@@ -98,34 +98,62 @@ func TestIdentityRevocationMachineEntries(t *testing.T) {
 // T5c takes the installation state FOR UPDATE before the machine rows, so no machine is inserted
 // between its machine locks and its commit: an inventory started while it waits on a machine row
 // waits for it, rather than adding a machine whose plans the revocation reads but never locked.
+// The control takes the installation state FOR SHARE: the inventory then commits while the
+// revocation still waits.
 func TestIdentityRevocationHoldsInventory(t *testing.T) {
 	t.Parallel()
-	p := newPlanEnv(t)
-	hold, err := p.db.Begin()
-	if err != nil {
-		t.Fatal(err)
+	for _, control := range []bool{false, true} {
+		t.Run(map[bool]string{false: "FOR UPDATE", true: "control FOR SHARE"}[control], func(t *testing.T) {
+			t.Parallel()
+			p := newPlanEnv(t)
+			p.api = p.build(options{shareRevoke: control})
+			hold, err := p.db.Begin()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = hold.Rollback() }()
+			if _, err := hold.Exec(`SELECT 1 FROM machine WHERE id = $1 FOR UPDATE`, p.machine); err != nil {
+				t.Fatal(err)
+			}
+			recovery, author := p.human("h-recovery"), p.human("h-author")
+			revokedID := p.principalOf("h-approver")
+			revoked := make(chan *httptest.ResponseRecorder, 1)
+			go func() {
+				revoked <- revoke(p.env, recovery, "k-revoke-inventory-012", `{"identity":"`+revokedID+`","reason":"left"}`)
+			}()
+			waitForLockWaits(t, p.db, 1)
+			inventoried := make(chan *httptest.ResponseRecorder, 1)
+			go func() {
+				inventoried <- p.do(p.api, machineCall(author, "k-machine-during-0123", p.cluster, "0b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5d"))
+			}()
+			if control {
+				select {
+				case rec := <-inventoried:
+					decode[machineBody](t, rec, http.StatusCreated)
+				case <-time.After(10 * time.Second):
+					t.Fatal("control: the inventory waited for the revocation")
+				}
+				if err := hold.Rollback(); err != nil {
+					t.Fatal(err)
+				}
+				revocationOf(t, <-revoked)
+				t.Logf("control (FOR SHARE): the inventory committed while the revocation waited on a machine row")
+				return
+			}
+			waitForLockWaits(t, p.db, 2)
+			select {
+			case <-inventoried:
+				t.Fatal("the inventory committed while the revocation waited")
+			default:
+			}
+			if err := hold.Rollback(); err != nil {
+				t.Fatal(err)
+			}
+			revocationOf(t, <-revoked)
+			decode[machineBody](t, <-inventoried, http.StatusCreated)
+			t.Logf("FOR UPDATE: the inventory waited for the revocation")
+		})
 	}
-	defer func() { _ = hold.Rollback() }()
-	if _, err := hold.Exec(`SELECT 1 FROM machine WHERE id = $1 FOR UPDATE`, p.machine); err != nil {
-		t.Fatal(err)
-	}
-	recovery, author := p.human("h-recovery"), p.human("h-author")
-	revokedID := p.principalOf("h-approver")
-	revoked := make(chan *httptest.ResponseRecorder, 1)
-	go func() {
-		revoked <- revoke(p.env, recovery, "k-revoke-inventory-012", `{"identity":"`+revokedID+`","reason":"left"}`)
-	}()
-	waitForLockWaits(t, p.db, 1)
-	inventoried := make(chan *httptest.ResponseRecorder, 1)
-	go func() {
-		inventoried <- p.do(p.api, machineCall(author, "k-machine-during-0123", p.cluster, "0b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5d"))
-	}()
-	waitForLockWaits(t, p.db, 2)
-	if err := hold.Rollback(); err != nil {
-		t.Fatal(err)
-	}
-	revocationOf(t, <-revoked)
-	decode[machineBody](t, <-inventoried, http.StatusCreated)
 }
 
 // T5c reads which plans an entry names under the machine locks: a revocation queued behind a
