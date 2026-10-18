@@ -115,8 +115,8 @@ not guess. You decide, from two observations of the machine:
   observations itself, one per settle floor.
 
 ```sh
-items "/machines/$machine_w/observations" "$viewer" |    # listed by id, not time: sorted here
-  jq -sc 'sort_by(.startedAt)[] | {id, purpose, startedAt, at, resourceVersion, unread}'
+items "/machines/$machine_w/observations" "$viewer" |    # listed by id: sorted by start (basis) here
+  jq -sc 'sort_by(.basis)[] | {id, basis, purpose, startedAt, at, resourceVersion, unread}'
 call POST /operations/$op/attempts/$attempt/accountings "$recovery" \
   "$(jq -nc --arg s "$start" --arg e "$end" '{start: $s, end: $e, facts: {explanation: "the node was cut off"}}')" \
   recovery-accounting-1
