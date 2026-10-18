@@ -41,6 +41,9 @@ Prerequisites: Go at the version `mise.toml` pins, and [mise](https://mise.jdx.d
 
 ```sh
 mise run build        # bin/bronzeward and bin/oidc-fixture
+# without mise, the same two builds:
+go build -o bin/bronzeward ./cmd/bronzeward
+go build -o bin/oidc-fixture ./fixtures/oidc
 ```
 
 `bin/bronzeward` is the server and its operator commands: `serve`, `migrate`, `token` and
@@ -82,7 +85,12 @@ bao kv put -mount=secret access/talos/<cluster id> talosconfig=@talosconfig
 
 ```sh
 bin/bronzeward migrate -config bronzeward.yaml
-bin/bronzeward serve -config bronzeward.yaml
+bin/bronzeward serve -config bronzeward.yaml  # runs until stopped
+```
+
+From another shell:
+
+```sh
 curl -i http://127.0.0.1:8080/livez           # 204 once serving
 ```
 

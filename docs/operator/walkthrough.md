@@ -112,7 +112,9 @@ call POST /ingestions "$author" "$(jq -nc --arg m "$machine_cp" --arg d "$draft"
 The answer is `202` with `ingestion` and `operation`. Poll `GET /ingestions/<ingestion>` until
 `state` is `released`, check `GET /operations/<operation>` reads `succeeded`, then read the draft's
 new ETag with `call GET /drafts/$draft "$author" >/dev/null; etag=$(etag)`. Import the worker the
-same way, with `machine_w` and `marks: ["doc[0]/machine/files/0/content"]`.
+same way, with `machine_w`, `marks: ["doc[0]/machine/files/0/content"]` and its own key,
+`walkthrough-import-w`: a key sent again with a different request is refused
+`422 idempotency-key-reused`.
 
 Bronzeward never writes to a node during an import. S1 shows this by comparing each node's
 configuration digest and apid log before and after.
@@ -157,10 +159,19 @@ for m in "$machine_cp" "$machine_w"; do
 done
 ```
 
-The controller observes the node, checks its configuration digest is still the imported one, and
-records the adoption. `GET /machines/<id>` then shows `desired` and `applied.release` as the
-release, with `applied.source` `adoption`. If the node changed since the import, the adoption is
-refused and the plan stays approved.
+The approval answers before the adoption is recorded. The controller then observes the node,
+checks its configuration digest is still the imported one, and records the adoption. Wait for both
+before S2: a change to an assignment the plan bound, made first, gets the adoption refused.
+
+```sh
+for m in "$machine_cp" "$machine_w"; do
+  call GET /machines/$m "$viewer" | jq -r '.applied.source'      # until adoption
+done
+```
+
+`GET /machines/<id>` then shows `desired` and `applied.release` as the release, with
+`applied.source` `adoption`. If the node changed since the import, the adoption is refused and the
+plan stays approved.
 
 ## S2: change the worker's configuration
 
