@@ -25,7 +25,8 @@ mint() {
 }
 # call <method> <path> <token> [body] [idempotency key] [etag]: the response body on stdout.
 # The token goes over stdin and the body through a file only you can read, never on curl's
-# command line. The file is removed once curl returns, whether or not it succeeded.
+# command line. The file is removed once curl returns, whether or not it succeeded. --disable, first,
+# ignores ~/.curlrc, which could otherwise trace both to a file.
 call() {
   local args=(-sS -D "$H" -X "$1" -H @-) rc=0
   if [ -n "${4:-}" ]; then
@@ -34,7 +35,7 @@ call() {
   fi
   [ -z "${5:-}" ] || args+=(-H "Idempotency-Key: $5")
   [ -z "${6:-}" ] || args+=(-H "If-Match: $6")
-  printf 'Authorization: Bearer %s\n' "$3" | curl "${args[@]}" "$A/api/v1$2" || rc=$?
+  printf 'Authorization: Bearer %s\n' "$3" | curl --disable "${args[@]}" "$A/api/v1$2" || rc=$?
   rm -f -- "$B"
   return "$rc"
 }
@@ -309,7 +310,8 @@ and approve it:
 call PUT /drafts/$draft/assignments/$machine_w "$author" '{"profiles": [], "fragments": {"cluster": ["s3-handover"]}}' \
   walkthrough-assignment-s5 "$etag"; etag=$(etag)
 pub=$(call POST /drafts/$draft/publications "$publisher" '{}' walkthrough-publish-s5 "$etag" | jq -r .id)
-release=$(call GET /machines/$machine_w "$viewer" | jq -r .desired)    # once $pub succeeded
+call GET /operations/$pub "$viewer" | jq -r .state      # until succeeded, before reading desired
+release=$(call GET /machines/$machine_w "$viewer" | jq -r .desired)
 plan=$(call POST /plans "$publisher" "$(jq -nc --arg r "$release" --arg m "$machine_w" \
   '{releaseId: $r, machine: $m, operation: "adopt"}')" walkthrough-plan-adopt-drift | jq -r .id)
 call POST /plans/$plan/approvals "$approver" '{}' walkthrough-approval-adopt-drift
@@ -325,9 +327,18 @@ call GET /machines/$machine_w "$viewer" | jq '{release: .applied.release, source
 # until release is $release, source is adoption and openDrift is null
 ```
 
-**3b. Or revert it.** After another out-of-band change opens a new record, plan an `apply-config` of
-the machine's `desired` release with S3's body, under new idempotency keys: a key reused with a
-changed request is refused `422 idempotency-key-reused`. The approval answers
+**3b. Or revert it.** 3a closed the record, so first make another out-of-band change, here a
+registry mirror with nothing secret in it, and wait for its new `openDrift`:
+
+```sh
+printf 'machine:\n  registries:\n    mirrors:\n      mirror.s5.invalid:\n        endpoints:\n          - https://mirror.s5.invalid\n' >fixtures/.state/walk-patch
+$T -e $TALOS_WORKER_IP -n $TALOS_WORKER_IP patch machineconfig --mode no-reboot --patch @fixtures/.state/walk-patch
+rm fixtures/.state/walk-patch
+call GET /machines/$machine_w "$viewer" | jq .openDrift     # until not null
+```
+
+Then plan an `apply-config` of the machine's `desired` release with S3's body, under new idempotency
+keys: a key reused with a changed request is refused `422 idempotency-key-reused`. The approval answers
 `unseenOverwrite: true`: the approver is overwriting a state no release recorded. A frozen machine
 runs no apply-config, so the approver unfreezes it, and the revert then runs as S4 did and closes
 the record `reverted`:
