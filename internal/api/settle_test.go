@@ -718,6 +718,34 @@ func TestSettle(t *testing.T) {
 			t.Fatal("no classification recorded")
 		}
 	})
+	// ER §9.2: an operation with no recorded attempt, its artifact then applied out of band, is not
+	// completed by a completion observation that shows the artifact; "completed" above is the same
+	// observation completing an operation that sent.
+	t.Run("no attempt not completed by its artifact applied", func(t *testing.T) {
+		t.Parallel()
+		ae := newAttemptEnv(t, "")
+		next := ae.takenOverBy(t)
+		obs := ae.observed(t, nil)
+		r, err := next.settleOperation(context.Background(), ae.op, 2, obs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.State == "completed" || r.Outcome == "completed" {
+			t.Fatalf("settled %+v", r)
+		}
+		if n := count(t, ae.db, `SELECT count(*) FROM attempt WHERE operation = $1`, ae.op); n != 0 {
+			t.Fatalf("%d attempts recorded", n)
+		}
+		if n := count(t, ae.db, `SELECT count(*) FROM operation_classification WHERE operation = $1 AND outcome = 'completed'`,
+			ae.op); n != 0 {
+			t.Fatal("a completed classification was recorded")
+		}
+		if n := count(t, ae.db, `SELECT count(*) FROM machine_state ms JOIN plan p ON p.machine = ms.machine
+			WHERE p.id = $1 AND ms.applied_release IS NOT DISTINCT FROM p.release`, ae.pid); n != 0 {
+			t.Fatal("Applied names the plan's release")
+		}
+		t.Logf("no attempt, completion observation of the artifact: %s/%s, not completed", r.State, r.Outcome)
+	})
 	t.Run("a recovery observation fails nothing", func(t *testing.T) {
 		t.Parallel()
 		ae, a, gen := lost(t)
