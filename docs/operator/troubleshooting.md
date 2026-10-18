@@ -45,8 +45,10 @@ call GET "/machines/$machine_w/timeline?limit=500" "$viewer" | jq -c '.items[] |
 
 Pages hold 50 entries by default and at most 500, oldest first, so recent entries are on the last
 page: follow `next` with `&cursor=<next>`, or use the [`items` helper](recovery.md#read-it-first).
-Other lists, such as observations, page the same way but are in id order, not time order. Responses
-never carry configuration text or secrets.
+Other lists, such as observations, page the same way but are in id order, not time order. Timeline
+and operation-event responses carry no configuration text or secrets. Other reads can: source reads
+(fragments, profiles, assignments) carry sanitized documents, and an ingestion's review (`no-store`, its author
+only) carries the staged document, which can hold a value nobody marked.
 
 From it, for any operation, you can answer:
 
