@@ -14,7 +14,8 @@ worktree, with no local state carried over. The recovery page was run from its p
 head (cd8226d), before that pull request merged.
 
 Pinned by the checkout: Go 1.27.1 (`mise.toml`); Talos v1.13.6, Kubernetes 1.36.2, PostgreSQL 17
-(alpine digest), OpenBao 2.6.1 (`fixtures/versions.env`). Host: Docker Engine 26.1.5, Linux amd64.
+(alpine digest), OpenBao 2.6.1 (`fixtures/versions.env`). Host: Docker Engine 26.1.5, Linux amd64;
+mise 2026.5.18 with `paranoid` false and no trusted-path settings for the clone's directory.
 Every secret is the fixture's synthetic material; the one rotated automation token was written to a
 mode-600 file and never printed.
 
@@ -67,7 +68,7 @@ Recovery details (12:00-12:14 UTC):
 
 | ID | Where | Observed | Fix |
 |---|---|---|---|
-| D1 | README Build | `mise ERROR Config files ... are not trusted`, rc 1 | `mise trust` line in the build block (this change) |
+| D1 | README Build | `mise ERROR Config files ... are not trusted`, rc 1, from mise 2026.5.18 on this host; other mise versions or trust settings may not refuse | `mise trust` line in the build block (this change) |
 | D2 | README Configure | `bronzeward.yaml`, holding the DSN password, shows as untracked; `up` counts it as a changed path | `/bronzeward.yaml` in `.gitignore` (this change) |
 | D3 | Walkthrough S2 review | `jq .sources` omits the renderer the prose names | `jq '{sources, renderer}'` (this change) |
 | R-D1 | Recovery, timeline and observation reads | The timeline is oldest first. The worker's held 605 entries; page 1 (`limit=500`) ended at revision 500 with `next` set and held none of the interrupted operation's entries. Observations are listed by id, not by time (`internal/api/observations.go`), so the first qualifying read is found only over every page, by `basis` | Follow `next` with `&cursor=`; sort observations by `basis` (fixed in the recovery pull request) |
