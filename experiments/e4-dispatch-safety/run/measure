@@ -100,12 +100,13 @@ hex4() {
 # The control plane's connection to the worker's port 50000, as either end lists it.
 SOCK_RE="$(hex4 "$TALOS_CONTROLPLANE_IP"):[0-9A-F]{4} [0-9A-F]*$(hex4 "$TALOS_WORKER_IP"):C350 |$(hex4 "$TALOS_WORKER_IP"):C350 [0-9A-F]*$(hex4 "$TALOS_CONTROLPLANE_IP"):"
 # sockets_sample <container name> <seconds> <out>: that connection's lines, prefixed with the time,
-# once a second, from a one-off curl-image container in the node's network namespace.
+# once a second, from a one-off curl-image container in the node's network namespace. Run in the
+# background, its PID is then timeout's, and a TERM to it ends the container (--init passes it on).
 sockets_sample() {
   local id
   id=$(container_id "$1") || return 1
   # shellcheck disable=SC2016 # expanded by the container's shell
-  timeout $(($2 + 30)) docker run --rm --pull never --network "container:$id" --label "$TOOL_LABEL" \
+  exec timeout $(($2 + 30)) docker run --rm --init --pull never --network "container:$id" --label "$TOOL_LABEL" \
     --entrypoint sh "$CURL_IMAGE" -c 'i=0
       while [ "$i" -lt "$1" ]; do
         t=$(date -u +%T)
@@ -130,31 +131,35 @@ held_established() {
     { split($2, l, ":"); split($3, r, ":") }
     is(l[1], cp) && is(r[1], w) && r[2] == "C350" && $4 == "01"'
 }
-# held_pin: before the send, the one connection apid holds to the worker after the warm read; it
-# sets HELD_LOCAL, HELD_REMOTE and HELD_INODE. Two such connections, or none, refuse the capture.
+# held_pin: before the send, the one connection apid holds to the worker after the warm read, with
+# nothing left unsent on it; it sets HELD_LOCAL, HELD_REMOTE and HELD_INODE. Two such connections,
+# none, or one with a non-empty send queue refuse the capture.
 held_pin() {
-  local out n
+  local out n q
   out=$(cp_tcp 10 | held_established) || return 1
   n=$(grep -c . <<<"$out" || true)
   printf '%s held pin: %s\n' "$(now_ms)" "${out:-no established connection to the worker}" >>"$LOG"
   [ "$n" = 1 ] || return 1
-  read -r _ HELD_LOCAL HELD_REMOTE _ _ _ _ _ _ HELD_INODE _ <<<"$out"
+  read -r _ HELD_LOCAL HELD_REMOTE _ q _ _ _ _ HELD_INODE _ <<<"$out"
+  [ "$((16#${q%%:*}))" = 0 ]
 }
-# held_wait <send start>: the synchronization point of a held-controlplane capture. Reads the
-# control plane's /proc/net/tcp and tcp6 until the pinned connection, still established, has a
-# non-zero send queue: the request has reached apid and been forwarded into the split connection
-# (nothing else goes through the control plane during a capture). Every read goes to the
-# transcript with its time. Each read is bounded by what is left of the send's transport deadline,
-# and a sample read past it is refused, so the pause never follows `talosctl`'s kill.
+# held_wait <send start> <bytes>: the synchronization point of a held-controlplane capture. Reads
+# the control plane's /proc/net/tcp and tcp6 until the pinned connection, still established, holds
+# at least <bytes> unsent, the size of the configuration sent: the apply has reached apid and been
+# forwarded into the split connection, which a keepalive or a read's remains cannot fill. Every
+# read goes to the transcript with its time. Each read is bounded by what is left of the send's
+# transport deadline, and a read that ends past it is refused.
 held_wait() {
-  local deadline=$(($1 + E4M_DEADLINE)) left out line
+  local deadline=$(($1 + E4M_DEADLINE)) left out line q
   while left=$((deadline - SECONDS)) && [ "$left" -gt 0 ]; do
     out=$(cp_tcp "$left") || return 1
-    [ "$SECONDS" -lt "$deadline" ] || return 1
     line=$(held_established <<<"$out" | awk -v l="$HELD_LOCAL" -v r="$HELD_REMOTE" -v i="$HELD_INODE" '
-      $2 == l && $3 == r && $10 == i { split($5, q, ":"); if (q[1] !~ /^0+$/) { print; exit } }')
-    printf '%s held check: %s\n' "$(now_ms)" "${line:-nothing unsent on the pinned connection}" >>"$LOG"
-    [ -z "$line" ] || return 0
+      $2 == l && $3 == r && $10 == i { print; exit }')
+    printf '%s held check: %s\n' "$(now_ms)" "${line:-the pinned connection is gone}" >>"$LOG"
+    [ -n "$line" ] || return 1
+    [ "$SECONDS" -lt "$deadline" ] || return 1
+    read -r _ _ _ _ q _ <<<"$line"
+    [ "$((16#${q%%:*}))" -lt "$2" ] || return 0
   done
   return 1
 }
@@ -170,7 +175,7 @@ inject_logged() {
 capture() {
   local cell=$1 n=$2 fault=$3 length=$4 route=$5 action target undo endpoint
   local pre_v pre_u since send_at kill_at heal_at rc v u first='' last_v start i applies ok other
-  local landed=no spids=() side tpid
+  local landed=no spids=() side tpid sent_ms
   ROW_N=$(printf '%s-%02d' "$cell" "$n") ROW_ID=$ROW_N ROW_PARTS=$E4D_PARTS/$ROW_N
   mkdir -p -- "$ROW_PARTS"
   LOG=$E4D_T/$ROW_N.txt
@@ -233,6 +238,7 @@ capture() {
     inject_logged "$action" "$target" || die "capture $ROW_N: could not $action $target"
   fi
   start=$SECONDS
+  sent_ms=$(date +%s%3N)
   send_at=$(now_ms)
   rc=0
   timeout --signal=KILL "$E4M_DEADLINE" "$CACHE/talosctl" -e "$endpoint" -n "$TALOS_WORKER_IP" \
@@ -240,9 +246,13 @@ capture() {
   tpid=$!
   BG+=("$tpid")
   if [ "$action" = held ]; then
-    held_wait "$start" || die "capture $ROW_N: the pinned connection held nothing unsent before the deadline"
+    held_wait "$start" "$(stat -c %s -- "$ROW_PARTS/art.yaml")" ||
+      die "capture $ROW_N: the pinned connection did not hold the request before the deadline"
     HEAL=("netjoin worker" "unpause $target")
     inject_logged pause "$target" || die "capture $ROW_N: could not pause $target"
+    # Measured from before talosctl started, so never shorter than its own run.
+    [ $(($(date +%s%3N) - sent_ms)) -lt $((E4M_DEADLINE * 1000)) ] ||
+      die "capture $ROW_N: the pause completed after the transport deadline"
   fi
   wait "$tpid" || rc=$?
   BG=("${spids[@]}")
