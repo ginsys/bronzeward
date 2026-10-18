@@ -159,7 +159,8 @@ held_wait() {
     [ -n "$line" ] || return 1
     [ "$SECONDS" -lt "$deadline" ] || return 1
     read -r _ _ _ _ q _ <<<"$line"
-    [ "$((16#${q%%:*}))" -lt "$2" ] || return 0
+    [[ $q =~ ^[0-9A-F]+: ]] || return 1
+    if [ "$((16#${q%%:*}))" -ge "$2" ]; then return 0; fi
   done
   return 1
 }
@@ -175,7 +176,7 @@ inject_logged() {
 capture() {
   local cell=$1 n=$2 fault=$3 length=$4 route=$5 action target undo endpoint
   local pre_v pre_u since send_at kill_at heal_at rc v u first='' last_v start i applies ok other
-  local landed=no spids=() side tpid sent_ms
+  local landed=no spids=() side tpid sent_ms size
   ROW_N=$(printf '%s-%02d' "$cell" "$n") ROW_ID=$ROW_N ROW_PARTS=$E4D_PARTS/$ROW_N
   mkdir -p -- "$ROW_PARTS"
   LOG=$E4D_T/$ROW_N.txt
@@ -228,6 +229,8 @@ capture() {
     BG=("${spids[@]}")
   fi
   if [ "$action" = held ]; then
+    size=$(stat -c %s -- "$ROW_PARTS/art.yaml") || die "capture $ROW_N: cannot read the configuration's size"
+    [[ $size =~ ^[1-9][0-9]*$ ]] || die "capture $ROW_N: the configuration is empty"
     held_pin || die "capture $ROW_N: not exactly one connection from the control plane to the worker"
     # The worker split off first; the pause comes after the send.
     HEAL=("netjoin worker")
@@ -246,7 +249,7 @@ capture() {
   tpid=$!
   BG+=("$tpid")
   if [ "$action" = held ]; then
-    held_wait "$start" "$(stat -c %s -- "$ROW_PARTS/art.yaml")" ||
+    held_wait "$start" "$size" ||
       die "capture $ROW_N: the pinned connection did not hold the request before the deadline"
     HEAL=("netjoin worker" "unpause $target")
     inject_logged pause "$target" || die "capture $ROW_N: could not pause $target"

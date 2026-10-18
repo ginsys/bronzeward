@@ -262,10 +262,11 @@ retransmission timer running. In the 45 and 90 s captures, the samples show:
 35 bytes joined the send queue at the unpause, as in §5.2 (ASSUMPTION, as there: the
 cancellation). In the 20 s captures the unpause came before the delivery, so the cancellation was
 queued behind the request, and all three still landed. In `90-03` the 35 bytes show at the unpause,
-after the landing. A later single 20 s capture, on the harness §7 describes and not collected, did
-not land: the 35 bytes joined at the unpause, before the delivery, and the queue emptied about 27 s
-after the send, on a connection that survived. That is the race §5.2 gives for the 20 s netsplit
-that did not land, so the 20 s held cell stands at 3 of 4.
+after the landing. Two later single 20 s captures, made while the harness was being corrected
+(§7), were not collected and are not counted here. Neither landed. In both, the samples show the
+35 bytes joining at the unpause, before the delivery about 27 s after the send, on a connection
+that survived. ASSUMPTION, as in §5.2: the cancellation then reached the worker's apid with the
+request.
 
 So a pause of the control plane does not hold back a request apid has already forwarded. The
 frozen container's kernel keeps retransmitting it. The landing follows the worker-side partition,
@@ -293,10 +294,11 @@ falls. This is it. What it supports:
   buffered frames are read, not a guarantee in the source. A pause of the control plane before the
   send kept the request in `talosctl` (0 of 15).
 - **A pause of the control plane after the forward bounds nothing.** With the request already
-  in the control plane's connection to the worker, all 9 captures landed 26-28 s after the send,
-  in pauses of 20, 45 and 90 s (§5.4). The kernel delivers what apid queued while apid is frozen,
-  and the frozen apid cannot queue the cancellation. The cut-off is the worker-side one above,
-  not the pause.
+  in the control plane's connection to the worker, all 9 collected captures landed 26-28 s after
+  the send, in pauses of 20, 45 and 90 s (§5.4). The kernel delivers what apid queued while apid
+  is frozen, and the frozen apid cannot queue the cancellation. The cut-off is the worker-side one
+  above, not the pause. A 20 s pause ends before the delivery, so there the 20 s netsplit's race
+  can still stop the request (§5.4's two uncollected captures).
 - **A dial that fails sends nothing.** Over the worker's own endpoint the partition was in place
   before `talosctl` dialled, so no connection could open, and on the cold route four dials failed
   with `no route to host`; none of these nine landed. The tenth, the cold capture with no dial
