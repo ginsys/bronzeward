@@ -162,5 +162,9 @@ keep first.
 
 ## Next
 
-The [walkthrough](walkthrough.md): adopt the fixture's cluster, publish, approve, apply and handle
-drift.
+- The [walkthrough](walkthrough.md): adopt the fixture's cluster, publish, approve, apply and handle
+  drift.
+- [Recovery](recovery.md): stop a server, settle an interrupted operation, restore the database or
+  OpenBao.
+- [Limits](limits.md): what the PoC covers, what it does not, and its known gaps.
+- [Troubleshooting](troubleshooting.md): read a refusal and a machine's timeline.
