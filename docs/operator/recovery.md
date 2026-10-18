@@ -21,7 +21,8 @@ nothing in Bronzeward checks them:
 
 - Back up three things: PostgreSQL, the OpenBao node, and the credential store holding provider
   tokens.
-- Keep the OpenBao unseal share apart from every backup. Nothing starts without it.
+- Keep the OpenBao unseal share apart from every backup. Without it OpenBao stays sealed: `serve`
+  still starts and answers reads, but compilation, execution and provider-dependent recovery fail.
 - Before recording any identity revocation, add its subject to `auth.deniedSubjects`, and leave it
   there. A restore can erase the revocation; it does not rewind the list.
 - Take the OpenBao backup no earlier than the database backup it pairs with, and keep the
@@ -57,7 +58,7 @@ the interruption seam, and B takes over. What each point leaves:
 |---|---|---|
 | Before commitment | No operation; the plan is still approved | The next executor commits it |
 | After commitment, before an attempt | `unresolved`, no attempt (`attempts` is `null`) | Taken over and retried by the server |
-| After an attempt was sent, no response | `unresolved`, an attempt with no response | You: account for the attempt |
+| After an attempt was recorded, no response | `unresolved`, an attempt with no response | You: account for the attempt |
 | While verifying | `unresolved`, an attempt with a response | The server, from a new observation |
 
 ### Read it first
@@ -104,10 +105,10 @@ gen=$(set -o pipefail; items "/machines/$machine_w/timeline" "$viewer" | jq -es 
 A stale generation, or an operation already `completed`, `failed`, `rejected` or `cancelled`, gets
 `409 conflict`.
 
-### Account for a sent attempt
+### Account for an attempt with no response
 
-When an attempt was sent and no response came back, nobody knows whether it landed. Bronzeward does
-not guess. You decide, from two observations of the machine:
+An attempt is recorded before its request is sent. With no response, nobody knows whether the
+request left, or whether it landed. Bronzeward does not guess. You decide, from two observations of the machine:
 
 - `start`: the first observation, begun after the attempt's transport deadline, that read anything
   from the node. It must be that one, not a later one, and it must have a `resourceVersion`; if the

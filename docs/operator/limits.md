@@ -50,8 +50,9 @@ Results hold for that topology and that Talos version only.
   assessed further.
 - **No late-landing bound.** A request that was sent but whose response was lost may still land
   later; a measured one landed 26 to 28 s after its send. No upper bound was adopted, so accounting
-  for such an attempt stays a `recovery-admin` decision after the settle floor, and a later landing
-  is found as drift ([recovery](recovery.md#account-for-a-sent-attempt)).
+  for such an attempt stays a `recovery-admin` decision after the settle floor. A later landing is
+  found as drift only if it leaves the configuration different from Applied
+  ([recovery](recovery.md#account-for-an-attempt-with-no-response)).
 - **Leak scanning is exact-copy.** The checks that no secret value leaked look for exact copies of
   each value only.
 - **A scenario shows only the paths it drove.**
