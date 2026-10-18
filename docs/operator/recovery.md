@@ -8,8 +8,9 @@ more token:
 recovery=$(mint h-recovery)
 ```
 
-Every route here is `recovery-admin`, human-only, and needs an `Idempotency-Key` of 16 to 128
-characters of `[A-Za-z0-9_-]`; a shorter key gets `400 invalid-request`. The full contracts
+Every write here is `recovery-admin`, human-only, and needs an `Idempotency-Key` of 16 to 128
+characters of `[A-Za-z0-9_-]`; a shorter key gets `400 invalid-request`. The reads accept any role
+and need no key. The full contracts
 are [execution and recovery](../spec/execution-recovery.md) and
 [persistence and API §12](../spec/persistence-api.md).
 
@@ -21,6 +22,8 @@ nothing in Bronzeward checks them:
 - Back up three things: PostgreSQL, the OpenBao node, and the credential store holding provider
   tokens.
 - Keep the OpenBao unseal share apart from every backup. Nothing starts without it.
+- Before recording any identity revocation, add its subject to `auth.deniedSubjects`, and leave it
+  there. A restore can erase the revocation; it does not rewind the list.
 - Take the OpenBao backup no earlier than the database backup it pairs with, and keep the
   credential store's backup matched to them.
 - While a database backup that names a Transit key version may still be restored, keep that
@@ -127,7 +130,8 @@ a pair that does not meet these rules with `409 conflict` and names the rule. On
 server retries or settles the operation. The settle floor is a floor, not a bound: a measured
 late landing came 26 to 28 s after its send, and no upper bound was adopted
 ([late-landing report](../design/research/20261016-late-landing.md)). A request that lands later
-still is found as drift.
+still is found as drift only if it leaves the node's configuration different from Applied; one that
+reapplies what Applied already records leaves no trace.
 
 ### Cancel it
 
@@ -200,9 +204,9 @@ Restart every such process. The entry also:
 
 Then, through the recovery instance:
 
-- Re-record every revocation the restore erased (`POST /identity-revocations`), then remove from
-  `auth.deniedSubjects` only the subjects you added for this restore whose revocation is recorded.
-  Leave every other entry there.
+- Re-record every revocation the restore erased (`POST /identity-revocations`). Keep every subject
+  in `auth.deniedSubjects`, including the ones you just added: the list survives a later restore,
+  which could erase the revocation again.
 - Reissue every automation token with `bronzeward token rotate`. A token issued before the entry
   is from an earlier epoch and gets `401`.
 
@@ -237,7 +241,18 @@ Each machine goes `pre-restore-unaccounted`, then `unresolved` or `blocked`, the
    restored operation with no attempt is then cancelled by the server, sending nothing. One with an
    attempt is classified by the normal instance's executor from an observation after the
    accounting: `completed`, `failed`, or `unresolved` until you resolve it. It is never retried.
-2. **Mark.** The server observes the machine. `ready` with `missing: []` means it can be
+2. **Check dependencies.** A mark checks only the machine, its Desired artifact and Talos access;
+   the rest is yours ([execution and recovery §7.3](../spec/execution-recovery.md#73-procedure) step 3). Check
+   that every provider reference releases need is still retained, that the backups were paired
+   (OpenBao no earlier than the database), and that the decryption and credentials each scope needs
+   work under the recovery identities, which must not be able to create a Transit key. Stop and
+   name what is missing. After the normal restart, list what the monitor does not hold retained:
+
+   ```sh
+   items /dependencies "$viewer" | jq -c 'select(.class != "retained" or .stale) | {id, provider, object, class, reason, stale}'
+   ```
+
+3. **Mark.** The server observes the machine. `ready` with `missing: []` means it can be
    released. `blocked` names what is missing, such as an observation of an unreachable node.
 
    ```sh
@@ -247,7 +262,7 @@ Each machine goes `pre-restore-unaccounted`, then `unresolved` or `blocked`, the
    If the node's configuration digest is not what the restored Applied explains, the mark opens a
    drift record, even when it matches a restored release's artifact. Handle it once the scope is
    released, as in [S5](walkthrough.md#s5-drift-adopted-or-reverted).
-3. **Release.** Only a `ready` scope; anything else is `409 conflict`.
+4. **Release.** Only a `ready` scope whose dependencies you checked; anything else is `409 conflict`.
 
    ```sh
    call POST /recovery/scopes/$machine_w/releases "$recovery" '{"facts": {}}' recovery-release-worker | jq .state
