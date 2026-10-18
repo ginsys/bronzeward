@@ -262,11 +262,7 @@ retransmission timer running. In the 45 and 90 s captures, the samples show:
 35 bytes joined the send queue at the unpause, as in §5.2 (ASSUMPTION, as there: the
 cancellation). In the 20 s captures the unpause came before the delivery, so the cancellation was
 queued behind the request, and all three still landed. In `90-03` the 35 bytes show at the unpause,
-after the landing. Two later single 20 s captures, made while the harness was being corrected
-(§7), were not collected and are not counted here. Neither landed. In both, the samples show the
-35 bytes joining at the unpause, before the delivery about 27 s after the send, on a connection
-that survived. ASSUMPTION, as in §5.2: the cancellation then reached the worker's apid with the
-request.
+after the landing.
 
 So a pause of the control plane does not hold back a request apid has already forwarded. The
 frozen container's kernel keeps retransmitting it. The landing follows the worker-side partition,
@@ -297,8 +293,8 @@ falls. This is it. What it supports:
   in the control plane's connection to the worker, all 9 collected captures landed 26-28 s after
   the send, in pauses of 20, 45 and 90 s (§5.4). The kernel delivers what apid queued while apid
   is frozen, and the frozen apid cannot queue the cancellation. The cut-off is the worker-side one
-  above, not the pause. A 20 s pause ends before the delivery, so there the 20 s netsplit's race
-  can still stop the request (§5.4's two uncollected captures).
+  above, not the pause. A 20 s pause ends before the delivery, so there the cancellation is queued
+  behind the request, as in the 20 s netsplit (§5.2).
 - **A dial that fails sends nothing.** Over the worker's own endpoint the partition was in place
   before `talosctl` dialled, so no connection could open, and on the cold route four dials failed
   with `no route to host`; none of these nine landed. The tenth, the cold capture with no dial
@@ -333,6 +329,9 @@ pause case, which no default here bounds.
   in §5.3 predicts the change, but no capture tested where it falls. Faults shorter than the 15 s
   deadline were not measured; under the same schedule, a partition healed at 14 s would still wait
   for the retransmission at about 26 s, after `talosctl` was killed.
+- **The 20 s held cell's landing rate is not established.** Its three captures landed, but in all
+  three the cancellation was queued behind the request before the delivery (§5.4), the ordering
+  the 20 s netsplit shares with its capture that did not land (§5.2).
 - **The held cells heal the worker's split at 20 s in every cell**; only the pause varies. A
   longer split under a paused control plane was not measured; §5.3's worker-side abort predicts
   the same outcome as a 45 s netsplit.
