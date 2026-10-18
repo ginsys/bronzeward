@@ -76,7 +76,7 @@ LABEL_MARK='doc[0]/machine/nodeLabels/bw-s2'
 
 cluster='' machine_cp='' machine_w='' plan='' rel='' baseline='' op='' held=''
 cp_log='' w_log=''
-pre_plan='' pre_approval='' post_plan='' restored_epoch='' epoch=''
+pre_plan='' pre_approval='' post_plan='' restored_epoch='' epoch='' epoch_t0=''
 t_at='' bao_at='' stopped_at='' db_backup='' bao_backup='' entry_draft='' second_draft='' second_etag=''
 robot_new='' ing_epoch='' s_start='' s_end='' cp_start='' cp_end='' w_start='' w_end='' marked='' w_mark='' drift_rec=''
 c_owner='' w_pre='' c_commits=''
@@ -447,8 +447,18 @@ preconditions() {
   cp_log=$(apid_log "$TALOS_CONTROLPLANE_IP") || die "cannot read the control plane's apid log"
 }
 
+# epoch_before: the epoch served to h-viewer before T, kept in the evidence directory and in the
+# state directory for S8's comparison.
+epoch_before() {
+  fresh h-viewer
+  answers 200 - GET "/api/v1/machines/$machine_w/timeline?limit=1" "$tok" || return 1
+  epoch_t0=$(served_epoch) && [ -n "$epoch_t0" ] || return 1
+  printf '%s\n' "$epoch_t0" >"$EV/epoch-before-t" && cp -- "$EV/epoch-before-t" "$STATE/s7-epoch-before-t"
+}
+
 before_t() {
   local ref='S7 before T' n
+  check "$ref" "the epoch served before T kept, as h-viewer's Bronzeward-Epoch header" epoch_before
   # S6.1's stale owner: C commits a worker plan and stalls before its attempt.
   ds_publish held
   ds_plan held
