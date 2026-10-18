@@ -401,19 +401,22 @@ func TestAttemptEpochs(t *testing.T) {
 // the row only by its epoch. The plan is approved in the current epoch, so that comparison 1 does
 // not refuse first, and A's process carries an earlier recorded epoch. With the process-epoch
 // comparison dropped, the epoch term alone refuses A's attempt; with both dropped, the attempt is
-// recorded, which is row 027. The restore is staged in SQL here; AP S7's closing run shows A's
-// executor stopping at its first superseded epoch.
+// recorded, which is row 027. Each refusal is checked for its reason in the attempt's own
+// transaction, before its settlement: the process-epoch comparison, or comparison 7 on the owner
+// token. The restore is staged in SQL here; AP S7's closing run shows A's executor stopping at its
+// first superseded epoch.
 func TestAttemptEpochTermRow027(t *testing.T) {
 	t.Parallel()
+	const process, token = "process epoch", "owner token"
 	for _, tc := range []struct {
 		name                        string
 		noEpochTerm, noProcessEpoch bool
-		lands                       bool
+		refusedBy                   string // "" when the attempt is recorded
 	}{
-		{"as shipped", false, false, false},
-		{"without the epoch term", true, false, false},
-		{"without the process-epoch comparison", false, true, false},
-		{"without both", true, true, true},
+		{"as shipped", false, false, process},
+		{"without the epoch term", true, false, process},
+		{"without the process-epoch comparison", false, true, token},
+		{"without both", true, true, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -423,13 +426,38 @@ func TestAttemptEpochTermRow027(t *testing.T) {
 			mustExec(t, ae.db, `INSERT INTO recovery_epoch (epoch, entered_at) VALUES ($1, now() - interval '1 day')`, earlier)
 			stale.d.owner.Epoch = earlier
 			mustExec(t, ae.db, `UPDATE operation SET owner = $2, owner_gen = 3 WHERE id = $1`, ae.op, stale.d.owner.ID)
-			_, err := stale.recordAttempt(context.Background(), ae.op, 3)
+			ctx := context.Background()
+			tx, err := ae.db.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _, _, txErr := stale.recordAttemptTx(ctx, tx, ae.op, 3)
+			if err := tx.Rollback(); err != nil {
+				t.Fatal(err)
+			}
+			var refused *attemptRefused
+			switch tc.refusedBy {
+			case process:
+				if !errors.Is(txErr, errNotController) {
+					t.Fatalf("A's attempt was not refused by its process epoch: %v", txErr)
+				}
+			case token:
+				if !errors.As(txErr, &refused) || refused.Comparison != "7" ||
+					refused.Cause != "the operation's owner token is not this controller's" {
+					t.Fatalf("A's attempt was not refused by comparison 7 on its owner token: %v", txErr)
+				}
+			default:
+				if txErr != nil {
+					t.Fatalf("A's attempt was refused: %v", txErr)
+				}
+			}
+			_, err = stale.recordAttempt(ctx, ae.op, 3)
 			state, _, _ := ae.state(t)
 			n := count(t, ae.db, `SELECT count(*) FROM attempt WHERE operation = $1`, ae.op)
 			switch {
-			case tc.lands && (err != nil || state != "sending" || n != 1):
+			case tc.refusedBy == "" && (err != nil || state != "sending" || n != 1):
 				t.Fatalf("A's attempt was not recorded: %v, state %s, %d attempts", err, state, n)
-			case !tc.lands && (err == nil || state != "committed" || n != 0):
+			case tc.refusedBy != "" && (err == nil || state != "committed" || n != 0):
 				t.Fatalf("A's attempt was not refused: %v, state %s, %d attempts", err, state, n)
 			}
 		})
