@@ -9,12 +9,13 @@ Every refusal is `application/problem+json`. Its `type` is `urn:bronzeward:probl
 and sometimes a `cause`, say which check refused. The response headers are in `$H`.
 
 ```sh
-call POST /plans "$publisher" "$body" my-key | jq '{type, status, detail, cause}'
+call POST /plans "$publisher" "$body" troubleshoot-plan-1 | jq '{type, status, detail, cause}'
 ```
 
 | Code | Status | Usual cause | What to do |
 |---|---|---|---|
 | `idempotency-key-required` | 428 | A write without `Idempotency-Key` | Send one, unique per intended act |
+| `invalid-request` | 400 | A malformed body or header, such as an `Idempotency-Key` outside 16 to 128 characters of `[A-Za-z0-9_-]`; `detail` names it | Fix the request |
 | `idempotency-key-reused` | 422 | The same key with a different request | Use a new key; the same key replays only the same request |
 | `precondition-required` | 428 | A draft change without `If-Match` | Send the draft's current ETag |
 | `precondition-failed` | 412 | The draft moved since you read its ETag | Read the draft again, reapply your change |
@@ -22,7 +23,7 @@ call POST /plans "$publisher" "$body" my-key | jq '{type, status, detail, cause}
 | `scope-busy` | 409 | An operation holds the machine's scope | Wait for it, or settle it ([recovery](recovery.md#interrupted-operations)) |
 | `recovery-mode-active` | 409 | Recovery mode, or a scope not yet released | Finish [the restore](recovery.md#restoring-the-database-or-openbao) |
 | `conflict` | 409 | A state the act does not apply to; `detail` names it | Read the object, then act on its current state |
-| `identity-revoked` | 403 | The subject or service identity is revoked, or in `auth.deniedSubjects` | A new subject or token; revocation is permanent |
+| `identity-revoked` | 403 | The subject or service identity is revoked, or in `auth.deniedSubjects` | Revocation is permanent and a new token does not lift it: act as another human subject, or issue a new service identity (`bronzeward token issue`) |
 | `forbidden` | 403 | The token lacks the role, or a human-only act from automation | Check `auth.roles` and the groups claim |
 | `machine-identity-mismatch` | 409 | The node's SMBIOS UUID, node ID or cluster ID is not the recorded one | Check the endpoint points at the right machine |
 | `talos-access-unavailable` | 503 | No talosconfig in the provider, access denied, or the node unreachable | Check OpenBao, the access path and the network |
