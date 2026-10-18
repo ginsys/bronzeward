@@ -23,7 +23,8 @@
 # again. The commitment-level controls are S4's.
 # Usage: scenarios/s3 handover|handover-controls   (each after scenarios/s1 run on a fresh
 # fixtures/bin/up: the handover is S2's precondition, the controls are their own run)
-#        scenarios/s3 run   (after scenarios/s1 run, s3 handover and s2 run on the same up)
+#        scenarios/s3 run|pass   (after scenarios/s1 run, s3 handover and s2 run on the same up;
+#        pass, the integrated run's, leaves out the negative controls)
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 bin=$here/../bin
@@ -31,14 +32,20 @@ bin=$here/../bin
 . "$here/../lib.sh"
 
 s3_mode=${1:-}
-case $s3_mode in handover | handover-controls | run) ;; *) die "usage: scenarios/s3 handover|handover-controls|run" ;; esac
+# `pass` is `run` without its negative controls (common.sh controls_run); the evidence keeps its name.
+s3_name=$s3_mode pass_only=''
+case $s3_mode in
+  handover | handover-controls | run) ;;
+  pass) s3_mode=run pass_only=1 ;;
+  *) die "usage: scenarios/s3 handover|handover-controls|run|pass" ;;
+esac
 need docker curl jq timeout id sleep date awk wc
 need_state
 # No fixture lock of its own: inject and evidence each take the one they need.
 umask 077
 image_id=$(cat -- "$STATE/up-image") || die "no server image is recorded in $STATE; run fixtures/bin/up"
 image_own "$image_id" || die "the recorded server image is not this run's; run fixtures/bin/down, then up"
-EV=$STATE/evidence/s3-$s3_mode-$(date -u +%Y%m%dT%H%M%SZ)
+EV=$STATE/evidence/s3-$s3_name-$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p -- "$EV" "$EV/http"
 scenario=s3
 # shellcheck source-path=SCRIPTDIR source=common.sh
@@ -706,64 +713,7 @@ approval_part() {
   check "$ref" 'inject db-snapshot s3-step3, after step 3' "$bin/inject" db-snapshot s3-step3
   check "$ref" 'inject bao-snapshot s3-step3, after step 3' "$bin/inject" bao-snapshot s3-step3
 
-  # The controls that end a plan before its commitment, on the live database (P2 stays approved).
-  ref='S3 negative controls'
-  plan_by h-publisher approval-controls || die "s3: no plan for the approval controls"
-  pcancel=$plan_id
-  check "$ref" 'the automation identity approving: 403, no approval, the plan proposed' refused_approval robot "$pcancel" robot
-  check "$ref" 'h-recovery alone approving: 403, no approval, the plan proposed' refused_approval h-recovery "$pcancel" recovery
-  check "$ref" 'h-viewer approving: 403' refused_approval h-viewer "$pcancel" viewer
-  check "$ref" 'a second approval of the approved plan, by h-approver: 409 conflict, its one approval unchanged' \
-    second_approval h-approver "$p2" second
-  check "$ref" 'a second approval by h-all, another approver: 409 conflict' second_approval h-all "$p2" second-all
-  check "$ref" "a plan of the import release the handover published, which S2 superseded: 409 conflict naming the S2 release as Desired, no plan created" \
-    superseded_refused
-  check "$ref" 'a plan past its expiry reads expired, approved or not: an approval is 409, no operation' expiry_cases
-
-  plan_by h-publisher cancel-creator || die "s3: no plan to cancel"
-  check "$ref" 'a plan cancelled before commitment by its creator h-publisher: cancelled, no operation, recorded under publisher' \
-    cancelled_as h-publisher publisher creator
-  plan_by robot cancel-automation || die "s3: no plan to cancel"
-  check "$ref" 'a plan cancelled before commitment by its creator, the automation identity: cancelled, no operation, recorded under publisher' \
-    cancelled_as robot publisher automation
-  plan_by h-publisher cancel-approver || die "s3: no plan to cancel"
-  approve_by h-approver "$plan_id" cancel-approver || die "s3: no approval to cancel under"
-  check "$ref" 'an approved plan cancelled before commitment by h-approver: cancelled, no approval kept, no operation, recorded under approver' \
-    cancelled_as h-approver approver approver
-  plan_by h-publisher cancel-recovery || die "s3: no plan to cancel"
-  check "$ref" 'a plan cancelled before commitment by h-recovery: cancelled, no operation, recorded under recovery-admin' \
-    cancelled_as h-recovery recovery-admin recovery
-  plan_by robot cancel-forbidden || die "s3: no plan for the forbidden cancellation"
-  check "$ref" 'h-publisher cancelling a plan the automation identity created: 403 forbidden, the plan unchanged, no cancellation' \
-    cancel_forbidden h-publisher publisher
-
-  plan_by h-publisher revoke-approver || die "s3: no plan to revoke under"
-  approve_by h-approver "$plan_id" revoke-approver || die "s3: no approval to revoke"
-  check "$ref" 'an approval revoked before commitment by h-approver: the plan revoked, nothing dispatched, recorded under approver' \
-    revoked_as h-approver approver approver
-  plan_by h-publisher revoke-recovery || die "s3: no plan to revoke under"
-  approve_by h-approver "$plan_id" revoke-recovery || die "s3: no approval to revoke"
-  check "$ref" 'an approval revoked before commitment by h-recovery: the plan revoked, nothing dispatched, recorded under recovery-admin' \
-    revoked_as h-recovery recovery-admin recovery
-
-  plan_by h-publisher unapproved || die "s3: no unapproved plan"
-  pu=$plan_id
-  # The monitors pass every 60 s: S2's last restore put OpenBao back, and each status is read again.
-  check "$ref" 'the monitors classify every dependency retained' within 240 deps_classified
-  check "$ref" 'every dependency retained, none stale, as served' deps_retained
-  # With the links cut no plan reaches an operation, approved or not: what tells the unapproved plan
-  # apart is that dispatch never begins for it. Step 3's approved plan is retried every lease, each
-  # time with a use-time check; once one is recorded after this point, the unapproved plan has none.
-  rev_u=$(sql "SELECT coalesce(max(revision), 0) FROM machine_event WHERE machine = '$machine_w'") || die "s3: cannot read the worker's timeline"
-  sleep 16
-  check "$ref" 'every dependency retained and a plan unapproved, three heartbeats on: no operation, the plan still proposed' \
-    same "$(sql "SELECT (SELECT state FROM plan_state WHERE plan = '$pu') || ' ' || (SELECT count(*) FROM operation WHERE seq > $ops0 AND kind = 'apply-config')")" 'proposed 0'
-  check "$ref" "the controller dispatching meanwhile: a use-time check of step 3's approved plan after that point, none ever of the unapproved plan" \
-    within 40 dispatched_only_approved "$p2" "$pu" "$rev_u"
-  check "$ref" 'no operation exists for any plan of this part: every one proposed, approved, expired, cancelled or revoked' \
-    same "$(sql "SELECT count(*) FROM plan p JOIN operation o ON o.plan = p.id WHERE p.kind = 'apply-config'")" 0
-  outcome_bundle "$ref" controls
-  check "$ref" 'inject db-snapshot of the controls, for the bundle to expand and scan' "$bin/inject" db-snapshot "$backup_name-controls"
+  controls_run 'S3 negative controls' 'the controls that refuse or end a plan before its commitment' && approval_controls
 
   # Step 4, from one restore of the snapshots taken before step 2. The servers are paused across
   # both restores (as S2 step 7's are) and keep running.
@@ -847,6 +797,69 @@ approval_part() {
     restored_to_step3
 }
 
+# The controls that end a plan before its commitment, on the live database (P2 stays approved).
+# Called from approval_part, whose locals (p2, pcancel, pu) it uses, with the global ops0.
+approval_controls() {
+  ref='S3 negative controls'
+  plan_by h-publisher approval-controls || die "s3: no plan for the approval controls"
+  pcancel=$plan_id
+  check "$ref" 'the automation identity approving: 403, no approval, the plan proposed' refused_approval robot "$pcancel" robot
+  check "$ref" 'h-recovery alone approving: 403, no approval, the plan proposed' refused_approval h-recovery "$pcancel" recovery
+  check "$ref" 'h-viewer approving: 403' refused_approval h-viewer "$pcancel" viewer
+  check "$ref" 'a second approval of the approved plan, by h-approver: 409 conflict, its one approval unchanged' \
+    second_approval h-approver "$p2" second
+  check "$ref" 'a second approval by h-all, another approver: 409 conflict' second_approval h-all "$p2" second-all
+  check "$ref" "a plan of the import release the handover published, which S2 superseded: 409 conflict naming the S2 release as Desired, no plan created" \
+    superseded_refused
+  check "$ref" 'a plan past its expiry reads expired, approved or not: an approval is 409, no operation' expiry_cases
+
+  plan_by h-publisher cancel-creator || die "s3: no plan to cancel"
+  check "$ref" 'a plan cancelled before commitment by its creator h-publisher: cancelled, no operation, recorded under publisher' \
+    cancelled_as h-publisher publisher creator
+  plan_by robot cancel-automation || die "s3: no plan to cancel"
+  check "$ref" 'a plan cancelled before commitment by its creator, the automation identity: cancelled, no operation, recorded under publisher' \
+    cancelled_as robot publisher automation
+  plan_by h-publisher cancel-approver || die "s3: no plan to cancel"
+  approve_by h-approver "$plan_id" cancel-approver || die "s3: no approval to cancel under"
+  check "$ref" 'an approved plan cancelled before commitment by h-approver: cancelled, no approval kept, no operation, recorded under approver' \
+    cancelled_as h-approver approver approver
+  plan_by h-publisher cancel-recovery || die "s3: no plan to cancel"
+  check "$ref" 'a plan cancelled before commitment by h-recovery: cancelled, no operation, recorded under recovery-admin' \
+    cancelled_as h-recovery recovery-admin recovery
+  plan_by robot cancel-forbidden || die "s3: no plan for the forbidden cancellation"
+  check "$ref" 'h-publisher cancelling a plan the automation identity created: 403 forbidden, the plan unchanged, no cancellation' \
+    cancel_forbidden h-publisher publisher
+
+  plan_by h-publisher revoke-approver || die "s3: no plan to revoke under"
+  approve_by h-approver "$plan_id" revoke-approver || die "s3: no approval to revoke"
+  check "$ref" 'an approval revoked before commitment by h-approver: the plan revoked, nothing dispatched, recorded under approver' \
+    revoked_as h-approver approver approver
+  plan_by h-publisher revoke-recovery || die "s3: no plan to revoke under"
+  approve_by h-approver "$plan_id" revoke-recovery || die "s3: no approval to revoke"
+  check "$ref" 'an approval revoked before commitment by h-recovery: the plan revoked, nothing dispatched, recorded under recovery-admin' \
+    revoked_as h-recovery recovery-admin recovery
+
+  plan_by h-publisher unapproved || die "s3: no unapproved plan"
+  pu=$plan_id
+  # The monitors pass every 60 s: S2's last restore put OpenBao back, and each status is read again.
+  check "$ref" 'the monitors classify every dependency retained' within 240 deps_classified
+  check "$ref" 'every dependency retained, none stale, as served' deps_retained
+  # With the links cut no plan reaches an operation, approved or not: what tells the unapproved plan
+  # apart is that dispatch never begins for it. Step 3's approved plan is retried every lease, each
+  # time with a use-time check; once one is recorded after this point, the unapproved plan has none.
+  local rev_u
+  rev_u=$(sql "SELECT coalesce(max(revision), 0) FROM machine_event WHERE machine = '$machine_w'") || die "s3: cannot read the worker's timeline"
+  sleep 16
+  check "$ref" 'every dependency retained and a plan unapproved, three heartbeats on: no operation, the plan still proposed' \
+    same "$(sql "SELECT (SELECT state FROM plan_state WHERE plan = '$pu') || ' ' || (SELECT count(*) FROM operation WHERE seq > $ops0 AND kind = 'apply-config')")" 'proposed 0'
+  check "$ref" "the controller dispatching meanwhile: a use-time check of step 3's approved plan after that point, none ever of the unapproved plan" \
+    within 40 dispatched_only_approved "$p2" "$pu" "$rev_u"
+  check "$ref" 'no operation exists for any plan of this part: every one proposed, approved, expired, cancelled or revoked' \
+    same "$(sql "SELECT count(*) FROM plan p JOIN operation o ON o.plan = p.id WHERE p.kind = 'apply-config'")" 0
+  outcome_bundle "$ref" controls
+  check "$ref" 'inject db-snapshot of the controls, for the bundle to expand and scan' "$bin/inject" db-snapshot "$backup_name-controls"
+}
+
 # The database dump taken after every case, for the final bundle to expand and scan (C §15:
 # backups).
 backup_name=s3-$run_key
@@ -924,5 +937,5 @@ else
   result FAIL 'S3 evidence' 'bin/evidence failed'
 fi
 rm -f -- "$ev_log"
-say "s3 $s3_mode: $failed failed; evidence in $EV, bundle ${final:-none}"
+say "s3 $s3_name: $failed failed; evidence in $EV, bundle ${final:-none}"
 [ "$failed" -eq 0 ]

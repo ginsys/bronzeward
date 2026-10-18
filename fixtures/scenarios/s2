@@ -8,8 +8,9 @@
 # them, and one evidence bundle scanned for every fixture secret: the logs, the database's data
 # directory and write-ahead log, the backups, and the instances' writable layers. Each check writes PASS, FAIL or SKIP, its acceptance-plan reference and what it
 # checked to s2.tsv in the evidence directory and to stdout; the directory is then scanned by
-# bin/evidence. Exit 1 on any FAIL.
-# Usage: scenarios/s2 run   (after scenarios/s1 run and scenarios/s3 handover on the same
+# bin/evidence. Exit 1 on any FAIL. `pass`, the integrated run's: steps 1 to 7 without the
+# negative controls, the two matrices, step 6's OpenBao controls and the Go rows.
+# Usage: scenarios/s2 run|pass   (after scenarios/s1 run and scenarios/s3 handover on the same
 # fixtures/bin/up: S2's precondition, the worker adopted)
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
@@ -18,7 +19,8 @@ bin=$here/../bin
 . "$here/../lib.sh"
 
 s2_mode=${1:-}
-case $s2_mode in run) ;; *) die "usage: scenarios/s2 run" ;; esac
+pass_only=''
+case $s2_mode in run) ;; pass) pass_only=1 ;; *) die "usage: scenarios/s2 run|pass" ;; esac
 need docker curl jq timeout id sleep date awk
 need_state
 # No fixture lock of its own: inject and evidence each take the one they need.
@@ -986,7 +988,7 @@ s2_steps() {
   fresh_author
   fresh_publisher
   ref='S2 precondition (S3 handover)'
-  check "$ref" "after the matrices the worker's Applied is still the release its adoption recorded (completed adopt operation, source adoption, baseline revision 1, its import base's configuration digest); its Desired in desired0" handover_applied
+  check "$ref" "after whatever matrices ran the worker's Applied is still the release its adoption recorded (completed adopt operation, source adoption, baseline revision 1, its import base's configuration digest); its Desired in desired0" handover_applied
   [ -n "$applied" ] || die "s2: no Applied release; nothing after it can run"
   check "$ref" "the Applied release's review names one reference at the worker's marked file content" applied_reference "$author"
   [ -n "$ref_name" ] || die "s2: no reference to carry; nothing after it can run"
@@ -1014,21 +1016,27 @@ s2_steps() {
   check 'S2 step 1' "PUT a worker fragment, one node label a !bwref to the worker's extracted file content: 200, ETag moved" \
     s2_put "$author" step1-fragment /fragments/s2-labels "$(label_body)"
   frv=$s2_rev
-  check 'S2 negative controls' 'a second author on the replaced ETag, of the fragment: 412, nothing written, ETag unchanged' \
-    stale_put /fragments/s2-labels "$(label_body)" fragment "SELECT count(*) FROM fragment_revision WHERE name = 's2-labels'"
+  if [ "${pass_only:-}" != 1 ]; then
+    check 'S2 negative controls' 'a second author on the replaced ETag, of the fragment: 412, nothing written, ETag unchanged' \
+      stale_put /fragments/s2-labels "$(label_body)" fragment "SELECT count(*) FROM fragment_revision WHERE name = 's2-labels'"
+  fi
   s2_prior_etag=$etag
   check 'S2 step 2' 'PUT a worker profile listing the fragment revision: 200, ETag moved' \
     s2_put "$author" step1-profile /profiles/workers "$(jq -nc --arg f "$frv" '{fragments: [$f]}')"
   prv=$s2_rev
-  check 'S2 negative controls' 'a second author on the replaced ETag, of the profile: 412, nothing written, ETag unchanged' \
-    stale_put /profiles/workers "$(jq -nc --arg f "$frv" '{fragments: [$f]}')" profile "SELECT count(*) FROM profile_revision WHERE name = 'workers'"
+  if [ "${pass_only:-}" != 1 ]; then
+    check 'S2 negative controls' 'a second author on the replaced ETag, of the profile: 412, nothing written, ETag unchanged' \
+      stale_put /profiles/workers "$(jq -nc --arg f "$frv" '{fragments: [$f]}')" profile "SELECT count(*) FROM profile_revision WHERE name = 'workers'"
+  fi
   s2_prior_etag=$etag
   check 'S2 step 2' "PUT the worker's assignment selecting the profile: 200, ETag moved" \
     s2_put "$author" step1-assignment "/assignments/$machine_w" '{"profiles": ["workers"], "fragments": {}}'
   arv=$s2_rev
-  check 'S2 negative controls' 'a second author on the replaced ETag, of the assignment: 412, nothing written, ETag unchanged' \
-    stale_put "/assignments/$machine_w" '{"profiles": ["workers"], "fragments": {}}' assignment \
-    "SELECT count(*) FROM assignment_revision WHERE machine = '$machine_w'"
+  if controls_run 'S2 negative controls' 'a second author on each replaced ETag: 412'; then
+    check 'S2 negative controls' 'a second author on the replaced ETag, of the assignment: 412, nothing written, ETag unchanged' \
+      stale_put "/assignments/$machine_w" '{"profiles": ["workers"], "fragments": {}}' assignment \
+      "SELECT count(*) FROM assignment_revision WHERE machine = '$machine_w'"
+  fi
   [ -n "$frv" ] && [ -n "$prv" ] && [ -n "$arv" ] || die "s2: steps 1 and 2 left no revisions; nothing after them can run"
 
   # Step 3, on A, the workers of A, B and C all running.
@@ -1068,6 +1076,12 @@ s2_steps() {
   check 'S2 step 6' 'GET /dependencies serves every one retained, none stale' \
     s6_served '[.items[] | select(.class != "retained" or .stale)] == [] and .lastPass != null'
   ref='S2 negative controls (step 6)'
+  controls_run "$ref" "the version soft-deleted, destroyed, and OpenBao partitioned, sealed and paused" && s2_step6_controls
+  s2_step7
+}
+# s2_step6_controls: step 6's negative controls on the label reference's KV version.
+s2_step6_controls() {
+  local ref='S2 negative controls (step 6)'
   check "$ref" 'inject bao-soft-delete of the version' s6_inject bao-soft-delete "$dep_obj" "$dep_ver"
   check "$ref" 'soft-deleted: the version blocked (soft-deleted), every other dependency retained' \
     within 180 s6_classes blocked soft-deleted retained -
@@ -1093,7 +1107,9 @@ s2_steps() {
   s6_outage netsplit netjoin unreachable step6-netsplit
   s6_outage seal unseal unavailable step6-seal
   s6_outage pause unpause unreachable step6-pause
-
+}
+# s2_step7: from the snapshots taken before step 1, the automation identity repeats steps 1 to 3.
+s2_step7() {
   # Step 7: from the snapshots taken before step 1, the automation identity repeats steps 1 to 3.
   # The servers are paused across both restores and keep running: db-restore ends their sessions
   # and renames in one transaction, and a pool reconnecting in between makes the rename fail; and
@@ -1138,6 +1154,21 @@ run() {
   c10_rows
   [ "$failed" -eq "$gate_failed" ] || die "s2: the machinery gate did not pass; S2 does not run on a compiler it has not accepted"
   withheld+=("$BW_CANARY")
+  if controls_run 'S2 negative controls, C §15' 'the draft updates and publications on C: success, refusal and the interruption matrices'; then
+    update_and_publication_matrices
+  fi
+
+  # S2 steps 1 to 7, on the Applied state S3's handover left.
+  s2_steps
+  controls_run 'S2 negative controls' 'the Go rows' && go_rows
+  check 'S2 backups, C §15' 'inject db-snapshot: a dump of the bronzeward database after the updates and whatever controls ran' \
+    "$bin/inject" db-snapshot "$backup_name"
+}
+pass() { run; }
+
+# update_and_publication_matrices: draft updates and publications on C that succeed, are refused and
+# are killed at each interruption point, a bundle after each.
+update_and_publication_matrices() {
   fresh_author
   check 'S2 step 1' 'POST /drafts as h-author: 201 with an ETag' \
     answers 201 - POST /api/v1/drafts "$author" "$(jq -nc --arg c "$cluster" '{cluster: $c, title: "S2 draft updates"}')" "$(key draft)"
@@ -1181,12 +1212,6 @@ run() {
   check "$ref" 'refused publication on C: no release names the operation, the draft still open' unreleased
   outcome_bundle "$ref" publication-refusal
   for p in $pub_points; do pub_kill_case "$p"; done
-
-  # S2 steps 1 to 7, on the Applied state S3's handover left.
-  s2_steps
-  go_rows
-  check 'S2 backups, C §15' 'inject db-snapshot: a dump of the bronzeward database after the updates, refusals and interruptions' \
-    "$bin/inject" db-snapshot "$backup_name"
 }
 
 "$s2_mode"
@@ -1206,14 +1231,17 @@ if final=$("$bin/evidence" "$EV" 2>"$ev_log"); then
     result PASS 'S2 negative controls, C §15' 'the bundle is complete: bin/evidence captured every source'
   fi
   # The scan above covers the dump only if the bundle holds it expanded, with the database's rows
-  # in it: an interrupted claim's own row inside the staging_claim COPY block.
-  if [ "${#interrupted[@]}" -gt 0 ] &&
-    awk -v id="${interrupted[0]}" '
-      /^COPY public\.staging_claim / { block = 1; next }
+  # in it: an interrupted claim's own row inside the staging_claim COPY block; the pass mode
+  # interrupts nothing, so its release's row inside the release block.
+  dump_table=staging_claim dump_id=${interrupted[0]:-} dump_row="an interrupted draft update's claim"
+  [ "$s2_mode" != pass ] || dump_table=release dump_id=${s2_release:-} dump_row="step 7's release"
+  if [ -n "$dump_id" ] &&
+    awk -v id="$dump_id" -v table="$dump_table" '
+      index($0, "COPY public." table " ") == 1 { block = 1; next }
       block && /^\\\.$/ { block = 0 }
       block && index($0, id "\t") == 1 { found = 1 }
       END { exit !found }' "$final/backups/pg-$backup_name.dump.sql"; then
-    result PASS 'S2 backups, C §15' 'the scanned bundle holds the database dump expanded, an interrupted draft update'"'"'s claim among its rows (control)'
+    result PASS 'S2 backups, C §15' "the scanned bundle holds the database dump expanded, $dump_row among its rows (control)"
   else
     result FAIL 'S2 backups, C §15' 'the scanned bundle does not hold the database dump expanded with the run'"'"'s rows: the backup went unscanned'
   fi

@@ -32,7 +32,8 @@ $o.subject.plan as $plan |
      accounting: ([$mine[] | select(.kind == "accounting" and .entry.attempt == $a.entry.attempt) |
        {revision, basis: .entry.basis, class: .entry.class, decidedBy: .entry.decidedBy, role: .entry.role,
         start: .entry.start, end: .entry.end}] | first)} |
-    .sending = (if .response then "response" elif .accounting then "accounting:" + .accounting.basis else "unknown" end)],
+    # Known only once accounted: a response that does not account (a transport failure) leaves it unknown.
+    .sending = (if .accounting then "accounting:" + .accounting.basis else "unknown" end)],
   # What was observed for it: the observations resting on a start that names it.
   observed: [$t[] | select(.kind == "observation" and (.entry.basis as $b | $starts | index($b)) != null) |
     {revision, observation: .entry.observation, purpose: .entry.purpose, basis: .entry.basis}],
@@ -42,7 +43,8 @@ $o.subject.plan as $plan |
     {revision, kind, from: .entry.from, to: .entry.to, why: (.entry.cause // .entry.reason),
      by: (.entry.decidedBy // .entry.resolvedBy // .entry.requestedBy), role: .entry.role}],
   scope: (if $revs == [] then [] else [$t[] | select(.kind == "scope-state" and .revision > $revs[0] and .revision < $revs[-1]) |
-    {revision, from: .entry.from, to: .entry.to, why: .entry.cause}] end),
+    {revision, from: .entry.from, to: .entry.to, why: .entry.cause, decidedBy: .entry.decidedBy, role: .entry.role,
+     act: .entry.act, start: .entry.start, end: .entry.end, facts: .entry.facts, attempts: .entry.attempts}] end),
   refusals: [$t[] | select(.kind == "refusal" and .entry.plan == $plan) |
     {revision, comparison: .entry.comparison, cause: .entry.cause, controller: .entry.controller}],
   # How it ended.
@@ -51,9 +53,13 @@ $o.subject.plan as $plan |
   state: $o.state,
   # The pass criteria's structure: commit order, links, and no response text served.
   ordered: (($t | map(.revision)) as $r | $r == ($r | sort) and ($r | unique | length) == ($r | length)),
-  eventsAreTimeline: (($e | map(.id | split(":")[1] | tonumber)) ==
-    ([$mine[] | select(.kind != "observation-started") | .revision])),
-  attemptsLinked: ((($o.attempts // []) | map(.id)) == [$mine[] | select(.kind == "attempt") | .entry.attempt]),
+  # Each event is its timeline entry: the same revision, type and data.
+  eventsAreTimeline: (($e | map([(.id | split(":")[1] | tonumber), .type, .data])) ==
+    ([$mine[] | select(.kind != "observation-started") | [.revision, .kind, .entry]])),
+  # Each of the resource's attempts is its timeline entry, field by field where both carry it.
+  attemptsLinked: ((($o.attempts // []) | map({id, number, controller, generation, route, observation, revision})) ==
+    [$mine[] | select(.kind == "attempt") | {id: .entry.attempt, number: .entry.number, controller: .entry.controller,
+      generation: .entry.generation, route: .entry.route, observation: .entry.observation, revision}]),
   commitmentApproved: ([$mine[] | select(.kind == "commitment") | .entry.approval] as $c |
     $c != [] and all($c[]; . as $x | [$t[] | select(.kind == "approval" and .entry.plan == $plan) | .entry.approval] | index($x) != null)),
   textServed: ([$o, $e, $t] | [.. | objects | select(has("text"))] | length > 0)

@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Acceptance plan S0 end to end against the fixture. `run`: steps 1, 2, 3 and 5 and the schema
-# negative controls; `walk`: step 4's denied walk and the identity revocation it ends with. Each
+# negative controls; `pass`: `run` without the schema negative controls (the integrated run's);
+# `walk`: step 4's denied walk and the identity revocation it ends with. Each
 # check writes PASS, FAIL or SKIP, its acceptance-plan reference and what it checked to s0.tsv in
 # the evidence directory and to stdout; the directory is then scanned by bin/evidence. Exit 1 on
 # any FAIL.
-# Usage: scenarios/s0 run|walk   (each on a fresh fixtures/bin/up; run needs mise run go-db's
-# database and OpenBao: mise run dev-db, mise run dev-bao)
+# Usage: scenarios/s0 run|pass|walk   (each on a fresh fixtures/bin/up, run before any other scenario:
+# scenarios/integrated runs s1 after it on the same up; run needs mise run go-db's database and
+# OpenBao: mise run dev-db, mise run dev-bao)
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 bin=$here/../bin
@@ -13,7 +15,8 @@ bin=$here/../bin
 . "$here/../lib.sh"
 
 s0_mode=${1:-}
-case $s0_mode in run | walk) ;; *) die "usage: scenarios/s0 run|walk" ;; esac
+pass_only=''
+case $s0_mode in run | walk) ;; pass) pass_only=1 ;; *) die "usage: scenarios/s0 run|pass|walk" ;; esac
 need docker curl jq timeout id sleep git env
 need_state
 # No fixture lock of its own: bw, seed, inject and evidence each take the one they need.
@@ -219,6 +222,7 @@ run() {
   # Negative controls: a schema version the binary does not know, and an applied migration's
   # checksum changed (the immutability trigger held off for the one statement). Version 999 stays
   # unknown as migrations are added.
+  controls_run 'S0 negative control' 'the schema controls (an unknown version, an edited checksum) and the restore' || return 0
   "$bin/inject" kill A >/dev/null
   schema_control 1 'unknown schema version 999' \
     "INSERT INTO schema_migrations VALUES (999, 'unknown', 'x', now())" \
@@ -230,6 +234,7 @@ run() {
   check 'S0 negative control, PA §10.3' 'restored: automation on a human-only route is 403 forbidden, humanOnly' \
     answers_with '.humanOnly == true' 403 forbidden POST /api/v1/clusters "$robot" '{}' s0-ctl-cluster-key00
 }
+pass() { run; }
 
 # Well-formed identifiers whose records need not exist (all-zero bits are well formed).
 zero=aaaaaaaaaaaaaaaaaaaaaaaaaa

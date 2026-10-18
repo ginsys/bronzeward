@@ -4,21 +4,31 @@
 # directory outside the fixture state, which bin/down removes. A preset or a list of steps, run in
 # order from a fresh up; it stops at the first step that fails and leaves the fixture up for
 # inspection, its evidence already copied.
-#   run: up, s0 run, s1 run, s3 handover, s2 run, s3 run, s4 run, s5 run, s7 run, s8 run, down.
-#        s8 run reads S6.1's retained timeline from S8_S6_KEPT: the s6-run evidence directory a
-#        separate s6 preset copied into its record.
+#   run: up, s0 pass, s1 pass, s3 handover, s2 pass, s3 pass, s4 run, s5 pass, s7 run, s8 run,
+#        down: the pass paths alone, each scenario's negative controls and interruption matrices
+#        left to the presets below (each SKIP row names what). s8 run reads S6.1's retained
+#        timeline from S8_S6_KEPT: the s6-run evidence directory a separate s6 preset copied into
+#        its record.
+#   controls: up, s0 run, s1 run, s3 handover, s2 run, s3 run, s4 controls, s4 restores, s4 run,
+#        s5 run, s5 roles, down: the same chain in the full modes, with the controls the run
+#        preset leaves out.
 #   s6:  up, s1 run, s3 handover, s2 run, s3 run, s4 run, s4 ds, s6 run, down.
-# Steps: up down s0 s0walk s1 s3h s2 s3r s4 s4ds s5 s6 s7 s8 s8controls s8revocation.
+# The modes that need an up of their own run as step lists: up s1nid down; up s1 s3hc down;
+# up s1 s3h s2 s3r s4 s7c down; up s1 s3h s2 s3r s4 s7 s7n s7t s7o down; up s0walk down;
+# up s1 s8controls s8revocation down.
+# Steps: up down s0 s0p s0walk s1 s1p s1nid s3h s3hc s2 s2p s3r s3rp s4 s4c s4x s4ds s5 s5p
+# s5roles s6 s7 s7c s7n s7t s7o s8 s8controls s8revocation; a step ending in p is that
+# scenario's pass mode. A step appears once per list: its log is <step>.log.
 # The record: <record dir>/<preset>-<utc>/chain.log (checkout, start, end and exit status of each
 # step), <step>.log, evidence/ (a copy of the fixture's evidence directories).
-# Usage: scenarios/integrated <record dir> run|s6|<step>...
+# Usage: scenarios/integrated <record dir> run|controls|s6|<step>...
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 bin=$here/../bin
 # shellcheck source-path=SCRIPTDIR source=../lib.sh
 . "$here/../lib.sh"
 
-usage="usage: scenarios/integrated <record dir> run|s6|<step>..."
+usage="usage: scenarios/integrated <record dir> run|controls|s6|<step>..."
 [ "$#" -ge 2 ] || die "$usage"
 need git date cp mkdir tail tee wc realpath
 record=$1
@@ -32,8 +42,12 @@ case $1 in
     [ "$#" = 1 ] || die "$usage"
     [ -n "${S8_S6_KEPT:-}" ] && [ -s "$S8_S6_KEPT/s6-send-timeline.json" ] ||
       die "integrated: S8_S6_KEPT must name the s6-run evidence directory of a separate s6 preset"
-    set -- up s0 s1 s3h s2 s3r s4 s5 s7 s8 down
+    set -- up s0p s1p s3h s2p s3rp s4 s5p s7 s8 down
     preset=run ;;
+  controls)
+    [ "$#" = 1 ] || die "$usage"
+    set -- up s0 s1 s3h s2 s3r s4c s4x s4 s5 s5roles down
+    preset=controls ;;
   s6)
     [ "$#" = 1 ] || die "$usage"
     set -- up s1 s3h s2 s3r s4 s4ds s6 down
@@ -47,23 +61,42 @@ command_of() {
     up) cmd=("$bin/up") ;;
     down) cmd=("$bin/down") ;;
     s0) cmd=("$here/s0" run) ;;
+    s0p) cmd=("$here/s0" pass) ;;
     s0walk) cmd=("$here/s0" walk) ;;
     s1) cmd=("$here/s1" run) ;;
+    s1p) cmd=("$here/s1" pass) ;;
+    s1nid) cmd=("$here/s1" node-id) ;;
     s3h) cmd=("$here/s3" handover) ;;
+    s3hc) cmd=("$here/s3" handover-controls) ;;
     s2) cmd=("$here/s2" run) ;;
+    s2p) cmd=("$here/s2" pass) ;;
     s3r) cmd=("$here/s3" run) ;;
+    s3rp) cmd=("$here/s3" pass) ;;
     s4) cmd=("$here/s4" run) ;;
+    s4c) cmd=("$here/s4" controls) ;;
+    s4x) cmd=("$here/s4" restores) ;;
     s4ds) cmd=("$here/s4" ds) ;;
     s5) cmd=("$here/s5" run) ;;
+    s5p) cmd=("$here/s5" pass) ;;
+    s5roles) cmd=("$here/s5" roles) ;;
     s6) cmd=("$here/s6" run) ;;
     s7) cmd=("$here/s7" run) ;;
+    s7c) cmd=("$here/s7" closing) ;;
+    s7n) cmd=("$here/s7" no-entry) ;;
+    s7t) cmd=("$here/s7" transit) ;;
+    s7o) cmd=("$here/s7" old-bao) ;;
     s8) cmd=("$here/s8" run) ;;
     s8controls) cmd=("$here/s8" controls) ;;
     s8revocation) cmd=("$here/s8" revocation) ;;
     *) return 1 ;;
   esac
 }
-for s in "$@"; do command_of "$s" || die "integrated: unknown step $s; $usage"; done
+seen=' '
+for s in "$@"; do
+  command_of "$s" || die "integrated: unknown step $s; $usage"
+  case $seen in *" $s "*) die "integrated: step $s twice; run each up as its own list" ;; esac
+  seen="$seen$s "
+done
 
 out=$record/$preset-$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p -- "$out/evidence"
