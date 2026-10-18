@@ -40,6 +40,7 @@ Prerequisites: Go at the version `mise.toml` pins, and [mise](https://mise.jdx.d
 [its prerequisites](../../fixtures/README.md#prerequisites).
 
 ```sh
+mise trust            # once per fresh checkout: mise refuses an untrusted mise.toml
 mise run build        # bin/bronzeward and bin/oidc-fixture
 # without mise, the same two builds:
 go build -o bin/bronzeward ./cmd/bronzeward
