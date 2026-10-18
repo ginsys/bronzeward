@@ -21,7 +21,7 @@ call POST /plans "$publisher" "$body" troubleshoot-plan-1 | jq '{type, status, d
 | `precondition-failed` | 412 | The draft moved since you read its ETag | Read the draft again, reapply your change |
 | `stale-input` | 409 | A publication input moved since it was read | Publish again |
 | `scope-busy` | 409 | An operation holds the machine's scope | Wait for it, or settle it ([recovery](recovery.md#interrupted-operations)) |
-| `recovery-mode-active` | 409 | Recovery mode, or a scope not yet released | Finish [the restore](recovery.md#restoring-the-database-or-openbao) |
+| `recovery-mode-active` | 409 | Recovery mode, or a scope not yet released | Finish [the restore](recovery.md#restoring-from-a-backup) |
 | `conflict` | 409 | A state the act does not apply to; `detail` names it | Read the object, then act on its current state |
 | `identity-revoked` | 403 | The subject or service identity is revoked, or in `auth.deniedSubjects` | Revocation is permanent and a new token does not lift it: act as another human subject, or issue a new service identity (`bronzeward token issue`) |
 | `forbidden` | 403 | The token lacks the role, or a human-only act from automation | Check `auth.roles` and the groups claim |
@@ -41,7 +41,8 @@ response, accounting, drift, freeze and ownership transition, in revision order.
 call GET "/machines/$machine_w/timeline?limit=500" "$viewer" | jq -c '.items[] | [.revision, .at, .kind, .entry]'
 ```
 
-Pages hold 50 entries by default and at most 500; follow `next` with `?cursor=`. Responses never
+Pages hold 50 entries by default and at most 500, oldest first, so recent entries are on the last
+page: follow `next` with `&cursor=<next>`, or use the [`items` helper](recovery.md#read-it-first). Responses never
 carry configuration text or secrets.
 
 From it, for any operation, you can answer:
@@ -49,7 +50,9 @@ From it, for any operation, you can answer:
 - **Who approved what:** the `plan` and `approval` entries, and any `approval-revocation`.
 - **What each attempt carried, and when:** `attempt` entries, each with its number, route, controller
   and transport and verification deadlines.
-- **Whether it was sent:** a `response`, an `accounting`, or neither (still unknown).
+- **How each attempt is accounted for:** a `response`, an `accounting` decision, or neither (still
+  unknown). An `attempt` is recorded before the send, so the timeline cannot always say whether the
+  request left; an accounting records what was decided from observations, not that it was sent.
 - **What was seen on the node:** `observation-started` and `observation` entries, each naming its
   purpose.
 - **Why the scope was held:** `commitment`, `operation-state` and `scope-state` entries.
@@ -73,8 +76,11 @@ new recovery epoch: read the events again from the start.
 
 ## Common situations
 
-- **An operation stays `unresolved`.** Its owner stopped. See
-  [interrupted operations](recovery.md#interrupted-operations).
+- **An operation stays `unresolved`.** Find out why before taking it over: read its attempts and
+  timeline. An unaccounted attempt, a verification deadline reached without a decisive observation,
+  a closed scope gate or a revoked approval each leave it there with a healthy owner, and a takeover
+  only advances the generation. Account, observe or cancel for the cause you find; take it over only
+  when its owner stopped. See [interrupted operations](recovery.md#interrupted-operations).
 - **A plan is approved but nothing happens.** Look on the timeline for a `refusal` entry, which names
   the transaction and the comparison that failed, or a `use-time-check` entry, which gives each
   dependency's result.

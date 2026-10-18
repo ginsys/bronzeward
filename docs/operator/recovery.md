@@ -1,7 +1,7 @@
 # Recovery: stops, interrupted operations and restores
 
-What to do when an apply is cut off part-way, and when the database or OpenBao is restored from a
-backup. It uses the [walkthrough's setup](walkthrough.md#setup-for-the-commands-below), plus one
+What to do when an apply is cut off part-way, and when the database, OpenBao or the credential
+store is restored from a backup. It uses the [walkthrough's setup](walkthrough.md#setup-for-the-commands-below), plus one
 more token:
 
 ```sh
@@ -25,7 +25,8 @@ nothing in Bronzeward checks them:
   credential store's backup matched to them.
 - While a database backup that names a Transit key version may still be restored, keep that
   version decryptable. Restrict delete, destroy and trim on keys and secrets.
-- After restoring either service, start in recovery mode (below) before any normal start.
+- After restoring any of the three, start in recovery mode (below) before any normal start, and
+  name each restored one in the entry.
 
 Write down when each backup was taken. The recovery entry asks for it.
 
@@ -52,16 +53,29 @@ the interruption seam, and B takes over. What each point leaves:
 | Cut off | You see | Who settles it |
 |---|---|---|
 | Before commitment | No operation; the plan is still approved | The next executor commits it |
-| After commitment, before an attempt | `unresolved`, no attempt | Taken over and retried by the server |
+| After commitment, before an attempt | `unresolved`, no attempt (`attempts` is `null`) | Taken over and retried by the server |
 | After an attempt was sent, no response | `unresolved`, an attempt with no response | You: account for the attempt |
 | While verifying | `unresolved`, an attempt with a response | The server, from a new observation |
 
 ### Read it first
 
+Lists are oldest first, at most 500 per page, so what you need is often past the first page. `items`
+follows `next` and prints every item, one per line:
+
 ```sh
+items() {   # items <path> <token>
+  local page next=
+  while :; do
+    page=$(call GET "$1?limit=500${next:+&cursor=$next}" "$2") || return
+    jq -c '.items[]' <<<"$page"
+    next=$(jq -r '.next // empty' <<<"$page")
+    [ -n "$next" ] || return 0
+  done
+}
+
 op=<operation id>
-call GET /operations/$op "$viewer" | jq '{state, attempts}'
-call GET "/machines/$machine_w/timeline?limit=500" "$viewer" | jq '.items[] | {revision, at, kind, entry}'
+call GET /operations/$op "$viewer" | jq '{state, attempts}'     # attempts is null before the first
+items "/machines/$machine_w/timeline" "$viewer" | jq -c '{revision, at, kind, entry}'
 ```
 
 The timeline says who committed, which attempts were made, and every ownership transition. See
@@ -70,12 +84,16 @@ The timeline says who committed, which attempts were made, and every ownership t
 ### Take it over
 
 An instance that starts takes over what the previous owner left, with no call from you. To move an
-operation to the instance you are talking to, take it over from its current generation. The
-generation is in the operation's last `ownership-transition` timeline entry.
+operation to the instance you are talking to, take it over from its current generation: the one in
+the operation's last `ownership-transition` timeline entry, or in its `commitment` entry (1) if it
+was never taken over. An instance start or a recovery entry has usually moved it past 1 already.
 
 ```sh
-call POST /operations/$op/takeovers "$recovery" '{"generation": 1, "reason": "the owner was stopped"}' recovery-takeover-1 |
-  jq '{state, generation}'                       # unresolved, generation 2
+gen=$(items "/machines/$machine_w/timeline" "$viewer" | jq -s --arg op "$op" '[.[] |
+  select((.kind == "commitment" or .kind == "ownership-transition") and .entry.operation == $op) |
+  .entry.generation] | last')
+call POST /operations/$op/takeovers "$recovery" "{\"generation\": $gen, \"reason\": \"the owner was stopped\"}" \
+  recovery-takeover-1 | jq '{state, generation}'   # unresolved, generation $gen + 1
 ```
 
 A stale generation, or an operation already `completed`, `failed`, `rejected` or `cancelled`, gets
@@ -95,8 +113,8 @@ not guess. You decide, from two observations of the machine:
   observations itself, one per settle floor.
 
 ```sh
-call GET "/machines/$machine_w/observations?limit=500" "$viewer" |
-  jq '.items[] | {id, purpose, startedAt, at, resourceVersion, unread}'
+items "/machines/$machine_w/observations" "$viewer" |
+  jq -c '{id, purpose, startedAt, at, resourceVersion, unread}'
 call POST /operations/$op/attempts/$attempt/accountings "$recovery" \
   "$(jq -nc --arg s "$start" --arg e "$end" '{start: $s, end: $e, facts: {explanation: "the node was cut off"}}')" \
   recovery-accounting-1
@@ -119,7 +137,7 @@ call POST /operations/$op/resolutions "$recovery" '{"to": "cancelled", "reason":
 
 Only `cancelled` is accepted, only from `unresolved`, and only when the operation has no attempt.
 
-## Restoring the database or OpenBao
+## Restoring from a backup
 
 A restore takes the installation back to the backup's moment. Operations that were in flight then
 look in flight again, and identities revoked since then look valid. Recovery mode stops anything
@@ -128,7 +146,8 @@ reference run.
 
 ### 1. Stop every instance, then restore
 
-Stop every `serve` process and note the time. Restore PostgreSQL and OpenBao from matched backups.
+Stop every `serve` process and note the time. Restore what was lost from matched backups: PostgreSQL,
+OpenBao, the credential store, or several of them.
 On the fixture, with backups taken earlier by `inject db-snapshot <name>` and
 `inject bao-snapshot <name>`:
 
@@ -148,8 +167,8 @@ restore erased those revocations; the list refuses them whatever the database sa
 bin/bronzeward serve -config bronzeward.yaml -recovery-start     # fixture: fixtures/bin/inject start B-recovery
 ```
 
-Until the entry is recorded it answers everything except the entry with
-`409 recovery-mode-active`. It runs no executor, publisher, adopter or drift loop, and it never
+Until the entry is recorded it answers everything except `/livez` and the entry with
+`409 recovery-mode-active`; a `204` from `/livez` does not mean the entry is recorded. It runs no executor, publisher, adopter or drift loop, and it never
 accepts a plan, an approval or an unfreeze, even after the entry.
 
 ### 3. Record the entry
@@ -166,15 +185,22 @@ call POST /recovery/entries "$recovery" "$(jq -nc --arg s "$stopped_at" '{
   jq '{previousEpoch, epoch, machines, operations}'
 ```
 
-The families are `database`, `provider` and `credential-store`. The entry starts a new epoch: every
-process started before it is refused from then on (`503 epoch-superseded`). Every operation that
-was in flight is taken over and becomes `unresolved`. Every machine's scope becomes
-`pre-restore-unaccounted`. Paused import claims are abandoned.
+The families are `database`, `provider` and `credential-store`. The entry starts a new epoch. A
+process started before it may issue no more ownership: its commitments, takeovers, job claims,
+ingestions, marks and recovery acts get `503 epoch-superseded`, though it may still answer reads.
+Restart every such process. The entry also:
+
+- takes over every apply-config operation in flight, which becomes `unresolved`;
+- fails every queued or running publication job (`recovery-mode-entered`) and every running
+  ingestion (`ingestion-abandoned`), abandoning every live import claim. These do not resume:
+  submit them again once the scope allows;
+- moves every machine's scope to `pre-restore-unaccounted`.
 
 Then, through the recovery instance:
 
-- Re-record every revocation the restore erased (`POST /identity-revocations`), then empty
-  `auth.deniedSubjects` again.
+- Re-record every revocation the restore erased (`POST /identity-revocations`), then remove from
+  `auth.deniedSubjects` only the subjects you added for this restore whose revocation is recorded.
+  Leave every other entry there.
 - Reissue every automation token with `bronzeward token rotate`. A token issued before the entry
   is from an earlier epoch and gets `401`.
 
