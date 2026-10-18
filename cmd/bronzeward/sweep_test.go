@@ -329,3 +329,25 @@ func TestRecoveryStartSweepsAfterEntry(t *testing.T) {
 	}
 	waitAbandoned(t, db, due, "the due claim after entry")
 }
+
+// A recovery start records no dependency classification, alert or progress before its entry
+// (dependency-monitor §10.1 item 13): its monitor starts only once the entry has committed. The
+// control: a normal start starts the monitor with the process.
+func TestRecoveryStartMonitorsAfterEntry(t *testing.T) {
+	db, _, _, _ := sweepFixture(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	monitored := 0
+	onEntry := startMonitor(ctx, db, true, time.Hour, func() { monitored++ })
+	if monitored != 0 || onEntry == nil {
+		t.Fatalf("a recovery start monitored %d times before entry (onEntry set: %t)", monitored, onEntry != nil)
+	}
+	onEntry()
+	if monitored != 1 {
+		t.Fatalf("after entry the monitor started %d times", monitored)
+	}
+	monitored = 0
+	if onEntry := startMonitor(ctx, db, false, time.Hour, func() { monitored++ }); monitored != 1 || onEntry != nil {
+		t.Fatalf("a normal start monitored %d times (onEntry set: %t)", monitored, onEntry != nil)
+	}
+}
