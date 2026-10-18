@@ -36,8 +36,9 @@
 # generations and alerts at once, and a publication pinning them is refused (PA §13.3).
 # Each check writes PASS, FAIL or SKIP, its acceptance-plan reference and what it checked to s7.tsv
 # in the evidence directory and to stdout. Exit 1 on any FAIL.
-# Usage: scenarios/s7 run       (after scenarios/s5 run on the same up, as in the integrated run, or
-#                                directly after scenarios/s4 run; S6 runs outside the integrated run)
+# Usage: scenarios/s7 run       (after scenarios/s5 run or s5 pass on the same up, the integrated run
+#                                running s5 pass, or directly after scenarios/s4 run; S6 runs outside
+#                                the integrated run)
 #        scenarios/s7 closing   (after scenarios/s4 run on a fresh up, outside the integrated run)
 #        scenarios/s7 no-entry  (after scenarios/s7 run on the same up)
 #        scenarios/s7 transit   (after scenarios/s7 no-entry on the same up)
@@ -962,7 +963,7 @@ old_bao() {
   ing_old=${ingested[-1]}
   must "$ref" "the import's generations written to OpenBao after its snapshot" has_generations "$ing_old"
   if [ "$(fragment_count s2-labels)" = 0 ]; then
-    must "$ref" "S2's label fragment already out of the workers profile (s5 run took it out)" same "$(fragment_count s2-labels)" 0
+    must "$ref" "S2's label fragment already out of the workers profile (s5 run or s5 pass took it out)" same "$(fragment_count s2-labels)" 0
   else
     must "$ref" "h-author takes S2's label fragment out of the workers profile, the import base holding that reference: 200, the ETag replaced" \
       profile_drops h-author old s2-labels
