@@ -247,19 +247,22 @@ Five cells of three captures each, 01:05-01:31 UTC on 18 October, on a third fre
 | held, pause 45 s | 3/3 | 26-27 s after the send, about 7 s after the split healed, with the control plane still paused |
 | held, pause 90 s | 3/3 | 27-28 s after the send, as at 45 s |
 
-Every capture reached its synchronization point about 0.3 s after the send. The control plane's
-send queue then held 2989 bytes, with its retransmission timer running. In the 45 and 90 s
-captures, the samples show:
+Every capture reached its synchronization point about 0.3 s after the send, on the one
+established connection the warm read had used (the same local port in all nine). The control
+plane's send queue then held 2989 bytes (2967 in `held-controlplane-45-02`), with its
+retransmission timer running. In the 45 and 90 s captures, the samples show:
 
-- the queue stays at 2989 bytes through `talosctl`'s kill at 15 s, so the frozen apid added no
-  cancellation;
+- the queue keeps that size through `talosctl`'s kill at 15 s, so the frozen apid added nothing,
+  the cancellation included;
 - it empties at the seventh retransmission, about 27 s after the send;
-- the worker's answer then waits in the frozen control plane's receive queue (102 bytes) until
-  the unpause;
+- the worker's answer then waits in the frozen control plane's receive queue until the unpause
+  (102 bytes, 124 in `90-02` and `90-03`);
 - the connection survives on both ends.
 
-In the 20 s captures, the unpause came first: 35 bytes joined the queue at the unpause, as in
-§5.2. All three still landed.
+35 bytes joined the send queue at the unpause, as in §5.2 (ASSUMPTION, as there: the
+cancellation). In the 20 s captures the unpause came before the delivery, so the cancellation was
+queued behind the request, and all three still landed. In `90-03` the 35 bytes show at the unpause,
+after the landing.
 
 So a pause of the control plane does not hold back a request apid has already forwarded. The
 frozen container's kernel keeps retransmitting it. The landing follows the worker-side partition,
@@ -336,4 +339,7 @@ pause case, which no default here bounds.
   After both runs, `run/measure` was corrected on paths neither run reached: an undo armed before
   each fault rather than after it, and a failed last read now recorded as `unknown`. In both runs
   every capture's `landed` agrees with its version change and no read failed. The held run (§5.4)
-  was made after those corrections.
+  was made after those corrections. After it, `run/measure` pins the connection it waits on before
+  the send, bounds that wait by the transport deadline, and ends its background jobs when it
+  stops early. In the held run every synchronization came 0.3 s after the send, on the one
+  established connection to the worker, and no capture stopped early.

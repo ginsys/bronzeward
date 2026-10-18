@@ -13,9 +13,10 @@
 #   netsplit-worker, pause-worker, pause-controlplane at 20, 45 and 90 s, sent through the control
 #     plane's API proxy on a warm connection (the harness has just read the worker through it);
 #   held-controlplane at 20, 45 and 90 s: a request the proxy already holds when its side is paused.
-#     The worker is split off first, so apid's forward waits in the control plane's connection to it;
-#     the control plane is paused only once that connection holds unsent bytes (each poll of it in
-#     the transcript), the split healed at 20 s after the send and the pause undone at the cell's
+#     The worker is split off first, so apid's forward waits in the control plane's connection to it
+#     (the one established connection the warm read leaves, pinned before the send); the control
+#     plane is paused only once that connection holds unsent bytes, within the transport deadline
+#     (the pin and each poll in the transcript), the split healed at 20 s after the send and the pause undone at the cell's
 #     length. A pause after the forward reached a reachable worker would find nothing held: the
 #     proxied apply completes in milliseconds, faster than a pause takes;
 #   cold: the control plane restarted before the capture and the worker reached only directly, so
@@ -71,10 +72,15 @@ d_applies_since() {
   awk -v since="$1" '/\[\/machine\.MachineService\/ApplyConfiguration\]/ && $2 " " $3 >= since' <<<"$log"
 }
 
-# A fault left in place by an interrupted run would make every later capture meaningless.
+# A fault left in place by an interrupted run would make every later capture meaningless, and so
+# would an apply still running after it: background jobs (BG) are ended and reaped first.
 HEAL=()
+BG=()
 heal_all() {
-  local h a
+  local h a p
+  for p in "${BG[@]}"; do kill -TERM "$p" 2>/dev/null || true; done
+  for p in "${BG[@]}"; do wait "$p" 2>/dev/null || true; done
+  BG=()
   for h in "${HEAL[@]}"; do
     read -ra a <<<"$h"
     "$FIXTURES_DIR/bin/inject" "${a[@]}" >/dev/null 2>&1 || true
@@ -109,20 +115,45 @@ sockets_sample() {
       done' sh "$2" "$SOCK_RE" >"$3" 2>&1
 }
 
-# The control plane's end of that connection alone.
-HELD_RE="$(hex4 "$TALOS_CONTROLPLANE_IP"):[0-9A-F]{4} [0-9A-F]*$(hex4 "$TALOS_WORKER_IP"):C350 "
-# held_wait: the synchronization point of a held-controlplane capture. Reads the control plane's
-# /proc/net/tcp and tcp6 until its connection to the worker's API port has a non-zero send queue:
-# the request has reached apid and been forwarded into the split connection. Every read goes to
-# the transcript with its time. Fails after the transport deadline.
-held_wait() {
-  local id start=$SECONDS out line
+# cp_tcp <seconds>: the control plane's /proc/net/tcp and tcp6, read within that many seconds.
+cp_tcp() {
+  local id
   id=$(container_id "$CP") || return 1
-  while [ $((SECONDS - start)) -lt "$E4M_DEADLINE" ]; do
-    out=$(timeout 10 docker run --rm --pull never --network "container:$id" --label "$TOOL_LABEL" \
-      --entrypoint cat "$CURL_IMAGE" /proc/net/tcp /proc/net/tcp6) || return 1
-    line=$(grep -iE -- "$HELD_RE" <<<"$out" | awk '{ split($5, q, ":"); if (q[1] !~ /^0+$/) { print; exit } }')
-    printf '%s held check: %s\n' "$(now_ms)" "${line:-nothing unsent on the connection to the worker}" >>"$LOG"
+  timeout "$1" docker run --rm --pull never --network "container:$id" --label "$TOOL_LABEL" \
+    --entrypoint cat "$CURL_IMAGE" /proc/net/tcp /proc/net/tcp6
+}
+# held_established: the control plane's established connections from its address to the worker's
+# API port, as IPv4 or IPv4-mapped IPv6 addresses, exactly; one line each.
+held_established() {
+  awk -v cp="$(hex4 "$TALOS_CONTROLPLANE_IP")" -v w="$(hex4 "$TALOS_WORKER_IP")" '
+    function is(addr, ip) { return addr == ip || addr == "0000000000000000FFFF0000" ip }
+    { split($2, l, ":"); split($3, r, ":") }
+    is(l[1], cp) && is(r[1], w) && r[2] == "C350" && $4 == "01"'
+}
+# held_pin: before the send, the one connection apid holds to the worker after the warm read; it
+# sets HELD_LOCAL, HELD_REMOTE and HELD_INODE. Two such connections, or none, refuse the capture.
+held_pin() {
+  local out n
+  out=$(cp_tcp 10 | held_established) || return 1
+  n=$(grep -c . <<<"$out" || true)
+  printf '%s held pin: %s\n' "$(now_ms)" "${out:-no established connection to the worker}" >>"$LOG"
+  [ "$n" = 1 ] || return 1
+  read -r _ HELD_LOCAL HELD_REMOTE _ _ _ _ _ _ HELD_INODE _ <<<"$out"
+}
+# held_wait <send start>: the synchronization point of a held-controlplane capture. Reads the
+# control plane's /proc/net/tcp and tcp6 until the pinned connection, still established, has a
+# non-zero send queue: the request has reached apid and been forwarded into the split connection
+# (nothing else goes through the control plane during a capture). Every read goes to the
+# transcript with its time. Each read is bounded by what is left of the send's transport deadline,
+# and a sample read past it is refused, so the pause never follows `talosctl`'s kill.
+held_wait() {
+  local deadline=$(($1 + E4M_DEADLINE)) left out line
+  while left=$((deadline - SECONDS)) && [ "$left" -gt 0 ]; do
+    out=$(cp_tcp "$left") || return 1
+    [ "$SECONDS" -lt "$deadline" ] || return 1
+    line=$(held_established <<<"$out" | awk -v l="$HELD_LOCAL" -v r="$HELD_REMOTE" -v i="$HELD_INODE" '
+      $2 == l && $3 == r && $10 == i { split($5, q, ":"); if (q[1] !~ /^0+$/) { print; exit } }')
+    printf '%s held check: %s\n' "$(now_ms)" "${line:-nothing unsent on the pinned connection}" >>"$LOG"
     [ -z "$line" ] || return 0
   done
   return 1
@@ -189,8 +220,10 @@ capture() {
     spids+=($!)
     sockets_sample "$WORKER" $((i + E4M_WINDOW + 5)) "$ROW_PARTS/sockets-worker.txt" &
     spids+=($!)
+    BG=("${spids[@]}")
   fi
   if [ "$action" = held ]; then
+    held_pin || die "capture $ROW_N: not exactly one connection from the control plane to the worker"
     # The worker split off first; the pause comes after the send.
     HEAL=("netjoin worker")
     inject_logged netsplit worker || die "capture $ROW_N: could not netsplit worker"
@@ -205,12 +238,14 @@ capture() {
   timeout --signal=KILL "$E4M_DEADLINE" "$CACHE/talosctl" -e "$endpoint" -n "$TALOS_WORKER_IP" \
     apply-config --mode=no-reboot --file "$ROW_PARTS/art.yaml" >>"$LOG" 2>&1 &
   tpid=$!
+  BG+=("$tpid")
   if [ "$action" = held ]; then
-    held_wait || die "capture $ROW_N: the control plane's connection to the worker held nothing unsent"
+    held_wait "$start" || die "capture $ROW_N: the pinned connection held nothing unsent before the deadline"
     HEAL=("netjoin worker" "unpause $target")
     inject_logged pause "$target" || die "capture $ROW_N: could not pause $target"
   fi
   wait "$tpid" || rc=$?
+  BG=("${spids[@]}")
   kill_at=$(now_ms)
   printf '%s talosctl exited %s\n' "$kill_at" "$rc" >>"$LOG"
   if [ "$action" = held ]; then
@@ -260,6 +295,7 @@ capture() {
   fi
   if [ "${#spids[@]}" -gt 0 ]; then
     wait "${spids[@]}" || printf 'a socket sampler failed\n' >>"$LOG"
+    BG=()
     for side in controlplane worker; do
       printf 'sockets in the %s namespace (time sl local remote st tx:rx tr:when retransmits ...):\n' "$side" >>"$LOG"
       cat -- "$ROW_PARTS/sockets-$side.txt" >>"$LOG"
