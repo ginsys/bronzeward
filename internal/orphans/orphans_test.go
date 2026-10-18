@@ -120,6 +120,19 @@ func (w *world) claim(t *testing.T, mode, state, lease, expiry string) string {
 	return c
 }
 
+// paused records a paused claim in cluster a, its lease ended by the pause, its envelope stored
+// and its review pending (compilation §3.6), with the expiry relative to now.
+func (w *world) paused(t *testing.T, expiry string) string {
+	t.Helper()
+	c := id.New(id.Ingestion)
+	exec(t, w.db, `INSERT INTO staging_claim (id, mode, state, owner, owner_gen, owner_epoch, lease_until, expires_at,
+		cluster, machine, kind, created_at, payload, payload_digest, review)
+		SELECT $1, 'encrypted', 'paused', 'a/4242/start-1', 1, epoch, now() - interval '1 minute', now() + $2::interval, $3, $4,
+			'import', now(), '\x01', $5, 'pending'
+		FROM installation_state`, c, expiry, w.a, w.machine, bytes.Repeat([]byte{1}, 32))
+	return c
+}
+
 // gen adds a generation of claim under cluster to the tree and returns its path.
 func (w *world) gen(cluster, claim string) string {
 	if w.tree[cluster] == nil {
@@ -194,6 +207,7 @@ type matrix struct {
 	encryptedLapsed, removed                               string
 	// Named only by a fragment revision's reference row: of the abandoned claim, of a released one.
 	fragmentReferenced, fragmentReleased string
+	paused, pausedExpired                string
 }
 
 func newMatrix(t *testing.T) *matrix {
@@ -215,6 +229,8 @@ func newMatrix(t *testing.T) *matrix {
 	m.transientLapsed = w.gen(w.a, w.claim(t, "transient", "held", "-1 minute", "1 hour"))
 	m.encryptedLapsed = w.gen(w.a, w.claim(t, "encrypted", "held", "-1 minute", "1 hour"))
 	m.removed = w.gen(w.b, id.New(id.Ingestion))
+	m.paused = w.gen(w.a, w.paused(t, "1 hour"))
+	m.pausedExpired = w.gen(w.a, w.paused(t, "-1 minute"))
 	return m
 }
 
@@ -234,15 +250,15 @@ func TestSelection(t *testing.T) {
 	m := newMatrix(t)
 	r, _ := m.run(t, "", options{})
 	wantOrphans := sorted(m.abandoned, m.released, m.absent, m.removed)
-	wantExpired := sorted(m.heldExpired, m.resumedExpired, m.transientLapsed)
+	wantExpired := sorted(m.heldExpired, m.resumedExpired, m.pausedExpired, m.transientLapsed)
 	if got := paths(r.Orphans); !slices.Equal(got, wantOrphans) {
 		t.Fatalf("orphans %q, want %q", got, wantOrphans)
 	}
 	if got := paths(r.Expired); !slices.Equal(got, wantExpired) {
 		t.Fatalf("expired %q, want %q", got, wantExpired)
 	}
-	if r.Listed != 13 {
-		t.Fatalf("listed %d, want 13", r.Listed)
+	if r.Listed != 15 {
+		t.Fatalf("listed %d, want 15", r.Listed)
 	}
 	if sr, _ := m.run(t, "", options{split: true}); !slices.Equal(paths(sr.Orphans), wantOrphans) {
 		t.Fatalf("the two-statement read reports %q, want %q", paths(sr.Orphans), wantOrphans)
@@ -257,11 +273,11 @@ func TestSelection(t *testing.T) {
 		}
 	}
 	for _, e := range r.Expired {
-		if e.Mode == "" || e.LeaseUntil.IsZero() || (e.State != "held" && e.State != "resumed") {
+		if e.Mode == "" || e.LeaseUntil.IsZero() || (e.State != "held" && e.State != "resumed" && e.State != "paused") {
 			t.Fatalf("an expired entry lacks its fields: %+v", e)
 		}
 	}
-	t.Logf("orphans: abandoned, released, absent claim row, restore-removed cluster; listed apart: two past expiry, one transient past lease; " +
+	t.Logf("orphans: abandoned, released, absent claim row, restore-removed cluster; listed apart: three past expiry (held, resumed, paused), one transient past lease; " +
 		"not reported: generations named by an import base or a fragment revision's reference row; the two-statement read agrees")
 
 	fragmentOrphan := func(r Report) bool {
@@ -276,7 +292,7 @@ func TestSelection(t *testing.T) {
 		{"read one kind of reference row only", options{oneKind: true}, fragmentOrphan},
 		{"read one kind of reference row only, two statements", options{oneKind: true, split: true}, fragmentOrphan},
 		{"read-time abandonment", options{readTimeAbandon: true}, func(r Report) bool { return slices.Contains(paths(r.Orphans), m.heldExpired) }},
-		{"omit every held or resumed claim", options{omitLive: true}, func(r Report) bool { return len(r.Expired) == 0 }},
+		{"omit every held, resumed or paused claim", options{omitLive: true}, func(r Report) bool { return len(r.Expired) == 0 }},
 		{"every lapsed lease abandons", options{lapsedLease: true}, func(r Report) bool { return slices.Contains(paths(r.Expired), m.encryptedLapsed) }},
 		{"only the clusters the database records", options{dbClusters: true}, func(r Report) bool { return !slices.Contains(paths(r.Orphans), m.removed) }},
 	}
@@ -423,12 +439,12 @@ func TestWrite(t *testing.T) {
 			t.Fatalf("output lacks %s:\n%s", p, out)
 		}
 	}
-	for _, p := range []string{m.referenced, m.fragmentReferenced, m.fragmentReleased, m.held, m.resumed, m.encryptedLapsed} {
+	for _, p := range []string{m.referenced, m.fragmentReferenced, m.fragmentReleased, m.held, m.resumed, m.paused, m.encryptedLapsed} {
 		if strings.Contains(out, p) {
 			t.Fatalf("output names %s:\n%s", p, out)
 		}
 	}
-	if !strings.Contains(lines[len(lines)-1], "4 orphans, 3 expired and not yet abandoned, 13 generations listed") {
+	if !strings.Contains(lines[len(lines)-1], "4 orphans, 4 expired and not yet abandoned, 15 generations listed") {
 		t.Fatalf("summary %q", lines[len(lines)-1])
 	}
 	t.Logf("output:\n%s", out)
