@@ -78,7 +78,7 @@ func (a *API) recordAttemptTx(ctx context.Context, tx *sql.Tx, operation string,
 		&current, &recovery); err != nil {
 		return r, "", "", err
 	}
-	if current != a.d.owner.Epoch {
+	if a.superseded(current) {
 		return r, "", "", errNotController
 	}
 	// An operation's plan and the plan row are immutable, so their bindings are read before the
@@ -157,19 +157,26 @@ func (a *API) recordAttemptTx(ctx context.Context, tx *sql.Tx, operation string,
 			operation).Scan(&owner, &gen, &epoch, &state); err != nil {
 			return r, machine, plan, err
 		}
-		moved = owner.String == a.d.owner.ID && gen == generation && epoch.String == current && state.String == "committed"
+		moved = owner.String == a.d.owner.ID && gen == generation && epoch.String == a.d.owner.Epoch && state.String == "committed"
 		if moved {
 			if _, err := tx.ExecContext(ctx, `UPDATE operation SET state = 'sending' WHERE id = $1`, operation); err != nil {
 				return r, machine, plan, err
 			}
 		}
 	} else {
-		// Committed, or unresolved and classified safe to retry by this token (comparison 7).
+		// Committed, or unresolved and classified safe to retry by this token (comparison 7). The
+		// token is the process's owner, generation and epoch: a restore rewinds the first two, so a
+		// pre-restore token can match a row reissued after entry but for its epoch (DB row 027). The
+		// epoch term's control (options.noEpochTerm) drops it.
+		term := ` AND owner_epoch = $4`
+		if a.o.noEpochTerm {
+			term = ` AND $4::text IS NOT NULL`
+		}
 		res, err := tx.ExecContext(ctx, `UPDATE operation SET state = 'sending'
-			WHERE id = $1 AND owner = $2 AND owner_gen = $3 AND owner_epoch = $4 AND (state = 'committed' OR (state = 'unresolved'
+			WHERE id = $1 AND owner = $2 AND owner_gen = $3`+term+` AND (state = 'committed' OR (state = 'unresolved'
 				AND EXISTS (SELECT FROM operation_classification c WHERE c.operation = $1 AND c.outcome = 'safe-to-retry'
 					AND c.owner = $2 AND c.owner_gen = $3 AND c.owner_epoch = $4)))`,
-			operation, a.d.owner.ID, generation, current)
+			operation, a.d.owner.ID, generation, a.d.owner.Epoch)
 		if err != nil {
 			return r, machine, plan, err
 		}
@@ -270,7 +277,7 @@ func (a *API) recordAttemptTx(ctx context.Context, tx *sql.Tx, operation string,
 			operation).Scan(&owner, &gen, &epoch, &state); err != nil {
 			return r, machine, plan, err
 		}
-		if owner.String != a.d.owner.ID || gen != generation || epoch.String != current {
+		if owner.String != a.d.owner.ID || gen != generation || epoch.String != a.d.owner.Epoch {
 			return r, machine, plan, refuseAttempt("7", "the operation's owner token is not this controller's")
 		}
 		return r, machine, plan, refuseAttempt("7", "the operation is "+state.String)
@@ -280,7 +287,7 @@ func (a *API) recordAttemptTx(ctx context.Context, tx *sql.Tx, operation string,
 	// classification admits one attempt.
 	if cls.Valid {
 		if clsOutcome.String != "safe-to-retry" || clsOwner.String != a.d.owner.ID || clsGen.Int64 != generation ||
-			clsEpoch.String != current {
+			clsEpoch.String != a.d.owner.Epoch {
 			return r, machine, plan, refuseAttempt("8", "the operation's latest classification is not this controller's to retry")
 		}
 		var later sql.NullString
