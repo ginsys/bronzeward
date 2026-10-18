@@ -7,7 +7,7 @@ approval, a safe apply and drift handling.
 This is a proof of concept under implementation. Nothing here is a release or a production
 deployment guide: the supported scope is
 [design §18.2](../design/Talos_Configuration_and_Machine_Management_Design.md#182-phase-1---configuration-control-on-an-existing-cluster),
-and the [acceptance plan](../spec/acceptance-plan.md) is what has been checked.
+and the [acceptance plan](../spec/acceptance-plan.md) defines what must be checked.
 
 ## The profile
 
@@ -118,10 +118,10 @@ bin/bronzeward token revoke -config bronzeward.yaml -identity <idn_...> -operato
 
 ```sh
 fixtures/bin/up            # about two minutes once images are cached
+fixtures/bin/bw migrate    # before any instance starts: serve refuses an unmigrated database
 fixtures/bin/inject start A
 fixtures/bin/inject start B
 fixtures/bin/inject start C
-fixtures/bin/bw migrate
 fixtures/bin/seed          # the automation identity; its token goes to fixtures/.state/automation-token
 curl -i http://127.0.0.1:28080/livez
 ```
