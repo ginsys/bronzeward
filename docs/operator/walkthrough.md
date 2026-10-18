@@ -316,7 +316,14 @@ call POST /plans/$plan/approvals "$approver" '{}' walkthrough-approval-adopt-dri
 ```
 
 The plan binds the open drift record (`driftRecord`). The adoption commits even while frozen, since
-it sends nothing. The record closes `adopted` and `applied.source` reads `adoption`.
+it sends nothing. The record closes `adopted` and `applied.source` reads `adoption`. As in the
+handover, the approval answers first: wait for the adoption before changing the node again, or a
+later digest gets it refused.
+
+```sh
+call GET /machines/$machine_w "$viewer" | jq '{release: .applied.release, source: .applied.source, openDrift}'
+# until release is $release, source is adoption and openDrift is null
+```
 
 **3b. Or revert it.** After another out-of-band change opens a new record, plan an `apply-config` of
 the machine's `desired` release with S3's body, under new idempotency keys: a key reused with a
