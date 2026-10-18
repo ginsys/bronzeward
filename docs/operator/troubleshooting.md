@@ -47,8 +47,9 @@ Pages hold 50 entries by default and at most 500, oldest first, so recent entrie
 page: follow `next` with `&cursor=<next>`, or use the [`items` helper](recovery.md#read-it-first).
 Other lists, such as observations, page the same way but are in id order, not time order. Timeline
 and operation-event responses carry no configuration text or secrets. Other reads can: source reads
-(fragments, profiles, assignments) carry sanitized documents, and an ingestion's review (`no-store`, its author
-only) carries the staged document, which can hold a value nobody marked.
+(fragments, profiles, assignments) carry sanitized documents, and an ingestion's review carries the
+staged document, which can hold a value nobody marked. That review is `no-store` and answers any
+human with the `author` role, not only the ingestion's creator.
 
 From it, for any operation, you can answer:
 
