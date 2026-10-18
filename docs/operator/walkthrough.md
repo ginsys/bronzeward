@@ -258,8 +258,9 @@ $T -e $TALOS_WORKER_IP -n $TALOS_WORKER_IP patch machineconfig --mode no-reboot 
 rm fixtures/.state/walk-patch
 ```
 
-Within a minute `GET /machines/$machine_w` shows `openDrift`: a drift record naming the observation,
-`Applied`'s digest and the drifted one. The opening entry is on the timeline.
+Within a minute `GET /machines/$machine_w` shows `openDrift`: the timeline revision that opened it,
+the observation that opened it, the latest observation recorded on it and a possible late landing.
+The opening entry is on the timeline.
 
 **2. Freeze the machine** while you decide. Any of `author`, `publisher`, `approver` or
 `recovery-admin` may freeze; only an `approver` unfreezes:
@@ -300,11 +301,19 @@ The plan binds the open drift record (`driftRecord`). The adoption commits even 
 it sends nothing. The record closes `adopted` and `applied.source` reads `adoption`.
 
 **3b. Or revert it.** After another out-of-band change opens a new record, plan an `apply-config` of
-the machine's `desired` release, exactly as in S3. Its approval answers `unseenOverwrite: true`: the
-approver is overwriting a state no release recorded. A frozen machine runs no apply-config, so the
-approver unfreezes it, and the revert then runs as S4 did and closes the record `reverted`:
+the machine's `desired` release with S3's body, under new idempotency keys: a key reused with a
+changed request is refused `422 idempotency-key-reused`. The approval answers
+`unseenOverwrite: true`: the approver is overwriting a state no release recorded. A frozen machine
+runs no apply-config, so the approver unfreezes it, and the revert then runs as S4 did and closes
+the record `reverted`:
 
 ```sh
+release=$(call GET /machines/$machine_w "$viewer" | jq -r .desired)
+plan=$(call POST /plans "$publisher" "$(jq -nc --arg r "$release" --arg m "$machine_w" \
+  '{releaseId: $r, machine: $m, operation: "apply-config", mode: "no-reboot", expiresInSeconds: 7200,
+    maxObservationAgeSeconds: 300, checkValiditySeconds: 600, transportDeadlineSeconds: 120,
+    verificationDeadlineSeconds: 300, maxAttempts: 2}')" walkthrough-plan-revert | jq -r .id)
+call POST /plans/$plan/approvals "$approver" '{}' walkthrough-approval-revert | jq .unseenOverwrite
 call POST /machines/$machine_w/unfreezes "$approver" '{"reason": "S5 revert"}' walkthrough-unfreeze
 ```
 
@@ -322,5 +331,5 @@ that step is unverified.
 ## Where next
 
 - Every route, body and refusal: [persistence and API](../spec/persistence-api.md).
-- What has been checked, and how: [acceptance plan](../spec/acceptance-plan.md).
+- What must be checked, and how: [acceptance plan](../spec/acceptance-plan.md).
 - Clean up: `fixtures/bin/down`.
