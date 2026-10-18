@@ -230,7 +230,7 @@ func (a *API) startObservation(ctx context.Context, tx *sql.Tx, machine string, 
 			return "", head, errReadNotDue
 		}
 	}
-	if f.plan != "" { // a plan is immutable: its route needs no lock
+	if f.plan != "" && !a.o.dispatchRoute { // a plan is immutable: its route needs no lock
 		if err := tx.QueryRowContext(ctx, `SELECT route FROM plan WHERE id = $1 AND machine = $2`, f.plan, machine).Scan(&o.Endpoint); err != nil {
 			return "", head, fmt.Errorf("observation of machine %s for plan %s: %w", machine, f.plan, err)
 		}
