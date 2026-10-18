@@ -122,6 +122,7 @@ type options struct {
 	readThenWrite  bool                                                                                 // the owner-token control at an attempt (§3.3 comparison 7, DS row 018)
 	noPlanCheck    bool                                                                                 // the in-transaction plan-check control at an attempt (§3.3 comparison 1, DS row 006)
 	latestAccess   bool                                                                                 // the control that sends with the Talos access read again at send (PA §16)
+	recordOrder    bool                                                                                 // the ordering control at settlement: an observation ordered by its recorded revision, not its basis (ER §4.1, DS §7)
 	dispatchRoute  bool                                                                                 // the route control: a plan's observation dials the machine's current endpoint, resolved at dispatch, not the plan's route (PA §3.3, §16)
 	staleAccess    *provider.TalosAccess                                                                // the stale-credential control: an observation uses this access instead of reading the latest (PA §16)
 	afterEffect    func()                                                                               // runs in the transaction, after the effect, act and record

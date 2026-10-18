@@ -31,6 +31,7 @@ type cobs struct {
 	unreached  bool          // access was obtained but no node value was read
 	node       string        // the Talos node ID the observation read, when it is not the machine's
 	uuid       string        // the SMBIOS UUID the observation read, when it is not the machine's
+	between    func()        // runs with the start committed and the observation not yet recorded: the read in flight
 }
 
 // observed records o's observation and answers its id.
@@ -103,6 +104,16 @@ func (ae *attemptEnv) observed(t *testing.T, change func(*cobs)) string {
 		FROM installation_state`, ae.machine, basis, s.purpose, startPlan, route, ae.a.d.owner.ID, began)
 	mustExec(t, tx, `INSERT INTO observation_start (machine, revision, purpose, plan, operation, endpoint, controller)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)`, ae.machine, basis, s.purpose, startPlan, startOperation, route, ae.a.d.owner.ID)
+	if s.between != nil {
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+		s.between()
+		if tx, err = ae.db.Begin(); err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback() }()
+	}
 	obs := id.New(id.Observation)
 	if err := tx.QueryRow(`UPDATE machine SET revision_counter = revision_counter + 1 WHERE id = $1 RETURNING revision_counter`,
 		ae.machine).Scan(&rev); err != nil {
@@ -797,6 +808,38 @@ func TestSettle(t *testing.T) {
 			if r.Outcome != "pending" || r.State != "verifying" {
 				t.Fatalf("settled %+v", r)
 			}
+		})
+		// ER §4.1, §9.2: an accounting commits while a completion read is in flight, after its start
+		// and before it is recorded. The read began before the accounting, so it is ordered before it
+		// and completes nothing. The control orders it by its recorded revision and completes.
+		t.Run("read in flight across a concurrent accounting", func(t *testing.T) {
+			t.Parallel()
+			for _, control := range []bool{false, true} {
+				ae := newAttemptEnv(t, "")
+				att := ae.sent(t)
+				obs := ae.observed(t, func(c *cobs) {
+					c.between = func() {
+						if _, err := ae.a.recordResponse(context.Background(), att.Attempt, answer(talos.ClassAccepted)); err != nil {
+							t.Fatal(err)
+						}
+					}
+				})
+				if n := count(t, ae.db, `SELECT count(*) FROM observation o, attempt_accounting c
+					WHERE o.id = $1 AND c.attempt = $2 AND o.basis < c.revision AND o.revision > c.revision`, obs, att.Attempt); n != 1 {
+					t.Fatal("the accounting did not commit between the read's start and its record")
+				}
+				r, err := ae.buildWith(ae.a.d, options{recordOrder: control}).settleOperation(context.Background(), ae.op, 1, obs)
+				if err != nil {
+					t.Fatal(err)
+				}
+				switch {
+				case !control && (r.Outcome != "pending" || r.State != "verifying"):
+					t.Fatalf("settled %+v", r)
+				case control && r.Outcome != "completed":
+					t.Fatalf("control: settled %+v; want completed", r)
+				}
+			}
+			t.Logf("read begun before a concurrent accounting: pending; control (ordered by record): completed")
 		})
 		// ER §4, §9.2: a recorded higher-basis read differing on a bound postcondition blocks the
 		// completion read, for the digest, the identity and the assignment revision (the PoC binds no
