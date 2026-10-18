@@ -1,0 +1,11 @@
+commit	be2e1b88ce20cc602b1ca2c033ca936230eacfc7
+uncommitted inputs	0
+only	^(control-none|held-controlplane-(20|45|90)|control-after)$
+started	2026-10-18T01:05:42Z
+talosctl	Client: Talos v1.13.6
+talos worker	Client: Talos v1.13.6 Server: 	NODE:        10.55.0.3 	Tag:         v1.13.6 	SHA:         04318854 	Built:        	Go version:  go1.26.5 	OS/Arch:     linux/amd64 	Enabled:     RBAC
+captures per cell	3
+transport deadline	15s
+window	60s
+socket samples	yes
+finished	2026-10-18T01:31:30Z

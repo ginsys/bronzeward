@@ -5,7 +5,7 @@
 | **Date** | 16 October 2026 |
 | **Work item** | [Recovery and failure behaviour](https://github.com/ginsys/bronzeward/issues/28) |
 | **Design reference** | [§12.5 Durable operations and uncertain outcomes](../Talos_Configuration_and_Machine_Management_Design.md#125-durable-operations-and-uncertain-outcomes); specification [execution-recovery §5.2](../../spec/execution-recovery.md#52-accounting-a-lost-response), [§9.3](../../spec/execution-recovery.md#93-gaps-carried-and-what-would-close-them) item 2, [§10](../../spec/execution-recovery.md#10-choices-for-owner-review) choices 9 and 11; [acceptance plan S6.2](../../spec/acceptance-plan.md#s62-late-landing-bound-measurement) |
-| **Artifacts** | [`experiments/e4-dispatch-safety/run/measure`](../../../experiments/e4-dispatch-safety/run/measure); evidence under [`evidence-latelanding/`](../../../experiments/e4-dispatch-safety/evidence-latelanding/) (the full run) and [`evidence-latelandingsockets/`](../../../experiments/e4-dispatch-safety/evidence-latelandingsockets/) (a subset with socket samples) |
+| **Artifacts** | [`experiments/e4-dispatch-safety/run/measure`](../../../experiments/e4-dispatch-safety/run/measure); evidence under [`evidence-latelanding/`](../../../experiments/e4-dispatch-safety/evidence-latelanding/) (the full run), [`evidence-latelandingsockets/`](../../../experiments/e4-dispatch-safety/evidence-latelandingsockets/) (a subset with socket samples) and [`evidence-latelandingheld/`](../../../experiments/e4-dispatch-safety/evidence-latelandingheld/) (pauses of the control plane with the request at its proxy) |
 | **Decision enabled** | Whether a bound on when an abandoned request can no longer land exists for the control plane's proxied route, which a contract amendment could adopt for accounting (ER §5.2). It re-admits no route and changes no contract. |
 
 ## 1. Question
@@ -105,13 +105,23 @@ the TCP connection between the control plane and the worker's API port (`/proc/n
 `tcp6`: state, send and receive queues, the timer, the retransmission count). `E4M_ONLY` selects
 cells; a subset is collected only into a directory of its own.
 
+The `held-controlplane` cells pause the control plane with the request already at its proxy. A
+pause after apid forwarded to a reachable worker would find nothing held, since the proxied apply
+completes in about 25 ms (§5.1). So each capture splits the worker off first, sends on the warm
+connection, and reads the control plane's `/proc/net/tcp` and `tcp6` until its connection to the
+worker's API port has a non-zero send queue: apid has forwarded the request into that connection.
+Only then does it pause the control plane. Each poll is in the transcript (`held check:`). The split
+is healed 20 s after the send, and the pause undone at the cell's length.
+
 ## 4. Reproduction
 
 As the [experiment README](../../../experiments/e4-dispatch-safety/README.md#the-late-landing-measurement)
 gives it: a fresh `fixtures/bin/up`, then `E4D_OUT=<new dir> run/measure`, the fixture's evidence
 bundle, `run/collect-evidence`, `fixtures/bin/down`. The socket subset is the same on a second
 fresh fixture, with `E4M_N=3 E4M_SOCKETS=1` and the `E4M_ONLY` expression the README gives, collected
-with `E4D_EVIDENCE=<checkout>/experiments/e4-dispatch-safety/evidence-latelandingsockets`. Each
+with `E4D_EVIDENCE=<checkout>/experiments/e4-dispatch-safety/evidence-latelandingsockets`. The held
+run is the same again, with the README's `held-controlplane` expression, collected into
+`evidence-latelandingheld`. Each
 `run.txt` records the commit, the `talosctl` versions, the capture count, the deadline, the window
 and any cell selection.
 
@@ -212,7 +222,7 @@ frozen apid cannot answer the TLS handshake, and grpc-go sends a call only on a 
 (`picker_wrapper.go:97-105`; ASSUMPTION for the kernel's part: the TCP handshake itself completes in the frozen
 container's listen queue). The request therefore never leaves `talosctl`, and when `talosctl` is
 killed there is nothing in flight. §2's prediction for this cell assumed a request already with
-apid; this measured a request that never reached it.
+apid; this measured a request that never reached it. §5.4 measures a request apid already holds.
 
 **The cold dial failed on address resolution.** The restarted control plane had no address for the
 worker; ASSUMPTION: Linux gives up resolving after about 3 s and the dial fails with
@@ -224,6 +234,38 @@ failed, killing `talosctl` cancels the forwarded call, not the proxy's cached co
 has its own lifetime (`clientconn.go:918` in grpc-go); the call cannot be sent before a connection
 exists, so nothing was sent for it. The control plane's apid logs the call as a success, because in its one-to-many mode
 an error from one node is carried inside the response.
+
+### 5.4 The held run
+
+Five cells of three captures each, 01:05-01:31 UTC on 18 October, on a third fresh fixture, with
+`E4M_SOCKETS=1`: the control first and last, and `held-controlplane` at 20, 45 and 90 s (§3).
+
+| Cell | Landed | When it landed |
+|---|---|---|
+| control, first and last | 6/6 | seen by the first read |
+| held, pause 20 s | 3/3 | 26-27 s after the send, 6-7 s after the split healed and the pause ended |
+| held, pause 45 s | 3/3 | 26-27 s after the send, about 7 s after the split healed, with the control plane still paused |
+| held, pause 90 s | 3/3 | 27-28 s after the send, as at 45 s |
+
+Every capture reached its synchronization point about 0.3 s after the send. The control plane's
+send queue then held 2989 bytes, with its retransmission timer running. In the 45 and 90 s
+captures, the samples show:
+
+- the queue stays at 2989 bytes through `talosctl`'s kill at 15 s, so the frozen apid added no
+  cancellation;
+- it empties at the seventh retransmission, about 27 s after the send;
+- the worker's answer then waits in the frozen control plane's receive queue (102 bytes) until
+  the unpause;
+- the connection survives on both ends.
+
+In the 20 s captures, the unpause came first: 35 bytes joined the queue at the unpause, as in
+§5.2. All three still landed.
+
+So a pause of the control plane does not hold back a request apid has already forwarded. The
+frozen container's kernel keeps retransmitting it. The landing follows the worker-side partition,
+as in a 20 s netsplit, not the pause. A pause that outlasts the delivery also keeps apid from
+queueing the cancellation: in the six 45 and 90 s captures the request reached the worker with
+nothing behind it to race.
 
 ## 6. What this decides
 
@@ -244,6 +286,11 @@ falls. This is it. What it supports:
   full run, 0 of 3 in the socket run), but the reason is a hypothesis about the order in which
   buffered frames are read, not a guarantee in the source. A pause of the control plane before the
   send kept the request in `talosctl` (0 of 15).
+- **A pause of the control plane after the forward bounds nothing.** With the request already
+  in the control plane's connection to the worker, all 9 captures landed 26-28 s after the send,
+  in pauses of 20, 45 and 90 s (§5.4). The kernel delivers what apid queued while apid is frozen,
+  and the frozen apid cannot queue the cancellation. The cut-off is the worker-side one above,
+  not the pause.
 - **A dial that fails sends nothing.** Over the worker's own endpoint the partition was in place
   before `talosctl` dialled, so no connection could open, and on the cold route four dials failed
   with `no route to host`; none of these nine landed. The tenth, the cold capture with no dial
@@ -278,8 +325,9 @@ pause case, which no default here bounds.
   in §5.3 predicts the change, but no capture tested where it falls. Faults shorter than the 15 s
   deadline were not measured; under the same schedule, a partition healed at 14 s would still wait
   for the retransmission at about 26 s, after `talosctl` was killed.
-- **Pauses of the control plane began before the send**, so they measured a request that never
-  left `talosctl`, not a pause with a request already at the proxy.
+- **The held cells heal the worker's split at 20 s in every cell**; only the pause varies. A
+  longer split under a paused control plane was not measured; §5.3's worker-side abort predicts
+  the same outcome as a 45 s netsplit.
 - **Every warm capture sent on a connection the harness had just used.** A connection idle for
   longer before the send reaches the worker's abort sooner (§5.3); none was measured.
 - **The full run predates the closing control.** Its last cells (cold, direct) are not followed
@@ -287,4 +335,5 @@ pause case, which no default here bounds.
 - **`run.txt` names the branch commit the run was made from**, which a rebase merge does not keep.
   After both runs, `run/measure` was corrected on paths neither run reached: an undo armed before
   each fault rather than after it, and a failed last read now recorded as `unknown`. In both runs
-  every capture's `landed` agrees with its version change and no read failed.
+  every capture's `landed` agrees with its version change and no read failed. The held run (§5.4)
+  was made after those corrections.

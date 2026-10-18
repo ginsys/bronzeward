@@ -92,6 +92,9 @@ are:
   45 and 90 s, sent through the control plane on a warm proxy connection;
 - a cold proxy connection: the control plane is restarted first, and nothing reaches the worker
   through it before the send;
+- a pause of the control plane with the request already forwarded into its connection to a split
+  worker, for 20, 45 and 90 s (`held-controlplane`; added after the full run, measured as the
+  subset below);
 - the worker's own endpoint, partitioned before the dial (the dial-failure test);
 - the control again, last, so that no landing in between is not a path the faults broke.
 
@@ -123,6 +126,18 @@ E4D_OUT=<a new directory> E4M_N=3 E4M_SOCKETS=1 \
   E4M_ONLY='^(control-none|netsplit-worker-(20|45)|pause-worker-20|control-after)$' \
   experiments/e4-dispatch-safety/run/measure
 E4D_OUT=<the same directory> E4D_EVIDENCE=$PWD/experiments/e4-dispatch-safety/evidence-latelandingsockets \
+  experiments/e4-dispatch-safety/run/collect-evidence
+```
+
+The `held-controlplane` cells pause the control plane only once the request is in its connection
+to the worker (the measure script's header gives the synchronization point). Their evidence is
+[`evidence-latelandingheld/`](evidence-latelandingheld/), made the same way with:
+
+```sh
+E4D_OUT=<a new directory> E4M_N=3 E4M_SOCKETS=1 \
+  E4M_ONLY='^(control-none|held-controlplane-(20|45|90)|control-after)$' \
+  experiments/e4-dispatch-safety/run/measure
+E4D_OUT=<the same directory> E4D_EVIDENCE=$PWD/experiments/e4-dispatch-safety/evidence-latelandingheld \
   experiments/e4-dispatch-safety/run/collect-evidence
 ```
 
