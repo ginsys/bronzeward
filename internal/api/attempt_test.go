@@ -395,6 +395,47 @@ func TestAttemptEpochs(t *testing.T) {
 	ae.wantAttemptRefused(t, err, "1", "the approval is of an earlier epoch", "", "committed")
 }
 
+// The attempt's epoch term against DB row 027's collision, isolated as AP S7's negative controls
+// require: a restore rewound A's operation and takeovers after entry reissued A's owner and
+// generation under the new epoch, so A's pre-restore token (A, gen 3, the old epoch) differs from
+// the row only by its epoch. The plan is approved in the current epoch, so that comparison 1 does
+// not refuse first, and A's process carries an earlier recorded epoch. With the process-epoch
+// comparison dropped, the epoch term alone refuses A's attempt; with both dropped, the attempt is
+// recorded, which is row 027. The restore is staged in SQL here; AP S7's closing run shows A's
+// executor stopping at its first superseded epoch.
+func TestAttemptEpochTermRow027(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name                        string
+		noEpochTerm, noProcessEpoch bool
+		lands                       bool
+	}{
+		{"as shipped", false, false, false},
+		{"without the epoch term", true, false, false},
+		{"without the process-epoch comparison", false, true, false},
+		{"without both", true, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ae := newAttemptEnv(t, "")
+			stale := observer(t, ae.env, &fakeExecutor{}, options{noEpochTerm: tc.noEpochTerm, noProcessEpoch: tc.noProcessEpoch})
+			earlier := id.New(id.Epoch)
+			mustExec(t, ae.db, `INSERT INTO recovery_epoch (epoch, entered_at) VALUES ($1, now() - interval '1 day')`, earlier)
+			stale.d.owner.Epoch = earlier
+			mustExec(t, ae.db, `UPDATE operation SET owner = $2, owner_gen = 3 WHERE id = $1`, ae.op, stale.d.owner.ID)
+			_, err := stale.recordAttempt(context.Background(), ae.op, 3)
+			state, _, _ := ae.state(t)
+			n := count(t, ae.db, `SELECT count(*) FROM attempt WHERE operation = $1`, ae.op)
+			switch {
+			case tc.lands && (err != nil || state != "sending" || n != 1):
+				t.Fatalf("A's attempt was not recorded: %v, state %s, %d attempts", err, state, n)
+			case !tc.lands && (err == nil || state != "committed" || n != 0):
+				t.Fatalf("A's attempt was not refused: %v, state %s, %d attempts", err, state, n)
+			}
+		})
+	}
+}
+
 // Each record comparisons 1, 2 and 6 read is held until the attempt commits (§3.3, PA §5 rule 5):
 // a transaction that would change it, standing in for a cancellation, an approval or identity
 // revocation, a freeze, a recovery-mode entry or an assignment change, waits for the attempt, and

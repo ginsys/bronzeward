@@ -712,7 +712,7 @@ s7() {
     # The controls that drop a comparison need a server built without it: Go checks.
     ref='S7 negative controls'
     result SKIP "$ref" "a plan approved in the new epoch on the ready, unreleased worker scope waits for the release, and commits with the scope gate dropped (comparison 6): B-recovery runs no executor to show the wait; the Go check TestCommitmentScopeGateControl (refused_until_the_release, without_the_scope_gate, the_dispatch_filter_waits_for_the_release; internal/api)"
-    result SKIP "$ref" "DB row 027's collision in the new epoch, A's write refused with the epoch term and passing with it dropped: the Go check TestFenceEpochTermRow027 (internal/staging)"
+    result SKIP "$ref" "DB row 027's collision in the new epoch, A's write refused with the epoch term and passing with it dropped: the Go checks TestFenceEpochTermRow027 (internal/staging, the claim heartbeat) and TestAttemptEpochTermRow027 (internal/api, the attempt, with and without the process-epoch comparison)"
     result SKIP "$ref" "the process-epoch comparison dropped, A's job claim, takeover, ingestion start and commitment pass: the Go check TestProcessEpochControl (internal/api; without_the_process-epoch_comparison: job-claim, takeover, ingestion-start, commitment)"
   fi
 
