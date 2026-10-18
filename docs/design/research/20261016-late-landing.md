@@ -262,7 +262,10 @@ retransmission timer running. In the 45 and 90 s captures, the samples show:
 35 bytes joined the send queue at the unpause, as in §5.2 (ASSUMPTION, as there: the
 cancellation). In the 20 s captures the unpause came before the delivery, so the cancellation was
 queued behind the request, and all three still landed. In `90-03` the 35 bytes show at the unpause,
-after the landing.
+after the landing. A later single 20 s capture, on the harness §7 describes and not collected, did
+not land: the 35 bytes joined at the unpause, before the delivery, and the queue emptied about 27 s
+after the send, on a connection that survived. That is the race §5.2 gives for the 20 s netsplit
+that did not land, so the 20 s held cell stands at 3 of 4.
 
 So a pause of the control plane does not hold back a request apid has already forwarded. The
 frozen container's kernel keeps retransmitting it. The landing follows the worker-side partition,
@@ -340,6 +343,9 @@ pause case, which no default here bounds.
   each fault rather than after it, and a failed last read now recorded as `unknown`. In both runs
   every capture's `landed` agrees with its version change and no read failed. The held run (§5.4)
   was made after those corrections. After it, `run/measure` pins the connection it waits on before
-  the send, bounds that wait by the transport deadline, and ends its background jobs when it
-  stops early. In the held run every synchronization came 0.3 s after the send, on the one
-  established connection to the worker, and no capture stopped early.
+  the send and requires its send queue empty there, then waits for at least the size of the
+  configuration sent; it bounds that wait by the transport deadline, refuses a pause that completed
+  after it, and ends its background jobs, the socket samplers' containers included, when it stops
+  early. In the held run every synchronization came 0.3 s after the send, on the one established
+  connection to the worker, with more queued than the configuration's size, and no capture stopped
+  early.
