@@ -63,7 +63,7 @@ func transition(old status, r classify.Result, at time.Time, t Timings) (status,
 		}
 		// At Persistent since unknown_since, then each Persistent since the last such alert.
 		from := s.persistentAt
-		if from.IsZero() {
+		if from.IsZero() || t.noLastAlert {
 			from = s.unknownSince
 		}
 		if !at.Before(from.Add(t.Persistent)) {

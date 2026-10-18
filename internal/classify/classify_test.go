@@ -297,6 +297,25 @@ func TestClassify(t *testing.T) {
 			}
 		})
 	}
+	// DM §10.1 item 1's control: comparing the deletion time with the monitor's clock, here two
+	// seconds ahead of the provider's, instead of Date misclassifies the same-second row.
+	found := false
+	for _, c := range cases {
+		if c.name != "kv deletion in Date's second" {
+			continue
+		}
+		found = true
+		a := c.answer(t)
+		a.Date = date.Add(2 * time.Second).Format(http.TimeFormat)
+		if got := Classify(c.dep, a); got.Class == c.class && got.Reason == c.reason {
+			t.Fatalf("control: the monitor's clock still classifies the same-second row %s/%q", got.Class, got.Reason)
+		} else {
+			t.Logf("same-second row: %s/%q by Date; control (monitor's clock): %s/%q", c.class, c.reason, got.Class, got.Reason)
+		}
+	}
+	if !found {
+		t.Fatal("no same-second row")
+	}
 }
 
 // A dependency recorded without a creation time (publication's own first classification,
