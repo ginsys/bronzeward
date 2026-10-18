@@ -18,6 +18,9 @@ type Timings struct {
 	// LockHolder is the statement and idle-in-transaction timeout of every transaction that locks
 	// the DependencyMonitor row (§6.3).
 	LockHolder time.Duration
+	// noLastAlert is §10.1 item 4's control, false in production: persistent is measured from
+	// unknown_since alone, without the last-alert check.
+	noLastAlert bool
 }
 
 // Defaults are the PoC values.

@@ -113,3 +113,34 @@ func TestNext(t *testing.T) {
 		t.Fatalf("wait %v", d)
 	}
 }
+
+// Dependency monitor §10.1 item 4: an unknown dependency alerts persistent at 15 minutes and every
+// 15 minutes after, never in between, with the class unknown throughout. Control: without the
+// last-alert check, persistent repeats on every pass after the first.
+func TestPersistentEveryInterval(t *testing.T) {
+	passes := []time.Duration{0, 14 * time.Minute, 15 * time.Minute, 16 * time.Minute, 29 * time.Minute, 30 * time.Minute, 31 * time.Minute}
+	for _, control := range []bool{false, true} {
+		tm := Defaults()
+		tm.noLastAlert = control
+		s := status{class: classify.Retained, firstRetained: t0.Add(-time.Hour)}
+		var alerted []time.Duration
+		for _, d := range passes {
+			var kinds []kind
+			s, kinds = transition(s, result(classify.Unknown, classify.Absent), t0.Add(d), tm)
+			if s.class != classify.Unknown {
+				t.Fatalf("class %s at %v", s.class, d)
+			}
+			if slices.Contains(kinds, kindPersistent) {
+				alerted = append(alerted, d)
+			}
+		}
+		want := []time.Duration{15 * time.Minute, 30 * time.Minute}
+		if control {
+			want = []time.Duration{15 * time.Minute, 16 * time.Minute, 29 * time.Minute, 30 * time.Minute, 31 * time.Minute}
+		}
+		if !slices.Equal(alerted, want) {
+			t.Fatalf("control %v: persistent at %v, want %v", control, alerted, want)
+		}
+		t.Logf("control %v: persistent at %v", control, alerted)
+	}
+}
