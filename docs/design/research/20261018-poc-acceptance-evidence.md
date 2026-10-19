@@ -201,21 +201,31 @@ synthetic secrets with their scans. The commands of §4 regenerate them.
 
 ## 4. Reproduction
 
-From `fixtures/` in a clean checkout at fcecfca (§2), with `mise run dev-db` and
+From `fixtures/` in a clean checkout at each revision below (§2), with `mise run dev-db` and
 `mise run dev-bao` up for the Go rows (S0's, S1's, S2's, S4's dispatch-safety rows and S8's), and
 `<rec>` a record directory outside `fixtures/` (`bin/down` removes the fixture's state). `s6` runs
-before `run`, whose S8 step reads the S6.1 timeline it kept.
+before `run`, whose S8 step reads the S6.1 timeline it kept. Finish each chain, including `down`,
+before changing checkout. The commands reproduce the historical runs at their own revisions;
+running them at a later revision produces new evidence.
+
+At `ab327884527fee3b3ed32f0e2dfc8ffde5bf0ce3`:
 
 ```
 scenarios/integrated <rec> s6
-S8_S6_KEPT=<rec>/s6-<UTC start>/evidence/s6-run-<UTC> scenarios/integrated <rec> run
-scenarios/integrated <rec> controls
 scenarios/integrated <rec> up s1nid down
 scenarios/integrated <rec> up s1 s3hc down
 scenarios/integrated <rec> up s1 s3h s2 s3r s4 s7c down
 scenarios/integrated <rec> up s1 s3h s2 s3r s4 s7 s7n s7t s7o down
 scenarios/integrated <rec> up s0walk down
 scenarios/integrated <rec> up s1 s8controls s8revocation down
+```
+
+At `fcecfcaf2a6f` (the `run` and `controls` checkout in §3.3), using the retained S6.1 timeline
+from the preceding revision:
+
+```
+S8_S6_KEPT=<rec>/s6-<UTC start>/evidence/s6-run-<UTC> scenarios/integrated <rec> run
+scenarios/integrated <rec> controls
 ```
 
 Records written:
