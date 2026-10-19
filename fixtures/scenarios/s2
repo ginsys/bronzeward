@@ -961,9 +961,9 @@ s6_pinned_served() {
     answers_with "(.items | last | .kind == \"$3\" and .reason == \"$2\" and (.releases | index(\"$s2_release\") != null))" \
       200 - GET "/api/v1/dependencies/$dep_p/alerts?limit=500" "$author"
 }
-# s6_refused <key name> <status> <problem code> <jq filter on the dependency>: a new draft, changing
-# nothing, published as h-publisher: 202, then the operation failed with that problem, naming a
-# dependency the filter accepts, and nothing released.
+# s6_refused <key name> <status> <problem code> <jq filter on the problem>: a new draft, changing
+# nothing, published as h-publisher: 202, then the operation failed with that problem and nothing
+# released. A provider outage can refuse the required node read before pinned dependencies.
 s6_refused() {
   fresh_author
   fresh_publisher
@@ -972,7 +972,7 @@ s6_refused() {
   pub_op=$(jq -er '.id' "$EV/last.body") || return 1
   within 150 pub_is failed 1 queued,claimed,failed || return 1
   unreleased || return 1
-  answers_with ".state == \"failed\" and .error.status == $2 and .error.type == \"urn:bronzeward:problem:$3\" and (.error.dependency | $4)" \
+  answers_with ".state == \"failed\" and .error.status == $2 and .error.type == \"urn:bronzeward:problem:$3\" and (.error | $4)" \
     200 - GET "/api/v1/operations/$pub_op" "$author"
 }
 # s6_outage <split> <join> <reason> <key name>: OpenBao made unreachable by inject <split> openbao,
@@ -987,8 +987,21 @@ s6_outage() {
   # stale, by the spec's own rule; s6_served compares stale with the recorded observed-from.
   check "$ref" "$1: GET /dependencies serves every one unknown, each stale exactly when its observation is over three intervals old, each as the database records it" \
     s6_served '[.items[] | select(.class != "unknown")] == []'
-  check "$ref" "$1: a publication pinning the version refused 503 dependency-unavailable naming a dependency unknown ($3 where a reason is given), nothing released" \
-    s6_refused "$4" 503 dependency-unavailable "(.provider == \"kv\" or .provider == \"transit\") and .class == \"unknown\" and (.reason == null or .reason == \"$3\")"
+  check "$ref" "$1: publication refused 503 by its required node-access read before pinned dependencies, nothing released" \
+    s6_refused "$4" 503 dependency-unavailable '.rule == "publication-evidence" and .cause == "unreadable-identity-or-version" and (.machine | type == "string") and (.observation | type == "string") and .dependency == null'
+  check "$ref" "$1: publication retains one provider-unavailable observation with no access version or node values" \
+    test "$(sql "SELECT count(*) FROM observation o
+      JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
+      JOIN machine m ON m.id = o.machine JOIN operation op ON op.id = s.operation
+      WHERE s.operation = '$pub_op' AND s.purpose = 'publication'
+        AND s.publication_generation = op.owner_gen AND m.cluster = '$cluster'
+        AND o.id = op.error->>'observation' AND o.machine = op.error->>'machine'
+        AND o.access_path IS NULL AND o.access_version IS NULL AND o.access_created IS NULL
+        AND o.smbios_uuid IS NULL AND o.talos_node_id IS NULL AND o.talos_cluster_id IS NULL
+        AND o.running_version IS NULL AND o.configuration_digest IS NULL
+        AND o.assignment_evidence IS NULL AND o.resource_version IS NULL AND o.health IS NULL
+        AND o.unread->'identity'->>'cause' = 'provider-unavailable'
+        AND o.unread->'runningVersion'->>'cause' = 'provider-unavailable'")" = 1
   check "$ref" "inject $2 openbao" s6_inject "$2" openbao
   check "$ref" "$2: the version lost again, every other dependency retained" within 300 s6_classes lost destroyed retained -
   check "$ref" "$2: one lost alert for the version on its new entry into lost, and no other" s6_alerted "lost:$dep_p:destroyed"
@@ -1108,7 +1121,7 @@ s2_step6_controls() {
     s6_pinned_served blocked soft-deleted blocked
   check "$ref" 'soft-deleted: a publication pinning the version refused 422, naming it blocked, nothing released' \
     s6_refused step6-blocked 422 validation-failed \
-    ".provider == \"kv\" and .object == \"$dep_obj\" and .version == $dep_ver and .reference == \"$ref_name\" and .class == \"blocked\""
+    ".dependency | (.provider == \"kv\" and .object == \"$dep_obj\" and .version == $dep_ver and .reference == \"$ref_name\" and .class == \"blocked\")"
   check "$ref" 'inject bao-destroy of the version' s6_inject bao-destroy "$dep_obj" "$dep_ver"
   check "$ref" 'destroyed: the version lost (destroyed), every other dependency retained' \
     within 180 s6_classes lost destroyed retained -
@@ -1117,7 +1130,7 @@ s2_step6_controls() {
     s6_pinned_served lost destroyed lost
   check "$ref" 'destroyed: a publication pinning the version refused 422, naming it lost, nothing released' \
     s6_refused step6-lost 422 validation-failed \
-    ".provider == \"kv\" and .object == \"$dep_obj\" and .version == $dep_ver and .reference == \"$ref_name\" and .class == \"lost\""
+    ".dependency | (.provider == \"kv\" and .object == \"$dep_obj\" and .version == $dep_ver and .reference == \"$ref_name\" and .class == \"lost\")"
   # Partitioned, sealed, paused: no connection, a 503, no answer within the request timeout.
   s6_outage netsplit netjoin unreachable step6-netsplit
   s6_outage seal unseal unavailable step6-seal
