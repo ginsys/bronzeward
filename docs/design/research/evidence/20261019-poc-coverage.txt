@@ -106,3 +106,79 @@ Follow-up log screen: same four named canaries and private-key regex above, thre
 b916c810e42b262202f694d3c7ea48590723827e80996e34aa11ecbb287a8032  bw241-synchronous-db.log
 53b85b67e147a659bfcfa286fedf1cef0899347ccd281ebe2cabee5ca05abf35  bw241-synchronous-db-control.log
 fb270eb50ed89f75e2b90adbbfd094af785681ca93f813c1af7172425d9ded96  bw241-minor-reproduction.log
+
+Expanded coverage after #247 landing (separate run)
+Revision: 1cc6ddc4960615e42db646e21e8428960d95606f
+Combined focused/full execution: 2026-10-19T19:17:12Z to 2026-10-19T19:26:18Z; 546 seconds
+go version go1.27.1 linux/amd64
+postgres (PostgreSQL) 17.11
+OpenBao v2.6.1 (ba7ad8861d0578cd4da4f7b9e5a6756d30484f8f), committed 2026-07-22T14:22:20Z
+Clean checkout unchanged throughout. No live Talos target configured.
+Base: b3a479c0c0a4170d95d33e71b0ce799cd51a5eb7 (PR248 merged, tree equal to assessed candidate).
+TMPDIR=GOTMPDIR=/home/serge/src/ginsys/_scratch/bronzeward/gotmp
+Focused environment: BW_REQUIRE_PG=1; BW_TEST_PG_DSN=postgres://bronzeward@127.0.0.1:55433/bronzeward?sslmode=disable
+Focused command: mise exec -- go test -count=1 -v -timeout 15m -run '^(TestObservationPurposeAccessFailure|TestObservationRecordsTheAccessItRead|TestObserveDrift|TestObserveAccessReadFails|TestObserveNodeReadFails|TestObserveErrorTextControl|TestExecutorRevokedControl|TestExecutorRevocationHeld|TestMachineryCallsAllowlisted|TestFragmentPutRefusesOtherClusterReference|TestNewKeyAfterDigestKeyLoss|TestCompileRefusesAnUntraceableFragment|TestFragmentPutDatabaseFailure|TestDraftDiscard|TestPublicationRunningMinor|TestPublicationMixedCoverage|TestPublicationWorkerRefusal|TestPublicationIdentityAndAccess|TestPublicationEvidenceAtCommit|TestPublicationEndpointRace|TestPublicationReadFenced|TestPublicationLeaseAfterLockWait)$' ./internal/api ./internal/compile ./internal/talos
+Focused: exit 0, 22 top-level tests, 100 PASS records, 0 FAIL, 0 SKIP.
+Six purposes: 30 named failed-access combinations; 12 latest/stale loop assertions, not 12 named subtests.
+Publication uses its actual running owner, operation and generation; records path/version/creation identity.
+Stale-access control distinguishes version 1 from the normal publication version 52; it does not assert publication success or refusal.
+PASS TestDraftDiscard
+PASS TestFragmentPutDatabaseFailure
+PASS TestNewKeyAfterDigestKeyLoss
+PASS TestObservationPurposeAccessFailure
+PASS TestPublicationRunningMinor
+PASS TestPublicationIdentityAndAccess
+PASS TestPublicationEvidenceAtCommit
+PASS TestPublicationReadFenced
+PASS TestPublicationMixedCoverage
+PASS TestPublicationWorkerRefusal
+PASS TestPublicationEndpointRace
+PASS TestPublicationLeaseAfterLockWait
+PASS TestFragmentPutRefusesOtherClusterReference
+PASS TestObserveAccessReadFails
+PASS TestObserveNodeReadFails
+PASS TestExecutorRevokedControl
+PASS TestObserveErrorTextControl
+PASS TestExecutorRevocationHeld
+PASS TestObserveDrift
+PASS TestObservationRecordsTheAccessItRead
+PASS TestCompileRefusesAnUntraceableFragment
+PASS TestMachineryCallsAllowlisted
+
+Full command: GOFLAGS=-v mise run go-db
+Full: exit 0; 21 tested packages, 2 without tests; 1026 top-level PASS, 2135 total PASS records; 6 explicit SKIP.
+ok github.com/ginsys/bronzeward/cmd/bronzeward	56.425s
+ok github.com/ginsys/bronzeward/fixtures/oidc	0.003s
+ok github.com/ginsys/bronzeward/fixtures/oidc/issuer	0.011s
+ok github.com/ginsys/bronzeward/internal/api	494.379s
+ok github.com/ginsys/bronzeward/internal/auth	102.830s
+ok github.com/ginsys/bronzeward/internal/baotest	0.002s
+ok github.com/ginsys/bronzeward/internal/classify	0.006s
+ok github.com/ginsys/bronzeward/internal/compile	34.018s
+ok github.com/ginsys/bronzeward/internal/config	0.008s
+ok github.com/ginsys/bronzeward/internal/database	0.003s
+ok github.com/ginsys/bronzeward/internal/dbtest	2.561s
+ok github.com/ginsys/bronzeward/internal/id	0.028s
+ok github.com/ginsys/bronzeward/internal/ingest	2.560s
+ok github.com/ginsys/bronzeward/internal/migrate	116.021s
+ok github.com/ginsys/bronzeward/internal/monitor	106.294s
+ok github.com/ginsys/bronzeward/internal/orphans	23.589s
+ok github.com/ginsys/bronzeward/internal/provider	0.719s
+ok github.com/ginsys/bronzeward/internal/server	0.328s
+ok github.com/ginsys/bronzeward/internal/staging	94.504s
+ok github.com/ginsys/bronzeward/internal/talos	1.940s
+ok github.com/ginsys/bronzeward/internal/textdiff	0.035s
+no tests github.com/ginsys/bronzeward/internal/seam	[no test files]
+no tests github.com/ginsys/bronzeward/internal/talos/talostest	[no test files]
+SKIP TestMachineryGate
+SKIP TestSensitivityGate
+SKIP TestLiveRead
+SKIP TestLiveApply
+SKIP TestLiveUnreachable
+SKIP TestLiveRoleProbe
+Skip reasons are retained in the raw verbose log. Machinery/sensitivity require the dedicated C10 runner; live Talos checks require an explicitly configured target. These are no new live Talos results.
+
+Log screen: four exact synthetic canaries plus private-key headers, both complete logs; zero hits.
+Positive screen control: all five patterns detected. Limit: stdout/stderr only, not database/WAL, memory, unknown encodings or live surfaces.
+SHA256 388b54f66b3a917ae6e56a5ce49830a77759bcf568786ee352095006d149e1ed  bw241-expanded-focused.log
+SHA256 42e915f448626f4ef3d0b318fcf3adddd3070c94e8eda38f7e7c4e90ea3dcb6e  bw241-expanded-go-db.log

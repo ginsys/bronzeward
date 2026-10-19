@@ -123,9 +123,35 @@ and the other compiler tests below. Neither refusal path creates a release.
 Known identity/minor mismatches refuse 422; missing or unreadable identity,
 version or access refuses 503. Different/malformed node versions are stand-ins;
 the live profile remains Talos 1.13.6. The original 25-case access matrix and six
-environment skips above remain five-purpose evidence. No six-purpose #241
-matrix result is asserted by this mapping update. #241's
-closeout assessment remains separate from #31's human acceptance.
+environment skips above remain five-purpose evidence. The fresh six-purpose
+run below supplies the added publication checks. #241's closeout assessment
+remains separate from #31's human acceptance.
+
+### Fresh coverage after the landed repair
+
+At `1cc6ddc4960615e42db646e21e8428960d95606f`, the focused command passed all 22 top-level tests
+(100 PASS records, no failures or skips), including all 30 named failed-access
+combinations across the six purposes. The access-version test additionally
+asserts all 12 latest/stale combinations in its loop; these are not 12 named
+subtests. Publication records the running operation, generation and owner,
+including absent access/node values and safe causes after failed reads. The
+stale control distinguishes access version 1 from the normal publication
+version 52; it does not assert publication success or refusal.
+
+The full `GOFLAGS=-v mise run go-db` passed all 21 tested packages; two have
+no tests. Its complete verbose log records 1026 top-level passes,
+2135 PASS records and 6 explicit skips: `TestMachineryGate`, `TestSensitivityGate`, `TestLiveRead`, `TestLiveApply`, `TestLiveUnreachable`, `TestLiveRoleProbe`.
+The combined run lasted 546 seconds (2026-10-19T19:17:12Z to 2026-10-19T19:26:18Z), with a
+clean unchanged checkout. The sanitized results retain both exact commands,
+versions, names, skip inventory and log hashes. Both complete logs passed the
+four-canary/private-key-header screen; its positive control detected all five
+patterns. This remains a stdout/stderr screen with the limits stated above.
+
+This run repeats the R5/R45 checks and the inherited publication repair on the
+combined tree. Earlier failed probes, guard-removal controls and live scenarios
+retain their original revisions. No live fixture rerun or human S8 review is
+claimed. The retained clause mappings and these checks supply R5/R45 evidence;
+publication, hosted review and issue acceptance still govern #241's closure.
 
 ## R5: compilation §13
 
@@ -224,7 +250,7 @@ assertions do not turn all failures into “nothing persisted.”
 | --- | --- |
 | Observation client read allowlist | `talos.TestMachineryCallsAllowlisted` checks the actual reader/applier call sets, including typed calls. Injected reader `ApplyConfiguration` and COSI `Destroy` calls must be detected. Exported-surface/import/caller guards constrain alternate call paths. |
 | Plan-less drift observation | `api.TestObserveDrift` records drift-purpose observation with null plan/operation, the access path/version, identity/configuration evidence and no node metadata leak. It does not create mutation authority. |
-| Access version and failed read | At `c9398d4`, `TestObservationRecordsTheAccessItRead` checks the original five purposes and distinguishes the stale-credential control; `TestObservationPurposeAccessFailure` crosses those purposes with absent, denied, malformed, unavailable and unclassified-status errors (25 cases): recorded purpose/plan/operation and cause, no access or node values, no dial, no provider error text in records/timeline/logs. #247 adds publication as a sixth purpose; its dedicated failure tests and full S2 evidence do not establish the unrun six-purpose #241 matrix or its publication stale-version control. `TestObserveAccessReadFails` independently uses a stand-in node for drift failures. `TestObserveNodeReadFails` covers malformed/refused credentials, a silent endpoint and individual read failures; `TestObserveErrorTextControl` detects the deliberate client-error-text leak. These node-side checks use drift observations, while R44 retains dispatch-specific refusals. |
+| Access version and failed read | At `c9398d4`, `TestObservationRecordsTheAccessItRead` checks the original five purposes and distinguishes the stale-credential control; `TestObservationPurposeAccessFailure` crosses those purposes with absent, denied, malformed, unavailable and unclassified-status errors (25 cases): recorded purpose/plan/operation and cause, no access or node values, no dial, no provider error text in records/timeline/logs. The fresh run at `1cc6ddc` covers all six purposes with 30 named failure combinations and 12 latest/stale loop assertions, including publication's running owner, operation and generation. The latest/stale control records the access actually read; it does not assert publication success or refusal. `TestObserveAccessReadFails` independently uses a stand-in node for drift failures. `TestObserveNodeReadFails` covers malformed/refused credentials, a silent endpoint and individual read failures; `TestObserveErrorTextControl` detects the deliberate client-error-text leak. These node-side checks use drift observations, while R44 retains dispatch-specific refusals. |
 | Mutating client refused after revocation | `TestExecutorRevokedControl`: revoke after commitment and before attempt; shipped path records zero attempts/sends, enters unresolved/cancelled as specified. Skipping comparison 1 admits the control's exact no-reboot artifact send to its Talos stand-in (ER choice §10.32). `TestExecutorRevocationHeld` checks the lock wait. |
 
 ## Acceptance-boundary audit
@@ -235,7 +261,7 @@ supplement the retained integrated runs.
 
 | Indexed required-check list | Acceptance-record rows | Audit outcome |
 | --- | --- | --- |
-| C §15 | R1–R5 and R50 | Interruption/scans, claims, review, SR/SP and fidelity remain bound to their recorded tests and fixture runs. R5's clauses are mapped here; #244 is repaired, and #247 now supplies separately revision-bound publication-minor repair evidence landed through PR248; #241 closeout remains pending its fresh checks and review. |
+| C §15 | R1–R5 and R50 | Interruption/scans, claims, review, SR/SP and fidelity remain bound to their recorded tests and fixture runs. R5's clauses are mapped here; #244 is repaired, and #247 now supplies separately revision-bound publication-minor repair evidence landed through PR248; the fresh combined-tree checks above complete the executable mapping; #241 closure still requires publication, review and acceptance. |
 | ER §9.2 | R6–R20 | Existing execution, accounting, identity, drift and restoration evidence remains in the record. R11 and R17 retain the future bound-health cases in #188; the late-read and late-landing residuals remain limits. |
 | PA §16 | R5, R15, R21–R28 and R35–R50 | Refusal traceability is expanded here; R42's platform checks and R45's observation boundary receive explicit mappings. All other rows retain their named tests, controls and scenario references. |
 | DM §10.1 | R29–R34 | All 15 items map to these rows: live provider states/publication/restore variants remain distinct from synthetic classifications, identity changes, ordering, watchdog and log controls. No additional provider topology is claimed. |
@@ -281,7 +307,10 @@ maintenance/reset and transport work is separately tracked without implementatio
 Use the repository's disposable development PostgreSQL/OpenBao setup and run
 `mise run go-db`. Set `TMPDIR` and `GOTMPDIR` to suitable disposable storage.
 For the focused run, use the environment, four package paths and anchored union
-of the 23 test names in the sanitized result file. Do not set `GOFLAGS=-json`:
+of the 23 test names in the historical section of the sanitized result file.
+The later `1cc6ddc` section separately retains the exact 22-name command over
+API, compiler and Talos packages, followed by `GOFLAGS=-v mise run go-db`;
+use those commands for the six-purpose extension and verbose skip inventory. Do not set `GOFLAGS=-json`:
 the method inventory's nested `go list -m -f` cannot combine those options.
 
 For either authoring control, make a temporary copy of
