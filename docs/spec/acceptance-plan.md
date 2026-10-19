@@ -391,7 +391,7 @@ has no plan but the handover's completed `adopt` plan.
    stay out of the integrated run, where the controller could commit them before S4: the approval
    part takes snapshots after step 3 (`s3-step3`) and ends restored to them, leaving step 3's
    plan `approved` as S4's precondition and none of the controls' or step 4's plans or releases.
-   Every plan of the approval part stays `approved` or ends before commitment, and uncommitted:
+   No plan of the approval part commits; after approval it stays `approved` or ends before commitment:
    the controller dispatches an approved plan, so the approval part first cuts each instance's
    link to the worker (`bin/inject linksplit A|B|C worker`, §2). Step 4 verifies that its restore
    removed every apply-config plan, then joins the links while preparing its releases and plans:

@@ -570,3 +570,30 @@ rows take the path the claim's state allows, so their count can differ between r
   bootstrap, upgrades, remote transports and managed-cluster etcd recovery
   ([AP §8](../../spec/acceptance-plan.md#8-not-covered-by-the-poc)).
 - No result here is a production-readiness claim.
+
+## 11. Publication node evidence supplement (2026-10-19)
+
+ginsys/bronzeward#247 adds fresh read-only executor observations before
+publication, including first adoption, and retains each machine's evidence
+link. The [repair report](20261019-publication-node-evidence.md) records the
+full database/provider gate at `e04d627`, the matching and refusal stand-ins,
+four guard-removal controls at `aede267`, full S2 with 373 passing checks at
+that same revision before its chain stopped at S3, and the fresh live chain
+at `44e8cf8`:
+`up s1p s3h s2p s3r s4c s4x s4 s5p s7 s7n s7t s7o down`.
+Every step passed; all 48 bundles passed the revision, empty-diff,
+capture and positive-control-only scan audit; teardown completed. Pass-mode
+skips and all three failed attempts remain explicit in the
+[sanitized evidence](evidence/20261019-publication-node-evidence.txt).
+
+The live profile is Talos 1.13.6. Different/missing/malformed version reports
+are stand-in evidence, not a second live profile or an upgrade. Provider-wide
+outages now refuse at the required publication node-access read before compiler
+pinned-value reads; the separate compiler refusal tests retain that coverage.
+
+This supplies the publication-minor repair evidence for R5. The clause-level
+R5 mapping and all-purpose R45 access checks remain with
+ginsys/bronzeward#241, including the new publication purpose. The older rows
+above retain their original revisions and limitations. Nothing here supplies
+the independent S8 person review, the six criterion verdicts or the owner's
+dated assessment; ginsys/bronzeward#31 remains open.
