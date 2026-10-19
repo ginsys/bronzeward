@@ -392,7 +392,7 @@ Investigate a local age-backed encrypted store for home installations and SOPS/a
 The database and provider do not share a transaction. Use an application publication protocol:
 
 1. Snapshot source and assignment revisions; select or create immutable secret generations and pin every required version.
-2. Check dependencies and resolve required values under the compiler identity; compose and validate each actual configuration using upstream semantics.
+2. Obtain fresh read-only executor observations of every covered machine, verifying its identity and running Talos minor against the target contract; an offline or unreadable covered machine blocks publication. Check dependencies and resolve required values under the compiler identity; compose and validate each actual configuration using upstream semantics.
 3. Derive protected provenance/redacted review data and encrypt every full artifact. Record provider/key/version dependencies as applicable.
 4. Atomically commit release metadata, source references, dependency records and ciphertext in the application database, rejecting stale input revisions or conflicts.
 5. Make the committed release available for planning and approval. Publication alone never authorizes dispatch.
@@ -880,6 +880,8 @@ Duplicate ApplyConfig is not universally harmless: a stale executor applying A a
 The implementation must define per-operation safety properties and prove how it prevents conflicting dispatch when an old executor may still act. Until a safe ownership/dispatch boundary is established, stop conflicting work rather than promise no stale RPC can occur. Mechanism selection remains part of E4; no exactly-once or universal retry guarantee is made here.
 
 ### 12.6 Offline semantics
+
+Publication requires fresh executor evidence for every covered machine (§7.4); it cannot select a new Desired release while a covered machine is offline. A machine may go offline after that read or after publication; this does not undo the release.
 
 A release becomes the machine's `Desired` when it is published; approval does not select it (persistence contract choice §17.6). Convergent configuration can apply the latest applicable release that `Desired` names only through an **approved** plan, after checking current assignment and state. The plan binds that selection: a later publication invalidates it before dispatch commitment (execution contract choice §10.24). Commands cannot collapse or replay blindly. A returning machine must not receive a queue of expired reboot/reset/upgrade commands. Replan when assumptions changed; unresolved prior execution also blocks conflicting new work.
 
