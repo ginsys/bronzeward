@@ -1567,6 +1567,12 @@ previous release with `wipe: false` shows `-wipe: <redacted:paired>` beside
 | Compilation | Reserved text or an unattributed exact copy in the output | Publication refused, naming paths | Nothing |
 | Compilation | Encryption fails, or persistence rejects a stale input | Publication refused | Nothing of the release |
 
+For compilation/publication rows, "Nothing" means nothing of the release.
+The publication operation, act and events, and any immutable publication
+observation starts/results already recorded, remain as specified in
+persistence/API §6.1.1 and §14. A refusal commits no release or Desired change;
+an interrupted observation can leave its start without a completed result.
+
 A refusal never quotes a value, and a refusal is never retried by weakening a
 check.
 
