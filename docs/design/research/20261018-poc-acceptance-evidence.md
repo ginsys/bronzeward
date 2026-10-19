@@ -333,21 +333,24 @@ or supplies an owner's verdict.
 ## 5. Coverage (AP §7)
 
 Runs and steps are those of §3; "`controls`: `s1`" is the `s1` step of the `controls` run.
+Scenario passes describe the observed paths; the remaining R5 refusal and R45
+observation-access coverage in §8 and the independent timeline review still limit
+overall acceptance. The owner's six verdicts remain pending in §7.
 
 | Design §18.2 | Scenario | Runs: steps | Result | Verdict |
 | --- | --- | --- | --- | --- |
 | Item 1: import without mutation, extraction before persistence, exact encrypted baseline | S1; S3's handover part | `run`: `s1p`, `s3h`; `controls`: `s1`, `s3h`; S3 handover controls: `s3hc` | passed: every step named exited 0, no check failed (§4) | met |
 | Item 2: native fragments, references, revisions, provenance, validation stages | S2 | `run`: `s2p`; `controls`: `s2` | passed: every step named exited 0, no check failed (§4) | met |
 | Item 3: immutable encrypted artifacts, exact dependencies, redacted review data, no apply | S2, S3 step 1 | `run`: `s2p`, `s3rp`; `controls`: `s2`, `s3r` | passed: every step named exited 0, no check failed (§4) | met |
-| Item 4: authenticated API; plan and approval of one safe worker change | S0, S3 | `run`: `s0p`, `s3rp`; `controls`: `s0`, `s3r`; S0 walk: `s0walk` | passed: every step named exited 0, no check failed (§4) | met |
-| Item 5: direct dispatch, verification, separate desired/applied/observed | S4 | `run`: `s4`; `s6`: `s4ds` | passed: every step named exited 0, no check failed (§4) | met |
+| Item 4: authenticated API; plan and approval of one safe worker change | S0, S3 | `run`: `s0p`, `s3rp`; `controls`: `s0`, `s3r`; S0 walk: `s0walk` | passed: every step named exited 0, no check failed (§4) | partially evidenced; R5 coverage pending #241/#244 (§8) |
+| Item 5: direct dispatch, verification, separate desired/applied/observed | S4 | `run`: `s4`; `s6`: `s4ds` | passed: every step named exited 0, no check failed (§4) | partially evidenced; R45 coverage pending #241 (§8) |
 | Item 6: external change detected; freeze, sanitized adoption, approved revert | S5 | `run`: `s5p`; `controls`: `s5` | passed: every step named exited 0, no check failed (§4) | met |
 | Item 7: interrupted execution | S6 | `s6`: `s6` | passed: every step named exited 0, no check failed (§4) | met |
 | Item 7: external restoration through explicit recovery mode | S7 | `run`: `s7` (the nominal run; its pass criterion "every pre-restore automation token until reissued", PA §17 choice 27: `S7 step 6`, the seed automation token 401 after the restore and after its reissue, which S0 step 3 leaves out with a `SKIP`); S7 closing: `s7c`; S7 variants: `s7`, `s7n`, `s7t`, `s7o` | passed: every step named exited 0, no check failed (§4) | met |
 | Selected database/provider behaviour (§7.7) | S0 to S8 on the AP §2 fixture | all nine runs | passed: every step named exited 0, no check failed (§4) | met |
 | Scoped authorization (§13.7) | S0 steps 4 and 5, and the scenario-table rows AP §7 names | S0 walk: `s0walk`; `run`: `s0p`, `s2p` (step 7), `s3h`, `s3rp`, `s4`, `s5p` (step 3), `s7`; `controls`: `s4c`, `s4x`, `s5roles` (step 7); `s6`: `s6` (step 7); S7 closing: `s7c` | passed: every step named exited 0, no check failed (§4) | met |
 | Usable operation timeline | S8, with a second reviewer's record | `run`: `s8`; S8 controls: `s8controls`, `s8revocation`; the reviewer's record (`run`'s `s8` writes `SKIP` for it) | passed: every step named exited 0, no check failed (§4) | met for the live part; the second reviewer's record is open (§8) |
-| §18.1 E6: the existing-cluster vertical slice | §3.1 and S6's runs | `run`; `s6` | passed: every step named exited 0, no check failed (§4) | met |
+| §18.1 E6: the existing-cluster vertical slice | §3.1 and S6's runs | `run`; `s6` | passed: every step named exited 0, no check failed (§4) | partially evidenced; R5/R45 and the second reviewer remain open (§8) |
 
 ## 6. Required verification (AP §7.1)
 
@@ -370,13 +373,13 @@ plan. An item with no retained result leaves its issue incomplete (AP §7.1).
 | R11 | ER §9.2: a bound health check failing before the verification deadline then passing | #26, #27, #188 | a contradicting digest: `failed` at once, the drift record in the same transaction | — | contradicting digest met in CI; health cases carried (§8) |
 | R12 | ER §9.2: the fixture's nodes each reporting a distinct Talos node ID, no SMBIOS UUID and one Talos cluster ID through … | #26, #29 | the commitment's and retry's identity cases with their controls against a stub; the restoration half | the fixture's nodes read through the real client | met live and in CI |
 | R13 | ER §9.2: an `apply-config` operation with no attempt not completed by a completion observation of its artifact applied … | #28 | the schema refusing completion with no attempt; a recovery observation not completing it; a completion observation of the artifact applied not completing it, with its control | — | met in CI |
-| R14 | ER §9.2: assignment change refused while the scope is held | #26, #29 | — | S4's and S7's negative controls | met live |
+| R14 | ER §9.2: assignment change refused while the scope is held | #26, #29 | — | S4's negative control: publication changing the held worker's assignment | met live |
 | R15 | ER §9.2: takeover at start | #28 | takeover at start, the §5 precedence, `unresolved` kept, a terminal operation refused | S6.1 | met live and in CI |
 | R16 | ER §9.2: identity revocation before commitment, after it with no attempt, after an attempt with its retry refused | #25, #26, #28 | the retry refused after an attempt | before commitment and after it with no attempt (S4) | met live and in CI |
 | R17 | ER §9.2: observation ordering, contradicting higher-basis reads, confirmed reads, the late-read residual | #28, #27 (adoption read) | ordering, contradicting higher-basis and confirmed reads, the late-read residual, the adoption read; a completion read in flight across a concurrent accounting, with the record-order control | — | PoC observation predicates met in CI; bound-health ordering carried to #188 (§8) |
 | R18 | ER §9.2: plan and commitment refusals on undetected drift | #27 | a commitment refused on drifted evidence, opening the record, and comparison 6 refusing an ordinary plan while it is open; a drifted adoption's refusals; a revert's refusals, re-drift and a manual return closing `returned` | S5, and two of its negative controls: the revert on a frozen scope passed over, the unfreeze by a non-approver refused | met live and in CI |
 | R19 | ER §9.2: recovery-mode entry after a restore older than a takeover, an approval, a revocation and an attempt | #29 | — | S7 | met live |
-| R20 | ER §9.2: the complete existing-cluster E6 slice | #31 | — | the integrated run (§3.1) | met live |
+| R20 | ER §9.2: the complete existing-cluster E6 slice | #31 | — | the integrated run (§3.1) | live run passed; R5/R45 coverage and the second reviewer remain open (§8) |
 | R21 | PA §16: `FOR SHARE` at publication (DB row 011) | #23 | — | S2's negative controls | met live |
 | R22 | PA §16: ownership check inside the attempt's `UPDATE` (row 018) | #25, #26 | the conditional write and its read-then-write control | S4's negative controls | met live and in CI |
 | R23 | PA §16: claim eligibility re-check (row 020) | #22 | the refusal after expiry in the lock wait, with the earlier-read control | — | met in CI |
@@ -391,7 +394,7 @@ plan. An item with no retained result leaves its issue incomplete (AP §7.1).
 | R32 | DM §10.1 items 1, 4 to 7, 9 to 12, 14 and 15: every classification rule, persistent unknown, metadata-only access, … | #24 | each listed item, with item 1's clock control and item 4's no-last-alert control | — | met in CI |
 | R33 | DM §10.1 item 8's dispatch half: no dispatch admitted by a retained class | #26 | no dispatch admitted while the artifact key is retained | — | met in CI |
 | R34 | DM §10.1 item 13: recovery start records nothing before its entry commits | #29 | the monitor and sweep start only after the entry, with the normal-start control | — | met in CI |
-| R35 | PA §16: approval revocation racing commitment (DS row 003) | #25, #26 | — | S4's negative controls | met live |
+| R35 | PA §16: approval revocation racing commitment (DS row 003) | #25, #26 | approval revocation waits for commitment (`TestCommitmentRevocationsWait/approval`) | S4 DS row 003 through the executor and Talos client | met live and in CI |
 | R36 | PA §10.4: an approval surviving its approver's loss of the role, contrasted with its revocation (choice §17.23) | #25, #26 | — | S4's negative controls, contrasted with S3 | met live |
 | R37 | PA §16: identity revocation racing commitment, with the lock control | #25 | the race; the T5c entries on exactly the machines touched; the T5c installation lock with its `FOR SHARE` control | — | met in CI |
 | R38 | PA §16: a lapsed `publish` job claimed again | #23 | — | S2's negative controls | met live |
@@ -435,7 +438,8 @@ Paths and lines are at cde5e38, main after [ginsys/bronzeward#234](https://githu
 - **R32**: `TestClassify` (internal/classify/classify_test.go:60), `TestPassPersistent` (internal/monitor/monitor_test.go:258), `TestPassMetadataIdentity` (internal/monitor/evidence_test.go:64), `TestLiveMetadataIdentity` (internal/provider/identity_live_test.go:170), `TestRecordOneAlertAcrossInstances` (internal/monitor/evidence_test.go:136), `TestWatchdogStalled` (internal/monitor/watchdog_test.go:41), `TestWatchdogSlowPass` (internal/monitor/watchdog_test.go:84), `TestWatchdogHungHolder` (internal/monitor/watchdog_test.go:139), `TestRunHungPasses` (internal/monitor/watchdog_test.go:172), `TestProgressAfterMonitorLock` (internal/monitor/monitor_test.go:554), `TestEncryptArtifactsRefuses` (internal/compile/dependencies_test.go:326), `TestReadPinned` (internal/compile/dependencies_test.go:208), `TestPublishRacingMonitorNamedByAlert` (internal/api/publish_monitor_test.go:129), `TestPublishFirstNamedByTwoNamedByAlert` (internal/api/publish_monitor_test.go:185), `TestPublishFirstNamedConcurrentlyRefused` (internal/api/publish_monitor_test.go:262), `TestPublishAfterMonitorWaitedRefused` (internal/api/publish_monitor_test.go:280), `TestPassDeletionScheduled` (internal/monitor/monitor_test.go:283), `TestLoggerOrderAndCursor` (internal/monitor/logger_test.go:129), `TestLoggerPausedWrite` (internal/monitor/logger_test.go:194), `TestLoggerBacklog` (internal/monitor/logger_test.go:446), `TestDependencyStaleOwnObservation` (internal/api/dependencies_test.go:130), `TestOverlappingMonitors` (internal/monitor/evidence_test.go:252), `TestOverlappingMonitorIdleSession` (internal/monitor/evidence_test.go:282), `TestPassRequestTimeout` (internal/monitor/evidence_test.go:328), `TestLoggerAfterRestore` (internal/monitor/evidence_test.go:385); at cde5e38: `TestClassify` (internal/classify/classify_test.go:60), item 1's clock control (line 300), `TestPersistentEveryInterval` (internal/monitor/transition_test.go:120), item 4 with its no-last-alert control.
 - **R33**: `TestExecutorUseTimeCheckFailure` (internal/api/executor_test.go:245).
 - **R34**: `TestRecoveryStartMonitorsAfterEntry` (cmd/bronzeward/sweep_test.go:336), `TestRecoveryStartDoesNotSweep` (cmd/bronzeward/sweep_test.go:296), `TestRecoveryStartSweepsAfterEntry` (cmd/bronzeward/sweep_test.go:320).
-- **R37**: `TestCommitmentRevocationsWait` (internal/api/commit_test.go:715), `TestIdentityRevocationMachineEntries` (internal/api/revocation_machines_test.go:48), `TestIdentityRevocationHoldsInventory` (internal/api/revocation_machines_test.go:103); at cde5e38: `TestIdentityRevocationHoldsInventory` (internal/api/revocation_machines_test.go:103), the T5c lock with its `FOR SHARE` control (line 106).
+- **R35**: `TestCommitmentRevocationsWait/approval` (internal/api/commit_test.go:715). The executor/Talos half, `TestExecutorRevocationHeld` (internal/api/executor_test.go:677), runs in the live DS evidence, not CI without a node.
+- **R37**: `TestCommitmentRevocationsWait/identity` (internal/api/commit_test.go:715), `TestIdentityRevocationMachineEntries` (internal/api/revocation_machines_test.go:48), `TestIdentityRevocationHoldsInventory` (internal/api/revocation_machines_test.go:103); at cde5e38: `TestIdentityRevocationHoldsInventory` (internal/api/revocation_machines_test.go:103), the T5c lock with its `FOR SHARE` control (line 106).
 - **R39**: `TestRecoveryExitRacesInventory` (internal/api/recovery_exits_test.go:75).
 - **R40**: `TestConcurrentRotationsSerialize` (internal/auth/race_test.go:182), `TestConcurrentRotationsNoLockControl` (internal/auth/race_test.go:202), `TestRotationThenIdentityRevocation` (internal/auth/race_test.go:244), `TestIdentityRevocationThenRotation` (internal/auth/race_test.go:264), `TestRevocationRaceNoLockControl` (internal/auth/race_test.go:291).
 - **R41**: `TestReissueAfterRestoreRefusedForDeniedIdentity` (internal/auth/tokens_test.go:232).
@@ -471,13 +475,13 @@ rows take the path the claim's state allows, so their count can differ between r
 | R11 | — | CI: the contradicting digest; the health cases carried (§8) | contradicting digest met in CI; health cases carried (§8) |
 | R12 | `run`: `s1p` (`S1 step 1`: two node IDs, one cluster ID; then the imports through the application's client), `s4` (the commitment's evidence observation) | CI: the refusals and their controls | passed |
 | R13 | — | CI | met in CI |
-| R14 | `controls`: `s4c` (`S4 negative controls`: the publication changing the worker's assignment, 409 `scope-busy`), `s5` (`S5 negative controls`: the frozen-scope revert plan passed over) | CI: comparison 6 under a freeze (`TestCommitmentRefusals`, "frozen") and before release in recovery mode (`TestCommitmentScopeGateControl`, internal/api/epoch_test.go:201) | passed |
+| R14 | `controls`: `s4c` (`S4 negative controls`: the publication changing the worker's assignment, 409 `scope-busy`) | — | passed |
 | R15 | `s6`: `s6` (`S6.1 018` to `S6.1 021`, `S6.1 stale`, `S6.1 send`, `S6.1 cancel`; the table `s6-points.tsv`) | CI | passed |
 | R16 | `controls`: `s4x` (`S4 negative controls`: the identity revoked before the commitment, comparison 1; and once committed with no attempt) | CI: after an attempt | passed |
 | R17 | — | CI | PoC observation predicates met in CI; bound-health ordering carried to #188 (§8) |
 | R18 | `run`: `s5p`; `controls`: `s5` (`S5 negative controls`: the revert on a frozen scope passed over, the unfreeze by a non-approver 403) | CI: the commitment, adoption and revert refusals | passed |
 | R19 | `run` and S7 variants: `s7` (`S7 before T`, `S7 at T`, `S7 after T`, `S7 step 1` to `S7 step 11`; step 4 is the closing run's); S7 closing: `s7c` | — | passed |
-| R20 | `run`, whole; `s6` | — | passed |
+| R20 | `run`, whole; `s6` | — | live run passed; R5/R45 coverage and the second reviewer remain open (§8) |
 | R21 | `controls` and `s6`: `s2` (`S2 Go tests`) | — | passed |
 | R22 | `s6`: `s4ds` (`TestAttemptStaleOwner` in `ds-go.log`) | CI | passed |
 | R23 | — | CI | met in CI |
@@ -492,7 +496,7 @@ rows take the path the claim's state allows, so their count can differ between r
 | R32 | — | CI | met in CI |
 | R33 | — | CI | met in CI |
 | R34 | — | CI | met in CI |
-| R35 | `s6`: `s4ds` (`TestCommitmentRevocationsWait` in `ds-go.log`) | — | passed |
+| R35 | `s6`: `s4ds` (DS row 003 in `ds.tsv`; `TestCommitmentRevocationsWait/approval` and `TestExecutorRevocationHeld` in `ds-go.log`) | CI: `TestCommitmentRevocationsWait/approval` | passed |
 | R36 | `controls`: `s4x` (`S4 negative controls`: h-approver's next approval 403 without the approver group, the earlier approval committed and its attempt admitted), contrasted with `s3r` (`S3 negative controls`: the approval revocation) | — | passed |
 | R37 | — | CI | met in CI |
 | R38 | `controls` and `s6`: `s2` (`S2 Go tests`: `TestPublishRunLapsed`) | CI | passed |
