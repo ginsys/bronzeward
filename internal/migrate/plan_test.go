@@ -50,6 +50,11 @@ func (r record) stmt() stmt {
 	for i, c := range r.cols {
 		marks[i] = fmt.Sprintf("$%d", i+1)
 		args[i] = r.vals[c]
+		if c == "revision" || c == "basis" || c == "classification" {
+			if n, ok := args[i].(int); ok {
+				args[i] = afterPublication(n)
+			}
+		}
 	}
 	return stmt{fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", r.table, strings.Join(r.cols, ", "), strings.Join(marks, ", ")), args}
 }
@@ -63,8 +68,17 @@ func newRecord(table string, kv ...any) record {
 	return r
 }
 
+// Execution fixture revision arguments are relative to publication's two entries.
+// Keep invalid zero/negative revisions invalid for constraint controls.
+func afterPublication(revision int) int {
+	if revision > 0 {
+		return revision + 2
+	}
+	return revision
+}
+
 // plans holds releaseRows' release with an approved apply-config plan and a proposed adopt plan of
-// its machine, inserted by planRows. Revisions 1 to 3 of the machine's timeline are theirs.
+// its machine, inserted by planRows. Relative revisions 1 to 3 (absolute 3 to 5) are theirs.
 type plans struct {
 	release
 	epoch, bob, service, apply, adopt, approval string
@@ -72,7 +86,7 @@ type plans struct {
 
 // entry is the machine timeline entry a record is keyed by.
 func (p plans) entry(machine string, revision int, kind string) stmt {
-	return stmt{insertMachineEvent, []any{machine, revision, kind, `{}`}}
+	return stmt{insertMachineEvent, []any{machine, afterPublication(revision), kind, `{}`}}
 }
 
 func (p plans) act(actID, principal, role string) stmt {
@@ -571,14 +585,14 @@ func TestPlanOperations(t *testing.T) {
 		stmt{insertEvent, []any{adoptOp, 1, `{}`, "adopt"}})
 	// A refused commitment's entry names the transaction and the comparison that failed (§4.1).
 	refusal := func(entry string) stmt {
-		return stmt{insertMachineEvent, []any{p.machine, 90, "refusal", entry}}
+		return stmt{insertMachineEvent, []any{p.machine, afterPublication(90), "refusal", entry}}
 	}
 	refused(t, db, "refusal entry naming no comparison", "23514/machine_event_refusal", refusal(`{"transaction": "T6"}`))
 	refused(t, db, "refusal entry naming no transaction", "23514/machine_event_refusal", refusal(`{"comparison": "4.4"}`))
 	commitRows(t, db, refusal(`{"transaction": "T6", "comparison": "4.4", "plan": "`+p.adopt+`"}`))
 	// A commitment's entry names the operation it created, its plan and the evidence it links (§4.1).
 	commitment := func(entry string) stmt {
-		return stmt{insertMachineEvent, []any{p.machine, 91, "commitment", entry}}
+		return stmt{insertMachineEvent, []any{p.machine, afterPublication(91), "commitment", entry}}
 	}
 	for name, entry := range map[string]string{
 		"no operation":   `{"plan": "pln_x", "observation": "obs_x"}`,

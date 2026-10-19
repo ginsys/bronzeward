@@ -270,6 +270,7 @@ func TestExecutorUseTimeCheckFailure(t *testing.T) {
 				t.Fatal("the artifact key is not classified retained")
 			}
 			tc.fail(xe.x)
+			beforeObservations := count(t, xe.db, `SELECT count(*) FROM observation_start`)
 			life, stop := context.WithCancel(t.Context())
 			idle := make(chan struct{})
 			a := xe.executor(t, life, idle, options{})
@@ -283,7 +284,7 @@ func TestExecutorUseTimeCheckFailure(t *testing.T) {
 				AND entry->>'result' = 'failed' AND entry::text LIKE '%' || $2 || '%'`, xe.machine, tc.cause); n < 1 {
 				t.Fatalf("no failed check naming %q", tc.cause)
 			}
-			if n := count(t, xe.db, `SELECT count(*) FROM observation_start`); n != 0 || xe.entries(t, "commitment") != 0 {
+			if n := count(t, xe.db, `SELECT count(*) FROM observation_start`); n != beforeObservations || xe.entries(t, "commitment") != 0 {
 				t.Fatalf("%d observations or a commitment after a failed check", n)
 			}
 			xe.x.mu.Lock()

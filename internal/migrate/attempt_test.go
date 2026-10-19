@@ -63,7 +63,7 @@ func (a attempts) finish(state string) stmt {
 
 // entryOf is the machine timeline entry of kind at revision rev with the given JSON entry.
 func (a attempts) entryOf(rev int, kind, entry string) stmt {
-	return stmt{insertMachineEvent, []any{a.machine, rev, kind, entry}}
+	return stmt{insertMachineEvent, []any{a.machine, afterPublication(rev), kind, entry}}
 }
 
 // classified is the operation's classification at revision rev: its entry and its record.
@@ -91,7 +91,7 @@ func answered(machine, op, epoch, att string, rev int, class string) []stmt {
 	acc := newRecord("attempt_accounting", "attempt", att, "machine", machine, "basis", "response",
 		"response_from_target", true, "epoch", epoch, "at", time.Now(), "revision", rev+1)
 	entry := func(rev int, kind, basis string) stmt {
-		return stmt{insertMachineEvent, []any{machine, rev, kind,
+		return stmt{insertMachineEvent, []any{machine, afterPublication(rev), kind,
 			`{"operation": "` + op + `", "attempt": "` + att + `", "class": "` + class + `", "basis": "` + basis + `"}`}}
 	}
 	return []stmt{entry(rev, "response", ""), resp.stmt(), entry(rev+1, "accounting", "response"), acc.stmt()}
@@ -295,7 +295,9 @@ func recordAttempt(db *sql.DB, a attempts) error {
 func TestOperationStateEntry(t *testing.T) {
 	db, _ := installed(t)
 	p := planRows(t, db)
-	entry := func(e string) stmt { return stmt{insertMachineEvent, []any{p.machine, 4, "operation-state", e}} }
+	entry := func(e string) stmt {
+		return stmt{insertMachineEvent, []any{p.machine, afterPublication(4), "operation-state", e}}
+	}
 	for name, e := range map[string]string{
 		"no operation": `{"from": "committed", "to": "unresolved"}`,
 		"no from":      `{"operation": "op_x", "to": "unresolved"}`,
@@ -324,7 +326,7 @@ func TestAttemptConstraintControl(t *testing.T) {
 		{"DROP TRIGGER cancelled ON attempt", append([]stmt{a.state("unresolved"), a.state("cancelled")},
 			a.attempted(r, "cancelled")[:2]...)},
 		{"ALTER TABLE machine_event DROP CONSTRAINT machine_event_operation_state",
-			[]stmt{{insertMachineEvent, []any{a.machine, 6, "operation-state", `{}`}}}},
+			[]stmt{{insertMachineEvent, []any{a.machine, afterPublication(6), "operation-state", `{}`}}}},
 	} {
 		accepted(t, db, "after "+c.drop, append([]stmt{{c.drop, nil}}, c.rows...)...)
 	}

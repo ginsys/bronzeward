@@ -173,7 +173,7 @@ func TestDrifterLogsUnread(t *testing.T) {
 		t.Fatalf("%d drift observations after two passes", all)
 	}
 	var obs string
-	if err := le.db.QueryRow(`SELECT id FROM observation WHERE machine = $1 ORDER BY revision LIMIT 1`, le.machine).Scan(&obs); err != nil {
+	if err := le.db.QueryRow(`SELECT o.id FROM observation o JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis WHERE o.machine = $1 AND s.purpose = 'drift' ORDER BY o.revision LIMIT 1`, le.machine).Scan(&obs); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{le.machine, obs, "provider-unavailable"} {

@@ -513,8 +513,14 @@ func TestObservePlanRoute(t *testing.T) {
 	// The read route answers the start's plan (PA §9.2).
 	read := decode[listPage[observationBody]](t, p.do(a, call{method: "GET", path: prefix + "/machines/" + p.machine + "/observations",
 		token: p.human("h-viewer")}), 200)
-	if len(read.Items) != 1 || read.Items[0].Plan == nil || *read.Items[0].Plan != plan.ID || read.Items[0].Operation != nil ||
-		read.Items[0].Purpose != "evidence" || read.Items[0].Endpoint != nodeA.Endpoint {
+	var evidence []observationBody
+	for _, o := range read.Items {
+		if o.ID == ev.ID {
+			evidence = append(evidence, o)
+		}
+	}
+	if len(evidence) != 1 || evidence[0].Plan == nil || *evidence[0].Plan != plan.ID || evidence[0].Operation != nil ||
+		evidence[0].Purpose != "evidence" || evidence[0].Endpoint != nodeA.Endpoint {
 		t.Fatalf("observations %+v", read)
 	}
 	seenA := len(nodeA.Seen())

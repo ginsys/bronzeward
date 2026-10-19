@@ -12,7 +12,9 @@ import (
 	"github.com/ginsys/bronzeward/internal/auth"
 	"github.com/ginsys/bronzeward/internal/config"
 	"github.com/ginsys/bronzeward/internal/id"
+	"github.com/ginsys/bronzeward/internal/provider"
 	"github.com/ginsys/bronzeward/internal/staging"
+	"github.com/ginsys/bronzeward/internal/talos/talostest"
 )
 
 // queuePublish inserts a queued publish operation of d's draft at revision rev, as T2 writes it.
@@ -484,8 +486,16 @@ func TestNewStartsPublisher(t *testing.T) {
 		t.Fatal(err)
 	}
 	life, stop := context.WithCancel(t.Context())
+	x, r := b.publicationReader()
+	pki := talostest.NewPKI(t)
+	node := talostest.Serve(t, pki)
+	node.SetSMBIOSUUID(t, r.identity.SMBIOSUUID, true)
+	node.SetNodeID(t, r.identity.NodeID)
+	node.SetClusterID(t, r.identity.ClusterID)
+	mustExec(t, b.db, `UPDATE machine SET talos_endpoint = $2 WHERE id = $1`, b.machine, node.Endpoint)
+	x.access = provider.NewTalosAccess(x.access.Version(), pki.Talosconfig("", "", ""))
 	h := New(life, b.db, auth.NewVerifier(b.cfg, b.db, auth.Discover(b.cfg.OIDC)), b.cfg, testExecution(), nil,
-		&Publishers{Meta: b.held, Compiler: b.held}, nil,
+		&Publishers{Meta: b.held, Compiler: b.held}, x,
 		&config.Ingestion{Instance: "a", Heartbeat: 20 * time.Millisecond, Lease: time.Minute}, epoch, false, nil)
 	defer stopping(h.(*API), stop)
 	op := b.queuePublish(1)
