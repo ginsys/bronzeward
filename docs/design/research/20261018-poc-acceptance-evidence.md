@@ -5,7 +5,7 @@
 | **Date** | 2026-10-19 |
 | **Work item** | [E6: demonstrate PoC acceptance](https://github.com/ginsys/bronzeward/issues/31) |
 | **Design reference** | [§18.1](../Talos_Configuration_and_Machine_Management_Design.md#181-phase-0---evidence-before-implementation-contracts) E6, [§18.2](../Talos_Configuration_and_Machine_Management_Design.md#182-phase-1---configuration-control-on-an-existing-cluster); the [acceptance plan](../../spec/acceptance-plan.md) (AP) |
-| **Artifacts** | The nine run records of §4 and their 605 `bin/evidence` bundles: kept by the owner, not published (§3.4) |
+| **Artifacts** | The nine run records of §4 and their `bin/evidence` bundles: kept by the owner, not published (§3.4) |
 | **Decision enabled** | Whether the owner accepts the configuration-control PoC on the fixture profile, with the gaps of §8 carried or closed. It makes no production claim. |
 
 ## 1. Question
@@ -22,20 +22,29 @@ those runs and answers [AP §7](../../spec/acceptance-plan.md#7-coverage) and
 - **Fixture:** the [AP §2](../../spec/acceptance-plan.md#2-fixture-and-common-evidence) fixture at
   the pins of `fixtures/versions.env`, blob `efd7c1431ebc0c3da9d258a13bb60c1c6112243f`. This is
   design §7.7's selected profile in its single-instance topology.
-- **Commits:** Bronzeward and the fixture, one repository: `ab327884527fee3b3ed32f0e2dfc8ffde5bf0ce3`,
-  main after [ginsys/bronzeward#235](https://github.com/ginsys/bronzeward/pull/235), every run's
-  checkout with no changed path (§3.3).
+- **Commits:** Bronzeward and the fixture, one repository, every run's checkout with no changed path
+  (§3.3). `run` and `controls`: `fcecfcaf2a6f724972688d1a21d81a06b7a72054`, this change's fixture
+  fixes. The other seven runs: `ab327884527fee3b3ed32f0e2dfc8ffde5bf0ce3`, main after
+  [ginsys/bronzeward#235](https://github.com/ginsys/bronzeward/pull/235). Between the two, no Go
+  file differs. The fixture differs where a worker S5 step 4 pointed back at S3's handover cluster
+  fragment selects no workers profile: S5 step 4 itself, the dispatch helper adding a role fragment
+  to the worker's assignment instead of the workers profile there, and S7 step 3, which sends the
+  worker's current selection with its cluster fragment added where ab32788 sent the workers profile
+  with that fragment. In the S7 runs at ab32788 the worker's assignment is S2's,
+  `{"profiles": ["workers"], "fragments": {}}`: no step between S2 and S7 puts it. So S7 step 3
+  sends the same JSON value at both commits, compact at fcecfca, with no same-key retry. None of the
+  seven runs at ab32788 runs S5, so the dispatch helper's path there is the unchanged one. Only S7 step 3's check text differs: it
+  read "beside the workers profile" at ab32788. The text of S0's `SKIP` row for the earlier-epoch
+  automation token,
+  `fixtures/README.md` and the acceptance plan also differ.
 - **Limits:** the plan's [§9](../../spec/acceptance-plan.md#9-limits) limits bind every result.
   A pass is a pass on the fixture, never a production claim.
 
 ## 3. Runs
 
-Nine runs, each from its own fresh `bin/up`, all through `fixtures/scenarios/integrated` at
-ab32788: the `s6` preset and eight step lists. `run` and `controls` ran as explicit step lists equal
-to the presets of those names as this change fixes them. At ab32788 those presets lack `s4ds`,
-which S5 needs: S5 step 4 takes S2's label fragment out of the workers profile, which without S4's
-dispatch-safety rows holds that fragment alone, and an empty profile is refused
-(`internal/api/drafts.go:348`). It runs the steps in order, stops at the first that fails, and writes
+Nine runs, each from its own fresh `bin/up`, all through `fixtures/scenarios/integrated`: the
+`run` and `controls` presets at fcecfca, the `s6` preset and six step lists at ab32788 (§2). The
+runner runs the steps in order, stops at the first that fails, and writes
 `chain.log` (the checkout and each step's start, end and exit status), one `<step>.log` per step
 and a copy of the fixture's evidence directories, under `<preset>-<UTC start>` for a preset and
 `steps-<UTC start>` for a step list; a list names each step at most once. Each scenario step writes
@@ -46,8 +55,8 @@ paths alone. It writes one `SKIP` row for each negative control or matrix it lea
 
 | Run | Steps | What it carries |
 | --- | --- | --- |
-| `run` | `up s0p s1p s3h s2p s3rp s4 s4ds s5p s7 s8 down` | the integrated run (AP §2, "Execution"): the pass paths of S0 to S5, S7's nominal run and S8, S3's handover between S1 and S2 |
-| `controls` | `up s0 s1 s3h s2 s3r s4c s4x s4 s4ds s5 s5roles down` | the same chain in the full modes: the negative controls, matrices and Go rows `run` leaves out, S4's controls (`s4c`) and commitment-level controls (`s4x`, from restores of S3's snapshots) before S4's run, and S5 step 7 (`s5roles`) |
+| `run` | `up s0p s1p s3h s2p s3rp s4 s5p s7 s8 down` | the integrated run (AP §2, "Execution"): the pass paths of S0 to S5, S7's nominal run and S8, S3's handover between S1 and S2 |
+| `controls` | `up s0 s1 s3h s2 s3r s4c s4x s4 s5 s5roles down` | the same chain in the full modes: the negative controls, matrices and Go rows `run` leaves out, S4's controls (`s4c`) and commitment-level controls (`s4x`, from restores of S3's snapshots) before S4's run, and S5 step 7 (`s5roles`) |
 | `s6` | `up s1 s3h s2 s3r s4 s4ds s6 down` | S4's dispatch-safety rows (`s4ds`) and S6.1's interruption points; S8's step 2 reads its S6.1 timeline |
 | S1 node ID | `up s1nid down` | S1's Talos access refusal for another node ID |
 | S3 handover controls | `up s1 s3hc down` | the controls that refuse or hold an adoption before it commits |
@@ -63,16 +72,15 @@ S6.2's measurement is already landed in the [late-landing report](20261016-late-
 | Step | Command | Exit | Checks (PASS / FAIL / SKIP) | Retained evidence |
 | --- | --- | --- | --- | --- |
 | `up` | `bin/up` | 0 | — | — |
-| `s0p` | `scenarios/s0 pass` | 0 | 56 / 0 / 2 | `s0-pass-20261018T220450Z`, 1 bundle |
-| `s1p` | `scenarios/s1 pass` | 0 | 36 / 0 / 2 | `s1-pass-20261018T221421Z`, 5 bundles |
-| `s3h` | `scenarios/s3 handover` | 0 | 29 / 0 / 0 | `s3-handover-20261018T221531Z`, 3 bundles |
-| `s2p` | `scenarios/s2 pass` | 0 | 53 / 0 / 4 | `s2-pass-20261018T221617Z`, 4 bundles |
-| `s3rp` | `scenarios/s3 pass` | 0 | 74 / 0 / 1 | `s3-pass-20261018T221757Z`, 4 bundles |
-| `s4` | `scenarios/s4 run` | 0 | 33 / 0 / 0 | `s4-run-20261018T221956Z`, 3 bundles |
-| `s4ds` | `scenarios/s4 ds` | 0 | 298 / 0 / 0 | `s4-ds-20261018T222059Z`, 18 bundles |
-| `s5p` | `scenarios/s5 pass` | 0 | 73 / 0 / 3 | `s5-pass-20261018T223240Z`, 8 bundles |
-| `s7` | `scenarios/s7 run` | 0 | 125 / 0 / 0 | `s7-run-20261018T223513Z`, 4 bundles |
-| `s8` | `scenarios/s8 run` | 0 | 55 / 0 / 2 | `s8-run-20261018T224250Z`, 3 bundles |
+| `s0p` | `scenarios/s0 pass` | 0 | 56 / 0 / 2 | `s0-pass-20261019T052351Z`, 1 bundle |
+| `s1p` | `scenarios/s1 pass` | 0 | 36 / 0 / 2 | `s1-pass-20261019T053359Z`, 5 bundles |
+| `s3h` | `scenarios/s3 handover` | 0 | 29 / 0 / 0 | `s3-handover-20261019T053514Z`, 3 bundles |
+| `s2p` | `scenarios/s2 pass` | 0 | 53 / 0 / 4 | `s2-pass-20261019T053559Z`, 4 bundles |
+| `s3rp` | `scenarios/s3 pass` | 0 | 74 / 0 / 1 | `s3-pass-20261019T053733Z`, 4 bundles |
+| `s4` | `scenarios/s4 run` | 0 | 33 / 0 / 0 | `s4-run-20261019T053935Z`, 3 bundles |
+| `s5p` | `scenarios/s5 pass` | 0 | 73 / 0 / 3 | `s5-pass-20261019T054036Z`, 8 bundles |
+| `s7` | `scenarios/s7 run` | 0 | 125 / 0 / 0 | `s7-run-20261019T054312Z`, 4 bundles |
+| `s8` | `scenarios/s8 run` | 0 | 55 / 0 / 2 | `s8-run-20261019T055053Z`, 3 bundles |
 | `down` | `bin/down` | 0 | — | — |
 
 ### 3.2 Separate runs
@@ -81,19 +89,18 @@ Each from a fresh `bin/up` (AP §2). AP §7.1 items marked *check* are the CI te
 
 | Run | Step | Command | Exit | Checks (PASS / FAIL / SKIP) | Retained evidence |
 | --- | --- | --- | --- | --- | --- |
-| `controls` | `up` | `bin/up` | 0 | — | — |
-| `controls` | `s0` | `scenarios/s0 run` | 0 | 62 / 0 / 1 | `s0-run-20261018T225053Z`, 1 bundle |
-| `controls` | `s1` | `scenarios/s1 run` | 0 | 453 / 0 / 0 | `s1-run-20261018T230407Z`, 52 bundles |
-| `controls` | `s3h` | `scenarios/s3 handover` | 0 | 29 / 0 / 0 | `s3-handover-20261018T233104Z`, 3 bundles |
-| `controls` | `s2` | `scenarios/s2 run` | 0 | 334 / 0 / 0 | `s2-run-20261018T233230Z`, 23 bundles |
-| `controls` | `s3r` | `scenarios/s3 run` | 0 | 95 / 0 / 0 | `s3-run-20261018T235423Z`, 5 bundles |
-| `controls` | `s4c` | `scenarios/s4 controls` | 0 | 63 / 0 / 2 | `s4-controls-20261018T235919Z`, 3 bundles |
-| `controls` | `s4x` | `scenarios/s4 restores` | 0 | 138 / 0 / 1 | `s4-restores-20261019T000302Z`, 8 bundles |
-| `controls` | `s4` | `scenarios/s4 run` | 0 | 33 / 0 / 0 | `s4-run-20261019T001117Z`, 3 bundles |
-| `controls` | `s4ds` | `scenarios/s4 ds` | 0 | 298 / 0 / 0 | `s4-ds-20261019T001645Z`, 18 bundles |
-| `controls` | `s5` | `scenarios/s5 run` | 0 | 170 / 0 / 0 | `s5-run-20261019T003400Z`, 17 bundles |
-| `controls` | `s5roles` | `scenarios/s5 roles` | 0 | 17 / 0 / 0 | `s5-roles-20261019T004840Z`, 1 bundle |
-| `controls` | `down` | `bin/down` | 0 | — | — |
+| `controls` | `up` | `bin/up` | *pending* | — | — |
+| `controls` | `s0` | `scenarios/s0 run` | *pending* | *pending* | *pending* |
+| `controls` | `s1` | `scenarios/s1 run` | *pending* | *pending* | *pending* |
+| `controls` | `s3h` | `scenarios/s3 handover` | *pending* | *pending* | *pending* |
+| `controls` | `s2` | `scenarios/s2 run` | *pending* | *pending* | *pending* |
+| `controls` | `s3r` | `scenarios/s3 run` | *pending* | *pending* | *pending* |
+| `controls` | `s4c` | `scenarios/s4 controls` | *pending* | *pending* | *pending* |
+| `controls` | `s4x` | `scenarios/s4 restores` | *pending* | *pending* | *pending* |
+| `controls` | `s4` | `scenarios/s4 run` | *pending* | *pending* | *pending* |
+| `controls` | `s5` | `scenarios/s5 run` | *pending* | *pending* | *pending* |
+| `controls` | `s5roles` | `scenarios/s5 roles` | *pending* | *pending* | *pending* |
+| `controls` | `down` | `bin/down` | *pending* | — | — |
 | `s6` | `up` | `bin/up` | 0 | — | — |
 | `s6` | `s1` | `scenarios/s1 run` | 0 | 453 / 0 / 0 | `s1-run-20261018T191441Z`, 52 bundles |
 | `s6` | `s3h` | `scenarios/s3 handover` | 0 | 29 / 0 / 0 | `s3-handover-20261018T194024Z`, 3 bundles |
@@ -156,8 +163,8 @@ under the table.
 
 | Run | Record | Checkout (changed paths) | Pins blob | Server image |
 | --- | --- | --- | --- | --- |
-| `run` | `steps-20261018T220329Z` | `ab327884527f` (0) | `efd7c1431ebc` | `ca8ad48f1058` |
-| `controls` | `steps-20261018T224934Z` | `ab327884527f` (0) | `efd7c1431ebc` | `1560d5b0b419` |
+| `run` | `run-20261019T052145Z` | `fcecfcaf2a6f` (0) | `efd7c1431ebc` | `6e31bb6ab4aa` |
+| `controls` | *pending* | *pending* | *pending* | *pending* |
 | `s6` | `s6-20261018T191226Z` | `ab327884527f` (0) | `efd7c1431ebc` | `74661b51c9cc` |
 | S1 node ID | `steps-20261019T005015Z` | `ab327884527f` (0) | `efd7c1431ebc` | `e5dd6e22b059` |
 | S3 handover controls | `steps-20261019T005313Z` | `ab327884527f` (0) | `efd7c1431ebc` | `a3cb9895bc26` |
@@ -166,7 +173,8 @@ under the table.
 | S0 walk | `steps-20261019T040050Z` | `ab327884527f` (0) | `efd7c1431ebc` | `82cdf5079447` |
 | S8 controls | `steps-20261019T040326Z` | `ab327884527f` (0) | `efd7c1431ebc` | `dc0f3ca92012` |
 
-Every bundle of every run (605) agrees: `manifest commit` and `created at` ab32788 and an empty
+Every bundle of every run (*pending: the total*) agrees: `manifest commit` and `created at` its run's
+checkout (fcecfca for `run` and `controls`, ab32788 for the others) and an empty
 `fixtures-diff.txt`. The server image is built by each `bin/up`, so its ID is the run's own; within
 a run all four server containers share it. Versions, the same for all runs:
 - Talos v1.13.6, `talosctl` and both nodes, image
@@ -189,19 +197,19 @@ Per run (AP §2):
 - a `bin/evidence` bundle with its positive control found.
 
 Each run's record and bundles are kept by the owner, not published: the bundles hold the fixture's
-synthetic secrets with their scans. The commands of §4 regenerate them at the commit of §2.
+synthetic secrets with their scans. The commands of §4 regenerate them.
 
 ## 4. Reproduction
 
-From `fixtures/` in a clean checkout at the commit of §2, with `mise run dev-db` and
+From `fixtures/` in a clean checkout at fcecfca (§2), with `mise run dev-db` and
 `mise run dev-bao` up for the Go rows (S0's, S1's, S2's, S4's dispatch-safety rows and S8's), and
 `<rec>` a record directory outside `fixtures/` (`bin/down` removes the fixture's state). `s6` runs
 before `run`, whose S8 step reads the S6.1 timeline it kept.
 
 ```
 scenarios/integrated <rec> s6
-S8_S6_KEPT=<rec>/s6-<UTC start>/evidence/s6-run-<UTC> scenarios/integrated <rec> up s0p s1p s3h s2p s3rp s4 s4ds s5p s7 s8 down
-scenarios/integrated <rec> up s0 s1 s3h s2 s3r s4c s4x s4 s4ds s5 s5roles down
+S8_S6_KEPT=<rec>/s6-<UTC start>/evidence/s6-run-<UTC> scenarios/integrated <rec> run
+scenarios/integrated <rec> controls
 scenarios/integrated <rec> up s1nid down
 scenarios/integrated <rec> up s1 s3hc down
 scenarios/integrated <rec> up s1 s3h s2 s3r s4 s7c down
@@ -213,11 +221,20 @@ scenarios/integrated <rec> up s1 s8controls s8revocation down
 Records written:
 - `s6`: `s6-20261018T191226Z`. It supersedes `s6-20261018T153139Z`, which passed but checked out
   3a1ffdb, a branch commit before its merge, not the commit of §2.
-- `run`: `steps-20261018T220329Z`, with `S8_S6_KEPT` the `s6` record's `s6-run-20261018T205620Z`.
-  It supersedes `run-20261018T213240Z`, the `run` preset without `s4ds`, stopped at `s5p` (exit 1,
-  S5 step 4's profile change refused with 400 for an empty fragment list); every step before it
-  exited 0.
-- `controls`: `steps-20261018T224934Z`.
+- `run`: `run-20261019T052145Z`, with `S8_S6_KEPT` the `s6` record's `s6-run-20261018T205620Z`.
+  S5 step 4 pointed the worker's assignment back at S3's handover cluster fragment, since S2's
+  label fragment was the workers profile's only one. From then on the worker selects no workers
+  profile, so S7's held-operation release and S8's release added their role fragments to the
+  worker's assignment, and S7 step 3 added its cluster fragment beside the worker's current
+  selection. It supersedes three records:
+  - `run-20261018T213240Z`, the `run` preset at ab32788, stopped at `s5p` (exit 1, S5 step 4's
+    profile change refused with 400 for an empty fragment list);
+  - `steps-20261018T220329Z`, which passed at ab32788 with `s4ds` before `s5p`, so that S5 relied on
+    the dispatch-safety rows' fragments, where AP §2 runs those separately;
+  - `run-20261019T045222Z`, the `run` preset at an earlier commit of this change, stopped at `s7`
+    (S7 step 3's release left the worker's configuration digest unchanged).
+- `controls`: *pending: the record at fcecfca and its S5 step 4 path*. It supersedes
+  `steps-20261018T224934Z`, which passed at ab32788 with `s4ds` before `s5`.
 - S1 node ID: `steps-20261019T005015Z`.
 - S3 handover controls: `steps-20261019T005313Z`.
 - S7 closing: `steps-20261019T012309Z`.
@@ -225,7 +242,7 @@ Records written:
 - S0 walk: `steps-20261019T040050Z`.
 - S8 controls: `steps-20261019T040326Z`.
 
-Every step of these nine records exited 0 and no check failed. Across the 605 bundles, each leak
+Every step of these nine records exited 0 and no check failed (`controls`: *pending*). Across the *pending: the total* bundles, each leak
 scan found only its positive control, except where S8's negative control planted a copy of a
 secret to be found (`S8 negative controls`, "the scan reports the copy"); no bundle names a source
 it could not capture.
@@ -274,7 +291,7 @@ plan. An item with no retained result leaves its issue incomplete (AP §7.1).
 | R15 | ER §9.2: takeover at start | #28 | takeover at start, the §5 precedence, `unresolved` kept, a terminal operation refused | S6.1 | met live and in CI |
 | R16 | ER §9.2: identity revocation before commitment, after it with no attempt, after an attempt with its retry refused | #25, #26, #28 | the retry refused after an attempt | before commitment and after it with no attempt (S4) | met live and in CI |
 | R17 | ER §9.2: observation ordering, contradicting higher-basis reads, confirmed reads, the late-read residual | #28, #27 (adoption read) | ordering, contradicting higher-basis and confirmed reads, the late-read residual, the adoption read; a completion read in flight across a concurrent accounting, with the record-order control | — | met in CI |
-| R18 | ER §9.2: plan and commitment refusals on undetected drift | #27 | — | S5 and its negative controls | met live |
+| R18 | ER §9.2: plan and commitment refusals on undetected drift | #27 | a commitment refused on drifted evidence, opening the record, and comparison 6 refusing an ordinary plan while it is open; a drifted adoption's refusals; a revert's refusals, re-drift and a manual return closing `returned` | S5, and two of its negative controls: the revert on a frozen scope passed over, the unfreeze by a non-approver refused | met live and in CI |
 | R19 | ER §9.2: recovery-mode entry after a restore older than a takeover, an approval, a revocation and an attempt | #29 | — | S7 | met live |
 | R20 | ER §9.2: the complete existing-cluster E6 slice | #31 | — | the integrated run (§3.1) | met live |
 | R21 | PA §16: `FOR SHARE` at publication (DB row 011) | #23 | — | S2's negative controls | met live |
@@ -310,7 +327,7 @@ plan. An item with no retained result leaves its issue incomplete (AP §7.1).
 
 ### 6.1 Tests per row
 
-Paths and lines are at cde5e38, main after [ginsys/bronzeward#234](https://github.com/ginsys/bronzeward/pull/234). Each test ran in CI's `go-db` job (PostgreSQL 17, OpenBao 2.6.1 in development mode, no Talos node): on main at a636c2a, workflow run 39136967990, which succeeded, or, for the tests and subtests marked *at cde5e38*, in the `go-db` job of ginsys/bronzeward#234, which added them. At ab32788, main after [ginsys/bronzeward#235](https://github.com/ginsys/bronzeward/pull/235) and the commit the live runs checked out, no Go file differs from cde5e38; CI workflow run 39157577288 there succeeded, its `go-db` job with 21 packages `ok` and none failing. A test that skips without a Talos node is marked; it counts only in the live run.
+Paths and lines are at cde5e38, main after [ginsys/bronzeward#234](https://github.com/ginsys/bronzeward/pull/234). Each test ran in CI's `go-db` job (PostgreSQL 17, OpenBao 2.6.1 in development mode, no Talos node): on main at a636c2a, workflow run 39136967990, which succeeded, or, for the tests and subtests marked *at cde5e38*, in the `go-db` job of ginsys/bronzeward#234, which added them. At ab32788, main after [ginsys/bronzeward#235](https://github.com/ginsys/bronzeward/pull/235) and the commit seven of the live runs checked out, and at fcecfca, which `run` and `controls` checked out, no Go file differs from cde5e38; CI workflow run 39157577288 there succeeded, its `go-db` job with 21 packages `ok` and none failing. A test that skips without a Talos node is marked; it counts only in the live run.
 
 - **R1**: `TestDriftAdoptionIngestion` (internal/api/drift_adoption_test.go:187), `TestDriftAdoptionRefusals` (internal/api/drift_adoption_test.go:218).
 - **R2**: `TestPublishRunStopped` (internal/api/worker_test.go:309).
@@ -325,6 +342,7 @@ Paths and lines are at cde5e38, main after [ginsys/bronzeward#234](https://githu
 - **R15**: `TestExecutorTakesOverAtStart` (internal/api/executor_test.go:1188), `TestExecutorCompletesATakenOverAcceptedAttempt` (internal/api/executor_test.go:785), `TestSettle` (internal/api/settle_test.go:374), "no retry", `TestTakeOver` (internal/api/outcome_test.go:79), `TestTakeOverRefusals` (internal/api/outcome_test.go:131).
 - **R16**: `TestSettle` (internal/api/settle_test.go:374), "identity revoked after an attempt".
 - **R17**: `TestSettle` (internal/api/settle_test.go:374), `TestAccountByDecision` (internal/api/settle_test.go:180), `TestMachineObservedHighestBasis` (internal/api/operations_read_test.go:271), `TestResidualLateRead` (internal/api/residual_test.go:80), `TestRevertRefusals` (internal/api/drift_revert_test.go:140), `TestAdoptionRefusals` (internal/api/adoption_test.go:301); at cde5e38: `TestSettle` (internal/api/settle_test.go:374), "read in flight across a concurrent accounting" (line 815), with its record-order control.
+- **R18**: `TestCommitmentDrift` (internal/api/drift_test.go:34), `TestDriftedAdoptionRefusals` (internal/api/drift_adoption_test.go:136), `TestRevertRefusals` (internal/api/drift_revert_test.go:140).
 - **R22**: `TestAttemptStaleOwner` (internal/api/attempt_test.go:742).
 - **R23**: `TestTakeOverRechecksEligibility` (internal/staging/takeover_test.go:304).
 - **R24**: `TestSelection` (internal/orphans/orphans_test.go:249), `TestClusterScope` (internal/orphans/orphans_test.go:309), `TestReleaseDuringRun` (internal/orphans/orphans_test.go:325), `TestHeldPastExpiryUnderLock` (internal/orphans/orphans_test.go:350), `TestFailures` (internal/orphans/orphans_test.go:385), `TestOrphansSelects` (cmd/bronzeward/orphans_test.go:282), `TestOrphansClusterScope` (cmd/bronzeward/orphans_test.go:316), `TestOrphansTokenFileRefused` (cmd/bronzeward/orphans_test.go:346), `TestOrphansTokenReadAtUse` (cmd/bronzeward/orphans_test.go:417), `TestOrphansFailuresPrintNothing` (cmd/bronzeward/orphans_test.go:444), `TestOrphansNoCustomMetadata` (cmd/bronzeward/orphans_test.go:499), `TestOrphansChangesNothing` (cmd/bronzeward/orphans_test.go:558), `TestLiveReportPolicyExact` (internal/provider/report_live_test.go:96), `TestLiveReportIdentity` (internal/provider/report_live_test.go:227), `TestNoOrphanReportRoute` (internal/api/router_test.go:196); at cde5e38: `TestSelection` (internal/orphans/orphans_test.go:249), generations named only by fragment reference rows, with the one-kind-only control in one and two statements (lines 292-293).
@@ -361,7 +379,7 @@ rows take the path the claim's state allows, so their count can differ between r
 | R2 | `controls`: `s2` (`S2 negative controls, C §15`: the publications) | CI: the stop at each point | passed |
 | R3 | `controls` and `s6`: `s1` (`S1 takeover, C §3.4`, 25; `S1 takeover, C §15 check`, 9; `S1 lease extension, C §3.3`, 5; `S1 interruption`, 2; `S1 Go tests`, 1) | CI | passed |
 | R4 | `run`: `s2p` (`S2 precondition, C §10.1`); `controls`: `s2` (`S2 negative controls`, `S2 Go tests`) | — | passed |
-| R5 | each scenario's refusals in `run`, and their negative controls in `controls` | CI: the rest, and the specified-codes check | passed |
+| R5 | each scenario's refusals in `run`, and their negative controls in `controls` | CI: the rest, and the specified-codes check | met in each clause's scenario and in CI; no result maps every clause (§8) |
 | R6 | `s6`: `s4ds` (`S4 DS row 001` to `S4 DS row 021`, the table `ds.tsv`; the rows no request reaches, as the Go checks of `ds-go.log`) | CI: the scan | passed |
 | R7 | `run`: `s4` (`S4 step 1` to `S4 step 5`); `s6`: `s4ds` (DS rows 003 and 011) | CI: every named lock test | passed |
 | R8 | `controls`: `s3r` (`S3 negative controls`: expiry), `s4c` (`S4 negative controls`: the evidence older than the plan binds, no evidence, nothing refused; ER choice §10.28) | CI: a contradicting newer observation (`TestCommitmentRefusals` and `TestAttemptRefusals`, "a newer observation shows another digest"), the bound | passed |
@@ -374,7 +392,7 @@ rows take the path the claim's state allows, so their count can differ between r
 | R15 | `s6`: `s6` (`S6.1 018` to `S6.1 021`, `S6.1 stale`, `S6.1 send`, `S6.1 cancel`; the table `s6-points.tsv`) | CI | passed |
 | R16 | `controls`: `s4x` (`S4 negative controls`: the identity revoked before the commitment, comparison 1; and once committed with no attempt) | CI: after an attempt | passed |
 | R17 | — | CI | met in CI |
-| R18 | `run`: `s5p`; `controls`: `s5` (`S5 negative controls`) | — | passed |
+| R18 | `run`: `s5p`; `controls`: `s5` (`S5 negative controls`: the revert on a frozen scope passed over, the unfreeze by a non-approver 403) | CI: the commitment, adoption and revert refusals | passed |
 | R19 | `run` and S7 variants: `s7` (`S7 before T`, `S7 at T`, `S7 after T`, `S7 step 1` to `S7 step 11`; step 4 is the closing run's); S7 closing: `s7c` | — | passed |
 | R20 | `run`, whole; `s6` | — | passed |
 | R21 | `controls` and `s6`: `s2` (`S2 Go tests`) | — | passed |
@@ -401,7 +419,7 @@ rows take the path the claim's state allows, so their count can differ between r
 | R42 | — | CI | met in CI |
 | R43 | `controls` and `s6`: `s1` (`S1 access`, 14; `S1 access, PA §16`, 1; `S1 access, PA §16 check`, 6; `S1 inventory, PA §16 check`, 5; `S1 Go tests`: `TestLiveRoleProbe` against the fixture's nodes); S1 node ID: `s1nid` (the refusal for another node ID) | CI | passed |
 | R44 | `run`: `s4`; `s6`: `s4ds` (the scans of its refused and interrupted dispatches) | CI | passed |
-| R45 | `run`: `s4`, `s5p`, `s7` | CI | passed |
+| R45 | `run`: `s4`, `s5p`, `s7` | CI | met live and in CI; the allowlist and post-revocation refusals not traced (§8) |
 | R46 | — | CI | met in CI |
 | R47 | — | CI | met in CI |
 | R48 | `run`: `s8` (`S8 step 3`); S8 controls: `s8controls` (`S8 negative controls`), `s8revocation` (`S8 revocation alone`) | CI | passed |
