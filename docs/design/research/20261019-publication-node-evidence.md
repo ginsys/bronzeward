@@ -106,6 +106,51 @@ operation before subsequent rejection cases. The retained intermediate logs
 are not assigned to a clean committed revision. The final database/provider
 gate above supersedes them as acceptance evidence, without erasing them.
 
+## S2 assertion review repair
+
+The first hosted advisory review found a stale revision label in the sanitized
+header and a weakness in S2's `released_once` assertion. The header now names
+`aede267` as the chain that stopped at S3 and `44e8cf8` as the passing repair
+chain. The assertion now requires nonempty release-machine coverage and a
+positively matching observation for every machine; a missing row or null field
+cannot disappear from a count of violations.
+
+The [reproducible harness](../../../scripts/test/s2-publication-evidence-test.sh)
+extracts the actual function, without executing the scenario's top-level code.
+Each query uses fresh nullable PostgreSQL temporary tables inside a rolled-back
+transaction with `search_path = pg_temp`. Deliberately missing/null rows test
+the assertion independently of production schema constraints; several are
+already forbidden by those constraints. This is a fixture assertion repair,
+not evidence that the publication implementation accepted those states.
+
+At clean `6fe0af3afb0eca83844489d15d7069a43dfc8d17`, PostgreSQL 17.11,
+the same harness checked the old function from published `0476c19` and the
+corrected function. The old function missed 15 of 28 controls (expected exit 1);
+the corrected function passed all 28 (exit 0), with zero SQL errors in both.
+The controls cover one/two-machine success, missing/null/badly bound evidence,
+wrong minor, mixed valid/invalid machines, empty coverage and the original
+release/draft assertions. The checkout remained unchanged. Syntax, ShellCheck
+and whitespace checks passed. No full live chain was rerun for this assertion
+change; the live results above and below keep their original revisions.
+
+With the disposable development database available, choose an empty artifact
+directory outside the checkout and set `TMPDIR`/`GOTMPDIR` as above:
+
+```sh
+bash scripts/test/s2-publication-evidence-test.sh fixtures/scenarios/s2 "$artifact_dir/after"
+git show 0476c196fa06f27c5320de50b27efb929b114ba9:fixtures/scenarios/s2 > "$artifact_dir/before-s2"
+bash scripts/test/s2-publication-evidence-test.sh "$artifact_dir/before-s2" "$artifact_dir/before"
+# The old-function control must exit 1; the corrected function must exit 0.
+```
+
+`BW_TEST_PG_DSN` defaults to the repository's disposable development PostgreSQL.
+The retained development attempt that could not connect through the restricted
+sandbox is a harness/environment failure, not an assertion result. The final
+harness refuses a failed connection preflight and records SQL errors separately
+from assertion outcomes. Both committed logs passed the same synthetic-value
+and private-key-header screen, with all positive controls detected; this only
+screens emitted output.
+
 ## Live fixture verification
 
 The fresh chain completed at clean revision

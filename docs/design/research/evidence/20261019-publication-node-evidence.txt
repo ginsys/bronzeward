@@ -256,3 +256,90 @@ Retained first launch: exit 1 at up before any scenario; source 247e22c2adff4bf2
 2bca4bf6f608cde71c62ef8f7787fd524fb34b239264e59bfe656d7be034309d  steps-20261019T151526Z/chain.log
 5e88e7149bccc4e6e4b917dcd18c85903a1631814b6b3693b44ebd53f35aafa6  steps-20261019T151526Z/up.log
 Teardown: no fixture containers, networks, volumes or state left.
+
+S2 assertion review repair:
+Harness and corrected function source: 6fe0af3afb0eca83844489d15d7069a43dfc8d17
+Old-function source: 0476c196fa06f27c5320de50b27efb929b114ba9
+Harness SHA256: 9b259ba188a7855fe5460d6ba5bc94c8d4d28ea8c1e9d844603f2ae1151538be
+Command: bash scripts/test/s2-publication-evidence-test.sh <source-script> <artifact-directory>
+The old source is extracted with git show 0476c196fa06f27c5320de50b27efb929b114ba9:fixtures/scenarios/s2.
+Every exact query uses fresh nullable pg_temp tables inside BEGIN/ROLLBACK; production constraints are intentionally absent.
+No full live chain rerun for this assertion-only repair.
+
+before: exit 1 (expected 1)
+UTC start: 2026-10-19T17:31:48Z
+PostgreSQL: 17.11
+PASS	matching	exit=0
+PASS	matching_two_machines	exit=0
+PASS	no_release	exit=1
+PASS	duplicate_release	exit=1
+PASS	draft_not_published	exit=1
+PASS	draft_wrong_release	exit=1
+PASS	missing_draft	exit=1
+FAIL	zero_machines	exit=0 expected=1
+FAIL	missing_observation	exit=0 expected=1
+FAIL	missing_start	exit=0 expected=1
+FAIL	missing_operation	exit=0 expected=1
+FAIL	null_observation_link	exit=0 expected=1
+FAIL	null_generation	exit=0 expected=1
+FAIL	null_owner_generation	exit=0 expected=1
+FAIL	null_access_path	exit=0 expected=1
+FAIL	null_purpose	exit=0 expected=1
+FAIL	null_operation_binding	exit=0 expected=1
+PASS	null_running_version	exit=1
+PASS	wrong_operation_binding	exit=1
+FAIL	wrong_machine_binding	exit=0 expected=1
+FAIL	wrong_start_basis	exit=0 expected=1
+PASS	wrong_generation	exit=1
+PASS	wrong_access_path	exit=1
+PASS	wrong_purpose	exit=1
+PASS	wrong_minor	exit=1
+FAIL	malformed_minor	exit=0 expected=1
+FAIL	mixed_missing_observation	exit=0 expected=1
+FAIL	mixed_null_generation	exit=0 expected=1
+Cases: 13 PASS, 15 FAIL; SQL errors: 0
+UTC finish: 2026-10-19T17:31:51Z
+758efe95c837ac98eab84e906d95e49f1fe9e8bfb4c6af08ab7f65092ebbf582  bw247-s2-committed-before.log
+
+after: exit 0 (expected 0)
+UTC start: 2026-10-19T17:31:51Z
+PostgreSQL: 17.11
+PASS	matching	exit=0
+PASS	matching_two_machines	exit=0
+PASS	no_release	exit=1
+PASS	duplicate_release	exit=1
+PASS	draft_not_published	exit=1
+PASS	draft_wrong_release	exit=1
+PASS	missing_draft	exit=1
+PASS	zero_machines	exit=1
+PASS	missing_observation	exit=1
+PASS	missing_start	exit=1
+PASS	missing_operation	exit=1
+PASS	null_observation_link	exit=1
+PASS	null_generation	exit=1
+PASS	null_owner_generation	exit=1
+PASS	null_access_path	exit=1
+PASS	null_purpose	exit=1
+PASS	null_operation_binding	exit=1
+PASS	null_running_version	exit=1
+PASS	wrong_operation_binding	exit=1
+PASS	wrong_machine_binding	exit=1
+PASS	wrong_start_basis	exit=1
+PASS	wrong_generation	exit=1
+PASS	wrong_access_path	exit=1
+PASS	wrong_purpose	exit=1
+PASS	wrong_minor	exit=1
+PASS	malformed_minor	exit=1
+PASS	mixed_missing_observation	exit=1
+PASS	mixed_null_generation	exit=1
+Cases: 28 PASS, 0 FAIL; SQL errors: 0
+UTC finish: 2026-10-19T17:31:53Z
+f01b3cc8328f33cd13e450d48a2761699cae883c317df2501f4efedffa8a5456  bw247-s2-committed-after.log
+Log screen: zero synthetic-value/private-key-header matches; every pattern detected in positive control.
+Checkout unchanged throughout both committed runs.
+Retained development attempts (not acceptance results for a clean committed revision):
+38c817b2a23892088f8e47bc2e9a64977cdb6dfe790e96ac297a9440373e967f  bw247-s2-released-once-development-before.log
+a925db5aedb481620ab2276fddb915e37d3135ab83d51a819de9d32deb26ad74  bw247-s2-released-once-development-before-retry.log
+67b9dc17c000d58f809d369474c9b5a4ac55625630bb94ff7ea95d66f6ee3dc1  bw247-s2-released-once-development-after.log
+The first development attempt could not connect through the sandbox; its apparent case outcomes are invalid.
+The final harness fails connection preflight and labels SQL errors separately from assertion results.
