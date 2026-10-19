@@ -590,19 +590,26 @@ func lockWaited(ctx context.Context, db *sql.DB) <-chan struct{} {
 
 // PA §3.3 and §16 Talos access, observations: each purpose reads the access's latest version at
 // use and records it; the stale-credential control observes with an earlier version and records
-// that one instead.
+// that one instead. This distinguishes the access read; it does not assert publication refusal.
 func TestObservationRecordsTheAccessItRead(t *testing.T) {
 	t.Parallel()
 	ae := newAttemptEnv(t, "")
-	path := "access/talos/" + ae.cluster
-	stale := provider.NewTalosAccess(provider.TalosAccessVersion{Path: path, Version: 1, CreatedTime: accessCreated}, []byte("context: a\n"))
+	p := publishFixture(t, newDraftEnv(t))
 	for i, f := range []observeFor{
 		{purpose: "evidence", plan: ae.pid},
 		{purpose: "completion", plan: ae.pid, operation: ae.op},
 		{purpose: "recovery", plan: ae.pid, operation: ae.op},
 		{purpose: "restoration"},
 		{purpose: "drift"},
+		{purpose: "publication", operation: p.job.op, generation: p.job.gen},
 	} {
+		e, machine, cluster, owner := ae.env, ae.machine, ae.cluster, ae.a.d.owner
+		if f.purpose == "publication" {
+			// Use the owner whose running publication the observation names.
+			e, machine, cluster, owner = p.env, p.machine, p.cluster, p.owner
+		}
+		path := "access/talos/" + cluster
+		stale := provider.NewTalosAccess(provider.TalosAccessVersion{Path: path, Version: 1, CreatedTime: accessCreated}, []byte("context: a\n"))
 		for _, control := range []bool{false, true} {
 			v := provider.TalosAccessVersion{Path: path, Version: 10*i + 2, CreatedTime: accessCreated.Add(time.Duration(i) * time.Second)}
 			x := &fakeExecutor{access: provider.NewTalosAccess(v, []byte("context: a\n"))}
@@ -610,7 +617,9 @@ func TestObservationRecordsTheAccessItRead(t *testing.T) {
 			if control {
 				o.staleAccess = &stale
 			}
-			got, err := observer(t, ae.env, x, o).observe(t.Context(), ae.machine, f)
+			d := e.d
+			d.exe, d.owner = x, owner
+			got, err := e.buildWith(d, o).observe(t.Context(), machine, f)
 			if err != nil {
 				t.Fatalf("%s: %v", f.purpose, err)
 			}
@@ -618,8 +627,13 @@ func TestObservationRecordsTheAccessItRead(t *testing.T) {
 			if control {
 				want = stale.Version()
 			}
-			if n := count(t, ae.db, `SELECT count(*) FROM observation WHERE id = $1 AND access_path = $2 AND access_version = $3
-				AND access_created::timestamptz = $4`, got.ID, want.Path, want.Version, want.CreatedTime); n != 1 {
+			if n := count(t, e.db, `SELECT count(*) FROM observation o
+				JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
+				WHERE o.id = $1 AND o.access_path = $2 AND o.access_version = $3 AND o.access_created::timestamptz = $4
+				AND s.purpose = $5 AND s.plan IS NOT DISTINCT FROM NULLIF($6, '')
+				AND s.operation IS NOT DISTINCT FROM NULLIF($7, '')
+				AND s.publication_generation IS NOT DISTINCT FROM NULLIF($8::bigint, 0) AND s.controller = $9`,
+				got.ID, want.Path, want.Version, want.CreatedTime, f.purpose, f.plan, f.operation, f.generation, owner.ID); n != 1 {
 				t.Fatalf("%s (control %v): the observation does not record access version %d", f.purpose, control, want.Version)
 			}
 		}

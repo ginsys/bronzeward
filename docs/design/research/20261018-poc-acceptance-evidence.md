@@ -362,10 +362,10 @@ plan. An item with no retained result leaves its issue incomplete (AP §7.1).
 | Row | Contract item (leading clause) | Issue (ginsys/bronzeward) | Checks (§6.1; supplement §6.3) | Left for the live run | Verdict |
 | --- | --- | --- | --- | --- | --- |
 | R1 | C §15: ingestion success, refusal and interruption at each pipeline step, every surface scanned | #22, #27, #23 | drift-adoption success and its start refusals | S1; S5 step 4 with drift adoption's interruption at each step and its scan; S2's negative controls | met live and in CI |
-| R2 | C §15: the compiler process's surfaces scanned over successful, rejected and interrupted publications, killed at … | #23 | a publish run stopped in process at each of its six points, nothing written, taken over | S2's scans over a killed compiler process | met live and in CI |
+| R2 | C §15: the compiler process's surfaces scanned over successful, rejected and interrupted publications, killed at … | #23 | original six-point checks; #247's seven-point run can retain earlier observation entries but no release/Desired change before commit; generation-2 takeover | S2's revision-bound scans, including #247 full S2 at `aede267` | met live and in CI |
 | R3 | C §15: claim lease extension by its owner only, takeover of `held` and `resumed` claims only after lapse, stale … | #22 | every named takeover test, lease extension, a crash inside the draft transaction, provider unreachable | S1's negative controls | met live and in CI |
 | R4 | C §15: SR and SP matrices through the compiler's path, with import-base references and SP's oracle over Bronzeward's … | #23 | — | S2's precondition and negative controls | met live |
-| R5 | C §15 and PA §16: every refusal of C §13, every walk-through of PA §13 and refusal of PA §14 | #21 to #29 | clause-level mapping in the supplement; C13-17 publication minor gap open; PA14-13 synchronous failure and control checked | retained scenario refusals and scans | partially evidenced; publication repair #247 remains open (§6.3) |
+| R5 | C §15 and PA §16: every refusal of C §13, every walk-through of PA §13 and refusal of PA §14 | #21 to #29 | clause-level mapping in the supplement; separate #247 publication-minor evidence; PA14-13 synchronous failure and control checked | retained scenario refusals and scans, including early publication access refusal | additional evidence recorded; #241 closeout assessment remains open (§6.3) |
 | R6 | ER §9.2: DS rows 001–023 through the implementation over the worker's endpoint, with controls 006, 008, 011 and row … | #26 | — | S4's precondition (DS rows over the worker's endpoint); the fallback's scan does not apply, the fallback is not built (ER §9.2) | met by live rows and Go interleaving checks (ER choice §10.32); the fallback is not built (ER §9.2) |
 | R7 | ER §9.2: sending only after the attempt commits | #25, #26 | every named lock test with its control | S4 and DS rows 003 and 011 | met live and in CI |
 | R8 | ER §9.2: expiry, observation age, a contradicting newer observation, the attempt bound, each refusing | #25, #26, #28 | the attempt bound refusing; the bound exhausted after a lost response | expiry, observation age and a contradicting newer observation (S3, S4) | met live and in CI |
@@ -405,7 +405,7 @@ plan. An item with no retained result leaves its issue incomplete (AP §7.1).
 | R42 | PA §16: two inventory requests for one SMBIOS UUID under different keys, one refused, and the same for one Talos node … | #22 | each identity key's race with its control; both keys/neither and platform refusals; matching/mismatched release-mode controls | — | met in CI; platform checks rerun in §6.3 |
 | R43 | PA §16: Talos access, ingestion | #22 | every named test; the access path's grants and refusals | `TestLiveRoleProbe` (skips in CI: no Talos node); S1's scan | met live and in CI |
 | R44 | PA §16: Talos access, executor | #26, #172 | every named test, against a stand-in node | S4's scan of refused and interrupted dispatches | met live and in CI |
-| R45 | PA §16: Talos access, observations | #26, #27, #29 | all five purposes and access failures; stale-version, mutating-call and post-revocation controls; plan-less drift | retained S4, S5, S7 evidence | evidenced by the mapped runs and committed checks (§6.3) |
+| R45 | PA §16: Talos access, observations | #26, #27, #29 | original five purposes and access failures; stale-version, mutating-call and post-revocation controls; plan-less drift | retained S4, S5, S7 evidence; #247 publication observations | five-purpose evidence retained; publication-purpose matrix remains pending in #241 (§6.3) |
 | R46 | PA §16: Talos access, endpoint | #22, #25, #29 | the grammar, atomicity, recovery mode, a plan dialling its old endpoint, with the current-endpoint and dispatch-time-resolution controls; a later plan bound to the new endpoint | — | met in CI |
 | R47 | PA §16: machine revisions allocated in commit order under concurrent writers, with the unlocked control | #26 | commit order under concurrent writers, with the unlocked control | — | met in CI |
 | R48 | PA §16: an event stream ended by its token's `exp`, resumption refused after revocation | #26 | the stream ended at `exp` (in CI too) | S8 step 3 | met live and in CI |
@@ -544,9 +544,30 @@ failed attempts, skips and fixture limits above remain unchanged. This
 supplement supplies additional R5/R45 evidence; it does not supply the independent
 S8 review, any of the six owner verdicts below, or the dated owner assessment.
 Local review then reproduced a second publication defect: a node-minor mismatch
-does not refuse publication. [#247](https://github.com/ginsys/bronzeward/issues/247)
-owns that repair and its needed evidence-acquisition refinement. R5 remains
-incomplete. The review also identified missing synchronous T1 database-failure
+did not refuse publication at the reviewed revision.
+[#247](https://github.com/ginsys/bronzeward/issues/247) now has separately
+recorded repair evidence in the [publication report](20261019-publication-node-evidence.md):
+the database/provider gate at `e04d627`, four guard-removal controls and full
+S2 at `aede267`, and the repaired integrated chain at `44e8cf8`. The
+clause-level report links each exact revision and preserves the failed chains.
+Its #247 report reference at `032ecd4` also retains the S2 assertion controls at
+`6fe0af3` (old assertion: 13 PASS / 15 FAIL, expected exit 1; corrected assertion:
+28 PASS, exit 0; zero SQL errors) and the committed-reply-loss checks at
+`7d06094` (seven top-level tests, nine PASS records, zero FAIL/SKIP, exit 0).
+The former use nullable temporary tables, not evidence of reachable production
+corruption. The latter retain already-committed success and original evidence
+without reclaim or reread; the rolled-back `08006` control remains a separate
+unfinished-operation case. Neither replaces any live run. PR248 landed at
+`b3a479c0c0a4170d95d33e71b0ce799cd51a5eb7` on 2026-10-19
+at 19:14:04 UTC, with an equal verified tree and passing branch/queue CI;
+#247 was assessed and closed. R2's current summary names all seven publication interruption points
+and retained observation entries; §6.2's original runs remain unchanged.
+Provider-wide outages now refuse at the required publication access read;
+`TestReadPinnedRefuses` separately retains compiler dependency-read coverage.
+Failed publication observation starts/results can persist without a release.
+The original 25-case run covers five purposes; no six-purpose #241 matrix
+result is asserted here. #241 closeout remains open.
+The review also identified missing synchronous T1 database-failure
 response coverage. The added check and its successful-commit control pass at
 `02d012c222d51714a9ce08b7087f8c9d1fab35fb`; changing the failure's HTTP 503 to
 500 makes the check fail as intended. The supplement retains both outcomes.
@@ -585,9 +606,11 @@ response coverage. The added check and its successful-commit control pass at
 - **R5 and R45 additional evidence:** the clause audit, missing checks and controls
   are recorded in §6.3 and the linked #241 supplement. The publication defect
   found by that audit was separately repaired and landed under #244. A second
-  publication-minor defect remains open under #247. The synchronous T1 failure
-  check and control passed, with the wrong-status control failing. R5 is incomplete. These later results do not
-  retroactively change any original run's coverage.
+  publication-minor defect has separate repair evidence under #247, mapped in
+  §6.3 with its verified PR248 landing. The synchronous T1 failure check and
+  control passed, with the wrong-status control failing. #241's closeout
+  assessment and six-purpose observation-access matrix remain open. These
+  later results do not retroactively change any original run's coverage.
 - Pointer `SKIP` rows, each naming the check that carries what it leaves out: S7's three
   dropped-comparison controls (§6.1, R27), S4's frozen-scope, index-drop and revocation-wait rows
   (`s4ds`, `s5`, §6.1), and S0 step 3's earlier-epoch automation token (S7 step 6, §5).

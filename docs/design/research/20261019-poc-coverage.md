@@ -55,8 +55,10 @@ The mappings below identify assertions, not just matching test names. Tests in
 responses are distinguished from the retained live scenarios. Compiler tests
 use the pinned Talos machinery on synthetic inputs. The fixture scenarios use
 the one selected container profile; they establish no VM/hardware or production
-claim. A refused publication's “nothing” means no release: its operation, act
-and terminal event may persist, as PA §14 specifies.
+claim. A refused publication's “nothing” means no release or Desired change:
+its operation, act, events and immutable publication observation starts/results
+can persist (PA §6.1.1/§14). An interrupted read can leave a start without a
+completed observation; retained failed evidence is not a published release.
 
 ## Review findings and remaining coverage
 
@@ -68,12 +70,13 @@ for a synthetic observation reporting v1.12.4, while the v1.13.6 control also
 published. The expected-failure run exited 1; retained log SHA256
 `fb270eb50ed89f75e2b90adbbfd094af785681ca93f813c1af7172425d9ded96`.
 The behavioral repair is [#247](https://github.com/ginsys/bronzeward/issues/247),
-a native prerequisite of #241. It requires refinement of version-evidence
-acquisition before implementation: initial source-machine ingestion records no
-running version, drift reads require an Applied baseline, and the compiler
-cannot read Talos credentials. The proposal in #247 is not an accepted change.
-**R5 remains incomplete.** Dispatch's existing check remains useful but cannot
-substitute for the publication refusal.
+a native prerequisite of #241. At that review, version-evidence acquisition
+still needed refinement: initial source-machine ingestion records no running
+version, drift reads require an Applied baseline, and the compiler cannot
+read Talos credentials. **R5 was incomplete at that revision.** Dispatch's
+existing check remains useful but cannot substitute for the publication
+refusal. The later owner decision and repair evidence are recorded separately
+below; they do not change the failed probe's result.
 
 PA14-13 also lacked a synchronous draft-update HTTP failure check. The added
 `TestFragmentPutDatabaseFailure` checks a rolled-back T1 against a successful
@@ -87,6 +90,42 @@ The result file retains commands, log hashes and the clean follow-up log
 screen with positive control. The older asynchronous and live kill results
 remain at their original revisions. This closes PA14-13's missing response
 coverage, not C13-17's publication defect.
+
+### Publication repair evidence recorded separately
+
+The [#247 repair report at `032ecd4`](https://github.com/ginsys/bronzeward/blob/032ecd4e15d9916f9269509fe7705684bbb43cf6/docs/design/research/20261019-publication-node-evidence.md)
+records the 19 October owner decision: fresh read-only executor observations
+of every covered machine, including first adoption, before compiler pinned-value
+reads. Its [sanitized evidence at that revision](https://github.com/ginsys/bronzeward/blob/032ecd4e15d9916f9269509fe7705684bbb43cf6/docs/design/research/evidence/20261019-publication-node-evidence.txt)
+separates the following runs and their limits. [PR248](https://github.com/ginsys/bronzeward/pull/248)
+landed at `b3a479c0c0a4170d95d33e71b0ce799cd51a5eb7` on
+2026-10-19 at 19:14:04 UTC. The landed tree equals the verified candidate;
+branch and merge-queue CI passed, and #247 was assessed and closed. The
+original source identities below remain the identities of the executed checks:
+
+| Evidence | Exact source and outcome |
+| --- | --- |
+| Database/provider gate | [`e04d627`](https://github.com/ginsys/bronzeward/commit/e04d6272006fdfaa57e192d8531dbb5b0a47e8af): `mise run go-db` exited 0, 21 tested packages and two without tests; nonverbose output does not provide a complete skip inventory. |
+| Guard-removal controls | [`aede267`](https://github.com/ginsys/bronzeward/commit/aede267c50f7c10978e42aa1eb4a8c43c96feaee): four overlays failed the expected assertions while matching controls passed, with no selected test skipped. |
+| Full S2 | `aede267`, `steps-20261019T155019Z`: 373 PASS, 0 FAIL, 0 SKIP, including the required early node-access refusal under partition, seal and pause, offline-node refusal and seven publication interruption points. The chain later failed eight S3 assertions; this is a passing S2 within a retained failed chain. |
+| Repaired integrated chain | [`44e8cf8`](https://github.com/ginsys/bronzeward/commit/44e8cf8c8f0285e70768e07291c2cd6f4a0ee9e6), `steps-20261019T163018Z`: every requested step exited 0, with 48 exact-revision, empty-diff, complete bundles and positive-control-only scans. Pass-mode skips remain explicit; this was not a full S1/S2/S5 negative-matrix rerun or an S8 human review. |
+| S2 assertion controls | [`6fe0af3`](https://github.com/ginsys/bronzeward/commit/6fe0af3afb0eca83844489d15d7069a43dfc8d17): the extracted old assertion from `0476c19` produced 13 PASS / 15 FAIL (expected exit 1); the corrected assertion passed all 28 controls (exit 0), both with zero SQL errors. Nullable temporary tables test missing/null/wrong evidence and nonempty coverage; they do not establish production reachability. No live chain was rerun for this assertion-only repair. |
+| Successful COMMIT with lost reply | [`7d06094`](https://github.com/ginsys/bronzeward/commit/7d06094caee750fe537483521ce52cf78319be8b): seven top-level tests, nine PASS records including subtests, zero FAIL/SKIP, exit 0. `TestPublishWorkerCommittedReplyLost` performs real COMMIT then returns synthetic `08006`; operation/release/draft/Desired and original evidence remain, neither worker can reclaim, and an unavailable node causes no new observation/read/release. Six existing retry, rollback, claim, lapsed-owner and offline checks passed alongside it. This is not a real database network partition. |
+
+Under a provider-wide outage the required access read fails before any compiler
+pinned-value read. The failed operation names `publication-evidence`, safe cause
+`unreadable-identity-or-version`, the machine and its observation; it has no
+`dependency` object. Full S2 checks the linked publication generation and absent
+access-version/node values, with `provider-unavailable` unread causes. Later
+compiler dependency failures remain separately checked by `TestReadPinnedRefuses`
+and the other compiler tests below. Neither refusal path creates a release.
+
+Known identity/minor mismatches refuse 422; missing or unreadable identity,
+version or access refuses 503. Different/malformed node versions are stand-ins;
+the live profile remains Talos 1.13.6. The original 25-case access matrix and six
+environment skips above remain five-purpose evidence. No six-purpose #241
+matrix result is asserted by this mapping update. #241's
+closeout assessment remains separate from #31's human acceptance.
 
 ## R5: compilation §13
 
@@ -106,11 +145,11 @@ Rows follow the contract's order. Each alternative in a condition is explicit.
 | C13-10 Stale heartbeat/commit/release; paused state | `staging.TestOwnerFenceMatrix`, `TestPausedOwnerTransitionsRefused`, `api.TestT1RefusedAfterGenBump`, `TestAbandonRefusedAfterGenBump`: each owner/generation/epoch/state term refuses the stale write, row unchanged, matching-owner controls admitted. |
 | C13-11 Absolute expiry; abandonment; recovery entry, including paused | S1 expiry/abandonment/review rows; `api.TestRecoveryEntryAbandonsPausedClaim`, `TestRecoveryEntryEndsJobsAndClaims`; staging expiry/sweep cases: payload cleared, claim abandoned, later import required. |
 | C13-12 Undeclared/unused name; local tag; key/sequence tag; reserved text; bad path | `ingest.TestValidateAuthoring`, `TestRefusalSweep`; API fragment refusal: each rule/path refused without a committed fragment. Sweep checks all formatting verbs for synthetic values. |
-| C13-13 Dependency not retained; unreadable | `compile.TestCheckPinnedRefuses`, `TestReadPinned`; `api.TestReadPinnedRefuses`, `TestBuildReleaseDependencyUnknown`; S2 step 6: lost/blocked versus unknown classified separately, no release. |
+| C13-13 Dependency not retained; unreadable | `compile.TestCheckPinnedRefuses`, `TestReadPinned`; `api.TestReadPinnedRefuses`, `TestBuildReleaseDependencyUnknown` retain isolated compiler classification/read refusals. Full S2 at `aede267` retains soft-deleted/destroyed pinned-value refusals and separate monitor classifications/alerts; its provider-wide outage cases now prove the earlier publication node-access 503, not a compiler pinned-value read. No release in either path; see the revision-bound repair evidence above. |
 | C13-14 Kind mismatch; base64 on non-string | `ingest.TestResolveRefusals`, `TestValidateAuthoring`; `api.TestBuildReleaseRefuses`: kind/encoding refusal, no artifact/release, safe error. |
 | C13-15 Secret reference belongs to another cluster | New `api.TestFragmentPutRefusesOtherClusterReference`: references actually minted through both foreign import-base and fragment routes; local draft rejects each, same-cluster control succeeds. Removing either cluster predicate makes its corresponding case fail. Publication diagnostics found a missing check, separately tracked in [#244](https://github.com/ginsys/bronzeward/issues/244): the inconsistent stored source reached provider reads and a successful worker release. `TestReadPinnedClusterScope` and `TestPublishWorkerRefusesForeignGeneration` cover its repair. The repair landed through [PR245](https://github.com/ginsys/bronzeward/pull/245) at `bc59346428ea267addfca37881c14eb4ecfda108`; its [evidence note](20261019-publication-cluster-scope.md) retains the failed probe and green checks. Supported authoring prevents constructing this source; direct database corruption is not asserted remotely reachable. |
 | C13-16 Ordinary fragment overrides/deletes an import-base reference | `compile.TestCompileRefusesABaseOverride`, `TestCompileRefusesAnAliasOverride`, `TestCompileBaseOverrideNamesOneFragment`; S2/S5: refusal names fragment/path, no release; authorized composition is the control. |
-| C13-17 Contract newer than renderer/not node minor; Kubernetes outside window | `compile.TestCheckContract`, `TestKubernetesVersionRefuses` and `api.TestBuildReleaseRefuses` cover renderer/Kubernetes mismatches. **Node-minor publication refusal is missing**, confirmed by the failed probe above and tracked in #247. Commitment checks prevent dispatch but do not satisfy this clause. |
+| C13-17 Contract newer than renderer/not node minor; Kubernetes outside window | `compile.TestCheckContract`, `TestKubernetesVersionRefuses` and `api.TestBuildReleaseRefuses` retain renderer/Kubernetes checks. #247 adds `TestPublicationRunningMinor`: same-minor publication succeeds, different minor refuses 422, missing/malformed version refuses 503; the minor-guard overlay detects the missing comparison. `TestPublicationMixedCoverage` refuses a mismatching covered machine; `TestPublicationWorkerRefusal` retains the failed operation/observation with no release or Desired change. The repair runs are bound above; the original failed probe and dispatch-only limitation remain historical evidence. |
 | C13-18 Native composition/validation rejects | `compile.TestComposeRejectsTypeMismatch`, `TestComposeRejectsAnUnloadableBase`, `TestCompileReturnsTheRealVerdict`, `TestCompileMessages`; `api.TestBuildReleaseRefuses` preserves rule/path and withholds unsafe native text. |
 | C13-19 Trace/flip counterpart missing; shape differs; passes disagree | New `compile.TestCompileRefusesAnUntraceableFragment` rejects real-valid input whose trace cannot be built, on either side of a boolean input; successful controls retain both inputs and attribute the flip. `TestFidelityFailsOnAnInjectedChange` rejects changed shape, untraced leaf and flipped shape; `TestCompileTraceInvalidIsFidelity` rejects real-valid/trace-invalid disagreement. Full source lists are constructed before each flip; no test claims an externally supplied flip input API exists. |
 | C13-20 Reserved output; unattributed exact copy | `compile.TestComposeRefusesReservedTextInOutput`, `TestCompileRefusesAnExactCopy`, `TestCompileCopyChecksEveryLeaf`, `TestCompileRefusesACanonicalCopy`, mapping/key-copy cases and no-secret assertions: paths only, no artifact; attributed copies are separately controlled. |
@@ -122,7 +161,7 @@ Rows follow the contract's order. Each alternative in a condition is explicit.
 | --- | --- |
 | PA13.1 Concurrent edits | `api.TestFragmentPutPreconditions` refuses a stale ETag before ingestion; `TestFragmentPutMovedBeforeT1` refuses movement during ingestion and leaves abandoned-claim orphans. `TestPublishCommitChangedHeadMoved`, `TestPublishCommitUnchangedHeadMoved` and its concurrent case refuse the moved head; S2's unlocked `FOR SHARE` control demonstrates the stale commit. |
 | PA13.2 Provider ahead of database | S1 T1 interruption and `TestCrashInsideT1LeavesDraft` retain the unreleased claim/provider generations without draft entries. Transient sweep and encrypted takeover have separate outcomes. The orphan report lists without deleting; S1/new import creates new names. |
-| PA13.3 Database ahead of client/provider | `TestPublishCommitRetry`/`TestPublishCommitExistingRelease` read the natural key first and retain one release; transaction commit-unknown cases distinguish committed/still-committing/not-committed. S7 older-OpenBao restore alerts on missing retained generations and refuses regeneration while the surviving artifact/key permits the separate apply claim. |
+| PA13.3 Database ahead of client/provider | `TestPublishWorkerCommittedReplyLost` at `7d06094` proves successful T3 already committed operation success and original evidence: no reclaim or fresh read after the reply is lost, even with the node now unavailable. `TestPublishCommitRetry` reuses its built unit and returns the matching release before evidence checks; `TestPublishCommitExistingRelease` is a synthetic second-operation transaction control, not ownership takeover. Request transaction tests separately distinguish committed/still-committing/not-committed. S7 older-OpenBao restore alerts on missing retained generations and refuses regeneration while the surviving artifact/key permits the separate apply claim. |
 | PA13.4 Repeated requests | `TestReplay`, `TestKeyReusedForAnotherRequest`, `TestSameKeyInFlight` with unlocked control, `TestFragmentPutLiveClaimForKey`, `TestPublicationRequestStates`, `TestApprovalRefusals`: one effect, stored replay, live entry-claim conflict, wrong-key fingerprint refusal, active operation reuse, published-draft conflict and exactly one approval. |
 | PA13.5 Migration | `migrate.TestSecondRunWaitsThenSkips`, `TestNoLockControl`, `TestKilledMigrationLeavesNothing`, schema/checksum checks: second runner waits; killed transaction leaves no migration; incompatible binary refuses startup. |
 | PA13.6 Older restore | S7 nominal restores backups older than ownership/approval/attempt/revocation changes, enters a fresh epoch, refuses stale tokens, records unaccounted scopes, preserves denied subjects and reissues automation. S7 no-entry is the explicit residual control; one released scope resumes while other scopes stay gated. |
@@ -131,7 +170,9 @@ Rows follow the contract's order. Each alternative in a condition is explicit.
 
 The row numbers below follow the 40 contract rows at the audited revision.
 Shared transaction tests assert act/idempotency counts; publication refusal
-helpers assert no release, the failed operation and terminal event. Those
+helpers assert no release, the failed operation and terminal event. Publication
+observation starts/results and their machine timeline entries can also persist,
+including all-null node/access results from a failed provider read. Those
 assertions do not turn all failures into “nothing persisted.”
 
 | Row and alternatives | Executable evidence and assertion |
@@ -149,17 +190,17 @@ assertions do not turn all failures into “nothing persisted.”
 | PA14-11 Update/discard during queued/running publication | `TestDraftUpdatePreconditions`, expanded `TestDraftDiscard` name the operation and preserve revision/state in both states; discard also asserts no discard act. Failed-operation controls permit editing or discarding. |
 | PA14-12 Compilation refuses draft input | Fragment refusal/replay and ingestion refusal cases: 422 paths/rule, abandoned claim, persisted refusal record/act, no fragment; provider orphans only when a write occurred. |
 | PA14-13 Database failure inside T1 | `TestCrashInsideT1LeavesDraft` and S1 interruption retain their rollback/claim evidence. New `TestFragmentPutDatabaseFailure` adds the synchronous 503, safe body, unchanged draft, held claim and provider orphan, with a successful-commit control. Both passed at `02d012c`; changing only the failure status to 500 made the refusal check fail while the success control still passed. |
-| PA14-14 Changed/unchanged head; changed import base; newly covered machine | `TestPublishCommitChangedHeadMoved`, `TestPublishCommitUnchangedHeadMoved` and concurrent case, `TestPublishCommitAppliedImportBaseChanged`, `TestPublishCommitMachineCovered` and concurrent case: failed stale-input, no release. |
+| PA14-14 Changed/unchanged head; changed import base; newly covered machine; missing/misbound/superseded publication evidence | `TestPublishCommitChangedHeadMoved`, `TestPublishCommitUnchangedHeadMoved` and concurrent case, `TestPublishCommitAppliedImportBaseChanged`, `TestPublishCommitMachineCovered` and concurrent case retain input-movement checks. #247's `TestPublicationEvidenceAtCommit` and `TestPublicationEndpointRace` add binding, endpoint and higher-basis evidence refusals against matching-newer controls: failed stale-input, no release. |
 | PA14-15 Introduced name now exists | `TestPublishCommitIntroducedNameExists` and concurrent case: expected-absent mismatch fails stale-input, no release. |
 | PA14-16 Assignment change on held scope | `TestPublishCommitScopeHeld` and concurrent case: failed scope-busy, no release; S4 held-scope control. |
 | PA14-17 Blocked/lost/changed dependency identity, concurrent creation-time seed | `TestReadPinnedRefuses`, `TestBuildReleaseEncryptionRefused`, `TestPublishCommitStatusOtherIdentity`, `TestPublishCommitStatusOtherIdentityConcurrently`, `TestPublishFirstNamedConcurrentlyRefused`, `TestPublishAfterMonitorWaitedRefused`; S2 step 6: failed validation-failed names dependency, no release. |
-| PA14-18 Unknown value/encryption/read metadata; missing Date; sealed/unreachable provider | `TestReadPinnedRefuses`, `TestBuildReleaseDependencyUnknown`, `compile.TestEncryptArtifactsRefuses` and S2 provider failure: failed dependency-unavailable, no release; valid provider response controls succeed. |
-| PA14-19 Compiler rejection; mixed Kubernetes versions | `TestBuildReleaseRefuses`, `TestPublishWorkerRefused`: safe rule/path error, failed operation/event, no release. |
+| PA14-18 Missing/unreadable publication identity/version/access; unknown value/encryption/read metadata; missing Date; sealed/unreachable provider | #247's `TestPublicationIdentityAndAccess` checks the early evidence refusal before compiler reads. Full S2 at `aede267` proves partition/seal/pause fail 503 `dependency-unavailable`, naming machine/observation/rule/cause rather than a dependency; the linked failed observation has no access version or node values. `TestReadPinnedRefuses`, `TestBuildReleaseDependencyUnknown` and `compile.TestEncryptArtifactsRefuses` retain the separate later compiler dependency failures and response controls. Neither path releases anything; immutable observations already recorded remain. |
+| PA14-19 Known publication identity/minor mismatch; compiler rejection; mixed Kubernetes versions | #247's `TestPublicationIdentityAndAccess`, `TestPublicationRunningMinor` and `TestPublicationWorkerRefusal` retain the machine/observation-bound 422 with matching controls. `TestBuildReleaseRefuses`, `TestPublishWorkerRefused` retain compiler rule/path errors. The failed operation/event and any publication evidence remain; no release. |
 | PA14-20 Stale pin/selection; changed assignment without import base; no covered machine | `TestSnapshotRecheck`, `TestSnapshotCoverage`, `TestPublishCommitNoImportBase`: validation-failed, no release; `TestSnapshotComposition` is the complete-snapshot control. |
-| PA14-21 Commit-unknown | Publication retry/existing-release and tx commit-unknown cases: natural-key read resolves one release, not an assumed rollback. |
-| PA14-22 Deadlock exhaustion; rejected COMMIT; statement constraint | `TestPublishCommitDeadlocked`, `TestPublishCommitRejected`, `TestPublishCommitConstraintViolated`: failed 503 or 500, no release; lost-reply control stays running and then resolves. |
+| PA14-21 Commit-unknown | `TestPublishWorkerCommittedReplyLost` at `7d06094` retains the already-succeeded operation and original release/evidence with no reclaim or node reread. `TestPublishCommitRetry` returns the matching natural key using the retained built unit before evidence checks; `TestPublishCommitExistingRelease` supplies a separate synthetic transaction-level control. Request commit-unknown cases cover the in-flight outcome separately; no result assumes rollback. |
+| PA14-22 Deadlock exhaustion; rejected COMMIT; statement constraint | `TestPublishCommitDeadlocked`, `TestPublishCommitRejected`, `TestPublishCommitConstraintViolated`: failed 503 or 500, no release. `TestPublishCommitRejected`'s `08006` control deliberately rolls back first, leaving no release and a running operation for retry; it is distinct from successful COMMIT/reply loss in PA14-21. A newly claimed unfinished pass obtains fresh observations and may refuse an offline node. |
 | PA14-23 Declaration/text-digest mismatch | `TestPublishCommitDeclarations` covers reference, source, version, digest, occurrence and provenance inconsistencies: failed internal-error, named clause logged, no release. `TestPublishCommitDeclarationsAgree` is the successful control. |
-| PA14-24 Superseded worker; lapsed lease | `TestPublishCommitFenced`, `TestPublishRunSuperseded`, `TestPublishRunLapsed`, `TestPublishRunStopped`: no stale commit or failure event; rightful takeover publishes once. |
+| PA14-24 Superseded worker; lapsed lease | `TestPublishCommitFenced`, `TestPublishRunSuperseded`, `TestPublishRunLapsed`, `TestPublishRunStopped`: no stale commit or failure event; rightful takeover publishes once. #247 adds `TestPublicationReadFenced` for supersession before/during access reads (no completed stale evidence) and `TestPublicationLeaseAfterLockWait` for lease expiry during the operation-lock wait (no observation start). |
 | PA14-25 New request for published draft | `TestPublicationRequestStates`: 409 names the release, no second operation. |
 | PA14-26 Second approval in epoch | `TestApprovalRefusals`: 409, original approval and plan state unchanged. |
 | PA14-27 Apply plan not Desired | `TestPlanCreationRefusals`: 409 names Desired, no plan/counter movement. |
@@ -183,7 +224,7 @@ assertions do not turn all failures into “nothing persisted.”
 | --- | --- |
 | Observation client read allowlist | `talos.TestMachineryCallsAllowlisted` checks the actual reader/applier call sets, including typed calls. Injected reader `ApplyConfiguration` and COSI `Destroy` calls must be detected. Exported-surface/import/caller guards constrain alternate call paths. |
 | Plan-less drift observation | `api.TestObserveDrift` records drift-purpose observation with null plan/operation, the access path/version, identity/configuration evidence and no node metadata leak. It does not create mutation authority. |
-| Access version and failed read | `TestObservationRecordsTheAccessItRead` checks all five purposes and detects the stale-credential control. New `TestObservationPurposeAccessFailure` crosses those purposes with absent, denied, malformed, unavailable and unclassified-status errors: recorded purpose/plan/operation and cause, no access or node values, no dial, no provider error text in records/timeline/logs. `TestObserveAccessReadFails` independently uses a stand-in node for drift failures. `TestObserveNodeReadFails` covers malformed credentials, refused credentials, a silent endpoint and individual node-read failures after the access read; `TestObserveErrorTextControl` detects the deliberate client-error-text leak. These node-side checks use drift observations, while R44 retains the dispatch-specific refusal checks. |
+| Access version and failed read | At `c9398d4`, `TestObservationRecordsTheAccessItRead` checks the original five purposes and distinguishes the stale-credential control; `TestObservationPurposeAccessFailure` crosses those purposes with absent, denied, malformed, unavailable and unclassified-status errors (25 cases): recorded purpose/plan/operation and cause, no access or node values, no dial, no provider error text in records/timeline/logs. #247 adds publication as a sixth purpose; its dedicated failure tests and full S2 evidence do not establish the unrun six-purpose #241 matrix or its publication stale-version control. `TestObserveAccessReadFails` independently uses a stand-in node for drift failures. `TestObserveNodeReadFails` covers malformed/refused credentials, a silent endpoint and individual read failures; `TestObserveErrorTextControl` detects the deliberate client-error-text leak. These node-side checks use drift observations, while R44 retains dispatch-specific refusals. |
 | Mutating client refused after revocation | `TestExecutorRevokedControl`: revoke after commitment and before attempt; shipped path records zero attempts/sends, enters unresolved/cancelled as specified. Skipping comparison 1 admits the control's exact no-reboot artifact send to its Talos stand-in (ER choice §10.32). `TestExecutorRevocationHeld` checks the lock wait. |
 
 ## Acceptance-boundary audit
@@ -194,7 +235,7 @@ supplement the retained integrated runs.
 
 | Indexed required-check list | Acceptance-record rows | Audit outcome |
 | --- | --- | --- |
-| C §15 | R1–R5 and R50 | Interruption/scans, claims, review, SR/SP and fidelity remain bound to their recorded tests and fixture runs. R5's clauses are mapped here; #244 is repaired, while the publication-minor requirement in #247 remains open. |
+| C §15 | R1–R5 and R50 | Interruption/scans, claims, review, SR/SP and fidelity remain bound to their recorded tests and fixture runs. R5's clauses are mapped here; #244 is repaired, and #247 now supplies separately revision-bound publication-minor repair evidence landed through PR248; #241 closeout remains pending its fresh checks and review. |
 | ER §9.2 | R6–R20 | Existing execution, accounting, identity, drift and restoration evidence remains in the record. R11 and R17 retain the future bound-health cases in #188; the late-read and late-landing residuals remain limits. |
 | PA §16 | R5, R15, R21–R28 and R35–R50 | Refusal traceability is expanded here; R42's platform checks and R45's observation boundary receive explicit mappings. All other rows retain their named tests, controls and scenario references. |
 | DM §10.1 | R29–R34 | All 15 items map to these rows: live provider states/publication/restore variants remain distinct from synthetic classifications, identity changes, ordering, watchdog and log controls. No additional provider topology is claimed. |
@@ -229,8 +270,9 @@ the deadline. R17 therefore means the PoC predicates are evidenced, not that a
 bound-health reader or its ordering cases have run.
 
 Milestone 03 requires the integrated evidence and owner assessment, not merely
-closed implementation issues or passing CI. #31 remains open for the second
-S8 reviewer, six criterion verdicts and the owner assessment. Milestone 02 stays
+closed implementation issues or passing CI. #31 remains open for the independent
+S8 review by the owner-named person, six criterion verdicts and the dated owner
+assessment. Milestone 02 stays
 open while the excluded licence decision #16 remains unfinished. Later upgrade,
 maintenance/reset and transport work is separately tracked without implementation.
 
