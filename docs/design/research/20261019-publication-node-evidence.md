@@ -88,6 +88,17 @@ after lease lapse; that new pass must obtain fresh observations and correctly
 refuses an offline node. PA §6.1.1 and §13.3 now distinguish these paths.
 No earlier release lookup or worker behavior change is required.
 
+At clean `7d06094caee750fe537483521ce52cf78319be8b`,
+`TestPublishWorkerCommittedReplyLost` performed a real COMMIT, then returned a
+synthetic connection-loss error to the worker. It verified durable operation,
+release, draft, Desired and original evidence, then made the node reader
+unavailable and proved neither the original nor another worker could claim it;
+no second observation, start, access read or release appeared. Six existing
+retry, rollback, claim, takeover and offline checks also passed: seven top-level
+tests, nine PASS records including subtests, zero failures or skips, exit 0.
+This simulates loss of the commit reply, not a real database network partition.
+The sanitized evidence retains the exact command, revision and log hash.
+
 ## Negative controls and development failures
 
 The first new tests ran on the pre-implementation source at a74cee5 with test
