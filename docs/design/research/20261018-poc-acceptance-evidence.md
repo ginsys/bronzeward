@@ -5,7 +5,7 @@
 | **Date** | 2026-10-19 |
 | **Work item** | [E6: demonstrate PoC acceptance](https://github.com/ginsys/bronzeward/issues/31) |
 | **Design reference** | [§18.1](../Talos_Configuration_and_Machine_Management_Design.md#181-phase-0---evidence-before-implementation-contracts) E6, [§18.2](../Talos_Configuration_and_Machine_Management_Design.md#182-phase-1---configuration-control-on-an-existing-cluster); the [acceptance plan](../../spec/acceptance-plan.md) (AP) |
-| **Artifacts** | The nine run records of §4 and their `bin/evidence` bundles: kept by the owner, not published (§3.4) |
+| **Artifacts** | The nine historical run records of §4, two repair regressions (§4.1) and their `bin/evidence` bundles: kept by the owner, not published (§3.4) |
 | **Decision enabled** | Whether the owner accepts the configuration-control PoC on the fixture profile, with the gaps of §8 carried or closed. It makes no production claim. |
 
 ## 1. Question
@@ -37,12 +37,14 @@ those runs and answers [AP §7](../../spec/acceptance-plan.md#7-coverage) and
   read "beside the workers profile" at ab32788. The text of S0's `SKIP` row for the earlier-epoch
   automation token,
   `fixtures/README.md` and the acceptance plan also differ.
+- **Repair regressions:** the two additional chains at `7fe6f14a6853d8e7be65d46bda72884b4a4cc040`
+  are recorded separately in §4.1; they do not change the historical revision bindings above.
 - **Limits:** the plan's [§9](../../spec/acceptance-plan.md#9-limits) limits bind every result.
   A pass is a pass on the fixture, never a production claim.
 
 ## 3. Runs
 
-Nine runs, each from its own fresh `bin/up`, all through `fixtures/scenarios/integrated`: the
+Nine historical acceptance runs, each from its own fresh `bin/up`, all through `fixtures/scenarios/integrated`: the
 `run` and `controls` presets at fcecfca, the `s6` preset and six step lists at ab32788 (§2). The
 runner runs the steps in order, stops at the first that fails, and writes
 `chain.log` (the checkout and each step's start, end and exit status), one `<step>.log` per step
@@ -258,6 +260,76 @@ scan found only its positive control, except where S8's negative control planted
 secret to be found (`S8 negative controls`, "the scan reports the copy"); no bundle names a source
 it could not capture.
 
+### 4.1 Repair regression: both worker selections
+
+Local review found that the older-OpenBao variant would remove `s2-labels` from
+the unused `workers` profile after S5 had reassigned the worker. That profile
+contained only that fragment, so the edit would be refused with 400 for an empty
+fragment list. This was a source finding, not another recorded failed chain. Commit
+`7fe6f14a6853d8e7be65d46bda72884b4a4cc040` skips the edit when the worker does not
+select `workers`; when it does, the existing fragment-removal behavior remains.
+No public API, schema or Go code changed.
+
+These two fresh chains ran serially at that clean commit, with no tracked edits
+during execution. They supplement the nine historical records above. They do not
+replace the AP §2 integrated run, its S8 timeline or the separate S6 evidence.
+
+| Path | Record | UTC start to finish | Bundles | Server image (sha256) |
+| --- | --- | --- | --- | --- |
+| Reassigned worker | `steps-20261019T100727Z` | 2026-10-19T10:07:27Z to 2026-10-19T11:43:35Z | 112 | `bd18cd9f76b9c0fba3212dd5ce7d74c0d2f9b259cc869316ec98b841492dc8a6` |
+| Selected workers profile | `steps-20261019T114919Z` | 2026-10-19T11:49:19Z to 2026-10-19T12:14:38Z | 28 | `37c24cb5baf555816f53b1808f31367a18d788c9415237d798c39940f99e4f94` |
+
+| Path | Step | Exit | Checks (PASS / FAIL / SKIP) | Retained evidence |
+| --- | --- | --- | --- | --- |
+| Reassigned worker | `s1` | 0 | 458 / 0 / 0 | `s1-run-20261019T100935Z` |
+| Reassigned worker | `s3h` | 0 | 29 / 0 / 0 | `s3-handover-20261019T103717Z` |
+| Reassigned worker | `s2` | 0 | 334 / 0 / 0 | `s2-run-20261019T103831Z` |
+| Reassigned worker | `s3r` | 0 | 95 / 0 / 0 | `s3-run-20261019T110350Z` |
+| Reassigned worker | `s4` | 0 | 33 / 0 / 0 | `s4-run-20261019T110747Z` |
+| Reassigned worker | `s5` | 0 | 170 / 0 / 0 | `s5-run-20261019T110935Z` |
+| Reassigned worker | `s7` | 0 | 125 / 0 / 0 | `s7-run-20261019T112413Z` |
+| Reassigned worker | `s7n` | 0 | 49 / 0 / 0 | `s7-no-entry-20261019T113249Z` |
+| Reassigned worker | `s7t` | 0 | 46 / 0 / 0 | `s7-transit-20261019T113456Z` |
+| Reassigned worker | `s7o` | 0 | 41 / 0 / 0 | `s7-old-bao-20261019T114126Z` |
+| Selected workers profile | `s1p` | 0 | 36 / 0 / 2 | `s1-pass-20261019T115132Z` |
+| Selected workers profile | `s3h` | 0 | 29 / 0 / 0 | `s3-handover-20261019T115245Z` |
+| Selected workers profile | `s2p` | 0 | 53 / 0 / 4 | `s2-pass-20261019T115330Z` |
+| Selected workers profile | `s3rp` | 0 | 74 / 0 / 1 | `s3-pass-20261019T115519Z` |
+| Selected workers profile | `s4` | 0 | 33 / 0 / 0 | `s4-run-20261019T115713Z` |
+| Selected workers profile | `s7` | 0 | 125 / 0 / 0 | `s7-run-20261019T115807Z` |
+| Selected workers profile | `s7n` | 0 | 49 / 0 / 0 | `s7-no-entry-20261019T120540Z` |
+| Selected workers profile | `s7t` | 0 | 46 / 0 / 0 | `s7-transit-20261019T120646Z` |
+| Selected workers profile | `s7o` | 0 | 41 / 0 / 0 | `s7-old-bao-20261019T121255Z` |
+
+Every `up` and `down` also exited 0. Teardown reported no fixture containers,
+networks, volumes or state left. The profile-selected chain deliberately uses
+S1/S2/S3 pass modes; their explicit skips remain in their TSVs. It exercises the
+selected-profile branch, not another full interruption matrix. The first chain
+runs the full modes and S5's reassignment before the same S7 variants.
+
+Each bundle's `manifest commit` and `created at` equal the repair commit, each
+`fixtures-diff.txt` is empty, and each leak scan finds only its intentional
+positive control. No source is recorded as unavailable. All versions and pinned
+images are those in §3.3, except the per-run server image IDs above; the pins blob
+is unchanged. Bundles remain owner-kept and unpublished under §3.4.
+
+From the repository root at the repair commit, with the same development services
+as §4, `<rec>` outside `fixtures/` and an existing writable `<tmp>` outside the
+fixture state:
+
+```sh
+export TMPDIR='<tmp>' GOTMPDIR='<tmp>'
+mise exec -- fixtures/scenarios/integrated '<rec>' up s1 s3h s2 s3r s4 s5 s7 s7n s7t s7o down
+mise exec -- fixtures/scenarios/integrated '<rec>' up s1p s3h s2p s3rp s4 s7 s7n s7t s7o down
+```
+
+The first run's older-OpenBao check explicitly records that the worker selects
+no `workers` profile and skips the unused profile edit. The second run retains
+the selected-profile removal check. Both publish and apply the imported artifact
+before the database snapshot, then restore the older provider, record its missing
+dependency alerts and refuse regeneration. Neither changes the acceptance limits
+or supplies an owner's verdict.
+
 ## 5. Coverage (AP §7)
 
 Runs and steps are those of §3; "`controls`: `s1`" is the `s1` step of the `controls` run.
@@ -289,7 +361,7 @@ plan. An item with no retained result leaves its issue incomplete (AP §7.1).
 | R2 | C §15: the compiler process's surfaces scanned over successful, rejected and interrupted publications, killed at … | #23 | a publish run stopped in process at each of its six points, nothing written, taken over | S2's scans over a killed compiler process | met live and in CI |
 | R3 | C §15: claim lease extension by its owner only, takeover of `held` and `resumed` claims only after lapse, stale … | #22 | every named takeover test, lease extension, a crash inside the draft transaction, provider unreachable | S1's negative controls | met live and in CI |
 | R4 | C §15: SR and SP matrices through the compiler's path, with import-base references and SP's oracle over Bronzeward's … | #23 | — | S2's precondition and negative controls | met live |
-| R5 | C §15 and PA §16: every refusal of C §13, every walk-through of PA §13 and refusal of PA §14 | #21 to #29 | refusals route by route; the specified-codes check | each clause's scenario; no test maps every C §13, PA §13 and PA §14 clause to a result | met in each clause's scenario and in CI; no result maps every clause (§8) |
+| R5 | C §15 and PA §16: every refusal of C §13, every walk-through of PA §13 and refusal of PA §14 | #21 to #29 | refusals route by route; the specified-codes check | scenario refusals; full C §13, PA §13 and PA §14 mapping pending #241 | partially evidenced; clause-level coverage pending #241 (§8) |
 | R6 | ER §9.2: DS rows 001–023 through the implementation over the worker's endpoint, with controls 006, 008, 011 and row … | #26 | — | S4's precondition (DS rows over the worker's endpoint); the fallback's scan does not apply, the fallback is not built (ER §9.2) | met live; the fallback is not built (ER §9.2) |
 | R7 | ER §9.2: sending only after the attempt commits | #25, #26 | every named lock test with its control | S4 and DS rows 003 and 011 | met live and in CI |
 | R8 | ER §9.2: expiry, observation age, a contradicting newer observation, the attempt bound, each refusing | #25, #26, #28 | the attempt bound refusing; the bound exhausted after a lost response | expiry, observation age and a contradicting newer observation (S3, S4) | met live and in CI |
@@ -301,7 +373,7 @@ plan. An item with no retained result leaves its issue incomplete (AP §7.1).
 | R14 | ER §9.2: assignment change refused while the scope is held | #26, #29 | — | S4's and S7's negative controls | met live |
 | R15 | ER §9.2: takeover at start | #28 | takeover at start, the §5 precedence, `unresolved` kept, a terminal operation refused | S6.1 | met live and in CI |
 | R16 | ER §9.2: identity revocation before commitment, after it with no attempt, after an attempt with its retry refused | #25, #26, #28 | the retry refused after an attempt | before commitment and after it with no attempt (S4) | met live and in CI |
-| R17 | ER §9.2: observation ordering, contradicting higher-basis reads, confirmed reads, the late-read residual | #28, #27 (adoption read) | ordering, contradicting higher-basis and confirmed reads, the late-read residual, the adoption read; a completion read in flight across a concurrent accounting, with the record-order control | — | met in CI |
+| R17 | ER §9.2: observation ordering, contradicting higher-basis reads, confirmed reads, the late-read residual | #28, #27 (adoption read) | ordering, contradicting higher-basis and confirmed reads, the late-read residual, the adoption read; a completion read in flight across a concurrent accounting, with the record-order control | — | PoC observation predicates met in CI; bound-health ordering carried to #188 (§8) |
 | R18 | ER §9.2: plan and commitment refusals on undetected drift | #27 | a commitment refused on drifted evidence, opening the record, and comparison 6 refusing an ordinary plan while it is open; a drifted adoption's refusals; a revert's refusals, re-drift and a manual return closing `returned` | S5, and two of its negative controls: the revert on a frozen scope passed over, the unfreeze by a non-approver refused | met live and in CI |
 | R19 | ER §9.2: recovery-mode entry after a restore older than a takeover, an approval, a revocation and an attempt | #29 | — | S7 | met live |
 | R20 | ER §9.2: the complete existing-cluster E6 slice | #31 | — | the integrated run (§3.1) | met live |
@@ -329,7 +401,7 @@ plan. An item with no retained result leaves its issue incomplete (AP §7.1).
 | R42 | PA §16: two inventory requests for one SMBIOS UUID under different keys, one refused, and the same for one Talos node … | #22 | each identity key's race with its control; both keys and neither refused | — | met in CI |
 | R43 | PA §16: Talos access, ingestion | #22 | every named test; the access path's grants and refusals | `TestLiveRoleProbe` (skips in CI: no Talos node); S1's scan | met live and in CI |
 | R44 | PA §16: Talos access, executor | #26, #172 | every named test, against a stand-in node | S4's scan of refused and interrupted dispatches | met live and in CI |
-| R45 | PA §16: Talos access, observations | #26, #27, #29 | ginsys/bronzeward#26's part with its stale-credential control; a plan-less drift observation | S4, S5, S7; the allowlist and post-revocation refusals not traced | met live and in CI; the allowlist and post-revocation refusals not traced (§8) |
+| R45 | PA §16: Talos access, observations | #26, #27, #29 | ginsys/bronzeward#26's part with its stale-credential control; a plan-less drift observation | S4, S5, S7; the allowlist and post-revocation refusals not traced | partially evidenced; observation-access coverage pending #241 (§8) |
 | R46 | PA §16: Talos access, endpoint | #22, #25, #29 | the grammar, atomicity, recovery mode, a plan dialling its old endpoint, with the current-endpoint and dispatch-time-resolution controls; a later plan bound to the new endpoint | — | met in CI |
 | R47 | PA §16: machine revisions allocated in commit order under concurrent writers, with the unlocked control | #26 | commit order under concurrent writers, with the unlocked control | — | met in CI |
 | R48 | PA §16: an event stream ended by its token's `exp`, resumption refused after revocation | #26 | the stream ended at `exp` (in CI too) | S8 step 3 | met live and in CI |
@@ -390,7 +462,7 @@ rows take the path the claim's state allows, so their count can differ between r
 | R2 | `controls`: `s2` (`S2 negative controls, C §15`: the publications) | CI: the stop at each point | passed |
 | R3 | `controls` and `s6`: `s1` (`S1 takeover, C §3.4`, 25; `S1 takeover, C §15 check`, 9; `S1 lease extension, C §3.3`, 5; `S1 interruption`, 2; `S1 Go tests`, 1) | CI | passed |
 | R4 | `run`: `s2p` (`S2 precondition, C §10.1`); `controls`: `s2` (`S2 negative controls`, `S2 Go tests`) | — | passed |
-| R5 | each scenario's refusals in `run`, and their negative controls in `controls` | CI: the rest, and the specified-codes check | met in each clause's scenario and in CI; no result maps every clause (§8) |
+| R5 | each scenario's refusals in `run`, and their negative controls in `controls` | CI: the listed refusal tests and specified-codes check; full mapping pending #241 | partially evidenced; clause-level coverage pending #241 (§8) |
 | R6 | `s6`: `s4ds` (`S4 DS row 001` to `S4 DS row 021`, the table `ds.tsv`; the rows no request reaches, as the Go checks of `ds-go.log`) | CI: the scan | passed |
 | R7 | `run`: `s4` (`S4 step 1` to `S4 step 5`); `s6`: `s4ds` (DS rows 003 and 011) | CI: every named lock test | passed |
 | R8 | `controls`: `s3r` (`S3 negative controls`: expiry), `s4c` (`S4 negative controls`: the evidence older than the plan binds, no evidence, nothing refused; ER choice §10.28) | CI: a contradicting newer observation (`TestCommitmentRefusals` and `TestAttemptRefusals`, "a newer observation shows another digest"), the bound | passed |
@@ -402,7 +474,7 @@ rows take the path the claim's state allows, so their count can differ between r
 | R14 | `controls`: `s4c` (`S4 negative controls`: the publication changing the worker's assignment, 409 `scope-busy`), `s5` (`S5 negative controls`: the frozen-scope revert plan passed over) | CI: comparison 6 under a freeze (`TestCommitmentRefusals`, "frozen") and before release in recovery mode (`TestCommitmentScopeGateControl`, internal/api/epoch_test.go:201) | passed |
 | R15 | `s6`: `s6` (`S6.1 018` to `S6.1 021`, `S6.1 stale`, `S6.1 send`, `S6.1 cancel`; the table `s6-points.tsv`) | CI | passed |
 | R16 | `controls`: `s4x` (`S4 negative controls`: the identity revoked before the commitment, comparison 1; and once committed with no attempt) | CI: after an attempt | passed |
-| R17 | — | CI | met in CI |
+| R17 | — | CI | PoC observation predicates met in CI; bound-health ordering carried to #188 (§8) |
 | R18 | `run`: `s5p`; `controls`: `s5` (`S5 negative controls`: the revert on a frozen scope passed over, the unfreeze by a non-approver 403) | CI: the commitment, adoption and revert refusals | passed |
 | R19 | `run` and S7 variants: `s7` (`S7 before T`, `S7 at T`, `S7 after T`, `S7 step 1` to `S7 step 11`; step 4 is the closing run's); S7 closing: `s7c` | — | passed |
 | R20 | `run`, whole; `s6` | — | passed |
@@ -430,7 +502,7 @@ rows take the path the claim's state allows, so their count can differ between r
 | R42 | — | CI | met in CI |
 | R43 | `controls` and `s6`: `s1` (`S1 access`, 14; `S1 access, PA §16`, 1; `S1 access, PA §16 check`, 6; `S1 inventory, PA §16 check`, 5; `S1 Go tests`: `TestLiveRoleProbe` against the fixture's nodes); S1 node ID: `s1nid` (the refusal for another node ID) | CI | passed |
 | R44 | `run`: `s4`; `s6`: `s4ds` (the scans of its refused and interrupted dispatches) | CI | passed |
-| R45 | `run`: `s4`, `s5p`, `s7` | CI | met live and in CI; the allowlist and post-revocation refusals not traced (§8) |
+| R45 | `run`: `s4`, `s5p`, `s7` | CI | partially evidenced; observation-access coverage pending #241 (§8) |
 | R46 | — | CI | met in CI |
 | R47 | — | CI | met in CI |
 | R48 | `run`: `s8` (`S8 step 3`); S8 controls: `s8controls` (`S8 negative controls`), `s8revocation` (`S8 revocation alone`) | CI | passed |
@@ -450,7 +522,7 @@ rows take the path the claim's state allows, so their count can differ between r
 
 ## 8. Gaps and carried items
 
-- R11's health-check cases are carried to
+- R11's health-window cases and R17's bound-health observation-ordering cases are carried to
   [ginsys/bronzeward#188](https://github.com/ginsys/bronzeward/issues/188). The PoC binds no
   health check (ER choice §10.33).
 - Found while mapping §6 to the tests in CI, and closed by
@@ -468,10 +540,15 @@ rows take the path the claim's state allows, so their count can differ between r
   - **The timeline's second reviewer** (§5): AP S8's pass criterion needs a second reviewer to reach
     the same answers from the timeline; `run`'s `s8` writes `SKIP` for it and for the reads after
     the operator walkthrough of ginsys/bronzeward#30, by a person. The owner names the reviewer.
-  - **R5:** each clause's scenario and CI's refusal tests pass, but no result maps every C §13,
-    PA §13 and PA §14 clause to its own check.
-  - **R45:** the allowlist and post-revocation refusals of the observation path are not traced to a
-    check.
+  - **R5:** the recorded scenario refusals and CI tests do not establish complete coverage of
+    every C §13, PA §13 and PA §14 clause. The clause-level audit and missing checks are tracked
+    by [ginsys/bronzeward#241](https://github.com/ginsys/bronzeward/issues/241). Its publication
+    cluster-scope finding is separately tracked by
+    [ginsys/bronzeward#244](https://github.com/ginsys/bronzeward/issues/244), which blocks #241.
+    Neither issue's open work is claimed as repaired or verified by these fixture runs.
+  - **R45:** the observation allowlist, post-revocation refusal and access-failure coverage are
+    being traced and completed under #241. The existing live and CI rows are partial evidence,
+    not a complete verdict for this row.
 - Pointer `SKIP` rows, each naming the check that carries what it leaves out: S7's three
   dropped-comparison controls (§6.1, R27), S4's frozen-scope, index-drop and revocation-wait rows
   (`s4ds`, `s5`, §6.1), and S0 step 3's earlier-epoch automation token (S7 step 6, §5).
