@@ -280,6 +280,14 @@ and S7 recovery: those also need node reads available during publication while
 preserving their held commitment or blocked-scope assertions. These fixture
 adaptations change no product safety check.
 
+A later advisory review found that AP S4 omitted the existing A/B pause
+prerequisite for its commitment-level restore controls. The fixture already
+pauses both instances before those cases and directs requests to C, the sole
+running publisher/executor. The retained `s4-restores-20261019T164201Z/s4.tsv`
+at `44e8cf8` passes that pause, both assignment/Desired publications and both
+comparison-2 refusals. The written procedure now states this prerequisite;
+the fixture is unchanged, and no additional live run is claimed.
+
 ## Evidence retention and scan limits
 
 The owner retains raw logs, temporary guard controls and fixture bundles. Only
