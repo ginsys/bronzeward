@@ -79,8 +79,14 @@ PA14-13 also lacked a synchronous draft-update HTTP failure check. The added
 `TestFragmentPutDatabaseFailure` checks a rolled-back T1 against a successful
 commit, including the safe 503, draft/ETag, unreleased claim, retained synthetic
 provider generation, absence of committed source/act/replay rows and secret
-absence. Its execution result is pending; the older asynchronous and live kill
-results remain at their original revisions.
+absence. At `02d012c222d51714a9ce08b7087f8c9d1fab35fb`, both cases passed
+(exit 0). A temporary production overlay changing only that failure's HTTP
+status from 503 to 500 failed the refusal case (exit 1), while its successful
+commit control still passed. The checkout stayed clean during both runs.
+The result file retains commands, log hashes and the clean follow-up log
+screen with positive control. The older asynchronous and live kill results
+remain at their original revisions. This closes PA14-13's missing response
+coverage, not C13-17's publication defect.
 
 ## R5: compilation §13
 
@@ -142,7 +148,7 @@ assertions do not turn all failures into “nothing persisted.”
 | PA14-10 ETag mismatch | Fragment/draft precondition tests: 412, no claim or generation, unchanged draft. |
 | PA14-11 Update/discard during queued/running publication | `TestDraftUpdatePreconditions`, expanded `TestDraftDiscard` name the operation and preserve revision/state in both states; discard also asserts no discard act. Failed-operation controls permit editing or discarding. |
 | PA14-12 Compilation refuses draft input | Fragment refusal/replay and ingestion refusal cases: 422 paths/rule, abandoned claim, persisted refusal record/act, no fragment; provider orphans only when a write occurred. |
-| PA14-13 Database failure inside T1 | `TestCrashInsideT1LeavesDraft` and S1 interruption retain their rollback/claim evidence. New `TestFragmentPutDatabaseFailure` adds the synchronous 503, safe body, unchanged draft, held claim and provider orphan, with a successful-commit control; execution pending. |
+| PA14-13 Database failure inside T1 | `TestCrashInsideT1LeavesDraft` and S1 interruption retain their rollback/claim evidence. New `TestFragmentPutDatabaseFailure` adds the synchronous 503, safe body, unchanged draft, held claim and provider orphan, with a successful-commit control. Both passed at `02d012c`; changing only the failure status to 500 made the refusal check fail while the success control still passed. |
 | PA14-14 Changed/unchanged head; changed import base; newly covered machine | `TestPublishCommitChangedHeadMoved`, `TestPublishCommitUnchangedHeadMoved` and concurrent case, `TestPublishCommitAppliedImportBaseChanged`, `TestPublishCommitMachineCovered` and concurrent case: failed stale-input, no release. |
 | PA14-15 Introduced name now exists | `TestPublishCommitIntroducedNameExists` and concurrent case: expected-absent mismatch fails stale-input, no release. |
 | PA14-16 Assignment change on held scope | `TestPublishCommitScopeHeld` and concurrent case: failed scope-busy, no release; S4 held-scope control. |
