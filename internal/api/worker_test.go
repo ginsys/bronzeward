@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/ginsys/bronzeward/internal/auth"
 	"github.com/ginsys/bronzeward/internal/config"
 	"github.com/ginsys/bronzeward/internal/id"
@@ -220,6 +222,92 @@ func TestPublishWorker(t *testing.T) {
 	if n := count(t, b.db, `SELECT count(*) FROM draft WHERE id = $1 AND state = 'published'`, b.draft); n != 1 {
 		t.Fatal("the draft is not published")
 	}
+}
+
+// A lost reply after T3 really commits leaves success and its original evidence durable.
+// Neither the original worker nor a takeover can claim it again, even with the node offline.
+func TestPublishWorkerCommittedReplyLost(t *testing.T) {
+	b := newBuildEnv(t)
+	mustExec(t, b.db, `DELETE FROM operation WHERE id = $1`, b.job.op)
+	var op, release, observation string
+	var publicationCommit, replyLost bool
+	a := b.workerWith("run-1/1/a", t.Context(), idle, options{
+		stopAt: func(step string) bool {
+			publicationCommit = step == "publish-commit"
+			return false
+		},
+		commit: func(tx *sql.Tx) error {
+			if !publicationCommit {
+				return tx.Commit()
+			}
+			publicationCommit = false
+			if err := tx.QueryRow(`SELECT r.id, rm.publication_observation FROM release r
+				JOIN release_machine rm ON rm.release = r.id WHERE r.operation = $1 AND rm.machine = $2`,
+				op, b.machine).Scan(&release, &observation); err != nil {
+				return err
+			}
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+			replyLost = true
+			return &pgconn.PgError{Code: "08006", Message: "connection lost after publication COMMIT (test)"}
+		},
+	})
+	b.a = a
+	x, node := b.publicationReader()
+	op = b.queuePublish(1)
+	j, ok := b.claim(a)
+	if !ok || j.op != op {
+		t.Fatalf("claim %+v %v; want %s", j, ok, op)
+	}
+	a.runPublish(t.Context(), j)
+	if !replyLost || !b.logged("connection lost after publication COMMIT (test)") {
+		t.Fatal("the worker did not receive the lost reply after a real commit")
+	}
+
+	checkCommitted := func() {
+		t.Helper()
+		state, gen, events := b.ended(op)
+		if state != "succeeded" || gen != 1 || !slices.Equal(events, []string{"queued", "claimed", "succeeded"}) {
+			t.Fatalf("operation %s at generation %d, events %v", state, gen, events)
+		}
+		if n := count(t, b.db, `SELECT count(*) FROM operation o
+			JOIN release r ON r.id = o.result->>'release' AND r.operation = o.id
+			JOIN draft d ON d.id = r.draft AND d.release = r.id AND d.state = 'published'
+			JOIN release_machine rm ON rm.release = r.id
+			JOIN machine_state ms ON ms.machine = rm.machine AND ms.desired = r.id
+			JOIN observation ob ON ob.id = rm.publication_observation AND ob.machine = rm.machine
+			JOIN observation_start s ON s.machine = ob.machine AND s.revision = ob.basis
+			WHERE o.id = $1 AND r.id = $2 AND ob.id = $3 AND rm.machine = $4
+			AND o.owner IS NULL AND o.owner_epoch IS NULL AND o.lease_until IS NULL
+			AND s.purpose = 'publication' AND s.operation = o.id AND s.publication_generation = 1`,
+			op, release, observation, b.machine); n != 1 {
+			t.Fatal("committed operation, release, draft, Desired or original evidence was lost")
+		}
+		if count(t, b.db, `SELECT count(*) FROM release`) != 1 ||
+			count(t, b.db, `SELECT count(*) FROM observation`) != 1 ||
+			count(t, b.db, `SELECT count(*) FROM observation_start`) != 1 {
+			t.Fatal("publication was repeated after its committed reply was lost")
+		}
+		x.mu.Lock()
+		reads := len(x.reads)
+		x.mu.Unlock()
+		if reads != 1 {
+			t.Fatalf("%d access reads; want only the original publication read", reads)
+		}
+	}
+	checkCommitted()
+
+	node.identityErr = errors.New("node unavailable after publication")
+	node.versionErr = node.identityErr
+	other := b.worker("run-1/2/b", t.Context(), idle)
+	other.d.exe, other.o.dial = x, a.o.dial
+	for _, worker := range []*API{a, other} {
+		if claimed, ok := b.claim(worker); ok {
+			t.Fatalf("committed publication claimed again: %+v", claimed)
+		}
+	}
+	checkCommitted()
 }
 
 // A compilation refusal fails the operation with its problem and a failed event naming the code,

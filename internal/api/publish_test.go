@@ -332,8 +332,8 @@ func (p *publishEnv) count(query string, args ...any) int {
 	return n
 }
 
-// secondJob is another running publish operation of the same draft revision, as a worker that
-// superseded the first one's would hold.
+// secondJob injects another running operation for the same draft revision to exercise T3's
+// natural-key conflict path directly. A worker takeover retains the original operation ID.
 func (p *publishEnv) secondJob() publishJob {
 	p.t.Helper()
 	op := id.New(id.Operation)

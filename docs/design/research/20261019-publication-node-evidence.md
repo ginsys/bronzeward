@@ -38,7 +38,9 @@ PostgreSQL 17.11 and OpenBao 2.6.1
 The later `247e22c2adff4bf21c6d3a7427587b86a2693035` changes documentation
 only; the subsequent corrections at `aede267c50f7c10978e42aa1eb4a8c43c96feaee`
 and `44e8cf8c8f0285e70768e07291c2cd6f4a0ee9e6` change fixtures and
-documentation. No Go source differs from e04d627. This nonverbose task does not
+documentation. Through `14262bd5283c78e863f88cf7ebe3df37a124b1e6`, no Go source
+differs from e04d627. The later commit-unknown clarification adds a focused test,
+described below, without changing production Go code. This nonverbose task does not
 provide a complete skip inventory. The live S2 run separately records the
 selected Go checks and requires that none of those checks skip.
 
@@ -70,6 +72,21 @@ Existing execution tests now compare their own observations with the count
 before execution, since publication legitimately adds two timeline entries.
 The migrations' execution fixtures likewise express revisions relative to the
 publication entries. These adaptations preserve the execution assertions.
+
+## Commit-unknown clarification
+
+The second hosted advisory review identified ambiguous retry prose. T3 commits
+the release, Desired, published draft, operation success and terminal event in
+one transaction. A lost reply after successful COMMIT leaves that succeeded
+operation in the database, so the claim predicate cannot select it for takeover.
+The client reads the persisted result even if a covered node is now offline.
+An explicit T3 retry uses the retained built unit and returns its existing
+matching release before evidence checks, without another remote read.
+
+If T3 rolled back, there is no release. Its unfinished operation may be claimed
+after lease lapse; that new pass must obtain fresh observations and correctly
+refuses an offline node. PA §6.1.1 and §13.3 now distinguish these paths.
+No earlier release lookup or worker behavior change is required.
 
 ## Negative controls and development failures
 

@@ -928,13 +928,18 @@ basis cannot supersede the chosen read. There is no remote read inside T3.
 Each release machine stores the chosen observation ID; the release API's
 machine entry exposes `publicationObservation`. Observation responses expose
 nullable `publicationGeneration`. The observation and its start are immutable.
-Evidence IDs/times are excluded from the release content digest: retrying the
-same content after commit-unknown returns the existing release and its original
-evidence. That existing-release lookup still precedes stale-input checks.
+Evidence IDs/times are excluded from the release content digest. Retrying T3
+with the already built release unit returns an existing matching release and
+its original evidence before stale-input checks, without another remote read.
+T3 commits the release and operation success atomically. If its reply is lost
+after that commit, the client reads the succeeded operation; it cannot be
+claimed for another worker pass, even if a covered node is now offline (§13.3).
 
-Every new worker pass (including ownership takeover) obtains new observations;
-starts or completed reads from an interrupted pass remain in the timeline.
-A database transaction retry may reuse that pass's reads with the same T3
+Every newly claimed worker pass (including ownership takeover of an unfinished
+operation) obtains new observations; starts or completed reads from an
+interrupted pass remain in the timeline. If T3 rolled back, no release exists
+and a takeover must satisfy these fresh-read requirements. A database
+transaction retry reuses that pass's built unit and reads with the same T3
 checks. Fresh means started for this worker pass, not a cached-age policy.
 Unrecorded remote changes after the read cannot be excluded; dispatch retains
 its independent fresh evidence and contract check. This refinement does not
@@ -2920,12 +2925,15 @@ knows:
 
 - **Commit-unknown.** A `publish` worker sends `COMMIT` for T3 and loses the
   connection. The release committed, as in DB row 061. The worker cannot tell,
-  so it reads: a release exists for `(drf_2rmpezm5rfx47azsgmp66z457a, 8)`
-  with matching digests, so it records the operation `succeeded` if its fence
-  still holds. If another worker superseded it, that worker's own T3 finds the
-  release by its first check (§6.2), before the draft and head checks the first
-  commit made fail, compares digests and succeeds with the same release. The
-  client following the operation sees one release.
+  so it ends that run without recording failure. The operation is already
+  `succeeded` in the same transaction as the release, Desired, published draft
+  and terminal event. The client following the operation sees that result and
+  one release with its original publication evidence. A claim cannot select
+  the succeeded operation; later node unavailability cannot change that result.
+  A direct T3 retry with the retained built unit also returns the matching
+  release before stale-input checks (§6.2), without new remote reads. If T3
+  instead rolled back, no release exists: the running operation may be claimed
+  after lease lapse, and that new pass obtains fresh observations (§6.1.1).
 - **Provider behind the database.** OpenBao is restored from a snapshot older
   than generations the database references. Nothing in Bronzeward wrote this
   state. The dependency monitor reads 404 for those generations; they were
