@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/ginsys/bronzeward/internal/dbtest"
 	"github.com/ginsys/bronzeward/internal/id"
 )
 
@@ -28,8 +29,11 @@ const (
 		machinery_checksum, kubernetes_version, operation, published_by, published_role, epoch, published_at)
 		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, epoch, now() FROM installation_state`
 	insertReleaseMachine = `INSERT INTO release_machine (release, cluster, machine, import_base_revision,
-		assignment_revision, mode, ciphertext, ciphertext_digest, configuration_digest, redacted, provenance, key_name)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12)`
+		assignment_revision, mode, ciphertext, ciphertext_digest, configuration_digest, redacted, provenance, key_name, publication_observation)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, (SELECT o.id FROM observation o
+   JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
+   JOIN release r ON r.operation = s.operation WHERE r.id = $1 AND o.machine = $3
+   ORDER BY o.basis DESC LIMIT 1))`
 	insertReleaseSource = `INSERT INTO release_source (release, cluster, kind, fragment, profile, assignment, name, machine,
 		fragment_revision, profile_revision, assignment_revision, head_revision)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
@@ -64,6 +68,7 @@ func releaseRows(t *testing.T, db *sql.DB) release {
 		depKV: id.New(id.Dependency), depKey: id.New(id.Dependency), frgSite: id.New(id.Fragment)}
 	kv := generation(r.cluster, r.claim)
 	mustExec(t, db, insertOperation, r.publish, "publish", "running", "run-1/4242/publish-1", 1, r.draft, 1, nil, r.human, nil, nil)
+	dbtest.PublicationObservation(t, db, r.machine, r.publish)
 	// The fragment the assignment selects under the site layer.
 	mustExec(t, db, insertFragment, r.frgSite, r.cluster, "cluster", "site-dns", "site", r.frvSite, 1)
 	mustExec(t, db, insertStatus, r.depKV, "kv", kv, 1, "retained", nil, nil, created)
@@ -105,6 +110,8 @@ func TestReleaseConstraints(t *testing.T) {
 	op2, op3 := id.New(id.Operation), id.New(id.Operation)
 	claim2, bob := id.New(id.Ingestion), id.New(id.Principal)
 	mustExec(t, db, insertOperation, op2, "publish", "running", "run-1/4242/publish-2", 1, r.draft2, 1, nil, r.human, nil, nil)
+	dbtest.PublicationObservation(t, db, r.machine, op2)
+	dbtest.PublicationObservation(t, db, r.otherMachine, op2)
 	mustExec(t, db, `INSERT INTO principal (id, kind, iss, sub, created_at) VALUES ($1, 'human', 'https://idp.test', 'bob', now())`, bob)
 	// A second version of the artifact key, which no ciphertext of withMachine names, and another
 	// key at the version it names.
@@ -119,6 +126,7 @@ func TestReleaseConstraints(t *testing.T) {
 	// A second machine of the cluster, whose import base declares the same reference.
 	machine2, ibr2 := id.New(id.Machine), id.New(id.ImportBase)
 	mustExec(t, db, insertMachine, machine2, r.cluster, "3e8d9f4b-5c6a-4b8c-9d2e-3f4a5b6c7d8e", nil, "normal")
+	dbtest.PublicationObservation(t, db, machine2, op2)
 	inTx := func(rows ...stmt) {
 		t.Helper()
 		tx, err := db.Begin()
@@ -595,6 +603,7 @@ func TestReleaseConstraintControl(t *testing.T) {
 	kv := generation(r.cluster, r.claim)
 	rel2, op2, op3 := id.New(id.Release), id.New(id.Operation), id.New(id.Operation)
 	mustExec(t, db, insertOperation, op2, "publish", "running", "run-1/4242/publish-2", 1, r.draft2, 1, nil, r.human, nil, nil)
+	dbtest.PublicationObservation(t, db, r.machine, op2)
 	withRelease := stmt{insertRelease, []any{rel2, r.cluster, r.draft2, 1, digest(3), "v1.13", machinery, checksum,
 		"v1.36.0", op2, r.human, "publisher"}}
 	withMachine := stmt{insertReleaseMachine, []any{rel2, r.cluster, r.machine, r.ibr, r.asr, "metal", cipher, digest(4),

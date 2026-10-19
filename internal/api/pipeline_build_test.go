@@ -205,8 +205,9 @@ func (b *buildEnv) fragment(name, layer, text string) string {
 
 func newBuildEnv(t *testing.T) *buildEnv {
 	t.Helper()
-	b := &buildEnv{publishEnv: newPublishEnv(t), held: heldValues{values: map[string]provider.Value{}}}
+	b := &buildEnv{publishEnv: publishFixture(t, newDraftEnv(t)), held: heldValues{values: map[string]provider.Value{}}}
 	b.ibr = b.importBase(b.machine, generatedConfig(t, constants.DefaultKubernetesVersion))
+	b.defaultPublicationReader(b.a)
 	// The alias places the one reference at two outputs: one effective dependency, not two.
 	b.network = b.fragment("network", "site", buildFragment("machine:\n  nodeAnnotations:\n    example.test/copy: *secret\n"))
 	return b
@@ -217,6 +218,7 @@ func (b *buildEnv) secondMachine(kubernetes string) string {
 	b.t.Helper()
 	rec := b.do(b.api, machineCall(b.human("h-author"), "k-machine-two-0123456", b.cluster, "1c6b7d2f-3e4a-4f60-9b0c-1d2e3f4a5b6c"))
 	second := decode[machineBody](b.t, rec, http.StatusCreated).ID
+	mustExec(b.t, b.db, `UPDATE machine SET talos_endpoint = '10.55.0.4:50000' WHERE id = $1`, second)
 	b.importBase(second, generatedConfig(b.t, kubernetes))
 	return second
 }

@@ -2059,6 +2059,7 @@ HTTP/1.1 200 OK
  "sources": [{"kind": "fragment", "head": "frg_rgkebwvneg6mxhid62gec5difi",
               "revision": "frv_sqb745zrpl2xltek22ai7sbdue", "headRevision": 4}],
  "machines": [{"machine": "mch_tqhcznunhyle4hnxru5hkt35uq", "mode": "metal",
+               "publicationObservation": "obs_aycy4h7xaoj2dvqjnyzjck2oka",
                "review": "/api/v1/releases/rel_fgqvcvz3ck7h7234ljgdbzsj6m/machines/mch_tqhcznunhyle4hnxru5hkt35uq/review"}]}
 
 GET /api/v1/releases/rel_fgqvcvz3ck7h7234ljgdbzsj6m/machines/mch_tqhcznunhyle4hnxru5hkt35uq/review

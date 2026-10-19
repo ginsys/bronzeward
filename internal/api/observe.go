@@ -28,6 +28,7 @@ type observeFor struct {
 	purpose, plan, operation string
 	access                   *provider.TalosAccess
 	paced                    bool
+	generation               int64 // publication owner generation; zero for other purposes
 }
 
 // errReadNotDue is a paced recovery read refused under the machine's lock: a recovery read of the
@@ -239,19 +240,23 @@ func (a *API) startObservation(ctx context.Context, tx *sql.Tx, machine string, 
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return "", head, err
 	}
+	if err := a.lockPublication(ctx, tx, machine, f); err != nil {
+		return "", head, err
+	}
 	at, err := nextEntry(ctx, tx, machine, &o.Basis)
 	if err != nil {
 		return "", head, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
 		VALUES ($1, $2, $3, 'observation-started', jsonb_build_object('purpose', $4::text, 'plan', $5::text, 'operation', $6::text,
-			'endpoint', $7::text, 'controller', $8::text), $9)`,
-		machine, o.Basis, current, f.purpose, nullable(f.plan), nullable(f.operation), o.Endpoint, a.d.owner.ID, at); err != nil {
+			'endpoint', $7::text, 'controller', $8::text) ||
+ CASE WHEN $10::bigint > 0 THEN jsonb_build_object('publicationGeneration', $10::bigint) ELSE '{}'::jsonb END, $9)`,
+		machine, o.Basis, current, f.purpose, nullable(f.plan), nullable(f.operation), o.Endpoint, a.d.owner.ID, at, f.generation); err != nil {
 		return "", head, err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO observation_start (machine, revision, purpose, plan, operation, endpoint, controller)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`, machine, o.Basis, f.purpose, nullable(f.plan), nullable(f.operation), o.Endpoint,
-		a.d.owner.ID); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO observation_start (machine, revision, purpose, plan, operation, endpoint, controller, publication_generation)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, 0))`, machine, o.Basis, f.purpose, nullable(f.plan), nullable(f.operation), o.Endpoint,
+		a.d.owner.ID, f.generation); err != nil {
 		return "", head, err
 	}
 	return cluster, head, nil
@@ -286,6 +291,9 @@ func (a *API) recordObservation(ctx context.Context, machine string, f observeFo
 			return errNotController
 		}
 		if _, err := tx.ExecContext(ctx, `SELECT 1 FROM machine WHERE id = $1 FOR UPDATE`, machine); err != nil {
+			return err
+		}
+		if err := a.lockPublication(ctx, tx, machine, f); err != nil {
 			return err
 		}
 		at, err := nextEntry(ctx, tx, machine, &o.Revision)

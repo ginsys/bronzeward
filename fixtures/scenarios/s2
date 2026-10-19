@@ -243,7 +243,14 @@ claimed_after_lease() {
 released_once() {
   [ "$(sql "SELECT count(*) FROM release WHERE operation = '$pub_op'")" = 1 ] &&
     [ "$(sql "SELECT d.state FROM draft d JOIN release r ON r.id = d.release AND r.operation = '$pub_op'
-      WHERE d.id = '$draft'")" = published ]
+      WHERE d.id = '$draft'")" = published ] &&
+    [ "$(sql "SELECT count(*) FROM release_machine rm JOIN release r ON r.id = rm.release
+      JOIN observation o ON o.id = rm.publication_observation AND o.machine = rm.machine
+      JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
+      JOIN operation op ON op.id = r.operation
+      WHERE r.operation = '$pub_op' AND (s.purpose <> 'publication' OR s.operation <> r.operation
+        OR s.publication_generation <> op.owner_gen OR o.access_path <> 'access/talos/' || r.cluster
+        OR o.running_version IS NULL OR substring(o.running_version FROM '^v[0-9]+\.[0-9]+') <> r.contract)")" = 0 ]
 }
 # unreleased: no release names pub_op, and the draft is still open.
 unreleased() {
@@ -271,9 +278,9 @@ pub_case_start() {
   [ "$pub_ready" = 1 ] || die "s2: no draft for the publication $1; nothing after it can run"
 }
 # The interruption points of a publication, as internal/seam names them: after the claim, the
-# snapshot read, the pins read, every machine compiled, the artifacts encrypted, and every
+# snapshot read, fresh node observations, the pins read, every machine compiled, the artifacts encrypted, and every
 # statement of the publication commit made before its COMMIT.
-pub_points='publish-claim publish-snapshot publish-pins publish-compile publish-encrypt publish-commit'
+pub_points='publish-claim publish-snapshot publish-observations publish-pins publish-compile publish-encrypt publish-commit'
 # pub_kill_case <point>: C exits at once at the point while it runs the publication. Until the
 # lease lapses the operation stays running at owner generation 1 with nothing published; the bundle
 # is captured while C is still stopped and A and B still paused, so its writable layer is what the
@@ -309,6 +316,7 @@ pub_kill_case() {
 # provider classification, a lost reply after COMMIT), proven by the Go tests that prove them, so
 # that S2's evidence holds their results. Anchored, as in S1.
 go_tests='TestFragmentPutPreconditions|TestDraftUpdatePreconditions'
+go_tests+='|TestPublicationRunningMinor|TestPublicationIdentityAndAccess|TestPublicationEvidenceAtCommit|TestPublicationReadFenced|TestPublicationMixedCoverage|TestPublicationOlderReadCompletingLate|TestPublicationWorkerRefusal'
 go_tests+='|TestPublishCommitChangedHeadMoved|TestPublishCommitUnchangedHeadMoved|TestPublishCommitUnchangedHeadMovedConcurrently'
 go_tests+='|TestCompileRefusesAnExactCopy|TestRefusalSweep|TestFidelityFailsOnAnInjectedChange'
 go_tests+='|TestClassify|TestReadPinnedRefuses|TestPublishCommitStatusRecordedAfter'
@@ -358,6 +366,13 @@ go_rows() {
   if clone_made go-rows-clone; then
     check 'S2 precondition' "GOFLAGS, GOEXPERIMENT and GOWORK are unset and the Go version is the image's, so the tests run on the server's build (clone HEAD $clone_head)" go_env_clean
     check 'S2 Go tests' 'the tests below ran against PostgreSQL and passed, none skipped (go-rows.log)' go_rows_ran
+    check 'S2 node evidence, C §13 row 17' 'stand-in version reports: matching minor publishes; different, missing and malformed versions refuse (TestPublicationRunningMinor)' go_row TestPublicationRunningMinor
+    check 'S2 node evidence, PA §6.1.1' 'identity and all five failed access reads refuse with safe retained evidence (TestPublicationIdentityAndAccess)' go_row TestPublicationIdentityAndAccess
+    check 'S2 node evidence, PA §6.1.1' 'T3 refuses endpoint changes, newer contradictory/unreadable observations, missing or misbound evidence (TestPublicationEvidenceAtCommit)' go_row TestPublicationEvidenceAtCommit
+    check 'S2 node evidence, PA §6.1.1' 'superseded publication reads cannot start or complete (TestPublicationReadFenced)' go_row TestPublicationReadFenced
+    check 'S2 node evidence, PA §6.1.1' 'mixed machine coverage refuses; matching coverage publishes (TestPublicationMixedCoverage)' go_row TestPublicationMixedCoverage
+    check 'S2 node evidence, PA §6.1.1' 'lower-basis late completion cannot supersede fresh evidence; release and observation API retain binding (TestPublicationOlderReadCompletingLate)' go_row TestPublicationOlderReadCompletingLate
+    check 'S2 node evidence, PA §6.1.1' 'actual worker persists failed publication and observation without a release or Desired change (TestPublicationWorkerRefusal)' go_row TestPublicationWorkerRefusal
     check "$ref" 'a second author on a replaced ETag: 412, nothing written, for a fragment (TestFragmentPutPreconditions)' go_row TestFragmentPutPreconditions
     check "$ref" 'the same for a profile: 428 without If-Match, 412 on a replaced ETag, nothing written (TestDraftUpdatePreconditions)' go_row TestDraftUpdatePreconditions
     check "$ref" 'a head the draft changes moved since its base: 409 stale-input naming it (TestPublishCommitChangedHeadMoved)' go_row TestPublishCommitChangedHeadMoved
@@ -1201,6 +1216,24 @@ update_and_publication_matrices() {
   check "$ref" 'publication on C: one release names the operation, the draft published as it' released_once
   check "$ref" 'inject unpause A and B' both unpause
   outcome_bundle "$ref" publication-success
+  # A live node becomes unreadable after import; no stored observation may replace
+  # this publication's read. Resume before capture so evidence can read the fixture.
+  pub_case_start offline
+  local before_offline
+  before_offline=$(sql "SELECT desired FROM machine_state WHERE machine = '$machine_w'")
+  check "$ref" 'inject pause A and B' both pause
+  check "$ref" 'inject pause worker' "$bin/inject" pause worker
+  check "$ref" 'offline publication on C: 202' publish_on_c offline 202
+  check "$ref" 'offline publication: claimed and failed' within 90 pub_is failed 1 queued,claimed,failed
+  check "$ref" 'inject unpause worker' "$bin/inject" unpause worker
+  check "$ref" 'inject unpause A and B' both unpause
+  check "$ref" 'offline publication: 503 dependency-unavailable names the worker and publication-evidence' \
+    answers_with ".error.status == 503 and .error.type == \"urn:bronzeward:problem:dependency-unavailable\" and .error.machine == \"$machine_w\" and .error.rule == \"publication-evidence\"" 200 - GET "/api/v1/operations/$pub_op" "$author"
+  check "$ref" 'offline publication: no release; draft open' unreleased
+  check "$ref" 'offline publication: Desired unchanged' test "$before_offline" = "$(sql "SELECT desired FROM machine_state WHERE machine = '$machine_w'")"
+  check "$ref" 'offline publication: failed fresh read retained without node identity/version' \
+    test "$(sql "SELECT count(*) FROM observation o JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis WHERE s.operation = '$pub_op' AND s.purpose = 'publication' AND o.machine = '$machine_w' AND o.talos_node_id IS NULL AND o.running_version IS NULL AND o.unread->'identity'->>'cause' = 'node-unreachable'")" = 1
+  outcome_bundle "$ref" publication-offline
   pub_case_start refusal
   check "$ref" "a cluster fragment overriding the worker's machine token, selected by its assignment: 200 each" pub_override
   check "$ref" 'inject pause A and B' both pause

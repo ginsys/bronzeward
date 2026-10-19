@@ -59,8 +59,11 @@ const (
 		machinery_checksum, kubernetes_version, operation, published_by, published_role, epoch, published_at)
 		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, epoch, now() FROM installation_state`
 	insertReleaseMachine = `INSERT INTO release_machine (release, cluster, machine, import_base_revision,
-		assignment_revision, mode, ciphertext, ciphertext_digest, configuration_digest, redacted, provenance, key_name)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12)`
+		assignment_revision, mode, ciphertext, ciphertext_digest, configuration_digest, redacted, provenance, key_name, publication_observation)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, (SELECT o.id FROM observation o
+   JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
+   JOIN release r ON r.operation = s.operation WHERE r.id = $1 AND o.machine = $3
+   ORDER BY o.basis DESC LIMIT 1))`
 	insertReleaseSource = `INSERT INTO release_source (release, cluster, kind, fragment, profile, assignment, name, machine,
 		fragment_revision, profile_revision, assignment_revision, head_revision)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
@@ -180,6 +183,7 @@ func (f *fixture) publishAgain(t *testing.T) string {
 	mustExec(t, db, insertDraft, draft, f.cluster, "release "+strconv.Itoa(n), "open", "m3oxmlfh6phr7aigshdydcb4ji")
 	mustExec(t, db, insertOperation, publish, "publish", "running", "run-1/4242/publish-"+strconv.Itoa(n), 1, draft, 1, nil,
 		f.human, nil, nil)
+	dbtest.PublicationObservation(t, db, f.machine, publish)
 	// A release's rows are written in its own transaction (release_test.go releaseRows).
 	tx, err := db.Begin()
 	if err != nil {

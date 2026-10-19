@@ -56,6 +56,7 @@ type usedHead struct {
 // records (compilation §9).
 type unitMachine struct {
 	machine, importBase, assignment, mode string
+	observation                           string
 	ciphertext                            provider.Ciphertext
 	configuration                         [32]byte
 	redacted                              *string
@@ -328,6 +329,11 @@ func (a *API) commitRelease(ctx context.Context, tx *sql.Tx, j publishJob, u rel
 		return "", ref, err
 	}
 
+	for _, m := range u.machines {
+		if ref, err := a.publicationEvidence(ctx, tx, j, m.machine, m.observation, u.renderer.Contract, true); ref != nil || err != nil {
+			return "", ref, err
+		}
+	}
 	if err := seedStatuses(ctx, tx, u.statuses); err != nil {
 		return "", nil, err
 	}
@@ -702,10 +708,10 @@ func insertReleaseMachine(ctx context.Context, tx *sql.Tx, rel, cluster string, 
 		redacted = sql.NullString{String: *m.redacted, Valid: true}
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO release_machine (release, cluster, machine, import_base_revision,
-		assignment_revision, mode, ciphertext, ciphertext_digest, configuration_digest, redacted, provenance, key_name)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`, rel, cluster, m.machine, m.importBase,
+		assignment_revision, mode, ciphertext, ciphertext_digest, configuration_digest, redacted, provenance, key_name, publication_observation)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`, rel, cluster, m.machine, m.importBase,
 		sql.NullString{String: m.assignment, Valid: m.assignment != ""}, m.mode, string(m.ciphertext), cipherDigest[:],
-		m.configuration[:], redacted, string(provenance), m.encryption.object)
+		m.configuration[:], redacted, string(provenance), m.encryption.object, m.observation)
 	return err
 }
 

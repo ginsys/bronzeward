@@ -1356,7 +1356,7 @@ unreadable identity/version evidence refuses publication, including initial
 adoption; an older cached observation cannot substitute for this read. The
 transaction rechecks the evidence and retains its immutable link per artifact
 ([persistence and API §6.1.1](persistence-api.md#611-publication-observations)).
-This is the owner-approved #247 refinement (2026-10-19). It deliberately makes
+This is the owner-approved ginsys/bronzeward#247 refinement (2026-10-19). It deliberately makes
 publication depend on node availability. Reusing prior observations was rejected
 because initial adoption has none and cached versions can silently become stale;
 deferring this check to dispatch does not satisfy §13 row 17.
@@ -1754,14 +1754,14 @@ Evidence gaps this contract carries rather than closes:
   publication succeeds, one is refused by the compilation (`base-override`),
   and one is killed at each of its interruption points: `publish-claim`
   (after the claim), `publish-snapshot` (the snapshot read),
-  `publish-pins` (the pinned values read and held), `publish-compile` (every
+  `publish-observations` (fresh executor evidence recorded), `publish-pins` (the pinned values read and held), `publish-compile` (every
   covered machine compiled, its configuration held in plaintext),
   `publish-encrypt` (the artifacts encrypted, the plaintexts still held) and
   `publish-commit` (every statement of the commit transaction made, before
   its `COMMIT`). After each, the logs, the instance's writable layer, the
   database's data directory and write-ahead log are scanned for every fixture
   secret beside a positive control, and a dump taken after the last at the
-  end. A stop at a point writes nothing: the operation stays `running` at its
+  end. A stop at a point commits no release; completed observation starts/results remain. The operation stays `running` at its
   claim's generation until the lease lapses, then another worker claims it and
   publishes one release; the implementation's tests stop at each point the
   same way ([acceptance plan S2](acceptance-plan.md#s2-publication)). The
