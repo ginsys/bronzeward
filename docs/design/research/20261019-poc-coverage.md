@@ -13,7 +13,8 @@ publication repair `bc59346428ea267addfca37881c14eb4ecfda108`. The checkout
 remained clean throughout execution. The [sanitized results](evidence/20261019-poc-coverage.txt)
 retain the commands, package outcomes, focused names, controls, explicit skips
 and original log hashes. This note and the acceptance-record update follow
-those checks; no test or production source changed to write their results.
+those checks. Later review findings and follow-up checks are recorded separately below;
+they do not change the identity or outcome of those original runs.
 
 `mise run go-db` exited 0: all 21 packages with tests passed, and two had no
 test files. The focused command exited 0 with 17 top-level passes (63 PASS
@@ -57,6 +58,30 @@ the one selected container profile; they establish no VM/hardware or production
 claim. A refused publication's “nothing” means no release: its operation, act
 and terminal event may persist, as PA §14 specifies.
 
+## Review findings and remaining coverage
+
+The local range review at `0724177ae21553c1d0c7abfaa60f40a85f1c1760`
+found two gaps. C13-17's node-minor requirement applies at publication; the
+commitment-stage refusal cited below does not establish it. An independently
+repeated isolated database/stand-in-provider probe published a v1.13 release
+for a synthetic observation reporting v1.12.4, while the v1.13.6 control also
+published. The expected-failure run exited 1; retained log SHA256
+`fb270eb50ed89f75e2b90adbbfd094af785681ca93f813c1af7172425d9ded96`.
+The behavioral repair is [#247](https://github.com/ginsys/bronzeward/issues/247),
+a native prerequisite of #241. It requires refinement of version-evidence
+acquisition before implementation: initial source-machine ingestion records no
+running version, drift reads require an Applied baseline, and the compiler
+cannot read Talos credentials. The proposal in #247 is not an accepted change.
+**R5 remains incomplete.** Dispatch's existing check remains useful but cannot
+substitute for the publication refusal.
+
+PA14-13 also lacked a synchronous draft-update HTTP failure check. The added
+`TestFragmentPutDatabaseFailure` checks a rolled-back T1 against a successful
+commit, including the safe 503, draft/ETag, unreleased claim, retained synthetic
+provider generation, absence of committed source/act/replay rows and secret
+absence. Its execution result is pending; the older asynchronous and live kill
+results remain at their original revisions.
+
 ## R5: compilation §13
 
 Rows follow the contract's order. Each alternative in a condition is explicit.
@@ -79,7 +104,7 @@ Rows follow the contract's order. Each alternative in a condition is explicit.
 | C13-14 Kind mismatch; base64 on non-string | `ingest.TestResolveRefusals`, `TestValidateAuthoring`; `api.TestBuildReleaseRefuses`: kind/encoding refusal, no artifact/release, safe error. |
 | C13-15 Secret reference belongs to another cluster | New `api.TestFragmentPutRefusesOtherClusterReference`: references actually minted through both foreign import-base and fragment routes; local draft rejects each, same-cluster control succeeds. Removing either cluster predicate makes its corresponding case fail. Publication diagnostics found a missing check, separately tracked in [#244](https://github.com/ginsys/bronzeward/issues/244): the inconsistent stored source reached provider reads and a successful worker release. `TestReadPinnedClusterScope` and `TestPublishWorkerRefusesForeignGeneration` cover its repair. The repair landed through [PR245](https://github.com/ginsys/bronzeward/pull/245) at `bc59346428ea267addfca37881c14eb4ecfda108`; its [evidence note](20261019-publication-cluster-scope.md) retains the failed probe and green checks. Supported authoring prevents constructing this source; direct database corruption is not asserted remotely reachable. |
 | C13-16 Ordinary fragment overrides/deletes an import-base reference | `compile.TestCompileRefusesABaseOverride`, `TestCompileRefusesAnAliasOverride`, `TestCompileBaseOverrideNamesOneFragment`; S2/S5: refusal names fragment/path, no release; authorized composition is the control. |
-| C13-17 Contract newer than renderer/not node minor; Kubernetes outside window | `compile.TestCheckContract`, `TestKubernetesVersionRefuses`, `api.TestBuildReleaseRefuses`; commitment version checks bind the node's observed minor. Each mismatch refuses rather than choosing another contract. |
+| C13-17 Contract newer than renderer/not node minor; Kubernetes outside window | `compile.TestCheckContract`, `TestKubernetesVersionRefuses` and `api.TestBuildReleaseRefuses` cover renderer/Kubernetes mismatches. **Node-minor publication refusal is missing**, confirmed by the failed probe above and tracked in #247. Commitment checks prevent dispatch but do not satisfy this clause. |
 | C13-18 Native composition/validation rejects | `compile.TestComposeRejectsTypeMismatch`, `TestComposeRejectsAnUnloadableBase`, `TestCompileReturnsTheRealVerdict`, `TestCompileMessages`; `api.TestBuildReleaseRefuses` preserves rule/path and withholds unsafe native text. |
 | C13-19 Trace/flip counterpart missing; shape differs; passes disagree | New `compile.TestCompileRefusesAnUntraceableFragment` rejects real-valid input whose trace cannot be built, on either side of a boolean input; successful controls retain both inputs and attribute the flip. `TestFidelityFailsOnAnInjectedChange` rejects changed shape, untraced leaf and flipped shape; `TestCompileTraceInvalidIsFidelity` rejects real-valid/trace-invalid disagreement. Full source lists are constructed before each flip; no test claims an externally supplied flip input API exists. |
 | C13-20 Reserved output; unattributed exact copy | `compile.TestComposeRefusesReservedTextInOutput`, `TestCompileRefusesAnExactCopy`, `TestCompileCopyChecksEveryLeaf`, `TestCompileRefusesACanonicalCopy`, mapping/key-copy cases and no-secret assertions: paths only, no artifact; attributed copies are separately controlled. |
@@ -117,7 +142,7 @@ assertions do not turn all failures into “nothing persisted.”
 | PA14-10 ETag mismatch | Fragment/draft precondition tests: 412, no claim or generation, unchanged draft. |
 | PA14-11 Update/discard during queued/running publication | `TestDraftUpdatePreconditions`, expanded `TestDraftDiscard` name the operation and preserve revision/state in both states; discard also asserts no discard act. Failed-operation controls permit editing or discarding. |
 | PA14-12 Compilation refuses draft input | Fragment refusal/replay and ingestion refusal cases: 422 paths/rule, abandoned claim, persisted refusal record/act, no fragment; provider orphans only when a write occurred. |
-| PA14-13 Database failure inside T1 | `TestCrashInsideT1LeavesDraft`, S1 interruption: no draft entries, unreleased claim, ciphertext/orphans retained. |
+| PA14-13 Database failure inside T1 | `TestCrashInsideT1LeavesDraft` and S1 interruption retain their rollback/claim evidence. New `TestFragmentPutDatabaseFailure` adds the synchronous 503, safe body, unchanged draft, held claim and provider orphan, with a successful-commit control; execution pending. |
 | PA14-14 Changed/unchanged head; changed import base; newly covered machine | `TestPublishCommitChangedHeadMoved`, `TestPublishCommitUnchangedHeadMoved` and concurrent case, `TestPublishCommitAppliedImportBaseChanged`, `TestPublishCommitMachineCovered` and concurrent case: failed stale-input, no release. |
 | PA14-15 Introduced name now exists | `TestPublishCommitIntroducedNameExists` and concurrent case: expected-absent mismatch fails stale-input, no release. |
 | PA14-16 Assignment change on held scope | `TestPublishCommitScopeHeld` and concurrent case: failed scope-busy, no release; S4 held-scope control. |
@@ -163,7 +188,7 @@ supplement the retained integrated runs.
 
 | Indexed required-check list | Acceptance-record rows | Audit outcome |
 | --- | --- | --- |
-| C §15 | R1–R5 and R50 | Interruption/scans, claims, review, SR/SP and fidelity remain bound to their recorded tests and fixture runs. R5's previously untraced clauses are expanded here, including the #244 defect. |
+| C §15 | R1–R5 and R50 | Interruption/scans, claims, review, SR/SP and fidelity remain bound to their recorded tests and fixture runs. R5's clauses are mapped here; #244 is repaired, while the publication-minor requirement in #247 remains open. |
 | ER §9.2 | R6–R20 | Existing execution, accounting, identity, drift and restoration evidence remains in the record. R11 and R17 retain the future bound-health cases in #188; the late-read and late-landing residuals remain limits. |
 | PA §16 | R5, R15, R21–R28 and R35–R50 | Refusal traceability is expanded here; R42's platform checks and R45's observation boundary receive explicit mappings. All other rows retain their named tests, controls and scenario references. |
 | DM §10.1 | R29–R34 | All 15 items map to these rows: live provider states/publication/restore variants remain distinct from synthetic classifications, identity changes, ordering, watchdog and log controls. No additional provider topology is claimed. |
