@@ -1,0 +1,82 @@
+Bronzeward #241: sanitized committed check results
+Revision: c9398d45c1b690e8e11ce541dbb76af0ec690308
+Environment: Go 1.27.1 linux/amd64; PostgreSQL 17.11; OpenBao 2.6.1
+OpenBao revision: ba7ad8861d0578cd4da4f7b9e5a6756d30484f8f
+TMPDIR and GOTMPDIR: /home/serge/src/ginsys/_scratch/bronzeward/gotmp
+Full database/provider suite finished: 2026-10-19T13:48:57.862243+00:00
+Checkout clean and unchanged during execution. No live Talos target configured.
+
+Command: mise run go-db
+Exit: 0
+ok  	github.com/ginsys/bronzeward/cmd/bronzeward	47.451s
+ok  	github.com/ginsys/bronzeward/fixtures/oidc	0.003s
+ok  	github.com/ginsys/bronzeward/fixtures/oidc/issuer	0.012s
+ok  	github.com/ginsys/bronzeward/internal/api	438.133s
+ok  	github.com/ginsys/bronzeward/internal/auth	96.215s
+ok  	github.com/ginsys/bronzeward/internal/baotest	0.004s
+ok  	github.com/ginsys/bronzeward/internal/classify	0.007s
+ok  	github.com/ginsys/bronzeward/internal/compile	38.082s
+ok  	github.com/ginsys/bronzeward/internal/config	0.011s
+ok  	github.com/ginsys/bronzeward/internal/database	0.005s
+ok  	github.com/ginsys/bronzeward/internal/dbtest	2.582s
+ok  	github.com/ginsys/bronzeward/internal/id	0.004s
+ok  	github.com/ginsys/bronzeward/internal/ingest	3.266s
+ok  	github.com/ginsys/bronzeward/internal/migrate	108.237s
+ok  	github.com/ginsys/bronzeward/internal/monitor	102.452s
+ok  	github.com/ginsys/bronzeward/internal/orphans	19.919s
+ok  	github.com/ginsys/bronzeward/internal/provider	0.667s
+ok  	github.com/ginsys/bronzeward/internal/server	0.307s
+ok  	github.com/ginsys/bronzeward/internal/staging	94.182s
+ok  	github.com/ginsys/bronzeward/internal/talos	2.053s
+ok  	github.com/ginsys/bronzeward/internal/textdiff	0.012s
+?   	github.com/ginsys/bronzeward/internal/seam	[no test files]
+?   	github.com/ginsys/bronzeward/internal/talos/talostest	[no test files]
+
+Focused command: mise exec -- go test -count=1 -v -timeout 10m -run '^(TestDraftDiscard|TestInventoryPlatform|TestInventoryRefusals|TestNewKeyAfterDigestKeyLoss|TestObservationPurposeAccessFailure|TestFragmentPutRefusesOtherClusterReference|TestObserveDrift|TestObservationRecordsTheAccessItRead|TestExecutorRevocationHeld|TestExecutorRevokedControl|TestObserveAccessReadFails|TestObserveErrorTextControl|TestObserveNodeReadFails|TestCompileRefusesAnUntraceableFragment|TestMachineryCallsAllowlisted|TestMachinePlatform|TestReleaseConstraints|TestMachineryGate|TestSensitivityGate|TestLiveRead|TestLiveApply|TestLiveUnreachable|TestLiveRoleProbe)$' ./internal/api ./internal/compile ./internal/talos ./internal/migrate
+Focused environment: BW_REQUIRE_PG=1; BW_TEST_PG_DSN=postgres://bronzeward@127.0.0.1:55433/bronzeward?sslmode=disable
+Exit: 0; 17 top-level PASS, 63 total PASS lines, 6 explicit SKIP
+Additional command: mise exec -- go test -v -count=1 -run ^TestAdopterRetryOutlivesClosedScope$ ./internal/api (same PostgreSQL environment)
+Additional result: exit 0, PASS in 0.83s; its earlier nonverbose full-suite timing-skip outcome is not known.
+PASS TestDraftDiscard
+PASS TestInventoryPlatform
+PASS TestInventoryRefusals
+PASS TestNewKeyAfterDigestKeyLoss
+PASS TestObservationPurposeAccessFailure
+PASS TestFragmentPutRefusesOtherClusterReference
+PASS TestObserveDrift
+PASS TestObservationRecordsTheAccessItRead
+PASS TestExecutorRevocationHeld
+PASS TestExecutorRevokedControl
+PASS TestObserveAccessReadFails
+PASS TestObserveErrorTextControl
+PASS TestObserveNodeReadFails
+PASS TestCompileRefusesAnUntraceableFragment
+PASS TestMachineryCallsAllowlisted
+PASS TestMachinePlatform
+PASS TestReleaseConstraints
+SKIP TestMachineryGate
+SKIP TestSensitivityGate
+SKIP TestLiveRead
+SKIP TestLiveApply
+SKIP TestLiveUnreachable
+SKIP TestLiveRoleProbe
+SKIP reason: machinery/sensitivity require experiments/c10-machinery-gate/run/all; live tests require BW_TEST_TALOSCONFIG and BW_TEST_TALOS_ENDPOINT.
+
+Controls: same committed tests; one production carriedReference cluster predicate replaced by $1::text IS NOT NULL via go -overlay.
+fragment: exit 1 expected; TestFragmentPutRefusesOtherClusterReference/fragment saw status 200 instead of a refusal.
+import-base: exit 1 expected; TestFragmentPutRefusesOtherClusterReference/import-base saw status 200 instead of a refusal.
+Neither overlay changed tracked files. The ordinary run passed both foreign-refusal and same-cluster paths.
+Built-in controls passed: stale access version, error-text leakage, approval revocation comparison, mutating-call allowlist and platform constraints.
+
+Log screen: four named synthetic canaries and private-key header patterns; five retained logs, zero hits.
+Screen canaries (public synthetic inputs): synthetic-access-failure-key; bw-synthetic-label-2; bw-review-sentinel-7f3a; bw-access-error-canary-7q4z.
+Screen regex: -----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----
+Positive screen control: all four synthetic canaries plus private-key marker, five detections.
+Limit: stdout/stderr only. Database/timeline/log assertions run inside named tests; live fixture surface scans remain separate.
+
+Raw retained logs (local /home/serge/tmp/bwtpl; SHA-256):
+65aa33be05da9f7f5f969370e344bac6b7d200e14ff28d1938b2003ef513d384  bw241-go-db.log
+194c6cbb6be91e39ee69103b0e85c369050c42c5579f6282f4cb050b4e819372  bw241-focused.log
+33cec0980aee4face947c13ef22421691fa7d4c7c542ac56354f78f4035cc136  bw241-committed-control-fragment.log
+e7e1d8945bb4d45b66947755ab51b31065d39e95cc75a448c162edb651f5a66b  bw241-committed-control-import.log
+0c38952def5f8335c5488c414fb07723f259488757577c16eab53b6b7c00fbc6  bw241-timing-skip-check.log
