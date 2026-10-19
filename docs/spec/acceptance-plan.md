@@ -311,7 +311,12 @@ follows it.
 row 011). A literal copy of a resolved value, and the reserved text `!bwref` in a string: refused,
 paths only. A fidelity check firing on an injected structural change (C §8.1). A pinned KV version
 soft-deleted, then destroyed, then OpenBao partitioned, sealed and paused: `blocked`, `lost`,
-`unknown`, each alerted as design §7.8 sets, and a publication pinning it refused. Each provider
+`unknown`, each alerted as design §7.8 sets, and a publication pinning it refused. During a
+provider-wide outage, the required fresh publication observation cannot read Talos access:
+publication refuses `503 dependency-unavailable` at that earlier node-evidence check, retaining
+an observation with no access version or node values (PA §6.1.1). The monitor still classifies
+and alerts every pinned dependency; the isolated `TestReadPinnedRefuses` check covers the
+compiler's own unavailable-dependency refusal. Each provider
 object state, against the fixture's OpenBao through the monitor's metadata client
 (`TestLiveProviderStates`, run with S2's Go tests, its log kept in S2's evidence), one object per
 state, each first `retained`: a KV version soft-deleted (`blocked`), undeleted (`retained`),
