@@ -883,6 +883,12 @@ checks no longer accept is the server's error (`500`), not a refusal:
 persistence stores only what ingestion produced and checked, so it means the
 stored text and its reference rows disagree. No refusal holds a value.
 
+The publication observation check (§6.1.1) precedes these pinned-value and
+compilation steps. If a provider-wide outage prevents the Talos access read,
+that earlier refusal names the machine and observation, not a pinned
+dependency. The dependency-specific refusals above still apply when the
+publication reaches those later reads.
+
 ### 6.1.1 Publication observations
 
 After the snapshot and before reading pinned values or compiling, the worker
@@ -2318,7 +2324,7 @@ counter, not the ETag token, so the token is not named.
 | 403 | `forbidden` | no qualifying role; the body names the roles that would qualify, and for a plan's cancellation by a `publisher` that did not create it, the plan (§10.3) |
 | 403 | `identity-revoked` | the principal was revoked (§10.4) |
 | 404 | `not-found` | no such resource or route |
-| 409 | `stale-input` | a publication input moved, or a name the draft introduces was introduced first (§4.2) |
+| 409 | `stale-input` | a publication input moved, or a name the draft introduces was introduced first (§4.2); also T3 refusing missing, misbound or superseded publication evidence, including changed endpoints and higher-basis unread or contradicting observations (§6.1.1) |
 | 409 | `conflict` | the resource is in a state that refuses the act (a published draft, whose release the body names; an update or discard of a draft with a `queued` or `running` publish operation, which the body names (§3.1); a plan that is not `proposed` and not awaiting re-approval in the current epoch, or whose expiry passed before the approval's time, the body naming the plan and its state (`expired` for the latter); a second approval in one epoch; a revocation of an approval already revoked, naming the approval; a cancellation of a plan that reads `revoked`, `cancelled` or `expired` at the time read after the act-order lock, or of a committed plan whose cancellation is already recorded, naming the plan and that state; a draft entry retry while the first request's claim is live (§7.2); an ingestion for a draft revision that has one `running` (§7.3); an inventory request for an SMBIOS UUID or Talos node ID already recorded, naming its machine, or for a Talos cluster ID already recorded, naming its cluster (§7.3); a key whose record is from an earlier epoch (§7.2); an entry whose key has a record other than this recovery start's own entry (§12.4); a second entry in one recovery start (§12.2); a publish operation whose draft is no longer `open` at the revision it bound, naming the draft, or whose draft revision has a release with other content, naming it (§6.2)) |
 | 409 | `machine-identity-mismatch` | the error of a failed `ingest` operation: its `source: machine` read reached a node whose identity key is not the machine record's or whose Talos cluster ID is not its cluster record's, whose identity read failed, or whose SMBIOS UUID is absent for a machine recorded by one or present for a machine recorded by node ID (§3.3); its claim is abandoned and nothing read is kept |
 | 409 | `ingestion-abandoned` | the error of a failed `ingest` operation whose staging claim was abandoned: by an operator's abandonment, by the sweep at the claim's absolute expiry or, under transient staging, at its lease lapse, by an ingestion start of the same draft revision once the claim is due, by a takeover with nothing to decrypt, or by recovery-mode entry (§8.2); the generations it created are orphans (§6.4) |
@@ -2326,13 +2332,13 @@ counter, not the ETag token, so the token is not named.
 | 409 | `scope-busy` | an assignment change while an operation holds the machine scope |
 | 409 | `recovery-mode-active` | an act refused on a scope still pre-restore unaccounted, a publication changing the assignment of a scope not released in the current epoch, or any request but liveness and entry under the recovery-start flag before entry, and plan creation, approval or unfreezing under it after entry (§12.2); the body names the scope |
 | 412 | `precondition-failed` | `If-Match` does not match |
-| 422 | `validation-failed` | compilation refused the input; paths and rule, never values (compilation §13). Also a publication refused by T3's re-check: a version's status recorded not before publication began classifying it is not `retained` (dependency monitor §5.2); the body names its `dependency` by provider, object and version |
+| 422 | `validation-failed` | compilation refused the input; paths and rule, never values (compilation §13). A known publication identity or running-minor mismatch names the machine, observation, rule and safe cause (§6.1.1). Also a publication refused by T3's re-check: a version's status recorded not before publication began classifying it is not `retained` (dependency monitor §5.2); the body names its `dependency` by provider, object and version |
 | 422 | `idempotency-key-reused` | same key, other request (§7.2) |
 | 428 | `precondition-required`, `idempotency-key-required` | `If-Match` or `Idempotency-Key` missing |
 | 500 | `internal-error` | an unexpected server failure; the body says whether anything was committed or the outcome is unknown, in which case a retry under the same `Idempotency-Key` answers it (§5 rule 6) |
 | 501 | `not-implemented` | a §9.2 route whose handler has not landed yet: routed, authenticated and role-checked, nothing committed. PoC delivery state only; it disappears when every route has its handler |
-| 503 | `dependency-unavailable` | the provider is sealed or unreachable, or authentication could not reach the identity provider or the database; nothing was committed. Not at a Talos access read, which is `talos-access-unavailable` |
-| 503 | `talos-access-unavailable` | the error of a failed `ingest` operation, or the cause recorded by a dispatch's use-time check or fresh observation that failed on it (execution and recovery §3.1): the cluster's Talos access configuration is absent, unreadable by the identity, unreachable behind a sealed or silent provider, not a usable talosconfig or refused by Talos, or the machine's Talos endpoint did not answer (§3.3); the body names the cluster or machine, never a value; an ingestion's claim is abandoned and nothing read is kept. A use-time check that fails on the access read and on another dependency at once, as under a sealed provider, reports this code; its timeline entry records each dependency's result (execution and recovery §4.1) |
+| 503 | `dependency-unavailable` | the provider is sealed or unreachable, or authentication could not reach the identity provider or the database. A publication also uses this code for missing or unreadable identity, running version or Talos access (§6.1.1), naming the machine, observation, rule and safe cause; later compiler dependency failures name the dependency (§6.1). Publication commits no release or Desired change on refusal, but its operation, act, events and already recorded observations remain. Ingestion and dispatch Talos access failures use `talos-access-unavailable` |
+| 503 | `talos-access-unavailable` | the error of a failed `ingest` operation, or the cause recorded by a dispatch's use-time check or fresh observation that failed on it (execution and recovery §3.1): the cluster's Talos access configuration is absent, unreadable by the identity, unreachable behind a sealed or silent provider, not a usable talosconfig or refused by Talos, or the machine's Talos endpoint did not answer (§3.3); the body names the cluster or machine, never a value; an ingestion's claim is abandoned and nothing read is kept. A use-time check that fails on the access read and on another dependency at once, as under a sealed provider, reports this code; its timeline entry records each dependency's result (execution and recovery §4.1). A publication observation also retains this code in its unread values, while the publish operation reports `dependency-unavailable` under §6.1.1 |
 | 503 | `transient-conflict` | deadlock retries exhausted (§5) |
 | 503 | `epoch-superseded` | the serving process started before the current epoch, so it may issue no ownership (§5.1); nothing was committed |
 | 503 | `schema-mismatch` | never served: the server does not start (§11) |
@@ -3024,6 +3030,13 @@ equals neither the restored epoch nor the lost one.
 
 ## 14. Failure and rejection cases
 
+For publication, the persisted column includes any immutable observation
+starts, completed observations and their timeline entries already committed
+under §6.1.1, on success, refusal, interruption or takeover. An interrupted
+read can leave a start without a completed observation. "Operation, act"
+also includes the operation's recorded events. A refusal commits no release
+or Desired change; it does not erase earlier evidence.
+
 | Area | Condition | Outcome | Persisted |
 | --- | --- | --- | --- |
 | Auth | Missing, malformed, expired, over-long or wrongly signed token | `401` | nothing |
@@ -3039,17 +3052,17 @@ equals neither the restored epoch nor the lost one.
 | Draft | Update or discard while a publish operation for it is queued or running | `409 conflict` naming the operation | nothing |
 | Draft | Compilation refuses the input | `422`, paths only; a retry under the same key replays it (§7.2) | claim row with its principal and key, the refusal's idempotency record and act; orphans if past compilation §2.3 step 6 |
 | Draft | Database fails inside T1 | `503`; claim unreleased | claim row; orphans |
-| Publish | Moved head, a covered machine's import base changed (§4.2), or a machine of the cluster covered since the snapshot (§6.2, expected "absent") | operation `failed`, `409 stale-input` | operation, act |
+| Publish | Moved head, a covered machine's import base changed (§4.2), a machine of the cluster covered since the snapshot (§6.2, expected "absent"), or T3 finds missing, misbound or superseded publication evidence (§6.1.1) | operation `failed`, `409 stale-input` | operation, act |
 | Publish | A name the draft introduces was introduced by another publication first | operation `failed`, `409 stale-input` (expected "absent") | operation, act |
 | Publish | Assignment change while its scope is held | `failed`, `409 scope-busy` | operation, act |
 | Publish | Dependency `blocked` or `lost`, or its identity changed (§6.1), a concurrent publication's seed of another KV creation time included (§6.2) | `failed`, `422 validation-failed` naming it | operation, act |
-| Publish | Dependency left `unknown` for another reason (a value read or encryption refused, absent or not understood; an artifact key read with no `Date`), or provider sealed or unreachable (§6.1) | `failed`, `503 dependency-unavailable` naming it | operation, act |
-| Publish | Compilation refuses, or covered machines name different Kubernetes versions (§6.1) | `failed`, `422 validation-failed`, rule and paths only | operation, act |
+| Publish | Missing or unreadable publication identity, running version or Talos access (§6.1.1); otherwise a dependency left `unknown` (a value read or encryption refused, absent or not understood; an artifact key read with no `Date`), or provider sealed or unreachable (§6.1) | `failed`, `503 dependency-unavailable`; the early evidence refusal names machine/observation/rule/cause, a later dependency refusal names the dependency | operation, act |
+| Publish | Known publication identity or running-minor mismatch (§6.1.1); compilation refuses, or covered machines name different Kubernetes versions (§6.1) | `failed`, `422 validation-failed`; node evidence names machine/observation/rule/cause, compilation names rule and redacted paths | operation, act |
 | Publish | Stale pin or selection; a changed assignment of a machine with no import base; no covered machine (§6.1) | `failed`, `422 validation-failed` | operation, act |
-| Publish | Commit-unknown | resolved by reading the natural key | the release, once |
+| Publish | Commit-unknown | resolved by reading the natural key | the release once, with its original evidence links; any earlier observations |
 | Publish | Deadlock retries exhausted, `COMMIT` rejected (a deferred constraint), or a statement breaking an integrity constraint (a release machine whose mode is not its machine's platform, for one) | operation `failed`, `503 transient-conflict` or `500 internal-error` | operation, act |
 | Publish | Compiled release disagrees with its sources' reference declarations or text digests | operation `failed`, `500 internal-error`; the clause logged | operation, act |
-| Publish | Worker superseded, or its lease lapsed | its commit refused by the fence; the job claimed again | the other worker's result |
+| Publish | Worker superseded, or its lease lapsed | its commit refused by the fence; the job claimed again | the other worker's result; any earlier observation starts/results |
 | Publish | New request for a draft already published | `409 conflict` naming the release | nothing |
 | Plan | Second approval of a plan in one epoch | `409 conflict` | nothing |
 | Plan | An `apply-config` plan for a release that is not the machine's `Desired` | `409 conflict` naming the `Desired` release | nothing |
