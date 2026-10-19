@@ -94,14 +94,47 @@ changes_worker() {
   [ "$(sql "SELECT rm.configuration_digest <> s.applied_digest FROM release_machine rm
     JOIN machine_state s ON s.machine = rm.machine WHERE rm.release = '$rel' AND rm.machine = '$machine_w'")" = t ]
 }
+# selects_workers: the worker's assignment head selects the workers profile.
+selects_workers() {
+  [ "$(sql "SELECT count(*) FROM assignment a JOIN assignment_revision_profile p ON p.revision = a.head_revision_id
+    WHERE a.machine = '$machine_w' AND p.profile = 'workers'")" = 1 ]
+}
+# selection: the worker's assignment head as an assignment body, its profiles and its fragments by
+# layer.
+selection() {
+  sql "SELECT jsonb_build_object(
+      'profiles', coalesce((SELECT jsonb_agg(p.profile ORDER BY p.position) FROM assignment_revision_profile p
+        WHERE p.revision = a.head_revision_id), '[]'::jsonb),
+      'fragments', coalesce((SELECT jsonb_object_agg(l.layer, l.names) FROM (SELECT f.layer::text AS layer,
+        jsonb_agg(f.fragment ORDER BY f.position) AS names FROM assignment_revision_fragment f
+        WHERE f.revision = a.head_revision_id GROUP BY f.layer) l), '{}'::jsonb))
+    FROM assignment a WHERE a.machine = '$machine_w'"
+}
+# assign_adds <who> <name> <layer> <fragment>: the worker's assignment in the draft, its head's
+# selection with <fragment> added at <layer>, under the draft's ETag: 200, the ETag replaced.
+assign_adds() {
+  local body
+  fresh "$1"
+  body=$(selection) && [ -n "$body" ] || return 1
+  body=$(jq -c --arg l "$3" --arg f "$4" '.fragments[$l] = ((.fragments[$l] // []) + [$f])' <<<"$body") || return 1
+  answers 200 - PUT "/api/v1/drafts/$draft/assignments/$machine_w" "$tok" "$body" "$(key "assignment-$2")" "$etag" || return 1
+  differ "$(etag_of_last)" "$etag" || return 1
+  etag=$(etag_of_last)
+}
 # ds_publish <row>: h-author drafts a role fragment, a node label of the row's own, and lists it in
-# the workers profile; h-publisher publishes it: a release changing the worker's configuration, its
-# Desired, in rel. Each step is a prerequisite.
+# the workers profile, or, when the worker selects no workers profile (after s5's step 4 pointed it
+# back at the handover's cluster fragment), adds it to the worker's assignment; h-publisher publishes
+# it: a release changing the worker's configuration, its Desired, in rel. Each step is a prerequisite.
 ds_publish() {
   local ref="$ds_ref $1"
   must "$ref" 'h-author opens a draft: 201' draft_by h-author "ds$1"
   must "$ref" "h-author drafts a role fragment, a node label of the row's own: 200" fragment_by h-author "ds$1" "ds$1" role
-  must "$ref" 'h-author lists it in the workers profile: 200' profile_by h-author "ds$1"
+  if selects_workers; then
+    must "$ref" 'h-author lists it in the workers profile: 200' profile_by h-author "ds$1"
+  else
+    must "$ref" "h-author adds it to the worker's assignment, which selects no workers profile: 200" \
+      assign_adds h-author "ds$1" role "$scenario-ds$1"
+  fi
   must "$ref" "h-publisher publishes it: 202, one release, the worker's Desired" publish_by h-publisher "ds$1"
   rel=$new_release
   must "$ref" "the release changes the worker's configuration digest" changes_worker
