@@ -1632,9 +1632,16 @@ each:
 
 Evidence gaps this contract carries rather than closes:
 
+The limits below retain the distinction between the original experiments and
+implementation evidence. Current scenario results, check mappings and open
+assessment items are in the [PoC acceptance record](../design/research/20261018-poc-acceptance-evidence.md)
+and its [refusal/access supplement](../design/research/20261019-poc-coverage.md).
+Those results do not erase an experiment's untested cases or supply the owner's
+acceptance.
+
 **Ingestion and staging**
 
-- **Interruption of this pipeline**: measured for the import only. S1 kills
+- **Interruption of this pipeline**: measured separately for import, fragment update and drift adoption on the selected fixture. S1 kills
   the ingestion at each of steps 0 to 8 under both staging modes. After each
   kill it checks the claim, the operation and the draft's ETag, and that as
   many generations as were created before the kill are still listed under the
@@ -1653,7 +1660,11 @@ Evidence gaps this contract carries rather than closes:
   scanned, the logs, the data directory, the write-ahead log and a dump taken
   after the last kill among the surfaces
   ([acceptance plan S2](acceptance-plan.md#s2-publication)). Profile and
-  assignment updates ingest no document and hold no claim.
+  assignment updates ingest no document and hold no claim. S5's full mode
+  separately runs drift adoption through success, refusal and its interruption
+  points, with the retained checks and scans listed in acceptance-record R1;
+  its pass mode deliberately omits that matrix. These are fixture results,
+  not broader renderer or provider-topology coverage.
 - **Operator review** (§3.6): measured on the fixture and in Go checks. S1
   pauses a reviewed import, shows it, keeps it paused across a restart,
   refuses a mark before and after a provider write, kills a mark's run at each

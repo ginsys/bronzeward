@@ -525,13 +525,22 @@ func TestDraftDiscard(t *testing.T) {
 
 	wantProblem(t, discard(`{"reason":"x"}`, d.etag, d.key()), http.StatusBadRequest, "invalid-request")
 	wantProblem(t, discard(`{}`, `"2-aaaaaaaaaaaaaaaaaaaaaaaaaa"`, d.key()), http.StatusPreconditionFailed, "precondition-failed")
-	op := id.New(id.Operation)
-	mustExec(t, d.db, `INSERT INTO operation (id, kind, state, epoch, owner_gen, draft, draft_revision, created_by, created_by_kind, created_role, created_at)
-		SELECT $1, 'publish', 'queued', epoch, 0, $2, 2, $3, 'human', 'publisher', now() FROM installation_state`, op, d.draft, d.seed)
-	if doc := wantProblem(t, discard(`{}`, d.etag, d.key()), http.StatusConflict, "conflict"); doc["operation"] != op {
-		t.Fatalf("discard with a queued publication: %v; want it named", doc)
+	for _, state := range []string{"queued", "running"} {
+		op := id.New(id.Operation)
+		mustExec(t, d.db, `INSERT INTO operation (id, kind, state, epoch, owner, owner_gen, owner_epoch, lease_until, draft,
+			draft_revision, created_by, created_by_kind, created_role, created_at)
+			SELECT $1, 'publish', $2, epoch, CASE WHEN $2 = 'running' THEN 'run-1/4242/pub' END, CASE WHEN $2 = 'running' THEN 1 ELSE 0 END,
+			CASE WHEN $2 = 'running' THEN epoch END, CASE WHEN $2 = 'running' THEN now() + interval '1 minute' END,
+			$3, 2, $4, 'human', 'publisher', now() FROM installation_state`, op, state, d.draft, d.seed)
+		if doc := wantProblem(t, discard(`{}`, d.etag, d.key()), http.StatusConflict, "conflict"); doc["operation"] != op {
+			t.Fatalf("discard with a %s publication: %v; want it named", state, doc)
+		}
+		if count(t, d.db, `SELECT count(*) FROM draft WHERE id = $1 AND state = 'open' AND revision = 2`, d.draft) != 1 ||
+			count(t, d.db, `SELECT count(*) FROM act WHERE action = 'draft.discard'`) != 0 {
+			t.Fatalf("discard refusal during %s publication changed the draft or wrote a discard act", state)
+		}
+		mustExec(t, d.db, `UPDATE operation SET state = 'failed', error = '{}'::jsonb WHERE id = $1`, op)
 	}
-	mustExec(t, d.db, `UPDATE operation SET state = 'failed', error = '{}'::jsonb WHERE id = $1`, op)
 
 	k := d.key()
 	rec := discard(`{}`, d.etag, k)
