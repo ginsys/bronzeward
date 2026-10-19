@@ -7,6 +7,7 @@ import (
 	"maps"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/ginsys/bronzeward/internal/classify"
@@ -42,6 +43,13 @@ func (a *API) readPinned(ctx context.Context, j publishJob, s snapshot, m compil
 			path, err := provider.ParseGenerationPath(k.path)
 			if err != nil {
 				return pinned{}, nil, fmt.Errorf("source %s reference %q: %w", rev, name, err)
+			}
+			// C §5.1: validate scope before classifying or reading any pin, even if
+			// an inconsistent stored reference bypassed the authoring boundary.
+			if !strings.HasPrefix(path.String(), "gen/"+j.cluster+"/") {
+				return pinned{}, refuse(http.StatusUnprocessableEntity, "validation-failed",
+					"Publication refused: a secret reference belongs to another cluster; nothing was committed.").
+					with("source", rev).with("reference", name), nil
 			}
 			index[k] = len(pins)
 			pins = append(pins, compile.Pin{Reference: name, Path: path, Version: k.version, Recorded: s.recorded[k]})
