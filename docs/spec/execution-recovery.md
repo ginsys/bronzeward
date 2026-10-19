@@ -763,7 +763,7 @@ Required entries:
 | Approval | the plan, approver, role, epoch, self-approval mark (§2) |
 | Revocation, identity revocation, cancellation | what it names, who, role |
 | Observation started | purpose, the plan or operation it is taken for, if any, and the Talos endpoint it dials: that plan's route when taken for a plan or its operation, the machine's current endpoint otherwise ([persistence and API §3.3](persistence-api.md#33-talos-access)); recorded before the remote read, its revision is the observation's basis (below) |
-| Observation | purpose (`evidence`, `completion`, `recovery`, `drift`, `restoration`), basis, the Talos access version it read (path, version, `created_time`; [persistence and API §3.3](persistence-api.md#33-talos-access)), identity, assignment evidence, running Talos version, configuration digest, machine-configuration resource version, health results, or which values could not be read and why: a failed access read or connection reads none, and records its `talos-access-unavailable` cause |
+| Observation | purpose (`evidence`, `completion`, `recovery`, `drift`, `restoration`, `publication`), basis, the Talos access version it read (path, version, `created_time`; [persistence and API §3.3](persistence-api.md#33-talos-access)), identity, assignment evidence, running Talos version, configuration digest, machine-configuration resource version, health results, or which values could not be read and why: a failed access read or connection reads none, and records its `talos-access-unavailable` cause |
 | Use-time check | each dependency checked, its result, under which identity |
 | Commitment | the operation created, the §3.1 evidence it links, owner, generation, epoch, comparisons passed |
 | Refusal | the transaction and the comparison that failed, by number; recorded after the refused transaction rolls back, by a separate transaction that allocates its revision like any entry (below) and, for a commitment refused on its evidence's configuration digest, applies §6.1 and §6.5 to that evidence (§3.2) |
@@ -780,6 +780,14 @@ machine-scope facts are recorded on the machine's timeline beside its
 operations' entries: drift records and their resolution, freezes and unfreezes,
 adoption records, recovery-mode entry, scope states and scope release (§6,
 §7), and Talos endpoint changes.
+
+A `publication` start names a publish operation and its `publicationGeneration`,
+with no plan, and dials the current inventory endpoint. Its ownership fences,
+required identity/version evidence and immutable release linkage are defined in
+[persistence and API §6.1.1](persistence-api.md#611-publication-observations).
+It never authorizes mutation and does not update Applied or perform drift
+classification. The observation API returns `publicationGeneration` as null
+for the other purposes.
 
 **Ordering.** Every entry's revision, for a plan, an operation or a
 machine-scope fact alike, is allocated from one per-machine counter under the

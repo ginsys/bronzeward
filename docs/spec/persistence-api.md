@@ -821,7 +821,7 @@ Design: [§7.4](../design/Talos_Configuration_and_Machine_Management_Design.md#7
 | Design §7.4 step | Where | Provider writes | Database writes |
 | --- | --- | --- | --- |
 | 1. Snapshot, select or create generations, pin | compilation §6 steps 1–2, in a read-only transaction | none: generations already exist from ingestion (compilation §2.3 step 6) | none |
-| 2. Check dependencies, resolve, compose, validate | compilation §6 steps 3–8, outside any transaction | none | none |
+| 2. Observe nodes, check dependencies, resolve, compose, validate | §6.1.1; compilation §6 steps 3–8, outside the publication transaction | none | immutable observation starts/results |
 | 3. Redact, encrypt, record dependencies | compilation §8, §9, §11 | none: Transit encryption keeps no state; the compiler cannot create a key (KL §7 item 1; row 037) | none |
 | 4. Atomic commit, rejecting stale input | T3, §6.2 | none | the whole release, or nothing |
 | 5. Available for planning | after T3 commits | none | none; publication never authorizes dispatch |
@@ -883,6 +883,57 @@ checks no longer accept is the server's error (`500`), not a refusal:
 persistence stores only what ingestion produced and checked, so it means the
 stored text and its reference rows disagree. No refusal holds a value.
 
+### 6.1.1 Publication observations
+
+After the snapshot and before reading pinned values or compiling, the worker
+obtains one fresh `publication` observation per covered machine, in machine-id
+order. It uses the **executor** identity's normal latest Talos access read and
+read-only node client (§3.3). The compiler identity cannot read access or dial
+nodes. This also applies to the first import -> publish -> adoption sequence;
+no Applied baseline or prior observation is required.
+
+The start names the publish operation, its owner generation, controller, epoch
+and current machine endpoint; it has no plan. Both start and completion check
+the current epoch and the publish operation's running owner, generation and
+unexpired lease, after locking the machine. The completed observation records
+the access version and identity/version results, including ordinary unread
+causes. Configuration/resource-version reads remain diagnostic: publication
+requires identity and running version, not a configuration or health match.
+No health check is bound. A failed access read records no node values.
+
+The reported identity must match the immutable inventory identity and Talos
+cluster identity; the running minor must equal the snapshot's target contract.
+A known mismatch is `422 validation-failed`; missing or unreadable identity,
+version or access is `503 dependency-unavailable`. Refusals name the machine,
+rule (`publication-identity`, `publication-version` or `publication-evidence`),
+observation and safe cause, never credentials, configuration or provider text.
+No release or Desired change is committed on refusal; the timeline evidence
+remains. Compilation and encryption do not begin after this check has failed.
+
+T3, under its covered-machine locks and current operation ownership fence,
+requires each supplied observation to be of that machine, purpose, operation,
+owner generation, controller and epoch. It rechecks identity, access path and
+version, and refuses `409 stale-input` if the endpoint changed since the start
+(including changed away and back), or a completed higher-basis observation
+lacks usable identity/version or contradicts them. A higher-basis observation
+with matching identity and minor is allowed; a later completion with lower
+basis cannot supersede the chosen read. There is no remote read inside T3.
+
+Each release machine stores the chosen observation ID; the release API's
+machine entry exposes `publicationObservation`. Observation responses expose
+nullable `publicationGeneration`. The observation and its start are immutable.
+Evidence IDs/times are excluded from the release content digest: retrying the
+same content after commit-unknown returns the existing release and its original
+evidence. That existing-release lookup still precedes stale-input checks.
+
+Every new worker pass (including ownership takeover) obtains new observations;
+starts or completed reads from an interrupted pass remain in the timeline.
+A database transaction retry may reuse that pass's reads with the same T3
+checks. Fresh means started for this worker pass, not a cached-age policy.
+Unrecorded remote changes after the read cannot be excluded; dispatch retains
+its independent fresh evidence and contract check. This refinement does not
+add upgrade support, a health binding, or authorization to mutate a node.
+
 ### 6.2 The commit transaction (T3)
 
 ```sql
@@ -921,6 +972,7 @@ SELECT id, digest FROM release
   -- for each machine whose assignment head is in $changed:
   --   no operation on its scope is committed, sending, verifying or unresolved;
   --   in recovery mode, its scope released in the current epoch
+-- each covered machine has valid publication evidence under these locks (§6.1.1)
 INSERT INTO dependency_status ... ON CONFLICT DO NOTHING;
                                      -- `retained`, per provider object version
                                      -- and creation time without a row, in
@@ -1027,7 +1079,7 @@ publications introducing the same name meet at the unique index, where the
 second insert waits for the first transaction and fails once it commits, so
 the second publication fails `409 stale-input` with the head's expected
 revision "absent" and its actual one. Publication writes only the database and
-sends nothing to a machine, and stays allowed during recovery mode (§12.2).
+sends no mutation to a machine, and stays allowed during recovery mode (§12.2).
 T3 consults recovery mode only for an assignment change: execution and
 recovery refuses one, in recovery mode, on a scope not released in the current
 epoch, because an attempt the restored state does not hold may still be in

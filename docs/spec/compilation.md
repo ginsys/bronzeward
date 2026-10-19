@@ -1349,6 +1349,18 @@ outcomes through both implementations (E3 §4.3); the choice belongs to
   written for. A contract change is a new fragment revision that passes stage 1
   again; paths are never translated automatically.
 
+Publication establishes the running minor using a fresh read-only executor
+observation for every covered machine, before resolving compiler inputs. The
+compiler receives the evidence reference, never Talos credentials. Missing or
+unreadable identity/version evidence refuses publication, including initial
+adoption; an older cached observation cannot substitute for this read. The
+transaction rechecks the evidence and retains its immutable link per artifact
+([persistence and API §6.1.1](persistence-api.md#611-publication-observations)).
+This is the owner-approved #247 refinement (2026-10-19). It deliberately makes
+publication depend on node availability. Reusing prior observations was rejected
+because initial adoption has none and cached versions can silently become stale;
+deferring this check to dispatch does not satisfy §13 row 17.
+
 ### 10.3 Compatibility limits and the deferral
 
 Evidenced: generation, validation and the PoC's configuration RPCs (version
