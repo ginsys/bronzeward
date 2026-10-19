@@ -80,3 +80,29 @@ Raw retained logs (local /home/serge/tmp/bwtpl; SHA-256):
 33cec0980aee4face947c13ef22421691fa7d4c7c542ac56354f78f4035cc136  bw241-committed-control-fragment.log
 e7e1d8945bb4d45b66947755ab51b31065d39e95cc75a448c162edb651f5a66b  bw241-committed-control-import.log
 0c38952def5f8335c5488c414fb07723f259488757577c16eab53b6b7c00fbc6  bw241-timing-skip-check.log
+
+
+Review follow-up: synchronous draft-update failure (PA14-13)
+Revision: 02d012c222d51714a9ce08b7087f8c9d1fab35fb
+Same Go/PostgreSQL environment and TMPDIR/GOTMPDIR as above. Stand-in provider.
+Command: BW_REQUIRE_PG=1 BW_TEST_PG_DSN=postgres://bronzeward@127.0.0.1:55433/bronzeward?sslmode=disable mise exec -- go test -count=1 -v -timeout 10m -run '^TestFragmentPutDatabaseFailure$' ./internal/api
+Exit: 0; failed_commit PASS, successful_commit PASS; 1.028s.
+Assertions: safe HTTP 503, unchanged draft/ETag, held transient claim, retained synthetic provider generation; no fragment/reference/draft-source/act/replay commit, no asynchronous operation, no synthetic secret in response/log/database. Successful control commits atomically and releases its claim.
+Control: temporary copy of internal/api/tx.go; in fail's errUnavailable/connLost branch change only http.StatusServiceUnavailable to http.StatusInternalServerError. Map that file through Go -overlay.
+Control command: same command with -overlay /home/serge/tmp/bwtpl/bw241-sync-control.json
+Control exit: 1 expected; failed_commit detects 500 instead of 503; successful_commit PASS; 0.983s.
+No tracked edits during either run. No full database suite rerun is claimed for this follow-up test-only change.
+
+Review diagnostic: publication node-minor mismatch (C13-17), tracked in #247
+Revision: 0724177ae21553c1d0c7abfaa60f40a85f1c1760
+Command: same Go/PostgreSQL environment; mise exec -- go test -count=1 -v -timeout 10m -overlay /home/serge/src/ginsys/_scratch/bronzeward/bw241-review-vkk9vfp1/overlay.json -run '^TestReviewNodeMinorPublication$' ./internal/api
+Overlay appends the diagnostic to pipeline_build_test.go; it seeds a drift observation with running_version on newBuildEnv, then calls build and T3 commit.
+Observed: v1.13.6 control publishes contract v1.13; v1.12.4 also publishes contract v1.13.
+Exit: 1 expected, C13-17 node-minor mismatch did not refuse publication; 2.409s.
+Limit: isolated database and stand-in provider, synthetic stored observation; no live-node or dispatch claim. The probe's early return on any refusal is not a reusable successful-publication control; its retained log explicitly records both successful commits here. #247 must supply a strict regression test after refinement.
+R5 remains incomplete. Original suite passes above do not establish this missing publication behavior.
+
+Follow-up log screen: same four named canaries and private-key regex above, three logs, zero hits; positive control detects all five patterns. Scope stdout/stderr only.
+b916c810e42b262202f694d3c7ea48590723827e80996e34aa11ecbb287a8032  bw241-synchronous-db.log
+53b85b67e147a659bfcfa286fedf1cef0899347ccd281ebe2cabee5ca05abf35  bw241-synchronous-db-control.log
+fb270eb50ed89f75e2b90adbbfd094af785681ca93f813c1af7172425d9ded96  bw241-minor-reproduction.log

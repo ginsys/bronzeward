@@ -365,7 +365,7 @@ plan. An item with no retained result leaves its issue incomplete (AP §7.1).
 | R2 | C §15: the compiler process's surfaces scanned over successful, rejected and interrupted publications, killed at … | #23 | a publish run stopped in process at each of its six points, nothing written, taken over | S2's scans over a killed compiler process | met live and in CI |
 | R3 | C §15: claim lease extension by its owner only, takeover of `held` and `resumed` claims only after lapse, stale … | #22 | every named takeover test, lease extension, a crash inside the draft transaction, provider unreachable | S1's negative controls | met live and in CI |
 | R4 | C §15: SR and SP matrices through the compiler's path, with import-base references and SP's oracle over Bronzeward's … | #23 | — | S2's precondition and negative controls | met live |
-| R5 | C §15 and PA §16: every refusal of C §13, every walk-through of PA §13 and refusal of PA §14 | #21 to #29 | clause-level mapping in the supplement; C13-17 publication minor and PA14-13 synchronous failure gaps identified | retained scenario refusals and scans | partially evidenced; publication repair #247 and follow-up checks remain open (§6.3) |
+| R5 | C §15 and PA §16: every refusal of C §13, every walk-through of PA §13 and refusal of PA §14 | #21 to #29 | clause-level mapping in the supplement; C13-17 publication minor gap open; PA14-13 synchronous failure and control checked | retained scenario refusals and scans | partially evidenced; publication repair #247 remains open (§6.3) |
 | R6 | ER §9.2: DS rows 001–023 through the implementation over the worker's endpoint, with controls 006, 008, 011 and row … | #26 | — | S4's precondition (DS rows over the worker's endpoint); the fallback's scan does not apply, the fallback is not built (ER §9.2) | met by live rows and Go interleaving checks (ER choice §10.32); the fallback is not built (ER §9.2) |
 | R7 | ER §9.2: sending only after the attempt commits | #25, #26 | every named lock test with its control | S4 and DS rows 003 and 011 | met live and in CI |
 | R8 | ER §9.2: expiry, observation age, a contradicting newer observation, the attempt bound, each refusing | #25, #26, #28 | the attempt bound refusing; the bound exhausted after a lost response | expiry, observation age and a contradicting newer observation (S3, S4) | met live and in CI |
@@ -547,7 +547,9 @@ Local review then reproduced a second publication defect: a node-minor mismatch
 does not refuse publication. [#247](https://github.com/ginsys/bronzeward/issues/247)
 owns that repair and its needed evidence-acquisition refinement. R5 remains
 incomplete. The review also identified missing synchronous T1 database-failure
-response coverage; its added check has not yet run.
+response coverage. The added check and its successful-commit control pass at
+`02d012c222d51714a9ce08b7087f8c9d1fab35fb`; changing the failure's HTTP 503 to
+500 makes the check fail as intended. The supplement retains both outcomes.
 
 ## 7. Acceptance criteria of ginsys/bronzeward#31
 
@@ -583,8 +585,8 @@ response coverage; its added check has not yet run.
 - **R5 and R45 additional evidence:** the clause audit, missing checks and controls
   are recorded in §6.3 and the linked #241 supplement. The publication defect
   found by that audit was separately repaired and landed under #244. A second
-  publication-minor defect remains open under #247; the synchronous T1 failure
-  check also awaits execution. R5 is incomplete. These later results do not
+  publication-minor defect remains open under #247. The synchronous T1 failure
+  check and control passed, with the wrong-status control failing. R5 is incomplete. These later results do not
   retroactively change any original run's coverage.
 - Pointer `SKIP` rows, each naming the check that carries what it leaves out: S7's three
   dropped-comparison controls (§6.1, R27), S4's frozen-scope, index-drop and revocation-wait rows
