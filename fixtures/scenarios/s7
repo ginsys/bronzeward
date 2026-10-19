@@ -210,15 +210,9 @@ claim_abandoned_by_entry() {
     same "$(sql "SELECT pg_xact_commit_timestamp(xmin) < expires_at FROM staging_claim WHERE id = '$tk_ing'")" t &&
     same "$(sql "SELECT state FROM operation WHERE id = '$tk_op'")" failed
 }
-# reassign_entry: the worker's assignment in the draft, the workers profile and the draft's cluster
+# reassign_entry: the worker's assignment in the draft, its current selection and the draft's cluster
 # fragment, under the draft's ETag: 200.
-reassign_entry() {
-  fresh h-author
-  answers 200 - PUT "/api/v1/drafts/$draft/assignments/$machine_w" "$tok" \
-    '{"profiles": ["workers"], "fragments": {"cluster": ["s7-entry"]}}' "$(key assignment-entry)" "$etag" || return 1
-  etag=$(etag_of_last)
-  [ -n "$etag" ]
-}
+reassign_entry() { assign_adds h-author entry cluster s7-entry; }
 # publish_queued: the draft published as h-publisher under its ETag: 202, its operation in pub_op.
 publish_queued() {
   fresh h-publisher
@@ -578,7 +572,7 @@ s7() {
   must "$ref" 'h-author opens a draft through B-recovery: 201' draft_by h-author entry
   entry_draft=$draft
   must "$ref" "h-author drafts a cluster fragment, a node label of its own: 200" fragment_by h-author entry entry
-  check "$ref" "h-author assigns it to the worker beside the workers profile: 200" reassign_entry
+  check "$ref" "h-author assigns it to the worker beside its current selection: 200" reassign_entry
   check "$ref" 'h-publisher publishes it: 202' publish_queued
   sleep 16
   check "$ref" "three heartbeats on, its publish job is still queued with no release: B-recovery runs no job worker" pub_queued
