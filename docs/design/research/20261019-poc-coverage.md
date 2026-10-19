@@ -7,9 +7,43 @@ replace the independent timeline review, criterion verdicts or owner assessment.
 
 ## Evidence identity and reproduction
 
-Source audit began at `ab327884527fee3b3ed32f0e2dfc8ffde5bf0ce3`; validation is prepared on landed repair `bc59346428ea267addfca37881c14eb4ecfda108`.
-Fresh test revision, commands, versions, statuses, skips and sanitized result
-links must be inserted after execution. No fresh result is asserted here yet.
+Source audit began at `ab327884527fee3b3ed32f0e2dfc8ffde5bf0ce3`.
+Fresh checks ran at `c9398d45c1b690e8e11ce541dbb76af0ec690308`, on landed
+publication repair `bc59346428ea267addfca37881c14eb4ecfda108`. The checkout
+remained clean throughout execution. The [sanitized results](evidence/20261019-poc-coverage.txt)
+retain the commands, package outcomes, focused names, controls, explicit skips
+and original log hashes. This note and the acceptance-record update follow
+those checks; no test or production source changed to write their results.
+
+`mise run go-db` exited 0: all 21 packages with tests passed, and two had no
+test files. The focused command exited 0 with 17 top-level passes (63 PASS
+lines including subcases) and six explicit environment skips. In particular,
+all 25 observation-purpose/access-failure combinations passed. Each of the two
+removed-cluster-predicate controls exited 1 as expected: its foreign reference
+was accepted with HTTP 200, which the committed refusal check detects. The
+unmodified code passed both foreign-refusal and same-cluster paths.
+
+The existing `TestAdopterRetryOutlivesClosedScope` can skip when its passes
+outlast a lease. Its separate verbose run passed (exit 0, 0.83 seconds); the
+nonverbose full task does not establish whether that individual run skipped.
+
+The machinery/sensitivity gates require their dedicated C10 runner; the four
+live Talos checks require a configured Talos target. They explicitly skipped
+here. Their separately retained scenario/C10 results remain at their original
+revisions in the acceptance record; this run is no new live Talos evidence.
+
+The five retained result logs passed an exact screen for four synthetic
+canaries and private-key headers. A positive control detected all five inserted
+patterns. This is a stdout/stderr screen, not a scan of database/WAL, memory,
+other encodings or unknown secrets. The named tests separately assert their
+persisted records, timeline and logs, including the intentional error-text
+control. The retained integrated runs carry their own broader surface scans.
+
+Earlier scratch-overlay attempts remain retained, including the initial
+untrusted-mise failure (`bw241-draft-tests.log`, exit 1) and the subsequent
+passing scratch checks. They are not substituted for the committed checks.
+The production publication defect and its failed diagnostic attempts belong to
+the separate [repair evidence](20261019-publication-cluster-scope.md).
 
 The local verification environment reports Go 1.27.1 on linux/amd64,
 PostgreSQL 17.11 and OpenBao 2.6.1
@@ -123,8 +157,9 @@ assertions do not turn all failures into “nothing persisted.”
 
 ## Acceptance-boundary audit
 
-DRAFT: retain fresh committed R5/R45 outcomes before replacing the pending
-evidence identity above. The contract-to-row source cross-check is complete.
+The source cross-check accounts for all 50 AP rows. The named test functions were inspected by assertion, not inferred from
+a matching name. Fresh full-suite results and the focused R45 checks above
+supplement the retained integrated runs.
 
 | Indexed required-check list | Acceptance-record rows | Audit outcome |
 | --- | --- | --- |
@@ -167,3 +202,32 @@ closed implementation issues or passing CI. #31 remains open for the second
 S8 reviewer, six criterion verdicts and the owner assessment. Milestone 02 stays
 open while the excluded licence decision #16 remains unfinished. Later upgrade,
 maintenance/reset and transport work is separately tracked without implementation.
+
+## Reproduction
+
+Use the repository's disposable development PostgreSQL/OpenBao setup and run
+`mise run go-db`. Set `TMPDIR` and `GOTMPDIR` to suitable disposable storage.
+For the focused run, use the environment, four package paths and anchored union
+of the 23 test names in the sanitized result file. Do not set `GOFLAGS=-json`:
+the method inventory's nested `go list -m -f` cannot combine those options.
+
+For either authoring control, make a temporary copy of
+`internal/api/fragments.go`, replace only `m.cluster = $1` (import-base) or
+`f.cluster = $1` (fragment) in `carriedReference` with `$1::text IS NOT NULL`,
+and map the original absolute path to that copy in a Go overlay JSON object's
+`Replace` dictionary. The cast preserves the SQL parameter binding, so failure
+comes from accepting the foreign reference, not an untyped parameter. Run:
+
+```sh
+BW_REQUIRE_PG=1 \
+  BW_TEST_PG_DSN='postgres://bronzeward@127.0.0.1:55433/bronzeward?sslmode=disable' \
+  mise exec -- go test -v -count=1 -overlay="$coverage_overlay" \
+  -run '^TestFragmentPutRefusesOtherClusterReference$/fragment$' ./internal/api
+```
+
+`coverage_overlay` names the temporary JSON file; select `/import-base$` for
+that origin. Each control must exit 1 because it gets HTTP 200. Removing the
+overlay must exit 0. Keep the checkout unchanged. The compiler control proves
+both real inputs remain and both attributions exist when tracing succeeds;
+the refusal input is valid for real composition but cannot be traced. It does
+not invent a public API accepting externally supplied trace/flip fragments.
