@@ -1,0 +1,257 @@
+Bronzeward #247: sanitized publication evidence results
+Database/provider source: e04d6272006fdfaa57e192d8531dbb5b0a47e8af
+Failed live-chain source: 247e22c2adff4bf21c6d3a7427587b86a2693035
+Repair live-chain source: aede267c50f7c10978e42aa1eb4a8c43c96feaee
+Environment: Go 1.27.1 linux/amd64; PostgreSQL 17.11; OpenBao 2.6.1
+OpenBao revision: ba7ad8861d0578cd4da4f7b9e5a6756d30484f8f
+TMPDIR and GOTMPDIR: the same disposable directory on disk outside the checkout
+
+Command: mise run go-db
+Exit: 0; 21 packages with tests passed, two had no test files.
+The nonverbose full-suite output does not enumerate skips.
+ok  	github.com/ginsys/bronzeward/cmd/bronzeward	60.008s
+ok  	github.com/ginsys/bronzeward/fixtures/oidc	0.008s
+ok  	github.com/ginsys/bronzeward/fixtures/oidc/issuer	0.019s
+ok  	github.com/ginsys/bronzeward/internal/api	523.906s
+ok  	github.com/ginsys/bronzeward/internal/auth	114.838s
+ok  	github.com/ginsys/bronzeward/internal/baotest	0.004s
+ok  	github.com/ginsys/bronzeward/internal/classify	0.008s
+ok  	github.com/ginsys/bronzeward/internal/compile	45.333s
+ok  	github.com/ginsys/bronzeward/internal/config	0.015s
+ok  	github.com/ginsys/bronzeward/internal/database	0.006s
+ok  	github.com/ginsys/bronzeward/internal/dbtest	2.540s
+ok  	github.com/ginsys/bronzeward/internal/id	0.006s
+ok  	github.com/ginsys/bronzeward/internal/ingest	3.467s
+ok  	github.com/ginsys/bronzeward/internal/migrate	128.539s
+ok  	github.com/ginsys/bronzeward/internal/monitor	114.864s
+ok  	github.com/ginsys/bronzeward/internal/orphans	21.922s
+ok  	github.com/ginsys/bronzeward/internal/provider	0.726s
+?   	github.com/ginsys/bronzeward/internal/seam	[no test files]
+ok  	github.com/ginsys/bronzeward/internal/server	0.306s
+ok  	github.com/ginsys/bronzeward/internal/staging	104.369s
+ok  	github.com/ginsys/bronzeward/internal/talos	2.025s
+?   	github.com/ginsys/bronzeward/internal/talos/talostest	[no test files]
+ok  	github.com/ginsys/bronzeward/internal/textdiff	0.013s
+
+Command: accounted mise run verify
+Source: e04d6272006fdfaa57e192d8531dbb5b0a47e8af
+Exit: 0; unchanged checkout, settled process group.
+Log SHA256: 584319a3d3b9b1cc5f126eda9d8e56784b0421a3319bb063a34e083ac2cf9fc3
+
+Earlier development controls, not assigned to a clean committed revision: Go source overlays only, original checkout unchanged. The later committed rerun is recorded below.
+minor: exit 1 (expected 1)
+--- FAIL: TestPublicationRunningMinor (3.92s)
+--- PASS: TestPublicationRunningMinor/same_minor (2.50s)
+--- FAIL: TestPublicationRunningMinor/different_minor (1.42s)
+newer: exit 1 (expected 1)
+--- FAIL: TestPublicationEvidenceAtCommit (11.06s)
+--- PASS: TestPublicationEvidenceAtCommit/matching_newer (3.24s)
+--- FAIL: TestPublicationEvidenceAtCommit/different_newer (1.96s)
+--- FAIL: TestPublicationEvidenceAtCommit/unreadable_newer (5.86s)
+endpoint: exit 1 (expected 1)
+--- FAIL: TestPublicationEvidenceAtCommit (9.46s)
+--- PASS: TestPublicationEvidenceAtCommit/matching_newer (2.86s)
+--- FAIL: TestPublicationEvidenceAtCommit/endpoint (4.92s)
+--- FAIL: TestPublicationEvidenceAtCommit/endpoint_changed_back (1.69s)
+lease: exit 1 (expected 1)
+--- PASS: TestPublicationRunningMinor (2.54s)
+--- PASS: TestPublicationRunningMinor/same_minor (2.54s)
+--- FAIL: TestPublicationLeaseAfterLockWait (3.93s)
+
+Log screen: 14 development/committed/control stdout-stderr logs; zero hits.
+Patterns: publication-access-canary; provider-secret-canary; secret-canary; -----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----
+Positive control: every pattern detected. secret-canary also matches the suffix of provider-secret-canary.
+Limit: this is an output screen; database/timeline assertions and live bundle scans remain separate.
+
+Retained logs SHA-256 (development logs are not bound to a clean committed revision):
+4bff95ffe6e77b03d44f0ca4cd357f9fc17a2fefb2654740f5cba3d751c19218  bw247-red.log
+c8f023e8cb215d6e26e5e47ad834c9210c47c4710189fa191eba128bcf6de64b  bw247-green-first.log
+77ae34eec0c96e788986110fd91a3e69eac4dddbf4859eedb2eff362321f622f  bw247-focused-first.log
+84631ed396f7e5e7ef15b8a1c30aef8ad524abb195c5b52f65133b75680ac3ea  bw247-focused-second.log
+471af56cf8028ddd22ede7517e0ec325009af045b2526be3bb3b282463fb883e  bw247-go-db-first.log
+8e37b36877b6387d6cc3ad40828e30ed779f1e59f1a0e87d3330bd069da54454  bw247-fixture-repairs.log
+e3d28d9cbea86acd0c438fb97a0fe1085ea98ace92c4a6394985d0b998fe8977  bw247-schema-relative.log
+a00c70797c7dd40f7da3f339793c0eac8046995e96230928955a02135c3e393c  bw247-races.log
+8e5bb4c95e1f6afd2bf2472f67f09c7b122176c839e04482fa8f0da30587c2b4  bw247-added-tests.log
+e4fee80e56ff6082310164cbcdb4f2173c1f2fef1ca0085a6e61b7bd187d708b  bw247-go-db-committed.log
+f96cb8090f64ca587a0b1031f3d4e2c11ba107976ec3e1217c1a519c7f36479a  bw247-controls/minor/run.log
+13dd65c747b7e6e0797a5596c7d97f926da1f6d2d9ec958323d4ee5089e870a6  bw247-controls/newer/run.log
+8ced2bff017103fef7298e325701c94c51b523b299e62daa4a91f26cd3c947a1  bw247-controls/endpoint/run.log
+ae089515dbefceb6e1eb44573143161d54c3d7d7ba744f8ff10a0e94f8f1a41c  bw247-controls/lease/run.log
+
+
+Failed chain: steps-20261019T151940Z; exit 1 at S2; later steps not run.
+Time: 2026-10-19T15:19:40Z to 2026-10-19T15:49:04Z.
+33 evidence bundles: exact revision, empty diff, no unavailable source, positive-control-only scans.
+s1-pass-20261019T152150Z: {"PASS": 36, "SKIP": 2}; TSV SHA256 c4b86a81426b9c58fd10ef3daa35341227c93d08ad9c4d7464bac00269de1ceb
+s2-run-20261019T152406Z: {"FAIL": 3, "PASS": 367}; TSV SHA256 cb8d50e7d7b448f0e12764cf5ed08d58a2fd1df81cfb9187790cef63ad4c4373
+s3-handover-20261019T152311Z: {"PASS": 29}; TSV SHA256 7820ef8fd6a17a97db4254243d27764e5300610d39deedc5645bb7605e0631d1
+13b38f8b741bf2acbd9042747c3fb840dacda1d63963f55460038b9b0a0d17bc  steps-20261019T151940Z/chain.log
+ca8da4e95e3df19b535caa29b76b93d70f91289c0121fcc0d6060e0dc1f32a79  steps-20261019T151940Z/up.log
+df270cc434ba34b315c8dfd90cd4e98745da79e28ba079bbb7b700d51156dfc0  steps-20261019T151940Z/s1p.log
+74715d5b4a1a21a97432a9812abe2059683e810db5d2f206463556e4602cb588  steps-20261019T151940Z/s3h.log
+0c41f61f64028ed4aa1b751e12dee0a1da1aafc3b6379c972fac28d144a0eca3  steps-20261019T151940Z/s2.log
+8b711c212463663ba266ebb665c4b4616a952662d1e2ac1448a8207b16aa7a71  bw247-failed-up-down.log
+ab3335f69fb7c8883b827197a5ec68cd00685e6321397da7e3610be00d992400  bw247-failed-s2-down.log
+3230114dea23e532e6914c5bd5d86226d6a1f52f56a3e000cf27f945bff9cd75  bw247-outage-observations.txt
+Teardown: no fixture containers, networks, volumes or state left.
+Actual outage operations: failed, status 503, rule publication-evidence, cause unreadable-identity-or-version.
+The failed expectation was a dependency object naming unknown; the required node-access read now precedes pinned reads.
+Selected S2 Go checks passed; no selected test skipped.
+--- PASS: TestPublicationRunningMinor (5.42s)
+--- PASS: TestPublicationIdentityAndAccess (12.09s)
+--- PASS: TestPublicationEvidenceAtCommit (9.49s)
+--- PASS: TestPublicationReadFenced (2.57s)
+--- PASS: TestPublicationMixedCoverage (2.91s)
+--- PASS: TestPublicationOlderReadCompletingLate (1.60s)
+--- PASS: TestPublicationWorkerRefusal (0.83s)
+--- PASS: TestPublicationRequest (0.53s)
+S2 Go log SHA256 c4e23e9fb576f0ceecb5f2a2383fd268edce0b236c5b2032a308d6e6b9bb46bc
+
+
+
+Committed guard-removal controls: aede267c50f7c10978e42aa1eb4a8c43c96feaee
+minor: exit 1 (expected 1); raw log SHA256 16be9d7d4a283cec987c2f0a126df95dc0d2f4d2ad00a91e581948d81352b471
+--- FAIL: TestPublicationRunningMinor (1.64s)
+--- PASS: TestPublicationRunningMinor/same_minor (1.03s)
+--- FAIL: TestPublicationRunningMinor/different_minor (0.61s)
+newer: exit 1 (expected 1); raw log SHA256 b3e1f55eb44645283bc524d23b6d54231f9721d0fce535993100bcc3c731ea0d
+--- FAIL: TestPublicationEvidenceAtCommit (3.11s)
+--- PASS: TestPublicationEvidenceAtCommit/matching_newer (1.12s)
+--- FAIL: TestPublicationEvidenceAtCommit/different_newer (0.99s)
+--- FAIL: TestPublicationEvidenceAtCommit/unreadable_newer (1.00s)
+endpoint: exit 1 (expected 1); raw log SHA256 52291307c2053097c0a40327110fb93c35fa19a37338a7197287490fef16cef9
+--- FAIL: TestPublicationEvidenceAtCommit (4.01s)
+--- PASS: TestPublicationEvidenceAtCommit/matching_newer (0.89s)
+--- FAIL: TestPublicationEvidenceAtCommit/endpoint (1.66s)
+--- FAIL: TestPublicationEvidenceAtCommit/endpoint_changed_back (1.46s)
+lease: exit 1 (expected 1); raw log SHA256 e93178a5454b1e9422329005ca0e60d655c10d4a94c9613c7e52f7306b8cc755
+--- PASS: TestPublicationRunningMinor (4.05s)
+--- PASS: TestPublicationRunningMinor/same_minor (1.55s)
+--- PASS: TestPublicationRunningMinor/different_minor (0.77s)
+--- PASS: TestPublicationRunningMinor/missing_version (0.99s)
+--- PASS: TestPublicationRunningMinor/malformed_version (0.74s)
+--- FAIL: TestPublicationLeaseAfterLockWait (3.09s)
+Screen: all four committed control logs have zero hits for the three synthetic canaries and private-key header pattern; all positive controls detected.
+
+Third live chain (failed at S3): steps-20261019T155019Z
+Source: aede267c50f7c10978e42aa1eb4a8c43c96feaee
+Command: mise exec -- fixtures/scenarios/integrated "$record_dir" up s1p s3h s2 s3rp s4 s5p s7 s7n s7t s7o down
+Exit 1 at s3rp; later scenarios did not run.
+Audit: 37 exact-revision, empty-diff, complete bundles; positive-control-only scans.
+s1-pass-20261019T155228Z: {"PASS": 36, "SKIP": 2}; TSV SHA256 c4b86a81426b9c58fd10ef3daa35341227c93d08ad9c4d7464bac00269de1ceb
+s2-run-20261019T155431Z: {"PASS": 373}; TSV SHA256 fbdfc80ad3186c4570dc69e893a256f4e2e6205f9eee1b09ceb34aaa27f39fb1
+s3-handover-20261019T155343Z: {"PASS": 29}; TSV SHA256 7820ef8fd6a17a97db4254243d27764e5300610d39deedc5645bb7605e0631d1
+s3-pass-20261019T161534Z: {"FAIL": 8, "PASS": 66, "SKIP": 1}; TSV SHA256 29d8f7907bfc1b931299ab886d467d10818d3eb4863b020746ab8c4c8868b705
+FAIL	S3 step 4	case 2: h-all publishes it: 202, one release, the worker's Desired
+FAIL	S3 step 4	case 2: the approval carries created-plan, published and authored-change, and owned-automation (the automation identity's S2 revisions are in every release)
+FAIL	S3 step 4	case 3: h-publisher publishes it as a later release: 202, one release, the worker's Desired
+FAIL	S3 step 4	case 3: that release reuses h-all's fragment revision unchanged
+FAIL	S3 step 4	case 3: h-author's unrelated fragment revision is a changed head of that release, its own draft entry, not the reused one
+FAIL	S3 step 4	case 3: no machine selects it: the worker's configuration digest in that release is case 2's release's
+FAIL	S3 step 4	case 3: the approval carries authored-reused and owned-automation
+FAIL	S3 step 4	the three plans were each made from the worker's Desired at that moment, one release apart
+e394b721b62a42f2ff62ea68c68be0a6370590b930f1e0637eba4cc87cce0496  steps-20261019T155019Z/chain.log
+b6cccbd960fbcecade6a4def4ce51b227ef3239e4068a19f9a50cfd1898cb9c0  steps-20261019T155019Z/s1p.log
+5d716225df966d07feda62eb91bc795e1197584aa7d6646866c4203a4847bb2d  steps-20261019T155019Z/s2.log
+0ed9538af7e827047b051251fb29c915f917b2c363066bacf12b727428274afe  steps-20261019T155019Z/s3h.log
+60eb77c67f3f86fc4d9080736fec32b653c926eca7bbdacc60b5fb4d37cdb778  steps-20261019T155019Z/s3rp.log
+8260caa5a02480ab489bebca7ad1a6248642ff3105f193fef9c14ec3d033088a  steps-20261019T155019Z/up.log
+Selected S2 Go checks PASS with no skips; 2597941e73440d8d6c13a079819637cfa7178719995e257ef5910ea84a295e34  go-bao-rows.log
+Selected S2 Go checks PASS with no skips; 74765f796e5924ebf75b17222cdcf49ae5d5d1a4def626f33b59e5251e507afd  go-rows-clone.log
+Selected S2 Go checks PASS with no skips; 83f969d36c8686daaef09caa24e9bec26c4f37316bca00ab9f5cb27e1a9eb9c3  go-rows.log
+Scoped teardown PASS; ab3335f69fb7c8883b827197a5ec68cd00685e6321397da7e3610be00d992400  bw247-failed-s3-down.log
+
+The three full-S2 Go logs from steps-20261019T155019Z also passed the same three-canary/private-key-header screen: zero matches, every positive control detected (bw247-s2-success-log-audit.json).
+
+Repaired live chain: steps-20261019T163018Z
+Source: 44e8cf8c8f0285e70768e07291c2cd6f4a0ee9e6
+Exit: 0; every step exit 0; checkout remained clean.
+Command: mise exec -- fixtures/scenarios/integrated "$record_dir" up s1p s3h s2p s3r s4c s4x s4 s5p s7 s7n s7t s7o down
+Bundle audit: 48 exact-revision bundles; empty fixture diffs; complete captures; positive-control-only scans.
+Server image: sha256:417c71280c270e335ae434c008c839441e71296ebdfd94d7300d5b633a2a19e9
+2026-10-19T16:30:18Z checkout 44e8cf8c8f0285e70768e07291c2cd6f4a0ee9e6, 0 changed paths
+2026-10-19T16:30:18Z start up: up
+2026-10-19T16:32:25Z end up: exit 0
+2026-10-19T16:32:25Z start s1p: s1 pass
+2026-10-19T16:33:35Z end s1p: exit 0
+2026-10-19T16:33:35Z start s3h: s3 handover
+2026-10-19T16:34:20Z end s3h: exit 0
+2026-10-19T16:34:20Z start s2p: s2 pass
+2026-10-19T16:36:14Z end s2p: exit 0
+2026-10-19T16:36:14Z start s3r: s3 run
+2026-10-19T16:39:01Z end s3r: exit 0
+2026-10-19T16:39:01Z start s4c: s4 controls
+2026-10-19T16:42:01Z end s4c: exit 0
+2026-10-19T16:42:01Z start s4x: s4 restores
+2026-10-19T16:47:06Z end s4x: exit 0
+2026-10-19T16:47:06Z start s4: s4 run
+2026-10-19T16:48:03Z end s4: exit 0
+2026-10-19T16:48:03Z start s5p: s5 pass
+2026-10-19T16:50:47Z end s5p: exit 0
+2026-10-19T16:50:47Z start s7: s7 run
+2026-10-19T16:58:28Z end s7: exit 0
+2026-10-19T16:58:28Z start s7n: s7 no-entry
+2026-10-19T16:59:41Z end s7n: exit 0
+2026-10-19T16:59:41Z start s7t: s7 transit
+2026-10-19T17:05:53Z end s7t: exit 0
+2026-10-19T17:05:53Z start s7o: s7 old-bao
+2026-10-19T17:07:35Z end s7o: exit 0
+2026-10-19T17:07:35Z start down: down
+2026-10-19T17:07:41Z end down: exit 0
+2026-10-19T17:07:41Z done
+Observed tool versions (unique lines across retained bundles):
+age             v1.3.2
+compose         2.27.1
+docker          client 26.1.5+dfsg1 server 26.1.5+dfsg1
+kubernetes      1.36.2 (requested)
+openbao         OpenBao v2.6.1 (ba7ad8861d0578cd4da4f7b9e5a6756d30484f8f), committed 2026-07-22T14:22:20Z
+postgres        17.11
+sops            sops 3.13.3
+talos nodes     10.55.0.2 v1.13.6, 10.55.0.3 v1.13.6
+talosctl        Client: Talos v1.13.6
+s1-pass-20261019T163225Z: PASS 36; FAIL 0; SKIP 2; TSV SHA256 c4b86a81426b9c58fd10ef3daa35341227c93d08ad9c4d7464bac00269de1ceb
+s2-pass-20261019T163420Z: PASS 53; FAIL 0; SKIP 4; TSV SHA256 f0b182a14c79b72727553c248feb30e604071b630c33f66976fb2e491e70b0ce
+s3-handover-20261019T163336Z: PASS 29; FAIL 0; SKIP 0; TSV SHA256 7820ef8fd6a17a97db4254243d27764e5300610d39deedc5645bb7605e0631d1
+s3-run-20261019T163614Z: PASS 98; FAIL 0; SKIP 0; TSV SHA256 8a1e0cf76a47fc4be6d619cd72f913dec69bff52b178c6de86f99b1b6ec385fd
+s4-controls-20261019T163901Z: PASS 66; FAIL 0; SKIP 2; TSV SHA256 884697ff349a1519b06fef1fafb71ed8c1574cff0aa3d8e05fbe1cd9d3315de7
+s4-restores-20261019T164201Z: PASS 141; FAIL 0; SKIP 1; TSV SHA256 b2667325b9ea6f5878ca2bee9d8e88705bb5b2a3c52152f059b284a9520f035d
+s4-run-20261019T164706Z: PASS 33; FAIL 0; SKIP 0; TSV SHA256 25c5ef4ce1dbd8797c313256e5ae14ad4304389ed1425e5e7d40d8a1cb7ca13f
+s5-pass-20261019T164803Z: PASS 73; FAIL 0; SKIP 3; TSV SHA256 8f74b0d08ee933a00965bafe8a60613e82648911132420e58467e30df2bc2a8b
+s7-no-entry-20261019T165828Z: PASS 49; FAIL 0; SKIP 0; TSV SHA256 b7b14f2af09387f084d3748a0e696bb579ebf67b79bbc3947bc7f851a64e2531
+s7-old-bao-20261019T170553Z: PASS 41; FAIL 0; SKIP 0; TSV SHA256 de40987957c55c651103c1a7eb7fc0f6612cfb366adbcc36f27f3eedba6369aa
+s7-run-20261019T165047Z: PASS 128; FAIL 0; SKIP 0; TSV SHA256 9a2d30579b2da56cb7b8cf314b5aa8b8cfa641160b0012ae7d88f7e87cc83b13
+s7-transit-20261019T165941Z: PASS 46; FAIL 0; SKIP 0; TSV SHA256 faf559dcbd5bb879a1fe7eb0e22a587bc08a5585b9fad82ebc0bd7a04e2a8a73
+Explicit skips:
+SKIP	S1 Go tests	the Go rows (lease, takeover, interruption, access and inventory refusals): the pass mode runs the pass paths alone; the full mode runs this, from a fresh up
+SKIP	S1 negative controls	the refusal set, the Talos access refusals, takeover, the interruption matrix, the review, expiry and orphan rows: the pass mode runs the pass paths alone; the full mode runs this, from a fresh up
+SKIP	S2 negative controls, C §15	the draft updates and publications on C: success, refusal and the interruption matrices: the pass mode runs the pass paths alone; the full mode runs this, from a fresh up
+SKIP	S2 negative controls	a second author on each replaced ETag: 412: the pass mode runs the pass paths alone; the full mode runs this, from a fresh up
+SKIP	S2 negative controls (step 6)	the version soft-deleted, destroyed, and OpenBao partitioned, sealed and paused: the pass mode runs the pass paths alone; the full mode runs this, from a fresh up
+SKIP	S2 negative controls	the Go rows: the pass mode runs the pass paths alone; the full mode runs this, from a fresh up
+SKIP	S4 negative controls	a frozen scope refused: the Go check TestCommitmentRefusals "frozen"; scenarios/s5 run shows the controller passing over an approved plan on the frozen worker
+SKIP	S4 negative controls	with both scope indexes dropped a second plan's rows insert (DS row 011, the schema's control), node validation's InvalidArgument (DS row 022), the ownership check outside the attempt's UPDATE (DB row 018): the DS re-run's
+SKIP	S4 negative controls	a revocation started while a commitment holds the approval waits for it (DS row 003): the Go check TestCommitmentRevocationsWait in s4 ds
+SKIP	S5 negative controls	an approved revert plan on the frozen scope, passed over and cancelled: the pass mode runs the pass paths alone; the full mode runs this, from a fresh up
+SKIP	S5 step 4, C §15	the drift adoption's interruption matrix, killed at each pipeline step, with its generation-count control: the pass mode runs the pass paths alone; the full mode runs this, from a fresh up
+SKIP	S5 negative controls	unfreezing by h-publisher, not an approver: the pass mode runs the pass paths alone; the full mode runs this, from a fresh up
+Retained chain log hashes:
+8217cc8d237139b55b4356546f3a450c06e82fed277a1f51b3df78e79effec60  steps-20261019T163018Z/chain.log
+ab3335f69fb7c8883b827197a5ec68cd00685e6321397da7e3610be00d992400  steps-20261019T163018Z/down.log
+da7fae524f73b4fd0942c46d52f6191aed3ef21bcc13315587dafa1e053c1ad5  steps-20261019T163018Z/s1p.log
+9c319e98e0ba50916e82a5b8447cb08e59e474e44c71d27f25a7b6540b85cc1f  steps-20261019T163018Z/s2p.log
+b3850bba1841b668741f974cb0559e6a691fe54336febc86a9820360a8bb3824  steps-20261019T163018Z/s3h.log
+d51343a9cf308a503e40cad598e3036b83edf82be3210d2b4ea3bd7f31ef7ae8  steps-20261019T163018Z/s3r.log
+6ee68dca9b9213e3d368a943afdc6825829cbec485b0799df72ff49f9a0412ca  steps-20261019T163018Z/s4.log
+b120091e2d937e000c2e32d7b8257f61000cc5b40809f986fc682aa77adbc395  steps-20261019T163018Z/s4c.log
+8661064362ddc31044553cbca5f21e43c298286fd436fd712346637f934e8b6a  steps-20261019T163018Z/s4x.log
+edc1b72fe0c6b60f990cf2a32a754c70346981eb7231164eae9293ab3fc04599  steps-20261019T163018Z/s5p.log
+ae7ad117635a7f3b91c4f819f915c16d09dbd225b88586c7fd910bf4a2264ae0  steps-20261019T163018Z/s7.log
+87342fda68e54a2dfe2133a247003a4787f3c14e456de09289f2806e1c0a6eff  steps-20261019T163018Z/s7n.log
+268d5dc5268ae040998572b9aa46a5bc2093783182319799ef27dd6ac1ab5cb4  steps-20261019T163018Z/s7o.log
+8054e87b8bd10d41f67df492711958d3f91386a253f472c2695401eebb063521  steps-20261019T163018Z/s7t.log
+6070dcd18fddefdca2a7e431315d3a37a75554b4e7eea367b6701a8c29a9f205  steps-20261019T163018Z/up.log
+Retained first launch: exit 1 at up before any scenario; source 247e22c2adff4bf21c6d3a7427587b86a2693035; ambient Go 1.27.2 versus pinned 1.27.1; corrected launcher uses mise exec.
+2bca4bf6f608cde71c62ef8f7787fd524fb34b239264e59bfe656d7be034309d  steps-20261019T151526Z/chain.log
+5e88e7149bccc4e6e4b917dcd18c85903a1631814b6b3693b44ebd53f35aafa6  steps-20261019T151526Z/up.log
+Teardown: no fixture containers, networks, volumes or state left.
