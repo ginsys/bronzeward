@@ -511,6 +511,8 @@ stale attempt is recorded (DB row 018).
 The commitment-level controls of the approval part (S3 keeps those before commitment), each from
 a restore of S3's step 4 snapshots with the S2 release planned as in S3 step 2. Each approves the
 plan as in S3 step 3 before the change it names, except the two that say the approval follows it.
+Pause A and B before these controls and keep them paused throughout; C alone runs their
+publication and execution workers. Requests for these controls go to C.
 For the assignment-change case, C joins the worker and stalls at `dispatch-evidence` after
 approval, before commitment. Its separate publication worker can obtain fresh node observations
 while the assignment changes; releasing the stall reaches the comparison-2 refusal. For the
