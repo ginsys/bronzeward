@@ -202,7 +202,7 @@ run() {
   after=$(count_principals) || die "cannot count principals"
   check 'S0 step 3' "refused credentials wrote no principal row ($before, then $after with $issued_n identities issued)" \
     test "$after" -eq $((before + issued_n))
-  result SKIP 'S0 step 3, ruling 4' 'automation token from an earlier epoch: no route enters recovery mode before ginsys/bronzeward#29; internal/auth TestAutomationExpiredRevokedEarlierEpoch covers the refusal'
+  result SKIP 'S0 step 3, ruling 4' 'automation token from an earlier epoch: S0 enters no recovery mode; S7 step 6 (scenarios/s7 run) refuses the seed token 401 after the restore and after its reissue, and internal/auth TestAutomationExpiredRevokedEarlierEpoch covers the refusal'
 
   # Step 5: no route dispatches, issues tokens or grants roles.
   local all

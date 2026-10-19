@@ -548,7 +548,8 @@ ends: S1 to S4 run with none observing.
    ETag), marking the new password, S1's file content and S2's node label of it. The adopted import
    base then holds that label as a reference, which S2's label fragment would override (refused,
    C choice §16.20), so `h-author` takes the fragment out of the `workers` profile in the same
-   draft. After the ingestion succeeds, `h-publisher` reads the draft's new ETag, publishes it with that ETag and creates an
+   draft, or, where it is the only fragment the profile lists (a profile lists at least one),
+   points the worker's assignment back at S3's handover cluster fragment. After the ingestion succeeds, `h-publisher` reads the draft's new ETag, publishes it with that ETag and creates an
    `adopt` plan binding the drift record; `h-approver` approves; after an `evidence` observation begun after the approval, the adoption
    record commits under the freeze.
 5. Measure whether an artifact compiled from the unchanged import base reproduces the baseline
