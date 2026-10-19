@@ -835,7 +835,9 @@ The applied release has one other source: an explicitly approved baseline that t
 
 Plan from a published artifact rather than re-rendering at dispatch. Bind the release/artifact identity, secret and crypto references, target machines and assignment revisions, operation **and mode**, parameters, relevant observed preconditions, rollout limits, expiry and approval policy. Include a redacted diff, upstream validation and available dry-run evidence; distinguish these from checks performed against live state at execution.
 
-Talos supports `auto`, `no-reboot`, `reboot`, `staged` and `try`. `try` is an automatic revert timer (one minute by default unless configured), not a separate human-confirmation transaction; another config update is needed to prevent the timed revert. `staged` does not immediately replace the running config. Record mode-specific evidence for acceptance, activation and observed convergence; RPC success alone is not completion. The first milestone uses a safe `no-reboot` worker change. Other modes require their own recovery tests before support. [T5]
+Talos v1.13.6, the version used by the PoC fixture, provides `auto`, `no-reboot`, `reboot`, `staged` and `try`. `try` is an automatic revert timer (one minute by default unless configured), not a separate human-confirmation transaction; another config update is needed to prevent the timed revert. `staged` does not immediately replace the running config. Record mode-specific evidence for acceptance, activation and observed convergence; RPC success alone is not completion. The first milestone uses a safe `no-reboot` worker change. Other modes require their own recovery tests before support. [T5]
+
+Talos v1.14 removes reboot-mode apply and automatic reboot on configuration changes. Stored or reported configuration can therefore differ from settings active in a running service. Later support must bind version-specific activation requirements and the observations that prove them; a configuration digest alone is insufficient. Explicit staging, service restart and reboot are distinct actions requiring their own authority and recovery evidence. The [upgrade investigation](research/20261019-upgrade-workflow-design.md#6-configuration-activation-under-talos-114) records the official documentation, its non-exhaustive impact examples and the untested limits. This does not extend the PoC's supported profile.
 
 ### 12.3 Rollout policy
 
@@ -1290,7 +1292,9 @@ This milestone requires the selected database/provider behavior (§7.7), scoped 
 
 - Kubernetes observer for readiness, drain and PDB failures.
 
-- Upgrade-transition acceptance, deferred from E3 (§18.1): on VMs or hardware, an upgrade through the legacy `MachineService.Upgrade` and through `LifecycleClient.Upgrade`, the version gate that chooses between them, an upgrade across the v1.13 boundary, a later configuration contract applied after an upgrade, reboot-mode apply and the upstream upgrade windows. Talos upgrades are not supported until it passes.
+- Upgrade-transition acceptance, deferred from E3 (§18.1): on VMs or hardware, an upgrade through the legacy `MachineService.Upgrade` and through `LifecycleClient.Upgrade`, the version gate that chooses between them, an upgrade across the v1.13 boundary, a later configuration contract applied after an upgrade, v1.13 reboot-mode apply, v1.14 explicit activation and the upstream upgrade windows. Talos upgrades are not supported until it passes.
+
+The [upgrade safeguards and recovery investigation](research/20261019-upgrade-workflow-design.md) maps the operator procedure to proposed plan, execution and observation contracts, including partial installation/drain/cordon outcomes and Kubernetes manifest ownership. Its source fixture establishes call paths only; specification, implementation and VM/hardware qualification remain separately tracked. It does not supply lifecycle acceptance or adopt an upstream executor.
 
 ### 18.4 Phase 3 - remote connectivity
 
