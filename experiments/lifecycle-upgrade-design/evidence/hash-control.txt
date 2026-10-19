@@ -1,0 +1,2 @@
+FAIL	talos-upgrade pinned hash
+EXIT	1 (expected)

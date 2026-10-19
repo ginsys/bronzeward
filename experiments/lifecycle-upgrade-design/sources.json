@@ -1,0 +1,79 @@
+[
+  {
+    "id": "talos-upgrade",
+    "repository": "siderolabs/talos",
+    "revision": "9abd05af449ebf9cb1827648298291afce18d714",
+    "path": "cmd/talosctl/cmd/talos/upgrade.go",
+    "sha256": "77a8514f316649f1fa358dba792399fa4a8772a7eb45029e5268d7fe59929a6c"
+  },
+  {
+    "id": "talos-k8s",
+    "repository": "siderolabs/talos",
+    "revision": "9abd05af449ebf9cb1827648298291afce18d714",
+    "path": "pkg/cluster/kubernetes/talos_managed.go",
+    "sha256": "e6958ecf3439bb5c491c02882046fc39861d3510c91c898467bb0fecda3042c2"
+  },
+  {
+    "id": "talos-module",
+    "repository": "siderolabs/talos",
+    "revision": "9abd05af449ebf9cb1827648298291afce18d714",
+    "path": "go.mod",
+    "sha256": "70fc24aa947da6b9f1f1dd633154f2a61bd696c045ee6a6dda40cc0e4247ac02"
+  },
+  {
+    "id": "ssa-diff",
+    "repository": "siderolabs/go-kubernetes",
+    "revision": "0caf1f226727cc05f80b92c27c9116e68fb5532d",
+    "path": "kubernetes/ssa/diff.go",
+    "sha256": "1cbc02493bfb6632145c92452ee2c0ea0ef504930e5eb6532bb7329b6b1d5f6c"
+  },
+  {
+    "id": "ssa-inventory",
+    "repository": "siderolabs/go-kubernetes",
+    "revision": "0caf1f226727cc05f80b92c27c9116e68fb5532d",
+    "path": "kubernetes/ssa/inventory.go",
+    "sha256": "0c0f2be7555ce1ad6cbd36b9f19e0c89b362657808617419ace61f8552adc221"
+  },
+  {
+    "id": "ssa-configmap",
+    "repository": "siderolabs/go-kubernetes",
+    "revision": "0caf1f226727cc05f80b92c27c9116e68fb5532d",
+    "path": "kubernetes/ssa/internal/inventory/configmap/inventory.go",
+    "sha256": "06bf5d20bdf12fd0885ba0d213b41c6a1543f0ba279413be5cc4e9677104c6ff"
+  },
+  {
+    "id": "ssa-manager",
+    "repository": "siderolabs/go-kubernetes",
+    "revision": "0caf1f226727cc05f80b92c27c9116e68fb5532d",
+    "path": "kubernetes/ssa/ssa.go",
+    "sha256": "a30378236136fd6911488661215a0fd77f9f66807781b2be4757c7ae2fb61c6e"
+  },
+  {
+    "id": "ssa-apply",
+    "repository": "siderolabs/go-kubernetes",
+    "revision": "0caf1f226727cc05f80b92c27c9116e68fb5532d",
+    "path": "kubernetes/ssa/apply.go",
+    "sha256": "23e6768145be1764abfd35c25c0e71a1b434176b64cc3078506092e713708797"
+  },
+  {
+    "id": "ssa-module",
+    "repository": "siderolabs/go-kubernetes",
+    "revision": "0caf1f226727cc05f80b92c27c9116e68fb5532d",
+    "path": "go.mod",
+    "sha256": "b4cb3212227b83e1b27abdf23bb2cc6cd0b94bcfbd77d46d8c58de92f1b58dad"
+  },
+  {
+    "id": "flux-apply",
+    "repository": "fluxcd/pkg",
+    "revision": "b98e2b0975e0863f32790229ce7c9f097ed67706",
+    "path": "ssa/manager_apply.go",
+    "sha256": "2d82deeb1f043941670ce477f4d9c572dc615800127169afdabcde0f5913ef73"
+  },
+  {
+    "id": "configuration-doc",
+    "repository": "siderolabs/docs",
+    "revision": "d7cf508eebc2f8dcc1439560c4856735e8c82fc4",
+    "path": "public/talos/v1.14/configure-your-talos-cluster/system-configuration/editing-machine-configuration.mdx",
+    "sha256": "e1ef88248c2dd9b7550185dd5405e5c7521bb99e8658e64a6cda970893aec027"
+  }
+]

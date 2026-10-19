@@ -1,0 +1,23 @@
+PASS	talos-upgrade pinned hash
+PASS	talos-k8s pinned hash
+PASS	talos-module pinned hash
+PASS	ssa-diff pinned hash
+PASS	ssa-inventory pinned hash
+PASS	ssa-configmap pinned hash
+PASS	ssa-manager pinned hash
+PASS	ssa-apply pinned hash
+PASS	ssa-module pinned hash
+PASS	flux-apply pinned hash
+PASS	configuration-doc pinned hash
+PASS	lifecycle image installation precedes drain and reboot
+PASS	drain error returns before deferred uncordon is installed
+PASS	API selection includes the prerelease boundary
+PASS	pre-pull condition does not include DryRun
+PASS	dry-run manifest path calls SSA Diff
+PASS	diff inventory path can create a missing namespace or ConfigMap
+PASS	manifest apply reaches unconditional SSA field ownership
+PASS	inspected dependency versions match the upstream module pins
+PASS	documentation separates explicit reboot and incomplete impact catalogue
+PASS	control rejects reversed synthetic phase order
+LIMIT	static call-path inspection only; no Talos or Kubernetes operation executed
+EXIT	0
