@@ -956,7 +956,9 @@ old_bao() {
     ingest "$machine_w" "$(jq -nc --arg p "$WORKER_MARK" --arg l "$LABEL_MARK" '[$p, $l]')" old
   ing_old=${ingested[-1]}
   must "$ref" "the import's generations written to OpenBao after its snapshot" has_generations "$ing_old"
-  if [ "$(fragment_count s2-labels)" = 0 ]; then
+  if ! selects_workers; then
+    result PASS "$ref" "the worker selects no workers profile; its unused label fragment needs no profile edit"
+  elif [ "$(fragment_count s2-labels)" = 0 ]; then
     must "$ref" "S2's label fragment already out of the workers profile (s5 run or s5 pass took it out)" same "$(fragment_count s2-labels)" 0
   else
     must "$ref" "h-author takes S2's label fragment out of the workers profile, the import base holding that reference: 200, the ETag replaced" \
