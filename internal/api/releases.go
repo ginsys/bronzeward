@@ -36,9 +36,10 @@ type releaseSourceBody struct {
 // releaseMachineBody is one machine a release covers, with the mode it was validated in and the
 // route of its review data.
 type releaseMachineBody struct {
-	Machine string `json:"machine"`
-	Mode    string `json:"mode"`
-	Review  string `json:"review"`
+	Machine                string `json:"machine"`
+	Mode                   string `json:"mode"`
+	Review                 string `json:"review"`
+	PublicationObservation string `json:"publicationObservation"`
 }
 
 // releaseBody is PA §9.2's release resource, as its read example answers it. It holds no
@@ -197,12 +198,12 @@ func withReleaseParts(ctx context.Context, tx *sql.Tx, rs []*releaseBody) error 
 	if err != nil {
 		return err
 	}
-	return eachRow(ctx, tx, `SELECT release, machine, mode FROM release_machine
+	return eachRow(ctx, tx, `SELECT release, machine, mode, publication_observation FROM release_machine
 		WHERE release = ANY (string_to_array($1, ',')) ORDER BY release, machine`,
 		strings.Join(ids, ","), func(row *sql.Rows) error {
 			var rel string
 			var m releaseMachineBody
-			if err := row.Scan(&rel, &m.Machine, &m.Mode); err != nil {
+			if err := row.Scan(&rel, &m.Machine, &m.Mode, &m.PublicationObservation); err != nil {
 				return err
 			}
 			m.Review = prefix + "/releases/" + rel + "/machines/" + m.Machine + "/review"

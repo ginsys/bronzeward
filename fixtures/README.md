@@ -113,7 +113,7 @@ request is sent (`dispatch-sent`, acceptance plan S7's held request); A and B-re
 several generations, `generation`, `construct`, `baseline`, `staged`, and `draft` before the draft
 transaction), a mark's run at those it re-enters (`parse` to `construct`, then `envelope` once its
 new envelope is encrypted and before it is stored), and the publish worker at each of a publication's interruption points
-(`publish-claim`, `publish-snapshot`, `publish-pins`, `publish-compile`, `publish-encrypt`,
+(`publish-claim`, `publish-snapshot`, `publish-observations`, `publish-pins`, `publish-compile`, `publish-encrypt`,
 `publish-commit`, the last inside the commit transaction before its `COMMIT`), and the adoption loop
 once (`adoption`, after the plan's evidence observation is recorded and before the adoption is). Without the tag
 `At` is empty, and `up` refuses an image whose `bronzeward` holds the seam.

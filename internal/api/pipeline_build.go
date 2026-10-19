@@ -37,19 +37,26 @@ func (a *API) buildRelease(ctx context.Context, j publishJob, c publishClients) 
 	if err := a.step("publish-snapshot"); err != nil {
 		return releaseUnit{}, nil, err
 	}
-	pins, ref, err := a.readPinned(ctx, j, s, c.meta, c.reader)
-	if err != nil || ref != nil {
-		return releaseUnit{}, ref, err
-	}
-	if err := a.step("publish-pins"); err != nil { // the resolved values held
-		return releaseUnit{}, nil, err
-	}
 	version, checksum, err := compile.Machinery()
 	if err != nil {
 		return releaseUnit{}, nil, err
 	}
 	if ref, err := compileRefusal("", compile.CheckContract(version, s.contract)); ref != nil || err != nil {
 		return releaseUnit{}, ref, err
+	}
+	observations, ref, err := a.publicationObservations(ctx, j, s)
+	if err != nil || ref != nil {
+		return releaseUnit{}, ref, err
+	}
+	if err := a.step("publish-observations"); err != nil {
+		return releaseUnit{}, nil, err
+	}
+	pins, ref, err := a.readPinned(ctx, j, s, c.meta, c.reader)
+	if err != nil || ref != nil {
+		return releaseUnit{}, ref, err
+	}
+	if err := a.step("publish-pins"); err != nil { // the resolved values held
+		return releaseUnit{}, nil, err
 	}
 	sources := map[string]compile.Source{}
 	for rev, st := range s.sources {
@@ -91,6 +98,7 @@ func (a *API) buildRelease(ctx context.Context, j publishJob, c publishClients) 
 		if err != nil {
 			return releaseUnit{}, nil, fmt.Errorf("machine %s: %w", m.machine, err)
 		}
+		um.observation = observations[m.machine]
 		u.machines = append(u.machines, um)
 		artifacts = append(artifacts, compiled.Materialized())
 	}

@@ -140,8 +140,10 @@ func (b *buildEnv) workerWith(owner string, life context.Context, timers config.
 	if err := b.db.QueryRow(`SELECT epoch FROM installation_state`).Scan(&epoch); err != nil {
 		b.t.Fatal(err)
 	}
-	return b.buildWith(deps{owner: staging.Owner{ID: owner, Epoch: epoch}, life: life, timers: timers,
+	a := b.buildWith(deps{owner: staging.Owner{ID: owner, Epoch: epoch}, life: life, timers: timers,
 		pub: &publishClients{meta: b.held, reader: b.held, encrypter: b.held}}, o)
+	b.defaultPublicationReader(a)
+	return a
 }
 
 // ended waits, at most 10 s, for op to end, and returns its state, its last owner generation and
@@ -301,7 +303,7 @@ func TestPublishRunLapsed(t *testing.T) {
 }
 
 // publishPoints are the publication's interruption points, in the order a run reaches them.
-var publishPoints = []string{"publish-claim", "publish-snapshot", "publish-pins", "publish-compile", "publish-encrypt", "publish-commit"}
+var publishPoints = []string{"publish-claim", "publish-snapshot", "publish-observations", "publish-pins", "publish-compile", "publish-encrypt", "publish-commit"}
 
 // compilation §15: a run stopped at an interruption point before COMMIT ends as a killed process
 // would, writing nothing and leaving the job to its lease; once the lease lapses, another worker
@@ -353,6 +355,11 @@ func TestPublishRunStopped(t *testing.T) {
 			}
 			if n := count(t, b.db, `SELECT count(*) FROM draft WHERE id = $1 AND state = 'published'`, b.draft); n != 1 {
 				t.Fatal("the draft is not published")
+			}
+			if n := count(t, b.db, `SELECT count(*) FROM release_machine rm JOIN observation o ON o.id = rm.publication_observation
+    JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
+    WHERE s.operation = $1 AND s.publication_generation = 2 AND s.controller = $2`, op, other.d.owner.ID); n != 1 {
+				t.Fatal("takeover reused the interrupted owner's evidence")
 			}
 		})
 	}

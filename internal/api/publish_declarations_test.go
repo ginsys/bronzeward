@@ -8,6 +8,7 @@ import (
 
 	"github.com/ginsys/bronzeward/internal/classify"
 	"github.com/ginsys/bronzeward/internal/compile"
+	"github.com/ginsys/bronzeward/internal/dbtest"
 	"github.com/ginsys/bronzeward/internal/id"
 )
 
@@ -67,6 +68,7 @@ func (p *publishEnv) secondMachine() *unitMachine {
 		VALUES ($1, $2, 'import-base', $3, $4)`, p.draft, p.cluster, machine, ibr)
 	m := p.unit.machines[0]
 	m.machine, m.importBase, m.assignment = machine, ibr, ""
+	m.observation = dbtest.PublicationObservation(p.t, p.db, machine, p.job.op)
 	m.reproduction = []unitDependency{m.reproduction[0]}
 	m.reproduction[0].source = ibr
 	m.provenance = []compile.Record{m.provenance[0]}

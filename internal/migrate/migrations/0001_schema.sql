@@ -982,6 +982,7 @@ CREATE CONSTRAINT TRIGGER selection AFTER INSERT ON release_source DEFERRABLE IN
 -- which the dependency's status key binds. Its assignment revision is the one its release's
 -- assignment source names, inserted later in the transaction.
 CREATE TABLE release_machine (
+  publication_observation text NOT NULL,
   release              text NOT NULL,
   cluster              text NOT NULL,
   machine              text NOT NULL,
@@ -1276,18 +1277,24 @@ CALL make_immutable('plan_cancellation');
 -- read, which its observation names as its basis, with the endpoint it dials and the controller
 -- that dials it. A plan's observation dials the plan's route. Evidence is for a plan, completion
 -- for an operation, drift and restoration for neither; recovery may name either.
+-- Publication names its publish operation and owner generation, without a plan.
 CREATE TABLE observation_start (
   machine    text NOT NULL,
   revision   bigint NOT NULL,
   entry_kind text NOT NULL GENERATED ALWAYS AS ('observation-started') STORED,
-  purpose    text NOT NULL CHECK (purpose IN ('evidence', 'completion', 'recovery', 'drift', 'restoration')),
+  purpose    text NOT NULL CHECK (purpose IN ('evidence', 'completion', 'recovery', 'drift', 'restoration', 'publication')),
+  publication_generation bigint CHECK (publication_generation >= 1),
+  publication_kind text GENERATED ALWAYS AS (CASE WHEN purpose = 'publication' THEN 'publish' END) STORED,
   plan       text,
   operation  text,
   endpoint   talos_endpoint NOT NULL,
   controller text NOT NULL CHECK (btrim(controller) <> '' AND octet_length(controller) <= 512),
   PRIMARY KEY (machine, revision),
-  CHECK (operation IS NULL OR plan IS NOT NULL),
+  CHECK (operation IS NULL OR plan IS NOT NULL OR purpose = 'publication'),
+  CHECK ((purpose = 'publication') = (publication_generation IS NOT NULL)),
+  FOREIGN KEY (operation, publication_kind) REFERENCES operation (id, kind),
   CONSTRAINT observation_start_purpose CHECK (CASE purpose
+    WHEN 'publication' THEN operation IS NOT NULL AND plan IS NULL
     WHEN 'evidence' THEN plan IS NOT NULL
     WHEN 'completion' THEN operation IS NOT NULL
     WHEN 'recovery' THEN true
@@ -1335,6 +1342,26 @@ CREATE TABLE observation (
   FOREIGN KEY (machine, revision, entry_kind) REFERENCES machine_event (machine, revision, kind)
 );
 CALL make_immutable('observation');
+
+ALTER TABLE release_machine ADD CONSTRAINT release_machine_publication_observation
+  FOREIGN KEY (publication_observation, machine) REFERENCES observation (id, machine);
+
+-- Static linkage; T3 additionally checks ownership, endpoint and later observations.
+CREATE FUNCTION check_publication_observation() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM observation o
+    JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
+    JOIN release r ON r.id = NEW.release
+    WHERE o.id = NEW.publication_observation AND o.machine = NEW.machine
+      AND s.purpose = 'publication' AND s.operation = r.operation) THEN
+    RAISE EXCEPTION 'release machine needs its publication observation'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'release_publication_evidence';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE CONSTRAINT TRIGGER publication_evidence AFTER INSERT ON release_machine
+  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION check_publication_observation();
 
 -- A drift record (execution and recovery §6.1, §6.5): an observed configuration digest other than
 -- Applied's while no operation held the machine scope. It names the observation that opened it,

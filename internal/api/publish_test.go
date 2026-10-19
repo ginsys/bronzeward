@@ -15,6 +15,7 @@ import (
 
 	"github.com/ginsys/bronzeward/internal/classify"
 	"github.com/ginsys/bronzeward/internal/compile"
+	"github.com/ginsys/bronzeward/internal/dbtest"
 	"github.com/ginsys/bronzeward/internal/id"
 	"github.com/ginsys/bronzeward/internal/staging"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -55,6 +56,12 @@ func newPublishEnv(t *testing.T) *publishEnv {
 
 // publishOn is newPublishEnv on d's cluster, machine and draft.
 func publishOn(t *testing.T, d *draftEnv) *publishEnv {
+	p := publishFixture(t, d)
+	p.unit.machines[0].observation = dbtest.PublicationObservation(t, d.db, d.machine, p.job.op)
+	return p
+}
+
+func publishFixture(t *testing.T, d *draftEnv) *publishEnv {
 	t.Helper()
 	p := &publishEnv{draftEnv: d}
 	var epoch string
@@ -774,6 +781,7 @@ func (p *publishEnv) nextDraft() {
 		VALUES ($1, 'publish', 'running', $2, 1, $3, now() + interval '1 minute', $4, 1, $5, 'human', 'publisher', $3, now())`,
 		op, p.owner.ID, p.owner.Epoch, d2, p.seed)
 	p.job = publishJob{op: op, draft: d2, cluster: p.cluster, draftRev: 1, gen: 1}
+	p.unit.machines[0].observation = dbtest.PublicationObservation(p.t, p.db, p.machine, op)
 	p.unit.unchanged = []usedHead{{kind: "fragment", head: p.base, revision: p.baseRev, headRevision: 1},
 		{kind: "profile", head: p.prf, revision: p.prv, headRevision: 1},
 		{kind: "fragment", head: p.network, revision: p.networkNew, headRevision: 2},

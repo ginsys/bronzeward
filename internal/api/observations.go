@@ -16,26 +16,27 @@ import (
 // A value the observation did not read is null and named in unread with its cause. It answers no
 // configuration digest, as a plan answers none (persistence-api.md §9.1).
 type observationBody struct {
-	ID                 string                 `json:"id"`
-	Machine            string                 `json:"machine"`
-	Basis              int64                  `json:"basis"`
-	Revision           int64                  `json:"revision"`
-	Purpose            string                 `json:"purpose"`
-	Plan               *string                `json:"plan"`
-	Operation          *string                `json:"operation"`
-	Endpoint           string                 `json:"endpoint"`
-	Controller         string                 `json:"controller"`
-	StartedAt          time.Time              `json:"startedAt"`
-	At                 time.Time              `json:"at"`
-	Access             *accessVersionBody     `json:"access"`
-	SMBIOSUUID         *string                `json:"smbiosUuid"`
-	TalosNodeID        *string                `json:"talosNodeId"`
-	TalosClusterID     *string                `json:"talosClusterId"`
-	AssignmentEvidence *string                `json:"assignmentEvidence"`
-	RunningVersion     *string                `json:"runningVersion"`
-	ResourceVersion    *string                `json:"resourceVersion"`
-	Health             json.RawMessage        `json:"health"`
-	Unread             map[string]unreadValue `json:"unread"`
+	ID                    string                 `json:"id"`
+	Machine               string                 `json:"machine"`
+	Basis                 int64                  `json:"basis"`
+	Revision              int64                  `json:"revision"`
+	Purpose               string                 `json:"purpose"`
+	PublicationGeneration *int64                 `json:"publicationGeneration"`
+	Plan                  *string                `json:"plan"`
+	Operation             *string                `json:"operation"`
+	Endpoint              string                 `json:"endpoint"`
+	Controller            string                 `json:"controller"`
+	StartedAt             time.Time              `json:"startedAt"`
+	At                    time.Time              `json:"at"`
+	Access                *accessVersionBody     `json:"access"`
+	SMBIOSUUID            *string                `json:"smbiosUuid"`
+	TalosNodeID           *string                `json:"talosNodeId"`
+	TalosClusterID        *string                `json:"talosClusterId"`
+	AssignmentEvidence    *string                `json:"assignmentEvidence"`
+	RunningVersion        *string                `json:"runningVersion"`
+	ResourceVersion       *string                `json:"resourceVersion"`
+	Health                json.RawMessage        `json:"health"`
+	Unread                map[string]unreadValue `json:"unread"`
 }
 
 // accessVersionBody is the Talos access version an observation read (persistence-api.md §3.3):
@@ -68,7 +69,7 @@ func listObservations(a *API, w http.ResponseWriter, q *request) {
 		if err := machineNamed(ctx, tx, m); err != nil {
 			return "", nil, err
 		}
-		out, err := listRows(ctx, tx, q, id.Observation, `SELECT o.id, o.machine, o.basis, o.revision, s.purpose, s.plan, s.operation,
+		out, err := listRows(ctx, tx, q, id.Observation, `SELECT o.id, o.machine, o.basis, o.revision, s.purpose, s.plan, s.operation, s.publication_generation,
 				s.endpoint, s.controller, se.at, o.at, o.access_path, o.access_version, o.access_created, o.smbios_uuid::text,
 				o.talos_node_id, o.talos_cluster_id, o.assignment_evidence, o.running_version, o.resource_version, o.health, o.unread
 			FROM observation o
@@ -84,7 +85,7 @@ func scanObservation(r *sql.Rows) (observationBody, string, error) {
 	var plan, operation, path, created sql.NullString
 	var version sql.NullInt64
 	var health, unread []byte
-	err := r.Scan(&b.ID, &b.Machine, &b.Basis, &b.Revision, &b.Purpose, &plan, &operation, &b.Endpoint, &b.Controller,
+	err := r.Scan(&b.ID, &b.Machine, &b.Basis, &b.Revision, &b.Purpose, &plan, &operation, &b.PublicationGeneration, &b.Endpoint, &b.Controller,
 		&b.StartedAt, &b.At, &path, &version, &created, &b.SMBIOSUUID, &b.TalosNodeID, &b.TalosClusterID,
 		&b.AssignmentEvidence, &b.RunningVersion, &b.ResourceVersion, &health, &unread)
 	if err != nil {

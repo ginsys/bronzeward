@@ -1478,7 +1478,7 @@ Recovery mode is enforced per scope, not by refusing the whole installation
 | --- | --- |
 | Acts that only remove authority: approval and identity revocation, plan cancellation, freeze | always allowed, to the roles design §13.7 gives them |
 | Acts that record recovery: entry, accounting decisions (§5.2), resolutions of `unresolved` operations, scope marking and release, leaving | always allowed, to `recovery-admin` |
-| Drafts, ingestion, compilation and publication | allowed installation-wide: they write only to the database and the provider, and nothing reaches a machine |
+| Drafts, ingestion, compilation and publication | allowed installation-wide: writes are confined to the database and provider; ingestion/publication may perform their read-only node observations |
 | Plan creation and approval, unfreeze, adoption, and anything that could send to a machine | refused on a scope still pre-restore unaccounted |
 | Commitment and attempt transactions, and adoption records | refused on every scope not released in the current epoch (comparison 6; §6.3 requirement 4.5) |
 | Every act on a released scope | allowed, as outside recovery mode |
