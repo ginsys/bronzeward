@@ -3299,7 +3299,7 @@ each (design §7.7 consequences):
   check (execution and recovery §3.1 item 2) and a refused credential or a
   silent endpoint failing the fresh observation (item 1), with no operation
   committed and no mutation request sent; every observation purpose
-  (`evidence`, `completion`, `recovery`, `drift`, `restoration`) recording
+  (`publication`, `evidence`, `completion`, `recovery`, `drift`, `restoration`) recording
   the access version it read, and on a failed access read none of the node's
   values and its cause, with a control that reuses a credential read before a
   rotation and must then be told apart by its version; for each, no part of the

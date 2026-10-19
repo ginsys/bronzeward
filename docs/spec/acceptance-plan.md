@@ -378,14 +378,14 @@ has no plan but the handover's completed `adopt` plan.
 3. `h-approver` approves it.
 4. From one restore of snapshots taken before step 2 (`bin/inject db-snapshot s3-step4`,
    `bao-snapshot s3-step4`; restored with `db-restore s3-step4`, `bao-restore s3-step4`),
-   running these three cases in order, so each plan is made from the worker's `Desired` at that
-   moment (ER §2) and the third reuses the second's fragment revision: as the automation
-   identity's responsible human, `h-all` approves a plan the automation identity created from the
-   S2 release; `h-all` authors a fragment, lists it in the profile the worker's assignment
-   selects, publishes, plans and approves that change; and, after `h-author` drafts an unrelated
-   change and `h-publisher` publishes it as a later release that carries `h-all`'s fragment
-   revision unchanged (a release carries the heads its compilation uses, not every fragment),
-   `h-all` approves `h-publisher`'s plan for that release.
+   prepare the three releases and plans in order, so each plan is made from the worker's `Desired`
+   at that moment (ER §2) and the third reuses the second's fragment revision. The automation
+   identity creates the first plan from the S2 release. For the second, `h-all` authors a fragment,
+   lists it in the profile the worker's assignment selects, publishes and plans that change. For
+   the third, `h-author` drafts an unrelated change and `h-publisher` publishes and plans a later
+   release carrying `h-all`'s fragment revision unchanged (a release carries the heads its
+   compilation uses, not every fragment). After preparation and the link cut described below,
+   `h-all`, the automation identity's responsible human, approves the three plans in that order.
    Each of the two publications starts from a draft opened for it (`POST /drafts`), whose
    returned ETag every mutation sends in `If-Match` and replaces, as in S2 step 1. These plans
    stay out of the integrated run, where the controller could commit them before S4: the approval
@@ -393,9 +393,13 @@ has no plan but the handover's completed `adopt` plan.
    plan `approved` as S4's precondition and none of the controls' or step 4's plans or releases.
    Every plan of the approval part stays `approved` or ends before commitment, and uncommitted:
    the controller dispatches an approved plan, so the approval part first cuts each instance's
-   link to the worker (`bin/inject linksplit A|B|C worker`, §2) and keeps them cut. The executor's
-   `evidence` observation then fails and nothing commits; S4 starts by joining them again, and
-   the commitment-level controls are S4's.
+   link to the worker (`bin/inject linksplit A|B|C worker`, §2). Step 4 verifies that its restore
+   removed every apply-config plan, then joins the links while preparing its releases and plans:
+   publication requires fresh node reads. All three plans must remain `proposed`, without an
+   approval or operation, until all links are cut again. It then approves them in case order;
+   self-approval reasons use each plan's immutable release, and approval does not compare current
+   `Desired`. The executor's `evidence` observation fails while disconnected and nothing commits;
+   S4 starts by joining the links again, and the commitment-level controls are S4's.
 
 **Clauses exercised.** ER [§2](execution-recovery.md#2-immutable-plan-and-approval-binding)
 (the plan states before commitment, approval and its refusals, revocation and cancellation) and, in
@@ -496,7 +500,10 @@ observation (ER choice §10.28). A second plan for the worker while the first ho
 controller does not take it up while the scope is held, and comparison 4 refuses it when its
 transaction runs anyway (a Go check, the route ER choice §10.32 selects); with both scope indexes
 dropped, the second plan's operation rows insert directly (DS row 011's control, the schema's). An assignment change while the scope is held: its publication fails
-`409 scope-busy`. A frozen scope: refused (a Go check; S5 shows the controller passing over such a plan).
+`409 scope-busy`. Every publisher has node access for fresh publication observations: A and B
+are joined only after the first operation is confirmed to hold the scope, stalled before its
+attempt. All three worker links are cut again before restoring the approved-plan snapshot.
+A frozen scope: refused (a Go check; S5 shows the controller passing over such a plan).
 An artifact failing node validation: `InvalidArgument`, `rejected`,
 resource version unchanged (DS row 022). The ownership check moved out of the attempt's `UPDATE`: a
 stale attempt is recorded (DB row 018).
@@ -504,6 +511,11 @@ stale attempt is recorded (DB row 018).
 The commitment-level controls of the approval part (S3 keeps those before commitment), each from
 a restore of S3's step 4 snapshots with the S2 release planned as in S3 step 2. Each approves the
 plan as in S3 step 3 before the change it names, except the two that say the approval follows it.
+For the assignment-change case, C joins the worker and stalls at `dispatch-evidence` after
+approval, before commitment. Its separate publication worker can obtain fresh node observations
+while the assignment changes; releasing the stall reaches the comparison-2 refusal. For the
+later Desired-release case, C joins while the plan is still proposed, publishes the new release,
+and only then receives approval of the earlier plan.
 The worker's assignment changed after planning: commitment refused by comparison 2. A later
 release published for the worker from a draft opened for it (as in S3 step 4), then the plan
 approved, which does not compare `Desired`: commitment refused by comparison 2, since `Desired`
@@ -756,15 +768,18 @@ queued, the pre-entry plan waiting, `503 epoch-superseded`, the second draft's E
    dependencies under the recovery identities. Then pause the control plane, take `restoration`
    observations, reclassify the restored operation and mark the scopes.
 8. **Release** the worker scope.
-9. **Restart** B without the flag: the recovery start runs no executor and no job worker, and entry
-   has committed. B's job worker runs the `publish` job queued in step 3, whose worker change T3
-   admits only because the worker scope is released (PA §12.2); it changes the worker's
-   assignment and `Desired`. Through B, `h-publisher` and `h-approver` plan and approve, from that
-   release, a worker change in the new epoch: a revert binding the drift record the held request's
-   landing opened, as in S5 step 6. B commits it and applies it as S4; A, whose executor stopped
-   in step 4, takes no part in it.
-10. Unpause the control plane; after a successful `restoration` observation, re-mark and release
-    its scope.
+9. Unpause the control plane and establish that its Talos API answers, keeping its recovery scope
+   `blocked` and unreleased. Publication requires fresh observations of every covered node
+   (PA §6.1.1); restored node access does not mark or release the scope. **Restart** B without
+   the flag: the recovery start runs no executor and no job worker, and entry has committed.
+   B's job worker runs the `publish` job queued in step 3, whose worker change T3 admits only
+   because the worker scope is released (PA §12.2); it changes the worker's assignment and
+   `Desired`. Through B, `h-publisher` and `h-approver` plan and approve, from that release, a
+   worker change in the new epoch: a revert binding the drift record the held request's landing
+   opened, as in S5 step 6. B commits it and applies it as S4; A, whose executor stopped in step 4,
+   takes no part in it. Check that the control-plane scope remains `blocked`, with no release
+   event in this epoch, before publication, after publication and after the completed revert.
+10. After a successful `restoration` observation, re-mark and release the control-plane scope.
 11. **Exit** recovery mode.
 
 **Clauses exercised.** ER [§7.1](execution-recovery.md#71-what-a-restore-does-to-the-fences),
@@ -794,8 +809,9 @@ owner epoch and starts an ingestion in the new epoch (PA §16). The restored ope
 journal holds no attempt, ends `cancelled`; the held request's landing is recorded as drift at
 the scope's marking, not applied over, and reverted only by the step 9 plan. The revoked approver is refused before and after entry, and
 every pre-restore automation token until reissued. The worker scope is `ready`, is released and
-dispatches under a new-epoch approval while the control-plane scope is `blocked` on its failed
-observation, until step 10 clears it. Exit succeeds only once both scopes are released, and no
+dispatches under a new-epoch approval while the control-plane scope remains `blocked` from its
+failed restoration mark, although its node is reachable for publication reads. Only step 10's
+new mark and release clear that scope. Exit succeeds only once both scopes are released, and no
 restored operation was retried.
 
 **Negative controls.** A plan created and approved in the new epoch on the worker scope once it is
