@@ -391,6 +391,27 @@ profile_drops() {
   differ "$(etag_of_last)" "$etag" || return 1
   etag=$(etag_of_last)
 }
+# label_unselected <who> <name> <fragment>: the worker stops selecting <fragment>, the one the
+# adopted base's reference would refuse: out of the workers profile (profile_drops). A profile lists
+# at least one fragment, so when <fragment> is the only one it lists, as after s4 run without s4 ds,
+# the worker's assignment points back at the handover's cluster fragment instead: 200, the ETag
+# replaced.
+label_unselected() {
+  local listed
+  listed=$(sql "SELECT coalesce(string_agg(r.name, ' '), '') FROM profile p
+    JOIN profile_revision_fragment f ON f.revision = p.head_revision_id
+    JOIN fragment_revision r ON r.id = f.fragment_revision
+    WHERE p.cluster = '$cluster' AND p.name = 'workers'") || return 1
+  if [ "$listed" != "$3" ]; then
+    profile_drops "$@"
+    return
+  fi
+  fresh "$1"
+  answers 200 - PUT "/api/v1/drafts/$draft/assignments/$machine_w" "$tok" \
+    '{"profiles": [], "fragments": {"cluster": ["s3-handover"]}}' "$(key "assignment-$2")" "$etag" || return 1
+  differ "$(etag_of_last)" "$etag" || return 1
+  etag=$(etag_of_last)
+}
 
 # node_at <path>: the inline value at that path of the first document on stdin, a trailing comment
 # and plain quotes removed; nothing when the node is absent or its value is not on its key's line. The path is a mark's without its doc[0]/,
@@ -644,8 +665,8 @@ adopt() {
       adoption_generations
     for step in $kill_points; do adoption_kill "$step"; done
   fi
-  check "$ref" "h-author takes S2's label fragment out of the workers profile, the adopted base holding that reference: 200, the ETag replaced" \
-    profile_drops h-author adopt s2-labels
+  check "$ref" "h-author stops the worker selecting S2's label fragment, the adopted base holding that reference: out of the workers profile, or, when it is the profile's only fragment, the worker's assignment back at the handover's cluster fragment: 200, the ETag replaced" \
+    label_unselected h-author adopt s2-labels
   check "$ref" 'h-publisher publishes the draft under its new ETag: 202, one release, the worker'"'"'s Desired' publish_by h-publisher adopt
   [ -n "$new_release" ] || die "s5: no release; nothing after it can run"
   check "$ref" "the release's import base for the worker: the registry password, S1's file content and S2's label are references to create-only generations of the drift adoption" \
