@@ -14,9 +14,10 @@
 # automation token reissued, held taken over again and an import into the second draft started.
 # Step 7: both scopes accounted with one decision, held reclassified cancelled, the control plane
 # paused, the worker marked ready (its mark opens the landing's drift record) and the control plane
-# blocked. Step 8 releases the worker; step 9 restarts B without the flag, which runs step 3's
-# publication, and a revert of the landing, approved in the new epoch, runs as S4; step 10 unpauses
-# the control plane, marks and releases it; step 11 exits recovery mode. The run leaves recovery
+# blocked. Step 8 releases the worker; step 9 unpauses the control plane for publication reads,
+# keeping its scope blocked and unreleased, and restarts B without the flag, which runs step 3's
+# publication. A revert of the landing, approved in the new epoch, runs as S4; step 10 marks and
+# releases the control plane; step 11 exits recovery mode. The run leaves recovery
 # mode off and B running; the reissued automation token is kept nowhere, so .state/automation-token
 # holds the seed token the restore made unusable. The served timelines and GET /recovery are kept.
 # The closing run (ER §9.3 item 3) runs the same steps from a fresh up, outside the integrated run,
@@ -304,6 +305,12 @@ mark_as() {
 release_scope() {
   fresh h-recovery
   answers_with '.state == "released"' 201 - POST "/api/v1/recovery/scopes/$1/releases" "$tok" '{"facts": {}}' "$(key "release-$2")"
+}
+# controlplane_blocked: the scope stays blocked and has never been released in this epoch.
+controlplane_blocked() {
+  same "$(sql "SELECT scope_state FROM machine WHERE id = '$machine_cp'")" blocked &&
+    same "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_cp' AND epoch = '$epoch'
+      AND kind = 'scope-state' AND entry->>'to' = 'released'")" 0
 }
 # landing_drift: the worker's one open drift record, opened by its mark's observation, which read the
 # held release's artifact; its opening revision in drift_rec.
@@ -670,26 +677,32 @@ s7() {
     check 'S7 negative controls' "an exit with the control plane's scope unreleased: 409 conflict naming it" exit_refused
   fi
 
-  # Step 9: B without the flag runs step 3's publication; a revert of the landing in the new epoch.
+  # Step 9: publication reads every covered node, including the control plane. Restore its node
+  # access, but keep its recovery scope blocked while the released worker publishes and dispatches.
   ref='S7 step 9'
+  must "$ref" 'inject unpause controlplane for the fresh publication reads' "$bin/inject" unpause controlplane
+  must "$ref" "the control plane's Talos API answers" within 120 node_talos "$TALOS_CONTROLPLANE_IP" version
+  must "$ref" 'the reachable control plane remains blocked, with no scope release in this epoch' controlplane_blocked
   must "$ref" 'inject kill B-recovery' "$bin/inject" kill B-recovery
   must "$ref" 'inject start B' "$bin/inject" start B
   call_port=$SERVER_B_PORT
   check "$ref" "B's job worker runs step 3's publication: succeeded, one release" within 120 pub_succeeded
   check "$ref" "the worker's Desired is that release" desired_is_pub
+  check "$ref" 'publication left the control plane scope blocked and unreleased' controlplane_blocked
   ds_plan 9
   check "$ref" 'the plan, a revert, binds the drift record the landing opened' same "$(sql "SELECT drift_record FROM plan WHERE id = '$plan'")" "$drift_rec"
   check "$ref" 'approved as h-approver: 201' approve_by h-approver "$plan" s7revert
   check "$ref" 'as an unseen overwrite' approved_unseen "$plan"
   check "$ref" 'the approval is of the new epoch' same "$approval_epoch" "$epoch"
-  # ds_done's checks but its bundle, which cannot be complete while the control plane is paused: the
-  # bundle and the digest read from it follow step 10's unpause.
+  # ds_done's checks but its bundle: capture it before step 10 marks and releases the control plane,
+  # retaining the completed worker operation alongside the other scope still blocked.
   check "$ref" "the plan's operation completed within four minutes with 1 attempt, 1 accepted; Applied the release from the operation, the baseline revision one more" \
     within 240 ds_completed 1 1
   w_after=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
   check "$ref" "the worker's apid log records exactly one mutating request since the row began, ApplyConfiguration" \
     one_apply "$w_log" "$w_after"
   check "$ref" 'the drift record closed reverted' same "$(sql "SELECT resolution FROM drift_record WHERE machine = '$machine_w' AND opened = $drift_rec")" reverted
+  check "$ref" 'the worker completed while the control plane scope stayed blocked and unreleased' controlplane_blocked
   if [ "$s7_mode" = closing ]; then
     # C's executor ended in step 4 (PA §5.1), so it makes no commitment attempt here; the
     # process-epoch comparison's refusal of one is the Go control named below.
@@ -698,8 +711,6 @@ s7() {
 
   # Step 10.
   ref='S7 step 10'
-  must "$ref" 'inject unpause controlplane' "$bin/inject" unpause controlplane
-  must "$ref" "the control plane's Talos API answers" within 120 node_talos "$TALOS_CONTROLPLANE_IP" version
   outcome_bundle 'S7 step 9' ds-9
   check 'S7 step 9' "the worker's digest is the release's artifact and its resource version moved" ds_landed
   must "$ref" "the control plane's mark: 201, ready, nothing missing" mark_as "$machine_cp" '.state == "ready" and .missing == []' controlplane

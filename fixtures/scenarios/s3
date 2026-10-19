@@ -19,8 +19,10 @@
 # of an approval) leave no operation; and from a restore of the snapshots taken before step 2, the
 # three self-approval cases of step 4, each approval with the reasons that hold. The controller
 # dispatches an approved plan, so the part first cuts A's, B's and C's links to the worker and
-# leaves them cut: the executor's evidence observation fails and nothing commits; S4 joins them
-# again. The commitment-level controls are S4's.
+# keeps them cut around approvals: the executor's evidence observation fails and nothing commits.
+# Step 4 restores the state before any apply-config plan, joins the links to publish and create
+# all three plans while they are proposed, then cuts the links again before approving any of them.
+# Publication needs fresh node reads; S4 joins the links for execution. Its controls cover commitment.
 # Usage: scenarios/s3 handover|handover-controls   (each after scenarios/s1 run on a fresh
 # fixtures/bin/up: the handover is S2's precondition, the controls are their own run)
 #        scenarios/s3 run|pass   (after scenarios/s1 run, s3 handover and s2 run on the same up;
@@ -634,6 +636,13 @@ approved_idle() {
   plan_is_stored "$1" approved "$approval_id" && plan_reads "$1" approved && no_dispatch_since "$ops0"
 }
 
+# plans_proposed <plan>...: no approval or operation exists before the links are cut again.
+plans_proposed() {
+  local p
+  for p; do plan_is_stored "$p" proposed none || return 1; done
+  no_dispatch_since 0
+}
+
 # plans_approved <plan:approval>...: each plan stored approved by its own approval, and no
 # apply-config operation exists.
 plans_approved() {
@@ -669,7 +678,8 @@ approval_part() {
   check 'S3 precondition' "the S2 release holds a revision the automation identity authored: owned-automation holds for h-all on every plan of this part" \
     release_holds_automation_revision
   # The controller dispatches an approved plan: with every instance cut from the worker, its
-  # evidence observation fails and nothing commits. S4 joins the links again.
+  # evidence observation fails and nothing commits. Step 4 briefly joins them while all its plans
+  # are still proposed, to permit publication observations; S4 joins them again for execution.
   check 'S3 precondition' 'inject linksplit A, B and C from the worker: no approved plan of this part commits' worker_links linksplit
   # With a link left open, an approved plan of this part would commit and apply.
   counted 3 '^[ABC] worker$' "$STATE/linksplits" || die "s3: not every link to the worker is cut; nothing after it can run"
@@ -724,17 +734,16 @@ approval_part() {
   check "$ref" 'inject unpause A, B and C' servers unpause
   check "$ref" 'A reads the restored database' within 60 db_reads
   check "$ref" "restored: no act after the snapshot, no apply-config plan, the worker's Desired and Applied what they were" restored
+  # Joining while a plan is approved would allow it to dispatch. The snapshot must have removed
+  # every apply-config plan before any link is opened; all new plans stay proposed until cut again.
+  restored || die "s3: step-4 restore not verified; the worker links must stay cut"
+  check "$ref" 'inject linkjoin A, B and C worker: no apply-config plan exists; publication may read the nodes' worker_links linkjoin
   ops0=$(sql "SELECT coalesce(max(seq), 0) FROM operation") || die "s3: cannot read the operations"
   fresh_author
   # 1: the automation identity's responsible human approves a plan the automation identity created
   # from the S2 release.
   check "$ref" 'case 1: the automation identity creates a plan of the S2 release: 201' plan_by robot case1
   pa=$plan_id
-  check "$ref" "case 1: h-all, the automation identity's responsible human, approves it: 201, self-approval marked with owned-automation alone" \
-    approve_by h-all "$pa" case1
-  check "$ref" 'case 1: the approval carries exactly owned-automation' reasons_are owned-automation true
-  step4_approval=$approval_id
-  check "$ref" 'case 1: the plan is approved by it, no operation' approved_idle "$pa"
   # 2: h-all authors, publishes, plans and approves a change.
   check "$ref" 'case 2: h-all opens a draft: 201' draft_by h-all case2
   check "$ref" 'case 2: h-all authors a fragment in it: 200, the ETag replaced' fragment_by h-all case2 all role
@@ -742,11 +751,6 @@ approval_part() {
   check "$ref" 'case 2: h-all publishes it: 202, one release, the worker'"'"'s Desired' publish_by h-all case2
   check "$ref" 'case 2: h-all creates a plan of that release: 201' plan_by h-all case2
   pb=$plan_id
-  check "$ref" 'case 2: h-all approves it: 201, naming the plan, the approver, its role and the epoch' approve_by h-all "$pb" case2
-  apb=$approval_id
-  check "$ref" 'case 2: the approval carries created-plan, published and authored-change, and owned-automation (the automation identity'"'"'s S2 revisions are in every release)' \
-    reasons_are created-plan,published,authored-change,owned-automation true
-  check "$ref" 'case 2: the plan is approved by it, no operation' approved_idle "$pb"
   # 3: a later release by others reuses h-all's fragment revision unchanged.
   check "$ref" 'case 3: h-author opens a draft: 201' draft_by h-author case3
   check "$ref" 'case 3: h-author drafts an unrelated change, a fragment: 200' fragment_by h-author case3 other
@@ -766,6 +770,22 @@ approval_part() {
         WHERE p.id = '$pb')")" t
   check "$ref" 'case 3: h-publisher creates a plan of that release: 201' plan_by h-publisher case3
   pc=$plan_id
+  check "$ref" 'all three plans are still proposed without approval or operation after the publications' \
+    plans_proposed "$pa" "$pb" "$pc"
+  # Self-approval reasons are derived from each immutable plan's release. Approving after the
+  # publications preserves those cases and keeps every release's node observations readable.
+  check "$ref" 'inject linksplit A, B and C worker before approving any of the three plans' worker_links linksplit
+  counted 3 '^[ABC] worker$' "$STATE/linksplits" || die "s3: not every link to the worker is cut; approvals cannot run"
+  check "$ref" "case 1: h-all, the automation identity's responsible human, approves it: 201, self-approval marked with owned-automation alone" \
+    approve_by h-all "$pa" case1
+  check "$ref" 'case 1: the approval carries exactly owned-automation' reasons_are owned-automation true
+  step4_approval=$approval_id
+  check "$ref" 'case 1: the plan is approved by it, no operation' approved_idle "$pa"
+  check "$ref" 'case 2: h-all approves it: 201, naming the plan, the approver, its role and the epoch' approve_by h-all "$pb" case2
+  apb=$approval_id
+  check "$ref" 'case 2: the approval carries created-plan, published and authored-change, and owned-automation (the automation identity'"'"'s S2 revisions are in every release)' \
+    reasons_are created-plan,published,authored-change,owned-automation true
+  check "$ref" 'case 2: the plan is approved by it, no operation' approved_idle "$pb"
   check "$ref" "case 3: h-all approves h-publisher's plan: 201, naming the plan, the approver, its role and the epoch" approve_by h-all "$pc" case3
   apc=$approval_id
   check "$ref" 'case 3: the approval carries authored-reused and owned-automation' reasons_are authored-reused,owned-automation true

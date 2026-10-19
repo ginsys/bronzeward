@@ -14,8 +14,9 @@
 # that evidence is older than the plan binds, C is told to stall after the commitment instead: the
 # stale evidence is no evidence (nothing refused), and the commitment rests on a later observation.
 # Its operation then holds the worker's scope, with no attempt: with A and B running, a second
-# approved plan waits, and a publication changing the worker's assignment fails 409 scope-busy. The
-# database is dumped, then both s3-step3 snapshots are restored with C's link cut again: the state
+# approved plan waits. Their links are joined while the scope stays held so any publisher can read
+# the nodes; a publication changing the worker's assignment fails 409 scope-busy. The
+# database is dumped, then both s3-step3 snapshots are restored with every link cut again: the state
 # `run` starts from.
 # `restores`: the commitment-level controls, each from a restore of S3's step-4 snapshots with the S2
 # release planned on C alone, A and B paused and C told to stall before anything could be sent. The
@@ -432,7 +433,11 @@ controls() {
   sleep 16
   check "$ref" 'three heartbeats on, the second plan waits: approved, no operation, no use-time check, commitment or refusal entry names it (comparison 4 refusing it is the Go check TestCommitmentRefusals)' \
     waits "$second" "$sa"
-  check "$ref" 'the first operation still holds the scope: committed, no attempt' still_held
+  must "$ref" 'the first operation still holds the scope: committed, no attempt' still_held
+  # Every instance can claim the publication. Join A and B only after proving the scope held:
+  # publication needs node reads, while the held scope still prevents the second plan committing.
+  must "$ref" 'inject linkjoin A worker while the first operation holds the scope' "$bin/inject" linkjoin A worker
+  must "$ref" 'inject linkjoin B worker while the first operation holds the scope' "$bin/inject" linkjoin B worker
   check "$ref" 'h-author opens a draft: 201' draft_by h-author busy
   check "$ref" "h-author changes the worker's assignment in it: 200" reassign busy
   check "$ref" 'h-publisher publishes it: 202' publish_busy
@@ -452,9 +457,10 @@ controls() {
   check 'S4 backups' 'inject db-snapshot: a dump of the bronzeward database after the controls' "$bin/inject" db-snapshot "$backup_name"
 
   # Back to what run starts from. C's stall is released only once the database under it is the
-  # snapshot's and its link is cut again: its attempt then finds no operation and nothing is sent.
+  # snapshot's and every link is cut again: no instance can dispatch the restored approved plan.
   ref='S4 controls handoff'
-  check "$ref" 'inject linksplit C worker' "$bin/inject" linksplit C worker
+  must "$ref" 'inject linksplit A, B and C worker' worker_links linksplit
+  must "$ref" 'every link to the worker is cut before restoring the approved plan' worker_cut
   check "$ref" 'inject pause A, B and C' servers pause
   check "$ref" 'inject db-restore s3-step3' "$bin/inject" db-restore s3-step3
   check "$ref" 'inject bao-restore s3-step3' "$bin/inject" bao-restore s3-step3
@@ -557,14 +563,20 @@ restores() {
   call_port=$SERVER_C_PORT
   # Each case's bundle is captured before the next restore removes its timeline.
 
-  # The assignment changed after planning and the approval: comparison 2.
-  from_step4 assignment dispatch-attempted
+  # The assignment changed after planning and the approval: comparison 2. Stall the executor
+  # before commitment, leaving C's separate publication worker free to read both nodes.
+  from_step4 assignment dispatch-evidence
   p=$plan_id
+  n=$(stalls_at dispatch-evidence)
+  rev=$(worker_rev) || die "s4: cannot read the worker's timeline"
+  must "$ref, assignment" 'inject linkjoin C worker before taking the evidence' "$bin/inject" linkjoin C worker
   check "$ref, assignment" 'approved as h-approver: 201' approve_by h-approver "$p" assignment
+  must "$ref, assignment" 'the use-time check passes and the evidence is recorded; C stalls there, nothing committed' \
+    within 120 evidence_stalled "$p" "$rev" "$n"
   check "$ref, assignment" 'h-author opens a draft: 201' draft_by h-author assignment
   check "$ref, assignment" "h-author changes the worker's assignment in it: 200" reassign assignment
   check "$ref, assignment" 'h-publisher publishes it: 202, one release, the worker'"'"'s Desired' publish_by h-publisher assignment
-  check "$ref, assignment" 'inject linkjoin C worker' "$bin/inject" linkjoin C worker
+  must "$ref, assignment" 'C released, told to stall after an attempt instead' interrupt dispatch-attempted stall
   check "$ref, assignment" "the commitment refused by comparison 2, the machine's assignment revision changed; no operation" \
     within 90 commit_refused "$p" 2 "the machine's assignment revision changed"
   outcome_bundle "$ref, assignment" restores-assignment
@@ -573,11 +585,12 @@ restores() {
   # run's commitment of step 3's plan with no publication between (ER choice §10.24).
   from_step4 desired dispatch-attempted
   p=$plan_id
+  must "$ref, desired" 'the plan remains proposed before joining the worker for publication' plan_state_is "$p" proposed
+  must "$ref, desired" 'inject linkjoin C worker while the plan is still proposed' "$bin/inject" linkjoin C worker
   check "$ref, desired" 'h-author opens a draft: 201' draft_by h-author desired
   check "$ref, desired" 'h-author drafts an unrelated change, a fragment: 200' fragment_by h-author desired desired
   check "$ref, desired" 'h-publisher publishes it as a later release: 202, one release, the worker'"'"'s Desired' publish_by h-publisher desired
   check "$ref, desired" 'then approved as h-approver: 201' approve_by h-approver "$p" desired
-  check "$ref, desired" 'inject linkjoin C worker' "$bin/inject" linkjoin C worker
   check "$ref, desired" "the commitment refused by comparison 2, the machine's Desired release changed; no operation" \
     within 90 commit_refused "$p" 2 "the machine's Desired release changed"
   outcome_bundle "$ref, desired" restores-desired
