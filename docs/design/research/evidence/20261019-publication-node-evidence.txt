@@ -1,7 +1,8 @@
 Bronzeward #247: sanitized publication evidence results
 Database/provider source: e04d6272006fdfaa57e192d8531dbb5b0a47e8af
 Failed live-chain source: 247e22c2adff4bf21c6d3a7427587b86a2693035
-Repair live-chain source: aede267c50f7c10978e42aa1eb4a8c43c96feaee
+Third live-chain source (failed at S3), and committed guard controls: aede267c50f7c10978e42aa1eb4a8c43c96feaee
+Repaired live-chain source: 44e8cf8c8f0285e70768e07291c2cd6f4a0ee9e6
 Environment: Go 1.27.1 linux/amd64; PostgreSQL 17.11; OpenBao 2.6.1
 OpenBao revision: ba7ad8861d0578cd4da4f7b9e5a6756d30484f8f
 TMPDIR and GOTMPDIR: the same disposable directory on disk outside the checkout
