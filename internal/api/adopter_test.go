@@ -325,6 +325,7 @@ func TestAdopterSkips(t *testing.T) {
 			}
 			le := newLoopEnv(t, c.extra, before...)
 			c.setup(t, le, other)
+			beforeObservations := count(t, le.db, `SELECT count(*) FROM observation_start WHERE machine = $1`, le.machine)
 			life, stop := context.WithCancel(t.Context())
 			idle := make(chan struct{})
 			a := le.adopter(t, life, config.Ingestion{Heartbeat: 20 * time.Millisecond, Lease: 50 * time.Millisecond}, idle)
@@ -332,7 +333,7 @@ func TestAdopterSkips(t *testing.T) {
 			defer stopping(a, stop)
 			waitIdle(t, idle, 3)
 			if s, r := count(t, le.db, `SELECT count(*) FROM observation_start WHERE machine = $1`, le.machine),
-				count(t, le.db, `SELECT count(*) FROM machine_event WHERE kind = 'refusal'`); s != 0 || r != 0 {
+				count(t, le.db, `SELECT count(*) FROM machine_event WHERE kind = 'refusal'`); s != beforeObservations || r != 0 {
 				t.Fatalf("%d observations and %d refusal entries", s, r)
 			}
 		})
