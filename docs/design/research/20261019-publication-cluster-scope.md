@@ -62,9 +62,39 @@ OpenBao 2.6.1 (`ba7ad8861d0578cd4da4f7b9e5a6756d30484f8f`), with versions read
 back on 19 October 2026. The two new tests use stand-in providers; OpenBao is
 used by the broader database/provider task, not by those diagnostic cases.
 
-These overlay diagnostics establish the pre-fix failure and the guard control.
-They do not substitute for verification of the committed branch; the PR records
-its exact candidate and normal database/provider and verification results.
+## Committed-branch evidence
+
+The following checks ran at
+`032b5433a6ad39a8ff62fdcba411b9c1b964a89e`, with `TMPDIR` and `GOTMPDIR`
+set to the retained campaign's disposable Go storage. The checkout was unchanged
+during execution. The environment and provider versions were those recorded above.
+
+| Check | Exit | Observed result | Retained log SHA-256 |
+| --- | --- | --- | --- |
+| `mise run go-db` | 0 | All 21 packages with tests passed; two packages had no test files. | `e6e57707669d303c6acf785c02dee3d102860dfe5e6506841817a74bf4ce1332` |
+| Focused committed cases and explicit skip inventory | 0 | All four source/scope cases, the worker refusal and `TestTalosAPIMethods` passed; the latter classified 75 methods across ten services. Six environment-dependent tests explicitly skipped, as detailed below. | `fbcc61bd2d915464bd6f3cbe2053846504917fbc8ebeabb7d48b03d0e5e2f768` |
+| Committed tests with the original production file overlaid | 1, expected | Both same-cluster controls passed. Both foreign-reference cases failed after two metadata and two value reads; the worker succeeded with 23 provider calls instead of refusing. | `ef5463860aab85949354ea3e4fdd4a57822cd9ee18613f797dc260f8f203662b` |
+
+The focused command used `go test -v -count=1 -p=1 -parallel=1 -timeout=3m`
+through `mise exec`, with the development database variables from the reproduction
+below, against `./internal/api ./internal/compile ./internal/talos`. Its anchored
+test selection comprised the two new tests, `TestTalosAPIMethods`,
+`TestMachineryGate`, `TestSensitivityGate`, `TestLiveApply`, `TestLiveRead`,
+`TestLiveRoleProbe` and `TestLiveUnreachable`. The machinery and sensitivity gates
+require the dedicated `experiments/c10-machinery-gate/run/all` environment. The
+four live tests skipped because `BW_TEST_TALOSCONFIG` and
+`BW_TEST_TALOS_ENDPOINT` were explicitly unset. These checks made no live Talos
+request and do not replace the separately retained fixture evidence.
+
+An earlier attempt to collect the full task as JSON used `GOFLAGS=-json` and
+exited 1. Its only failing test was `TestTalosAPIMethods`: its nested
+`go list -m -f` inherited that flag and failed with
+`go list -f cannot be used with -json`. The command failed independently with
+the flag and succeeded without it; the normal repository task above then passed.
+The failed run remains retained, SHA-256
+`36ea1651c06eb0642464a05be6e34e97750f8ba098337823bcd0651040f23a71`.
+It is not counted as a passing suite. The PR records final candidate verification
+separately from these revision-bound database/provider results.
 
 ## Reproduce and limits
 
