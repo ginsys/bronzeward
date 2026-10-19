@@ -239,18 +239,21 @@ claimed_after_lease() {
   [ "$(sql "SELECT pg_xact_commit_timestamp(xmin) >= '$pub_lease'::timestamptz FROM operation_event
     WHERE operation = '$pub_op' AND number = 3 AND entry->>'type' = 'claimed'")" = t ]
 }
-# released_once: one release names pub_op, and the draft is published as that release.
+# released_once: one release names pub_op, the draft is published as that release, and every
+# covered machine has matching publication evidence. Positive matches reject missing/null data.
 released_once() {
   [ "$(sql "SELECT count(*) FROM release WHERE operation = '$pub_op'")" = 1 ] &&
     [ "$(sql "SELECT d.state FROM draft d JOIN release r ON r.id = d.release AND r.operation = '$pub_op'
       WHERE d.id = '$draft'")" = published ] &&
-    [ "$(sql "SELECT count(*) FROM release_machine rm JOIN release r ON r.id = rm.release
-      JOIN observation o ON o.id = rm.publication_observation AND o.machine = rm.machine
-      JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
-      JOIN operation op ON op.id = r.operation
-      WHERE r.operation = '$pub_op' AND (s.purpose <> 'publication' OR s.operation <> r.operation
-        OR s.publication_generation <> op.owner_gen OR o.access_path <> 'access/talos/' || r.cluster
-        OR o.running_version IS NULL OR substring(o.running_version FROM '^v[0-9]+\.[0-9]+') <> r.contract)")" = 0 ]
+    [ "$(sql "SELECT count(*) > 0 AND bool_and(EXISTS (
+      SELECT FROM observation o
+        JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
+        JOIN operation op ON op.id = r.operation
+      WHERE o.id = rm.publication_observation AND o.machine = rm.machine
+        AND s.purpose = 'publication' AND s.operation = r.operation
+        AND s.publication_generation = op.owner_gen AND o.access_path = 'access/talos/' || r.cluster
+        AND substring(o.running_version FROM '^v[0-9]+\.[0-9]+') = r.contract))
+      FROM release_machine rm JOIN release r ON r.id = rm.release WHERE r.operation = '$pub_op'")" = t ]
 }
 # unreleased: no release names pub_op, and the draft is still open.
 unreleased() {
