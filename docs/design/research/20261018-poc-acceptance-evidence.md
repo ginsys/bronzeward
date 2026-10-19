@@ -89,18 +89,18 @@ Each from a fresh `bin/up` (AP §2). AP §7.1 items marked *check* are the CI te
 
 | Run | Step | Command | Exit | Checks (PASS / FAIL / SKIP) | Retained evidence |
 | --- | --- | --- | --- | --- | --- |
-| `controls` | `up` | `bin/up` | *pending* | — | — |
-| `controls` | `s0` | `scenarios/s0 run` | *pending* | *pending* | *pending* |
-| `controls` | `s1` | `scenarios/s1 run` | *pending* | *pending* | *pending* |
-| `controls` | `s3h` | `scenarios/s3 handover` | *pending* | *pending* | *pending* |
-| `controls` | `s2` | `scenarios/s2 run` | *pending* | *pending* | *pending* |
-| `controls` | `s3r` | `scenarios/s3 run` | *pending* | *pending* | *pending* |
-| `controls` | `s4c` | `scenarios/s4 controls` | *pending* | *pending* | *pending* |
-| `controls` | `s4x` | `scenarios/s4 restores` | *pending* | *pending* | *pending* |
-| `controls` | `s4` | `scenarios/s4 run` | *pending* | *pending* | *pending* |
-| `controls` | `s5` | `scenarios/s5 run` | *pending* | *pending* | *pending* |
-| `controls` | `s5roles` | `scenarios/s5 roles` | *pending* | *pending* | *pending* |
-| `controls` | `down` | `bin/down` | *pending* | — | — |
+| `controls` | `up` | `bin/up` | 0 | — | — |
+| `controls` | `s0` | `scenarios/s0 run` | 0 | 62 / 0 / 1 | `s0-run-20261019T055929Z`, 1 bundle |
+| `controls` | `s1` | `scenarios/s1 run` | 0 | 453 / 0 / 0 | `s1-run-20261019T061151Z`, 52 bundles |
+| `controls` | `s3h` | `scenarios/s3 handover` | 0 | 29 / 0 / 0 | `s3-handover-20261019T063830Z`, 3 bundles |
+| `controls` | `s2` | `scenarios/s2 run` | 0 | 334 / 0 / 0 | `s2-run-20261019T063944Z`, 23 bundles |
+| `controls` | `s3r` | `scenarios/s3 run` | 0 | 95 / 0 / 0 | `s3-run-20261019T070417Z`, 5 bundles |
+| `controls` | `s4c` | `scenarios/s4 controls` | 0 | 63 / 0 / 2 | `s4-controls-20261019T070820Z`, 3 bundles |
+| `controls` | `s4x` | `scenarios/s4 restores` | 0 | 138 / 0 / 1 | `s4-restores-20261019T071208Z`, 8 bundles |
+| `controls` | `s4` | `scenarios/s4 run` | 0 | 33 / 0 / 0 | `s4-run-20261019T071945Z`, 3 bundles |
+| `controls` | `s5` | `scenarios/s5 run` | 0 | 170 / 0 / 0 | `s5-run-20261019T072136Z`, 17 bundles |
+| `controls` | `s5roles` | `scenarios/s5 roles` | 0 | 17 / 0 / 0 | `s5-roles-20261019T073612Z`, 1 bundle |
+| `controls` | `down` | `bin/down` | 0 | — | — |
 | `s6` | `up` | `bin/up` | 0 | — | — |
 | `s6` | `s1` | `scenarios/s1 run` | 0 | 453 / 0 / 0 | `s1-run-20261018T191441Z`, 52 bundles |
 | `s6` | `s3h` | `scenarios/s3 handover` | 0 | 29 / 0 / 0 | `s3-handover-20261018T194024Z`, 3 bundles |
@@ -164,7 +164,7 @@ under the table.
 | Run | Record | Checkout (changed paths) | Pins blob | Server image |
 | --- | --- | --- | --- | --- |
 | `run` | `run-20261019T052145Z` | `fcecfcaf2a6f` (0) | `efd7c1431ebc` | `6e31bb6ab4aa` |
-| `controls` | *pending* | *pending* | *pending* | *pending* |
+| `controls` | `controls-20261019T055715Z` | `fcecfcaf2a6f` (0) | `efd7c1431ebc` | `d4b8c1c21333` |
 | `s6` | `s6-20261018T191226Z` | `ab327884527f` (0) | `efd7c1431ebc` | `74661b51c9cc` |
 | S1 node ID | `steps-20261019T005015Z` | `ab327884527f` (0) | `efd7c1431ebc` | `e5dd6e22b059` |
 | S3 handover controls | `steps-20261019T005313Z` | `ab327884527f` (0) | `efd7c1431ebc` | `a3cb9895bc26` |
@@ -173,7 +173,7 @@ under the table.
 | S0 walk | `steps-20261019T040050Z` | `ab327884527f` (0) | `efd7c1431ebc` | `82cdf5079447` |
 | S8 controls | `steps-20261019T040326Z` | `ab327884527f` (0) | `efd7c1431ebc` | `dc0f3ca92012` |
 
-Every bundle of every run (*pending: the total*) agrees: `manifest commit` and `created at` its run's
+Every bundle of every run (569) agrees: `manifest commit` and `created at` its run's
 checkout (fcecfca for `run` and `controls`, ab32788 for the others) and an empty
 `fixtures-diff.txt`. The server image is built by each `bin/up`, so its ID is the run's own; within
 a run all four server containers share it. Versions, the same for all runs:
@@ -233,7 +233,8 @@ Records written:
     the dispatch-safety rows' fragments, where AP §2 runs those separately;
   - `run-20261019T045222Z`, the `run` preset at an earlier commit of this change, stopped at `s7`
     (S7 step 3's release left the worker's configuration digest unchanged).
-- `controls`: *pending: the record at fcecfca and its S5 step 4 path*. It supersedes
+- `controls`: `controls-20261019T055715Z`. With no S4 dispatch-safety rows before it, S5 step 4
+  again pointed the worker's assignment back at S3's handover cluster fragment. It supersedes
   `steps-20261018T224934Z`, which passed at ab32788 with `s4ds` before `s5`.
 - S1 node ID: `steps-20261019T005015Z`.
 - S3 handover controls: `steps-20261019T005313Z`.
@@ -242,7 +243,7 @@ Records written:
 - S0 walk: `steps-20261019T040050Z`.
 - S8 controls: `steps-20261019T040326Z`.
 
-Every step of these nine records exited 0 and no check failed (`controls`: *pending*). Across the *pending: the total* bundles, each leak
+Every step of these nine records exited 0 and no check failed. Across the 569 bundles, each leak
 scan found only its positive control, except where S8's negative control planted a copy of a
 secret to be found (`S8 negative controls`, "the scan reports the copy"); no bundle names a source
 it could not capture.
