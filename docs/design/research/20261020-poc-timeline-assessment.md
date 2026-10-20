@@ -40,7 +40,7 @@ unfreeze control, already exercised in the earlier complete campaign. The focuse
 same-startup lost-response replay supplements the original separate S6; it does not
 replace that scenario's other interruption points or refusal controls.
 
-Retained root: `/home/serge/src/ginsys/_scratch/bronzeward/walkthrough-31-20261020`.
+Retained evidence bundle: `walkthrough-31-20261020`.
 The owner retains the complete captures and a sanitized four-case package. Each case
 contains `operation.json`, `events.json`, `timeline.json`, `observations.json`
 and individual observations; the guided plans are in `human-review/api/`.
@@ -185,16 +185,20 @@ and no new defects. Its retained `independent-review/claude-confirmation.md`
 (SHA256 `ed61896c9ece78c75df98873f304e8e91f3f73c5fcede67c31916033cb4e4018`)
 records the actual procedure: read scope-ordered timelines, operations, recovery
 events, linked plans/approvals and observations; all four answer sets agree with §2.
-It made no live API calls and did not independently verify capture pagination or hashes.
+It made no live API calls, exercised no event stream and did not verify pagination or hashes.
 
-**Delegated factual disposition:** S8's independent reading is met. AP S8 explicitly
-uses retained records, including separate S6; the reviewer followed the documented
-reading procedure over those responses. AP S8, ER §9.3 and design §18.2 require no
-human reviewer, owner-named reviewer or new live replay. The older record's “person”
-wording was an added characterization, not an acceptance-plan condition.
-The reviewer left the acceptance decision to the owner; this disposition uses the
-owner's delegation of straightforward factual assessment, not reviewer authority
-or a waiver. Original person-read SKIPs remain historical. Neither this review nor
+**Delegated factual disposition:** S8's independent reading is met. The reviewer left
+two interpretations open: whether an agent qualifies and whether retained-response
+reading suffices instead of issuing the walkthrough's live, paged GETs.
+This assessment accepts both: AP S8, ER §9.3 and design §18.2 name no human or
+owner-named reviewer; AP S8 explicitly takes the separately retained S6 timeline
+and calls for evidence “as served”. The reviewer followed the documented reading
+procedure over those responses. Capture completeness rests on the original harness's
+retain-every-page check; stream/authentication coverage remains in the original S8
+run (acceptance record R48). Neither was independently re-exercised here.
+The older “person” wording was an added characterization, not an acceptance-plan
+condition. This disposition uses the owner's factual-assessment delegation, not
+reviewer authority or a waiver. Original person-read SKIPs remain historical. Neither this review nor
 the [earlier agent review](20261018-operator-docs-reviewer-run.md#1-setup) proves unaided human usability.
 
 ## 4. Human-facing usability
