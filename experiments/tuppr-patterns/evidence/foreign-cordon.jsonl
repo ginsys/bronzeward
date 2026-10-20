@@ -1,0 +1,9 @@
+{"Time":"2026-10-20T22:34:44.457087575+02:00","Action":"start","Package":"github.com/home-operations/tuppr/internal/controller/drain"}
+{"Time":"2026-10-20T22:34:44.463524075+02:00","Action":"run","Package":"github.com/home-operations/tuppr/internal/controller/drain","Test":"TestBronzewardForeignCordonMustSurvive"}
+{"Time":"2026-10-20T22:34:44.463587462+02:00","Action":"output","Package":"github.com/home-operations/tuppr/internal/controller/drain","Test":"TestBronzewardForeignCordonMustSurvive","Output":"=== RUN   TestBronzewardForeignCordonMustSurvive\n","OutputType":"frame"}
+{"Time":"2026-10-20T22:34:44.539656764+02:00","Action":"output","Package":"github.com/home-operations/tuppr/internal/controller/drain","Test":"TestBronzewardForeignCordonMustSurvive","Output":"    bronzeward_probe_test.go:34: BW_FOREIGN_CORDON_CLEARED: cleanup removed a pre-existing cordon\n","OutputType":"error"}
+{"Time":"2026-10-20T22:34:44.53968274+02:00","Action":"output","Package":"github.com/home-operations/tuppr/internal/controller/drain","Test":"TestBronzewardForeignCordonMustSurvive","Output":"--- FAIL: TestBronzewardForeignCordonMustSurvive (0.08s)\n","OutputType":"frame"}
+{"Time":"2026-10-20T22:34:44.539686145+02:00","Action":"fail","Package":"github.com/home-operations/tuppr/internal/controller/drain","Test":"TestBronzewardForeignCordonMustSurvive","Elapsed":0.08}
+{"Time":"2026-10-20T22:34:44.539698169+02:00","Action":"output","Package":"github.com/home-operations/tuppr/internal/controller/drain","Output":"FAIL\n","OutputType":"frame"}
+{"Time":"2026-10-20T22:34:44.540681003+02:00","Action":"output","Package":"github.com/home-operations/tuppr/internal/controller/drain","Output":"FAIL\tgithub.com/home-operations/tuppr/internal/controller/drain\t0.083s\n","OutputType":"frame"}
+{"Time":"2026-10-20T22:34:44.540693001+02:00","Action":"fail","Package":"github.com/home-operations/tuppr/internal/controller/drain","Elapsed":0.084}

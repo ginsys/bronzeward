@@ -1,0 +1,101 @@
+{
+  "source_commit": "377fbf03df05420ca833230233e67877e5f343d4",
+  "started_utc": "2026-10-20T20:33:05.855253+00:00",
+  "go_version": "go version go1.27.1 linux/amd64",
+  "fixture_sha256": {
+    "run.py": "f43ad5a9b5125ecad40f1028ef682358405c48f7d376cc1ef4cb2a66439edb68",
+    "probes/cordon_test.go": "da6aaf7c47ba4f2278a8d90c20cc52bb96347036955a1ca94a766ec828ae03d2",
+    "probes/suspend_test.go": "a9517fef2fba0f4d2c213fe32a36893f28edb9dfa2c7c8c54da220ddf0478ae0"
+  },
+  "source_files_sha256": {
+    "go.mod": "7f5613ad9cfa0525d766dd4c5e8c8e0ca99cddaae7a28ae78acbc780dc61be6e",
+    "go.sum": "7183c154ebfada0c9625b7f0d7729ecfaacf6ec404a54218dd587ae2ac3a4515",
+    ".mise/config.toml": "99760d929f584547364d0e1def23734ff9dbaef13411d90094ef8d2f2718bddb"
+  },
+  "cases": [
+    {
+      "case": "recovery",
+      "command": "timeout --kill-after=10s 600s go test -mod=readonly -count=1 -p=2 -parallel=2 -timeout=90s -json -overlay=$OUTPUT/overlay.json ./internal/controller/talosupgrade -run ^(TestTalosReconcile_CreatesJobForNextNode|TestTalosReconcile_HealthCheckFailure|TestTalosReconcile_FailedState_ResetsOnRetry|TestTalosReconcile_HandleJobSuccess_PatchInstallImageFails_Continues|TestTalosReconcile_FailedJobButNodeUpgraded_TreatedAsSuccess|TestTalosReconcile_RebootingNodeRecordsDeadline|TestTalosReconcile_RebootingNodeTimesOut_JobStillPresent|TestTalosReconcile_RebootingNodeAfterJobGC_KeepsWaiting|TestTalosReconcile_RebootingNodeAfterJobGC_TimesOut|TestTalosReconcile_RebootingNodeAfterJobGC_CompletesWhenReady|TestTalosReconcile_StaleRebootTrackingCleared)$",
+      "exit": 0,
+      "expected_test_result": "pass",
+      "observed": {
+        "TestTalosReconcile_CreatesJobForNextNode": "pass",
+        "TestTalosReconcile_HealthCheckFailure": "pass",
+        "TestTalosReconcile_FailedState_ResetsOnRetry": "pass",
+        "TestTalosReconcile_HandleJobSuccess_PatchInstallImageFails_Continues": "pass",
+        "TestTalosReconcile_FailedJobButNodeUpgraded_TreatedAsSuccess": "pass",
+        "TestTalosReconcile_RebootingNodeRecordsDeadline": "pass",
+        "TestTalosReconcile_RebootingNodeTimesOut_JobStillPresent": "pass",
+        "TestTalosReconcile_RebootingNodeAfterJobGC_KeepsWaiting": "pass",
+        "TestTalosReconcile_RebootingNodeAfterJobGC_TimesOut": "pass",
+        "TestTalosReconcile_RebootingNodeAfterJobGC_CompletesWhenReady": "pass",
+        "TestTalosReconcile_StaleRebootTrackingCleared": "pass"
+      },
+      "unexpected": {},
+      "matched": true
+    },
+    {
+      "case": "coordination",
+      "command": "timeout --kill-after=10s 600s go test -mod=readonly -count=1 -p=2 -parallel=2 -timeout=90s -json -overlay=$OUTPUT/overlay.json ./internal/controller/coordination -run ^(TestIsAnotherUpgradeActive)$",
+      "exit": 0,
+      "expected_test_result": "pass",
+      "observed": {
+        "TestIsAnotherUpgradeActive": "pass"
+      },
+      "unexpected": {},
+      "matched": true
+    },
+    {
+      "case": "config",
+      "command": "timeout --kill-after=10s 600s go test -mod=readonly -count=1 -p=2 -parallel=2 -timeout=90s -json -overlay=$OUTPUT/overlay.json ./internal/talos -run ^(TestInstallImageFromConfig|TestSetInstallImage)$",
+      "exit": 0,
+      "expected_test_result": "pass",
+      "observed": {
+        "TestInstallImageFromConfig": "pass",
+        "TestSetInstallImage": "pass"
+      },
+      "unexpected": {},
+      "matched": true
+    },
+    {
+      "case": "health",
+      "command": "timeout --kill-after=10s 600s go test -mod=readonly -count=1 -p=2 -parallel=2 -timeout=90s -json -overlay=$OUTPUT/overlay.json ./internal/healthcheck -run ^(TestHealthChecker_ValidateHealthChecks|TestHealthChecker_EvaluateSpecificResource_NotFound|TestHealthChecker_EvaluateAllResources_OneFails|TestHealthChecker_ListSelectorEmpty|TestHealthChecker_EvaluateAllResources_EmptyList)$",
+      "exit": 0,
+      "expected_test_result": "pass",
+      "observed": {
+        "TestHealthChecker_ValidateHealthChecks": "pass",
+        "TestHealthChecker_EvaluateSpecificResource_NotFound": "pass",
+        "TestHealthChecker_EvaluateAllResources_OneFails": "pass",
+        "TestHealthChecker_ListSelectorEmpty": "pass",
+        "TestHealthChecker_EvaluateAllResources_EmptyList": "pass"
+      },
+      "unexpected": {},
+      "matched": true
+    },
+    {
+      "case": "foreign-cordon",
+      "command": "timeout --kill-after=10s 600s go test -mod=readonly -count=1 -p=2 -parallel=2 -timeout=90s -json -overlay=$OUTPUT/overlay.json ./internal/controller/drain -run ^(TestBronzewardForeignCordonMustSurvive)$",
+      "exit": 1,
+      "expected_test_result": "fail",
+      "observed": {
+        "TestBronzewardForeignCordonMustSurvive": "fail"
+      },
+      "unexpected": {},
+      "matched": true
+    },
+    {
+      "case": "suspend-job",
+      "command": "timeout --kill-after=10s 600s go test -mod=readonly -count=1 -p=2 -parallel=2 -timeout=90s -json -overlay=$OUTPUT/overlay.json ./internal/controller/talosupgrade -run ^(TestBronzewardSuspendMustStopActiveJob)$",
+      "exit": 1,
+      "expected_test_result": "fail",
+      "observed": {
+        "TestBronzewardSuspendMustStopActiveJob": "fail"
+      },
+      "unexpected": {},
+      "matched": true
+    }
+  ],
+  "limits": "Fake clients only; no cluster, real RPC, quorum, reboot or credential custody proof.",
+  "source_clean_after": true,
+  "finished_utc": "2026-10-20T20:34:46.840831+00:00"
+}

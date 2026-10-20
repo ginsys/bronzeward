@@ -1,0 +1,8 @@
+20 October 2026, before publication.
+gitleaks 8.30.1: gitleaks dir experiments/tuppr-patterns --redact --no-banner
+Result: exit 0; approximately 79.89 KB scanned; no leaks found.
+Additional exact text scan of retained evidence and research report:
+/home/, /tmp/, private-key PEM headers, client-key/client-key-data assignments,
+bao.token and vault-token: no matches.
+Scope: public upstream test output and synthetic fixture inputs only.
+This is not evidence of real credential custody or Bronzeward ingress redaction.
