@@ -43,10 +43,14 @@ not evidence of an upgrade against that Talos version.
 
 ## Component assessment
 
+Rows below cite inspected source. Only the specific checks listed under
+Executed checks were exercised locally; image/pre-pull behavior, visibility,
+eviction/PDB handling and volume-detach waiting remain source-only observations.
+
 | Candidate | Recommendation | Rationale, alternative and evidence limit |
 | --- | --- | --- |
 | Upgrade progress and recovery | Adapt the persisted-deadline and post-Job-GC observation patterns; reject unchanged state-machine reuse. | [Reboot tracking](https://github.com/home-operations/tuppr/blob/377fbf03df05420ca833230233e67877e5f343d4/internal/controller/talosupgrade/jobs.go) survives Job loss. However, timeout can produce a terminal failed state, and a failed Job can be accepted when the node reports the target version. ER requires accounting for every old attempt before terminal classification or scope release; a Ready/version observation alone is insufficient. |
-| Drain and rollout | Reimplement operation-owned cordon/drain phases; retain upstream scenarios as test ideas. | The [drainer](https://github.com/home-operations/tuppr/blob/377fbf03df05420ca833230233e67877e5f343d4/internal/controller/drain/drain.go) uses eviction and waits for selected Pod UIDs, but its uncordon helper clears the unschedulable flag without proving ownership. [Batch orchestration](https://github.com/home-operations/tuppr/blob/377fbf03df05420ca833230233e67877e5f343d4/internal/controller/talosupgrade/upgrade.go) treats volume-detach timeout as best-effort. Preserve explicit partial eviction, foreign cordon and unknown detach outcomes instead. No real PDB, quorum or detach qualification is claimed. |
+| Drain and rollout | Reimplement operation-owned cordon/drain phases; retain upstream scenarios as test ideas. | The [drainer](https://github.com/home-operations/tuppr/blob/377fbf03df05420ca833230233e67877e5f343d4/internal/controller/drain/drain.go) uses eviction and waits for selected Pod UIDs, but its uncordon helper clears the unschedulable flag without proving ownership. With `DisableEviction` enabled, a PDB refusal can fall back to direct Pod deletion. [Batch orchestration](https://github.com/home-operations/tuppr/blob/377fbf03df05420ca833230233e67877e5f343d4/internal/controller/talosupgrade/upgrade.go) treats volume-detach timeout as best-effort. Preserve explicit partial eviction, foreign cordon and unknown detach outcomes instead. No real PDB, quorum or detach qualification is claimed. |
 | Health | Adapt declarative validation and full evaluation rounds; reject the checker unchanged as an operation completion policy. | The [CEL checker](https://github.com/home-operations/tuppr/blob/377fbf03df05420ca833230233e67877e5f343d4/internal/healthcheck/checker.go) distinguishes expressions and selection, but an empty unfiltered list passes while an empty selector result fails. Its default ten-minute timeout can be increased by check timeouts; a shorter parent context can still end it. Bronzeward needs bound coverage, freshness, pass/fail/unreadable and deadline semantics, not an inferred generic healthy boolean. |
 | Scheduling and hooks | Adapt explicit clock/timezone/window evaluation; reject automatic hook bypass or execution as implicit approval. | [Maintenance windows](https://github.com/home-operations/tuppr/blob/377fbf03df05420ca833230233e67877e5f343d4/internal/controller/maintenance/window.go) accept an explicit time and return the next eligible window; nil windows allow execution. Source review also finds a seven-day backward search for the preceding cron occurrence. Completed pre-hooks [suppress inter-batch health checks](https://github.com/home-operations/tuppr/blob/377fbf03df05420ca833230233e67877e5f343d4/internal/controller/talosupgrade/upgrade.go#L327-L348); the initial check still runs. Future Bronzeward plans must bind these choices and define continuation when a window closes. Scheduling and hook execution were not exercised locally. |
 | Image and compatibility | Adapt runtime schematic discovery, extension-preservation refusals and pre-pull separation. | [Image construction](https://github.com/home-operations/tuppr/blob/377fbf03df05420ca833230233e67877e5f343d4/internal/controller/talosupgrade/upgrade.go) derives targets from live configuration, runtime extensions and mutable node annotations. Bronzeward instead needs approved image digest, platform, source/target versions, schematic and client/RPC bindings. A pre-pull is a mutation; it is not read-only preview. Version selection does not prove a supported transition. |
@@ -65,7 +69,7 @@ and per-case JSON logs are retained with the fixture.
 
 | Group | Expected and observed | What this establishes |
 | --- | --- | --- |
-| Recovery, 11 tests | Exit 0; all pass | Job creation, health refusal, explicit retry reset, persisted deadlines, observation after Job GC, timeout handling and cleanup of stale status behave as the selected fake-client tests assert. It also reproduces completion despite image-sync failure and a failed Job followed by an observed target version. |
+| Recovery, 11 tests | Exit 0; all pass | Job creation, health refusal, generation-change reset of a Failed run to Pending, persisted deadlines, observation after Job GC, timeout handling and cleanup of stale status behave as the selected fake-client tests assert. The reset test changes observed generation; it does not demonstrate explicit retry authorization. It also reproduces completion despite image-sync failure and a failed Job followed by an observed target version. |
 | Coordination, 1 test with subcases | Exit 0; all pass | Blocking among tuppr upgrade resources; no Bronzeward coexistence proof. |
 | Configuration, 2 tests with subcases | Exit 0; all pass | Synthetic legacy/multi-document image extraction and editing, unknown-document preservation and rejection of missing image data. No real secret or concurrent writer was involved. |
 | Health, 5 tests with subcases | Exit 0; all pass | Validation, absent object, one failing resource and the two empty-selection behaviours. Not a full health-window timing test. |
@@ -79,6 +83,13 @@ not counted as a test. The successful run used a working-tree fixture based on
 Bronzeward 0439601; its exact script/probe hashes, rather than an invented committed
 revision, identify those tested bytes.
 
+The runner overrides environment GOFLAGS but does not disable Go's persisted
+per-user configuration. The recorded run is not a fully hermetic toolchain run.
+Source inspection of
+[generation handling](https://github.com/home-operations/tuppr/blob/377fbf03df05420ca833230233e67877e5f343d4/internal/controller/talosupgrade/annotations.go#L79-L104)
+shows that a spec-generation change also clears completed, failed and rebooting
+records. That is a rejected recovery behavior, not Bronzeward retry permission.
+
 The two compatibility probes assert Bronzeward requirements against unmodified
 upstream code. Their expected failures are evidence against reuse, not defects
 claimed against tuppr's own documented contract. The harness accepts a negative
@@ -89,7 +100,11 @@ The foreign-cordon probe begins with a node already cordoned by another actor,
 calls the existing cordon helper, then its cleanup helper. The required outcome
 is that the original cordon survives. The suspension probe creates an existing
 active Job and a suspended TalosUpgrade, then reconciles it. It requires the Job
-to be stopped at the Kubernetes-object level. Even satisfying that weaker check
+to be stopped at the Kubernetes-object level. The probe does not assert the
+Suspended condition; the branch taken is confirmed by pinned source inspection
+of [the early suspension return](https://github.com/home-operations/tuppr/blob/377fbf03df05420ca833230233e67877e5f343d4/internal/controller/talosupgrade/upgrade.go#L45-L51)
+and [its annotation handler](https://github.com/home-operations/tuppr/blob/377fbf03df05420ca833230233e67877e5f343d4/internal/controller/talosupgrade/annotations.go#L15-L35).
+Even satisfying that weaker check
 would not prove that an already accepted remote request cannot act later.
 
 ## Boundary preservation and rejected integration
@@ -152,7 +167,9 @@ remains independent and open. This investigation does not select a licence.
 
 The existing [lifecycle specification #237](https://github.com/ginsys/bronzeward/issues/237)
 covers immutable bindings, phase accounting, foreign cordons, partial outcomes,
-health semantics and observer credentials. This report supplies concrete rejected
+health semantics and observer credentials. Its criteria also require an explicit
+admission or rejection of maintenance windows and hooks, with bound clock/timezone,
+window-close continuation and health-gate behavior. This report supplies concrete rejected
 substitutions and test inputs for that work. The existing
 [VM/hardware qualification #238](https://github.com/ginsys/bronzeward/issues/238)
 owns real installation/drain/reboot order, older API transition, quorum/PDB effects,
