@@ -54,25 +54,55 @@ and [recovery reads](../../operator/recovery.md#read-it-first). Follow every pag
 and linked observation. For a mechanical comparison, the pinned
 [`fixtures/s8-answers.jq`](../../../fixtures/s8-answers.jq) accepts the four case
 directories below. Set `BW_REPO` to the absolute checkout path and `BW_EVIDENCE`
-to the absolute retained-bundle path; the command then works from any directory:
+to the absolute retained-bundle path. Run this block as a script from any directory.
+It creates a working copy for the analysis outputs:
 
 ```sh
+set -eu
 : "${BW_REPO:?Set the absolute Bronzeward checkout path}"
 : "${BW_EVIDENCE:?Set the absolute walkthrough-31-20261020 bundle path}"
+BW_REPLAY_DIR=$(mktemp -d)
+cp -a "$BW_EVIDENCE/human-review" "$BW_EVIDENCE/worker-apply" \
+  "$BW_EVIDENCE/agent-assessment" "$BW_REPLAY_DIR/"
+linked='.ordered and .eventsAreTimeline and .attemptsLinked and (.textServed | not)
+  and .commitmentApproved
+  and (.commitment[-1].approval as $a | any(.approved[]; .approval == $a
+    and (.by | type == "string" and . != "") and (.role | type == "string" and . != "")))
+  and .observationsResolve and .observedIsTimeline and .observedRead'
+applied='(.commitment[-1].approval as $a | any(.approved[]; .approval == $a and .role == "approver"))
+  and (.attempts | length) >= 1
+  and all(.attempts[]; .route != null and .observation != null and .transportDeadline != null
+    and .verificationDeadline != null and .recordedAt != null and .sending != "unknown")
+  and .attempts[-1].response.class == "accepted"
+  and (.observed | length) >= 1
+  and .ended == "completed" and .state == "completed"'
 for BW_CASE in 01-worker-apply 02-drift 03-interruption 04-restoration; do
-  BW_CASE_DIR="$BW_EVIDENCE/human-review/$BW_CASE"
+  BW_CASE_DIR="$BW_REPLAY_DIR/human-review/$BW_CASE"
+  BW_ANSWER="$BW_REPLAY_DIR/agent-assessment/$BW_CASE.json"
   jq -n --slurpfile op "$BW_CASE_DIR/operation.json" \
     --slurpfile ev "$BW_CASE_DIR/events.json" \
     --slurpfile tl "$BW_CASE_DIR/timeline.json" \
     --slurpfile obs "$BW_CASE_DIR/observations.json" \
-    -f "$BW_REPO/fixtures/s8-answers.jq" || exit
+    -f "$BW_REPO/fixtures/s8-answers.jq" >"$BW_ANSWER" || exit
+  jq -e "$linked" "$BW_ANSWER" || exit
+  case "$BW_CASE" in
+    01-worker-apply|02-drift) jq -e "$applied" "$BW_ANSWER" || exit ;;
+  esac
 done
+python3 "$BW_REPLAY_DIR/agent-assessment/assess.py"
 ```
 
-The primary assessment ran six canonical `linked`/`applied` predicates from
-[`fixtures/scenarios/s8`](../../../fixtures/scenarios/s8) over these records:
-all exited 0. Twenty-three direct source cross-checks also passed. These checks
-support consistency; they do not substitute for independent interpretation.
+The extraction filter emits answers; its exit status alone does not validate them.
+The six `jq -e` calls above use the canonical `linked`/`applied` predicates from
+[`fixtures/scenarios/s8`](../../../fixtures/scenarios/s8): expect six `true` results
+and exit 0. The retained `agent-assessment/assess.py` then checks the served source
+records: expect `23 source-level factual cross-checks passed.` and exit 0.
+It rewrites `source-cross-checks.json` in the working copy. All these checks passed
+in the primary assessment. They support consistency, not independent interpretation.
+The complete block was replayed from outside the checkout: six predicates and
+23 source checks passed, all four answers matched, and the 542 original hashes
+remained unchanged. Reversing a copied normal timeline left extraction successful
+but made `ordered=false` and the `linked` predicate exit 1, as intended.
 Complete captures and positive-control secret scans are retained with the runs.
 
 ## 2. Four timeline readings
@@ -148,7 +178,9 @@ Restored operation `op_2sk3bf4brucrnjivezuan3uxla`, plan
   at 264 (`apr_ntvgkddvplirvguxdg5hgshboe`), then the separate waiting plan
   `pln_upizcgfor7upcuybk6rpa7ss2a` at 270 (`apr_h3cyj553pmiiha477xqwzvt2ie`).
   Both target `rel_a57a…` in the old epoch.
-  Approval 270 still looks live after restoration; its later revocation was erased.
+  In the earlier post-restoration capture, approval 270 still looks live; its
+  later revocation was erased. At the independent live read below, that waiting
+  plan reads expired and has no committed operation; its immutable approval remains.
   Commitment 268 precedes the backup; recovery ownership 271, unresolved 272 and hold 273 follow entry.
 - Recovery-admin `idn_n2fmoxkmpf4yalolmhwkczx2wm` records scope accounting 279,
   citing `obs_t4kfff4ri4tsbb3gvi4oxwgbue` and
@@ -199,16 +231,49 @@ by hosted Codex review at `35e4c1c`. The retained timeline and linked plan respo
 bind approval 264 to `pln_y24…` and approval 270 to `pln_upiz…`, as corrected in §2.
 This correction supersedes that part of the earlier confirmation; the original
 review is retained unchanged and does not prove the mistaken binding.
+Independent Claude review `48eb761a` at `3435240` subsequently reconstructed the
+restoration answer from the served timeline, operations, linked plans/approvals
+and observations, and confirmed the corrected binding and remaining narrative.
+Its unchanged output is retained as `independent-review/claude-restoration-correction.md`
+(SHA256 `666144c5b9d0923054e57006f7cf51f75605b530d8ff3e157e48602a77a106fd`).
+That reviewer read the recipe statically; the executing agent ran it.
 
-**Delegated factual disposition:** S8's independent reading is met. The reviewer left
-two interpretations open: whether an agent qualifies and whether retained-response
-reading suffices instead of issuing the walkthrough's live, paged GETs.
-This assessment accepts both: AP S8, ER §9.3 and design §18.2 name no human or
-owner-named reviewer; AP S8 explicitly takes the separately retained S6 timeline
-and calls for evidence “as served”. The reviewer followed the documented reading
-procedure over those responses. Capture completeness rests on the original harness's
-retain-every-page check; stream/authentication coverage remains in the original S8
-run (acceptance record R48). Neither was independently re-exercised here.
+The retained-only review above did not independently execute the walkthrough's
+authenticated, paginated GETs. A separate Codex reader subsequently followed that
+walkthrough as synthetic `h-viewer` against the still-running clean `c9b70ff`
+fixture. It wrote and hashed its own four answers before opening the assessment
+at `3435240`, then compared them and found agreement, including the corrected
+restoration approval binding.
+
+The unchanged supplement is retained under
+`independent-review/live-walkthrough/`. Its `README.md` gives the exact procedure;
+`requests.jsonl` and the individual response bodies/headers retain 98 GETs, all
+HTTP 200 and command exit 0. With `limit=7`, it followed 44 timeline pages
+(305 entries), 13 observation pages (91 observations) and every operation-event
+page to an empty next cursor. It fetched the linked plans, approvals and releases,
+including the distinct new-epoch revert. Fourteen checks passed: response status,
+epoch, ordering, link coverage, cursor completion, capture screening and two
+in-memory positive controls. The manifest verifies 228 payload files.
+
+| Retained artifact | SHA256 |
+| --- | --- |
+| `independent-answers.md`, checkpointed before comparison | `91c98076d83fb553d2b65acf62848752fcbbf987fdfec541096245791a35c937` |
+| `comparison.md`, against assessment `3435240` | `587d569e821d9e325db31b5406c6894e5163f4229cae2cf8629f654e94d6e286` |
+| `SHA256SUMS`, payload manifest | `b7dba6b42136a7519541d0c0dd133a965802383bb2ed5c4b47cf97f815c553de` |
+
+The separate S6 reading used byte-verified original captures, as AP S8's
+precondition requires; it did not substitute the guided interruption or repeat
+S6's HTTP pagination. All fresh headers carry the current recovery epoch; the
+pre-restoration header comparison remains in the original campaign. This reader
+did not repeat event-stream expiry/revocation, viewer mutation refusals or Talos
+error injection. Their evidence remains in the original S8 run and controls
+(acceptance record R48), not in these new GETs. Screening today's captures with
+today's fixture patterns does not replace the original S6 secret scan.
+
+**Delegated factual disposition:** S8's independent reading is met by this
+additional walkthrough. This supersedes the earlier retained-only basis for
+that verdict, without changing what the earlier reviewers actually did.
+AP S8, ER §9.3 and design §18.2 name no human or owner-named reviewer.
 The older “person” wording was an added characterization, not an acceptance-plan
 condition. This disposition uses the owner's factual-assessment delegation, not
 reviewer authority or a waiver. Original person-read SKIPs remain historical. Neither this review nor
@@ -241,7 +306,8 @@ neither a CLI nor a web UI and adds neither to PoC acceptance.
   upper bound on late request delivery.
 - The earlier acceptance campaigns retain responsibility for negative matrices,
   interruption points and variant coverage omitted by the guided pass.
-- After the guided runs listed in §1, the documentation repairs added no runtime
-  scenario; their verification re-read retained evidence and replayed the analysis.
+- After the guided runs listed in §1, the documentation repairs replayed the
+  analysis and added the independent live GET walkthrough in §3. They performed
+  no new configuration mutation, interruption or restoration scenario.
 - Issue31 and milestone03 remain open until this assessment lands and closure is
   recorded in the authoritative tracker. Licence and later implementation exclusions remain.
