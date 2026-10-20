@@ -598,7 +598,7 @@ remain in the historical revision; no run or human-review skip is relabelled.
 | Direct apply and verify, separate desired/applied/observed, a usable approval-to-outcome timeline | §5 item 5 and the timeline row | Met for the PoC: execution, traceability and independent factual interpretation; no general usability pass |
 | Drift report, freeze, sanitized adoption, approved revert | §5 item 6 | Met on the selected fixture, preserving earlier refusal coverage |
 | Interrupted-operation and restoration recovery; unresolved old execution blocks conflicting mutations | §5 item 7 (both rows) | Met within the documented decision-based recovery limits |
-| Reproducible integrated evidence and owner assessment, with limitations and no production claim | §3, §4, §9 and §10 | Met by the retained campaign, delegated assessment and independent reading; publication/landing remains required |
+| Reproducible integrated evidence and owner assessment, with limitations and no production claim | §3, §4, §9 and §10 | Met once this assessment lands, supported by the retained campaign, delegated assessment and independent reading |
 
 ## 8. Gaps and carried items
 
