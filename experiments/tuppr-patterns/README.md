@@ -25,7 +25,9 @@ python3 experiments/tuppr-patterns/run.py \
 
 The output directory must not exist. The source must be clean at the exact pin.
 The script uses `GOWORK=off`, `GOTOOLCHAIN=local`, `-mod=readonly`, two build/test
-workers and bounded command/test timeouts. It clears inherited GOFLAGS and GOROOT.
+workers and bounded command/test timeouts. It clears inherited environment GOFLAGS
+and GOROOT, but does not disable Go's persisted per-user configuration. The recorded
+run is not fully hermetic.
 It does not run upstream mise tasks or installation hooks. Go's `-overlay`
 adds the two probe files to their upstream packages only for compilation; it
 does not modify the source checkout. See `go help build` for the overlay contract.
@@ -42,7 +44,8 @@ test failing and include the corresponding `BW_` marker. Missing tests, skipped
 tests, unexpected failure/subtest skips, compiler errors and timeouts fail the
 experiment. The final source status must remain clean.
 
-- `recovery`: creation, health refusal, retry reset, failed synchronization,
+- `recovery`: creation, health refusal, generation-change reset of Failed to Pending
+  (not explicit retry authorization), failed synchronization,
   failed Job with target version, and persisted reboot tracking after Job GC.
 - `coordination`: tuppr-resource blocking only.
 - `config`: synthetic legacy and multi-document image reads/edits.
@@ -63,6 +66,8 @@ production-readiness claim follows from the runner's exit 0.
 codes and the exact test inventory. Per-case JSON lines retain test output;
 paths for the fixture, source and output roots are replaced by `$FIXTURE`,
 `$SOURCE` and `$OUTPUT`. `overlay.json` is local execution plumbing, not published.
+The coordination, health, foreign-cordon and suspend-job stderr files were empty
+and are omitted; the other two stderr files are retained.
 [launch-failure.txt](evidence/launch-failure.txt) preserves the first failed
 environment setup. [leak-scan.txt](evidence/leak-scan.txt) states the scan's scope.
 
