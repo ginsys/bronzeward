@@ -305,8 +305,9 @@ open while the excluded licence decision #16 remains unfinished. Later upgrade,
 maintenance/reset and transport work is separately tracked without implementation.
 
 **20 October update:** the [dated delegated assessment](20261020-poc-timeline-assessment.md#3-criterion-verdicts-and-independent-review)
-records the independent agent reading and corrects the owner-named-person
-characterization above. The [current criterion verdicts](20261018-poc-acceptance-evidence.md#7-acceptance-criteria-of-ginsysbronzeward31)
+records the independent agent reading and supersedes this report's earlier
+descriptions of #31's acceptance as human or requiring an owner-named person.
+The [current criterion verdicts](20261018-poc-acceptance-evidence.md#7-acceptance-criteria-of-ginsysbronzeward31)
 retain the assessment's limits; original run SKIPs are unchanged and no human
 trial is claimed. Issue closure still requires the assessment to land.
 
