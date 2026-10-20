@@ -1,0 +1,8 @@
+Run 1, 20 October 2026: environment failure before any test ran.
+Selected executable: Go 1.27.1. Inherited GOROOT: uninstalled Go 1.27.2.
+Sanitized diagnostic excerpt from the recorded command output:
+go: cannot find GOROOT directory: $TOOLCHAIN/go/1.27.2
+go version exit: 2; Python runner exit: 1; no test result.
+Python propagated CalledProcessError from the go version invocation.
+Correction: clear inherited GOROOT; run 2 uses the selected binary's installation.
+The original run1 scratch directory was retained; it contains only overlay plumbing.

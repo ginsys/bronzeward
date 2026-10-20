@@ -1298,6 +1298,8 @@ This milestone requires the selected database/provider behavior (§7.7), scoped 
 
 The [upgrade safeguards and recovery investigation](research/20261019-upgrade-workflow-design.md) maps the operator procedure to proposed plan, execution and observation contracts, including partial installation/drain/cordon outcomes and Kubernetes manifest ownership. Its source fixture establishes call paths only; specification, implementation and VM/hardware qualification remain separately tracked. It does not supply lifecycle acceptance or adopt an upstream executor.
 
+The [tuppr investigation](research/20261020-tuppr-patterns.md) evaluates reusable patterns with pinned fake-client tests and negative ownership/suspension probes. It recommends patterns rather than unchanged executor or operator reuse; no upstream implementation or credential policy is adopted. Real upgrade, coexistence and uncertain-outcome qualification remain required.
+
 ### 18.4 Phase 3 - remote connectivity
 
 - SideroLink headend integration with gRPC tunnel support.
