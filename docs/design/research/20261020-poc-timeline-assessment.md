@@ -52,12 +52,21 @@ Databases, provider snapshots and credentials remain outside this small package.
 To reproduce the analysis, follow the [timeline-reading guide](../../operator/troubleshooting.md#reading-the-timeline)
 and [recovery reads](../../operator/recovery.md#read-it-first). Follow every page
 and linked observation. For a mechanical comparison, the pinned
-[`fixtures/s8-answers.jq`](../../../fixtures/s8-answers.jq) accepts:
+[`fixtures/s8-answers.jq`](../../../fixtures/s8-answers.jq) accepts the four case
+directories below. Set `BW_REPO` to the absolute checkout path and `BW_EVIDENCE`
+to the absolute retained-bundle path; the command then works from any directory:
 
 ```sh
-jq -n --slurpfile op operation.json --slurpfile ev events.json \
-  --slurpfile tl timeline.json --slurpfile obs observations.json \
-  -f fixtures/s8-answers.jq
+: "${BW_REPO:?Set the absolute Bronzeward checkout path}"
+: "${BW_EVIDENCE:?Set the absolute walkthrough-31-20261020 bundle path}"
+for BW_CASE in 01-worker-apply 02-drift 03-interruption 04-restoration; do
+  BW_CASE_DIR="$BW_EVIDENCE/human-review/$BW_CASE"
+  jq -n --slurpfile op "$BW_CASE_DIR/operation.json" \
+    --slurpfile ev "$BW_CASE_DIR/events.json" \
+    --slurpfile tl "$BW_CASE_DIR/timeline.json" \
+    --slurpfile obs "$BW_CASE_DIR/observations.json" \
+    -f "$BW_REPO/fixtures/s8-answers.jq" || exit
+done
 ```
 
 The primary assessment ran six canonical `linked`/`applied` predicates from
@@ -135,8 +144,10 @@ Restored operation `op_2sk3bf4brucrnjivezuan3uxla`, plan
 `pln_y24wwajahj7iwmdycs7zijszda`; recovery epoch
 `ep_sr34wsje3iirfyupzmrcpfpnya`.
 
-- `idn_q6bzuafr5x6jp2mlpnltaecjne` approves at 264 and again at 270 for
-  `pln_upizcgfor7upcuybk6rpa7ss2a`, both targeting `rel_a57a…` in the old epoch.
+- `idn_q6bzuafr5x6jp2mlpnltaecjne` approves `pln_y24wwajahj7iwmdycs7zijszda`
+  at 264 (`apr_ntvgkddvplirvguxdg5hgshboe`), then the separate waiting plan
+  `pln_upizcgfor7upcuybk6rpa7ss2a` at 270 (`apr_h3cyj553pmiiha477xqwzvt2ie`).
+  Both target `rel_a57a…` in the old epoch.
   Approval 270 still looks live after restoration; its later revocation was erased.
   Commitment 268 precedes the backup; recovery ownership 271, unresolved 272 and hold 273 follow entry.
 - Recovery-admin `idn_n2fmoxkmpf4yalolmhwkczx2wm` records scope accounting 279,
@@ -180,8 +191,14 @@ The confirming Claude review `6c80ac46` at `ad89e68` found all five fixes comple
 and no new defects. Its retained `independent-review/claude-confirmation.md`
 (SHA256 `ed61896c9ece78c75df98873f304e8e91f3f73c5fcede67c31916033cb4e4018`)
 records the actual procedure: read scope-ordered timelines, operations, recovery
-events, linked plans/approvals and observations; all four answer sets agree with §2.
+events, linked plans/approvals and observations; it reported agreement on all four cases.
 It made no live API calls, exercised no event stream and did not verify pagination or hashes.
+
+That confirmation missed a restoration approval mismatch subsequently identified
+by hosted Codex review at `35e4c1c`. The retained timeline and linked plan responses
+bind approval 264 to `pln_y24…` and approval 270 to `pln_upiz…`, as corrected in §2.
+This correction supersedes that part of the earlier confirmation; the original
+review is retained unchanged and does not prove the mistaken binding.
 
 **Delegated factual disposition:** S8's independent reading is met. The reviewer left
 two interpretations open: whether an agent qualifies and whether retained-response
@@ -224,6 +241,7 @@ neither a CLI nor a web UI and adds neither to PoC acceptance.
   upper bound on late request delivery.
 - The earlier acceptance campaigns retain responsibility for negative matrices,
   interruption points and variant coverage omitted by the guided pass.
-- No new runtime scenario was run to prepare this assessment.
+- After the guided runs listed in §1, the documentation repairs added no runtime
+  scenario; their verification re-read retained evidence and replayed the analysis.
 - Issue31 and milestone03 remain open until this assessment lands and closure is
   recorded in the authoritative tracker. Licence and later implementation exclusions remain.
