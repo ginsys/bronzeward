@@ -1,0 +1,9 @@
+{"Time":"2026-10-20T23:48:25.173558393+02:00","Action":"start","Package":"github.com/postfinance/topf/internal/cmd/upgrade"}
+{"Time":"2026-10-20T23:48:25.184019763+02:00","Action":"run","Package":"github.com/postfinance/topf/internal/cmd/upgrade","Test":"TestBronzewardUnknownVersionMustNotSelectAPI"}
+{"Time":"2026-10-20T23:48:25.184061966+02:00","Action":"output","Package":"github.com/postfinance/topf/internal/cmd/upgrade","Test":"TestBronzewardUnknownVersionMustNotSelectAPI","Output":"=== RUN   TestBronzewardUnknownVersionMustNotSelectAPI\n","OutputType":"frame"}
+{"Time":"2026-10-20T23:48:25.184262546+02:00","Action":"output","Package":"github.com/postfinance/topf/internal/cmd/upgrade","Test":"TestBronzewardUnknownVersionMustNotSelectAPI","Output":"    bronzeward_probe_test.go:33: BW_UNPROVEN_API_SELECTION: empty=true malformed=true\n","OutputType":"error"}
+{"Time":"2026-10-20T23:48:25.184376622+02:00","Action":"output","Package":"github.com/postfinance/topf/internal/cmd/upgrade","Test":"TestBronzewardUnknownVersionMustNotSelectAPI","Output":"--- FAIL: TestBronzewardUnknownVersionMustNotSelectAPI (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-20T23:48:25.184383194+02:00","Action":"fail","Package":"github.com/postfinance/topf/internal/cmd/upgrade","Test":"TestBronzewardUnknownVersionMustNotSelectAPI","Elapsed":0}
+{"Time":"2026-10-20T23:48:25.184387919+02:00","Action":"output","Package":"github.com/postfinance/topf/internal/cmd/upgrade","Output":"FAIL\n","OutputType":"frame"}
+{"Time":"2026-10-20T23:48:25.184934506+02:00","Action":"output","Package":"github.com/postfinance/topf/internal/cmd/upgrade","Output":"FAIL\tgithub.com/postfinance/topf/internal/cmd/upgrade\t0.011s\n","OutputType":"frame"}
+{"Time":"2026-10-20T23:48:25.184947527+02:00","Action":"fail","Package":"github.com/postfinance/topf/internal/cmd/upgrade","Elapsed":0.011}

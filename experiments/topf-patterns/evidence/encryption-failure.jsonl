@@ -1,0 +1,9 @@
+{"Time":"2026-10-20T23:48:20.073175815+02:00","Action":"start","Package":"github.com/postfinance/topf/pkg/providers"}
+{"Time":"2026-10-20T23:48:20.077884799+02:00","Action":"run","Package":"github.com/postfinance/topf/pkg/providers","Test":"TestBronzewardEncryptionFailureMustRefusePersistence"}
+{"Time":"2026-10-20T23:48:20.077921589+02:00","Action":"output","Package":"github.com/postfinance/topf/pkg/providers","Test":"TestBronzewardEncryptionFailureMustRefusePersistence","Output":"=== RUN   TestBronzewardEncryptionFailureMustRefusePersistence\n","OutputType":"frame"}
+{"Time":"2026-10-20T23:48:20.078983879+02:00","Action":"output","Package":"github.com/postfinance/topf/pkg/providers","Test":"TestBronzewardEncryptionFailureMustRefusePersistence","Output":"    bronzeward_probe_test.go:42: BW_PLAINTEXT_PERSISTED: failing encryption returned success and wrote the original bytes\n","OutputType":"error"}
+{"Time":"2026-10-20T23:48:20.079132346+02:00","Action":"output","Package":"github.com/postfinance/topf/pkg/providers","Test":"TestBronzewardEncryptionFailureMustRefusePersistence","Output":"--- FAIL: TestBronzewardEncryptionFailureMustRefusePersistence (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-20T23:48:20.079142021+02:00","Action":"fail","Package":"github.com/postfinance/topf/pkg/providers","Test":"TestBronzewardEncryptionFailureMustRefusePersistence","Elapsed":0}
+{"Time":"2026-10-20T23:48:20.079149524+02:00","Action":"output","Package":"github.com/postfinance/topf/pkg/providers","Output":"FAIL\n","OutputType":"frame"}
+{"Time":"2026-10-20T23:48:20.079870286+02:00","Action":"output","Package":"github.com/postfinance/topf/pkg/providers","Output":"FAIL\tgithub.com/postfinance/topf/pkg/providers\t0.006s\n","OutputType":"frame"}
+{"Time":"2026-10-20T23:48:20.07988356+02:00","Action":"fail","Package":"github.com/postfinance/topf/pkg/providers","Elapsed":0.007}

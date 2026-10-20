@@ -1,0 +1,18 @@
+Upstream CI; not locally executed. Source 7aeead7545d6a715e719e2e6241027792f7e1a89
+Run https://github.com/postfinance/topf/actions/runs/38545129337/attempts/3
+Attempt 3; run number 19; Go1.27.2. Attempts1and2 failed before tests on Image Factory reachability.
+Raw log SHA256 8f700b5aff1719493db6818c5f78d16a01b0a86fdeaa46f8e22689fba94bb36b
+
+e2e (3 control-plane, upgrade)	UNKNOWN STEP	2026-10-16T12:04:14.6235280Z go version go1.27.2 linux/amd64
+e2e (3 control-plane, upgrade)	UNKNOWN STEP	2026-10-16T12:06:47.5437844Z === RUN   TestIntegration
+e2e (3 control-plane, upgrade)	UNKNOWN STEP	2026-10-16T12:06:47.5444529Z === RUN   TestIntegration/TestNodesInMaintenance
+e2e (3 control-plane, upgrade)	UNKNOWN STEP	2026-10-16T12:06:48.0526143Z === RUN   TestIntegration/TestBootstrap
+e2e (3 control-plane, upgrade)	UNKNOWN STEP	2026-10-16T12:08:56.8737594Z === RUN   TestIntegration/TestDryRunCleanAfterApply
+e2e (3 control-plane, upgrade)	UNKNOWN STEP	2026-10-16T12:08:56.9807991Z === RUN   TestIntegration/TestLabelPatchLifecycle
+e2e (3 control-plane, upgrade)	UNKNOWN STEP	2026-10-16T12:09:12.4147476Z === RUN   TestIntegration/TestUpgrade
+e2e (3 control-plane, upgrade)	UNKNOWN STEP	2026-10-16T12:13:44.2010958Z --- PASS: TestIntegration (416.66s)
+e2e (3 control-plane, upgrade)	UNKNOWN STEP	2026-10-16T12:13:44.2011690Z     --- PASS: TestIntegration/TestNodesInMaintenance (0.51s)
+e2e (3 control-plane, upgrade)	UNKNOWN STEP	2026-10-16T12:13:44.2012546Z     --- PASS: TestIntegration/TestBootstrap (128.82s)
+e2e (3 control-plane, upgrade)	UNKNOWN STEP	2026-10-16T12:13:44.2013281Z     --- PASS: TestIntegration/TestDryRunCleanAfterApply (0.11s)
+e2e (3 control-plane, upgrade)	UNKNOWN STEP	2026-10-16T12:13:44.2013994Z     --- PASS: TestIntegration/TestLabelPatchLifecycle (15.43s)
+e2e (3 control-plane, upgrade)	UNKNOWN STEP	2026-10-16T12:13:44.2014622Z     --- PASS: TestIntegration/TestUpgrade (271.79s)

@@ -1,0 +1,46 @@
+[
+  {
+    "id": 38545129337,
+    "run_number": 19,
+    "run_attempt": 1,
+    "head_sha": "7aeead7545d6a715e719e2e6241027792f7e1a89",
+    "status": "completed",
+    "conclusion": "failure",
+    "run_started_at": "2026-10-14T09:49:06Z",
+    "updated_at": "2026-10-14T09:49:48Z",
+    "html_url": "https://github.com/postfinance/topf/actions/runs/38545129337",
+    "raw_log_sha256": "192769f2ff623ef755293935a9708209824f4793e8f2b04e6324549e2de4eedb",
+    "failure_lines": [
+      "e2e (3 control-plane, upgrade)\tUNKNOWN STEP\t2026-10-14T09:49:45.9155549Z ##[error]could not reach the Image Factory at https://factory.talos.dev/schematics: fetch failed"
+    ],
+    "test_started": false
+  },
+  {
+    "id": 38545129337,
+    "run_number": 19,
+    "run_attempt": 2,
+    "head_sha": "7aeead7545d6a715e719e2e6241027792f7e1a89",
+    "status": "completed",
+    "conclusion": "failure",
+    "run_started_at": "2026-10-14T09:54:57Z",
+    "updated_at": "2026-10-14T09:55:53Z",
+    "html_url": "https://github.com/postfinance/topf/actions/runs/38545129337",
+    "raw_log_sha256": "34a971ceee630c8321d3bb7dc830cc209337e8e27b12bc4833b157df0feab986",
+    "failure_lines": [
+      "e2e (3 control-plane, upgrade)\tUNKNOWN STEP\t2026-10-14T09:55:49.8948443Z ##[error]could not reach the Image Factory at https://factory.talos.dev/schematics: fetch failed"
+    ],
+    "test_started": false
+  },
+  {
+    "id": 38545129337,
+    "run_number": 19,
+    "run_attempt": 3,
+    "head_sha": "7aeead7545d6a715e719e2e6241027792f7e1a89",
+    "status": "completed",
+    "conclusion": "success",
+    "run_started_at": "2026-10-16T12:03:48Z",
+    "updated_at": "2026-10-16T12:13:51Z",
+    "html_url": "https://github.com/postfinance/topf/actions/runs/38545129337",
+    "raw_log_sha256": "8f700b5aff1719493db6818c5f78d16a01b0a86fdeaa46f8e22689fba94bb36b"
+  }
+]

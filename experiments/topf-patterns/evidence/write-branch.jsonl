@@ -1,0 +1,8 @@
+{"Time":"2026-10-20T23:47:48.406348944+02:00","Action":"start","Package":"github.com/postfinance/topf/pkg/providers"}
+{"Time":"2026-10-20T23:47:48.410737519+02:00","Action":"run","Package":"github.com/postfinance/topf/pkg/providers","Test":"TestBronzewardEncryptedWriteBranch"}
+{"Time":"2026-10-20T23:47:48.410768775+02:00","Action":"output","Package":"github.com/postfinance/topf/pkg/providers","Test":"TestBronzewardEncryptedWriteBranch","Output":"=== RUN   TestBronzewardEncryptedWriteBranch\n","OutputType":"frame"}
+{"Time":"2026-10-20T23:47:48.411595448+02:00","Action":"output","Package":"github.com/postfinance/topf/pkg/providers","Test":"TestBronzewardEncryptedWriteBranch","Output":"--- PASS: TestBronzewardEncryptedWriteBranch (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-20T23:47:48.411601312+02:00","Action":"pass","Package":"github.com/postfinance/topf/pkg/providers","Test":"TestBronzewardEncryptedWriteBranch","Elapsed":0}
+{"Time":"2026-10-20T23:47:48.411605387+02:00","Action":"output","Package":"github.com/postfinance/topf/pkg/providers","Output":"PASS\n","OutputType":"frame"}
+{"Time":"2026-10-20T23:47:48.412080192+02:00","Action":"output","Package":"github.com/postfinance/topf/pkg/providers","Output":"ok  \tgithub.com/postfinance/topf/pkg/providers\t0.005s\n"}
+{"Time":"2026-10-20T23:47:48.412091426+02:00","Action":"pass","Package":"github.com/postfinance/topf/pkg/providers","Elapsed":0.006}

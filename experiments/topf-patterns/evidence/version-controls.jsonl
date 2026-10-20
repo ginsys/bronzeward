@@ -1,0 +1,8 @@
+{"Time":"2026-10-20T23:48:19.28327041+02:00","Action":"start","Package":"github.com/postfinance/topf/internal/cmd/upgrade"}
+{"Time":"2026-10-20T23:48:19.293058592+02:00","Action":"run","Package":"github.com/postfinance/topf/internal/cmd/upgrade","Test":"TestBronzewardVersionControls"}
+{"Time":"2026-10-20T23:48:19.293121511+02:00","Action":"output","Package":"github.com/postfinance/topf/internal/cmd/upgrade","Test":"TestBronzewardVersionControls","Output":"=== RUN   TestBronzewardVersionControls\n","OutputType":"frame"}
+{"Time":"2026-10-20T23:48:19.293140412+02:00","Action":"output","Package":"github.com/postfinance/topf/internal/cmd/upgrade","Test":"TestBronzewardVersionControls","Output":"--- PASS: TestBronzewardVersionControls (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-20T23:48:19.293142773+02:00","Action":"pass","Package":"github.com/postfinance/topf/internal/cmd/upgrade","Test":"TestBronzewardVersionControls","Elapsed":0}
+{"Time":"2026-10-20T23:48:19.293146316+02:00","Action":"output","Package":"github.com/postfinance/topf/internal/cmd/upgrade","Output":"PASS\n","OutputType":"frame"}
+{"Time":"2026-10-20T23:48:19.293774269+02:00","Action":"output","Package":"github.com/postfinance/topf/internal/cmd/upgrade","Output":"ok  \tgithub.com/postfinance/topf/internal/cmd/upgrade\t0.010s\n"}
+{"Time":"2026-10-20T23:48:19.29379013+02:00","Action":"pass","Package":"github.com/postfinance/topf/internal/cmd/upgrade","Elapsed":0.011}

@@ -1,0 +1,150 @@
+{
+  "source_commit": "7aeead7545d6a715e719e2e6241027792f7e1a89",
+  "started_utc": "2026-10-20T21:47:29.666080+00:00",
+  "python_version": "3.13.5",
+  "platform": "Linux-7.2.6+deb13-amd64-x86_64-with-glibc2.41",
+  "go_version": "go version go1.27.1 linux/amd64",
+  "git_version": "git version 2.47.3",
+  "timeout_version": "timeout (GNU coreutils) 9.7",
+  "cc_version": "cc (Debian 14.2.0-19) 14.2.0",
+  "environment": {
+    "TMPDIR": "$TMPDIR",
+    "GOTMPDIR": "$TMPDIR",
+    "GOCACHE": "$GOCACHE",
+    "GOMODCACHE": "$GOMODCACHE",
+    "GOPATH": "$OUTPUT/gopath",
+    "GOENV": "off",
+    "GOTOOLCHAIN": "local",
+    "GOWORK": "off",
+    "GOFLAGS": "",
+    "GOMAXPROCS": "2",
+    "CGO_ENABLED": "1"
+  },
+  "fixture_sha256": {
+    "run.py": "5ce4b70622f9ef45fc47d3c28e8e5170e6bf0f4695a58dbbe7972684315005ca",
+    "probes/config_test.go": "c0aecfd401ce96e748929e4c4a4041a1a57f25dc07fa1eb25d2c7b0361c48dfa",
+    "probes/node_test.go": "58a6e02e22e74b4f7670c56488ad8c5281713281e4e7ed6adf4b3f0e2265cd57",
+    "probes/nodepool_test.go": "39ba392327f00012faa905a3bf249043c95a0248a1f8bccde752e10cadf93b19",
+    "probes/providers_test.go": "73a3df3fb972faafd68a667303ad6173dc440a06c496969c513b829f121f3e68",
+    "probes/upgrade_test.go": "dbe04fe0f7fa8d3ad12dfee7432a3dc8edc1b0e238bfd9a8fbf40e8583101060"
+  },
+  "source_files_sha256": {
+    "go.mod": "a5468faf351bac94e7a273935482dd1a797c7199e7ea371c9e7033028b3d5832",
+    "go.sum": "868a7dd6029010d17254489e1c2369d93f8ce0f8bf5b1dadfdba86d4f4274b57",
+    ".github/workflows/e2e.yml": "bd72df63817c229a7f21c5d308e2efce2b8558f75a9d0f9e97c8b82bba6ef438",
+    ".github/workflows/test.yml": "16a30354d2c2fced0056db395ae21c5ecee9e69d3bc3e2d1bd6f00666b463e36"
+  },
+  "cases": [
+    {
+      "case": "composition",
+      "command": "timeout --kill-after=10s 600s $GO test -mod=readonly -count=1 -p=2 -parallel=2 -timeout=90s -json -overlay=$OUTPUT/overlay.json ./pkg/config -run ^(TestLoadFileTemplate|TestParsePatches|TestBronzewardCompositionOrder|TestBronzewardTemplateInputCanChange)$",
+      "exit": 0,
+      "expected_test_result": "pass",
+      "observed": {
+        "TestLoadFileTemplate": "pass",
+        "TestParsePatches": "pass",
+        "TestBronzewardCompositionOrder": "pass",
+        "TestBronzewardTemplateInputCanChange": "pass"
+      },
+      "unexpected": {},
+      "matched": true
+    },
+    {
+      "case": "masking",
+      "command": "timeout --kill-after=10s 600s $GO test -mod=readonly -count=1 -p=2 -parallel=2 -timeout=90s -json -race -overlay=$OUTPUT/overlay.json ./internal/maskedwriter -run ^(TestMaskedWriter|TestMaskedWriterConcurrency)$",
+      "exit": 0,
+      "expected_test_result": "pass",
+      "observed": {
+        "TestMaskedWriter": "pass",
+        "TestMaskedWriterConcurrency": "pass"
+      },
+      "unexpected": {},
+      "matched": true
+    },
+    {
+      "case": "secrets-and-version",
+      "command": "timeout --kill-after=10s 600s $GO test -mod=readonly -count=1 -p=2 -parallel=2 -timeout=90s -json -overlay=$OUTPUT/overlay.json ./internal/topf -run ^(TestCollectCurrentConfigSecrets|TestEncodingVariationsPEM|TestCollectCurrentConfigSecretsNilSafe|TestBronzewardRunningContractAndDesiredImage)$",
+      "exit": 0,
+      "expected_test_result": "pass",
+      "observed": {
+        "TestCollectCurrentConfigSecrets": "pass",
+        "TestEncodingVariationsPEM": "pass",
+        "TestCollectCurrentConfigSecretsNilSafe": "pass",
+        "TestBronzewardRunningContractAndDesiredImage": "pass"
+      },
+      "unexpected": {},
+      "matched": true
+    },
+    {
+      "case": "dispatch",
+      "command": "timeout --kill-after=10s 600s $GO test -mod=readonly -count=1 -p=2 -parallel=2 -timeout=90s -json -overlay=$OUTPUT/overlay.json ./internal/nodepool -run ^(TestRun|TestBronzewardSerialFailureStopsAdmission)$",
+      "exit": 0,
+      "expected_test_result": "pass",
+      "observed": {
+        "TestRun": "pass",
+        "TestBronzewardSerialFailureStopsAdmission": "pass"
+      },
+      "unexpected": {},
+      "matched": true
+    },
+    {
+      "case": "write-branch",
+      "command": "timeout --kill-after=10s 600s $GO test -mod=readonly -count=1 -p=2 -parallel=2 -timeout=90s -json -overlay=$OUTPUT/overlay.json ./pkg/providers -run ^(TestBronzewardEncryptedWriteBranch)$",
+      "exit": 0,
+      "expected_test_result": "pass",
+      "observed": {
+        "TestBronzewardEncryptedWriteBranch": "pass"
+      },
+      "unexpected": {},
+      "matched": true
+    },
+    {
+      "case": "version-controls",
+      "command": "timeout --kill-after=10s 600s $GO test -mod=readonly -count=1 -p=2 -parallel=2 -timeout=90s -json -overlay=$OUTPUT/overlay.json ./internal/cmd/upgrade -run ^(TestBronzewardVersionControls)$",
+      "exit": 0,
+      "expected_test_result": "pass",
+      "observed": {
+        "TestBronzewardVersionControls": "pass"
+      },
+      "unexpected": {},
+      "matched": true
+    },
+    {
+      "case": "encryption-failure",
+      "command": "timeout --kill-after=10s 600s $GO test -mod=readonly -count=1 -p=2 -parallel=2 -timeout=90s -json -overlay=$OUTPUT/overlay.json ./pkg/providers -run ^(TestBronzewardEncryptionFailureMustRefusePersistence)$",
+      "exit": 1,
+      "expected_test_result": "fail",
+      "observed": {
+        "TestBronzewardEncryptionFailureMustRefusePersistence": "fail"
+      },
+      "unexpected": {},
+      "matched": true
+    },
+    {
+      "case": "digest-version",
+      "command": "timeout --kill-after=10s 600s $GO test -mod=readonly -count=1 -p=2 -parallel=2 -timeout=90s -json -overlay=$OUTPUT/overlay.json ./internal/cmd/upgrade -run ^(TestBronzewardDigestMustNotBecomeVersion)$",
+      "exit": 1,
+      "expected_test_result": "fail",
+      "observed": {
+        "TestBronzewardDigestMustNotBecomeVersion": "fail"
+      },
+      "unexpected": {},
+      "matched": true
+    },
+    {
+      "case": "unknown-version",
+      "command": "timeout --kill-after=10s 600s $GO test -mod=readonly -count=1 -p=2 -parallel=2 -timeout=90s -json -overlay=$OUTPUT/overlay.json ./internal/cmd/upgrade -run ^(TestBronzewardUnknownVersionMustNotSelectAPI)$",
+      "exit": 1,
+      "expected_test_result": "fail",
+      "observed": {
+        "TestBronzewardUnknownVersionMustNotSelectAPI": "fail"
+      },
+      "unexpected": {},
+      "matched": true
+    }
+  ],
+  "limits": "Pure/synthetic tests and subprocess stubs; no real encryption, API, upgrade or recovery proof.",
+  "source_clean_after": true,
+  "fixture_unchanged_after": true,
+  "finished_utc": "2026-10-20T21:48:25.214305+00:00"
+}

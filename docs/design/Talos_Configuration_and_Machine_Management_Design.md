@@ -1300,6 +1300,8 @@ The [upgrade safeguards and recovery investigation](research/20261019-upgrade-wo
 
 The [tuppr investigation](research/20261020-tuppr-patterns.md) evaluates reusable patterns with pinned fake-client tests and negative ownership/suspension probes. It recommends patterns rather than unchanged executor or operator reuse; no upstream implementation or credential policy is adopted. Real upgrade, coexistence and uncertain-outcome qualification remain required.
 
+The [topf investigation](research/20261020-topf-patterns.md) compares composition, version-selection, orchestration and secret-provider patterns against these boundaries, with selected unit tests and original compatibility probes. It recommends patterns only; plaintext fallback, mutable inputs and absent durable remote accounting prevent unchanged integration. It adds no lifecycle qualification or upstream runtime dependency.
+
 ### 18.4 Phase 3 - remote connectivity
 
 - SideroLink headend integration with gRPC tunnel support.
