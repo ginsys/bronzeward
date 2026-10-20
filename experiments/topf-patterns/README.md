@@ -7,8 +7,9 @@ They do not run topf's CLI, integration suite, a cluster or real credentials.
 
 ## Reproduce
 
-Requires Git, Python 3.10+, GNU `timeout`, native Go 1.27.1 and a C compiler for
-the masking group's race detector. Public Go module downloads require network
+Requires Git, Python 3.10+, GNU `timeout`, native Go 1.27.1 and a C compiler.
+The runner requires `cc` and enables CGO for every group; masking also uses the race detector.
+Public Go module downloads require network
 access. Use disposable disk-backed paths outside both repositories:
 
 ```sh
@@ -55,6 +56,11 @@ errors and timeouts cannot count as confirmation. A successful harness exit mean
 that the expected positive and negative results matched, not that integration is
 safe. The final upstream status must remain pristine.
 
+The digest marker accepts any parsed version other than `1.14.1`; the unknown-version
+marker accepts selection for either empty or malformed input. Read the marker lines
+in the raw logs for the exact observations: run 1 included the digest suffix and
+selected the API for both inputs. The harness does not assert those stronger details.
+
 The filesystem test writes only an arbitrary synthetic string under a test temp
 directory. Its `sops` executable is a local stub; no real encryption key, SOPS
 installation, secret provider or service is used. Synthetic version strings do
@@ -66,7 +72,7 @@ not establish cancellation of concurrent or already accepted remote work.
 The first run on 20 October 2026 took about 56 seconds: 14 named positive tests
 passed (eight upstream and six original), with 51 test/subtest pass events, three
 expected-negative failures and zero skips. The runner exited 0; source and fixture
-bytes remained unchanged. [results.json](evidence/results.json) records versions,
+checks matched before and after the run. [results.json](evidence/results.json) records versions,
 commands, source/fixture hashes and every named outcome. Its command strings are
 argument displays; use the runner above to reproduce the exact argument vectors.
 [retention.json](evidence/retention.json) binds the tested uncommitted fixture bytes
