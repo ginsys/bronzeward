@@ -1881,9 +1881,9 @@ fail:
 These are the evidence review's gaps that this contract must address
 (FR §9 items 1, 3, 4 and 5). Their implementation evidence is mapped in the
 [PoC acceptance record](../design/research/20261018-poc-acceptance-evidence.md),
-including the separate live and Go checks. Owner acceptance remains pending
-there; the independent timeline review and the residuals below are not closed
-by passing CI or by that mapping.
+including the separate live and Go checks and the dated delegated acceptance
+assessment. The independent timeline review and the residuals below require
+their own evidence; passing CI or that mapping alone does not close them.
 
 1. **Drift freeze, sanitized adoption and approved revert** (item 1). Closed by
    an E6-style run on the fixture: an out-of-band `talosctl` change detected
