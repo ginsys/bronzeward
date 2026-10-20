@@ -542,7 +542,8 @@ R42's platform/mode assertions were also traced and rerun. R11 and R17 retain
 future bound-health validation in #188. The original scenarios, revisions,
 failed attempts, skips and fixture limits above remain unchanged. This
 supplement supplies additional R5/R45 evidence; it does not supply the independent
-S8 review, any of the six owner verdicts below, or the dated owner assessment.
+S8 review, any of the six delegated criterion verdicts (§7), or the dated
+assessment (§9).
 Local review then reproduced a second publication defect: a node-minor mismatch
 did not refuse publication at the reviewed revision.
 [#247](https://github.com/ginsys/bronzeward/issues/247) now has separately

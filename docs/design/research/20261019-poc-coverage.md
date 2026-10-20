@@ -295,12 +295,20 @@ in both directions, and agreeing higher-basis reads that confirm failure after
 the deadline. R17 therefore means the PoC predicates are evidenced, not that a
 bound-health reader or its ordering cases have run.
 
+At this report's 19 October checkpoint:
+
 Milestone 03 requires the integrated evidence and owner assessment, not merely
 closed implementation issues or passing CI. #31 remains open for the independent
 S8 review by the owner-named person, six criterion verdicts and the dated owner
 assessment. Milestone 02 stays
 open while the excluded licence decision #16 remains unfinished. Later upgrade,
 maintenance/reset and transport work is separately tracked without implementation.
+
+**20 October update:** the [dated delegated assessment](20261020-poc-timeline-assessment.md#3-criterion-verdicts-and-independent-review)
+records the independent agent reading and corrects the owner-named-person
+characterization above. The [current criterion verdicts](20261018-poc-acceptance-evidence.md#7-acceptance-criteria-of-ginsysbronzeward31)
+retain the assessment's limits; original run SKIPs are unchanged and no human
+trial is claimed. Issue closure still requires the assessment to land.
 
 ## Reproduction
 
