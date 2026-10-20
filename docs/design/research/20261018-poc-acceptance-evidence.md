@@ -582,6 +582,12 @@ response coverage. The added check and its successful-commit control pass at
 
 ## 7. Acceptance criteria of ginsys/bronzeward#31
 
+The verdicts below describe the original record. The
+[20 October delegated assessment](20261020-poc-timeline-assessment.md#3-criterion-verdicts-and-independent-review)
+adds dated technical verdicts and the owner's negative usability feedback.
+Independent timeline review is still pending; no historical run or human-review
+skip is relabelled.
+
 | Criterion | Answered by | Verdict |
 | --- | --- | --- |
 | Adoption without mutation, extraction before persistence, immutable encrypted artifacts with redacted provenance | §5 items 1 to 3 | *pending* |
@@ -626,7 +632,13 @@ response coverage. The added check and its successful-commit control pass at
 
 ## 9. Owner assessment
 
-*Pending: the owner's or designated reviewer's assessment of each criterion in §7, with its date.*
+On 20 October 2026 the owner delegated straightforward factual assessment to the
+executing agent. Its [dated assessment](20261020-poc-timeline-assessment.md)
+records the criterion verdicts, exact timeline evidence and limitations. The owner
+separately assessed the API-and-script operator experience negatively. This is
+not a claim that the owner performed the walkthrough or independently interpreted
+the four timelines. Final acceptance remains pending the independent-review
+disposition recorded there.
 
 ## 10. Limits
 
