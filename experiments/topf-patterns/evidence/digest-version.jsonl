@@ -1,0 +1,9 @@
+{"Time":"2026-10-20T23:48:22.620929428+02:00","Action":"start","Package":"github.com/postfinance/topf/internal/cmd/upgrade"}
+{"Time":"2026-10-20T23:48:22.631511936+02:00","Action":"run","Package":"github.com/postfinance/topf/internal/cmd/upgrade","Test":"TestBronzewardDigestMustNotBecomeVersion"}
+{"Time":"2026-10-20T23:48:22.631550177+02:00","Action":"output","Package":"github.com/postfinance/topf/internal/cmd/upgrade","Test":"TestBronzewardDigestMustNotBecomeVersion","Output":"=== RUN   TestBronzewardDigestMustNotBecomeVersion\n","OutputType":"frame"}
+{"Time":"2026-10-20T23:48:22.631790486+02:00","Action":"output","Package":"github.com/postfinance/topf/internal/cmd/upgrade","Test":"TestBronzewardDigestMustNotBecomeVersion","Output":"    bronzeward_probe_test.go:26: BW_DIGEST_IN_VERSION: observed version \"1.14.1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n","OutputType":"error"}
+{"Time":"2026-10-20T23:48:22.631798489+02:00","Action":"output","Package":"github.com/postfinance/topf/internal/cmd/upgrade","Test":"TestBronzewardDigestMustNotBecomeVersion","Output":"--- FAIL: TestBronzewardDigestMustNotBecomeVersion (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-20T23:48:22.631800925+02:00","Action":"fail","Package":"github.com/postfinance/topf/internal/cmd/upgrade","Test":"TestBronzewardDigestMustNotBecomeVersion","Elapsed":0}
+{"Time":"2026-10-20T23:48:22.631810624+02:00","Action":"output","Package":"github.com/postfinance/topf/internal/cmd/upgrade","Output":"FAIL\n","OutputType":"frame"}
+{"Time":"2026-10-20T23:48:22.632538067+02:00","Action":"output","Package":"github.com/postfinance/topf/internal/cmd/upgrade","Output":"FAIL\tgithub.com/postfinance/topf/internal/cmd/upgrade\t0.011s\n","OutputType":"frame"}
+{"Time":"2026-10-20T23:48:22.632570486+02:00","Action":"fail","Package":"github.com/postfinance/topf/internal/cmd/upgrade","Elapsed":0.012}

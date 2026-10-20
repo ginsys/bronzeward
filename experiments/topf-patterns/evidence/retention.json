@@ -1,0 +1,91 @@
+{
+  "bronzeward_base": "c0a54f834cf721f03c6ae559045236af332f8253",
+  "tested_material": "Original uncommitted run.py and probes, identified by results.json fixture_sha256; bytes unchanged after execution.",
+  "run": 1,
+  "harness_exit": 0,
+  "positive_top_level_tests": 14,
+  "test_and_subtest_terminal_events": {
+    "pass": 51,
+    "fail": 3,
+    "skip": 0
+  },
+  "omitted_empty_stderr": [
+    "digest-version.stderr",
+    "dispatch.stderr",
+    "encryption-failure.stderr",
+    "masking.stderr",
+    "unknown-version.stderr",
+    "write-branch.stderr"
+  ],
+  "omitted_local_plumbing": [
+    "overlay.json"
+  ],
+  "retained_sha256": [
+    {
+      "path": "composition.jsonl",
+      "sha256": "64951c92d9d90306c9a9705df8760204147c528ae4f7038a93a02f011306ee72"
+    },
+    {
+      "path": "composition.stderr",
+      "sha256": "090f114fba6013c1c734c974f092bb0919c0907bdfee05e9fbba486f846e9227"
+    },
+    {
+      "path": "digest-version.jsonl",
+      "sha256": "47207b8565712617c6dbdce6b9b5f7282b7b77723020b5a9ef645c30d53f3d51"
+    },
+    {
+      "path": "dispatch.jsonl",
+      "sha256": "8bb1a05ff284be3f291d35c79ec7782df6a5190065b75f50922505bfc2e7ec94"
+    },
+    {
+      "path": "encryption-failure.jsonl",
+      "sha256": "af17cb2febbd598ffc86cefc523a844434130242f617e06be25d234d6d064257"
+    },
+    {
+      "path": "masking.jsonl",
+      "sha256": "57a807bb25dfcc04b6af422f636b7486b5881bb2c9ddf8457d48f817bcb42801"
+    },
+    {
+      "path": "results.json",
+      "sha256": "0a05c743dec3053de58d35a54fe67369e1ae94a752d3678f14fb396578cca75f"
+    },
+    {
+      "path": "secrets-and-version.jsonl",
+      "sha256": "91f96d8689d6330e77a72b2dc82ba2593bf5d53d3f5baee47a3dfe820de86cc7"
+    },
+    {
+      "path": "secrets-and-version.stderr",
+      "sha256": "91b968f173939a3cfb9f5ae08421c1580ea26c141107d1eff9d1bd7bd3ef3d72"
+    },
+    {
+      "path": "unknown-version.jsonl",
+      "sha256": "259051de7ab26fe4bdd3a29084584d87370c4609be6577f74e9a7d7f1e9ad4f3"
+    },
+    {
+      "path": "version-controls.jsonl",
+      "sha256": "d2372579f205ed314c1747ba0ce80a1d8d9229da595761e34c87d8e05113532a"
+    },
+    {
+      "path": "version-controls.stderr",
+      "sha256": "099a73ef0ea79b8720f6136cf9a23e270c43cf9669ee2ed658c7bce499f1ecac"
+    },
+    {
+      "path": "write-branch.jsonl",
+      "sha256": "e8d9003713565c8d8186e4466c2226871b034946a3f4e75ce5201a7a223b6c7b"
+    },
+    {
+      "path": "upstream-e2e-attempts.json",
+      "sha256": "193088a662ee5dda2da84c2749a7cf85601754cd85777403f4ac085139e072dc"
+    },
+    {
+      "path": "upstream-e2e-excerpt.txt",
+      "sha256": "7ec5bf8044ba0c4ec0456ce45b232869bf80fa000b2d57931b812db4b99865a1"
+    }
+  ],
+  "setup_diagnostics": [
+    "Before the first fixture launch, bare go was absent from the shell PATH.",
+    "The native Go binary initially saw an inherited GOROOT for absent Go 1.27.2; env -u GOROOT confirmed Go 1.27.1, and the runner uses its documented minimal environment.",
+    "Neither diagnostic ran tests. The first actual fixture launch completed; no failed fixture launch or skipped test is omitted."
+  ],
+  "limitations": "Synthetic tests and stubs, with masking under -race. No CLI, real encryption, API, cluster, upgrade, credential rotation or remote recovery execution."
+}

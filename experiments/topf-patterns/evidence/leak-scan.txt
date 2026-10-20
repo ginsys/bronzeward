@@ -1,0 +1,12 @@
+20 October 2026, before publication.
+gitleaks 8.30.1: gitleaks dir experiments/topf-patterns --redact --no-banner
+Final result: exit 0; approximately 90.53 KB scanned; no leaks found.
+The initial scan reported two generic-api-key matches in retention.json.
+Both values were verified SHA-256 hashes of the retained secrets-and-version
+logs, not credentials. The metadata now uses explicit path/sha256 records;
+all 15 hash values and the retained logs are unchanged. No rule was suppressed.
+Additional exact text scan of retained evidence and the research report for
+local home/temp paths, private-key PEM headers, client-key assignments and
+Bao/Vault token-file names: no matches (before this scan record was added).
+Scope: public upstream test output and synthetic fixture inputs only.
+This is not evidence of real credential custody or Bronzeward ingress redaction.

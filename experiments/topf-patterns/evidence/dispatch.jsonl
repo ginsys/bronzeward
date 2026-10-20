@@ -1,0 +1,12 @@
+{"Time":"2026-10-20T23:47:47.58253981+02:00","Action":"start","Package":"github.com/postfinance/topf/internal/nodepool"}
+{"Time":"2026-10-20T23:47:47.587429187+02:00","Action":"run","Package":"github.com/postfinance/topf/internal/nodepool","Test":"TestBronzewardSerialFailureStopsAdmission"}
+{"Time":"2026-10-20T23:47:47.587461675+02:00","Action":"output","Package":"github.com/postfinance/topf/internal/nodepool","Test":"TestBronzewardSerialFailureStopsAdmission","Output":"=== RUN   TestBronzewardSerialFailureStopsAdmission\n","OutputType":"frame"}
+{"Time":"2026-10-20T23:47:47.587474203+02:00","Action":"output","Package":"github.com/postfinance/topf/internal/nodepool","Test":"TestBronzewardSerialFailureStopsAdmission","Output":"--- PASS: TestBronzewardSerialFailureStopsAdmission (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-20T23:47:47.587476393+02:00","Action":"pass","Package":"github.com/postfinance/topf/internal/nodepool","Test":"TestBronzewardSerialFailureStopsAdmission","Elapsed":0}
+{"Time":"2026-10-20T23:47:47.58748174+02:00","Action":"run","Package":"github.com/postfinance/topf/internal/nodepool","Test":"TestRun"}
+{"Time":"2026-10-20T23:47:47.587483327+02:00","Action":"output","Package":"github.com/postfinance/topf/internal/nodepool","Test":"TestRun","Output":"=== RUN   TestRun\n","OutputType":"frame"}
+{"Time":"2026-10-20T23:47:47.647833813+02:00","Action":"output","Package":"github.com/postfinance/topf/internal/nodepool","Test":"TestRun","Output":"--- PASS: TestRun (0.06s)\n","OutputType":"frame"}
+{"Time":"2026-10-20T23:47:47.647850852+02:00","Action":"pass","Package":"github.com/postfinance/topf/internal/nodepool","Test":"TestRun","Elapsed":0.06}
+{"Time":"2026-10-20T23:47:47.647854685+02:00","Action":"output","Package":"github.com/postfinance/topf/internal/nodepool","Output":"PASS\n","OutputType":"frame"}
+{"Time":"2026-10-20T23:47:47.648408766+02:00","Action":"output","Package":"github.com/postfinance/topf/internal/nodepool","Output":"ok  \tgithub.com/postfinance/topf/internal/nodepool\t0.066s\n"}
+{"Time":"2026-10-20T23:47:47.648420115+02:00","Action":"pass","Package":"github.com/postfinance/topf/internal/nodepool","Elapsed":0.066}
