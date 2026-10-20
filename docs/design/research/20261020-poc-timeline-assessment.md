@@ -41,10 +41,12 @@ same-startup lost-response replay supplements the original separate S6; it does 
 replace that scenario's other interruption points or refusal controls.
 
 The owner retains the complete captures and a sanitized four-case package. Each case
-contains `operation.json`, `events.json`, `timeline.json`, `observations.json`,
-individual linked observations and plans. The package's input manifest hashes the
-original copied records. Full databases, provider snapshots and credentials are
-excluded from that small package and remain in the original captures.
+contains `operation.json`, `events.json`, `timeline.json`, `observations.json`
+and individual observations; the guided plans are in `human-review/api/`.
+The separate S6 plan's proposed-state response and approval were recovered from
+original HTTP captures `0047.txt`/`0048.txt` into `independent-review/`, with a
+source/extraction manifest. The original input manifest still verifies all 542 files.
+Databases, provider snapshots and credentials remain outside this small package.
 
 To reproduce the analysis, follow the [timeline-reading guide](../../operator/troubleshooting.md#reading-the-timeline)
 and [recovery reads](../../operator/recovery.md#read-it-first). Follow every page
@@ -65,8 +67,10 @@ Complete captures and positive-control secret scans are retained with the runs.
 
 ## 2. Four timeline readings
 
-Revisions below are machine-scope commit order, not a global clock. An attempt
-entry precedes sending and cannot alone prove that the request left the process.
+Revisions below are machine-scope commit order, not a global clock. Attempts
+precede sending and cannot prove delivery. Digests are withheld from served records;
+drift/convergence judgements and separately attributed harness checks have distinct bases.
+Shortened IDs below are unique prefixes in the retained case; full IDs remain in its JSON.
 
 ### Normal worker apply
 
@@ -83,41 +87,45 @@ Operation `op_p6ts4luxskabqvs5qbnmeycje4`, plan
   This case requires no recovery-admin accounting decision.
 - Completion observation 22 follows observation-started 21. Classification 23
   relies on the response, accounting and observation; state 24 is completed and
-  Applied moves at 25. The captured node checks show the worker changed and the
-  control plane did not; Desired, Applied and Observed converge.
+  Applied moves `rel_yend…` → `rel_qczl…` at 25. Separately, `worker-apply/guided-apply.tsv` rows 15/19/20/22
+  establish the worker change, unchanged control plane and state convergence.
 
 ### Drift, adoption and revert
 
 Revert operation `op_yefcszh4txsxfcckfl5vsohzfe`, plan
 `pln_v5kacaliyd73722kspaxty626e`, in the same pre-restoration epoch.
 
-- Drift 46 opens, freeze 71 precedes adoption 138, and closure 140 is adopted.
-  The missing-secret-mark control was refused before secret persistence.
-- A second drift opens at 161. Approval 187 explicitly records
-  `unseenOverwrite=true`; unfreeze 188 precedes commitment 195.
-- Attempt 196 receives accepted response 197. The operation completes at 203
-  and the second drift closes reverted at 205.
-- These are two different drift records. Adopting the first does not explain
-  away the second, and unfreezing does not itself approve a revert.
+- Drift 46 opens; author `idn_3zqiy6psrcymxc3fbxvvbzfika` freezes at 71.
+  Approver `idn_q6bzuafr5x6jp2mlpnltaecjne` approves adoption plan
+  `pln_ubxzhc372azatqi6wl47asd3gu` at 135: adoption 138 has no attempt,
+  Applied 139 names `rel_u3pm…`, and drift 140 closes adopted.
+- The same approver approves the revert at 187 (`unseenOverwrite=true`) and
+  unfreezes at 188, after a second drift opens at 161; commitment follows at 195.
+- Attempt 196 (bounds below) receives accepted response 197, accounting 198;
+  completion observation `obs_h4lw…` supports completed 203 and reverted drift 205.
+  Observed resource versions progress 3 → 4 → 5 across the two drifts and revert.
+- Separately, `s5-pass-20261020T110711Z/s5.tsv` row 26 proves the missing-mark
+  refusal before secret persistence. Unfreezing does not itself approve a revert.
 
 ### Lost-response interruption
 
 Original separate S6 record `s6-run-20261018T205620Z`, operation
 `op_aer7okgheiftyrkmlvoaijxqdu`, plan `pln_i4ipf5rll3b7okk24syob3lfji`.
-Its epoch and resource identifiers belong to that separate fixture.
+Its epoch is `ep_ub5hbpow5yfbakbopuqliqayke`; identifiers belong to that separate fixture.
 
-- Approval 449 precedes commitment 453 and attempt 454. Transport response 455
-  has code 14; state 456 is unresolved, followed by takeover 457.
+- Approver `idn_vs7fthjzcy2egcbisobnn2vvw4` approves at 449 before commitment 453
+  and attempt 454. Transport response 455 has code 14; unresolved 456 precedes takeover 457.
 - Accounting 465 is a recovery-admin decision by
   `idn_nqb3frxy2gd6lwb72l7knjs7e4`, citing start observation
   `obs_iwzo2oh3ci4q66gnc4cfuvfllq` and end observation
-  `obs_pkdrj4h65gpcre3rr4wkfgbsy4`.
+  `obs_pkdrj4h65gpcre3rr4wkfgbsy4`: versions 20/20, anchor
+  `2026-10-18T21:20:09.306882Z`, settle floor 30 s. Completion later observes version 21.
 - Classification 468 permits retry only after that accounting. Attempt 470
   receives accepted response 471; subsequent observation supports completion 477.
-- The original full S6 also exercised conflicting-plan waiting and wrong-role
-  accounting. Accounting by decision is not proof that the first request never
-  reached the node. The focused 20 October replay has its own identifiers and
-  does not replace this record.
+- Conflicting plan `pln_h5fp…` at 460 is approved at 461 by that approver, revoked
+  at 462 and never committed. Wrong-role accounting is separately proved by
+  original `s6.tsv` row 151. Decision accounting is not proof of non-delivery.
+  The focused 20 October replay does not replace this record.
 
 ### Restoration
 
@@ -125,18 +133,35 @@ Restored operation `op_2sk3bf4brucrnjivezuan3uxla`, plan
 `pln_y24wwajahj7iwmdycs7zijszda`; recovery epoch
 `ep_sr34wsje3iirfyupzmrcpfpnya`.
 
-- Approval 264 and commitment 268 precede the backup boundary.
-  Recovery ownership 271, unresolved state 272 and scope hold 273 follow recovery entry.
+- `idn_q6bzuafr5x6jp2mlpnltaecjne` approves at 264 and again at 270 for
+  `pln_upizcgfor7upcuybk6rpa7ss2a`, both targeting `rel_a57a…` in the old epoch.
+  Approval 270 still looks live after restoration; its later revocation was erased.
+  Commitment 268 precedes the backup; recovery ownership 271, unresolved 272 and hold 273 follow entry.
 - Recovery-admin `idn_n2fmoxkmpf4yalolmhwkczx2wm` records scope accounting 279,
   citing `obs_t4kfff4ri4tsbb3gvi4oxwgbue` and
   `obs_l7ecpovyfph4ysxky4h5fyuhmu`, resource versions 7/7 and the 30-second settle floor.
 - State 281 is cancelled: its approval belongs to the earlier epoch.
   No attempt exists in the restored journal, and that operation is not retried.
-- A request after the backup had changed the node. Fresh observations expose
-  that discrepancy; a fresh approved revert closes drift at 304, and exit 305
-  returns the scopes to normal.
+- Served observations show version 6 at `obs_6ixi…`, then 7 at accounting and drift
+  284; they establish change, not its cause or time relative to the backup.
+  The post-backup send is separately established by `s7-run-20261020T111224Z/s7.tsv`
+  rows 32/76/94; rows 36/53 establish the erased revocation.
+- The same approver approves `pln_cvdwpkq4dks322scc2bamb6lri` at 290 in the new epoch
+  (`unseenOverwrite=true`). Its operation `op_q6fkjnhwd2them6pns7afzpkaq` attempts at 295,
+  receives accepted response 296/accounting 297, observes version 8 at `obs_4lz2…`,
+  completes at 302 and moves Applied from `rel_eojo…` to newly published `rel_gfmr…`
+  at 303. Drift closes reverted at 304; exit 305 returns both scopes to normal.
 - Zero attempts in restored history is not evidence that no post-backup request
   reached the node. The old and new epochs must remain distinct.
+
+The remaining attempts all use `10.55.0.3:50000`; times below are UTC on the case's date.
+
+| Case / revision | Recorded | Transport deadline | Verification deadline |
+| --- | --- | --- | --- |
+| Drift / 196 | 11:08:52.875814 | 11:10:52.875814 | 11:13:52.875814 |
+| S6 / 454 | 21:19:36.593424 | 21:20:06.593424 | 21:24:36.593424 |
+| S6 / 470 | 21:20:49.345186 | 21:21:19.345186 | 21:25:49.345186 |
+| Restoration revert / 295 | 11:19:21.01762 | 11:21:21.01762 | 11:24:21.01762 |
 
 ## 3. Criterion verdicts and independent review
 
@@ -149,16 +174,15 @@ Restored operation `op_2sk3bf4brucrnjivezuan3uxla`, plan
 | Interruption/restoration recovery and conflicting-execution blocking | Met within the documented decision-based recovery limits |
 | Reproducible evidence and assessment with limitations | Primary delegated assessment recorded; final acceptance awaits independent review disposition |
 
-AP S8 asks a second reviewer following the walkthrough to reach the same answers.
-The [earlier documentation reviewer](20261018-operator-docs-reviewer-run.md#1-setup)
-was explicitly an agent that authored neither page. That is relevant precedent
-for factual review, not evidence that this report already received one.
-
-The original fixture's person-read and second-reviewer `SKIP` entries remain
-historical facts. This report does not convert an agent review into a person's
-trial. The independent reviewer must identify its actual provenance and report
-any questions the served records cannot answer. No second-reviewer verdict is
-claimed in this revision.
+Claude independently read the four served captures before comparing this report
+at `91b71d7`. Its retained `independent-review/claude-initial-review.md`
+(SHA256 `ed5626582b0e96ca597e1e88b99a90d8c96961037624788f15692787cfe96502`)
+identified missing links and harness/timeline attribution; §2 corrects those findings.
+This is an independent agent factual reading, with no live walkthrough executed.
+AP S8's “following the walkthrough” disposition remains explicit and pending;
+the original person-read SKIP is unchanged. The
+[earlier documentation reviewer](20261018-operator-docs-reviewer-run.md#1-setup)
+was also an agent, but that precedent cannot supply missing work in this review.
 
 ## 4. Human-facing usability
 
