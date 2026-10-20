@@ -40,6 +40,7 @@ unfreeze control, already exercised in the earlier complete campaign. The focuse
 same-startup lost-response replay supplements the original separate S6; it does not
 replace that scenario's other interruption points or refusal controls.
 
+Retained root: `/home/serge/src/ginsys/_scratch/bronzeward/walkthrough-31-20261020`.
 The owner retains the complete captures and a sanitized four-case package. Each case
 contains `operation.json`, `events.json`, `timeline.json`, `observations.json`
 and individual observations; the guided plans are in `human-review/api/`.
@@ -71,6 +72,7 @@ Revisions below are machine-scope commit order, not a global clock. Attempts
 precede sending and cannot prove delivery. Digests are withheld from served records;
 drift/convergence judgements and separately attributed harness checks have distinct bases.
 Shortened IDs below are unique prefixes in the retained case; full IDs remain in its JSON.
+Backup times are operator-entered; use each entry's epoch, not an event ID's read-time epoch.
 
 ### Normal worker apply
 
@@ -169,20 +171,31 @@ The remaining attempts all use `10.55.0.3:50000`; times below are UTC on the cas
 | --- | --- |
 | Adoption without mutation, extraction before persistence, immutable encrypted artifacts and redacted provenance | Technical evidence met by the complete campaign and guided adoption |
 | Publication cannot dispatch; approval binds the exact worker change | Met; proposal/publication performed no apply, and immutable plan bindings were re-read before approval |
-| Apply/verify, separate desired/applied/observed and usable timeline | Technical execution and traceability met; independent timeline interpretation pending |
+| Apply/verify, separate desired/applied/observed and usable timeline | Met for the PoC: execution, traceability and independent factual interpretation; no general usability pass |
 | Drift, freeze, sanitized adoption and approved revert | Met on the selected fixture, preserving earlier refusal coverage |
 | Interruption/restoration recovery and conflicting-execution blocking | Met within the documented decision-based recovery limits |
-| Reproducible evidence and assessment with limitations | Primary delegated assessment recorded; final acceptance awaits independent review disposition |
+| Reproducible evidence and assessment with limitations | Met by the retained campaign, this delegated assessment and the independent reading below; publication/landing remains required |
 
 Claude independently read the four served captures before comparing this report
 at `91b71d7`. Its retained `independent-review/claude-initial-review.md`
 (SHA256 `ed5626582b0e96ca597e1e88b99a90d8c96961037624788f15692787cfe96502`)
 identified missing links and harness/timeline attribution; §2 corrects those findings.
-This is an independent agent factual reading, with no live walkthrough executed.
-AP S8's “following the walkthrough” disposition remains explicit and pending;
-the original person-read SKIP is unchanged. The
-[earlier documentation reviewer](20261018-operator-docs-reviewer-run.md#1-setup)
-was also an agent, but that precedent cannot supply missing work in this review.
+The confirming Claude review `6c80ac46` at `ad89e68` found all five fixes complete
+and no new defects. Its retained `independent-review/claude-confirmation.md`
+(SHA256 `ed61896c9ece78c75df98873f304e8e91f3f73c5fcede67c31916033cb4e4018`)
+records the actual procedure: read scope-ordered timelines, operations, recovery
+events, linked plans/approvals and observations; all four answer sets agree with §2.
+It made no live API calls and did not independently verify capture pagination or hashes.
+
+**Delegated factual disposition:** S8's independent reading is met. AP S8 explicitly
+uses retained records, including separate S6; the reviewer followed the documented
+reading procedure over those responses. AP S8, ER §9.3 and design §18.2 require no
+human reviewer, owner-named reviewer or new live replay. The older record's “person”
+wording was an added characterization, not an acceptance-plan condition.
+The reviewer left the acceptance decision to the owner; this disposition uses the
+owner's delegation of straightforward factual assessment, not reviewer authority
+or a waiver. Original person-read SKIPs remain historical. Neither this review nor
+the [earlier agent review](20261018-operator-docs-reviewer-run.md#1-setup) proves unaided human usability.
 
 ## 4. Human-facing usability
 
@@ -212,5 +225,5 @@ neither a CLI nor a web UI and adds neither to PoC acceptance.
 - The earlier acceptance campaigns retain responsibility for negative matrices,
   interruption points and variant coverage omitted by the guided pass.
 - No new runtime scenario was run to prepare this assessment.
-- Issue31 and milestone03 remain open pending independent review and final
-  acceptance disposition. Licence and later lifecycle/transport exclusions remain.
+- Issue31 and milestone03 remain open until this assessment lands and closure is
+  recorded in the authoritative tracker. Licence and later implementation exclusions remain.

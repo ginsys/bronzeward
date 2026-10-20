@@ -585,9 +585,9 @@ response coverage. The added check and its successful-commit control pass at
 
 The verdicts below describe the original record. The
 [20 October delegated assessment](20261020-poc-timeline-assessment.md#3-criterion-verdicts-and-independent-review)
-adds dated technical verdicts and the owner's negative usability feedback.
-Independent timeline review is still pending; no historical run or human-review
-skip is relabelled.
+adds dated technical verdicts, an independent agent timeline reading and the owner's
+negative usability feedback. Its explicit S8 disposition supersedes the former
+pending assessment; no historical run or human-review skip is relabelled.
 
 | Criterion | Answered by | Verdict |
 | --- | --- | --- |
@@ -614,10 +614,11 @@ skip is relabelled.
     re-enters has no Go test: AP S1 assigns it to the live run's review rows
     ([AP S1](../../spec/acceptance-plan.md#s1-adoption-of-the-existing-cluster)), so R50 rests on
     them.
-- Open after the runs, each for the owner's assessment (§9):
+- Open after the original runs; later disposition is in the dated assessment (§9):
   - **The timeline's second reviewer** (§5): AP S8's pass criterion needs a second reviewer to reach
     the same answers from the timeline; `run`'s `s8` writes `SKIP` for it and for the reads after
-    the operator walkthrough of ginsys/bronzeward#30, by a person. The owner names the reviewer.
+    the operator walkthrough of ginsys/bronzeward#30, by a person. That added characterization
+    is distinguished from AP S8's actual reviewer criterion in the 20 October assessment.
 - **R5 and R45 additional evidence:** the clause audit, missing checks and controls
   are recorded in §6.3 and the linked #241 supplement. The publication defect
   found by that audit was separately repaired and landed under #244. A second
@@ -638,8 +639,8 @@ executing agent. Its [dated assessment](20261020-poc-timeline-assessment.md)
 records the criterion verdicts, exact timeline evidence and limitations. The owner
 separately assessed the API-and-script operator experience negatively. This is
 not a claim that the owner performed the walkthrough or independently interpreted
-the four timelines. Final acceptance remains pending the independent-review
-disposition recorded there.
+the four timelines. The independent agent reading and delegated S8 disposition are
+recorded there; issue closure still requires this evidence to land.
 
 ## 10. Limits
 
