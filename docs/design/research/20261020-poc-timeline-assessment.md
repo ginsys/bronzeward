@@ -167,14 +167,10 @@ The remaining attempts all use `10.55.0.3:50000`; times below are UTC on the cas
 
 ## 3. Criterion verdicts and independent review
 
-| Issue criterion | Primary delegated verdict |
-| --- | --- |
-| Adoption without mutation, extraction before persistence, immutable encrypted artifacts and redacted provenance | Technical evidence met by the complete campaign and guided adoption |
-| Publication cannot dispatch; approval binds the exact worker change | Met; proposal/publication performed no apply, and immutable plan bindings were re-read before approval |
-| Apply/verify, separate desired/applied/observed and usable timeline | Met for the PoC: execution, traceability and independent factual interpretation; no general usability pass |
-| Drift, freeze, sanitized adoption and approved revert | Met on the selected fixture, preserving earlier refusal coverage |
-| Interruption/restoration recovery and conflicting-execution blocking | Met within the documented decision-based recovery limits |
-| Reproducible evidence and assessment with limitations | Met by the retained campaign, this delegated assessment and the independent reading below; publication/landing remains required |
+The six delegated criterion verdicts are recorded in the
+[acceptance record's current table](20261018-poc-acceptance-evidence.md#7-acceptance-criteria-of-ginsysbronzeward31).
+This assessment supplies their dated rationale and independent-review evidence;
+it does not maintain a second verdict table.
 
 Claude independently read the four served captures before comparing this report
 at `91b71d7`. Its retained `independent-review/claude-initial-review.md`

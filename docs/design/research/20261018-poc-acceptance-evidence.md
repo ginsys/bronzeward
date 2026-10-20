@@ -583,20 +583,21 @@ response coverage. The added check and its successful-commit control pass at
 
 ## 7. Acceptance criteria of ginsys/bronzeward#31
 
-The verdicts below describe the original record. The
+The current verdicts below come from the
 [20 October delegated assessment](20261020-poc-timeline-assessment.md#3-criterion-verdicts-and-independent-review)
-adds dated technical verdicts, an independent agent timeline reading and the owner's
-negative usability feedback. Its explicit S8 disposition supersedes the former
-pending assessment; no historical run or human-review skip is relabelled.
+and its independent agent timeline reading. The owner's negative usability feedback
+and the assessment's limits still apply. The
+[original pending verdicts](https://github.com/ginsys/bronzeward/blob/c9b70ffbf4d3b13b775ee949d67bca1f03183294/docs/design/research/20261018-poc-acceptance-evidence.md#7-acceptance-criteria-of-ginsysbronzeward31)
+remain in the historical revision; no run or human-review skip is relabelled.
 
 | Criterion | Answered by | Verdict |
 | --- | --- | --- |
-| Adoption without mutation, extraction before persistence, immutable encrypted artifacts with redacted provenance | §5 items 1 to 3 | *pending* |
-| Publication alone cannot dispatch; plan and approval bind the exact safe no-reboot worker change | §5 items 3 and 4 | *pending* |
-| Direct apply and verify, separate desired/applied/observed, a usable approval-to-outcome timeline | §5 item 5 and the timeline row | *pending* |
-| Drift report, freeze, sanitized adoption, approved revert | §5 item 6 | *pending* |
-| Interrupted-operation and restoration recovery; unresolved old execution blocks conflicting mutations | §5 item 7 (both rows) | *pending* |
-| Reproducible integrated evidence and owner assessment, with limitations and no production claim | §3, §4, §9 and §10 | *pending* |
+| Adoption without mutation, extraction before persistence, immutable encrypted artifacts with redacted provenance | §5 items 1 to 3 | Technical evidence met by the complete campaign and guided adoption |
+| Publication alone cannot dispatch; plan and approval bind the exact safe no-reboot worker change | §5 items 3 and 4 | Met; proposal/publication performed no apply, and immutable plan bindings were re-read before approval |
+| Direct apply and verify, separate desired/applied/observed, a usable approval-to-outcome timeline | §5 item 5 and the timeline row | Met for the PoC: execution, traceability and independent factual interpretation; no general usability pass |
+| Drift report, freeze, sanitized adoption, approved revert | §5 item 6 | Met on the selected fixture, preserving earlier refusal coverage |
+| Interrupted-operation and restoration recovery; unresolved old execution blocks conflicting mutations | §5 item 7 (both rows) | Met within the documented decision-based recovery limits |
+| Reproducible integrated evidence and owner assessment, with limitations and no production claim | §3, §4, §9 and §10 | Met by the retained campaign, delegated assessment and independent reading; publication/landing remains required |
 
 ## 8. Gaps and carried items
 
