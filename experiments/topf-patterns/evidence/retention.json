@@ -79,7 +79,7 @@
     },
     {
       "path": "upstream-e2e-excerpt.txt",
-      "sha256": "7ec5bf8044ba0c4ec0456ce45b232869bf80fa000b2d57931b812db4b99865a1"
+      "sha256": "612bed124dd8859a37ee41b147210223326f89137e3acd4c7fc4f6563660bc25"
     }
   ],
   "setup_diagnostics": [

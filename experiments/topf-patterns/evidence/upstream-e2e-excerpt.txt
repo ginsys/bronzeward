@@ -1,6 +1,6 @@
 Upstream CI; not locally executed. Source 7aeead7545d6a715e719e2e6241027792f7e1a89
 Run https://github.com/postfinance/topf/actions/runs/38545129337/attempts/3
-Attempt 3; run number 19; Go1.27.2. Attempts1and2 failed before tests on Image Factory reachability.
+Attempt 3; run number 19; Go 1.27.2. Attempts 1 and 2 failed before tests on Image Factory reachability.
 Raw log SHA256 8f700b5aff1719493db6818c5f78d16a01b0a86fdeaa46f8e22689fba94bb36b
 
 e2e (3 control-plane, upgrade)	UNKNOWN STEP	2026-10-16T12:04:14.6235280Z go version go1.27.2 linux/amd64
