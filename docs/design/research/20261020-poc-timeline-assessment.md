@@ -62,6 +62,7 @@ set -eu
 : "${BW_REPO:?Set the absolute Bronzeward checkout path}"
 : "${BW_EVIDENCE:?Set the absolute walkthrough-31-20261020 bundle path}"
 BW_REPLAY_DIR=$(mktemp -d)
+printf 'working copy: %s\n' "$BW_REPLAY_DIR" >&2
 cp -a "$BW_EVIDENCE/human-review" "$BW_EVIDENCE/worker-apply" \
   "$BW_EVIDENCE/agent-assessment" "$BW_REPLAY_DIR/"
 linked='.ordered and .eventsAreTimeline and .attemptsLinked and (.textServed | not)
@@ -90,6 +91,43 @@ for BW_CASE in 01-worker-apply 02-drift 03-interruption 04-restoration; do
   esac
 done
 python3 "$BW_REPLAY_DIR/agent-assessment/assess.py"
+
+# Reversing a copied timeline must fail validation despite successful extraction.
+BW_CASE_DIR="$BW_REPLAY_DIR/human-review/01-worker-apply"
+jq 'reverse' "$BW_CASE_DIR/timeline.json" >"$BW_REPLAY_DIR/reversed-timeline.json"
+jq -n --slurpfile op "$BW_CASE_DIR/operation.json" \
+  --slurpfile ev "$BW_CASE_DIR/events.json" \
+  --slurpfile tl "$BW_REPLAY_DIR/reversed-timeline.json" \
+  --slurpfile obs "$BW_CASE_DIR/observations.json" \
+  -f "$BW_REPO/fixtures/s8-answers.jq" >"$BW_REPLAY_DIR/reversed-answers.json"
+jq -e '.ordered == false' "$BW_REPLAY_DIR/reversed-answers.json" >/dev/null
+BW_CONTROL_RC=0
+jq -e "$linked" "$BW_REPLAY_DIR/reversed-answers.json" \
+  >"$BW_REPLAY_DIR/reversal-predicate.out" || BW_CONTROL_RC=$?
+[ "$BW_CONTROL_RC" -eq 1 ]
+printf 'reversed-timeline predicate: expected exit 1, observed %s\n' "$BW_CONTROL_RC"
+
+# Compare JSON answers and every original input after the replay and control.
+python3 - "$BW_REPLAY_DIR" "$BW_EVIDENCE" <<'PY'
+from pathlib import Path
+import hashlib
+import json
+import sys
+
+replay, evidence = map(Path, sys.argv[1:])
+cases = ("01-worker-apply", "02-drift", "03-interruption", "04-restoration")
+for case in cases:
+    relative = Path("agent-assessment") / (case + ".json")
+    if json.loads((replay / relative).read_text()) != json.loads((evidence / relative).read_text()):
+        raise SystemExit(f"answer mismatch: {case}")
+manifest = json.loads((evidence / "agent-assessment/input-manifest.json").read_text())
+if len(manifest) != 542:
+    raise SystemExit(f"unexpected input count: {len(manifest)}")
+for item in manifest:
+    if hashlib.sha256((evidence / item["file"]).read_bytes()).hexdigest() != item["sha256"]:
+        raise SystemExit(f"input hash mismatch: {item['file']}")
+print("4 answer sets match; 542 original input hashes match.")
+PY
 ```
 
 The extraction filter emits answers; its exit status alone does not validate them.
@@ -97,12 +135,20 @@ The six `jq -e` calls above use the canonical `linked`/`applied` predicates from
 [`fixtures/scenarios/s8`](../../../fixtures/scenarios/s8): expect six `true` results
 and exit 0. The retained `agent-assessment/assess.py` then checks the served source
 records: expect `23 source-level factual cross-checks passed.` and exit 0.
-It rewrites `source-cross-checks.json` in the working copy. All these checks passed
-in the primary assessment. They support consistency, not independent interpretation.
-The complete block was replayed from outside the checkout: six predicates and
-23 source checks passed, all four answers matched, and the 542 original hashes
-remained unchanged. Reversing a copied normal timeline left extraction successful
-but made `ordered=false` and the `linked` predicate exit 1, as intended.
+It rewrites `source-cross-checks.json` in the working copy. The remaining commands
+require a successful extraction with `ordered=false` for the reversed copy,
+predicate exit 1, four matching JSON answer sets and all 542 original input
+hashes unchanged. The entire script exits 0 only when those checks succeed.
+Its printed working-copy path contains the outputs for inspection; that generated
+directory can be deleted afterwards, while the retained evidence bundle is kept.
+These checks support consistency, not independent interpretation.
+
+The complete block was executed from outside the checkout. Its exact bytes,
+execution wrapper, stdout, stderr, result and manifest are retained in
+`independent-review/replay-checks/`; `replay.sh` is the block above, and
+`result.json` records its hash, command and exit status. The six predicates,
+23 source checks, four answer comparisons and 542 hashes passed; the reversed
+timeline extracted successfully but its predicate exited 1 as expected.
 Complete captures and positive-control secret scans are retained with the runs.
 
 ## 2. Four timeline readings
@@ -236,7 +282,8 @@ restoration answer from the served timeline, operations, linked plans/approvals
 and observations, and confirmed the corrected binding and remaining narrative.
 Its unchanged output is retained as `independent-review/claude-restoration-correction.md`
 (SHA256 `666144c5b9d0923054e57006f7cf51f75605b530d8ff3e157e48602a77a106fd`).
-That reviewer read the recipe statically; the executing agent ran it.
+That reviewer statically read the extraction-only recipe at `3435240`, which the
+executing agent ran. The predicate-and-control recipe in §1 replaces it.
 
 The retained-only review above did not independently execute the walkthrough's
 authenticated, paginated GETs. A separate Codex reader subsequently followed that
