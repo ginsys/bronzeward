@@ -335,23 +335,23 @@ or supplies an owner's verdict.
 Runs and steps are those of §3; "`controls`: `s1`" is the `s1` step of the `controls` run.
 Scenario passes describe their observed paths. The dated supplement in §6.3
 adds the R5 refusal and R45 observation-access mapping and committed checks.
-The independent timeline review still limits overall acceptance; the owner's
-six verdicts remain pending in §7.
+The 20 October independent timeline reading and delegated assessment supply
+the current six criterion verdicts in §7, with their limits in §9.
 
 | Design §18.2 | Scenario | Runs: steps | Result | Verdict |
 | --- | --- | --- | --- | --- |
 | Item 1: import without mutation, extraction before persistence, exact encrypted baseline | S1; S3's handover part | `run`: `s1p`, `s3h`; `controls`: `s1`, `s3h`; S3 handover controls: `s3hc` | passed: every step named exited 0, no check failed (§4) | met |
 | Item 2: native fragments, references, revisions, provenance, validation stages | S2 | `run`: `s2p`; `controls`: `s2` | passed: every step named exited 0, no check failed (§4) | met |
 | Item 3: immutable encrypted artifacts, exact dependencies, redacted review data, no apply | S2, S3 step 1 | `run`: `s2p`, `s3rp`; `controls`: `s2`, `s3r` | passed: every step named exited 0, no check failed (§4) | met |
-| Item 4: authenticated API; plan and approval of one safe worker change | S0, S3 | `run`: `s0p`, `s3rp`; `controls`: `s0`, `s3r`; S0 walk: `s0walk` | passed: every step named exited 0, no check failed (§4) | evidenced by the runs and R5 supplement (§6.3); owner verdict pending (§7) |
-| Item 5: direct dispatch, verification, separate desired/applied/observed | S4 | `run`: `s4`; `s6`: `s4ds` | passed: every step named exited 0, no check failed (§4) | evidenced by the runs and R45 supplement (§6.3); owner verdict pending (§7) |
+| Item 4: authenticated API; plan and approval of one safe worker change | S0, S3 | `run`: `s0p`, `s3rp`; `controls`: `s0`, `s3r`; S0 walk: `s0walk` | passed: every step named exited 0, no check failed (§4) | evidenced by the runs and R5 supplement (§6.3); dated verdict in §7 |
+| Item 5: direct dispatch, verification, separate desired/applied/observed | S4 | `run`: `s4`; `s6`: `s4ds` | passed: every step named exited 0, no check failed (§4) | evidenced by the runs and R45 supplement (§6.3); dated verdict in §7 |
 | Item 6: external change detected; freeze, sanitized adoption, approved revert | S5 | `run`: `s5p`; `controls`: `s5` | passed: every step named exited 0, no check failed (§4) | met |
 | Item 7: interrupted execution | S6 | `s6`: `s6` | passed: every step named exited 0, no check failed (§4) | met |
 | Item 7: external restoration through explicit recovery mode | S7 | `run`: `s7` (the nominal run; its pass criterion "every pre-restore automation token until reissued", PA §17 choice 27: `S7 step 6`, the seed automation token 401 after the restore and after its reissue, which S0 step 3 leaves out with a `SKIP`); S7 closing: `s7c`; S7 variants: `s7`, `s7n`, `s7t`, `s7o` | passed: every step named exited 0, no check failed (§4) | met |
 | Selected database/provider behaviour (§7.7) | S0 to S8 on the AP §2 fixture | all nine runs | passed: every step named exited 0, no check failed (§4) | met |
 | Scoped authorization (§13.7) | S0 steps 4 and 5, and the scenario-table rows AP §7 names | S0 walk: `s0walk`; `run`: `s0p`, `s2p` (step 7), `s3h`, `s3rp`, `s4`, `s5p` (step 3), `s7`; `controls`: `s4c`, `s4x`, `s5roles` (step 7); `s6`: `s6` (step 7); S7 closing: `s7c` | passed: every step named exited 0, no check failed (§4) | met |
-| Usable operation timeline | S8, with a second reviewer's record | `run`: `s8`; S8 controls: `s8controls`, `s8revocation`; the reviewer's record (`run`'s `s8` writes `SKIP` for it) | passed: every step named exited 0, no check failed (§4) | met for the live part; the second reviewer's record is open (§8) |
-| §18.1 E6: the existing-cluster vertical slice | §3.1 and S6's runs | `run`; `s6` | passed: every step named exited 0, no check failed (§4) | checks supplemented in §6.3; the second reviewer remains open (§8) |
+| Usable operation timeline | S8, with a second reviewer's record | `run`: `s8`; S8 controls: `s8controls`, `s8revocation`; the reviewer's record (`run`'s `s8` writes `SKIP` for it) | passed: every step named exited 0, no check failed (§4) | live part met; independent reading assessed on 20 October (§7, §9), preserving the original SKIP |
+| §18.1 E6: the existing-cluster vertical slice | §3.1 and S6's runs | `run`; `s6` | passed: every step named exited 0, no check failed (§4) | checks supplemented in §6.3; independent reading and dated verdicts in §7 and §9 |
 
 ## 6. Required verification (AP §7.1)
 
@@ -380,7 +380,7 @@ plan. An item with no retained result leaves its issue incomplete (AP §7.1).
 | R17 | ER §9.2: observation ordering, contradicting higher-basis reads, confirmed reads, the late-read residual | #28, #27 (adoption read) | ordering, contradicting higher-basis and confirmed reads, the late-read residual, the adoption read; a completion read in flight across a concurrent accounting, with the record-order control | — | PoC observation predicates met in CI; bound-health ordering carried to #188 (§8) |
 | R18 | ER §9.2: plan and commitment refusals on undetected drift | #27 | a commitment refused on drifted evidence, opening the record, and comparison 6 refusing an ordinary plan while it is open; a drifted adoption's refusals; a revert's refusals, re-drift and a manual return closing `returned` | S5, and two of its negative controls: the revert on a frozen scope passed over, the unfreeze by a non-approver refused | met live and in CI |
 | R19 | ER §9.2: recovery-mode entry after a restore older than a takeover, an approval, a revocation and an attempt | #29 | — | S7 | met live |
-| R20 | ER §9.2: the complete existing-cluster E6 slice | #31 | — | the integrated run (§3.1) | live run and R5/R45 checks evidenced; the second reviewer and owner assessment remain open (§8) |
+| R20 | ER §9.2: the complete existing-cluster E6 slice | #31 | — | the integrated run (§3.1) | live run and R5/R45 checks evidenced; independent reading and delegated assessment recorded in §7 and §9 |
 | R21 | PA §16: `FOR SHARE` at publication (DB row 011) | #23 | — | S2's negative controls | met live |
 | R22 | PA §16: ownership check inside the attempt's `UPDATE` (row 018) | #25, #26 | the conditional write and its read-then-write control | S4's negative controls | met live and in CI |
 | R23 | PA §16: claim eligibility re-check (row 020) | #22 | the refusal after expiry in the lock wait, with the earlier-read control | — | met in CI |
@@ -675,6 +675,6 @@ pinned-value reads; the separate compiler refusal tests retain that coverage.
 This supplies the publication-minor repair evidence for R5. The clause-level
 R5 mapping and all-purpose R45 access checks remain with
 ginsys/bronzeward#241, including the new publication purpose. The older rows
-above retain their original revisions and limitations. Nothing here supplies
-the independent S8 person review, the six criterion verdicts or the owner's
-dated assessment; ginsys/bronzeward#31 remains open.
+above retain their original revisions and limitations. This supplement alone
+supplies no independent S8 review or acceptance assessment; the later reading
+and six delegated verdicts are recorded separately in §7 and §9.
