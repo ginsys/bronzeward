@@ -1,0 +1,15 @@
+{
+  "projection": "Fixed allowlisted Keycloak event fields; all other fields omitted",
+  "events": [
+    {
+      "path": "private/commands/011-keycloak-logs.out",
+      "bytes": 3730,
+      "sha256": "d0ab3c046be0c27786f080668647b267fd72a54a0a78483a0c4293dd7c3954bd",
+      "line": 24,
+      "fields": {
+        "type": "LOGIN_ERROR",
+        "error": "cookie_not_found"
+      }
+    }
+  ]
+}

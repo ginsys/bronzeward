@@ -2,6 +2,7 @@
   "scope": [
     "audit.json",
     "browser.json",
+    "diagnostics.json",
     "events.json",
     "retention.json"
   ],

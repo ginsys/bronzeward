@@ -36,8 +36,10 @@ that the CLI explicitly trusts. HOME, XDG configuration and D-Bus are isolated,
 so the test cannot write the host keyring. All generated credentials and raw
 logs remain private run state. Evidence exports contain certificate metadata,
 sanitized commands, exit statuses, timings and audit projections, never keys or
-usable tokens. The independent emergency credential is created with the cluster
-and is not obtained through the exchange service.
+usable tokens. The emergency credential is created with the cluster and is not
+obtained through the exchange service. The fixture also gives that same
+talosconfig to the issuer: independence here means availability during
+IdP/exchange outages, not separate credential custody, rotation or revocation.
 
 ## Source findings
 
@@ -51,11 +53,14 @@ and is not obtained through the exchange service.
 | Issuer outage | [`pkg/oidc/jwks_cache.go`](https://github.com/qjoly/talosctl-oidc/blob/d3cd122341537d3235bd5dfe7ced2171ec765227/pkg/oidc/jwks_cache.go) returns stale keys when refresh fails, with no additional stale-age bound. [`pkg/server/server.go`](https://github.com/qjoly/talosctl-oidc/blob/d3cd122341537d3235bd5dfe7ced2171ec765227/pkg/server/server.go) initializes discovery lazily and caches keys for five minutes. A restart loses this cache. Token expiry still applies; a stale-key fallback is not proof of immediate issuer-side revocation. |
 | Audit | The exchange logs authentication and issuance, including subject, issuer, email, roles, request ID and certificate fingerprint. An unmatched role emits authentication success followed by HTTP 403 without a dedicated role-denial audit event. [`pkg/audit/audit.go`](https://github.com/qjoly/talosctl-oidc/blob/d3cd122341537d3235bd5dfe7ced2171ec765227/pkg/audit/audit.go) writes best-effort JSON and ignores write errors. This is neither durable Bronzeward operation accounting nor a tamper-evident log. |
 
-Talos 1.13.6's `GenerateClientConfiguration` method requires `os:admin` and its
-handler accepts a positive requested lifetime without imposing a maximum. The
-role injector uses the authenticated TLS peer's roles; certificate validity is
-checked at connection establishment rather than explicitly on each RPC. These
-are source findings; the separate live expiry and remint results follow.
+Talos 1.13.6's
+[`GenerateClientConfiguration` authorization rule](https://github.com/siderolabs/talos/blob/v1.13.6/internal/app/machined/pkg/system/services/machined.go#L83)
+requires `os:admin`; its
+[handler](https://github.com/siderolabs/talos/blob/v1.13.6/internal/app/machined/internal/server/v1alpha1/v1alpha1_server.go#L2363)
+accepts a positive requested lifetime without imposing a maximum. The
+[role injector](https://github.com/siderolabs/talos/blob/v1.13.6/pkg/grpc/middleware/authz/injector.go#L130)
+uses the authenticated TLS peer's roles without an explicit per-RPC expiry
+check. The separate live expiry and remint results follow.
 
 ## Live observations
 
@@ -73,15 +78,15 @@ excluded from publication.
 
 | Case | Expected and observed behavior |
 | --- | --- |
-| Login and renewal | The real CLI completed authorization-code/S256-PKCE login, stored the token cache with mode 0600, and obtained an `os:reader` certificate. `Version` succeeded. A second invocation reused the ID token and issued a different certificate fingerprint. This proves certificate renewal; automatic ID-token refresh after natural token expiry was not exercised. |
+| Login and renewal | The real CLI completed authorization-code/S256-PKCE login, stored the token cache with mode 0600 under fixture umask 077, and obtained an `os:reader` certificate. The observed mode alone does not isolate upstream permissions; the pinned keychain source separately requests 0600. `Version` succeeded. A second invocation reused the ID token and issued a different certificate fingerprint. This proves certificate renewal; automatic ID-token refresh after natural token expiry was not exercised. |
 | Role denial | The reader's attempt to mint an administrator certificate returned `PermissionDenied` and created no credential file. An authenticated identity with no mapped group was refused by the CLI. |
 | Group removal | Within 0.189 seconds of removal, cached CLI renewal and direct exchange still succeeded; a fresh login produced no groups and exchange returned 403. The cached token's original group claim remained valid. This is a sampled removal response, not a measured upper revocation bound. |
-| Account disablement | Cached-token exchange still returned 200; refresh returned 400 within 0.043 seconds; the already issued certificate still completed `Version`. The imported user had a refresh token. No immediate revocation of existing tokens or certificates was observed. |
+| Account disablement | Cached-token exchange still returned 200; refresh returned 400 within 0.043 seconds; the already issued certificate still completed `Version`. The imported user had a refresh token, and the retained Keycloak diagnostic reports `REFRESH_TOKEN_ERROR`, `invalid_token`, `User disabled`. No enabled-user refresh control or fresh login after disablement was exercised. No immediate revocation of existing tokens or certificates was observed. |
 | Certificate expiry | A 45-second reader certificate expired at 01:05:35Z. At 01:05:37.003Z, `Version` still succeeded on the held connection, with TCP dial count unchanged at one. A new connection returned `Unavailable`. The successful held RPC and later emergency probes distinguish this from an unavailable node. This is one post-expiry sample, not an unlimited-duration test. |
 | Administrator reminting | A 45-second administrator certificate requested and received a one-hour administrator certificate. At 01:06:24Z the original failed on a new connection, while the reminted credential succeeded; its recorded expiry was 02:05:37Z. Short issuer TTL is therefore not a hard authority-duration bound for `os:admin`. |
-| Issuance versus commands | Direct `Version` left the exchange audit at five rows before and after. The final audit had 32 rows and 13 issuance events, each containing subject, issuer, email, request ID, roles and certificate fingerprint. These identify issuance, not subsequent direct commands or Bronzeward approval. |
+| Issuance versus commands | Direct `Version` left the exchange audit at five rows before and after. The final audit had 32 rows and 13 exchange issuance events, each containing subject, issuer, email, request ID, roles and certificate fingerprint. Those are the 45-second exchange certificates; the direct one-hour administrator remint is absent. This is not a complete certificate inventory or an account of subsequent direct commands or Bronzeward approval. |
 | Issuer and exchange outages | Issuance returned 200 immediately after stopping the IdP and again after 306.006 seconds, beyond the five-minute key-cache interval. After stopping and restarting the exchange with the IdP still down, the same token returned 401. Restoring the IdP restored issuance (200). The independent emergency credential completed `Version` during the IdP outage, while the exchange was stopped, and after the cold restart. |
-| Talos outage | Pausing the sole disposable node caused emergency `Version` to return `DeadlineExceeded` after five seconds; the exchange request reached its eight-second client timeout. Unpausing restored emergency access and exchange issuance. An independent credential cannot make an unavailable node respond. A timeout does not prove that no issuance request could have taken effect. |
+| Talos outage | Pausing the sole disposable node caused emergency `Version` to return `DeadlineExceeded` after five seconds; the exchange request reached its eight-second client timeout. Audit request `0e33351a` reports `cert_error` eight seconds after `auth_success`, consistent with request-context cancellation, not an independent issuer deadline. Unpausing restored emergency access and exchange issuance. An independent credential cannot make an unavailable node respond. A timeout does not prove that no issuance request could have taken effect. |
 
 The tests use ordinary session scopes (`openid,profile,email`) and 15-minute
 tokens. Cached-token acceptance was sampled before token expiry; there is no
@@ -108,6 +113,15 @@ The cookie explanation is grounded in Keycloak's pinned
 and [cookie provider](https://github.com/keycloak/keycloak/blob/26.8.1/services/src/main/java/org/keycloak/cookie/DefaultCookieProvider.java),
 the failed server event, and the successful follow-up browser metadata. These
 are fixture setup limitations, not changes to upstream or Bronzeward policy.
+Minimal diagnostic projections retain the exact error fields and source-log
+filename, line and SHA-256 for [run 1](../../../experiments/talosctl-oidc/evidence/run1/diagnostics.json),
+[run 2](../../../experiments/talosctl-oidc/evidence/run2/diagnostics.json) and
+[run 3](../../../experiments/talosctl-oidc/evidence/run3/diagnostics.json).
+The [committed exporter and bundle procedure](../../../experiments/talosctl-oidc/README.md#exporting-evidence)
+reproduce the sanitized projections and aggregate counts from the retained
+private runs and wrapper receipts. Re-exporting preserves the original event,
+audit, browser and private-log-hash files; the added diagnostic files expand
+the leak-scan scope and top-level retention manifest.
 
 ## Executor compatibility
 
@@ -129,8 +143,9 @@ implemented or tested by this investigation.
 Native issuance may reduce routine exposure compared with long-lived service
 credentials, but selecting it requires a separately refined lifecycle
 specification. The issuance authority itself remains powerful; a certificate
-can outlive the issuer connection and an administrator can request another
-certificate. None of these changes is adopted here.
+can remain usable after its issuing connection closes, an already authenticated
+connection can remain usable after its certificate expires, and an administrator
+can request another certificate. None of these changes is adopted here.
 
 ## Security refresh
 
@@ -181,7 +196,10 @@ in milestone 05 and depend natively on assessed #162 evidence. Neither blocks
 Bronzeward CLI/web login or selects an IdP, framework or credential policy.
 
 This experiment used one Linux amd64 Docker node, synthetic identities and a
-single Keycloak realm. It did not qualify HA, production TLS/ingress, another
+single Keycloak realm, with matching host/container UID 1000 for the private
+realm bind mount. Only the Talos API port 50000 host binding is explicitly
+asserted; the runner requests loopback bindings for the profile. It did not
+qualify other UID mappings, Docker-daemon failure during teardown, HA, production TLS/ingress, another
 IdP, device flow, OS keyrings, offline tokens, the background watch loop, natural
 ID-token expiry/refresh success, signing-key rotation, account deletion, durable
 audit under storage failure, or executor integration. The upstream security
@@ -194,3 +212,5 @@ checks with positive controls: four distinct known values in each failed run,
 synthetic credentials and is not publishable. See each run's `leak-scan.json`
 for scope and limits; this is evidence hygiene, not proof that upstream never
 logs secrets under other configurations.
+Ordinary repository CI does not run this fixture, its standalone Go probe or
+Python checks; their separately recorded local results supply that coverage.

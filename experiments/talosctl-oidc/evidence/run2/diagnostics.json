@@ -1,0 +1,16 @@
+{
+  "projection": "Fixed allowlisted Keycloak event fields; all other fields omitted",
+  "events": [
+    {
+      "path": "private/commands/011-keycloak-logs.out",
+      "bytes": 4393,
+      "sha256": "ab8d48ef309682adf6be587dd594259a4ffa1c80d28984bb55bb01f65395c443",
+      "line": 25,
+      "fields": {
+        "type": "CODE_TO_TOKEN_ERROR",
+        "error": "not_allowed",
+        "reason": "Offline tokens not allowed for the user or client"
+      }
+    }
+  ]
+}

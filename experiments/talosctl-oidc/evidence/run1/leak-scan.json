@@ -1,6 +1,7 @@
 {
   "scope": [
     "audit.json",
+    "diagnostics.json",
     "events.json",
     "retention.json"
   ],
