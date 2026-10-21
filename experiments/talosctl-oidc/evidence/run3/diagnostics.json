@@ -1,5 +1,5 @@
 {
-  "projection": "Fixed allowlisted Keycloak event fields; all other fields omitted",
+  "projection": "Fields from lines matching three predefined Keycloak signatures; other fields and events not projected",
   "events": [
     {
       "path": "private/commands/077-keycloak-logs.out",
