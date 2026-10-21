@@ -224,8 +224,10 @@ Plan pln_f645…cawy   (•) Proposed — not approved, nothing will run   expir
 |  Change      whole redacted configuration, applied rel_9vbn… -> rel_h7rt…                 |
 |              machine.nodeLabels.team: (absent) -> storage                                 |
 +-------------------------------------------------------------------------------------------+
-| (•) Self-approval, predicted: you created this plan and published this release. The      |
-|     approval records the actual reasons. Allowed and marked.                              |
+| (•) Self-approval, predicted: you created this plan and published this release, and you   |
+|     authored no fragment, profile or assignment revision in it. Import-base authorship    |
+|     and automation you own are not predicted. The approval records the actual reasons.    |
+|     Allowed and marked.                                                                   |
 | To approve, type the plan ID: [______________]   [Approve]  (approver, human)             |
 | [Cancel plan] (creator publisher, approver, recovery-admin)                               |
 +-------------------------------------------------------------------------------------------+
@@ -264,14 +266,15 @@ Drift on mch_w4ze…n3fa   opened 09:41   (•) Frozen
 What changed is not shown: Bronzeward can show it only by importing it (gap G7).
 +-----------------------------+-------------------------------+-----------------------------+
 | Freeze                      | Adopt                         | Revert                      |
-| Stop new commitments and    | Make what the machine runs    | Put Desired rel_fgqv… back. |
-| attempts while you decide.  | the applied release.          | Overwrites the change.      |
-| Does not stop an attempt    | 1 Import it for adoption,     | 1 Plan apply-config         |
-| already recorded.           |                               |                             |
-| (•) already frozen          |                               |                             |
-|                             |   review and mark  (author)   |   (publisher)               |
-|                             | 2 Publish  (publisher)        | 2 Approve  (approver)       |
-|                             | 3 Plan adopt, approve         | 3 Unfreeze (approver)       |
+| Stop new commitments and    | Record the node's bytes as    | Put Desired rel_fgqv… back. |
+| attempts while you decide.  | Applied for a newly published | Overwrites the change.      |
+| Does not stop an attempt    | release. Its compiled bytes   | 1 Plan apply-config         |
+| already recorded.           | may differ: the adopt plan    |   (publisher)               |
+| (•) already frozen          | reports pendingConvergence.   | 2 Approve  (approver)       |
+|                             | 1 Import it for adoption,     | 3 Unfreeze (approver)       |
+|                             |   review and mark  (author)   |                             |
+|                             | 2 Publish  (publisher)        |                             |
+|                             | 3 Plan adopt, approve         |                             |
 |                             | Sends nothing to the machine. |                             |
 | [Unfreeze] (approver)       | [Start adoption]              | [Plan revert]               |
 +-----------------------------+-------------------------------+-----------------------------+
@@ -291,20 +294,24 @@ restart. Imports complete on it.
 | mch_k2p…7xqa   | pre-restore-unaccounted  | [Account scope]                              |
 | mch_tqhc…35uq  | ready                    | [Release scope]  (not an approval)           |
 | mch_w4ze…n3fa  | ready                    | [Release scope]  (not an approval)           |
-| mch_b3c…aa2q   | unresolved               | op_q8r… held: classified after restart       |
+| mch_b3c…aa2q   | unresolved               | op_q8r… held: classified after the normal    |
+|                |                          | restart, then re-mark                        |
 +----------------+--------------------------+----------------------------------------------+
 | [Exit recovery]~ 4 scopes not released (ready is not released)                            |
 | Drafts, imports and publication remain available: a scope blocked by a lost key leaves    |
-| that state through a newly published release.  [Open Changes]                             |
+| that state through a newly published release that leaves unreleased scopes' assignments   |
+| unchanged; one that changes them fails recovery-mode-active.  [Open Changes]              |
 +-------------------------------------------------------------------------------------------+
 
 Account scope mch_k2p…7xqa (pre-restore unaccounted)
-  Restore stopped      10:31         Floor from   the stop plus the maximum transport
-                                                  deadline, or a later restored attempt's
-  Start observation    [obs_a… ▾]  must be the first successful read after that point
-  End observation      [obs_b… ▾]  must begin at least the settle floor (30 s) after the
-                                   latest of that point and the start
-  Resource version     unchanged between them
+  Restore stopped      10:31
+  Start observation    [obs_a… ▾]  must be the first successful read after the latest of the
+                                   stop plus the maximum transport deadline and any restored
+                                   unaccounted attempt's transport deadline
+  End observation      [obs_b… ▾]  recovery observations only; must begin at least the
+                                   settle floor after the latest of that point and the start.
+                                   Neither value is served (G17); a refusal states them.
+  Resource version     read at both ends, unchanged between them
   Explanation          [______________]  required if the resource version moved
   This records your judgment that no request sent before the restore, from any attempt the
   restored journal shows or one it lost, can still land. It may already have landed; nothing
