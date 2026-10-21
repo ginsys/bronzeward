@@ -362,7 +362,7 @@ returns a different principal is shown as a new sign-in, never silently continue
 $ bronzewardctl machine list --cluster cl_9fd…m3ka
 MACHINE         ENDPOINT          DESIRED        APPLIED (SOURCE)          OBSERVED             STATE
 mch_k2p…7xqa    10.5.0.2:50000    rel_fgqv…j6m   rel_fgqv…j6m (operation)  =applied, 2m ago     matches applied
-mch_tqhc…35uq   10.5.0.3:50000    rel_p4nx…8wd   rel_fgqv…j6m (adoption)   =applied, 1m ago     pending convergence
+mch_tqhc…35uq   10.5.0.3:50000    rel_fgqv…j6m   rel_fgqv…j6m (adoption)   =applied, 1m ago     pending convergence
 mch_w4ze…n3fa   10.5.0.4:50000    rel_fgqv…j6m   rel_fgqv…j6m (operation)  no match, 5m ago     drifted, frozen
 Health is not checked in this installation.
 ```
@@ -444,7 +444,7 @@ Failure branches the clients must show, each from `GET /ingestions/{id}` states 
 ```text
 $ bronzewardctl import continue ing_6fd…q2la
 Continued (operation op_zcfw…5mcm) ... failed: precondition-failed. The draft changed after
-this import paused, so the import was not applied and its claim is abandoned.   # exit 4
+this import started, so the import was not applied and its claim is abandoned.   # exit 4
 Import again against the draft's current revision:
   bronzewardctl import start --machine mch_b3c…aa2q --draft drf_2rmp…457a --review
 $ bronzewardctl import status ing_8nw…c5ra                 # a different import, its runner gone
@@ -455,14 +455,20 @@ Take it over to resume, or abandon it:
 
 A machine recorded from an existing cluster has no `Applied` yet, and an `apply-config` plan
 for it is refused until it is handed over (`internal/api/plans.go:272-275`). The handover
-publishes the import draft and adopts the machine with an adopt plan that binds no drift record
+gives the machine an assignment selecting something in the import draft, publishes it and adopts
+the machine with an adopt plan that binds no drift record. A machine published with no assignment
+has no assignment revision in the release, and its adopt plan is refused
+(`internal/api/publish.go:713`, `internal/api/plans.go:325-328`; `docs/operator/walkthrough.md:128-141`)
 ([execution and recovery §6.3](execution-recovery.md#63-adopt), existing-cluster handover;
 [acceptance plan S3](acceptance-plan.md#s3-approval), handover part):
 
 ```text
+$ bronzewardctl assignment set mch_b3c…aa2q --draft drf_2rmp…457a --fragment cluster=cluster-base
+Assignment saved (draft revision 3).
 $ bronzewardctl publish drf_2rmp…457a                          # role: publisher
-Publishing draft drf_2rmp…457a revision 2 (operation op_t6j…w2na) ... succeeded.
-Release rel_9vbn…c1ta is now Desired for 1 machine. Nothing has been sent to any machine.
+Publishing draft drf_2rmp…457a revision 3 (operation op_t6j…w2na) ... succeeded.
+Release rel_9vbn…c1ta is now Desired for 4 machines: every machine of cluster cl_9fd…m3ka with
+an import base. Nothing has been sent to any machine.
 mch_b3c…aa2q has no Applied: hand it over with an adopt plan.
 $ bronzewardctl plan create --release rel_9vbn…c1ta --machine mch_b3c…aa2q --operation adopt
 Plan pln_h2d…r8qa proposed: adopt, handover (no drift record, no baseline revision).
@@ -476,7 +482,7 @@ rel_9vbn…c1ta (adoption) once it does.
 The approval screen is §5.6's, with the adoption baseline evidence in place of a diff
 (`internal/api/plans.go:138-168`). An adoption records the digest of the node's own bytes
 ([§2.4](#24-desired-applied-and-observed)); the plan's evidence says whether the release's
-artifact differs from them (`pendingConvergence`, `internal/api/plans.go:313-314`). In this
+artifact differs from them (`pendingConvergence`, `internal/api/plans.go:315`). In this
 example it does not, so §5.6's later `apply-config` plan shows a diff from `rel_9vbn…c1ta`.
 Had it differed, that plan would show "Diff withheld": no redacted form exists of what the
 machine runs (`internal/api/plans.go:434-449`).
@@ -525,21 +531,26 @@ fragment `document` is never in argv: `--file` or stdin.
 ```text
 $ bronzewardctl publish drf_8kdq…z6pa          # role: publisher
 Publishing draft drf_8kdq…z6pa revision 6 (operation op_m2a…z7ka) ... succeeded.
-Release rel_h7rt…2bd is now Desired for 1 machine. Nothing has been sent to any machine.
+Release rel_h7rt…2bd is now Desired for 4 machines: every machine of cluster cl_9fd…m3ka with
+an import base. Nothing has been sent to any machine.
 Next (mch_b3c…aa2q has an Applied, so apply-config; a machine with none is handed over first, §5.3):
   bronzewardctl plan create --release rel_h7rt…2bd --machine mch_b3c…aa2q --operation apply-config
 $ bronzewardctl release show rel_h7rt…2bd
 Release rel_h7rt…2bd  cluster cl_9fd… (lab-a)  published by ops-ben (publisher) 10:02
 Renderer   contract v1.13, machinery v1.13.6, Kubernetes v1.34.1
 Built from (source revisions, not configuration):
+  fragment     cluster-base    frv_5cz…h1ma
   fragment     worker-labels   frv_3jn…k4ma
+  fragment     worker-sysctls  frv_8wq…c3ra
   profile      workers         prv_7ce…m2qa
   assignment   mch_b3c…aa2q    asr_5qp…d7fa
-Rendered configuration per machine:
+  assignment   3 more, one per other covered machine
+Rendered configuration per machine (4):
   mch_b3c…aa2q   no-reboot   bronzewardctl release review rel_h7rt…2bd mch_b3c…aa2q
+  mch_k2p…7xqa, mch_tqhc…35uq, mch_w4ze…n3fa: the same command with their IDs
 $ bronzewardctl release provenance rel_h7rt…2bd mch_b3c…aa2q
 REFERENCE                VERSION  FROM (REVISION, PATH)                           RENDERED AT
-registry/example-pass    1        frv_9tk…, doc[0]/machine/registries/…/password  doc[0]/machine/registries/…/password
+registry/example-pass    1        frv_3jn…k4ma, doc[0]/machine/registries/…/password  doc[0]/machine/registries/…/password
 Provenance covers secret references only; other fields are not traced.         # G6
 ```
 
@@ -568,10 +579,10 @@ Evidence
   Diff          whole redacted configuration, applied rel_9vbn…c1ta -> rel_h7rt…2bd
     @@ machine.nodeLabels @@
     +  team: storage
-Self-approval   predicted: you published this release. The approval records the actual
-                reasons; self-approval is marked and allowed.
+Self-approval   predicted: you created this plan and published this release. The approval
+                records the actual reasons; self-approval is marked and allowed.
 Type the plan ID to approve, or press Enter to stop: pln_f645…cawy
-Approved (apr_2ztr…47vy). Recorded self-approval reasons: published.
+Approved (apr_2ztr…47vy). Recorded self-approval reasons: created-plan, published.
 The controller re-checks the plan at use time; it applies it only if every check passes.
 ```
 
@@ -824,7 +835,7 @@ over an operation whose owner is stopped; account an attempt with two named obse
 written explanation where required; resolve an attempt-less `unresolved` operation as
 cancelled; account, mark and release scopes; exit; revoke an identity after adding it to the
 deployment's denied subjects. Human only. Sees: the settle floor stated as a floor, not a bound;
-the `missing[]` list before a mark (`internal/api/recovery_marks.go:47-59`).
+a mark's `missing[]` list before a release (`internal/api/recovery_marks.go:195-213`).
 
 **Automation.** A CI job with an automation token: create a draft, set fragments from files,
 publish, create a plan, then stop. It cannot import, approve, recover or record inventory. The
@@ -955,7 +966,7 @@ accepted limitation.
 | --- | --- | --- | --- |
 | G1 | No identity, role or capability read; a 403 body lists only the roles the route accepts, never the caller's (`internal/api/api.go:372-384`) | showing who is signed in and which actions are allowed | none; let the server refuse |
 | G2 | No version or compatibility read; only unauthenticated `GET /livez` (`internal/server/server.go:19-21`) | client/server compatibility, context setup | none |
-| G3 | An operation does not name its ingestion; only the ingestion's 202 body links them (`internal/api/reads.go:336-349`) | resuming an import after the client lost the 202 | keep the 202 body; within the same principal and epoch, the identical request with the same key replays it |
+| G3 | An operation does not name its ingestion, and no ingestion listing exists (G10); the ingestion names its operation (`internal/api/ingestions.go:234`), not the reverse (`internal/api/reads.go:323-328`) | resuming an import after the client lost the 202 | keep the 202 body; within the same principal and epoch, the identical request with the same key replays it |
 | G4 | A draft does not name its release; releases have no draft filter (`internal/api/inventory.go:346-353`, `internal/api/releases.go:215`) | "what did this draft publish?" | the publish operation's `result.release` |
 | G5 | No render of a draft before publication | authors cannot see a machine's configuration before publishing | publish, then review |
 | G6 | Provenance covers reference occurrences only (`internal/api/releases.go:78-100`), not "which fragment set this field" ([design §6.2](../design/Talos_Configuration_and_Machine_Management_Design.md#62-fragments-profiles-and-assignments)) | field-origin inspector | none |
@@ -963,7 +974,7 @@ accepted limitation.
 | G8 | Machines have no human-readable name (`internal/api/inventory.go:177-224`) | finding a machine | endpoint and node ID |
 | G9 | No list filters on machines, plans, releases, drafts or acts (`internal/api/reads.go:78-80`, `internal/api/acts.go:72`); operations filter by `plan`, `machine`, `state`, `kind` (`internal/api/operations.go:97`); no machine timeline stream | "plans awaiting my approval", per-cluster views, following a timeline | client-side paging; polling |
 | G10 | No listing of ingestions: only `GET /ingestions/{id}` (`internal/api/routes.go:90`) | finding a paused or lapsed import | keep the ID |
-| G11 | Recovery marks, releases and accountings have no list route; they appear in `GET /recovery` and timelines | recovery console history | timeline |
+| G11 | Recovery marks, releases and accountings have no list route; `GET /recovery` shows only their resulting scope states (`internal/api/recovery_exits.go:123-148`), the records themselves appear in machine timelines and acts | recovery console history | timeline |
 | G12 | Browser use: no statement of CORS, origin checks or hosting of a web client | the web interface at all | #253 |
 
 Not gaps, by design: no client dispatch or apply route
@@ -993,7 +1004,7 @@ the CLI and in the web interface. A walkthrough by an agent does not count as a 
 | --- | --- | --- | --- |
 | T1 Sign in, pick a context, say which roles you hold | any | correct context and roles stated | — |
 | T2 Find the drifted machine and state its desired, applied and observed release and observation time | viewer | all four correct | "Is it healthy?" Expected: not established |
-| T3 Import a machine with review, mark one unmarked secret, continue, then hand it over: publish the import draft, plan and approve the adopt | author, publisher, approver | import released; mark recorded; `Applied` set by the adoption | "Is the secret in the draft?" Expected: a reference only |
+| T3 Import a machine with review, mark one unmarked secret, continue, then hand it over: assign it, publish the import draft, plan and approve the adopt | author, publisher, approver | import released; mark recorded; `Applied` set by the adoption | "Is the secret in the draft?" Expected: a reference only |
 | T4 Change a node label for the workers and save it | author | draft entry saved | "Has any machine changed?" Expected: no |
 | T5 Recover from a concurrent edit | author | other change read, own change re-applied | — |
 | T6 Publish and find one machine's rendered configuration | publisher | review opened for that machine | "Are the sources the configuration?" Expected: no |
