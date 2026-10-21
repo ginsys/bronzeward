@@ -24,12 +24,17 @@ class LeakScanTest(unittest.TestCase):
                                [b"synthetic-known-secret"]))
 
     def test_optimization_refused_before_argument_parsing(self):
-        script = Path(__file__).with_name("export.py")
-        for flags, optimization in ((["-O"], ""), (["-OO"], ""), ([], "1")):
-            with self.subTest(flags=flags, optimization=optimization):
-                result = subprocess.run([sys.executable, *flags, str(script), "--help"],
-                                        env=os.environ | {"PYTHONOPTIMIZE": optimization},
-                                        capture_output=True, text=True)
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn("Evidence export requires assertions", result.stderr)
-                self.assertEqual(result.stdout, "")
+        for name in ("export.py", "run.py"):
+            script = Path(__file__).with_name(name)
+            for flags, optimization in ((["-O"], ""), (["-OO"], ""), ([], "1"), ([], "")):
+                with self.subTest(script=name, flags=flags, optimization=optimization):
+                    result = subprocess.run([sys.executable, *flags, str(script), "--help"],
+                                            env=os.environ | {"PYTHONOPTIMIZE": optimization},
+                                            capture_output=True, text=True)
+                    if flags or optimization:
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertIn("requires assertions", result.stderr)
+                        self.assertEqual(result.stdout, "")
+                    else:
+                        self.assertEqual(result.returncode, 0)
+                        self.assertIn("usage:", result.stdout)

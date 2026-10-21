@@ -220,9 +220,12 @@ for scope and limits; this is evidence hygiene, not proof that upstream never
 logs secrets under other configurations.
 The final offline rescan covers raw and JSON-escaped known values and generic
 and Ed25519 key headers, with its exporter hash retained. Four scanner checks
-include an unknown-key header and an escaped value that raw matching misses;
-all eight Python checks pass. The exporter refuses `-O`, `-OO` and
-`PYTHONOPTIMIZE` before argument parsing or evidence file access, so its assertion gates
-cannot silently disappear. No live scenario was rerun for these export fixes.
+include an unknown-key header and an escaped value that raw matching misses.
+All eight Python checks pass. Both runner and exporter refuse `-O`, `-OO` and
+`PYTHONOPTIMIZE` before argument parsing, resource creation or evidence access,
+so their assertion gates cannot silently disappear. The completed live chain
+belongs to `3ddf133`; later exporter repairs and the runner's startup refusal
+were verified offline. The scenario and cleanup body are unchanged, but no
+later live-chain result is claimed.
 Ordinary repository CI does not run this fixture, its standalone Go probe or
 Python checks; their separately recorded local results supply that coverage.

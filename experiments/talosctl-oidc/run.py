@@ -22,6 +22,11 @@ from urllib.request import ProxyHandler, Request, build_opener, HTTPSHandler
 import yaml
 
 
+# Refuse to create resources or report results with integrity checks disabled.
+if not __debug__:
+    raise SystemExit("Research runner requires assertions: unset PYTHONOPTIMIZE and omit -O/-OO")
+
+
 SOURCE = "d3cd122341537d3235bd5dfe7ced2171ec765227"
 TALOS = "ghcr.io/siderolabs/talos:v1.13.6@sha256:f2e2b7e5812b2b59c1acfe6af7516231aeeef79fb1ffff6b57ad987f8dd47a6e"
 KEYCLOAK = "quay.io/keycloak/keycloak:26.8.1@sha256:ed1cab21814c7d18ce8f0e11d5a1fa1c6923de12dd4c7625a18c5d34452a57a4"
