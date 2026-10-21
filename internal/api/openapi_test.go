@@ -103,13 +103,18 @@ func description(t *testing.T) map[string]any {
 
 // describedFacts returns the description's facts, keyed as tableFacts keys them, and every
 // malformed operation it met. A path parameter must be required; an Idempotency-Key or If-Match
-// parameter counts only when it is a required header.
+// parameter counts only when it is a required header; a request body must be required. Parameters
+// are described per operation: a path item's own parameters, which OpenAPI applies to all its
+// operations, are refused rather than merged.
 func describedFacts(doc map[string]any) (map[string]routeFacts, []string) {
 	out := map[string]routeFacts{}
 	var bad []string
 	paths, _ := doc["paths"].(map[string]any)
 	for _, p := range slices.Sorted(maps.Keys(paths)) {
 		item, _ := paths[p].(map[string]any)
+		if _, ok := item["parameters"]; ok {
+			bad = append(bad, p+": parameters on the path item, not on its operations")
+		}
 		for _, m := range operationMethods {
 			raw, ok := item[m]
 			if !ok {
@@ -155,7 +160,12 @@ func describedFacts(doc map[string]any) (map[string]routeFacts, []string) {
 					f.ifMatchHeader = required
 				}
 			}
-			_, f.body = op["requestBody"]
+			if raw, ok := op["requestBody"]; ok {
+				rb, _ := deref(doc, raw).(map[string]any)
+				if f.body = rb["required"] == true; !f.body {
+					bad = append(bad, k+": the request body is not required")
+				}
+			}
 			out[k] = f
 		}
 	}
@@ -327,6 +337,11 @@ func TestDescribedFactsReadRequestShape(t *testing.T) {
 			c["parameters"] = replace("Idempotency-Key", map[string]any{"name": "Idempotency-Key", "in": "header"})
 		}},
 		{"the request body removed", func(c map[string]any) { delete(c, "requestBody") }},
+		{"the request body not required", func(c map[string]any) {
+			rb := maps.Clone(deref(doc, c["requestBody"]).(map[string]any))
+			delete(rb, "required")
+			c["requestBody"] = rb
+		}},
 	} {
 		c := maps.Clone(op)
 		tc.change(c)
@@ -341,5 +356,22 @@ func TestDescribedFactsReadRequestShape(t *testing.T) {
 		if len(d) != 1 || !strings.HasPrefix(d[0], k+":") {
 			t.Errorf("%s: got %q, want one difference starting %q", tc.name, d, k+":")
 		}
+	}
+}
+
+// A path item's own parameters apply to all its operations; describedFacts refuses them instead
+// of reading facts without them.
+func TestDescribedFactsRefusePathItemParameters(t *testing.T) {
+	t.Parallel()
+	doc := description(t)
+	paths := doc["paths"].(map[string]any)
+	item := maps.Clone(paths["/clusters"].(map[string]any))
+	item["parameters"] = []any{map[string]any{"$ref": "#/components/parameters/IdempotencyKey"}}
+	changedPaths := maps.Clone(paths)
+	changedPaths["/clusters"] = item
+	changed := maps.Clone(doc)
+	changed["paths"] = changedPaths
+	if _, bad := describedFacts(changed); !slices.Contains(bad, "/clusters: parameters on the path item, not on its operations") {
+		t.Errorf("path-item parameters not refused: %q", bad)
 	}
 }

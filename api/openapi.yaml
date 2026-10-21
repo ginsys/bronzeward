@@ -9,7 +9,7 @@ info:
     parameters or its request body differ from routes(), in either direction, and the API tests validate every answer''s status,
     headers and body, and every request the server accepted, against this description. Every error answer is a problem document
     (default response). Request bodies are decoded strictly: application/json, exactly the listed members, none repeated;
-    an optional member given as null is the same as an absent one.'
+    a member whose schema admits null may be given as null, which the server treats as absent.'
 servers:
 - {url: /api/v1}
 security:
@@ -1965,7 +1965,8 @@ components:
           description: 'On 401: the bearer challenge (RFC 6750).'
           schema: {type: string}
         Cache-Control:
-          description: no-store on every answer of GET /ingestions/{id}/review.
+          description: no-store on an answer of GET /ingestions/{id}/review once its handler runs; absent from an authentication,
+            role or recovery-start refusal.
           schema: {type: string, enum: [no-store]}
       content:
         application/problem+json:
@@ -2313,7 +2314,7 @@ components:
       properties:
         references:
           type: [object, 'null']
-          additionalProperties: {$ref: '#/components/schemas/Reference'}
+          additionalProperties: {$ref: '#/components/schemas/ReferenceInput'}
         embedded:
           type: [array, 'null']
           items: {$ref: '#/components/schemas/Embedded'}
@@ -2625,10 +2626,7 @@ components:
           type: [array, 'null']
           items: {type: string}
           maxItems: 1024
-        document:
-          type: [string, 'null']
-          minLength: 1
-          description: The YAML document, at most 512 KiB.
+        document: {type: string, minLength: 1, description: 'The YAML document, at most 512 KiB.'}
         declarations:
           oneOf:
           - {$ref: '#/components/schemas/Declarations'}
@@ -3071,6 +3069,14 @@ components:
         kind: {type: string}
         version: {type: integer}
         encoding: {type: string}
+      additionalProperties: false
+    ReferenceInput:
+      type: object
+      required: [kind, version]
+      properties:
+        kind: {type: string}
+        version: {type: integer}
+        encoding: {type: [string, 'null']}
       additionalProperties: false
     ReleaseBody:
       type: object
