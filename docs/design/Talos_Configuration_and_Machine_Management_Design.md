@@ -926,22 +926,34 @@ OpenBao supports Kubernetes service-account and certificate authentication; use 
 
 Talos access credentials are per cluster and provider-held: each cluster's talosconfig is an operator-written secret that ingestion and the executor read at use, at a path apart from the secret generations ([persistence and API §3.3](../spec/persistence-api.md#33-talos-access); owner decision, 2 October 2026). Reading a machine configuration needs the `os:admin` Talos role, so ingestion's lack of machine-operation authority is enforced by its read-only Talos client, not by Talos or the provider. The executor's observations (drift, restoration, recovery, and those taken for a plan) need the same credential without an approved plan to check; they use a read-only Talos client held to the same kind of allowlist, and the approval check gates artifact decryption and every mutating request (owner decision, 2 October 2026). The provider cannot tell the two uses apart; a separate observer identity was rejected because it would hold the same mutation-capable credential and change nothing the read-only client does not.
 
-**Service-credential model** (owner, 21 October 2026, [service-credential decision](https://github.com/ginsys/bronzeward/issues/266)): Bronzeward keeps the per-cluster, operator-written, provider-held talosconfig of [persistence and API §3.3](../spec/persistence-api.md#33-talos-access) for ingestion and the executor. It does not issue Talos certificates. Rotation remains writing a new provider version, which the next read, and a retry's fresh evidence, picks up.
+**Service-credential model** (owner, 21 October 2026, [service-credential decision](https://github.com/ginsys/bronzeward/issues/266)): Bronzeward keeps the per-cluster, operator-written, provider-held talosconfig of [persistence and API §3.3](../spec/persistence-api.md#33-talos-access) for ingestion and the executor. It does not issue Talos certificates. Native issuance through a separately designed service is deferred, not rejected. The decision authorizes no implementation, provider change, credential-policy change or deployment.
 
-Native issuance through a separately designed service is deferred, not rejected. The [Talos OIDC investigation](research/20261021-talosctl-oidc.md#executor-compatibility) shows that it needs a long-lived `os:admin` issuing credential. Talos imposes no maximum certificate lifetime, and an administrator certificate can mint a longer-lived one. An authenticated connection can outlive its certificate. Adopting it would need a new contract for:
+The rest of this decision is *derived*, as in §13.7: the recorder's account of the current model, the rationale of the recommendation the owner accepted as presented, and what issuance would need. It is not the owner's words.
+
+Rotation remains writing a new provider version. A dispatch in flight keeps the version its evidence read; a retry reads the new version with its fresh evidence, and an attempt whose version moved since its evidence is refused and observed again ([execution and recovery §3.2](../spec/execution-recovery.md#32-the-commitment-transaction) comparison 3).
+
+Rationale: the current model is fully specified against the provider and execution contracts. It leaves the talosconfig's custody and rotation an operator duty, and its exposure is bounded only by how often the operator rotates. Issuance could shorten routine exposure, but the [Talos OIDC investigation](research/20261021-talosctl-oidc.md#executor-compatibility) shows it moves the powerful credential rather than removing it.
+
+- The issuer needs a privileged (`os:admin`) talosconfig of its own to sign certificates.
+- At Talos v1.13.6 the signing call accepts any positive requested lifetime, with no maximum (source reading).
+- In single samples on one disposable fixture, an administrator certificate minted a longer-lived one, and an authenticated connection outlived its certificate.
+
+That comparison is source and design analysis; no issuer or OpenBao integration was built or tested. An operator login or a successful issuance does not establish executor compatibility. The upstream `talosctl-oidc` CLI is not an executor credential source: its keyring and file custody conflicts with memory-only executor handling.
+
+Adopting issuance would need a separately refined specification and qualification sequence, covering:
 
 - an access identity that keeps the meaning of path, version and `created_time`;
 - binding one credential to an evidence observation and its attempt;
 - rotation, expiry and retries during that window, restore epochs and uncertain requests;
-- issuer custody, rotation, outage and emergency access.
+- issuer custody, rotation, outage, restart and emergency access, and evidence-leak checks.
 
-Throughout, it would keep memory-only executor handling, independently chosen endpoints, read-only observation clients and the approval check before every mutation, and issuance would never own dispatch. The upstream `talosctl-oidc` CLI is not an executor credential source. Reconsideration needs new evidence: a Talos control that bounds issued lifetime or scopes a read-only configuration role, or an exposure requirement that rotation cannot meet.
+Throughout, it would keep memory-only executor handling, independently chosen endpoints, read-only observation clients and the approval check before every mutation, and issuance would never own dispatch. Reconsideration needs new evidence: a Talos control that bounds issued lifetime or scopes a read-only configuration role, or an exposure requirement that rotation cannot meet.
 
 OpenBao policies constrain paths and operations but do not know which database plan is approved. Encryption contexts are not a substitute for that application check. The controller's trust and deployment boundary must be explicit; naming separate roles does not prove isolation within one process.
 
 These are component identities inside the controller. The application roles that humans and automation hold are §13.7's and are distinct from them: the `publisher` application role grants no provider access of its own.
 
-The [Talos OIDC credential investigation](research/20261021-talosctl-oidc.md) evaluates a separate operator-access companion and native issuance using disposable Talos/IdP fixtures. Cached tokens survived group removal and account disablement, a held connection worked after certificate expiry, and an administrator minted a longer-lived certificate. The research recommends deferring adoption; it does not change the provider-held executor contract or application authentication. Both decisions are recorded: operator access in §13.8, service credentials in the §13.2 paragraph above, with no dependency imposed on the CLI/web workflows.
+The [Talos OIDC credential investigation](research/20261021-talosctl-oidc.md) evaluates a separate operator-access companion and native issuance using disposable Talos/IdP fixtures. In single sampled observations, not measured bounds, cached tokens survived group removal and account disablement, a held connection worked after certificate expiry, and an administrator minted a longer-lived certificate. The research recommends deferring the operator companion and keeping the current executor credential model; it does not change the provider-held executor contract or application authentication. Both decisions are recorded: operator access in §13.8, service credentials in the §13.2 paragraph above, with no dependency imposed on the CLI/web workflows.
 
 ### 13.3 Enrolment security
 
