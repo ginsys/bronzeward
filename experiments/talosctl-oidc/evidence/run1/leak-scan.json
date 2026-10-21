@@ -7,7 +7,7 @@
   ],
   "known_synthetic_values": 4,
   "matches": 0,
-  "scanner_sha256": "b5983cf44d54acb41cfb43fd768b7d3d33283e3258a9c9cca3389b881308008d",
+  "scanner_sha256": "10c707cb309e5ed997be098de3b8f17918c9b43c028b4bcf74eab0602d58f749",
   "positive_controls": "every known value raw and JSON-escaped, generic and ED25519 private-key markers, and synthetic JWT detected",
   "limitations": "This checks retained projections only. Private run state intentionally contains synthetic credentials and is not publishable."
 }

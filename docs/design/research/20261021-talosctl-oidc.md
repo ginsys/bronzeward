@@ -219,8 +219,10 @@ synthetic credentials and is not publishable. See each run's `leak-scan.json`
 for scope and limits; this is evidence hygiene, not proof that upstream never
 logs secrets under other configurations.
 The final offline rescan covers raw and JSON-escaped known values and generic
-and Ed25519 key headers, with its exporter hash retained. Three scanner checks
+and Ed25519 key headers, with its exporter hash retained. Four scanner checks
 include an unknown-key header and an escaped value that raw matching misses;
-all seven Python checks pass. No live scenario was rerun for these export fixes.
+all eight Python checks pass. The exporter refuses `-O`, `-OO` and
+`PYTHONOPTIMIZE` before argument parsing or evidence file access, so its assertion gates
+cannot silently disappear. No live scenario was rerun for these export fixes.
 Ordinary repository CI does not run this fixture, its standalone Go probe or
 Python checks; their separately recorded local results supply that coverage.

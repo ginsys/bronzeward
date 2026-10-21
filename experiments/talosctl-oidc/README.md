@@ -123,8 +123,9 @@ Keep fixture files unchanged during a chain.
 
 ## Exporting evidence
 
-Run the committed exporter without Python's `-O` option (its checks use
-assertions), with the exact paths supplied to the recorded fixture:
+Run the committed exporter with the exact paths supplied to the recorded
+fixture. It refuses Python optimization (`-O`, `-OO` or `PYTHONOPTIMIZE`) before
+argument parsing or evidence file access, because its integrity checks use assertions:
 
 ```sh
 python3 experiments/talosctl-oidc/export.py run \
@@ -140,8 +141,9 @@ controls before writing anything. It is specific to this synthetic fixture;
 inspect its output before publication. It does not sanitize arbitrary logs.
 Supply absolute, non-symlink paths as in the recorded profile; other path forms
 are not qualified. The scan covers raw and JSON-escaped known values and generic
-and Ed25519 private-key headers, and records the exporter's SHA-256. The seven
-Python checks include escaped-value and unknown-Ed25519-key negative controls.
+and Ed25519 private-key headers, and records the exporter's SHA-256. The eight
+Python checks include escaped-value and unknown-Ed25519-key positive controls,
+a safe-metadata negative control, and refusal of all three optimization modes.
 Diagnostic projections cannot establish the absence of other Keycloak errors.
 
 To rebuild the top-level results and SHA-256 manifest, supply each export and
