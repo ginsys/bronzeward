@@ -5,6 +5,8 @@ proposal's status). Low-fidelity wireframes for the web journeys in the
 [operator experience proposal](operator-experience.md). They fix content, order and which
 action is available to which role. They do not fix layout, styling, framework or wording beyond
 the labels that carry meaning. All data is synthetic; identifiers are shortened as `mch_tqhc…35uq`.
+Other people appear by readable names (`ops-ben`), which depend on
+[gap G15](operator-experience.md#11-api-gap-audit); the API serves only principal identifiers.
 
 Conventions: `[Button]` is an action; `[Button]~` is shown disabled with its reason;
 `(•)` is a status badge whose text carries the meaning, never its colour alone; `▸` opens a
@@ -30,7 +32,8 @@ Roles are shown only once the API can report them
 the epoch, and actions are enabled and refused by the server. The recovery banner states the
 scope summary and, while the server runs as started for recovery, that plan creation, approval
 and unfreeze wait for its normal restart and that accepted publications complete only then;
-imports complete on it. It never disables actions recovery mode allows
+imports complete on it. Until [gap G14](operator-experience.md#11-api-gap-audit) the client learns
+that start mode only from a refusal, so that line appears after the first one. It never disables actions recovery mode allows
 ([§5.9](operator-experience.md#59-recovery-after-a-restore)): an action is disabled only on a
 scope whose state refuses it, with that reason.
 
@@ -277,8 +280,9 @@ What changed is not shown: Bronzeward can show it only by importing it (gap G7).
 ```text
 Recovery   (•) Recovery mode on since 10:42   epoch ep_r2l…   entry by ops-carl
 Restored: database backup taken 10:20; stopped at 10:31
-Server started for recovery: plan creation, approval and unfreeze wait for its normal restart;
-publications it accepts complete only after that restart. Imports complete on it.
+Server started for recovery (known from a refusal until G14): plan creation, approval and
+unfreeze wait for its normal restart; publications it accepts complete only after that restart.
+Imports complete on it.
 +----------------+--------------------------+----------------------------------------------+
 | Machine        | Scope state              | Next action                                  |
 +----------------+--------------------------+----------------------------------------------+

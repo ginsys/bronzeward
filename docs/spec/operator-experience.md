@@ -67,12 +67,12 @@ API behaviour and compatibility belong to
 
 ## 2. What the operator must be able to tell apart
 
-Three questions in the owner's own review of the PoC show where the current output misleads:
+Three questions raised about the PoC's output show where it misleads:
 what the `sources` of a release are and where the configuration itself is; why a key in a YAML
 document is empty; and whether an imported configuration was changed when a plan says it will
 apply one. Each client view must answer these without the operator reading the specifications.
 The examples below are synthetic. They do not reproduce any captured document, and no statement
-here says which key the owner saw empty.
+here says which key was seen empty.
 
 ### 2.1 Source, release pointers and rendered configuration
 
@@ -288,7 +288,7 @@ bronzewardctl
   operation list | show | watch       watch follows events and resumes after a disconnect
   act list                            the audit record
   drift show <machine>
-  drift adopt <machine>               composite: drift-adoption import, then plan create
+  drift adopt <machine>               composite: drift-adoption import, publish, then plan create
   drift revert <machine>              composite: plan create (apply-config) for desired
 
   recovery status | enter | exit
@@ -313,8 +313,8 @@ Global: --context, -o table|json|yaml, --no-input, --no-wait, --idempotency-key,
 - Names are accepted where the API keys by name (fragments, profiles and the draft path) and
   identifiers everywhere else. A cluster is addressed by its ID and displayed with its recorded
   `name` beside it (`cl_9fd… (lab-a)`); the client resolves no names, except fragment names within a draft for a profile's pins ([§5.4](#54-editing-fragments-profiles-and-assignments)). Machines have no human name in the API
-  ([§11](#11-api-gap-audit), G8), so tables show the Talos endpoint and node ID beside the
-  identifier.
+  ([§11](#11-api-gap-audit), G8), so tables show the Talos endpoint beside the identifier, and
+  the machine detail adds the node ID.
 - No command applies configuration. Dispatch is the controller's; the clients plan, approve,
   watch and cancel.
 
@@ -322,7 +322,9 @@ Global: --context, -o table|json|yaml, --no-input, --no-wait, --idempotency-key,
 
 Synthetic data throughout. Identifiers are shortened as `mch_tqhc…35uq`; real output prints them
 whole. Text after `#` is commentary, not output. Each transcript names the role the signed-in
-identity holds.
+identity holds. Other people appear by readable names (`ops-ben`); the API serves only their
+principal identifiers today, so those names depend on gap G15
+([§11](#11-api-gap-audit)).
 
 ### 5.1 Sign-in and context
 
@@ -425,7 +427,7 @@ A mark is refused with the rule and the mark's position, never its path
 `failed` and abandons the claim itself, so nothing is left to abandon
 (`internal/api/continuations.go:60-63`, `internal/api/runner.go:108-111`,
 `internal/api/runner.go:384-386`, `internal/api/runner.go:457-468`). Marks are HMAC-keyed in the idempotency
-fingerprint and never stored (`internal/api/routes.go:20-23`).
+fingerprint and never stored (`internal/api/marks.go:58-68`).
 
 **Proposed**, as a candidate for #253 to qualify against
 [compilation §3.6](compilation.md#36-operator-review): the review is shown only on a terminal,
@@ -705,7 +707,7 @@ made again.
 ```text
 $ bronzewardctl status
 Recovery mode: on since 10:42 (epoch ep_r2l…). Scopes: 1 pre-restore-unaccounted, 1 unresolved, 2 ready.
-Server: started for recovery. Plan creation, approval and unfreeze are refused. Imports
+Server: started for recovery (needs G14). Plan creation, approval and unfreeze are refused. Imports
   complete here; publications are accepted but complete only after a normal restart (no
   publish worker runs). Recovery mode stays on after that restart.
 Drafts can be edited. No scope can commit, attempt or adopt until it is released; the
@@ -858,14 +860,14 @@ sending with "approval is for humans".
 | Withheld | review `configuration: null` | the notice, never an empty document | [W11](operator-experience-wireframes.md#w11-empty-withheld-error-and-offline-states) |
 | Unread or stale observation | `unread` causes, old `at` (`internal/api/observe.go:56-198`) | cause per field ("node unreachable", "provider access denied") | same, never green |
 | Refused | `application/problem+json` ([persistence and API §9.4](persistence-api.md#94-errors)) | title, code, what to do, `instance` | inline at the control, summary at the top |
-| Conflict | `412 precondition-failed`, `409 conflict` | stop and point at the newer state | show both and offer reload; never auto-merge |
+| Conflict | `412 precondition-failed`, `409 conflict` | stop and point at the newer state; a `409` naming a request still in progress under the same key instead waits and repeats with that key ([persistence and API §7.2](persistence-api.md#72-behavior)) | show both and offer reload; never auto-merge |
 | Ambiguous response | timeout or connection loss after sending | before exiting 3, offers to repeat the request it still holds in memory with the same key, subject to G13; after exit, prints the key and the resource to read | "Unknown whether this was saved"; [Repeat exactly] only while the page holds the request, for the same sign-in and epoch, subject to G13 |
 | Replayed | `Idempotent-Replayed: true` (`internal/api/idempotency.go:75-81`) | "Already done earlier; showing that result" | same |
 | Key reused | `422 idempotency-key-reused` | the request could not be matched to the earlier one under that key (it differed, or the recorded digest-key version can no longer be computed, [persistence and API §7.1](persistence-api.md#71-the-key)); nothing was done; retry under a new key | same |
 | Offline | no connection | retry reads with backoff; never queue writes | banner; actions disabled; last-read time shown |
-| Authentication refused | `401 unauthenticated`: not accepted, possibly but not necessarily because it expired | renew and repeat reads; repeat a pending write with the same key only if the renewed token is the same principal and the epoch is unchanged | same |
+| Authentication refused | `401 unauthenticated`: not accepted, possibly but not necessarily because it expired | renew and repeat reads; resend the refused write itself, which authentication refused before routing, so nothing ran (`internal/api/api.go:259-263`); an earlier write whose outcome is unknown is repeated only as an ambiguous response, for the same principal and epoch and subject to G13 | same |
 | Principal or epoch changed with a write pending | renewal returned another principal, a context switch, or a new `Bronzeward-Epoch` | the pending write is set aside: not repeated and not sent under a new key; the client reads the current resource and the operator decides afresh | same, with the pending write shown as "outcome unknown: it may already have been committed", and its repeat disabled |
-| Recovery mode | `Bronzeward-Recovery-Mode: true`, `409 recovery-mode-active` naming the scope | banner line on every command with the scope summary | persistent banner; an action is disabled only where its scope's state or the recovery-start process refuses it, with that reason ([§5.9](#59-recovery-after-a-restore)) |
+| Recovery mode | `Bronzeward-Recovery-Mode: true`, `409 recovery-mode-active` naming the scope | banner line on every command with the scope summary | persistent banner; an action is disabled only where its scope's state or the recovery-start process refuses it, with that reason ([§5.9](#59-recovery-after-a-restore)); the start mode is known only from such a refusal until G14 |
 | Epoch changed | new `Bronzeward-Epoch`, `400 cursor-invalid`, SSE `reset` | discard cached pages and cursors, say why | same |
 | Unresolved operation | `state: unresolved` | exit 5; who must act | the operation and machine both show it; no retry button |
 | Human-only refusal | `403 forbidden`, `humanOnly: true` | "This needs a person signed in, not an automation token" | same |
@@ -873,10 +875,12 @@ sending with "approval is for humans".
 Idempotency facts: a key is scoped to the authenticated principal, so another principal's use
 of it is a new request; the fingerprint covers the method, route template, path parameters,
 `If-Match` and the canonical body. The same key with the same fingerprint replays the stored
-answer in the current epoch, a different fingerprint is `422`, a record from an earlier epoch is
+answer in the current epoch, a different fingerprint is `422`, a claim still in progress under
+the key is `409` naming that request, a record from an earlier epoch is
 `409`, and after a restore that removed the record the same key executes afresh
 ([persistence and API §7.1](persistence-api.md#71-the-key), §7.2;
-`docs/spec/persistence-api.md:1243-1269`, `docs/spec/persistence-api.md:1332-1340`;
+`docs/spec/persistence-api.md:1243-1269`, `docs/spec/persistence-api.md:1320-1323`,
+`docs/spec/persistence-api.md:1332-1340`;
 `internal/api/idempotency.go:57-81`). The same key does not make a remote mutation exactly-once
 ([design §12.5](../design/Talos_Configuration_and_Machine_Management_Design.md#125-durable-operations-and-uncertain-outcomes)).
 
@@ -992,6 +996,8 @@ accepted limitation.
 | G11 | Recovery marks, releases and accountings have no list route; `GET /recovery` shows only their resulting scope states (`internal/api/recovery_exits.go:123-148`), the records themselves appear in machine timelines and acts | recovery console history | timeline |
 | G12 | Browser use: no statement of CORS, origin checks or hosting of a web client | the web interface at all | #253 |
 | G13 | A mutation takes no expected-epoch precondition: only `Idempotency-Key` and `If-Match` are checked (`internal/api/api.go:388-409`), and the epoch is reported only in an answer (`internal/api/api.go:318-319`). After a committed write's answer is lost and a restore removes its record, the same request with the same key executes afresh in the new epoch ([persistence and API §7.1](persistence-api.md#71-the-key)); a read before repeating leaves a race | repeating an ambiguous write ([§8](#8-states-every-view-must-handle), C5, [W11](operator-experience-wireframes.md#w11-empty-withheld-error-and-offline-states)) | none: the client compares only the epoch it last saw; #253 adds a server-enforced epoch check or explicitly accepts the residual risk |
+| G14 | No read of the process's start mode: `GET /recovery` serves epoch, recovery mode, entry, exit and scopes (`internal/api/recovery_exits.go:123-129`), the headers carry only `Bronzeward-Epoch` and `Bronzeward-Recovery-Mode` (`internal/api/api.go:318-324`), and a recovery start shows only in a `409 recovery-mode-active` refusal (`internal/api/recovery_exits.go:211-213`) | the recovery banner and `status` stating that plan creation, approval and unfreeze wait for a normal restart ([§5.9](#59-recovery-after-a-restore)) | the refusal itself; actions cannot be disabled beforehand |
+| G15 | No principal display name: bodies carry principal identifiers only (`internal/api/acts.go:19-30`, `internal/api/releases.go:53`), and no route maps one to a subject or name | showing who published, planned, approved or entered recovery | shortened principal identifiers |
 
 Not gaps, by design: no client dispatch or apply route
 ([design §12.7](../design/Talos_Configuration_and_Machine_Management_Design.md#127-application-approval-and-dispatch-boundary));
@@ -1080,7 +1086,7 @@ refinement until #253's contracts land.
 
 Proposed changes: the web inventory ticket (#255) also carries the shared web shell (header,
 banners, state catalogue of [§8](#8-states-every-view-must-handle)); and #253 records, for each
-gap G1-G13, whether it becomes an API issue that natively blocks the client tickets it affects.
+gap G1-G15, whether it becomes an API issue that natively blocks the client tickets it affects.
 
 **Qualifications left to #253**, besides the gaps:
 
