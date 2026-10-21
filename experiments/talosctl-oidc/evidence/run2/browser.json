@@ -1,0 +1,30 @@
+{
+  "browser-9-reader.json": {
+    "steps": [
+      {
+        "stage": "form",
+        "status": 200,
+        "cookies": [
+          {
+            "name": "AUTH_SESSION_ID",
+            "secure": true
+          },
+          {
+            "name": "KC_AUTH_SESSION_HASH",
+            "secure": true
+          },
+          {
+            "name": "KC_RESTART",
+            "secure": true
+          }
+        ]
+      },
+      {
+        "stage": "submit",
+        "status": 200,
+        "reached_callback": true
+      }
+    ],
+    "result": "pass"
+  }
+}

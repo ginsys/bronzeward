@@ -1,0 +1,11 @@
+{
+  "scope": [
+    "audit.json",
+    "events.json",
+    "retention.json"
+  ],
+  "known_synthetic_values": 4,
+  "matches": 0,
+  "positive_controls": "every known value, private-key marker and synthetic JWT detected",
+  "limitations": "This checks retained projections only. Private run state intentionally contains synthetic credentials and is not publishable."
+}

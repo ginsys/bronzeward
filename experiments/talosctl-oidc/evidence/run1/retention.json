@@ -1,0 +1,97 @@
+{
+  "run": "oidc162-20261021-run1",
+  "outcome": "failed",
+  "projection": "events plus audit without raw error strings; credential state and raw command output remain private",
+  "commands": [
+    {
+      "path": "private/commands/000-exchange-build-info.err",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "private/commands/000-exchange-build-info.out",
+      "bytes": 4329,
+      "sha256": "cc1865a223d279704112d7107bde34957d3093980ba5f81f7c44d264931cb815"
+    },
+    {
+      "path": "private/commands/001-probe-build-info.err",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "private/commands/001-probe-build-info.out",
+      "bytes": 3638,
+      "sha256": "8c6c57346e4bfc09e4e64228abe4c56a1c60a23d912af04ec16069d0f83d77a9"
+    },
+    {
+      "path": "private/commands/003-keycloak-pull.err",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "private/commands/003-keycloak-pull.out",
+      "bytes": 933,
+      "sha256": "416e47443b03570a76c48c1ba63db77b805b7cc7ae0e7df2eefeeaaa5f5a1671"
+    },
+    {
+      "path": "private/commands/004-talos-create.err",
+      "bytes": 2239,
+      "sha256": "3a9e056f5b515e31bf77ca1370ffd60a9ecb2311784d87a6ba854a239e99fa6c"
+    },
+    {
+      "path": "private/commands/004-talos-create.out",
+      "bytes": 587,
+      "sha256": "7ed7414accb3e7379fb1251835da08db0d43e292bef6b1daf039e639db6f2584"
+    },
+    {
+      "path": "private/commands/005-emergency-baseline.err",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "private/commands/005-emergency-baseline.out",
+      "bytes": 338,
+      "sha256": "3991952d94ee3cf3d32a149d500b4dc3cc45742eb337925d00f7695094ea3dac"
+    },
+    {
+      "path": "private/commands/007-keycloak-start.err",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "private/commands/007-keycloak-start.out",
+      "bytes": 65,
+      "sha256": "a198ad162668d98acb1e998a6605c370aa3f6b64a876ced9ae7ef45f60af6378"
+    },
+    {
+      "path": "private/commands/009-login-reader.err",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "private/commands/009-login-reader.out",
+      "bytes": 585,
+      "sha256": "33d892a26d12c55dab39fd51f1f32fe4ba6962bf010a985162a522e708d08299"
+    },
+    {
+      "path": "private/commands/011-keycloak-logs.err",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "private/commands/011-keycloak-logs.out",
+      "bytes": 3730,
+      "sha256": "d0ab3c046be0c27786f080668647b267fd72a54a0a78483a0c4293dd7c3954bd"
+    },
+    {
+      "path": "private/commands/012-talos-destroy.err",
+      "bytes": 90,
+      "sha256": "f1aedc9b120eda6d3bceb03f7cac40000f89b6a6f3f95948e7a84db3355a313c"
+    },
+    {
+      "path": "private/commands/012-talos-destroy.out",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ]
+}

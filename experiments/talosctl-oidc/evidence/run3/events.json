@@ -1,0 +1,1449 @@
+[
+  {
+    "event": "command",
+    "utc": "2026-10-21T01:02:31.294778+00:00",
+    "name": "exchange-build-info",
+    "argv": [
+      "$GO",
+      "version",
+      "-m",
+      "$TOOLS/talosctl-oidc"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 0.003,
+    "stdout_sha256": "cc1865a223d279704112d7107bde34957d3093980ba5f81f7c44d264931cb815",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T01:02:31.298340+00:00",
+    "name": "probe-build-info",
+    "argv": [
+      "$GO",
+      "version",
+      "-m",
+      "$TOOLS/rpc"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 0.003,
+    "stdout_sha256": "8c6c57346e4bfc09e4e64228abe4c56a1c60a23d912af04ec16069d0f83d77a9",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "event": "pins",
+    "utc": "2026-10-21T01:02:31.804783+00:00",
+    "upstream": "d3cd122341537d3235bd5dfe7ced2171ec765227",
+    "talos_image": "ghcr.io/siderolabs/talos:v1.13.6@sha256:f2e2b7e5812b2b59c1acfe6af7516231aeeef79fb1ffff6b57ad987f8dd47a6e",
+    "keycloak_image": "quay.io/keycloak/keycloak:26.8.1@sha256:ed1cab21814c7d18ce8f0e11d5a1fa1c6923de12dd4c7625a18c5d34452a57a4",
+    "bronzeward_revision": "3ddf1333fee7f54eab70fb0b51bd28928b7525ef",
+    "kubernetes": "1.36.2",
+    "go": "1.27.1",
+    "talosctl_sha256": "540c5e7cb0d3fa3a9b2e1c717ced212727b73bcaf0cf9cf9ba2472ec381041d4",
+    "rpc_sha256": "a0415ac7cb68afa545def04455db7586c1a0141ce735255f2a253d49065ced31",
+    "exchange_binary_sha256": "b0886e3db24c8ef5b54ef22ccc34a849bf15d87277e8e1090bf7c49e77af9cd8",
+    "fixture_hashes": {
+      "browser.py": "263e2a3dd5f7ede2ebe567f51fb4396242968e870f43fd8b8f8bbe14c2366e3a",
+      "README.md": "5bb5330fc08257e04aacd88714fe4772fe2eda9599e5bba4bc87d5c6d229130f",
+      "rpc.go": "f428eb8a50f7ab543801befe81e47694f3b7f795621009d9f680e468fe2f6792",
+      "run.py": "42a5f4fadb636954f9c4872c1ab5b2931c9da781472918eec54615dfc070c15a",
+      "test_browser.py": "8e1eff827421a41e979d24fcc1b90843a904e04e778c210c3a5048c1de30ee3c"
+    },
+    "cluster": "bw-oidc162-b29d60d6",
+    "subnet": "10.61.162.0/24"
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T01:02:32.419605+00:00",
+    "name": "keycloak-pull",
+    "argv": [
+      "docker",
+      "pull",
+      "quay.io/keycloak/keycloak:26.8.1@sha256:ed1cab21814c7d18ce8f0e11d5a1fa1c6923de12dd4c7625a18c5d34452a57a4"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 0.615,
+    "stdout_sha256": "bfd87d0e975748c40a8a29d761b07f46ae0d3390959e304206b3e8050e21c569",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T01:04:16.428566+00:00",
+    "name": "talos-create",
+    "argv": [
+      "$TALOSCTL",
+      "cluster",
+      "create",
+      "docker",
+      "--name",
+      "bw-oidc162-b29d60d6",
+      "--state",
+      "$PRIVATE/cluster",
+      "--workers",
+      "0",
+      "--subnet",
+      "10.61.162.0/24",
+      "--image",
+      "ghcr.io/siderolabs/talos:v1.13.6@sha256:f2e2b7e5812b2b59c1acfe6af7516231aeeef79fb1ffff6b57ad987f8dd47a6e",
+      "--kubernetes-version",
+      "1.36.2",
+      "--host-ip",
+      "127.0.0.1",
+      "--cpus-controlplanes",
+      "2",
+      "--memory-controlplanes",
+      "2GiB",
+      "--talosconfig-destination",
+      "$PRIVATE/emergency.talosconfig"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 104.009,
+    "stdout_sha256": "67df8ab7e3ed54cbfab434f5f587ff912229ff0fa6ddc2425c95544e960a25a7",
+    "stderr_sha256": "4543806d4dffd1c7e3f788742252ee4a781633c567594ebbcb20687b67815a24"
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T01:04:16.445848+00:00",
+    "name": "emergency-baseline",
+    "argv": [
+      "$TOOLS/rpc",
+      "-config",
+      "$PRIVATE/emergency.talosconfig",
+      "-endpoint",
+      "127.0.0.1:38919",
+      "-mode",
+      "version"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 0.007,
+    "stdout_sha256": "904f8dd78834d92f6283788bbfcc5dba0c5b58e664e080acbd99214c16b2c8ed",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "event": "probe",
+    "utc": "2026-10-21T01:04:16.446073+00:00",
+    "name": "emergency-baseline",
+    "rows": [
+      {
+        "event": "credential",
+        "not_after": "2027-10-21T01:02:32Z",
+        "not_before": "2026-10-21T01:02:32Z",
+        "roles": [
+          "os:admin"
+        ],
+        "sha256": "871c5e37c231ddf36a11a3acf79c95a7149265709230234e130c3d7473b46687",
+        "utc": "2026-10-21T01:04:16.441170795Z"
+      },
+      {
+        "code": "OK",
+        "event": "version",
+        "tcp_dials": 1,
+        "utc": "2026-10-21T01:04:16.444480528Z",
+        "versions": [
+          "v1.13.6"
+        ]
+      }
+    ]
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T01:04:16.810506+00:00",
+    "name": "keycloak-start",
+    "argv": [
+      "docker",
+      "run",
+      "-d",
+      "--name",
+      "bw-oidc162-b29d60d6-idp",
+      "--memory",
+      "1g",
+      "--cpus",
+      "1.5",
+      "--env-file",
+      "$PRIVATE/keycloak.env",
+      "-p",
+      "127.0.0.1:60159:8080",
+      "--mount",
+      "type=bind,src=$PRIVATE/fixture-realm.json,dst=/opt/keycloak/data/import/fixture-realm.json,readonly",
+      "quay.io/keycloak/keycloak:26.8.1@sha256:ed1cab21814c7d18ce8f0e11d5a1fa1c6923de12dd4c7625a18c5d34452a57a4",
+      "start-dev",
+      "--import-realm",
+      "--hostname",
+      "http://127.0.0.1:60159"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 0.364,
+    "stdout_sha256": "08c4df5abfd938eaa66c16b1b8ea7eed5283a519c665ee857be8c55356bb5352",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "event": "exchange-start",
+    "utc": "2026-10-21T01:04:48.964171+00:00",
+    "pid": 266138
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T01:04:49.778952+00:00",
+    "name": "login-reader",
+    "argv": [
+      "$TOOLS/talosctl-oidc",
+      "login",
+      "--provider",
+      "http://127.0.0.1:60159/realms/fixture",
+      "--scopes",
+      "openid,profile,email",
+      "--client-id",
+      "talos-fixture",
+      "--server",
+      "https://127.0.0.1:47403",
+      "--server-ca",
+      "$PRIVATE/exchange-tls/ca.crt",
+      "--talosconfig",
+      "$PRIVATE/reader.talosconfig",
+      "--context-name",
+      "reader",
+      "--callback-port",
+      "58721",
+      "--browser-command",
+      "$BRONZEWARD/experiments/talosctl-oidc/browser.py"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 0.814,
+    "stdout_sha256": "66a5b4442bfcac783dd2b79f439d55112baabaf74da3aeacd0a77feaf87a5916",
+    "stderr_sha256": "69451329af97d14dd072860448412fff479d00ab34621254b2b017295a933e1e"
+  },
+  {
+    "event": "login",
+    "utc": "2026-10-21T01:04:49.779334+00:00",
+    "name": "reader",
+    "expected": 0,
+    "cached": false,
+    "token_claims": {
+      "iss": "http://127.0.0.1:60159/realms/fixture",
+      "sub": "b7ff749d-3642-4b10-b90e-0e715f3ba859",
+      "iat": 1792544689,
+      "exp": 1792545589,
+      "groups": [
+        "readers"
+      ]
+    },
+    "token_cache_mode": "0600",
+    "refresh_present": true
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T01:04:49.795050+00:00",
+    "name": "reader-version",
+    "argv": [
+      "$TOOLS/rpc",
+      "-config",
+      "$PRIVATE/reader.talosconfig",
+      "-endpoint",
+      "127.0.0.1:38919",
+      "-mode",
+      "version"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 0.015,
+    "stdout_sha256": "3f9b569b4eb3e445f5d32b47380bbdf7c81e0832a3240bd3c67c947a85de528d",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "event": "probe",
+    "utc": "2026-10-21T01:04:49.795342+00:00",
+    "name": "reader-version",
+    "rows": [
+      {
+        "event": "credential",
+        "not_after": "2026-10-21T01:05:34Z",
+        "not_before": "2026-10-21T01:04:49Z",
+        "roles": [
+          "os:reader"
+        ],
+        "sha256": "69cda0774d761fdd1e68ec3b068368d5b5af2f86123afb2e2607c6e541f2fcbb",
+        "utc": "2026-10-21T01:04:49.782752936Z"
+      },
+      {
+        "code": "OK",
+        "event": "version",
+        "tcp_dials": 1,
+        "utc": "2026-10-21T01:04:49.786873831Z",
+        "versions": [
+          "v1.13.6"
+        ]
+      }
+    ]
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T01:04:49.811085+00:00",
+    "name": "login-reader",
+    "argv": [
+      "$TOOLS/talosctl-oidc",
+      "login",
+      "--provider",
+      "http://127.0.0.1:60159/realms/fixture",
+      "--scopes",
+      "openid,profile,email",
+      "--client-id",
+      "talos-fixture",
+      "--server",
+      "https://127.0.0.1:47403",
+      "--server-ca",
+      "$PRIVATE/exchange-tls/ca.crt",
+      "--talosconfig",
+      "$PRIVATE/reader.talosconfig",
+      "--context-name",
+      "reader",
+      "--callback-port",
+      "58721",
+      "--browser-command",
+      "$BRONZEWARD/experiments/talosctl-oidc/browser.py"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 0.015,
+    "stdout_sha256": "eb1bb4e80dfaa89e2fadaf12f716a168ac0ed0680c66f56c301c056c62dbc1d2",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "event": "login",
+    "utc": "2026-10-21T01:04:49.811427+00:00",
+    "name": "reader",
+    "expected": 0,
+    "cached": true,
+    "token_claims": {
+      "iss": "http://127.0.0.1:60159/realms/fixture",
+      "sub": "b7ff749d-3642-4b10-b90e-0e715f3ba859",
+      "iat": 1792544689,
+      "exp": 1792545589,
+      "groups": [
+        "readers"
+      ]
+    },
+    "token_cache_mode": "0600",
+    "refresh_present": true
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T01:04:49.819077+00:00",
+    "name": "renewed-reader-version",
+    "argv": [
+      "$TOOLS/rpc",
+      "-config",
+      "$PRIVATE/reader.talosconfig",
+      "-endpoint",
+      "127.0.0.1:38919",
+      "-mode",
+      "version"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 0.007,
+    "stdout_sha256": "12ade5ca8c33f8b9e33eaa3d85e4d02baf1104857a23c6a4d020f709e2e34eb4",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "event": "probe",
+    "utc": "2026-10-21T01:04:49.819356+00:00",
+    "name": "renewed-reader-version",
+    "rows": [
+      {
+        "event": "credential",
+        "not_after": "2026-10-21T01:05:34Z",
+        "not_before": "2026-10-21T01:04:49Z",
+        "roles": [
+          "os:reader"
+        ],
+        "sha256": "7062577484c870f873747b877c153ab0f2f5945b26edfa3586031709da175e5d",
+        "utc": "2026-10-21T01:04:49.81483103Z"
+      },
+      {
+        "code": "OK",
+        "event": "version",
+        "tcp_dials": 1,
+        "utc": "2026-10-21T01:04:49.818514923Z",
+        "versions": [
+          "v1.13.6"
+        ]
+      }
+    ]
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T01:04:49.835052+00:00",
+    "name": "reader-cannot-mint-admin",
+    "argv": [
+      "$TOOLS/rpc",
+      "-config",
+      "$PRIVATE/reader.talosconfig",
+      "-endpoint",
+      "127.0.0.1:38919",
+      "-mode",
+      "mint",
+      "-roles",
+      "os:admin",
+      "-output",
+      "$PRIVATE/denied.json"
+    ],
+    "rc": 1,
+    "expected": 1,
+    "seconds": 0.015,
+    "stdout_sha256": "896ac27bd363ddc1905b57cb5b54bcd02e6aa3376e9285f7cd9ccd80fae53d3c",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "event": "probe",
+    "utc": "2026-10-21T01:04:49.835364+00:00",
+    "name": "reader-cannot-mint-admin",
+    "rows": [
+      {
+        "event": "credential",
+        "not_after": "2026-10-21T01:05:34Z",
+        "not_before": "2026-10-21T01:04:49Z",
+        "roles": [
+          "os:reader"
+        ],
+        "sha256": "7062577484c870f873747b877c153ab0f2f5945b26edfa3586031709da175e5d",
+        "utc": "2026-10-21T01:04:49.822654582Z"
+      },
+      {
+        "code": "PermissionDenied",
+        "event": "mint",
+        "requested_roles": "os:admin",
+        "requested_seconds": 45,
+        "utc": "2026-10-21T01:04:49.826679466Z"
+      }
+    ]
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T01:04:49.999314+00:00",
+    "name": "login-unmatched",
+    "argv": [
+      "$TOOLS/talosctl-oidc",
+      "login",
+      "--provider",
+      "http://127.0.0.1:60159/realms/fixture",
+      "--scopes",
+      "openid,profile,email",
+      "--client-id",
+      "talos-fixture",
+      "--server",
+      "https://127.0.0.1:47403",
+      "--server-ca",
+      "$PRIVATE/exchange-tls/ca.crt",
+      "--talosconfig",
+      "$PRIVATE/unmatched.talosconfig",
+      "--context-name",
+      "unmatched",
+      "--callback-port",
+      "58721",
+      "--browser-command",
+      "$BRONZEWARD/experiments/talosctl-oidc/browser.py"
+    ],
+    "rc": 1,
+    "expected": 1,
+    "seconds": 0.164,
+    "stdout_sha256": "f174ef3b410fa9aca94efd6de3da173feebf14789ede10e93443bc1a0ffb1f3c",
+    "stderr_sha256": "8de05a0e869076d78d269bb3c22fa1c5b199f8836f8c96270c5a8fbdbf09b71f"
+  },
+  {
+    "event": "login",
+    "utc": "2026-10-21T01:04:49.999743+00:00",
+    "name": "unmatched",
+    "expected": 1,
+    "cached": false,
+    "token_claims": {
+      "iss": "http://127.0.0.1:60159/realms/fixture",
+      "sub": "7d03c859-7fbc-4740-be4f-e8402fd65b20",
+      "iat": 1792544689,
+      "exp": 1792545589,
+      "groups": null
+    },
+    "token_cache_mode": "0600",
+    "refresh_present": true
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T01:04:50.015617+00:00",
+    "name": "direct-command-no-issuance-event",
+    "argv": [
+      "$TOOLS/rpc",
+      "-config",
+      "$PRIVATE/reader.talosconfig",
+      "-endpoint",
+      "127.0.0.1:38919",
+      "-mode",
+      "version"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 0.015,
+    "stdout_sha256": "83c150f8b36b10b5a15ee43933da213269e45381f4cf98a9995daf82a555243e",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "event": "probe",
+    "utc": "2026-10-21T01:04:50.015995+00:00",
+    "name": "direct-command-no-issuance-event",
+    "rows": [
+      {
+        "event": "credential",
+        "not_after": "2026-10-21T01:05:34Z",
+        "not_before": "2026-10-21T01:04:49Z",
+        "roles": [
+          "os:reader"
+        ],
+        "sha256": "7062577484c870f873747b877c153ab0f2f5945b26edfa3586031709da175e5d",
+        "utc": "2026-10-21T01:04:50.003249687Z"
+      },
+      {
+        "code": "OK",
+        "event": "version",
+        "tcp_dials": 1,
+        "utc": "2026-10-21T01:04:50.008099371Z",
+        "versions": [
+          "v1.13.6"
+        ]
+      }
+    ]
+  },
+  {
+    "event": "direct-audit",
+    "utc": "2026-10-21T01:04:50.016304+00:00",
+    "before": 5,
+    "after": 5
+  },
+  {
+    "event": "idp-admin",
+    "utc": "2026-10-21T01:04:50.255152+00:00",
+    "name": "GET users?username=reader&exact=true",
+    "status": 200
+  },
+  {
+    "event": "idp-admin",
+    "utc": "2026-10-21T01:04:50.343576+00:00",
+    "name": "GET groups?search=readers&exact=true",
+    "status": 200
+  },
+  {
+    "event": "idp-admin",
+    "utc": "2026-10-21T01:04:50.433415+00:00",
+    "name": "DELETE users/b7ff749d-3642-4b10-b90e-0e715f3ba859/groups/6d539e6d-67ff-4511-967e-7160ad024882",
+    "status": 204
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T01:04:50.449497+00:00",
+    "name": "login-reader",
+    "argv": [
+      "$TOOLS/talosctl-oidc",
+      "login",
+      "--provider",
+      "http://127.0.0.1:60159/realms/fixture",
+      "--scopes",
+      "openid,profile,email",
+      "--client-id",
+      "talos-fixture",
+      "--server",
+      "https://127.0.0.1:47403",
+      "--server-ca",
+      "$PRIVATE/exchange-tls/ca.crt",
+      "--talosconfig",
+      "$PRIVATE/reader.talosconfig",
+      "--context-name",
+      "reader",
+      "--callback-port",
+      "58721",
+      "--browser-command",
+      "$BRONZEWARD/experiments/talosctl-oidc/browser.py"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 0.016,
+    "stdout_sha256": "eb1bb4e80dfaa89e2fadaf12f716a168ac0ed0680c66f56c301c056c62dbc1d2",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "event": "login",
+    "utc": "2026-10-21T01:04:50.449907+00:00",
+    "name": "reader",
+    "expected": 0,
+    "cached": true,
+    "token_claims": {
+      "iss": "http://127.0.0.1:60159/realms/fixture",
+      "sub": "b7ff749d-3642-4b10-b90e-0e715f3ba859",
+      "iat": 1792544689,
+      "exp": 1792545589,
+      "groups": [
+        "readers"
+      ]
+    },
+    "token_cache_mode": "0600",
+    "refresh_present": true
+  },
+  {
+    "event": "exchange",
+    "utc": "2026-10-21T01:04:50.455074+00:00",
+    "name": "removed-group-cached-token",
+    "status": 200,
+    "expected": 200,
+    "seconds": 0.005
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T01:04:50.619328+00:00",
+    "name": "login-reader-fresh",
+    "argv": [
+      "$TOOLS/talosctl-oidc",
+      "login",
+      "--provider",
+      "http://127.0.0.1:60159/realms/fixture",
+      "--scopes",
+      "openid,profile,email",
+      "--client-id",
+      "talos-fixture",
+      "--server",
+      "https://127.0.0.1:47403",
+      "--server-ca",
+      "$PRIVATE/exchange-tls/ca.crt",
+      "--talosconfig",
+      "$PRIVATE/reader-fresh.talosconfig",
+      "--context-name",
+      "reader-fresh",
+      "--callback-port",
+      "58721",
+      "--browser-command",
+      "$BRONZEWARD/experiments/talosctl-oidc/browser.py"
+    ],
+    "rc": 1,
+    "expected": 1,
+    "seconds": 0.164,
+    "stdout_sha256": "3fd2e982b66eea3ca847763fa720dd7111430d7254619bedfcb89d448a330bb4",
+    "stderr_sha256": "697da2458f7268cb38fef6668d44f842dc7fe3234b605149b612cb60a12d8d15"
+  },
+  {
+    "event": "login",
+    "utc": "2026-10-21T01:04:50.619780+00:00",
+    "name": "reader-fresh",
+    "expected": 1,
+    "cached": false,
+    "token_claims": {
+      "iss": "http://127.0.0.1:60159/realms/fixture",
+      "sub": "b7ff749d-3642-4b10-b90e-0e715f3ba859",
+      "iat": 1792544690,
+      "exp": 1792545590,
+      "groups": null
+    },
+    "token_cache_mode": "0600",
+    "refresh_present": true
+  },
+  {
+    "event": "exchange",
+    "utc": "2026-10-21T01:04:50.622213+00:00",
+    "name": "removed-group-fresh-token",
+    "status": 403,
+    "expected": 403,
+    "seconds": 0.002
+  },
+  {
+    "event": "group-removal",
+    "utc": "2026-10-21T01:04:50.622439+00:00",
+    "seconds": 0.189
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T01:04:50.786385+00:00",
+    "name": "login-disabled",
+    "argv": [
+      "$TOOLS/talosctl-oidc",
+      "login",
+      "--provider",
+      "http://127.0.0.1:60159/realms/fixture",
+      "--scopes",
+      "openid,profile,email",
+      "--client-id",
+      "talos-fixture",
+      "--server",
+      "https://127.0.0.1:47403",
+      "--server-ca",
+      "$PRIVATE/exchange-tls/ca.crt",
+      "--talosconfig",
+      "$PRIVATE/disabled.talosconfig",
+      "--context-name",
+      "disabled",
+      "--callback-port",
+      "58721",
+      "--browser-command",
+      "$BRONZEWARD/experiments/talosctl-oidc/browser.py"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 0.164,
+    "stdout_sha256": "9f89afff107fda640f3cbc3f85a81c7cce77bd28c08ae355e95bbdcd9c5f9dfa",
+    "stderr_sha256": "e1a47b2d2c30eddf361868b88eae90600bbd19b5013dc00fb5bd0c741ab96d0e"
+  },
+  {
+    "event": "login",
+    "utc": "2026-10-21T01:04:50.786837+00:00",
+    "name": "disabled",
+    "expected": 0,
+    "cached": false,
+    "token_claims": {
+      "iss": "http://127.0.0.1:60159/realms/fixture",
+      "sub": "9c101e21-982f-490f-9a27-d9d6d3d93690",
+      "iat": 1792544690,
+      "exp": 1792545590,
+      "groups": [
+        "readers"
+      ]
+    },
+    "token_cache_mode": "0600",
+    "refresh_present": true
+  },
+  {
+    "event": "idp-admin",
+    "utc": "2026-10-21T01:04:50.844368+00:00",
+    "name": "GET users?username=disabled&exact=true",
+    "status": 200
+  },
+  {
+    "event": "idp-admin",
+    "utc": "2026-10-21T01:04:50.894922+00:00",
+    "name": "PUT users/9c101e21-982f-490f-9a27-d9d6d3d93690",
+    "status": 204
+  },
+  {
+    "event": "exchange",
+    "utc": "2026-10-21T01:04:50.900382+00:00",
+    "name": "disabled-account-cached-token",
+    "status": 200,
+    "expected": 200,
+    "seconds": 0.005
+  },
+  {
+    "event": "disabled-account-refresh",
+    "utc": "2026-10-21T01:04:50.938535+00:00",
+    "status": 400,
+    "seconds": 0.043
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T01:04:50.954474+00:00",
+    "name": "disabled-account-existing-certificate",
+    "argv": [
+      "$TOOLS/rpc",
+      "-config",
+      "$PRIVATE/disabled.talosconfig",
+      "-endpoint",
+      "127.0.0.1:38919",
+      "-mode",
+      "version"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 0.015,
+    "stdout_sha256": "31969e492e8649a829a6cf76dc068ed945a88186d2f53e134ce93fdb4724d4e5",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "event": "probe",
+    "utc": "2026-10-21T01:04:50.954878+00:00",
+    "name": "disabled-account-existing-certificate",
+    "rows": [
+      {
+        "event": "credential",
+        "not_after": "2026-10-21T01:05:35Z",
+        "not_before": "2026-10-21T01:04:50Z",
+        "roles": [
+          "os:reader"
+        ],
+        "sha256": "2c606c7b599448336a44e2448ca72b9256955e7e3ccca9b4665e18723778c861",
+        "utc": "2026-10-21T01:04:50.942878755Z"
+      },
+      {
+        "code": "OK",
+        "event": "version",
+        "tcp_dials": 1,
+        "utc": "2026-10-21T01:04:50.947524573Z",
+        "versions": [
+          "v1.13.6"
+        ]
+      }
+    ]
+  },
+  {
+    "event": "exchange",
+    "utc": "2026-10-21T01:04:50.960403+00:00",
+    "name": "reader-expiry-issue",
+    "status": 200,
+    "expected": 200,
+    "seconds": 0.005
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T01:05:37.017972+00:00",
+    "name": "certificate-expiry",
+    "argv": [
+      "$TOOLS/rpc",
+      "-config",
+      "$PRIVATE/expiry.talosconfig",
+      "-endpoint",
+      "127.0.0.1:38919",
+      "-mode",
+      "lifetime"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 46.056,
+    "stdout_sha256": "f5c2d66686e2c01bbd20a9da03ede20def607955976a870391adb776d9e8b7a9",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "event": "probe",
+    "utc": "2026-10-21T01:05:37.018539+00:00",
+    "name": "certificate-expiry",
+    "rows": [
+      {
+        "event": "credential",
+        "not_after": "2026-10-21T01:05:35Z",
+        "not_before": "2026-10-21T01:04:50Z",
+        "roles": [
+          "os:reader"
+        ],
+        "sha256": "08f74dd9e01113f8c56df2cb83592e9998f4e08e07979556c1c928d57332f73a",
+        "utc": "2026-10-21T01:04:50.964797633Z"
+      },
+      {
+        "code": "OK",
+        "event": "before_expiry",
+        "tcp_dials": 1,
+        "utc": "2026-10-21T01:04:50.968769334Z",
+        "versions": [
+          "v1.13.6"
+        ]
+      },
+      {
+        "code": "OK",
+        "event": "held_after_expiry",
+        "tcp_dials": 1,
+        "utc": "2026-10-21T01:05:37.003879382Z",
+        "versions": [
+          "v1.13.6"
+        ]
+      },
+      {
+        "dials_after": 1,
+        "dials_before": 1,
+        "event": "connection",
+        "past_not_after": true,
+        "utc": "2026-10-21T01:05:37.003912396Z"
+      },
+      {
+        "code": "Unavailable",
+        "event": "new_after_expiry",
+        "tcp_dials": 2,
+        "utc": "2026-10-21T01:05:37.005377147Z"
+      }
+    ]
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T01:05:37.182876+00:00",
+    "name": "login-admin",
+    "argv": [
+      "$TOOLS/talosctl-oidc",
+      "login",
+      "--provider",
+      "http://127.0.0.1:60159/realms/fixture",
+      "--scopes",
+      "openid,profile,email",
+      "--client-id",
+      "talos-fixture",
+      "--server",
+      "https://127.0.0.1:47403",
+      "--server-ca",
+      "$PRIVATE/exchange-tls/ca.crt",
+      "--talosconfig",
+      "$PRIVATE/admin.talosconfig",
+      "--context-name",
+      "admin",
+      "--callback-port",
+      "58721",
+      "--browser-command",
+      "$BRONZEWARD/experiments/talosctl-oidc/browser.py"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 0.164,
+    "stdout_sha256": "22e1530df6dbe7349fcf1ec4f45696857024207dc0f184dedc3dde97ee366af0",
+    "stderr_sha256": "75e88d31abe9cdf52eccd330059a7df8d11663a2d932bec2a19d2cd43a43efd0"
+  },
+  {
+    "event": "login",
+    "utc": "2026-10-21T01:05:37.183423+00:00",
+    "name": "admin",
+    "expected": 0,
+    "cached": false,
+    "token_claims": {
+      "iss": "http://127.0.0.1:60159/realms/fixture",
+      "sub": "5922f3ea-ec8a-4ad3-9ef7-312b5150a799",
+      "iat": 1792544737,
+      "exp": 1792545637,
+      "groups": [
+        "admins"
+      ]
+    },
+    "token_cache_mode": "0600",
+    "refresh_present": true
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T01:05:37.199408+00:00",
+    "name": "admin-remint-one-hour",
+    "argv": [
+      "$TOOLS/rpc",
+      "-config",
+      "$PRIVATE/admin.talosconfig",
+      "-endpoint",
+      "127.0.0.1:38919",
+      "-mode",
+      "mint",
+      "-roles",
+      "os:admin",
+      "-ttl",
+      "1h",
+      "-output",
+      "$PRIVATE/reminted.json"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 0.016,
+    "stdout_sha256": "0c8b6452661298e4938165d368784b5c1c2222e8260e02bdb1e0a9929dc83c6e",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "event": "probe",
+    "utc": "2026-10-21T01:05:37.199811+00:00",
+    "name": "admin-remint-one-hour",
+    "rows": [
+      {
+        "event": "credential",
+        "not_after": "2026-10-21T01:06:22Z",
+        "not_before": "2026-10-21T01:05:37Z",
+        "roles": [
+          "os:admin"
+        ],
+        "sha256": "6cfd0ad3f88d68c7cad68b1afcbdfe02e036abef04273c02f5bfe1eb877084c3",
+        "utc": "2026-10-21T01:05:37.186878855Z"
+      },
+      {
+        "code": "OK",
+        "event": "mint",
+        "requested_roles": "os:admin",
+        "requested_seconds": 3600,
+        "utc": "2026-10-21T01:05:37.190878945Z"
+      },
+      {
+        "event": "issued",
+        "not_after": "2026-10-21T02:05:37Z",
+        "not_before": "2026-10-21T01:05:37Z",
+        "roles": [
+          "os:admin"
+        ],
+        "sha256": "b96136627977f4e65d5a862e6ff3ad462d72f691c40065d6ad1ecab661c4a149",
+        "utc": "2026-10-21T01:05:37.190924109Z"
+      }
+    ]
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T01:06:24.007808+00:00",
+    "name": "original-admin-expired",
+    "argv": [
+      "$TOOLS/rpc",
+      "-config",
+      "$PRIVATE/admin.talosconfig",
+      "-endpoint",
+      "127.0.0.1:38919",
+      "-mode",
+      "version"
+    ],
+    "rc": 1,
+    "expected": 1,
+    "seconds": 0.008,
+    "stdout_sha256": "577448fb8bf824411f41d14e0fec6521d58e616f1576e54b3777942b4854cf76",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "event": "probe",
+    "utc": "2026-10-21T01:06:24.008328+00:00",
+    "name": "original-admin-expired",
+    "rows": [
+      {
+        "event": "credential",
+        "not_after": "2026-10-21T01:06:22Z",
+        "not_before": "2026-10-21T01:05:37Z",
+        "roles": [
+          "os:admin"
+        ],
+        "sha256": "6cfd0ad3f88d68c7cad68b1afcbdfe02e036abef04273c02f5bfe1eb877084c3",
+        "utc": "2026-10-21T01:06:24.003451665Z"
+      },
+      {
+        "code": "Unavailable",
+        "event": "version",
+        "tcp_dials": 1,
+        "utc": "2026-10-21T01:06:24.006428932Z"
+      }
+    ]
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T01:06:24.024197+00:00",
+    "name": "reminted-admin-after-original-expiry",
+    "argv": [
+      "$TOOLS/rpc",
+      "-config",
+      "$PRIVATE/reminted.talosconfig",
+      "-endpoint",
+      "127.0.0.1:38919",
+      "-mode",
+      "version"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 0.015,
+    "stdout_sha256": "712a5773ef72ad798e43bcd981f687b6ef058e87ea619becdc82c17ccfb83a7f",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "event": "probe",
+    "utc": "2026-10-21T01:06:24.024620+00:00",
+    "name": "reminted-admin-after-original-expiry",
+    "rows": [
+      {
+        "event": "credential",
+        "not_after": "2026-10-21T02:05:37Z",
+        "not_before": "2026-10-21T01:05:37Z",
+        "roles": [
+          "os:admin"
+        ],
+        "sha256": "b96136627977f4e65d5a862e6ff3ad462d72f691c40065d6ad1ecab661c4a149",
+        "utc": "2026-10-21T01:06:24.011691971Z"
+      },
+      {
+        "code": "OK",
+        "event": "version",
+        "tcp_dials": 1,
+        "utc": "2026-10-21T01:06:24.015640744Z",
+        "versions": [
+          "v1.13.6"
+        ]
+      }
+    ]
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T01:06:24.188739+00:00",
+    "name": "login-outage",
+    "argv": [
+      "$TOOLS/talosctl-oidc",
+      "login",
+      "--provider",
+      "http://127.0.0.1:60159/realms/fixture",
+      "--scopes",
+      "openid,profile,email",
+      "--client-id",
+      "talos-fixture",
+      "--server",
+      "https://127.0.0.1:47403",
+      "--server-ca",
+      "$PRIVATE/exchange-tls/ca.crt",
+      "--talosconfig",
+      "$PRIVATE/outage.talosconfig",
+      "--context-name",
+      "outage",
+      "--callback-port",
+      "58721",
+      "--browser-command",
+      "$BRONZEWARD/experiments/talosctl-oidc/browser.py"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 0.164,
+    "stdout_sha256": "8de471e5e0cc63cbb5aeea0e5f54150f84cb635bd39c8f583c3d2aa0e9101723",
+    "stderr_sha256": "594054f5035ba6e92cdb35913229b10b7242dcb958ebb94e0ea2010be1126618"
+  },
+  {
+    "event": "login",
+    "utc": "2026-10-21T01:06:24.189258+00:00",
+    "name": "outage",
+    "expected": 0,
+    "cached": false,
+    "token_claims": {
+      "iss": "http://127.0.0.1:60159/realms/fixture",
+      "sub": "88ebab47-e3be-4e61-8feb-bf3fc854a972",
+      "iat": 1792544784,
+      "exp": 1792545684,
+      "groups": [
+        "readers"
+      ]
+    },
+    "token_cache_mode": "0600",
+    "refresh_present": true
+  },
+  {
+    "event": "idp-stopped",
+    "utc": "2026-10-21T01:06:25.571895+00:00",
+    "container_id": "1588961f7ec26cce57c6290e947878f722010199ae2df02a23e327175dbd799f"
+  },
+  {
+    "event": "exchange",
+    "utc": "2026-10-21T01:06:25.576864+00:00",
+    "name": "issuer-outage-warm-cache",
+    "status": 200,
+    "expected": 200,
+    "seconds": 0.005
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T01:06:25.584671+00:00",
+    "name": "emergency-during-issuer-outage",
+    "argv": [
+      "$TOOLS/rpc",
+      "-config",
+      "$PRIVATE/emergency.talosconfig",
+      "-endpoint",
+      "127.0.0.1:38919",
+      "-mode",
+      "version"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 0.007,
+    "stdout_sha256": "d9607c14f720e6c6bec0823ac8f73648e393085f29c988011815e8660a9e8076",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "event": "probe",
+    "utc": "2026-10-21T01:06:25.585085+00:00",
+    "name": "emergency-during-issuer-outage",
+    "rows": [
+      {
+        "event": "credential",
+        "not_after": "2027-10-21T01:02:32Z",
+        "not_before": "2026-10-21T01:02:32Z",
+        "roles": [
+          "os:admin"
+        ],
+        "sha256": "871c5e37c231ddf36a11a3acf79c95a7149265709230234e130c3d7473b46687",
+        "utc": "2026-10-21T01:06:25.580090178Z"
+      },
+      {
+        "code": "OK",
+        "event": "version",
+        "tcp_dials": 1,
+        "utc": "2026-10-21T01:06:25.58342818Z",
+        "versions": [
+          "v1.13.6"
+        ]
+      }
+    ]
+  },
+  {
+    "event": "cache-expiry-wait",
+    "utc": "2026-10-21T01:06:25.585426+00:00",
+    "seconds": 306
+  },
+  {
+    "event": "exchange",
+    "utc": "2026-10-21T01:11:31.577079+00:00",
+    "name": "issuer-outage-expired-cache",
+    "status": 200,
+    "expected": 200,
+    "seconds": 0.005
+  },
+  {
+    "event": "issuer-outage-elapsed",
+    "utc": "2026-10-21T01:11:31.577498+00:00",
+    "seconds": 306.006
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T01:11:31.588435+00:00",
+    "name": "emergency-during-exchange-outage",
+    "argv": [
+      "$TOOLS/rpc",
+      "-config",
+      "$PRIVATE/emergency.talosconfig",
+      "-endpoint",
+      "127.0.0.1:38919",
+      "-mode",
+      "version"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 0.007,
+    "stdout_sha256": "940680149271b5e18a7de3d4e7f65533b326a457a56e15a866c81aaa8d1a52fd",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "event": "probe",
+    "utc": "2026-10-21T01:11:31.588872+00:00",
+    "name": "emergency-during-exchange-outage",
+    "rows": [
+      {
+        "event": "credential",
+        "not_after": "2027-10-21T01:02:32Z",
+        "not_before": "2026-10-21T01:02:32Z",
+        "roles": [
+          "os:admin"
+        ],
+        "sha256": "871c5e37c231ddf36a11a3acf79c95a7149265709230234e130c3d7473b46687",
+        "utc": "2026-10-21T01:11:31.583853993Z"
+      },
+      {
+        "code": "OK",
+        "event": "version",
+        "tcp_dials": 1,
+        "utc": "2026-10-21T01:11:31.587404778Z",
+        "versions": [
+          "v1.13.6"
+        ]
+      }
+    ]
+  },
+  {
+    "event": "exchange-start",
+    "utc": "2026-10-21T01:11:32.592244+00:00",
+    "pid": 286144
+  },
+  {
+    "event": "exchange",
+    "utc": "2026-10-21T01:11:32.594966+00:00",
+    "name": "issuer-outage-cold-restart",
+    "status": 401,
+    "expected": 401,
+    "seconds": 0.002
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T01:11:32.617397+00:00",
+    "name": "emergency-after-cold-restart",
+    "argv": [
+      "$TOOLS/rpc",
+      "-config",
+      "$PRIVATE/emergency.talosconfig",
+      "-endpoint",
+      "127.0.0.1:38919",
+      "-mode",
+      "version"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 0.016,
+    "stdout_sha256": "cc7f7908568b6d25ebeba1af019b9f84d5c624efd279c8be0adf2f5a3da1e508",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "event": "probe",
+    "utc": "2026-10-21T01:11:32.617843+00:00",
+    "name": "emergency-after-cold-restart",
+    "rows": [
+      {
+        "event": "credential",
+        "not_after": "2027-10-21T01:02:32Z",
+        "not_before": "2026-10-21T01:02:32Z",
+        "roles": [
+          "os:admin"
+        ],
+        "sha256": "871c5e37c231ddf36a11a3acf79c95a7149265709230234e130c3d7473b46687",
+        "utc": "2026-10-21T01:11:32.604990109Z"
+      },
+      {
+        "code": "OK",
+        "event": "version",
+        "tcp_dials": 1,
+        "utc": "2026-10-21T01:11:32.609112897Z",
+        "versions": [
+          "v1.13.6"
+        ]
+      }
+    ]
+  },
+  {
+    "event": "exchange",
+    "utc": "2026-10-21T01:11:41.193497+00:00",
+    "name": "issuer-restored",
+    "status": 200,
+    "expected": 200,
+    "seconds": 0.148
+  },
+  {
+    "event": "talos-paused",
+    "utc": "2026-10-21T01:11:41.220474+00:00",
+    "container_id": "7e0c949a9ef53f810a7a587e90cc140c1be4663ee84026d9d6da9dea0fc5be42"
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T01:11:46.239395+00:00",
+    "name": "emergency-while-talos-unavailable",
+    "argv": [
+      "$TOOLS/rpc",
+      "-config",
+      "$PRIVATE/emergency.talosconfig",
+      "-endpoint",
+      "127.0.0.1:38919",
+      "-mode",
+      "version"
+    ],
+    "rc": 1,
+    "expected": 1,
+    "seconds": 5.018,
+    "stdout_sha256": "b3df7b64d7e7581015cdcccb2df26addd2fa5c9ba4a9d1815b2d023fb58d0dfb",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "event": "probe",
+    "utc": "2026-10-21T01:11:46.239893+00:00",
+    "name": "emergency-while-talos-unavailable",
+    "rows": [
+      {
+        "event": "credential",
+        "not_after": "2027-10-21T01:02:32Z",
+        "not_before": "2026-10-21T01:02:32Z",
+        "roles": [
+          "os:admin"
+        ],
+        "sha256": "871c5e37c231ddf36a11a3acf79c95a7149265709230234e130c3d7473b46687",
+        "utc": "2026-10-21T01:11:41.22399072Z"
+      },
+      {
+        "code": "DeadlineExceeded",
+        "event": "version",
+        "tcp_dials": 1,
+        "utc": "2026-10-21T01:11:46.225506497Z"
+      }
+    ]
+  },
+  {
+    "event": "talos-unavailable-exchange",
+    "utc": "2026-10-21T01:11:54.242723+00:00",
+    "status": 0,
+    "client_timeout_seconds": 8
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T01:11:54.291259+00:00",
+    "name": "emergency-after-talos-recovery",
+    "argv": [
+      "$TOOLS/rpc",
+      "-config",
+      "$PRIVATE/emergency.talosconfig",
+      "-endpoint",
+      "127.0.0.1:38919",
+      "-mode",
+      "version"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 0.015,
+    "stdout_sha256": "53f6b9efc334fdb8890d87ca989b25e933ab4901309ae42f0ec02173aa69c4f4",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "event": "probe",
+    "utc": "2026-10-21T01:11:54.291870+00:00",
+    "name": "emergency-after-talos-recovery",
+    "rows": [
+      {
+        "event": "credential",
+        "not_after": "2027-10-21T01:02:32Z",
+        "not_before": "2026-10-21T01:02:32Z",
+        "roles": [
+          "os:admin"
+        ],
+        "sha256": "871c5e37c231ddf36a11a3acf79c95a7149265709230234e130c3d7473b46687",
+        "utc": "2026-10-21T01:11:54.279178843Z"
+      },
+      {
+        "code": "OK",
+        "event": "version",
+        "tcp_dials": 1,
+        "utc": "2026-10-21T01:11:54.285892873Z",
+        "versions": [
+          "v1.13.6"
+        ]
+      }
+    ]
+  },
+  {
+    "event": "exchange",
+    "utc": "2026-10-21T01:11:54.298099+00:00",
+    "name": "talos-restored",
+    "status": 200,
+    "expected": 200,
+    "seconds": 0.006
+  },
+  {
+    "event": "audit",
+    "utc": "2026-10-21T01:11:54.298969+00:00",
+    "rows": 32,
+    "issued": 13,
+    "direct_rpc_events": 0,
+    "limitation": "Issuance identifies a token subject; it does not record subsequent direct Talos commands."
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T01:11:54.337580+00:00",
+    "name": "keycloak-logs",
+    "argv": [
+      "docker",
+      "logs",
+      "1588961f7ec26cce57c6290e947878f722010199ae2df02a23e327175dbd799f"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 0.016,
+    "stdout_sha256": "103e55115a6c0f8fb9d199c7e4cbfc5a3be841bfd14ad079342557e432cb85bc",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T01:11:55.681491+00:00",
+    "name": "talos-destroy",
+    "argv": [
+      "$TALOSCTL",
+      "cluster",
+      "destroy",
+      "--name",
+      "bw-oidc162-b29d60d6",
+      "--state",
+      "$PRIVATE/cluster"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 1.014,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "599c0c8bf526d60de3dbf60f50751cffc77ebdbe3fa51f5fc73d6a9874c48b70"
+  },
+  {
+    "event": "cleanup",
+    "utc": "2026-10-21T01:11:55.714214+00:00",
+    "result": "owned resources removed; pre-existing container IDs preserved; fixture unchanged"
+  },
+  {
+    "event": "completed",
+    "utc": "2026-10-21T01:11:55.714645+00:00",
+    "result": "pass"
+  }
+]

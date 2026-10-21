@@ -1,8 +1,9 @@
 # talosctl-oidc credential research fixture
 
-Work in progress for [#162](https://github.com/ginsys/bronzeward/issues/162).
-The first two local chains stopped during login; the complete scenario result
-remains pending. Failed-run evidence is retained separately.
+Research for [#162](https://github.com/ginsys/bronzeward/issues/162); see the
+[report](../../docs/design/research/20261021-talosctl-oidc.md) for interpretation,
+alternatives and limits. One complete chain passed on 21 October 2026; two
+earlier login failures remain recorded at their original revisions.
 
 The original `rpc.go` probe uses an explicitly supplied disposable talosconfig
 and endpoint. It reports certificate metadata and gRPC status without printing
@@ -12,8 +13,29 @@ file; that file is private run state and must never enter retained evidence.
 the certificate's actual expiry, counting TCP dials to detect reconnection.
 
 This fixture is separate from the accepted PoC and its running demo. It does not
-change Bronzeward authentication, approval or provider policy. Reproduction,
-complete scenario results and limitations will be added after execution.
+change Bronzeward authentication, approval or provider policy.
+
+## Recorded results
+
+| Revision | Result | Coverage |
+| --- | --- | --- |
+| `faae408` | Failed, 191.380 seconds | First CLI login timed out because the Python browser withheld Secure loopback cookies. Later cases did not run; scoped teardown passed. |
+| `aaceff9` | Failed, 142.382 seconds | Browser callback passed; Keycloak rejected the CLI's default offline-access request. Later cases did not run; scoped teardown passed. |
+| `3ddf133` | Passed, 564.516 seconds | 81 events; all 30 command exits matched (25 zero, five nonzero), HTTP/certificate checks passed, no skips; scoped teardown passed. |
+
+[Results](evidence/results.json), [successful events](evidence/run3/events.json),
+[issuance audit](evidence/run3/audit.json), [browser metadata](evidence/run3/browser.json)
+and [retained hashes](evidence/retention.json) preserve the evidence. Each run
+directory also records its projection leak-scan result and private-log hashes.
+Known synthetic-value, private-key and JWT checks detected no exported secrets;
+positive controls passed. Raw logs and usable synthetic credentials are excluded.
+
+The tests demonstrate certificate renewal, role denial, cached-token behavior
+after removal, existing connections beyond certificate expiry, administrator
+reminting, issuer/exchange outages and Talos interruption/recovery. They do not
+establish immediate revocation, a hard administrator-access duration bound,
+direct-command audit or production readiness. Automatic ID-token refresh after
+natural expiry, offline access and background watch mode were not exercised.
 
 ## Reproduction
 

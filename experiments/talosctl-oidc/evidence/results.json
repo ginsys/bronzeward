@@ -1,0 +1,44 @@
+[
+  {
+    "run": "run1",
+    "revision": "faae4085866bb3d15665e6b3cde175d392a6e96c",
+    "result": "failed",
+    "seconds": 191.38,
+    "exit": 1,
+    "events": 15,
+    "commands": 9,
+    "matched_command_exits": 8,
+    "expected_nonzero_commands": 0,
+    "skips": 0,
+    "cleanup": "pass",
+    "scope_limit": "Later scenarios unexecuted after first failure"
+  },
+  {
+    "run": "run2",
+    "revision": "aaceff90944da800ed674afea28d9105dc594c4f",
+    "result": "failed",
+    "seconds": 142.382,
+    "exit": 1,
+    "events": 15,
+    "commands": 9,
+    "matched_command_exits": 8,
+    "expected_nonzero_commands": 0,
+    "skips": 0,
+    "cleanup": "pass",
+    "scope_limit": "Later scenarios unexecuted after first failure"
+  },
+  {
+    "run": "run3",
+    "revision": "3ddf1333fee7f54eab70fb0b51bd28928b7525ef",
+    "result": "pass",
+    "seconds": 564.516,
+    "exit": 0,
+    "events": 81,
+    "commands": 30,
+    "matched_command_exits": 30,
+    "expected_nonzero_commands": 5,
+    "skips": 0,
+    "cleanup": "pass",
+    "scope_limit": "One complete disposable chain; see report for untested modes"
+  }
+]

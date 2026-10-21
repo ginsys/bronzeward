@@ -1,0 +1,307 @@
+{
+  "run": "oidc162-20261021-run3",
+  "outcome": "pass",
+  "projection": "events plus audit without raw error strings; credential state and raw command output remain private",
+  "commands": [
+    {
+      "path": "private/commands/000-exchange-build-info.err",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "private/commands/000-exchange-build-info.out",
+      "bytes": 4329,
+      "sha256": "cc1865a223d279704112d7107bde34957d3093980ba5f81f7c44d264931cb815"
+    },
+    {
+      "path": "private/commands/001-probe-build-info.err",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "private/commands/001-probe-build-info.out",
+      "bytes": 3638,
+      "sha256": "8c6c57346e4bfc09e4e64228abe4c56a1c60a23d912af04ec16069d0f83d77a9"
+    },
+    {
+      "path": "private/commands/003-keycloak-pull.err",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "private/commands/003-keycloak-pull.out",
+      "bytes": 445,
+      "sha256": "bfd87d0e975748c40a8a29d761b07f46ae0d3390959e304206b3e8050e21c569"
+    },
+    {
+      "path": "private/commands/004-talos-create.err",
+      "bytes": 2239,
+      "sha256": "4543806d4dffd1c7e3f788742252ee4a781633c567594ebbcb20687b67815a24"
+    },
+    {
+      "path": "private/commands/004-talos-create.out",
+      "bytes": 587,
+      "sha256": "67df8ab7e3ed54cbfab434f5f587ff912229ff0fa6ddc2425c95544e960a25a7"
+    },
+    {
+      "path": "private/commands/005-emergency-baseline.err",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "private/commands/005-emergency-baseline.out",
+      "bytes": 338,
+      "sha256": "904f8dd78834d92f6283788bbfcc5dba0c5b58e664e080acbd99214c16b2c8ed"
+    },
+    {
+      "path": "private/commands/007-keycloak-start.err",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "private/commands/007-keycloak-start.out",
+      "bytes": 65,
+      "sha256": "08c4df5abfd938eaa66c16b1b8ea7eed5283a519c665ee857be8c55356bb5352"
+    },
+    {
+      "path": "private/commands/009-login-reader.err",
+      "bytes": 346,
+      "sha256": "69451329af97d14dd072860448412fff479d00ab34621254b2b017295a933e1e"
+    },
+    {
+      "path": "private/commands/009-login-reader.out",
+      "bytes": 916,
+      "sha256": "66a5b4442bfcac783dd2b79f439d55112baabaf74da3aeacd0a77feaf87a5916"
+    },
+    {
+      "path": "private/commands/011-reader-version.err",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "private/commands/011-reader-version.out",
+      "bytes": 339,
+      "sha256": "3f9b569b4eb3e445f5d32b47380bbdf7c81e0832a3240bd3c67c947a85de528d"
+    },
+    {
+      "path": "private/commands/013-login-reader.err",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "private/commands/013-login-reader.out",
+      "bytes": 438,
+      "sha256": "eb1bb4e80dfaa89e2fadaf12f716a168ac0ed0680c66f56c301c056c62dbc1d2"
+    },
+    {
+      "path": "private/commands/015-renewed-reader-version.err",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "private/commands/015-renewed-reader-version.out",
+      "bytes": 338,
+      "sha256": "12ade5ca8c33f8b9e33eaa3d85e4d02baf1104857a23c6a4d020f709e2e34eb4"
+    },
+    {
+      "path": "private/commands/017-reader-cannot-mint-admin.err",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "private/commands/017-reader-cannot-mint-admin.out",
+      "bytes": 365,
+      "sha256": "896ac27bd363ddc1905b57cb5b54bcd02e6aa3376e9285f7cd9ccd80fae53d3c"
+    },
+    {
+      "path": "private/commands/019-login-unmatched.err",
+      "bytes": 2666,
+      "sha256": "8de05a0e869076d78d269bb3c22fa1c5b199f8836f8c96270c5a8fbdbf09b71f"
+    },
+    {
+      "path": "private/commands/019-login-unmatched.out",
+      "bytes": 661,
+      "sha256": "f174ef3b410fa9aca94efd6de3da173feebf14789ede10e93443bc1a0ffb1f3c"
+    },
+    {
+      "path": "private/commands/021-direct-command-no-issuance-event.err",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "private/commands/021-direct-command-no-issuance-event.out",
+      "bytes": 339,
+      "sha256": "83c150f8b36b10b5a15ee43933da213269e45381f4cf98a9995daf82a555243e"
+    },
+    {
+      "path": "private/commands/027-login-reader.err",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "private/commands/027-login-reader.out",
+      "bytes": 438,
+      "sha256": "eb1bb4e80dfaa89e2fadaf12f716a168ac0ed0680c66f56c301c056c62dbc1d2"
+    },
+    {
+      "path": "private/commands/030-login-reader-fresh.err",
+      "bytes": 2666,
+      "sha256": "697da2458f7268cb38fef6668d44f842dc7fe3234b605149b612cb60a12d8d15"
+    },
+    {
+      "path": "private/commands/030-login-reader-fresh.out",
+      "bytes": 661,
+      "sha256": "3fd2e982b66eea3ca847763fa720dd7111430d7254619bedfcb89d448a330bb4"
+    },
+    {
+      "path": "private/commands/034-login-disabled.err",
+      "bytes": 346,
+      "sha256": "e1a47b2d2c30eddf361868b88eae90600bbd19b5013dc00fb5bd0c741ab96d0e"
+    },
+    {
+      "path": "private/commands/034-login-disabled.out",
+      "bytes": 920,
+      "sha256": "9f89afff107fda640f3cbc3f85a81c7cce77bd28c08ae355e95bbdcd9c5f9dfa"
+    },
+    {
+      "path": "private/commands/040-disabled-account-existing-certificate.err",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "private/commands/040-disabled-account-existing-certificate.out",
+      "bytes": 339,
+      "sha256": "31969e492e8649a829a6cf76dc068ed945a88186d2f53e134ce93fdb4724d4e5"
+    },
+    {
+      "path": "private/commands/043-certificate-expiry.err",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "private/commands/043-certificate-expiry.out",
+      "bytes": 683,
+      "sha256": "f5c2d66686e2c01bbd20a9da03ede20def607955976a870391adb776d9e8b7a9"
+    },
+    {
+      "path": "private/commands/045-login-admin.err",
+      "bytes": 346,
+      "sha256": "75e88d31abe9cdf52eccd330059a7df8d11663a2d932bec2a19d2cd43a43efd0"
+    },
+    {
+      "path": "private/commands/045-login-admin.out",
+      "bytes": 914,
+      "sha256": "22e1530df6dbe7349fcf1ec4f45696857024207dc0f184dedc3dde97ee366af0"
+    },
+    {
+      "path": "private/commands/047-admin-remint-one-hour.err",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "private/commands/047-admin-remint-one-hour.out",
+      "bytes": 578,
+      "sha256": "0c8b6452661298e4938165d368784b5c1c2222e8260e02bdb1e0a9929dc83c6e"
+    },
+    {
+      "path": "private/commands/049-original-admin-expired.err",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "private/commands/049-original-admin-expired.out",
+      "bytes": 324,
+      "sha256": "577448fb8bf824411f41d14e0fec6521d58e616f1576e54b3777942b4854cf76"
+    },
+    {
+      "path": "private/commands/051-reminted-admin-after-original-expiry.err",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "private/commands/051-reminted-admin-after-original-expiry.out",
+      "bytes": 338,
+      "sha256": "712a5773ef72ad798e43bcd981f687b6ef058e87ea619becdc82c17ccfb83a7f"
+    },
+    {
+      "path": "private/commands/053-login-outage.err",
+      "bytes": 346,
+      "sha256": "594054f5035ba6e92cdb35913229b10b7242dcb958ebb94e0ea2010be1126618"
+    },
+    {
+      "path": "private/commands/053-login-outage.out",
+      "bytes": 916,
+      "sha256": "8de471e5e0cc63cbb5aeea0e5f54150f84cb635bd39c8f583c3d2aa0e9101723"
+    },
+    {
+      "path": "private/commands/057-emergency-during-issuer-outage.err",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "private/commands/057-emergency-during-issuer-outage.out",
+      "bytes": 337,
+      "sha256": "d9607c14f720e6c6bec0823ac8f73648e393085f29c988011815e8660a9e8076"
+    },
+    {
+      "path": "private/commands/062-emergency-during-exchange-outage.err",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "private/commands/062-emergency-during-exchange-outage.out",
+      "bytes": 338,
+      "sha256": "940680149271b5e18a7de3d4e7f65533b326a457a56e15a866c81aaa8d1a52fd"
+    },
+    {
+      "path": "private/commands/066-emergency-after-cold-restart.err",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "private/commands/066-emergency-after-cold-restart.out",
+      "bytes": 338,
+      "sha256": "cc7f7908568b6d25ebeba1af019b9f84d5c624efd279c8be0adf2f5a3da1e508"
+    },
+    {
+      "path": "private/commands/070-emergency-while-talos-unavailable.err",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "private/commands/070-emergency-while-talos-unavailable.out",
+      "bytes": 328,
+      "sha256": "b3df7b64d7e7581015cdcccb2df26addd2fa5c9ba4a9d1815b2d023fb58d0dfb"
+    },
+    {
+      "path": "private/commands/073-emergency-after-talos-recovery.err",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "private/commands/073-emergency-after-talos-recovery.out",
+      "bytes": 338,
+      "sha256": "53f6b9efc334fdb8890d87ca989b25e933ab4901309ae42f0ec02173aa69c4f4"
+    },
+    {
+      "path": "private/commands/077-keycloak-logs.err",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "private/commands/077-keycloak-logs.out",
+      "bytes": 9876,
+      "sha256": "103e55115a6c0f8fb9d199c7e4cbfc5a3be841bfd14ad079342557e432cb85bc"
+    },
+    {
+      "path": "private/commands/078-talos-destroy.err",
+      "bytes": 90,
+      "sha256": "599c0c8bf526d60de3dbf60f50751cffc77ebdbe3fa51f5fc73d6a9874c48b70"
+    },
+    {
+      "path": "private/commands/078-talos-destroy.out",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ]
+}
