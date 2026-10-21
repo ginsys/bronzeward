@@ -206,8 +206,8 @@ timeline:
 
 | Fields | Sentence |
 | --- | --- |
-| no open drift, observed.release = applied.release | "The configuration read at `<observed.at>` matched what Bronzeward last verified (`<applied.release>`, by `<applied.source>`)." |
-| as above, applied.source = adoption | adds "Adopted from the node's own bytes; the release's compiled configuration may differ. The adopt plan's `pendingConvergence` evidence shows whether it does; a later `apply-config` plan withholds its diff when it does." |
+| no open drift, observed.release = applied.release | "The configuration read at `<observed.at>` is attributed to `<observed.release>`, which is the `Applied` release (by `<applied.source>`)." |
+| as above, applied.source = adoption | adds "Adopted from the node's own bytes; the release's compiled configuration may differ. The adopt plan's `pendingConvergence` evidence shows whether it does; a later `apply-config` plan withholds its diff when it does." If desired = applied.release, also adds "The read may match the adopted bytes or this release's compiled configuration; the API does not say which." (`internal/api/reads.go:160-161`) |
 | desired ≠ applied.release, no open drift | adds "Pending convergence: `<desired>` is selected, not applied." |
 | openDrift not null | "Drifted since `<at of the openDrift.observation observation>`: a read differed from what Bronzeward last verified (`<applied.release>`)." If observed.release = desired, adds "It equals the selected release; that does not close the drift." |
 | no open drift, observed.release null | "The configuration read at `<observed.at>` matched neither `Applied` nor `Desired`, and no drift is open; an operation may hold the machine. See the timeline." |
@@ -549,7 +549,7 @@ Built from (source revisions, not configuration):
   assignment   mch_b3c…aa2q    asr_5qp…d7fa
   assignment   3 more, one per other covered machine
 Rendered configuration per machine (4):
-  mch_b3c…aa2q   no-reboot   bronzewardctl release review rel_h7rt…2bd mch_b3c…aa2q
+  mch_b3c…aa2q   validated: metal   bronzewardctl release review rel_h7rt…2bd mch_b3c…aa2q
   mch_k2p…7xqa, mch_tqhc…35uq, mch_w4ze…n3fa: the same command with their IDs
 $ bronzewardctl release provenance rel_h7rt…2bd mch_b3c…aa2q
 REFERENCE                VERSION  FROM (REVISION, PATH)                           RENDERED AT
@@ -859,7 +859,7 @@ sending with "approval is for humans".
 | Unread or stale observation | `unread` causes, old `at` (`internal/api/observe.go:56-198`) | cause per field ("node unreachable", "provider access denied") | same, never green |
 | Refused | `application/problem+json` ([persistence and API §9.4](persistence-api.md#94-errors)) | title, code, what to do, `instance` | inline at the control, summary at the top |
 | Conflict | `412 precondition-failed`, `409 conflict` | stop and point at the newer state | show both and offer reload; never auto-merge |
-| Ambiguous response | timeout or connection loss after sending | before exiting 3, offers to repeat the request it still holds in memory with the same key; after exit, prints the key and the resource to read | "Unknown whether this was saved"; [Repeat exactly] only while the page holds the request, for the same sign-in and epoch |
+| Ambiguous response | timeout or connection loss after sending | before exiting 3, offers to repeat the request it still holds in memory with the same key, subject to G13; after exit, prints the key and the resource to read | "Unknown whether this was saved"; [Repeat exactly] only while the page holds the request, for the same sign-in and epoch, subject to G13 |
 | Replayed | `Idempotent-Replayed: true` (`internal/api/idempotency.go:75-81`) | "Already done earlier; showing that result" | same |
 | Key reused | `422 idempotency-key-reused` | the request could not be matched to the earlier one under that key (it differed, or the recorded digest-key version can no longer be computed, [persistence and API §7.1](persistence-api.md#71-the-key)); nothing was done; retry under a new key | same |
 | Offline | no connection | retry reads with backoff; never queue writes | banner; actions disabled; last-read time shown |
@@ -889,6 +889,14 @@ decides afresh. On a principal, context or epoch change it sets pending writes a
 silently creates a new key for them. It never writes a request body, or a hash of a low-entropy
 secret, to disk to repeat it later. Whether any key metadata is kept across a restart, and how
 it is compared, is #253's to decide.
+
+The epoch condition is the client's alone: it can compare only the epoch it last saw. A mutation
+takes no expected-epoch precondition (`internal/api/api.go:388-409`), and the epoch is reported
+only in an answer (`Bronzeward-Epoch`, `internal/api/api.go:318-319`). If a write commits, its
+answer is lost and a restore then removes its record, the repeat executes afresh in the new
+epoch; a read before repeating narrows that window but does not close it. The repeat is
+therefore proposed only on condition that #253 either adds a server-enforced epoch check or
+explicitly accepts this residual risk ([G13](#11-api-gap-audit)).
 
 ## 9. Secret handling in the clients
 
@@ -983,6 +991,7 @@ accepted limitation.
 | G10 | No listing of ingestions: only `GET /ingestions/{id}` (`internal/api/routes.go:90`) | finding a paused or lapsed import | keep the ID |
 | G11 | Recovery marks, releases and accountings have no list route; `GET /recovery` shows only their resulting scope states (`internal/api/recovery_exits.go:123-148`), the records themselves appear in machine timelines and acts | recovery console history | timeline |
 | G12 | Browser use: no statement of CORS, origin checks or hosting of a web client | the web interface at all | #253 |
+| G13 | A mutation takes no expected-epoch precondition: only `Idempotency-Key` and `If-Match` are checked (`internal/api/api.go:388-409`), and the epoch is reported only in an answer (`internal/api/api.go:318-319`). After a committed write's answer is lost and a restore removes its record, the same request with the same key executes afresh in the new epoch ([persistence and API §7.1](persistence-api.md#71-the-key)); a read before repeating leaves a race | repeating an ambiguous write ([§8](#8-states-every-view-must-handle), C5, [W11](operator-experience-wireframes.md#w11-empty-withheld-error-and-offline-states)) | none: the client compares only the epoch it last saw; #253 adds a server-enforced epoch check or explicitly accepts the residual risk |
 
 Not gaps, by design: no client dispatch or apply route
 ([design §12.7](../design/Talos_Configuration_and_Machine_Management_Design.md#127-application-approval-and-dispatch-boundary));
@@ -998,7 +1007,7 @@ general secret browser (milestone exclusion).
 | C2 | Web navigation | resource tabs only; a single change wizard; machine hub plus a staged change pipeline | Hub plus pipeline: operators start from a machine's state, while publish, plan and approve stay separate pages, buttons and roles, which a wizard would blur | recommended; usability unmeasured |
 | C3 | Editing | native YAML editor; forms over the Talos schema; both | Native YAML for documents and structured controls for metadata only: the design makes native Talos configuration canonical ([design §6.1](../design/Talos_Configuration_and_Machine_Management_Design.md#61-canonical-model)), and a schema form would be a second model to keep in step with every Talos version | recommended; usability unmeasured |
 | C4 | Protected review in the CLI | terminal pager in process; temporary file in `$EDITOR`; web-only review | Terminal pager in process; non-terminal output refused with no override; no JSON, YAML, save or export form; marks by prompt or stdin, never a client-read file. An editor leaves swap and backup files the client cannot control ([compilation §3.6](compilation.md#36-operator-review)); web-only would make the CLI unable to finish an import. It limits client-controlled persistence only and does not prevent terminal or host capture ([§9](#9-secret-handling-in-the-clients)) | candidate, to be qualified in #253; no standard-output export form in any case |
-| C5 | Concurrency and retries | last-seen ETag; re-read then write; journal of requests | Last-seen ETag per draft, stop on 412; repeat an ambiguous write with its key only on request, for the exact request held in memory, the same principal and the same epoch ([§8](#8-states-every-view-must-handle)); no body journal: re-reading before writing is a silent overwrite, and a journal would store documents and marks | recommended, within the limits of §8; any persistence across restarts is #253's |
+| C5 | Concurrency and retries | last-seen ETag; re-read then write; journal of requests | Last-seen ETag per draft, stop on 412; repeat an ambiguous write with its key only on request, for the exact request held in memory, the same principal and the same epoch ([§8](#8-states-every-view-must-handle)), an epoch the client can only compare with the one it last saw (G13); no body journal: re-reading before writing is a silent overwrite, and a journal would store documents and marks | recommended, within the limits of §8 and conditional on #253 settling G13; any persistence across restarts is #253's |
 
 ## 13. Usability and accessibility acceptance
 
@@ -1071,7 +1080,7 @@ refinement until #253's contracts land.
 
 Proposed changes: the web inventory ticket (#255) also carries the shared web shell (header,
 banners, state catalogue of [§8](#8-states-every-view-must-handle)); and #253 records, for each
-gap G1-G12, whether it becomes an API issue that natively blocks the client tickets it affects.
+gap G1-G13, whether it becomes an API issue that natively blocks the client tickets it affects.
 
 **Qualifications left to #253**, besides the gaps:
 
