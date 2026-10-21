@@ -232,12 +232,13 @@ func validate(doc map[string]any, schema, v any, at string) []string {
 	if !ok {
 		return []string{fmt.Sprintf("%s: the schema is %T, not an object", at, schema)}
 	}
-	if ref, ok := s["$ref"].(string); ok {
-		return validate(doc, pointer(doc, ref), v, at)
-	}
+	// A $ref's siblings still apply in OpenAPI 3.1 (JSON Schema 2020-12): both must accept v.
 	var errs []string
+	if ref, ok := s["$ref"].(string); ok {
+		errs = validate(doc, pointer(doc, ref), v, at)
+	}
 	if types, ok := s["type"]; ok && !hasType(types, v) {
-		return []string{fmt.Sprintf("%s: %s is not of type %v", at, shortJSON(v), types)}
+		return append(errs, fmt.Sprintf("%s: %s is not of type %v", at, shortJSON(v), types))
 	}
 	if enum, ok := s["enum"].([]any); ok && !slices.ContainsFunc(enum, func(e any) bool { return sameValue(e, v) }) {
 		errs = append(errs, fmt.Sprintf("%s: %s is not one of %v", at, shortJSON(v), enum))
@@ -442,6 +443,7 @@ func TestValidateRefusesEachKind(t *testing.T) {
 	doc := map[string]any{"components": map[string]any{"schemas": map[string]any{
 		"Item": map[string]any{"type": "object", "required": []any{"id"}, "additionalProperties": false,
 			"properties": map[string]any{"id": map[string]any{"type": "string"}, "n": map[string]any{"type": "integer"}}},
+		"Name": map[string]any{"type": "string"},
 	}}}
 	ref := map[string]any{"$ref": "#/components/schemas/Item"}
 	num := func(s string) any { return json.Number(s) }
@@ -470,6 +472,8 @@ func TestValidateRefusesEachKind(t *testing.T) {
 		{"an array above maxItems", map[string]any{"maxItems": 1}, []any{"a", "b"}},
 		{"an additional member the schema refuses", map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
 			map[string]any{"a": num("1")}},
+		{"a value a $ref's sibling refuses", map[string]any{"$ref": "#/components/schemas/Name", "enum": []any{"a"}}, "b"},
+		{"a value the $ref refuses and its sibling admits", map[string]any{"$ref": "#/components/schemas/Name", "enum": []any{"a", 1}}, num("1")},
 	} {
 		if errs := validate(doc, tc.schema, tc.v, "v"); len(errs) == 0 {
 			t.Errorf("%s: accepted", tc.name)
@@ -489,6 +493,7 @@ func TestValidateRefusesEachKind(t *testing.T) {
 		{"an array at its bounds", map[string]any{"minItems": 1, "maxItems": 1}, []any{"a"}},
 		{"an additional member the schema admits", map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
 			map[string]any{"a": "b"}},
+		{"a value a $ref and its sibling admit", map[string]any{"$ref": "#/components/schemas/Name", "enum": []any{"a"}}, "a"},
 	} {
 		if errs := validate(doc, tc.schema, tc.v, "v"); len(errs) != 0 {
 			t.Errorf("%s: refused: %v", tc.name, errs)

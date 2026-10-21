@@ -2088,6 +2088,13 @@ components:
         epoch: {type: string}
         at: {type: string, format: date-time}
       additionalProperties: false
+    AdoptResult:
+      type: object
+      description: 'An adopt operation''s result: the adoption record, named by its plan (adoption.go).'
+      required: [adoptionRecord]
+      properties:
+        adoptionRecord: {type: string}
+      additionalProperties: false
     AlertBody:
       type: object
       required:
@@ -2131,6 +2138,35 @@ components:
       properties:
         release: {type: string}
         source: {type: string}
+      additionalProperties: false
+    ApplyFailed:
+      type: object
+      description: An apply-config operation's error once a completion observation contradicted its postconditions (settle.go).
+      required: [outcome, cause, observation, attempts]
+      properties:
+        outcome: {const: failed}
+        cause: {type: string}
+        observation: {type: string}
+        attempts: {type: integer}
+      additionalProperties: false
+    ApplyRejected:
+      type: object
+      description: An apply-config operation's error once the node refused every attempt as invalid (outcome.go).
+      required: [outcome, cause, attempts]
+      properties:
+        outcome: {const: rejected}
+        cause: {type: string}
+        attempts: {type: integer}
+      additionalProperties: false
+    ApplyResult:
+      type: object
+      description: 'An apply-config operation''s result once it completed (settle.go complete): the applied release, the digest
+        of the configuration it confirmed, lowercase hex, and the confirming observation.'
+      required: [appliedRelease, digest, observation]
+      properties:
+        appliedRelease: {type: string}
+        digest: {type: string}
+        observation: {type: string}
       additionalProperties: false
     ApprovalBody:
       type: object
@@ -2390,7 +2426,18 @@ components:
         revision: {type: integer}
         entries:
           type: array
-          items: {}
+          items:
+            oneOf:
+            - {$ref: '#/components/schemas/DraftEntry'}
+            - {$ref: '#/components/schemas/SourceEntry'}
+      additionalProperties: false
+    DraftEntry:
+      type: object
+      required: [kind, machine, revision]
+      properties:
+        kind: {const: import-base}
+        machine: {type: string}
+        revision: {type: string}
       additionalProperties: false
     DraftInput:
       type: object
@@ -2485,7 +2532,8 @@ components:
         id: {type: string}
         type: {type: string}
         at: {type: string, format: date-time}
-        data: {}
+        data:
+          description: The event's record; its members depend on type (persistence and API §8.3). Not typed here.
       additionalProperties: false
     ExitBody:
       type: object
@@ -2582,6 +2630,15 @@ components:
         smbiosUuid: {type: [string, 'null']}
         talosNodeId: {type: [string, 'null']}
         serial: {type: [string, 'null']}
+      additionalProperties: false
+    IngestResult:
+      type: object
+      description: An ingest operation's result once it succeeded (runner.go finish).
+      required: [draft, draftRevision, importBaseRevision]
+      properties:
+        draft: {type: string}
+        draftRevision: {type: integer}
+        importBaseRevision: {type: string}
       additionalProperties: false
     IngestionBody:
       type: object
@@ -2747,7 +2804,8 @@ components:
         assignmentEvidence: {type: [string, 'null']}
         runningVersion: {type: [string, 'null']}
         resourceVersion: {type: [string, 'null']}
-        health: {}
+        health:
+          description: The health facts the observation recorded, as stored. Not typed here.
         unread:
           type: object
           additionalProperties: {$ref: '#/components/schemas/UnreadValue'}
@@ -2797,8 +2855,22 @@ components:
           - {$ref: '#/components/schemas/CreatedBy'}
           - {type: 'null'}
         createdAt: {type: string, format: date-time}
-        result: {}
-        error: {}
+        result:
+          description: null until the operation succeeds or completes; then the record its kind writes.
+          oneOf:
+          - {$ref: '#/components/schemas/PublishResult'}
+          - {$ref: '#/components/schemas/IngestResult'}
+          - {$ref: '#/components/schemas/ApplyResult'}
+          - {$ref: '#/components/schemas/AdoptResult'}
+          - {type: 'null'}
+        error:
+          description: null unless the operation failed or was rejected; then a problem document (publish, ingest) or an apply-config
+            outcome record.
+          oneOf:
+          - {$ref: '#/components/schemas/Problem'}
+          - {$ref: '#/components/schemas/ApplyRejected'}
+          - {$ref: '#/components/schemas/ApplyFailed'}
+          - {type: 'null'}
         attempts:
           type: array
           items: {$ref: '#/components/schemas/AttemptBody'}
@@ -3013,6 +3085,13 @@ components:
         occurrence: {type: integer}
       additionalProperties: false
     PublicationInput: {type: object, additionalProperties: false}
+    PublishResult:
+      type: object
+      description: A publish operation's result once it succeeded (publish.go finishPublish).
+      required: [release]
+      properties:
+        release: {type: string}
+      additionalProperties: false
     ReasonInput:
       type: object
       required: [reason]
@@ -3276,7 +3355,8 @@ components:
           items: {type: string}
         dependencies:
           type: object
-          additionalProperties: {}
+          additionalProperties:
+            description: A dependency's verdict, as the scope mark recorded it. Not typed here.
         revision: {type: integer}
         markedBy: {type: string}
         role: {type: string}
@@ -3348,7 +3428,7 @@ components:
       type: object
       required: [kind, head, base, revision]
       properties:
-        kind: {type: string}
+        kind: {type: string, enum: [fragment, profile, assignment]}
         name: {type: string}
         machine: {type: string}
         head: {type: [string, 'null']}
@@ -3405,7 +3485,8 @@ components:
         epoch: {type: string}
         at: {type: string, format: date-time}
         kind: {type: string}
-        entry: {}
+        entry:
+          description: The timeline entry's record; its members depend on kind. Not typed here.
       additionalProperties: false
     UnreadValue:
       type: object
