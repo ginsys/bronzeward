@@ -70,7 +70,7 @@ Machines                                    Cluster: all ▾   State: all ▾   
 | Machine    | Endpoint       | Desired     | Applied (source)         | Observed                 | State                   |
 +------------+----------------+-------------+--------------------------+--------------------------+-------------------------+
 | mch_k2p…7x | 10.5.0.2:50000 | rel_fgqv…   | rel_fgqv… (operation)    | = applied, 2 min ago     | (•) Matches applied     |
-| mch_tqhc…35| 10.5.0.3:50000 | rel_fgqv…   | rel_p4nx… (adoption)     | = applied, 1 min ago     | (•) Pending convergence |
+| mch_tqhc…35| 10.5.0.3:50000 | rel_fgqv…   | rel_p4nx… (adoption)     | = applied, 1 min ago     | (•) Selected ≠ applied  |
 | mch_w4ze…n3| 10.5.0.4:50000 | rel_fgqv…   | rel_fgqv… (operation)    | no match, 5 min ago      | (•) Drifted (•) Frozen  |
 +------------+----------------+-------------+--------------------------+--------------------------+-------------------------+
 Filtering is done in the browser over all pages (gap G9). Showing 3 of 3. Health is not checked.
@@ -93,7 +93,7 @@ Machine mch_w4ze…n3fa   cluster cl_9fd… (lab-a)   10.5.0.4:50000   node 9Zs�
 |            Health: not checked (none bound in the PoC)                                    |
 | Scope      normal                                                                         |
 +-------------------------------------------------------------------------------------------+
-| [Freeze]~ already frozen    [Unfreeze]~ needs approver    [Plan revert]  (publisher)      |
+| [Freeze]~ already frozen    [Unfreeze] (approver)         [Plan revert]  (publisher)      |
 +-------------------------------------------------------------------------------------------+
 | Timeline (newest first)                                            [Load older]           |
 |  09:51  observation   drift    obs_p8w…   configuration not read: node unreachable        |
@@ -273,7 +273,7 @@ What changed is not shown: Bronzeward can show it only by importing it (gap G7).
 |                             | 2 Publish  (publisher)        | 2 Approve  (approver)       |
 |                             | 3 Plan adopt, approve         | 3 Unfreeze (approver)       |
 |                             | Sends nothing to the machine. |                             |
-| [Unfreeze]~ needs approver  | [Start adoption]              | [Plan revert]               |
+| [Unfreeze] (approver)       | [Start adoption]              | [Plan revert]               |
 +-----------------------------+-------------------------------+-----------------------------+
 ```
 

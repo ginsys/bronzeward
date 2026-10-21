@@ -208,7 +208,7 @@ timeline:
 | --- | --- |
 | no open drift, observed.release = applied.release | "The configuration read at `<observed.at>` is attributed to `<observed.release>`, which is the `Applied` release (by `<applied.source>`)." |
 | as above, applied.source = adoption | adds "Adopted from the node's own bytes; the release's compiled configuration may differ. The adopt plan's `pendingConvergence` evidence shows whether it does; a later `apply-config` plan withholds its diff when it does." If desired = applied.release, also adds "The read may match the adopted bytes or this release's compiled configuration; the API does not say which." (`internal/api/reads.go:160-161`) |
-| desired ≠ applied.release, no open drift | adds "Pending convergence: `<desired>` is selected, not applied." |
+| desired ≠ applied.release, no open drift | adds "The selected release `<desired>` differs from the applied one; whether its configuration for this machine differs is not shown (G16)." |
 | openDrift not null | "Drifted since `<at of the openDrift.observation observation>`: a read differed from what Bronzeward last verified (`<applied.release>`)." If observed.release = desired, adds "It equals the selected release; that does not close the drift." |
 | no open drift, observed.release null | "The configuration read at `<observed.at>` matched neither `Applied` nor `Desired`, and no drift is open; an operation may hold the machine. See the timeline." |
 | newest observation newer than observed.at, with unread causes | adds "The latest read at `<time>` could not read: `<causes>`." |
@@ -220,7 +220,12 @@ timeline:
 A matching release ID never by itself means healthy, fresh or converged: no health check is
 bound in the PoC (`health: none-bound`, `internal/api/observe.go:86`), and every sentence says
 "Health: not checked". Pending convergence and drift are different
-([execution and recovery §6.1](execution-recovery.md#61-detection)). A freeze closes the scope
+([execution and recovery §6.1](execution-recovery.md#61-detection)). Pending convergence is a
+difference of the machine's artifact digests between `Desired` and `Applied`
+([execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values)),
+which no read serves ([§11](#11-api-gap-audit), G16). A newly selected release can carry the
+same configuration for an unchanged machine, so the clients show only that the selected release
+differs from the applied one, never that the machine needs to converge. A freeze closes the scope
 gate for commitments and attempts but does not stop an attempt already recorded, and does not
 block an adoption record
 ([execution and recovery §6.2](execution-recovery.md#62-freeze),
@@ -364,7 +369,7 @@ returns a different principal is shown as a new sign-in, never silently continue
 $ bronzewardctl machine list --cluster cl_9fd…m3ka
 MACHINE         ENDPOINT          DESIRED        APPLIED (SOURCE)          OBSERVED             STATE
 mch_k2p…7xqa    10.5.0.2:50000    rel_fgqv…j6m   rel_fgqv…j6m (operation)  =applied, 2m ago     matches applied
-mch_tqhc…35uq   10.5.0.3:50000    rel_fgqv…j6m   rel_p4nx…8wd (adoption)   =applied, 1m ago     pending convergence
+mch_tqhc…35uq   10.5.0.3:50000    rel_fgqv…j6m   rel_p4nx…8wd (adoption)   =applied, 1m ago     selected ≠ applied
 mch_w4ze…n3fa   10.5.0.4:50000    rel_fgqv…j6m   rel_fgqv…j6m (operation)  no match, 5m ago     drifted, frozen
 Health is not checked in this installation.
 ```
@@ -816,8 +821,10 @@ tests. "Sees" lists what must be visible before the step's action is enabled.
 
 **Viewer.** Sign in, pick the context, open Machines, find the drifted machine, read its
 desired, applied and observed state with observation time, open the timeline, open the plan and
-approval that last applied it, read the audit acts. Every action button is absent or disabled
-with "needs author" or a similar reason. Restriction: nothing secret is served to any role
+approval that last applied it, read the audit acts. Once #253 closes G1, every action button is
+absent or disabled with "needs author" or a similar reason; until then the clients cannot know
+the caller's roles ([§3](#3-roles-humans-and-automation)), so actions stay enabled and an action
+the viewer takes shows the server's `403` with the roles the route accepts. Restriction: nothing secret is served to any role
 except the protected review, which is author-only.
 
 **Author.** Record a cluster and its machines (human); import with review (human), mark missed
@@ -1003,6 +1010,7 @@ accepted limitation.
 | G13 | A human session's mutation takes no expected-epoch precondition: only `Idempotency-Key` and `If-Match` are checked (`internal/api/api.go:388-409`), and the epoch is reported only in an answer (`internal/api/api.go:318-319`). After a committed write's answer is lost and a restore removes its record, the same request with the same key executes afresh in the new epoch ([persistence and API §7.2](persistence-api.md#72-behavior)); a read before repeating leaves a race. An automation token is bound to its issuing epoch and refused `401` in any other (`internal/api/api.go:297-303`) | repeating an ambiguous write ([§8](#8-states-every-view-must-handle), C5, G3, [W11](operator-experience-wireframes.md#w11-empty-withheld-error-and-offline-states)) | none for a human session: the client compares only the epoch it last saw; #253 adds a server-enforced epoch check or explicitly accepts the residual risk |
 | G14 | No read of the process's start mode: `GET /recovery` serves epoch, recovery mode, entry, exit and scopes (`internal/api/recovery_exits.go:123-129`), the headers carry only `Bronzeward-Epoch` and `Bronzeward-Recovery-Mode` (`internal/api/api.go:318-324`), and a recovery start shows only in a `409 recovery-mode-active` refusal (`internal/api/recovery_exits.go:211-213`) | the recovery banner and `status` stating that plan creation, approval and unfreeze wait for a normal restart ([§5.9](#59-recovery-after-a-restore)) | the answers of those three routes: past the role check, a recovery-start refusal shows a recovery start and any other answer a normal one (`internal/api/api.go:331-345`), and recovery entry is refused on a normal start (`internal/api/api.go:348-351`); nothing shows it before one is sent, so actions cannot be disabled beforehand and the banner holds until the next such answer |
 | G15 | No principal display name: bodies carry principal identifiers only (`internal/api/acts.go:19-30`, `internal/api/releases.go:53`), and no route maps one to a subject or name | showing who published, planned, approved or entered recovery | shortened principal identifiers |
+| G16 | No convergence status: a machine body serves `desired` and `applied.release` but not whether their artifact digests for the machine differ (`internal/api/reads.go:155-167`), which is what pending convergence means ([execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values)) | showing whether a machine still needs a plan ([§2.4](#24-desired-applied-and-observed), [§5.2](#52-inventory), [W2](operator-experience-wireframes.md#w2-machines)) | the release difference only, never labelled as pending convergence |
 
 Not gaps, by design: no client dispatch or apply route
 ([design §12.7](../design/Talos_Configuration_and_Machine_Management_Design.md#127-application-approval-and-dispatch-boundary));
@@ -1079,7 +1087,7 @@ refinement until #253's contracts land.
 | Journey (section) | CLI | Web | API/contract | Validation |
 | --- | --- | --- | --- | --- |
 | Sign-in, context, roles (5.1) | [#254](https://github.com/ginsys/bronzeward/issues/254) | [#255](https://github.com/ginsys/bronzeward/issues/255) | #253: login, G1, G2 | [#263](https://github.com/ginsys/bronzeward/issues/263) T1 |
-| Inventory and machine state (5.2, 2.4) | #254 | #255 | #253: G8, G9 | #263 T2 |
+| Inventory and machine state (5.2, 2.4) | #254 | #255 | #253: G8, G9, G16 | #263 T2 |
 | Protected import and review (5.3) | [#256](https://github.com/ginsys/bronzeward/issues/256) | [#257](https://github.com/ginsys/bronzeward/issues/257) | #253: review handling, G3, G10 | #263 T3 |
 | Fragments, profiles, assignments (5.4) | #256 | #257 | #253: ETags, G5 | #263 T4, T5 |
 | Publication, rendered review, provenance (5.5, 2.1, 2.2) | #256 | #257 | #253: G4, G6, G15 | #263 T6, T7 |
@@ -1091,7 +1099,7 @@ refinement until #253's contracts land.
 
 Proposed changes: the web inventory ticket (#255) also carries the shared web shell (header,
 banners, state catalogue of [§8](#8-states-every-view-must-handle)); and #253 records, for each
-gap G1-G15, whether it becomes an API issue that natively blocks the client tickets it affects.
+gap G1-G16, whether it becomes an API issue that natively blocks the client tickets it affects.
 
 **Qualifications left to #253**, besides the gaps:
 
