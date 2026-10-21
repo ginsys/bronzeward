@@ -1085,11 +1085,31 @@ Items labelled *derived* are the recorder's inferences, not the owner's decision
 
 ### 13.8 Direct operator Talos access
 
-**Decision** (owner, 21 October 2026, [direct Talos SSO decision](https://github.com/ginsys/bronzeward/issues/265)): Bronzeward neither recommends nor supports an SSO companion that issues Talos client certificates to operators. Operators keep their existing talosconfigs; their distribution, custody and rotation stay operational duties outside Bronzeward. The independent emergency credentials of §13.5 are unchanged. Direct Talos access of any kind is outside application approval and is reconciled as drift (§12.7).
+**Decision** (owner, 21 October 2026, [direct Talos SSO decision](https://github.com/ginsys/bronzeward/issues/265)): operators keep the talosconfigs they hold today. Bronzeward does not recommend or support an SSO companion that issues Talos client certificates to operators; both companion options below are deferred, not rejected, and may be reconsidered under the conditions at the end of this section. Distribution, custody and rotation of the operator-held talosconfig copies stay operational duties outside Bronzeward. The provider-held talosconfig the executor reads (§13.2) and the independent emergency credentials of §13.5 are unchanged.
 
-Alternatives considered, using the [Talos OIDC investigation](research/20261021-talosctl-oidc.md): a reader-first companion with an operator-run identity provider, and the same companion also issuing `os:admin`. Both are deferred, not rejected. A cached token kept exchanging after group removal and account disablement, an issued certificate kept working, and a held connection served after its certificate expired. An administrator certificate could mint a longer-lived one, so the issuer's lifetime does not bound administrative authority. The exchange audit records issuance, not the direct commands that follow. Its token validator does not meet [persistence and API §10.1](../spec/persistence-api.md#101-humans-oidc), so it is never Bronzeward application authentication.
+Supported operator uses are those operators already have with their own talosconfigs: direct reads and diagnostics, and emergency changes under §13.5. Bronzeward does not authorize, fence or attribute that access. A configuration change made through it is outside application approval and is reconciled as drift ([execution and recovery §6.1](../spec/execution-recovery.md#61-detection), §12.7). Rationale: the current model adds no identity-provider or exchange availability dependency, no privileged issuer and no workstation token cache. The companion offers central login and group-based issuance, but default-deny groups and reader-first access narrow its scope without solving administrative revocation.
 
-Reconsideration needs a stated direct-access use case the current model cannot serve, and must define a revocation bound with compensating controls, reader/administrator separation, workstation custody, audit attribution, issuer availability, and emergency access independent of the issuer. Certificate expiry alone is never treated as ending a connection or an administrator's authority. Unqualified in the investigation: account deletion, signing-key rotation, production TLS, high availability, other identity providers, natural token refresh.
+Alternatives considered: a reader-first companion with an operator-run identity provider, and the same companion also issuing `os:admin`. The [Talos OIDC investigation](research/20261021-talosctl-oidc.md) supplies three kinds of evidence:
+
+- **Live, one disposable run** (Talos 1.13.6, one Keycloak realm, synthetic identities):
+  - Reader login and certificate renewal worked. A reader's request for an administrator certificate was refused, and so was an identity with no mapped group.
+  - A cached token still exchanged within 0.189 seconds of group removal, and again after account disablement. The already issued certificate kept working.
+  - A held connection still served about two seconds after its certificate expired.
+  - A 45-second administrator certificate minted a one-hour one, which the exchange audit did not record.
+  - These are single samples, not revocation or lifetime bounds.
+- **Source, at the pinned upstream commit and Talos v1.13.6:**
+  - The exchange grants `os:admin` when neither roles nor rules are configured.
+  - It returns stale signing keys when a refresh fails, with no age bound.
+  - Its audit is best-effort and records issuance, not the direct commands that follow.
+  - Its CLI keeps tokens, certificates and keys on the workstation, falling back to a mode-0600 file.
+  - Its token validator does not require a non-empty `sub`, check `iat` or bound `exp - iat`. It therefore does not meet [persistence and API §10.1](../spec/persistence-api.md#101-humans-oidc) and is never Bronzeward application authentication.
+  - Talos v1.13.6 imposes no maximum lifetime on a requested certificate, so the issuer's lifetime does not bound administrative authority.
+- **Untested, or open:**
+  - Not tested: account deletion, session logout, signing-key rotation, production TLS and ingress, high availability, other identity providers, device flow, OS keyrings, offline tokens, natural token refresh, durable audit under storage failure.
+  - Upstream's scan of the pinned source reported eleven reachable Go standard-library findings, and no local scan cleared the build.
+  - The fixture also gave the emergency credential to the issuer. It therefore showed independence of availability only, not of custody or revocation.
+
+Reconsideration needs a stated direct-access use case the current model cannot serve. It must define a revocation bound with compensating controls, reader/administrator separation, workstation custody, audit attribution, issuer availability, and emergency access independent of the issuer. Certificate expiry alone is never treated as ending a connection or an administrator's authority.
 
 ## 14. Reliability, high availability and disaster recovery
 
