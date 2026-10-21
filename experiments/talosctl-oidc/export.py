@@ -13,6 +13,11 @@ import subprocess
 import yaml
 
 
+# Assertions are the fixture's integrity gates; refuse modes that remove them.
+if not __debug__:
+    raise SystemExit("Evidence export requires assertions: unset PYTHONOPTIMIZE and omit -O/-OO")
+
+
 def encoded(value):
     return (json.dumps(value, indent=2) + "\n").encode()
 
