@@ -485,7 +485,8 @@ contract's, and this specification does not close it.
    `GET /recovery` included, with `409 recovery-mode-active` (`internal/api/api.go:335-339`). When
    only the `201` was lost, the process saw the commit before answering, so the confirming read
    shows the new epoch and a same-key repeat replays the entry
-   (`internal/api/recovery_entries_test.go:236-252`). When the server lost its own COMMIT reply
+   (`internal/api/recovery_entries_test.go:236-252`; the replay: `internal/api/idempotency.go:60-82`,
+   `internal/api/recovery_entries.go:102-113`). When the server lost its own COMMIT reply
    and answered `500`, only a same-key repeat completes the entry
    (`internal/api/recovery_entries_test.go:254-295`). So the client repeats an entry whose outcome
    is unknown under the same key, checking the principal but not the epoch, here and in item 4.
@@ -980,7 +981,7 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 | REC-01 | restore | recovery mode on | banner; refusals name scope or process restriction |
 | REC-02 | refusal | recovery entry sent to a normal start; then to a recovery start whose entry committed under another key | first: `409 conflict` without `epoch` or `request`, read as a normal start; second: `409 conflict` with `epoch`, read as a recovery start, never as a normal one |
 | REC-03 | refusal | plan creation on a recovery start after its entry; plan creation on a pre-restore unaccounted scope of a normal start | first: `409 recovery-mode-active` without `scope`, read as a recovery start; second: with `scope`, start mode unchanged |
-| REC-04 | disconnect | recovery entry commits and its answer is lost: (a) the injector drops the `201`, and the confirming read answers `200` with the new epoch; (b) the server loses its own COMMIT reply and answers `500`, and the confirming read is refused `409 recovery-mode-active`; (b) needs a server-side fault hook, not the injector | both: repeated under the same key with no epoch check; `201` with `Idempotent-Replayed: true` and the minted epoch; §8.5 applied without setting the entry aside |
+| REC-04 | disconnect | recovery entry commits and its answer is lost: (a) the injector drops the `201`, and the confirming read answers `200` with the new epoch; (b) the server loses its own COMMIT reply and answers `500`, and the confirming read is refused `409 recovery-mode-active`; (b) needs a server-side fault hook, not the injector, and the server binary has none (the test-only `commit` option, `internal/api/api.go:131`, `:189`): its server side is covered by `internal/api/recovery_entries_test.go:254-295`, and its client side waits for that hook, a prerequisite of #263 | both: repeated under the same key with no epoch check; `201` with `Idempotent-Replayed: true` and the minted epoch; §8.5 applied without setting the entry aside |
 | PROT-01 | success | protected import, review, mark, continue | review only on a terminal (CLI; a pseudo-terminal in tests, its output matched in memory and never retained, [§11.5](#115-test-artifacts) item 1); no synthetic value in any artifact or storage |
 | PROT-02 | refusal | `import review` with standard output redirected | refused, nothing written |
 | PROT-03 | refusal | mark that is not a path; mark compilation refuses (for example one that would rewrite text); compilation fails on a dependency | first: `422` with `position`; second: `202`, then, after the `marked` event of that `generation`, a `mark-refused` event with `422` and `position` and the ingestion paused again; third: `mark-refused` with `503`, shown by code as not applied; none reported as accepted, no path shown |
@@ -1051,9 +1052,11 @@ route accepts an optional request header naming the epoch the client expects, ch
 transaction as the write and after the idempotency lookup, so an earlier-epoch record still
 answers its `409` (AMB-07); a mismatch is refused with a problem naming the current epoch and
 commits nothing. It extends to human principals the epoch check service tokens already get. Both
-clients send it on every write and every repeat, except a repeat of the recovery entry, which
-[§8.4](#84-idempotency-and-ambiguous-responses) item 3 lets cross the entry's own epoch change;
-the server's own-entry check still bounds that repeat, and its residual (a repeat with no record
+clients send it on every write and every repeat, except the recovery entry, neither its first
+send nor a repeat: its own commit changes the epoch, a recovery start serves no read that would
+tell the client the current epoch before it, and
+[§8.4](#84-idempotency-and-ambiguous-responses) item 3 lets its repeat cross that change. The
+server's own-entry check still bounds that repeat, and its residual (a repeat with no record
 becoming a later start's entry) stays open. Closes G21.
 
 **A7. Principal display names.** A way to show a principal identifier as a person or service:
@@ -1078,7 +1081,7 @@ dependencies below in place:
 | [#258](https://github.com/ginsys/bronzeward/issues/258), [#259](https://github.com/ginsys/bronzeward/issues/259) plans, approval, operations | A4 (plan filters), D9 (CLI), D10 | 8.4, 8.6 |
 | [#260](https://github.com/ginsys/bronzeward/issues/260), [#261](https://github.com/ginsys/bronzeward/issues/261) drift and recovery | A2 (settings, start mode), D10 | 8.5, 8.6 |
 | [#262](https://github.com/ginsys/bronzeward/issues/262) packaging and documentation | D1, D3, D7 | 6, 7, 9.1, 10.1, 10.2 |
-| [#263](https://github.com/ginsys/bronzeward/issues/263) validation | A5, D8 | 11.5, 12 |
+| [#263](https://github.com/ginsys/bronzeward/issues/263) validation | A5, D8; a server-side COMMIT fault hook for REC-04 (b) | 11.5, 12 |
 
 A7 blocks no ticket: until it lands, the tickets from #256 to #261 show shortened principal
 identifiers (G23). A4's convergence member does not block the inventory views of #254 and #255
