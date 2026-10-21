@@ -65,7 +65,7 @@ Machines                                    Cluster: all ▾   State: all ▾   
 | Machine    | Endpoint       | Desired     | Applied (source)         | Observed                 | State                   |
 +------------+----------------+-------------+--------------------------+--------------------------+-------------------------+
 | mch_k2p…7x | 10.5.0.2:50000 | rel_fgqv…   | rel_fgqv… (operation)    | = applied, 2 min ago     | (•) Matches applied     |
-| mch_tqhc…35| 10.5.0.3:50000 | rel_p4nx…   | rel_fgqv… (adoption)     | = applied, 1 min ago     | (•) Pending convergence |
+| mch_tqhc…35| 10.5.0.3:50000 | rel_fgqv…   | rel_fgqv… (adoption)     | = applied, 1 min ago     | (•) Pending convergence |
 | mch_w4ze…n3| 10.5.0.4:50000 | rel_fgqv…   | rel_fgqv… (operation)    | no match, 5 min ago      | (•) Drifted (•) Frozen  |
 +------------+----------------+-------------+--------------------------+--------------------------+-------------------------+
 Filtering is done in the browser over all pages (gap G9). Showing 3 of 3. Health is not checked.
@@ -160,7 +160,7 @@ automatic overwrite.
 No copy, download, print styling or browser history entry for this view; it is fetched on
 demand and cleared on leaving the page. A refused mark says "Mark 1 was refused: rule
 `mark-kind`" and never echoes the path. "Continue" ends with "The draft changed after this
-import paused; the import was not applied and is abandoned" when the draft moved, and offers
+import started; the import was not applied and is abandoned" when the draft moved, and offers
 [Import again] against the draft's current revision; the claim is already abandoned.
 
 ## W6. Release and rendered review
@@ -170,12 +170,15 @@ Release rel_h7rt…2bd   cluster cl_9fd… (lab-a)   published 10:02 by ops-ben 
 Renderer: contract v1.13 · machinery v1.13.6 · Kubernetes v1.34.1
 +-------------------------------------------------------------------------------------------+
 | Source revisions this release was built from (these are not configuration)               |
+|   fragment    cluster-base    frv_5cz…h1ma  ▸                                             |
 |   fragment    worker-labels   frv_3jn…k4ma  ▸                                             |
+|   fragment    worker-sysctls  frv_8wq…c3ra  ▸                                             |
 |   profile     workers         prv_7ce…m2qa  ▸                                             |
-|   assignment  mch_b3c…        asr_5qp…d7fa  ▸                                             |
+|   assignment  mch_b3c…        asr_5qp…d7fa  ▸   (+3 more, one per covered machine)        |
 +-------------------------------------------------------------------------------------------+
-| Rendered configuration per machine                                                       |
+| Rendered configuration per machine (4 covered)                                            |
 |   mch_b3c…aa2q   no-reboot   [Open rendered configuration]   [Plan apply] (publisher)    |
+|   mch_k2p…7xqa · mch_tqhc…35uq · mch_w4ze…n3fa   (same actions per row)                   |
 +-------------------------------------------------------------------------------------------+
 
 Rendered configuration: mch_b3c…aa2q in rel_h7rt…2bd (redacted)
@@ -184,9 +187,9 @@ Rendered configuration: mch_b3c…aa2q in rel_h7rt…2bd (redacted)
       username: ci-pull
       password: [secret registry/example-pass, version 1]      <- badge for <redacted:registry/example-pass@1>
     nodeLabels:
-      team: ""                                                   <- empty in this review; no token or provenance names it
+      team: storage
   Provenance (secret references only)
-    registry/example-pass v1  from frv_9tk… doc[0]/…/password  -> doc[0]/…/password
+    registry/example-pass v1  from frv_3jn…k4ma doc[0]/…/password  -> doc[0]/…/password
 ```
 
 Withheld variant: the rendered panel reads only "Configuration not shown: it could not be
@@ -216,8 +219,8 @@ Plan pln_f645…cawy   (•) Proposed — not approved, nothing will run   expir
 |  Change      whole redacted configuration, applied rel_9vbn… -> rel_h7rt…                 |
 |              machine.nodeLabels.team: (absent) -> storage                                 |
 +-------------------------------------------------------------------------------------------+
-| (•) Self-approval, predicted: you published this release. The approval records the actual |
-|     reasons. Allowed and marked.                                                          |
+| (•) Self-approval, predicted: you created this plan and published this release. The      |
+|     approval records the actual reasons. Allowed and marked.                              |
 | To approve, type the plan ID: [______________]   [Approve]  (approver, human)             |
 | [Cancel plan] (creator publisher, approver, recovery-admin)                               |
 +-------------------------------------------------------------------------------------------+
