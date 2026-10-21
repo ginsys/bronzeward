@@ -483,7 +483,9 @@ The approval screen is §5.6's, with the adoption baseline evidence in place of 
 (`internal/api/plans.go:138-168`). An adoption records the digest of the node's own bytes
 ([§2.4](#24-desired-applied-and-observed)); the plan's evidence says whether the release's
 artifact differs from them (`pendingConvergence`, `internal/api/plans.go:315`). In this
-example `cluster-base` only restates values the node already runs, so it does not differ, and §5.6's later `apply-config` plan shows a diff from `rel_9vbn…c1ta`.
+example the adopt plan reports `pendingConvergence: false`: the compiled artifact is
+byte-identical to what the node runs, so §5.6's later `apply-config` plan shows a diff from
+`rel_9vbn…c1ta`. Equal values alone would not establish this; only the plan's evidence does.
 Had it differed, that plan would show "Diff withheld": no redacted form exists of what the
 machine runs (`internal/api/plans.go:434-449`).
 
