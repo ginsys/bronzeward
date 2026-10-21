@@ -5,9 +5,11 @@ info:
   description: 'The HTTP API of persistence and API §9, under /api/v1. Every operation carries the route table''s facts as
     extension fields: x-bronzeward-roles, the roles that may call it, in the table''s order; x-bronzeward-human-only, refused
     to automation principals; x-bronzeward-if-match, requires If-Match; x-bronzeward-normal-start-only, refused on a recovery
-    start. internal/api/openapi_test.go fails when they differ from routes(), in either direction, and the API tests validate
-    every answer, and every request the server accepted, against these schemas. Every error answer is a problem document (default
-    response). Request bodies are decoded strictly: application/json, exactly the listed members, none repeated.'
+    start. internal/api/openapi_test.go fails when they, an operation''s path parameters, its Idempotency-Key and If-Match
+    parameters or its request body differ from routes(), in either direction, and the API tests validate every answer''s status,
+    headers and body, and every request the server accepted, against this description. Every error answer is a problem document
+    (default response). Request bodies are decoded strictly: application/json, exactly the listed members, none repeated;
+    an optional member given as null is the same as an absent one.'
 servers:
 - {url: /api/v1}
 security:
@@ -26,6 +28,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema:
@@ -53,6 +56,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ApprovalBody'}
@@ -78,6 +82,7 @@ paths:
           description: Created.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -98,6 +103,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema: {$ref: '#/components/schemas/AssignmentRevisionBody'}
@@ -115,6 +121,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema:
@@ -143,6 +150,7 @@ paths:
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
             ETag: {$ref: '#/components/headers/ETag'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema: {$ref: '#/components/schemas/AssignmentBody'}
@@ -164,6 +172,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema:
@@ -189,6 +198,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema:
@@ -219,6 +229,7 @@ paths:
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
             Location: {$ref: '#/components/headers/Location'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -239,6 +250,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ClusterBody'}
@@ -259,6 +271,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema: {$ref: '#/components/schemas/DependencyPage'}
@@ -278,6 +291,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema: {$ref: '#/components/schemas/DependencyBody'}
@@ -299,6 +313,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema:
@@ -328,6 +343,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema:
@@ -353,6 +369,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema:
@@ -378,6 +395,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema:
@@ -408,6 +426,7 @@ paths:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
             ETag: {$ref: '#/components/headers/ETag'}
             Location: {$ref: '#/components/headers/Location'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -429,6 +448,7 @@ paths:
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
             ETag: {$ref: '#/components/headers/ETag'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema: {$ref: '#/components/schemas/DraftBody'}
@@ -461,6 +481,7 @@ paths:
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
             ETag: {$ref: '#/components/headers/ETag'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -488,6 +509,7 @@ paths:
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
             ETag: {$ref: '#/components/headers/ETag'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -516,6 +538,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -549,6 +572,7 @@ paths:
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
             ETag: {$ref: '#/components/headers/ETag'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -576,6 +600,7 @@ paths:
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
             ETag: {$ref: '#/components/headers/ETag'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -609,6 +634,7 @@ paths:
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
             ETag: {$ref: '#/components/headers/ETag'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -636,6 +662,7 @@ paths:
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
             ETag: {$ref: '#/components/headers/ETag'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -665,6 +692,7 @@ paths:
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
             Location: {$ref: '#/components/headers/Location'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -685,6 +713,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema: {$ref: '#/components/schemas/FragmentRevisionBody'}
@@ -702,6 +731,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema:
@@ -730,6 +760,7 @@ paths:
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
             ETag: {$ref: '#/components/headers/ETag'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema: {$ref: '#/components/schemas/FragmentBody'}
@@ -751,6 +782,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema:
@@ -781,6 +813,7 @@ paths:
           description: Created.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -807,6 +840,7 @@ paths:
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
             Location: {$ref: '#/components/headers/Location'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -833,6 +867,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema: {$ref: '#/components/schemas/IngestionBody'}
@@ -859,6 +894,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -887,6 +923,7 @@ paths:
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
             Location: {$ref: '#/components/headers/Location'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -921,6 +958,7 @@ paths:
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
             Location: {$ref: '#/components/headers/Location'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -949,6 +987,8 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
+            Cache-Control: {$ref: '#/components/headers/NoStore'}
           content:
             application/json:
               schema: {$ref: '#/components/schemas/IngestionReviewBody'}
@@ -976,6 +1016,7 @@ paths:
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
             Location: {$ref: '#/components/headers/Location'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -1000,6 +1041,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema:
@@ -1030,6 +1072,7 @@ paths:
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
             Location: {$ref: '#/components/headers/Location'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -1050,6 +1093,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MachineBody'}
@@ -1076,6 +1120,7 @@ paths:
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
             Location: {$ref: '#/components/headers/Location'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -1098,6 +1143,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema:
@@ -1133,6 +1179,7 @@ paths:
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
             Location: {$ref: '#/components/headers/Location'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -1155,6 +1202,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema:
@@ -1190,6 +1238,7 @@ paths:
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
             Location: {$ref: '#/components/headers/Location'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -1233,6 +1282,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema:
@@ -1260,6 +1310,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema: {$ref: '#/components/schemas/OperationBody'}
@@ -1290,6 +1341,7 @@ paths:
           description: Created.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -1309,20 +1361,22 @@ paths:
       - {$ref: '#/components/parameters/Cursor'}
       - {$ref: '#/components/parameters/LastEventID'}
       description: 'With `Accept: text/event-stream` the answer is Server-Sent Events and the request takes no query; otherwise
-        it is a JSON page of events (persistence and API §8.3). Each SSE event has `id: <epoch>:<number>`, `event: <type>`
-        and `data: <entry>`, the same three members as an EventBody. A Last-Event-ID of another epoch cannot be resumed: the
-        server first sends `event: reset` with `data: {}`, then the events from the start. A plan operation''s types are its
-        timeline entries'' kinds (attempt, response, accounting, classification, ownership-transition, operation-state, applied-change,
-        scope-state); a publish or ingest operation''s are its own events (queued, claimed, started, staged, paused, marked,
-        mark-refused, continued, taken-over, resume-failed, talos-access, succeeded, failed). The stream ends when the operation
-        is terminal and its events are written, or at the expiry of the token that opened it.'
+        it is a JSON page of EventBody items (persistence and API §8.3). Each SSE event has `id: <epoch>:<number>`, `event:
+        <type>` and `data: <data>`: an EventBody''s id, type and data; its `at` is sent only in the JSON form. A Last-Event-ID
+        of another epoch cannot be resumed: the server first sends `event: reset` with `data: {}`, then the events from the
+        start. A plan operation''s types are the kinds of the machine timeline entries that name it, beginning with its commitment,
+        for example commitment, attempt, refusal, response, accounting, classification, ownership-transition, operation-state,
+        adoption and applied-change; a publish or ingest operation''s are its own events (queued, claimed, started, staged,
+        paused, marked, mark-refused, continued, taken-over, resume-failed, talos-access, succeeded, failed). The stream ends
+        when the operation is terminal and its events are written, or at the expiry of the token that opened it.'
       responses:
         '200':
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Cache-Control:
-              description: no-store on a stream.
+              description: no-store on a stream; absent from the JSON form.
               schema: {type: string}
           content:
             application/json:
@@ -1360,6 +1414,7 @@ paths:
           description: Created.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -1387,6 +1442,7 @@ paths:
           description: Created.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -1405,6 +1461,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema:
@@ -1435,6 +1492,7 @@ paths:
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
             Location: {$ref: '#/components/headers/Location'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -1455,6 +1513,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema: {$ref: '#/components/schemas/PlanBody'}
@@ -1483,6 +1542,7 @@ paths:
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
             Location: {$ref: '#/components/headers/Location'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -1509,6 +1569,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -1529,6 +1590,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ProfileRevisionBody'}
@@ -1538,12 +1600,15 @@ paths:
       operationId: getProfiles
       tags: [profiles]
       x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
-      parameters: []
+      parameters:
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
       responses:
         '200':
           description: No API test reaches this answer; described from its handler.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema:
@@ -1572,6 +1637,7 @@ paths:
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
             ETag: {$ref: '#/components/headers/ETag'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ProfileBody'}
@@ -1593,6 +1659,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema:
@@ -1616,6 +1683,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema: {$ref: '#/components/schemas/RecoveryBody'}
@@ -1638,6 +1706,7 @@ paths:
           description: Created.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -1662,6 +1731,7 @@ paths:
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
             Location: {$ref: '#/components/headers/Location'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -1686,6 +1756,7 @@ paths:
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
             Location: {$ref: '#/components/headers/Location'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -1714,6 +1785,7 @@ paths:
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
             Location: {$ref: '#/components/headers/Location'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -1742,6 +1814,7 @@ paths:
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
             Location: {$ref: '#/components/headers/Location'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
             Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
@@ -1760,6 +1833,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema:
@@ -1787,6 +1861,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ReleaseBody'}
@@ -1810,6 +1885,7 @@ paths:
           description: OK.
           headers:
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ReviewBody'}
@@ -1848,19 +1924,49 @@ components:
   headers:
     Epoch:
       description: The recovery epoch the request was answered in (persistence and API §9.1).
+      required: true
       schema: {type: string}
+    OptionalEpoch:
+      description: The recovery epoch the request was answered in (persistence and API §9.1); absent from an answer to an
+        unauthenticated request.
+      schema: {type: string}
+    RecoveryMode:
+      description: true while the server runs in recovery mode (persistence and API §9.1); absent otherwise.
+      schema: {type: string, enum: ['true']}
     ETag:
       description: The resource's version (persistence and API §4.1).
+      required: true
+      schema: {type: string}
+    OptionalETag:
+      description: The resource's version (persistence and API §4.1), when the answer is one versioned resource.
       schema: {type: string}
     Location:
       description: The created resource.
+      required: true
+      schema: {type: string}
+    OptionalLocation:
+      description: The created resource, when the answer created one.
       schema: {type: string}
     IdempotentReplayed:
       description: true when the answer is a stored one, replayed for a repeated key (persistence and API §7.2).
-      schema: {type: string}
+      schema: {type: string, enum: ['true']}
+    NoStore:
+      description: 'no-store: the answer must not be cached (persistence and API §9.2).'
+      required: true
+      schema: {type: string, enum: [no-store]}
   responses:
     Problem:
       description: A problem document (persistence and API §9.4).
+      headers:
+        Bronzeward-Epoch: {$ref: '#/components/headers/OptionalEpoch'}
+        Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
+        Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+        WWW-Authenticate:
+          description: 'On 401: the bearer challenge (RFC 6750).'
+          schema: {type: string}
+        Cache-Control:
+          description: no-store on every answer of GET /ingestions/{id}/review.
+          schema: {type: string, enum: [no-store]}
       content:
         application/problem+json:
           schema: {$ref: '#/components/schemas/Problem'}
@@ -1946,8 +2052,9 @@ components:
         start: {type: string}
         end: {type: string}
         facts:
-          type: object
+          type: [object, 'null']
           additionalProperties: {type: string}
+          description: At most 16 members; names at most 64 bytes, values at most 1024.
       additionalProperties: false
     ActItem:
       type: object
@@ -2073,10 +2180,10 @@ components:
       required: []
       properties:
         profiles:
-          type: array
+          type: [array, 'null']
           items: {type: string}
         fragments:
-          type: object
+          type: [object, 'null']
           additionalProperties:
             type: array
             items: {type: string}
@@ -2395,8 +2502,9 @@ components:
       required: []
       properties:
         facts:
-          type: object
+          type: [object, 'null']
           additionalProperties: {type: string}
+          description: At most 16 members; names at most 64 bytes, values at most 1024.
       additionalProperties: false
     FragmentBody:
       type: object
@@ -2429,10 +2537,13 @@ components:
         layer: {type: string, enum: [global, site, cluster, role, workload, override]}
         document: {type: string, minLength: 1, description: 'The YAML document, at most 512 KiB.'}
         marks:
-          type: array
+          type: [array, 'null']
           items: {type: string}
           maxItems: 1024
-        declarations: {$ref: '#/components/schemas/Declarations'}
+        declarations:
+          oneOf:
+          - {$ref: '#/components/schemas/Declarations'}
+          - {type: 'null'}
       additionalProperties: false
     FragmentRevisionBody:
       type: object
@@ -2509,13 +2620,19 @@ components:
         draft: {type: string}
         source: {type: string, enum: [machine, document]}
         staging: {type: string, enum: [transient, encrypted]}
-        review: {type: boolean}
+        review: {type: [boolean, 'null']}
         marks:
-          type: array
+          type: [array, 'null']
           items: {type: string}
           maxItems: 1024
-        document: {type: string, minLength: 1, description: 'The YAML document, at most 512 KiB.'}
-        declarations: {$ref: '#/components/schemas/Declarations'}
+        document:
+          type: [string, 'null']
+          minLength: 1
+          description: The YAML document, at most 512 KiB.
+        declarations:
+          oneOf:
+          - {$ref: '#/components/schemas/Declarations'}
+          - {type: 'null'}
       additionalProperties: false
     IngestionReviewBody:
       type: object
@@ -3081,9 +3198,9 @@ components:
       type: object
       required: [reason]
       properties:
-        identity: {type: string}
-        iss: {type: string}
-        sub: {type: string}
+        identity: {type: [string, 'null']}
+        iss: {type: [string, 'null']}
+        sub: {type: [string, 'null']}
         reason: {type: string, minLength: 1, description: '1 to 1024 bytes, not blank.'}
       additionalProperties: false
     ScopeAccounted:
@@ -3122,8 +3239,9 @@ components:
           minItems: 1
           maxItems: 256
         facts:
-          type: object
+          type: [object, 'null']
           additionalProperties: {type: string}
+          description: At most 16 members; names at most 64 bytes, values at most 1024.
       additionalProperties: false
     ScopeMarkBody:
       type: object
@@ -3163,8 +3281,9 @@ components:
       required: []
       properties:
         facts:
-          type: object
+          type: [object, 'null']
           additionalProperties: {type: string}
+          description: At most 16 members; names at most 64 bytes, values at most 1024.
       additionalProperties: false
     ScopeReleaseBody:
       type: object
@@ -3196,8 +3315,9 @@ components:
       required: []
       properties:
         facts:
-          type: object
+          type: [object, 'null']
           additionalProperties: {type: string}
+          description: At most 16 members; names at most 64 bytes, values at most 1024.
       additionalProperties: false
     ScopeSettle:
       type: object

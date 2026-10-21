@@ -1619,9 +1619,10 @@ Design: [§11](../design/Talos_Configuration_and_Machine_Management_Design.md#11
   describes every route of §9.2 in OpenAPI 3.1, with its roles, human-only,
   `If-Match` and start-mode restrictions as `x-bronzeward-*` extension fields.
   `internal/api/openapi_test.go` fails when it and the server's route table
-  differ in either direction, and the API tests validate every answer, and
-  every request the server accepted, against its schemas
-  (`internal/api/openapi_response_test.go`). A route change updates it in the
+  differ in either direction, in those facts or in an operation's path
+  parameters, `Idempotency-Key` and `If-Match` parameters or request body. The
+  API tests validate every answer's status, headers and body, and every request
+  the server accepted, against it (`internal/api/openapi_response_test.go`). A route change updates it in the
   same change. Clients generate their request and response types from it with
   an OpenAPI 3.1 generator of their choosing; idempotency keys, ETags, epochs
   and token renewal stay hand-written client behavior

@@ -16,8 +16,8 @@ import (
 )
 
 // checkResponse fails t when rec, the answer to r, is not one the description lists for r's
-// operation: an undescribed status, a media type the status does not list, or a JSON body its
-// schema refuses. A request the server accepted must also fit the operation's request schema, so
+// operation: an undescribed status, a header the status does not describe or one it requires
+// and the answer lacks, a media type the status does not list, or a JSON body its schema refuses. A request the server accepted must also fit the operation's request schema, so
 // the description requires no member the server does without. env.do calls it for every request
 // a test sends through it, so the API tests' own exchanges are what the description's schemas are
 // checked against. A path outside prefix, or one no described path matches, is a test's own route
@@ -57,7 +57,9 @@ func exchangeErrors(doc map[string]any, r *http.Request, reqBody string, rec *ht
 			return append(errs, where+": the description lists no such status")
 		}
 	}
-	content, _ := deref(doc, resp).(map[string]any)["content"].(map[string]any)
+	described, _ := deref(doc, resp).(map[string]any)
+	errs = append(errs, headerErrors(doc, described, rec.Header(), where)...)
+	content, _ := described["content"].(map[string]any)
 	if len(content) == 0 {
 		if rec.Body.Len() != 0 {
 			errs = append(errs, fmt.Sprintf("%s: the description lists no body, the answer has %d bytes", where, rec.Body.Len()))
@@ -81,6 +83,45 @@ func exchangeErrors(doc map[string]any, r *http.Request, reqBody string, rec *ht
 	}
 	for _, e := range validate(doc, media["schema"], body, "body") {
 		errs = append(errs, where+": "+e)
+	}
+	return errs
+}
+
+// contractHeaders are the answer headers persistence and API §9 defines. An answer carrying one
+// must find it described for its status; headerErrors also checks every described one.
+var contractHeaders = []string{"Bronzeward-Epoch", "Bronzeward-Recovery-Mode", "Cache-Control", "ETag",
+	"Idempotent-Replayed", "Location", "WWW-Authenticate"}
+
+// headerErrors reports a contract header h carries that resp does not describe, a header resp
+// requires that h lacks, and a header value resp's schema for it refuses.
+func headerErrors(doc, resp map[string]any, h http.Header, where string) []string {
+	described := map[string]map[string]any{}
+	hs, _ := resp["headers"].(map[string]any)
+	for name, v := range hs {
+		d, _ := deref(doc, v).(map[string]any)
+		described[http.CanonicalHeaderKey(name)] = d
+	}
+	names := slices.Collect(maps.Keys(described))
+	for _, name := range contractHeaders {
+		names = append(names, http.CanonicalHeaderKey(name))
+	}
+	slices.Sort(names)
+	var errs []string
+	for _, name := range slices.Compact(names) {
+		d, ok := described[name]
+		values := h.Values(name)
+		switch {
+		case !ok && len(values) > 0:
+			errs = append(errs, fmt.Sprintf("%s: header %s is not described", where, name))
+		case ok && len(values) == 0 && d["required"] == true:
+			errs = append(errs, fmt.Sprintf("%s: required header %s is missing", where, name))
+		case ok:
+			for _, v := range values {
+				for _, e := range validate(doc, d["schema"], v, "header "+name) {
+					errs = append(errs, where+": "+e)
+				}
+			}
+		}
 	}
 	return errs
 }
@@ -412,6 +453,15 @@ func TestValidateRefusesEachKind(t *testing.T) {
 		{"a value other than const", map[string]any{"const": "a"}, "b"},
 		{"no oneOf alternative", map[string]any{"oneOf": []any{map[string]any{"type": "string"}, map[string]any{"type": "boolean"}}}, num("1")},
 		{"two oneOf alternatives", map[string]any{"oneOf": []any{map[string]any{"type": "string"}, map[string]any{"enum": []any{"a"}}}}, "a"},
+		{"a string below minLength", map[string]any{"minLength": 2}, "é"},
+		{"a string above maxLength", map[string]any{"maxLength": 1}, "ab"},
+		{"a number below minimum", map[string]any{"minimum": 1}, num("0")},
+		{"a number above maximum", map[string]any{"maximum": 604800}, num("604801")},
+		{"a fractional bound", map[string]any{"maximum": 1.5}, num("2")},
+		{"an array below minItems", map[string]any{"minItems": 1}, []any{}},
+		{"an array above maxItems", map[string]any{"maxItems": 1}, []any{"a", "b"}},
+		{"an additional member the schema refuses", map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
+			map[string]any{"a": num("1")}},
 	} {
 		if errs := validate(doc, tc.schema, tc.v, "v"); len(errs) == 0 {
 			t.Errorf("%s: accepted", tc.name)
@@ -420,8 +470,21 @@ func TestValidateRefusesEachKind(t *testing.T) {
 	if errs := validate(doc, ref, map[string]any{"id": "a", "n": num("2")}, "v"); len(errs) != 0 {
 		t.Errorf("a valid value refused: %v", errs)
 	}
-	if errs := validate(doc, map[string]any{"type": []any{"string", "null"}}, nil, "v"); len(errs) != 0 {
-		t.Errorf("null refused where allowed: %v", errs)
+	for _, tc := range []struct {
+		name   string
+		schema map[string]any
+		v      any
+	}{
+		{"null where allowed", map[string]any{"type": []any{"string", "null"}}, nil},
+		{"a string at its bounds", map[string]any{"minLength": 1, "maxLength": 1}, "é"},
+		{"a number at its bounds", map[string]any{"minimum": 1, "maximum": 604800}, num("604800")},
+		{"an array at its bounds", map[string]any{"minItems": 1, "maxItems": 1}, []any{"a"}},
+		{"an additional member the schema admits", map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
+			map[string]any{"a": "b"}},
+	} {
+		if errs := validate(doc, tc.schema, tc.v, "v"); len(errs) != 0 {
+			t.Errorf("%s: refused: %v", tc.name, errs)
+		}
 	}
 }
 
@@ -432,10 +495,21 @@ func TestExchangeErrorsReportEachMismatch(t *testing.T) {
 	doc := description(t)
 	cluster := `{"id":"cl_x","name":"n","endpoint":"https://e.example.test","contract":"v1.13","talosClusterId":"BWSYNTH-id"}`
 	input := `{"name":"n","endpoint":"https://e.example.test","contract":"v1.13","talosClusterId":"BWSYNTH-id"}`
-	answer := func(status int, ctype, body string) *httptest.ResponseRecorder {
+	answer := func(status int, ctype, body string, headers ...string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
 		if ctype != "" {
 			rec.Header().Set("Content-Type", ctype)
+		}
+		rec.Header().Set("Bronzeward-Epoch", "ep_x")
+		if status == http.StatusCreated {
+			rec.Header().Set("Location", prefix+"/clusters/cl_x")
+		}
+		for i := 0; i+1 < len(headers); i += 2 {
+			if headers[i+1] == "" {
+				rec.Header().Del(headers[i])
+			} else {
+				rec.Header().Set(headers[i], headers[i+1])
+			}
 		}
 		rec.WriteHeader(status)
 		rec.Body.WriteString(body)
@@ -462,6 +536,12 @@ func TestExchangeErrorsReportEachMismatch(t *testing.T) {
 		{"a problem type not described", input, answer(404, "application/problem+json",
 			strings.Replace(problemBody, "not-found", "no-such-code", 1)), "is not one of"},
 		{"an accepted request the schema refuses", `{"name":"n"}`, answer(201, "application/json", cluster), "request: member"},
+		{"an undescribed header", input, answer(201, "application/json", cluster, "ETag", `"v1"`), "header Etag is not described"},
+		{"a missing required header", input, answer(201, "application/json", cluster, "Location", ""), "required header Location is missing"},
+		{"a header value the schema refuses", input, answer(201, "application/json", cluster, "Bronzeward-Recovery-Mode", "yes"),
+			"header Bronzeward-Recovery-Mode"},
+		{"an undescribed problem header", input, answer(404, "application/problem+json", problemBody, "Location", "/x"),
+			"header Location is not described"},
 	} {
 		errs := exchangeErrors(doc, post(tc.req), tc.req, tc.rec)
 		if !slices.ContainsFunc(errs, func(e string) bool { return strings.Contains(e, tc.want) }) {
