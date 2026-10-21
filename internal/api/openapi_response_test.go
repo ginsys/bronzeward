@@ -3,7 +3,9 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"mime"
 	"net/http"
@@ -149,12 +151,18 @@ func requestErrors(doc, op map[string]any, reqBody, where string) []string {
 	return errs
 }
 
+// decodeJSON decodes b as exactly one JSON value, refusing anything after it.
 func decodeJSON(b []byte) (any, error) {
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.UseNumber()
 	var v any
-	err := dec.Decode(&v)
-	return v, err
+	if err := dec.Decode(&v); err != nil {
+		return nil, err
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return nil, errors.New("data follows the JSON value")
+	}
+	return v, nil
 }
 
 // matchPath returns the described path template that path matches, preferring the one with the
@@ -533,6 +541,8 @@ func TestExchangeErrorsReportEachMismatch(t *testing.T) {
 		{"an undescribed status", input, answer(299, "application/json", cluster), "lists no such status"},
 		{"an undescribed media type", input, answer(201, "text/plain", cluster), "lists no text/plain body"},
 		{"a body the schema refuses", input, answer(201, "application/json", `{"id":"cl_x"}`), "is missing"},
+		{"a body with data after its value", input, answer(201, "application/json", cluster+`{"x":1}`), "the body is not JSON"},
+		{"an accepted request with data after its value", input + " x", answer(201, "application/json", cluster), "the accepted request body is not JSON"},
 		{"a problem type not described", input, answer(404, "application/problem+json",
 			strings.Replace(problemBody, "not-found", "no-such-code", 1)), "is not one of"},
 		{"an accepted request the schema refuses", `{"name":"n"}`, answer(201, "application/json", cluster), "request: member"},
