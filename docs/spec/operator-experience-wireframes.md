@@ -18,7 +18,7 @@ detail. Every screen has the [header](#header-on-every-screen) and the state var
 | Bronzeward   Context: lab ▾   ops-anna@example.invalid (human)   Roles: author, publisher |
 |              Epoch ep_bqek…ekgi                                   [Sign out]              |
 +------------------------------------------------------------------------------------------+
-| RECOVERY MODE since 10:42, epoch ep_r2l…. 3 of 3 scopes not released: none can commit.   |  <- only in recovery mode
+| RECOVERY MODE since 10:42, epoch ep_r2l…. 4 of 4 scopes not released: none can commit.   |  <- only in recovery mode
 | Drafts editable. Recovery-start server: no plans; publications wait for restart. [Open]  |
 +------------------------------------------------------------------------------------------+
 | Machines | Changes | Plans | Operations | Sources | Audit | Recovery                      |
@@ -65,7 +65,7 @@ Machines                                    Cluster: all ▾   State: all ▾   
 | Machine    | Endpoint       | Desired     | Applied (source)         | Observed                 | State                   |
 +------------+----------------+-------------+--------------------------+--------------------------+-------------------------+
 | mch_k2p…7x | 10.5.0.2:50000 | rel_fgqv…   | rel_fgqv… (operation)    | = applied, 2 min ago     | (•) Matches applied     |
-| mch_tqhc…35| 10.5.0.3:50000 | rel_fgqv…   | rel_fgqv… (adoption)     | = applied, 1 min ago     | (•) Pending convergence |
+| mch_tqhc…35| 10.5.0.3:50000 | rel_fgqv…   | rel_p4nx… (adoption)     | = applied, 1 min ago     | (•) Pending convergence |
 | mch_w4ze…n3| 10.5.0.4:50000 | rel_fgqv…   | rel_fgqv… (operation)    | no match, 5 min ago      | (•) Drifted (•) Frozen  |
 +------------+----------------+-------------+--------------------------+--------------------------+-------------------------+
 Filtering is done in the browser over all pages (gap G9). Showing 3 of 3. Health is not checked.
@@ -284,9 +284,10 @@ publications it accepts complete only after that restart. Imports complete on it
 +----------------+--------------------------+----------------------------------------------+
 | mch_k2p…7xqa   | pre-restore-unaccounted  | [Account scope]                              |
 | mch_tqhc…35uq  | ready                    | [Release scope]  (not an approval)           |
+| mch_w4ze…n3fa  | ready                    | [Release scope]  (not an approval)           |
 | mch_b3c…aa2q   | unresolved               | op_q8r… held: classified after restart       |
 +----------------+--------------------------+----------------------------------------------+
-| [Exit recovery]~ 3 scopes not released (ready is not released)                            |
+| [Exit recovery]~ 4 scopes not released (ready is not released)                            |
 | Drafts, imports and publication remain available: a scope blocked by a lost key leaves    |
 | that state through a newly published release.  [Open Changes]                             |
 +-------------------------------------------------------------------------------------------+

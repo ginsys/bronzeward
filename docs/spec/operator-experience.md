@@ -362,7 +362,7 @@ returns a different principal is shown as a new sign-in, never silently continue
 $ bronzewardctl machine list --cluster cl_9fd…m3ka
 MACHINE         ENDPOINT          DESIRED        APPLIED (SOURCE)          OBSERVED             STATE
 mch_k2p…7xqa    10.5.0.2:50000    rel_fgqv…j6m   rel_fgqv…j6m (operation)  =applied, 2m ago     matches applied
-mch_tqhc…35uq   10.5.0.3:50000    rel_fgqv…j6m   rel_fgqv…j6m (adoption)   =applied, 1m ago     pending convergence
+mch_tqhc…35uq   10.5.0.3:50000    rel_fgqv…j6m   rel_p4nx…8wd (adoption)   =applied, 1m ago     pending convergence
 mch_w4ze…n3fa   10.5.0.4:50000    rel_fgqv…j6m   rel_fgqv…j6m (operation)  no match, 5m ago     drifted, frozen
 Health is not checked in this installation.
 ```
@@ -483,7 +483,7 @@ The approval screen is §5.6's, with the adoption baseline evidence in place of 
 (`internal/api/plans.go:138-168`). An adoption records the digest of the node's own bytes
 ([§2.4](#24-desired-applied-and-observed)); the plan's evidence says whether the release's
 artifact differs from them (`pendingConvergence`, `internal/api/plans.go:315`). In this
-example it does not, so §5.6's later `apply-config` plan shows a diff from `rel_9vbn…c1ta`.
+example `cluster-base` only restates values the node already runs, so it does not differ, and §5.6's later `apply-config` plan shows a diff from `rel_9vbn…c1ta`.
 Had it differed, that plan would show "Diff withheld": no redacted form exists of what the
 machine runs (`internal/api/plans.go:434-449`).
 
@@ -643,6 +643,9 @@ Still unresolved; exiting with 5.
 
 ### 5.8 Drift: freeze, then adopt or revert
 
+This scenario happens before the publications of §5.3 and §5.5, while every covered machine's
+`Desired` is still `rel_fgqv…j6m` ([§5.2](#52-inventory)).
+
 ```text
 $ bronzewardctl drift show mch_w4ze…n3fa
 Drift opened 09:41 by observation obs_k3d…, last seen 09:46. Late landing: no.
@@ -698,7 +701,7 @@ made again.
 
 ```text
 $ bronzewardctl status
-Recovery mode: on since 10:42 (epoch ep_r2l…). Scopes: 1 pre-restore-unaccounted, 1 unresolved, 1 ready.
+Recovery mode: on since 10:42 (epoch ep_r2l…). Scopes: 1 pre-restore-unaccounted, 1 unresolved, 2 ready.
 Server: started for recovery. Plan creation, approval and unfreeze are refused. Imports
   complete here; publications are accepted but complete only after a normal restart (no
   publish worker runs). Recovery mode stays on after that restart.
@@ -708,6 +711,7 @@ $ bronzewardctl recovery status
 MACHINE         SCOPE STATE              NEXT
 mch_k2p…7xqa    pre-restore-unaccounted  account the scope (recovery scope-account)
 mch_tqhc…35uq   ready                    release (recovery-admin)
+mch_w4ze…n3fa   ready                    release (recovery-admin)
 mch_b3c…aa2q    unresolved               restored op_q8r…t2na holds it: classified after the
                                          normal restart, then re-mark
 $ bronzewardctl recovery scope-account mch_k2p…7xqa --start obs_a… --end obs_b…
