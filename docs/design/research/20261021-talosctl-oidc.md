@@ -75,6 +75,10 @@ hashes stayed unchanged. This is one successful chain, not repeated-run or
 production qualification. [Retention metadata](../../../experiments/talosctl-oidc/evidence/retention.json)
 binds all exported files to their hashes; private credentials and raw logs are
 excluded from publication.
+Run revisions are original branch commits, preserved through this PR's retained
+head rather than rewritten to the rebase-merge identities on `main`. The
+[reproduction instructions](../../../experiments/talosctl-oidc/README.md#recorded-results)
+show how to fetch that history before checking the original hashes.
 
 | Case | Expected and observed behavior |
 | --- | --- |
@@ -122,6 +126,8 @@ reproduce the sanitized projections and aggregate counts from the retained
 private runs and wrapper receipts. Re-exporting preserves the original event,
 audit, browser and private-log-hash files; the added diagnostic files expand
 the leak-scan scope and top-level retention manifest.
+Only lines matching the three named signatures are projected; these files do
+not show whether other Keycloak errors occurred.
 
 ## Executor compatibility
 
@@ -212,5 +218,9 @@ checks with positive controls: four distinct known values in each failed run,
 synthetic credentials and is not publishable. See each run's `leak-scan.json`
 for scope and limits; this is evidence hygiene, not proof that upstream never
 logs secrets under other configurations.
+The final offline rescan covers raw and JSON-escaped known values and generic
+and Ed25519 key headers, with its exporter hash retained. Three scanner checks
+include an unknown-key header and an escaped value that raw matching misses;
+all seven Python checks pass. No live scenario was rerun for these export fixes.
 Ordinary repository CI does not run this fixture, its standalone Go probe or
 Python checks; their separately recorded local results supply that coverage.

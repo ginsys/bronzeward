@@ -30,6 +30,13 @@ directory also records its projection leak-scan result and private-log hashes.
 Known synthetic-value, private-key and JWT checks detected no exported secrets;
 positive controls passed. Raw logs and usable synthetic credentials are excluded.
 
+The run revisions are original pre-merge commits, preserved in this PR's head
+history. A rebase-only merge creates different commits on `main`. Before using
+the recorded revisions or the bundler from a fresh clone, find this PR with
+`gh pr list --repo ginsys/bronzeward --state all --head docs/162-talosctl-oidc`
+and fetch `git fetch origin refs/pull/<PR-number>/head`. The published history
+through the successful `3ddf133` run is retained without rewriting.
+
 The tests demonstrate certificate renewal, role denial, cached-token behavior
 after removal, existing connections beyond certificate expiry, administrator
 reminting, issuer/exchange outages and Talos interruption/recovery. They do not
@@ -131,6 +138,11 @@ allowlisted Keycloak diagnostic signatures. It checks known private-state
 passwords, tokens and keys, private-key markers and JWTs, and runs positive
 controls before writing anything. It is specific to this synthetic fixture;
 inspect its output before publication. It does not sanitize arbitrary logs.
+Supply absolute, non-symlink paths as in the recorded profile; other path forms
+are not qualified. The scan covers raw and JSON-escaped known values and generic
+and Ed25519 private-key headers, and records the exporter's SHA-256. The seven
+Python checks include escaped-value and unknown-Ed25519-key negative controls.
+Diagnostic projections cannot establish the absence of other Keycloak errors.
 
 To rebuild the top-level results and SHA-256 manifest, supply each export and
 its retained wrapper receipt, in run order:

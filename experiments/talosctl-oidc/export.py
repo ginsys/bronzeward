@@ -21,6 +21,12 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def leaks(data, known):
+    return (any(v in data or json.dumps(v.decode())[1:-1].encode() in data for v in known)
+            or bool(re.search(rb"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----", data))
+            or bool(re.search(rb"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", data)))
+
+
 def export_run(args):
     run = args.run.resolve()
     private = run / "private"
@@ -58,16 +64,11 @@ def export_run(args):
         if isinstance(document, dict) and isinstance(document.get("key"), str):
             values.append(document["key"])
     known = [v.encode() for v in set(values) if len(v) >= 16]
-    private_key = re.compile(rb"-----BEGIN [A-Z ]*PRIVATE KEY-----")
-    jwt = re.compile(rb"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")
-
-    def leaks(data):
-        return any(v in data for v in known) or bool(private_key.search(data)) or bool(jwt.search(data))
-
     assert known, "Expected synthetic credentials in retained private state"
-    assert all(leaks(value) for value in known)
-    assert leaks(b"-----BEGIN PRIVATE KEY-----")
-    assert leaks(b"eyJhbGciOiJub25lIn0.eyJzdWIiOiJ0ZXN0In0.synthetic")
+    assert all(leaks(value, known) and leaks(encoded({"control": value.decode()}), known) for value in known)
+    assert leaks(b"-----BEGIN PRIVATE KEY-----", [])
+    assert leaks(b"-----BEGIN ED25519 PRIVATE KEY-----", [])
+    assert leaks(b"eyJhbGciOiJub25lIn0.eyJzdWIiOiJ0ZXN0In0.synthetic", [])
     files = {"events.json": text.encode()}
     browser = {path.name: json.loads(path.read_text()) for path in sorted(private.glob("browser-*.json"))}
     if browser:
@@ -91,19 +92,20 @@ def export_run(args):
         record = {"path": "private/commands/" + path.name, "bytes": path.stat().st_size, "sha256": digest(path)}
         retention["commands"].append(record)
         if path.name.endswith("-keycloak-logs.out"):
-            for number, line in enumerate(path.read_text().splitlines(), 1):
+            for number, line in enumerate(path.read_bytes().split(b"\n"), 1):
                 for fields in signatures:
-                    if all(f'{key}="{value}"' in line for key, value in fields.items()):
+                    if all(f'{key}="{value}"'.encode() in line for key, value in fields.items()):
                         diagnostics.append({**record, "line": number, "fields": fields})
     files["retention.json"] = encoded(retention)
-    files["diagnostics.json"] = encoded({"projection": "Fixed allowlisted Keycloak event fields; all other fields omitted",
+    files["diagnostics.json"] = encoded({"projection": "Fields from lines matching three predefined Keycloak signatures; other fields and events not projected",
                                           "events": diagnostics})
     for name, data in files.items():
-        assert not leaks(data), "Credential value detected in " + name
+        assert not leaks(data, known), "Credential value detected in " + name
         assert str(Path.home()).encode() not in data, "Host-home path detected in " + name
         assert not any(path.encode() in data for path in replacements), "Local path detected in " + name
     scan = {"scope": sorted(files), "known_synthetic_values": len(known), "matches": 0,
-            "positive_controls": "every known value, private-key marker and synthetic JWT detected",
+            "scanner_sha256": digest(Path(__file__)),
+            "positive_controls": "every known value raw and JSON-escaped, generic and ED25519 private-key markers, and synthetic JWT detected",
             "limitations": "This checks retained projections only. Private run state intentionally contains synthetic credentials and is not publishable."}
     files["leak-scan.json"] = encoded(scan)
     args.output.mkdir(mode=0o700)  # Never overwrite a previous export.
