@@ -11,8 +11,8 @@ as an open choice with a recommendation, for the owner to settle.
 
 It builds on the operator journeys proposed for
 [Design the operator journeys for bronzewardctl and the web UI](https://github.com/ginsys/bronzeward/issues/252),
-which are not landed yet. References of the form *journeys §8* and gap IDs `G1`-`G12` and `G21` point at
-that proposal; this document adds `G13`-`G20`.
+which are not landed yet. References of the form *journeys §8* and gap IDs `G1`-`G12` point at
+that proposal, whose `G13`-`G15` appear here as `G21`-`G23`; this document adds `G13`-`G20`.
 
 **Facts and proposals are kept apart.** A statement about existing behaviour cites the contract
 section or the source line it comes from, read at revision `9b5804a` (`internal/api/api.go:374`
@@ -188,7 +188,7 @@ ETag (`internal/api/ingestions.go:152-153`).
 
 ## 4. API gap audit
 
-The thirteen gaps the journeys found, checked against the code above, plus eight this audit adds; G21 is the journeys' expected-epoch gap, numbered last because it was added to them last.
+The fifteen gaps the journeys found, checked against the code above, plus eight this audit adds. G21-G23 are the journeys' G13-G15 (expected epoch, start mode, principal display name), numbered last because they were added to the journeys last.
 Each has a disposition: an **API issue** proposed in [§14](#14-proposed-api-gap-issues-and-downstream-refinement),
 a **client composite** over existing routes, an **accepted limitation**, or a **decision**
 listed in [§13](#13-alternatives-and-open-choices). Every disposition, including "accepted", is
@@ -218,6 +218,8 @@ supported.
 | G19 | The fixture issuer mints tokens but offers no authorization, token, device or revocation endpoint, so no interactive sign-in can be tested against it | `fixtures/oidc/issuer/issuer.go:1-6` ("no login, no clients, no refresh"), `fixtures/oidc/issuer/issuer.go:110-123` (discovery and key set only), `fixtures/oidc/main.go:22-25` | validation-fixture issue A5 |
 | G20 | `503` answers carry no `Retry-After`, and the contract gives no retry guidance for `dependency-unavailable`, `transient-conflict` or `epoch-superseded` | search of `internal/` for `Retry-After`; [persistence and API §9.4](persistence-api.md#94-errors) | client rule in [§8.2](#82-errors); no API change proposed |
 | G21 | A human's mutation takes no expected-epoch precondition: only `Idempotency-Key` and `If-Match` are checked (`internal/api/api.go:388-409`), and the epoch is reported only in an answer (`internal/api/api.go:318-319`). After a committed write's answer is lost and a restore removes its record, the same request with the same key executes afresh in the new epoch ([persistence and API §12.4](persistence-api.md#124-restore-and-idempotency)); the read before repeating of [§8.4](#84-idempotency-and-ambiguous-responses) item 3 leaves a race. A service principal is already checked: its token carries its epoch, and the write's own transaction refuses one from another epoch with `401` | `internal/api/api.go:388-409`, `internal/api/api.go:318-319`; service check: `internal/auth/automation.go:51-52`, `internal/api/idempotency.go:28-30`, `internal/api/idempotency.go:47-49`, `internal/api/api.go:297-303` | decision D10; API issue A6 if D10 chooses a server check |
+| G22 | No read of the process's start mode. `GET /recovery` serves epoch, recovery mode, entry, exit and scopes, and the headers carry only `Bronzeward-Epoch` and `Bronzeward-Recovery-Mode`. Past the role check, a recovery start shows only in an answer: a `409 recovery-mode-active` without a `scope` member, to any request but the entry before the entry commits and to plan creation, approval or unfreeze after it, or any recovery-entry answer except its not-a-recovery-start refusal. A normal start shows only in that refusal: a plain `409 conflict` with neither an `epoch` nor a `request` member, while every other `409 conflict` the entry answers carries `epoch`. The scope refusals that share the `recovery-mode-active` code carry `scope` | `internal/api/recovery_exits.go:123-129`, `internal/api/api.go:318-324`; process refusals: `internal/api/api.go:241-243`, `internal/api/api.go:337-351`, `internal/api/recovery_exits.go:211-213`, `internal/api/routes.go:120-127`; entry: `internal/api/recovery_entries.go:91-92`, `internal/api/recovery_entries.go:106-108`, `internal/api/recovery_entries.go:133-135`, `internal/api/idempotency.go:65-67`; scope refusals: for example `internal/api/plans.go:226-227` | API issue A2 (the start mode served with the version); until then the client reading of [§8.5](#85-epoch-changes), with the limit that nothing shows the mode before such an answer |
+| G23 | No principal display name: bodies carry principal identifiers only, and no route maps one to a subject or name | `internal/api/acts.go:19-30`, `internal/api/releases.go:53`, `internal/api/plans.go:195`, `internal/api/approvals.go:43`, `internal/api/recovery_entries.go:79`; no such route in `internal/api/routes.go:78-136` | API issue A7; until then clients show shortened principal identifiers |
 
 Not gaps, by design: no dispatch or apply route, no token administration route, no secret
 browser, and no WebSocket (polling and SSE only, [persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress)).
@@ -278,8 +280,12 @@ it. It holds no secret.
 7. **Redirects and proxies.** Neither client follows a redirect from the API, so `Authorization`
    and a request body never reach another URL and nothing is resent. The CLI reports a `3xx` with
    its target. The web client issues every API call with `fetch`'s `redirect: 'error'`, because a
-   browser otherwise follows a `307`/`308` with the same method and body; the page then reports a
-   refused redirect without its target, which the browser does not expose (assumption S7). Toward
+   browser otherwise follows a `307`/`308` with the same method and body. The page then sees only a
+   network error, which it cannot tell apart from any other transport failure (assumption S7): it
+   shows a generic transport-failure message that names a refused redirect as one possible cause,
+   never a target. For a write that error is an ambiguous outcome and is handled as in
+   [§8.4](#84-idempotency-and-ambiguous-responses) item 2, since the page cannot tell whether the
+   request reached the server. Toward
    the identity provider the CLI follows redirects only to `https` (or loopback) URLs. The CLI
    honours the standard proxy environment variables, says so in verbose output, and never sends
    `Authorization` to a proxy in clear text: an `https` URL goes through a proxy only by a
@@ -339,7 +345,7 @@ body. Exit codes are the journeys' (journeys §4).
 | 403 `forbidden` | show the route's `roles`, and "humans only" when `humanOnly` is true; no retry |
 | 403 `identity-revoked` | stop; clear the context's stored credential; do not start a new sign-in by itself ([§9.6](#96-failure-cases)) |
 | 404 `not-found` | the resource does not exist in this epoch; after a restore a handle issued later answers `404` ([persistence and API §12.3](persistence-api.md#123-what-a-restored-state-means-record-by-record)) |
-| 409 `conflict`, `stale-input`, `scope-busy`, `machine-identity-mismatch`, `ingestion-abandoned`, `recovery-mode-entered`, `recovery-mode-active` | show the named resource and state; read it; never repeat automatically, with one exception. A `409 conflict` that carries `request` and `epoch` is an earlier-epoch idempotency record: it is read and reported, not repeated, under either key ([§8.4](#84-idempotency-and-ambiguous-responses) item 7). The one exception: a `409 conflict` on a draft fragment write (`PUT /drafts/{id}/fragments/{name}`) that answers a repeat, carries an `ingestion` member but no `draft` member, and has no `Idempotent-Replayed: true` is the first request still running (`internal/api/fragments.go:105-114`; looked up by principal and key, so it never answers a first send). A `409` with both `ingestion` and `draft`, replayed or not, is a recorded refusal (`internal/api/fragments.go:291-296`, `internal/api/drafts.go:94-104`): the write was refused, not pending. For the in-progress case, repeat the identical request with the same key, with backoff, until it answers otherwise or the client's wait bound of [§8.4](#84-idempotency-and-ambiguous-responses) item 2 expires; the contract says the repeat then gets the first request's replay ([persistence and API §7.2](persistence-api.md#72-behavior); [§8.4](#84-idempotency-and-ambiguous-responses) item 2) |
+| 409 `conflict`, `stale-input`, `scope-busy`, `machine-identity-mismatch`, `ingestion-abandoned`, `recovery-mode-entered`, `recovery-mode-active` | show the named resource and state; read it; never repeat automatically, with one exception. A `409 recovery-mode-active` without a `scope` member, and a `409 conflict` to the recovery entry without `epoch` and `request` members, are process refusals that show the start mode ([§8.5](#85-epoch-changes)). A `409 conflict` that carries `request` and `epoch` is an earlier-epoch idempotency record: it is read and reported, not repeated, under either key ([§8.4](#84-idempotency-and-ambiguous-responses) item 7). The one exception: a `409 conflict` on a draft fragment write (`PUT /drafts/{id}/fragments/{name}`) that answers a repeat, carries an `ingestion` member but no `draft` member, and has no `Idempotent-Replayed: true` is the first request still running (`internal/api/fragments.go:105-114`; looked up by principal and key, so it never answers a first send). A `409` with both `ingestion` and `draft`, replayed or not, is a recorded refusal (`internal/api/fragments.go:291-296`, `internal/api/drafts.go:94-104`): the write was refused, not pending. For the in-progress case, repeat the identical request with the same key, with backoff, until it answers otherwise or the client's wait bound of [§8.4](#84-idempotency-and-ambiguous-responses) item 2 expires; the contract says the repeat then gets the first request's replay ([persistence and API §7.2](persistence-api.md#72-behavior); [§8.4](#84-idempotency-and-ambiguous-responses) item 2) |
 | 412 `precondition-failed` | someone else wrote first: stop, show the newer state, never refetch and resend ([§8.3](#83-etags)) |
 | 422 `validation-failed` | show `rule` and position extensions; for marks only the position, never a path. Most mark refusals arrive later, as an event ([§11.3](#113-cli-review)) |
 | 422 `idempotency-key-reused` | on a first send: the key was used for a different request; nothing was done; a client defect unless the operator supplied the key. On a repeat to a keyed route (fragment write, ingestion start, mark): the outcome is **unknown**, because a byte-identical repeat is also answered `422` when the provider can no longer compute under the digest-key version the record names, or the recorded key is not one the current key can be matched to; a rotation alone still replays ([persistence and API §7.1](persistence-api.md#71-the-key); `internal/api/idempotency.go:94-121`); read the resource and report what it shows |
@@ -394,9 +400,10 @@ matches, but the client cannot tell which ETags were issued after *T*. The inges
 Facts: a key is scoped to the authenticated principal, a human's being its issuer and subject
 (`internal/auth/auth.go:186-188`, `internal/api/idempotency.go:41-43`); the fingerprint covers
 method, route, path parameters, `If-Match` and the canonical body, keyed with the provider's
-digest key on keyed routes (`internal/api/body.go:165-185`); the same request under the key
-replays, another is `422`, an earlier epoch's record is `409`
-(`internal/api/idempotency.go:60-106`); a request whose effect a restore removed lost its record
+digest key on keyed routes (`internal/api/body.go:165-185`); where the key has a record, the same
+request under it replays, another is `422`, an earlier epoch's record is `409`
+(`internal/api/idempotency.go:60-106`); where it has none, any request under it executes as a new
+one (`internal/api/tx.go:198-202`); a request whose effect a restore removed lost its record
 too and executes again
 ([persistence and API §12.4](persistence-api.md#124-restore-and-idempotency)); the same key does
 not make a remote mutation exactly-once
@@ -414,9 +421,13 @@ The principal is the authenticated identity, not the credential: for automation 
 service identity that owns the token (`internal/auth/automation.go:58`), so a rotated token keeps
 the same idempotency scope.
 
-The server's fingerprint is what makes a repeat safe: a repeat that is not byte-identical in
-meaning is refused `422` and does nothing. On a keyed route a byte-identical repeat can also be
-answered `422`, when the provider can no longer compute under the digest-key version the record
+The server's fingerprint is what makes a repeat safe, but only against a record: a repeat that is
+not byte-identical in meaning is refused `422` and does nothing when the first attempt committed
+and its record is current. When the first attempt never committed, or a restore removed its
+record, there is nothing to compare with, and a changed repeat executes as a new request with the
+changed input. A client therefore repeats only the exact request it sent, including its
+`If-Match`, never a reconstruction it cannot prove identical. On a keyed route a byte-identical
+repeat can also be answered `422`, when the provider can no longer compute under the digest-key version the record
 names or the recorded key cannot be matched to the current one; a rotation alone still replays
 ([persistence and API §7.1](persistence-api.md#71-the-key);
 `internal/api/idempotency.go:94-121`); then the first request may well have committed. The
@@ -465,17 +476,25 @@ contract's, and this specification does not close it.
    recovery entry between the confirming read and the repeat is not detected by the client. If the
    first attempt's record survived, the repeat meets the earlier-epoch `409` of item 7 (AMB-07); it
    executes afresh only when a restore removed that record or the first attempt never committed
-   (G21). A service principal's repeat is refused `401` by the server instead. Whether the server
+   (G21, AMB-12). A service principal's repeat is refused `401` by the server instead. Whether the server
    enforces the epoch for humans too, or this residual risk is accepted, is decision D10.
 4. **After the process ends.** The CLI stores no request body, hash of a body, or key journal.
    When it gives up with the outcome unknown, it prints, on standard error, the key, method,
    route, context, principal (issuer and subject, or the token ID that stands for the service
-   identity until A1) and epoch, and what to read to find out. An operator may then repeat with
-   `--idempotency-key <key> --expect-epoch <epoch>`: the client confirms the epoch as in item 3
-   and refuses if it differs, checks the principal as in item 3, and sends the input the operator
-   supplies again. If that input differs, the server answers `422` and nothing happens. This
-   answers the journeys' open question on key metadata across a restart with no local key
-   journal, as proposed in decision D9.
+   identity until A1), epoch and the `If-Match` value it sent, if any, and what to read to find
+   out. An ETag is not secret. An operator may then repeat with `--idempotency-key <key>
+   --expect-epoch <epoch> --expect-principal <principal>`, plus `--if-match <etag>` where the
+   route takes one, all as printed. The client refuses, sending nothing, when one of them is
+   missing, when the epoch differs as in item 3, or when its current principal is not the printed
+   one. It never substitutes an ETag it reads now: `If-Match` is part of the fingerprint
+   ([persistence and API §7.1](persistence-api.md#71-the-key)), so a new one turns the repeat into
+   another request. The operator supplies the input again, and the client cannot check that it is
+   the same. Where the first attempt's record exists, a changed input is refused `422` and does
+   nothing (AMB-04); where it does not, because the first attempt never committed or a restore
+   removed it, the changed input executes (AMB-10). An operator who cannot reconstruct the exact
+   input stops and reconciles from the resource instead of repeating. This is option (a) of
+   decision D9, for the journeys' open question on key metadata across a restart; option (b), a
+   local journal, would replay without that reconstruction. D9 stays open.
 5. **Browser.** The page holds pending writes in memory only. Leaving or reloading the page drops
    them; the outcome-unknown notice shows the key and the resource to read, and no repeat is
    offered afterwards.
@@ -514,6 +533,25 @@ the context. On a change it:
 An epoch is never ordered or parsed. A missing `Bronzeward-Epoch` on an authenticated success is
 a defect the client reports.
 
+**Start mode** (G22). Neither the headers nor `GET /recovery` say whether the process was started
+for recovery, which decides whether plan creation, approval and unfreeze can succeed (journeys
+§5.9). Until A2 serves it, the client keeps the last mode an answer showed, per context. A
+restart changes the mode without any signal, so the kept mode is only the last one shown:
+
+1. **Recovery start:** a `409 recovery-mode-active` without a `scope` member, or any answer of
+   `POST /recovery/entries` given after authentication and the role check other than the refusal
+   in item 2, its `201` and its other `409 conflict` answers included (each of these carries
+   `epoch`). A `401`, a `403` or an authentication `503` to the entry shows nothing. A
+   `recovery-mode-active` with a `scope` member is a scope's refusal and says nothing about the
+   start mode.
+2. **Normal start:** only the entry's not-a-recovery-start refusal, a `409 conflict` with neither
+   an `epoch` nor a `request` member, whose detail says only a recovery start serves the entry. A
+   `409 conflict` to the entry is never read as a normal start by its status and code alone.
+3. **Unknown** before any such answer. The client then disables no action beforehand, and the
+   recovery banner states the mode as unknown or as last shown, until the next such answer.
+
+Evidence for each answer is in the G22 row of [§4](#4-api-gap-audit).
+
 ### 8.6 Event resumption
 
 Facts: [§2](#2-the-api-a-client-meets) events row. The SSE stream sends no keep-alive comment and
@@ -524,8 +562,13 @@ it polls every 500 ms (`internal/api/operations.go:210-213`).
 
 1. A client follows an operation with the stream when it can and with JSON pages otherwise; both
    are complete. It remembers the last event ID it showed.
-2. When the stream ends it reads `GET /operations/{id}`. A terminal state ends the watch. Any
-   other state, `unresolved` included, means the stream ended because the token expired or the
+2. When the stream ends it reads `GET /operations/{id}`. A terminal state does not show that the
+   last events arrived: the stream may have been cut after the state was written and before its
+   last events were (the server writes the state after the last entry and ends the stream only
+   once they are written, `internal/api/operations.go:217-218`,
+   `internal/api/operations.go:254`). So on a terminal state the client drains the backlog
+   first: it reads the JSON event pages to their end and shows every event after the last one it
+   showed, then ends the watch. Any other state, `unresolved` included, means the stream ended because the token expired or the
    connection dropped: the client renews if needed and reconnects with `Last-Event-ID` and the
    renewed token, with backoff from 1 s to 30 s on repeated failures.
 3. A `reset` event clears what the watch showed, prints that the installation was restored or
@@ -882,10 +925,13 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 | AMB-01 | disconnect | connection dropped before any request byte is sent | ordinary retry |
 | AMB-02 | disconnect | fragment write dropped after the body is sent | repeat with the same key; an in-progress `409` (with `ingestion`, no `draft`, not replayed) is repeated with backoff up to the client's wait bound, then outcome unknown; a `409` with `ingestion` and `draft` (draft published meanwhile) is reported refused, not repeated; otherwise replay or first execution |
 | AMB-03 | refusal | `500 internal-error` | repeat with the same key; replayed result |
-| AMB-04 | refusal | CLI exits with outcome unknown; operator repeats with `--idempotency-key` and a changed file | `422 idempotency-key-reused`; reported as: this send did nothing, the original outcome is still unknown; resource read |
+| AMB-04 | refusal | first attempt committed, its answer dropped; CLI exits with outcome unknown; operator repeats with the printed values and a changed file (existing record) | `422 idempotency-key-reused`; reported as: this send did nothing, the original outcome is still unknown; resource read |
+| AMB-10 | disconnect | first attempt dropped by the injector before the server receives it; CLI exits with outcome unknown; operator repeats with the printed values and a changed file (missing record) | the changed input executes as a new request; the client reports this send's answer as its own result, never as a replay or as the original outcome; the case records that no client check prevents it ([§8.4](#84-idempotency-and-ambiguous-responses) item 4) |
+| AMB-11 | refusal | as AMB-04 or AMB-10, with the printed `--if-match` omitted or replaced by a freshly read ETag, or with another principal signed in | refused by the client before sending; nothing sent |
 | AMB-05 | restore | write dropped, then recovery entry before the repeat | epoch confirmed by a read before repeating; it differs, so not repeated; resource read; operator decides |
 | AMB-06 | refusal | keyed repeat after the digest key's recorded version became uncomputable | `422`; reported as unknown outcome; resource read; no new key sent |
 | AMB-07 | restore | write dropped; recovery entry injected after the confirming read and before the repeat (or the operator `--idempotency-key` path after a recovery entry), so the repeat meets an earlier-epoch record | `409 conflict` with `request` and `epoch`; no new key sent; resource read |
+| AMB-12 | restore | as AMB-07, but the first attempt's record is missing: a restore to a backup taken before it removed it, or the first attempt never committed (G21) | with A6 (D10 option (a)): refused naming the current epoch, nothing committed, resource read; with D10 option (b): the repeat executes afresh in the new epoch, the accepted residual, and the case records that no client check detects it |
 | AMB-08 | refusal | write answered `503 dependency-unavailable`, e.g. ingestion start with no provider configured | repeated at most 3 times with the same key; then reported not done |
 | AMB-09 | disconnect | write dropped after the body is sent; every repeat answered `503` | not reported as not done: outcome unknown, key and resource printed as in §8.4 item 4 |
 | PAGE-01 | success | list over three pages | every item once, in order |
@@ -893,7 +939,10 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 | EVT-01 | disconnect | stream cut mid-operation | reconnect with `Last-Event-ID`; no event shown twice |
 | EVT-02 | restore | `Last-Event-ID` from the earlier epoch | `reset`; display cleared and replayed |
 | EVT-03 | success | operation ends `unresolved` then `cancelled` by resolution | watch continues past `unresolved`; ends at `cancelled` |
+| EVT-04 | disconnect | stream cut after the operation's terminal state is written and before its last events are sent | the operation read shows the terminal state; the client drains the JSON event pages, shows the missing events once, then ends the watch |
 | REC-01 | restore | recovery mode on | banner; refusals name scope or process restriction |
+| REC-02 | refusal | recovery entry sent to a normal start; then to a recovery start whose entry committed under another key | first: `409 conflict` without `epoch` or `request`, read as a normal start; second: `409 conflict` with `epoch`, read as a recovery start, never as a normal one |
+| REC-03 | refusal | plan creation on a recovery start after its entry; plan creation on a pre-restore unaccounted scope of a normal start | first: `409 recovery-mode-active` without `scope`, read as a recovery start; second: with `scope`, start mode unchanged |
 | PROT-01 | success | protected import, review, mark, continue | review only on a terminal (CLI; a pseudo-terminal in tests, its output matched in memory and never retained, [§11.5](#115-test-artifacts) item 1); no synthetic value in any artifact or storage |
 | PROT-02 | refusal | `import review` with standard output redirected | refused, nothing written |
 | PROT-03 | refusal | mark that is not a path; mark compilation refuses (for example one that would rewrite text); compilation fails on a dependency | first: `422` with `position`; second: `202`, then, after the `marked` event of that `generation`, a `mark-refused` event with `422` and `position` and the ingestion paused again; third: `mark-refused` with `503`, shown by code as not applied; none reported as accepted, no path shown |
@@ -901,7 +950,8 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 | COMP-01 | refusal | server below the client's minimum API revision (after A2) | refused before any write, both versions named |
 | COMP-02 | success | response carrying a `Deprecation` header | warning shown once, naming the route |
 | ETAG-02 | success | edit after the client's own import succeeded; second case: another author writes between the import and the re-read | first: draft `revision` equals the import's `result.draftRevision`, the next write uses the new ETag, no `412`; second: revision is higher, treated as `412`, newer state shown |
-| TLS-02 | refusal | API answers a `3xx` to another origin, to the CLI and to the web client | redirect not followed and nothing resent by either; the CLI names the target, the web client reports a refused redirect |
+| TLS-02 | refusal | API answers a `3xx` to another origin, to the CLI and to the web client; harness check | the injector sees no request to the target and nothing resent by either client; the CLI names the target |
+| TLS-03 | refusal | as TLS-02, to the web client, for a read and for a write; browser message check | the page shows the generic transport-failure message naming a refused redirect as a possible cause and no target; the write is repeated with the same key as in §8.4 item 2 and, when every repeat meets the same redirect, reported as an unknown outcome with its key and the resource to read, never as not done |
 | TLS-01 | refusal | certificate from an untrusted CA | nothing sent; host and trust source named |
 
 ## 13. Alternatives and open choices
@@ -919,7 +969,7 @@ draft's, not a decision.
 | D6 | Automation token in an environment variable | (a) not accepted, file or stdin only; (b) accepted as `BRONZEWARD_TOKEN` | (a): an environment variable is inherited by every child process and readable by the same user's processes; CI systems can write the token to a file first. (b) is the common CI convention; if chosen, the CLI never passes its environment to a child process |
 | D7 | Generated or handwritten clients | (a) both handwritten; (b) an OpenAPI description of v1 in the repository, checked against the route table by a test, generating request and response types for both clients, with handwritten behaviour (idempotency, ETags, epochs, renewal); (c) fully generated clients | (b): the types stay aligned with the server while the behaviour this document specifies stays explicit and tested by the shared cases; no OpenAPI description exists today (search of the repository) |
 | D8 | Conformance case format and home | (a) case records in the repository run by both clients' harnesses; (b) separate suites per client | (a), as [§12](#12-shared-conformance-cases) |
-| D9 | Idempotency key metadata across a CLI restart | (a) no local journal: on giving up, the CLI prints the key, route, principal and epoch, and the operator repeats with `--idempotency-key` ([§8.4](#84-idempotency-and-ambiguous-responses) item 4); (b) a local journal of pending keys, owner-readable, replayed on the next run | (a): a journal would hold request context on disk and need its own expiry and epoch rules; the printed record gives the operator the same repeat without it |
+| D9 | Idempotency key metadata across a CLI restart | (a) no local journal: on giving up, the CLI prints the key, route, principal, epoch and `If-Match`, and the operator repeats with them and the same input ([§8.4](#84-idempotency-and-ambiguous-responses) item 4); (b) a local journal of pending keys, owner-readable, replayed on the next run | (a): a journal would hold request context on disk and need its own expiry and epoch rules. Its cost is that the operator must supply the exact input again: where no record exists, a changed input executes (AMB-10), so an operator who cannot reconstruct it reconciles from the resource; (b) avoids that reconstruction only if the journal holds the request itself, documents included |
 | D10 | Epoch check on a human's repeated write (G21) | (a) server-enforced: mutations accept an expected-epoch request header and refuse, committing nothing, when it differs from the current epoch, extending to humans the check service tokens already get (API issue A6); (b) client-only check of [§8.4](#84-idempotency-and-ambiguous-responses) item 3 for humans, with the race between its confirming read and the repeat explicitly accepted | (a): it closes the race at the only place that knows the epoch at commit time, reuses an existing mechanism, and keeps the earlier-epoch `409` of AMB-07 if checked after the idempotency lookup; (b) needs no server change and the window is short, but a human's repeat that lands in it after a restore removed the record executes afresh, with no error to any party |
 
 ## 14. Proposed API-gap issues and downstream refinement
@@ -936,8 +986,8 @@ its own identity. Closes G1; blocks the CLI and web sign-in tickets' role displa
 **A2. Serve the server version, API revision and installation settings.** An authenticated
 `GET` with the server's version, the API revision within v1, the optional features it serves, and
 the read-only settings a client shows: `maxTokenLifetime`, the settle floor, the maximum transport
-deadline, the ingestion claim's lease and absolute expiry, and the plan defaults. Closes G2 and
-G18; gives the in-progress `409` wait of [§8.4](#84-idempotency-and-ambiguous-responses) item 2
+deadline, the ingestion claim's lease and absolute expiry, and the plan defaults; and the serving
+process's start mode, normal or recovery. Closes G2, G18 and G22; gives the in-progress `409` wait of [§8.4](#84-idempotency-and-ambiguous-responses) item 2
 a server-derived bound; lets clients refuse an incompatible server
 (the CLI ticket's acceptance criterion).
 
@@ -962,6 +1012,12 @@ answers its `409` (AMB-07); a mismatch is refused with a problem naming the curr
 commits nothing. It extends to human principals the epoch check service tokens already get. Both
 clients send it on every write and every repeat. Closes G21.
 
+**A7. Principal display names.** A way to show a principal identifier as a person or service:
+either a read that maps an identifier to its kind and issuer and subject or service name, or that
+name served next to the identifier in the bodies that carry one (acts, releases, plans,
+approvals, recovery entries). Which identities a caller may resolve is part of the issue. Closes
+G23; until then clients show shortened principal identifiers.
+
 **C1. Contract correction.** Add the `reset` event to the stream contract of
 [persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress) (G15). A
 documentation change for the landing of this specification or its own small change.
@@ -976,9 +1032,12 @@ dependencies below in place:
 | [#255](https://github.com/ginsys/bronzeward/issues/255) web sign-in, navigation, inventory | A1, A2, A3, A5, D1, D3, D5, D10 | 5, 7, 8, 9, 10, 12 |
 | [#256](https://github.com/ginsys/bronzeward/issues/256), [#257](https://github.com/ginsys/bronzeward/issues/257) import, drafts, publication | A4, D9 (CLI), D10 | 8.3, 8.4, 11 |
 | [#258](https://github.com/ginsys/bronzeward/issues/258), [#259](https://github.com/ginsys/bronzeward/issues/259) plans, approval, operations | A4 (plan filters), D9 (CLI), D10 | 8.4, 8.6 |
-| [#260](https://github.com/ginsys/bronzeward/issues/260), [#261](https://github.com/ginsys/bronzeward/issues/261) drift and recovery | A2 (settings), D10 | 8.5, 8.6 |
+| [#260](https://github.com/ginsys/bronzeward/issues/260), [#261](https://github.com/ginsys/bronzeward/issues/261) drift and recovery | A2 (settings, start mode), D10 | 8.5, 8.6 |
 | [#262](https://github.com/ginsys/bronzeward/issues/262) packaging and documentation | D1, D3, D7 | 6, 7, 9.1, 10.1, 10.2 |
 | [#263](https://github.com/ginsys/bronzeward/issues/263) validation | A5, D8 | 11.5, 12 |
+
+A7 blocks no ticket: until it lands, the tickets from #256 to #261 show shortened principal
+identifiers (G23).
 
 ## 15. Assumptions and limits
 
