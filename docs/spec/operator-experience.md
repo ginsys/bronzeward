@@ -591,8 +591,10 @@ Evidence
   Diff          whole redacted configuration, applied rel_9vbn…c1ta -> rel_h7rt…2bd
     @@ machine.nodeLabels @@
     +  team: storage
-Self-approval   predicted: you created this plan and published this release. The approval
-                records the actual reasons; self-approval is marked and allowed.
+Self-approval   predicted: you created this plan and published this release, and authored no
+                fragment, profile or assignment revision in it. Import-base authorship and
+                automation you own are not predicted. The approval records the actual
+                reasons; self-approval is marked and allowed.
 Type the plan ID to approve, or press Enter to stop: pln_f645…cawy
 Approved (apr_2ztr…47vy). Recorded self-approval reasons: created-plan, published.
 The controller re-checks the plan at use time; it applies it only if every check passes.
@@ -605,8 +607,15 @@ kinds: diff or withheld diff, adoption baseline, validation, and an unavailable 
 with the reasons `created-plan`, `published`, `authored-change`, `authored-reused` and
 `owned-automation`, then marked and allowed (`internal/api/approvals.go:220-226`;
 [design §13.7](../design/Talos_Configuration_and_Machine_Management_Design.md#137-poc-identity-and-approval-policy)).
-Before approval a client can only predict them, from the plan's creator and the release's
-publisher; draft authorship is not on the plan. The returned approval owns the reasons.
+Before approval a client predicts `created-plan` and `published` from the plan's creator and the
+release's publisher, and `authored-change` and `authored-reused` for fragment, profile and
+assignment revisions from the release's `sources[]` (`internal/api/releases.go:29-34`), each
+revision's `author` (`internal/api/sources.go:60`, `internal/api/sources.go:77`,
+`internal/api/sources.go:87`) and the draft's entries, which name the revisions it introduced
+(`internal/api/reads.go:245-267`; `internal/api/approvals.go:200-215`). Import-base authorship
+and `owned-automation` cannot be predicted: no read serves an import-base revision's author for
+a release, or a service principal's responsible human. The prediction therefore never presents
+an approver as clear of self-approval; the returned approval owns the reasons.
 
 **Proposed:** `approve` always prints the plan before asking, the confirmation is the plan ID
 typed back (not `y`), and approval has no `--yes`. These are guards against approving by habit
@@ -727,10 +736,12 @@ mch_w4ze…n3fa   ready                    release (recovery-admin)
 mch_b3c…aa2q    unresolved               restored op_q8r…t2na holds it: classified after the
                                          normal restart, then re-mark
 $ bronzewardctl recovery scope-account mch_k2p…7xqa --start obs_a… --end obs_b…
-Shows: restore stopped at 10:31; the floor starts at that stop plus the maximum transport
-deadline, or at a later restored attempt's deadline; start is the first successful read after
-it; end began at least the settle floor (30s) after the latest of that point and the start.
-Resource version unchanged between them.
+Shows: restore stopped at 10:31. Start must be the first successful read after the latest of
+that stop plus the maximum transport deadline and any restored unaccounted attempt's deadline;
+end must be a recovery observation begun at least the settle floor after the latest of that
+point and the start. Neither the maximum deadline nor the settle floor is served (G17): a
+refusal states the floor and the point it counts from.
+Resource version read at both ends, unchanged between them.
 This records your judgment that no request sent before the restore, from any attempt the
 restored journal shows or one it lost, can still land on this machine. It may already have
 landed; nothing here shows whether it did. The settle floor is a minimum wait, not a proven
@@ -755,8 +766,13 @@ here, waits for the normal restart's executor to classify it. The scope is then 
 the manual path for an operation with no attempt only. Both accountings, this
 one and the per-attempt accounting of a lost response outside a restore (`recovery account`,
 [§5.7](#57-operation-tracking)), are operator judgments with the same named settle refusals: a
-start that is not the first read after the deadline, an end before the settle floor, or a moved
-resource version without an explanation (`internal/api/settle.go:111-154`). The per-attempt
+start that is not the first read after the deadline, an end that is not a recovery observation,
+a resource version not read at both ends, an end before the settle floor, or a moved resource
+version without an explanation (`internal/api/settle.go:111-154`). Only the settle-floor refusal states the
+floor and the point it counts from (`internal/api/settle.go:148-150`), so no client shows either
+as a value before one (G17). **Proposed:** the end-observation choice offers only observations
+with purpose `recovery`, and an observation without a `resourceVersion` is shown unusable at
+either end (`internal/api/observations.go:23`, `internal/api/observations.go:37`). The per-attempt
 accounting also refuses an attempt already accounted and an executor not stopped or taken over
 (`internal/api/settle.go:50-67`;
 [execution and recovery §5.2](execution-recovery.md#52-accounting-a-lost-response)). The
@@ -771,12 +787,16 @@ Recovery mode is enforced per scope, not installation-wide
 ([execution and recovery §7.5](execution-recovery.md#75-what-recovery-mode-allows),
 `docs/spec/execution-recovery.md:1472-1490`): acts that only remove authority (revocations, plan
 cancellation, freeze) and the recovery acts are always allowed to their roles; drafts,
-ingestion, compilation and publication are allowed everywhere; plan creation, approval, unfreeze
+ingestion and compilation are allowed everywhere, and so is publication, except that a
+publication changing the assignment of a machine whose scope is not released in the current
+epoch fails `recovery-mode-active` (`internal/api/publish.go:473-475`;
+[persistence and API §12.2](persistence-api.md#122-entry)); plan creation, approval, unfreeze
 and adoption are refused on a scope still pre-restore unaccounted; commitment, attempts and
 adoption records are refused on every scope not released in the current epoch; a released scope
 works as outside recovery mode. A scope `blocked` by a lost key version leaves that state through
 a newly published release, so drafting, importing and publishing must stay reachable
-([§7.4](execution-recovery.md#74-scope-states-in-recovery)). Separately, the process started
+([§7.4](execution-recovery.md#74-scope-states-in-recovery)); that publication must leave the
+unreleased scope's assignment unchanged, or it fails as above. Separately, the process started
 for recovery serves only liveness and the entry act before entry; after entry it serves the
 recovery routes, the authority-removing acts and the installation-wide acts, but refuses plan
 creation, approval and unfreezing. It runs no publish worker, adopter, drift detector or
@@ -852,7 +872,8 @@ controller committed does not stop an attempt already recorded
 over an operation whose owner is stopped; account an attempt with two named observations and a
 written explanation where required; resolve an attempt-less `unresolved` operation as
 cancelled; account, mark and release scopes; exit; revoke an identity after adding it to the
-deployment's denied subjects. Human only. Sees: the settle floor stated as a floor, not a bound;
+deployment's denied subjects. Human only. Sees: the settle floor described as a minimum wait,
+not a bound, with its value only once a refusal states it (G17);
 a mark's `missing[]` list before a release (`internal/api/recovery_marks.go:195-213`).
 
 **Automation.** A CI job with an automation token: create a draft, set fragments from files,
@@ -1000,7 +1021,7 @@ accepted limitation.
 | G1 | No identity, role or capability read; a 403 body lists only the roles the route accepts, never the caller's (`internal/api/api.go:372-384`) | showing who is signed in and which actions are allowed | none; let the server refuse |
 | G2 | No version or compatibility read; only unauthenticated `GET /livez` (`internal/server/server.go:19-21`) | client/server compatibility, context setup | none |
 | G3 | An operation does not name its ingestion, and no ingestion listing exists (G10); the ingestion names its operation (`internal/api/ingestions.go:234`), not the reverse (`internal/api/reads.go:323-328`) | resuming an import after the client lost the 202 | keep the 202 body; within the same principal and epoch, the identical request with the same key replays it, subject to G13 |
-| G4 | A draft does not name its release; releases have no draft filter (`internal/api/inventory.go:346-353`, `internal/api/releases.go:215`) | "what did this draft publish?" | the publish operation's `result.release` |
+| G4 | A draft does not name its release; releases have no draft filter (`internal/api/inventory.go:346-353`, `internal/api/releases.go:215`) | "what did this draft publish?" | the publish operation's `result.release` while the client holds it; otherwise paging releases and matching `draft` (`internal/api/releases.go:50-51`), the client-side scan G9 accepts |
 | G5 | No render of a draft before publication | authors cannot see a machine's configuration before publishing | publish, then review |
 | G6 | Provenance covers reference occurrences only (`internal/api/releases.go:78-100`), not "which fragment set this field" ([design §6.2](../design/Talos_Configuration_and_Machine_Management_Design.md#62-fragments-profiles-and-assignments)) | field-origin inspector | none |
 | G7 | Drift content is not served: no observed configuration or digest (`internal/api/reads.go:155-167`) | deciding adopt or revert from what changed | a drift-adoption import with review, or `talosctl` outside Bronzeward |
@@ -1013,6 +1034,7 @@ accepted limitation.
 | G14 | No read of the process's start mode: `GET /recovery` serves epoch, recovery mode, entry, exit and scopes (`internal/api/recovery_exits.go:123-129`), the headers carry only `Bronzeward-Epoch` and `Bronzeward-Recovery-Mode` (`internal/api/api.go:318-324`), and a recovery start shows only in a `409 recovery-mode-active` refusal (`internal/api/recovery_exits.go:211-213`) | the recovery banner and `status` stating that plan creation, approval and unfreeze wait for a normal restart ([§5.9](#59-recovery-after-a-restore)) | the answers of those three routes: past the role check, a recovery-start refusal shows a recovery start and any other answer a normal one (`internal/api/api.go:331-345`), and recovery entry is refused on a normal start (`internal/api/api.go:348-351`); nothing shows it before one is sent, so actions cannot be disabled beforehand and the banner holds until the next such answer |
 | G15 | No principal display name: bodies carry principal identifiers only (`internal/api/acts.go:19-30`, `internal/api/releases.go:53`), and no route maps one to a subject or name | showing who published, planned, approved or entered recovery | shortened principal identifiers |
 | G16 | No convergence status: a machine body serves `desired` and `applied.release` but not whether the `Desired` release's artifact digest for the machine differs from the `Applied` digest (`internal/api/reads.go:155-167`), which is what pending convergence means ([execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values)); after an adoption the `Applied` digest is the baseline's ([execution and recovery §6.3](execution-recovery.md#63-adopt)), so equal release IDs do not rule it out | showing whether a machine still needs a plan ([§2.4](#24-desired-applied-and-observed), [§5.2](#52-inventory), [W2](operator-experience-wireframes.md#w2-machines)) | the release difference only, never labelled as pending convergence |
+| G17 | No read of the settle floor or the maximum transport deadline: `SettleFloor` defaults to 30 s and may be configured higher, `MaxTransportDeadline` is required deployment configuration with no default (`internal/config/config.go:134-135`, `internal/config/config.go:161-164`), and neither is on `GET /recovery` (`internal/api/recovery_exits.go:123-148`) or any other response. The scope-accounting anchor is the later of the restore stop plus that maximum and any restored unaccounted attempt's transport deadline (`internal/api/recovery_accountings.go:85-87`, `internal/api/recovery_accountings.go:143`, `internal/api/recovery_accountings.go:188-189`), so a client cannot compute it | the recovery accounting journey: when the end observation may begin ([§5.9](#59-recovery-after-a-restore), [W10](operator-experience-wireframes.md#w10-recovery-console)) | the refusal text, which states the floor and the point it counts from only after a failed decision (`internal/api/settle.go:148-150`) |
 
 Not gaps, by design: no client dispatch or apply route
 ([design §12.7](../design/Talos_Configuration_and_Machine_Management_Design.md#127-application-approval-and-dispatch-boundary));
@@ -1096,12 +1118,12 @@ refinement until #253's contracts land.
 | Plan and approval (5.6) | [#258](https://github.com/ginsys/bronzeward/issues/258) | [#259](https://github.com/ginsys/bronzeward/issues/259) | #253: G9, G15 | #263 T8 |
 | Operation tracking (5.7) | #258 | #259 | #253: events, epochs | #263 T9 |
 | Drift (5.8) | [#260](https://github.com/ginsys/bronzeward/issues/260) | [#261](https://github.com/ginsys/bronzeward/issues/261) | #253: G7 | #263 T10 |
-| Recovery (5.9) | #260 | #261 | #253: G11, G14, G15 | #263 T11 |
+| Recovery (5.9) | #260 | #261 | #253: G11, G14, G15, G17 | #263 T11 |
 | Packaging and documentation | [#262](https://github.com/ginsys/bronzeward/issues/262) | #262 | #253: compatibility | #263 |
 
 Proposed changes: the web inventory ticket (#255) also carries the shared web shell (header,
 banners, state catalogue of [§8](#8-states-every-view-must-handle)); and #253 records, for each
-gap G1-G16, whether it becomes an API issue that natively blocks the client tickets it affects.
+gap G1-G17, whether it becomes an API issue that natively blocks the client tickets it affects.
 
 **Qualifications left to #253**, besides the gaps:
 
