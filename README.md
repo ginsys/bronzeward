@@ -6,11 +6,12 @@ The project's proof of concept is under implementation. The [operator guide](doc
 
 The design, specification, research reports and experiment READMEs are also published as a browsable site at <https://ginsys.github.io/bronzeward/>, rebuilt from `main` (see [Documentation site](CONTRIBUTING.md#documentation-site)).
 
-Tracking ends at a working configuration-control proof of concept using one database/provider profile selected after investigation:
+Tracking covers a working configuration-control proof of concept using one database/provider profile selected after investigation, plus operator clients for that same scope:
 
 1. [01 - Feasibility evidence](https://github.com/ginsys/bronzeward/milestone/1): reproducible experiments and reviewed findings.
 2. [02 - PoC specification](https://github.com/ginsys/bronzeward/milestone/2): profile and policy decisions, detailed contracts and implementation refinement.
 3. [03 - Working configuration-control PoC](https://github.com/ginsys/bronzeward/milestone/3): adoption, publication, approval, safe worker apply, drift handling and interruption/restoration recovery.
+4. [04 - Operator experience](https://github.com/ginsys/bronzeward/milestone/4): a CLI and web UI over the existing API, proposed in the [operator experience specification](docs/spec/operator-experience.md) and not accepted for implementation.
 
 Use the milestones for priorities and completion criteria, and native GitHub dependencies for blocking relationships.
 
