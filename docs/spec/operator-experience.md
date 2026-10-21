@@ -211,7 +211,7 @@ timeline:
 | desired ≠ applied.release, no open drift | adds "The selected release `<desired>` differs from the applied one; whether its configuration for this machine differs is not shown (G16)." |
 | openDrift not null | "Drifted since `<at of the openDrift.observation observation>`: a read differed from what Bronzeward last verified (`<applied.release>`)." If observed.release = desired, adds "It equals the selected release; that does not close the drift." |
 | no open drift, observed.release null | "The configuration read at `<observed.at>` matched neither `Applied` nor `Desired`, and no drift is open; an operation may hold the machine. See the timeline." |
-| newest observation newer than observed.at, with unread causes | adds "The latest read at `<time>` could not read: `<causes>`." |
+| an observation with a higher `basis` than the one `observed` names (the machine read selects `observed` by highest basis, `internal/api/reads.go:167`; the observations list serves `basis`, `internal/api/observations.go:21`), with unread causes | adds "The latest read at `<time>` could not read: `<causes>`." |
 | applied null | "Not applied or adopted by Bronzeward." |
 | desired null | "No release selected." |
 | observed null | "No configuration read recorded." No time is shown. |
@@ -226,9 +226,10 @@ bound in the PoC (`health: none-bound`, `internal/api/observe.go:86`), and every
 which after an adoption is the digest of the node's own bytes
 ([execution and recovery §6.3](execution-recovery.md#63-adopt)), so equal release IDs do not
 rule it out. The machine read does not serve it ([§11](#11-api-gap-audit), G16). A newly
-selected release can carry the same configuration for an unchanged machine, so the clients show
-only that the selected release differs from the applied one, never that the machine needs to
-converge or that it does not. A freeze closes the scope gate for commitments and attempts but
+selected release can carry the same configuration for an unchanged machine, so the machine views
+show only that the selected release differs from the applied one, never that the machine needs
+to converge or that it does not. The adopt plan is different: its `pendingConvergence` evidence
+does show it (`internal/api/plans.go:315`). A freeze closes the scope gate for commitments and attempts but
 does not stop an attempt already recorded, and does not block an adoption record
 ([execution and recovery §6.2](execution-recovery.md#62-freeze),
 [§6.3](execution-recovery.md#63-adopt) requirement 4.5). See
@@ -575,9 +576,9 @@ cannot get fresh evidence for every covered machine fails rather than select a n
 
 ```text
 $ bronzewardctl plan create --release rel_h7rt…2bd --machine mch_b3c…aa2q \
-    --operation apply-config --mode no-reboot             # role: publisher
+    --operation apply-config --mode no-reboot             # signed in as ops-ben; role: publisher
 Plan pln_f645…cawy proposed. It is not approved and nothing will run until an approver approves.
-$ bronzewardctl approve pln_f645…cawy                      # role: approver, human
+$ bronzewardctl approve pln_f645…cawy                      # ops-ben; role: approver, human
 Plan pln_f645…cawy  proposed  expires 2026-10-22 10:05 (in 23h59m)
   Machine       mch_b3c…aa2q  10.5.0.5:50000  cluster cl_9fd… (lab-a)  route 10.5.0.5:50000
   Operation     apply-config, mode no-reboot
@@ -739,8 +740,8 @@ $ bronzewardctl recovery scope-account mch_k2p…7xqa --start obs_a… --end obs
 Shows: restore stopped at 10:31. Start must be the first successful read after the latest of
 that stop plus the maximum transport deadline and any restored unaccounted attempt's deadline;
 end must be a recovery observation begun at least the settle floor after the latest of that
-point and the start. Neither the maximum deadline nor the settle floor is served (G17): a
-refusal states the floor and the point it counts from.
+point and the start. Neither the maximum deadline nor the settle floor is readable before a
+decision (G17): a settle-floor refusal states the floor and the point it counts from.
 Resource version read at both ends, unchanged between them.
 This records your judgment that no request sent before the restore, from any attempt the
 restored journal shows or one it lost, can still land on this machine. It may already have
@@ -768,9 +769,13 @@ one and the per-attempt accounting of a lost response outside a restore (`recove
 [§5.7](#57-operation-tracking)), are operator judgments with the same named settle refusals: a
 start that is not the first read after the deadline, an end that is not a recovery observation,
 a resource version not read at both ends, an end before the settle floor, or a moved resource
-version without an explanation (`internal/api/settle.go:111-154`). Only the settle-floor refusal states the
-floor and the point it counts from (`internal/api/settle.go:148-150`), so no client shows either
-as a value before one (G17). **Proposed:** the end-observation choice offers only observations
+version without an explanation (`internal/api/settle.go:111-154`). Before a decision, only the
+settle-floor refusal states the floor and the point it counts from
+(`internal/api/settle.go:148-150`), and only a plan-creation refusal states the maximum
+transport deadline (`internal/api/plans.go:113-114`), so no client shows either as a value
+before one (G17). After a successful accounting its timeline entries carry `facts.settleFloor`
+and `facts.anchor` (`internal/api/settle.go:160-161`,
+`internal/api/recovery_accountings.go:209-211`). **Proposed:** the end-observation choice offers only observations
 with purpose `recovery`, and an observation without a `resourceVersion` is shown unusable at
 either end (`internal/api/observations.go:23`, `internal/api/observations.go:37`). The per-attempt
 accounting also refuses an attempt already accounted and an executor not stopped or taken over
@@ -789,7 +794,8 @@ Recovery mode is enforced per scope, not installation-wide
 cancellation, freeze) and the recovery acts are always allowed to their roles; drafts,
 ingestion and compilation are allowed everywhere, and so is publication, except that a
 publication changing the assignment of a machine whose scope is not released in the current
-epoch fails `recovery-mode-active` (`internal/api/publish.go:473-475`;
+epoch fails `recovery-mode-active`, or `scope-busy` first when an operation holds that scope
+(`internal/api/publish.go:470-475`;
 [persistence and API §12.2](persistence-api.md#122-entry)); plan creation, approval, unfreeze
 and adoption are refused on a scope still pre-restore unaccounted; commitment, attempts and
 adoption records are refused on every scope not released in the current epoch; a released scope
@@ -873,7 +879,8 @@ over an operation whose owner is stopped; account an attempt with two named obse
 written explanation where required; resolve an attempt-less `unresolved` operation as
 cancelled; account, mark and release scopes; exit; revoke an identity after adding it to the
 deployment's denied subjects. Human only. Sees: the settle floor described as a minimum wait,
-not a bound, with its value only once a refusal states it (G17);
+not a bound, with its value not readable before a decision except in a settle-floor refusal
+(G17);
 a mark's `missing[]` list before a release (`internal/api/recovery_marks.go:195-213`).
 
 **Automation.** A CI job with an automation token: create a draft, set fragments from files,
@@ -897,7 +904,7 @@ sending with "approval is for humans".
 | Offline | no connection | retry reads with backoff; never queue writes | banner; actions disabled; last-read time shown |
 | Authentication refused | `401 unauthenticated`: not accepted, possibly but not necessarily because it expired | renew and repeat reads; repeat a pending write with the same key only if the renewed token is the same principal and the epoch is unchanged, and subject to G13 | same |
 | Principal or epoch changed with a write pending | renewal returned another principal, a context switch, or a new `Bronzeward-Epoch` | the pending write is set aside: not repeated and not sent under a new key; the client reads the current resource and the operator decides afresh | same, with the pending write shown as "outcome unknown: it may already have been committed", and its repeat disabled |
-| Recovery mode | `Bronzeward-Recovery-Mode: true`, `409 recovery-mode-active` naming the scope | banner line on every command with the scope summary | persistent banner; an action is disabled only where its scope's state or the recovery-start process refuses it, with that reason ([§5.9](#59-recovery-after-a-restore)); until G14 the start mode is known from the last answer of plan creation, approval or unfreeze, which a recovery start refuses, or of recovery entry, which a normal start refuses |
+| Recovery mode | `Bronzeward-Recovery-Mode: true`, `409 recovery-mode-active` naming the scope | banner line on every command with the scope summary | persistent banner; an action is disabled only where its scope's state or the recovery-start process refuses it, with that reason ([§5.9](#59-recovery-after-a-restore)); until G14 the start mode is known from the last answer of plan creation, approval or unfreeze, which a recovery start refuses without a `scope` member, or of recovery entry, which a normal start refuses with a `409 conflict` carrying neither `epoch` nor `request`; the entry's other refusals carry `epoch` and show a recovery start |
 | Epoch changed | new `Bronzeward-Epoch`, `400 cursor-invalid`, SSE `reset` | discard cached pages and cursors, say why | same |
 | Unresolved operation | `state: unresolved` | exit 5; who must act | the operation and machine both show it; no retry button |
 | Human-only refusal | `403 forbidden`, `humanOnly: true` | "This needs a person signed in, not an automation token" | same |
@@ -1031,10 +1038,10 @@ accepted limitation.
 | G11 | Recovery marks, releases and accountings have no list route; `GET /recovery` shows only their resulting scope states (`internal/api/recovery_exits.go:123-148`), the records themselves appear in machine timelines and acts | recovery console history | timeline |
 | G12 | Browser use: no statement of CORS, origin checks or hosting of a web client | the web interface at all | #253 |
 | G13 | A human session's mutation takes no expected-epoch precondition: only `Idempotency-Key` and `If-Match` are checked (`internal/api/api.go:388-409`), and the epoch is reported only in an answer (`internal/api/api.go:318-319`). After a committed write's answer is lost and a restore removes its record, the same request with the same key executes afresh in the new epoch ([persistence and API §7.2](persistence-api.md#72-behavior)); a read before repeating leaves a race. An automation token is bound to its issuing epoch and refused `401` in any other (`internal/api/api.go:297-303`) | repeating an ambiguous write ([§8](#8-states-every-view-must-handle), C5, G3, [W11](operator-experience-wireframes.md#w11-empty-withheld-error-and-offline-states)) | none for a human session: the client compares only the epoch it last saw; #253 adds a server-enforced epoch check or explicitly accepts the residual risk |
-| G14 | No read of the process's start mode: `GET /recovery` serves epoch, recovery mode, entry, exit and scopes (`internal/api/recovery_exits.go:123-129`), the headers carry only `Bronzeward-Epoch` and `Bronzeward-Recovery-Mode` (`internal/api/api.go:318-324`), and a recovery start shows only in a `409 recovery-mode-active` refusal (`internal/api/recovery_exits.go:211-213`) | the recovery banner and `status` stating that plan creation, approval and unfreeze wait for a normal restart ([§5.9](#59-recovery-after-a-restore)) | the answers of those three routes: past the role check, a recovery-start refusal shows a recovery start and any other answer a normal one (`internal/api/api.go:331-345`), and recovery entry is refused on a normal start (`internal/api/api.go:348-351`); nothing shows it before one is sent, so actions cannot be disabled beforehand and the banner holds until the next such answer |
+| G14 | No read of the process's start mode: `GET /recovery` serves epoch, recovery mode, entry, exit and scopes (`internal/api/recovery_exits.go:123-129`), the headers carry only `Bronzeward-Epoch` and `Bronzeward-Recovery-Mode` (`internal/api/api.go:318-324`). A recovery start shows only in an answer: a `409 recovery-mode-active` without a `scope` member (`internal/api/api.go:241-243`, `internal/api/recovery_exits.go:211-213`), or any recovery-entry answer past the role check but its not-a-recovery-start refusal, each carrying `epoch`; a normal start shows in that refusal, a plain `409 conflict` with neither an `epoch` nor a `request` member (`internal/api/api.go:348-351`, `internal/api/recovery_entries.go:91-92`, `internal/api/recovery_entries.go:106-108`, `internal/api/recovery_entries.go:133-135`, `internal/api/idempotency.go:65-67`) | the recovery banner and `status` stating that plan creation, approval and unfreeze wait for a normal restart ([§5.9](#59-recovery-after-a-restore)) | the answers of those three routes: past the role check, a recovery-start refusal (no `scope` member) shows a recovery start and any other answer a normal one (`internal/api/api.go:331-345`); a `409 conflict` to recovery entry shows a normal start only without `epoch` and `request` members, and the client tells it apart from the entry's other `409 conflict` answers by those members, never by status and code alone ([client contracts §8.5](client-contracts.md#85-epoch-changes)); nothing shows it before one is sent, so actions cannot be disabled beforehand and the banner holds until the next such answer |
 | G15 | No principal display name: bodies carry principal identifiers only (`internal/api/acts.go:19-30`, `internal/api/releases.go:53`), and no route maps one to a subject or name | showing who published, planned, approved or entered recovery | shortened principal identifiers |
 | G16 | No convergence status: a machine body serves `desired` and `applied.release` but not whether the `Desired` release's artifact digest for the machine differs from the `Applied` digest (`internal/api/reads.go:155-167`), which is what pending convergence means ([execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values)); after an adoption the `Applied` digest is the baseline's ([execution and recovery §6.3](execution-recovery.md#63-adopt)), so equal release IDs do not rule it out | showing whether a machine still needs a plan ([§2.4](#24-desired-applied-and-observed), [§5.2](#52-inventory), [W2](operator-experience-wireframes.md#w2-machines)) | the release difference only, never labelled as pending convergence |
-| G17 | No read of the settle floor or the maximum transport deadline: `SettleFloor` defaults to 30 s and may be configured higher, `MaxTransportDeadline` is required deployment configuration with no default (`internal/config/config.go:134-135`, `internal/config/config.go:161-164`), and neither is on `GET /recovery` (`internal/api/recovery_exits.go:123-148`) or any other response. The scope-accounting anchor is the later of the restore stop plus that maximum and any restored unaccounted attempt's transport deadline (`internal/api/recovery_accountings.go:85-87`, `internal/api/recovery_accountings.go:143`, `internal/api/recovery_accountings.go:188-189`), so a client cannot compute it | the recovery accounting journey: when the end observation may begin ([§5.9](#59-recovery-after-a-restore), [W10](operator-experience-wireframes.md#w10-recovery-console)) | the refusal text, which states the floor and the point it counts from only after a failed decision (`internal/api/settle.go:148-150`) |
+| G17 | The settle floor and the maximum transport deadline are not readable before a decision, when the accounting journey needs them: `SettleFloor` defaults to 30 s and may be configured higher, `MaxTransportDeadline` is required deployment configuration with no default (`internal/config/config.go:134-135`, `internal/config/config.go:161-164`), and neither is on `GET /recovery` (`internal/api/recovery_exits.go:123-148`). After a decision, a successful accounting's entries carry `facts.settleFloor` and `facts.anchor` on the machine timeline and operation events (`internal/api/settle.go:160-161`, `internal/api/recovery_accountings.go:209-211`), and a plan-creation refusal states the maximum (`internal/api/plans.go:113-114`). The scope-accounting anchor is the later of the restore stop plus that maximum and any restored unaccounted attempt's transport deadline (`internal/api/recovery_accountings.go:85-87`, `internal/api/recovery_accountings.go:143`, `internal/api/recovery_accountings.go:188-189`), so a client cannot compute it | the recovery accounting journey: when the end observation may begin ([§5.9](#59-recovery-after-a-restore), [W10](operator-experience-wireframes.md#w10-recovery-console)) | the refusal text, which states the floor and the point it counts from only after a failed decision (`internal/api/settle.go:148-150`) |
 
 Not gaps, by design: no client dispatch or apply route
 ([design §12.7](../design/Talos_Configuration_and_Machine_Management_Design.md#127-application-approval-and-dispatch-boundary));

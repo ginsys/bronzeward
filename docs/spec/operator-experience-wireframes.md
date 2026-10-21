@@ -34,7 +34,9 @@ scope summary and, while the server runs as started for recovery, that plan crea
 and unfreeze wait for its normal restart and that accepted publications complete only then;
 imports complete on it. Until [gap G14](operator-experience.md#11-api-gap-audit) the client learns
 that start mode from answers: plan creation, approval and unfreeze are refused on a recovery
-start, and recovery entry on a normal one. The line reflects the last such answer and is
+start without a `scope` member, and recovery entry on a normal one with a `409 conflict` that
+carries neither `epoch` nor `request`; the entry's other `409 conflict` answers carry `epoch`
+and show a recovery start. The line reflects the last such answer and is
 corrected by the next one. It never disables actions recovery mode allows
 ([§5.9](operator-experience.md#59-recovery-after-a-restore)): an action is disabled only on a
 scope whose state refuses it, with that reason.
@@ -72,8 +74,9 @@ Machines                                    Cluster: all ▾   State: all ▾   
 | mch_k2p…7x | 10.5.0.2:50000 | rel_fgqv…   | rel_fgqv… (operation)    | = applied, 2 min ago     | (•) Matches applied     |
 | mch_tqhc…35| 10.5.0.3:50000 | rel_fgqv…   | rel_p4nx… (adoption)     | = applied, 1 min ago     | (•) Selected ≠ applied  |
 | mch_w4ze…n3| 10.5.0.4:50000 | rel_fgqv…   | rel_fgqv… (operation)    | no match, 5 min ago      | (•) Drifted (•) Frozen  |
+| mch_b3c…aa | 10.5.0.5:50000 | rel_h7rt…   | rel_9vbn… (operation)    | = applied, 3 min ago     | (•) Selected ≠ applied  |
 +------------+----------------+-------------+--------------------------+--------------------------+-------------------------+
-Filtering is done in the browser over all pages (gap G9). Showing 3 of 3. Health is not checked.
+Filtering is done in the browser over all pages (gap G9). Showing 4 of 4. Health is not checked.
 ```
 
 ## W3. Machine detail
@@ -207,6 +210,9 @@ the machine is handed over
 
 ## W7. Plan and approval
 
+Shown signed in as ops-ben (publisher, approver), who created the plan and published the
+release, as in [§5.6](operator-experience.md#56-plan-and-approval).
+
 ```text
 Plan pln_f645…cawy   (•) Proposed — not approved, nothing will run   expires in 23 h 59 min
 +-------------------------------------------------------------------------------------------+
@@ -300,7 +306,8 @@ restart. Imports complete on it.
 | [Exit recovery]~ 4 scopes not released (ready is not released)                            |
 | Drafts, imports and publication remain available: a scope blocked by a lost key leaves    |
 | that state through a newly published release that leaves unreleased scopes' assignments   |
-| unchanged; one that changes them fails recovery-mode-active.  [Open Changes]              |
+| unchanged; one that changes them fails recovery-mode-active, or scope-busy first where an |
+| operation holds the scope.  [Open Changes]                                                |
 +-------------------------------------------------------------------------------------------+
 
 Account scope mch_k2p…7xqa (pre-restore unaccounted)
@@ -310,7 +317,8 @@ Account scope mch_k2p…7xqa (pre-restore unaccounted)
                                    unaccounted attempt's transport deadline
   End observation      [obs_b… ▾]  recovery observations only; must begin at least the
                                    settle floor after the latest of that point and the start.
-                                   Neither value is served (G17); a refusal states them.
+                                   Neither value is readable before a decision (G17); a
+                                   settle-floor refusal states the floor and its anchor.
   Resource version     read at both ends, unchanged between them
   Explanation          [______________]  required if the resource version moved
   This records your judgment that no request sent before the restore, from any attempt the

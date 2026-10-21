@@ -7,7 +7,8 @@ management API, for
 in [04 - Operator experience: CLI and web UI](https://github.com/ginsys/bronzeward/milestone/4).
 It implements no client, adds no route and changes no role, credential policy or server
 behaviour. Each design decision it needs is listed in [§13](#13-alternatives-and-open-choices)
-as an open choice with a recommendation, for the owner to settle.
+with its options; four are decided there, and the others are open choices with a recommendation,
+for the owner to settle.
 
 It builds on the operator journeys of [operator experience](operator-experience.md), proposed for
 [Design the operator journeys for bronzewardctl and the web UI](https://github.com/ginsys/bronzeward/issues/252).
@@ -84,7 +85,7 @@ The facts every later section relies on, read from the code and the contracts.
 
 | Topic | Fact | Source |
 | --- | --- | --- |
-| Base path | Routes are `METHOD /api/v1<pattern>`; a request no route takes is `404 not-found`, after authentication | `internal/api/api.go:229-235` |
+| Base path | Routes are `METHOD /api/v1<pattern>`; a request no route takes is `404 not-found`, after authentication, or `409 recovery-mode-active` before a recovery start's entry commits | `internal/api/api.go:229-235`, `internal/api/api.go:246-253` |
 | Anonymous surface | `GET` and `HEAD /livez` answer `204` with no body and no authentication; every other request authenticates first, an unknown path and `OPTIONS` included | `internal/server/server.go:10-24`, `internal/api/api.go:255-264` |
 | Transport | The server listens on plain http; TLS terminates in front of it | `internal/server/server.go:34-42`; [persistence and API §9.1](persistence-api.md#91-conventions) |
 | Timeouts | Reading a request, body included, 30 s; headers 10 s; idle 2 min; no write timeout (the event stream outlives any fixed bound) | `internal/server/server.go:27-42` |
@@ -108,9 +109,11 @@ The facts every later section relies on, read from the code and the contracts.
 Every route of `internal/api/routes.go:78-136` with the client action that uses it. No route
 answers `501` today: each sets a read or an effect (`internal/api/api.go:358-366`). "Human"
 means the route refuses automation with `403 forbidden` and `humanOnly: true`
-(`internal/api/api.go:374-375`). "Normal start" means a process started for recovery refuses it
-even after its entry (`internal/api/api.go:342-345`). "Keyed" means the body carries unextracted
-input, fingerprinted with the provider's digest key instead of SHA-256 (`internal/api/routes.go:20-23`).
+(`internal/api/api.go:374-375`). "Keyed" means the body carries unextracted input, fingerprinted
+with the provider's digest key instead of SHA-256 (`internal/api/routes.go:20-23`). In the
+"Start mode" column, "normal" means a process started for recovery refuses the route even after
+its entry (`internal/api/api.go:342-345`), and "recovery" means a normal start refuses it
+(`internal/api/api.go:348-351`).
 
 ### 3.1 Reads
 
@@ -139,34 +142,34 @@ protected review.
 
 ### 3.2 Writes
 
-| Client action | Route | Roles | Human | `If-Match` | Success | Keyed |
-| --- | --- | --- | --- | --- | --- | --- |
-| `cluster add` | `POST /clusters` | author | yes | | 201 | |
-| `machine add` | `POST /machines` | author | yes | | 201 | |
-| `machine set-endpoint` | `POST /machines/{id}/talos-endpoints` | author | yes | | 201 | |
-| `import start` | `POST /ingestions` | author | yes | draft's | 202 | `document` |
-| `import mark` | `POST /ingestions/{id}/marks` | author | yes | | 202 | `marks` |
-| `import continue` / `takeover` | `POST /ingestions/{id}/continuations` / `takeovers` | author | yes | | 202 | |
-| `import abandon` | `POST /ingestions/{id}/abandonments` | author | yes | | 200 | |
-| `draft create` | `POST /drafts` | author | | | 201, ETag | |
-| `fragment set` / `rm` | `PUT` / `DELETE /drafts/{id}/fragments/{name}` | author | | yes | 200, ETag | `document` (PUT) |
-| `profile set` / `rm` | `PUT` / `DELETE /drafts/{id}/profiles/{name}` | author | | yes | 200, ETag | |
-| `assignment set` / `rm` | `PUT` / `DELETE /drafts/{id}/assignments/{machine}` | author | | yes | 200, ETag | |
-| `draft discard` | `POST /drafts/{id}/discard` | author | | yes | 200 | |
-| `publish` | `POST /drafts/{id}/publications` | publisher | | yes | 202 | |
-| `plan create`, `drift revert` | `POST /plans` | publisher | | | 201 | normal start |
-| `plan cancel` | `POST /plans/{id}/cancellations` | publisher (its own plan), approver, recovery-admin | | | 200 | |
-| `approve` | `POST /plans/{id}/approvals` | approver | yes | | 201 | normal start |
-| `approval revoke` | `POST /approvals/{id}/revocations` | approver, recovery-admin | | | 201 | |
-| `machine freeze` | `POST /machines/{id}/freezes` | author, publisher, approver, recovery-admin | | | 201 | |
-| `machine unfreeze` | `POST /machines/{id}/unfreezes` | approver | | | 201 | normal start |
-| `recovery enter` | `POST /recovery/entries` | recovery-admin | yes | | 201 | recovery start only |
-| `recovery exit` | `POST /recovery/exits` | recovery-admin | yes | | 201 | |
-| `recovery mark` / `release` | `POST /recovery/scopes/{machine}/marks` / `releases` | recovery-admin | yes | | 201 | |
-| `recovery scope-account` | `POST /recovery/accountings` | recovery-admin | yes | | 201 | |
-| `recovery account` | `POST /operations/{id}/attempts/{attempt}/accountings` | recovery-admin | yes | | 201 | |
-| `recovery takeover` / `resolve` | `POST /operations/{id}/takeovers` / `resolutions` | recovery-admin | yes | | 201 | |
-| `identity revoke` | `POST /identity-revocations` | recovery-admin | yes | | 201 | |
+| Client action | Route | Roles | Human | `If-Match` | Success | Keyed | Start mode |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `cluster add` | `POST /clusters` | author | yes | | 201 | | |
+| `machine add` | `POST /machines` | author | yes | | 201 | | |
+| `machine set-endpoint` | `POST /machines/{id}/talos-endpoints` | author | yes | | 201 | | |
+| `import start` | `POST /ingestions` | author | yes | draft's | 202 | `document` | |
+| `import mark` | `POST /ingestions/{id}/marks` | author | yes | | 202 | `marks` | |
+| `import continue` / `takeover` | `POST /ingestions/{id}/continuations` / `takeovers` | author | yes | | 202 | | |
+| `import abandon` | `POST /ingestions/{id}/abandonments` | author | yes | | 200 | | |
+| `draft create` | `POST /drafts` | author | | | 201, ETag | | |
+| `fragment set` / `rm` | `PUT` / `DELETE /drafts/{id}/fragments/{name}` | author | | yes | 200, ETag | `document` (PUT) | |
+| `profile set` / `rm` | `PUT` / `DELETE /drafts/{id}/profiles/{name}` | author | | yes | 200, ETag | | |
+| `assignment set` / `rm` | `PUT` / `DELETE /drafts/{id}/assignments/{machine}` | author | | yes | 200, ETag | | |
+| `draft discard` | `POST /drafts/{id}/discard` | author | | yes | 200 | | |
+| `publish` | `POST /drafts/{id}/publications` | publisher | | yes | 202 | | |
+| `plan create`, `drift revert` | `POST /plans` | publisher | | | 201 | | normal |
+| `plan cancel` | `POST /plans/{id}/cancellations` | publisher (its own plan), approver, recovery-admin | | | 200 | | |
+| `approve` | `POST /plans/{id}/approvals` | approver | yes | | 201 | | normal |
+| `approval revoke` | `POST /approvals/{id}/revocations` | approver, recovery-admin | | | 201 | | |
+| `machine freeze` | `POST /machines/{id}/freezes` | author, publisher, approver, recovery-admin | | | 201 | | |
+| `machine unfreeze` | `POST /machines/{id}/unfreezes` | approver | | | 201 | | normal |
+| `recovery enter` | `POST /recovery/entries` | recovery-admin | yes | | 201 | | recovery |
+| `recovery exit` | `POST /recovery/exits` | recovery-admin | yes | | 201 | | |
+| `recovery mark` / `release` | `POST /recovery/scopes/{machine}/marks` / `releases` | recovery-admin | yes | | 201 | | |
+| `recovery scope-account` | `POST /recovery/accountings` | recovery-admin | yes | | 201 | | |
+| `recovery account` | `POST /operations/{id}/attempts/{attempt}/accountings` | recovery-admin | yes | | 201 | | |
+| `recovery takeover` / `resolve` | `POST /operations/{id}/takeovers` / `resolutions` | recovery-admin | yes | | 201 | | |
+| `identity revoke` | `POST /identity-revocations` | recovery-admin | yes | | 201 | | |
 
 Sources: `internal/api/routes.go:98-135`; the success status each handler returns (for example
 `internal/api/inventory.go:172`, `internal/api/drafts.go:303`, `internal/api/ingestions.go:404`,
@@ -185,14 +188,16 @@ ETag (`internal/api/ingestions.go:152-153`).
 | `whoami`, roles in the web header | G1 | [§4](#4-api-gap-audit) |
 | version check | G2 | [§7](#7-compatibility-and-versioning) |
 | automation token issue, rotate, list | server-side command only | not offered by either client |
-| dispatch, apply | the controller dispatches approved plans ([design §11.1](../design/Talos_Configuration_and_Machine_Management_Design.md#111-api-style)) | not offered |
+| dispatch, apply | the controller dispatches approved plans ([design §12.7](../design/Talos_Configuration_and_Machine_Management_Design.md#127-application-approval-and-dispatch-boundary); [§13.7](../design/Talos_Configuration_and_Machine_Management_Design.md#137-poc-identity-and-approval-policy) item 2) | not offered |
 
 ## 4. API gap audit
 
 The seventeen gaps the journeys found, checked against the code above, plus seven this audit adds. G21-G24 are the journeys' G13-G16 (expected epoch, start mode, principal display name, convergence status), numbered last because they were added to the journeys last; the journeys' G17 is G18 here.
 Each has a disposition: an **API issue** proposed in [§14](#14-proposed-api-gap-issues-and-downstream-refinement),
-a **client composite** over existing routes, an **accepted limitation**, or a **decision**
-listed in [§13](#13-alternatives-and-open-choices). Every disposition, including "accepted", is
+a **contract correction** to an existing specification, also in §14, a **later design issue**
+out of this milestone, also in §14, a **client rule** this document states, a **client
+composite** over existing routes, an **accepted limitation**, or a **decision** listed in
+[§13](#13-alternatives-and-open-choices). Every disposition, including "accepted", is
 this draft's proposal until the owner assesses it. Nothing here is presented to a client as
 supported.
 
@@ -202,11 +207,11 @@ supported.
 | G2 | No server version or compatibility read; only anonymous `/livez` | `internal/server/server.go:19-22` | API issue A2; blocks every client's compatibility refusal |
 | G3 | An operation does not name its ingestion; only the start's `202` body links them | the operation's subject is a draft or a plan and machine, never an ingestion (`internal/api/reads.go:358-373`, `internal/api/reads.go:398-400`) | API issue A4 (operation `subject`) |
 | G4 | A draft does not name the release it produced | the draft read selects no release (`internal/api/reads.go:211`) | accepted limitation: the publish operation's `result.release` answers it |
-| G5 | No render of a draft before publication | no such route in `internal/api/routes.go:78-136` | out of this milestone: a compilation design change, not a client contract; record as a later design issue |
-| G6 | Provenance covers secret-reference occurrences only, not "which fragment set this field" | [compilation §8.1](compilation.md#81-provenance-by-tracer-composition) attributes stand-ins to reference occurrences | out of this milestone, as G5 |
-| G7 | Drift content is not served | the machine's drift and observation reads name the observation, its time and a matched release, and no configuration (`internal/api/drift.go:150-155`, `internal/api/inventory.go:251-257`, `internal/api/observations.go:16-17`) | out of this milestone: serving observed configuration is a redaction design question; clients use a drift-adoption import with review |
+| G5 | No render of a draft before publication | no such route in `internal/api/routes.go:78-136` | later design issue L1: a compilation design change, not a client contract |
+| G6 | Provenance covers secret-reference occurrences only, not "which fragment set this field" | [compilation §8.1](compilation.md#81-provenance-by-tracer-composition) attributes stand-ins to reference occurrences | later design issue L1, as G5 |
+| G7 | Drift content is not served | the machine's drift and observation reads name the observation, its time and a matched release, and no configuration (`internal/api/drift.go:150-155`, `internal/api/inventory.go:251-257`, `internal/api/observations.go:16-17`) | later design issue L2: serving observed configuration is a redaction design question; until then clients use a drift-adoption import with review |
 | G8 | Machines have no human-readable name | the machine resource has no name member (`internal/api/inventory.go:260-272`) | accepted limitation for this milestone; clients show endpoint and node ID |
-| G9 | No list filters on machines, plans, releases, drafts or acts; no machine timeline stream | `internal/api/acts.go:135-145` refuses any key but `limit`, `cursor` and the route's filters; filters exist only on operations and dependencies | API issue A4 for the filters the journeys need first: plans by `state` and `machine`, machines by `cluster`; timeline polling accepted |
+| G9 | No list filters on machines, plans, releases, drafts or acts; no machine timeline stream | `internal/api/acts.go:135-145` refuses any key but `limit`, `cursor` and the route's filters; filters exist only on operations and dependencies | API issue A4 for the filters the journeys need first: plans by `state` and `machine`, machines by `cluster`; accepted limitation for the release, draft and act filters, which clients apply over the pages they read; timeline polling accepted |
 | G10 | No ingestion list | `internal/api/routes.go:90` | API issue A4 |
 | G11 | Recovery marks, releases and accountings have no list route | `internal/api/routes.go:128-135` | accepted limitation: `GET /recovery` and the machine timeline |
 | G12 | No browser access path: no CORS, and every request including a preflight `OPTIONS` must authenticate | `internal/server/server.go:10-13`, `internal/api/api.go:255-264`; [§10.1](#101-hosting-and-origin) | decision D1; under the recommended same-origin hosting no API change |
@@ -215,11 +220,11 @@ supported.
 | G15 | The contract's prose describes the `reset` stream event, but its ingest and publish event-type lists omit it, so a client built from the lists does not expect it | `internal/api/operations.go:283-285`; [persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress) | contract correction C1 (documentation only) |
 | G16 | No request-ID response header: a client learns the request ID only from a problem's `instance` | `internal/api/problem.go:84-90`; no other header set | API issue A3 |
 | G17 | A request with an unsupported method on a known path is answered by the catch-all `404`, not `405` | `internal/api/api.go:233-235` (inferred from `ServeMux` method patterns; untested) | accepted; clients treat `404 not-found` on a known route as "not supported by this server" only together with A2's version read |
-| G18 | The settle floor and transport deadlines that bound recovery accounting are deployment settings no route serves, so a client cannot compute when the end observation may begin (the journeys' G17) | [execution and recovery §5.2](execution-recovery.md#52-accounting-a-lost-response); `examples/bronzeward.yaml:29-44` | folded into A2 (served as read-only installation settings) |
+| G18 | The settle floor and transport deadlines that bound recovery accounting are deployment settings no route serves before an accounting decision, which is when a client needs them to compute when the end observation may begin (the journeys' G17). After one, a successful accounting's timeline facts carry `settleFloor` and `anchor`, the settle-floor refusal states the floor and its anchor only, and a plan-creation refusal states the maximum transport deadline | [execution and recovery §5.2](execution-recovery.md#52-accounting-a-lost-response); `examples/bronzeward.yaml:29-44`; after a decision: `internal/api/settle.go:160-161`, `internal/api/recovery_accountings.go:209-211`, `internal/api/settle.go:148-150`, `internal/api/plans.go:113-114` | folded into A2 (served as read-only installation settings) |
 | G19 | The fixture issuer mints tokens but offers no authorization, token, device or revocation endpoint, so no interactive sign-in can be tested against it | `fixtures/oidc/issuer/issuer.go:1-6` ("no login, no clients, no refresh"), `fixtures/oidc/issuer/issuer.go:110-123` (discovery and key set only), `fixtures/oidc/main.go:22-25` | validation-fixture issue A5 |
 | G20 | `503` answers carry no `Retry-After`, and the contract gives no retry guidance for `dependency-unavailable`, `transient-conflict` or `epoch-superseded` | search of `internal/` for `Retry-After`; [persistence and API §9.4](persistence-api.md#94-errors) | client rule in [§8.2](#82-errors); no API change proposed |
-| G21 | A human's mutation takes no expected-epoch precondition: only `Idempotency-Key` and `If-Match` are checked (`internal/api/api.go:388-409`), and the epoch is reported only in an answer (`internal/api/api.go:318-319`). After a committed write's answer is lost and a restore removes its record, the same request with the same key executes afresh in the new epoch ([persistence and API §12.4](persistence-api.md#124-restore-and-idempotency)); the read before repeating of [§8.4](#84-idempotency-and-ambiguous-responses) item 3 leaves a race. A service principal is already checked: its token carries its epoch, and the write's own transaction refuses one from another epoch with `401` | `internal/api/api.go:388-409`, `internal/api/api.go:318-319`; service check: `internal/auth/automation.go:51-52`, `internal/api/idempotency.go:28-30`, `internal/api/idempotency.go:47-49`, `internal/api/api.go:297-303` | decision D10; API issue A6 if D10 chooses a server check |
-| G22 | No read of the process's start mode. `GET /recovery` serves epoch, recovery mode, entry, exit and scopes, and the headers carry only `Bronzeward-Epoch` and `Bronzeward-Recovery-Mode`. Past the role check, a recovery start shows only in an answer: a `409 recovery-mode-active` without a `scope` member, to any request but the entry before the entry commits and to plan creation, approval or unfreeze after it, or any recovery-entry answer except its not-a-recovery-start refusal. A normal start shows only in that refusal: a plain `409 conflict` with neither an `epoch` nor a `request` member, while every other `409 conflict` the entry answers carries `epoch`. The scope refusals that share the `recovery-mode-active` code carry `scope` | `internal/api/recovery_exits.go:123-129`, `internal/api/api.go:318-324`; process refusals: `internal/api/api.go:241-243`, `internal/api/api.go:337-351`, `internal/api/recovery_exits.go:211-213`, `internal/api/routes.go:120-127`; entry: `internal/api/recovery_entries.go:91-92`, `internal/api/recovery_entries.go:106-108`, `internal/api/recovery_entries.go:133-135`, `internal/api/idempotency.go:65-67`; scope refusals: for example `internal/api/plans.go:226-227` | API issue A2 (the start mode served with the version); until then the client reading of [§8.5](#85-epoch-changes), with the limit that nothing shows the mode before such an answer |
+| G21 | A human's mutation takes no expected-epoch precondition: only `Idempotency-Key` and `If-Match` are checked (`internal/api/api.go:388-409`), and the epoch is reported only in an answer (`internal/api/api.go:318-319`). After a write's answer is lost, and either a restore removes its record or the first attempt never committed, the same request with the same key executes afresh in the new epoch, because the in-transaction lookup finds no record (`internal/api/tx.go:190-198`) ([persistence and API §12.4](persistence-api.md#124-restore-and-idempotency)); the read before repeating of [§8.4](#84-idempotency-and-ambiguous-responses) item 3 leaves a race. A service principal is already checked: its token carries its epoch, and the write's own transaction refuses one from another epoch with `401` | `internal/api/api.go:388-409`, `internal/api/api.go:318-319`, `internal/api/tx.go:190-198`; service check: `internal/auth/automation.go:51-52`, `internal/api/idempotency.go:28-30`, `internal/api/idempotency.go:47-49`, `internal/api/api.go:297-303` | decision D10; API issue A6 if D10 chooses a server check |
+| G22 | No read of the process's start mode. `GET /recovery` serves epoch, recovery mode, entry, exit and scopes, and the headers carry only `Bronzeward-Epoch` and `Bronzeward-Recovery-Mode`. Past the role check, a recovery start shows only in an answer: a `409 recovery-mode-active` without a `scope` member, to any request but the entry before the entry commits and to plan creation, approval or unfreeze after it, or any recovery-entry answer except its not-a-recovery-start refusal. A normal start shows only in that refusal: a plain `409 conflict` with neither an `epoch` nor a `request` member, while every other `409 conflict` the entry answers carries `epoch`. The scope refusals that share the `recovery-mode-active` code carry `scope` | `internal/api/recovery_exits.go:123-129`, `internal/api/api.go:318-324`; process refusals: `internal/api/api.go:241-243`, `internal/api/api.go:337-351`, `internal/api/recovery_exits.go:211-213`, `internal/api/routes.go:120-127`; entry: `internal/api/recovery_entries.go:91-92`, `internal/api/recovery_entries.go:106-108`, `internal/api/recovery_entries.go:133-135`, `internal/api/idempotency.go:65-67`; scope refusals: for example `internal/api/plans.go:226-227` | API issue A2 (the start mode served with the version); until then the client reading of [§8.5](#85-epoch-changes), with the limit that nothing shows the mode before such an answer. That reading rests on the absent `scope` member, which the contract says every `recovery-mode-active` carries: contract correction C2 |
 | G23 | No principal display name: bodies carry principal identifiers only, and no route maps one to a subject or name | `internal/api/acts.go:19-30`, `internal/api/releases.go:53`, `internal/api/plans.go:195`, `internal/api/approvals.go:43`, `internal/api/recovery_entries.go:79`; no such route in `internal/api/routes.go:78-136` | API issue A7; until then clients show shortened principal identifiers |
 | G24 | No convergence status: the machine body serves `desired` and `applied.release`, and compares the artifact digests only to match an observation, never serving them, so a client cannot tell whether the `Desired` release's digest differs from the `Applied` one, which is what pending convergence means. After an adoption the `Applied` digest is the baseline's, so equal or different release IDs do not settle it | `internal/api/reads.go:155-166`; [execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values), [§6.3](execution-recovery.md#63-adopt) | API issue A4 (a pending-convergence member on the machine); until then clients show the release difference only, never labelled as pending convergence |
 
@@ -345,7 +350,7 @@ body. Exit codes are the journeys' (journeys §4).
 | 400 `cursor-invalid` | discard the cursor and restart the list. Run the epoch-change handling of [§8.5](#85-epoch-changes) only when `Bronzeward-Epoch` changed: the same code also answers a cursor that does not parse (`internal/api/acts.go:154-156`) |
 | 401 `unauthenticated` | renew once ([§9.5](#95-renewal)); repeat a read; for a write follow [§8.4](#84-idempotency-and-ambiguous-responses); a second `401` stops with the failure text of [§9.6](#96-failure-cases) |
 | 403 `forbidden` | show the route's `roles`, and "humans only" when `humanOnly` is true; no retry |
-| 403 `identity-revoked` | stop; clear the context's stored credential; do not start a new sign-in by itself ([§9.6](#96-failure-cases)) |
+| 403 `identity-revoked` | stop; clear the context's stored credential, meaning the tokens the client itself keeps in its credential store or memory, never an operator-supplied token file, which it leaves untouched and reports as no longer accepted; do not start a new sign-in by itself ([§9.6](#96-failure-cases)) |
 | 404 `not-found` | the resource does not exist in this epoch; after a restore a handle issued later answers `404` ([persistence and API §12.3](persistence-api.md#123-what-a-restored-state-means-record-by-record)) |
 | 409 `conflict`, `stale-input`, `scope-busy`, `machine-identity-mismatch`, `ingestion-abandoned`, `recovery-mode-entered`, `recovery-mode-active` | show the named resource and state; read it; never repeat automatically, with one exception. A `409 recovery-mode-active` without a `scope` member, and a `409 conflict` to the recovery entry without `epoch` and `request` members, are process refusals that show the start mode ([§8.5](#85-epoch-changes)). A `409 conflict` that carries `request` and `epoch` is an earlier-epoch idempotency record: it is read and reported, not repeated, under either key ([§8.4](#84-idempotency-and-ambiguous-responses) item 7). The one exception: a `409 conflict` on a draft fragment write (`PUT /drafts/{id}/fragments/{name}`) that answers a repeat, carries an `ingestion` member but no `draft` member, and has no `Idempotent-Replayed: true` is the first request still running (`internal/api/fragments.go:105-114`; looked up by principal and key, so it never answers a first send). A `409` with both `ingestion` and `draft`, replayed or not, is a recorded refusal (`internal/api/fragments.go:291-296`, `internal/api/drafts.go:94-104`): the write was refused, not pending. For the in-progress case, repeat the identical request with the same key, with backoff, until it answers otherwise or the client's wait bound of [§8.4](#84-idempotency-and-ambiguous-responses) item 2 expires; the contract says the repeat then gets the first request's replay ([persistence and API §7.2](persistence-api.md#72-behavior); [§8.4](#84-idempotency-and-ambiguous-responses) item 2) |
 | 412 `precondition-failed` | someone else wrote first: stop, show the newer state, never refetch and resend ([§8.3](#83-etags)) |
@@ -356,8 +361,10 @@ body. Exit codes are the journeys' (journeys §4).
 | 501 `not-implemented` | not served by this server; no route answers it today |
 | 503 `dependency-unavailable`, `talos-access-unavailable`, `transient-conflict`, `epoch-superseded` | reads: retry with backoff (1 s doubling to 30 s, at most 5 tries, then stop). Writes: repeat with the same key at most 3 times. If every attempt of the write was answered `503`, report **not done**: each such `503` states that nothing was committed by that attempt. If any earlier attempt was ambiguous ([§8.4](#84-idempotency-and-ambiguous-responses) item 2), a `503` to the repeat says nothing about that attempt: report the outcome as unknown, as in [§8.4](#84-idempotency-and-ambiguous-responses) item 4. `epoch-superseded` is not repeated against the same server process: it started before the current epoch and cannot succeed until restarted. The server sends no `Retry-After` (G20) |
 | an unknown code | treat by status class: 4xx as a refusal, 5xx as an unknown outcome for a write |
+| a 5xx that is not a Bronzeward problem | an answer without `application/problem+json` and a `type` starting `urn:bronzeward:problem:`, for example a `502`, `503` or `504` from the component in front of the server, may come after the server committed: for a write it is an ambiguous outcome as in [§8.4](#84-idempotency-and-ambiguous-responses) item 2, never **not done**; reads retry as for the `503` row |
 
-The write `503`s say that the attempt they answer committed nothing; for example authentication's
+The `503` row applies only to a Bronzeward problem with one of its four codes. The write `503`s
+say that the attempt they answer committed nothing; for example authentication's
 (`internal/api/api.go:311`), the installation-state read's (`internal/api/api.go:268`), the keyed
 fingerprint's (`internal/api/tx.go:110`, `internal/api/tx.go:123`) and the transaction's
 (`internal/api/tx.go:308`, `internal/api/tx.go:310`, `internal/api/tx.go:314`). This list is not
@@ -445,7 +452,8 @@ contract's, and this specification does not close it.
    base64url without padding (22 characters, within `internal/api/api.go:386`). Never derived from
    the request content, so a key reveals nothing about a document.
 2. **Ambiguous.** A write's outcome is unknown when the connection fails after any byte of the
-   request was sent, when no complete response arrives, or on `500`. The client then repeats the
+   request was sent, when no complete response arrives, on `500`, or on a `5xx` that is not a
+   Bronzeward problem ([§8.2](#82-errors)). The client then repeats the
    identical request it still holds in memory, with the same key, at most 3 times with backoff.
    A write's `503` is repeated the same way; it states only that the attempt it answers committed
    nothing, so after an ambiguous attempt the outcome stays unknown ([§8.2](#82-errors)). The
@@ -517,8 +525,9 @@ contract's, and this specification does not close it.
    executes (AMB-10), and a changed `If-Match` executes when it matches the current resource and
    is refused `412` otherwise (AMB-13). An operator who cannot reconstruct the exact
    input stops and reconciles from the resource instead of repeating. This is option (a) of
-   decision D9, for the journeys' open question on key metadata across a restart; option (b), a
-   local journal, would replay without that reconstruction. D9 stays open.
+   decision D9, for the journeys' open question on key metadata across a restart, as decided in
+   [§13](#13-alternatives-and-open-choices); option (b), a local journal, would replay without
+   that reconstruction.
 5. **Browser.** The page holds pending writes in memory only. Leaving or reloading the page drops
    them; the outcome-unknown notice shows the key and the resource to read, and no repeat is
    offered afterwards.
@@ -575,7 +584,10 @@ restart changes the mode without any signal, so the kept mode is only the last o
 3. **Unknown** before any such answer. The client then disables no action beforehand, and the
    recovery banner states the mode as unknown or as last shown, until the next such answer.
 
-Evidence for each answer is in the G22 row of [§4](#4-api-gap-audit).
+Evidence for each answer is in the G22 row of [§4](#4-api-gap-audit). Item 1 relies on the code,
+not the contract: persistence and API says every `409 recovery-mode-active` names the scope, and
+the process refusals do not; contract correction C2 in
+[§14](#14-proposed-api-gap-issues-and-downstream-refinement) records the divergence.
 
 ### 8.6 Event resumption
 
@@ -636,7 +648,8 @@ current token expires
    loopback redirect URIs with any port; the web client allows exactly the web origin's callback
    path. The device-authorization grant is enabled on the CLI client only if decision D4 adopts it.
 3. Any choice under which a client keeps a refresh token (the CLI's credential store of
-   [§9.2](#92-cli-sign-in) item 3, D2(b) or (c), D5(a)) is conditional on refresh tokens issued to
+   [§9.2](#92-cli-sign-in) item 3; every D2 option, D2(a)'s process memory included, since a long
+   wait renews in-process, [§9.5](#95-renewal) item 4; D5(a)) is conditional on refresh tokens issued to
    public clients rotating on every use and being bound to the client; this document sets no
    refresh-token policy itself. The provider's session length, not the client, bounds how long an operator
    stays signed in.
@@ -736,7 +749,7 @@ read locally, labelled as its own reading, never as the server's reason.
 | Human-only route with an automation token | `403 forbidden`, `humanOnly: true` | "This needs a person signed in, not an automation token" |
 | Group removed at the provider | takes effect when the current token expires ([persistence and API §10.1](persistence-api.md#101-humans-oidc)) | nothing to detect before; after renewal the next refusal names the roles |
 | Account disabled at the provider | the current token is accepted until it expires; in the #162 experiment a refresh after disablement was refused ([talosctl-oidc live observations](../design/research/20261021-talosctl-oidc.md#live-observations), one provider only) | the failed renewal of [§9.5](#95-renewal) item 3 |
-| Identity revoked in Bronzeward, or listed in `deniedSubjects` | `403 identity-revoked` (`internal/api/api.go:308-309`) for both. A recorded revocation is permanent (`internal/api/revocations.go:122`); a `deniedSubjects` entry is deployment configuration and lasts while the entry does (`internal/auth/auth.go:182-183`, `internal/auth/automation.go:45`) | "Your access was revoked or is denied by this installation; contact a recovery administrator." Clear the stored credential; no automatic new sign-in, which would be refused the same way. The client cannot tell the two causes apart |
+| Identity revoked in Bronzeward, or listed in `deniedSubjects` | `403 identity-revoked` (`internal/api/api.go:308-309`) for both. A recorded revocation is permanent (`internal/api/revocations.go:122`); a `deniedSubjects` entry is deployment configuration and lasts while the entry does (`internal/auth/auth.go:182-183`, `internal/auth/automation.go:45`) | "Your access was revoked or is denied by this installation; contact a recovery administrator." Clear the stored credential as in [§8.2](#82-errors), never an operator-supplied token file; no automatic new sign-in, which would be refused the same way. The client cannot tell the two causes apart |
 | Automation token revoked, rotated or from an earlier epoch | `401` (`internal/auth/automation.go:47-52`) | "The automation token was not accepted: it may be revoked, rotated, expired or from before a restore. The operator reissues it with the server-side command." |
 | Provider or database unreachable from the server | `503 dependency-unavailable`, nothing committed | retry as [§8.2](#82-errors) |
 | Provider unreachable from the client | no request reaches the server | keep using the current token until it is refused; then "Cannot reach the identity provider `<issuer>`" |
@@ -757,8 +770,9 @@ expiry, at most `maxTokenLifetime`; an identity revocation is permanent and is n
    (assumption S3), and redirects to the provider's end-session endpoint where it offers one. It
    then shows a signed-out page that holds no data.
 3. After sign-out, the browser's back button shows no data from before: the web pages are served
-   `Cache-Control: no-store` ([§10.3](#103-caches-and-back-navigation)), and the application
-   renders nothing without a token.
+   `Cache-Control: no-store`, the application clears its state on `pagehide` and on a page
+   restored from the back-forward cache ([§10.3](#103-caches-and-back-navigation) items 3-4,
+   assumption S8), and it renders nothing without a token.
 
 ## 10. Browser security
 
@@ -782,8 +796,11 @@ package ships the static files and the response headers the static host must sen
 **Proposed.** The static host sends, on every page:
 
 - `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self';
-  connect-src 'self' <issuer origin>; form-action <issuer origin>; frame-ancestors 'none';
-  base-uri 'none'`, with `require-trusted-types-for 'script'` where supported;
+  connect-src 'self' <provider origins>; form-action <issuer origin>; frame-ancestors 'none';
+  base-uri 'none'`, with `require-trusted-types-for 'script'` where supported. `<provider
+  origins>` are the issuer's origin and the origins of the token and revocation endpoints its
+  discovery document names, which may differ from the issuer's
+  ([§9.3](#93-browser-sign-in) item 5);
 - `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`,
   `Cross-Origin-Opener-Policy: same-origin`, `Cache-Control: no-store`.
 
@@ -807,8 +824,10 @@ added; any future cookie needs its own CSRF design.
 2. The application uses no service worker.
 3. On `pagehide` and on sign-out, the application clears its in-memory state and every form field
    that holds a document or marks.
-4. Pages are served `no-store`, so a page restored from history renders nothing until signed in
-   again.
+4. Pages are served `no-store`, so a page reloaded from history renders nothing until signed in
+   again. A browser may still keep a `no-store` page in its back-forward cache (assumption S8);
+   on a `pageshow` with `persisted` true the application discards any state and renders nothing
+   until signed in again, so the guarantee rests on items 3 and 4, not on the header alone.
 
 ## 11. Protected input
 
@@ -835,8 +854,9 @@ The review is served to any human `author`, not only the one who started the ing
 
 **Proposed.**
 
-1. **Argv and history.** No flag takes a protected value. Documents and marks come from a file,
-   standard input or a prompt; tokens from [§9.4](#94-automation-token-input). The documentation
+1. **Argv and history.** No flag takes a protected value. Documents come from a file, standard
+   input or a prompt; marks only from a prompt or standard input ([§11.3](#113-cli-review) item
+   3); tokens from [§9.4](#94-automation-token-input). The documentation
    says that a shell here-document is saved in the shell's history like any command, so a document
    goes in a file.
 2. **Logs and diagnostics.** Debug output (`-v`) prints method, path, status, `instance` and
@@ -882,7 +902,17 @@ The review is served to any human `author`, not only the one who started the ing
    the operation `running` (`internal/api/runner.go:212-231`;
    [persistence and API §9.3](persistence-api.md#93-examples)). The client reports the mark as
    not applied, and offers `import takeover` once the lease lapses, or `import abandon`
-   ([compilation §3.6](compilation.md#36-operator-review) item 6). It reports a
+   ([compilation §3.6](compilation.md#36-operator-review) item 6). A run can also stop without
+   writing any event, for example when the serving process is killed: the claim stays `held`
+   and the operation `running` until the claim's absolute expiry
+   (`internal/staging/sweep.go:10-13`, `internal/staging/sweep.go:134-138`), and the stream
+   shows nothing. So while it follows, the client reads `GET /ingestions/{id}` again whenever
+   the `leaseUntil` it last read has passed by its own clock, plus a margin for clock difference
+   (`internal/api/ingestions.go:237`). A read that still shows `held` with `leaseUntil` passed
+   ends the watch as `resume-failed` does: the mark is reported as not applied, with the same
+   offers. A lapsed lease lets the run commit nothing more
+   (`internal/staging/claim.go:69`). A continuation's watch (`import continue`) ends the same two
+   ways. It reports a
    `mark-refused` event's `422` as a refusal by position, never as an accepted mark; a
    `mark-refused` problem without a position (`503 dependency-unavailable` or `500
    internal-error`, `internal/api/runner.go:328-338`) is shown by its code as a mark that was not
@@ -950,7 +980,7 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 | AUTH-01 | success | sign in, read machines | `Bronzeward-Epoch` recorded; list shown |
 | AUTH-02 | refusal | each fixture defect `expired`, `wrong-issuer`, `wrong-audience`, `over-lifetime`, `alg-none`, `groups-not-array` (`fixtures/oidc/issuer/issuer.go:42-46`) | `401`; one renewal attempt at most; the client's local reading labelled as such |
 | AUTH-03 | refusal | token without the needed group (`-without-group`) | `403 forbidden`; roles named |
-| AUTH-04 | refusal | automation token on approve | refused before sending, then `403` with `humanOnly` if forced |
+| AUTH-04 | refusal | automation token on approve | warned before sending that the route is human-only ([§9.4](#94-automation-token-input) item 3); the request sent is answered `403 forbidden` with `humanOnly`, shown as in [§9.6](#96-failure-cases) |
 | AUTH-05 | refusal | identity revoked | `403 identity-revoked`; stored credential cleared; no new sign-in loop |
 | AUTH-06 | success | token expires during `operation watch` | renewed; stream resumed with `Last-Event-ID` |
 | AUTH-07 | refusal | renewal returns a different subject with a write pending | write set aside; change shown |
@@ -963,11 +993,11 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 | AMB-03 | refusal | `500 internal-error` | repeat with the same key; replayed result |
 | AMB-04 | refusal | first attempt committed, its answer dropped; CLI exits with outcome unknown; operator repeats with the printed values and a changed file (existing record) | `422 idempotency-key-reused`; reported as: this send did nothing, the original outcome is still unknown; resource read |
 | AMB-10 | disconnect | first attempt dropped by the injector before the server receives it; CLI exits with outcome unknown; operator repeats with the printed values and a changed file (missing record) | the changed input executes as a new request; the client reports this send's answer as its own result, never as a replay or as the original outcome; the case records that no client check prevents it ([§8.4](#84-idempotency-and-ambiguous-responses) item 4) |
-| AMB-11 | refusal | as AMB-04 or AMB-10, with the printed `--if-match` omitted, or with another principal signed in | refused by the client before sending; nothing sent |
+| AMB-11 | refusal | as AMB-04 or AMB-10, with the printed `--if-match` omitted, with another principal signed in, or after a recovery entry changed the epoch from the printed `--expect-epoch` | refused by the client before sending; nothing sent |
 | AMB-13 | refusal | as AMB-04 or AMB-10, with `--if-match` given a freshly read ETag instead of the printed one | not detectable by the client ([§8.4](#84-idempotency-and-ambiguous-responses) item 4); with the first attempt's record: `422`, as AMB-04; without it: executes when the ETag matches the current resource, reported as in AMB-10, else `412`, reported as: this send did nothing, the original outcome is still unknown; resource read; the case records that no client check prevents it |
 | AMB-05 | restore | write dropped, then recovery entry before the repeat | epoch confirmed by a read before repeating; it differs, so not repeated; resource read; operator decides |
 | AMB-06 | refusal | keyed repeat after the digest key's recorded version became uncomputable | `422`; reported as unknown outcome; resource read; no new key sent |
-| AMB-07 | restore | write dropped; recovery entry injected after the confirming read and before the repeat (or the operator `--idempotency-key` path after a recovery entry), so the repeat meets an earlier-epoch record | `409 conflict` with `request` and `epoch`; no new key sent; resource read |
+| AMB-07 | restore | signed in as a human principal (a service principal's repeat is refused `401` instead, [§8.4](#84-idempotency-and-ambiguous-responses) item 3); write dropped; recovery entry injected after the confirming read and before the repeat, so the repeat meets an earlier-epoch record | `409 conflict` with `request` and `epoch`; no new key sent; resource read |
 | AMB-12 | restore | as AMB-07, but the first attempt's record is missing: a restore to a backup taken before it removed it, or the first attempt never committed (G21) | with A6 (D10 option (a)): refused naming the current epoch, nothing committed, resource read; with D10 option (b): the repeat executes afresh in the new epoch, the accepted residual, and the case records that no client check detects it |
 | AMB-08 | refusal | write answered `503 dependency-unavailable`, e.g. ingestion start with no provider configured | repeated at most 3 times with the same key; then reported not done |
 | AMB-09 | disconnect | write dropped after the body is sent; every repeat answered `503` | not reported as not done: outcome unknown, key and resource printed as in §8.4 item 4 |
@@ -986,6 +1016,7 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 | PROT-02 | refusal | `import review` with standard output redirected | refused, nothing written |
 | PROT-03 | refusal | mark that is not a path; mark compilation refuses (for example one that would rewrite text); compilation fails on a dependency | first: `422` with `position`; second: `202`, then, after the `marked` event of that `generation`, a `mark-refused` event with `422` and `position` and the ingestion paused again; third: `mark-refused` with `503`, shown by code as not applied; none reported as accepted, no path shown |
 | PROT-05 | refusal | mark accepted (`202`), then the run cannot decrypt the staged envelope | after the `marked` event, a `resume-failed` event with `dependency-unavailable`; the watch ends with the operation still `running`; the mark reported as not applied; `import takeover` offered once the lease lapses, and `import abandon`; no wait without end |
+| PROT-06 | disconnect | mark accepted (`202`), then the serving process is killed before the run writes any event; second case: the same during a continuation | the client reads the ingestion once its `leaseUntil` has passed; `held` with `leaseUntil` passed ends the watch with the operation still `running`; the mark (or continuation) reported as not applied; `import takeover` and `import abandon` offered; no wait until the claim's absolute expiry |
 | PROT-04 | disconnect | connection dropped during the review read | nothing persisted; review read again |
 | COMP-01 | refusal | server below the client's minimum API revision (after A2) | refused before any write, both versions named |
 | COMP-02 | success | response carrying a `Deprecation` header | warning shown once, naming the route |
@@ -996,21 +1027,22 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 
 ## 13. Alternatives and open choices
 
-Each choice below is open until the owner settles it. The recommendation is this
-draft's, not a decision.
+D3, D7, D8 and D9 are decided by the lead on 2026-10-21, under the owner's 2026-10-07
+delegation, as their rows state. D1, D2, D4, D5, D6 and D10 stay open until the owner settles
+them; their recommendation is this draft's, not a decision.
 
 | ID | Choice | Options | Recommendation and reason |
 | --- | --- | --- | --- |
 | D1 | Web hosting and origin | (a) static files on the API's origin via the TLS terminator; (b) another origin with CORS added to the server; (c) the server serves the files; (d) backend-for-frontend | (a): no server change, no anonymous preflight path, no cookie; (b) adds an unauthenticated `OPTIONS` path, (c) an unauthenticated file route, both against "every request authenticates"; (d) is excluded by the issue unless decided explicitly |
-| D2 | CLI token store without an OS credential store | (a) memory only, sign in per process; (b) file readable only by its owner, opt-in per context; (c) file by default | (a) by default with (b) as an explicit opt-in, conditional on rotating, client-bound refresh tokens ([§9.1](#91-identity-provider-requirements) item 3): a refresh token on disk is a long-lived credential; the choice is visible per context |
-| D3 | How a client learns issuer, client ID and audience | (a) by hand in the context; (b) a static client-configuration file served next to the web files; (c) an anonymous API route | (a) now and (b) once D1 is settled: the web client needs the file anyway, and the CLI can import it with `context add --from <url>` under TLS; (c) adds a second anonymous route |
+| D2 | CLI token store without an OS credential store | (a) memory only, sign in per process; (b) file readable only by its owner, opt-in per context; (c) file by default | (a) by default with (b) as an explicit opt-in, each conditional on rotating, client-bound refresh tokens ([§9.1](#91-identity-provider-requirements) item 3), since (a) also holds one in process memory: a refresh token on disk is a long-lived credential; the choice is visible per context |
+| D3 | How a client learns issuer, client ID and audience | (a) by hand in the context; (b) a static client-configuration file served next to the web files; (c) an anonymous API route | **Decided** by the lead, 2026-10-21, under the owner's 2026-10-07 delegation: (a) now, and (b) if D1 is decided (a). Reason: under same-origin hosting the web client needs the file anyway, and the CLI can import it with `context add --from <url>` under TLS; (c) adds a second anonymous route |
 | D4 | CLI sign-in without a local browser | (a) device-authorization grant; (b) loopback over a forwarded port; (c) both | (a) offered when the provider supports it, else (b): device flow suits SSH sessions but is phishable by a lookalike prompt, so the CLI shows the verification URI's host prominently |
 | D5 | Browser renewal | (a) rotating refresh token in memory; (b) silent frame renewal; (c) redirect at every expiry | (a), conditional on the provider rotating and client-binding refresh tokens ([§9.1](#91-identity-provider-requirements) item 3): (b) breaks under third-party cookie blocking; (c) interrupts work every 15 minutes |
 | D6 | Automation token in an environment variable | (a) not accepted, file or stdin only; (b) accepted as `BRONZEWARD_TOKEN` | (a): an environment variable is inherited by every child process and readable by the same user's processes; CI systems can write the token to a file first. (b) is the common CI convention; if chosen, the CLI never passes its environment to a child process |
-| D7 | Generated or handwritten clients | (a) both handwritten; (b) an OpenAPI description of v1 in the repository, checked against the route table by a test, generating request and response types for both clients, with handwritten behaviour (idempotency, ETags, epochs, renewal); (c) fully generated clients | (b): the types stay aligned with the server while the behaviour this document specifies stays explicit and tested by the shared cases; no OpenAPI description exists today (search of the repository) |
-| D8 | Conformance case format and home | (a) case records in the repository run by both clients' harnesses; (b) separate suites per client | (a), as [§12](#12-shared-conformance-cases) |
-| D9 | Idempotency key metadata across a CLI restart | (a) no local journal: on giving up, the CLI prints the key, route, principal, epoch and `If-Match`, and the operator repeats with them and the same input ([§8.4](#84-idempotency-and-ambiguous-responses) item 4); (b) a local journal of pending keys, owner-readable, replayed on the next run | (a): a journal would hold request context on disk and need its own expiry and epoch rules. Its cost is that the operator must supply the exact input again: where no record exists, a changed input executes (AMB-10), so an operator who cannot reconstruct it reconciles from the resource; (b) avoids that reconstruction only if the journal holds the request itself, documents included |
-| D10 | Epoch check on a human's repeated write (G21) | (a) server-enforced: mutations accept an expected-epoch request header and refuse, committing nothing, when it differs from the current epoch, extending to humans the check service tokens already get (API issue A6); (b) client-only check of [§8.4](#84-idempotency-and-ambiguous-responses) item 3 for humans, with the race between its confirming read and the repeat explicitly accepted | (a): it closes the race at the only place that knows the epoch at commit time, reuses an existing mechanism, and keeps the earlier-epoch `409` of AMB-07 if checked after the idempotency lookup; (b) needs no server change and the window is short, but a human's repeat that lands in it after a restore removed the record executes afresh, with no error to any party |
+| D7 | Generated or handwritten clients | (a) both handwritten; (b) an OpenAPI description of v1 in the repository, checked against the route table by a test, generating request and response types for both clients, with handwritten behaviour (idempotency, ETags, epochs, renewal); (c) fully generated clients | **Decided** by the lead, 2026-10-21, under the owner's 2026-10-07 delegation: (b), generating types only; all behaviour stays handwritten. Reason: the types stay aligned with the server while the behaviour this document specifies stays explicit and tested by the shared cases; no OpenAPI description exists today (search of the repository) |
+| D8 | Conformance case format and home | (a) case records in the repository run by both clients' harnesses; (b) separate suites per client | **Decided** by the lead, 2026-10-21, under the owner's 2026-10-07 delegation: (a), as [§12](#12-shared-conformance-cases) |
+| D9 | Idempotency key metadata across a CLI restart | (a) no local journal: on giving up, the CLI prints the key, route, principal, epoch and `If-Match`, and the operator repeats with them and the same input ([§8.4](#84-idempotency-and-ambiguous-responses) item 4); (b) a local journal of pending keys, owner-readable, replayed on the next run | **Decided** by the lead, 2026-10-21, under the owner's 2026-10-07 delegation: (a). Reason: a journal would hold request context on disk and need its own expiry and epoch rules. Its cost is that the operator must supply the exact input again: where no record exists, a changed input executes (AMB-10), so an operator who cannot reconstruct it reconciles from the resource; (b) avoids that reconstruction only if the journal holds the request itself, documents included |
+| D10 | Epoch check on a human's repeated write (G21) | (a) server-enforced: mutations accept an expected-epoch request header and refuse, committing nothing, when it differs from the current epoch, giving humans an epoch check like the one service tokens already get (API issue A6); (b) client-only check of [§8.4](#84-idempotency-and-ambiguous-responses) item 3 for humans, with the race between its confirming read and the repeat explicitly accepted | (a): it closes the race at the only place that knows the epoch at commit time, and keeps the earlier-epoch `409` of AMB-07 because, unlike the service check, which refuses before any record is answered (`internal/api/idempotency.go:47-49`), it runs only when the in-transaction lookup finds no record (`internal/api/tx.go:198-199`); (b) needs no server change and the window is short, but a human's repeat that lands in it after a restore removed the record, or whose first attempt never committed, executes afresh, with no error to any party |
 
 ## 14. Proposed API-gap issues and downstream refinement
 
@@ -1049,15 +1081,18 @@ and not a minted token. Closes G19; blocks the sign-in tickets' verification.
 
 **A6. An expected-epoch precondition on mutations** (only if D10 chooses (a)). Every mutating
 route accepts an optional request header naming the epoch the client expects, checked in the same
-transaction as the write and after the idempotency lookup, so an earlier-epoch record still
-answers its `409` (AMB-07); a mismatch is refused with a problem naming the current epoch and
-commits nothing. It extends to human principals the epoch check service tokens already get. Both
-clients send it on every write and every repeat, except the recovery entry, neither its first
-send nor a repeat: its own commit changes the epoch, a recovery start serves no read that would
-tell the client the current epoch before it, and
-[§8.4](#84-idempotency-and-ambiguous-responses) item 3 lets its repeat cross that change. The
-server's own-entry check still bounds that repeat, and its residual (a repeat with no record
-becoming a later start's entry) stays open. Closes G21.
+transaction as the write and only when the idempotency lookup finds no record
+(`internal/api/tx.go:198-199`), so an earlier-epoch record still answers its `409` (AMB-07); a
+mismatch is refused with a problem naming the current epoch and commits nothing. It gives human
+principals an epoch check like the one service tokens get, but placed differently: the service
+check refuses a stale token before any record is answered
+(`internal/api/idempotency.go:47-49`). Both clients send it on every write and every repeat,
+except the recovery entry, neither its first send nor a repeat: its first send is already
+refused by its own first step when another entry has committed since the process started
+(`internal/api/recovery_entries.go:133-135`), and its own commit changes the epoch, which
+[§8.4](#84-idempotency-and-ambiguous-responses) item 3 lets its repeat cross. The server's
+own-entry check still bounds that repeat, and its residual (a repeat with no record becoming a
+later start's entry) stays open. Closes G21.
 
 **A7. Principal display names.** A way to show a principal identifier as a person or service:
 either a read that maps an identifier to its kind and issuer and subject or service name, or that
@@ -1069,6 +1104,22 @@ G23; until then clients show shortened principal identifiers.
 [persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress) (G15). A
 documentation change for the landing of this specification or its own small change.
 
+**C2. Contract correction.** The `recovery-mode-active` row of
+[persistence and API §9.4](persistence-api.md#94-errors) says the body names the scope, but the
+process refusals of a recovery start, before and after its entry, carry no `scope` member
+(`internal/api/api.go:241-243`, `internal/api/recovery_exits.go:211-213`). The code is right: a
+process refusal concerns no scope. State that only the scope refusals name the scope (G22,
+[§8.5](#85-epoch-changes)). A documentation change, like C1.
+
+**L1. Later design issue: draft render and field provenance.** A render of a draft before
+publication, and provenance that says which fragment set a field, are compilation design
+changes outside this milestone (G5, G6). Proposed as one issue for a later milestone; no client
+ticket waits for it.
+
+**L2. Later design issue: serving observed configuration.** Whether and how drift content is
+served is a redaction design question outside this milestone (G7); until it is settled clients
+use a drift-adoption import with review.
+
 **Downstream refinement, proposed for the owner.** Each client ticket cites this document's
 sections as its contract, and its `status/needs-refinement` label is lifted only with the
 dependencies below in place:
@@ -1079,7 +1130,7 @@ dependencies below in place:
 | [#255](https://github.com/ginsys/bronzeward/issues/255) web sign-in, navigation, inventory | A1, A2, A3, A5, D1, D3, D5, D10 | 5, 7, 8, 9, 10, 12 |
 | [#256](https://github.com/ginsys/bronzeward/issues/256), [#257](https://github.com/ginsys/bronzeward/issues/257) import, drafts, publication | A4, D9 (CLI), D10 | 8.3, 8.4, 11 |
 | [#258](https://github.com/ginsys/bronzeward/issues/258), [#259](https://github.com/ginsys/bronzeward/issues/259) plans, approval, operations | A4 (plan filters), D9 (CLI), D10 | 8.4, 8.6 |
-| [#260](https://github.com/ginsys/bronzeward/issues/260), [#261](https://github.com/ginsys/bronzeward/issues/261) drift and recovery | A2 (settings, start mode), D10 | 8.5, 8.6 |
+| [#260](https://github.com/ginsys/bronzeward/issues/260), [#261](https://github.com/ginsys/bronzeward/issues/261) drift and recovery | A2 (settings, start mode), D9 (CLI), D10 | 8.4, 8.5, 8.6 |
 | [#262](https://github.com/ginsys/bronzeward/issues/262) packaging and documentation | D1, D3, D7 | 6, 7, 9.1, 10.1, 10.2 |
 | [#263](https://github.com/ginsys/bronzeward/issues/263) validation | A5, D8; a server-side COMMIT fault hook for REC-04 (b) | 11.5, 12 |
 
@@ -1106,6 +1157,9 @@ Assumptions this document relies on without a citation in this repository:
   ([talosctl-oidc research](../design/research/20261021-talosctl-oidc.md#pinned-sources-and-fixture)).
 - **S7.** A browser `fetch` follows a redirect by default and resends the method and body on a
   `307` or `308`; `redirect: 'error'` makes any redirect a network error instead (Fetch standard).
+- **S8.** `Cache-Control: no-store` does not keep every browser from restoring a page from its
+  back-forward cache; a page restored that way receives `pageshow` with `persisted` true (HTML
+  standard).
 
 Limits:
 
@@ -1115,5 +1169,5 @@ Limits:
 - Line references were read at `9b5804a` and move as the code changes.
 - It decides no hosting topology, frontend framework, CLI language, identity provider, browser
   support matrix or credential policy; the choices in [§13](#13-alternatives-and-open-choices)
-  remain open.
+  other than D3, D7, D8 and D9 remain open.
 - It does not change any role, human-only rule, route, schema or server setting.
