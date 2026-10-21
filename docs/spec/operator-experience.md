@@ -860,12 +860,12 @@ sending with "approval is for humans".
 | Withheld | review `configuration: null` | the notice, never an empty document | [W11](operator-experience-wireframes.md#w11-empty-withheld-error-and-offline-states) |
 | Unread or stale observation | `unread` causes, old `at` (`internal/api/observe.go:56-198`) | cause per field ("node unreachable", "provider access denied") | same, never green |
 | Refused | `application/problem+json` ([persistence and API §9.4](persistence-api.md#94-errors)) | title, code, what to do, `instance` | inline at the control, summary at the top |
-| Conflict | `412 precondition-failed`, `409 conflict` | stop and point at the newer state; a `409` naming a request still in progress under the same key instead waits and repeats with that key ([persistence and API §7.2](persistence-api.md#72-behavior)) | show both and offer reload; never auto-merge |
+| Conflict | `412 precondition-failed`, `409 conflict` | stop and point at the newer state; a `409` naming the ingestion still in progress under the same key instead waits and repeats with that key ([persistence and API §7.2](persistence-api.md#72-behavior)) | show both and offer reload; never auto-merge |
 | Ambiguous response | timeout or connection loss after sending | before exiting 3, offers to repeat the request it still holds in memory with the same key, subject to G13; after exit, prints the key and the resource to read | "Unknown whether this was saved"; [Repeat exactly] only while the page holds the request, for the same sign-in and epoch, subject to G13 |
 | Replayed | `Idempotent-Replayed: true` (`internal/api/idempotency.go:75-81`) | "Already done earlier; showing that result" | same |
 | Key reused | `422 idempotency-key-reused` | the request could not be matched to the earlier one under that key (it differed, or the recorded digest-key version can no longer be computed, [persistence and API §7.1](persistence-api.md#71-the-key)); nothing was done; retry under a new key | same |
 | Offline | no connection | retry reads with backoff; never queue writes | banner; actions disabled; last-read time shown |
-| Authentication refused | `401 unauthenticated`: not accepted, possibly but not necessarily because it expired | renew and repeat reads; resend the refused write itself, which authentication refused before routing, so nothing ran (`internal/api/api.go:259-263`); an earlier write whose outcome is unknown is repeated only as an ambiguous response, for the same principal and epoch and subject to G13 | same |
+| Authentication refused | `401 unauthenticated`: not accepted, possibly but not necessarily because it expired | renew and repeat reads; repeat a pending write with the same key only if the renewed token is the same principal and the epoch is unchanged, and subject to G13 | same |
 | Principal or epoch changed with a write pending | renewal returned another principal, a context switch, or a new `Bronzeward-Epoch` | the pending write is set aside: not repeated and not sent under a new key; the client reads the current resource and the operator decides afresh | same, with the pending write shown as "outcome unknown: it may already have been committed", and its repeat disabled |
 | Recovery mode | `Bronzeward-Recovery-Mode: true`, `409 recovery-mode-active` naming the scope | banner line on every command with the scope summary | persistent banner; an action is disabled only where its scope's state or the recovery-start process refuses it, with that reason ([§5.9](#59-recovery-after-a-restore)); the start mode is known only from such a refusal until G14 |
 | Epoch changed | new `Bronzeward-Epoch`, `400 cursor-invalid`, SSE `reset` | discard cached pages and cursors, say why | same |
@@ -876,7 +876,7 @@ Idempotency facts: a key is scoped to the authenticated principal, so another pr
 of it is a new request; the fingerprint covers the method, route template, path parameters,
 `If-Match` and the canonical body. The same key with the same fingerprint replays the stored
 answer in the current epoch, a different fingerprint is `422`, a claim still in progress under
-the key is `409` naming that request, a record from an earlier epoch is
+the key is `409` naming its ingestion (`internal/api/fragments.go:113-114`), a record from an earlier epoch is
 `409`, and after a restore that removed the record the same key executes afresh
 ([persistence and API §7.1](persistence-api.md#71-the-key), §7.2;
 `docs/spec/persistence-api.md:1243-1269`, `docs/spec/persistence-api.md:1320-1323`,
@@ -996,7 +996,7 @@ accepted limitation.
 | G11 | Recovery marks, releases and accountings have no list route; `GET /recovery` shows only their resulting scope states (`internal/api/recovery_exits.go:123-148`), the records themselves appear in machine timelines and acts | recovery console history | timeline |
 | G12 | Browser use: no statement of CORS, origin checks or hosting of a web client | the web interface at all | #253 |
 | G13 | A mutation takes no expected-epoch precondition: only `Idempotency-Key` and `If-Match` are checked (`internal/api/api.go:388-409`), and the epoch is reported only in an answer (`internal/api/api.go:318-319`). After a committed write's answer is lost and a restore removes its record, the same request with the same key executes afresh in the new epoch ([persistence and API §7.1](persistence-api.md#71-the-key)); a read before repeating leaves a race | repeating an ambiguous write ([§8](#8-states-every-view-must-handle), C5, [W11](operator-experience-wireframes.md#w11-empty-withheld-error-and-offline-states)) | none: the client compares only the epoch it last saw; #253 adds a server-enforced epoch check or explicitly accepts the residual risk |
-| G14 | No read of the process's start mode: `GET /recovery` serves epoch, recovery mode, entry, exit and scopes (`internal/api/recovery_exits.go:123-129`), the headers carry only `Bronzeward-Epoch` and `Bronzeward-Recovery-Mode` (`internal/api/api.go:318-324`), and a recovery start shows only in a `409 recovery-mode-active` refusal (`internal/api/recovery_exits.go:211-213`) | the recovery banner and `status` stating that plan creation, approval and unfreeze wait for a normal restart ([§5.9](#59-recovery-after-a-restore)) | the refusal itself; actions cannot be disabled beforehand |
+| G14 | No read of the process's start mode: `GET /recovery` serves epoch, recovery mode, entry, exit and scopes (`internal/api/recovery_exits.go:123-129`), the headers carry only `Bronzeward-Epoch` and `Bronzeward-Recovery-Mode` (`internal/api/api.go:318-324`), and a recovery start shows only in a `409 recovery-mode-active` refusal (`internal/api/recovery_exits.go:211-213`) | the recovery banner and `status` stating that plan creation, approval and unfreeze wait for a normal restart ([§5.9](#59-recovery-after-a-restore)) | the refusal itself; actions cannot be disabled beforehand, and a later normal restart is not visible |
 | G15 | No principal display name: bodies carry principal identifiers only (`internal/api/acts.go:19-30`, `internal/api/releases.go:53`), and no route maps one to a subject or name | showing who published, planned, approved or entered recovery | shortened principal identifiers |
 
 Not gaps, by design: no client dispatch or apply route
@@ -1077,11 +1077,11 @@ refinement until #253's contracts land.
 | Inventory and machine state (5.2, 2.4) | #254 | #255 | #253: G8, G9 | #263 T2 |
 | Protected import and review (5.3) | [#256](https://github.com/ginsys/bronzeward/issues/256) | [#257](https://github.com/ginsys/bronzeward/issues/257) | #253: review handling, G3, G10 | #263 T3 |
 | Fragments, profiles, assignments (5.4) | #256 | #257 | #253: ETags, G5 | #263 T4, T5 |
-| Publication, rendered review, provenance (5.5, 2.1, 2.2) | #256 | #257 | #253: G4, G6 | #263 T6, T7 |
-| Plan and approval (5.6) | [#258](https://github.com/ginsys/bronzeward/issues/258) | [#259](https://github.com/ginsys/bronzeward/issues/259) | #253: G9 | #263 T8 |
+| Publication, rendered review, provenance (5.5, 2.1, 2.2) | #256 | #257 | #253: G4, G6, G15 | #263 T6, T7 |
+| Plan and approval (5.6) | [#258](https://github.com/ginsys/bronzeward/issues/258) | [#259](https://github.com/ginsys/bronzeward/issues/259) | #253: G9, G15 | #263 T8 |
 | Operation tracking (5.7) | #258 | #259 | #253: events, epochs | #263 T9 |
 | Drift (5.8) | [#260](https://github.com/ginsys/bronzeward/issues/260) | [#261](https://github.com/ginsys/bronzeward/issues/261) | #253: G7 | #263 T10 |
-| Recovery (5.9) | #260 | #261 | #253: G11 | #263 T11 |
+| Recovery (5.9) | #260 | #261 | #253: G11, G14, G15 | #263 T11 |
 | Packaging and documentation | [#262](https://github.com/ginsys/bronzeward/issues/262) | #262 | #253: compatibility | #263 |
 
 Proposed changes: the web inventory ticket (#255) also carries the shared web shell (header,

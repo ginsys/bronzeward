@@ -33,7 +33,8 @@ the epoch, and actions are enabled and refused by the server. The recovery banne
 scope summary and, while the server runs as started for recovery, that plan creation, approval
 and unfreeze wait for its normal restart and that accepted publications complete only then;
 imports complete on it. Until [gap G14](operator-experience.md#11-api-gap-audit) the client learns
-that start mode only from a refusal, so that line appears after the first one. It never disables actions recovery mode allows
+that start mode only from a refusal, so the line reflects the last such refusal and cannot
+show a later normal restart. It never disables actions recovery mode allows
 ([§5.9](operator-experience.md#59-recovery-after-a-restore)): an action is disabled only on a
 scope whose state refuses it, with that reason.
 
@@ -280,9 +281,9 @@ What changed is not shown: Bronzeward can show it only by importing it (gap G7).
 ```text
 Recovery   (•) Recovery mode on since 10:42   epoch ep_r2l…   entry by ops-carl
 Restored: database backup taken 10:20; stopped at 10:31
-Server started for recovery (known from a refusal until G14): plan creation, approval and
-unfreeze wait for its normal restart; publications it accepts complete only after that restart.
-Imports complete on it.
+Server started for recovery (as of the last refusal; G14): plan creation, approval and
+unfreeze wait for its normal restart; publications it accepts complete only after that
+restart. Imports complete on it.
 +----------------+--------------------------+----------------------------------------------+
 | Machine        | Scope state              | Next action                                  |
 +----------------+--------------------------+----------------------------------------------+
