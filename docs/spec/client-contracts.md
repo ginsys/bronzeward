@@ -188,7 +188,7 @@ ETag (`internal/api/ingestions.go:152-153`).
 
 ## 4. API gap audit
 
-The twelve gaps the journeys found, checked against the code above, plus eight this audit adds.
+The thirteen gaps the journeys found, checked against the code above, plus eight this audit adds; G21 is the journeys' expected-epoch gap, numbered last because it was added to them last.
 Each has a disposition: an **API issue** proposed in [§14](#14-proposed-api-gap-issues-and-downstream-refinement),
 a **client composite** over existing routes, an **accepted limitation**, or a **decision**
 listed in [§13](#13-alternatives-and-open-choices). Every disposition, including "accepted", is
@@ -217,6 +217,7 @@ supported.
 | G18 | The settle floor and transport deadlines that bound recovery accounting are deployment settings no route serves | [execution and recovery §5.2](execution-recovery.md#52-accounting-a-lost-response); `examples/bronzeward.yaml:29-44` | folded into A2 (served as read-only installation settings) |
 | G19 | The fixture issuer mints tokens but offers no authorization, token, device or revocation endpoint, so no interactive sign-in can be tested against it | `fixtures/oidc/issuer/issuer.go:1-6` ("no login, no clients, no refresh"), `fixtures/oidc/issuer/issuer.go:110-123` (discovery and key set only), `fixtures/oidc/main.go:22-25` | validation-fixture issue A5 |
 | G20 | `503` answers carry no `Retry-After`, and the contract gives no retry guidance for `dependency-unavailable`, `transient-conflict` or `epoch-superseded` | search of `internal/` for `Retry-After`; [persistence and API §9.4](persistence-api.md#94-errors) | client rule in [§8.2](#82-errors); no API change proposed |
+| G21 | A mutation takes no expected-epoch precondition: only `Idempotency-Key` and `If-Match` are checked (`internal/api/api.go:388-409`), and the epoch is reported only in an answer (`internal/api/api.go:318-319`). After a committed write's answer is lost and a restore removes its record, the same request with the same key executes afresh in the new epoch ([persistence and API §7.1](persistence-api.md#71-the-key)); the read before repeating of [§8.4](#84-idempotency-and-ambiguous-responses) item 3 leaves a race | `internal/api/api.go:388-409`, `internal/api/api.go:318-319` | decision D10; API issue A6 if D10 chooses a server check |
 
 Not gaps, by design: no dispatch or apply route, no token administration route, no secret
 browser, and no WebSocket (polling and SSE only, [persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress)).
@@ -460,7 +461,10 @@ contract's, and this specification does not close it.
    header of the failed attempt is not enough, because a dropped connection shows none. If either
    differs, or the confirming read yields no epoch header (for example its own `503`), the write
    is set aside: not repeated, not sent under a new key; the client reads the resource and the
-   operator decides (journeys §8).
+   operator decides (journeys §8). The check is the client's alone: a recovery entry between the
+   confirming read and the repeat is not detected, and the repeat then executes afresh in the new
+   epoch (G21). Whether the server enforces the epoch or this residual risk is accepted is
+   decision D10.
 4. **After the process ends.** The CLI stores no request body, hash of a body, or key journal.
    When it gives up with the outcome unknown, it prints, on standard error, the key, method,
    route, context, principal (issuer and subject, or the token ID that stands for the service
@@ -914,6 +918,7 @@ draft's, not a decision.
 | D7 | Generated or handwritten clients | (a) both handwritten; (b) an OpenAPI description of v1 in the repository, checked against the route table by a test, generating request and response types for both clients, with handwritten behaviour (idempotency, ETags, epochs, renewal); (c) fully generated clients | (b): the types stay aligned with the server while the behaviour this document specifies stays explicit and tested by the shared cases; no OpenAPI description exists today (search of the repository) |
 | D8 | Conformance case format and home | (a) case records in the repository run by both clients' harnesses; (b) separate suites per client | (a), as [§12](#12-shared-conformance-cases) |
 | D9 | Idempotency key metadata across a CLI restart | (a) no local journal: on giving up, the CLI prints the key, route, principal and epoch, and the operator repeats with `--idempotency-key` ([§8.4](#84-idempotency-and-ambiguous-responses) item 4); (b) a local journal of pending keys, owner-readable, replayed on the next run | (a): a journal would hold request context on disk and need its own expiry and epoch rules; the printed record gives the operator the same repeat without it |
+| D10 | Epoch check on a repeated write (G21) | (a) server-enforced: mutations accept an expected-epoch request header and refuse, committing nothing, when it differs from the current epoch (API issue A6); (b) client-only check of [§8.4](#84-idempotency-and-ambiguous-responses) item 3, with the race between its confirming read and the repeat explicitly accepted | (a): it closes the race at the only place that knows the epoch at commit time, and a client that sends the header loses nothing; (b) needs no server change and the window is short, but a repeat that lands in it executes afresh after a restore with no error to any party |
 
 ## 14. Proposed API-gap issues and downstream refinement
 
@@ -948,6 +953,11 @@ provider to the fixtures, with authorization-code and PKCE, refresh with rotatio
 end-session and optionally device authorization, so client sign-in is tested against an endpoint
 and not a minted token. Closes G19; blocks the sign-in tickets' verification.
 
+**A6. An expected-epoch precondition on mutations** (only if D10 chooses (a)). Every mutating
+route accepts an optional request header naming the epoch the client expects, checked in the same
+transaction as the write; a mismatch is refused with a problem naming the current epoch and
+commits nothing. Both clients send it on every write and every repeat. Closes G21.
+
 **C1. Contract correction.** Add the `reset` event to the stream contract of
 [persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress) (G15). A
 documentation change for the landing of this specification or its own small change.
@@ -960,9 +970,9 @@ dependencies below in place:
 | --- | --- | --- |
 | [#254](https://github.com/ginsys/bronzeward/issues/254) CLI sign-in, contexts, inventory | A1, A2, A5, D2-D4, D6, D9 | 5, 6, 7, 8, 9, 12 |
 | [#255](https://github.com/ginsys/bronzeward/issues/255) web sign-in, navigation, inventory | A1, A2, A3, A5, D1, D3, D5 | 5, 7, 8, 9, 10, 12 |
-| [#256](https://github.com/ginsys/bronzeward/issues/256), [#257](https://github.com/ginsys/bronzeward/issues/257) import, drafts, publication | A4, D9 (CLI) | 8.3, 8.4, 11 |
-| [#258](https://github.com/ginsys/bronzeward/issues/258), [#259](https://github.com/ginsys/bronzeward/issues/259) plans, approval, operations | A4 (plan filters), D9 (CLI) | 8.4, 8.6 |
-| [#260](https://github.com/ginsys/bronzeward/issues/260), [#261](https://github.com/ginsys/bronzeward/issues/261) drift and recovery | A2 (settings) | 8.5, 8.6 |
+| [#256](https://github.com/ginsys/bronzeward/issues/256), [#257](https://github.com/ginsys/bronzeward/issues/257) import, drafts, publication | A4, D9 (CLI), D10 | 8.3, 8.4, 11 |
+| [#258](https://github.com/ginsys/bronzeward/issues/258), [#259](https://github.com/ginsys/bronzeward/issues/259) plans, approval, operations | A4 (plan filters), D9 (CLI), D10 | 8.4, 8.6 |
+| [#260](https://github.com/ginsys/bronzeward/issues/260), [#261](https://github.com/ginsys/bronzeward/issues/261) drift and recovery | A2 (settings), D10 | 8.5, 8.6 |
 | [#262](https://github.com/ginsys/bronzeward/issues/262) packaging and documentation | D1, D3, D7 | 6, 7, 9.1, 10.1, 10.2 |
 | [#263](https://github.com/ginsys/bronzeward/issues/263) validation | A5, D8 | 11.5, 12 |
 
