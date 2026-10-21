@@ -133,7 +133,7 @@ machine:
 | --- | --- | --- |
 | `!bwref registry/example-pass` in a source | A reference to a secret held by the provider at the declared version; the value is never stored in the database or served | [compilation §5](compilation.md#5-reference-grammar-and-declaration), design [§6.9](../design/Talos_Configuration_and_Machine_Management_Design.md#69-secret-references-and-validation-stages) |
 | `<redacted:REF@VERSION>` or `<redacted:REF@VERSION#N>` in a review | The rendered field came from that reference, or from the member at position N of a mapping reference; the value exists in the encrypted artifact | [compilation §8.3](compilation.md#83-redaction) |
-| `<redacted:schema>`, `<redacted:value>`, `<redacted:paired>`, `<redacted>` | Redacted because the pinned machinery marks the field secret, because the text is a copy of a resolved value, because it is a base leaf of a diff whose output holds a redaction token and the output does not show it unchanged at the same path, or because a path itself holds a value | [compilation §8.3](compilation.md#83-redaction) |
+| `<redacted:schema>`, `<redacted:value>`, `<redacted:paired>`, `<redacted>` | Redacted because the pinned machinery marks the field secret, because the text is a copy of a resolved value, because it is a base leaf of a diff whose output holds a redaction token and the output does not show it unchanged at the same path (or a base key the output does not show in the same mapping), or because a path itself holds a value | [compilation §8.3](compilation.md#83-redaction) |
 | `configuration: null` with `notice` | The review is withheld because no redacted form could be produced (`internal/api/releases.go:157-158`); nothing is known from it about the content | [compilation §8.3](compilation.md#83-redaction) |
 | `team: ""` | An empty value in the rendered review: no redaction token, and no provenance record names its path. It is empty in a source only if that source revision has been read and shows it | the document and the provenance list |
 
@@ -449,10 +449,10 @@ Continued (operation op_zcfw…5mcm) ... failed: precondition-failed. The draft 
 this import paused, so the import was not applied and its claim is abandoned.   # exit 4
 Import again against the draft's current revision:
   bronzewardctl import start --machine mch_b3c…aa2q --draft drf_2rmp…457a --review
-$ bronzewardctl import status ing_6fd…q2la
+$ bronzewardctl import status ing_8nw…c5ra                 # a different import, its runner gone
 State: held, lease lapsed 3m ago (owner generation 2). Encrypted staging.
 Take it over to resume, or abandon it:
-  bronzewardctl import takeover ing_6fd…q2la
+  bronzewardctl import takeover ing_8nw…c5ra
 ```
 
 A machine recorded from an existing cluster has no `Applied` yet, and an `apply-config` plan
@@ -476,9 +476,12 @@ rel_9vbn…c1ta (adoption) once it does.
 ```
 
 The approval screen is §5.6's, with the adoption baseline evidence in place of a diff
-(`internal/api/plans.go:138-168`). After the handover the machine may still be pending
-convergence: an adoption records the digest of the node's own bytes
-([§2.4](#24-desired-applied-and-observed)).
+(`internal/api/plans.go:138-168`). An adoption records the digest of the node's own bytes
+([§2.4](#24-desired-applied-and-observed)); the plan's evidence says whether the release's
+artifact differs from them (`pendingConvergence`, `internal/api/plans.go:313-314`). In this
+example it does not, so §5.6's later `apply-config` plan shows a diff from `rel_9vbn…c1ta`.
+Had it differed, that plan would show "Diff withheld": no redacted form exists of what the
+machine runs (`internal/api/plans.go:434-449`).
 
 ### 5.4 Editing fragments, profiles and assignments
 
@@ -718,9 +721,13 @@ once, and is refused on a scope that is not pre-restore unaccounted. The scope t
 `unresolved` if a restored operation still holds it, and otherwise `blocked` until it is marked
 (`internal/api/recovery_accountings.go:143-226`;
 [execution and recovery §7.3](execution-recovery.md#73-procedure), step 1). An `unresolved`
-scope is not accounted again: it waits for its operation's classification after the normal
-restart, or, for an operation with no attempt, a `recovery-admin` resolution, and is then
-re-marked ([§7.4](execution-recovery.md#74-scope-states-in-recovery)). Both accountings, this
+scope is not accounted again. A restored operation with no attempt is ended `cancelled` by the
+recovery start itself, sending nothing, once the scope is accounted; one with an attempt, as
+here, waits for the normal restart's executor to classify it. The scope is then re-marked
+(`internal/api/recovery_reads.go:78-108`;
+[§7.3](execution-recovery.md#73-procedure) step 5,
+[§7.4](execution-recovery.md#74-scope-states-in-recovery)). A `recovery-admin` resolution is
+the manual path for an operation with no attempt only. Both accountings, this
 one and the per-attempt accounting of a lost response outside a restore (`recovery account`,
 [§5.7](#57-operation-tracking)), are operator judgments with the same named settle refusals: a
 start that is not the first read after the deadline, an end before the settle floor, or a moved
@@ -988,7 +995,7 @@ the CLI and in the web interface. A walkthrough by an agent does not count as a 
 | --- | --- | --- | --- |
 | T1 Sign in, pick a context, say which roles you hold | any | correct context and roles stated | — |
 | T2 Find the drifted machine and state its desired, applied and observed release and observation time | viewer | all four correct | "Is it healthy?" Expected: not established |
-| T3 Import a machine with review, mark one unmarked secret, continue | author | import released; mark recorded | "Is the secret in the draft?" Expected: a reference only |
+| T3 Import a machine with review, mark one unmarked secret, continue, then hand it over: publish the import draft, plan and approve the adopt | author, publisher, approver | import released; mark recorded; `Applied` set by the adoption | "Is the secret in the draft?" Expected: a reference only |
 | T4 Change a node label for the workers and save it | author | draft entry saved | "Has any machine changed?" Expected: no |
 | T5 Recover from a concurrent edit | author | other change read, own change re-applied | — |
 | T6 Publish and find one machine's rendered configuration | publisher | review opened for that machine | "Are the sources the configuration?" Expected: no |
