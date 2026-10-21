@@ -480,6 +480,17 @@ contract's, and this specification does not close it.
    executes afresh only when a restore removed that record or the first attempt never committed
    (G21, AMB-12). A service principal's repeat is refused `401` by the server instead. Whether the server
    enforces the epoch for humans too, or this residual risk is accepted, is decision D10.
+   The recovery entry (`POST /recovery/entries`) is the one exception. Its own commit mints the
+   new epoch, and until the process has seen that commit it refuses every other request,
+   `GET /recovery` included, with `409 recovery-mode-active` (`internal/api/api.go:335-339`); after
+   a lost answer only a repeat under the same key completes the entry
+   (`internal/api/recovery_entries_test.go:257-295`). So the client repeats an entry whose outcome
+   is unknown under the same key, checking the principal but not the epoch, here and in item 4.
+   The server replays only this process's own entry and refuses any other entry record with a
+   `409 conflict` carrying `request` and `epoch` (`internal/api/recovery_entries.go:95-114`), so
+   the exception cannot replay an earlier entry or carry any other write across the epoch change.
+   The entry's answer is then handled as in [§8.5](#85-epoch-changes), without setting the entry
+   itself aside (REC-04).
 4. **After the process ends.** The CLI stores no request body, hash of a body, or key journal.
    When it gives up with the outcome unknown, it prints, on standard error, the key, method,
    route, context, principal (issuer and subject, or the token ID that stands for the service
@@ -487,13 +498,15 @@ contract's, and this specification does not close it.
    out. An ETag is not secret. An operator may then repeat with `--idempotency-key <key>
    --expect-epoch <epoch> --expect-principal <principal>`, plus `--if-match <etag>` where the
    route takes one, all as printed. The client refuses, sending nothing, when one of them is
-   missing, when the epoch differs as in item 3, or when its current principal is not the printed
-   one. It never substitutes an ETag it reads now: `If-Match` is part of the fingerprint
-   ([persistence and API §7.1](persistence-api.md#71-the-key)), so a new one turns the repeat into
-   another request. The operator supplies the input again, and the client cannot check that it is
-   the same. Where the first attempt's record exists, a changed input is refused `422` and does
-   nothing (AMB-04); where it does not, because the first attempt never committed or a restore
-   removed it, the changed input executes (AMB-10). An operator who cannot reconstruct the exact
+   missing, when the epoch differs as in item 3 (not for the recovery entry), or when its current
+   principal is not the printed one. It never substitutes an ETag it reads now: `If-Match` is part
+   of the fingerprint ([persistence and API §7.1](persistence-api.md#71-the-key)), so a new one
+   turns the repeat into another request. The operator supplies the input and the `If-Match` value
+   again, and the client keeps nothing to check either against. Where the first attempt's record
+   exists, a changed input or `If-Match` is refused `422` and does nothing (AMB-04); where it does
+   not, because the first attempt never committed or a restore removed it, the changed input
+   executes (AMB-10), and a changed `If-Match` executes when it matches the current resource and
+   is refused `412` otherwise (AMB-13). An operator who cannot reconstruct the exact
    input stops and reconciles from the resource instead of repeating. This is option (a) of
    decision D9, for the journeys' open question on key metadata across a restart; option (b), a
    local journal, would replay without that reconstruction. D9 stays open.
@@ -526,7 +539,8 @@ streams `reset` ([§2](#2-the-api-a-client-meets)).
 the context. On a change it:
 
 1. discards every cursor, cached page, ETag and stream position for the context;
-2. sets aside every pending write as in [§8.4](#84-idempotency-and-ambiguous-responses) item 3;
+2. sets aside every pending write as in [§8.4](#84-idempotency-and-ambiguous-responses) item 3,
+   except a recovery entry, which that item repeats under its key;
 3. tells the operator "The installation entered recovery mode or was restored; what was read
    before may no longer hold", and, while `Bronzeward-Recovery-Mode: true` is present, shows the
    recovery banner (journeys §8);
@@ -575,7 +589,12 @@ it polls every 500 ms (`internal/api/operations.go:210-213`).
    renewed token, with backoff from 1 s to 30 s on repeated failures.
 3. A `reset` event clears what the watch showed, prints that the installation was restored or
    entered recovery mode, and shows the replay from the start. The epoch change is handled as in
-   [§8.5](#85-epoch-changes).
+   [§8.5](#85-epoch-changes). The server sends `reset` only when a stream opens
+   (`internal/api/operations.go:248-249`); a stream that stays open across a recovery entry goes
+   on with event IDs carrying the new epoch (`internal/api/operations.go:262`). So the client
+   compares the epoch part of every event ID (before the `:`) with the stream's
+   `Bronzeward-Epoch`; on a difference it ends the stream, applies [§8.5](#85-epoch-changes), clears
+   what the watch showed and reopens the stream without `Last-Event-ID` (EVT-05).
 4. The browser cannot send `Authorization` with `EventSource`, so the web client reads the stream
    with `fetch` and a streamed response body, sending `Authorization`, `Accept` and
    `Last-Event-ID` itself (assumption S1). No token is ever put in a URL.
@@ -935,7 +954,8 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 | AMB-03 | refusal | `500 internal-error` | repeat with the same key; replayed result |
 | AMB-04 | refusal | first attempt committed, its answer dropped; CLI exits with outcome unknown; operator repeats with the printed values and a changed file (existing record) | `422 idempotency-key-reused`; reported as: this send did nothing, the original outcome is still unknown; resource read |
 | AMB-10 | disconnect | first attempt dropped by the injector before the server receives it; CLI exits with outcome unknown; operator repeats with the printed values and a changed file (missing record) | the changed input executes as a new request; the client reports this send's answer as its own result, never as a replay or as the original outcome; the case records that no client check prevents it ([§8.4](#84-idempotency-and-ambiguous-responses) item 4) |
-| AMB-11 | refusal | as AMB-04 or AMB-10, with the printed `--if-match` omitted or replaced by a freshly read ETag, or with another principal signed in | refused by the client before sending; nothing sent |
+| AMB-11 | refusal | as AMB-04 or AMB-10, with the printed `--if-match` omitted, or with another principal signed in | refused by the client before sending; nothing sent |
+| AMB-13 | refusal | as AMB-04 or AMB-10, with `--if-match` given a freshly read ETag instead of the printed one | not detectable by the client ([§8.4](#84-idempotency-and-ambiguous-responses) item 4); with the first attempt's record: `422`, as AMB-04; without it: executes when the ETag matches the current resource, else `412`; the case records that no client check prevents it |
 | AMB-05 | restore | write dropped, then recovery entry before the repeat | epoch confirmed by a read before repeating; it differs, so not repeated; resource read; operator decides |
 | AMB-06 | refusal | keyed repeat after the digest key's recorded version became uncomputable | `422`; reported as unknown outcome; resource read; no new key sent |
 | AMB-07 | restore | write dropped; recovery entry injected after the confirming read and before the repeat (or the operator `--idempotency-key` path after a recovery entry), so the repeat meets an earlier-epoch record | `409 conflict` with `request` and `epoch`; no new key sent; resource read |
@@ -948,9 +968,11 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 | EVT-02 | restore | `Last-Event-ID` from the earlier epoch | `reset`; display cleared and replayed |
 | EVT-03 | success | operation ends `unresolved` then `cancelled` by resolution | watch continues past `unresolved`; ends at `cancelled` |
 | EVT-04 | disconnect | stream cut after the operation's terminal state is written and before its last events are sent | the operation read shows the terminal state; the client drains the JSON event pages, shows the missing events once, then ends the watch |
+| EVT-05 | restore | recovery entry, on another process over the same database, while a stream stays open | the first event ID with another epoch ends the stream; §8.5 applied; display cleared; stream reopened without `Last-Event-ID` |
 | REC-01 | restore | recovery mode on | banner; refusals name scope or process restriction |
 | REC-02 | refusal | recovery entry sent to a normal start; then to a recovery start whose entry committed under another key | first: `409 conflict` without `epoch` or `request`, read as a normal start; second: `409 conflict` with `epoch`, read as a recovery start, never as a normal one |
 | REC-03 | refusal | plan creation on a recovery start after its entry; plan creation on a pre-restore unaccounted scope of a normal start | first: `409 recovery-mode-active` without `scope`, read as a recovery start; second: with `scope`, start mode unchanged |
+| REC-04 | disconnect | recovery entry commits and its answer is lost; the confirming read is refused `409 recovery-mode-active` | repeated under the same key with no epoch check; `201` with `Idempotent-Replayed: true` and the minted epoch; §8.5 applied without setting the entry aside |
 | PROT-01 | success | protected import, review, mark, continue | review only on a terminal (CLI; a pseudo-terminal in tests, its output matched in memory and never retained, [§11.5](#115-test-artifacts) item 1); no synthetic value in any artifact or storage |
 | PROT-02 | refusal | `import review` with standard output redirected | refused, nothing written |
 | PROT-03 | refusal | mark that is not a path; mark compilation refuses (for example one that would rewrite text); compilation fails on a dependency | first: `422` with `position`; second: `202`, then, after the `marked` event of that `generation`, a `mark-refused` event with `422` and `position` and the ingestion paused again; third: `mark-refused` with `503`, shown by code as not applied; none reported as accepted, no path shown |
@@ -1021,7 +1043,9 @@ route accepts an optional request header naming the epoch the client expects, ch
 transaction as the write and after the idempotency lookup, so an earlier-epoch record still
 answers its `409` (AMB-07); a mismatch is refused with a problem naming the current epoch and
 commits nothing. It extends to human principals the epoch check service tokens already get. Both
-clients send it on every write and every repeat. Closes G21.
+clients send it on every write and every repeat, except the recovery entry, whose own commit
+changes the epoch ([§8.4](#84-idempotency-and-ambiguous-responses) item 3); the entry keeps its
+own-record check. Closes G21.
 
 **A7. Principal display names.** A way to show a principal identifier as a person or service:
 either a read that maps an identifier to its kind and issuer and subject or service name, or that
