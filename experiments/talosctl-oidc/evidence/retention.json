@@ -1,0 +1,80 @@
+{
+  "retained_sha256": [
+    {
+      "path": "results.json",
+      "sha256": "ee674dd5c485b837a8c6918c87cd7adf03134553d3e9e4d141e59a61c283c98c",
+      "bytes": 1105
+    },
+    {
+      "path": "run1/audit.json",
+      "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "bytes": 3
+    },
+    {
+      "path": "run1/events.json",
+      "sha256": "55ec682e038cb3e2550493f0baef84b65abd37f231ac122f0759db27f1732ebb",
+      "bytes": 8059
+    },
+    {
+      "path": "run1/leak-scan.json",
+      "sha256": "3dbd0e9d4ffe2d49109583fb19edda8b04781d676eb62b91c7f0cda15c43656c",
+      "bytes": 363
+    },
+    {
+      "path": "run1/retention.json",
+      "sha256": "a78bd56ac60f2f7aa4def294728df53f29f0430415b1747899660636d3920b44",
+      "bytes": 3307
+    },
+    {
+      "path": "run2/audit.json",
+      "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "bytes": 3
+    },
+    {
+      "path": "run2/browser.json",
+      "sha256": "bee719865b8cce339a5913b7e830b6b894ef0a3d32012cb003278d2301aa8665",
+      "bytes": 547
+    },
+    {
+      "path": "run2/events.json",
+      "sha256": "0ebbfe587c1a9d2170b194099061476ec07dfb6b92e02cdd387e4c67470743ad",
+      "bytes": 8147
+    },
+    {
+      "path": "run2/leak-scan.json",
+      "sha256": "ef0938f92b97d5348cfc31b4c9a42900afef4005096a859d897d123cd5a969f1",
+      "bytes": 383
+    },
+    {
+      "path": "run2/retention.json",
+      "sha256": "0b5a6f00005f57eeaf469f089e4db31ab7a3424aa5dba4dc276250f32dbb9105",
+      "bytes": 3310
+    },
+    {
+      "path": "run3/audit.json",
+      "sha256": "507e6659629ce11f207baa67381ac44e40c3e9bbdd26f403ca6d0d7572e0cc39",
+      "bytes": 17312
+    },
+    {
+      "path": "run3/browser.json",
+      "sha256": "f5581ab9a5a85a2d36d240271bffd801b14060f060e55581dbe1fb5d757ef7ff",
+      "bytes": 3282
+    },
+    {
+      "path": "run3/events.json",
+      "sha256": "353ff7d2947de0840a5ae1ef7108bd7b69c29d1f9b546fb929a9798ec5c59f73",
+      "bytes": 39127
+    },
+    {
+      "path": "run3/leak-scan.json",
+      "sha256": "e48f883d6a0110ad50c6b9a27461d7e733a6d0786b80715080dc8910b9cd2ef9",
+      "bytes": 384
+    },
+    {
+      "path": "run3/retention.json",
+      "sha256": "758419e81557af2622b04998ee4ffe90aad80c3d28e17edcd1a6b8b463ec2a00",
+      "bytes": 10901
+    }
+  ],
+  "private_state": "All raw logs and usable synthetic credentials excluded; original runs retained separately for acceptance."
+}

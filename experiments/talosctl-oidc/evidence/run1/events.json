@@ -1,0 +1,268 @@
+[
+  {
+    "event": "command",
+    "utc": "2026-10-21T00:48:31.077525+00:00",
+    "name": "exchange-build-info",
+    "argv": [
+      "$GO",
+      "version",
+      "-m",
+      "$TOOLS/talosctl-oidc"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 0.003,
+    "stdout_sha256": "cc1865a223d279704112d7107bde34957d3093980ba5f81f7c44d264931cb815",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T00:48:31.081124+00:00",
+    "name": "probe-build-info",
+    "argv": [
+      "$GO",
+      "version",
+      "-m",
+      "$TOOLS/rpc"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 0.003,
+    "stdout_sha256": "8c6c57346e4bfc09e4e64228abe4c56a1c60a23d912af04ec16069d0f83d77a9",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "event": "pins",
+    "utc": "2026-10-21T00:48:31.600876+00:00",
+    "upstream": "d3cd122341537d3235bd5dfe7ced2171ec765227",
+    "talos_image": "ghcr.io/siderolabs/talos:v1.13.6@sha256:f2e2b7e5812b2b59c1acfe6af7516231aeeef79fb1ffff6b57ad987f8dd47a6e",
+    "keycloak_image": "quay.io/keycloak/keycloak:26.8.1@sha256:ed1cab21814c7d18ce8f0e11d5a1fa1c6923de12dd4c7625a18c5d34452a57a4",
+    "bronzeward_revision": "faae4085866bb3d15665e6b3cde175d392a6e96c",
+    "kubernetes": "1.36.2",
+    "go": "1.27.1",
+    "talosctl_sha256": "540c5e7cb0d3fa3a9b2e1c717ced212727b73bcaf0cf9cf9ba2472ec381041d4",
+    "rpc_sha256": "a0415ac7cb68afa545def04455db7586c1a0141ce735255f2a253d49065ced31",
+    "exchange_binary_sha256": "b0886e3db24c8ef5b54ef22ccc34a849bf15d87277e8e1090bf7c49e77af9cd8",
+    "fixture_hashes": {
+      "browser.py": "bc2a9ad39dec8479da3fecf33dd7e474d8b761e52bf9846540eae5167ad60d62",
+      "README.md": "85356f73ef211d36a0a948b4abf4d024e72fd71321b9d7d8f60dcccddcfcdfb9",
+      "rpc.go": "f428eb8a50f7ab543801befe81e47694f3b7f795621009d9f680e468fe2f6792",
+      "run.py": "55f6174e418ec727c7eaa7a2908825a21f5456e7e39fa95b5f7a2dbf794df778"
+    },
+    "cluster": "bw-oidc162-182170b1",
+    "subnet": "10.61.162.0/24"
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T00:48:39.771146+00:00",
+    "name": "keycloak-pull",
+    "argv": [
+      "docker",
+      "pull",
+      "quay.io/keycloak/keycloak:26.8.1@sha256:ed1cab21814c7d18ce8f0e11d5a1fa1c6923de12dd4c7625a18c5d34452a57a4"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 8.17,
+    "stdout_sha256": "416e47443b03570a76c48c1ba63db77b805b7cc7ae0e7df2eefeeaaa5f5a1671",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T00:50:23.522100+00:00",
+    "name": "talos-create",
+    "argv": [
+      "$TALOSCTL",
+      "cluster",
+      "create",
+      "docker",
+      "--name",
+      "bw-oidc162-182170b1",
+      "--state",
+      "$PRIVATE/cluster",
+      "--workers",
+      "0",
+      "--subnet",
+      "10.61.162.0/24",
+      "--image",
+      "ghcr.io/siderolabs/talos:v1.13.6@sha256:f2e2b7e5812b2b59c1acfe6af7516231aeeef79fb1ffff6b57ad987f8dd47a6e",
+      "--kubernetes-version",
+      "1.36.2",
+      "--host-ip",
+      "127.0.0.1",
+      "--cpus-controlplanes",
+      "2",
+      "--memory-controlplanes",
+      "2GiB",
+      "--talosconfig-destination",
+      "$PRIVATE/emergency.talosconfig"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 103.751,
+    "stdout_sha256": "7ed7414accb3e7379fb1251835da08db0d43e292bef6b1daf039e639db6f2584",
+    "stderr_sha256": "3a9e056f5b515e31bf77ca1370ffd60a9ecb2311784d87a6ba854a239e99fa6c"
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T00:50:23.539213+00:00",
+    "name": "emergency-baseline",
+    "argv": [
+      "$TOOLS/rpc",
+      "-config",
+      "$PRIVATE/emergency.talosconfig",
+      "-endpoint",
+      "127.0.0.1:41425",
+      "-mode",
+      "version"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 0.007,
+    "stdout_sha256": "3991952d94ee3cf3d32a149d500b4dc3cc45742eb337925d00f7695094ea3dac",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "event": "probe",
+    "utc": "2026-10-21T00:50:23.539458+00:00",
+    "name": "emergency-baseline",
+    "rows": [
+      {
+        "event": "credential",
+        "not_after": "2027-10-21T00:48:39Z",
+        "not_before": "2026-10-21T00:48:39Z",
+        "roles": [
+          "os:admin"
+        ],
+        "sha256": "bbc19fb3e483500e37539f0ce178d72ceb0e3989310dab2fad1a5fad5ca09ec0",
+        "utc": "2026-10-21T00:50:23.534619608Z"
+      },
+      {
+        "code": "OK",
+        "event": "version",
+        "tcp_dials": 1,
+        "utc": "2026-10-21T00:50:23.538127427Z",
+        "versions": [
+          "v1.13.6"
+        ]
+      }
+    ]
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T00:50:23.904073+00:00",
+    "name": "keycloak-start",
+    "argv": [
+      "docker",
+      "run",
+      "-d",
+      "--name",
+      "bw-oidc162-182170b1-idp",
+      "--memory",
+      "1g",
+      "--cpus",
+      "1.5",
+      "--env-file",
+      "$PRIVATE/keycloak.env",
+      "-p",
+      "127.0.0.1:53095:8080",
+      "--mount",
+      "type=bind,src=$PRIVATE/fixture-realm.json,dst=/opt/keycloak/data/import/fixture-realm.json,readonly",
+      "quay.io/keycloak/keycloak:26.8.1@sha256:ed1cab21814c7d18ce8f0e11d5a1fa1c6923de12dd4c7625a18c5d34452a57a4",
+      "start-dev",
+      "--import-realm",
+      "--hostname",
+      "http://127.0.0.1:53095"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 0.364,
+    "stdout_sha256": "a198ad162668d98acb1e998a6605c370aa3f6b64a876ced9ae7ef45f60af6378",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "event": "exchange-start",
+    "utc": "2026-10-21T00:50:56.043448+00:00",
+    "pid": 208618
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T00:51:41.045190+00:00",
+    "name": "login-reader",
+    "argv": [
+      "$TOOLS/talosctl-oidc",
+      "login",
+      "--provider",
+      "http://127.0.0.1:53095/realms/fixture",
+      "--client-id",
+      "talos-fixture",
+      "--server",
+      "https://127.0.0.1:37785",
+      "--server-ca",
+      "$PRIVATE/exchange-tls/ca.crt",
+      "--talosconfig",
+      "$PRIVATE/reader.talosconfig",
+      "--context-name",
+      "reader",
+      "--callback-port",
+      "58185",
+      "--browser-command",
+      "$BRONZEWARD/experiments/talosctl-oidc/browser.py"
+    ],
+    "rc": 124,
+    "expected": 0,
+    "seconds": 45.001,
+    "stdout_sha256": "33d892a26d12c55dab39fd51f1f32fe4ba6962bf010a985162a522e708d08299",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "event": "failure",
+    "utc": "2026-10-21T00:51:41.045415+00:00",
+    "result": "AssertionError",
+    "detail": "login-reader: exit 124, expected 0; private logs retained"
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T00:51:41.079636+00:00",
+    "name": "keycloak-logs",
+    "argv": [
+      "docker",
+      "logs",
+      "6e6bc6c75d38e07b1a829653863ea5d1c52681707e9fa5e66df99c759eace94a"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 0.016,
+    "stdout_sha256": "d0ab3c046be0c27786f080668647b267fd72a54a0a78483a0c4293dd7c3954bd",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "event": "command",
+    "utc": "2026-10-21T00:51:42.296079+00:00",
+    "name": "talos-destroy",
+    "argv": [
+      "$TALOSCTL",
+      "cluster",
+      "destroy",
+      "--name",
+      "bw-oidc162-182170b1",
+      "--state",
+      "$PRIVATE/cluster"
+    ],
+    "rc": 0,
+    "expected": 0,
+    "seconds": 0.914,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "f1aedc9b120eda6d3bceb03f7cac40000f89b6a6f3f95948e7a84db3355a313c"
+  },
+  {
+    "event": "cleanup",
+    "utc": "2026-10-21T00:51:42.328934+00:00",
+    "result": "owned resources removed; pre-existing container IDs preserved; fixture unchanged"
+  },
+  {
+    "event": "completed",
+    "utc": "2026-10-21T00:51:42.329161+00:00",
+    "result": "failed"
+  }
+]
