@@ -177,7 +177,7 @@ Renderer: contract v1.13 · machinery v1.13.6 · Kubernetes v1.34.1
 |   assignment  mch_b3c…        asr_5qp…d7fa  ▸   (+3 more, one per covered machine)        |
 +-------------------------------------------------------------------------------------------+
 | Rendered configuration per machine (4 covered)                                            |
-|   mch_b3c…aa2q   no-reboot   [Open rendered configuration]   [Plan apply] (publisher)    |
+|   mch_b3c…aa2q  validated: metal  [Open rendered configuration]  [Plan apply] (publisher) |
 |   mch_k2p…7xqa · mch_tqhc…35uq · mch_w4ze…n3fa   (same actions per row)                   |
 +-------------------------------------------------------------------------------------------+
 
@@ -319,7 +319,8 @@ Refused:    Not saved: validation-failed (rule unknown-reference). "registry/x" 
 Conflict:   Someone changed this draft (revision 7). Your text is not saved. [Show their change]
 Unknown:    Unknown whether this was saved: the connection dropped. [Repeat exactly]
             (same request, same key; offered only while this page holds the request,
-            for the same sign-in and epoch; otherwise [Show current state])
+            for the same sign-in and last-seen epoch, and only once #253 settles
+            gap G13; otherwise [Show current state])
 Set aside:  Your sign-in or the installation's epoch changed. A change with an unknown
             outcome is pending: it may already have been committed. It was not repeated,
             and repeating it stays disabled. [Show current state]
