@@ -77,6 +77,14 @@ class Fixture:
         self.no_proxy = build_opener(ProxyHandler({}))
         self.before_ids = set(self.docker("ps", "-aq").split())
         self.fixture_hashes = {p.name: digest(p) for p in Path(__file__).parent.iterdir() if p.is_file()}
+        self.checkout = Path(__file__).resolve().parents[2]
+        self.revision = self.git(self.checkout, "rev-parse", "HEAD")
+        assert not self.git(self.checkout, "status", "--porcelain=v1"), "fixture checkout must be clean"
+        assert self.git(args.source, "rev-parse", "HEAD") == SOURCE
+        assert not self.git(args.source, "status", "--porcelain=v1"), "upstream checkout must be clean"
+
+    def git(self, path, *args):
+        return subprocess.check_output(["git", "-C", str(path), *args], env=self.env, text=True).strip()
 
     def event(self, kind, **data):
         self.events.append({"event": kind, "utc": utc(), **data})
@@ -101,6 +109,14 @@ class Fixture:
                     os.killpg(proc.pid, signal.SIGKILL)
                     proc.wait(timeout=5)
                 rc = 124
+            except BaseException:
+                os.killpg(proc.pid, signal.SIGTERM)
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                    proc.wait(timeout=5)
+                raise
         self.event("command", name=name, argv=[str(a).replace(str(self.private), "$PRIVATE") for a in argv],
                    rc=rc, expected=expected, seconds=round(time.monotonic()-started, 3),
                    stdout_sha256=digest(out), stderr_sha256=digest(err))
@@ -162,6 +178,12 @@ class Fixture:
         return response
 
     def setup(self):
+        build_info = self.command("exchange-build-info", [self.args.go, "version", "-m", self.args.exchange])
+        assert "go1.27.1" in build_info and "vcs.revision=" + SOURCE in build_info
+        assert "vcs.modified=false" in build_info
+        probe_info = self.command("probe-build-info", [self.args.go, "version", "-m", self.args.rpc])
+        assert "go1.27.1" in probe_info and "github.com/siderolabs/talos/pkg/machinery\tv1.13.6" in probe_info
+        assert digest(self.args.talosctl) == "540c5e7cb0d3fa3a9b2e1c717ced212727b73bcaf0cf9cf9ba2472ec381041d4"
         subnet = ipaddress.ip_network("10.61.162.0/24")
         networks = json.loads(self.docker("network", "inspect", *self.docker("network", "ls", "-q").split()))
         for network in networks:
@@ -170,7 +192,7 @@ class Fixture:
                     other = ipaddress.ip_network(cfg["Subnet"])
                     assert other.version != subnet.version or not subnet.overlaps(other), "fixture subnet overlaps existing network"
         self.event("pins", upstream=SOURCE, talos_image=TALOS, keycloak_image=KEYCLOAK,
-                   kubernetes="1.36.2", talosctl_sha256=digest(self.args.talosctl),
+                   bronzeward_revision=self.revision, kubernetes="1.36.2", go="1.27.1", talosctl_sha256=digest(self.args.talosctl),
                    rpc_sha256=digest(self.args.rpc), exchange_binary_sha256=digest(self.args.exchange),
                    fixture_hashes=self.fixture_hashes, cluster=self.name, subnet=str(subnet))
         self.command("keycloak-pull", ["docker", "pull", KEYCLOAK], timeout=300)
@@ -399,24 +421,31 @@ class Fixture:
         assert not self.docker("ps", "-aq", "--filter", "name=" + self.name)
         assert not self.docker("network", "ls", "-q", "--filter", "name=" + self.name)
         assert self.fixture_hashes == {p.name: digest(p) for p in Path(__file__).parent.iterdir() if p.is_file()}
+        assert self.git(self.checkout, "rev-parse", "HEAD") == self.revision
+        assert not self.git(self.checkout, "status", "--porcelain=v1")
+        assert self.git(self.args.source, "rev-parse", "HEAD") == SOURCE
+        assert not self.git(self.args.source, "status", "--porcelain=v1")
         self.event("cleanup", result="owned resources removed; pre-existing container IDs preserved; fixture unchanged")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ["output", "talosctl", "rpc", "exchange", "tmp"]:
+    for name in ["output", "talosctl", "rpc", "exchange", "tmp", "go", "source"]:
         parser.add_argument("--" + name, required=True, type=Path)
     args = parser.parse_args()
     os.umask(0o077)
-    for binary in [args.talosctl, args.rpc, args.exchange]:
+    for binary in [args.talosctl, args.rpc, args.exchange, args.go]:
         assert binary.is_file() and os.access(binary, os.X_OK)
+    def interrupted(_signal, _frame):
+        raise SystemExit("fixture interrupted")
+    signal.signal(signal.SIGTERM, interrupted)
     fixture = Fixture(args)
     success = False
     try:
         fixture.setup()
         fixture.scenarios()
         success = True
-    except Exception as error:
+    except BaseException as error:
         fixture.event("failure", result=type(error).__name__, detail=str(error) if isinstance(error, AssertionError) else "See private logs; no exception payload published")
         raise
     finally:
