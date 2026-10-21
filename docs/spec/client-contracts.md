@@ -482,15 +482,23 @@ contract's, and this specification does not close it.
    enforces the epoch for humans too, or this residual risk is accepted, is decision D10.
    The recovery entry (`POST /recovery/entries`) is the one exception. Its own commit mints the
    new epoch, and until the process has seen that commit it refuses every other request,
-   `GET /recovery` included, with `409 recovery-mode-active` (`internal/api/api.go:335-339`); after
-   a lost answer only a repeat under the same key completes the entry
-   (`internal/api/recovery_entries_test.go:257-295`). So the client repeats an entry whose outcome
+   `GET /recovery` included, with `409 recovery-mode-active` (`internal/api/api.go:335-339`). When
+   only the `201` was lost, the process saw the commit before answering, so the confirming read
+   shows the new epoch and a same-key repeat replays the entry
+   (`internal/api/recovery_entries_test.go:236-252`). When the server lost its own COMMIT reply
+   and answered `500`, only a same-key repeat completes the entry
+   (`internal/api/recovery_entries_test.go:254-295`). So the client repeats an entry whose outcome
    is unknown under the same key, checking the principal but not the epoch, here and in item 4.
    The server replays only this process's own entry and refuses any other entry record with a
    `409 conflict` carrying `request` and `epoch` (`internal/api/recovery_entries.go:95-114`), so
    the exception cannot replay an earlier entry or carry any other write across the epoch change.
-   The entry's answer is then handled as in [§8.5](#85-epoch-changes), without setting the entry
-   itself aside (REC-04).
+   The entry itself can cross one: where its record is missing, because it never committed or a
+   restore removed it, and a later recovery start is waiting for its entry, the repeat becomes
+   that start's entry, with the earlier body's restored backups, stop time and reason, and is
+   reported as this send's own `201` (`internal/api/tx.go:198-202`,
+   `internal/api/recovery_entries.go:133-135`). That is accepted with the exception, like the
+   residuals of AMB-10 and AMB-12, and A6 does not close it. The entry's answer is then handled as in
+   [§8.5](#85-epoch-changes), without setting the entry itself aside (REC-04).
 4. **After the process ends.** The CLI stores no request body, hash of a body, or key journal.
    When it gives up with the outcome unknown, it prints, on standard error, the key, method,
    route, context, principal (issuer and subject, or the token ID that stands for the service
@@ -955,7 +963,7 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 | AMB-04 | refusal | first attempt committed, its answer dropped; CLI exits with outcome unknown; operator repeats with the printed values and a changed file (existing record) | `422 idempotency-key-reused`; reported as: this send did nothing, the original outcome is still unknown; resource read |
 | AMB-10 | disconnect | first attempt dropped by the injector before the server receives it; CLI exits with outcome unknown; operator repeats with the printed values and a changed file (missing record) | the changed input executes as a new request; the client reports this send's answer as its own result, never as a replay or as the original outcome; the case records that no client check prevents it ([§8.4](#84-idempotency-and-ambiguous-responses) item 4) |
 | AMB-11 | refusal | as AMB-04 or AMB-10, with the printed `--if-match` omitted, or with another principal signed in | refused by the client before sending; nothing sent |
-| AMB-13 | refusal | as AMB-04 or AMB-10, with `--if-match` given a freshly read ETag instead of the printed one | not detectable by the client ([§8.4](#84-idempotency-and-ambiguous-responses) item 4); with the first attempt's record: `422`, as AMB-04; without it: executes when the ETag matches the current resource, else `412`; the case records that no client check prevents it |
+| AMB-13 | refusal | as AMB-04 or AMB-10, with `--if-match` given a freshly read ETag instead of the printed one | not detectable by the client ([§8.4](#84-idempotency-and-ambiguous-responses) item 4); with the first attempt's record: `422`, as AMB-04; without it: executes when the ETag matches the current resource, reported as in AMB-10, else `412`, reported as: this send did nothing, the original outcome is still unknown; resource read; the case records that no client check prevents it |
 | AMB-05 | restore | write dropped, then recovery entry before the repeat | epoch confirmed by a read before repeating; it differs, so not repeated; resource read; operator decides |
 | AMB-06 | refusal | keyed repeat after the digest key's recorded version became uncomputable | `422`; reported as unknown outcome; resource read; no new key sent |
 | AMB-07 | restore | write dropped; recovery entry injected after the confirming read and before the repeat (or the operator `--idempotency-key` path after a recovery entry), so the repeat meets an earlier-epoch record | `409 conflict` with `request` and `epoch`; no new key sent; resource read |
@@ -972,7 +980,7 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 | REC-01 | restore | recovery mode on | banner; refusals name scope or process restriction |
 | REC-02 | refusal | recovery entry sent to a normal start; then to a recovery start whose entry committed under another key | first: `409 conflict` without `epoch` or `request`, read as a normal start; second: `409 conflict` with `epoch`, read as a recovery start, never as a normal one |
 | REC-03 | refusal | plan creation on a recovery start after its entry; plan creation on a pre-restore unaccounted scope of a normal start | first: `409 recovery-mode-active` without `scope`, read as a recovery start; second: with `scope`, start mode unchanged |
-| REC-04 | disconnect | recovery entry commits and its answer is lost; the confirming read is refused `409 recovery-mode-active` | repeated under the same key with no epoch check; `201` with `Idempotent-Replayed: true` and the minted epoch; §8.5 applied without setting the entry aside |
+| REC-04 | disconnect | recovery entry commits and its answer is lost: (a) the injector drops the `201`, and the confirming read answers `200` with the new epoch; (b) the server loses its own COMMIT reply and answers `500`, and the confirming read is refused `409 recovery-mode-active`; (b) needs a server-side fault hook, not the injector | both: repeated under the same key with no epoch check; `201` with `Idempotent-Replayed: true` and the minted epoch; §8.5 applied without setting the entry aside |
 | PROT-01 | success | protected import, review, mark, continue | review only on a terminal (CLI; a pseudo-terminal in tests, its output matched in memory and never retained, [§11.5](#115-test-artifacts) item 1); no synthetic value in any artifact or storage |
 | PROT-02 | refusal | `import review` with standard output redirected | refused, nothing written |
 | PROT-03 | refusal | mark that is not a path; mark compilation refuses (for example one that would rewrite text); compilation fails on a dependency | first: `422` with `position`; second: `202`, then, after the `marked` event of that `generation`, a `mark-refused` event with `422` and `position` and the ingestion paused again; third: `mark-refused` with `503`, shown by code as not applied; none reported as accepted, no path shown |
@@ -1043,9 +1051,10 @@ route accepts an optional request header naming the epoch the client expects, ch
 transaction as the write and after the idempotency lookup, so an earlier-epoch record still
 answers its `409` (AMB-07); a mismatch is refused with a problem naming the current epoch and
 commits nothing. It extends to human principals the epoch check service tokens already get. Both
-clients send it on every write and every repeat, except the recovery entry, whose own commit
-changes the epoch ([§8.4](#84-idempotency-and-ambiguous-responses) item 3); the entry keeps its
-own-record check. Closes G21.
+clients send it on every write and every repeat, except a repeat of the recovery entry, which
+[§8.4](#84-idempotency-and-ambiguous-responses) item 3 lets cross the entry's own epoch change;
+the server's own-entry check still bounds that repeat, and its residual (a repeat with no record
+becoming a later start's entry) stays open. Closes G21.
 
 **A7. Principal display names.** A way to show a principal identifier as a person or service:
 either a read that maps an identifier to its kind and issuer and subject or service name, or that
