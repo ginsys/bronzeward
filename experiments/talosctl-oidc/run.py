@@ -270,6 +270,7 @@ class Fixture:
                               "--talosconfig", path, "--context-name", name, "--callback-port", self.callback_port,
                               "--browser-command", Path(__file__).with_name("browser.py")], expected=expected, timeout=45,
                               extra_env={"BW_IDP_URL": self.idp_url, "BW_CALLBACK_URL": self.callback,
+                                         "BW_BROWSER_DIAGNOSTIC": str(self.private / f"browser-{len(self.events)}-{name}.json"),
                                          "BW_LOGIN_USER": user, "BW_LOGIN_PASSWORD": self.password})
         token_file = self.private / "config/talosctl-oidc/tokens.json"
         assert token_file.stat().st_mode & 0o777 == 0o600
