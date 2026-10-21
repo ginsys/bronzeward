@@ -11,14 +11,19 @@
       "bytes": 3
     },
     {
+      "path": "run1/diagnostics.json",
+      "sha256": "926bd0fff666142bcb06883dcc587cb2f4a94402ba7d1afa4a124e81e7b50def",
+      "bytes": 391
+    },
+    {
       "path": "run1/events.json",
       "sha256": "55ec682e038cb3e2550493f0baef84b65abd37f231ac122f0759db27f1732ebb",
       "bytes": 8059
     },
     {
       "path": "run1/leak-scan.json",
-      "sha256": "3dbd0e9d4ffe2d49109583fb19edda8b04781d676eb62b91c7f0cda15c43656c",
-      "bytes": 363
+      "sha256": "15fb6dbea125e364436f90e7deff181bb31a7f7a8c573f22fa56d574164741c8",
+      "bytes": 387
     },
     {
       "path": "run1/retention.json",
@@ -36,14 +41,19 @@
       "bytes": 547
     },
     {
+      "path": "run2/diagnostics.json",
+      "sha256": "5999dd9625340e12739293b554d2ba8387e35e6edc8a15cf047dfccf1ccbb8a5",
+      "bytes": 465
+    },
+    {
       "path": "run2/events.json",
       "sha256": "0ebbfe587c1a9d2170b194099061476ec07dfb6b92e02cdd387e4c67470743ad",
       "bytes": 8147
     },
     {
       "path": "run2/leak-scan.json",
-      "sha256": "ef0938f92b97d5348cfc31b4c9a42900afef4005096a859d897d123cd5a969f1",
-      "bytes": 383
+      "sha256": "e09d687730f70a0e00fe77d845ef4dde1bcdb774f6fb165b3daa891aadef341e",
+      "bytes": 407
     },
     {
       "path": "run2/retention.json",
@@ -61,14 +71,19 @@
       "bytes": 3282
     },
     {
+      "path": "run3/diagnostics.json",
+      "sha256": "ca3ca127412808bae73c44fa451b0c85907c0c2a3fde06661f674f6772316c25",
+      "bytes": 431
+    },
+    {
       "path": "run3/events.json",
       "sha256": "353ff7d2947de0840a5ae1ef7108bd7b69c29d1f9b546fb929a9798ec5c59f73",
       "bytes": 39127
     },
     {
       "path": "run3/leak-scan.json",
-      "sha256": "e48f883d6a0110ad50c6b9a27461d7e733a6d0786b80715080dc8910b9cd2ef9",
-      "bytes": 384
+      "sha256": "c916a93df23b4c15de4f167ac92b8dfe4ab6cd221b7694140dd08c14904392cf",
+      "bytes": 408
     },
     {
       "path": "run3/retention.json",

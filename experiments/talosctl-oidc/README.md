@@ -40,10 +40,14 @@ natural expiry, offline access and background watch mode were not exercised.
 ## Reproduction
 
 Prerequisites: Linux amd64, Docker, Python 3 with PyYAML, Go 1.27.1, and the
-Talos 1.13.6 CLI. Use a disposable host with capacity for one 2 GiB Talos node
+Talos 1.13.6 CLI. This profile ran as host UID 1000, matching the Keycloak
+container's UID so it can read the mode-0600 imported realm bind mount. Other
+UID mappings are not qualified. Use a disposable host with capacity for one 2 GiB Talos node
 and one 1 GiB Keycloak container. The fixed `10.61.162.0/24` subnet must not
 overlap an existing Docker network; the runner refuses an overlap. Container
-names are unique and published ports bind to loopback. Keycloak 26.8.1 is a
+names are unique. The fixture requests loopback host bindings and explicitly
+checks the Talos API port 50000 binding; it does not independently assert every
+Talos-published port. Keycloak 26.8.1 is a
 test dependency, not a selected Bronzeward identity provider.
 
 Clone `qjoly/talosctl-oidc` and check out
@@ -90,15 +94,64 @@ python3 -m unittest discover -s experiments/talosctl-oidc -p 'test_*.py' -v
 ```
 
 The chain checks login/renewal, explicit reader access and mint denial,
-unmatched groups, cached versus fresh credentials after group/account removal,
+unmatched groups, cached versus fresh login after group removal, cached exchange
+and refresh refusal after account disablement,
 new versus held connections after expiry, and admin reminting. It measures a
 306-second IdP outage across the upstream five-minute key cache, then a cold
 exchange restart and recovery. Pausing only its own Talos node checks timeout
 and recovery; emergency access cannot work while that same node is paused,
 but is checked during the independent IdP/exchange outages and after recovery.
 Issuance audit and a direct version RPC are compared separately.
+The cluster-generated emergency talosconfig is also the exchange's issuing
+credential. Its availability is independent of the IdP/exchange; separate
+credential custody, revocation and rotation are not demonstrated.
 
 Normal and failed runs attempt scoped teardown in `finally`. Retain the run
 directory until evidence is assessed. An interrupted process or failed teardown
 requires checking its recorded unique resource names before any cleanup; never
-use broad Docker cleanup. Keep fixture files unchanged during a chain.
+use broad Docker cleanup. Docker/Git helpers have no individual deadline, and
+a failed cleanup helper can prevent later cleanup steps. The recorded wrapper
+bounded the whole run at 1800 seconds; daemon-failure teardown is not qualified.
+Keep fixture files unchanged during a chain.
+
+## Exporting evidence
+
+Run the committed exporter without Python's `-O` option (its checks use
+assertions), with the exact paths supplied to the recorded fixture:
+
+```sh
+python3 experiments/talosctl-oidc/export.py run \
+  --run "$RUN" --output "$EXPORT" --talosctl "$TALOSCTL" --go "$GO" \
+  --tools "$TOOLS" --source "$SOURCE" --checkout "$BRONZEWARD"
+```
+
+`EXPORT` must be new. The exporter replaces those paths with stable placeholders,
+retains command-log hashes, omits raw audit errors, and projects only three
+allowlisted Keycloak diagnostic signatures. It checks known private-state
+passwords, tokens and keys, private-key markers and JWTs, and runs positive
+controls before writing anything. It is specific to this synthetic fixture;
+inspect its output before publication. It does not sanitize arbitrary logs.
+
+To rebuild the top-level results and SHA-256 manifest, supply each export and
+its retained wrapper receipt, in run order:
+
+```sh
+python3 experiments/talosctl-oidc/export.py bundle \
+  --checkout "$BRONZEWARD" --output "$BUNDLE" \
+  --run "$EXPORT1" "$RECEIPT1" --run "$EXPORT2" "$RECEIPT2" \
+  --run "$EXPORT3" "$RECEIPT3"
+```
+
+The wrapper receipt supplies `state` (`completed`), `head`, `head_unchanged`,
+`checkout_clean`, `seconds` and `rc`. The original receipts measure wall time
+around the runner, including setup/teardown, and record Git checks before and
+after it; those durations are not inferred from the first/last event timestamps.
+The bundler verifies the recorded revision and original fixture hashes using
+Git, checks outcome/exit agreement, and derives command counts from events.
+Zero skips means the runner has no skip path; later unexecuted cases after a
+failure remain explicit limitations. Raw receipts and private runs stay outside
+Git. The retained `results.json` carries their durations and exit statuses.
+
+The ordinary repository CI does not execute this disposable chain, standalone
+Go probe or Python checks. The recorded live run and separate local checks
+provide that evidence; passing ordinary CI alone does not qualify the fixture.

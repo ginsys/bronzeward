@@ -1,0 +1,16 @@
+{
+  "projection": "Fixed allowlisted Keycloak event fields; all other fields omitted",
+  "events": [
+    {
+      "path": "private/commands/077-keycloak-logs.out",
+      "bytes": 9876,
+      "sha256": "103e55115a6c0f8fb9d199c7e4cbfc5a3be841bfd14ad079342557e432cb85bc",
+      "line": 29,
+      "fields": {
+        "type": "REFRESH_TOKEN_ERROR",
+        "error": "invalid_token",
+        "reason": "User disabled"
+      }
+    }
+  ]
+}
