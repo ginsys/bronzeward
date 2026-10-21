@@ -147,6 +147,7 @@ The September review then narrowed first delivery to existing-cluster configurat
 | Secret authoring | Automatic Talos bundle extraction; operator marking for other secrets; whole-value structural references | Decided; specified for the PoC, pending owner review ([compilation contract §16](../spec/compilation.md#16-choices-for-owner-review)): an explicit `!bwref` tag resolved before composition ([§5–§6](../spec/compilation.md#5-reference-grammar-and-declaration)) |
 | Approval | Trusted controller enforces immutable approved plans; PoC: one approval per plan, adoption baselines included; self-approval allowed and recorded; revocation by any `approver` or `recovery-admin`, effective against every attempt not yet recorded (§13.7) | Boundary decided; decided for the PoC |
 | Identity and roles | PoC: OIDC for humans, with roles from identity-provider group claims; hashed Bronzeward-issued bearer tokens for automation, issued with a server-side tool; `viewer`, `author`, `publisher`, `approver` and `recovery-admin`, granted installation-wide; automation never `approver` or `recovery-admin` (§13.7) | Decided for the PoC |
+| Direct operator Talos access | Operators keep their own talosconfigs; an SSO certificate companion is deferred and is never application authentication (§13.8) | Decided |
 | Recovery | Evidence-based interrupted-operation handling; explicit recovery mode after restoration | Decided |
 | Retention and alerts | PoC removes no provider object (and, derived, no release, artifact or source record); recovery window is the operator's backup retention; persistent-unknown alert after 15 minutes; manual unseal (§7.8) | Decided for the PoC |
 | First milestone | Configuration control on an existing cluster | Decided |
@@ -928,7 +929,7 @@ OpenBao policies constrain paths and operations but do not know which database p
 
 These are component identities inside the controller. The application roles that humans and automation hold are §13.7's and are distinct from them: the `publisher` application role grants no provider access of its own.
 
-The [Talos OIDC credential investigation](research/20261021-talosctl-oidc.md) evaluates a separate operator-access companion and native issuance using disposable Talos/IdP fixtures. Cached tokens survived group removal and account disablement, a held connection worked after certificate expiry, and an administrator minted a longer-lived certificate. The research recommends deferring adoption; it does not change the provider-held executor contract or application authentication. Separate operator-access and service-credential decisions remain tracked, with no dependency imposed on the CLI/web workflows.
+The [Talos OIDC credential investigation](research/20261021-talosctl-oidc.md) evaluates a separate operator-access companion and native issuance using disposable Talos/IdP fixtures. Cached tokens survived group removal and account disablement, a held connection worked after certificate expiry, and an administrator minted a longer-lived certificate. The research recommends deferring adoption; it does not change the provider-held executor contract or application authentication. The operator-access decision is recorded in §13.8; the service-credential decision remains tracked separately, with no dependency imposed on the CLI/web workflows.
 
 ### 13.3 Enrolment security
 
@@ -1081,6 +1082,14 @@ Items labelled *derived* are the recorder's inferences, not the owner's decision
   - Which role may ignore a known drift difference for a bounded time (§12.4) is an owner decision pending on #14, carried into the execution and recovery contracts (#19).
   - The two self-approval edge cases in item 3: persistence and API contracts (#18) and execution and recovery contracts (#19).
 - Settled since, on [#20](https://github.com/ginsys/bronzeward/issues/20): the privileged ingestion that feeds an adoption (§9.1, Appendix B AdoptCluster) is a human `author`'s, and automation does not ingest ([persistence and API contracts](../spec/persistence-api.md) choice §17.22). Its mechanics belong to the [secret ingress and compilation contracts](https://github.com/ginsys/bronzeward/issues/17). For the PoC, losing a role, rather than an identity revocation, does not invalidate approvals given under it; the operator revokes the approval or the identity instead (persistence and API contracts choice §17.23).
+
+### 13.8 Direct operator Talos access
+
+**Decision** (owner, 21 October 2026, [direct Talos SSO decision](https://github.com/ginsys/bronzeward/issues/265)): Bronzeward neither recommends nor supports an SSO companion that issues Talos client certificates to operators. Operators keep their existing talosconfigs; their distribution, custody and rotation stay operational duties outside Bronzeward. The independent emergency credentials of §13.5 are unchanged. Direct Talos access of any kind is outside application approval and is reconciled as drift (§12.7).
+
+Alternatives considered, using the [Talos OIDC investigation](research/20261021-talosctl-oidc.md): a reader-first companion with an operator-run identity provider, and the same companion also issuing `os:admin`. Both are deferred, not rejected. A cached token kept exchanging after group removal and account disablement, an issued certificate kept working, and a held connection served after its certificate expired. An administrator certificate could mint a longer-lived one, so the issuer's lifetime does not bound administrative authority. The exchange audit records issuance, not the direct commands that follow. Its token validator does not meet [persistence and API §10.1](../spec/persistence-api.md#101-humans-oidc), so it is never Bronzeward application authentication.
+
+Reconsideration needs a stated direct-access use case the current model cannot serve, and must define a revocation bound with compensating controls, reader/administrator separation, workstation custody, audit attribution, issuer availability, and emergency access independent of the issuer. Certificate expiry alone is never treated as ending a connection or an administrator's authority. Unqualified in the investigation: account deletion, signing-key rotation, production TLS, high availability, other identity providers, natural token refresh.
 
 ## 14. Reliability, high availability and disaster recovery
 
