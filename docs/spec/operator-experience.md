@@ -207,7 +207,7 @@ timeline:
 | Fields | Sentence |
 | --- | --- |
 | no open drift, observed.release = applied.release | "The configuration read at `<observed.at>` matched what Bronzeward last verified (`<applied.release>`, by `<applied.source>`)." |
-| as above, applied.source = adoption | adds "Adopted from the node's own bytes; the release's compiled configuration may differ. Only an `apply-config` plan's diff shows whether it does." |
+| as above, applied.source = adoption | adds "Adopted from the node's own bytes; the release's compiled configuration may differ. The adopt plan's `pendingConvergence` evidence shows whether it does; a later `apply-config` plan withholds its diff when it does." |
 | desired ≠ applied.release, no open drift | adds "Pending convergence: `<desired>` is selected, not applied." |
 | openDrift not null | "Drifted since `<at of the openDrift.observation observation>`: a read differed from what Bronzeward last verified (`<applied.release>`)." If observed.release = desired, adds "It equals the selected release; that does not close the drift." |
 | no open drift, observed.release null | "The configuration read at `<observed.at>` matched neither `Applied` nor `Desired`, and no drift is open; an operation may hold the machine. See the timeline." |
@@ -484,12 +484,11 @@ The approval screen is §5.6's, with the adoption baseline evidence in place of 
 ([§2.4](#24-desired-applied-and-observed)); the plan's evidence says whether the release's
 artifact differs from them (`pendingConvergence`, `internal/api/plans.go:315`). In this
 example the adopt plan reports `pendingConvergence: false`: the compiled artifact is
-byte-identical to what the node runs. §5.6's later `apply-config` plan is therefore not withheld
-for that reason and, since both releases have a redacted form, shows a diff from
-`rel_9vbn…c1ta`. Equal values alone would not establish this; the adopt plan's
-`pendingConvergence` does.
-Had it differed, that plan would show "Diff withheld": no redacted form exists of what the
-machine runs (`internal/api/plans.go:434-449`).
+byte-identical to what the node runs, which equal values alone would not establish. §5.6's later
+`apply-config` plan shows a diff from `rel_9vbn…c1ta`; in this example none of the plan's
+withholding cases applies (`internal/api/plans.go:447-454`).
+Had the artifact differed, that plan would show "Diff withheld": no redacted form exists of what
+the machine runs (`internal/api/plans.go:434-449`).
 
 ### 5.4 Editing fragments, profiles and assignments
 
