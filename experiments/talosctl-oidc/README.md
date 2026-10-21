@@ -33,7 +33,8 @@ go -C "$SOURCE" build -mod=readonly -trimpath -p=2 -o "$TOOLS/talosctl-oidc" .
 go build -mod=readonly -trimpath -p=2 -o "$TOOLS/rpc" experiments/talosctl-oidc/rpc.go
 python3 experiments/talosctl-oidc/run.py \
   --output "$RUN" --tmp "$GOTMPDIR" --talosctl "$TALOSCTL" \
-  --rpc "$TOOLS/rpc" --exchange "$TOOLS/talosctl-oidc"
+  --rpc "$TOOLS/rpc" --exchange "$TOOLS/talosctl-oidc" \
+  --source "$SOURCE" --go "$GO"
 ```
 
 `RUN` must not exist. The runner creates private mode-0700 state beneath it;
@@ -43,6 +44,10 @@ logs stay there. Never commit that directory. The separate `events.json` and
 and a leak scan before retention. Commands retain expected and actual exits,
 elapsed time and hashes of their private output. A failure stops the chain and
 preserves its evidence; run again only in a fresh directory.
+`GO` names the Go 1.27.1 executable. The runner checks the upstream commit and
+cleanliness, built exchange revision/toolchain, probe machinery version and
+Talos CLI checksum before starting services. It records the Bronzeward revision
+and verifies both checkouts and fixture hashes remain unchanged after teardown.
 
 The browser helper completes the upstream CLI's authorization-code/PKCE flow
 with synthetic users against the fixture's loopback origins. HOME, XDG config
