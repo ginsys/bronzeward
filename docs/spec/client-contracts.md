@@ -848,7 +848,13 @@ The review is served to any human `author`, not only the one who started the ing
    paused. After a mark's `202` (`{operation, ingestion, generation}`,
    `internal/api/marks.go:105-106`) the client therefore follows the operation's events
    ([§8.6](#86-event-resumption)) after the `marked` event whose `generation` equals the `202`'s
-   (`internal/api/marks.go:102`), until the ingestion pauses again or ends. It reports a
+   (`internal/api/marks.go:102`), until the ingestion pauses again, ends, or the run records
+   `resume-failed`. That event (`dependency-unavailable`) ends the watch without ending the
+   operation: the staged envelope could not be decrypted, the claim stays `held` to its lease and
+   the operation `running` (`internal/api/runner.go:212-231`;
+   [persistence and API §9.3](persistence-api.md#93-examples)). The client reports the mark as
+   not applied, and offers `import takeover` once the lease lapses, or `import abandon`
+   ([compilation §3.6](compilation.md#36-operator-review) item 6). It reports a
    `mark-refused` event's `422` as a refusal by position, never as an accepted mark; a
    `mark-refused` problem without a position (`503 dependency-unavailable` or `500
    internal-error`, `internal/api/runner.go:328-338`) is shown by its code as a mark that was not
@@ -948,6 +954,7 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 | PROT-01 | success | protected import, review, mark, continue | review only on a terminal (CLI; a pseudo-terminal in tests, its output matched in memory and never retained, [§11.5](#115-test-artifacts) item 1); no synthetic value in any artifact or storage |
 | PROT-02 | refusal | `import review` with standard output redirected | refused, nothing written |
 | PROT-03 | refusal | mark that is not a path; mark compilation refuses (for example one that would rewrite text); compilation fails on a dependency | first: `422` with `position`; second: `202`, then, after the `marked` event of that `generation`, a `mark-refused` event with `422` and `position` and the ingestion paused again; third: `mark-refused` with `503`, shown by code as not applied; none reported as accepted, no path shown |
+| PROT-05 | refusal | mark accepted (`202`), then the run cannot decrypt the staged envelope | after the `marked` event, a `resume-failed` event with `dependency-unavailable`; the watch ends with the operation still `running`; the mark reported as not applied; `import takeover` offered once the lease lapses, and `import abandon`; no wait without end |
 | PROT-04 | disconnect | connection dropped during the review read | nothing persisted; review read again |
 | COMP-01 | refusal | server below the client's minimum API revision (after A2) | refused before any write, both versions named |
 | COMP-02 | success | response carrying a `Deprecation` header | warning shown once, naming the route |
