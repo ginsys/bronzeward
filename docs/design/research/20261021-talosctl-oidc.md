@@ -194,4 +194,3 @@ checks with positive controls: four distinct known values in each failed run,
 synthetic credentials and is not publishable. See each run's `leak-scan.json`
 for scope and limits; this is evidence hygiene, not proof that upstream never
 logs secrets under other configurations.
-
