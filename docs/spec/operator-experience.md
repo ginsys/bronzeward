@@ -1,6 +1,6 @@
 # Operator experience: bronzewardctl and web UI journeys
 
-**Status: proposed; journey direction assessed, not accepted for implementation.** This
+**Status: proposed, not accepted for implementation.** This
 document proposes the operator journeys for a
 `bronzewardctl` command-line client and a web interface over the existing management API, for
 [Design the operator journeys for bronzewardctl and the web UI](https://github.com/ginsys/bronzeward/issues/252)
@@ -9,12 +9,10 @@ It specifies no client implementation, frontend framework, login flow, hosting m
 distribution target or credential policy, and it adds no API route. The linked
 [wireframes](operator-experience-wireframes.md) are part of the proposal.
 
-**Assessment so far.** The campaign's coordinating design assessment found the proposal
-suitable for specification review. It accepted the directions C1, C2, C3 and C5 of
-[§12](#12-alternatives-and-recommendations) and left C4, the protected review in the CLI, a
-candidate that #253 must qualify. It found no unresolved correction or owner choice. It is not
-the owner's acceptance, an independent accounted review, a usability or accessibility
-measurement, or implementation readiness: #253's contracts and the tasks of
+**Not yet accepted.** The recommendations C1-C5 of
+[§12](#12-alternatives-and-recommendations) are proposals; C4, the protected review in the CLI,
+is a candidate that #253 must qualify. This document is not the owner's acceptance, a usability
+or accessibility measurement, or implementation readiness: #253's contracts and the tasks of
 [§13](#13-usability-and-accessibility-acceptance) remain before implementation.
 
 **Facts and proposals are kept apart.** A statement about existing behaviour cites the contract
@@ -978,11 +976,11 @@ general secret browser (milestone exclusion).
 
 | ID | Choice | Options | Recommendation and reason | Status |
 | --- | --- | --- | --- | --- |
-| C1 | CLI vocabulary | noun-verb (`plan create`); verb-noun (`create plan`); workflow verbs only | Noun-verb plus `publish` and `approve` as top-level verbs: matches the API resources and `kubectl`/`talosctl`, keeps help discoverable, and keeps the three distinct steps as distinct words | accepted direction in the coordinating assessment; usability unmeasured |
-| C2 | Web navigation | resource tabs only; a single change wizard; machine hub plus a staged change pipeline | Hub plus pipeline: operators start from a machine's state, while publish, plan and approve stay separate pages, buttons and roles, which a wizard would blur | accepted direction in the coordinating assessment; usability unmeasured |
-| C3 | Editing | native YAML editor; forms over the Talos schema; both | Native YAML for documents and structured controls for metadata only: the design makes native Talos configuration canonical ([design §6.1](../design/Talos_Configuration_and_Machine_Management_Design.md#61-canonical-model)), and a schema form would be a second model to keep in step with every Talos version | accepted direction in the coordinating assessment; usability unmeasured |
+| C1 | CLI vocabulary | noun-verb (`plan create`); verb-noun (`create plan`); workflow verbs only | Noun-verb plus `publish` and `approve` as top-level verbs: matches the API resources and `kubectl`/`talosctl`, keeps help discoverable, and keeps the three distinct steps as distinct words | recommended; usability unmeasured |
+| C2 | Web navigation | resource tabs only; a single change wizard; machine hub plus a staged change pipeline | Hub plus pipeline: operators start from a machine's state, while publish, plan and approve stay separate pages, buttons and roles, which a wizard would blur | recommended; usability unmeasured |
+| C3 | Editing | native YAML editor; forms over the Talos schema; both | Native YAML for documents and structured controls for metadata only: the design makes native Talos configuration canonical ([design §6.1](../design/Talos_Configuration_and_Machine_Management_Design.md#61-canonical-model)), and a schema form would be a second model to keep in step with every Talos version | recommended; usability unmeasured |
 | C4 | Protected review in the CLI | terminal pager in process; temporary file in `$EDITOR`; web-only review | Terminal pager in process; non-terminal output refused with no override; no JSON, YAML, save or export form; marks by prompt or stdin, never a client-read file. An editor leaves swap and backup files the client cannot control ([compilation §3.6](compilation.md#36-operator-review)); web-only would make the CLI unable to finish an import. It limits client-controlled persistence only and does not prevent terminal or host capture ([§9](#9-secret-handling-in-the-clients)) | candidate, to be qualified in #253; no standard-output export form in any case |
-| C5 | Concurrency and retries | last-seen ETag; re-read then write; journal of requests | Last-seen ETag per draft, stop on 412; repeat an ambiguous write with its key only on request, for the exact request held in memory, the same principal and the same epoch ([§8](#8-states-every-view-must-handle)); no body journal: re-reading before writing is a silent overwrite, and a journal would store documents and marks | accepted direction in the coordinating assessment, within the limits of §8; any persistence across restarts is #253's |
+| C5 | Concurrency and retries | last-seen ETag; re-read then write; journal of requests | Last-seen ETag per draft, stop on 412; repeat an ambiguous write with its key only on request, for the exact request held in memory, the same principal and the same epoch ([§8](#8-states-every-view-must-handle)); no body journal: re-reading before writing is a silent overwrite, and a journal would store documents and marks | recommended, within the limits of §8; any persistence across restarts is #253's |
 
 ## 13. Usability and accessibility acceptance
 

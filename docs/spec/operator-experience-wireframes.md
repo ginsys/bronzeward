@@ -1,6 +1,6 @@
 # Operator experience: web wireframes
 
-**Status: proposed; journey direction assessed, not accepted for implementation** (see the
+**Status: proposed, not accepted for implementation** (see the
 proposal's status). Low-fidelity wireframes for the web journeys in the
 [operator experience proposal](operator-experience.md). They fix content, order and which
 action is available to which role. They do not fix layout, styling, framework or wording beyond
