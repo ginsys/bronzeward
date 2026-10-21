@@ -25,6 +25,7 @@ The working design is not an implementation specification or proof of passing ex
 | Phase 0: evidence before implementation contracts (§18.1) | [01 - Feasibility evidence](https://github.com/ginsys/bronzeward/milestone/1) |
 | “milestone-1 specification” (§18.1) | [02 - PoC specification](https://github.com/ginsys/bronzeward/milestone/2) |
 | Phase 1 / “first milestone”: configuration control (§18.2) | [03 - Working configuration-control PoC](https://github.com/ginsys/bronzeward/milestone/3) |
+| Operator clients for the Phase 1 scope (§11.3, proposed); not a design phase | [04 - Operator experience: CLI and web UI](https://github.com/ginsys/bronzeward/milestone/4) |
 
 The [design's configuration-control scope](docs/design/Talos_Configuration_and_Machine_Management_Design.md#182-phase-1---configuration-control-on-an-existing-cluster) owns acceptance and exclusions. GitHub milestone numbers do not renumber the design phases.
 
