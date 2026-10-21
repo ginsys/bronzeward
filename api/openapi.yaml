@@ -1,0 +1,3288 @@
+openapi: 3.1.0
+info:
+  title: Bronzeward API
+  version: v1
+  description: 'The HTTP API of persistence and API §9, under /api/v1. Every operation carries the route table''s facts as
+    extension fields: x-bronzeward-roles, the roles that may call it, in the table''s order; x-bronzeward-human-only, refused
+    to automation principals; x-bronzeward-if-match, requires If-Match; x-bronzeward-normal-start-only, refused on a recovery
+    start. internal/api/openapi_test.go fails when they differ from routes(), in either direction, and the API tests validate
+    every answer, and every request the server accepted, against these schemas. Every error answer is a problem document (default
+    response). Request bodies are decoded strictly: application/json, exactly the listed members, none repeated.'
+servers:
+- {url: /api/v1}
+security:
+- {bearer: []}
+paths:
+  /acts:
+    get:
+      operationId: getActs
+      tags: [acts]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/ActItem'}
+                  next: {type: string, description: The cursor of the next page; absent on the last.}
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /approvals/{id}:
+    get:
+      operationId: getApprovalsId
+      tags: [approvals]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ApprovalBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /approvals/{id}/revocations:
+    post:
+      operationId: postApprovalsIdRevocations
+      tags: [approvals]
+      x-bronzeward-roles: [approver, recovery-admin]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReasonInput'}
+      responses:
+        '201':
+          description: Created.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ApprovalRevocationBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /assignment-revisions/{id}:
+    get:
+      operationId: getAssignmentRevisionsId
+      tags: [assignment-revisions]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AssignmentRevisionBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /assignments:
+    get:
+      operationId: getAssignments
+      tags: [assignments]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/AssignmentBody'}
+                  next: {type: string, description: The cursor of the next page; absent on the last.}
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /assignments/{id}:
+    get:
+      operationId: getAssignmentsId
+      tags: [assignments]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AssignmentBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /assignments/{id}/revisions:
+    get:
+      operationId: getAssignmentsIdRevisions
+      tags: [assignments]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/AssignmentRevisionBody'}
+                  next: {type: string, description: The cursor of the next page; absent on the last.}
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /clusters:
+    get:
+      operationId: getClusters
+      tags: [clusters]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/ClusterBody'}
+                  next: {type: string, description: The cursor of the next page; absent on the last.}
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+    post:
+      operationId: postClusters
+      tags: [clusters]
+      x-bronzeward-roles: [author]
+      x-bronzeward-human-only: true
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ClusterInput'}
+      responses:
+        '201':
+          description: Created.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ClusterBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /clusters/{id}:
+    get:
+      operationId: getClustersId
+      tags: [clusters]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ClusterBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /dependencies:
+    get:
+      operationId: getDependencies
+      tags: [dependencies]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      - name: class
+        in: query
+        schema: {type: string, enum: [retained, unknown, blocked, lost]}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DependencyPage'}
+        default: {$ref: '#/components/responses/Problem'}
+  /dependencies/{id}:
+    get:
+      operationId: getDependenciesId
+      tags: [dependencies]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DependencyBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /dependencies/{id}/alerts:
+    get:
+      operationId: getDependenciesIdAlerts
+      tags: [dependencies]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/AlertBody'}
+                  next: {type: string, description: The cursor of the next page; absent on the last.}
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /dependencies/{id}/releases:
+    get:
+      operationId: getDependenciesIdReleases
+      tags: [dependencies]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/DependencyReleaseBody'}
+                  next: {type: string, description: The cursor of the next page; absent on the last.}
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /dependency-alerts:
+    get:
+      operationId: getDependencyAlerts
+      tags: [dependency-alerts]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/AlertBody'}
+                  next: {type: string, description: The cursor of the next page; absent on the last.}
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /drafts:
+    get:
+      operationId: getDrafts
+      tags: [drafts]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/DraftBody'}
+                  next: {type: string, description: The cursor of the next page; absent on the last.}
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+    post:
+      operationId: postDrafts
+      tags: [drafts]
+      x-bronzeward-roles: [author]
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DraftInput'}
+      responses:
+        '201':
+          description: Created.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DraftBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /drafts/{id}:
+    get:
+      operationId: getDraftsId
+      tags: [drafts]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DraftBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /drafts/{id}/assignments/{machine}:
+    put:
+      operationId: putDraftsIdAssignmentsMachine
+      tags: [drafts]
+      x-bronzeward-roles: [author]
+      x-bronzeward-if-match: true
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - name: machine
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/IfMatch'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AssignmentInput'}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SourceUpdate'}
+        default: {$ref: '#/components/responses/Problem'}
+    delete:
+      operationId: deleteDraftsIdAssignmentsMachine
+      tags: [drafts]
+      x-bronzeward-roles: [author]
+      x-bronzeward-if-match: true
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - name: machine
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/IfMatch'}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SourceUpdate'}
+        default: {$ref: '#/components/responses/Problem'}
+  /drafts/{id}/discard:
+    post:
+      operationId: postDraftsIdDiscard
+      tags: [drafts]
+      x-bronzeward-roles: [author]
+      x-bronzeward-if-match: true
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/IfMatch'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DiscardInput'}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DraftBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /drafts/{id}/fragments/{name}:
+    put:
+      operationId: putDraftsIdFragmentsName
+      tags: [drafts]
+      x-bronzeward-roles: [author]
+      x-bronzeward-if-match: true
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - name: name
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/IfMatch'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/FragmentInput'}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SourceUpdate'}
+        default: {$ref: '#/components/responses/Problem'}
+    delete:
+      operationId: deleteDraftsIdFragmentsName
+      tags: [drafts]
+      x-bronzeward-roles: [author]
+      x-bronzeward-if-match: true
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - name: name
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/IfMatch'}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SourceUpdate'}
+        default: {$ref: '#/components/responses/Problem'}
+  /drafts/{id}/profiles/{name}:
+    put:
+      operationId: putDraftsIdProfilesName
+      tags: [drafts]
+      x-bronzeward-roles: [author]
+      x-bronzeward-if-match: true
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - name: name
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/IfMatch'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProfileInput'}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SourceUpdate'}
+        default: {$ref: '#/components/responses/Problem'}
+    delete:
+      operationId: deleteDraftsIdProfilesName
+      tags: [drafts]
+      x-bronzeward-roles: [author]
+      x-bronzeward-if-match: true
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - name: name
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/IfMatch'}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SourceUpdate'}
+        default: {$ref: '#/components/responses/Problem'}
+  /drafts/{id}/publications:
+    post:
+      operationId: postDraftsIdPublications
+      tags: [drafts]
+      x-bronzeward-roles: [publisher]
+      x-bronzeward-if-match: true
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/IfMatch'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PublicationInput'}
+      responses:
+        '202':
+          description: 'Accepted: the operation named in the body proceeds asynchronously.'
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OperationBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /fragment-revisions/{id}:
+    get:
+      operationId: getFragmentRevisionsId
+      tags: [fragment-revisions]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FragmentRevisionBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /fragments:
+    get:
+      operationId: getFragments
+      tags: [fragments]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/FragmentBody'}
+                  next: {type: string, description: The cursor of the next page; absent on the last.}
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /fragments/{id}:
+    get:
+      operationId: getFragmentsId
+      tags: [fragments]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FragmentBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /fragments/{id}/revisions:
+    get:
+      operationId: getFragmentsIdRevisions
+      tags: [fragments]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/FragmentRevisionBody'}
+                  next: {type: string, description: The cursor of the next page; absent on the last.}
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /identity-revocations:
+    post:
+      operationId: postIdentityRevocations
+      tags: [identity-revocations]
+      x-bronzeward-roles: [recovery-admin]
+      x-bronzeward-human-only: true
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RevocationInput'}
+      responses:
+        '201':
+          description: Created.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RevocationBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /ingestions:
+    post:
+      operationId: postIngestions
+      tags: [ingestions]
+      x-bronzeward-roles: [author]
+      x-bronzeward-human-only: true
+      x-bronzeward-if-match: true
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/IfMatch'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/IngestionInput'}
+      responses:
+        '202':
+          description: 'Accepted: the operation named in the body proceeds asynchronously.'
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ingestion, operation]
+                properties:
+                  ingestion: {type: string}
+                  operation: {type: string}
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /ingestions/{id}:
+    get:
+      operationId: getIngestionsId
+      tags: [ingestions]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IngestionBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /ingestions/{id}/abandonments:
+    post:
+      operationId: postIngestionsIdAbandonments
+      tags: [ingestions]
+      x-bronzeward-roles: [author]
+      x-bronzeward-human-only: true
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AbandonInput'}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IngestionBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /ingestions/{id}/continuations:
+    post:
+      operationId: postIngestionsIdContinuations
+      tags: [ingestions]
+      x-bronzeward-roles: [author]
+      x-bronzeward-human-only: true
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ContinuationInput'}
+      responses:
+        '202':
+          description: 'Accepted: the operation named in the body proceeds asynchronously.'
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ingestion, operation]
+                properties:
+                  ingestion: {type: string}
+                  operation: {type: string}
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /ingestions/{id}/marks:
+    post:
+      operationId: postIngestionsIdMarks
+      tags: [ingestions]
+      x-bronzeward-roles: [author]
+      x-bronzeward-human-only: true
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MarkInput'}
+      responses:
+        '202':
+          description: 'Accepted: the operation named in the body proceeds asynchronously.'
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [generation, ingestion, operation]
+                properties:
+                  generation: {type: integer}
+                  ingestion: {type: string}
+                  operation: {type: string}
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /ingestions/{id}/review:
+    get:
+      operationId: getIngestionsIdReview
+      tags: [ingestions]
+      x-bronzeward-roles: [author]
+      x-bronzeward-human-only: true
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IngestionReviewBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /ingestions/{id}/takeovers:
+    post:
+      operationId: postIngestionsIdTakeovers
+      tags: [ingestions]
+      x-bronzeward-roles: [author]
+      x-bronzeward-human-only: true
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TakeoverInput'}
+      responses:
+        '202':
+          description: 'Accepted: the operation named in the body proceeds asynchronously.'
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ingestion, operation]
+                properties:
+                  ingestion: {type: string}
+                  operation: {type: string}
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /machines:
+    get:
+      operationId: getMachines
+      tags: [machines]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/MachineBody'}
+                  next: {type: string, description: The cursor of the next page; absent on the last.}
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+    post:
+      operationId: postMachines
+      tags: [machines]
+      x-bronzeward-roles: [author]
+      x-bronzeward-human-only: true
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MachineInput'}
+      responses:
+        '201':
+          description: Created.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MachineBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /machines/{id}:
+    get:
+      operationId: getMachinesId
+      tags: [machines]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MachineBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /machines/{id}/freezes:
+    post:
+      operationId: postMachinesIdFreezes
+      tags: [machines]
+      x-bronzeward-roles: [author, publisher, approver, recovery-admin]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReasonInput'}
+      responses:
+        '201':
+          description: Created.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FreezeBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /machines/{id}/observations:
+    get:
+      operationId: getMachinesIdObservations
+      tags: [machines]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/ObservationBody'}
+                  next: {type: string, description: The cursor of the next page; absent on the last.}
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /machines/{id}/talos-endpoints:
+    post:
+      operationId: postMachinesIdTalosEndpoints
+      tags: [machines]
+      x-bronzeward-roles: [author]
+      x-bronzeward-human-only: true
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EndpointInput'}
+      responses:
+        '201':
+          description: Created.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EndpointChangeBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /machines/{id}/timeline:
+    get:
+      operationId: getMachinesIdTimeline
+      tags: [machines]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/TimelineEntry'}
+                  next: {type: string, description: The cursor of the next page; absent on the last.}
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /machines/{id}/unfreezes:
+    post:
+      operationId: postMachinesIdUnfreezes
+      tags: [machines]
+      x-bronzeward-roles: [approver]
+      x-bronzeward-normal-start-only: true
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReasonInput'}
+      responses:
+        '201':
+          description: Created.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FreezeBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /operations:
+    get:
+      operationId: getOperations
+      tags: [operations]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      - name: plan
+        in: query
+        schema: {type: string}
+      - name: machine
+        in: query
+        schema: {type: string}
+      - name: state
+        in: query
+        schema:
+          type: string
+          enum:
+          - queued
+          - running
+          - succeeded
+          - failed
+          - committed
+          - sending
+          - verifying
+          - completed
+          - rejected
+          - cancelled
+          - unresolved
+      - name: kind
+        in: query
+        schema: {type: string, enum: [publish, ingest, apply-config, adopt]}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/OperationBody'}
+                  next: {type: string, description: The cursor of the next page; absent on the last.}
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /operations/{id}:
+    get:
+      operationId: getOperationsId
+      tags: [operations]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OperationBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /operations/{id}/attempts/{attempt}/accountings:
+    post:
+      operationId: postOperationsIdAttemptsAttemptAccountings
+      tags: [operations]
+      x-bronzeward-roles: [recovery-admin]
+      x-bronzeward-human-only: true
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - name: attempt
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AccountingRequest'}
+      responses:
+        '201':
+          description: Created.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AccountingBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /operations/{id}/events:
+    get:
+      operationId: getOperationsIdEvents
+      tags: [operations]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/LastEventID'}
+      description: 'With `Accept: text/event-stream` the answer is Server-Sent Events and the request takes no query; otherwise
+        it is a JSON page of events (persistence and API §8.3). Each SSE event has `id: <epoch>:<number>`, `event: <type>`
+        and `data: <entry>`, the same three members as an EventBody. A Last-Event-ID of another epoch cannot be resumed: the
+        server first sends `event: reset` with `data: {}`, then the events from the start. A plan operation''s types are its
+        timeline entries'' kinds (attempt, response, accounting, classification, ownership-transition, operation-state, applied-change,
+        scope-state); a publish or ingest operation''s are its own events (queued, claimed, started, staged, paused, marked,
+        mark-refused, continued, taken-over, resume-failed, talos-access, succeeded, failed). The stream ends when the operation
+        is terminal and its events are written, or at the expiry of the token that opened it.'
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Cache-Control:
+              description: no-store on a stream.
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/EventBody'}
+                  next: {type: string, description: The cursor of the next page; absent on the last.}
+                additionalProperties: false
+            text/event-stream:
+              schema: {type: string, description: Server-Sent Events.}
+        default: {$ref: '#/components/responses/Problem'}
+  /operations/{id}/resolutions:
+    post:
+      operationId: postOperationsIdResolutions
+      tags: [operations]
+      x-bronzeward-roles: [recovery-admin]
+      x-bronzeward-human-only: true
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ResolutionRequest'}
+      responses:
+        '201':
+          description: Created.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ResolutionBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /operations/{id}/takeovers:
+    post:
+      operationId: postOperationsIdTakeovers
+      tags: [operations]
+      x-bronzeward-roles: [recovery-admin]
+      x-bronzeward-human-only: true
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TakeoverRequest'}
+      responses:
+        '201':
+          description: Created.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TakeoverBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /plans:
+    get:
+      operationId: getPlans
+      tags: [plans]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/PlanBody'}
+                  next: {type: string, description: The cursor of the next page; absent on the last.}
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+    post:
+      operationId: postPlans
+      tags: [plans]
+      x-bronzeward-roles: [publisher]
+      x-bronzeward-normal-start-only: true
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PlanInput'}
+      responses:
+        '201':
+          description: Created.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlanBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /plans/{id}:
+    get:
+      operationId: getPlansId
+      tags: [plans]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlanBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /plans/{id}/approvals:
+    post:
+      operationId: postPlansIdApprovals
+      tags: [plans]
+      x-bronzeward-roles: [approver]
+      x-bronzeward-human-only: true
+      x-bronzeward-normal-start-only: true
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ApprovalInput'}
+      responses:
+        '201':
+          description: Created.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ApprovalBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /plans/{id}/cancellations:
+    post:
+      operationId: postPlansIdCancellations
+      tags: [plans]
+      x-bronzeward-roles: [publisher, approver, recovery-admin]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReasonInput'}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CancellationBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /profile-revisions/{id}:
+    get:
+      operationId: getProfileRevisionsId
+      tags: [profile-revisions]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProfileRevisionBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /profiles:
+    get:
+      operationId: getProfiles
+      tags: [profiles]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters: []
+      responses:
+        '200':
+          description: No API test reaches this answer; described from its handler.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/ProfileBody'}
+                  next: {type: string, description: The cursor of the next page; absent on the last.}
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /profiles/{id}:
+    get:
+      operationId: getProfilesId
+      tags: [profiles]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProfileBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /profiles/{id}/revisions:
+    get:
+      operationId: getProfilesIdRevisions
+      tags: [profiles]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/ProfileRevisionBody'}
+                  next: {type: string, description: The cursor of the next page; absent on the last.}
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /recovery:
+    get:
+      operationId: getRecovery
+      tags: [recovery]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters: []
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RecoveryBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /recovery/accountings:
+    post:
+      operationId: postRecoveryAccountings
+      tags: [recovery]
+      x-bronzeward-roles: [recovery-admin]
+      x-bronzeward-human-only: true
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ScopeAccountingRequest'}
+      responses:
+        '201':
+          description: Created.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ScopeAccountingBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /recovery/entries:
+    post:
+      operationId: postRecoveryEntries
+      tags: [recovery]
+      x-bronzeward-roles: [recovery-admin]
+      x-bronzeward-human-only: true
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EntryRequest'}
+      responses:
+        '201':
+          description: Created.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EntryBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /recovery/exits:
+    post:
+      operationId: postRecoveryExits
+      tags: [recovery]
+      x-bronzeward-roles: [recovery-admin]
+      x-bronzeward-human-only: true
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ExitRequest'}
+      responses:
+        '201':
+          description: Created.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ExitBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /recovery/scopes/{machine}/marks:
+    post:
+      operationId: postRecoveryScopesMachineMarks
+      tags: [recovery]
+      x-bronzeward-roles: [recovery-admin]
+      x-bronzeward-human-only: true
+      parameters:
+      - name: machine
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ScopeMarkRequest'}
+      responses:
+        '201':
+          description: Created.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ScopeMarkBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /recovery/scopes/{machine}/releases:
+    post:
+      operationId: postRecoveryScopesMachineReleases
+      tags: [recovery]
+      x-bronzeward-roles: [recovery-admin]
+      x-bronzeward-human-only: true
+      parameters:
+      - name: machine
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ScopeReleaseRequest'}
+      responses:
+        '201':
+          description: Created.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ScopeReleaseBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /releases:
+    get:
+      operationId: getReleases
+      tags: [releases]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/ReleaseBody'}
+                  next: {type: string, description: The cursor of the next page; absent on the last.}
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /releases/{id}:
+    get:
+      operationId: getReleasesId
+      tags: [releases]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReleaseBody'}
+        default: {$ref: '#/components/responses/Problem'}
+  /releases/{id}/machines/{m}/review:
+    get:
+      operationId: getReleasesIdMachinesMReview
+      tags: [releases]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - name: m
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReviewBody'}
+        default: {$ref: '#/components/responses/Problem'}
+components:
+  securitySchemes:
+    bearer: {type: http, scheme: bearer, bearerFormat: JWT}
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: 16 to 128 characters of [A-Za-z0-9_-] (persistence and API §7.1).
+      schema: {type: string}
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: The ETag last read (persistence and API §4.1).
+      schema: {type: string}
+    Limit:
+      name: limit
+      in: query
+      description: 1 to 500; 50 when absent.
+      schema: {type: integer}
+    Cursor:
+      name: cursor
+      in: query
+      description: The next member of the previous page, opaque, valid in the epoch that issued it.
+      schema: {type: string}
+    LastEventID:
+      name: Last-Event-ID
+      in: header
+      description: '`<epoch>:<number>`: resume a stream after that event (persistence and API §8.3).'
+      schema: {type: string}
+  headers:
+    Epoch:
+      description: The recovery epoch the request was answered in (persistence and API §9.1).
+      schema: {type: string}
+    ETag:
+      description: The resource's version (persistence and API §4.1).
+      schema: {type: string}
+    Location:
+      description: The created resource.
+      schema: {type: string}
+    IdempotentReplayed:
+      description: true when the answer is a stored one, replayed for a repeated key (persistence and API §7.2).
+      schema: {type: string}
+  responses:
+    Problem:
+      description: A problem document (persistence and API §9.4).
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status, instance]
+      properties:
+        type:
+          type: string
+          enum:
+          - urn:bronzeward:problem:invalid-request
+          - urn:bronzeward:problem:cursor-invalid
+          - urn:bronzeward:problem:unauthenticated
+          - urn:bronzeward:problem:forbidden
+          - urn:bronzeward:problem:identity-revoked
+          - urn:bronzeward:problem:not-found
+          - urn:bronzeward:problem:conflict
+          - urn:bronzeward:problem:stale-input
+          - urn:bronzeward:problem:recovery-mode-active
+          - urn:bronzeward:problem:scope-busy
+          - urn:bronzeward:problem:ingestion-abandoned
+          - urn:bronzeward:problem:recovery-mode-entered
+          - urn:bronzeward:problem:idempotency-key-reused
+          - urn:bronzeward:problem:idempotency-key-required
+          - urn:bronzeward:problem:precondition-required
+          - urn:bronzeward:problem:precondition-failed
+          - urn:bronzeward:problem:validation-failed
+          - urn:bronzeward:problem:epoch-superseded
+          - urn:bronzeward:problem:internal-error
+          - urn:bronzeward:problem:not-implemented
+          - urn:bronzeward:problem:transient-conflict
+          - urn:bronzeward:problem:dependency-unavailable
+          - urn:bronzeward:problem:machine-identity-mismatch
+          - urn:bronzeward:problem:talos-access-unavailable
+        title: {type: string}
+        status: {type: integer}
+        instance: {type: string}
+        detail: {type: string}
+      additionalProperties: true
+      description: RFC 9457. Extension members depend on the problem type.
+    Role:
+      type: string
+      enum: [viewer, author, publisher, approver, recovery-admin]
+    AbandonInput: {type: object, additionalProperties: false}
+    AccessVersionBody:
+      type: object
+      required: [path, version, created]
+      properties:
+        path: {type: string}
+        version: {type: integer}
+        created: {type: string}
+      additionalProperties: false
+    AccountingBody:
+      type: object
+      required:
+      - operation
+      - attempt
+      - revision
+      - decidedBy
+      - role
+      - start
+      - end
+      - act
+      - epoch
+      - at
+      properties:
+        operation: {type: string}
+        attempt: {type: string}
+        revision: {type: integer}
+        decidedBy: {type: string}
+        role: {type: string}
+        start: {type: string}
+        end: {type: string}
+        act: {type: string}
+        epoch: {type: string}
+        at: {type: string, format: date-time}
+      additionalProperties: false
+    AccountingRequest:
+      type: object
+      required: [start, end]
+      properties:
+        start: {type: string}
+        end: {type: string}
+        facts:
+          type: object
+          additionalProperties: {type: string}
+      additionalProperties: false
+    ActItem:
+      type: object
+      required:
+      - id
+      - principal
+      - principalKind
+      - via
+      - role
+      - action
+      - subjects
+      - idempotencyKey
+      - requestId
+      - epoch
+      - at
+      properties:
+        id: {type: string}
+        principal: {type: string}
+        principalKind: {type: string}
+        via: {type: string}
+        role: {type: [string, 'null']}
+        action: {type: string}
+        subjects:
+          type: array
+          items: {type: string}
+        idempotencyKey: {type: [string, 'null']}
+        requestId: {type: [string, 'null']}
+        epoch: {type: string}
+        at: {type: string, format: date-time}
+      additionalProperties: false
+    AlertBody:
+      type: object
+      required:
+      - id
+      - kind
+      - dependency
+      - provider
+      - object
+      - version
+      - created
+      - class
+      - reason
+      - releases
+      - deletion
+      - observedFrom
+      - answerDate
+      - epoch
+      - recordedAt
+      properties:
+        id: {type: string}
+        kind: {type: string}
+        dependency: {type: [string, 'null']}
+        provider: {type: [string, 'null']}
+        object: {type: [string, 'null']}
+        version: {type: [integer, 'null']}
+        created: {type: [string, 'null']}
+        class: {type: [string, 'null']}
+        reason: {type: [string, 'null']}
+        releases:
+          type: [array, 'null']
+          items: {type: string}
+        deletion: {type: [string, 'null'], format: date-time}
+        observedFrom: {type: [string, 'null'], format: date-time}
+        answerDate: {type: [string, 'null'], format: date-time}
+        epoch: {type: string}
+        recordedAt: {type: string, format: date-time}
+      additionalProperties: false
+    Applied:
+      type: object
+      required: [release, source]
+      properties:
+        release: {type: string}
+        source: {type: string}
+      additionalProperties: false
+    ApprovalBody:
+      type: object
+      required: [id, plan, approver, epoch, selfApproval, unseenOverwrite]
+      properties:
+        id: {type: string}
+        plan: {type: string}
+        approver: {$ref: '#/components/schemas/ApprovalBy'}
+        epoch: {type: string}
+        selfApproval: {$ref: '#/components/schemas/SelfApproval'}
+        unseenOverwrite: {type: boolean}
+      additionalProperties: false
+    ApprovalBy:
+      type: object
+      required: [principal, role]
+      properties:
+        principal: {type: string}
+        role: {type: string}
+      additionalProperties: false
+    ApprovalInput: {type: object, additionalProperties: false}
+    ApprovalRevocationBody:
+      type: object
+      required: [approval, plan, machine, revokedBy, role, reason, act, epoch, at]
+      properties:
+        approval: {type: string}
+        plan: {type: string}
+        machine: {type: string}
+        revokedBy: {type: string}
+        role: {type: string}
+        reason: {type: string}
+        act: {type: string}
+        epoch: {type: string}
+        at: {type: string, format: date-time}
+      additionalProperties: false
+    AssignmentBody:
+      type: object
+      required: [id, cluster, machine, revision, headRevision, createdAt]
+      properties:
+        id: {type: string}
+        cluster: {type: string}
+        machine: {type: string}
+        revision: {type: [string, 'null']}
+        headRevision: {type: integer}
+        createdAt: {type: string, format: date-time}
+      additionalProperties: false
+    AssignmentInput:
+      description: Profiles, then fragments per layer by name; 1 to 256 selected in all. A fragments member is a layer and
+        lists at least one fragment.
+      type: object
+      required: []
+      properties:
+        profiles:
+          type: array
+          items: {type: string}
+        fragments:
+          type: object
+          additionalProperties:
+            type: array
+            items: {type: string}
+      additionalProperties: false
+    AssignmentRevisionBody:
+      type: object
+      required: [id, cluster, machine, profiles, fragments, author, createdAt]
+      properties:
+        id: {type: string}
+        cluster: {type: string}
+        machine: {type: string}
+        profiles:
+          type: array
+          items: {type: string}
+        fragments:
+          type: object
+          additionalProperties:
+            type: array
+            items: {type: string}
+        author: {type: string}
+        createdAt: {type: string, format: date-time}
+      additionalProperties: false
+    AttemptAccounting:
+      type: object
+      required: [basis, at, revision]
+      properties:
+        basis: {type: string}
+        at: {type: string, format: date-time}
+        revision: {type: integer}
+      additionalProperties: false
+    AttemptBody:
+      type: object
+      required:
+      - id
+      - number
+      - controller
+      - generation
+      - route
+      - observation
+      - transportDeadline
+      - verificationDeadline
+      - at
+      - revision
+      - classification
+      - response
+      - accounting
+      properties:
+        id: {type: string}
+        number: {type: integer}
+        controller: {type: string}
+        generation: {type: integer}
+        route: {type: string}
+        observation: {type: string}
+        transportDeadline: {type: string, format: date-time}
+        verificationDeadline: {type: string, format: date-time}
+        at: {type: string, format: date-time}
+        revision: {type: integer}
+        classification: {type: [integer, 'null']}
+        response:
+          oneOf:
+          - {$ref: '#/components/schemas/AttemptResponse'}
+          - {type: 'null'}
+        accounting:
+          oneOf:
+          - {$ref: '#/components/schemas/AttemptAccounting'}
+          - {type: 'null'}
+      additionalProperties: false
+    AttemptResponse:
+      type: object
+      required: [class, code, at, revision]
+      properties:
+        class: {type: string}
+        code: {type: integer}
+        at: {type: string, format: date-time}
+        revision: {type: integer}
+      additionalProperties: false
+    CancellationBody:
+      type: object
+      required: [plan, machine, cancelledBy, role, reason, act, epoch, at]
+      properties:
+        plan: {type: string}
+        machine: {type: string}
+        cancelledBy: {type: string}
+        role: {type: string}
+        reason: {type: string}
+        act: {type: string}
+        epoch: {type: string}
+        at: {type: string, format: date-time}
+      additionalProperties: false
+    ClusterBody:
+      type: object
+      required: [id, name, endpoint, contract, talosClusterId]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        endpoint: {type: string}
+        contract: {type: string}
+        talosClusterId: {type: string}
+      additionalProperties: false
+    ClusterInput:
+      type: object
+      required: [name, endpoint, contract, talosClusterId]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: At most 128 bytes, no control characters.
+        endpoint:
+          type: string
+          description: https://<host>[:<port>], with no path, query, fragment or user information.
+        contract: {type: string, description: 'A Talos contract minor, as v1.13.'}
+        talosClusterId:
+          type: string
+          description: 'The cluster ID `talosctl get info` prints: 32 bytes in URL-safe base64.'
+      additionalProperties: false
+    ContinuationInput: {type: object, additionalProperties: false}
+    CreatedBy:
+      type: object
+      required: [principal, role]
+      properties:
+        principal: {type: string}
+        role: {type: string}
+      additionalProperties: false
+    Declarations:
+      type: object
+      required: []
+      properties:
+        references:
+          type: [object, 'null']
+          additionalProperties: {$ref: '#/components/schemas/Reference'}
+        embedded:
+          type: [array, 'null']
+          items: {$ref: '#/components/schemas/Embedded'}
+      additionalProperties: false
+    DependencyBody:
+      type: object
+      required:
+      - id
+      - provider
+      - object
+      - version
+      - created
+      - class
+      - reason
+      - firstRetainedAt
+      - unknownSince
+      - observedFrom
+      - recordedAt
+      - stale
+      properties:
+        id: {type: string}
+        provider: {type: string}
+        object: {type: string}
+        version: {type: integer}
+        created: {type: string}
+        class: {type: string}
+        reason: {type: [string, 'null']}
+        firstRetainedAt: {type: [string, 'null'], format: date-time}
+        unknownSince: {type: [string, 'null'], format: date-time}
+        observedFrom: {type: string, format: date-time}
+        recordedAt: {type: string, format: date-time}
+        stale: {type: boolean}
+      additionalProperties: false
+    DependencyPage:
+      type: object
+      required: [items, lastPass]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/DependencyBody'}
+        next: {type: string}
+        lastPass: {type: [string, 'null'], format: date-time}
+      additionalProperties: false
+    DependencyRecordBody:
+      type: object
+      required: [machine, kind]
+      properties:
+        machine: {type: string}
+        kind: {type: string}
+      additionalProperties: false
+    DependencyReleaseBody:
+      type: object
+      required: [release, cluster, publishedAt, records]
+      properties:
+        release: {type: string}
+        cluster: {type: string}
+        publishedAt: {type: string, format: date-time}
+        records:
+          type: array
+          items: {$ref: '#/components/schemas/DependencyRecordBody'}
+      additionalProperties: false
+    DiscardInput: {type: object, additionalProperties: false}
+    DraftBody:
+      type: object
+      required: [id, cluster, title, state, revision, entries]
+      properties:
+        id: {type: string}
+        cluster: {type: string}
+        title: {type: string}
+        state: {type: string}
+        revision: {type: integer}
+        entries:
+          type: array
+          items: {}
+      additionalProperties: false
+    DraftInput:
+      type: object
+      required: [cluster, title]
+      properties:
+        cluster: {type: string}
+        title: {type: string, minLength: 1, description: At most 256 bytes.}
+      additionalProperties: false
+    Embedded:
+      type: object
+      required: [path, format]
+      properties:
+        path: {type: string}
+        format: {type: string}
+      additionalProperties: false
+    EndpointChangeBody:
+      type: object
+      required:
+      - machine
+      - revision
+      - previousEndpoint
+      - talosEndpoint
+      - changedBy
+      - role
+      - act
+      - epoch
+      - at
+      properties:
+        machine: {type: string}
+        revision: {type: integer}
+        previousEndpoint: {type: string}
+        talosEndpoint: {type: string}
+        changedBy: {type: string}
+        role: {type: string}
+        act: {type: string}
+        epoch: {type: string}
+        at: {type: string, format: date-time}
+      additionalProperties: false
+    EndpointInput:
+      type: object
+      required: [talosEndpoint]
+      properties:
+        talosEndpoint: {type: string}
+      additionalProperties: false
+    EntryBody:
+      type: object
+      required:
+      - epoch
+      - previousEpoch
+      - enteredBy
+      - role
+      - reason
+      - restored
+      - stoppedAt
+      - machines
+      - operations
+      - act
+      - at
+      properties:
+        epoch: {type: string}
+        previousEpoch: {type: string}
+        enteredBy: {type: string}
+        role: {$ref: '#/components/schemas/Role'}
+        reason: {type: string}
+        restored:
+          type: array
+          items: {$ref: '#/components/schemas/RestoredBackup'}
+        stoppedAt: {type: string, format: date-time}
+        machines: {type: integer}
+        operations:
+          type: array
+          items: {type: string}
+        act: {type: string}
+        at: {type: string, format: date-time}
+      additionalProperties: false
+    EntryRequest:
+      type: object
+      required: [restored, stoppedAt, reason]
+      properties:
+        restored:
+          type: array
+          items: {$ref: '#/components/schemas/RestoredBackup'}
+          minItems: 1
+          maxItems: 3
+        stoppedAt: {type: string, format: date-time}
+        reason: {type: string, minLength: 1, description: '1 to 1024 bytes, not blank.'}
+      additionalProperties: false
+    EventBody:
+      type: object
+      required: [id, type, at, data]
+      properties:
+        id: {type: string}
+        type: {type: string}
+        at: {type: string, format: date-time}
+        data: {}
+      additionalProperties: false
+    ExitBody:
+      type: object
+      required: [epoch, exitedBy, role, act, at, scopes]
+      properties:
+        epoch: {type: string}
+        exitedBy: {type: string}
+        role: {type: string}
+        act: {type: string}
+        at: {type: string, format: date-time}
+        scopes:
+          type: array
+          items: {type: string}
+      additionalProperties: false
+    ExitRequest:
+      type: object
+      required: []
+      properties:
+        facts:
+          type: object
+          additionalProperties: {type: string}
+      additionalProperties: false
+    FragmentBody:
+      type: object
+      required: [id, cluster, scope, name, layer, revision, headRevision, createdAt]
+      properties:
+        id: {type: string}
+        cluster: {type: string}
+        scope: {type: string}
+        name: {type: string}
+        layer: {type: string}
+        revision: {type: [string, 'null']}
+        headRevision: {type: integer}
+        createdAt: {type: string, format: date-time}
+      additionalProperties: false
+    FragmentDeclarations:
+      type: object
+      required: [references, embedded]
+      properties:
+        references:
+          type: object
+          additionalProperties: {$ref: '#/components/schemas/Reference'}
+        embedded:
+          type: array
+          items: {$ref: '#/components/schemas/Embedded'}
+      additionalProperties: false
+    FragmentInput:
+      type: object
+      required: [layer, document]
+      properties:
+        layer: {type: string, enum: [global, site, cluster, role, workload, override]}
+        document: {type: string, minLength: 1, description: 'The YAML document, at most 512 KiB.'}
+        marks:
+          type: array
+          items: {type: string}
+          maxItems: 1024
+        declarations: {$ref: '#/components/schemas/Declarations'}
+      additionalProperties: false
+    FragmentRevisionBody:
+      type: object
+      required: [id, cluster, name, layer, document, declarations, author, createdAt]
+      properties:
+        id: {type: string}
+        cluster: {type: string}
+        name: {type: string}
+        layer: {type: string}
+        document: {type: string}
+        declarations: {$ref: '#/components/schemas/FragmentDeclarations'}
+        author: {type: string}
+        createdAt: {type: string, format: date-time}
+      additionalProperties: false
+    FreezeBody:
+      type: object
+      required: [machine, revision, frozen, principal, role, reason, act, epoch, at]
+      properties:
+        machine: {type: string}
+        revision: {type: integer}
+        frozen: {type: boolean}
+        principal: {type: string}
+        role: {type: string}
+        reason: {type: string}
+        act: {type: string}
+        epoch: {type: string}
+        at: {type: string, format: date-time}
+      additionalProperties: false
+    Hardware:
+      type: object
+      required: [smbiosUuid, talosNodeId, serial]
+      properties:
+        smbiosUuid: {type: [string, 'null']}
+        talosNodeId: {type: [string, 'null']}
+        serial: {type: [string, 'null']}
+      additionalProperties: false
+    IngestionBody:
+      type: object
+      required:
+      - id
+      - kind
+      - mode
+      - state
+      - machine
+      - draft
+      - operation
+      - review
+      - ownerGeneration
+      - leaseUntil
+      - expiresAt
+      - createdAt
+      properties:
+        id: {type: string}
+        kind: {type: string}
+        mode: {type: string}
+        state: {type: string}
+        machine: {type: [string, 'null']}
+        draft: {type: string}
+        operation: {type: [string, 'null']}
+        review: {type: [string, 'null']}
+        ownerGeneration: {type: integer}
+        leaseUntil: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time}
+        createdAt: {type: string, format: date-time}
+      additionalProperties: false
+    IngestionInput:
+      description: A drift adoption's source is machine. document is required with source document and refused with source
+        machine. declarations.references is not served yet.
+      type: object
+      required: [kind, machine, draft, source, staging]
+      properties:
+        kind: {type: string, enum: [import, drift-adoption]}
+        machine: {type: string}
+        draft: {type: string}
+        source: {type: string, enum: [machine, document]}
+        staging: {type: string, enum: [transient, encrypted]}
+        review: {type: boolean}
+        marks:
+          type: array
+          items: {type: string}
+          maxItems: 1024
+        document: {type: string, minLength: 1, description: 'The YAML document, at most 512 KiB.'}
+        declarations: {$ref: '#/components/schemas/Declarations'}
+      additionalProperties: false
+    IngestionReviewBody:
+      type: object
+      required: [ingestion, document, declarations]
+      properties:
+        ingestion: {type: string}
+        document: {type: string}
+        declarations: {$ref: '#/components/schemas/FragmentDeclarations'}
+      additionalProperties: false
+    MachineBody:
+      type: object
+      required:
+      - id
+      - cluster
+      - hardware
+      - platform
+      - talosEndpoint
+      - desired
+      - applied
+      - observed
+      - frozen
+      - scopeState
+      - openDrift
+      properties:
+        id: {type: string}
+        cluster: {type: string}
+        hardware: {$ref: '#/components/schemas/Hardware'}
+        platform: {type: string}
+        talosEndpoint: {type: string}
+        desired: {type: [string, 'null']}
+        applied:
+          oneOf:
+          - {$ref: '#/components/schemas/Applied'}
+          - {type: 'null'}
+        observed:
+          oneOf:
+          - {$ref: '#/components/schemas/ObservedBody'}
+          - {type: 'null'}
+        frozen: {type: boolean}
+        scopeState: {type: string}
+        openDrift:
+          oneOf:
+          - {$ref: '#/components/schemas/OpenDriftBody'}
+          - {type: 'null'}
+      additionalProperties: false
+    MachineInput:
+      description: Exactly one of smbiosUuid and talosNodeId.
+      type: object
+      required: [cluster, platform, talosEndpoint]
+      properties:
+        cluster: {type: string}
+        smbiosUuid: {type: [string, 'null'], description: A UUID in its 8-4-4-4-12 hexadecimal form.}
+        talosNodeId: {type: [string, 'null'], description: The node ID `talosctl get identity` prints.}
+        serial: {type: [string, 'null']}
+        platform: {type: string, enum: [metal, container, cloud]}
+        talosEndpoint: {type: string}
+      additionalProperties: false
+    MarkInput:
+      type: object
+      required: [marks]
+      properties:
+        marks:
+          type: array
+          items: {type: string}
+          minItems: 1
+          maxItems: 1024
+      additionalProperties: false
+    ObservationBody:
+      type: object
+      required:
+      - id
+      - machine
+      - basis
+      - revision
+      - purpose
+      - publicationGeneration
+      - plan
+      - operation
+      - endpoint
+      - controller
+      - startedAt
+      - at
+      - access
+      - smbiosUuid
+      - talosNodeId
+      - talosClusterId
+      - assignmentEvidence
+      - runningVersion
+      - resourceVersion
+      - health
+      - unread
+      properties:
+        id: {type: string}
+        machine: {type: string}
+        basis: {type: integer}
+        revision: {type: integer}
+        purpose: {type: string}
+        publicationGeneration: {type: [integer, 'null']}
+        plan: {type: [string, 'null']}
+        operation: {type: [string, 'null']}
+        endpoint: {type: string}
+        controller: {type: string}
+        startedAt: {type: string, format: date-time}
+        at: {type: string, format: date-time}
+        access:
+          oneOf:
+          - {$ref: '#/components/schemas/AccessVersionBody'}
+          - {type: 'null'}
+        smbiosUuid: {type: [string, 'null']}
+        talosNodeId: {type: [string, 'null']}
+        talosClusterId: {type: [string, 'null']}
+        assignmentEvidence: {type: [string, 'null']}
+        runningVersion: {type: [string, 'null']}
+        resourceVersion: {type: [string, 'null']}
+        health: {}
+        unread:
+          type: object
+          additionalProperties: {$ref: '#/components/schemas/UnreadValue'}
+      additionalProperties: false
+    ObservedBody:
+      type: object
+      required: [observation, at, release]
+      properties:
+        observation: {type: string}
+        at: {type: string, format: date-time}
+        release: {type: [string, 'null']}
+      additionalProperties: false
+    OpenDriftBody:
+      type: object
+      required: [revision, observation, lastObservation, lateLanding]
+      properties:
+        revision: {type: integer}
+        observation: {type: string}
+        lastObservation: {type: string}
+        lateLanding: {type: [string, 'null']}
+      additionalProperties: false
+    OperationBody:
+      type: object
+      required:
+      - id
+      - kind
+      - state
+      - epoch
+      - lastEvent
+      - subject
+      - createdBy
+      - createdAt
+      - result
+      - error
+      properties:
+        id: {type: string}
+        kind: {type: string}
+        state: {type: string}
+        epoch: {type: string}
+        lastEvent: {type: integer}
+        subject:
+          oneOf:
+          - {$ref: '#/components/schemas/OperationSubject'}
+          - {type: 'null'}
+        createdBy:
+          oneOf:
+          - {$ref: '#/components/schemas/CreatedBy'}
+          - {type: 'null'}
+        createdAt: {type: string, format: date-time}
+        result: {}
+        error: {}
+        attempts:
+          type: array
+          items: {$ref: '#/components/schemas/AttemptBody'}
+      additionalProperties: false
+    OperationSubject:
+      type: object
+      required: []
+      properties:
+        draft: {type: string}
+        draftRevision: {type: integer}
+        plan: {type: string}
+        machine: {type: string}
+      additionalProperties: false
+    PlanBaseline:
+      type: object
+      required: [importBaseRevision, pendingConvergence]
+      properties:
+        importBaseRevision: {type: string}
+        pendingConvergence: {type: boolean}
+      additionalProperties: false
+    PlanBody:
+      type: object
+      required:
+      - id
+      - revision
+      - state
+      - committedOperation
+      - approval
+      - cluster
+      - machine
+      - release
+      - operation
+      - mode
+      - assignmentRevision
+      - desiredRelease
+      - baselineRevision
+      - driftRecord
+      - route
+      - maxObservationAgeSeconds
+      - checkValiditySeconds
+      - transportDeadlineSeconds
+      - verificationDeadlineSeconds
+      - maxAttempts
+      - rolloutLimit
+      - approvalPolicy
+      - createdBy
+      - epoch
+      - timelineRevision
+      - createdAt
+      - expiresAt
+      - evidence
+      properties:
+        id: {type: string}
+        revision: {type: integer}
+        state: {type: string}
+        committedOperation: {type: [string, 'null']}
+        approval: {type: [string, 'null']}
+        cluster: {type: string}
+        machine: {type: string}
+        release: {type: string}
+        operation: {type: string}
+        mode: {type: [string, 'null']}
+        assignmentRevision: {type: string}
+        desiredRelease: {type: [string, 'null']}
+        baselineRevision: {type: [integer, 'null']}
+        driftRecord: {type: [integer, 'null']}
+        route: {type: string}
+        maxObservationAgeSeconds: {type: integer}
+        checkValiditySeconds: {type: integer}
+        transportDeadlineSeconds: {type: [integer, 'null']}
+        verificationDeadlineSeconds: {type: [integer, 'null']}
+        maxAttempts: {type: [integer, 'null']}
+        rolloutLimit: {type: integer}
+        approvalPolicy: {type: string}
+        createdBy: {$ref: '#/components/schemas/PlanCreator'}
+        epoch: {type: string}
+        timelineRevision: {type: integer}
+        createdAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time}
+        evidence: {$ref: '#/components/schemas/PlanEvidence'}
+      additionalProperties: false
+    PlanCreator:
+      type: object
+      required: [principal, role]
+      properties:
+        principal: {type: string}
+        role: {type: string}
+      additionalProperties: false
+    PlanDiff:
+      type: object
+      required: [from, to, withheld, unified]
+      properties:
+        from: {type: string}
+        to: {type: string}
+        withheld: {type: boolean}
+        unified: {type: string}
+      additionalProperties: false
+    PlanDryRun:
+      type: object
+      required: [available, reason]
+      properties:
+        available: {type: boolean}
+        reason: {type: string}
+      additionalProperties: false
+    PlanEvidence:
+      type: object
+      required: [validation, dryRun]
+      properties:
+        diff:
+          oneOf:
+          - {$ref: '#/components/schemas/PlanDiff'}
+          - {type: 'null'}
+        baseline:
+          oneOf:
+          - {$ref: '#/components/schemas/PlanBaseline'}
+          - {type: 'null'}
+        validation: {$ref: '#/components/schemas/PlanValidation'}
+        dryRun: {$ref: '#/components/schemas/PlanDryRun'}
+      additionalProperties: false
+    PlanInput:
+      description: An apply-config plan takes mode "no-reboot"; an adopt plan takes no mode, deadlines or attempt limit. transportDeadlineSeconds
+        is at most verificationDeadlineSeconds.
+      type: object
+      required: [releaseId, machine, operation]
+      properties:
+        releaseId: {type: string}
+        machine: {type: string}
+        operation: {type: string, enum: [apply-config, adopt]}
+        mode: {type: [string, 'null'], enum: [no-reboot, null]}
+        expiresInSeconds: {type: [integer, 'null'], minimum: 1, maximum: 604800}
+        maxObservationAgeSeconds: {type: [integer, 'null'], minimum: 1, maximum: 604800}
+        checkValiditySeconds: {type: [integer, 'null'], minimum: 1, maximum: 604800}
+        transportDeadlineSeconds: {type: [integer, 'null'], minimum: 1, maximum: 604800}
+        verificationDeadlineSeconds: {type: [integer, 'null'], minimum: 1, maximum: 604800}
+        maxAttempts: {type: [integer, 'null'], minimum: 1, maximum: 10}
+      additionalProperties: false
+    PlanValidation:
+      type: object
+      required: [result, at, contract, kubernetesVersion, machineryVersion, platformMode]
+      properties:
+        result: {type: string}
+        at: {type: string}
+        contract: {type: string}
+        kubernetesVersion: {type: string}
+        machineryVersion: {type: string}
+        platformMode: {type: string}
+      additionalProperties: false
+    ProfileBody:
+      type: object
+      required: [id, cluster, scope, name, revision, headRevision, createdAt]
+      properties:
+        id: {type: string}
+        cluster: {type: string}
+        scope: {type: string}
+        name: {type: string}
+        revision: {type: [string, 'null']}
+        headRevision: {type: integer}
+        createdAt: {type: string, format: date-time}
+      additionalProperties: false
+    ProfileInput:
+      type: object
+      required: [fragments]
+      properties:
+        fragments:
+          type: array
+          items: {type: string}
+          minItems: 1
+          maxItems: 256
+      additionalProperties: false
+    ProfileRevisionBody:
+      type: object
+      required: [id, cluster, name, fragments, author, createdAt]
+      properties:
+        id: {type: string}
+        cluster: {type: string}
+        name: {type: string}
+        fragments:
+          type: array
+          items: {type: string}
+        author: {type: string}
+        createdAt: {type: string, format: date-time}
+      additionalProperties: false
+    ProvenanceOrigin:
+      type: object
+      required: [revision, digest]
+      properties:
+        revision: {type: string}
+        digest: {type: string}
+      additionalProperties: false
+    ProvenanceRecord:
+      type: object
+      required: [reference, version, source]
+      properties:
+        reference: {type: string}
+        version: {type: integer}
+        encoding: {type: string}
+        member: {type: [integer, 'null']}
+        source: {$ref: '#/components/schemas/ProvenanceSource'}
+        output: {type: string}
+        overriddenBy:
+          oneOf:
+          - {$ref: '#/components/schemas/ProvenanceOrigin'}
+          - {type: 'null'}
+      additionalProperties: false
+    ProvenanceSource:
+      type: object
+      required: [revision, digest, path, occurrence]
+      properties:
+        revision: {type: string}
+        digest: {type: string}
+        path: {type: string}
+        occurrence: {type: integer}
+      additionalProperties: false
+    PublicationInput: {type: object, additionalProperties: false}
+    ReasonInput:
+      type: object
+      required: [reason]
+      properties:
+        reason: {type: string, minLength: 1, description: '1 to 1024 bytes, not blank.'}
+      additionalProperties: false
+    RecoveryBody:
+      type: object
+      required: [epoch, recoveryMode, entry, exit, scopes]
+      properties:
+        epoch: {type: string}
+        recoveryMode: {type: boolean}
+        entry:
+          oneOf:
+          - {$ref: '#/components/schemas/RecoveryEntryRef'}
+          - {type: 'null'}
+        exit:
+          oneOf:
+          - {$ref: '#/components/schemas/RecoveryExitRef'}
+          - {type: 'null'}
+        scopes:
+          type: array
+          items: {$ref: '#/components/schemas/RecoveryScope'}
+      additionalProperties: false
+    RecoveryEntryRef:
+      type: object
+      required: [enteredBy, enteredAt, stoppedAt, reason, restored]
+      properties:
+        enteredBy: {type: string}
+        enteredAt: {type: string, format: date-time}
+        stoppedAt: {type: string, format: date-time}
+        reason: {type: string}
+        restored:
+          type: array
+          items: {$ref: '#/components/schemas/RestoredBackup'}
+      additionalProperties: false
+    RecoveryExitRef:
+      type: object
+      required: [exitedBy, act, at]
+      properties:
+        exitedBy: {type: string}
+        act: {type: string}
+        at: {type: string, format: date-time}
+      additionalProperties: false
+    RecoveryScope:
+      type: object
+      required: [machine, state]
+      properties:
+        machine: {type: string}
+        state: {type: string}
+      additionalProperties: false
+    Reference:
+      type: object
+      required: [kind, version]
+      properties:
+        kind: {type: string}
+        version: {type: integer}
+        encoding: {type: string}
+      additionalProperties: false
+    ReleaseBody:
+      type: object
+      required:
+      - id
+      - cluster
+      - draft
+      - draftRevision
+      - operation
+      - publishedBy
+      - publishedAt
+      - renderer
+      - sources
+      - machines
+      properties:
+        id: {type: string}
+        cluster: {type: string}
+        draft: {type: string}
+        draftRevision: {type: integer}
+        operation: {type: string}
+        publishedBy: {$ref: '#/components/schemas/CreatedBy'}
+        publishedAt: {type: string, format: date-time}
+        renderer: {$ref: '#/components/schemas/RendererBody'}
+        sources:
+          type: array
+          items: {$ref: '#/components/schemas/ReleaseSourceBody'}
+        machines:
+          type: array
+          items: {$ref: '#/components/schemas/ReleaseMachineBody'}
+      additionalProperties: false
+    ReleaseMachineBody:
+      type: object
+      required: [machine, mode, review, publicationObservation]
+      properties:
+        machine: {type: string}
+        mode: {type: string}
+        review: {type: string}
+        publicationObservation: {type: string}
+      additionalProperties: false
+    ReleaseSourceBody:
+      type: object
+      required: [kind, head, revision, headRevision]
+      properties:
+        kind: {type: string}
+        head: {type: string}
+        revision: {type: [string, 'null']}
+        headRevision: {type: integer}
+      additionalProperties: false
+    RendererBody:
+      type: object
+      required: [contract, machineryVersion, machineryChecksum, kubernetesVersion]
+      properties:
+        contract: {type: string}
+        machineryVersion: {type: string}
+        machineryChecksum: {type: string}
+        kubernetesVersion: {type: string}
+      additionalProperties: false
+    ResolutionBody:
+      type: object
+      required: [operation, state, revision, resolvedBy, role, reason, act, epoch, at]
+      properties:
+        operation: {type: string}
+        state: {type: string}
+        revision: {type: integer}
+        resolvedBy: {type: string}
+        role: {type: string}
+        reason: {type: string}
+        act: {type: string}
+        epoch: {type: string}
+        at: {type: string, format: date-time}
+      additionalProperties: false
+    ResolutionRequest:
+      type: object
+      required: [to, reason]
+      properties:
+        to: {type: string, enum: [cancelled]}
+        reason: {type: string, minLength: 1, description: '1 to 1024 bytes, not blank.'}
+      additionalProperties: false
+    RestoredBackup:
+      type: object
+      required: [family, backup, takenAt]
+      properties:
+        family: {type: string}
+        backup: {type: string}
+        takenAt: {type: string, format: date-time}
+      additionalProperties: false
+    ReviewBody:
+      type: object
+      required: [release, machine, mode, configuration, provenance]
+      properties:
+        release: {type: string}
+        machine: {type: string}
+        mode: {type: string}
+        configuration: {type: [string, 'null']}
+        notice: {type: string}
+        provenance:
+          type: array
+          items: {$ref: '#/components/schemas/ProvenanceRecord'}
+      additionalProperties: false
+    RevocationBody:
+      type: object
+      required:
+      - identity
+      - revokedBy
+      - role
+      - reason
+      - act
+      - epoch
+      - at
+      - deniedSubjectsListed
+      - note
+      properties:
+        identity: {type: string}
+        revokedBy: {type: string}
+        role: {$ref: '#/components/schemas/Role'}
+        reason: {type: string}
+        act: {type: string}
+        epoch: {type: string}
+        at: {type: string, format: date-time}
+        deniedSubjectsListed: {type: boolean}
+        note: {type: string}
+      additionalProperties: false
+    RevocationInput:
+      description: Names the identity by identity, or by iss and sub, not both; iss is the configured issuer.
+      type: object
+      required: [reason]
+      properties:
+        identity: {type: string}
+        iss: {type: string}
+        sub: {type: string}
+        reason: {type: string, minLength: 1, description: '1 to 1024 bytes, not blank.'}
+      additionalProperties: false
+    ScopeAccounted:
+      type: object
+      required: [machine, state, revision, start, end, attempts]
+      properties:
+        machine: {type: string}
+        state: {type: string}
+        revision: {type: integer}
+        start: {type: string}
+        end: {type: string}
+        attempts:
+          type: array
+          items: {type: string}
+      additionalProperties: false
+    ScopeAccountingBody:
+      type: object
+      required: [scopes, decidedBy, role, act, epoch, at]
+      properties:
+        scopes:
+          type: array
+          items: {$ref: '#/components/schemas/ScopeAccounted'}
+        decidedBy: {type: string}
+        role: {type: string}
+        act: {type: string}
+        epoch: {type: string}
+        at: {type: string, format: date-time}
+      additionalProperties: false
+    ScopeAccountingRequest:
+      type: object
+      required: [scopes]
+      properties:
+        scopes:
+          type: array
+          items: {$ref: '#/components/schemas/ScopeSettle'}
+          minItems: 1
+          maxItems: 256
+        facts:
+          type: object
+          additionalProperties: {type: string}
+      additionalProperties: false
+    ScopeMarkBody:
+      type: object
+      required:
+      - machine
+      - from
+      - state
+      - observation
+      - missing
+      - dependencies
+      - revision
+      - markedBy
+      - role
+      - act
+      - epoch
+      - at
+      properties:
+        machine: {type: string}
+        from: {type: string}
+        state: {type: string}
+        observation: {type: string}
+        missing:
+          type: array
+          items: {type: string}
+        dependencies:
+          type: object
+          additionalProperties: {}
+        revision: {type: integer}
+        markedBy: {type: string}
+        role: {type: string}
+        act: {type: string}
+        epoch: {type: string}
+        at: {type: string, format: date-time}
+      additionalProperties: false
+    ScopeMarkRequest:
+      type: object
+      required: []
+      properties:
+        facts:
+          type: object
+          additionalProperties: {type: string}
+      additionalProperties: false
+    ScopeReleaseBody:
+      type: object
+      required:
+      - machine
+      - from
+      - state
+      - mark
+      - revision
+      - releasedBy
+      - role
+      - act
+      - epoch
+      - at
+      properties:
+        machine: {type: string}
+        from: {type: string}
+        state: {type: string}
+        mark: {type: integer}
+        revision: {type: integer}
+        releasedBy: {type: string}
+        role: {type: string}
+        act: {type: string}
+        epoch: {type: string}
+        at: {type: string, format: date-time}
+      additionalProperties: false
+    ScopeReleaseRequest:
+      type: object
+      required: []
+      properties:
+        facts:
+          type: object
+          additionalProperties: {type: string}
+      additionalProperties: false
+    ScopeSettle:
+      type: object
+      required: [machine, start, end]
+      properties:
+        machine: {type: string}
+        start: {type: string}
+        end: {type: string}
+      additionalProperties: false
+    SelfApproval:
+      type: object
+      required: [marked, reasons]
+      properties:
+        marked: {type: boolean}
+        reasons:
+          type: array
+          items: {type: string}
+      additionalProperties: false
+    SourceEntry:
+      type: object
+      required: [kind, head, base, revision]
+      properties:
+        kind: {type: string}
+        name: {type: string}
+        machine: {type: string}
+        head: {type: [string, 'null']}
+        base: {type: [integer, 'null']}
+        revision: {type: [string, 'null']}
+        document: {type: [string, 'null']}
+      additionalProperties: false
+    SourceUpdate:
+      type: object
+      required: [draft, entry]
+      properties:
+        draft: {type: string}
+        entry: {$ref: '#/components/schemas/SourceEntry'}
+        ingestion: {type: string}
+      additionalProperties: false
+    TakeoverBody:
+      type: object
+      required:
+      - operation
+      - state
+      - generation
+      - revision
+      - requestedBy
+      - role
+      - reason
+      - act
+      - epoch
+      - at
+      properties:
+        operation: {type: string}
+        state: {type: string}
+        generation: {type: integer}
+        revision: {type: integer}
+        requestedBy: {type: string}
+        role: {type: string}
+        reason: {type: string}
+        act: {type: string}
+        epoch: {type: string}
+        at: {type: string, format: date-time}
+      additionalProperties: false
+    TakeoverInput: {type: object, additionalProperties: false}
+    TakeoverRequest:
+      type: object
+      required: [generation, reason]
+      properties:
+        generation: {type: integer, minimum: 1}
+        reason: {type: string, minLength: 1, description: '1 to 1024 bytes, not blank.'}
+      additionalProperties: false
+    TimelineEntry:
+      type: object
+      required: [revision, epoch, at, kind, entry]
+      properties:
+        revision: {type: integer}
+        epoch: {type: string}
+        at: {type: string, format: date-time}
+        kind: {type: string}
+        entry: {}
+      additionalProperties: false
+    UnreadValue:
+      type: object
+      required: [cause]
+      properties:
+        code: {type: string}
+        cause: {type: string}
+      additionalProperties: false

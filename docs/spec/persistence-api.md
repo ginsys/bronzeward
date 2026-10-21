@@ -1615,6 +1615,17 @@ Design: [§11](../design/Talos_Configuration_and_Machine_Management_Design.md#11
   recovery mode is in effect. A `401`, a `403 identity-revoked` and the
   liveness probe carry neither: they answer a caller who has not
   authenticated, and the epoch is data (§10).
+- **Machine-readable description**: [`api/openapi.yaml`](../../api/openapi.yaml)
+  describes every route of §9.2 in OpenAPI 3.1, with its roles, human-only,
+  `If-Match` and start-mode restrictions as `x-bronzeward-*` extension fields.
+  `internal/api/openapi_test.go` fails when it and the server's route table
+  differ in either direction, and the API tests validate every answer, and
+  every request the server accepted, against its schemas
+  (`internal/api/openapi_response_test.go`). A route change updates it in the
+  same change. Clients generate their request and response types from it with
+  an OpenAPI 3.1 generator of their choosing; idempotency keys, ETags, epochs
+  and token renewal stay hand-written client behavior
+  ([#275](https://github.com/ginsys/bronzeward/issues/275)).
 
 ### 9.2 Resources and routes
 
