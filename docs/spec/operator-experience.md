@@ -220,14 +220,16 @@ timeline:
 A matching release ID never by itself means healthy, fresh or converged: no health check is
 bound in the PoC (`health: none-bound`, `internal/api/observe.go:86`), and every sentence says
 "Health: not checked". Pending convergence and drift are different
-([execution and recovery §6.1](execution-recovery.md#61-detection)). Pending convergence is a
-difference of the machine's artifact digests between `Desired` and `Applied`
+([execution and recovery §6.1](execution-recovery.md#61-detection)). Pending convergence is the
+`Desired` release's artifact digest for the machine differing from the `Applied` digest
 ([execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values)),
-which no read serves ([§11](#11-api-gap-audit), G16). A newly selected release can carry the
-same configuration for an unchanged machine, so the clients show only that the selected release
-differs from the applied one, never that the machine needs to converge. A freeze closes the scope
-gate for commitments and attempts but does not stop an attempt already recorded, and does not
-block an adoption record
+which after an adoption is the digest of the node's own bytes
+([execution and recovery §6.3](execution-recovery.md#63-adopt)), so equal release IDs do not
+rule it out. The machine read does not serve it ([§11](#11-api-gap-audit), G16). A newly
+selected release can carry the same configuration for an unchanged machine, so the clients show
+only that the selected release differs from the applied one, never that the machine needs to
+converge or that it does not. A freeze closes the scope gate for commitments and attempts but
+does not stop an attempt already recorded, and does not block an adoption record
 ([execution and recovery §6.2](execution-recovery.md#62-freeze),
 [§6.3](execution-recovery.md#63-adopt) requirement 4.5). See
 [W3](operator-experience-wireframes.md#w3-machine-detail).
@@ -1010,7 +1012,7 @@ accepted limitation.
 | G13 | A human session's mutation takes no expected-epoch precondition: only `Idempotency-Key` and `If-Match` are checked (`internal/api/api.go:388-409`), and the epoch is reported only in an answer (`internal/api/api.go:318-319`). After a committed write's answer is lost and a restore removes its record, the same request with the same key executes afresh in the new epoch ([persistence and API §7.2](persistence-api.md#72-behavior)); a read before repeating leaves a race. An automation token is bound to its issuing epoch and refused `401` in any other (`internal/api/api.go:297-303`) | repeating an ambiguous write ([§8](#8-states-every-view-must-handle), C5, G3, [W11](operator-experience-wireframes.md#w11-empty-withheld-error-and-offline-states)) | none for a human session: the client compares only the epoch it last saw; #253 adds a server-enforced epoch check or explicitly accepts the residual risk |
 | G14 | No read of the process's start mode: `GET /recovery` serves epoch, recovery mode, entry, exit and scopes (`internal/api/recovery_exits.go:123-129`), the headers carry only `Bronzeward-Epoch` and `Bronzeward-Recovery-Mode` (`internal/api/api.go:318-324`), and a recovery start shows only in a `409 recovery-mode-active` refusal (`internal/api/recovery_exits.go:211-213`) | the recovery banner and `status` stating that plan creation, approval and unfreeze wait for a normal restart ([§5.9](#59-recovery-after-a-restore)) | the answers of those three routes: past the role check, a recovery-start refusal shows a recovery start and any other answer a normal one (`internal/api/api.go:331-345`), and recovery entry is refused on a normal start (`internal/api/api.go:348-351`); nothing shows it before one is sent, so actions cannot be disabled beforehand and the banner holds until the next such answer |
 | G15 | No principal display name: bodies carry principal identifiers only (`internal/api/acts.go:19-30`, `internal/api/releases.go:53`), and no route maps one to a subject or name | showing who published, planned, approved or entered recovery | shortened principal identifiers |
-| G16 | No convergence status: a machine body serves `desired` and `applied.release` but not whether their artifact digests for the machine differ (`internal/api/reads.go:155-167`), which is what pending convergence means ([execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values)) | showing whether a machine still needs a plan ([§2.4](#24-desired-applied-and-observed), [§5.2](#52-inventory), [W2](operator-experience-wireframes.md#w2-machines)) | the release difference only, never labelled as pending convergence |
+| G16 | No convergence status: a machine body serves `desired` and `applied.release` but not whether the `Desired` release's artifact digest for the machine differs from the `Applied` digest (`internal/api/reads.go:155-167`), which is what pending convergence means ([execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values)); after an adoption the `Applied` digest is the baseline's ([execution and recovery §6.3](execution-recovery.md#63-adopt)), so equal release IDs do not rule it out | showing whether a machine still needs a plan ([§2.4](#24-desired-applied-and-observed), [§5.2](#52-inventory), [W2](operator-experience-wireframes.md#w2-machines)) | the release difference only, never labelled as pending convergence |
 
 Not gaps, by design: no client dispatch or apply route
 ([design §12.7](../design/Talos_Configuration_and_Machine_Management_Design.md#127-application-approval-and-dispatch-boundary));
