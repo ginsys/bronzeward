@@ -14,6 +14,8 @@ the certificate's actual expiry, counting TCP dials to detect reconnection.
 
 This fixture is separate from the accepted PoC and its running demo. It does not
 change Bronzeward authentication, approval or provider policy.
+Both runner and exporter refuse Python optimization before argument parsing,
+resource creation or evidence access, so their assertion gates cannot disappear.
 
 ## Recorded results
 
@@ -36,6 +38,9 @@ the recorded revisions or the bundler from a fresh clone, find this PR with
 `gh pr list --repo ginsys/bronzeward --state all --head docs/162-talosctl-oidc`
 and fetch `git fetch origin refs/pull/<PR-number>/head`. The published history
 through the successful `3ddf133` run is retained without rewriting.
+Later exporter repairs and the runner's startup refusal for optimized Python
+were verified offline. No new live result is claimed for the later runner;
+its scenario and cleanup body remain unchanged from the recorded successful run.
 
 The tests demonstrate certificate renewal, role denial, cached-token behavior
 after removal, existing connections beyond certificate expiry, administrator
@@ -143,7 +148,8 @@ Supply absolute, non-symlink paths as in the recorded profile; other path forms
 are not qualified. The scan covers raw and JSON-escaped known values and generic
 and Ed25519 private-key headers, and records the exporter's SHA-256. The eight
 Python checks include escaped-value and unknown-Ed25519-key positive controls,
-a safe-metadata negative control, and refusal of all three optimization modes.
+a safe-metadata negative control, and refusal of all three optimization modes
+by both entry points, with ordinary `--help` succeeding as a control.
 Diagnostic projections cannot establish the absence of other Keycloak errors.
 
 To rebuild the top-level results and SHA-256 manifest, supply each export and

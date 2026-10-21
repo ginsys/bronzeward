@@ -928,7 +928,7 @@ OpenBao policies constrain paths and operations but do not know which database p
 
 These are component identities inside the controller. The application roles that humans and automation hold are §13.7's and are distinct from them: the `publisher` application role grants no provider access of its own.
 
-The [Talos OIDC credential investigation](research/20261021-talosctl-oidc.md) evaluates a separate operator-access companion and native issuance using disposable Talos/IdP fixtures. Cached tokens survived account/group removal, a held connection worked after certificate expiry, and an administrator minted a longer-lived certificate. The research recommends deferring adoption; it does not change the provider-held executor contract or application authentication. Separate operator-access and service-credential decisions remain tracked, with no dependency imposed on the CLI/web workflows.
+The [Talos OIDC credential investigation](research/20261021-talosctl-oidc.md) evaluates a separate operator-access companion and native issuance using disposable Talos/IdP fixtures. Cached tokens survived group removal and account disablement, a held connection worked after certificate expiry, and an administrator minted a longer-lived certificate. The research recommends deferring adoption; it does not change the provider-held executor contract or application authentication. Separate operator-access and service-credential decisions remain tracked, with no dependency imposed on the CLI/web workflows.
 
 ### 13.3 Enrolment security
 
