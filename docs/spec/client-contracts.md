@@ -9,10 +9,11 @@ It implements no client, adds no route and changes no role, credential policy or
 behaviour. Each design decision it needs is listed in [§13](#13-alternatives-and-open-choices)
 as an open choice with a recommendation, for the owner to settle.
 
-It builds on the operator journeys proposed for
-[Design the operator journeys for bronzewardctl and the web UI](https://github.com/ginsys/bronzeward/issues/252),
-which are not landed yet. References of the form *journeys §8* and gap IDs `G1`-`G12` point at
-that proposal, whose `G13`-`G15` appear here as `G21`-`G23`; this document adds `G13`-`G20`.
+It builds on the operator journeys of [operator experience](operator-experience.md), proposed for
+[Design the operator journeys for bronzewardctl and the web UI](https://github.com/ginsys/bronzeward/issues/252).
+References of the form *journeys §8* and gap IDs `G1`-`G12` point at that document. Its
+`G13`-`G16` appear here as `G21`-`G24`, and its `G17` is this document's `G18`; this document
+adds `G13`-`G17`, `G19` and `G20`.
 
 **Facts and proposals are kept apart.** A statement about existing behaviour cites the contract
 section or the source line it comes from, read at revision `9b5804a` (`internal/api/api.go:374`
@@ -188,7 +189,7 @@ ETag (`internal/api/ingestions.go:152-153`).
 
 ## 4. API gap audit
 
-The fifteen gaps the journeys found, checked against the code above, plus eight this audit adds. G21-G23 are the journeys' G13-G15 (expected epoch, start mode, principal display name), numbered last because they were added to the journeys last.
+The seventeen gaps the journeys found, checked against the code above, plus seven this audit adds. G21-G24 are the journeys' G13-G16 (expected epoch, start mode, principal display name, convergence status), numbered last because they were added to the journeys last; the journeys' G17 is G18 here.
 Each has a disposition: an **API issue** proposed in [§14](#14-proposed-api-gap-issues-and-downstream-refinement),
 a **client composite** over existing routes, an **accepted limitation**, or a **decision**
 listed in [§13](#13-alternatives-and-open-choices). Every disposition, including "accepted", is
@@ -214,12 +215,13 @@ supported.
 | G15 | The contract's prose describes the `reset` stream event, but its ingest and publish event-type lists omit it, so a client built from the lists does not expect it | `internal/api/operations.go:283-285`; [persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress) | contract correction C1 (documentation only) |
 | G16 | No request-ID response header: a client learns the request ID only from a problem's `instance` | `internal/api/problem.go:84-90`; no other header set | API issue A3 |
 | G17 | A request with an unsupported method on a known path is answered by the catch-all `404`, not `405` | `internal/api/api.go:233-235` (inferred from `ServeMux` method patterns; untested) | accepted; clients treat `404 not-found` on a known route as "not supported by this server" only together with A2's version read |
-| G18 | The settle floor and transport deadlines that bound recovery accounting are deployment settings no route serves | [execution and recovery §5.2](execution-recovery.md#52-accounting-a-lost-response); `examples/bronzeward.yaml:29-44` | folded into A2 (served as read-only installation settings) |
+| G18 | The settle floor and transport deadlines that bound recovery accounting are deployment settings no route serves, so a client cannot compute when the end observation may begin (the journeys' G17) | [execution and recovery §5.2](execution-recovery.md#52-accounting-a-lost-response); `examples/bronzeward.yaml:29-44` | folded into A2 (served as read-only installation settings) |
 | G19 | The fixture issuer mints tokens but offers no authorization, token, device or revocation endpoint, so no interactive sign-in can be tested against it | `fixtures/oidc/issuer/issuer.go:1-6` ("no login, no clients, no refresh"), `fixtures/oidc/issuer/issuer.go:110-123` (discovery and key set only), `fixtures/oidc/main.go:22-25` | validation-fixture issue A5 |
 | G20 | `503` answers carry no `Retry-After`, and the contract gives no retry guidance for `dependency-unavailable`, `transient-conflict` or `epoch-superseded` | search of `internal/` for `Retry-After`; [persistence and API §9.4](persistence-api.md#94-errors) | client rule in [§8.2](#82-errors); no API change proposed |
 | G21 | A human's mutation takes no expected-epoch precondition: only `Idempotency-Key` and `If-Match` are checked (`internal/api/api.go:388-409`), and the epoch is reported only in an answer (`internal/api/api.go:318-319`). After a committed write's answer is lost and a restore removes its record, the same request with the same key executes afresh in the new epoch ([persistence and API §12.4](persistence-api.md#124-restore-and-idempotency)); the read before repeating of [§8.4](#84-idempotency-and-ambiguous-responses) item 3 leaves a race. A service principal is already checked: its token carries its epoch, and the write's own transaction refuses one from another epoch with `401` | `internal/api/api.go:388-409`, `internal/api/api.go:318-319`; service check: `internal/auth/automation.go:51-52`, `internal/api/idempotency.go:28-30`, `internal/api/idempotency.go:47-49`, `internal/api/api.go:297-303` | decision D10; API issue A6 if D10 chooses a server check |
 | G22 | No read of the process's start mode. `GET /recovery` serves epoch, recovery mode, entry, exit and scopes, and the headers carry only `Bronzeward-Epoch` and `Bronzeward-Recovery-Mode`. Past the role check, a recovery start shows only in an answer: a `409 recovery-mode-active` without a `scope` member, to any request but the entry before the entry commits and to plan creation, approval or unfreeze after it, or any recovery-entry answer except its not-a-recovery-start refusal. A normal start shows only in that refusal: a plain `409 conflict` with neither an `epoch` nor a `request` member, while every other `409 conflict` the entry answers carries `epoch`. The scope refusals that share the `recovery-mode-active` code carry `scope` | `internal/api/recovery_exits.go:123-129`, `internal/api/api.go:318-324`; process refusals: `internal/api/api.go:241-243`, `internal/api/api.go:337-351`, `internal/api/recovery_exits.go:211-213`, `internal/api/routes.go:120-127`; entry: `internal/api/recovery_entries.go:91-92`, `internal/api/recovery_entries.go:106-108`, `internal/api/recovery_entries.go:133-135`, `internal/api/idempotency.go:65-67`; scope refusals: for example `internal/api/plans.go:226-227` | API issue A2 (the start mode served with the version); until then the client reading of [§8.5](#85-epoch-changes), with the limit that nothing shows the mode before such an answer |
 | G23 | No principal display name: bodies carry principal identifiers only, and no route maps one to a subject or name | `internal/api/acts.go:19-30`, `internal/api/releases.go:53`, `internal/api/plans.go:195`, `internal/api/approvals.go:43`, `internal/api/recovery_entries.go:79`; no such route in `internal/api/routes.go:78-136` | API issue A7; until then clients show shortened principal identifiers |
+| G24 | No convergence status: the machine body serves `desired` and `applied.release`, and compares the artifact digests only to match an observation, never serving them, so a client cannot tell whether the `Desired` release's digest differs from the `Applied` one, which is what pending convergence means. After an adoption the `Applied` digest is the baseline's, so equal or different release IDs do not settle it | `internal/api/reads.go:155-166`; [execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values), [§6.3](execution-recovery.md#63-adopt) | API issue A4 (a pending-convergence member on the machine); until then clients show the release difference only, never labelled as pending convergence |
 
 Not gaps, by design: no dispatch or apply route, no token administration route, no secret
 browser, and no WebSocket (polling and SSE only, [persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress)).
@@ -998,7 +1000,9 @@ stream at a fixed interval. Closes G13 and G16, and the idle-cut risk in
 
 **A4. Navigation reads for the journeys.** A list of ingestions (filterable by state and machine),
 the ingestion named in its operation's `subject`, and list filters: plans by `state` and
-`machine`, machines by `cluster`. Closes G3, G10 and the first part of G9.
+`machine`, machines by `cluster`; and a member on the machine stating whether it is pending
+convergence, computed from the digests the server already compares. Closes G3, G10, G24 and the
+first part of G9.
 
 **A5. A sign-in-capable test issuer.** Extend the fixture issuer, or add a pinned identity
 provider to the fixtures, with authorization-code and PKCE, refresh with rotation, revocation,
@@ -1037,7 +1041,8 @@ dependencies below in place:
 | [#263](https://github.com/ginsys/bronzeward/issues/263) validation | A5, D8 | 11.5, 12 |
 
 A7 blocks no ticket: until it lands, the tickets from #256 to #261 show shortened principal
-identifiers (G23).
+identifiers (G23). A4's convergence member does not block the inventory views of #254 and #255
+either: until it lands they show the release difference only (G24).
 
 ## 15. Assumptions and limits
 
