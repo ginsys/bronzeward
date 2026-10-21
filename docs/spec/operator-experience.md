@@ -132,8 +132,8 @@ machine:
 | Seen | Meaning | Source |
 | --- | --- | --- |
 | `!bwref registry/example-pass` in a source | A reference to a secret held by the provider at the declared version; the value is never stored in the database or served | [compilation §5](compilation.md#5-reference-grammar-and-declaration), design [§6.9](../design/Talos_Configuration_and_Machine_Management_Design.md#69-secret-references-and-validation-stages) |
-| `<redacted:REF@VERSION>` in a review | The rendered field came from that reference; the value exists in the encrypted artifact | [compilation §8.3](compilation.md#83-redaction) |
-| `<redacted:schema>`, `<redacted:value>`, `<redacted:paired>`, `<redacted>` | Redacted because the pinned machinery marks the field secret, because the text is a copy of a resolved value, because it is one side of an unchanged diff pair, or because a path itself holds a value | [compilation §8.3](compilation.md#83-redaction) |
+| `<redacted:REF@VERSION>` or `<redacted:REF@VERSION#N>` in a review | The rendered field came from that reference, or from the member at position N of a mapping reference; the value exists in the encrypted artifact | [compilation §8.3](compilation.md#83-redaction) |
+| `<redacted:schema>`, `<redacted:value>`, `<redacted:paired>`, `<redacted>` | Redacted because the pinned machinery marks the field secret, because the text is a copy of a resolved value, because it is a base leaf of a diff whose output holds a redaction token and the output does not show it unchanged at the same path, or because a path itself holds a value | [compilation §8.3](compilation.md#83-redaction) |
 | `configuration: null` with `notice` | The review is withheld because no redacted form could be produced (`internal/api/releases.go:157-158`); nothing is known from it about the content | [compilation §8.3](compilation.md#83-redaction) |
 | `team: ""` | An empty value in the rendered review: no redaction token, and no provenance record names its path. It is empty in a source only if that source revision has been read and shows it | the document and the provenance list |
 
@@ -211,7 +211,7 @@ timeline:
 | no open drift, observed.release = applied.release | "The configuration read at `<observed.at>` matched what Bronzeward last verified (`<applied.release>`, by `<applied.source>`)." |
 | as above, applied.source = adoption | adds "Adopted from the node's own bytes; the release's compiled configuration may differ. Only an `apply-config` plan's diff shows whether it does." |
 | desired ≠ applied.release, no open drift | adds "Pending convergence: `<desired>` is selected, not applied." |
-| openDrift not null | "Drifted since `<opened>`: a read differed from what Bronzeward last verified (`<applied.release>`)." If observed.release = desired, adds "It equals the selected release; that does not close the drift." |
+| openDrift not null | "Drifted since `<at of the openDrift.observation observation>`: a read differed from what Bronzeward last verified (`<applied.release>`)." If observed.release = desired, adds "It equals the selected release; that does not close the drift." |
 | no open drift, observed.release null | "The configuration read at `<observed.at>` matched neither `Applied` nor `Desired`, and no drift is open; an operation may hold the machine. See the timeline." |
 | newest observation newer than observed.at, with unread causes | adds "The latest read at `<time>` could not read: `<causes>`." |
 | applied null | "Not applied or adopted by Bronzeward." |
@@ -249,8 +249,8 @@ Sources: `internal/api/routes.go:98-135`. The token administration for automatio
 server-side command (`cmd/bronzeward/token.go:22-26`); neither client offers it.
 
 **Proposed:** both clients show the roles the current credential holds, and disable an action
-the identity cannot take with the reason ("needs approver", "humans only"). The API does not
-answer which roles an identity holds today: roles appear only in a 403 body
+the identity cannot take with the reason ("needs approver", "humans only"). No response tells
+an identity which roles it holds: a 403 body lists only the roles the route accepts
 (`internal/api/api.go:372-384`). Until #253 resolves this gap ([§11](#11-api-gap-audit), G1), the
 clients cannot hide actions correctly, and the server's refusal stays authoritative.
 
@@ -278,7 +278,7 @@ bronzewardctl
   profile set | rm | show | history
   assignment set | rm | show | history
 
-  import start                        --machine --draft [--review] [--marks-file]
+  import start                        --machine --draft [--review]
   import status | review | mark | continue | takeover | abandon
 
   publish <draft>                     waits for the publish operation unless --no-wait
@@ -314,7 +314,7 @@ Global: --context, -o table|json|yaml, --no-input, --no-wait, --idempotency-key,
   `--no-wait` returns at once.
 - Names are accepted where the API keys by name (fragments, profiles and the draft path) and
   identifiers everywhere else. A cluster is addressed by its ID and displayed with its recorded
-  `name` beside it (`cl_9fd… (lab-a)`); the client resolves no names. Machines have no human name in the API
+  `name` beside it (`cl_9fd… (lab-a)`); the client resolves no names, except fragment names within a draft for a profile's pins ([§5.4](#54-editing-fragments-profiles-and-assignments)). Machines have no human name in the API
   ([§11](#11-api-gap-audit), G8), so tables show the Talos endpoint and node ID beside the
   identifier.
 - No command applies configuration. Dispatch is the controller's; the clients plan, approve,
@@ -364,7 +364,7 @@ returns a different principal is shown as a new sign-in, never silently continue
 $ bronzewardctl machine list --cluster cl_9fd…m3ka
 MACHINE         ENDPOINT          DESIRED        APPLIED (SOURCE)          OBSERVED             STATE
 mch_k2p…7xqa    10.5.0.2:50000    rel_fgqv…j6m   rel_fgqv…j6m (operation)  =applied, 2m ago     matches applied
-mch_tqhc…35uq   10.5.0.3:50000    rel_h7rt…2bd   rel_fgqv…j6m (adoption)   =applied, 1m ago     pending convergence
+mch_tqhc…35uq   10.5.0.3:50000    rel_p4nx…8wd   rel_fgqv…j6m (adoption)   =applied, 1m ago     pending convergence
 mch_w4ze…n3fa   10.5.0.4:50000    rel_fgqv…j6m   rel_fgqv…j6m (operation)  no match, 5m ago     drifted, frozen
 Health is not checked in this installation.
 ```
@@ -422,8 +422,11 @@ Facts: review needs encrypted staging and is requested when the import starts
 `Cache-Control: no-store` (`internal/api/review.go:18-31`). It may contain secrets the schema
 did not recognise; that is why it exists ([compilation §3.6](compilation.md#36-operator-review)).
 A mark is refused with the rule and the mark's position, never its path
-([compilation §3.6](compilation.md#36-operator-review), item 4). Continuation fails if the draft
-moved meanwhile (`internal/api/runner.go:385`). Marks are HMAC-keyed in the idempotency
+([compilation §3.6](compilation.md#36-operator-review), item 4). A continuation is accepted
+(`202`) and runs in the background; if the draft moved meanwhile, that run ends the operation
+`failed` and abandons the claim itself, so nothing is left to abandon
+(`internal/api/continuations.go:60-63`, `internal/api/runner.go:108-111`,
+`internal/api/runner.go:384-386`, `internal/api/runner.go:457-468`). Marks are HMAC-keyed in the idempotency
 fingerprint and never stored (`internal/api/routes.go:20-23`).
 
 **Proposed**, as a candidate for #253 to qualify against
@@ -432,7 +435,7 @@ through an in-process pager with no temporary file and no `$EDITOR`. It is refus
 is not a terminal, with no override, and it has no `-o json`, `-o yaml`, export or save form: a
 warning would not stop ordinary redirection or log retention. This limits what the client
 itself persists; it does not prevent capture by the terminal, a recording, a host crash dump or
-the operator copying it. Marks come from the prompt, `--marks-file` or stdin, never from argv,
+the operator copying it. Marks come from the prompt or stdin, never from argv or a client-read file,
 because a mark's path can name a secret mapping key
 ([persistence and API §7.1](persistence-api.md#71-the-key); [§9](#9-secret-handling-in-the-clients),
 [§12](#12-alternatives-and-recommendations) C4).
@@ -442,14 +445,40 @@ Failure branches the clients must show, each from `GET /ingestions/{id}` states 
 
 ```text
 $ bronzewardctl import continue ing_6fd…q2la
-Refused: precondition-failed. The draft changed after this import paused.   # exit 1
-The import was not applied. Abandon it and import again against the draft's current revision:
-  bronzewardctl import abandon ing_6fd…q2la
+Continued (operation op_zcfw…5mcm) ... failed: precondition-failed. The draft changed after
+this import paused, so the import was not applied and its claim is abandoned.   # exit 4
+Import again against the draft's current revision:
+  bronzewardctl import start --machine mch_b3c…aa2q --draft drf_2rmp…457a --review
 $ bronzewardctl import status ing_6fd…q2la
 State: held, lease lapsed 3m ago (owner generation 2). Encrypted staging.
 Take it over to resume, or abandon it:
   bronzewardctl import takeover ing_6fd…q2la
 ```
+
+A machine recorded from an existing cluster has no `Applied` yet, and an `apply-config` plan
+for it is refused until it is handed over (`internal/api/plans.go:272-275`). The handover
+publishes the import draft and adopts the machine with an adopt plan that binds no drift record
+([execution and recovery §6.3](execution-recovery.md#63-adopt), existing-cluster handover;
+[acceptance plan S3](acceptance-plan.md#s3-approval), handover part):
+
+```text
+$ bronzewardctl publish drf_2rmp…457a                          # role: publisher
+Publishing draft drf_2rmp…457a revision 2 (operation op_t6j…w2na) ... succeeded.
+Release rel_9vbn…c1ta is now Desired for 1 machine. Nothing has been sent to any machine.
+mch_b3c…aa2q has no Applied: hand it over with an adopt plan.
+$ bronzewardctl plan create --release rel_9vbn…c1ta --machine mch_b3c…aa2q --operation adopt
+Plan pln_h2d…r8qa proposed: adopt, handover (no drift record, no baseline revision).
+It sends nothing to the machine. It is not approved.
+$ bronzewardctl approve pln_h2d…r8qa                           # role: approver, human
+...
+Approved. The controller records the adoption without sending anything; Applied becomes
+rel_9vbn…c1ta (adoption) once it does.
+```
+
+The approval screen is §5.6's, with the adoption baseline evidence in place of a diff
+(`internal/api/plans.go:138-168`). After the handover the machine may still be pending
+convergence: an adoption records the digest of the node's own bytes
+([§2.4](#24-desired-applied-and-observed)).
 
 ### 5.4 Editing fragments, profiles and assignments
 
@@ -496,7 +525,8 @@ fragment `document` is never in argv: `--file` or stdin.
 $ bronzewardctl publish drf_8kdq…z6pa          # role: publisher
 Publishing draft drf_8kdq…z6pa revision 6 (operation op_m2a…z7ka) ... succeeded.
 Release rel_h7rt…2bd is now Desired for 1 machine. Nothing has been sent to any machine.
-Next: bronzewardctl plan create --release rel_h7rt…2bd --machine mch_b3c…aa2q
+Next (mch_b3c…aa2q has an Applied, so apply-config; a machine with none is handed over first, §5.3):
+  bronzewardctl plan create --release rel_h7rt…2bd --machine mch_b3c…aa2q --operation apply-config
 $ bronzewardctl release show rel_h7rt…2bd
 Release rel_h7rt…2bd  cluster cl_9fd… (lab-a)  published by ops-ben (publisher) 10:02
 Renderer   contract v1.13, machinery v1.13.6, Kubernetes v1.34.1
@@ -534,7 +564,7 @@ Plan pln_f645…cawy  proposed  expires 2026-10-22 10:05 (in 23h59m)
 Evidence
   Validation    passed at publication (contract v1.13, machinery v1.13.6)
   Dry run       not available: the PoC has none
-  Diff          whole redacted configuration, applied rel_fgqv…j6m -> rel_h7rt…2bd
+  Diff          whole redacted configuration, applied rel_9vbn…c1ta -> rel_h7rt…2bd
     @@ machine.nodeLabels @@
     +  team: storage
 Self-approval   predicted: you published this release. The approval records the actual
@@ -657,33 +687,46 @@ made again.
 ```text
 $ bronzewardctl status
 Recovery mode: on since 10:42 (epoch ep_r2l…). Scopes: 1 pre-restore-unaccounted, 1 unresolved, 1 ready.
-Server: started for recovery. Plan creation, approval and unfreeze are refused, and imports and
-  publications are accepted but complete only after a normal restart (no job worker runs).
-  Recovery mode stays on after that restart.
+Server: started for recovery. Plan creation, approval and unfreeze are refused. Imports
+  complete here; publications are accepted but complete only after a normal restart (no
+  publish worker runs). Recovery mode stays on after that restart.
 Drafts can be edited. No scope can commit, attempt or adopt until it is released; the
   pre-restore-unaccounted scope also refuses planning and approval.
 $ bronzewardctl recovery status
 MACHINE         SCOPE STATE              NEXT
-mch_k2p…7xqa    pre-restore-unaccounted  account its observations
+mch_k2p…7xqa    pre-restore-unaccounted  account the scope (recovery scope-account)
 mch_tqhc…35uq   ready                    release (recovery-admin)
-mch_b3c…aa2q    unresolved               account attempt 1 of op_q8r…t2na
-$ bronzewardctl recovery account op_q8r…t2na --attempt 1 --start obs_a… --end obs_b…
-Shows: transport deadline 10:07:03; executor taken over at 10:42 (entry); start is the first
-successful read after the deadline; end began at least the settle floor (30s) after the latest
-of the deadline, the takeover and the start.
+mch_b3c…aa2q    unresolved               restored op_q8r…t2na holds it: classified after the
+                                         normal restart, then re-mark
+$ bronzewardctl recovery scope-account mch_k2p…7xqa --start obs_a… --end obs_b…
+Shows: restore stopped at 10:31; the floor starts at that stop plus the maximum transport
+deadline, or at a later restored attempt's deadline; start is the first successful read after
+it; end began at least the settle floor (30s) after the latest of that point and the start.
 Resource version unchanged between them.
-This records your judgment that no request from attempt 1 can still land. It may already have
+This records your judgment that no request sent before the restore, from any attempt the
+restored journal shows or one it lost, can still land on this machine. It may already have
 landed; nothing here shows whether it did. The settle floor is a minimum wait, not a proven
 bound: a request landing after this can overwrite work admitted once the scope is released,
 and would be seen only as drift at a later observation.
 Explanation (required if the resource version moved): <empty>
-Type the attempt ID to record this accounting: att_…
+Type the machine ID to record this accounting: mch_k2p…7xqa
+Recorded. Scope mch_k2p…7xqa is now blocked until it is marked.
 ```
 
-Recovery accounting is an operator judgment with named refusals: an already-accounted attempt,
-an executor not stopped or taken over, a start that is not the first read after the transport
-deadline, an end before the settle floor, or a moved resource version without an explanation
-(`internal/api/settle.go:56-154`;
+Scope accounting is step 1's decision: it accounts every unaccounted attempt on the machine at
+once, and is refused on a scope that is not pre-restore unaccounted. The scope then becomes
+`unresolved` if a restored operation still holds it, and otherwise `blocked` until it is marked
+(`internal/api/recovery_accountings.go:143-226`;
+[execution and recovery §7.3](execution-recovery.md#73-procedure), step 1). An `unresolved`
+scope is not accounted again: it waits for its operation's classification after the normal
+restart, or, for an operation with no attempt, a `recovery-admin` resolution, and is then
+re-marked ([§7.4](execution-recovery.md#74-scope-states-in-recovery)). Both accountings, this
+one and the per-attempt accounting of a lost response outside a restore (`recovery account`,
+[§5.7](#57-operation-tracking)), are operator judgments with the same named settle refusals: a
+start that is not the first read after the deadline, an end before the settle floor, or a moved
+resource version without an explanation (`internal/api/settle.go:111-154`). The per-attempt
+accounting also refuses an attempt already accounted and an executor not stopped or taken over
+(`internal/api/settle.go:50-67`;
 [execution and recovery §5.2](execution-recovery.md#52-accounting-a-lost-response)). The
 decision records a judgment, not evidence that the request can no longer land, and the residual
 late-landing risk stays explicit there. Marking, releasing a scope and exiting are separate
@@ -704,8 +747,9 @@ a newly published release, so drafting, importing and publishing must stay reach
 ([§7.4](execution-recovery.md#74-scope-states-in-recovery)). Separately, the process started
 for recovery serves only liveness and the entry act before entry; after entry it serves the
 recovery routes, the authority-removing acts and the installation-wide acts, but refuses plan
-creation, approval and unfreezing, and runs no job worker, so an import or publication it accepts
-completes only after the normal restart. The operator may restart it normally once entry has
+creation, approval and unfreezing. It runs no publish worker, adopter, drift detector or
+executor, so a publication it accepts completes only after the normal restart, while an import
+runs at once on this process (`internal/api/api.go:189-197`, `internal/api/runner.go:28-37`). The operator may restart it normally once entry has
 committed, and recovery mode continues
 (`internal/api/routes.go:18`, `internal/api/routes.go:120-127`;
 `docs/spec/execution-recovery.md:1286-1298`, `docs/spec/execution-recovery.md:1337-1342`). Entry is available only on a server started for
@@ -794,7 +838,7 @@ sending with "approval is for humans".
 | Conflict | `412 precondition-failed`, `409 conflict` | stop and point at the newer state | show both and offer reload; never auto-merge |
 | Ambiguous response | timeout or connection loss after sending | before exiting 3, offers to repeat the request it still holds in memory with the same key; after exit, prints the key and the resource to read | "Unknown whether this was saved"; [Repeat exactly] only while the page holds the request, for the same sign-in and epoch |
 | Replayed | `Idempotent-Replayed: true` (`internal/api/idempotency.go:75-81`) | "Already done earlier; showing that result" | same |
-| Key reused | `422 idempotency-key-reused` | the earlier request differed; nothing was done | same |
+| Key reused | `422 idempotency-key-reused` | the request could not be matched to the earlier one under that key (it differed, or the recorded digest-key version can no longer be computed, [persistence and API §7.1](persistence-api.md#71-the-key)); nothing was done; retry under a new key | same |
 | Offline | no connection | retry reads with backoff; never queue writes | banner; actions disabled; last-read time shown |
 | Authentication refused | `401 unauthenticated`: not accepted, possibly but not necessarily because it expired | renew and repeat reads; repeat a pending write with the same key only if the renewed token is the same principal and the epoch is unchanged | same |
 | Principal or epoch changed with a write pending | renewal returned another principal, a context switch, or a new `Bronzeward-Epoch` | the pending write is set aside: not repeated and not sent under a new key; the client reads the current resource and the operator decides afresh | same, with the pending write shown as "outcome unknown: it may already have been committed", and its repeat disabled |
@@ -828,7 +872,11 @@ it is compared, is #253's to decide.
 **Proposed** journey requirements. The mechanisms are #253's.
 
 1. No value is ever put in argv by a documented journey: fragment documents, ingestion
-   documents, marks and tokens come from a file, stdin, a prompt or the browser.
+   documents and tokens come from a file, stdin, a prompt or the browser. Marks come only from
+   a prompt, stdin or the browser: a mark's path can name a secret mapping key, and the
+   server holds marks in the serving process only, never stored
+   ([compilation §3.6](compilation.md#36-operator-review), item 3). A client-read marks file
+   would be a stored copy; an operator who pipes marks from a file owns that copy.
 2. The protected review is shown and discarded: nothing the client controls keeps it, so no
    temporary file, editor swap file, shell history, log, crash report, telemetry, clipboard
    helper, browser storage, service worker cache, HTTP cache, request journal or export. It has
@@ -900,7 +948,7 @@ accepted limitation.
 
 | ID | Gap | Journey affected | Current workaround |
 | --- | --- | --- | --- |
-| G1 | No identity, role or capability read; roles appear only in a 403 body (`internal/api/api.go:372-384`) | showing who is signed in and which actions are allowed | none; let the server refuse |
+| G1 | No identity, role or capability read; a 403 body lists only the roles the route accepts, never the caller's (`internal/api/api.go:372-384`) | showing who is signed in and which actions are allowed | none; let the server refuse |
 | G2 | No version or compatibility read; only unauthenticated `GET /livez` (`internal/server/server.go:19-21`) | client/server compatibility, context setup | none |
 | G3 | An operation does not name its ingestion; only the ingestion's 202 body links them (`internal/api/reads.go:336-349`) | resuming an import after the client lost the 202 | keep the 202 body; within the same principal and epoch, the identical request with the same key replays it |
 | G4 | A draft does not name its release; releases have no draft filter (`internal/api/inventory.go:346-353`, `internal/api/releases.go:215`) | "what did this draft publish?" | the publish operation's `result.release` |
@@ -926,7 +974,7 @@ general secret browser (milestone exclusion).
 | C1 | CLI vocabulary | noun-verb (`plan create`); verb-noun (`create plan`); workflow verbs only | Noun-verb plus `publish` and `approve` as top-level verbs: matches the API resources and `kubectl`/`talosctl`, keeps help discoverable, and keeps the three distinct steps as distinct words | accepted direction in the coordinating assessment; usability unmeasured |
 | C2 | Web navigation | resource tabs only; a single change wizard; machine hub plus a staged change pipeline | Hub plus pipeline: operators start from a machine's state, while publish, plan and approve stay separate pages, buttons and roles, which a wizard would blur | accepted direction in the coordinating assessment; usability unmeasured |
 | C3 | Editing | native YAML editor; forms over the Talos schema; both | Native YAML for documents and structured controls for metadata only: the design makes native Talos configuration canonical ([design §6.1](../design/Talos_Configuration_and_Machine_Management_Design.md#61-canonical-model)), and a schema form would be a second model to keep in step with every Talos version | accepted direction in the coordinating assessment; usability unmeasured |
-| C4 | Protected review in the CLI | terminal pager in process; temporary file in `$EDITOR`; web-only review | Terminal pager in process; non-terminal output refused with no override; no JSON, YAML, save or export form; marks by prompt, file or stdin. An editor leaves swap and backup files the client cannot control ([compilation §3.6](compilation.md#36-operator-review)); web-only would make the CLI unable to finish an import. It limits client-controlled persistence only and does not prevent terminal or host capture ([§9](#9-secret-handling-in-the-clients)) | candidate, to be qualified in #253; no standard-output export form in any case |
+| C4 | Protected review in the CLI | terminal pager in process; temporary file in `$EDITOR`; web-only review | Terminal pager in process; non-terminal output refused with no override; no JSON, YAML, save or export form; marks by prompt or stdin, never a client-read file. An editor leaves swap and backup files the client cannot control ([compilation §3.6](compilation.md#36-operator-review)); web-only would make the CLI unable to finish an import. It limits client-controlled persistence only and does not prevent terminal or host capture ([§9](#9-secret-handling-in-the-clients)) | candidate, to be qualified in #253; no standard-output export form in any case |
 | C5 | Concurrency and retries | last-seen ETag; re-read then write; journal of requests | Last-seen ETag per draft, stop on 412; repeat an ambiguous write with its key only on request, for the exact request held in memory, the same principal and the same epoch ([§8](#8-states-every-view-must-handle)); no body journal: re-reading before writing is a silent overwrite, and a journal would store documents and marks | accepted direction in the coordinating assessment, within the limits of §8; any persistence across restarts is #253's |
 
 ## 13. Usability and accessibility acceptance
@@ -948,7 +996,7 @@ the CLI and in the web interface. A walkthrough by an agent does not count as a 
 | T8 Plan and approve the change; say what will change | publisher, approver | approved; change described from the diff | "Was the imported configuration changed?" Expected: only what the diff shows |
 | T9 Follow the apply to completion through a disconnect | viewer | completion reported with time | — |
 | T10 Freeze a drifted machine, then revert or adopt it | author to approver | drift closed as chosen | "Did detection revert it?" Expected: no |
-| T11 Account an unresolved attempt in recovery and release its scope | recovery-admin | scope released with stated evidence | "Is release an approval?" Expected: no |
+| T11 Account a pre-restore-unaccounted scope in recovery, then mark and release it | recovery-admin | scope released with stated evidence | "Is release an approval?" Expected: no |
 
 **Measures per task:** completed unaided (yes or no), time, number of refusals hit, help
 lookups, and the answer to the probe. **Baseline friction**, counted from the current

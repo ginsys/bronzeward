@@ -19,7 +19,7 @@ detail. Every screen has the [header](#header-on-every-screen) and the state var
 |              Epoch ep_bqek…ekgi                                   [Sign out]              |
 +------------------------------------------------------------------------------------------+
 | RECOVERY MODE since 10:42, epoch ep_r2l…. 3 of 3 scopes not released: none can commit.   |  <- only in recovery mode
-| Drafts editable. Recovery-start server: no plans; imports finish after restart. [Open]   |
+| Drafts editable. Recovery-start server: no plans; publications wait for restart. [Open]  |
 +------------------------------------------------------------------------------------------+
 | Machines | Changes | Plans | Operations | Sources | Audit | Recovery                      |
 +------------------------------------------------------------------------------------------+
@@ -29,8 +29,8 @@ Roles are shown only once the API can report them
 ([gap G1](operator-experience.md#11-api-gap-audit)); until then the header shows the identity and
 the epoch, and actions are enabled and refused by the server. The recovery banner states the
 scope summary and, while the server runs as started for recovery, that plan creation, approval
-and unfreeze wait for its normal restart and that accepted imports and publications complete
-only then. It never disables actions recovery mode allows
+and unfreeze wait for its normal restart and that accepted publications complete only then;
+imports complete on it. It never disables actions recovery mode allows
 ([§5.9](operator-experience.md#59-recovery-after-a-restore)): an action is disabled only on a
 scope whose state refuses it, with that reason.
 
@@ -65,7 +65,7 @@ Machines                                    Cluster: all ▾   State: all ▾   
 | Machine    | Endpoint       | Desired     | Applied (source)         | Observed                 | State                   |
 +------------+----------------+-------------+--------------------------+--------------------------+-------------------------+
 | mch_k2p…7x | 10.5.0.2:50000 | rel_fgqv…   | rel_fgqv… (operation)    | = applied, 2 min ago     | (•) Matches applied     |
-| mch_tqhc…35| 10.5.0.3:50000 | rel_h7rt…   | rel_fgqv… (adoption)     | = applied, 1 min ago     | (•) Pending convergence |
+| mch_tqhc…35| 10.5.0.3:50000 | rel_p4nx…   | rel_fgqv… (adoption)     | = applied, 1 min ago     | (•) Pending convergence |
 | mch_w4ze…n3| 10.5.0.4:50000 | rel_fgqv…   | rel_fgqv… (operation)    | no match, 5 min ago      | (•) Drifted (•) Frozen  |
 +------------+----------------+-------------+--------------------------+--------------------------+-------------------------+
 Filtering is done in the browser over all pages (gap G9). Showing 3 of 3. Health is not checked.
@@ -159,8 +159,9 @@ automatic overwrite.
 
 No copy, download, print styling or browser history entry for this view; it is fetched on
 demand and cleared on leaving the page. A refused mark says "Mark 1 was refused: rule
-`mark-kind`" and never echoes the path. "Continue" fails with "The draft changed after this
-import paused" when the draft moved, and offers [Abandon import].
+`mark-kind`" and never echoes the path. "Continue" ends with "The draft changed after this
+import paused; the import was not applied and is abandoned" when the draft moved, and offers
+[Import again] against the draft's current revision; the claim is already abandoned.
 
 ## W6. Release and rendered review
 
@@ -191,6 +192,11 @@ Rendered configuration: mch_b3c…aa2q in rel_h7rt…2bd (redacted)
 Withheld variant: the rendered panel reads only "Configuration not shown: it could not be
 redacted." with no document area. It is never an empty editor.
 
+For a machine with no `Applied`, such as one just imported from an existing cluster, the row
+offers [Plan adopt (handover)] instead of [Plan apply]: an `apply-config` plan is refused until
+the machine is handed over
+([§5.3](operator-experience.md#53-protected-import-with-review)).
+
 ## W7. Plan and approval
 
 ```text
@@ -207,7 +213,7 @@ Plan pln_f645…cawy   (•) Proposed — not approved, nothing will run   expir
 | Evidence                                                                                  |
 |  Validation  passed at publication (contract v1.13)                                       |
 |  Dry run     not available (the PoC has none)                                             |
-|  Change      whole redacted configuration, applied rel_fgqv… -> rel_h7rt…                 |
+|  Change      whole redacted configuration, applied rel_9vbn… -> rel_h7rt…                 |
 |              machine.nodeLabels.team: (absent) -> storage                                 |
 +-------------------------------------------------------------------------------------------+
 | (•) Self-approval, predicted: you published this release. The approval records the actual |
@@ -269,31 +275,33 @@ What changed is not shown: Bronzeward can show it only by importing it (gap G7).
 Recovery   (•) Recovery mode on since 10:42   epoch ep_r2l…   entry by ops-carl
 Restored: database backup taken 10:20; stopped at 10:31
 Server started for recovery: plan creation, approval and unfreeze wait for its normal restart;
-imports and publications it accepts complete only after that restart.
+publications it accepts complete only after that restart. Imports complete on it.
 +----------------+--------------------------+----------------------------------------------+
 | Machine        | Scope state              | Next action                                  |
 +----------------+--------------------------+----------------------------------------------+
-| mch_k2p…7xqa   | pre-restore-unaccounted  | [Account observations]                       |
+| mch_k2p…7xqa   | pre-restore-unaccounted  | [Account scope]                              |
 | mch_tqhc…35uq  | ready                    | [Release scope]  (not an approval)           |
-| mch_b3c…aa2q   | unresolved               | op_q8r… attempt 1 [Account attempt]          |
+| mch_b3c…aa2q   | unresolved               | op_q8r… held: classified after restart       |
 +----------------+--------------------------+----------------------------------------------+
 | [Exit recovery]~ 3 scopes not released (ready is not released)                            |
 | Drafts, imports and publication remain available: a scope blocked by a lost key leaves    |
 | that state through a newly published release.  [Open Changes]                             |
 +-------------------------------------------------------------------------------------------+
 
-Account attempt 1 of op_q8r…
-  Transport deadline   10:07:03      Executor taken over   10:42 (entry)
-  Start observation    [obs_a… ▾]  must be the first successful read after the deadline
+Account scope mch_k2p…7xqa (pre-restore unaccounted)
+  Restore stopped      10:31         Floor from   the stop plus the maximum transport
+                                                  deadline, or a later restored attempt's
+  Start observation    [obs_a… ▾]  must be the first successful read after that point
   End observation      [obs_b… ▾]  must begin at least the settle floor (30 s) after the
-                                   latest of the deadline, the takeover and the start
+                                   latest of that point and the start
   Resource version     unchanged between them
   Explanation          [______________]  required if the resource version moved
-  This records your judgment that no request from this attempt can still land. It may
-  already have landed; nothing here shows whether it did. The settle floor is a minimum
-  wait, not a proven bound: a later landing can overwrite work admitted after release, and
-  would be seen only as drift at a later observation.
-  Type the attempt ID to record: [________]   [Record accounting]
+  This records your judgment that no request sent before the restore, from any attempt the
+  restored journal shows or one it lost, can still land. It may already have landed; nothing
+  here shows whether it did. The settle floor is a minimum wait, not a proven bound: a later
+  landing can overwrite work admitted after release, and would be seen only as drift at a
+  later observation.
+  Type the machine ID to record: [________]   [Record accounting]
 ```
 
 ## W11. Empty, withheld, error and offline states
