@@ -1,7 +1,8 @@
 # talosctl-oidc credential research fixture
 
 Work in progress for [#162](https://github.com/ginsys/bronzeward/issues/162).
-No local execution result is claimed yet.
+The first local chain stopped at browser login; the complete scenario result
+remains pending. Failed-run evidence is retained separately.
 
 The original `rpc.go` probe uses an explicitly supplied disposable talosconfig
 and endpoint. It reports certificate metadata and gRPC status without printing
@@ -53,6 +54,15 @@ The browser helper completes the upstream CLI's authorization-code/PKCE flow
 with synthetic users against the fixture's loopback origins. HOME, XDG config
 and the D-Bus address are isolated from the host's keyring. The exchange uses
 its own TLS CA; the IdP uses loopback HTTP in this disposable profile.
+Keycloak marks loopback cookies `Secure`; the helper permits those cookies only
+on the exact fixture IdP origin, including its port. It refuses other origins
+and never sends IdP cookies to the CLI callback. Safe browser diagnostics retain
+cookie names/flags and callback success, without cookie values or URL queries.
+Run the cookie regression checks without starting services:
+
+```sh
+python3 -m unittest discover -s experiments/talosctl-oidc -p 'test_*.py' -v
+```
 
 The chain checks login/renewal, explicit reader access and mint denial,
 unmatched groups, cached versus fresh credentials after group/account removal,

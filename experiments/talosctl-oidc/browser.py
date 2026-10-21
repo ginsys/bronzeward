@@ -3,10 +3,12 @@
 
 from html.parser import HTMLParser
 import http.cookiejar
+import json
 import os
+from pathlib import Path
 import sys
 from urllib.parse import urlencode, urljoin, urlsplit
-from urllib.request import build_opener, HTTPRedirectHandler, HTTPCookieProcessor, Request
+from urllib.request import build_opener, HTTPRedirectHandler, HTTPCookieProcessor, ProxyHandler, Request
 
 
 def origin(url):
@@ -17,6 +19,25 @@ def origin(url):
 
 
 allowed = {origin(os.environ["BW_IDP_URL"]), origin(os.environ["BW_CALLBACK_URL"])}
+idp_origin = origin(os.environ["BW_IDP_URL"])
+
+
+class LoopbackCookies(http.cookiejar.DefaultCookiePolicy):
+    """Model browser Secure cookies on the single disposable loopback IdP."""
+
+    def set_ok(self, cookie, request):
+        return origin(request.full_url) == idp_origin and super().set_ok(cookie, request)
+
+    def return_ok(self, cookie, request):
+        return origin(request.full_url) == idp_origin and super().return_ok(cookie, request)
+
+    def return_ok_secure(self, cookie, request):
+        # Keycloak 26.8.1 treats loopback as a secure context. Python's default
+        # jar only permits Secure cookies over HTTPS/WSS. Never relax another
+        # origin (including the CLI callback, whose port differs from the IdP).
+        if request.type == "http" and origin(request.full_url) == idp_origin:
+            return True
+        return super().return_ok_secure(cookie, request)
 
 
 def check(url):
@@ -51,17 +72,41 @@ class LoginForm(HTMLParser):
             self.inside = False
 
 
-opener = build_opener(Redirects(), HTTPCookieProcessor(http.cookiejar.CookieJar()))
-with opener.open(check(sys.argv[1]), timeout=15) as response:
-    form = LoginForm()
-    form.feed(response.read().decode())
-    page_url = response.url
-if not form.action:
-    raise SystemExit("synthetic login form not found")
-form.fields.update(username=os.environ["BW_LOGIN_USER"], password=os.environ["BW_LOGIN_PASSWORD"])
-request = Request(check(urljoin(page_url, form.action)), data=urlencode(form.fields).encode())
-with opener.open(request, timeout=15) as response:
-    response.read()
-    if origin(response.url) != origin(os.environ["BW_CALLBACK_URL"]):
-        raise SystemExit("login did not reach the CLI callback")
-print("Synthetic browser completed the loopback callback; no token printed.")
+def main():
+    diagnostic = {"steps": []}
+    jar = http.cookiejar.CookieJar(LoopbackCookies())
+    opener = build_opener(ProxyHandler({}), Redirects(), HTTPCookieProcessor(jar))
+    try:
+        with opener.open(check(sys.argv[1]), timeout=15) as response:
+            form = LoginForm()
+            form.feed(response.read().decode())
+            page_url = response.url
+            diagnostic["steps"].append({"stage": "form", "status": response.status,
+                                        "cookies": [{"name": c.name, "secure": c.secure} for c in jar]})
+        if not form.action:
+            raise RuntimeError("synthetic login form not found")
+        action = check(urljoin(page_url, form.action))
+        if origin(action) != idp_origin:
+            raise ValueError("credentials may only be submitted to the IdP")
+        form.fields.update(username=os.environ["BW_LOGIN_USER"], password=os.environ["BW_LOGIN_PASSWORD"])
+        request = Request(action, data=urlencode(form.fields).encode())
+        with opener.open(request, timeout=15) as response:
+            response.read()
+            reached_callback = origin(response.url) == origin(os.environ["BW_CALLBACK_URL"])
+            diagnostic["steps"].append({"stage": "submit", "status": response.status,
+                                        "reached_callback": reached_callback})
+            if not reached_callback:
+                raise RuntimeError("login did not reach the CLI callback")
+        diagnostic["result"] = "pass"
+    except Exception as error:
+        diagnostic.update(result="failed", error_type=type(error).__name__)
+        raise
+    finally:
+        # Upstream intentionally drops browser stdout/stderr. Retain only safe
+        # metadata; no URLs, cookie values, credentials or exception payloads.
+        with Path(os.environ["BW_BROWSER_DIAGNOSTIC"]).open("x") as output:
+            json.dump(diagnostic, output, indent=2)
+
+
+if __name__ == "__main__":
+    main()
