@@ -7,7 +7,7 @@ management API, for
 in [04 - Operator experience: CLI and web UI](https://github.com/ginsys/bronzeward/milestone/4).
 It implements no client, adds no route and changes no role, credential policy or server
 behaviour. Each design decision it needs is listed in [§13](#13-alternatives-and-open-choices)
-as an open choice with a recommendation, for the coordinating lead and the owner to settle.
+as an open choice with a recommendation, for the owner to settle.
 
 It builds on the operator journeys proposed for
 [Design the operator journeys for bronzewardctl and the web UI](https://github.com/ginsys/bronzeward/issues/252),
@@ -191,7 +191,8 @@ ETag (`internal/api/ingestions.go:152-153`).
 The twelve gaps the journeys found, checked against the code above, plus eight this audit adds.
 Each has a disposition: an **API issue** proposed in [§14](#14-proposed-api-gap-issues-and-downstream-refinement),
 a **client composite** over existing routes, an **accepted limitation**, or a **decision**
-listed in [§13](#13-alternatives-and-open-choices). Nothing here is presented to a client as
+listed in [§13](#13-alternatives-and-open-choices). Every disposition, including "accepted", is
+this draft's proposal until the owner assesses it. Nothing here is presented to a client as
 supported.
 
 | ID | Gap | Evidence | Disposition |
@@ -337,7 +338,7 @@ body. Exit codes are the journeys' (journeys §4).
 | 403 `forbidden` | show the route's `roles`, and "humans only" when `humanOnly` is true; no retry |
 | 403 `identity-revoked` | stop; clear the context's stored credential; do not start a new sign-in by itself ([§9.6](#96-failure-cases)) |
 | 404 `not-found` | the resource does not exist in this epoch; after a restore a handle issued later answers `404` ([persistence and API §12.3](persistence-api.md#123-what-a-restored-state-means-record-by-record)) |
-| 409 `conflict`, `stale-input`, `scope-busy`, `machine-identity-mismatch`, `ingestion-abandoned`, `recovery-mode-entered`, `recovery-mode-active` | show the named resource and state; read it; never repeat automatically, with two exceptions. A `409 conflict` that carries `request` and `epoch` is an earlier-epoch idempotency record ([§8.4](#84-idempotency-and-ambiguous-responses) item 7). A `409 conflict` on a draft fragment write (`PUT /drafts/{id}/fragments/{name}`) that carries an `ingestion` member is the first request still running (`internal/api/fragments.go:105-114`): repeat the identical request with the same key, with backoff, until it answers otherwise or the client's wait bound of [§8.4](#84-idempotency-and-ambiguous-responses) item 2 expires; the contract says the repeat then gets the first request's replay ([persistence and API §7.2](persistence-api.md#72-behavior); [§8.4](#84-idempotency-and-ambiguous-responses) item 2) |
+| 409 `conflict`, `stale-input`, `scope-busy`, `machine-identity-mismatch`, `ingestion-abandoned`, `recovery-mode-entered`, `recovery-mode-active` | show the named resource and state; read it; never repeat automatically, with two exceptions. A `409 conflict` that carries `request` and `epoch` is an earlier-epoch idempotency record ([§8.4](#84-idempotency-and-ambiguous-responses) item 7). A `409 conflict` on a draft fragment write (`PUT /drafts/{id}/fragments/{name}`) that answers a repeat, carries an `ingestion` member and has no `Idempotent-Replayed: true` is the first request still running (`internal/api/fragments.go:105-114`; looked up by principal and key, so it never answers a first send). A replayed `409` with `ingestion` is a recorded refusal (`internal/api/fragments.go:291-296`, `internal/api/drafts.go:94-104`): the write was refused, not pending. For the in-progress case, repeat the identical request with the same key, with backoff, until it answers otherwise or the client's wait bound of [§8.4](#84-idempotency-and-ambiguous-responses) item 2 expires; the contract says the repeat then gets the first request's replay ([persistence and API §7.2](persistence-api.md#72-behavior); [§8.4](#84-idempotency-and-ambiguous-responses) item 2) |
 | 412 `precondition-failed` | someone else wrote first: stop, show the newer state, never refetch and resend ([§8.3](#83-etags)) |
 | 422 `validation-failed` | show `rule` and position extensions; for marks only the position, never a path. Most mark refusals arrive later, as an event ([§11.3](#113-cli-review)) |
 | 422 `idempotency-key-reused` | on a first send: the key was used for a different request; nothing was done; a client defect unless the operator supplied the key. On a repeat to a keyed route (fragment write, ingestion start, mark): the outcome is **unknown**, because a byte-identical repeat is also answered `422` when the provider can no longer compute under the digest-key version the record names, or the recorded key is not one the current key can be matched to; a rotation alone still replays ([persistence and API §7.1](persistence-api.md#71-the-key); `internal/api/idempotency.go:94-121`); read the resource and report what it shows |
@@ -435,8 +436,11 @@ contract's, and this specification does not close it.
    A write's `503` is repeated the same way; it states only that the attempt it answers committed
    nothing, so after an ambiguous attempt the outcome stays unknown ([§8.2](#82-errors)). The
    in-progress `409` of a fragment write (route plus `409 conflict` plus an `ingestion` member,
-   never the detail text; `internal/api/fragments.go:105-114`) is repeated with backoff until the
-   first request has answered. The server keeps that claim alive for as long as the first request
+   answering a repeat and without `Idempotent-Replayed: true`, never the detail text;
+   `internal/api/fragments.go:105-114`) is repeated with backoff until the first request has
+   answered. A replayed `409` with an `ingestion` member is the first request's recorded refusal
+   (for example the draft closed or a publication active; `internal/api/drafts.go:94-104`,
+   `internal/api/fragments.go:291-296`) and is reported as refused, not repeated. The server keeps that claim alive for as long as the first request
    runs (`internal/api/fragments.go:87`), so the client bounds the wait itself: a fixed maximum,
    configurable, after which the outcome is reported unknown as in item 4. The deployment's
    claim timers are an example of a sensible value (`examples/bronzeward.yaml:76-80`); the client
@@ -463,7 +467,8 @@ contract's, and this specification does not close it.
    `--idempotency-key <key> --expect-epoch <epoch>`: the client confirms the epoch as in item 3
    and refuses if it differs, checks the principal as in item 3, and sends the input the operator
    supplies again. If that input differs, the server answers `422` and nothing happens. This
-   settles the journeys' open question on key metadata across a restart: none is kept.
+   answers the journeys' open question on key metadata across a restart with no local key
+   journal, as proposed in decision D9.
 5. **Browser.** The page holds pending writes in memory only. Leaving or reloading the page drops
    them; the outcome-unknown notice shows the key and the resource to read, and no repeat is
    offered afterwards.
@@ -550,8 +555,9 @@ current token expires
    the authorization-code grant with PKCE `S256` and no client secret. The CLI client allows
    loopback redirect URIs with any port; the web client allows exactly the web origin's callback
    path. The device-authorization grant is enabled on the CLI client only if decision D4 adopts it.
-3. Refresh tokens, if the provider issues them to public clients, rotate on every use and are
-   bound to the client. The provider's session length, not the client, bounds how long an operator
+3. If D5(a) or D2(b) is chosen, it is conditional on refresh tokens issued to public clients
+   rotating on every use and being bound to the client; this document sets no refresh-token
+   policy itself. The provider's session length, not the client, bounds how long an operator
    stays signed in.
 4. The web client's origin is allowed to call the provider's token endpoint cross-origin.
 
@@ -590,7 +596,7 @@ current token expires
    API, a cookie or a service worker.
 3. A reload or a new tab signs in again through the provider; the provider's own session makes
    that a redirect without a password prompt while it lasts. This is the cost of keeping tokens out
-   of storage, accepted in decision D5.
+   of storage, under the recommendation of decision D5.
 4. Silent renewal through a hidden frame is not used: browsers that block third-party cookies make
    it fail unpredictably (assumption S2), and a failure would surface as an unexplained sign-out.
 5. Every API call goes to the page's own origin ([§10.1](#101-hosting-and-origin)); only the
@@ -797,7 +803,7 @@ The review is served to any human `author`, not only the one who started the ing
 
 The qualification: the server's `no-store` and the client's refusal to persist limit what the
 client keeps. They do not stop the operator, the terminal, a recording or the host from keeping
-the text. The requirement is accepted with that limit stated.
+the text. The requirement is proposed with that limit stated.
 
 ### 11.4 Web review and document input
 
@@ -819,7 +825,9 @@ them as the fixtures already do for evidence
 [acceptance plan](acceptance-plan.md) line 50 describes the scan with a positive control):
 
 1. CLI process tests capture standard output, standard error and the process's argument list, and
-   the scan includes all three.
+   the scan includes all three. The one exception is a protected review (PROT-01): it runs on a
+   pseudo-terminal, its output is matched in memory and never retained, as the fixtures' review
+   rows already do ([fixtures README](../../fixtures/README.md), S1 operator review rows).
 2. Browser tests never retain a trace, HAR, video or screenshot of a protected review or of a page
    holding a document; the other pages may keep them, as the web ticket requires. The scan covers
    every retained file and fails on any synthetic value, with a positive control that plants one.
@@ -863,7 +871,7 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 | AUTH-10 | refusal | subject listed in `deniedSubjects` | `403 identity-revoked`; same handling as AUTH-05 |
 | ETAG-01 | refusal | another author writes first | `412`; no resend; newer state shown |
 | AMB-01 | disconnect | connection dropped before any request byte is sent | ordinary retry |
-| AMB-02 | disconnect | fragment write dropped after the body is sent | repeat with the same key; an in-progress `409` (with `ingestion`) is repeated with backoff up to the client's wait bound, then outcome unknown; otherwise replay or first execution |
+| AMB-02 | disconnect | fragment write dropped after the body is sent | repeat with the same key; an in-progress `409` (with `ingestion`, not replayed) is repeated with backoff up to the client's wait bound, then outcome unknown; a replayed `409` with `ingestion` (draft published meanwhile) is reported refused, not repeated; otherwise replay or first execution |
 | AMB-03 | refusal | `500 internal-error` | repeat with the same key; replayed result |
 | AMB-04 | refusal | CLI exits with outcome unknown; operator repeats with `--idempotency-key` and a changed file | `422 idempotency-key-reused`; reported as: this send did nothing, the original outcome is still unknown; resource read |
 | AMB-05 | restore | write dropped, then recovery entry before the repeat | epoch confirmed by a read before repeating; it differs, so not repeated; resource read; operator decides |
@@ -877,7 +885,7 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 | EVT-02 | restore | `Last-Event-ID` from the earlier epoch | `reset`; display cleared and replayed |
 | EVT-03 | success | operation ends `unresolved` then `cancelled` by resolution | watch continues past `unresolved`; ends at `cancelled` |
 | REC-01 | restore | recovery mode on | banner; refusals name scope or process restriction |
-| PROT-01 | success | protected import, review, mark, continue | review only on a terminal (CLI); no synthetic value in any artifact or storage |
+| PROT-01 | success | protected import, review, mark, continue | review only on a terminal (CLI; a pseudo-terminal in tests, its output matched in memory and never retained, [§11.5](#115-test-artifacts) item 1); no synthetic value in any artifact or storage |
 | PROT-02 | refusal | `import review` with standard output redirected | refused, nothing written |
 | PROT-03 | refusal | mark that is not a path; mark compilation refuses (for example one that would rewrite text); compilation fails on a dependency | first: `422` with `position`; second: `202`, then, after the `marked` event of that `generation`, a `mark-refused` event with `422` and `position` and the ingestion paused again; third: `mark-refused` with `503`, shown by code as not applied; none reported as accepted, no path shown |
 | PROT-04 | disconnect | connection dropped during the review read | nothing persisted; review read again |
@@ -889,7 +897,7 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 
 ## 13. Alternatives and open choices
 
-Each choice below is open until the lead or the owner settles it. The recommendation is this
+Each choice below is open until the owner settles it. The recommendation is this
 draft's, not a decision.
 
 | ID | Choice | Options | Recommendation and reason |
@@ -898,14 +906,15 @@ draft's, not a decision.
 | D2 | CLI token store without an OS credential store | (a) memory only, sign in per process; (b) file readable only by its owner, opt-in per context; (c) file by default | (a) by default with (b) as an explicit opt-in: a refresh token on disk is a long-lived credential; the choice is visible per context |
 | D3 | How a client learns issuer, client ID and audience | (a) by hand in the context; (b) a static client-configuration file served next to the web files; (c) an anonymous API route | (a) now and (b) once D1 is settled: the web client needs the file anyway, and the CLI can import it with `context add --from <url>` under TLS; (c) adds a second anonymous route |
 | D4 | CLI sign-in without a local browser | (a) device-authorization grant; (b) loopback over a forwarded port; (c) both | (a) offered when the provider supports it, else (b): device flow suits SSH sessions but is phishable by a lookalike prompt, so the CLI shows the verification URI's host prominently |
-| D5 | Browser renewal | (a) rotating refresh token in memory; (b) silent frame renewal; (c) redirect at every expiry | (a): (b) breaks under third-party cookie blocking; (c) interrupts work every 15 minutes |
+| D5 | Browser renewal | (a) rotating refresh token in memory; (b) silent frame renewal; (c) redirect at every expiry | (a), conditional on the provider rotating and client-binding refresh tokens ([§9.1](#91-identity-provider-requirements) item 3): (b) breaks under third-party cookie blocking; (c) interrupts work every 15 minutes |
 | D6 | Automation token in an environment variable | (a) not accepted, file or stdin only; (b) accepted as `BRONZEWARD_TOKEN` | (a): an environment variable is inherited by every child process and readable by the same user's processes; CI systems can write the token to a file first. (b) is the common CI convention; if chosen, the CLI never passes its environment to a child process |
 | D7 | Generated or handwritten clients | (a) both handwritten; (b) an OpenAPI description of v1 in the repository, checked against the route table by a test, generating request and response types for both clients, with handwritten behaviour (idempotency, ETags, epochs, renewal); (c) fully generated clients | (b): the types stay aligned with the server while the behaviour this document specifies stays explicit and tested by the shared cases; no OpenAPI description exists today (search of the repository) |
 | D8 | Conformance case format and home | (a) case records in the repository run by both clients' harnesses; (b) separate suites per client | (a), as [§12](#12-shared-conformance-cases) |
+| D9 | Idempotency key metadata across a CLI restart | (a) no local journal: on giving up, the CLI prints the key, route, principal and epoch, and the operator repeats with `--idempotency-key` ([§8.4](#84-idempotency-and-ambiguous-responses) item 4); (b) a local journal of pending keys, owner-readable, replayed on the next run | (a): a journal would hold request context on disk and need its own expiry and epoch rules; the printed record gives the operator the same repeat without it |
 
 ## 14. Proposed API-gap issues and downstream refinement
 
-This document creates no issue. The lead decides which to open and links them natively.
+This document creates no issue. The owner decides which to open and links them natively.
 
 **A1. Serve the caller's identity and roles.** An authenticated `GET` that answers the
 principal's kind, issuer and subject or service name, the principal ID when one exists, the roles
@@ -940,7 +949,7 @@ and not a minted token. Closes G19; blocks the sign-in tickets' verification.
 [persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress) (G15). A
 documentation change for the landing of this specification or its own small change.
 
-**Downstream refinement, proposed for the lead.** Each client ticket cites this document's
+**Downstream refinement, proposed for the owner.** Each client ticket cites this document's
 sections as its contract, and its `status/needs-refinement` label is lifted only with the
 dependencies below in place:
 
