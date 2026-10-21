@@ -33,8 +33,9 @@ the epoch, and actions are enabled and refused by the server. The recovery banne
 scope summary and, while the server runs as started for recovery, that plan creation, approval
 and unfreeze wait for its normal restart and that accepted publications complete only then;
 imports complete on it. Until [gap G14](operator-experience.md#11-api-gap-audit) the client learns
-that start mode only from the answers of plan creation, approval and unfreeze, so the line
-reflects the last such answer and is corrected by the next one. It never disables actions recovery mode allows
+that start mode from answers: plan creation, approval and unfreeze are refused on a recovery
+start, and recovery entry on a normal one. The line reflects the last such answer and is
+corrected by the next one. It never disables actions recovery mode allows
 ([§5.9](operator-experience.md#59-recovery-after-a-restore)): an action is disabled only on a
 scope whose state refuses it, with that reason.
 
