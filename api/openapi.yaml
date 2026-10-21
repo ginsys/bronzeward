@@ -10,7 +10,8 @@ info:
     headers and body, and every request the server accepted, against this description. Every error answer is a problem document
     (default response). Request bodies are decoded strictly: application/json, exactly the listed members, none repeated;
     a member whose schema admits null may be given as null, which the decoder treats as absent. The idempotency fingerprint
-    covers the body as sent (persistence and API §7.1), so a retry repeats the exact body.'
+    covers the canonical body (persistence and API §7.1), which keeps a null member, so a retry that adds or drops one is
+    a different request.'
 servers:
 - {url: /api/v1}
 security:
