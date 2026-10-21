@@ -266,6 +266,7 @@ class Fixture:
         name = name or user
         path = self.private / (name + ".talosconfig")
         output = self.command("login-" + name, [self.args.exchange, "login", "--provider", self.issuer,
+                              "--scopes", "openid,profile,email",
                               "--client-id", "talos-fixture", "--server", self.exchange_url, "--server-ca", self.ca,
                               "--talosconfig", path, "--context-name", name, "--callback-port", self.callback_port,
                               "--browser-command", Path(__file__).with_name("browser.py")], expected=expected, timeout=45,

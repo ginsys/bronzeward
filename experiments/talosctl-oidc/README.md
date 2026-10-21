@@ -1,7 +1,7 @@
 # talosctl-oidc credential research fixture
 
 Work in progress for [#162](https://github.com/ginsys/bronzeward/issues/162).
-The first local chain stopped at browser login; the complete scenario result
+The first two local chains stopped during login; the complete scenario result
 remains pending. Failed-run evidence is retained separately.
 
 The original `rpc.go` probe uses an explicitly supplied disposable talosconfig
@@ -54,6 +54,9 @@ The browser helper completes the upstream CLI's authorization-code/PKCE flow
 with synthetic users against the fixture's loopback origins. HOME, XDG config
 and the D-Bus address are isolated from the host's keyring. The exchange uses
 its own TLS CA; the IdP uses loopback HTTP in this disposable profile.
+The CLI explicitly requests `openid,profile,email`, using normal session refresh
+tokens. Its default additional `offline_access` request was rejected by the
+imported test realm; this profile does not grant offline access.
 Keycloak marks loopback cookies `Secure`; the helper permits those cookies only
 on the exact fixture IdP origin, including its port. It refuses other origins
 and never sends IdP cookies to the CLI callback. Safe browser diagnostics retain
