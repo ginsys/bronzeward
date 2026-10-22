@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -13,16 +14,33 @@ import (
 	"github.com/ginsys/bronzeward/internal/id"
 )
 
-// walk follows path's pages one item at a time to the end and answers the identifiers listed, in
-// order.
-func walk[T any](t *testing.T, get func(string) *httptest.ResponseRecorder, path string, idOf func(T) string) []string {
+// walk follows path's pages one item at a time to the end, once from the first page and once from
+// low, a cursor before every item, so that every page of the second walk is a cursor page; both
+// must list the same identifiers, which it answers in order.
+func walk[T any](t *testing.T, get func(string) *httptest.ResponseRecorder, path, low string, idOf func(T) string) []string {
+	t.Helper()
+	ids := walkFrom(t, get, path, "", idOf)
+	if again := walkFrom(t, get, path, low, idOf); !slices.Equal(again, ids) {
+		t.Fatalf("%s: %v from the first page, %v from a cursor", path, ids, again)
+	}
+	return ids
+}
+
+// lowCursor is a cursor of the current epoch naming the lowest identifier of p: '2' is the lowest
+// character a body takes, and '4' the lowest whose two trailing bits are zero, as the last must be.
+func lowCursor(t *testing.T, db *sql.DB, p id.Prefix) string {
+	t.Helper()
+	head, body, _ := strings.Cut(id.New(p), "_")
+	return makeCursor(epoch(t, db), head+"_"+strings.Repeat("2", len(body)-1)+"4")
+}
+
+func walkFrom[T any](t *testing.T, get func(string) *httptest.ResponseRecorder, path, cursor string, idOf func(T) string) []string {
 	t.Helper()
 	sep := "?"
 	if strings.Contains(path, "?") {
 		sep = "&"
 	}
 	var ids []string
-	cursor := ""
 	for range 20 {
 		q := path + sep + "limit=1"
 		if cursor != "" {
@@ -80,6 +98,7 @@ func TestIngestionsList(t *testing.T) {
 	}
 	abandoned, held := claimOf(firstOp), claimOf(secondOp)
 	ingestionID := func(b ingestionBody) string { return b.ID }
+	low := lowCursor(t, ie.db, id.Ingestion)
 
 	for q, want := range map[string][]string{
 		"/ingestions":                                  sorted(abandoned, held),
@@ -90,7 +109,7 @@ func TestIngestionsList(t *testing.T) {
 		"/ingestions?machine=" + ie.otherMachine:       nil,
 		"/ingestions?state=held&machine=" + ie.machine: {held},
 	} {
-		if got := walk(t, get, q, ingestionID); !slices.Equal(got, want) {
+		if got := walk(t, get, q, low, ingestionID); !slices.Equal(got, want) {
 			t.Fatalf("%s: %v, want %v", q, got, want)
 		}
 	}
@@ -122,7 +141,7 @@ func TestIngestionsList(t *testing.T) {
 		"/ingestions?state=abandoned": sorted(abandoned, held),
 		"/ingestions?state=held":      nil,
 	} {
-		if got := walk(t, get, q, ingestionID); !slices.Equal(got, want) {
+		if got := walk(t, get, q, low, ingestionID); !slices.Equal(got, want) {
 			t.Fatalf("%s after the lapse: %v, want %v", q, got, want)
 		}
 	}
@@ -152,6 +171,7 @@ func TestPlansListFilters(t *testing.T) {
 		return p.do(p.api, call{method: "GET", path: prefix + q, token: p.robot})
 	}
 	planID := func(b planBody) string { return b.ID }
+	low := lowCursor(t, p.db, id.Plan)
 	for q, want := range map[string][]string{
 		"/plans":                                    sorted(proposed, cancelled, expired),
 		"/plans?state=proposed":                     {proposed},
@@ -162,7 +182,7 @@ func TestPlansListFilters(t *testing.T) {
 		"/plans?machine=" + p.target.machine2:       nil,
 		"/plans?state=expired&machine=" + p.machine: {expired},
 	} {
-		if got := walk(t, get, q, planID); !slices.Equal(got, want) {
+		if got := walk(t, get, q, low, planID); !slices.Equal(got, want) {
 			t.Fatalf("%s: %v, want %v", q, got, want)
 		}
 	}
@@ -185,13 +205,14 @@ func TestMachinesListCluster(t *testing.T) {
 		return ie.do(ie.api, call{method: "GET", path: prefix + q, token: author})
 	}
 	machineID := func(b machineBody) string { return b.ID }
+	low := lowCursor(t, ie.db, id.Machine)
 	for q, want := range map[string][]string{
 		"/machines":                               sorted(ie.machine, third, ie.otherMachine),
 		"/machines?cluster=" + ie.cluster:         sorted(ie.machine, third),
 		"/machines?cluster=" + other:              {ie.otherMachine},
 		"/machines?cluster=" + id.New(id.Cluster): nil,
 	} {
-		if got := walk(t, get, q, machineID); !slices.Equal(got, want) {
+		if got := walk(t, get, q, low, machineID); !slices.Equal(got, want) {
 			t.Fatalf("%s: %v, want %v", q, got, want)
 		}
 	}

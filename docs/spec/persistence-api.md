@@ -1666,7 +1666,7 @@ idempotency and conflict behavior.
 
 A list takes only its own filters, each at most once; any other parameter is
 `400 invalid-request`. Filters combine, and each page holds only matching
-items, in identifier order (§9.1). Besides the dependency reads' own filters
+items. Besides the dependency reads' own filters
 ([dependency monitor §7.2](dependency-monitor.md#72-read-routes)), `GET /operations` filters
 by `plan`, `machine`, `state` and `kind`; `GET /plans` by `state`, the state
 the plan reads as (`expired` and `revoked` included, §8.1), and `machine`;

@@ -72,11 +72,11 @@ Machines                                    Cluster: all ▾   State: all ▾   
 | Machine    | Endpoint       | Desired     | Applied (source)         | Observed                 | State                   |
 +------------+----------------+-------------+--------------------------+--------------------------+-------------------------+
 | mch_k2p…7x | 10.5.0.2:50000 | rel_fgqv…   | rel_fgqv… (operation)    | = applied, 2 min ago     | (•) Matches applied     |
-| mch_tqhc…35| 10.5.0.3:50000 | rel_fgqv…   | rel_p4nx… (adoption)     | = applied, 1 min ago     | (•) Selected ≠ applied  |
+| mch_tqhc…35| 10.5.0.3:50000 | rel_fgqv…   | rel_p4nx… (adoption)     | = applied, 1 min ago     | (•) Pending convergence |
 | mch_w4ze…n3| 10.5.0.4:50000 | rel_fgqv…   | rel_fgqv… (operation)    | no match, 5 min ago      | (•) Drifted (•) Frozen  |
 | mch_b3c…aa | 10.5.0.5:50000 | none        | none                     | —                        | (•) Not handed over     |
 +------------+----------------+-------------+--------------------------+--------------------------+-------------------------+
-Filtering is done in the browser over all pages (gap G9). Showing 4 of 4. Health is not checked.
+The server filters by cluster; the browser filters by state over all pages (gap G9). Showing 4 of 4. Health is not checked.
 ```
 
 All four rows are at one moment: just after `mch_b3c…aa2q` was recorded
