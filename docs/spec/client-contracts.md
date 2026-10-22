@@ -581,10 +581,10 @@ restart changes the mode without any signal, so the kept mode is only the last o
 1. **Recovery start:** a `409 recovery-mode-active` without a `scope` member, or any answer of
    `POST /recovery/entries` given after authentication and the role check other than the refusal
    in item 2, its `201` and its other `409 conflict` answers included (each of these carries
-   `epoch`). A `401`, a `403`, or a `503` without `Bronzeward-Epoch` to the entry shows nothing:
-   both `503`s decided before routing, the authentication one and the installation-state read's
-   (`internal/api/api.go:266-269`), lack the header, and every answer after the role check carries
-   it. A
+   `epoch`). A `401`, a `403`, or any answer without `Bronzeward-Epoch` to the entry shows
+   nothing: both `503`s decided before routing, the authentication one and the installation-state
+   read's (`internal/api/api.go:266-269`), and any `5xx` that is not a Bronzeward problem
+   ([§8.2](#82-errors)) lack the header, and every answer after the role check carries it. A
    `recovery-mode-active` with a `scope` member is a scope's refusal and says nothing about the
    start mode.
 2. **Normal start:** only the entry's not-a-recovery-start refusal, a `409 conflict` with neither
@@ -917,11 +917,12 @@ The review is served to any human `author`, not only the one who started the ing
    (`internal/staging/sweep.go:10-13`, `internal/staging/sweep.go:134-138`), and the stream
    shows nothing. So while it follows, the client reads `GET /ingestions/{id}` again whenever
    the `leaseUntil` it last read has passed by its own clock, plus a margin for clock difference
-   (`internal/api/ingestions.go:237`). A read that still shows `held` with `leaseUntil` passed
-   ends the watch as `resume-failed` does: the mark is reported as not applied, with the same
-   offers. A lapsed lease lets the run commit nothing more
-   (`internal/staging/claim.go:69`). A continuation's watch (`import continue`) ends the same two
-   ways. It reports a
+   (`internal/api/ingestions.go:237`). A read that still shows `held` or `resumed` with
+   `leaseUntil` passed ends the watch as `resume-failed` does: the mark is reported as not
+   applied, with the same offers. A lapsed lease lets the run commit nothing more
+   (`internal/staging/claim.go:69`). A continuation's watch (`import continue`) and a takeover's
+   (`import takeover`, which leaves the claim `resumed`, `internal/staging/takeover.go:84`) end
+   the same two ways. It reports a
    `mark-refused` event's `422` as a refusal by position, never as an accepted mark; a
    `mark-refused` problem without a position (`503 dependency-unavailable` or `500
    internal-error`, `internal/api/runner.go:328-338`) is shown by its code as a mark that was not
@@ -1025,7 +1026,7 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 | PROT-02 | refusal | `import review` with standard output redirected | refused, nothing written |
 | PROT-03 | refusal | mark that is not a path; mark compilation refuses (for example one that would rewrite text); compilation fails on a dependency | first: `422` with `position`; second: `202`, then, after the `marked` event of that `generation`, a `mark-refused` event with `422` and `position` and the ingestion paused again; third: `mark-refused` with `503`, shown by code as not applied; none reported as accepted, no path shown |
 | PROT-05 | refusal | mark accepted (`202`), then the run cannot decrypt the staged envelope | after the `marked` event, a `resume-failed` event with `dependency-unavailable`; the watch ends with the operation still `running`; the mark reported as not applied; `import takeover` offered once the lease lapses, and `import abandon`; no wait without end |
-| PROT-06 | disconnect | mark accepted (`202`), then the serving process is killed before the run writes any event; second case: the same during a continuation | the client reads the ingestion once its `leaseUntil` has passed; `held` with `leaseUntil` passed ends the watch with the operation still `running`; the mark (or continuation) reported as not applied; `import takeover` and `import abandon` offered; no wait until the claim's absolute expiry |
+| PROT-06 | disconnect | mark accepted (`202`), then the serving process is killed before the run writes any event; second case: the same during a continuation; third case: the same during a takeover | the client reads the ingestion once its `leaseUntil` has passed; `held` (mark, continuation) or `resumed` (takeover) with `leaseUntil` passed ends the watch with the operation still `running`; the mark, continuation or takeover reported as not applied; `import takeover` and `import abandon` offered; no wait until the claim's absolute expiry |
 | PROT-04 | disconnect | connection dropped during the review read | nothing persisted; review read again |
 | COMP-01 | refusal | server below the client's minimum API revision (after A2) | refused before any write, both versions named |
 | COMP-02 | success | response carrying a `Deprecation` header | warning shown once, naming the route |
