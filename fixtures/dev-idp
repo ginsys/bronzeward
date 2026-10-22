@@ -77,7 +77,7 @@ summary() {
 }
 
 up() {
-  local c ids
+  local c ids arch
   if ours; then
     summary
     return
@@ -95,8 +95,10 @@ up() {
   mkdir -p "$state"
   chmod 700 "$state"
   # A static binary, so that the groups target runs in the Zitadel image, which has no C library.
-  # Built into the state directory, which down removes.
-  CGO_ENABLED=0 go build -o "$state/oidc" ./fixtures/oidc
+  # Built into the state directory, which down removes, for the daemon's Linux platform, not the
+  # host's.
+  arch=$(docker version --format '{{.Server.Arch}}') || die "cannot read the docker daemon's architecture (docker version)"
+  GOOS=linux GOARCH=$arch CGO_ENABLED=0 go build -o "$state/oidc" ./fixtures/oidc
   docker network create "$net" >/dev/null
   docker run -d --rm --name "$pg" --network "$net" -e POSTGRES_USER=postgres -e POSTGRES_HOST_AUTH_METHOD=trust \
     "$(pin POSTGRES_IMAGE)" >/dev/null
@@ -195,7 +197,7 @@ BW_TEST_IDP_PROJECT=$project
 BW_TEST_IDP_CLI_CLIENT=$cli
 BW_TEST_IDP_WEB_CLIENT=$webc
 BW_TEST_IDP_WEB_ORIGIN=$web
-BW_TEST_IDP_LOGIN_TOKEN_FILE=$state/login.pat
+BW_TEST_IDP_LOGIN_TOKEN_FILE='$state/login.pat'
 BW_TEST_IDP_PASSWORD=$password
 BW_TEST_IDP_USERS=$users
 EOF
