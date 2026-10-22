@@ -333,8 +333,10 @@ is.
 2. A client ignores unknown response fields, and shows an unknown enumeration value raw, never as
    a known state and never as success.
 3. A client declares the minimum API revision it needs. It reads `GET /server` on context use and
-   refuses, with both revisions named, a server below that minimum, before any write. A `409 recovery-mode-active` without a `scope` member is a recovery start before its
-   entry ([§8.5](#85-epoch-changes)): the client allows only the entry, whose request it already
+   refuses, with both revisions named, a server below that minimum, before any write. `GET /server`
+   answered `409 recovery-mode-active` without a `scope` member is a recovery start before its
+   entry ([§8.5](#85-epoch-changes)), since the read is refused that way only then: the client
+   allows only the entry, whose request it already
    knows from revision 1, and reads the revision once the entry has committed. The revision
    describes the process that answered; another instance behind the same endpoint may differ, so
    a refusal names the revision that answer served.
