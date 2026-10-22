@@ -446,6 +446,13 @@ func TestEventStreamKeepAlive(t *testing.T) {
 		defer mu.Unlock()
 		return rearms, slices.Clone(intervals)
 	}
+	reads := make(chan struct{}, 1)
+	ce.a.o.beforeRead = func() {
+		select {
+		case reads <- struct{}{}:
+		default:
+		}
+	}
 	srv := httptest.NewServer(ce.a)
 	t.Cleanup(srv.Close)
 	tok, err := auth.NewStore(ce.db, ce.cfg).Issue(t.Context(), "watch", []auth.Role{auth.Viewer}, time.Hour, "h-all", "h-all")
@@ -509,6 +516,35 @@ func TestEventStreamKeepAlive(t *testing.T) {
 	if n, _ := counted(); n != 3 {
 		t.Fatalf("%d rearms after an event and two comments; want 3", n)
 	}
+
+	// A poll waiting on a lock still lets the stream send its keep-alive.
+	lock, err := ce.db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = lock.Rollback() })
+	if _, err := lock.Exec("SELECT 1 FROM installation_state FOR UPDATE"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-reads: // drain a read that may have started before the lock
+	default:
+	}
+	select {
+	case <-reads:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the stream started no read")
+	}
+	time.Sleep(streamPoll / 5) // the read reaches the lock and waits
+	select {
+	case ticks <- time.Time{}:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the stream took no tick while its read waited on a lock")
+	}
+	if got := read(2); !slices.Equal(got, []string{": keep-alive", ""}) {
+		t.Fatalf("during a held read %q, want a comment line alone", got)
+	}
+	_ = lock.Rollback()
 
 	// Cut, then resumed with the last event's id after an epoch change: a reset comes first.
 	_ = resp.Body.Close()

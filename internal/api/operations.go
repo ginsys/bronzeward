@@ -307,6 +307,23 @@ func streamEvents(a *API, w http.ResponseWriter, q *request) {
 	}
 	idle := timer(streamKeepAlive)
 	defer idle.stop()
+	beat := func() bool {
+		if ctx.Err() != nil {
+			return false
+		}
+		if _, err := fmt.Fprint(w, ": keep-alive\n\n"); err != nil {
+			return false
+		}
+		_ = rc.Flush()
+		idle.rearm()
+		return true
+	}
+	type polled struct {
+		h     opHead
+		batch []eventBody
+		seqs  []int64
+		err   error
+	}
 	for {
 		for i, e := range batch {
 			if ctx.Err() != nil {
@@ -329,20 +346,37 @@ func streamEvents(a *API, w http.ResponseWriter, q *request) {
 			case <-ctx.Done():
 				return
 			case <-idle.c:
-				if ctx.Err() != nil {
+				if !beat() {
 					return
 				}
-				if _, err := fmt.Fprint(w, ": keep-alive\n\n"); err != nil {
-					return
-				}
-				_ = rc.Flush()
-				idle.rearm()
 			case <-time.After(streamPoll):
 			}
 		}
-		if h, batch, seqs, err = pass(false); err != nil {
+		// The read runs while the stream goes on with its keep-alives, so a read waiting on a lock
+		// does not silence the stream; every write stays on this goroutine. The read ends with the
+		// stream's context, and the stream waits for it before it returns.
+		got := make(chan polled, 1)
+		go func() {
+			var p polled
+			p.h, p.batch, p.seqs, p.err = pass(false)
+			got <- p
+		}()
+		var p polled
+		for waiting := true; waiting; {
+			select {
+			case p = <-got:
+				waiting = false
+			case <-idle.c:
+				if !beat() {
+					<-got
+					return
+				}
+			}
+		}
+		if p.err != nil {
 			return // the headers are sent: ending the stream is the answer, and the client resumes
 		}
+		h, batch, seqs = p.h, p.batch, p.seqs
 	}
 }
 
