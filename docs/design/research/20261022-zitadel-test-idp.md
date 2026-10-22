@@ -79,8 +79,9 @@ Behaviour of the pinned release that a client must not rely on otherwise:
   clients carry no secret, so the token request's own checks (PKCE, refresh-token binding) are
   the protection.
 - **Revocation is not seen by the server (11).** Revocation and end-session end the provider's
-  session, but the server verifies access tokens locally, so it accepts one until its `exp`, at
-  most 5 minutes here ([§9.7](../../spec/client-contracts.md#97-sign-out-and-cache-clearing)).
+  session, but the server verifies access tokens locally, so it accepts one until its `exp` plus
+  the verifier's 60 s leeway (`internal/auth/auth.go:95`), at most 6 minutes here
+  ([§9.7](../../spec/client-contracts.md#97-sign-out-and-cache-clearing)).
 - **End-session leaves renewal.** The refresh token survives end-session, so the web sign-out's
   revocation step ([§9.7](../../spec/client-contracts.md#97-sign-out-and-cache-clearing) item 2)
   is what ends renewal.
