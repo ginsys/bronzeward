@@ -137,6 +137,7 @@ func (e *env) do(h http.Handler, c call) *httptest.ResponseRecorder {
 	}
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, r)
+	checkAnswerHeaders(e.t, rec)
 	return rec
 }
 

@@ -210,6 +210,9 @@ func getOperationEvents(a *API, w http.ResponseWriter, q *request) {
 const (
 	streamBatch = 100
 	streamPoll  = 500 * time.Millisecond
+	// streamKeepAlive is how long a stream stays silent before it sends a comment line, so a
+	// proxy's idle limit does not cut it (§8.3).
+	streamKeepAlive = 15 * time.Second
 )
 
 // streamEvents answers the operation's events as Server-Sent Events (§8.3): each event's id is
@@ -283,6 +286,14 @@ func streamEvents(a *API, w http.ResponseWriter, q *request) {
 	if reset {
 		_, _ = fmt.Fprint(w, "event: reset\ndata: {}\n\n")
 	}
+	// A stream with no event to send for streamKeepAlive sends a comment line, which carries no id
+	// and no event, so neither the client's Last-Event-ID nor its event handling sees it.
+	ticks, rearm := a.o.keepAlive, func() {}
+	if ticks == nil {
+		idle := time.NewTimer(streamKeepAlive)
+		defer idle.Stop()
+		ticks, rearm = idle.C, func() { idle.Reset(streamKeepAlive) }
+	}
 	for {
 		for i, e := range batch {
 			if ctx.Err() != nil {
@@ -293,6 +304,9 @@ func streamEvents(a *API, w http.ResponseWriter, q *request) {
 			}
 			last = seqs[i]
 		}
+		if len(batch) > 0 {
+			rearm()
+		}
 		_ = rc.Flush()
 		if len(batch) < streamBatch {
 			if h.terminal() {
@@ -301,6 +315,15 @@ func streamEvents(a *API, w http.ResponseWriter, q *request) {
 			select {
 			case <-ctx.Done():
 				return
+			case <-ticks:
+				if ctx.Err() != nil {
+					return
+				}
+				if _, err := fmt.Fprint(w, ": keep-alive\n\n"); err != nil {
+					return
+				}
+				_ = rc.Flush()
+				rearm()
 			case <-time.After(streamPoll):
 			}
 		}

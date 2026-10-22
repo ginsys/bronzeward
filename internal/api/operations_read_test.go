@@ -418,6 +418,77 @@ func TestEventStreamEndsAtTokenExpiry(t *testing.T) {
 	}
 }
 
+// §8.3: a stream with nothing to send writes a comment line at each keep-alive tick, with no id and
+// no event, so the client's Last-Event-ID still names the last event; the stream carries §9.1's
+// headers.
+func TestEventStreamKeepAlive(t *testing.T) {
+	t.Parallel()
+	ce := newCommitEnv(t, "")
+	ce.ready(t)
+	r, err := ce.a.commitPlan(t.Context(), ce.pid) // committed, and no loop to move it on
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticks := make(chan time.Time)
+	ce.a.o.keepAlive = ticks
+	srv := httptest.NewServer(ce.a)
+	t.Cleanup(srv.Close)
+	tok, err := auth.NewStore(ce.db, ce.cfg).Issue(t.Context(), "watch", []auth.Role{auth.Viewer}, time.Hour, "h-all", "h-all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+prefix+"/operations/"+r.Operation+"/events", nil)
+	req.Header.Set("Authorization", "Bearer "+tok.Token)
+	req.Header.Set("Accept", "text/event-stream")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("Cache-Control") != "no-store" ||
+		id.MustHave(resp.Header.Get(requestIDHeader), id.Request) != nil {
+		t.Fatalf("%d %v", resp.StatusCode, resp.Header)
+	}
+	lines := make(chan string, 64)
+	go func() {
+		defer close(lines)
+		sc := bufio.NewScanner(resp.Body)
+		for sc.Scan() {
+			lines <- sc.Text()
+		}
+	}()
+	read := func(n int) (got []string) {
+		t.Helper()
+		for range n {
+			select {
+			case l, ok := <-lines:
+				if !ok {
+					t.Fatalf("the stream ended after %q", got)
+				}
+				got = append(got, l)
+			case <-time.After(10 * time.Second):
+				t.Fatalf("no line after %q", got)
+			}
+		}
+		return got
+	}
+	ev := epoch(t, ce.db) + ":" + strconv.FormatInt(r.Revision, 10)
+	if got := read(4); got[0] != "id: "+ev || got[1] != "event: commitment" || got[3] != "" {
+		t.Fatalf("first event %q", got)
+	}
+	for range 2 {
+		ticks <- time.Time{}
+		if got := read(2); !slices.Equal(got, []string{": keep-alive", ""}) {
+			t.Fatalf("after a tick %q, want a comment line alone", got)
+		}
+	}
+	select {
+	case l := <-lines:
+		t.Fatalf("a line %q with no tick and no event", l)
+	case <-time.After(2 * streamPoll):
+	}
+}
+
 // §9.1: an event stream takes no query (it resumes with Last-Event-ID), and an operation is read
 // whole: its row is locked FOR SHARE before its attempts are read, so a transaction that holds it
 // is waited for and never seen between its statements.

@@ -142,6 +142,7 @@ type options struct {
 	dial           func(ctx context.Context, talosconfig []byte, endpoint string) (talos.Reader, error) // talos.Dial by default
 	nodeTimeout    time.Duration                                                                        // bounds each node request; nodeTimeout by default
 	quoteErrors    bool                                                                                 // the pass-through control (§16): a node read's failure logs its error text
+	keepAlive      <-chan time.Time                                                                     // an event stream's keep-alive ticks, instead of its idle timer (§8.3)
 }
 
 // request is one API request as it passes the checks.
@@ -252,10 +253,17 @@ func (a *API) unrouted(ref *refusal) *refusal {
 	return ref
 }
 
+// requestIDHeader names the request on every answer (§9.1): the instance of every problem the
+// request answers itself, and the identifier its log lines start with.
+const requestIDHeader = "Bronzeward-Request-ID"
+
 // ServeHTTP authenticates first, then reads the installation state for the epoch headers, then
-// routes (§10: every request authenticates, an unknown path included).
+// routes (§10: every request authenticates, an unknown path included). Every answer, a refusal of
+// authentication included, carries the request's identifier and is kept out of caches (§9.1).
 func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	q := &request{id: id.New(id.Request), r: r}
+	w.Header().Set(requestIDHeader, q.id)
+	w.Header().Set("Cache-Control", "no-store")
 	p, err := a.authn.Authenticate(r.Context(), r.Header.Get("Authorization"))
 	if err != nil {
 		a.o.logf("%s %s %s: %v", q.id, r.Method, r.URL.EscapedPath(), err)
