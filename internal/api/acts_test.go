@@ -188,6 +188,7 @@ func TestListActsWritesAfterTransaction(t *testing.T) {
 		r.Header.Set("Authorization", "Bearer "+e.human("h-viewer"))
 		e.api.ServeHTTP(p, r)
 		checkAnswerHeaders(t, p.ResponseRecorder)
+		checkResponse(t, r, "", p.ResponseRecorder)
 		if p.Code == 0 || p.held != nil {
 			t.Fatalf("%q: status %d; the installation state was still locked while writing: %v", query, p.Code, p.held)
 		}

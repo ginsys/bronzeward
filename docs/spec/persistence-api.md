@@ -1660,6 +1660,19 @@ Design: [§11](../design/Talos_Configuration_and_Machine_Management_Design.md#11
   identifier of the request that replays it, while a stored problem it replays
   keeps the `instance` of the request that stored it. The liveness probe
   carries neither. No answer sets a cookie or a CORS header.
+- **Machine-readable description**: [`api/openapi.yaml`](../../api/openapi.yaml)
+  describes every route of §9.2 in OpenAPI 3.1, with its roles, human-only,
+  `If-Match` and start-mode restrictions as `x-bronzeward-*` extension fields.
+  `internal/api/openapi_test.go` fails when it and the server's route table
+  differ in either direction, in those facts or in an operation's path
+  parameters, `Idempotency-Key` and `If-Match` parameters or request body. The
+  API tests validate every answer's status, headers and body on a described
+  route, except an event stream's, and every request the server accepted,
+  against it (`internal/api/openapi_response_test.go`). A route change updates
+  it in the same change. Clients generate their request and response types from it with
+  an OpenAPI 3.1 generator of their choosing; idempotency keys, ETags, epochs
+  and token renewal stay hand-written client behavior
+  ([#275](https://github.com/ginsys/bronzeward/issues/275)).
 
 API revisions:
 

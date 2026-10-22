@@ -106,7 +106,10 @@ func TestAnswerHeadersOnEveryAnswer(t *testing.T) {
 	// checks each answer's headers, and each route is answered past its role check at least once.
 	tokens := []string{e.human("h-all"), e.human("h-recovery")}
 	for i, rt := range routes() {
-		c := call{method: rt.method, path: path(rt.pattern), key: fmt.Sprintf("k-walk-%012d", i), ifMatch: `"1-x"`, body: `{}`}
+		c := call{method: rt.method, path: path(rt.pattern), key: fmt.Sprintf("k-walk-%012d", i), ifMatch: `"1-x"`}
+		if rt.method != http.MethodGet { // a read takes no body, and e.do checks the request against the description
+			c.body = `{}`
+		}
 		if rec := e.do(e.api, c); rec.Code != http.StatusUnauthorized {
 			t.Errorf("%s %s with no token: %d", rt.method, rt.pattern, rec.Code)
 		}
