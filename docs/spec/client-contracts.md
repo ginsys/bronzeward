@@ -501,10 +501,10 @@ contract's, and this specification does not close it.
    `GET /recovery` included, with `409 recovery-mode-active` (`internal/api/api.go:343-347`). When
    only the `201` was lost, the process saw the commit before answering, so the confirming read
    shows the new epoch and a same-key repeat replays the entry
-   (`internal/api/recovery_entries_test.go:236-252`; the replay: `internal/api/idempotency.go:60-82`,
+   (`internal/api/recovery_entries_test.go:236-253`; the replay: `internal/api/idempotency.go:60-82`,
    `internal/api/recovery_entries.go:102-113`). When the server lost its own COMMIT reply
    and answered `500`, only a same-key repeat completes the entry
-   (`internal/api/recovery_entries_test.go:254-295`). So the client repeats an entry whose outcome
+   (`internal/api/recovery_entries_test.go:255-296`). So the client repeats an entry whose outcome
    is unknown under the same key, checking the principal but not the epoch, here and in item 4.
    The server replays only this process's own entry and refuses any other entry record with a
    `409 conflict` carrying `request` and `epoch` (`internal/api/recovery_entries.go:95-114`), so
@@ -607,7 +607,7 @@ the process refusals do not; contract correction C2 in
 
 Facts: [§2](#2-the-api-a-client-meets) events row. The SSE stream sends no `retry:` field in the
 frames it writes (`internal/api/operations.go:295-353`); between events it polls every 500 ms
-(`internal/api/operations.go:210-213`); after 15 s with nothing sent it sends a `: keep-alive`
+(`internal/api/operations.go:210-212`); after 15 s with nothing sent it sends a `: keep-alive`
 comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress)).
 
 **Proposed.**
@@ -1051,7 +1051,7 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 | REC-01 | restore | recovery mode on | banner; refusals name scope or process restriction |
 | REC-02 | refusal | recovery entry sent to a normal start; then to a recovery start whose entry committed under another key | first: `409 conflict` without `epoch` or `request`, read as a normal start; second: `409 conflict` with `epoch`, read as a recovery start, never as a normal one |
 | REC-03 | refusal | plan creation on a recovery start after its entry; plan creation on a pre-restore unaccounted scope of a normal start | first: `409 recovery-mode-active` without `scope`, read as a recovery start; second: with `scope`, start mode unchanged |
-| REC-04 | disconnect | recovery entry commits and its answer is lost: (a) the injector drops the `201`, and the confirming read answers `200` with the new epoch; (b) the server loses its own COMMIT reply and answers `500`, and the confirming read is refused `409 recovery-mode-active`; (b) needs a server-side fault hook, not the injector, and the server binary has none (the test-only `commit` option, `internal/api/api.go:131`, `:190`): its server side is covered by `internal/api/recovery_entries_test.go:254-295`, and its client side waits for that hook, a prerequisite of #263 | both: repeated under the same key with no epoch check; `201` with `Idempotent-Replayed: true` and the minted epoch; §8.5 applied without setting the entry aside |
+| REC-04 | disconnect | recovery entry commits and its answer is lost: (a) the injector drops the `201`, and the confirming read answers `200` with the new epoch; (b) the server loses its own COMMIT reply and answers `500`, and the confirming read is refused `409 recovery-mode-active`; (b) needs a server-side fault hook, not the injector, and the server binary has none (the test-only `commit` option, `internal/api/api.go:131`, `:190`): its server side is covered by `internal/api/recovery_entries_test.go:255-296`, and its client side waits for that hook, a prerequisite of #263 | both: repeated under the same key with no epoch check; `201` with `Idempotent-Replayed: true` and the minted epoch; §8.5 applied without setting the entry aside |
 | PROT-01 | success | protected import, review, mark, continue | review only on a terminal (CLI; a pseudo-terminal in tests, its output matched in memory and never retained, [§11.5](#115-test-artifacts) item 1); no synthetic value in any artifact or storage |
 | PROT-02 | refusal | `import review` with standard output redirected | refused, nothing written |
 | PROT-03 | refusal | mark that is not a path; mark compilation refuses (for example one that would rewrite text); compilation fails on a dependency | first: `422` with `position`; second: `202`, then, after the `marked` event of that `generation`, a `mark-refused` event with `422` and `position` and the ingestion paused again; third: `mark-refused` with `503`, shown by code as not applied; none reported as accepted, no path shown |
