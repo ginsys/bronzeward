@@ -70,9 +70,12 @@ type API struct {
 	authn  Authenticator
 	denied auth.Denied
 	issuer string
-	mux    *http.ServeMux
-	d      deps
-	o      options
+	// lifetime is the longest a human's token may live (auth.oidc.maxTokenLifetime), which the
+	// verifier enforces and GET /server serves.
+	lifetime time.Duration
+	mux      *http.ServeMux
+	d        deps
+	o        options
 }
 
 // deps are what ingestion, publication and observations need: the provider clients, the claim
@@ -227,7 +230,8 @@ func newAPI(db *sql.DB, a Authenticator, cfg config.Auth, d deps, o options) *AP
 	if d.preEntry == nil {
 		d.preEntry = new(atomic.Bool)
 	}
-	api := &API{db: db, authn: a, denied: auth.NewDenied(cfg.DeniedSubjects), issuer: cfg.OIDC.Issuer, mux: http.NewServeMux(), d: d, o: o}
+	api := &API{db: db, authn: a, denied: auth.NewDenied(cfg.DeniedSubjects), issuer: cfg.OIDC.Issuer, lifetime: cfg.OIDC.MaxTokenLifetime,
+		mux: http.NewServeMux(), d: d, o: o}
 	for _, rt := range append(routes(), o.extra...) {
 		api.mux.Handle(rt.method+" "+prefix+rt.pattern, api.handle(rt))
 	}

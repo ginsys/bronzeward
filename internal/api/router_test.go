@@ -30,7 +30,7 @@ var specRoutes = []string{
 	"GET /plans any", "GET /plans/{id} any", "GET /approvals/{id} any", "GET /operations any", "GET /operations/{id} any",
 	"GET /operations/{id}/events any", "GET /acts any", "GET /recovery any",
 	"GET /dependencies any", "GET /dependencies/{id} any", "GET /dependencies/{id}/releases any",
-	"GET /dependencies/{id}/alerts any", "GET /dependency-alerts any", "GET /identity credential",
+	"GET /dependencies/{id}/alerts any", "GET /dependency-alerts any", "GET /identity credential", "GET /server any",
 	"POST /ingestions author human if-match", "GET /ingestions/{id}/review author human",
 	"POST /ingestions/{id}/marks author human", "POST /ingestions/{id}/continuations author human",
 	"POST /ingestions/{id}/takeovers author human",
