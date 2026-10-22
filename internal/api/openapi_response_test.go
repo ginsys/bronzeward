@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"math/big"
 	"mime"
 	"net/http"
 	"net/http/httptest"
@@ -360,12 +361,20 @@ func hasType(types, v any) bool {
 }
 
 // sameValue compares a schema value, as YAML decoded it, with a JSON value decoded with
-// UseNumber.
+// UseNumber. A JSON number equals only a numeric schema value of the same magnitude.
 func sameValue(schema, v any) bool {
-	if n, ok := v.(json.Number); ok {
-		return fmt.Sprint(schema) == n.String()
+	n, ok := v.(json.Number)
+	if !ok {
+		return reflect.DeepEqual(schema, v)
 	}
-	return reflect.DeepEqual(schema, v)
+	switch schema.(type) {
+	case int, int64, uint64, float64:
+	default:
+		return false
+	}
+	a, okA := new(big.Rat).SetString(fmt.Sprint(schema))
+	b, okB := new(big.Rat).SetString(n.String())
+	return okA && okB && a.Cmp(b) == 0
 }
 
 func shortJSON(v any) string {
@@ -474,6 +483,9 @@ func TestValidateRefusesEachKind(t *testing.T) {
 			map[string]any{"a": num("1")}},
 		{"a value a $ref's sibling refuses", map[string]any{"$ref": "#/components/schemas/Name", "enum": []any{"a"}}, "b"},
 		{"a value the $ref refuses and its sibling admits", map[string]any{"$ref": "#/components/schemas/Name", "enum": []any{"a", 1}}, num("1")},
+		{"a number against a string enum value", map[string]any{"enum": []any{"1"}}, num("1")},
+		{"a number against a string const", map[string]any{"const": "1"}, num("1")},
+		{"a number other than the enum value", map[string]any{"enum": []any{1}}, num("2")},
 	} {
 		if errs := validate(doc, tc.schema, tc.v, "v"); len(errs) == 0 {
 			t.Errorf("%s: accepted", tc.name)
@@ -494,6 +506,8 @@ func TestValidateRefusesEachKind(t *testing.T) {
 		{"an additional member the schema admits", map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
 			map[string]any{"a": "b"}},
 		{"a value a $ref and its sibling admit", map[string]any{"$ref": "#/components/schemas/Name", "enum": []any{"a"}}, "a"},
+		{"a number written otherwise than its enum value", map[string]any{"enum": []any{1.0}}, num("1.0")},
+		{"a number equal to a const", map[string]any{"const": 5}, num("5")},
 	} {
 		if errs := validate(doc, tc.schema, tc.v, "v"); len(errs) != 0 {
 			t.Errorf("%s: refused: %v", tc.name, errs)
