@@ -267,9 +267,11 @@ it. It holds no secret.
    ([§10.1](#101-hosting-and-origin)). Switching installations is navigating to another origin,
    which starts with an empty state; nothing read under one origin is shown under another.
 4. Today the issuer, client ID and audience are configured by hand (G14). Under decision D3 (b),
-   a static client-configuration file served next to the web files names them; the web client
-   reads it from its own origin, and the CLI imports it with `context add --from <url>` under the
-   TLS rules of [§6](#6-tls-trust). Entering them by hand stays possible. The server is never asked
+   a static client-configuration file served next to the web files names them, with the client
+   ID of each of the two registrations of [§9.1](#91-identity-provider-requirements) item 2; the
+   web client reads it from its own origin and uses the web client's ID, and the CLI imports it
+   with `context add --from <url>` under the TLS rules of [§6](#6-tls-trust) and stores the CLI
+   client's ID. Entering them by hand stays possible. The server is never asked
    for them through an authenticated route: the client needs them before it can authenticate.
 5. A context's `server` is checked once when it is added: `GET /livez` must answer `204`
    (`internal/server/server.go:19-21`), which shows only that something answers; it proves
@@ -706,7 +708,9 @@ current token expires
    that process only and each new process runs `login`. An explicit per-context opt-in keeps them
    in a file readable only by its owner instead, offered only when the provider issues rotating,
    client-bound refresh tokens to public clients ([§9.1](#91-identity-provider-requirements)
-   item 3). The opt-in is the context's `oidc.tokenFile` ([§5](#5-endpoint-discovery-and-context-selection));
+   item 3). CLI processes that share that file renew one at a time, holding a lock on it while
+   they renew, and read the new pair from it. The opt-in is the context's `oidc.tokenFile`
+   ([§5](#5-endpoint-discovery-and-context-selection));
    only in a context that has it may `BRONZEWARD_TOKEN_FILE` override its path. The CLI writes
    that file and clears it as its own stored credential ([§8.2](#82-errors)), and refuses to
    write or clear a file that holds an automation token (`bwt_`).
@@ -732,7 +736,10 @@ current token expires
    ([§9.5](#95-renewal)). A new tab receives the tokens from an open tab of the same origin over
    `BroadcastChannel` (assumption S3). A reload, or a first tab when none is open, makes a
    top-level redirect to the provider, which answers at once from its own session, without a
-   prompt while that session lasts. Where the provider does not issue rotating, client-bound
+   prompt while that session lasts. A rotated refresh token is used once, so the open tabs do not
+   renew separately: one tab renews and sends the new pair to every open tab over the same
+   channel, and a tab that receives a pair drops its own renewal. Where the provider does not
+   issue rotating, client-bound
    refresh tokens ([§9.1](#91-identity-provider-requirements) item 3), renewal also uses that
    redirect, never a hidden frame (item 4). That fallback redirects at every
    access-token expiry, the behaviour the owner's constraint in D5 refuses, so the constraint holds
@@ -811,7 +818,8 @@ expiry, at most `maxTokenLifetime`; an identity revocation is permanent and is n
 
 **Proposed.**
 
-1. `bronzewardctl logout` deletes the context's tokens from the store, revokes the refresh token
+1. `bronzewardctl logout` deletes the context's tokens from the store and from its D2 (b) token
+   file, if it has one, revokes the refresh token
    at the provider's revocation endpoint if it has one, and says that an access token already
    issued remains valid at the server for up to its remaining lifetime.
 2. The web sign-out discards the in-memory tokens and every cached response, revokes the refresh
@@ -1057,7 +1065,7 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 | AUTH-06 | success | token expires during `operation watch` | renewed; stream resumed with `Last-Event-ID` |
 | AUTH-07 | refusal | renewal returns a different subject with a write pending | write set aside; change shown |
 | AUTH-08 | success | sign-out, then back navigation (web) | no data shown; storage empty |
-| AUTH-09 | success | `bronzewardctl logout` | tokens gone from the credential store; refresh token revoked where the provider allows; remaining access-token validity stated |
+| AUTH-09 | success | `bronzewardctl logout` | tokens gone from the credential store and from a D2 (b) token file; refresh token revoked where the provider allows; remaining access-token validity stated |
 | AUTH-10 | refusal | subject listed in `deniedSubjects` | `403 identity-revoked`; same handling as AUTH-05 |
 | ETAG-01 | refusal | another author writes first | `412`; no resend; newer state shown |
 | AMB-01 | disconnect | connection dropped before any request byte is sent | ordinary retry |
