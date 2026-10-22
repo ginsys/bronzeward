@@ -77,6 +77,7 @@ summary() {
 }
 
 up() {
+  local c ids
   if ours; then
     summary
     return
@@ -86,6 +87,10 @@ up() {
       die "$c exists but is not this checkout's complete provider (another checkout's, or an interrupted up); run mise run dev-idp-down, then mise run dev-idp"
     fi
   done
+  ids=$(docker network ls -q --filter "name=^$net\$") || die "cannot list networks (docker network ls)"
+  if [ -n "$ids" ]; then
+    die "network $net exists without the provider (an interrupted up); run mise run dev-idp-down, then mise run dev-idp"
+  fi
   rm -rf -- "$state"
   mkdir -p "$state"
   chmod 700 "$state"
@@ -197,9 +202,11 @@ EOF
   summary
 }
 
-command -v jq >/dev/null || die "needs jq"
 case ${1:-} in
-up) up ;;
+up)
+  command -v jq >/dev/null || die "needs jq"
+  up
+  ;;
 down) down ;;
 *) die "usage: fixtures/dev-idp up | down" ;;
 esac
