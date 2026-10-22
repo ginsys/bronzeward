@@ -87,7 +87,7 @@ func routes() []*route {
 	}
 	rs = append(rs,
 		read(g("/drafts"), listDrafts), read(g("/drafts/{id}"), getDraft),
-		read(g("/ingestions/{id}"), getIngestion), read(g("/releases"), listReleases), read(g("/releases/{id}"), getRelease),
+		read(g("/ingestions"), listIngestions), read(g("/ingestions/{id}"), getIngestion), read(g("/releases"), listReleases), read(g("/releases/{id}"), getRelease),
 		read(g("/releases/{id}/machines/{m}/review"), getReview),
 		read(g("/plans"), listPlans), read(g("/plans/{id}"), getPlan), read(g("/approvals/{id}"), getApproval), read(g("/operations"), listOperations),
 		read(g("/operations/{id}"), getOperation), read(g("/operations/{id}/events"), getOperationEvents),

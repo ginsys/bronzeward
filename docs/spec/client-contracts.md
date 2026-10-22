@@ -123,16 +123,16 @@ protected review.
 | Client action | Route | Paged | ETag served | Notes |
 | --- | --- | --- | --- | --- |
 | cluster list / show | `GET /clusters`, `/clusters/{id}` | list | no | |
-| machine list / show | `GET /machines`, `/machines/{id}` | list | no | no filter (G9) |
+| machine list / show | `GET /machines`, `/machines/{id}` | list | no | filter `cluster`; `pendingConvergence` (G24) (`internal/api/reads.go:199-218`) |
 | machine observations | `GET /machines/{id}/observations` | yes | no | |
 | machine timeline | `GET /machines/{id}/timeline` | yes, by revision | no | JSON only, no stream (G9) |
 | fragment, profile, assignment list / show / history / revision | `GET /{kind}s`, `/{kind}s/{id}`, `/{kind}s/{id}/revisions`, `/{kind}-revisions/{id}` | lists | head item only | `internal/api/routes.go:83-87` |
 | draft list / show | `GET /drafts`, `/drafts/{id}` | list | item | the item's ETag is the one draft writes need |
-| import status | `GET /ingestions/{id}` | no | no | no ingestion list (G10) |
+| import list / status | `GET /ingestions`, `/ingestions/{id}` | list | no | filters `state`, `machine` (`internal/api/ingestions.go:280-299`) |
 | import review | `GET /ingestions/{id}/review` | no | no | `author`, human; `no-store`; only while `paused` (`internal/api/review.go:30-52`) |
 | release list / show | `GET /releases`, `/releases/{id}` | list | no | |
 | release review, provenance | `GET /releases/{id}/machines/{m}/review` | no | no | redacted |
-| plan list / show | `GET /plans`, `/plans/{id}` | list | no | no filter (G9) |
+| plan list / show | `GET /plans`, `/plans/{id}` | list | no | filters `state`, `machine` (`internal/api/plans.go:429-451`) |
 | approval show | `GET /approvals/{id}` | no | none, by design | approvals are immutable |
 | operation list / show | `GET /operations`, `/operations/{id}` | list | no | filters `plan`, `machine`, `state`, `kind` (`internal/api/operations.go:95-108`) |
 | operation watch | `GET /operations/{id}/events` | JSON pages, or SSE | no | [§8.6](#86-event-resumption) |
@@ -205,14 +205,14 @@ supported.
 | --- | --- | --- | --- |
 | G1 | No identity, role or capability read; roles appear only in a `403` body | `internal/api/api.go:372-384`; no route in `internal/api/routes.go:78-136` | API issue A1; blocks the sign-in and inventory tickets |
 | G2 | No server version or compatibility read; only anonymous `/livez` | `internal/server/server.go:19-22` | API issue A2; blocks every client's compatibility refusal |
-| G3 | An operation does not name its ingestion; only the ingestion side links them: its read serves `operation`, and the start, mark and takeover `202` bodies name both | the operation's subject is a draft or a plan and machine, never an ingestion (`internal/api/reads.go:358-373`, `internal/api/reads.go:398-400`); the ingestion side: `internal/api/ingestions.go:234`, `internal/api/ingestions.go:255-260`, `internal/api/marks.go:106`, `internal/api/ingestions.go:323` | API issue A4 (operation `subject`) |
+| G3 | An operation does not name its ingestion; only the ingestion side links them: its read serves `operation`, and the start, mark and takeover `202` bodies name both | the operation's subject is a draft or a plan and machine, never an ingestion (`internal/api/reads.go:358-373`, `internal/api/reads.go:398-400`); the ingestion side: `internal/api/ingestions.go:234`, `internal/api/ingestions.go:255-260`, `internal/api/marks.go:106`, `internal/api/ingestions.go:323` | closed by API issue A4 ([#280](https://github.com/ginsys/bronzeward/issues/280)): an `ingest` operation's `subject` names its `ingestion` (`internal/api/reads.go:346`, `internal/api/reads.go:396-398`) |
 | G4 | A draft does not name the release it produced | the draft read selects no release (`internal/api/reads.go:211`) | accepted limitation: the publish operation's `result.release` answers it |
 | G5 | No render of a draft before publication | no such route in `internal/api/routes.go:78-136` | later design issue L1: a compilation design change, not a client contract |
 | G6 | Provenance covers secret-reference occurrences only, not "which fragment set this field" | [compilation §8.1](compilation.md#81-provenance-by-tracer-composition) attributes stand-ins to reference occurrences | later design issue L1, as G5 |
 | G7 | Drift content is not served | the machine's drift and observation reads name the observation, its time and a matched release, and no configuration (`internal/api/drift.go:150-155`, `internal/api/inventory.go:251-257`, `internal/api/observations.go:16-17`) | later design issue L2: serving observed configuration is a redaction design question; until then clients use a drift-adoption import with review |
 | G8 | Machines have no human-readable name | the machine resource has no name member (`internal/api/inventory.go:260-272`) | accepted limitation for this milestone; clients show endpoint and node ID |
-| G9 | No list filters on machines, plans, releases, drafts or acts; no machine timeline stream | `internal/api/acts.go:135-145` refuses any key but `limit`, `cursor` and the route's filters; filters exist only on operations and dependencies | API issue A4 for the filters the journeys need first: plans by `state` and `machine`, machines by `cluster`; accepted limitation for the release, draft and act filters, which clients apply over the pages they read; timeline polling accepted |
-| G10 | No ingestion list | `internal/api/routes.go:90` | API issue A4 |
+| G9 | No list filters on machines, plans, releases, drafts or acts; no machine timeline stream | `internal/api/acts.go:135-145` refuses any key but `limit`, `cursor` and the route's filters; filters exist only on operations and dependencies | API issue A4 for the filters the journeys need first: plans by `state` and `machine`, machines by `cluster`; accepted limitation for the release, draft and act filters, which clients apply over the pages they read; timeline polling accepted. A4's filters are served ([#280](https://github.com/ginsys/bronzeward/issues/280)): plans by `state` and `machine` (`internal/api/plans.go:429-451`), machines by `cluster` (`internal/api/reads.go:199-218`) |
+| G10 | No ingestion list | `internal/api/routes.go:90` | closed by API issue A4 ([#280](https://github.com/ginsys/bronzeward/issues/280)): `GET /ingestions`, filtered by `state` and `machine` (`internal/api/ingestions.go:280-299`) |
 | G11 | Recovery marks, releases and accountings have no list route | `internal/api/routes.go:128-135` | accepted limitation: `GET /recovery` and the machine timeline |
 | G12 | No browser access path: no CORS, and every request including a preflight `OPTIONS` must authenticate | `internal/server/server.go:10-13`, `internal/api/api.go:255-264`; [§10.1](#101-hosting-and-origin) | decision D1; under the recommended same-origin hosting no API change |
 | G13 | Authenticated reads set no `Cache-Control`; a browser may keep them in its HTTP cache | [§2](#2-the-api-a-client-meets) caching row | API issue A3 |
@@ -226,7 +226,7 @@ supported.
 | G21 | A human's mutation takes no expected-epoch precondition: only `Idempotency-Key` and `If-Match` are checked (`internal/api/api.go:388-409`), and the epoch is reported only in an answer (`internal/api/api.go:318-319`). After a write's answer is lost, and either a restore removes its record or the first attempt never committed, the same request with the same key executes afresh in the new epoch, because the in-transaction lookup finds no record (`internal/api/tx.go:190-198`) ([persistence and API §12.4](persistence-api.md#124-restore-and-idempotency)); the read before repeating of [§8.4](#84-idempotency-and-ambiguous-responses) item 3 leaves a race. A service principal is already checked: its token carries its epoch, and the write's own transaction refuses one from another epoch with `401` | `internal/api/api.go:388-409`, `internal/api/api.go:318-319`, `internal/api/tx.go:190-198`; service check: `internal/auth/automation.go:51-52`, `internal/api/idempotency.go:28-30`, `internal/api/idempotency.go:47-49`, `internal/api/api.go:297-303` | decision D10; API issue A6 if D10 chooses a server check |
 | G22 | No read of the process's start mode. `GET /recovery` serves epoch, recovery mode, entry, exit and scopes, and the headers carry only `Bronzeward-Epoch` and `Bronzeward-Recovery-Mode`. Past the role check, a recovery start shows only in an answer: a `409 recovery-mode-active` without a `scope` member, to any request but the entry before the entry commits and to plan creation, approval or unfreeze after it, or any recovery-entry answer except its not-a-recovery-start refusal. A normal start shows only in that refusal: a plain `409 conflict` with neither an `epoch` nor a `request` member, while every other `409 conflict` the entry answers carries `epoch`. The scope refusals that share the `recovery-mode-active` code carry `scope` | `internal/api/recovery_exits.go:123-129`, `internal/api/api.go:318-324`; process refusals: `internal/api/api.go:241-243`, `internal/api/api.go:337-351`, `internal/api/recovery_exits.go:211-213`, `internal/api/routes.go:120-127`; entry: `internal/api/recovery_entries.go:91-92`, `internal/api/recovery_entries.go:106-108`, `internal/api/recovery_entries.go:133-135`, `internal/api/idempotency.go:65-67`; scope refusals: for example `internal/api/plans.go:226-227` | API issue A2 (the start mode served with the version); until then the client reading of [§8.5](#85-epoch-changes), with the limit that nothing shows the mode before such an answer. That reading rests on the absent `scope` member, which the contract says every `recovery-mode-active` carries: contract correction C2 |
 | G23 | No principal display name: bodies carry principal identifiers only, and no route maps one to a subject or name | `internal/api/acts.go:19-30`, `internal/api/releases.go:53`, `internal/api/plans.go:195`, `internal/api/approvals.go:43`, `internal/api/recovery_entries.go:79`; no such route in `internal/api/routes.go:78-136` | API issue A7; until then clients show shortened principal identifiers |
-| G24 | No convergence status: the machine body serves `desired` and `applied.release`, and compares the artifact digests only to match an observation, never serving them, so a client cannot tell whether the `Desired` release's digest differs from the `Applied` one, which is what pending convergence means. After an adoption the `Applied` digest is the baseline's, so equal or different release IDs do not settle it | `internal/api/reads.go:155-166`; [execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values), [§6.3](execution-recovery.md#63-adopt) | API issue A4 (a pending-convergence member on the machine); until then clients show the release difference only, never labelled as pending convergence |
+| G24 | No convergence status: the machine body serves `desired` and `applied.release`, and compares the artifact digests only to match an observation, never serving them, so a client cannot tell whether the `Desired` release's digest differs from the `Applied` one, which is what pending convergence means. After an adoption the `Applied` digest is the baseline's, so equal or different release IDs do not settle it | `internal/api/reads.go:155-166`; [execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values), [§6.3](execution-recovery.md#63-adopt) | closed by API issue A4 ([#280](https://github.com/ginsys/bronzeward/issues/280)): the machine's `pendingConvergence` compares the `Desired` artifact's digest with the `Applied` digest, `true` too for a `Desired` with no `Applied`, and serves neither digest (`internal/api/reads.go:155-166`) |
 
 Not gaps, by design: no dispatch or apply route, no token administration route, no secret
 browser, and no WebSocket (polling and SSE only, [persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress)).
@@ -1100,7 +1100,9 @@ stream at a fixed interval. Closes G13 and G16, and the idle-cut risk in
 the ingestion named in its operation's `subject`, and list filters: plans by `state` and
 `machine`, machines by `cluster`; and a member on the machine stating whether it is pending
 convergence, computed from the digests the server already compares. Closes G3, G10, G24 and the
-first part of G9.
+first part of G9. Served since [#280](https://github.com/ginsys/bronzeward/issues/280), as
+[persistence and API §9.2](persistence-api.md#92-resources-and-routes) states; a machine with a
+`Desired` release and no `Applied` state reads as pending convergence.
 
 **A5. A sign-in-capable test issuer.** Extend the fixture issuer, or add a pinned identity
 provider to the fixtures, with authorization-code and PKCE, refresh with rotation, revocation,
@@ -1163,8 +1165,8 @@ dependencies below in place:
 | [#263](https://github.com/ginsys/bronzeward/issues/263) validation | A5, D8; a server-side COMMIT fault hook for REC-04 (b); a server-side hook delaying a draft transaction's `COMMIT` after its claim's release for PROT-06's fourth case | 11.5, 12 |
 
 A7 blocks no ticket: until it lands, the tickets from #256 to #261 show shortened principal
-identifiers (G23). A4's convergence member does not block the inventory views of #254 and #255
-either: until it lands they show the release difference only (G24).
+identifiers (G23). A4's convergence member, served since #280, did not block the inventory views of
+#254 and #255 either (G24).
 
 ## 15. Assumptions and limits
 

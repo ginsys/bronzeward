@@ -155,11 +155,15 @@ var (
 // Observed is the observation of the highest basis (execution-recovery §4.1) that read the
 // configuration, matched by digest against the
 // Applied artifact's and then the Desired release's; the digest is compared here and never served.
+// Pending convergence (execution-recovery §1) compares the Desired release's artifact digest for
+// the machine with the Applied digest, which after an adoption is the import base's, never the
+// release identifiers; a machine with a Desired release and no Applied state is pending.
 const selectMachine = `SELECT m.id, m.cluster, m.smbios_uuid::text, m.talos_node_id, m.serial, m.platform, m.talos_endpoint, m.frozen, m.scope_state, s.desired,
 		s.applied_release, s.applied_source, ob.id, ob.at,
 		CASE WHEN ob.configuration_digest = s.applied_digest THEN s.applied_release
 			WHEN ob.configuration_digest = rd.configuration_digest THEN s.desired END,
-		d.opened, d.observation, d.last_observation, d.late_landing
+		d.opened, d.observation, d.last_observation, d.late_landing,
+		s.desired IS NOT NULL AND rd.configuration_digest IS DISTINCT FROM s.applied_digest
 	FROM machine m JOIN machine_state s ON s.machine = m.id
 	LEFT JOIN release_machine rd ON rd.release = s.desired AND rd.machine = m.id
 	LEFT JOIN drift_record d ON d.machine = m.id AND d.closed IS NULL
@@ -172,7 +176,7 @@ func scanMachine(r interface{ Scan(...any) error }) (machineBody, error) {
 	var observedAt sql.NullTime
 	var opened sql.NullInt64
 	err := r.Scan(&b.ID, &b.Cluster, &b.Hardware.SMBIOSUUID, &b.Hardware.TalosNodeID, &b.Hardware.Serial, &b.Platform, &b.TalosEndpoint, &b.Frozen, &b.ScopeState, &b.Desired, &rel, &source,
-		&obs, &observedAt, &observedRelease, &opened, &driftObs, &driftLast, &late)
+		&obs, &observedAt, &observedRelease, &opened, &driftObs, &driftLast, &late, &b.PendingConvergence)
 	if opened.Valid {
 		b.OpenDrift = &openDriftBody{Revision: opened.Int64, Observation: driftObs.String, LastObservation: driftLast.String}
 		if late.Valid {
@@ -192,9 +196,25 @@ func scanMachine(r interface{ Scan(...any) error }) (machineBody, error) {
 }
 
 var (
-	listMachines = listed(id.Machine, selectMachine+` WHERE m.id > $1 ORDER BY m.id LIMIT $2`, func(r *sql.Rows) (machineBody, string, error) {
-		b, err := scanMachine(r)
-		return b, b.ID, err
+	// listMachines takes the filter cluster (§9.2).
+	listMachines = readFunc(func(a *API, w http.ResponseWriter, q *request) {
+		readIn(a, w, q, func(ctx context.Context, tx *sql.Tx) (string, any, error) {
+			limit, after, ref := page(q, id.Machine, "cluster")
+			if ref != nil {
+				return "", nil, ref
+			}
+			cluster := q.r.URL.Query().Get("cluster")
+			if cluster != "" && id.MustHave(cluster, id.Cluster) != nil {
+				return "", nil, refuse(http.StatusBadRequest, "invalid-request", "cluster names a cluster")
+			}
+			out, err := pageRows(ctx, tx, q, limit, after,
+				selectMachine+` WHERE m.id > $1 AND ($3 = '' OR m.cluster = $3) ORDER BY m.id LIMIT $2`,
+				func(r *sql.Rows) (machineBody, string, error) {
+					b, err := scanMachine(r)
+					return b, b.ID, err
+				}, cluster)
+			return "", out, err
+		})
 	})
 	getMachine = item(id.Machine, func(ctx context.Context, tx *sql.Tx, v string) (string, any, error) {
 		b, err := scanMachine(tx.QueryRowContext(ctx, selectMachine+` WHERE m.id = $1`, v))
@@ -318,11 +338,12 @@ func getDraft(a *API, w http.ResponseWriter, q *request) {
 	})(a, w, q)
 }
 
-// operationSubject is what the operation acts on: a draft revision for a publish or ingest, a plan
-// and its machine for an apply-config or adopt operation.
+// operationSubject is what the operation acts on: a draft revision for a publish or ingest, with
+// an ingest's ingestion; a plan and its machine for an apply-config or adopt operation.
 type operationSubject struct {
 	Draft         string `json:"draft,omitempty"`
 	DraftRevision int    `json:"draftRevision,omitempty"`
+	Ingestion     string `json:"ingestion,omitempty"`
 	Plan          string `json:"plan,omitempty"`
 	Machine       string `json:"machine,omitempty"`
 }
@@ -355,15 +376,15 @@ var getOperation = item(id.Operation, func(ctx context.Context, tx *sql.Tx, v st
 
 // selectOperation never selects a digest: an operation's result names what it applied, and the
 // artifact's digest stays in the database (choice §17.38).
-const selectOperation = `SELECT id, kind, state, epoch, last_event, draft, draft_revision, plan, machine, created_by, created_role,
-		created_at, (result - 'digest')::text, error::text
+const selectOperation = `SELECT id, kind, state, epoch, last_event, draft, draft_revision, ingestion, plan, machine, created_by,
+		created_role, created_at, (result - 'digest')::text, error::text
 	FROM operation`
 
 func scanOperation(r interface{ Scan(...any) error }) (operationBody, error) {
 	var b operationBody
-	var draft, plan, machine, principal, role, res, fail sql.NullString
+	var draft, ingestion, plan, machine, principal, role, res, fail sql.NullString
 	var revision sql.NullInt64
-	err := r.Scan(&b.ID, &b.Kind, &b.State, &b.Epoch, &b.LastEvent, &draft, &revision, &plan, &machine,
+	err := r.Scan(&b.ID, &b.Kind, &b.State, &b.Epoch, &b.LastEvent, &draft, &revision, &ingestion, &plan, &machine,
 		&principal, &role, &b.CreatedAt, &res, &fail)
 	if err != nil {
 		return b, err
@@ -371,7 +392,11 @@ func scanOperation(r interface{ Scan(...any) error }) (operationBody, error) {
 	if plan.Valid {
 		b.Subject = &operationSubject{Plan: plan.String, Machine: machine.String}
 	}
-	return finishOperation(b, draft, revision, principal, role, res, fail), nil
+	b = finishOperation(b, draft, revision, principal, role, res, fail)
+	if ingestion.Valid && b.Subject != nil {
+		b.Subject.Ingestion = ingestion.String
+	}
+	return b, nil
 }
 
 // readOperation reads operation v as §8.3 shows it. The row is locked FOR SHARE before its
