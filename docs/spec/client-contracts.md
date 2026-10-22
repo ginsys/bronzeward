@@ -359,7 +359,7 @@ body. Exit codes are the journeys' (journeys §4).
 | 400 `cursor-invalid` | discard the cursor and restart the list. Run the epoch-change handling of [§8.5](#85-epoch-changes) only when `Bronzeward-Epoch` changed: the same code also answers a cursor that does not parse (`internal/api/acts.go:154-156`) |
 | 401 `unauthenticated` | renew once ([§9.5](#95-renewal)); repeat a read; for a write follow [§8.4](#84-idempotency-and-ambiguous-responses); a second `401` stops with the failure text of [§9.6](#96-failure-cases) |
 | 403 `forbidden` | show the route's `roles`, and "humans only" when `humanOnly` is true; no retry. For the plan cancellation's creator check, the form that carries a `plan` member, show its `detail` instead: its `roles` are the route's, `publisher` included, which the caller already holds (`internal/api/cancellations.go:64-72`, `internal/api/routes.go:123`). After an ambiguous attempt, the route-level role check's refusal, like the process `409`s, is decided before the idempotency lookup (`internal/api/api.go:339-359`, `internal/api/api.go:380-391`; for example a renewal dropped a role, [§9.6](#96-failure-cases)), so it says nothing about the earlier attempt: the outcome stays unknown ([§8.4](#84-idempotency-and-ambiguous-responses) item 4). The plan cancellation's creator check, a `403 forbidden` that carries a `plan` member, refuses after the lookup instead (`internal/api/cancellations.go:61-73`, `internal/api/tx.go:198-202`): it means the key has no record, in this epoch or an earlier one, so the earlier attempt did not commit or a restore removed it |
-| 403 `identity-revoked` | stop; clear the context's stored credential, meaning the tokens the client itself keeps in its credential store or memory, never an operator-supplied token file, which it leaves untouched and reports as no longer accepted; do not start a new sign-in by itself ([§9.6](#96-failure-cases)) |
+| 403 `identity-revoked` | stop; clear the context's stored credential, meaning the tokens the client itself keeps in its credential store, its memory or its D2 (b) token file, never an operator-supplied automation token file, which it leaves untouched and reports as no longer accepted; do not start a new sign-in by itself ([§9.6](#96-failure-cases)) |
 | 404 `not-found` | the resource does not exist in this epoch; after a restore a handle issued later answers `404` ([persistence and API §12.3](persistence-api.md#123-what-a-restored-state-means-record-by-record)) |
 | 409 `conflict`, `stale-input`, `scope-busy`, `machine-identity-mismatch`, `ingestion-abandoned`, `recovery-mode-entered`, `recovery-mode-active` | show the named resource and state; read it; never repeat automatically, with one exception. A `409 recovery-mode-active` without a `scope` member, and a `409 conflict` to the recovery entry without `epoch` and `request` members, are process refusals that show the start mode ([§8.5](#85-epoch-changes)). A `409 conflict` that carries `request` and `epoch` is an earlier-epoch idempotency record: it is read and reported, not repeated, under either key ([§8.4](#84-idempotency-and-ambiguous-responses) item 7). The one exception: a `409 conflict` on a draft fragment write (`PUT /drafts/{id}/fragments/{name}`) that answers a repeat, carries an `ingestion` member but no `draft` member, and has no `Idempotent-Replayed: true` is the first request still running, or ended without committing while its claim's lease has not lapsed (`internal/api/fragments.go:105-114`, `internal/api/tx.go:80-98`; looked up by principal and key, so it never answers a first send). A `409` with both `ingestion` and `draft`, replayed or not, is a recorded refusal (`internal/api/fragments.go:291-296`, `internal/api/drafts.go:94-104`): the write was refused, not pending. For the in-progress case, repeat the identical request with the same key, with backoff, until it answers otherwise or the client's wait bound of [§8.4](#84-idempotency-and-ambiguous-responses) item 2 expires; the contract says the repeat then gets the first request's replay ([persistence and API §7.2](persistence-api.md#72-behavior); [§8.4](#84-idempotency-and-ambiguous-responses) item 2), or, when the first request ended without committing, executes as a new request, reported as this send's own result (`internal/api/fragments.go:105-114`) |
 | 412 `precondition-failed` | someone else wrote first: stop, show the newer state, never refetch and resend ([§8.3](#83-etags)) |
@@ -679,8 +679,10 @@ current token expires
    [§9.2](#92-cli-sign-in) item 3; its process memory under D2 (a), since a long wait renews
    in-process, [§9.5](#95-renewal) item 4; its token file under D2 (b); the web client's memory
    under D5 (a)) is conditional on refresh tokens issued to public clients rotating on every use
-   and being bound to the client. Where the provider does not offer that, the CLI offers no token
-   file and the web client renews by the redirect of [§9.3](#93-browser-sign-in) item 3. This
+   and being bound to the client. Where the provider does not offer that, no client keeps a
+   refresh token: the CLI keeps only the access token, in its credential store or memory, offers
+   no token file and runs `login` again when the access token expires; the web client renews by
+   the redirect of [§9.3](#93-browser-sign-in) item 3. This
    document sets no refresh-token policy itself. The provider's session length, not the client,
    bounds how long an operator stays signed in.
 4. The web client's origin is allowed to call the provider's token endpoint cross-origin.
@@ -703,7 +705,8 @@ current token expires
    that process only and each new process runs `login`. An explicit per-context opt-in keeps them
    in a file readable only by its owner instead, offered only when the provider issues rotating,
    client-bound refresh tokens to public clients ([§9.1](#91-identity-provider-requirements)
-   item 3); `BRONZEWARD_TOKEN_FILE` may name that file's path.
+   item 3). In a signed-in context, `BRONZEWARD_TOKEN_FILE` may name that file's path; the CLI
+   writes it and clears it as its own stored credential ([§8.2](#82-errors)).
 4. No token is printed, written to the configuration file, passed in argv or placed in an
    environment variable by the CLI. No command prints a token.
 5. `whoami` shows the issuer and subject from the token's claims, read without verification and
@@ -727,7 +730,10 @@ current token expires
    `BroadcastChannel` (assumption S3). A reload, or a first tab when none is open, makes a
    top-level redirect to the provider, which answers at once from its own session, without a
    prompt while that session lasts. Where the provider does not rotate refresh tokens, renewal
-   also uses that redirect, never a hidden frame (item 4). No token is kept in storage (item 2).
+   also uses that redirect, never a hidden frame (item 4). That fallback redirects at every
+   access-token expiry, the behaviour the owner's constraint in D5 refuses, so the constraint holds
+   only with a rotating provider: rotation is a provider requirement
+   ([§15](#15-assumptions-and-limits)). No token is kept in storage (item 2).
 4. Silent renewal through a hidden frame is not used: browsers that block third-party cookies make
    it fail unpredictably (assumption S2), and a failure would surface as an unexplained sign-out.
 5. Every API call goes to the page's own origin ([§10.1](#101-hosting-and-origin)); only the
@@ -743,7 +749,8 @@ an earlier epoch (`internal/auth/automation.go:47-52`).
 **Proposed.**
 
 1. The CLI reads an automation token from a file (`--token-file` or the context's
-   `automation.tokenFile`, or a path in `BRONZEWARD_TOKEN_FILE`) or from standard input
+   `automation.tokenFile`, or, in an automation context, a path in `BRONZEWARD_TOKEN_FILE`) or
+   from standard input
    (`--token-stdin`). It never accepts the token as an argument value, nor the token itself in an
    environment variable (decision D6 (a)): `BRONZEWARD_TOKEN_FILE` holds a path, never a secret.
 2. A token file must be a regular file readable only by its owner; otherwise the CLI refuses it
@@ -787,7 +794,7 @@ read locally, labelled as its own reading, never as the server's reason.
 | Human-only route with an automation token | `403 forbidden`, `humanOnly: true` | "This needs a person signed in, not an automation token" |
 | Group removed at the provider | takes effect when the current token expires ([persistence and API §10.1](persistence-api.md#101-humans-oidc)) | nothing to detect before; after renewal the next refusal names the roles |
 | Account disabled at the provider | the current token is accepted until it expires; in the #162 experiment a refresh after disablement was refused ([talosctl-oidc live observations](../design/research/20261021-talosctl-oidc.md#live-observations), one provider only) | the failed renewal of [§9.5](#95-renewal) item 3 |
-| Identity revoked in Bronzeward, or listed in `deniedSubjects` | `403 identity-revoked` (`internal/api/api.go:316-317`) for both. A recorded revocation is permanent (`internal/api/revocations.go:122`); a `deniedSubjects` entry is deployment configuration and lasts while the entry does (`internal/auth/auth.go:182-183`, `internal/auth/automation.go:45`) | "Your access was revoked or is denied by this installation; contact a recovery administrator." Clear the stored credential as in [§8.2](#82-errors), never an operator-supplied token file; no automatic new sign-in, which would be refused the same way. The client cannot tell the two causes apart |
+| Identity revoked in Bronzeward, or listed in `deniedSubjects` | `403 identity-revoked` (`internal/api/api.go:316-317`) for both. A recorded revocation is permanent (`internal/api/revocations.go:122`); a `deniedSubjects` entry is deployment configuration and lasts while the entry does (`internal/auth/auth.go:182-183`, `internal/auth/automation.go:45`) | "Your access was revoked or is denied by this installation; contact a recovery administrator." Clear the stored credential as in [§8.2](#82-errors), never an operator-supplied automation token file; no automatic new sign-in, which would be refused the same way. The client cannot tell the two causes apart |
 | Automation token revoked, rotated or from an earlier epoch | `401` (`internal/auth/automation.go:47-52`) | "The automation token was not accepted: it may be revoked, rotated, expired or from before a restore. The operator reissues it with the server-side command." |
 | Provider or database unreachable from the server | `503 dependency-unavailable`, nothing committed | retry as [§8.2](#82-errors) |
 | Provider unreachable from the client | no request reaches the server | keep using the current token until it is refused; then "Cannot reach the identity provider `<issuer>`" |
@@ -1095,10 +1102,10 @@ the times their rows give.
 | ID | Choice | Options | Decision and reason |
 | --- | --- | --- | --- |
 | D1 | Web hosting and origin | (a) static files on the API's origin via the TLS terminator; (b) another origin with CORS added to the server; (c) the server serves the files; (d) backend-for-frontend | **Decided** by the owner (Serge, 2026-10-22 09:50 CEST): (a). The TLS front end routes `/api/v1/` and `/livez` to the server and serves the static web files for everything else ([§10.1](#101-hosting-and-origin)). Reason: no server change, no anonymous route, no cookie. Rejected: (b) adds an unauthenticated `OPTIONS` path and (c) an unauthenticated file route, both against "every request authenticates"; (d) is excluded by the issue unless decided explicitly |
-| D2 | CLI token store without an OS credential store | (a) memory only, sign in per process; (b) file readable only by its owner, opt-in per context; (c) file by default | **Decided** by the owner (Serge, 2026-10-22 09:58 CEST): (a) by default, with (b) as an explicit per-context opt-in, offered only if the provider issues rotating, client-bound refresh tokens to public clients ([§9.1](#91-identity-provider-requirements) item 3, [§9.2](#92-cli-sign-in) item 3). `BRONZEWARD_TOKEN_FILE` may name the opt-in file's path. Reason: a refresh token on disk is a long-lived credential, so keeping one there is an operator's visible choice per context. Rejected: (c), which puts one on disk without that choice |
+| D2 | CLI token store without an OS credential store | (a) memory only, sign in per process; (b) file readable only by its owner, opt-in per context; (c) file by default | **Decided** by the owner (Serge, 2026-10-22 09:58 CEST): (a) by default, with (b) as an explicit per-context opt-in, offered only if the provider issues rotating, client-bound refresh tokens to public clients ([§9.1](#91-identity-provider-requirements) item 3, [§9.2](#92-cli-sign-in) item 3). `BRONZEWARD_TOKEN_FILE` may name the opt-in file's path in a signed-in context. (a) also holds a refresh token in process memory, which [§9.1](#91-identity-provider-requirements) item 3 conditions on rotation as well. Reason: a refresh token on disk is a long-lived credential, so keeping one there is an operator's visible choice per context. Rejected: (c), which puts one on disk without that choice |
 | D3 | How a client learns issuer, client ID and audience | (a) by hand in the context; (b) a static client-configuration file served next to the web files; (c) an anonymous API route | **Decided** by the lead, 2026-10-21, under the owner's 2026-10-07 delegation: (a) now, and (b) if D1 is decided (a). Reason: under same-origin hosting the web client needs the file anyway, and the CLI can import it with `context add --from <url>` under TLS; (c) adds a second anonymous route. D1 is decided (a), so (b) applies, and entering the values by hand stays possible ([§5](#5-endpoint-discovery-and-context-selection) item 4) |
 | D4 | CLI sign-in without a local browser | (a) device-authorization grant; (b) loopback over a forwarded port; (c) both | **Decided** by the owner (Serge, 2026-10-22 10:04 CEST): (a) only, with no forwarded-loopback fallback ([§9.2](#92-cli-sign-in) item 2). Reason: device flow suits SSH sessions; it is phishable by a lookalike prompt, so the CLI shows the verification URI's host prominently. Rejected: (b) and (c) |
-| D5 | Browser renewal and new tabs | (a) access and refresh tokens in memory only, renewed silently by the rotating refresh token; a new tab receives them from an open tab over `BroadcastChannel`; a reload or first tab makes a top-level redirect to the provider, which answers from its own session without a prompt; no token in `localStorage`, `sessionStorage` or IndexedDB; without rotation, renewal by that redirect, never a hidden frame; (b) a refresh token bound by DPoP, kept in browser storage; (c) an authentication proxy that holds the session and gives the browser a cookie | **Decided** by the owner (Serge, 2026-10-22 10:20 CEST): (a) ([§9.3](#93-browser-sign-in) item 3). The owner's constraints (10:10 CEST): "reload and new tab is not acceptable / re-auth manually every 15m is not acceptable". Reason: (a) meets both without writing a token to storage. Rejected: (b), which keeps a credential in storage; (c), a stateful component in front of an API that accepts no cookie ([§10.1](#101-hosting-and-origin)). An earlier set of options, (b) silent frame renewal and (c) a redirect at every expiry, was replaced: the first breaks under third-party cookie blocking (assumption S2), the second interrupts work every 15 minutes |
+| D5 | Browser renewal and new tabs | (a) access and refresh tokens in memory only, renewed silently by the rotating refresh token; a new tab receives them from an open tab over `BroadcastChannel`; a reload or first tab makes a top-level redirect to the provider, which answers from its own session without a prompt; no token in `localStorage`, `sessionStorage` or IndexedDB; without rotation, renewal by that redirect, never a hidden frame; (b) a refresh token bound by DPoP, kept in browser storage; (c) an authentication proxy that holds the session and gives the browser a cookie | **Decided** by the owner (Serge, 2026-10-22 10:20 CEST): (a) ([§9.3](#93-browser-sign-in) item 3). The owner's constraints (10:10 CEST): "reload and new tab is not acceptable / re-auth manually every 15m is not acceptable". Reason: (a) meets both without writing a token to storage. Rejected: (b), which keeps a credential in storage; (c), a stateful component in front of an API that accepts no cookie ([§10.1](#101-hosting-and-origin)). An earlier set of options, (b) silent frame renewal and (c) a redirect at every expiry, was replaced: the first breaks under third-party cookie blocking (assumption S2), the second interrupts work every 15 minutes. (a)'s fallback for a provider without rotation behaves as that second option did, so the constraints hold only with a rotating provider, which §15 lists as a provider requirement |
 | D6 | Automation token in an environment variable | (a) not accepted, file or stdin only; (b) accepted as `BRONZEWARD_TOKEN` | **Decided** by the owner (Serge, 2026-10-22 09:59 CEST): (a). The path variable `BRONZEWARD_TOKEN_FILE` is accepted; a secret in an environment variable never is ([§9.4](#94-automation-token-input) item 1). Reason: an environment variable is inherited by every child process and readable by the same user's processes; CI systems can write the token to a file first. Rejected: (b), the common CI convention |
 | D7 | Generated or handwritten clients | (a) both handwritten; (b) an OpenAPI description of v1 in the repository, checked against the route table by a test, generating request and response types for both clients, with handwritten behaviour (idempotency, ETags, epochs, renewal); (c) fully generated clients | **Decided** by the lead, 2026-10-21, under the owner's 2026-10-07 delegation: (b), generating types only; all behaviour stays handwritten. Reason: the types stay aligned with the server while the behaviour this document specifies stays explicit and tested by the shared cases; no OpenAPI description exists today (search of the repository) |
 | D8 | Conformance case format and home | (a) case records in the repository run by both clients' harnesses; (b) separate suites per client | **Decided** by the lead, 2026-10-21, under the owner's 2026-10-07 delegation: (a), as [§12](#12-shared-conformance-cases) |
@@ -1143,7 +1150,7 @@ state reads as pending convergence.
 
 **A5. A sign-in-capable test issuer.** Extend the fixture issuer, or add a pinned identity
 provider to the fixtures, with authorization-code and PKCE, refresh with rotation, revocation,
-end-session and optionally device authorization, so client sign-in is tested against an endpoint
+end-session and device authorization, which D4 (a) makes the only headless sign-in, so client sign-in is tested against an endpoint
 and not a minted token. Closes G19; blocks the sign-in tickets' verification.
 
 **A6. An expected-epoch precondition on mutations** (only if D10 chooses (a)). Every mutating
@@ -1232,9 +1239,9 @@ Implementation choices the owner made on 2026-10-22:
 
 - **CLI language** (Serge, 10:23 CEST): Go, as a second binary, `cmd/bronzewardctl`, beside the
   server's `cmd/bronzeward`. Rejected: TypeScript shared with the web client; Rust or Python.
-  Whether the CLI generates its types from the OpenAPI description of D7 (b) or reuses the
-  server's Go types is left to the refinement of
-  [#254](https://github.com/ginsys/bronzeward/issues/254).
+  D7 (b) generates both clients' types from the OpenAPI description. Whether the Go CLI may
+  reuse the server's Go types instead, which would amend D7 (b) for the CLI, is left to the
+  refinement of [#254](https://github.com/ginsys/bronzeward/issues/254).
 - **Frontend framework** (Serge, 10:27 CEST): TypeScript and React, built with Vite into static
   files, with no server-side rendering, as D1 (a) implies. Dependencies follow a tight policy:
   pinned versions, no large UI kit, updates through Renovate. The API types are generated from
@@ -1266,15 +1273,17 @@ requirements, not observed facts: none is verified against Zitadel yet, and the 
 - JWT access tokens whose audience carries the server's value ([§9.1](#91-identity-provider-requirements)
   item 1);
 - a groups claim that is an array of strings. The server refuses a token whose groups claim is
-  not one (`internal/auth/auth.go:209-221`); Zitadel's role claim is an object, so the setup
-  needs a Zitadel Action that emits a `groups` array.
+  not one (`internal/auth/auth.go:209-221`). According to Zitadel's documentation, not verified
+  here, its role claim is an object, so the setup would need a Zitadel Action that emits a
+  `groups` array.
 
 Residual risk of the D2 (b) token file and of D5 (a), with Zitadel: according to Zitadel's source at
 v4.19.5, read but not tested, a replayed refresh token that was already used is refused, but the
 session is not revoked. Whoever refreshes a copied token first therefore keeps that session until
 its idle or absolute expiry, and the legitimate client is refused and signs in again. Rotation
 does not prevent this; the mitigation is deployment configuration, a short absolute "Refresh Token
-Expiration" at the instance or organization level, which the packaging guide of #262 documents.
+Expiration". Where Zitadel offers that setting is not verified here: #281 verifies it and the
+packaging guide of #262 documents it.
 
 Limits:
 
@@ -1284,5 +1293,9 @@ Limits:
 - Line references were read at `3cbe953`, except those to the identity read, which are read with
   [#277](https://github.com/ginsys/bronzeward/issues/277) applied, and move as the code changes.
 - Every choice in [§13](#13-alternatives-and-open-choices) and every implementation choice above
-  is decided; none remains open. This document decides no credential policy.
+  is decided, except whether the Go CLI reuses the server's types instead of D7 (b)'s generated
+  ones, which #254 refines. [§8.4](#84-idempotency-and-ambiguous-responses), the G21 row, A6 and
+  AMB-12 still describe D10 as open: the change that serves it,
+  [#293](https://github.com/ginsys/bronzeward/issues/293), updates them. This document decides no
+  credential policy.
 - It does not change any role, human-only rule, route, schema or server setting.
