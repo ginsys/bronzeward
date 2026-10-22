@@ -17,25 +17,66 @@ import (
 // header. It reports with Errorf: env.do runs in goroutines too.
 func checkAnswerHeaders(t *testing.T, rec *httptest.ResponseRecorder) {
 	t.Helper()
-	h := rec.Header()
+	for _, p := range answerHeaderProblems(rec) {
+		t.Error(p)
+	}
+}
+
+// answerHeaderProblems reads the headers as they were sent: the recorder's snapshot at the first
+// write, not its live map, which also holds a header set after the status was written.
+func answerHeaderProblems(rec *httptest.ResponseRecorder) []string {
+	var problems []string
+	h := rec.Result().Header
 	if cc := h.Get("Cache-Control"); cc != "no-store" {
-		t.Errorf("status %d: Cache-Control %q, want no-store", rec.Code, cc)
+		problems = append(problems, fmt.Sprintf("status %d: Cache-Control %q, want no-store", rec.Code, cc))
 	}
 	rid := h.Get(requestIDHeader)
 	if err := id.MustHave(rid, id.Request); err != nil {
-		t.Errorf("status %d: %s %q: %v", rec.Code, requestIDHeader, rid, err)
+		problems = append(problems, fmt.Sprintf("status %d: %s %q: %v", rec.Code, requestIDHeader, rid, err))
 	}
 	for k := range h {
 		if k == "Set-Cookie" || strings.HasPrefix(k, "Access-Control-") {
-			t.Errorf("status %d: header %s %v", rec.Code, k, h[k])
+			problems = append(problems, fmt.Sprintf("status %d: header %s %v", rec.Code, k, h[k]))
 		}
 	}
 	if h.Get("Content-Type") != "application/problem+json" || h.Get("Idempotent-Replayed") == "true" {
-		return
+		return problems
 	}
 	var doc struct{ Instance string }
 	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil || doc.Instance != rid {
-		t.Errorf("status %d: problem instance %q (%v), want the %s %q", rec.Code, doc.Instance, err, requestIDHeader, rid)
+		problems = append(problems, fmt.Sprintf("status %d: problem instance %q (%v), want the %s %q", rec.Code, doc.Instance, err, requestIDHeader, rid))
+	}
+	return problems
+}
+
+// The check reads what was sent: a header set only after the status is written is missing from
+// the answer, though the recorder's live map shows it.
+func TestAnswerHeaderCheckReadsTheSentHeaders(t *testing.T) {
+	values := map[string]string{"Cache-Control": "no-store", requestIDHeader: id.New(id.Request)}
+	answer := func(late string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		for name, v := range values {
+			if name != late {
+				rec.Header().Set(name, v)
+			}
+		}
+		rec.WriteHeader(http.StatusNoContent)
+		if late != "" {
+			rec.Header().Set(late, values[late])
+		}
+		return rec
+	}
+	if p := answerHeaderProblems(answer("")); len(p) != 0 {
+		t.Fatalf("both headers set before the write: %v", p)
+	}
+	for late := range values {
+		rec := answer(late)
+		if rec.Header().Get(late) == "" {
+			t.Fatalf("%s: the live map lost the late header", late)
+		}
+		if p := answerHeaderProblems(rec); len(p) != 1 || !strings.Contains(p[0], late) {
+			t.Errorf("%s set after the write: problems %v, want one naming it", late, p)
+		}
 	}
 }
 
