@@ -33,8 +33,9 @@ and the server's refusal stays authoritative. The recovery banner states the
 scope summary and, while the server runs as started for recovery, that plan creation, approval
 and unfreeze wait for its normal restart and that accepted publications complete only then;
 imports complete on it. The client reads that start mode from `GET /server`
-([gap G14](operator-experience.md#11-api-gap-audit)); until that read answers, as before a
-recovery start's entry, which refuses it, the client learns the mode from answers: plan creation, approval and unfreeze are refused on a recovery
+([gap G14](operator-experience.md#11-api-gap-audit)). Before a recovery start's entry that read
+is refused with a `409 recovery-mode-active` without a `scope` member, which itself shows a
+recovery start. Until the read answers, the client also learns the mode from answers: plan creation, approval and unfreeze are refused on a recovery
 start without a `scope` member, and recovery entry on a normal one with a `409 conflict` that
 carries neither `epoch` nor `request`; the entry's other `409 conflict` answers carry `epoch`
 and show a recovery start. The line reflects the last such answer and is
