@@ -231,10 +231,9 @@ func (e *env) accepted(p *idp, at, human string, roles []auth.Role) {
 	}
 }
 
-// groupsClaim is the access token's groups claim as the provider sent it, decoded without a
-// signature check (the server's verifier checks the token): roles: [] cannot tell a [] claim from
-// an absent one, which the server also maps to no role.
-func groupsClaim(t *testing.T, at string) (groups []string, present bool) {
+// jwtClaims is the access token's payload as the provider sent it, decoded without a signature
+// check (the server's verifier checks the token).
+func jwtClaims(t *testing.T, at string) map[string]json.RawMessage {
 	t.Helper()
 	parts := strings.Split(at, ".")
 	if len(parts) != 3 {
@@ -248,7 +247,25 @@ func groupsClaim(t *testing.T, at string) (groups []string, present bool) {
 	if err := json.Unmarshal(payload, &claims); err != nil {
 		t.Fatal(err)
 	}
-	raw, ok := claims["groups"]
+	return claims
+}
+
+// lifetime is the access token's exp - iat, in seconds.
+func lifetime(t *testing.T, at string) int64 {
+	t.Helper()
+	claims := jwtClaims(t, at)
+	var exp, iat int64
+	if json.Unmarshal(claims["exp"], &exp) != nil || json.Unmarshal(claims["iat"], &iat) != nil {
+		t.Fatalf("exp %s, iat %s; want NumericDates", claims["exp"], claims["iat"])
+	}
+	return exp - iat
+}
+
+// groupsClaim is the access token's groups claim: roles: [] cannot tell a [] claim from an absent
+// one, which the server also maps to no role.
+func groupsClaim(t *testing.T, at string) (groups []string, present bool) {
+	t.Helper()
+	raw, ok := jwtClaims(t, at)["groups"]
 	if !ok {
 		return nil, false
 	}
@@ -267,7 +284,8 @@ var idpRoles = map[string][]auth.Role{
 }
 
 // Each synthetic human signs in on the CLI's Native app, on a fresh loopback port, and is served
-// exactly its roles. Its token's groups claim is present and holds exactly its groups, sorted:
+// exactly its roles. Its token lives the configured 300 s (exp - iat, check 12), and its groups
+// claim is present and holds exactly its groups, sorted:
 // [] for the user with no grant, who is served roles: []. One web sign-in shows the User Agent
 // app's token is accepted the same way.
 func TestIdentityProviderRoles(t *testing.T) {
@@ -280,6 +298,9 @@ func TestIdentityProviderRoles(t *testing.T) {
 		tk := p.signIn(p.cli, loopback(), human)
 		if tk.ExpiresIn <= 0 || tk.ExpiresIn > 300 {
 			t.Errorf("%s: expires_in %d; want at most the 5-minute lifetime", human, tk.ExpiresIn)
+		}
+		if got := lifetime(t, tk.Access); got != 300 {
+			t.Errorf("%s: access token exp - iat = %d; want the configured 300", human, got)
 		}
 		want := slices.Sorted(slices.Values(issuer.Humans[human]))
 		if got, ok := groupsClaim(t, tk.Access); !ok || !slices.Equal(got, want) {

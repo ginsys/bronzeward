@@ -1264,9 +1264,12 @@ Assumptions this document relies on without a citation in this repository:
 - **S5.** Browser spelling services can send field text to a remote service unless spell checking
   is off for the field.
 - **S6.** The identity providers operators run can issue JWT access tokens with a configurable
-  audience and groups claim, PKCE public clients and rotating refresh tokens. Only one provider
-  was exercised in this repository, for Talos access, not for this client
-  ([talosctl-oidc research](../design/research/20261021-talosctl-oidc.md#pinned-sources-and-fixture)).
+  audience and groups claim, PKCE public clients and rotating refresh tokens. One provider was
+  exercised for Talos access
+  ([talosctl-oidc research](../design/research/20261021-talosctl-oidc.md#pinned-sources-and-fixture)),
+  and #281 exercised Zitadel v4.19.5 for this client's grants
+  ([live checks](../design/research/20261022-zitadel-test-idp.md#outcomes)); no other release or
+  product was.
 - **S7.** A browser `fetch` follows a redirect by default and resends the method and body on a
   `307` or `308`; `redirect: 'error'` makes any redirect a network error instead (Fetch standard).
 - **S8.** `Cache-Control: no-store` does not keep every browser from restoring a page from its
