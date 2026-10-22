@@ -1152,8 +1152,11 @@ gap G1-G17, whether it becomes an API issue that natively blocks the client tick
 - This is a proposal. No participant has used either client; the tasks and targets in
   [§13](#13-usability-and-accessibility-acceptance) are unmeasured.
 - Line references were read at `e1c8cb3` and move as code changes.
-- It does not choose a frontend framework, a CLI implementation language, a login flow, token
-  storage, hosting, packaging targets or a browser support matrix.
+- It does not choose packaging targets. The sign-in flows, token storage and hosting are decided
+  in [client contracts §13](client-contracts.md#13-alternatives-and-open-choices), and the
+  implementation choices in its [§15](client-contracts.md#15-assumptions-and-limits): the CLI in
+  Go, as a second binary `cmd/bronzewardctl`; the web client in TypeScript and React, built with
+  Vite; and current desktop browsers as the tested targets, with mobile browsers untested.
 - It does not change any role, human-only rule, route, schema or credential policy, and it does
   not decide #16, #265 or #266.
 - Per-cluster role scoping, policy-based approval, `Ignore` drift and modes other than
