@@ -428,7 +428,7 @@ Continued. Import released into draft drf_2rmp…457a (now revision 2).
 ```
 
 Facts: review needs encrypted staging and is requested when the import starts
-(`internal/api/ingestions.go:122-125`). The review is human-author-only and answered with
+(`internal/api/ingestions.go:121-124`). The review is human-author-only and answered with
 `Cache-Control: no-store` (`internal/api/review.go:18-31`). It may contain secrets the schema
 did not recognise; that is why it exists ([compilation §3.6](compilation.md#36-operator-review)).
 A mark is refused with the rule and the mark's position, never its path
