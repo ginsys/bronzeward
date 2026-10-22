@@ -49,7 +49,7 @@ settings, as below.
 | 9 | Loopback redirect on any port | `http://127.0.0.1/callback` registered: ports 49152, 50001 and 61999 accepted, with devMode on and off; another path `400` | pass |
 | 10 | Cross-origin token call | preflight `204` and the `POST` carry `Access-Control-Allow-Origin` for `http://localhost:58443`, with credentials. Any origin is echoed (`https://evil.example` too) | pass, residual |
 | 11 | Public revocation | `POST /oauth/v2/revoke` with the token and client ID only: `200`; the refresh token is refused and the provider's userinfo refuses the access token (`401`) | pass, residual |
-| 12 | Access-token lifetime | set to 300 s: `exp - iat` = 300 | pass |
+| 12 | Access-token lifetime | configured 300 s; `exp - iat` is 300, or 299 across a second boundary | pass |
 
 End-session (an acceptance criterion, not a numbered check): `GET /oidc/v1/end_session` with
 `id_token_hint`, client ID, post-logout URI and state redirects (`302`) straight to that URI with
