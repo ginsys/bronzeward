@@ -23,16 +23,35 @@ die() {
   exit 1
 }
 pin() { sed -n "s/^$1=//p" fixtures/versions.env; }
-present() { [ -n "$(docker ps -aq --filter "name=^$1\$")" ]; }
+# Each docker query is assigned before it is tested, so that a docker failure (no daemon, no
+# permission) stops the script instead of reading as an absent container, as in mise run dev-down.
+present() {
+  local ids
+  ids=$(docker ps -aq --filter "name=^$1\$") || die "cannot list containers (docker ps)"
+  [ -n "$ids" ]
+}
+
+# ours: the provider running is the one this checkout's state describes. A provider another
+# checkout started has other IDs, and this checkout's seed token is not valid on it.
+ours() {
+  local running project
+  [ -f "$state/idp.env" ] && [ -s "$state/seed.pat" ] || return 1
+  running=$(docker ps -q --filter "name=^$groups\$" --filter status=running) || die "cannot list containers (docker ps)"
+  [ -n "$running" ] || return 1
+  project=$(sed -n 's/^BW_TEST_IDP_PROJECT=//p' "$state/idp.env")
+  [ -n "$project" ] && curl -sf --noproxy '*' -o /dev/null --max-time 5 \
+    -H "Authorization: Bearer $(cat "$state/seed.pat")" "$issuer/management/v1/projects/$project"
+}
 
 down() {
-  local c
+  local c ids
   for c in "$groups" "$zitadel" "$pg"; do
     if present "$c"; then docker stop "$c" >/dev/null; fi
     for _ in $(seq 30); do present "$c" || continue 2; sleep 1; done
     die "$c was still present after 30s (docker ps -a; docker rm -f $c)"
   done
-  if [ -n "$(docker network ls -q --filter "name=^$net\$")" ]; then docker network rm "$net" >/dev/null; fi
+  ids=$(docker network ls -q --filter "name=^$net\$") || die "cannot list networks (docker network ls)"
+  if [ -n "$ids" ]; then docker network rm "$net" >/dev/null; fi
   rm -rf -- "$state"
 }
 
@@ -58,19 +77,21 @@ summary() {
 }
 
 up() {
-  if [ -f "$state/idp.env" ] && [ -n "$(docker ps -q --filter "name=^$groups\$" --filter status=running)" ] &&
-    curl -sf --noproxy '*' -o /dev/null --max-time 2 "$issuer/debug/ready"; then
+  if ours; then
     summary
     return
   fi
   for c in "$pg" "$zitadel" "$groups"; do
-    if present "$c"; then die "$c exists but the provider is not complete; run mise run dev-idp-down, then mise run dev-idp"; fi
+    if present "$c"; then
+      die "$c exists but is not this checkout's complete provider (another checkout's, or an interrupted up); run mise run dev-idp-down, then mise run dev-idp"
+    fi
   done
-  # A static binary: the groups target runs in the Zitadel image, which has no C library.
-  CGO_ENABLED=0 go build -o bin/oidc-fixture-static ./fixtures/oidc
   rm -rf -- "$state"
   mkdir -p "$state"
   chmod 700 "$state"
+  # A static binary, so that the groups target runs in the Zitadel image, which has no C library.
+  # Built into the state directory, which down removes.
+  CGO_ENABLED=0 go build -o "$state/oidc" ./fixtures/oidc
   docker network create "$net" >/dev/null
   docker run -d --rm --name "$pg" --network "$net" -e POSTGRES_USER=postgres -e POSTGRES_HOST_AUTH_METHOD=trust \
     "$(pin POSTGRES_IMAGE)" >/dev/null
@@ -145,7 +166,7 @@ up() {
   # The target runs first: Zitadel refuses a target whose host does not resolve. It reads its
   # signing key per call, and refuses every call until the key is written below.
   docker run -d --rm --name "$groups" --network "$net" --user "$(id -u):$(id -g)" \
-    -v "$PWD/bin/oidc-fixture-static:/oidc:ro" -v "$state:/state:ro" --entrypoint /oidc "$(pin ZITADEL_IMAGE)" \
+    -v "$state:/state:ro" --entrypoint /state/oidc "$(pin ZITADEL_IMAGE)" \
     groups -signing-key /state/groups.key -project "$project" -listen 0.0.0.0:8090 >/dev/null
   # Up once it answers an unsigned call (503 without a key), asked from inside the network.
   ready=""

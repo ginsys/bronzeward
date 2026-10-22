@@ -27,9 +27,12 @@ login through the Session API; groups from an Actions v2 target.
   The login machine user creates a session with `POST /v2/sessions` (user and password checks)
   and finishes with `POST /v2/oidc/auth_requests/<id>`, whose `callbackUrl` carries the code.
 
-Reproduction: `mise run dev-db`, `mise run dev-idp`, `mise run go-idp` repeats checks 1-4, 6, 7, 9,
-11 and 12 and end-session (`internal/api/idp_test.go`). Checks 5, 8 and 10 and the deny list were
-run by hand with `curl` against the same container and these settings, as below.
+Reproduction: `mise run dev-db`, `mise run dev-idp`, `mise run go-idp` repeats the passing paths of
+checks 1-4, 6, 7, 9, 11 and 12 and end-session (`internal/api/idp_test.go`): check 4 in the
+web-to-CLI direction, check 9 on the Native app with devMode off. Checks 5, 8 and 10, the deny
+list, and the remaining parts (check 4's CLI-to-web direction, check 7's target-down `500`, check 9
+with devMode on and another path) were run by hand with `curl` against the same container and these
+settings, as below.
 
 ## Outcomes
 
@@ -38,7 +41,7 @@ run by hand with `curl` against the same container and these settings, as below.
 | 1 | Device flow, Native PKCE app | `expires_in` 300, `interval` 5. Approved through `GET /v2/oidc/device_authorization/<user code>` and `POST /v2/oidc/device_authorization/<id>` with the session: token issued. Denied: `access_denied`. Unapproved: `authorization_pending` to t+270 s, `expired_token` at t+300 s | pass |
 | 2 | User Agent app refresh | `offline_access` and the refresh grant give a refresh token; refreshing rotates it | pass |
 | 3 | Rotated-out refresh token | `400 invalid_request` (`Errors.OIDCSession.RefreshTokenInvalid`), not `invalid_grant`. Reuse does not revoke the session: the current token still renews | pass, residual |
-| 4 | Refresh token at another client | the CLI's token at the web client ID, same project: `400 invalid_client` | pass |
+| 4 | Refresh token at another client | the CLI's token at the web client ID, and the web's at the CLI's, same project: `400 invalid_client` | pass |
 | 5 | Idle and absolute expiry | refused after 130 s idle; renewing every 60 s works to t+550 s, refused from t+610 s. The last access token still lives its full 300 s past the absolute end | pass |
 | 6 | `aud` | with scope `urn:zitadel:iam:org:project:id:<project>:aud`: every app's client ID and the project ID; the server's single audience is the project ID | pass |
 | 7 | groups claim | `["bw-authors"]`, `["bw-viewers"]`; `[]` with no grant, present. Re-run on renewal. Target down: token endpoint `500 server_error`, no token | pass |

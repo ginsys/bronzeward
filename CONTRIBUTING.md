@@ -99,7 +99,7 @@ The implementation is the root Go module (`cmd/`, `internal/`); the Go version c
 mise run go                                        # format, go.mod tidiness, build, vet and test checks (per module, as mise.toml lists them); database tests skip
 mise run dev-db                                    # a disposable development PostgreSQL on 127.0.0.1:55433
 mise run dev-bao                                   # a disposable dev-mode OpenBao on http://127.0.0.1:58201, root token bw-dev-root-token
-mise run dev-down                                  # stop both, which removes them and their data (shared by every worktree on the host)
+mise run dev-down                                  # stop dev-db, dev-bao and dev-idp, which removes them and their data (shared by every worktree on the host)
 mise run go-db                                     # the root module's tests against PostgreSQL and OpenBao (BW_TEST_PG_DSN and BW_TEST_BAO_ADDR/BW_TEST_BAO_TOKEN, else dev-db's and dev-bao's); a missing service fails
 mise run build                                     # bin/bronzeward and the fixture issuer bin/oidc-fixture (bin/ is gitignored)
 mise run dev                                       # dev-db, dev-bao and build, then migrate, the fixture issuer and serve, as the lines below do by hand, until Ctrl-C
