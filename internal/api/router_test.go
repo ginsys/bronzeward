@@ -16,9 +16,9 @@ import (
 	"github.com/ginsys/bronzeward/internal/id"
 )
 
-// specRoutes transcribes PA §9.2: method, path, qualifying roles in listed order, then "human"
-// for human only and "if-match" where If-Match is required. A difference from routes() is a
-// transcription error in one of the two.
+// specRoutes transcribes PA §9.2: method, path, qualifying roles in listed order ("credential"
+// where no role is needed), then "human" for human only and "if-match" where If-Match is
+// required. A difference from routes() is a transcription error in one of the two.
 var specRoutes = []string{
 	"GET /clusters any", "GET /clusters/{id} any", "GET /machines any", "GET /machines/{id} any",
 	"GET /machines/{id}/observations any", "GET /machines/{id}/timeline any",
@@ -30,7 +30,7 @@ var specRoutes = []string{
 	"GET /plans any", "GET /plans/{id} any", "GET /approvals/{id} any", "GET /operations any", "GET /operations/{id} any",
 	"GET /operations/{id}/events any", "GET /acts any", "GET /recovery any",
 	"GET /dependencies any", "GET /dependencies/{id} any", "GET /dependencies/{id}/releases any",
-	"GET /dependencies/{id}/alerts any", "GET /dependency-alerts any",
+	"GET /dependencies/{id}/alerts any", "GET /dependency-alerts any", "GET /identity credential",
 	"POST /ingestions author human if-match", "GET /ingestions/{id}/review author human",
 	"POST /ingestions/{id}/marks author human", "POST /ingestions/{id}/continuations author human",
 	"POST /ingestions/{id}/takeovers author human",
@@ -62,7 +62,10 @@ func describe(rt *route) string {
 		roles[i] = string(r)
 	}
 	s := rt.method + " " + rt.pattern + " " + strings.Join(roles, ",")
-	if slices.Equal(rt.roles, anyRole) {
+	switch {
+	case rt.pattern == identityPattern:
+		s = rt.method + " " + rt.pattern + " credential"
+	case slices.Equal(rt.roles, anyRole):
 		s = rt.method + " " + rt.pattern + " any"
 	}
 	if rt.humanOnly {

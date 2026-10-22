@@ -1631,7 +1631,9 @@ Design: [§11](../design/Talos_Configuration_and_Machine_Management_Design.md#11
 ### 9.2 Resources and routes
 
 "Any role" means any authenticated principal holding at least one role: every
-grant confers read (design §13.7 item 2). A route marked *EaR* has its
+grant confers read (design §13.7 item 2). The one exception is `GET /identity`,
+the caller's own identity, served to any authenticated credential, one that
+holds no role included (§10.3). A route marked *EaR* has its
 semantics in execution and recovery; this contract fixes its route, role,
 idempotency and conflict behavior.
 
@@ -1642,6 +1644,7 @@ idempotency and conflict behavior.
 | `GET /drafts[/{id}]`, `/ingestions[/{id}]`, `/releases[/{id}]`, `/releases/{id}/machines/{m}/review` | 200 | any role |
 | `GET /plans[/{id}]`, `/approvals/{id}`, `/operations[/{id}]`, `/operations/{id}/events`, `/acts`, `/recovery` | 200 | any role |
 | `GET /dependencies[/{id}[/releases\|/alerts]]`, `/dependency-alerts` ([dependency monitor §7.2](dependency-monitor.md#72-read-routes)) | 200 | any role |
+| `GET /identity` (the caller's own identity; no query, no ETag): `kind` (`human` or `service`); `issuer` and `subject` for a human, `service`, the service identity's name, for automation, each `null` for the other kind; `principal`, its identifier, `null` for a human with no row yet, which the read does not create (§10); `roles`, those the credential maps to in design §13.7's order, `[]` for none; `expiresAt`, the token's `exp` or the automation token's expiry; `epoch`, the epoch the read held, as its `Bronzeward-Epoch`. Nothing else of the credential, its token ID and claims included | 200 | any authenticated credential, roles or none (§10.3) |
 | `POST /ingestions` (import or drift adoption of a machine's configuration), with `If-Match` carrying the named draft's ETag, which the operation binds | 202, `ingest`, created `running` with its staging claim (§5.1) | `author`, human only (§10.3) |
 | `GET /ingestions/{id}/review` (the staged change of a paused ingestion, compilation §3.6) | 200, `Cache-Control: no-store` | `author`, human only (§10.3) |
 | `POST /ingestions/{id}/marks`, `/continuations`, `/takeovers` (a further mark on a paused ingestion and its continuation into the draft transaction, compilation §3.6; compilation's explicit operator recovery request, §3.4 there) | 202, the ingestion's `ingest` operation; a mark's also the owner generation it took (§9.3) | `author`, human only (§10.3) |
@@ -2559,6 +2562,20 @@ that qualifies so (choice §17.20). A principal holding `publisher` and
 `approver` therefore cancels a plan it created as `publisher` and any other as
 `approver`; one that only holds `publisher` and did not create the plan is
 refused `403 forbidden`, naming the plan.
+
+`GET /identity` needs no role (decision R1 of
+[#277](https://github.com/ginsys/bronzeward/issues/277), by the lead,
+2026-10-22 09:50 CEST, under the owner's 2026-10-07 delegation): a credential that maps
+to no role is served its own identity with no roles, and every other route
+still refuses it. Without it a client could not tell "signed in, no roles"
+from a wrong credential. It discloses only what concerns the caller: its own
+credential and principal, never another's, and the epoch, which the role
+check's `403` already carries (§9.1); it gives no role a capability. Only a
+human can hold no role: an automation token names at least one
+(`internal/migrate/migrations/0001_schema.sql:102-103`). The read records no
+act, so no role is recorded for it. Only the role check is skipped: `401`,
+`403 identity-revoked`, a recovery start's refusal before its entry (§12.2)
+and the read's epoch recheck of a service token (§10.2) still apply.
 
 Drift **Ignore** is outside PoC scope (execution and recovery, supported
 values) and has no route.

@@ -94,7 +94,7 @@ func routes() []*route {
 		read(g("/acts"), listActs), read(g("/recovery"), getRecovery),
 		read(g("/dependencies"), listDependencies), read(g("/dependencies/{id}"), getDependency),
 		read(g("/dependencies/{id}/releases"), dependencyReleases), read(g("/dependencies/{id}/alerts"), listAlerts(true)),
-		read(g("/dependency-alerts"), listAlerts(false)),
+		read(g("/dependency-alerts"), listAlerts(false)), read(&route{method: http.MethodGet, pattern: identityPattern}, getIdentity),
 		ingestionStart().on(ifm(human(m(post, "/ingestions", author)))),
 		read(human(m(http.MethodGet, "/ingestions/{id}/review", author)), getIngestionReview),
 		ingestionMark().on(human(m(post, "/ingestions/{id}/marks", author))),
