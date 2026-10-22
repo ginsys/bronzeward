@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+# The test identity provider (fixtures/README.md, "Test identity provider"): Zitadel at the
+# ZITADEL_IMAGE pin, its own PostgreSQL at the POSTGRES_IMAGE pin and the groups target
+# (fixtures/oidc/groups), on one Docker network, with only Zitadel published, on 127.0.0.1.
+# Everything in it is synthetic. State, including the login client's token, goes to .dev/idp/
+# (gitignored) and nowhere else; stdout gets the issuer, project and client IDs, nothing secret.
+# Usage: fixtures/dev-idp up | down   (mise run dev-idp, mise run dev-idp-down)
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+net=bw-dev-idp pg=bw-dev-idp-pg zitadel=bw-dev-idp groups=bw-dev-idp-groups
+state=$PWD/.dev/idp
+issuer=http://localhost:58280
+web=${BW_DEV_IDP_WEB_ORIGIN:-http://localhost:58443}
+password='Synthetic-Pass-1!'
+# Each synthetic human with fixtures/oidc/issuer.Humans' groups, as project-role keys, and h-none
+# with no grant. The self-test compares the roles the server reads back against issuer.Humans.
+humans=(h-author:bw-authors h-publisher:bw-publishers h-approver:bw-approvers h-recovery:bw-recovery
+  h-viewer:bw-viewers h-all:bw-authors+bw-publishers+bw-approvers h-none:)
+
+die() {
+  echo "dev-idp: $*" >&2
+  exit 1
+}
+pin() { sed -n "s/^$1=//p" fixtures/versions.env; }
+present() { [ -n "$(docker ps -aq --filter "name=^$1\$")" ]; }
+
+down() {
+  local c
+  for c in "$groups" "$zitadel" "$pg"; do
+    if present "$c"; then docker stop "$c" >/dev/null; fi
+    for _ in $(seq 30); do present "$c" || continue 2; sleep 1; done
+    die "$c was still present after 30s (docker ps -a; docker rm -f $c)"
+  done
+  if [ -n "$(docker network ls -q --filter "name=^$net\$")" ]; then docker network rm "$net" >/dev/null; fi
+  rm -rf -- "$state"
+}
+
+# api <method> <path> [json]: one management call with the first-instance machine user's token;
+# prints the answer, or fails with it.
+api() {
+  local out code
+  out=$(curl -sS --noproxy '*' -X "$1" "$issuer$2" -H "Authorization: Bearer $(cat "$state/seed.pat")" \
+    -H 'Content-Type: application/json' ${3:+-d "$3"} -w '\n%{http_code}')
+  code=${out##*$'\n'}
+  out=${out%$'\n'*}
+  case $code in 2??) printf '%s' "$out" ;; *) die "$1 $2: HTTP $code: $out" ;; esac
+}
+
+summary() {
+  # shellcheck source=/dev/null
+  . "$state/idp.env"
+  echo "issuer $BW_TEST_IDP_ISSUER"
+  echo "project $BW_TEST_IDP_PROJECT (the audience)"
+  echo "cli client $BW_TEST_IDP_CLI_CLIENT"
+  echo "web client $BW_TEST_IDP_WEB_CLIENT ($BW_TEST_IDP_WEB_ORIGIN)"
+  echo "test variables: $state/idp.env"
+}
+
+up() {
+  if [ -f "$state/idp.env" ] && [ -n "$(docker ps -q --filter "name=^$groups\$" --filter status=running)" ] &&
+    curl -sf --noproxy '*' -o /dev/null --max-time 2 "$issuer/debug/ready"; then
+    summary
+    return
+  fi
+  for c in "$pg" "$zitadel" "$groups"; do
+    if present "$c"; then die "$c exists but the provider is not complete; run mise run dev-idp-down, then mise run dev-idp"; fi
+  done
+  # A static binary: the groups target runs in the Zitadel image, which has no C library.
+  CGO_ENABLED=0 go build -o bin/oidc-fixture-static ./fixtures/oidc
+  rm -rf -- "$state"
+  mkdir -p "$state"
+  chmod 700 "$state"
+  docker network create "$net" >/dev/null
+  docker run -d --rm --name "$pg" --network "$net" -e POSTGRES_USER=postgres -e POSTGRES_HOST_AUTH_METHOD=trust \
+    "$(pin POSTGRES_IMAGE)" >/dev/null
+  local ready=""
+  for _ in $(seq 30); do
+    if docker exec "$pg" pg_isready -q -h 127.0.0.1 -U postgres; then ready=1 && break; fi
+    sleep 1
+  done
+  [ -n "$ready" ] || die "$pg was not ready within 30s (docker logs $pg)"
+  # The master key and every password are synthetic. ZITADEL_HTTPCLIENT_DENYLIST replaces a
+  # default that refuses every private address, so that Zitadel may call the groups target on this
+  # network: a setting for this throwaway provider only, never a production default.
+  # ZITADEL_OIDC_DEVICEAUTH_LIFETIME shortens the device code's 5-minute default so that the
+  # self-test sees one expire.
+  docker run -d --rm --name "$zitadel" --network "$net" -p 127.0.0.1:58280:8080 --user "$(id -u):$(id -g)" \
+    -v "$state:/state" \
+    -e ZITADEL_EXTERNALDOMAIN=localhost -e ZITADEL_EXTERNALPORT=58280 -e ZITADEL_EXTERNALSECURE=false \
+    -e ZITADEL_TLS_ENABLED=false -e ZITADEL_HTTPCLIENT_DENYLIST=169.254.0.0/16 \
+    -e ZITADEL_OIDC_DEVICEAUTH_LIFETIME=1m \
+    -e ZITADEL_DATABASE_POSTGRES_HOST="$pg" -e ZITADEL_DATABASE_POSTGRES_PORT=5432 \
+    -e ZITADEL_DATABASE_POSTGRES_DATABASE=zitadel \
+    -e ZITADEL_DATABASE_POSTGRES_USER_USERNAME=zitadel -e ZITADEL_DATABASE_POSTGRES_USER_PASSWORD=zitadel \
+    -e ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE=disable \
+    -e ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME=postgres -e ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD=postgres \
+    -e ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE=disable \
+    -e ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_USERNAME=bw-seed -e ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_NAME=bw-seed \
+    -e ZITADEL_FIRSTINSTANCE_ORG_MACHINE_PAT_EXPIRATIONDATE=2099-01-01T00:00:00Z -e ZITADEL_FIRSTINSTANCE_PATPATH=/state/seed.pat \
+    -e ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_USERNAME=bw-login -e ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_NAME=bw-login \
+    -e ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_PAT_EXPIRATIONDATE=2099-01-01T00:00:00Z \
+    -e ZITADEL_FIRSTINSTANCE_LOGINCLIENTPATPATH=/state/login.pat \
+    "$(pin ZITADEL_IMAGE)" start-from-init --masterkey MasterkeyNeedsToHave32Characters --tlsMode disabled >/dev/null
+  # Ready once a management call answers: /debug/ready can answer before the REST gateway reaches
+  # the API behind it.
+  ready=""
+  for _ in $(seq 120); do
+    if [ -s "$state/login.pat" ] && [ -s "$state/seed.pat" ] && curl -sf --noproxy '*' -o /dev/null --max-time 2 \
+      -H "Authorization: Bearer $(cat "$state/seed.pat")" "$issuer/admin/v1/settings/oidc"; then ready=1 && break; fi
+    sleep 1
+  done
+  [ -n "$ready" ] || die "Zitadel was not ready within 120s (docker logs $zitadel)"
+
+  # Access tokens of 5 minutes, inside the server's 15-minute maximum; renewal idle 10 minutes,
+  # absolute 1 hour.
+  api PUT /admin/v1/settings/oidc \
+    '{"accessTokenLifetime":"300s","idTokenLifetime":"300s","refreshTokenIdleExpiration":"600s","refreshTokenExpiration":"3600s"}' >/dev/null
+  local project cli webc target key uid users=""
+  project=$(api POST /management/v1/projects '{"name":"bronzeward","projectRoleAssertion":true}' | jq -er .id)
+  api POST "/management/v1/projects/$project/roles/_bulk" "$(jq -nc '{roles: [$ARGS.positional[] |
+    {key: ., displayName: .}]}' --args bw-viewers bw-authors bw-publishers bw-approvers bw-recovery)" >/dev/null
+  # Native: a loopback redirect, which Zitadel accepts on any port; no secret, so PKCE.
+  cli=$(api POST "/management/v1/projects/$project/apps/oidc" '{"name":"bronzewardctl",
+    "redirectUris":["http://127.0.0.1/callback"],"responseTypes":["OIDC_RESPONSE_TYPE_CODE"],
+    "grantTypes":["OIDC_GRANT_TYPE_AUTHORIZATION_CODE","OIDC_GRANT_TYPE_REFRESH_TOKEN","OIDC_GRANT_TYPE_DEVICE_CODE"],
+    "appType":"OIDC_APP_TYPE_NATIVE","authMethodType":"OIDC_AUTH_METHOD_TYPE_NONE",
+    "accessTokenType":"OIDC_TOKEN_TYPE_JWT"}' | jq -er .clientId)
+  # User Agent: the exact callback. devMode admits its plain-http redirect.
+  webc=$(api POST "/management/v1/projects/$project/apps/oidc" "$(jq -nc --arg w "$web" '{name: "bronzeward-web",
+    redirectUris: [$w + "/callback"], postLogoutRedirectUris: [$w + "/signed-out"],
+    responseTypes: ["OIDC_RESPONSE_TYPE_CODE"], grantTypes: ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE", "OIDC_GRANT_TYPE_REFRESH_TOKEN"],
+    appType: "OIDC_APP_TYPE_USER_AGENT", authMethodType: "OIDC_AUTH_METHOD_TYPE_NONE",
+    accessTokenType: "OIDC_TOKEN_TYPE_JWT", devMode: true}')" | jq -er .clientId)
+  for h in "${humans[@]}"; do
+    uid=$(api POST /v2/users/human "$(jq -nc --arg u "${h%%:*}" --arg p "$password" '{username: $u,
+      profile: {givenName: $u, familyName: "synthetic"}, email: {email: ($u + "@example.invalid"), isVerified: true},
+      password: {password: $p, changeRequired: false}}')" | jq -er .userId)
+    if [ -n "${h#*:}" ]; then
+      api POST "/management/v1/users/$uid/grants" "$(jq -nc --arg p "$project" --arg r "${h#*:}" \
+        '{projectId: $p, roleKeys: ($r | split("+"))}')" >/dev/null
+    fi
+    users+=${users:+,}${h%%:*}=$uid
+  done
+  # The target runs first: Zitadel refuses a target whose host does not resolve. It reads its
+  # signing key per call, and refuses every call until the key is written below.
+  docker run -d --rm --name "$groups" --network "$net" --user "$(id -u):$(id -g)" \
+    -v "$PWD/bin/oidc-fixture-static:/oidc:ro" -v "$state:/state:ro" --entrypoint /oidc "$(pin ZITADEL_IMAGE)" \
+    groups -signing-key /state/groups.key -project "$project" -listen 0.0.0.0:8090 >/dev/null
+  # Up once it answers an unsigned call (503 without a key), asked from inside the network.
+  ready=""
+  for _ in $(seq 30); do
+    if [ "$(docker run --rm --network "$net" "$(pin CURL_IMAGE)" -s -o /dev/null -w '%{http_code}' \
+      -X POST "http://$groups:8090/groups" 2>/dev/null)" = 503 ]; then ready=1 && break; fi
+    sleep 1
+  done
+  [ -n "$ready" ] || die "$groups did not answer within 30s (docker logs $groups)"
+  # interruptOnError: a refused or unreachable target fails the token request.
+  target=$(api POST /v2/actions/targets "{\"name\":\"bw-groups\",\"restCall\":{\"interruptOnError\":true},
+    \"endpoint\":\"http://$groups:8090/groups\",\"timeout\":\"5s\"}")
+  key=$(jq -er .signingKey <<<"$target")
+  (umask 077 && printf '%s\n' "$key" >"$state/groups.key")
+  api PUT /v2/actions/executions "{\"condition\":{\"function\":{\"name\":\"preaccesstoken\"}},
+    \"targets\":[\"$(jq -er .id <<<"$target")\"]}" >/dev/null
+
+  cat >"$state/idp.env" <<EOF
+BW_TEST_IDP_ISSUER=$issuer
+BW_TEST_IDP_PROJECT=$project
+BW_TEST_IDP_CLI_CLIENT=$cli
+BW_TEST_IDP_WEB_CLIENT=$webc
+BW_TEST_IDP_WEB_ORIGIN=$web
+BW_TEST_IDP_LOGIN_TOKEN_FILE=$state/login.pat
+BW_TEST_IDP_PASSWORD=$password
+BW_TEST_IDP_USERS=$users
+EOF
+  summary
+}
+
+command -v jq >/dev/null || die "needs jq"
+case ${1:-} in
+up) up ;;
+down) down ;;
+*) die "usage: fixtures/dev-idp up | down" ;;
+esac

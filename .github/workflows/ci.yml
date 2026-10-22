@@ -176,6 +176,35 @@ jobs:
           install_args: go
       - run: mise run go-db
 
+  idp:
+    # The sign-in self-test against the test identity provider (fixtures/dev-idp). Not in
+    # `checks`' needs on purpose: whether it becomes required is the owner's branch-protection
+    # call. Steps, not `services:`, because a service container cannot be given Zitadel's
+    # command; dev-idp and dev-db read their images from versions.env, so this file holds no
+    # copy of those pins (go-db's step above counts every `image:` line). GitHub-hosted for the
+    # Docker daemon, as go-db.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
+          install_args: go
+      - run: mise run dev-db
+      - run: mise run dev-idp
+      - run: mise run go-idp
+      - name: dev-down leaves nothing behind
+        if: always()
+        run: |
+          mise run dev-down
+          left=$(docker ps -aq --filter name=bw-dev-; docker network ls -q --filter name=bw-dev-idp)
+          if [ -n "$left" ] || [ -e .dev/idp ]; then
+            docker ps -a
+            echo "dev-down left a container, the network or .dev/idp behind" >&2
+            exit 1
+          fi
+
   commit-lint:
     # PR commits only: a push to main or a merge-group ref has no PR range to lint.
     if: github.event_name == 'pull_request'
