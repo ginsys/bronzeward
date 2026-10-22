@@ -347,8 +347,7 @@ Refused:    Not saved: validation-failed (rule unknown-reference). "registry/x" 
 Conflict:   Someone changed this draft (revision 7). Your text is not saved. [Show their change]
 Unknown:    Unknown whether this was saved: the connection dropped. [Repeat exactly]
             (same request, same key; offered only while this page holds the request,
-            for the same sign-in and last-seen epoch, and only once #253 settles
-            gap G13; otherwise [Show current state])
+            for the same sign-in and last-seen epoch; otherwise [Show current state])
 Set aside:  Your sign-in or the installation's epoch changed. A change with an unknown
             outcome is pending: it may already have been committed. It was not repeated,
             and repeating it stays disabled. [Show current state]
