@@ -919,17 +919,24 @@ The review is served to any human `author`, not only the one who started the ing
    the `leaseUntil` it last read has passed by its own clock, plus a margin for clock difference
    (`internal/api/ingestions.go:237`). A read that still shows `held` or `resumed` with
    `leaseUntil` passed ends the watch, with the operation still `running`, but the mark's
-   outcome is reported as unknown, not as not applied. The run's closing transaction (a mark's
-   pause, `mark-refused` pause or abandonment, or a continuation's or takeover's draft transaction
-   releasing the claim) checks the lease once, under the claim's row lock, not again at `COMMIT`
-   ([compilation §3.5](compilation.md#35-expiry-abandonment-and-restoration);
-   `internal/staging/claim.go:217-241`, `internal/api/runner.go:372-377`), so a run that passed
+   outcome is reported as unknown, not as not applied. The run's closing transaction checks the
+   lease once, under the claim's row lock, not again at `COMMIT`: a mark's is its pause,
+   `mark-refused` pause or abandonment; a continuation's is its draft transaction releasing the
+   claim, or an abandonment; a takeover's is either of those, or a pause while the claim's review
+   is still `pending`, since a takeover of a marked claim resumes without the mark and pauses
+   again (`internal/api/runner.go:243-253`;
+   [compilation §3.5](compilation.md#35-expiry-abandonment-and-restoration);
+   `internal/staging/claim.go:217-241`, `internal/api/runner.go:372-377`). So a run that passed
    that check before the lease lapsed can still commit, while this read takes no lock and shows
    the claim's earlier state, or `abandoned` once its absolute expiry has passed. The client
    offers a later read and the same offers as `resume-failed`. Only the operation settles the
    outcome: its terminal state; for a mark, the `paused` or `mark-refused` event at the `202`'s
-   generation; or a takeover's `202`, which fences the earlier run off (it takes the claim's row
-   lock first, `internal/staging/takeover.go:65`). A claim read `abandoned`, or a takeover's
+   generation; for a takeover, the `paused` event at its `taken-over` event's generation
+   (`internal/api/ingestions.go:330`; its `202` names none); or a later takeover's `202`, which
+   fences the earlier run off (it takes the claim's row lock first,
+   `internal/staging/takeover.go:65`). An earlier mark is then not applied, since the takeover
+   resumes without it, and the operator marks again; an earlier continuation is carried on by the
+   takeover's run (`internal/staging/mark.go:32-34`). A claim read `abandoned`, or a takeover's
    `409 conflict` "the ingestion has ended" (`internal/api/ingestions.go:308-309`), while the
    operation is still `running` settles nothing. A continuation's
    watch (`import continue`) and a takeover's (`import takeover`, which leaves the claim
