@@ -68,6 +68,17 @@ func (a *API) mutate(w http.ResponseWriter, q *request) {
 	}
 	// §7.2: before running anything, look the key up.
 	rec, err := lookup(ctx, a.db, q, false)
+	if ref := (*refusal)(nil); errors.As(err, &ref) && ref.code == "epoch-mismatch" {
+		// Without the key's lock the statement may have waited on an entry and missed a record
+		// committed ahead of it; read again under the lock, as the transaction does, before refusing.
+		err = a.inTx(ctx, func(tx *sql.Tx) error {
+			if err := a.lockKey(ctx, tx, q); err != nil {
+				return err
+			}
+			rec, err = lookup(ctx, tx, q, false)
+			return err
+		})
+	}
 	if err != nil {
 		a.fail(w, q, fmt.Errorf("%w: %w", errUnavailable, err))
 		return

@@ -1312,10 +1312,12 @@ decision D10, option (a)). A lookup that finds no record compares it with the
 epoch the lookup read, and another is refused `412 epoch-mismatch`, naming the
 current epoch; nothing commits. A key with a record is answered by that record
 as above, so an earlier epoch's record still answers its `409`, and a request
-without the header is not checked. The check is part of the lookup, so the
-transaction's own lookup decides it under its lock of the installation state:
-an entry that committed before that lookup read is seen, and one that has not
-waits for the request's transaction to end. Only an entry changes the epoch,
+without the header is not checked. The check is part of the lookup, and only a
+lookup under the key's lock refuses: one without it, which may have waited on
+an entry and missed a record committed ahead of it, reads again under the lock
+first. The transaction's own lookup also holds its lock of the installation
+state: an entry that committed before that lookup read is seen, and one that
+has not waits for the request's transaction to end. Only an entry changes the epoch,
 and it abandons every earlier epoch's staging claim (§12.2), so on a draft
 entry route this refusal records nothing. Clients send the header on every
 write except the recovery entry (client contracts §8.4).
@@ -1343,7 +1345,7 @@ abandoned claim's generations are reported as orphans (§6.4).
 | Situation | Response |
 | --- | --- |
 | New key | executed; record committed with the effect |
-| New key, `Bronzeward-Expected-Epoch` not the current epoch | `412 epoch-mismatch` naming the current epoch; nothing executes |
+| No record for the key (new, refused, rolled back or removed by a restore), `Bronzeward-Expected-Epoch` not the current epoch | `412 epoch-mismatch` naming the current epoch; nothing executes |
 | Same key, same fingerprint, record from the current epoch | the stored status, headers and body, with `Idempotent-Replayed: true`; nothing executes |
 | Same key, record from an earlier epoch | `409 conflict` naming the stored request and its epoch; nothing executes |
 | Same key, other fingerprint | `422 idempotency-key-reused` |

@@ -86,8 +86,8 @@ func TestExpectedEpochAfterRestore(t *testing.T) {
 }
 
 // An entry that commits between the request's arrival and its transaction is caught by the
-// transaction's own lookup; one that commits while the lookup waits on the installation state is
-// caught when the wait ends. Nothing commits either way.
+// transaction's own lookup; one that commits while a lookup, the first or the transaction's, waits
+// on the installation state is caught when the wait ends. Nothing commits in any case.
 func TestExpectedEpochConcurrentEntry(t *testing.T) {
 	rt := testRoute(nil)
 	var e *env
@@ -117,6 +117,40 @@ func TestExpectedEpochConcurrentEntry(t *testing.T) {
 	mustExec(t, tx, "UPDATE installation_state SET epoch = $1", ep)
 	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() { done <- e.do(e.api, c) }()
+	dbtest.WaitForLockWait(t, e.db)
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	wantEpochMismatch(t, <-done, ep)
+	if acts, records := rows(t, e); acts != 0 || records != 0 {
+		t.Fatalf("acts %d, records %d", acts, records)
+	}
+
+	// The entry starts after the first lookup passed, and commits while the transaction's own lookup
+	// waits on it.
+	rt = testRoute(nil)
+	held := make(chan *sql.Tx, 1)
+	ep = id.New(id.Epoch)
+	rt.prepare = func(context.Context, *API, *request) error {
+		tx, err := e.db.BeginTx(t.Context(), nil)
+		if err != nil {
+			return err
+		}
+		held <- tx // the request's goroutine: report a failure, never t.Fatal
+		if _, err := tx.Exec("INSERT INTO recovery_epoch (epoch, entered_at) VALUES ($1, now())", ep); err != nil {
+			return err
+		}
+		_, err = tx.Exec("UPDATE installation_state SET epoch = $1", ep)
+		return err
+	}
+	e = newEnv(t, options{extra: []*route{rt}})
+	tok = e.human("h-author")
+	e.recordHuman("h-author")
+	c = post(tok, key, `{"note":"a"}`)
+	c.expected = epoch(t, e.db)
+	go func() { done <- e.do(e.api, c) }()
+	tx = <-held
+	defer func() { _ = tx.Rollback() }()
 	dbtest.WaitForLockWait(t, e.db)
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
