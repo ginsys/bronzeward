@@ -391,10 +391,12 @@ func insertPlan(ctx context.Context, tx *sql.Tx, q *request, in *planInput, b *p
 // expired, and an approved plan whose approver is revoked reads revoked, before any transaction
 // has written either (§8.1): whichever came first, a revoked flag with no recorded time counting
 // as before. The clock is read when the plan is, not at the transaction's start, which can
-// precede a wait on the installation state.
-const selectPlan = `SELECT p.id, s.revision,
-		CASE WHEN s.state = 'approved' AND ap.revoked AND (r.at IS NULL OR r.at < p.expires_at) THEN 'revoked'
-			WHEN s.state IN ('proposed', 'approved') AND p.expires_at <= c.t THEN 'expired' ELSE s.state END,
+// precede a wait on the installation state. The list's state filter matches planStateSQL, the
+// state the read serves.
+const (
+	planStateSQL = `CASE WHEN s.state = 'approved' AND ap.revoked AND (r.at IS NULL OR r.at < p.expires_at) THEN 'revoked'
+			WHEN s.state IN ('proposed', 'approved') AND p.expires_at <= c.t THEN 'expired' ELSE s.state END`
+	selectPlan = `SELECT p.id, s.revision, ` + planStateSQL + `,
 		s.operation, s.approval, p.cluster, p.machine, p.release, p.kind, p.mode,
 		p.assignment_revision, p.desired_release, p.baseline_revision, p.drift_record, p.route,
 		extract(epoch FROM p.max_observation_age)::bigint,
@@ -404,6 +406,7 @@ const selectPlan = `SELECT p.id, s.revision,
 	FROM plan p JOIN plan_state s ON s.plan = p.id LEFT JOIN approval a ON a.id = s.approval
 		LEFT JOIN principal ap ON ap.id = a.approver LEFT JOIN identity_revocation r ON r.identity = ap.id
 		CROSS JOIN (SELECT clock_timestamp() AS t) c`
+)
 
 func scanPlan(r interface{ Scan(...any) error }) (*planBody, error) {
 	b := &planBody{}
@@ -419,13 +422,33 @@ func scanPlan(r interface{ Scan(...any) error }) (*planBody, error) {
 	return b, json.Unmarshal(evidence, &b.Evidence)
 }
 
-var listPlans = listed(id.Plan, selectPlan+` WHERE p.id > $1 ORDER BY p.id LIMIT $2`, func(r *sql.Rows) (*planBody, string, error) {
-	b, err := scanPlan(r)
-	if err != nil {
-		return nil, "", err
-	}
-	return b, b.ID, nil
-})
+// planStates are the states a plan reads as (§8.1), the values of the list's state filter.
+var planStates = []string{"proposed", "approved", "committed", "revoked", "cancelled", "expired"}
+
+// listPlans takes the filters state and machine (§9.2).
+func listPlans(a *API, w http.ResponseWriter, q *request) {
+	readIn(a, w, q, func(ctx context.Context, tx *sql.Tx) (string, any, error) {
+		limit, after, ref := page(q, id.Plan, "state", "machine")
+		if ref != nil {
+			return "", nil, ref
+		}
+		v := q.r.URL.Query()
+		state, machine := v.Get("state"), v.Get("machine")
+		if (state != "" && !slices.Contains(planStates, state)) || (machine != "" && id.MustHave(machine, id.Machine) != nil) {
+			return "", nil, refuse(http.StatusBadRequest, "invalid-request", "state and machine each name a value of their kind")
+		}
+		out, err := pageRows(ctx, tx, q, limit, after, selectPlan+` WHERE p.id > $1 AND ($3 = '' OR `+planStateSQL+` = $3)
+			AND ($4 = '' OR p.machine = $4) ORDER BY p.id LIMIT $2`,
+			func(r *sql.Rows) (*planBody, string, error) {
+				b, err := scanPlan(r)
+				if err != nil {
+					return nil, "", err
+				}
+				return b, b.ID, nil
+			}, state, machine)
+		return "", out, err
+	})
+}
 
 var getPlan = item(id.Plan, func(ctx context.Context, tx *sql.Tx, v string) (string, any, error) {
 	b, err := scanPlan(tx.QueryRowContext(ctx, selectPlan+` WHERE p.id = $1`, v))

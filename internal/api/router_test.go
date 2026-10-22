@@ -25,7 +25,7 @@ var specRoutes = []string{
 	"GET /fragments any", "GET /fragments/{id} any", "GET /fragments/{id}/revisions any", "GET /fragment-revisions/{id} any",
 	"GET /profiles any", "GET /profiles/{id} any", "GET /profiles/{id}/revisions any", "GET /profile-revisions/{id} any",
 	"GET /assignments any", "GET /assignments/{id} any", "GET /assignments/{id}/revisions any", "GET /assignment-revisions/{id} any",
-	"GET /drafts any", "GET /drafts/{id} any", "GET /ingestions/{id} any", "GET /releases any", "GET /releases/{id} any",
+	"GET /drafts any", "GET /drafts/{id} any", "GET /ingestions any", "GET /ingestions/{id} any", "GET /releases any", "GET /releases/{id} any",
 	"GET /releases/{id}/machines/{m}/review any",
 	"GET /plans any", "GET /plans/{id} any", "GET /approvals/{id} any", "GET /operations any", "GET /operations/{id} any",
 	"GET /operations/{id}/events any", "GET /acts any", "GET /recovery any",

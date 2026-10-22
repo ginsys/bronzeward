@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/ginsys/bronzeward/internal/id"
@@ -252,18 +253,49 @@ func (b ingestionBody) subjects() []string {
 }
 
 // An import's claim has exactly one ingest operation; a draft update's has none.
-const selectIngestion = `SELECT c.id, c.kind, c.mode, c.state, c.machine, COALESCE(o.draft, c.draft), o.id, c.review, c.owner_gen,
+const selectIngestions = `SELECT c.id, c.kind, c.mode, c.state, c.machine, COALESCE(o.draft, c.draft), o.id, c.review, c.owner_gen,
 		c.lease_until, c.expires_at, c.created_at
 	FROM (SELECT id, kind, mode, ` + staging.EffectiveStateSQL + ` AS state, machine, draft, review, owner_gen, lease_until,
 		expires_at, created_at FROM staging_claim) c
-	LEFT JOIN operation o ON o.ingestion = c.id
-	WHERE c.id = $1`
+	LEFT JOIN operation o ON o.ingestion = c.id`
 
-func readIngestion(ctx context.Context, tx *sql.Tx, claim string) (ingestionBody, error) {
+func scanIngestion(r interface{ Scan(...any) error }) (ingestionBody, error) {
 	var b ingestionBody
-	err := tx.QueryRowContext(ctx, selectIngestion, claim).Scan(&b.ID, &b.Kind, &b.Mode, &b.State, &b.Machine, &b.Draft, &b.Operation,
+	err := r.Scan(&b.ID, &b.Kind, &b.Mode, &b.State, &b.Machine, &b.Draft, &b.Operation,
 		&b.Review, &b.OwnerGeneration, &b.LeaseUntil, &b.ExpiresAt, &b.CreatedAt)
 	return b, err
+}
+
+func readIngestion(ctx context.Context, tx *sql.Tx, claim string) (ingestionBody, error) {
+	return scanIngestion(tx.QueryRowContext(ctx, selectIngestions+` WHERE c.id = $1`, claim))
+}
+
+// ingestionStates are the states an ingestion reads as (compilation §3.5), the values of the
+// list's state filter.
+var ingestionStates = []string{"held", "paused", "resumed", "released", "abandoned"}
+
+// listIngestions answers the ingestions in identifier order, filtered by state as every read
+// treats it and by machine (§9.2). A draft update's claim names no machine, so a machine filter
+// never lists it.
+func listIngestions(a *API, w http.ResponseWriter, q *request) {
+	readIn(a, w, q, func(ctx context.Context, tx *sql.Tx) (string, any, error) {
+		limit, after, ref := page(q, id.Ingestion, "state", "machine")
+		if ref != nil {
+			return "", nil, ref
+		}
+		v := q.r.URL.Query()
+		state, machine := v.Get("state"), v.Get("machine")
+		if (state != "" && !slices.Contains(ingestionStates, state)) || (machine != "" && id.MustHave(machine, id.Machine) != nil) {
+			return "", nil, refuse(http.StatusBadRequest, "invalid-request", "state and machine each name a value of their kind")
+		}
+		out, err := pageRows(ctx, tx, q, limit, after, selectIngestions+` WHERE c.id > $1 AND ($3 = '' OR c.state = $3)
+			AND ($4 = '' OR c.machine = $4) ORDER BY c.id LIMIT $2`,
+			func(r *sql.Rows) (ingestionBody, string, error) {
+				b, err := scanIngestion(r)
+				return b, b.ID, err
+			}, state, machine)
+		return "", out, err
+	})
 }
 
 var getIngestion = item(id.Ingestion, func(ctx context.Context, tx *sql.Tx, v string) (string, any, error) {

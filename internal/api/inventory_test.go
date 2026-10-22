@@ -616,7 +616,7 @@ func TestInventoryReads(t *testing.T) {
 	newEpoch(t, e.db)
 	wantProblem(t, e.do(e.api, call{method: "GET", path: prefix + "/clusters?cursor=" + old, token: viewer}), http.StatusBadRequest, "cursor-invalid")
 	wantProblem(t, e.do(e.api, call{method: "GET", path: prefix + "/clusters?limit=0", token: viewer}), http.StatusBadRequest, "invalid-request")
-	wantProblem(t, e.do(e.api, call{method: "GET", path: prefix + "/machines?cluster=" + clusters[0], token: viewer}), http.StatusBadRequest, "invalid-request")
+	wantProblem(t, e.do(e.api, call{method: "GET", path: prefix + "/machines?state=" + clusters[0], token: viewer}), http.StatusBadRequest, "invalid-request")
 	// An item read takes no query at all (§9.1: unknown fields are refused), before any lookup.
 	for _, p := range []string{"/clusters/" + clusters[0] + "?x=1", "/machines/" + m.ID + "?limit=1",
 		"/drafts/" + id.New(id.Draft) + "?x", "/operations/" + id.New(id.Operation) + "?x=1"} {

@@ -1548,7 +1548,9 @@ the entry in the database holds them. A stream also ends once the operation is
 terminal and its events are written; `unresolved` is not terminal. The
 resource of an apply-config operation also lists its `attempts`, each with its
 response class and code and its accounting basis once recorded, and the
-operation's `subject` names its `plan` and `machine`. A machine resource's
+operation's `subject` names its `plan` and `machine`. An `ingest`
+operation's `subject` names its draft revision and its `ingestion`, the staging
+claim it runs (§9.3). A machine resource's
 `observed` is the latest observation that read its configuration, with the
 release among its Applied and Desired whose artifact the observation matched
 (`null` for neither), so Desired, Applied and Observed are three values that
@@ -1637,7 +1639,7 @@ idempotency and conflict behavior.
 | --- | --- | --- |
 | `GET /clusters`, `/clusters/{id}`, `/machines`, `/machines/{id}`, `/machines/{id}/observations`, `/machines/{id}/timeline` | 200 | any role |
 | `GET /fragments[/{id}]`, `/fragments/{id}/revisions`, `/fragment-revisions/{id}`; the same for profiles and assignments | 200 | any role |
-| `GET /drafts[/{id}]`, `/ingestions/{id}`, `/releases[/{id}]`, `/releases/{id}/machines/{m}/review` | 200 | any role |
+| `GET /drafts[/{id}]`, `/ingestions[/{id}]`, `/releases[/{id}]`, `/releases/{id}/machines/{m}/review` | 200 | any role |
 | `GET /plans[/{id}]`, `/approvals/{id}`, `/operations[/{id}]`, `/operations/{id}/events`, `/acts`, `/recovery` | 200 | any role |
 | `GET /dependencies[/{id}[/releases\|/alerts]]`, `/dependency-alerts` ([dependency monitor §7.2](dependency-monitor.md#72-read-routes)) | 200 | any role |
 | `POST /ingestions` (import or drift adoption of a machine's configuration), with `If-Match` carrying the named draft's ETag, which the operation binds | 202, `ingest`, created `running` with its staging claim (§5.1) | `author`, human only (§10.3) |
@@ -1661,6 +1663,16 @@ idempotency and conflict behavior.
 | `POST /recovery/accountings` (the post-restore accounting decision, covering one or more scopes) | 201 | `recovery-admin`, human only (EaR) |
 | `POST /operations/{id}/attempts/{attempt}/accountings`, `/operations/{id}/takeovers`, `/operations/{id}/resolutions` | 201 | `recovery-admin`, human only (EaR) |
 | `POST /identity-revocations` | 201 | `recovery-admin`, human only (§10.4) |
+
+A list takes only the filters named here, each at most once; any other
+parameter, or a value that is not one of its kind, is `400 invalid-request`.
+Filters combine, and each page holds only matching items, in identifier order
+(§9.1). `GET /operations` filters by `plan`, `machine`, `state` and `kind`;
+`GET /plans` by `state`, the state the plan reads as (`expired` and `revoked`
+included, §8.1), and `machine`; `GET /machines` by `cluster`; and
+`GET /ingestions` by `state`, as a read treats the claim (compilation §3.5),
+and `machine`. A draft update's claim names no machine, so a `machine` filter
+never lists it.
 
 Every `POST`, `PUT` and `DELETE` needs an `Idempotency-Key` (§7). There is no
 route that dispatches, none that issues, rotates or lists automation tokens,
@@ -2106,8 +2118,18 @@ HTTP/1.1 200 OK
  "talosEndpoint": "10.55.0.3:50000",
  "desired": "rel_fgqvcvz3ck7h7234ljgdbzsj6m",
  "applied": {"release": "rel_uxpkmwd6ckxmj4z75j7y2mcxb4", "source": "operation"},
+ "pendingConvergence": true,
  "frozen": false, "scopeState": "normal", "openDrift": null}
 ```
+
+A machine's `pendingConvergence` is `true` exactly when it has a `Desired`
+release whose artifact's configuration digest differs from its `Applied`
+digest, or a `Desired` release and no `Applied`; with no `Desired` it is
+`false`. It compares digests, never release identifiers: after an adoption the
+`Applied` digest is the import base's (execution-recovery.md §6.3), so an
+adopted machine whose release compiled other bytes is pending although
+`desired` and `applied.release` name the same release. Neither digest is
+served (choice §17.38).
 
 A machine's `openDrift` is its open drift record (execution-recovery.md §6.1,
 choice §10.35), or null: `{"revision", "observation", "lastObservation",
