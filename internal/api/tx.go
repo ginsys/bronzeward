@@ -304,6 +304,9 @@ func (a *API) fail(w http.ResponseWriter, q *request, err error) {
 	var ref *refusal
 	switch {
 	case errors.As(err, &ref):
+		if ref.code == "epoch-mismatch" {
+			setEpoch(w, q) // the epoch the lookup read, which the problem names
+		}
 	case errors.Is(err, staging.ErrEpochSuperseded), errors.Is(err, errNotController):
 		ref = refuse(http.StatusServiceUnavailable, "epoch-superseded", "this server started before the current recovery epoch and may issue no ownership; nothing was committed")
 	case errors.Is(err, errTransient):

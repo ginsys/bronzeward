@@ -155,6 +155,7 @@ type request struct {
 	epoch        string
 	recovery     bool
 	key, ifMatch string
+	expected     string // the Bronzeward-Expected-Epoch header, or empty (§7.2)
 	input        input
 	material     []byte // the length-prefixed request without a keyed member (§7.1)
 	fingerprint  []byte
@@ -393,6 +394,10 @@ func authorize(q *request) *refusal {
 
 var keyShape = regexp.MustCompile(`^[A-Za-z0-9_-]{16,128}$`)
 
+// expectedEpochHeader names the epoch a mutation's client expects; the lookup that finds no record
+// for its key refuses any other (§7.2).
+const expectedEpochHeader = "Bronzeward-Expected-Epoch"
+
 // preconditions checks a mutating request's headers (§7.1, §9.2); none needs a transaction.
 func preconditions(q *request) *refusal {
 	h := q.r.Header
@@ -413,6 +418,12 @@ func preconditions(q *request) *refusal {
 		default:
 			q.ifMatch = ms[0]
 		}
+	}
+	switch es := h.Values(expectedEpochHeader); {
+	case len(es) > 1:
+		return refuse(http.StatusBadRequest, "invalid-request", expectedEpochHeader+" must be one header")
+	case len(es) == 1:
+		q.expected = es[0]
 	}
 	return nil
 }

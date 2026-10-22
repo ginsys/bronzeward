@@ -1306,6 +1306,20 @@ key under a partial unique index over live claims, so of two concurrent
 duplicates only one creates a claim and ingests, and the other is answered as
 below.
 
+A mutating request may also carry `Bronzeward-Expected-Epoch`, the epoch its
+client expects (§9.1; [client contracts](client-contracts.md#13-alternatives-and-open-choices)
+decision D10, option (a)). A lookup that finds no record compares it with the
+epoch the lookup read, and another is refused `412 epoch-mismatch`, naming the
+current epoch; nothing commits. A key with a record is answered by that record
+as above, so an earlier epoch's record still answers its `409`, and a request
+without the header is not checked. The check is part of the lookup, so the
+transaction's own lookup decides it under its lock of the installation state:
+an entry that committed before that lookup read is seen, and one that has not
+waits for the request's transaction to end. Only an entry changes the epoch,
+and it abandons every earlier epoch's staging claim (§12.2), so on a draft
+entry route this refusal records nothing. Clients send the header on every
+write except the recovery entry (client contracts §8.4).
+
 The draft entry routes are also the one exception to "a refusal commits no
 record", because their ingestion persists a staging claim before T1 that a
 refusal does not undo. Their claim records the principal and the idempotency
@@ -1329,12 +1343,13 @@ abandoned claim's generations are reported as orphans (§6.4).
 | Situation | Response |
 | --- | --- |
 | New key | executed; record committed with the effect |
+| New key, `Bronzeward-Expected-Epoch` not the current epoch | `412 epoch-mismatch` naming the current epoch; nothing executes |
 | Same key, same fingerprint, record from the current epoch | the stored status, headers and body, with `Idempotent-Replayed: true`; nothing executes |
 | Same key, record from an earlier epoch | `409 conflict` naming the stored request and its epoch; nothing executes |
 | Same key, other fingerprint | `422 idempotency-key-reused` |
 | Same key while the first request's transaction is open | waits on the key's lock; then replays if the first committed, or executes if it rolled back |
 | Same key after the request that used it was refused | executed afresh; on a draft entry route refused after ingestion, the stored refusal replayed |
-| Same key after a restore that removed the record | executed afresh (§12.4) |
+| Same key after a restore that removed the record | executed afresh (§12.4); `412 epoch-mismatch` if `Bronzeward-Expected-Epoch` names an earlier epoch |
 
 The waiting row follows PostgreSQL's advisory-lock semantics and is not
 measured for requests: DB row 013 retried the same key sequentially and got the
@@ -1620,6 +1635,11 @@ Design: [§11](../design/Talos_Configuration_and_Machine_Management_Design.md#11
   recovery mode is in effect. A `401`, a `403 identity-revoked` and the
   liveness probe carry neither: they answer a caller who has not
   authenticated, and the epoch is data (§10).
+- A mutating request may carry `Bronzeward-Expected-Epoch`, the epoch identity
+  its client expects. When its key has no record and the header names another
+  epoch, it is refused `412 epoch-mismatch` (§7.2), whose `Bronzeward-Epoch`
+  and body name the current one. The header is optional; two of them are
+  `400 invalid-request`.
 - Every answer of the API, authenticated or not, problems included, carries
   `Cache-Control: no-store` and `Bronzeward-Request-ID`, the request's
   identifier: the `instance` of a problem the request answers (§9.4) and the
@@ -2372,6 +2392,7 @@ counter, not the ETag token, so the token is not named.
 | 409 | `scope-busy` | an assignment change while an operation holds the machine scope |
 | 409 | `recovery-mode-active` | an act refused on a scope still pre-restore unaccounted, a publication changing the assignment of a scope not released in the current epoch, or any request but liveness and entry under the recovery-start flag before entry, and plan creation, approval or unfreezing under it after entry (§12.2); the body names the scope |
 | 412 | `precondition-failed` | `If-Match` does not match |
+| 412 | `epoch-mismatch` | `Bronzeward-Expected-Epoch` names an epoch other than the current one and the key has no record (§7.2); the body's `epoch` names the current one; nothing was committed |
 | 422 | `validation-failed` | compilation refused the input; paths and rule, never values (compilation §13). A known publication identity or running-minor mismatch names the machine, observation, rule and safe cause (§6.1.1). Also a publication refused by T3's re-check: a version's status recorded not before publication began classifying it is not `retained` (dependency monitor §5.2); the body names its `dependency` by provider, object and version |
 | 422 | `idempotency-key-reused` | same key, other request (§7.2) |
 | 428 | `precondition-required`, `idempotency-key-required` | `If-Match` or `Idempotency-Key` missing |
@@ -2893,7 +2914,11 @@ A request whose effect the restore removed also lost its idempotency record,
 so its retry executes again. That is the intended result: the effect is gone,
 and executing it again is the only way to have it. Its provider side is not
 repeated: an ingestion retried after a restore mints new names and new
-generations, and the first attempt's generations stay as orphans.
+generations, and the first attempt's generations stay as orphans. A retry
+whose `Bronzeward-Expected-Epoch` names its first attempt's epoch is refused
+`412 epoch-mismatch` instead once an entry has minted a new one (§7.2), so its
+client reads before deciding; a restore with no entry mints no epoch (§12.1)
+and is not detected.
 
 The one record a restore must not replay is an earlier entry. A restored
 database can hold the idempotency record of a `POST /recovery/entries` from an
