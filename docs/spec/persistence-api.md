@@ -1605,6 +1605,12 @@ Design: [§11](../design/Talos_Configuration_and_Machine_Management_Design.md#11
   are added, never removed or changed in meaning. A route due for removal
   answers with a `Deprecation` header for at least one minor release first. A
   breaking change is a new version prefix.
+- **API revision**: a whole number, served by `GET /server` (§9.2). Revision 1
+  is `v1` as of the change that added that route. Every later additive change
+  within `v1` (a route, a response member, a request field, an enumeration
+  value or a problem code) raises it by one in the same change and adds its row
+  to the table below. A client compares the served revision with the minimum
+  it declares (client contracts §7).
 - **Pagination**: every collection takes `limit` (default 50, at most 500) and
   an opaque `cursor`, and answers with `next` when more remain. A cursor
   carries the epoch identity; a cursor from another epoch is
@@ -1628,6 +1634,12 @@ Design: [§11](../design/Talos_Configuration_and_Machine_Management_Design.md#11
   keeps the `instance` of the request that stored it. The liveness probe
   carries neither. No answer sets a cookie or a CORS header.
 
+API revisions:
+
+| Revision | Adds |
+| --- | --- |
+| 1 | `v1` as of `GET /server` |
+
 ### 9.2 Resources and routes
 
 "Any role" means any authenticated principal holding at least one role: every
@@ -1645,6 +1657,7 @@ idempotency and conflict behavior.
 | `GET /plans[/{id}]`, `/approvals/{id}`, `/operations[/{id}]`, `/operations/{id}/events`, `/acts`, `/recovery` | 200 | any role |
 | `GET /dependencies[/{id}[/releases\|/alerts]]`, `/dependency-alerts` ([dependency monitor §7.2](dependency-monitor.md#72-read-routes)) | 200 | any role |
 | `GET /identity` (the caller's own identity; no query, no ETag): `kind` (`human` or `service`); `issuer` and `subject` for a human, `service`, the service identity's name, for automation, each `null` for the other kind; `principal`, its identifier, `null` for a human with no row yet, which the read does not create (§10); `roles`, those the credential maps to in design §13.7's order, `[]` for none; `expiresAt`, the token's `exp` or the automation token's expiry; `epoch`, the epoch the read held, as its `Bronzeward-Epoch`. Nothing else of the credential, its token ID and claims included | 200 | any authenticated credential, roles or none (§10.3) |
+| `GET /server` (the version, API revision, features and start mode of the process that answered, and the read-only settings a client shows) | 200 | any role |
 | `POST /ingestions` (import or drift adoption of a machine's configuration), with `If-Match` carrying the named draft's ETag, which the operation binds | 202, `ingest`, created `running` with its staging claim (§5.1) | `author`, human only (§10.3) |
 | `GET /ingestions/{id}/review` (the staged change of a paused ingestion, compilation §3.6) | 200, `Cache-Control: no-store` | `author`, human only (§10.3) |
 | `POST /ingestions/{id}/marks`, `/continuations`, `/takeovers` (a further mark on a paused ingestion and its continuation into the draft transaction, compilation §3.6; compilation's explicit operator recovery request, §3.4 there) | 202, the ingestion's `ingest` operation; a mark's also the owner generation it took (§9.3) | `author`, human only (§10.3) |
@@ -1754,6 +1767,20 @@ the act together:
   its restored backups, the exit that ended its recovery mode (null before
   one), and every machine's scope state. Each scope's recovery timeline is the
   scope state entries on its machine's timeline.
+- `GET /server` takes no query and answers the process that answered, which
+  another instance's configuration may not match: `version` (the main module's
+  version from the build information, unless the build sets one; `(devel)`
+  when neither does), `apiRevision` (§9.1), `features` (in name order, each of
+  `execution`, `ingestion` and `publication` this process has a provider for;
+  `[]` without one), `startMode` (`normal`, or `recovery` under the
+  recovery-start flag, after its entry too, §12.2), and, in seconds,
+  `maxTokenLifetimeSeconds`, `settleFloorSeconds`,
+  `maxTransportDeadlineSeconds`, `ingestionClaim` (`leaseSeconds` and
+  `absoluteExpirySeconds`, null without the `ingestion` block) and
+  `planDefaults` (named as a plan request names each value, `maxAttempts` a
+  count), each as configured or defaulted. It serves no secret, address, path
+  or configured name, and no other setting. Before a recovery start's entry
+  commits it is refused as every request but the entry is (§12.2).
 - `POST /operations/{id}/resolutions` takes `to` and `reason`. `to` is
   `cancelled` only, and only an `unresolved` operation with no recorded attempt
   qualifies (§4): any other state or an attempt is `409 conflict`. Its
