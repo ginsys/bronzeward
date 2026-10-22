@@ -17,7 +17,7 @@ or accessibility measurement, or implementation readiness: #253's contracts and 
 
 **Facts and proposals are kept apart.** A statement about existing behaviour cites the contract
 section or the source line it comes from (`internal/api/routes.go:98` means that file and line at
-the revision this proposal was written against). Client behaviour this document proposes is
+revision `e1c8cb3`). Client behaviour this document proposes is
 marked **Proposed**. A behaviour the API does not support today is listed in
 [§11](#11-api-gap-audit) and is not presented as available.
 
@@ -1151,7 +1151,7 @@ gap G1-G17, whether it becomes an API issue that natively blocks the client tick
 
 - This is a proposal. No participant has used either client; the tasks and targets in
   [§13](#13-usability-and-accessibility-acceptance) are unmeasured.
-- Line references were read at the base revision of this proposal and move as code changes.
+- Line references were read at `e1c8cb3` and move as code changes.
 - It does not choose a frontend framework, a CLI implementation language, a login flow, token
   storage, hosting, packaging targets or a browser support matrix.
 - It does not change any role, human-only rule, route, schema or credential policy, and it does
