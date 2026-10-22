@@ -100,8 +100,56 @@ go run ./fixtures/oidc defects   # every defect mint can put in a token
   `auth.oidc.plainHTTPHosts`. It is not published on the host; tokens are minted offline from the
   key, as `scenarios/s0` does with the image's `oidc mint`. The key's private part is a leak-scan
   pattern. The commands above remain for running it outside the fixture.
-- **Tested against this issuer only.** Bronzeward's verifier is tested against this issuer alone.
-  No identity-provider product's interoperability is claimed.
+- **Defect cases stay here.** The verifier's own tests, every defect token and fixture scenarios
+  S0-S8 run against this issuer. Only the sign-in self-test below uses a real provider, and it
+  claims interoperability with that pinned release only.
+
+## Test identity provider
+
+[`dev-idp`](dev-idp) runs Zitadel at the `ZITADEL_IMAGE` pin as a real authorization server for
+the clients' sign-in: authorization code with PKCE `S256`, refresh with rotation, the device
+grant, revocation and end-session. It is a test fixture and selects no identity provider for
+deployments. Everything in it is synthetic.
+
+```sh
+mise run dev-db          # the self-test's database
+mise run dev-idp         # prints the issuer, project ID (the audience) and client IDs
+mise run go-idp          # the self-test, internal/api/idp_test.go
+mise run dev-idp-down    # its containers, network and .dev/idp/; mise run dev-down does this too
+```
+
+- **Shape.** Zitadel, its own PostgreSQL (`POSTGRES_IMAGE`, not dev-db's container, whose
+  databases the tests create and drop) and the groups target share the Docker network
+  `bw-dev-idp`. Only Zitadel is published, as `http://localhost:58280`, the issuer every caller
+  must use: Zitadel serves an instance by its external name. The server needs no
+  `plainHTTPHosts` entry for it (loopback).
+- **Seed.** One project `bronzeward` with the five role keys of `examples/bronzeward.yaml`; the
+  Native app `bronzewardctl` (redirect `http://127.0.0.1/callback` on any port, no secret, code,
+  refresh and device grants); the User Agent app `bronzeward-web` (callback and post-logout URI
+  under `http://localhost:58443`, or `BW_DEV_IDP_WEB_ORIGIN`); the humans of `issuer.Humans`
+  with those roles as grants, and `h-none` with none. Access tokens live 5 minutes, refresh
+  tokens 10 minutes idle and 1 hour absolute, a device code 1 minute (Zitadel's default is 5).
+- **Groups.** Zitadel's roles claim is an object, which the server refuses as `groups`, and the
+  pinned release has no groups scope. An Actions v2 `preaccesstoken` target, `oidc groups`
+  ([`oidc/groups/`](oidc/groups/)), adds `groups`: the user's role keys in the project, `[]` for
+  none. It verifies Zitadel's HMAC signature on every call and is created with
+  `interruptOnError`, so a refused or unreachable target fails the token request.
+- **Deny list.** Zitadel's default HTTP-client deny list refuses every loopback and private
+  address, the target's included. dev-idp replaces it with `169.254.0.0/16`. That is a setting
+  for this throwaway provider only, never a production default.
+- **Headless sign-in.** The self-test plays the login UI: the machine user `bw-login`
+  (`IAM_LOGIN_CLIENT`) creates a session through the Session API and finishes the authorization
+  request with CreateCallback. No login container runs.
+- **State.** `.dev/idp/` (gitignored) holds the provider's two machine-user tokens, the target's
+  signing key, the target's static `oidc` binary, which its container runs read-only, and
+  `idp.env`, the `BW_TEST_IDP_*` variables `go-idp` reads. The containers are
+  shared by every worktree on the host; `.dev/idp/` is per checkout, so start and stop the
+  provider from the same one.
+- **Self-test gate.** Without `BW_TEST_IDP_ISSUER` the tests skip; `go-idp` sets
+  `BW_REQUIRE_IDP=1`, so there a missing provider fails them. CI's `idp` job runs the three
+  tasks and then checks that `dev-down` left nothing; it is not a required check.
+- **Live checks.** The provider behaviour these rest on, and its residuals, are recorded in
+  [the Zitadel test-provider record](../docs/design/research/20261022-zitadel-test-idp.md).
 
 ## Instance C and the interruption seam
 

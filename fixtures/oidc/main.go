@@ -1,7 +1,9 @@
-// Command oidc runs the fixture's disposable OIDC issuer (fixtures/README.md).
+// Command oidc runs the fixture's disposable OIDC issuer and the test identity provider's groups
+// target (fixtures/README.md).
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"flag"
@@ -16,13 +18,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ginsys/bronzeward/fixtures/oidc/groups"
 	"github.com/ginsys/bronzeward/fixtures/oidc/issuer"
 )
 
 const usage = `usage: oidc keygen  -out <key file>
        oidc serve   -key <key file> -issuer <url> [-listen 127.0.0.1:5556]
        oidc mint    -key <key file> -issuer <url> [-audience bronzeward] -human <name> [-defect <name> | -without-group <group>]
-       oidc defects`
+       oidc defects
+       oidc groups  -signing-key <file> -project <id> [-listen 127.0.0.1:5556]`
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout); err != nil {
@@ -40,7 +44,9 @@ func run(args []string, stdout io.Writer) error {
 	keyPath := fs.String("key", "", "signing key file, as keygen writes it")
 	issuerURL := fs.String("issuer", "", "issuer URL: the iss claim, with no path")
 	audience := fs.String("audience", "bronzeward", "aud claim (mint)")
-	listen := fs.String("listen", "127.0.0.1:5556", "listen address (serve)")
+	listen := fs.String("listen", "127.0.0.1:5556", "listen address (serve, groups)")
+	signingKey := fs.String("signing-key", "", "file holding the Actions target's signing key (groups)")
+	project := fs.String("project", "", "project whose role keys become groups (groups)")
 	human := fs.String("human", "", "synthetic human (mint): "+strings.Join(slices.Sorted(maps.Keys(issuer.Humans)), ", "))
 	defect := fs.String("defect", "", "defect to put in the token (mint): see oidc defects")
 	withoutGroup := fs.String("without-group", "", "group of the human's left out of a valid token (mint)")
@@ -62,6 +68,15 @@ func run(args []string, stdout io.Writer) error {
 			fmt.Fprintln(stdout, d)
 		}
 		return nil
+	case "groups":
+		if *signingKey == "" || *project == "" {
+			return errors.New("groups needs -signing-key and -project")
+		}
+		key := func() ([]byte, error) {
+			k, err := os.ReadFile(*signingKey)
+			return bytes.TrimSpace(k), err
+		}
+		return serve(groups.Handler(key, *project, time.Now), *listen)
 	case "mint", "serve":
 		key, err := issuer.ReadKey(*keyPath)
 		if err != nil {
@@ -72,7 +87,7 @@ func run(args []string, stdout io.Writer) error {
 			return err
 		}
 		if args[0] == "serve" {
-			return serve(iss, *listen)
+			return serve(iss.Handler(), *listen)
 		}
 		var tok string
 		switch {
@@ -93,8 +108,8 @@ func run(args []string, stdout io.Writer) error {
 	}
 }
 
-func serve(iss *issuer.Issuer, listen string) error {
-	srv := &http.Server{Addr: listen, Handler: iss.Handler(), ReadHeaderTimeout: 10 * time.Second}
+func serve(h http.Handler, listen string) error {
+	srv := &http.Server{Addr: listen, Handler: h, ReadHeaderTimeout: 10 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	errc := make(chan error, 1)

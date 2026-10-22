@@ -13,7 +13,7 @@ description = "actionlint on the workflows, shellcheck on the scripts"
 run = """
 env -u SHELLCHECK_OPTS actionlint
 env -u SHELLCHECK_OPTS shellcheck scripts/ci/*.sh scripts/test/*.sh
-env -u SHELLCHECK_OPTS shellcheck -x fixtures/lib.sh fixtures/bin/* fixtures/scenarios/* experiments/e1-secret-ingress/run/* \
+env -u SHELLCHECK_OPTS shellcheck -x fixtures/lib.sh fixtures/dev-idp fixtures/bin/* fixtures/scenarios/* experiments/e1-secret-ingress/run/* \
   experiments/e5-provider-capabilities/run/* experiments/e5-retention-classification/run/* \
   experiments/e4-dispatch-safety/run/* \
   experiments/e5-key-loss-restoration/run/* \
@@ -214,10 +214,35 @@ echo "dev-bao: bw-dev-bao was not running and unsealed within 30s (docker ps -a;
 exit 1
 '''
 
+[tasks.dev-idp]
+description = "Start the test identity provider (Zitadel at the fixture's pin) on http://localhost:58280, seeded with the synthetic humans; prints the issuer, project and client IDs"
+# Everything is in fixtures/dev-idp, kept out of this file because mise renders run scripts with
+# Tera. Its test variables go to .dev/idp/idp.env (gitignored); mise run go-idp reads them.
+run = "fixtures/dev-idp up"
+
+[tasks.dev-idp-down]
+description = "Stop dev-idp's containers and remove its network and .dev/idp/, leaving dev-db and dev-bao running"
+# mise run dev-down does this too, after stopping the containers every worktree shares.
+run = "fixtures/dev-idp down"
+
+[tasks.go-idp]
+description = "Run the sign-in self-test against mise run dev-idp's provider and mise run dev-db's database"
+# BW_REQUIRE_IDP=1: the test fails, not skips, when the provider's variables are missing.
+run = '''
+[ -f .dev/idp/idp.env ] || { echo "go-idp: no .dev/idp/idp.env; run mise run dev-idp first" >&2; exit 1; }
+set -a
+. .dev/idp/idp.env
+set +a
+: "${BW_TEST_PG_DSN:=postgres://bronzeward@127.0.0.1:55433/bronzeward?sslmode=disable}"
+export BW_TEST_PG_DSN
+BW_REQUIRE_IDP=1 BW_REQUIRE_PG=1 go test -count=1 -timeout 10m -run '^TestIdentityProvider' -v ./internal/api/
+'''
+
 [tasks.dev-down]
-description = "Stop dev-db's and dev-bao's containers, which removes them and their data"
-# Both run with --rm, so stopping is removing. Returns once they are gone, so their ports are free
-# for the next mise run dev-db or dev-bao. They are shared by every worktree on this host.
+description = "Stop dev-db's, dev-bao's and dev-idp's containers, which removes them and their data"
+# dev-db and dev-bao run with --rm, so stopping is removing; dev-idp down removes its containers
+# and network. Returns once they are gone, so their ports are free for the next start. They are
+# shared by every worktree on this host.
 run = '''
 # Each query is assigned before it is tested, so a docker failure (no daemon, no permission) fails
 # the task under errexit instead of reading as an absent container.
@@ -232,6 +257,7 @@ for c in bw-dev-pg bw-dev-bao; do
   echo "dev-down: $c was still present after 30s (docker ps -a; docker rm -f $c)" >&2
   exit 1
 done
+fixtures/dev-idp down
 '''
 
 [tasks.build]
@@ -305,5 +331,5 @@ FIRST_PARTY_WORKFLOW_RE='^(go-kure|ginsys)/[^/]+/\\.github/workflows/[^@]+@main$
 """
 
 [tasks.verify]
-description = "Everything ci.yml runs except go-db (it needs a database; mise run go-db): lint, tests, docs, site, whitespace, commit subjects, go, action pins"
+description = "Everything ci.yml runs except go-db and idp (they need running services; mise run go-db, mise run go-idp): lint, tests, docs, site, whitespace, commit subjects, go, action pins"
 depends = ["lint", "test", "docs", "site", "whitespace", "commit-lint", "go", "action-pins"]

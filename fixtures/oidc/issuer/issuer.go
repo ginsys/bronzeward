@@ -2,8 +2,9 @@
 // discovery document and a JWKS for one synthetic ES256 key, and it mints access tokens for the
 // synthetic humans, valid or carrying one named defect (persistence-api.md §10.1). Defect tokens
 // are built here with go-jose, never through the server's verifier. It is not an identity
-// provider: no login, no clients, no refresh. Bronzeward is tested against it only; no
-// provider product's interoperability is claimed.
+// provider: no login, no clients, no refresh. The verifier's tests and the defect tokens use it;
+// only the sign-in self-test uses a real provider, and claims interoperability with that pinned
+// release only (fixtures/README.md).
 package issuer
 
 import (
