@@ -25,6 +25,7 @@ var titles = map[string]string{
 	"idempotency-key-required":  "An Idempotency-Key header is required",
 	"precondition-required":     "An If-Match header is required",
 	"precondition-failed":       "The If-Match header does not match",
+	"epoch-mismatch":            "The expected epoch is not the current one",
 	"validation-failed":         "Compilation refused the input",
 	"epoch-superseded":          "The server started before the current recovery epoch",
 	"internal-error":            "The server failed",

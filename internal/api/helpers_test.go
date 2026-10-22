@@ -115,6 +115,7 @@ func (e *env) human(name string) string {
 // call is one request; path is a full path (prefix + … or path(…)).
 type call struct {
 	method, path, token, key, ifMatch, body string
+	expected                                string // Bronzeward-Expected-Epoch
 }
 
 func (e *env) do(h http.Handler, c call) *httptest.ResponseRecorder {
@@ -131,6 +132,9 @@ func (e *env) do(h http.Handler, c call) *httptest.ResponseRecorder {
 	}
 	if c.ifMatch != "" {
 		r.Header.Set("If-Match", c.ifMatch)
+	}
+	if c.expected != "" {
+		r.Header.Set(expectedEpochHeader, c.expected)
 	}
 	if c.body != "" {
 		r.Header.Set("Content-Type", "application/json")
