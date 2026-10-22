@@ -43,5 +43,8 @@ func TestLiveness(t *testing.T) {
 		if c.want == http.StatusNoContent && rec.Body.Len() != 0 { // 404 carries http.Error's text
 			t.Errorf("%s /livez returned data", c.method)
 		}
+		if c.want == http.StatusNoContent && len(rec.Header()) != 0 { // the API's headers are its own (§9.1)
+			t.Errorf("%s /livez returned headers %v", c.method, rec.Header())
+		}
 	}
 }

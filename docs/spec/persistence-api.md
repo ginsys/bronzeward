@@ -1529,7 +1529,10 @@ server sends a `reset` event and the timeline from its start. The server ends
 a stream no later than the `exp` of the token that opened it; the client
 reconnects with `Last-Event-ID` and a fresh token, verified as any request
 (§10.1), so an identity revocation, a denied subject or a changed group takes
-effect on a stream within the token's lifetime. Epochs are compared by equality only; the entry
+effect on a stream within the token's lifetime. A stream that has sent nothing
+for 15 seconds sends the comment line `: keep-alive`, which carries no id and
+no event, so an intermediary's idle timeout longer than that does not cut it
+and the client's `Last-Event-ID` still names the last event. Epochs are compared by equality only; the entry
 time of each `RecoveryEpoch` row orders them for display. A plan operation's
 events begin at its commitment and link its plan and approval, whose entries
 are on the machine's timeline (`GET /machines/{id}/timeline`). They continue
@@ -1615,6 +1618,13 @@ Design: [§11](../design/Talos_Configuration_and_Machine_Management_Design.md#11
   recovery mode is in effect. A `401`, a `403 identity-revoked` and the
   liveness probe carry neither: they answer a caller who has not
   authenticated, and the epoch is data (§10).
+- Every answer of the API, authenticated or not, problems included, carries
+  `Cache-Control: no-store` and `Bronzeward-Request-ID`, the request's
+  identifier: the `instance` of a problem the request answers (§9.4) and the
+  identifier its server log lines name. A replayed answer (§7.2) carries the
+  identifier of the request that replays it, while a stored problem it replays
+  keeps the `instance` of the request that stored it. The liveness probe
+  carries neither. No answer sets a cookie or a CORS header.
 
 ### 9.2 Resources and routes
 
@@ -2299,8 +2309,9 @@ was recorded under (§10.3).
 
 Errors are `application/problem+json` (RFC 9457) **(choice §17.14)**. `type`
 is `urn:bronzeward:problem:<code>`; `detail` names resources and paths, never a
-value; `instance` is the request's identifier, also written to the server log,
-or, in a failed operation's `error`, the operation's.
+value; `instance` is the request's identifier, also written to the server log
+and sent as `Bronzeward-Request-ID` (§9.1), or, in a failed operation's
+`error`, the operation's.
 
 ```json
 {
