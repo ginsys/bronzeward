@@ -419,8 +419,8 @@ func TestEventStreamEndsAtTokenExpiry(t *testing.T) {
 }
 
 // §8.3: a stream with nothing to send writes a comment line at each keep-alive tick, with no id and
-// no event, so the client's Last-Event-ID still names the last event; the stream carries §9.1's
-// headers.
+// no event, so the client's Last-Event-ID still names the last event, and a resumption with it
+// after an epoch change still starts with reset; the stream carries §9.1's headers.
 func TestEventStreamKeepAlive(t *testing.T) {
 	t.Parallel()
 	ce := newCommitEnv(t, "")
@@ -486,6 +486,22 @@ func TestEventStreamKeepAlive(t *testing.T) {
 	case l := <-lines:
 		t.Fatalf("a line %q with no tick and no event", l)
 	case <-time.After(2 * streamPoll):
+	}
+
+	// Cut, then resumed with the last event's id after an epoch change: a reset comes first.
+	_ = resp.Body.Close()
+	newEpoch(t, ce.db)
+	req, _ = http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+prefix+"/operations/"+r.Operation+"/events", nil)
+	req.Header.Set("Authorization", "Bearer "+ce.human("h-viewer"))
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Last-Event-ID", ev)
+	again, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = again.Body.Close() })
+	if first, _ := bufio.NewReader(again.Body).ReadString('\n'); again.StatusCode != http.StatusOK || first != "event: reset\n" {
+		t.Fatalf("resumption after an epoch change: %d %q", again.StatusCode, first)
 	}
 }
 

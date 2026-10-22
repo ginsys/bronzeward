@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -57,6 +58,13 @@ func TestAnswerHeadersOnEveryAnswer(t *testing.T) {
 	} {
 		if rec := e.do(e.api, c.c); rec.Code != c.want {
 			t.Errorf("%s: %d %s, want %d", c.name, rec.Code, rec.Body, c.want)
+		}
+	}
+	// The route table, with no token and with every role: e.do checks each answer's headers.
+	all := e.human("h-all")
+	for i, rt := range routes() {
+		for _, tok := range []string{"", all} {
+			e.do(e.api, call{method: rt.method, path: path(rt.pattern), token: tok, key: fmt.Sprintf("k-walk-%012d", i), ifMatch: `"1-x"`, body: `{}`})
 		}
 	}
 	// A database that cannot be read answers 503 after authentication, with the same headers.
