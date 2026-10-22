@@ -17,7 +17,9 @@ or accessibility measurement, or implementation readiness: #253's contracts and 
 
 **Facts and proposals are kept apart.** A statement about existing behaviour cites the contract
 section or the source line it comes from (`internal/api/routes.go:98` means that file and line at
-revision `e1c8cb3`). Client behaviour this document proposes is
+revision `e1c8cb3`). The expected-epoch check that
+[#293](https://github.com/ginsys/bronzeward/issues/293) added did not exist there: its citations
+in [§8](#8-states-every-view-must-handle) are read with the change applied. Client behaviour this document proposes is
 marked **Proposed**. A behaviour the API does not support today is listed in
 [§11](#11-api-gap-audit) and is not presented as available.
 
@@ -901,11 +903,11 @@ sending with "approval is for humans", and the server refuses it `403` with `hum
 | Unread or stale observation | `unread` causes, old `at` (`internal/api/observe.go:56-198`) | cause per field ("node unreachable", "provider access denied") | same, never green |
 | Refused | `application/problem+json` ([persistence and API §9.4](persistence-api.md#94-errors)) | title, code, what to do, `instance` | inline at the control, summary at the top |
 | Conflict | `412 precondition-failed`, `409 conflict` | stop and point at the newer state; a `409` naming the ingestion still in progress under the same key instead waits and repeats with that key ([persistence and API §7.2](persistence-api.md#72-behavior)); a refusal stored after the claim also names its ingestion (`internal/api/fragments.go:289-296`) and its first answer is unmarked (`internal/api/tx.go:100`), so an unmarked one may be either, and one same-key repeat settles it: a stored refusal then comes back marked `Idempotent-Replayed` and is final | show both and offer reload; never auto-merge |
-| Ambiguous response | timeout or connection loss after sending | before exiting 3, offers to repeat the request it still holds in memory with the same key, subject to G13; after exit, prints the key and the resource to read | "Unknown whether this was saved"; [Repeat exactly] only while the page holds the request, for the same sign-in and epoch, subject to G13 |
+| Ambiguous response | timeout or connection loss after sending | before exiting 3, offers to repeat the request it still holds in memory with the same key and its expected epoch; after exit, prints the key and the resource to read | "Unknown whether this was saved"; [Repeat exactly] only while the page holds the request, for the same sign-in and epoch |
 | Replayed | `Idempotent-Replayed: true` (`internal/api/idempotency.go:75-81`) | "Already done earlier; showing that result" | same |
 | Key reused | `422 idempotency-key-reused` | the request could not be matched to the earlier one under that key (it differed, or the recorded digest-key version can no longer be computed, [persistence and API §7.1](persistence-api.md#71-the-key)); nothing was done; retry under a new key | same |
 | Offline | no connection | retry reads with backoff; never queue writes | banner; actions disabled; last-read time shown |
-| Authentication refused | `401 unauthenticated`: not accepted, possibly but not necessarily because it expired | renew and repeat reads; repeat a pending write with the same key only if the renewed token is the same principal and the epoch is unchanged, and subject to G13 | same |
+| Authentication refused | `401 unauthenticated`: not accepted, possibly but not necessarily because it expired | renew and repeat reads; repeat a pending write with the same key only if the renewed token is the same principal and the epoch is unchanged | same |
 | Principal or epoch changed with a write pending | renewal returned another principal, a context switch, or a new `Bronzeward-Epoch` | the pending write is set aside: not repeated and not sent under a new key; the client reads the current resource and the operator decides afresh | same, with the pending write shown as "outcome unknown: it may already have been committed", and its repeat disabled |
 | Recovery mode | `Bronzeward-Recovery-Mode: true`, `409 recovery-mode-active` naming the scope | banner line on every command with the scope summary | persistent banner; an action is disabled only where its scope's state or the recovery-start process refuses it, with that reason ([§5.9](#59-recovery-after-a-restore)); the start mode is read from `GET /server` (G14), whose refusal before a recovery start's entry, a `409 recovery-mode-active` without a `scope` member, itself shows a recovery start; until that read answers, the mode is also known from the last answer of plan creation, approval or unfreeze, which a recovery start refuses without a `scope` member, or of recovery entry, which a normal start refuses with a `409 conflict` carrying neither `epoch` nor `request`; the entry's `201` and its other `409 conflict` answers carry `epoch` and show a recovery start ([client contracts §8.5](client-contracts.md#85-epoch-changes)) |
 | Epoch changed | new `Bronzeward-Epoch`, `400 cursor-invalid`, SSE `reset` | discard cached pages and cursors, say why | same |
@@ -917,8 +919,9 @@ of it is a new request; the fingerprint covers the method, route template, path 
 `If-Match` and the canonical body. The same key with the same fingerprint replays the stored
 answer in the current epoch, a different fingerprint is `422`, a claim still in progress under
 the key is `409` naming its ingestion (`internal/api/fragments.go:113-114`), a record from an earlier epoch is
-`409`, and after a restore that removed the record the same key executes afresh
-([persistence and API §7.1](persistence-api.md#71-the-key), §7.2;
+`409`, and after a restore that removed the record the same key executes afresh, unless its
+`Bronzeward-Expected-Epoch` names an earlier epoch, which is refused `412 epoch-mismatch`
+([persistence and API §7.1](persistence-api.md#71-the-key), §7.2; `internal/api/idempotency.go:52-58`;
 `docs/spec/persistence-api.md:1243-1269`, `docs/spec/persistence-api.md:1320-1323`,
 `docs/spec/persistence-api.md:1332-1340`;
 `internal/api/idempotency.go:57-81`). The same key does not make a remote mutation exactly-once
@@ -934,18 +937,20 @@ silently creates a new key for them. It never writes a request body, or a hash o
 secret, to disk to repeat it later. Whether any key metadata is kept across a restart, and how
 it is compared, is #253's to decide.
 
-For a human session the epoch condition is the client's alone: it can compare only the epoch it
-last saw. An automation token is bound to the epoch it was issued in and refused `401` in any
+An automation token is bound to the epoch it was issued in and refused `401` in any
 other (`internal/api/api.go:305-311`), so after a restore followed by a recovery-mode entry its
 repeat is not executed; it is set aside like any write pending across an epoch change. After a
 restore nobody entered, no new epoch exists and a pre-restore token can pass
-([persistence and API §12.1](persistence-api.md#121-the-epoch), the residual of design §14.6). A human session's mutation takes no
-expected-epoch precondition (`internal/api/api.go:396-417`), and the epoch is reported
-only in an answer (`Bronzeward-Epoch`, `internal/api/api.go:326-327`). If a write commits, its
-answer is lost and a restore then removes its record, the repeat executes afresh in the new
-epoch; a read before repeating narrows that window but does not close it. The repeat is
-therefore proposed only on condition that #253 either adds a server-enforced epoch check or
-explicitly accepts this residual risk ([G13](#11-api-gap-audit)).
+([persistence and API §12.1](persistence-api.md#121-the-epoch), the residual of design §14.6). A human session's write
+carries the epoch it last saw in `Bronzeward-Expected-Epoch`, which the write's own transaction
+checks when its key has no record (`internal/api/idempotency.go:52-58`,
+[#293](https://github.com/ginsys/bronzeward/issues/293)). If a write commits, its answer is lost
+and a restore then removes its record, the repeat is refused `412 epoch-mismatch` once an entry
+has minted a new epoch, instead of executing afresh, and is set aside the same way. The recovery
+entry, which mints the epoch, is sent without the header
+([client contracts §8.4](client-contracts.md#84-idempotency-and-ambiguous-responses)), and the
+restore nobody entered stays the same residual
+([persistence and API §12.1](persistence-api.md#121-the-epoch)).
 
 ## 9. Secret handling in the clients
 
@@ -1041,7 +1046,7 @@ accepted limitation.
 | G10 | No listing of ingestions: only `GET /ingestions/{id}` (before [#280](https://github.com/ginsys/bronzeward/issues/280): [`internal/api/routes.go:90`](https://github.com/ginsys/bronzeward/blob/23c1bc2a233cbdf0916076e62016a82892107053/internal/api/routes.go#L90)) | finding a paused or lapsed import | served since [#280](https://github.com/ginsys/bronzeward/issues/280): `GET /ingestions`, filtered by `state` and `machine` (`internal/api/ingestions.go:280-299`) |
 | G11 | Recovery marks, releases and accountings have no list route; `GET /recovery` shows only their resulting scope states (`internal/api/recovery_exits.go:123-148`), the records themselves appear in machine timelines and acts | recovery console history | timeline |
 | G12 | Browser use: no statement of CORS, origin checks or hosting of a web client | the web interface at all | #253 |
-| G13 | A human session's mutation takes no expected-epoch precondition: only `Idempotency-Key` and `If-Match` are checked (`internal/api/api.go:396-417`), and the epoch is reported only in an answer (`internal/api/api.go:326-327`). After a committed write's answer is lost and a restore removes its record, the same request with the same key executes afresh in the new epoch ([persistence and API §7.2](persistence-api.md#72-behavior)); a read before repeating leaves a race. An automation token is bound to its issuing epoch and refused `401` in any other (`internal/api/api.go:305-311`) | repeating an ambiguous write ([§8](#8-states-every-view-must-handle), C5, G3, [W11](operator-experience-wireframes.md#w11-empty-withheld-error-and-offline-states)) | none for a human session: the client compares only the epoch it last saw; #253 adds a server-enforced epoch check or explicitly accepts the residual risk |
+| G13 | Before [#293](https://github.com/ginsys/bronzeward/issues/293), a human session's mutation took no expected-epoch precondition: only `Idempotency-Key` and `If-Match` were checked, and the epoch was reported only in an answer. After a committed write's answer is lost and a restore removes its record, the same request with the same key executed afresh in the new epoch ([persistence and API §7.2](persistence-api.md#72-behavior)); a read before repeating left a race. An automation token is bound to its issuing epoch and refused `401` in any other (`internal/api/api.go:305-311`) | repeating an ambiguous write ([§8](#8-states-every-view-must-handle), C5, G3, [W11](operator-experience-wireframes.md#w11-empty-withheld-error-and-offline-states)) | closed by #293: the client sends `Bronzeward-Expected-Epoch`, and a repeat whose key has no record is refused `412 epoch-mismatch` once the epoch moved ([client contracts](client-contracts.md#4-api-gap-audit) G21) |
 | G14 | No read of the process's start mode (before [#278](https://github.com/ginsys/bronzeward/issues/278)): `GET /recovery` serves epoch, recovery mode, entry, exit and scopes (`internal/api/recovery_exits.go:123-129`), the headers carry only `Bronzeward-Epoch` and `Bronzeward-Recovery-Mode` (`internal/api/api.go:326-332`). A recovery start shows only in an answer: a `409 recovery-mode-active` without a `scope` member (`internal/api/api.go:242-244`, `internal/api/recovery_exits.go:211-213`), or any recovery-entry answer past the role check but its not-a-recovery-start refusal, of which its `201` and its other `409 conflict` answers carry `epoch` (`internal/api/recovery_entries.go:77`); a normal start shows in that refusal, a plain `409 conflict` with neither an `epoch` nor a `request` member (`internal/api/api.go:356-359`, `internal/api/recovery_entries.go:91-92`, `internal/api/recovery_entries.go:106-108`, `internal/api/recovery_entries.go:133-135`, `internal/api/idempotency.go:65-67`) | the recovery banner and `status` stating that plan creation, approval and unfreeze wait for a normal restart ([§5.9](#59-recovery-after-a-restore)) | the answers of those three routes: past the role check, a recovery-start refusal (no `scope` member) shows a recovery start (`internal/api/api.go:339-353`); a `409 conflict` to recovery entry shows a normal start only without `epoch` and `request` members, and the client tells it apart from the entry's other `409 conflict` answers by those members, never by status and code alone ([client contracts §8.5](client-contracts.md#85-epoch-changes)); before [#278](https://github.com/ginsys/bronzeward/issues/278), nothing showed it before one was sent, so actions could not be disabled beforehand and the banner held until the next such answer. Served since [#278](https://github.com/ginsys/bronzeward/issues/278) except before a recovery start's entry: `GET /server` serves `startMode`, and is refused as every request but the entry until the entry commits; in that window its own refusal, a `409 recovery-mode-active` without a `scope` member, shows a recovery start, as those answers do |
 | G15 | No principal display name: bodies carry principal identifiers only (`internal/api/acts.go:19-30`, `internal/api/releases.go:53`), and no route maps one to a subject or name | showing who published, planned, approved or entered recovery | shortened principal identifiers |
 | G16 | No convergence status: a machine body serves `desired` and `applied.release` but not whether the `Desired` release's artifact digest for the machine differs from the `Applied` digest (before [#280](https://github.com/ginsys/bronzeward/issues/280): [`internal/api/reads.go:155-167`](https://github.com/ginsys/bronzeward/blob/23c1bc2a233cbdf0916076e62016a82892107053/internal/api/reads.go#L155-L167)), which is what pending convergence means ([execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values)); after an adoption the `Applied` digest is the baseline's ([execution and recovery §6.3](execution-recovery.md#63-adopt)), so equal release IDs do not rule it out | showing whether a machine still needs a plan ([§2.4](#24-desired-applied-and-observed), [§5.2](#52-inventory), [W2](operator-experience-wireframes.md#w2-machines)) | served since [#280](https://github.com/ginsys/bronzeward/issues/280): the machine's `pendingConvergence`, which serves neither digest (`internal/api/reads.go:155-171`) |
@@ -1061,7 +1066,7 @@ general secret browser (milestone exclusion).
 | C2 | Web navigation | resource tabs only; a single change wizard; machine hub plus a staged change pipeline | Hub plus pipeline: operators start from a machine's state, while publish, plan and approve stay separate pages, buttons and roles, which a wizard would blur | recommended; usability unmeasured |
 | C3 | Editing | native YAML editor; forms over the Talos schema; both | Native YAML for documents and structured controls for metadata only: the design makes native Talos configuration canonical ([design §6.1](../design/Talos_Configuration_and_Machine_Management_Design.md#61-canonical-model)), and a schema form would be a second model to keep in step with every Talos version | recommended; usability unmeasured |
 | C4 | Protected review in the CLI | terminal pager in process; temporary file in `$EDITOR`; web-only review | Terminal pager in process; non-terminal output refused with no override; no JSON, YAML, save or export form; marks by prompt or stdin, never a client-read file. An editor leaves swap and backup files the client cannot control ([compilation §3.6](compilation.md#36-operator-review)); web-only would make the CLI unable to finish an import. It limits client-controlled persistence only and does not prevent terminal or host capture ([§9](#9-secret-handling-in-the-clients)) | candidate, to be qualified in #253; no standard-output export form in any case |
-| C5 | Concurrency and retries | last-seen ETag; re-read then write; journal of requests | Last-seen ETag per draft, stop on 412; repeat an ambiguous write with its key only on request, for the exact request held in memory, the same principal and the same epoch ([§8](#8-states-every-view-must-handle)), an epoch the client can only compare with the one it last saw (G13); no body journal: re-reading before writing is a silent overwrite, and a journal would store documents and marks | recommended, within the limits of §8 and conditional on #253 settling G13; any persistence across restarts is #253's |
+| C5 | Concurrency and retries | last-seen ETag; re-read then write; journal of requests | Last-seen ETag per draft, stop on 412; repeat an ambiguous write with its key only on request, for the exact request held in memory, the same principal and the same epoch ([§8](#8-states-every-view-must-handle)), an epoch the write's own transaction checks against the one the client last saw (G13, closed by #293); no body journal: re-reading before writing is a silent overwrite, and a journal would store documents and marks | recommended, within the limits of §8; any persistence across restarts is #253's |
 
 ## 13. Usability and accessibility acceptance
 
@@ -1138,7 +1143,7 @@ gap G1-G17, whether it becomes an API issue that natively blocks the client tick
 
 **Qualifications left to #253**, besides the gaps:
 
-- the retry boundary of C5: whether the same-key repeat is offered at all (G13), whether any key
+- the retry boundary of C5: whether the same-key repeat is offered at all (G13 closed by #293), whether any key
   or request may survive a client restart, and how an ambiguous outcome is shown after one;
 - the protected review of C4: the mechanism must be shown to keep plaintext out of argv, shell
   history, logs, editor files and caches, or be replaced;
@@ -1150,7 +1155,8 @@ gap G1-G17, whether it becomes an API issue that natively blocks the client tick
 
 - This is a proposal. No participant has used either client; the tasks and targets in
   [§13](#13-usability-and-accessibility-acceptance) are unmeasured.
-- Line references were read at `e1c8cb3` and move as code changes.
+- Line references were read at `e1c8cb3` and move as code changes, except the expected-epoch
+  check's, which are read with #293 applied (see the opening).
 - It does not choose packaging targets. The sign-in flows, token storage and hosting are decided
   in [client contracts §13](client-contracts.md#13-alternatives-and-open-choices), and the
   implementation choices in its [§15](client-contracts.md#15-assumptions-and-limits): the CLI in
