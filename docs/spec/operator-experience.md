@@ -182,7 +182,7 @@ from matching release IDs, names or sources.
 
 `GET /machines/{id}` returns `desired` (a release ID or null), `applied {release, source}` (or
 null) with source `operation` or `adoption`, `observed {observation, at, release}` (or null),
-`frozen`, `scopeState` and `openDrift` (`internal/api/reads.go:155-196`). `observed` is the
+`frozen`, `scopeState`, `openDrift` and `pendingConvergence` (`internal/api/reads.go:155-196`). `observed` is the
 observation with the highest basis that read a configuration digest, not necessarily the newest
 observation: a later read that failed or left the digest unread is not it. `observed.release`
 names the applied release when that observation's digest equals the `Applied` digest, the
@@ -374,7 +374,7 @@ returns a different principal is shown as a new sign-in, never silently continue
 $ bronzewardctl machine list --cluster cl_9fd…m3ka
 MACHINE         ENDPOINT          DESIRED        APPLIED (SOURCE)          OBSERVED             STATE
 mch_k2p…7xqa    10.5.0.2:50000    rel_fgqv…j6m   rel_fgqv…j6m (operation)  =applied, 2m ago     matches applied
-mch_tqhc…35uq   10.5.0.3:50000    rel_fgqv…j6m   rel_p4nx…8wd (adoption)   =applied, 1m ago     selected ≠ applied
+mch_tqhc…35uq   10.5.0.3:50000    rel_fgqv…j6m   rel_p4nx…8wd (adoption)   =applied, 1m ago     pending convergence
 mch_w4ze…n3fa   10.5.0.4:50000    rel_fgqv…j6m   rel_fgqv…j6m (operation)  no match, 5m ago     drifted, frozen
 Health is not checked in this installation.
 ```
@@ -1035,8 +1035,8 @@ accepted limitation.
 | G6 | Provenance covers reference occurrences only (`internal/api/releases.go:78-100`), not "which fragment set this field" ([design §6.2](../design/Talos_Configuration_and_Machine_Management_Design.md#62-fragments-profiles-and-assignments)) | field-origin inspector | none |
 | G7 | Drift content is not served: no observed configuration or digest (`internal/api/reads.go:155-171`) | deciding adopt or revert from what changed | a drift-adoption import with review, or `talosctl` outside Bronzeward |
 | G8 | Machines have no human-readable name (`internal/api/inventory.go:177-224`) | finding a machine | endpoint and node ID |
-| G9 | No list filters on machines, plans, releases, drafts or acts (`internal/api/reads.go:78-80`, `internal/api/acts.go:72`); operations filter by `plan`, `machine`, `state`, `kind` (`internal/api/operations.go:97`); no machine timeline stream | "plans awaiting my approval", per-cluster views, following a timeline | served since [#280](https://github.com/ginsys/bronzeward/issues/280): plans by `state` and `machine` (`internal/api/plans.go:429-451`), machines by `cluster` (`internal/api/reads.go:199-218`); client-side paging for releases, drafts and acts; polling |
-| G10 | No listing of ingestions: only `GET /ingestions/{id}` (`internal/api/routes.go:90`) | finding a paused or lapsed import | served since [#280](https://github.com/ginsys/bronzeward/issues/280): `GET /ingestions`, filtered by `state` and `machine` (`internal/api/ingestions.go:280-299`) |
+| G9 | No list filters on machines, plans, releases, drafts or acts (before [#280](https://github.com/ginsys/bronzeward/issues/280): [`internal/api/reads.go:78-80`](https://github.com/ginsys/bronzeward/blob/23c1bc2a233cbdf0916076e62016a82892107053/internal/api/reads.go#L78-L80); `internal/api/acts.go:72`); operations filter by `plan`, `machine`, `state`, `kind` (`internal/api/operations.go:97`); no machine timeline stream | "plans awaiting my approval", per-cluster views, following a timeline | served since [#280](https://github.com/ginsys/bronzeward/issues/280): plans by `state` and `machine` (`internal/api/plans.go:429-451`), machines by `cluster` (`internal/api/reads.go:199-218`); client-side paging for releases, drafts and acts; polling |
+| G10 | No listing of ingestions: only `GET /ingestions/{id}` (before [#280](https://github.com/ginsys/bronzeward/issues/280): [`internal/api/routes.go:90`](https://github.com/ginsys/bronzeward/blob/23c1bc2a233cbdf0916076e62016a82892107053/internal/api/routes.go#L90)) | finding a paused or lapsed import | served since [#280](https://github.com/ginsys/bronzeward/issues/280): `GET /ingestions`, filtered by `state` and `machine` (`internal/api/ingestions.go:280-299`) |
 | G11 | Recovery marks, releases and accountings have no list route; `GET /recovery` shows only their resulting scope states (`internal/api/recovery_exits.go:123-148`), the records themselves appear in machine timelines and acts | recovery console history | timeline |
 | G12 | Browser use: no statement of CORS, origin checks or hosting of a web client | the web interface at all | #253 |
 | G13 | A human session's mutation takes no expected-epoch precondition: only `Idempotency-Key` and `If-Match` are checked (`internal/api/api.go:388-409`), and the epoch is reported only in an answer (`internal/api/api.go:318-319`). After a committed write's answer is lost and a restore removes its record, the same request with the same key executes afresh in the new epoch ([persistence and API §7.2](persistence-api.md#72-behavior)); a read before repeating leaves a race. An automation token is bound to its issuing epoch and refused `401` in any other (`internal/api/api.go:297-303`) | repeating an ambiguous write ([§8](#8-states-every-view-must-handle), C5, G3, [W11](operator-experience-wireframes.md#w11-empty-withheld-error-and-offline-states)) | none for a human session: the client compares only the epoch it last saw; #253 adds a server-enforced epoch check or explicitly accepts the residual risk |
