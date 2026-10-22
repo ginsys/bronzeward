@@ -247,8 +247,39 @@ func TestIdentityEpochChange(t *testing.T) {
 	if rec.Header().Get("Bronzeward-Epoch") != "" {
 		t.Fatalf("a stale token was told the epoch: %v", rec.Header())
 	}
-	if b, body := f.identity(f.human("h-viewer")); b.Epoch != entered {
-		t.Fatalf("human after the entry: %s; want epoch %s", body, entered)
+	// A human's token carries no epoch and is served, so an entry that commits after routing
+	// shows which epoch its answer carries: the one the read held, as its header does.
+	var held string
+	f.api = f.build(options{beforeRead: func() {
+		if held == "" {
+			held = newEpoch(t, f.db)
+		}
+	}})
+	if b, body := f.identity(f.human("h-viewer")); held == "" || held == entered || b.Epoch != held {
+		t.Fatalf("human, an entry after routing: %s; want epoch %s, not %s", body, held, entered)
+	}
+}
+
+// §9.2: expiresAt is served in UTC whatever the zone the credential's expiry was read in. The
+// expiries here are in a non-UTC zone, so the check does not depend on the host's zone.
+func TestIdentityExpiresAtInUTC(t *testing.T) {
+	e := newEnv(t, options{})
+	exp := time.Date(2030, 1, 2, 5, 4, 5, 0, time.FixedZone("plus2", 2*60*60))
+	for _, p := range []auth.Principal{
+		{Kind: auth.Human, Issuer: e.iss.URL, Subject: "h-viewer", Roles: []auth.Role{auth.Viewer}, Expiry: exp},
+		{Kind: auth.Service, ID: e.robotID, Epoch: epoch(t, e.db), Roles: []auth.Role{auth.Author, auth.Publisher}, Expiry: exp},
+	} {
+		a := newAPI(e.db, stubAuthn{p: p}, e.cfg, deps{}, options{logf: e.logf})
+		rec := e.do(a, call{method: "GET", path: prefix + "/identity", token: "x"})
+		var raw struct {
+			ExpiresAt string `json:"expiresAt"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &raw); rec.Code != http.StatusOK || err != nil {
+			t.Fatalf("%s: %d %s", p.Kind, rec.Code, rec.Body)
+		}
+		if raw.ExpiresAt != "2030-01-02T03:04:05Z" {
+			t.Errorf("%s: expiresAt %q; want 2030-01-02T03:04:05Z", p.Kind, raw.ExpiresAt)
+		}
 	}
 }
 
