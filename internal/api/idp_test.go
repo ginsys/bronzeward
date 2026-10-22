@@ -299,8 +299,10 @@ func TestIdentityProviderRoles(t *testing.T) {
 		if tk.ExpiresIn <= 0 || tk.ExpiresIn > 300 {
 			t.Errorf("%s: expires_in %d; want at most the 5-minute lifetime", human, tk.ExpiresIn)
 		}
-		if got := lifetime(t, tk.Access); got != 300 {
-			t.Errorf("%s: access token exp - iat = %d; want the configured 300", human, got)
+		// Zitadel truncates exp and iat to whole seconds from separate clock reads, so the
+		// configured 300 reads 299 when they fall across a second boundary.
+		if got := lifetime(t, tk.Access); got < 299 || got > 300 {
+			t.Errorf("%s: access token exp - iat = %d; want the configured 300 (299 across a second boundary)", human, got)
 		}
 		want := slices.Sorted(slices.Values(issuer.Humans[human]))
 		if got, ok := groupsClaim(t, tk.Access); !ok || !slices.Equal(got, want) {
