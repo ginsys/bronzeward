@@ -215,6 +215,19 @@ const (
 	streamKeepAlive = 15 * time.Second
 )
 
+// idleTimer is an event stream's keep-alive timer: c ticks once the stream has sent nothing for
+// the interval, rearm starts the interval again, and stop releases the timer.
+type idleTimer struct {
+	c     <-chan time.Time
+	rearm func()
+	stop  func() bool
+}
+
+func newIdleTimer(d time.Duration) idleTimer {
+	t := time.NewTimer(d)
+	return idleTimer{c: t.C, rearm: func() { t.Reset(d) }, stop: t.Stop}
+}
+
 // streamEvents answers the operation's events as Server-Sent Events (§8.3): each event's id is
 // `<epoch>:<number>`; a Last-Event-ID of another epoch cannot be resumed, so the server sends a
 // reset event and the events from the start. The stream ends when the operation is terminal and
@@ -288,12 +301,12 @@ func streamEvents(a *API, w http.ResponseWriter, q *request) {
 	}
 	// A stream with no event to send for streamKeepAlive sends a comment line, which carries no id
 	// and no event, so neither the client's Last-Event-ID nor its event handling sees it.
-	ticks, rearm := a.o.keepAlive, func() {}
-	if ticks == nil {
-		idle := time.NewTimer(streamKeepAlive)
-		defer idle.Stop()
-		ticks, rearm = idle.C, func() { idle.Reset(streamKeepAlive) }
+	timer := a.o.keepAlive
+	if timer == nil {
+		timer = newIdleTimer
 	}
+	idle := timer(streamKeepAlive)
+	defer idle.stop()
 	for {
 		for i, e := range batch {
 			if ctx.Err() != nil {
@@ -305,7 +318,7 @@ func streamEvents(a *API, w http.ResponseWriter, q *request) {
 			last = seqs[i]
 		}
 		if len(batch) > 0 {
-			rearm()
+			idle.rearm()
 		}
 		_ = rc.Flush()
 		if len(batch) < streamBatch {
@@ -315,7 +328,7 @@ func streamEvents(a *API, w http.ResponseWriter, q *request) {
 			select {
 			case <-ctx.Done():
 				return
-			case <-ticks:
+			case <-idle.c:
 				if ctx.Err() != nil {
 					return
 				}
@@ -323,7 +336,7 @@ func streamEvents(a *API, w http.ResponseWriter, q *request) {
 					return
 				}
 				_ = rc.Flush()
-				rearm()
+				idle.rearm()
 			case <-time.After(streamPoll):
 			}
 		}

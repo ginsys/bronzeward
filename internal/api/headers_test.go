@@ -40,7 +40,8 @@ func checkAnswerHeaders(t *testing.T, rec *httptest.ResponseRecorder) {
 }
 
 // Every answer carries the headers, whatever answers it: an authentication refusal, a role
-// refusal, an unavailable database, a read and a write.
+// refusal, an unavailable database, a read, a write, its replay, every route and the event
+// stream's refusals.
 func TestAnswerHeadersOnEveryAnswer(t *testing.T) {
 	e := newEnv(t, options{})
 	viewer, author := e.human("h-viewer"), e.human("h-author")
@@ -60,15 +61,43 @@ func TestAnswerHeadersOnEveryAnswer(t *testing.T) {
 			t.Errorf("%s: %d %s, want %d", c.name, rec.Code, rec.Body, c.want)
 		}
 	}
-	// The route table, with no token and with every role: e.do checks each answer's headers.
-	all := e.human("h-all")
+	// The route table, with no token and with the role tokens that together hold every role: e.do
+	// checks each answer's headers, and each route is answered past its role check at least once.
+	tokens := []string{e.human("h-all"), e.human("h-recovery")}
 	for i, rt := range routes() {
-		for _, tok := range []string{"", all} {
-			e.do(e.api, call{method: rt.method, path: path(rt.pattern), token: tok, key: fmt.Sprintf("k-walk-%012d", i), ifMatch: `"1-x"`, body: `{}`})
+		c := call{method: rt.method, path: path(rt.pattern), key: fmt.Sprintf("k-walk-%012d", i), ifMatch: `"1-x"`, body: `{}`}
+		if rec := e.do(e.api, c); rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s %s with no token: %d", rt.method, rt.pattern, rec.Code)
+		}
+		reached := false
+		for _, tok := range tokens {
+			c.token = tok
+			rec := e.do(e.api, c)
+			reached = reached || rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "urn:bronzeward:problem:forbidden")
+		}
+		if !reached {
+			t.Errorf("%s %s: refused its role check to every token", rt.method, rt.pattern)
 		}
 	}
-	// A database that cannot be read answers 503 after authentication, with the same headers.
+	// The event stream's own refusals answer before any frame, with the same headers.
+	for _, h := range []struct{ query, lastID string }{{"?limit=5", ""}, {"", "not-an-event-id"}} {
+		r := httptest.NewRequest(http.MethodGet, path("/operations/{id}/events")+h.query, nil)
+		r.Header.Set("Authorization", "Bearer "+viewer)
+		r.Header.Set("Accept", "text/event-stream")
+		if h.lastID != "" {
+			r.Header.Set("Last-Event-ID", h.lastID)
+		}
+		rec := httptest.NewRecorder()
+		e.api.ServeHTTP(rec, r)
+		checkAnswerHeaders(t, rec)
+		wantProblem(t, rec, http.StatusBadRequest, "invalid-request")
+	}
+	// A database that cannot be read answers 503: from authentication for an automation token,
+	// whose check reads the installation state, and from the installation-state read after a
+	// human's authentication.
 	mustExec(t, e.db, "ALTER TABLE installation_state RENAME TO installation_state_away")
 	t.Cleanup(func() { mustExec(t, e.db, "ALTER TABLE installation_state_away RENAME TO installation_state") })
-	wantProblem(t, e.do(e.api, call{method: "GET", path: prefix + "/acts", token: e.robot}), http.StatusServiceUnavailable, "dependency-unavailable")
+	for _, tok := range []string{e.robot, viewer} {
+		wantProblem(t, e.do(e.api, call{method: "GET", path: prefix + "/acts", token: tok}), http.StatusServiceUnavailable, "dependency-unavailable")
+	}
 }

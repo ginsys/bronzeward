@@ -246,6 +246,7 @@ func TestRecoveryEntryOpensTheGateBeforeItAnswers(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	w := &gateWriter{ResponseRecorder: httptest.NewRecorder(), gate: r.d.preEntry}
 	r.ServeHTTP(w, req)
+	checkAnswerHeaders(t, w.ResponseRecorder)
 	if w.Code != http.StatusCreated || w.closed {
 		t.Fatalf("answered %d %s with the gate closed: %t", w.Code, w.Body, w.closed)
 	}

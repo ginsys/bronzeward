@@ -142,7 +142,7 @@ type options struct {
 	dial           func(ctx context.Context, talosconfig []byte, endpoint string) (talos.Reader, error) // talos.Dial by default
 	nodeTimeout    time.Duration                                                                        // bounds each node request; nodeTimeout by default
 	quoteErrors    bool                                                                                 // the pass-through control (§16): a node read's failure logs its error text
-	keepAlive      <-chan time.Time                                                                     // an event stream's keep-alive ticks, instead of its idle timer (§8.3)
+	keepAlive      func(time.Duration) idleTimer                                                        // an event stream's keep-alive timer, newIdleTimer if nil (§8.3)
 }
 
 // request is one API request as it passes the checks.

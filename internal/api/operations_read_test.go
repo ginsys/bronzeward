@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -429,8 +430,22 @@ func TestEventStreamKeepAlive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A fake timer: the test sends its ticks and counts the stream's rearms.
 	ticks := make(chan time.Time)
-	ce.a.o.keepAlive = ticks
+	var mu sync.Mutex
+	var intervals []time.Duration
+	rearms := 0
+	ce.a.o.keepAlive = func(d time.Duration) idleTimer {
+		mu.Lock()
+		defer mu.Unlock()
+		intervals = append(intervals, d)
+		return idleTimer{c: ticks, rearm: func() { mu.Lock(); rearms++; mu.Unlock() }, stop: func() bool { return true }}
+	}
+	counted := func() (int, []time.Duration) {
+		mu.Lock()
+		defer mu.Unlock()
+		return rearms, slices.Clone(intervals)
+	}
 	srv := httptest.NewServer(ce.a)
 	t.Cleanup(srv.Close)
 	tok, err := auth.NewStore(ce.db, ce.cfg).Issue(t.Context(), "watch", []auth.Role{auth.Viewer}, time.Hour, "h-all", "h-all")
@@ -476,6 +491,10 @@ func TestEventStreamKeepAlive(t *testing.T) {
 	if got := read(4); got[0] != "id: "+ev || got[1] != "event: commitment" || got[3] != "" {
 		t.Fatalf("first event %q", got)
 	}
+	// The batch rearmed the timer before it was flushed: events keep the comment away.
+	if n, ds := counted(); n != 1 || !slices.Equal(ds, []time.Duration{15 * time.Second}) {
+		t.Fatalf("after the first event: %d rearms, intervals %v; want 1 and [15s]", n, ds)
+	}
 	for range 2 {
 		ticks <- time.Time{}
 		if got := read(2); !slices.Equal(got, []string{": keep-alive", ""}) {
@@ -486,6 +505,9 @@ func TestEventStreamKeepAlive(t *testing.T) {
 	case l := <-lines:
 		t.Fatalf("a line %q with no tick and no event", l)
 	case <-time.After(2 * streamPoll):
+	}
+	if n, _ := counted(); n != 3 {
+		t.Fatalf("%d rearms after an event and two comments; want 3", n)
 	}
 
 	// Cut, then resumed with the last event's id after an epoch change: a reset comes first.
@@ -505,6 +527,32 @@ func TestEventStreamKeepAlive(t *testing.T) {
 	}
 }
 
+// newIdleTimer ticks once its interval passes, and again only after a rearm.
+func TestNewIdleTimer(t *testing.T) {
+	const d = 20 * time.Millisecond
+	idle := newIdleTimer(d)
+	defer idle.stop()
+	started := time.Now()
+	for i := range 2 {
+		select {
+		case <-idle.c:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("tick %d never came", i+1)
+		}
+		if i == 0 {
+			idle.rearm()
+		}
+	}
+	if got := time.Since(started); got < 2*d {
+		t.Fatalf("two ticks in %s; want at least %s", got, 2*d)
+	}
+	select {
+	case <-idle.c:
+		t.Fatal("a tick with no rearm")
+	case <-time.After(5 * d):
+	}
+}
+
 // §9.1: an event stream takes no query (it resumes with Last-Event-ID), and an operation is read
 // whole: its row is locked FOR SHARE before its attempts are read, so a transaction that holds it
 // is waited for and never seen between its statements.
@@ -518,6 +566,7 @@ func TestOperationReadFollowsItsLock(t *testing.T) {
 	req.Header.Set("Accept", "text/event-stream")
 	rec := httptest.NewRecorder()
 	xe.env.api.ServeHTTP(rec, req)
+	checkAnswerHeaders(t, rec)
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid-request") {
 		t.Fatalf("an event stream with a query: %d %s", rec.Code, rec.Body)
 	}
