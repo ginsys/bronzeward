@@ -918,11 +918,17 @@ The review is served to any human `author`, not only the one who started the ing
    shows nothing. So while it follows, the client reads `GET /ingestions/{id}` again whenever
    the `leaseUntil` it last read has passed by its own clock, plus a margin for clock difference
    (`internal/api/ingestions.go:237`). A read that still shows `held` or `resumed` with
-   `leaseUntil` passed ends the watch as `resume-failed` does: the mark is reported as not
-   applied, with the same offers. A lapsed lease lets the run commit nothing more
-   (`internal/staging/claim.go:69`). A continuation's watch (`import continue`) and a takeover's
-   (`import takeover`, which leaves the claim `resumed`, `internal/staging/takeover.go:84`) end
-   the same two ways. It reports a
+   `leaseUntil` passed ends the watch, with the operation still `running`, but the mark's
+   outcome is reported as unknown, not as not applied. A draft transaction checks the lease once,
+   when it releases the claim under the claim's row lock, not again at `COMMIT`
+   ([compilation §3.5](compilation.md#35-expiry-abandonment-and-restoration)), so a run that
+   released the claim before the lease lapsed can still commit, while this read takes no lock
+   and still shows the claim's earlier state (`internal/api/runner.go:372-377`). The client
+   offers a later read of the ingestion and the same offers as `resume-failed`; a takeover takes
+   the claim's row lock first (`internal/staging/takeover.go:64`), so its answer, and a later
+   read showing the claim ended or the operation terminal, settle the outcome. A continuation's
+   watch (`import continue`) and a takeover's (`import takeover`, which leaves the claim
+   `resumed`, `internal/staging/takeover.go:84`) end the same two ways. It reports a
    `mark-refused` event's `422` as a refusal by position, never as an accepted mark; a
    `mark-refused` problem without a position (`503 dependency-unavailable` or `500
    internal-error`, `internal/api/runner.go:328-338`) is shown by its code as a mark that was not
@@ -1026,7 +1032,7 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 | PROT-02 | refusal | `import review` with standard output redirected | refused, nothing written |
 | PROT-03 | refusal | mark that is not a path; mark compilation refuses (for example one that would rewrite text); compilation fails on a dependency | first: `422` with `position`; second: `202`, then, after the `marked` event of that `generation`, a `mark-refused` event with `422` and `position` and the ingestion paused again; third: `mark-refused` with `503`, shown by code as not applied; none reported as accepted, no path shown |
 | PROT-05 | refusal | mark accepted (`202`), then the run cannot decrypt the staged envelope | after the `marked` event, a `resume-failed` event with `dependency-unavailable`; the watch ends with the operation still `running`; the mark reported as not applied; `import takeover` offered once the lease lapses, and `import abandon`; no wait without end |
-| PROT-06 | disconnect | mark accepted (`202`), then the serving process is killed before the run writes any event; second case: the same during a continuation; third case: the same during a takeover | the client reads the ingestion once its `leaseUntil` has passed; `held` (mark, continuation) or `resumed` (takeover) with `leaseUntil` passed ends the watch with the operation still `running`; the mark, continuation or takeover reported as not applied; `import takeover` and `import abandon` offered; no wait until the claim's absolute expiry |
+| PROT-06 | disconnect | mark accepted (`202`), then the serving process is killed before the run writes any event; second case: the same during a continuation; third case: the same during a takeover; fourth case: the run releases the claim before its lease lapses and its transaction is delayed past `leaseUntil` before `COMMIT`, which needs a server-side fault hook the server binary does not have, a prerequisite of #263 | the client reads the ingestion once its `leaseUntil` has passed; `held` (mark, continuation) or `resumed` (takeover) with `leaseUntil` passed ends the watch with the operation still `running`; the mark, continuation or takeover reported as of unknown outcome, never as not applied; a later read, `import takeover` and `import abandon` offered; in the fourth case a later read shows the operation `succeeded`; no wait until the claim's absolute expiry |
 | PROT-04 | disconnect | connection dropped during the review read | nothing persisted; review read again |
 | COMP-01 | refusal | server below the client's minimum API revision (after A2) | refused before any write, both versions named |
 | COMP-02 | success | response carrying a `Deprecation` header | warning shown once, naming the route |
@@ -1142,7 +1148,7 @@ dependencies below in place:
 | [#258](https://github.com/ginsys/bronzeward/issues/258), [#259](https://github.com/ginsys/bronzeward/issues/259) plans, approval, operations | A4 (plan filters), D9 (CLI), D10 | 8.4, 8.6 |
 | [#260](https://github.com/ginsys/bronzeward/issues/260), [#261](https://github.com/ginsys/bronzeward/issues/261) drift and recovery | A2 (settings, start mode), D9 (CLI), D10 | 8.4, 8.5, 8.6 |
 | [#262](https://github.com/ginsys/bronzeward/issues/262) packaging and documentation | D1, D3, D7 | 6, 7, 9.1, 10.1, 10.2 |
-| [#263](https://github.com/ginsys/bronzeward/issues/263) validation | A5, D8; a server-side COMMIT fault hook for REC-04 (b) | 11.5, 12 |
+| [#263](https://github.com/ginsys/bronzeward/issues/263) validation | A5, D8; a server-side COMMIT fault hook for REC-04 (b); a server-side hook delaying a draft transaction's `COMMIT` after its claim's release for PROT-06's fourth case | 11.5, 12 |
 
 A7 blocks no ticket: until it lands, the tickets from #256 to #261 show shortened principal
 identifiers (G23). A4's convergence member does not block the inventory views of #254 and #255
