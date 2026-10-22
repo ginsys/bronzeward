@@ -108,7 +108,7 @@ The facts every later section relies on, read from the code and the contracts.
 | Caching | Every API answer, authenticated or not, problems and the event stream included, sends `Cache-Control: no-store`; liveness sends no cache header | [persistence and API §9.1](persistence-api.md#91-conventions) |
 | Browser support | No CORS headers, no `Origin` check, no cookie, no CSRF token anywhere in the server | search of `internal/` and `cmd/` for `Access-Control`, `Origin`, `Cookie`; [persistence and API §10.1](persistence-api.md#101-humans-oidc) "no server session" |
 | Identity read | `GET /identity` answers who the caller is, which roles it holds and the epoch, to any authenticated credential, one with no role included | `internal/api/routes.go:97`, `internal/api/api.go:339`; [persistence and API §9.2](persistence-api.md#92-resources-and-routes) |
-| Version read | None: no route answers which server version runs | `internal/api/routes.go:78-136` |
+| Version read | `GET /server` answers the answering process's version, API revision, features, start mode and read-only settings, to any role; refused before a recovery start's entry commits | [persistence and API §9.1](persistence-api.md#91-conventions), [§9.2](persistence-api.md#92-resources-and-routes) |
 
 ## 3. Action, endpoint and role matrix
 
@@ -147,6 +147,7 @@ no role included (`internal/api/api.go:339`).
 | recovery status | `GET /recovery` | no | no | |
 | dependency list / show / releases / alerts | `GET /dependencies` (`class` filter), `/dependencies/{id}`, `/dependencies/{id}/releases`, `/dependencies/{id}/alerts`, `/dependency-alerts` | lists | no | |
 | `whoami`, roles in the web header | `GET /identity` | no | no | the caller's kind, issuer and subject or service, principal, roles, expiry and epoch; takes no query (`internal/api/identity.go:22-59`) |
+| version check, server settings, start mode | `GET /server` | no | no | the answering process's version, API revision, features, start mode and read-only settings ([persistence and API §9.2](persistence-api.md#92-resources-and-routes)); refused before a recovery start's entry |
 
 ### 3.2 Writes
 
@@ -193,7 +194,6 @@ ETag (`internal/api/ingestions.go:153-154`).
 | --- | --- | --- |
 | `login`, `logout` | identity-provider and client concerns; the server keeps no session | [§9](#9-authentication) |
 | `context` | client configuration | [§5](#5-endpoint-discovery-and-context-selection) |
-| version check | G2 | [§7](#7-compatibility-and-versioning) |
 | automation token issue, rotate, list | server-side command only | not offered by either client |
 | dispatch, apply | the controller dispatches approved plans ([design §12.7](../design/Talos_Configuration_and_Machine_Management_Design.md#127-application-approval-and-dispatch-boundary); [§13.7](../design/Talos_Configuration_and_Machine_Management_Design.md#137-poc-identity-and-approval-policy) item 2) | not offered |
 
@@ -211,7 +211,7 @@ supported.
 | ID | Gap | Evidence | Disposition |
 | --- | --- | --- | --- |
 | G1 | No identity, role or capability read; roles appear only in a `403` body | `internal/api/api.go:380-392`; before [#277](https://github.com/ginsys/bronzeward/issues/277), no route in [`internal/api/routes.go:78-136`](https://github.com/ginsys/bronzeward/blob/3cbe953e87c6836799db569855670d48b70bb527/internal/api/routes.go#L78-L136) | closed by API issue A1 ([#277](https://github.com/ginsys/bronzeward/issues/277)): `GET /identity` serves the caller's identity, roles and epoch (`internal/api/identity.go:22-31`), a credential with no role included (`internal/api/api.go:339`) |
-| G2 | No server version or compatibility read; only anonymous `/livez` | `internal/server/server.go:19-22` | API issue A2; blocks every client's compatibility refusal |
+| G2 | No server version or compatibility read; only anonymous `/livez` | before [#278](https://github.com/ginsys/bronzeward/issues/278): `internal/server/server.go:19-22` | closed by API issue A2 ([#278](https://github.com/ginsys/bronzeward/issues/278)): `GET /server` serves the version and the API revision ([persistence and API §9.1](persistence-api.md#91-conventions), [§9.2](persistence-api.md#92-resources-and-routes)) |
 | G3 | An operation does not name its ingestion; only the ingestion side links them: its read serves `operation`, and the start, mark and takeover `202` bodies name both | before [#280](https://github.com/ginsys/bronzeward/issues/280), the operation's subject was a draft or a plan and machine, never an ingestion ([`internal/api/reads.go:358-373`](https://github.com/ginsys/bronzeward/blob/23c1bc2a233cbdf0916076e62016a82892107053/internal/api/reads.go#L358-L373), `internal/api/reads.go:423-425`); the ingestion side: `internal/api/ingestions.go:235`, `internal/api/ingestions.go:256-260`, `internal/api/ingestions.go:217-218`, `internal/api/marks.go:106`, `internal/api/ingestions.go:355` | closed by API issue A4 ([#280](https://github.com/ginsys/bronzeward/issues/280)): an `ingest` operation's `subject` names its `ingestion` (`internal/api/reads.go:346`, `internal/api/reads.go:396-398`) |
 | G4 | A draft does not name the release it produced | the draft read selects no release (`internal/api/reads.go:231`) | accepted limitation: the publish operation's `result.release` answers it |
 | G5 | No render of a draft before publication | no such route in `internal/api/routes.go:78-136` | later design issue L1: a compilation design change, not a client contract |
@@ -226,12 +226,12 @@ supported.
 | G14 | No anonymous way to learn the issuer, audience and client registration a deployment expects | [§2](#2-the-api-a-client-meets) anonymous row | decision D3, decided (b): a static client-configuration file next to the web files ([§5](#5-endpoint-discovery-and-context-selection) item 4) |
 | G15 | The contract's prose describes the `reset` stream event, but its ingest and publish event-type lists omit it, so a client built from the lists does not expect it | `internal/api/operations.go:299-301`; [persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress) | contract correction C1 (documentation only) |
 | G16 | No request-ID response header: a client learns the request ID only from a problem's `instance` | [`internal/api/problem.go:84-90`](https://github.com/ginsys/bronzeward/blob/23c1bc2a233cbdf0916076e62016a82892107053/internal/api/problem.go#L84-L90); no other header set | API issue A3; served: [§2](#2-the-api-a-client-meets) request-ID row |
-| G17 | A request with an unsupported method on a known path is answered by the catch-all `404`, not `405` | `internal/api/api.go:234-236` (inferred from `ServeMux` method patterns; untested) | accepted; clients treat `404 not-found` on a known route as "not supported by this server" only together with A2's version read |
-| G18 | The settle floor and transport deadlines that bound recovery accounting are deployment settings no route serves before an accounting decision, which is when a client needs them to compute when the end observation may begin (the journeys' G17). After one, a successful accounting's timeline facts carry `settleFloor` and `anchor`, and the settle-floor refusal states the floor and its anchor only, so no route serves the maximum transport deadline at all. Separately, on a normal start a plan-creation refusal states the maximum transport deadline at any time, before a decision too; a recovery start refuses plan creation before that check | [execution and recovery §5.2](execution-recovery.md#52-accounting-a-lost-response); `examples/bronzeward.yaml:29-44`; after a decision: `internal/api/settle.go:160-161`, `internal/api/recovery_accountings.go:209-211`, `internal/api/recovery_accountings.go:230-231`, `internal/api/settle.go:148-150`; the maximum: `internal/api/plans.go:113-114`, `internal/api/routes.go:120`, `internal/api/api.go:350-352` | folded into A2 (served as read-only installation settings) |
+| G17 | A request with an unsupported method on a known path is answered by the catch-all `404`, not `405` | `internal/api/api.go:234-236` (inferred from `ServeMux` method patterns; untested) | accepted; clients treat `404 not-found` on a known route as "not supported by this server" only together with A2's revision read ([§7](#7-compatibility-and-versioning)) |
+| G18 | The settle floor and transport deadlines that bound recovery accounting are deployment settings no route serves before an accounting decision, which is when a client needs them to compute when the end observation may begin (the journeys' G17). After one, a successful accounting's timeline facts carry `settleFloor` and `anchor`, and the settle-floor refusal states the floor and its anchor only, so no route serves the maximum transport deadline at all. Separately, on a normal start a plan-creation refusal states the maximum transport deadline at any time, before a decision too; a recovery start refuses plan creation before that check | [execution and recovery §5.2](execution-recovery.md#52-accounting-a-lost-response); `examples/bronzeward.yaml:29-44`; after a decision: `internal/api/settle.go:160-161`, `internal/api/recovery_accountings.go:209-211`, `internal/api/recovery_accountings.go:230-231`, `internal/api/settle.go:148-150`; the maximum: `internal/api/plans.go:113-114`, `internal/api/routes.go:120`, `internal/api/api.go:350-352` | folded into A2, closed by [#278](https://github.com/ginsys/bronzeward/issues/278): `GET /server` serves the settle floor, the maximum transport deadline and the plan defaults, its transport deadline included, before a decision too, and on a recovery start once its entry has committed ([persistence and API §9.2](persistence-api.md#92-resources-and-routes)) |
 | G19 | The fixture issuer mints tokens but offers no authorization, token, device or revocation endpoint, so no interactive sign-in can be tested against it | `fixtures/oidc/issuer/issuer.go:1-6` ("no login, no clients, no refresh"), `fixtures/oidc/issuer/issuer.go:110-123` (discovery and key set only), `fixtures/oidc/main.go:22-25` | validation-fixture issue A5 |
 | G20 | `503` answers carry no `Retry-After`, and the contract gives no retry guidance for `dependency-unavailable`, `transient-conflict` or `epoch-superseded` | search of `internal/` for `Retry-After`; [persistence and API §9.4](persistence-api.md#94-errors) | client rule in [§8.2](#82-errors); no API change proposed |
 | G21 | A human's mutation takes no expected-epoch precondition: only `Idempotency-Key` and `If-Match` are checked (`internal/api/api.go:396-417`), and the epoch is reported only in an answer (`internal/api/api.go:326-327`). After a write's answer is lost, and either a restore removes its record or the first attempt never committed, the same request with the same key executes afresh in the new epoch, because the in-transaction lookup finds no record (`internal/api/tx.go:190-198`) ([persistence and API §12.4](persistence-api.md#124-restore-and-idempotency)); the read before repeating of [§8.4](#84-idempotency-and-ambiguous-responses) item 3 leaves a race. A service principal is already checked: its token carries its epoch, and the write's own transaction refuses one from another epoch with `401` | `internal/api/api.go:396-417`, `internal/api/api.go:326-327`, `internal/api/tx.go:190-198`; service check: `internal/auth/automation.go:51-52`, `internal/api/idempotency.go:28-30`, `internal/api/idempotency.go:47-49`, `internal/api/api.go:305-311` | decision D10; API issue A6 if D10 chooses a server check |
-| G22 | No read of the process's start mode. `GET /recovery` serves epoch, recovery mode, entry, exit and scopes, and the headers carry only `Bronzeward-Epoch` and `Bronzeward-Recovery-Mode`. Past the role check, a recovery start shows only in an answer: a `409 recovery-mode-active` without a `scope` member, to any request but the entry before the entry commits and to plan creation, approval or unfreeze after it, or any recovery-entry answer except its not-a-recovery-start refusal. A normal start shows only in that refusal: a plain `409 conflict` with neither an `epoch` nor a `request` member, while every other `409 conflict` the entry answers carries `epoch`. The scope refusals that share the `recovery-mode-active` code carry `scope` | `internal/api/recovery_exits.go:123-129`, `internal/api/api.go:326-332`; process refusals: `internal/api/api.go:242-244`, `internal/api/api.go:345-359`, `internal/api/recovery_exits.go:211-213`, `internal/api/routes.go:120-127`; entry: `internal/api/recovery_entries.go:91-92`, `internal/api/recovery_entries.go:106-108`, `internal/api/recovery_entries.go:133-135`, `internal/api/idempotency.go:65-67`; scope refusals: for example `internal/api/plans.go:226-227` | API issue A2 (the start mode served with the version); until then the client reading of [§8.5](#85-epoch-changes), with the limit that nothing shows the mode before such an answer. That reading rests on the absent `scope` member, which the contract says every `recovery-mode-active` carries: contract correction C2 |
+| G22 | No read of the process's start mode. `GET /recovery` serves epoch, recovery mode, entry, exit and scopes, and the headers carry only `Bronzeward-Epoch` and `Bronzeward-Recovery-Mode`. Past the role check, a recovery start shows only in an answer: a `409 recovery-mode-active` without a `scope` member, to any request but the entry before the entry commits and to plan creation, approval or unfreeze after it, or any recovery-entry answer except its not-a-recovery-start refusal. A normal start shows only in that refusal: a plain `409 conflict` with neither an `epoch` nor a `request` member, while every other `409 conflict` the entry answers carries `epoch`. The scope refusals that share the `recovery-mode-active` code carry `scope` | `internal/api/recovery_exits.go:123-129`, `internal/api/api.go:326-332`; process refusals: `internal/api/api.go:242-244`, `internal/api/api.go:345-359`, `internal/api/recovery_exits.go:211-213`, `internal/api/routes.go:120-127`; entry: `internal/api/recovery_entries.go:91-92`, `internal/api/recovery_entries.go:106-108`, `internal/api/recovery_entries.go:133-135`, `internal/api/idempotency.go:65-67`; scope refusals: for example `internal/api/plans.go:226-227` | closed after the entry by API issue A2 ([#278](https://github.com/ginsys/bronzeward/issues/278)): `GET /server` serves `startMode` ([persistence and API §9.2](persistence-api.md#92-resources-and-routes)). Before a recovery start's entry commits that read is refused like every other request, so the client reading of [§8.5](#85-epoch-changes) stays for that window. That reading rests on the absent `scope` member, which the contract says every `recovery-mode-active` carries: contract correction C2 |
 | G23 | No principal display name: bodies carry principal identifiers only, and no route maps one to a subject or name | `internal/api/acts.go:19-30`, `internal/api/releases.go:53`, `internal/api/plans.go:195`, `internal/api/approvals.go:43`, `internal/api/recovery_entries.go:79`; no such route in `internal/api/routes.go:78-136` | API issue A7; until then clients show shortened principal identifiers |
 | G24 | No convergence status: the machine body serves `desired` and `applied.release`, and compares the artifact digests only to match an observation, never serving them, so a client cannot tell whether the `Desired` release's digest differs from the `Applied` one, which is what pending convergence means. After an adoption the `Applied` digest is the baseline's, so equal or different release IDs do not settle it | before [#280](https://github.com/ginsys/bronzeward/issues/280): [`internal/api/reads.go:155-166`](https://github.com/ginsys/bronzeward/blob/23c1bc2a233cbdf0916076e62016a82892107053/internal/api/reads.go#L155-L166); [execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values), [§6.3](execution-recovery.md#63-adopt) | closed by API issue A4 ([#280](https://github.com/ginsys/bronzeward/issues/280)): the machine's `pendingConvergence` compares the `Desired` artifact's digest with the `Applied` digest, `true` too for a `Desired` with no `Applied`, and serves neither digest (`internal/api/reads.go:155-171`) |
 
@@ -316,25 +316,33 @@ it. It holds no secret.
 Facts: the API is `/api/v1`; within it fields and routes are only added, never removed or changed
 in meaning; a route due for removal answers with a `Deprecation` header for at least one minor
 release first; a breaking change is a new prefix; unknown request fields are refused
-([persistence and API §9.1](persistence-api.md#91-conventions)). No route reports the server's
-version (G2).
+([persistence and API §9.1](persistence-api.md#91-conventions)). Since
+[#278](https://github.com/ginsys/bronzeward/issues/278), `GET /server` reports the answering
+process's version, its API revision, a whole number raised by one with each additive change within
+`v1` and listed in §9.1's revision table, and the optional features it serves (G2,
+[persistence and API §9.2](persistence-api.md#92-resources-and-routes)). Before a recovery start's
+entry commits the read is refused with `409 recovery-mode-active`, as every request but the entry
+is.
 
 **Proposed.**
 
 1. A client sends only fields the server it talks to is known to accept. Because the server
    refuses unknown request fields, a newer client sending a field an older server lacks fails with
-   `400 invalid-request`, which is safe but useless; once A2 lands, the client feature-gates such
-   fields on the served API revision.
+   `400 invalid-request`, which is safe but useless; the client feature-gates such fields on the
+   served API revision.
 2. A client ignores unknown response fields, and shows an unknown enumeration value raw, never as
    a known state and never as success.
-3. A client declares the minimum API revision it needs. Once A2 lands, it reads the version on
-   context use and refuses, with both values named, a server below that minimum. Until A2 lands,
-   the clients and the server are released together from one repository revision, the packaging
-   ticket documents that pairing, and no client claims to detect an incompatible server.
+3. A client declares the minimum API revision it needs. It reads `GET /server` on context use and
+   refuses, with both revisions named, a server below that minimum, before any write. A `409 recovery-mode-active` without a `scope` member is a recovery start before its
+   entry ([§8.5](#85-epoch-changes)): the client allows only the entry, whose request it already
+   knows from revision 1, and reads the revision once the entry has committed. The revision
+   describes the process that answered; another instance behind the same endpoint may differ, so
+   a refusal names the revision that answer served.
 4. A `Deprecation` header on any response is shown once per command or page load, naming the
    route.
-5. Each client prints its own version and, once A2 lands, the server's, in `bronzewardctl version`
-   and in the web footer.
+5. Each client prints its own version and the server's, with its API revision, in
+   `bronzewardctl version` and in the web footer; the server's as "unknown" while the read is
+   refused.
 
 ## 8. Request handling
 
@@ -483,7 +491,9 @@ contract's, and this specification does not close it.
    lapses (`internal/api/fragments.go:105-114`). The client bounds the wait itself: a fixed
    maximum, configurable and at least the claim lease, after which the outcome is reported
    unknown as in item 4. The deployment's claim timers are an example of a sensible value
-   (`examples/bronzeward.yaml:76-80`); the client cannot read them until A2 serves them. A replay
+   (`examples/bronzeward.yaml:76-80`), served by `GET /server` as `ingestionClaim` since
+   [#278](https://github.com/ginsys/bronzeward/issues/278): the client's bound is at least the
+   served `leaseSeconds` when that member is not null. A replay
    (`Idempotent-Replayed: true`) is reported as "already done earlier; showing that result", except
    a replayed `application/problem+json`, which is reported as the earlier attempt's refusal (the
    fragment write replays recorded refusals, `internal/api/fragments.go:291-296`,
@@ -593,10 +603,15 @@ a defect the client reports.
 
 **Start mode** (G22). Neither the headers nor `GET /recovery` say whether the process was started
 for recovery, which decides whether plan creation, approval and unfreeze can succeed (journeys
-§5.9). Until A2 serves it, the client keeps the last mode an answer showed, per context. A
-restart changes the mode without any signal, so the kept mode is only the last one shown:
+§5.9). Since [#278](https://github.com/ginsys/bronzeward/issues/278), `GET /server` serves it as
+`startMode` ([persistence and API §9.2](persistence-api.md#92-resources-and-routes)), but a
+recovery start refuses that read until its entry commits. The client keeps the last mode a
+`GET /server` answer or one of the answers below showed, per context, and reads `GET /server`
+again on context use and after a new epoch. A restart changes the mode without any signal, so the
+kept mode is only the last one shown:
 
-1. **Recovery start:** a `409 recovery-mode-active` without a `scope` member, or any answer of
+1. **Recovery start:** `GET /server` answering `"startMode": "recovery"`, which a recovery start
+   serves only after its entry; a `409 recovery-mode-active` without a `scope` member; or any answer of
    `POST /recovery/entries` given after authentication and the role check other than the refusal
    in item 2, its `201` and its other `409 conflict` answers included (each of these carries
    `epoch`). A `401`, a `403`, or any answer without `Bronzeward-Epoch` to the entry shows
@@ -607,13 +622,14 @@ restart changes the mode without any signal, so the kept mode is only the last o
    (`internal/api/problem.go:63-71`). A
    `recovery-mode-active` with a `scope` member is a scope's refusal and says nothing about the
    start mode.
-2. **Normal start:** only the entry's not-a-recovery-start refusal, a `409 conflict` with neither
+2. **Normal start:** `GET /server` answering `"startMode": "normal"`, or the entry's
+   not-a-recovery-start refusal, a `409 conflict` with neither
    an `epoch` nor a `request` member, whose detail says only a recovery start serves the entry. A
    `409 conflict` to the entry is never read as a normal start by its status and code alone.
 3. **Unknown** before any such answer. The client then disables no action beforehand, and the
    recovery banner states the mode as unknown or as last shown, until the next such answer.
 
-Evidence for each answer is in the G22 row of [§4](#4-api-gap-audit). Item 1 relies on the code,
+Evidence for each refusal and entry answer is in the G22 row of [§4](#4-api-gap-audit). Item 1 relies on the code,
 not the contract: persistence and API says every `409 recovery-mode-active` names the scope, and
 the process refusals do not; contract correction C2 in
 [§14](#14-proposed-api-gap-issues-and-downstream-refinement) records the divergence.
@@ -798,7 +814,7 @@ read locally, labelled as its own reading, never as the server's reason.
 | Token expired | `401` (`internal/auth/auth.go:165-166`) | renew ([§9.5](#95-renewal)); if the provider refuses, "Your sign-in expired: sign in again" |
 | Wrong issuer | `401` | if the token's `iss` differs from `oidc.issuer`: "The token is from `<iss>`; this context expects `<issuer>`. Check the context or the server's configuration." |
 | Wrong audience | `401` | if `aud` lacks `oidc.audience`: "The token is not issued for `<audience>`; the identity provider needs an audience mapping" ([§9.1](#91-identity-provider-requirements) item 1) |
-| Lifetime over the maximum | `401` (`internal/auth/auth.go:175-176`); the maximum is the deployment's `maxTokenLifetime`, 15 minutes unless configured (`internal/config/config.go:125`, `internal/config/config.go:353-356`) | no local pre-check until A2 serves the setting, because the client cannot know the configured value; afterwards, if `exp - iat` exceeds it: "The token lives longer than this server accepts; the identity provider's access-token lifetime must be shortened" |
+| Lifetime over the maximum | `401` (`internal/auth/auth.go:175-176`); the maximum is the deployment's `maxTokenLifetime`, 15 minutes unless configured (`internal/config/config.go:125`, `internal/config/config.go:353-356`) | `GET /server` serves the maximum as `maxTokenLifetimeSeconds` since [#278](https://github.com/ginsys/bronzeward/issues/278), but only to an accepted token, so the client pre-checks against the value the context last read; with none read yet it reports the `401` as any other. If `exp - iat` exceeds it: "The token lives longer than this server accepts; the identity provider's access-token lifetime must be shortened" |
 | Groups claim malformed | `401` (`internal/auth/auth.go:213-223`) | "Not accepted by `<context>`: sign in again"; nothing more can be read safely |
 | No role for the action | `403 forbidden` with the route's roles | "Needs `<roles>`; you are signed in as `<sub>`" |
 | A principal whose only qualifying role is publisher cancels a plan it did not create | `403 forbidden` with a `plan` member and the route's roles, `publisher` included (`internal/api/cancellations.go:64-72`) | "`<detail>`; you are signed in as `<sub>`", not the roles ([§8.2](#82-errors)) |
@@ -1098,7 +1114,7 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 | PROT-05 | refusal | mark accepted (`202`), then the run cannot decrypt the staged envelope | after the `marked` event, a `resume-failed` event with `dependency-unavailable`; the watch ends with the operation still `running`; the mark reported as not applied; `import takeover` offered once the lease lapses, and `import abandon`; no wait without end |
 | PROT-06 | disconnect | mark accepted (`202`), then the serving process is killed before the run writes any event; second case: the same during a continuation; third case: the same during a takeover; fourth case: during a continuation, the run releases the claim before its lease lapses and its draft transaction is delayed past `leaseUntil` before `COMMIT`, which needs a server-side fault hook the server binary does not have, a prerequisite of #263 | the client reads the ingestion once its `leaseUntil` has passed; `held` (mark, continuation) or `resumed` (takeover) with `leaseUntil` passed ends the watch with the operation still `running`; the mark, continuation or takeover reported as of unknown outcome, never as not applied; a later read, `import takeover` and `import abandon` offered; in the fourth case the outcome stays unknown, even when a read shows the claim `abandoned`, until a later read shows the operation `succeeded`; no wait until the claim's absolute expiry |
 | PROT-04 | disconnect | connection dropped during the review read | nothing persisted; review read again |
-| COMP-01 | refusal | server below the client's minimum API revision (after A2) | refused before any write, both versions named |
+| COMP-01 | refusal | `GET /server` serves an API revision below the client's minimum | refused before any write, both revisions named |
 | COMP-02 | success | response carrying a `Deprecation` header | warning shown once, naming the route |
 | ETAG-02 | success | edit after the client's own import succeeded; second case: another author writes between the import and the re-read | first: draft `revision` equals the import's `result.draftRevision`, the next write uses the new ETag, no `412`; second: revision is higher, treated as `412`, newer state shown |
 | TLS-02 | refusal | API answers a `3xx` to another origin, to the CLI and to the web client; harness check | the injector sees no request to the target and nothing resent by either client; the CLI names the target |
@@ -1143,7 +1159,12 @@ the read-only settings a client shows: `maxTokenLifetime`, the settle floor, the
 deadline, the ingestion claim's lease and absolute expiry, and the plan defaults; and the serving
 process's start mode, normal or recovery. Closes G2, G18 and G22; gives the in-progress `409` wait of [§8.4](#84-idempotency-and-ambiguous-responses) item 2
 a server-derived bound; lets clients refuse an incompatible server
-(the CLI ticket's acceptance criterion).
+(the CLI ticket's acceptance criterion). Served since
+[#278](https://github.com/ginsys/bronzeward/issues/278): `GET /server`, any role, in
+[persistence and API §9.2](persistence-api.md#92-resources-and-routes), and the API revision and
+its table in [§9.1](persistence-api.md#91-conventions). It describes the process that answered.
+A recovery start refuses it before its entry commits, as every request but the entry, so G22
+stays open for that window ([§8.5](#85-epoch-changes)).
 
 **A3. Response headers for clients.** `Cache-Control: no-store` on every authenticated response,
 a request-ID response header equal to the problem `instance`, and keep-alive comments on the event
