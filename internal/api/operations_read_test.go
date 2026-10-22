@@ -594,6 +594,7 @@ func TestOperationReadFollowsItsLock(t *testing.T) {
 	rec := httptest.NewRecorder()
 	xe.env.api.ServeHTTP(rec, req)
 	checkAnswerHeaders(t, rec)
+	checkResponse(t, req, "", rec)
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid-request") {
 		t.Fatalf("an event stream with a query: %d %s", rec.Code, rec.Body)
 	}
