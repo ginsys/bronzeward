@@ -446,13 +446,6 @@ func TestEventStreamKeepAlive(t *testing.T) {
 		defer mu.Unlock()
 		return rearms, slices.Clone(intervals)
 	}
-	reads := make(chan struct{}, 1)
-	ce.a.o.beforeRead = func() {
-		select {
-		case reads <- struct{}{}:
-		default:
-		}
-	}
 	srv := httptest.NewServer(ce.a)
 	t.Cleanup(srv.Close)
 	tok, err := auth.NewStore(ce.db, ce.cfg).Issue(t.Context(), "watch", []auth.Role{auth.Viewer}, time.Hour, "h-all", "h-all")
@@ -526,16 +519,14 @@ func TestEventStreamKeepAlive(t *testing.T) {
 	if _, err := lock.Exec("SELECT 1 FROM installation_state FOR UPDATE"); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-reads: // drain a read that may have started before the lock
-	default:
+	// The stream's next read waits on the lock: its backend shows a lock wait on that statement.
+	for deadline := time.Now().Add(10 * time.Second); count(t, ce.db, `SELECT count(*) FROM pg_stat_activity
+		WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%installation_state FOR SHARE%'`) == 0; {
+		if time.Now().After(deadline) {
+			t.Fatal("no read of the stream waited on the lock")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	select {
-	case <-reads:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the stream started no read")
-	}
-	time.Sleep(streamPoll / 5) // the read reaches the lock and waits
 	select {
 	case ticks <- time.Time{}:
 	case <-time.After(5 * time.Second):
