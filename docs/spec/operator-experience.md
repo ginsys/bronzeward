@@ -435,7 +435,7 @@ A mark is refused with the rule and the mark's position, never its path
 ([compilation §3.6](compilation.md#36-operator-review), item 4). A continuation is accepted
 (`202`) and runs in the background; if the draft moved meanwhile, that run ends the operation
 `failed` and abandons the claim itself, so nothing is left to abandon
-(`internal/api/continuations.go:60-63`, `internal/api/runner.go:108-111`,
+(`internal/api/continuations.go:60-63`, `internal/api/runner.go:108-112`,
 `internal/api/runner.go:384-386`, `internal/api/runner.go:457-468`). Marks are HMAC-keyed in the idempotency
 fingerprint and never stored (`internal/api/marks.go:58-68`).
 
@@ -651,7 +651,7 @@ Reconnected; resumed after event ep_bqek…ekgi:14.
 
 Events stream as Server-Sent Events with `Last-Event-ID` `<epoch>:<number>`; a different epoch
 yields a `reset` event and a replay from the start; the stream ends at a terminal state or at the
-expiry of the token that opened it (`internal/api/operations.go:214-250`). `unresolved` is not
+expiry of the token that opened it (`internal/api/operations.go:231-266`). `unresolved` is not
 terminal (`internal/api/operations.go:144-151`). **Proposed:** `watch` reconnects with the last
 event ID and a renewed token; on `reset` it prints "The installation was restored to an earlier
 state; replaying this operation's events from the start" and clears what it showed.

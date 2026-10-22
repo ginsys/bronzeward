@@ -17,7 +17,7 @@ References of the form *journeys §8* and gap IDs `G1`-`G12` point at that docum
 adds `G13`-`G17`, `G19` and `G20`.
 
 **Facts and proposals are kept apart.** A statement about existing behaviour cites the contract
-section or the source line it comes from, read at revision `9b5804a` (`internal/api/api.go:374`
+section or the source line it comes from, read at revision `3cbe953` (`internal/api/api.go:382`
 means that file and line). A requirement this document proposes is marked **Proposed**; *must*
 in a Proposed item is a requirement on the clients once the proposal is accepted, not a claim
 about code that exists. A behaviour the API does not support today is listed in
@@ -89,7 +89,7 @@ The facts every later section relies on, read from the code and the contracts.
 | Anonymous surface | `GET` and `HEAD /livez` answer `204` with no body and no authentication; every other request authenticates first, an unknown path and `OPTIONS` included | `internal/server/server.go:10-24`, `internal/api/api.go:260-272` |
 | Transport | The server listens on plain http; TLS terminates in front of it | `internal/server/server.go:34-42`; [persistence and API §9.1](persistence-api.md#91-conventions) |
 | Timeouts | Reading a request, body included, 30 s; headers 10 s; idle 2 min; no write timeout (the event stream outlives any fixed bound) | `internal/server/server.go:27-42` |
-| Request body | Every `POST` and `PUT` sends one JSON object (`{}` when the route takes no member) with `Content-Type: application/json`, at most 1 MiB, unknown members refused, each violation `400 invalid-request`; a `DELETE` with a body is `400`, while its `Content-Type` is not checked (clients send none) | `internal/api/body.go:36-66`, `internal/api/drafts.go:44`; [persistence and API §9.1](persistence-api.md#91-conventions) |
+| Request body | Every `POST` and `PUT` sends one JSON object (`{}` when the route takes no member) with `Content-Type: application/json`, at most 1 MiB, unknown members refused, each violation `400 invalid-request`; a `DELETE` with a body is `400`, while its `Content-Type` is not checked (clients send none) | `internal/api/body.go:36-72`, `internal/api/drafts.go:44`; [persistence and API §9.1](persistence-api.md#91-conventions) |
 | Success body | `application/json` | `internal/api/reads.go:35`, `internal/api/idempotency.go:85` |
 | Errors | `application/problem+json` with `type` `urn:bronzeward:problem:<code>`, `title`, `status`, `instance` (the request ID, also logged), optional `detail` and extension members; `detail` never names a value | `internal/api/problem.go:76-98`; [persistence and API §9.4](persistence-api.md#94-errors) |
 | Request ID | Every API answer, authenticated or not, carries `Bronzeward-Request-ID`, equal to the `instance` of a problem the request answers; a replayed stored problem keeps the `instance` of the request that stored it, while the header names the replaying request; liveness carries none | [persistence and API §9.1](persistence-api.md#91-conventions) |
@@ -100,7 +100,7 @@ The facts every later section relies on, read from the code and the contracts.
 | Idempotency | Every `POST`, `PUT`, `DELETE` needs one `Idempotency-Key` of 16-128 `[A-Za-z0-9_-]` (`428 idempotency-key-required` if absent); scoped per principal; same request replays with `Idempotent-Replayed: true`; another request under the key is `422 idempotency-key-reused`; a record from an earlier epoch is `409 conflict` | `internal/api/api.go:394-405`, `internal/api/idempotency.go:41-43`, `internal/api/idempotency.go:60-92`, `internal/api/idempotency.go:98-106`; [persistence and API §7.2](persistence-api.md#72-behavior) |
 | Unknown commit | A commit whose outcome the server could not learn is `500 internal-error`, "retrying with the same Idempotency-Key answers it" | `internal/api/tx.go:312`; [persistence and API §9.4](persistence-api.md#94-errors) |
 | Asynchronous work | Ingestion start, mark, continuation, takeover and publication answer `202` with an operation; plans and approvals `201` | [persistence and API §8](persistence-api.md#8-asynchronous-operations), [§9.2](persistence-api.md#92-resources-and-routes) |
-| Events | `GET /operations/{id}/events` is a cursor-paged JSON list, or Server-Sent Events when `Accept` contains `text/event-stream`; event ID `<epoch>:<number>`; resume with `Last-Event-ID`; an ID from another epoch gets `event: reset` and a replay from the start; after 15 s with nothing sent the stream sends the comment line `: keep-alive`, with no ID and no event ([persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress)); the stream ends when the operation is terminal or at the opening token's expiry; `unresolved` is not terminal | `internal/api/operations.go:183-305`; [persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress) |
+| Events | `GET /operations/{id}/events` is a cursor-paged JSON list, or Server-Sent Events when `Accept` contains `text/event-stream`; event ID `<epoch>:<number>`; resume with `Last-Event-ID`; an ID from another epoch gets `event: reset` and a replay from the start; after 15 s with nothing sent the stream sends the comment line `: keep-alive`, with no ID and no event ([persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress)); the stream ends when the operation is terminal or at the opening token's expiry; `unresolved` is not terminal | `internal/api/operations.go:183-344`; [persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress) |
 | Caching | Every API answer, authenticated or not, problems and the event stream included, sends `Cache-Control: no-store`; liveness sends no cache header | [persistence and API §9.1](persistence-api.md#91-conventions) |
 | Browser support | No CORS headers, no `Origin` check, no cookie, no CSRF token anywhere in the server | search of `internal/` and `cmd/` for `Access-Control`, `Origin`, `Cookie`; [persistence and API §10.1](persistence-api.md#101-humans-oidc) "no server session" |
 | Identity and version reads | None: no route answers who the caller is, which roles it holds, or which server version runs | `internal/api/routes.go:78-136` |
@@ -216,10 +216,10 @@ supported.
 | G10 | No ingestion list | before [#280](https://github.com/ginsys/bronzeward/issues/280): [`internal/api/routes.go:90`](https://github.com/ginsys/bronzeward/blob/23c1bc2a233cbdf0916076e62016a82892107053/internal/api/routes.go#L90) | closed by API issue A4 ([#280](https://github.com/ginsys/bronzeward/issues/280)): `GET /ingestions`, filtered by `state` and `machine` (`internal/api/ingestions.go:280-299`) |
 | G11 | Recovery marks, releases and accountings have no list route | `internal/api/routes.go:128-135` | accepted limitation: `GET /recovery` and the machine timeline |
 | G12 | No browser access path: no CORS, and every request including a preflight `OPTIONS` must authenticate | `internal/server/server.go:10-13`, `internal/api/api.go:260-272`; [§10.1](#101-hosting-and-origin) | decision D1; under the recommended same-origin hosting no API change |
-| G13 | Authenticated reads set no `Cache-Control`; a browser may keep them in its HTTP cache | `internal/api/review.go:31`, `internal/api/operations.go:281` were the only `Cache-Control` writes | API issue A3; served: [§2](#2-the-api-a-client-meets) caching row |
+| G13 | Authenticated reads set no `Cache-Control`; a browser may keep them in its HTTP cache | [`internal/api/review.go:31`](https://github.com/ginsys/bronzeward/blob/23c1bc2a233cbdf0916076e62016a82892107053/internal/api/review.go#L31), [`internal/api/operations.go:281`](https://github.com/ginsys/bronzeward/blob/23c1bc2a233cbdf0916076e62016a82892107053/internal/api/operations.go#L281) were the only `Cache-Control` writes | API issue A3; served: [§2](#2-the-api-a-client-meets) caching row |
 | G14 | No anonymous way to learn the issuer, audience and client registration a deployment expects | [§2](#2-the-api-a-client-meets) anonymous row | decision D3 |
-| G15 | The contract's prose describes the `reset` stream event, but its ingest and publish event-type lists omit it, so a client built from the lists does not expect it | `internal/api/operations.go:283-285`; [persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress) | contract correction C1 (documentation only) |
-| G16 | No request-ID response header: a client learns the request ID only from a problem's `instance` | `internal/api/problem.go:84-90`; no other header set | API issue A3; served: [§2](#2-the-api-a-client-meets) request-ID row |
+| G15 | The contract's prose describes the `reset` stream event, but its ingest and publish event-type lists omit it, so a client built from the lists does not expect it | `internal/api/operations.go:299-301`; [persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress) | contract correction C1 (documentation only) |
+| G16 | No request-ID response header: a client learns the request ID only from a problem's `instance` | [`internal/api/problem.go:84-90`](https://github.com/ginsys/bronzeward/blob/23c1bc2a233cbdf0916076e62016a82892107053/internal/api/problem.go#L84-L90); no other header set | API issue A3; served: [§2](#2-the-api-a-client-meets) request-ID row |
 | G17 | A request with an unsupported method on a known path is answered by the catch-all `404`, not `405` | `internal/api/api.go:234-236` (inferred from `ServeMux` method patterns; untested) | accepted; clients treat `404 not-found` on a known route as "not supported by this server" only together with A2's version read |
 | G18 | The settle floor and transport deadlines that bound recovery accounting are deployment settings no route serves before an accounting decision, which is when a client needs them to compute when the end observation may begin (the journeys' G17). After one, a successful accounting's timeline facts carry `settleFloor` and `anchor`, and the settle-floor refusal states the floor and its anchor only, so no route serves the maximum transport deadline at all. Separately, on a normal start a plan-creation refusal states the maximum transport deadline at any time, before a decision too; a recovery start refuses plan creation before that check | [execution and recovery §5.2](execution-recovery.md#52-accounting-a-lost-response); `examples/bronzeward.yaml:29-44`; after a decision: `internal/api/settle.go:160-161`, `internal/api/recovery_accountings.go:209-211`, `internal/api/recovery_accountings.go:230-231`, `internal/api/settle.go:148-150`; the maximum: `internal/api/plans.go:113-114`, `internal/api/routes.go:120`, `internal/api/api.go:350-352` | folded into A2 (served as read-only installation settings) |
 | G19 | The fixture issuer mints tokens but offers no authorization, token, device or revocation endpoint, so no interactive sign-in can be tested against it | `fixtures/oidc/issuer/issuer.go:1-6` ("no login, no clients, no refresh"), `fixtures/oidc/issuer/issuer.go:110-123` (discovery and key set only), `fixtures/oidc/main.go:22-25` | validation-fixture issue A5 |
@@ -425,7 +425,7 @@ authenticated principal's identifier (`internal/api/idempotency.go:41-43`). Two 
 the same key string therefore never meet: the second finds no record and executes as a new
 request, neither replayed nor refused `422`. The fingerprint itself names neither principal nor
 epoch (`internal/api/body.go:170-187`); the principal is in the lookup, and the epoch is compared
-on the record found (`internal/api/idempotency.go:41`, `internal/api/idempotency.go:65-68`).
+on the record found (`internal/api/idempotency.go:41-42`, `internal/api/idempotency.go:65-68`).
 
 The principal is the authenticated identity, not the credential: for automation it is the
 service identity that owns the token (`internal/auth/automation.go:58`), so a rotated token keeps
@@ -467,7 +467,7 @@ contract's, and this specification does not close it.
    refused, not repeated. The server keeps that claim alive for as long as the first request
    runs (`internal/api/fragments.go:87`). A first request that ended without committing (a `5xx`
    from its transaction or from prepare) only stops the heartbeat; the claim is abandoned at once
-   only after a `5xx` from extraction or generation creation (`internal/api/fragments.go:163-167`,
+   only after a `5xx` from extraction or generation creation (`internal/api/fragments.go:157-167`,
    `internal/api/fragments.go:172-193`), otherwise when its lease
    lapses (`internal/api/fragments.go:105-114`). The client bounds the wait itself: a fixed
    maximum, configurable and at least the claim lease, after which the outcome is reported
@@ -606,7 +606,7 @@ the process refusals do not; contract correction C2 in
 ### 8.6 Event resumption
 
 Facts: [§2](#2-the-api-a-client-meets) events row. The SSE stream sends no `retry:` field in the
-frames it writes (`internal/api/operations.go:279-305`); between events it polls every 500 ms
+frames it writes (`internal/api/operations.go:295-344`); between events it polls every 500 ms
 (`internal/api/operations.go:210-213`); after 15 s with nothing sent it sends a `: keep-alive`
 comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress)).
 
@@ -617,8 +617,8 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
 2. When the stream ends it reads `GET /operations/{id}`. A terminal state does not show that the
    last events arrived: the stream may have been cut after the state was written and before its
    last events were (the server writes the state after the last entry and ends the stream only
-   once they are written, `internal/api/operations.go:217-218`,
-   `internal/api/operations.go:254`). So on a terminal state the client drains the backlog
+   once they are written, `internal/api/operations.go:233-234`,
+   `internal/api/operations.go:270`). So on a terminal state the client drains the backlog
    first: it reads the JSON event pages to their end and shows every event after the last one it
    showed, then ends the watch. Any other state, `unresolved` included, means the stream ended because the token expired or the
    connection dropped: the client renews if needed and reconnects with `Last-Event-ID` and the
@@ -626,8 +626,8 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
 3. A `reset` event clears what the watch showed, prints that the installation was restored or
    entered recovery mode, and shows the replay from the start. The epoch change is handled as in
    [§8.5](#85-epoch-changes). The server sends `reset` only when a stream opens
-   (`internal/api/operations.go:248-249`); a stream that stays open across a recovery entry goes
-   on with event IDs carrying the new epoch (`internal/api/operations.go:262`). So the client
+   (`internal/api/operations.go:264-265`); a stream that stays open across a recovery entry goes
+   on with event IDs carrying the new epoch (`internal/api/operations.go:278`). So the client
    compares the epoch part of every event ID (before the `:`) with the stream's
    `Bronzeward-Epoch`; on a difference it ends the stream, applies [§8.5](#85-epoch-changes), clears
    what the watch showed and reopens the stream without `Last-Event-ID` (EVT-05).
@@ -1210,7 +1210,7 @@ Limits:
 - This is a proposal. No client exists and no case of [§12](#12-shared-conformance-cases) has run.
   No synthetic contract probe was run against the server for this draft: every server behaviour
   above is read from source and contract text, and G17 is inferred, not observed.
-- Line references were read at `9b5804a` and move as the code changes.
+- Line references were read at `3cbe953` and move as the code changes.
 - It decides no hosting topology, frontend framework, CLI language, identity provider, browser
   support matrix or credential policy; the choices in [§13](#13-alternatives-and-open-choices)
   other than D3, D7, D8 and D9 remain open.
