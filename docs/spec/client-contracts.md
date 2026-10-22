@@ -252,6 +252,7 @@ it. It holds no secret.
 | `oidc.issuer`, `oidc.clientID`, `oidc.scopes` | the identity provider and the public client registered for this client ([§9.1](#91-identity-provider-requirements)) | with `oidc` |
 | `oidc.audience` | the value the server's `auth.oidc.audience` holds, used only for the client's own pre-check ([§9.6](#96-failure-cases)) | with `oidc` |
 | `oidc.certificateAuthority` | PEM bundle for the issuer, if not the system store | no |
+| `oidc.tokenFile` | path to the owner-only token file of the D2 (b) opt-in; its presence is the opt-in ([§9.2](#92-cli-sign-in) item 3) | no |
 | `automation.tokenFile` | path to the automation token ([§9.4](#94-automation-token-input)) | with `automation`, unless given per invocation |
 | `lastEpoch` | the last `Bronzeward-Epoch` seen; not secret ([§8.5](#85-epoch-changes)) | written by the client |
 
@@ -705,8 +706,10 @@ current token expires
    that process only and each new process runs `login`. An explicit per-context opt-in keeps them
    in a file readable only by its owner instead, offered only when the provider issues rotating,
    client-bound refresh tokens to public clients ([§9.1](#91-identity-provider-requirements)
-   item 3). In a signed-in context, `BRONZEWARD_TOKEN_FILE` may name that file's path; the CLI
-   writes it and clears it as its own stored credential ([§8.2](#82-errors)).
+   item 3). The opt-in is the context's `oidc.tokenFile` ([§5](#5-endpoint-discovery-and-context-selection));
+   only in a context that has it may `BRONZEWARD_TOKEN_FILE` override its path. The CLI writes
+   that file and clears it as its own stored credential ([§8.2](#82-errors)), and refuses to
+   write or clear a file that holds an automation token (`bwt_`).
 4. No token is printed, written to the configuration file, passed in argv or placed in an
    environment variable by the CLI. No command prints a token.
 5. `whoami` shows the issuer and subject from the token's claims, read without verification and
@@ -729,8 +732,9 @@ current token expires
    ([§9.5](#95-renewal)). A new tab receives the tokens from an open tab of the same origin over
    `BroadcastChannel` (assumption S3). A reload, or a first tab when none is open, makes a
    top-level redirect to the provider, which answers at once from its own session, without a
-   prompt while that session lasts. Where the provider does not rotate refresh tokens, renewal
-   also uses that redirect, never a hidden frame (item 4). That fallback redirects at every
+   prompt while that session lasts. Where the provider does not issue rotating, client-bound
+   refresh tokens ([§9.1](#91-identity-provider-requirements) item 3), renewal also uses that
+   redirect, never a hidden frame (item 4). That fallback redirects at every
    access-token expiry, the behaviour the owner's constraint in D5 refuses, so the constraint holds
    only with a rotating provider: rotation is a provider requirement
    ([§15](#15-assumptions-and-limits)). No token is kept in storage (item 2).
@@ -1102,7 +1106,7 @@ the times their rows give.
 | ID | Choice | Options | Decision and reason |
 | --- | --- | --- | --- |
 | D1 | Web hosting and origin | (a) static files on the API's origin via the TLS terminator; (b) another origin with CORS added to the server; (c) the server serves the files; (d) backend-for-frontend | **Decided** by the owner (Serge, 2026-10-22 09:50 CEST): (a). The TLS front end routes `/api/v1/` and `/livez` to the server and serves the static web files for everything else ([§10.1](#101-hosting-and-origin)). Reason: no server change, no anonymous route, no cookie. Rejected: (b) adds an unauthenticated `OPTIONS` path and (c) an unauthenticated file route, both against "every request authenticates"; (d) is excluded by the issue unless decided explicitly |
-| D2 | CLI token store without an OS credential store | (a) memory only, sign in per process; (b) file readable only by its owner, opt-in per context; (c) file by default | **Decided** by the owner (Serge, 2026-10-22 09:58 CEST): (a) by default, with (b) as an explicit per-context opt-in, offered only if the provider issues rotating, client-bound refresh tokens to public clients ([§9.1](#91-identity-provider-requirements) item 3, [§9.2](#92-cli-sign-in) item 3). `BRONZEWARD_TOKEN_FILE` may name the opt-in file's path in a signed-in context. (a) also holds a refresh token in process memory, which [§9.1](#91-identity-provider-requirements) item 3 conditions on rotation as well. Reason: a refresh token on disk is a long-lived credential, so keeping one there is an operator's visible choice per context. Rejected: (c), which puts one on disk without that choice |
+| D2 | CLI token store without an OS credential store | (a) memory only, sign in per process; (b) file readable only by its owner, opt-in per context; (c) file by default | **Decided** by the owner (Serge, 2026-10-22 09:58 CEST): (a) by default, with (b) as an explicit per-context opt-in, offered only if the provider issues rotating, client-bound refresh tokens to public clients ([§9.1](#91-identity-provider-requirements) item 3, [§9.2](#92-cli-sign-in) item 3). The opt-in is the context's `oidc.tokenFile`, whose path `BRONZEWARD_TOKEN_FILE` may override in that context only. (a) also holds a refresh token in process memory, which [§9.1](#91-identity-provider-requirements) item 3 conditions on rotation as well. Reason: a refresh token on disk is a long-lived credential, so keeping one there is an operator's visible choice per context. Rejected: (c), which puts one on disk without that choice |
 | D3 | How a client learns issuer, client ID and audience | (a) by hand in the context; (b) a static client-configuration file served next to the web files; (c) an anonymous API route | **Decided** by the lead, 2026-10-21, under the owner's 2026-10-07 delegation: (a) now, and (b) if D1 is decided (a). Reason: under same-origin hosting the web client needs the file anyway, and the CLI can import it with `context add --from <url>` under TLS; (c) adds a second anonymous route. D1 is decided (a), so (b) applies, and entering the values by hand stays possible ([§5](#5-endpoint-discovery-and-context-selection) item 4) |
 | D4 | CLI sign-in without a local browser | (a) device-authorization grant; (b) loopback over a forwarded port; (c) both | **Decided** by the owner (Serge, 2026-10-22 10:04 CEST): (a) only, with no forwarded-loopback fallback ([§9.2](#92-cli-sign-in) item 2). Reason: device flow suits SSH sessions; it is phishable by a lookalike prompt, so the CLI shows the verification URI's host prominently. Rejected: (b) and (c) |
 | D5 | Browser renewal and new tabs | (a) access and refresh tokens in memory only, renewed silently by the rotating refresh token; a new tab receives them from an open tab over `BroadcastChannel`; a reload or first tab makes a top-level redirect to the provider, which answers from its own session without a prompt; no token in `localStorage`, `sessionStorage` or IndexedDB; without rotation, renewal by that redirect, never a hidden frame; (b) a refresh token bound by DPoP, kept in browser storage; (c) an authentication proxy that holds the session and gives the browser a cookie | **Decided** by the owner (Serge, 2026-10-22 10:20 CEST): (a) ([§9.3](#93-browser-sign-in) item 3). The owner's constraints (10:10 CEST): "reload and new tab is not acceptable / re-auth manually every 15m is not acceptable". Reason: (a) meets both without writing a token to storage. Rejected: (b), which keeps a credential in storage; (c), a stateful component in front of an API that accepts no cookie ([§10.1](#101-hosting-and-origin)). An earlier set of options, (b) silent frame renewal and (c) a redirect at every expiry, was replaced: the first breaks under third-party cookie blocking (assumption S2), the second interrupts work every 15 minutes. (a)'s fallback for a provider without rotation behaves as that second option did, so the constraints hold only with a rotating provider, which §15 lists as a provider requirement |
@@ -1148,8 +1152,9 @@ and filters in [persistence and API §9.2](persistence-api.md#92-resources-and-r
 in [§9.3](persistence-api.md#93-examples); a machine with a `Desired` release and no `Applied`
 state reads as pending convergence.
 
-**A5. A sign-in-capable test issuer.** Extend the fixture issuer, or add a pinned identity
-provider to the fixtures, with authorization-code and PKCE, refresh with rotation, revocation,
+**A5. A sign-in-capable test issuer.** Add a pinned Zitadel, the reference provider of
+[§15](#15-assumptions-and-limits), to the fixtures
+([#281](https://github.com/ginsys/bronzeward/issues/281)), with authorization-code and PKCE, refresh with rotation, revocation,
 end-session and device authorization, which D4 (a) makes the only headless sign-in, so client sign-in is tested against an endpoint
 and not a minted token. Closes G19; blocks the sign-in tickets' verification.
 
