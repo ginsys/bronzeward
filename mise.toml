@@ -240,8 +240,9 @@ BW_REQUIRE_IDP=1 BW_REQUIRE_PG=1 go test -count=1 -timeout 10m -run '^TestIdenti
 
 [tasks.dev-down]
 description = "Stop dev-db's, dev-bao's and dev-idp's containers, which removes them and their data"
-# Both run with --rm, so stopping is removing. Returns once they are gone, so their ports are free
-# for the next mise run dev-db or dev-bao. They are shared by every worktree on this host.
+# dev-db and dev-bao run with --rm, so stopping is removing; dev-idp down removes its containers
+# and network. Returns once they are gone, so their ports are free for the next start. They are
+# shared by every worktree on this host.
 run = '''
 # Each query is assigned before it is tested, so a docker failure (no daemon, no permission) fails
 # the task under errexit instead of reading as an absent container.

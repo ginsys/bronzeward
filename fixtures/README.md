@@ -141,7 +141,8 @@ mise run dev-idp-down    # its containers, network and .dev/idp/; mise run dev-d
   (`IAM_LOGIN_CLIENT`) creates a session through the Session API and finishes the authorization
   request with CreateCallback. No login container runs.
 - **State.** `.dev/idp/` (gitignored) holds the provider's two machine-user tokens, the target's
-  signing key and `idp.env`, the `BW_TEST_IDP_*` variables `go-idp` reads. The containers are
+  signing key, the target's static `oidc` binary, which its container runs read-only, and
+  `idp.env`, the `BW_TEST_IDP_*` variables `go-idp` reads. The containers are
   shared by every worktree on the host; `.dev/idp/` is per checkout, so start and stop the
   provider from the same one.
 - **Self-test gate.** Without `BW_TEST_IDP_ISSUER` the tests skip; `go-idp` sets

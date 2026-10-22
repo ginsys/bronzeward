@@ -231,6 +231,33 @@ func (e *env) accepted(p *idp, at, human string, roles []auth.Role) {
 	}
 }
 
+// groupsClaim is the access token's groups claim as the provider sent it, decoded without a
+// signature check (the server's verifier checks the token): roles: [] cannot tell a [] claim from
+// an absent one, which the server also maps to no role.
+func groupsClaim(t *testing.T, at string) (groups []string, present bool) {
+	t.Helper()
+	parts := strings.Split(at, ".")
+	if len(parts) != 3 {
+		t.Fatalf("the access token has %d parts; want a compact JWS", len(parts))
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var claims map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		t.Fatal(err)
+	}
+	raw, ok := claims["groups"]
+	if !ok {
+		return nil, false
+	}
+	if err := json.Unmarshal(raw, &groups); err != nil || groups == nil {
+		t.Fatalf("groups claim %s; want an array of strings", raw)
+	}
+	return groups, true
+}
+
 // idpRoles is issuer.Humans' roles, as TestIdentityServesEachPrincipal reads them, and h-none,
 // the user with no grant.
 var idpRoles = map[string][]auth.Role{
@@ -240,8 +267,9 @@ var idpRoles = map[string][]auth.Role{
 }
 
 // Each synthetic human signs in on the CLI's Native app, on a fresh loopback port, and is served
-// exactly its roles; the user with no grant is served roles: [] (its groups claim is []). One
-// web sign-in shows the User Agent app's token is accepted the same way.
+// exactly its roles. Its token's groups claim is present and holds exactly its groups, sorted:
+// [] for the user with no grant, who is served roles: []. One web sign-in shows the User Agent
+// app's token is accepted the same way.
 func TestIdentityProviderRoles(t *testing.T) {
 	p := newIDP(t)
 	e := idpEnv(t, p)
@@ -252,6 +280,10 @@ func TestIdentityProviderRoles(t *testing.T) {
 		tk := p.signIn(p.cli, loopback(), human)
 		if tk.ExpiresIn <= 0 || tk.ExpiresIn > 300 {
 			t.Errorf("%s: expires_in %d; want at most the 5-minute lifetime", human, tk.ExpiresIn)
+		}
+		want := slices.Sorted(slices.Values(issuer.Humans[human]))
+		if got, ok := groupsClaim(t, tk.Access); !ok || !slices.Equal(got, want) {
+			t.Errorf("%s: groups claim %q (present %v); want %q", human, got, ok, want)
 		}
 		e.accepted(p, tk.Access, human, roles)
 	}
@@ -281,13 +313,21 @@ func TestIdentityProviderRefresh(t *testing.T) {
 	}
 }
 
-// Revocation by a public client, with its client ID alone, ends the provider's session: the
-// refresh token is refused, and so is the access token at the provider. A residual: the server
+// Renewal on the CLI's Native app rotates its refresh token too. Revocation by a public client,
+// with its client ID alone, then ends the provider's session: the refresh token is refused, and
+// so is the access token at the provider, which accepted it before. A residual: the server
 // verifies the token itself, so it accepts the access token until exp.
 func TestIdentityProviderRevocation(t *testing.T) {
 	p := newIDP(t)
 	e := idpEnv(t, p)
-	tk := p.signIn(p.cli, loopback(), "h-approver")
+	first := p.signIn(p.cli, loopback(), "h-approver")
+	code, tk := p.refresh(p.cli, first.Refresh)
+	if code != 200 || tk.Access == "" || tk.Refresh == "" || tk.Refresh == first.Refresh {
+		t.Fatalf("CLI refresh: %d %q; want 200 and a new refresh token", code, tk.Error)
+	}
+	if !p.providerAccepts(tk.Access) {
+		t.Fatal("the provider refuses a live session's access token, so its refusal after revocation would prove nothing")
+	}
 	if code := p.json("POST", p.revoke, url.Values{"token": {tk.Refresh}, "client_id": {p.cli}}, "", nil, nil); code != 200 {
 		t.Fatalf("revoke: %d", code)
 	}
@@ -306,6 +346,9 @@ func TestIdentityProviderRevocation(t *testing.T) {
 func TestIdentityProviderEndSession(t *testing.T) {
 	p := newIDP(t)
 	tk := p.signIn(p.web, p.webOrigin+"/callback", "h-viewer")
+	if !p.providerAccepts(tk.Access) {
+		t.Fatal("the provider refuses a live session's access token, so its refusal after end-session would prove nothing")
+	}
 	state := random(16)
 	q := url.Values{"id_token_hint": {tk.ID}, "client_id": {p.web}, "post_logout_redirect_uri": {p.webOrigin + "/signed-out"}, "state": {state}}
 	resp, err := p.hc.Get(p.end + "?" + q.Encode())
