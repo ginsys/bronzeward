@@ -32,8 +32,9 @@ The header shows the identity, the roles and the epoch that `GET /identity` serv
 and the server's refusal stays authoritative. The recovery banner states the
 scope summary and, while the server runs as started for recovery, that plan creation, approval
 and unfreeze wait for its normal restart and that accepted publications complete only then;
-imports complete on it. Until [gap G14](operator-experience.md#11-api-gap-audit) the client learns
-that start mode from answers: plan creation, approval and unfreeze are refused on a recovery
+imports complete on it. The client reads that start mode from `GET /server`
+([gap G14](operator-experience.md#11-api-gap-audit)); until that read answers, as before a
+recovery start's entry, which refuses it, the client learns the mode from answers: plan creation, approval and unfreeze are refused on a recovery
 start without a `scope` member, and recovery entry on a normal one with a `409 conflict` that
 carries neither `epoch` nor `request`; the entry's other `409 conflict` answers carry `epoch`
 and show a recovery start. The line reflects the last such answer and is
@@ -296,7 +297,7 @@ What changed is not shown: Bronzeward can show it only by importing it (gap G7).
 ```text
 Recovery   (•) Recovery mode on since 10:42   epoch ep_r2l…   entry by ops-carl
 Restored: database backup taken 10:20; stopped at 10:31
-Server started for recovery (as of the last answer; G14): plan creation, approval and
+Server started for recovery (as GET /server reports; G14): plan creation, approval and
 unfreeze wait for its normal restart; publications it accepts complete only after that
 restart. Imports complete on it.
 +----------------+--------------------------+----------------------------------------------+
@@ -322,8 +323,8 @@ Account scope mch_k2p…7xqa (pre-restore unaccounted)
                                    unaccounted attempt's transport deadline
   End observation      [obs_b… ▾]  recovery observations only; must begin at least the
                                    settle floor after the latest of that point and the start.
-                                   The settle floor is not readable before a decision
-                                   (G17); a settle-floor refusal states it and its anchor.
+                                   Settle floor 30s, maximum transport deadline 2m, as
+                                   GET /server serves them (G17).
   Resource version     read at both ends, unchanged between them
   Explanation          [______________]  required if the resource version moved
   This records your judgment that no request sent before the restore, from any attempt the
