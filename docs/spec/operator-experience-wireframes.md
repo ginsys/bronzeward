@@ -27,9 +27,9 @@ detail. Every screen has the [header](#header-on-every-screen) and the state var
 +------------------------------------------------------------------------------------------+
 ```
 
-Roles are shown only once the API can report them
-([gap G1](operator-experience.md#11-api-gap-audit)); until then the header shows the identity and
-the epoch, and actions are enabled and refused by the server. The recovery banner states the
+The header shows the identity, the roles and the epoch that `GET /identity` serves
+([gap G1](operator-experience.md#11-api-gap-audit)); an action the roles do not allow is disabled,
+and the server's refusal stays authoritative. The recovery banner states the
 scope summary and, while the server runs as started for recovery, that plan creation, approval
 and unfreeze wait for its normal restart and that accepted publications complete only then;
 imports complete on it. Until [gap G14](operator-experience.md#11-api-gap-audit) the client learns
@@ -59,8 +59,8 @@ Refusal variants, each saying only what the server's answer establishes: `401` (
 by this installation. Sign in again."), whatever the cause, since the server does not say
 whether issuer, audience, expiry or signature failed; `403 identity-revoked` ("Your access was
 revoked"); `503` ("Authentication could not reach the identity provider or the database; nothing was
-committed"); and, once roles
-can be read (gap G1), no roles ("You are signed in but hold no Bronzeward role"). A local
+committed"); and, from
+`GET /identity` (gap G1), no roles ("You are signed in but hold no Bronzeward role"). A local
 reading, such as "your token expired at 10:15 by this browser's clock", is labelled as the
 client's own.
 

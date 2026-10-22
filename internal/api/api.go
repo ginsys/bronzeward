@@ -336,7 +336,7 @@ func (a *API) handle(rt *route) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := requestOf(r)
 		q.r, q.route = r, rt
-		if ref := authorize(q); ref != nil {
+		if ref := authorize(q); ref != nil && rt.pattern != identityPattern { // the caller's own identity needs no role (§10.3)
 			a.problem(w, q, ref)
 			return
 		}

@@ -18,7 +18,10 @@ adds `G13`-`G17`, `G19` and `G20`.
 
 **Facts and proposals are kept apart.** A statement about existing behaviour cites the contract
 section or the source line it comes from, read at revision `3cbe953` (`internal/api/api.go:382`
-means that file and line). A requirement this document proposes is marked **Proposed**; *must*
+means that file and line), except the code
+[#277](https://github.com/ginsys/bronzeward/issues/277) adds or changes, the identity read
+(`internal/api/identity.go`, `internal/api/routes.go:97`, `internal/api/api.go:339`), which is
+read with it applied. A requirement this document proposes is marked **Proposed**; *must*
 in a Proposed item is a requirement on the clients once the proposal is accepted, not a claim
 about code that exists. A behaviour the API does not support today is listed in
 [§4](#4-api-gap-audit) and is never presented as available. Statements that rest on outside
@@ -103,7 +106,8 @@ The facts every later section relies on, read from the code and the contracts.
 | Events | `GET /operations/{id}/events` is a cursor-paged JSON list, or Server-Sent Events when `Accept` contains `text/event-stream`; event ID `<epoch>:<number>`; resume with `Last-Event-ID`; an ID from another epoch gets `event: reset` and a replay from the start; after 15 s with nothing sent the stream sends the comment line `: keep-alive`, with no ID and no event ([persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress)); the stream ends when the operation is terminal or at the opening token's expiry; `unresolved` is not terminal | `internal/api/operations.go:183-353`; [persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress) |
 | Caching | Every API answer, authenticated or not, problems and the event stream included, sends `Cache-Control: no-store`; liveness sends no cache header | [persistence and API §9.1](persistence-api.md#91-conventions) |
 | Browser support | No CORS headers, no `Origin` check, no cookie, no CSRF token anywhere in the server | search of `internal/` and `cmd/` for `Access-Control`, `Origin`, `Cookie`; [persistence and API §10.1](persistence-api.md#101-humans-oidc) "no server session" |
-| Identity and version reads | None: no route answers who the caller is, which roles it holds, or which server version runs | `internal/api/routes.go:78-136` |
+| Identity read | `GET /identity` answers who the caller is, which roles it holds and the epoch, to any authenticated credential, one with no role included | `internal/api/routes.go:97`, `internal/api/api.go:339`; [persistence and API §9.2](persistence-api.md#92-resources-and-routes) |
+| Version read | None: no route answers which server version runs | `internal/api/routes.go:78-136` |
 
 ## 3. Action, endpoint and role matrix
 
@@ -119,7 +123,8 @@ its entry (`internal/api/api.go:350-353`), and "recovery" means a normal start r
 ### 3.1 Reads
 
 Every read takes any role (`internal/api/routes.go:60`, `internal/api/routes.go:65`) except the
-protected review.
+protected review and the identity read, which serves any authenticated credential, one that holds
+no role included (`internal/api/api.go:339`).
 
 | Client action | Route | Paged | ETag served | Notes |
 | --- | --- | --- | --- | --- |
@@ -140,6 +145,7 @@ protected review.
 | act list | `GET /acts` | yes | no | |
 | recovery status | `GET /recovery` | no | no | |
 | dependency list / show / releases / alerts | `GET /dependencies` (`class` filter), `/dependencies/{id}`, `/dependencies/{id}/releases`, `/dependencies/{id}/alerts`, `/dependency-alerts` | lists | no | |
+| `whoami`, roles in the web header | `GET /identity` | no | no | the caller's kind, issuer and subject or service, principal, roles, expiry and epoch; takes no query (`internal/api/identity.go:22-59`) |
 
 ### 3.2 Writes
 
@@ -186,7 +192,6 @@ ETag (`internal/api/ingestions.go:153-154`).
 | --- | --- | --- |
 | `login`, `logout` | identity-provider and client concerns; the server keeps no session | [§9](#9-authentication) |
 | `context` | client configuration | [§5](#5-endpoint-discovery-and-context-selection) |
-| `whoami`, roles in the web header | G1 | [§4](#4-api-gap-audit) |
 | version check | G2 | [§7](#7-compatibility-and-versioning) |
 | automation token issue, rotate, list | server-side command only | not offered by either client |
 | dispatch, apply | the controller dispatches approved plans ([design §12.7](../design/Talos_Configuration_and_Machine_Management_Design.md#127-application-approval-and-dispatch-boundary); [§13.7](../design/Talos_Configuration_and_Machine_Management_Design.md#137-poc-identity-and-approval-policy) item 2) | not offered |
@@ -204,7 +209,7 @@ supported.
 
 | ID | Gap | Evidence | Disposition |
 | --- | --- | --- | --- |
-| G1 | No identity, role or capability read; roles appear only in a `403` body | `internal/api/api.go:380-392`; no route in `internal/api/routes.go:78-136` | API issue A1; blocks the sign-in and inventory tickets |
+| G1 | No identity, role or capability read; roles appear only in a `403` body | `internal/api/api.go:380-392`; before [#277](https://github.com/ginsys/bronzeward/issues/277), no route in [`internal/api/routes.go:78-136`](https://github.com/ginsys/bronzeward/blob/3cbe953e87c6836799db569855670d48b70bb527/internal/api/routes.go#L78-L136) | closed by API issue A1 ([#277](https://github.com/ginsys/bronzeward/issues/277)): `GET /identity` serves the caller's identity, roles and epoch (`internal/api/identity.go:22-31`), a credential with no role included (`internal/api/api.go:339`) |
 | G2 | No server version or compatibility read; only anonymous `/livez` | `internal/server/server.go:19-22` | API issue A2; blocks every client's compatibility refusal |
 | G3 | An operation does not name its ingestion; only the ingestion side links them: its read serves `operation`, and the start, mark and takeover `202` bodies name both | before [#280](https://github.com/ginsys/bronzeward/issues/280), the operation's subject was a draft or a plan and machine, never an ingestion ([`internal/api/reads.go:358-373`](https://github.com/ginsys/bronzeward/blob/23c1bc2a233cbdf0916076e62016a82892107053/internal/api/reads.go#L358-L373), `internal/api/reads.go:423-425`); the ingestion side: `internal/api/ingestions.go:235`, `internal/api/ingestions.go:256-260`, `internal/api/ingestions.go:217-218`, `internal/api/marks.go:106`, `internal/api/ingestions.go:355` | closed by API issue A4 ([#280](https://github.com/ginsys/bronzeward/issues/280)): an `ingest` operation's `subject` names its `ingestion` (`internal/api/reads.go:346`, `internal/api/reads.go:396-398`) |
 | G4 | A draft does not name the release it produced | the draft read selects no release (`internal/api/reads.go:231`) | accepted limitation: the publish operation's `result.release` answers it |
@@ -480,10 +485,11 @@ contract's, and this specification does not close it.
    `422` to a repeat on a keyed route is reported as an unknown outcome ([§8.2](#82-errors)).
 3. **Same principal and epoch only.** Before any repeat the client checks that its credential
    still names the same principal: for OIDC, the same `iss` and `sub` in the renewed token; for
-   automation, the same service identity. The CLI learns the identity only from the token ID (the
-   part between `bwt_` and `.`) until A1 serves it, so until then a different token ID counts as
-   a different principal; this may set aside a write the server would have replayed after a
-   rotation, which is the safe direction. It then confirms the current epoch with one
+   automation, the same service identity, compared by the `principal` the identity read serves
+   (A1, `internal/api/identity.go:56`): the client reads it once before the first send, and again
+   with the current credential before a repeat whose token ID changed, so a rotated token of that
+   identity is the same principal. An automation client that cannot read it sends nothing, so
+   every write it sends has a `principal` to compare. It then confirms the current epoch with one
    authenticated read (`GET /recovery`, any role, `internal/api/routes.go:94`) and compares that
    response's `Bronzeward-Epoch` with the reference epoch: the last one the client saw before the
    first send. A client that has seen none reads `GET /recovery` once before that first send. The
@@ -518,13 +524,16 @@ contract's, and this specification does not close it.
    [§8.5](#85-epoch-changes), without setting the entry itself aside (REC-04).
 4. **After the process ends.** The CLI stores no request body, hash of a body, or key journal.
    When it gives up with the outcome unknown, it prints, on standard error, the key, method,
-   route, context, principal (issuer and subject, or the token ID that stands for the service
-   identity until A1), epoch and the `If-Match` value it sent, if any, and what to read to find
+   route, context, principal (issuer and subject, or the service identity's `principal` from
+   A1), epoch and the `If-Match` value it sent, if any, and what to read to find
    out. An ETag is not secret. An operator may then repeat with `--idempotency-key <key>
    --expect-epoch <epoch> --expect-principal <principal>`, plus `--if-match <etag>` where the
    route takes one, all as printed. The client refuses, sending nothing, when one of them is
-   missing or its current principal is not the printed one, and refuses after sending only item
-   3's confirming read when the epoch differs as in that item (not for the recovery entry). It
+   missing or, for a human, when its token's `iss` and `sub` are not the printed ones. An automation
+   client first sends item 3's identity read and refuses when that `principal` is not the printed
+   one. Otherwise it refuses after sending only item 3's reads (that identity read, for
+   automation, and the confirming read) when the epoch differs as in that item (not for the recovery
+   entry). It
    never substitutes an ETag it reads now: `If-Match` is part
    of the fingerprint ([persistence and API §7.1](persistence-api.md#71-the-key)), so a new one
    turns the repeat into another request. The operator supplies the input and the `If-Match` value
@@ -689,8 +698,8 @@ current token expires
 4. No token is printed, written to the configuration file, passed in argv or placed in an
    environment variable by the CLI. No command prints a token.
 5. `whoami` shows the issuer and subject from the token's claims, read without verification and
-   labelled as the client's reading, and the expiry. Roles come from A1; until it lands the CLI
-   says roles are not known.
+   labelled as the client's reading, and the expiry. Roles come from A1 (`GET /identity`,
+   `internal/api/identity.go:39`).
 
 ### 9.3 Browser sign-in
 
@@ -1093,7 +1102,9 @@ principal's kind, issuer and subject or service name, the principal ID when one 
 the credential maps to, the credential's expiry and the current epoch. It must answer a
 credential that maps to no role, which the current role check would refuse
 (`internal/api/api.go:385-391`), so it needs a decision on whether a role-less identity may read
-its own identity. Closes G1; blocks the CLI and web sign-in tickets' role display.
+its own identity. Closes G1; blocks the CLI and web sign-in tickets' role display. Served since
+[#277](https://github.com/ginsys/bronzeward/issues/277): `GET /identity` in [persistence and API §9.2](persistence-api.md#92-resources-and-routes),
+and the role-less read decided in [§10.3](persistence-api.md#103-authorization).
 
 **A2. Serve the server version, API revision and installation settings.** An authenticated
 `GET` with the server's version, the API revision within v1, the optional features it serves, and
@@ -1210,7 +1221,8 @@ Limits:
 - This is a proposal. No client exists and no case of [§12](#12-shared-conformance-cases) has run.
   No synthetic contract probe was run against the server for this draft: every server behaviour
   above is read from source and contract text, and G17 is inferred, not observed.
-- Line references were read at `3cbe953` and move as the code changes.
+- Line references were read at `3cbe953`, except those to the identity read, which are read with
+  [#277](https://github.com/ginsys/bronzeward/issues/277) applied, and move as the code changes.
 - It decides no hosting topology, frontend framework, CLI language, identity provider, browser
   support matrix or credential policy; the choices in [§13](#13-alternatives-and-open-choices)
   other than D3, D7, D8 and D9 remain open.

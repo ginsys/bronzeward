@@ -257,10 +257,10 @@ Sources: `internal/api/routes.go:98-135`. The token administration for automatio
 server-side command (`cmd/bronzeward/token.go:22-26`); neither client offers it.
 
 **Proposed:** both clients show the roles the current credential holds, and disable an action
-the identity cannot take with the reason ("needs approver", "humans only"). No response tells
-an identity which roles it holds: a 403 body lists only the roles the route accepts
-(`internal/api/api.go:380-392`). Until #253 resolves this gap ([§11](#11-api-gap-audit), G1), the
-clients cannot hide actions correctly, and the server's refusal stays authoritative.
+the identity cannot take with the reason ("needs approver", "humans only"). A 403 body lists
+only the roles the route accepts (`internal/api/api.go:380-392`); the roles the credential holds
+come from `GET /identity`, served since [#277](https://github.com/ginsys/bronzeward/issues/277) ([§11](#11-api-gap-audit), G1). The server's
+refusal stays authoritative.
 
 ## 4. Command tree
 
@@ -273,7 +273,7 @@ must stay distinct get three distinct words: `publish` and `approve` are top-lev
 bronzewardctl
   login | logout                      sign in or out of the current context (#253)
   context list | use | add | remove   API endpoint, TLS trust and identity per installation
-  whoami                              identity, roles, epoch, recovery mode (G1)
+  whoami                              identity, roles, epoch, recovery mode (GET /identity)
   status                              installation epoch, recovery mode, open drift, unresolved ops
 
   cluster list | show | add
@@ -347,7 +347,7 @@ Signed in as ops-anna@example.invalid.
 $ bronzewardctl whoami
 Context   lab (https://bronzeward.lab.example.invalid)
 Identity  ops-anna@example.invalid   human
-Roles     author, publisher           # G1: not served today
+Roles     author, publisher           # GET /identity (G1)
 Epoch     ep_bqek…ekgi   recovery mode: off
 Token     expires in 14m                                      # renewal: #253
 ```
@@ -853,10 +853,10 @@ tests. "Sees" lists what must be visible before the step's action is enabled.
 
 **Viewer.** Sign in, pick the context, open Machines, find the drifted machine, read its
 desired, applied and observed state with observation time, open the timeline, open the plan and
-approval that last applied it, read the audit acts. Once #253 closes G1, every action button is
-absent or disabled with "needs author" or a similar reason; until then the clients cannot know
-the caller's roles ([§3](#3-roles-humans-and-automation)), so actions stay enabled and an action
-the viewer takes shows the server's `403` with the roles the route accepts. Restriction: nothing secret is served to any role
+approval that last applied it, read the audit acts. From the roles `GET /identity` serves (G1),
+every action button is absent or disabled with "needs author" or a similar reason
+([§3](#3-roles-humans-and-automation)); an action the viewer takes anyway shows the server's `403`
+with the roles the route accepts. Restriction: nothing secret is served to any role
 except the protected review, which is author-only.
 
 **Author.** Record a cluster and its machines (human); import with review (human), mark missed
@@ -1015,7 +1015,7 @@ Routes are under `/api/v1` (`internal/api/routes.go:62-136`).
 | `recovery takeover` / `resolve` | `POST /operations/{id}/takeovers` / `resolutions` | recovery-admin | yes | no |
 | `identity revoke` | `POST /identity-revocations` | recovery-admin | yes | no |
 | `login`, `logout`, `context` | none: client and identity provider (#253) | — | — | — |
-| `whoami`, `status` (roles) | none: gap G1 | — | — | — |
+| `whoami`, `status` (roles) | `GET /identity` | any authenticated credential, none needed | no | no |
 
 Every mutating route requires an `Idempotency-Key`
 ([persistence and API §7](persistence-api.md#7-idempotency)). Plan creation and approval, and
@@ -1030,7 +1030,7 @@ accepted limitation.
 
 | ID | Gap | Journey affected | Current workaround |
 | --- | --- | --- | --- |
-| G1 | No identity, role or capability read; a 403 body lists only the roles the route accepts, never the caller's (`internal/api/api.go:380-392`) | showing who is signed in and which actions are allowed | none; let the server refuse |
+| G1 | No identity, role or capability read; a 403 body lists only the roles the route accepts, never the caller's (`internal/api/api.go:380-392`) | showing who is signed in and which actions are allowed | served since [#277](https://github.com/ginsys/bronzeward/issues/277): `GET /identity` ([persistence and API §9.2](persistence-api.md#92-resources-and-routes)) |
 | G2 | No version or compatibility read; only unauthenticated `GET /livez` (`internal/server/server.go:19-21`) | client/server compatibility, context setup | none |
 | G3 | An operation does not name its ingestion, and no ingestion listing exists (G10); the ingestion names its operation (`internal/api/ingestions.go:235`), not the reverse before [#280](https://github.com/ginsys/bronzeward/issues/280) ([`internal/api/reads.go:323-328`](https://github.com/ginsys/bronzeward/blob/23c1bc2a233cbdf0916076e62016a82892107053/internal/api/reads.go#L323-L328)) | resuming an import after the client lost the 202 | served since [#280](https://github.com/ginsys/bronzeward/issues/280): an `ingest` operation's `subject` names its `ingestion` (`internal/api/reads.go:396-398`), and `GET /ingestions` lists them (G10) |
 | G4 | A draft does not name its release; releases have no draft filter (`internal/api/inventory.go:349-356`, `internal/api/releases.go:215`) | "what did this draft publish?" | the publish operation's `result.release` while the client holds it; otherwise paging releases and matching `draft` (`internal/api/releases.go:50-51`), the client-side scan G9 accepts |
