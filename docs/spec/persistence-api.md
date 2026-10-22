@@ -1654,15 +1654,17 @@ idempotency and conflict behavior.
 | `POST /operations/{id}/attempts/{attempt}/accountings`, `/operations/{id}/takeovers`, `/operations/{id}/resolutions` | 201 | `recovery-admin`, human only (EaR) |
 | `POST /identity-revocations` | 201 | `recovery-admin`, human only (§10.4) |
 
-A list takes only the filters named here, each at most once; any other
-parameter, or a value that is not one of its kind, is `400 invalid-request`.
-Filters combine, and each page holds only matching items, in identifier order
-(§9.1). `GET /operations` filters by `plan`, `machine`, `state` and `kind`;
-`GET /plans` by `state`, the state the plan reads as (`expired` and `revoked`
-included, §8.1), and `machine`; `GET /machines` by `cluster`; and
-`GET /ingestions` by `state`, as a read treats the claim (compilation §3.5),
-and `machine`. A draft update's claim names no machine, so a `machine` filter
-never lists it.
+A list takes only its own filters, each at most once; any other parameter is
+`400 invalid-request`. Filters combine, and each page holds only matching
+items, in identifier order (§9.1). Besides the dependency reads' own filters
+([dependency monitor §7.2](dependency-monitor.md#72-read-routes)), `GET /operations` filters
+by `plan`, `machine`, `state` and `kind`; `GET /plans` by `state`, the state
+the plan reads as (`expired` and `revoked` included, §8.1), and `machine`;
+`GET /machines` by `cluster`; and `GET /ingestions` by `state`, as a read
+treats the claim (compilation §3.5), and `machine`. On these four, a non-empty
+value that is not one of its kind is `400 invalid-request` and an empty value
+does not filter. A draft update's claim names no machine, so a `machine`
+filter never lists it.
 
 Every `POST`, `PUT` and `DELETE` needs an `Idempotency-Key` (§7). There is no
 route that dispatches, none that issues, rotates or lists automation tokens,

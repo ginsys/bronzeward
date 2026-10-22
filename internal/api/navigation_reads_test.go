@@ -112,6 +112,21 @@ func TestIngestionsList(t *testing.T) {
 		}
 	}
 
+	// The held claim's lease lapses with no later start: it is stored held, and every read, its
+	// filter included, treats it as abandoned (compilation §3.5).
+	mustExec(t, ie.db, `UPDATE staging_claim SET lease_until = now() - interval '1 second' WHERE id = $1`, held)
+	if n := count(t, ie.db, `SELECT count(*) FROM staging_claim WHERE id = $1 AND state = 'held'`, held); n != 1 {
+		t.Fatal("the lapsed claim is not stored held")
+	}
+	for q, want := range map[string][]string{
+		"/ingestions?state=abandoned": sorted(abandoned, held),
+		"/ingestions?state=held":      nil,
+	} {
+		if got := walk(t, get, q, ingestionID); !slices.Equal(got, want) {
+			t.Fatalf("%s after the lapse: %v, want %v", q, got, want)
+		}
+	}
+
 	page := decode[listPage[ingestionBody]](t, get("/ingestions?limit=1"), http.StatusOK)
 	if page.Next == "" {
 		t.Fatal("no cursor after the first of two ingestions")
@@ -156,7 +171,7 @@ func TestPlansListFilters(t *testing.T) {
 	}
 }
 
-// §9.2 (A4, G10): GET /machines filters by cluster, exactly the cluster's machines across pages.
+// §9.2 (A4, G9): GET /machines filters by cluster, exactly the cluster's machines across pages.
 func TestMachinesListCluster(t *testing.T) {
 	ie := newIngestEnv(t, options{})
 	author := ie.human("h-author")

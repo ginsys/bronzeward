@@ -182,13 +182,13 @@ from matching release IDs, names or sources.
 
 `GET /machines/{id}` returns `desired` (a release ID or null), `applied {release, source}` (or
 null) with source `operation` or `adoption`, `observed {observation, at, release}` (or null),
-`frozen`, `scopeState` and `openDrift` (`internal/api/reads.go:155-192`). `observed` is the
+`frozen`, `scopeState` and `openDrift` (`internal/api/reads.go:155-196`). `observed` is the
 observation with the highest basis that read a configuration digest, not necessarily the newest
 observation: a later read that failed or left the digest unread is not it. `observed.release`
 names the applied release when that observation's digest equals the `Applied` digest, the
 desired release when it equals the `Desired` release's, and is null otherwise, including when it
 equals some older release's; the digest itself is never served
-(`internal/api/reads.go:155-167`). The newest observations, with their unread causes, are read
+(`internal/api/reads.go:155-171`). The newest observations, with their unread causes, are read
 from `GET /machines/{id}/observations` (`internal/api/observations.go:14-40`) and the timeline.
 
 Drift is defined against `Applied`, not against releases: an observed digest that differs from
@@ -207,11 +207,12 @@ timeline:
 | Fields | Sentence |
 | --- | --- |
 | no open drift, observed.release = applied.release | "The configuration read at `<observed.at>` is attributed to `<observed.release>`, which is the `Applied` release (by `<applied.source>`)." |
-| as above, applied.source = adoption | adds "Adopted from the node's own bytes; the release's compiled configuration may differ. The adopt plan's `pendingConvergence` evidence shows whether it does; a later `apply-config` plan withholds its diff when it does." If desired = applied.release, also adds "The read may match the adopted bytes or this release's compiled configuration; the API does not say which." (`internal/api/reads.go:160-161`) |
-| desired ≠ applied.release, no open drift | adds "The selected release `<desired>` differs from the applied one; whether its configuration for this machine differs is not shown (G16)." |
+| as above, applied.source = adoption | adds "Adopted from the node's own bytes; the release's compiled configuration may differ. The adopt plan's `pendingConvergence` evidence shows whether it does; a later `apply-config` plan withholds its diff when it does." If desired = applied.release, also adds "The read may match the adopted bytes or this release's compiled configuration; the API does not say which." (`internal/api/reads.go:163-164`) |
+| pendingConvergence, no open drift | adds "Pending convergence: the configuration of the selected release `<desired>` for this machine differs from what Bronzeward applied." |
+| desired ≠ applied.release, not pendingConvergence, no open drift | adds "The selected release `<desired>` carries this machine's applied configuration unchanged." |
 | openDrift not null | "Drifted since `<at of the openDrift.observation observation>`: a read differed from what Bronzeward last verified (`<applied.release>`)." If observed.release = desired, adds "It equals the selected release; that does not close the drift." |
 | no open drift, observed.release null | "The configuration read at `<observed.at>` matched neither `Applied` nor `Desired`, and no drift is open; an operation may hold the machine. See the timeline." |
-| an observation with a higher `basis` than the one `observed` names (the machine read selects `observed` by highest basis, `internal/api/reads.go:167`; the observations list serves `basis`, `internal/api/observations.go:21`), with unread causes | adds "The latest read at `<time>` could not read: `<causes>`." |
+| an observation with a higher `basis` than the one `observed` names (the machine read selects `observed` by highest basis, `internal/api/reads.go:171`; the observations list serves `basis`, `internal/api/observations.go:21`), with unread causes | adds "The latest read at `<time>` could not read: `<causes>`." |
 | applied null | "Not applied or adopted by Bronzeward." |
 | desired null | "No release selected." |
 | observed null | "No configuration read recorded." No time is shown. |
@@ -225,11 +226,11 @@ bound in the PoC (`health: none-bound`, `internal/api/observe.go:86`), and every
 ([execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values)),
 which after an adoption is the digest of the node's own bytes
 ([execution and recovery §6.3](execution-recovery.md#63-adopt)), so equal release IDs do not
-rule it out. The machine read does not serve it ([§11](#11-api-gap-audit), G16). A newly
-selected release can carry the same configuration for an unchanged machine, so the machine views
-show only that the selected release differs from the applied one, never that the machine needs
-to converge or that it does not. The adopt plan is different: its `pendingConvergence` evidence
-does show it (`internal/api/plans.go:315`). A freeze closes the scope gate for commitments and attempts but
+rule it out. The machine read serves it as `pendingConvergence`, without either digest
+(`internal/api/reads.go:155-171`; [§11](#11-api-gap-audit), G16). A newly selected release can
+carry the same configuration for an unchanged machine, and is then not pending; a machine with a
+`Desired` release and no `Applied` is. The adopt plan's `pendingConvergence` evidence shows the
+same comparison for the release it adopts (`internal/api/plans.go:315`). A freeze closes the scope gate for commitments and attempts but
 does not stop an attempt already recorded, and does not block an adoption record
 ([execution and recovery §6.2](execution-recovery.md#62-freeze),
 [§6.3](execution-recovery.md#63-adopt) requirement 4.5). See
@@ -381,8 +382,8 @@ Health is not checked in this installation.
 means it equals neither `Applied` nor `Desired`, and "drifted" comes from the open drift record
 ([§2.4](#24-desired-applied-and-observed)).
 
-`machine list` and `GET /machines` take no filter (the shared pager, `internal/api/reads.go:78-80`), so `--cluster`
-is client-side over every page ([§11](#11-api-gap-audit), G9).
+`GET /machines` filters by `cluster` (`internal/api/reads.go:199-218`), so `machine list --cluster`
+passes it to the server ([§11](#11-api-gap-audit), G9).
 
 Recording a machine is a human `author` act, with the node's Talos identity read beforehand
 ([acceptance plan S1](acceptance-plan.md#s1-adoption-of-the-existing-cluster)):
@@ -426,7 +427,7 @@ Continued. Import released into draft drf_2rmp…457a (now revision 2).
 ```
 
 Facts: review needs encrypted staging and is requested when the import starts
-(`internal/api/ingestions.go:121-124`). The review is human-author-only and answered with
+(`internal/api/ingestions.go:122-125`). The review is human-author-only and answered with
 `Cache-Control: no-store` (`internal/api/review.go:18-31`). It may contain secrets the schema
 did not recognise; that is why it exists ([compilation §3.6](compilation.md#36-operator-review)).
 A mark is refused with the rule and the mark's position, never its path
@@ -496,9 +497,9 @@ artifact differs from them (`pendingConvergence`, `internal/api/plans.go:315`). 
 example the adopt plan reports `pendingConvergence: false`: the compiled artifact is
 byte-identical to what the node runs, which equal values alone would not establish. §5.6's later
 `apply-config` plan shows a diff from `rel_9vbn…c1ta`; in this example none of the plan's
-withholding cases applies (`internal/api/plans.go:447-454`).
+withholding cases applies (`internal/api/plans.go:470-477`).
 Had the artifact differed, that plan would show "Diff withheld": no redacted form exists of what
-the machine runs (`internal/api/plans.go:434-449`).
+the machine runs (`internal/api/plans.go:457-472`).
 
 ### 5.4 Editing fragments, profiles and assignments
 
@@ -568,7 +569,7 @@ Provenance covers secret references only; other fields are not traced.         #
 ```
 
 The publish operation's `result` names the release (`internal/api/publish.go:323`); a draft
-does not (`internal/api/inventory.go:346-353`, [§11](#11-api-gap-audit) G4). A publication that
+does not (`internal/api/inventory.go:349-356`, [§11](#11-api-gap-audit) G4). A publication that
 cannot get fresh evidence for every covered machine fails rather than select a new `Desired`
 ([design §12.6](../design/Talos_Configuration_and_Machine_Management_Design.md#126-offline-semantics)).
 
@@ -613,7 +614,7 @@ release's publisher, and `authored-change` and `authored-reused` for fragment, p
 assignment revisions from the release's `sources[]` (`internal/api/releases.go:29-34`), each
 revision's `author` (`internal/api/sources.go:60`, `internal/api/sources.go:77`,
 `internal/api/sources.go:87`) and the draft's entries, which name the revisions it introduced
-(`internal/api/reads.go:245-267`; `internal/api/approvals.go:200-215`). Import-base authorship
+(`internal/api/reads.go:265-287`; `internal/api/approvals.go:200-215`). Import-base authorship
 and `owned-automation` cannot be predicted: no read serves an import-base revision's author for
 a release, or a service principal's responsible human. The prediction therefore never presents
 an approver as clear of self-approval; the returned approval owns the reasons.
@@ -1027,20 +1028,20 @@ accepted limitation.
 | --- | --- | --- | --- |
 | G1 | No identity, role or capability read; a 403 body lists only the roles the route accepts, never the caller's (`internal/api/api.go:372-384`) | showing who is signed in and which actions are allowed | none; let the server refuse |
 | G2 | No version or compatibility read; only unauthenticated `GET /livez` (`internal/server/server.go:19-21`) | client/server compatibility, context setup | none |
-| G3 | An operation does not name its ingestion, and no ingestion listing exists (G10); the ingestion names its operation (`internal/api/ingestions.go:234`), not the reverse (`internal/api/reads.go:323-328`) | resuming an import after the client lost the 202 | keep the 202 body; within the same principal and epoch, the identical request with the same key replays it, subject to G13 |
-| G4 | A draft does not name its release; releases have no draft filter (`internal/api/inventory.go:346-353`, `internal/api/releases.go:215`) | "what did this draft publish?" | the publish operation's `result.release` while the client holds it; otherwise paging releases and matching `draft` (`internal/api/releases.go:50-51`), the client-side scan G9 accepts |
+| G3 | An operation does not name its ingestion, and no ingestion listing exists (G10); the ingestion names its operation (`internal/api/ingestions.go:235`), not the reverse (`internal/api/reads.go:343-349`) | resuming an import after the client lost the 202 | served since [#280](https://github.com/ginsys/bronzeward/issues/280): an `ingest` operation's `subject` names its `ingestion` (`internal/api/reads.go:396-398`), and `GET /ingestions` lists them (G10) |
+| G4 | A draft does not name its release; releases have no draft filter (`internal/api/inventory.go:349-356`, `internal/api/releases.go:215`) | "what did this draft publish?" | the publish operation's `result.release` while the client holds it; otherwise paging releases and matching `draft` (`internal/api/releases.go:50-51`), the client-side scan G9 accepts |
 | G5 | No render of a draft before publication | authors cannot see a machine's configuration before publishing | publish, then review |
 | G6 | Provenance covers reference occurrences only (`internal/api/releases.go:78-100`), not "which fragment set this field" ([design §6.2](../design/Talos_Configuration_and_Machine_Management_Design.md#62-fragments-profiles-and-assignments)) | field-origin inspector | none |
-| G7 | Drift content is not served: no observed configuration or digest (`internal/api/reads.go:155-167`) | deciding adopt or revert from what changed | a drift-adoption import with review, or `talosctl` outside Bronzeward |
+| G7 | Drift content is not served: no observed configuration or digest (`internal/api/reads.go:155-171`) | deciding adopt or revert from what changed | a drift-adoption import with review, or `talosctl` outside Bronzeward |
 | G8 | Machines have no human-readable name (`internal/api/inventory.go:177-224`) | finding a machine | endpoint and node ID |
-| G9 | No list filters on machines, plans, releases, drafts or acts (`internal/api/reads.go:78-80`, `internal/api/acts.go:72`); operations filter by `plan`, `machine`, `state`, `kind` (`internal/api/operations.go:97`); no machine timeline stream | "plans awaiting my approval", per-cluster views, following a timeline | client-side paging; polling |
-| G10 | No listing of ingestions: only `GET /ingestions/{id}` (`internal/api/routes.go:90`) | finding a paused or lapsed import | keep the ID |
+| G9 | No list filters on machines, plans, releases, drafts or acts (`internal/api/reads.go:78-80`, `internal/api/acts.go:72`); operations filter by `plan`, `machine`, `state`, `kind` (`internal/api/operations.go:97`); no machine timeline stream | "plans awaiting my approval", per-cluster views, following a timeline | served since [#280](https://github.com/ginsys/bronzeward/issues/280): plans by `state` and `machine` (`internal/api/plans.go:429-451`), machines by `cluster` (`internal/api/reads.go:199-218`); client-side paging for releases, drafts and acts; polling |
+| G10 | No listing of ingestions: only `GET /ingestions/{id}` (`internal/api/routes.go:90`) | finding a paused or lapsed import | served since [#280](https://github.com/ginsys/bronzeward/issues/280): `GET /ingestions`, filtered by `state` and `machine` (`internal/api/ingestions.go:280-299`) |
 | G11 | Recovery marks, releases and accountings have no list route; `GET /recovery` shows only their resulting scope states (`internal/api/recovery_exits.go:123-148`), the records themselves appear in machine timelines and acts | recovery console history | timeline |
 | G12 | Browser use: no statement of CORS, origin checks or hosting of a web client | the web interface at all | #253 |
 | G13 | A human session's mutation takes no expected-epoch precondition: only `Idempotency-Key` and `If-Match` are checked (`internal/api/api.go:388-409`), and the epoch is reported only in an answer (`internal/api/api.go:318-319`). After a committed write's answer is lost and a restore removes its record, the same request with the same key executes afresh in the new epoch ([persistence and API §7.2](persistence-api.md#72-behavior)); a read before repeating leaves a race. An automation token is bound to its issuing epoch and refused `401` in any other (`internal/api/api.go:297-303`) | repeating an ambiguous write ([§8](#8-states-every-view-must-handle), C5, G3, [W11](operator-experience-wireframes.md#w11-empty-withheld-error-and-offline-states)) | none for a human session: the client compares only the epoch it last saw; #253 adds a server-enforced epoch check or explicitly accepts the residual risk |
 | G14 | No read of the process's start mode: `GET /recovery` serves epoch, recovery mode, entry, exit and scopes (`internal/api/recovery_exits.go:123-129`), the headers carry only `Bronzeward-Epoch` and `Bronzeward-Recovery-Mode` (`internal/api/api.go:318-324`). A recovery start shows only in an answer: a `409 recovery-mode-active` without a `scope` member (`internal/api/api.go:241-243`, `internal/api/recovery_exits.go:211-213`), or any recovery-entry answer past the role check but its not-a-recovery-start refusal, of which its `201` and its other `409 conflict` answers carry `epoch` (`internal/api/recovery_entries.go:77`); a normal start shows in that refusal, a plain `409 conflict` with neither an `epoch` nor a `request` member (`internal/api/api.go:348-351`, `internal/api/recovery_entries.go:91-92`, `internal/api/recovery_entries.go:106-108`, `internal/api/recovery_entries.go:133-135`, `internal/api/idempotency.go:65-67`) | the recovery banner and `status` stating that plan creation, approval and unfreeze wait for a normal restart ([§5.9](#59-recovery-after-a-restore)) | the answers of those three routes: past the role check, a recovery-start refusal (no `scope` member) shows a recovery start (`internal/api/api.go:331-345`); a `409 conflict` to recovery entry shows a normal start only without `epoch` and `request` members, and the client tells it apart from the entry's other `409 conflict` answers by those members, never by status and code alone ([client contracts §8.5](client-contracts.md#85-epoch-changes)); nothing shows it before one is sent, so actions cannot be disabled beforehand and the banner holds until the next such answer |
 | G15 | No principal display name: bodies carry principal identifiers only (`internal/api/acts.go:19-30`, `internal/api/releases.go:53`), and no route maps one to a subject or name | showing who published, planned, approved or entered recovery | shortened principal identifiers |
-| G16 | No convergence status: a machine body serves `desired` and `applied.release` but not whether the `Desired` release's artifact digest for the machine differs from the `Applied` digest (`internal/api/reads.go:155-167`), which is what pending convergence means ([execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values)); after an adoption the `Applied` digest is the baseline's ([execution and recovery §6.3](execution-recovery.md#63-adopt)), so equal release IDs do not rule it out | showing whether a machine still needs a plan ([§2.4](#24-desired-applied-and-observed), [§5.2](#52-inventory), [W2](operator-experience-wireframes.md#w2-machines)) | the release difference only, never labelled as pending convergence |
+| G16 | No convergence status: a machine body serves `desired` and `applied.release` but not whether the `Desired` release's artifact digest for the machine differs from the `Applied` digest (`internal/api/reads.go:155-171`), which is what pending convergence means ([execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values)); after an adoption the `Applied` digest is the baseline's ([execution and recovery §6.3](execution-recovery.md#63-adopt)), so equal release IDs do not rule it out | showing whether a machine still needs a plan ([§2.4](#24-desired-applied-and-observed), [§5.2](#52-inventory), [W2](operator-experience-wireframes.md#w2-machines)) | served since [#280](https://github.com/ginsys/bronzeward/issues/280): the machine's `pendingConvergence`, which serves neither digest (`internal/api/reads.go:155-171`) |
 | G17 | The settle floor and the maximum transport deadline are not readable before a decision, when the accounting journey needs them: `SettleFloor` defaults to 30 s and may be configured higher, `MaxTransportDeadline` is required deployment configuration with no default (`internal/config/config.go:134-135`, `internal/config/config.go:161-164`), and neither is on `GET /recovery` (`internal/api/recovery_exits.go:123-148`). After a decision, a successful accounting's entries carry `facts.settleFloor` and `facts.anchor` on the machine timeline and operation events (`internal/api/settle.go:160-161`, `internal/api/recovery_accountings.go:209-211`), and a plan-creation refusal states the maximum (`internal/api/plans.go:113-114`). The scope-accounting anchor is the later of the restore stop plus that maximum and any restored unaccounted attempt's transport deadline (`internal/api/recovery_accountings.go:85-87`, `internal/api/recovery_accountings.go:143`, `internal/api/recovery_accountings.go:188-189`), so a client cannot compute it | the recovery accounting journey: when the end observation may begin ([§5.9](#59-recovery-after-a-restore), [W10](operator-experience-wireframes.md#w10-recovery-console)) | the refusal text, which states the floor and the point it counts from only after a failed decision (`internal/api/settle.go:148-150`) |
 
 Not gaps, by design: no client dispatch or apply route
