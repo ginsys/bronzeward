@@ -94,6 +94,10 @@ func TestStoredRefusalReplaysAsProblem(t *testing.T) {
 	// §9.4: the log carries the problem's instance, for the first answer and the replay alike.
 	_, doc := problem(t, first)
 	instance, _ := doc["instance"].(string)
+	// §9.1: the header names each request, while the replayed problem keeps the stored instance.
+	if h1, h2 := first.Header().Get(requestIDHeader), second.Header().Get(requestIDHeader); instance != h1 || h2 == h1 {
+		t.Fatalf("instance %s; %s first %s, replay %s", instance, requestIDHeader, h1, h2)
+	}
 	e.mu.Lock()
 	n := 0
 	for _, l := range e.logs {
@@ -167,6 +171,7 @@ func httptestRequest(t *testing.T, e *env, ct string) *httptest.ResponseRecorder
 	r.Header.Set("Content-Type", ct)
 	rec := httptest.NewRecorder()
 	e.api.ServeHTTP(rec, r)
+	checkAnswerHeaders(t, rec)
 	return rec
 }
 
