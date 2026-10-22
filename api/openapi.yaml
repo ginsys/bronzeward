@@ -2160,12 +2160,11 @@ components:
       additionalProperties: false
     ApplyResult:
       type: object
-      description: 'An apply-config operation''s result once it completed (settle.go complete): the applied release, the digest
-        of the configuration it confirmed, lowercase hex, and the confirming observation.'
-      required: [appliedRelease, digest, observation]
+      description: 'An apply-config operation''s result once it completed (settle.go complete): the applied release and the
+        confirming observation.'
+      required: [appliedRelease, observation]
       properties:
         appliedRelease: {type: string}
-        digest: {type: string}
         observation: {type: string}
       additionalProperties: false
     ApprovalBody:
