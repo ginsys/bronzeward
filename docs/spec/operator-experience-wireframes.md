@@ -322,8 +322,8 @@ Account scope mch_k2p…7xqa (pre-restore unaccounted)
                                    unaccounted attempt's transport deadline
   End observation      [obs_b… ▾]  recovery observations only; must begin at least the
                                    settle floor after the latest of that point and the start.
-                                   Neither value is readable before a decision (G17); a
-                                   settle-floor refusal states the floor and its anchor.
+                                   The settle floor is not readable before a decision
+                                   (G17); a settle-floor refusal states it and its anchor.
   Resource version     read at both ends, unchanged between them
   Explanation          [______________]  required if the resource version moved
   This records your judgment that no request sent before the restore, from any attempt the

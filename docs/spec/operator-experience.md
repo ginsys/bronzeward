@@ -742,8 +742,8 @@ $ bronzewardctl recovery scope-account mch_k2p…7xqa --start obs_a… --end obs
 Shows: restore stopped at 10:31. Start must be the first successful read after the latest of
 that stop plus the maximum transport deadline and any restored unaccounted attempt's deadline;
 end must be a recovery observation begun at least the settle floor after the latest of that
-point and the start. Neither the maximum deadline nor the settle floor is readable before a
-decision (G17): a settle-floor refusal states the floor and the point it counts from.
+point and the start. The settle floor is not readable before a decision (G17): a settle-floor
+refusal states the floor and the point it counts from. No route serves the maximum deadline.
 Resource version read at both ends, unchanged between them.
 This records your judgment that no request sent before the restore, from any attempt the
 restored journal shows or one it lost, can still land on this machine. It may already have
@@ -773,11 +773,13 @@ start that is not the first read after the deadline, an end that is not a recove
 a resource version not read at both ends, an end before the settle floor, or a moved resource
 version without an explanation (`internal/api/settle.go:111-154`). Before a decision, only the
 settle-floor refusal states the floor and the point it counts from
-(`internal/api/settle.go:148-150`), and only a plan-creation refusal states the maximum
-transport deadline (`internal/api/plans.go:113-114`), so no client shows either as a value
-before one (G17). After a successful accounting its timeline entries carry `facts.settleFloor`
-and `facts.anchor` (`internal/api/settle.go:160-161`,
-`internal/api/recovery_accountings.go:209-211`). **Proposed:** the end-observation choice offers only observations
+(`internal/api/settle.go:148-150`), so no client shows the floor as a value before one (G17).
+No route serves the maximum transport deadline: only a plan-creation refusal states it, at any
+time on a normal start, and a recovery start refuses plan creation before that check
+(`internal/api/plans.go:113-114`, `internal/api/routes.go:120`, `internal/api/api.go:350-352`).
+After a successful accounting its timeline entries carry `facts.settleFloor` and `facts.anchor`
+(`internal/api/settle.go:160-161`, `internal/api/recovery_accountings.go:209-211`,
+`internal/api/recovery_accountings.go:230-231`). **Proposed:** the end-observation choice offers only observations
 with purpose `recovery`, and an observation without a `resourceVersion` is shown unusable at
 either end (`internal/api/observations.go:23`, `internal/api/observations.go:37`). The per-attempt
 accounting also refuses an attempt already accounted and an executor not stopped or taken over
@@ -887,8 +889,9 @@ a mark's `missing[]` list before a release (`internal/api/recovery_marks.go:195-
 
 **Automation.** A CI job with an automation token: create a draft, set fragments from files,
 publish, create a plan, then stop. It cannot import, approve, recover or record inventory. The
-CLI's non-interactive mode (`--no-input`) never prompts; an approval attempt fails before
-sending with "approval is for humans".
+CLI's non-interactive mode (`--no-input`) never prompts; an approval attempt is warned before
+sending with "approval is for humans", and the server refuses it `403` with `humanOnly`
+(client contracts AUTH-04).
 
 ## 8. States every view must handle
 
@@ -1043,7 +1046,7 @@ accepted limitation.
 | G14 | No read of the process's start mode: `GET /recovery` serves epoch, recovery mode, entry, exit and scopes (`internal/api/recovery_exits.go:123-129`), the headers carry only `Bronzeward-Epoch` and `Bronzeward-Recovery-Mode` (`internal/api/api.go:318-324`). A recovery start shows only in an answer: a `409 recovery-mode-active` without a `scope` member (`internal/api/api.go:241-243`, `internal/api/recovery_exits.go:211-213`), or any recovery-entry answer past the role check but its not-a-recovery-start refusal, of which its `201` and its other `409 conflict` answers carry `epoch` (`internal/api/recovery_entries.go:77`); a normal start shows in that refusal, a plain `409 conflict` with neither an `epoch` nor a `request` member (`internal/api/api.go:348-351`, `internal/api/recovery_entries.go:91-92`, `internal/api/recovery_entries.go:106-108`, `internal/api/recovery_entries.go:133-135`, `internal/api/idempotency.go:65-67`) | the recovery banner and `status` stating that plan creation, approval and unfreeze wait for a normal restart ([§5.9](#59-recovery-after-a-restore)) | the answers of those three routes: past the role check, a recovery-start refusal (no `scope` member) shows a recovery start (`internal/api/api.go:331-345`); a `409 conflict` to recovery entry shows a normal start only without `epoch` and `request` members, and the client tells it apart from the entry's other `409 conflict` answers by those members, never by status and code alone ([client contracts §8.5](client-contracts.md#85-epoch-changes)); nothing shows it before one is sent, so actions cannot be disabled beforehand and the banner holds until the next such answer |
 | G15 | No principal display name: bodies carry principal identifiers only (`internal/api/acts.go:19-30`, `internal/api/releases.go:53`), and no route maps one to a subject or name | showing who published, planned, approved or entered recovery | shortened principal identifiers |
 | G16 | No convergence status: a machine body serves `desired` and `applied.release` but not whether the `Desired` release's artifact digest for the machine differs from the `Applied` digest (before [#280](https://github.com/ginsys/bronzeward/issues/280): [`internal/api/reads.go:155-167`](https://github.com/ginsys/bronzeward/blob/23c1bc2a233cbdf0916076e62016a82892107053/internal/api/reads.go#L155-L167)), which is what pending convergence means ([execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values)); after an adoption the `Applied` digest is the baseline's ([execution and recovery §6.3](execution-recovery.md#63-adopt)), so equal release IDs do not rule it out | showing whether a machine still needs a plan ([§2.4](#24-desired-applied-and-observed), [§5.2](#52-inventory), [W2](operator-experience-wireframes.md#w2-machines)) | served since [#280](https://github.com/ginsys/bronzeward/issues/280): the machine's `pendingConvergence`, which serves neither digest (`internal/api/reads.go:155-171`) |
-| G17 | The settle floor and the maximum transport deadline are not readable before a decision, when the accounting journey needs them: `SettleFloor` defaults to 30 s and may be configured higher, `MaxTransportDeadline` is required deployment configuration with no default (`internal/config/config.go:134-135`, `internal/config/config.go:161-164`), and neither is on `GET /recovery` (`internal/api/recovery_exits.go:123-148`). After a decision, a successful accounting's entries carry `facts.settleFloor` and `facts.anchor` on the machine timeline and operation events (`internal/api/settle.go:160-161`, `internal/api/recovery_accountings.go:209-211`), and a plan-creation refusal states the maximum (`internal/api/plans.go:113-114`). The scope-accounting anchor is the later of the restore stop plus that maximum and any restored unaccounted attempt's transport deadline (`internal/api/recovery_accountings.go:85-87`, `internal/api/recovery_accountings.go:143`, `internal/api/recovery_accountings.go:188-189`), so a client cannot compute it | the recovery accounting journey: when the end observation may begin ([§5.9](#59-recovery-after-a-restore), [W10](operator-experience-wireframes.md#w10-recovery-console)) | the refusal text, which states the floor and the point it counts from only after a failed decision (`internal/api/settle.go:148-150`) |
+| G17 | No route serves the settle floor or the maximum transport deadline, which the accounting journey needs before a decision: `SettleFloor` defaults to 30 s and may be configured higher, `MaxTransportDeadline` is required deployment configuration with no default (`internal/config/config.go:134-135`, `internal/config/config.go:161-164`), and neither is on `GET /recovery` (`internal/api/recovery_exits.go:123-148`). After a decision, a successful accounting's entries carry `facts.settleFloor` and `facts.anchor` on the machine timeline and operation events (`internal/api/settle.go:160-161`, `internal/api/recovery_accountings.go:209-211`, `internal/api/recovery_accountings.go:230-231`). Separately, on a normal start a plan-creation refusal states the maximum at any time, before a decision too; a recovery start refuses plan creation before that check (`internal/api/plans.go:113-114`, `internal/api/routes.go:120`, `internal/api/api.go:350-352`). The scope-accounting anchor is the later of the restore stop plus that maximum and any restored unaccounted attempt's transport deadline (`internal/api/recovery_accountings.go:85-87`, `internal/api/recovery_accountings.go:143`, `internal/api/recovery_accountings.go:188-189`), so a client cannot compute it | the recovery accounting journey: when the end observation may begin ([§5.9](#59-recovery-after-a-restore), [W10](operator-experience-wireframes.md#w10-recovery-console)) | the refusal text, which states the floor and the point it counts from only after a failed decision (`internal/api/settle.go:148-150`) |
 
 Not gaps, by design: no client dispatch or apply route
 ([design §12.7](../design/Talos_Configuration_and_Machine_Management_Design.md#127-application-approval-and-dispatch-boundary));
