@@ -100,8 +100,8 @@ func TestIngestRefusesBeforeOpeningAnything(t *testing.T) {
 // needs neither a database nor a provider, which is the point: the denominator comes from a file,
 // so it cannot quietly become "whatever the detector found".
 func TestSchemaReportMeasuresAgainstAGroundTruthItDidNotProduce(t *testing.T) {
-	// The report echoes its two input paths. Go's random temp-dir names sometimes contain "f1", so
-	// the second case puts the inputs under such a name every run, instead of once in a while.
+	// The report echoes its two input paths, and the temp root they sit under (GOTMPDIR or TMPDIR)
+	// can contain "f1", a hex session ID for one. The second case puts one in the path every run.
 	for _, c := range []struct{ name, sub string }{
 		{"temp dir", ""},
 		{"temp path containing f1", "run-f1"},
