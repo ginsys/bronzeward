@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/ginsys/bronzeward/internal/auth"
@@ -157,6 +158,56 @@ func TestExpectedEpochConcurrentEntry(t *testing.T) {
 	}
 	wantEpochMismatch(t, <-done, ep)
 	if acts, records := rows(t, e); acts != 0 || records != 0 {
+		t.Fatalf("acts %d, records %d", acts, records)
+	}
+
+	// Only a lookup under the key's lock refuses. A request without the header passes its first
+	// lookup; the entry starts and holds the installation state while that request's transaction
+	// waits on it under the key's lock, and a second request with the same key and the earlier epoch
+	// waits in its first lookup. When the entry commits, the first commits its record, which the
+	// second's first lookup, begun before, cannot see: the read under the key's lock finds it, and
+	// the second answers with the first's replay, not 412.
+	rt = testRoute(nil)
+	ep = id.New(id.Epoch)
+	var once sync.Once
+	rt.prepare = func(context.Context, *API, *request) error {
+		var err error
+		once.Do(func() {
+			var tx *sql.Tx
+			if tx, err = e.db.BeginTx(t.Context(), nil); err != nil {
+				return
+			}
+			held <- tx // the request's goroutine: report a failure, never t.Fatal
+			if _, err = tx.Exec("INSERT INTO recovery_epoch (epoch, entered_at) VALUES ($1, now())", ep); err != nil {
+				return
+			}
+			_, err = tx.Exec("UPDATE installation_state SET epoch = $1", ep)
+		})
+		return err
+	}
+	e = newEnv(t, options{extra: []*route{rt}})
+	tok = e.human("h-author")
+	e.recordHuman("h-author")
+	first := post(tok, key, `{"note":"a"}`)
+	second := first
+	second.expected = epoch(t, e.db)
+	firstDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() { firstDone <- e.do(e.api, first) }()
+	tx = <-held
+	defer func() { _ = tx.Rollback() }()
+	dbtest.WaitForLockWait(t, e.db)
+	go func() { done <- e.do(e.api, second) }()
+	waitForLockWaits(t, e.db, 2)
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if rec := <-firstDone; rec.Code != http.StatusCreated {
+		t.Fatalf("first: %d %s", rec.Code, rec.Body)
+	}
+	if rec := <-done; rec.Code != http.StatusCreated || rec.Header().Get("Idempotent-Replayed") != "true" {
+		t.Fatalf("second: %d %v %s; want the first's replay", rec.Code, rec.Header(), rec.Body)
+	}
+	if acts, records := rows(t, e); acts != 1 || records != 1 {
 		t.Fatalf("acts %d, records %d", acts, records)
 	}
 }
