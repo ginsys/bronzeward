@@ -27,7 +27,16 @@ cluster:
 
 func writeFile(t *testing.T, name, body string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), name)
+	return writeFileIn(t, t.TempDir(), name, body)
+}
+
+// writeFileIn writes into dir, creating it, so a test can choose the path a report echoes.
+func writeFileIn(t *testing.T, dir, name, body string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("creating %s: %v", dir, err)
+	}
+	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("writing %s: %v", name, err)
 	}
@@ -91,11 +100,22 @@ func TestIngestRefusesBeforeOpeningAnything(t *testing.T) {
 // needs neither a database nor a provider, which is the point: the denominator comes from a file,
 // so it cannot quietly become "whatever the detector found".
 func TestSchemaReportMeasuresAgainstAGroundTruthItDidNotProduce(t *testing.T) {
-	config := writeFile(t, "controlplane.yaml", miniConfig)
+	// The report echoes its two input paths. Go's random temp-dir names sometimes contain "f1", so
+	// the second case puts the inputs under such a name every run, instead of once in a while.
+	for _, c := range []struct{ name, sub string }{
+		{"temp dir", ""},
+		{"temp path containing f1", "run-f1"},
+	} {
+		t.Run(c.name, func(t *testing.T) { schemaReportCase(t, filepath.Join(t.TempDir(), c.sub)) })
+	}
+}
+
+func schemaReportCase(t *testing.T, dir string) {
+	config := writeFileIn(t, dir, "controlplane.yaml", miniConfig)
 	// The truth includes the OIDC client secret, which the Talos rules deliberately do not cover,
 	// and excludes machine.ca.crt, which is a certificate sitting beside its key. Both are there to
 	// make the two numbers move independently.
-	truth := writeFile(t, "truth.txt", strings.Join([]string{
+	truth := writeFileIn(t, dir, "truth.txt", strings.Join([]string{
 		"doc[0].machine.token",
 		"doc[0].machine.ca.key",
 		"doc[0].cluster.id",
@@ -120,7 +140,7 @@ func TestSchemaReportMeasuresAgainstAGroundTruthItDidNotProduce(t *testing.T) {
 	if want := "recall 4/5, precision 4/4"; !strings.Contains(stdout, want) {
 		t.Errorf("the report does not give %q:\n%s", want, stdout)
 	}
-	if strings.Contains(strings.ToLower(stdout), "f1") || strings.Contains(strings.ToLower(stdout), "f-score") {
+	if combinedScore(stdout, config, truth) {
 		t.Errorf("the report gives a combined score, which §6.9 forbids the claim behind:\n%s", stdout)
 	}
 	// §6.9's limitation has to travel with the numbers, not sit in a document read separately.
@@ -132,6 +152,33 @@ func TestSchemaReportMeasuresAgainstAGroundTruthItDidNotProduce(t *testing.T) {
 	for _, value := range []string{"e1-test-machine-token", "e1-test-cluster-secret", "e1-test-machine-ca-key"} {
 		if strings.Contains(stdout, value) {
 			t.Errorf("the report printed the value at a detected path: %q", value)
+		}
+	}
+}
+
+// combinedScore reports whether report names an F1 or F-score. The input paths it echoes are
+// removed first: they are the caller's file names, not the report's claim, and may contain "f1".
+func combinedScore(report string, inputs ...string) bool {
+	for _, in := range inputs {
+		report = strings.ReplaceAll(report, in, "")
+	}
+	report = strings.ToLower(report)
+	return strings.Contains(report, "f1") || strings.Contains(report, "f-score")
+}
+
+func TestCombinedScoreIgnoresOnlyTheInputPaths(t *testing.T) {
+	const path = "/tmp/run-f1/controlplane.yaml"
+	for _, c := range []struct {
+		report string
+		want   bool
+	}{
+		{"configuration: " + path + "\nrecall 4/5, precision 4/4\n", false},
+		{"configuration: " + path + "\nrecall 4/5, precision 4/4, F1 0.89\n", true},
+		{"configuration: " + path + "\nf-score 0.89\n", true},
+		{"configuration: /tmp/other-f1/controlplane.yaml\n", true},
+	} {
+		if got := combinedScore(c.report, path); got != c.want {
+			t.Errorf("combinedScore(%q, %q) = %v, want %v", c.report, path, got, c.want)
 		}
 	}
 }
