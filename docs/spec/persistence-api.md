@@ -1661,6 +1661,7 @@ API revisions:
 | Revision | Adds |
 | --- | --- |
 | 1 | `v1` as of `GET /server` |
+| 2 | `Bronzeward-Expected-Epoch` on mutations and `412 epoch-mismatch` (§7.2) |
 
 ### 9.2 Resources and routes
 
