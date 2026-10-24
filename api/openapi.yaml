@@ -2105,6 +2105,26 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ReviewBody'}
         default: {$ref: '#/components/responses/Problem'}
+  /server:
+    get:
+      operationId: getServer
+      tags: [server]
+      description: What the process that answered serves and the read-only settings a client shows (persistence and API §9.1,
+        §9.2). It takes no query. Before a recovery start's entry commits it is refused as every request but the entry is.
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters: []
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Cache-Control: {$ref: '#/components/headers/NoStore'}
+            Bronzeward-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ServerBody'}
+        default: {$ref: '#/components/responses/Problem'}
 components:
   securitySchemes:
     bearer:
@@ -3667,6 +3687,46 @@ components:
         reasons:
           type: array
           items: {type: string}
+      additionalProperties: false
+    ServerBody:
+      description: The process that answered, which another instance's configuration may not match. Durations are in seconds,
+        each as configured or defaulted. No secret, address, path or configured name is served.
+      type: object
+      required: [version, apiRevision, features, startMode, maxTokenLifetimeSeconds, settleFloorSeconds, maxTransportDeadlineSeconds,
+        ingestionClaim, planDefaults]
+      properties:
+        version: {type: string, description: 'The build''s version, else the main module''s, else (devel).'}
+        apiRevision: {type: integer, description: The API revision within v1 (persistence and API §9.1).}
+        features:
+          type: array
+          description: In name order, each one this process has a provider for; empty without one.
+          items: {type: string, enum: [execution, ingestion, publication]}
+        startMode: {type: string, enum: [normal, recovery], description: 'recovery under the recovery-start flag, after its entry
+            too.'}
+        maxTokenLifetimeSeconds: {type: number}
+        settleFloorSeconds: {type: number}
+        maxTransportDeadlineSeconds: {type: number}
+        ingestionClaim:
+          description: Null without the ingestion block.
+          type: [object, 'null']
+          required: [leaseSeconds, absoluteExpirySeconds]
+          properties:
+            leaseSeconds: {type: number}
+            absoluteExpirySeconds: {type: number}
+          additionalProperties: false
+        planDefaults:
+          description: Each default named as a plan creation request names the value.
+          type: object
+          required: [expiresInSeconds, maxObservationAgeSeconds, checkValiditySeconds, transportDeadlineSeconds, verificationDeadlineSeconds,
+            maxAttempts]
+          properties:
+            expiresInSeconds: {type: number}
+            maxObservationAgeSeconds: {type: number}
+            checkValiditySeconds: {type: number}
+            transportDeadlineSeconds: {type: number}
+            verificationDeadlineSeconds: {type: number}
+            maxAttempts: {type: integer}
+          additionalProperties: false
       additionalProperties: false
     SourceEntry:
       type: object
