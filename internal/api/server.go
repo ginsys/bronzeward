@@ -10,7 +10,7 @@ import (
 
 // apiRevision is the API revision within v1 (persistence-api.md §9.1): raised by one with each
 // additive change, which adds its row to §9.1's revision table.
-const apiRevision = 1
+const apiRevision = 2
 
 // version is the server's version when the build sets it
 // (-ldflags "-X github.com/ginsys/bronzeward/internal/api.version=…"); otherwise serverVersion
