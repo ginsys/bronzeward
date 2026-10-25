@@ -6,6 +6,10 @@
 package: apitypes
 generate:
   models: true
+output-options:
+  # Applied in strict mode, the default, so an action that matches nothing fails the generation.
+  overlay:
+    path: internal/client/apitypes/overlay.yaml
 compatibility:
   # Without it the layer enumeration's value `role` collides with the type Role.
   always-prefix-enum-values: true
