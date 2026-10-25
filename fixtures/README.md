@@ -143,8 +143,10 @@ mise run dev-idp-down    # its containers, network and .dev/idp/; mise run dev-d
 - **State.** `.dev/idp/` (gitignored) holds the provider's two machine-user tokens, the target's
   signing key, the target's static `oidc` binary, which its container runs read-only, and
   `idp.env`, the `BW_TEST_IDP_*` variables `go-idp` reads. The containers are
-  kept until `dev-idp-down` removes them, so a container that exits during `dev-idp` fails it at
-  once with its log tail, and `docker logs` still reads it afterwards. They are
+  kept until `dev-idp-down` removes them with their data, so `docker logs` still reads one that
+  exited. While `dev-idp` waits for each to answer, a container that exits fails it at once with
+  that container's log tail; one that exits during the few seconds of seeding calls fails the
+  call instead. They are
   shared by every worktree on the host; `.dev/idp/` is per checkout, so start and stop the
   provider from the same one.
 - **Self-test gate.** Without `BW_TEST_IDP_ISSUER` the tests skip; `go-idp` sets

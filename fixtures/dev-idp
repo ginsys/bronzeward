@@ -32,14 +32,16 @@ present() {
   ids=$(docker ps -aq --filter "name=^$1\$") || die "cannot list containers (docker ps)"
   [ -n "$ids" ]
 }
-# alive: the container is still running. One that has exited fails up at once with its log tail:
-# the containers run without --rm, so that they and their logs survive until down.
+# alive <container>...: each is still running. One that has exited fails up at once with its own
+# log tail. The containers run without --rm, so that they and their logs survive until down.
 alive() {
-  local running
-  running=$(docker inspect -f '{{.State.Running}}' "$1") || die "cannot inspect $1 (docker inspect)"
-  [ "$running" = true ] && return
-  docker logs --tail 50 "$1" >&2 || true
-  die "$1 exited during start-up, its log tail above (docker logs $1; mise run dev-idp-down)"
+  local c running
+  for c; do
+    running=$(docker inspect -f '{{.State.Running}}' "$c") || die "cannot inspect $c (docker inspect)"
+    [ "$running" = true ] && continue
+    docker logs --tail 50 "$c" >&2 || true
+    die "$c exited during start-up, its log tail above (docker logs $c; mise run dev-idp-down)"
+  done
 }
 
 # ours: the provider running is the one this checkout's state describes. A provider another
@@ -57,7 +59,7 @@ ours() {
 down() {
   local c ids
   for c in "$groups" "$zitadel" "$pg"; do
-    if present "$c"; then docker rm -f "$c" >/dev/null; fi
+    if present "$c"; then docker rm -fv "$c" >/dev/null; fi
     for _ in $(seq 30); do present "$c" || continue 2; sleep 1; done
     die "$c was still present after 30s (docker ps -a; docker rm -f $c)"
   done
@@ -146,7 +148,7 @@ up() {
   # the API behind it.
   ready=""
   for _ in $(seq 120); do
-    alive "$zitadel"
+    alive "$pg" "$zitadel"
     if [ -s "$state/login.pat" ] && [ -s "$state/seed.pat" ] && curl -sf --noproxy '*' -o /dev/null --max-time 2 \
       -H "Authorization: Bearer $(cat "$state/seed.pat")" "$issuer/admin/v1/settings/oidc"; then ready=1 && break; fi
     sleep 1
@@ -191,7 +193,7 @@ up() {
   # Up once it answers an unsigned call (503 without a key), asked from inside the network.
   ready=""
   for _ in $(seq 30); do
-    alive "$groups"
+    alive "$pg" "$zitadel" "$groups"
     if [ "$(docker run --rm --network "$net" "$(pin CURL_IMAGE)" -s -o /dev/null -w '%{http_code}' \
       -X POST "http://$groups:8090/groups" 2>/dev/null)" = 503 ]; then ready=1 && break; fi
     sleep 1
