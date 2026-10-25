@@ -531,8 +531,11 @@ contract's, and this specification does not close it.
    so a recovery entry that commits at any point before the write's own transaction is caught: if the first
    attempt's record survived, the repeat meets the earlier-epoch `409` of item 7 (AMB-07);
    otherwise, when a restore removed it or the first attempt never committed, the repeat is
-   refused `412 epoch-mismatch` naming the current epoch, and nothing commits (G21, AMB-12). A
-   service principal's repeat is refused `401` instead, its token carrying its epoch. Before a
+   refused `412 epoch-mismatch` naming the current epoch (G21, AMB-12). A route's work outside
+   those lookups can refuse first, and a fragment write's claim or a scope mark's observation
+   taken before the refusal stays ([persistence and API §7.2](persistence-api.md#72-behavior),
+   §14), but no act or idempotency record commits. A service principal's repeat is refused `401`
+   instead, its token carrying its epoch. Before a
    repeat the client still confirms the epoch with one `GET /recovery` and compares its
    `Bronzeward-Epoch` with the reference epoch, so a write already known to be across an epoch
    change is not sent again; the header of the failed attempt is not enough, because a dropped
