@@ -647,13 +647,19 @@ Rules for every transaction:
    the request's own transaction or a publication's T3; §14 gives the answer
    when the deadlock is in a transaction the route runs before the request's
    own. A transaction that a job or the controller runs outside any request
-   is retried the same way: an `ingest` job's T1 and its T7 and T8 writes, a
-   publish job's claim, lease extension, observations and failure recording,
-   and the controller's transactions (execution and recovery). When its
-   retries are exhausted, it is handled like any other database failure
-   there: nothing of that transaction commits, and no problem names the
-   deadlock. The job stops, left to its lease, the sweep or a takeover
-   (§5.1), or its loop tries again on a later pass.
+   is retried the same way: an `ingest` job's T1 and its other T7 and T8
+   writes, a publish job's claim, lease extension, observations and failure
+   recording, and the controller's transactions (execution and recovery).
+   The staging claim's heartbeat and the sweep (§5.1) are not retried. When
+   the retries are exhausted, or on the first deadlock in those two, nothing
+   of that transaction commits and no problem names the deadlock; what
+   follows is that transaction's failure path. A run stops, left to its
+   lease, the sweep or a takeover (§5.1). A failed lease extension leaves its
+   job running, and the next heartbeat tries again, as the sweep does at its
+   next run and a polling loop at its next pass. A response record, whose
+   only retry is of a lost connection after each lease, leaves the operation
+   `sending` until a controller start takes it over (execution and recovery
+   §3.4).
 6. **Commit-unknown is resolved by reading, not by assuming.** A connection
    error after `COMMIT` was sent leaves the outcome to the server. In DB row
    061 the release committed after the client was gone, and an idempotent
@@ -3283,7 +3289,7 @@ or Desired change; it does not erase earlier evidence.
 | Recovery | Publication changing the assignment of a scope not released in the current epoch | operation `failed`, `409 recovery-mode-active` (§6.2) | operation, act |
 | Recovery | Any request but liveness and entry under the recovery-start flag, before entry | `409 recovery-mode-active` | nothing |
 | Recovery | A second entry in one recovery start, under another key | `409 conflict` naming the epoch the first minted (§12.2) | nothing |
-| Any | Deadlock retries exhausted | `503 transient-conflict` in the request's own transaction. In a transaction its route runs before that one, `500 internal-error`: a draft entry's claim transaction, or a scope mark's observation (§7.2, §9.2); the key's lookup repeated under its lock before a `412 epoch-mismatch` answers `503 dependency-unavailable` (§7.2). In a transaction a job or the controller runs outside any request, other than a publication's T3, no problem: handled like any other database failure there, the job left to its lease, the sweep or a takeover, or its loop's later pass (§5 rule 5) | nothing of the request's own transaction; what the route committed in an earlier one stays: a draft entry's claim and its orphans, or a scope mark's restoration observation or only its `observation-started` entry (§7.2, §9.2). Nothing of the job's or controller's transaction; what it committed in earlier ones stays |
+| Any | Deadlock retries exhausted | `503 transient-conflict` in the request's own transaction. In a transaction its route runs before that one, `500 internal-error`: a draft entry's claim transaction, or a scope mark's observation (§7.2, §9.2); the key's lookup repeated under its lock before a `412 epoch-mismatch` answers `503 dependency-unavailable` (§7.2). In a transaction a job or the controller runs outside any request, other than a publication's T3, no problem, and that transaction's failure path follows: a run is left to its lease, the sweep or a takeover; a lease extension, the sweep or a polling loop tries again at its next heartbeat, run or pass; a response record leaves the operation `sending` until a controller start takes it over (§5 rule 5; execution and recovery §3.4) | nothing of the request's own transaction; what the route committed in an earlier one stays: a draft entry's claim and its orphans, or a scope mark's restoration observation or only its `observation-started` entry (§7.2, §9.2). Nothing of the job's or controller's transaction; what it committed in earlier ones stays |
 | Migrate | Failure or kill inside a migration | migration absent; server refuses to start | earlier migrations |
 | Startup | Schema or checksum mismatch | refuses to start | nothing |
 | Restore | No recovery-mode entry after a restore | undetected (design §14.6); pre-restore tokens can pass | the residual of §12.1 |
