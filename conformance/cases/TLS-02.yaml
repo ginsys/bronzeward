@@ -11,6 +11,6 @@ expect:
   absent: [synthetic value in retained artifacts or browser storage]
 runs:
   web:
-    check: web/e2e/tls.e2e.ts, mise run browser
+    check: web/e2e/tls.e2e.ts, mise run browser; "not repeated" in web/src/request.test.ts, mise run web
     browsers: [chrome, edge, firefox, firefox-esr, safari]
     covers: the web client; the CLI's half (the CLI names the target) runs with the CLI

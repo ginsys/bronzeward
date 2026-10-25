@@ -258,6 +258,56 @@ describe("stale-response discard", () => {
     expect(await pending).toEqual({ kind: "ok", data: { a: 1 } });
   });
 
+  // Headers at once, the body only after release(): the view can change while the body arrives.
+  function slowBody(status: number, contentType: string, body: unknown) {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const stream = new ReadableStream<Uint8Array>({
+      async pull(ctl) {
+        await gate;
+        ctl.enqueue(new TextEncoder().encode(JSON.stringify(body)));
+        ctl.close();
+      },
+    });
+    const response = new Response(stream, { status, headers: { "Content-Type": contentType, "Bronzeward-Epoch": EPOCH } });
+    return { fetchImpl: (async () => response) as unknown as typeof fetch, release };
+  }
+
+  test("a success whose body arrives after the route changed is not rendered", async () => {
+    const { fetchImpl, release } = slowBody(200, "application/json", { stale: true });
+    const c = new Client({ fetch: fetchImpl });
+    c.setView(base);
+    const pending = c.read("/machines");
+    await new Promise((r) => setTimeout(r, 0)); // the headers have arrived
+    c.setView({ ...base, route: "/plans" });
+    release();
+    expect(await pending).toEqual({ kind: "discarded" });
+  });
+
+  test("a revocation whose body arrives after a new sign-in clears nothing", async () => {
+    const { fetchImpl, release } = slowBody(403, "application/problem+json", {
+      type: "urn:bronzeward:problem:identity-revoked", title: "revoked", status: 403,
+    });
+    const onRevoked = vi.fn();
+    const c = new Client({ fetch: fetchImpl, onRevoked });
+    c.setView(base);
+    const pending = c.read("/machines");
+    await new Promise((r) => setTimeout(r, 0));
+    c.setView({ ...base, principal: "p2" });
+    release();
+    expect(await pending).toEqual({ kind: "discarded" });
+    expect(onRevoked).not.toHaveBeenCalled();
+  });
+
+  test("a body cut off by the network is a transport failure; one that is not JSON is a defect", async () => {
+    const cut = new Response(new ReadableStream({ pull: (ctl) => ctl.error(new TypeError("network error")) }), {
+      status: 200, headers: { "Bronzeward-Epoch": EPOCH },
+    });
+    expect(await client([cut]).c.read("/server")).toEqual({ kind: "transport" });
+    const html = new Response("<html>", { status: 200, headers: { "Bronzeward-Epoch": EPOCH } });
+    expect(await client([html]).c.read("/server")).toEqual({ kind: "defect", message: "the response is not JSON" });
+  });
+
   test("a view change during a 503 backoff stops the retries", async () => {
     let c!: Client;
     const fetchMock = vi.fn(async () => problem(503, "dependency-unavailable"));
