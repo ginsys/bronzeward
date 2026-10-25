@@ -169,9 +169,9 @@ func requestErrors(doc, op map[string]any, reqBody, where string) []string {
 }
 
 // paramErrors reports a query parameter of r, a request the server accepted, that op does not
-// describe, and a query or header value op's schema for it refuses. An undescribed request header
-// is not reported: the route walk sends Idempotency-Key and If-Match everywhere and a read ignores
-// them; routeFacts holds each route's described headers to the table.
+// describe, one op requires that r lacks, and a query or header value op's schema for it refuses.
+// An undescribed request header is not reported: the route walk sends Idempotency-Key and If-Match
+// everywhere and a read ignores them; routeFacts holds each route's described headers to the table.
 func paramErrors(doc, op map[string]any, r *http.Request, where string) []string {
 	described := map[string]map[string]any{}
 	ps, _ := op["parameters"].([]any)
@@ -195,6 +195,9 @@ func paramErrors(doc, op map[string]any, r *http.Request, where string) []string
 		values := r.Header.Values(name)
 		if in == "query" {
 			values = r.URL.Query()[name]
+		}
+		if len(values) == 0 && described[at]["required"] == true {
+			errs = append(errs, fmt.Sprintf("%s: required %s %s is missing", where, in, described[at]["name"]))
 		}
 		schema := described[at]["schema"] // validated as written: a $ref's siblings apply too
 		resolved, _ := deref(doc, schema).(map[string]any)
@@ -733,6 +736,25 @@ func TestDescriptionReferenceInputMatchesServer(t *testing.T) {
 	}
 }
 
+// A parameter the description requires and an accepted request lacks is reported, since the server
+// did without it: here Last-Event-ID, made required in a copy of the description.
+func TestParamErrorsReportMissingRequired(t *testing.T) {
+	t.Parallel()
+	doc, strict := description(t), freshDescription(t)
+	pointer(strict, "#/components/parameters/LastEventID").(map[string]any)["required"] = true
+	op := func(d map[string]any) map[string]any {
+		return pointer(d, "#/paths/~1operations~1{id}~1events/get").(map[string]any)
+	}
+	r := httptest.NewRequest(http.MethodGet, prefix+"/operations/op_x/events", nil)
+	if errs := paramErrors(doc, op(doc), r, "GET"); len(errs) != 0 {
+		t.Errorf("the description: %q", errs)
+	}
+	errs := paramErrors(strict, op(strict), r, "GET")
+	if want := "required header Last-Event-ID is missing"; !slices.ContainsFunc(errs, func(e string) bool { return strings.Contains(e, want) }) {
+		t.Errorf("Last-Event-ID required: got %q, want an error containing %q", errs, want)
+	}
+}
+
 // checkResponse's negative controls: each kind of mismatch, made on a real exchange shape, is
 // reported, and the matching exchange is not.
 func TestExchangeErrorsReportEachMismatch(t *testing.T) {
@@ -767,7 +789,9 @@ func TestExchangeErrorsReportEachMismatch(t *testing.T) {
 		return rec
 	}
 	post := func(body string) *http.Request {
-		return httptest.NewRequest(http.MethodPost, prefix+"/clusters", strings.NewReader(body))
+		r := httptest.NewRequest(http.MethodPost, prefix+"/clusters", strings.NewReader(body))
+		r.Header.Set("Idempotency-Key", "k-exchange-0123456789")
+		return r
 	}
 	if errs := exchangeErrors(doc, post(input), input, answer(201, "application/json", cluster)); len(errs) != 0 {
 		t.Fatalf("a described exchange refused: %v", errs)
