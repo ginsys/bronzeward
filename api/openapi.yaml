@@ -2176,8 +2176,8 @@ components:
       name: Bronzeward-Expected-Epoch
       in: header
       description: Optional; the epoch identity the client expects. When the key has no record and this names another
-        epoch, the request is refused 412 epoch-mismatch and nothing commits. An empty one or two of them are 400
-        invalid-request (API revision 2; persistence and API §7.2, §9.1).
+        epoch, the request is refused 412 epoch-mismatch and its own transaction commits nothing. An empty one or two
+        of them are 400 invalid-request (API revision 2; persistence and API §7.2, §9.1).
       schema: {type: string, minLength: 1}
     IfMatch:
       name: If-Match

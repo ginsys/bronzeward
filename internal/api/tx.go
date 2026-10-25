@@ -310,9 +310,9 @@ func (a *API) resolveCommit(q *request, rec *record, cerr error) (*record, bool,
 }
 
 // notCommitted ends the detail of a refusal that can come after a route's earlier transaction
-// committed: a draft entry's staging claim, or a scope mark's observation or its start, stays, and
-// only the request's own transaction, with its act and idempotency record, committed nothing
-// (§7.2, §9.2).
+// committed: a draft entry's staging claim, a scope mark's observation or its start, or a principal
+// row stays, and only the request's own transaction, with its act and idempotency record, committed
+// nothing (§7.2, §9.2, §14).
 const notCommitted = "nothing of the request's own transaction was committed"
 
 // fail answers an error from a mutating request and logs its cause under the request id.
