@@ -1325,19 +1325,28 @@ write except the recovery entry (client contracts §8.4). Wherever this document
 the table below included, says that a request whose key has no record executes,
 ingests afresh or is answered by a staging claim, that holds only when its
 `Bronzeward-Expected-Epoch` is absent or names the current epoch; otherwise a
-lookup refuses it `412 epoch-mismatch`. The first lookup runs once the
-request's query, input, keyed fingerprint and principal are accepted, and
-before every check of its route, including the work a route does before its
-transaction (§9.2). So the same holds of each refusal that §9.2 and §14 give
-for a route's own checks, a superseded controller's `503 epoch-superseded`
-among them. Anything that work committed before a later lookup refused the
-request stays (§14).
+lookup refuses it `412 epoch-mismatch`. The first lookup runs once
+authentication, the route's role and human-only check (§10.3), the
+recovery-start refusals (§12.2) and the request's headers, query, input, keyed
+fingerprint and principal are accepted, and before every other check of its
+route. A lookup runs again in a draft entry's claim transaction and in the
+request's transaction, before their checks, so the same holds of each refusal
+that §9.2 and §14 give for a route's own checks in those transactions, a
+superseded controller's
+`503 epoch-superseded` among them. The work a route does before its
+transaction has no lookup of its own: a scope mark's observation answers
+`503 epoch-superseded`, whatever the header names, when an entry commits after
+the first lookup and before the observation is recorded (§9.2), and a repeat
+under the same key whose header names the earlier epoch is then refused
+`412 epoch-mismatch`. Anything that work
+committed before a later refusal stays (§14).
 
 The draft entry routes are also the one exception to "a refusal commits no
 record", because their ingestion persists a staging claim before T1 that a
 refusal does not undo. Their claim records the principal and the idempotency
 key. A `4xx` refusal after the claim exists (compilation's `422`, or T1's
-`412 precondition-failed` or `409`) commits the
+`412 precondition-failed`, `409` or `422 validation-failed` with
+`"rule": "unknown-reference"`, §9.3) commits the
 idempotency record with the refusal's response, and the act of §10.5 naming
 the refused request, in the transaction that records the claim's outcome: the
 claim and its provider generations persist, so the audit records who caused
@@ -1772,16 +1781,22 @@ the act together:
   and `ready` otherwise, as one
   scope state entry naming the observation and the act. The answer names the
   state moved from and to, the observation and what is missing. A scope may be
-  marked again. Outside recovery mode, a released scope, or a `Desired` release
-  that changed during the check is `409 conflict`; a scope still pre-restore
-  unaccounted is `409 recovery-mode-active`, and nothing is observed; an unknown
-  machine is `404 not-found`. After these, a controller with no executor
-  answers `503 dependency-unavailable`, and one whose epoch an entry committed
-  after its observation superseded answers `503 epoch-superseded` (§5.1), or
-  `412 epoch-mismatch` when the mark's `Bronzeward-Expected-Epoch` names
-  another epoch, which its transaction's lookup refuses first (§7.2). Either
-  way the observation stays committed. The scope state entry also names the
-  `Desired` release the check was for, null for none.
+  marked again. Before the observation, an unknown machine is
+  `404 not-found`, outside recovery mode or for a released scope it is
+  `409 conflict`, a scope still pre-restore unaccounted is
+  `409 recovery-mode-active`, and then a controller with no executor answers
+  `503 dependency-unavailable`; nothing is observed. An entry that commits
+  after the request's first lookup and before the observation is recorded
+  makes the observation answer `503 epoch-superseded`, whatever the
+  `Bronzeward-Expected-Epoch` names (§7.2); an observation-started entry it
+  committed stays. In the transaction, its lookup refuses a mismatching
+  `Bronzeward-Expected-Epoch` `412 epoch-mismatch` first (§7.2); then outside
+  recovery mode it is `409 conflict`; then a controller whose epoch an entry
+  committed after its observation superseded answers `503 epoch-superseded`
+  (§5.1); then the scope refusals above and a `Desired` release that changed
+  during the check (`409 conflict`) follow. Each of these leaves the recorded
+  observation committed. The scope state entry also names the `Desired`
+  release the check was for, null for none.
 - `POST /recovery/scopes/{machine}/releases` takes `facts` as above and
   releases a `ready` scope in the current epoch (execution and recovery §7.3
   step 7), as one scope state entry and a scope release record naming the mark
@@ -3215,9 +3230,11 @@ or Desired change; it does not erase earlier evidence.
 | Restore | No recovery-mode entry after a restore | undetected (design §14.6); pre-restore tokens can pass | the residual of §12.1 |
 
 "Nothing" is apart from a human's Principal row, which a first admitted
-mutating request creates before its transaction and a refusal inside that
-transaction leaves (§10), and apart from the row an identity revocation
-creates for a subject that never signed in, which a refusal inside its
+mutating request creates before its first lookup and every later refusal
+leaves: the first lookup's `412 epoch-mismatch`, a refusal of the work its
+route does before its transaction and one inside that transaction (§7.2,
+§10). It is also apart from the row an identity revocation creates, before its
+transaction, for a subject that never signed in, which a refusal inside that
 transaction leaves too; neither row grants anything. The `401`, `403` and
 `428` rows, and the refusals under the recovery-start flag before entry,
 create none.
@@ -3244,9 +3261,9 @@ create none.
 9. **Every committed API request has an act and an idempotency record** in
    its own transaction; no refused request has either, except a draft entry
    route refused after its staging claim exists by compilation's `422` or T1's
-   `412 precondition-failed` or `409`, which commits both for the refusal
-   (§7.2). Its `412 epoch-mismatch` and `5xx` refusals commit neither.
-   Transactions that serve no request record timeline entries instead.
+   `412 precondition-failed`, `409` or `422` unknown reference, which commits
+   both for the refusal (§7.2). Its `412 epoch-mismatch` and `5xx` refusals
+   commit neither. Transactions that serve no request record timeline entries instead.
 10. **No request body, secret value or ciphertext in an idempotency record, an
     act or a problem document.**
 11. **Everything that authorizes carries the current epoch** (approvals, scope
