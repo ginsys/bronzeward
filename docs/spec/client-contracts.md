@@ -104,7 +104,7 @@ The facts every later section relies on, read from the code and the contracts.
 | Epoch headers | A response to an authenticated request carries `Bronzeward-Epoch`, and `Bronzeward-Recovery-Mode: true` while recovery mode is in effect, once the installation state was read; `401`, `403 identity-revoked`, liveness and a `503` from authentication or from the installation-state read carry neither | `internal/api/api.go:267-283`, `internal/api/api.go:325-333`, `internal/api/problem.go:68-71`; [persistence and API §9.1](persistence-api.md#91-conventions) |
 | Pagination | `limit` 1-500, default 50; opaque `cursor`; answer `{"items": [...], "next": "..."}` with `next` omitted on the last page; a cursor carries its epoch; one from another epoch, or one that does not parse, is `400 cursor-invalid`; any other query key is `400` | `internal/api/acts.go:33`, `internal/api/acts.go:135-160`, `internal/api/reads.go:59-63`, `internal/api/reads.go:92-112` |
 | ETags | Strong `"<revision>-<token>"`, token replaced on every write; served on drafts and source heads; `If-Match` required on draft-scoped writes, publication and ingestion start; missing `428 precondition-required`, mismatch `412 precondition-failed`; no `If-None-Match` | `internal/api/routes.go:98-119`, `internal/api/api.go:407-416`; [persistence and API §4.1](persistence-api.md#41-etags) |
-| Idempotency | Every `POST`, `PUT`, `DELETE` needs one `Idempotency-Key` of 16-128 `[A-Za-z0-9_-]` (`428 idempotency-key-required` if absent); scoped per principal; same request replays with `Idempotent-Replayed: true`; another request under the key is `422 idempotency-key-reused`; a record from an earlier epoch is `409 conflict` | `internal/api/api.go:394-405`, `internal/api/idempotency.go:41-43`, `internal/api/idempotency.go:60-92`, `internal/api/idempotency.go:98-106`; [persistence and API §7.2](persistence-api.md#72-behavior) |
+| Idempotency | Every `POST`, `PUT`, `DELETE` needs one `Idempotency-Key` of 16-128 `[A-Za-z0-9_-]` (`428 idempotency-key-required` if absent); scoped per principal; same request replays with `Idempotent-Replayed: true`; another request under the key is `422 idempotency-key-reused`; a record from an earlier epoch is `409 conflict`; with no record, a `Bronzeward-Expected-Epoch` naming another epoch is `412 epoch-mismatch` ([§8.4](#84-idempotency-and-ambiguous-responses) item 3, A6) | `internal/api/api.go:394-405`, `internal/api/idempotency.go:41-43`, `internal/api/idempotency.go:60-92`, `internal/api/idempotency.go:98-106`; [persistence and API §7.2](persistence-api.md#72-behavior) |
 | Unknown commit | A commit whose outcome the server could not learn is `500 internal-error`, "retrying with the same Idempotency-Key answers it" | `internal/api/tx.go:312`; [persistence and API §9.4](persistence-api.md#94-errors) |
 | Asynchronous work | Ingestion start, mark, continuation, takeover and publication answer `202` with an operation; plans and approvals `201` | [persistence and API §8](persistence-api.md#8-asynchronous-operations), [§9.2](persistence-api.md#92-resources-and-routes) |
 | Events | `GET /operations/{id}/events` is a cursor-paged JSON list, or Server-Sent Events when `Accept` contains `text/event-stream`; event ID `<epoch>:<number>`; resume with `Last-Event-ID`; an ID from another epoch gets `event: reset` and a replay from the start; after 15 s with nothing sent the stream sends the comment line `: keep-alive`, with no ID and no event ([persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress)); the stream ends when the operation is terminal or at the opening token's expiry; `unresolved` is not terminal | `internal/api/operations.go:183-353`; [persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress) |
@@ -358,7 +358,8 @@ is.
 takes no member, with `Content-Type: application/json`; a `DELETE` sends neither
 ([§2](#2-the-api-a-client-meets) request body row). Every write
 sends exactly one `Idempotency-Key` ([§8.4](#84-idempotency-and-ambiguous-responses)) and, where
-[§3.2](#32-writes) lists it, exactly one `If-Match`. A body is at most 1 MiB
+[§3.2](#32-writes) lists it, exactly one `If-Match`; every write but the recovery entry also sends
+exactly one `Bronzeward-Expected-Epoch` ([§8.4](#84-idempotency-and-ambiguous-responses) item 3). A body is at most 1 MiB
 (`internal/api/body.go:36`); a client refuses a larger input before sending and says so, rather
 than relying on the server's `400`.
 
@@ -377,7 +378,7 @@ body. Exit codes are the journeys' (journeys §4).
 | 403 `forbidden` | show the route's `roles`, and "humans only" when `humanOnly` is true; no retry. For the plan cancellation's creator check, the form that carries a `plan` member, show its `detail` instead: its `roles` are the route's, `publisher` included, which the caller already holds (`internal/api/cancellations.go:64-72`, `internal/api/routes.go:123`). After an ambiguous attempt, the route-level role check's refusal, like the process `409`s, is decided before the idempotency lookup (`internal/api/api.go:339-359`, `internal/api/api.go:380-391`; for example a renewal dropped a role, [§9.6](#96-failure-cases)), so it says nothing about the earlier attempt: the outcome stays unknown ([§8.4](#84-idempotency-and-ambiguous-responses) item 4). The plan cancellation's creator check, a `403 forbidden` that carries a `plan` member, refuses after the lookup instead (`internal/api/cancellations.go:61-73`, `internal/api/tx.go:198-202`): it means the key has no record, in this epoch or an earlier one, so the earlier attempt did not commit or a restore removed it |
 | 403 `identity-revoked` | stop; clear the context's stored credential, meaning the tokens the client itself keeps in its credential store, its memory or its D2 (b) token file, never an operator-supplied automation token file, which it leaves untouched and reports as no longer accepted; do not start a new sign-in by itself ([§9.6](#96-failure-cases)) |
 | 404 `not-found` | the resource does not exist in this epoch; after a restore a handle issued later answers `404` ([persistence and API §12.3](persistence-api.md#123-what-a-restored-state-means-record-by-record)) |
-| 409 `conflict`, `stale-input`, `scope-busy`, `machine-identity-mismatch`, `ingestion-abandoned`, `recovery-mode-entered`, `recovery-mode-active` | show the named resource and state; read it; never repeat automatically, with one exception. A `409 recovery-mode-active` without a `scope` member, and a `409 conflict` to the recovery entry without `epoch` and `request` members, are process refusals that show the start mode ([§8.5](#85-epoch-changes)). A `409 conflict` that carries `request` and `epoch` is an earlier-epoch idempotency record: it is read and reported, not repeated, under either key ([§8.4](#84-idempotency-and-ambiguous-responses) item 7). The one exception: a `409 conflict` on a draft fragment write (`PUT /drafts/{id}/fragments/{name}`) that answers a repeat, carries an `ingestion` member but no `draft` member, and has no `Idempotent-Replayed: true` is the first request still running, or ended without committing while its claim's lease has not lapsed (`internal/api/fragments.go:105-114`, `internal/api/tx.go:80-98`; looked up by principal and key, so it never answers a first send). A `409` with both `ingestion` and `draft`, replayed or not, is a recorded refusal (`internal/api/fragments.go:291-296`, `internal/api/drafts.go:94-104`): the write was refused, not pending. For the in-progress case, repeat the identical request with the same key, with backoff, until it answers otherwise or the client's wait bound of [§8.4](#84-idempotency-and-ambiguous-responses) item 2 expires; the contract says the repeat then gets the first request's replay ([persistence and API §7.2](persistence-api.md#72-behavior); [§8.4](#84-idempotency-and-ambiguous-responses) item 2), or, when the first request ended without committing, executes as a new request, reported as this send's own result (`internal/api/fragments.go:105-114`) |
+| 409 `conflict`, `stale-input`, `scope-busy`, `machine-identity-mismatch`, `ingestion-abandoned`, `recovery-mode-entered`, `recovery-mode-active` | show the named resource and state; read it; never repeat automatically, with one exception. A `409 recovery-mode-active` without a `scope` member, and a `409 conflict` to the recovery entry without `epoch` and `request` members, are process refusals that show the start mode ([§8.5](#85-epoch-changes)). A `409 conflict` that carries `request` and `epoch` is an earlier-epoch idempotency record: it is read and reported, not repeated, under either key ([§8.4](#84-idempotency-and-ambiguous-responses) item 7). The one exception: a `409 conflict` on a draft fragment write (`PUT /drafts/{id}/fragments/{name}`) that answers a repeat, carries an `ingestion` member but no `draft` member, and has no `Idempotent-Replayed: true` is the first request still running, or ended without committing while its claim's lease has not lapsed (`internal/api/fragments.go:105-114`, `internal/api/tx.go:80-98`; looked up by principal and key, so it never answers a first send). A `409` with both `ingestion` and `draft`, replayed or not, is a recorded refusal (`internal/api/fragments.go:291-296`, `internal/api/drafts.go:94-104`): the write was refused, not pending. For the in-progress case, repeat the identical request with the same key, with backoff, until it answers otherwise or the client's wait bound of [§8.4](#84-idempotency-and-ambiguous-responses) item 2 expires; the contract says the repeat then gets the first request's replay ([persistence and API §7.2](persistence-api.md#72-behavior); [§8.4](#84-idempotency-and-ambiguous-responses) item 2), or, when the first request ended without committing, executes as a new request, unless its `Bronzeward-Expected-Epoch` names another epoch (`412 epoch-mismatch`, A6), reported as this send's own result (`internal/api/fragments.go:105-114`) |
 | 412 `precondition-failed` | someone else wrote first: stop, show the newer state, never refetch and resend ([§8.3](#83-etags)) |
 | 412 `epoch-mismatch` | the epoch is no longer the one the write named in `Bronzeward-Expected-Epoch` and the key has no record: nothing was committed by this send. Handle the epoch change of [§8.5](#85-epoch-changes) with the `epoch` member, and set the write aside as in [§8.4](#84-idempotency-and-ambiguous-responses) item 3; never repeat it. After an ambiguous attempt it means that attempt's record is gone or never committed ([persistence and API §7.2](persistence-api.md#72-behavior)) |
 | 422 `validation-failed` | show `rule` and position extensions; for marks only the position, never a path. Most mark refusals arrive later, as an event ([§11.3](#113-cli-review)) |
@@ -444,7 +445,7 @@ executes again under the same exception
 ([persistence and API §12.4](persistence-api.md#124-restore-and-idempotency)); the same key does
 not make a remote mutation exactly-once
 ([persistence and API §7.2](persistence-api.md#72-behavior)). The same exception holds wherever
-this section says that a request finding no record executes as a new one.
+this section says that a request finding no record executes.
 
 Keys are not global. The record's primary key is the pair of principal and key
 (`internal/migrate/migrations/0001_schema.sql:491-508`), and the lookup joins on both, with the
@@ -601,8 +602,9 @@ contract's, and this specification does not close it.
 Facts: an epoch is a random identity minted at installation and at each recovery-mode entry,
 compared by equality only
 ([persistence and API §12.1](persistence-api.md#121-the-epoch)). An epoch change makes cursors
-`400 cursor-invalid`, earlier idempotency records `409`, earlier automation tokens `401`, and
-streams `reset` ([§2](#2-the-api-a-client-meets)).
+`400 cursor-invalid`, earlier idempotency records `409`, a write whose key has no record and whose
+`Bronzeward-Expected-Epoch` names the earlier epoch `412 epoch-mismatch`, earlier automation
+tokens `401`, and streams `reset` ([§2](#2-the-api-a-client-meets)).
 
 **Proposed.** The client compares `Bronzeward-Epoch` on every response with the last it saw for
 the context. On a change it:
@@ -1076,7 +1078,7 @@ setup: draft at revision 3; signed in as h-author        # fixture state, synthe
 action: fragment set worker-labels --file <synthetic file>
 exchange:                                               # what the client must send
   - PUT /api/v1/drafts/{draft}/fragments/worker-labels
-    headers: [Authorization, Idempotency-Key, If-Match: <draft ETag>]
+    headers: [Authorization, Idempotency-Key, If-Match: <draft ETag>, Bronzeward-Expected-Epoch: <reference epoch>]
 fault: drop the connection after the request body is sent
 expect:
   client: repeats with the same key and same body; on the in-progress 409 repeats again with backoff
@@ -1210,9 +1212,10 @@ and not a minted token. Closes G19; blocks the sign-in tickets' verification. Se
 **A6. An expected-epoch precondition on mutations** (D10 option (a); served by
 [#293](https://github.com/ginsys/bronzeward/issues/293)). Every mutating route accepts an
 optional `Bronzeward-Expected-Epoch` naming the epoch the client expects, checked only when the
-idempotency lookup finds no record, and refused only by a lookup under the key's lock, the write's
-own or a fresh one (`internal/api/idempotency.go:52-58`, `internal/api/tx.go:209-210`,
-`internal/api/tx.go:71-81`), so an earlier-epoch record
+idempotency lookup finds no record, and refused only by a lookup under the key's lock: the
+write's own, a fragment write's claim transaction's or a fresh one (`internal/api/idempotency.go:52-58`,
+`internal/api/tx.go:209-210`, `internal/api/fragments.go:95-103`, `internal/api/tx.go:71-81`),
+so an earlier-epoch record
 still answers its `409` (AMB-07); a mismatch is refused `412 epoch-mismatch` naming the current
 epoch and commits nothing ([persistence and API §7.2](persistence-api.md#72-behavior)). It gives human
 principals an epoch check like the one service tokens get, but placed differently: the service
