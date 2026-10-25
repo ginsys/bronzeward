@@ -193,6 +193,7 @@ func TestRecoveryScopeMark(t *testing.T) {
 	defer func() { _ = moved.Rollback() }()
 	committed := make(chan error, 1)
 	var once sync.Once
+	me.x.mu.Lock()
 	me.x.onDecrypt = func() {
 		once.Do(func() {
 			mustExec(t, moved, `SELECT FROM machine WHERE id = $1 FOR SHARE`, m2)
@@ -217,6 +218,7 @@ func TestRecoveryScopeMark(t *testing.T) {
 			}()
 		})
 	}
+	me.x.mu.Unlock()
 	wantProblem(t, me.mark(ctl, m2, "moved"), http.StatusConflict, "conflict")
 	if err := <-committed; err != nil {
 		t.Fatal(err)
@@ -267,6 +269,7 @@ func TestRecoveryScopeMark(t *testing.T) {
 	// dependencies are checked): §6.1 excludes the observation from drift, so it is not the mark's
 	// evidence either, and the scope stays blocked on it.
 	var changed sync.Once
+	me.x.mu.Lock()
 	me.x.onDecrypt = func() {
 		changed.Do(func() {
 			mustExec(t, ae.db, `WITH r AS (UPDATE machine SET revision_counter = revision_counter + 1 WHERE id = $1
@@ -276,6 +279,7 @@ func TestRecoveryScopeMark(t *testing.T) {
 				m2, epoch(t, ae.db))
 		})
 	}
+	me.x.mu.Unlock()
 	if b := decode[scopeMarkBody](t, me.mark(ctl, m2, "changed"), http.StatusCreated); b.State != "blocked" ||
 		len(b.Missing) != 1 || b.Missing[0] != "observation" {
 		t.Fatalf("a mark on an observation an operation change follows was marked %s missing %v", b.State, b.Missing)
@@ -287,6 +291,7 @@ func TestRecoveryScopeMark(t *testing.T) {
 	// and marks the scope blocked. The first's own observation matched, but a newer one contradicts its
 	// identity, so it does not mark the scope ready over the second's evidence.
 	var overlapped *scopeMarkBody
+	me.x.mu.Lock()
 	me.x.onDecrypt = func() {
 		me.x.mu.Lock()
 		me.x.onDecrypt = nil
@@ -296,6 +301,7 @@ func TestRecoveryScopeMark(t *testing.T) {
 		overlapped = &nb
 		me.report(me.recordedIdentity(t, m2))
 	}
+	me.x.mu.Unlock()
 	if b := decode[scopeMarkBody](t, me.mark(ctl, m2, "overlapped"), http.StatusCreated); overlapped == nil ||
 		overlapped.State != "blocked" || b.State != "blocked" || len(b.Missing) != 1 || b.Missing[0] != "identity" {
 		t.Fatalf("a mark a newer observation of another identity contradicts was marked %s missing %v (the newer: %+v)",
@@ -347,7 +353,9 @@ func TestRecoveryScopeMark(t *testing.T) {
 		t.Fatal(err)
 	}
 	var entered sync.Once
+	me.x.mu.Lock()
 	me.x.onDecrypt = func() { entered.Do(func() { newEpoch(t, ae.db) }) }
+	me.x.mu.Unlock()
 	wantProblem(t, me.mark(ctl, m2, "superseded"), http.StatusServiceUnavailable, "epoch-superseded")
 	me.x.mu.Lock()
 	me.x.onDecrypt = nil
@@ -364,7 +372,9 @@ func TestRecoveryScopeMark(t *testing.T) {
 	before = me.restorations(t, m2)
 	var ep string
 	var again sync.Once
+	me.x.mu.Lock()
 	me.x.onDecrypt = func() { again.Do(func() { ep = newEpoch(t, ae.db) }) }
+	me.x.mu.Unlock()
 	rec := me.do(ctl, call{method: "POST", path: prefix + "/recovery/scopes/" + m2 + "/marks", token: me.human("h-recovery"),
 		key: "k-mark-expected-" + id.New(id.Request), body: `{"facts":{"note":"after the restore"}}`, expected: expected})
 	me.x.mu.Lock()
