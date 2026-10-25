@@ -65,8 +65,8 @@ func (a *API) wakeLoops() {
 
 // executorLoop dispatches each approved apply-config plan (execution-recovery.md §3) and carries
 // the operations this process owns to their outcome, a pass at its start, after each approval's
-// wake and every heartbeat. Its first pass takes over every non-terminal operation another
-// process owned, one of the takeovers §3.4 defines; no timer takes an operation over. A
+// wake and every heartbeat. Its first pass is the controller-start takeover of §3.4: it takes over
+// every non-terminal operation another process owned. No timer takes an operation over. A
 // superseded epoch ends it: such a process dispatches nothing until it is restarted.
 func (a *API) executorLoop(ctx context.Context) {
 	t := time.NewTicker(a.d.timers.Heartbeat)
