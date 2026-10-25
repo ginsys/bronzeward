@@ -15,7 +15,8 @@ import (
 // an object, a member of that object that differs in case or repeats (encoding/json would accept
 // both) is refused 400 invalid-request, and the same body without the fault is not: it passes the
 // body checks and is answered by the route. A map member's object takes any key but not one key
-// twice. Neither refusal names the client's member or key (§9.4).
+// twice. Neither refusal names the client's member or key, which can spell a protected path
+// (client contracts §11.1).
 func TestNestedMemberRefusals(t *testing.T) {
 	ie := setupIngestEnv(t)
 	var entered atomic.Int32
@@ -40,8 +41,9 @@ func TestNestedMemberRefusals(t *testing.T) {
 	}
 	settle := `"start":"` + start + `","end":"` + end + `"`
 	// A form is one nested object: its well-formed body, the body with one member in another case
-	// (none for a map, whose keys are free) and with one member repeated, and the client's text
-	// that no refusal may name.
+	// (none for a map, whose keys are free) and with one member repeated, and the client's texts,
+	// space-separated, that neither refusal may name: the wrong-case name and any map key on the
+	// way to the faulty member.
 	type form struct{ good, wrongCase, repeated, hidden string }
 	facts := func(members string) form {
 		return form{`{` + members + `"facts":{"why":"a"}}`, "", `{` + members + `"facts":{"why":"a","why":"b"}}`, "why"}
@@ -54,7 +56,7 @@ func TestNestedMemberRefusals(t *testing.T) {
 		{"fragment", "PUT", frag, author, ie.etag, ie.api, []form{
 			{fragment(`{"references":{"s-a":{"kind":"string","version":1}}}`),
 				fragment(`{"references":{"s-a":{"Kind":"string","version":1}}}`),
-				fragment(`{"references":{"s-a":{"kind":"string","version":1,"version":2}}}`), "Kind"},
+				fragment(`{"references":{"s-a":{"kind":"string","version":1,"version":2}}}`), "Kind s-a"},
 			{fragment(`{"embedded":[{"path":"machine.nodeLabels.tier","format":"yaml"}]}`),
 				fragment(`{"embedded":[{"path":"machine.nodeLabels.tier","Format":"yaml"}]}`),
 				fragment(`{"embedded":[{"path":"machine.nodeLabels.tier","path":"machine.nodeLabels.tier","format":"yaml"}]}`), "Format"},
@@ -96,8 +98,11 @@ func TestNestedMemberRefusals(t *testing.T) {
 				}
 				t.Run(fmt.Sprintf("%s %d %s", rt.name, i, fault.what), func(t *testing.T) {
 					p := wantProblem(t, send(fault.what, fault.body), http.StatusBadRequest, "invalid-request")
-					if detail, _ := p["detail"].(string); strings.Contains(detail, f.hidden) {
-						t.Fatalf("the refusal names the client's %q: %s", f.hidden, detail)
+					detail, _ := p["detail"].(string)
+					for h := range strings.FieldsSeq(f.hidden) {
+						if strings.Contains(detail, h) {
+							t.Fatalf("the refusal names the client's %q: %s", h, detail)
+						}
 					}
 				})
 			}
