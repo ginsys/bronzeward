@@ -256,8 +256,9 @@ type responded struct {
 // operation's state follows only from the operation's latest attempt, except that a definitive
 // rejection may end an unresolved operation: an acceptance moves sending to verifying; a definitive
 // rejection moves sending or unresolved to rejected when every attempt has one, and sending to
-// unresolved otherwise; any other response moves sending to unresolved. An operation that took
-// over or ended since is not touched: its late response is a recorded fact only.
+// unresolved otherwise; any other response moves sending to unresolved. An operation that ended
+// since does not move, and one taken over since, now unresolved, moves only by that rejection; its
+// late response is recorded and accounted as above either way.
 func (a *API) recordResponse(ctx context.Context, attempt string, resp talos.Response) (responded, error) {
 	if a.d.owner.ID == "" {
 		return responded{}, errNotController

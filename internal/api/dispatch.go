@@ -351,10 +351,11 @@ func (a *API) attemptAndSend(ctx context.Context, operation string, gen int64, m
 // respond records the attempt's response. The response is held only in this process, so a lost
 // database connection is retried after each lease until the record commits (DS row 016). One that
 // commits after a takeover (§3.4), by another controller or by this one on a recovery-admin's
-// request, is a late response: recordResponse records it as it describes, and the operation stays
-// with its new owner. A retry that finds the response already recorded met a COMMIT that succeeded
-// after its reply was lost: the loop carries the operation on from its recorded state. Any other failure leaves the operation sending until a takeover moves it
-// to unresolved (§3.4): no timer does.
+// request, is a late response: recordResponse decides what is recorded and what moves, and the
+// operation stays with its new owner. A retry that finds the response already recorded met a COMMIT
+// that succeeded after its reply was lost: the loop carries the operation on from its recorded
+// state. Any other failure leaves the operation sending until a takeover moves it to unresolved
+// (§3.4): no timer does.
 func (a *API) respond(ctx context.Context, attempt, operation string, gen int64, machine, plan string, resp talos.Response) error {
 	r, err := a.recordResponse(ctx, attempt, resp)
 	for err != nil && connLost(err) {
