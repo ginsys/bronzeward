@@ -517,6 +517,41 @@ func TestValidateRefusesEachKind(t *testing.T) {
 	}
 }
 
+// The description's bounds are the server's: at each bound and just past it, the described schema
+// admits a value exactly when the server's own check does.
+func TestDescriptionBoundsMatchServer(t *testing.T) {
+	t.Parallel()
+	doc := description(t)
+	schema := func(ref string) map[string]any {
+		s, ok := pointer(doc, ref).(map[string]any)
+		if !ok {
+			t.Fatalf("%s: no schema", ref)
+		}
+		return s
+	}
+	agree := func(what string, s map[string]any, v any, served bool) {
+		t.Helper()
+		if described := len(validate(doc, s, v, "v")) == 0; described != served {
+			t.Errorf("%s: the description admits it %t, the server %t", what, described, served)
+		}
+	}
+	// acts.go's limit check: 1, a literal there, to maxLimit.
+	limit := schema("#/components/parameters/Limit/schema")
+	for _, n := range []int{0, 1, maxLimit, maxLimit + 1} {
+		agree(fmt.Sprintf("limit %d", n), limit, json.Number(fmt.Sprint(n)), n >= 1 && n <= maxLimit)
+	}
+	key := schema("#/components/parameters/IdempotencyKey/schema")
+	for _, n := range []int{15, 16, 128, 129} {
+		k := strings.Repeat("a", n)
+		agree(fmt.Sprintf("an Idempotency-Key of %d characters", n), key, k, keyShape.MatchString(k))
+	}
+	layer := schema("#/components/schemas/AssignmentInput/properties/fragments/additionalProperties")
+	for _, n := range []int{0, 1} {
+		in := assignmentInput{Fragments: map[string][]string{"global": slices.Repeat([]string{"base"}, n)}}
+		agree(fmt.Sprintf("a fragments layer of %d", n), layer, slices.Repeat([]any{"base"}, n), in.check(nil) == nil)
+	}
+}
+
 // checkResponse's negative controls: each kind of mismatch, made on a real exchange shape, is
 // reported, and the matching exchange is not.
 func TestExchangeErrorsReportEachMismatch(t *testing.T) {
