@@ -48,6 +48,9 @@ export interface ClientOptions {
   onRevoked?: () => void;
   // §8.5 items 1 and 3: discard cursors, pages, ETags and stream positions; tell the operator.
   onEpochChange?: (epoch: string, recoveryMode: boolean) => void;
+  // §8.5 item 3: the recovery banner shows while responses carry Bronzeward-Recovery-Mode: true,
+  // from the first epoch on, and clears on a recovery exit, which keeps the epoch.
+  onRecoveryModeChange?: (on: boolean) => void;
   fetch?: typeof fetch;
   sleep?: (ms: number) => Promise<void>;
 }
@@ -63,10 +66,12 @@ export class Client {
   private epoch: string | undefined;
   private generation = 0;
   private epochRecords = 0;
+  private recovery = false;
 
   constructor(private readonly opts: ClientOptions = {}) {}
 
   get currentEpoch(): string | undefined { return this.epoch; }
+  get recoveryMode(): boolean { return this.recovery; }
 
   // A change of principal, route or query makes every read in flight stale.
   setView(view: View): void {
@@ -143,14 +148,29 @@ export class Client {
   // that carries a new epoch is itself discarded, since its read began under the old one.
   private observeEpoch(res: Response): boolean {
     const epoch = res.headers.get("Bronzeward-Epoch");
-    if (epoch === null || epoch === this.epoch) return false;
+    if (epoch === null) return false;
+    const recovery = res.headers.get("Bronzeward-Recovery-Mode") === "true";
+    // An entry mints an epoch in recovery mode and its exit keeps that epoch, so within one epoch
+    // the mode only turns off: a late response from before the exit cannot turn it back on.
+    if (epoch === this.epoch) {
+      if (!recovery) this.setRecoveryMode(false);
+      return false;
+    }
     const first = this.epoch === undefined;
     this.epoch = epoch;
     this.epochRecords++;
-    if (first) return false;
-    this.generation++;
-    this.opts.onEpochChange?.(epoch, res.headers.get("Bronzeward-Recovery-Mode") === "true");
-    return true;
+    if (!first) {
+      this.generation++;
+      this.opts.onEpochChange?.(epoch, recovery);
+    }
+    this.setRecoveryMode(recovery);
+    return !first;
+  }
+
+  private setRecoveryMode(on: boolean): void {
+    if (on === this.recovery) return;
+    this.recovery = on;
+    this.opts.onRecoveryModeChange?.(on);
   }
 
   // A body that fails to parse is a defect; one cut off by the network is a transport failure.
