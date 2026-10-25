@@ -115,6 +115,21 @@ func description(t *testing.T) map[string]any {
 	return doc
 }
 
+// freshDescription is the description parsed anew, as loadDescription parses it, for a test that
+// modifies its copy.
+func freshDescription(t *testing.T) map[string]any {
+	t.Helper()
+	raw, err := os.ReadFile(descriptionPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	return doc
+}
+
 // describedFacts returns the description's facts, keyed as tableFacts keys them, and every
 // malformed operation it met. A path parameter must be required; an Idempotency-Key or If-Match
 // parameter counts only when it is a required header; a Bronzeward-Expected-Epoch header and a
