@@ -129,7 +129,8 @@ func holdsNUL(v any) bool {
 // follows in's Go type: a value whose type decodes itself (json.Unmarshaler or
 // encoding.TextUnmarshaler, as the document member does) is left to that type, and so is a value
 // of an interface type, which takes any member. A value of another shape than its type is left to
-// the decoder, which refuses it.
+// the decoder, which refuses it. The field names it matches are fieldTypes', for the field shapes
+// request types use.
 func exactMembers(b []byte, in input) error {
 	dec := json.NewDecoder(bytes.NewReader(b))
 	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
@@ -179,9 +180,9 @@ func exactValue(b []byte, t reflect.Type, path string) error {
 }
 
 // exactObject walks the object b: a struct's, whose members must be exactly fields' names, or a
-// map's (fields nil), whose values are of type elem. It refuses a repeated member, naming a map's
-// key in no error since a key is a value, and checks each member's value against its type. A b that
-// is not an object is left to the decoder.
+// map's (fields nil), whose values are of type elem. It refuses a repeated member and checks each
+// member's value against its type. No error names a map's key or a nested unknown member, which
+// are the client's text, not field names. A b that is not an object is left to the decoder.
 func exactObject(b []byte, path string, fields map[string]reflect.Type, elem reflect.Type) error {
 	dec := json.NewDecoder(bytes.NewReader(b))
 	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
@@ -198,7 +199,12 @@ func exactObject(b []byte, path string, fields map[string]reflect.Type, elem ref
 		if fields != nil {
 			var ok bool
 			if ft, ok = fields[name]; !ok {
-				return fmt.Errorf("unknown member %q", path+name)
+				// Below the top level a name can spell a path into a document, so only the
+				// containing object is named (client contracts' protected inputs).
+				if path == "" {
+					return fmt.Errorf("unknown member %q", name)
+				}
+				return fmt.Errorf("an unknown or differently cased member in %q", strings.TrimSuffix(path, "."))
 			}
 			at = path + name + "."
 		}
@@ -220,9 +226,11 @@ func exactObject(b []byte, path string, fields map[string]reflect.Type, elem ref
 	return nil
 }
 
-// fieldTypes maps the JSON names encoding/json decodes into t to their field types: an exported
-// field's tag name, or its Go name when the tag names none, and the fields of an untagged embedded
-// struct as its own. A field tagged "-" is not decoded.
+// fieldTypes maps the JSON names encoding/json decodes into t to their field types, for the field
+// shapes request types use: an exported field's tag name, or its Go name when the tag names none,
+// and the fields of an untagged embedded struct as its own. A field tagged "-" is not decoded. It
+// does not resolve conflicting embedded names or invalid tag names as encoding/json does, and the
+// walk takes a map's keys as strings: no request type has such a name or a non-string map key.
 func fieldTypes(t reflect.Type) map[string]reflect.Type {
 	fields := map[string]reflect.Type{}
 	for i := range t.NumField() {
