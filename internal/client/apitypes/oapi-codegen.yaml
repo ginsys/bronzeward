@@ -1,0 +1,11 @@
+# The configuration `mise run generate` passes to oapi-codegen (pinned in mise.toml) to generate
+# this package's types from api/openapi.yaml. Only the models are generated: the client's request
+# core is written by hand in internal/client. The tasks name the output file with -o: an `output`
+# member here would take precedence over -o, so `mise run generate:check` would overwrite the file
+# it checks.
+package: apitypes
+generate:
+  models: true
+compatibility:
+  # Without it the layer enumeration's value `role` collides with the type Role.
+  always-prefix-enum-values: true
