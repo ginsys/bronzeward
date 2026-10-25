@@ -126,6 +126,22 @@ describe("§8.2 read rows", () => {
     expect((await client([problem(418, "future-code")]).c.read("/x")).kind).toBe("refused");
   });
 
+  test("a 401 with an unknown code is a refusal, not renewed or repeated", async () => {
+    const renew = vi.fn(async () => true);
+    const { c, fetchMock } = client([problem(401, "future-code", {}, null), ok({})], { renew });
+    expect(await c.read("/x")).toMatchObject({ kind: "refused", status: 401 });
+    expect(renew).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("a 4xx problem body that is not JSON is a defect; a 5xx one retries as the 503 row", async () => {
+    const broken = (status: number) => new Response("{broken", { status, headers: { "Content-Type": "application/problem+json" } });
+    expect(await client([broken(400)]).c.read("/x")).toEqual({ kind: "defect", message: "the problem body is not JSON" });
+    const { c, fetchMock } = client([broken(502), ok({})]);
+    expect((await c.read("/x")).kind).toBe("ok");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   test("501 not-implemented is a refusal", async () => {
     expect(await client([problem(501, "not-implemented")]).c.read("/x")).toMatchObject({ kind: "refused", status: 501 });
   });
