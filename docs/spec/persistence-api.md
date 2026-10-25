@@ -1644,7 +1644,8 @@ Design: [§11](../design/Talos_Configuration_and_Machine_Management_Design.md#11
   front of the server (an ingress or API gateway); the hop behind it is the
   deployment's choice: plain http on a network it protects, TLS per service,
   or encryption by the network layer. The PoC server listens on plain http.
-  Unknown request fields are refused **(choice §17.14)**.
+  Unknown, repeated or differently cased request members are refused at
+  every level of the body **(choice §17.14)**.
 - **Deprecation policy** **(choice §17.14)**: within `v1`, fields and routes
   are added, never removed or changed in meaning. A route due for removal
   answers with a `Deprecation` header for at least one minor release first. A

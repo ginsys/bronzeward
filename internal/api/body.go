@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -38,8 +39,8 @@ const maxBody = 1 << 20
 var errNotObject = errors.New("the body must be one JSON object of this route's members")
 
 // decodeBody reads r's body into in and returns its RFC 8785 canonical form (§7.1). It refuses a
-// content type other than JSON, a body over maxBody, a member that is unknown, repeated or
-// differently cased (encoding/json would accept the last two), and trailing data. Its errors name
+// content type other than JSON, a body over maxBody, a member at any level that is unknown,
+// repeated or differently cased (encoding/json would accept the last two), and trailing data. Its errors name
 // no value (§9.4). A non-empty omit is a keyed route's document member (§7.1): it is decoded into
 // in but left out of the canonical form. A noBody route takes no body at all, and no content type.
 func decodeBody(r *http.Request, in input, omit string) ([]byte, error) {
@@ -123,19 +124,68 @@ func holdsNUL(v any) bool {
 	return false
 }
 
-// exactMembers refuses a top-level member whose name is not exactly one of in's JSON field
-// names, or that repeats.
+// exactMembers refuses a member, at any level of the body, whose name is not exactly one of its
+// object's JSON field names, or that repeats; a repeated key of a map member is refused too. It
+// follows in's Go type: a value whose type decodes itself (json.Unmarshaler or
+// encoding.TextUnmarshaler, as the document member does) is left to that type, and so is a value
+// of an interface type, which takes any member. A value of another shape than its type is left to
+// the decoder, which refuses it.
 func exactMembers(b []byte, in input) error {
-	allowed := map[string]bool{}
-	t := reflect.TypeOf(in).Elem()
-	for i := range t.NumField() {
-		if name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ","); name != "" && name != "-" {
-			allowed[name] = true
-		}
-	}
 	dec := json.NewDecoder(bytes.NewReader(b))
 	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
 		return errNotObject
+	}
+	return exactValue(b, reflect.TypeOf(in).Elem(), "")
+}
+
+var (
+	jsonUnmarshaler = reflect.TypeFor[json.Unmarshaler]()
+	textUnmarshaler = reflect.TypeFor[encoding.TextUnmarshaler]()
+)
+
+// exactValue is exactMembers for the value b of type t at path, the member names leading to it ("" at
+// the top level, so that a top-level refusal names the member alone).
+func exactValue(b []byte, t reflect.Type, path string) error {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if pt := reflect.PointerTo(t); pt.Implements(jsonUnmarshaler) || pt.Implements(textUnmarshaler) {
+		return nil
+	}
+	switch t.Kind() {
+	case reflect.Struct:
+		return exactObject(b, path, fieldTypes(t), nil)
+	case reflect.Map:
+		return exactObject(b, path, nil, t.Elem())
+	case reflect.Slice, reflect.Array:
+		if t.Elem().Kind() == reflect.Uint8 {
+			return nil // a []byte is one base64 string
+		}
+		dec := json.NewDecoder(bytes.NewReader(b))
+		if tok, err := dec.Token(); err != nil || tok != json.Delim('[') {
+			return nil
+		}
+		for i := 0; dec.More(); i++ {
+			var e json.RawMessage
+			if err := dec.Decode(&e); err != nil {
+				return errNotObject
+			}
+			if err := exactValue(e, t.Elem(), fmt.Sprintf("%s[%d].", strings.TrimSuffix(path, "."), i)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// exactObject walks the object b: a struct's, whose members must be exactly fields' names, or a
+// map's (fields nil), whose values are of type elem. It refuses a repeated member, naming a map's
+// key in no error since a key is a value, and checks each member's value against its type. A b that
+// is not an object is left to the decoder.
+func exactObject(b []byte, path string, fields map[string]reflect.Type, elem reflect.Type) error {
+	dec := json.NewDecoder(bytes.NewReader(b))
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return nil
 	}
 	seen := map[string]bool{}
 	for dec.More() {
@@ -144,19 +194,67 @@ func exactMembers(b []byte, in input) error {
 			return errNotObject
 		}
 		name, _ := tok.(string)
-		switch {
-		case !allowed[name]:
-			return fmt.Errorf("unknown member %q", name)
-		case seen[name]:
-			return fmt.Errorf("member %q given twice", name)
+		ft, at := elem, path+"*."
+		if fields != nil {
+			var ok bool
+			if ft, ok = fields[name]; !ok {
+				return fmt.Errorf("unknown member %q", path+name)
+			}
+			at = path + name + "."
+		}
+		if seen[name] {
+			if fields == nil {
+				return fmt.Errorf("a key of member %q given twice", strings.TrimSuffix(path, "."))
+			}
+			return fmt.Errorf("member %q given twice", path+name)
 		}
 		seen[name] = true
-		var skip json.RawMessage
-		if err := dec.Decode(&skip); err != nil {
+		var v json.RawMessage
+		if err := dec.Decode(&v); err != nil {
 			return errNotObject
+		}
+		if err := exactValue(v, ft, at); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// fieldTypes maps the JSON names encoding/json decodes into t to their field types: an exported
+// field's tag name, or its Go name when the tag names none, and the fields of an untagged embedded
+// struct as its own. A field tagged "-" is not decoded.
+func fieldTypes(t reflect.Type) map[string]reflect.Type {
+	fields := map[string]reflect.Type{}
+	for i := range t.NumField() {
+		f := t.Field(i)
+		tag := f.Tag.Get("json")
+		if tag == "-" {
+			continue
+		}
+		name, _, _ := strings.Cut(tag, ",")
+		if f.Anonymous && name == "" {
+			ft := f.Type
+			if ft.Kind() == reflect.Pointer {
+				ft = ft.Elem()
+			}
+			if ft.Kind() == reflect.Struct {
+				for n, et := range fieldTypes(ft) {
+					if _, own := fields[n]; !own {
+						fields[n] = et
+					}
+				}
+				continue
+			}
+		}
+		if !f.IsExported() {
+			continue
+		}
+		if name == "" {
+			name = f.Name
+		}
+		fields[name] = f.Type
+	}
+	return fields
 }
 
 var wildcard = regexp.MustCompile(`\{([a-z]+)\}`)
