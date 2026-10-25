@@ -11,9 +11,9 @@ info:
     parameters or its request body differ from routes(), in either direction, and the API tests validate every answer''s status,
     headers and body on a described route, except an answer of the event-stream route (its tests bypass the check), and the
     body of every request the server accepted, against this description. Every error answer is a problem document (default
-    response). Request bodies are decoded strictly: application/json; at the top level exactly the listed members, none repeated; in a nested object no unlisted
-    or repeated member, though the decoder matches a nested member''s name without regard to case, so a client must send the
-    names as listed; a member whose schema admits null may be given as null, which the decoder treats as absent. The idempotency
+    response). Request bodies are decoded strictly: application/json; at every level exactly the listed members, none repeated
+    and none differing in case, while a map member''s keys are not a listed set, though its own contract may restrict them,
+    and none may repeat; a member whose schema admits null may be given as null, which the decoder treats as absent. The idempotency
     fingerprint covers the canonical body (persistence and API §7.1), which keeps a null member, so a retry that adds or drops
     one is a different request.'
 servers:
