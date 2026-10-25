@@ -356,4 +356,26 @@ func TestRecoveryScopeMark(t *testing.T) {
 			SELECT FROM machine_event e WHERE e.machine = m.id AND e.revision > $2 AND e.kind = 'scope-state')`, m2, rev); n != 1 {
 		t.Fatal("a controller of a superseded epoch marked the scope")
 	}
+	// The same entry under a mark expecting the epoch it replaced: the transaction's lookup refuses
+	// the mark 412 ahead of the controller check, and the observation taken before it stays
+	// (persistence-api.md §7.2, §14).
+	ctl = me.controller(t)
+	expected := epoch(t, ae.db)
+	before = me.restorations(t, m2)
+	var ep string
+	var again sync.Once
+	me.x.onDecrypt = func() { again.Do(func() { ep = newEpoch(t, ae.db) }) }
+	rec := me.do(ctl, call{method: "POST", path: prefix + "/recovery/scopes/" + m2 + "/marks", token: me.human("h-recovery"),
+		key: "k-mark-expected-" + id.New(id.Request), body: `{"facts":{"note":"after the restore"}}`, expected: expected})
+	me.x.mu.Lock()
+	me.x.onDecrypt = nil
+	me.x.mu.Unlock()
+	wantEpochMismatch(t, rec, ep)
+	if n := me.restorations(t, m2); n != before+1 {
+		t.Fatalf("%d restoration observations after the refused mark; want %d, its own kept", n, before+1)
+	}
+	if n := count(t, ae.db, `SELECT count(*) FROM machine m WHERE m.id = $1 AND m.scope_state = 'blocked' AND NOT EXISTS (
+			SELECT FROM machine_event e WHERE e.machine = m.id AND e.revision > $2 AND e.kind = 'scope-state')`, m2, rev); n != 1 {
+		t.Fatal("a mark refused 412 marked the scope")
+	}
 }

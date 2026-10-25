@@ -1325,7 +1325,13 @@ write except the recovery entry (client contracts §8.4). Wherever this document
 the table below included, says that a request whose key has no record executes,
 ingests afresh or is answered by a staging claim, that holds only when its
 `Bronzeward-Expected-Epoch` is absent or names the current epoch; otherwise a
-lookup refuses it `412 epoch-mismatch`.
+lookup refuses it `412 epoch-mismatch`. The first lookup runs once the
+request's query, input, keyed fingerprint and principal are accepted, and
+before every check of its route, including the work a route does before its
+transaction (§9.2). So the same holds of each refusal that §9.2 and §14 give
+for a route's own checks, a superseded controller's `503 epoch-superseded`
+among them. Anything that work committed before a later lookup refused the
+request stays (§14).
 
 The draft entry routes are also the one exception to "a refusal commits no
 record", because their ingestion persists a staging claim before T1 that a
@@ -1771,9 +1777,11 @@ the act together:
   unaccounted is `409 recovery-mode-active`, and nothing is observed; an unknown
   machine is `404 not-found`. After these, a controller with no executor
   answers `503 dependency-unavailable`, and one whose epoch an entry committed
-  after its observation superseded answers `503 epoch-superseded` (§5.1). The
-  scope state entry also names the `Desired` release the check was for, null
-  for none.
+  after its observation superseded answers `503 epoch-superseded` (§5.1), or
+  `412 epoch-mismatch` when the mark's `Bronzeward-Expected-Epoch` names
+  another epoch, which its transaction's lookup refuses first (§7.2). Either
+  way the observation stays committed. The scope state entry also names the
+  `Desired` release the check was for, null for none.
 - `POST /recovery/scopes/{machine}/releases` takes `facts` as above and
   releases a `ready` scope in the current epoch (execution and recovery §7.3
   step 7), as one scope state entry and a scope release record naming the mark
@@ -3172,7 +3180,7 @@ or Desired change; it does not erase earlier evidence.
 | Request | Same key while the first is in flight | waits on the key's lock, then replays or executes; on a draft entry route whose first request still holds a live claim, `409 conflict` (§7.2) | one effect |
 | Request | Entry retried with a key whose record is not this recovery start's own entry | `409 conflict` naming the stored entry (§12.4) | nothing |
 | Request | Key whose record is from an earlier epoch | `409 conflict` naming the stored request and its epoch (§7.2) | nothing |
-| Request | Key with no record, `Bronzeward-Expected-Epoch` naming another epoch | `412 epoch-mismatch` naming the current epoch (§7.2) | nothing; a draft entry refused in T1 leaves the claim it persisted before T1, which the entry that changed the epoch abandoned (§12.2), and that claim's generations as orphans (§6.4) |
+| Request | Key with no record, `Bronzeward-Expected-Epoch` naming another epoch | `412 epoch-mismatch` naming the current epoch (§7.2) | nothing; a draft entry refused in T1 leaves the claim it persisted before T1, which the entry that changed the epoch abandoned (§12.2), and that claim's generations as orphans (§6.4); a scope mark refused in its transaction leaves the restoration observation it took before it (§9.2) |
 | Request | Keyed fingerprint whose digest-key version the provider can no longer compute under | `422`; under a new key, an ingestion whose operation is still active is `409 conflict` naming it (§7.1, §7.3), and a draft entry that compilation refused after its claim existed ingests afresh (§7.1) | nothing; under the new key, a draft entry refused again leaves another abandoned claim and its orphans |
 | Draft | ETag mismatch | `412` | nothing |
 | Draft | Update or discard while a publish operation for it is queued or running | `409 conflict` naming the operation | nothing |
