@@ -299,17 +299,20 @@ describe("stale-response discard", () => {
     expect(onRevoked).not.toHaveBeenCalled();
   });
 
+  // Answers each request in turn: a response at once, or a held one when it is released.
+  function scripted(answers: (Response | typeof fetch)[]) {
+    return (async (...args: Parameters<typeof fetch>) => {
+      const next = answers.shift();
+      if (next === undefined) throw new Error("no answer left");
+      return next instanceof Response ? next : next(...args);
+    }) as typeof fetch;
+  }
+
   test("a late response under the old epoch does not roll the epoch back", async () => {
     const { fetchImpl: slow, release } = delayed(ok({ stale: true }, "e1"));
-    const answers = [ok({}), null, ok({}, "e2"), ok({ fresh: true }, "e2")];
     const onEpochChange = vi.fn();
-    const c = new Client({
-      onEpochChange,
-      fetch: (async (...args: Parameters<typeof fetch>) => {
-        const next = answers.shift();
-        return next === null ? slow(...args) : next!;
-      }) as typeof fetch,
-    });
+    // The late e1 is repeated once and answered under e2.
+    const c = new Client({ onEpochChange, fetch: scripted([ok({}), slow, ok({}, "e2"), ok({}, "e2"), ok({ fresh: true }, "e2")]) });
     await c.read("/machines"); // e1 recorded
     const pending = c.read("/machines"); // in flight under e1
     expect(await c.read("/plans")).toEqual({ kind: "discarded" }); // reveals e2
@@ -320,31 +323,60 @@ describe("stale-response discard", () => {
     expect(await c.read("/plans")).toEqual({ kind: "ok", data: { fresh: true } });
   });
 
-  test("a response a view change made stale still reports its new epoch", async () => {
-    const a = delayed(ok({ old: true }, "e2"));
-    const b = delayed(ok({ new: true }, "e1"));
-    const answers = [ok({}), a.fetchImpl, b.fetchImpl];
+  // Read A, then a route change, then read B, both held; `recorded` seeds e1 first. Each repeat
+  // answers a read whose epoch was ambiguous when it arrived.
+  async function race(a: Response, b: Response, repeats: Response[], recorded = true) {
+    const ha = delayed(a);
+    const hb = delayed(b);
     const onEpochChange = vi.fn();
-    const c = new Client({
-      onEpochChange,
-      fetch: (async (...args: Parameters<typeof fetch>) => {
-        const next = answers.shift()!;
-        return next instanceof Response ? next : next(...args);
-      }) as typeof fetch,
-    });
+    const c = new Client({ onEpochChange, fetch: scripted([...(recorded ? [ok({})] : []), ha.fetchImpl, hb.fetchImpl, ...repeats]) });
     c.setView(base);
-    await c.read("/machines"); // e1 recorded
-    const first = c.read("/machines"); // answered under e2, after recovery
+    if (recorded) await c.read("/machines");
+    const first = c.read("/machines");
     c.setView({ ...base, route: "/plans" });
-    const second = c.read("/plans"); // answered under e1, before recovery, and arriving last
-    a.release();
-    expect(await first).toEqual({ kind: "discarded" });
-    expect(c.currentEpoch).toBe("e2");
-    expect(onEpochChange).toHaveBeenCalledTimes(1);
-    b.release();
-    expect(await second).toEqual({ kind: "discarded" });
-    expect(c.currentEpoch).toBe("e2");
-    expect(onEpochChange).toHaveBeenCalledTimes(1);
+    const second = c.read("/plans");
+    return { c, onEpochChange, first, second, releaseA: ha.release, releaseB: hb.release };
+  }
+
+  test("a response a view change made stale still reports its new epoch", async () => {
+    const r = await race(ok({}, "e2"), ok({ old: true }, "e1"), [ok({}, "e2")]);
+    r.releaseA();
+    expect(await r.first).toEqual({ kind: "discarded" });
+    expect(r.c.currentEpoch).toBe("e2");
+    r.releaseB(); // answered before recovery, arriving last
+    expect(await r.second).toEqual({ kind: "discarded" });
+    expect(r.c.currentEpoch).toBe("e2");
+    expect(r.onEpochChange).toHaveBeenCalledTimes(1);
+  });
+
+  test("a second recovery seen only by a read sent before the first was recorded is reported", async () => {
+    const r = await race(ok({}, "e2"), ok({}, "e3"), [ok({}, "e3")]);
+    r.releaseA();
+    await r.first;
+    r.releaseB();
+    expect(await r.second).toEqual({ kind: "discarded" });
+    expect(r.c.currentEpoch).toBe("e3");
+    expect(r.onEpochChange).toHaveBeenCalledTimes(2);
+  });
+
+  test("before any epoch is recorded, a late older epoch does not replace the first one", async () => {
+    const r = await race(ok({}, "e2"), ok({ old: true }, "e1"), [ok({ fresh: true }, "e2")], false);
+    r.releaseA(); // e2 recorded silently
+    await r.first;
+    r.releaseB(); // repeated, and its current view renders the answer under e2
+    expect(await r.second).toEqual({ kind: "ok", data: { fresh: true } });
+    expect(r.c.currentEpoch).toBe("e2");
+    expect(r.onEpochChange).not.toHaveBeenCalled();
+  });
+
+  test("before any epoch is recorded, a newer epoch arriving second is reported", async () => {
+    const r = await race(ok({}, "e2"), ok({ b: 1 }, "e1"), [ok({}, "e2")], false);
+    r.releaseB(); // e1 recorded silently, B rendered
+    expect(await r.second).toEqual({ kind: "ok", data: { b: 1 } });
+    r.releaseA();
+    expect(await r.first).toEqual({ kind: "discarded" });
+    expect(r.c.currentEpoch).toBe("e2");
+    expect(r.onEpochChange).toHaveBeenCalledTimes(1);
   });
 
   test("a failed renewal that ends after the view changed is discarded, not shown", async () => {
