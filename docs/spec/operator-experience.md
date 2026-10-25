@@ -923,8 +923,8 @@ the key is `409` naming its ingestion (`internal/api/fragments.go:113-114`), a r
 `409`, and after a restore that removed the record the same key executes afresh, unless its
 `Bronzeward-Expected-Epoch` names an earlier epoch, which is refused `412 epoch-mismatch`
 ([persistence and API §7.1](persistence-api.md#71-the-key), §7.2; `internal/api/idempotency.go:52-58`;
-`docs/spec/persistence-api.md:1243-1253`, `docs/spec/persistence-api.md:1350-1369`,
-`docs/spec/persistence-api.md:1371-1380`;
+`docs/spec/persistence-api.md:1243-1253`, `docs/spec/persistence-api.md:1351-1370`,
+`docs/spec/persistence-api.md:1372-1381`;
 `internal/api/idempotency.go:63-87`). The same key does not make a remote mutation exactly-once
 ([design §12.5](../design/Talos_Configuration_and_Machine_Management_Design.md#125-durable-operations-and-uncertain-outcomes)).
 

@@ -1335,17 +1335,18 @@ that §9.2 and §14 give for a route's own checks in those transactions, a
 superseded controller's
 `503 epoch-superseded` among them. The `412` precedes only those refusals. The
 work a route does outside those transactions has no lookup of its own, so when
-an entry commits after the first lookup, a refusal that work decides can come
-first, whatever the header names. For example, a scope mark answers
-`409 recovery-mode-active` when the entry commits before the mark reads its
-scope, and its observation answers `503 epoch-superseded` when the entry
-commits after that read and before the observation is recorded (§9.2); a draft
-entry's ingestion ends `5xx` once the entry has abandoned its claim and the
-claim's next heartbeat is refused. Such a refusal records no act or
+an entry commits after the first lookup, a refusal that work answers itself,
+before the transaction, can come first, whatever the header names. For
+example, a scope mark answers `409 recovery-mode-active` when the entry commits
+before the mark reads its scope, and its observation answers
+`503 epoch-superseded` when the entry commits after that read and before the
+observation is recorded (§9.2); a draft entry's ingestion ends `5xx` when the
+claim's heartbeat is refused, after the entry abandoned the claim, while a
+generation create is still to run. Such a refusal records no act or
 idempotency record, and what the route committed before it stays (§14): a
-draft entry's staging claim, or a scope mark's `observation-started` entry or
-recorded observation. A repeat under the same key whose header names the
-earlier epoch is then refused `412 epoch-mismatch`.
+draft entry's staging claim, or a scope mark's `observation-started` entry. A
+repeat under the same key whose header names the earlier epoch is then refused
+`412 epoch-mismatch`.
 
 The draft entry routes are also the one exception to "a refusal commits no
 record", because their ingestion persists a staging claim before T1 that a
@@ -1358,7 +1359,7 @@ the refused request, in the transaction that records the claim's outcome: the
 claim and its provider generations persist, so the audit records who caused
 them. A retry therefore replays the refusal and ingests nothing. A `5xx`
 refusal records nothing; a retry ingests afresh once the earlier claim has
-ended, as below.
+ended, as below. T1's `412 epoch-mismatch`, like a `5xx`, records nothing.
 A retry that finds a claim for its key but no record looks at the claim's
 lease (compilation §3). While the lease is live, the first request may still be
 ingesting, and the retry answers `409 conflict` naming the request in progress;
@@ -3219,7 +3220,7 @@ or Desired change; it does not erase earlier evidence.
 | Request | Same key while the first is in flight | waits on the key's lock, then replays or executes; on a draft entry route whose first request still holds a live claim, `409 conflict` (§7.2) | one effect |
 | Request | Entry retried with a key whose record is not this recovery start's own entry | `409 conflict` naming the stored entry (§12.4) | nothing |
 | Request | Key whose record is from an earlier epoch | `409 conflict` naming the stored request and its epoch (§7.2) | nothing |
-| Request | Key with no record, `Bronzeward-Expected-Epoch` naming another epoch | `412 epoch-mismatch` naming the current epoch (§7.2) | nothing; a draft entry refused in T1 leaves the claim it persisted before T1, which the entry that changed the epoch abandoned (§12.2), and that claim's generations as orphans (§6.4); a scope mark refused in its transaction leaves the restoration observation it took before it (§9.2) |
+| Request | Key with no record, `Bronzeward-Expected-Epoch` naming another epoch | `412 epoch-mismatch` naming the current epoch (§7.2) | nothing; a draft entry refused in T1 leaves the claim it persisted before T1, which the entry that changed the epoch abandoned (§12.2), and that claim's generations as orphans (§6.4); a scope mark refused in its transaction leaves the restoration observation it took before it, with what that observation's transaction recorded (§9.2) |
 | Request | Keyed fingerprint whose digest-key version the provider can no longer compute under | `422`; under a new key, an ingestion whose operation is still active is `409 conflict` naming it (§7.1, §7.3), and a draft entry that compilation refused after its claim existed ingests afresh (§7.1) | nothing; under the new key, a draft entry refused again leaves another abandoned claim and its orphans |
 | Draft | ETag mismatch | `412` | nothing |
 | Draft | Update or discard while a publish operation for it is queued or running | `409 conflict` naming the operation | nothing |
