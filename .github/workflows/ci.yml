@@ -124,10 +124,8 @@ jobs:
       - run: mise run web
 
   browser:
-    # Conformance cases TLS-02 and TLS-03's read case in real browsers (mise run browser): the
-    # runner's Chrome and Edge, and the current Firefox and Firefox ESR, which WebdriverIO
-    # downloads. GitHub-hosted for every event: the in-cluster runners have no browser. The
-    # artifacts are uploaded only once the scan has passed.
+    # TLS-02 and TLS-03's read case (mise run browser) in the runner's Chrome and Edge and the current
+    # Firefox and ESR; GitHub-hosted (no browser in-cluster). Uploaded only if the scan passes.
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -138,6 +136,8 @@ jobs:
         with:
           cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: node go
+      # AppArmor blocks Edge's namespace sandbox and the image strips its setuid fallback's bit.
+      - run: sudo chown root:root /opt/microsoft/msedge/msedge-sandbox && sudo chmod 4755 /opt/microsoft/msedge/msedge-sandbox
       - run: mise run browser
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
