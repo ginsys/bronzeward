@@ -13,6 +13,8 @@ state=$PWD/.dev/idp
 issuer=http://localhost:58280
 web=${BW_DEV_IDP_WEB_ORIGIN:-http://localhost:58443}
 password='Synthetic-Pass-1!'
+# The device code's lifetime in seconds. idp.env carries it, and the self-test asserts it.
+devicelife=60
 # Each synthetic human with fixtures/oidc/issuer.Humans' groups, as project-role keys, and h-none
 # with no grant. The self-test compares the roles the server reads back against issuer.Humans.
 humans=(h-author:bw-authors h-publisher:bw-publishers h-approver:bw-approvers h-recovery:bw-recovery
@@ -30,6 +32,15 @@ present() {
   ids=$(docker ps -aq --filter "name=^$1\$") || die "cannot list containers (docker ps)"
   [ -n "$ids" ]
 }
+# alive: the container is still running. One that has exited fails up at once with its log tail:
+# the containers run without --rm, so that they and their logs survive until down.
+alive() {
+  local running
+  running=$(docker inspect -f '{{.State.Running}}' "$1") || die "cannot inspect $1 (docker inspect)"
+  [ "$running" = true ] && return
+  docker logs --tail 50 "$1" >&2 || true
+  die "$1 exited during start-up, its log tail above (docker logs $1; mise run dev-idp-down)"
+}
 
 # ours: the provider running is the one this checkout's state describes. A provider another
 # checkout started has other IDs, and this checkout's seed token is not valid on it.
@@ -46,7 +57,7 @@ ours() {
 down() {
   local c ids
   for c in "$groups" "$zitadel" "$pg"; do
-    if present "$c"; then docker stop "$c" >/dev/null; fi
+    if present "$c"; then docker rm -f "$c" >/dev/null; fi
     for _ in $(seq 30); do present "$c" || continue 2; sleep 1; done
     die "$c was still present after 30s (docker ps -a; docker rm -f $c)"
   done
@@ -100,10 +111,11 @@ up() {
   arch=$(docker version --format '{{.Server.Arch}}') || die "cannot read the docker daemon's architecture (docker version)"
   GOOS=linux GOARCH=$arch CGO_ENABLED=0 go build -o "$state/oidc" ./fixtures/oidc
   docker network create "$net" >/dev/null
-  docker run -d --rm --name "$pg" --network "$net" -e POSTGRES_USER=postgres -e POSTGRES_HOST_AUTH_METHOD=trust \
+  docker run -d --name "$pg" --network "$net" -e POSTGRES_USER=postgres -e POSTGRES_HOST_AUTH_METHOD=trust \
     "$(pin POSTGRES_IMAGE)" >/dev/null
   local ready=""
   for _ in $(seq 30); do
+    alive "$pg"
     if docker exec "$pg" pg_isready -q -h 127.0.0.1 -U postgres; then ready=1 && break; fi
     sleep 1
   done
@@ -113,11 +125,11 @@ up() {
   # network: a setting for this throwaway provider only, never a production default.
   # ZITADEL_OIDC_DEVICEAUTH_LIFETIME shortens the device code's 5-minute default so that the
   # self-test sees one expire.
-  docker run -d --rm --name "$zitadel" --network "$net" -p 127.0.0.1:58280:8080 --user "$(id -u):$(id -g)" \
+  docker run -d --name "$zitadel" --network "$net" -p 127.0.0.1:58280:8080 --user "$(id -u):$(id -g)" \
     -v "$state:/state" \
     -e ZITADEL_EXTERNALDOMAIN=localhost -e ZITADEL_EXTERNALPORT=58280 -e ZITADEL_EXTERNALSECURE=false \
     -e ZITADEL_TLS_ENABLED=false -e ZITADEL_HTTPCLIENT_DENYLIST=169.254.0.0/16 \
-    -e ZITADEL_OIDC_DEVICEAUTH_LIFETIME=1m \
+    -e ZITADEL_OIDC_DEVICEAUTH_LIFETIME="${devicelife}s" \
     -e ZITADEL_DATABASE_POSTGRES_HOST="$pg" -e ZITADEL_DATABASE_POSTGRES_PORT=5432 \
     -e ZITADEL_DATABASE_POSTGRES_DATABASE=zitadel \
     -e ZITADEL_DATABASE_POSTGRES_USER_USERNAME=zitadel -e ZITADEL_DATABASE_POSTGRES_USER_PASSWORD=zitadel \
@@ -134,6 +146,7 @@ up() {
   # the API behind it.
   ready=""
   for _ in $(seq 120); do
+    alive "$zitadel"
     if [ -s "$state/login.pat" ] && [ -s "$state/seed.pat" ] && curl -sf --noproxy '*' -o /dev/null --max-time 2 \
       -H "Authorization: Bearer $(cat "$state/seed.pat")" "$issuer/admin/v1/settings/oidc"; then ready=1 && break; fi
     sleep 1
@@ -172,12 +185,13 @@ up() {
   done
   # The target runs first: Zitadel refuses a target whose host does not resolve. It reads its
   # signing key per call, and refuses every call until the key is written below.
-  docker run -d --rm --name "$groups" --network "$net" --user "$(id -u):$(id -g)" \
+  docker run -d --name "$groups" --network "$net" --user "$(id -u):$(id -g)" \
     -v "$state:/state:ro" --entrypoint /state/oidc "$(pin ZITADEL_IMAGE)" \
     groups -signing-key /state/groups.key -project "$project" -listen 0.0.0.0:8090 >/dev/null
   # Up once it answers an unsigned call (503 without a key), asked from inside the network.
   ready=""
   for _ in $(seq 30); do
+    alive "$groups"
     if [ "$(docker run --rm --network "$net" "$(pin CURL_IMAGE)" -s -o /dev/null -w '%{http_code}' \
       -X POST "http://$groups:8090/groups" 2>/dev/null)" = 503 ]; then ready=1 && break; fi
     sleep 1
@@ -199,6 +213,7 @@ BW_TEST_IDP_WEB_CLIENT=$webc
 BW_TEST_IDP_WEB_ORIGIN=$web
 BW_TEST_IDP_LOGIN_TOKEN_FILE='$state/login.pat'
 BW_TEST_IDP_PASSWORD=$password
+BW_TEST_IDP_DEVICE_LIFETIME=$devicelife
 BW_TEST_IDP_USERS=$users
 EOF
   summary
