@@ -533,7 +533,7 @@ contract's, and this specification does not close it.
    attempt's record survived, the repeat meets the earlier-epoch `409` of item 7 (AMB-07);
    otherwise, when a restore removed it or the first attempt never committed, the repeat is
    refused `412 epoch-mismatch` naming the current epoch (G21, AMB-12). A route's work outside
-   those lookups can refuse first, and a fragment write's claim, a scope mark's observation or a
+   those lookups can refuse first, and a fragment write's claim, a scope mark's `observation-started` entry or a
    principal row taken before the refusal stays ([persistence and API §7.2](persistence-api.md#72-behavior),
    §14), but no act or idempotency record commits. A service principal's repeat is refused `401`
    instead, its token carrying its epoch. Before a
