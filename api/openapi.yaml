@@ -2209,7 +2209,8 @@ components:
         identity-revoked and an answer refused before the epoch was read.
       schema: {type: string}
     RecoveryMode:
-      description: true while the server runs in recovery mode (persistence and API §9.1); absent otherwise.
+      description: true while the server runs in recovery mode (persistence and API §9.1); absent otherwise, and from
+        every answer Bronzeward-Epoch is absent from.
       schema: {type: string, enum: ['true']}
     ETag:
       description: The resource's version (persistence and API §4.1).
