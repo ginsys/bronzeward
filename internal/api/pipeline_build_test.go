@@ -461,6 +461,7 @@ func TestBuildReleaseDependencyUnknown(t *testing.T) {
 			if d == nil || d["provider"] != c.provider || d["class"] != string(classify.Unknown) || (c.provider == "kv") != (d["reference"] != nil) {
 				t.Fatalf("refusal names %v", ref.extra["dependency"])
 			}
+			wantDetail(t, ref, "Publication refused: the provider's answer leaves a dependency undecided; no release or Desired change was committed.")
 			b.noSecretIn(fmt.Sprint(ref.extra) + ref.detail)
 		})
 	}

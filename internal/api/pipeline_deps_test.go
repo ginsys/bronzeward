@@ -166,6 +166,10 @@ func TestReadPinnedNone(t *testing.T) {
 func TestReadPinnedRefuses(t *testing.T) {
 	later := kvCreated.Add(time.Second)
 	unreachable := fmt.Errorf("reading: %w", provider.ErrUnavailable)
+	const (
+		undecided = "Publication refused: the provider's answer leaves a dependency undecided; no release or Desired change was committed."
+		unreached = "Publication refused: the provider could not be reached; no release or Desired change was committed."
+	)
 	cases := []struct {
 		name     string
 		meta     map[string]classify.Answer
@@ -175,6 +179,7 @@ func TestReadPinnedRefuses(t *testing.T) {
 		recorded bool // a status recorded the version at a later created_time
 		status   int
 		code     string
+		detail   string // a 503's: it claims no release, as its operation, act and events stay
 	}{
 		{name: "lost", meta: map[string]classify.Answer{"": kvAnswer(map[int]bool{1: true}, kvCreated)}, created: kvCreated,
 			status: 422, code: "validation-failed"},
@@ -183,10 +188,10 @@ func TestReadPinnedRefuses(t *testing.T) {
 		{name: "read identity changed", meta: map[string]classify.Answer{"": kvAnswer(nil, kvCreated)}, created: later,
 			status: 422, code: "validation-failed"},
 		{name: "undecided", meta: map[string]classify.Answer{"": {Unreachable: true}}, created: kvCreated,
-			status: 503, code: "dependency-unavailable"},
-		{name: "classification unreachable", metaErr: unreachable, status: 503, code: "dependency-unavailable"},
+			status: 503, code: "dependency-unavailable", detail: undecided},
+		{name: "classification unreachable", metaErr: unreachable, status: 503, code: "dependency-unavailable", detail: unreached},
 		{name: "read unreachable", meta: map[string]classify.Answer{"": kvAnswer(nil, kvCreated)}, readErr: unreachable,
-			status: 503, code: "dependency-unavailable"},
+			status: 503, code: "dependency-unavailable", detail: unreached},
 		{name: "read failed", meta: map[string]classify.Answer{"": kvAnswer(nil, kvCreated)}, readErr: errors.New("stand-in: refused")},
 	}
 	for _, c := range cases {
@@ -218,6 +223,9 @@ func TestReadPinnedRefuses(t *testing.T) {
 			// PA §6.1: a 503 names the dependency with class unknown, an unreachable provider's too.
 			if d, _ := ref.extra["dependency"].(map[string]any); c.status == 503 && d["class"] != string(classify.Unknown) {
 				t.Fatalf("503 refusal names %v without class unknown", d)
+			}
+			if c.detail != "" {
+				wantDetail(t, ref, c.detail)
 			}
 			if strings.Contains(fmt.Sprint(ref.extra)+ref.detail, pinHeld) || p.logged(pinHeld) {
 				t.Fatal("a refusal or log line quotes the value")

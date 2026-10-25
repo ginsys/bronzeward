@@ -48,7 +48,7 @@ func (a *API) readPinned(ctx context.Context, j publishJob, s snapshot, m compil
 			// an inconsistent stored reference bypassed the authoring boundary.
 			if !strings.HasPrefix(path.String(), "gen/"+j.cluster+"/") {
 				return pinned{}, refuse(http.StatusUnprocessableEntity, "validation-failed",
-					"Publication refused: a secret reference belongs to another cluster; nothing was committed.").
+					"Publication refused: a secret reference belongs to another cluster; "+noRelease+".").
 					with("source", rev).with("reference", name), nil
 			}
 			index[k] = len(pins)
@@ -120,7 +120,7 @@ func (a *API) dependencyRefusal(j publishJob, reference, prov, object string, ve
 	case errors.As(err, &d) && d.Class == classify.Unknown && d.Reason != string(classify.IdentityMismatch):
 		dep["class"], dep["reason"] = string(d.Class), d.Reason
 		return refuse(http.StatusServiceUnavailable, "dependency-unavailable",
-			"Publication refused: the provider's answer leaves a dependency undecided; nothing was committed.").with("dependency", dep), nil
+			"Publication refused: the provider's answer leaves a dependency undecided; "+noRelease+".").with("dependency", dep), nil
 	case errors.As(err, &d):
 		if d.Class != "" {
 			dep["class"] = string(d.Class)
@@ -134,14 +134,14 @@ func (a *API) dependencyRefusal(j publishJob, reference, prov, object string, ve
 		a.o.logf("%s: publication: %v", j.op, err)
 		dep["class"] = string(classify.Unknown)
 		return refuse(http.StatusServiceUnavailable, "dependency-unavailable",
-			"Publication refused: the provider could not be reached; nothing was committed.").with("dependency", dep), nil
+			"Publication refused: the provider could not be reached; "+noRelease+".").with("dependency", dep), nil
 	case errors.Is(err, provider.ErrAbsent), errors.Is(err, provider.ErrDenied), errors.Is(err, provider.ErrProtocol),
 		errors.Is(err, provider.ErrStatus):
 		// A read or encryption refused or not understood after the classification: unknown.
 		a.o.logf("%s: publication: %v", j.op, err)
 		dep["class"] = string(classify.Unknown)
 		return refuse(http.StatusServiceUnavailable, "dependency-unavailable",
-			"Publication refused: the provider's answer leaves a dependency undecided; nothing was committed.").with("dependency", dep), nil
+			"Publication refused: the provider's answer leaves a dependency undecided; "+noRelease+".").with("dependency", dep), nil
 	}
 	return nil, err
 }

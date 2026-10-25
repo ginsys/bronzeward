@@ -571,6 +571,18 @@ func wantConflicts(t *testing.T, ref *refusal, want ...map[string]any) {
 	}
 }
 
+// wantDetail wants ref's detail to be want. A publication refusal leaves its operation, act and
+// events committed, so it claims only that no release or Desired change was (§9.4, §14).
+func wantDetail(t *testing.T, ref *refusal, want string) {
+	t.Helper()
+	if ref == nil {
+		t.Fatalf("no refusal; want detail %q", want)
+	}
+	if ref.detail != want {
+		t.Fatalf("detail %q; want %q", ref.detail, want)
+	}
+}
+
 func TestPublishCommitDraftClosed(t *testing.T) {
 	p := newPublishEnv(t)
 	mustExec(t, p.db, `UPDATE draft SET state = 'discarded' WHERE id = $1`, p.draft)
@@ -654,7 +666,8 @@ func (p *publishEnv) committing(n int, err error) *int {
 func TestPublishCommitDeadlocked(t *testing.T) {
 	p := newPublishEnv(t)
 	calls := p.committing(maxAttempts, &pgconn.PgError{Code: "40P01", Message: "deadlock detected (test)"})
-	p.refused(503, "transient-conflict")
+	wantDetail(t, p.refused(503, "transient-conflict"),
+		"the publication deadlocked on every attempt; no release or Desired change was committed")
 	if *calls != maxAttempts+1 {
 		t.Fatalf("%d COMMITs; want %d attempts and the failure", *calls, maxAttempts)
 	}
@@ -675,7 +688,8 @@ func TestPublishCommitRejected(t *testing.T) {
 		}
 		return tx.Commit()
 	}})
-	p.refused(500, "internal-error")
+	wantDetail(t, p.refused(500, "internal-error"),
+		"the publication commit was rejected; no release or Desired change was committed")
 
 	p = newPublishEnv(t)
 	p.committing(1, &pgconn.PgError{Code: "08006", Message: "connection lost at COMMIT (test)"})
@@ -701,7 +715,8 @@ func TestPublishCommitRejected(t *testing.T) {
 func TestPublishCommitConstraintViolated(t *testing.T) {
 	p := newPublishEnv(t)
 	p.unit.machines[0].mode = "metal"
-	p.refused(500, "internal-error")
+	wantDetail(t, p.refused(500, "internal-error"),
+		"the publication broke a database constraint; no release or Desired change was committed")
 }
 
 // A recovery entry between the rolled-back commit and the failure transaction supersedes the
@@ -744,7 +759,8 @@ func TestPublishCommitAnsweredRollback(t *testing.T) {
 		}
 		return tx.Commit()
 	}})
-	p.refused(500, "internal-error")
+	wantDetail(t, p.refused(500, "internal-error"),
+		"the publication commit was rejected; no release or Desired change was committed")
 }
 
 // A covered machine whose import base the draft does not carry and which has no Applied release
