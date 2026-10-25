@@ -320,6 +320,33 @@ describe("stale-response discard", () => {
     expect(await c.read("/plans")).toEqual({ kind: "ok", data: { fresh: true } });
   });
 
+  test("a response a view change made stale still reports its new epoch", async () => {
+    const a = delayed(ok({ old: true }, "e2"));
+    const b = delayed(ok({ new: true }, "e1"));
+    const answers = [ok({}), a.fetchImpl, b.fetchImpl];
+    const onEpochChange = vi.fn();
+    const c = new Client({
+      onEpochChange,
+      fetch: (async (...args: Parameters<typeof fetch>) => {
+        const next = answers.shift()!;
+        return next instanceof Response ? next : next(...args);
+      }) as typeof fetch,
+    });
+    c.setView(base);
+    await c.read("/machines"); // e1 recorded
+    const first = c.read("/machines"); // answered under e2, after recovery
+    c.setView({ ...base, route: "/plans" });
+    const second = c.read("/plans"); // answered under e1, before recovery, and arriving last
+    a.release();
+    expect(await first).toEqual({ kind: "discarded" });
+    expect(c.currentEpoch).toBe("e2");
+    expect(onEpochChange).toHaveBeenCalledTimes(1);
+    b.release();
+    expect(await second).toEqual({ kind: "discarded" });
+    expect(c.currentEpoch).toBe("e2");
+    expect(onEpochChange).toHaveBeenCalledTimes(1);
+  });
+
   test("a failed renewal that ends after the view changed is discarded, not shown", async () => {
     let c!: Client;
     const renew = vi.fn(async () => {
