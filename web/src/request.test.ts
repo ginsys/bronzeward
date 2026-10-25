@@ -203,6 +203,22 @@ describe("§8.5 epoch changes", () => {
     expect(await c.read("/acts?cursor=x")).toEqual({ kind: "discarded" });
     expect(onEpochChange).toHaveBeenCalledWith("e2", false);
   });
+
+  test("recovery mode is reported from the first epoch on and clears on an exit that keeps the epoch", async () => {
+    const onEpochChange = vi.fn();
+    const onRecoveryModeChange = vi.fn();
+    const answers = [ok({}, EPOCH, true), problem(401, "unauthenticated", {}, null), ok({}, EPOCH, true), ok({})];
+    const { c } = client(answers, { onEpochChange, onRecoveryModeChange });
+    await c.read("/server");
+    expect(c.recoveryMode).toBe(true);
+    expect((await c.read("/server")).kind).toBe("unauthenticated"); // no epoch header: says nothing
+    await c.read("/server");
+    expect(c.recoveryMode).toBe(true);
+    expect((await c.read("/server")).kind).toBe("ok"); // the exit
+    expect(c.recoveryMode).toBe(false);
+    expect(onRecoveryModeChange.mock.calls).toEqual([[true], [false]]);
+    expect(onEpochChange).not.toHaveBeenCalled();
+  });
 });
 
 describe("stale-response discard", () => {
@@ -321,6 +337,19 @@ describe("stale-response discard", () => {
     expect(c.currentEpoch).toBe("e2");
     expect(onEpochChange).toHaveBeenCalledTimes(1);
     expect(await c.read("/plans")).toEqual({ kind: "ok", data: { fresh: true } });
+  });
+
+  test("a late response from before a recovery exit does not turn recovery mode back on", async () => {
+    const { fetchImpl: slow, release } = delayed(ok({ late: true }, "e1", true));
+    const onRecoveryModeChange = vi.fn();
+    const c = new Client({ onRecoveryModeChange, fetch: scripted([ok({}, "e1", true), slow, ok({}, "e1")]) });
+    await c.read("/machines");
+    const pending = c.read("/machines"); // in flight in recovery mode
+    await c.read("/plans"); // after the exit
+    release();
+    expect(await pending).toEqual({ kind: "ok", data: { late: true } });
+    expect(c.recoveryMode).toBe(false);
+    expect(onRecoveryModeChange.mock.calls).toEqual([[true], [false]]);
   });
 
   // Read A, then a route change, then read B, both held; `recorded` seeds e1 first. Each repeat
