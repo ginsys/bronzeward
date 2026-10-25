@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 )
 
@@ -24,7 +25,7 @@ var section102 = map[string]string{
 }
 
 // host serves a fake build, its upstream counting each request it gets.
-func host(t *testing.T, redirect string) (*httptest.Server, *int) {
+func host(t *testing.T, redirect string) (*httptest.Server, *atomic.Int64) {
 	t.Helper()
 	dist := t.TempDir()
 	for name, body := range map[string]string{"index.html": "<!doctype html>app", "assets/index-x.js": "js"} {
@@ -40,9 +41,10 @@ func host(t *testing.T, redirect string) (*httptest.Server, *int) {
 	if err := os.WriteFile(clientConfig, []byte(`{"issuer":"http://idp.test"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	hits := new(int)
+	// Counted on the upstream's goroutine and read on the test's.
+	hits := new(atomic.Int64)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		*hits++
+		hits.Add(1)
 		w.Header().Set("X-Upstream", r.URL.RequestURI())
 		w.WriteHeader(http.StatusNoContent)
 	}))
@@ -108,8 +110,8 @@ func TestProxiesTheAPIAndLiveness(t *testing.T) {
 			t.Errorf("%s: %d, upstream saw %q", path, res.StatusCode, res.Header.Get("X-Upstream"))
 		}
 	}
-	if *hits != 3 {
-		t.Errorf("upstream got %d requests, want 3", *hits)
+	if n := hits.Load(); n != 3 {
+		t.Errorf("upstream got %d requests, want 3", n)
 	}
 }
 
@@ -119,8 +121,8 @@ func TestRedirectInjection(t *testing.T) {
 	if res.StatusCode != http.StatusTemporaryRedirect || res.Header.Get("Location") != "http://127.0.0.1:58444/api/v1/server?x=1" {
 		t.Errorf("got %d to %q", res.StatusCode, res.Header.Get("Location"))
 	}
-	if *hits != 0 {
-		t.Errorf("upstream got %d requests, want none", *hits)
+	if n := hits.Load(); n != 0 {
+		t.Errorf("upstream got %d requests, want none", n)
 	}
 }
 
