@@ -62,7 +62,7 @@ export class Client {
   private view: View = { principal: "", route: "", query: "" };
   private epoch: string | undefined;
   private generation = 0;
-  private epochChanges = 0;
+  private epochRecords = 0;
 
   constructor(private readonly opts: ClientOptions = {}) {}
 
@@ -80,12 +80,17 @@ export class Client {
     const sent = this.generation;
     let renewed = false;
     for (let attempt = 0; ; attempt++) {
-      const epochs = this.epochChanges;
+      const records = this.epochRecords;
       const res = await this.send(path);
       if (res === undefined) return sent === this.generation ? { kind: "transport" } : { kind: "discarded" };
-      // Its epoch is read, stale or not, unless one changed since the send: it could roll that back.
-      const changed = epochs === this.epochChanges && this.observeEpoch(res);
-      if (changed || sent !== this.generation) return { kind: "discarded" };
+      // Epochs are unordered: another epoch than one recorded after the send may be older or newer,
+      // so the read is sent again to learn the current one. Any other is read, even on a stale read.
+      const epoch = res.headers.get("Bronzeward-Epoch");
+      if (epoch !== null && epoch !== this.epoch && records !== this.epochRecords) {
+        if (attempt + 1 >= MAX_TRIES) return { kind: "discarded" };
+        continue;
+      }
+      if (this.observeEpoch(res) || sent !== this.generation) return { kind: "discarded" };
       if (res.ok) return this.success<T>(res, sent);
       const problem = await readProblem(res);
       if (sent !== this.generation) return { kind: "discarded" }; // changed while the body arrived
@@ -140,8 +145,8 @@ export class Client {
     if (epoch === null || epoch === this.epoch) return false;
     const first = this.epoch === undefined;
     this.epoch = epoch;
+    this.epochRecords++;
     if (first) return false;
-    this.epochChanges++;
     this.generation++;
     this.opts.onEpochChange?.(epoch, res.headers.get("Bronzeward-Recovery-Mode") === "true");
     return true;
