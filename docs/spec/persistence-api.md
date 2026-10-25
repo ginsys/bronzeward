@@ -643,7 +643,9 @@ Rules for every transaction:
    A read of an immutable row needs no lock and may come first, for
    example the plan binding that names the machine to lock. A detected
    deadlock aborts the transaction, which is retried whole, at most three
-   times, then fails `503 transient-conflict` **(choice §17.7)**.
+   times, then fails `503 transient-conflict` **(choice §17.7)** when it is
+   the request's own transaction or a publication's T3; §14 names what a
+   transaction a route runs before its own answers.
 6. **Commit-unknown is resolved by reading, not by assuming.** A connection
    error after `COMMIT` was sent leaves the outcome to the server. In DB row
    061 the release committed after the client was gone, and an idempotent
@@ -1680,8 +1682,9 @@ Design: [§11](../design/Talos_Configuration_and_Machine_Management_Design.md#11
   authenticated. A committed recovery entry or exit instead names what it
   leaves in place: the entry the epoch it minted, in recovery mode, and the
   exit its epoch outside recovery mode. An entry that commits after the read
-  the headers report replaces the epoch they carry, so any refusal, `503 epoch-superseded`
-  included, can carry the epoch that entry replaced; a client confirms the epoch with
+  the headers report replaces the epoch they carry, so an answer that carries
+  them, a refusal such as `503 epoch-superseded` included, can carry the epoch
+  that entry replaced; a client confirms the epoch with
   `GET /recovery` before acting on a change (client contracts §8.4 item 3). A
   `401`, a `403 identity-revoked` and the liveness probe carry neither: they
   answer a caller who has not authenticated, and the epoch is data (§10). A
@@ -2506,9 +2509,9 @@ counter, not the ETag token, so the token is not named.
 | 428 | `precondition-required`, `idempotency-key-required` | `If-Match` or `Idempotency-Key` missing |
 | 500 | `internal-error` | an unexpected server failure; the body says whether anything was committed or the outcome is unknown, in which case a retry under the same `Idempotency-Key` answers it (§5 rule 6) |
 | 501 | `not-implemented` | a §9.2 route whose handler has not landed yet: routed, authenticated and role-checked, nothing committed. PoC delivery state only; it disappears when every route has its handler |
-| 503 | `dependency-unavailable` | the provider is sealed or unreachable, or the process has no provider, or no executor, that the route needs; authentication could not reach the identity provider or the database; or the database failed while the request ran: the installation-state read made once it authenticated (§9.1), its first-use principal row (§10), its key's lookup or its own transaction, or a connection lost or refused in a transaction its route runs before its own (§7.2). A request so answered committed nothing of its own transaction; what an earlier one committed stays (§14). A publication also uses this code for missing or unreadable identity, running version or Talos access (§6.1.1), naming the machine, observation, rule and safe cause; later compiler dependency failures name the dependency (§6.1). Publication commits no release or Desired change on refusal, but its operation, act, events and already recorded observations remain. Ingestion and dispatch Talos access failures use `talos-access-unavailable` |
+| 503 | `dependency-unavailable` | the provider is sealed or unreachable, or the process has no provider, or no executor, that the route needs; authentication could not reach the identity provider or the database; or the database failed while the request ran: the installation-state read made once it authenticated (§9.1), its first-use principal row (§10) or a revoked subject's (§10.4), its key's lookup or its own transaction, or a connection lost or refused in a transaction its route runs before its own (§7.2); or the provider refused or could not decrypt a staged envelope for a review (§9.3). A request so answered committed nothing of its own transaction; what an earlier one committed stays (§14). A publication also uses this code for missing or unreadable identity, running version or Talos access (§6.1.1), naming the machine, observation, rule and safe cause; later compiler dependency failures name the dependency (§6.1). Publication commits no release or Desired change on refusal, but its operation, act, events and already recorded observations remain. Ingestion and dispatch Talos access failures use `talos-access-unavailable` |
 | 503 | `talos-access-unavailable` | the error of a failed `ingest` operation, or the cause recorded by a dispatch's use-time check or fresh observation that failed on it (execution and recovery §3.1): the cluster's Talos access configuration is absent, unreadable by the identity, unreachable behind a sealed or silent provider, not a usable talosconfig or refused by Talos, or the machine's Talos endpoint did not answer (§3.3); the body names the cluster or machine, never a value; an ingestion's claim is abandoned and nothing read is kept. A use-time check that fails on the access read and on another dependency at once, as under a sealed provider, reports this code; its timeline entry records each dependency's result (execution and recovery §4.1). A publication observation also retains this code in its unread values, while the publish operation reports `dependency-unavailable` under §6.1.1 |
-| 503 | `transient-conflict` | deadlock retries exhausted (§5) |
+| 503 | `transient-conflict` | deadlock retries exhausted in the request's own transaction or a publication's T3 (§5 rule 5); §14 names what a transaction a route runs before its own answers |
 | 503 | `epoch-superseded` | the serving process started before the current epoch, so it may issue no ownership (§5.1); nothing of the request's own transaction was committed, while a draft entry's staging claim, or a scope mark's recorded observation or only its `observation-started` entry, or a principal row, committed before it stays (§7.2, §9.2, §14). Its `Bronzeward-Epoch` can name the epoch the entry replaced (§9.1) |
 | 503 | `schema-mismatch` | never served: the server does not start (§11) |
 
@@ -3268,7 +3271,7 @@ or Desired change; it does not erase earlier evidence.
 | Recovery | Publication changing the assignment of a scope not released in the current epoch | operation `failed`, `409 recovery-mode-active` (§6.2) | operation, act |
 | Recovery | Any request but liveness and entry under the recovery-start flag, before entry | `409 recovery-mode-active` | nothing |
 | Recovery | A second entry in one recovery start, under another key | `409 conflict` naming the epoch the first minted (§12.2) | nothing |
-| Any | Deadlock retries exhausted | `503 transient-conflict` in the request's own transaction. In a transaction its route runs before that one, `500 internal-error`: a draft entry's claim transaction, or a scope mark's observation (§5 rule 5); the key's lookup repeated under its lock before a `412 epoch-mismatch` answers `503 dependency-unavailable` (§7.2) | nothing of the request's own transaction; what the route committed in an earlier one stays: a draft entry's claim and its orphans, or a scope mark's restoration observation or only its `observation-started` entry (§7.2, §9.2) |
+| Any | Deadlock retries exhausted | `503 transient-conflict` in the request's own transaction. In a transaction its route runs before that one, `500 internal-error`: a draft entry's claim transaction, or a scope mark's observation (§7.2, §9.2); the key's lookup repeated under its lock before a `412 epoch-mismatch` answers `503 dependency-unavailable` (§7.2) | nothing of the request's own transaction; what the route committed in an earlier one stays: a draft entry's claim and its orphans, or a scope mark's restoration observation or only its `observation-started` entry (§7.2, §9.2) |
 | Migrate | Failure or kill inside a migration | migration absent; server refuses to start | earlier migrations |
 | Startup | Schema or checksum mismatch | refuses to start | nothing |
 | Restore | No recovery-mode entry after a restore | undetected (design §14.6); pre-restore tokens can pass | the residual of §12.1 |
