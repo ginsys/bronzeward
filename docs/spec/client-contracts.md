@@ -438,9 +438,9 @@ method, route, path parameters, `If-Match` and the canonical body, keyed with th
 digest key on keyed routes (`internal/api/body.go:165-185`); where the key has a record, the same
 request under it replays, another is `422`, an earlier epoch's record is `409`
 (`internal/api/idempotency.go:60-106`); where it has none, any request under it executes as a new
-one (`internal/api/tx.go:198-202`); a request whose effect a restore removed lost its record
-too and executes again, unless it carries `Bronzeward-Expected-Epoch` and an entry has minted a
-new epoch (`412 epoch-mismatch`, A6)
+one (`internal/api/tx.go:198-202`), unless its `Bronzeward-Expected-Epoch` names another epoch
+(`412 epoch-mismatch`, A6); a request whose effect a restore removed lost its record too and
+executes again under the same exception
 ([persistence and API §12.4](persistence-api.md#124-restore-and-idempotency)); the same key does
 not make a remote mutation exactly-once
 ([persistence and API §7.2](persistence-api.md#72-behavior)).
