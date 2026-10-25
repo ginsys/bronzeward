@@ -81,19 +81,18 @@ export class Client {
     for (let attempt = 0; ; attempt++) {
       const res = await this.send(path);
       if (res === undefined) return sent === this.generation ? { kind: "transport" } : { kind: "discarded" };
-      const changed = this.observeEpoch(res);
-      if (changed || sent !== this.generation) return { kind: "discarded" };
+      // A stale response is discarded before its epoch is read, so a late one cannot roll it back.
+      if (sent !== this.generation || this.observeEpoch(res)) return { kind: "discarded" };
       if (res.ok) return this.success<T>(res, sent);
       const problem = await readProblem(res);
-      // The view or epoch may have changed while the body arrived.
-      if (sent !== this.generation) return { kind: "discarded" };
+      if (sent !== this.generation) return { kind: "discarded" }; // changed while the body arrived
       const code = problem?.type.slice(PROBLEM_PREFIX.length);
       if (res.status === 401 && problem !== null) {
-        if (!renewed && this.opts.renew !== undefined && (await this.opts.renew())) {
+        if (!renewed && this.opts.renew !== undefined) {
           renewed = true;
+          const again = await this.opts.renew();
           if (sent !== this.generation) return { kind: "discarded" };
-          attempt--;
-          continue;
+          if (again) { attempt--; continue; }
         }
         return { kind: "unauthenticated", problem };
       }
@@ -131,7 +130,7 @@ export class Client {
     }
   }
 
-  // §8.5: every response's epoch against the last one seen; the first is recorded silently. A
+  // §8.5: every current response's epoch against the last one seen; the first is recorded silently. A
   // response that carries a new epoch is itself discarded, since its read began under the old one.
   private observeEpoch(res: Response): boolean {
     const epoch = res.headers.get("Bronzeward-Epoch");
