@@ -16,8 +16,6 @@ type TokenInput struct {
 	Stdin bool
 }
 
-const maxToken = 4096
-
 // automationToken reads the token for x: --token-stdin, else the first of --token-file, the
 // context's automation.tokenFile and BRONZEWARD_TOKEN_FILE (a path) that is set.
 func automationToken(x *Context, in TokenInput) (string, error) {
@@ -28,7 +26,7 @@ func automationToken(x *Context, in TokenInput) (string, error) {
 	var err error
 	src := "standard input"
 	if in.Stdin {
-		b, err = io.ReadAll(io.LimitReader(os.Stdin, maxToken+1))
+		b, err = io.ReadAll(os.Stdin)
 	} else {
 		src = in.File
 		if src == "" && x.Automation != nil {
@@ -46,17 +44,18 @@ func automationToken(x *Context, in TokenInput) (string, error) {
 		return "", fmt.Errorf("token from %s: %w", src, err)
 	}
 	t := strings.TrimSpace(string(b))
-	switch {
-	case len(b) > maxToken:
-		return "", fmt.Errorf("token from %s: longer than %d bytes", src, maxToken)
-	case !strings.HasPrefix(t, "bwt_") || strings.ContainsAny(t, " \t\r\n"):
+	if !strings.HasPrefix(t, "bwt_") || strings.ContainsAny(t, " \t\r\n") {
 		return "", fmt.Errorf("token from %s: not an automation token (bwt_…) on one line", src)
 	}
 	return t, nil
 }
 
-// readOwnerOnly reads a regular file no one but its owner may read (§9.4 item 2).
+// readOwnerOnly reads a regular file no one but its owner may read (§9.4 item 2), checked
+// before it is opened, since opening a FIFO blocks.
 func readOwnerOnly(p string) ([]byte, error) {
+	if fi, err := os.Stat(p); err == nil && !fi.Mode().IsRegular() {
+		return nil, errors.New("not a regular file")
+	}
 	f, err := os.Open(p)
 	if err != nil {
 		return nil, err
@@ -66,11 +65,8 @@ func readOwnerOnly(p string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !fi.Mode().IsRegular() {
-		return nil, errors.New("not a regular file")
-	}
 	if fi.Mode().Perm()&0o077 != 0 {
 		return nil, fmt.Errorf("mode %04o lets others read it; make it owner-only (chmod 600)", fi.Mode().Perm())
 	}
-	return io.ReadAll(io.LimitReader(f, maxToken+1))
+	return io.ReadAll(f)
 }

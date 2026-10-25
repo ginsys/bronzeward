@@ -25,8 +25,9 @@ type Client struct {
 	Notices io.Writer
 	hc      *http.Client
 	token   string
-	changed bool
 	warned  map[string]bool
+
+	changed, newEpoch, recovery bool
 }
 
 // Response is a successful answer.
@@ -35,8 +36,12 @@ type Response struct {
 	Body   []byte
 }
 
-// Open prepares the client for x, reading its automation token.
+// Open prepares the client for x, reading its automation token. A context edited by hand is
+// checked as context add checks it, so no token is sent over plain http to a remote host.
 func Open(x *Context, in TokenInput, notices, verbose io.Writer) (*Client, error) {
+	if err := x.Check(); err != nil {
+		return nil, x.fail(err)
+	}
 	hc, err := httpClient(x, verbose)
 	if err != nil {
 		return nil, x.fail(err)
@@ -55,8 +60,8 @@ func (x *Context) fail(err error) error { return fmt.Errorf("%s: %w", x.Where(),
 
 // Live checks a new context's server: GET /livez must answer 204 (§5 item 5). It sends no
 // credential and shows only that something answers.
-func Live(x *Context) error {
-	hc, err := httpClient(x, nil)
+func Live(x *Context, verbose io.Writer) error {
+	hc, err := httpClient(x, verbose)
 	if err != nil {
 		return x.fail(err)
 	}
@@ -66,22 +71,27 @@ func Live(x *Context) error {
 	}
 	r.Body.Close()
 	if r.StatusCode != http.StatusNoContent {
+		if l := r.Header.Get("Location"); l != "" {
+			return x.fail(fmt.Errorf("GET /livez answered %s redirecting to %q, which bronzewardctl does not follow", r.Status, l))
+		}
 		return x.fail(fmt.Errorf("GET /livez answered %s, not 204: this is not a Bronzeward server, or not its base URL", r.Status))
 	}
 	return nil
 }
 
-// Server reads GET /server on context use (§7 item 3) and keeps the start mode it shows (§8.5).
-// It refuses a server below MinRevision, returning what it served with the refusal. A 409
-// recovery-mode-active without a scope member is a recovery start before its entry: Server then
-// returns nil and no error, the revision unknown.
+// Server reads GET /server on context use and after a new epoch (§7 item 3, §8.5), keeps the
+// start mode it shows and then shows the recovery banner. It refuses a server below MinRevision,
+// returning what it served with the refusal. A 409 recovery-mode-active without a scope member
+// is a recovery start before its entry: the start mode is kept and the refusal returned.
 func (c *Client) Server() (*Response, *apitypes.ServerBody, error) {
-	r, err := c.Get("/server")
+	defer c.banner()
+	r, err := c.retry("/server")
+	c.newEpoch = false
 	var p *Problem
 	if errors.As(err, &p) && p.Code() == "recovery-mode-active" && p.Doc["scope"] == nil {
 		c.setStartMode("recovery")
-		return nil, nil, nil
-	} else if err != nil {
+	}
+	if err != nil {
 		return nil, nil, err
 	}
 	var s apitypes.ServerBody
@@ -101,9 +111,22 @@ func (c *Client) setStartMode(m string) {
 	}
 }
 
-// Get reads path under /api/v1, retrying a retryable 503, a 5xx that is not a Bronzeward problem
-// and a transport failure after 1 s, doubling to at most 30 s, at most 5 tries (§8.2).
+// Get reads path under /api/v1. After an answer showing a new epoch it reads GET /server again
+// for the start mode (§8.5) before the recovery banner is shown.
 func (c *Client) Get(path string) (*Response, error) {
+	r, err := c.retry(path)
+	if c.newEpoch {
+		if _, _, err := c.Server(); err != nil {
+			fmt.Fprintln(c.Notices, err)
+		}
+	}
+	c.banner()
+	return r, err
+}
+
+// retry sends a GET, retrying a retryable 503, a 5xx that is not a Bronzeward problem and a
+// transport failure after 1 s, doubling to at most 30 s, at most 5 tries (§8.2).
+func (c *Client) retry(path string) (*Response, error) {
 	delay := time.Second
 	for try := 1; ; try++ {
 		r, retry, err := c.once(path)
@@ -131,20 +154,20 @@ func (c *Client) once(path string) (*Response, bool, error) {
 		return nil, !errors.As(err, &t), c.Context.fail(fmt.Errorf("%s: %w", route, err))
 	}
 	defer r.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(r.Body, 64<<20))
+	c.observe(route, r)
+	if r.StatusCode >= 300 && r.StatusCode < 400 {
+		return nil, false, c.Context.fail(fmt.Errorf("%s answered %s redirecting to %q; bronzewardctl follows no redirect, and nothing was resent",
+			route, r.Status, r.Header.Get("Location")))
+	}
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		return nil, true, c.Context.fail(fmt.Errorf("%s: reading the answer: %w", route, err))
 	}
-	c.observe(route, r)
-	switch {
-	case r.StatusCode >= 200 && r.StatusCode < 300:
+	if r.StatusCode >= 200 && r.StatusCode < 300 {
 		if r.Header.Get("Bronzeward-Epoch") == "" {
 			fmt.Fprintf(c.Notices, "%s: %s answered without Bronzeward-Epoch, a server defect\n", c.Context.Where(), route)
 		}
 		return &Response{Header: r.Header, Body: body}, false, nil
-	case r.StatusCode >= 300 && r.StatusCode < 400:
-		return nil, false, c.Context.fail(fmt.Errorf("%s answered %s redirecting to %q; bronzewardctl follows no redirect, and nothing was resent",
-			route, r.Status, r.Header.Get("Location")))
 	}
 	var doc map[string]any
 	mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
@@ -159,15 +182,24 @@ func (c *Client) once(path string) (*Response, bool, error) {
 }
 
 // observe applies the response headers every answer may carry: the epoch (§8.5), the recovery
-// banner and a deprecation (§7 item 4), each shown once per command.
+// header and a deprecation (§7 item 4), shown once per route.
 func (c *Client) observe(route string, r *http.Response) {
 	if e := r.Header.Get("Bronzeward-Epoch"); e != "" && e != c.Context.LastEpoch {
 		if c.Context.LastEpoch != "" {
 			fmt.Fprintf(c.Notices, "%s: The installation entered recovery mode or was restored; what was read before may no longer hold.\n", c.Context.Where())
 		}
-		c.Context.LastEpoch, c.changed = e, true
+		c.Context.LastEpoch, c.changed, c.newEpoch = e, true, c.Context.LastEpoch != ""
 	}
-	if r.Header.Get("Bronzeward-Recovery-Mode") == "true" && !c.warned["recovery"] {
+	c.recovery = c.recovery || r.Header.Get("Bronzeward-Recovery-Mode") == "true"
+	if d := r.Header.Get("Deprecation"); d != "" && !c.warned[route] {
+		c.warned[route] = true
+		fmt.Fprintf(c.Notices, "%s: %s is deprecated (Deprecation: %s)\n", c.Context.Where(), route, d)
+	}
+}
+
+// banner shows the recovery banner once per command, with the start mode last shown.
+func (c *Client) banner() {
+	if c.recovery && !c.warned["recovery"] {
 		c.warned["recovery"] = true
 		mode := c.Context.StartMode
 		if mode == "" {
@@ -175,25 +207,22 @@ func (c *Client) observe(route string, r *http.Response) {
 		}
 		fmt.Fprintf(c.Notices, "RECOVERY MODE is on in %s (start mode: %s).\n", c.Context.Where(), mode)
 	}
-	if d := r.Header.Get("Deprecation"); d != "" && !c.warned[route] {
-		c.warned[route] = true
-		fmt.Fprintf(c.Notices, "%s: %s is deprecated (Deprecation: %s)\n", c.Context.Where(), route, d)
-	}
 }
 
-// Save keeps the epoch and start mode in the contexts file, re-read first so a concurrent edit
-// of another field survives.
+// Save keeps the epoch and start mode in the contexts file, leaving its other fields as they
+// are now.
 func (c *Client) Save() error {
 	if !c.changed {
 		return nil
 	}
-	cfg, err := LoadConfig()
+	err := UpdateConfig(func(cfg *Config) error {
+		if x := cfg.Find(c.Context.Name); x != nil {
+			x.LastEpoch, x.StartMode = c.Context.LastEpoch, c.Context.StartMode
+		}
+		return nil
+	})
 	if err != nil {
-		return err
-	}
-	if x := cfg.Find(c.Context.Name); x != nil {
-		x.LastEpoch, x.StartMode = c.Context.LastEpoch, c.Context.StartMode
-		return cfg.Save()
+		return c.Context.fail(fmt.Errorf("keeping the epoch and start mode: %w", err))
 	}
 	return nil
 }

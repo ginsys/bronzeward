@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -66,14 +67,30 @@ func LoadConfig() (*Config, error) {
 	return &c, nil
 }
 
-// Save writes the file whole through an owner-only temporary file of its own and a rename, so
-// neither a reader nor a concurrent writer sees half of it.
-func (c *Config) Save() error {
+// UpdateConfig applies change to the contexts file under an exclusive lock held across the read,
+// the change and the write, so concurrent commands never lose each other's updates. The file is
+// written whole through an owner-only temporary file and a rename, so no reader sees half of it.
+func UpdateConfig(change func(*Config) error) error {
 	p, err := ConfigPath()
 	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		return err
+	}
+	lock, err := os.OpenFile(p+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	c, err := LoadConfig()
+	if err != nil {
+		return err
+	}
+	if err := change(c); err != nil {
 		return err
 	}
 	b, err := yaml.Marshal(c)

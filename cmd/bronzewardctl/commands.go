@@ -14,10 +14,6 @@ import (
 )
 
 func (e *env) contextCmd(args []string) error {
-	cfg, err := client.LoadConfig()
-	if err != nil {
-		return err
-	}
 	verb := ""
 	if len(args) > 0 {
 		verb, args = args[0], args[1:]
@@ -25,6 +21,10 @@ func (e *env) contextCmd(args []string) error {
 	switch verb {
 	case "list":
 		if _, err := e.parse("context list", args, 0, nil); err != nil {
+			return err
+		}
+		cfg, err := client.LoadConfig()
+		if err != nil {
 			return err
 		}
 		raw, _ := json.Marshal(cfg)
@@ -39,33 +39,36 @@ func (e *env) contextCmd(args []string) error {
 		if err != nil {
 			return err
 		}
-		x := cfg.Find(pos[0])
-		if x == nil {
-			return fmt.Errorf("context %q does not exist", pos[0])
-		}
-		msg := "Current context: " + x.Where() + "."
-		if verb == "use" {
-			cfg.Current = x.Name
-		} else {
+		var msg string
+		if err := client.UpdateConfig(func(cfg *client.Config) error {
+			x := cfg.Find(pos[0])
+			if x == nil {
+				return fmt.Errorf("context %q does not exist", pos[0])
+			}
+			msg = "Current context: " + x.Where() + "."
+			if verb == "use" {
+				cfg.Current = x.Name
+				return nil
+			}
 			msg = fmt.Sprintf("Context %q removed.", x.Name)
 			if cfg.Current == x.Name {
 				cfg.Current, msg = "", msg+" No context is current now."
 			}
 			cfg.Contexts = slices.DeleteFunc(cfg.Contexts, func(c client.Context) bool { return c.Name == pos[0] })
-		}
-		if err := cfg.Save(); err != nil {
+			return nil
+		}); err != nil {
 			return err
 		}
-		fmt.Fprintln(e.out, msg)
-		return nil
+		_, err = fmt.Fprintln(e.out, msg)
+		return err
 	case "add":
-		return e.contextAdd(cfg, args)
+		return e.contextAdd(args)
 	}
 	return usageError{errors.New("context needs list, use, add or remove")}
 }
 
 // contextAdd records a context after its server answered GET /livez (client-contracts.md §5).
-func (e *env) contextAdd(cfg *client.Config, args []string) error {
+func (e *env) contextAdd(args []string) error {
 	x := client.Context{Credential: "automation"}
 	var automationFile string
 	pos, err := e.parse("context add", args, 1, func(fs *flag.FlagSet) {
@@ -77,35 +80,39 @@ func (e *env) contextAdd(cfg *client.Config, args []string) error {
 		return err
 	}
 	x.Name = pos[0]
-	if cfg.Find(x.Name) != nil {
-		return fmt.Errorf("context %q exists: remove it first", x.Name)
-	}
 	if automationFile != "" {
 		x.Automation = &client.Automation{TokenFile: automationFile}
 	}
 	if err := x.Check(); err != nil {
 		return usageError{err}
 	}
-	if err := client.Live(&x); err != nil {
+	if err := client.Live(&x, e.verboseOut()); err != nil {
 		return err
 	}
-	cfg.Contexts = append(cfg.Contexts, x)
-	if cfg.Current == "" {
-		cfg.Current = x.Name
-	}
-	if err := cfg.Save(); err != nil {
+	var current string
+	if err := client.UpdateConfig(func(cfg *client.Config) error {
+		if cfg.Find(x.Name) != nil {
+			return fmt.Errorf("context %q exists: remove it first", x.Name)
+		}
+		cfg.Contexts = append(cfg.Contexts, x)
+		if cfg.Current == "" {
+			cfg.Current = x.Name
+		}
+		current = cfg.Current
+		return nil
+	}); err != nil {
 		return err
 	}
 	trust := "the system trust store"
 	if x.CertificateAuthority != "" {
 		trust = "the bundle " + x.CertificateAuthority
 	}
-	fmt.Fprintf(e.out, "Context %q added: %s, TLS trust from %s. Current context: %s.\n", x.Name, x.Server, trust, cfg.Current)
-	return nil
+	_, err = fmt.Fprintf(e.out, "Context %q added: %s, TLS trust from %s. Current context: %s.\n", x.Name, x.Server, trust, current)
+	return err
 }
 
-// versionCmd prints both versions and the served API revision. The server's is "unknown", with
-// the reason on standard error, while it cannot be read (client-contracts.md §7 item 5).
+// versionCmd prints both versions and the served API revision. The server's is "unknown" while
+// it cannot be read, and the command then fails with the reason (client-contracts.md §7 item 5).
 func (e *env) versionCmd(args []string) error {
 	if _, err := e.parse("version", args, 0, nil); err != nil {
 		return err
@@ -121,18 +128,15 @@ func (e *env) versionCmd(args []string) error {
 		}
 		err = errors.Join(err, c.Save())
 	}
-	if err != nil {
-		fmt.Fprintln(e.err, "bronzewardctl:", err)
-	}
 	out := fmt.Appendf(nil, `{"client":{"version":%q,"minimumApiRevision":%d},"server":%s}`, clientVersion(), client.MinRevision, raw)
-	return e.emit(out, func(w *tabwriter.Writer) {
+	return errors.Join(err, e.emit(out, func(w *tabwriter.Writer) {
 		fmt.Fprintf(w, "Client\tbronzewardctl %s, needs API revision %d or later\n", clientVersion(), client.MinRevision)
 		if srv == nil {
 			fmt.Fprintln(w, "Server\tunknown")
 		} else {
 			fmt.Fprintf(w, "Server\t%s, API revision %d, start mode %s\t%s\n", srv.Version, srv.ApiRevision, srv.StartMode, where)
 		}
-	})
+	}))
 }
 
 // whoamiCmd shows what GET /identity reports for the credential in use.
