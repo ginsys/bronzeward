@@ -96,8 +96,8 @@ diff -u internal/client/apitypes/apitypes.gen.go "$out" || {
 description = "Check the generated API types, then build, vet, format-check and test the root module and the Phase-0 experiment modules"
 # generate:check runs first, so CI's go job, which runs this task, fails on a stale generated file.
 depends = ["generate:check"]
-# The root module (cmd/, internal/, fixtures/oidc) comes first. Its go.mod ignores ./site, which the
-# site task rebuilds in parallel under `mise run verify`, and carries `ignore ./experiments`, so
+# The root module (cmd/, internal/, fixtures/oidc) comes first. Its go.mod ignores ./site and ./web,
+# which the site and web tasks rebuild in parallel under `mise run verify`, and carries `ignore ./experiments`, so
 # the root `./...` never sweeps disposable evidence code into the implementation: the nested
 # go.mod files alone do not suffice, since experiments/e3-talos-compatibility/machinery/src has
 # none. Each experiment is its own module, checked with `go -C <dir>`, one line per module.

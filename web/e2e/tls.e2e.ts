@@ -52,7 +52,9 @@ describe("an API redirect to another origin", () => {
       caches: "caches" in self ? await caches.keys() : ["unreadable"],
     }));
     expect(storage).toEqual({ local: [], session: [], indexedDB: [], caches: [] });
-    const name = `${browser.capabilities.browserName}-${this.currentTest?.title.slice(0, 20).replace(/\W+/g, "-")}`;
+    // The version tells the two Firefoxes apart.
+    const { browserName, browserVersion } = browser.capabilities;
+    const name = `${browserName}-${browserVersion}-${this.currentTest?.title.slice(0, 20).replace(/\W+/g, "-")}`;
     await browser.saveScreenshot(`e2e/out/${name}.png`);
   });
 });

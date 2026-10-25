@@ -83,8 +83,10 @@ export class Client {
       if (res === undefined) return sent === this.generation ? { kind: "transport" } : { kind: "discarded" };
       const changed = this.observeEpoch(res);
       if (changed || sent !== this.generation) return { kind: "discarded" };
+      if (res.ok) return this.success<T>(res, sent);
       const problem = await readProblem(res);
-      if (res.ok) return this.success<T>(res);
+      // The view or epoch may have changed while the body arrived.
+      if (sent !== this.generation) return { kind: "discarded" };
       const code = problem?.type.slice(PROBLEM_PREFIX.length);
       if (res.status === 401 && problem !== null) {
         if (!renewed && this.opts.renew !== undefined && (await this.opts.renew())) {
@@ -142,10 +144,13 @@ export class Client {
     return true;
   }
 
-  private async success<T>(res: Response): Promise<ReadResult<T>> {
+  // A body that fails to parse is a defect; one cut off by the network is a transport failure.
+  private async success<T>(res: Response, sent: number): Promise<ReadResult<T>> {
     if (!res.headers.has("Bronzeward-Epoch")) return { kind: "defect", message: "a success carried no Bronzeward-Epoch header" };
-    const data = await res.json().then((d: unknown) => ({ d }), () => undefined);
-    return data === undefined ? { kind: "defect", message: "the response is not JSON" } : { kind: "ok", data: data.d as T };
+    const body = await res.json().then((d: unknown) => ({ d }), (e: unknown) => ({ e }));
+    if (sent !== this.generation) return { kind: "discarded" };
+    if ("e" in body) return body.e instanceof SyntaxError ? { kind: "defect", message: "the response is not JSON" } : { kind: "transport" };
+    return { kind: "ok", data: body.d as T };
   }
 }
 
