@@ -110,6 +110,10 @@ type sourceHead struct {
 	changed                   bool
 }
 
+// noRelease ends the detail of a publication refusal, which T3 rolled back or which came before
+// it: the operation, its act and events, and the observations already recorded stay (§9.4, §14).
+const noRelease = "no release or Desired change was committed"
+
 // publishCommit is the publication commit (T3, persistence-api.md §6.2): the release, its machines,
 // sources and dependency records, the statuses it seeds, the heads moved, the covered machines'
 // Desired, the draft published and the operation succeeded naming the release, in one
@@ -132,19 +136,19 @@ func (a *API) publishCommit(ctx context.Context, j publishJob, u releaseUnit) (s
 	switch {
 	case errors.Is(err, errRefused):
 	case isDeadlock(err):
-		ref = refuse(http.StatusServiceUnavailable, "transient-conflict", "the publication deadlocked on every attempt; nothing was committed")
+		ref = refuse(http.StatusServiceUnavailable, "transient-conflict", "the publication deadlocked on every attempt; "+noRelease)
 	case errors.Is(err, errStop) && (errors.As(err, &pe) && !connLost(err) || errors.Is(err, pgx.ErrTxCommitRollback)):
 		// The server rejected the COMMIT, a deferred trigger for one, or answered it with ROLLBACK:
 		// the release rolled back. A lost reply instead leaves the outcome unknown, for a retry to
 		// read (§5 rule 6).
 		a.o.logf("publication %s: %v", j.op, err)
-		ref = refuse(http.StatusInternalServerError, "internal-error", "the publication commit was rejected; nothing was committed")
+		ref = refuse(http.StatusInternalServerError, "internal-error", "the publication commit was rejected; "+noRelease)
 	case errors.As(err, &pe) && strings.HasPrefix(pe.Code, "23"):
 		// A statement broke an integrity constraint the unit should have met (a release machine in
 		// another mode than its machine's platform, for one): the transaction rolled back, and a
 		// retry would break it again, so the operation fails rather than staying running.
 		a.o.logf("publication %s: %v", j.op, err)
-		ref = refuse(http.StatusInternalServerError, "internal-error", "the publication broke a database constraint; nothing was committed")
+		ref = refuse(http.StatusInternalServerError, "internal-error", "the publication broke a database constraint; "+noRelease)
 	}
 	if ref != nil {
 		// The refusal rolled the commit back; a separate transaction records the operation failed
@@ -384,7 +388,7 @@ func (a *API) commitRelease(ctx context.Context, tx *sql.Tx, j publishJob, u rel
 	if mismatch != "" {
 		a.o.logf("publication %s: %s", j.op, mismatch)
 		return "", refuse(http.StatusInternalServerError, "internal-error",
-			"the compiled release disagrees with its sources' reference declarations; nothing was committed"), nil
+			"the compiled release disagrees with its sources' reference declarations; "+noRelease), nil
 	}
 	for _, m := range u.machines {
 		if err := insertDependencies(ctx, tx, rel, m); err != nil {

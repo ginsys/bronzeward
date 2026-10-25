@@ -267,7 +267,8 @@ func TestPublishCommitDeclarations(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			p := newPublishEnv(t)
 			c.mutate(p)
-			p.refused(500, "internal-error")
+			wantDetail(t, p.refused(500, "internal-error"),
+				"the compiled release disagrees with its sources' reference declarations; no release or Desired change was committed")
 			// The disagreeing machine is the one a case mutates: the second when it adds one.
 			if want := "machine " + p.unit.machines[len(p.unit.machines)-1].machine + ": " + c.reason; !p.logged(want) {
 				t.Fatalf("no log %q in %q", want, p.logs)

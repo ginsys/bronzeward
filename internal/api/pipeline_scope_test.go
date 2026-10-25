@@ -63,6 +63,7 @@ func TestReadPinnedClusterScope(t *testing.T) {
 						strings.Contains(fmt.Sprint(ref.extra)+ref.detail, pinHeld) || p.logged(pinHeld) {
 						t.Fatal("scope refusal lacks its source/reference or exposes the synthetic value")
 					}
+					wantDetail(t, ref, "Publication refused: a secret reference belongs to another cluster; no release or Desired change was committed.")
 					return
 				}
 				if err != nil || ref != nil || classifications != 1 || reads != 1 ||
