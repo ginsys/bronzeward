@@ -94,6 +94,7 @@ export class Client {
       if (res.ok) return this.success<T>(res, sent);
       const problem = await readProblem(res);
       if (sent !== this.generation) return { kind: "discarded" }; // changed while the body arrived
+      if (problem === CUT) return { kind: "transport" };
       const code = problem?.type.slice(PROBLEM_PREFIX.length);
       if (res.status === 401 && problem !== null) {
         if (!renewed && this.opts.renew !== undefined) {
@@ -155,17 +156,26 @@ export class Client {
   // A body that fails to parse is a defect; one cut off by the network is a transport failure.
   private async success<T>(res: Response, sent: number): Promise<ReadResult<T>> {
     if (!res.headers.has("Bronzeward-Epoch")) return { kind: "defect", message: "a success carried no Bronzeward-Epoch header" };
-    const body = await res.json().then((d: unknown) => ({ d }), (e: unknown) => ({ e }));
+    const body = await readJson(res);
     if (sent !== this.generation) return { kind: "discarded" };
-    if ("e" in body) return body.e instanceof SyntaxError ? { kind: "defect", message: "the response is not JSON" } : { kind: "transport" };
-    return { kind: "ok", data: body.d as T };
+    if (body === CUT) return { kind: "transport" };
+    if (body === NOT_JSON) return { kind: "defect", message: "the response is not JSON" };
+    return { kind: "ok", data: body as T };
   }
 }
 
-// A Bronzeward problem document, or null for any other answer (§8.2's last row).
-async function readProblem(res: Response): Promise<Problem | null> {
+// A body's JSON; NOT_JSON when it does not parse, CUT when the network cut it off.
+export const NOT_JSON = Symbol("not JSON");
+export const CUT = Symbol("cut off");
+export async function readJson(res: Response): Promise<unknown> {
+  return res.json().catch((e: unknown) => (e instanceof SyntaxError ? NOT_JSON : CUT));
+}
+
+// A Bronzeward problem document, null for any other answer (§8.2's last row), or CUT.
+async function readProblem(res: Response): Promise<Problem | null | typeof CUT> {
   if (res.ok || !(res.headers.get("Content-Type") ?? "").startsWith("application/problem+json")) return null;
-  const body: unknown = await res.json().catch(() => null);
+  const body = await readJson(res);
+  if (body === CUT) return CUT;
   const type = typeof body === "object" && body !== null && "type" in body ? body.type : undefined;
   return typeof type === "string" && type.startsWith(PROBLEM_PREFIX) ? (body as Problem) : null;
 }

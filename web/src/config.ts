@@ -1,6 +1,8 @@
 // The client-configuration file served next to the web files (client contracts §5 item 4, D3 (b)),
 // read from the page's own origin before anything can authenticate.
 
+import { CUT, readJson } from "./request.ts";
+
 export const CLIENT_CONFIG_PATH = "/bronzeward-client.json";
 
 export interface ClientConfig {
@@ -22,7 +24,8 @@ export async function loadClientConfig(fetchImpl: typeof fetch = fetch): Promise
     return { kind: "transport" };
   }
   if (!res.ok) return { kind: "invalid", reason: `${CLIENT_CONFIG_PATH} answered ${res.status}` };
-  const body: unknown = await res.json().catch(() => null);
+  const body = await readJson(res);
+  if (body === CUT) return { kind: "transport" };
   if (typeof body !== "object" || body === null) return { kind: "invalid", reason: `${CLIENT_CONFIG_PATH} is not a JSON object` };
   const record = body as Record<string, unknown>;
   const missing = MEMBERS.find((m) => typeof record[m] !== "string" || record[m] === "");
