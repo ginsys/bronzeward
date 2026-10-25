@@ -1164,8 +1164,8 @@ paths:
       responses:
         '202':
           description: 'Accepted: the operation named in the body resumes the claim asynchronously, unless the claim held
-            no staged envelope: then the operation has already finished failed with ingestion-abandoned, cause nothing-to-decrypt,
-            before this answer (persistence and API §8.3).'
+            no staged envelope: then the operation has already finished failed with ingestion-abandoned before this answer,
+            its failed event naming cause nothing-to-decrypt (persistence and API §8.3).'
           headers:
             Cache-Control: {$ref: '#/components/headers/NoStore'}
             Bronzeward-Request-ID: {$ref: '#/components/headers/RequestID'}
@@ -1822,7 +1822,7 @@ paths:
       - {$ref: '#/components/parameters/Cursor'}
       responses:
         '200':
-          description: No API test reaches this answer; described from its handler.
+          description: No API test lists a profile; the item is described from its handler.
           headers:
             Cache-Control: {$ref: '#/components/headers/NoStore'}
             Bronzeward-Request-ID: {$ref: '#/components/headers/RequestID'}
@@ -2205,8 +2205,8 @@ components:
       required: true
       schema: {type: string}
     OptionalEpoch:
-      description: The recovery epoch the request was answered in (persistence and API §9.1); absent from an answer to an
-        unauthenticated request.
+      description: The recovery epoch the request was answered in (persistence and API §9.1); absent from a 401, a 403
+        identity-revoked and an answer refused before the epoch was read.
       schema: {type: string}
     RecoveryMode:
       description: true while the server runs in recovery mode (persistence and API §9.1); absent otherwise.

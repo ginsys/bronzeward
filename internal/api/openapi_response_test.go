@@ -569,8 +569,9 @@ func TestDescriptionBoundsMatchServer(t *testing.T) {
 		in := assignmentInput{Fragments: map[string][]string{l: {"base"}}}
 		agree(fmt.Sprintf("a fragments member %q", l), fragments, map[string]any{l: []any{"base"}}, in.check(nil) == nil)
 	}
-	in := assignmentInput{Fragments: map[string][]string{"global": {}}}
-	agree("an empty fragments layer", fragments, map[string]any{"global": []any{}}, in.check(nil) == nil)
+	// Beside a layer that selects one, so the per-layer rule decides and not the total's.
+	in := assignmentInput{Fragments: map[string][]string{"global": {}, "site": {"base"}}}
+	agree("an empty fragments layer", fragments, map[string]any{"global": []any{}, "site": []any{"base"}}, in.check(nil) == nil)
 }
 
 // checkResponse's negative controls: each kind of mismatch, made on a real exchange shape, is
