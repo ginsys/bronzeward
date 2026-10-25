@@ -1,0 +1,56 @@
+# Shared conformance case records (docs/spec/client-contracts.md §12) that bronzewardctl runs.
+# cli_test.go TestSharedCases runs exactly the cases recorded here, in this order, against a
+# disposable bronzeward serve behind an in-process TLS injector. Data is synthetic: a viewer
+# automation token issued by bronzeward token for the test database. An exchange item is one
+# string, with its headers after the request line.
+
+- id: TLS-01
+  setup: server behind the injector, whose certificate is from a test CA outside the system store; viewer automation token
+  action: context add untrusted --server <injector URL>; then context add trusted with --certificate-authority <the test CA bundle>
+  exchange:
+    - first: none; the handshake fails before any request
+    - second: GET /livez, no Authorization
+  fault: certificate from an untrusted CA
+  expect:
+    client: refuses before sending; names the host, the certificate's subject and issuer and the trust source
+    server: the injector receives no request for the first; the second is answered 204
+    shown: '"is not trusted by the system trust store ... nothing was sent", exit 1; then "added", exit 0'
+    absent: [token in stdout, stderr, argv]
+
+- id: TLS-02
+  setup: context trusted from TLS-01; a second server as the redirect target, counting requests
+  action: whoami
+  exchange:
+    - "GET /api/v1/server, headers: Authorization, Accept: application/json"
+    - "GET /api/v1/identity, headers: Authorization, Accept: application/json"
+  fault: the injector answers GET /api/v1/identity with 307 to the target's origin
+  expect:
+    client: does not follow; sends nothing to the target; does not resend
+    server: the injector sees the identity read once; the target sees no request
+    shown: the 307 and its target, "follows no redirect"; exit 1
+    absent: [token in stdout, stderr, argv]
+
+- id: COMP-01
+  setup: context trusted
+  action: whoami
+  exchange:
+    - GET /api/v1/server
+  fault: the injector rewrites the GET /server answer's apiRevision from 2 to 1
+  expect:
+    client: refuses after GET /server; sends no other request
+    server: answers GET /server only
+    shown: '"serves API revision 1; this bronzewardctl needs revision 2 or later"; exit 1'
+    absent: [token in stdout, stderr, argv]
+
+- id: COMP-02
+  setup: context trusted
+  action: whoami
+  exchange:
+    - GET /api/v1/server
+    - GET /api/v1/identity
+  fault: 'the injector adds "Deprecation: @1798761600" to every answer'
+  expect:
+    client: warns once per route
+    server: answers both reads
+    shown: '"GET /api/v1/identity is deprecated (Deprecation: @1798761600)" exactly once; identity shown; exit 0'
+    absent: [token in stdout, stderr, argv]

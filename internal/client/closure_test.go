@@ -53,9 +53,10 @@ func closure(t *testing.T, patterns ...string) []string {
 
 func TestClientClosureExcludesServerPackages(t *testing.T) {
 	pkgs := closure(t, clientPatterns...)
-	// The listing names this package and the generated types, so the check below is not run on
-	// an empty closure.
+	// The listing names the command, this package and the generated types, so the check below is
+	// not run on an empty closure.
 	for _, want := range []string{
+		"github.com/ginsys/bronzeward/cmd/bronzewardctl",
 		"github.com/ginsys/bronzeward/internal/client",
 		"github.com/ginsys/bronzeward/internal/client/apitypes",
 	} {
