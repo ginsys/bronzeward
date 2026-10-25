@@ -200,7 +200,7 @@ func exactObject(b []byte, path string, fields map[string]reflect.Type, elem ref
 			var ok bool
 			if ft, ok = fields[name]; !ok {
 				// Below the top level a name can spell a path into a document, so only the
-				// containing object is named (client contracts' protected inputs).
+				// containing object is named (client contracts §11.1).
 				if path == "" {
 					return fmt.Errorf("unknown member %q", name)
 				}
