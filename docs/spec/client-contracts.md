@@ -523,9 +523,12 @@ contract's, and this specification does not close it.
    ([persistence and API §9.1](persistence-api.md#91-conventions)): an earlier server ignores it
    without error, so a client that relies on it declares revision 2 as its minimum
    ([§7](#7-compatibility-and-versioning)). A client that has seen none reads `GET /recovery` (any role,
-   `internal/api/routes.go:94`) once before that first send. The server checks the header in the
-   write's own transaction when the key has no record (A6, `internal/api/idempotency.go:52-58`),
-   so a recovery entry that commits at any point before that transaction is caught: if the first
+   `internal/api/routes.go:94`) once before that first send. The server checks the header
+   whenever a lookup finds no record for the key, and refuses only under the key's lock: in the
+   write's own transaction, a fragment write's claim transaction or the first lookup's fresh read
+   (A6, `internal/api/idempotency.go:52-58`, `internal/api/tx.go:209-210`,
+   `internal/api/fragments.go:95-103`, `internal/api/tx.go:71-81`),
+   so a recovery entry that commits at any point before the write's own transaction is caught: if the first
    attempt's record survived, the repeat meets the earlier-epoch `409` of item 7 (AMB-07);
    otherwise, when a restore removed it or the first attempt never committed, the repeat is
    refused `412 epoch-mismatch` naming the current epoch, and nothing commits (G21, AMB-12). A

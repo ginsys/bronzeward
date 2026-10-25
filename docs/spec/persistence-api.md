@@ -1333,11 +1333,13 @@ route. A lookup runs again in a draft entry's claim transaction and in the
 request's transaction, before their checks, so the same holds of each refusal
 that §9.2 and §14 give for a route's own checks in those transactions, a
 superseded controller's
-`503 epoch-superseded` among them. The work a route does before its
-transaction has no lookup of its own: a scope mark's observation answers
-`503 epoch-superseded`, whatever the header names, when an entry commits after
-the first lookup and before the observation is recorded (§9.2), and a repeat
-under the same key whose header names the earlier epoch is then refused
+`503 epoch-superseded` among them. Outside those transactions, the work a
+route does before its transaction has no lookup of its own: a scope mark's
+observation answers `503 epoch-superseded`, whatever the header names, when an
+entry commits after the first lookup and before the observation is recorded
+(§9.2), and a draft entry's ingestion, once an entry refuses its claim's
+heartbeat, can likewise end `5xx` whatever the header names; a repeat under
+the same key whose header names the earlier epoch is then refused
 `412 epoch-mismatch`. Anything that work
 committed before a later refusal stays (§14).
 
@@ -1793,7 +1795,8 @@ the act together:
   `Bronzeward-Expected-Epoch` `412 epoch-mismatch` first (§7.2); then outside
   recovery mode it is `409 conflict`; then a controller whose epoch an entry
   committed after its observation superseded answers `503 epoch-superseded`
-  (§5.1); then the scope refusals above and a `Desired` release that changed
+  (§5.1); then a marking identity revoked meanwhile is `403 identity-revoked`;
+  then the scope refusals above and a `Desired` release that changed
   during the check (`409 conflict`) follow. Each of these leaves the recorded
   observation committed. The scope state entry also names the `Desired`
   release the check was for, null for none.
