@@ -2490,8 +2490,8 @@ components:
         createdAt: {type: string, format: date-time}
       additionalProperties: false
     AssignmentInput:
-      description: Profiles, then fragments per layer by name; 1 to 256 selected in all. A fragments member is a layer and
-        lists at least one fragment.
+      description: Profiles, then fragments per layer by name; 1 to 256 selected in all, each profile once and each
+        fragment once across all layers. A fragments member is a layer and lists at least one fragment.
       type: object
       required: []
       properties:
@@ -2517,7 +2517,7 @@ components:
       maxItems: 256
       items: {$ref: '#/components/schemas/SourceName'}
     SourceName:
-      description: A fragment or profile name, unique within one assignment.
+      description: A fragment or profile name, 1 to 63 lowercase letters, digits and inner hyphens.
       type: string
       minLength: 1
       maxLength: 63

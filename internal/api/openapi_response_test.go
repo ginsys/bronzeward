@@ -79,11 +79,8 @@ func exchangeErrors(doc map[string]any, r *http.Request, reqBody string, rec *ht
 	sent := rec.Result().Header
 	errs = append(errs, headerErrors(doc, described, sent, where)...)
 	content, _ := described["content"].(map[string]any)
-	if r.Method == http.MethodHead {
-		return errs
-	}
 	if len(content) == 0 {
-		if rec.Body.Len() != 0 {
+		if rec.Body.Len() != 0 && r.Method != http.MethodHead {
 			errs = append(errs, fmt.Sprintf("%s: the description lists no body, the answer has %d bytes", where, rec.Body.Len()))
 		}
 		return errs
@@ -96,7 +93,7 @@ func exchangeErrors(doc map[string]any, r *http.Request, reqBody string, rec *ht
 	if !ok {
 		return append(errs, fmt.Sprintf("%s: the description lists no %s body", where, mt))
 	}
-	if mt == "text/event-stream" {
+	if mt == "text/event-stream" || r.Method == http.MethodHead { // a HEAD answer's body is not sent
 		return errs
 	}
 	body, err := decodeJSON(rec.Body.Bytes())
@@ -199,10 +196,11 @@ func paramErrors(doc, op map[string]any, r *http.Request, where string) []string
 		if in == "query" {
 			values = r.URL.Query()[name]
 		}
-		schema, _ := deref(doc, described[at]["schema"]).(map[string]any)
+		schema := described[at]["schema"] // validated as written: a $ref's siblings apply too
+		resolved, _ := deref(doc, schema).(map[string]any)
 		for _, s := range values {
 			var v any = s
-			if _, err := strconv.ParseInt(s, 10, 64); err == nil && schema["type"] == "integer" {
+			if _, err := strconv.ParseInt(s, 10, 64); err == nil && resolved["type"] == "integer" {
 				v = json.Number(s)
 			}
 			for _, e := range validate(doc, schema, v, at) {
@@ -535,8 +533,8 @@ func TestDescriptionProblemTypesMatchTitles(t *testing.T) {
 	}
 }
 
-// Every component the description defines is referenced, so none describes what no answer or
-// request uses.
+// Every component the description defines is reached from its paths, so none describes what no
+// answer or request uses: a component only an unreached one refers to is unreached too.
 func TestDescriptionComponentsAreReferenced(t *testing.T) {
 	t.Parallel()
 	doc := description(t)
@@ -545,8 +543,9 @@ func TestDescriptionComponentsAreReferenced(t *testing.T) {
 	walk = func(v any) {
 		switch v := v.(type) {
 		case map[string]any:
-			if ref, ok := v["$ref"].(string); ok {
+			if ref, ok := v["$ref"].(string); ok && !refs[ref] {
 				refs[ref] = true
+				walk(pointer(doc, ref))
 			}
 			for _, sub := range v {
 				walk(sub)
@@ -557,7 +556,7 @@ func TestDescriptionComponentsAreReferenced(t *testing.T) {
 			}
 		}
 	}
-	walk(doc)
+	walk(doc["paths"])
 	components, _ := doc["components"].(map[string]any)
 	for _, kind := range slices.Sorted(maps.Keys(components)) {
 		if kind == "securitySchemes" { // named by security requirements, not by $ref
@@ -565,7 +564,7 @@ func TestDescriptionComponentsAreReferenced(t *testing.T) {
 		}
 		for _, name := range slices.Sorted(maps.Keys(components[kind].(map[string]any))) {
 			if !refs["#/components/"+kind+"/"+name] {
-				t.Errorf("components/%s/%s is referenced nowhere", kind, name)
+				t.Errorf("components/%s/%s is reached from no path", kind, name)
 			}
 		}
 	}
@@ -820,6 +819,8 @@ func TestExchangeErrorsReportEachMismatch(t *testing.T) {
 		want string // "" when the exchange is described
 	}{
 		{"a HEAD answered as its GET", req(http.MethodHead, "/clusters/cl_x"), answer(200, "application/json", ""), ""},
+		{"a HEAD answer's media type not described", req(http.MethodHead, "/clusters/cl_x"), answer(200, "text/plain", ""),
+			"lists no text/plain body"},
 		{"a page with its query", req(http.MethodGet, "/clusters?limit=5&cursor=c"), answer(200, "application/json", page), ""},
 		{"a query parameter not described", req(http.MethodGet, "/clusters?state=open"), answer(200, "application/json", page),
 			"query parameter state is not described"},
