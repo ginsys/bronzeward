@@ -3257,9 +3257,10 @@ create none.
    than the one the draft or snapshot read.
 9. **Every committed API request has an act and an idempotency record** in
    its own transaction; no refused request has either, except a draft entry
-   route refused after its staging claim exists, which commits both for the
-   refusal (§7.2). Transactions that serve
-   no request record timeline entries instead.
+   route refused after its staging claim exists by compilation's `422` or T1's
+   `412 precondition-failed` or `409`, which commits both for the refusal
+   (§7.2). Its `412 epoch-mismatch` and `5xx` refusals commit neither.
+   Transactions that serve no request record timeline entries instead.
 10. **No request body, secret value or ciphertext in an idempotency record, an
     act or a problem document.**
 11. **Everything that authorizes carries the current epoch** (approvals, scope

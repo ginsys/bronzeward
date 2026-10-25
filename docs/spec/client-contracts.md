@@ -445,7 +445,8 @@ executes again under the same exception
 ([persistence and API §12.4](persistence-api.md#124-restore-and-idempotency)); the same key does
 not make a remote mutation exactly-once
 ([persistence and API §7.2](persistence-api.md#72-behavior)). The same exception holds wherever
-this section says that a request finding no record executes.
+this document, D9 in [§13](#13-alternatives-and-open-choices) included, says that a request
+finding no record executes.
 
 Keys are not global. The record's primary key is the pair of principal and key
 (`internal/migrate/migrations/0001_schema.sql:491-508`), and the lookup joins on both, with the
