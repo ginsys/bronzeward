@@ -400,6 +400,15 @@ describe("stale-response discard", () => {
     expect(await client([html]).c.read("/server")).toEqual({ kind: "defect", message: "the response is not JSON" });
   });
 
+  test("a problem body cut off by the network is a transport failure, not a refusal", async () => {
+    const cut = new Response(new ReadableStream({ pull: (ctl) => ctl.error(new TypeError("network error")) }), {
+      status: 403, headers: { "Content-Type": "application/problem+json", "Bronzeward-Epoch": EPOCH },
+    });
+    const onRevoked = vi.fn();
+    expect(await client([cut], { onRevoked }).c.read("/server")).toEqual({ kind: "transport" });
+    expect(onRevoked).not.toHaveBeenCalled();
+  });
+
   test("a view change during a 503 backoff stops the retries", async () => {
     let c!: Client;
     const fetchMock = vi.fn(async () => problem(503, "dependency-unavailable"));

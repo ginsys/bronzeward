@@ -25,8 +25,10 @@ test.each([
   expect((await loadClientConfig(answer({ ...valid, issuer }))).kind).toBe(kind);
 });
 
-test("a missing file, a non-JSON body and a transport failure", async () => {
+test("a missing file, a non-JSON body and a transport failure, before or during the body", async () => {
   expect((await loadClientConfig(answer({}, 404))).kind).toBe("invalid");
   expect((await loadClientConfig((async () => new Response("<html>")) as unknown as typeof fetch)).kind).toBe("invalid");
   expect((await loadClientConfig((async () => Promise.reject(new TypeError("x"))) as unknown as typeof fetch)).kind).toBe("transport");
+  const cut = async () => new Response(new ReadableStream({ pull: (ctl) => ctl.error(new TypeError("network error")) }));
+  expect((await loadClientConfig(cut as unknown as typeof fetch)).kind).toBe("transport");
 });
