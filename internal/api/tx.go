@@ -309,6 +309,12 @@ func (a *API) resolveCommit(q *request, rec *record, cerr error) (*record, bool,
 	}
 }
 
+// notCommitted ends the detail of a refusal that can come after a route's earlier transaction
+// committed: a draft entry's staging claim, or a scope mark's observation or its start, stays, and
+// only the request's own transaction, with its act and idempotency record, committed nothing
+// (§7.2, §9.2).
+const notCommitted = "nothing of the request's own transaction was committed"
+
 // fail answers an error from a mutating request and logs its cause under the request id.
 func (a *API) fail(w http.ResponseWriter, q *request, err error) {
 	a.o.logf("%s %s %s: %v", q.id, q.r.Method, q.r.URL.EscapedPath(), err)
@@ -319,15 +325,15 @@ func (a *API) fail(w http.ResponseWriter, q *request, err error) {
 			setEpoch(w, q) // the epoch the lookup read, which the problem names
 		}
 	case errors.Is(err, staging.ErrEpochSuperseded), errors.Is(err, errNotController):
-		ref = refuse(http.StatusServiceUnavailable, "epoch-superseded", "this server started before the current recovery epoch and may issue no ownership; nothing was committed")
+		ref = refuse(http.StatusServiceUnavailable, "epoch-superseded", "this server started before the current recovery epoch and may issue no ownership; "+notCommitted)
 	case errors.Is(err, errTransient):
-		ref = refuse(http.StatusServiceUnavailable, "transient-conflict", "the request deadlocked on every attempt; nothing was committed")
+		ref = refuse(http.StatusServiceUnavailable, "transient-conflict", "the request deadlocked on every attempt; "+notCommitted)
 	case errors.Is(err, errUnknownOutcome):
 		ref = refuse(http.StatusInternalServerError, "internal-error", "the outcome is unknown; retrying with the same Idempotency-Key answers it")
 	case errors.Is(err, errUnavailable), connLost(err):
-		ref = refuse(http.StatusServiceUnavailable, "dependency-unavailable", "the database failed; nothing was committed")
+		ref = refuse(http.StatusServiceUnavailable, "dependency-unavailable", "the database failed; "+notCommitted)
 	default:
-		ref = refuse(http.StatusInternalServerError, "internal-error", "nothing was committed")
+		ref = refuse(http.StatusInternalServerError, "internal-error", notCommitted)
 	}
 	a.problem(w, q, ref)
 }

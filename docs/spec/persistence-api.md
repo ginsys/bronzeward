@@ -1310,7 +1310,8 @@ A mutating request may also carry `Bronzeward-Expected-Epoch`, the epoch its
 client expects (§9.1; [client contracts](client-contracts.md#13-alternatives-and-open-choices)
 decision D10, option (a)). A lookup that finds no record compares it with the
 epoch the lookup read, and another is refused `412 epoch-mismatch`, naming the
-current epoch; nothing commits. A key with a record is answered by that record
+current epoch; no act or idempotency record commits, and what the route
+committed before that lookup stays (below). A key with a record is answered by that record
 as above, so an earlier epoch's record still answers its `409`, and a request
 without the header is not checked. A present header must name an epoch: an
 empty one, like two, is `400 invalid-request` (§9.1), never taken as absent. The check is part of the lookup, and only a
@@ -1666,10 +1667,18 @@ Design: [§11](../design/Talos_Configuration_and_Machine_Management_Design.md#11
   marked, to the operator reviewing it, under `no-store` (§9.3, compilation
   §3.6).
 - Every response to an authenticated request carries `Bronzeward-Epoch` with
-  the current epoch identity, and `Bronzeward-Recovery-Mode: true` while
-  recovery mode is in effect. A `401`, a `403 identity-revoked` and the
-  liveness probe carry neither: they answer a caller who has not
-  authenticated, and the epoch is data (§10).
+  the epoch identity the request read, and `Bronzeward-Recovery-Mode: true`
+  while recovery mode was in effect in that read. The read is the one that
+  decided the answer where one did (a write's transaction or replay, a read
+  route's read, the lookup of a `412 epoch-mismatch`), and otherwise the one
+  made once the request authenticated. An entry that commits after that read
+  replaces the epoch it names, so a refusal, `503 epoch-superseded` among
+  them, can name the epoch it replaced; a client confirms the epoch with
+  `GET /recovery` before acting on a change (client contracts §8.4 item 3). A
+  `401`, a `403 identity-revoked` and the liveness probe carry neither: they
+  answer a caller who has not authenticated, and the epoch is data (§10). A
+  `503 dependency-unavailable` answering a failed read of the installation
+  state after authentication also carries neither: it has no epoch to name.
 - A mutating request may carry `Bronzeward-Expected-Epoch`, the epoch identity
   its client expects. When its key has no record and the header names another
   epoch, it is refused `412 epoch-mismatch` (§7.2), whose `Bronzeward-Epoch`
@@ -1803,7 +1812,8 @@ the act together:
   scope state entry naming the observation and the act. The answer names the
   state moved from and to, the observation and what is missing. A scope may be
   marked again. Before the observation, an unknown machine is
-  `404 not-found`, outside recovery mode or for a released scope it is
+  `404 not-found`, outside recovery mode or for a scope in any state other
+  than `blocked`, `unresolved` or `ready` (a `normal` or released one) it is
   `409 conflict`, a scope still pre-restore unaccounted is
   `409 recovery-mode-active`, and then a controller with no executor answers
   `503 dependency-unavailable`; nothing is observed. These refusals and the
@@ -2481,7 +2491,7 @@ counter, not the ETag token, so the token is not named.
 | 409 | `scope-busy` | an assignment change while an operation holds the machine scope |
 | 409 | `recovery-mode-active` | an act refused on a scope still pre-restore unaccounted, a publication changing the assignment of a scope not released in the current epoch, or any request but liveness and entry under the recovery-start flag before entry, and plan creation, approval or unfreezing under it after entry (§12.2); the body names the scope |
 | 412 | `precondition-failed` | `If-Match` does not match |
-| 412 | `epoch-mismatch` | `Bronzeward-Expected-Epoch` names an epoch other than the current one and the key has no record (§7.2); the body's `epoch` names the current one; nothing was committed |
+| 412 | `epoch-mismatch` | `Bronzeward-Expected-Epoch` names an epoch other than the current one and the key has no record (§7.2); the body's `epoch` names the current one; nothing of the request's own transaction was committed, while a draft entry's staging claim or a scope mark's observation taken before the refusing lookup stays (§7.2, §9.2) |
 | 422 | `validation-failed` | compilation refused the input; paths and rule, never values (compilation §13). A known publication identity or running-minor mismatch names the machine, observation, rule and safe cause (§6.1.1). Also a publication refused by T3's re-check: a version's status recorded not before publication began classifying it is not `retained` (dependency monitor §5.2); the body names its `dependency` by provider, object and version |
 | 422 | `idempotency-key-reused` | same key, other request (§7.2) |
 | 428 | `precondition-required`, `idempotency-key-required` | `If-Match` or `Idempotency-Key` missing |
@@ -2490,7 +2500,7 @@ counter, not the ETag token, so the token is not named.
 | 503 | `dependency-unavailable` | the provider is sealed or unreachable, or authentication could not reach the identity provider or the database. A publication also uses this code for missing or unreadable identity, running version or Talos access (§6.1.1), naming the machine, observation, rule and safe cause; later compiler dependency failures name the dependency (§6.1). Publication commits no release or Desired change on refusal, but its operation, act, events and already recorded observations remain. Ingestion and dispatch Talos access failures use `talos-access-unavailable` |
 | 503 | `talos-access-unavailable` | the error of a failed `ingest` operation, or the cause recorded by a dispatch's use-time check or fresh observation that failed on it (execution and recovery §3.1): the cluster's Talos access configuration is absent, unreadable by the identity, unreachable behind a sealed or silent provider, not a usable talosconfig or refused by Talos, or the machine's Talos endpoint did not answer (§3.3); the body names the cluster or machine, never a value; an ingestion's claim is abandoned and nothing read is kept. A use-time check that fails on the access read and on another dependency at once, as under a sealed provider, reports this code; its timeline entry records each dependency's result (execution and recovery §4.1). A publication observation also retains this code in its unread values, while the publish operation reports `dependency-unavailable` under §6.1.1 |
 | 503 | `transient-conflict` | deadlock retries exhausted (§5) |
-| 503 | `epoch-superseded` | the serving process started before the current epoch, so it may issue no ownership (§5.1); nothing was committed |
+| 503 | `epoch-superseded` | the serving process started before the current epoch, so it may issue no ownership (§5.1); nothing of the request's own transaction was committed, while a draft entry's staging claim, or a scope mark's recorded observation or only its `observation-started` entry, committed before it stays (§7.2, §9.2). Its `Bronzeward-Epoch` can name the epoch the entry replaced (§9.1) |
 | 503 | `schema-mismatch` | never served: the server does not start (§11) |
 
 An asynchronous operation that fails carries the same problem document in its

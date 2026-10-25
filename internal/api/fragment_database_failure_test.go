@@ -63,7 +63,7 @@ func TestFragmentPutDatabaseFailure(t *testing.T) {
 			}
 			if failCommit {
 				p := wantProblem(t, rec, http.StatusServiceUnavailable, "dependency-unavailable")
-				if p["detail"] != "the database failed; nothing was committed" || strings.Contains(rec.Body.String(), "synthetic T1") {
+				if p["detail"] != "the database failed; nothing of the request's own transaction was committed" || strings.Contains(rec.Body.String(), "synthetic T1") {
 					t.Fatalf("database refusal is not sanitized: %s", rec.Body)
 				}
 				ie.draftUnchanged(t, before)

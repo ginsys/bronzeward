@@ -346,20 +346,28 @@ func TestRecoveryScopeMark(t *testing.T) {
 		t.Fatal("a refused mark of a released scope observed the machine")
 	}
 	// A recovery entry commits after the mark's observation: the controller of the earlier epoch
-	// marks nothing in the new one (persistence-api.md §5.1).
+	// marks nothing in the new one (persistence-api.md §5.1), and the answer claims only its own
+	// transaction, since the observation committed before it stays (§9.2, §9.4).
 	mustExec(t, ae.db, `UPDATE machine SET scope_state = 'blocked' WHERE id = $1`, m2)
 	var rev int64
 	if err := ae.db.QueryRow(`SELECT revision_counter FROM machine WHERE id = $1`, m2).Scan(&rev); err != nil {
 		t.Fatal(err)
 	}
+	before = me.restorations(t, m2)
 	var entered sync.Once
 	me.x.mu.Lock()
 	me.x.onDecrypt = func() { entered.Do(func() { newEpoch(t, ae.db) }) }
 	me.x.mu.Unlock()
-	wantProblem(t, me.mark(ctl, m2, "superseded"), http.StatusServiceUnavailable, "epoch-superseded")
+	p := wantProblem(t, me.mark(ctl, m2, "superseded"), http.StatusServiceUnavailable, "epoch-superseded")
 	me.x.mu.Lock()
 	me.x.onDecrypt = nil
 	me.x.mu.Unlock()
+	if want := "this server started before the current recovery epoch and may issue no ownership; nothing of the request's own transaction was committed"; p["detail"] != want {
+		t.Fatalf("detail %q; want %q", p["detail"], want)
+	}
+	if n := me.restorations(t, m2); n != before+1 {
+		t.Fatalf("%d restoration observations after the superseded mark; want %d, its own kept", n, before+1)
+	}
 	if n := count(t, ae.db, `SELECT count(*) FROM machine m WHERE m.id = $1 AND m.scope_state = 'blocked' AND NOT EXISTS (
 			SELECT FROM machine_event e WHERE e.machine = m.id AND e.revision > $2 AND e.kind = 'scope-state')`, m2, rev); n != 1 {
 		t.Fatal("a controller of a superseded epoch marked the scope")
