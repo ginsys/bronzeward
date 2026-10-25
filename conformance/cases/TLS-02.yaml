@@ -1,0 +1,16 @@
+id: TLS-02
+setup: the test static host (fixtures/webhost) with -redirect-api, its CSP admitting the target's origin; not signed in
+action: load the web client, which reads GET /server
+exchange:
+  - request: GET /api/v1/server
+    headers: ["Accept: application/json"]
+fault: the host answers every /api/v1/ request with a 307 to http://127.0.0.1:58444, another origin
+expect:
+  client: the read fails as a transport error and is not repeated
+  server: the target sees no request; a WebDriver-run fetch that follows redirects reaches it (positive control)
+  absent: [synthetic value in retained artifacts or browser storage]
+runs:
+  web:
+    check: web/e2e/tls.e2e.ts, mise run browser
+    browsers: [chrome, edge, firefox, firefox-esr, safari]
+    covers: the web client; the CLI's half (the CLI names the target) runs with the CLI

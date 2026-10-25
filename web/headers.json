@@ -1,0 +1,7 @@
+{
+  "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self' {providerOrigins}; form-action {issuerOrigin}; frame-ancestors 'none'; base-uri 'none'; require-trusted-types-for 'script'",
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "no-referrer",
+  "Cross-Origin-Opener-Policy": "same-origin",
+  "Cache-Control": "no-store"
+}

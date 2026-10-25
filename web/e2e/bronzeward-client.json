@@ -1,0 +1,6 @@
+{
+  "issuer": "http://localhost:58280",
+  "audience": "bronzeward",
+  "cliClientId": "synthetic-cli-client",
+  "webClientId": "synthetic-web-client"
+}
