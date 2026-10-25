@@ -1312,8 +1312,7 @@ decision D10, option (a)). A lookup that finds no record compares it with the
 epoch the lookup read, and another is refused `412 epoch-mismatch`, naming the
 current epoch; no act or idempotency record commits, and what the route
 committed before that lookup stays: a draft entry's staging claim, a scope
-mark's `observation-started` entry or its recorded observation (§9.2), or a
-principal row (§14). A key with a record is answered by that record
+mark's recorded observation (§9.2), or a principal row (§14). A key with a record is answered by that record
 as above, so an earlier epoch's record still answers its `409`, and a request
 without the header is not checked. A present header must name an epoch: an
 empty one, like two, is `400 invalid-request` (§9.1), never taken as absent. The check is part of the lookup, and only a
@@ -1347,7 +1346,8 @@ observation is recorded (§9.2); a draft entry's ingestion ends `5xx` when the
 claim's heartbeat is refused, after the entry abandoned the claim, while a
 generation create is still to run. Such a refusal records no act or
 idempotency record, and what the route committed before it stays (§14): a
-draft entry's staging claim, or a scope mark's `observation-started` entry. A
+draft entry's staging claim, a scope mark's `observation-started` entry, or a
+principal row. A
 repeat under the same key whose header names the earlier epoch is then refused
 `412 epoch-mismatch`.
 
@@ -1676,8 +1676,8 @@ Design: [§11](../design/Talos_Configuration_and_Machine_Management_Design.md#11
   `412 epoch-mismatch`), and otherwise the one made once the request
   authenticated. A committed recovery entry or exit instead names what it
   leaves in place: the entry the epoch it minted, in recovery mode, and the
-  exit its epoch outside recovery mode. An entry that commits after that read
-  replaces the epoch it names, so a refusal, `503 epoch-superseded` among
+  exit its epoch outside recovery mode. An entry that commits after the read
+  that decided the answer replaces the epoch the answer names, so a refusal, `503 epoch-superseded` among
   them, can name the epoch it replaced; a client confirms the epoch with
   `GET /recovery` before acting on a change (client contracts §8.4 item 3). A
   `401`, a `403 identity-revoked` and the liveness probe carry neither: they
@@ -3265,7 +3265,7 @@ or Desired change; it does not erase earlier evidence.
 | Recovery | Publication changing the assignment of a scope not released in the current epoch | operation `failed`, `409 recovery-mode-active` (§6.2) | operation, act |
 | Recovery | Any request but liveness and entry under the recovery-start flag, before entry | `409 recovery-mode-active` | nothing |
 | Recovery | A second entry in one recovery start, under another key | `409 conflict` naming the epoch the first minted (§12.2) | nothing |
-| Any | Deadlock retries exhausted | `503 transient-conflict` | nothing of the request's own transaction; what the route committed in an earlier one stays: a draft entry's claim and its orphans, or a scope mark's restoration observation or only its start (§7.2, §9.2) |
+| Any | Deadlock retries exhausted | `503 transient-conflict` | nothing of the request's own transaction; what the route committed in an earlier one stays: a draft entry's claim and its orphans, or a scope mark's restoration observation (§7.2, §9.2) |
 | Migrate | Failure or kill inside a migration | migration absent; server refuses to start | earlier migrations |
 | Startup | Schema or checksum mismatch | refuses to start | nothing |
 | Restore | No recovery-mode entry after a restore | undetected (design §14.6); pre-restore tokens can pass | the residual of §12.1 |

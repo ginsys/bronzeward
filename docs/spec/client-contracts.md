@@ -533,8 +533,8 @@ contract's, and this specification does not close it.
    attempt's record survived, the repeat meets the earlier-epoch `409` of item 7 (AMB-07);
    otherwise, when a restore removed it or the first attempt never committed, the repeat is
    refused `412 epoch-mismatch` naming the current epoch (G21, AMB-12). A route's work outside
-   those lookups can refuse first, and a fragment write's claim or a scope mark's observation
-   taken before the refusal stays ([persistence and API §7.2](persistence-api.md#72-behavior),
+   those lookups can refuse first, and a fragment write's claim, a scope mark's observation or a
+   principal row taken before the refusal stays ([persistence and API §7.2](persistence-api.md#72-behavior),
    §14), but no act or idempotency record commits. A service principal's repeat is refused `401`
    instead, its token carrying its epoch. Before a
    repeat the client still confirms the epoch with one `GET /recovery` and compares its
@@ -1227,7 +1227,7 @@ write's own, a fragment write's claim transaction's or a fresh one (`internal/ap
 so an earlier-epoch record
 still answers its `409` (AMB-07); a mismatch is refused `412 epoch-mismatch` naming the current
 epoch and commits no act or idempotency record, while what the route committed before that lookup,
-a fragment write's claim or a scope mark's observation, stays
+a fragment write's claim, a scope mark's observation or a principal row, stays
 ([persistence and API §7.2](persistence-api.md#72-behavior)). It gives human
 principals an epoch check like the one service tokens get, but placed differently: the service
 check refuses a stale token before any record is answered
