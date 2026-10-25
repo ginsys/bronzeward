@@ -4,6 +4,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import { fileURLToPath } from "node:url";
+// The launcher logs and ignores any other error a launcher hook throws, and runs the specs anyway.
+import { SevereServiceError } from "webdriverio";
 
 export const PAGE_ORIGIN = "http://localhost:58443";
 export const TARGET_ORIGIN = "http://127.0.0.1:58444";
@@ -52,14 +54,14 @@ export const config: WebdriverIO.Config = {
     await new Promise<void>((resolve) => target!.listen(58444, "127.0.0.1", resolve));
     // A host left from an earlier run would answer the readiness check below with an old build.
     const hostUrl = `${PAGE_ORIGIN.replace("localhost", "127.0.0.1")}/`;
-    if (await fetch(hostUrl).then(() => true, () => false)) throw new Error("something already answers on the static host's port");
+    if (await fetch(hostUrl).then(() => true, () => false)) throw new SevereServiceError("something already answers on the static host's port");
     host = spawn(`${web}../bin/webhost`, [
       "-dist", `${web}dist`, "-headers", `${web}headers.json`, "-client-config", `${web}e2e/bronzeward-client.json`,
       "-issuer", "http://localhost:58280", "-provider-origins", TARGET_ORIGIN, "-redirect-api", TARGET_ORIGIN,
     ], { stdio: "inherit" });
     for (let i = 0; ; i++) {
       if (await fetch(hostUrl).then((r) => r.ok, () => false)) break;
-      if (i === 50 || host.exitCode !== null) throw new Error("the static host did not answer within 10 s");
+      if (i === 50 || host.exitCode !== null) throw new SevereServiceError("the static host did not answer within 10 s");
       await new Promise((r) => setTimeout(r, 200));
     }
   },
