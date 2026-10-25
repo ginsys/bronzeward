@@ -1621,7 +1621,9 @@ a mark takes it; `{"type": "mark-refused", "generation": <n>, "problem":
 <problem document>}` when a mark is refused before any provider write, the
 problem naming the rule and the mark's position in the request, and no path
 (compilation §3.6 item 4); and `{"type": "continued",
-"generation": <n>}` when the operator continues it. No event carries input text. The operation resource shows its stored row: an operation
+"generation": <n>}` when the operator continues it. A stream resumed with a
+`Last-Event-ID` from another epoch first sends a `reset` event, with data
+`{}`, then the timeline from its start. No event carries input text. The operation resource shows its stored row: an operation
 whose claim a read already treats as abandoned (compilation §3.5) stays
 `running` here until a sweep writes it: the next periodic sweep, or a later
 one if that sweep fails or waits for a lock. An ingestion start of the same
@@ -1634,7 +1636,9 @@ operation (T2); `{"type": "claimed", "generation": <n>}` at each job claim
 (§5.1), so a job claimed again after its lease lapsed shows each generation;
 and one terminal event, `{"type": "succeeded", "release": "<release
 identifier>"}` (T3) or `{"type": "failed", "code": "<problem code>"}` (§6.2).
-No event carries input text.
+A stream resumed with a `Last-Event-ID` from another epoch first sends a
+`reset` event, with data `{}`, then the timeline from its start. No event
+carries input text.
 
 ## 9. API
 
@@ -2498,7 +2502,7 @@ counter, not the ETag token, so the token is not named.
 | 409 | `ingestion-abandoned` | the error of a failed `ingest` operation whose staging claim was abandoned: by an operator's abandonment, by the sweep at the claim's absolute expiry or, under transient staging, at its lease lapse, by an ingestion start of the same draft revision once the claim is due, by a takeover with nothing to decrypt, or by recovery-mode entry (§8.2); the generations it created are orphans (§6.4) |
 | 409 | `recovery-mode-entered` | the error of a failed `publish` operation that was `queued` or `running` when recovery-mode entry committed (§8.2, §12.2); nothing it compiled was published |
 | 409 | `scope-busy` | an assignment change while an operation holds the machine scope |
-| 409 | `recovery-mode-active` | an act refused on a scope still pre-restore unaccounted, a publication changing the assignment of a scope not released in the current epoch, or any request but liveness and entry under the recovery-start flag before entry, and plan creation, approval or unfreezing under it after entry (§12.2); the body names the scope |
+| 409 | `recovery-mode-active` | an act refused on a scope still pre-restore unaccounted, a publication changing the assignment of a scope not released in the current epoch, or any request but liveness and entry under the recovery-start flag before entry, and plan creation, approval or unfreezing under it after entry (§12.2); only a scope refusal's body carries a `scope` member; a refusal by the recovery-start flag concerns no scope and carries none |
 | 412 | `precondition-failed` | `If-Match` does not match |
 | 412 | `epoch-mismatch` | `Bronzeward-Expected-Epoch` names an epoch other than the current one and the key has no record (§7.2); the body's `epoch` names the current one; nothing of the request's own transaction was committed, while a draft entry's staging claim, a scope mark's observation or a principal row taken before the refusing lookup stays (§7.2, §9.2, §14) |
 | 422 | `validation-failed` | compilation refused the input; paths and rule, never values (compilation §13). A known publication identity or running-minor mismatch names the machine, observation, rule and safe cause (§6.1.1). Also a publication refused by T3's re-check: a version's status recorded not before publication began classifying it is not `retained` (dependency monitor §5.2); the body names its `dependency` by provider, object and version |
