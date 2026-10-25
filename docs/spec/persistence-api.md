@@ -1312,7 +1312,8 @@ decision D10, option (a)). A lookup that finds no record compares it with the
 epoch the lookup read, and another is refused `412 epoch-mismatch`, naming the
 current epoch; nothing commits. A key with a record is answered by that record
 as above, so an earlier epoch's record still answers its `409`, and a request
-without the header is not checked. The check is part of the lookup, and only a
+without the header is not checked. A present header must name an epoch: an
+empty one, like two, is `400 invalid-request` (§9.1), never taken as absent. The check is part of the lookup, and only a
 lookup under the key's lock refuses: one without it, which may have waited on
 an entry and missed a record committed ahead of it, reads again under the lock
 first. The transaction's own lookup also holds its lock of the installation
@@ -1650,8 +1651,8 @@ Design: [§11](../design/Talos_Configuration_and_Machine_Management_Design.md#11
 - A mutating request may carry `Bronzeward-Expected-Epoch`, the epoch identity
   its client expects. When its key has no record and the header names another
   epoch, it is refused `412 epoch-mismatch` (§7.2), whose `Bronzeward-Epoch`
-  and body name the current one. The header is optional; two of them are
-  `400 invalid-request`.
+  and body name the current one. The header is optional; two of them, or an
+  empty one, are `400 invalid-request`.
 - Every answer of the API, authenticated or not, problems included, carries
   `Cache-Control: no-store` and `Bronzeward-Request-ID`, the request's
   identifier: the `instance` of a problem the request answers (§9.4) and the

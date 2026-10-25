@@ -48,16 +48,16 @@ func TestExpectedEpoch(t *testing.T) {
 	if rec := e.do(e.api, clusterCall(author, "k-expected-none-01234")); rec.Code != http.StatusCreated {
 		t.Fatalf("no header: %d %s", rec.Code, rec.Body)
 	}
-	two := clusterCall(author, "k-expected-two-012345")
-	r := httptest.NewRequest(two.method, two.path, strings.NewReader(two.body))
-	r.Header.Set("Authorization", "Bearer "+author)
-	r.Header.Set("Idempotency-Key", two.key)
-	r.Header.Set("Content-Type", "application/json")
-	r.Header.Add(expectedEpochHeader, cur)
-	r.Header.Add(expectedEpochHeader, cur)
-	rec := httptest.NewRecorder()
-	e.api.ServeHTTP(rec, r)
-	wantProblem(t, rec, http.StatusBadRequest, "invalid-request")
+	// A present header must name an epoch: an empty one is not taken as absent, which would skip
+	// the check the client asked for.
+	for _, vs := range [][]string{{""}, {cur, cur}, {"", cur}} {
+		c := clusterCall(author, "k-expected-bad-"+id.New(id.Request))
+		c.expectedValues = vs
+		wantProblem(t, e.do(e.api, c), http.StatusBadRequest, "invalid-request")
+	}
+	if acts, records := rows(t, e); acts != 2 || records != 2 {
+		t.Fatalf("a malformed header committed: acts %d, records %d", acts, records)
+	}
 }
 
 // AMB-07 and AMB-12: after a recovery entry, a repeat whose record survived still answers the
@@ -249,6 +249,15 @@ func TestExpectedEpochEveryMutation(t *testing.T) {
 		wantEpochMismatch(t, e.do(e.api, c), cur)
 		if ran {
 			t.Errorf("%s %s: the effect ran under a mismatching header", rt.method, rt.pattern)
+		}
+		for _, vs := range [][]string{{""}, {cur, cur}} {
+			bad := c
+			bad.key, bad.expected, bad.expectedValues = "k-walk-bad-"+id.New(id.Request), "", vs
+			ran = false
+			wantProblem(t, e.do(e.api, bad), http.StatusBadRequest, "invalid-request")
+			if ran {
+				t.Errorf("%s %s: the effect ran under the headers %q", rt.method, rt.pattern, vs)
+			}
 		}
 		c.key, c.expected = "k-walk-match-"+id.New(id.Request), cur
 		if rec := e.do(e.api, c); rec.Code != http.StatusCreated || !ran {

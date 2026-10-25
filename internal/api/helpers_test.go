@@ -116,6 +116,9 @@ func (e *env) human(name string) string {
 type call struct {
 	method, path, token, key, ifMatch, body string
 	expected                                string // Bronzeward-Expected-Epoch
+	// expectedValues, when set, are sent as Bronzeward-Expected-Epoch headers instead of expected,
+	// so a test can send an empty one or several.
+	expectedValues []string
 }
 
 func (e *env) do(h http.Handler, c call) *httptest.ResponseRecorder {
@@ -135,6 +138,9 @@ func (e *env) do(h http.Handler, c call) *httptest.ResponseRecorder {
 	}
 	if c.expected != "" {
 		r.Header.Set(expectedEpochHeader, c.expected)
+	}
+	for _, v := range c.expectedValues {
+		r.Header.Add(expectedEpochHeader, v)
 	}
 	if c.body != "" {
 		r.Header.Set("Content-Type", "application/json")
