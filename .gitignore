@@ -13,3 +13,9 @@ __pycache__/
 # mise run build's binaries and mise run dev's synthetic OIDC key. Anchored, so fixtures/bin/ stays.
 /bin/
 /.dev/
+
+# The web package's dependencies, build output, generated API types and browser-run artifacts.
+/web/node_modules/
+/web/dist/
+/web/src/api/v1.d.ts
+/web/e2e/out/

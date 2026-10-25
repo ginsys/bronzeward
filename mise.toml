@@ -5,6 +5,8 @@
 actionlint = "1.7.12"
 shellcheck = "0.11.0"
 go = "1.27.1"
+# The current LTS; web/package.json's engines names the same version.
+node = "24.22.1"
 
 [tasks.lint]
 description = "actionlint on the workflows, shellcheck on the scripts"
@@ -101,7 +103,7 @@ depends = ["generate:check"]
 # none. Each experiment is its own module, checked with `go -C <dir>`, one line per module.
 # `mod tidy -diff` fails instead of rewriting, so CI reports a stale go.mod rather than hiding it.
 run = """
-gofmt -l cmd internal fixtures/oidc | { ! grep . ; }
+gofmt -l cmd internal fixtures/oidc fixtures/webhost | { ! grep . ; }
 go mod verify
 go mod tidy -diff
 go build -o /dev/null ./...
@@ -332,6 +334,30 @@ echo 'dev: curl -s -H "Authorization: Bearer $(bin/oidc-fixture mint -key .dev/o
 bin/bronzeward serve -config examples/bronzeward.yaml
 '''
 
+[tasks."web:install"]
+description = "Install web/'s locked dependencies into web/node_modules (gitignored) when the lockfile is newer"
+run = "[ web/node_modules/.package-lock.json -nt web/package-lock.json ] || npm --prefix web ci"
+
+[tasks.web]
+description = "Generate the API types from api/openapi.yaml, then type-check, unit-test and build web/ into web/dist"
+depends = ["web:install"]
+dir = "web"
+run = "npm run verify"
+
+[tasks.browser]
+description = "The real-browser cases against the test static host (BW_BROWSERS, default chrome,firefox), then the artifact scan"
+# Needs no server, database or identity provider: the host answers every API request with a
+# redirect (fixtures/webhost -redirect-api). The canary is the run's synthetic value (§11.5).
+depends = ["web"]
+run = '''
+go build -o bin/webhost ./fixtures/webhost
+canary="BWSYNTH-web-$(od -An -tx1 -N8 /dev/urandom | tr -d ' \n')"
+rm -rf web/e2e/out
+cd web
+BW_WEB_CANARY=$canary npx wdio run e2e/wdio.conf.ts
+node e2e/scan.ts e2e/out "$canary"
+'''
+
 [tasks.upstream-sync]
 description = "Check out go-kure/.github into upstream/ (gitignored) at the commit ci.yml pins the action-pin checker to"
 # Single source of truth for the revision: the `check-action-pins@<sha>` pin in ci.yml, so the
@@ -357,5 +383,5 @@ FIRST_PARTY_WORKFLOW_RE='^(go-kure|ginsys)/[^/]+/\\.github/workflows/[^@]+@main$
 """
 
 [tasks.verify]
-description = "Everything ci.yml runs except go-db and idp (they need running services; mise run go-db, mise run go-idp): lint, tests, docs, site, whitespace, commit subjects, go, action pins"
-depends = ["lint", "test", "docs", "site", "whitespace", "commit-lint", "go", "action-pins"]
+description = "Everything ci.yml runs except go-db, idp and the browser jobs (they need running services or browsers; mise run go-db, mise run go-idp, mise run browser): lint, tests, docs, site, whitespace, commit subjects, go, web, action pins"
+depends = ["lint", "test", "docs", "site", "whitespace", "commit-lint", "go", "web", "action-pins"]

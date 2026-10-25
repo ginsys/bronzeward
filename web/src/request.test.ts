@@ -1,0 +1,272 @@
+import { describe, expect, test, vi } from "vitest";
+import { API_BASE, Client, type ClientOptions } from "./request.ts";
+
+const EPOCH = "e1";
+
+function problem(status: number, code: string, extra: Record<string, unknown> = {}, epoch: string | null = EPOCH): Response {
+  const headers: Record<string, string> = { "Content-Type": "application/problem+json" };
+  if (epoch !== null) headers["Bronzeward-Epoch"] = epoch;
+  return new Response(
+    JSON.stringify({ type: `urn:bronzeward:problem:${code}`, title: code, status, instance: "req-1", ...extra }),
+    { status, headers },
+  );
+}
+
+function ok(body: unknown, epoch: string | null = EPOCH, recovery = false): Response {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (epoch !== null) headers["Bronzeward-Epoch"] = epoch;
+  if (recovery) headers["Bronzeward-Recovery-Mode"] = "true";
+  return new Response(JSON.stringify(body), { status: 200, headers });
+}
+
+// A client whose fetch answers each request with the next response (or throws the next error).
+function client(answers: (Response | Error)[], opts: ClientOptions = {}) {
+  const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => {
+    const next = answers.shift();
+    if (next === undefined) throw new Error("no answer left");
+    if (next instanceof Error) throw next;
+    return next;
+  });
+  const sleeps: number[] = [];
+  const c = new Client({
+    sleep: async (ms) => {
+      sleeps.push(ms);
+    },
+    ...opts,
+    fetch: fetchMock as unknown as typeof fetch,
+  });
+  return { c, fetchMock, sleeps };
+}
+
+describe("request options", () => {
+  test("every read is no-store, refuses redirects, sends no cookie and the bearer token", async () => {
+    const { c, fetchMock } = client([ok({})], { token: () => "SYNTH-token" });
+    await c.read("/server");
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe(`${API_BASE}/server`);
+    expect(init).toMatchObject({ method: "GET", cache: "no-store", redirect: "error", credentials: "omit" });
+    expect(init?.headers).toEqual({ Accept: "application/json", Authorization: "Bearer SYNTH-token" });
+  });
+
+  test("a transport failure, a refused redirect included, is reported once and never repeated", async () => {
+    const { c, fetchMock } = client([new TypeError("Failed to fetch")]);
+    expect(await c.read("/server")).toEqual({ kind: "transport" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("§8.2 read rows", () => {
+  test("200 renders the body", async () => {
+    expect(await client([ok({ version: "v" })]).c.read("/server")).toEqual({ kind: "ok", data: { version: "v" } });
+  });
+
+  test("a success without Bronzeward-Epoch is a defect, not rendered", async () => {
+    expect((await client([ok({}, null)]).c.read("/server")).kind).toBe("defect");
+  });
+
+  test("400 invalid-request stops without a repeat", async () => {
+    const { c, fetchMock } = client([problem(400, "invalid-request", { detail: "bad" })]);
+    expect(await c.read("/machines")).toMatchObject({ kind: "refused", status: 400, problem: { detail: "bad" } });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("400 cursor-invalid restarts the list", async () => {
+    expect((await client([problem(400, "cursor-invalid")]).c.read("/acts?cursor=x")).kind).toBe("restart");
+  });
+
+  test("401 renews once and repeats the read", async () => {
+    const renew = vi.fn(async () => true);
+    const { c, fetchMock } = client([problem(401, "unauthenticated", {}, null), ok({ a: 1 })], { renew });
+    expect(await c.read("/machines")).toEqual({ kind: "ok", data: { a: 1 } });
+    expect(renew).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("a second 401 stops", async () => {
+    const renew = vi.fn(async () => true);
+    const { c } = client([problem(401, "unauthenticated", {}, null), problem(401, "unauthenticated", {}, null)], { renew });
+    expect((await c.read("/machines")).kind).toBe("unauthenticated");
+    expect(renew).toHaveBeenCalledTimes(1);
+  });
+
+  test("401 with a failed renewal stops", async () => {
+    const { c, fetchMock } = client([problem(401, "unauthenticated", {}, null)], { renew: async () => false });
+    expect((await c.read("/machines")).kind).toBe("unauthenticated");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("403 forbidden shows the roles, no retry", async () => {
+    const { c, fetchMock } = client([problem(403, "forbidden", { roles: ["publisher"], humanOnly: true })]);
+    expect(await c.read("/plans")).toMatchObject({ kind: "refused", status: 403, problem: { roles: ["publisher"], humanOnly: true } });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("403 identity-revoked clears the credential and stops", async () => {
+    const onRevoked = vi.fn();
+    const { c } = client([problem(403, "identity-revoked", {}, null)], { onRevoked });
+    expect((await c.read("/identity")).kind).toBe("revoked");
+    expect(onRevoked).toHaveBeenCalledTimes(1);
+  });
+
+  test("404 not-found", async () => {
+    expect(await client([problem(404, "not-found")]).c.read("/machines/m")).toMatchObject({ kind: "refused", status: 404 });
+  });
+
+  test.each(["conflict", "stale-input", "scope-busy", "machine-identity-mismatch", "ingestion-abandoned", "recovery-mode-entered", "recovery-mode-active"])(
+    "409 %s shows the named resource, never repeated",
+    async (code) => {
+      const { c, fetchMock } = client([problem(409, code, { machine: "m1" })]);
+      expect(await c.read("/machines/m1")).toMatchObject({ kind: "refused", status: 409, problem: { machine: "m1" } });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  test("428 and an unknown 4xx code are refusals by status class", async () => {
+    expect((await client([problem(428, "precondition-required")]).c.read("/x")).kind).toBe("refused");
+    expect((await client([problem(418, "future-code")]).c.read("/x")).kind).toBe("refused");
+  });
+
+  test("501 not-implemented is a refusal", async () => {
+    expect(await client([problem(501, "not-implemented")]).c.read("/x")).toMatchObject({ kind: "refused", status: 501 });
+  });
+
+  test.each(["dependency-unavailable", "talos-access-unavailable", "transient-conflict"])(
+    "503 %s retries 1 s doubling, at most 5 tries, then stops",
+    async (code) => {
+      const answers = Array.from({ length: 5 }, () => problem(503, code));
+      const { c, fetchMock, sleeps } = client(answers);
+      expect(await c.read("/dependencies")).toMatchObject({ kind: "unavailable", status: 503 });
+      expect(fetchMock).toHaveBeenCalledTimes(5);
+      expect(sleeps).toEqual([1000, 2000, 4000, 8000]);
+    },
+  );
+
+  test("503 retry succeeds when the dependency comes back", async () => {
+    const { c, fetchMock } = client([problem(503, "dependency-unavailable"), ok({ a: 1 })]);
+    expect(await c.read("/dependencies")).toEqual({ kind: "ok", data: { a: 1 } });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("503 epoch-superseded is not repeated against the same process", async () => {
+    const { c, fetchMock } = client([problem(503, "epoch-superseded")]);
+    expect((await c.read("/machines")).kind).toBe("unavailable");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("500 internal-error is read again", async () => {
+    const { c, fetchMock } = client([problem(500, "internal-error"), ok({})]);
+    expect((await c.read("/machines")).kind).toBe("ok");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("an unknown Bronzeward 5xx code is a refusal for a read", async () => {
+    const { c, fetchMock } = client([problem(507, "future-code")]);
+    expect((await c.read("/machines")).kind).toBe("refused");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test.each([
+    ["a 502 page", new Response("<html>bad gateway</html>", { status: 502, headers: { "Content-Type": "text/html" } })],
+    ["a 504 with no body", new Response(null, { status: 504 })],
+    ["a problem of another type", new Response(JSON.stringify({ type: "about:blank", status: 503 }), { status: 503, headers: { "Content-Type": "application/problem+json" } })],
+  ])("a 5xx that is not a Bronzeward problem (%s) retries as the 503 row", async (_name, first) => {
+    const { c, fetchMock } = client([first, ok({})]);
+    expect((await c.read("/machines")).kind).toBe("ok");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("§8.5 epoch changes", () => {
+  test("the first epoch is recorded without a notice", async () => {
+    const onEpochChange = vi.fn();
+    const { c } = client([ok({})], { onEpochChange });
+    expect((await c.read("/server")).kind).toBe("ok");
+    expect(c.currentEpoch).toBe(EPOCH);
+    expect(onEpochChange).not.toHaveBeenCalled();
+  });
+
+  test("a changed epoch is recorded, reported with the recovery flag, and its response discarded", async () => {
+    const onEpochChange = vi.fn();
+    const { c } = client([ok({}), ok({ stale: true }, "e2", true), ok({ fresh: true }, "e2")], { onEpochChange });
+    await c.read("/machines");
+    expect(await c.read("/machines")).toEqual({ kind: "discarded" });
+    expect(onEpochChange).toHaveBeenCalledWith("e2", true);
+    expect(c.currentEpoch).toBe("e2");
+    expect(await c.read("/machines")).toEqual({ kind: "ok", data: { fresh: true } });
+    expect(onEpochChange).toHaveBeenCalledTimes(1);
+  });
+
+  test("a refusal carrying a new epoch runs the change too", async () => {
+    const onEpochChange = vi.fn();
+    const { c } = client([ok({}), problem(400, "cursor-invalid", {}, "e2")], { onEpochChange });
+    await c.read("/acts");
+    expect(await c.read("/acts?cursor=x")).toEqual({ kind: "discarded" });
+    expect(onEpochChange).toHaveBeenCalledWith("e2", false);
+  });
+});
+
+describe("stale-response discard", () => {
+  // A read held until release() is called, so the view can change while it is in flight.
+  function delayed(response: Response) {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const fetchImpl = (async () => {
+      await gate;
+      return response;
+    }) as unknown as typeof fetch;
+    return { fetchImpl, release };
+  }
+
+  const base = { principal: "p1", route: "/machines", query: "" };
+  test.each([
+    ["route", { ...base, route: "/plans" }],
+    ["query", { ...base, query: "?cluster=c2" }],
+    ["principal", { ...base, principal: "p2" }],
+  ])("a response arriving after its %s changed is not rendered", async (_what, next) => {
+    const { fetchImpl, release } = delayed(ok({ stale: true }));
+    const c = new Client({ fetch: fetchImpl });
+    c.setView(base);
+    const pending = c.read("/machines");
+    c.setView(next);
+    release();
+    expect(await pending).toEqual({ kind: "discarded" });
+  });
+
+  test("a response arriving after another response changed the epoch is not rendered", async () => {
+    const { fetchImpl: slow, release } = delayed(ok({ stale: true }, "e2"));
+    const answers = [ok({}), null, ok({}, "e2")];
+    const c = new Client({
+      fetch: (async (...args: Parameters<typeof fetch>) => {
+        const next = answers.shift();
+        return next === null ? slow(...args) : next!;
+      }) as typeof fetch,
+    });
+    await c.read("/machines"); // e1 recorded
+    const pending = c.read("/machines"); // in flight under e1
+    expect(await c.read("/plans")).toEqual({ kind: "discarded" }); // reveals e2
+    release();
+    expect(await pending).toEqual({ kind: "discarded" });
+  });
+
+  test("an unchanged view renders", async () => {
+    const { fetchImpl, release } = delayed(ok({ a: 1 }));
+    const c = new Client({ fetch: fetchImpl });
+    c.setView(base);
+    const pending = c.read("/machines");
+    c.setView({ ...base });
+    release();
+    expect(await pending).toEqual({ kind: "ok", data: { a: 1 } });
+  });
+
+  test("a view change during a 503 backoff stops the retries", async () => {
+    let c!: Client;
+    const fetchMock = vi.fn(async () => problem(503, "dependency-unavailable"));
+    c = new Client({
+      fetch: fetchMock as unknown as typeof fetch,
+      sleep: async () => c.setView({ ...base, route: "/plans" }),
+    });
+    c.setView(base);
+    expect(await c.read("/machines")).toEqual({ kind: "discarded" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});

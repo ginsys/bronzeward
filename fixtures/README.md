@@ -155,6 +155,22 @@ mise run dev-idp-down    # its containers, network and .dev/idp/; mise run dev-d
 - **Live checks.** The provider behaviour these rest on, and its residuals, are recorded in
   [the Zitadel test-provider record](../docs/design/research/20261022-zitadel-test-idp.md).
 
+## Test static host
+
+[`webhost/`](webhost/) serves the built web package (`web/dist`) as the component in front of
+the server would ([client contracts §10.1](../docs/spec/client-contracts.md#101-hosting-and-origin)):
+every page with the §10.2 headers of `web/headers.json`, whose CSP placeholders it fills from
+`-issuer` and `-provider-origins`; `/api/v1/` and `/livez` proxied to `-api`; every other path
+answered with the application. It listens on `127.0.0.1:58443`, behind the test provider's
+seeded web origin `http://localhost:58443`. `-redirect-api <origin>` makes it answer every API
+request with a `307` to that origin instead, the fault of conformance cases TLS-02 and TLS-03.
+
+`mise run browser` builds it, starts it in that mode with a counting target on
+`http://127.0.0.1:58444`, runs `web/e2e/` in each browser of `BW_BROWSERS` (default
+`chrome,firefox`; also `edge`, `firefox-esr`, `safari`) and scans `web/e2e/out/` for the run's
+canary, a `BWSYNTH-` value only the target serves. No server, database or provider runs.
+`BW_WDIO_CACHE` moves WebdriverIO's browser and driver downloads out of `TMPDIR`.
+
 ## Instance C and the interruption seam
 
 Instance C runs `/bronzeward-interrupt`, the server built with the `fixtureinterrupt` tag, from the
