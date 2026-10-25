@@ -1827,6 +1827,9 @@ the plan's `adopt` operation directly in `completed`, and sends nothing
 
 ### 9.3 Examples
 
+The examples omit `Bronzeward-Expected-Epoch`, which is optional (§9.1); a
+client sends it on every write but the recovery entry (client contracts §8.4).
+
 Publishing a draft, with a replay after a lost response:
 
 ```http
@@ -3130,7 +3133,9 @@ equals neither the restored epoch nor the lost one.
   fence refuses only its database writes, and only after entry.
 - A client that recorded `ep_e3t4dznwcjg4uoahvfjk4w6kwy` sees
   `ep_53wiltmcac6xxdggvgg7zcoh5y` in `Bronzeward-Epoch` and knows its events and
-  cursors do not resume.
+  cursors do not resume; a write it sends with the recorded epoch in
+  `Bronzeward-Expected-Epoch` under a key with no record is refused
+  `412 epoch-mismatch` (§7.2).
 - The generations of step 4 are orphans; the input is ingested again.
 - The revocation row of step 5 is gone, but its subject has been in
   `deniedSubjects` since step 5 (§10.4), so the human is refused before and
@@ -3166,6 +3171,7 @@ or Desired change; it does not erase earlier evidence.
 | Request | Same key while the first is in flight | waits on the key's lock, then replays or executes; on a draft entry route whose first request still holds a live claim, `409 conflict` (§7.2) | one effect |
 | Request | Entry retried with a key whose record is not this recovery start's own entry | `409 conflict` naming the stored entry (§12.4) | nothing |
 | Request | Key whose record is from an earlier epoch | `409 conflict` naming the stored request and its epoch (§7.2) | nothing |
+| Request | Key with no record, `Bronzeward-Expected-Epoch` naming another epoch | `412 epoch-mismatch` naming the current epoch (§7.2) | nothing; a draft entry refused in T1 leaves the claim it persisted before T1, which the entry that changed the epoch abandoned (§12.2), and that claim's generations as orphans (§6.4) |
 | Request | Keyed fingerprint whose digest-key version the provider can no longer compute under | `422`; under a new key, an ingestion whose operation is still active is `409 conflict` naming it (§7.1, §7.3), and a draft entry that compilation refused after its claim existed ingests afresh (§7.1) | nothing; under the new key, a draft entry refused again leaves another abandoned claim and its orphans |
 | Draft | ETag mismatch | `412` | nothing |
 | Draft | Update or discard while a publish operation for it is queued or running | `409 conflict` naming the operation | nothing |
