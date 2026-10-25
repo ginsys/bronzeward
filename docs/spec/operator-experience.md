@@ -18,8 +18,9 @@ or accessibility measurement, or implementation readiness: #253's contracts and 
 **Facts and proposals are kept apart.** A statement about existing behaviour cites the contract
 section or the source line it comes from (`internal/api/routes.go:98` means that file and line at
 revision `e1c8cb3`). The expected-epoch check that
-[#293](https://github.com/ginsys/bronzeward/issues/293) added did not exist there: its citations
-in [§8](#8-states-every-view-must-handle) are read with the change applied. Client behaviour this document proposes is
+[#293](https://github.com/ginsys/bronzeward/issues/293) added did not exist there, so the
+citations in [§8](#8-states-every-view-must-handle) are read at the revision that lands
+[#309](https://github.com/ginsys/bronzeward/issues/309), with that check applied. Client behaviour this document proposes is
 marked **Proposed**. A behaviour the API does not support today is listed in
 [§11](#11-api-gap-audit) and is not presented as available.
 
@@ -902,9 +903,9 @@ sending with "approval is for humans", and the server refuses it `403` with `hum
 | Withheld | review `configuration: null` | the notice, never an empty document | [W11](operator-experience-wireframes.md#w11-empty-withheld-error-and-offline-states) |
 | Unread or stale observation | `unread` causes, old `at` (`internal/api/observe.go:56-198`) | cause per field ("node unreachable", "provider access denied") | same, never green |
 | Refused | `application/problem+json` ([persistence and API §9.4](persistence-api.md#94-errors)) | title, code, what to do, `instance` | inline at the control, summary at the top |
-| Conflict | `412 precondition-failed`, `409 conflict` | stop and point at the newer state; a `409` naming the ingestion still in progress under the same key instead waits and repeats with that key ([persistence and API §7.2](persistence-api.md#72-behavior)); a refusal stored after the claim also names its ingestion (`internal/api/fragments.go:289-296`) and its first answer is unmarked (`internal/api/tx.go:100`), so an unmarked one may be either, and one same-key repeat settles it: a stored refusal then comes back marked `Idempotent-Replayed` and is final | show both and offer reload; never auto-merge |
+| Conflict | `412 precondition-failed`, `409 conflict` | stop and point at the newer state; a `409` naming the ingestion still in progress under the same key instead waits and repeats with that key ([persistence and API §7.2](persistence-api.md#72-behavior)); a refusal stored after the claim also names its ingestion (`internal/api/fragments.go:289-296`) and its first answer is unmarked (`internal/api/tx.go:111`), so an unmarked one may be either, and one same-key repeat settles it: a stored refusal then comes back marked `Idempotent-Replayed` and is final | show both and offer reload; never auto-merge |
 | Ambiguous response | timeout or connection loss after sending | before exiting 3, offers to repeat the request it still holds in memory with the same key and its expected epoch; after exit, prints the key and the resource to read | "Unknown whether this was saved"; [Repeat exactly] only while the page holds the request, for the same sign-in and epoch |
-| Replayed | `Idempotent-Replayed: true` (`internal/api/idempotency.go:75-81`) | "Already done earlier; showing that result" | same |
+| Replayed | `Idempotent-Replayed: true` (`internal/api/idempotency.go:81-87`) | "Already done earlier; showing that result" | same |
 | Key reused | `422 idempotency-key-reused` | the request could not be matched to the earlier one under that key (it differed, or the recorded digest-key version can no longer be computed, [persistence and API §7.1](persistence-api.md#71-the-key)); nothing was done; retry under a new key | same |
 | Offline | no connection | retry reads with backoff; never queue writes | banner; actions disabled; last-read time shown |
 | Authentication refused | `401 unauthenticated`: not accepted, possibly but not necessarily because it expired | renew and repeat reads; repeat a pending write with the same key only if the renewed token is the same principal and the epoch is unchanged | same |
@@ -922,9 +923,9 @@ the key is `409` naming its ingestion (`internal/api/fragments.go:113-114`), a r
 `409`, and after a restore that removed the record the same key executes afresh, unless its
 `Bronzeward-Expected-Epoch` names an earlier epoch, which is refused `412 epoch-mismatch`
 ([persistence and API §7.1](persistence-api.md#71-the-key), §7.2; `internal/api/idempotency.go:52-58`;
-`docs/spec/persistence-api.md:1243-1269`, `docs/spec/persistence-api.md:1320-1323`,
-`docs/spec/persistence-api.md:1332-1340`;
-`internal/api/idempotency.go:57-81`). The same key does not make a remote mutation exactly-once
+`docs/spec/persistence-api.md:1243-1269`, `docs/spec/persistence-api.md:1347-1350`,
+`docs/spec/persistence-api.md:1360-1368`;
+`internal/api/idempotency.go:63-87`). The same key does not make a remote mutation exactly-once
 ([design §12.5](../design/Talos_Configuration_and_Machine_Management_Design.md#125-durable-operations-and-uncertain-outcomes)).
 
 **Proposed:** a client keeps a key per write until it has an answer. A repeat with that key is
@@ -938,7 +939,7 @@ secret, to disk to repeat it later. Whether any key metadata is kept across a re
 it is compared, is #253's to decide.
 
 An automation token is bound to the epoch it was issued in and refused `401` in any
-other (`internal/api/api.go:305-311`), so after a restore followed by a recovery-mode entry its
+other (`internal/api/api.go:310-316`), so after a restore followed by a recovery-mode entry its
 repeat is not executed; it is set aside like any write pending across an epoch change. After a
 restore nobody entered, no new epoch exists and a pre-restore token can pass
 ([persistence and API §12.1](persistence-api.md#121-the-epoch), the residual of design §14.6). A human session's write
