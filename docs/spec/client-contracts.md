@@ -1,8 +1,9 @@
 # Client contracts: authentication, API behaviour and compatibility
 
 **Status: accepted** by the owner on 25 October 2026 at 21:15 CET, in the owner's workflow
-session, after the [acceptance assessment](https://github.com/ginsys/bronzeward/issues/253#issuecomment-6400565386):
-"A: accept now". This document specifies what any Bronzeward client, the
+session: "A: accept now". Option A accepted the client contracts as they stood at `daa4393`, as
+assessed in the [acceptance assessment](https://github.com/ginsys/bronzeward/issues/253#issuecomment-6400565386).
+This document specifies what any Bronzeward client, the
 `bronzewardctl` command-line client and the web interface alike, must do against the existing
 management API, for
 [Specify client authentication, API behavior and compatibility](https://github.com/ginsys/bronzeward/issues/253)
@@ -209,8 +210,8 @@ Each has a disposition: an **API issue** proposed in [§14](#14-proposed-api-gap
 a **contract correction** to an existing specification, also in §14, a **later design issue**
 out of this milestone, also in §14, a **client rule** this document states, a **client
 composite** over existing routes, an **accepted limitation**, or a **decision** listed in
-[§13](#13-alternatives-and-open-choices). Every disposition, including "accepted", is
-this draft's proposal until the owner assesses it. Nothing here is presented to a client as
+[§13](#13-alternatives-and-open-choices). The owner accepted every disposition, including
+"accepted", with this document. Nothing here is presented to a client as
 supported.
 
 | ID | Gap | Evidence | Disposition |
@@ -1269,7 +1270,7 @@ ticket waits for it.
 served is a redaction design question outside this milestone (G7); until it is settled clients
 use a drift-adoption import with review.
 
-**Downstream refinement, proposed for the owner.** Each client ticket cites this document's
+**Downstream refinement.** Each client ticket cites this document's
 sections as its contract, and its `status/needs-refinement` label is lifted only with the
 dependencies below in place:
 
@@ -1368,8 +1369,9 @@ The packaging guide of #262 documents it.
 
 Limits:
 
-- This is a proposal. No client exists and no case of [§12](#12-shared-conformance-cases) has run.
-  No synthetic contract probe was run against the server for this draft: every server behaviour
+- This specification is accepted but not implemented. No client exists and no case of
+  [§12](#12-shared-conformance-cases) has run. No synthetic contract probe was run against the
+  server for this document: every server behaviour
   above is read from source and contract text, and G17 is inferred, not observed.
 - Line references were read at `3cbe953`, except those to the identity read and the
   expected-epoch check, which are read with
