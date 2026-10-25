@@ -43,8 +43,9 @@ describe("an API redirect to another origin", () => {
     expect(await hits()).toBe(2);
   });
 
-  // Client contracts §11.5 item 3: no browser storage holds a value; the page uses none.
-  afterEach(async function () {
+  // Client contracts §11.5 item 3: no browser storage holds a value; the page uses none. No
+  // screenshot is retained: the artifact scan reads bytes and cannot see text drawn as pixels.
+  afterEach(async () => {
     const storage = await browser.execute(async () => ({
       local: Object.entries(localStorage),
       session: Object.entries(sessionStorage),
@@ -52,9 +53,5 @@ describe("an API redirect to another origin", () => {
       caches: "caches" in self ? await caches.keys() : ["unreadable"],
     }));
     expect(storage).toEqual({ local: [], session: [], indexedDB: [], caches: [] });
-    // The worker ID, one per capability, tells the two Firefoxes apart; the version alone may not.
-    const { browserName, browserVersion } = browser.capabilities;
-    const name = `${browserName}-${browserVersion}-${process.env["WDIO_WORKER_ID"]}-${this.currentTest?.title.slice(0, 20).replace(/\W+/g, "-")}`;
-    await browser.saveScreenshot(`e2e/out/${name}.png`);
   });
 });
