@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -24,10 +25,15 @@ import (
 // the description requires no member the server does without. env.do calls it for every request
 // a test sends through it, so the API tests' own exchanges are what the description's schemas are
 // checked against. A path outside prefix, or one no described path matches, is a test's own route
-// and is not checked.
+// and is not checked. It reports with Errorf: env.do runs in goroutines too.
 func checkResponse(t *testing.T, r *http.Request, reqBody string, rec *httptest.ResponseRecorder) {
 	t.Helper()
-	for _, e := range exchangeErrors(description(t), r, reqBody, rec) {
+	doc, err := loadDescription()
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	for _, e := range exchangeErrors(doc, r, reqBody, rec) {
 		t.Error(e)
 	}
 }
@@ -225,7 +231,7 @@ func pointer(doc map[string]any, ref string) any {
 // TestDescriptionUsesSupportedKeywords, so a schema never relies on one validate ignores.
 var (
 	assertionKeywords = []string{"$ref", "type", "properties", "required", "additionalProperties", "items", "enum", "const", "oneOf",
-		"minLength", "maxLength", "minimum", "maximum", "minItems", "maxItems"}
+		"minLength", "maxLength", "pattern", "minimum", "maximum", "minItems", "maxItems"}
 	annotationKeywords = []string{"description", "format", "examples", "deprecated"}
 )
 
@@ -271,6 +277,13 @@ func validate(doc map[string]any, schema, v any, at string) []string {
 	switch v := v.(type) {
 	case string:
 		outside(float64(utf8.RuneCountInString(v)), "minLength", "maxLength")
+		if p, ok := s["pattern"].(string); ok {
+			if re, err := regexp.Compile(p); err != nil {
+				errs = append(errs, fmt.Sprintf("%s: pattern %q does not compile: %v", at, p, err))
+			} else if !re.MatchString(v) {
+				errs = append(errs, fmt.Sprintf("%s: %s does not match %s", at, shortJSON(v), p))
+			}
+		}
 	case json.Number:
 		n, _ := v.Float64()
 		outside(n, "minimum", "maximum")
@@ -476,6 +489,7 @@ func TestValidateRefusesEachKind(t *testing.T) {
 		{"two oneOf alternatives", map[string]any{"oneOf": []any{map[string]any{"type": "string"}, map[string]any{"enum": []any{"a"}}}}, "a"},
 		{"a string below minLength", map[string]any{"minLength": 2}, "é"},
 		{"a string above maxLength", map[string]any{"maxLength": 1}, "ab"},
+		{"a string outside its pattern", map[string]any{"pattern": "^[a-z]+$"}, "aB"},
 		{"a number below minimum", map[string]any{"minimum": 1}, num("0")},
 		{"a number above maximum", map[string]any{"maximum": 604800}, num("604801")},
 		{"a fractional bound", map[string]any{"maximum": 1.5}, num("2")},
@@ -503,6 +517,7 @@ func TestValidateRefusesEachKind(t *testing.T) {
 	}{
 		{"null where allowed", map[string]any{"type": []any{"string", "null"}}, nil},
 		{"a string at its bounds", map[string]any{"minLength": 1, "maxLength": 1}, "é"},
+		{"a string matching its pattern", map[string]any{"pattern": "^[a-z]+$"}, "ab"},
 		{"a number at its bounds", map[string]any{"minimum": 1, "maximum": 604800}, num("604800")},
 		{"an array at its bounds", map[string]any{"minItems": 1, "maxItems": 1}, []any{"a"}},
 		{"an additional member the schema admits", map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
@@ -541,15 +556,21 @@ func TestDescriptionBoundsMatchServer(t *testing.T) {
 		agree(fmt.Sprintf("limit %d", n), limit, json.Number(fmt.Sprint(n)), n >= 1 && n <= maxLimit)
 	}
 	key := schema("#/components/parameters/IdempotencyKey/schema")
-	for _, n := range []int{15, 16, 128, 129} {
-		k := strings.Repeat("a", n)
-		agree(fmt.Sprintf("an Idempotency-Key of %d characters", n), key, k, keyShape.MatchString(k))
+	for _, k := range []string{strings.Repeat("a", 15), strings.Repeat("a", 16), strings.Repeat("a", 128), strings.Repeat("a", 129),
+		"0123456789abcde!", strings.Repeat("é", 16)} {
+		agree(fmt.Sprintf("the Idempotency-Key %q", k), key, k, keyShape.MatchString(k))
 	}
-	layer := schema("#/components/schemas/AssignmentInput/properties/fragments/additionalProperties")
-	for _, n := range []int{0, 1} {
-		in := assignmentInput{Fragments: map[string][]string{"global": slices.Repeat([]string{"base"}, n)}}
-		agree(fmt.Sprintf("a fragments layer of %d", n), layer, slices.Repeat([]any{"base"}, n), in.check(nil) == nil)
+	// Every layer either side names, and two names that are not layers: a layer added to only one
+	// of fragmentLayers and the description fails.
+	fragments := schema("#/components/schemas/AssignmentInput/properties/fragments")
+	props, _ := fragments["properties"].(map[string]any)
+	layers := slices.Concat(fragmentLayers, slices.Collect(maps.Keys(props)), []string{"machine-intrinsic", "Global"})
+	for _, l := range slices.Compact(slices.Sorted(slices.Values(layers))) {
+		in := assignmentInput{Fragments: map[string][]string{l: {"base"}}}
+		agree(fmt.Sprintf("a fragments member %q", l), fragments, map[string]any{l: []any{"base"}}, in.check(nil) == nil)
 	}
+	in := assignmentInput{Fragments: map[string][]string{"global": {}}}
+	agree("an empty fragments layer", fragments, map[string]any{"global": []any{}}, in.check(nil) == nil)
 }
 
 // checkResponse's negative controls: each kind of mismatch, made on a real exchange shape, is

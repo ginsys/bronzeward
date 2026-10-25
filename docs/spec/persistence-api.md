@@ -1667,9 +1667,10 @@ Design: [§11](../design/Talos_Configuration_and_Machine_Management_Design.md#11
   differ in either direction, in those facts or in an operation's path
   parameters, `Idempotency-Key` and `If-Match` parameters or request body. The
   API tests validate every answer's status, headers and body on a described
-  route, except an event stream's, and every request the server accepted,
-  against it (`internal/api/openapi_response_test.go`). A route change updates
-  it in the same change. Clients generate their request and response types from it with
+  route, except an answer of the event-stream route, and the body of every
+  request the server accepted, against it
+  (`internal/api/openapi_response_test.go`). A route change updates it in the
+  same change. Clients generate their request and response types from it with
   an OpenAPI 3.1 generator of their choosing; idempotency keys, ETags, epochs
   and token renewal stay hand-written client behavior
   ([#275](https://github.com/ginsys/bronzeward/issues/275)).

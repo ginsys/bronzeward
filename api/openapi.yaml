@@ -9,9 +9,9 @@ info:
     start; x-bronzeward-recovery-start-only, served only by a process started with the recovery-start flag, any other answering
     409 conflict. internal/api/openapi_test.go fails when they, an operation''s path parameters, its Idempotency-Key and If-Match
     parameters or its request body differ from routes(), in either direction, and the API tests validate every answer''s status,
-    headers and body on a described route, except an event stream''s (its tests bypass the check), and every request the server
-    accepted, against this description. Every error answer is a problem document (default response). Request bodies are decoded
-    strictly: application/json; at the top level exactly the listed members, none repeated; in a nested object no unlisted
+    headers and body on a described route, except an answer of the event-stream route (its tests bypass the check), and the
+    body of every request the server accepted, against this description. Every error answer is a problem document (default
+    response). Request bodies are decoded strictly: application/json; at the top level exactly the listed members, none repeated; in a nested object no unlisted
     or repeated member, though the decoder matches a nested member''s name without regard to case, so a client must send the
     names as listed; a member whose schema admits null may be given as null, which the decoder treats as absent. The idempotency
     fingerprint covers the canonical body (persistence and API §7.1), which keeps a null member, so a retry that adds or drops
@@ -1562,9 +1562,7 @@ paths:
             Bronzeward-Request-ID: {$ref: '#/components/headers/RequestID'}
             Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
             Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
-            Cache-Control:
-              description: no-store on a stream; absent from the JSON form.
-              schema: {type: string}
+            Cache-Control: {$ref: '#/components/headers/NoStore'}
           content:
             application/json:
               schema:
@@ -2165,14 +2163,14 @@ components:
       type: http
       scheme: bearer
       description: A human's OIDC token from the configured issuer, or an automation token `bwt_<id>.<secret>`, which is opaque,
-        not a JWT (persistence and API §9.1).
+        not a JWT (persistence and API §10.1, §10.2).
   parameters:
     IdempotencyKey:
       name: Idempotency-Key
       in: header
       required: true
       description: 16 to 128 characters of [A-Za-z0-9_-] (persistence and API §7.1).
-      schema: {type: string, minLength: 16, maxLength: 128}
+      schema: {type: string, minLength: 16, maxLength: 128, pattern: '^[A-Za-z0-9_-]{16,128}$'}
     ExpectedEpoch:
       name: Bronzeward-Expected-Epoch
       in: header
@@ -2507,11 +2505,20 @@ components:
           items: {type: string}
         fragments:
           type: [object, 'null']
-          additionalProperties:
-            type: array
-            minItems: 1
-            items: {type: string}
+          properties:
+            global: {$ref: '#/components/schemas/LayerFragments'}
+            site: {$ref: '#/components/schemas/LayerFragments'}
+            cluster: {$ref: '#/components/schemas/LayerFragments'}
+            role: {$ref: '#/components/schemas/LayerFragments'}
+            workload: {$ref: '#/components/schemas/LayerFragments'}
+            override: {$ref: '#/components/schemas/LayerFragments'}
+          additionalProperties: false
       additionalProperties: false
+    LayerFragments:
+      description: The fragments one layer selects, by name.
+      type: array
+      minItems: 1
+      items: {type: string}
     AssignmentRevisionBody:
       type: object
       required: [id, cluster, machine, profiles, fragments, author, createdAt]
