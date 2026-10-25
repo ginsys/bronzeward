@@ -50,12 +50,15 @@ export const config: WebdriverIO.Config = {
       res.writeHead(200, { "Cache-Control": "no-store", "Access-Control-Allow-Origin": PAGE_ORIGIN }).end(canary);
     });
     await new Promise<void>((resolve) => target!.listen(58444, "127.0.0.1", resolve));
+    // A host left from an earlier run would answer the readiness check below with an old build.
+    const hostUrl = `${PAGE_ORIGIN.replace("localhost", "127.0.0.1")}/`;
+    if (await fetch(hostUrl).then(() => true, () => false)) throw new Error("something already answers on the static host's port");
     host = spawn(`${web}../bin/webhost`, [
       "-dist", `${web}dist`, "-headers", `${web}headers.json`, "-client-config", `${web}e2e/bronzeward-client.json`,
       "-issuer", "http://localhost:58280", "-provider-origins", TARGET_ORIGIN, "-redirect-api", TARGET_ORIGIN,
     ], { stdio: "inherit" });
     for (let i = 0; ; i++) {
-      if (await fetch(`${PAGE_ORIGIN.replace("localhost", "127.0.0.1")}/`).then((r) => r.ok, () => false)) break;
+      if (await fetch(hostUrl).then((r) => r.ok, () => false)) break;
       if (i === 50 || host.exitCode !== null) throw new Error("the static host did not answer within 10 s");
       await new Promise((r) => setTimeout(r, 200));
     }
