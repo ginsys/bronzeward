@@ -29,7 +29,7 @@ type querier interface {
 // FOR SHARE: a recovery-mode entry commits before the statement reads or after it, so the record's
 // epoch is judged against the epoch it sets on q, and a service token is rechecked against it.
 // With no record, so that an earlier epoch's record still answers its 409, the epoch the request
-// expects is checked against it too, and the lookup in the request's own transaction decides (§7.2).
+// expects is checked against it too, and only a lookup under the key's lock decides (§7.2).
 // exclusive takes it FOR UPDATE instead, for a route whose effect must wait for every request
 // holding it, and hold off new ones, an inventory among them (§5 T5c).
 func lookup(ctx context.Context, db querier, q *request, exclusive bool) (*record, error) {
