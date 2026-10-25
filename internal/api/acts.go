@@ -117,28 +117,32 @@ func readActs(a *API, q *request) (actsPage, error) {
 // page reads limit, cursor and at most one of each of the route's filters, refusing anything else
 // (§9.1: unknown fields are refused); the route reads its filters. The cursor names the last item
 // listed, an identifier of p.
-func page(q *request, p id.Prefix, filters ...string) (limit int, after string, ref *refusal) {
-	return pageBy(q, func(last string) bool { return id.MustHave(last, p) == nil }, filters...)
+func page(q *request, p id.Prefix) (limit int, after string, ref *refusal) {
+	return pageBy(q, func(last string) bool { return id.MustHave(last, p) == nil })
 }
 
 // pageSeq is page for a collection ordered by a number, an entry's revision or an event's number:
 // the cursor names the last number listed, and the first page starts after 0.
-func pageSeq(q *request, filters ...string) (limit int, after string, ref *refusal) {
-	limit, after, ref = pageBy(q, func(last string) bool { n, err := strconv.ParseInt(last, 10, 64); return err == nil && n >= 1 }, filters...)
+func pageSeq(q *request) (limit int, after string, ref *refusal) {
+	limit, after, ref = pageBy(q, func(last string) bool { n, err := strconv.ParseInt(last, 10, 64); return err == nil && n >= 1 })
 	if after == "" {
 		after = "0"
 	}
 	return limit, after, ref
 }
 
-// pageBy is page for a cursor whose last item valid accepts.
-func pageBy(q *request, valid func(last string) bool, filters ...string) (limit int, after string, ref *refusal) {
+// pageBy is page for a cursor whose last item valid accepts. The query parameters it admits are
+// the route's (routes()), the ones the description lists.
+func pageBy(q *request, valid func(last string) bool) (limit int, after string, ref *refusal) {
+	if !slices.Contains(q.route.query, "limit") {
+		return 0, "", refuse(http.StatusInternalServerError, "internal-error", "")
+	}
 	vals, err := url.ParseQuery(q.r.URL.RawQuery)
 	if err != nil {
 		return 0, "", refuse(http.StatusBadRequest, "invalid-request", "the query does not parse")
 	}
 	for k, v := range vals {
-		if (k != "limit" && k != "cursor" && !slices.Contains(filters, k)) || len(v) != 1 {
+		if !slices.Contains(q.route.query, k) || len(v) != 1 {
 			return 0, "", refuse(http.StatusBadRequest, "invalid-request", "the query takes at most one limit, one cursor and one of each filter")
 		}
 	}

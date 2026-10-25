@@ -2209,24 +2209,18 @@ components:
         identity-revoked and an answer refused before the epoch was read.
       schema: {type: string}
     RecoveryMode:
-      description: true while the server runs in recovery mode (persistence and API §9.1); absent otherwise, and from
+      description: true while recovery mode is in effect (persistence and API §9.1); absent otherwise, and from
         every answer Bronzeward-Epoch is absent from.
       schema: {type: string, enum: ['true']}
     ETag:
       description: The resource's version (persistence and API §4.1).
       required: true
       schema: {type: string}
-    OptionalETag:
-      description: The resource's version (persistence and API §4.1), when the answer is one versioned resource.
-      schema: {type: string}
     Location:
       description: 'The resource the answer names: the one it created, or the existing resource the act was recorded on, such
         as the machine for a freeze or a scope mark, /recovery for a recovery entry or exit, or an operation already queued
         for a publication.'
       required: true
-      schema: {type: string}
-    OptionalLocation:
-      description: The resource the answer names, when it names one; see Location.
       schema: {type: string}
     IdempotentReplayed:
       description: true when the answer is a stored one, replayed for a repeated key (persistence and API §7.2).
@@ -2503,7 +2497,8 @@ components:
       properties:
         profiles:
           type: [array, 'null']
-          items: {type: string}
+          maxItems: 256
+          items: {$ref: '#/components/schemas/SourceName'}
         fragments:
           type: [object, 'null']
           properties:
@@ -2519,7 +2514,14 @@ components:
       description: The fragments one layer selects, by name.
       type: array
       minItems: 1
-      items: {type: string}
+      maxItems: 256
+      items: {$ref: '#/components/schemas/SourceName'}
+    SourceName:
+      description: A fragment or profile name, unique within one assignment.
+      type: string
+      minLength: 1
+      maxLength: 63
+      pattern: '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'
     AssignmentRevisionBody:
       type: object
       required: [id, cluster, machine, profiles, fragments, author, createdAt]
@@ -3467,16 +3469,22 @@ components:
         encoding: {type: string, enum: [base64]}
       additionalProperties: false
     ReferenceInput:
-      type: object
-      required: [kind, version]
-      properties:
-        kind: {type: string, enum: [string, integer, boolean, mapping]}
-        version: {type: integer}
-        encoding:
-          description: 'Empty, like null or absent, means no encoding (checkDeclarations, internal/ingest/declare.go).'
-          type: [string, 'null']
-          enum: [base64, '', null]
-      additionalProperties: false
+      description: 'A declared reference (checkDeclarations, internal/ingest/declare.go): version 1 or later; only a string may be base64-encoded. An empty encoding, like null or absent, means none.'
+      oneOf:
+      - type: object
+        required: [kind, version]
+        properties:
+          kind: {type: string, enum: [string]}
+          version: {type: integer, minimum: 1}
+          encoding: {type: [string, 'null'], enum: [base64, '', null]}
+        additionalProperties: false
+      - type: object
+        required: [kind, version]
+        properties:
+          kind: {type: string, enum: [integer, boolean, mapping]}
+          version: {type: integer, minimum: 1}
+          encoding: {type: [string, 'null'], enum: ['', null]}
+        additionalProperties: false
     ReleaseBody:
       type: object
       required:

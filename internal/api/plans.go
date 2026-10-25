@@ -428,7 +428,7 @@ var planStates = []string{"proposed", "approved", "committed", "revoked", "cance
 // listPlans takes the filters state and machine (§9.2).
 func listPlans(a *API, w http.ResponseWriter, q *request) {
 	readIn(a, w, q, func(ctx context.Context, tx *sql.Tx) (string, any, error) {
-		limit, after, ref := page(q, id.Plan, "state", "machine")
+		limit, after, ref := page(q, id.Plan)
 		if ref != nil {
 			return "", nil, ref
 		}

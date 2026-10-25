@@ -279,7 +279,7 @@ var ingestionStates = []string{"held", "paused", "resumed", "released", "abandon
 // never lists it.
 func listIngestions(a *API, w http.ResponseWriter, q *request) {
 	readIn(a, w, q, func(ctx context.Context, tx *sql.Tx) (string, any, error) {
-		limit, after, ref := page(q, id.Ingestion, "state", "machine")
+		limit, after, ref := page(q, id.Ingestion)
 		if ref != nil {
 			return "", nil, ref
 		}

@@ -14,9 +14,13 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/ginsys/bronzeward/internal/ingest"
+	"github.com/ginsys/bronzeward/internal/provider"
 )
 
 // checkResponse fails t when rec, the answer to r, is not one the description lists for r's
@@ -50,14 +54,18 @@ func exchangeErrors(doc map[string]any, r *http.Request, reqBody string, rec *ht
 	}
 	where := r.Method + " " + tmpl + " " + fmt.Sprint(rec.Code)
 	item, _ := doc["paths"].(map[string]any)[tmpl].(map[string]any)
-	op, ok := item[strings.ToLower(r.Method)].(map[string]any)
+	method := strings.ToLower(r.Method)
+	if _, ok := item[method]; !ok && r.Method == http.MethodHead {
+		method = "get" // http.ServeMux serves HEAD through every GET pattern; the answer carries no body
+	}
+	op, ok := item[method].(map[string]any)
 	if !ok {
 		// The router answers a method the path does not serve; that answer is a problem.
 		op = map[string]any{"responses": map[string]any{"default": map[string]any{"$ref": "#/components/responses/Problem"}}}
 	}
 	var errs []string
 	if rec.Code < 300 {
-		errs = requestErrors(doc, op, reqBody, where)
+		errs = append(paramErrors(doc, op, r, where), requestErrors(doc, op, reqBody, where)...)
 	}
 	responses, _ := op["responses"].(map[string]any)
 	resp, ok := responses[fmt.Sprint(rec.Code)]
@@ -71,6 +79,9 @@ func exchangeErrors(doc map[string]any, r *http.Request, reqBody string, rec *ht
 	sent := rec.Result().Header
 	errs = append(errs, headerErrors(doc, described, sent, where)...)
 	content, _ := described["content"].(map[string]any)
+	if r.Method == http.MethodHead {
+		return errs
+	}
 	if len(content) == 0 {
 		if rec.Body.Len() != 0 {
 			errs = append(errs, fmt.Sprintf("%s: the description lists no body, the answer has %d bytes", where, rec.Body.Len()))
@@ -156,6 +167,48 @@ func requestErrors(doc, op map[string]any, reqBody, where string) []string {
 	var errs []string
 	for _, e := range validate(doc, media["schema"], v, "request") {
 		errs = append(errs, where+": "+e)
+	}
+	return errs
+}
+
+// paramErrors reports a query parameter of r, a request the server accepted, that op does not
+// describe, and a query or header value op's schema for it refuses. An undescribed request header
+// is not reported: the route walk sends Idempotency-Key and If-Match everywhere and a read ignores
+// them; routeFacts holds each route's described headers to the table.
+func paramErrors(doc, op map[string]any, r *http.Request, where string) []string {
+	described := map[string]map[string]any{}
+	ps, _ := op["parameters"].([]any)
+	for _, p := range ps {
+		d, _ := deref(doc, p).(map[string]any)
+		name, _ := d["name"].(string)
+		if in := d["in"]; in == "header" {
+			described["header "+http.CanonicalHeaderKey(name)] = d
+		} else if in == "query" {
+			described["query "+name] = d
+		}
+	}
+	var errs []string
+	for _, name := range slices.Sorted(maps.Keys(r.URL.Query())) {
+		if _, ok := described["query "+name]; !ok {
+			errs = append(errs, fmt.Sprintf("%s: query parameter %s is not described", where, name))
+		}
+	}
+	for _, at := range slices.Sorted(maps.Keys(described)) {
+		in, name, _ := strings.Cut(at, " ")
+		values := r.Header.Values(name)
+		if in == "query" {
+			values = r.URL.Query()[name]
+		}
+		schema, _ := deref(doc, described[at]["schema"]).(map[string]any)
+		for _, s := range values {
+			var v any = s
+			if _, err := strconv.ParseInt(s, 10, 64); err == nil && schema["type"] == "integer" {
+				v = json.Number(s)
+			}
+			for _, e := range validate(doc, schema, v, at) {
+				errs = append(errs, where+": "+e)
+			}
+		}
 	}
 	return errs
 }
@@ -461,6 +514,63 @@ func TestDescriptionUsesSupportedKeywords(t *testing.T) {
 	}
 }
 
+// The problem types the description lists are the codes problem.go answers with a title, so a
+// new code fails here, not only when some API test happens to return it.
+func TestDescriptionProblemTypesMatchTitles(t *testing.T) {
+	t.Parallel()
+	enum, _ := pointer(description(t), "#/components/schemas/Problem/properties/type/enum").([]any)
+	var described []string
+	for _, v := range enum {
+		s, _ := v.(string)
+		described = append(described, s)
+	}
+	var served []string
+	for code := range titles {
+		served = append(served, "urn:bronzeward:problem:"+code)
+	}
+	slices.Sort(described)
+	slices.Sort(served)
+	if !slices.Equal(described, served) {
+		t.Errorf("the description lists %v, problem.go answers %v", described, served)
+	}
+}
+
+// Every component the description defines is referenced, so none describes what no answer or
+// request uses.
+func TestDescriptionComponentsAreReferenced(t *testing.T) {
+	t.Parallel()
+	doc := description(t)
+	refs := map[string]bool{}
+	var walk func(v any)
+	walk = func(v any) {
+		switch v := v.(type) {
+		case map[string]any:
+			if ref, ok := v["$ref"].(string); ok {
+				refs[ref] = true
+			}
+			for _, sub := range v {
+				walk(sub)
+			}
+		case []any:
+			for _, sub := range v {
+				walk(sub)
+			}
+		}
+	}
+	walk(doc)
+	components, _ := doc["components"].(map[string]any)
+	for _, kind := range slices.Sorted(maps.Keys(components)) {
+		if kind == "securitySchemes" { // named by security requirements, not by $ref
+			continue
+		}
+		for _, name := range slices.Sorted(maps.Keys(components[kind].(map[string]any))) {
+			if !refs["#/components/"+kind+"/"+name] {
+				t.Errorf("components/%s/%s is referenced nowhere", kind, name)
+			}
+		}
+	}
+}
+
 // The validator's negative controls: each assertion keyword refuses the value it should.
 func TestValidateRefusesEachKind(t *testing.T) {
 	t.Parallel()
@@ -572,6 +682,56 @@ func TestDescriptionBoundsMatchServer(t *testing.T) {
 	// Beside a layer that selects one, so the per-layer rule decides and not the total's.
 	in := assignmentInput{Fragments: map[string][]string{"global": {}, "site": {"base"}}}
 	agree("an empty fragments layer", fragments, map[string]any{"global": []any{}, "site": []any{"base"}}, in.check(nil) == nil)
+	// A selected name's shape, and the 256 a list can reach alone: the total across lists is prose.
+	profiles := schema("#/components/schemas/AssignmentInput/properties/profiles")
+	layer := schema("#/components/schemas/LayerFragments")
+	for _, n := range []string{"", "a", "a-b", "0a", strings.Repeat("a", 63), strings.Repeat("a", 64), "-a", "a-", "A", "a_b", "é"} {
+		in := assignmentInput{Profiles: []string{n}}
+		agree(fmt.Sprintf("a profile named %q", n), profiles, []any{n}, in.check(nil) == nil)
+		in = assignmentInput{Fragments: map[string][]string{"site": {n}}}
+		agree(fmt.Sprintf("a fragment named %q", n), layer, []any{n}, in.check(nil) == nil)
+	}
+	for _, n := range []int{256, 257} {
+		var list []string
+		var described []any
+		for i := range n {
+			list = append(list, fmt.Sprintf("n%d", i))
+			described = append(described, list[i])
+		}
+		in := assignmentInput{Profiles: list}
+		agree(fmt.Sprintf("%d profiles", n), profiles, described, in.check(nil) == nil)
+		in = assignmentInput{Fragments: map[string][]string{"site": list}}
+		agree(fmt.Sprintf("%d fragments in one layer", n), layer, described, in.check(nil) == nil)
+	}
+}
+
+// ReferenceInput admits a declaration exactly when the server's declaration check does. The check
+// (checkDeclarations, internal/ingest) is reached through ingest.Stored, which holds a stream's
+// declarations to it before anything else, here with a stream that uses the one declared name.
+func TestDescriptionReferenceInputMatchesServer(t *testing.T) {
+	t.Parallel()
+	doc := description(t)
+	s, ok := pointer(doc, "#/components/schemas/ReferenceInput").(map[string]any)
+	if !ok {
+		t.Fatal("no ReferenceInput schema")
+	}
+	const absent = "(absent)"
+	for _, kind := range []string{"string", "integer", "boolean", "mapping", "secret"} {
+		for _, version := range []int64{0, 1} {
+			for _, enc := range []any{absent, nil, "", "base64", "hex"} {
+				v := map[string]any{"kind": kind, "version": json.Number(fmt.Sprint(version))}
+				r := ingest.Reference{Kind: provider.Kind(kind), Version: version}
+				if enc != absent {
+					v["encoding"] = enc
+					r.Encoding, _ = enc.(string)
+				}
+				_, err := ingest.Stored("a: !bwref ref\n", ingest.Declarations{References: map[string]ingest.Reference{"ref": r}})
+				if described := len(validate(doc, s, v, "v")) == 0; described != (err == nil) {
+					t.Errorf("kind %s, version %d, encoding %v: the description admits it %t, the server %t", kind, version, enc, described, err == nil)
+				}
+			}
+		}
+	}
 }
 
 // checkResponse's negative controls: each kind of mismatch, made on a real exchange shape, is
@@ -641,6 +801,41 @@ func TestExchangeErrorsReportEachMismatch(t *testing.T) {
 	} {
 		errs := exchangeErrors(doc, post(tc.req), tc.req, tc.rec)
 		if !slices.ContainsFunc(errs, func(e string) bool { return strings.Contains(e, tc.want) }) {
+			t.Errorf("%s: got %q, want an error containing %q", tc.name, errs, tc.want)
+		}
+	}
+	// A request's query and headers: HEAD is answered as its GET, without a body.
+	req := func(method, target string, headers ...string) *http.Request {
+		r := httptest.NewRequest(method, prefix+target, nil)
+		for i := 0; i+1 < len(headers); i += 2 {
+			r.Header.Set(headers[i], headers[i+1])
+		}
+		return r
+	}
+	page := `{"items":[` + cluster + `],"next":"c"}`
+	for _, tc := range []struct {
+		name string
+		r    *http.Request
+		rec  *httptest.ResponseRecorder
+		want string // "" when the exchange is described
+	}{
+		{"a HEAD answered as its GET", req(http.MethodHead, "/clusters/cl_x"), answer(200, "application/json", ""), ""},
+		{"a page with its query", req(http.MethodGet, "/clusters?limit=5&cursor=c"), answer(200, "application/json", page), ""},
+		{"a query parameter not described", req(http.MethodGet, "/clusters?state=open"), answer(200, "application/json", page),
+			"query parameter state is not described"},
+		{"a query value the schema refuses", req(http.MethodGet, "/clusters?limit=0"), answer(200, "application/json", page), "query limit"},
+		{"a header value the schema refuses", req(http.MethodPost, "/clusters", "Idempotency-Key", "short"),
+			answer(201, "application/json", cluster), "header Idempotency-Key"},
+	} {
+		body := ""
+		if tc.r.Method == http.MethodPost {
+			body = input
+		}
+		errs := exchangeErrors(doc, tc.r, body, tc.rec)
+		switch {
+		case tc.want == "" && len(errs) != 0:
+			t.Errorf("%s: refused: %q", tc.name, errs)
+		case tc.want != "" && !slices.ContainsFunc(errs, func(e string) bool { return strings.Contains(e, tc.want) }):
 			t.Errorf("%s: got %q, want an error containing %q", tc.name, errs, tc.want)
 		}
 	}

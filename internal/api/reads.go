@@ -199,7 +199,7 @@ var (
 	// listMachines takes the filter cluster (§9.2).
 	listMachines = readFunc(func(a *API, w http.ResponseWriter, q *request) {
 		readIn(a, w, q, func(ctx context.Context, tx *sql.Tx) (string, any, error) {
-			limit, after, ref := page(q, id.Machine, "cluster")
+			limit, after, ref := page(q, id.Machine)
 			if ref != nil {
 				return "", nil, ref
 			}
