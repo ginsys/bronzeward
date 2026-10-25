@@ -1,8 +1,8 @@
 # Operator experience: web wireframes
 
-**Status: proposed, not accepted for implementation** (see the
-proposal's status). Low-fidelity wireframes for the web journeys in the
-[operator experience proposal](operator-experience.md). They fix content, order and which
+**Status: accepted for implementation** with the
+[operator experience journeys](operator-experience.md) (see their status). Low-fidelity
+wireframes for the web journeys in that document. They fix content, order and which
 action is available to which role. They do not fix layout, styling, framework or wording beyond
 the labels that carry meaning. All data is synthetic; identifiers are shortened as `mch_tqhc…35uq`.
 Other people appear by readable names (`ops-ben`), which depend on
