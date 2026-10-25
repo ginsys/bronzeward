@@ -51,7 +51,7 @@ func lookup(ctx context.Context, db querier, q *request, exclusive bool) (*recor
 	}
 	if !rid.Valid {
 		if q.expected != "" && q.expected != q.epoch {
-			return nil, refuse(http.StatusPreconditionFailed, "epoch-mismatch", "the expected epoch is not the current one; nothing was committed").
+			return nil, refuse(http.StatusPreconditionFailed, "epoch-mismatch", "the expected epoch is not the current one; "+notCommitted).
 				with("epoch", q.epoch)
 		}
 		return nil, nil
