@@ -135,7 +135,7 @@ func pageSeq(q *request) (limit int, after string, ref *refusal) {
 // the route's (routes()), the ones the description lists.
 func pageBy(q *request, valid func(last string) bool) (limit int, after string, ref *refusal) {
 	if !slices.Contains(q.route.query, "limit") {
-		return 0, "", refuse(http.StatusInternalServerError, "internal-error", "")
+		return 0, "", refuse(http.StatusInternalServerError, "internal-error", "the route lists no page parameters")
 	}
 	vals, err := url.ParseQuery(q.r.URL.RawQuery)
 	if err != nil {
