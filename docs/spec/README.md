@@ -1,6 +1,6 @@
 # PoC specification
 
-This directory holds the detailed PoC contracts produced during [02 - PoC specification](https://github.com/ginsys/bronzeward/milestone/2), and the accepted operator-experience specification and client contracts for [04 - Operator experience](https://github.com/ginsys/bronzeward/milestone/4), which are not PoC contracts. This index contains no implementation contracts and does not establish specification approval or implementation readiness.
+This directory holds the detailed PoC contracts produced during [02 - PoC specification](https://github.com/ginsys/bronzeward/milestone/2), and the accepted operator-experience specification and client contracts for [04 - Operator experience](https://github.com/ginsys/bronzeward/milestone/4), which are not PoC contracts. This index itself contains no implementation contracts and does not establish specification approval or implementation readiness; each document's status line and its work item record that.
 
 | Contract artifact | Work item |
 | --- | --- |
