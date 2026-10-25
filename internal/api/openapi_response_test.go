@@ -825,6 +825,9 @@ func TestExchangeErrorsReportEachMismatch(t *testing.T) {
 		{"a query parameter not described", req(http.MethodGet, "/clusters?state=open"), answer(200, "application/json", page),
 			"query parameter state is not described"},
 		{"a query value the schema refuses", req(http.MethodGet, "/clusters?limit=0"), answer(200, "application/json", page), "query limit"},
+		// An empty filter does not filter (persistence and API §9.2); an empty class is refused.
+		{"an empty filter", req(http.MethodGet, "/plans?state="), answer(200, "application/json", `{"items":[]}`), ""},
+		{"an empty class", req(http.MethodGet, "/dependencies?class="), answer(200, "application/json", `{"items":[]}`), "query class"},
 		{"a header value the schema refuses", req(http.MethodPost, "/clusters", "Idempotency-Key", "short"),
 			answer(201, "application/json", cluster), "header Idempotency-Key"},
 	} {

@@ -930,7 +930,7 @@ paths:
         in: query
         schema:
           type: string
-          enum: [held, paused, resumed, released, abandoned]
+          enum: [held, paused, resumed, released, abandoned, '']
       - name: machine
         in: query
         description: A draft update's claim names no machine, so a machine filter never lists it.
@@ -1452,9 +1452,10 @@ paths:
           - rejected
           - cancelled
           - unresolved
+          - ''
       - name: kind
         in: query
-        schema: {type: string, enum: [publish, ingest, apply-config, adopt]}
+        schema: {type: string, enum: [publish, ingest, apply-config, adopt, '']}
       responses:
         '200':
           description: OK.
@@ -1651,7 +1652,7 @@ paths:
         in: query
         schema:
           type: string
-          enum: [proposed, approved, committed, revoked, cancelled, expired]
+          enum: [proposed, approved, committed, revoked, cancelled, expired, '']
       - name: machine
         in: query
         schema: {type: string}
