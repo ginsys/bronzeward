@@ -16,12 +16,15 @@ import (
 )
 
 // wantEpochMismatch checks §9.4's 412 epoch-mismatch: it names the current epoch, in the body and
-// in Bronzeward-Epoch.
+// in Bronzeward-Epoch, and claims only its own transaction committed nothing.
 func wantEpochMismatch(t *testing.T, rec *httptest.ResponseRecorder, current string) {
 	t.Helper()
 	doc := wantProblem(t, rec, http.StatusPreconditionFailed, "epoch-mismatch")
 	if doc["epoch"] != current || rec.Header().Get("Bronzeward-Epoch") != current {
 		t.Fatalf("epoch %v, header %q; want %s", doc["epoch"], rec.Header().Get("Bronzeward-Epoch"), current)
+	}
+	if want := "the expected epoch is not the current one; nothing of the request's own transaction was committed"; doc["detail"] != want {
+		t.Fatalf("detail %q, want %q", doc["detail"], want)
 	}
 }
 
