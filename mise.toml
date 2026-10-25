@@ -69,8 +69,31 @@ base=$(git merge-base origin/main HEAD) || { echo "commit-lint: no merge-base wi
 scripts/ci/commit-lint.sh "$base" HEAD
 """
 
+[vars]
+# The pinned generator of internal/client/apitypes (decision T1 of ginsys/bronzeward#254). `go run`
+# at a version keeps it, and its own dependencies, out of go.mod.
+oapi_codegen = "go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.8.1 -config internal/client/apitypes/oapi-codegen.yaml"
+
+[tasks.generate]
+description = "Regenerate internal/client/apitypes/apitypes.gen.go from api/openapi.yaml with the pinned oapi-codegen"
+run = "{{vars.oapi_codegen}} -o internal/client/apitypes/apitypes.gen.go api/openapi.yaml"
+
+[tasks."generate:check"]
+description = "Fail when internal/client/apitypes/apitypes.gen.go differs from what mise run generate writes"
+run = """
+out=$(mktemp)
+trap 'rm -f "$out"' EXIT
+{{vars.oapi_codegen}} -o "$out" api/openapi.yaml
+diff -u internal/client/apitypes/apitypes.gen.go "$out" || {
+  echo "generate:check: internal/client/apitypes/apitypes.gen.go is stale; run mise run generate" >&2
+  exit 1
+}
+"""
+
 [tasks.go]
-description = "Build, vet, format-check and test the root module and the Phase-0 experiment modules"
+description = "Check the generated API types, then build, vet, format-check and test the root module and the Phase-0 experiment modules"
+# generate:check runs first, so CI's go job, which runs this task, fails on a stale generated file.
+depends = ["generate:check"]
 # The root module (cmd/, internal/, fixtures/oidc) comes first. Its go.mod ignores ./site, which the
 # site task rebuilds in parallel under `mise run verify`, and carries `ignore ./experiments`, so
 # the root `./...` never sweeps disposable evidence code into the implementation: the nested

@@ -96,7 +96,8 @@ Write documentation for GitHub, as before; the site needs no edits of its own:
 The implementation is the root Go module (`cmd/`, `internal/`); the Go version comes from `mise.toml`. Its `go.mod` ignores `experiments/`, whose modules are Phase-0 evidence and are checked separately, and the generated `site/`, which `mise run verify` rebuilds while the Go checks run. From the repository root:
 
 ```sh
-mise run go                                        # format, go.mod tidiness, build, vet and test checks (per module, as mise.toml lists them); database tests skip
+mise run go                                        # the generated-types check, then format, go.mod tidiness, build, vet and test checks (per module, as mise.toml lists them); database tests skip
+mise run generate                                  # regenerate internal/client/apitypes from api/openapi.yaml with the pinned oapi-codegen; commit the result with the description change
 mise run dev-db                                    # a disposable development PostgreSQL on 127.0.0.1:55433
 mise run dev-bao                                   # a disposable dev-mode OpenBao on http://127.0.0.1:58201, root token bw-dev-root-token
 mise run dev-down                                  # stop dev-db, dev-bao and dev-idp, which removes them and their data (shared by every worktree on the host)
