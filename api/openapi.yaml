@@ -3472,7 +3472,10 @@ components:
       properties:
         kind: {type: string, enum: [string, integer, boolean, mapping]}
         version: {type: integer}
-        encoding: {type: [string, 'null'], enum: [base64, null]}
+        encoding:
+          description: 'Empty, like null or absent, means no encoding (internal/ingest/declare.go:70).'
+          type: [string, 'null']
+          enum: [base64, '', null]
       additionalProperties: false
     ReleaseBody:
       type: object
