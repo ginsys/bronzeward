@@ -64,7 +64,7 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// fixture is one disposable server with a viewer automation token, and the CLI's own
+// fixture is one disposable server with an automation token holding roles, and the CLI's own
 // configuration directory.
 type fixture struct {
 	t                                 *testing.T
@@ -73,7 +73,7 @@ type fixture struct {
 
 var tokenPattern = regexp.MustCompile(`bwt_\S+`)
 
-func start(t *testing.T) *fixture {
+func start(t *testing.T, roles string) *fixture {
 	t.Helper()
 	_, dsn := dbtest.New(t)
 	f := &fixture{t: t, bin: binaries(t), home: t.TempDir()}
@@ -91,7 +91,7 @@ func start(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	f.server("migrate", "-config", cfg)
-	f.token = tokenPattern.FindString(f.server("token", "issue", "-config", cfg, "-name", "ci", "-roles", "viewer",
+	f.token = tokenPattern.FindString(f.server("token", "issue", "-config", cfg, "-name", "ci", "-roles", roles,
 		"-responsible", "h-all", "-operator", "h-operator"))
 	if f.token == "" {
 		t.Fatal("token issue printed no token")
@@ -142,11 +142,20 @@ type result struct {
 }
 
 // ctl runs bronzewardctl with a clean environment plus env, and scans its argv, standard output
-// and standard error for the token (§11.5 item 1).
+// and standard error for the fixture's token and any token given on standard input (§11.5
+// item 1).
 func (f *fixture) ctl(env []string, stdin string, args ...string) result {
 	f.t.Helper()
-	cmd := exec.Command(filepath.Join(f.bin, "bronzewardctl"), args...)
-	cmd.Env = append([]string{"HOME=" + f.home, "XDG_CONFIG_HOME=" + f.home, "PATH=" + os.Getenv("PATH")}, env...)
+	r := f.exec(env, stdin, args...)
+	for _, where := range r.leaked(f.token, stdin, args) {
+		f.t.Errorf("bronzewardctl %v: %s holds a token", args, where)
+	}
+	return r
+}
+
+func (f *fixture) exec(env []string, stdin string, args ...string) result {
+	f.t.Helper()
+	cmd := f.command(env, args...)
 	cmd.Stdin = strings.NewReader(stdin)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
@@ -158,12 +167,28 @@ func (f *fixture) ctl(env []string, stdin string, args ...string) result {
 		f.t.Fatal(err)
 	}
 	r.out, r.err = out.String(), errb.String()
-	for where, s := range map[string]string{"argv": strings.Join(args, " "), "stdout": r.out, "stderr": r.err} {
-		if leaks(s, f.token) {
-			f.t.Errorf("bronzewardctl %v: %s holds the token", args, where)
+	return r
+}
+
+// command is bronzewardctl with a clean environment plus env and the fixture's home.
+func (f *fixture) command(env []string, args ...string) *exec.Cmd {
+	cmd := exec.Command(filepath.Join(f.bin, "bronzewardctl"), args...)
+	cmd.Env = append([]string{"HOME=" + f.home, "XDG_CONFIG_HOME=" + f.home, "PATH=" + os.Getenv("PATH")}, env...)
+	return cmd
+}
+
+// leaked names the captures (argv, stdout, stderr) that hold token or a token in stdin.
+func (r result) leaked(token, stdin string, args []string) []string {
+	var where []string
+	for _, w := range []struct{ name, s string }{{"argv", strings.Join(args, " ")}, {"stdout", r.out}, {"stderr", r.err}} {
+		for _, tok := range append(tokenPattern.FindAllString(stdin, -1), token) {
+			if leaks(w.s, tok) {
+				where = append(where, w.name)
+				break
+			}
 		}
 	}
-	return r
+	return where
 }
 
 // want fails unless r exited with code and its output holds every part.
@@ -228,14 +253,15 @@ func (f *fixture) do(q *http.Request, status int) []byte {
 }
 
 // injector is a TLS proxy to the server. hook may answer a request itself; edit may change a
-// proxied answer. seen lists the requests it received.
+// proxied answer. seen lists the requests it received since the last set; writes lists every
+// request it ever received that was not a GET.
 type injector struct {
 	*httptest.Server
-	mu   sync.Mutex
-	hook func(http.ResponseWriter, *http.Request) bool
-	edit func(*http.Response)
-	seen []string
-	ca   string
+	mu           sync.Mutex
+	hook         func(http.ResponseWriter, *http.Request) bool
+	edit         func(*http.Response)
+	seen, writes []string
+	ca           string
 }
 
 func newInjector(t *testing.T, target string) *injector {
@@ -254,13 +280,21 @@ func newInjector(t *testing.T, target string) *injector {
 	in.Server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		in.mu.Lock()
 		in.seen = append(in.seen, r.Method+" "+r.URL.Path)
+		if r.Method != http.MethodGet {
+			in.writes = append(in.writes, r.Method+" "+r.URL.Path)
+		}
 		hook := in.hook
 		in.mu.Unlock()
 		if hook == nil || !hook(w, r) {
 			rp.ServeHTTP(w, r)
 		}
 	}))
-	t.Cleanup(in.Close)
+	t.Cleanup(func() {
+		in.Close()
+		if len(in.writes) > 0 {
+			t.Errorf("read commands sent %v", in.writes)
+		}
+	})
 	in.ca = filepath.Join(t.TempDir(), "ca.pem")
 	if err := os.WriteFile(in.ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: in.Certificate().Raw}), 0o600); err != nil {
 		t.Fatal(err)
@@ -349,7 +383,7 @@ var sharedCases = map[string]func(*testing.T, *fixture, *injector){
 }
 
 func TestSharedCases(t *testing.T) {
-	f := start(t)
+	f := start(t, "viewer")
 	in := newInjector(t, f.base)
 	b, err := os.ReadFile("testdata/cases.yaml")
 	if err != nil {

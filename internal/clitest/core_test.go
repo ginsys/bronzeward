@@ -2,20 +2,27 @@ package clitest
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"syscall"
 	"testing"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/ginsys/bronzeward/internal/client"
 )
 
 // TestContextsTokensAndOutput covers context selection, automation token input, the output
 // formats and the read-only and no-leak properties of every read command.
 func TestContextsTokensAndOutput(t *testing.T) {
-	f := start(t)
+	f := start(t, "viewer")
 	f.want(f.ctl(nil, "", "context", "list"), 0, "CURRENT  NAME")
 	f.want(f.ctl(nil, "", "whoami"), 1, "no context selected")
 	f.want(f.ctl(nil, "", "context", "add", "remote", "--server", "http://bronzeward.example.invalid"), 2, "must be https")
@@ -62,9 +69,54 @@ func TestContextsTokensAndOutput(t *testing.T) {
 	id, _, _ := strings.Cut(f.token, ".")
 	f.want(f.ctl(nil, id+".BWSYNTH-wrong\n", "whoami", "--token-stdin"), 1, "401", "The automation token was not accepted",
 		"other ("+f.base+")", "instance")
+	f.want(f.ctl(nil, id+".BWSYNTH-wrong\n", "version", "--token-stdin"), 1, "Server  unknown", "401")
+	fifo := filepath.Join(f.home, "fifo-token")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.want(f.ctl(nil, "", "whoami", "--token-file", fifo), 1, "not a regular file")
+
+	// The leak scan's positive control through the capture path: a planted token, from the
+	// fixture and from standard input, that the CLI echoes in an error.
+	for _, plant := range []struct{ stdin, arg string }{{"", f.token}, {"bwt_p.BWSYNTH-planted\n", "BWSYNTH-planted"}} {
+		args := []string{"context", "use", plant.arg}
+		if got := f.exec(nil, plant.stdin, args...).leaked(f.token, plant.stdin, args); !slices.Equal(got, []string{"argv", "stderr"}) {
+			t.Errorf("planted %q found in %v, want argv and stderr", plant.arg, got)
+		}
+	}
+	full, err := os.OpenFile("/dev/full", os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer full.Close()
+	use := f.command(nil, "context", "use", "other")
+	use.Stdout = full
+	if err := use.Run(); err == nil {
+		t.Error("context use reported success when its output could not be written")
+	}
 
 	f.want(f.ctl(nil, "", "context", "remove", "other"), 0, `Context "other" removed. No context is current now.`)
 	f.want(f.ctl(nil, "", "context", "list", "-o", "json"), 0, `"name":"lab"`, `"lastEpoch":"`)
+
+	// Concurrent context changes all survive.
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Go(func() { f.want(f.ctl(nil, "", "context", "add", fmt.Sprint("c", i), "--server", f.base), 0) })
+	}
+	wg.Wait()
+	var contexts client.Config
+	r = f.ctl(nil, "", "context", "list", "-o", "json")
+	if json.Unmarshal([]byte(r.out), &contexts); len(contexts.Contexts) != 9 {
+		t.Errorf("after 8 concurrent adds: %s", r.out)
+	}
+
+	// A context edited by hand to plain http to a remote host is refused before the token is read.
+	contexts.Contexts = append(contexts.Contexts, client.Context{Name: "plain", Server: "http://bronzeward.example.invalid", Credential: "automation"})
+	b, _ := yaml.Marshal(contexts)
+	if err := os.WriteFile(filepath.Join(f.home, "bronzeward", "config.yaml"), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.want(f.ctl(nil, "", "--context", "plain", "whoami", "--token-file", f.tokenFile), 1, "plain (http://bronzeward.example.invalid)", "must be https")
 	if after := f.acts(); after != before {
 		t.Errorf("acts changed around the read commands:\nbefore %s\nafter  %s", before, after)
 	}
@@ -75,29 +127,76 @@ func TestContextsTokensAndOutput(t *testing.T) {
 }
 
 // TestRequestCore covers the answers every read meets: epochs, the recovery banner, a missing
-// epoch, the 503 read retry, the pre-entry start mode, an unknown problem code and an
-// unreachable server.
+// epoch, a redirect, the 503 read retry, the pre-entry start mode, an unknown problem code and an
+// unreachable server. Its token may write, so the unchanged acts and the injector's GET-only
+// record show the reads send no write.
 func TestRequestCore(t *testing.T) {
-	f := start(t)
+	f := start(t, "viewer,author,publisher")
 	in := newInjector(t, f.base)
+	in.set(func(w http.ResponseWriter, r *http.Request) bool {
+		if r.URL.Path == "/livez" {
+			http.Redirect(w, r, "https://bronzeward.example.invalid/livez", http.StatusFound)
+			return true
+		}
+		return false
+	}, nil)
+	f.want(f.ctl(nil, "", "context", "add", "moved", "--server", in.URL, "--certificate-authority", in.ca), 1,
+		`302 Found redirecting to "https://bronzeward.example.invalid/livez"`)
+	in.set(nil, nil)
 	f.want(f.ctl(nil, "", "context", "add", "lab", "--server", in.URL, "--certificate-authority", in.ca,
 		"--automation-token-file", f.tokenFile), 0)
+	before := f.acts()
 	notice := "The installation entered recovery mode or was restored"
 	if r := f.ctl(nil, "", "whoami"); r.code != 0 || strings.Contains(r.err, notice) {
 		t.Errorf("first epoch: exit %d, stderr %s; want 0 and no notice", r.code, r.err)
 	}
 
+	// A recovery entry seen first on /identity: the client reads /server again, and the banner
+	// shows the start mode that read served.
+	var entered atomic.Bool
 	in.set(nil, func(r *http.Response) {
 		if on("/identity")(r.Request) {
+			entered.Store(true)
+		}
+		if entered.Load() {
 			r.Header.Set("Bronzeward-Epoch", "ep_BWSYNTH-other")
 			r.Header.Set("Bronzeward-Recovery-Mode", "true")
+			if on("/server")(r.Request) {
+				rewrite(r, `"startMode":"normal"`, `"startMode":"recovery"`)
+			}
 		}
 	})
 	r := f.ctl(nil, "", "whoami")
-	f.want(r, 0, "lab ("+in.URL+"): "+notice, "RECOVERY MODE is on in lab ("+in.URL+") (start mode: normal)")
-	cfg, _ := os.ReadFile(filepath.Join(f.home, "bronzeward", "config.yaml"))
+	f.want(r, 0, "lab ("+in.URL+"): "+notice, "RECOVERY MODE is on in lab ("+in.URL+") (start mode: recovery)")
+	if n := strings.Count(strings.Join(in.requests(), "\n"), "/api/v1/server"); n != 2 {
+		t.Errorf("GET /server sent %d times, want 2: %v", n, in.requests())
+	}
+	config := filepath.Join(f.home, "bronzeward")
+	cfg, _ := os.ReadFile(filepath.Join(config, "config.yaml"))
 	if !strings.Contains(string(cfg), "lastEpoch: ep_BWSYNTH-other") {
 		t.Errorf("the new epoch was not kept:\n%s", cfg)
+	}
+
+	// A new epoch that cannot be kept fails the command, naming the context.
+	in.set(nil, func(r *http.Response) { r.Header.Set("Bronzeward-Epoch", "ep_BWSYNTH-third") })
+	os.Chmod(config, 0o500)
+	f.want(f.ctl(nil, "", "whoami"), 1, "lab ("+in.URL+"): keeping the epoch and start mode")
+	os.Chmod(config, 0o700)
+
+	// A redirect whose body is cut short is reported, not resent.
+	in.set(func(w http.ResponseWriter, r *http.Request) bool {
+		if !on("/identity")(r) {
+			return false
+		}
+		w.Header().Set("Location", "https://bronzeward.example.invalid/")
+		w.Header().Set("Content-Length", "100")
+		w.WriteHeader(http.StatusTemporaryRedirect)
+		w.Write([]byte("short"))
+		return true
+	}, nil)
+	f.want(f.ctl(nil, "", "whoami"), 1, "follows no redirect")
+	if n := strings.Count(strings.Join(in.requests(), "\n"), "/api/v1/identity"); n != 1 {
+		t.Errorf("the identity read was sent %d times", n)
 	}
 
 	in.set(nil, func(r *http.Response) {
@@ -116,7 +215,7 @@ func TestRequestCore(t *testing.T) {
 		problem(w, http.StatusServiceUnavailable, "dependency-unavailable", "")
 		return true
 	}, nil)
-	f.want(f.ctl(nil, "", "whoami"), 0, "503 Injected dependency-unavailable", "try 2 of 5 in 1s", "try 3 of 5 in 2s", "Roles      viewer")
+	f.want(f.ctl(nil, "", "whoami"), 0, "503 Injected dependency-unavailable", "try 2 of 5 in 1s", "try 3 of 5 in 2s", "Identity   ci")
 
 	in.set(func(w http.ResponseWriter, r *http.Request) bool {
 		if !on("/identity")(r) {
@@ -136,10 +235,14 @@ func TestRequestCore(t *testing.T) {
 		}
 		return false
 	}, nil)
-	f.want(f.ctl(nil, "", "version"), 0, "Server  unknown")
-	cfg, _ = os.ReadFile(filepath.Join(f.home, "bronzeward", "config.yaml"))
+	f.want(f.ctl(nil, "", "version"), 1, "Server  unknown", "409 Injected recovery-mode-active")
+	cfg, _ = os.ReadFile(filepath.Join(config, "config.yaml"))
 	if !strings.Contains(string(cfg), "startMode: recovery") {
 		t.Errorf("the pre-entry refusal did not record a recovery start:\n%s", cfg)
+	}
+	f.want(f.ctl(nil, "", "whoami"), 1, "recovery-mode-active")
+	if slices.Contains(in.requests(), "GET /api/v1/identity") {
+		t.Error("the identity read was sent before the recovery entry")
 	}
 
 	in.set(func(w http.ResponseWriter, r *http.Request) bool {
@@ -150,6 +253,9 @@ func TestRequestCore(t *testing.T) {
 		return true
 	}, nil)
 	f.want(f.ctl(nil, "", "whoami"), 1, "418 Injected BWSYNTH-unknown: an unknown code (instance req_injected)")
+	if after := f.acts(); after != before {
+		t.Errorf("acts changed around the read commands:\nbefore %s\nafter  %s", before, after)
+	}
 
 	in.Close()
 	f.want(f.ctl(nil, "", "whoami"), 1, "lab ("+in.URL+")", "try 5 of 5 in 8s", "connection refused")

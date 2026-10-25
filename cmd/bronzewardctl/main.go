@@ -117,11 +117,15 @@ func (e *env) open() (*client.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	var verbose io.Writer
+	return client.Open(x, client.TokenInput{File: e.tokenFile, Stdin: e.tokenStdin}, e.err, e.verboseOut())
+}
+
+// verboseOut is where -v output goes: standard error, or nowhere.
+func (e *env) verboseOut() io.Writer {
 	if e.verbose {
-		verbose = e.err
+		return e.err
 	}
-	return client.Open(x, client.TokenInput{File: e.tokenFile, Stdin: e.tokenStdin}, e.err, verbose)
+	return nil
 }
 
 // clientVersion is the module version the build information records.
