@@ -299,6 +299,39 @@ describe("stale-response discard", () => {
     expect(onRevoked).not.toHaveBeenCalled();
   });
 
+  test("a late response under the old epoch does not roll the epoch back", async () => {
+    const { fetchImpl: slow, release } = delayed(ok({ stale: true }, "e1"));
+    const answers = [ok({}), null, ok({}, "e2"), ok({ fresh: true }, "e2")];
+    const onEpochChange = vi.fn();
+    const c = new Client({
+      onEpochChange,
+      fetch: (async (...args: Parameters<typeof fetch>) => {
+        const next = answers.shift();
+        return next === null ? slow(...args) : next!;
+      }) as typeof fetch,
+    });
+    await c.read("/machines"); // e1 recorded
+    const pending = c.read("/machines"); // in flight under e1
+    expect(await c.read("/plans")).toEqual({ kind: "discarded" }); // reveals e2
+    release();
+    expect(await pending).toEqual({ kind: "discarded" });
+    expect(c.currentEpoch).toBe("e2");
+    expect(onEpochChange).toHaveBeenCalledTimes(1);
+    expect(await c.read("/plans")).toEqual({ kind: "ok", data: { fresh: true } });
+  });
+
+  test("a failed renewal that ends after the view changed is discarded, not shown", async () => {
+    let c!: Client;
+    const renew = vi.fn(async () => {
+      c.setView({ ...base, principal: "p2" });
+      return false;
+    });
+    c = new Client({ fetch: (async () => problem(401, "unauthenticated", {}, null)) as unknown as typeof fetch, renew });
+    c.setView(base);
+    expect(await c.read("/machines")).toEqual({ kind: "discarded" });
+    expect(renew).toHaveBeenCalledTimes(1);
+  });
+
   test("a body cut off by the network is a transport failure; one that is not JSON is a defect", async () => {
     const cut = new Response(new ReadableStream({ pull: (ctl) => ctl.error(new TypeError("network error")) }), {
       status: 200, headers: { "Bronzeward-Epoch": EPOCH },
