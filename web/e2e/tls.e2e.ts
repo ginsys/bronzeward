@@ -52,9 +52,9 @@ describe("an API redirect to another origin", () => {
       caches: "caches" in self ? await caches.keys() : ["unreadable"],
     }));
     expect(storage).toEqual({ local: [], session: [], indexedDB: [], caches: [] });
-    // The version tells the two Firefoxes apart.
+    // The worker ID, one per capability, tells the two Firefoxes apart; the version alone may not.
     const { browserName, browserVersion } = browser.capabilities;
-    const name = `${browserName}-${browserVersion}-${this.currentTest?.title.slice(0, 20).replace(/\W+/g, "-")}`;
+    const name = `${browserName}-${browserVersion}-${process.env["WDIO_WORKER_ID"]}-${this.currentTest?.title.slice(0, 20).replace(/\W+/g, "-")}`;
     await browser.saveScreenshot(`e2e/out/${name}.png`);
   });
 });
