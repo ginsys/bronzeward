@@ -31,6 +31,7 @@ type idp struct {
 	t                                     *testing.T
 	issuer, project, cli, web, webOrigin  string
 	password, login                       string            // the humans' password; the login client's token
+	deviceLifetime                        string            // the device code's configured lifetime, in seconds
 	users                                 map[string]string // human -> Zitadel user ID
 	authorize, token, revoke, end, device string            // endpoints from discovery
 	userinfo                              string
@@ -48,7 +49,7 @@ func newIDP(t *testing.T) *idp {
 		t.Skip("no test identity provider: BW_TEST_IDP_ISSUER is unset (mise run dev-idp, then mise run go-idp)")
 	}
 	for v, dst := range map[string]*string{"PROJECT": &p.project, "CLI_CLIENT": &p.cli, "WEB_CLIENT": &p.web,
-		"WEB_ORIGIN": &p.webOrigin, "PASSWORD": &p.password} {
+		"WEB_ORIGIN": &p.webOrigin, "PASSWORD": &p.password, "DEVICE_LIFETIME": &p.deviceLifetime} {
 		if *dst = os.Getenv("BW_TEST_IDP_" + v); *dst == "" {
 			t.Fatalf("BW_TEST_IDP_ISSUER is set but BW_TEST_IDP_%s is not", v)
 		}
@@ -489,8 +490,8 @@ func TestIdentityProviderDevice(t *testing.T) {
 		p := parent.with(t)
 		start := time.Now()
 		dc, _, exp, iv := p.startDevice()
-		if exp <= 0 || exp > 300 {
-			t.Fatalf("expires_in %d; want at most 300", exp)
+		if fmt.Sprint(exp) != p.deviceLifetime {
+			t.Fatalf("expires_in %d; want the configured %s", exp, p.deviceLifetime)
 		}
 		tk := p.poll(dc, iv, start.Add(time.Duration(exp+2*iv)*time.Second))
 		if tk.Error != "expired_token" || time.Since(start) < time.Duration(exp)*time.Second {
