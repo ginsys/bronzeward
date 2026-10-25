@@ -1,0 +1,12 @@
+overlay: 1.0.0
+info:
+  title: Generation-only changes to api/openapi.yaml for internal/client/apitypes
+  version: 1.0.0
+# The overlay library reads filter expressions per RFC 9535 only with this extension.
+x-speakeasy-jsonpath: rfc9535
+actions:
+  # A nullable enumeration lists null among its values. oapi-codegen turns that value into a
+  # constant "<nil>", which Valid() accepts and the server refuses. Without it the member is still
+  # a pointer, from its type array, so null stays representable as nil.
+  - target: $..enum[?(@ == null)]
+    remove: true

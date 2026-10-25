@@ -9,8 +9,8 @@ import (
 )
 
 // The client's packages, whose dependency closure must hold none of the server's packages
-// (decision T2 of the client's ticket): bronzewardctl links only the generated types and the
-// client core, never provider, Talos or database access.
+// listed in forbidden (decision T2 of the client's ticket), so bronzewardctl never links the
+// server's API, database, provider or Talos packages, or the PostgreSQL driver.
 var clientPatterns = []string{
 	"github.com/ginsys/bronzeward/cmd/bronzewardctl/...",
 	"github.com/ginsys/bronzeward/internal/client/...",

@@ -181,15 +181,12 @@ func (e MachineInputPlatform) Valid() bool {
 
 // Defines values for PlanInputMode.
 const (
-	PlanInputModeLessThannil PlanInputMode = "<nil>"
-	PlanInputModeNoReboot    PlanInputMode = "no-reboot"
+	PlanInputModeNoReboot PlanInputMode = "no-reboot"
 )
 
 // Valid indicates whether the value is a known member of the PlanInputMode enum.
 func (e PlanInputMode) Valid() bool {
 	switch e {
-	case PlanInputModeLessThannil:
-		return true
 	case PlanInputModeNoReboot:
 		return true
 	default:
@@ -343,9 +340,8 @@ func (e ReferenceKind) Valid() bool {
 
 // Defines values for ReferenceInput0Encoding.
 const (
-	ReferenceInput0EncodingBase64      ReferenceInput0Encoding = "base64"
-	ReferenceInput0EncodingEmpty       ReferenceInput0Encoding = ""
-	ReferenceInput0EncodingLessThannil ReferenceInput0Encoding = "<nil>"
+	ReferenceInput0EncodingBase64 ReferenceInput0Encoding = "base64"
+	ReferenceInput0EncodingEmpty  ReferenceInput0Encoding = ""
 )
 
 // Valid indicates whether the value is a known member of the ReferenceInput0Encoding enum.
@@ -354,8 +350,6 @@ func (e ReferenceInput0Encoding) Valid() bool {
 	case ReferenceInput0EncodingBase64:
 		return true
 	case ReferenceInput0EncodingEmpty:
-		return true
-	case ReferenceInput0EncodingLessThannil:
 		return true
 	default:
 		return false
@@ -379,16 +373,13 @@ func (e ReferenceInput0Kind) Valid() bool {
 
 // Defines values for ReferenceInput1Encoding.
 const (
-	ReferenceInput1EncodingEmpty       ReferenceInput1Encoding = ""
-	ReferenceInput1EncodingLessThannil ReferenceInput1Encoding = "<nil>"
+	ReferenceInput1EncodingEmpty ReferenceInput1Encoding = ""
 )
 
 // Valid indicates whether the value is a known member of the ReferenceInput1Encoding enum.
 func (e ReferenceInput1Encoding) Valid() bool {
 	switch e {
 	case ReferenceInput1EncodingEmpty:
-		return true
-	case ReferenceInput1EncodingLessThannil:
 		return true
 	default:
 		return false
