@@ -1320,13 +1320,17 @@ state: an entry that committed before that lookup read is seen, and one that
 has not waits for the request's transaction to end. Only an entry changes the epoch,
 and it abandons every earlier epoch's staging claim (§12.2), so on a draft
 entry route this refusal records nothing. Clients send the header on every
-write except the recovery entry (client contracts §8.4).
+write except the recovery entry (client contracts §8.4). Wherever this document,
+the table below included, says that a request whose key has no record executes,
+ingests afresh or is answered by a staging claim, that holds only when its
+`Bronzeward-Expected-Epoch` is absent or names the current epoch; otherwise a
+lookup refuses it `412 epoch-mismatch`.
 
 The draft entry routes are also the one exception to "a refusal commits no
 record", because their ingestion persists a staging claim before T1 that a
 refusal does not undo. Their claim records the principal and the idempotency
 key. A `4xx` refusal after the claim exists (compilation's `422`, or T1's
-`412` or `409`) commits the
+`412 precondition-failed` or `409`) commits the
 idempotency record with the refusal's response, and the act of §10.5 naming
 the refused request, in the transaction that records the claim's outcome: the
 claim and its provider generations persist, so the audit records who caused
