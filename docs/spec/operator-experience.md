@@ -24,7 +24,8 @@ revision `e1c8cb3`). The expected-epoch check that
 [#293](https://github.com/ginsys/bronzeward/issues/293) added did not exist there, so the
 citations in [§8](#8-states-every-view-must-handle) are read at the revision that lands
 [#309](https://github.com/ginsys/bronzeward/issues/309), with that check applied. Client behaviour this document proposes is
-marked **Proposed**. A behaviour the API does not support today is listed in
+marked **Proposed**; with the acceptance above, the marker separates accepted client behaviour
+from existing behaviour. A behaviour the API does not support today is listed in
 [§11](#11-api-gap-audit) and is not presented as available.
 
 ## Contents
@@ -445,7 +446,7 @@ A mark is refused with the rule and the mark's position, never its path
 `internal/api/runner.go:384-386`, `internal/api/runner.go:457-468`). Marks are HMAC-keyed in the idempotency
 fingerprint and never stored (`internal/api/marks.go:58-68`).
 
-**Proposed**, as [client contracts §11.3](client-contracts.md#113-cli-review) qualifies it against
+**Proposed**, as qualified by [client contracts §11.3](client-contracts.md#113-cli-review) against
 [compilation §3.6](compilation.md#36-operator-review): the review is shown only on a terminal,
 through an in-process pager with no temporary file and no `$EDITOR`. It is refused when stdout
 is not a terminal, with no override, and it has no `-o json`, `-o yaml`, export or save form: a
@@ -1125,8 +1126,9 @@ on a terminal; `-o json` is stable for scripts and assistive tools.
 ## 14. Proposed refinement of the milestone tickets
 
 This document edits no issue. Each journey stays covered by at least one implementation ticket
-per client and by the validation ticket. #254 and #255 are refined against #253's contracts; the
-other tickets stay in refinement until they are.
+per client and by the validation ticket. #254 and #255 are refined against #253's contracts; any
+other ticket still carrying `status/needs-refinement` is refined the same way before
+implementation.
 
 | Journey (section) | CLI | Web | API/contract | Validation |
 | --- | --- | --- | --- | --- |
@@ -1145,15 +1147,21 @@ Proposed changes: the web inventory ticket (#255) also carries the shared web sh
 banners, state catalogue of [§8](#8-states-every-view-must-handle)); and #253 records, for each
 gap G1-G17, whether it becomes an API issue that natively blocks the client tickets it affects.
 
-**Qualifications left to #253**, besides the gaps:
+**Qualifications this document left to #253**, besides the gaps, and where the
+[client contracts](client-contracts.md) settle them:
 
 - the retry boundary of C5: whether the same-key repeat is offered at all (G13 closed by #293), whether any key
-  or request may survive a client restart, and how an ambiguous outcome is shown after one;
+  or request may survive a client restart, and how an ambiguous outcome is shown after one
+  ([client contracts §8.4](client-contracts.md#84-idempotency-and-ambiguous-responses), D9);
 - the protected review of C4: the mechanism must be shown to keep plaintext out of argv, shell
-  history, logs, editor files and caches, or be replaced;
+  history, logs, editor files and caches
+  ([client contracts §11.2](client-contracts.md#112-rules-for-both-clients),
+  [§11.3](client-contracts.md#113-cli-review));
 - sign-in, renewal, expiry and sign-out behind T1, and the 401, 403 and 503 states of
-  [§8](#8-states-every-view-must-handle);
-- hosting, origin and browser storage rules for the web client (G12).
+  [§8](#8-states-every-view-must-handle) ([client contracts §9](client-contracts.md#9-authentication),
+  [§8.2](client-contracts.md#82-errors));
+- hosting, origin and browser storage rules for the web client (G12)
+  ([client contracts §10](client-contracts.md#10-browser-security), D1).
 
 ## 15. Limits
 

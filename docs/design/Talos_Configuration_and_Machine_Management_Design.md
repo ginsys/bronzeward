@@ -814,9 +814,9 @@ HTTP/1.1 200 OK
 | Approval         | Who approved which exact plan/release/action.                                            |
 | Observation      | Last known Talos/Kubernetes state and digests.                                           |
 
-### 11.3 Operator clients (proposed)
+### 11.3 Operator clients
 
-The PoC exposes this API only; its operators drove it with HTTP requests and shell helpers, which the owner assessed as inadequate ([timeline assessment §4](research/20261020-poc-timeline-assessment.md#4-human-facing-usability)). A `bronzewardctl` command-line client and a web interface over the same API are proposed in the [operator experience specification](../spec/operator-experience.md), with [wireframes](../spec/operator-experience-wireframes.md), for [milestone 04](https://github.com/ginsys/bronzeward/milestone/4). It is proposed, not accepted for implementation, and it changes no decision here: the clients add no route, dispatch nothing themselves, keep publish, plan and approve separate, and leave roles, human-only rules and the credential policy (§13.7) unchanged. Client authentication and API behaviour are to be specified separately in [#253](https://github.com/ginsys/bronzeward/issues/253).
+The PoC exposes this API only; its operators drove it with HTTP requests and shell helpers, which the owner assessed as inadequate ([timeline assessment §4](research/20261020-poc-timeline-assessment.md#4-human-facing-usability)). A `bronzewardctl` command-line client and a web interface over the same API are specified in the [operator experience specification](../spec/operator-experience.md), with [wireframes](../spec/operator-experience-wireframes.md), for [milestone 04](https://github.com/ginsys/bronzeward/milestone/4). The owner accepted it for implementation on 25 October 2026; it changes no decision here: the clients add no route, dispatch nothing themselves, keep publish, plan and approve separate, and leave roles, human-only rules and the credential policy (§13.7) unchanged. Client authentication and API behaviour are specified in the [client contracts](../spec/client-contracts.md) ([#253](https://github.com/ginsys/bronzeward/issues/253)).
 
 ## 12. Reconciliation, rollout and drift
 

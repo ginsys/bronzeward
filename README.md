@@ -11,7 +11,7 @@ Tracking covers a working configuration-control proof of concept using one datab
 1. [01 - Feasibility evidence](https://github.com/ginsys/bronzeward/milestone/1): reproducible experiments and reviewed findings.
 2. [02 - PoC specification](https://github.com/ginsys/bronzeward/milestone/2): profile and policy decisions, detailed contracts and implementation refinement.
 3. [03 - Working configuration-control PoC](https://github.com/ginsys/bronzeward/milestone/3): adoption, publication, approval, safe worker apply, drift handling and interruption/restoration recovery.
-4. [04 - Operator experience](https://github.com/ginsys/bronzeward/milestone/4): a CLI and web UI over the existing API, proposed in the [operator experience specification](docs/spec/operator-experience.md) and not accepted for implementation.
+4. [04 - Operator experience](https://github.com/ginsys/bronzeward/milestone/4): a CLI and web UI over the existing API, specified in the [operator experience specification](docs/spec/operator-experience.md) and the [client contracts](docs/spec/client-contracts.md), and accepted for implementation by the owner on 25 October 2026.
 
 Use the milestones for priorities and completion criteria, and native GitHub dependencies for blocking relationships.
 
