@@ -426,6 +426,8 @@ func preconditions(q *request) *refusal {
 	switch es := h.Values(expectedEpochHeader); {
 	case len(es) > 1:
 		return refuse(http.StatusBadRequest, "invalid-request", expectedEpochHeader+" must be one header")
+	case len(es) == 1 && es[0] == "":
+		return refuse(http.StatusBadRequest, "invalid-request", expectedEpochHeader+" must name an epoch")
 	case len(es) == 1:
 		q.expected = es[0]
 	}
