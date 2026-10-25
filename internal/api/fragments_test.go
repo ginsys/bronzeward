@@ -8,9 +8,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/ginsys/bronzeward/internal/dbtest"
 	"github.com/ginsys/bronzeward/internal/id"
 	"github.com/ginsys/bronzeward/internal/staging"
 )
@@ -586,5 +588,55 @@ func TestFragmentPutEpochTerm(t *testing.T) {
 	var n int
 	if err := ie.db.QueryRow(`SELECT count(*) FROM staging_claim WHERE kind = 'draft-update'`).Scan(&n); err != nil || n != 0 {
 		t.Fatalf("%d draft-update claims, %v; want none", n, err)
+	}
+}
+
+// PA §7.2: a fragment PUT expecting an epoch an entry replaced after its first lookup passed is
+// refused 412 by the claim transaction's lookup, under the key's lock, before any claim exists;
+// one the entry replaces after the claim is refused by T1's lookup, which commits no revision and
+// no record.
+func TestFragmentPutExpectedEpoch(t *testing.T) {
+	ie := newFragmentEnv(t, options{})
+	var principal string
+	if err := ie.db.QueryRow(`SELECT id FROM principal WHERE sub = 'h-author'`).Scan(&principal); err != nil {
+		t.Fatal(err)
+	}
+	body := fragmentPut(t, "cluster", labelDoc, []string{labelMark}, nil)
+	put := call{method: "PUT", path: prefix + "/drafts/" + ie.draft + "/fragments/registries", token: ie.human("h-author"),
+		key: "k-fragment-expect-" + id.New(id.Request), ifMatch: ie.etag, body: body, expected: epoch(t, ie.db)}
+	// The key's lock, held here, is taken by the claim transaction and not by the first lookup.
+	held, err := ie.db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = held.Rollback() }()
+	mustExec(t, held, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, principal+"/"+put.key)
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- ie.do(ie.api, put) }()
+	dbtest.WaitForLockWait(t, ie.db)
+	ep := newEpoch(t, ie.db)
+	if err := held.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	wantEpochMismatch(t, <-done, ep)
+	if n := count(t, ie.db, `SELECT count(*) FROM staging_claim WHERE kind = 'draft-update'`); n != 0 {
+		t.Fatalf("%d draft-update claims; the claim transaction's lookup did not refuse", n)
+	}
+
+	var ie2 *ingestEnv
+	var entered sync.Once
+	var ep2 string
+	ie2 = newFragmentEnv(t, options{beforeT1: func() { entered.Do(func() { ep2 = newEpoch(t, ie2.db) }) }})
+	put = call{method: "PUT", path: prefix + "/drafts/" + ie2.draft + "/fragments/registries", token: ie2.human("h-author"),
+		key: "k-fragment-expect-" + id.New(id.Request), ifMatch: ie2.etag, body: body, expected: epoch(t, ie2.db)}
+	wantEpochMismatch(t, ie2.do(ie2.api, put), ep2)
+	if n := count(t, ie2.db, `SELECT count(*) FROM staging_claim WHERE kind = 'draft-update'`); n != 1 {
+		t.Fatalf("%d draft-update claims; want the one persisted before T1", n)
+	}
+	if n := count(t, ie2.db, `SELECT count(*) FROM fragment_revision`); n != 0 {
+		t.Fatalf("%d revisions", n)
+	}
+	if n := count(t, ie2.db, `SELECT count(*) FROM idempotency_record WHERE key = $1`, put.key); n != 0 {
+		t.Fatalf("%d idempotency records for the refused key", n)
 	}
 }
