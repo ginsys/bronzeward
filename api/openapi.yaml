@@ -3473,7 +3473,7 @@ components:
         kind: {type: string, enum: [string, integer, boolean, mapping]}
         version: {type: integer}
         encoding:
-          description: 'Empty, like null or absent, means no encoding (internal/ingest/declare.go:70).'
+          description: 'Empty, like null or absent, means no encoding (checkDeclarations, internal/ingest/declare.go).'
           type: [string, 'null']
           enum: [base64, '', null]
       additionalProperties: false
