@@ -273,8 +273,10 @@ it. It holds no secret.
    ([§10.1](#101-hosting-and-origin)). Switching installations is navigating to another origin,
    which starts with an empty state; nothing read under one origin is shown under another.
 4. Today the issuer, client ID and audience are configured by hand (G14). Under decision D3 (b),
-   a static client-configuration file served next to the web files names them, with the client
-   ID of each of the two registrations of [§9.1](#91-identity-provider-requirements) item 2; the
+   a static client-configuration file served next to the web files, `bronzeward-client.json` at
+   the web root, names them: a JSON object with the string members `issuer`, `audience`,
+   `cliClientId` and `webClientId`, the last two the client IDs of the two registrations of
+   [§9.1](#91-identity-provider-requirements) item 2. The
    web client reads it from its own origin and uses the web client's ID, and the CLI imports it
    with `context add --from <url>` under the TLS rules of [§6](#6-tls-trust) and stores the CLI
    client's ID. Entering them by hand stays possible. The server is never asked
