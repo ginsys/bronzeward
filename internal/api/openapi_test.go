@@ -86,10 +86,9 @@ var (
 	descriptionErr  error
 )
 
-// description returns the parsed description, read once per test binary. Callers must not
+// loadDescription returns the parsed description, read once per test binary. Callers must not
 // modify it; describedFacts copies what it reads.
-func description(t *testing.T) map[string]any {
-	t.Helper()
+func loadDescription() (map[string]any, error) {
 	descriptionOnce.Do(func() {
 		raw, err := os.ReadFile(descriptionPath)
 		if err != nil {
@@ -99,9 +98,19 @@ func description(t *testing.T) map[string]any {
 		descriptionErr = yaml.Unmarshal(raw, &descriptionDoc)
 	})
 	if descriptionErr != nil {
-		t.Fatalf("reading %s: %v", descriptionPath, descriptionErr)
+		return nil, fmt.Errorf("reading %s: %w", descriptionPath, descriptionErr)
 	}
-	return descriptionDoc
+	return descriptionDoc, nil
+}
+
+// description is loadDescription for a test's own goroutine, which a failure stops.
+func description(t *testing.T) map[string]any {
+	t.Helper()
+	doc, err := loadDescription()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return doc
 }
 
 // describedFacts returns the description's facts, keyed as tableFacts keys them, and every
