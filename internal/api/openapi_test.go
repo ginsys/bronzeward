@@ -32,24 +32,25 @@ var operationMethods = []string{"get", "put", "post", "delete", "patch", "head",
 
 // routeFacts is what the description and the route table must agree on for one operation: the
 // route's facts, and the request a client generator builds from the description's parameters and
-// request body. pathParams are the template's wildcards, in order; key, ifMatchHeader and body
-// are a required Idempotency-Key, a required If-Match and a request body.
+// request body. pathParams are the template's wildcards, in order; query the query parameters,
+// sorted; key, ifMatchHeader, expectedEpoch and body are a required Idempotency-Key, a required
+// If-Match, an optional Bronzeward-Expected-Epoch and a request body.
 type routeFacts struct {
 	roles                                                  []string
 	humanOnly, ifMatch, normalStartOnly, recoveryStartOnly bool
-	pathParams                                             []string
-	key, ifMatchHeader, body                               bool
+	pathParams, query                                      []string
+	key, ifMatchHeader, expectedEpoch, body                bool
 }
 
 func (f routeFacts) String() string {
-	return fmt.Sprintf("roles %v, humanOnly %t, ifMatch %t, normalStartOnly %t, recoveryStartOnly %t, path parameters %v, Idempotency-Key %t, If-Match header %t, body %t",
-		f.roles, f.humanOnly, f.ifMatch, f.normalStartOnly, f.recoveryStartOnly, f.pathParams, f.key, f.ifMatchHeader, f.body)
+	return fmt.Sprintf("roles %v, humanOnly %t, ifMatch %t, normalStartOnly %t, recoveryStartOnly %t, path parameters %v, query %v, Idempotency-Key %t, If-Match header %t, Bronzeward-Expected-Epoch %t, body %t",
+		f.roles, f.humanOnly, f.ifMatch, f.normalStartOnly, f.recoveryStartOnly, f.pathParams, f.query, f.key, f.ifMatchHeader, f.expectedEpoch, f.body)
 }
 
 func (f routeFacts) equal(g routeFacts) bool {
 	return slices.Equal(f.roles, g.roles) && f.humanOnly == g.humanOnly && f.ifMatch == g.ifMatch &&
-		f.normalStartOnly == g.normalStartOnly && f.recoveryStartOnly == g.recoveryStartOnly && slices.Equal(f.pathParams, g.pathParams) && f.key == g.key &&
-		f.ifMatchHeader == g.ifMatchHeader && f.body == g.body
+		f.normalStartOnly == g.normalStartOnly && f.recoveryStartOnly == g.recoveryStartOnly && slices.Equal(f.pathParams, g.pathParams) &&
+		slices.Equal(f.query, g.query) && f.key == g.key && f.ifMatchHeader == g.ifMatchHeader && f.expectedEpoch == g.expectedEpoch && f.body == g.body
 }
 
 var pathWildcard = regexp.MustCompile(`\{([^}]+)\}`)
@@ -64,7 +65,8 @@ func tableFacts(t *testing.T) map[string]routeFacts {
 			t.Fatalf("the route table serves %s twice", k)
 		}
 		f := routeFacts{humanOnly: rt.humanOnly, ifMatch: rt.ifMatch, normalStartOnly: rt.normalStartOnly,
-			recoveryStartOnly: rt.pattern == entryPattern, key: rt.mutating(), ifMatchHeader: rt.ifMatch}
+			recoveryStartOnly: rt.pattern == entryPattern, key: rt.mutating(), ifMatchHeader: rt.ifMatch, expectedEpoch: rt.mutating(),
+			query: slices.Sorted(slices.Values(rt.query))}
 		for _, r := range rt.roles {
 			f.roles = append(f.roles, string(r))
 		}
@@ -115,7 +117,8 @@ func description(t *testing.T) map[string]any {
 
 // describedFacts returns the description's facts, keyed as tableFacts keys them, and every
 // malformed operation it met. A path parameter must be required; an Idempotency-Key or If-Match
-// parameter counts only when it is a required header; a request body must be required. Parameters
+// parameter counts only when it is a required header; a Bronzeward-Expected-Epoch header and a
+// query parameter must be optional, as the server reads them; a request body must be required. Parameters
 // are described per operation: a path item's own parameters, which OpenAPI applies to all its
 // operations, are refused rather than merged.
 func describedFacts(doc map[string]any) (map[string]routeFacts, []string) {
@@ -178,8 +181,18 @@ func describedFacts(doc map[string]any) (map[string]routeFacts, []string) {
 					if !required {
 						bad = append(bad, fmt.Sprintf("%s: header parameter %s is not required", k, name))
 					}
+				case in == "header" && name == expectedEpochHeader, in == "query":
+					if in == "query" {
+						f.query = append(f.query, name)
+					} else {
+						f.expectedEpoch = true
+					}
+					if required {
+						bad = append(bad, fmt.Sprintf("%s: %s parameter %s is required", k, in, name))
+					}
 				}
 			}
+			slices.Sort(f.query)
 			if raw, ok := op["requestBody"]; ok {
 				rb, _ := deref(doc, raw).(map[string]any)
 				if f.body = true; rb["required"] != true {
@@ -257,7 +270,7 @@ func TestRouteTableDiffReportsEachDifference(t *testing.T) {
 	if roles == "" || humanOnly == "" || ifMatch == "" || normalStartOnly == "" || recoveryStartOnly == "" {
 		t.Fatal("the table has no route for one of the controls")
 	}
-	var params, body, read string
+	var params, body, read, filtered, unpaged string
 	for _, k := range keys {
 		f := table[k]
 		if len(f.pathParams) > 1 && params == "" {
@@ -269,8 +282,14 @@ func TestRouteTableDiffReportsEachDifference(t *testing.T) {
 		if !f.key && read == "" {
 			read = k
 		}
+		if len(f.query) > 2 && filtered == "" {
+			filtered = k
+		}
+		if !f.key && len(f.query) == 0 && unpaged == "" {
+			unpaged = k
+		}
 	}
-	if params == "" || body == "" || read == "" {
+	if params == "" || body == "" || read == "" || filtered == "" || unpaged == "" {
 		t.Fatal("the table has no route for one of the request controls")
 	}
 	edit := func(k string, change func(*routeFacts)) map[string]routeFacts {
@@ -278,6 +297,7 @@ func TestRouteTableDiffReportsEachDifference(t *testing.T) {
 		f := c[k]
 		f.roles = slices.Clone(f.roles)
 		f.pathParams = slices.Clone(f.pathParams)
+		f.query = slices.Clone(f.query)
 		change(&f)
 		c[k] = f
 		return c
@@ -307,6 +327,12 @@ func TestRouteTableDiffReportsEachDifference(t *testing.T) {
 		{"the If-Match header dropped", edit(ifMatch, func(f *routeFacts) { f.ifMatchHeader = false }), ifMatch + ":"},
 		{"the request body dropped", edit(body, func(f *routeFacts) { f.body = false }), body + ":"},
 		{"a request body on a read", edit(read, func(f *routeFacts) { f.body = true }), read + ":"},
+		{"the Bronzeward-Expected-Epoch dropped", edit(body, func(f *routeFacts) { f.expectedEpoch = false }), body + ":"},
+		{"a Bronzeward-Expected-Epoch on a read", edit(read, func(f *routeFacts) { f.expectedEpoch = true }), read + ":"},
+		{"a filter dropped", edit(filtered, func(f *routeFacts) {
+			f.query = slices.DeleteFunc(f.query, func(q string) bool { return q != "limit" && q != "cursor" })
+		}), filtered + ":"},
+		{"a query on a read that takes none", edit(unpaged, func(f *routeFacts) { f.query = []string{"cursor", "limit"} }), unpaged + ":"},
 	} {
 		d := routeTableDiff(table, tc.described)
 		if len(d) != 1 || !strings.HasPrefix(d[0], tc.want) {
@@ -358,6 +384,10 @@ func TestDescribedFactsReadRequestShape(t *testing.T) {
 			c["parameters"] = replace(pathParam, map[string]any{"name": pathParam + "x", "in": "path", "required": true})
 		}},
 		{"the If-Match parameter removed", func(c map[string]any) { c["parameters"] = replace("If-Match", nil) }},
+		{"the Bronzeward-Expected-Epoch parameter removed", func(c map[string]any) { c["parameters"] = replace(expectedEpochHeader, nil) }},
+		{"the Bronzeward-Expected-Epoch required", func(c map[string]any) {
+			c["parameters"] = replace(expectedEpochHeader, map[string]any{"name": expectedEpochHeader, "in": "header", "required": true})
+		}},
 		{"the Idempotency-Key not required", func(c map[string]any) {
 			c["parameters"] = replace("Idempotency-Key", map[string]any{"name": "Idempotency-Key", "in": "header"})
 		}},
@@ -380,6 +410,50 @@ func TestDescribedFactsReadRequestShape(t *testing.T) {
 		d := append(routeTableDiff(table, described), bad...)
 		if len(d) != 1 || !strings.HasPrefix(d[0], k+":") {
 			t.Errorf("%s: got %q, want one difference starting %q", tc.name, d, k+":")
+		}
+	}
+}
+
+// A list's query parameters are read from the description: a filter removed, or one made
+// required, is reported for that operation, and only it.
+func TestDescribedFactsReadQuery(t *testing.T) {
+	t.Parallel()
+	doc := description(t)
+	table := tableFacts(t)
+	paths := doc["paths"].(map[string]any)
+	op := paths["/plans"].(map[string]any)["get"].(map[string]any)
+	if !slices.Contains(table["GET /plans"].query, "state") {
+		t.Fatal("GET /plans takes no state filter")
+	}
+	for _, tc := range []struct {
+		name string
+		with map[string]any // replaces the state filter; nil drops it
+	}{
+		{"a filter removed", nil},
+		{"a filter required", map[string]any{"name": "state", "in": "query", "required": true}},
+	} {
+		var params []any
+		for _, raw := range op["parameters"].([]any) {
+			p, _ := deref(doc, raw).(map[string]any)
+			switch {
+			case p["name"] != "state":
+				params = append(params, raw)
+			case tc.with != nil:
+				params = append(params, tc.with)
+			}
+		}
+		c := maps.Clone(op)
+		c["parameters"] = params
+		item := maps.Clone(paths["/plans"].(map[string]any))
+		item["get"] = c
+		changedPaths := maps.Clone(paths)
+		changedPaths["/plans"] = item
+		changed := maps.Clone(doc)
+		changed["paths"] = changedPaths
+		described, bad := describedFacts(changed)
+		d := append(routeTableDiff(table, described), bad...)
+		if len(d) != 1 || !strings.HasPrefix(d[0], "GET /plans:") {
+			t.Errorf("%s: got %q, want one difference starting %q", tc.name, d, "GET /plans:")
 		}
 	}
 }

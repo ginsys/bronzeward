@@ -94,7 +94,7 @@ var (
 // the state and the kind. A plan's operation exists from its commitment (§8.1).
 func listOperations(a *API, w http.ResponseWriter, q *request) {
 	readIn(a, w, q, func(ctx context.Context, tx *sql.Tx) (string, any, error) {
-		limit, after, ref := page(q, id.Operation, "plan", "machine", "state", "kind")
+		limit, after, ref := page(q, id.Operation)
 		if ref != nil {
 			return "", nil, ref
 		}

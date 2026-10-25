@@ -16,6 +16,7 @@ type route struct {
 	ifMatch         bool        // If-Match is required
 	exclusive       bool        // the transaction takes the installation state FOR UPDATE (§5)
 	normalStartOnly bool        // a recovery start refuses it after its entry too (ruling X3, §12.2)
+	query           []string    // a list's query parameters, limit and cursor first (§9.1); page refuses any other
 	action          string      // the act's action (§10.5)
 	// keyed names the body member that carries unextracted input: the request is fingerprinted
 	// with the digest key (§7.1), its input implements keyedInput, and that member is left out
@@ -74,27 +75,34 @@ func routes() []*route {
 	author, publisher, approver, recovery := auth.Author, auth.Publisher, auth.Approver, auth.RecoveryAdmin
 
 	read := func(rt *route, fn readFunc) *route { rt.read = fn; return rt }
+	// list is a paged read: limit, cursor and its filters (§9.1).
+	list := func(p string, fn readFunc, filters ...string) *route {
+		rt := read(g(p), fn)
+		rt.query = append([]string{"limit", "cursor"}, filters...)
+		return rt
+	}
 
 	rs := []*route{
-		read(g("/clusters"), listClusters), read(g("/clusters/{id}"), getCluster),
-		read(g("/machines"), listMachines), read(g("/machines/{id}"), getMachine),
-		read(g("/machines/{id}/observations"), listObservations), read(g("/machines/{id}/timeline"), listTimeline),
+		list("/clusters", listClusters), read(g("/clusters/{id}"), getCluster),
+		list("/machines", listMachines, "cluster"), read(g("/machines/{id}"), getMachine),
+		list("/machines/{id}/observations", listObservations), list("/machines/{id}/timeline", listTimeline),
 	}
 	for _, kind := range []string{"fragment", "profile", "assignment"} {
-		for _, p := range []string{"/" + kind + "s", "/" + kind + "s/{id}", "/" + kind + "s/{id}/revisions", "/" + kind + "-revisions/{id}"} {
-			rs = append(rs, read(g(p), sourceReads[p]))
-		}
+		rs = append(rs, list("/"+kind+"s", sourceReads["/"+kind+"s"]), read(g("/"+kind+"s/{id}"), sourceReads["/"+kind+"s/{id}"]),
+			list("/"+kind+"s/{id}/revisions", sourceReads["/"+kind+"s/{id}/revisions"]),
+			read(g("/"+kind+"-revisions/{id}"), sourceReads["/"+kind+"-revisions/{id}"]))
 	}
 	rs = append(rs,
-		read(g("/drafts"), listDrafts), read(g("/drafts/{id}"), getDraft),
-		read(g("/ingestions"), listIngestions), read(g("/ingestions/{id}"), getIngestion), read(g("/releases"), listReleases), read(g("/releases/{id}"), getRelease),
-		read(g("/releases/{id}/machines/{m}/review"), getReview),
-		read(g("/plans"), listPlans), read(g("/plans/{id}"), getPlan), read(g("/approvals/{id}"), getApproval), read(g("/operations"), listOperations),
-		read(g("/operations/{id}"), getOperation), read(g("/operations/{id}/events"), getOperationEvents),
-		read(g("/acts"), listActs), read(g("/recovery"), getRecovery),
-		read(g("/dependencies"), listDependencies), read(g("/dependencies/{id}"), getDependency),
-		read(g("/dependencies/{id}/releases"), dependencyReleases), read(g("/dependencies/{id}/alerts"), listAlerts(true)),
-		read(g("/dependency-alerts"), listAlerts(false)), read(&route{method: http.MethodGet, pattern: identityPattern}, getIdentity),
+		list("/drafts", listDrafts), read(g("/drafts/{id}"), getDraft),
+		list("/ingestions", listIngestions, "state", "machine"), read(g("/ingestions/{id}"), getIngestion), list("/releases", listReleases),
+		read(g("/releases/{id}"), getRelease), read(g("/releases/{id}/machines/{m}/review"), getReview),
+		list("/plans", listPlans, "state", "machine"), read(g("/plans/{id}"), getPlan), read(g("/approvals/{id}"), getApproval),
+		list("/operations", listOperations, "plan", "machine", "state", "kind"),
+		read(g("/operations/{id}"), getOperation), list("/operations/{id}/events", getOperationEvents),
+		list("/acts", listActs), read(g("/recovery"), getRecovery),
+		list("/dependencies", listDependencies, "class"), read(g("/dependencies/{id}"), getDependency),
+		list("/dependencies/{id}/releases", dependencyReleases), list("/dependencies/{id}/alerts", listAlerts(true)),
+		list("/dependency-alerts", listAlerts(false)), read(&route{method: http.MethodGet, pattern: identityPattern}, getIdentity),
 		read(g("/server"), getServer),
 		ingestionStart().on(ifm(human(m(post, "/ingestions", author)))),
 		read(human(m(http.MethodGet, "/ingestions/{id}/review", author)), getIngestionReview),

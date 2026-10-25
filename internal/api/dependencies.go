@@ -41,7 +41,7 @@ func listDependencies(a *API, w http.ResponseWriter, q *request) {
 		if q.r.URL.Query().Has("class") && !slices.Contains(dependencyClasses, class) {
 			return "", nil, refuse(http.StatusBadRequest, "invalid-request", "class must be retained, unknown, blocked or lost")
 		}
-		limit, after, ref := page(q, id.Dependency, "class")
+		limit, after, ref := page(q, id.Dependency)
 		if ref != nil {
 			return "", nil, ref
 		}

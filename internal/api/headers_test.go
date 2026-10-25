@@ -134,6 +134,7 @@ func TestAnswerHeadersOnEveryAnswer(t *testing.T) {
 		rec := httptest.NewRecorder()
 		e.api.ServeHTTP(rec, r)
 		checkAnswerHeaders(t, rec)
+		checkResponse(t, r, "", rec)
 		wantProblem(t, rec, http.StatusBadRequest, "invalid-request")
 	}
 	// A database that cannot be read answers 503: from authentication for an automation token,
