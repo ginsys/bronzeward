@@ -62,6 +62,7 @@ export class Client {
   private view: View = { principal: "", route: "", query: "" };
   private epoch: string | undefined;
   private generation = 0;
+  private epochChanges = 0;
 
   constructor(private readonly opts: ClientOptions = {}) {}
 
@@ -79,10 +80,12 @@ export class Client {
     const sent = this.generation;
     let renewed = false;
     for (let attempt = 0; ; attempt++) {
+      const epochs = this.epochChanges;
       const res = await this.send(path);
       if (res === undefined) return sent === this.generation ? { kind: "transport" } : { kind: "discarded" };
-      // A stale response is discarded before its epoch is read, so a late one cannot roll it back.
-      if (sent !== this.generation || this.observeEpoch(res)) return { kind: "discarded" };
+      // Its epoch is read, stale or not, unless one changed since the send: it could roll that back.
+      const changed = epochs === this.epochChanges && this.observeEpoch(res);
+      if (changed || sent !== this.generation) return { kind: "discarded" };
       if (res.ok) return this.success<T>(res, sent);
       const problem = await readProblem(res);
       if (sent !== this.generation) return { kind: "discarded" }; // changed while the body arrived
@@ -130,14 +133,15 @@ export class Client {
     }
   }
 
-  // §8.5: every current response's epoch against the last one seen; the first is recorded silently. A
-  // response that carries a new epoch is itself discarded, since its read began under the old one.
+  // §8.5: a response's epoch against the last one seen; the first is recorded silently. A response
+  // that carries a new epoch is itself discarded, since its read began under the old one.
   private observeEpoch(res: Response): boolean {
     const epoch = res.headers.get("Bronzeward-Epoch");
     if (epoch === null || epoch === this.epoch) return false;
     const first = this.epoch === undefined;
     this.epoch = epoch;
     if (first) return false;
+    this.epochChanges++;
     this.generation++;
     this.opts.onEpochChange?.(epoch, res.headers.get("Bronzeward-Recovery-Mode") === "true");
     return true;
