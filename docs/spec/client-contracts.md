@@ -1,6 +1,8 @@
 # Client contracts: authentication, API behaviour and compatibility
 
-**Status: proposed, not assessed.** This document specifies what any Bronzeward client, the
+**Status: accepted** by the owner on 25 October 2026 at 21:15 CET, in the owner's workflow
+session, after the [acceptance assessment](https://github.com/ginsys/bronzeward/issues/253#issuecomment-6400565386):
+"A: accept now". This document specifies what any Bronzeward client, the
 `bronzewardctl` command-line client and the web interface alike, must do against the existing
 management API, for
 [Specify client authentication, API behavior and compatibility](https://github.com/ginsys/bronzeward/issues/253)
