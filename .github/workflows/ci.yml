@@ -27,9 +27,9 @@ permissions:
 # github.event.pull_request, so it cannot tell a fork's candidate from an own-branch one; routing
 # every candidate to a hosted runner is the only branch-independent rule. The org-level fork-PR
 # approval gate still applies on top. The Claude review job is a separate workflow whose reusable
-# skips forks and merge groups outright (the proxy is in-cluster only). The one exception to this
-# rule is go-db, which always runs GitHub-hosted: its service container needs a Docker daemon, and
-# the in-cluster runners have none.
+# skips forks and merge groups outright (the proxy is in-cluster only). The exceptions to this
+# rule always run GitHub-hosted: go-db and idp, whose containers need a Docker daemon, and browser
+# and safari, which need browsers; the in-cluster runners have neither.
 
 env:
   # The setting `mise run` honours (`mise help run`, --skip-tools); MISE_EXEC_AUTO_INSTALL does
@@ -109,6 +109,61 @@ jobs:
           cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: go
       - run: mise run go
+
+  web:
+    # web/: the API types generated from api/openapi.yaml and their type test, the unit tests and
+    # the build.
+    runs-on: ${{ (github.event_name == 'merge_group' || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'autops-kube-ginsys' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
+          install_args: node
+      - run: mise run web
+
+  browser:
+    # Conformance cases TLS-02 and TLS-03's read case in real browsers (mise run browser): the
+    # runner's Chrome and Edge, and the current Firefox and Firefox ESR, which WebdriverIO
+    # downloads. GitHub-hosted for every event: the in-cluster runners have no browser. The
+    # artifacts are uploaded only once the scan has passed.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BW_BROWSERS: chrome,edge,firefox,firefox-esr
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
+          install_args: node go
+      - run: mise run browser
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: browser-linux
+          path: web/e2e/out
+          retention-days: 14
+
+  safari:
+    # The same cases in Safari, on a GitHub-hosted macOS runner (decision B6).
+    runs-on: macos-latest
+    timeout-minutes: 20
+    env:
+      BW_BROWSERS: safari
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
+          install_args: node go
+      - run: sudo safaridriver --enable
+      - run: mise run browser
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: browser-safari
+          path: web/e2e/out
+          retention-days: 14
 
   go-db:
     # The root module's tests against PostgreSQL and OpenBao, in service containers at the
@@ -237,7 +292,7 @@ jobs:
     # outside pull requests, so `skipped` counts as success only for that job there. Any other
     # result fails, including `abandoned` (a job that never got a runner).
     if: always()
-    needs: [docs, site, actionlint, test, go, go-db, commit-lint, action-pins]
+    needs: [docs, site, actionlint, test, go, web, browser, safari, go-db, commit-lint, action-pins]
     runs-on: ${{ (github.event_name == 'merge_group' || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'autops-kube-ginsys' }}
     timeout-minutes: 2
     steps:

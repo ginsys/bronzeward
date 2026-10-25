@@ -7,6 +7,12 @@
       "matchManagers": ["pip_requirements"],
       "matchPackageNames": ["mkdocs"],
       "allowedVersions": "<2"
+    },
+    {
+      "description": "openapi-typescript 7 needs TypeScript 5's compiler API (peer ^5.x); TypeScript 7 is the native port without it.",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["typescript"],
+      "allowedVersions": "<6"
     }
   ]
 }

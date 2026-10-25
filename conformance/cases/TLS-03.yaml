@@ -1,0 +1,15 @@
+id: TLS-03
+setup: as TLS-02
+action: load the web client, which reads GET /server
+exchange:
+  - request: GET /api/v1/server
+    headers: ["Accept: application/json"]
+fault: as TLS-02
+expect:
+  shown: the generic transport-failure message naming a refused redirect as a possible cause, and no target
+  absent: [the target's address on the page, synthetic value in retained artifacts or browser storage]
+runs:
+  web:
+    check: web/e2e/tls.e2e.ts, mise run browser
+    browsers: [chrome, edge, firefox, firefox-esr, safari]
+    covers: the read case; the write case runs with the first web write
