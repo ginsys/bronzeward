@@ -221,7 +221,7 @@ description = "Start the test identity provider (Zitadel at the fixture's pin) o
 run = "fixtures/dev-idp up"
 
 [tasks.dev-idp-down]
-description = "Stop dev-idp's containers and remove its network and .dev/idp/, leaving dev-db and dev-bao running"
+description = "Remove dev-idp's containers with their data, its network and .dev/idp/, leaving dev-db and dev-bao running"
 # mise run dev-down does this too, after stopping the containers every worktree shares.
 run = "fixtures/dev-idp down"
 
