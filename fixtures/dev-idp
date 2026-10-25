@@ -61,7 +61,7 @@ down() {
   for c in "$groups" "$zitadel" "$pg"; do
     if present "$c"; then docker rm -fv "$c" >/dev/null; fi
     for _ in $(seq 30); do present "$c" || continue 2; sleep 1; done
-    die "$c was still present after 30s (docker ps -a; docker rm -f $c)"
+    die "$c was still present after 30s (docker ps -a; docker rm -fv $c)"
   done
   ids=$(docker network ls -q --filter "name=^$net\$") || die "cannot list networks (docker network ls)"
   if [ -n "$ids" ]; then docker network rm "$net" >/dev/null; fi
