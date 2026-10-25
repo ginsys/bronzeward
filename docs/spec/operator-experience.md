@@ -25,7 +25,8 @@ revision `e1c8cb3`). The expected-epoch check that
 citations in [§8](#8-states-every-view-must-handle) are read at the revision that lands
 [#309](https://github.com/ginsys/bronzeward/issues/309), with that check applied. Client behaviour this document proposes is
 marked **Proposed**; with the acceptance above, the marker separates accepted client behaviour
-from existing behaviour. A behaviour the API does not support today is listed in
+from existing behaviour, and in §13 it keeps its meaning of a target for the owner to set. A
+behaviour the API does not support today is listed in
 [§11](#11-api-gap-audit) and is not presented as available.
 
 ## Contents
@@ -1154,14 +1155,15 @@ gap G1-G17, whether it becomes an API issue that natively blocks the client tick
   or request may survive a client restart, and how an ambiguous outcome is shown after one
   ([client contracts §8.4](client-contracts.md#84-idempotency-and-ambiguous-responses), D9);
 - the protected review of C4: the mechanism must be shown to keep plaintext out of argv, shell
-  history, logs, editor files and caches
+  history, logs, editor files and caches, or be replaced
   ([client contracts §11.2](client-contracts.md#112-rules-for-both-clients),
   [§11.3](client-contracts.md#113-cli-review));
 - sign-in, renewal, expiry and sign-out behind T1, and the 401, 403 and 503 states of
   [§8](#8-states-every-view-must-handle) ([client contracts §9](client-contracts.md#9-authentication),
   [§8.2](client-contracts.md#82-errors));
 - hosting, origin and browser storage rules for the web client (G12)
-  ([client contracts §10](client-contracts.md#10-browser-security), D1).
+  ([client contracts §10](client-contracts.md#10-browser-security),
+  [§9.3](client-contracts.md#93-browser-sign-in), D1, D5).
 
 ## 15. Limits
 
