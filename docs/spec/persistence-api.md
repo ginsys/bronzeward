@@ -1680,7 +1680,7 @@ Design: [§11](../design/Talos_Configuration_and_Machine_Management_Design.md#11
   authenticated. A committed recovery entry or exit instead names what it
   leaves in place: the entry the epoch it minted, in recovery mode, and the
   exit its epoch outside recovery mode. An entry that commits after the read
-  that decided the answer replaces the epoch the answer names, so a refusal, `503 epoch-superseded` among
+  that the headers name replaces the epoch they name, so a refusal, `503 epoch-superseded` among
   them, can name the epoch it replaced; a client confirms the epoch with
   `GET /recovery` before acting on a change (client contracts §8.4 item 3). A
   `401`, a `403 identity-revoked` and the liveness probe carry neither: they
