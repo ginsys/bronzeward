@@ -121,6 +121,7 @@ func TestIdentityProviderIDToken(t *testing.T) {
 	dc, uc, exp, iv := p.startDevice()
 	p.decide(uc, "h-viewer")
 	device := p.poll(dc, iv, time.Now().Add(time.Duration(exp)*time.Second))
+	parent := e.t
 	for _, g := range []struct {
 		grant string
 		tk    tokens
@@ -130,6 +131,10 @@ func TestIdentityProviderIDToken(t *testing.T) {
 		{"refresh, web", renewed, true}, {"device authorization, CLI", device, false},
 	} {
 		t.Run(g.grant, func(t *testing.T) {
+			// e's helpers fail through e.t: bound to this subtest, a failure stops only this
+			// grant. The subtests run one at a time.
+			e.t = t
+			defer func() { e.t = parent }()
 			if g.tk.ID == "" || g.tk.Access == "" {
 				t.Fatalf("%q: want an ID token and an access token", g.tk.Error)
 			}
