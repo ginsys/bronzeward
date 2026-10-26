@@ -25,9 +25,10 @@ type View =
   | { kind: "signed-out" }
   // Between the sign-out button and the redirect: nothing read before stays on the page (§9.7, §10.3).
   | { kind: "signing-out" }
-  | { kind: "sign-in"; message: string; reading?: string | undefined; config: ClientConfig; provider: Provider }
-  | { kind: "failed"; message: string }
-  | { kind: "signed-in"; sub: string; status: string; signOut: () => void };
+  // `problem`: the answer's §8.2 fields, under a message of its own.
+  | { kind: "sign-in"; message: string; reading?: string | undefined; problem?: string | undefined; config: ClientConfig; provider: Provider }
+  | { kind: "failed"; message: string; problem?: string | undefined }
+  | { kind: "signed-in"; sub: string; status: string; problem?: string | undefined; signOut: () => void };
 
 const failure = (f: Failure) => (f.kind === "transport" ? TRANSPORT_FAILURE : f.reason);
 
@@ -103,11 +104,13 @@ export function App() {
       if (session !== s) return;
       if (res.kind === "unauthenticated") {
         const reading = localReading(s.token() ?? "", config, Date.now());
-        return setView({ kind: "sign-in", message: NOT_ACCEPTED, reading, config, provider });
+        return setView({ kind: "sign-in", message: NOT_ACCEPTED, reading, problem: problemFields(res), config, provider });
       }
-      if (res.kind === "revoked") return setView({ kind: "failed", message: REVOKED });
+      if (res.kind === "revoked") return setView({ kind: "failed", message: REVOKED, problem: problemFields(res) });
       const sub = s.principal?.sub ?? "";
-      setView({ kind: "signed-in", sub, status: describe(res, sub), signOut });
+      const status = describe(res, sub);
+      const problem = problemFields(res);
+      setView({ kind: "signed-in", sub, status, problem: problem === status ? undefined : problem, signOut });
     };
 
     void (async () => {
@@ -165,11 +168,12 @@ export function App() {
         </Page>
       );
     case "failed":
-      return <Page><p role="alert" data-testid="status">{view.message}</p></Page>;
+      return <Page><p role="alert" data-testid="status">{view.message}</p><Problem text={view.problem} /></Page>;
     case "sign-in":
       return (
         <Page>
           <p role="alert" data-testid="status">{view.message}</p>
+          <Problem text={view.problem} />
           {view.reading !== undefined && <p data-testid="reading">This browser's own reading: {view.reading}.</p>}
           <button type="button" onClick={() => void beginSignIn(view.config, view.provider, location.pathname + location.search, sessionStorage, location.origin).then((u) => location.assign(u))}>
             Sign in with the identity provider
@@ -181,6 +185,7 @@ export function App() {
         <Page>
           <p data-testid="principal">Signed in as {view.sub}</p>
           <p role="status" data-testid="status">{view.status}</p>
+          <Problem text={view.problem} />
           <button type="button" onClick={view.signOut}>Sign out</button>
         </Page>
       );
@@ -208,6 +213,13 @@ function describe(res: ReadResult<Server>, sub: string): string {
   if (res.kind === "defect") return `The server read failed: ${res.message}`;
   return problemText(res);
 }
+
+// The answer's problem, when it carries one.
+export function problemFields(res: ReadResult<unknown>): string | undefined {
+  return "problem" in res && res.problem !== null ? problemText(res) : undefined;
+}
+
+const Problem = ({ text }: { text: string | undefined }) => (text === undefined ? null : <p data-testid="problem">{text}</p>);
 
 // §8.2: a problem's title, its detail when present and its instance, never a request body. The
 // authentication 503's detail is W1's text.
