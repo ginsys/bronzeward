@@ -859,7 +859,8 @@ current token expires
    ([§9.7](#97-sign-out-and-cache-clearing), [§10.3](#103-caches-and-back-navigation) item 3) does
    not go on; only the operator's sign-in button leaves a refused or changed page. A refresh-token
    request already sent still gets its answer. After an end or another account, the pair it brings
-   is revoked (§9.7 item 2). After a refusal, that pair still goes to the other tabs, whose refresh token the request
+   is revoked (§9.7 item 2); if it fails after the page has dropped its tokens, the refresh token it
+   sent is revoked, not kept. After a refusal, that pair still goes to the other tabs, whose refresh token the request
    spent, and the refused page sends nothing with it.
 4. Silent renewal through a hidden frame is not used: browsers that block third-party cookies make
    it fail unpredictably (assumption S2), and a failure would surface as an unexplained sign-out.
@@ -951,8 +952,9 @@ expiry, at most `maxTokenLifetime` after issue, plus the server's 60 s leeway
    revocation still deletes the tokens, says the refresh token is not revoked and exits 1.
 2. The web sign-out discards the in-memory tokens and every cached response, revokes the last
    refresh token the tab held if the provider allows it, even one it no longer sends for renewal
-   (after a failed or unrotated renewal, or one another tab may have spent), without waiting for a
-   renewal in flight, then the pair that renewal brings, tells other open tabs of the same origin to discard theirs
+   (after a failed or unrotated renewal, or one another tab may have spent), or else the refresh
+   token a renewal in flight sent, at once and without waiting for that renewal, and then the pair
+   it brings, tells other open tabs of the same origin to discard theirs
    (assumption S3), and redirects to the provider's end-session endpoint where it offers one, with
    `client_id` and `post_logout_redirect_uri` only. It sends no `id_token_hint`: the test
    provider's ID token carries the access token's issuer, audience and lifetime, so the server
