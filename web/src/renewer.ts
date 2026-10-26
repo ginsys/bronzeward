@@ -43,6 +43,11 @@ export class Renewer {
     private readonly onPair: (t: Tokens) => void,
   ) {}
 
+  // This tab holds the lock now: it alone renews, and by the redirect where §9.3 item 3 says so.
+  get holder(): boolean {
+    return this.#holder;
+  }
+
   // What a Session tells the other tabs.
   readonly hooks: Pick<SessionOptions, "onRenewing" | "onRenewed"> = {
     onRenewing: (of) => this.channel.postMessage({ type: "renewing", of }),
