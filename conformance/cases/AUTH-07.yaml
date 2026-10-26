@@ -1,0 +1,17 @@
+id: AUTH-07
+setup: as AUTH-02, with a provider that rotates the refresh token and answers the renewal with a token minted for h-author; signed in as h-viewer with a 16-second token, in two tabs
+action: load the web client, sign in, open a second tab, wait for the renewal
+exchange:
+  - request: POST <provider>/token
+    headers: ["grant_type=refresh_token, once, from one tab"]
+fault: the renewed token's subject differs
+expect:
+  server: not reached after the renewal
+  client: one renewal for both tabs; the earlier subject's state discarded in each tab; no new authorization request
+  shown: 'the text "The identity provider renewed the sign-in for another account. Sign in again to continue." in both tabs, and nothing of the earlier subject or the server read'
+  absent: [token in the harness log, retained artifacts or browser storage]
+runs:
+  web:
+    check: web/e2e/auth/tabs.e2e.ts, mise run browser-auth
+    browsers: [chrome, edge, firefox, firefox-esr]
+    covers: the change shown and the cached state discarded, in two tabs; the pending write set aside comes with the first web write (ginsys/bronzeward#257)

@@ -799,18 +799,38 @@ current token expires
    enumerate. They are never written to `localStorage`, `sessionStorage`, IndexedDB, the Cache
    API, a cookie or a service worker.
 3. Under decision D5 (a), the access token is renewed silently with the rotating refresh token
-   ([§9.5](#95-renewal)). A new tab receives the tokens from an open tab of the same origin over
-   `BroadcastChannel` (assumption S3). A reload, or a first tab when none is open, makes a
-   top-level redirect to the provider, which answers at once from its own session, without a
-   prompt while that session lasts. A rotated refresh token is used once, so the open tabs do not
-   renew separately: one tab renews and sends the new pair to every open tab over the same
-   channel, and a tab that receives a pair drops its own renewal. Where the provider does not
-   issue rotating, client-bound
-   refresh tokens ([§9.1](#91-identity-provider-requirements) item 3), renewal also uses that
-   redirect, never a hidden frame (item 4). That fallback redirects at every
-   access-token expiry, the behaviour the owner's constraint in D5 refuses, so the constraint holds
-   only with a rotating provider: rotation is a provider requirement
-   ([§15](#15-assumptions-and-limits)). No token is kept in storage (item 2).
+   ([§9.5](#95-renewal)). A rotated refresh token is used once, so one tab renews for all
+   (decision B1 of [#255](https://github.com/ginsys/bronzeward/issues/255)). Every signed-in tab
+   requests the exclusive Web Lock `bronzeward-renewer` and holds it until `pagehide`, when
+   [§10.3](#103-caches-and-back-navigation) item 3 clears its state (assumption S9). Only the
+   holder sends refresh-token requests; before each it posts `renewing` on the
+   `BroadcastChannel` (assumption S3), and after it the new pair.
+   - A tab without the lock never renews: under the 60 s threshold or after a `401` (§9.5 item 1)
+     it posts a request and waits for the holder's pair, at most 10 s, then treats renewal as
+     failed (§9.5 item 3). Granted the lock while it waits, it renews itself.
+   - A tab that becomes holder after a `renewing` with no newer pair treats the refresh token as
+     spent and never sends it, nor gives that pair to a new tab: renewal has failed, the current
+     token is used until refused, then the page offers sign-in again.
+   - A new tab, a reload, or a page restored from the back-forward cache posts a request. If
+     `navigator.locks.query()` shows no holder it is a first tab and redirects at once; otherwise
+     it requests the lock and waits 5 s for the pair, then redirects. Granted the lock before a
+     pair arrives, no tab that asked before it is left, so it redirects at once. The redirect is
+     top-level; the provider answers at once from its own session, without a prompt while that
+     session lasts.
+   - A pair obtained by a redirect is posted to every tab by the tab that obtained it. A tab takes
+     a received pair when it is newer than its own; a pair with another `sub` or `iss` is a new
+     sign-in (§9.5 item 2).
+
+   Rejected: a lock taken per renewal, because a waiting tab can be granted it before the previous
+   holder's pair reaches it and then spend the used token; a counter in `localStorage`, which
+   item 1 excludes.
+
+   Where the provider does not issue rotating, client-bound refresh tokens
+   ([§9.1](#91-identity-provider-requirements) item 3), renewal also uses that redirect, never a
+   hidden frame (item 4). That fallback redirects at every access-token expiry, the behaviour the
+   owner's constraint in D5 refuses, so the constraint holds only with a rotating provider:
+   rotation is a provider requirement ([§15](#15-assumptions-and-limits)). No token is kept in
+   storage (item 2).
 4. Silent renewal through a hidden frame is not used: browsers that block third-party cookies make
    it fail unpredictably (assumption S2), and a failure would surface as an unexplained sign-out.
 5. Every API call goes to the page's own origin ([§10.1](#101-hosting-and-origin)); only the
@@ -1148,6 +1168,7 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 | AUTH-08 | success | sign-out, then back navigation (web) | no data shown; storage empty |
 | AUTH-09 | success | `bronzewardctl logout` | tokens gone from the credential store and from a D2 (b) token file; refresh token revoked where the provider allows; remaining access-token validity stated |
 | AUTH-10 | refusal | subject listed in `deniedSubjects` | `403 identity-revoked`; same handling as AUTH-05 |
+| AUTH-11 | success | web: three tabs whose access tokens reach the renewal threshold together; second case: the holding tab closes after posting `renewing` and before its answer | first: one refresh request per renewal, counted at the provider, every tab on the new pair, no redirect; second: no refresh request with the spent token, renewal failed as §9.5 item 3, and after one tab signs in again every tab uses its pair |
 | ETAG-01 | refusal | another author writes first | `412`; no resend; newer state shown |
 | AMB-01 | disconnect | connection dropped before any request byte is sent | ordinary retry |
 | AMB-02 | disconnect | fragment write dropped after the body is sent | repeat with the same key; an in-progress `409` (with `ingestion`, no `draft`, not replayed) is repeated with backoff up to the client's wait bound, then outcome unknown; a `409` with `ingestion` and `draft` (draft published meanwhile) is reported refused, not repeated; otherwise replay or first execution |
@@ -1346,6 +1367,9 @@ Assumptions this document relies on without a citation in this repository:
 - **S8.** `Cache-Control: no-store` does not keep every browser from restoring a page from its
   back-forward cache; a page restored that way receives `pageshow` with `persisted` true (HTML
   standard).
+- **S9.** Every matrix browser provides Web Locks (`navigator.locks`), grants an exclusive lock
+  to one tab of an origin at a time, in request order, and releases a tab's locks when it closes
+  or leaves the page (Web Locks API). AUTH-11 observes the grant order and the release on close.
 
 Implementation choices the owner made on 2026-10-22:
 
