@@ -264,6 +264,20 @@ describe("B1 one renewing tab", () => {
     expect(b.sent).toEqual(["SYNTH-r1", "SYNTH-r2"]);
   });
 
+  test("a released tab sends and gives no refresh token, announced or not", async () => {
+    const b = new Browser();
+    const [x, y] = [b.open(), b.open()];
+    x.signIn(first());
+    await settle();
+    await y.join();
+    expect(await x.renewer.renew()).toBe(true);
+    await settle();
+    expect([y.renewer.hooks.spent?.("SYNTH-r1"), y.renewer.hooks.spent?.("SYNTH-r2")]).toEqual([true, false]);
+    y.renewer.release();
+    expect(y.renewer.hooks.spent?.("SYNTH-r2")).toBe(true);
+    expect(y.session?.pair()).toBeUndefined();
+  });
+
   test("a tab that signs in by the redirect while another tab's renewal is unanswered keeps its own refresh token", async () => {
     const b = new Browser();
     const [x, c] = [b.open(), b.open()];

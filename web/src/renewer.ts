@@ -35,7 +35,8 @@ export class Renewer {
   #closed = false;
   // Every refresh token another tab announced in a `renewing`: whatever its answer, it may be spent,
   // so it is never sent or given from here. Told by token, not by expiry, so that a pair with a
-  // shorter lifetime cannot hide it.
+  // shorter lifetime cannot hide it. Erased on release() (§10.3 item 3), after which this tab sends
+  // and gives nothing.
   readonly #sent = new Set<string>();
   readonly #waiting = new Set<(t: Tokens) => void>();
   readonly #granted = new Set<() => void>();
@@ -57,7 +58,7 @@ export class Renewer {
   readonly hooks: Pick<SessionOptions, "onRenewing" | "onRenewed" | "spent"> = {
     onRenewing: (of) => this.channel.postMessage({ type: "renewing", of }),
     onRenewed: (tokens) => this.channel.postMessage({ type: "pair", tokens }),
-    spent: (refresh) => this.#sent.has(refresh),
+    spent: (refresh) => this.#closed || this.#sent.has(refresh),
   };
 
   // A new tab, or one restored from the back-forward cache: the holder's pair, or undefined when
@@ -98,6 +99,7 @@ export class Renewer {
   // On pagehide, sign-out or when the tokens are gone, so that another tab can renew.
   release(): void {
     this.#closed = true;
+    this.#sent.clear();
     this.#release?.();
     this.#release = undefined;
   }
@@ -117,7 +119,7 @@ export class Renewer {
   }
 
   onMessage(m: Message): void {
-    if (m.type === "renewing" && typeof m.of === "string") this.#sent.add(m.of);
+    if (m.type === "renewing" && typeof m.of === "string" && !this.#closed) this.#sent.add(m.of);
     if (m.type === "request") void this.#answer(typeof m.due === "number" ? m.due : undefined);
     if (m.type !== "pair" || !isTokens(m.tokens)) return;
     for (const w of this.#waiting) w(m.tokens);
