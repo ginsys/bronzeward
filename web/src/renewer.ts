@@ -30,6 +30,9 @@ export interface Locks {
 export class Renewer {
   #holder = false;
   #release: (() => void) | undefined;
+  // Released for good: a page that stops renewing never holds the lock again (no tab re-signs in
+  // without a navigation), and a join still awaiting its query must not take it afterwards.
+  #closed = false;
   // The `of` of a `renewing` with no newer pair after it: the refresh token it was for may be spent.
   #unanswered: number | undefined;
   readonly #waiting = new Set<(t: Tokens) => void>();
@@ -59,7 +62,7 @@ export class Renewer {
   // lock is requested at once: granted before a pair, no tab that asked before this one is left.
   async join(): Promise<Tokens | undefined> {
     const { held } = await this.locks.query();
-    if (!held?.some((l) => l.name === LOCK)) return undefined;
+    if (this.#closed || !held?.some((l) => l.name === LOCK)) return undefined;
     this.hold();
     const t = await this.#wait(JOIN_WAIT_MS, () => true, { type: "request" });
     return t === "holder" ? undefined : t;
@@ -72,7 +75,7 @@ export class Renewer {
 
   // Signed in: wait for the lock and keep it until release().
   hold(): void {
-    if (this.#release !== undefined) return;
+    if (this.#closed || this.#release !== undefined) return;
     let released = false;
     let end!: () => void;
     const held = new Promise<void>((r) => (end = r));
@@ -84,7 +87,11 @@ export class Renewer {
     void this.locks.request(LOCK, () => {
       if (released) return undefined;
       this.#holder = true;
-      if (this.#unanswered !== undefined) this.session()?.spend();
+      // Only a pair no newer than the one the `renewing` was for: a pair this tab obtained since,
+      // by its own redirect, holds a refresh token nobody sent.
+      const s = this.session();
+      const at = s?.expiresAt;
+      if (this.#unanswered !== undefined && at !== undefined && at <= this.#unanswered) s?.spend();
       for (const g of this.#granted) g();
       return held;
     });
@@ -92,6 +99,7 @@ export class Renewer {
 
   // On pagehide, sign-out or when the tokens are gone, so that another tab can renew.
   release(): void {
+    this.#closed = true;
     this.#release?.();
     this.#release = undefined;
   }

@@ -248,11 +248,24 @@ describe("§9.5 renewal", () => {
     ["undelivered", (s: Session) => s.renew(), [new TypeError("Failed to fetch")]],
     ["refused", (s: Session) => s.renew(), [json({ error: "invalid_grant" }, 400)]],
     ["spent by another tab", (s: Session) => s.spend(), []],
-  ] as const)("a refresh token %s leaves no renewal by the redirect", async (_name, act, list) => {
+  ] as const)("a refresh token %s leaves no renewal by the redirect, here or in a new tab", async (_name, act, list) => {
     const s = new Session(config, provider, tokens(), { fetch: answers([...list]) as unknown as typeof fetch });
     await act(s);
     expect(s.byRedirect).toBe(false);
     expect(await s.renew()).toBe(false);
+    // A new tab given this pair, without its refresh token, would renew by the redirect.
+    expect(s.pair()).toBeUndefined();
+  });
+
+  test("a renewal that fails after another tab's pair was taken leaves that pair to give", async () => {
+    let release!: (r: Response) => void;
+    const f = vi.fn(() => new Promise<Response>((r) => (release = r)));
+    const s = new Session(config, provider, tokens(), { fetch: f as unknown as typeof fetch });
+    const renewal = s.renew();
+    expect(s.adopt(tokens({ access: "SYNTH-a3", refresh: "SYNTH-r3", expiresAt: 500_000 }))).toBe(true);
+    release(json({ error: "invalid_grant" }, 400));
+    expect(await renewal).toBe(false);
+    expect(s.pair()?.refresh).toBe("SYNTH-r3");
   });
 
   test("another tab's pair without a refresh token renews by the redirect; with one, by the refresh token", () => {
@@ -310,6 +323,7 @@ describe("§9.5 renewal", () => {
     expect(s.adopt(tokens({ access: "SYNTH-a0", expiresAt: 300_000 }))).toBe(false);
     expect(s.adopt(tokens({ access: "SYNTH-a2", sub: "u2", expiresAt: 400_000 }))).toBe(false);
     expect(s.adopt(tokens({ access: "SYNTH-a2", expiresAt: 400_000 }))).toBe(true);
+    expect(s.token()).toBe("SYNTH-a2");
     expect(s.pair()).toEqual(tokens({ access: "SYNTH-a2", expiresAt: 400_000 }));
     s.spend();
     expect(s.pair()).toBeUndefined();
@@ -398,6 +412,19 @@ describe("§9.7 item 2 sign-out", () => {
     s.clear();
     await out;
     expect(f.mock.calls.filter((c) => c[0] === provider.revocationEndpoint).map((c) => form(c[1])["token"])).toEqual([revoked]);
+  });
+
+  test("during a renewal whose answer brings no refresh token, revokes the one it sent", async () => {
+    let release!: (r: Response) => void;
+    const f = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => (url === provider.tokenEndpoint ? new Promise<Response>((r) => (release = r)) : Promise.resolve(new Response(null, { status: 200 }))));
+    const s = new Session(config, provider, tokens(), { fetch: f as unknown as typeof fetch });
+    const renewal = s.renew();
+    const out = s.signOut(ORIGIN);
+    s.clear();
+    release(json({ access_token: "SYNTH-a2", expires_in: 300 }));
+    await out;
+    expect(await renewal).toBe(false);
+    expect(f.mock.calls.filter((c) => c[0] === provider.revocationEndpoint).map((c) => form(c[1])["token"])).toEqual(["SYNTH-r1"]);
   });
 
   test("during a renewal that fails, and with the page cleared meanwhile, revokes the refresh token it gives back", async () => {

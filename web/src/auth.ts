@@ -242,12 +242,16 @@ export class Session {
     if (answer.kind !== "ok") {
       // Maybe never delivered, so maybe still valid at the provider (CP2-F2).
       this.#revocable ??= refresh;
+      // §9.3 item 3: renewal has failed, so this pair, now without a refresh token, goes to no new
+      // tab, which would take it for a provider that does not rotate and renew by the redirect.
+      if (this.#tokens === current) this.#spent = true;
       return false;
     }
     // Signed out, cleared or replaced meanwhile: the new pair is not kept, and its refresh token,
-    // which nothing else holds, is revoked so that it does not outlive the sign-out.
+    // which nothing else holds, is revoked so that it does not outlive the sign-out; a provider
+    // that sent none left the one sent valid (CP2-F2).
     if (this.#tokens !== current) {
-      await this.#revoke(answer.body.refresh_token);
+      await this.#revoke(answer.body.refresh_token || refresh);
       return false;
     }
     const id = typeof answer.body.id_token === "string" ? claims(answer.body.id_token) : undefined;
