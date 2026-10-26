@@ -105,7 +105,7 @@ func TestContextsTokensAndOutput(t *testing.T) {
 	}
 	wg.Wait()
 	var contexts client.Config
-	r = f.ctl(nil, "", "context", "list", "-o", "json")
+	r = f.ctl(nil, "", "context", "-o", "json", "list")
 	if json.Unmarshal([]byte(r.out), &contexts); len(contexts.Contexts) != 9 {
 		t.Errorf("after 8 concurrent adds: %s", r.out)
 	}
@@ -143,8 +143,20 @@ func TestRequestCore(t *testing.T) {
 	f.want(f.ctl(nil, "", "context", "add", "moved", "--server", in.URL, "--certificate-authority", in.ca), 1,
 		`302 Found redirecting to "https://bronzeward.example.invalid/livez"`)
 	in.set(nil, nil)
-	f.want(f.ctl(nil, "", "context", "add", "lab", "--server", in.URL, "--certificate-authority", in.ca,
-		"--automation-token-file", f.tokenFile), 0)
+	// Relative paths are kept absolute.
+	cwd, _ := os.Getwd()
+	relCA, err1 := filepath.Rel(cwd, in.ca)
+	relToken, err2 := filepath.Rel(cwd, f.tokenFile)
+	if err1 != nil || err2 != nil {
+		t.Fatal(err1, err2)
+	}
+	f.want(f.ctl(nil, "", "context", "add", "lab", "--server", in.URL, "--certificate-authority", relCA,
+		"--automation-token-file", relToken), 0, "the bundle "+in.ca)
+	config := filepath.Join(f.home, "bronzeward")
+	if cfg, _ := os.ReadFile(filepath.Join(config, "config.yaml")); !strings.Contains(string(cfg), "certificateAuthority: "+in.ca) ||
+		!strings.Contains(string(cfg), "tokenFile: "+f.tokenFile) {
+		t.Errorf("relative paths were not kept absolute:\n%s", cfg)
+	}
 	before := f.acts()
 	notice := "The installation entered recovery mode or was restored"
 	if r := f.ctl(nil, "", "whoami"); r.code != 0 || strings.Contains(r.err, notice) {
@@ -171,17 +183,23 @@ func TestRequestCore(t *testing.T) {
 	if n := strings.Count(strings.Join(in.requests(), "\n"), "/api/v1/server"); n != 2 {
 		t.Errorf("GET /server sent %d times, want 2: %v", n, in.requests())
 	}
-	config := filepath.Join(f.home, "bronzeward")
 	cfg, _ := os.ReadFile(filepath.Join(config, "config.yaml"))
 	if !strings.Contains(string(cfg), "lastEpoch: ep_BWSYNTH-other") {
 		t.Errorf("the new epoch was not kept:\n%s", cfg)
 	}
 
-	// A new epoch that cannot be kept fails the command, naming the context.
+	// A new epoch that cannot be kept fails the command, naming the context. Root writes past
+	// the mode, so the check needs another user.
 	in.set(nil, func(r *http.Response) { r.Header.Set("Bronzeward-Epoch", "ep_BWSYNTH-third") })
-	os.Chmod(config, 0o500)
-	f.want(f.ctl(nil, "", "whoami"), 1, "lab ("+in.URL+"): keeping the epoch and start mode")
-	os.Chmod(config, 0o700)
+	if os.Geteuid() != 0 {
+		if err := os.Chmod(config, 0o500); err != nil {
+			t.Fatal(err)
+		}
+		f.want(f.ctl(nil, "", "whoami"), 1, "lab ("+in.URL+"): keeping the epoch and start mode")
+		if err := os.Chmod(config, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	// A redirect whose body is cut short is reported, not resent.
 	in.set(func(w http.ResponseWriter, r *http.Request) bool {
@@ -221,12 +239,12 @@ func TestRequestCore(t *testing.T) {
 	})
 	f.want(f.ctl(nil, "", "whoami"), 0, "GET /api/v1/identity answered without Bronzeward-Epoch, a server defect")
 
-	failures := 2
+	var failures atomic.Int32
+	failures.Store(2)
 	in.set(func(w http.ResponseWriter, r *http.Request) bool {
-		if !on("/identity")(r) || failures == 0 {
+		if !on("/identity")(r) || failures.Add(-1) < 0 {
 			return false
 		}
-		failures--
 		problem(w, http.StatusServiceUnavailable, "dependency-unavailable", "")
 		return true
 	}, nil)
