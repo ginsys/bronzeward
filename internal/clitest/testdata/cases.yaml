@@ -80,7 +80,7 @@
   expect:
     client: discards the cursor and restarts the list, a given cursor included; runs the epoch handling only when the epoch changed; a failed GET /server re-read fails the list instead
     server: answers every read but the refused ones
-    shown: '"reading the list again from its start" the first three times; the epoch notice the second time only; every machine once, in order, or the first page; exit 0; the last time "API revision 1", no restart, exit 1'
+    shown: '"reading the list again from its start" the first three times; the epoch notice on each epoch change, never the first time; every machine once, in order, or the first page; exit 0; the last time "API revision 1", no restart, exit 1'
     absent: [token in stdout, stderr, argv]
 
 - id: REC-01
