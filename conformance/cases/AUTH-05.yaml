@@ -12,5 +12,6 @@ expect:
   absent: [token in the harness log, retained artifacts or browser storage]
 runs:
   web:
-    check: web/e2e/auth/fixture.e2e.ts, mise run browser-auth; the cleared credential in web/src/request.test.ts, mise run web
+    check: web/e2e/auth/fixture.e2e.ts, mise run browser-auth; the client's onRevoked call in web/src/request.test.ts, mise run web
     browsers: [chrome, edge, firefox, firefox-esr]
+    covers: the shown text and no new authorization request. That the tokens are cleared is checked only up to the client's onRevoked call; the page's own clearing in web/src/app.tsx is not observed, since a browser cannot read the page's memory
