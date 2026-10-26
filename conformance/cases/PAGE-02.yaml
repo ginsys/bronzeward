@@ -1,0 +1,19 @@
+id: PAGE-02
+setup: as PAGE-01 with 60 machines; after the first page is shown, the deployment restarted with -recovery-start on the same database and its entry made as h-recovery outside the page (one synthetic database backup)
+action: ask for the next page with the cursor read before the entry
+exchange:
+  - request: GET /api/v1/machines?cursor=<cursor of the old epoch>
+    headers: ["Authorization: Bearer <token>", "Accept: application/json"]
+  - request: GET /api/v1/machines
+    headers: ["Authorization: Bearer <token>", "Accept: application/json"]
+fault: recovery mode entered between two pages
+expect:
+  server: the old cursor refused 400 cursor-invalid with the new epoch; the first page served again
+  client: the answer discarded with its epoch, the change handled as client contracts §8.5, and the list read again from its start
+  shown: the epoch-change notice and the list's first 50 machines again, with more pages to read
+  absent: [token in the harness log, retained artifacts or browser storage]
+runs:
+  web:
+    check: web/e2e/auth/inventory.e2e.ts, mise run browser-auth; a cursor refused without an epoch change in web/src/list.test.ts, mise run web
+    browsers: [chrome, edge, firefox, firefox-esr]
+    covers: the machine list
