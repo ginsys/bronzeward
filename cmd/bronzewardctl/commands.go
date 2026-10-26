@@ -253,7 +253,8 @@ func (e *env) logoutCmd(args []string) error {
 	if p == "" {
 		return fmt.Errorf("%s: this context has no token file (oidc.tokenFile), so no sign-in is stored", x.Where())
 	}
-	t, err := client.ReadTokens(p)
+	// Read under the renewal lock: a renewal it waited for may have stored a newer token.
+	t, err := client.ClearTokens(p)
 	unreadable := errors.Is(err, client.ErrNotTokenFile)
 	if err != nil && !unreadable {
 		return fmt.Errorf("%s: %w", x.Where(), err)
@@ -261,9 +262,6 @@ func (e *env) logoutCmd(args []string) error {
 	if t == nil && !unreadable {
 		_, err = fmt.Fprintf(e.out, "Not signed in to %s: the token file %s does not exist.\n", x.Where(), p)
 		return err
-	}
-	if err := client.ClearTokens(p); err != nil {
-		return fmt.Errorf("%s: %w", x.Where(), err)
 	}
 	if unreadable {
 		_, err = fmt.Fprintf(e.out, "Signed out of %s: the token file %s was unreadable and is removed.\n", x.Where(), p)

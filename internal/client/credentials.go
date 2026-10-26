@@ -55,17 +55,20 @@ func ReadTokens(p string) (*Tokens, error) {
 		return nil, automationFile(p)
 	}
 	var t Tokens
-	if json.Unmarshal(b, &t) != nil || t.AccessToken == "" {
+	if json.Unmarshal(b, &t) == nil && t.AccessToken != "" {
+		return &t, nil
+	}
+	if json.Unmarshal(b, new(map[string]json.RawMessage)) == nil {
 		return nil, fmt.Errorf("token file %s: %w", p, ErrNotTokenFile)
 	}
-	return &t, nil
+	return nil, fmt.Errorf("token file %s holds neither bronzewardctl's tokens nor an automation token; bronzewardctl leaves it as it is", p)
 }
 
-// ErrNotTokenFile is a token file that holds neither tokens nor an automation token.
+// ErrNotTokenFile is a token file of this client's, a JSON object, that holds no access token.
 var ErrNotTokenFile = errors.New("not a bronzewardctl token file")
 
-// automation is the content of a file holding an automation token, as AutomationToken reads one.
-func automation(b []byte) bool { return bytes.HasPrefix(bytes.TrimLeft(b, " \t\r\n"), []byte("bwt_")) }
+// automation is the content of a file holding an automation token, as automationToken reads one.
+func automation(b []byte) bool { return bytes.HasPrefix(bytes.TrimSpace(b), []byte("bwt_")) }
 
 func automationFile(p string) error {
 	return fmt.Errorf("token file %s holds an automation token; bronzewardctl neither signs in with it nor writes or clears it", p)
@@ -114,19 +117,23 @@ func WriteTokens(p string, t *Tokens) error {
 
 // ClearTokens removes the token file, as logout and an identity-revoked answer do (§8.2), under
 // the renewal lock, so that a renewal in another process finds it gone instead of writing it back.
-func ClearTokens(p string) error {
+// It returns the tokens it removed, read under the lock, and nil when there was no file. A file of
+// this client's that holds no access token is removed too, reported as ErrNotTokenFile; any other
+// file is left as it is.
+func ClearTokens(p string) (*Tokens, error) {
 	unlock, err := renewalLock(p)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer unlock()
-	if err := operators(p); err != nil {
-		return err
+	t, err := ReadTokens(p)
+	if err != nil && !errors.Is(err, ErrNotTokenFile) || t == nil && err == nil {
+		return nil, err
 	}
-	if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
+	if rm := os.Remove(p); rm != nil && !errors.Is(rm, os.ErrNotExist) {
+		return nil, rm
 	}
-	return nil
+	return t, err
 }
 
 // Claims are an access token's payload, read without verification: the client's own reading
@@ -202,7 +209,7 @@ func (s *signIn) expiring() bool {
 	return c != nil && time.Until(c.ExpiresAt()) < renewBefore
 }
 
-// renew replaces the access token (§9.5) under the context's renewal lock (decision T6 of #254):
+// renew replaces the access token (§9.5) under the token file's renewal lock (decision T6 of #254):
 // once it holds the lock it reads the stored sign-in again and uses the pair another process
 // stored meanwhile instead of refreshing, since a rotated refresh token works once. A failure
 // leaves the current token in use.
@@ -357,7 +364,7 @@ func (c *Client) signedIn(p *Problem) {
 	case p.Status == http.StatusUnauthorized:
 		p.Reading = c.reading()
 	case p.Code() == "identity-revoked" && c.signIn.file != "":
-		if err := ClearTokens(c.signIn.file); err != nil {
+		if _, err := ClearTokens(c.signIn.file); err != nil && !errors.Is(err, ErrNotTokenFile) {
 			p.Cleared = fmt.Sprintf("Clearing the stored sign-in failed: %v.", err)
 		} else {
 			p.Cleared = "The stored sign-in was cleared; signing in again does not restore access."
