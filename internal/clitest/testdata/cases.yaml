@@ -109,7 +109,7 @@
   expect:
     client: no renewal without a refresh token; adds its own reading, labelled as such
     server: answers 401 unauthenticated with no reason
-    shown: '"bronzewardctl''s own reading of the token, not the server''s reason:" then "Your sign-in expired", "The token is from <iss>/other; this context expects <iss>", "not issued for bronzeward", "lives longer than this server accepts", or "Not accepted by human" for the last two; exit 1'
+    shown: '"bronzewardctl''s own reading of the token, not the server''s reason:" then "Your sign-in expired", "The token is from <iss>/other; this context expects <iss>", "not issued for bronzeward", "lives longer than this server accepts", "Not accepted by human" for alg-none and groups-not-array, or "The identity provider sent an ID token, or an access token without jti" for id-token-nonce, id-token-at-hash and no-jti; exit 1'
     absent: [token in stdout, stderr, argv]
 
 - id: AUTH-03
