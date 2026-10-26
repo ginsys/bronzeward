@@ -28,25 +28,27 @@ import (
 // discovery: "down" answers 503 with a body of control characters, "bare" 503 with no reason
 // phrase and "phrase" with the provider's own, "garbage" 200 with a body that is no document,
 // "moved" redirects to plain http off loopback, "fragment" to an empty fragment, "other" names
-// another issuer, and "keys" keys on plain http off loopback.
+// another issuer, and "keys" keys on plain http off loopback. verification, when set, is the
+// device grant's verification_uri.
 type provider struct {
 	iss *issuer.Issuer
 
-	mu         sync.Mutex
-	discovery  string
-	query      string
-	seen       string
-	endpoint   any
-	revocation func() (int, any)
-	revoked    []url.Values
-	answer     func(rt string) (int, any)  // the refresh grant; nil refuses it
-	callback   func(url.Values) url.Values // edits the authorization answer
-	nonce      string                      // an ID token nonce other than the request's
-	codes      map[string]authorization    // codes issued and not yet exchanged
-	request    url.Values                  // the last authorization request
-	calls      atomic.Int32                // refresh redemptions
-	approved   atomic.Bool                 // the operator approved the device request
-	exchange   atomic.Int32                // code exchanges
+	mu           sync.Mutex
+	discovery    string
+	verification string
+	query        string
+	seen         string
+	endpoint     any
+	revocation   func() (int, any)
+	revoked      []url.Values
+	answer       func(rt string) (int, any)  // the refresh grant; nil refuses it
+	callback     func(url.Values) url.Values // edits the authorization answer
+	nonce        string                      // an ID token nonce other than the request's
+	codes        map[string]authorization    // codes issued and not yet exchanged
+	request      url.Values                  // the last authorization request
+	calls        atomic.Int32                // refresh redemptions
+	approved     atomic.Bool                 // the operator approved the device request
+	exchange     atomic.Int32                // code exchanges
 }
 
 type authorization struct{ challenge, nonce, redirect string }
@@ -162,8 +164,14 @@ func (p *provider) wrap(iss *issuer.Issuer) http.Handler {
 		http.Redirect(w, r, q.Get("redirect_uri")+"?"+back.Encode(), http.StatusFound)
 	})
 	mux.HandleFunc("POST /device", func(w http.ResponseWriter, r *http.Request) {
+		p.mu.Lock()
+		verify := p.verification
+		p.mu.Unlock()
+		if verify == "" {
+			verify = iss.URL + "/activate?client=cli"
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"device_code": "BWSYNTH-device", "user_code": "BWSY-NTH1",
-			"verification_uri": iss.URL + "/activate?client=cli", "expires_in": 60, "interval": 1})
+			"verification_uri": verify, "expires_in": 60, "interval": 1})
 	})
 	mux.HandleFunc("GET /revoked", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, http.StatusOK, map[string]any{}) })
 	mux.HandleFunc("POST /revoke", func(w http.ResponseWriter, r *http.Request) {

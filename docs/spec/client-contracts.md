@@ -765,7 +765,10 @@ current token expires
 2. Headless use, where no browser runs on the host, uses the device-authorization grant only
    (decision D4 (a)): the CLI prints the user code and the verification URI, shows the URI's host
    prominently so that a lookalike prompt stands out, and polls the token endpoint. There is no
-   fallback to a loopback redirect over a forwarded port.
+   fallback to a loopback redirect over a forwarded port. A sign-in the CLI starts by itself
+   (item 3's memory-only case) on a host without a desktop session uses this grant. An explicit
+   `bronzewardctl login` keeps item 1's grant unless `--device` is given, because a browser may
+   still run on the host without one, for example on another console.
 3. **Store.** The refresh token and the current access token are kept in the operating system's
    credential store (Secret Service, Keychain or Windows Credential Manager) under the context's
    name. Where no store is available (decision D2 (a) and (b)), the tokens are kept in memory for
