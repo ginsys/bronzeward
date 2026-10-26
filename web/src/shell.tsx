@@ -1,9 +1,11 @@
 // The web shell every screen shares (ginsys/bronzeward#333): the header wireframe's identity, roles,
-// epoch and sign-out from GET /identity, the navigation, the footer's versions, and the client
-// contracts §7 compatibility check, which GET /server answers before any page reads data.
+// epoch and sign-out from GET /identity, the navigation, the footer's versions, the client
+// contracts §7 compatibility check, which GET /server answers before any page reads data, and the
+// recovery banner, start mode and epoch-change notice of §8.5.
 
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useId, useReducer, useRef, useState } from "react";
-import { Client, type ClientOptions, type ReadResult } from "./request.ts";
+import { PreEntry, type Recovery, RecoveryBanner, type StartMode, startModeOf, startRefusal } from "./recovery.tsx";
+import { Client, type ClientOptions, EPOCH_CHANGED, type ReadResult } from "./request.ts";
 import { follow, PAGES, usePath } from "./router.ts";
 import { Disconnected, HumanOnly, Loading, Offline, ProblemFields, problemFields, Refused, Status } from "./states.tsx";
 import type { components } from "./api/v1";
@@ -118,28 +120,47 @@ export const Deprecations = ({ routes }: { routes: readonly string[] }) =>
 
 export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, onDeprecation, signOut, notices = [] }: SignedInProps & { notices?: readonly string[] }) {
   const [path, go, query] = usePath();
+  const [server, setServer] = useState<Load<Server>>({ kind: "loading" });
+  const [identity, setIdentity] = useState<Load<Identity>>({ kind: "loading" });
+  const [recovery, setRecovery] = useState<Load<Recovery>>({ kind: "loading" });
+  const [recoveryMode, setRecoveryMode] = useState(false);
+  const [mode, setMode] = useState<StartMode>("unknown");
+  const [epochChanged, setEpochChanged] = useState(false);
+  const [conn, observe] = useReducer((c: Connection, [e, at]: [ConnectionEvent, Date]) => connection(c, e, at), {});
+  const offline = offlineSince(conn);
+  // Bumped to read again: back online, asked by the operator, or after a new epoch.
+  const [again, setAgain] = useState(0);
+  const readAt = useRef<Date | undefined>(undefined);
+  const shown = useRef({ server: false, identity: false, recovery: false });
   const [client] = useState(() => {
-    const c = new Client({ ...auth, onDeprecation });
+    const c = new Client({
+      ...auth,
+      onDeprecation,
+      // §8.5: what was read is discarded with its epoch, and GET /server read again for the mode.
+      onEpochChange: () => {
+        setEpochChanged(true);
+        setServer({ kind: "loading" });
+        setIdentity({ kind: "loading" });
+        setRecovery({ kind: "loading" });
+        shown.current = { server: false, identity: false, recovery: false };
+        setAgain((n) => n + 1);
+      },
+      onRecoveryModeChange: setRecoveryMode,
+    });
     c.setView({ principal, route: location.pathname, query: location.search });
     return c;
   });
-  const [server, setServer] = useState<Load<Server>>({ kind: "loading" });
-  const [identity, setIdentity] = useState<Load<Identity>>({ kind: "loading" });
-  const [conn, observe] = useReducer((c: Connection, [e, at]: [ConnectionEvent, Date]) => connection(c, e, at), {});
-  const offline = offlineSince(conn);
-  const [online, setOnline] = useState(0);
-  const readAt = useRef<Date | undefined>(undefined);
-  const shown = useRef({ server: false, identity: false });
 
   // A transport failure keeps the data this resource showed under the offline banner; without any,
   // it is shown as the disconnected state.
   // A refusal ends the page whichever read carried it, a superseded one too: the client already
   // dropped the credentials it refused. Any other answer of a superseded read says nothing more.
-  const settle = useCallback(<T,>(res: ReadResult<T>, set: (r: Load<T>) => void, what: "server" | "identity", live: () => boolean) => {
+  const settle = useCallback(<T,>(res: ReadResult<T>, set: (r: Load<T>) => void, what: "server" | "identity" | "recovery", live: () => boolean) => {
     if (res.kind === "discarded") return;
     if (res.kind === "unauthenticated") return onUnauthenticated(res);
     if (res.kind === "revoked") return onRevoked(res);
     if (!live()) return;
+    if (startRefusal(res)) setMode("recovery");
     const now = new Date();
     const e = observed(res, shown.current[what]);
     if (e !== undefined) observe([e, now]);
@@ -153,17 +174,22 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
   // Reads still in flight when the shell goes (a refusal, sign-out) are discarded, and renew no more.
   useEffect(() => () => client.setView({ principal: "", route: "", query: "" }), [client]);
 
-  // Read until it answers with data; again when the browser is back online. A read an online event
-  // or a new page superseded is ignored when it completes, so it cannot replace a newer answer.
+  // Read until it answers with data, each time the page reads again. A read a newer one or a new
+  // page superseded is ignored when it completes, so it cannot replace a newer answer.
   const known = server.kind === "ok";
   useEffect(() => {
     if (known) return;
     let live = true;
-    void client.read<Server>("/server").then((res) => settle(res, setServer, "server", () => live));
+    void client.read<Server>("/server").then((res) => {
+      const m = startModeOf(res);
+      if (m !== undefined && live) setMode(m);
+      settle(res, setServer, "server", () => live);
+    });
     return () => void (live = false);
-  }, [client, known, online, settle]);
+  }, [client, known, again, settle]);
 
-  // The header's identity, read again on every page and when the browser is back online.
+  // The header's identity, and the recovery banner's scopes while in recovery mode, read again on
+  // every page and each time the page reads again.
   const compatible = known && server.data.apiRevision >= MIN_API_REVISION;
   useEffect(() => {
     if (!compatible) return;
@@ -171,13 +197,19 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
     let live = true;
     void client.read<Identity>("/identity").then((res) => settle(res, setIdentity, "identity", () => live));
     return () => void (live = false);
-  }, [client, compatible, path, query, principal, online, settle]);
+  }, [client, compatible, path, query, principal, again, settle]);
+  useEffect(() => {
+    if (!compatible || !recoveryMode) return;
+    let live = true;
+    void client.read<Recovery>("/recovery").then((res) => settle(res, setRecovery, "recovery", () => live));
+    return () => void (live = false);
+  }, [client, compatible, recoveryMode, path, query, again, settle]);
 
   useEffect(() => {
     const down = () => observe(["offline", new Date()]);
     const up = () => {
       observe(["online", new Date()]);
-      setOnline((n) => n + 1);
+      setAgain((n) => n + 1);
     };
     addEventListener("offline", down);
     addEventListener("online", up);
@@ -191,6 +223,8 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
 
   let main: ReactNode;
   if (server.kind === "loading") main = <Loading what="the server's version" />;
+  // GET /server is refused this way only before a recovery start's entry (§8.5 item 1).
+  else if (startRefusal(server)) main = <PreEntry onRead={() => setAgain((n) => n + 1)} />;
   else if (server.kind !== "ok") main = server.kind !== "discarded" && <Failure res={server} sub={sub} />;
   else if (!compatible) main = <Status>{incompatible(server.data.apiRevision)}</Status>;
   else if (identity.kind === "loading") main = <Loading what="your identity" />;
@@ -210,6 +244,8 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
           </p>
         )}
         <button type="button" onClick={signOut}>Sign out</button>
+        {recoveryMode && <RecoveryBanner recovery={recovery.kind === "ok" ? recovery.data : undefined} mode={mode} />}
+        {epochChanged && <Status testid="epoch-changed">{EPOCH_CHANGED}.</Status>}
         <Deprecations routes={notices} />
         {offline !== undefined && <Offline since={offline} readAt={readAt.current} />}
         {id !== undefined && (
