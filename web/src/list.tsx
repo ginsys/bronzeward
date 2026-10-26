@@ -27,7 +27,7 @@ export interface Reads {
 }
 const ReadContext = createContext<Reads | undefined>(undefined);
 export const ReadsProvider = ReadContext.Provider;
-const useReads = () => useContext(ReadContext)!;
+export const useReads = () => useContext(ReadContext)!;
 
 // What a view shows until its read answers with data: loading, nothing for a discarded read, or the
 // failure; undefined once there is data.
@@ -41,7 +41,7 @@ export function usePending(load: Load<unknown>, what: string): ReactNode | undef
 export const RESTARTED = "The server no longer accepted this list's position, so it was read again from its start.";
 
 export interface Listed<T> { items: T[]; next: string | undefined; restarted: boolean }
-type Page<T> = { items: T[]; next?: string };
+export type Page<T> = { items: T[]; next?: string };
 
 // Reads on from `from`: one page, or every page left when `all`. A 400 cursor-invalid drops the
 // items read so far and restarts once from the first page.
