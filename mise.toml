@@ -369,9 +369,15 @@ go build -o bin/webhost ./fixtures/webhost
 canary="BWSYNTH-web-$(od -An -tx1 -N8 /dev/urandom | tr -d ' \n')"
 password=$(. .dev/idp/idp.env && printf %s "$BW_TEST_IDP_PASSWORD")
 rm -rf web/e2e/out
+mkdir -p web/e2e/out
 cd web
-BW_WEB_CANARY=$canary npx wdio run e2e/auth.conf.ts
-node e2e/scan.ts e2e/out "$canary" "$password" @../.dev/idp/login.pat
+# The run's console goes to a file the scan reads, not to the job log: a failing expect prints its
+# received value. The scan runs after a failed run too, and the console is shown only once it passes.
+rc=0
+BW_WEB_CANARY=$canary npx wdio run e2e/auth.conf.ts > e2e/out/console.log 2>&1 || rc=$?
+node e2e/scan.ts e2e/out "$canary" "$password" @../.dev/idp/login.pat || exit 1
+cat e2e/out/console.log
+exit "$rc"
 '''
 
 [tasks.upstream-sync]

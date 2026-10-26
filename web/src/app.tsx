@@ -64,6 +64,8 @@ export function App() {
     channel.onmessage = (e: MessageEvent) => {
       if ((e.data as { type?: unknown } | null)?.type !== "signed-out") return;
       end();
+      // Nothing read before stays on screen, even if the navigation stalls or is cancelled.
+      flushSync(() => setView({ kind: "signing-out" }));
       location.replace(SIGNED_OUT_PATH);
     };
 
@@ -71,15 +73,16 @@ export function App() {
       location.assign(await beginSignIn(config, provider, location.pathname + location.search + location.hash, sessionStorage, location.origin));
     };
 
-    // §9.5 item 1: renew before less than 60 s remains; a failed renewal keeps the current token.
-    const schedule = () => {
-      clearTimeout(timer);
-      const at = session?.expiresAt;
-      if (at === undefined) return;
-      timer = setTimeout(() => void session?.renew().then((ok) => ok && schedule()), renewDelay(at, Date.now()));
-    };
-
     const signedIn = async (config: ClientConfig, provider: Provider, s: Session) => {
+      // §9.5 item 1: renew before less than 60 s remains; a failed renewal keeps the current token.
+      // §9.3 item 3: without a rotating refresh token, the renewal is the sign-in redirect.
+      const schedule = () => {
+        clearTimeout(timer);
+        const at = session?.expiresAt;
+        if (at === undefined) return;
+        const renew = () => (session?.renewsByRedirect ? void signIn(config, provider) : void session?.renew().then((ok) => ok && schedule()));
+        timer = setTimeout(renew, renewDelay(at, Date.now()));
+      };
       session = s;
       schedule();
       const client = new Client({
