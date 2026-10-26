@@ -25,7 +25,8 @@ commands:
   context add <name> --server <url> [--certificate-authority <file>] [--automation-token-file <path>]
   context add <name> --server <url> --issuer <url> --client-id <id> [--audience <aud>] [--scopes a,b]
               [--oidc-certificate-authority <file>] [--oidc-token-file <path>]
-  context add <name> --from <url> [--server <url>] [--scopes a,b]
+  context add <name> --from <url> [--server <url>] [--certificate-authority <file>] [--scopes a,b]
+              [--oidc-certificate-authority <file>] [--oidc-token-file <path>]
               the issuer, audience, CLI client ID and scopes from <url>/bronzeward-client.json
   version     this client's version, the server's and its API revision
   whoami      the identity, roles and epoch the server sees, and this client's reading of a sign-in

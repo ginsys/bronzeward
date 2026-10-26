@@ -9,10 +9,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"go.yaml.in/yaml/v3"
+
+	"github.com/ginsys/bronzeward/internal/client"
 )
 
 // scan fails on any JWT, refresh token or the fixture's automation token in r (§9.2 item 4).
@@ -185,6 +190,37 @@ func TestLogin(t *testing.T) {
 		f.want(r, 0, "Signed in to file")
 		// --no-input forbids the wait for the operator.
 		f.want(f.ctl(nil, "", "--context", "file", "--no-input", "login"), 1, "which --no-input forbids")
+		// A sign-in that cannot be kept, here over an automation token, has its refresh token
+		// revoked, and says so when the provider refuses.
+		if err := os.WriteFile(file, []byte("bwt_BWSYNTH-automation\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		f.idp.login(nil, "")
+		f.want(login(nil, "file"), 1, "holds an automation token", "its refresh token is revoked at the identity provider")
+		if r := f.idp.revocations(); len(r) != 1 || r[0].Get("token") != "BWSYNTH-rt-1" {
+			t.Errorf("revoked %v, want the new refresh token", r)
+		}
+		f.idp.revoking(func() (int, any) { return http.StatusBadRequest, map[string]string{"error": "invalid_request"} })
+		f.idp.login(nil, "")
+		f.want(login(nil, "file"), 1, "holds an automation token", "its refresh token is not revoked, so it stays usable",
+			"refused the revocation")
+		f.idp.revoking(func() (int, any) { return http.StatusOK, map[string]any{} })
+		os.Remove(file)
+	})
+
+	// A context edited by hand is refused before its store is reached.
+	t.Run("hand-edited", func(t *testing.T) {
+		f.edit(func(c *client.Config) {
+			c.Contexts = append(c.Contexts,
+				client.Context{Name: "a/b", Server: f.base, Credential: "oidc", OIDC: &client.OIDC{Issuer: f.iss.URL, ClientID: "BWSYNTH-cli"}},
+				client.Context{Name: "bare", Server: f.base, Credential: "oidc"})
+		})
+		defer f.edit(func(c *client.Config) {
+			c.Contexts = slices.DeleteFunc(c.Contexts, func(x client.Context) bool { return x.Name == "a/b" || x.Name == "bare" })
+		})
+		f.want(f.ctl(nil, "", "--context", "a/b", "logout"), 1, "without spaces or slashes")
+		f.want(f.ctl(nil, "", "--context", "bare", "logout"), 1, "an oidc context needs its issuer and client ID")
+		f.want(f.ctl(nil, "", "--context", "bare", "login"), 1, "an oidc context needs its issuer and client ID")
 	})
 
 	// Keys on plain http off loopback would let an on-path host sign the ID token.
@@ -237,6 +273,15 @@ func TestLogin(t *testing.T) {
 		f.want(f.interact(nil, approve, "--context", "file", "login", "--device"), 0, "open "+f.iss.URL+"/activate?client=cli on any device",
 			"Check that the page's host is: "+strings.ToUpper(host), "Signed in to file", "kept in the token file "+file)
 		f.want(f.signedIn("--context", "file", "whoami"), 0, "subject h-viewer")
+		// A verification page on plain http off loopback is refused before it is shown.
+		f.idp.mu.Lock()
+		f.idp.verification = "http://idp.example.invalid/activate"
+		f.idp.mu.Unlock()
+		r := f.ctl(nil, "", "--context", "file", "login", "--device")
+		f.idp.mu.Lock()
+		f.idp.verification = ""
+		f.idp.mu.Unlock()
+		f.want(r, 1, "the identity provider's verification_uri", "must be https")
 	})
 
 	t.Run("logout revokes", func(t *testing.T) {
@@ -288,5 +333,34 @@ func TestLogin(t *testing.T) {
 		f.want(ctl("context", "remove", "store"), 0, `Context "store" removed.`)
 		add(env, "store")
 		f.want(ctl("--context", "store", "whoami"), 1, "nothing is stored in the system credential store")
+		// An entry left under a context edited to automation is never read for it.
+		f.want(login(env, "store"), 0, "kept in the system credential store")
+		f.edit(func(c *client.Config) {
+			if x := c.Find("store"); x != nil {
+				x.Credential, x.OIDC = "automation", nil
+			}
+		})
+		f.want(login(env, "store"), 1, "an automation context has no sign-in")
 	})
+}
+
+// edit changes the contexts file by hand, as an operator may.
+func (f *fixture) edit(change func(*client.Config)) {
+	f.t.Helper()
+	path := filepath.Join(f.home, "bronzeward", "config.yaml")
+	b, err := os.ReadFile(path)
+	var c client.Config
+	if err == nil {
+		err = yaml.Unmarshal(b, &c)
+	}
+	if err != nil {
+		f.t.Fatalf("contexts file: %v", err)
+	}
+	change(&c)
+	if b, err = yaml.Marshal(&c); err == nil {
+		err = os.WriteFile(path, b, 0o600)
+	}
+	if err != nil {
+		f.t.Fatal(err)
+	}
 }

@@ -213,15 +213,20 @@ func openBrowser(u string) bool {
 
 // SignIn runs Login and keeps the sign-in under the renewal lock, so that neither a renewal nor
 // an identity-revoked clear in another process interleaves with the write; it returns where it is
-// kept. The credential store is read first, so one that fails is known before the sign-in. A
-// sign-in that cannot be kept has its refresh token revoked.
+// kept. A credential store that fails is refused before the sign-in, so nothing is issued that
+// cannot be kept; a sign-in whose write still fails has its refresh token revoked.
 func SignIn(x *Context, device bool, prompts io.Writer) (*Tokens, string, error) {
 	if err := x.Check(); err != nil {
 		return nil, "", x.fail(err)
 	}
+	if x.Credential != "oidc" {
+		return nil, "", x.fail(errors.New("an automation context has no sign-in"))
+	}
 	s := openStore(x)
-	if s.file == "" {
-		s.load()
+	if s.file == "" && s.none == "" {
+		if _, err := s.read(); err != nil {
+			return nil, "", x.fail(fmt.Errorf("the system credential store failed, so a sign-in could not be kept there: %w", err))
+		}
 	}
 	t, err := Login(x, device, prompts)
 	if err != nil {
@@ -239,11 +244,19 @@ func SignIn(x *Context, device bool, prompts io.Writer) (*Tokens, string, error)
 		return s.save(t)
 	}
 	if err := keep(); err != nil {
-		revoked := "its refresh token is not revoked, so it stays usable until the identity provider expires it"
-		if t.RefreshToken != "" && Revoke(x, t.RefreshToken) == nil {
-			revoked = "its refresh token is revoked at the identity provider"
+		err = fmt.Errorf("keeping the sign-in in %s: %w", s.kept(), err)
+		if t.RefreshToken == "" {
+			return nil, "", x.fail(fmt.Errorf("%w; the identity provider issued no refresh token", err))
 		}
-		return nil, "", x.fail(fmt.Errorf("keeping the sign-in in %s: %w; %s", s.kept(), err, revoked))
+		switch rerr := Revoke(x, t.RefreshToken); {
+		case rerr == nil:
+			err = fmt.Errorf("%w; its refresh token is revoked at the identity provider", err)
+		case errors.Is(rerr, ErrNoRevocation):
+			err = fmt.Errorf("%w; its refresh token is not revoked: the identity provider offers no revocation endpoint, so it stays usable until the provider expires it", err)
+		default:
+			err = errors.Join(fmt.Errorf("%w; its refresh token is not revoked, so it stays usable until the identity provider expires it", err), rerr)
+		}
+		return nil, "", x.fail(err)
 	}
 	return t, s.kept(), nil
 }
