@@ -879,7 +879,10 @@ expiry, at most `maxTokenLifetime` after issue, plus the server's 60 s leeway
 1. `bronzewardctl logout` deletes the context's tokens from the store and from its D2 (b) token
    file, if it has one, revokes the refresh token
    at the provider's revocation endpoint if it has one, and says that an access token already
-   issued remains valid at the server for up to its remaining lifetime plus that leeway.
+   issued remains valid at the server for up to its remaining lifetime plus that leeway. The
+   endpoint is the `revocation_endpoint` of the provider's discovery (RFC 7009, sent as a public
+   client). Without one, logout says the refresh token is not revoked; a refused or failed
+   revocation still deletes the tokens, says the refresh token is not revoked and exits 1.
 2. The web sign-out discards the in-memory tokens and every cached response, revokes the refresh
    token if the provider allows it, tells other open tabs of the same origin to discard theirs
    (assumption S3), and redirects to the provider's end-session endpoint where it offers one. It

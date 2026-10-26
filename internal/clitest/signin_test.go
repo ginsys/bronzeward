@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -19,12 +20,19 @@ import (
 	"github.com/ginsys/bronzeward/internal/client"
 )
 
-// provider adds a token endpoint to the fixture issuer, which has none (client-contracts.md G19),
-// so renewal can be tested: answer redeems a refresh token, and calls counts the redemptions.
+// provider adds a token and a revocation endpoint to the fixture issuer, which has neither
+// (client-contracts.md G19), so renewal and logout can be tested: answer redeems a refresh token,
+// and calls counts the redemptions; query is added to the token endpoint, and seen is the query
+// the last redemption came with. revocation answers a revocation, and revoked lists their forms;
+// while it is nil, discovery names no revocation endpoint.
 type provider struct {
-	mu     sync.Mutex
-	answer func(rt string) (int, any)
-	calls  atomic.Int32
+	mu         sync.Mutex
+	answer     func(rt string) (int, any)
+	calls      atomic.Int32
+	query      string
+	seen       string
+	revocation func() (int, any)
+	revoked    []url.Values
 }
 
 func (p *provider) set(answer func(rt string) (int, any)) {
@@ -34,8 +42,21 @@ func (p *provider) set(answer func(rt string) (int, any)) {
 	p.calls.Store(0)
 }
 
-// wrap serves the issuer's discovery with a token_endpoint added, the token endpoint, and the
-// issuer's other paths unchanged.
+func (p *provider) revoking(answer func() (int, any)) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.revocation, p.revoked = answer, nil
+}
+
+// revocations is what the revocation endpoint was sent since revoking.
+func (p *provider) revocations() []url.Values {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.revoked
+}
+
+// wrap serves the issuer's discovery with the endpoints added, the endpoints, and the issuer's
+// other paths unchanged.
 func (p *provider) wrap(iss *issuer.Issuer) http.Handler {
 	inner := iss.Handler()
 	mux := http.NewServeMux()
@@ -44,14 +65,33 @@ func (p *provider) wrap(iss *issuer.Issuer) http.Handler {
 		inner.ServeHTTP(rec, r)
 		var d map[string]any
 		json.Unmarshal(rec.Body.Bytes(), &d)
-		d["token_endpoint"] = iss.URL + "/token"
+		p.mu.Lock()
+		d["token_endpoint"] = iss.URL + "/token" + p.query
+		if p.revocation != nil {
+			d["revocation_endpoint"] = iss.URL + "/revoke"
+		}
+		p.mu.Unlock()
 		writeJSON(w, http.StatusOK, d)
+	})
+	mux.HandleFunc("POST /revoke", func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		p.mu.Lock()
+		answer := p.revocation
+		p.revoked = append(p.revoked, r.PostForm)
+		p.mu.Unlock()
+		if answer == nil {
+			http.NotFound(w, r)
+			return
+		}
+		status, body := answer()
+		writeJSON(w, status, body)
 	})
 	mux.HandleFunc("POST /token", func(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
 		p.calls.Add(1)
 		p.mu.Lock()
 		answer := p.answer
+		p.seen = r.URL.RawQuery
 		p.mu.Unlock()
 		if answer == nil || r.PostForm.Get("grant_type") != "refresh_token" {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_grant"})
@@ -120,17 +160,20 @@ func (f *fixture) store(path, at, rt string) {
 	}
 }
 
-// hold takes the renewal lock at path as bronzewardctl does, until the returned func.
+// hold takes the renewal lock at path as bronzewardctl does, until the returned func or the end of
+// the test, so that a failed wait leaves no lock behind for the next case.
 func hold(t *testing.T, path string) func() {
 	t.Helper()
 	l, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		t.Fatal(err)
 	}
+	unlock := sync.OnceFunc(func() { l.Close() })
+	t.Cleanup(unlock)
 	if err := syscall.Flock(int(l.Fd()), syscall.LOCK_EX); err != nil {
 		t.Fatal(err)
 	}
-	return func() { l.Close() }
+	return unlock
 }
 
 // waiting returns once n processes are blocked on the flock of path, as /proc/locks lists them. A
@@ -356,29 +399,38 @@ func TestSignIn(t *testing.T) {
 
 	// A logout while another process renews waits for the renewal, then removes the renewed file
 	// and states the renewed token's validity.
+	// The token endpoint answers only once the logout blocks on the renewal lock, which the
+	// renewal holds while it redeems.
 	t.Run("logout during a renewal", func(t *testing.T) {
 		old := f.viewerToken("h-viewer", 270*time.Second, 30*time.Second)
 		f.store(file, old, "BWSYNTH-rt-10")
+		fresh := f.mint("h-viewer", "")
+		release, redeeming := make(chan struct{}), make(chan struct{}, 1)
 		f.idp.set(func(string) (int, any) {
-			time.Sleep(time.Second)
-			return issued(f.mint("h-viewer", ""), "BWSYNTH-rt-11")
+			redeeming <- struct{}{}
+			<-release
+			return issued(fresh, "BWSYNTH-rt-11")
 		})
 		var wg sync.WaitGroup
-		var renewing result
+		var renewing, out result
 		wg.Go(func() { renewing = whoami() })
-		deadline := time.Now().Add(10 * time.Second)
-		for f.idp.calls.Load() == 0 {
-			if time.Now().After(deadline) {
-				t.Fatal("the renewal did not reach the token endpoint within 10 s")
-			}
-			time.Sleep(10 * time.Millisecond)
+		select {
+		case <-redeeming:
+		case <-time.After(10 * time.Second):
+			close(release)
+			t.Fatal("the renewal did not reach the token endpoint within 10 s")
 		}
-		out := f.signedIn("--context", "human", "logout")
-		f.want(out, 0, "Signed out of human")
-		if exp := client.ReadClaims(old).ExpiresAt().UTC().Format("2006-01-02 15:04:05 MST"); strings.Contains(out.out, exp) {
-			t.Errorf("logout states the replaced token's expiry %s: %s", exp, out.out)
-		}
+		wg.Go(func() { out = f.signedIn("--context", "human", "logout") })
+		waiting(t, file+".lock", 1)
+		close(release)
 		wg.Wait()
+		format := func(tok string) string {
+			return client.ReadClaims(tok).ExpiresAt().UTC().Format("2006-01-02 15:04:05 MST")
+		}
+		f.want(out, 0, "Signed out of human", "stays valid at the server until "+format(fresh))
+		if strings.Contains(out.out, format(old)) {
+			t.Errorf("logout states the replaced token's expiry %s: %s", format(old), out.out)
+		}
 		f.want(renewing, 0, "subject h-viewer")
 		if _, err := os.Stat(file); !os.IsNotExist(err) {
 			t.Errorf("the token file is back after the logout: %v", err)
@@ -409,15 +461,108 @@ func TestSignIn(t *testing.T) {
 		}
 	})
 
+	// H2: a pair stored meanwhile with the same access token but another refresh token is adopted,
+	// not redeemed again.
+	t.Run("refresh token replaced while a renewal waits", func(t *testing.T) {
+		at := f.viewerToken("h-viewer", 270*time.Second, 30*time.Second)
+		f.store(file, at, "BWSYNTH-rt-14")
+		f.idp.set(func(string) (int, any) { return http.StatusBadRequest, map[string]string{"error": "invalid_grant"} })
+		unlock := hold(t, file+".lock")
+		var wg sync.WaitGroup
+		var renewing result
+		wg.Go(func() { renewing = whoami() })
+		waiting(t, file+".lock", 1)
+		rt := "BWSYNTH-rt-15"
+		meanwhile := client.Tokens{AccessToken: at, RefreshToken: rt}
+		f.store(file, meanwhile.AccessToken, meanwhile.RefreshToken)
+		unlock()
+		wg.Wait()
+		f.want(renewing, 0, "subject h-viewer")
+		if s := f.stored(file); f.idp.calls.Load() != 0 || *s != meanwhile {
+			t.Errorf("%d redemptions, want 0; the file keeps the pair stored meanwhile: %v", f.idp.calls.Load(), *s == meanwhile)
+		}
+	})
+
+	// H3: a token endpoint with a query is redeemed at, the query kept.
+	t.Run("token endpoint with a query", func(t *testing.T) {
+		f.idp.mu.Lock()
+		f.idp.query = "?tenant=lab"
+		f.idp.mu.Unlock()
+		defer func() { f.idp.mu.Lock(); f.idp.query = ""; f.idp.mu.Unlock() }()
+		f.store(file, f.viewerToken("h-viewer", 270*time.Second, 30*time.Second), "BWSYNTH-rt-16")
+		rt := "BWSYNTH-rt-17"
+		renewed := client.Tokens{AccessToken: f.mint("h-viewer", ""), RefreshToken: rt}
+		f.idp.set(func(string) (int, any) { return issued(renewed.AccessToken, renewed.RefreshToken) })
+		f.want(whoami(), 0, "subject h-viewer")
+		f.idp.mu.Lock()
+		seen := f.idp.seen
+		f.idp.mu.Unlock()
+		if s := f.stored(file); f.idp.calls.Load() != 1 || seen != "tenant=lab" || *s != renewed {
+			t.Errorf("%d redemptions with the query %q, want 1 with tenant=lab; renewed: %v", f.idp.calls.Load(), seen, *s == renewed)
+		}
+	})
+
+	// H1: an identity-revoked answer clears only the refused identity's sign-in. bronzewardctl
+	// cannot sign in yet, so the other subject's sign-in is a synthetic token file, stored while
+	// the refused whoami waits for the lock to clear.
+	t.Run("another sign-in stored before an identity-revoked clear", func(t *testing.T) {
+		f.store(file, f.viewerToken("h-denied", 0, issuer.Lifetime), "")
+		other := f.viewerToken("h-viewer", 0, issuer.Lifetime)
+		unlock := hold(t, file+".lock")
+		var wg sync.WaitGroup
+		var refused result
+		wg.Go(func() { refused = whoami() })
+		waiting(t, file+".lock", 1)
+		f.store(file, other, "BWSYNTH-rt-18")
+		unlock()
+		wg.Wait()
+		f.want(refused, 1, "(identity-revoked)", "The stored sign-in is now for h-viewer at "+f.iss.URL+", not the refused identity, and is kept.")
+		if s := f.stored(file); s.AccessToken != other || s.RefreshToken != "BWSYNTH-rt-18" {
+			t.Error("the other subject's sign-in was not kept as it was")
+		}
+	})
+
+	// F4: logout revokes the refresh token where discovery names a revocation endpoint (RFC 7009).
 	t.Run("logout", func(t *testing.T) {
+		defer f.idp.revoking(nil)
+		f.idp.revoking(func() (int, any) { return http.StatusOK, map[string]any{} })
 		tok := f.mint("h-viewer", "")
 		f.store(file, tok, "BWSYNTH-rt-1")
 		until := client.ReadClaims(tok).ExpiresAt().UTC().Format("2006-01-02 15:04:05 MST")
 		f.want(f.signedIn("--context", "human", "logout"), 0, "Signed out of human", "the token file "+file+" is removed",
 			"The access token already issued stays valid at the server until "+until+", plus the server's 60 s leeway.",
-			"The refresh token is not revoked at the identity provider")
+			"The refresh token is revoked at the identity provider.")
 		if _, err := os.Stat(file); !os.IsNotExist(err) {
 			t.Errorf("the token file is still there: %v", err)
+		}
+		want := url.Values{"token": {"BWSYNTH-rt-1"}, "token_type_hint": {"refresh_token"}, "client_id": {"BWSYNTH-cli"}}
+		if seen := f.idp.revocations(); len(seen) != 1 || seen[0].Encode() != want.Encode() {
+			t.Errorf("the revocation endpoint was sent %d forms, want one with the refresh token, its hint and the client ID", len(seen))
+		}
+		// C1: a document without an access token still has its refresh token revoked, and no
+		// access token's validity is claimed.
+		os.WriteFile(file, []byte(`{"refreshToken":"BWSYNTH-rt-2"}`), 0o600)
+		f.idp.revoking(func() (int, any) { return http.StatusOK, map[string]any{} })
+		f.want(f.signedIn("--context", "human", "logout"), 0, "the token file "+file+" held no access token and is removed",
+			"An access token issued earlier with this sign-in may stay valid at the server until it expires",
+			"The refresh token is revoked at the identity provider.")
+		if seen := f.idp.revocations(); len(seen) != 1 || seen[0].Get("token") != "BWSYNTH-rt-2" {
+			t.Errorf("the refresh-only document's token was not revoked: %d revocations", len(seen))
+		}
+		f.idp.revoking(func() (int, any) { return http.StatusBadRequest, map[string]string{"error": "unsupported_token_type"} })
+		f.store(file, tok, "BWSYNTH-rt-3")
+		f.want(f.signedIn("--context", "human", "logout"), 1, "the token file "+file+" is removed",
+			"The refresh token is not revoked, so it stays usable until the identity provider expires it.",
+			"refused the revocation: 400 Bad Request unsupported_token_type")
+		if _, err := os.Stat(file); !os.IsNotExist(err) {
+			t.Errorf("a refused revocation kept the token file: %v", err)
+		}
+		f.idp.revoking(nil)
+		f.store(file, tok, "BWSYNTH-rt-4")
+		f.want(f.signedIn("--context", "human", "logout"), 0, "the token file "+file+" is removed",
+			"The refresh token is not revoked: the identity provider offers no revocation endpoint")
+		if seen := f.idp.revocations(); len(seen) != 0 {
+			t.Errorf("%d revocations sent where discovery names no endpoint", len(seen))
 		}
 		f.store(file, f.mint("h-viewer", "expired"), "")
 		r := f.signedIn("--context", "human", "logout")
@@ -426,16 +571,17 @@ func TestSignIn(t *testing.T) {
 			t.Errorf("logout names a refresh token none was stored for:\n%s", r.out)
 		}
 		os.WriteFile(file, []byte("{}"), 0o600)
-		f.want(f.signedIn("--context", "human", "logout"), 0, "the token file "+file+" was unreadable and is removed")
+		f.want(f.signedIn("--context", "human", "logout"), 0, "the token file "+file+" held no access token and is removed")
 		if _, err := os.Stat(file); !os.IsNotExist(err) {
-			t.Errorf("the unreadable token file is still there: %v", err)
+			t.Errorf("the document without an access token is still there: %v", err)
 		}
 		os.WriteFile(file, []byte("-----BEGIN OPENSSH PRIVATE KEY-----\n"), 0o600)
 		f.want(f.signedIn("--context", "human", "logout"), 1, "holds neither bronzewardctl's tokens nor an automation token")
 		if _, err := os.Stat(file); err != nil {
 			t.Errorf("logout removed a file that is not bronzewardctl's: %v", err)
 		}
-		for _, foreign := range []string{`{"type":"service_account","private_key":"BWSYNTH-key"}`, `null`, `{"accessToken":""} {}`} {
+		for _, foreign := range []string{`{"type":"service_account","private_key":"BWSYNTH-key"}`, `null`, `{"accessToken":""} {}`,
+			`{"AccessToken":"BWSYNTH-x"}`, `{"accessToken":"BWSYNTH-x"}}`, `{"accessToken":1}`} {
 			os.WriteFile(file, []byte(foreign), 0o600)
 			f.want(f.signedIn("--context", "human", "logout"), 1, "holds neither bronzewardctl's tokens nor an automation token")
 			if b, err := os.ReadFile(file); err != nil || string(b) != foreign {
@@ -443,7 +589,11 @@ func TestSignIn(t *testing.T) {
 			}
 		}
 		os.Remove(file)
+		os.Remove(file + ".lock")
 		f.want(f.signedIn("--context", "human", "logout"), 0, "Not signed in to human")
+		if _, err := os.Stat(file + ".lock"); !os.IsNotExist(err) {
+			t.Errorf("a logout with no token file made a lock file: %v", err)
+		}
 		f.want(f.signedIn("--context", "lab", "logout"), 1, "an automation context has no sign-in")
 		if _, err := os.Stat(f.tokenFile); err != nil {
 			t.Errorf("the automation token file: %v", err)

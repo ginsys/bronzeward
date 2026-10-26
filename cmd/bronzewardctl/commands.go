@@ -231,9 +231,10 @@ func (e *env) whoamiCmd(args []string) (err error) {
 	})
 }
 
-// logoutCmd removes an OIDC context's stored sign-in, an unreadable one too. An access token
-// already issued stays valid at the server until it expires, plus its leeway; the refresh token is
-// not yet revoked at the provider (client-contracts.md §9.7 item 1).
+// logoutCmd removes an OIDC context's stored sign-in, one without an access token too, and revokes
+// its refresh token at the provider's revocation endpoint where discovery names one (RFC 7009,
+// client-contracts.md §9.7 item 1). An access token already issued stays valid at the server until
+// it expires, plus its leeway. A failed revocation still signs out, and exits 1.
 func (e *env) logoutCmd(args []string) error {
 	if _, err := e.parse("logout", args, 0, nil); err != nil {
 		return err
@@ -254,32 +255,44 @@ func (e *env) logoutCmd(args []string) error {
 		return fmt.Errorf("%s: this context has no token file (oidc.tokenFile), so no sign-in is stored", x.Where())
 	}
 	// Read under the renewal lock: a renewal it waited for may have stored a newer token.
-	t, err := client.ClearTokens(p)
-	unreadable := errors.Is(err, client.ErrNotTokenFile)
-	if err != nil && !unreadable {
+	t, err := client.ClearTokens(p, nil)
+	noAccess := errors.Is(err, client.ErrNotTokenFile)
+	if err != nil && !noAccess {
 		return fmt.Errorf("%s: %w", x.Where(), err)
 	}
-	if t == nil && !unreadable {
+	if t == nil {
 		_, err = fmt.Fprintf(e.out, "Not signed in to %s: the token file %s does not exist.\n", x.Where(), p)
 		return err
 	}
-	if unreadable {
-		_, err = fmt.Fprintf(e.out, "Signed out of %s: the token file %s was unreadable and is removed.\n", x.Where(), p)
-		return err
-	}
-	valid := "stays valid at the server until it expires, plus the server's 60 s leeway"
+	// A document without an access token says nothing about one issued earlier, which may still be
+	// valid for its whole lifetime.
+	valid := "An access token issued earlier with this sign-in may stay valid at the server until it expires, plus the server's 60 s leeway."
 	if c := client.ReadClaims(t.AccessToken); c != nil && time.Now().Before(c.ExpiresAt()) {
-		valid = "stays valid at the server until " + c.ExpiresAt().UTC().Format("2006-01-02 15:04:05 MST") + ", plus the server's 60 s leeway"
+		valid = "The access token already issued stays valid at the server until " + c.ExpiresAt().UTC().Format("2006-01-02 15:04:05 MST") + ", plus the server's 60 s leeway."
 	} else if c != nil {
-		valid = "expired at " + c.ExpiresAt().UTC().Format("2006-01-02 15:04:05 MST") + "; the server accepts it for at most 60 s after that"
+		valid = "The access token already issued expired at " + c.ExpiresAt().UTC().Format("2006-01-02 15:04:05 MST") + "; the server accepts it for at most 60 s after that."
+	} else if !noAccess {
+		valid = "The access token already issued stays valid at the server until it expires, plus the server's 60 s leeway."
 	}
+	removed := "is removed"
+	if noAccess {
+		removed = "held no access token and is removed"
+	}
+	var failed error
 	revoked := ""
 	if t.RefreshToken != "" {
-		revoked = " The refresh token is not revoked at the identity provider; this bronzewardctl does not revoke it yet."
+		switch err := client.Revoke(x, t.RefreshToken); {
+		case err == nil:
+			revoked = " The refresh token is revoked at the identity provider."
+		case errors.Is(err, client.ErrNoRevocation):
+			revoked = " The refresh token is not revoked: the identity provider offers no revocation endpoint, so it stays usable until the provider expires it."
+		default:
+			revoked = " The refresh token is not revoked, so it stays usable until the identity provider expires it."
+			failed = fmt.Errorf("%s: %w", x.Where(), err)
+		}
 	}
-	_, err = fmt.Fprintf(e.out, "Signed out of %s: the token file %s is removed. The access token already issued %s.%s\n",
-		x.Where(), p, valid, revoked)
-	return err
+	_, err = fmt.Fprintf(e.out, "Signed out of %s: the token file %s %s. %s%s\n", x.Where(), p, removed, valid, revoked)
+	return errors.Join(failed, err)
 }
 
 func deref(s *string) string {

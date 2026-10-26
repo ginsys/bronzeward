@@ -172,9 +172,18 @@ func (x *Context) Check() error {
 
 // endpoint parses an https URL, or an http one to a loopback address (§6 item 1).
 func endpoint(raw, field string) error {
-	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+	if u, err := url.Parse(raw); err == nil && u.RawQuery != "" {
 		return fmt.Errorf("%s %q: give a URL with a host and no query, fragment or user", field, raw)
+	}
+	return providerEndpoint(raw, field)
+}
+
+// providerEndpoint is endpoint for a URL the identity provider names (its token and revocation
+// endpoints, a redirect), which may carry a query, kept as it is.
+func providerEndpoint(raw, field string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || u.Fragment != "" || u.User != nil {
+		return fmt.Errorf("%s %q: give a URL with a host and no fragment or user", field, raw)
 	}
 	if u.Scheme == "https" || u.Scheme == "http" && loopback(u.Hostname()) {
 		return nil
