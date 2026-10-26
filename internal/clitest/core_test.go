@@ -2,17 +2,20 @@ package clitest
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
+	"time"
 
 	"go.yaml.in/yaml/v3"
 
@@ -60,10 +63,40 @@ func TestContextsTokensAndOutput(t *testing.T) {
 
 	// Token input: standard input, an owner-only file, never both; a refused token.
 	f.want(f.ctl(nil, f.token+"\n", "whoami", "--token-stdin"), 0, "Roles      viewer")
+
+	// While it waits for the token, the CLI has no core size and is not dumpable (§11.2 item 5):
+	// a process that is not dumpable has its /proc environment owned by root.
+	cmd := f.command(nil, "whoami", "--token-stdin")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	proc := fmt.Sprint("/proc/", cmd.Process.Pid)
+	var limits []byte
+	for i := 0; i < 100 && !regexp.MustCompile(`Max core file size +0 +0 `).Match(limits); i++ {
+		time.Sleep(50 * time.Millisecond)
+		limits, _ = os.ReadFile(proc + "/limits")
+	}
+	if _, err := os.ReadFile(proc + "/environ"); !errors.Is(err, os.ErrPermission) {
+		t.Errorf("the waiting CLI's environment read: %v, want a permission error", err)
+	}
+	if !regexp.MustCompile(`Max core file size +0 +0 `).Match(limits) {
+		t.Errorf("the waiting CLI's limits:\n%s", limits)
+	}
+	stdin.Close()
+	cmd.Wait()
 	f.want(f.ctl(nil, "", "whoami"), 1, "no automation token")
 	f.want(f.ctl(nil, "", "whoami", "--token-stdin", "--token-file", f.tokenFile), 2, "not both")
 	open := filepath.Join(f.home, "open-token")
-	os.WriteFile(open, []byte(f.token), 0o644)
+	if err := os.WriteFile(open, []byte(f.token), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(open, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	f.want(f.ctl(nil, "", "whoami", "--token-file", open), 1, "make it owner-only")
 	f.want(f.ctl(nil, "not-a-token\n", "whoami", "--token-stdin"), 1, "not an automation token")
 	id, _, _ := strings.Cut(f.token, ".")

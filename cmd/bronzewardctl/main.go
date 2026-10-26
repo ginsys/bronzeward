@@ -10,6 +10,9 @@ import (
 	"io"
 	"os"
 	"runtime/debug"
+	"slices"
+	"strings"
+	"syscall"
 
 	"github.com/ginsys/bronzeward/internal/client"
 )
@@ -41,21 +44,34 @@ type env struct {
 	out, err                     io.Writer
 }
 
-// main disables core dumps before any token is read, and a panic prints a fixed message and no
-// stack values (client-contracts.md §11.2 item 5).
 func main() {
-	debug.SetTraceback("none")
+	if err := harden(); err != nil {
+		fmt.Fprintln(os.Stderr, "bronzewardctl: disabling core dumps and tracebacks:", err)
+		os.Exit(1)
+	}
 	defer func() {
 		if recover() != nil {
 			fmt.Fprintln(os.Stderr, "bronzewardctl: internal error")
 			os.Exit(1)
 		}
 	}()
-	if err := noCoreDumps(); err != nil {
-		fmt.Fprintln(os.Stderr, "bronzewardctl: disabling core dumps:", err)
-		os.Exit(1)
-	}
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+// harden runs before any token is read (client-contracts.md §11.2 item 5). The traceback level
+// cannot be lowered below the one the process started with, so the process starts again with
+// GOTRACEBACK=none, and a panic in any goroutine prints no stack values. Core dumps are disabled
+// after that start, since starting again makes a process dumpable.
+func harden() error {
+	if os.Getenv("GOTRACEBACK") != "none" {
+		exe, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		env := slices.DeleteFunc(os.Environ(), func(v string) bool { return strings.HasPrefix(v, "GOTRACEBACK=") })
+		return syscall.Exec(exe, os.Args, append(env, "GOTRACEBACK=none"))
+	}
+	return noCoreDumps()
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
