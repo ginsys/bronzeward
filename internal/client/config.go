@@ -172,7 +172,7 @@ func (x *Context) Check() error {
 
 // endpoint parses an https URL, or an http one to a loopback address (§6 item 1).
 func endpoint(raw, field string) error {
-	if u, err := url.Parse(raw); err == nil && u.RawQuery != "" {
+	if u, err := url.Parse(raw); err == nil && (u.RawQuery != "" || u.ForceQuery) {
 		return fmt.Errorf("%s %q: give a URL with a host and no query, fragment or user", field, raw)
 	}
 	return providerEndpoint(raw, field)

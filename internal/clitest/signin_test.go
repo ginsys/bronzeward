@@ -23,8 +23,9 @@ import (
 // provider adds a token and a revocation endpoint to the fixture issuer, which has neither
 // (client-contracts.md G19), so renewal and logout can be tested: answer redeems a refresh token,
 // and calls counts the redemptions; query is added to the token endpoint, and seen is the query
-// the last redemption came with. revocation answers a revocation, and revoked lists their forms;
-// while it is nil, discovery names no revocation endpoint.
+// the last redemption came with. revocation answers a revocation, a 302 redirecting to a page that
+// answers a GET with 200, and revoked lists their forms; while it is nil, discovery names no
+// revocation endpoint. endpoint, when set, is the revocation_endpoint discovery names instead.
 type provider struct {
 	mu         sync.Mutex
 	answer     func(rt string) (int, any)
@@ -33,6 +34,7 @@ type provider struct {
 	seen       string
 	revocation func() (int, any)
 	revoked    []url.Values
+	endpoint   any
 }
 
 func (p *provider) set(answer func(rt string) (int, any)) {
@@ -70,9 +72,13 @@ func (p *provider) wrap(iss *issuer.Issuer) http.Handler {
 		if p.revocation != nil {
 			d["revocation_endpoint"] = iss.URL + "/revoke"
 		}
+		if p.endpoint != nil {
+			d["revocation_endpoint"] = p.endpoint
+		}
 		p.mu.Unlock()
 		writeJSON(w, http.StatusOK, d)
 	})
+	mux.HandleFunc("GET /revoked", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, http.StatusOK, map[string]any{}) })
 	mux.HandleFunc("POST /revoke", func(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
 		p.mu.Lock()
@@ -84,6 +90,10 @@ func (p *provider) wrap(iss *issuer.Issuer) http.Handler {
 			return
 		}
 		status, body := answer()
+		if status == http.StatusFound {
+			http.Redirect(w, r, "/revoked", status)
+			return
+		}
 		writeJSON(w, status, body)
 	})
 	mux.HandleFunc("POST /token", func(w http.ResponseWriter, r *http.Request) {
@@ -406,6 +416,9 @@ func TestSignIn(t *testing.T) {
 		f.store(file, old, "BWSYNTH-rt-10")
 		fresh := f.mint("h-viewer", "")
 		release, redeeming := make(chan struct{}), make(chan struct{}, 1)
+		// Released on every path, so that a failed wait cannot leave the token endpoint blocked.
+		answer := sync.OnceFunc(func() { close(release) })
+		t.Cleanup(answer)
 		f.idp.set(func(string) (int, any) {
 			redeeming <- struct{}{}
 			<-release
@@ -417,12 +430,11 @@ func TestSignIn(t *testing.T) {
 		select {
 		case <-redeeming:
 		case <-time.After(10 * time.Second):
-			close(release)
 			t.Fatal("the renewal did not reach the token endpoint within 10 s")
 		}
 		wg.Go(func() { out = f.signedIn("--context", "human", "logout") })
 		waiting(t, file+".lock", 1)
-		close(release)
+		answer()
 		wg.Wait()
 		format := func(tok string) string {
 			return client.ReadClaims(tok).ExpiresAt().UTC().Format("2006-01-02 15:04:05 MST")
@@ -557,6 +569,24 @@ func TestSignIn(t *testing.T) {
 		if _, err := os.Stat(file); !os.IsNotExist(err) {
 			t.Errorf("a refused revocation kept the token file: %v", err)
 		}
+		// A redirect is not followed, so a 200 at its target is no revocation; and only an RFC 6749
+		// error code is shown, not control characters or the provider's reason phrase.
+		f.idp.revoking(func() (int, any) { return http.StatusFound, nil })
+		f.store(file, tok, "BWSYNTH-rt-5")
+		f.want(f.signedIn("--context", "human", "logout"), 1, "The refresh token is not revoked", "refused the revocation: 302 Found")
+		f.idp.revoking(func() (int, any) { return http.StatusBadRequest, map[string]string{"error": "\x1b[2Jinvalid"} })
+		f.store(file, tok, "BWSYNTH-rt-6")
+		if r := f.signedIn("--context", "human", "logout"); r.code != 1 || strings.ContainsRune(r.out+r.err, '\x1b') {
+			t.Errorf("logout showed a control character from the provider, or exit %d:\n%s%s", r.code, r.out, r.err)
+		}
+		f.idp.mu.Lock()
+		f.idp.endpoint = 7
+		f.idp.mu.Unlock()
+		f.store(file, tok, "BWSYNTH-rt-7")
+		f.want(f.signedIn("--context", "human", "logout"), 1, "The refresh token is not revoked", "revocation_endpoint")
+		f.idp.mu.Lock()
+		f.idp.endpoint = nil
+		f.idp.mu.Unlock()
 		f.idp.revoking(nil)
 		f.store(file, tok, "BWSYNTH-rt-4")
 		f.want(f.signedIn("--context", "human", "logout"), 0, "the token file "+file+" is removed",
@@ -581,7 +611,8 @@ func TestSignIn(t *testing.T) {
 			t.Errorf("logout removed a file that is not bronzewardctl's: %v", err)
 		}
 		for _, foreign := range []string{`{"type":"service_account","private_key":"BWSYNTH-key"}`, `null`, `{"accessToken":""} {}`,
-			`{"AccessToken":"BWSYNTH-x"}`, `{"accessToken":"BWSYNTH-x"}}`, `{"accessToken":1}`} {
+			`{"AccessToken":"BWSYNTH-x"}`, `{"accessToken":"BWSYNTH-x"}}`, `{"accessToken":1}`, `{"accessToken":null}`,
+			"{\"accessToken\":\"BWSYNTH-x\"}\f", `{"accessToken":"BWSYNTH-x","accessToken":"BWSYNTH-y"}`} {
 			os.WriteFile(file, []byte(foreign), 0o600)
 			f.want(f.signedIn("--context", "human", "logout"), 1, "holds neither bronzewardctl's tokens nor an automation token")
 			if b, err := os.ReadFile(file); err != nil || string(b) != foreign {
