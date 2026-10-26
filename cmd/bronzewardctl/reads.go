@@ -108,7 +108,13 @@ func (e *env) noun(name string, args []string, l *listing, extra func(*flag.Flag
 		pos, err := e.parse(name+" show", args[1:], 1, nil)
 		return "show", pos, err
 	}
-	_, err = e.parse(name+" list", args[1:], 0, func(fs *flag.FlagSet) {
+	_, err = e.paged(name+" list", args[1:], 0, l, extra)
+	return "list", nil, err
+}
+
+// paged parses a paged read's arguments: n positional ones, the paging flags and extra's.
+func (e *env) paged(name string, args []string, n int, l *listing, extra func(*flag.FlagSet)) ([]string, error) {
+	pos, err := e.parse(name, args, n, func(fs *flag.FlagSet) {
 		l.flags(fs)
 		if extra != nil {
 			extra(fs)
@@ -117,7 +123,7 @@ func (e *env) noun(name string, args []string, l *listing, extra func(*flag.Flag
 	if err == nil && l.all && l.cursor != "" {
 		err = usageError{errors.New("give --cursor or --all, not both")}
 	}
-	return "list", nil, err
+	return pos, err
 }
 
 func (e *env) clusterCmd(args []string) error {
@@ -146,6 +152,11 @@ func (e *env) clusterCmd(args []string) error {
 }
 
 func (e *env) machineCmd(args []string) error {
+	if v, rest, err := e.verb("machine", args, "list", "show", "timeline", "observations"); err != nil {
+		return err
+	} else if v == "timeline" || v == "observations" {
+		return e.machineRecords(v, rest)
+	}
 	var l listing
 	var cluster string
 	verb, pos, err := e.noun("machine", args, &l, func(fs *flag.FlagSet) { fs.StringVar(&cluster, "cluster", "", "") })

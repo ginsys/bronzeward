@@ -32,7 +32,7 @@ func (e *env) emit(raw []byte, table func(*tabwriter.Writer)) error {
 		_, err = e.out.Write(b)
 		return err
 	}
-	w := tabwriter.NewWriter(e.out, 0, 0, 2, ' ', 0)
+	w := tabwriter.NewWriter(e.out, 0, 0, 2, ' ', tabwriter.StripEscape)
 	table(w)
 	return w.Flush()
 }
