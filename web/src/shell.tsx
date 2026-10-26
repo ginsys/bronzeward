@@ -2,7 +2,7 @@
 // epoch and sign-out from GET /identity, the navigation, the footer's versions, and the client
 // contracts §7 compatibility check, which GET /server answers before any page reads data.
 
-import { createContext, type ReactNode, useCallback, useContext, useEffect, useId, useRef, useState } from "react";
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useId, useReducer, useRef, useState } from "react";
 import { Client, type ClientOptions, type ReadResult } from "./request.ts";
 import { follow, PAGES, usePath } from "./router.ts";
 import { Disconnected, HumanOnly, Loading, Offline, ProblemFields, problemFields, Refused, Status } from "./states.tsx";
@@ -67,40 +67,75 @@ export interface SignedInProps {
   // The refusal that ends the signed-in page, with its answer for the problem fields (§8.2).
   onUnauthenticated: (res: ReadResult<unknown>) => void;
   onRevoked: (res: ReadResult<unknown>) => void;
+  // §7 item 4: the page keeps the notices, so one on a refusal's answer outlives the shell.
+  onDeprecation: (route: string) => void;
   signOut: () => void;
 }
 
-export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, signOut }: SignedInProps) {
+// The offline banner's two causes: the browser's offline event, and a read that found no answer
+// after its data was shown. Each ends only on its own event (an online event; a read that answers),
+// so a late answer while the browser is offline keeps the actions disabled.
+export interface Connection {
+  down?: Date | undefined;
+  lost?: Date | undefined;
+}
+export type ConnectionEvent = "offline" | "online" | "lost" | "answered";
+export function connection(c: Connection, e: ConnectionEvent, at: Date): Connection {
+  switch (e) {
+    case "offline":
+      return { ...c, down: c.down ?? at };
+    case "online":
+      return { ...c, down: undefined };
+    case "lost":
+      return { ...c, lost: c.lost ?? at };
+    case "answered":
+      return { ...c, lost: undefined };
+  }
+}
+// Offline since the earlier cause, undefined while neither holds.
+export const offlineSince = ({ down, lost }: Connection) => (down === undefined || (lost !== undefined && lost < down) ? lost : down);
+
+// §7 item 4: each deprecated route, once per page load.
+export const Deprecations = ({ routes }: { routes: readonly string[] }) =>
+  routes.map((route) => <Status key={route} testid="deprecation">{deprecated(route)}</Status>);
+
+export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, onDeprecation, signOut, notices = [] }: SignedInProps & { notices?: readonly string[] }) {
   const [path, go] = usePath();
-  const [notices, setNotices] = useState<string[]>([]);
   const [client] = useState(() => {
-    const c = new Client({ ...auth, onDeprecation: (route) => setNotices((n) => [...n, route]) });
+    const c = new Client({ ...auth, onDeprecation });
     c.setView({ principal, route: location.pathname, query: location.search });
     return c;
   });
   const [server, setServer] = useState<Load<Server>>({ kind: "loading" });
   const [identity, setIdentity] = useState<Load<Identity>>({ kind: "loading" });
-  const [offline, setOffline] = useState<Date | undefined>();
+  const [conn, observe] = useReducer((c: Connection, [e, at]: [ConnectionEvent, Date]) => connection(c, e, at), {});
+  const offline = offlineSince(conn);
   const [online, setOnline] = useState(0);
   const readAt = useRef<Date | undefined>(undefined);
+  const shown = useRef({ server: false, identity: false });
 
-  // A transport failure after data was shown keeps that data under the offline banner.
-  const settle = useCallback(<T,>(res: ReadResult<T>, set: (r: Load<T>) => void) => {
+  // A transport failure keeps the data this resource showed under the offline banner; without any,
+  // it is shown as the disconnected state.
+  const settle = useCallback(<T,>(res: ReadResult<T>, set: (r: Load<T>) => void, what: "server" | "identity") => {
     if (res.kind === "discarded") return;
     if (res.kind === "unauthenticated") return onUnauthenticated(res);
     if (res.kind === "revoked") return onRevoked(res);
-    if (res.kind === "transport" && readAt.current !== undefined) return setOffline((o) => o ?? new Date());
+    if (res.kind === "transport" && shown.current[what]) return observe(["lost", new Date()]);
     if (res.kind === "ok") {
+      shown.current[what] = true;
       readAt.current = new Date();
-      setOffline(undefined);
+      observe(["answered", readAt.current]);
     }
     set(res);
   }, [onUnauthenticated, onRevoked]);
 
+  // Reads still in flight when the shell goes (a refusal, sign-out) are discarded, and renew no more.
+  useEffect(() => () => client.setView({ principal: "", route: "", query: "" }), [client]);
+
   // Read until it answers with data; again when the browser is back online.
   const known = server.kind === "ok";
   useEffect(() => {
-    if (!known) void client.read<Server>("/server").then((res) => settle(res, setServer));
+    if (!known) void client.read<Server>("/server").then((res) => settle(res, setServer, "server"));
   }, [client, known, online, settle]);
 
   // The header's identity, read again on every page and when the browser is back online.
@@ -108,12 +143,15 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, s
   useEffect(() => {
     if (!compatible) return;
     client.setView({ principal, route: path, query: location.search });
-    void client.read<Identity>("/identity").then((res) => settle(res, setIdentity));
+    void client.read<Identity>("/identity").then((res) => settle(res, setIdentity, "identity"));
   }, [client, compatible, path, principal, online, settle]);
 
   useEffect(() => {
-    const down = () => setOffline((o) => o ?? new Date());
-    const up = () => setOnline((n) => n + 1);
+    const down = () => observe(["offline", new Date()]);
+    const up = () => {
+      observe(["online", new Date()]);
+      setOnline((n) => n + 1);
+    };
     addEventListener("offline", down);
     addEventListener("online", up);
     return () => {
@@ -143,7 +181,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, s
           </p>
         )}
         <button type="button" onClick={signOut}>Sign out</button>
-        {notices.map((route) => <Status key={route} testid="deprecation">{deprecated(route)}</Status>)}
+        <Deprecations routes={notices} />
         {offline !== undefined && <Offline since={offline} readAt={readAt.current} />}
         {id !== undefined && (
           <nav aria-label="Main">
