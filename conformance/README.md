@@ -18,7 +18,9 @@ part of the case. A case without a record has not run.
 | [AUTH-02](cases/AUTH-02.yaml) | web: `mise run browser-auth` |
 | [AUTH-03](cases/AUTH-03.yaml) | web: `mise run browser-auth` |
 | [AUTH-05](cases/AUTH-05.yaml) | web: `mise run browser-auth` |
+| [AUTH-07](cases/AUTH-07.yaml) | web, the change shown with no write pending: `mise run browser-auth` |
 | [AUTH-08](cases/AUTH-08.yaml) | web, the client's half: `mise run browser-auth` |
 | [AUTH-10](cases/AUTH-10.yaml) | web: `mise run browser-auth` |
+| [AUTH-11](cases/AUTH-11.yaml) | web: `mise run browser-auth`; the tab protocol in `mise run web` |
 | [TLS-02](cases/TLS-02.yaml) | web: `mise run browser` |
 | [TLS-03](cases/TLS-03.yaml) | web, the read case: `mise run browser` |
