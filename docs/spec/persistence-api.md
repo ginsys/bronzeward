@@ -2619,12 +2619,15 @@ owner's choice, recorded in §17.40 once made. Options:
   Readable names; but many providers let users edit these claims, so a view
   could show a name chosen to look like someone else's next to the true
   subject; an access token need not carry either claim, so the member may be
-  `null` throughout; a row created by an identity revocation carries the
-  revoker's token, not the subject's, so it has no name until the subject
-  signs in; and a refresh writes the principal row, which identity
-  revocation locks for update and attempt and token transactions lock too
-  (§10.4), so it would run in the short first-use transaction and only when
-  the value changed, or add lock-ordering cases to §5.
+  `null` throughout; a row created without the subject's token has no name
+  until the subject's own admitted request: the token tool creates the rows
+  of a responsible human and its operator (§10.2), and an identity revocation
+  creates a row it revokes at once, whose subject never signs in again, so
+  that row never has one (§10.4); and a refresh writes the principal row,
+  which the token tool, identity revocation and the acts that read the
+  acting principal `FOR SHARE` lock (§10.2, §10.3, §10.4), so where the
+  write runs, and how it orders with those locks (§5), is part of the
+  choice.
 - (c) names kept in a table of their own, maintained by an operator. Names a
   user cannot change; but this specification names no source or route that
   fills the table, and the choice would have to add one.
