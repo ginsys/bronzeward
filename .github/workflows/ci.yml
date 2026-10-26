@@ -28,8 +28,9 @@ permissions:
 # every candidate to a hosted runner is the only branch-independent rule. The org-level fork-PR
 # approval gate still applies on top. The Claude review job is a separate workflow whose reusable
 # skips forks and merge groups outright (the proxy is in-cluster only). The exceptions to this
-# rule always run GitHub-hosted: go-db and idp, whose containers need a Docker daemon, and browser
-# and safari, which need browsers; the in-cluster runners have neither.
+# rule always run GitHub-hosted: go-db and idp, whose containers need a Docker daemon, browser
+# and safari, which need browsers, and browser-auth, which needs both; the in-cluster runners have
+# neither.
 
 env:
   # The setting `mise run` honours (`mise help run`, --skip-tools); MISE_EXEC_AUTO_INSTALL does
@@ -286,6 +287,32 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: go-kure/.github/.github/actions/check-action-pins@ae10bfb8f99fd5ddcee3185d1a420be14b201e3c # main 2026-09-07 (go-kure/.github#154 merge)
+
+  browser-auth:
+    # The AUTH cases (mise run browser-auth) in the browsers of the browser job, against the test
+    # identity provider and the fixture issuer. Not in `checks`' needs, as idp. Not on macOS: its
+    # hosted runner has no Docker for the provider. Uploaded only if the scan passes.
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      BW_BROWSERS: chrome,edge,firefox,firefox-esr
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
+          install_args: node go
+      - run: sudo chown root:root /opt/microsoft/msedge/msedge-sandbox && sudo chmod 4755 /opt/microsoft/msedge/msedge-sandbox
+      - run: mise run dev-db
+      - run: mise run dev-idp
+      - run: mise run browser-auth
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: browser-auth-linux
+          path: web/e2e/out
+          retention-days: 14
+      - if: always()
+        run: mise run dev-down
 
   checks:
     # Aggregator: passes only when every needed job succeeded. `commit-lint` is skipped by design

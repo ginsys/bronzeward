@@ -276,7 +276,13 @@ it. It holds no secret.
    a static client-configuration file served next to the web files, `bronzeward-client.json` at
    the web root, names them: a JSON object with the string members `issuer`, `audience`,
    `cliClientId` and `webClientId`, the last two the client IDs of the two registrations of
-   [§9.1](#91-identity-provider-requirements) item 2. The
+   [§9.1](#91-identity-provider-requirements) item 2, and an optional string member `scopes`:
+   space-separated scopes requested after `openid offline_access`, as the CLI's `oidc.scopes`,
+   for a provider that puts the audience into a token only when a scope asks for it (Zitadel's
+   project audience scope is one). Absent is none; repeating `openid` or `offline_access` is a
+   configuration error, as is any other member's wrong type (lead decision under the owner's
+   2026-10-07 grant, 26 October 2026, recorded in
+   [#332](https://github.com/ginsys/bronzeward/issues/332)). The
    web client reads it from its own origin and uses the web client's ID, and the CLI imports it
    with `context add --from <url>` under the TLS rules of [§6](#6-tls-trust) and stores the CLI
    client's ID. Entering them by hand stays possible. The server is never asked
@@ -781,10 +787,13 @@ current token expires
 **Proposed.**
 
 1. The web interface is a public client using the authorization-code grant with PKCE `S256`,
-   `state` and `nonce`, with a full-page redirect to the provider. The PKCE verifier, `state` and
-   `nonce` are held in `sessionStorage` only between the redirect and the callback and are deleted
-   when the callback is handled; this is the one storage use the web client makes, and it holds no
-   token.
+   `state` and `nonce`, with a full-page redirect to the provider. The PKCE verifier, `state`,
+   `nonce` and the page path to return to are held in one `sessionStorage` entry only between the
+   redirect and the callback and are deleted when the callback is handled; this is the one storage
+   use the web client makes, and it holds no token. The return path starts with `/` and not `//`,
+   holds no backslash or control character, is never a full URL and is never the callback or
+   signed-out page; any other is replaced by `/` (decision B2 of
+   [#255](https://github.com/ginsys/bronzeward/issues/255)).
 2. Access and refresh tokens are held in memory only, in a module the rest of the page cannot
    enumerate. They are never written to `localStorage`, `sessionStorage`, IndexedDB, the Cache
    API, a cookie or a service worker.
@@ -882,8 +891,12 @@ expiry, at most `maxTokenLifetime` after issue, plus the server's 60 s leeway
    issued remains valid at the server for up to its remaining lifetime plus that leeway.
 2. The web sign-out discards the in-memory tokens and every cached response, revokes the refresh
    token if the provider allows it, tells other open tabs of the same origin to discard theirs
-   (assumption S3), and redirects to the provider's end-session endpoint where it offers one. It
-   then shows a signed-out page that holds no data.
+   (assumption S3), and redirects to the provider's end-session endpoint where it offers one, with
+   `client_id` and `post_logout_redirect_uri` only. It sends no `id_token_hint`: the test
+   provider's ID token carries the access token's issuer, audience and lifetime, so the server
+   would accept it as a bearer token, and a URL keeps it in history and provider logs. Without the
+   hint that provider sends the browser through its login UI's logout page. It then shows a
+   signed-out page that holds no data.
 3. After sign-out, the browser's back button shows no data from before: the web pages are served
    `Cache-Control: no-store`, the application clears its state on `pagehide` and on a page
    restored from the back-forward cache ([§10.3](#103-caches-and-back-navigation) items 3-4,

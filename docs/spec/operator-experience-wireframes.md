@@ -66,6 +66,11 @@ committed"); and, from
 reading, such as "your token expired at 10:15 by this browser's clock", is labelled as the
 client's own.
 
+The signed-out page, `/signed-out`, where the provider's end-session returns the browser, shows
+"You are signed out of Bronzeward." and a link to sign in. It reads nothing, holds no data and
+starts no sign-in by itself ([client contracts §9.7](client-contracts.md#97-sign-out-and-cache-clearing)
+item 2).
+
 ## W2. Machines
 
 ```text

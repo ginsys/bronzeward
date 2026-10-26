@@ -1,0 +1,16 @@
+id: AUTH-10
+setup: as AUTH-02, with h-approver of the synthetic provider's issuer in the server's deniedSubjects; signed in as h-approver with a valid token
+action: load the web client, sign in, read GET /server
+exchange:
+  - request: GET /api/v1/server
+    headers: ["Authorization: Bearer <token>", "Accept: application/json"]
+fault: none
+expect:
+  server: 403 identity-revoked
+  client: as AUTH-05
+  shown: as AUTH-05
+  absent: [token in the harness log, retained artifacts or browser storage]
+runs:
+  web:
+    check: web/e2e/auth/fixture.e2e.ts, mise run browser-auth
+    browsers: [chrome, edge, firefox, firefox-esr]

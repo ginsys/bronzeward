@@ -1,0 +1,19 @@
+id: AUTH-02
+setup: a disposable server trusting the fixture issuer, reached through a synthetic provider (web/e2e/provider.ts) that serves the issuer's key set as its own and hands out a refresh token it then refuses; signed in as h-viewer with a token minted with each defect expired, wrong-issuer, wrong-audience, over-lifetime, alg-none, groups-not-array
+action: load the web client, sign in, read GET /server
+exchange:
+  - request: GET /api/v1/server
+    headers: ["Authorization: Bearer <defective token>", "Accept: application/json"]
+  - request: POST <provider>/token
+    headers: ["grant_type=refresh_token, once"]
+fault: the token's defect
+expect:
+  server: 401 unauthenticated
+  client: one renewal attempt, refused; the read not repeated after it; no new authorization request
+  shown: 'the text "Not accepted by this installation. Sign in again."; for expired, wrong-issuer and wrong-audience, the browser''s own reading, labelled as such'
+  absent: [token in the harness log, retained artifacts or browser storage]
+runs:
+  web:
+    check: web/e2e/auth/fixture.e2e.ts, mise run browser-auth; the readings in web/src/auth.test.ts, mise run web
+    browsers: [chrome, edge, firefox, firefox-esr]
+    covers: every listed defect; over-lifetime has no reading until the client has read maxTokenLifetimeSeconds (client contracts §9.6)
