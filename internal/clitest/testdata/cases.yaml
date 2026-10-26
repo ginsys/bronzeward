@@ -44,15 +44,16 @@
 
 - id: COMP-02
   setup: context trusted
-  action: whoami
+  action: whoami; then machine list --limit 1 --all
   exchange:
     - GET /api/v1/server
     - GET /api/v1/identity
+    - GET /api/v1/machines?limit=1, one read per page
   fault: 'the injector adds "Deprecation: @1798761600" to every answer'
   expect:
-    client: warns once per route
-    server: answers both reads
-    shown: '"GET /api/v1/identity is deprecated (Deprecation: @1798761600)" exactly once; identity shown; exit 0'
+    client: warns once per route, its method and path without the query
+    server: answers every read
+    shown: '"GET /api/v1/identity is deprecated (Deprecation: @1798761600)" exactly once; identity shown; "GET /api/v1/machines is deprecated" exactly once over the pages; exit 0'
     absent: [token in stdout, stderr, argv]
 
 - id: PAGE-01

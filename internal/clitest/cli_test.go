@@ -397,6 +397,14 @@ var sharedCases = map[string]func(*testing.T, *fixture, *injector){
 		if n := strings.Count(r.err, "/identity is deprecated"); n != 1 {
 			t.Errorf("the identity deprecation was shown %d times", n)
 		}
+		// Each page of a list is a read of one route, so it warns once.
+		r = f.ctl(nil, "", "--context", "trusted", "machine", "list", "--limit", "1", "--all")
+		f.want(r, 0, "GET /api/v1/machines is deprecated (Deprecation: @1798761600)")
+		pages := len(slices.DeleteFunc(in.requests(), func(q string) bool { return q != "GET /api/v1/machines" }))
+		if n := strings.Count(r.err, "is deprecated"); pages < 2 || n != 2 {
+			t.Errorf("%d page reads, %d deprecations shown, want 2 or more and 2 (GET /server and the list):\n%s", pages, n, r.err)
+		}
+		in.set(nil, nil)
 	},
 }
 
