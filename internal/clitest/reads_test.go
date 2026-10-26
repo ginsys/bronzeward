@@ -121,6 +121,30 @@ func init() {
 				t.Errorf("new epoch %v: notice shown %v\n%s", newEpoch, notice, r.err)
 			}
 		}
+		// A given cursor the server refuses is discarded too: the first page is shown.
+		in.set(nil, nil)
+		f.want(f.ctl(nil, "", "--context", "trusted", "machine", "list", "--limit", "1", "--cursor", "BWSYNTH-stale"), 0,
+			"reading the list again from its start", ms[0], "Next page: --cursor ")
+		// The new epoch's GET /server re-read refuses the server: the list fails, not restarts.
+		var refused atomic.Bool
+		in.set(func(w http.ResponseWriter, r *http.Request) bool {
+			if !on("/machines")(r) || r.URL.Query().Get("cursor") == "" || refused.Swap(true) {
+				return false
+			}
+			w.Header().Set("Bronzeward-Epoch", "ep_BWSYNTH-other")
+			problem(w, http.StatusBadRequest, "cursor-invalid", "")
+			return true
+		}, func(r *http.Response) {
+			if refused.Load() && on("/server")(r.Request) {
+				rewrite(r, `"apiRevision":2`, `"apiRevision":1`)
+			}
+		})
+		r := f.ctl(nil, "", "--context", "trusted", "machine", "list", "--limit", "1", "--all", "-o", "json")
+		f.want(r, 1, "API revision 1")
+		if strings.Contains(r.err, "reading the list again") || strings.Contains(r.out, ms[0]) {
+			t.Errorf("the list restarted after the refused server:\n%s%s", r.out, r.err)
+		}
+		in.set(nil, nil)
 	}
 	sharedCases["REC-01"] = func(t *testing.T, f *fixture, in *injector) {
 		m := all(t, f)[0]
