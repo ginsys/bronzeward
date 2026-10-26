@@ -29,3 +29,6 @@ part of the case. A case without a record has not run.
 | [REC-01](cases/REC-01.yaml) | web, the banner and the process's refusal: `mise run browser-auth` |
 | [TLS-02](cases/TLS-02.yaml) | web: `mise run browser` |
 | [TLS-03](cases/TLS-03.yaml) | web, the read case: `mise run browser` |
+
+The web accessibility passes of journeys §13 are not §12 cases; they are recorded per browser in
+[accessibility-web.md](accessibility-web.md).

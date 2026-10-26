@@ -46,6 +46,15 @@ corrected by the next one. It never disables actions recovery mode allows
 ([§5.9](operator-experience.md#59-recovery-after-a-restore)): an action is disabled only on a
 scope whose state refuses it, with that reason.
 
+The read-only lists sit under the navigation as follows. Changes lists the releases; the drafts
+list joins it with the draft editor. Sources lists fragments, profiles, assignments, the monitored
+dependencies with the last completed monitor pass, and the dependency alerts. Audit lists the
+acts. Each resource opens at its own path: `/fragments/{id}` with its revisions, `/fragment-revisions/{id}`
+and likewise for profiles and assignments, `/releases/{id}`, `/plans/{id}`, `/operations/{id}`
+and `/dependencies/{id}` with its releases and alerts. The plan list filters by state and
+machine and the operation list by plan, machine, state and kind, in the query; a machine's
+detail links to its plans and operations, and a plan to its operations.
+
 ## W1. Sign-in and context
 
 ```text
