@@ -1,0 +1,21 @@
+id: REC-01
+setup: as AUTH-02, with the injector passing every request to the fixture deployment started with -recovery-start on a fresh database, its entry not yet made; signed in as h-viewer
+action: load the web client, sign in; make the recovery entry as h-recovery outside the page (one synthetic database backup); read again on the page
+exchange:
+  - request: GET /api/v1/server
+    headers: ["Authorization: Bearer <token>", "Accept: application/json"]
+  - request: POST /api/v1/recovery/entries
+    headers: ["Authorization: Bearer <recovery-admin token>", "Idempotency-Key: <key>", "Content-Type: application/json"]
+  - request: GET /api/v1/recovery
+    headers: ["Authorization: Bearer <token>", "Accept: application/json"]
+fault: recovery mode on, after a recovery start
+expect:
+  server: before the entry, GET /server refused 409 recovery-mode-active without scope, no other request reaching it; the entry 201 with a new epoch; then GET /server serving startMode recovery, and Bronzeward-Recovery-Mode true on every answer
+  client: before the entry, the start mode read from that refusal and nothing else read; after it, the new epoch handled as client contracts §8.5, GET /server read again, and the banner shown from GET /recovery
+  shown: 'before the entry, "This server was started for recovery and serves only the recovery entry until it is recorded.", the footer''s server unknown; after it, the epoch-change notice, the header''s new epoch and the banner "Recovery mode since <HH:MM>, epoch <epoch>. No machine scopes. Drafts can be edited." with the process''s restriction'
+  absent: [token in the harness log, retained artifacts or browser storage]
+runs:
+  web:
+    check: web/e2e/auth/shell.e2e.ts, mise run browser-auth; the banner's texts and the start mode in web/src/recovery.test.ts, mise run web
+    browsers: [chrome, edge, firefox, firefox-esr]
+    covers: the banner and the process's refusal before the entry; a scope's refusal comes with the first write view (#257) and the recovery console (#261)
