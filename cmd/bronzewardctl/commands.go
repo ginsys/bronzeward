@@ -67,8 +67,13 @@ func (e *env) contextCmd(args []string) error {
 		}
 		// Its credential-store entry goes with it; a D2 (b) file is left where the operator put it.
 		if verb == "remove" {
-			if err := client.ClearStored(&removed); err != nil {
-				msg += fmt.Sprintf(" %v.", err)
+			note, err := client.ClearStored(&removed)
+			if note != "" {
+				msg += " " + note + "."
+			}
+			if err != nil {
+				fmt.Fprintln(e.out, msg)
+				return err
 			}
 		}
 		_, err = fmt.Fprintln(e.out, msg)

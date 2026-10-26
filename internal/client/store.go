@@ -157,7 +157,10 @@ func (s *store) removed(err error) string {
 // keyringService names this client's entries in the credential store.
 const keyringService = "bronzewardctl"
 
-// within bounds a credential-store call: a locked store may wait on an unlock prompt. The result
+// storeBound is how long within waits for the credential store.
+var storeBound = time.Minute
+
+// within bounds a credential-store read: a locked store may wait on an unlock prompt. The result
 // comes back through the channel, so a call that outlives the bound writes nothing shared.
 func within[T any](f func() (T, error)) (T, error) {
 	type answer struct {
@@ -172,26 +175,32 @@ func within[T any](f func() (T, error)) (T, error) {
 	select {
 	case a := <-done:
 		return a.v, a.err
-	case <-time.After(time.Minute):
+	case <-time.After(storeBound):
 		var zero T
 		return zero, errors.New("the credential store did not answer within a minute; it may be locked")
 	}
 }
 
-// ClearStored removes the credential-store entry of a context being removed; a file is the
-// operator's to remove. Without the store it says that an entry is not reached.
-func ClearStored(x *Context) error {
+// ClearStored removes the credential-store entry of a context being removed, under its renewal
+// lock, so that a renewal in flight finishes first and a waiting one finds the entry gone; a file
+// is the operator's to remove. Without the store it returns a note that an entry is not reached.
+func ClearStored(x *Context) (string, error) {
 	if x.Credential != "oidc" || x.TokenFile() != "" {
-		return nil
+		return "", nil
 	}
 	if why := keyringUnavailable(); why != "" {
 		if unreached() == "" {
-			return nil
+			return "", nil
 		}
-		return fmt.Errorf("The system credential store is not reached, since %s, so a sign-in another session kept there is not removed", why)
+		return fmt.Sprintf("The system credential store is not reached, since %s, so a sign-in another session kept there is not removed", why), nil
 	}
+	unlock, err := openStore(x).lock()
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
 	if err := keyringDelete(x.Name); err != nil {
-		return fmt.Errorf("removing the stored sign-in: %w", err)
+		return "", fmt.Errorf("removing the stored sign-in of context %q from the system credential store: %w", x.Name, err)
 	}
-	return nil
+	return "", nil
 }

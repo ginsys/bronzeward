@@ -37,17 +37,20 @@ func keyringGet(user string) (string, bool, error) {
 	return *v, true, nil
 }
 
+// The Secret Service's writes, replaced in tests.
+var keyringSetCall, keyringDeleteCall = keyring.Set, keyring.Delete
+
+// keyringSet and keyringDelete are not bounded by within: a write given up on would still land
+// after its caller released the renewal lock, over a newer sign-in or one cleared meanwhile. So a
+// store that stops answering mid-write holds the lock, and blocks other bronzewardctl commands on
+// that context, until it answers.
 func keyringSet(user, v string) error {
-	_, err := within(func() (struct{}, error) { return struct{}{}, keyring.Set(keyringService, user, v) })
-	return err
+	return keyringSetCall(keyringService, user, v)
 }
 
 func keyringDelete(user string) error {
-	_, err := within(func() (struct{}, error) {
-		if err := keyring.Delete(keyringService, user); !errors.Is(err, keyring.ErrNotFound) {
-			return struct{}{}, err
-		}
-		return struct{}{}, nil
-	})
-	return err
+	if err := keyringDeleteCall(keyringService, user); !errors.Is(err, keyring.ErrNotFound) {
+		return err
+	}
+	return nil
 }
