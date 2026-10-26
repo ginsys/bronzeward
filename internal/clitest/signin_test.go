@@ -1,0 +1,333 @@
+package clitest
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/ginsys/bronzeward/fixtures/oidc/issuer"
+	"github.com/ginsys/bronzeward/internal/client"
+)
+
+// provider adds a token endpoint to the fixture issuer, which has none (client-contracts.md G19),
+// so renewal can be tested: answer redeems a refresh token, and calls counts the redemptions.
+type provider struct {
+	mu     sync.Mutex
+	answer func(rt string) (int, any)
+	calls  atomic.Int32
+}
+
+func (p *provider) set(answer func(rt string) (int, any)) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.answer = answer
+	p.calls.Store(0)
+}
+
+// wrap serves the issuer's discovery with a token_endpoint added, the token endpoint, and the
+// issuer's other paths unchanged.
+func (p *provider) wrap(iss *issuer.Issuer) http.Handler {
+	inner := iss.Handler()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		rec := httptest.NewRecorder()
+		inner.ServeHTTP(rec, r)
+		var d map[string]any
+		json.Unmarshal(rec.Body.Bytes(), &d)
+		d["token_endpoint"] = iss.URL + "/token"
+		writeJSON(w, http.StatusOK, d)
+	})
+	mux.HandleFunc("POST /token", func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		p.calls.Add(1)
+		p.mu.Lock()
+		answer := p.answer
+		p.mu.Unlock()
+		if answer == nil || r.PostForm.Get("grant_type") != "refresh_token" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_grant"})
+			return
+		}
+		status, body := answer(r.PostForm.Get("refresh_token"))
+		writeJSON(w, status, body)
+	})
+	mux.Handle("/", inner)
+	return mux
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(v)
+}
+
+// issued is a token endpoint answer: access token at, refresh token rt.
+func issued(at, rt string) (int, any) {
+	return http.StatusOK, map[string]any{"access_token": at, "token_type": "Bearer", "expires_in": 300, "refresh_token": rt}
+}
+
+// jwtPattern finds a JWT; refreshPattern the synthetic refresh tokens these tests store.
+var jwtPattern, refreshPattern = regexp.MustCompile(`eyJ[\w-]+\.eyJ[\w-]+\.`), regexp.MustCompile(`BWSYNTH-rt-\d`)
+
+// signedIn runs bronzewardctl as f.ctl does and also fails on any JWT or refresh token in its
+// output (§9.2 item 4).
+func (f *fixture) signedIn(args ...string) result {
+	f.t.Helper()
+	r := f.ctl(nil, "", args...)
+	if jwtPattern.MatchString(r.out+r.err) || refreshPattern.MatchString(r.out+r.err) {
+		f.t.Errorf("bronzewardctl %v printed a sign-in token:\nstdout: %s\nstderr: %s", args, r.out, r.err)
+	}
+	return r
+}
+
+// mint is a fixture human's token, f.Fatal on an error.
+func (f *fixture) mint(human, defect string) string {
+	f.t.Helper()
+	tok, err := f.iss.Mint(human, defect, time.Now())
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return tok
+}
+
+// viewerToken is a viewer's token for sub, issued age ago and valid for left.
+func (f *fixture) viewerToken(sub string, age, left time.Duration) string {
+	f.t.Helper()
+	now := time.Now()
+	tok, err := f.iss.Sign(map[string]any{"iss": f.iss.URL, "aud": "bronzeward", "sub": sub, "groups": []string{"bw-viewers"},
+		"iat": now.Add(-age).Unix(), "nbf": now.Add(-age).Unix(), "exp": now.Add(left).Unix(), "jti": issuer.JTI()})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return tok
+}
+
+// store writes a token file as bronzewardctl would.
+func (f *fixture) store(path, at, rt string) {
+	f.t.Helper()
+	b, _ := json.Marshal(client.Tokens{AccessToken: at, RefreshToken: rt})
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+func (f *fixture) stored(path string) *client.Tokens {
+	f.t.Helper()
+	t, err := client.ReadTokens(path)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return t
+}
+
+// revoke records the identity revocation of human, as h-recovery.
+func (f *fixture) revoke(human string) {
+	f.t.Helper()
+	body := `{"iss":"` + f.iss.URL + `","sub":"` + human + `","reason":"BWSYNTH revoked for the sign-in cases"}`
+	q, _ := http.NewRequest(http.MethodPost, f.base+"/api/v1/identity-revocations", strings.NewReader(body))
+	q.Header.Set("Authorization", "Bearer "+f.mint("h-recovery", ""))
+	q.Header.Set("Content-Type", "application/json")
+	q.Header.Set("Idempotency-Key", "k-revoke-"+human+"-0123456")
+	f.do(q, http.StatusCreated)
+}
+
+// humanFile is the token file of the shared cases' oidc context "human".
+func (f *fixture) humanFile() string { return filepath.Join(f.home, "human.json") }
+
+func init() {
+	reading := "bronzewardctl's own reading of the token, not the server's reason: "
+	sharedCases["AUTH-02"] = func(t *testing.T, f *fixture, in *injector) {
+		in.set(nil, nil)
+		f.want(f.ctl(nil, "", "context", "add", "human", "--server", in.URL, "--certificate-authority", in.ca,
+			"--issuer", f.iss.URL, "--client-id", "BWSYNTH-cli", "--audience", "bronzeward", "--oidc-token-file", f.humanFile()), 0, "credential oidc")
+		// A first accepted read keeps the server's maximum lifetime for the over-lifetime reading.
+		f.store(f.humanFile(), f.mint("h-viewer", ""), "")
+		f.want(f.signedIn("--context", "human", "whoami"), 0, "Roles", "viewer",
+			"Token (bronzewardctl's reading)", "subject h-viewer, issuer "+f.iss.URL)
+		for defect, says := range map[string]string{
+			"expired":          "Your sign-in expired: sign in again.",
+			"wrong-issuer":     "The token is from " + f.iss.URL + "/other; this context expects " + f.iss.URL + ".",
+			"wrong-audience":   "The token is not issued for bronzeward; the identity provider needs an audience mapping.",
+			"over-lifetime":    "The token lives longer than this server accepts",
+			"alg-none":         "Not accepted by human (" + in.URL + "): sign in again.",
+			"groups-not-array": "Not accepted by human (" + in.URL + "): sign in again.",
+		} {
+			f.store(f.humanFile(), f.mint("h-viewer", defect), "")
+			in.set(nil, nil)
+			f.want(f.signedIn("--context", "human", "whoami"), 1, "answered 401", "(unauthenticated)", reading+says)
+			if seen := in.requests(); len(seen) != 1 {
+				t.Errorf("%s: the injector saw %v, want GET /server once and no renewal", defect, seen)
+			}
+		}
+	}
+	sharedCases["AUTH-03"] = func(t *testing.T, f *fixture, in *injector) {
+		tok, err := f.iss.MintWithoutGroup("h-viewer", "bw-viewers", time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.store(f.humanFile(), tok, "")
+		f.want(f.signedIn("--context", "human", "whoami"), 1, "answered 403", "(forbidden)", "Needs one of the roles [viewer",
+			"You are signed in as h-viewer.")
+	}
+	// revoked runs AUTH-05 and AUTH-10: the stored sign-in is cleared and no new one is tried.
+	revoked := func(t *testing.T, f *fixture, in *injector, tok string) {
+		f.store(f.humanFile(), tok, "")
+		in.set(nil, nil)
+		f.want(f.signedIn("--context", "human", "whoami"), 1, "(identity-revoked)", "contact a recovery administrator",
+			"The stored sign-in was cleared; signing in again does not restore access.")
+		if _, err := os.Stat(f.humanFile()); !os.IsNotExist(err) {
+			t.Errorf("the token file is still there: %v", err)
+		}
+		in.set(nil, nil)
+		f.want(f.signedIn("--context", "human", "whoami"), 1, "not signed in", "does not exist")
+		if seen := in.requests(); len(seen) != 0 {
+			t.Errorf("the injector saw %v after the sign-in was cleared", seen)
+		}
+	}
+	sharedCases["AUTH-05"] = func(t *testing.T, f *fixture, in *injector) { revoked(t, f, in, f.mint("h-author", "")) }
+	sharedCases["AUTH-10"] = func(t *testing.T, f *fixture, in *injector) {
+		revoked(t, f, in, f.viewerToken("h-denied", 0, issuer.Lifetime))
+	}
+}
+
+// TestSignIn checks an oidc context's token file, renewal (§9.5, decision T6 of #254) and logout.
+func TestSignIn(t *testing.T) {
+	f := start(t, "viewer")
+	file := filepath.Join(f.home, "signin.json")
+	f.want(f.ctl(nil, "", "context", "add", "human", "--server", f.base, "--issuer", f.iss.URL, "--client-id", "BWSYNTH-cli",
+		"--audience", "bronzeward", "--oidc-token-file", file), 0, "credential oidc")
+	f.want(f.ctl(nil, "", "context", "add", "lab", "--server", f.base, "--automation-token-file", f.tokenFile), 0)
+	whoami := func() result { return f.signedIn("--context", "human", "whoami") }
+
+	t.Run("token file", func(t *testing.T) {
+		f.want(whoami(), 1, "not signed in: the token file "+file+" does not exist")
+		f.store(file, f.mint("h-viewer", ""), "")
+		f.want(f.signedIn("--context", "human", "--token-file", f.tokenFile, "whoami"), 1, "this context signs in")
+		os.Chmod(file, 0o644)
+		f.want(whoami(), 1, "make it owner-only")
+		os.Chmod(file, 0o600)
+		f.want(whoami(), 0, "subject h-viewer")
+		// An automation token in the file is the operator's: never used, replaced or removed.
+		os.WriteFile(file, []byte(f.token+"\n"), 0o600)
+		f.want(whoami(), 1, "holds an automation token")
+		f.want(f.signedIn("--context", "human", "logout"), 1, "holds an automation token")
+		if b, _ := os.ReadFile(file); string(b) != f.token+"\n" {
+			t.Error("the automation token file was changed")
+		}
+	})
+
+	t.Run("renewal before expiry", func(t *testing.T) {
+		f.store(file, f.viewerToken("h-viewer", 270*time.Second, 30*time.Second), "BWSYNTH-rt-1")
+		fresh := f.mint("h-viewer", "")
+		f.idp.set(func(rt string) (int, any) {
+			if rt != "BWSYNTH-rt-1" {
+				return http.StatusBadRequest, map[string]string{"error": "invalid_grant"}
+			}
+			return issued(fresh, "BWSYNTH-rt-2")
+		})
+		f.want(whoami(), 0, "subject h-viewer")
+		if s := f.stored(file); f.idp.calls.Load() != 1 || s.AccessToken != fresh || s.RefreshToken != "BWSYNTH-rt-2" {
+			t.Errorf("%d redemptions; the file holds the renewed pair: %v", f.idp.calls.Load(), s.AccessToken == fresh && s.RefreshToken == "BWSYNTH-rt-2")
+		}
+	})
+
+	t.Run("renewal once after a 401", func(t *testing.T) {
+		f.store(file, f.mint("h-viewer", "unknown-kid"), "BWSYNTH-rt-3")
+		f.idp.set(func(string) (int, any) { return issued(f.mint("h-viewer", ""), "BWSYNTH-rt-4") })
+		f.want(whoami(), 0, "subject h-viewer")
+		if n := f.idp.calls.Load(); n != 1 {
+			t.Errorf("%d redemptions, want 1", n)
+		}
+		f.store(file, f.mint("h-viewer", "unknown-kid"), "BWSYNTH-rt-3")
+		f.idp.set(func(string) (int, any) { return issued(f.mint("h-viewer", "unknown-kid"), "BWSYNTH-rt-4") })
+		f.want(whoami(), 1, "answered 401", "Not accepted by human")
+		if n := f.idp.calls.Load(); n != 1 {
+			t.Errorf("%d redemptions after a renewed token was refused too, want 1", n)
+		}
+	})
+
+	t.Run("renewal refused", func(t *testing.T) {
+		expired := f.mint("h-viewer", "expired")
+		f.store(file, expired, "BWSYNTH-rt-5")
+		f.idp.set(func(string) (int, any) { return http.StatusBadRequest, map[string]string{"error": "invalid_grant"} })
+		f.want(whoami(), 1, "refused the renewal: 400 Bad Request invalid_grant", "the current token stays in use until the server refuses it",
+			"answered 401", "Your sign-in expired: sign in again.")
+		if s := f.stored(file); f.idp.calls.Load() != 1 || s.AccessToken != expired || s.RefreshToken != "BWSYNTH-rt-5" {
+			t.Errorf("%d redemptions, want 1; the stored sign-in changed", f.idp.calls.Load())
+		}
+	})
+
+	t.Run("refresh token not rotated", func(t *testing.T) {
+		f.store(file, f.viewerToken("h-viewer", 270*time.Second, 30*time.Second), "BWSYNTH-rt-6")
+		f.idp.set(func(rt string) (int, any) { return issued(f.mint("h-viewer", ""), rt) })
+		f.want(whoami(), 0, "did not rotate the refresh token, so none is kept")
+		if s := f.stored(file); s.RefreshToken != "" {
+			t.Error("the unrotated refresh token was kept")
+		}
+	})
+
+	t.Run("new subject", func(t *testing.T) {
+		f.store(file, f.viewerToken("h-viewer", 270*time.Second, 30*time.Second), "BWSYNTH-rt-7")
+		f.idp.set(func(string) (int, any) { return issued(f.viewerToken("h-other", 0, issuer.Lifetime), "BWSYNTH-rt-8") })
+		f.want(whoami(), 0, "a new sign-in: the renewed token is for h-other at "+f.iss.URL+", not h-viewer at "+f.iss.URL, "subject h-other")
+	})
+
+	// T6: two processes renewing together redeem the refresh token once; the second uses the
+	// pair the first stored.
+	t.Run("concurrent renewal", func(t *testing.T) {
+		f.store(file, f.viewerToken("h-viewer", 270*time.Second, 30*time.Second), "BWSYNTH-rt-9")
+		var used atomic.Bool
+		f.idp.set(func(rt string) (int, any) {
+			if rt != "BWSYNTH-rt-9" || used.Swap(true) {
+				return http.StatusBadRequest, map[string]string{"error": "invalid_grant"}
+			}
+			time.Sleep(500 * time.Millisecond)
+			return issued(f.mint("h-viewer", ""), "BWSYNTH-rt-0")
+		})
+		var wg sync.WaitGroup
+		results := make([]result, 2)
+		for i := range results {
+			wg.Go(func() { results[i] = whoami() })
+		}
+		wg.Wait()
+		for _, r := range results {
+			f.want(r, 0, "subject h-viewer")
+		}
+		if n := f.idp.calls.Load(); n != 1 {
+			t.Errorf("%d redemptions, want 1", n)
+		}
+	})
+
+	t.Run("logout", func(t *testing.T) {
+		tok := f.mint("h-viewer", "")
+		f.store(file, tok, "BWSYNTH-rt-1")
+		until := client.ReadClaims(tok).ExpiresAt().UTC().Format("2006-01-02 15:04:05 MST")
+		f.want(f.signedIn("--context", "human", "logout"), 0, "Signed out of human", "the token file "+file+" is removed",
+			"is not revoked and stays valid at the server until "+until+", plus the server's 60 s leeway")
+		if _, err := os.Stat(file); !os.IsNotExist(err) {
+			t.Errorf("the token file is still there: %v", err)
+		}
+		f.want(f.signedIn("--context", "human", "logout"), 0, "Not signed in to human")
+		f.want(f.signedIn("--context", "lab", "logout"), 1, "an automation context has no sign-in")
+		if _, err := os.Stat(f.tokenFile); err != nil {
+			t.Errorf("the automation token file: %v", err)
+		}
+	})
+}
+
+// TestSignInLeakScan is the sign-in leak scan's positive control.
+func TestSignInLeakScan(t *testing.T) {
+	key, _ := issuer.NewKey()
+	iss, _ := issuer.New("http://127.0.0.1:1", "bronzeward", key)
+	tok, err := iss.Mint("h-viewer", "", time.Now())
+	if err != nil || !jwtPattern.MatchString("x "+tok+" y") || !refreshPattern.MatchString("BWSYNTH-rt-1") || jwtPattern.MatchString("eyJhbGciOi") {
+		t.Fatalf("the sign-in leak scan misses a token or flags a header alone: %v", err)
+	}
+}

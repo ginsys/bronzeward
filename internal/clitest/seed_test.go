@@ -13,8 +13,8 @@ import (
 )
 
 // serveIssuer serves the fixture issuer on loopback for the test's lifetime, so the server
-// accepts its humans' tokens over plain http.
-func serveIssuer(t *testing.T) *issuer.Issuer {
+// accepts its humans' tokens over plain http, with the token endpoint of provider.
+func serveIssuer(t *testing.T) (*issuer.Issuer, *provider) {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -28,10 +28,11 @@ func serveIssuer(t *testing.T) *issuer.Issuer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := &httptest.Server{Listener: l, Config: &http.Server{Handler: iss.Handler()}}
+	idp := &provider{}
+	srv := &httptest.Server{Listener: l, Config: &http.Server{Handler: idp.wrap(iss)}}
 	srv.Start()
 	t.Cleanup(srv.Close)
-	return iss
+	return iss, idp
 }
 
 // seeded names what seed recorded.

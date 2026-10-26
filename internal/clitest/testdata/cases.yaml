@@ -99,3 +99,51 @@
     server: answers the status reads; the injector refuses the machine reads
     shown: '"RECOVERY MODE is on in trusted", "Scopes: 1: <machine> ready", exit 0; then "the scope of machine <machine> is pre-restore-unaccounted" and "a process restriction of a server started for recovery", exit 1'
     absent: [token in stdout, stderr, argv]
+
+- id: AUTH-02
+  setup: 'context human: oidc, issuer the fixture issuer, audience bronzeward, a D2 (b) token file holding no refresh token; a first whoami with a valid h-viewer token keeps the server''s maxTokenLifetimeSeconds'
+  action: whoami, once per fixture defect expired, wrong-issuer, wrong-audience, over-lifetime, alg-none, groups-not-array
+  exchange:
+    - "GET /api/v1/server, headers: Authorization, Accept: application/json"
+  fault: the token file holds an h-viewer token carrying the defect
+  expect:
+    client: no renewal without a refresh token; adds its own reading, labelled as such
+    server: answers 401 unauthenticated with no reason
+    shown: '"bronzewardctl''s own reading of the token, not the server''s reason:" then "Your sign-in expired", "The token is from <iss>/other; this context expects <iss>", "not issued for bronzeward", "lives longer than this server accepts", or "Not accepted by human" for the last two; exit 1'
+    absent: [token in stdout, stderr, argv]
+
+- id: AUTH-03
+  setup: context human
+  action: whoami
+  exchange:
+    - GET /api/v1/server
+  fault: the token file holds an h-viewer token without the bw-viewers group
+  expect:
+    client: names the roles and the signed-in subject
+    server: answers 403 forbidden with the route's roles
+    shown: '"Needs one of the roles [viewer ...]. You are signed in as h-viewer."; exit 1'
+    absent: [token in stdout, stderr, argv]
+
+- id: AUTH-05
+  setup: context human; h-recovery recorded the identity revocation of h-author before the cases
+  action: whoami, twice
+  exchange:
+    - GET /api/v1/server, the first time only
+  fault: the token file holds an h-author token
+  expect:
+    client: clears the token file; tries no new sign-in; the second run sends nothing
+    server: answers 403 identity-revoked
+    shown: '"contact a recovery administrator. The stored sign-in was cleared", exit 1; then "not signed in", exit 1'
+    absent: [token in stdout, stderr, argv]
+
+- id: AUTH-10
+  setup: context human; the server's deniedSubjects lists h-denied at the fixture issuer
+  action: whoami, twice
+  exchange:
+    - GET /api/v1/server, the first time only
+  fault: the token file holds a viewer token for h-denied
+  expect:
+    client: as AUTH-05
+    server: answers 403 identity-revoked
+    shown: as AUTH-05
+    absent: [token in stdout, stderr, argv]

@@ -33,6 +33,9 @@ type Context struct {
 
 	LastEpoch string `yaml:"lastEpoch,omitempty" json:"lastEpoch,omitempty"`
 	StartMode string `yaml:"startMode,omitempty" json:"startMode,omitempty"`
+	// MaxTokenLifetimeSeconds is the maximum GET /server last served, for the lifetime pre-check
+	// of client-contracts.md §9.6; 0 before the first read.
+	MaxTokenLifetimeSeconds int `yaml:"maxTokenLifetimeSeconds,omitempty" json:"maxTokenLifetimeSeconds,omitempty"`
 }
 
 type Automation struct {
