@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { $, browser, expect } from "@wdio/globals";
 import { CONTROL, FIXTURE_ISSUER, FIXTURE_PAGE, IDP_PAGE, idpEnv } from "../auth.conf.ts";
+import type { Faults } from "../injector.ts";
 import type { Counts } from "../provider.ts";
 
 const root = fileURLToPath(new URL("../../..", import.meta.url));
@@ -13,12 +14,14 @@ export const where = () => browser.execute(() => location.origin + location.path
 export const param = (name: string) => browser.execute((n: string) => new URLSearchParams(location.search).get(n), name);
 export const status = () => $('[data-testid="status"]').getText();
 
-// Waits until the page is back on `page`/ with its read settled.
+// Waits until the page is back on `page`/ with its reads settled: the page's state text, or the
+// footer's server versions once the shell shows a page.
 export async function settled(page: string): Promise<string> {
-  await browser.waitUntil(async () => (await where()) === `${page}/` && (await $('[data-testid="status"]').isExisting()) && (await status()) !== "Loading", {
+  const shown = async () => (await $('[data-testid="status"]').isExisting()) ? !(await status()).startsWith("Loading") : $("main h2").isExisting();
+  await browser.waitUntil(async () => (await where()) === `${page}/` && (await shown()), {
     timeout: 20_000, timeoutMsg: `the page did not settle on ${page}/`,
   });
-  return status();
+  return (await $('[data-testid="status"]').isExisting()) ? status() : $('[data-testid="server"]').getText();
 }
 
 // A token the fixture issuer mints, under the synthetic provider's issuer.
@@ -28,15 +31,19 @@ export function mint(human: string, flags: Record<string, string> = {}): string 
   return execFileSync(`${root}bin/oidc-fixture`, args).toString().trim();
 }
 
-// Signs the fixture page in: the synthetic provider hands out the token the issuer mints with flags.
-export async function fixtureSignIn(human: string, flags: Record<string, string> = {}): Promise<string> {
+// Signs the fixture page in: the synthetic provider hands out the token the issuer mints with flags,
+// and the injector applies the faults.
+export async function fixtureSignIn(human: string, flags: Record<string, string> = {}, f: Faults = {}): Promise<string> {
   const q = new URLSearchParams({ human, ...flags });
   expect((await fetch(`${CONTROL}/next?${q}`)).ok).toBe(true);
+  await faults(f);
   await browser.url(`${FIXTURE_PAGE}/`);
   return settled(FIXTURE_PAGE);
 }
 
 export const counts = async (): Promise<Counts> => (await fetch(`${CONTROL}/counts`)).json() as never;
+export const seen = async (): Promise<string[]> => (await fetch(`${CONTROL}/seen`)).json() as never;
+export const faults = async (f: Faults) => expect((await fetch(`${CONTROL}/faults`, { method: "POST", body: JSON.stringify(f) })).ok).toBe(true);
 
 // Signs the test provider's page in as human: the page sends the browser to the provider, which has
 // no login UI here; the case completes the authorization request through the Session API, as the

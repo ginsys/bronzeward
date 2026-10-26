@@ -4,7 +4,8 @@
 //     (AUTH-01, AUTH-08).
 //   - B trusts the synthetic provider (provider.ts), which hands out tokens the fixture issuer mints
 //     on the spec's request, defects included (AUTH-02, AUTH-03, AUTH-05, AUTH-07, AUTH-10,
-//     AUTH-11).
+//     AUTH-11); its page reaches it through the injector (injector.ts; COMP-01, COMP-02 and the
+//     shell's states).
 // It removes the databases with the processes, and fails the run when it cannot; then the state
 // directory, which names them, is kept, and the next run refuses to start until it is removed.
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
@@ -14,6 +15,7 @@ import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { SevereServiceError } from "webdriverio";
 import { config as base } from "./wdio.conf.ts";
+import { type Faults, type Injector, startInjector } from "./injector.ts";
 import { type Counts, type Grant, type Provider, startProvider } from "./provider.ts";
 
 export const IDP_PAGE = "http://localhost:58443";
@@ -21,6 +23,7 @@ export const FIXTURE_PAGE = "http://localhost:58448";
 export const FIXTURE_ISSUER = "http://127.0.0.1:58446";
 export const CONTROL = "http://127.0.0.1:58449";
 export const FIXTURE_API = "http://127.0.0.1:58451";
+const INJECTOR = "http://127.0.0.1:58452";
 const IDP_API = "http://127.0.0.1:58450";
 const KEYS = "127.0.0.1:58447";
 const PG = ["-h", "127.0.0.1", "-p", "55433", "-U", "bronzeward"];
@@ -96,15 +99,22 @@ function host(listen: string, clientConfig: object, issuer: string, api: string)
 // The control routes: a spec chooses the fixture token the next sign-in receives, reads the
 // provider's counts, and sends the browser to a URL holding a code without naming it over
 // WebDriver, whose log the artifact scan reads (POST /go stores it, GET /go redirects there once).
-function control(provider: Provider, next: { grant: Grant }): Server {
+// POST /faults sets the injector's faults, GET /seen lists the API paths it passed on; the next
+// sign-in clears both.
+function control(provider: Provider, next: { grant: Grant }, injector: Injector): Server {
   let go: string | undefined;
   return createServer((req, res) => {
     const url = new URL(req.url ?? "/", CONTROL);
     if (url.pathname === "/counts") return res.end(JSON.stringify(provider.counts));
-    if (url.pathname === "/go" && req.method === "POST") {
+    if (url.pathname === "/seen") return res.end(JSON.stringify(injector.seen));
+    if (req.method === "POST" && (url.pathname === "/go" || url.pathname === "/faults")) {
       let body = "";
       req.on("data", (c: Buffer) => (body += c.toString()));
-      req.on("end", () => ((go = body), res.end()));
+      req.on("end", () => {
+        if (url.pathname === "/go") go = body;
+        else injector.faults = JSON.parse(body) as Faults;
+        res.end();
+      });
       return;
     }
     if (url.pathname === "/go") {
@@ -130,13 +140,15 @@ function control(provider: Provider, next: { grant: Grant }): Server {
       return res.writeHead(500).end(String(e));
     }
     for (const k of Object.keys(provider.counts) as (keyof Counts)[]) provider.counts[k] = 0;
+    injector.faults = {};
+    injector.seen.length = 0;
     res.end();
   });
 }
 
 async function prepare() {
   // Anything left on these ports from an earlier run would answer the readiness checks below.
-  for (const at of ["127.0.0.1:58443", "127.0.0.1:58448", FIXTURE_ISSUER.slice(7), CONTROL.slice(7), FIXTURE_API.slice(7), IDP_API.slice(7), KEYS]) {
+  for (const at of ["127.0.0.1:58443", "127.0.0.1:58448", FIXTURE_ISSUER.slice(7), CONTROL.slice(7), FIXTURE_API.slice(7), IDP_API.slice(7), INJECTOR.slice(7), KEYS]) {
     if (await fetch(`http://${at}/`).then(() => true, () => false)) throw new SevereServiceError(`something already answers on ${at}`);
   }
   // Made, never reused: one left behind names databases an earlier cleanup could not drop, and the
@@ -156,7 +168,9 @@ async function prepare() {
   const next = { grant: { access: "", sub: "" } };
   const provider = await startProvider({ issuer: FIXTURE_ISSUER, pageOrigin: FIXTURE_PAGE, clientId: "synthetic-web-client", next: () => next.grant, keys: `http://${KEYS}`, refresh: canary });
   servers.push(provider.server);
-  const ctl = control(provider, next);
+  const injector = await startInjector(FIXTURE_API, Number(new URL(INJECTOR).port));
+  servers.push(injector.server);
+  const ctl = control(provider, next, injector);
   await new Promise<void>((resolve, reject) => {
     ctl.once("error", reject);
     ctl.listen(Number(new URL(CONTROL).port), "127.0.0.1", resolve);
@@ -172,7 +186,7 @@ async function prepare() {
     // Zitadel puts the project in aud only when this scope asks for it (client contracts §5 item 4).
     scopes: `urn:zitadel:iam:org:project:id:${idp["BW_TEST_IDP_PROJECT"]}:aud`,
   }, idp["BW_TEST_IDP_ISSUER"]!, IDP_API);
-  const hb = host("127.0.0.1:58448", { issuer: FIXTURE_ISSUER, audience: "bronzeward", cliClientId: "synthetic-cli-client", webClientId: "synthetic-web-client" }, FIXTURE_ISSUER, FIXTURE_API);
+  const hb = host("127.0.0.1:58448", { issuer: FIXTURE_ISSUER, audience: "bronzeward", cliClientId: "synthetic-cli-client", webClientId: "synthetic-web-client" }, FIXTURE_ISSUER, INJECTOR);
   await ready("http://127.0.0.1:58443/", ha);
   await ready("http://127.0.0.1:58448/", hb);
 }
