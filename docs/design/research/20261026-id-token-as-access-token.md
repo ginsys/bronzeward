@@ -15,9 +15,11 @@ access token from an ID token, and
 states only that a client never sends one. This record establishes what the pinned provider puts
 in each token, which of the issue's four alternatives can tell them apart there, and at what cost.
 
-Decision enabled: once the check of #372 lands, dropping
-[client contracts §9.7](../../spec/client-contracts.md#97-sign-out-and-cache-clearing) item 2's
-no-`id_token_hint` workaround, and running AUTH-08 in full.
+Decision enabled: once the check of #372 lands, the web sign-out
+([client contracts §9.7](../../spec/client-contracts.md#97-sign-out-and-cache-clearing) item 2)
+can send an `id_token_hint` to the provider's end-session endpoint, which the sign-out
+implementation of [#332](https://github.com/ginsys/bronzeward/issues/332) avoids because a leaked
+ID token would authenticate at the server; and AUTH-08 can run in full.
 
 ## Pinned versions and inputs
 
@@ -37,8 +39,9 @@ no-`id_token_hint` workaround, and running AUTH-08 in full.
 `mise run dev-db`, `mise run dev-idp`, then `mise run go-idp`, which runs
 `TestIdentityProviderIDToken` (`internal/api/idtoken_test.go`) with the rest of the sign-in
 self-test. It skips without the provider's variables. For each grant it decodes both tokens'
-headers and claims without a signature check, records which claims are present (no value other
-than `typ` and `aud` is kept), applies each candidate check to both, and presents both tokens to
+headers and claims without a signature check, asserts the header type, the exact audience and the
+presence or absence of every claim in the table below (no value other than `typ` and `aud` is
+kept), applies each candidate check to both, and presents both tokens to
 the server's real verifier through `GET /identity`. It asserts today's behaviour, the finding
 included, so a provider or verifier change fails it; #372 turns the ID token's assertion into a
 refusal.
@@ -91,10 +94,12 @@ Why, from the provider's source at tag v4.19.5:
 | 3 | A distinct access-token audience no ID token names | impossible: both tokens take the session's audience. Shown from source; not tried live, since adding an application to the `bronzeward` project would change every token the shared test provider issues | unusable with this provider |
 | 4 | Provider configuration only | not a fix: the one lever is keeping role claims out of ID tokens, which leaves the no-role identity, and no server check holds it | a configuration mistake turns the finding into full role equivalence (below) |
 
-Severity amplifier for 4: a deployment that adds its groups claim on the `preuserinfo` function as
-well, or maps `groupsClaim` to a role claim that ID-token role assertion puts into ID tokens, gives
-an ID token the access token's roles, from a token sent to every relying party in the project and
-carried in an `id_token_hint`. Inferred from the source above; not configured live.
+Severity amplifier for 4: a deployment whose action adds the groups claim on the `preuserinfo`
+function as well as `preaccesstoken` gives an ID token the access token's roles, from a token sent
+to every relying party in the project and carried in an `id_token_hint`. Inferred from the source
+above; not configured live. Zitadel's own role claim, which ID-token role assertion adds, is an
+object, and the server refuses a non-array groups claim (`internal/auth/auth.go:213-221`,
+`fixtures/oidc/groups/groups.go:4-5`), so pointing `groupsClaim` at it grants nothing.
 
 ## Recommendation
 

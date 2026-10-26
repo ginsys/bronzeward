@@ -10,6 +10,7 @@ package api
 import (
 	"encoding/base64"
 	"encoding/json"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -100,6 +101,23 @@ func TestIdentityProviderIDToken(t *testing.T) {
 	if st != 200 || renewed.ID == "" {
 		t.Fatalf("refresh: %d %q; want 200 with an ID token", st, renewed.Error)
 	}
+	aud := []string{p.cli, p.web, p.project}
+	slices.Sort(aud)
+	// want is the record's table: the claims each token carries, every other probed claim absent.
+	want := func(nonce bool) (idWant, atWant map[string]bool) {
+		idWant, atWant = map[string]bool{}, map[string]bool{}
+		for _, c := range probed {
+			idWant[c], atWant[c] = false, false
+		}
+		for _, c := range []string{"at_hash", "azp", "auth_time", "amr", "sid", "client_id"} {
+			idWant[c] = true
+		}
+		idWant["nonce"] = nonce
+		for _, c := range []string{"client_id", "jti", "groups"} {
+			atWant[c] = true
+		}
+		return idWant, atWant
+	}
 	dc, uc, exp, iv := p.startDevice()
 	p.decide(uc, "h-viewer")
 	device := p.poll(dc, iv, time.Now().Add(time.Duration(exp)*time.Second))
@@ -121,14 +139,15 @@ func TestIdentityProviderIDToken(t *testing.T) {
 			if id.typ != "JWT" || at.typ != "JWT" {
 				t.Errorf("header typ %q and %q; want JWT for both (internal/api/oidc/sign/signer.go:50)", id.typ, at.typ)
 			}
-			if !slices.Equal(id.aud, at.aud) || !slices.Contains(at.aud, p.project) {
-				t.Errorf("aud %v and %v; want the same audience, the project's included", id.aud, at.aud)
+			if !slices.Equal(id.aud, aud) || !slices.Equal(at.aud, aud) {
+				t.Errorf("aud %v and %v; want both the CLI client, the web client and the project", id.aud, at.aud)
 			}
-			if !id.claims["at_hash"] || id.claims["nonce"] != g.nonce || !id.claims["client_id"] || id.claims["jti"] || id.claims["groups"] {
-				t.Errorf("ID token claims %v; want at_hash, client_id, nonce %v, no jti or groups", id.claims, g.nonce)
+			idWant, atWant := want(g.nonce)
+			if !maps.Equal(id.claims, idWant) {
+				t.Errorf("ID token claims %v; want %v", id.claims, idWant)
 			}
-			if at.claims["at_hash"] || at.claims["nonce"] || !at.claims["client_id"] || !at.claims["jti"] || !at.claims["groups"] {
-				t.Errorf("access token claims %v; want client_id, jti and groups, no at_hash or nonce", at.claims)
+			if !maps.Equal(at.claims, atWant) {
+				t.Errorf("access token claims %v; want %v", at.claims, atWant)
 			}
 			for _, c := range candidates {
 				t.Logf("check %s: ID token passes %v, access token passes %v", c.name, c.pass(id), c.pass(at))
