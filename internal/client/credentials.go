@@ -348,16 +348,20 @@ func discover(x *Context, d time.Duration) (context.Context, context.CancelFunc,
 
 // discoveryError is a failed discovery as shown. A transport error is the client's own. go-oidc's
 // other errors quote what the provider sent (its reason phrase, its response body, the issuer it
-// names), which is not shown: only the status of a refusal, which go-oidc puts first.
+// names), which is not shown: only the status of a refusal, which go-oidc puts first, followed by
+// the reason phrase or, when the status line has none, by a colon.
 func discoveryError(iss string, err error) error {
 	var ue *url.Error
 	var me *oidc.IssuerMismatchError
+	var re *redirectRefused
 	switch s := err.Error(); {
+	case errors.As(err, &re):
+		return fmt.Errorf("the identity provider %s: %w", iss, re)
 	case errors.As(err, &ue):
 		return fmt.Errorf("cannot reach the identity provider %s: %w", iss, err)
 	case errors.As(err, &me):
 		return fmt.Errorf("the identity provider %s: its discovery document names another issuer", iss)
-	case len(s) > 4 && s[3] == ' ':
+	case len(s) > 4 && (s[3] == ' ' || s[3] == ':'):
 		if status, e := strconv.Atoi(s[:3]); e == nil && http.StatusText(status) != "" {
 			return fmt.Errorf("the identity provider %s refused its discovery: %s", iss, refusal(status, ""))
 		}
@@ -451,12 +455,21 @@ func issuerClient(x *Context) (*http.Client, error) {
 		return nil, err
 	}
 	hc.CheckRedirect = func(r *http.Request, via []*http.Request) error {
-		if len(via) >= 10 || providerEndpoint(r.URL.String(), "redirect") != nil {
-			return fmt.Errorf("the identity provider redirected to %s, which bronzewardctl does not follow", r.URL.Redacted())
+		// Go drops an empty fragment from the target, so the Location header is checked as sent.
+		if len(via) >= 10 || r.Response != nil && strings.Contains(r.Response.Header.Get("Location"), "#") ||
+			providerEndpoint(r.URL.String(), "redirect") != nil {
+			return &redirectRefused{r.URL.Redacted()}
 		}
 		return nil
 	}
 	return hc, nil
+}
+
+// redirectRefused is a redirect from the identity provider that issuerClient does not follow.
+type redirectRefused struct{ to string }
+
+func (e *redirectRefused) Error() string {
+	return "it redirected to " + e.to + ", which bronzewardctl does not follow"
 }
 
 // reading is the client's own reading of an access token the server answered 401 to (§9.6),

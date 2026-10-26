@@ -434,7 +434,7 @@ func TestSignIn(t *testing.T) {
 		}
 	})
 
-	// H3: a document without an access token, stored while the refused whoami waits, names no
+	// H3 of #381: a document without an access token, stored while the refused whoami waits, names no
 	// identity, so it is not known to be the refused one and is kept.
 	t.Run("a refresh-only document stored before an identity-revoked clear", func(t *testing.T) {
 		f.store(file, f.viewerToken("h-denied", 0, issuer.Lifetime), "")
@@ -525,11 +525,17 @@ func TestSignIn(t *testing.T) {
 		os.WriteFile(path, cfg, 0o600)
 		f.want(plain, 1, "the token file "+file+" is removed", "The refresh token is not revoked", "must be https")
 		// A failed discovery shows the status of a refusal, but neither the provider's reason
-		// phrase nor its body; a refused redirect and another issuer are named as such.
+		// phrase nor its body nor the issuer it names; a refused redirect is named once, as such,
+		// including one to an empty fragment, which Go drops from the target.
+		moved := "it redirected to http://idp.example.invalid/.well-known/openid-configuration, which bronzewardctl does not follow"
 		for mode, want := range map[string]string{
-			"down":  "refused its discovery: 503 Service Unavailable",
-			"moved": "which bronzewardctl does not follow",
-			"other": "its discovery document names another issuer",
+			"down":     "refused its discovery: 503 Service Unavailable",
+			"bare":     "refused its discovery: 503 Service Unavailable",
+			"phrase":   "refused its discovery: 503 Service Unavailable",
+			"garbage":  "its discovery document could not be read",
+			"moved":    "the identity provider " + f.iss.URL + ": " + moved,
+			"fragment": "it redirected to " + f.iss.URL + "/.well-known/openid-configuration?moved, which bronzewardctl does not follow",
+			"other":    "its discovery document names another issuer",
 		} {
 			f.idp.mu.Lock()
 			f.idp.discovery = mode
@@ -540,8 +546,11 @@ func TestSignIn(t *testing.T) {
 			f.idp.discovery = ""
 			f.idp.mu.Unlock()
 			f.want(r, 1, "The refresh token is not revoked", want)
-			if strings.ContainsRune(r.out+r.err, '\x1b') || strings.Contains(r.out+r.err, "down") {
-				t.Errorf("logout showed what the failed discovery sent:\n%s%s", r.out, r.err)
+			shown := r.out + r.err
+			if strings.ContainsRune(shown, '\x1b') || strings.Contains(shown, "down") || strings.Contains(shown, "BWSYNTH-body") ||
+				strings.Contains(shown, "BWSYNTH-phrase") || mode == "other" && strings.Contains(shown, "idp.example.invalid") ||
+				strings.Contains(shown, "cannot reach") || strings.Count(shown, "redirected to") > 1 {
+				t.Errorf("logout in discovery mode %s showed what the failed discovery sent:\n%s", mode, shown)
 			}
 		}
 		f.store(file, f.mint("h-viewer", "expired"), "")

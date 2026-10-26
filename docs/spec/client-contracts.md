@@ -285,7 +285,8 @@ it. It holds no secret.
    [#332](https://github.com/ginsys/bronzeward/issues/332)). The
    web client reads it from its own origin and uses the web client's ID, and the CLI imports it
    with `context add --from <url>` under the TLS rules of [§6](#6-tls-trust) and stores the CLI
-   client's ID. Entering them by hand stays possible. The server is never asked
+   client's ID, and as `oidc.scopes` `openid offline_access` followed by the file's scopes unless
+   `--scopes` names others. Entering them by hand stays possible. The server is never asked
    for them through an authenticated route: the client needs them before it can authenticate.
 5. A context's `server` is checked once when it is added: `GET /livez` must answer `204`
    (`internal/server/server.go:19-21`), which shows only that something answers; it proves

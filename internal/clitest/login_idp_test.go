@@ -179,8 +179,8 @@ func (z *zitadel) refreshes(rt string) bool {
 }
 
 // TestLoginIdentityProvider signs in to the test identity provider with bronzewardctl: AUTH-01
-// through the loopback, renewal with rotation past the access token's expiry (AUTH-06's renewal
-// half), the device grant, and AUTH-09's logout with revocation.
+// through the loopback, renewal with rotation past the access token's expiry on operation list
+// (AUTH-06's renewal half), the device grant, and AUTH-09's logout with revocation.
 func TestLoginIdentityProvider(t *testing.T) {
 	z := newZitadel(t)
 	f := startFor(t, "viewer", z.issuer, z.project)
@@ -221,7 +221,7 @@ func TestLoginIdentityProvider(t *testing.T) {
 		before := f.stored(file)
 		exp := client.ReadClaims(before.AccessToken).ExpiresAt()
 		time.Sleep(time.Until(exp.Add(5 * time.Second)))
-		f.want(ctl("--context", "idp", "machine", "list"), 0)
+		f.want(ctl("--context", "idp", "operation", "list"), 0)
 		after := f.stored(file)
 		if after.AccessToken == before.AccessToken || after.RefreshToken == "" || after.RefreshToken == before.RefreshToken {
 			t.Fatalf("the file after a read past expiry: renewed %v, refresh token rotated %v",
@@ -230,7 +230,7 @@ func TestLoginIdentityProvider(t *testing.T) {
 		if z.refreshes(before.RefreshToken) {
 			t.Error("the provider still redeems the rotated-out refresh token")
 		}
-		f.want(ctl("--context", "idp", "machine", "list"), 0)
+		f.want(ctl("--context", "idp", "operation", "list"), 0)
 		if again := f.stored(file); again.RefreshToken != after.RefreshToken {
 			t.Error("a read with a live token renewed it again")
 		}
@@ -245,8 +245,8 @@ func TestLoginIdentityProvider(t *testing.T) {
 
 	t.Run("AUTH-09", func(t *testing.T) {
 		s := f.stored(file)
-		f.want(ctl("--context", "idp", "logout"), 0, "the sign-in is removed from the token file "+file,
-			"The refresh token is revoked at "+z.issuer, "stays valid at the server until")
+		f.want(ctl("--context", "idp", "logout"), 0, "the token file "+file+" is removed",
+			"The refresh token is revoked at the identity provider.", "stays valid at the server until")
 		if _, err := os.Stat(file); !os.IsNotExist(err) {
 			t.Errorf("the token file is still there: %v", err)
 		}

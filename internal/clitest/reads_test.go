@@ -189,6 +189,36 @@ func TestReads(t *testing.T) {
 		!reflect.DeepEqual(*cfg.Find("signin").OIDC, client.OIDC{Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli", Audience: "bronzeward"}) {
 		t.Errorf("--from did not keep the file's issuer, audience and CLI client ID:\n%s", b)
 	}
+	// The optional scopes, as the test identity provider's file names its project audience scope,
+	// are kept after the base scopes; a repeated base scope or a malformed member is refused.
+	serve := func(scopes string) {
+		in.set(func(w http.ResponseWriter, r *http.Request) bool {
+			if r.URL.Path != "/bronzeward-client.json" {
+				return false
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"issuer":"https://idp.example.invalid","audience":"BWSYNTH-project","cliClientId":"BWSYNTH-cli","webClientId":"BWSYNTH-web","scopes":` + scopes + `}`))
+			return true
+		}, nil)
+	}
+	serve(`"urn:zitadel:iam:org:project:id:BWSYNTH-project:aud"`)
+	f.want(f.ctl(nil, "", "context", "add", "zitadel", "--from", in.URL, "--certificate-authority", in.ca), 0, `Context "zitadel" added`)
+	b, _ = os.ReadFile(filepath.Join(f.home, "bronzeward", "config.yaml"))
+	cfg = client.Config{}
+	if yaml.Unmarshal(b, &cfg); cfg.Find("zitadel") == nil || cfg.Find("zitadel").OIDC == nil ||
+		!slices.Equal(cfg.Find("zitadel").OIDC.Scopes, []string{"openid", "offline_access", "urn:zitadel:iam:org:project:id:BWSYNTH-project:aud"}) {
+		t.Errorf("--from did not keep the file's scopes after the base scopes:\n%s", b)
+	}
+	for scopes, want := range map[string]string{
+		`"openid urn:zitadel:iam:org:project:id:BWSYNTH-project:aud"`: "scopes repeats openid, which is always requested",
+		`"offline_access"`: "scopes repeats offline_access, which is always requested",
+		`" "`:              "scopes is empty",
+		`"a\"b"`:           "scopes holds a character a scope cannot",
+		`7`:                "json: cannot unmarshal number",
+	} {
+		serve(scopes)
+		f.want(f.ctl(nil, "", "context", "add", "badscopes", "--from", in.URL, "--certificate-authority", in.ca), 1, "bronzeward-client.json: "+want)
+	}
 	f.want(f.ctl(nil, "", "--context", "signin", "--no-input", "whoami"), 1, "not signed in", "--no-input forbids")
 	f.want(f.ctl(nil, "", "context", "add", "both", "--from", in.URL, "--issuer", "https://idp.example.invalid"), 2, "not both")
 	f.want(f.ctl(nil, "", "context", "add", "noclient", "--server", in.URL, "--issuer", "https://idp.example.invalid"), 2, "issuer and client ID")
