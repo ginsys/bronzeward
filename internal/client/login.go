@@ -213,8 +213,9 @@ func openBrowser(u string) bool {
 
 // SignIn runs Login and keeps the sign-in under the renewal lock, so that neither a renewal nor
 // an identity-revoked clear in another process interleaves with the write; it returns where it is
-// kept. A credential store that fails is refused before the sign-in, so nothing is issued that
-// cannot be kept; a sign-in whose write still fails has its refresh token revoked.
+// kept. A credential store that fails, and a token file that is not this client's (ReadTokens),
+// are refused before the sign-in, so nothing is issued that cannot be kept; a sign-in whose write
+// still fails has its refresh token revoked.
 func SignIn(x *Context, device bool, prompts io.Writer) (*Tokens, string, error) {
 	if err := x.Check(); err != nil {
 		return nil, "", x.fail(err)
@@ -223,7 +224,12 @@ func SignIn(x *Context, device bool, prompts io.Writer) (*Tokens, string, error)
 		return nil, "", x.fail(errors.New("an automation context has no sign-in"))
 	}
 	s := openStore(x)
-	if s.file == "" && s.none == "" {
+	switch {
+	case s.file != "":
+		if err := ownTokenFile(s.file); err != nil {
+			return nil, "", x.fail(err)
+		}
+	case s.none == "":
 		if _, err := s.read(); err != nil {
 			return nil, "", x.fail(fmt.Errorf("the system credential store failed, so a sign-in could not be kept there: %w", err))
 		}
@@ -241,6 +247,12 @@ func SignIn(x *Context, device bool, prompts io.Writer) (*Tokens, string, error)
 			return err
 		}
 		defer unlock()
+		// Read again under the lock: the file may have been replaced during the sign-in.
+		if s.file != "" {
+			if err := ownTokenFile(s.file); err != nil {
+				return err
+			}
+		}
 		return s.save(t)
 	}
 	if err := keep(); err != nil {
@@ -259,6 +271,15 @@ func SignIn(x *Context, device bool, prompts io.Writer) (*Tokens, string, error)
 		return nil, "", x.fail(err)
 	}
 	return t, s.kept(), nil
+}
+
+// ownTokenFile refuses a token file that login must not overwrite: anything but a missing file or
+// this client's own document, a refresh-only one included (ReadTokens).
+func ownTokenFile(p string) error {
+	if _, err := ReadTokens(p); err != nil && !errors.Is(err, ErrNotTokenFile) {
+		return err
+	}
+	return nil
 }
 
 // SignOut removes x's stored sign-in, one without an access token too, and revokes its refresh
