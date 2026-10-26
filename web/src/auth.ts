@@ -173,6 +173,8 @@ export class Session {
   // §9.7 item 2: the last refresh token this tab held, kept for sign-out's revocation after it may
   // no longer be sent for renewal (a failed or unrotated renewal, a spent token).
   #revocable: string | undefined;
+  // The refresh token a renewal in flight has sent, until it answers or sign-out takes it.
+  #inFlight: string | undefined;
 
   constructor(
     private readonly config: ClientConfig,
@@ -239,7 +241,10 @@ export class Session {
   // (item 3). False also when there is none to send: byRedirect says whether the page renews by
   // the redirect instead.
   renew(): Promise<boolean> {
-    this.#renewing ??= this.#renew().finally(() => (this.#renewing = undefined));
+    this.#renewing ??= this.#renew().finally(() => {
+      this.#renewing = undefined;
+      this.#inFlight = undefined;
+    });
     return this.#renewing;
   }
 
@@ -251,11 +256,17 @@ export class Session {
     current.refresh = undefined;
     // Sign-out's handle goes with the token: the pair it brings replaces it, a failure gives it back.
     this.#revocable = undefined;
+    this.#inFlight = refresh;
     this.opts.onRenewing?.(refresh);
     const answer = await tokenRequest(this.provider, { grant_type: "refresh_token", refresh_token: refresh, client_id: this.config.webClientId }, this.opts.fetch);
+    // The sent token, unless sign-out has taken it to revoke.
+    const sent = this.#inFlight === refresh ? refresh : undefined;
     if (answer.kind !== "ok") {
-      // Maybe never delivered, so maybe still valid at the provider (CP2-F2).
-      this.#revocable ??= refresh;
+      // Maybe never delivered, so maybe still valid at the provider (CP2-F2): kept for sign-out
+      // while the page holds tokens; on a page cleared or signed out meanwhile, never restored
+      // (§10.3 item 3) but revoked, as nothing else would.
+      if (this.#tokens === undefined) await this.#revoke(sent);
+      else this.#revocable ??= refresh;
       // §9.3 item 3: renewal has failed, so this pair, now without a refresh token, goes to no new
       // tab, which would take it for a provider that does not rotate and renew by the redirect.
       if (this.#tokens === current) this.#spent = true;
@@ -265,7 +276,7 @@ export class Session {
     // which nothing else holds, is revoked so that it does not outlive the sign-out; a provider
     // that sent none left the one sent valid (CP2-F2).
     if (this.#tokens !== current) {
-      await this.#revoke(answer.body.refresh_token || refresh);
+      await this.#revoke(answer.body.refresh_token || sent);
       return false;
     }
     const id = typeof answer.body.id_token === "string" ? claims(answer.body.id_token) : undefined;
@@ -297,25 +308,21 @@ export class Session {
 
   // §9.7 item 2: forget the tokens, revoke the refresh token where the provider allows it, and
   // return where to go: the provider's end-session endpoint if it has one, else the signed-out page.
-  // A renewal in flight revokes the pair it receives; the wait for both is bounded, so a stalled
-  // provider delays the redirect by at most SIGN_OUT_WAIT_MS.
+  // A renewal in flight revokes the pair it receives, or the token it sent if sign-out did not take
+  // it; the wait for both is bounded, so a stalled provider delays the redirect by at most
+  // SIGN_OUT_WAIT_MS.
   async signOut(origin: string): Promise<string> {
     const signedIn = this.#tokens !== undefined;
-    // Taken now: the page clears the session as soon as this returns its promise. A renewal in
-    // flight has the handle instead (#renew).
-    const held = this.#revocable;
+    // Taken now, since the page clears the session as soon as this returns its promise: the last
+    // refresh token held, even one no longer sent for renewal (CP2-F2), else the one a renewal in
+    // flight sent, which may never reach the provider or never be answered. It goes at once, so
+    // that a renewal that never answers cannot hold it back.
+    const held = signedIn ? (this.#revocable ?? this.#inFlight) : undefined;
+    if (held !== undefined && held === this.#inFlight) this.#inFlight = undefined;
     this.#tokens = undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    // The last refresh token held goes at once, even one no longer sent for renewal (CP2-F2), so
-    // that a renewal that never answers cannot hold it back. A renewal in flight revokes the pair
-    // it brings, or gives its refresh token back, which goes after it.
-    const later = async () => {
-      await this.#renewing?.catch(() => false);
-      const back = this.#revocable;
-      if (signedIn && back !== held) await this.#revoke(back);
-    };
     await Promise.race([
-      Promise.all([signedIn ? this.#revoke(held) : undefined, later()]),
+      Promise.all([this.#revoke(held), this.#renewing?.catch(() => false)]),
       new Promise((r) => (timer = setTimeout(r, SIGN_OUT_WAIT_MS))),
     ]);
     clearTimeout(timer);

@@ -383,8 +383,10 @@ describe("§9.7 item 2 sign-out", () => {
     release(json({ access_token: "SYNTH-a2", refresh_token: "SYNTH-r2", expires_in: 300 }));
     await out;
     expect(await renewal).toBe(false);
-    // The renewal took SYNTH-r1, so only the pair it brought is left to revoke.
-    expect(f.mock.calls.filter((c) => c[0] === provider.revocationEndpoint).map((c) => form(c[1])["token"])).toEqual(["SYNTH-r2"]);
+    // SYNTH-r1, sent by the renewal, goes at once: the provider has either rotated it, when its
+    // revocation changes nothing or ends the family at sign-out anyway, or never received it. Then
+    // the pair the renewal brought.
+    expect(f.mock.calls.filter((c) => c[0] === provider.revocationEndpoint).map((c) => form(c[1])["token"])).toEqual(["SYNTH-r1", "SYNTH-r2"]);
     expect(s.token()).toBeUndefined();
   });
 
@@ -417,6 +419,33 @@ describe("§9.7 item 2 sign-out", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  test("during a renewal that never answers, revokes at once the refresh token it sent", async () => {
+    vi.useFakeTimers();
+    try {
+      const f = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => (url === provider.tokenEndpoint ? new Promise<Response>(() => {}) : Promise.resolve(new Response(null, { status: 200 }))));
+      const s = new Session(config, provider, tokens(), { fetch: f as unknown as typeof fetch });
+      void s.renew();
+      void s.signOut(ORIGIN);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(f.mock.calls.filter((c) => c[0] === provider.revocationEndpoint).map((c) => form(c[1])["token"])).toEqual(["SYNTH-r1"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // §10.3 item 3: a failure after the page cleared the session gives the sent token to nothing that
+  // stays; it is revoked instead, since no sign-out will.
+  test("a renewal that fails after the page cleared the session revokes the refresh token it sent", async () => {
+    let release!: (r: Response) => void;
+    const f = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => (url === provider.tokenEndpoint ? new Promise<Response>((r) => (release = r)) : Promise.resolve(new Response(null, { status: 200 }))));
+    const s = new Session(config, provider, tokens(), { fetch: f as unknown as typeof fetch });
+    const renewal = s.renew();
+    s.clear();
+    release(new Response(null, { status: 503 }));
+    expect(await renewal).toBe(false);
+    expect(f.mock.calls.filter((c) => c[0] === provider.revocationEndpoint).map((c) => form(c[1])["token"])).toEqual(["SYNTH-r1"]);
   });
 
   // CP2-F2: a refresh token no longer sent for renewal is still revoked at sign-out.
