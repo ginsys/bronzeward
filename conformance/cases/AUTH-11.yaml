@@ -1,17 +1,19 @@
 id: AUTH-11
-setup: as AUTH-02, with a provider that rotates the refresh token, counts every request and every spent token sent, and issues 20-second tokens; signed in as h-viewer in three tabs; second case, the provider takes the first refresh request and never answers it
-action: open three tabs, wait for the renewal threshold; close the holding tab, then the next, each time waiting for the next renewal; second case, close the holding tab once its refresh request is sent, wait 12 s, open a new tab
+setup: as AUTH-02, with a provider that rotates the refresh token, counts every request and every spent token sent, and issues 20-second tokens; signed in as h-viewer in three tabs; second and third cases, the provider takes the first refresh request and never answers it; fourth case, the provider issues no refresh token, two tabs
+action: open three tabs, wait for the renewal threshold; close the holding tab, then the next, each time waiting for the next renewal; second case, close the holding tab once its refresh request is sent, wait 12 s, open a new tab; third case, one tab, wait 16 s after its refresh request, open a new tab; fourth case, open two tabs and wait for two renewals
 exchange:
   - request: POST <provider>/token
     headers: ["grant_type=refresh_token, once per renewal"]
-fault: second case, the holding tab closes before its answer
+  - request: GET <provider>/authorize
+    headers: ["fourth case: once per renewal, from the lock holder"]
+fault: second case, the holding tab closes before its answer; third case, the holder's request is never answered
 expect:
   server: first case, every tab's read answered; the provider renews with the same access token, so no read tells the renewed token apart (the adopted access token is checked in web/src/auth.test.ts)
-  client: 'first case: one refresh request per renewal, three in all, each with the latest refresh token, no redirect; second case: no request with the spent token, the waiting tabs fail as §9.5 item 3 and keep their token, the new tab gets no pair, signs in again, and the remaining tabs renew with its pair'
+  client: 'first case: one refresh request per renewal, three in all, each with the latest refresh token, no redirect; second case: no request with the spent token, the waiting tabs fail as §9.5 item 3 and keep their token, the new tab gets no pair, signs in again, and the remaining tabs renew with its pair; third case: the renewal fails after 15 s, the new tab gets no pair and signs in again, and the holder renews with its pair; fourth case: one redirect per renewal, two in all after the sign-in, the tab granted the lock when the holder leaves taking the redirect''s pair'
   shown: the server read in every tab
   absent: [token in the harness log, retained artifacts or browser storage]
 runs:
   web:
-    check: web/e2e/auth/tabs.e2e.ts, mise run browser-auth; the tab protocol in web/src/renewer.test.ts, mise run web
+    check: web/e2e/auth/tabs.e2e.ts, mise run browser-auth; the tab protocol in web/src/renewer.test.ts, mise run web, including a frozen tab, which no browser driver used here can freeze
     browsers: [chrome, edge, firefox, firefox-esr]
-    covers: both cases
+    covers: all four cases

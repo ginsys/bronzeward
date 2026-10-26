@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, test, vi } from "vitest";
-import { beginSignIn, claims, completeSignIn, discover, localReading, PENDING_KEY, type Provider, renewDelay, returnPath, Session, SIGN_OUT_WAIT_MS, SIGNED_OUT_PATH, type Tokens } from "./auth.ts";
+import { beginSignIn, claims, completeSignIn, discover, localReading, PENDING_KEY, type Provider, REFRESH_WAIT_MS, renewDelay, returnPath, Session, SIGN_OUT_WAIT_MS, SIGNED_OUT_PATH, type Tokens } from "./auth.ts";
 import type { ClientConfig } from "./config.ts";
 
 const ORIGIN = "http://localhost:58443";
@@ -356,6 +356,54 @@ describe("§9.5 renewal", () => {
     expect(f.mock.calls[1]![0]).toBe(provider.revocationEndpoint);
     expect(form(f.mock.calls[1]![1])["token"]).toBe("SYNTH-r2");
   });
+
+  // #388: a hung request no longer holds every later renewal of the page.
+  test("a refresh request unanswered after REFRESH_WAIT_MS fails the renewal; a newer pair renews afterwards, and the late answer's refresh token is revoked", async () => {
+    vi.useFakeTimers();
+    try {
+      const pending: ((r: Response) => void)[] = [];
+      const f = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => (url === provider.tokenEndpoint ? new Promise<Response>((r) => pending.push(r)) : Promise.resolve(new Response(null, { status: 200 }))));
+      const s = new Session(config, provider, tokens(), { fetch: f as unknown as typeof fetch });
+      let renewed: boolean | undefined;
+      void s.renew().then((ok) => (renewed = ok));
+      await vi.advanceTimersByTimeAsync(REFRESH_WAIT_MS - 1);
+      expect(renewed).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(renewed).toBe(false);
+      expect(s.adopt(tokens({ access: "SYNTH-a3", refresh: "SYNTH-r3", expiresAt: 600_000 }))).toBe(true);
+      const again = s.renew();
+      pending[1]!(json({ access_token: "SYNTH-a4", refresh_token: "SYNTH-r4", expires_in: 300 }));
+      expect(await again).toBe(true);
+      expect(s.token()).toBe("SYNTH-a4");
+      pending[0]!(json({ access_token: "SYNTH-a2", refresh_token: "SYNTH-r2", expires_in: 300 }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(s.token()).toBe("SYNTH-a4");
+      const sent = f.mock.calls.map((c) => [c[0], form(c[1])["refresh_token"] ?? form(c[1])["token"]]);
+      expect(sent).toEqual([[provider.tokenEndpoint, "SYNTH-r1"], [provider.tokenEndpoint, "SYNTH-r3"], [provider.revocationEndpoint, "SYNTH-r2"]]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("#388: a renewal not announced to every tab sends nothing, and the refresh token stays for sign-out", async () => {
+    const f = answers([new Response(null, { status: 200 })]);
+    const s = new Session(config, provider, tokens(), { fetch: f as unknown as typeof fetch, onRenewing: () => Promise.resolve(false) });
+    expect(await s.renew()).toBe(false);
+    expect(f).not.toHaveBeenCalled();
+    expect(s.pair()).toBeUndefined();
+    await s.signOut(ORIGIN);
+    expect(f.mock.calls.map((c) => form(c[1])["token"])).toEqual(["SYNTH-r1"]);
+  });
+
+  test("#388: a forfeited pair renews by the redirect and takes the current pair, even of the same expiry", () => {
+    const s = new Session(config, provider, tokens());
+    expect(s.adopt(tokens({ access: "SYNTH-a2", refresh: "SYNTH-r2" }))).toBe(false);
+    s.forfeit();
+    expect([s.byRedirect, s.pair()]).toEqual([true, undefined]);
+    expect(s.adopt(tokens({ access: "SYNTH-a2", refresh: "SYNTH-r2" }))).toBe(true);
+    expect([s.byRedirect, s.pair()?.refresh]).toEqual([false, "SYNTH-r2"]);
+    expect(s.adopt(tokens({ access: "SYNTH-a3", refresh: "SYNTH-r3" }))).toBe(false);
+  });
 });
 
 describe("§9.7 item 2 sign-out", () => {
@@ -491,6 +539,48 @@ describe("§9.7 item 2 sign-out", () => {
     await out;
     expect(await renewal).toBe(false);
     expect(f.mock.calls.filter((c) => c[0] === provider.revocationEndpoint).map((c) => form(c[1])["token"])).toEqual(["SYNTH-r1"]);
+  });
+
+  test("#388: a renewal that answers after sign-out with the same refresh token unrotated does not revoke it twice", async () => {
+    let release!: (r: Response) => void;
+    const f = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => (url === provider.tokenEndpoint ? new Promise<Response>((r) => (release = r)) : Promise.resolve(new Response(null, { status: 200 }))));
+    const s = new Session(config, provider, tokens(), { fetch: f as unknown as typeof fetch });
+    const renewal = s.renew();
+    await new Promise((r) => setTimeout(r, 0));
+    const out = s.signOut(ORIGIN);
+    s.clear();
+    release(json({ access_token: "SYNTH-a2", refresh_token: "SYNTH-r1", expires_in: 300 }));
+    await out;
+    expect(await renewal).toBe(false);
+    expect(f.mock.calls.filter((c) => c[0] === provider.revocationEndpoint).map((c) => form(c[1])["token"])).toEqual(["SYNTH-r1"]);
+  });
+
+  test("#388: after another tab's sign-out, settled() waits for the renewal in flight to revoke the pair it brings, at most SIGN_OUT_WAIT_MS", async () => {
+    vi.useFakeTimers();
+    try {
+      let release!: (r: Response) => void;
+      const f = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => (url === provider.tokenEndpoint ? new Promise<Response>((r) => (release = r)) : Promise.resolve(new Response(null, { status: 200 }))));
+      const s = new Session(config, provider, tokens(), { fetch: f as unknown as typeof fetch });
+      void s.renew();
+      await vi.advanceTimersByTimeAsync(0);
+      s.clear();
+      let done = false;
+      void s.settled().then(() => (done = true));
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(done).toBe(false);
+      release(json({ access_token: "SYNTH-a2", refresh_token: "SYNTH-r2", expires_in: 300 }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(done).toBe(true);
+      expect(f.mock.calls.filter((c) => c[0] === provider.revocationEndpoint).map((c) => form(c[1])["token"])).toEqual(["SYNTH-r2"]);
+      const hung = new Session(config, provider, tokens(), { fetch: (() => new Promise<Response>(() => {})) as typeof fetch });
+      void hung.renew();
+      let out = false;
+      void hung.settled().then(() => (out = true));
+      await vi.advanceTimersByTimeAsync(SIGN_OUT_WAIT_MS);
+      expect(out).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("after a cleared page, sign-out revokes nothing", async () => {

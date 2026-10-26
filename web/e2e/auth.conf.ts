@@ -132,7 +132,7 @@ function control(provider: Provider, next: { grant: Grant }, injector: Injector)
     // A failed mint fails the spec that asked for it, not the launcher, whose cleanup must still run.
     try {
       // AUTH-07 and AUTH-11: a short expires_in, rotation, a renewal as another human, held answers.
-      const grant: Grant = { ...mint(q.get("human") ?? ""), rotate: q.has("rotate"), hold: Number(q.get("hold") ?? 0) };
+      const grant: Grant = { ...mint(q.get("human") ?? ""), rotate: q.has("rotate"), hold: Number(q.get("hold") ?? 0), bare: q.has("bare") };
       if (q.has("lifetime")) grant.lifetime = Number(q.get("lifetime"));
       if (q.has("renew-as")) grant.renewed = { ...mint(q.get("renew-as")!), lifetime: 300 };
       next.grant = grant;

@@ -12,6 +12,8 @@ export const SIGNED_OUT_PATH = "/signed-out";
 export const RENEW_BEFORE_MS = 60_000;
 // §9.7 item 2: how long sign-out waits for the revocation before it leaves anyway.
 export const SIGN_OUT_WAIT_MS = 5_000;
+// §9.3 item 3 (#388): how long a refresh-token request may go unanswered before the renewal fails.
+export const REFRESH_WAIT_MS = 15_000;
 
 // When to renew, in ms from now: 60 s before expiry, but never sooner than half the remaining
 // lifetime, so a provider's short-lived tokens are not renewed one after another without pause.
@@ -158,7 +160,8 @@ export interface SessionOptions {
   onPrincipalChange?: (before: Principal, after: Principal) => void;
   // B1: told the refresh token before it is sent, and given the pair it brings, before the item 2
   // check; `spent` says another tab has sent this refresh token, so it is never sent or given here.
-  onRenewing?: (refresh: string) => void;
+  // False from onRenewing: the token is not sent (#388, every other tab must know it first).
+  onRenewing?: (refresh: string) => Promise<boolean> | void;
   onRenewed?: (tokens: Tokens) => void;
   spent?: (refresh: string) => boolean;
 }
@@ -175,6 +178,10 @@ export class Session {
   #revocable: string | undefined;
   // The refresh token a renewal in flight has sent, until it answers or sign-out takes it.
   #inFlight: string | undefined;
+  // The last refresh token sent for revocation, which is not sent again (#388).
+  #revoked: string | undefined;
+  // #388: given up after this tab may have missed a `renewing`, until another pair is taken.
+  #forfeited = false;
 
   constructor(
     private readonly config: ClientConfig,
@@ -217,12 +224,15 @@ export class Session {
     if (refresh !== undefined && this.opts.spent?.(refresh) === true) this.spend();
   }
 
-  // B1: another tab's newer pair for the same principal replaces this one; false if not taken.
+  // B1: another tab's newer pair for the same principal replaces this one, as does the current pair
+  // once this one is forfeited; false if not taken.
   adopt(tokens: Tokens): boolean {
     const t = this.#tokens;
-    if (t === undefined || tokens.iss !== t.iss || tokens.sub !== t.sub || tokens.expiresAt <= t.expiresAt) return false;
+    if (t === undefined || tokens.iss !== t.iss || tokens.sub !== t.sub) return false;
+    if (tokens.expiresAt < t.expiresAt || (tokens.expiresAt === t.expiresAt && !this.#forfeited)) return false;
     this.#tokens = { ...tokens };
     this.#spent = false;
+    this.#forfeited = false;
     // A pair without a refresh token comes from a provider that does not rotate (§9.3 item 3).
     this.#byRedirect = tokens.refresh === undefined;
     this.#revocable = tokens.refresh ?? this.#revocable;
@@ -234,6 +244,24 @@ export class Session {
     if (this.#tokens !== undefined) this.#tokens.refresh = undefined;
     this.#spent = true;
     this.#byRedirect = false;
+  }
+
+  // #388: this tab may have missed another tab's `renewing`, so its refresh token is never sent;
+  // the page takes another tab's pair, or renews by the redirect (§9.3 item 3). Not a failed renewal.
+  forfeit(): void {
+    if (this.#tokens === undefined) return;
+    this.#tokens.refresh = undefined;
+    this.#spent = true;
+    this.#byRedirect = true;
+    this.#forfeited = true;
+  }
+
+  // §9.7 item 2, after another tab's sign-out: a renewal in flight revokes the pair it brings, which
+  // no tab holds; waited for at most SIGN_OUT_WAIT_MS.
+  async settled(): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([this.#renewing, new Promise((r) => (timer = setTimeout(r, SIGN_OUT_WAIT_MS)))]);
+    clearTimeout(timer);
   }
 
   // §9.5: one renewal at a time. A refresh token is sent at most once: after any failure, its
@@ -257,11 +285,20 @@ export class Session {
     // Sign-out's handle goes with the token: the pair it brings replaces it, a failure gives it back.
     this.#revocable = undefined;
     this.#inFlight = refresh;
-    this.opts.onRenewing?.(refresh);
-    const answer = await tokenRequest(this.provider, { grant_type: "refresh_token", refresh_token: refresh, client_id: this.config.webClientId }, this.opts.fetch);
+    // Not sent at all when another tab may not know it is spent (#388), or sign-out took it.
+    const told = this.opts.onRenewing?.(refresh);
+    const announced = (told === undefined || (await told) !== false) && this.#inFlight === refresh;
+    const request = announced ? tokenRequest(this.provider, { grant_type: "refresh_token", refresh_token: refresh, client_id: this.config.webClientId }, this.opts.fetch) : undefined;
+    // #388: a request unanswered after REFRESH_WAIT_MS fails the renewal; its answer, whenever it
+    // comes, is an obsolete renewal's, and its refresh token, which nothing else holds, is revoked.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<"late">((r) => (timer = setTimeout(() => r("late"), REFRESH_WAIT_MS)));
+    const answer = request === undefined ? undefined : await Promise.race([request, late]);
+    clearTimeout(timer);
+    if (answer === "late") void request?.then((a) => (a.kind === "ok" ? this.#revoke(a.body.refresh_token || undefined) : undefined));
     // The sent token, unless sign-out has taken it to revoke.
     const sent = this.#inFlight === refresh ? refresh : undefined;
-    if (answer.kind !== "ok") {
+    if (answer === undefined || answer === "late" || answer.kind !== "ok") {
       // Maybe never delivered, so maybe still valid at the provider (CP2-F2): kept for sign-out
       // while the page holds tokens; on a page cleared or signed out meanwhile, never restored
       // (§10.3 item 3) but revoked, as nothing else would.
@@ -334,8 +371,12 @@ export class Session {
     return url.href;
   }
 
+  // A token already sent for revocation is not sent again: a renewal that answers after sign-out
+  // took its token can bring that same token back unrotated (RFC 7009 §2.2 answers 200 either way).
   async #revoke(token: string | undefined): Promise<void> {
-    if (token === undefined || this.provider.revocationEndpoint === undefined) return;
+    if (token === undefined || token === this.#revoked || this.provider.revocationEndpoint === undefined) return;
+    this.#revoked = token;
+    if (this.#revocable === token) this.#revocable = undefined;
     try {
       await (this.opts.fetch ?? fetch)(this.provider.revocationEndpoint, post({ token, token_type_hint: "refresh_token", client_id: this.config.webClientId }));
     } catch {

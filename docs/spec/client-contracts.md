@@ -815,10 +815,35 @@ current token expires
    [§10.3](#103-caches-and-back-navigation) item 3 clears its state (assumption S9). Only the
    holder sends refresh-token requests; before each it posts `renewing`, naming the refresh token
    it sends, on the `BroadcastChannel` (assumption S3), and after it the new pair.
+   - The holder sends only once no other tab can send the same token
+     ([#388](https://github.com/ginsys/bronzeward/issues/388)). Each tab holds an exclusive Web Lock
+     `bronzeward-tab:<random>` and opens its channel only once that lock is granted. After posting
+     `renewing`, the holder lists the held `bronzeward-tab:` locks other than its own with
+     `navigator.locks.query()` and waits, at most 3 s, for an `ack` naming the token from each; a
+     tab acks once it has recorded the token as spent. The holder then takes, with `steal`, the
+     lock of every tab that did not ack, and sends only if its own tab lock is still its own. A tab
+     can hold the token only from a message posted after its channel opened, so after its tab lock
+     was granted and before the holder's query: each such tab has acked or lost its lock.
+   - A tab whose tab lock was taken (frozen, suspended, or silent for 3 s) may have missed a
+     `renewing`. It gives up its refresh token, takes a new tab lock and posts a request. It then
+     takes the holder's current pair, even one of the same expiry as its own, or, granted the
+     renewer lock first, renews by the redirect. A holder whose own tab lock was taken before it
+     sent sends nothing, and does the same. A tab that stops for good (`pagehide`, sign-out, the
+     signed-out page) gives up its tab lock and is not waited for. A tab's own sign-in redirect
+     needs nothing: no other tab holds its pair until it posts it. A page restored from the
+     back-forward cache reloads (§10.3 item 4).
+   - A refresh-token request unanswered after 15 s fails the renewal (§9.5 item 3), so that a
+     request the provider never answers holds back no later renewal and no pair for a new tab. Its
+     answer, whenever it comes, is not kept: the refresh token it brings, which no tab holds, is
+     revoked, and the one sent stays held for sign-out's revocation. The request is not aborted,
+     since an abort cannot recall a request the provider may already have answered.
    - A tab without the lock never renews: under the 60 s threshold or after a `401` (§9.5 item 1)
      it posts a request and waits for the holder's pair, at most 10 s, then treats renewal as
-     failed (§9.5 item 3). Granted the lock while it waits, it renews itself, by the redirect
-     where its pair has no refresh token.
+     failed (§9.5 item 3). Granted the lock while it waits, it renews itself. Where its pair has no
+     refresh token, it first waits at most 10 s for the pair of the redirect the previous holder
+     may have left for, then redirects, so that one renewal is one redirect, not one per tab.
+   - A holder whose renewal answered a request due first has a new pair, and its own renewal
+     timer waits for that pair's threshold instead of renewing again.
    - A refresh token named in a `renewing` is spent in every other tab, whatever the answer: a tab
      never sends it, nor gives its pair to a new tab. A tab that holds it and takes no newer pair,
      or becomes holder before one comes, has failed to renew: the current token is used until
@@ -838,15 +863,18 @@ current token expires
      two pairs, a tab can keep the older pair, whose refresh token another tab has sent. Its
      renewal then fails as §9.5 item 3 and the page offers sign-in again. The spent token is told
      by its value, not by expiry, so it is not sent twice.
-   - Two gaps remain ([#388](https://github.com/ginsys/bronzeward/issues/388)). A refresh-token
-     request has no time bound: one the provider never answers holds every later renewal and every
-     pair for a new tab, until the token is refused. And a tab can be granted the lock before the
-     old holder's `renewing` reaches it, then send the token already sent; its renewal fails as
-     §9.5 item 3.
+   - Limits. A silent tab delays one renewal by 3 s; after that its lock is taken and it is no
+     longer waited for. A holder that is itself frozen still holds `bronzeward-renewer`: the other tabs' requests go
+     unanswered and fail after 10 s (§9.5 item 3) until it resumes or closes. This predates #388
+     and is tracked there; taking the renewer lock from a holder is not part of decision B1.
 
    Rejected: a lock taken per renewal, because a waiting tab can be granted it before the previous
    holder's pair reaches it and then spend the used token; a counter in `localStorage`, which
-   item 1 excludes.
+   item 1 excludes. For #388, also rejected: a fixed delay before sending, which no length makes
+   safe against a slow or frozen tab; a hash of the token in `localStorage`, which item 1
+   excludes; handing the token over on `pagehide`, which a frozen or crashed tab never fires; and
+   giving up the tab lock on the `freeze` event, which only Chromium fires of the browsers in
+   [§15](#15-assumptions-and-limits), whereas a steal needs nothing from the frozen tab.
 
    Where the provider does not issue rotating, client-bound refresh tokens
    ([§9.1](#91-identity-provider-requirements) item 3), renewal also uses that redirect, never a
@@ -969,7 +997,10 @@ expiry, at most `maxTokenLifetime` after issue, plus the server's 60 s leeway
    provider's ID token carries the access token's issuer, audience and lifetime, so the server
    would accept it as a bearer token, and a URL keeps it in history and provider logs. Without the
    hint that provider sends the browser through its login UI's logout page. It then shows a
-   signed-out page that holds no data.
+   signed-out page that holds no data. A tab told of another tab's sign-out hides what it shows at
+   once, waits at most 5 s for a renewal in flight to revoke the pair it brings, then shows the
+   signed-out page, which holds no lock and records no other tab's refresh token
+   ([#388](https://github.com/ginsys/bronzeward/issues/388)).
 3. After sign-out, the browser's back button shows no data from before: the web pages are served
    `Cache-Control: no-store`, the application clears its state on `pagehide` and on a page
    restored from the back-forward cache ([§10.3](#103-caches-and-back-navigation) items 3-4,
