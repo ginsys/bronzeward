@@ -20,10 +20,10 @@ func (p *Problem) Code() string {
 	return strings.TrimPrefix(t, problemPrefix)
 }
 
-// Error shows title, detail when present and instance, never a request body
-// (client-contracts.md §8.2), and what the operator can do for the codes a read meets.
+// Error shows title, code, detail when present and instance, never a request body
+// (client-contracts.md §8.2, journeys §8), and what the operator can do for the codes a read meets.
 func (p *Problem) Error() string {
-	s := fmt.Sprintf("%s: %s answered %d %s", p.Where, p.Route, p.Status, p.str("title"))
+	s := fmt.Sprintf("%s: %s answered %d %s (%s)", p.Where, p.Route, p.Status, p.str("title"), p.Code())
 	if d := p.str("detail"); d != "" {
 		s += ": " + d
 	}
@@ -36,7 +36,8 @@ func (p *Problem) Error() string {
 	case "forbidden":
 		if p.Doc["humanOnly"] == true {
 			s += "\nThis needs a person signed in, not an automation token."
-		} else if roles, ok := p.Doc["roles"].([]any); ok {
+		}
+		if roles, ok := p.Doc["roles"].([]any); ok {
 			s += fmt.Sprintf("\nNeeds one of the roles %v.", roles)
 		}
 	}

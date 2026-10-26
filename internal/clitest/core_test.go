@@ -194,6 +194,34 @@ func TestRequestCore(t *testing.T) {
 		t.Errorf("the new epoch was not kept:\n%s", cfg)
 	}
 
+	// A context added again for another server while a command ran keeps its own epoch: what the
+	// command read belongs to the old server. The edit runs in the injector, so it uses Errorf.
+	in.set(nil, func(r *http.Response) {
+		if !on("/identity")(r.Request) {
+			return
+		}
+		var c client.Config
+		if err := yaml.Unmarshal(cfg, &c); err != nil || c.Find("lab") == nil {
+			t.Errorf("contexts file: %v\n%s", err, cfg)
+			return
+		}
+		c.Find("lab").Server, c.Find("lab").LastEpoch = "https://bronzeward.example.invalid", ""
+		b, _ := yaml.Marshal(c)
+		if err := os.WriteFile(filepath.Join(config, "config.yaml"), b, 0o600); err != nil {
+			t.Error(err)
+		}
+		r.Header.Set("Bronzeward-Epoch", "ep_BWSYNTH-replaced")
+	})
+	f.want(f.ctl(nil, "", "whoami"), 0)
+	var replaced client.Config
+	b, _ := os.ReadFile(filepath.Join(config, "config.yaml"))
+	if yaml.Unmarshal(b, &replaced); replaced.Find("lab") == nil || replaced.Find("lab").LastEpoch != "" {
+		t.Errorf("the replaced context took the old server's epoch:\n%s", b)
+	}
+	if err := os.WriteFile(filepath.Join(config, "config.yaml"), cfg, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
 	// A new epoch that cannot be kept fails the command, naming the context. Root writes past
 	// the mode, so the check needs another user.
 	in.set(nil, func(r *http.Response) { r.Header.Set("Bronzeward-Epoch", "ep_BWSYNTH-third") })
@@ -223,6 +251,20 @@ func TestRequestCore(t *testing.T) {
 		t.Errorf("the identity read was sent %d times", n)
 	}
 
+	// A refusal whose body is cut short is the refusal its status names, not repeated.
+	in.set(func(w http.ResponseWriter, r *http.Request) bool {
+		if !on("/identity")(r) {
+			return false
+		}
+		w.Header().Set("Content-Length", "100")
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte("short"))
+		return true
+	}, nil)
+	if r := f.ctl(nil, "", "whoami"); r.code != 1 || !strings.Contains(r.err, "401 Unauthorized, and reading the answer failed") || strings.Contains(r.err, "try 2") {
+		t.Errorf("cut-short 401: exit %d, stderr %s; want 1, the status and no retry", r.code, r.err)
+	}
+
 	// A failed GET /server re-read after a new epoch fails the read it followed.
 	var servers atomic.Int32
 	in.set(func(w http.ResponseWriter, r *http.Request) bool {
@@ -236,7 +278,7 @@ func TestRequestCore(t *testing.T) {
 			r.Header.Set("Bronzeward-Epoch", "ep_BWSYNTH-fourth")
 		}
 	})
-	f.want(f.ctl(nil, "", "whoami"), 1, notice, "409 Injected recovery-mode-active")
+	f.want(f.ctl(nil, "", "whoami"), 1, notice, "409 Injected refusal (recovery-mode-active)")
 
 	in.set(nil, func(r *http.Response) {
 		if on("/identity")(r.Request) {
@@ -254,7 +296,7 @@ func TestRequestCore(t *testing.T) {
 		problem(w, http.StatusServiceUnavailable, "dependency-unavailable", "")
 		return true
 	}, nil)
-	f.want(f.ctl(nil, "", "whoami"), 0, "503 Injected dependency-unavailable", "try 2 of 5 in 1s", "try 3 of 5 in 2s", "Identity   ci")
+	f.want(f.ctl(nil, "", "whoami"), 0, "503 Injected refusal (dependency-unavailable)", "try 2 of 5 in 1s", "try 3 of 5 in 2s", "Identity   ci")
 
 	// Only the three listed codes are retried (§8.2).
 	for _, code := range []string{"epoch-superseded", "BWSYNTH-unknown"} {
@@ -282,14 +324,23 @@ func TestRequestCore(t *testing.T) {
 	in.set(nil, nil)
 	f.want(f.ctl(nil, "", "version"), 0, "start mode normal")
 
-	in.set(func(w http.ResponseWriter, r *http.Request) bool {
-		if on("/server")(r) {
-			problem(w, http.StatusConflict, "recovery-mode-active", "")
-			return true
-		}
-		return false
-	}, nil)
-	f.want(f.ctl(nil, "", "version"), 1, "Server  unknown", "409 Injected recovery-mode-active")
+	// Any read answered 409 recovery-mode-active without a scope is a recovery start before its
+	// entry (§8.5 item 1); one with a scope is not.
+	in.set(refuse("/identity", http.StatusConflict, "recovery-mode-active", `,"scope":"BWSYNTH-scope"`), nil)
+	f.want(f.ctl(nil, "", "whoami"), 1, "409 Injected refusal (recovery-mode-active)")
+	if cfg, _ = os.ReadFile(filepath.Join(config, "config.yaml")); strings.Contains(string(cfg), "startMode: recovery") {
+		t.Errorf("a scoped refusal recorded a recovery start:\n%s", cfg)
+	}
+	in.set(refuse("/identity", http.StatusConflict, "recovery-mode-active", ""), nil)
+	f.want(f.ctl(nil, "", "whoami"), 1, "409 Injected refusal (recovery-mode-active)")
+	if cfg, _ = os.ReadFile(filepath.Join(config, "config.yaml")); !strings.Contains(string(cfg), "startMode: recovery") {
+		t.Errorf("the refused read did not record a recovery start:\n%s", cfg)
+	}
+	in.set(nil, nil)
+	f.want(f.ctl(nil, "", "version"), 0, "start mode normal")
+
+	in.set(refuse("/server", http.StatusConflict, "recovery-mode-active", ""), nil)
+	f.want(f.ctl(nil, "", "version"), 1, "Server  unknown", "409 Injected refusal (recovery-mode-active)")
 	cfg, _ = os.ReadFile(filepath.Join(config, "config.yaml"))
 	if !strings.Contains(string(cfg), "startMode: recovery") {
 		t.Errorf("the pre-entry refusal did not record a recovery start:\n%s", cfg)
@@ -306,7 +357,10 @@ func TestRequestCore(t *testing.T) {
 		problem(w, http.StatusTeapot, "BWSYNTH-unknown", `,"detail":"an unknown code"`)
 		return true
 	}, nil)
-	f.want(f.ctl(nil, "", "whoami"), 1, "418 Injected BWSYNTH-unknown: an unknown code (instance req_injected)")
+	f.want(f.ctl(nil, "", "whoami"), 1, "418 Injected refusal (BWSYNTH-unknown): an unknown code (instance req_injected)")
+	// Both hints of a forbidden read are shown.
+	in.set(refuse("/identity", http.StatusForbidden, "forbidden", `,"humanOnly":true,"roles":["approver"]`), nil)
+	f.want(f.ctl(nil, "", "whoami"), 1, "This needs a person signed in", "Needs one of the roles [approver]")
 	if after := f.acts(); after != before {
 		t.Errorf("acts changed around the read commands:\nbefore %s\nafter  %s", before, after)
 	}
