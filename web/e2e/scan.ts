@@ -5,11 +5,18 @@
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
 
-function scan(dir: string, values: string[]): { files: number; found: string[] } {
+function scan(dir: string, values: string[]): { files: number; found: string[]; unscannable: string[] } {
   const found: string[] = [];
+  const unscannable: string[] = [];
   let files = 0;
   for (const entry of readdirSync(dir, { recursive: true, withFileTypes: true })) {
-    if (!entry.isFile()) continue;
+    if (entry.isDirectory()) continue;
+    // The upload follows symlinks, so a link (or any other non-regular entry) would ship bytes
+    // this walk never read: it fails the scan instead of being skipped.
+    if (!entry.isFile()) {
+      unscannable.push(join(entry.parentPath, entry.name));
+      continue;
+    }
     files++;
     const path = join(entry.parentPath, entry.name);
     const bytes = readFileSync(path);
@@ -18,7 +25,7 @@ function scan(dir: string, values: string[]): { files: number; found: string[] }
       if (bytes.includes(v) || bytes.includes(Buffer.from(v, "utf16le"))) found.push(`${path}: value ${i + 1}`);
     }
   }
-  return { files, found };
+  return { files, found, unscannable };
 }
 
 const [dir, ...values] = process.argv.slice(2);
@@ -27,7 +34,7 @@ if (dir === undefined || values.length === 0 || values.some((v) => v.length < 8)
   process.exit(2);
 }
 const control = mkdtempSync(join(dir, "scan-control-"));
-let result: { files: number; found: string[] };
+let result: ReturnType<typeof scan>;
 try {
   mkdirSync(join(control, "nested"));
   for (const [i, v] of values.entries()) writeFileSync(join(control, "nested", `planted-${i}.log`), `before ${v} after`);
@@ -40,6 +47,9 @@ const leaks = result.found.filter((f) => !f.startsWith(control + sep));
 const files = result.files - values.length;
 if (planted.length !== values.length) {
   console.error(`scan: the positive control found ${planted.length} of ${values.length} planted values`);
+  process.exitCode = 1;
+} else if (result.unscannable.length > 0) {
+  console.error(`scan: entries that are not regular files cannot be scanned:\n${result.unscannable.join("\n")}`);
   process.exitCode = 1;
 } else if (files === 0) {
   console.error(`scan: ${dir} holds no artifact to scan`);

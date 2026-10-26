@@ -15,7 +15,6 @@ import (
 	"net/url"
 	"os"
 	"path"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -85,17 +84,27 @@ func handler(c config) (http.Handler, error) {
 		return nil, fmt.Errorf("-api: %w", err)
 	}
 	proxy := httputil.NewSingleHostReverseProxy(upstream)
+	// A rooted view of the build: a symlink inside it cannot reach a file outside it.
+	dist, err := os.OpenRoot(c.dist)
+	if err != nil {
+		return nil, fmt.Errorf("-dist: %w", err)
+	}
 	pages := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		for k, v := range headers {
 			w.Header().Set(k, v)
 		}
-		name := filepath.Join(c.dist, filepath.FromSlash(path.Clean("/"+r.URL.Path)))
+		// Whole files only: ServeContent's range errors drop Cache-Control, which every page carries.
+		r.Header.Del("Range")
+		var f *os.File
+		var err error
+		name := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
 		if r.URL.Path == "/bronzeward-client.json" && c.clientConfig != "" {
-			name = c.clientConfig
-		} else if fi, err := os.Stat(name); err != nil || fi.IsDir() {
-			name = filepath.Join(c.dist, "index.html") // every other path is the application (B3)
+			f, err = os.Open(c.clientConfig)
+		} else if fi, serr := dist.Stat(name); name == "" || serr != nil || fi.IsDir() {
+			f, err = dist.Open("index.html") // every other path is the application (B3)
+		} else {
+			f, err = dist.Open(name)
 		}
-		f, err := os.Open(name)
 		if err != nil {
 			http.Error(w, "not built", http.StatusNotFound)
 			return

@@ -37,6 +37,14 @@ func host(t *testing.T, redirect string) (*httptest.Server, *atomic.Int64) {
 			t.Fatal(err)
 		}
 	}
+	// A link inside the build to a directory outside it, which the host must never serve from.
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dist, "assets", "outside")); err != nil {
+		t.Fatal(err)
+	}
 	clientConfig := filepath.Join(t.TempDir(), "client.json")
 	if err := os.WriteFile(clientConfig, []byte(`{"issuer":"http://idp.test"}`), 0o644); err != nil {
 		t.Fatal(err)
@@ -59,10 +67,17 @@ func host(t *testing.T, redirect string) (*httptest.Server, *atomic.Int64) {
 	return srv, hits
 }
 
-func get(t *testing.T, url string) (*http.Response, string) {
+func get(t *testing.T, url string, header ...string) (*http.Response, string) {
 	t.Helper()
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	res, err := client.Get(url)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i+1 < len(header); i += 2 {
+		req.Header.Set(header[i], header[i+1])
+	}
+	res, err := client.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,6 +112,33 @@ func TestHeadersOnEveryPage(t *testing.T) {
 		for k, v := range section102 {
 			if got := res.Header.Get(k); got != v {
 				t.Errorf("%s: %s = %q, want %q", path, k, got, v)
+			}
+		}
+	}
+}
+
+// TestNeverServesOutsideTheBuild: a symlink inside the build that points outside it is not
+// followed; the path gets the application, as any other unknown path does.
+func TestNeverServesOutsideTheBuild(t *testing.T) {
+	srv, _ := host(t, "")
+	res, body := get(t, srv.URL+"/assets/outside/secret.txt")
+	if res.StatusCode != http.StatusOK || body != "<!doctype html>app" {
+		t.Errorf("got %d %q, want 200 with the application", res.StatusCode, body)
+	}
+}
+
+// TestRangeKeepsTheHeaders: an invalid range is ignored, so the answer is still the whole page
+// with every §10.2 header (ServeContent's 416 would drop Cache-Control).
+func TestRangeKeepsTheHeaders(t *testing.T) {
+	srv, _ := host(t, "")
+	for _, rng := range []string{"bytes=invalid", "bytes=9999-"} {
+		res, body := get(t, srv.URL+"/machines/m1", "Range", rng)
+		if res.StatusCode != http.StatusOK || body != "<!doctype html>app" {
+			t.Errorf("Range %s: %d %q, want 200 with the application", rng, res.StatusCode, body)
+		}
+		for k, v := range section102 {
+			if got := res.Header.Get(k); got != v {
+				t.Errorf("Range %s: %s = %q, want %q", rng, k, got, v)
 			}
 		}
 	}
