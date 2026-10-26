@@ -45,10 +45,10 @@ export class PageState {
 
 // A top-level navigation to the provider once the PKCE digest is done (§9.3 item 1): a first tab's
 // sign-in, the sign-in button and the renewal by the redirect. It goes only if the page has not
-// moved since `still` was taken.
-export async function navigate(url: Promise<string>, still: () => boolean, assign: (url: string) => void): Promise<boolean> {
+// moved since `still` was taken; no URL means the sign-in was not begun.
+export async function navigate(url: Promise<string | undefined>, still: () => boolean, assign: (url: string) => void): Promise<boolean> {
   const to = await url;
-  if (!still()) return false;
+  if (to === undefined || !still()) return false;
   assign(to);
   return true;
 }
@@ -75,9 +75,14 @@ export function renewals(page: PageState, deps: RenewalDeps) {
     timer = setTimeout(() => {
       if (!still()) return;
       // §9.3 item 3: without a rotating refresh token the holder renews by the redirect; another
-      // tab asks it, as for any renewal.
-      if (deps.session()?.byRedirect === true && deps.holder()) return void deps.redirect(still);
-      void deps.renew().then((ok) => ok && still() && schedule());
+      // tab asks it, as for any renewal, and redirects itself if granted the lock while it waits.
+      const byRedirect = () => deps.session()?.byRedirect === true && deps.holder();
+      if (byRedirect()) return void deps.redirect(still);
+      void deps.renew().then((ok) => {
+        if (!still()) return;
+        if (ok) schedule();
+        else if (byRedirect()) void deps.redirect(still);
+      });
     }, renewDelay(at, Date.now()));
   };
   return {

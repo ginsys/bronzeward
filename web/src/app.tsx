@@ -89,7 +89,7 @@ export function App() {
 
     // The redirect to the provider, after the PKCE digest only while `still` holds.
     const signIn = (config: ClientConfig, provider: Provider, still: () => boolean) =>
-      navigate(beginSignIn(config, provider, location.pathname + location.search + location.hash, sessionStorage, location.origin), still, (u) => location.assign(u));
+      navigate(beginSignIn(config, provider, location.pathname + location.search + location.hash, sessionStorage, location.origin, still), still, (u) => location.assign(u));
     // The sign-in view. Its button is the operator's, so its mark is taken at the click.
     const offer = (message: string, config: ClientConfig, provider: Provider, more: { reading?: string | undefined; problem?: string | undefined } = {}) =>
       setView({ kind: "sign-in", message, ...more, signIn: () => void signIn(config, provider, page.mark()) });

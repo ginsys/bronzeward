@@ -113,6 +113,22 @@ describe("§9.5 renewals", () => {
     expect(h.redirect).not.toHaveBeenCalled();
   });
 
+  // A tab that asked the holder is granted the lock (the holder closed): its renewal answers false,
+  // since it has no refresh token to send, and it renews by the redirect; a failed renewal does not.
+  test.each([
+    [true, 1],
+    [false, 0],
+  ] as const)("§9.3 item 3: granted the lock while it waits, a tab with byRedirect %s redirects %i times", async (byRedirect, times) => {
+    const opts = { byRedirect, holder: false };
+    const h = harness(opts);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(h.renew).toHaveBeenCalledTimes(1);
+    opts.holder = true;
+    h.renewed(false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.redirect).toHaveBeenCalledTimes(times);
+  });
+
   // R8-F1: the redirect renewal awaits the PKCE digest when the page moves.
   test.each([
     ["a final 401", "refused"],

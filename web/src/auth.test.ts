@@ -83,7 +83,7 @@ describe("discovery", () => {
 // A sign-in begun with the storage, and the pending values the request carried.
 async function begun(returnTo = "/machines") {
   const storage = memory();
-  const url = new URL(await beginSignIn(config, provider, returnTo, storage, ORIGIN));
+  const url = new URL((await beginSignIn(config, provider, returnTo, storage, ORIGIN))!);
   const pending = JSON.parse(storage.getItem(PENDING_KEY)!) as Record<string, string>;
   return { storage, url, pending };
 }
@@ -106,6 +106,15 @@ describe("§9.3 item 1 authorization request", () => {
     expect(pending["verifier"]!.length).toBe(43);
     expect(pending["returnTo"]).toBe("/machines?cluster=c1");
     expect([...storage.items.keys()]).toEqual([PENDING_KEY]);
+  });
+
+  test("a page that moves during the PKCE digest stores no pending entry and gets no URL", async () => {
+    const storage = memory();
+    let still = true;
+    const url = beginSignIn(config, provider, "/machines", storage, ORIGIN, () => still);
+    still = false;
+    expect(await url).toBeUndefined();
+    expect(storage.items.size).toBe(0);
   });
 });
 
@@ -390,6 +399,21 @@ describe("§9.7 item 2 sign-out", () => {
       expect(to).toBeUndefined();
       await vi.advanceTimersByTimeAsync(1);
       expect(to).toBe(SIGNED_OUT_PATH);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("during a renewal that never answers, revokes at once the refresh token of a pair taken from another tab", async () => {
+    vi.useFakeTimers();
+    try {
+      const f = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => (url === provider.tokenEndpoint ? new Promise<Response>(() => {}) : Promise.resolve(new Response(null, { status: 200 }))));
+      const s = new Session(config, provider, tokens(), { fetch: f as unknown as typeof fetch });
+      void s.renew();
+      expect(s.adopt(tokens({ access: "SYNTH-a3", refresh: "SYNTH-r3", expiresAt: 600_000 }))).toBe(true);
+      void s.signOut(ORIGIN);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(f.mock.calls.filter((c) => c[0] === provider.revocationEndpoint).map((c) => form(c[1])["token"])).toEqual(["SYNTH-r3"]);
     } finally {
       vi.useRealTimers();
     }
