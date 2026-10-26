@@ -179,10 +179,16 @@ func within[T any](f func() (T, error)) (T, error) {
 }
 
 // ClearStored removes the credential-store entry of a context being removed; a file is the
-// operator's to remove.
+// operator's to remove. Without the store it says that an entry is not reached.
 func ClearStored(x *Context) error {
-	if x.Credential != "oidc" || x.TokenFile() != "" || keyringUnavailable() != "" {
+	if x.Credential != "oidc" || x.TokenFile() != "" {
 		return nil
+	}
+	if why := keyringUnavailable(); why != "" {
+		if unreached() == "" {
+			return nil
+		}
+		return fmt.Errorf("The system credential store is not reached, since %s, so a sign-in another session kept there is not removed", why)
 	}
 	if err := keyringDelete(x.Name); err != nil {
 		return fmt.Errorf("removing the stored sign-in: %w", err)

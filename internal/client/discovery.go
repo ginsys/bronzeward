@@ -17,8 +17,10 @@ type ClientConfig struct {
 	Audience    string `json:"audience"`
 	CLIClientID string `json:"cliClientId"`
 	WebClientID string `json:"webClientId"`
-	// Scopes is the optional member: space-separated scopes requested after openid offline_access.
-	Scopes *string `json:"scopes"`
+	// RawScopes is the optional member as sent: space-separated scopes requested after openid
+	// offline_access. Scopes is it split, nil when it is absent.
+	RawScopes json.RawMessage `json:"scopes"`
+	Scopes    []string        `json:"-"`
 }
 
 // baseScopes are always requested, so the client configuration file does not repeat them.
@@ -30,7 +32,7 @@ func (cc *ClientConfig) OIDCScopes() []string {
 	if cc.Scopes == nil {
 		return nil
 	}
-	return append(slices.Clone(baseScopes), splitScopes(*cc.Scopes)...)
+	return append(slices.Clone(baseScopes), cc.Scopes...)
 }
 
 func splitScopes(s string) []string {
@@ -82,10 +84,17 @@ func FetchClientConfig(x *Context, from string, verbose io.Writer) (*ClientConfi
 	if cc.Issuer == "" || cc.CLIClientID == "" {
 		return nil, fmt.Errorf("GET %s: the file names no issuer or no cliClientId", u)
 	}
-	if cc.Scopes != nil {
-		if why := checkScopes(*cc.Scopes); why != "" {
+	if cc.RawScopes != nil {
+		// A null is no string either; Unmarshal would leave s empty without an error.
+		var s string
+		why := "scopes is not a string"
+		if string(cc.RawScopes) != "null" && json.Unmarshal(cc.RawScopes, &s) == nil {
+			why = checkScopes(s)
+		}
+		if why != "" {
 			return nil, fmt.Errorf("GET %s: %s", u, why)
 		}
+		cc.Scopes = splitScopes(s)
 	}
 	return &cc, nil
 }

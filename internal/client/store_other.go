@@ -10,6 +10,9 @@ func keyringUnavailable() string {
 	return "this system's credential store is not supported yet"
 }
 
+// unreached is empty: no sign-in is ever kept in this system's credential store.
+func unreached() string { return "" }
+
 var errNoKeyring = errors.New(keyringUnavailable())
 
 func keyringGet(string) (string, bool, error) { return "", false, errNoKeyring }
