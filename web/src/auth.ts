@@ -88,10 +88,12 @@ interface Pending {
   returnTo: string;
 }
 
-// The authorization request (§9.3 item 1): its URL, after the pending entry is stored.
-export async function beginSignIn(config: ClientConfig, provider: Provider, returnTo: string, storage: Storage, origin: string): Promise<string> {
+// The authorization request (§9.3 item 1): its URL, after the pending entry is stored; nothing is
+// stored, and there is no URL, unless `still` holds after the PKCE digest (no redirect follows).
+export async function beginSignIn(config: ClientConfig, provider: Provider, returnTo: string, storage: Storage, origin: string, still: () => boolean = () => true): Promise<string | undefined> {
   const pending: Pending = { verifier: random(32), state: random(16), nonce: random(16), returnTo: returnPath(returnTo) };
   const challenge = base64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(pending.verifier))));
+  if (!still()) return undefined;
   storage.setItem(PENDING_KEY, JSON.stringify(pending));
   const url = new URL(provider.authorizationEndpoint);
   const params = {
@@ -304,13 +306,16 @@ export class Session {
     const held = this.#revocable;
     this.#tokens = undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // The last refresh token held goes at once, even one no longer sent for renewal (CP2-F2), so
+    // that a renewal that never answers cannot hold it back. A renewal in flight revokes the pair
+    // it brings, or gives its refresh token back, which goes after it.
+    const later = async () => {
+      await this.#renewing?.catch(() => false);
+      const back = this.#revocable;
+      if (signedIn && back !== held) await this.#revoke(back);
+    };
     await Promise.race([
-      (async () => {
-        // A renewal in flight revokes the pair it brings, or gives its refresh token back; then
-        // the last refresh token held goes, even one no longer sent for renewal (CP2-F2).
-        await this.#renewing?.catch(() => false);
-        if (signedIn) await this.#revoke(held ?? this.#revocable);
-      })(),
+      Promise.all([signedIn ? this.#revoke(held) : undefined, later()]),
       new Promise((r) => (timer = setTimeout(r, SIGN_OUT_WAIT_MS))),
     ]);
     clearTimeout(timer);

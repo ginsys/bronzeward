@@ -799,7 +799,8 @@ current token expires
 1. The web interface is a public client using the authorization-code grant with PKCE `S256`,
    `state` and `nonce`, with a full-page redirect to the provider. The PKCE verifier, `state`,
    `nonce` and the page path to return to are held in one `sessionStorage` entry only between the
-   redirect and the callback and are deleted when the callback is handled; this is the one storage
+   redirect and the callback, stored only when the redirect follows, and are deleted when the
+   callback is handled; this is the one storage
    use the web client makes, and it holds no token. The return path starts with `/` and not `//`,
    holds no backslash or control character, is never a full URL and is never the callback or
    signed-out page; any other is replaced by `/` (decision B2 of
@@ -816,7 +817,8 @@ current token expires
    it sends, on the `BroadcastChannel` (assumption S3), and after it the new pair.
    - A tab without the lock never renews: under the 60 s threshold or after a `401` (§9.5 item 1)
      it posts a request and waits for the holder's pair, at most 10 s, then treats renewal as
-     failed (§9.5 item 3). Granted the lock while it waits, it renews itself.
+     failed (§9.5 item 3). Granted the lock while it waits, it renews itself, by the redirect
+     where its pair has no refresh token.
    - A refresh token named in a `renewing` is spent in every other tab, whatever the answer: a tab
      never sends it, nor gives its pair to a new tab. A tab that holds it and takes no newer pair,
      or becomes holder before one comes, has failed to renew: the current token is used until
@@ -836,6 +838,11 @@ current token expires
      two pairs, a tab can keep the older pair, whose refresh token another tab has sent. Its
      renewal then fails as §9.5 item 3 and the page offers sign-in again. The spent token is told
      by its value, not by expiry, so it is not sent twice.
+   - Two gaps remain ([#388](https://github.com/ginsys/bronzeward/issues/388)). A refresh-token
+     request has no time bound: one the provider never answers holds every later renewal and every
+     pair for a new tab, until the token is refused. And a tab can be granted the lock before the
+     old holder's `renewing` reaches it, then send the token already sent; its renewal fails as
+     §9.5 item 3.
 
    Rejected: a lock taken per renewal, because a waiting tab can be granted it before the previous
    holder's pair reaches it and then spend the used token; a counter in `localStorage`, which
@@ -845,7 +852,8 @@ current token expires
    ([§9.1](#91-identity-provider-requirements) item 3), renewal also uses that redirect, never a
    hidden frame (item 4). The page renews by the redirect when its pair, from a sign-in or another
    tab, has no refresh token, or when a renewal brings back the refresh token it sent; only the
-   lock holder redirects, at the 60 s threshold, and another tab asks it as for any renewal. A
+   lock holder redirects, at the 60 s threshold, and another tab asks it as for any renewal, or
+   redirects itself if granted the lock while it asks. A
    failed renewal or a spent token is not this case: renewal has failed (§9.5 item 3), and that
    pair goes to no new tab. A `401` is not either: the page shows W1 and does not redirect, since a
    token the server refuses would come back refused and the page would loop
@@ -952,8 +960,8 @@ expiry, at most `maxTokenLifetime` after issue, plus the server's 60 s leeway
    revocation still deletes the tokens, says the refresh token is not revoked and exits 1.
 2. The web sign-out discards the in-memory tokens and every cached response, revokes the last
    refresh token the tab held if the provider allows it, even one it no longer sends for renewal
-   (after a failed or unrotated renewal, or one another tab may have spent), or, with a renewal
-   in flight, the pair that renewal brings, tells other open tabs of the same origin to discard theirs
+   (after a failed or unrotated renewal, or one another tab may have spent), without waiting for a
+   renewal in flight, then the pair that renewal brings, tells other open tabs of the same origin to discard theirs
    (assumption S3), and redirects to the provider's end-session endpoint where it offers one, with
    `client_id` and `post_logout_redirect_uri` only. It sends no `id_token_hint`: the test
    provider's ID token carries the access token's issuer, audience and lifetime, so the server
