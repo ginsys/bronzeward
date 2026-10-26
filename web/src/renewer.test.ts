@@ -192,6 +192,45 @@ describe("B1 one renewing tab", () => {
     expect(b.sent).toEqual(["SYNTH-r1", "SYNTH-r9"]);
   });
 
+  test("a tab that signs in by the redirect while another tab's renewal is unanswered keeps its own refresh token", async () => {
+    const b = new Browser();
+    const [x, c] = [b.open(), b.open()];
+    x.signIn(first());
+    await settle();
+    b.hang = true;
+    void x.renewer.renew();
+    await settle();
+    // c, at its callback, got its own pair after the `renewing`, and posts it.
+    b.latest = "SYNTH-r9";
+    const own = first({ access: "SYNTH-a9", refresh: "SYNTH-r9", expiresAt: Date.now() + 600_000 });
+    c.signIn(own);
+    c.renewer.post(own);
+    x.close();
+    await settle();
+    b.hang = false;
+    expect(c.renewer.holder).toBe(true);
+    expect(await c.renewer.renew()).toBe(true);
+    expect(b.sent).toEqual(["SYNTH-r1", "SYNTH-r9"]);
+  });
+
+  test("a tab released while its join awaits the lock query never takes the lock", async () => {
+    const b = new Browser();
+    const x = b.open();
+    x.signIn(first());
+    await settle();
+    const t = b.open();
+    const joined = t.renewer.join();
+    t.close();
+    expect(await joined).toBeUndefined();
+    x.close();
+    await settle();
+    const y = b.open();
+    y.renewer.hold();
+    await settle();
+    expect(t.renewer.holder).toBe(false);
+    expect(y.renewer.holder).toBe(true);
+  });
+
   test("a new tab granted the lock before a pair arrives redirects at once, as after a reload", async () => {
     const b = new Browser();
     const old = b.open();
