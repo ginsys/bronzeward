@@ -15,6 +15,7 @@ export const NOT_ACCEPTED = "Not accepted by this installation. Sign in again.";
 export const REVOKED = "Your access was revoked or is denied by this installation; contact a recovery administrator.";
 export const SIGNED_OUT = "You are signed out of Bronzeward.";
 export const PRINCIPAL_CHANGED = "The identity provider renewed the sign-in for another account. Sign in again to continue.";
+export const SIGNING_OUT = "Signing out";
 const CHANNEL = "bronzeward";
 
 type View =
@@ -22,6 +23,8 @@ type View =
   // Nothing at all: after pagehide, so a restored page shows no data (§10.3 items 3-4).
   | { kind: "blank" }
   | { kind: "signed-out" }
+  // Between the sign-out button and the redirect: nothing read before stays on the page (§9.7, §10.3).
+  | { kind: "signing-out" }
   | { kind: "sign-in"; message: string; reading?: string | undefined; config: ClientConfig; provider: Provider }
   | { kind: "failed"; message: string }
   | { kind: "signed-in"; sub: string; status: string; signOut: () => void };
@@ -92,6 +95,7 @@ export function App() {
         // signOut takes the tokens before its first await, so the revocation still has the refresh token.
         const to = session?.signOut(location.origin) ?? Promise.resolve(SIGNED_OUT_PATH);
         end();
+        setView({ kind: "signing-out" });
         channel.postMessage({ type: "signed-out" });
         void to.then((url) => location.assign(url));
       };
@@ -151,6 +155,8 @@ export function App() {
       return null;
     case "loading":
       return <Page><p role="status" data-testid="status">Loading</p></Page>;
+    case "signing-out":
+      return <Page><p role="status" data-testid="status">{SIGNING_OUT}</p></Page>;
     case "signed-out":
       return (
         <Page>
@@ -199,5 +205,14 @@ function describe(res: ReadResult<Server>, sub: string): string {
   if (p?.["plan"] !== undefined && typeof p.detail === "string") return `${p.detail}; you are signed in as ${sub}`;
   const roles = p?.["roles"];
   if (Array.isArray(roles) && roles.every((r) => typeof r === "string")) return `Needs ${roles.join(" or ")}; you are signed in as ${sub}`;
-  return `The server read failed (${res.kind})`;
+  if (res.kind === "defect") return `The server read failed: ${res.message}`;
+  return problemText(res);
+}
+
+// §8.2: a problem's title, its detail when present and its instance, never a request body. The
+// authentication 503's detail is W1's text.
+export function problemText(res: ReadResult<unknown>): string {
+  const p = "problem" in res ? res.problem : null;
+  if (p === null) return `Not read: the server answered ${"status" in res ? res.status : res.kind}.`;
+  return `Not read: ${p.title}${p.detail !== undefined ? ` (${p.detail})` : ""}.${p.instance !== undefined ? ` Request ${p.instance}.` : ""}`;
 }

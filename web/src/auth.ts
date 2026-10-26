@@ -10,6 +10,8 @@ export const CALLBACK_PATH = "/callback";
 export const SIGNED_OUT_PATH = "/signed-out";
 // §9.5 item 1: renew when less than 60 s of the access token's lifetime remains.
 export const RENEW_BEFORE_MS = 60_000;
+// §9.7 item 2: how long sign-out waits for the revocation before it leaves anyway.
+export const SIGN_OUT_WAIT_MS = 5_000;
 
 // When to renew, in ms from now: 60 s before expiry, but never sooner than half the remaining
 // lifetime, so a provider's short-lived tokens are not renewed one after another without pause.
@@ -194,8 +196,13 @@ export class Session {
     if (current === undefined || refresh === undefined) return false;
     current.refresh = undefined;
     const answer = await tokenRequest(this.provider, { grant_type: "refresh_token", refresh_token: refresh, client_id: this.config.webClientId }, this.opts.fetch);
-    // Signed out or cleared meanwhile: the new pair is not kept.
-    if (answer.kind !== "ok" || this.#tokens !== current) return false;
+    if (answer.kind !== "ok") return false;
+    // Signed out or cleared meanwhile: the new pair is not kept, and its refresh token, which
+    // nothing else holds, is revoked so that it does not outlive the sign-out.
+    if (this.#tokens !== current) {
+      await this.#revoke(answer.body.refresh_token);
+      return false;
+    }
     const id = typeof answer.body.id_token === "string" ? claims(answer.body.id_token) : undefined;
     const after = { iss: typeof id?.["iss"] === "string" ? id["iss"] : current.iss, sub: typeof id?.["sub"] === "string" ? id["sub"] : current.sub };
     this.#tokens = toTokens(answer.body, after, this.now());
@@ -210,21 +217,31 @@ export class Session {
 
   // §9.7 item 2: forget the tokens, revoke the refresh token where the provider allows it, and
   // return where to go: the provider's end-session endpoint if it has one, else the signed-out page.
+  // A renewal in flight revokes the pair it receives; the wait for both is bounded, so a stalled
+  // provider delays the redirect by at most SIGN_OUT_WAIT_MS.
   async signOut(origin: string): Promise<string> {
     const t = this.#tokens;
     this.#tokens = undefined;
-    if (t?.refresh !== undefined && this.provider.revocationEndpoint !== undefined) {
-      try {
-        await (this.opts.fetch ?? fetch)(this.provider.revocationEndpoint, post({ token: t.refresh, token_type_hint: "refresh_token", client_id: this.config.webClientId }));
-      } catch {
-        // Unreachable: the token stays valid at the provider until it expires; nothing to retry here.
-      }
-    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      Promise.all([this.#revoke(t?.refresh), this.#renewing?.catch(() => false)]),
+      new Promise((r) => (timer = setTimeout(r, SIGN_OUT_WAIT_MS))),
+    ]);
+    clearTimeout(timer);
     if (this.provider.endSessionEndpoint === undefined) return SIGNED_OUT_PATH;
     const url = new URL(this.provider.endSessionEndpoint);
     url.searchParams.set("client_id", this.config.webClientId);
     url.searchParams.set("post_logout_redirect_uri", origin + SIGNED_OUT_PATH);
     return url.href;
+  }
+
+  async #revoke(token: string | undefined): Promise<void> {
+    if (token === undefined || this.provider.revocationEndpoint === undefined) return;
+    try {
+      await (this.opts.fetch ?? fetch)(this.provider.revocationEndpoint, post({ token, token_type_hint: "refresh_token", client_id: this.config.webClientId }));
+    } catch {
+      // Unreachable: the token stays valid at the provider until it expires; nothing to retry here.
+    }
   }
 
   private now(): number {
