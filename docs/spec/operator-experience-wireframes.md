@@ -5,8 +5,11 @@
 wireframes for the web journeys in that document. They fix content, order and which
 action is available to which role. They do not fix layout, styling, framework or wording beyond
 the labels that carry meaning. All data is synthetic; identifiers are shortened as `mch_tqhc…35uq`.
-Other people appear by readable names (`ops-ben`), which depend on
-[gap G15](operator-experience.md#11-api-gap-audit); the API serves only principal identifiers.
+Other people appear by readable names (`ops-ben`). The API serves only principal identifiers;
+[gap G15](operator-experience.md#11-api-gap-audit) adds a human's subject and issuer, and a
+readable name for a human depends on pending owner choice BW-335-display-1
+([persistence and API §10](persistence-api.md#10-authentication-and-authorization)). Without
+it, a human is shown by subject and issuer.
 
 Conventions: `[Button]` is an action; `[Button]~` is shown disabled with its reason;
 `(•)` is a status badge whose text carries the meaning, never its colour alone; `▸` opens a
