@@ -14,18 +14,19 @@ export const where = () => browser.execute(() => location.origin + location.path
 export const param = (name: string) => browser.execute((n: string) => new URLSearchParams(location.search).get(n), name);
 export const status = () => $('[data-testid="status"]').getText();
 
-// Waits until the page is back on `page`/ with its reads settled: the page's state text, or the
-// footer's server versions once the shell shows a page. Checked and read in one step in the page:
-// an element a re-render replaced between two WebDriver calls would be stale for the second.
+// Waits until the page is back on `page`/ with its reads settled: the footer's server versions once
+// the shell shows a page, which may hold a state of its own (an empty list), else the state text.
+// Checked and read in one step in the page: an element a re-render replaced between two WebDriver
+// calls would be stale for the second.
 export async function settled(page: string): Promise<string> {
   let text: string | null = null;
   await browser.waitUntil(async () => {
     text = await browser.execute((want: string) => {
       if (location.origin + location.pathname !== want) return null;
       const s = document.querySelector<HTMLElement>('[data-testid="status"]');
-      if (s !== null) return (s.textContent ?? "").startsWith("Loading") ? null : s.innerText.trim();
-      if (document.querySelector("main h2") === null) return null;
-      return document.querySelector<HTMLElement>('[data-testid="server"]')?.innerText.trim() ?? null;
+      if ((s?.textContent ?? "").startsWith("Loading")) return null;
+      if (document.querySelector("main h2") !== null) return document.querySelector<HTMLElement>('[data-testid="server"]')?.innerText.trim() ?? null;
+      return s !== null ? s.innerText.trim() : null;
     }, `${page}/`);
     return text !== null;
   }, { timeout: 20_000, timeoutMsg: `the page did not settle on ${page}/` });
@@ -51,6 +52,8 @@ export async function fixtureSignIn(human: string, flags: Record<string, string>
 
 export const counts = async (): Promise<Counts> => (await fetch(`${CONTROL}/counts`)).json() as never;
 export const seen = async (): Promise<string[]> => (await fetch(`${CONTROL}/seen`)).json() as never;
+// The server's answers the injector passed on, as "<route><query> <status>".
+export const answers = async (): Promise<string[]> => (await fetch(`${CONTROL}/answered`)).json() as never;
 export const faults = async (f: Faults) => expect((await fetch(`${CONTROL}/faults`, { method: "POST", body: JSON.stringify(f) })).ok).toBe(true);
 // Lets the answers the `held` fault holds go; returns once the injector has sent each.
 export const release = async () => expect((await fetch(`${CONTROL}/release`, { method: "POST" })).ok).toBe(true);

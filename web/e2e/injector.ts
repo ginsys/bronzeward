@@ -13,8 +13,8 @@ export interface Faults {
   // (client contracts §6 item 7). A connection closed here would reach the page as the static
   // host's 502.
   redirect?: string;
-  // The answer to this path held this long, in milliseconds.
-  hold?: { path: string; ms: number };
+  // The answer to this path held this long, in milliseconds; with a query, only to that query.
+  hold?: { path: string; ms: number; query?: string };
   // The answer to this path held until the case releases it (POST /release on the control server),
   // so a case orders a late answer after what it asserted first, whatever the runner's timing.
   held?: string;
@@ -30,8 +30,9 @@ export interface Faults {
 export interface Injector {
   server: Server;
   faults: Faults;
-  // Every API path asked, in order.
+  // Every API path asked, in order, and each server answer passed on: path, query and status.
   seen: string[];
+  answered: string[];
   // Lets every held answer go on; resolves once each has been sent.
   release: () => Promise<void>;
 }
@@ -48,7 +49,7 @@ export function startInjector(upstream: string, port: number): Promise<Injector>
   // Each held answer: its release, and its having been sent.
   const waiting: { go: () => void; sent: Promise<void> }[] = [];
   const inj: Injector = {
-    faults: {}, seen: [], server: undefined as never,
+    faults: {}, seen: [], answered: [], server: undefined as never,
     release: async () => {
       const now = waiting.splice(0);
       for (const w of now) w.go();
@@ -56,13 +57,13 @@ export function startInjector(upstream: string, port: number): Promise<Injector>
     },
   };
   inj.server = createServer((req, res) => {
-    const path = new URL(req.url ?? "/", upstream).pathname;
+    const { pathname: path, search } = new URL(req.url ?? "/", upstream);
     if (path.startsWith("/api/v1/")) inj.seen.push(path.slice("/api/v1".length));
     const f = inj.faults;
     const route = path.slice("/api/v1".length);
     if (f.redirect === route) return void res.writeHead(302, { Location: "http://127.0.0.1:9/" }).end();
     void (async () => {
-      if (f.hold?.path === route) await new Promise((r) => setTimeout(r, f.hold!.ms));
+      if (f.hold?.path === route && (f.hold.query ?? search) === search) await new Promise((r) => setTimeout(r, f.hold!.ms));
       if (f.held === route) {
         await new Promise<void>((go) => waiting.push({ go, sent: new Promise((done) => res.once("close", () => done())) }));
       }
@@ -87,6 +88,7 @@ export function startInjector(upstream: string, port: number): Promise<Injector>
         out = Buffer.from(JSON.stringify({ ...JSON.parse(out.toString()), apiRevision: f.revision }));
       }
       if (f.deprecate === route) back["deprecation"] = "@1767225600";
+      inj.answered.push(`${route}${search} ${up.status}`);
       res.writeHead(up.status, back).end(out);
     })().catch(() => req.socket.destroy());
   });

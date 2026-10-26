@@ -16,6 +16,8 @@ const nav = (title: string) => $('nav[aria-label="Main"]').$(`a=${title}`);
 // The browser's own connectivity events, as the shell listens for them.
 const event = (name: "offline" | "online") => browser.execute((n: string) => void dispatchEvent(new Event(n)), name);
 const reads = (n: number) => browser.waitUntil(async () => (await seen()).length === n, { timeout: 10_000, timeoutMsg: `the page did not make ${n} reads` });
+// The machine list and its cluster filter are read at once, so they arrive in either order.
+const ordered = async () => (await seen()).join(" ").replaceAll("/clusters /machines", "/machines /clusters").split(" ");
 
 // Loads the page without waiting for it to settle, so a state on the way can be read.
 async function load(f: Faults) {
@@ -54,8 +56,9 @@ describe("the shell", () => {
     await browser.execute(() => history.back());
     await expect($("main h2")).toHaveText("Machines");
     expect(await where()).toBe(`${FIXTURE_PAGE}/`);
-    // The server's version first (§7 item 3), the header's identity on each page.
-    expect(await seen()).toEqual(["/server", "/identity", "/identity", "/identity"]);
+    // The server's version first (§7 item 3), the header's identity on each page, the machine list
+    // and its cluster filter once the identity is shown.
+    expect(await ordered()).toEqual(["/server", "/identity", "/machines", "/clusters", "/identity", "/machines", "/clusters", "/identity"]);
   });
 
   it("a query-only move reads the identity again under the new view", async () => {
@@ -64,10 +67,14 @@ describe("the shell", () => {
       history.pushState(null, "", "/?cluster=c1");
       dispatchEvent(new PopStateEvent("popstate"));
     });
-    await reads(3);
+    // Each move reads the identity and the machine list, filtered by the query; the cluster filter's
+    // own list has no query and is not read again.
+    await reads(6);
     await browser.execute(() => history.back());
-    await reads(4);
-    expect(await seen()).toEqual(["/server", "/identity", "/identity", "/identity"]);
+    await reads(8);
+    const s = await seen();
+    expect(s.filter((p) => p === "/identity")).toHaveLength(3);
+    expect(s.filter((p) => p === "/machines")).toHaveLength(3);
   });
 
   it("COMP-01: a server below the client's minimum API revision is refused before any other read, both revisions named", async () => {
@@ -85,7 +92,7 @@ describe("the shell", () => {
     await expect($("main h2")).toHaveText("Audit");
     await nav("Sources").click();
     await expect($("main h2")).toHaveText("Sources");
-    expect(await seen()).toEqual(["/server", "/identity", "/identity", "/identity"]);
+    expect(await ordered()).toEqual(["/server", "/identity", "/machines", "/clusters", "/identity", "/identity"]);
     expect(await $$('[data-testid="deprecation"]').length).toBe(1);
   });
 
@@ -170,7 +177,7 @@ describe("the state catalogue", () => {
     await event("online");
     await expect(testid("principal")).toHaveText("Signed in as h-viewer");
     expect(await testid("offline").isExisting()).toBe(false);
-    expect(await seen()).toEqual(["/server", "/identity", "/identity", "/identity"]);
+    expect(await ordered()).toEqual(["/server", "/identity", "/machines", "/clusters", "/identity", "/identity"]);
   });
 
   it("offline: a read an online event superseded is ignored when it completes, and the newer answer shown", async () => {
@@ -178,9 +185,11 @@ describe("the state catalogue", () => {
     await faults({ missing: "/identity" });
     await event("online");
     await announced("status", "Not read: not-found. Not found: injected Request req-injected.");
+    // The first online event read the machine list and its cluster filter again with the identity;
+    // the refusal then replaced the list, so this one reads the identity alone.
     await faults({ held: "/identity", missing: "/identity" });
     await event("online");
-    await reads(4);
+    await reads(8);
     await faults({});
     await event("online");
     // The newer read's data replaces the refusal while the older read is still held.
@@ -190,17 +199,19 @@ describe("the state catalogue", () => {
     await browser.waitUntil(() => answered("/identity", 4), { timeout: 10_000, timeoutMsg: "the held read's answer did not reach the page" });
     await browser.pause(500);
     expect(await testid("principal").getText()).toBe("Signed in as h-viewer");
-    expect(await testid("status").isExisting()).toBe(false);
+    // The machine list's own state may be shown; the refusal is not.
+    expect(await $("main").getText()).not.toContain("Not read");
   });
 
   it("offline: identity-revoked on a superseded read still ends the page with the revocation", async () => {
     await fixtureSignIn("h-viewer");
+    // Each online event reads the identity, the machine list and its cluster filter again.
     await faults({ held: "/identity", revoked: "/identity" });
     await event("online");
-    await reads(3);
+    await reads(7);
     await faults({ redirect: "/identity" });
     await event("online");
-    await reads(4);
+    await reads(10);
     // The newer read lost its answer; the old read's revocation, released after it, still ends the page.
     await announced("offline", /^Offline since /);
     await release();
@@ -215,7 +226,7 @@ const INJECTED_REFUSAL = "Not read: Recovery mode active (injected). Request req
 
 describe("recovery", () => {
   it("REC-01: a recovery start before its entry names the process's restriction; after it, the banner, the scopes and the epoch change", async () => {
-    const started = await fetch(`${CONTROL}/recovery-start`, { method: "POST" });
+    const started = await fetch(`${CONTROL}/disposable?start=recovery`, { method: "POST" });
     expect(started.status).toBe(200);
     const at = await started.text();
     // Before the entry: GET /server refused as every request but the entry, so nothing else is read.
