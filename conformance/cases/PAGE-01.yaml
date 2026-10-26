@@ -1,0 +1,19 @@
+id: PAGE-01
+setup: as AUTH-02, with the injector passing every request to the fixture deployment on a fresh database holding one synthetic cluster and 120 synthetic machines recorded as h-author; signed in as h-viewer
+action: load the web client, sign in, open the machine list, ask for the next page twice; then filter by a state in the browser
+exchange:
+  - request: GET /api/v1/machines
+    headers: ["Authorization: Bearer <token>", "Accept: application/json"]
+  - request: GET /api/v1/machines?cursor=<next>
+    headers: ["Authorization: Bearer <token>", "Accept: application/json"]
+fault: none
+expect:
+  server: three pages of the default 50, 50 and 20 items, the last without next
+  client: each page read with the previous one's cursor, which never enters the page's URL; the state filter reads every page before it filters
+  shown: every machine once, in identifier order, then "Showing 120 of 120."
+  absent: [token in the harness log, retained artifacts or browser storage]
+runs:
+  web:
+    check: web/e2e/auth/inventory.e2e.ts, mise run browser-auth; the paging in web/src/list.test.ts, mise run web
+    browsers: [chrome, edge, firefox, firefox-esr]
+    covers: the machine list
