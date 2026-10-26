@@ -347,16 +347,20 @@ func discover(x *Context, d time.Duration) (context.Context, context.CancelFunc,
 
 // discoveryError is a failed discovery as shown. A transport error is shown as remoteFailure shows
 // it. go-oidc's other errors quote what the provider sent (its reason phrase, its response body, the
-// issuer it names), which is not shown: only the status of a refusal, which go-oidc puts first.
+// issuer it names), which is not shown: only the status of a refusal, which go-oidc puts first,
+// followed by the reason phrase or, when the status line has none, by a colon.
 func discoveryError(iss string, err error) error {
 	var ue *url.Error
 	var me *oidc.IssuerMismatchError
+	var rr *refusedRedirect
 	switch s := err.Error(); {
+	case errors.As(err, &rr):
+		return fmt.Errorf("the identity provider %s: %w", iss, rr)
 	case errors.As(err, &ue):
 		return fmt.Errorf("cannot reach the identity provider %s: %w", iss, remoteFailure(err))
 	case errors.As(err, &me):
 		return fmt.Errorf("the identity provider %s: its discovery document names another issuer", iss)
-	case len(s) > 4 && s[3] == ' ':
+	case len(s) > 4 && (s[3] == ' ' || s[3] == ':'):
 		if status, e := strconv.Atoi(s[:3]); e == nil && http.StatusText(status) != "" {
 			return fmt.Errorf("the identity provider %s refused its discovery: %s", iss, refusal(status, ""))
 		}
@@ -437,7 +441,9 @@ func issuerClient(x *Context) (*http.Client, error) {
 		return nil, err
 	}
 	hc.CheckRedirect = func(r *http.Request, via []*http.Request) error {
-		if len(via) >= 10 || providerEndpoint(r.URL.String(), "redirect") != nil {
+		// Go drops an empty fragment from the target, so the Location header is checked as sent.
+		if len(via) >= 10 || r.Response != nil && strings.Contains(r.Response.Header.Get("Location"), "#") ||
+			providerEndpoint(r.URL.String(), "redirect") != nil {
 			return &refusedRedirect{to: r.URL, many: len(via) >= 10}
 		}
 		return nil

@@ -25,8 +25,10 @@ import (
 // revocation answers a revocation, a 302 redirecting to a page that answers a GET with 200, and
 // revoked lists their forms; while it is nil, discovery names no revocation endpoint. endpoint,
 // when set, is the revocation_endpoint discovery names instead. discovery, when set, breaks
-// discovery: "down" answers 503 with a body of control characters, "moved" redirects to plain
-// http off loopback, and "other" names another issuer.
+// discovery: "down" answers 503 with a body of control characters, "bare" 503 with no reason
+// phrase and "phrase" with the provider's own, "garbage" 200 with a body that is no document,
+// "moved" redirects to plain http off loopback, "fragment" to an empty fragment, and "other"
+// names another issuer.
 type provider struct {
 	iss *issuer.Issuer
 
@@ -108,6 +110,28 @@ func (p *provider) wrap(iss *issuer.Issuer) http.Handler {
 		case "moved":
 			p.mu.Unlock()
 			http.Redirect(w, r, "http://idp.example.invalid/.well-known/openid-configuration", http.StatusFound)
+			return
+		case "fragment":
+			// The target serves the document, so only refusing the redirect fails discovery.
+			if !r.URL.Query().Has("moved") {
+				p.mu.Unlock()
+				w.Header().Set("Location", iss.URL+"/.well-known/openid-configuration?moved#")
+				w.WriteHeader(http.StatusFound)
+				return
+			}
+		case "garbage":
+			p.mu.Unlock()
+			w.Write([]byte("\x1b[2J BWSYNTH-body"))
+			return
+		case "bare", "phrase":
+			// A status line without a reason phrase, or with the provider's own.
+			line := map[string]string{"bare": "HTTP/1.1 503\r\n", "phrase": "HTTP/1.1 503 BWSYNTH-phrase\r\n"}[p.discovery]
+			p.mu.Unlock()
+			c, _, err := w.(http.Hijacker).Hijack()
+			if err == nil {
+				c.Write([]byte(line + "Content-Length: 12\r\nConnection: close\r\n\r\nBWSYNTH-body"))
+				c.Close()
+			}
 			return
 		case "other":
 			d["issuer"] = "https://idp.example.invalid"
