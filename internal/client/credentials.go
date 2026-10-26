@@ -350,7 +350,7 @@ func discoveryError(iss string, err error) error {
 	var me *oidc.IssuerMismatchError
 	switch s := err.Error(); {
 	case errors.As(err, &ue):
-		return fmt.Errorf("cannot reach the identity provider %s: %w", iss, err)
+		return fmt.Errorf("cannot reach the identity provider %s: %w", iss, printableError(err))
 	case errors.As(err, &me):
 		return fmt.Errorf("the identity provider %s: its discovery document names another issuer", iss)
 	case len(s) > 4 && s[3] == ' ':
@@ -396,7 +396,7 @@ func Revoke(x *Context, rt string) error {
 	once.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	r, err := once.Do(q)
 	if err != nil {
-		return fmt.Errorf("revoking at the identity provider %s: %w", x.OIDC.Issuer, err)
+		return fmt.Errorf("revoking at the identity provider %s: %w", x.OIDC.Issuer, printableError(err))
 	}
 	defer r.Body.Close()
 	if r.StatusCode == http.StatusOK {
@@ -442,7 +442,7 @@ func refresh(x *Context, rt string) (*Tokens, error) {
 		// The provider's own error code only: its response body is not shown.
 		return nil, fmt.Errorf("the identity provider %s refused the renewal: %s", x.OIDC.Issuer, refusal(re.Response.StatusCode, re.ErrorCode))
 	} else if err != nil {
-		return nil, fmt.Errorf("renewing at the identity provider %s: %w", x.OIDC.Issuer, err)
+		return nil, fmt.Errorf("renewing at the identity provider %s: %w", x.OIDC.Issuer, printableError(err))
 	}
 	return &Tokens{AccessToken: t.AccessToken, RefreshToken: t.RefreshToken}, nil
 }
