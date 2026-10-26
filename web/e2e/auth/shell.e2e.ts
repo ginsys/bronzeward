@@ -1,9 +1,11 @@
-// COMP-01, COMP-02 (conformance/cases/) and the shell's header, navigation and states: the fixture
-// page against the server that trusts the fixture issuer, through the injector.
+// COMP-01, COMP-02, REC-01 (conformance/cases/) and the shell's header, navigation and states: the
+// fixture page against the server that trusts the fixture issuer, or a recovery start of its
+// deployment, through the injector.
 import { $, $$, browser, expect } from "@wdio/globals";
 import { NOT_ACCEPTED, REVOKED } from "../../src/app.tsx";
+import { PRE_ENTRY, RECOVERY_START } from "../../src/recovery.tsx";
 import { deprecated, incompatible } from "../../src/shell.tsx";
-import { TRANSPORT_FAILURE } from "../../src/request.ts";
+import { EPOCH_CHANGED, TRANSPORT_FAILURE } from "../../src/request.ts";
 import { CONTROL, FIXTURE_API, FIXTURE_PAGE } from "../auth.conf.ts";
 import type { Faults } from "../injector.ts";
 import { faults, fixtureSignIn, mint, seen, settled, storageEmpty, where } from "./helpers.ts";
@@ -201,6 +203,37 @@ describe("the state catalogue", () => {
     await expect(testid("status")).toHaveText(REVOKED, { wait: 10_000 });
     expect(await testid("principal").isExisting()).toBe(false);
     expect(await $("footer").getText()).toMatch(/^Client .+\. Server unknown$/);
+  });
+});
+
+const literal = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+describe("recovery", () => {
+  it("REC-01: a recovery start before its entry names the process's restriction; after it, the banner, the scopes and the epoch change", async () => {
+    const started = await fetch(`${CONTROL}/recovery-start`, { method: "POST" });
+    expect(started.status).toBe(200);
+    const at = await started.text();
+    // Before the entry: GET /server refused as every request but the entry, so nothing else is read.
+    expect(await fixtureSignIn("h-viewer", {}, { upstream: at })).toBe(PRE_ENTRY);
+    expect(await testid("status").getAttribute("role")).toBe("status");
+    expect(await testid("principal").isExisting()).toBe(false);
+    expect(await testid("server").getText()).toBe("Server unknown");
+    expect(await seen()).toEqual(["/server"]);
+    // The entry, as a recovery administrator would make it (synthetic values only).
+    const now = new Date(Date.now() - 60_000).toISOString();
+    const entry = await fetch(`${at}/api/v1/recovery/entries`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${mint("h-recovery")}`, "Content-Type": "application/json", "Idempotency-Key": `rec-01-${Date.now()}-entry` },
+      body: JSON.stringify({ restored: [{ family: "database", backup: "synthetic-backup-rec-01", takenAt: now }], stoppedAt: now, reason: "REC-01 synthetic restore" }),
+    });
+    expect(entry.status).toBe(201);
+    const { epoch } = (await entry.json()) as { epoch: string };
+    await $("button=Read again").click();
+    await expect($("main h2")).toHaveText("Machines");
+    await announced("epoch-changed", `${EPOCH_CHANGED}.`);
+    await announced("recovery", new RegExp(`^Recovery mode since \\d\\d:\\d\\d, epoch ${literal(epoch)}\\. No machine scopes\\. Drafts can be edited\\. ${literal(RECOVERY_START)}$`));
+    expect(await testid("epoch").getText()).toBe(`Epoch ${epoch}`);
+    expect(await testid("server").getText()).toMatch(SERVER);
   });
 });
 

@@ -3,6 +3,8 @@
 import { createServer, type IncomingMessage, type Server } from "node:http";
 
 export interface Faults {
+  // REC-01: every request goes to this server instead, a recovery start the control route made.
+  upstream?: string;
   // COMP-01: GET /server's apiRevision, rewritten.
   revision?: number;
   // COMP-02: a Deprecation header on the answers to this path.
@@ -54,7 +56,7 @@ export function startInjector(upstream: string, port: number): Promise<Injector>
       }
       const headers = Object.fromEntries(Object.entries(req.headers).filter(([k]) => k !== "host" && k !== "connection")) as Record<string, string>;
       const sent = req.method === "GET" || req.method === "HEAD" ? null : new Uint8Array(await body(req));
-      const up = await fetch(upstream + (req.url ?? "/"), { method: req.method ?? "GET", headers, body: sent, redirect: "manual" });
+      const up = await fetch((f.upstream ?? upstream) + (req.url ?? "/"), { method: req.method ?? "GET", headers, body: sent, redirect: "manual" });
       let out = Buffer.from(await up.arrayBuffer());
       const back = Object.fromEntries([...up.headers].filter(([k]) => !["content-length", "content-encoding", "transfer-encoding", "connection"].includes(k)));
       if (route === "/server" && f.revision !== undefined && up.ok) {
