@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, test, vi } from "vitest";
-import { beginSignIn, claims, completeSignIn, discover, PENDING_KEY, type Provider, RENEW_BEFORE_MS, returnPath, Session, SIGNED_OUT_PATH, type Tokens } from "./auth.ts";
+import { beginSignIn, claims, completeSignIn, discover, localReading, PENDING_KEY, type Provider, RENEW_BEFORE_MS, returnPath, Session, SIGNED_OUT_PATH, type Tokens } from "./auth.ts";
 import type { ClientConfig } from "./config.ts";
 
 const ORIGIN = "http://localhost:58443";
@@ -258,4 +258,15 @@ test("JWT claims are read only when they decode to an object", () => {
   expect(claims("nodots")).toBeUndefined();
   expect(claims(`a.${b64url("[1]")}.c`)).toBeUndefined();
   expect(claims("a.%%%.c")).toBeUndefined();
+});
+
+test("§9.6 the browser's own reading of a refused token", () => {
+  const now = Date.UTC(2026, 9, 26);
+  const exp = now / 1000 + 300;
+  expect(localReading(jwt({ iss: ISSUER, aud: "bronzeward", exp }), config, now)).toBeUndefined();
+  expect(localReading(jwt({ iss: ISSUER, aud: ["x", "bronzeward"], exp }), config, now)).toBeUndefined();
+  expect(localReading(jwt({ iss: "https://other", aud: "bronzeward", exp }), config, now)).toBe(`the token is from https://other; this page expects ${ISSUER}`);
+  expect(localReading(jwt({ iss: ISSUER, aud: "other", exp }), config, now)).toBe("the token is not issued for bronzeward; the identity provider needs an audience mapping");
+  expect(localReading(jwt({ iss: ISSUER, aud: "bronzeward", exp: now / 1000 }), config, now)).toBe("the token expired at 2026-10-26T00:00:00.000Z");
+  expect(localReading("opaque", config, now)).toBeUndefined();
 });

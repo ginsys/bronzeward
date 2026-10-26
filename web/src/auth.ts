@@ -284,6 +284,18 @@ function readPending(raw: string | null): Pending | undefined {
   }
 }
 
+// §9.6: what this page can read in a token the server refused, never the server's reason (it says
+// only 401). Undefined when nothing can be read safely.
+export function localReading(access: string, config: ClientConfig, now: number): string | undefined {
+  const c = claims(access);
+  if (c === undefined) return undefined;
+  if (typeof c["iss"] === "string" && c["iss"] !== config.issuer) return `the token is from ${c["iss"]}; this page expects ${config.issuer}`;
+  const aud = Array.isArray(c["aud"]) ? c["aud"] : [c["aud"]];
+  if (!aud.includes(config.audience)) return `the token is not issued for ${config.audience}; the identity provider needs an audience mapping`;
+  if (typeof c["exp"] === "number" && c["exp"] * 1000 <= now) return `the token expired at ${new Date(c["exp"] * 1000).toISOString()}`;
+  return undefined;
+}
+
 // A JWT's claims, read without verification; undefined when it does not decode.
 export function claims(jwt: string): Record<string, unknown> | undefined {
   const part = jwt.split(".")[1];
