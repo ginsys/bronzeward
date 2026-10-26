@@ -319,7 +319,8 @@ it. It holds no secret.
    never a target. For a write that error is an ambiguous outcome and is handled as in
    [§8.4](#84-idempotency-and-ambiguous-responses) item 2, since the page cannot tell whether the
    request reached the server. Toward
-   the identity provider the CLI follows redirects only to `https` (or loopback) URLs. The CLI
+   the identity provider the CLI follows redirects only to `https` (or loopback) URLs, and none
+   on a token revocation ([§9.7](#97-sign-out-and-cache-clearing) item 1). The CLI
    honours the standard proxy environment variables, says so in verbose output, and never sends
    `Authorization` to a proxy in clear text: an `https` URL goes through a proxy only by a
    tunnel. The server's own issuer fetches follow a comparable rule
@@ -895,7 +896,8 @@ expiry, at most `maxTokenLifetime` after issue, plus the server's 60 s leeway
    at the provider's revocation endpoint if it has one, and says that an access token already
    issued remains valid at the server for up to its remaining lifetime plus that leeway. The
    endpoint is the `revocation_endpoint` of the provider's discovery (RFC 7009, sent as a public
-   client). Without one, logout says the refresh token is not revoked; a refused or failed
+   client). The revocation request follows no redirect, so a 3xx answer is a refused revocation.
+   Without one, logout says the refresh token is not revoked; a refused or failed
    revocation still deletes the tokens, says the refresh token is not revoked and exits 1.
 2. The web sign-out discards the in-memory tokens and every cached response, revokes the refresh
    token if the provider allows it, tells other open tabs of the same origin to discard theirs

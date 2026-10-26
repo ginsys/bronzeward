@@ -179,10 +179,11 @@ func endpoint(raw, field string) error {
 }
 
 // providerEndpoint is endpoint for a URL the identity provider names (its token and revocation
-// endpoints, a redirect), which may carry a query, kept as it is.
+// endpoints, a redirect), which may carry a query, kept as it is. An empty fragment counts too:
+// url.Parse drops it.
 func providerEndpoint(raw, field string) error {
 	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" || u.Fragment != "" || u.User != nil {
+	if err != nil || u.Host == "" || strings.Contains(raw, "#") || u.User != nil {
 		return fmt.Errorf("%s %q: give a URL with a host and no fragment or user", field, raw)
 	}
 	if u.Scheme == "https" || u.Scheme == "http" && loopback(u.Hostname()) {

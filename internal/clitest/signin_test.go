@@ -26,7 +26,9 @@ import (
 // the last redemption came with. revocation answers a revocation, a 302 redirecting to a page that
 // answers a GET with 200, and revoked lists their forms; while it is nil, discovery names no
 // revocation endpoint. endpoint, when set, is the revocation_endpoint discovery names instead.
+// While broken is set, discovery answers 503 with a body of control characters.
 type provider struct {
+	broken     bool
 	mu         sync.Mutex
 	answer     func(rt string) (int, any)
 	calls      atomic.Int32
@@ -68,6 +70,12 @@ func (p *provider) wrap(iss *issuer.Issuer) http.Handler {
 		var d map[string]any
 		json.Unmarshal(rec.Body.Bytes(), &d)
 		p.mu.Lock()
+		if p.broken {
+			p.mu.Unlock()
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte("\x1b[2J down"))
+			return
+		}
 		d["token_endpoint"] = iss.URL + "/token" + p.query
 		if p.revocation != nil {
 			d["revocation_endpoint"] = iss.URL + "/revoke"
@@ -360,6 +368,15 @@ func TestSignIn(t *testing.T) {
 		if s := f.stored(file); f.idp.calls.Load() != 1 || s.AccessToken != expired || s.RefreshToken != "BWSYNTH-rt-5" {
 			t.Errorf("%d redemptions, want 1; the stored sign-in changed", f.idp.calls.Load())
 		}
+		// Only an RFC 6749 error code is shown, not control characters.
+		f.idp.set(func(string) (int, any) {
+			return http.StatusBadRequest, map[string]string{"error": "\x1b[2Jinvalid_grant"}
+		})
+		r := whoami()
+		f.want(r, 1, "refused the renewal: 400 Bad Request;")
+		if strings.ContainsRune(r.out+r.err, '\x1b') {
+			t.Errorf("the renewal refusal showed a control character from the provider:\n%s%s", r.out, r.err)
+		}
 	})
 
 	t.Run("refresh token not rotated", func(t *testing.T) {
@@ -593,6 +610,19 @@ func TestSignIn(t *testing.T) {
 			"The refresh token is not revoked: the identity provider offers no revocation endpoint")
 		if seen := f.idp.revocations(); len(seen) != 0 {
 			t.Errorf("%d revocations sent where discovery names no endpoint", len(seen))
+		}
+		// A failed discovery shows neither the provider's reason phrase nor its body.
+		f.idp.mu.Lock()
+		f.idp.broken = true
+		f.idp.mu.Unlock()
+		f.store(file, tok, "BWSYNTH-rt-8")
+		down := f.signedIn("--context", "human", "logout")
+		f.idp.mu.Lock()
+		f.idp.broken = false
+		f.idp.mu.Unlock()
+		f.want(down, 1, "The refresh token is not revoked", "its discovery document could not be read")
+		if strings.ContainsRune(down.out+down.err, '\x1b') || strings.Contains(down.out+down.err, "down") {
+			t.Errorf("logout showed what the failed discovery sent:\n%s%s", down.out, down.err)
 		}
 		f.store(file, f.mint("h-viewer", "expired"), "")
 		r := f.signedIn("--context", "human", "logout")
