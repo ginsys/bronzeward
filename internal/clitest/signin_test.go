@@ -435,6 +435,13 @@ func TestSignIn(t *testing.T) {
 		if _, err := os.Stat(file); err != nil {
 			t.Errorf("logout removed a file that is not bronzewardctl's: %v", err)
 		}
+		for _, foreign := range []string{`{"type":"service_account","private_key":"BWSYNTH-key"}`, `null`, `{"accessToken":""} {}`} {
+			os.WriteFile(file, []byte(foreign), 0o600)
+			f.want(f.signedIn("--context", "human", "logout"), 1, "holds neither bronzewardctl's tokens nor an automation token")
+			if b, err := os.ReadFile(file); err != nil || string(b) != foreign {
+				t.Errorf("logout changed the foreign file %s: %q, %v", foreign, b, err)
+			}
+		}
 		os.Remove(file)
 		f.want(f.signedIn("--context", "human", "logout"), 0, "Not signed in to human")
 		f.want(f.signedIn("--context", "lab", "logout"), 1, "an automation context has no sign-in")

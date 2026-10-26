@@ -54,17 +54,21 @@ func ReadTokens(p string) (*Tokens, error) {
 	if automation(b) {
 		return nil, automationFile(p)
 	}
+	// The client's own document is one JSON object with no field but the ones it writes; any other
+	// file at the path is someone else's, and is never used or removed.
 	var t Tokens
-	if json.Unmarshal(b, &t) == nil && t.AccessToken != "" {
-		return &t, nil
+	d := json.NewDecoder(bytes.NewReader(b))
+	d.DisallowUnknownFields()
+	if !bytes.HasPrefix(bytes.TrimSpace(b), []byte("{")) || d.Decode(&t) != nil || d.More() {
+		return nil, fmt.Errorf("token file %s holds neither bronzewardctl's tokens nor an automation token; bronzewardctl leaves it as it is", p)
 	}
-	if json.Unmarshal(b, new(map[string]json.RawMessage)) == nil {
+	if t.AccessToken == "" {
 		return nil, fmt.Errorf("token file %s: %w", p, ErrNotTokenFile)
 	}
-	return nil, fmt.Errorf("token file %s holds neither bronzewardctl's tokens nor an automation token; bronzewardctl leaves it as it is", p)
+	return &t, nil
 }
 
-// ErrNotTokenFile is a token file of this client's, a JSON object, that holds no access token.
+// ErrNotTokenFile is the client's own token document without an access token.
 var ErrNotTokenFile = errors.New("not a bronzewardctl token file")
 
 // automation is the content of a file holding an automation token, as automationToken reads one.
