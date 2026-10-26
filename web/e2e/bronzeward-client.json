@@ -1,5 +1,5 @@
 {
-  "issuer": "http://localhost:58280",
+  "issuer": "http://127.0.0.1:58445",
   "audience": "bronzeward",
   "cliClientId": "synthetic-cli-client",
   "webClientId": "synthetic-web-client"
