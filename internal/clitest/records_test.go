@@ -11,11 +11,11 @@ import (
 )
 
 // TestRecordReads runs the record reads: the machine timeline and observations, source heads and
-// revisions, drafts, releases, plans, operations and acts. A draft, the machine timeline, acts,
-// the empty lists and every not-found come from the server. What the test server cannot create
-// (source heads and revisions, releases, plans, operations, a recorded observation, a draft with
-// published entries) is answered by the injector with bodies of the API's shapes: it has no
-// provider to publish with or machine to observe.
+// revisions, drafts, releases, plans, operations and acts. A draft, a machine's empty timeline,
+// acts, the empty lists and every not-found come from the server. What the test server cannot
+// create (source heads and revisions, releases, plans, operations, a recorded observation, an
+// adoption on the timeline, a draft with entries) is answered by the injector with bodies of the
+// API's shapes: it has no provider to digest an entry or publish with, or machine to observe.
 func TestRecordReads(t *testing.T) {
 	f := start(t, "viewer")
 	s := f.seed()
@@ -135,9 +135,10 @@ func TestRecordReads(t *testing.T) {
 	canned["/releases?cursor=c2"] = `{"items":[` + other + `]}`
 	canned["/plans"] = `{"items":[` + canned["/plans/pln_test"] + `]}`
 	canned["/operations"] = `{"items":[` + canned["/operations/op_test"] + `]}`
-	canned["/machines/"+m+"/timeline"] = `{"items":[{"revision":1,"at":"2026-10-22T10:00:00Z","epoch":"` + id.Epoch + `","kind":"adopted","entry":{"by":"ops-ben"}}]}`
+	canned["/machines/"+m+"/timeline"] = `{"items":[{"revision":1,"at":"2026-10-22T10:00:00Z","epoch":"` + id.Epoch + `","kind":"adoption",` +
+		`"entry":{"approval":"apr_a","comparisons":["4.1","4.2","4.3","4.4","4.5"],"controller":"ctl-b","observation":"obs_a","operation":"op_adopt","plan":"pln_adopt"}}]}`
 	canned["/drafts/drf_test"] = `{"id":"drf_test","cluster":"` + c + `","state":"open","revision":5,"title":"labels","entries":[` +
-		`{"kind":"import-base","machine":"` + m + `","revision":"asr_base"},` +
+		`{"kind":"import-base","machine":"` + m + `","revision":"ibr_base"},` +
 		`{"kind":"fragment","name":"labels","head":null,"base":null,"revision":"frv_new"},` +
 		`{"kind":"profile","name":"workers","head":"prf_w","base":2,"revision":null},` +
 		`{"kind":"assignment","machine":"` + m + `","head":"asg_a","base":3,"revision":"asr_new"}]}`
@@ -206,11 +207,12 @@ func TestRecordReads(t *testing.T) {
 		key  string
 		want string
 	}{
-		{[]string{"draft", "show", "drf_test"}, "import-base", "import-base " + m + " asr_base import base"},
+		{[]string{"draft", "show", "drf_test"}, "import-base", "import-base " + m + " ibr_base import base"},
 		{[]string{"draft", "show", "drf_test"}, "frv_new", "fragment labels frv_new new"},
 		{[]string{"draft", "show", "drf_test"}, "workers", "profile workers - removed"},
 		{[]string{"draft", "show", "drf_test"}, "asr_new", "assignment " + m + " asr_new changed (based on head revision 3)"},
-		{[]string{"machine", "timeline", m}, "adopted", `1 2026-10-22 10:00:00 UTC adopted {"by":"ops-ben"}`},
+		{[]string{"machine", "timeline", m}, "adoption", `1 2026-10-22 10:00:00 UTC adoption {"approval":"apr_a","comparisons":["4.1","4.2","4.3","4.4","4.5"],` +
+			`"controller":"ctl-b","observation":"obs_a","operation":"op_adopt","plan":"pln_adopt"}`},
 		{[]string{"plan", "list"}, "pln_test", "pln_test proposed " + m + " apply-config rel_test 2026-10-23 10:04:00 UTC"},
 		{[]string{"operation", "list"}, "op_test", "op_test apply-config unresolved plan pln_test, machine " + m + " 2026-10-22 10:06:00 UTC"},
 	} {
