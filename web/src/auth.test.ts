@@ -259,7 +259,11 @@ describe("§9.7 item 2 sign-out", () => {
     const f = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => (url === provider.tokenEndpoint ? new Promise<Response>((r) => (release = r)) : Promise.resolve(new Response(null, { status: 200 }))));
     const s = new Session(config, provider, tokens(), { fetch: f as unknown as typeof fetch });
     const renewal = s.renew();
-    const out = s.signOut(ORIGIN);
+    let settled = false;
+    const out = s.signOut(ORIGIN).then(() => (settled = true));
+    await new Promise((r) => setTimeout(r, 10));
+    // Still waiting for the renewal: the pair it brings is not yet revoked.
+    expect(settled).toBe(false);
     release(json({ access_token: "SYNTH-a2", refresh_token: "SYNTH-r2", expires_in: 300 }));
     await out;
     expect(await renewal).toBe(false);
