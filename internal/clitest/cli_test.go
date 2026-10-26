@@ -423,6 +423,7 @@ func TestSharedCases(t *testing.T) {
 		}
 	}
 	f.ctl(nil, "", "context", "add", "lab", "--server", f.base, "--automation-token-file", f.tokenFile)
+	f.inventory()
 	before := f.acts()
 	for _, id := range ids {
 		run := sharedCases[id]

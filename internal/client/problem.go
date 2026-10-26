@@ -40,6 +40,14 @@ func (p *Problem) Error() string {
 		if roles, ok := p.Doc["roles"].([]any); ok {
 			s += fmt.Sprintf("\nNeeds one of the roles %v.", roles)
 		}
+	case "recovery-mode-active":
+		// A scope refusal names the machine and its scope state; without a scope it is the
+		// process's own restriction (§8.2, §8.5 item 1).
+		if scope := p.str("scope"); scope != "" {
+			s += fmt.Sprintf("\nRecovery mode: the scope of machine %s is %s.", p.str("machine"), scope)
+		} else {
+			s += "\nRecovery mode: a process restriction of a server started for recovery, not of one scope."
+		}
 	}
 	return s
 }

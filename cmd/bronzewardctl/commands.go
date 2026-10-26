@@ -73,20 +73,44 @@ func (e *env) contextCmd(args []string) error {
 }
 
 // contextAdd records a context after its server answered GET /livez (client-contracts.md §5).
+// The identity provider's values are given by hand, or with --from read from the client
+// configuration file next to the web files, keeping the CLI's client ID (§5 item 4).
 func (e *env) contextAdd(args []string) error {
-	x := client.Context{Credential: "automation"}
-	var automationFile string
+	x := client.Context{}
+	var automationFile, from, scopes string
+	o := &client.OIDC{}
 	pos, err := e.parse("context add", args, 1, func(fs *flag.FlagSet) {
 		fs.StringVar(&x.Server, "server", "", "")
 		fs.StringVar(&x.CertificateAuthority, "certificate-authority", "", "")
+		fs.StringVar(&x.Credential, "credential", "", "")
 		fs.StringVar(&automationFile, "automation-token-file", "", "")
+		fs.StringVar(&from, "from", "", "")
+		fs.StringVar(&o.Issuer, "issuer", "", "")
+		fs.StringVar(&o.ClientID, "client-id", "", "")
+		fs.StringVar(&o.Audience, "audience", "", "")
+		fs.StringVar(&scopes, "scopes", "", "")
+		fs.StringVar(&o.CertificateAuthority, "oidc-certificate-authority", "", "")
+		fs.StringVar(&o.TokenFile, "oidc-token-file", "", "")
 	})
 	if err != nil {
 		return err
 	}
 	x.Name = pos[0]
-	// Both paths are kept absolute, so the context works from any directory.
-	for _, p := range []*string{&x.CertificateAuthority, &automationFile} {
+	if scopes != "" {
+		o.Scopes = strings.Split(scopes, ",")
+	}
+	byHand := o.Issuer != "" || o.ClientID != "" || o.Audience != ""
+	switch {
+	case from != "" && byHand:
+		return usageError{errors.New("give --from or the identity provider's values by hand, not both")}
+	case from != "" && x.Server == "":
+		x.Server = from
+	}
+	if x.Credential == "" {
+		x.Credential = map[bool]string{true: "oidc", false: "automation"}[from != "" || byHand]
+	}
+	// Every path is kept absolute, so the context works from any directory.
+	for _, p := range []*string{&x.CertificateAuthority, &automationFile, &o.CertificateAuthority, &o.TokenFile} {
 		if *p != "" {
 			if *p, err = filepath.Abs(*p); err != nil {
 				return err
@@ -95,6 +119,16 @@ func (e *env) contextAdd(args []string) error {
 	}
 	if automationFile != "" {
 		x.Automation = &client.Automation{TokenFile: automationFile}
+	}
+	if x.Credential == "oidc" {
+		x.OIDC = o
+	}
+	if from != "" {
+		cc, err := client.FetchClientConfig(&x, from, e.verboseOut())
+		if err != nil {
+			return fmt.Errorf("%s: %w", x.Where(), err)
+		}
+		o.Issuer, o.Audience, o.ClientID = cc.Issuer, cc.Audience, cc.CLIClientID
 	}
 	if err := x.Check(); err != nil {
 		return usageError{err}
@@ -120,7 +154,7 @@ func (e *env) contextAdd(args []string) error {
 	if x.CertificateAuthority != "" {
 		trust = "the bundle " + x.CertificateAuthority
 	}
-	_, err = fmt.Fprintf(e.out, "Context %q added: %s, TLS trust from %s. Current context: %s.\n", x.Name, x.Server, trust, current)
+	_, err = fmt.Fprintf(e.out, "Context %q added: %s, TLS trust from %s, credential %s. Current context: %s.\n", x.Name, x.Server, trust, x.Credential, current)
 	return err
 }
 

@@ -22,8 +22,16 @@ const usage = `usage: bronzewardctl [global flags] <command> [arguments]
 commands:
   context list | use <name> | remove <name>
   context add <name> --server <url> [--certificate-authority <file>] [--automation-token-file <path>]
+  context add <name> --server <url> --issuer <url> --client-id <id> [--audience <aud>] [--scopes a,b]
+              [--oidc-certificate-authority <file>] [--oidc-token-file <path>]
+  context add <name> --from <url> [--server <url>]
+              the issuer, audience and CLI client ID from <url>/bronzeward-client.json
   version     this client's version, the server's and its API revision
   whoami      the identity, roles and epoch the server sees
+  status      start mode, recovery mode, open drift and unresolved operations
+  cluster list | show <id>
+  machine list [--cluster <id>] | show <id>
+              list commands read one page: --limit <n>, --cursor <next>; --all reads every page
 
 global flags, before or after the command:
   --context <name>      else BRONZEWARD_CONTEXT, else the current context
@@ -76,7 +84,8 @@ func harden() error {
 
 func run(args []string, stdout, stderr io.Writer) int {
 	e := &env{output: "table", out: stdout, err: stderr}
-	commands := map[string]func([]string) error{"context": e.contextCmd, "version": e.versionCmd, "whoami": e.whoamiCmd}
+	commands := map[string]func([]string) error{"context": e.contextCmd, "version": e.versionCmd, "whoami": e.whoamiCmd,
+		"status": e.statusCmd, "cluster": e.clusterCmd, "machine": e.machineCmd}
 	pos, err := e.parse("bronzewardctl", args, -1, nil)
 	if err == nil && len(pos) == 0 {
 		err = usageError{errors.New("no command")}

@@ -21,7 +21,7 @@ type TokenInput struct {
 // context's automation.tokenFile and BRONZEWARD_TOKEN_FILE (a path) that is set.
 func automationToken(x *Context, in TokenInput) (string, error) {
 	if x.Credential != "automation" {
-		return "", fmt.Errorf("credential %q: this bronzewardctl offers automation contexts only", x.Credential)
+		return "", fmt.Errorf("credential %q: this bronzewardctl cannot sign in yet; use an automation context", x.Credential)
 	}
 	var b []byte
 	var err error
