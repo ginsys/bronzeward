@@ -23,6 +23,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -164,7 +165,9 @@ func (f *fixture) exec(env []string, stdin string, args ...string) result {
 	if err := cmd.Run(); errors.As(err, &exit) {
 		r.code = exit.ExitCode()
 	} else if err != nil {
-		f.t.Fatal(err)
+		// Errorf, not Fatal: commands also run from goroutines.
+		f.t.Errorf("bronzewardctl %v: %v", args, err)
+		r.code = -1
 	}
 	r.out, r.err = out.String(), errb.String()
 	return r
@@ -325,7 +328,18 @@ func rewrite(r *http.Response, old, new string) {
 func problem(w http.ResponseWriter, status int, code string, extra string) {
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(status)
-	fmt.Fprintf(w, `{"type":"urn:bronzeward:problem:%s","title":"Injected %s","status":%d,"instance":"req_injected"%s}`, code, code, status, extra)
+	fmt.Fprintf(w, `{"type":"urn:bronzeward:problem:%s","title":"Injected refusal","status":%d,"instance":"req_injected"%s}`, code, status, extra)
+}
+
+// refuse answers the read of path with a problem.
+func refuse(path string, status int, code, extra string) func(http.ResponseWriter, *http.Request) bool {
+	return func(w http.ResponseWriter, r *http.Request) bool {
+		if !on(path)(r) {
+			return false
+		}
+		problem(w, status, code, extra)
+		return true
+	}
 }
 
 func on(path string) func(*http.Request) bool {
@@ -346,8 +360,8 @@ var sharedCases = map[string]func(*testing.T, *fixture, *injector){
 			"--automation-token-file", f.tokenFile), 0, "the bundle "+in.ca)
 	},
 	"TLS-02": func(t *testing.T, f *fixture, in *injector) {
-		var hits int
-		target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits++ }))
+		var hits atomic.Int32
+		target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits.Add(1) }))
 		defer target.Close()
 		in.set(func(w http.ResponseWriter, r *http.Request) bool {
 			if !on("/identity")(r) {
@@ -357,8 +371,8 @@ var sharedCases = map[string]func(*testing.T, *fixture, *injector){
 			return true
 		}, nil)
 		f.want(f.ctl(nil, "", "--context", "trusted", "whoami"), 1, "307", target.URL+"/api/v1/identity", "follows no redirect")
-		if hits != 0 || strings.Count(strings.Join(in.requests(), "\n"), "/api/v1/identity") != 1 {
-			t.Errorf("target hits %d, injector saw %v: want none, and the identity read once", hits, in.requests())
+		if hits.Load() != 0 || strings.Count(strings.Join(in.requests(), "\n"), "/api/v1/identity") != 1 {
+			t.Errorf("target hits %d, injector saw %v: want none, and the identity read once", hits.Load(), in.requests())
 		}
 	},
 	"COMP-01": func(t *testing.T, f *fixture, in *injector) {

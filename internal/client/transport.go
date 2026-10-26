@@ -1,14 +1,17 @@
 package client
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -16,6 +19,13 @@ import (
 // bundle replacing the system store, no way to disable verification, no redirect followed. Go
 // reaches an https URL through a proxy only by a CONNECT tunnel and never proxies loopback.
 func httpClient(x *Context, verbose io.Writer) (*http.Client, error) {
+	return newHTTPClient(x, verbose, http.ProxyFromEnvironment, nil)
+}
+
+// newHTTPClient takes the proxy's source and the roots an https proxy is verified by (nil: the
+// system store). Go would verify an https proxy with the context's bundle, which is for the
+// Bronzeward server alone, so such a proxy is named to Go as a plain one and dialled with TLS here.
+func newHTTPClient(x *Context, verbose io.Writer, from func(*http.Request) (*url.URL, error), proxyRoots *x509.CertPool) (*http.Client, error) {
 	tc := &tls.Config{MinVersion: tls.VersionTLS12}
 	if x.CertificateAuthority != "" {
 		pem, err := os.ReadFile(x.CertificateAuthority)
@@ -27,15 +37,42 @@ func httpClient(x *Context, verbose io.Writer) (*http.Client, error) {
 			return nil, fmt.Errorf("certificateAuthority %s holds no PEM certificate", x.CertificateAuthority)
 		}
 	}
+	var tlsProxies sync.Map // the dial address of each https proxy, to its host name
 	proxy := func(r *http.Request) (*url.URL, error) {
-		u, err := http.ProxyFromEnvironment(r)
-		if u != nil && verbose != nil {
+		u, err := from(r)
+		if u == nil {
+			return nil, err
+		}
+		if verbose != nil {
 			fmt.Fprintf(verbose, "%s: through the proxy %s\n", r.URL.Host, u.Redacted())
+		}
+		if u.Scheme == "https" {
+			plain := *u
+			plain.Scheme = "http"
+			if plain.Port() == "" {
+				plain.Host = net.JoinHostPort(plain.Hostname(), "443")
+			}
+			tlsProxies.Store(plain.Host, plain.Hostname())
+			u = &plain
 		}
 		return u, err
 	}
+	var d net.Dialer
+	dial := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		conn, err := d.DialContext(ctx, network, addr)
+		name, ok := tlsProxies.Load(addr)
+		if err != nil || !ok {
+			return conn, err
+		}
+		pc := tls.Client(conn, &tls.Config{MinVersion: tls.VersionTLS12, ServerName: name.(string), RootCAs: proxyRoots})
+		if err := pc.HandshakeContext(ctx); err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("the proxy %s, verified by the system trust store: %v", addr, err)
+		}
+		return pc, nil
+	}
 	return &http.Client{
-		Transport: &http.Transport{Proxy: proxy, TLSClientConfig: tc, ForceAttemptHTTP2: true,
+		Transport: &http.Transport{Proxy: proxy, DialContext: dial, TLSClientConfig: tc, ForceAttemptHTTP2: true,
 			TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 30 * time.Second},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		Timeout:       time.Minute,

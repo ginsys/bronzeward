@@ -1025,7 +1025,7 @@ Routes are under `/api/v1` (`internal/api/routes.go:62-136`).
 | `identity revoke` | `POST /identity-revocations` | recovery-admin | yes | no |
 | `login`, `logout`, `context` | none: client and identity provider (#253) | — | — | — |
 | `whoami`, `status` (roles) | `GET /identity` | any authenticated credential, none needed | no | no |
-| `status` (start mode, server settings), context use (version check) | `GET /server` | any | no | no |
+| `status` (start mode, server settings), the version check of a command's first request in a context (not the `context use` command) | `GET /server` | any | no | no |
 
 Every mutating route requires an `Idempotency-Key`
 ([persistence and API §7](persistence-api.md#7-idempotency)). Plan creation and approval, and

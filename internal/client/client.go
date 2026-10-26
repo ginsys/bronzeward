@@ -82,16 +82,11 @@ func Live(x *Context, verbose io.Writer) error {
 
 // Server reads GET /server on context use and after a new epoch (§7 item 3, §8.5), keeps the
 // start mode it shows and then shows the recovery banner. It refuses a server below MinRevision,
-// returning what it served with the refusal. A 409 recovery-mode-active without a scope member
-// is a recovery start before its entry: the start mode is kept and the refusal returned.
+// returning what it served with the refusal.
 func (c *Client) Server() (*Response, *apitypes.ServerBody, error) {
 	defer c.banner()
 	r, err := c.retry("/server")
 	c.newEpoch = false
-	var p *Problem
-	if errors.As(err, &p) && p.Code() == "recovery-mode-active" && p.Doc["scope"] == nil {
-		c.setStartMode("recovery")
-	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -162,7 +157,9 @@ func (c *Client) once(path string) (*Response, bool, error) {
 	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		return nil, true, c.Context.fail(fmt.Errorf("%s: reading the answer: %w", route, err))
+		// A cut-off 4xx is still the refusal its status names, so it is not repeated.
+		return nil, r.StatusCode < 400 || r.StatusCode >= 500,
+			c.Context.fail(fmt.Errorf("%s answered %s, and reading the answer failed: %w", route, r.Status, err))
 	}
 	if r.StatusCode >= 200 && r.StatusCode < 300 {
 		if r.Header.Get("Bronzeward-Epoch") == "" {
@@ -175,6 +172,11 @@ func (c *Client) once(path string) (*Response, bool, error) {
 	if mt == "application/problem+json" && json.Unmarshal(body, &doc) == nil {
 		if t, _ := doc["type"].(string); strings.HasPrefix(t, problemPrefix) {
 			p := &Problem{Status: r.StatusCode, Doc: doc, Route: route, Where: c.Context.Where()}
+			// Any answer 409 recovery-mode-active without a scope member is a recovery start
+			// before its entry (§8.5 item 1).
+			if p.Code() == "recovery-mode-active" && p.Doc["scope"] == nil {
+				c.setStartMode("recovery")
+			}
 			retry := r.StatusCode == http.StatusServiceUnavailable &&
 				slices.Contains([]string{"dependency-unavailable", "talos-access-unavailable", "transient-conflict"}, p.Code())
 			return nil, retry, p
@@ -212,13 +214,14 @@ func (c *Client) banner() {
 }
 
 // Save keeps the epoch and start mode in the contexts file, leaving its other fields as they
-// are now.
+// are now. A context removed and added again under the same name for another server while the
+// command ran keeps its own: what was read belongs to the old server.
 func (c *Client) Save() error {
 	if !c.changed {
 		return nil
 	}
 	err := UpdateConfig(func(cfg *Config) error {
-		if x := cfg.Find(c.Context.Name); x != nil {
+		if x := cfg.Find(c.Context.Name); x != nil && x.Server == c.Context.Server {
 			x.LastEpoch, x.StartMode = c.Context.LastEpoch, c.Context.StartMode
 		}
 		return nil
