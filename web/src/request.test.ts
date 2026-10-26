@@ -454,6 +454,15 @@ describe("stale-response discard", () => {
     expect(onRevoked).not.toHaveBeenCalled();
   });
 
+  test("a non-Bronzeward 5xx body cut off by the network is a transport failure, not retried", async () => {
+    const cut = new Response(new ReadableStream({ pull: (ctl) => ctl.error(new TypeError("network error")) }), {
+      status: 502, headers: { "Content-Type": "text/html" },
+    });
+    const { c, fetchMock } = client([cut]);
+    expect(await c.read("/server")).toEqual({ kind: "transport" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   test("a view change during a 503 backoff stops the retries", async () => {
     let c!: Client;
     const fetchMock = vi.fn(async () => problem(503, "dependency-unavailable"));

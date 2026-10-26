@@ -197,7 +197,11 @@ export async function readJson(res: Response): Promise<unknown> {
 
 // A Bronzeward problem document, null for any other answer (§8.2's last row), NOT_JSON or CUT.
 async function readProblem(res: Response): Promise<Problem | null | typeof NOT_JSON | typeof CUT> {
-  if (res.ok || !(res.headers.get("Content-Type") ?? "").startsWith("application/problem+json")) return null;
+  if (res.ok) return null;
+  // Any other answer's body is read too, so one cut off by the network is still a transport failure.
+  if (!(res.headers.get("Content-Type") ?? "").startsWith("application/problem+json")) {
+    return res.arrayBuffer().then(() => null, () => CUT);
+  }
   const body = await readJson(res);
   if (body === CUT || body === NOT_JSON) return body;
   const type = typeof body === "object" && body !== null && "type" in body ? body.type : undefined;
