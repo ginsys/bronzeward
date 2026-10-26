@@ -474,4 +474,49 @@ describe("stale-response discard", () => {
     expect(await c.read("/machines")).toEqual({ kind: "discarded" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  // Regression guards from #331's review: renewal sits next to each of these branches.
+  test.each(["malformed", "cut"])("a %s problem body that arrives after the view changed is discarded", async (how) => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const stream = new ReadableStream<Uint8Array>({
+      async pull(ctl) {
+        await gate;
+        if (how === "cut") return ctl.error(new TypeError("network error"));
+        ctl.enqueue(new TextEncoder().encode("{"));
+        ctl.close();
+      },
+    });
+    const response = new Response(stream, { status: 403, headers: { "Content-Type": "application/problem+json", "Bronzeward-Epoch": EPOCH } });
+    const c = new Client({ fetch: (async () => response) as unknown as typeof fetch });
+    c.setView(base);
+    const pending = c.read("/machines");
+    await new Promise((r) => setTimeout(r, 0));
+    c.setView({ ...base, route: "/plans" });
+    release();
+    expect(await pending).toEqual({ kind: "discarded" });
+  });
+});
+
+describe("refusals renewal never touches", () => {
+  test.each([
+    ["no body", () => new Response(null, { status: 401, headers: { "Bronzeward-Epoch": EPOCH } })],
+    ["a non-Bronzeward problem", () => new Response(JSON.stringify({ type: "about:blank", title: "x", status: 401 }), {
+      status: 401, headers: { "Content-Type": "application/problem+json", "Bronzeward-Epoch": EPOCH },
+    })],
+  ])("a 401 with %s is a refusal and is not renewed", async (_what, answer) => {
+    const renew = vi.fn(async () => true);
+    const { c, fetchMock } = client([answer()], { renew });
+    expect(await c.read("/server")).toEqual({ kind: "refused", status: 401, problem: null });
+    expect(renew).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("five 5xx answers with an unparseable problem body are read five times with backoff, then unavailable", async () => {
+    const bad = () => new Response("{", { status: 503, headers: { "Content-Type": "application/problem+json", "Bronzeward-Epoch": EPOCH } });
+    const { c, fetchMock, sleeps } = client([bad(), bad(), bad(), bad(), bad()]);
+    expect(await c.read("/server")).toEqual({ kind: "unavailable", status: 503, problem: null });
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(sleeps).toEqual([1000, 2000, 4000, 8000]);
+  });
 });
