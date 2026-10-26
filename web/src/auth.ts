@@ -154,12 +154,16 @@ export interface SessionOptions {
   now?: () => number;
   // §9.5 item 2: a renewal answered for another subject or issuer is a new sign-in.
   onPrincipalChange?: (before: Principal, after: Principal) => void;
+  // B1: told before a refresh token is sent, and given the pair it brings, before the item 2 check.
+  onRenewing?: (expiresAt: number) => void;
+  onRenewed?: (tokens: Tokens) => void;
 }
 
 // One signed-in principal's tokens; nothing outside reads them but the access token itself.
 export class Session {
   #tokens: Tokens | undefined;
   #renewing: Promise<boolean> | undefined;
+  #spent = false;
 
   constructor(
     private readonly config: ClientConfig,
@@ -182,6 +186,26 @@ export class Session {
     return this.#tokens?.access;
   }
 
+  // B1: the pair to post to another tab, unless its refresh token may already be spent.
+  pair(): Tokens | undefined {
+    return this.#tokens === undefined || this.#spent ? undefined : { ...this.#tokens };
+  }
+
+  // B1: another tab's newer pair for the same principal replaces this one; false if not taken.
+  adopt(tokens: Tokens): boolean {
+    const t = this.#tokens;
+    if (t === undefined || tokens.iss !== t.iss || tokens.sub !== t.sub || tokens.expiresAt <= t.expiresAt) return false;
+    this.#tokens = { ...tokens };
+    this.#spent = false;
+    return true;
+  }
+
+  // B1: another tab may have sent the refresh token with no answer, so it is never sent from here.
+  spend(): void {
+    if (this.#tokens !== undefined) this.#tokens.refresh = undefined;
+    this.#spent = true;
+  }
+
   // §9.5: one renewal at a time. A refresh token is sent at most once: after any failure, its
   // rotation may already have happened, so it is dropped and the current token used until refused
   // (item 3). False also when there is none to send: the session then ends at expiry.
@@ -195,10 +219,11 @@ export class Session {
     const refresh = current?.refresh;
     if (current === undefined || refresh === undefined) return false;
     current.refresh = undefined;
+    this.opts.onRenewing?.(current.expiresAt);
     const answer = await tokenRequest(this.provider, { grant_type: "refresh_token", refresh_token: refresh, client_id: this.config.webClientId }, this.opts.fetch);
     if (answer.kind !== "ok") return false;
-    // Signed out or cleared meanwhile: the new pair is not kept, and its refresh token, which
-    // nothing else holds, is revoked so that it does not outlive the sign-out.
+    // Signed out, cleared or replaced meanwhile: the new pair is not kept, and its refresh token,
+    // which nothing else holds, is revoked so that it does not outlive the sign-out.
     if (this.#tokens !== current) {
       await this.#revoke(answer.body.refresh_token);
       return false;
@@ -218,6 +243,7 @@ export class Session {
     // this session renews no further and ends at expiry. The renewal by the sign-in redirect is
     // the follow-up's, with the multi-tab renewer.
     if (this.#tokens.refresh === refresh) this.#tokens.refresh = undefined;
+    this.opts.onRenewed?.({ ...this.#tokens });
     if (after.iss !== before.iss || after.sub !== before.sub) this.opts.onPrincipalChange?.(before, after);
     return true;
   }

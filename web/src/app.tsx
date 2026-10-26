@@ -3,8 +3,9 @@
 
 import { type ReactNode, useEffect, useState } from "react";
 import { flushSync } from "react-dom";
-import { beginSignIn, CALLBACK_PATH, completeSignIn, discover, type Failure, localReading, PENDING_KEY, type Provider, renewDelay, Session, SIGNED_OUT_PATH } from "./auth.ts";
+import { beginSignIn, CALLBACK_PATH, completeSignIn, discover, type Failure, localReading, PENDING_KEY, type Provider, renewDelay, Session, SIGNED_OUT_PATH, type Tokens } from "./auth.ts";
 import { type ClientConfig, loadClientConfig } from "./config.ts";
+import { type Message, Renewer } from "./renewer.ts";
 import { Client, type ReadResult, TRANSPORT_FAILURE } from "./request.ts";
 import type { components } from "./api/v1";
 
@@ -37,12 +38,22 @@ export function App() {
 
   useEffect(() => {
     let session: Session | undefined;
-    let stopRenewals: (() => void) | undefined;
+    let renewing: ReturnType<typeof renewals> | undefined;
     // Set when this page signs out, is hidden or unmounts: a sign-in still awaiting stops there.
     let ended = false;
     const channel = new BroadcastChannel(CHANNEL);
+    // §9.5 item 2, set once signed in.
+    let changed: (() => void) | undefined;
+    // B1: another tab's pair is a new sign-in for another principal, else taken when newer.
+    const renewer = new Renewer(channel, navigator.locks, () => session, (t) => {
+      const p = session?.principal;
+      if (p === undefined) return;
+      if (p.iss !== t.iss || p.sub !== t.sub) return changed?.();
+      if (session?.adopt(t) === true) renewing?.schedule();
+    });
     const forget = () => {
-      stopRenewals?.();
+      renewing?.stop();
+      renewer.release();
       session?.clear();
       session = undefined;
     };
@@ -62,7 +73,9 @@ export function App() {
     addEventListener("pageshow", onShow);
     // §9.7 item 2: another tab signed out.
     channel.onmessage = (e: MessageEvent) => {
-      if ((e.data as { type?: unknown } | null)?.type !== "signed-out") return;
+      const m = e.data as Message | null;
+      if (typeof m !== "object" || m === null) return;
+      if (m.type !== "signed-out") return renewer.onMessage(m);
       end();
       // Nothing read before stays on screen, even if the navigation stalls or is cancelled.
       flushSync(() => setView({ kind: "signing-out" }));
@@ -73,10 +86,18 @@ export function App() {
       location.assign(await beginSignIn(config, provider, location.pathname + location.search + location.hash, sessionStorage, location.origin));
     };
 
-    const signedIn = async (config: ClientConfig, provider: Provider, s: Session) => {
+    const signedIn = async (config: ClientConfig, provider: Provider, tokens: Tokens) => {
+      // §9.5 item 2: a renewal for another account is a new sign-in, and is shown, not adopted.
+      changed = () => {
+        forget();
+        setView({ kind: "sign-in", message: PRINCIPAL_CHANGED, config, provider });
+      };
+      const s = new Session(config, provider, tokens, { onPrincipalChange: () => changed?.(), ...renewer.hooks });
       session = s;
-      const timer = renewals(() => session);
-      stopRenewals = timer.stop;
+      renewer.hold();
+      // B1: the renewal goes through the lock holder.
+      const timer = renewals(() => session && { expiresAt: session.expiresAt, renew: () => renewer.renew() });
+      renewing = timer;
       timer.schedule();
       const client = new Client({
         token: () => session?.token(),
@@ -84,6 +105,7 @@ export function App() {
         // The tokens go, but the session stays this read's, so the refusal below is still shown.
         onRevoked: () => {
           timer.stop();
+          renewer.release();
           s.clear();
         },
       });
@@ -130,17 +152,19 @@ export function App() {
       const found = await discover(config.config.issuer);
       if (ended) return abandon();
       if (found.kind !== "ok") return fail(failure(found));
-      if (callback === undefined) return signIn(config.config, found.provider);
+      if (callback === undefined) {
+        // B1: an open tab's pair, else the redirect.
+        const tokens = await renewer.join();
+        if (ended) return;
+        if (tokens === undefined) return signIn(config.config, found.provider);
+        return signedIn(config.config, found.provider, tokens);
+      }
       const done = await completeSignIn(config.config, found.provider, callback, { storage: sessionStorage, origin: location.origin });
       if (ended) return;
       if (done.kind !== "ok") return setView({ kind: "sign-in", message: failure(done), config: config.config, provider: found.provider });
       history.replaceState(null, "", done.returnTo);
-      // §9.5 item 2: a renewal for another account is a new sign-in, and is shown, not adopted.
-      const onPrincipalChange = () => {
-        forget();
-        setView({ kind: "sign-in", message: PRINCIPAL_CHANGED, config: config.config, provider: found.provider });
-      };
-      await signedIn(config.config, found.provider, new Session(config.config, found.provider, done.tokens, { onPrincipalChange }));
+      renewer.post(done.tokens);
+      await signedIn(config.config, found.provider, done.tokens);
     })();
 
     return () => {
