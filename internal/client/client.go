@@ -90,9 +90,9 @@ func Live(x *Context, verbose io.Writer) error {
 	r.Body.Close()
 	if r.StatusCode != http.StatusNoContent {
 		if l := r.Header.Get("Location"); l != "" {
-			return x.fail(fmt.Errorf("GET /livez answered %s redirecting to %q, which bronzewardctl does not follow", r.Status, l))
+			return x.fail(fmt.Errorf("GET /livez answered %s redirecting to %q, which bronzewardctl does not follow", printable(r.Status), l))
 		}
-		return x.fail(fmt.Errorf("GET /livez answered %s, not 204: this is not a Bronzeward server, or not its base URL", r.Status))
+		return x.fail(fmt.Errorf("GET /livez answered %s, not 204: this is not a Bronzeward server, or not its base URL", printable(r.Status)))
 	}
 	return nil
 }
@@ -184,13 +184,13 @@ func (c *Client) once(path string) (*Response, bool, error) {
 	c.observe(route, r)
 	if r.StatusCode >= 300 && r.StatusCode < 400 {
 		return nil, false, c.Context.fail(fmt.Errorf("%s answered %s redirecting to %q; bronzewardctl follows no redirect, and nothing was resent",
-			route, r.Status, r.Header.Get("Location")))
+			route, printable(r.Status), r.Header.Get("Location")))
 	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		// A cut-off 4xx is still the refusal its status names, so it is not repeated.
 		return nil, r.StatusCode < 400 || r.StatusCode >= 500,
-			c.Context.fail(fmt.Errorf("%s answered %s, and reading the answer failed: %w", route, r.Status, err))
+			c.Context.fail(fmt.Errorf("%s answered %s, and reading the answer failed: %w", route, printable(r.Status), printableError(err)))
 	}
 	if r.StatusCode >= 200 && r.StatusCode < 300 {
 		if r.Header.Get("Bronzeward-Epoch") == "" {
@@ -214,7 +214,7 @@ func (c *Client) once(path string) (*Response, bool, error) {
 			return nil, retry, p
 		}
 	}
-	return nil, r.StatusCode >= 500, c.Context.fail(fmt.Errorf("%s answered %s, not a Bronzeward problem", route, r.Status))
+	return nil, r.StatusCode >= 500, c.Context.fail(fmt.Errorf("%s answered %s, not a Bronzeward problem", route, printable(r.Status)))
 }
 
 // observe applies the response headers every answer may carry: the epoch (§8.5), the recovery

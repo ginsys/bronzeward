@@ -309,8 +309,9 @@ it. It holds no secret.
    the trust source used, and sends nothing. What a TLS or transport error shows that the remote
    side chose, such as a certificate's DNS names, which may hold any ASCII, is shown with each
    control character and each byte that is not UTF-8 escaped (`\x1b`), so it cannot write to the
-   terminal. This holds toward the server and toward the identity provider, in discovery and in
-   renewal (`internal/client/printable.go`).
+   terminal. This holds toward the server and toward the identity provider, in discovery, renewal
+   and revocation, and for the server's own text in an error: the reason phrase of every status
+   shown and each member of a problem document (`internal/client/printable.go`).
 5. Certificate pinning is not offered: a bundle per context limits trust enough for this
    milestone, and pinning a leaf breaks on every renewal.
 6. The browser uses the browser's own trust and has no override.

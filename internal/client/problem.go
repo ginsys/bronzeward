@@ -26,8 +26,9 @@ func (p *Problem) Code() string {
 
 // Error shows title, code, detail when present and instance, never a request body
 // (client-contracts.md §8.2, journeys §8), and what the operator can do for the codes a read meets.
+// Each value the server or a token chose is printable (§6 item 4).
 func (p *Problem) Error() string {
-	s := fmt.Sprintf("%s: %s answered %d %s (%s)", p.Where, p.Route, p.Status, p.str("title"), p.Code())
+	s := fmt.Sprintf("%s: %s answered %d %s (%s)", p.Where, p.Route, p.Status, p.str("title"), printable(p.Code()))
 	if d := p.str("detail"); d != "" {
 		s += ": " + d
 	}
@@ -35,14 +36,14 @@ func (p *Problem) Error() string {
 	switch p.Code() {
 	case "unauthenticated":
 		if p.Reading != "" {
-			s += "\n" + p.Reading
+			s += "\n" + printable(p.Reading)
 		} else {
 			s += "\nThe automation token was not accepted: it may be revoked, rotated, expired or from before a restore. The operator reissues it with the server-side command."
 		}
 	case "identity-revoked":
 		s += "\nYour access was revoked or is denied by this installation; contact a recovery administrator."
 		if p.Cleared != "" {
-			s += " " + p.Cleared
+			s += " " + printable(p.Cleared)
 		} else if p.Subject == "" {
 			s += " The automation token file is left as it is."
 		}
@@ -52,10 +53,10 @@ func (p *Problem) Error() string {
 		}
 		// A plan member makes the detail the reason, not the roles (§9.6).
 		if roles, ok := p.Doc["roles"].([]any); ok && p.Doc["plan"] == nil {
-			s += fmt.Sprintf("\nNeeds one of the roles %v.", roles)
+			s += "\nNeeds one of the roles " + printable(fmt.Sprint(roles)) + "."
 		}
 		if p.Subject != "" {
-			s += " You are signed in as " + p.Subject + "."
+			s += " You are signed in as " + printable(p.Subject) + "."
 		}
 	case "recovery-mode-active":
 		// A scope refusal names the machine and its scope state; without a scope it is the
@@ -69,7 +70,7 @@ func (p *Problem) Error() string {
 	return s
 }
 
-func (p *Problem) str(k string) string { s, _ := p.Doc[k].(string); return s }
+func (p *Problem) str(k string) string { s, _ := p.Doc[k].(string); return printable(s) }
 
 // Host is the server's host and port, as a trust failure names it.
 func (x *Context) Host() string {
