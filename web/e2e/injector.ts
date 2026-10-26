@@ -26,6 +26,9 @@ export interface Faults {
   // A 409 recovery-mode-active problem without a scope member for these paths, instead of the
   // server's answer: a process restarted for recovery under the same epoch, its entry not yet made.
   processRefused?: string[];
+  // W3: the body of a successful answer to each path, with the server's status and headers: the
+  // synthetic machine and observation reads a deployment without a Talos node cannot produce.
+  bodies?: Record<string, unknown>;
 }
 
 export interface Injector {
@@ -88,6 +91,7 @@ export function startInjector(upstream: string, port: number): Promise<Injector>
       if (route === "/server" && f.revision !== undefined && up.ok) {
         out = Buffer.from(JSON.stringify({ ...JSON.parse(out.toString()), apiRevision: f.revision }));
       }
+      if (up.ok && f.bodies?.[route] !== undefined) out = Buffer.from(JSON.stringify(f.bodies[route]));
       if (f.deprecate === route) back["deprecation"] = "@1767225600";
       inj.answered.push(`${route}${search} ${up.status}`);
       res.writeHead(up.status, back).end(out);
