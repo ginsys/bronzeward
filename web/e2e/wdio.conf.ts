@@ -55,7 +55,10 @@ export const config: WebdriverIO.Config = {
       res.writeHead(200, { "Cache-Control": "no-store", "Access-Control-Allow-Origin": PAGE_ORIGIN }).end(canary);
     });
     await new Promise<void>((resolve) => target!.listen(58444, "127.0.0.1", resolve));
-    provider = await startProvider(PAGE_ORIGIN, "synthetic-web-client", canary);
+    // Every token carries the run's canary, so the artifact scan finds any token an artifact keeps.
+    ({ server: provider } = await startProvider({
+      issuer: FAKE_ISSUER, pageOrigin: PAGE_ORIGIN, clientId: "synthetic-web-client", next: () => ({ access: `${canary}-access`, sub: "h-synthetic" }),
+    }));
     // A host left from an earlier run would answer the readiness check below with an old build.
     const hostUrl = `${PAGE_ORIGIN.replace("localhost", "127.0.0.1")}/`;
     if (await fetch(hostUrl).then(() => true, () => false)) throw new SevereServiceError("something already answers on the static host's port");
