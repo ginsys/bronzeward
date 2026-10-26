@@ -1,4 +1,4 @@
-// The machines (wireframe W2) and the clusters, their lists and items. The server filters machines
+// The machine list (wireframe W2) and the clusters' list and items. The server filters machines
 // by cluster; the browser filters them by state over all pages (G9). Machines have no name, so
 // they show endpoint and node ID (G8).
 
@@ -53,9 +53,9 @@ export function observed(m: Machine, now: number): string {
 }
 
 // G8: the node ID when the machine was recorded by it, else its SMBIOS UUID.
-const node = (m: Machine) => (m.hardware.talosNodeId != null ? `node ${m.hardware.talosNodeId}` : `UUID ${m.hardware.smbiosUuid ?? "unknown"}`);
+export const node = (m: Machine) => (m.hardware.talosNodeId != null ? `node ${m.hardware.talosNodeId}` : `UUID ${m.hardware.smbiosUuid ?? "unknown"}`);
 // A release's link comes with its view (#334's third part).
-const release = (id: string | null) => (id === null ? "none" : <span title={id}>{short(id)}</span>);
+export const release = (id: string | null) => (id === null ? "none" : <span title={id}>{short(id)}</span>);
 
 function Filter({ label, value, options, onChange }: { label: string; value: string; options: readonly (readonly [string, string])[]; onChange: (v: string) => void }) {
   return (
@@ -69,7 +69,7 @@ function Filter({ label, value, options, onChange }: { label: string; value: str
   );
 }
 
-const Head = ({ cols }: { cols: string[] }) => <thead><tr>{cols.map((c) => <th key={c} scope="col">{c}</th>)}</tr></thead>;
+export const Head = ({ cols }: { cols: string[] }) => <thead><tr>{cols.map((c) => <th key={c} scope="col">{c}</th>)}</tr></thead>;
 
 export function Machines({ query, go }: { query: string; go: (to: string) => void }) {
   const q = new URLSearchParams(query);
@@ -123,20 +123,6 @@ export function Machines({ query, go }: { query: string; go: (to: string) => voi
       <Filter label="State:" value={state?.[0] ?? ""} options={STATES} onChange={(v) => filter("state", v)} />
       {body}
       <p>Health is not checked.</p>
-    </>
-  );
-}
-
-// The identity half of W3; its state comes with the detail view (#334's second part).
-export function MachineItem({ id }: { id: string }) {
-  const m = useItem<Machine>(`/machines/${encodeURIComponent(id)}`);
-  const pending = usePending(m, "the machine");
-  if (m.kind !== "ok") return <><h2>Machine {short(id)}</h2>{pending}</>;
-  const d = m.data;
-  return (
-    <>
-      <h2>Machine {d.id}</h2>
-      <p>Cluster <Ref to={`/clusters/${d.cluster}`} id={d.cluster} />, {d.talosEndpoint}, {node(d)}, {d.platform}.</p>
     </>
   );
 }

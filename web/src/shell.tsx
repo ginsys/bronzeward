@@ -5,7 +5,8 @@
 
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useId, useReducer, useRef, useState } from "react";
 import { type Load, ReadsProvider } from "./list.tsx";
-import { ClusterItem, Clusters, MachineItem, Machines } from "./machines.tsx";
+import { MachineItem } from "./machine.tsx";
+import { ClusterItem, Clusters, Machines } from "./machines.tsx";
 import { PreEntry, type Recovery, RecoveryBanner, RecoveryRead, type StartMode, startModeOf, startRefusal } from "./recovery.tsx";
 import { Client, type ClientOptions, EPOCH_CHANGED, type ReadResult } from "./request.ts";
 import { follow, PAGES, usePath } from "./router.ts";

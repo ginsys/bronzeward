@@ -1,0 +1,156 @@
+import { describe, expect, test, vi } from "vitest";
+import { ADOPTED, details, EITHER, type Entry, FROZEN, HEALTH, latestUnread, type Observation, POLL_MS, polled, readTail, sentences, type Tail } from "./machine.tsx";
+import type { Machine } from "./machines.tsx";
+import type { ReadResult } from "./request.ts";
+import { clock } from "./states.tsx";
+
+// Synthetic machine and observation reads, as the generated types describe them.
+const machine = (over: Partial<Machine>): Machine => ({
+  id: "mch_a", cluster: "cl_a", hardware: { smbiosUuid: null, talosNodeId: "node-a", serial: null }, platform: "metal", talosEndpoint: "10.5.0.2:50000",
+  desired: "rel_new", applied: { release: "rel_new", source: "operation" }, pendingConvergence: false,
+  observed: { observation: "obs_a", at: "2026-10-26T09:46:00Z", release: "rel_new" }, frozen: false, scopeState: "normal", openDrift: null, ...over,
+});
+const observation = (id: string, basis: number, at: string, unread: Observation["unread"] = {}): Observation => ({
+  id, machine: "mch_a", basis, revision: basis + 1, purpose: "scheduled", publicationGeneration: null, plan: null, operation: null,
+  endpoint: "10.5.0.2:50000", controller: "ctl_a", startedAt: at, at, access: null, smbiosUuid: null, talosNodeId: "node-a",
+  talosClusterId: null, assignmentEvidence: null, runningVersion: null, resourceVersion: null, health: null, unread,
+});
+const T = (at: string) => clock(new Date(at));
+const READ = "2026-10-26T09:46:00Z";
+const obsA = observation("obs_a", 4, READ);
+const drift = { revision: 3, observation: "obs_k", lastObservation: "obs_a", lateLanding: null };
+const opened = observation("obs_k", 2, "2026-10-26T09:41:00Z");
+
+describe("journeys §2.4 status sentences, field by field", () => {
+  test("observed = applied, by an operation", () => {
+    expect(sentences(machine({}), [obsA])).toEqual([`The configuration read at ${T(READ)} is attributed to rel_new, which is the Applied release (by operation).`, HEALTH]);
+  });
+
+  test("applied by adoption, with desired = applied.release and without", () => {
+    const adopted = { release: "rel_new", source: "adoption" };
+    expect(sentences(machine({ applied: adopted }), [obsA])).toEqual([expect.stringContaining("(by adoption)"), ADOPTED, EITHER, HEALTH]);
+    expect(sentences(machine({ applied: adopted, desired: "rel_next" }), [obsA])).toEqual([
+      expect.stringContaining("(by adoption)"), ADOPTED, "The selected release rel_next carries this machine's applied configuration unchanged.", HEALTH,
+    ]);
+  });
+
+  test("pendingConvergence, applied not null and applied null", () => {
+    expect(sentences(machine({ desired: "rel_next", pendingConvergence: true }), [obsA])).toContain(
+      "Pending convergence: the configuration of the selected release rel_next for this machine differs from what Bronzeward applied.");
+    expect(sentences(machine({ applied: null, pendingConvergence: true, observed: null }), [])).toEqual([
+      "No configuration read recorded.", "Not applied or adopted by Bronzeward.", "Pending convergence: the selected release rel_new has not been applied to this machine.", HEALTH,
+    ]);
+  });
+
+  test("openDrift is the only authority for drift, even when the read equals the selected release", () => {
+    const m = machine({ desired: "rel_next", openDrift: drift, pendingConvergence: true, observed: { observation: "obs_a", at: READ, release: "rel_next" } });
+    expect(sentences(m, [obsA, opened])).toEqual([
+      `Drifted since ${T(opened.at)}: a read differed from what Bronzeward last verified (rel_new).`, "It equals the selected release; that does not close the drift.", HEALTH,
+    ]);
+    // observed = applied does not hide an open drift record.
+    expect(sentences(machine({ openDrift: drift }), [obsA, opened])[0]).toMatch(/^Drifted since/);
+  });
+
+  test("no open drift and a read matching neither", () => {
+    expect(sentences(machine({ observed: { observation: "obs_a", at: READ, release: null } }), [obsA])[0]).toBe(
+      `The configuration read at ${T(READ)} matched neither Applied nor Desired, and no drift is open; an operation may hold the machine. See the timeline.`);
+  });
+
+  test("no open drift and a read equal to the selected release, not the Applied one: an operation holds the machine", () => {
+    const m = machine({ desired: "rel_next", pendingConvergence: true, observed: { observation: "obs_a", at: READ, release: "rel_next" } });
+    expect(sentences(m, [obsA])[0]).toBe(`The configuration read at ${T(READ)} is attributed to the selected release rel_next.`);
+  });
+
+  test("a later read that could not read, named by its causes; an earlier one or a complete one is not", () => {
+    const late = observation("obs_p", 5, "2026-10-26T09:51:00Z", { configDigest: { code: "unreachable", cause: "node unreachable" } });
+    expect(sentences(machine({}), [obsA, late])).toContain(`The latest read at ${T(late.at)} could not read: node unreachable.`);
+    const early = observation("obs_e", 3, "2026-10-26T09:40:00Z", { configDigest: { cause: "node unreachable" } });
+    expect(latestUnread(machine({}), [obsA, early])).toBeUndefined();
+    expect(latestUnread(machine({}), [obsA, observation("obs_q", 6, READ)])).toBeUndefined();
+  });
+
+  test("nothing applied, selected or read, and frozen: no time shown", () => {
+    const s = sentences(machine({ applied: null, desired: null, observed: null, frozen: true }), []);
+    expect(s).toEqual(["No configuration read recorded.", "Not applied or adopted by Bronzeward.", "No release selected.", FROZEN, HEALTH]);
+    expect(s.join(" ")).not.toMatch(/\d\d:\d\d/);
+  });
+
+  test("never healthy: every combination ends with Health: not checked", () => {
+    for (const m of [machine({}), machine({ openDrift: drift }), machine({ applied: null, observed: null })]) {
+      const s = sentences(m, [obsA, opened]);
+      expect(s.at(-1)).toBe(HEALTH);
+      expect(s.join(" ")).not.toMatch(/healthy|converged|fresh/i);
+    }
+  });
+});
+
+// A client over a list of answers, recording each path read.
+function client(answers: ReadResult<unknown>[]) {
+  const paths: string[] = [];
+  return { paths, read: <T,>(path: string) => (paths.push(path), Promise.resolve(answers.shift() as ReadResult<T>)) };
+}
+const page = (items: number[], next?: string): ReadResult<unknown> => ({ kind: "ok", data: next === undefined ? { items } : { items, next } });
+const restart: ReadResult<unknown> = { kind: "restart", problem: { type: "urn:bronzeward:problem:cursor-invalid", title: "Cursor invalid", status: 400 } };
+const empty: Tail<number> = { items: [], start: 0, cursor: undefined };
+
+describe("the timeline poll (client contracts §8.6 item 6)", () => {
+  test("read to its end, then the last page read again with the cursor that read it", async () => {
+    const c = client([page([1, 2], "c1"), page([3]), page([3, 4])]);
+    const first = await readTail(c, "/t", empty);
+    expect(first).toEqual({ kind: "ok", data: { items: [1, 2, 3], start: 2, cursor: "c1" } });
+    expect(await readTail(c, "/t", (first as { data: Tail<number> }).data)).toEqual({ kind: "ok", data: { items: [1, 2, 3, 4], start: 2, cursor: "c1" } });
+    expect(c.paths).toEqual(["/t", "/t?cursor=c1", "/t?cursor=c1"]);
+  });
+
+  test("a single page is read again from the start; a new page moves the cursor on", async () => {
+    const c = client([page([1]), page([1, 2], "c1"), page([3])]);
+    const first = await readTail(c, "/t", empty);
+    expect(await readTail(c, "/t", (first as { data: Tail<number> }).data)).toEqual({ kind: "ok", data: { items: [1, 2, 3], start: 2, cursor: "c1" } });
+    expect(c.paths).toEqual(["/t", "/t", "/t?cursor=c1"]);
+  });
+
+  test("a refused cursor reads the timeline again from its start, once", async () => {
+    const c = client([restart, page([9])]);
+    expect(await readTail(c, "/t", { items: [1, 2], start: 1, cursor: "old" })).toEqual({ kind: "ok", data: { items: [9], start: 0, cursor: undefined } });
+    expect(await readTail(client([restart]), "/t", empty)).toMatchObject({ kind: "refused", status: 400 });
+    expect(await readTail(client([{ kind: "transport" }]), "/t", empty)).toEqual({ kind: "transport" });
+  });
+
+  test("polled every 5 s, not while the page is hidden, resumed at the next check once visible, and stopped", async () => {
+    vi.useFakeTimers();
+    try {
+      const page = { visibilityState: "visible" as DocumentVisibilityState };
+      let reads = 0;
+      const stop = polled(() => Promise.resolve((reads++, true)), page);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(reads).toBe(1);
+      await vi.advanceTimersByTimeAsync(POLL_MS - 1);
+      expect(reads).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(reads).toBe(2);
+      page.visibilityState = "hidden";
+      await vi.advanceTimersByTimeAsync(4 * POLL_MS);
+      expect(reads).toBe(2);
+      page.visibilityState = "visible";
+      await vi.advanceTimersByTimeAsync(POLL_MS);
+      expect(reads).toBe(3);
+      stop();
+      await vi.advanceTimersByTimeAsync(4 * POLL_MS);
+      expect(reads).toBe(3);
+      // An answer that ends the polling (a refusal) schedules no further read.
+      let once = 0;
+      polled(() => Promise.resolve((once++, false)), page);
+      await vi.advanceTimersByTimeAsync(4 * POLL_MS);
+      expect(once).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("an entry's details: who, why and what it names, identifiers shortened", () => {
+    const e = (kind: string, entry: unknown): Entry => ({ revision: 1, epoch: "ep", at: READ, kind, entry });
+    expect(details(e("freeze", { principal: "h-author", role: "author", reason: "synthetic incident" }))).toBe('h-author author "synthetic incident"');
+    expect(details(e("drift", { record: 3, change: "opened", observation: "obs_abcdefghijklmnopqrstuvwxyz" }))).toBe("opened obs_abcd…wxyz");
+    expect(details(e("unknown-kind", null))).toBe("");
+  });
+});
