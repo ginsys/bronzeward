@@ -279,6 +279,23 @@ describe("§9.5 renewal", () => {
     expect(s.principal).toEqual({ iss: ISSUER, sub: "u2" });
   });
 
+  test("B1: only a newer pair of the same principal is adopted, and a spent refresh token is neither sent nor posted", async () => {
+    const f = answers([]);
+    const s = new Session(config, provider, tokens(), { fetch: f as unknown as typeof fetch });
+    expect(s.adopt(tokens({ access: "SYNTH-a0", expiresAt: 300_000 }))).toBe(false);
+    expect(s.adopt(tokens({ access: "SYNTH-a2", sub: "u2", expiresAt: 400_000 }))).toBe(false);
+    expect(s.adopt(tokens({ access: "SYNTH-a2", expiresAt: 400_000 }))).toBe(true);
+    expect(s.pair()).toEqual(tokens({ access: "SYNTH-a2", expiresAt: 400_000 }));
+    s.spend();
+    expect(s.pair()).toBeUndefined();
+    expect(await s.renew()).toBe(false);
+    expect(f).not.toHaveBeenCalled();
+    expect(s.adopt(tokens({ access: "SYNTH-a3", refresh: "SYNTH-r3", expiresAt: 500_000 }))).toBe(true);
+    expect(s.pair()?.refresh).toBe("SYNTH-r3");
+    s.clear();
+    expect(s.adopt(tokens({ expiresAt: 600_000 }))).toBe(false);
+  });
+
   test("a pair that arrives after the session was cleared is not kept, and its refresh token is revoked", async () => {
     let release!: (r: Response) => void;
     const f = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => (url === provider.tokenEndpoint ? new Promise<Response>((r) => (release = r)) : Promise.resolve(new Response(null, { status: 200 }))));
