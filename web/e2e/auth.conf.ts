@@ -3,7 +3,8 @@
 //   - A trusts mise run dev-idp's provider; its page signs in through the provider's Session API
 //     (AUTH-01, AUTH-08).
 //   - B trusts the synthetic provider (provider.ts), which hands out tokens the fixture issuer mints
-//     on the spec's request, defects included (AUTH-02, AUTH-03, AUTH-05, AUTH-10).
+//     on the spec's request, defects included (AUTH-02, AUTH-03, AUTH-05, AUTH-07, AUTH-10,
+//     AUTH-11).
 // It removes the databases with the processes, and fails the run when it cannot; then the state
 // directory, which names them, is kept, and the next run refuses to start until it is removed.
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
@@ -13,7 +14,7 @@ import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { SevereServiceError } from "webdriverio";
 import { config as base } from "./wdio.conf.ts";
-import { type Grant, type Provider, startProvider } from "./provider.ts";
+import { type Counts, type Grant, type Provider, startProvider } from "./provider.ts";
 
 export const IDP_PAGE = "http://localhost:58443";
 export const FIXTURE_PAGE = "http://localhost:58448";
@@ -112,16 +113,23 @@ function control(provider: Provider, next: { grant: Grant }): Server {
       return to === undefined ? res.writeHead(404).end() : res.writeHead(302, { Location: to, "Cache-Control": "no-store" }).end();
     }
     if (url.pathname !== "/next") return res.writeHead(404).end();
-    const human = url.searchParams.get("human") ?? "";
-    const args = ["mint", "-key", `${state}/fixture.key`, "-issuer", FIXTURE_ISSUER, "-human", human];
-    for (const f of ["defect", "without-group"]) if (url.searchParams.has(f)) args.push(`-${f}`, url.searchParams.get(f)!);
+    const q = url.searchParams;
+    const mint = (human: string) => {
+      const args = ["mint", "-key", `${state}/fixture.key`, "-issuer", FIXTURE_ISSUER, "-human", human];
+      for (const f of ["defect", "without-group"]) if (q.has(f)) args.push(`-${f}`, q.get(f)!);
+      return { access: execFileSync(`${root}bin/oidc-fixture`, args).toString().trim(), sub: human };
+    };
     // A failed mint fails the spec that asked for it, not the launcher, whose cleanup must still run.
     try {
-      next.grant = { access: execFileSync(`${root}bin/oidc-fixture`, args).toString().trim(), sub: human };
+      // AUTH-07 and AUTH-11: a short expires_in, rotation, a renewal as another human, held answers.
+      const grant: Grant = { ...mint(q.get("human") ?? ""), rotate: q.has("rotate"), hold: Number(q.get("hold") ?? 0) };
+      if (q.has("lifetime")) grant.lifetime = Number(q.get("lifetime"));
+      if (q.has("renew-as")) grant.renewed = { ...mint(q.get("renew-as")!), lifetime: 300 };
+      next.grant = grant;
     } catch (e) {
       return res.writeHead(500).end(String(e));
     }
-    provider.counts.authorize = provider.counts.refresh = provider.counts.revoke = 0;
+    for (const k of Object.keys(provider.counts) as (keyof Counts)[]) provider.counts[k] = 0;
     res.end();
   });
 }

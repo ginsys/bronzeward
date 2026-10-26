@@ -5,13 +5,21 @@
 // server verifies the fixture's minted tokens under this provider's issuer. The test provider
 // covers the real login flow (decision B7).
 import { createHash, randomBytes } from "node:crypto";
-import { createServer, type Server } from "node:http";
+import { createServer, type Server, type ServerResponse } from "node:http";
 
 export const FAKE_ISSUER = "http://127.0.0.1:58445";
 
 export interface Grant {
   access: string;
   sub: string;
+  // The expires_in of every answer (300 if absent), whatever the access token's own lifetime.
+  lifetime?: number;
+  // Rotate: accept the latest refresh token issued under this grant and answer with a new pair,
+  // for `renewed`'s access token and subject if set (AUTH-07). Without it every use is refused.
+  rotate?: boolean;
+  renewed?: Grant;
+  // How many refresh requests to take and never answer (AUTH-11's second case).
+  hold?: number;
 }
 
 export interface ProviderOptions {
@@ -22,20 +30,38 @@ export interface ProviderOptions {
   // The fixture issuer whose /jwks this serves; absent, the provider serves no key set.
   keys?: string;
   // Hand out refresh tokens that start with this (the run's canary, so the artifact scan finds
-  // one), and refuse their use; uses and revocations are counted.
+  // one); uses, uses of a rotated-out token and revocations are counted.
   refresh?: string;
+}
+
+export interface Counts {
+  authorize: number;
+  refresh: number;
+  spent: number;
+  revoke: number;
 }
 
 export interface Provider {
   server: Server;
-  counts: { authorize: number; refresh: number; revoke: number };
+  counts: Counts;
 }
 
 const b64url = (s: string | Buffer) => Buffer.from(s).toString("base64url");
 
 export function startProvider(o: ProviderOptions): Promise<Provider> {
   const codes = new Map<string, { nonce: string; challenge: string; grant: Grant }>();
-  const counts = { authorize: 0, refresh: 0, revoke: 0 };
+  const counts: Counts = { authorize: 0, refresh: 0, spent: 0, revoke: 0 };
+  // The latest refresh token of each sign-in, and those rotated out.
+  const latest = new Map<string, Grant>();
+  const spent = new Set<string>();
+  const answer = (res: ServerResponse, headers: Record<string, string>, grant: Grant, nonce?: string) => {
+    const now = Math.floor(Date.now() / 1000);
+    const lifetime = grant.lifetime ?? 300;
+    const id = [b64url('{"alg":"none"}'), b64url(JSON.stringify({ iss: o.issuer, aud: [o.clientId], sub: grant.sub, ...(nonce !== undefined ? { nonce } : {}), iat: now, exp: now + 300 })), ""].join(".");
+    const refresh = o.refresh !== undefined ? `${o.refresh}-refresh-${randomBytes(8).toString("hex")}` : undefined;
+    if (refresh !== undefined) latest.set(refresh, grant);
+    res.writeHead(200, headers).end(JSON.stringify({ access_token: grant.access, expires_in: lifetime, id_token: id, ...(refresh !== undefined ? { refresh_token: refresh } : {}) }));
+  };
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", o.issuer);
     const headers = { "Cache-Control": "no-store", "Access-Control-Allow-Origin": o.pageOrigin, "Content-Type": "application/json" };
@@ -74,21 +100,22 @@ export function startProvider(o: ProviderOptions): Promise<Provider> {
       req.on("data", (c: Buffer) => (body += c.toString()));
       req.on("end", () => {
         const form = new URLSearchParams(body);
+        const refused = () => res.writeHead(400, headers).end(JSON.stringify({ error: "invalid_grant" }));
         if (form.get("grant_type") === "refresh_token") {
           counts.refresh++;
-          return res.writeHead(400, headers).end(JSON.stringify({ error: "invalid_grant" }));
+          const token = form.get("refresh_token") ?? "";
+          if (spent.has(token)) counts.spent++;
+          const grant = latest.get(token);
+          if (grant?.rotate !== true) return refused();
+          latest.delete(token);
+          spent.add(token);
+          if ((grant.hold ?? 0) > 0) return void grant.hold!--;
+          return answer(res, headers, grant.renewed ?? grant);
         }
         const code = codes.get(form.get("code") ?? "");
         codes.delete(form.get("code") ?? "");
-        if (code === undefined || b64url(createHash("sha256").update(form.get("code_verifier") ?? "").digest()) !== code.challenge) {
-          return res.writeHead(400, headers).end(JSON.stringify({ error: "invalid_grant" }));
-        }
-        const now = Math.floor(Date.now() / 1000);
-        const id = [b64url('{"alg":"none"}'), b64url(JSON.stringify({ iss: o.issuer, aud: [o.clientId], sub: code.grant.sub, nonce: code.nonce, iat: now, exp: now + 300 })), ""].join(".");
-        res.writeHead(200, headers).end(JSON.stringify({
-          access_token: code.grant.access, expires_in: 300, id_token: id,
-          ...(o.refresh !== undefined ? { refresh_token: `${o.refresh}-refresh-${randomBytes(8).toString("hex")}` } : {}),
-        }));
+        if (code === undefined || b64url(createHash("sha256").update(form.get("code_verifier") ?? "").digest()) !== code.challenge) return refused();
+        answer(res, headers, code.grant, code.nonce);
       });
       return;
     }
