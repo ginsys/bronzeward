@@ -225,7 +225,8 @@ type signIn struct {
 }
 
 // openSignIn reads the context's stored sign-in. Without a store (D2 (a)) each command signs in
-// for itself, unless --no-input forbids it.
+// for itself, unless --no-input forbids it: in this host's browser on a desktop, else with the
+// device grant (decision D4 (a)).
 func openSignIn(x *Context, noInput bool, prompts io.Writer) (*signIn, error) {
 	s := &signIn{store: openStore(x)}
 	t, err := s.store.load()
@@ -237,7 +238,7 @@ func openSignIn(x *Context, noInput bool, prompts io.Writer) (*signIn, error) {
 	case t == nil && noInput:
 		return nil, fmt.Errorf("not signed in: the sign-in is kept in %s, so each command signs in for itself, which --no-input forbids", s.store.kept())
 	case t == nil:
-		if t, err = Login(x, false, prompts); err != nil {
+		if t, err = Login(x, !desktop(), prompts); err != nil {
 			return nil, err
 		}
 	}
@@ -264,7 +265,9 @@ func (c *Client) renew() (err error) {
 	}
 	defer unlock()
 	old := s.tokens
-	t, err := s.store.load()
+	// Strictly: a credential store that fails now must not read as empty, or the refresh token it
+	// still holds would be redeemed and the rotated one never kept.
+	t, err := s.store.read()
 	if err != nil {
 		return err
 	}

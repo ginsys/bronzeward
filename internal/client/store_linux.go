@@ -17,6 +17,12 @@ func keyringUnavailable() string {
 	return ""
 }
 
+// unreached says, after a sentence, that a sign-in another session kept in the Secret Service is
+// not reached without a session bus: it is neither removed nor revoked.
+func unreached() string {
+	return " A sign-in another session kept in the system credential store is not reached, so it is neither removed nor revoked."
+}
+
 func keyringGet(user string) (string, bool, error) {
 	v, err := within(func() (*string, error) {
 		v, err := keyring.Get(keyringService, user)

@@ -35,9 +35,16 @@ func openIDP(x *Context, d time.Duration) (*idp, context.CancelFunc, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	var keys struct {
+		URI string `json:"jwks_uri"`
+	}
+	if err := p.Claims(&keys); err != nil {
+		cancel()
+		return nil, nil, fmt.Errorf("the identity provider's jwks_uri: %w", err)
+	}
 	ep := p.Endpoint()
 	ep.AuthStyle = oauth2.AuthStyleInParams
-	for _, u := range [][2]string{{"authorization_endpoint", ep.AuthURL}, {"token_endpoint", ep.TokenURL}, {"device_authorization_endpoint", ep.DeviceAuthURL}} {
+	for _, u := range [][2]string{{"authorization_endpoint", ep.AuthURL}, {"token_endpoint", ep.TokenURL}, {"device_authorization_endpoint", ep.DeviceAuthURL}, {"jwks_uri", keys.URI}} {
 		if u[1] != "" {
 			if err := providerEndpoint(u[1], "the identity provider's "+u[0]); err != nil {
 				cancel()
@@ -66,14 +73,15 @@ func (i *idp) refusal(x *Context, what, doing string, err error) error {
 
 // Login signs in to x's identity provider (§9.2 items 1-2): the authorization-code grant with
 // PKCE S256, state and nonce on a loopback redirect, or with device the device-authorization
-// grant. What the operator must do goes to prompts.
+// grant. What the operator must do goes to prompts. Its errors do not name the context; the caller
+// does.
 func Login(x *Context, device bool, prompts io.Writer) (*Tokens, error) {
 	if x.Credential != "oidc" || x.OIDC == nil {
-		return nil, fmt.Errorf("%s is an automation context; it has no sign-in", x.Where())
+		return nil, errors.New("an automation context has no sign-in")
 	}
 	i, cancel, err := openIDP(x, 10*time.Minute)
 	if err != nil {
-		return nil, x.fail(err)
+		return nil, err
 	}
 	defer cancel()
 	var t *oauth2.Token
@@ -83,7 +91,7 @@ func Login(x *Context, device bool, prompts io.Writer) (*Tokens, error) {
 		t, err = i.loopback(x, prompts)
 	}
 	if err != nil {
-		return nil, x.fail(err)
+		return nil, err
 	}
 	return &Tokens{AccessToken: t.AccessToken, RefreshToken: t.RefreshToken}, nil
 }
@@ -96,10 +104,11 @@ func (i *idp) device(x *Context, prompts io.Writer) (*oauth2.Token, error) {
 	if err != nil {
 		return nil, i.refusal(x, "device authorization", "device authorization", err)
 	}
-	u, err := url.Parse(d.VerificationURI)
-	if err != nil || endpoint(d.VerificationURI, "verification URI") != nil {
-		return nil, fmt.Errorf("the identity provider %s gave the verification URI %q, which is not https", x.OIDC.Issuer, d.VerificationURI)
+	// RFC 8628 lets the verification URI carry a query.
+	if err := providerEndpoint(d.VerificationURI, "the identity provider's verification_uri"); err != nil {
+		return nil, err
 	}
+	u, _ := url.Parse(d.VerificationURI)
 	// The host stands alone, so a look-alike prompt stands out (D4 (a)).
 	fmt.Fprintf(prompts, "To sign in to %s, open %s on any device and enter the code %s.\n\n    Check that the page's host is: %s\n\nWaiting for the sign-in...\n",
 		x.Where(), d.VerificationURI, d.UserCode, strings.ToUpper(u.Host))
@@ -184,9 +193,14 @@ func random() string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
+// desktop: this host has a desktop whose browser openBrowser can open.
+func desktop() bool {
+	return runtime.GOOS == "linux" && (os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != "")
+}
+
 // openBrowser opens u in the desktop's browser, where there is a desktop (§9.2 item 1).
 func openBrowser(u string) bool {
-	if runtime.GOOS != "linux" || os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
+	if !desktop() {
 		return false
 	}
 	cmd := exec.Command("xdg-open", u)
@@ -197,15 +211,39 @@ func openBrowser(u string) bool {
 	return true
 }
 
-// SignIn runs Login and keeps the sign-in; it returns where it is kept.
+// SignIn runs Login and keeps the sign-in under the renewal lock, so that neither a renewal nor
+// an identity-revoked clear in another process interleaves with the write; it returns where it is
+// kept. The credential store is read first, so one that fails is known before the sign-in. A
+// sign-in that cannot be kept has its refresh token revoked.
 func SignIn(x *Context, device bool, prompts io.Writer) (*Tokens, string, error) {
-	t, err := Login(x, device, prompts)
-	if err != nil {
-		return nil, "", err
+	if err := x.Check(); err != nil {
+		return nil, "", x.fail(err)
 	}
 	s := openStore(x)
-	if err := s.save(t); err != nil {
-		return nil, "", x.fail(fmt.Errorf("keeping the sign-in in %s: %w", s.kept(), err))
+	if s.file == "" {
+		s.load()
+	}
+	t, err := Login(x, device, prompts)
+	if err != nil {
+		return nil, "", x.fail(err)
+	}
+	keep := func() error {
+		if s.none != "" {
+			return nil
+		}
+		unlock, err := s.lock()
+		if err != nil {
+			return err
+		}
+		defer unlock()
+		return s.save(t)
+	}
+	if err := keep(); err != nil {
+		revoked := "its refresh token is not revoked, so it stays usable until the identity provider expires it"
+		if t.RefreshToken != "" && Revoke(x, t.RefreshToken) == nil {
+			revoked = "its refresh token is revoked at the identity provider"
+		}
+		return nil, "", x.fail(fmt.Errorf("keeping the sign-in in %s: %w; %s", s.kept(), err, revoked))
 	}
 	return t, s.kept(), nil
 }
@@ -216,12 +254,19 @@ func SignIn(x *Context, device bool, prompts io.Writer) (*Tokens, string, error)
 // returns what it did, for the operator; a failed revocation still signs out, and is returned
 // beside that text.
 func SignOut(x *Context) (string, error) {
+	// Only what reaching the store needs: a refused server or issuer still has its sign-in removed.
+	if err := x.checkName(); err != nil {
+		return "", x.fail(err)
+	}
+	if x.Credential == "oidc" && x.OIDC == nil {
+		return "", x.fail(errors.New("an oidc context needs its issuer and client ID"))
+	}
 	if x.Credential != "oidc" {
 		return "", x.fail(errors.New("an automation context has no sign-in; its token file is the operator's and is left as it is"))
 	}
 	s := openStore(x)
 	if s.file == "" && s.none != "" {
-		return fmt.Sprintf("Not signed in to %s: the sign-in is kept in %s, so none is stored.", x.Where(), s.kept()), nil
+		return fmt.Sprintf("Not signed in to %s: the sign-in is kept in %s, so none is stored.%s", x.Where(), s.kept(), unreached()), nil
 	}
 	// Read under the renewal lock: a renewal it waited for may have stored a newer token.
 	t, err := s.clear(nil)

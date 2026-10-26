@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -172,6 +173,31 @@ func TestLogin(t *testing.T) {
 			t.Errorf("%d exchanges; the file holds the refresh token: %v", f.idp.exchange.Load(), s.RefreshToken == "BWSYNTH-rt-1")
 		}
 		f.want(f.signedIn("--context", "file", "whoami"), 0, "subject h-viewer")
+		// The sign-in is written under the renewal lock, after a renewal or clear holding it.
+		f.idp.login(nil, "")
+		unlock := hold(t, file+".lock")
+		var r result
+		var wg sync.WaitGroup
+		wg.Go(func() { r = login(nil, "file") })
+		waiting(t, file+".lock", 1)
+		unlock()
+		wg.Wait()
+		f.want(r, 0, "Signed in to file")
+		// --no-input forbids the wait for the operator.
+		f.want(f.ctl(nil, "", "--context", "file", "--no-input", "login"), 1, "which --no-input forbids")
+	})
+
+	// Keys on plain http off loopback would let an on-path host sign the ID token.
+	t.Run("plain-http keys", func(t *testing.T) {
+		f.idp.login(nil, "")
+		f.idp.mu.Lock()
+		f.idp.discovery = "keys"
+		f.idp.mu.Unlock()
+		r := login(nil, "file")
+		f.idp.mu.Lock()
+		f.idp.discovery = ""
+		f.idp.mu.Unlock()
+		f.want(r, 1, "the identity provider's jwks_uri", "must be https")
 	})
 
 	t.Run("another state", func(t *testing.T) {
@@ -208,7 +234,7 @@ func TestLogin(t *testing.T) {
 			}
 		}
 		host := strings.TrimPrefix(f.iss.URL, "http://")
-		f.want(f.interact(nil, approve, "--context", "file", "login", "--device"), 0, "open "+f.iss.URL+"/activate on any device",
+		f.want(f.interact(nil, approve, "--context", "file", "login", "--device"), 0, "open "+f.iss.URL+"/activate?client=cli on any device",
 			"Check that the page's host is: "+strings.ToUpper(host), "Signed in to file", "kept in the token file "+file)
 		f.want(f.signedIn("--context", "file", "whoami"), 0, "subject h-viewer")
 	})
@@ -222,14 +248,24 @@ func TestLogin(t *testing.T) {
 		}
 	})
 
-	// D2 (a): with no store, each command signs in for itself, which --no-input refuses.
+	// D2 (a): with no store, each command signs in for itself, which --no-input refuses; with no
+	// desktop, as here, with the device grant (D4 (a)).
 	t.Run("memory", func(t *testing.T) {
 		f.idp.login(nil, "")
 		f.want(f.signedIn("--context", "memory", "--no-input", "whoami"), 1,
 			"the sign-in is kept in this process's memory only, since no D-Bus session bus is named", "--no-input forbids")
-		f.want(f.interact(nil, f.browser, "--context", "memory", "whoami"), 0, "Sign in to memory", "subject h-viewer")
+		approve := func(line string) {
+			if strings.Contains(line, "enter the code BWSY-NTH1") {
+				f.idp.approved.Store(true)
+			}
+		}
+		f.want(f.interact(nil, approve, "--context", "memory", "whoami"), 0, "To sign in to memory", "subject h-viewer")
 		f.want(login(nil, "memory"), 0, "kept in this process's memory only", "each later command signs in for itself")
-		f.want(f.signedIn("--context", "memory", "logout"), 0, "Not signed in to memory (", "the sign-in is kept in this process's memory only", "so none is stored")
+		unreached := "A sign-in another session kept in the system credential store is not reached, so it is neither removed nor revoked."
+		f.want(f.signedIn("--context", "memory", "logout"), 0, "Not signed in to memory (", "the sign-in is kept in this process's memory only",
+			"so none is stored", unreached)
+		f.want(f.ctl(nil, "", "context", "remove", "memory"), 0, `Context "memory" removed.`,
+			"The system credential store is not reached, since no D-Bus session bus is named", "so a sign-in another session kept there is not removed.")
 	})
 
 	// T3/T4: the system credential store, a private Secret Service here.

@@ -251,6 +251,9 @@ func (e *env) loginCmd(args []string) error {
 	if err != nil {
 		return err
 	}
+	if e.noInput {
+		return fmt.Errorf("%s: login waits for the operator to sign in, which --no-input forbids", x.Where())
+	}
 	t, kept, err := client.SignIn(x, device, e.err)
 	if err != nil {
 		return err
