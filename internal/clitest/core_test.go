@@ -199,6 +199,21 @@ func TestRequestCore(t *testing.T) {
 		t.Errorf("the identity read was sent %d times", n)
 	}
 
+	// A failed GET /server re-read after a new epoch fails the read it followed.
+	var servers atomic.Int32
+	in.set(func(w http.ResponseWriter, r *http.Request) bool {
+		if on("/server")(r) && servers.Add(1) > 1 {
+			problem(w, http.StatusConflict, "recovery-mode-active", "")
+			return true
+		}
+		return false
+	}, func(r *http.Response) {
+		if on("/identity")(r.Request) {
+			r.Header.Set("Bronzeward-Epoch", "ep_BWSYNTH-fourth")
+		}
+	})
+	f.want(f.ctl(nil, "", "whoami"), 1, notice, "409 Injected recovery-mode-active")
+
 	in.set(nil, func(r *http.Response) {
 		if on("/identity")(r.Request) {
 			r.Header.Del("Bronzeward-Epoch")
@@ -227,6 +242,18 @@ func TestRequestCore(t *testing.T) {
 	if r := f.ctl(nil, "", "whoami"); r.code != 1 || strings.Contains(r.err, "try 2") {
 		t.Errorf("epoch-superseded: exit %d, stderr %s; want 1 and no retry", r.code, r.err)
 	}
+
+	// An incompatible server's start mode is still the one the banner shows.
+	in.set(nil, func(r *http.Response) {
+		if on("/server")(r.Request) {
+			r.Header.Set("Bronzeward-Recovery-Mode", "true")
+			rewrite(r, `"apiRevision":2`, `"apiRevision":1`)
+			rewrite(r, `"startMode":"normal"`, `"startMode":"recovery"`)
+		}
+	})
+	f.want(f.ctl(nil, "", "version"), 1, "needs revision 2 or later", "(start mode: recovery)")
+	in.set(nil, nil)
+	f.want(f.ctl(nil, "", "version"), 0, "start mode normal")
 
 	in.set(func(w http.ResponseWriter, r *http.Request) bool {
 		if on("/server")(r) {
