@@ -191,7 +191,7 @@ func TestReads(t *testing.T) {
 		!reflect.DeepEqual(*cfg.Find("signin").OIDC, client.OIDC{Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli", Audience: "bronzeward"}) {
 		t.Errorf("--from did not keep the file's issuer, audience and CLI client ID:\n%s", b)
 	}
-	f.want(f.ctl(nil, "", "--context", "signin", "whoami"), 1, "not signed in", "no token file")
+	f.want(f.ctl(nil, "", "--context", "signin", "--no-input", "whoami"), 1, "not signed in", "--no-input forbids")
 	f.want(f.ctl(nil, "", "context", "add", "both", "--from", in.URL, "--issuer", "https://idp.example.invalid"), 2, "not both")
 	f.want(f.ctl(nil, "", "context", "add", "noclient", "--server", in.URL, "--issuer", "https://idp.example.invalid"), 2, "issuer and client ID")
 	// An identity-provider flag is never dropped: alone it asks for the rest, and with another

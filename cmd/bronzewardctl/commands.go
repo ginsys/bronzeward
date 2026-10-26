@@ -9,7 +9,6 @@ import (
 	"slices"
 	"strings"
 	"text/tabwriter"
-	"time"
 
 	"github.com/ginsys/bronzeward/internal/client"
 	"github.com/ginsys/bronzeward/internal/client/apitypes"
@@ -46,6 +45,7 @@ func (e *env) contextCmd(args []string) error {
 			return err
 		}
 		var msg string
+		var removed client.Context
 		if err := client.UpdateConfig(func(cfg *client.Config) error {
 			x := cfg.Find(pos[0])
 			if x == nil {
@@ -56,7 +56,7 @@ func (e *env) contextCmd(args []string) error {
 				cfg.Current = x.Name
 				return nil
 			}
-			msg = fmt.Sprintf("Context %q removed.", x.Name)
+			removed, msg = *x, fmt.Sprintf("Context %q removed.", x.Name)
 			if cfg.Current == x.Name {
 				cfg.Current, msg = "", msg+" No context is current now."
 			}
@@ -64,6 +64,12 @@ func (e *env) contextCmd(args []string) error {
 			return nil
 		}); err != nil {
 			return err
+		}
+		// Its credential-store entry goes with it; a D2 (b) file is left where the operator put it.
+		if verb == "remove" {
+			if err := client.ClearStored(&removed); err != nil {
+				msg += fmt.Sprintf(" %v.", err)
+			}
 		}
 		_, err = fmt.Fprintln(e.out, msg)
 		return err
@@ -231,6 +237,34 @@ func (e *env) whoamiCmd(args []string) (err error) {
 	})
 }
 
+// loginCmd signs in to the selected oidc context and keeps the sign-in (client-contracts.md §9.2).
+func (e *env) loginCmd(args []string) error {
+	var device bool
+	if _, err := e.parse("login", args, 0, func(fs *flag.FlagSet) { fs.BoolVar(&device, "device", false, "") }); err != nil {
+		return err
+	}
+	x, err := e.selected()
+	if err != nil {
+		return err
+	}
+	t, kept, err := client.SignIn(x, device, e.err)
+	if err != nil {
+		return err
+	}
+	who := "an unreadable token"
+	if c := client.ReadClaims(t.AccessToken); c != nil {
+		who = fmt.Sprintf("%s at %s (bronzewardctl's reading of the token), until %s", c.Subject, c.Issuer, c.ExpiresAt().UTC().Format("2006-01-02 15:04:05 MST"))
+	}
+	msg := fmt.Sprintf("Signed in to %s as %s, kept in %s.", x.Where(), who, kept)
+	if strings.HasPrefix(kept, "this process's memory") {
+		msg += " The sign-in ends with this command: each later command signs in for itself."
+	} else if t.RefreshToken == "" {
+		msg += " The identity provider issued no refresh token, so sign in again when the access token expires."
+	}
+	_, err = fmt.Fprintln(e.out, msg)
+	return err
+}
+
 // logoutCmd removes an OIDC context's stored sign-in, one without an access token too, and revokes
 // its refresh token at the provider's revocation endpoint where discovery names one (RFC 7009,
 // client-contracts.md §9.7 item 1). An access token already issued stays valid at the server until
@@ -239,59 +273,15 @@ func (e *env) logoutCmd(args []string) error {
 	if _, err := e.parse("logout", args, 0, nil); err != nil {
 		return err
 	}
-	cfg, err := client.LoadConfig()
+	x, err := e.selected()
 	if err != nil {
 		return err
 	}
-	x, err := cfg.Select(e.context)
-	if err != nil {
-		return err
+	msg, failed := client.SignOut(x)
+	if msg == "" {
+		return failed
 	}
-	if x.Credential != "oidc" {
-		return fmt.Errorf("%s: an automation context has no sign-in; its token file is the operator's and is left as it is", x.Where())
-	}
-	p := x.TokenFile()
-	if p == "" {
-		return fmt.Errorf("%s: this context has no token file (oidc.tokenFile), so no sign-in is stored", x.Where())
-	}
-	// Read under the renewal lock: a renewal it waited for may have stored a newer token.
-	t, err := client.ClearTokens(p, nil)
-	noAccess := errors.Is(err, client.ErrNotTokenFile)
-	if err != nil && !noAccess {
-		return fmt.Errorf("%s: %w", x.Where(), err)
-	}
-	if t == nil {
-		_, err = fmt.Fprintf(e.out, "Not signed in to %s: the token file %s does not exist.\n", x.Where(), p)
-		return err
-	}
-	// A document without an access token says nothing about one issued earlier, which may still be
-	// valid for its whole lifetime.
-	valid := "An access token issued earlier with this sign-in may stay valid at the server until it expires, plus the server's 60 s leeway."
-	if c := client.ReadClaims(t.AccessToken); c != nil && time.Now().Before(c.ExpiresAt()) {
-		valid = "The access token already issued stays valid at the server until " + c.ExpiresAt().UTC().Format("2006-01-02 15:04:05 MST") + ", plus the server's 60 s leeway."
-	} else if c != nil {
-		valid = "The access token already issued expired at " + c.ExpiresAt().UTC().Format("2006-01-02 15:04:05 MST") + "; the server accepts it for at most 60 s after that."
-	} else if !noAccess {
-		valid = "The access token already issued stays valid at the server until it expires, plus the server's 60 s leeway."
-	}
-	removed := "is removed"
-	if noAccess {
-		removed = "held no access token and is removed"
-	}
-	var failed error
-	revoked := ""
-	if t.RefreshToken != "" {
-		switch err := client.Revoke(x, t.RefreshToken); {
-		case err == nil:
-			revoked = " The refresh token is revoked at the identity provider."
-		case errors.Is(err, client.ErrNoRevocation):
-			revoked = " The refresh token is not revoked: the identity provider offers no revocation endpoint, so it stays usable until the provider expires it."
-		default:
-			revoked = " The refresh token is not revoked, so it stays usable until the identity provider expires it."
-			failed = fmt.Errorf("%s: %w", x.Where(), err)
-		}
-	}
-	_, err = fmt.Fprintf(e.out, "Signed out of %s: the token file %s %s. %s%s\n", x.Where(), p, removed, valid, revoked)
+	_, err = fmt.Fprintln(e.out, msg)
 	return errors.Join(failed, err)
 }
 
