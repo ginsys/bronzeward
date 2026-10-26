@@ -160,8 +160,6 @@ export interface SessionOptions {
 export class Session {
   #tokens: Tokens | undefined;
   #renewing: Promise<boolean> | undefined;
-  // §9.3 item 3: the provider issued no rotating refresh token, so renewal is the redirect.
-  #byRedirect: boolean;
 
   constructor(
     private readonly config: ClientConfig,
@@ -170,13 +168,6 @@ export class Session {
     private readonly opts: SessionOptions = {},
   ) {
     this.#tokens = tokens;
-    this.#byRedirect = tokens.refresh === undefined;
-  }
-
-  // True when the page renews by a full-page sign-in redirect before expiry, never after a
-  // refresh that failed: that one keeps the current token until refused (§9.5 item 3).
-  get renewsByRedirect(): boolean {
-    return this.#tokens !== undefined && this.#byRedirect;
   }
 
   get principal(): Principal | undefined {
@@ -193,7 +184,7 @@ export class Session {
 
   // §9.5: one renewal at a time. A refresh token is sent at most once: after any failure, its
   // rotation may already have happened, so it is dropped and the current token used until refused
-  // (item 3). False also when there is none to send: the page renews by the redirect instead.
+  // (item 3). False also when there is none to send: the session then ends at expiry.
   renew(): Promise<boolean> {
     this.#renewing ??= this.#renew().finally(() => (this.#renewing = undefined));
     return this.#renewing;
@@ -223,12 +214,10 @@ export class Session {
       if (was !== undefined && now !== undefined && (was.iss !== now.iss || was.sub !== now.sub)) [before, after] = [was, now];
     }
     this.#tokens = toTokens(answer.body, after, this.now());
-    // §9.3 item 3: a refresh token that did not rotate is not sent again (item 1's "used once");
-    // the next renewal is the redirect.
-    if (this.#tokens.refresh === undefined || this.#tokens.refresh === refresh) {
-      this.#tokens.refresh = undefined;
-      this.#byRedirect = true;
-    }
+    // §9.3 items 1 and 3: a refresh token that did not rotate is not sent again ("used once"), so
+    // this session renews no further and ends at expiry. The renewal by the sign-in redirect is
+    // the follow-up's, with the multi-tab renewer.
+    if (this.#tokens.refresh === refresh) this.#tokens.refresh = undefined;
     if (after.iss !== before.iss || after.sub !== before.sub) this.opts.onPrincipalChange?.(before, after);
     return true;
   }

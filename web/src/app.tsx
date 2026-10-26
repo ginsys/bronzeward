@@ -75,7 +75,7 @@ export function App() {
 
     const signedIn = async (config: ClientConfig, provider: Provider, s: Session) => {
       session = s;
-      const timer = renewals(() => session, () => void signIn(config, provider));
+      const timer = renewals(() => session);
       stopRenewals = timer.stop;
       timer.schedule();
       const client = new Client({
@@ -155,18 +155,16 @@ export function App() {
 }
 
 // §9.5 item 1: renew before less than 60 s remains; a failed renewal keeps the current token.
-// §9.3 item 3: without a rotating refresh token, the renewal is the sign-in redirect.
 // After stop() (the server refused the session, or the page forgot it) nothing re-arms the timer,
-// not even a renewal still in flight: a redirect would loop on a token the server keeps refusing.
-export function renewals(session: () => Pick<Session, "expiresAt" | "renewsByRedirect" | "renew"> | undefined, redirect: () => void) {
+// not even a renewal still in flight.
+export function renewals(session: () => Pick<Session, "expiresAt" | "renew"> | undefined) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
   const schedule = () => {
     clearTimeout(timer);
     const at = session()?.expiresAt;
     if (stopped || at === undefined) return;
-    const renew = () => (session()?.renewsByRedirect ? redirect() : void session()?.renew().then((ok) => ok && schedule()));
-    timer = setTimeout(renew, renewDelay(at, Date.now()));
+    timer = setTimeout(() => void session()?.renew().then((ok) => ok && schedule()), renewDelay(at, Date.now()));
   };
   return {
     schedule,
