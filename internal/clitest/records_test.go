@@ -44,7 +44,7 @@ func TestRecordReads(t *testing.T) {
 	f.want(f.ctl(nil, "", "draft", "show", s.draft), 0, "Draft "+s.draft+` "worker labels" open, revision`, "cluster "+s.cluster, "Not rendered")
 	same(f.ctl(nil, "", "-o", "json", "draft", "show", s.draft), get("/drafts/"+s.draft))
 	f.want(f.ctl(nil, "", "machine", "observations", s.machine), 0, "None found.", "Health is not checked")
-	f.want(f.ctl(nil, "", "machine", "timeline", s.machine), 0)
+	f.want(f.ctl(nil, "", "machine", "timeline", s.machine), 0, "None found.")
 	same(f.ctl(nil, "", "machine", "timeline", s.machine, "-o", "json"), get("/machines/"+s.machine+"/timeline"))
 	f.want(f.ctl(nil, "", "act", "list"), 0, "ACTION", s.cluster)
 	same(f.ctl(nil, "", "act", "list", "-o", "yaml", "-o", "json"), get("/acts"))
