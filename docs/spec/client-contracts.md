@@ -883,7 +883,7 @@ expiry, at most `maxTokenLifetime` after issue, plus the server's 60 s leeway
    issued remains valid at the server for up to its remaining lifetime plus that leeway. The
    endpoint is the `revocation_endpoint` of the provider's discovery (RFC 7009, sent as a public
    client). The revocation request follows no redirect, so a 3xx answer is a refused revocation.
-   Without one, logout says the refresh token is not revoked; a refused or failed
+   Without a `revocation_endpoint`, logout says the refresh token is not revoked; a refused or failed
    revocation still deletes the tokens, says the refresh token is not revoked and exits 1.
 2. The web sign-out discards the in-memory tokens and every cached response, revokes the refresh
    token if the provider allows it, tells other open tabs of the same origin to discard theirs

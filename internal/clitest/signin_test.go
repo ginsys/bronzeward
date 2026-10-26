@@ -26,9 +26,10 @@ import (
 // the last redemption came with. revocation answers a revocation, a 302 redirecting to a page that
 // answers a GET with 200, and revoked lists their forms; while it is nil, discovery names no
 // revocation endpoint. endpoint, when set, is the revocation_endpoint discovery names instead.
-// While broken is set, discovery answers 503 with a body of control characters.
+// discovery, when set, breaks discovery: "down" answers 503 with a body of control characters,
+// "moved" redirects to plain http off loopback, and "other" names another issuer.
 type provider struct {
-	broken     bool
+	discovery  string
 	mu         sync.Mutex
 	answer     func(rt string) (int, any)
 	calls      atomic.Int32
@@ -70,11 +71,18 @@ func (p *provider) wrap(iss *issuer.Issuer) http.Handler {
 		var d map[string]any
 		json.Unmarshal(rec.Body.Bytes(), &d)
 		p.mu.Lock()
-		if p.broken {
+		switch p.discovery {
+		case "down":
 			p.mu.Unlock()
 			w.WriteHeader(http.StatusServiceUnavailable)
 			w.Write([]byte("\x1b[2J down"))
 			return
+		case "moved":
+			p.mu.Unlock()
+			http.Redirect(w, r, "http://idp.example.invalid/.well-known/openid-configuration", http.StatusFound)
+			return
+		case "other":
+			d["issuer"] = "https://idp.example.invalid"
 		}
 		d["token_endpoint"] = iss.URL + "/token" + p.query
 		if p.revocation != nil {
@@ -611,18 +619,25 @@ func TestSignIn(t *testing.T) {
 		if seen := f.idp.revocations(); len(seen) != 0 {
 			t.Errorf("%d revocations sent where discovery names no endpoint", len(seen))
 		}
-		// A failed discovery shows neither the provider's reason phrase nor its body.
-		f.idp.mu.Lock()
-		f.idp.broken = true
-		f.idp.mu.Unlock()
-		f.store(file, tok, "BWSYNTH-rt-8")
-		down := f.signedIn("--context", "human", "logout")
-		f.idp.mu.Lock()
-		f.idp.broken = false
-		f.idp.mu.Unlock()
-		f.want(down, 1, "The refresh token is not revoked", "its discovery document could not be read")
-		if strings.ContainsRune(down.out+down.err, '\x1b') || strings.Contains(down.out+down.err, "down") {
-			t.Errorf("logout showed what the failed discovery sent:\n%s%s", down.out, down.err)
+		// A failed discovery shows the status of a refusal, but neither the provider's reason
+		// phrase nor its body; a refused redirect and another issuer are named as such.
+		for mode, want := range map[string]string{
+			"down":  "refused its discovery: 503 Service Unavailable",
+			"moved": "which bronzewardctl does not follow",
+			"other": "its discovery document names another issuer",
+		} {
+			f.idp.mu.Lock()
+			f.idp.discovery = mode
+			f.idp.mu.Unlock()
+			f.store(file, tok, "BWSYNTH-rt-8")
+			r := f.signedIn("--context", "human", "logout")
+			f.idp.mu.Lock()
+			f.idp.discovery = ""
+			f.idp.mu.Unlock()
+			f.want(r, 1, "The refresh token is not revoked", want)
+			if strings.ContainsRune(r.out+r.err, '\x1b') || strings.Contains(r.out+r.err, "down") {
+				t.Errorf("logout showed what the failed discovery sent:\n%s%s", r.out, r.err)
+			}
 		}
 		f.store(file, f.mint("h-viewer", "expired"), "")
 		r := f.signedIn("--context", "human", "logout")

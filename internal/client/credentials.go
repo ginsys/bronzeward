@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -331,24 +332,28 @@ func discover(x *Context) (context.Context, context.CancelFunc, *http.Client, *o
 	p, err := oidc.NewProvider(ctx, x.OIDC.Issuer)
 	if err != nil {
 		cancel()
-		return nil, nil, nil, nil, fmt.Errorf("cannot reach the identity provider %s: %w", x.OIDC.Issuer, discoveryError(err))
+		return nil, nil, nil, nil, discoveryError(x.OIDC.Issuer, err)
 	}
 	return ctx, cancel, hc, p, nil
 }
 
-// discoveryError is a failed discovery as shown. A transport error is the client's own; go-oidc's
+// discoveryError is a failed discovery as shown. A transport error is the client's own. go-oidc's
 // other errors quote what the provider sent (its reason phrase, its response body, the issuer it
-// names), which is not shown.
-func discoveryError(err error) error {
+// names), which is not shown: only the status of a refusal, which go-oidc puts first.
+func discoveryError(iss string, err error) error {
 	var ue *url.Error
 	var me *oidc.IssuerMismatchError
-	switch {
+	switch s := err.Error(); {
 	case errors.As(err, &ue):
-		return err
+		return fmt.Errorf("cannot reach the identity provider %s: %w", iss, err)
 	case errors.As(err, &me):
-		return errors.New("its discovery document names another issuer")
+		return fmt.Errorf("the identity provider %s: its discovery document names another issuer", iss)
+	case len(s) > 4 && s[3] == ' ':
+		if status, e := strconv.Atoi(s[:3]); e == nil && http.StatusText(status) != "" {
+			return fmt.Errorf("the identity provider %s refused its discovery: %s", iss, refusal(status, ""))
+		}
 	}
-	return errors.New("its discovery document could not be read")
+	return fmt.Errorf("the identity provider %s: its discovery document could not be read", iss)
 }
 
 // ErrNoRevocation: the provider's discovery names no revocation_endpoint.
