@@ -278,3 +278,25 @@ func TestServerTextIsPrintable(t *testing.T) {
 		}
 	}
 }
+
+// TestURLsWithControlCharactersAreRefused checks that a URL the errors show as it is (an issuer
+// from an imported client configuration, a server, an endpoint the identity provider names) holds
+// no character that printable would escape: url.Parse admits C1 controls and bytes that are not
+// UTF-8 (§6 item 4).
+func TestURLsWithControlCharactersAreRefused(t *testing.T) {
+	for _, raw := range []string{"https://BWSYNTH.example.invalid/\u009b2J", "https://BWSYNTH.example.invalid/\xff"} {
+		x := &Context{Name: "lab", Server: "https://BWSYNTH.example.invalid", Credential: "oidc",
+			OIDC: &OIDC{Issuer: raw, ClientID: "BWSYNTH-cli"}}
+		for name, err := range map[string]error{
+			"issuer": x.Check(), "server": (&Context{Name: "lab", Server: raw, Credential: "automation"}).Check(),
+			"token endpoint": providerEndpoint(raw, "token_endpoint"),
+		} {
+			if err == nil || hostile(err.Error()) || !strings.Contains(err.Error(), "no control characters") {
+				t.Errorf("%s %q: %v; want it refused, shown escaped", name, raw, err)
+			}
+		}
+	}
+	if err := providerEndpoint("https://BWSYNTH.example.invalid/é?a=b", "token_endpoint"); err != nil {
+		t.Errorf("a printable non-ASCII URL: %v; want it accepted", err)
+	}
+}
