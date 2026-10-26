@@ -856,11 +856,14 @@ an earlier epoch (`internal/auth/automation.go:47-52`).
 
 The server answers every token it does not accept with the same `401` and no detail
 (`internal/api/api.go:314-322`, `internal/api/problem.go:76-79`). The client may add what it can
-read locally, labelled as its own reading, never as the server's reason.
+read locally, labelled as its own reading, never as the server's reason. The web interface shows
+W1's text, "Not accepted by this installation. Sign in again.", for every `401`, with its local
+reading below it; the texts below that name a context, and the expired-token text, are the CLI's
+(lead decision on consistency, 26 October 2026, under the owner's 2026-10-07 grant).
 
 | Case | What the server does | Client behaviour (**Proposed**) |
 | --- | --- | --- |
-| Token expired | `401` (`internal/auth/auth.go:165-166`) | renew ([§9.5](#95-renewal)); if the provider refuses, "Your sign-in expired: sign in again" |
+| Token expired | `401` (`internal/auth/auth.go:165-166`) | renew ([§9.5](#95-renewal)); if the provider refuses, the CLI says "Your sign-in expired: sign in again" |
 | Wrong issuer | `401` | if the token's `iss` differs from `oidc.issuer`: "The token is from `<iss>`; this context expects `<issuer>`. Check the context or the server's configuration." |
 | Wrong audience | `401` | if `aud` lacks `oidc.audience`: "The token is not issued for `<audience>`; the identity provider needs an audience mapping" ([§9.1](#91-identity-provider-requirements) item 1) |
 | Lifetime over the maximum | `401` (`internal/auth/auth.go:175-176`); the maximum is the deployment's `maxTokenLifetime`, 15 minutes unless configured (`internal/config/config.go:125`, `internal/config/config.go:353-356`) | `GET /server` serves the maximum as `maxTokenLifetimeSeconds` since [#278](https://github.com/ginsys/bronzeward/issues/278), but only to an accepted token, so the client pre-checks against the value the context last read; with none read yet it reports the `401` as any other. If `exp - iat` exceeds it: "The token lives longer than this server accepts; the identity provider's access-token lifetime must be shortened" |
