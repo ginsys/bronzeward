@@ -1742,6 +1742,7 @@ API revisions:
 | --- | --- |
 | 1 | `v1` as of `GET /server` |
 | 2 | `Bronzeward-Expected-Epoch` on mutations and `412 epoch-mismatch` (§7.2) |
+| 3 | `order` and `tail` on `GET /machines/{id}/timeline` (§9.2) |
 
 ### 9.2 Resources and routes
 
@@ -1794,6 +1795,20 @@ treats the claim (compilation §3.5), and `machine`. On these four, a non-empty
 value that is not one of its kind is `400 invalid-request` and an empty value
 does not filter. A draft update's claim names no machine, so a `machine`
 filter never lists it.
+
+`GET /machines/{id}/timeline` also takes `order`, `oldest` (the default) or
+`newest`; any other value, an empty one included, is `400 invalid-request`. Its
+`next` continues in the page's order, so with `newest` it names older
+entries, and a cursor names its direction: one used with the other order is
+`400 cursor-invalid`. Every answer also carries `tail`, a cursor in `oldest`
+order naming the machine's newest entry, absent while the machine has none.
+One statement reads the page and `tail`, so both come from one snapshot. A
+read from `tail` answers only later entries and misses none that commit
+later: T7 (§5) allocates each revision with
+`UPDATE machine SET revision_counter = revision_counter + 1 ... RETURNING`,
+which holds the machine row's lock to the writer's commit (`nextEntry` in
+`internal/api/observe.go`, and the writers that raise the counter
+themselves), so a machine's entries commit in revision order.
 
 Every `POST`, `PUT` and `DELETE` needs an `Idempotency-Key` (§7). There is no
 route that dispatches, none that issues, rotates or lists automation tokens,

@@ -389,29 +389,89 @@ type timelineEntry struct {
 	Entry    json.RawMessage `json:"entry"`
 }
 
-// listTimeline is GET /machines/{id}/timeline: the machine's entries in revision order, without a
-// response's text or an artifact digest.
+// timelinePage is a timeline's answer: a collection page (§9.1) and tail, the forward cursor
+// naming the newest entry the read saw, absent while the machine has none.
+type timelinePage struct {
+	Items []timelineEntry `json:"items"`
+	Next  string          `json:"next,omitempty"`
+	Tail  string          `json:"tail,omitempty"`
+}
+
+// listTimeline is GET /machines/{id}/timeline: the machine's entries in revision order, oldest
+// first or, with order=newest, newest first, without a response's text or an artifact digest. A
+// newest-first cursor names the last revision listed after a "<", so a cursor used with the
+// other order is refused. The page and tail are one statement, so one snapshot: tail never names
+// an entry the page's read could not see. Every writer takes its revision by updating the
+// machine's revision_counter (nextEntry), whose row lock it holds until it commits, so a
+// machine's entries commit in revision order and a forward read from tail misses none.
 func listTimeline(a *API, w http.ResponseWriter, q *request) {
 	m := q.r.PathValue("id")
 	readIn(a, w, q, func(ctx context.Context, tx *sql.Tx) (string, any, error) {
 		if err := machineNamed(ctx, tx, m); err != nil {
 			return "", nil, err
 		}
-		limit, after, ref := pageSeq(q)
+		limit, after, ref := pageBy(q, func(last string) bool {
+			n, err := strconv.ParseInt(strings.TrimPrefix(last, "<"), 10, 64)
+			return err == nil && n >= 1
+		})
 		if ref != nil {
 			return "", nil, ref
 		}
-		out, err := pageRows(ctx, tx, q, limit, after, `SELECT revision, epoch, at, kind, (entry - 'text' - 'digest')::text
-			FROM machine_event WHERE machine = $3 AND revision > $1::text::bigint ORDER BY revision LIMIT $2`,
-			func(r *sql.Rows) (timelineEntry, string, error) {
-				var e timelineEntry
-				var entry string
-				if err := r.Scan(&e.Revision, &e.Epoch, &e.At, &e.Kind, &entry); err != nil {
-					return e, "", err
-				}
-				e.At, e.Entry = e.At.UTC(), json.RawMessage(entry)
-				return e, strconv.FormatInt(e.Revision, 10), nil
-			}, m)
-		return "", out, err
+		var newest bool
+		if order, set := q.r.URL.Query()["order"]; set { // pageBy allowed it at most once
+			switch order[0] {
+			case "oldest":
+			case "newest":
+				newest = true
+			default:
+				return "", nil, refuse(http.StatusBadRequest, "invalid-request", "order must be oldest or newest")
+			}
+		}
+		if after != "" && strings.HasPrefix(after, "<") != newest {
+			return "", nil, refuse(http.StatusBadRequest, "cursor-invalid", "")
+		}
+		cond, dir, mark := "x.revision > $1", "", ""
+		var from int64 // the forward first page starts after 0, the newest one below the largest bigint
+		if newest {
+			cond, dir, mark, from = "x.revision < $1", " DESC", "<", 1<<63-1
+		}
+		if after != "" {
+			from, _ = strconv.ParseInt(strings.TrimPrefix(after, "<"), 10, 64)
+		}
+		rows, err := tx.QueryContext(ctx, `SELECT t.tail, e.revision, e.epoch, e.at, e.kind, e.entry
+			FROM (SELECT max(revision) AS tail FROM machine_event WHERE machine = $3) t
+			LEFT JOIN LATERAL (SELECT x.revision, x.epoch, x.at, x.kind, (x.entry - 'text' - 'digest')::text AS entry
+				FROM machine_event x WHERE x.machine = $3 AND `+cond+` ORDER BY x.revision`+dir+` LIMIT $2) e ON true
+			ORDER BY e.revision`+dir, from, limit+1, m)
+		if err != nil {
+			return "", nil, err
+		}
+		defer rows.Close()
+		out := timelinePage{Items: []timelineEntry{}}
+		for rows.Next() {
+			var tail, rev sql.NullInt64
+			var e timelineEntry
+			var ep, kind, entry sql.NullString
+			var at sql.NullTime
+			if err := rows.Scan(&tail, &rev, &ep, &at, &kind, &entry); err != nil {
+				return "", nil, err
+			}
+			if tail.Valid {
+				out.Tail = makeCursor(q.epoch, strconv.FormatInt(tail.Int64, 10))
+			}
+			if !rev.Valid {
+				continue // no entry on this side of the cursor: the one row carries only tail
+			}
+			e.Revision, e.Epoch, e.At, e.Kind, e.Entry = rev.Int64, ep.String, at.Time.UTC(), kind.String, json.RawMessage(entry.String)
+			out.Items = append(out.Items, e)
+		}
+		if err := rows.Err(); err != nil {
+			return "", nil, err
+		}
+		if len(out.Items) > limit {
+			out.Items = out.Items[:limit]
+			out.Next = makeCursor(q.epoch, mark+strconv.FormatInt(out.Items[limit-1].Revision, 10))
+		}
+		return "", out, nil
 	})
 }

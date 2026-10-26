@@ -136,7 +136,7 @@ func init() {
 			return true
 		}, func(r *http.Response) {
 			if refused.Load() && on("/server")(r.Request) {
-				rewrite(r, `"apiRevision":2`, `"apiRevision":1`)
+				revisionOne(r)
 			}
 		})
 		r := f.ctl(nil, "", "--context", "trusted", "machine", "list", "--limit", "1", "--all", "-o", "json")

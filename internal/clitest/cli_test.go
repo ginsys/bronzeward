@@ -329,6 +329,17 @@ func rewrite(r *http.Response, old, new string) {
 	r.Header.Set("Content-Length", fmt.Sprint(len(b)))
 }
 
+// servedRevision is a GET /server answer's apiRevision member, whatever revision it names.
+var servedRevision = regexp.MustCompile(`"apiRevision":[0-9]+`)
+
+// revisionOne rewrites a GET /server answer to API revision 1, below the client's minimum.
+func revisionOne(r *http.Response) {
+	b, _ := io.ReadAll(r.Body)
+	b = servedRevision.ReplaceAll(b, []byte(`"apiRevision":1`))
+	r.Body, r.ContentLength = io.NopCloser(bytes.NewReader(b)), int64(len(b))
+	r.Header.Set("Content-Length", fmt.Sprint(len(b)))
+}
+
 func problem(w http.ResponseWriter, status int, code string, extra string) {
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(status)
@@ -382,7 +393,7 @@ var sharedCases = map[string]func(*testing.T, *fixture, *injector){
 	"COMP-01": func(t *testing.T, f *fixture, in *injector) {
 		in.set(nil, func(r *http.Response) {
 			if on("/server")(r.Request) {
-				rewrite(r, `"apiRevision":2`, `"apiRevision":1`)
+				revisionOne(r)
 			}
 		})
 		f.want(f.ctl(nil, "", "--context", "trusted", "whoami"), 1, "API revision 1", "needs revision 2 or later")
