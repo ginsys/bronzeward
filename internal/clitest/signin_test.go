@@ -619,6 +619,18 @@ func TestSignIn(t *testing.T) {
 		if seen := f.idp.revocations(); len(seen) != 0 {
 			t.Errorf("%d revocations sent where discovery names no endpoint", len(seen))
 		}
+		// An issuer edited by hand to plain http off loopback is refused before discovery, so no
+		// on-path host can name the revocation endpoint; the tokens are still deleted.
+		path := filepath.Join(f.home, "bronzeward", "config.yaml")
+		cfg, err := os.ReadFile(path)
+		if err != nil || !strings.Contains(string(cfg), "issuer: "+f.iss.URL+"\n") {
+			t.Fatalf("contexts file: %v, or it does not name the issuer", err)
+		}
+		os.WriteFile(path, []byte(strings.Replace(string(cfg), "issuer: "+f.iss.URL+"\n", "issuer: http://idp.example.invalid\n", 1)), 0o600)
+		f.store(file, tok, "BWSYNTH-rt-9")
+		plain := f.signedIn("--context", "human", "logout")
+		os.WriteFile(path, cfg, 0o600)
+		f.want(plain, 1, "the token file "+file+" is removed", "The refresh token is not revoked", "must be https")
 		// A failed discovery shows the status of a refusal, but neither the provider's reason
 		// phrase nor its body; a refused redirect and another issuer are named as such.
 		for mode, want := range map[string]string{

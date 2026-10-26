@@ -322,8 +322,13 @@ func renewalLock(p string) (func(), error) {
 }
 
 // discover reads the provider's discovery document through issuerClient, within a minute; it
-// returns that client and a context that carries it.
+// returns that client and a context that carries it. The issuer is checked first, as context add
+// checks it: logout reaches here without Open, and a hand-edited plain http issuer would let an
+// on-path host name the endpoint the refresh token is sent to.
 func discover(x *Context) (context.Context, context.CancelFunc, *http.Client, *oidc.Provider, error) {
+	if err := endpoint(x.OIDC.Issuer, "oidc.issuer"); err != nil {
+		return nil, nil, nil, nil, err
+	}
 	hc, err := issuerClient(x)
 	if err != nil {
 		return nil, nil, nil, nil, err
