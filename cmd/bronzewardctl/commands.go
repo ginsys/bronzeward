@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"text/tabwriter"
@@ -14,6 +15,10 @@ import (
 )
 
 func (e *env) contextCmd(args []string) error {
+	args, err := e.parse("context", args, -1, nil)
+	if err != nil {
+		return err
+	}
 	verb := ""
 	if len(args) > 0 {
 		verb, args = args[0], args[1:]
@@ -80,6 +85,14 @@ func (e *env) contextAdd(args []string) error {
 		return err
 	}
 	x.Name = pos[0]
+	// Both paths are kept absolute, so the context works from any directory.
+	for _, p := range []*string{&x.CertificateAuthority, &automationFile} {
+		if *p != "" {
+			if *p, err = filepath.Abs(*p); err != nil {
+				return err
+			}
+		}
+	}
 	if automationFile != "" {
 		x.Automation = &client.Automation{TokenFile: automationFile}
 	}
