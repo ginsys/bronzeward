@@ -311,6 +311,11 @@ func TestLogin(t *testing.T) {
 			"so none is stored", unreached)
 		f.want(f.ctl(nil, "", "context", "remove", "memory"), 0, `Context "memory" removed.`,
 			"The system credential store is not reached, since no D-Bus session bus is named", "so a sign-in another session kept there is not removed.")
+		// A named store that cannot be reached fails the removal of its entry.
+		add(nil, "unreachable")
+		bus := []string{"DBUS_SESSION_BUS_ADDRESS=unix:path=" + filepath.Join(t.TempDir(), "missing")}
+		f.want(f.ctl(bus, "", "context", "remove", "unreachable"), 1, `Context "unreachable" removed.`,
+			`removing the stored sign-in of context "unreachable" from the system credential store`)
 	})
 
 	// T3/T4: the system credential store, a private Secret Service here.
@@ -331,6 +336,19 @@ func TestLogin(t *testing.T) {
 		// Removing the context removes its entry: a context of the same name starts signed out.
 		f.want(login(env, "store"), 0, "kept in the system credential store")
 		f.want(ctl("context", "remove", "store"), 0, `Context "store" removed.`)
+		add(env, "store")
+		f.want(ctl("--context", "store", "whoami"), 1, "nothing is stored in the system credential store")
+		// context remove deletes the entry under the renewal lock, after a renewal holding it.
+		f.want(login(env, "store"), 0, "kept in the system credential store")
+		lock := filepath.Join(f.home, ".local", "state", "bronzeward", "store.renewal.lock")
+		unlock := hold(t, lock)
+		var r result
+		var wg sync.WaitGroup
+		wg.Go(func() { r = ctl("context", "remove", "store") })
+		waiting(t, lock, 1)
+		unlock()
+		wg.Wait()
+		f.want(r, 0, `Context "store" removed.`)
 		add(env, "store")
 		f.want(ctl("--context", "store", "whoami"), 1, "nothing is stored in the system credential store")
 		// An entry left under a context edited to automation is never read for it.
