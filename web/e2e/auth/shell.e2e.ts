@@ -1,0 +1,108 @@
+// COMP-01, COMP-02 (conformance/cases/) and the shell's header, navigation and states: the fixture
+// page against the server that trusts the fixture issuer, through the injector.
+import { $, $$, browser, expect } from "@wdio/globals";
+import { deprecated, incompatible } from "../../src/shell.tsx";
+import { TRANSPORT_FAILURE } from "../../src/request.ts";
+import { CONTROL, FIXTURE_API, FIXTURE_PAGE } from "../auth.conf.ts";
+import type { Faults } from "../injector.ts";
+import { faults, fixtureSignIn, mint, seen, settled, storageEmpty, where } from "./helpers.ts";
+
+const SERVER = /^Server .+, API revision \d+$/;
+const testid = (id: string) => $(`[data-testid="${id}"]`);
+const nav = (title: string) => $('nav[aria-label="Main"]').$(`a=${title}`);
+
+// Loads the page without waiting for it to settle, so a state on the way can be read.
+async function load(f: Faults) {
+  expect((await fetch(`${CONTROL}/next?human=h-viewer`)).ok).toBe(true);
+  await faults(f);
+  await browser.url(`${FIXTURE_PAGE}/`);
+}
+
+// Shown as a status message, which assistive technology announces without moving focus. Looked up
+// again on each try: one state's message replaces the one before it.
+async function announced(id: string, text: string | RegExp) {
+  const shows = async () => {
+    const el = await testid(id);
+    if (!(await el.isExisting())) return false;
+    const t = await el.getText().catch(() => "");
+    return typeof text === "string" ? t === text : text.test(t);
+  };
+  await browser.waitUntil(shows, { timeout: 20_000, timeoutMsg: `${id} did not show ${String(text)}` });
+  expect(await testid(id).getAttribute("role")).toBe("status");
+}
+
+describe("the shell", () => {
+  it("shows the identity, roles and epoch GET /identity serves, and navigates by path", async () => {
+    expect(await fixtureSignIn("h-viewer")).toMatch(SERVER);
+    const res = await fetch(`${FIXTURE_API}/api/v1/identity`, { headers: { Authorization: `Bearer ${mint("h-viewer")}` } });
+    const served = (await res.json()) as { roles: string[]; epoch: string };
+    expect(await testid("principal").getText()).toBe("Signed in as h-viewer");
+    expect(await testid("roles").getText()).toBe(`Roles: ${served.roles.join(", ")}`);
+    expect(await testid("epoch").getText()).toBe(`Epoch ${served.epoch}`);
+    expect(await $("footer").getText()).toMatch(/^Client .+\. Server .+, API revision \d+$/);
+    expect(await nav("Machines").getAttribute("aria-current")).toBe("page");
+    await nav("Plans").click();
+    await expect($("main h2")).toHaveText("Plans");
+    expect(await where()).toBe(`${FIXTURE_PAGE}/plans`);
+    expect(await nav("Plans").getAttribute("aria-current")).toBe("page");
+    await browser.execute(() => history.back());
+    await expect($("main h2")).toHaveText("Machines");
+    expect(await where()).toBe(`${FIXTURE_PAGE}/`);
+    // The server's version first (§7 item 3), the header's identity on each page.
+    expect(await seen()).toEqual(["/server", "/identity", "/identity", "/identity"]);
+  });
+
+  it("COMP-01: a server below the client's minimum API revision is refused before any other read, both revisions named", async () => {
+    expect(await fixtureSignIn("h-viewer", {}, { revision: 1 })).toBe(incompatible(1));
+    expect(await testid("principal").isExisting()).toBe(false);
+    expect(await $("nav").isExisting()).toBe(false);
+    expect(await testid("server").getText()).toMatch(/^Server .+, API revision 1$/);
+    expect(await seen()).toEqual(["/server"]);
+  });
+
+  it("COMP-02: a Deprecation header is shown once per page load, naming the route", async () => {
+    await fixtureSignIn("h-viewer", {}, { deprecate: "/identity" });
+    await announced("deprecation", deprecated("/api/v1/identity"));
+    await nav("Audit").click();
+    await expect($("main h2")).toHaveText("Audit");
+    await nav("Sources").click();
+    await expect($("main h2")).toHaveText("Sources");
+    expect(await seen()).toEqual(["/server", "/identity", "/identity", "/identity"]);
+    expect(await $$('[data-testid="deprecation"]').length).toBe(1);
+  });
+});
+
+describe("the state catalogue", () => {
+  it("loading", async () => {
+    await load({ hold: { path: "/identity", ms: 4000 } });
+    await announced("status", "Loading your identity");
+    expect(await settled(FIXTURE_PAGE)).toMatch(SERVER);
+  });
+
+  it("disconnected: no answer the page can read, the server's version unknown", async () => {
+    expect(await fixtureSignIn("h-viewer", {}, { redirect: "/server" })).toBe(TRANSPORT_FAILURE);
+    expect(await testid("status").getAttribute("role")).toBe("status");
+    expect(await testid("server").getText()).toBe("Server unknown");
+  });
+
+  it("error: the problem's code, detail and instance", async () => {
+    expect(await fixtureSignIn("h-viewer", {}, { missing: "/identity" })).toBe("Not read: not-found. Not found: injected Request req-injected.");
+    expect(await testid("status").getAttribute("role")).toBe("status");
+    expect(await testid("server").getText()).toMatch(SERVER);
+  });
+
+  it("offline: the last data stays under the banner until a read answers again", async () => {
+    await fixtureSignIn("h-viewer");
+    await faults({ redirect: "/identity" });
+    await nav("Operations").click();
+    await announced("offline", /^Offline since \d\d:\d\d\. Showing data read at \d\d:\d\d\. Actions are disabled\.$/);
+    expect(await testid("principal").getText()).toBe("Signed in as h-viewer");
+    await faults({});
+    await nav("Changes").click();
+    await expect($("main h2")).toHaveText("Changes");
+    await expect(testid("offline")).not.toBeExisting({ wait: 10_000 });
+    expect(await testid("status").isExisting()).toBe(false);
+  });
+});
+
+afterEach(storageEmpty);

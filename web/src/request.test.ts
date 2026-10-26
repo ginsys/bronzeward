@@ -53,6 +53,17 @@ describe("request options", () => {
     expect(await c.read("/server")).toEqual({ kind: "transport" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  test("§7 item 4: a Deprecation header is told once per route, on any answer, named without its query", async () => {
+    const deprecated = (r: Response) => (r.headers.set("Deprecation", "@1767225600"), r);
+    const routes: string[] = [];
+    const { c } = client([deprecated(ok([])), deprecated(ok([])), deprecated(problem(404, "not-found")), ok({})], { onDeprecation: (r) => routes.push(r) });
+    await c.read("/machines?cluster=c1");
+    await c.read("/machines");
+    await c.read("/machines/m1");
+    await c.read("/server");
+    expect(routes).toEqual([`${API_BASE}/machines`, `${API_BASE}/machines/m1`]);
+  });
 });
 
 describe("§8.2 read rows", () => {
