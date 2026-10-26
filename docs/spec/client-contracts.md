@@ -857,8 +857,10 @@ an earlier epoch (`internal/auth/automation.go:47-52`).
 The server answers every token it does not accept with the same `401` and no detail
 (`internal/api/api.go:314-322`, `internal/api/problem.go:76-79`). The client may add what it can
 read locally, labelled as its own reading, never as the server's reason. The web interface shows
-W1's text, "Not accepted by this installation. Sign in again.", for every `401`, with its local
-reading below it; the texts below that name a context, and the expired-token text, are the CLI's
+W1's text, "Not accepted by this installation. Sign in again.", for every `401 unauthenticated`
+that its one renewal ([§9.5](#95-renewal) item 1) does not clear, with its local reading below it;
+a `401` with another body follows [§8.2](#82-errors)'s rows. The texts below that name a context,
+and the expired-token text, are the CLI's
 (lead decision on consistency, 26 October 2026, under the owner's 2026-10-07 grant).
 
 | Case | What the server does | Client behaviour (**Proposed**) |
