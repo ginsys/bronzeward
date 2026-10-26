@@ -60,7 +60,7 @@ scope whose state refuses it, with that reason.
 Refusal variants, each saying only what the server's answer establishes: `401` ("Not accepted
 by this installation. Sign in again."), whatever the cause, since the server does not say
 whether issuer, audience, expiry or signature failed; `403 identity-revoked` ("Your access was
-revoked"); `503` ("Authentication could not reach the identity provider or the database; nothing was
+revoked or is denied by this installation; contact a recovery administrator."); `503` ("Authentication could not reach the identity provider or the database; nothing was
 committed"); and, from
 `GET /identity` (gap G1), no roles ("You are signed in but hold no Bronzeward role"). A local
 reading, such as "your token expired at 10:15 by this browser's clock", is labelled as the
@@ -358,7 +358,7 @@ Set aside:  Your sign-in or the installation's epoch changed. A change with an u
             and repeating it stays disabled. [Show current state]
 Offline:    Offline since 10:12. Showing data read at 10:11. Actions are disabled.
 Human only: This action needs a person signed in; automation tokens cannot approve.
-Not accepted: Your sign-in was not accepted (it may have expired). [Sign in again] — text
+Not accepted: Not accepted by this installation. Sign in again. [Sign in again] — text
             you have not sent is kept on this page.
 ```
 
