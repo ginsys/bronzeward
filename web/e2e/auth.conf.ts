@@ -115,7 +115,12 @@ function control(provider: Provider, next: { grant: Grant }): Server {
     const human = url.searchParams.get("human") ?? "";
     const args = ["mint", "-key", `${state}/fixture.key`, "-issuer", FIXTURE_ISSUER, "-human", human];
     for (const f of ["defect", "without-group"]) if (url.searchParams.has(f)) args.push(`-${f}`, url.searchParams.get(f)!);
-    next.grant = { access: execFileSync(`${root}bin/oidc-fixture`, args).toString().trim(), sub: human };
+    // A failed mint fails the spec that asked for it, not the launcher, whose cleanup must still run.
+    try {
+      next.grant = { access: execFileSync(`${root}bin/oidc-fixture`, args).toString().trim(), sub: human };
+    } catch (e) {
+      return res.writeHead(500).end(String(e));
+    }
     provider.counts.authorize = provider.counts.refresh = provider.counts.revoke = 0;
     res.end();
   });
