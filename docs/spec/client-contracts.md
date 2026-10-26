@@ -780,7 +780,8 @@ current token expires
    ([§5](#5-endpoint-discovery-and-context-selection));
    only in a context that has it may `BRONZEWARD_TOKEN_FILE` override its path. The CLI writes
    that file and clears it as its own stored credential ([§8.2](#82-errors)), and refuses to
-   write or clear a file that holds an automation token (`bwt_`).
+   write or clear a file that holds an automation token (`bwt_`) or anything else that is not
+   its own document; `login` checks the file before the sign-in starts and again before writing.
 4. No token is printed, written to the configuration file, passed in argv or placed in an
    environment variable by the CLI. No command prints a token.
 5. `whoami` shows the issuer and subject from the token's claims, read without verification and
