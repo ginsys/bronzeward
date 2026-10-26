@@ -1,9 +1,14 @@
 // PAGE-01, PAGE-02 (conformance/cases/) and the machines and clusters views: the fixture page
 // against a disposable deployment through the injector, with synthetic clusters and machines
-// recorded through the API as h-author.
+// recorded through the API as h-author. The deployment has no Talos node, so W3's machine and
+// observation reads with drift, releases and observations are synthetic bodies the injector
+// serves in place of the server's, typed by the generated API types.
 import { randomBytes } from "node:crypto";
 import { $, $$, browser, expect } from "@wdio/globals";
 import { REVOKED } from "../../src/app.tsx";
+import { short } from "../../src/list.tsx";
+import { HEALTH, type Observation, sentences } from "../../src/machine.tsx";
+import type { Machine } from "../../src/machines.tsx";
 import { EPOCH_CHANGED, TRANSPORT_FAILURE } from "../../src/request.ts";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
 import { answers, faults, fixtureSignIn, mint, param, release, seen, storageEmpty, where } from "./helpers.ts";
@@ -17,10 +22,10 @@ async function disposable(q = "start=normal"): Promise<string> {
 }
 
 let keys = 0;
-async function write(at: string, path: string, body: object): Promise<{ id: string }> {
+async function write(at: string, path: string, body: object, human = "h-author"): Promise<{ id: string }> {
   const res = await fetch(`${at}/api/v1${path}`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${mint("h-author")}`, "Content-Type": "application/json", "Idempotency-Key": `inventory-${Date.now()}-${keys++}` },
+    headers: { Authorization: `Bearer ${mint(human)}`, "Content-Type": "application/json", "Idempotency-Key": `inventory-${Date.now()}-${keys++}` },
     body: JSON.stringify(body),
   });
   expect(res.status).toBe(201);
@@ -239,6 +244,77 @@ describe("the machines", () => {
     await release();
     await statusIs(REVOKED);
     expect(await $('[data-testid="principal"]').isExisting()).toBe(false);
+  });
+});
+
+const texts = (sel: string) => $$(sel).map((el) => el.getText());
+const timelineReads = async (id: string) => (await answers()).filter((a) => a.startsWith(`/machines/${id}/timeline`)).length;
+
+describe("the machine detail (W3)", () => {
+  it("the §2.4 sentences, each observation's unread causes and the timeline, never a healthy state", async () => {
+    const at = await disposable();
+    const cl = await cluster(at, "lab-a");
+    const [id] = await machines(at, cl.id, 1);
+    await write(at, `/machines/${id}/freezes`, { reason: "synthetic incident" });
+    // Synthetic reads: the drift opened by obs_k, observed (highest basis that read the digest)
+    // obs_m equal to the selected release, and a later read obs_p that could not read.
+    const rel = (c: string) => `rel_${c.repeat(26)}`;
+    const obs = (c: string, basis: number, at: string, unread: Observation["unread"] = {}): Observation => ({
+      id: `obs_${c.repeat(26)}`, machine: id!, basis, revision: basis + 1, purpose: "scheduled", publicationGeneration: null, plan: null,
+      operation: null, endpoint: "192.0.2.1:50000", controller: `ctl_${"c".repeat(26)}`, startedAt: at, at, access: null, smbiosUuid: null,
+      talosNodeId: "synthetic-node-0", talosClusterId: null, assignmentEvidence: null, runningVersion: null, resourceVersion: null, health: null, unread,
+    });
+    const k = obs("k", 2, "2026-10-26T08:41:00Z");
+    const m1 = obs("m", 4, "2026-10-26T08:46:00Z");
+    const p = obs("p", 5, "2026-10-26T08:51:00Z", { configDigest: { code: "unreachable", cause: "node unreachable" } });
+    const machine: Machine = {
+      id: id!, cluster: cl.id, hardware: { smbiosUuid: null, talosNodeId: "synthetic-node-0", serial: null }, platform: "metal", talosEndpoint: "192.0.2.1:50000",
+      desired: rel("b"), applied: { release: rel("a"), source: "operation" }, pendingConvergence: true,
+      observed: { observation: m1.id, at: m1.at, release: rel("b") }, frozen: true, scopeState: "normal",
+      openDrift: { revision: 3, observation: k.id, lastObservation: m1.id, lateLanding: null },
+    };
+    expect(await fixtureSignIn("h-viewer", {}, { upstream: at, bodies: { [`/machines/${id}`]: machine, [`/machines/${id}/observations`]: { items: [k, m1, p] } } })).toMatch(SERVER);
+    await $(`a[title="${id}"]`).click();
+    await expect($("main h2")).toHaveText(`Machine ${id}`);
+    const said = await texts('[data-testid="sentences"] li');
+    expect(said).toEqual(sentences(machine, [p, m1, k]));
+    expect(said[0]).toMatch(new RegExp(`^Drifted since \\d\\d:\\d\\d: a read differed from what Bronzeward last verified \\(${short(rel("a"))}\\)\\.$`));
+    expect(said).toContain("It equals the selected release; that does not close the drift.");
+    expect(said).toEqual(expect.arrayContaining([expect.stringMatching(/^The latest read at \d\d:\d\d could not read: node unreachable\.$/)]));
+    expect(said.at(-1)).toBe(HEALTH);
+    // Pending convergence is not stated while the drift is open (§2.4: they are different).
+    expect(said.join(" ")).not.toContain("Pending convergence");
+    expect(await texts('[data-testid="observations"] tbody tr td:last-child')).toEqual(["node unreachable", "nothing", "nothing"]);
+    // The principal is the identity Bronzeward recorded for h-author, shortened (G23).
+    await expect($('[data-testid="timeline"]')).toHaveText(expect.stringMatching(/freeze idn_[a-z2-7]{4}…[a-z2-7]{4} author "synthetic incident"/), { wait: 20_000 });
+    expect(await $("main").getText()).not.toMatch(/healthy|converged/i);
+  });
+
+  it("a machine never read: the absent fields said so, without a time; the timeline polled every 5 s or slower while shown", async function () {
+    this.timeout(90_000);
+    const at = await disposable();
+    const cl = await cluster(at, "lab-a");
+    const [id] = await machines(at, cl.id, 1);
+    expect(await fixtureSignIn("h-viewer", {}, { upstream: at })).toMatch(SERVER);
+    await $(`a[title="${id}"]`).click();
+    await expect($("main h2")).toHaveText(`Machine ${id}`);
+    expect(await texts('[data-testid="sentences"] li')).toEqual(["No configuration read recorded.", "Not applied or adopted by Bronzeward.", "No release selected.", HEALTH]);
+    await expect($("main")).toHaveText(expect.stringContaining("No observation recorded."));
+    // A freeze made outside the page reaches the shown timeline by a poll.
+    await write(at, `/machines/${id}/freezes`, { reason: "synthetic poll check" });
+    await expect($('[data-testid="timeline"]')).toHaveText(expect.stringContaining('"synthetic poll check"'), { wait: 20_000 });
+    const before = await timelineReads(id!);
+    await browser.pause(11_000);
+    const polled = (await timelineReads(id!)) - before;
+    expect(polled).toBeGreaterThanOrEqual(1);
+    expect(polled).toBeLessThanOrEqual(3);
+    // Off screen, no more polls.
+    await $('nav[aria-label="Main"]').$("a=Machines").click();
+    await expect($("main h2")).toHaveText("Machines");
+    await browser.pause(1000); // a poll sent just before leaving is still answered
+    const left = await timelineReads(id!);
+    await browser.pause(6_000);
+    expect(await timelineReads(id!)).toBe(left);
   });
 });
 
