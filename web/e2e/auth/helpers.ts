@@ -35,7 +35,7 @@ export async function fixtureSignIn(human: string, flags: Record<string, string>
   return settled(FIXTURE_PAGE);
 }
 
-export const counts = async (): Promise<{ authorize: number; refresh: number }> => (await fetch(`${CONTROL}/counts`)).json() as never;
+export const counts = async (): Promise<{ authorize: number; refresh: number; revoke: number }> => (await fetch(`${CONTROL}/counts`)).json() as never;
 
 // Signs the test provider's page in as human: the page sends the browser to the provider, which has
 // no login UI here; the case completes the authorization request through the Session API, as the

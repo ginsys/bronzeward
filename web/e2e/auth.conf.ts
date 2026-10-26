@@ -4,7 +4,8 @@
 //     (AUTH-01, AUTH-08).
 //   - B trusts the synthetic provider (provider.ts), which hands out tokens the fixture issuer mints
 //     on the spec's request, defects included (AUTH-02, AUTH-03, AUTH-05, AUTH-10).
-// The mise task runs it under the database lock and removes the databases with the processes.
+// It removes the databases with the processes, and fails the run when it cannot; then the state
+// directory, which names them, is kept.
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -27,6 +28,8 @@ export const DENIED = "h-approver";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
 const state = `${root}.dev/browser-auth`;
+// wdio.conf.ts has checked it.
+const canary = process.env["BW_WEB_CANARY"]!;
 
 // The test provider's variables, as mise run dev-idp writes them.
 export function idpEnv(): Record<string, string> {
@@ -111,12 +114,16 @@ function control(provider: Provider, next: { grant: Grant }): Server {
     const args = ["mint", "-key", `${state}/fixture.key`, "-issuer", FIXTURE_ISSUER, "-human", human];
     for (const f of ["defect", "without-group"]) if (url.searchParams.has(f)) args.push(`-${f}`, url.searchParams.get(f)!);
     next.grant = { access: execFileSync(`${root}bin/oidc-fixture`, args).toString().trim(), sub: human };
-    provider.counts.authorize = provider.counts.refresh = 0;
+    provider.counts.authorize = provider.counts.refresh = provider.counts.revoke = 0;
     res.end();
   });
 }
 
 async function prepare() {
+  // Anything left on these ports from an earlier run would answer the readiness checks below.
+  for (const at of ["127.0.0.1:58443", "127.0.0.1:58448", FIXTURE_ISSUER.slice(7), CONTROL.slice(7), FIXTURE_API.slice(7), IDP_API.slice(7), KEYS]) {
+    if (await fetch(`http://${at}/`).then(() => true, () => false)) throw new SevereServiceError(`something already answers on ${at}`);
+  }
   rmSync(state, { recursive: true, force: true });
   mkdirSync(state, { recursive: true });
   const idp = idpEnv();
@@ -124,11 +131,14 @@ async function prepare() {
   const keys = start("oidc-fixture", ["serve", "-key", `${state}/fixture.key`, "-issuer", FIXTURE_ISSUER, "-listen", KEYS]);
   await ready(`http://${KEYS}/jwks`, keys);
   const next = { grant: { access: "", sub: "" } };
-  const provider = await startProvider({ issuer: FIXTURE_ISSUER, pageOrigin: FIXTURE_PAGE, clientId: "synthetic-web-client", next: () => next.grant, keys: `http://${KEYS}`, refresh: true });
+  const provider = await startProvider({ issuer: FIXTURE_ISSUER, pageOrigin: FIXTURE_PAGE, clientId: "synthetic-web-client", next: () => next.grant, keys: `http://${KEYS}`, refresh: canary });
   servers.push(provider.server);
   const ctl = control(provider, next);
+  await new Promise<void>((resolve, reject) => {
+    ctl.once("error", reject);
+    ctl.listen(Number(new URL(CONTROL).port), "127.0.0.1", resolve);
+  });
   servers.push(ctl);
-  await new Promise<void>((r) => ctl.listen(Number(new URL(CONTROL).port), "127.0.0.1", r));
 
   const a = server("idp", IDP_API.slice(7), `issuer: ${idp["BW_TEST_IDP_ISSUER"]}\naudience: "${idp["BW_TEST_IDP_PROJECT"]}"`, "  deniedSubjects: []");
   const b = server("fixture", FIXTURE_API.slice(7), `issuer: ${FIXTURE_ISSUER}\naudience: bronzeward`, `  deniedSubjects: [{iss: "${FIXTURE_ISSUER}", sub: ${DENIED}}]`);
@@ -144,18 +154,31 @@ async function prepare() {
   await ready("http://127.0.0.1:58448/", hb);
 }
 
-function cleanup() {
-  for (const p of procs) p.kill();
-  for (const s of servers) s.close();
-  procs.length = servers.length = 0;
+// Stopped, and killed after 10 s if it is still running.
+function stop(p: ChildProcess): Promise<void> {
+  return new Promise((resolve) => {
+    if (p.exitCode !== null || p.signalCode !== null) return resolve();
+    const kill = setTimeout(() => p.kill("SIGKILL"), 10_000);
+    p.once("exit", () => (clearTimeout(kill), resolve()));
+    p.kill();
+  });
+}
+
+async function cleanup() {
   // Each server must be gone before its database can be dropped.
-  for (const db of databases.splice(0)) {
+  await Promise.all(procs.splice(0).map(stop));
+  await Promise.all(servers.splice(0).map((s) => new Promise((r) => (s.closeAllConnections(), s.close(r)))));
+  const left = databases.filter((db) => {
     try {
       execFileSync("dropdb", [...PG, "--force", db]);
+      return false;
     } catch (e) {
       console.error(`dropdb ${db}: ${String(e)}`);
+      return true;
     }
-  }
+  });
+  databases.length = 0;
+  if (left.length > 0) throw new Error(`databases left behind: ${left.join(", ")} (named in ${state})`);
   rmSync(state, { recursive: true, force: true });
 }
 
@@ -167,7 +190,7 @@ export const config: WebdriverIO.Config = {
     try {
       await prepare();
     } catch (e) {
-      cleanup();
+      await cleanup().catch((c: unknown) => console.error(String(c)));
       throw e instanceof SevereServiceError ? e : new SevereServiceError(String(e));
     }
   },

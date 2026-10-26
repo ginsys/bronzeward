@@ -1,10 +1,10 @@
-// AUTH-02, AUTH-03, AUTH-05 and AUTH-10 (conformance/cases/): the fixture page signed in with
-// tokens the fixture issuer mints, against a server that trusts it.
+// AUTH-02, AUTH-03, AUTH-05, AUTH-10 and AUTH-08's revocation (conformance/cases/): the fixture
+// page signed in with tokens the fixture issuer mints, against a server that trusts it.
 import { randomUUID } from "node:crypto";
 import { $, browser, expect } from "@wdio/globals";
 import { NOT_ACCEPTED, REVOKED } from "../../src/app.tsx";
-import { FIXTURE_API, FIXTURE_ISSUER } from "../auth.conf.ts";
-import { counts, fixtureSignIn, mint, storageEmpty } from "./helpers.ts";
+import { FIXTURE_API, FIXTURE_ISSUER, FIXTURE_PAGE } from "../auth.conf.ts";
+import { counts, fixtureSignIn, mint, storageEmpty, where } from "./helpers.ts";
 
 const reading = () => $('[data-testid="reading"]');
 const ALL_ROLES = "viewer or author or publisher or approver or recovery-admin";
@@ -55,6 +55,15 @@ describe("a token the server refuses with 403", () => {
   it("AUTH-10: a subject in deniedSubjects is handled as AUTH-05", async () => {
     expect(await fixtureSignIn("h-approver")).toBe(REVOKED);
     await noLoop();
+  });
+});
+
+describe("signing out", () => {
+  it("AUTH-08: the sign-out button revokes the refresh token once (this provider has no end-session endpoint)", async () => {
+    await fixtureSignIn("h-viewer");
+    await $("button=Sign out").click();
+    await browser.waitUntil(async () => (await where()) === `${FIXTURE_PAGE}/signed-out`, { timeout: 20_000, timeoutMsg: "the page did not reach the signed-out page" });
+    expect((await counts()).revoke).toBe(1);
   });
 });
 

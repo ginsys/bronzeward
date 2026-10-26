@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, test, vi } from "vitest";
-import { beginSignIn, claims, completeSignIn, discover, localReading, PENDING_KEY, type Provider, returnPath, Session, SIGNED_OUT_PATH, type Tokens } from "./auth.ts";
+import { beginSignIn, claims, completeSignIn, discover, localReading, PENDING_KEY, type Provider, renewDelay, returnPath, Session, SIGNED_OUT_PATH, type Tokens } from "./auth.ts";
 import type { ClientConfig } from "./config.ts";
 
 const ORIGIN = "http://localhost:58443";
@@ -111,7 +111,7 @@ describe("§9.3 item 1 authorization request", () => {
 
 describe("§9.3 item 1 callback", () => {
   const tokenAnswer = (nonce: string, extra: Record<string, unknown> = {}) =>
-    json({ access_token: "SYNTH-access", refresh_token: "SYNTH-refresh", expires_in: 300, id_token: jwt({ iss: ISSUER, aud: ["web", "p1"], sub: "u1", nonce, ...extra }) });
+    json({ access_token: "SYNTH-access", refresh_token: "SYNTH-refresh", expires_in: 300, id_token: jwt({ iss: ISSUER, aud: ["web", "p1"], sub: "u1", nonce, exp: 4_000_000_000, ...extra }) });
 
   test("exchanges the code with the verifier and deletes the pending entry", async () => {
     const { storage, pending } = await begun();
@@ -160,6 +160,18 @@ describe("§9.3 item 1 callback", () => {
     const f = answers([tokenAnswer(pending["nonce"]!, extra)]);
     const res = await completeSignIn(config, provider, `?code=c1&state=${pending["state"]}`, { storage, origin: ORIGIN, fetch: f as unknown as typeof fetch });
     expect(res).toEqual({ kind: "invalid", reason: "the ID token does not match this sign-in" });
+  });
+
+  test.each([
+    ["has expired", { exp: 1 }],
+    ["expires now", { exp: 2 }],
+    ["carries no expiry", { exp: undefined }],
+    ["carries a text expiry", { exp: "4000000000" }],
+  ])("an ID token that %s is refused", async (_name, extra) => {
+    const { storage, pending } = await begun();
+    const f = answers([tokenAnswer(pending["nonce"]!, extra)]);
+    const res = await completeSignIn(config, provider, `?code=c1&state=${pending["state"]}`, { storage, origin: ORIGIN, fetch: f as unknown as typeof fetch, now: () => 2000 });
+    expect(res).toEqual({ kind: "invalid", reason: "the ID token has expired or carries no expiry" });
   });
 
   test("a refused exchange, a cut-off answer and an answer without an access token", async () => {
@@ -261,5 +273,12 @@ test("§9.6 the browser's own reading of a refused token", () => {
   expect(localReading(jwt({ iss: "https://other", aud: "bronzeward", exp }), config, now)).toBe(`the token is from https://other; this page expects ${ISSUER}`);
   expect(localReading(jwt({ iss: ISSUER, aud: "other", exp }), config, now)).toBe("the token is not issued for bronzeward; the identity provider needs an audience mapping");
   expect(localReading(jwt({ iss: ISSUER, aud: "bronzeward", exp: now / 1000 }), config, now)).toBe("the token expired at 2026-10-26T00:00:00.000Z");
+  expect(localReading(jwt({ iss: ISSUER, aud: "bronzeward", exp: -1e100 }), config, now)).toBeUndefined();
   expect(localReading("opaque", config, now)).toBeUndefined();
+});
+
+test("§9.5 item 1 renews 60 s before expiry, never sooner than half the remaining lifetime", () => {
+  expect(renewDelay(300_000, 0)).toBe(240_000);
+  expect(renewDelay(30_000, 0)).toBe(15_000);
+  expect(renewDelay(1_000, 2_000)).toBe(0);
 });
