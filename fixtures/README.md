@@ -114,7 +114,7 @@ deployments. Everything in it is synthetic.
 ```sh
 mise run dev-db          # the self-test's database
 mise run dev-idp         # prints the issuer, project ID (the audience) and client IDs
-mise run go-idp          # the self-test, internal/api/idp_test.go
+mise run go-idp          # the self-test, internal/api/idp_test.go and internal/clitest/login_idp_test.go
 mise run dev-idp-down    # its containers, network and .dev/idp/; mise run dev-down does this too
 ```
 
