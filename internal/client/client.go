@@ -186,8 +186,10 @@ func (c *Client) once(path string) (*Response, bool, error) {
 }
 
 // observe applies the response headers every answer may carry: the epoch (§8.5), the recovery
-// header and a deprecation (§7 item 4), shown once per route.
+// header and a deprecation (§7 item 4), shown once per route: the method and path, without the
+// query, so the pages of one list warn once.
 func (c *Client) observe(route string, r *http.Response) {
+	route, _, _ = strings.Cut(route, "?")
 	if e := r.Header.Get("Bronzeward-Epoch"); e != "" && e != c.Context.LastEpoch {
 		if c.Context.LastEpoch != "" {
 			fmt.Fprintf(c.Notices, "%s: The installation entered recovery mode or was restored; what was read before may no longer hold.\n", c.Context.Where())
