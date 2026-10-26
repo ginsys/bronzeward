@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, test, vi } from "vitest";
-import { beginSignIn, claims, completeSignIn, discover, localReading, PENDING_KEY, type Provider, RENEW_BEFORE_MS, returnPath, Session, SIGNED_OUT_PATH, type Tokens } from "./auth.ts";
+import { beginSignIn, claims, completeSignIn, discover, localReading, PENDING_KEY, type Provider, returnPath, Session, SIGNED_OUT_PATH, type Tokens } from "./auth.ts";
 import type { ClientConfig } from "./config.ts";
 
 const ORIGIN = "http://localhost:58443";
@@ -178,21 +178,14 @@ describe("§9.3 item 1 callback", () => {
 const tokens = (over: Partial<Tokens> = {}): Tokens => ({ iss: ISSUER, sub: "u1", access: "SYNTH-a1", refresh: "SYNTH-r1", expiresAt: 300_000, ...over });
 
 describe("§9.5 renewal", () => {
-  test("due when less than 60 s remains, by the page's clock", () => {
-    let now = 300_000 - RENEW_BEFORE_MS;
-    const s = new Session(config, provider, tokens(), { now: () => now });
-    expect(s.renewalDue()).toBe(false);
-    now++;
-    expect(s.renewalDue()).toBe(true);
-  });
-
-  test("one renewal at a time, with the rotated pair kept", async () => {
+  test("one renewal at a time, with the rotated pair kept and its expiry by the page's clock", async () => {
     const f = answers([json({ access_token: "SYNTH-a2", refresh_token: "SYNTH-r2", expires_in: 300 })]);
     const s = new Session(config, provider, tokens(), { fetch: f as unknown as typeof fetch, now: () => 10_000 });
     expect(await Promise.all([s.renew(), s.renew()])).toEqual([true, true]);
     expect(f).toHaveBeenCalledTimes(1);
     expect(form(f.mock.calls[0]![1])).toEqual({ grant_type: "refresh_token", refresh_token: "SYNTH-r1", client_id: "web" });
     expect(s.token()).toBe("SYNTH-a2");
+    expect(s.expiresAt).toBe(10_000 + 300_000);
     expect(s.expiresAt).toBe(310_000);
     const g = answers([json({ access_token: "SYNTH-a3", refresh_token: "SYNTH-r3", expires_in: 300 })]);
     const t = new Session(config, provider, tokens({ refresh: "SYNTH-r2" }), { fetch: g as unknown as typeof fetch });

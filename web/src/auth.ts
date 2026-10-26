@@ -21,10 +21,7 @@ export interface Provider {
   endSessionEndpoint: string | undefined;
 }
 
-export interface Principal {
-  iss: string;
-  sub: string;
-}
+export type Principal = { iss: string; sub: string };
 
 export interface Tokens extends Principal {
   access: string;
@@ -110,12 +107,7 @@ export interface CallbackDeps {
 }
 
 // The callback: the pending entry is deleted first, whatever the answer (§9.3 item 1).
-export async function completeSignIn(
-  config: ClientConfig,
-  provider: Provider,
-  search: string,
-  deps: CallbackDeps,
-): Promise<{ kind: "ok"; tokens: Tokens; returnTo: string } | Failure> {
+export async function completeSignIn(config: ClientConfig, provider: Provider, search: string, deps: CallbackDeps): Promise<{ kind: "ok"; tokens: Tokens; returnTo: string } | Failure> {
   const raw = deps.storage.getItem(PENDING_KEY);
   deps.storage.removeItem(PENDING_KEY);
   const pending = readPending(raw);
@@ -178,10 +170,6 @@ export class Session {
     return this.#tokens?.access;
   }
 
-  renewalDue(): boolean {
-    return this.#tokens !== undefined && this.#tokens.expiresAt - this.now() < RENEW_BEFORE_MS;
-  }
-
   // §9.5: one renewal at a time. A refresh token is sent at most once: after any failure, its
   // rotation may already have happened, so it is dropped and the current token used until refused
   // (item 3). False also when there is none to send: the page renews by the redirect instead.
@@ -217,12 +205,7 @@ export class Session {
     this.#tokens = undefined;
     if (t?.refresh !== undefined && this.provider.revocationEndpoint !== undefined) {
       try {
-        await (this.opts.fetch ?? fetch)(this.provider.revocationEndpoint, {
-          ...NO_STORE,
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({ token: t.refresh, token_type_hint: "refresh_token", client_id: this.config.webClientId }),
-        });
+        await (this.opts.fetch ?? fetch)(this.provider.revocationEndpoint, post({ token: t.refresh, token_type_hint: "refresh_token", client_id: this.config.webClientId }));
       } catch {
         // Unreachable: the token stays valid at the provider until it expires; nothing to retry here.
       }
@@ -239,22 +222,14 @@ export class Session {
   }
 }
 
-interface TokenBody {
-  access_token: string;
-  refresh_token?: string;
-  id_token?: string;
-  expires_in: number;
-}
+type TokenBody = { access_token: string; refresh_token?: string; id_token?: string; expires_in: number };
+
+const post = (form: Record<string, string>): RequestInit => ({ ...NO_STORE, method: "POST", body: new URLSearchParams(form) });
 
 async function tokenRequest(provider: Provider, form: Record<string, string>, fetchImpl: typeof fetch = fetch): Promise<{ kind: "ok"; body: TokenBody } | Failure> {
   let res: Response;
   try {
-    res = await fetchImpl(provider.tokenEndpoint, {
-      ...NO_STORE,
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams(form),
-    });
+    res = await fetchImpl(provider.tokenEndpoint, post(form));
   } catch {
     return { kind: "transport" };
   }
