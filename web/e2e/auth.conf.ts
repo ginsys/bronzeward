@@ -43,6 +43,8 @@ export function idpEnv(): Record<string, string> {
 const procs: ChildProcess[] = [];
 const servers: Server[] = [];
 const databases: string[] = [];
+// Set once this run has made the state directory; before that it may be another run's.
+let ownState = false;
 
 function start(bin: string, args: string[]): ChildProcess {
   const p = spawn(`${root}bin/${bin}`, args, { stdio: "inherit" });
@@ -126,6 +128,7 @@ async function prepare() {
   }
   rmSync(state, { recursive: true, force: true });
   mkdirSync(state, { recursive: true });
+  ownState = true;
   const idp = idpEnv();
   execFileSync(`${root}bin/oidc-fixture`, ["keygen", "-out", `${state}/fixture.key`]);
   const keys = start("oidc-fixture", ["serve", "-key", `${state}/fixture.key`, "-issuer", FIXTURE_ISSUER, "-listen", KEYS]);
@@ -177,9 +180,11 @@ async function cleanup() {
       return true;
     }
   });
-  databases.length = 0;
+  // A later cleanup tries them again, and keeps the state directory while any is left.
+  databases.splice(0, databases.length, ...left);
   if (left.length > 0) throw new Error(`databases left behind: ${left.join(", ")} (named in ${state})`);
-  rmSync(state, { recursive: true, force: true });
+  if (ownState) rmSync(state, { recursive: true, force: true });
+  ownState = false;
 }
 
 export const config: WebdriverIO.Config = {
