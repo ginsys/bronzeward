@@ -2600,7 +2600,9 @@ That insert skips the `deniedSubjects` check: §10.4 has the operator list a
 subject before revoking it, so the check would leave such a subject
 unrecordable. The row it creates is revoked by the same request.
 A service identity's row is created by the command-line tool with its token
-(§10.2). No human or automation principal
+(§10.2). The tool creates the row of the responsible human it records and of
+the operator given to it the same way when they have none, with the same
+`deniedSubjects` check. No human or automation principal
 has an OpenBao identity (design §13.7 item 1, derived).
 
 **Pending owner choice BW-335-display-1: a human's display name.** The row
@@ -2621,13 +2623,12 @@ owner's choice, recorded in §17.40 once made. Options:
   subject; an access token need not carry either claim, so the member may be
   `null` throughout; a row created without the subject's token has no name
   until the subject's own admitted request: the token tool creates the rows
-  of a responsible human and its operator (§10.2), and an identity revocation
-  creates a row it revokes at once, whose subject never signs in again, so
-  that row never has one (§10.4); and a refresh writes the principal row,
-  which the token tool, identity revocation and the acts that read the
-  acting principal `FOR SHARE` lock (§10.2, §10.3, §10.4), so where the
-  write runs, and how it orders with those locks (§5), is part of the
-  choice.
+  of the responsible human and of the operator given to it (above), and an
+  identity revocation creates a row it revokes at once, whose subject never
+  signs in again, so that row never has one (§10.4); and a refresh writes
+  the principal row, so it contends with every transaction that locks that
+  row (§5); where the write runs, and how it orders with them, is part of
+  the choice.
 - (c) names kept in a table of their own, maintained by an operator. Names a
   user cannot change; but this specification names no source or route that
   fills the table, and the choice would have to add one.
