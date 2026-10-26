@@ -61,6 +61,17 @@ describe("§9.5 renewals", () => {
     expect(h.renew).toHaveBeenCalledTimes(2);
   });
 
+  // #388: the holder renewed for another tab, whose request was due first.
+  test("a timer whose pair was renewed meanwhile waits for the new threshold", async () => {
+    const h = harness();
+    await vi.advanceTimersByTimeAsync(30_000);
+    h.s.expiresAt += 300_000;
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(h.renew).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(h.renew).toHaveBeenCalledTimes(1);
+  });
+
   // R7-F1: a refusal while a renewal is in flight; the renewal then succeeds.
   test.each([
     ["the timer's", () => void vi.advanceTimersByTime(60_000)],
