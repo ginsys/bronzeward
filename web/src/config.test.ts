@@ -6,8 +6,24 @@ const answer = (body: unknown, status = 200) => vi.fn(async () => new Response(J
 
 test("reads the four members from the page's own origin, no-store, refusing redirects", async () => {
   const f = answer({ ...valid, extra: 1 });
-  expect(await loadClientConfig(f)).toEqual({ kind: "ok", config: valid });
+  expect(await loadClientConfig(f)).toEqual({ kind: "ok", config: { ...valid, scopes: [] } });
   expect(f).toHaveBeenCalledWith(CLIENT_CONFIG_PATH, { cache: "no-store", redirect: "error", credentials: "omit" });
+});
+
+test("scopes: a space-separated string of extra scopes", async () => {
+  const res = await loadClientConfig(answer({ ...valid, scopes: " urn:example:aud  profile " }));
+  expect(res).toEqual({ kind: "ok", config: { ...valid, scopes: ["urn:example:aud", "profile"] } });
+});
+
+test.each([
+  [["a", "b"], "scopes is not a string"],
+  ["  ", "scopes is empty"],
+  ["openid urn:x", "scopes repeats openid, which is always requested"],
+  ["offline_access", "scopes repeats offline_access, which is always requested"],
+  ["a\tb", "scopes holds a character a scope cannot"],
+  ['a"b', "scopes holds a character a scope cannot"],
+])("scopes %j is a configuration error", async (scopes, reason) => {
+  expect(await loadClientConfig(answer({ ...valid, scopes }))).toEqual({ kind: "invalid", reason: `${CLIENT_CONFIG_PATH}: ${reason}` });
 });
 
 test.each(["issuer", "audience", "cliClientId", "webClientId"])("refuses a file without %s", async (m) => {
