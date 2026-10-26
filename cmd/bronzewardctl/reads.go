@@ -230,6 +230,9 @@ func (e *env) machineShow(c *client.Client, id string) error {
 	if err != nil {
 		return err
 	}
+	if e.output == "json" || e.output == "yaml" { // the resource alone; the sentences are the table's
+		return e.emit(r.Body, nil)
+	}
 	items, err := c.List("/machines/" + url.PathEscape(id) + "/observations")
 	if err != nil {
 		return err
@@ -242,6 +245,7 @@ func (e *env) machineShow(c *client.Client, id string) error {
 	return e.emit(r.Body, func(w *tabwriter.Writer) {
 		fmt.Fprintf(w, "Machine\t%s\tcluster %s\n", m.Id, m.Cluster)
 		fmt.Fprintf(w, "Endpoint\t%s\tplatform %s\n", m.TalosEndpoint, m.Platform)
+		fmt.Fprintf(w, "Hardware\tnode ID %s\tSMBIOS UUID %s\n", deref(m.Hardware.TalosNodeId), deref(m.Hardware.SmbiosUuid))
 		fmt.Fprintf(w, "Scope\t%s\n", m.ScopeState)
 		for _, s := range sentences(m, obs) {
 			fmt.Fprintln(w, s)
@@ -380,8 +384,9 @@ func (e *env) statusCmd(args []string) error {
 						scopes = append(scopes, s.Machine+" "+s.State)
 					}
 				}
-				mode += fmt.Sprintf(" (epoch %s). Scopes: %s", rec.Epoch, count(scopes))
+				mode += ". Scopes: " + count(scopes)
 			}
+			fmt.Fprintf(w, "Epoch\t%s\n", rec.Epoch)
 			fmt.Fprintf(w, "Recovery mode\t%s\n", mode)
 			fmt.Fprintf(w, "Open drift\t%s\n", count(ids))
 			var opIDs []string

@@ -11,8 +11,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // httpClient follows client-contracts.md §6: TLS 1.2 at least, host names verified, the context's
@@ -47,6 +49,11 @@ func newHTTPClient(x *Context, verbose io.Writer, from func(*http.Request) (*url
 			fmt.Fprintf(verbose, "%s: through the proxy %s\n", r.URL.Host, u.Redacted())
 		}
 		if u.Scheme == "https" {
+			// Go dials an internationalized name by its ASCII form, which the dialer would not
+			// find below and would reach without TLS.
+			if strings.IndexFunc(u.Hostname(), func(r rune) bool { return r >= utf8.RuneSelf }) >= 0 {
+				return nil, fmt.Errorf("the https proxy %s: give its host name in ASCII (punycode)", u.Redacted())
+			}
 			plain := *u
 			plain.Scheme = "http"
 			if plain.Port() == "" {
@@ -67,7 +74,13 @@ func newHTTPClient(x *Context, verbose io.Writer, from func(*http.Request) (*url
 		pc := tls.Client(conn, &tls.Config{MinVersion: tls.VersionTLS12, ServerName: name.(string), RootCAs: proxyRoots})
 		if err := pc.HandshakeContext(ctx); err != nil {
 			conn.Close()
-			return nil, fmt.Errorf("the proxy %s, verified by the system trust store: %v", addr, err)
+			var v *tls.CertificateVerificationError
+			if errors.As(err, &v) && len(v.UnverifiedCertificates) > 0 {
+				c := v.UnverifiedCertificates[0]
+				return nil, &trust{fmt.Errorf("the certificate of the proxy %s (subject %q, issuer %q) is not trusted by the system trust store: %v; nothing was sent",
+					addr, c.Subject, c.Issuer, v.Err)}
+			}
+			return nil, fmt.Errorf("the proxy %s, verified by the system trust store: %w", addr, err)
 		}
 		return pc, nil
 	}
