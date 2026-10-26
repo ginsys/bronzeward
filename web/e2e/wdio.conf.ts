@@ -56,8 +56,11 @@ export const config: WebdriverIO.Config = {
     });
     await new Promise<void>((resolve) => target!.listen(58444, "127.0.0.1", resolve));
     // Every token carries the run's canary, so the artifact scan finds any token an artifact keeps.
+    // Severe, so that a provider port held by an earlier run stops the run instead of its specs.
     ({ server: provider } = await startProvider({
       issuer: FAKE_ISSUER, pageOrigin: PAGE_ORIGIN, clientId: "synthetic-web-client", next: () => ({ access: `${canary}-access`, sub: "h-synthetic" }),
+    }).catch((e: unknown) => {
+      throw new SevereServiceError(`the synthetic provider did not start: ${String(e)}`);
     }));
     // A host left from an earlier run would answer the readiness check below with an old build.
     const hostUrl = `${PAGE_ORIGIN.replace("localhost", "127.0.0.1")}/`;

@@ -160,6 +160,8 @@ export interface SessionOptions {
 export class Session {
   #tokens: Tokens | undefined;
   #renewing: Promise<boolean> | undefined;
+  // §9.3 item 3: the provider issued no rotating refresh token, so renewal is the redirect.
+  #byRedirect: boolean;
 
   constructor(
     private readonly config: ClientConfig,
@@ -168,6 +170,13 @@ export class Session {
     private readonly opts: SessionOptions = {},
   ) {
     this.#tokens = tokens;
+    this.#byRedirect = tokens.refresh === undefined;
+  }
+
+  // True when the page renews by a full-page sign-in redirect before expiry, never after a
+  // refresh that failed: that one keeps the current token until refused (§9.5 item 3).
+  get renewsByRedirect(): boolean {
+    return this.#tokens !== undefined && this.#byRedirect;
   }
 
   get principal(): Principal | undefined {
@@ -204,8 +213,20 @@ export class Session {
       return false;
     }
     const id = typeof answer.body.id_token === "string" ? claims(answer.body.id_token) : undefined;
-    const after = { iss: typeof id?.["iss"] === "string" ? id["iss"] : current.iss, sub: typeof id?.["sub"] === "string" ? id["sub"] : current.sub };
+    let after = { iss: typeof id?.["iss"] === "string" ? id["iss"] : current.iss, sub: typeof id?.["sub"] === "string" ? id["sub"] : current.sub };
+    // No ID token in the answer: the two access tokens, which the server reads, say whether the
+    // account changed.
+    const [was, now] = id === undefined ? [claims(current.access), claims(answer.body.access_token)] : [];
+    if (was !== undefined && typeof now?.["iss"] === "string" && typeof now["sub"] === "string" && (was["iss"] !== now["iss"] || was["sub"] !== now["sub"])) {
+      after = { iss: now["iss"], sub: now["sub"] };
+    }
     this.#tokens = toTokens(answer.body, after, this.now());
+    // §9.3 item 3: a refresh token that did not rotate is not sent again (item 1's "used once");
+    // the next renewal is the redirect.
+    if (this.#tokens.refresh === undefined || this.#tokens.refresh === refresh) {
+      this.#tokens.refresh = undefined;
+      this.#byRedirect = true;
+    }
     if (after.iss !== current.iss || after.sub !== current.sub) this.opts.onPrincipalChange?.({ iss: current.iss, sub: current.sub }, after);
     return true;
   }
