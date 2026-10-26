@@ -153,7 +153,7 @@ func ClearTokens(p string, match func(*Tokens) bool) (*Tokens, error) {
 	if _, err := os.Lstat(p); errors.Is(err, os.ErrNotExist) {
 		return nil, nil // nothing to clear, so no lock file is made either
 	}
-	unlock, err := renewalLock(p)
+	unlock, err := renewalLock(p + ".lock")
 	if err != nil {
 		return nil, err
 	}
@@ -171,8 +171,8 @@ func ClearTokens(p string, match func(*Tokens) bool) (*Tokens, error) {
 	return t, err
 }
 
-// ErrOtherSignIn: the token file holds another sign-in than the one ClearTokens was to clear.
-var ErrOtherSignIn = errors.New("the token file holds another sign-in now")
+// ErrOtherSignIn: the store holds another sign-in than the one a clear was to remove.
+var ErrOtherSignIn = errors.New("another sign-in is stored now")
 
 // Claims are an access token's payload, read without verification: the client's own reading
 // (§9.2 item 5, §9.6), never the server's reason.
@@ -219,23 +219,27 @@ func (c *Claims) ExpiresAt() time.Time { return time.Unix(int64(c.Expiry), 0) }
 
 // signIn is an OIDC context's sign-in for one command.
 type signIn struct {
-	file   string
+	store  *store
 	tokens *Tokens
 	failed bool // a renewal failed; this command does not try again
 }
 
-// openSignIn reads the context's stored sign-in.
-func openSignIn(x *Context) (*signIn, error) {
-	s := &signIn{file: x.TokenFile()}
-	if s.file == "" {
-		return nil, errors.New("not signed in: this context has no token file (oidc.tokenFile), and this bronzewardctl cannot sign in by itself yet")
-	}
-	t, err := ReadTokens(s.file)
-	if err != nil {
+// openSignIn reads the context's stored sign-in. Without a store (D2 (a)) each command signs in
+// for itself, unless --no-input forbids it.
+func openSignIn(x *Context, noInput bool, prompts io.Writer) (*signIn, error) {
+	s := &signIn{store: openStore(x)}
+	t, err := s.store.load()
+	switch {
+	case err != nil:
 		return nil, err
-	}
-	if t == nil {
-		return nil, fmt.Errorf("not signed in: the token file %s does not exist", s.file)
+	case t == nil && s.store.none == "":
+		return nil, fmt.Errorf("not signed in: nothing is stored in %s; sign in with bronzewardctl login", s.store.kept())
+	case t == nil && noInput:
+		return nil, fmt.Errorf("not signed in: the sign-in is kept in %s, so each command signs in for itself, which --no-input forbids", s.store.kept())
+	case t == nil:
+		if t, err = Login(x, false, prompts); err != nil {
+			return nil, err
+		}
 	}
 	s.tokens = t
 	return s, nil
@@ -254,22 +258,22 @@ func (s *signIn) expiring() bool {
 func (c *Client) renew() (err error) {
 	s := c.signIn
 	defer func() { s.failed = s.failed || err != nil }()
-	unlock, err := renewalLock(s.file)
+	unlock, err := s.store.lock()
 	if err != nil {
 		return err
 	}
 	defer unlock()
 	old := s.tokens
-	t, err := ReadTokens(s.file)
+	t, err := s.store.load()
 	if err != nil {
 		return err
 	}
-	if t == nil {
+	if t == nil && s.store.none == "" {
 		// Logout or an identity-revoked answer removed it meanwhile: never write it back.
 		s.tokens = &Tokens{AccessToken: old.AccessToken}
 		return errors.New("the stored sign-in was removed meanwhile, so it is not renewed")
 	}
-	if *t != *old {
+	if t != nil && *t != *old {
 		c.adopt(t)
 		return nil
 	}
@@ -285,7 +289,7 @@ func (c *Client) renew() (err error) {
 		t.RefreshToken = ""
 		fmt.Fprintf(c.Notices, "%s: the identity provider did not rotate the refresh token, so none is kept; sign in again when this access token expires.\n", c.Context.Where())
 	}
-	if err := WriteTokens(s.file, t); err != nil {
+	if err := s.store.save(t); err != nil {
 		return err
 	}
 	c.adopt(t)
@@ -302,14 +306,14 @@ func (c *Client) adopt(t *Tokens) {
 	c.signIn.tokens, c.token = t, t.AccessToken
 }
 
-// renewalLock takes the token file's renewal lock (§9.2 item 3): the file p.lock beside it, which
-// holds nothing secret. It belongs to the file, not the context, so contexts that share a token
-// file (BRONZEWARD_TOKEN_FILE overrides every one) renew one at a time.
-func renewalLock(p string) (func(), error) {
-	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+// renewalLock takes a renewal lock (§9.2 item 3), the file l, which holds nothing secret. A token
+// file's is the file p.lock beside it: it belongs to the file, not the context, so contexts that
+// share a token file (BRONZEWARD_TOKEN_FILE overrides every one) renew one at a time.
+func renewalLock(l string) (func(), error) {
+	if err := os.MkdirAll(filepath.Dir(l), 0o700); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(p+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	f, err := os.OpenFile(l, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
 	}
@@ -320,11 +324,11 @@ func renewalLock(p string) (func(), error) {
 	return func() { f.Close() }, nil
 }
 
-// discover reads the provider's discovery document through issuerClient, within a minute; it
-// returns that client and a context that carries it. The issuer is checked first, as context add
+// discover reads the provider's discovery document through issuerClient; it returns that client
+// and a context that carries it, which ends after d. The issuer is checked first, as context add
 // checks it: logout reaches here without Open, and a hand-edited plain http issuer would let an
 // on-path host name the endpoint the refresh token is sent to.
-func discover(x *Context) (context.Context, context.CancelFunc, *http.Client, *oidc.Provider, error) {
+func discover(x *Context, d time.Duration) (context.Context, context.CancelFunc, *http.Client, *oidc.Provider, error) {
 	if err := endpoint(x.OIDC.Issuer, "oidc.issuer"); err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -332,7 +336,7 @@ func discover(x *Context) (context.Context, context.CancelFunc, *http.Client, *o
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	ctx, cancel := context.WithTimeout(oidc.ClientContext(context.Background(), hc), time.Minute)
+	ctx, cancel := context.WithTimeout(oidc.ClientContext(context.Background(), hc), d)
 	p, err := oidc.NewProvider(ctx, x.OIDC.Issuer)
 	if err != nil {
 		cancel()
@@ -368,7 +372,7 @@ var ErrNoRevocation = errors.New("the identity provider offers no revocation end
 // token elsewhere, or turn the POST into a GET whose 200 revokes nothing. Only the status and the
 // provider's error code are shown, never its response body.
 func Revoke(x *Context, rt string) error {
-	ctx, cancel, hc, p, err := discover(x)
+	ctx, cancel, hc, p, err := discover(x, time.Minute)
 	if err != nil {
 		return err
 	}
@@ -410,30 +414,15 @@ func Revoke(x *Context, rt string) error {
 
 // refresh redeems the refresh token at the provider's token endpoint, found by its discovery.
 func refresh(x *Context, rt string) (*Tokens, error) {
-	ctx, cancel, _, p, err := discover(x)
+	i, cancel, err := openIDP(x, time.Minute)
 	if err != nil {
 		return nil, err
 	}
 	defer cancel()
-	// A public client sends its ID in the form; auto-detection would redeem a refused token twice.
-	ep := p.Endpoint()
-	if err := providerEndpoint(ep.TokenURL, "the identity provider's token_endpoint"); err != nil {
-		return nil, err
-	}
-	ep.AuthStyle = oauth2.AuthStyleInParams
-	conf := oauth2.Config{ClientID: x.OIDC.ClientID, Endpoint: ep, Scopes: x.OIDC.Scopes}
-	t, err := conf.TokenSource(ctx, &oauth2.Token{RefreshToken: rt}).Token()
-	var re *oauth2.RetrieveError
-	var ue *url.Error
-	switch {
-	case errors.As(err, &re):
-		// The provider's own error code only: its response body is not shown.
-		return nil, fmt.Errorf("the identity provider %s refused the renewal: %s", x.OIDC.Issuer, refusal(re.Response.StatusCode, re.ErrorCode))
-	case errors.As(err, &ue), errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
-		return nil, fmt.Errorf("renewing at the identity provider %s: %w", x.OIDC.Issuer, remoteFailure(err))
-	case err != nil:
-		// oauth2 quotes an answer it cannot decode, a token included.
-		return nil, fmt.Errorf("renewing at the identity provider %s: its answer could not be read", x.OIDC.Issuer)
+	// AuthStyleInParams (openIDP): auto-detection would redeem a refused token twice.
+	t, err := i.conf.TokenSource(i.ctx, &oauth2.Token{RefreshToken: rt}).Token()
+	if err != nil {
+		return nil, i.refusal(x, "renewal", "renewing", err)
 	}
 	return &Tokens{AccessToken: t.AccessToken, RefreshToken: t.RefreshToken}, nil
 }
@@ -489,10 +478,10 @@ func (c *Client) signedIn(p *Problem) {
 	switch {
 	case p.Status == http.StatusUnauthorized:
 		p.Reading = c.reading()
-	case p.Code() == "identity-revoked" && c.signIn.file != "":
+	case p.Code() == "identity-revoked" && c.signIn.store.none == "":
 		// Only the refused identity's sign-in is cleared: another process may have stored a new
 		// sign-in, for another subject or issuer, while this request was in flight.
-		t, err := ClearTokens(c.signIn.file, func(t *Tokens) bool { return sameIdentity(t.AccessToken, c.token) })
+		t, err := c.signIn.store.clear(func(t *Tokens) bool { return sameIdentity(t.AccessToken, c.token) })
 		switch {
 		case errors.Is(err, ErrOtherSignIn):
 			if now := ReadClaims(t.AccessToken); now != nil {

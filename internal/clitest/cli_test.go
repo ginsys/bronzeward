@@ -79,6 +79,12 @@ var tokenPattern = regexp.MustCompile(`bwt_\S+`)
 
 func start(t *testing.T, roles string) *fixture {
 	t.Helper()
+	return startFor(t, roles, "", "bronzeward")
+}
+
+// startFor is start with the server trusting issuerURL for audience; "" is the fixture issuer.
+func startFor(t *testing.T, roles, issuerURL, audience string) *fixture {
+	t.Helper()
 	_, dsn := dbtest.New(t)
 	f := &fixture{t: t, bin: binaries(t), home: t.TempDir()}
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -89,8 +95,11 @@ func start(t *testing.T, roles string) *fixture {
 	l.Close()
 	f.base = "http://" + addr
 	f.iss, f.idp = serveIssuer(t)
+	if issuerURL == "" {
+		issuerURL = f.iss.URL
+	}
 	cfg := filepath.Join(t.TempDir(), "bronzeward.yaml")
-	body := "listen: " + addr + "\ndatabase:\n  dsn: " + dsn + "\nauth:\n  oidc:\n    issuer: " + f.iss.URL + "\n    audience: bronzeward\n" +
+	body := "listen: " + addr + "\ndatabase:\n  dsn: " + dsn + "\nauth:\n  oidc:\n    issuer: " + issuerURL + "\n    audience: " + audience + "\n" +
 		"  roles: {viewer: [bw-viewers], author: [bw-authors], publisher: [bw-publishers], approver: [bw-approvers], recovery-admin: [bw-recovery]}\n" +
 		"  deniedSubjects: [{iss: \"" + f.iss.URL + "\", sub: h-denied}]\n" +
 		"execution: {maxTransportDeadline: 5m}\n"

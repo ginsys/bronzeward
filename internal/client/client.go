@@ -54,7 +54,7 @@ func Open(x *Context, in TokenInput, notices, verbose io.Writer) (*Client, error
 		if in.File != "" || in.Stdin {
 			return nil, x.fail(errors.New("--token-file and --token-stdin take an automation token; this context signs in"))
 		}
-		if c.signIn, err = openSignIn(x); err != nil {
+		if c.signIn, err = openSignIn(x, in.NoInput, notices); err != nil {
 			return nil, x.fail(err)
 		}
 		c.token = c.signIn.tokens.AccessToken

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -21,127 +20,6 @@ import (
 	"github.com/ginsys/bronzeward/internal/client"
 )
 
-// provider adds a token and a revocation endpoint to the fixture issuer, which has neither
-// (client-contracts.md G19), so renewal and logout can be tested: answer redeems a refresh token,
-// and calls counts the redemptions; query is added to the token endpoint, and seen is the query
-// the last redemption came with. revocation answers a revocation, a 302 redirecting to a page that
-// answers a GET with 200, and revoked lists their forms; while it is nil, discovery names no
-// revocation endpoint. endpoint, when set, is the revocation_endpoint discovery names instead.
-// discovery, when set, breaks discovery: "down" answers 503 with a body of control characters,
-// "moved" redirects to plain http off loopback, and "other" names another issuer.
-type provider struct {
-	discovery  string
-	mu         sync.Mutex
-	answer     func(rt string) (int, any)
-	calls      atomic.Int32
-	query      string
-	seen       string
-	revocation func() (int, any)
-	revoked    []url.Values
-	endpoint   any
-}
-
-func (p *provider) set(answer func(rt string) (int, any)) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.answer = answer
-	p.calls.Store(0)
-}
-
-func (p *provider) revoking(answer func() (int, any)) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.revocation, p.revoked = answer, nil
-}
-
-// revocations is what the revocation endpoint was sent since revoking.
-func (p *provider) revocations() []url.Values {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.revoked
-}
-
-// wrap serves the issuer's discovery with the endpoints added, the endpoints, and the issuer's
-// other paths unchanged.
-func (p *provider) wrap(iss *issuer.Issuer) http.Handler {
-	inner := iss.Handler()
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
-		rec := httptest.NewRecorder()
-		inner.ServeHTTP(rec, r)
-		var d map[string]any
-		json.Unmarshal(rec.Body.Bytes(), &d)
-		p.mu.Lock()
-		switch p.discovery {
-		case "down":
-			p.mu.Unlock()
-			w.WriteHeader(http.StatusServiceUnavailable)
-			w.Write([]byte("\x1b[2J down"))
-			return
-		case "moved":
-			p.mu.Unlock()
-			http.Redirect(w, r, "http://idp.example.invalid/.well-known/openid-configuration", http.StatusFound)
-			return
-		case "other":
-			d["issuer"] = "https://idp.example.invalid"
-		}
-		d["token_endpoint"] = iss.URL + "/token" + p.query
-		if p.revocation != nil {
-			d["revocation_endpoint"] = iss.URL + "/revoke"
-		}
-		if p.endpoint != nil {
-			d["revocation_endpoint"] = p.endpoint
-		}
-		p.mu.Unlock()
-		writeJSON(w, http.StatusOK, d)
-	})
-	mux.HandleFunc("GET /revoked", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, http.StatusOK, map[string]any{}) })
-	mux.HandleFunc("POST /revoke", func(w http.ResponseWriter, r *http.Request) {
-		r.ParseForm()
-		p.mu.Lock()
-		answer := p.revocation
-		p.revoked = append(p.revoked, r.PostForm)
-		p.mu.Unlock()
-		if answer == nil {
-			http.NotFound(w, r)
-			return
-		}
-		status, body := answer()
-		if status == http.StatusFound {
-			http.Redirect(w, r, "/revoked", status)
-			return
-		}
-		writeJSON(w, status, body)
-	})
-	mux.HandleFunc("POST /token", func(w http.ResponseWriter, r *http.Request) {
-		r.ParseForm()
-		p.calls.Add(1)
-		p.mu.Lock()
-		answer := p.answer
-		p.seen = r.URL.RawQuery
-		p.mu.Unlock()
-		if answer == nil || r.PostForm.Get("grant_type") != "refresh_token" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_grant"})
-			return
-		}
-		status, body := answer(r.PostForm.Get("refresh_token"))
-		writeJSON(w, status, body)
-	})
-	mux.Handle("/", inner)
-	return mux
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
-}
-
-// issued is a token endpoint answer: access token at, refresh token rt.
-func issued(at, rt string) (int, any) {
-	return http.StatusOK, map[string]any{"access_token": at, "token_type": "Bearer", "expires_in": 300, "refresh_token": rt}
-}
-
 // jwtPattern finds a JWT; refreshPattern the synthetic refresh tokens these tests store.
 var jwtPattern, refreshPattern = regexp.MustCompile(`eyJ[\w-]+\.eyJ[\w-]+\.`), regexp.MustCompile(`BWSYNTH-rt-\d`)
 
@@ -149,11 +27,7 @@ var jwtPattern, refreshPattern = regexp.MustCompile(`eyJ[\w-]+\.eyJ[\w-]+\.`), r
 // output (§9.2 item 4).
 func (f *fixture) signedIn(args ...string) result {
 	f.t.Helper()
-	r := f.ctl(nil, "", args...)
-	if jwtPattern.MatchString(r.out+r.err) || refreshPattern.MatchString(r.out+r.err) {
-		f.t.Errorf("bronzewardctl %v printed a sign-in token:\nstdout: %s\nstderr: %s", args, r.out, r.err)
-	}
-	return r
+	return f.scan(f.exec(nil, "", args...), args)
 }
 
 // mint is a fixture human's token, f.Fatal on an error.
@@ -301,7 +175,7 @@ func init() {
 			t.Errorf("the token file is still there: %v", err)
 		}
 		in.set(nil, nil)
-		f.want(f.signedIn("--context", "human", "whoami"), 1, "not signed in", "does not exist")
+		f.want(f.signedIn("--context", "human", "whoami"), 1, "not signed in", "nothing is stored")
 		if seen := in.requests(); len(seen) != 0 {
 			t.Errorf("the injector saw %v after the sign-in was cleared", seen)
 		}
@@ -322,7 +196,7 @@ func TestSignIn(t *testing.T) {
 	whoami := func() result { return f.signedIn("--context", "human", "whoami") }
 
 	t.Run("token file", func(t *testing.T) {
-		f.want(whoami(), 1, "not signed in: the token file "+file+" does not exist")
+		f.want(whoami(), 1, "not signed in: nothing is stored in the token file "+file)
 		f.store(file, f.mint("h-viewer", ""), "")
 		f.want(f.signedIn("--context", "human", "--token-file", f.tokenFile, "whoami"), 1, "this context signs in")
 		os.Chmod(file, 0o644)
