@@ -32,7 +32,8 @@ func printable(s string) string {
 }
 
 // printableError is err with its text made printable; errors.Is and errors.As still find what err
-// wraps. Every transport or TLS error the client shows passes through it (#380).
+// wraps. Every transport or TLS error the client shows passes through it or, for a trust refusal,
+// through printable (#380).
 func printableError(err error) error {
 	if err == nil {
 		return nil

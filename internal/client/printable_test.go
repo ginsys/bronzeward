@@ -241,6 +241,9 @@ func TestServerTextIsPrintable(t *testing.T) {
 		"/api/v1/redirect":        fmt.Sprintf(reason, 302, "Location: /elsewhere\r\nContent-Length: 0\r\n", ""),
 		"/api/v1/cut":             fmt.Sprintf(reason, 418, "Content-Length: 10\r\n", "ab"),
 	})
+	moved := rawServer(t, map[string]string{
+		"/livez": fmt.Sprintf(reason, 302, "Location: /elsewhere\r\nContent-Length: 0\r\n", ""),
+	})
 	x := &Context{Name: "lab", Server: srv, Credential: "automation"}
 	hc, err := httpClient(x, nil)
 	if err != nil {
@@ -250,8 +253,9 @@ func TestServerTextIsPrintable(t *testing.T) {
 	once := func(path string) error { _, _, err := c.once(path); return err }
 	_, fetchErr := FetchClientConfig(x, srv, nil)
 	for name, err := range map[string]error{
-		"live": Live(x, nil), "client configuration": fetchErr,
-		"not a problem": once("/plain"), "redirect": once("/redirect"), "cut-off answer": once("/cut"),
+		"live": Live(x, nil), "live redirect": Live(&Context{Name: "lab", Server: moved, Credential: "automation"}, nil),
+		"client configuration": fetchErr,
+		"not a problem":        once("/plain"), "redirect": once("/redirect"), "cut-off answer": once("/cut"),
 	} {
 		if err == nil || hostile(err.Error()) || !strings.Contains(err.Error(), `BWSYNTH-\x1b[2J\x07phrase`) {
 			t.Errorf("%s: %q; want the reason phrase escaped", name, err)
