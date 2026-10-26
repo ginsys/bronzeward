@@ -80,10 +80,10 @@ func newHTTPClient(x *Context, verbose io.Writer, from func(*http.Request) (*url
 			var v *tls.CertificateVerificationError
 			if errors.As(err, &v) && len(v.UnverifiedCertificates) > 0 {
 				c := v.UnverifiedCertificates[0]
-				return nil, &trust{fmt.Errorf("the certificate of the proxy %s (subject %q, issuer %q) is not trusted by the system trust store: %v; nothing was sent",
-					addr, c.Subject, c.Issuer, v.Err)}
+				return nil, &trust{fmt.Errorf("the certificate of the proxy %s (subject %q, issuer %q) is not trusted by the system trust store: %s; nothing was sent",
+					addr, c.Subject, c.Issuer, printable(v.Err.Error()))}
 			}
-			return nil, fmt.Errorf("the proxy %s, verified by the system trust store: %w", addr, err)
+			return nil, fmt.Errorf("the proxy %s, verified by the system trust store: %w", addr, printableError(err))
 		}
 		return pc, nil
 	}
@@ -99,16 +99,17 @@ func newHTTPClient(x *Context, verbose io.Writer, from func(*http.Request) (*url
 type trust struct{ error }
 
 // transportError names the host, the presented certificate's subject and issuer and the trust
-// source when verification refused the server (§6 item 4); the request was not sent.
+// source when verification refused the server (§6 item 4); the request was not sent. Its text, and
+// any other transport error's, is printable.
 func transportError(x *Context, host string, err error) error {
 	var v *tls.CertificateVerificationError
 	if !errors.As(err, &v) || len(v.UnverifiedCertificates) == 0 {
-		return err
+		return printableError(err)
 	}
 	c, source := v.UnverifiedCertificates[0], "the system trust store"
 	if x.CertificateAuthority != "" {
 		source = "the bundle " + x.CertificateAuthority
 	}
-	return &trust{fmt.Errorf("the certificate of %s (subject %q, issuer %q) is not trusted by %s: %v; nothing was sent",
-		host, c.Subject, c.Issuer, source, v.Err)}
+	return &trust{fmt.Errorf("the certificate of %s (subject %q, issuer %q) is not trusted by %s: %s; nothing was sent",
+		host, c.Subject, c.Issuer, source, printable(v.Err.Error()))}
 }

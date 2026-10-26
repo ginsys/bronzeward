@@ -300,7 +300,11 @@ it. It holds no secret.
 3. No option disables verification, in configuration or on the command line, and no environment
    variable does. An operator with a private CA adds the bundle to the context.
 4. A verification failure names the host, the subject and issuer of the presented certificate and
-   the trust source used, and sends nothing.
+   the trust source used, and sends nothing. What a TLS or transport error shows that the remote
+   side chose, such as a certificate's DNS names, which may hold any ASCII, is shown with each
+   control character and each byte that is not UTF-8 escaped (`\x1b`), so it cannot write to the
+   terminal. This holds toward the server and toward the identity provider, in discovery and in
+   renewal (`internal/client/printable.go`).
 5. Certificate pinning is not offered: a bundle per context limits trust enough for this
    milestone, and pinning a leaf breaks on every renewal.
 6. The browser uses the browser's own trust and has no override.

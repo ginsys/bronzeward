@@ -296,7 +296,7 @@ func refresh(x *Context, rt string) (*Tokens, error) {
 	defer cancel()
 	p, err := oidc.NewProvider(ctx, x.OIDC.Issuer)
 	if err != nil {
-		return nil, fmt.Errorf("cannot reach the identity provider %s: %w", x.OIDC.Issuer, err)
+		return nil, fmt.Errorf("cannot reach the identity provider %s: %w", x.OIDC.Issuer, printableError(err))
 	}
 	// A public client sends its ID in the form; auto-detection would redeem a refused token twice.
 	ep := p.Endpoint()
@@ -311,7 +311,7 @@ func refresh(x *Context, rt string) (*Tokens, error) {
 		// The provider's own error code only: its response body is not shown.
 		return nil, fmt.Errorf("the identity provider %s refused the renewal: %s %s", x.OIDC.Issuer, re.Response.Status, re.ErrorCode)
 	} else if err != nil {
-		return nil, fmt.Errorf("renewing at the identity provider %s: %w", x.OIDC.Issuer, err)
+		return nil, fmt.Errorf("renewing at the identity provider %s: %w", x.OIDC.Issuer, printableError(err))
 	}
 	return &Tokens{AccessToken: t.AccessToken, RefreshToken: t.RefreshToken}, nil
 }
