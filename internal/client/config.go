@@ -29,6 +29,7 @@ type Context struct {
 	CertificateAuthority string      `yaml:"certificateAuthority,omitempty" json:"certificateAuthority,omitempty"`
 	Credential           string      `yaml:"credential" json:"credential"`
 	Automation           *Automation `yaml:"automation,omitempty" json:"automation,omitempty"`
+	OIDC                 *OIDC       `yaml:"oidc,omitempty" json:"oidc,omitempty"`
 
 	LastEpoch string `yaml:"lastEpoch,omitempty" json:"lastEpoch,omitempty"`
 	StartMode string `yaml:"startMode,omitempty" json:"startMode,omitempty"`
@@ -36,6 +37,17 @@ type Context struct {
 
 type Automation struct {
 	TokenFile string `yaml:"tokenFile,omitempty" json:"tokenFile,omitempty"`
+}
+
+// OIDC is the identity provider and the public client registered for this CLI (§9.1). Audience
+// is used only for the client's own pre-check (§9.6); TokenFile is the D2 (b) opt-in.
+type OIDC struct {
+	Issuer               string   `yaml:"issuer" json:"issuer"`
+	ClientID             string   `yaml:"clientID" json:"clientID"`
+	Scopes               []string `yaml:"scopes,omitempty" json:"scopes,omitempty"`
+	Audience             string   `yaml:"audience,omitempty" json:"audience,omitempty"`
+	CertificateAuthority string   `yaml:"certificateAuthority,omitempty" json:"certificateAuthority,omitempty"`
+	TokenFile            string   `yaml:"tokenFile,omitempty" json:"tokenFile,omitempty"`
 }
 
 // ConfigPath is the contexts file under the user's configuration directory
@@ -144,10 +156,15 @@ func (x *Context) Check() error {
 	if err := endpoint(x.Server, "server"); err != nil {
 		return err
 	}
-	if x.Credential != "automation" {
-		return fmt.Errorf("credential %q: this bronzewardctl offers automation contexts; oidc arrives with sign-in", x.Credential)
+	switch {
+	case x.Credential == "automation":
+		return nil
+	case x.Credential != "oidc":
+		return fmt.Errorf("credential %q: give automation or oidc", x.Credential)
+	case x.OIDC == nil || x.OIDC.ClientID == "":
+		return errors.New("an oidc context needs its issuer and client ID")
 	}
-	return nil
+	return endpoint(x.OIDC.Issuer, "oidc.issuer")
 }
 
 // endpoint parses an https URL, or an http one to a loopback address (§6 item 1).

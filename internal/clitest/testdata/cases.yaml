@@ -54,3 +54,47 @@
     server: answers both reads
     shown: '"GET /api/v1/identity is deprecated (Deprecation: @1798761600)" exactly once; identity shown; exit 0'
     absent: [token in stdout, stderr, argv]
+
+- id: PAGE-01
+  setup: context trusted; a cluster with three machines, recorded by the fixture human before the cases
+  action: machine list --limit 1; then machine list --limit 1 --all -o json
+  exchange:
+    - GET /api/v1/server
+    - GET /api/v1/machines?limit=1
+    - GET /api/v1/machines?limit=1&cursor=<next>, once per further page
+  fault: none
+  expect:
+    client: one page names the next cursor; --all follows every page
+    server: one page read per machine
+    shown: '"Next page: --cursor"; then {"items": [...]} with every machine once, in the unpaged list''s order; exit 0'
+    absent: [token in stdout, stderr, argv]
+
+- id: PAGE-02
+  setup: context trusted; the PAGE-01 machines
+  action: machine list --limit 1 --all -o json, twice
+  exchange:
+    - GET /api/v1/machines?limit=1
+    - GET /api/v1/machines?limit=1&cursor=<next>
+    - GET /api/v1/machines?limit=1, the restart
+  fault: 'the injector answers the first cursor read 400 cursor-invalid: the first time in the same epoch; the second time with a new Bronzeward-Epoch on it and every later answer, as after a recovery entry'
+  expect:
+    client: discards the cursor and restarts the list; runs the epoch handling only when the epoch changed
+    server: answers every read but the refused one
+    shown: '"reading the list again from its start" both times; the epoch notice the second time only; every machine once, in order; exit 0'
+    absent: [token in stdout, stderr, argv]
+
+- id: REC-01
+  setup: context trusted; the PAGE-01 machines
+  action: status; then machine show <machine>, twice
+  exchange:
+    - GET /api/v1/server
+    - GET /api/v1/recovery
+    - GET /api/v1/machines
+    - GET /api/v1/operations?state=unresolved
+    - GET /api/v1/machines/<machine>
+  fault: 'status: the injector adds "Bronzeward-Recovery-Mode: true" and rewrites GET /recovery to recovery mode on with one ready scope; machine show: 409 recovery-mode-active, first with machine and scope members, then without'
+  expect:
+    client: shows the recovery banner and the scopes; names the scope, or the process restriction when there is none
+    server: answers the status reads; the injector refuses the machine reads
+    shown: '"RECOVERY MODE is on in trusted", "Scopes: 1: <machine> ready", exit 0; then "the scope of machine <machine> is pre-restore-unaccounted" and "a process restriction of a server started for recovery", exit 1'
+    absent: [token in stdout, stderr, argv]
