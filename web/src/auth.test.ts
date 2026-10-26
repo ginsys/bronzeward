@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, test, vi } from "vitest";
-import { beginSignIn, claims, completeSignIn, discover, localReading, PENDING_KEY, type Provider, renewDelay, returnPath, Session, SIGNED_OUT_PATH, type Tokens } from "./auth.ts";
+import { beginSignIn, claims, completeSignIn, discover, localReading, PENDING_KEY, type Provider, renewDelay, returnPath, Session, SIGN_OUT_WAIT_MS, SIGNED_OUT_PATH, type Tokens } from "./auth.ts";
 import type { ClientConfig } from "./config.ts";
 
 const ORIGIN = "http://localhost:58443";
@@ -191,18 +191,20 @@ const tokens = (over: Partial<Tokens> = {}): Tokens => ({ iss: ISSUER, sub: "u1"
 
 describe("§9.5 renewal", () => {
   test("one renewal at a time, with the rotated pair kept and its expiry by the page's clock", async () => {
-    const f = answers([json({ access_token: "SYNTH-a2", refresh_token: "SYNTH-r2", expires_in: 300 })]);
+    const f = answers([
+      json({ access_token: "SYNTH-a2", refresh_token: "SYNTH-r2", expires_in: 300 }),
+      json({ access_token: "SYNTH-a3", refresh_token: "SYNTH-r3", expires_in: 300 }),
+    ]);
     const s = new Session(config, provider, tokens(), { fetch: f as unknown as typeof fetch, now: () => 10_000 });
     expect(await Promise.all([s.renew(), s.renew()])).toEqual([true, true]);
     expect(f).toHaveBeenCalledTimes(1);
     expect(form(f.mock.calls[0]![1])).toEqual({ grant_type: "refresh_token", refresh_token: "SYNTH-r1", client_id: "web" });
     expect(s.token()).toBe("SYNTH-a2");
-    expect(s.expiresAt).toBe(10_000 + 300_000);
     expect(s.expiresAt).toBe(310_000);
-    const g = answers([json({ access_token: "SYNTH-a3", refresh_token: "SYNTH-r3", expires_in: 300 })]);
-    const t = new Session(config, provider, tokens({ refresh: "SYNTH-r2" }), { fetch: g as unknown as typeof fetch });
-    await t.renew();
-    expect(form(g.mock.calls[0]![1])["refresh_token"]).toBe("SYNTH-r2");
+    // The same session renews again with the refresh token the first renewal returned.
+    expect(await s.renew()).toBe(true);
+    expect(f.mock.calls.map((c) => form(c[1])["refresh_token"])).toEqual(["SYNTH-r1", "SYNTH-r2"]);
+    expect(s.token()).toBe("SYNTH-a3");
   });
 
   test.each([
@@ -226,15 +228,17 @@ describe("§9.5 renewal", () => {
     expect(s.principal).toEqual({ iss: ISSUER, sub: "u2" });
   });
 
-  test("a pair that arrives after the session was cleared is not kept", async () => {
+  test("a pair that arrives after the session was cleared is not kept, and its refresh token is revoked", async () => {
     let release!: (r: Response) => void;
-    const f = vi.fn(() => new Promise<Response>((r) => (release = r)));
+    const f = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => (url === provider.tokenEndpoint ? new Promise<Response>((r) => (release = r)) : Promise.resolve(new Response(null, { status: 200 }))));
     const s = new Session(config, provider, tokens(), { fetch: f as unknown as typeof fetch });
     const renewal = s.renew();
     s.clear();
     release(json({ access_token: "SYNTH-a2", refresh_token: "SYNTH-r2", expires_in: 300 }));
     expect(await renewal).toBe(false);
     expect(s.token()).toBeUndefined();
+    expect(f.mock.calls[1]![0]).toBe(provider.revocationEndpoint);
+    expect(form(f.mock.calls[1]![1])["token"]).toBe("SYNTH-r2");
   });
 });
 
@@ -248,6 +252,36 @@ describe("§9.7 item 2 sign-out", () => {
     expect(to.origin + to.pathname).toBe(provider.endSessionEndpoint);
     expect(Object.fromEntries(to.searchParams)).toEqual({ client_id: "web", post_logout_redirect_uri: `${ORIGIN}${SIGNED_OUT_PATH}` });
     expect(s.token()).toBeUndefined();
+  });
+
+  test("during a renewal, waits for it and revokes the refresh token it brings", async () => {
+    let release!: (r: Response) => void;
+    const f = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => (url === provider.tokenEndpoint ? new Promise<Response>((r) => (release = r)) : Promise.resolve(new Response(null, { status: 200 }))));
+    const s = new Session(config, provider, tokens(), { fetch: f as unknown as typeof fetch });
+    const renewal = s.renew();
+    const out = s.signOut(ORIGIN);
+    release(json({ access_token: "SYNTH-a2", refresh_token: "SYNTH-r2", expires_in: 300 }));
+    await out;
+    expect(await renewal).toBe(false);
+    // The renewal took SYNTH-r1, so only the pair it brought is left to revoke.
+    expect(f.mock.calls.filter((c) => c[0] === provider.revocationEndpoint).map((c) => form(c[1])["token"])).toEqual(["SYNTH-r2"]);
+    expect(s.token()).toBeUndefined();
+  });
+
+  test("a revocation that never answers delays sign-out by at most SIGN_OUT_WAIT_MS", async () => {
+    vi.useFakeTimers();
+    try {
+      const f = vi.fn(() => new Promise<Response>(() => {}));
+      const s = new Session(config, { ...provider, endSessionEndpoint: undefined }, tokens(), { fetch: f as unknown as typeof fetch });
+      let to: string | undefined;
+      void s.signOut(ORIGIN).then((u) => (to = u));
+      await vi.advanceTimersByTimeAsync(SIGN_OUT_WAIT_MS - 1);
+      expect(to).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(to).toBe(SIGNED_OUT_PATH);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("an unreachable revocation still signs out; without end-session, the signed-out page", async () => {
