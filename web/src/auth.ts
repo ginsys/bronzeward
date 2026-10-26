@@ -283,6 +283,9 @@ export class Session {
   // provider delays the redirect by at most SIGN_OUT_WAIT_MS.
   async signOut(origin: string): Promise<string> {
     const signedIn = this.#tokens !== undefined;
+    // Taken now: the page clears the session as soon as this returns its promise. A renewal in
+    // flight has the handle instead (#renew).
+    const held = this.#revocable;
     this.#tokens = undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([
@@ -290,7 +293,7 @@ export class Session {
         // A renewal in flight revokes the pair it brings, or gives its refresh token back; then
         // the last refresh token held goes, even one no longer sent for renewal (CP2-F2).
         await this.#renewing?.catch(() => false);
-        if (signedIn) await this.#revoke(this.#revocable);
+        if (signedIn) await this.#revoke(held ?? this.#revocable);
       })(),
       new Promise((r) => (timer = setTimeout(r, SIGN_OUT_WAIT_MS))),
     ]);

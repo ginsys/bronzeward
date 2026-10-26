@@ -393,8 +393,24 @@ describe("§9.7 item 2 sign-out", () => {
     const f = answers([...list, new Response(null, { status: 200 })]);
     const s = new Session(config, provider, tokens(), { fetch: f as unknown as typeof fetch });
     await before(s);
-    await s.signOut(ORIGIN);
+    // As the page does: it clears the session as soon as sign-out has taken the tokens.
+    const out = s.signOut(ORIGIN);
+    s.clear();
+    await out;
     expect(f.mock.calls.filter((c) => c[0] === provider.revocationEndpoint).map((c) => form(c[1])["token"])).toEqual([revoked]);
+  });
+
+  test("during a renewal that fails, and with the page cleared meanwhile, revokes the refresh token it gives back", async () => {
+    let release!: (r: Response) => void;
+    const f = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => (url === provider.tokenEndpoint ? new Promise<Response>((r) => (release = r)) : Promise.resolve(new Response(null, { status: 200 }))));
+    const s = new Session(config, provider, tokens(), { fetch: f as unknown as typeof fetch });
+    const renewal = s.renew();
+    const out = s.signOut(ORIGIN);
+    s.clear();
+    release(json({ error: "invalid_grant" }, 400));
+    await out;
+    expect(await renewal).toBe(false);
+    expect(f.mock.calls.filter((c) => c[0] === provider.revocationEndpoint).map((c) => form(c[1])["token"])).toEqual(["SYNTH-r1"]);
   });
 
   test("after a cleared page, sign-out revokes nothing", async () => {
