@@ -30,8 +30,16 @@ commands:
   whoami      the identity, roles and epoch the server sees
   status      start mode, recovery mode, open drift and unresolved operations
   cluster list | show <id>
-  machine list [--cluster <id>] | show <id>
-              list commands read one page: --limit <n>, --cursor <next>; --all reads every page
+  machine list [--cluster <id>] | show <id> | timeline <id> | observations <id>
+  fragment | profile | assignment show <head or revision ID> | history <head ID>
+  draft list [--cluster <id>] | show <draft>
+  release list [--cluster <id>] [--draft <id>] | show <release>
+  plan list [--state <s>] [--machine <id>] | show <plan>
+  operation list [--plan <id>] [--machine <id>] [--state <s>] [--kind <k>] | show <operation>
+  act list    the audit record
+              lists, timeline, observations and history read one page: --limit <n>, --cursor <next>;
+              --all reads every page, which -o json and yaml print as one {"items": [...]}; the
+              draft and release filters apply to the items read
 
 global flags, before or after the command:
   --context <name>      else BRONZEWARD_CONTEXT, else the current context
@@ -85,7 +93,9 @@ func harden() error {
 func run(args []string, stdout, stderr io.Writer) int {
 	e := &env{output: "table", out: stdout, err: stderr}
 	commands := map[string]func([]string) error{"context": e.contextCmd, "version": e.versionCmd, "whoami": e.whoamiCmd,
-		"status": e.statusCmd, "cluster": e.clusterCmd, "machine": e.machineCmd}
+		"status": e.statusCmd, "cluster": e.clusterCmd, "machine": e.machineCmd,
+		"fragment": e.fragmentCmd, "profile": e.profileCmd, "assignment": e.assignmentCmd,
+		"draft": e.draftCmd, "release": e.releaseCmd, "plan": e.planCmd, "operation": e.operationCmd, "act": e.actCmd}
 	pos, err := e.parse("bronzewardctl", args, -1, nil)
 	if err == nil && len(pos) == 0 {
 		err = usageError{errors.New("no command")}
