@@ -43,8 +43,8 @@ const reach = (k: keyof Counts, n: number) =>
 describe("several tabs", () => {
   it("AUTH-07: a renewal for another subject is shown in every tab, and their data discarded", async function () {
     this.timeout(120_000);
-    // expires_in 16 s: the renewal comes 8 s after the sign-in, once the second tab is open.
-    const first = await signInTab({ rotate: "1", lifetime: "16", "renew-as": "h-author" });
+    // expires_in 24 s: the renewal comes 12 s after the sign-in, once the second tab is open.
+    const first = await signInTab({ rotate: "1", lifetime: "24", "renew-as": "h-author" });
     const second = await openTab();
     for (const tab of [first, second]) {
       await browser.switchToWindow(tab);
