@@ -7,6 +7,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -174,7 +175,8 @@ func (c *Client) once(path string) (*Response, bool, error) {
 	if mt == "application/problem+json" && json.Unmarshal(body, &doc) == nil {
 		if t, _ := doc["type"].(string); strings.HasPrefix(t, problemPrefix) {
 			p := &Problem{Status: r.StatusCode, Doc: doc, Route: route, Where: c.Context.Where()}
-			retry := r.StatusCode == http.StatusServiceUnavailable && p.Code() != "epoch-superseded"
+			retry := r.StatusCode == http.StatusServiceUnavailable &&
+				slices.Contains([]string{"dependency-unavailable", "talos-access-unavailable", "transient-conflict"}, p.Code())
 			return nil, retry, p
 		}
 	}

@@ -250,15 +250,18 @@ func TestRequestCore(t *testing.T) {
 	}, nil)
 	f.want(f.ctl(nil, "", "whoami"), 0, "503 Injected dependency-unavailable", "try 2 of 5 in 1s", "try 3 of 5 in 2s", "Identity   ci")
 
-	in.set(func(w http.ResponseWriter, r *http.Request) bool {
-		if !on("/identity")(r) {
-			return false
+	// Only the three listed codes are retried (§8.2).
+	for _, code := range []string{"epoch-superseded", "BWSYNTH-unknown"} {
+		in.set(func(w http.ResponseWriter, r *http.Request) bool {
+			if !on("/identity")(r) {
+				return false
+			}
+			problem(w, http.StatusServiceUnavailable, code, "")
+			return true
+		}, nil)
+		if r := f.ctl(nil, "", "whoami"); r.code != 1 || strings.Contains(r.err, "try 2") {
+			t.Errorf("%s: exit %d, stderr %s; want 1 and no retry", code, r.code, r.err)
 		}
-		problem(w, http.StatusServiceUnavailable, "epoch-superseded", "")
-		return true
-	}, nil)
-	if r := f.ctl(nil, "", "whoami"); r.code != 1 || strings.Contains(r.err, "try 2") {
-		t.Errorf("epoch-superseded: exit %d, stderr %s; want 1 and no retry", r.code, r.err)
 	}
 
 	// An incompatible server's start mode is still the one the banner shows.

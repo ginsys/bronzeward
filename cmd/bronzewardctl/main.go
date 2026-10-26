@@ -41,7 +41,22 @@ type env struct {
 	out, err                     io.Writer
 }
 
-func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
+// main disables core dumps before any token is read, and a panic prints a fixed message and no
+// stack values (client-contracts.md §11.2 item 5).
+func main() {
+	debug.SetTraceback("none")
+	defer func() {
+		if recover() != nil {
+			fmt.Fprintln(os.Stderr, "bronzewardctl: internal error")
+			os.Exit(1)
+		}
+	}()
+	if err := noCoreDumps(); err != nil {
+		fmt.Fprintln(os.Stderr, "bronzewardctl: disabling core dumps:", err)
+		os.Exit(1)
+	}
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
 
 func run(args []string, stdout, stderr io.Writer) int {
 	e := &env{output: "table", out: stdout, err: stderr}
