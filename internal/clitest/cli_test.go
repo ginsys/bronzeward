@@ -29,6 +29,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/ginsys/bronzeward/fixtures/oidc/issuer"
 	"github.com/ginsys/bronzeward/internal/dbtest"
 )
 
@@ -65,11 +66,12 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// fixture is one disposable server with an automation token holding roles, and the CLI's own
-// configuration directory.
+// fixture is one disposable server with an automation token holding roles, the fixture issuer
+// its humans' tokens come from, and the CLI's own configuration directory.
 type fixture struct {
 	t                                 *testing.T
 	bin, base, home, token, tokenFile string
+	iss                               *issuer.Issuer
 }
 
 var tokenPattern = regexp.MustCompile(`bwt_\S+`)
@@ -85,8 +87,10 @@ func start(t *testing.T, roles string) *fixture {
 	addr := l.Addr().String()
 	l.Close()
 	f.base = "http://" + addr
+	f.iss = serveIssuer(t)
 	cfg := filepath.Join(t.TempDir(), "bronzeward.yaml")
-	body := "listen: " + addr + "\ndatabase:\n  dsn: " + dsn + "\nauth:\n  oidc:\n    issuer: https://idp.test\n    audience: bronzeward\n" +
+	body := "listen: " + addr + "\ndatabase:\n  dsn: " + dsn + "\nauth:\n  oidc:\n    issuer: " + f.iss.URL + "\n    audience: bronzeward\n" +
+		"  roles: {viewer: [bw-viewers], author: [bw-authors], publisher: [bw-publishers], approver: [bw-approvers], recovery-admin: [bw-recovery]}\n" +
 		"execution: {maxTransportDeadline: 5m}\n"
 	if err := os.WriteFile(cfg, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
