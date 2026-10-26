@@ -217,6 +217,40 @@ describe("§9.5 renewal", () => {
     expect(s.token()).toBe("SYNTH-a1");
     expect(await s.renew()).toBe(false);
     expect(f).toHaveBeenCalledTimes(1);
+    // §9.5 item 3, not §9.3 item 3: a refused refresh never turns into the sign-in redirect.
+    expect(s.renewsByRedirect).toBe(false);
+  });
+
+  test.each([
+    ["returned unchanged", { refresh_token: "SYNTH-r1" }],
+    ["not returned", {}],
+  ])("§9.3 item 3: a refresh token %s is not sent again, and the next renewal is the redirect", async (_name, extra) => {
+    const f = answers([json({ access_token: "SYNTH-a2", expires_in: 300, ...extra })]);
+    const s = new Session(config, provider, tokens(), { fetch: f as unknown as typeof fetch });
+    expect(s.renewsByRedirect).toBe(false);
+    expect(await s.renew()).toBe(true);
+    expect(s.token()).toBe("SYNTH-a2");
+    expect(s.renewsByRedirect).toBe(true);
+    expect(await s.renew()).toBe(false);
+    expect(f).toHaveBeenCalledTimes(1);
+  });
+
+  test("§9.3 item 3: a sign-in that brought no refresh token renews by the redirect", () => {
+    expect(new Session(config, provider, tokens({ refresh: undefined })).renewsByRedirect).toBe(true);
+  });
+
+  test("a renewal with no ID token, whose access token names another subject, is a new sign-in", async () => {
+    const onPrincipalChange = vi.fn();
+    const access = (sub: string) => jwt({ iss: ISSUER, sub });
+    const f = answers([
+      json({ access_token: access("u1"), refresh_token: "SYNTH-r2", expires_in: 300 }),
+      json({ access_token: access("u2"), refresh_token: "SYNTH-r3", expires_in: 300 }),
+    ]);
+    const s = new Session(config, provider, tokens({ access: access("u1") }), { fetch: f as unknown as typeof fetch, onPrincipalChange });
+    await s.renew();
+    expect(onPrincipalChange).not.toHaveBeenCalled();
+    await s.renew();
+    expect(onPrincipalChange).toHaveBeenCalledWith({ iss: ISSUER, sub: "u1" }, { iss: ISSUER, sub: "u2" });
   });
 
   test("a renewal for another subject is a new sign-in", async () => {
