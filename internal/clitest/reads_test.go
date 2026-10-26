@@ -216,7 +216,8 @@ func TestReads(t *testing.T) {
 		`"offline_access"`: "scopes repeats offline_access, which is always requested",
 		`" "`:              "scopes is empty",
 		`"a\"b"`:           "scopes holds a character a scope cannot",
-		`7`:                "json: cannot unmarshal number",
+		`7`:                "scopes is not a string",
+		`null`:             "scopes is not a string",
 	} {
 		serve(scopes)
 		f.want(f.ctl(nil, "", "context", "add", "badscopes", "--from", in.URL, "--certificate-authority", in.ca), 1, "bronzeward-client.json: "+want)

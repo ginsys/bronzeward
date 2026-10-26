@@ -153,8 +153,8 @@ func (c *Config) Select(flag string) (*Context, error) {
 
 // Check refuses a context that cannot be used as written.
 func (x *Context) Check() error {
-	if x.Name == "" || strings.ContainsAny(x.Name, " \t\n/") {
-		return fmt.Errorf("context name %q: give a name without spaces or slashes", x.Name)
+	if err := x.checkName(); err != nil {
+		return err
 	}
 	if err := endpoint(x.Server, "server"); err != nil {
 		return err
@@ -168,6 +168,14 @@ func (x *Context) Check() error {
 		return errors.New("an oidc context needs its issuer and client ID")
 	}
 	return endpoint(x.OIDC.Issuer, "oidc.issuer")
+}
+
+// checkName refuses a name that cannot name a file, such as its renewal lock.
+func (x *Context) checkName() error {
+	if x.Name == "" || strings.ContainsAny(x.Name, " \t\n/") {
+		return fmt.Errorf("context name %q: give a name without spaces or slashes", x.Name)
+	}
+	return nil
 }
 
 // endpoint parses an https URL, or an http one to a loopback address (§6 item 1).

@@ -27,8 +27,8 @@ import (
 // when set, is the revocation_endpoint discovery names instead. discovery, when set, breaks
 // discovery: "down" answers 503 with a body of control characters, "bare" 503 with no reason
 // phrase and "phrase" with the provider's own, "garbage" 200 with a body that is no document,
-// "moved" redirects to plain http off loopback, "fragment" to an empty fragment, and "other"
-// names another issuer.
+// "moved" redirects to plain http off loopback, "fragment" to an empty fragment, "other" names
+// another issuer, and "keys" keys on plain http off loopback.
 type provider struct {
 	iss *issuer.Issuer
 
@@ -135,6 +135,8 @@ func (p *provider) wrap(iss *issuer.Issuer) http.Handler {
 			return
 		case "other":
 			d["issuer"] = "https://idp.example.invalid"
+		case "keys":
+			d["jwks_uri"] = "http://idp.example.invalid/keys"
 		}
 		d["authorization_endpoint"], d["token_endpoint"] = iss.URL+"/authorize", iss.URL+"/token"+p.query
 		d["device_authorization_endpoint"] = iss.URL + "/device"
@@ -161,7 +163,7 @@ func (p *provider) wrap(iss *issuer.Issuer) http.Handler {
 	})
 	mux.HandleFunc("POST /device", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"device_code": "BWSYNTH-device", "user_code": "BWSY-NTH1",
-			"verification_uri": iss.URL + "/activate", "expires_in": 60, "interval": 1})
+			"verification_uri": iss.URL + "/activate?client=cli", "expires_in": 60, "interval": 1})
 	})
 	mux.HandleFunc("GET /revoked", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, http.StatusOK, map[string]any{}) })
 	mux.HandleFunc("POST /revoke", func(w http.ResponseWriter, r *http.Request) {
