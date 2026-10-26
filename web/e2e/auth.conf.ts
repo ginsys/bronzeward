@@ -6,8 +6,9 @@
 //     on the spec's request, defects included (AUTH-02, AUTH-03, AUTH-05, AUTH-07, AUTH-10,
 //     AUTH-11); its page reaches it through the injector (injector.ts; COMP-01, COMP-02 and the
 //     shell's states).
-//   - On a case's request, B's deployment started with -recovery-start on a fresh database, which
-//     the injector then passes B's page on to (REC-01).
+//   - On a case's request, B's deployment on a fresh database, which the injector then passes B's
+//     page on to: started normally for the inventory cases (PAGE-01), with -recovery-start (REC-01),
+//     or restarted with it on the same database (PAGE-02).
 // It removes the databases with the processes, and fails the run when it cannot; then the state
 // directory, which names them, is kept, and the next run refuses to start until it is removed.
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
@@ -26,7 +27,7 @@ export const FIXTURE_ISSUER = "http://127.0.0.1:58446";
 export const CONTROL = "http://127.0.0.1:58449";
 export const FIXTURE_API = "http://127.0.0.1:58451";
 const INJECTOR = "http://127.0.0.1:58452";
-const RECOVERY_API = "http://127.0.0.1:58453";
+const DISPOSABLE_API = "http://127.0.0.1:58453";
 const IDP_API = "http://127.0.0.1:58450";
 const KEYS = "127.0.0.1:58447";
 const PG = ["-h", "127.0.0.1", "-p", "55433", "-U", "bronzeward"];
@@ -67,11 +68,13 @@ async function ready(url: string, p?: ChildProcess) {
   }
 }
 
-// One server on a fresh, migrated database, started with the serve flags given.
-function server(name: string, listen: string, oidc: string, extra: string, flags: string[] = []) {
-  const db = `bw_auth_${name}_${randomBytes(4).toString("hex")}`;
-  execFileSync("createdb", [...PG, db]);
-  databases.push(db);
+// One server, started with the serve flags given, on the database named or a fresh, migrated one.
+function server(name: string, listen: string, oidc: string, extra: string, flags: string[] = [], on?: string) {
+  const db = on ?? `bw_auth_${name}_${randomBytes(4).toString("hex")}`;
+  if (on === undefined) {
+    execFileSync("createdb", [...PG, db]);
+    databases.push(db);
+  }
   const file = `${state}/server-${name}.yaml`;
   writeFileSync(file, [
     `listen: ${listen}`,
@@ -88,8 +91,8 @@ function server(name: string, listen: string, oidc: string, extra: string, flags
     "  maxTransportDeadline: 1m",
     "",
   ].join("\n"));
-  execFileSync(`${root}bin/bronzeward`, ["migrate", "-config", file], { stdio: "inherit" });
-  return start("bronzeward", ["serve", "-config", file, ...flags]);
+  if (on === undefined) execFileSync(`${root}bin/bronzeward`, ["migrate", "-config", file], { stdio: "inherit" });
+  return { db, p: start("bronzeward", ["serve", "-config", file, ...flags]) };
 }
 
 function host(listen: string, clientConfig: object, issuer: string, api: string) {
@@ -102,18 +105,22 @@ function host(listen: string, clientConfig: object, issuer: string, api: string)
 // The control routes: a spec chooses the fixture token the next sign-in receives, reads the
 // provider's counts, and sends the browser to a URL holding a code without naming it over
 // WebDriver, whose log the artifact scan reads (POST /go stores it, GET /go redirects there once).
-// POST /faults sets the injector's faults, GET /seen lists the API paths it passed on, POST /release
-// lets its held answers go and answers once they are sent; the next sign-in clears all three. POST /recovery-start answers the URL of a server just started with
-// -recovery-start on a fresh database, its entry not yet made (REC-01), replacing any earlier one.
-function control(provider: Provider, next: { grant: Grant }, injector: Injector, recoveryStart: () => Promise<string>): Server {
+// POST /faults sets the injector's faults, GET /seen lists the API paths it passed on and GET
+// /answered the server's answers to them, POST /release lets its held answers go and answers once
+// they are sent; the next sign-in clears all four. POST /disposable answers the URL of B's
+// deployment just started on a fresh database, replacing any earlier one: ?start=recovery with
+// -recovery-start, its entry not yet made, and with &keep on the earlier one's database.
+function control(provider: Provider, next: { grant: Grant }, injector: Injector, disposable: (recovery: boolean, keep: boolean) => Promise<string>): Server {
   let go: string | undefined;
   return createServer((req, res) => {
     const url = new URL(req.url ?? "/", CONTROL);
     if (url.pathname === "/counts") return res.end(JSON.stringify(provider.counts));
     if (url.pathname === "/seen") return res.end(JSON.stringify(injector.seen));
+    if (url.pathname === "/answered") return res.end(JSON.stringify(injector.answered));
     if (url.pathname === "/release" && req.method === "POST") return void injector.release().then(() => res.end());
-    if (url.pathname === "/recovery-start" && req.method === "POST") {
-      return void recoveryStart().then((at) => res.end(at), (e: unknown) => res.writeHead(500).end(String(e)));
+    if (url.pathname === "/disposable" && req.method === "POST") {
+      const started = disposable(url.searchParams.get("start") === "recovery", url.searchParams.has("keep"));
+      return void started.then((at) => res.end(at), (e: unknown) => res.writeHead(500).end(String(e)));
     }
     if (req.method === "POST" && (url.pathname === "/go" || url.pathname === "/faults")) {
       let body = "";
@@ -150,6 +157,7 @@ function control(provider: Provider, next: { grant: Grant }, injector: Injector,
     for (const k of Object.keys(provider.counts) as (keyof Counts)[]) provider.counts[k] = 0;
     injector.faults = {};
     injector.seen.length = 0;
+    injector.answered.length = 0;
     void injector.release();
     res.end();
   });
@@ -157,7 +165,7 @@ function control(provider: Provider, next: { grant: Grant }, injector: Injector,
 
 async function prepare() {
   // Anything left on these ports from an earlier run would answer the readiness checks below.
-  for (const at of ["127.0.0.1:58443", "127.0.0.1:58448", FIXTURE_ISSUER.slice(7), CONTROL.slice(7), FIXTURE_API.slice(7), IDP_API.slice(7), INJECTOR.slice(7), RECOVERY_API.slice(7), KEYS]) {
+  for (const at of ["127.0.0.1:58443", "127.0.0.1:58448", FIXTURE_ISSUER.slice(7), CONTROL.slice(7), FIXTURE_API.slice(7), IDP_API.slice(7), INJECTOR.slice(7), DISPOSABLE_API.slice(7), KEYS]) {
     if (await fetch(`http://${at}/`).then(() => true, () => false)) throw new SevereServiceError(`something already answers on ${at}`);
   }
   // Made, never reused: one left behind names databases an earlier cleanup could not drop, and the
@@ -182,15 +190,15 @@ async function prepare() {
   // B's deployment, which the recovery starts share.
   const fixtureOidc = `issuer: ${FIXTURE_ISSUER}\naudience: bronzeward`;
   const fixtureDenied = `  deniedSubjects: [{iss: "${FIXTURE_ISSUER}", sub: ${DENIED}}]`;
-  // The entry takes operations over as this process's owner identity, which needs a provider and
-  // ingestion block. Nothing reaches the provider before the entry, and the case ends after it:
-  // its address answers nothing and its tokens are synthetic.
+  // A recovery entry takes operations over as this process's owner identity, which needs a provider
+  // and ingestion block. No case imports, publishes or runs an operation, so nothing reaches the
+  // provider: its address answers nothing and its tokens are synthetic.
   const tokens = ["ingestion", "compiler", "metadata", "executor"].map((t) => {
-    const file = `${state}/recovery-${t}.token`;
+    const file = `${state}/disposable-${t}.token`;
     writeFileSync(file, `synthetic-unused-${t}-token\n`, { mode: 0o600 });
     return `  ${t}TokenFile: ${file}`;
   });
-  const recoveryDeployment = [
+  const disposableDeployment = [
     fixtureDenied,
     "provider:",
     "  address: http://127.0.0.1:9",
@@ -198,12 +206,12 @@ async function prepare() {
     ...tokens,
     "ingestion: {instance: rec-01, heartbeat: 10s, lease: 30s, absoluteExpiry: 1h, sweep: 1m}",
   ].join("\n");
-  let recovery: ChildProcess | undefined;
-  const ctl = control(provider, next, injector, async () => {
-    if (recovery !== undefined) await stop(recovery);
-    recovery = server("recovery", RECOVERY_API.slice(7), fixtureOidc, recoveryDeployment, ["-recovery-start"]);
-    await ready(`${RECOVERY_API}/livez`, recovery);
-    return RECOVERY_API;
+  let disposable: { db: string; p: ChildProcess } | undefined;
+  const ctl = control(provider, next, injector, async (recovery, keep) => {
+    if (disposable !== undefined) await stop(disposable.p);
+    disposable = server("disposable", DISPOSABLE_API.slice(7), fixtureOidc, disposableDeployment, recovery ? ["-recovery-start"] : [], keep ? disposable?.db : undefined);
+    await ready(`${DISPOSABLE_API}/livez`, disposable.p);
+    return DISPOSABLE_API;
   });
   await new Promise<void>((resolve, reject) => {
     ctl.once("error", reject);
@@ -211,8 +219,8 @@ async function prepare() {
   });
   servers.push(ctl);
 
-  const a = server("idp", IDP_API.slice(7), `issuer: ${idp["BW_TEST_IDP_ISSUER"]}\naudience: "${idp["BW_TEST_IDP_PROJECT"]}"`, "  deniedSubjects: []");
-  const b = server("fixture", FIXTURE_API.slice(7), fixtureOidc, fixtureDenied);
+  const a = server("idp", IDP_API.slice(7), `issuer: ${idp["BW_TEST_IDP_ISSUER"]}\naudience: "${idp["BW_TEST_IDP_PROJECT"]}"`, "  deniedSubjects: []").p;
+  const b = server("fixture", FIXTURE_API.slice(7), fixtureOidc, fixtureDenied).p;
   await ready(`${IDP_API}/livez`, a);
   await ready(`${FIXTURE_API}/livez`, b);
   const ha = host("127.0.0.1:58443", {
