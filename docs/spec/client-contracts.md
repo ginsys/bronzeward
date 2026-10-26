@@ -829,8 +829,11 @@ current token expires
    ([§9.1](#91-identity-provider-requirements) item 3), renewal also uses that redirect, never a
    hidden frame (item 4). The page renews by the redirect when its pair, from a sign-in or another
    tab, has no refresh token, or when a renewal brings back the refresh token it sent; only the
-   lock holder redirects, and another tab asks it as for any renewal. A failed renewal or a spent
-   token is not this case: renewal has failed (§9.5 item 3). That fallback redirects at every
+   lock holder redirects, at the 60 s threshold, and another tab asks it as for any renewal. A
+   failed renewal or a spent token is not this case: renewal has failed (§9.5 item 3), and that
+   pair goes to no new tab. A `401` is not either: the page shows W1 and does not redirect, since a
+   token the server refuses would come back refused and the page would loop
+   ([§9.6](#96-failure-cases)); W1's button is the operator's redirect. That fallback redirects at every
    access-token expiry, the behaviour the
    owner's constraint in D5 refuses, so the constraint holds only with a rotating provider:
    rotation is a provider requirement ([§15](#15-assumptions-and-limits)). No token is kept in
