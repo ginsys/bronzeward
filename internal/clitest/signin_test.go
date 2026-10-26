@@ -2,6 +2,7 @@ package clitest
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -556,6 +557,24 @@ func TestSignIn(t *testing.T) {
 		f.want(refused, 1, "(identity-revoked)", "The stored sign-in is now for h-viewer at "+f.iss.URL+", not the refused identity, and is kept.")
 		if s := f.stored(file); s.AccessToken != other || s.RefreshToken != "BWSYNTH-rt-18" {
 			t.Error("the other subject's sign-in was not kept as it was")
+		}
+	})
+
+	// H3: a document without an access token, stored while the refused whoami waits, names no
+	// identity, so it is not known to be the refused one and is kept.
+	t.Run("a refresh-only document stored before an identity-revoked clear", func(t *testing.T) {
+		f.store(file, f.viewerToken("h-denied", 0, issuer.Lifetime), "")
+		unlock := hold(t, file+".lock")
+		var wg sync.WaitGroup
+		var refused result
+		wg.Go(func() { refused = whoami() })
+		waiting(t, file+".lock", 1)
+		f.store(file, "", "BWSYNTH-rt-19")
+		unlock()
+		wg.Wait()
+		f.want(refused, 1, "(identity-revoked)", "The stored sign-in now holds no readable identity, so it is not known to be the refused one, and is kept.")
+		if s, err := client.ReadTokens(file); !errors.Is(err, client.ErrNotTokenFile) || s.RefreshToken != "BWSYNTH-rt-19" {
+			t.Errorf("the refresh-only document was not kept as it was: %v", err)
 		}
 	})
 

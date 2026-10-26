@@ -501,12 +501,14 @@ func (c *Client) signedIn(p *Problem) {
 	case p.Code() == "identity-revoked" && c.signIn.file != "":
 		// Only the refused identity's sign-in is cleared: another process may have stored a new
 		// sign-in, for another subject or issuer, while this request was in flight.
-		refused := ReadClaims(c.token)
-		t, err := ClearTokens(c.signIn.file, func(t *Tokens) bool { return sameIdentity(ReadClaims(t.AccessToken), refused) })
+		t, err := ClearTokens(c.signIn.file, func(t *Tokens) bool { return sameIdentity(t.AccessToken, c.token) })
 		switch {
 		case errors.Is(err, ErrOtherSignIn):
-			now := ReadClaims(t.AccessToken)
-			p.Cleared = fmt.Sprintf("The stored sign-in is now for %s at %s, not the refused identity, and is kept.", now.Subject, now.Issuer)
+			if now := ReadClaims(t.AccessToken); now != nil {
+				p.Cleared = fmt.Sprintf("The stored sign-in is now for %s at %s, not the refused identity, and is kept.", now.Subject, now.Issuer)
+			} else {
+				p.Cleared = "The stored sign-in now holds no readable identity, so it is not known to be the refused one, and is kept."
+			}
 		case err != nil && !errors.Is(err, ErrNotTokenFile):
 			p.Cleared = fmt.Sprintf("Clearing the stored sign-in failed: %v.", err)
 		default:
@@ -515,10 +517,15 @@ func (c *Client) signedIn(p *Problem) {
 	}
 }
 
-// sameIdentity: the tokens carry the same subject at the same issuer, or either cannot be read: an
-// unreadable token is no other identity, so a document without an access token matches.
-func sameIdentity(a, b *Claims) bool {
-	return a == nil || b == nil || a.Subject == b.Subject && a.Issuer == b.Issuer
+// sameIdentity: the stored access token is the refused one, or both carry the same subject at the
+// same issuer. A token whose claims cannot be read, such as a document's without an access token,
+// is not known to be the refused identity, so it does not match.
+func sameIdentity(stored, refused string) bool {
+	if stored != "" && stored == refused {
+		return true
+	}
+	a, b := ReadClaims(stored), ReadClaims(refused)
+	return a != nil && b != nil && a.Subject == b.Subject && a.Issuer == b.Issuer
 }
 
 // Subject is the signed-in subject by the client's reading, "" for automation.
