@@ -1167,7 +1167,8 @@ gap G1-G17, whether it becomes an API issue that natively blocks the client tick
 
 ## 15. Limits
 
-- This document is accepted but not implemented. No participant has used either client; the tasks and targets in
+- This document is accepted and partly implemented: [client contracts §15](client-contracts.md#15-assumptions-and-limits)
+  names what bronzewardctl does so far. No participant has used either client; the tasks and targets in
   [§13](#13-usability-and-accessibility-acceptance) are unmeasured.
 - Line references were read at `e1c8cb3` and move as code changes, except the expected-epoch
   check's, which are read with #293 applied (see the opening).
