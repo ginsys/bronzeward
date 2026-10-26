@@ -37,12 +37,12 @@ export function App() {
 
   useEffect(() => {
     let session: Session | undefined;
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let stopRenewals: (() => void) | undefined;
     // Set when this page signs out, is hidden or unmounts: a sign-in still awaiting stops there.
     let ended = false;
     const channel = new BroadcastChannel(CHANNEL);
     const forget = () => {
-      clearTimeout(timer);
+      stopRenewals?.();
       session?.clear();
       session = undefined;
     };
@@ -74,23 +74,16 @@ export function App() {
     };
 
     const signedIn = async (config: ClientConfig, provider: Provider, s: Session) => {
-      // §9.5 item 1: renew before less than 60 s remains; a failed renewal keeps the current token.
-      // §9.3 item 3: without a rotating refresh token, the renewal is the sign-in redirect.
-      const schedule = () => {
-        clearTimeout(timer);
-        const at = session?.expiresAt;
-        if (at === undefined) return;
-        const renew = () => (session?.renewsByRedirect ? void signIn(config, provider) : void session?.renew().then((ok) => ok && schedule()));
-        timer = setTimeout(renew, renewDelay(at, Date.now()));
-      };
       session = s;
-      schedule();
+      const timer = renewals(() => session, () => void signIn(config, provider));
+      stopRenewals = timer.stop;
+      timer.schedule();
       const client = new Client({
         token: () => session?.token(),
-        renew: async () => (await session?.renew()) === true && (schedule(), true),
+        renew: timer.renew,
         // The tokens go, but the session stays this read's, so the refusal below is still shown.
         onRevoked: () => {
-          clearTimeout(timer);
+          timer.stop();
           s.clear();
         },
       });
@@ -106,9 +99,8 @@ export function App() {
       const res = await client.read<Server>("/server");
       if (session !== s) return;
       if (res.kind === "unauthenticated") {
-        // No renewal follows a refusal, the redirect least: it would loop on a token the server
-        // keeps refusing. Signing in again is the operator's.
-        clearTimeout(timer);
+        // Signing in again is the operator's (W1).
+        timer.stop();
         const reading = localReading(s.token() ?? "", config, Date.now());
         return setView({ kind: "sign-in", message: NOT_ACCEPTED, reading, problem: problemFields(res), config, provider });
       }
@@ -160,6 +152,30 @@ export function App() {
   }, []);
 
   return <Screen view={view} />;
+}
+
+// §9.5 item 1: renew before less than 60 s remains; a failed renewal keeps the current token.
+// §9.3 item 3: without a rotating refresh token, the renewal is the sign-in redirect.
+// After stop() (the server refused the session, or the page forgot it) nothing re-arms the timer,
+// not even a renewal still in flight: a redirect would loop on a token the server keeps refusing.
+export function renewals(session: () => Pick<Session, "expiresAt" | "renewsByRedirect" | "renew"> | undefined, redirect: () => void) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let stopped = false;
+  const schedule = () => {
+    clearTimeout(timer);
+    const at = session()?.expiresAt;
+    if (stopped || at === undefined) return;
+    const renew = () => (session()?.renewsByRedirect ? redirect() : void session()?.renew().then((ok) => ok && schedule()));
+    timer = setTimeout(renew, renewDelay(at, Date.now()));
+  };
+  return {
+    schedule,
+    renew: async () => (await session()?.renew()) === true && (schedule(), true),
+    stop: () => {
+      stopped = true;
+      clearTimeout(timer);
+    },
+  };
 }
 
 // What each view shows; exported for the rendered-view tests.
