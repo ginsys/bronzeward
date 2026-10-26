@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -130,6 +131,33 @@ func hold(t *testing.T, path string) func() {
 		t.Fatal(err)
 	}
 	return func() { l.Close() }
+}
+
+// waiting returns once n processes are blocked on the flock of path, as /proc/locks lists them. A
+// process blocked there has read the token file already, so no sleep decides the ordering.
+func waiting(t *testing.T, path string, n int) {
+	t.Helper()
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ino := ":" + strconv.FormatUint(fi.Sys().(*syscall.Stat_t).Ino, 10) + " "
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		b, err := os.ReadFile("/proc/locks")
+		if err != nil {
+			t.Fatal(err)
+		}
+		blocked := 0
+		for _, l := range strings.Split(string(b), "\n") {
+			if strings.Contains(l, "-> FLOCK") && strings.Contains(l, ino) {
+				blocked++
+			}
+		}
+		if blocked >= n {
+			return
+		}
+	}
+	t.Fatalf("%d processes did not block on %s within 10 s", n, path)
 }
 
 func (f *fixture) stored(path string) *client.Tokens {
@@ -315,7 +343,7 @@ func TestSignIn(t *testing.T) {
 		for i := range results {
 			wg.Go(func() { results[i] = whoami() })
 		}
-		time.Sleep(time.Second)
+		waiting(t, file+".lock", 2)
 		unlock()
 		wg.Wait()
 		for _, r := range results {
@@ -326,10 +354,11 @@ func TestSignIn(t *testing.T) {
 		}
 	})
 
-	// A logout while another process renews waits for the renewal and then removes the file,
-	// which the renewal does not write back.
+	// A logout while another process renews waits for the renewal, then removes the renewed file
+	// and states the renewed token's validity.
 	t.Run("logout during a renewal", func(t *testing.T) {
-		f.store(file, f.viewerToken("h-viewer", 270*time.Second, 30*time.Second), "BWSYNTH-rt-10")
+		old := f.viewerToken("h-viewer", 270*time.Second, 30*time.Second)
+		f.store(file, old, "BWSYNTH-rt-10")
 		f.idp.set(func(string) (int, any) {
 			time.Sleep(time.Second)
 			return issued(f.mint("h-viewer", ""), "BWSYNTH-rt-11")
@@ -337,14 +366,46 @@ func TestSignIn(t *testing.T) {
 		var wg sync.WaitGroup
 		var renewing result
 		wg.Go(func() { renewing = whoami() })
-		for deadline := time.Now().Add(10 * time.Second); f.idp.calls.Load() == 0 && time.Now().Before(deadline); {
+		deadline := time.Now().Add(10 * time.Second)
+		for f.idp.calls.Load() == 0 {
+			if time.Now().After(deadline) {
+				t.Fatal("the renewal did not reach the token endpoint within 10 s")
+			}
 			time.Sleep(10 * time.Millisecond)
 		}
-		f.want(f.signedIn("--context", "human", "logout"), 0, "Signed out of human")
+		out := f.signedIn("--context", "human", "logout")
+		f.want(out, 0, "Signed out of human")
+		if exp := client.ReadClaims(old).ExpiresAt().UTC().Format("2006-01-02 15:04:05 MST"); strings.Contains(out.out, exp) {
+			t.Errorf("logout states the replaced token's expiry %s: %s", exp, out.out)
+		}
 		wg.Wait()
 		f.want(renewing, 0, "subject h-viewer")
 		if _, err := os.Stat(file); !os.IsNotExist(err) {
 			t.Errorf("the token file is back after the logout: %v", err)
+		}
+	})
+
+	// A renewal that finds the file removed while it waited for the lock refuses: it redeems
+	// nothing and writes nothing back.
+	t.Run("removed while a renewal waits", func(t *testing.T) {
+		f.store(file, f.viewerToken("h-viewer", 270*time.Second, 30*time.Second), "BWSYNTH-rt-12")
+		f.idp.set(func(string) (int, any) { return issued(f.mint("h-viewer", ""), "BWSYNTH-rt-13") })
+		unlock := hold(t, file+".lock")
+		var wg sync.WaitGroup
+		var renewing result
+		wg.Go(func() { renewing = whoami() })
+		waiting(t, file+".lock", 1)
+		if err := os.Remove(file); err != nil {
+			t.Fatal(err)
+		}
+		unlock()
+		wg.Wait()
+		f.want(renewing, 0, "subject h-viewer", "the stored sign-in was removed meanwhile")
+		if n := f.idp.calls.Load(); n != 0 {
+			t.Errorf("%d redemptions, want 0", n)
+		}
+		if _, err := os.Stat(file); !os.IsNotExist(err) {
+			t.Errorf("the renewal wrote the removed token file back: %v", err)
 		}
 	})
 
@@ -369,6 +430,12 @@ func TestSignIn(t *testing.T) {
 		if _, err := os.Stat(file); !os.IsNotExist(err) {
 			t.Errorf("the unreadable token file is still there: %v", err)
 		}
+		os.WriteFile(file, []byte("-----BEGIN OPENSSH PRIVATE KEY-----\n"), 0o600)
+		f.want(f.signedIn("--context", "human", "logout"), 1, "holds neither bronzewardctl's tokens nor an automation token")
+		if _, err := os.Stat(file); err != nil {
+			t.Errorf("logout removed a file that is not bronzewardctl's: %v", err)
+		}
+		os.Remove(file)
 		f.want(f.signedIn("--context", "human", "logout"), 0, "Not signed in to human")
 		f.want(f.signedIn("--context", "lab", "logout"), 1, "an automation context has no sign-in")
 		if _, err := os.Stat(f.tokenFile); err != nil {
