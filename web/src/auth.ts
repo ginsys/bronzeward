@@ -164,6 +164,11 @@ export class Session {
   #tokens: Tokens | undefined;
   #renewing: Promise<boolean> | undefined;
   #spent = false;
+  // §9.3 item 3: the provider issues no rotating refresh token, so the page renews by the redirect.
+  #byRedirect: boolean;
+  // §9.7 item 2: the last refresh token this tab held, kept for sign-out's revocation after it may
+  // no longer be sent for renewal (a failed or unrotated renewal, a spent token).
+  #revocable: string | undefined;
 
   constructor(
     private readonly config: ClientConfig,
@@ -172,6 +177,12 @@ export class Session {
     private readonly opts: SessionOptions = {},
   ) {
     this.#tokens = tokens;
+    this.#byRedirect = tokens.refresh === undefined;
+    this.#revocable = tokens.refresh;
+  }
+
+  get byRedirect(): boolean {
+    return this.#tokens !== undefined && this.#byRedirect;
   }
 
   get principal(): Principal | undefined {
@@ -197,6 +208,9 @@ export class Session {
     if (t === undefined || tokens.iss !== t.iss || tokens.sub !== t.sub || tokens.expiresAt <= t.expiresAt) return false;
     this.#tokens = { ...tokens };
     this.#spent = false;
+    // A pair without a refresh token comes from a provider that does not rotate (§9.3 item 3).
+    this.#byRedirect = tokens.refresh === undefined;
+    this.#revocable = tokens.refresh ?? this.#revocable;
     return true;
   }
 
@@ -204,11 +218,13 @@ export class Session {
   spend(): void {
     if (this.#tokens !== undefined) this.#tokens.refresh = undefined;
     this.#spent = true;
+    this.#byRedirect = false;
   }
 
   // §9.5: one renewal at a time. A refresh token is sent at most once: after any failure, its
   // rotation may already have happened, so it is dropped and the current token used until refused
-  // (item 3). False also when there is none to send: the session then ends at expiry.
+  // (item 3). False also when there is none to send: byRedirect says whether the page renews by
+  // the redirect instead.
   renew(): Promise<boolean> {
     this.#renewing ??= this.#renew().finally(() => (this.#renewing = undefined));
     return this.#renewing;
@@ -219,9 +235,15 @@ export class Session {
     const refresh = current?.refresh;
     if (current === undefined || refresh === undefined) return false;
     current.refresh = undefined;
+    // Sign-out's handle goes with the token: the pair it brings replaces it, a failure gives it back.
+    this.#revocable = undefined;
     this.opts.onRenewing?.(current.expiresAt);
     const answer = await tokenRequest(this.provider, { grant_type: "refresh_token", refresh_token: refresh, client_id: this.config.webClientId }, this.opts.fetch);
-    if (answer.kind !== "ok") return false;
+    if (answer.kind !== "ok") {
+      // Maybe never delivered, so maybe still valid at the provider (CP2-F2).
+      this.#revocable ??= refresh;
+      return false;
+    }
     // Signed out, cleared or replaced meanwhile: the new pair is not kept, and its refresh token,
     // which nothing else holds, is revoked so that it does not outlive the sign-out.
     if (this.#tokens !== current) {
@@ -239,10 +261,11 @@ export class Session {
       if (was !== undefined && now !== undefined && (was.iss !== now.iss || was.sub !== now.sub)) [before, after] = [was, now];
     }
     this.#tokens = toTokens(answer.body, after, this.now());
-    // §9.3 items 1 and 3: a refresh token that did not rotate is not sent again ("used once"), so
-    // this session renews no further and ends at expiry. The renewal by the sign-in redirect is
-    // the follow-up's, with the multi-tab renewer.
+    this.#revocable = this.#tokens.refresh ?? refresh;
+    // §9.3 items 1 and 3: a refresh token that did not rotate is not sent again ("used once"); the
+    // provider does not rotate, so the page renews by the redirect from now on.
     if (this.#tokens.refresh === refresh) this.#tokens.refresh = undefined;
+    this.#byRedirect = this.#tokens.refresh === undefined;
     this.opts.onRenewed?.({ ...this.#tokens });
     if (after.iss !== before.iss || after.sub !== before.sub) this.opts.onPrincipalChange?.(before, after);
     return true;
@@ -251,6 +274,7 @@ export class Session {
   // §10.3 item 3, §8.2 identity-revoked: forget the tokens; nothing is sent.
   clear(): void {
     this.#tokens = undefined;
+    this.#revocable = undefined;
   }
 
   // §9.7 item 2: forget the tokens, revoke the refresh token where the provider allows it, and
@@ -258,14 +282,20 @@ export class Session {
   // A renewal in flight revokes the pair it receives; the wait for both is bounded, so a stalled
   // provider delays the redirect by at most SIGN_OUT_WAIT_MS.
   async signOut(origin: string): Promise<string> {
-    const t = this.#tokens;
+    const signedIn = this.#tokens !== undefined;
     this.#tokens = undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([
-      Promise.all([this.#revoke(t?.refresh), this.#renewing?.catch(() => false)]),
+      (async () => {
+        // A renewal in flight revokes the pair it brings, or gives its refresh token back; then
+        // the last refresh token held goes, even one no longer sent for renewal (CP2-F2).
+        await this.#renewing?.catch(() => false);
+        if (signedIn) await this.#revoke(this.#revocable);
+      })(),
       new Promise((r) => (timer = setTimeout(r, SIGN_OUT_WAIT_MS))),
     ]);
     clearTimeout(timer);
+    this.#revocable = undefined;
     if (this.provider.endSessionEndpoint === undefined) return SIGNED_OUT_PATH;
     const url = new URL(this.provider.endSessionEndpoint);
     url.searchParams.set("client_id", this.config.webClientId);
