@@ -299,4 +299,9 @@ func TestURLsWithControlCharactersAreRefused(t *testing.T) {
 	if err := providerEndpoint("https://BWSYNTH.example.invalid/é?a=b", "token_endpoint"); err != nil {
 		t.Errorf("a printable non-ASCII URL: %v; want it accepted", err)
 	}
+	// A command that shows a context without checking it (logout, context use) still escapes it.
+	x := &Context{Name: "lab\x1b[2J", Server: "https://BWSYNTH.example.invalid/\u009b2J"}
+	if w := x.Where(); hostile(w) || !strings.Contains(w, `lab\x1b[2J (https://BWSYNTH.example.invalid/\x9b2J)`) {
+		t.Errorf("Where: %q; want the name and server escaped", w)
+	}
 }

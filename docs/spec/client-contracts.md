@@ -312,9 +312,9 @@ it. It holds no secret.
    terminal. The escaping holds toward the server, toward an https proxy and toward the identity
    provider, in discovery, renewal and revocation, and for the server's own text in an error: the
    reason phrase of every status shown and each member of a problem document
-   (`internal/client/printable.go`). A URL that errors show as it is (the server, the issuer an
-   imported client configuration names, an endpoint or redirect the identity provider names) is
-   refused when it holds a character the escaping would change.
+   (`internal/client/printable.go`). A context whose server or issuer URL holds a character the
+   escaping would change is refused before use, as is such an endpoint or redirect the identity
+   provider names; where a context is shown without that check, its name and server are escaped.
 5. Certificate pinning is not offered: a bundle per context limits trust enough for this
    milestone, and pinning a leaf breaks on every renewal.
 6. The browser uses the browser's own trust and has no override.
