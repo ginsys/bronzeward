@@ -78,6 +78,8 @@ describe("several tabs", () => {
     const holder = await signInTab({ rotate: "1", lifetime: "20", hold: "1" });
     const next = await openTab();
     const last = await openTab();
+    // Every tab took the first pair before its renewal began.
+    expect(await counts()).toMatchObject({ authorize: 1, refresh: 0 });
     await reach("refresh", 1);
     await closeTab(holder, next);
     // The waiting tab gives up after 10 s (§9.5 item 3); the tabs keep the current token.

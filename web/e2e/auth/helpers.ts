@@ -15,9 +15,13 @@ export const param = (name: string) => browser.execute((n: string) => new URLSea
 export const status = () => $('[data-testid="status"]').getText();
 
 // Waits until the page is back on `page`/ with its reads settled: the page's state text, or the
-// footer's server versions once the shell shows a page.
+// footer's server versions once the shell shows a page. Read in one step in the page: a state
+// text gone between two WebDriver calls would hold the second for its whole implicit wait.
 export async function settled(page: string): Promise<string> {
-  const shown = async () => (await $('[data-testid="status"]').isExisting()) ? !(await status()).startsWith("Loading") : $("main h2").isExisting();
+  const shown = () => browser.execute(() => {
+    const s = document.querySelector('[data-testid="status"]');
+    return s === null ? document.querySelector("main h2") !== null : !(s.textContent ?? "").startsWith("Loading");
+  });
   await browser.waitUntil(async () => (await where()) === `${page}/` && (await shown()), {
     timeout: 20_000, timeoutMsg: `the page did not settle on ${page}/`,
   });
