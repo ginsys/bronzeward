@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bufio"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -10,9 +11,11 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -105,10 +108,7 @@ func bundleOf(t *testing.T, ders ...[]byte) string {
 // whose DNS names hold control characters, and none reaches the error text; the trust refusal
 // still names the host, subject, issuer and trust source (§6 item 4).
 func TestTransportErrorsArePrintable(t *testing.T) {
-	// http.ProxyFromEnvironment reads the environment once per process, so the first request
-	// fixes it for every later test: this one leaves the proxy TestLiveSaysItUsesAProxy names.
-	// Go never proxies localhost, so the requests here are not affected.
-	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1")
+	proxyAsTheProxyTestNamesIt(t)
 	bad, badDER := hostileServer(t, http.NotFoundHandler())
 	badHost := strings.TrimPrefix(bad, "https://")
 
@@ -151,7 +151,7 @@ func TestTransportErrorsArePrintable(t *testing.T) {
 			}
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]any{"issuer": iss.URL, "authorization_endpoint": iss.URL + "/authorize",
-				"token_endpoint": bad + "/token", "jwks_uri": iss.URL + "/jwks", "id_token_signing_alg_values_supported": []string{"ES256"}})
+				"token_endpoint": bad + "/token", "revocation_endpoint": bad + "/revoke", "jwks_uri": iss.URL + "/jwks", "id_token_signing_alg_values_supported": []string{"ES256"}})
 		}))
 		defer iss.Close()
 		x := &Context{Name: "lab", OIDC: &OIDC{Issuer: iss.URL, ClientID: "BWSYNTH-cli", CertificateAuthority: bundleOf(t, iss.Certificate().Raw, badDER)}}
@@ -160,5 +160,91 @@ func TestTransportErrorsArePrintable(t *testing.T) {
 			!strings.Contains(err.Error(), `BWSYNTH-\x1b[2J.example.invalid`) {
 			t.Errorf("renewal: %q; want the renewal failed at the token endpoint, its certificate's names escaped", err)
 		}
+		if err := Revoke(x, "BWSYNTH-rt"); err == nil || hostile(err.Error()) || !strings.Contains(err.Error(), "revoking at the identity provider "+iss.URL) ||
+			!strings.Contains(err.Error(), `BWSYNTH-\x1b[2J.example.invalid`) {
+			t.Errorf("revocation: %q; want the revocation failed at its endpoint, its certificate's names escaped", err)
+		}
 	})
+}
+
+// proxyAsTheProxyTestNamesIt: http.ProxyFromEnvironment reads the environment once per process,
+// so whichever test sends the first request fixes it for every later one. A test that may be first
+// leaves the proxy TestLiveSaysItUsesAProxy names; Go never proxies loopback, so its own requests
+// are not affected.
+func proxyAsTheProxyTestNamesIt(t *testing.T) { t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1") }
+
+// rawServer answers each request for a path in answers with that raw HTTP/1.1 response, which
+// net/http would not let a handler send: a reason phrase with control characters, for one.
+func rawServer(t *testing.T, answers map[string]string) string {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer c.Close()
+				br := bufio.NewReader(c)
+				line, _ := br.ReadString('\n')
+				for h, err := br.ReadString('\n'); err == nil && h != "\r\n"; h, err = br.ReadString('\n') {
+				}
+				if f := strings.Fields(line); len(f) > 1 {
+					io.WriteString(c, answers[f[1]])
+				}
+			}()
+		}
+	}()
+	return "http://" + l.Addr().String()
+}
+
+// TestServerTextIsPrintable checks the server's own text that bronzewardctl shows: the reason
+// phrase of every status it names, and the problem document's members (§6 item 4).
+func TestServerTextIsPrintable(t *testing.T) {
+	proxyAsTheProxyTestNamesIt(t)
+	const reason = "HTTP/1.1 %d BWSYNTH-\x1b[2J\aphrase\r\n%sConnection: close\r\n\r\n%s"
+	srv := rawServer(t, map[string]string{
+		"/livez":                  fmt.Sprintf(reason, 500, "Content-Length: 0\r\n", ""),
+		"/bronzeward-client.json": fmt.Sprintf(reason, 404, "Content-Length: 0\r\n", ""),
+		"/api/v1/plain":           fmt.Sprintf(reason, 418, "Content-Length: 0\r\n", ""),
+		"/api/v1/redirect":        fmt.Sprintf(reason, 302, "Location: /elsewhere\r\nContent-Length: 0\r\n", ""),
+		"/api/v1/cut":             fmt.Sprintf(reason, 418, "Content-Length: 10\r\n", "ab"),
+	})
+	x := &Context{Name: "lab", Server: srv, Credential: "automation"}
+	hc, err := httpClient(x, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &Client{Context: x, Notices: io.Discard, hc: hc, warned: map[string]bool{}, token: "BWSYNTH-token"}
+	once := func(path string) error { _, _, err := c.once(path); return err }
+	_, fetchErr := FetchClientConfig(x, srv, nil)
+	for name, err := range map[string]error{
+		"live": Live(x, nil), "client configuration": fetchErr,
+		"not a problem": once("/plain"), "redirect": once("/redirect"), "cut-off answer": once("/cut"),
+	} {
+		if err == nil || hostile(err.Error()) || !strings.Contains(err.Error(), `BWSYNTH-\x1b[2J\x07phrase`) {
+			t.Errorf("%s: %q; want the reason phrase escaped", name, err)
+		}
+	}
+
+	shown := func(s string) bool {
+		return !strings.ContainsFunc(s, func(r rune) bool { return r != '\n' && unicode.IsControl(r) })
+	}
+	for _, p := range []*Problem{
+		{Status: 403, Doc: map[string]any{"type": problemPrefix + "forbidden", "title": "BWSYNTH-\x1b[2J", "detail": "BWSYNTH-\r",
+			"instance": "BWSYNTH-\a", "roles": []any{"BWSYNTH-\x1b]0;r\a"}}, Subject: "BWSYNTH-\u009b"},
+		{Status: 409, Doc: map[string]any{"type": problemPrefix + "recovery-mode-active", "scope": "BWSYNTH-\x1b", "machine": "BWSYNTH-\x7f"}},
+		{Status: 401, Doc: map[string]any{"type": problemPrefix + "unauthenticated"}, Reading: "BWSYNTH-\x1b[2J"},
+		{Status: 403, Doc: map[string]any{"type": problemPrefix + "identity-revoked"}, Cleared: "BWSYNTH-\x1b[2J"},
+		{Status: 400, Doc: map[string]any{"type": problemPrefix + "BWSYNTH-\x1b[2J"}},
+	} {
+		if s := p.Error(); !shown(s) || !strings.Contains(s, `BWSYNTH-\x`) {
+			t.Errorf("problem %s: %q; want each member's control characters escaped", p.Code(), s)
+		}
+	}
 }

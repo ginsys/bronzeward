@@ -35,7 +35,7 @@ func FetchClientConfig(x *Context, from string, verbose io.Writer) (*ClientConfi
 	}
 	defer r.Body.Close()
 	if r.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET %s answered %s, not the client configuration file; bronzewardctl follows no redirect", u, r.Status)
+		return nil, fmt.Errorf("GET %s answered %s, not the client configuration file; bronzewardctl follows no redirect", u, printable(r.Status))
 	}
 	var cc ClientConfig
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&cc); err != nil {
