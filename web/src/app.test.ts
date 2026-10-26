@@ -39,3 +39,11 @@ test("§8.2: each refusal view renders the problem fields under its own message"
   expect(shown({ kind: "failed", message: "revoked", problem: fields })).toContain(paragraph);
   expect(shown({ kind: "failed", message: "revoked" })).not.toContain('data-testid="problem"');
 });
+
+test("§7 item 4: a deprecation notice stays on the refusal that ends the shell", () => {
+  const notice = 'data-testid="deprecation"';
+  const with_ = (view: View) => renderToStaticMarkup(createElement(Screen, { view, notices: ["/api/v1/identity"] }));
+  expect(with_({ kind: "sign-in", message: "W1", signIn: () => {} })).toContain(notice);
+  expect(with_({ kind: "failed", message: "revoked" })).toContain(notice);
+  expect(with_({ kind: "signing-out" })).not.toContain(notice);
+});
