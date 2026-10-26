@@ -18,7 +18,7 @@ export const PRINCIPAL_CHANGED = "The identity provider renewed the sign-in for 
 export const SIGNING_OUT = "Signing out";
 const CHANNEL = "bronzeward";
 
-type View =
+export type View =
   | { kind: "loading" }
   // Nothing at all: after pagehide, so a restored page shows no data (§10.3 items 3-4).
   | { kind: "blank" }
@@ -153,6 +153,11 @@ export function App() {
     };
   }, []);
 
+  return <Screen view={view} />;
+}
+
+// What each view shows; exported for the rendered-view tests.
+export function Screen({ view }: { view: View }) {
   switch (view.kind) {
     case "blank":
       return null;
