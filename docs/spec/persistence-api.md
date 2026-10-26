@@ -1797,7 +1797,12 @@ value that is not one of its kind is `400 invalid-request` and an empty value
 does not filter. A draft update's claim names no machine, so a `machine`
 filter never lists it.
 
-`GET /principals` takes only `id`, the one parameter given more than once,
+`GET /principals` is specified by
+[#335](https://github.com/ginsys/bronzeward/issues/335) and not served yet:
+neither the route table nor `api/openapi.yaml` holds it, so it answers `404`
+until the change that routes it also describes it and adds its API revision
+row. It is not a paginated collection: it takes no `limit` or `cursor` and
+answers no `next`. It takes only `id`, the one parameter given more than once,
 from 1 to 100 times. No `id`, more than 100, a value that is not an `idn`
 identifier (§2), an empty one included, or any other parameter is
 `400 invalid-request`. An identifier no row holds is answered `unknown`, not
@@ -2598,12 +2603,27 @@ has an OpenBao identity (design §13.7 item 1, derived).
 **Pending owner choice BW-335-display-1: a human's display name.** The row
 holds no name for a human, so `GET /principals` (§9.2) shows one by its issuer
 and subject. Whether it also serves a display name, and from where, is the
-owner's choice, recorded in §17.40 once made. Options: (a) issuer and subject
-only; (b) a nullable `display` member, taken from a claim the deployment
-names, default `name`, else `preferred_username`, stored on the row by the
-admitted request that creates it and refreshed by later admitted ones, `null`
-for a service identity, whose `service` name serves; (c) names kept in a
-table of their own. Until the choice, the read serves issuer and subject only.
+owner's choice, recorded in §17.40 once made. Options:
+
+- (a) issuer and subject only. Nothing to store or keep current, and nothing a
+  user can change; but a provider whose subject is an opaque number (the
+  fixture's Zitadel issues one) shows people by that number.
+- (b) a nullable `display` member, taken from a claim the deployment names,
+  default `name`, else `preferred_username`, kept in a new column of the row
+  (not `name`, which holds a service identity's name and is `NULL` for a
+  human) by the admitted request that creates the row and refreshed by later
+  admitted ones; `null` for a service identity, whose `service` name serves.
+  Readable names; but many providers let users edit these claims, so a view
+  could show a name chosen to look like someone else's next to the true
+  subject; an access token need not carry either claim, so the member may be
+  `null` throughout; and a row created by an identity revocation before a
+  first sign-in has no token to take one from.
+- (c) names kept in a table of their own, maintained by an operator. Names a
+  user cannot change; but this specification names no source or route that
+  fills the table, and the choice would have to add one.
+
+Until the choice, the read serves issuer and subject only; (b) would only add
+a member.
 
 ### 10.1 Humans: OIDC
 
@@ -3074,7 +3094,7 @@ For a database restored to a backup taken at time *T*:
 | Approvals, scope releases | earlier epoch | authorize nothing; a plan needs an approval in the new epoch |
 | Idempotency records after *T* | absent | a retry executes afresh, or is refused `412 epoch-mismatch` if its `Bronzeward-Expected-Epoch` names an earlier epoch (§7.2, §12.4) |
 | Idempotency records from before *T* | earlier epoch once entry commits | a retry is refused `409 conflict` (§7.2) |
-| Principals created after *T* | absent | `GET /principals` answers their identifiers `unknown` (§9.2); a human's row is created again, under a new identifier, by its next admitted mutating request (§10) |
+| Principals created after *T* | absent | `GET /principals` answers their identifiers `unknown` (§9.2); a human's row is created again, under a new identifier, by its next admitted mutating request, or, for a human `deniedSubjects` refuses, by its re-recorded identity revocation (§10, §10.4) |
 | Identity revocations after *T* | absent | re-recorded by `recovery-admin`; the subject, human or service identity, is already refused by `deniedSubjects`, and the tool reissues no token to a listed service identity (§10.2, §10.4) |
 | Automation tokens | earlier epoch | refused; reissued with the tool **(choice §17.27)** |
 | Tokens revoked after *T* | valid again in the rows | refused anyway: earlier epoch |
@@ -4006,7 +4026,7 @@ design and evidence do not settle the question. Each is marked in place as
     in bodies** (§9.2): `GET /principals` maps up to 100 identifiers to their
     kind and issuer and subject or service name, for any role, and answers
     one no row holds as `unknown`. A client resolves the identifiers a view
-    shows in one request. Every role already reads the bodies that name these
+    shows in requests of at most 100 distinct identifiers each. Every role already reads the bodies that name these
     principals and the act log (§10.5), so the read adds only the issuer and
     subject or service name of principals a caller already sees by
     identifier. Alternatives: the name served
