@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"syscall"
 )
 
 // TokenInput is where an invocation takes its automation token from (client-contracts.md §9.4
@@ -50,13 +51,10 @@ func automationToken(x *Context, in TokenInput) (string, error) {
 	return t, nil
 }
 
-// readOwnerOnly reads a regular file no one but its owner may read (§9.4 item 2), checked
-// before it is opened, since opening a FIFO blocks.
+// readOwnerOnly reads a regular file no one but its owner may read (§9.4 item 2). It opens
+// without blocking, so a FIFO is refused instead of waited on.
 func readOwnerOnly(p string) ([]byte, error) {
-	if fi, err := os.Stat(p); err == nil && !fi.Mode().IsRegular() {
-		return nil, errors.New("not a regular file")
-	}
-	f, err := os.Open(p)
+	f, err := os.OpenFile(p, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -64,6 +62,9 @@ func readOwnerOnly(p string) ([]byte, error) {
 	fi, err := f.Stat()
 	if err != nil {
 		return nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, errors.New("not a regular file")
 	}
 	if fi.Mode().Perm()&0o077 != 0 {
 		return nil, fmt.Errorf("mode %04o lets others read it; make it owner-only (chmod 600)", fi.Mode().Perm())

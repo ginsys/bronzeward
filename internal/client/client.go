@@ -98,10 +98,10 @@ func (c *Client) Server() (*Response, *apitypes.ServerBody, error) {
 	if err := json.Unmarshal(r.Body, &s); err != nil {
 		return nil, nil, c.Context.fail(fmt.Errorf("GET /server: %w", err))
 	}
+	c.setStartMode(string(s.StartMode))
 	if s.ApiRevision < MinRevision {
 		return r, &s, c.Context.fail(fmt.Errorf("the server serves API revision %d; this bronzewardctl needs revision %d or later", s.ApiRevision, MinRevision))
 	}
-	c.setStartMode(string(s.StartMode))
 	return r, &s, nil
 }
 
@@ -112,12 +112,12 @@ func (c *Client) setStartMode(m string) {
 }
 
 // Get reads path under /api/v1. After an answer showing a new epoch it reads GET /server again
-// for the start mode (§8.5) before the recovery banner is shown.
+// for the start mode (§8.5) before the recovery banner is shown; a failed re-read fails the read.
 func (c *Client) Get(path string) (*Response, error) {
 	r, err := c.retry(path)
 	if c.newEpoch {
-		if _, _, err := c.Server(); err != nil {
-			fmt.Fprintln(c.Notices, err)
+		if _, _, serr := c.Server(); serr != nil {
+			r, err = nil, errors.Join(err, serr)
 		}
 	}
 	c.banner()
