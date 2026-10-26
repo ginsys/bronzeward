@@ -71,8 +71,9 @@ func Open(x *Context, in TokenInput, notices, verbose io.Writer) (*Client, error
 	return c, nil
 }
 
-// Where names the context and its server for every error and wait (client-contracts.md §5 item 2).
-func (x *Context) Where() string { return x.Name + " (" + x.Server + ")" }
+// Where names the context and its server for every error and wait (client-contracts.md §5 item 2),
+// printable: a command that never checks the context still shows them (§6 item 4).
+func (x *Context) Where() string { return printable(x.Name + " (" + x.Server + ")") }
 
 func (x *Context) fail(err error) error { return fmt.Errorf("%s: %w", x.Where(), err) }
 
