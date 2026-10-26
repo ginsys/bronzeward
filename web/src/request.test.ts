@@ -435,6 +435,18 @@ describe("stale-response discard", () => {
     expect(r.onEpochChange).toHaveBeenCalledTimes(1);
   });
 
+  test("a 401 answered after the view changed is discarded and asks for no renewal", async () => {
+    const renew = vi.fn(async () => true);
+    const d = delayed(problem(401, "unauthenticated", {}, null));
+    const c = new Client({ fetch: d.fetchImpl, renew });
+    c.setView(base);
+    const read = c.read("/identity");
+    c.setView({ principal: "", route: "", query: "" });
+    d.release();
+    expect(await read).toEqual({ kind: "discarded" });
+    expect(renew).not.toHaveBeenCalled();
+  });
+
   test("a failed renewal that ends after the view changed is discarded, not shown", async () => {
     let c!: Client;
     const renew = vi.fn(async () => {

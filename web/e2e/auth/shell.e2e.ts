@@ -1,6 +1,7 @@
 // COMP-01, COMP-02 (conformance/cases/) and the shell's header, navigation and states: the fixture
 // page against the server that trusts the fixture issuer, through the injector.
 import { $, $$, browser, expect } from "@wdio/globals";
+import { NOT_ACCEPTED } from "../../src/app.tsx";
 import { deprecated, incompatible } from "../../src/shell.tsx";
 import { TRANSPORT_FAILURE } from "../../src/request.ts";
 import { CONTROL, FIXTURE_API, FIXTURE_PAGE } from "../auth.conf.ts";
@@ -70,6 +71,12 @@ describe("the shell", () => {
     expect(await seen()).toEqual(["/server", "/identity", "/identity", "/identity"]);
     expect(await $$('[data-testid="deprecation"]').length).toBe(1);
   });
+
+  it("COMP-02: a Deprecation header on the answer that refuses the sign-in is still shown", async () => {
+    expect(await fixtureSignIn("h-viewer", { defect: "expired" }, { deprecate: "/server" })).toBe(NOT_ACCEPTED);
+    await announced("deprecation", deprecated("/api/v1/server"));
+    expect(await $$('[data-testid="deprecation"]').length).toBe(1);
+  });
 });
 
 describe("the state catalogue", () => {
@@ -83,6 +90,12 @@ describe("the state catalogue", () => {
     expect(await fixtureSignIn("h-viewer", {}, { redirect: "/server" })).toBe(TRANSPORT_FAILURE);
     expect(await testid("status").getAttribute("role")).toBe("status");
     expect(await testid("server").getText()).toBe("Server unknown");
+  });
+
+  it("disconnected: a first identity read with no answer is shown as such, not as loading or offline", async () => {
+    expect(await fixtureSignIn("h-viewer", {}, { redirect: "/identity" })).toBe(TRANSPORT_FAILURE);
+    expect(await testid("offline").isExisting()).toBe(false);
+    expect(await testid("server").getText()).toMatch(SERVER);
   });
 
   it("error: the problem's code, detail and instance", async () => {

@@ -1,7 +1,7 @@
 import { createElement as h, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
-import { Action, Failure, incompatible, MIN_API_REVISION, ShellContext } from "./shell.tsx";
+import { Action, connection, Deprecations, deprecated, Failure, incompatible, MIN_API_REVISION, offlineSince, ShellContext } from "./shell.tsx";
 import { Conflict, Disconnected, Empty, HUMAN_ONLY, Loading, NOT_ACCEPTED, NotAccepted, Offline, Refused, REPLAYED, Replayed, SET_ASIDE, SetAside, Unknown, UNKNOWN, Unread, Withheld, WITHHELD } from "./states.tsx";
 import { TRANSPORT_FAILURE } from "./request.ts";
 
@@ -68,6 +68,27 @@ describe("the shell", () => {
     expect(html(h(Failure, { res: forbidden({ humanOnly: true, detail: "needs author", instance: "req-1" }), sub: "u" }))).toContain(fields);
     expect(status(h(Failure, { res: { kind: "transport" }, sub: "" }))).toBe(TRANSPORT_FAILURE);
     expect(status(h(Failure, { res: { kind: "defect", message: "the response is not JSON" }, sub: "" }))).toBe("Not read: the response is not JSON.");
+  });
+
+  test("offline: each cause ends only on its own event, and the banner dates from the earlier", () => {
+    const t1 = at("10:11");
+    const t2 = at("10:12");
+    let c = connection({}, "offline", t2);
+    // A late answer while the browser is offline keeps the banner and the actions disabled.
+    c = connection(c, "answered", t2);
+    expect(offlineSince(c)).toEqual(t2);
+    c = connection(c, "lost", t1);
+    expect(offlineSince(c)).toEqual(t1);
+    // Back online, a read that found no answer still holds until one answers.
+    c = connection(c, "online", t2);
+    expect(offlineSince(c)).toEqual(t1);
+    expect(offlineSince(connection(c, "answered", t2))).toBeUndefined();
+  });
+
+  test("§7 item 4: the deprecation notices render once each, as status messages", () => {
+    const shown = html(h(Deprecations, { routes: ["/api/v1/server", "/api/v1/identity"] }));
+    expect(shown.match(/role="status" data-testid="deprecation"/g)).toHaveLength(2);
+    expect(shown).toContain(deprecated("/api/v1/server"));
   });
 
   test("§7 item 3: the refusal of an older server names both revisions", () => {
