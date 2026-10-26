@@ -197,9 +197,11 @@ export class Session {
     return this.#tokens?.access;
   }
 
-  // B1: the pair to post to another tab, unless its refresh token may already be spent.
+  // B1: the pair to post to another tab, unless its refresh token may already be spent, or is being
+  // sent: until the renewal answers, the pair has no refresh token, and a new tab would take it for
+  // a provider that does not rotate (§9.3 item 3). The renewal posts the pair it brings.
   pair(): Tokens | undefined {
-    return this.#tokens === undefined || this.#spent ? undefined : { ...this.#tokens };
+    return this.#tokens === undefined || this.#spent || this.#renewing !== undefined ? undefined : { ...this.#tokens };
   }
 
   // B1: another tab's newer pair for the same principal replaces this one; false if not taken.

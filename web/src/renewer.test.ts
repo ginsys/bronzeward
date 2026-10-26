@@ -39,11 +39,14 @@ class Browser {
   readonly sent: string[] = [];
   latest = "SYNTH-r1";
   hang = false;
+  // Answers wait for this, when set.
+  delay: Promise<void> | undefined;
   #n = 1;
   readonly fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
     const refresh = new URLSearchParams(init?.body as URLSearchParams).get("refresh_token") ?? "";
     this.sent.push(refresh);
     if (this.hang) return new Promise<Response>(() => {});
+    await this.delay;
     if (refresh !== this.latest) return json({ error: "invalid_grant" }, 400);
     this.#n++;
     this.latest = `SYNTH-r${this.#n}`;
@@ -162,11 +165,10 @@ describe("B1 one renewing tab", () => {
     b.hang = true;
     void x.renewer.renew();
     await settle();
-    // A pair posted while the renewal is in flight is the old one and answers nothing.
+    // No pair goes to a new tab while the renewal is in flight: it has no refresh token yet.
     const late = b.open();
     const joined = late.renewer.join();
     await settle();
-    expect((await joined)?.access).toBe("SYNTH-a1");
     b.tabs.delete(late);
     x.close();
     await settle();
@@ -175,6 +177,7 @@ describe("B1 one renewing tab", () => {
     const asked = z.renewer.renew();
     await vi.advanceTimersByTimeAsync(RENEW_WAIT_MS);
     expect(await asked).toBe(false);
+    expect(await joined).toBeUndefined();
     expect(b.sent).toEqual(["SYNTH-r1"]);
     expect([y, z].map((t) => t.session?.token())).toEqual(["SYNTH-a1", "SYNTH-a1"]);
     // §9.5 item 3: no pair for a new tab either, so it signs in again, and posts what it got.
@@ -190,6 +193,48 @@ describe("B1 one renewing tab", () => {
     expect([y, z].map((t) => t.session?.token())).toEqual(["SYNTH-a9", "SYNTH-a9"]);
     expect(await y.renewer.renew()).toBe(true);
     expect(b.sent).toEqual(["SYNTH-r1", "SYNTH-r9"]);
+  });
+
+  test("a tab that joins during the holder's renewal takes the pair it brings, never the one being renewed", async () => {
+    const b = new Browser();
+    const x = b.open();
+    x.signIn(first());
+    await settle();
+    let answer!: () => void;
+    b.delay = new Promise((r) => (answer = r));
+    const renewed = x.renewer.renew();
+    await settle();
+    const late = b.open();
+    const joined = late.join();
+    await settle();
+    expect(late.session).toBeUndefined();
+    answer();
+    expect(await renewed).toBe(true);
+    const t = await joined;
+    expect([t?.access, t?.refresh]).toEqual(["SYNTH-a2", "SYNTH-r2"]);
+    expect(late.session?.byRedirect).toBe(false);
+  });
+
+  test("a renewal in flight when the page is refused still gives its pair to the other tabs, whose refresh token it spent", async () => {
+    const b = new Browser();
+    const [x, y] = [b.open(), b.open()];
+    x.signIn(first());
+    await settle();
+    await y.join();
+    await vi.advanceTimersByTimeAsync(1_000);
+    let answer!: () => void;
+    b.delay = new Promise((r) => (answer = r));
+    const renewed = x.renewer.renew();
+    await settle();
+    // Refused (W1): the page stops renewing and lets the lock go, and keeps its session.
+    x.renewer.release();
+    await settle();
+    answer();
+    expect(await renewed).toBe(true);
+    await settle();
+    expect(y.session?.token()).toBe("SYNTH-a2");
+    expect(await y.renewer.renew()).toBe(true);
+    expect(b.sent).toEqual(["SYNTH-r1", "SYNTH-r2"]);
   });
 
   test("a tab that signs in by the redirect while another tab's renewal is unanswered keeps its own refresh token", async () => {
