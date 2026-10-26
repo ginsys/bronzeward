@@ -309,9 +309,10 @@ it. It holds no secret.
    the trust source used, and sends nothing. What a TLS or transport error shows that the remote
    side chose, such as a certificate's DNS names, which may hold any ASCII, is shown with each
    control character and each byte that is not UTF-8 escaped (`\x1b`), so it cannot write to the
-   terminal. This holds toward the server and toward the identity provider, in discovery, renewal
-   and revocation, and for the server's own text in an error: the reason phrase of every status
-   shown and each member of a problem document (`internal/client/printable.go`).
+   terminal. The escaping holds toward the server, toward an https proxy and toward the identity
+   provider, in discovery, renewal and revocation, and for the server's own text in an error: the
+   reason phrase of every status shown and each member of a problem document
+   (`internal/client/printable.go`).
 5. Certificate pinning is not offered: a bundle per context limits trust enough for this
    milestone, and pinning a leaf breaks on every renewal.
 6. The browser uses the browser's own trust and has no override.
@@ -384,8 +385,9 @@ than relying on the server's `400`.
 
 **Proposed** client behaviour per problem code, from the code table of
 [persistence and API §9.4](persistence-api.md#94-errors) and `internal/api/problem.go:11-36`. The
-client always shows `title`, `detail` when present, and `instance`, and never shows a request
-body. Exit codes are the journeys' (journeys §4).
+client always shows `title`, `detail` when present, and `instance`, each escaped as
+[§6 item 4](#6-tls-trust) states, and never shows a request body. Exit codes are the journeys'
+(journeys §4).
 
 | Status, code | Client behaviour |
 | --- | --- |

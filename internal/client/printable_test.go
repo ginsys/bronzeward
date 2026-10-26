@@ -103,10 +103,10 @@ func bundleOf(t *testing.T, ders ...[]byte) string {
 	return p
 }
 
-// TestTransportErrorsArePrintable checks #380 on the three paths: the server's transport, the
-// identity provider's discovery and the renewal at its token endpoint. Each meets a certificate
-// whose DNS names hold control characters, and none reaches the error text; the trust refusal
-// still names the host, subject, issuer and trust source (§6 item 4).
+// TestTransportErrorsArePrintable checks #380 on each transport path: the server's transport, an
+// https proxy's trust refusal, the identity provider's discovery, and the renewal and revocation at
+// its endpoints. Each meets a certificate whose DNS names hold control characters, and none reaches
+// the error text; a trust refusal still names the host, subject, issuer and trust source (§6 item 4).
 func TestTransportErrorsArePrintable(t *testing.T) {
 	proxyAsTheProxyTestNamesIt(t)
 	bad, badDER := hostileServer(t, http.NotFoundHandler())
@@ -130,6 +130,32 @@ func TestTransportErrorsArePrintable(t *testing.T) {
 		var ue *url.Error
 		if e := transportError(&Context{}, badHost, raw); hostile(e.Error()) || !errors.As(e, &ue) {
 			t.Errorf("transportError of a plain transport error: %q; want it printable and still a url.Error", e)
+		}
+	})
+
+	t.Run("https proxy", func(t *testing.T) {
+		roots := x509.NewCertPool()
+		cert, err := x509.ParseCertificate(badDER)
+		if err != nil {
+			t.Fatal(err)
+		}
+		roots.AddCert(cert)
+		proxy, _ := url.Parse(bad)
+		hc, err := newHTTPClient(&Context{Name: "lab", Server: "https://BWSYNTH.example.invalid", Credential: "automation"}, nil,
+			func(*http.Request) (*url.URL, error) { return proxy, nil }, roots)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = hc.Get("https://BWSYNTH.example.invalid/livez")
+		var tr *trust
+		if err == nil || hostile(err.Error()) || !errors.As(err, &tr) {
+			t.Fatalf("proxy: %q; want a trust refusal without a control character", err)
+		}
+		for _, want := range []string{"the certificate of the proxy " + badHost, `subject "CN=BWSYNTH-hostile\x1b[0m"`,
+			`issuer "CN=BWSYNTH-hostile\x1b[0m"`, "not trusted by the system trust store", `BWSYNTH-\x1b[2J.example.invalid`, "nothing was sent"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("proxy: %q does not hold %q", err, want)
+			}
 		}
 	})
 
