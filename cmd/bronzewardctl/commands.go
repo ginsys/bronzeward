@@ -81,7 +81,8 @@ func (e *env) contextCmd(args []string) error {
 
 // contextAdd records a context after its server answered GET /livez (client-contracts.md §5).
 // The identity provider's values are given by hand, or with --from read from the client
-// configuration file next to the web files, keeping the CLI's client ID (§5 item 4).
+// configuration file next to the web files, keeping the CLI's client ID and the file's scopes
+// unless --scopes names others (§5 item 4).
 func (e *env) contextAdd(args []string) error {
 	x := client.Context{}
 	var automationFile, from, scopes string
@@ -139,6 +140,9 @@ func (e *env) contextAdd(args []string) error {
 			return fmt.Errorf("%s: %w", x.Where(), err)
 		}
 		o.Issuer, o.Audience, o.ClientID = cc.Issuer, cc.Audience, cc.CLIClientID
+		if o.Scopes == nil {
+			o.Scopes = cc.OIDCScopes()
+		}
 	}
 	if err := x.Check(); err != nil {
 		return usageError{err}
