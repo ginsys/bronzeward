@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/ginsys/bronzeward/internal/client"
 	"github.com/ginsys/bronzeward/internal/client/apitypes"
@@ -230,8 +231,9 @@ func (e *env) whoamiCmd(args []string) (err error) {
 	})
 }
 
-// logoutCmd removes an OIDC context's stored sign-in. An access token already issued is not
-// revoked by it and stays valid at the server until it expires (client-contracts.md §9.5 item 3).
+// logoutCmd removes an OIDC context's stored sign-in, an unreadable one too. An access token
+// already issued stays valid at the server until it expires, plus its leeway; the refresh token is
+// not yet revoked at the provider (client-contracts.md §9.7 item 1).
 func (e *env) logoutCmd(args []string) error {
 	if _, err := e.parse("logout", args, 0, nil); err != nil {
 		return err
@@ -252,22 +254,33 @@ func (e *env) logoutCmd(args []string) error {
 		return fmt.Errorf("%s: this context has no token file (oidc.tokenFile), so no sign-in is stored", x.Where())
 	}
 	t, err := client.ReadTokens(p)
-	if err != nil {
+	unreadable := errors.Is(err, client.ErrNotTokenFile)
+	if err != nil && !unreadable {
 		return fmt.Errorf("%s: %w", x.Where(), err)
 	}
-	if t == nil {
+	if t == nil && !unreadable {
 		_, err = fmt.Fprintf(e.out, "Not signed in to %s: the token file %s does not exist.\n", x.Where(), p)
 		return err
 	}
 	if err := client.ClearTokens(p); err != nil {
 		return fmt.Errorf("%s: %w", x.Where(), err)
 	}
-	until := "it expires"
-	if c := client.ReadClaims(t.AccessToken); c != nil {
-		until = c.ExpiresAt().UTC().Format("2006-01-02 15:04:05 MST")
+	if unreadable {
+		_, err = fmt.Fprintf(e.out, "Signed out of %s: the token file %s was unreadable and is removed.\n", x.Where(), p)
+		return err
 	}
-	_, err = fmt.Fprintf(e.out, "Signed out of %s: the token file %s is removed. The access token already issued is not revoked and stays valid at the server until %s, plus the server's 60 s leeway.\n",
-		x.Where(), p, until)
+	valid := "stays valid at the server until it expires, plus the server's 60 s leeway"
+	if c := client.ReadClaims(t.AccessToken); c != nil && time.Now().Before(c.ExpiresAt()) {
+		valid = "stays valid at the server until " + c.ExpiresAt().UTC().Format("2006-01-02 15:04:05 MST") + ", plus the server's 60 s leeway"
+	} else if c != nil {
+		valid = "expired at " + c.ExpiresAt().UTC().Format("2006-01-02 15:04:05 MST") + "; the server accepts it for at most 60 s after that"
+	}
+	revoked := ""
+	if t.RefreshToken != "" {
+		revoked = " The refresh token is not revoked at the identity provider; this bronzewardctl does not revoke it yet."
+	}
+	_, err = fmt.Fprintf(e.out, "Signed out of %s: the token file %s is removed. The access token already issued %s.%s\n",
+		x.Where(), p, valid, revoked)
 	return err
 }
 

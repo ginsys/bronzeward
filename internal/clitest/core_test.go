@@ -229,7 +229,7 @@ func TestRequestCore(t *testing.T) {
 		if err := os.Chmod(config, 0o500); err != nil {
 			t.Fatal(err)
 		}
-		f.want(f.ctl(nil, "", "whoami"), 1, "lab ("+in.URL+"): keeping the epoch and start mode")
+		f.want(f.ctl(nil, "", "whoami"), 1, "lab ("+in.URL+"): keeping the epoch, start mode and maximum token lifetime")
 		if err := os.Chmod(config, 0o700); err != nil {
 			t.Fatal(err)
 		}

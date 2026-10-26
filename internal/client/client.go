@@ -247,8 +247,8 @@ func (c *Client) banner() {
 	}
 }
 
-// Save keeps the epoch and start mode in the contexts file, leaving its other fields as they
-// are now. A context removed and added again under the same name for another server while the
+// Save keeps the epoch, start mode and maximum token lifetime in the contexts file, leaving its
+// other fields as they are now. A context removed and added again under the same name for another server while the
 // command ran keeps its own: what was read belongs to the old server.
 func (c *Client) Save() error {
 	if !c.changed {
@@ -261,7 +261,7 @@ func (c *Client) Save() error {
 		return nil
 	})
 	if err != nil {
-		return c.Context.fail(fmt.Errorf("keeping the epoch and start mode: %w", err))
+		return c.Context.fail(fmt.Errorf("keeping the epoch, start mode and maximum token lifetime: %w", err))
 	}
 	return nil
 }

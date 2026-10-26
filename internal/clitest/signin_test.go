@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -118,6 +119,19 @@ func (f *fixture) store(path, at, rt string) {
 	}
 }
 
+// hold takes the renewal lock at path as bronzewardctl does, until the returned func.
+func hold(t *testing.T, path string) func() {
+	t.Helper()
+	l, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Flock(int(l.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	return func() { l.Close() }
+}
+
 func (f *fixture) stored(path string) *client.Tokens {
 	f.t.Helper()
 	t, err := client.ReadTokens(path)
@@ -143,10 +157,9 @@ func (f *fixture) humanFile() string { return filepath.Join(f.home, "human.json"
 
 func init() {
 	reading := "bronzewardctl's own reading of the token, not the server's reason: "
+	idToken := "The identity provider sent an ID token, or an access token without jti; the client or the provider's configuration is at fault."
 	sharedCases["AUTH-02"] = func(t *testing.T, f *fixture, in *injector) {
 		in.set(nil, nil)
-		f.want(f.ctl(nil, "", "context", "add", "human", "--server", in.URL, "--certificate-authority", in.ca,
-			"--issuer", f.iss.URL, "--client-id", "BWSYNTH-cli", "--audience", "bronzeward", "--oidc-token-file", f.humanFile()), 0, "credential oidc")
 		// A first accepted read keeps the server's maximum lifetime for the over-lifetime reading.
 		f.store(f.humanFile(), f.mint("h-viewer", ""), "")
 		f.want(f.signedIn("--context", "human", "whoami"), 0, "Roles", "viewer",
@@ -158,6 +171,9 @@ func init() {
 			"over-lifetime":    "The token lives longer than this server accepts",
 			"alg-none":         "Not accepted by human (" + in.URL + "): sign in again.",
 			"groups-not-array": "Not accepted by human (" + in.URL + "): sign in again.",
+			"id-token-nonce":   idToken,
+			"id-token-at-hash": idToken,
+			"no-jti":           idToken,
 		} {
 			f.store(f.humanFile(), f.mint("h-viewer", defect), "")
 			in.set(nil, nil)
@@ -168,6 +184,7 @@ func init() {
 		}
 	}
 	sharedCases["AUTH-03"] = func(t *testing.T, f *fixture, in *injector) {
+		in.set(nil, nil)
 		tok, err := f.iss.MintWithoutGroup("h-viewer", "bw-viewers", time.Now())
 		if err != nil {
 			t.Fatal(err)
@@ -280,7 +297,8 @@ func TestSignIn(t *testing.T) {
 	})
 
 	// T6: two processes renewing together redeem the refresh token once; the second uses the
-	// pair the first stored.
+	// pair the first stored. The test holds the renewal lock until both have read the expiring
+	// token, so without the lock or the re-read under it both would redeem.
 	t.Run("concurrent renewal", func(t *testing.T) {
 		f.store(file, f.viewerToken("h-viewer", 270*time.Second, 30*time.Second), "BWSYNTH-rt-9")
 		var used atomic.Bool
@@ -291,11 +309,14 @@ func TestSignIn(t *testing.T) {
 			time.Sleep(500 * time.Millisecond)
 			return issued(f.mint("h-viewer", ""), "BWSYNTH-rt-0")
 		})
+		unlock := hold(t, file+".lock")
 		var wg sync.WaitGroup
 		results := make([]result, 2)
 		for i := range results {
 			wg.Go(func() { results[i] = whoami() })
 		}
+		time.Sleep(time.Second)
+		unlock()
 		wg.Wait()
 		for _, r := range results {
 			f.want(r, 0, "subject h-viewer")
@@ -305,14 +326,48 @@ func TestSignIn(t *testing.T) {
 		}
 	})
 
+	// A logout while another process renews waits for the renewal and then removes the file,
+	// which the renewal does not write back.
+	t.Run("logout during a renewal", func(t *testing.T) {
+		f.store(file, f.viewerToken("h-viewer", 270*time.Second, 30*time.Second), "BWSYNTH-rt-10")
+		f.idp.set(func(string) (int, any) {
+			time.Sleep(time.Second)
+			return issued(f.mint("h-viewer", ""), "BWSYNTH-rt-11")
+		})
+		var wg sync.WaitGroup
+		var renewing result
+		wg.Go(func() { renewing = whoami() })
+		for deadline := time.Now().Add(10 * time.Second); f.idp.calls.Load() == 0 && time.Now().Before(deadline); {
+			time.Sleep(10 * time.Millisecond)
+		}
+		f.want(f.signedIn("--context", "human", "logout"), 0, "Signed out of human")
+		wg.Wait()
+		f.want(renewing, 0, "subject h-viewer")
+		if _, err := os.Stat(file); !os.IsNotExist(err) {
+			t.Errorf("the token file is back after the logout: %v", err)
+		}
+	})
+
 	t.Run("logout", func(t *testing.T) {
 		tok := f.mint("h-viewer", "")
 		f.store(file, tok, "BWSYNTH-rt-1")
 		until := client.ReadClaims(tok).ExpiresAt().UTC().Format("2006-01-02 15:04:05 MST")
 		f.want(f.signedIn("--context", "human", "logout"), 0, "Signed out of human", "the token file "+file+" is removed",
-			"is not revoked and stays valid at the server until "+until+", plus the server's 60 s leeway")
+			"The access token already issued stays valid at the server until "+until+", plus the server's 60 s leeway.",
+			"The refresh token is not revoked at the identity provider")
 		if _, err := os.Stat(file); !os.IsNotExist(err) {
 			t.Errorf("the token file is still there: %v", err)
+		}
+		f.store(file, f.mint("h-viewer", "expired"), "")
+		r := f.signedIn("--context", "human", "logout")
+		f.want(r, 0, "already issued expired at ", "the server accepts it for at most 60 s after that")
+		if strings.Contains(r.out, "refresh token") {
+			t.Errorf("logout names a refresh token none was stored for:\n%s", r.out)
+		}
+		os.WriteFile(file, []byte("{}"), 0o600)
+		f.want(f.signedIn("--context", "human", "logout"), 0, "the token file "+file+" was unreadable and is removed")
+		if _, err := os.Stat(file); !os.IsNotExist(err) {
+			t.Errorf("the unreadable token file is still there: %v", err)
 		}
 		f.want(f.signedIn("--context", "human", "logout"), 0, "Not signed in to human")
 		f.want(f.signedIn("--context", "lab", "logout"), 1, "an automation context has no sign-in")

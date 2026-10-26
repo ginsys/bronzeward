@@ -51,15 +51,21 @@ func ReadTokens(p string) (*Tokens, error) {
 	} else if err != nil {
 		return nil, fmt.Errorf("token file %s: %w", p, err)
 	}
-	if bytes.HasPrefix(bytes.TrimSpace(b), []byte("bwt_")) {
+	if automation(b) {
 		return nil, automationFile(p)
 	}
 	var t Tokens
 	if json.Unmarshal(b, &t) != nil || t.AccessToken == "" {
-		return nil, fmt.Errorf("token file %s is not a bronzewardctl token file", p)
+		return nil, fmt.Errorf("token file %s: %w", p, ErrNotTokenFile)
 	}
 	return &t, nil
 }
+
+// ErrNotTokenFile is a token file that holds neither tokens nor an automation token.
+var ErrNotTokenFile = errors.New("not a bronzewardctl token file")
+
+// automation is the content of a file holding an automation token, as AutomationToken reads one.
+func automation(b []byte) bool { return bytes.HasPrefix(bytes.TrimLeft(b, " \t\r\n"), []byte("bwt_")) }
 
 func automationFile(p string) error {
 	return fmt.Errorf("token file %s holds an automation token; bronzewardctl neither signs in with it nor writes or clears it", p)
@@ -74,9 +80,9 @@ func operators(p string) error {
 		return err
 	}
 	defer f.Close()
-	head := make([]byte, 4)
+	head := make([]byte, 4096)
 	n, _ := io.ReadFull(f, head)
-	if string(head[:n]) == "bwt_" {
+	if automation(head[:n]) {
 		return automationFile(p)
 	}
 	return nil
@@ -100,14 +106,20 @@ func WriteTokens(p string, t *Tokens) error {
 	}
 	defer os.Remove(tmp.Name())
 	_, err = tmp.Write(b)
-	if err = errors.Join(err, tmp.Close()); err != nil {
+	if err = errors.Join(err, tmp.Sync(), tmp.Close()); err != nil {
 		return err
 	}
 	return os.Rename(tmp.Name(), p)
 }
 
-// ClearTokens removes the token file, as logout and an identity-revoked answer do (§8.2).
+// ClearTokens removes the token file, as logout and an identity-revoked answer do (§8.2), under
+// the renewal lock, so that a renewal in another process finds it gone instead of writing it back.
 func ClearTokens(p string) error {
+	unlock, err := renewalLock(p)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	if err := operators(p); err != nil {
 		return err
 	}
@@ -126,6 +138,10 @@ type Claims struct {
 	Expiry   float64         `json:"exp"`
 	IssuedAt float64         `json:"iat"`
 	Groups   json.RawMessage `json:"groups"`
+	ID       string          `json:"jti"`
+	// Present, even as null, they mark an ID token, as the server counts them (auth.go idToken).
+	Nonce  json.RawMessage `json:"nonce"`
+	AtHash json.RawMessage `json:"at_hash"`
 }
 
 type audience []string
@@ -193,26 +209,29 @@ func (s *signIn) expiring() bool {
 func (c *Client) renew() (err error) {
 	s := c.signIn
 	defer func() { s.failed = s.failed || err != nil }()
-	unlock, err := renewalLock(c.Context.Name)
+	unlock, err := renewalLock(s.file)
 	if err != nil {
 		return err
 	}
 	defer unlock()
 	old := s.tokens
-	if s.file != "" {
-		t, err := ReadTokens(s.file)
-		if err != nil {
-			return err
-		}
-		if t != nil && t.AccessToken != old.AccessToken {
-			c.adopt(t)
-			return nil
-		}
+	t, err := ReadTokens(s.file)
+	if err != nil {
+		return err
+	}
+	if t == nil {
+		// Logout or an identity-revoked answer removed it meanwhile: never write it back.
+		s.tokens = &Tokens{AccessToken: old.AccessToken}
+		return errors.New("the stored sign-in was removed meanwhile, so it is not renewed")
+	}
+	if t.AccessToken != old.AccessToken {
+		c.adopt(t)
+		return nil
 	}
 	if old.RefreshToken == "" {
 		return errors.New("no refresh token is kept, so the sign-in cannot be renewed")
 	}
-	t, err := refresh(c.Context, old.RefreshToken)
+	t, err = refresh(c.Context, old.RefreshToken)
 	if err != nil {
 		return err
 	}
@@ -221,10 +240,8 @@ func (c *Client) renew() (err error) {
 		t.RefreshToken = ""
 		fmt.Fprintf(c.Notices, "%s: the identity provider did not rotate the refresh token, so none is kept; sign in again when this access token expires.\n", c.Context.Where())
 	}
-	if s.file != "" {
-		if err := WriteTokens(s.file, t); err != nil {
-			return err
-		}
+	if err := WriteTokens(s.file, t); err != nil {
+		return err
 	}
 	c.adopt(t)
 	return nil
@@ -240,22 +257,14 @@ func (c *Client) adopt(t *Tokens) {
 	c.signIn.tokens, c.token = t, t.AccessToken
 }
 
-// renewalLock takes the context's renewal lock, a file in the user's state directory that holds
-// nothing secret.
-func renewalLock(name string) (func(), error) {
-	dir := os.Getenv("XDG_STATE_HOME")
-	if dir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, err
-		}
-		dir = filepath.Join(home, ".local", "state")
-	}
-	dir = filepath.Join(dir, "bronzeward")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+// renewalLock takes the token file's renewal lock (§9.2 item 3): the file p.lock beside it, which
+// holds nothing secret. It belongs to the file, not the context, so contexts that share a token
+// file (BRONZEWARD_TOKEN_FILE overrides every one) renew one at a time.
+func renewalLock(p string) (func(), error) {
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(filepath.Join(dir, name+".renewal.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	f, err := os.OpenFile(p+".lock", os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
 	}
@@ -280,6 +289,9 @@ func refresh(x *Context, rt string) (*Tokens, error) {
 	}
 	// A public client sends its ID in the form; auto-detection would redeem a refused token twice.
 	ep := p.Endpoint()
+	if err := endpoint(ep.TokenURL, "the identity provider's token_endpoint"); err != nil {
+		return nil, err
+	}
 	ep.AuthStyle = oauth2.AuthStyleInParams
 	conf := oauth2.Config{ClientID: x.OIDC.ClientID, Endpoint: ep, Scopes: x.OIDC.Scopes}
 	t, err := conf.TokenSource(ctx, &oauth2.Token{RefreshToken: rt}).Token()
@@ -328,6 +340,8 @@ func (c *Client) reading() string {
 		return say(fmt.Sprintf("The token is not issued for %s; the identity provider needs an audience mapping.", x.OIDC.Audience))
 	case x.MaxTokenLifetimeSeconds > 0 && t.Expiry-t.IssuedAt > float64(x.MaxTokenLifetimeSeconds):
 		return say("The token lives longer than this server accepts; the identity provider's access-token lifetime must be shortened.")
+	case t.Nonce != nil || t.AtHash != nil || t.ID == "":
+		return say("The identity provider sent an ID token, or an access token without jti; the client or the provider's configuration is at fault.")
 	}
 	return say(fmt.Sprintf("Not accepted by %s: sign in again.", x.Where()))
 }

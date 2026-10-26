@@ -102,7 +102,7 @@
 
 - id: AUTH-02
   setup: 'context human: oidc, issuer the fixture issuer, audience bronzeward, a D2 (b) token file holding no refresh token; a first whoami with a valid h-viewer token keeps the server''s maxTokenLifetimeSeconds'
-  action: whoami, once per fixture defect expired, wrong-issuer, wrong-audience, over-lifetime, alg-none, groups-not-array
+  action: whoami, once per fixture defect expired, wrong-issuer, wrong-audience, over-lifetime, alg-none, groups-not-array, id-token-nonce, id-token-at-hash, no-jti
   exchange:
     - "GET /api/v1/server, headers: Authorization, Accept: application/json"
   fault: the token file holds an h-viewer token carrying the defect

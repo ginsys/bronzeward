@@ -138,6 +138,17 @@ func TestRecordReads(t *testing.T) {
 	canned["/operations/op_none"] = strings.Replace(strings.TrimSuffix(op[:strings.Index(op, `"attempts":`)], ","), `"op_test"`, `"op_none"`, 1) + `}`
 	canned["/operations/op_acct"] = strings.NewReplacer(`"op_test"`, `"op_acct"`,
 		`"accounting":null`, `"accounting":{"basis":"decision","at":"2026-10-22T10:20:00Z","revision":2}`).Replace(op)
+	// Two attempts, one accounted: the guidance names the other, whichever is last.
+	first := op[strings.Index(op, `"attempts":[`)+len(`"attempts":[`) : len(op)-2]
+	second := strings.NewReplacer(`"att_a"`, `"att_b"`, `"number":1`, `"number":2`).Replace(first)
+	accounted := func(a string) string {
+		return strings.Replace(a, `"accounting":null`, `"accounting":{"basis":"decision","at":"2026-10-22T10:20:00Z","revision":3}`, 1)
+	}
+	withAttempts := func(id, attempts string) string {
+		return strings.Replace(op[:strings.Index(op, `"attempts":[`)], `"op_test"`, `"`+id+`"`, 1) + `"attempts":[` + attempts + `]}`
+	}
+	canned["/operations/op_last"] = withAttempts("op_last", first+","+accounted(second))
+	canned["/operations/op_first"] = withAttempts("op_first", accounted(first)+","+second)
 	canned["/plans"] = `{"items":[` + canned["/plans/pln_test"] + `]}`
 	canned["/operations"] = `{"items":[` + canned["/operations/op_test"] + `]}`
 	canned["/machines/"+m+"/timeline"] = `{"items":[{"revision":1,"at":"2026-10-22T10:00:00Z","epoch":"` + id.Epoch + `","kind":"adoption",` +
@@ -194,6 +205,8 @@ func TestRecordReads(t *testing.T) {
 		{[]string{"operation", "show", "op_none"}, []string{"Operation op_none  apply-config  unresolved", "no attempt was recorded",
 			"The server retries it", "the controller cancels it", "a recovery administrator resolves it as cancelled"}},
 		{[]string{"operation", "show", "op_acct"}, []string{"Attempt 1", "every attempt is accounted for", "retries or settles it from a new observation"}},
+		{[]string{"operation", "show", "op_last"}, []string{"Attempt 2", "must account for attempt 1."}},
+		{[]string{"operation", "show", "op_first"}, []string{"Attempt 2", "must account for attempt 2."}},
 		{[]string{"machine", "observations", m}, []string{"obs_b", "monitor", "configuration: the read timed out", "Health is not checked"}},
 	} {
 		f.want(f.ctl(nil, "", c.args...), 0, c.parts...)

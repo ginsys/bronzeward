@@ -433,6 +433,9 @@ func TestSharedCases(t *testing.T) {
 		}
 	}
 	f.ctl(nil, "", "context", "add", "lab", "--server", f.base, "--automation-token-file", f.tokenFile)
+	// The sign-in cases' oidc context, through the injector so that each case sees its requests.
+	f.want(f.ctl(nil, "", "context", "add", "human", "--server", in.URL, "--certificate-authority", in.ca,
+		"--issuer", f.iss.URL, "--client-id", "BWSYNTH-cli", "--audience", "bronzeward", "--oidc-token-file", f.humanFile()), 0, "credential oidc")
 	f.inventory()
 	f.revoke("h-author") // AUTH-05's setup, before the act count
 	before := f.acts()
