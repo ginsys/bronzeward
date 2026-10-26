@@ -49,16 +49,19 @@ func newHTTPClient(x *Context, verbose io.Writer, from func(*http.Request) (*url
 			fmt.Fprintf(verbose, "%s: through the proxy %s\n", r.URL.Host, u.Redacted())
 		}
 		if u.Scheme == "https" {
-			// Go dials an internationalized name by its ASCII form, which the dialer would not
-			// find below and would reach without TLS.
+			// The dialer below finds the proxy by the address Go dials, host and port joined
+			// (IPv6 bracketed); an address it does not find is reached without TLS. Go dials an
+			// internationalized name by its ASCII form, so such a name is refused.
 			if strings.IndexFunc(u.Hostname(), func(r rune) bool { return r >= utf8.RuneSelf }) >= 0 {
 				return nil, fmt.Errorf("the https proxy %s: give its host name in ASCII (punycode)", u.Redacted())
 			}
 			plain := *u
 			plain.Scheme = "http"
-			if plain.Port() == "" {
-				plain.Host = net.JoinHostPort(plain.Hostname(), "443")
+			port := plain.Port()
+			if port == "" {
+				port = "443"
 			}
+			plain.Host = net.JoinHostPort(plain.Hostname(), port)
 			tlsProxies.Store(plain.Host, plain.Hostname())
 			u = &plain
 		}

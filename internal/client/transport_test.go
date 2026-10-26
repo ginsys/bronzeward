@@ -108,6 +108,20 @@ func TestHTTPSProxyTrust(t *testing.T) {
 		hc.CloseIdleConnections()
 	}
 
+	// Go dials a proxy at its host and port joined, IPv6 bracketed; the address the dialer knows
+	// must be that one, also for an unbracketed IPv6 host as a lax URL parse gives it.
+	for host, want := range map[string]string{"::1:8443": "[::1]:8443", "proxy.example.invalid": "proxy.example.invalid:443"} {
+		hc, err := newHTTPClient(&Context{Name: "lab", Server: srv.URL, Credential: "automation"}, nil,
+			func(*http.Request) (*url.URL, error) { return &url.URL{Scheme: "https", Host: host}, nil }, proxyRoots)
+		if err != nil {
+			t.Fatal(err)
+		}
+		q, _ := http.NewRequest(http.MethodGet, srv.URL, nil)
+		if got, err := hc.Transport.(*http.Transport).Proxy(q); err != nil || got.Scheme != "http" || got.Host != want {
+			t.Errorf("proxy %s: %v, %v; want http://%s, the address Go dials", host, got, err, want)
+		}
+	}
+
 	// An internationalized https proxy name is refused, never reached without TLS.
 	var dials atomic.Int32
 	plain := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { dials.Add(1) }))
