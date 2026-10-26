@@ -93,6 +93,36 @@ describe("several tabs", () => {
     await reach("refresh", 3);
     expect(await counts()).toMatchObject({ authorize: 2, refresh: 3, spent: 0 });
   });
+
+  it("AUTH-11: a refresh request never answered fails after 15 s, and the holder renews with the next pair", async function () {
+    this.timeout(120_000);
+    const holder = await signInTab({ rotate: "1", lifetime: "20", hold: "1" });
+    await reach("refresh", 1);
+    // Past the 15 s bound (#388), the holder's renewal has failed and holds back nothing.
+    await browser.pause(16_000);
+    // A new tab gets no pair whose refresh token was sent, waits 5 s and signs in again; the holder
+    // takes its pair and renews with it at that pair's threshold.
+    await openTab();
+    await browser.switchToWindow(holder);
+    await reach("refresh", 2);
+    expect(await counts()).toMatchObject({ authorize: 2, refresh: 2, spent: 0 });
+    expect(await settled(FIXTURE_PAGE)).toMatch(SERVER);
+  });
+
+  it("AUTH-11: without a refresh token, two tabs at the threshold renew by one redirect, the holder's", async function () {
+    this.timeout(120_000);
+    // expires_in 20 s and no refresh token: each pair is renewed by the redirect 10 s after it was
+    // issued. The other tab, granted the lock when the holder leaves, waits for the redirect's pair.
+    await signInTab({ lifetime: "20", bare: "1" });
+    await openTab();
+    await reach("authorize", 2);
+    await browser.pause(3000);
+    expect(await counts()).toMatchObject({ authorize: 2, refresh: 0 });
+    // The tab that waited holds the lock now and redirects in turn.
+    await reach("authorize", 3);
+    await browser.pause(3000);
+    expect(await counts()).toMatchObject({ authorize: 3, refresh: 0, spent: 0 });
+  });
 });
 
 // Only the idle first tab left, so the next case starts with no holder.

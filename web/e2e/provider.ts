@@ -18,8 +18,10 @@ export interface Grant {
   // for `renewed`'s access token and subject if set (AUTH-07). Without it every use is refused.
   rotate?: boolean;
   renewed?: Grant;
-  // How many refresh requests to take and never answer (AUTH-11's second case).
+  // How many refresh requests to take and never answer (AUTH-11's second and third cases).
   hold?: number;
+  // Issue no refresh token: a provider that does not rotate (AUTH-11's fourth case).
+  bare?: boolean;
 }
 
 export interface ProviderOptions {
@@ -58,7 +60,7 @@ export function startProvider(o: ProviderOptions): Promise<Provider> {
     const now = Math.floor(Date.now() / 1000);
     const lifetime = grant.lifetime ?? 300;
     const id = [b64url('{"alg":"none"}'), b64url(JSON.stringify({ iss: o.issuer, aud: [o.clientId], sub: grant.sub, ...(nonce !== undefined ? { nonce } : {}), iat: now, exp: now + 300 })), ""].join(".");
-    const refresh = o.refresh !== undefined ? `${o.refresh}-refresh-${randomBytes(8).toString("hex")}` : undefined;
+    const refresh = o.refresh !== undefined && grant.bare !== true ? `${o.refresh}-refresh-${randomBytes(8).toString("hex")}` : undefined;
     if (refresh !== undefined) latest.set(refresh, grant);
     res.writeHead(200, headers).end(JSON.stringify({ access_token: grant.access, expires_in: lifetime, id_token: id, ...(refresh !== undefined ? { refresh_token: refresh } : {}) }));
   };

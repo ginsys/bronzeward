@@ -6,7 +6,7 @@ import { flushSync } from "react-dom";
 import { beginSignIn, CALLBACK_PATH, completeSignIn, discover, type Failure, localReading, PENDING_KEY, type Provider, Session, SIGNED_OUT_PATH, type Tokens } from "./auth.ts";
 import { type ClientConfig, loadClientConfig } from "./config.ts";
 import { navigate, PageState, renewals } from "./page.ts";
-import { type Message, Renewer } from "./renewer.ts";
+import { type Channel, Renewer } from "./renewer.ts";
 import { Client, type ReadResult, TRANSPORT_FAILURE } from "./request.ts";
 import type { components } from "./api/v1";
 
@@ -42,15 +42,23 @@ export function App() {
     const page = new PageState();
     let session: Session | undefined;
     let renewing: ReturnType<typeof renewals> | undefined;
-    const channel = new BroadcastChannel(CHANNEL);
     // §9.5 item 2, set once signed in.
     let changed: (() => void) | undefined;
-    // B1: another tab's pair is a new sign-in for another principal, else taken when newer.
-    const renewer = new Renewer(channel, navigator.locks, () => session, (t) => {
+    // B1: another tab's pair is a new sign-in for another principal, else taken when newer. The
+    // renewer opens the channel itself, once it holds its tab lock (#388).
+    const renewer = new Renewer((): Channel => new BroadcastChannel(CHANNEL), navigator.locks, () => session, (t) => {
       const p = session?.principal;
       if (page.phase !== "signed-in" || p === undefined) return;
       if (p.iss !== t.iss || p.sub !== t.sub) return changed?.();
       if (session?.adopt(t) === true) renewing?.schedule();
+    }, () => {
+      // §9.7 item 2: another tab signed out. A renewal in flight here revokes the pair it brings
+      // before the page leaves, within SIGN_OUT_WAIT_MS.
+      const s = session;
+      end();
+      // Nothing read before stays on screen, even if the navigation stalls or is cancelled.
+      flushSync(() => setView({ kind: "signing-out" }));
+      void (s?.settled() ?? Promise.resolve()).then(() => location.replace(SIGNED_OUT_PATH));
     });
     // No more renewals here, and the lock goes to another tab.
     const stop = () => {
@@ -76,16 +84,6 @@ export function App() {
     };
     addEventListener("pagehide", onHide);
     addEventListener("pageshow", onShow);
-    // §9.7 item 2: another tab signed out.
-    channel.onmessage = (e: MessageEvent) => {
-      const m = e.data as Message | null;
-      if (typeof m !== "object" || m === null) return;
-      if (m.type !== "signed-out") return renewer.onMessage(m);
-      end();
-      // Nothing read before stays on screen, even if the navigation stalls or is cancelled.
-      flushSync(() => setView({ kind: "signing-out" }));
-      location.replace(SIGNED_OUT_PATH);
-    };
 
     // The redirect to the provider, after the PKCE digest only while `still` holds.
     const signIn = (config: ClientConfig, provider: Provider, still: () => boolean) =>
@@ -128,9 +126,9 @@ export function App() {
       const signOut = () => {
         // signOut takes the tokens before its first await, so the revocation still has the refresh token.
         const to = session?.signOut(location.origin) ?? Promise.resolve(SIGNED_OUT_PATH);
+        renewer.signOut();
         end();
         setView({ kind: "signing-out" });
-        channel.postMessage({ type: "signed-out" });
         void to.then((url) => location.assign(url));
       };
       const still = page.mark();
@@ -153,7 +151,11 @@ export function App() {
     };
 
     void (async () => {
-      if (location.pathname === SIGNED_OUT_PATH) return setView({ kind: "signed-out" });
+      // #388: the signed-out page records no other tab's refresh token and holds no lock.
+      if (location.pathname === SIGNED_OUT_PATH) {
+        renewer.release();
+        return setView({ kind: "signed-out" });
+      }
       // The callback's code and state leave the address bar and the history entry before anything
       // can fail, and its pending entry goes on every path that does not reach completeSignIn.
       const callback = location.pathname === CALLBACK_PATH ? location.search : undefined;
@@ -189,7 +191,7 @@ export function App() {
 
     return () => {
       end();
-      channel.close();
+      renewer.close();
       removeEventListener("pagehide", onHide);
       removeEventListener("pageshow", onShow);
     };

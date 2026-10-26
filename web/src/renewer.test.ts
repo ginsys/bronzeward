@@ -1,33 +1,40 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { type Provider, Session, type Tokens } from "./auth.ts";
 import type { ClientConfig } from "./config.ts";
-import { JOIN_WAIT_MS, LOCK, type Locks, type Message, Renewer, RENEW_WAIT_MS } from "./renewer.ts";
+import { ACK_WAIT_MS, type Channel, JOIN_WAIT_MS, type Locks, type Message, REDIRECT_WAIT_MS, Renewer, RENEW_WAIT_MS, TAB } from "./renewer.ts";
 
 const ISSUER = "http://localhost:58280";
 const config: ClientConfig = { issuer: ISSUER, audience: "bronzeward", cliClientId: "cli", webClientId: "web", scopes: [] };
 const provider: Provider = { issuer: ISSUER, authorizationEndpoint: `${ISSUER}/a`, tokenEndpoint: `${ISSUER}/t`, revocationEndpoint: undefined, endSessionEndpoint: undefined };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
-// One exclusive lock, granted in request order, as navigator.locks grants it (assumption S9).
+// Exclusive locks by name, each granted in request order, as navigator.locks grants them
+// (assumption S9). A steal grants at once and rejects the stolen holder's request.
 class FakeLocks implements Locks {
-  held = false;
-  readonly queue: (() => void)[] = [];
-  request(_name: string, callback: () => Promise<void> | undefined): Promise<unknown> {
-    return new Promise((done) => {
+  readonly #held = new Map<string, (e: Error) => void>();
+  readonly #queue = new Map<string, (() => void)[]>();
+  request(name: string, options: { steal?: boolean }, callback: () => Promise<void> | undefined): Promise<unknown> {
+    return new Promise((done, fail) => {
       const run = () => {
-        this.held = true;
+        const stolen = (e: Error) => fail(e);
+        this.#held.set(name, stolen);
         void Promise.resolve(callback()).then(() => {
-          this.held = false;
+          if (this.#held.get(name) !== stolen) return;
+          this.#held.delete(name);
           done(undefined);
-          this.queue.shift()?.();
+          this.#queue.get(name)?.shift()?.();
         });
       };
-      if (this.held) this.queue.push(run);
+      const holder = this.#held.get(name);
+      if (options.steal === true) {
+        holder?.(new DOMException("stolen", "AbortError"));
+        run();
+      } else if (holder !== undefined) this.#queue.set(name, [...(this.#queue.get(name) ?? []), run]);
       else run();
     });
   }
   query() {
-    return Promise.resolve({ held: this.held ? [{ name: LOCK }] : [] });
+    return Promise.resolve({ held: [...this.#held.keys()].map((name) => ({ name })) });
   }
 }
 
@@ -35,7 +42,9 @@ class FakeLocks implements Locks {
 // issued is accepted.
 class Browser {
   readonly locks = new FakeLocks();
-  readonly tabs = new Set<Tab>();
+  // Every open channel, and the tab it belongs to. A message reaches the channels open when it
+  // was posted that are still open when it is delivered, the sender's excepted.
+  readonly channels = new Map<Channel, Tab>();
   readonly sent: string[] = [];
   latest = "SYNTH-r1";
   hang = false;
@@ -56,9 +65,23 @@ class Browser {
   }) as typeof fetch;
 
   open(): Tab {
-    const tab = new Tab(this);
-    this.tabs.add(tab);
-    return tab;
+    return new Tab(this);
+  }
+
+  channel(tab: Tab): Channel {
+    const c: Channel = {
+      onmessage: null,
+      postMessage: (m: Message) => {
+        const copy = structuredClone(m);
+        const to = [...this.channels].filter(([o]) => o !== c);
+        queueMicrotask(() => {
+          for (const [o, t] of to) if (this.channels.has(o)) t.deliver(o, copy);
+        });
+      },
+      close: () => void this.channels.delete(c),
+    };
+    this.channels.set(c, tab);
+    return c;
   }
 }
 
@@ -66,20 +89,50 @@ class Tab {
   session: Session | undefined;
   readonly renewer: Renewer;
   readonly pairs: Tokens[] = [];
+  signedOut = 0;
+  // Frozen: messages wait, as do the settlements of its lock requests, until resume().
+  #frozen: Promise<void> | undefined;
+  #thaw = () => {};
+  readonly #queued: [Channel, Message][] = [];
 
   constructor(private readonly browser: Browser) {
-    const channel = {
-      postMessage: (m: Message) => {
-        const copy = structuredClone(m);
-        queueMicrotask(() => {
-          for (const t of browser.tabs) if (t !== this) t.renewer.onMessage(copy);
-        });
-      },
+    const locks: Locks = {
+      request: (name, options, callback) => this.#awake(browser.locks.request(name, options, callback)),
+      query: () => browser.locks.query(),
     };
-    this.renewer = new Renewer(channel, browser.locks, () => this.session, (t) => {
+    this.renewer = new Renewer(() => browser.channel(this), locks, () => this.session, (t) => {
       this.pairs.push(t);
       this.session?.adopt(t);
-    });
+    }, () => this.signedOut++);
+  }
+
+  deliver(c: Channel, m: Message) {
+    if (this.#frozen !== undefined) this.#queued.push([c, m]);
+    else c.onmessage?.({ data: m } as MessageEvent);
+  }
+
+  freeze() {
+    this.#frozen = new Promise((r) => (this.#thaw = r));
+  }
+
+  // The messages first, then the lock settlements.
+  resume() {
+    this.#frozen = undefined;
+    for (const [c, m] of this.#queued.splice(0)) if (this.browser.channels.has(c)) this.deliver(c, m);
+    this.#thaw();
+  }
+
+  #awake<T>(p: Promise<T>): Promise<T> {
+    return p.then(
+      async (v) => {
+        await this.#frozen;
+        return v;
+      },
+      async (e: unknown) => {
+        await this.#frozen;
+        throw e;
+      },
+    );
   }
 
   signIn(tokens: Tokens) {
@@ -94,8 +147,7 @@ class Tab {
   }
 
   close() {
-    this.browser.tabs.delete(this);
-    this.renewer.release();
+    this.renewer.close();
     this.session = undefined;
   }
 }
@@ -171,7 +223,7 @@ describe("B1 one renewing tab", () => {
     const late = b.open();
     const joined = late.renewer.join();
     await settle();
-    b.tabs.delete(late);
+    late.close();
     x.close();
     await settle();
     b.hang = false;
@@ -384,5 +436,126 @@ describe("B1 one renewing tab", () => {
     z.session = new Session(config, provider, first(), { fetch: b.fetch, ...z.renewer.hooks });
     expect(await z.renewer.renew()).toBe(true);
     expect(b.sent).toEqual(["SYNTH-r1"]);
+  });
+});
+
+// #388: no tab that may hold a refresh token becomes holder without knowing it is spent.
+describe("#388 announced renewals", () => {
+  const tabLocks = async (b: Browser) => (await b.locks.query()).held.filter((l) => l.name.startsWith(TAB)).length;
+
+  test("the holder sends a refresh token only once every other tab has recorded it as spent", async () => {
+    const b = new Browser();
+    const [x, y] = [b.open(), b.open()];
+    x.signIn(first());
+    await settle();
+    await y.join();
+    y.freeze();
+    const renewed = x.renewer.renew();
+    await vi.advanceTimersByTimeAsync(ACK_WAIT_MS - 1);
+    expect(b.sent).toEqual([]);
+    y.resume();
+    expect(await renewed).toBe(true);
+    await settle();
+    expect(b.sent).toEqual(["SYNTH-r1"]);
+    expect(y.renewer.hooks.spent?.("SYNTH-r1")).toBe(true);
+    expect(y.session?.pair()?.refresh).toBe("SYNTH-r2");
+  });
+
+  test("a holder that leaves before every tab has acked sends nothing and takes no lock", async () => {
+    const b = new Browser();
+    const [x, y] = [b.open(), b.open()];
+    x.signIn(first());
+    await settle();
+    await y.join();
+    y.freeze();
+    const renewed = x.renewer.renew();
+    await settle();
+    x.close();
+    await vi.advanceTimersByTimeAsync(ACK_WAIT_MS);
+    expect(await renewed).toBe(false);
+    expect(b.sent).toEqual([]);
+    expect(await tabLocks(b)).toBe(1);
+  });
+
+  test("a silent tab's lock is taken after ACK_WAIT_MS; on resume it gives up its pair and takes the holder's", async () => {
+    const b = new Browser();
+    const [x, y] = [b.open(), b.open()];
+    x.signIn(first());
+    await settle();
+    await y.join();
+    y.freeze();
+    const renewed = x.renewer.renew();
+    await vi.advanceTimersByTimeAsync(ACK_WAIT_MS);
+    expect(await renewed).toBe(true);
+    expect(b.sent).toEqual(["SYNTH-r1"]);
+    y.resume();
+    await settle();
+    expect(y.session?.pair()?.refresh).toBe("SYNTH-r2");
+    expect(await tabLocks(b)).toBe(2);
+    x.close();
+    await settle();
+    expect(await y.renewer.renew()).toBe(true);
+    expect(b.sent).toEqual(["SYNTH-r1", "SYNTH-r2"]);
+  });
+
+  test("a resumed tab that renews before it learns its lock was taken sends nothing, and renews by the redirect", async () => {
+    const b = new Browser();
+    const [x, y] = [b.open(), b.open()];
+    x.signIn(first());
+    await settle();
+    await y.join();
+    y.freeze();
+    void x.renewer.renew();
+    await vi.advanceTimersByTimeAsync(ACK_WAIT_MS);
+    x.close();
+    await settle();
+    // Its renewal timer runs first on resume; the queued messages and the stolen lock come after.
+    expect(y.renewer.holder).toBe(true);
+    expect(await y.renewer.renew()).toBe(false);
+    expect(b.sent).toEqual(["SYNTH-r1"]);
+    expect(y.session?.byRedirect).toBe(true);
+    y.resume();
+    await settle();
+    expect(await tabLocks(b)).toBe(1);
+  });
+
+  test("a released tab is not waited on, and still hears another tab's sign-out", async () => {
+    const b = new Browser();
+    const [x, y] = [b.open(), b.open()];
+    x.signIn(first());
+    await settle();
+    await y.join();
+    y.renewer.release();
+    expect(await x.renewer.renew()).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    x.renewer.signOut();
+    await settle();
+    expect(y.signedOut).toBe(1);
+  });
+
+  test.each([
+    ["takes the redirect's pair", true],
+    ["renews by the redirect itself after REDIRECT_WAIT_MS", false],
+  ] as const)("granted the lock while it waits, a tab without a rotating refresh token %s", async (_name, back) => {
+    const b = new Browser();
+    const [x, y] = [b.open(), b.open()];
+    x.signIn(first({ refresh: undefined }));
+    await settle();
+    await y.join();
+    expect(y.session?.byRedirect).toBe(true);
+    const asked = y.renewer.renew();
+    await settle();
+    // The holder renews by the redirect: pagehide, then the callback posts the pair it brings.
+    x.close();
+    await vi.advanceTimersByTimeAsync(REDIRECT_WAIT_MS - 1);
+    expect(y.renewer.holder).toBe(true);
+    if (back) {
+      const pair = first({ access: "SYNTH-a9", refresh: undefined, expiresAt: Date.now() + 300_000 });
+      b.open().renewer.post(pair);
+    }
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await asked).toBe(back);
+    expect(y.session?.token()).toBe(back ? "SYNTH-a9" : "SYNTH-a1");
+    expect(b.sent).toEqual([]);
   });
 });
