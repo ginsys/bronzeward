@@ -106,6 +106,9 @@ export function App() {
       const res = await client.read<Server>("/server");
       if (session !== s) return;
       if (res.kind === "unauthenticated") {
+        // No renewal follows a refusal, the redirect least: it would loop on a token the server
+        // keeps refusing. Signing in again is the operator's.
+        clearTimeout(timer);
         const reading = localReading(s.token() ?? "", config, Date.now());
         return setView({ kind: "sign-in", message: NOT_ACCEPTED, reading, problem: problemFields(res), config, provider });
       }

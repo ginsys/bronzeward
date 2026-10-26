@@ -213,12 +213,14 @@ export class Session {
       return false;
     }
     const id = typeof answer.body.id_token === "string" ? claims(answer.body.id_token) : undefined;
-    let after = { iss: typeof id?.["iss"] === "string" ? id["iss"] : current.iss, sub: typeof id?.["sub"] === "string" ? id["sub"] : current.sub };
+    let before: Principal = { iss: current.iss, sub: current.sub };
+    let after: Principal = { iss: typeof id?.["iss"] === "string" ? id["iss"] : current.iss, sub: typeof id?.["sub"] === "string" ? id["sub"] : current.sub };
     // No ID token in the answer: the two access tokens, which the server reads, say whether the
-    // account changed.
-    const [was, now] = id === undefined ? [claims(current.access), claims(answer.body.access_token)] : [];
-    if (was !== undefined && typeof now?.["iss"] === "string" && typeof now["sub"] === "string" && (was["iss"] !== now["iss"] || was["sub"] !== now["sub"])) {
-      after = { iss: now["iss"], sub: now["sub"] };
+    // account changed, compared with each other and only when both name an issuer and a subject.
+    if (id === undefined) {
+      const was = principalOf(current.access);
+      const now = principalOf(answer.body.access_token);
+      if (was !== undefined && now !== undefined && (was.iss !== now.iss || was.sub !== now.sub)) [before, after] = [was, now];
     }
     this.#tokens = toTokens(answer.body, after, this.now());
     // §9.3 item 3: a refresh token that did not rotate is not sent again (item 1's "used once");
@@ -227,7 +229,7 @@ export class Session {
       this.#tokens.refresh = undefined;
       this.#byRedirect = true;
     }
-    if (after.iss !== current.iss || after.sub !== current.sub) this.opts.onPrincipalChange?.({ iss: current.iss, sub: current.sub }, after);
+    if (after.iss !== before.iss || after.sub !== before.sub) this.opts.onPrincipalChange?.(before, after);
     return true;
   }
 
@@ -332,6 +334,12 @@ export function claims(jwt: string): Record<string, unknown> | undefined {
   } catch {
     return undefined;
   }
+}
+
+// The issuer and subject a token names; undefined unless it names both as strings.
+function principalOf(jwt: string): Principal | undefined {
+  const c = claims(jwt);
+  return typeof c?.["iss"] === "string" && typeof c["sub"] === "string" ? { iss: c["iss"], sub: c["sub"] } : undefined;
 }
 
 function base64url(bytes: Uint8Array): string {
