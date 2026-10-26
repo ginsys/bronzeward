@@ -155,7 +155,7 @@ func init() {
 				rewrite(r, `{"machine":"`+m+`","state":"normal"}`, `{"machine":"`+m+`","state":"ready"}`)
 			}
 		})
-		f.want(f.ctl(nil, "", "--context", "trusted", "status"), 0, "RECOVERY MODE is on in trusted", "on (epoch ", "Scopes: 1: "+m+" ready")
+		f.want(f.ctl(nil, "", "--context", "trusted", "status"), 0, "RECOVERY MODE is on in trusted", "Epoch ", "Scopes: 1: "+m+" ready")
 		in.set(refuse("/machines/"+m, http.StatusConflict, "recovery-mode-active", `,"machine":"`+m+`","scope":"pre-restore-unaccounted"`), nil)
 		f.want(f.ctl(nil, "", "--context", "trusted", "machine", "show", m), 1, "the scope of machine "+m+" is pre-restore-unaccounted")
 		in.set(refuse("/machines/"+m, http.StatusConflict, "recovery-mode-active", ""), nil)
@@ -215,8 +215,14 @@ func TestReads(t *testing.T) {
 	f.want(f.ctl(nil, "", "cluster"), 2, "cluster needs list or show")
 	f.want(f.ctl(nil, "", "machine", "list", "--cluster", s.cluster), 0, machines[0], machines[2], "10.55.0.4:50000", "none", "Health is not checked")
 	f.want(f.ctl(nil, "", "machine", "show", s.machine), 0,
-		"Not applied or adopted by Bronzeward.", "No release selected.", "No configuration read recorded.", "Health: not checked.")
-	f.want(f.ctl(nil, "", "status"), 0, "Recovery mode          off", "Open drift             none",
+		"Hardware", "node ID none", "SMBIOS UUID ", "Not applied or adopted by Bronzeward.", "No release selected.", "No configuration read recorded.", "Health: not checked.")
+	// Structured output is the machine resource alone: its observations are not read.
+	in.set(nil, nil)
+	f.want(f.ctl(nil, "", "machine", "show", s.machine, "-o", "json"), 0, `"id":"`+s.machine+`"`)
+	if slices.ContainsFunc(in.requests(), func(q string) bool { return strings.HasSuffix(q, "/observations") }) {
+		t.Errorf("machine show -o json read the observations: %v", in.requests())
+	}
+	f.want(f.ctl(nil, "", "status"), 0, "Epoch                  ep_", "Recovery mode          off", "Open drift             none",
 		"Unresolved operations  none", "Health                 not checked")
 	r := f.ctl(nil, "", "status", "-o", "json")
 	var st struct {

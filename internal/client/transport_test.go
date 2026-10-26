@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"io"
 	"math/big"
 	"net"
@@ -98,13 +99,26 @@ func TestHTTPSProxyTrust(t *testing.T) {
 			if err != nil || r.StatusCode != http.StatusNoContent || connects.Load() != 1 {
 				t.Errorf("%s: %v, %v, %d CONNECTs; want 204 through one tunnel", c.name, err, r, connects.Load())
 			}
-		} else if err == nil || !strings.Contains(err.Error(), "verified by the system trust store") || connects.Load() != 0 {
-			t.Errorf("%s: %v, %d CONNECTs; want the proxy refused before any CONNECT", c.name, err, connects.Load())
+		} else if tr := (*trust)(nil); !errors.As(err, &tr) || !strings.Contains(err.Error(), `subject "CN=BWSYNTH-proxy"`) || connects.Load() != 0 {
+			t.Errorf("%s: %v, %d CONNECTs; want a trust refusal naming the proxy's certificate, before any CONNECT", c.name, err, connects.Load())
 		}
 		if r != nil {
 			r.Body.Close()
 		}
 		hc.CloseIdleConnections()
+	}
+
+	// An internationalized https proxy name is refused, never reached without TLS.
+	var dials atomic.Int32
+	plain := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { dials.Add(1) }))
+	defer plain.Close()
+	idn, _ := url.Parse("https://BWSYNTH-user:BWSYNTH-pass@bücher.example.invalid:" + strings.TrimPrefix(plain.Listener.Addr().String(), "127.0.0.1:"))
+	hc, err := newHTTPClient(&Context{Name: "lab", Server: srv.URL, Credential: "automation"}, nil, func(*http.Request) (*url.URL, error) { return idn, nil }, proxyRoots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := hc.Get(srv.URL + "/livez"); err == nil || !strings.Contains(err.Error(), "in ASCII") || strings.Contains(err.Error(), "BWSYNTH-pass") || dials.Load() != 0 {
+		t.Errorf("internationalized proxy: %v, %d requests; want a refusal without the password and no request", err, dials.Load())
 	}
 }
 
