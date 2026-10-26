@@ -222,7 +222,53 @@ func (e *env) whoamiCmd(args []string) (err error) {
 		fmt.Fprintf(w, "Roles\t%s\n", map[bool]string{true: "none"}[len(roles) == 0]+strings.Join(roles, ", "))
 		fmt.Fprintf(w, "Epoch\t%s\trecovery mode: %s\n", id.Epoch, recovery)
 		fmt.Fprintf(w, "Expires\t%s\n", id.ExpiresAt.Format("2006-01-02 15:04:05 MST"))
+		// The client's own reading of its token, labelled as such, beside the server's (§9.2 item 5).
+		if t := c.TokenClaims(); t != nil {
+			fmt.Fprintf(w, "Token (bronzewardctl's reading)\tsubject %s, issuer %s, expires %s\n",
+				t.Subject, t.Issuer, t.ExpiresAt().UTC().Format("2006-01-02 15:04:05 MST"))
+		}
 	})
+}
+
+// logoutCmd removes an OIDC context's stored sign-in. An access token already issued is not
+// revoked by it and stays valid at the server until it expires (client-contracts.md §9.5 item 3).
+func (e *env) logoutCmd(args []string) error {
+	if _, err := e.parse("logout", args, 0, nil); err != nil {
+		return err
+	}
+	cfg, err := client.LoadConfig()
+	if err != nil {
+		return err
+	}
+	x, err := cfg.Select(e.context)
+	if err != nil {
+		return err
+	}
+	if x.Credential != "oidc" {
+		return fmt.Errorf("%s: an automation context has no sign-in; its token file is the operator's and is left as it is", x.Where())
+	}
+	p := x.TokenFile()
+	if p == "" {
+		return fmt.Errorf("%s: this context has no token file (oidc.tokenFile), so no sign-in is stored", x.Where())
+	}
+	t, err := client.ReadTokens(p)
+	if err != nil {
+		return fmt.Errorf("%s: %w", x.Where(), err)
+	}
+	if t == nil {
+		_, err = fmt.Fprintf(e.out, "Not signed in to %s: the token file %s does not exist.\n", x.Where(), p)
+		return err
+	}
+	if err := client.ClearTokens(p); err != nil {
+		return fmt.Errorf("%s: %w", x.Where(), err)
+	}
+	until := "it expires"
+	if c := client.ReadClaims(t.AccessToken); c != nil {
+		until = c.ExpiresAt().UTC().Format("2006-01-02 15:04:05 MST")
+	}
+	_, err = fmt.Fprintf(e.out, "Signed out of %s: the token file %s is removed. The access token already issued is not revoked and stays valid at the server until %s, plus the server's 60 s leeway.\n",
+		x.Where(), p, until)
+	return err
 }
 
 func deref(s *string) string {

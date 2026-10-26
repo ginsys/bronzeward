@@ -72,6 +72,7 @@ type fixture struct {
 	t                                 *testing.T
 	bin, base, home, token, tokenFile string
 	iss                               *issuer.Issuer
+	idp                               *provider
 }
 
 var tokenPattern = regexp.MustCompile(`bwt_\S+`)
@@ -87,10 +88,11 @@ func start(t *testing.T, roles string) *fixture {
 	addr := l.Addr().String()
 	l.Close()
 	f.base = "http://" + addr
-	f.iss = serveIssuer(t)
+	f.iss, f.idp = serveIssuer(t)
 	cfg := filepath.Join(t.TempDir(), "bronzeward.yaml")
 	body := "listen: " + addr + "\ndatabase:\n  dsn: " + dsn + "\nauth:\n  oidc:\n    issuer: " + f.iss.URL + "\n    audience: bronzeward\n" +
 		"  roles: {viewer: [bw-viewers], author: [bw-authors], publisher: [bw-publishers], approver: [bw-approvers], recovery-admin: [bw-recovery]}\n" +
+		"  deniedSubjects: [{iss: \"" + f.iss.URL + "\", sub: h-denied}]\n" +
 		"execution: {maxTransportDeadline: 5m}\n"
 	if err := os.WriteFile(cfg, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
@@ -443,6 +445,7 @@ func TestSharedCases(t *testing.T) {
 	}
 	f.ctl(nil, "", "context", "add", "lab", "--server", f.base, "--automation-token-file", f.tokenFile)
 	f.inventory()
+	f.revoke("h-author") // AUTH-05's setup, before the act count
 	before := f.acts()
 	for _, id := range ids {
 		run := sharedCases[id]

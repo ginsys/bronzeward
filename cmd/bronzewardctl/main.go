@@ -27,7 +27,8 @@ commands:
   context add <name> --from <url> [--server <url>]
               the issuer, audience and CLI client ID from <url>/bronzeward-client.json
   version     this client's version, the server's and its API revision
-  whoami      the identity, roles and epoch the server sees
+  whoami      the identity, roles and epoch the server sees, and this client's reading of a sign-in
+  logout      remove an oidc context's stored sign-in
   status      start mode, recovery mode, open drift and unresolved operations
   cluster list | show <id>
   machine list [--cluster <id>] | show <id> | timeline <id> | observations <id>
@@ -92,7 +93,7 @@ func harden() error {
 
 func run(args []string, stdout, stderr io.Writer) int {
 	e := &env{output: "table", out: stdout, err: stderr}
-	commands := map[string]func([]string) error{"context": e.contextCmd, "version": e.versionCmd, "whoami": e.whoamiCmd,
+	commands := map[string]func([]string) error{"context": e.contextCmd, "version": e.versionCmd, "whoami": e.whoamiCmd, "logout": e.logoutCmd,
 		"status": e.statusCmd, "cluster": e.clusterCmd, "machine": e.machineCmd,
 		"fragment": e.fragmentCmd, "profile": e.profileCmd, "assignment": e.assignmentCmd,
 		"draft": e.draftCmd, "release": e.releaseCmd, "plan": e.planCmd, "operation": e.operationCmd, "act": e.actCmd}
