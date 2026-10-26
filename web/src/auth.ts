@@ -154,9 +154,11 @@ export interface SessionOptions {
   now?: () => number;
   // §9.5 item 2: a renewal answered for another subject or issuer is a new sign-in.
   onPrincipalChange?: (before: Principal, after: Principal) => void;
-  // B1: told before a refresh token is sent, and given the pair it brings, before the item 2 check.
-  onRenewing?: (expiresAt: number) => void;
+  // B1: told the refresh token before it is sent, and given the pair it brings, before the item 2
+  // check; `spent` says another tab has sent this refresh token, so it is never sent or given here.
+  onRenewing?: (refresh: string) => void;
   onRenewed?: (tokens: Tokens) => void;
+  spent?: (refresh: string) => boolean;
 }
 
 // One signed-in principal's tokens; nothing outside reads them but the access token itself.
@@ -201,7 +203,14 @@ export class Session {
   // sent: until the renewal answers, the pair has no refresh token, and a new tab would take it for
   // a provider that does not rotate (§9.3 item 3). The renewal posts the pair it brings.
   pair(): Tokens | undefined {
+    this.#checkSpent();
     return this.#tokens === undefined || this.#spent || this.#renewing !== undefined ? undefined : { ...this.#tokens };
+  }
+
+  // A refresh token another tab has sent is spent here too, whatever the pairs' expiries say.
+  #checkSpent(): void {
+    const refresh = this.#tokens?.refresh;
+    if (refresh !== undefined && this.opts.spent?.(refresh) === true) this.spend();
   }
 
   // B1: another tab's newer pair for the same principal replaces this one; false if not taken.
@@ -233,13 +242,14 @@ export class Session {
   }
 
   async #renew(): Promise<boolean> {
+    this.#checkSpent();
     const current = this.#tokens;
     const refresh = current?.refresh;
     if (current === undefined || refresh === undefined) return false;
     current.refresh = undefined;
     // Sign-out's handle goes with the token: the pair it brings replaces it, a failure gives it back.
     this.#revocable = undefined;
-    this.opts.onRenewing?.(current.expiresAt);
+    this.opts.onRenewing?.(refresh);
     const answer = await tokenRequest(this.provider, { grant_type: "refresh_token", refresh_token: refresh, client_id: this.config.webClientId }, this.opts.fetch);
     if (answer.kind !== "ok") {
       // Maybe never delivered, so maybe still valid at the provider (CP2-F2).

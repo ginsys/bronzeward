@@ -11,8 +11,8 @@ export const JOIN_WAIT_MS = 5_000;
 
 export type Message =
   | { type: "signed-out" }
-  // `of`: the expiry of the pair whose refresh token the holder is sending.
-  | { type: "renewing"; of: number }
+  // `of`: the refresh token the holder is sending, spent wherever else it is held.
+  | { type: "renewing"; of: string }
   // `due`: the expiry of the sender's pair, which reached the threshold or was refused; absent
   // from a new tab, which takes the current pair.
   | { type: "request"; due?: number }
@@ -33,8 +33,10 @@ export class Renewer {
   // Released for good: a page that stops renewing never holds the lock again (no tab re-signs in
   // without a navigation), and a join still awaiting its query must not take it afterwards.
   #closed = false;
-  // The `of` of a `renewing` with no newer pair after it: the refresh token it was for may be spent.
-  #unanswered: number | undefined;
+  // Every refresh token another tab announced in a `renewing`: whatever its answer, it may be spent,
+  // so it is never sent or given from here. Told by token, not by expiry, so that a pair with a
+  // shorter lifetime cannot hide it.
+  readonly #sent = new Set<string>();
   readonly #waiting = new Set<(t: Tokens) => void>();
   readonly #granted = new Set<() => void>();
 
@@ -52,9 +54,10 @@ export class Renewer {
   }
 
   // What a Session tells the other tabs.
-  readonly hooks: Pick<SessionOptions, "onRenewing" | "onRenewed"> = {
+  readonly hooks: Pick<SessionOptions, "onRenewing" | "onRenewed" | "spent"> = {
     onRenewing: (of) => this.channel.postMessage({ type: "renewing", of }),
     onRenewed: (tokens) => this.channel.postMessage({ type: "pair", tokens }),
+    spent: (refresh) => this.#sent.has(refresh),
   };
 
   // A new tab, or one restored from the back-forward cache: the holder's pair, or undefined when
@@ -87,11 +90,6 @@ export class Renewer {
     void this.locks.request(LOCK, () => {
       if (released) return undefined;
       this.#holder = true;
-      // Only a pair no newer than the one the `renewing` was for: a pair this tab obtained since,
-      // by its own redirect, holds a refresh token nobody sent.
-      const s = this.session();
-      const at = s?.expiresAt;
-      if (this.#unanswered !== undefined && at !== undefined && at <= this.#unanswered) s?.spend();
       for (const g of this.#granted) g();
       return held;
     });
@@ -119,11 +117,9 @@ export class Renewer {
   }
 
   onMessage(m: Message): void {
-    if (m.type === "renewing" && typeof m.of === "number") this.#unanswered = m.of;
+    if (m.type === "renewing" && typeof m.of === "string") this.#sent.add(m.of);
     if (m.type === "request") void this.#answer(typeof m.due === "number" ? m.due : undefined);
     if (m.type !== "pair" || !isTokens(m.tokens)) return;
-    // A pair posted during the renewal is the one it replaces, and answers nothing.
-    if (this.#unanswered !== undefined && m.tokens.expiresAt > this.#unanswered) this.#unanswered = undefined;
     for (const w of this.#waiting) w(m.tokens);
     this.onPair(m.tokens);
   }
