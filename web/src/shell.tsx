@@ -4,6 +4,8 @@
 // recovery banner, start mode and epoch-change notice of §8.5.
 
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useId, useReducer, useRef, useState } from "react";
+import { type Load, ReadsProvider } from "./list.tsx";
+import { ClusterItem, Clusters, MachineItem, Machines } from "./machines.tsx";
 import { PreEntry, type Recovery, RecoveryBanner, RecoveryRead, type StartMode, startModeOf, startRefusal } from "./recovery.tsx";
 import { Client, type ClientOptions, EPOCH_CHANGED, type ReadResult } from "./request.ts";
 import { follow, PAGES, usePath } from "./router.ts";
@@ -42,8 +44,6 @@ export function Action({ label, needs, onClick }: { label: string; needs: readon
     </span>
   );
 }
-
-type Load<T> = { kind: "loading" } | ReadResult<T>;
 
 // A read that did not answer with data, as the catalogue shows it; a 403 names what the route
 // accepts, from the server's own answer, with its problem fields under it (§8.2, §9.6).
@@ -102,6 +102,9 @@ export function observed(res: ReadResult<unknown>, shown: boolean): ConnectionEv
   if (res.kind !== "transport") return "answered";
   return shown ? "lost" : undefined;
 }
+// Whether each resource's data was shown: the shell's three reads, and the page's as one.
+type Shown = Record<"server" | "identity" | "recovery" | "page", boolean>;
+const noneShown = (): Shown => ({ server: false, identity: false, recovery: false, page: false });
 // Offline since the earlier cause, undefined while neither holds.
 export const offlineSince = ({ down, lost }: Connection) => (down === undefined || (lost !== undefined && lost < down) ? lost : down);
 
@@ -131,7 +134,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
   // Bumped to read again: back online, asked by the operator, or after a new epoch.
   const [again, setAgain] = useState(0);
   const readAt = useRef<Date | undefined>(undefined);
-  const shown = useRef({ server: false, identity: false, recovery: false });
+  const shown = useRef(noneShown());
   // Bumped when the process's refusal drops every read in flight: a read started before it is no
   // longer live, though its effect's cleanup has not run yet.
   const dropped = useRef(0);
@@ -145,20 +148,22 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
         setServer({ kind: "loading" });
         setIdentity({ kind: "loading" });
         setRecovery({ kind: "loading" });
-        shown.current = { server: false, identity: false, recovery: false };
+        shown.current = noneShown();
         setAgain((n) => n + 1);
       },
       onRecoveryModeChange: setRecoveryMode,
     });
-    c.setView({ principal, route: location.pathname, query: location.search });
     return c;
   });
+  // In render, before any page's effect sends a read for the new path or query: effects run child
+  // first, so a page's read sent before this shell's effect would be discarded with the old ones.
+  client.setView({ principal, route: path, query });
 
   // A transport failure keeps the data this resource showed under the offline banner; without any,
   // it is shown as the disconnected state.
   // A refusal ends the page whichever read carried it, a superseded one too: the client already
   // dropped the credentials it refused. Any other answer of a superseded read says nothing more.
-  const settle = useCallback(<T,>(res: ReadResult<T>, set: (r: Load<T>) => void, what: "server" | "identity" | "recovery", live: () => boolean) => {
+  const settle = useCallback(<T,>(res: ReadResult<T>, set: (r: Load<T>) => void, what: keyof Shown, live: () => boolean) => {
     if (res.kind === "discarded") return;
     if (res.kind === "unauthenticated") return onUnauthenticated(res);
     if (res.kind === "revoked") return onRevoked(res);
@@ -175,7 +180,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
     if (what !== "server" && res.kind === "refused" && startRefusal(res)) {
       client.dropReads();
       dropped.current++;
-      shown.current = { server: false, identity: false, recovery: false };
+      shown.current = noneShown();
       setIdentity({ kind: "loading" });
       setRecovery({ kind: "loading" });
       setServer({ kind: "refused", status: res.status, problem: res.problem });
@@ -186,6 +191,13 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
     if (res.kind === "ok") readAt.current = now;
     set(res);
   }, [client, onUnauthenticated, onRevoked]);
+  // A page's reads settle as one resource, which a new path or query has not shown yet.
+  const settlePage = useCallback(<T,>(res: ReadResult<T>, set: (r: Load<T>) => void, live: () => boolean) => settle(res, set, "page", live), [settle]);
+  const undropped = useCallback(() => {
+    const at = dropped.current;
+    return () => at === dropped.current;
+  }, []);
+  useEffect(() => void (shown.current.page = false), [path, query]);
 
   // Reads still in flight when the shell goes (a refusal, sign-out) are discarded, and renew no more.
   useEffect(() => () => client.setView({ principal: "", route: "", query: "" }), [client]);
@@ -212,7 +224,6 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
   const compatible = known && server.data.apiRevision >= MIN_API_REVISION;
   useEffect(() => {
     if (!compatible) return;
-    client.setView({ principal, route: path, query });
     const at = dropped.current;
     let live = true;
     void client.read<Identity>("/identity").then((res) => settle(res, setIdentity, "identity", () => live && at === dropped.current));
@@ -250,7 +261,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
   else if (!compatible) main = <Status>{incompatible(server.data.apiRevision)}</Status>;
   else if (identity.kind === "loading") main = <Loading what="your identity" />;
   else if (identity.kind !== "ok") main = identity.kind !== "discarded" && <Failure res={identity} sub={sub} />;
-  else main = <Page path={path} />;
+  else main = <Page path={path} query={query} go={go} />;
 
   const id = identity.kind === "ok" ? identity.data : undefined;
   return (
@@ -278,7 +289,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
           </nav>
         )}
       </header>
-      <main>{main}</main>
+      <ReadsProvider value={{ client, settle: settlePage, undropped, again, go, failure: (res) => <Failure res={res} sub={sub} /> }}><main>{main}</main></ReadsProvider>
       <VersionFooter server={server.kind === "ok" ? server.data : undefined} />
     </ShellContext>
   );
@@ -288,7 +299,11 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
 const current = (path: string) => (path === "/" ? "/machines" : path);
 
 // Each page's view comes with its own ticket (#334 onwards).
-function Page({ path }: { path: string }) {
+function Page({ path, query, go }: { path: string; query: string; go: (to: string) => void }) {
+  // An identifier is never percent-encoded; one that is answers 404 once the view encodes it again.
+  const [, kind, id] = /^\/(machines|clusters)(?:\/([^/]+))?$/.exec(current(path)) ?? [];
+  if (kind === "machines") return id === undefined ? <Machines query={query} go={go} /> : <MachineItem id={id} />;
+  if (kind === "clusters") return id === undefined ? <Clusters /> : <ClusterItem id={id} />;
   const page = PAGES.find(([to]) => to === current(path));
   if (page === undefined) return <><h2>Not found</h2><Status>No page at {path}.</Status></>;
   return <h2>{page[1]}</h2>;
