@@ -1,7 +1,49 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { expect, test } from "vitest";
-import { problemFields, problemText, Screen, type View } from "./app.tsx";
+import { afterEach, expect, test, vi } from "vitest";
+import { problemFields, problemText, renewals, Screen, type View } from "./app.tsx";
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+// §9.3 item 3, §9.5 item 3: after a refusal, a renewal still in flight neither renews nor redirects again.
+const inFlight: [string, (t: ReturnType<typeof renewals>) => void][] = [
+  ["the timer's", () => void vi.advanceTimersByTime(60_000)],
+  ["a retried request's", (t) => void t.renew()],
+];
+test.each(inFlight)("a refusal stops %s renewal still in flight", async (_, start) => {
+  vi.useFakeTimers();
+  let done: (ok: boolean) => void = () => {};
+  const s = { expiresAt: Date.now() + 120_000, renewsByRedirect: false, renew: vi.fn(() => new Promise<boolean>((r) => (done = r))) };
+  const redirect = vi.fn();
+  const t = renewals(() => s, redirect);
+  t.schedule();
+  start(t);
+  expect(s.renew).toHaveBeenCalledTimes(1);
+  t.stop();
+  // The renewal brought no rotating refresh token: the next one would be the redirect.
+  s.renewsByRedirect = true;
+  s.expiresAt = Date.now() + 120_000;
+  done(true);
+  await vi.runAllTimersAsync();
+  expect(redirect).not.toHaveBeenCalled();
+  expect(s.renew).toHaveBeenCalledTimes(1);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+test("§9.3 item 3: without a rotating refresh token the timer redirects, and renews otherwise", async () => {
+  vi.useFakeTimers();
+  const s = { expiresAt: Date.now() + 120_000, renewsByRedirect: false, renew: vi.fn(async () => true) };
+  const redirect = vi.fn();
+  renewals(() => s, redirect).schedule();
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(s.renew).toHaveBeenCalledTimes(1);
+  s.renewsByRedirect = true;
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(redirect).toHaveBeenCalledTimes(1);
+  expect(s.renew).toHaveBeenCalledTimes(1);
+});
 
 const shown = (view: View) => renderToStaticMarkup(createElement(Screen, { view }));
 

@@ -255,7 +255,8 @@ describe("§9.5 renewal", () => {
 
   test("with no ID token, an old access token that names no subject reads as no change", async () => {
     const onPrincipalChange = vi.fn();
-    const f = answers([json({ access_token: jwt({ iss: ISSUER, sub: "u1" }), refresh_token: "SYNTH-r2", expires_in: 300 })]);
+    // The renewed token names u2, so a comparison against the incomplete old token would report it.
+    const f = answers([json({ access_token: jwt({ iss: ISSUER, sub: "u2" }), refresh_token: "SYNTH-r2", expires_in: 300 })]);
     const s = new Session(config, provider, tokens({ access: jwt({ iss: ISSUER }) }), { fetch: f as unknown as typeof fetch, onPrincipalChange });
     await s.renew();
     expect(onPrincipalChange).not.toHaveBeenCalled();
