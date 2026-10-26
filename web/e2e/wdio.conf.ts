@@ -1,11 +1,13 @@
 // The real-browser harness (decisions B6, B7). It starts the redirect target, on an origin of its
-// own, and the test static host, which answers every API request with a redirect to that target
-// (fixtures/webhost -redirect-api), then runs the specs once per browser in BW_BROWSERS.
+// own, the synthetic provider (provider.ts), and the test static host, which answers every API
+// request with a redirect to that target (fixtures/webhost -redirect-api), then runs the specs
+// once per browser in BW_BROWSERS.
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import { fileURLToPath } from "node:url";
 // The launcher logs and ignores any other error a launcher hook throws, and runs the specs anyway.
 import { SevereServiceError } from "webdriverio";
+import { FAKE_ISSUER, startProvider } from "./provider.ts";
 
 export const PAGE_ORIGIN = "http://localhost:58443";
 export const TARGET_ORIGIN = "http://127.0.0.1:58444";
@@ -26,6 +28,7 @@ const browsers = (process.env["BW_BROWSERS"] ?? "chrome,firefox").split(",");
 for (const b of browsers) if (!(b in capabilities)) throw new Error(`unknown browser ${b}`);
 
 let target: Server | undefined;
+let provider: Server | undefined;
 let host: ChildProcess | undefined;
 let hits = 0;
 
@@ -52,12 +55,13 @@ export const config: WebdriverIO.Config = {
       res.writeHead(200, { "Cache-Control": "no-store", "Access-Control-Allow-Origin": PAGE_ORIGIN }).end(canary);
     });
     await new Promise<void>((resolve) => target!.listen(58444, "127.0.0.1", resolve));
+    provider = await startProvider(PAGE_ORIGIN, "synthetic-web-client", canary);
     // A host left from an earlier run would answer the readiness check below with an old build.
     const hostUrl = `${PAGE_ORIGIN.replace("localhost", "127.0.0.1")}/`;
     if (await fetch(hostUrl).then(() => true, () => false)) throw new SevereServiceError("something already answers on the static host's port");
     host = spawn(`${web}../bin/webhost`, [
       "-dist", `${web}dist`, "-headers", `${web}headers.json`, "-client-config", `${web}e2e/bronzeward-client.json`,
-      "-issuer", "http://localhost:58280", "-provider-origins", TARGET_ORIGIN, "-redirect-api", TARGET_ORIGIN,
+      "-issuer", FAKE_ISSUER, "-provider-origins", TARGET_ORIGIN, "-redirect-api", TARGET_ORIGIN,
     ], { stdio: "inherit" });
     for (let i = 0; ; i++) {
       if (await fetch(hostUrl).then((r) => r.ok, () => false)) break;
@@ -68,5 +72,6 @@ export const config: WebdriverIO.Config = {
   onComplete() {
     host?.kill();
     target?.close();
+    provider?.close();
   },
 };

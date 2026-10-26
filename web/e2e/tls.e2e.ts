@@ -9,6 +9,17 @@ import { TARGET_ORIGIN } from "./wdio.conf.ts";
 const canary = process.env["BW_WEB_CANARY"]!;
 const hits = async (): Promise<number> => ((await (await fetch(`${TARGET_ORIGIN}/__hits`)).json()) as { hits: number }).hits;
 
+// The page signs in through the synthetic provider first; this waits until it is back on `path`
+// with its read settled, and returns the status the read left.
+async function settled(path: string): Promise<string> {
+  const status = () => $('[data-testid="status"]').getText();
+  await browser.waitUntil(async () => {
+    const url = new URL(await browser.getUrl());
+    return url.pathname + url.search === path && (await status()) !== "Loading";
+  }, { timeout: 20_000, timeoutMsg: `the page did not settle on ${path}` });
+  return status();
+}
+
 describe("an API redirect to another origin", () => {
   beforeEach(async () => {
     await fetch(`${TARGET_ORIGIN}/__reset`);
@@ -16,9 +27,8 @@ describe("an API redirect to another origin", () => {
 
   it("TLS-02, TLS-03: the read is not sent to the target and the page names no target", async () => {
     await browser.url("/machines?cluster=c1");
-    const status = $('[data-testid="status"]');
-    await browser.waitUntil(async () => (await status.getText()) !== "Loading");
-    expect(await status.getText()).toBe(TRANSPORT_FAILURE);
+    expect(await settled("/machines?cluster=c1")).toBe(TRANSPORT_FAILURE);
+    expect(await $('[data-testid="principal"]').getText()).toBe("Signed in as h-synthetic");
     const page = await $("body").getText();
     expect(page).not.toContain("58444");
     expect(page).not.toContain("127.0.0.1");
@@ -29,6 +39,7 @@ describe("an API redirect to another origin", () => {
   // zero above is the page's refusal, not the CSP's or the injector's.
   it("a fetch that follows redirects reaches the target and reads the canary", async () => {
     await browser.url("/");
+    await settled("/");
     // Only the body's digest crosses WebDriver: the harness log records every result.
     const digest = await browser.execute(async () => {
       const body = new TextEncoder().encode(await (await fetch("/api/v1/server")).text());
