@@ -826,10 +826,19 @@ current token expires
 
    Where the provider does not issue rotating, client-bound refresh tokens
    ([§9.1](#91-identity-provider-requirements) item 3), renewal also uses that redirect, never a
-   hidden frame (item 4). That fallback redirects at every access-token expiry, the behaviour the
+   hidden frame (item 4). The page renews by the redirect when its pair, from a sign-in or another
+   tab, has no refresh token, or when a renewal brings back the refresh token it sent; only the
+   lock holder redirects, and another tab asks it as for any renewal. A failed renewal or a spent
+   token is not this case: renewal has failed (§9.5 item 3). That fallback redirects at every
+   access-token expiry, the behaviour the
    owner's constraint in D5 refuses, so the constraint holds only with a rotating provider:
    rotation is a provider requirement ([§15](#15-assumptions-and-limits)). No token is kept in
    storage (item 2).
+
+   A renewal, a rescheduled renewal or a redirect still pending when the page is refused
+   ([§9.6](#96-failure-cases)), sees another account (§9.5 item 2) or ends
+   ([§9.7](#97-sign-out-and-cache-clearing), [§10.3](#103-caches-and-back-navigation) item 3) does
+   not go on; only the operator's sign-in button leaves a refused or changed page.
 4. Silent renewal through a hidden frame is not used: browsers that block third-party cookies make
    it fail unpredictably (assumption S2), and a failure would surface as an unexplained sign-out.
 5. Every API call goes to the page's own origin ([§10.1](#101-hosting-and-origin)); only the
@@ -914,8 +923,10 @@ expiry, at most `maxTokenLifetime` after issue, plus the server's 60 s leeway
    file, if it has one, revokes the refresh token
    at the provider's revocation endpoint if it has one, and says that an access token already
    issued remains valid at the server for up to its remaining lifetime plus that leeway.
-2. The web sign-out discards the in-memory tokens and every cached response, revokes the refresh
-   token if the provider allows it, tells other open tabs of the same origin to discard theirs
+2. The web sign-out discards the in-memory tokens and every cached response, revokes the last
+   refresh token the tab held if the provider allows it, even one it no longer sends for renewal
+   (after a failed or unrotated renewal, or one another tab may have spent), or, with a renewal
+   in flight, the pair that renewal brings, tells other open tabs of the same origin to discard theirs
    (assumption S3), and redirects to the provider's end-session endpoint where it offers one, with
    `client_id` and `post_logout_redirect_uri` only. It sends no `id_token_hint`: the test
    provider's ID token carries the access token's issuer, audience and lifetime, so the server
