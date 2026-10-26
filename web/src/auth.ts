@@ -11,6 +11,13 @@ export const SIGNED_OUT_PATH = "/signed-out";
 // §9.5 item 1: renew when less than 60 s of the access token's lifetime remains.
 export const RENEW_BEFORE_MS = 60_000;
 
+// When to renew, in ms from now: 60 s before expiry, but never sooner than half the remaining
+// lifetime, so a provider's short-lived tokens are not renewed one after another without pause.
+export function renewDelay(expiresAt: number, now: number): number {
+  const left = expiresAt - now;
+  return Math.max(left - RENEW_BEFORE_MS, left / 2, 0);
+}
+
 const NO_STORE = { cache: "no-store", redirect: "error", credentials: "omit" } as const;
 
 export interface Provider {
@@ -134,7 +141,10 @@ export async function completeSignIn(config: ClientConfig, provider: Provider, s
   if (id["iss"] !== provider.issuer || !aud.includes(config.webClientId) || id["nonce"] !== pending.nonce || typeof id["sub"] !== "string") {
     return invalid("the ID token does not match this sign-in");
   }
-  return { kind: "ok", tokens: toTokens(answer.body, { iss: provider.issuer, sub: id["sub"] }, (deps.now ?? Date.now)()), returnTo: pending.returnTo };
+  const now = (deps.now ?? Date.now)();
+  // Item 9: the current time is before its expiry, which it must carry.
+  if (typeof id["exp"] !== "number" || id["exp"] * 1000 <= now) return invalid("the ID token has expired or carries no expiry");
+  return { kind: "ok", tokens: toTokens(answer.body, { iss: provider.issuer, sub: id["sub"] }, now), returnTo: pending.returnTo };
 }
 
 export interface SessionOptions {
@@ -267,7 +277,9 @@ export function localReading(access: string, config: ClientConfig, now: number):
   if (typeof c["iss"] === "string" && c["iss"] !== config.issuer) return `the token is from ${c["iss"]}; this page expects ${config.issuer}`;
   const aud = Array.isArray(c["aud"]) ? c["aud"] : [c["aud"]];
   if (!aud.includes(config.audience)) return `the token is not issued for ${config.audience}; the identity provider needs an audience mapping`;
-  if (typeof c["exp"] === "number" && c["exp"] * 1000 <= now) return `the token expired at ${new Date(c["exp"] * 1000).toISOString()}`;
+  // An expiry out of Date's range reads as nothing rather than throwing.
+  const exp = typeof c["exp"] === "number" ? new Date(c["exp"] * 1000) : undefined;
+  if (exp !== undefined && !Number.isNaN(exp.getTime()) && exp.getTime() <= now) return `the token expired at ${exp.toISOString()}`;
   return undefined;
 }
 

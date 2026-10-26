@@ -13,6 +13,6 @@ expect:
   absent: [data from before sign-out after back navigation, any browser storage on the signed-out page, token in the harness log or retained artifacts]
 runs:
   web:
-    check: web/e2e/auth/provider.e2e.ts, mise run browser-auth; the revocation and end-session request in web/src/auth.test.ts, mise run web
+    check: web/e2e/auth/provider.e2e.ts, mise run browser-auth; that the sign-out button sends the revocation, counted by the synthetic provider, in web/e2e/auth/fixture.e2e.ts; the revocation and end-session request in web/src/auth.test.ts, mise run web
     browsers: [chrome, edge, firefox, firefox-esr]
     covers: the client's half. mise run dev-idp runs no login UI, so the provider's logout page and its return to the signed-out page are not exercised; the harness loads that page itself. Whether the provider revoked the refresh token is not read back

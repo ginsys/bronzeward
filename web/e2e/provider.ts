@@ -21,20 +21,21 @@ export interface ProviderOptions {
   next: () => Grant;
   // The fixture issuer whose /jwks this serves; absent, the provider serves no key set.
   keys?: string;
-  // Hand out a refresh token, and refuse its use, which is counted.
-  refresh?: boolean;
+  // Hand out refresh tokens that start with this (the run's canary, so the artifact scan finds
+  // one), and refuse their use; uses and revocations are counted.
+  refresh?: string;
 }
 
 export interface Provider {
   server: Server;
-  counts: { authorize: number; refresh: number };
+  counts: { authorize: number; refresh: number; revoke: number };
 }
 
 const b64url = (s: string | Buffer) => Buffer.from(s).toString("base64url");
 
 export function startProvider(o: ProviderOptions): Promise<Provider> {
   const codes = new Map<string, { nonce: string; challenge: string; grant: Grant }>();
-  const counts = { authorize: 0, refresh: 0 };
+  const counts = { authorize: 0, refresh: 0, revoke: 0 };
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", o.issuer);
     const headers = { "Cache-Control": "no-store", "Access-Control-Allow-Origin": o.pageOrigin, "Content-Type": "application/json" };
@@ -42,7 +43,17 @@ export function startProvider(o: ProviderOptions): Promise<Provider> {
       return res.writeHead(200, headers).end(JSON.stringify({
         issuer: o.issuer, authorization_endpoint: `${o.issuer}/authorize`, token_endpoint: `${o.issuer}/token`,
         ...(o.keys !== undefined ? { jwks_uri: `${o.issuer}/jwks` } : {}),
+        ...(o.refresh !== undefined ? { revocation_endpoint: `${o.issuer}/revoke` } : {}),
       }));
+    }
+    if (url.pathname === "/revoke" && req.method === "POST") {
+      let body = "";
+      req.on("data", (c: Buffer) => (body += c.toString()));
+      req.on("end", () => {
+        if (new URLSearchParams(body).get("token")?.startsWith(o.refresh ?? "\0")) counts.revoke++;
+        res.writeHead(200, headers).end();
+      });
+      return;
     }
     if (url.pathname === "/jwks" && o.keys !== undefined) {
       void fetch(`${o.keys}/jwks`).then(async (r) => res.writeHead(r.status, headers).end(await r.text()), () => res.writeHead(502).end());
@@ -72,10 +83,11 @@ export function startProvider(o: ProviderOptions): Promise<Provider> {
         if (code === undefined || b64url(createHash("sha256").update(form.get("code_verifier") ?? "").digest()) !== code.challenge) {
           return res.writeHead(400, headers).end(JSON.stringify({ error: "invalid_grant" }));
         }
-        const id = [b64url('{"alg":"none"}'), b64url(JSON.stringify({ iss: o.issuer, aud: [o.clientId], sub: code.grant.sub, nonce: code.nonce })), ""].join(".");
+        const now = Math.floor(Date.now() / 1000);
+        const id = [b64url('{"alg":"none"}'), b64url(JSON.stringify({ iss: o.issuer, aud: [o.clientId], sub: code.grant.sub, nonce: code.nonce, iat: now, exp: now + 300 })), ""].join(".");
         res.writeHead(200, headers).end(JSON.stringify({
           access_token: code.grant.access, expires_in: 300, id_token: id,
-          ...(o.refresh === true ? { refresh_token: randomBytes(16).toString("hex") } : {}),
+          ...(o.refresh !== undefined ? { refresh_token: `${o.refresh}-refresh-${randomBytes(8).toString("hex")}` } : {}),
         }));
       });
       return;
@@ -83,5 +95,8 @@ export function startProvider(o: ProviderOptions): Promise<Provider> {
     res.writeHead(404).end();
   });
   const port = Number(new URL(o.issuer).port);
-  return new Promise((resolve) => server.listen(port, "127.0.0.1", () => resolve({ server, counts })));
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", () => resolve({ server, counts }));
+  });
 }

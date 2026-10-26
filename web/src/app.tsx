@@ -3,7 +3,7 @@
 
 import { type ReactNode, useEffect, useState } from "react";
 import { flushSync } from "react-dom";
-import { beginSignIn, CALLBACK_PATH, completeSignIn, discover, type Failure, localReading, type Provider, RENEW_BEFORE_MS, Session, SIGNED_OUT_PATH } from "./auth.ts";
+import { beginSignIn, CALLBACK_PATH, completeSignIn, discover, type Failure, localReading, PENDING_KEY, type Provider, renewDelay, Session, SIGNED_OUT_PATH } from "./auth.ts";
 import { type ClientConfig, loadClientConfig } from "./config.ts";
 import { Client, type ReadResult, TRANSPORT_FAILURE } from "./request.ts";
 import type { components } from "./api/v1";
@@ -34,15 +34,21 @@ export function App() {
   useEffect(() => {
     let session: Session | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // Set when this page signs out, is hidden or unmounts: a sign-in still awaiting stops there.
+    let ended = false;
     const channel = new BroadcastChannel(CHANNEL);
     const forget = () => {
       clearTimeout(timer);
       session?.clear();
       session = undefined;
     };
+    const end = () => {
+      ended = true;
+      forget();
+    };
     // §10.3 items 3-4: cleared on pagehide; a page restored from the back-forward cache starts over.
     const onHide = () => {
-      forget();
+      end();
       flushSync(() => setView({ kind: "blank" }));
     };
     const onShow = (e: PageTransitionEvent) => {
@@ -53,7 +59,7 @@ export function App() {
     // §9.7 item 2: another tab signed out.
     channel.onmessage = (e: MessageEvent) => {
       if ((e.data as { type?: unknown } | null)?.type !== "signed-out") return;
-      forget();
+      end();
       location.replace(SIGNED_OUT_PATH);
     };
 
@@ -66,7 +72,7 @@ export function App() {
       clearTimeout(timer);
       const at = session?.expiresAt;
       if (at === undefined) return;
-      timer = setTimeout(() => void session?.renew().then((ok) => ok && schedule()), Math.max(0, at - RENEW_BEFORE_MS - Date.now()));
+      timer = setTimeout(() => void session?.renew().then((ok) => ok && schedule()), renewDelay(at, Date.now()));
     };
 
     const signedIn = async (config: ClientConfig, provider: Provider, s: Session) => {
@@ -83,10 +89,11 @@ export function App() {
       });
       client.setView({ principal: `${s.principal?.iss} ${s.principal?.sub}`, route: location.pathname, query: location.search });
       const signOut = () => {
-        const current = session;
-        forget();
+        // signOut takes the tokens before its first await, so the revocation still has the refresh token.
+        const to = session?.signOut(location.origin) ?? Promise.resolve(SIGNED_OUT_PATH);
+        end();
         channel.postMessage({ type: "signed-out" });
-        void (current?.signOut(location.origin) ?? Promise.resolve(SIGNED_OUT_PATH)).then((to) => location.assign(to));
+        void to.then((url) => location.assign(url));
       };
       const res = await client.read<Server>("/server");
       if (session !== s) return;
@@ -101,15 +108,28 @@ export function App() {
 
     void (async () => {
       if (location.pathname === SIGNED_OUT_PATH) return setView({ kind: "signed-out" });
+      // The callback's code and state leave the address bar and the history entry before anything
+      // can fail, and its pending entry goes on every path that does not reach completeSignIn.
+      const callback = location.pathname === CALLBACK_PATH ? location.search : undefined;
+      if (callback !== undefined) history.replaceState(null, "", "/");
+      const abandon = () => {
+        if (callback !== undefined) sessionStorage.removeItem(PENDING_KEY);
+      };
+      const fail = (message: string) => {
+        abandon();
+        setView({ kind: "failed", message });
+      };
       const config = await loadClientConfig();
-      if (config.kind !== "ok") return setView({ kind: "failed", message: config.kind === "transport" ? TRANSPORT_FAILURE : config.reason });
+      if (ended) return abandon();
+      if (config.kind !== "ok") return fail(config.kind === "transport" ? TRANSPORT_FAILURE : config.reason);
       const found = await discover(config.config.issuer);
-      if (found.kind !== "ok") return setView({ kind: "failed", message: failure(found) });
-      if (location.pathname !== CALLBACK_PATH) return signIn(config.config, found.provider);
-      const done = await completeSignIn(config.config, found.provider, location.search, { storage: sessionStorage, origin: location.origin });
-      // The callback's code and state leave the address bar and the history entry either way.
-      history.replaceState(null, "", done.kind === "ok" ? done.returnTo : "/");
+      if (ended) return abandon();
+      if (found.kind !== "ok") return fail(failure(found));
+      if (callback === undefined) return signIn(config.config, found.provider);
+      const done = await completeSignIn(config.config, found.provider, callback, { storage: sessionStorage, origin: location.origin });
+      if (ended) return;
       if (done.kind !== "ok") return setView({ kind: "sign-in", message: failure(done), config: config.config, provider: found.provider });
+      history.replaceState(null, "", done.returnTo);
       // §9.5 item 2: a renewal for another account is a new sign-in, and is shown, not adopted.
       const onPrincipalChange = () => {
         forget();
@@ -119,7 +139,7 @@ export function App() {
     })();
 
     return () => {
-      forget();
+      end();
       channel.close();
       removeEventListener("pagehide", onHide);
       removeEventListener("pageshow", onShow);
