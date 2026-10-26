@@ -221,6 +221,7 @@ timeline:
 | desired not null, desired ≠ applied.release, not pendingConvergence, no open drift | adds "The selected release `<desired>` carries this machine's applied configuration unchanged." |
 | openDrift not null | "Drifted since `<at of the openDrift.observation observation>`: a read differed from what Bronzeward last verified (`<applied.release>`)." If observed.release = desired, adds "It equals the selected release; that does not close the drift." |
 | no open drift, observed.release null | "The configuration read at `<observed.at>` matched neither `Applied` nor `Desired`, and no drift is open; an operation may hold the machine. See the timeline." |
+| no open drift, observed.release = desired ≠ applied.release (an operation holds the machine: no drift opens while one does, [execution and recovery §6.1](execution-recovery.md#61-detection)) | "The configuration read at `<observed.at>` is attributed to the selected release `<observed.release>`." |
 | an observation with a higher `basis` than the one `observed` names (the machine read selects `observed` by highest basis, `internal/api/reads.go:171`; the observations list serves `basis`, `internal/api/observations.go:21`), with unread causes | adds "The latest read at `<time>` could not read: `<causes>`." |
 | applied null | "Not applied or adopted by Bronzeward." |
 | desired null | "No release selected." |
