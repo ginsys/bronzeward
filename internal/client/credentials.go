@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -54,22 +55,39 @@ func ReadTokens(p string) (*Tokens, error) {
 	if automation(b) {
 		return nil, automationFile(p)
 	}
-	// The client's own document is one JSON object with no field but the ones it writes; any other
-	// file at the path is someone else's, and is never used or removed.
-	var t Tokens
-	d := json.NewDecoder(bytes.NewReader(b))
-	d.DisallowUnknownFields()
-	if !bytes.HasPrefix(bytes.TrimSpace(b), []byte("{")) || d.Decode(&t) != nil || d.More() {
-		return nil, fmt.Errorf("token file %s holds neither bronzewardctl's tokens nor an automation token; bronzewardctl leaves it as it is", p)
+	if !own(b) {
+		return nil, fmt.Errorf("token file %s holds neither bronzewardctl's tokens nor an automation token; bronzewardctl leaves it as it is. "+
+			"Point oidc.tokenFile, or BRONZEWARD_TOKEN_FILE, at bronzewardctl's own token file, or move this file away", p)
 	}
+	var t Tokens
+	json.Unmarshal(b, &t)
 	if t.AccessToken == "" {
-		return nil, fmt.Errorf("token file %s: %w", p, ErrNotTokenFile)
+		return &t, fmt.Errorf("token file %s: %w", p, ErrNotTokenFile)
 	}
 	return &t, nil
 }
 
-// ErrNotTokenFile is the client's own token document without an access token.
-var ErrNotTokenFile = errors.New("not a bronzewardctl token file")
+// own: b is the client's own document, one JSON object with no key but the ones it writes, spelled
+// as it writes them, and nothing after it. Any other file at the path is someone else's, and is
+// never used or removed.
+func own(b []byte) bool {
+	var keys map[string]json.RawMessage
+	d := json.NewDecoder(bytes.NewReader(b))
+	if !bytes.HasPrefix(bytes.TrimSpace(b), []byte("{")) || d.Decode(&keys) != nil || len(bytes.TrimSpace(b[d.InputOffset():])) > 0 {
+		return false
+	}
+	for k, v := range keys {
+		var s string
+		if k != "accessToken" && k != "refreshToken" || json.Unmarshal(v, &s) != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// ErrNotTokenFile is the client's own token document without an access token; ReadTokens returns
+// it with the document, whose refresh token logout still revokes.
+var ErrNotTokenFile = errors.New("it holds no access token")
 
 // automation is the content of a file holding an automation token, as automationToken reads one.
 func automation(b []byte) bool { return bytes.HasPrefix(bytes.TrimSpace(b), []byte("bwt_")) }
@@ -123,8 +141,11 @@ func WriteTokens(p string, t *Tokens) error {
 // the renewal lock, so that a renewal in another process finds it gone instead of writing it back.
 // It returns the tokens it removed, read under the lock, and nil when there was no file. A file of
 // this client's that holds no access token is removed too, reported as ErrNotTokenFile; any other
-// file is left as it is.
-func ClearTokens(p string) (*Tokens, error) {
+// file is left as it is, and so is one that match, when given, refuses (ErrOtherSignIn).
+func ClearTokens(p string, match func(*Tokens) bool) (*Tokens, error) {
+	if _, err := os.Lstat(p); errors.Is(err, os.ErrNotExist) {
+		return nil, nil // nothing to clear, so no lock file is made either
+	}
 	unlock, err := renewalLock(p)
 	if err != nil {
 		return nil, err
@@ -134,11 +155,17 @@ func ClearTokens(p string) (*Tokens, error) {
 	if err != nil && !errors.Is(err, ErrNotTokenFile) || t == nil && err == nil {
 		return nil, err
 	}
+	if match != nil && !match(t) {
+		return t, ErrOtherSignIn
+	}
 	if rm := os.Remove(p); rm != nil && !errors.Is(rm, os.ErrNotExist) {
 		return nil, rm
 	}
 	return t, err
 }
+
+// ErrOtherSignIn: the token file holds another sign-in than the one ClearTokens was to clear.
+var ErrOtherSignIn = errors.New("the token file holds another sign-in now")
 
 // Claims are an access token's payload, read without verification: the client's own reading
 // (§9.2 item 5, §9.6), never the server's reason.
@@ -235,7 +262,7 @@ func (c *Client) renew() (err error) {
 		s.tokens = &Tokens{AccessToken: old.AccessToken}
 		return errors.New("the stored sign-in was removed meanwhile, so it is not renewed")
 	}
-	if t.AccessToken != old.AccessToken {
+	if *t != *old {
 		c.adopt(t)
 		return nil
 	}
@@ -286,21 +313,73 @@ func renewalLock(p string) (func(), error) {
 	return func() { f.Close() }, nil
 }
 
+// discover reads the provider's discovery document through issuerClient, within a minute.
+func discover(x *Context) (context.Context, context.CancelFunc, *oidc.Provider, error) {
+	hc, err := issuerClient(x)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	ctx, cancel := context.WithTimeout(oidc.ClientContext(context.Background(), hc), time.Minute)
+	p, err := oidc.NewProvider(ctx, x.OIDC.Issuer)
+	if err != nil {
+		cancel()
+		return nil, nil, nil, fmt.Errorf("cannot reach the identity provider %s: %w", x.OIDC.Issuer, err)
+	}
+	return ctx, cancel, p, nil
+}
+
+// ErrNoRevocation: the provider's discovery names no revocation_endpoint.
+var ErrNoRevocation = errors.New("the identity provider offers no revocation endpoint")
+
+// Revoke revokes a refresh token at the provider's revocation endpoint (RFC 7009, §9.7 item 1), as
+// a public client: its ID in the form, no secret. Only the status and the provider's error code are
+// shown, never its response body.
+func Revoke(x *Context, rt string) error {
+	ctx, cancel, p, err := discover(x)
+	if err != nil {
+		return err
+	}
+	defer cancel()
+	var d struct {
+		URL string `json:"revocation_endpoint"`
+	}
+	if err := p.Claims(&d); err != nil || d.URL == "" {
+		return ErrNoRevocation
+	}
+	if err := providerEndpoint(d.URL, "the identity provider's revocation_endpoint"); err != nil {
+		return err
+	}
+	form := url.Values{"token": {rt}, "token_type_hint": {"refresh_token"}, "client_id": {x.OIDC.ClientID}}
+	q, err := http.NewRequestWithContext(ctx, http.MethodPost, d.URL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return err
+	}
+	q.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r, err := oauth2.NewClient(ctx, nil).Do(q) // discover's issuerClient, which ctx carries
+	if err != nil {
+		return fmt.Errorf("revoking at the identity provider %s: %w", x.OIDC.Issuer, err)
+	}
+	defer r.Body.Close()
+	if r.StatusCode == http.StatusOK {
+		return nil
+	}
+	var e struct {
+		Code string `json:"error"`
+	}
+	_ = json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&e) // a body that is no error document names no code
+	return fmt.Errorf("the identity provider %s refused the revocation: %s %s", x.OIDC.Issuer, r.Status, e.Code)
+}
+
 // refresh redeems the refresh token at the provider's token endpoint, found by its discovery.
 func refresh(x *Context, rt string) (*Tokens, error) {
-	hc, err := issuerClient(x)
+	ctx, cancel, p, err := discover(x)
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(oidc.ClientContext(context.Background(), hc), time.Minute)
 	defer cancel()
-	p, err := oidc.NewProvider(ctx, x.OIDC.Issuer)
-	if err != nil {
-		return nil, fmt.Errorf("cannot reach the identity provider %s: %w", x.OIDC.Issuer, err)
-	}
 	// A public client sends its ID in the form; auto-detection would redeem a refused token twice.
 	ep := p.Endpoint()
-	if err := endpoint(ep.TokenURL, "the identity provider's token_endpoint"); err != nil {
+	if err := providerEndpoint(ep.TokenURL, "the identity provider's token_endpoint"); err != nil {
 		return nil, err
 	}
 	ep.AuthStyle = oauth2.AuthStyleInParams
@@ -326,7 +405,7 @@ func issuerClient(x *Context) (*http.Client, error) {
 		return nil, err
 	}
 	hc.CheckRedirect = func(r *http.Request, via []*http.Request) error {
-		if len(via) >= 10 || endpoint(r.URL.String(), "redirect") != nil {
+		if len(via) >= 10 || providerEndpoint(r.URL.String(), "redirect") != nil {
 			return fmt.Errorf("the identity provider redirected to %s, which bronzewardctl does not follow", r.URL.Redacted())
 		}
 		return nil
@@ -368,12 +447,26 @@ func (c *Client) signedIn(p *Problem) {
 	case p.Status == http.StatusUnauthorized:
 		p.Reading = c.reading()
 	case p.Code() == "identity-revoked" && c.signIn.file != "":
-		if _, err := ClearTokens(c.signIn.file); err != nil && !errors.Is(err, ErrNotTokenFile) {
+		// Only the refused identity's sign-in is cleared: another process may have stored a new
+		// sign-in, for another subject or issuer, while this request was in flight.
+		refused := ReadClaims(c.token)
+		t, err := ClearTokens(c.signIn.file, func(t *Tokens) bool { return sameIdentity(ReadClaims(t.AccessToken), refused) })
+		switch {
+		case errors.Is(err, ErrOtherSignIn):
+			now := ReadClaims(t.AccessToken)
+			p.Cleared = fmt.Sprintf("The stored sign-in is now for %s at %s, not the refused identity, and is kept.", now.Subject, now.Issuer)
+		case err != nil && !errors.Is(err, ErrNotTokenFile):
 			p.Cleared = fmt.Sprintf("Clearing the stored sign-in failed: %v.", err)
-		} else {
+		default:
 			p.Cleared = "The stored sign-in was cleared; signing in again does not restore access."
 		}
 	}
+}
+
+// sameIdentity: both tokens are read and carry the same subject at the same issuer. A token that
+// cannot be read is no other identity, so a document without an access token matches.
+func sameIdentity(a, b *Claims) bool {
+	return a == nil || b == nil || a.Subject == b.Subject && a.Issuer == b.Issuer
 }
 
 // Subject is the signed-in subject by the client's reading, "" for automation.
