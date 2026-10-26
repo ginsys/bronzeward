@@ -1,5 +1,5 @@
 id: AUTH-07
-setup: as AUTH-02, with a provider that rotates the refresh token and answers the renewal with a token minted for h-author; signed in as h-viewer with a 16-second token, in two tabs
+setup: as AUTH-02, with a provider that rotates the refresh token and answers the renewal with a token minted for h-author; signed in as h-viewer with a 24-second token, in two tabs
 action: load the web client, sign in, open a second tab, wait for the renewal
 exchange:
   - request: POST <provider>/token
