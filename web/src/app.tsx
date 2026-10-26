@@ -3,8 +3,9 @@
 
 import { type ReactNode, useEffect, useState } from "react";
 import { flushSync } from "react-dom";
-import { beginSignIn, CALLBACK_PATH, completeSignIn, discover, type Failure, localReading, PENDING_KEY, type Provider, renewDelay, Session, SIGNED_OUT_PATH, type Tokens } from "./auth.ts";
+import { beginSignIn, CALLBACK_PATH, completeSignIn, discover, type Failure, localReading, PENDING_KEY, type Provider, Session, SIGNED_OUT_PATH, type Tokens } from "./auth.ts";
 import { type ClientConfig, loadClientConfig } from "./config.ts";
+import { navigate, PageState, renewals } from "./page.ts";
 import { type Message, Renewer } from "./renewer.ts";
 import { Client, type ReadResult, TRANSPORT_FAILURE } from "./request.ts";
 import type { components } from "./api/v1";
@@ -27,7 +28,7 @@ export type View =
   // Between the sign-out button and the redirect: nothing read before stays on the page (§9.7, §10.3).
   | { kind: "signing-out" }
   // `problem`: the answer's §8.2 fields, under a message of its own.
-  | { kind: "sign-in"; message: string; reading?: string | undefined; problem?: string | undefined; config: ClientConfig; provider: Provider }
+  | { kind: "sign-in"; message: string; reading?: string | undefined; problem?: string | undefined; signIn: () => void }
   | { kind: "failed"; message: string; problem?: string | undefined }
   | { kind: "signed-in"; sub: string; status: string; problem?: string | undefined; signOut: () => void };
 
@@ -37,28 +38,32 @@ export function App() {
   const [view, setView] = useState<View>({ kind: "loading" });
 
   useEffect(() => {
+    // The page-level state (page.ts): every await below is followed by a check of its mark.
+    const page = new PageState();
     let session: Session | undefined;
     let renewing: ReturnType<typeof renewals> | undefined;
-    // Set when this page signs out, is hidden or unmounts: a sign-in still awaiting stops there.
-    let ended = false;
     const channel = new BroadcastChannel(CHANNEL);
     // §9.5 item 2, set once signed in.
     let changed: (() => void) | undefined;
     // B1: another tab's pair is a new sign-in for another principal, else taken when newer.
     const renewer = new Renewer(channel, navigator.locks, () => session, (t) => {
       const p = session?.principal;
-      if (p === undefined) return;
+      if (page.phase !== "signed-in" || p === undefined) return;
       if (p.iss !== t.iss || p.sub !== t.sub) return changed?.();
       if (session?.adopt(t) === true) renewing?.schedule();
     });
-    const forget = () => {
+    // No more renewals here, and the lock goes to another tab.
+    const stop = () => {
       renewing?.stop();
       renewer.release();
+    };
+    const forget = () => {
+      stop();
       session?.clear();
       session = undefined;
     };
     const end = () => {
-      ended = true;
+      page.to("ended");
       forget();
     };
     // §10.3 items 3-4: cleared on pagehide; a page restored from the back-forward cache starts over.
@@ -82,30 +87,39 @@ export function App() {
       location.replace(SIGNED_OUT_PATH);
     };
 
-    const signIn = async (config: ClientConfig, provider: Provider) => {
-      location.assign(await beginSignIn(config, provider, location.pathname + location.search + location.hash, sessionStorage, location.origin));
-    };
+    // The redirect to the provider, after the PKCE digest only while `still` holds.
+    const signIn = (config: ClientConfig, provider: Provider, still: () => boolean) =>
+      navigate(beginSignIn(config, provider, location.pathname + location.search + location.hash, sessionStorage, location.origin), still, (u) => location.assign(u));
+    // The sign-in view. Its button is the operator's, so its mark is taken at the click.
+    const offer = (message: string, config: ClientConfig, provider: Provider, more: { reading?: string | undefined; problem?: string | undefined } = {}) =>
+      setView({ kind: "sign-in", message, ...more, signIn: () => void signIn(config, provider, page.mark()) });
 
     const signedIn = async (config: ClientConfig, provider: Provider, tokens: Tokens) => {
+      page.to("signed-in");
       // §9.5 item 2: a renewal for another account is a new sign-in, and is shown, not adopted.
       changed = () => {
+        page.to("changed");
         forget();
-        setView({ kind: "sign-in", message: PRINCIPAL_CHANGED, config, provider });
+        offer(PRINCIPAL_CHANGED, config, provider);
       };
       const s = new Session(config, provider, tokens, { onPrincipalChange: () => changed?.(), ...renewer.hooks });
       session = s;
       renewer.hold();
-      // B1: the renewal goes through the lock holder.
-      const timer = renewals(() => session && { expiresAt: session.expiresAt, renew: () => renewer.renew() });
+      // B1: the renewal goes through the lock holder; §9.3 item 3: by the redirect without rotation.
+      const timer = renewals(page, {
+        session: () => session,
+        renew: () => renewer.renew(),
+        holder: () => renewer.holder,
+        redirect: (still) => signIn(config, provider, still),
+      });
       renewing = timer;
       timer.schedule();
       const client = new Client({
         token: () => session?.token(),
         renew: timer.renew,
-        // The tokens go, but the session stays this read's, so the refusal below is still shown.
+        // The tokens go at once; the page moves to refused with the answer below.
         onRevoked: () => {
-          timer.stop();
-          renewer.release();
+          stop();
           s.clear();
         },
       });
@@ -118,13 +132,17 @@ export function App() {
         channel.postMessage({ type: "signed-out" });
         void to.then((url) => location.assign(url));
       };
+      const still = page.mark();
       const res = await client.read<Server>("/server");
-      if (session !== s) return;
+      if (!still()) return;
+      if (res.kind === "unauthenticated" || res.kind === "revoked") {
+        page.to("refused");
+        stop();
+      }
       if (res.kind === "unauthenticated") {
         // Signing in again is the operator's (W1).
-        timer.stop();
         const reading = localReading(s.token() ?? "", config, Date.now());
-        return setView({ kind: "sign-in", message: NOT_ACCEPTED, reading, problem: problemFields(res), config, provider });
+        return offer(NOT_ACCEPTED, config, provider, { reading, problem: problemFields(res) });
       }
       if (res.kind === "revoked") return setView({ kind: "failed", message: REVOKED, problem: problemFields(res) });
       const sub = s.principal?.sub ?? "";
@@ -146,22 +164,23 @@ export function App() {
         abandon();
         setView({ kind: "failed", message });
       };
+      const still = page.mark();
       const config = await loadClientConfig();
-      if (ended) return abandon();
+      if (!still()) return abandon();
       if (config.kind !== "ok") return fail(config.kind === "transport" ? TRANSPORT_FAILURE : config.reason);
       const found = await discover(config.config.issuer);
-      if (ended) return abandon();
+      if (!still()) return abandon();
       if (found.kind !== "ok") return fail(failure(found));
       if (callback === undefined) {
         // B1: an open tab's pair, else the redirect.
         const tokens = await renewer.join();
-        if (ended) return;
-        if (tokens === undefined) return signIn(config.config, found.provider);
+        if (!still()) return;
+        if (tokens === undefined) return void signIn(config.config, found.provider, still);
         return signedIn(config.config, found.provider, tokens);
       }
       const done = await completeSignIn(config.config, found.provider, callback, { storage: sessionStorage, origin: location.origin });
-      if (ended) return;
-      if (done.kind !== "ok") return setView({ kind: "sign-in", message: failure(done), config: config.config, provider: found.provider });
+      if (!still()) return;
+      if (done.kind !== "ok") return offer(failure(done), config.config, found.provider);
       history.replaceState(null, "", done.returnTo);
       renewer.post(done.tokens);
       await signedIn(config.config, found.provider, done.tokens);
@@ -176,28 +195,6 @@ export function App() {
   }, []);
 
   return <Screen view={view} />;
-}
-
-// §9.5 item 1: renew before less than 60 s remains; a failed renewal keeps the current token.
-// After stop() (the server refused the session, or the page forgot it) nothing re-arms the timer,
-// not even a renewal still in flight.
-export function renewals(session: () => Pick<Session, "expiresAt" | "renew"> | undefined) {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let stopped = false;
-  const schedule = () => {
-    clearTimeout(timer);
-    const at = session()?.expiresAt;
-    if (stopped || at === undefined) return;
-    timer = setTimeout(() => void session()?.renew().then((ok) => ok && schedule()), renewDelay(at, Date.now()));
-  };
-  return {
-    schedule,
-    renew: async () => (await session()?.renew()) === true && (schedule(), true),
-    stop: () => {
-      stopped = true;
-      clearTimeout(timer);
-    },
-  };
 }
 
 // What each view shows; exported for the rendered-view tests.
@@ -224,7 +221,7 @@ export function Screen({ view }: { view: View }) {
           <p role="alert" data-testid="status">{view.message}</p>
           <Problem text={view.problem} />
           {view.reading !== undefined && <p data-testid="reading">This browser's own reading: {view.reading}.</p>}
-          <button type="button" onClick={() => void beginSignIn(view.config, view.provider, location.pathname + location.search, sessionStorage, location.origin).then((u) => location.assign(u))}>
+          <button type="button" onClick={view.signIn}>
             Sign in with the identity provider
           </button>
         </Page>

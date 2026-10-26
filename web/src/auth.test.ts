@@ -222,20 +222,45 @@ describe("§9.5 renewal", () => {
   test.each([
     ["returned unchanged", { refresh_token: "SYNTH-r1" }],
     ["not returned", {}],
-  ])("§9.3 items 1 and 3: a refresh token %s is not sent again", async (_name, extra) => {
+  ])("§9.3 items 1 and 3: a refresh token %s is not sent again, and the page renews by the redirect", async (_name, extra) => {
     const f = answers([json({ access_token: "SYNTH-a2", expires_in: 300, ...extra })]);
     const s = new Session(config, provider, tokens(), { fetch: f as unknown as typeof fetch });
+    expect(s.byRedirect).toBe(false);
     expect(await s.renew()).toBe(true);
     expect(s.token()).toBe("SYNTH-a2");
+    expect(s.byRedirect).toBe(true);
     expect(await s.renew()).toBe(false);
     expect(f).toHaveBeenCalledTimes(1);
   });
 
-  test("a sign-in that brought no refresh token sends no renewal", async () => {
+  test("a sign-in that brought no refresh token sends no renewal, and renews by the redirect", async () => {
     const f = answers([]);
     const s = new Session(config, provider, tokens({ refresh: undefined }), { fetch: f as unknown as typeof fetch });
+    expect(s.byRedirect).toBe(true);
     expect(await s.renew()).toBe(false);
     expect(f).not.toHaveBeenCalled();
+    s.clear();
+    expect(s.byRedirect).toBe(false);
+  });
+
+  // §9.5 item 3: a failed or spent refresh token is a failed renewal, never a redirect.
+  test.each([
+    ["undelivered", (s: Session) => s.renew(), [new TypeError("Failed to fetch")]],
+    ["refused", (s: Session) => s.renew(), [json({ error: "invalid_grant" }, 400)]],
+    ["spent by another tab", (s: Session) => s.spend(), []],
+  ] as const)("a refresh token %s leaves no renewal by the redirect", async (_name, act, list) => {
+    const s = new Session(config, provider, tokens(), { fetch: answers([...list]) as unknown as typeof fetch });
+    await act(s);
+    expect(s.byRedirect).toBe(false);
+    expect(await s.renew()).toBe(false);
+  });
+
+  test("another tab's pair without a refresh token renews by the redirect; with one, by the refresh token", () => {
+    const s = new Session(config, provider, tokens(), { fetch: answers([]) as unknown as typeof fetch });
+    expect(s.adopt(tokens({ refresh: undefined, expiresAt: 400_000 }))).toBe(true);
+    expect(s.byRedirect).toBe(true);
+    expect(s.adopt(tokens({ refresh: "SYNTH-r3", expiresAt: 500_000 }))).toBe(true);
+    expect(s.byRedirect).toBe(false);
   });
 
   test("a renewal with no ID token, whose access token names another subject, is a new sign-in", async () => {
@@ -354,6 +379,30 @@ describe("§9.7 item 2 sign-out", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // CP2-F2: a refresh token no longer sent for renewal is still revoked at sign-out.
+  test.each([
+    ["an undelivered renewal", [new TypeError("Failed to fetch")], (s: Session) => s.renew(), "SYNTH-r1"],
+    ["a refused renewal", [json({ error: "invalid_grant" }, 400)], (s: Session) => s.renew(), "SYNTH-r1"],
+    ["an unrotated renewal", [json({ access_token: "SYNTH-a2", refresh_token: "SYNTH-r1", expires_in: 300 })], (s: Session) => s.renew(), "SYNTH-r1"],
+    ["a renewal that brings no refresh token", [json({ access_token: "SYNTH-a2", expires_in: 300 })], (s: Session) => s.renew(), "SYNTH-r1"],
+    ["a token another tab may have spent", [], (s: Session) => s.spend(), "SYNTH-r1"],
+    ["a rotated renewal", [json({ access_token: "SYNTH-a2", refresh_token: "SYNTH-r2", expires_in: 300 })], (s: Session) => s.renew(), "SYNTH-r2"],
+  ] as const)("after %s, sign-out revokes the last refresh token held", async (_name, list, before, revoked) => {
+    const f = answers([...list, new Response(null, { status: 200 })]);
+    const s = new Session(config, provider, tokens(), { fetch: f as unknown as typeof fetch });
+    await before(s);
+    await s.signOut(ORIGIN);
+    expect(f.mock.calls.filter((c) => c[0] === provider.revocationEndpoint).map((c) => form(c[1])["token"])).toEqual([revoked]);
+  });
+
+  test("after a cleared page, sign-out revokes nothing", async () => {
+    const f = answers([]);
+    const s = new Session(config, provider, tokens(), { fetch: f as unknown as typeof fetch });
+    s.clear();
+    await s.signOut(ORIGIN);
+    expect(f).not.toHaveBeenCalled();
   });
 
   test("an unreachable revocation still signs out; without end-session, the signed-out page", async () => {
