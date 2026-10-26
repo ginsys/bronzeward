@@ -8,7 +8,7 @@ import { type ClientConfig, loadClientConfig } from "./config.ts";
 import { navigate, PageState, renewals } from "./page.ts";
 import { type Message, Renewer } from "./renewer.ts";
 import { TRANSPORT_FAILURE } from "./request.ts";
-import { SignedIn, type SignedInProps } from "./shell.tsx";
+import { Deprecations, SignedIn, type SignedInProps } from "./shell.tsx";
 import { NOT_ACCEPTED, ProblemFields, problemFields } from "./states.tsx";
 
 // §9.6 texts. The server says only `401`, so the page never names a cause it cannot read.
@@ -35,6 +35,8 @@ const failure = (f: Failure) => (f.kind === "transport" ? TRANSPORT_FAILURE : f.
 
 export function App() {
   const [view, setView] = useState<View>({ kind: "loading" });
+  // §7 item 4: each route a response marked deprecated, once per page load.
+  const [notices, setNotices] = useState<readonly string[]>([]);
 
   useEffect(() => {
     // The page-level state (page.ts): every await below is followed by a check of its mark.
@@ -134,7 +136,8 @@ export function App() {
         props: {
           auth: {
             token: () => session?.token(),
-            renew: timer.renew,
+            // A read that outlives the signed-in page asks for no renewal.
+            renew: async () => page.phase === "signed-in" && timer.renew(),
             // The tokens go at once; the page moves to refused with the answer.
             onRevoked: () => {
               stop();
@@ -152,6 +155,7 @@ export function App() {
           onRevoked: (res) => {
             if (refused()) setView({ kind: "failed", message: REVOKED, problem: problemFields(res) });
           },
+          onDeprecation: (route) => setNotices((n) => [...n, route]),
           signOut,
         },
       });
@@ -200,11 +204,12 @@ export function App() {
     };
   }, []);
 
-  return <Screen view={view} />;
+  return <Screen view={view} notices={notices} />;
 }
 
-// What each view shows; exported for the rendered-view tests.
-export function Screen({ view }: { view: View }) {
+// What each view shows; exported for the rendered-view tests. The deprecation notices stay on the
+// signed-in page and on its refusals.
+export function Screen({ view, notices = [] }: { view: View; notices?: readonly string[] }) {
   switch (view.kind) {
     case "blank":
       return null;
@@ -220,12 +225,13 @@ export function Screen({ view }: { view: View }) {
         </Page>
       );
     case "failed":
-      return <Page><p role="alert" data-testid="status">{view.message}</p><ProblemFields text={view.problem} /></Page>;
+      return <Page><p role="alert" data-testid="status">{view.message}</p><ProblemFields text={view.problem} /><Deprecations routes={notices} /></Page>;
     case "sign-in":
       return (
         <Page>
           <p role="alert" data-testid="status">{view.message}</p>
           <ProblemFields text={view.problem} />
+          <Deprecations routes={notices} />
           {view.reading !== undefined && <p data-testid="reading">This browser's own reading: {view.reading}.</p>}
           <button type="button" onClick={view.signIn}>
             Sign in with the identity provider
@@ -233,7 +239,7 @@ export function Screen({ view }: { view: View }) {
         </Page>
       );
     case "signed-in":
-      return <SignedIn {...view.props} />;
+      return <SignedIn {...view.props} notices={notices} />;
   }
 }
 
