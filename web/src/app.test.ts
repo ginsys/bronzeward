@@ -1,7 +1,8 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
-import { problemFields, problemText, Screen, type View } from "./app.tsx";
+import { Screen, type View } from "./app.tsx";
+import { problemFields, problemText } from "./states.tsx";
 
 const shown = (view: View) => renderToStaticMarkup(createElement(Screen, { view }));
 
@@ -30,10 +31,10 @@ test("§8.2: the problem fields shown under a 403 row's, a 401's or a revocation
   expect(problemFields({ kind: "transport" })).toBeUndefined();
 });
 
+// The shell's 403 rows: shell.test.ts.
 test("§8.2: each refusal view renders the problem fields under its own message", () => {
   const fields = "Not read: Forbidden (needs viewer). Request req-1.";
   const paragraph = `<p data-testid="problem">${fields}</p>`;
-  expect(shown({ kind: "signed-in", sub: "u", status: "Needs viewer; you are signed in as u", problem: fields, signOut: () => {} })).toContain(paragraph);
   expect(shown({ kind: "sign-in", message: "W1", problem: fields, signIn: () => {} })).toContain(paragraph);
   expect(shown({ kind: "failed", message: "revoked", problem: fields })).toContain(paragraph);
   expect(shown({ kind: "failed", message: "revoked" })).not.toContain('data-testid="problem"');

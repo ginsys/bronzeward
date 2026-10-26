@@ -51,6 +51,8 @@ export interface ClientOptions {
   // §8.5 item 3: the recovery banner shows while responses carry Bronzeward-Recovery-Mode: true,
   // from the first epoch on, and clears on a recovery exit, which keeps the epoch.
   onRecoveryModeChange?: (on: boolean) => void;
+  // §7 item 4: a route answered with a Deprecation header, told once per route.
+  onDeprecation?: (route: string) => void;
   fetch?: typeof fetch;
   sleep?: (ms: number) => Promise<void>;
 }
@@ -67,6 +69,7 @@ export class Client {
   private generation = 0;
   private epochRecords = 0;
   private recovery = false;
+  private readonly deprecated = new Set<string>();
 
   constructor(private readonly opts: ClientOptions = {}) {}
 
@@ -88,6 +91,11 @@ export class Client {
       const records = this.epochRecords;
       const res = await this.send(path);
       if (res === undefined) return sent === this.generation ? { kind: "transport" } : { kind: "discarded" };
+      const route = API_BASE + path.split("?")[0];
+      if (res.headers.has("Deprecation") && !this.deprecated.has(route)) {
+        this.deprecated.add(route);
+        this.opts.onDeprecation?.(route);
+      }
       // Epochs are unordered: another epoch than one recorded after the send may be older or newer,
       // so the read is sent again to learn the current one. Any other is read, even on a stale read.
       const epoch = res.headers.get("Bronzeward-Epoch");
