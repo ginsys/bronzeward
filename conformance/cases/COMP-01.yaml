@@ -1,0 +1,17 @@
+id: COMP-01
+setup: as AUTH-02, with the injector rewriting the apiRevision GET /server serves to 1, below the web client's minimum of 2; signed in as h-viewer
+action: load the web client, sign in
+exchange:
+  - request: GET /api/v1/server
+    headers: ["Authorization: Bearer <token>", "Accept: application/json"]
+fault: the served API revision is below the client's minimum
+expect:
+  server: GET /server answered; no other request reaches it
+  client: refused before any other read or any write; no identity, navigation or page data shown
+  shown: 'the text "This server serves API revision 1; this client needs API revision 2 or later.", and the footer naming the server''s version and revision 1'
+  absent: [token in the harness log, retained artifacts or browser storage]
+runs:
+  web:
+    check: web/e2e/auth/shell.e2e.ts, mise run browser-auth
+    browsers: [chrome, edge, firefox, firefox-esr]
+    covers: the web client

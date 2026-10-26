@@ -1,0 +1,17 @@
+id: COMP-02
+setup: as AUTH-02, with the injector adding a Deprecation header to every answer of GET /identity; signed in as h-viewer
+action: load the web client, sign in, open two more pages, each reading GET /identity again
+exchange:
+  - request: GET /api/v1/identity
+    headers: ["Authorization: Bearer <token>", "Accept: application/json"]
+fault: none; the header marks the route as due for removal
+expect:
+  server: three answers, each with the Deprecation header
+  client: told once for the page load, not once per answer
+  shown: 'the status message "The server marks /api/v1/identity as deprecated: it will be removed in a later release.", once'
+  absent: [token in the harness log, retained artifacts or browser storage]
+runs:
+  web:
+    check: web/e2e/auth/shell.e2e.ts, mise run browser-auth; once per route in web/src/request.test.ts, mise run web
+    browsers: [chrome, edge, firefox, firefox-esr]
+    covers: the web client
