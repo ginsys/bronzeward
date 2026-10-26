@@ -204,6 +204,9 @@ func TestReads(t *testing.T) {
 		f.want(f.ctl(nil, "", "context", "add", "queryidp", "--server", in.URL, "--issuer", issuer, "--client-id", "BWSYNTH-cli"), 2, "oidc.issuer", "no query")
 	}
 	f.want(f.ctl(nil, "", "context", "add", "queryserver", "--server", in.URL+"?x=1", "--automation-token-file", f.tokenFile), 2, "server", "no query")
+	// Nor a fragment, an empty one included, which url.Parse drops.
+	f.want(f.ctl(nil, "", "context", "add", "hashidp", "--server", in.URL, "--issuer", "https://idp.example.invalid/#", "--client-id", "BWSYNTH-cli"), 2, "oidc.issuer", "fragment")
+	f.want(f.ctl(nil, "", "context", "add", "hashserver", "--server", in.URL+"/#", "--automation-token-file", f.tokenFile), 2, "server", "fragment")
 	f.want(f.ctl(nil, "", "context", "add", "byhand", "--server", in.URL, "--certificate-authority", in.ca,
 		"--issuer", "https://idp.example.invalid", "--client-id", "BWSYNTH-cli", "--scopes", "openid,groups"), 0, "credential oidc")
 	in.set(nil, nil)

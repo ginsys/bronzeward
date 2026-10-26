@@ -331,9 +331,24 @@ func discover(x *Context) (context.Context, context.CancelFunc, *http.Client, *o
 	p, err := oidc.NewProvider(ctx, x.OIDC.Issuer)
 	if err != nil {
 		cancel()
-		return nil, nil, nil, nil, fmt.Errorf("cannot reach the identity provider %s: %w", x.OIDC.Issuer, err)
+		return nil, nil, nil, nil, fmt.Errorf("cannot reach the identity provider %s: %w", x.OIDC.Issuer, discoveryError(err))
 	}
 	return ctx, cancel, hc, p, nil
+}
+
+// discoveryError is a failed discovery as shown. A transport error is the client's own; go-oidc's
+// other errors quote what the provider sent (its reason phrase, its response body, the issuer it
+// names), which is not shown.
+func discoveryError(err error) error {
+	var ue *url.Error
+	var me *oidc.IssuerMismatchError
+	switch {
+	case errors.As(err, &ue):
+		return err
+	case errors.As(err, &me):
+		return errors.New("its discovery document names another issuer")
+	}
+	return errors.New("its discovery document could not be read")
 }
 
 // ErrNoRevocation: the provider's discovery names no revocation_endpoint.
