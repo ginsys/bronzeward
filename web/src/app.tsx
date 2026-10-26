@@ -97,8 +97,9 @@ export function App() {
     const signedIn = async (config: ClientConfig, provider: Provider, tokens: Tokens) => {
       page.to("signed-in");
       // §9.5 item 2: a renewal for another account is a new sign-in, and is shown, not adopted.
+      // A renewal that answers after the page was refused or ended changes nothing on it.
       changed = () => {
-        page.to("changed");
+        if (!page.to("changed")) return;
         forget();
         offer(PRINCIPAL_CHANGED, config, provider);
       };
