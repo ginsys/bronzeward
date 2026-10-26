@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"syscall"
@@ -55,12 +56,11 @@ func ReadTokens(p string) (*Tokens, error) {
 	if automation(b) {
 		return nil, automationFile(p)
 	}
-	if !own(b) {
+	var t Tokens
+	if !own(b) || json.Unmarshal(b, &t) != nil {
 		return nil, fmt.Errorf("token file %s holds neither bronzewardctl's tokens nor an automation token; bronzewardctl leaves it as it is. "+
 			"Point oidc.tokenFile, or BRONZEWARD_TOKEN_FILE, at bronzewardctl's own token file, or move this file away", p)
 	}
-	var t Tokens
-	json.Unmarshal(b, &t)
 	if t.AccessToken == "" {
 		return &t, fmt.Errorf("token file %s: %w", p, ErrNotTokenFile)
 	}
@@ -68,21 +68,28 @@ func ReadTokens(p string) (*Tokens, error) {
 }
 
 // own: b is the client's own document, one JSON object with no key but the ones it writes, spelled
-// as it writes them, and nothing after it. Any other file at the path is someone else's, and is
-// never used or removed.
+// as it writes them, each once and a string; ReadTokens' json.Unmarshal refuses anything after it
+// but JSON whitespace. Any other file at the path is someone else's, and is never used or removed.
 func own(b []byte) bool {
-	var keys map[string]json.RawMessage
 	d := json.NewDecoder(bytes.NewReader(b))
-	if !bytes.HasPrefix(bytes.TrimSpace(b), []byte("{")) || d.Decode(&keys) != nil || len(bytes.TrimSpace(b[d.InputOffset():])) > 0 {
+	if t, err := d.Token(); err != nil || t != json.Delim('{') {
 		return false
 	}
-	for k, v := range keys {
-		var s string
-		if k != "accessToken" && k != "refreshToken" || json.Unmarshal(v, &s) != nil {
+	seen := map[string]bool{}
+	for d.More() {
+		k, err := d.Token()
+		key, _ := k.(string)
+		if err != nil || key != "accessToken" && key != "refreshToken" || seen[key] {
+			return false
+		}
+		seen[key] = true
+		v, err := d.Token()
+		if _, ok := v.(string); err != nil || !ok {
 			return false
 		}
 	}
-	return true
+	t, err := d.Token()
+	return err == nil && t == json.Delim('}')
 }
 
 // ErrNotTokenFile is the client's own token document without an access token; ReadTokens returns
@@ -313,29 +320,31 @@ func renewalLock(p string) (func(), error) {
 	return func() { f.Close() }, nil
 }
 
-// discover reads the provider's discovery document through issuerClient, within a minute.
-func discover(x *Context) (context.Context, context.CancelFunc, *oidc.Provider, error) {
+// discover reads the provider's discovery document through issuerClient, within a minute; it
+// returns that client and a context that carries it.
+func discover(x *Context) (context.Context, context.CancelFunc, *http.Client, *oidc.Provider, error) {
 	hc, err := issuerClient(x)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	ctx, cancel := context.WithTimeout(oidc.ClientContext(context.Background(), hc), time.Minute)
 	p, err := oidc.NewProvider(ctx, x.OIDC.Issuer)
 	if err != nil {
 		cancel()
-		return nil, nil, nil, fmt.Errorf("cannot reach the identity provider %s: %w", x.OIDC.Issuer, err)
+		return nil, nil, nil, nil, fmt.Errorf("cannot reach the identity provider %s: %w", x.OIDC.Issuer, err)
 	}
-	return ctx, cancel, p, nil
+	return ctx, cancel, hc, p, nil
 }
 
 // ErrNoRevocation: the provider's discovery names no revocation_endpoint.
 var ErrNoRevocation = errors.New("the identity provider offers no revocation endpoint")
 
 // Revoke revokes a refresh token at the provider's revocation endpoint (RFC 7009, §9.7 item 1), as
-// a public client: its ID in the form, no secret. Only the status and the provider's error code are
-// shown, never its response body.
+// a public client: its ID in the form, no secret. A redirect is not followed: it would resend the
+// token elsewhere, or turn the POST into a GET whose 200 revokes nothing. Only the status and the
+// provider's error code are shown, never its response body.
 func Revoke(x *Context, rt string) error {
-	ctx, cancel, p, err := discover(x)
+	ctx, cancel, hc, p, err := discover(x)
 	if err != nil {
 		return err
 	}
@@ -343,7 +352,10 @@ func Revoke(x *Context, rt string) error {
 	var d struct {
 		URL string `json:"revocation_endpoint"`
 	}
-	if err := p.Claims(&d); err != nil || d.URL == "" {
+	if err := p.Claims(&d); err != nil {
+		return fmt.Errorf("the identity provider's revocation_endpoint: %w", err)
+	}
+	if d.URL == "" {
 		return ErrNoRevocation
 	}
 	if err := providerEndpoint(d.URL, "the identity provider's revocation_endpoint"); err != nil {
@@ -355,7 +367,9 @@ func Revoke(x *Context, rt string) error {
 		return err
 	}
 	q.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	r, err := oauth2.NewClient(ctx, nil).Do(q) // discover's issuerClient, which ctx carries
+	once := *hc
+	once.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	r, err := once.Do(q)
 	if err != nil {
 		return fmt.Errorf("revoking at the identity provider %s: %w", x.OIDC.Issuer, err)
 	}
@@ -367,12 +381,25 @@ func Revoke(x *Context, rt string) error {
 		Code string `json:"error"`
 	}
 	_ = json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&e) // a body that is no error document names no code
-	return fmt.Errorf("the identity provider %s refused the revocation: %s %s", x.OIDC.Issuer, r.Status, e.Code)
+	return fmt.Errorf("the identity provider %s refused the revocation: %s", x.OIDC.Issuer, refusal(r.StatusCode, e.Code))
+}
+
+// errorCode is an error code as RFC 6749 §5.2 allows one; anything else a provider sends is not shown.
+var errorCode = regexp.MustCompile(`^[\x20\x21\x23-\x5B\x5D-\x7E]{1,64}$`)
+
+// refusal is a provider's refusal as shown: the status code and its standard text, and the error
+// code when it is one. The provider's own reason phrase is not shown.
+func refusal(status int, code string) string {
+	s := fmt.Sprintf("%d %s", status, http.StatusText(status))
+	if errorCode.MatchString(code) {
+		s += " " + code
+	}
+	return s
 }
 
 // refresh redeems the refresh token at the provider's token endpoint, found by its discovery.
 func refresh(x *Context, rt string) (*Tokens, error) {
-	ctx, cancel, p, err := discover(x)
+	ctx, cancel, _, p, err := discover(x)
 	if err != nil {
 		return nil, err
 	}
@@ -388,7 +415,7 @@ func refresh(x *Context, rt string) (*Tokens, error) {
 	var re *oauth2.RetrieveError
 	if errors.As(err, &re) {
 		// The provider's own error code only: its response body is not shown.
-		return nil, fmt.Errorf("the identity provider %s refused the renewal: %s %s", x.OIDC.Issuer, re.Response.Status, re.ErrorCode)
+		return nil, fmt.Errorf("the identity provider %s refused the renewal: %s", x.OIDC.Issuer, refusal(re.Response.StatusCode, re.ErrorCode))
 	} else if err != nil {
 		return nil, fmt.Errorf("renewing at the identity provider %s: %w", x.OIDC.Issuer, err)
 	}
@@ -463,8 +490,8 @@ func (c *Client) signedIn(p *Problem) {
 	}
 }
 
-// sameIdentity: both tokens are read and carry the same subject at the same issuer. A token that
-// cannot be read is no other identity, so a document without an access token matches.
+// sameIdentity: the tokens carry the same subject at the same issuer, or either cannot be read: an
+// unreadable token is no other identity, so a document without an access token matches.
 func sameIdentity(a, b *Claims) bool {
 	return a == nil || b == nil || a.Subject == b.Subject && a.Issuer == b.Issuer
 }

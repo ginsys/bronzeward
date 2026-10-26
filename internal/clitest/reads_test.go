@@ -198,6 +198,12 @@ func TestReads(t *testing.T) {
 	f.want(f.ctl(nil, "", "context", "add", "mixed", "--from", in.URL, "--credential", "automation"), 2, `need --credential oidc, not "automation"`)
 	f.want(f.ctl(nil, "", "context", "add", "mixed", "--server", in.URL, "--credential", "automation", "--issuer", "https://idp.example.invalid"), 2, "need --credential oidc")
 	f.want(f.ctl(nil, "", "context", "add", "plainidp", "--server", in.URL, "--issuer", "http://idp.example.invalid", "--client-id", "BWSYNTH-cli"), 2, "oidc.issuer", "must be https")
+	// The configured server and issuer take no query, an empty one included; the provider's own
+	// endpoints may (TestSignIn).
+	for _, issuer := range []string{"https://idp.example.invalid/?x=1", "https://idp.example.invalid/?"} {
+		f.want(f.ctl(nil, "", "context", "add", "queryidp", "--server", in.URL, "--issuer", issuer, "--client-id", "BWSYNTH-cli"), 2, "oidc.issuer", "no query")
+	}
+	f.want(f.ctl(nil, "", "context", "add", "queryserver", "--server", in.URL+"?x=1", "--automation-token-file", f.tokenFile), 2, "server", "no query")
 	f.want(f.ctl(nil, "", "context", "add", "byhand", "--server", in.URL, "--certificate-authority", in.ca,
 		"--issuer", "https://idp.example.invalid", "--client-id", "BWSYNTH-cli", "--scopes", "openid,groups"), 0, "credential oidc")
 	in.set(nil, nil)
