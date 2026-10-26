@@ -11,10 +11,11 @@ import (
 )
 
 // TestRecordReads runs the record reads: the machine timeline and observations, source heads and
-// revisions, drafts, releases, plans, operations and acts. Drafts, the machine
-// timeline and observations, acts, the empty lists and every not-found come from the server. What
-// only a publication creates (source heads and revisions, releases, plans, operations) is answered
-// by the injector with bodies of the API's shapes: the test server has no provider to publish with.
+// revisions, drafts, releases, plans, operations and acts. A draft, the machine timeline, acts,
+// the empty lists and every not-found come from the server. What the test server cannot create
+// (source heads and revisions, releases, plans, operations, a recorded observation, a draft with
+// published entries) is answered by the injector with bodies of the API's shapes: it has no
+// provider to publish with or machine to observe.
 func TestRecordReads(t *testing.T) {
 	f := start(t, "viewer")
 	s := f.seed()
@@ -131,6 +132,15 @@ func TestRecordReads(t *testing.T) {
 	other := strings.ReplaceAll(strings.ReplaceAll(canned["/releases/rel_test"], `"rel_test"`, `"rel_other"`), `"drf_x"`, `"drf_y"`)
 	canned["/releases"] = `{"items":[` + canned["/releases/rel_test"] + `,` + other + `]}`
 	canned["/releases?limit=1"] = `{"items":[` + canned["/releases/rel_test"] + `],"next":"c2"}`
+	canned["/releases?cursor=c2"] = `{"items":[` + other + `]}`
+	canned["/plans"] = `{"items":[` + canned["/plans/pln_test"] + `]}`
+	canned["/operations"] = `{"items":[` + canned["/operations/op_test"] + `]}`
+	canned["/machines/"+m+"/timeline"] = `{"items":[{"revision":1,"at":"2026-10-22T10:00:00Z","epoch":"` + id.Epoch + `","kind":"adopted","entry":{"by":"ops-ben"}}]}`
+	canned["/drafts/drf_test"] = `{"id":"drf_test","cluster":"` + c + `","state":"open","revision":5,"title":"labels","entries":[` +
+		`{"kind":"import-base","machine":"` + m + `","revision":"asr_base"},` +
+		`{"kind":"fragment","name":"labels","head":null,"base":null,"revision":"frv_new"},` +
+		`{"kind":"profile","name":"workers","head":"prf_w","base":2,"revision":null},` +
+		`{"kind":"assignment","machine":"` + m + `","head":"asg_a","base":3,"revision":"asr_new"}]}`
 	canned["/plans/pln_adopt"] = strings.NewReplacer(`"pln_test"`, `"pln_adopt"`, `"operation":"apply-config","mode":"no-reboot"`, `"operation":"adopt","mode":null`,
 		`"transportDeadlineSeconds":60`, `"transportDeadlineSeconds":null`, `"verificationDeadlineSeconds":600`, `"verificationDeadlineSeconds":null`,
 		`"maxAttempts":3`, `"maxAttempts":null`).Replace(canned["/plans/pln_test"])
@@ -172,6 +182,7 @@ func TestRecordReads(t *testing.T) {
 			"Dry run     not available: the PoC has none", "rel_old -> rel_test", "\n    +  team: storage\n"}},
 		{[]string{"plan", "show", "pln_adopt"}, []string{"adopt, mode none", "transport -, verification -, observation age 300s, attempts -"}},
 		{[]string{"release", "list", "--draft", "drf_y", "--limit", "1"}, []string{"None on this page.", "Next page: --cursor c2"}},
+		{[]string{"release", "list", "--draft", "drf_x", "--cursor", "c2"}, []string{"None on this page."}},
 		{[]string{"operation", "show", "op_test"}, []string{"Operation op_test  apply-config  unresolved", "plan pln_test, machine " + m, "by the controller",
 			"Attempt 1", "controller ctl-b, generation 3", "Unresolved: completion and retry safety are unknown"}},
 		{[]string{"machine", "observations", m}, []string{"obs_b", "monitor", "configuration: the read timed out", "Health is not checked"}},
@@ -188,6 +199,27 @@ func TestRecordReads(t *testing.T) {
 	}
 	same(f.ctl(nil, "", "release", "list", "--draft", "drf_y", "-o", "json"), []byte(`{"items":[`+other+`]}`))
 	same(f.ctl(nil, "", "release", "list", "--draft", "drf_y", "--limit", "1", "-o", "json"), []byte(`{"items":[],"next":"c2"}`))
+
+	// Each row prints its fields, in order.
+	for _, c := range []struct {
+		args []string
+		key  string
+		want string
+	}{
+		{[]string{"draft", "show", "drf_test"}, "import-base", "import-base " + m + " asr_base import base"},
+		{[]string{"draft", "show", "drf_test"}, "frv_new", "fragment labels frv_new new"},
+		{[]string{"draft", "show", "drf_test"}, "workers", "profile workers - removed"},
+		{[]string{"draft", "show", "drf_test"}, "asr_new", "assignment " + m + " asr_new changed (based on head revision 3)"},
+		{[]string{"machine", "timeline", m}, "adopted", `1 2026-10-22 10:00:00 UTC adopted {"by":"ops-ben"}`},
+		{[]string{"plan", "list"}, "pln_test", "pln_test proposed " + m + " apply-config rel_test 2026-10-23 10:04:00 UTC"},
+		{[]string{"operation", "list"}, "op_test", "op_test apply-config unresolved plan pln_test, machine " + m + " 2026-10-22 10:06:00 UTC"},
+	} {
+		r := f.ctl(nil, "", c.args...)
+		i := slices.IndexFunc(strings.Split(r.out, "\n"), func(l string) bool { return strings.Contains(l, c.key) })
+		if r.code != 0 || i < 0 || strings.Join(strings.Fields(strings.Split(r.out, "\n")[i]), " ") != c.want {
+			t.Errorf("%v: exit %d, want a row %q:\n%s%s", c.args, r.code, c.want, r.out, r.err)
+		}
+	}
 
 	// History is one table: each revision's columns line up under the header.
 	r = f.ctl(nil, "", "fragment", "history", "frg_test")

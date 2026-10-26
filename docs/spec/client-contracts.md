@@ -1378,7 +1378,8 @@ Limits:
   status, clusters, machines with their timeline and observations, fragment, profile and assignment
   heads, revisions and history, drafts, releases, plans, operations and acts. Its tests run the
   [§12](#12-shared-conformance-cases) cases TLS-01, TLS-02, COMP-01, COMP-02, PAGE-01, PAGE-02 and
-  REC-01. Its other reads of [§3.1](#31-reads), its sign-in and the web client are not. No synthetic contract probe was run against the
+  REC-01. bronzewardctl's other reads of [§3.1](#31-reads), its sign-in and the web client are
+  not implemented yet. No synthetic contract probe was run against the
   server for this document: every server behaviour
   above is read from source and contract text, and G17 is inferred, not observed.
 - Line references were read at `3cbe953`, except those to the identity read and the

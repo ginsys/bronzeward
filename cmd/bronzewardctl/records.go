@@ -34,7 +34,8 @@ func show[T any](e *env, path string, table func(*tabwriter.Writer, *T)) error {
 }
 
 // list prints the items at path with q, read as l asks, that keep accepts (nil keeps all): under
-// header one row each, the next page's cursor, then foot. A filter the API does not serve (G9)
+// header one row each, the next page's cursor, then foot. An empty page that is not the whole list
+// (one with a next cursor, or one reached by a cursor) says so. A filter the API does not serve (G9)
 // applies to the items read; -o then prints the items kept, with the page's next cursor.
 func list[T any](e *env, l listing, path string, q url.Values, keep func(*T) bool, header, foot string, row func(*tabwriter.Writer, *T)) error {
 	return e.session(func(c *client.Client, _ *client.Response, _ *apitypes.ServerBody) error {
@@ -64,7 +65,7 @@ func list[T any](e *env, l listing, path string, q url.Values, keep func(*T) boo
 		}
 		return e.emit(raw, func(w *tabwriter.Writer) {
 			switch {
-			case len(vs) == 0 && next != "":
+			case len(vs) == 0 && (next != "" || l.cursor != ""):
 				fmt.Fprintln(w, "None on this page.")
 			case len(vs) == 0:
 				fmt.Fprintln(w, "None found.")
