@@ -35,7 +35,7 @@
   action: whoami
   exchange:
     - GET /api/v1/server
-  fault: the injector rewrites the GET /server answer's apiRevision from 2 to 1
+  fault: the injector rewrites the GET /server answer's apiRevision to 1
   expect:
     client: refuses after GET /server; sends no other request
     server: answers GET /server only

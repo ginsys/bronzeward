@@ -138,7 +138,7 @@ no role included (`internal/api/api.go:339`).
 | cluster list / show | `GET /clusters`, `/clusters/{id}` | list | no | |
 | machine list / show | `GET /machines`, `/machines/{id}` | list | no | filter `cluster`; `pendingConvergence` (G24) (`internal/api/reads.go:199-218`) |
 | machine observations | `GET /machines/{id}/observations` | yes | no | |
-| machine timeline | `GET /machines/{id}/timeline` | yes, by revision | no | JSON only, no stream (G9) |
+| machine timeline | `GET /machines/{id}/timeline` | yes, by revision, oldest or newest first | no | JSON only, no stream (G9); `order`, and `tail`, the forward cursor from the newest entry, API revision 3 ([persistence and API §9.2](persistence-api.md#92-resources-and-routes)) |
 | fragment, profile, assignment list / show / history / revision | `GET /{kind}s`, `/{kind}s/{id}`, `/{kind}s/{id}/revisions`, `/{kind}-revisions/{id}` | lists | head item only | `internal/api/routes.go:83-87` |
 | draft list / show | `GET /drafts`, `/drafts/{id}` | list | item | the item's ETag is the one draft writes need |
 | import list / status | `GET /ingestions`, `/ingestions/{id}` | list | no | filters `state`, `machine` (`internal/api/ingestions.go:280-299`) |
@@ -701,8 +701,13 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
 5. The keep-alive comment keeps an intermediary with an idle timeout above 15 s from cutting a
    quiet stream; a client ignores comment lines and keeps its last event ID. A connection still
    cut without the operation having ended is covered by item 2.
-6. The machine timeline has no stream; a client polls it with its cursor no more often than every
-   5 s while it is on screen (G9).
+6. The machine timeline has no stream (G9). A client reads its newest page with `order=newest`
+   and keeps that answer's `tail`; "Load older" follows `next` with `order=newest`. While the
+   timeline is on screen the client polls forward from `tail` (from the start while there is
+   none), in `oldest` order, no more often than every 5 s, follows `next` while it is present,
+   and keeps the `tail` of the last page, the one without `next`. A server below API revision 3
+   refuses `order` as `400 invalid-request` and serves no `tail`, so a client that reads the timeline this way declares
+   revision 3 as its minimum.
 
 ## 9. Authentication
 

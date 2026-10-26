@@ -584,6 +584,24 @@ func (e GetIngestionsParamsState) Valid() bool {
 	}
 }
 
+// Defines values for GetMachinesIdTimelineParamsOrder.
+const (
+	GetMachinesIdTimelineParamsOrderNewest GetMachinesIdTimelineParamsOrder = "newest"
+	GetMachinesIdTimelineParamsOrderOldest GetMachinesIdTimelineParamsOrder = "oldest"
+)
+
+// Valid indicates whether the value is a known member of the GetMachinesIdTimelineParamsOrder enum.
+func (e GetMachinesIdTimelineParamsOrder) Valid() bool {
+	switch e {
+	case GetMachinesIdTimelineParamsOrderNewest:
+		return true
+	case GetMachinesIdTimelineParamsOrderOldest:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetOperationsParamsState.
 const (
 	GetOperationsParamsStateCancelled  GetOperationsParamsState = "cancelled"
@@ -2282,7 +2300,13 @@ type GetMachinesIdTimelineParams struct {
 
 	// Cursor The next member of the previous page, opaque, valid in the epoch that issued it.
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Order oldest (the default) or newest: entries in ascending or descending revision (API revision 3). A cursor keeps the order that issued it; one used with the other order is 400 cursor-invalid.
+	Order *GetMachinesIdTimelineParamsOrder `form:"order,omitempty" json:"order,omitempty"`
 }
+
+// GetMachinesIdTimelineParamsOrder defines parameters for GetMachinesIdTimeline.
+type GetMachinesIdTimelineParamsOrder string
 
 // PostMachinesIdUnfreezesParams defines parameters for PostMachinesIdUnfreezes.
 type PostMachinesIdUnfreezesParams struct {

@@ -1370,6 +1370,11 @@ paths:
         schema: {type: string}
       - {$ref: '#/components/parameters/Limit'}
       - {$ref: '#/components/parameters/Cursor'}
+      - name: order
+        in: query
+        description: 'oldest (the default) or newest: entries in ascending or descending revision (API revision 3). A
+          cursor keeps the order that issued it; one used with the other order is 400 cursor-invalid.'
+        schema: {type: string, enum: [oldest, newest]}
       responses:
         '200':
           description: OK.
@@ -1387,7 +1392,10 @@ paths:
                   items:
                     type: array
                     items: {$ref: '#/components/schemas/TimelineEntry'}
-                  next: {type: string, description: The cursor of the next page; absent on the last.}
+                  next: {type: string, description: 'The cursor of the next page, older entries with order=newest; absent on
+                      the last.'}
+                  tail: {type: string, description: 'A cursor, in oldest order, naming the newest entry this read saw; absent
+                      while the machine has none. A read from it answers only later entries (API revision 3).'}
                 additionalProperties: false
         default: {$ref: '#/components/responses/Problem'}
   /machines/{id}/unfreezes:
