@@ -75,7 +75,11 @@ export function App() {
       const client = new Client({
         token: () => session?.token(),
         renew: async () => (await session?.renew()) === true && (schedule(), true),
-        onRevoked: forget,
+        // The tokens go, but the session stays this read's, so the refusal below is still shown.
+        onRevoked: () => {
+          clearTimeout(timer);
+          s.clear();
+        },
       });
       client.setView({ principal: `${s.principal?.iss} ${s.principal?.sub}`, route: location.pathname, query: location.search });
       const signOut = () => {
