@@ -822,13 +822,19 @@ current token expires
      token is used until refused, then the page offers sign-in again.
    - A new tab, a reload, or a page restored from the back-forward cache posts a request. If
      `navigator.locks.query()` shows no holder it is a first tab and redirects at once; otherwise
-     it requests the lock and waits 5 s for the pair, then redirects. Granted the lock before a
+     it requests the lock and waits 5 s for the pair, then redirects. A holder whose renewal is in
+     flight answers with the pair that renewal brings, never the one it is renewing, which has no
+     refresh token until then. Granted the lock before a
      pair arrives, no tab that asked before it is left, so it redirects at once. The redirect is
      top-level; the provider answers at once from its own session, without a prompt while that
      session lasts.
    - A pair obtained by a redirect is posted to every tab by the tab that obtained it. A tab takes
      a received pair when it is newer than its own; a pair with another `sub` or `iss` is a new
      sign-in (§9.5 item 2).
+   - Pairs are ordered by access-token expiry. If the provider shortens the token lifetime between
+     two pairs, a tab can keep the older pair, or, granted the lock, treat a fresh pair as spent.
+     Its renewal then fails as §9.5 item 3 and the page offers sign-in again; no refresh token is
+     sent twice.
 
    Rejected: a lock taken per renewal, because a waiting tab can be granted it before the previous
    holder's pair reaches it and then spend the used token; a counter in `localStorage`, which
@@ -851,7 +857,10 @@ current token expires
    A renewal, a rescheduled renewal or a redirect still pending when the page is refused
    ([§9.6](#96-failure-cases)), sees another account (§9.5 item 2) or ends
    ([§9.7](#97-sign-out-and-cache-clearing), [§10.3](#103-caches-and-back-navigation) item 3) does
-   not go on; only the operator's sign-in button leaves a refused or changed page.
+   not go on; only the operator's sign-in button leaves a refused or changed page. A refresh-token
+   request already sent still gets its answer. After an end or another account, the pair it brings
+   is revoked (§9.7 item 2). After a refusal, that pair still goes to the other tabs, whose refresh token the request
+   spent, and the refused page sends nothing with it.
 4. Silent renewal through a hidden frame is not used: browsers that block third-party cookies make
    it fail unpredictably (assumption S2), and a failure would surface as an unexplained sign-out.
 5. Every API call goes to the page's own origin ([§10.1](#101-hosting-and-origin)); only the
