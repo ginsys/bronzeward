@@ -3,7 +3,7 @@
 
 import { type ReactNode, useEffect, useState } from "react";
 import { flushSync } from "react-dom";
-import { beginSignIn, CALLBACK_PATH, completeSignIn, discover, type Failure, type Provider, RENEW_BEFORE_MS, Session, SIGNED_OUT_PATH } from "./auth.ts";
+import { beginSignIn, CALLBACK_PATH, completeSignIn, discover, type Failure, localReading, type Provider, RENEW_BEFORE_MS, Session, SIGNED_OUT_PATH } from "./auth.ts";
 import { type ClientConfig, loadClientConfig } from "./config.ts";
 import { Client, type ReadResult, TRANSPORT_FAILURE } from "./request.ts";
 import type { components } from "./api/v1";
@@ -22,7 +22,7 @@ type View =
   // Nothing at all: after pagehide, so a restored page shows no data (§10.3 items 3-4).
   | { kind: "blank" }
   | { kind: "signed-out" }
-  | { kind: "sign-in"; message: string; config: ClientConfig; provider: Provider }
+  | { kind: "sign-in"; message: string; reading?: string | undefined; config: ClientConfig; provider: Provider }
   | { kind: "failed"; message: string }
   | { kind: "signed-in"; sub: string; status: string; signOut: () => void };
 
@@ -86,9 +86,13 @@ export function App() {
       };
       const res = await client.read<Server>("/server");
       if (session !== s) return;
-      if (res.kind === "unauthenticated") return setView({ kind: "sign-in", message: NOT_ACCEPTED, config, provider });
+      if (res.kind === "unauthenticated") {
+        const reading = localReading(s.token() ?? "", config, Date.now());
+        return setView({ kind: "sign-in", message: NOT_ACCEPTED, reading, config, provider });
+      }
       if (res.kind === "revoked") return setView({ kind: "failed", message: REVOKED });
-      setView({ kind: "signed-in", sub: s.principal?.sub ?? "", status: describe(res), signOut });
+      const sub = s.principal?.sub ?? "";
+      setView({ kind: "signed-in", sub, status: describe(res, sub), signOut });
     };
 
     void (async () => {
@@ -136,6 +140,7 @@ export function App() {
       return (
         <Page>
           <p role="alert" data-testid="status">{view.message}</p>
+          {view.reading !== undefined && <p data-testid="reading">This browser's own reading: {view.reading}.</p>}
           <button type="button" onClick={() => void beginSignIn(view.config, view.provider, location.pathname + location.search, sessionStorage, location.origin).then((u) => location.assign(u))}>
             Sign in with the identity provider
           </button>
@@ -161,8 +166,14 @@ function Page({ children }: { children: ReactNode }) {
   );
 }
 
-function describe(res: ReadResult<Server>): string {
+function describe(res: ReadResult<Server>, sub: string): string {
   if (res.kind === "ok") return `Server ${res.data.version}, API revision ${res.data.apiRevision}`;
   if (res.kind === "transport") return TRANSPORT_FAILURE;
+  // §9.6 403 rows, from the server's own answer.
+  const p = res.kind === "refused" && res.status === 403 ? res.problem : null;
+  if (p?.["humanOnly"] === true) return "This needs a person signed in, not an automation token";
+  if (p?.["plan"] !== undefined && typeof p.detail === "string") return `${p.detail}; you are signed in as ${sub}`;
+  const roles = p?.["roles"];
+  if (Array.isArray(roles) && roles.every((r) => typeof r === "string")) return `Needs ${roles.join(" or ")}; you are signed in as ${sub}`;
   return `The server read failed (${res.kind})`;
 }
