@@ -174,6 +174,10 @@ func (v *Verifier) human(ctx context.Context, raw string) (Principal, error) {
 		return Principal{}, fmt.Errorf("%w: no sub", ErrUnauthenticated)
 	case c.Expiry.Time().Sub(c.IssuedAt.Time()) > v.oidc.MaxTokenLifetime:
 		return Principal{}, fmt.Errorf("%w: lifetime over %s", ErrUnauthenticated, v.oidc.MaxTokenLifetime)
+	case idToken(payload):
+		return Principal{}, fmt.Errorf("%w: an ID token: it carries nonce or at_hash", ErrUnauthenticated)
+	case c.ID == "":
+		return Principal{}, fmt.Errorf("%w: no jti", ErrUnauthenticated)
 	}
 	roles, err := v.roles(payload)
 	if err != nil {
@@ -225,6 +229,22 @@ func (v *Verifier) roles(payload []byte) ([]Role, error) {
 		}
 	}
 	return ordered(has), nil
+}
+
+// idToken reports whether a token carries nonce or at_hash, present even as null: claims only an
+// ID token carries (OIDC Core §2, §3.1.3.6). An ID token is never an access token (§10.1); where
+// neither the token type nor the audience tells them apart, these claims and jti do (RFC 9068
+// §2.2, docs/design/research/20261026-id-token-as-access-token.md). A payload it cannot decode
+// counts as one.
+func idToken(payload []byte) bool {
+	var c struct {
+		Nonce  json.RawMessage `json:"nonce"`
+		AtHash json.RawMessage `json:"at_hash"`
+	}
+	if err := json.Unmarshal(payload, &c); err != nil {
+		return true
+	}
+	return c.Nonce != nil || c.AtHash != nil
 }
 
 // Discover returns the issuer's key set, found through its discovery document on first use and

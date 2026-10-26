@@ -123,7 +123,7 @@ func TestDefects(t *testing.T) {
 	// persistence-api.md §10.1 and §16 name these; the list may grow, never lose one.
 	for _, d := range []string{"malformed", "alg-none", "alg-hs256", "unknown-kid", "wrong-key", "bad-signature",
 		"wrong-issuer", "wrong-audience", "expired", "not-yet-valid", "no-exp", "no-iat", "future-iat",
-		"over-lifetime", "no-sub", "empty-sub", "numeric-sub"} {
+		"over-lifetime", "no-sub", "empty-sub", "numeric-sub", "id-token-nonce", "id-token-at-hash", "no-jti"} {
 		if !slices.Contains(Defects, d) {
 			t.Errorf("Defects lacks %s", d)
 		}

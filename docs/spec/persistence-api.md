@@ -2587,6 +2587,13 @@ session **(choice §17.16)**:
   without it, or issued in the future, is refused;
 - `exp - iat` at most the configured maximum lifetime, default 15 minutes; a
   longer-lived token is refused;
+- an access token, never an ID token: a token carrying `nonce` or `at_hash`,
+  even as `null`, is refused `401`, and so is one without a non-empty `jti`
+  (RFC 9068 §2.2). The test identity provider marks both tokens `typ` `JWT`
+  and gives them the same audience, so neither the header type nor `aud`
+  tells them apart; there an ID token issued beside an access token always
+  carries `at_hash`, and an access token always carries `jti`
+  ([ID token record](../design/research/20261026-id-token-as-access-token.md));
 - the subject is not revoked or denied (§10.4). A token that passes the
   checks above but names a revoked or denied subject is answered
   `403 identity-revoked`, not `401`.

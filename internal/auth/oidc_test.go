@@ -231,9 +231,14 @@ func TestClockSkewAndLifetime(t *testing.T) {
 		{"lifetime 15m1s", func(m map[string]any) { m["exp"] = at(15*time.Minute + time.Second) }, false},
 		{"aud array holding ours", func(m map[string]any) { m["aud"] = []string{"other", "bronzeward"} }, true},
 		{"no groups claim", func(m map[string]any) { delete(m, "groups") }, true},
+		// An ID token (§10.1): nonce or at_hash marks one even when null; an access token carries jti.
+		{"nonce null", func(m map[string]any) { m["nonce"] = nil }, false},
+		{"at_hash null", func(m map[string]any) { m["at_hash"] = nil }, false},
+		{"jti empty", func(m map[string]any) { m["jti"] = "" }, false},
+		{"jti numeric", func(m map[string]any) { m["jti"] = 7 }, false},
 	} {
 		m := map[string]any{"iss": f.iss.URL, "aud": "bronzeward", "sub": "h-viewer", "groups": []string{"bw-viewers"},
-			"iat": at(0), "nbf": at(0), "exp": at(5 * time.Minute)}
+			"iat": at(0), "nbf": at(0), "exp": at(5 * time.Minute), "jti": issuer.JTI()}
 		c.edit(m)
 		tok, err := f.iss.Sign(m)
 		if err != nil {

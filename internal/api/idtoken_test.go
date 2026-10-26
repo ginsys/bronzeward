@@ -5,12 +5,13 @@ package api
 // ID token and the access token are compared header by header and claim by claim, each candidate
 // check is applied to both, and the ID token is presented to the server's real verifier. The
 // record is docs/design/research/20261026-id-token-as-access-token.md. It asserts what the pinned
-// provider and the server do today, the finding included, so that a change shows.
+// provider issues and that the server refuses the ID token (#372), so that a change shows.
 
 import (
 	"encoding/base64"
 	"encoding/json"
 	"maps"
+	"net/http"
 	"slices"
 	"strings"
 	"testing"
@@ -90,8 +91,8 @@ var candidates = []struct {
 // name the same audience, so neither alternative 1 nor 3 can tell them apart; the ID token alone
 // carries at_hash (and nonce, from an authorization request that sent one), the access token
 // alone jti, so alternatives 2 and 2b each refuse every ID token and accept every access token.
-// Both carry client_id. The server today accepts the ID token as the human, with no role: it
-// carries no groups claim.
+// Both carry client_id. The server refuses the ID token (§10.1, #372); before that check it served
+// it as the human, with no role, since it carries no groups claim.
 func TestIdentityProviderIDToken(t *testing.T) {
 	p := newIDP(t)
 	e := idpEnv(t, p)
@@ -158,8 +159,10 @@ func TestIdentityProviderIDToken(t *testing.T) {
 				t.Logf("check %s: ID token passes %v, access token passes %v", c.name, c.pass(id), c.pass(at))
 			}
 			e.accepted(p, g.tk.Access, "h-viewer", []auth.Role{auth.Viewer})
-			// The finding: the ID token is served as the same human, with no role.
-			e.accepted(p, g.tk.ID, "h-viewer", []auth.Role{})
+			// The finding's fix (#372): the ID token is refused, as the token it is.
+			if rec := e.do(e.api, call{method: "GET", path: prefix + "/identity", token: g.tk.ID}); rec.Code != http.StatusUnauthorized {
+				t.Errorf("ID token: %d %s; want 401", rec.Code, rec.Body)
+			}
 		})
 	}
 }

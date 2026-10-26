@@ -113,7 +113,7 @@ func TestIdentityServesEachPrincipal(t *testing.T) {
 func TestIdentityRolesInDesignOrder(t *testing.T) {
 	e := newEnv(t, options{})
 	now := time.Now()
-	tok, err := e.iss.Sign(map[string]any{"iss": e.iss.URL, "aud": "bronzeward", "sub": "h-mixed",
+	tok, err := e.iss.Sign(map[string]any{"iss": e.iss.URL, "aud": "bronzeward", "sub": "h-mixed", "jti": issuer.JTI(),
 		"groups": []any{"bw-recovery", "bw-approvers", "bw-publishers", "bw-authors", "bw-viewers"},
 		"iat":    now.Unix(), "nbf": now.Unix(), "exp": now.Add(5 * time.Minute).Unix()})
 	if err != nil {

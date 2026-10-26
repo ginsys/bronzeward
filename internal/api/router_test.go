@@ -230,7 +230,7 @@ func TestForbidden(t *testing.T) {
 		t.Errorf("automation on a human-only route: %v", doc)
 	}
 	// A credential with no role at all has no read access either.
-	tok, err := e.iss.Sign(map[string]any{"iss": e.iss.URL, "aud": "bronzeward", "sub": "h-nobody",
+	tok, err := e.iss.Sign(map[string]any{"iss": e.iss.URL, "aud": "bronzeward", "sub": "h-nobody", "jti": issuer.JTI(),
 		"iat": time.Now().Unix(), "nbf": time.Now().Unix(), "exp": time.Now().Add(5 * time.Minute).Unix()})
 	if err != nil {
 		t.Fatal(err)
