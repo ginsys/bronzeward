@@ -5,7 +5,7 @@
 //   - B trusts the synthetic provider (provider.ts), which hands out tokens the fixture issuer mints
 //     on the spec's request, defects included (AUTH-02, AUTH-03, AUTH-05, AUTH-10).
 // It removes the databases with the processes, and fails the run when it cannot; then the state
-// directory, which names them, is kept.
+// directory, which names them, is kept, and the next run refuses to start until it is removed.
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -126,8 +126,15 @@ async function prepare() {
   for (const at of ["127.0.0.1:58443", "127.0.0.1:58448", FIXTURE_ISSUER.slice(7), CONTROL.slice(7), FIXTURE_API.slice(7), IDP_API.slice(7), KEYS]) {
     if (await fetch(`http://${at}/`).then(() => true, () => false)) throw new SevereServiceError(`something already answers on ${at}`);
   }
-  rmSync(state, { recursive: true, force: true });
-  mkdirSync(state, { recursive: true });
+  // Made, never reused: one left behind names databases an earlier cleanup could not drop, and the
+  // create fails rather than share it with a run started at the same time.
+  mkdirSync(`${root}.dev`, { recursive: true });
+  try {
+    mkdirSync(state);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+    throw new SevereServiceError(`${state} is left from another run: drop the databases its server-*.yaml files name, then remove it`);
+  }
   ownState = true;
   const idp = idpEnv();
   execFileSync(`${root}bin/oidc-fixture`, ["keygen", "-out", `${state}/fixture.key`]);
