@@ -192,6 +192,11 @@ func TestReads(t *testing.T) {
 	f.want(f.ctl(nil, "", "--context", "signin", "whoami"), 1, "cannot sign in yet")
 	f.want(f.ctl(nil, "", "context", "add", "both", "--from", in.URL, "--issuer", "https://idp.example.invalid"), 2, "not both")
 	f.want(f.ctl(nil, "", "context", "add", "noclient", "--server", in.URL, "--issuer", "https://idp.example.invalid"), 2, "issuer and client ID")
+	// An identity-provider flag is never dropped: alone it asks for the rest, and with another
+	// credential it is refused.
+	f.want(f.ctl(nil, "", "context", "add", "scopesonly", "--server", in.URL, "--scopes", "openid"), 2, "issuer and client ID")
+	f.want(f.ctl(nil, "", "context", "add", "mixed", "--from", in.URL, "--credential", "automation"), 2, `need --credential oidc, not "automation"`)
+	f.want(f.ctl(nil, "", "context", "add", "mixed", "--server", in.URL, "--credential", "automation", "--issuer", "https://idp.example.invalid"), 2, "need --credential oidc")
 	f.want(f.ctl(nil, "", "context", "add", "plainidp", "--server", in.URL, "--issuer", "http://idp.example.invalid", "--client-id", "BWSYNTH-cli"), 2, "oidc.issuer", "must be https")
 	f.want(f.ctl(nil, "", "context", "add", "byhand", "--server", in.URL, "--certificate-authority", in.ca,
 		"--issuer", "https://idp.example.invalid", "--client-id", "BWSYNTH-cli", "--scopes", "openid,groups"), 0, "credential oidc")

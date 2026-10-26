@@ -100,14 +100,17 @@ func (e *env) contextAdd(args []string) error {
 		o.Scopes = strings.Split(scopes, ",")
 	}
 	byHand := o.Issuer != "" || o.ClientID != "" || o.Audience != ""
+	oidc := from != "" || byHand || scopes != "" || o.CertificateAuthority != "" || o.TokenFile != ""
 	switch {
 	case from != "" && byHand:
 		return usageError{errors.New("give --from or the identity provider's values by hand, not both")}
+	case oidc && x.Credential != "" && x.Credential != "oidc":
+		return usageError{fmt.Errorf("--from and the identity provider's flags need --credential oidc, not %q", x.Credential)}
 	case from != "" && x.Server == "":
 		x.Server = from
 	}
 	if x.Credential == "" {
-		x.Credential = map[bool]string{true: "oidc", false: "automation"}[from != "" || byHand]
+		x.Credential = map[bool]string{true: "oidc", false: "automation"}[oidc]
 	}
 	// Every path is kept absolute, so the context works from any directory.
 	for _, p := range []*string{&x.CertificateAuthority, &automationFile, &o.CertificateAuthority, &o.TokenFile} {
