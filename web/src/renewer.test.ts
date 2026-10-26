@@ -41,6 +41,8 @@ class Browser {
   hang = false;
   // Answers wait for this, when set.
   delay: Promise<void> | undefined;
+  // The access-token lifetime of each answer, in seconds.
+  lifetime = 300;
   #n = 1;
   readonly fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
     const refresh = new URLSearchParams(init?.body as URLSearchParams).get("refresh_token") ?? "";
@@ -50,7 +52,7 @@ class Browser {
     if (refresh !== this.latest) return json({ error: "invalid_grant" }, 400);
     this.#n++;
     this.latest = `SYNTH-r${this.#n}`;
-    return json({ access_token: `SYNTH-a${this.#n}`, refresh_token: this.latest, expires_in: 300 });
+    return json({ access_token: `SYNTH-a${this.#n}`, refresh_token: this.latest, expires_in: this.lifetime });
   }) as typeof fetch;
 
   open(): Tab {
@@ -234,6 +236,31 @@ describe("B1 one renewing tab", () => {
     await settle();
     expect(y.session?.token()).toBe("SYNTH-a2");
     expect(await y.renewer.renew()).toBe(true);
+    expect(b.sent).toEqual(["SYNTH-r1", "SYNTH-r2"]);
+  });
+
+  test("a refresh token another tab sent is never sent or given again, though the provider shortened the lifetime of the pairs after it", async () => {
+    const b = new Browser();
+    const [x, y] = [b.open(), b.open()];
+    x.signIn(first());
+    await settle();
+    await y.join();
+    // Each pair x obtains expires before y's, so y keeps its pair and the spent SYNTH-r1.
+    b.lifetime = 100;
+    expect(await x.renewer.renew()).toBe(true);
+    await settle();
+    b.lifetime = 110;
+    expect(await x.renewer.renew()).toBe(true);
+    await settle();
+    expect(y.session?.token()).toBe("SYNTH-a1");
+    x.close();
+    await settle();
+    expect(y.renewer.holder).toBe(true);
+    const late = b.open();
+    const joined = late.renewer.join();
+    await vi.advanceTimersByTimeAsync(JOIN_WAIT_MS);
+    expect(await joined).toBeUndefined();
+    expect(await y.renewer.renew()).toBe(false);
     expect(b.sent).toEqual(["SYNTH-r1", "SYNTH-r2"]);
   });
 

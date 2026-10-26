@@ -812,14 +812,15 @@ current token expires
    (decision B1 of [#255](https://github.com/ginsys/bronzeward/issues/255)). Every signed-in tab
    requests the exclusive Web Lock `bronzeward-renewer` and holds it until `pagehide`, when
    [§10.3](#103-caches-and-back-navigation) item 3 clears its state (assumption S9). Only the
-   holder sends refresh-token requests; before each it posts `renewing` on the
-   `BroadcastChannel` (assumption S3), and after it the new pair.
+   holder sends refresh-token requests; before each it posts `renewing`, naming the refresh token
+   it sends, on the `BroadcastChannel` (assumption S3), and after it the new pair.
    - A tab without the lock never renews: under the 60 s threshold or after a `401` (§9.5 item 1)
      it posts a request and waits for the holder's pair, at most 10 s, then treats renewal as
      failed (§9.5 item 3). Granted the lock while it waits, it renews itself.
-   - A tab that becomes holder after a `renewing` with no newer pair treats the refresh token as
-     spent and never sends it, nor gives that pair to a new tab: renewal has failed, the current
-     token is used until refused, then the page offers sign-in again.
+   - A refresh token named in a `renewing` is spent in every other tab, whatever the answer: a tab
+     never sends it, nor gives its pair to a new tab. A tab that holds it and takes no newer pair,
+     or becomes holder before one comes, has failed to renew: the current token is used until
+     refused, then the page offers sign-in again.
    - A new tab, a reload, or a page restored from the back-forward cache posts a request. If
      `navigator.locks.query()` shows no holder it is a first tab and redirects at once; otherwise
      it requests the lock and waits 5 s for the pair, then redirects. A holder whose renewal is in
@@ -832,9 +833,9 @@ current token expires
      a received pair when it is newer than its own; a pair with another `sub` or `iss` is a new
      sign-in (§9.5 item 2).
    - Pairs are ordered by access-token expiry. If the provider shortens the token lifetime between
-     two pairs, a tab can keep the older pair, or, granted the lock, treat a fresh pair as spent.
-     Its renewal then fails as §9.5 item 3 and the page offers sign-in again; no refresh token is
-     sent twice.
+     two pairs, a tab can keep the older pair, whose refresh token another tab has sent. Its
+     renewal then fails as §9.5 item 3 and the page offers sign-in again. The spent token is told
+     by its value, not by expiry, so it is not sent twice.
 
    Rejected: a lock taken per renewal, because a waiting tab can be granted it before the previous
    holder's pair reaches it and then spend the used token; a counter in `localStorage`, which
