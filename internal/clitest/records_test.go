@@ -133,6 +133,11 @@ func TestRecordReads(t *testing.T) {
 	canned["/releases"] = `{"items":[` + canned["/releases/rel_test"] + `,` + other + `]}`
 	canned["/releases?limit=1"] = `{"items":[` + canned["/releases/rel_test"] + `],"next":"c2"}`
 	canned["/releases?cursor=c2"] = `{"items":[` + other + `]}`
+	op := canned["/operations/op_test"]
+	// The server omits attempts when there are none (omitempty).
+	canned["/operations/op_none"] = strings.Replace(strings.TrimSuffix(op[:strings.Index(op, `"attempts":`)], ","), `"op_test"`, `"op_none"`, 1) + `}`
+	canned["/operations/op_acct"] = strings.NewReplacer(`"op_test"`, `"op_acct"`,
+		`"accounting":null`, `"accounting":{"basis":"decision","at":"2026-10-22T10:20:00Z","revision":2}`).Replace(op)
 	canned["/plans"] = `{"items":[` + canned["/plans/pln_test"] + `]}`
 	canned["/operations"] = `{"items":[` + canned["/operations/op_test"] + `]}`
 	canned["/machines/"+m+"/timeline"] = `{"items":[{"revision":1,"at":"2026-10-22T10:00:00Z","epoch":"` + id.Epoch + `","kind":"adoption",` +
@@ -185,7 +190,10 @@ func TestRecordReads(t *testing.T) {
 		{[]string{"release", "list", "--draft", "drf_y", "--limit", "1"}, []string{"None on this page.", "Next page: --cursor c2"}},
 		{[]string{"release", "list", "--draft", "drf_x", "--cursor", "c2"}, []string{"None on this page."}},
 		{[]string{"operation", "show", "op_test"}, []string{"Operation op_test  apply-config  unresolved", "plan pln_test, machine " + m, "by the controller",
-			"Attempt 1", "controller ctl-b, generation 3", "Unresolved: completion and retry safety are unknown"}},
+			"Attempt 1", "controller ctl-b, generation 3", "Unresolved: completion and retry safety are unknown", "must account for attempt 1."}},
+		{[]string{"operation", "show", "op_none"}, []string{"Operation op_none  apply-config  unresolved", "no attempt was recorded",
+			"The server retries it", "the controller cancels it", "a recovery administrator resolves it as cancelled"}},
+		{[]string{"operation", "show", "op_acct"}, []string{"Attempt 1", "every attempt is accounted for", "retries or settles it from a new observation"}},
 		{[]string{"machine", "observations", m}, []string{"obs_b", "monitor", "configuration: the read timed out", "Health is not checked"}},
 	} {
 		f.want(f.ctl(nil, "", c.args...), 0, c.parts...)

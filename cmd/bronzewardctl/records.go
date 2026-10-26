@@ -407,9 +407,37 @@ func (e *env) operationCmd(args []string) error {
 			}
 		}
 		if o.State == "unresolved" {
-			fmt.Fprintln(w, "Unresolved: completion and retry safety are unknown. A recovery administrator must account for the attempt; no conflicting work on this machine proceeds until then.")
+			fmt.Fprintln(w, unresolvedGuidance(o.Attempts))
 		}
 	})
+}
+
+// unresolvedGuidance says what releases an unresolved operation (execution-recovery.md §4). With
+// no attempt, the server retries it, the controller cancels it when its approval can no longer be
+// used, or a recovery administrator resolves it as cancelled. Otherwise every recorded attempt
+// must be accounted for, and the server refuses a second accounting of one; once all are, the
+// server retries or settles it from a new observation.
+func unresolvedGuidance(attempts *[]apitypes.AttemptBody) string {
+	const hold = " No conflicting work on this machine proceeds until then."
+	if attempts == nil || len(*attempts) == 0 {
+		return "Unresolved: no attempt was recorded. The server retries it once an observation shows that is safe, " +
+			"the controller cancels it when its approval can no longer be used, or a recovery administrator resolves it as cancelled." + hold
+	}
+	var open []string
+	for _, a := range *attempts {
+		if a.Accounting == nil {
+			open = append(open, fmt.Sprint(a.Number))
+		}
+	}
+	if len(open) == 0 {
+		return "Unresolved: every attempt is accounted for. The server retries or settles it from a new observation." + hold
+	}
+	noun := "attempt"
+	if len(open) > 1 {
+		noun = "attempts"
+	}
+	return "Unresolved: completion and retry safety are unknown. A recovery administrator must account for " +
+		noun + " " + strings.Join(open, ", ") + "." + hold
 }
 
 // subject names what an operation acts on.
