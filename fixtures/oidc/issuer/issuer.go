@@ -39,12 +39,13 @@ var Humans = map[string][]string{
 
 // Defects lists every defect Mint can put in a token. groups-not-array and groups-null-element
 // are Bronzeward's own rules; every other entry is a check of persistence-api.md §10.1.
-// over-lifetime is 24 hours, longer than any sane maxTokenLifetime.
+// over-lifetime is 24 hours, longer than any sane maxTokenLifetime. id-token-nonce and
+// id-token-at-hash add the claim that marks an ID token; no-jti drops the access token's jti.
 var Defects = []string{
 	"malformed", "alg-none", "alg-hs256", "unknown-kid", "wrong-key", "bad-signature",
 	"wrong-issuer", "wrong-audience", "expired", "not-yet-valid", "no-exp", "no-iat",
-	"future-iat", "over-lifetime", "no-sub", "empty-sub", "numeric-sub", "groups-not-array",
-	"groups-null-element",
+	"future-iat", "over-lifetime", "no-sub", "empty-sub", "numeric-sub", "id-token-nonce",
+	"id-token-at-hash", "no-jti", "groups-not-array", "groups-null-element",
 }
 
 // Lifetime is a valid token's exp - iat, inside the default 15-minute maximum.
@@ -155,7 +156,7 @@ func (i *Issuer) mint(human string, groups []string, defect string, now time.Tim
 	at := func(d time.Duration) int64 { return now.Add(d).Unix() }
 	c := map[string]any{
 		"iss": i.URL, "aud": i.Audience, "sub": human, "groups": groups,
-		"iat": at(0), "nbf": at(0), "exp": at(Lifetime),
+		"iat": at(0), "nbf": at(0), "exp": at(Lifetime), "jti": JTI(),
 	}
 	key := i.key
 	switch defect {
@@ -199,6 +200,12 @@ func (i *Issuer) mint(human string, groups []string, defect string, now time.Tim
 		c["sub"] = ""
 	case "numeric-sub":
 		c["sub"] = 42
+	case "id-token-nonce":
+		c["nonce"] = "BWSYNTH-nonce"
+	case "id-token-at-hash":
+		c["at_hash"] = "BWSYNTH-at-hash"
+	case "no-jti":
+		delete(c, "jti")
 	case "groups-not-array":
 		c["groups"] = strings.Join(groups, ",")
 	case "groups-null-element":
@@ -207,6 +214,13 @@ func (i *Issuer) mint(human string, groups []string, defect string, now time.Tim
 		return "", fmt.Errorf("issuer: unknown defect %q", defect)
 	}
 	return sign(key, c)
+}
+
+// JTI returns a fresh access-token ID, for a token Mint does not make (RFC 9068 §2.2).
+func JTI() string {
+	var b [16]byte
+	rand.Read(b[:])
+	return hex.EncodeToString(b[:])
 }
 
 // Sign signs claims with the issuer's key, for a test that needs a token Mint does not make.

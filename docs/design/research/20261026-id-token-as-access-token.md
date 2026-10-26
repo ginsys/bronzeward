@@ -8,7 +8,7 @@ record selects no identity provider for deployments and sets no credential polic
 ## Scope and decision enabled
 
 The verifier checks signature, `iss`, `aud`, `exp`, `iat`, `nbf`, `sub`, the lifetime, the groups
-claim and the deny and revocation lists (`internal/auth/auth.go:145-185`,
+claim and the deny and revocation lists (`internal/auth/auth.go:145-189`,
 [persistence and API §10.1](../../spec/persistence-api.md#101-humans-oidc)). None of these tells an
 access token from an ID token, and
 [client contracts §9.1](../../spec/client-contracts.md#91-identity-provider-requirements) item 1
@@ -42,9 +42,9 @@ self-test. It skips without the provider's variables. For each grant it decodes 
 headers and claims without a signature check, asserts the header type, the exact audience and the
 presence or absence of every claim in the table below (no value other than `typ` and `aud` is
 kept), applies each candidate check to both, and presents both tokens to
-the server's real verifier through `GET /identity`. It asserts today's behaviour, the finding
-included, so a provider or verifier change fails it; #372 turns the ID token's assertion into a
-refusal.
+the server's real verifier through `GET /identity`. It asserted the behaviour observed below, the
+finding included, so a provider or verifier change failed it; since #372 it asserts that the
+server refuses the ID token `401`.
 
 ## Observed
 
@@ -98,7 +98,7 @@ Severity amplifier for 4: a deployment whose action adds the groups claim on the
 function as well as `preaccesstoken` gives an ID token the access token's roles, from a token sent
 to every relying party in the project and carried in an `id_token_hint`. Inferred from the source
 above; not configured live. Zitadel's own role claim, which ID-token role assertion adds, is an
-object, and the server refuses a non-array groups claim (`internal/auth/auth.go:213-221`,
+object, and the server refuses a non-array groups claim (`internal/auth/auth.go:217-225`,
 `fixtures/oidc/groups/groups.go:4-5`), so pointing `groupsClaim` at it grants nothing.
 
 ## Recommendation
@@ -108,7 +108,7 @@ carries `nonce` or `at_hash`, or lacks `jti`. Each refuses every observed ID tok
 they also cover an ID token issued without an access token (no `at_hash`, still no `jti`) and a
 provider that puts `jti` into ID tokens too (still `at_hash`). The provider requirement is that
 access tokens carry `jti`, which the pinned provider meets with no configuration; the in-process
-test issuer (`fixtures/oidc/issuer`) does not issue `jti` today and must. #372 carries the
+test issuer (`fixtures/oidc/issuer`) did not issue `jti` and does since #372. #372 carries the
 amendments: persistence and API §10.1 adds the check to its list, client contracts §9.1 adds
 `jti` to the access-token requirement and states that the server refuses an ID token.
 

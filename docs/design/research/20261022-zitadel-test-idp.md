@@ -90,7 +90,7 @@ Behaviour of the pinned release that a client must not rely on otherwise:
 ## Alternatives and limits
 
 The issue weighed the alternatives (P1-P4). Zitadel's own roles claim was rejected for groups
-because it is an object (`internal/auth/auth.go:209-221`). A login container and HTML scraping
+because it is an object (`internal/auth/auth.go:213-225`). A login container and HTML scraping
 were not needed, because the Session API plays the login UI. The human-run sign-in path stays
 with [#263](https://github.com/ginsys/bronzeward/issues/263).
 

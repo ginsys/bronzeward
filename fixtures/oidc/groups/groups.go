@@ -2,7 +2,7 @@
 // access token (mise run dev-idp, fixtures/README.md). It answers with a groups claim holding the
 // user's role keys in one project, the group names examples/bronzeward.yaml maps to roles.
 // Zitadel's own roles claim is an object, which the server refuses as groups
-// (internal/auth/auth.go:209-221), and the pinned release has no groups scope.
+// (internal/auth/auth.go:213-225), and the pinned release has no groups scope.
 package groups
 
 import (

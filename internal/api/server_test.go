@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ginsys/bronzeward/fixtures/oidc/issuer"
 	"github.com/ginsys/bronzeward/internal/auth"
 	"github.com/ginsys/bronzeward/internal/config"
 )
@@ -142,7 +143,7 @@ func TestServerRefusals(t *testing.T) {
 	p := prefix + "/server"
 	wantProblem(t, e.do(e.api, call{method: "GET", path: p + "?x=1", token: e.human("h-viewer")}), http.StatusBadRequest, "invalid-request")
 	wantProblem(t, e.do(e.api, call{method: "GET", path: p, token: "not-a-token"}), http.StatusUnauthorized, "unauthenticated")
-	nobody, err := e.iss.Sign(map[string]any{"iss": e.iss.URL, "aud": "bronzeward", "sub": "h-nobody",
+	nobody, err := e.iss.Sign(map[string]any{"iss": e.iss.URL, "aud": "bronzeward", "sub": "h-nobody", "jti": issuer.JTI(),
 		"iat": time.Now().Unix(), "nbf": time.Now().Unix(), "exp": time.Now().Add(5 * time.Minute).Unix()})
 	if err != nil {
 		t.Fatal(err)
