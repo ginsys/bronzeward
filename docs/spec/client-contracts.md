@@ -1294,8 +1294,10 @@ G23; until then clients show shortened principal identifiers. Specified by
 to 100 identifiers in one read, in [persistence and API §9.2](persistence-api.md#92-resources-and-routes);
 the batch read was chosen over names in the bodies (choice
 [§17.40](persistence-api.md#17-choices-for-owner-review)). A client resolves the identifiers a
-view or an output shows in requests of at most 100 identifiers each, each given once, and shows a human by subject and issuer, a service by its
-name, and the shortened identifier for one answered `unknown` or when the read fails. Whether a
+web view or a table output shows in requests of at most 100 identifiers each, each given once, and shows a human by subject and issuer, a service by its
+name, and the shortened identifier for one answered `unknown` or when the read fails. `-o json`
+and `-o yaml` print the resource unchanged, full identifiers included
+([operator experience §4](operator-experience.md#4-command-tree)). Whether a
 human also has a display name is pending ([persistence and API §10](persistence-api.md#10-authentication-and-authorization)).
 
 **C1. Contract correction.** Add the `reset` event to the stream contract of
