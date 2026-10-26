@@ -71,16 +71,16 @@
 
 - id: PAGE-02
   setup: context trusted; the PAGE-01 machines
-  action: machine list --limit 1 --all -o json, twice
+  action: machine list --limit 1 --all -o json, twice; machine list --limit 1 --cursor BWSYNTH-stale; machine list --limit 1 --all -o json
   exchange:
     - GET /api/v1/machines?limit=1
     - GET /api/v1/machines?limit=1&cursor=<next>
     - GET /api/v1/machines?limit=1, the restart
-  fault: 'the injector answers the first cursor read 400 cursor-invalid: the first time in the same epoch; the second time with a new Bronzeward-Epoch on it and every later answer, as after a recovery entry'
+  fault: 'the injector answers the first cursor read 400 cursor-invalid: the first time in the same epoch; the second time with a new Bronzeward-Epoch on it and every later answer, as after a recovery entry; the server refuses the stale cursor itself; the last time with a new epoch and GET /server then rewritten to apiRevision 1'
   expect:
-    client: discards the cursor and restarts the list; runs the epoch handling only when the epoch changed
-    server: answers every read but the refused one
-    shown: '"reading the list again from its start" both times; the epoch notice the second time only; every machine once, in order; exit 0'
+    client: discards the cursor and restarts the list, a given cursor included; runs the epoch handling only when the epoch changed; a failed GET /server re-read fails the list instead
+    server: answers every read but the refused ones
+    shown: '"reading the list again from its start" the first three times; the epoch notice the second time only; every machine once, in order, or the first page; exit 0; the last time "API revision 1", no restart, exit 1'
     absent: [token in stdout, stderr, argv]
 
 - id: REC-01
