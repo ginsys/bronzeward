@@ -253,7 +253,7 @@ statement.
 | Drift record | mutable projection | machine, observed digest, open or closed with the resolution that closed it; opening and closing are timeline entries | execution and recovery §6 |
 | Adoption record | immutable | the adopt plan and its `completed` operation, the adopted release, the baseline digest compared, the observation relied on | execution and recovery §6.3 |
 | Scope state mark, scope release, freeze, unfreeze | immutable | per machine, with epoch, identity and role | execution and recovery §6, §7 |
-| Principal | mutable | human (`iss`, `sub`) or service identity; creation time; revoked flag | §10 |
+| Principal | mutable | human (`iss`, `sub`) or service identity (its name and responsible human); creation time; revoked flag | §10 |
 | AutomationToken | mutable | token id, SHA-256 of the secret, roles, owner, expiry, epoch, revoked time | §10.2 |
 | Act | immutable | every mutating act: principal, role, action, subject, epoch, time | §10.5 |
 | IdempotencyRecord | immutable | key, fingerprint, stored response | §7 |
@@ -1761,6 +1761,7 @@ idempotency and conflict behavior.
 | `GET /plans[/{id}]`, `/approvals/{id}`, `/operations[/{id}]`, `/operations/{id}/events`, `/acts`, `/recovery` | 200 | any role |
 | `GET /dependencies[/{id}[/releases\|/alerts]]`, `/dependency-alerts` ([dependency monitor §7.2](dependency-monitor.md#72-read-routes)) | 200 | any role |
 | `GET /identity` (the caller's own identity; no query, no ETag): `kind` (`human` or `service`); `issuer` and `subject` for a human, `service`, the service identity's name, for automation, each `null` for the other kind; `principal`, its identifier, `null` for a human with no row yet, which the read does not create (§10); `roles`, those the credential maps to in design §13.7's order, `[]` for none; `expiresAt`, the token's `exp` or the automation token's expiry; `epoch`, the epoch the read held, as its `Bronzeward-Epoch`. Nothing else of the credential, its token ID and claims included | 200 | any authenticated credential, roles or none (§10.3) |
+| `GET /principals?id=…` (what principal identifiers name, for display; no ETag): `items`, one entry per distinct identifier given, in the order first given: `id`; `kind`, `human`, `service` or `unknown`, the last for an identifier no row holds; `issuer` and `subject` for a human, `service`, the service identity's name, for a service, each `null` otherwise. Nothing else of the row, its revocation and responsible human included; the read records no act **(choice §17.40)** | 200 | any role |
 | `GET /server` (the version, API revision, features and start mode of the process that answered, and the read-only settings a client shows) | 200 | any role |
 | `POST /ingestions` (import or drift adoption of a machine's configuration), with `If-Match` carrying the named draft's ETag, which the operation binds | 202, `ingest`, created `running` with its staging claim (§5.1) | `author`, human only (§10.3) |
 | `GET /ingestions/{id}/review` (the staged change of a paused ingestion, compilation §3.6) | 200, `Cache-Control: no-store` | `author`, human only (§10.3) |
@@ -1795,6 +1796,15 @@ treats the claim (compilation §3.5), and `machine`. On these four, a non-empty
 value that is not one of its kind is `400 invalid-request` and an empty value
 does not filter. A draft update's claim names no machine, so a `machine`
 filter never lists it.
+
+`GET /principals` takes only `id`, the one parameter given more than once,
+from 1 to 100 times. No `id`, more than 100, a value that is not an `idn`
+identifier (§2), an empty one included, or any other parameter is
+`400 invalid-request`. An identifier no row holds is answered `unknown`, not
+refused: a restore to an older backup loses the principals created after it
+(§12.3) while a client may still hold a body that names one. A recovery start
+refuses the read until its entry commits, as it refuses every request but the
+liveness probe and the entry (§12.2).
 
 `GET /machines/{id}/timeline` also takes `order`, `oldest` (the default) or
 `newest`; any other value, an empty one included, is `400 invalid-request`. Its
@@ -2585,6 +2595,16 @@ A service identity's row is created by the command-line tool with its token
 (§10.2). No human or automation principal
 has an OpenBao identity (design §13.7 item 1, derived).
 
+**Pending owner choice BW-335-display-1: a human's display name.** The row
+holds no name for a human, so `GET /principals` (§9.2) shows one by its issuer
+and subject. Whether it also serves a display name, and from where, is the
+owner's choice, recorded in §17.40 once made. Options: (a) issuer and subject
+only; (b) a nullable `display` member, taken from a claim the deployment
+names, default `name`, else `preferred_username`, stored on the row by the
+admitted request that creates it and refreshed by later admitted ones, `null`
+for a service identity, whose `service` name serves; (c) names kept in a
+table of their own. Until the choice, the read serves issuer and subject only.
+
 ### 10.1 Humans: OIDC
 
 Bronzeward is an OAuth 2.0 resource server. A human's client obtains a JWT
@@ -3054,6 +3074,7 @@ For a database restored to a backup taken at time *T*:
 | Approvals, scope releases | earlier epoch | authorize nothing; a plan needs an approval in the new epoch |
 | Idempotency records after *T* | absent | a retry executes afresh, or is refused `412 epoch-mismatch` if its `Bronzeward-Expected-Epoch` names an earlier epoch (§7.2, §12.4) |
 | Idempotency records from before *T* | earlier epoch once entry commits | a retry is refused `409 conflict` (§7.2) |
+| Principals created after *T* | absent | `GET /principals` answers their identifiers `unknown` (§9.2); a human's row is created again, under a new identifier, by its next admitted mutating request (§10) |
 | Identity revocations after *T* | absent | re-recorded by `recovery-admin`; the subject, human or service identity, is already refused by `deniedSubjects`, and the tool reissues no token to a listed service identity (§10.2, §10.4) |
 | Automation tokens | earlier epoch | refused; reissued with the tool **(choice §17.27)** |
 | Tokens revoked after *T* | valid again in the rows | refused anyway: earlier epoch |
@@ -3387,6 +3408,12 @@ each (design §7.7 consequences):
   its own entry, taking over and starting an ingestion in the new epoch;
 - two requests with one idempotency key in flight together, with a control
   that drops the key lock;
+- the principals read (§9.2): a human, a service identity and an identifier
+  no row holds answered in the order given, a repeated identifier answered
+  once, and no `id`, 101 of them, a malformed one, an empty one and another
+  parameter each refused `400 invalid-request`; after a restore to a backup
+  taken before a principal's row was created, its identifier answered
+  `unknown`; and a credential with no role refused, as on every any-role read;
 - an approval revocation and an identity revocation each started while a
   commitment holds the approval, waiting for it (DS row 003); no unlocked
   control applies, since each revocation also takes the machine row
@@ -3975,6 +4002,26 @@ design and evidence do not settle the question. Each is marked in place as
     "previous" and reads a revision reverted to as reused although the draft
     chose it again; record the reasons in the order found, which lets two
     equal marks differ.
+40. **Clients resolve principal identifiers with one batch read, not names
+    in bodies** (§9.2): `GET /principals` maps up to 100 identifiers to their
+    kind and issuer and subject or service name, for any role, and answers
+    one no row holds as `unknown`. A client resolves the identifiers a view
+    shows in one request. Every role already reads the bodies that name these
+    principals and the act log (§10.5), so the read adds only the issuer and
+    subject or service name of principals a caller already sees by
+    identifier. Alternatives: the name served
+    next to each identifier in the bodies that carry one (acts, releases,
+    plans, approvals, recovery entries), which changes five bodies and every
+    later one, joins the principal table into each of their reads and repeats
+    a name per item; a read of one identifier, a request per principal a view
+    shows; the read restricted to some roles, which hides nothing those roles
+    do not already read by identifier; the row's revoked flag served too,
+    which is not whether the principal is refused: `deniedSubjects` refuses
+    a subject whose row is unrevoked, and a restore to a backup taken before
+    a revocation leaves the row unrevoked while the subject stays refused
+    (§10.4, §12.3), so the member would show a refused principal as
+    unrevoked, and a display needs no revocation state. A human's display
+    name is pending owner choice BW-335-display-1 (§10).
 
 ## 18. Traceability
 
@@ -3993,7 +4040,7 @@ design and evidence do not settle the question. Each is marked in place as
 | §6.4 orphans | §7.4, §7.8, §13.2 | DB §9; KL case G; PC §4 row 065; the orphan-report identity's grants and the report's selection: §16 check, the pinned OpenBao only (choice §17.30) |
 | §7 idempotency | §11.1, §12.5 | [DB §4.3](../design/research/20260924-database-semantics.md#43-s3-unique-operation-intent) rows 012, 013; DB row 061; DB §4.6 (advisory lock); [E1 §7](../design/research/20260922-secret-ingress-extraction-before-persistence.md#7-limits), [E1 §4.4](../design/research/20260922-secret-ingress-extraction-before-persistence.md#44-the-forbidden-design-measured) |
 | §8 operations | §11.1, §12.5, §15.2 | [DS §4.2](../design/research/20260925-dispatch-safety.md#42-ownership-loss-and-a-second-executor-criterion-2) row 009; DB §4.5 rows 020, 021 |
-| §9 API | §11.1, §11.2, §13.7 | none: FR §9 item 5; the review route: choice §17.36, compilation §3.6; plan durations and adopt evidence: choices §17.37, §17.38 |
+| §9 API | §11.1, §11.2, §13.7 | none: FR §9 item 5; the review route: choice §17.36, compilation §3.6; plan durations and adopt evidence: choices §17.37, §17.38; the principals read: choice §17.40 |
 | §10 authentication, authorization | §13.1, §13.3, §13.6, §13.7 | none: FR §9 item 5; [DS §4.1](../design/research/20260925-dispatch-safety.md#41-revocation-around-the-commitment-boundary-criterion-1) row 003 for approval revocation and its lock; self-approval reasons: choice §17.39 |
 | §11 migrations | §7.2, §14.2 | [DB §4.6](../design/research/20260924-database-semantics.md#46-s6-migrations) rows 022–026; [DB §6.2](../design/research/20260924-database-semantics.md#62-criterion-2-intent-ownership-queue-claims-migrations-restored-state) |
 | §12 restored state, epoch | §7.7, §7.8, §14.6 | DB §4.7 row 027; DB §9 (inferred); [KL §7](../design/research/20260924-key-loss-restoration.md#7-recommendation) items 2, 5; FR §9 item 4 |
