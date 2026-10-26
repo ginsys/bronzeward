@@ -190,19 +190,44 @@ func TestLogin(t *testing.T) {
 		f.want(r, 0, "Signed in to file")
 		// --no-input forbids the wait for the operator.
 		f.want(f.ctl(nil, "", "--context", "file", "--no-input", "login"), 1, "which --no-input forbids")
-		// A sign-in that cannot be kept, here over an automation token, has its refresh token
-		// revoked, and says so when the provider refuses.
-		if err := os.WriteFile(file, []byte("bwt_BWSYNTH-automation\n"), 0o600); err != nil {
-			t.Fatal(err)
+		// A token file that is not this client's is refused before the sign-in and left as it is.
+		for _, other := range []string{"bwt_BWSYNTH-automation\n", "kind: Config\nclusters: []\n", `{"theirs":"BWSYNTH"}`} {
+			if err := os.WriteFile(file, []byte(other), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			f.idp.login(nil, "")
+			n := f.idp.exchange.Load()
+			f.want(login(nil, "file"), 1, "token file "+file)
+			if b, _ := os.ReadFile(file); string(b) != other || f.idp.exchange.Load() != n {
+				t.Errorf("the file now holds %q after %d exchanges, want it unchanged with none", b, f.idp.exchange.Load()-n)
+			}
 		}
-		f.idp.login(nil, "")
-		f.want(login(nil, "file"), 1, "holds an automation token", "its refresh token is revoked at the identity provider")
+		// A sign-in that cannot be kept, here because another program's file replaced the token file
+		// during the sign-in, has its refresh token revoked, and says so when the provider refuses.
+		replaced := func() result {
+			os.Remove(file)
+			f.idp.login(nil, "")
+			unlock := hold(t, file+".lock")
+			var r result
+			var wg sync.WaitGroup
+			wg.Go(func() { r = login(nil, "file") })
+			waiting(t, file+".lock", 1)
+			if err := os.WriteFile(file, []byte("kind: Config\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			unlock()
+			wg.Wait()
+			if b, _ := os.ReadFile(file); string(b) != "kind: Config\n" {
+				t.Errorf("the replaced file now holds %q", b)
+			}
+			return r
+		}
+		f.want(replaced(), 1, "holds neither bronzewardctl's tokens", "its refresh token is revoked at the identity provider")
 		if r := f.idp.revocations(); len(r) != 1 || r[0].Get("token") != "BWSYNTH-rt-1" {
 			t.Errorf("revoked %v, want the new refresh token", r)
 		}
 		f.idp.revoking(func() (int, any) { return http.StatusBadRequest, map[string]string{"error": "invalid_request"} })
-		f.idp.login(nil, "")
-		f.want(login(nil, "file"), 1, "holds an automation token", "its refresh token is not revoked, so it stays usable",
+		f.want(replaced(), 1, "holds neither bronzewardctl's tokens", "its refresh token is not revoked, so it stays usable",
 			"refused the revocation")
 		f.idp.revoking(func() (int, any) { return http.StatusOK, map[string]any{} })
 		os.Remove(file)
