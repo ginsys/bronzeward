@@ -253,6 +253,23 @@ describe("§9.5 renewal", () => {
     expect(onPrincipalChange).toHaveBeenCalledWith({ iss: ISSUER, sub: "u1" }, { iss: ISSUER, sub: "u2" });
   });
 
+  test("with no ID token, an old access token that names no subject reads as no change", async () => {
+    const onPrincipalChange = vi.fn();
+    const f = answers([json({ access_token: jwt({ iss: ISSUER, sub: "u1" }), refresh_token: "SYNTH-r2", expires_in: 300 })]);
+    const s = new Session(config, provider, tokens({ access: jwt({ iss: ISSUER }) }), { fetch: f as unknown as typeof fetch, onPrincipalChange });
+    await s.renew();
+    expect(onPrincipalChange).not.toHaveBeenCalled();
+  });
+
+  test("with no ID token, an access-token account change is shown even when the new subject matches the ID token's", async () => {
+    const onPrincipalChange = vi.fn();
+    const f = answers([json({ access_token: jwt({ iss: ISSUER, sub: "u1" }), refresh_token: "SYNTH-r2", expires_in: 300 })]);
+    // The ID token named u1; the access token the session held named api-user.
+    const s = new Session(config, provider, tokens({ access: jwt({ iss: ISSUER, sub: "api-user" }) }), { fetch: f as unknown as typeof fetch, onPrincipalChange });
+    await s.renew();
+    expect(onPrincipalChange).toHaveBeenCalledWith({ iss: ISSUER, sub: "api-user" }, { iss: ISSUER, sub: "u1" });
+  });
+
   test("a renewal for another subject is a new sign-in", async () => {
     const onPrincipalChange = vi.fn();
     const f = answers([json({ access_token: "SYNTH-a2", refresh_token: "SYNTH-r2", expires_in: 300, id_token: jwt({ iss: ISSUER, sub: "u2" }) })]);
