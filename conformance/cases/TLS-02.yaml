@@ -1,5 +1,5 @@
 id: TLS-02
-setup: the test static host (fixtures/webhost) with -redirect-api, its CSP admitting the target's origin; not signed in
+setup: the test static host (fixtures/webhost) with -redirect-api, its CSP admitting the target's origin; signed in through a synthetic provider (web/e2e/provider.ts) as h-synthetic
 action: load the web client, which reads GET /server
 exchange:
   - request: GET /api/v1/server

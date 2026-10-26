@@ -168,8 +168,18 @@ request with a `307` to that origin instead, the fault of conformance cases TLS-
 `mise run browser` builds it, starts it in that mode with a counting target on
 `http://127.0.0.1:58444`, runs `web/e2e/` in each browser of `BW_BROWSERS` (default
 `chrome,firefox`; also `edge`, `firefox-esr`, `safari`) and scans `web/e2e/out/` for the run's
-canary, a `BWSYNTH-` value only the target serves. No server, database or provider runs.
+canary, a `BWSYNTH-` value only the target serves, and for any JWT. No server, database or
+identity provider runs: the page signs in through a synthetic provider in the harness
+(`web/e2e/provider.ts`) on `http://127.0.0.1:58445`.
 `BW_WDIO_CACHE` moves WebdriverIO's browser and driver downloads out of `TMPDIR`.
+
+`mise run browser-auth` runs the AUTH cases (`web/e2e/auth/`) after `dev-db` and `dev-idp`. It
+creates two databases on dev-db's PostgreSQL and drops them at the end, with two servers and
+two hosts on loopback: one server trusts the test provider, behind a host on `58443`; the other
+trusts the fixture issuer (`58447`), whose key set the synthetic provider serves on `58446`
+under its own issuer, behind a host on `58448`. A control route on `58449` chooses the minted
+token, defect included, the next sign-in receives. The servers listen on `58450` and `58451`.
+The scan also looks for the provider's synthetic password and login token.
 
 ## Instance C and the interruption seam
 

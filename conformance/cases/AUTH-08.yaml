@@ -1,0 +1,18 @@
+id: AUTH-08
+setup: as AUTH-01, signed in as h-viewer with the server's read shown
+action: sign out; load the signed-out page; go back two history entries, past the provider, to the page that showed data
+exchange:
+  - request: POST <issuer>/oauth/v2/revoke
+    headers: ["token=<refresh token>, token_type_hint=refresh_token, client_id"]
+  - request: GET <issuer>/oidc/v1/end_session
+    headers: ["client_id, post_logout_redirect_uri=<origin>/signed-out; no id_token_hint"]
+fault: none
+expect:
+  client: the browser at the provider's logout page with the signed-out page as its return; after going back, a new sign-in starts
+  shown: on the signed-out page, "You are signed out of Bronzeward." and no subject
+  absent: [data from before sign-out after back navigation, any browser storage on the signed-out page, token in the harness log or retained artifacts]
+runs:
+  web:
+    check: web/e2e/auth/provider.e2e.ts, mise run browser-auth; the revocation and end-session request in web/src/auth.test.ts, mise run web
+    browsers: [chrome, edge, firefox, firefox-esr]
+    covers: the client's half. mise run dev-idp runs no login UI, so the provider's logout page and its return to the signed-out page are not exercised; the harness loads that page itself. Whether the provider revoked the refresh token is not read back

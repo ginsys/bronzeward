@@ -1,0 +1,16 @@
+id: AUTH-05
+setup: as AUTH-02; h-author revoked by h-recovery through POST /api/v1/identity-revocations; signed in as h-author with a valid token
+action: load the web client, sign in, read GET /server
+exchange:
+  - request: GET /api/v1/server
+    headers: ["Authorization: Bearer <token>", "Accept: application/json"]
+fault: none
+expect:
+  server: 403 identity-revoked
+  client: the in-memory tokens cleared; no new authorization request
+  shown: "Your access was revoked or is denied by this installation; contact a recovery administrator."
+  absent: [token in the harness log, retained artifacts or browser storage]
+runs:
+  web:
+    check: web/e2e/auth/fixture.e2e.ts, mise run browser-auth; the cleared credential in web/src/request.test.ts, mise run web
+    browsers: [chrome, edge, firefox, firefox-esr]

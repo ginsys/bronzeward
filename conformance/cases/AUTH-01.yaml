@@ -1,0 +1,18 @@
+id: AUTH-01
+setup: a disposable server trusting the test identity provider (mise run dev-idp), its project as the audience; the test static host proxying to it, its client configuration asking for the project audience scope
+action: load the web client, sign in as h-viewer, read GET /server
+exchange:
+  - request: GET <issuer>/oauth/v2/authorize
+    headers: ["response_type=code, code_challenge_method=S256, state, nonce, scope=openid offline_access <audience scope>"]
+  - request: GET /api/v1/server
+    headers: ["Authorization: Bearer <access token>", "Accept: application/json"]
+fault: none
+expect:
+  client: the authorization request completed through the provider's Session API (decision B7), the callback handled, the read sent with the access token
+  shown: 'the server''s version and API revision, and "Signed in as <subject>"'
+  absent: [token or code in the harness log, retained artifacts or browser storage]
+runs:
+  web:
+    check: web/e2e/auth/provider.e2e.ts, mise run browser-auth
+    browsers: [chrome, edge, firefox, firefox-esr]
+    covers: sign-in and the GET /server read; reading machines, and showing the recorded Bronzeward-Epoch, run with the first list view

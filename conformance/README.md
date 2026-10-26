@@ -14,5 +14,11 @@ part of the case. A case without a record has not run.
 
 | Record | Runs |
 | --- | --- |
+| [AUTH-01](cases/AUTH-01.yaml) | web, sign-in and the server read: `mise run browser-auth` |
+| [AUTH-02](cases/AUTH-02.yaml) | web: `mise run browser-auth` |
+| [AUTH-03](cases/AUTH-03.yaml) | web: `mise run browser-auth` |
+| [AUTH-05](cases/AUTH-05.yaml) | web: `mise run browser-auth` |
+| [AUTH-08](cases/AUTH-08.yaml) | web, the client's half: `mise run browser-auth` |
+| [AUTH-10](cases/AUTH-10.yaml) | web: `mise run browser-auth` |
 | [TLS-02](cases/TLS-02.yaml) | web: `mise run browser` |
 | [TLS-03](cases/TLS-03.yaml) | web, the read case: `mise run browser` |
