@@ -1116,7 +1116,7 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 | ID | Area | Case | Expected |
 | --- | --- | --- | --- |
 | AUTH-01 | success | sign in, read machines | `Bronzeward-Epoch` recorded; list shown |
-| AUTH-02 | refusal | each fixture defect `expired`, `wrong-issuer`, `wrong-audience`, `over-lifetime`, `alg-none`, `groups-not-array` (`fixtures/oidc/issuer/issuer.go:44-49`) | `401`; one renewal attempt at most; the client's local reading labelled as such |
+| AUTH-02 | refusal | each fixture defect `expired`, `wrong-issuer`, `wrong-audience`, `over-lifetime`, `alg-none`, `groups-not-array`, `id-token-nonce`, `id-token-at-hash`, `no-jti` (`fixtures/oidc/issuer/issuer.go:40-49`) | `401`; one renewal attempt at most; the client's local reading labelled as such |
 | AUTH-03 | refusal | token without the needed group (`-without-group`) | `403 forbidden`; roles named |
 | AUTH-04 | refusal | automation token on approve | warned before sending that the route is human-only ([§9.4](#94-automation-token-input) item 3); the request sent is answered `403 forbidden` with `humanOnly`, shown as in [§9.6](#96-failure-cases) |
 | AUTH-05 | refusal | identity revoked | `403 identity-revoked`; stored credential cleared; no new sign-in loop |
