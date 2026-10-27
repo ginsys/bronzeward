@@ -52,14 +52,13 @@ export function App() {
       if (page.phase !== "signed-in" || p === undefined) return;
       if (p.iss !== t.iss || p.sub !== t.sub) return changed?.();
       if (session?.adopt(t) === true) renewing?.schedule();
-    }, () => {
-      // §9.7 item 2: another tab signed out. A renewal in flight here revokes the pair it brings
-      // before the page leaves, within SIGN_OUT_WAIT_MS.
-      const s = session;
+    }, (ended) => {
+      // §9.7 item 2: another tab signed out. This tab's session has taken its tokens to revoke
+      // them, and a renewal in flight revokes the pair it brings, before the page leaves.
       end();
       // Nothing read before stays on screen, even if the navigation stalls or is cancelled.
       flushSync(() => setView({ kind: "signing-out" }));
-      void (s?.settled() ?? Promise.resolve()).then(() => location.replace(SIGNED_OUT_PATH));
+      void ended.then(() => location.replace(SIGNED_OUT_PATH));
     });
     // No more renewals here, and the lock goes to another tab.
     const stop = () => {

@@ -57,6 +57,9 @@ export class Renewer {
   #leave: (() => void) | undefined;
   // Until when another tab's redirect may still bring a pair.
   #redirectUntil = 0;
+  // A sign-out, this tab's or another's, is acted on once: a second one must not cut short the
+  // first one's bounded wait (#388).
+  #signedOut = false;
   // Every refresh token another tab announced in a `renewing`: whatever its answer, it may be spent,
   // so it is never sent or given from here. Told by token, not by expiry, so that a pair with a
   // shorter lifetime cannot hide it. Erased on release() (§10.3 item 3), after which this tab sends
@@ -72,8 +75,9 @@ export class Renewer {
     private readonly session: () => Session | undefined,
     // A pair from another tab, after any waiting renewal has taken it.
     private readonly onPair: (t: Tokens) => void,
-    // §9.7 item 2: another tab signed out.
-    private readonly onSignedOut: () => void = () => {},
+    // §9.7 item 2: another tab signed out; `ended` settles once this tab's session has revoked what
+    // it holds and a renewal in flight the pair it brings, at most SIGN_OUT_WAIT_MS.
+    private readonly onSignedOut: (ended: Promise<void>) => void = () => {},
   ) {
     this.#start();
   }
@@ -109,6 +113,7 @@ export class Renewer {
 
   // §9.7 item 2: tell the other tabs, before this one releases its channel.
   signOut(): void {
+    this.#signedOut = true;
     this.#channel?.postMessage({ type: "signed-out" });
   }
 
@@ -174,7 +179,11 @@ export class Renewer {
   }
 
   onMessage(m: Message): void {
-    if (m.type === "signed-out") return this.onSignedOut();
+    if (m.type === "signed-out") {
+      if (this.#signedOut) return;
+      this.#signedOut = true;
+      return this.onSignedOut(this.session()?.end() ?? Promise.resolve());
+    }
     if (this.#closed) return;
     if (m.type === "renewing" && typeof m.of === "string") {
       this.#sent.add(m.of);
@@ -189,7 +198,8 @@ export class Renewer {
   }
 
   // Take a new tab lock, then open the channel. A lock taken from this tab (another holder found it
-  // silent, frozen or suspended) means messages may have been missed: the tab starts over.
+  // silent, frozen or suspended) means messages may have been missed: the tab starts over, on the
+  // channel it has, so that none already posted to it is lost (a `signed-out`, #388).
   #start(): void {
     const tab = `${TAB}${random()}`;
     this.#tab = tab;
@@ -198,8 +208,9 @@ export class Renewer {
     const held = new Promise<void>((r) => (this.#leave = r));
     this.locks
       .request(tab, {}, () => {
-        if (this.#closed || this.#tab !== tab) return undefined;
-        const channel = this.open();
+        // Released first: whatever awaits the channel goes on, and finds the tab closed.
+        if (this.#closed || this.#tab !== tab) return void opened();
+        const channel = this.#channel ?? this.open();
         channel.onmessage = (e) => {
           const m = e.data as Message | null;
           if (typeof m === "object" && m !== null) this.onMessage(m);
@@ -216,8 +227,6 @@ export class Renewer {
   #rejoin(tab: string): void {
     if (this.#closed || this.#tab !== tab) return;
     this.session()?.forfeit();
-    this.#channel?.close();
-    this.#channel = undefined;
     this.#leave?.();
     this.#start();
     this.#post({ type: "request" });
