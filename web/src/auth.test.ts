@@ -587,7 +587,7 @@ describe("§9.7 item 2 sign-out", () => {
     }
   });
 
-  test("#388: after another tab's sign-out, settled() waits for the renewal in flight to revoke the pair it brings, at most SIGN_OUT_WAIT_MS", async () => {
+  test("#388: after another tab's sign-out, end() revokes the token in flight and waits for its renewal to revoke the pair it brings, at most SIGN_OUT_WAIT_MS", async () => {
     vi.useFakeTimers();
     try {
       let release!: (r: Response) => void;
@@ -595,19 +595,19 @@ describe("§9.7 item 2 sign-out", () => {
       const s = new Session(config, provider, tokens(), { fetch: f as unknown as typeof fetch });
       void s.renew();
       await vi.advanceTimersByTimeAsync(0);
-      s.clear();
       let done = false;
-      void s.settled().then(() => (done = true));
+      void s.end().then(() => (done = true));
       await vi.advanceTimersByTimeAsync(1_000);
       expect(done).toBe(false);
       release(json({ access_token: "SYNTH-a2", refresh_token: "SYNTH-r2", expires_in: 300 }));
       await vi.advanceTimersByTimeAsync(0);
       expect(done).toBe(true);
-      expect(f.mock.calls.filter((c) => c[0] === provider.revocationEndpoint).map((c) => form(c[1])["token"])).toEqual(["SYNTH-r2"]);
+      expect(s.token()).toBeUndefined();
+      expect(f.mock.calls.filter((c) => c[0] === provider.revocationEndpoint).map((c) => form(c[1])["token"])).toEqual(["SYNTH-r1", "SYNTH-r2"]);
       const hung = new Session(config, provider, tokens(), { fetch: (() => new Promise<Response>(() => {})) as typeof fetch });
       void hung.renew();
       let out = false;
-      void hung.settled().then(() => (out = true));
+      void hung.end().then(() => (out = true));
       await vi.advanceTimersByTimeAsync(SIGN_OUT_WAIT_MS);
       expect(out).toBe(true);
     } finally {

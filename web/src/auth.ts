@@ -256,14 +256,6 @@ export class Session {
     this.#forfeited = true;
   }
 
-  // §9.7 item 2, after another tab's sign-out: a renewal in flight revokes the pair it brings, which
-  // no tab holds; waited for at most SIGN_OUT_WAIT_MS.
-  async settled(): Promise<void> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    await Promise.race([this.#renewing, new Promise((r) => (timer = setTimeout(r, SIGN_OUT_WAIT_MS)))]);
-    clearTimeout(timer);
-  }
-
   // §9.5: one renewal at a time. A refresh token is sent at most once: after any failure, its
   // rotation may already have happened, so it is dropped and the current token used until refused
   // (item 3). False also when there is none to send: byRedirect says whether the page renews by
@@ -350,6 +342,17 @@ export class Session {
   // it; the wait for both is bounded, so a stalled provider delays the redirect by at most
   // SIGN_OUT_WAIT_MS.
   async signOut(origin: string): Promise<string> {
+    await this.end();
+    if (this.provider.endSessionEndpoint === undefined) return SIGNED_OUT_PATH;
+    const url = new URL(this.provider.endSessionEndpoint);
+    url.searchParams.set("client_id", this.config.webClientId);
+    url.searchParams.set("post_logout_redirect_uri", origin + SIGNED_OUT_PATH);
+    return url.href;
+  }
+
+  // §9.7 item 2: sign-out's revocations without its redirect, also after another tab's sign-out,
+  // which may not have had this tab's last pair (a renewal answered just before its message, #388).
+  async end(): Promise<void> {
     const signedIn = this.#tokens !== undefined;
     // Taken now, since the page clears the session as soon as this returns its promise: the last
     // refresh token held, even one no longer sent for renewal (CP2-F2), else the one a renewal in
@@ -365,11 +368,6 @@ export class Session {
     ]);
     clearTimeout(timer);
     this.#revocable = undefined;
-    if (this.provider.endSessionEndpoint === undefined) return SIGNED_OUT_PATH;
-    const url = new URL(this.provider.endSessionEndpoint);
-    url.searchParams.set("client_id", this.config.webClientId);
-    url.searchParams.set("post_logout_redirect_uri", origin + SIGNED_OUT_PATH);
-    return url.href;
   }
 
   // A token already sent for revocation is not sent again: a renewal that answers after sign-out
