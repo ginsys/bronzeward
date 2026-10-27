@@ -86,6 +86,7 @@ export class Client {
 
   async read<T>(path: string): Promise<ReadResult<T>> {
     const sent = this.generation;
+    const principal = this.view.principal;
     let renewed = false;
     for (let attempt = 0; ; attempt++) {
       const records = this.epochRecords;
@@ -103,15 +104,22 @@ export class Client {
         if (attempt + 1 >= MAX_TRIES) return { kind: "discarded" };
         continue;
       }
-      if (this.observeEpoch(res) || sent !== this.generation) return { kind: "discarded" };
+      // A 403 is read before a stale answer is dropped: identity-revoked of the sign-in still current
+      // clears its credential at once (§8.2), even when the view moved on; its data stays dropped.
+      const stale = this.observeEpoch(res) || sent !== this.generation;
+      if (stale && !(res.status === 403 && principal === this.view.principal)) return { kind: "discarded" };
       if (res.ok) return this.success<T>(res, sent);
       const body = await readProblem(res);
-      if (sent !== this.generation) return { kind: "discarded" }; // changed while the body arrived
+      const problem = body === NOT_JSON || body === CUT ? null : body;
+      const code = problem?.type.slice(PROBLEM_PREFIX.length);
+      if (res.status === 403 && code === "identity-revoked" && problem !== null && principal === this.view.principal) {
+        this.opts.onRevoked?.();
+        return { kind: "revoked", problem };
+      }
+      if (stale || sent !== this.generation) return { kind: "discarded" }; // changed while the body arrived
       if (body === CUT) return { kind: "transport" };
       // A problem body that does not parse is a defect, as a success's is; a 5xx stays §8.2's last row.
       if (body === NOT_JSON && res.status < 500) return { kind: "defect", message: "the problem body is not JSON" };
-      const problem = body === NOT_JSON ? null : body;
-      const code = problem?.type.slice(PROBLEM_PREFIX.length);
       // Any other 401 code is a refusal by its status class (§8.2's unknown-code row).
       if (res.status === 401 && code === "unauthenticated") {
         if (!renewed && this.opts.renew !== undefined) {
@@ -121,10 +129,6 @@ export class Client {
           if (again) { attempt--; continue; }
         }
         return { kind: "unauthenticated", problem };
-      }
-      if (res.status === 403 && code === "identity-revoked" && problem !== null) {
-        this.opts.onRevoked?.();
-        return { kind: "revoked", problem };
       }
       if (res.status === 400 && code === "cursor-invalid" && problem !== null) return { kind: "restart", problem };
       if (res.status < 500) return { kind: "refused", status: res.status, problem };

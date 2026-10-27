@@ -327,6 +327,20 @@ describe("stale-response discard", () => {
     expect(await pending).toEqual({ kind: "discarded" });
   });
 
+  test("a revocation whose answer arrives after the route changed still clears the sign-in's credential", async () => {
+    const { fetchImpl, release } = slowBody(403, "application/problem+json", {
+      type: "urn:bronzeward:problem:identity-revoked", title: "revoked", status: 403,
+    });
+    const onRevoked = vi.fn();
+    const c = new Client({ fetch: fetchImpl, onRevoked });
+    c.setView(base);
+    const pending = c.read("/identity");
+    c.setView({ ...base, route: "/plans" }); // before the headers arrive
+    release();
+    expect(await pending).toMatchObject({ kind: "revoked" });
+    expect(onRevoked).toHaveBeenCalledTimes(1);
+  });
+
   test("a revocation whose body arrives after a new sign-in clears nothing", async () => {
     const { fetchImpl, release } = slowBody(403, "application/problem+json", {
       type: "urn:bronzeward:problem:identity-revoked", title: "revoked", status: 403,
