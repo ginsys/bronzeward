@@ -133,10 +133,13 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
 
   // A transport failure keeps the data this resource showed under the offline banner; without any,
   // it is shown as the disconnected state.
-  const settle = useCallback(<T,>(res: ReadResult<T>, set: (r: Load<T>) => void, what: "server" | "identity") => {
+  // A refusal ends the page whichever read carried it, a superseded one too: the client already
+  // dropped the credentials it refused. Any other answer of a superseded read says nothing more.
+  const settle = useCallback(<T,>(res: ReadResult<T>, set: (r: Load<T>) => void, what: "server" | "identity", live: () => boolean) => {
     if (res.kind === "discarded") return;
     if (res.kind === "unauthenticated") return onUnauthenticated(res);
     if (res.kind === "revoked") return onRevoked(res);
+    if (!live()) return;
     const now = new Date();
     const e = observed(res, shown.current[what]);
     if (e !== undefined) observe([e, now]);
@@ -156,7 +159,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
   useEffect(() => {
     if (known) return;
     let live = true;
-    void client.read<Server>("/server").then((res) => live && settle(res, setServer, "server"));
+    void client.read<Server>("/server").then((res) => settle(res, setServer, "server", () => live));
     return () => void (live = false);
   }, [client, known, online, settle]);
 
@@ -166,7 +169,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
     if (!compatible) return;
     client.setView({ principal, route: path, query });
     let live = true;
-    void client.read<Identity>("/identity").then((res) => live && settle(res, setIdentity, "identity"));
+    void client.read<Identity>("/identity").then((res) => settle(res, setIdentity, "identity", () => live));
     return () => void (live = false);
   }, [client, compatible, path, query, principal, online, settle]);
 
