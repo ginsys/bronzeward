@@ -869,6 +869,12 @@ current token expires
      longer waited for. A holder that is itself frozen still holds `bronzeward-renewer`: the other tabs' requests go
      unanswered and fail after 10 s (§9.5 item 3) until it resumes or closes. This predates #388
      and is tracked there; taking the renewer lock from a holder is not part of decision B1.
+     Lock grants and channel messages are separate task sources, so a tab can be granted the lock
+     before the previous holder's `redirecting` reaches it, although that holder posted it before
+     navigating and releases the lock only when its page unloads. That tab then redirects too: one
+     extra redirect, which the provider answers from its session, and no refresh token sent
+     twice. Having every tab acknowledge `redirecting`, as it does `renewing`, would close this at
+     up to 3 s added to every redirect renewal; that is not done.
 
    Rejected: a lock taken per renewal, because a waiting tab can be granted it before the previous
    holder's pair reaches it and then spend the used token; a counter in `localStorage`, which
