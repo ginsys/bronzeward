@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"testing"
 	"time"
+	"unicode"
 
 	"github.com/ginsys/bronzeward/fixtures/oidc/issuer"
 	"github.com/ginsys/bronzeward/internal/client"
@@ -532,7 +533,8 @@ func TestSignIn(t *testing.T) {
 		f.want(gone, 1, "The refresh token is not revoked", "cannot reach the identity provider http://127.0.0.1:1: the connection was refused")
 		// A failed discovery shows the status of a refusal, but neither the provider's reason
 		// phrase nor its body nor the issuer it names; a refused redirect is named once, as such,
-		// including one to an empty fragment, which Go drops from the target.
+		// including one to an empty fragment, which Go drops from the target, and its target is shown
+		// by its scheme and host alone.
 		moved := "it redirected to http://idp.example.invalid, which bronzewardctl does not follow"
 		for mode, want := range map[string]string{
 			"down":     "refused its discovery: 503 Service Unavailable",
@@ -541,6 +543,7 @@ func TestSignIn(t *testing.T) {
 			"garbage":  "its discovery document could not be read",
 			"moved":    "the identity provider " + f.iss.URL + ": " + moved,
 			"fragment": "the identity provider " + f.iss.URL + ": it redirected to " + f.iss.URL + ", which bronzewardctl does not follow",
+			"escape":   "the identity provider " + f.iss.URL + ": it redirected to " + f.iss.URL + ", which bronzewardctl does not follow",
 			"other":    "its discovery document names another issuer",
 		} {
 			f.idp.mu.Lock()
@@ -553,7 +556,7 @@ func TestSignIn(t *testing.T) {
 			f.idp.mu.Unlock()
 			f.want(r, 1, "The refresh token is not revoked", want)
 			shown := r.out + r.err
-			if strings.ContainsRune(shown, '\x1b') || strings.Contains(shown, "down") || strings.Contains(shown, "BWSYNTH-body") ||
+			if strings.ContainsFunc(shown, func(r rune) bool { return unicode.IsControl(r) && r != '\n' }) || strings.Contains(shown, "down") || strings.Contains(shown, "BWSYNTH-body") ||
 				strings.Contains(shown, "BWSYNTH-phrase") || mode == "other" && strings.Contains(shown, "idp.example.invalid") ||
 				strings.Contains(shown, "cannot reach") || strings.Count(shown, "redirected to") > 1 {
 				t.Errorf("logout in discovery mode %s showed what the failed discovery sent:\n%s", mode, shown)
