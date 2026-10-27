@@ -1,7 +1,7 @@
 import { createElement as h, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
-import { Action, connection, Deprecations, deprecated, Failure, incompatible, MIN_API_REVISION, offlineSince, ShellContext } from "./shell.tsx";
+import { Action, connection, Deprecations, deprecated, Failure, incompatible, MIN_API_REVISION, observed, offlineSince, ShellContext } from "./shell.tsx";
 import { Conflict, Disconnected, Empty, HUMAN_ONLY, Loading, NOT_ACCEPTED, NotAccepted, Offline, Refused, REPLAYED, Replayed, SET_ASIDE, SetAside, Unknown, UNKNOWN, Unread, Withheld, WITHHELD } from "./states.tsx";
 import { TRANSPORT_FAILURE } from "./request.ts";
 
@@ -83,6 +83,24 @@ describe("the shell", () => {
     c = connection(c, "online", t2);
     expect(offlineSince(c)).toEqual(t1);
     expect(offlineSince(connection(c, "answered", t2))).toBeUndefined();
+  });
+
+  test("offline: any answer the server gives ends a lost read, a refusal too; no answer is lost only after data was shown", () => {
+    const problem = { type: "urn:bronzeward:problem:not-found", title: "Not found", status: 404 };
+    for (const res of [
+      { kind: "ok" as const, data: {} },
+      { kind: "refused" as const, status: 404, problem },
+      { kind: "unavailable" as const, status: 503, problem: null },
+      { kind: "restart" as const, problem },
+      { kind: "defect" as const, message: "the response is not JSON" },
+    ]) {
+      expect(observed(res, true)).toBe("answered");
+      // After a lost read, the refusal clears the banner it would otherwise stay under.
+      expect(offlineSince(connection(connection({}, "lost", at("10:11")), observed(res, true)!, at("10:12")))).toBeUndefined();
+    }
+    expect(observed({ kind: "transport" }, true)).toBe("lost");
+    expect(observed({ kind: "transport" }, false)).toBeUndefined();
+    expect(observed({ kind: "discarded" }, true)).toBeUndefined();
   });
 
   test("§7 item 4: the deprecation notices render once each, as status messages", () => {

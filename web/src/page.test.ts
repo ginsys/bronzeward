@@ -86,6 +86,14 @@ describe("§9.5 renewals", () => {
     expect(await answer).toBe(false);
   });
 
+  // A shell read in flight when the page was refused answers 401 afterwards: no renewal is asked for.
+  test.each(["refused", "changed", "ended"] as const)("a retried request after the page moved to %s asks for no renewal", async (phase) => {
+    const h = harness();
+    h.page.to(phase);
+    expect(await h.t.renew()).toBe(false);
+    expect(h.renew).not.toHaveBeenCalled();
+  });
+
   // R6-F1: the timer is left armed (no stop()); the move alone keeps it from renewing.
   test.each(["refused", "changed", "ended"] as const)("R6-F1: after the page moves to %s, the timer neither renews nor redirects", async (phase) => {
     for (const byRedirect of [false, true]) {
