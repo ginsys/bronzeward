@@ -22,6 +22,9 @@ export interface Faults {
   missing?: string;
   // A 403 identity-revoked problem for this path, instead of the server's answer.
   revoked?: string;
+  // A 409 recovery-mode-active problem without a scope member for these paths, instead of the
+  // server's answer: a process restarted for recovery under the same epoch, its entry not yet made.
+  processRefused?: string[];
 }
 
 export interface Injector {
@@ -70,6 +73,10 @@ export function startInjector(upstream: string, port: number): Promise<Injector>
       if (f.revoked === route) {
         const problem = { type: "urn:bronzeward:problem:identity-revoked", title: "Identity revoked", status: 403, detail: "injected", instance: "req-injected" };
         return void res.writeHead(403, { "Content-Type": "application/problem+json" }).end(JSON.stringify(problem));
+      }
+      if (f.processRefused?.includes(route)) {
+        const problem = { type: "urn:bronzeward:problem:recovery-mode-active", title: "Recovery mode active", status: 409, detail: "injected", instance: "req-injected" };
+        return void res.writeHead(409, { "Content-Type": "application/problem+json" }).end(JSON.stringify(problem));
       }
       const headers = Object.fromEntries(Object.entries(req.headers).filter(([k]) => k !== "host" && k !== "connection")) as Record<string, string>;
       const sent = req.method === "GET" || req.method === "HEAD" ? null : new Uint8Array(await body(req));
