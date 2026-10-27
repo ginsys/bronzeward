@@ -16,7 +16,7 @@ export const NOT_ACCEPTED = "Not accepted by this installation. Sign in again.";
 // A time as the wireframes show it, 10:12.
 export const clock = (d: Date) => d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 
-export function Status({ children, actions, testid = "status" }: { children: ReactNode; actions?: ReactNode; testid?: string }) {
+export function Status({ children, actions, testid = "status" }: { children: ReactNode; actions?: ReactNode; testid?: string | undefined }) {
   return (
     <div>
       <p role="status" data-testid={testid}>{children}</p>
@@ -43,12 +43,12 @@ export const Unread = ({ at, causes }: { at: Date; causes: string[] }) => (
 
 // A Bronzeward problem: its code, rule, title, detail and instance (client contracts §8.2), never a
 // request body. Any other answer is named by its status alone.
-export function Refused({ problem, status, verb }: { problem: Problem | null; status: number; verb: "read" | "saved" }) {
-  if (problem === null) return <Status>Not {verb}: the server answered {status}.</Status>;
+export function Refused({ problem, status, verb, testid }: { problem: Problem | null; status: number; verb: "read" | "saved"; testid?: string }) {
+  if (problem === null) return <Status testid={testid}>Not {verb}: the server answered {status}.</Status>;
   const code = problem.type.slice("urn:bronzeward:problem:".length);
   const rule = typeof problem["rule"] === "string" ? ` (rule ${problem["rule"]})` : "";
   return (
-    <Status>
+    <Status testid={testid}>
       Not {verb}: {code}{rule}. {problem.title}{problem.detail !== undefined && `: ${problem.detail}`}
       {problem.instance !== undefined && ` Request ${problem.instance}.`}
     </Status>
@@ -94,7 +94,7 @@ export const Offline = ({ since, readAt }: { since: Date; readAt: Date | undefin
 );
 
 // No answer at all: the network, or a redirect the page refuses (client contracts §6 item 7).
-export const Disconnected = () => <Status>{TRANSPORT_FAILURE}</Status>;
+export const Disconnected = ({ testid }: { testid?: string }) => <Status testid={testid}>{TRANSPORT_FAILURE}</Status>;
 
 export const HumanOnly = () => <Status>{HUMAN_ONLY}</Status>;
 
