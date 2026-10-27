@@ -101,6 +101,8 @@ class Tab {
   ended: Promise<void> | undefined;
   // Called at each of this tab's lock queries, before it is answered.
   onQuery: (() => void) | undefined;
+  // When set, this tab's tab-lock requests are granted only once it settles.
+  tabGate: Promise<void> | undefined;
   // Frozen: messages wait, as do the settlements of its lock requests, until resume().
   #frozen: Promise<void> | undefined;
   #thaw = () => {};
@@ -108,7 +110,11 @@ class Tab {
 
   constructor(private readonly browser: Browser) {
     const locks: Locks = {
-      request: (name, options, callback) => this.#awake(browser.locks.request(name, options, callback)),
+      request: (name, options, callback) => {
+        const gate = name.startsWith(TAB) ? this.tabGate : undefined;
+        if (gate === undefined) return this.#awake(browser.locks.request(name, options, callback));
+        return this.#awake(gate.then(() => browser.locks.request(name, options, callback)));
+      },
       query: () => {
         const held = browser.locks.query();
         this.onQuery?.();
@@ -659,6 +665,26 @@ describe("#388 announced renewals", () => {
     await y.resumeLocksFirst();
     await settle();
     expect(y.signedOut).toBe(1);
+  });
+
+  test("a tab signed out while its rejoin waits for its new tab lock still tells the other tabs", async () => {
+    const b = new Browser();
+    const [x, y] = [b.open(), b.open()];
+    x.signIn(first());
+    await settle();
+    await y.join();
+    y.freeze();
+    const renewed = x.renewer.renew();
+    await vi.advanceTimersByTimeAsync(ACK_WAIT_MS);
+    expect(await renewed).toBe(true);
+    y.tabGate = new Promise(() => {});
+    y.resume();
+    await settle();
+    // y has lost its tab lock and asked for a new one, not yet granted; App then releases it.
+    y.renewer.signOut();
+    y.close();
+    await settle();
+    expect(x.signedOut).toBe(1);
   });
 
   // The holder sent r2 without waiting for y, whose tab lock it had taken: the pair bringing r2,

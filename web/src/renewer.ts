@@ -117,13 +117,19 @@ export class Renewer {
   // §9.7 item 2: tell the other tabs, before this one releases its channel.
   signOut(): void {
     this.#signedOut = true;
-    this.#channel?.postMessage({ type: "signed-out" });
+    this.#now({ type: "signed-out" });
   }
 
   // §9.3 item 3: just before the holder's renewal by the redirect, so that the next holder waits
   // for its pair rather than redirecting too (#388).
   redirecting(): void {
-    this.#channel?.postMessage({ type: "redirecting" });
+    this.#now({ type: "redirecting" });
+  }
+
+  // Posted at once, not when the channel opens: the page may be released first. While a rejoin
+  // waits for its new tab lock, the old channel still reaches the other tabs.
+  #now(m: Message): void {
+    (this.#channel ?? this.#stale.at(-1))?.postMessage(m);
   }
 
   // Signed in: wait for the lock and keep it until release().
