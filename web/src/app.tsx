@@ -136,8 +136,8 @@ export function App() {
         props: {
           auth: {
             token: () => session?.token(),
-            // A read that outlives the signed-in page asks for no renewal.
-            renew: async () => page.phase === "signed-in" && timer.renew(),
+            // A read that outlives the signed-in page asks for no renewal (renewals()).
+            renew: timer.renew,
             // The tokens go at once; the page moves to refused with the answer.
             onRevoked: () => {
               stop();
