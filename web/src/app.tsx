@@ -86,8 +86,11 @@ export function App() {
     addEventListener("pageshow", onShow);
 
     // The redirect to the provider, after the PKCE digest only while `still` holds.
-    const signIn = (config: ClientConfig, provider: Provider, still: () => boolean) =>
-      navigate(beginSignIn(config, provider, location.pathname + location.search + location.hash, sessionStorage, location.origin, still), still, (u) => location.assign(u));
+    const signIn = (config: ClientConfig, provider: Provider, still: () => boolean, before = () => {}) =>
+      navigate(beginSignIn(config, provider, location.pathname + location.search + location.hash, sessionStorage, location.origin, still), still, (u) => {
+        before();
+        location.assign(u);
+      });
     // The sign-in view. Its button is the operator's, so its mark is taken at the click.
     const offer = (message: string, config: ClientConfig, provider: Provider, more: { reading?: string | undefined; problem?: string | undefined } = {}) =>
       setView({ kind: "sign-in", message, ...more, signIn: () => void signIn(config, provider, page.mark()) });
@@ -109,7 +112,7 @@ export function App() {
         session: () => session,
         renew: () => renewer.renew(),
         holder: () => renewer.holder,
-        redirect: (still) => signIn(config, provider, still),
+        redirect: (still) => signIn(config, provider, still, () => renewer.redirecting()),
       });
       renewing = timer;
       timer.schedule();
