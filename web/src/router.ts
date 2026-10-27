@@ -13,19 +13,24 @@ export const PAGES = [
   ["/audit", "Audit"],
 ] as const;
 
-// The current path, and a navigation that adds a history entry.
-export function usePath(): [string, (to: string) => void] {
+// The current path, its query, and a navigation that adds a history entry. The query is tracked
+// apart from the path, so a query-only move (Back from ?cluster=c2 to ?cluster=c1) is seen too.
+export function usePath(): [string, (to: string) => void, string] {
   const [path, setPath] = useState(location.pathname);
-  useEffect(() => {
-    const on = () => setPath(location.pathname);
-    addEventListener("popstate", on);
-    return () => removeEventListener("popstate", on);
+  const [query, setQuery] = useState(location.search);
+  const here = useCallback(() => {
+    setPath(location.pathname);
+    setQuery(location.search);
   }, []);
+  useEffect(() => {
+    addEventListener("popstate", here);
+    return () => removeEventListener("popstate", here);
+  }, [here]);
   const go = useCallback((to: string) => {
     if (to !== location.pathname + location.search) history.pushState(null, "", to);
-    setPath(location.pathname);
-  }, []);
-  return [path, go];
+    here();
+  }, [here]);
+  return [path, go, query];
 }
 
 // A plain left click navigates in the page; any other keeps the browser's own handling.
