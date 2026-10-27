@@ -15,6 +15,8 @@ export interface Faults {
   hold?: { path: string; ms: number };
   // A 404 not-found problem for this path, instead of the server's answer.
   missing?: string;
+  // A 403 identity-revoked problem for this path, instead of the server's answer.
+  revoked?: string;
 }
 
 export interface Injector {
@@ -45,6 +47,10 @@ export function startInjector(upstream: string, port: number): Promise<Injector>
       if (f.missing === route) {
         const problem = { type: "urn:bronzeward:problem:not-found", title: "Not found", status: 404, detail: "injected", instance: "req-injected" };
         return void res.writeHead(404, { "Content-Type": "application/problem+json" }).end(JSON.stringify(problem));
+      }
+      if (f.revoked === route) {
+        const problem = { type: "urn:bronzeward:problem:identity-revoked", title: "Identity revoked", status: 403, detail: "injected", instance: "req-injected" };
+        return void res.writeHead(403, { "Content-Type": "application/problem+json" }).end(JSON.stringify(problem));
       }
       const headers = Object.fromEntries(Object.entries(req.headers).filter(([k]) => k !== "host" && k !== "connection")) as Record<string, string>;
       const sent = req.method === "GET" || req.method === "HEAD" ? null : new Uint8Array(await body(req));
