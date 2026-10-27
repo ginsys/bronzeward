@@ -175,25 +175,35 @@ func endpoint(raw, field string) error {
 	if u, err := url.Parse(raw); err == nil && (u.RawQuery != "" || u.ForceQuery) {
 		return fmt.Errorf("%s %q: give a URL with a host and no query, fragment or user", field, raw)
 	}
-	return providerEndpoint(raw, field)
+	return checkEndpoint(raw, fmt.Sprintf("%s %q", field, raw))
 }
 
 // providerEndpoint is endpoint for a URL the identity provider names (its token and revocation
-// endpoints, a redirect), which may carry a query, kept as it is. An empty fragment counts too:
-// url.Parse drops it. A URL that printable would change is refused: url.Parse admits C1 controls
-// and bytes that are not UTF-8, and the URL is shown in errors as it is (§6 item 4).
+// endpoints, a redirect), which may carry a query, kept as it is. The refusal shows the URL's scheme
+// and host at most: the rest is what the provider sent (remote.go).
 func providerEndpoint(raw, field string) error {
+	shown := field
+	if u, err := url.Parse(raw); err == nil && u.Host != "" {
+		shown = fmt.Sprintf("%s %s://%s", field, printable(u.Scheme), printable(u.Host))
+	}
+	return checkEndpoint(raw, shown)
+}
+
+// checkEndpoint refuses raw, shown in its refusal as shown. An empty fragment counts too: url.Parse
+// drops it. A URL that printable would change is refused: url.Parse admits C1 controls and bytes
+// that are not UTF-8, and a URL is shown in errors as it is (§6 item 4).
+func checkEndpoint(raw, shown string) error {
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" || strings.Contains(raw, "#") || u.User != nil {
-		return fmt.Errorf("%s %q: give a URL with a host and no fragment or user", field, raw)
+		return fmt.Errorf("%s: give a URL with a host and no fragment or user", shown)
 	}
 	if printable(raw) != raw {
-		return fmt.Errorf("%s %q: give a URL with no control characters", field, raw)
+		return fmt.Errorf("%s: give a URL with no control characters", shown)
 	}
 	if u.Scheme == "https" || u.Scheme == "http" && loopback(u.Hostname()) {
 		return nil
 	}
-	return fmt.Errorf("%s %q: must be https; plain http is accepted only to a loopback address", field, raw)
+	return fmt.Errorf("%s: must be https; plain http is accepted only to a loopback address", shown)
 }
 
 func loopback(host string) bool {

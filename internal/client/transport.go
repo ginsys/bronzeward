@@ -81,9 +81,10 @@ func newHTTPClient(x *Context, verbose io.Writer, from func(*http.Request) (*url
 			if errors.As(err, &v) && len(v.UnverifiedCertificates) > 0 {
 				c := v.UnverifiedCertificates[0]
 				return nil, &trust{fmt.Errorf("the certificate of the proxy %s (subject %q, issuer %q) is not trusted by the system trust store: %s; nothing was sent",
-					addr, c.Subject, c.Issuer, printable(v.Err.Error()))}
+					addr, c.Subject, c.Issuer, certReason(v.Err))}
 			}
-			return nil, fmt.Errorf("the proxy %s, verified by the system trust store: %w", addr, printableError(err))
+			// tls quotes, in its error, certificate contents it cannot parse.
+			return nil, fmt.Errorf("the proxy %s, verified by the system trust store: %w", addr, &remote{why(err, "the TLS handshake failed"), err})
 		}
 		return pc, nil
 	}
@@ -102,14 +103,22 @@ type trust struct{ error }
 // source when verification refused the server (§6 item 4); the request was not sent. Its text, and
 // any other transport error's, is printable.
 func transportError(x *Context, host string, err error) error {
+	if t := refusedTrust(x, host, err); t != nil {
+		return t
+	}
+	return printableError(err)
+}
+
+// refusedTrust is transportError's text for a refused certificate, or nil for any other error.
+func refusedTrust(x *Context, host string, err error) error {
 	var v *tls.CertificateVerificationError
 	if !errors.As(err, &v) || len(v.UnverifiedCertificates) == 0 {
-		return printableError(err)
+		return nil
 	}
 	c, source := v.UnverifiedCertificates[0], "the system trust store"
 	if x.CertificateAuthority != "" {
 		source = "the bundle " + x.CertificateAuthority
 	}
 	return &trust{fmt.Errorf("the certificate of %s (subject %q, issuer %q) is not trusted by %s: %s; nothing was sent",
-		host, c.Subject, c.Issuer, source, printable(v.Err.Error()))}
+		host, c.Subject, c.Issuer, source, certReason(v.Err))}
 }

@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"runtime/debug"
 	"slices"
@@ -88,6 +89,9 @@ func harden() error {
 		env := slices.DeleteFunc(os.Environ(), func(v string) bool { return strings.HasPrefix(v, "GOTRACEBACK=") })
 		return syscall.Exec(exe, os.Args, append(env, "GOTRACEBACK=none"))
 	}
+	// net/http logs to the standard logger text a peer sent, an unsolicited response quoted for one.
+	// bronzewardctl itself does not use that logger.
+	log.SetOutput(io.Discard)
 	return noCoreDumps()
 }
 

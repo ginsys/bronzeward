@@ -21,6 +21,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -203,11 +204,18 @@ func proxyAsTheProxyTestNamesIt(t *testing.T) { t.Setenv("HTTPS_PROXY", "http://
 // net/http would not let a handler send: a reason phrase with control characters, for one.
 func rawServer(t *testing.T, answers map[string]string) string {
 	t.Helper()
+	return rawAt(t, func(string) map[string]string { return answers })
+}
+
+// rawAt is rawServer with answers that name its own URL, given to them.
+func rawAt(t *testing.T, of func(base string) map[string]string) string {
+	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { l.Close() })
+	answers := of("http://" + l.Addr().String())
 	go func() {
 		for {
 			c, err := l.Accept()
@@ -218,8 +226,13 @@ func rawServer(t *testing.T, answers map[string]string) string {
 				defer c.Close()
 				br := bufio.NewReader(c)
 				line, _ := br.ReadString('\n')
+				n := 0
 				for h, err := br.ReadString('\n'); err == nil && h != "\r\n"; h, err = br.ReadString('\n') {
+					if k, v, ok := strings.Cut(h, ":"); ok && strings.EqualFold(k, "Content-Length") {
+						n, _ = strconv.Atoi(strings.TrimSpace(v))
+					}
 				}
+				io.CopyN(io.Discard, br, int64(n)) // a request body left unread would reset the connection
 				if f := strings.Fields(line); len(f) > 1 {
 					io.WriteString(c, answers[f[1]])
 				}
@@ -251,11 +264,13 @@ func TestServerTextIsPrintable(t *testing.T) {
 	}
 	c := &Client{Context: x, Notices: io.Discard, hc: hc, warned: map[string]bool{}, token: "BWSYNTH-token"}
 	once := func(path string) error { _, _, err := c.once(path); return err }
-	_, fetchErr := FetchClientConfig(x, srv, nil)
+	// The client-configuration host's reason phrase is not shown at all (remote.go).
+	if _, err := FetchClientConfig(x, srv, nil); err == nil || strings.Contains(err.Error(), "BWSYNTH") || !strings.Contains(err.Error(), "answered 404 Not Found") {
+		t.Errorf("client configuration: %q; want the status alone", err)
+	}
 	for name, err := range map[string]error{
 		"live": Live(x, nil), "live redirect": Live(&Context{Name: "lab", Server: moved, Credential: "automation"}, nil),
-		"client configuration": fetchErr,
-		"not a problem":        once("/plain"), "redirect": once("/redirect"), "cut-off answer": once("/cut"),
+		"not a problem": once("/plain"), "redirect": once("/redirect"), "cut-off answer": once("/cut"),
 	} {
 		if err == nil || hostile(err.Error()) || !strings.Contains(err.Error(), `BWSYNTH-\x1b[2J\x07phrase`) {
 			t.Errorf("%s: %q; want the reason phrase escaped", name, err)
