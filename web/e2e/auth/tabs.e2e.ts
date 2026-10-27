@@ -50,7 +50,9 @@ describe("several tabs", () => {
       await browser.switchToWindow(tab);
       await expect($('[data-testid="status"]')).toHaveText(PRINCIPAL_CHANGED, { wait: 20_000 });
       expect(await $('[data-testid="principal"]').isExisting()).toBe(false);
-      expect(await $("body").getText()).not.toMatch(/h-viewer|Server /);
+      // Nothing read under the old subject stays: no principal, no server version (§7 item 5).
+      expect(await $("body").getText()).not.toMatch(/h-viewer|API revision/);
+      expect(await $('[data-testid="server"]').getText()).toBe("Server unknown");
     }
     expect(await counts()).toMatchObject({ authorize: 1, refresh: 1, spent: 0 });
   });
