@@ -29,17 +29,21 @@ func FetchClientConfig(x *Context, from string, verbose io.Writer) (*ClientConfi
 	}
 	u, _ := url.Parse(from)
 	u.Path, u.RawPath = "/bronzeward-client.json", ""
+	// Nothing the host sent is shown but its status code (remote.go); u is the URL bronzewardctl formed.
 	r, err := hc.Get(u.String())
 	if err != nil {
-		return nil, transportError(x, u.Host, err)
+		if t := refusedTrust(x, u.Host, err); t != nil {
+			return nil, t
+		}
+		return nil, fmt.Errorf("GET %s: %w", u, remoteFailure(err))
 	}
 	defer r.Body.Close()
 	if r.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET %s answered %s, not the client configuration file; bronzewardctl follows no redirect", u, printable(r.Status))
+		return nil, fmt.Errorf("GET %s answered %d %s, not the client configuration file; bronzewardctl follows no redirect", u, r.StatusCode, http.StatusText(r.StatusCode))
 	}
 	var cc ClientConfig
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&cc); err != nil {
-		return nil, fmt.Errorf("GET %s: %w", u, err)
+		return nil, fmt.Errorf("GET %s: its answer could not be read as a client configuration file", u)
 	}
 	if cc.Issuer == "" || cc.CLIClientID == "" {
 		return nil, fmt.Errorf("GET %s: the file names no issuer or no cliClientId", u)

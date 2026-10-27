@@ -12,7 +12,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -342,15 +341,15 @@ func discover(x *Context) (context.Context, context.CancelFunc, *http.Client, *o
 	return ctx, cancel, hc, p, nil
 }
 
-// discoveryError is a failed discovery as shown. A transport error is the client's own. go-oidc's
-// other errors quote what the provider sent (its reason phrase, its response body, the issuer it
-// names), which is not shown: only the status of a refusal, which go-oidc puts first.
+// discoveryError is a failed discovery as shown. A transport error is shown as remoteFailure shows
+// it. go-oidc's other errors quote what the provider sent (its reason phrase, its response body, the
+// issuer it names), which is not shown: only the status of a refusal, which go-oidc puts first.
 func discoveryError(iss string, err error) error {
 	var ue *url.Error
 	var me *oidc.IssuerMismatchError
 	switch s := err.Error(); {
 	case errors.As(err, &ue):
-		return fmt.Errorf("cannot reach the identity provider %s: %w", iss, printableError(err))
+		return fmt.Errorf("cannot reach the identity provider %s: %w", iss, remoteFailure(err))
 	case errors.As(err, &me):
 		return fmt.Errorf("the identity provider %s: its discovery document names another issuer", iss)
 	case len(s) > 4 && s[3] == ' ':
@@ -396,7 +395,7 @@ func Revoke(x *Context, rt string) error {
 	once.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	r, err := once.Do(q)
 	if err != nil {
-		return fmt.Errorf("revoking at the identity provider %s: %w", x.OIDC.Issuer, printableError(err))
+		return fmt.Errorf("revoking at the identity provider %s: %w", x.OIDC.Issuer, remoteFailure(err))
 	}
 	defer r.Body.Close()
 	if r.StatusCode == http.StatusOK {
@@ -407,19 +406,6 @@ func Revoke(x *Context, rt string) error {
 	}
 	_ = json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&e) // a body that is no error document names no code
 	return fmt.Errorf("the identity provider %s refused the revocation: %s", x.OIDC.Issuer, refusal(r.StatusCode, e.Code))
-}
-
-// errorCode is an error code as RFC 6749 §5.2 allows one; anything else a provider sends is not shown.
-var errorCode = regexp.MustCompile(`^[\x20\x21\x23-\x5B\x5D-\x7E]{1,64}$`)
-
-// refusal is a provider's refusal as shown: the status code and its standard text, and the error
-// code when it is one. The provider's own reason phrase is not shown.
-func refusal(status int, code string) string {
-	s := fmt.Sprintf("%d %s", status, http.StatusText(status))
-	if errorCode.MatchString(code) {
-		s += " " + code
-	}
-	return s
 }
 
 // refresh redeems the refresh token at the provider's token endpoint, found by its discovery.
@@ -438,11 +424,16 @@ func refresh(x *Context, rt string) (*Tokens, error) {
 	conf := oauth2.Config{ClientID: x.OIDC.ClientID, Endpoint: ep, Scopes: x.OIDC.Scopes}
 	t, err := conf.TokenSource(ctx, &oauth2.Token{RefreshToken: rt}).Token()
 	var re *oauth2.RetrieveError
-	if errors.As(err, &re) {
+	var ue *url.Error
+	switch {
+	case errors.As(err, &re):
 		// The provider's own error code only: its response body is not shown.
 		return nil, fmt.Errorf("the identity provider %s refused the renewal: %s", x.OIDC.Issuer, refusal(re.Response.StatusCode, re.ErrorCode))
-	} else if err != nil {
-		return nil, fmt.Errorf("renewing at the identity provider %s: %w", x.OIDC.Issuer, printableError(err))
+	case errors.As(err, &ue), errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+		return nil, fmt.Errorf("renewing at the identity provider %s: %w", x.OIDC.Issuer, remoteFailure(err))
+	case err != nil:
+		// oauth2 quotes an answer it cannot decode, a token included.
+		return nil, fmt.Errorf("renewing at the identity provider %s: its answer could not be read", x.OIDC.Issuer)
 	}
 	return &Tokens{AccessToken: t.AccessToken, RefreshToken: t.RefreshToken}, nil
 }
@@ -458,7 +449,7 @@ func issuerClient(x *Context) (*http.Client, error) {
 	}
 	hc.CheckRedirect = func(r *http.Request, via []*http.Request) error {
 		if len(via) >= 10 || providerEndpoint(r.URL.String(), "redirect") != nil {
-			return fmt.Errorf("the identity provider redirected to %s, which bronzewardctl does not follow", r.URL.Redacted())
+			return &refusedRedirect{to: r.URL, many: len(via) >= 10}
 		}
 		return nil
 	}

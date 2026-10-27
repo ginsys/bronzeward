@@ -314,7 +314,15 @@ it. It holds no secret.
    reason phrase of every status shown and each member of a problem document
    (`internal/client/printable.go`). A server or issuer URL that holds a character the escaping
    would change is refused before any request uses it, as is such an endpoint or redirect the
-   identity provider names.
+   identity provider names. Toward the identity provider and the host `context add --from` reads,
+   which may send a token in any of them, an error shows nothing those sent beyond the status code
+   with its standard text and an error code RFC 6749, RFC 7009, RFC 8628 or OpenID Connect Core 1.0
+   defines: no reason phrase, body, `error_description`, header or value decoded from the answer,
+   and of a redirect target or a named endpoint only its scheme and host. A transport failure is
+   named by its type (refused, reset, timed out, name not resolved, TLS alert), and a refused
+   certificate by its host-name mismatch, which lists its names, or by a fixed reason
+   (`internal/client/remote.go`). The standard library's log, which net/http writes a peer's text
+   to, is discarded. The server's own text keeps the rule above.
 5. Certificate pinning is not offered: a bundle per context limits trust enough for this
    milestone, and pinning a leaf breaks on every renewal.
 6. The browser uses the browser's own trust and has no override.
@@ -940,7 +948,7 @@ and the expired-token text, are the CLI's
 | Identity revoked in Bronzeward, or listed in `deniedSubjects` | `403 identity-revoked` (`internal/api/api.go:316-317`) for both. A recorded revocation is permanent (`internal/api/revocations.go:122`); a `deniedSubjects` entry is deployment configuration and lasts while the entry does (`internal/auth/auth.go:186-187`, `internal/auth/automation.go:45`) | "Your access was revoked or is denied by this installation; contact a recovery administrator." Clear the stored credential as in [§8.2](#82-errors), never an operator-supplied automation token file; no automatic new sign-in, which would be refused the same way. The client cannot tell the two causes apart |
 | Automation token revoked, rotated or from an earlier epoch | `401` (`internal/auth/automation.go:47-52`) | "The automation token was not accepted: it may be revoked, rotated, expired or from before a restore. The operator reissues it with the server-side command." |
 | Provider or database unreachable from the server | `503 dependency-unavailable`, nothing committed | retry as [§8.2](#82-errors) |
-| Provider unreachable from the client | no request reaches the server | keep using the current token until it is refused; then "Cannot reach the identity provider `<issuer>`" |
+| Provider unreachable from the client | no request reaches the server | keep using the current token until it is refused; then "Cannot reach the identity provider `<issuer>`", with the cause by its type ([§6](#6-tls-trust) item 4) |
 
 ### 9.7 Sign-out and cache clearing
 
@@ -957,6 +965,7 @@ expiry, at most `maxTokenLifetime` after issue, plus the server's 60 s leeway
    issued remains valid at the server for up to its remaining lifetime plus that leeway. The
    endpoint is the `revocation_endpoint` of the provider's discovery (RFC 7009, sent as a public
    client). The revocation request follows no redirect, so a 3xx answer is a refused revocation.
+   A refusal shows the status and a standard error code only ([§6](#6-tls-trust) item 4).
    Without a `revocation_endpoint`, logout says the refresh token is not revoked; a refused or failed
    revocation still deletes the tokens, says the refresh token is not revoked and exits 1.
 2. The web sign-out discards the in-memory tokens and every cached response, revokes the last
