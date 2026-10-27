@@ -71,11 +71,12 @@ class Browser {
   channel(tab: Tab): Channel {
     const c: Channel = {
       onmessage: null,
+      // Serialized at the post, and deserialized for each destination.
       postMessage: (m: Message) => {
-        const copy = structuredClone(m);
+        const sent = structuredClone(m);
         const to = [...this.channels].filter(([o]) => o !== c);
         queueMicrotask(() => {
-          for (const [o, t] of to) if (this.channels.has(o)) t.deliver(o, copy);
+          for (const [o, t] of to) if (this.channels.has(o)) t.deliver(o, structuredClone(sent));
         });
       },
       close: () => void this.channels.delete(c),
@@ -90,6 +91,8 @@ class Tab {
   readonly renewer: Renewer;
   readonly pairs: Tokens[] = [];
   signedOut = 0;
+  // Called at each of this tab's lock queries, before it is answered.
+  onQuery: (() => void) | undefined;
   // Frozen: messages wait, as do the settlements of its lock requests, until resume().
   #frozen: Promise<void> | undefined;
   #thaw = () => {};
@@ -98,7 +101,11 @@ class Tab {
   constructor(private readonly browser: Browser) {
     const locks: Locks = {
       request: (name, options, callback) => this.#awake(browser.locks.request(name, options, callback)),
-      query: () => browser.locks.query(),
+      query: () => {
+        const held = browser.locks.query();
+        this.onQuery?.();
+        return held;
+      },
     };
     this.renewer = new Renewer(() => browser.channel(this), locks, () => this.session, (t) => {
       this.pairs.push(t);
@@ -519,6 +526,20 @@ describe("#388 announced renewals", () => {
     expect(await tabLocks(b)).toBe(1);
   });
 
+  test("a holder released while its last lock query is answered sends nothing", async () => {
+    const b = new Browser();
+    const [x, y] = [b.open(), b.open()];
+    x.signIn(first());
+    await settle();
+    await y.join();
+    let queries = 0;
+    // Another tab's sign-out reaches x between its own-lock query and the answer.
+    x.onQuery = () => void (++queries === 2 && x.renewer.release());
+    expect(await x.renewer.renew()).toBe(false);
+    expect(queries).toBe(2);
+    expect(b.sent).toEqual([]);
+  });
+
   test("a released tab is not waited on, and still hears another tab's sign-out", async () => {
     const b = new Browser();
     const [x, y] = [b.open(), b.open()];
@@ -534,19 +555,24 @@ describe("#388 announced renewals", () => {
   });
 
   test.each([
-    ["takes the redirect's pair", true],
-    ["renews by the redirect itself after REDIRECT_WAIT_MS", false],
-  ] as const)("granted the lock while it waits, a tab without a rotating refresh token %s", async (_name, back) => {
+    ["while it asks, takes the redirect's pair", true, true],
+    ["while it asks, renews by the redirect itself after REDIRECT_WAIT_MS", true, false],
+    ["before its own threshold, takes the redirect's pair", false, true],
+    ["before its own threshold, renews by the redirect itself after REDIRECT_WAIT_MS", false, false],
+  ] as const)("granted the lock %s", async (_name, asking, back) => {
     const b = new Browser();
     const [x, y] = [b.open(), b.open()];
     x.signIn(first({ refresh: undefined }));
     await settle();
     await y.join();
     expect(y.session?.byRedirect).toBe(true);
-    const asked = y.renewer.renew();
+    const asked = asking ? y.renewer.renew() : undefined;
     await settle();
-    // The holder renews by the redirect: pagehide, then the callback posts the pair it brings.
+    // The holder renews by the redirect: `redirecting`, pagehide, then the callback posts the pair.
+    x.renewer.redirecting();
     x.close();
+    await settle();
+    const renewed = asked ?? y.renewer.renew();
     await vi.advanceTimersByTimeAsync(REDIRECT_WAIT_MS - 1);
     expect(y.renewer.holder).toBe(true);
     if (back) {
@@ -554,7 +580,7 @@ describe("#388 announced renewals", () => {
       b.open().renewer.post(pair);
     }
     await vi.advanceTimersByTimeAsync(1);
-    expect(await asked).toBe(back);
+    expect(await renewed).toBe(back);
     expect(y.session?.token()).toBe(back ? "SYNTH-a9" : "SYNTH-a1");
     expect(b.sent).toEqual([]);
   });
