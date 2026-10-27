@@ -87,7 +87,9 @@ export function renewals(page: PageState, deps: RenewalDeps) {
   };
   return {
     schedule,
+    // A read that outlives the signed-in page (its 401 answered after a refusal) asks for none.
     renew: async () => {
+      if (page.phase !== "signed-in") return false;
       const still = page.mark();
       if (!(await deps.renew()) || !still()) return false;
       schedule();

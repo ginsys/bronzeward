@@ -92,6 +92,14 @@ export function connection(c: Connection, e: ConnectionEvent, at: Date): Connect
       return { ...c, lost: undefined };
   }
 }
+// What a read's result says about the connection: any answer the server gave (data, a refusal, a
+// problem) is "answered"; no answer is "lost" only once this resource's data was shown, which stays
+// under the banner (otherwise the read shows the disconnected state); a discarded read says nothing.
+export function observed(res: ReadResult<unknown>, shown: boolean): ConnectionEvent | undefined {
+  if (res.kind === "discarded") return undefined;
+  if (res.kind !== "transport") return "answered";
+  return shown ? "lost" : undefined;
+}
 // Offline since the earlier cause, undefined while neither holds.
 export const offlineSince = ({ down, lost }: Connection) => (down === undefined || (lost !== undefined && lost < down) ? lost : down);
 
@@ -120,11 +128,13 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
     if (res.kind === "discarded") return;
     if (res.kind === "unauthenticated") return onUnauthenticated(res);
     if (res.kind === "revoked") return onRevoked(res);
-    if (res.kind === "transport" && shown.current[what]) return observe(["lost", new Date()]);
+    const now = new Date();
+    const e = observed(res, shown.current[what]);
+    if (e !== undefined) observe([e, now]);
+    if (e === "lost") return;
     if (res.kind === "ok") {
       shown.current[what] = true;
-      readAt.current = new Date();
-      observe(["answered", readAt.current]);
+      readAt.current = now;
     }
     set(res);
   }, [onUnauthenticated, onRevoked]);
