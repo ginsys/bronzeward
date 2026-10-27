@@ -838,7 +838,8 @@ current token expires
      lock is granted, and posts a request. Its old channel still delivers what was posted to it
      before, of which the tab takes only a `signed-out` and the tokens a `renewing` names, never a
      pair: the holder may have sent a pair's refresh token without waiting for this tab, before its
-     `renewing` naming it arrives. It then takes the holder's current pair, even one of the same expiry as its own, or, granted the
+     `renewing` naming it arrives. Until the new channel opens, its own `signed-out` and
+     `redirecting` go out on the old one. It then takes the holder's current pair, even one of the same expiry as its own, or, granted the
      renewer lock first, renews by the redirect. A holder whose own tab lock was taken before it
      sent sends nothing, and does the same. A tab that stops for good (`pagehide`, sign-out, the
      signed-out page) gives up its tab lock and is not waited for. A tab's own sign-in redirect
