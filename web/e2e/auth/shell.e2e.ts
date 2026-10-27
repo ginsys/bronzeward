@@ -1,7 +1,7 @@
 // COMP-01, COMP-02 (conformance/cases/) and the shell's header, navigation and states: the fixture
 // page against the server that trusts the fixture issuer, through the injector.
 import { $, $$, browser, expect } from "@wdio/globals";
-import { NOT_ACCEPTED } from "../../src/app.tsx";
+import { NOT_ACCEPTED, REVOKED } from "../../src/app.tsx";
 import { deprecated, incompatible } from "../../src/shell.tsx";
 import { TRANSPORT_FAILURE } from "../../src/request.ts";
 import { CONTROL, FIXTURE_API, FIXTURE_PAGE } from "../auth.conf.ts";
@@ -171,18 +171,36 @@ describe("the state catalogue", () => {
     expect(await seen()).toEqual(["/server", "/identity", "/identity", "/identity"]);
   });
 
-  it("offline: a read an online event superseded is ignored when it completes", async () => {
+  it("offline: a read an online event superseded is ignored when it completes, and the newer answer shown", async () => {
     await fixtureSignIn("h-viewer");
-    await faults({ hold: { path: "/identity", ms: 3000 }, missing: "/identity" });
+    await faults({ missing: "/identity" });
     await event("online");
-    await reads(3);
-    await faults({});
+    await announced("status", "Not read: not-found. Not found: injected Request req-injected.");
+    await faults({ hold: { path: "/identity", ms: 4000 }, missing: "/identity" });
     await event("online");
     await reads(4);
-    // The held read's refusal arrives after the newer read's data and must not replace it.
+    await faults({});
+    await event("online");
+    // The newer read's data replaces the refusal before the held read answers.
+    await expect(testid("principal")).toHaveText("Signed in as h-viewer", { wait: 3000 });
+    // The held read's refusal arrives after it and must not replace it.
     await browser.pause(4000);
     expect(await testid("principal").getText()).toBe("Signed in as h-viewer");
     expect(await testid("status").isExisting()).toBe(false);
+  });
+
+  it("offline: identity-revoked on a superseded read still ends the page with the revocation", async () => {
+    await fixtureSignIn("h-viewer");
+    await faults({ hold: { path: "/identity", ms: 3000 }, revoked: "/identity" });
+    await event("online");
+    await reads(3);
+    await faults({ redirect: "/identity" });
+    await event("online");
+    await reads(4);
+    // The newer read lost its answer; the old read's revocation still ends the page.
+    await expect(testid("status")).toHaveText(REVOKED, { wait: 10_000 });
+    expect(await testid("principal").isExisting()).toBe(false);
+    expect(await $("footer").getText()).toMatch(/^Client .+\. Server unknown$/);
   });
 });
 
