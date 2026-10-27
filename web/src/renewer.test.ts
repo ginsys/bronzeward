@@ -5,7 +5,7 @@ import { ACK_WAIT_MS, type Channel, JOIN_WAIT_MS, type Locks, type Message, REDI
 
 const ISSUER = "http://localhost:58280";
 const config: ClientConfig = { issuer: ISSUER, audience: "bronzeward", cliClientId: "cli", webClientId: "web", scopes: [] };
-const provider: Provider = { issuer: ISSUER, authorizationEndpoint: `${ISSUER}/a`, tokenEndpoint: `${ISSUER}/t`, revocationEndpoint: undefined, endSessionEndpoint: undefined };
+const provider: Provider = { issuer: ISSUER, authorizationEndpoint: `${ISSUER}/a`, tokenEndpoint: `${ISSUER}/t`, revocationEndpoint: `${ISSUER}/r`, endSessionEndpoint: undefined };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
 // Exclusive locks by name, each granted in request order, as navigator.locks grants them
@@ -46,6 +46,7 @@ class Browser {
   // was posted that are still open when it is delivered, the sender's excepted.
   readonly channels = new Map<Channel, Tab>();
   readonly sent: string[] = [];
+  readonly revoked: string[] = [];
   latest = "SYNTH-r1";
   hang = false;
   // Answers wait for this, when set.
@@ -53,8 +54,13 @@ class Browser {
   // The access-token lifetime of each answer, in seconds.
   lifetime = 300;
   #n = 1;
-  readonly fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
-    const refresh = new URLSearchParams(init?.body as URLSearchParams).get("refresh_token") ?? "";
+  readonly fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+    const form = new URLSearchParams(init?.body as URLSearchParams);
+    if (url === provider.revocationEndpoint) {
+      this.revoked.push(form.get("token") ?? "");
+      return new Response(null, { status: 200 });
+    }
+    const refresh = form.get("refresh_token") ?? "";
     this.sent.push(refresh);
     if (this.hang) return new Promise<Response>(() => {});
     await this.delay;
@@ -91,6 +97,8 @@ class Tab {
   readonly renewer: Renewer;
   readonly pairs: Tokens[] = [];
   signedOut = 0;
+  // Settled once the session has revoked what it held after another tab's sign-out.
+  ended: Promise<void> | undefined;
   // Called at each of this tab's lock queries, before it is answered.
   onQuery: (() => void) | undefined;
   // Frozen: messages wait, as do the settlements of its lock requests, until resume().
@@ -110,7 +118,10 @@ class Tab {
     this.renewer = new Renewer(() => browser.channel(this), locks, () => this.session, (t) => {
       this.pairs.push(t);
       this.session?.adopt(t);
-    }, () => this.signedOut++);
+    }, (ended) => {
+      this.signedOut++;
+      this.ended = ended;
+    });
   }
 
   deliver(c: Channel, m: Message) {
@@ -127,6 +138,13 @@ class Tab {
     this.#frozen = undefined;
     for (const [c, m] of this.#queued.splice(0)) if (this.browser.channels.has(c)) this.deliver(c, m);
     this.#thaw();
+  }
+
+  // The other way round: they are separate task sources, in no defined order.
+  async resumeLocksFirst() {
+    this.#thaw();
+    await settle();
+    this.resume();
   }
 
   #awake<T>(p: Promise<T>): Promise<T> {
@@ -587,5 +605,76 @@ describe("#388 announced renewals", () => {
     expect(await renewed).toBe(back);
     expect(y.session?.token()).toBe(back ? "SYNTH-a9" : "SYNTH-a1");
     expect(b.sent).toEqual([]);
+  });
+
+  test("a holder renewed just before another tab's sign-out revokes the pair it holds, which that tab never had", async () => {
+    const b = new Browser();
+    const [x, y] = [b.open(), b.open()];
+    x.signIn(first());
+    await settle();
+    await y.join();
+    y.freeze();
+    const renewed = x.renewer.renew();
+    await vi.advanceTimersByTimeAsync(ACK_WAIT_MS);
+    expect(await renewed).toBe(true);
+    // y, frozen, has not had the new pair: its sign-out revokes the token it last held.
+    const out = y.session?.signOut("http://localhost");
+    y.renewer.signOut();
+    await settle();
+    expect(x.signedOut).toBe(1);
+    await x.ended;
+    await out;
+    expect(b.revoked.sort()).toEqual(["SYNTH-r1", "SYNTH-r2"]);
+    expect(x.session?.token()).toBeUndefined();
+  });
+
+  test("a sign-out is acted on once: another tab's after this tab's own, or a second one, changes nothing", async () => {
+    const b = new Browser();
+    const [x, y, z] = [b.open(), b.open(), b.open()];
+    x.signIn(first());
+    await settle();
+    await y.join();
+    await z.join();
+    y.renewer.signOut();
+    z.renewer.signOut();
+    await settle();
+    expect([x.signedOut, y.signedOut, z.signedOut]).toEqual([1, 0, 0]);
+  });
+
+  test("a resumed tab whose lock was taken still hears a sign-out posted while it was frozen, its lock's loss handled first", async () => {
+    const b = new Browser();
+    const [x, y, z] = [b.open(), b.open(), b.open()];
+    x.signIn(first());
+    await settle();
+    await y.join();
+    await z.join();
+    y.freeze();
+    const renewed = x.renewer.renew();
+    await vi.advanceTimersByTimeAsync(ACK_WAIT_MS);
+    expect(await renewed).toBe(true);
+    z.renewer.signOut();
+    await settle();
+    await y.resumeLocksFirst();
+    await settle();
+    expect(y.signedOut).toBe(1);
+  });
+
+  test("a tab released before its tab lock is granted does not wait for its channel", async () => {
+    const b = new Browser();
+    let grant = () => {};
+    const locks: Locks = {
+      request: (name, options, callback) =>
+        name.startsWith(TAB) ? new Promise((done) => (grant = () => void Promise.resolve(callback()).then(done))) : b.locks.request(name, options, callback),
+      query: () => b.locks.query(),
+    };
+    const r = new Renewer(() => {
+      throw new Error("no channel for a released tab");
+    }, locks, () => undefined, () => {});
+    let joined = false;
+    void r.join().then(() => (joined = true));
+    r.release();
+    grant();
+    await settle();
+    expect(joined).toBe(true);
   });
 });

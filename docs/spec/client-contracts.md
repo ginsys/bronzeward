@@ -825,8 +825,9 @@ current token expires
      can hold the token only from a message posted after its channel opened, so after its tab lock
      was granted and before the holder's query: each such tab has acked or lost its lock.
    - A tab whose tab lock was taken (frozen, suspended, or silent for 3 s) may have missed a
-     `renewing`. It gives up its refresh token, takes a new tab lock and posts a request. It then
-     takes the holder's current pair, even one of the same expiry as its own, or, granted the
+     `renewing`. It gives up its refresh token, takes a new tab lock and posts a request, on the
+     channel it has, so that no message already posted to it, a `signed-out` among them, is lost.
+     It then takes the holder's current pair, even one of the same expiry as its own, or, granted the
      renewer lock first, renews by the redirect. A holder whose own tab lock was taken before it
      sent sends nothing, and does the same. A tab that stops for good (`pagehide`, sign-out, the
      signed-out page) gives up its tab lock and is not waited for. A tab's own sign-in redirect
@@ -1006,8 +1007,11 @@ expiry, at most `maxTokenLifetime` after issue, plus the server's 60 s leeway
    would accept it as a bearer token, and a URL keeps it in history and provider logs. Without the
    hint that provider sends the browser through its login UI's logout page. It then shows a
    signed-out page that holds no data. A tab told of another tab's sign-out hides what it shows at
-   once, waits at most 5 s for a renewal in flight to revoke the pair it brings, then shows the
-   signed-out page, which holds no lock and records no other tab's refresh token
+   once and revokes the last refresh token it holds, as its own sign-out would, since the other
+   tab may not have had it (a renewal answered just before its message). It waits at most 5 s for
+   that and for a renewal in flight to revoke the pair it brings, then shows the signed-out page,
+   which holds no lock and records no other tab's refresh token. A tab acts on one sign-out only:
+   a second tab's, or one after its own, would cut that wait short
    ([#388](https://github.com/ginsys/bronzeward/issues/388)).
 3. After sign-out, the browser's back button shows no data from before: the web pages are served
    `Cache-Control: no-store`, the application clears its state on `pagehide` and on a page
