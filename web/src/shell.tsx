@@ -103,12 +103,21 @@ export function observed(res: ReadResult<unknown>, shown: boolean): ConnectionEv
 // Offline since the earlier cause, undefined while neither holds.
 export const offlineSince = ({ down, lost }: Connection) => (down === undefined || (lost !== undefined && lost < down) ? lost : down);
 
+// §7 item 5: the client's version and the server's, "unknown" while its read is refused; the views
+// a refusal ends the shell with show it too.
+export const VersionFooter = ({ server }: { server?: Server | undefined }) => (
+  <footer>
+    Client {clientVersion()}.{" "}
+    <span data-testid="server">{server !== undefined ? `Server ${server.version}, API revision ${server.apiRevision}` : "Server unknown"}</span>
+  </footer>
+);
+
 // §7 item 4: each deprecated route, once per page load.
 export const Deprecations = ({ routes }: { routes: readonly string[] }) =>
   routes.map((route) => <Status key={route} testid="deprecation">{deprecated(route)}</Status>);
 
 export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, onDeprecation, signOut, notices = [] }: SignedInProps & { notices?: readonly string[] }) {
-  const [path, go] = usePath();
+  const [path, go, query] = usePath();
   const [client] = useState(() => {
     const c = new Client({ ...auth, onDeprecation });
     c.setView({ principal, route: location.pathname, query: location.search });
@@ -132,29 +141,34 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
     const e = observed(res, shown.current[what]);
     if (e !== undefined) observe([e, now]);
     if (e === "lost") return;
-    if (res.kind === "ok") {
-      shown.current[what] = true;
-      readAt.current = now;
-    }
+    // A refusal replaces the data, so a later read without answer has nothing to keep shown.
+    shown.current[what] = res.kind === "ok";
+    if (res.kind === "ok") readAt.current = now;
     set(res);
   }, [onUnauthenticated, onRevoked]);
 
   // Reads still in flight when the shell goes (a refusal, sign-out) are discarded, and renew no more.
   useEffect(() => () => client.setView({ principal: "", route: "", query: "" }), [client]);
 
-  // Read until it answers with data; again when the browser is back online.
+  // Read until it answers with data; again when the browser is back online. A read an online event
+  // or a new page superseded is ignored when it completes, so it cannot replace a newer answer.
   const known = server.kind === "ok";
   useEffect(() => {
-    if (!known) void client.read<Server>("/server").then((res) => settle(res, setServer, "server"));
+    if (known) return;
+    let live = true;
+    void client.read<Server>("/server").then((res) => live && settle(res, setServer, "server"));
+    return () => void (live = false);
   }, [client, known, online, settle]);
 
   // The header's identity, read again on every page and when the browser is back online.
   const compatible = known && server.data.apiRevision >= MIN_API_REVISION;
   useEffect(() => {
     if (!compatible) return;
-    client.setView({ principal, route: path, query: location.search });
-    void client.read<Identity>("/identity").then((res) => settle(res, setIdentity, "identity"));
-  }, [client, compatible, path, principal, online, settle]);
+    client.setView({ principal, route: path, query });
+    let live = true;
+    void client.read<Identity>("/identity").then((res) => live && settle(res, setIdentity, "identity"));
+    return () => void (live = false);
+  }, [client, compatible, path, query, principal, online, settle]);
 
   useEffect(() => {
     const down = () => observe(["offline", new Date()]);
@@ -164,6 +178,8 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
     };
     addEventListener("offline", down);
     addEventListener("online", up);
+    // A browser already offline when the shell came sent no event.
+    if (!navigator.onLine) down();
     return () => {
       removeEventListener("offline", down);
       removeEventListener("online", up);
@@ -202,10 +218,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
         )}
       </header>
       <main>{main}</main>
-      <footer>
-        Client {clientVersion()}.{" "}
-        <span data-testid="server">{server.kind === "ok" ? `Server ${server.data.version}, API revision ${server.data.apiRevision}` : "Server unknown"}</span>
-      </footer>
+      <VersionFooter server={server.kind === "ok" ? server.data : undefined} />
     </ShellContext>
   );
 }

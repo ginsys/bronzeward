@@ -8,7 +8,7 @@ import { type ClientConfig, loadClientConfig } from "./config.ts";
 import { navigate, PageState, renewals } from "./page.ts";
 import { type Message, Renewer } from "./renewer.ts";
 import { TRANSPORT_FAILURE } from "./request.ts";
-import { Deprecations, SignedIn, type SignedInProps } from "./shell.tsx";
+import { Deprecations, SignedIn, type SignedInProps, VersionFooter } from "./shell.tsx";
 import { NOT_ACCEPTED, ProblemFields, problemFields } from "./states.tsx";
 
 // §9.6 texts. The server says only `401`, so the page never names a cause it cannot read.
@@ -243,11 +243,16 @@ export function Screen({ view, notices = [] }: { view: View; notices?: readonly 
   }
 }
 
+// Every view outside the shell, a refusal that ended it included, has no server answer to show
+// (client contracts §7 item 5).
 function Page({ children }: { children: ReactNode }) {
   return (
-    <main>
-      <h1>Bronzeward</h1>
-      {children}
-    </main>
+    <>
+      <main>
+        <h1>Bronzeward</h1>
+        {children}
+      </main>
+      <VersionFooter />
+    </>
   );
 }
