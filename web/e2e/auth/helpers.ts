@@ -15,17 +15,21 @@ export const param = (name: string) => browser.execute((n: string) => new URLSea
 export const status = () => $('[data-testid="status"]').getText();
 
 // Waits until the page is back on `page`/ with its reads settled: the page's state text, or the
-// footer's server versions once the shell shows a page. Read in one step in the page: a state
-// text gone between two WebDriver calls would hold the second for its whole implicit wait.
+// footer's server versions once the shell shows a page. Checked and read in one step in the page:
+// an element a re-render replaced between two WebDriver calls would be stale for the second.
 export async function settled(page: string): Promise<string> {
-  const shown = () => browser.execute(() => {
-    const s = document.querySelector('[data-testid="status"]');
-    return s === null ? document.querySelector("main h2") !== null : !(s.textContent ?? "").startsWith("Loading");
-  });
-  await browser.waitUntil(async () => (await where()) === `${page}/` && (await shown()), {
-    timeout: 20_000, timeoutMsg: `the page did not settle on ${page}/`,
-  });
-  return (await $('[data-testid="status"]').isExisting()) ? status() : $('[data-testid="server"]').getText();
+  let text: string | null = null;
+  await browser.waitUntil(async () => {
+    text = await browser.execute((want: string) => {
+      if (location.origin + location.pathname !== want) return null;
+      const s = document.querySelector<HTMLElement>('[data-testid="status"]');
+      if (s !== null) return (s.textContent ?? "").startsWith("Loading") ? null : s.innerText.trim();
+      if (document.querySelector("main h2") === null) return null;
+      return document.querySelector<HTMLElement>('[data-testid="server"]')?.innerText.trim() ?? null;
+    }, `${page}/`);
+    return text !== null;
+  }, { timeout: 20_000, timeoutMsg: `the page did not settle on ${page}/` });
+  return text as unknown as string;
 }
 
 // A token the fixture issuer mints, under the synthetic provider's issuer.
