@@ -212,6 +212,27 @@ func (e PlanInputOperation) Valid() bool {
 	}
 }
 
+// Defines values for PrincipalBodyKind.
+const (
+	PrincipalBodyKindHuman   PrincipalBodyKind = "human"
+	PrincipalBodyKindService PrincipalBodyKind = "service"
+	PrincipalBodyKindUnknown PrincipalBodyKind = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the PrincipalBodyKind enum.
+func (e PrincipalBodyKind) Valid() bool {
+	switch e {
+	case PrincipalBodyKindHuman:
+		return true
+	case PrincipalBodyKindService:
+		return true
+	case PrincipalBodyKindUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ProblemType.
 const (
 	ProblemTypeUrnBronzewardProblemConflict                ProblemType = "urn:bronzeward:problem:conflict"
@@ -1482,6 +1503,27 @@ type PlanValidation struct {
 	Result            string `json:"result"`
 }
 
+// PrincipalBody What one principal identifier names (persistence and API §9.2). A member that does not apply to its kind is null. Nothing else of the row is served, its revocation and responsible human included.
+type PrincipalBody struct {
+	// Id The identifier as given.
+	Id string `json:"id"`
+
+	// Issuer A human's token issuer; null otherwise.
+	Issuer *string `json:"issuer"`
+
+	// Kind unknown for an identifier no row holds.
+	Kind PrincipalBodyKind `json:"kind"`
+
+	// Service The service identity's name; null otherwise.
+	Service *string `json:"service"`
+
+	// Subject A human's token subject; null otherwise.
+	Subject *string `json:"subject"`
+}
+
+// PrincipalBodyKind unknown for an identifier no row holds.
+type PrincipalBodyKind string
+
 // Problem RFC 9457. Extension members depend on the problem type.
 type Problem struct {
 	Detail               *string                `json:"detail,omitempty"`
@@ -2414,6 +2456,11 @@ type PostPlansIdCancellationsParams struct {
 
 	// BronzewardExpectedEpoch Optional; the epoch identity the client expects. When the key has no record and this names another epoch, the request is refused 412 epoch-mismatch and its own transaction commits nothing. An empty one or two of them are 400 invalid-request (API revision 2; persistence and API §7.2, §9.1).
 	BronzewardExpectedEpoch *ExpectedEpoch `json:"Bronzeward-Expected-Epoch,omitempty"`
+}
+
+// GetPrincipalsParams defines parameters for GetPrincipals.
+type GetPrincipalsParams struct {
+	Id []string `form:"id" json:"id"`
 }
 
 // GetProfilesParams defines parameters for GetProfiles.
