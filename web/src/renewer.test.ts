@@ -140,10 +140,12 @@ class Tab {
     this.#thaw();
   }
 
-  // The other way round: they are separate task sources, in no defined order.
-  async resumeLocksFirst() {
+  // The other way round: they are separate task sources, in no defined order. Only the first
+  // `messages` are delivered; the test ends before the others arrive.
+  async resumeLocksFirst(messages = Infinity) {
     this.#thaw();
     await settle();
+    this.#queued.splice(messages);
     this.resume();
   }
 
@@ -657,6 +659,29 @@ describe("#388 announced renewals", () => {
     await y.resumeLocksFirst();
     await settle();
     expect(y.signedOut).toBe(1);
+  });
+
+  // The holder sent r2 without waiting for y, whose tab lock it had taken: the pair bringing r2,
+  // posted before y rejoined, must not let y send r2 before the `renewing` naming it arrives.
+  test("a rejoined tab takes no pair posted before it rejoined", async () => {
+    const b = new Browser();
+    const [x, y] = [b.open(), b.open()];
+    x.signIn(first());
+    await settle();
+    await y.join();
+    y.freeze();
+    const one = x.renewer.renew();
+    await vi.advanceTimersByTimeAsync(ACK_WAIT_MS);
+    expect(await one).toBe(true);
+    expect(await x.renewer.renew()).toBe(true);
+    expect(b.sent).toEqual(["SYNTH-r1", "SYNTH-r2"]);
+    x.close();
+    // Queued at y: renewing r1, pair r2, renewing r2, pair r3. Its lock's loss first, then two.
+    await y.resumeLocksFirst(2);
+    await settle();
+    expect(y.renewer.holder).toBe(true);
+    await y.renewer.renew();
+    expect(b.sent).toEqual(["SYNTH-r1", "SYNTH-r2"]);
   });
 
   test("a tab released before its tab lock is granted does not wait for its channel", async () => {

@@ -55,6 +55,9 @@ export class Renewer {
   #channel: Channel | undefined;
   #ready: Promise<void> = Promise.resolve();
   #leave: (() => void) | undefined;
+  // The channels of the tab locks taken from this tab: they still deliver what was posted to them
+  // before, of which this tab keeps only a sign-out and the refresh tokens announced as spent (#388).
+  readonly #stale: Channel[] = [];
   // Until when another tab's redirect may still bring a pair.
   #redirectUntil = 0;
   // A sign-out, this tab's or another's, is acted on once: a second one must not cut short the
@@ -158,6 +161,7 @@ export class Renewer {
     this.release();
     this.#channel?.close();
     this.#channel = undefined;
+    for (const c of this.#stale.splice(0)) c.close();
   }
 
   // §9.5 item 1: the holder renews; another tab asks it and waits for a newer pair, at most 10 s,
@@ -198,8 +202,7 @@ export class Renewer {
   }
 
   // Take a new tab lock, then open the channel. A lock taken from this tab (another holder found it
-  // silent, frozen or suspended) means messages may have been missed: the tab starts over, on the
-  // channel it has, so that none already posted to it is lost (a `signed-out`, #388).
+  // silent, frozen or suspended) means messages may have been missed: the tab starts over.
   #start(): void {
     const tab = `${TAB}${random()}`;
     this.#tab = tab;
@@ -210,7 +213,7 @@ export class Renewer {
       .request(tab, {}, () => {
         // Released first: whatever awaits the channel goes on, and finds the tab closed.
         if (this.#closed || this.#tab !== tab) return void opened();
-        const channel = this.#channel ?? this.open();
+        const channel = this.open();
         channel.onmessage = (e) => {
           const m = e.data as Message | null;
           if (typeof m === "object" && m !== null) this.onMessage(m);
@@ -227,6 +230,19 @@ export class Renewer {
   #rejoin(tab: string): void {
     if (this.#closed || this.#tab !== tab) return;
     this.session()?.forfeit();
+    // A pair posted before the new tab lock may hold a token another tab sent without waiting for
+    // this one: never taken. A sign-out posted then still applies, and a `renewing` still spends.
+    const old = this.#channel;
+    if (old !== undefined) {
+      old.onmessage = (e) => {
+        const m = e.data as Message | null;
+        if (typeof m !== "object" || m === null) return;
+        if (m.type === "signed-out") this.onMessage(m);
+        else if (m.type === "renewing" && typeof m.of === "string" && !this.#closed) this.#sent.add(m.of);
+      };
+      this.#stale.push(old);
+    }
+    this.#channel = undefined;
     this.#leave?.();
     this.#start();
     this.#post({ type: "request" });
