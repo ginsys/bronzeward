@@ -248,6 +248,21 @@ describe("recovery", () => {
     expect(await testid("epoch").getText()).toBe(`Epoch ${epoch}`);
     expect(await testid("server").getText()).toMatch(SERVER);
   });
+
+  it("REC-01: an open page whose next read meets the process's refusal, under the same epoch, shows the state before the entry and reads again on request", async () => {
+    await fixtureSignIn("h-viewer");
+    // A restart for recovery keeps the epoch until the entry: the injected refusal carries none.
+    await faults({ processRefused: ["/identity", "/server"] });
+    await nav("Changes").click();
+    await announced("status", PRE_ENTRY);
+    expect(await testid("principal").isExisting()).toBe(false);
+    expect(await testid("server").getText()).toBe("Server unknown");
+    expect((await seen()).slice(-2)).toEqual(["/identity", "/server"]);
+    await faults({});
+    await $("button=Read again").click();
+    await expect(testid("principal")).toHaveText("Signed in as h-viewer");
+    expect(await testid("server").getText()).toMatch(SERVER);
+  });
 });
 
 afterEach(storageEmpty);

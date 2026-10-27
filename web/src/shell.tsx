@@ -169,6 +169,13 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
     shown.current[what] = res.kind === "ok";
     if (res.kind === "ok") readAt.current = now;
     set(res);
+    // The process's refusal on any other read means the process restarted for recovery, its entry
+    // not yet made, possibly under the same epoch: the page shows that state as GET /server's own
+    // answer, which it then reads again (§8.5 item 1).
+    if (what !== "server" && res.kind === "refused" && startRefusal(res)) {
+      shown.current.server = false;
+      setServer({ kind: "refused", status: res.status, problem: res.problem });
+    }
   }, [onUnauthenticated, onRevoked]);
 
   // Reads still in flight when the shell goes (a refusal, sign-out) are discarded, and renew no more.
