@@ -3,6 +3,8 @@ package clitest
 import (
 	"bufio"
 	"bytes"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -338,6 +340,89 @@ func TestLogin(t *testing.T) {
 		if strings.Contains(r.out+r.err, "BWSYNTH-rt-77") || strings.Contains(r.out+r.err, "BWSYNTH-at-77") {
 			t.Errorf("login showed a token from an answer it could not read:\n%s%s", r.out, r.err)
 		}
+	})
+
+	// No error from oauth2, go-oidc or net/http is shown as the library wrote it: each quotes
+	// what the provider sent, and here that holds BWSYNTH-rt-1, the refresh token it issues.
+	t.Run("library errors show no token", func(t *testing.T) {
+		iss := f.iss.URL
+		signed := func(edit func(map[string]any)) func(map[string]any) string {
+			return func(c map[string]any) string {
+				edit(c)
+				id, err := f.iss.Sign(c)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return id
+			}
+		}
+		// An unsigned token whose header names the token as its algorithm.
+		alg := func(c map[string]any) string {
+			enc := base64.RawURLEncoding.EncodeToString
+			h, _ := json.Marshal(map[string]string{"alg": "BWSYNTH-rt-1", "typ": "JWT"})
+			b, _ := json.Marshal(c)
+			return enc(h) + "." + enc(b) + "." + enc([]byte("BWSYNTH-sig"))
+		}
+		renew := func() result {
+			f.store(file, f.mint("h-viewer", "expired"), "BWSYNTH-rt-5")
+			return f.signedIn("--context", "file", "whoami")
+		}
+		for _, c := range []struct {
+			name  string
+			setup func()
+			run   func() result
+			want  string
+		}{
+			{"code exchange, unreadable answer", func() { f.idp.exchanged = sentinelAnswer },
+				func() result { return login(nil, "file") }, "code exchange at the identity provider " + iss + ": its answer could not be read"},
+			{"code exchange, garbled status line", func() { f.idp.exchanged = func() (int, any) { return garbled, nil } },
+				func() result { return login(nil, "file") }, "code exchange at the identity provider " + iss + ": the request failed"},
+			{"device sign-in, unreadable answer", func() { f.idp.exchanged = sentinelAnswer }, func() result {
+				return f.interact(nil, func(line string) {
+					if strings.Contains(line, "enter the code") {
+						f.idp.approved.Store(true)
+					}
+				}, "--context", "file", "login", "--device")
+			}, "device sign-in at the identity provider " + iss + ": its answer could not be read"},
+			{"ID token, a claim of the wrong type", func() { f.idp.idToken = signed(func(c map[string]any) { c["exp"] = "BWSYNTH-rt-1" }) },
+				func() result { return login(nil, "file") }, "the identity provider " + iss + ": its ID token could not be verified"},
+			{"ID token, another issuer", func() { f.idp.idToken = signed(func(c map[string]any) { c["iss"] = "BWSYNTH-rt-1" }) },
+				func() result { return login(nil, "file") }, "the identity provider " + iss + ": its ID token could not be verified"},
+			{"ID token, an unknown algorithm", func() { f.idp.idToken = alg },
+				func() result { return login(nil, "file") }, "the identity provider " + iss + ": its ID token could not be verified"},
+			{"ID token, expired", func() {
+				f.idp.idToken = signed(func(c map[string]any) { c["exp"] = time.Now().Add(-time.Hour).Unix() })
+			}, func() result { return login(nil, "file") }, "the identity provider " + iss + ": its ID token has expired"},
+			{"discovery, garbled status line", func() { f.idp.discovery = "garbled" }, func() result { return login(nil, "file") },
+				"cannot reach the identity provider " + iss + ": the request failed"},
+			{"renewal, unreadable answer", func() { f.idp.answer = func(string) (int, any) { return sentinelAnswer() } }, renew,
+				"renewing at the identity provider " + iss + ": its answer could not be read"},
+			{"renewal, garbled status line", func() { f.idp.answer = func(string) (int, any) { return garbled, nil } }, renew,
+				"renewing at the identity provider " + iss + ": the request failed"},
+			{"revocation, garbled status line", func() { f.idp.revocation = func() (int, any) { return garbled, nil } }, func() result {
+				f.store(file, f.mint("h-viewer", ""), "BWSYNTH-rt-5")
+				return f.signedIn("--context", "file", "logout")
+			}, "revoking at the identity provider " + iss + ": the request failed"},
+		} {
+			t.Run(c.name, func(t *testing.T) {
+				os.Remove(file)
+				f.idp.login(nil, "")
+				f.idp.mu.Lock()
+				c.setup()
+				f.idp.mu.Unlock()
+				defer func() {
+					f.idp.mu.Lock()
+					f.idp.discovery, f.idp.answer, f.idp.revocation = "", nil, func() (int, any) { return http.StatusOK, map[string]any{} }
+					f.idp.mu.Unlock()
+				}()
+				r := c.run()
+				f.want(r, 1, c.want)
+				if strings.Contains(r.out+r.err, "BWSYNTH-rt-1") {
+					t.Errorf("a library error showed the token:\n%s%s", r.out, r.err)
+				}
+			})
+		}
+		os.Remove(file)
 	})
 
 	t.Run("another nonce", func(t *testing.T) {
