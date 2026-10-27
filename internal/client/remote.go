@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"syscall"
 )
 
@@ -82,7 +83,6 @@ func why(err error, otherwise string) string {
 		cv *tls.CertificateVerificationError
 		rh tls.RecordHeaderError
 		de *net.DNSError
-		oe *net.OpError
 		ne net.Error
 	)
 	switch {
@@ -94,7 +94,7 @@ func why(err error, otherwise string) string {
 		return "its certificate is not trusted: " + certReason(cv.Err)
 	case errors.As(err, &rh):
 		return "it does not answer TLS"
-	case errors.As(err, &oe) && oe.Op == "remote error":
+	case alert(err):
 		return "it sent a TLS alert"
 	case errors.Is(err, context.Canceled):
 		return "it was cancelled"
@@ -110,6 +110,21 @@ func why(err error, otherwise string) string {
 		return "the connection closed before an answer"
 	}
 	return otherwise
+}
+
+// alert reports whether err wraps a TLS alert the peer sent. errors.As would stop at the first
+// *net.OpError, and net/http wraps an https proxy's failure in its own ("proxyconnect").
+func alert(err error) bool {
+	if oe, ok := err.(*net.OpError); ok && oe.Op == "remote error" {
+		return true
+	}
+	switch u := err.(type) {
+	case interface{ Unwrap() error }:
+		return alert(u.Unwrap())
+	case interface{ Unwrap() []error }:
+		return slices.ContainsFunc(u.Unwrap(), alert)
+	}
+	return false
 }
 
 // certReason is why a certificate was refused. A host name mismatch lists the names the
