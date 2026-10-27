@@ -201,6 +201,17 @@ func paramErrors(doc, op map[string]any, r *http.Request, where string) []string
 		}
 		schema := described[at]["schema"] // validated as written: a $ref's siblings apply too
 		resolved, _ := deref(doc, schema).(map[string]any)
+		if resolved["type"] == "array" && len(values) > 0 {
+			// A form-exploded array (GET /principals' id): the repeated values are its items.
+			items := make([]any, len(values))
+			for i, s := range values {
+				items[i] = s
+			}
+			for _, e := range validate(doc, schema, items, at) {
+				errs = append(errs, where+": "+e)
+			}
+			continue
+		}
 		for _, s := range values {
 			var v any = s
 			if _, err := strconv.ParseInt(s, 10, 64); err == nil && resolved["type"] == "integer" {
@@ -836,6 +847,8 @@ func TestExchangeErrorsReportEachMismatch(t *testing.T) {
 		return r
 	}
 	page := `{"items":[` + cluster + `],"next":"c"}`
+	idnA, idnB := "idn_"+strings.Repeat("a", 26), "idn_"+strings.Repeat("b", 26)
+	principals := `{"items":[{"id":"` + idnA + `","kind":"unknown","issuer":null,"subject":null,"service":null}]}`
 	for _, tc := range []struct {
 		name string
 		r    *http.Request
@@ -852,6 +865,11 @@ func TestExchangeErrorsReportEachMismatch(t *testing.T) {
 		// An empty filter does not filter (persistence and API §9.2); an empty class is refused.
 		{"an empty filter", req(http.MethodGet, "/plans?state="), answer(200, "application/json", `{"items":[]}`), ""},
 		{"an empty class", req(http.MethodGet, "/dependencies?class="), answer(200, "application/json", `{"items":[]}`), "query class"},
+		// GET /principals' id is a form-exploded array: its repeated values are validated together.
+		{"one array value", req(http.MethodGet, "/principals?id="+idnA), answer(200, "application/json", principals), ""},
+		{"a repeated array value", req(http.MethodGet, "/principals?id="+idnA+"&id="+idnB), answer(200, "application/json", principals), ""},
+		{"an array item the schema refuses", req(http.MethodGet, "/principals?id="+idnA+"&id=idn_x"),
+			answer(200, "application/json", principals), "query id"},
 		{"a header value the schema refuses", req(http.MethodPost, "/clusters", "Idempotency-Key", "short"),
 			answer(201, "application/json", cluster), "header Idempotency-Key"},
 	} {

@@ -16,7 +16,8 @@ type route struct {
 	ifMatch         bool        // If-Match is required
 	exclusive       bool        // the transaction takes the installation state FOR UPDATE (§5)
 	normalStartOnly bool        // a recovery start refuses it after its entry too (ruling X3, §12.2)
-	query           []string    // a list's query parameters, limit and cursor first (§9.1); page refuses any other
+	query           []string    // a list's query parameters, limit and cursor first (§9.1), which page refuses any other; a batch read's one
+	requiredQuery   []string    // the query parameters a request must carry, among query: a batch read's
 	action          string      // the act's action (§10.5)
 	// keyed names the body member that carries unextracted input: the request is fingerprinted
 	// with the digest key (§7.1), its input implements keyedInput, and that member is left out
@@ -81,6 +82,13 @@ func routes() []*route {
 		rt.query = append([]string{"limit", "cursor"}, filters...)
 		return rt
 	}
+	// batch is an unpaged read of the identifiers its one parameter names, required and repeated
+	// (§9.2).
+	batch := func(p string, fn readFunc, param string) *route {
+		rt := read(g(p), fn)
+		rt.query, rt.requiredQuery = []string{param}, []string{param}
+		return rt
+	}
 
 	rs := []*route{
 		list("/clusters", listClusters), read(g("/clusters/{id}"), getCluster),
@@ -103,7 +111,7 @@ func routes() []*route {
 		list("/dependencies", listDependencies, "class"), read(g("/dependencies/{id}"), getDependency),
 		list("/dependencies/{id}/releases", dependencyReleases), list("/dependencies/{id}/alerts", listAlerts(true)),
 		list("/dependency-alerts", listAlerts(false)), read(&route{method: http.MethodGet, pattern: identityPattern}, getIdentity),
-		read(g("/server"), getServer),
+		batch("/principals", getPrincipals, "id"), read(g("/server"), getServer),
 		ingestionStart().on(ifm(human(m(post, "/ingestions", author)))),
 		read(human(m(http.MethodGet, "/ingestions/{id}/review", author)), getIngestionReview),
 		ingestionMark().on(human(m(post, "/ingestions/{id}/marks", author))),

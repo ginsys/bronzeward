@@ -1723,8 +1723,7 @@ Design: [§11](../design/Talos_Configuration_and_Machine_Management_Design.md#11
   keeps the `instance` of the request that stored it. The liveness probe
   carries neither. No answer sets a cookie or a CORS header.
 - **Machine-readable description**: [`api/openapi.yaml`](../../api/openapi.yaml)
-  describes every route of §9.2 but `GET /principals`, not served yet (§9.2),
-  in OpenAPI 3.1, with its roles, human-only,
+  describes every route of §9.2 in OpenAPI 3.1, with its roles, human-only,
   `If-Match` and start-mode restrictions as `x-bronzeward-*` extension fields.
   `internal/api/openapi_test.go` fails when it and the server's route table
   differ in either direction, in those facts or in an operation's path
@@ -1745,6 +1744,7 @@ API revisions:
 | 1 | `v1` as of `GET /server` |
 | 2 | `Bronzeward-Expected-Epoch` on mutations and `412 epoch-mismatch` (§7.2) |
 | 3 | `order` and `tail` on `GET /machines/{id}/timeline` (§9.2) |
+| 4 | `GET /principals` (§9.2) |
 
 ### 9.2 Resources and routes
 
@@ -1799,11 +1799,8 @@ value that is not one of its kind is `400 invalid-request` and an empty value
 does not filter. A draft update's claim names no machine, so a `machine`
 filter never lists it.
 
-`GET /principals` is specified by
-[#335](https://github.com/ginsys/bronzeward/issues/335) and not served yet:
-neither the server's route table (`internal/api/routes.go`) nor
-`api/openapi.yaml` holds it, so it answers `404`, not §9.4's `501`, until the
-change that routes it also describes it and adds its API revision row. It is
+`GET /principals` (API revision 4,
+[#335](https://github.com/ginsys/bronzeward/issues/335)) is
 not a paginated collection: it takes no `limit` or `cursor` and
 answers no `next`. It takes only `id`, the one parameter given more than once,
 from 1 to 100 times. No `id`, more than 100, a value that is not an `idn`
@@ -2559,7 +2556,7 @@ counter, not the ETag token, so the token is not named.
 | 422 | `idempotency-key-reused` | same key, other request (§7.2) |
 | 428 | `precondition-required`, `idempotency-key-required` | `If-Match` or `Idempotency-Key` missing |
 | 500 | `internal-error` | an unexpected server failure; the body says whether anything was committed or the outcome is unknown, in which case a retry under the same `Idempotency-Key` answers it (§5 rule 6) |
-| 501 | `not-implemented` | a routed §9.2 route whose handler has not landed yet (`GET /principals` is not routed yet and answers `404`, §9.2): routed, authenticated and role-checked, nothing committed. PoC delivery state only; it disappears when every route has its handler |
+| 501 | `not-implemented` | a routed §9.2 route whose handler has not landed yet: routed, authenticated and role-checked, nothing committed. PoC delivery state only; it disappears when every route has its handler |
 | 503 | `dependency-unavailable` | the provider is sealed or unreachable, or the process has no provider, or no executor, that the route needs; authentication could not reach the identity provider or the database; or the database failed while the request ran: the installation-state read made once it authenticated (§9.1), its first-use principal row (§10) or the row an identity revocation records or reads for the subject it names by `iss` and `sub` (§10, §10.4), its key's lookup or its own transaction, or a connection lost or refused in a transaction its route runs before its own (§7.2); or the provider refused or could not decrypt a staged envelope for a review (§9.3). A request so answered committed nothing of its own transaction; what an earlier one committed stays (§14). A publication also uses this code for missing or unreadable identity, running version or Talos access (§6.1.1), naming the machine, observation, rule and safe cause; later compiler dependency failures name the dependency (§6.1). Publication commits no release or Desired change on refusal, but its operation, act, events and already recorded observations remain. Ingestion and dispatch Talos access failures use `talos-access-unavailable` |
 | 503 | `talos-access-unavailable` | the error of a failed `ingest` operation, or the cause recorded by a dispatch's use-time check or fresh observation that failed on it (execution and recovery §3.1): the cluster's Talos access configuration is absent, unreadable by the identity, unreachable behind a sealed or silent provider, not a usable talosconfig or refused by Talos, or the machine's Talos endpoint did not answer (§3.3); the body names the cluster or machine, never a value; an ingestion's claim is abandoned and nothing read is kept. A use-time check that fails on the access read and on another dependency at once, as under a sealed provider, reports this code; its timeline entry records each dependency's result (execution and recovery §4.1). A publication observation also retains this code in its unread values, while the publish operation reports `dependency-unavailable` under §6.1.1 |
 | 503 | `transient-conflict` | deadlock retries exhausted in the request's own transaction, or, as the error of a failed `publish` operation, in its T3 (§5 rule 5, §6.2); §14 gives the answer when the deadlock is in a transaction the route runs before the request's own |

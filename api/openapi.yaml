@@ -1799,6 +1799,46 @@ paths:
       description: 'A publisher qualifies only for a plan it created: a caller whose only qualifying role is publisher, cancelling
         another''s plan, is refused 403 forbidden; one that also holds approver or recovery-admin cancels under that role
         (persistence and API §10.3).'
+  /principals:
+    get:
+      operationId: getPrincipals
+      tags: [principals]
+      description: 'What principal identifiers name, for display (API revision 4; persistence and API §9.2, choice §17.40). Not
+        a paginated collection: it takes only id, from 1 to 100 times; no id, more than 100, a value that is not a principal
+        identifier, an empty one included, or any other parameter is 400 invalid-request. Each distinct identifier is answered
+        once, in the order first given; one no row holds is answered unknown, not refused. The read records no act and carries
+        no ETag. Before a recovery start''s entry commits it is refused as every request but the entry is.'
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - name: id
+        in: query
+        required: true
+        style: form
+        explode: true
+        schema:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items: {type: string, pattern: '^idn_[a-z2-7]{26}$'}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Cache-Control: {$ref: '#/components/headers/NoStore'}
+            Bronzeward-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/PrincipalBody'}
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
   /profile-revisions/{id}:
     get:
       operationId: getProfileRevisionsId
@@ -3343,6 +3383,18 @@ components:
         kubernetesVersion: {type: string}
         machineryVersion: {type: string}
         platformMode: {type: string}
+      additionalProperties: false
+    PrincipalBody:
+      description: What one principal identifier names (persistence and API §9.2). A member that does not apply to its kind is
+        null. Nothing else of the row is served, its revocation and responsible human included.
+      type: object
+      required: [id, kind, issuer, subject, service]
+      properties:
+        id: {type: string, description: The identifier as given.}
+        kind: {type: string, enum: [human, service, unknown], description: unknown for an identifier no row holds.}
+        issuer: {type: [string, 'null'], description: A human's token issuer; null otherwise.}
+        subject: {type: [string, 'null'], description: A human's token subject; null otherwise.}
+        service: {type: [string, 'null'], description: The service identity's name; null otherwise.}
       additionalProperties: false
     ProfileBody:
       type: object
