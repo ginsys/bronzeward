@@ -319,9 +319,10 @@ it. It holds no secret.
    with its standard text and an error code RFC 6749, RFC 7009, RFC 8628 or OpenID Connect Core 1.0
    defines: no reason phrase, body, `error_description`, header or value decoded from the answer,
    and of a redirect target or a named endpoint only its scheme and host. A transport failure is
-   named by its type (refused, reset, timed out, name not resolved, TLS alert), and a refused
-   certificate by its host-name mismatch, which lists its names, or by a fixed reason
-   (`internal/client/remote.go`). The standard library's log, which net/http writes a peer's text
+   named by its type (refused, reset, timed out, name not resolved, TLS alert). A trust refusal by
+   `--from` or an https proxy still names the host, subject, issuer and trust source, fixed before
+   anything is sent; a refused certificate's reason, on every path, is its host-name mismatch, which
+   lists its names, or a fixed text (`internal/client/remote.go`). The standard library's log, which net/http writes a peer's text
    to, is discarded. The server's own text keeps the rule above.
 5. Certificate pinning is not offered: a bundle per context limits trust enough for this
    milestone, and pinning a leaf breaks on every renewal.
