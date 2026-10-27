@@ -116,6 +116,17 @@ describe("the state catalogue", () => {
     await expect(testid("offline")).not.toBeExisting({ wait: 10_000 });
     expect(await testid("status").isExisting()).toBe(false);
   });
+
+  it("offline: a refusal the server answers ends the banner too, and is shown", async () => {
+    await fixtureSignIn("h-viewer");
+    await faults({ redirect: "/identity" });
+    await nav("Operations").click();
+    await announced("offline", /^Offline since /);
+    await faults({ missing: "/identity" });
+    await nav("Changes").click();
+    await announced("status", "Not read: not-found. Not found: injected Request req-injected.");
+    expect(await testid("offline").isExisting()).toBe(false);
+  });
 });
 
 afterEach(storageEmpty);
