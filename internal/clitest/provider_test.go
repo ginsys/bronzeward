@@ -45,6 +45,7 @@ type provider struct {
 	answer       func(rt string) (int, any)  // the refresh grant; nil refuses it
 	callback     func(url.Values) url.Values // edits the authorization answer
 	nonce        string                      // an ID token nonce other than the request's
+	exchanged    func() (int, any)           // answers a valid code exchange instead; nil issues
 	codes        map[string]authorization    // codes issued and not yet exchanged
 	request      url.Values                  // the last authorization request
 	calls        atomic.Int32                // refresh redemptions
@@ -66,7 +67,7 @@ func (p *provider) set(answer func(rt string) (int, any)) {
 func (p *provider) login(callback func(url.Values) url.Values, nonce string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.callback, p.nonce, p.codes, p.request, p.revoked = callback, nonce, map[string]authorization{}, nil, nil
+	p.callback, p.nonce, p.codes, p.request, p.revoked, p.exchanged = callback, nonce, map[string]authorization{}, nil, nil, nil
 	p.approved.Store(false)
 	p.exchange.Store(0)
 }
@@ -228,11 +229,16 @@ func (p *provider) wrap(iss *issuer.Issuer) http.Handler {
 			p.mu.Lock()
 			a, ok := p.codes[f.Get("code")]
 			delete(p.codes, f.Get("code"))
-			nonce := p.nonce
+			nonce, exchanged := p.nonce, p.exchanged
 			p.mu.Unlock()
 			sum := sha256.Sum256([]byte(f.Get("code_verifier")))
 			if !ok || base64.RawURLEncoding.EncodeToString(sum[:]) != a.challenge || f.Get("redirect_uri") != a.redirect || f.Get("client_id") != "BWSYNTH-cli" {
 				refuse("invalid_grant")
+				return
+			}
+			if exchanged != nil {
+				status, body := exchanged()
+				writeJSON(w, status, body)
 				return
 			}
 			if nonce == "" {
@@ -283,4 +289,11 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 // issued is a refresh answer: access token at, refresh token rt.
 func issued(at, rt string) (int, any) {
 	return http.StatusOK, map[string]any{"access_token": at, "token_type": "Bearer", "expires_in": 300, "refresh_token": rt}
+}
+
+// unreadable is a token answer oauth2 cannot read, with a token where expires_in belongs: its
+// error quotes the value.
+func unreadable() (int, any) {
+	return http.StatusOK, map[string]any{"access_token": "BWSYNTH-at-77", "token_type": "Bearer", "expires_in": "BWSYNTH-rt-77",
+		"refresh_token": "BWSYNTH-rt-77"}
 }
