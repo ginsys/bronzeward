@@ -573,8 +573,12 @@ describe("#388 announced renewals", () => {
     x.close();
     await settle();
     const renewed = asked ?? y.renewer.renew();
+    let answered = false;
+    void renewed.then(() => (answered = true));
     await vi.advanceTimersByTimeAsync(REDIRECT_WAIT_MS - 1);
     expect(y.renewer.holder).toBe(true);
+    // Still waiting for the redirect's pair: no second redirect yet.
+    expect(answered).toBe(false);
     if (back) {
       const pair = first({ access: "SYNTH-a9", refresh: undefined, expiresAt: Date.now() + 300_000 });
       b.open().renewer.post(pair);
