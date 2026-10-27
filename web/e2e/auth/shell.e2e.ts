@@ -8,7 +8,7 @@ import { deprecated, incompatible } from "../../src/shell.tsx";
 import { EPOCH_CHANGED, TRANSPORT_FAILURE } from "../../src/request.ts";
 import { CONTROL, FIXTURE_API, FIXTURE_PAGE } from "../auth.conf.ts";
 import type { Faults } from "../injector.ts";
-import { faults, fixtureSignIn, mint, seen, settled, storageEmpty, where } from "./helpers.ts";
+import { answered, faults, fixtureSignIn, mint, release, seen, settled, storageEmpty, where } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 const testid = (id: string) => $(`[data-testid="${id}"]`);
@@ -178,28 +178,32 @@ describe("the state catalogue", () => {
     await faults({ missing: "/identity" });
     await event("online");
     await announced("status", "Not read: not-found. Not found: injected Request req-injected.");
-    await faults({ hold: { path: "/identity", ms: 4000 }, missing: "/identity" });
+    await faults({ held: "/identity", missing: "/identity" });
     await event("online");
     await reads(4);
     await faults({});
     await event("online");
-    // The newer read's data replaces the refusal before the held read answers.
-    await expect(testid("principal")).toHaveText("Signed in as h-viewer", { wait: 3000 });
+    // The newer read's data replaces the refusal while the older read is still held.
+    await expect(testid("principal")).toHaveText("Signed in as h-viewer");
     // The held read's refusal arrives after it and must not replace it.
-    await browser.pause(4000);
+    await release();
+    await browser.waitUntil(() => answered("/identity", 4), { timeout: 10_000, timeoutMsg: "the held read's answer did not reach the page" });
+    await browser.pause(500);
     expect(await testid("principal").getText()).toBe("Signed in as h-viewer");
     expect(await testid("status").isExisting()).toBe(false);
   });
 
   it("offline: identity-revoked on a superseded read still ends the page with the revocation", async () => {
     await fixtureSignIn("h-viewer");
-    await faults({ hold: { path: "/identity", ms: 3000 }, revoked: "/identity" });
+    await faults({ held: "/identity", revoked: "/identity" });
     await event("online");
     await reads(3);
     await faults({ redirect: "/identity" });
     await event("online");
     await reads(4);
-    // The newer read lost its answer; the old read's revocation still ends the page.
+    // The newer read lost its answer; the old read's revocation, released after it, still ends the page.
+    await announced("offline", /^Offline since /);
+    await release();
     await expect(testid("status")).toHaveText(REVOKED, { wait: 10_000 });
     expect(await testid("principal").isExisting()).toBe(false);
     expect(await $("footer").getText()).toMatch(/^Client .+\. Server unknown$/);

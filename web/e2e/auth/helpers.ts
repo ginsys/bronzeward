@@ -52,6 +52,13 @@ export async function fixtureSignIn(human: string, flags: Record<string, string>
 export const counts = async (): Promise<Counts> => (await fetch(`${CONTROL}/counts`)).json() as never;
 export const seen = async (): Promise<string[]> => (await fetch(`${CONTROL}/seen`)).json() as never;
 export const faults = async (f: Faults) => expect((await fetch(`${CONTROL}/faults`, { method: "POST", body: JSON.stringify(f) })).ok).toBe(true);
+// Lets the answers the `held` fault holds go; returns once the injector has sent each.
+export const release = async () => expect((await fetch(`${CONTROL}/release`, { method: "POST" })).ok).toBe(true);
+// Whether the page has received every answer to `path` it asked for, by the browser's resource
+// timing: an entry appears once its response has ended.
+export const answered = (path: string, n: number) =>
+  browser.execute((p: string) => performance.getEntriesByType("resource").filter((e) => new URL(e.name).pathname === p).length, `/api/v1${path}`)
+    .then((count) => count >= n);
 
 // Signs the test provider's page in as human: the page sends the browser to the provider, which has
 // no login UI here; the case completes the authorization request through the Session API, as the

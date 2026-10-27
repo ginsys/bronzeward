@@ -102,8 +102,8 @@ function host(listen: string, clientConfig: object, issuer: string, api: string)
 // The control routes: a spec chooses the fixture token the next sign-in receives, reads the
 // provider's counts, and sends the browser to a URL holding a code without naming it over
 // WebDriver, whose log the artifact scan reads (POST /go stores it, GET /go redirects there once).
-// POST /faults sets the injector's faults, GET /seen lists the API paths it passed on; the next
-// sign-in clears both. POST /recovery-start answers the URL of a server just started with
+// POST /faults sets the injector's faults, GET /seen lists the API paths it passed on, POST /release
+// lets its held answers go and answers once they are sent; the next sign-in clears all three. POST /recovery-start answers the URL of a server just started with
 // -recovery-start on a fresh database, its entry not yet made (REC-01), replacing any earlier one.
 function control(provider: Provider, next: { grant: Grant }, injector: Injector, recoveryStart: () => Promise<string>): Server {
   let go: string | undefined;
@@ -111,6 +111,7 @@ function control(provider: Provider, next: { grant: Grant }, injector: Injector,
     const url = new URL(req.url ?? "/", CONTROL);
     if (url.pathname === "/counts") return res.end(JSON.stringify(provider.counts));
     if (url.pathname === "/seen") return res.end(JSON.stringify(injector.seen));
+    if (url.pathname === "/release" && req.method === "POST") return void injector.release().then(() => res.end());
     if (url.pathname === "/recovery-start" && req.method === "POST") {
       return void recoveryStart().then((at) => res.end(at), (e: unknown) => res.writeHead(500).end(String(e)));
     }
@@ -149,6 +150,7 @@ function control(provider: Provider, next: { grant: Grant }, injector: Injector,
     for (const k of Object.keys(provider.counts) as (keyof Counts)[]) provider.counts[k] = 0;
     injector.faults = {};
     injector.seen.length = 0;
+    void injector.release();
     res.end();
   });
 }
