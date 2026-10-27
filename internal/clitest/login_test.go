@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -246,6 +248,13 @@ func TestLogin(t *testing.T) {
 		f.want(f.ctl(nil, "", "--context", "a/b", "logout"), 1, "without spaces or slashes")
 		f.want(f.ctl(nil, "", "--context", "bare", "logout"), 1, "an oidc context needs its issuer and client ID")
 		f.want(f.ctl(nil, "", "--context", "bare", "login"), 1, "an oidc context needs its issuer and client ID")
+		// Its removal leaves the credential store alone: no sign-in was ever kept under that name,
+		// and the name cannot name a lock file.
+		bus := []string{"DBUS_SESSION_BUS_ADDRESS=unix:path=" + filepath.Join(t.TempDir(), "missing")}
+		f.want(f.ctl(bus, "", "context", "remove", "a/b"), 0, `Context "a/b" removed.`)
+		if _, err := os.Stat(filepath.Join(f.home, ".local", "state", "bronzeward", "a")); !os.IsNotExist(err) {
+			t.Errorf("context remove made a directory for the name a/b: %v", err)
+		}
 	})
 
 	// Keys on plain http off loopback would let an on-path host sign the ID token.
@@ -259,6 +268,22 @@ func TestLogin(t *testing.T) {
 		f.idp.discovery = ""
 		f.idp.mu.Unlock()
 		f.want(r, 1, "the identity provider's jwks_uri", "must be https")
+	})
+
+	// Keys that cannot be read fail the sign-in without the provider's status or body.
+	t.Run("keys down", func(t *testing.T) {
+		f.idp.login(nil, "")
+		f.idp.mu.Lock()
+		f.idp.discovery = "keysdown"
+		f.idp.mu.Unlock()
+		r := login(nil, "file")
+		f.idp.mu.Lock()
+		f.idp.discovery = ""
+		f.idp.mu.Unlock()
+		f.want(r, 1, "the identity provider "+f.iss.URL+": its keys (jwks_uri) could not be read, or do not verify the ID token")
+		if shown := r.out + r.err; strings.ContainsRune(shown, '\x1b') || strings.Contains(shown, "BWSYNTH-body") || strings.Contains(shown, "Service Unavailable") {
+			t.Errorf("login showed what the key fetch answered:\n%s", shown)
+		}
 	})
 
 	t.Run("another state", func(t *testing.T) {
@@ -278,6 +303,27 @@ func TestLogin(t *testing.T) {
 		f.want(r, 1, "refused the sign-in: an error code that is not shown")
 		if strings.ContainsRune(r.out+r.err, '\x1b') {
 			t.Errorf("login showed a control character from the sign-in answer:\n%s%s", r.out, r.err)
+		}
+		// A connection held open on the listener, mid-request, delays the end of the sign-in by
+		// at most the listener's 2 s shutdown bound, not the 5 s net/http waits for one by itself.
+		f.idp.login(func(v url.Values) url.Values { v.Del("code"); v.Set("error", "access_denied"); return v }, "")
+		var dialed atomic.Bool
+		held := func(line string) {
+			if s := strings.TrimSpace(line); strings.HasPrefix(s, f.iss.URL+"/authorize?") {
+				u, _ := url.Parse(s)
+				back, _ := url.Parse(u.Query().Get("redirect_uri"))
+				if c, err := net.Dial("tcp", back.Host); err == nil {
+					t.Cleanup(func() { c.Close() })
+					c.Write([]byte("GET /callback HTTP/1.1\r\nHost: " + back.Host + "\r\n"))
+					dialed.Store(true)
+				}
+			}
+			f.browser(line)
+		}
+		start := time.Now()
+		f.want(f.interact(nil, held, "--context", "file", "login"), 1, "refused the sign-in: access_denied")
+		if d := time.Since(start); !dialed.Load() || d > 4*time.Second {
+			t.Errorf("held a connection: %v; login ran for %v", dialed.Load(), d)
 		}
 	})
 

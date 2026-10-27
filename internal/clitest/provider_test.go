@@ -27,9 +27,10 @@ import (
 // when set, is the revocation_endpoint discovery names instead. discovery, when set, breaks
 // discovery: "down" answers 503 with a body of control characters, "bare" 503 with no reason
 // phrase and "phrase" with the provider's own, "garbage" 200 with a body that is no document,
-// "moved" redirects to plain http off loopback, "fragment" to an empty fragment, "other" names
-// another issuer, and "keys" keys on plain http off loopback. verification, when set, is the
-// device grant's verification_uri.
+// "moved" redirects to plain http off loopback, "fragment" to an empty fragment, "escape" to a
+// target holding a C1 control, "other" names another issuer, "keys" keys on plain http off
+// loopback, and "keysdown" keys that answer 503 with a body of control characters.
+// verification, when set, is the device grant's verification_uri.
 type provider struct {
 	iss *issuer.Issuer
 
@@ -121,6 +122,12 @@ func (p *provider) wrap(iss *issuer.Issuer) http.Handler {
 				w.WriteHeader(http.StatusFound)
 				return
 			}
+		case "escape":
+			// Set directly: http.Redirect would percent-encode the C1 control.
+			p.mu.Unlock()
+			w.Header().Set("Location", iss.URL+"/.well-known/openid-configuration?\u009b2J")
+			w.WriteHeader(http.StatusFound)
+			return
 		case "garbage":
 			p.mu.Unlock()
 			w.Write([]byte("\x1b[2J BWSYNTH-body"))
@@ -139,6 +146,8 @@ func (p *provider) wrap(iss *issuer.Issuer) http.Handler {
 			d["issuer"] = "https://idp.example.invalid"
 		case "keys":
 			d["jwks_uri"] = "http://idp.example.invalid/keys"
+		case "keysdown":
+			d["jwks_uri"] = iss.URL + "/keysdown"
 		}
 		d["authorization_endpoint"], d["token_endpoint"] = iss.URL+"/authorize", iss.URL+"/token"+p.query
 		d["device_authorization_endpoint"] = iss.URL + "/device"
@@ -172,6 +181,10 @@ func (p *provider) wrap(iss *issuer.Issuer) http.Handler {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"device_code": "BWSYNTH-device", "user_code": "BWSY-NTH1",
 			"verification_uri": verify, "expires_in": 60, "interval": 1})
+	})
+	mux.HandleFunc("GET /keysdown", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte("\x1b[2J BWSYNTH-body"))
 	})
 	mux.HandleFunc("GET /revoked", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, http.StatusOK, map[string]any{}) })
 	mux.HandleFunc("POST /revoke", func(w http.ResponseWriter, r *http.Request) {

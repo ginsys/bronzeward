@@ -185,7 +185,8 @@ func within[T any](f func() (T, error)) (T, error) {
 // lock, so that a renewal in flight finishes first and a waiting one finds the entry gone; a file
 // is the operator's to remove. Without the store it returns a note that an entry is not reached.
 func ClearStored(x *Context) (string, error) {
-	if x.Credential != "oidc" || x.TokenFile() != "" {
+	// A name that cannot name its lock file never had an entry: every sign-in refuses it.
+	if x.Credential != "oidc" || x.TokenFile() != "" || x.checkName() != nil {
 		return "", nil
 	}
 	if why := keyringUnavailable(); why != "" {

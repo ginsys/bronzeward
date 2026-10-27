@@ -148,7 +148,14 @@ func (i *idp) loopback(x *Context, prompts io.Writer) (*oauth2.Token, error) {
 		}
 	})}
 	go srv.Serve(l)
-	defer srv.Close()
+	// Shutdown, not Close: the callback's page is still being written when its answer arrives.
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if srv.Shutdown(ctx) != nil {
+			srv.Close()
+		}
+	}()
 	var q url.Values
 	select {
 	case q = <-got:
@@ -178,8 +185,12 @@ func (i *idp) loopback(x *Context, prompts io.Writer) (*oauth2.Token, error) {
 		return nil, errors.New("the identity provider answered without an ID token, so the nonce cannot be checked")
 	}
 	id, err := i.p.Verifier(&oidc.Config{ClientID: x.OIDC.ClientID}).Verify(i.ctx, raw)
-	if err != nil {
-		return nil, fmt.Errorf("the ID token: %w", err)
+	if err != nil && strings.HasPrefix(err.Error(), "failed to verify signature") {
+		// go-oidc puts a failed key fetch here, with the provider's status and response body,
+		// which are not shown.
+		return nil, fmt.Errorf("the identity provider %s: its keys (jwks_uri) could not be read, or do not verify the ID token", x.OIDC.Issuer)
+	} else if err != nil {
+		return nil, fmt.Errorf("the ID token: %w", printableError(err))
 	}
 	if id.Nonce != nonce {
 		return nil, errors.New("the ID token carries another nonce, so it is not this sign-in's")
