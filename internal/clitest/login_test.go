@@ -327,6 +327,19 @@ func TestLogin(t *testing.T) {
 		}
 	})
 
+	// An answer oauth2 cannot read is not shown: its error quotes the answer's values.
+	t.Run("unreadable answer", func(t *testing.T) {
+		f.idp.login(nil, "")
+		f.idp.mu.Lock()
+		f.idp.exchanged = unreadable
+		f.idp.mu.Unlock()
+		r := login(nil, "file")
+		f.want(r, 1, "code exchange at the identity provider "+f.iss.URL+": its answer could not be read")
+		if strings.Contains(r.out+r.err, "BWSYNTH-rt-77") || strings.Contains(r.out+r.err, "BWSYNTH-at-77") {
+			t.Errorf("login showed a token from an answer it could not read:\n%s%s", r.out, r.err)
+		}
+	})
+
 	t.Run("another nonce", func(t *testing.T) {
 		f.idp.login(nil, "BWSYNTH-nonce")
 		f.want(login(nil, "file"), 1, "the ID token carries another nonce")

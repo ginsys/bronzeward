@@ -62,13 +62,19 @@ func openIDP(x *Context, d time.Duration) (*idp, context.CancelFunc, error) {
 }
 
 // refusal shows a token endpoint's refusal by its status and error code only, never its body
-// (refusal); doing names the attempt in any other failure.
+// (refusal); doing names the attempt in any other failure. A transport error or a timeout is
+// shown, made printable; any other error is oauth2's reading of the answer, which may quote the
+// answer's tokens, so it is not.
 func (i *idp) refusal(x *Context, what, doing string, err error) error {
 	var re *oauth2.RetrieveError
-	if errors.As(err, &re) {
+	var ue *url.Error
+	switch {
+	case errors.As(err, &re):
 		return fmt.Errorf("the identity provider %s refused the %s: %s", x.OIDC.Issuer, what, refusal(re.Response.StatusCode, re.ErrorCode))
+	case errors.As(err, &ue), errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+		return fmt.Errorf("%s at the identity provider %s: %w", doing, x.OIDC.Issuer, printableError(err))
 	}
-	return fmt.Errorf("%s at the identity provider %s: %w", doing, x.OIDC.Issuer, printableError(err))
+	return fmt.Errorf("%s at the identity provider %s: its answer could not be read", doing, x.OIDC.Issuer)
 }
 
 // Login signs in to x's identity provider (§9.2 items 1-2): the authorization-code grant with

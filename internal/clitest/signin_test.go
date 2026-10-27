@@ -261,6 +261,13 @@ func TestSignIn(t *testing.T) {
 		if strings.ContainsRune(r.out+r.err, '\x1b') {
 			t.Errorf("the renewal refusal showed a control character from the provider:\n%s%s", r.out, r.err)
 		}
+		// An answer oauth2 cannot read is not shown: its error quotes the answer's values.
+		f.idp.set(func(string) (int, any) { return unreadable() })
+		r = whoami()
+		f.want(r, 1, "renewing at the identity provider "+f.iss.URL+": its answer could not be read")
+		if strings.Contains(r.out+r.err, "BWSYNTH-rt-77") || strings.Contains(r.out+r.err, "BWSYNTH-at-77") {
+			t.Errorf("the renewal showed a token from an answer it could not read:\n%s%s", r.out, r.err)
+		}
 	})
 
 	t.Run("refresh token not rotated", func(t *testing.T) {
