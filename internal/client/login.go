@@ -39,8 +39,9 @@ func openIDP(x *Context, d time.Duration) (*idp, context.CancelFunc, error) {
 		URI string `json:"jwks_uri"`
 	}
 	if err := p.Claims(&keys); err != nil {
+		// json's error would quote the document's value.
 		cancel()
-		return nil, nil, fmt.Errorf("the identity provider's jwks_uri: %w", err)
+		return nil, nil, fmt.Errorf("the identity provider %s: its discovery document's jwks_uri could not be read", x.OIDC.Issuer)
 	}
 	ep := p.Endpoint()
 	ep.AuthStyle = oauth2.AuthStyleInParams
@@ -63,8 +64,8 @@ func openIDP(x *Context, d time.Duration) (*idp, context.CancelFunc, error) {
 
 // refusal shows a token endpoint's refusal by its status and error code only, never its body
 // (refusal); doing names the attempt in any other failure. A transport error or a timeout is
-// shown, made printable; any other error is oauth2's reading of the answer, which may quote the
-// answer's tokens, so it is not.
+// shown as remoteFailure shows it; any other error is oauth2's reading of the answer, which may
+// quote the answer's tokens, so it is not.
 func (i *idp) refusal(x *Context, what, doing string, err error) error {
 	var re *oauth2.RetrieveError
 	var ue *url.Error
@@ -72,7 +73,7 @@ func (i *idp) refusal(x *Context, what, doing string, err error) error {
 	case errors.As(err, &re):
 		return fmt.Errorf("the identity provider %s refused the %s: %s", x.OIDC.Issuer, what, refusal(re.Response.StatusCode, re.ErrorCode))
 	case errors.As(err, &ue), errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
-		return fmt.Errorf("%s at the identity provider %s: %w", doing, x.OIDC.Issuer, printableError(err))
+		return fmt.Errorf("%s at the identity provider %s: %w", doing, x.OIDC.Issuer, remoteFailure(err))
 	}
 	return fmt.Errorf("%s at the identity provider %s: its answer could not be read", doing, x.OIDC.Issuer)
 }
@@ -191,12 +192,16 @@ func (i *idp) loopback(x *Context, prompts io.Writer) (*oauth2.Token, error) {
 		return nil, errors.New("the identity provider answered without an ID token, so the nonce cannot be checked")
 	}
 	id, err := i.p.Verifier(&oidc.Config{ClientID: x.OIDC.ClientID}).Verify(i.ctx, raw)
-	if err != nil && strings.HasPrefix(err.Error(), "failed to verify signature") {
-		// go-oidc puts a failed key fetch here, with the provider's status and response body,
-		// which are not shown.
+	// go-oidc's errors quote what the provider sent: a failed key fetch its status and response
+	// body, the others the token's header and claims, which may hold a token. None is shown.
+	var expired *oidc.TokenExpiredError
+	switch {
+	case err != nil && strings.HasPrefix(err.Error(), "failed to verify signature"):
 		return nil, fmt.Errorf("the identity provider %s: its keys (jwks_uri) could not be read, or do not verify the ID token", x.OIDC.Issuer)
-	} else if err != nil {
-		return nil, fmt.Errorf("the ID token: %w", printableError(err))
+	case errors.As(err, &expired):
+		return nil, fmt.Errorf("the identity provider %s: its ID token has expired; check this host's clock", x.OIDC.Issuer)
+	case err != nil:
+		return nil, fmt.Errorf("the identity provider %s: its ID token could not be verified", x.OIDC.Issuer)
 	}
 	if id.Nonce != nonce {
 		return nil, errors.New("the ID token carries another nonce, so it is not this sign-in's")

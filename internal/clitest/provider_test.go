@@ -29,7 +29,8 @@ import (
 // phrase and "phrase" with the provider's own, "garbage" 200 with a body that is no document,
 // "moved" redirects to plain http off loopback, "fragment" to an empty fragment, "escape" to a
 // target holding a C1 control, "other" names another issuer, "keys" keys on plain http off
-// loopback, and "keysdown" keys that answer 503 with a body of control characters.
+// loopback, "keysdown" keys that answer 503 with a body of control characters, and "garbled" an
+// answer whose status line holds a refresh token.
 // verification, when set, is the device grant's verification_uri.
 type provider struct {
 	iss *issuer.Issuer
@@ -45,7 +46,8 @@ type provider struct {
 	answer       func(rt string) (int, any)  // the refresh grant; nil refuses it
 	callback     func(url.Values) url.Values // edits the authorization answer
 	nonce        string                      // an ID token nonce other than the request's
-	exchanged    func() (int, any)           // answers a valid code exchange instead; nil issues
+	exchanged    func() (int, any)           // answers a valid code exchange or device grant instead; nil issues
+	idToken      func(map[string]any) string // the ID token for these claims; nil signs them
 	codes        map[string]authorization    // codes issued and not yet exchanged
 	request      url.Values                  // the last authorization request
 	calls        atomic.Int32                // refresh redemptions
@@ -67,7 +69,7 @@ func (p *provider) set(answer func(rt string) (int, any)) {
 func (p *provider) login(callback func(url.Values) url.Values, nonce string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.callback, p.nonce, p.codes, p.request, p.revoked, p.exchanged = callback, nonce, map[string]authorization{}, nil, nil, nil
+	p.callback, p.nonce, p.codes, p.request, p.revoked, p.exchanged, p.idToken = callback, nonce, map[string]authorization{}, nil, nil, nil, nil
 	p.approved.Store(false)
 	p.exchange.Store(0)
 }
@@ -149,6 +151,10 @@ func (p *provider) wrap(iss *issuer.Issuer) http.Handler {
 			d["jwks_uri"] = "http://idp.example.invalid/keys"
 		case "keysdown":
 			d["jwks_uri"] = iss.URL + "/keysdown"
+		case "garbled":
+			p.mu.Unlock()
+			writeJSON(w, garbled, nil)
+			return
 		}
 		d["authorization_endpoint"], d["token_endpoint"] = iss.URL+"/authorize", iss.URL+"/token"+p.query
 		d["device_authorization_endpoint"] = iss.URL + "/device"
@@ -229,7 +235,7 @@ func (p *provider) wrap(iss *issuer.Issuer) http.Handler {
 			p.mu.Lock()
 			a, ok := p.codes[f.Get("code")]
 			delete(p.codes, f.Get("code"))
-			nonce, exchanged := p.nonce, p.exchanged
+			nonce, exchanged, idToken := p.nonce, p.exchanged, p.idToken
 			p.mu.Unlock()
 			sum := sha256.Sum256([]byte(f.Get("code_verifier")))
 			if !ok || base64.RawURLEncoding.EncodeToString(sum[:]) != a.challenge || f.Get("redirect_uri") != a.redirect || f.Get("client_id") != "BWSYNTH-cli" {
@@ -245,8 +251,13 @@ func (p *provider) wrap(iss *issuer.Issuer) http.Handler {
 				nonce = a.nonce
 			}
 			now := time.Now()
-			id, err := iss.Sign(map[string]any{"iss": iss.URL, "aud": "BWSYNTH-cli", "sub": "h-viewer", "nonce": nonce,
-				"iat": now.Unix(), "exp": now.Add(issuer.Lifetime).Unix()})
+			claims := map[string]any{"iss": iss.URL, "aud": "BWSYNTH-cli", "sub": "h-viewer", "nonce": nonce,
+				"iat": now.Unix(), "exp": now.Add(issuer.Lifetime).Unix()}
+			if idToken != nil {
+				p.issue(w, idToken(claims))
+				return
+			}
+			id, err := iss.Sign(claims)
 			if err != nil {
 				refuse("server_error")
 				return
@@ -255,6 +266,14 @@ func (p *provider) wrap(iss *issuer.Issuer) http.Handler {
 		case "urn:ietf:params:oauth:grant-type:device_code":
 			if !p.approved.Load() {
 				refuse("authorization_pending")
+				return
+			}
+			p.mu.Lock()
+			exchanged := p.exchanged
+			p.mu.Unlock()
+			if exchanged != nil {
+				status, body := exchanged()
+				writeJSON(w, status, body)
 				return
 			}
 			p.issue(w, "")
@@ -280,7 +299,18 @@ func (p *provider) issue(w http.ResponseWriter, id string) {
 	writeJSON(w, http.StatusOK, body)
 }
 
+// garbled is a status for writeJSON: an answer whose status line holds BWSYNTH-rt-1, which net/http
+// quotes in its error.
+const garbled = -1
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
+	if status == garbled {
+		if c, _, err := w.(http.Hijacker).Hijack(); err == nil {
+			c.Write([]byte("HTTP/1.1 BWSYNTH-rt-1\r\nConnection: close\r\n\r\n"))
+			c.Close()
+		}
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
@@ -296,4 +326,10 @@ func issued(at, rt string) (int, any) {
 func unreadable() (int, any) {
 	return http.StatusOK, map[string]any{"access_token": "BWSYNTH-at-77", "token_type": "Bearer", "expires_in": "BWSYNTH-rt-77",
 		"refresh_token": "BWSYNTH-rt-77"}
+}
+
+// sentinelAnswer is unreadable with BWSYNTH-rt-1, the token the provider issues, in expires_in.
+func sentinelAnswer() (int, any) {
+	return http.StatusOK, map[string]any{"access_token": "BWSYNTH-at-1", "token_type": "Bearer", "expires_in": "BWSYNTH-rt-1",
+		"refresh_token": "BWSYNTH-rt-1"}
 }
