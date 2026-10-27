@@ -1,8 +1,8 @@
 import { createElement as h, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
-import { PRE_ENTRY, PreEntry, RECOVERY_START, RecoveryBanner, scopeSummary, startModeOf, startRefusal, UNKNOWN_START } from "./recovery.tsx";
-import type { Problem, ReadResult } from "./request.ts";
+import { PRE_ENTRY, PreEntry, RECOVERY_START, RecoveryBanner, RecoveryRead, scopeSummary, startModeOf, startRefusal, UNKNOWN_START } from "./recovery.tsx";
+import { type Problem, type ReadResult, TRANSPORT_FAILURE } from "./request.ts";
 
 const html = (e: ReactElement) => renderToStaticMarkup(e);
 function status(e: ReactElement): string {
@@ -41,6 +41,16 @@ describe("the recovery banner", () => {
     expect(status(h(RecoveryBanner, { recovery, mode: "recovery" }))).toBe(`Recovery mode since 10:42, epoch ep_r2l. 1 of 1 scopes not released: none can commit. Drafts can be edited. ${RECOVERY_START}`);
     expect(status(h(RecoveryBanner, { recovery, mode: "normal" }))).toBe("Recovery mode since 10:42, epoch ep_r2l. 1 of 1 scopes not released: none can commit. Drafts can be edited.");
     expect(status(h(RecoveryBanner, { recovery: undefined, mode: "unknown" }))).toBe(`Recovery mode. Drafts can be edited. ${UNKNOWN_START}`);
+  });
+
+  test("its own read without data is shown under it with the catalogue's text, under its own test id", () => {
+    expect(status(h(RecoveryRead, { res: { kind: "transport" } }))).toBe(TRANSPORT_FAILURE);
+    expect(html(h(RecoveryRead, { res: { kind: "transport" } }))).toContain('data-testid="recovery-read"');
+    expect(status(h(RecoveryRead, { res: { kind: "defect", message: "the response is not JSON" } }))).toBe("Not read: the response is not JSON.");
+    const p = { ...problem("internal-error"), status: 500, title: "Internal error", instance: "req-9" };
+    expect(status(h(RecoveryRead, { res: { kind: "unavailable", status: 500, problem: p } }))).toBe("Not read: internal-error. Internal error Request req-9.");
+    expect(status(h(RecoveryRead, { res: { kind: "refused", status: 502, problem: null } }))).toBe("Not read: the server answered 502.");
+    expect(html(h(RecoveryRead, { res: { kind: "discarded" } }))).toBe("");
   });
 
   test("before the entry: the process's restriction, and a read again", () => {

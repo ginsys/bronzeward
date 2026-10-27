@@ -3,7 +3,7 @@
 // start's entry.
 
 import type { ReadResult } from "./request.ts";
-import { clock, Status } from "./states.tsx";
+import { clock, Disconnected, Refused, Status } from "./states.tsx";
 import type { components } from "./api/v1";
 
 export type Recovery = components["schemas"]["RecoveryBody"];
@@ -50,6 +50,16 @@ export function RecoveryBanner({ recovery, mode }: { recovery: Recovery | undefi
   );
 }
 
-export const PreEntry = ({ onRead }: { onRead: () => void }) => (
+// The banner's own read when it found no data, under the banner, so the missing entry and scopes
+// are explained with the catalogue's text (W11). Once its data was shown, a read without answer
+// keeps that data under the offline banner instead.
+export function RecoveryRead({ res }: { res: ReadResult<Recovery> }) {
+  if (res.kind === "ok" || res.kind === "discarded") return null;
+  if (res.kind === "transport") return <Disconnected testid="recovery-read" />;
+  if (res.kind === "defect") return <Status testid="recovery-read">Not read: {res.message}.</Status>;
+  return <Refused testid="recovery-read" problem={res.problem} status={"status" in res ? res.status : 0} verb="read" />;
+}
+
+export const PreEntry =({ onRead }: { onRead: () => void }) => (
   <Status actions={<button type="button" onClick={onRead}>Read again</button>}>{PRE_ENTRY}</Status>
 );

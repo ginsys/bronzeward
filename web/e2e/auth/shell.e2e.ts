@@ -232,9 +232,18 @@ describe("recovery", () => {
     });
     expect(entry.status).toBe(201);
     const { epoch } = (await entry.json()) as { epoch: string };
+    // The banner's first read of GET /recovery finds no answer: the banner says what it knows, and
+    // the read's own state is shown under it.
+    await faults({ upstream: at, redirect: "/recovery" });
     await $("button=Read again").click();
     await expect($("main h2")).toHaveText("Machines");
     await announced("epoch-changed", `${EPOCH_CHANGED}.`);
+    await announced("recovery", `Recovery mode. Drafts can be edited. ${RECOVERY_START}`);
+    await announced("recovery-read", TRANSPORT_FAILURE);
+    // The next page reads it again.
+    await faults({ upstream: at });
+    await nav("Changes").click();
+    await expect(testid("recovery-read")).not.toBeExisting({ wait: 10_000 });
     await announced("recovery", new RegExp(`^Recovery mode since \\d\\d:\\d\\d, epoch ${literal(epoch)}\\. No machine scopes\\. Drafts can be edited\\. ${literal(RECOVERY_START)}$`));
     expect(await testid("epoch").getText()).toBe(`Epoch ${epoch}`);
     expect(await testid("server").getText()).toMatch(SERVER);

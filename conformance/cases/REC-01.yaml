@@ -12,7 +12,7 @@ fault: recovery mode on, after a recovery start
 expect:
   server: before the entry, GET /server refused 409 recovery-mode-active without scope, no other request reaching it; the entry 201 with a new epoch; then GET /server serving startMode recovery, and Bronzeward-Recovery-Mode true on every answer
   client: before the entry, the start mode read from that refusal and nothing else read; after it, the new epoch handled as client contracts §8.5, GET /server read again, and the banner shown from GET /recovery
-  shown: 'before the entry, "This server was started for recovery and serves only the recovery entry until it is recorded.", the footer''s server unknown; after it, the epoch-change notice, the header''s new epoch and the banner "Recovery mode since <HH:MM>, epoch <epoch>. No machine scopes. Drafts can be edited." with the process''s restriction'
+  shown: 'before the entry, "This server was started for recovery and serves only the recovery entry until it is recorded.", the footer''s server unknown; after it, the epoch-change notice, the header''s new epoch and the banner "Recovery mode since <HH:MM>, epoch <epoch>. No machine scopes. Drafts can be edited." with the process''s restriction; while GET /recovery has found no answer (a refused redirect injected on the first read), "Recovery mode. Drafts can be edited." with the restriction and the disconnected state under it, until the next page reads it'
   absent: [token in the harness log, retained artifacts or browser storage]
 runs:
   web:

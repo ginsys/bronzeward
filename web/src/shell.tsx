@@ -4,7 +4,7 @@
 // recovery banner, start mode and epoch-change notice of §8.5.
 
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useId, useReducer, useRef, useState } from "react";
-import { PreEntry, type Recovery, RecoveryBanner, type StartMode, startModeOf, startRefusal } from "./recovery.tsx";
+import { PreEntry, type Recovery, RecoveryBanner, RecoveryRead, type StartMode, startModeOf, startRefusal } from "./recovery.tsx";
 import { Client, type ClientOptions, EPOCH_CHANGED, type ReadResult } from "./request.ts";
 import { follow, PAGES, usePath } from "./router.ts";
 import { Disconnected, HumanOnly, Loading, Offline, ProblemFields, problemFields, Refused, Status } from "./states.tsx";
@@ -245,6 +245,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
         )}
         <button type="button" onClick={signOut}>Sign out</button>
         {recoveryMode && <RecoveryBanner recovery={recovery.kind === "ok" ? recovery.data : undefined} mode={mode} />}
+        {recoveryMode && recovery.kind !== "loading" && <RecoveryRead res={recovery} />}
         {epochChanged && <Status testid="epoch-changed">{EPOCH_CHANGED}.</Status>}
         <Deprecations routes={notices} />
         {offline !== undefined && <Offline since={offline} readAt={readAt.current} />}
