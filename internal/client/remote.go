@@ -95,7 +95,7 @@ func why(err error, otherwise string) string {
 	case errors.As(err, &rh):
 		return "it does not answer TLS"
 	case errors.As(err, &oe) && oe.Op == "remote error":
-		return "it ended the TLS handshake with an alert"
+		return "it sent a TLS alert"
 	case errors.Is(err, context.Canceled):
 		return "it was cancelled"
 	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &ne) && ne.Timeout():

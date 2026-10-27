@@ -48,5 +48,12 @@ func FetchClientConfig(x *Context, from string, verbose io.Writer) (*ClientConfi
 	if cc.Issuer == "" || cc.CLIClientID == "" {
 		return nil, fmt.Errorf("GET %s: the file names no issuer or no cliClientId", u)
 	}
+	// The issuer is the host's text until it is checked: Context.Check would quote it whole.
+	if err := providerEndpoint(cc.Issuer, fmt.Sprintf("GET %s: the file's issuer", u)); err != nil {
+		return nil, err
+	}
+	if v, _ := url.Parse(cc.Issuer); v.RawQuery != "" || v.ForceQuery {
+		return nil, fmt.Errorf("GET %s: the file's issuer %s://%s: give a URL with no query", u, printable(v.Scheme), printable(v.Host))
+	}
 	return &cc, nil
 }

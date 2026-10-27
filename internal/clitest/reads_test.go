@@ -212,6 +212,26 @@ func TestReads(t *testing.T) {
 	in.set(nil, nil)
 	f.want(f.ctl(nil, "", "context", "add", "nofile", "--from", in.URL, "--certificate-authority", in.ca), 1,
 		"bronzeward-client.json answered 401 Unauthorized, not the client configuration file")
+	// Nothing the host sent is shown (ginsys/bronzeward#395): an issuer it names is refused by its
+	// scheme and host, and a transport failure by its type.
+	for issuer, want := range map[string]string{
+		"https://idp.example.invalid/BWSYNTH-SENT?BWSYNTH-SENT":              "the file's issuer https://idp.example.invalid: give a URL with no query",
+		"https://BWSYNTH-SENT:BWSYNTH-SENT@idp.example.invalid/BWSYNTH-SENT": "the file's issuer https://idp.example.invalid: give a URL with a host and no fragment or user",
+	} {
+		in.set(func(w http.ResponseWriter, r *http.Request) bool {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"issuer":"` + issuer + `","cliClientId":"BWSYNTH-cli"}`))
+			return true
+		}, nil)
+		r := f.ctl(nil, "", "context", "add", "named", "--from", in.URL, "--certificate-authority", in.ca)
+		f.want(r, 1, want)
+		if strings.Contains(r.out+r.err, "BWSYNTH-SENT") {
+			t.Errorf("--from showed the issuer the host sent:\n%s%s", r.out, r.err)
+		}
+	}
+	in.set(nil, nil)
+	f.want(f.ctl(nil, "", "context", "add", "gone", "--from", "http://127.0.0.1:1"), 1,
+		"GET http://127.0.0.1:1/bronzeward-client.json: the connection was refused")
 
 	f.want(f.ctl(nil, "", "context", "add", "lab", "--server", in.URL, "--certificate-authority", in.ca,
 		"--automation-token-file", f.tokenFile), 0, "credential automation")

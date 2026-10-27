@@ -650,6 +650,12 @@ func TestSignIn(t *testing.T) {
 		plain := f.signedIn("--context", "human", "logout")
 		os.WriteFile(path, cfg, 0o600)
 		f.want(plain, 1, "the token file "+file+" is removed", "The refresh token is not revoked", "must be https")
+		// A provider that cannot be reached is named with the cause by its type (ginsys/bronzeward#395).
+		os.WriteFile(path, []byte(strings.Replace(string(cfg), "issuer: "+f.iss.URL+"\n", "issuer: http://127.0.0.1:1\n", 1)), 0o600)
+		f.store(file, tok, "BWSYNTH-rt-10")
+		gone := f.signedIn("--context", "human", "logout")
+		os.WriteFile(path, cfg, 0o600)
+		f.want(gone, 1, "The refresh token is not revoked", "cannot reach the identity provider http://127.0.0.1:1: the connection was refused")
 		// A failed discovery shows the status of a refusal, but neither the provider's reason
 		// phrase nor its body; a refused redirect and another issuer are named as such.
 		for mode, want := range map[string]string{
