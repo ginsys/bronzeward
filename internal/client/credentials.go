@@ -377,7 +377,7 @@ func Revoke(x *Context, rt string) error {
 		URL string `json:"revocation_endpoint"`
 	}
 	if err := p.Claims(&d); err != nil {
-		return fmt.Errorf("the identity provider's revocation_endpoint: %w", err)
+		return errors.New("the identity provider's revocation_endpoint is not a string")
 	}
 	if d.URL == "" {
 		return ErrNoRevocation

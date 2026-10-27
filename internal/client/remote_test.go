@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -104,6 +105,8 @@ func TestRemoteTextIsNotShown(t *testing.T) {
 			": the request failed"},
 		"revocation endpoint off loopback": {withToken("", fmt.Sprintf("%q", offLoopback), nil), revoke,
 			"the identity provider's revocation_endpoint http://BWSYNTH.example.invalid: give a URL with a host and no fragment or user"},
+		"revocation endpoint not a string": {withToken("", `{"BWSYNTH-SENT":1}`, nil), revoke,
+			"the identity provider's revocation_endpoint is not a string"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			x := idp(t, c.at)
@@ -161,6 +164,44 @@ func TestRemoteTextIsNotShown(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestProxyAlertIsNamed: net/http wraps an https proxy's failure in its own *net.OpError, and the
+// TLS alert the proxy sent is still found beneath it.
+func TestProxyAlertIsNamed(t *testing.T) {
+	proxy, _ := url.Parse(alertProxy(t))
+	hc, err := newHTTPClient(&Context{Name: "lab", Server: "https://BWSYNTH.example.invalid", Credential: "automation"}, nil,
+		func(*http.Request) (*url.URL, error) { return proxy, nil }, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = hc.Get("https://BWSYNTH.example.invalid/.well-known/openid-configuration")
+	if got := remoteFailure(err).Error(); got != "it sent a TLS alert" {
+		t.Errorf("%q (from %v); want the alert named", got, err)
+	}
+}
+
+// alertProxy is the https URL of a proxy that answers every TLS handshake with an alert.
+func alertProxy(t *testing.T) string {
+	t.Helper()
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+		return nil, errors.New("no certificate")
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			c.(*tls.Conn).Handshake()
+			c.Close()
+		}
+	}()
+	return "https://" + ln.Addr().String()
 }
 
 // uriServer is the https URL, as localhost, of a server whose certificate holds a URI that x509

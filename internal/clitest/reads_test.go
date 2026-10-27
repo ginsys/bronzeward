@@ -1,7 +1,9 @@
 package clitest
 
 import (
+	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -232,6 +234,27 @@ func TestReads(t *testing.T) {
 	in.set(nil, nil)
 	f.want(f.ctl(nil, "", "context", "add", "gone", "--from", "http://127.0.0.1:1"), 1,
 		"GET http://127.0.0.1:1/bronzeward-client.json: the connection was refused")
+	// Through an https proxy: one the system store does not trust, one that answers with a TLS alert.
+	alerting, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+		return nil, errors.New("no certificate")
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer alerting.Close()
+	go func() {
+		for c, err := alerting.Accept(); err == nil; c, err = alerting.Accept() {
+			c.(*tls.Conn).Handshake()
+			c.Close()
+		}
+	}()
+	for proxy, want := range map[string]string{
+		in.URL:                                "is not trusted by the system trust store",
+		"https://" + alerting.Addr().String(): ": it sent a TLS alert",
+	} {
+		f.want(f.ctl([]string{"HTTPS_PROXY=" + proxy}, "", "context", "add", "proxied", "--from", "https://bronzeward.example.invalid"), 1,
+			"GET https://bronzeward.example.invalid/bronzeward-client.json: ", want)
+	}
 
 	f.want(f.ctl(nil, "", "context", "add", "lab", "--server", in.URL, "--certificate-authority", in.ca,
 		"--automation-token-file", f.tokenFile), 0, "credential automation")
