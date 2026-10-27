@@ -395,6 +395,14 @@ describe("§9.5 renewal", () => {
     expect(f.mock.calls.map((c) => form(c[1])["token"])).toEqual(["SYNTH-r1"]);
   });
 
+  test("#388: a page cleared while its renewal is announced sends nothing and revokes nothing", async () => {
+    const f = answers([]);
+    let s!: Session;
+    s = new Session(config, provider, tokens(), { fetch: f as unknown as typeof fetch, onRenewing: () => Promise.resolve(s.clear()).then(() => true) });
+    expect(await s.renew()).toBe(false);
+    expect(f).not.toHaveBeenCalled();
+  });
+
   test("#388: a forfeited pair renews by the redirect and takes the current pair, even of the same expiry", () => {
     const s = new Session(config, provider, tokens());
     expect(s.adopt(tokens({ access: "SYNTH-a2", refresh: "SYNTH-r2" }))).toBe(false);
@@ -553,6 +561,30 @@ describe("§9.7 item 2 sign-out", () => {
     await out;
     expect(await renewal).toBe(false);
     expect(f.mock.calls.filter((c) => c[0] === provider.revocationEndpoint).map((c) => form(c[1])["token"])).toEqual(["SYNTH-r1"]);
+  });
+
+  test("#388: no refresh token is revoked twice, whichever answer brings it back", async () => {
+    vi.useFakeTimers();
+    try {
+      const pending: ((r: Response) => void)[] = [];
+      const f = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => (url === provider.tokenEndpoint ? new Promise<Response>((r) => pending.push(r)) : Promise.resolve(new Response(null, { status: 200 }))));
+      const s = new Session(config, provider, tokens(), { fetch: f as unknown as typeof fetch });
+      void s.renew();
+      await vi.advanceTimersByTimeAsync(REFRESH_WAIT_MS);
+      expect(s.adopt(tokens({ access: "SYNTH-a3", refresh: "SYNTH-r3", expiresAt: 600_000 }))).toBe(true);
+      const renewal = s.renew();
+      await vi.advanceTimersByTimeAsync(0);
+      const out = s.signOut(ORIGIN);
+      s.clear();
+      pending[0]!(json({ access_token: "SYNTH-a2", refresh_token: "SYNTH-r2", expires_in: 300 }));
+      pending[1]!(json({ access_token: "SYNTH-a4", refresh_token: "SYNTH-r3", expires_in: 300 }));
+      await vi.advanceTimersByTimeAsync(0);
+      await out;
+      expect(await renewal).toBe(false);
+      expect(f.mock.calls.filter((c) => c[0] === provider.revocationEndpoint).map((c) => form(c[1])["token"])).toEqual(["SYNTH-r3", "SYNTH-r2"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("#388: after another tab's sign-out, settled() waits for the renewal in flight to revoke the pair it brings, at most SIGN_OUT_WAIT_MS", async () => {

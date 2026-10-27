@@ -76,10 +76,10 @@ export function renewals(page: PageState, deps: RenewalDeps) {
       if (!still()) return;
       // #388: the holder renewed for another tab meanwhile; its threshold moved with the pair.
       if (deps.session()?.expiresAt !== at) return schedule();
-      // §9.3 item 3: without a rotating refresh token the holder renews by the redirect; another
-      // tab asks it, as for any renewal, and redirects itself if granted the lock while it waits.
+      // §9.3 item 3: without a rotating refresh token the holder renews by the redirect, once its
+      // renewal answers false (it may first wait for the previous holder's redirect, #388);
+      // another tab asks it, as for any renewal, and redirects itself if granted the lock.
       const byRedirect = () => deps.session()?.byRedirect === true && deps.holder();
-      if (byRedirect()) return void deps.redirect(still);
       void deps.renew().then((ok) => {
         if (!still()) return;
         if (ok) schedule();

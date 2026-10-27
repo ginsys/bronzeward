@@ -116,10 +116,12 @@ describe("§9.5 renewals", () => {
     }
   });
 
-  test("§9.3 item 3: without a rotating refresh token the holder renews by the redirect", async () => {
+  test("§9.3 item 3: without a rotating refresh token the holder renews by the redirect once its renewal answers false", async () => {
     const h = harness({ byRedirect: true });
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(h.renew).not.toHaveBeenCalled();
+    expect(h.redirect).not.toHaveBeenCalled();
+    h.renewed(false);
+    await vi.advanceTimersByTimeAsync(0);
     h.digested("https://idp.example.invalid/authorize?x");
     await vi.runAllTimersAsync();
     expect(h.assign).toHaveBeenCalledWith("https://idp.example.invalid/authorize?x");
@@ -156,6 +158,8 @@ describe("§9.5 renewals", () => {
   ] as const)("R8-F1: after %s during the PKCE digest, the renewal does not navigate", async (_name, phase) => {
     const h = harness({ byRedirect: true });
     await vi.advanceTimersByTimeAsync(60_000);
+    h.renewed(false);
+    await vi.advanceTimersByTimeAsync(0);
     expect(h.redirect).toHaveBeenCalledTimes(1);
     h.page.to(phase);
     h.digested("https://idp.example.invalid/authorize?x");

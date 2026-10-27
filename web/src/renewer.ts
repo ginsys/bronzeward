@@ -29,7 +29,9 @@ export type Message =
   // `due`: the expiry of the sender's pair, which reached the threshold or was refused; absent
   // from a new tab, which takes the current pair.
   | { type: "request"; due?: number }
-  | { type: "pair"; tokens: Tokens };
+  | { type: "pair"; tokens: Tokens }
+  // The holder leaves to renew by the redirect, whose pair comes to every tab.
+  | { type: "redirecting" };
 
 export interface Channel {
   postMessage(message: Message): void;
@@ -53,6 +55,8 @@ export class Renewer {
   #channel: Channel | undefined;
   #ready: Promise<void> = Promise.resolve();
   #leave: (() => void) | undefined;
+  // Until when another tab's redirect may still bring a pair.
+  #redirectUntil = 0;
   // Every refresh token another tab announced in a `renewing`: whatever its answer, it may be spent,
   // so it is never sent or given from here. Told by token, not by expiry, so that a pair with a
   // shorter lifetime cannot hide it. Erased on release() (§10.3 item 3), after which this tab sends
@@ -108,6 +112,12 @@ export class Renewer {
     this.#channel?.postMessage({ type: "signed-out" });
   }
 
+  // §9.3 item 3: just before the holder's renewal by the redirect, so that the next holder waits
+  // for its pair rather than redirecting too (#388).
+  redirecting(): void {
+    this.#channel?.postMessage({ type: "redirecting" });
+  }
+
   // Signed in: wait for the lock and keep it until release().
   hold(): void {
     if (this.#closed || this.#release !== undefined) return;
@@ -147,18 +157,18 @@ export class Renewer {
 
   // §9.5 item 1: the holder renews; another tab asks it and waits for a newer pair, at most 10 s,
   // or fails as item 3, unless the lock comes to it first. False also when the pair is another
-  // principal's (item 2, onPair's).
+  // principal's (item 2, onPair's), and for a holder that renews by the redirect.
   async renew(): Promise<boolean> {
     const s = this.session();
     const before = s?.expiresAt;
     const who = s?.principal;
     if (s === undefined || before === undefined || who === undefined) return false;
-    if (this.#holder) return s.renew();
     const accept = (p: Tokens) => p.expiresAt > before || p.iss !== who.iss || p.sub !== who.sub;
-    let t = await this.#wait(RENEW_WAIT_MS, accept, { type: "request", due: before });
-    // #388: the holder that left may be renewing by the redirect, whose pair comes to every tab;
-    // granted the lock, a tab that would redirect too waits for that pair first.
-    if (t === "holder" && this.session() === s && s.byRedirect) t = (await this.#wait(REDIRECT_WAIT_MS, accept)) ?? "holder";
+    let t = this.#holder ? "holder" : await this.#wait(RENEW_WAIT_MS, accept, { type: "request", due: before });
+    // #388: within REDIRECT_WAIT_MS of the previous holder's `redirecting`, a holder that would
+    // redirect too waits for that redirect's pair, granted the lock while it asked or before.
+    const left = this.#redirectUntil - Date.now();
+    if (t === "holder" && this.session() === s && s.byRedirect && left > 0) t = (await this.#wait(left, accept)) ?? "holder";
     if (this.session() !== s || t === undefined) return false;
     return t === "holder" ? s.renew() : t.iss === who.iss && t.sub === who.sub;
   }
@@ -171,6 +181,7 @@ export class Renewer {
       this.#post({ type: "ack", of: m.of, tab: this.#tab });
     }
     if (m.type === "ack") for (const a of this.#acks) a(m);
+    if (m.type === "redirecting") this.#redirectUntil = Date.now() + REDIRECT_WAIT_MS;
     if (m.type === "request") void this.#answer(typeof m.due === "number" ? m.due : undefined);
     if (m.type !== "pair" || !isTokens(m.tokens)) return;
     for (const w of this.#waiting) w(m.tokens);
@@ -244,11 +255,11 @@ export class Renewer {
       });
       if (this.#closed || this.#tab !== tab) return false;
       for (const n of others) if (!acked.has(n)) await this.locks.request(n, { steal: true }, () => undefined);
-      if (!(await this.#held()).includes(tab)) {
-        this.#rejoin(tab);
-        return false;
-      }
-      return true;
+      const mine = (await this.#held()).includes(tab);
+      // Released or rejoined meanwhile (another tab's sign-out, pagehide): nothing is sent.
+      if (this.#closed || this.#tab !== tab) return false;
+      if (!mine) this.#rejoin(tab);
+      return mine;
     } finally {
       this.#acks.delete(ack);
     }

@@ -848,9 +848,11 @@ current token expires
      since an abort cannot recall a request the provider may already have answered.
    - A tab without the lock never renews: under the 60 s threshold or after a `401` (§9.5 item 1)
      it posts a request and waits for the holder's pair, at most 10 s, then treats renewal as
-     failed (§9.5 item 3). Granted the lock while it waits, it renews itself. Where its pair has no
-     refresh token, it first waits at most 10 s for the pair of the redirect the previous holder
-     may have left for, then redirects, so that one renewal is one redirect, not one per tab.
+     failed (§9.5 item 3). Granted the lock while it waits, it renews itself. A holder about to
+     renew by redirect posts `redirecting` first. A tab that received it in the last 10 s and is
+     granted the lock, while it asks or before its own threshold, waits out the rest of those 10 s
+     for that redirect's pair and redirects itself only if none comes, so that one renewal is one
+     redirect, not one per tab.
    - A holder whose renewal answered a request due first has a new pair, and its own renewal
      timer waits for that pair's threshold instead of renewing again.
    - A refresh token named in a `renewing` is spent in every other tab, whatever the answer: a tab
