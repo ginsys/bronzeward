@@ -10,14 +10,19 @@ const canary = process.env["BW_WEB_CANARY"]!;
 const hits = async (): Promise<number> => ((await (await fetch(`${TARGET_ORIGIN}/__hits`)).json()) as { hits: number }).hits;
 
 // The page signs in through the synthetic provider first; this waits until it is back on `path`
-// with its read settled, and returns the status the read left.
+// with its read settled, and returns the status the read left. Read in one step in the page: a
+// status text gone between two WebDriver calls would hold the second for its whole implicit wait.
 async function settled(path: string): Promise<string> {
-  const status = () => $('[data-testid="status"]').getText();
+  let shown = "";
   await browser.waitUntil(async () => {
-    const url = new URL(await browser.getUrl());
-    return url.pathname + url.search === path && (await status()) !== "Loading";
+    const [at, status] = await browser.execute(() => [
+      location.pathname + location.search,
+      document.querySelector('[data-testid="status"]')?.textContent ?? "",
+    ]);
+    shown = status;
+    return at === path && status !== "" && !status.startsWith("Loading");
   }, { timeout: 20_000, timeoutMsg: `the page did not settle on ${path}` });
-  return status();
+  return shown;
 }
 
 describe("an API redirect to another origin", () => {
@@ -28,7 +33,10 @@ describe("an API redirect to another origin", () => {
   it("TLS-02, TLS-03: the read is not sent to the target and the page names no target", async () => {
     await browser.url("/machines?cluster=c1");
     expect(await settled("/machines?cluster=c1")).toBe(TRANSPORT_FAILURE);
-    expect(await $('[data-testid="principal"]').getText()).toBe("Signed in as h-synthetic");
+    // The shell's first read, GET /server, is the one refused (client contracts §7): nothing more
+    // is read, so the footer names no server and the header no principal.
+    expect(await $('[data-testid="server"]').getText()).toBe("Server unknown");
+    expect(await $('[data-testid="principal"]').isExisting()).toBe(false);
     const page = await $("body").getText();
     expect(page).not.toContain("58444");
     expect(page).not.toContain("127.0.0.1");
