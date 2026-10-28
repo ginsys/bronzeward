@@ -16,9 +16,8 @@ const ours = () =>
   );
 
 describe("the signed-out page", () => {
-  // Positive control: any other page holds its tab lock once settled (here the page signs in, then
-  // the shell's first read fails: every API request is redirected), so the query below can see a
-  // held one. It shows the query sees the lock, not that sign-in succeeded.
+  // Positive control: any other page holds its tab lock once settled, so the query below can see a
+  // held one. It shows the query sees the lock, not how the page settled.
   it("a page other than /signed-out holds a tab lock once settled", async () => {
     await browser.url("/");
     await browser.waitUntil(async () => {
