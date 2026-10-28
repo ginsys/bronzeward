@@ -52,7 +52,8 @@ def markdown_lines(path, root=ROOT):
     label = path.relative_to(root)
     for number, line in enumerate(read_text(path, root).splitlines(), 1):
         require(line == line.rstrip(), f'{label}:{number}: trailing whitespace')
-        marker = re.match(r'^ {0,3}(`{3,}|~{3,})(.*)$', BLOCKQUOTE.sub('', line))
+        # At any indentation, so that a fence inside a list item counts too.
+        marker = re.match(r'^ *(`{3,}|~{3,})(.*)$', BLOCKQUOTE.sub('', line))
         if marker and fence is None:
             fence = marker.group(1)
         elif marker and marker.group(1)[0] == fence[0] and len(marker.group(1)) >= len(fence) \
@@ -99,9 +100,14 @@ def check_markdown(path, root=ROOT):
             if parts.scheme or parts.netloc:
                 continue
             target = path.parent / unquote(parts.path) if parts.path else path
-        target = target.resolve()
+        try:
+            target = target.resolve()
+            exists = target.exists()
+        except OSError as error:
+            # Its message quotes the path, and so the destination.
+            raise ValueError(f'{label}: unusable link target ({error.strerror}): {shown(destination)}') from None
         require(target.is_relative_to(root.resolve()), f'{label}: link escapes repository: {shown(destination)}')
-        require(target.exists(), f'{label}: missing link target: {shown(destination)}')
+        require(exists, f'{label}: missing link target: {shown(destination)}')
         if parts.fragment and target.suffix == '.md':
             require(unquote(parts.fragment) in anchors(prose(target, root)),
                     f'{label}: missing anchor: {shown(destination)}')

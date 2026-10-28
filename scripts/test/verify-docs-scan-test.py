@@ -107,6 +107,8 @@ with tempfile.TemporaryDirectory() as work:
     fails('host in a blockquoted fence', OPERATOR, f'\n> ~~~sh\n> curl {host}\n> ~~~\n', HOST)
     fails('a fence-like line inside a fence', OPERATOR, f'\n```sh\n~~~ {host}\n```\n', HOST)
     fails('host in indented code', OPERATOR, f'\nRun:\n\n    curl {host}\n', HOST)
+    fails('host in a fence inside a list item', OPERATOR,
+          f'\n1. Configure the client:\n\n    ```sh\n    export BW_ISSUER={host}\n\n    bronzeward login\n    ```\n', HOST)
     passes('host in a list continuation', OPERATOR, f'\n- Step one\n\n    see {host} later.\n')
     passes('host in operator prose', OPERATOR, f'\nSee [the provider]({host}) or {host}.\n')
     passes('host in a specification code block', DOC, f'\n```sh\ncurl {host}\n```\n')
@@ -154,6 +156,12 @@ with tempfile.TemporaryDirectory() as work:
     error = run(root, lambda root: vd.check_markdown(root / 'README.md', root)) or ''
     if 'missing link target' not in error or token in error:
         failures.append(f'a link check on a token destination: want a refusal without it, got {error!r}')
+    # A destination too long for a file name fails in the file system, not in the check.
+    long_jwt = jwt + 'x' * 300
+    (root / 'README.md').write_text(f'[a link]({long_jwt})\n', encoding='utf-8')
+    error = run(root, lambda root: vd.check_markdown(root / 'README.md', root)) or ''
+    if 'unusable link target' not in error or long_jwt[:40] in error:
+        failures.append(f'a link check on a long token destination: want a refusal without it, got {error!r}')
 
 for failure in failures:
     print(f'FAIL: {failure}', file=sys.stderr)
