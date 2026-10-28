@@ -85,7 +85,7 @@ export function useHeld<T, X extends { kind: string } = never>(): [Load<T> | X, 
 
 // What settles a list's read: a dropped read hands its failure on, holds no data, so a failure
 // without answer is never kept under the offline banner, and is shown as dropped.
-export function settling<T>(res: ReadResult<Listed<T>> | Dropped, put: (r: Load<Listed<T>> | Dropped) => void, held: () => boolean): [ReadResult<Listed<T>>, (r: Load<Listed<T>>) => void, () => boolean] {
+export function settling<D>(res: ReadResult<D> | Dropped, put: (r: Load<D> | Dropped) => void, held: () => boolean): [ReadResult<D>, (r: Load<D>) => void, () => boolean] {
   return res.kind === "dropped" ? [res.failed, () => put(res), () => false] : [res, put, held];
 }
 
