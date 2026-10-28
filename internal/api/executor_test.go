@@ -571,31 +571,73 @@ func attemptAfterAccessRotation(t *testing.T, move func(*provider.TalosAccessVer
 	}
 }
 
-// revokeAtCommitment runs the executor on the plan and revokes its approval at the commitment: while
-// the commitment transaction holds its locks (held, DS row 003), the revocation waiting for it, or
-// once it has committed (row 004). With control, the attempt transaction's comparison 1 is skipped.
-// Checked, comparison 1 refuses the attempt: the operation is cancelled and nothing reaches the node.
-func revokeAtCommitment(t *testing.T, held, control bool) {
+// Where revokeAtCommitment places the approval's revocation.
+const (
+	// revokeAfter revokes once the commitment has committed (DS row 004).
+	revokeAfter = iota
+	// revokeHeld starts the revocation while the commitment holds its locks and commits once it waits
+	// on the machine row (DS row 003). Which of the revocation and the attempt then takes the row first
+	// is PostgreSQL's choice: the commitment updated the row, so the waiting revocation locks its new
+	// version afresh, as the attempt does (choice §10.31).
+	revokeHeld
+	// revokeAttemptFirst starts the revocation while the commitment holds its locks, but holds it at
+	// its key's lock, its first (§7.2), until the attempt holds the machine row: row 003's other order,
+	// every time.
+	revokeAttemptFirst
+)
+
+// revokeAtCommitment runs the executor on the plan and revokes its approval at the commitment, at
+// the place at names. With control, the attempt transaction's comparison 1 is skipped. Checked, a
+// revocation that takes the machine row before the attempt refuses it: the operation is cancelled
+// and nothing reaches the node. An attempt that takes the row first is recorded before the
+// revocation, as one recorded before a revocation is (DS row 005), and the revocation waits for it.
+func revokeAtCommitment(t *testing.T, at int, control bool) {
 	xe := newExecEnv(t)
 	token, k := xe.human("h-recovery"), xe.key()
-	var armed atomic.Bool
+	var gate *sql.Tx
+	if at == revokeAttemptFirst {
+		var err error
+		if gate, err = xe.db.BeginTx(t.Context(), nil); err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = gate.Rollback() }()
+		mustExec(t, gate, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, xe.principalOf("h-recovery")+"/"+k)
+	}
+	var armed, attempting atomic.Bool
 	armed.Store(true)
+	attempting.Store(at == revokeAttemptFirst)
 	revoked := make(chan int, 1)
-	waited := make(chan error, 1)
+	waited := make(chan error, 2)
 	life, stop := context.WithCancel(t.Context())
 	idle := make(chan struct{})
 	a := xe.executor(t, life, idle, options{noPlanCheck: control, commit: func(tx *sql.Tx) error {
 		var ops, attempts int
 		var approval sql.NullString
 		if err := tx.QueryRow(`SELECT (SELECT count(*) FROM operation WHERE plan = $1), (SELECT count(*) FROM attempt WHERE plan = $1),
-			(SELECT approval FROM plan_state WHERE plan = $1)`, xe.pid).Scan(&ops, &attempts, &approval); err != nil || ops == 0 ||
-			attempts != 0 || !armed.CompareAndSwap(true, false) {
+			(SELECT approval FROM plan_state WHERE plan = $1)`, xe.pid).Scan(&ops, &attempts, &approval); err != nil || ops == 0 {
+			return tx.Commit()
+		}
+		if attempts == 1 && attempting.CompareAndSwap(true, false) {
+			// The attempt holds the machine row: the revocation takes its key and waits on the row.
+			if err := gate.Commit(); err != nil {
+				waited <- err
+			} else {
+				waited <- revocationWaits(xe.db, machineLock)
+			}
+			return tx.Commit()
+		}
+		if attempts != 0 || !armed.CompareAndSwap(true, false) {
 			return tx.Commit()
 		}
 		revoke := func() { revoked <- xe.revokeApproval(token, k, approval.String, `{"reason":"wrong"}`).Code }
-		if held {
+		switch at {
+		case revokeHeld:
 			go revoke()
-			waited <- revocationWaits(xe.db)
+			waited <- revocationWaits(xe.db, machineLock)
+			return tx.Commit()
+		case revokeAttemptFirst:
+			go revoke()
+			waited <- revocationWaits(xe.db, keyLock)
 			return tx.Commit()
 		}
 		if err := tx.Commit(); err != nil {
@@ -608,12 +650,19 @@ func revokeAtCommitment(t *testing.T, held, control bool) {
 	defer stopping(a, stop)
 	waitIdle(t, idle, 1)
 	xe.approveThrough(t, a)
-	if control {
+	switch {
+	case control || at == revokeAttemptFirst:
 		until(t, a, idle, "the operation completes", func() bool { return xe.opState(t) == "completed" })
-	} else {
+	case at == revokeHeld:
+		until(t, a, idle, "the operation is cancelled or completed", func() bool {
+			s := xe.opState(t)
+			return s == "cancelled" || s == "completed"
+		})
+	default:
 		until(t, a, idle, "the operation is cancelled", func() bool { return xe.opState(t) == "cancelled" })
 	}
-	if held {
+	waits := map[int]int{revokeAfter: 0, revokeHeld: 1, revokeAttemptFirst: 2} // the commit hook's reports
+	for range waits[at] {
 		if err := <-waited; err != nil {
 			t.Fatal(err)
 		}
@@ -624,6 +673,10 @@ func revokeAtCommitment(t *testing.T, held, control bool) {
 	if n := count(t, xe.db, `SELECT count(*) FROM machine_event c JOIN machine_event v ON v.machine = c.machine
 		AND v.kind = 'approval-revocation' AND v.revision > c.revision WHERE c.machine = $1 AND c.kind = 'commitment'`, xe.machine); n != 1 {
 		t.Fatal("the revocation is not recorded after the commitment")
+	}
+	if !control && at != revokeAfter && xe.opState(t) == "completed" {
+		xe.wantAttemptBeforeRevocation(t)
+		return
 	}
 	if control {
 		got := xe.node.AppliedRequests()
@@ -656,28 +709,66 @@ func revokeAtCommitment(t *testing.T, held, control bool) {
 	}
 }
 
-// revocationWaits is nil once the approval revocation waits on the machine row the commitment holds
-// (T5b's first lock), in this test's own database. It reports, not fails: it runs on the executor's
-// goroutine.
-func revocationWaits(db *sql.DB) error {
+// The approval revocation's statements that revocationWaits recognises: its key's lock (§7.2) and
+// the machine row, T5b's first lock.
+const (
+	keyLock     = `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`
+	machineLock = `SELECT 1 FROM machine WHERE id = $1 FOR UPDATE`
+)
+
+// revocationWaits is nil once the approval revocation waits on the lock that stmt takes, in this
+// test's own database. It reports, not fails: it runs on the executor's goroutine.
+func revocationWaits(db *sql.DB, stmt string) error {
 	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
 		var n int
 		if err := db.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()
-			AND wait_event_type = 'Lock' AND query LIKE 'SELECT 1 FROM machine WHERE id = $1 FOR UPDATE'`).Scan(&n); err != nil {
+			AND wait_event_type = 'Lock' AND query = $1`, stmt).Scan(&n); err != nil {
 			return err
 		}
 		if n == 1 {
 			return nil
 		}
 	}
-	return errors.New("the revocation did not wait on the machine row within 10s")
+	return fmt.Errorf("the revocation did not wait on %q within 10s", stmt)
+}
+
+// wantAttemptBeforeRevocation checks an attempt that took the machine row before the revocation:
+// it was recorded before the revocation, which waited for it and was recorded too, and its one
+// request reached the node. No attempt is recorded after the revocation, so nothing is sent on one.
+func (xe *execEnv) wantAttemptBeforeRevocation(t *testing.T) {
+	t.Helper()
+	if n := count(t, xe.db, `SELECT count(*) FROM attempt a JOIN machine_event v ON v.machine = a.machine
+		AND v.kind = 'approval-revocation' AND v.revision > a.revision WHERE a.plan = $1`, xe.pid); n != 1 ||
+		count(t, xe.db, `SELECT count(*) FROM attempt WHERE plan = $1`, xe.pid) != 1 {
+		t.Fatal("the attempt is not the plan's one attempt, recorded before the revocation")
+	}
+	if n := count(t, xe.db, `SELECT count(*) FROM approval_revocation WHERE approval = $1`, xe.approval); n != 1 {
+		t.Fatalf("%d revocations of the approval", n)
+	}
+	if n := count(t, xe.db, `SELECT count(*) FROM machine_event WHERE machine = $1 AND kind = 'refusal'`, xe.machine); n != 0 {
+		t.Fatalf("%d refusals of an attempt recorded before the revocation", n)
+	}
+	got := xe.node.AppliedRequests()
+	if len(got) != 1 || got[0].Mode != "NO_REBOOT" || got[0].DryRun || !bytes.Equal(got[0].Data, xe.artifact) {
+		t.Fatalf("requests %+v", got)
+	}
 }
 
 // DS row 003 through the executor and a Talos node: a revocation started while the commitment holds
-// its locks waits for it, and the attempt transaction's comparison 1 then refuses the attempt.
+// its locks waits for it. Either the attempt transaction's comparison 1 then refuses the attempt, or
+// the attempt takes the machine row first and the revocation waits for it too (choice §10.31).
+// attempt-first forces the second order; held leaves the order to PostgreSQL.
 func TestExecutorRevocationHeld(t *testing.T) {
 	t.Parallel()
-	revokeAtCommitment(t, true, false)
+	for _, c := range []struct {
+		name string
+		at   int
+	}{{"held", revokeHeld}, {"attempt-first", revokeAttemptFirst}} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			revokeAtCommitment(t, c.at, false)
+		})
+	}
 }
 
 // DS rows 004 and 006: the approval revoked after the commitment, before the attempt, refused by
@@ -692,7 +783,7 @@ func TestExecutorRevokedControl(t *testing.T) {
 	}{{"checked", false}, {"control", true}} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			revokeAtCommitment(t, false, c.control)
+			revokeAtCommitment(t, revokeAfter, c.control)
 		})
 	}
 }
