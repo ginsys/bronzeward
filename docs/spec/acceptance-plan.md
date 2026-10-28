@@ -525,9 +525,10 @@ changed, and nothing sent; this step's commitment of the same plan with no publi
 the control (ER choice §10.24); the publication racing the commitment itself is a *check* (§7.1).
 A plan cancelled after commitment with no attempt: the operation goes `unresolved`, then
 `cancelled`, and nothing is sent (ER §9.2). A revocation started while a commitment holds the
-approval waits for it, and the attempt is then refused by comparison 1, nothing sent (DS row 003);
-it also waits on the machine row and plan state the commitment holds, so no unlocked control
-applies. Row 006's control revokes after the commitment, since a revoked plan cannot commit (ER
+approval waits for it. Then either the attempt is refused by comparison 1 and nothing is sent, or
+the attempt takes the machine row first, is recorded before the revocation and is sent (DS row 003,
+ER choice §10.31). The revocation also waits on the machine row and plan state the commitment
+holds, so no unlocked control applies. Row 006's control revokes after the commitment, since a revoked plan cannot commit (ER
 choice §10.31).
 The approver's identity revoked before commitment, and after it with no attempt: the plan cannot
 commit; or its operation goes `unresolved` with its scope held, each transition on the timeline,
