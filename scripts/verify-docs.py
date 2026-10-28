@@ -42,19 +42,22 @@ def read_text(path, root=ROOT):
         raise ValueError(f'{path.relative_to(root)}: invalid UTF-8') from None
 
 
+BLOCKQUOTE = re.compile(r'^(?: {0,3}>)+ ?')
+
+
 def markdown_lines(path, root=ROOT):
-    """Yield (number, line, fenced) for every line but fence markers; verify fences and whitespace."""
+    """Yield (number, line, fenced) for every line but the markers that open or close a fence, one
+    inside a blockquote included; verify fences and whitespace."""
     fence = None
     label = path.relative_to(root)
     for number, line in enumerate(read_text(path, root).splitlines(), 1):
         require(line == line.rstrip(), f'{label}:{number}: trailing whitespace')
-        marker = re.match(r'^ {0,3}(`{3,}|~{3,})(.*)$', line)
-        if marker:
-            run, suffix = marker.groups()
-            if fence is None:
-                fence = run
-            elif run[0] == fence[0] and len(run) >= len(fence) and not suffix.strip():
-                fence = None
+        marker = re.match(r'^ {0,3}(`{3,}|~{3,})(.*)$', BLOCKQUOTE.sub('', line))
+        if marker and fence is None:
+            fence = marker.group(1)
+        elif marker and marker.group(1)[0] == fence[0] and len(marker.group(1)) >= len(fence) \
+                and not marker.group(2).strip():
+            fence = None
         else:
             yield number, line, fence is not None
     require(fence is None, f'{label}: unclosed code fence')
@@ -78,6 +81,13 @@ def anchors(text):
     return result
 
 
+def shown(destination):
+    """A link destination for a refusal, unless it matches a credential or home-path pattern."""
+    if any(pattern.search(destination) for pattern in SECRETS.values()):
+        return 'a destination matching a P12 credential or home-path pattern'
+    return destination
+
+
 def check_markdown(path, root=ROOT):
     label = path.relative_to(root)
     for destination in re.findall(r'\[[^\]\n]+\]\(([^)\s]+)\)', prose(path, root)):
@@ -90,10 +100,11 @@ def check_markdown(path, root=ROOT):
                 continue
             target = path.parent / unquote(parts.path) if parts.path else path
         target = target.resolve()
-        require(target.is_relative_to(root.resolve()), f'{label}: link escapes repository: {destination}')
-        require(target.exists(), f'{label}: missing link target: {destination}')
+        require(target.is_relative_to(root.resolve()), f'{label}: link escapes repository: {shown(destination)}')
+        require(target.exists(), f'{label}: missing link target: {shown(destination)}')
         if parts.fragment and target.suffix == '.md':
-            require(unquote(parts.fragment) in anchors(prose(target, root)), f'{label}: missing anchor: {destination}')
+            require(unquote(parts.fragment) in anchors(prose(target, root)),
+                    f'{label}: missing anchor: {shown(destination)}')
 
 
 def check_form(root=ROOT):
@@ -130,15 +141,18 @@ SECRETS = {
     'JWT-shaped string': re.compile(r'\beyJ[\w-]{4,}\.eyJ[\w-]{4,}\.[\w-]*'),
     'automation token': re.compile(r'\bbwt_\w+\.[\w-]+'),  # internal/auth/tokens.go:21
     'client_secret value': re.compile(r'client_secret["\']?\s*[:=]\s*["\']?(?![<"\'\s])[^\s"\',}]+'),
-    'home-directory path': re.compile(r'/home/(?!<)[^/\s]+/|/Users/(?!<)[^/\s]+/|\b[A-Za-z]:\\Users\\'),
+    'home-directory path': re.compile(r'/home/(?!<)[^/\s]+/|/Users/(?!<)[^/\s]+/|(?i:\b[a-z]:\\{1,2}users\\{1,2})'),
 }
-# Host names in what an operator copies: URL authorities, mail domains, name:port and IPv4.
+# Host names in what an operator copies: URL authorities, mail domains, name:port (a dotted name or a
+# bracketed IPv6 address) and IPv4. A URL's host is taken whole, up to the port or path.
 HOSTS = (
-    re.compile(r'\b[A-Za-z][A-Za-z0-9+.-]*://(?:[^@/\s]*@)?(\[[^\]\s]*\]|[^/?#:\s"\'`<>)\]},]+)'),
+    re.compile(r'\b[A-Za-z][A-Za-z0-9+.-]*://(?:[^\s/?#@"\'`<>]*@)?(\[[^\]\s/]*\]|[^\s/?#:@"\'`<>()\[\],;\\]*)'),
     re.compile(r'[\w.+-]@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)'),
-    re.compile(r'(?<![\w./-])([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+):\d+\b'),
+    re.compile(r'(?<![\w./-])([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+|\[[0-9A-Fa-f:.]+\]):\d+\b'),
     re.compile(r'(?<![\w.])(\d{1,3}(?:\.\d{1,3}){3})(?![\w.])'),
 )
+# A shell or Caddy environment placeholder in host position names no host.
+PLACEHOLDER = re.compile(r'\$\w+|\$\{\w+\}|\{\$\w+\}')
 ALLOWED_DOMAINS = ('example.invalid', 'example.com', 'localhost')
 PROJECT_URL = 'https://github.com/ginsys/bronzeward/'
 # Known synthetic development values, each allowed by exact value: the walkthrough's registry
@@ -149,30 +163,64 @@ IMAGES = {'.png', '.jpg', '.jpeg', '.gif', '.webp'}
 
 
 def disallowed_hosts(text):
+    """Count the host names in text that are not example hosts, each compared whole."""
+    count = 0
     for pattern in HOSTS:
         for match in pattern.finditer(text):
-            # A shell variable or template placeholder in host position names no host.
-            host = re.match(r'\[[^\]]*\]|[A-Za-z0-9.-]*', match.group(1)).group(0).lower().rstrip('.')
-            if not host:
+            host = match.group(1)
+            if not host or PLACEHOLDER.fullmatch(host):
                 continue
             if pattern is HOSTS[0] and text.startswith(PROJECT_URL, match.start()):
                 continue
+            host = host.lower().rstrip('.')
             if host == '127.0.0.1' or host in SYNTHETIC_HOSTS:
                 continue
             if any(host == domain or host.endswith('.' + domain) for domain in ALLOWED_DOMAINS):
                 continue
-            yield host
+            count += 1
+    return count
 
 
-def code_spans(line):
-    return [span for _, span in re.findall(r'(`+)(.+?)\1', line)]
+def operator_code(path, root=ROOT):
+    """Yield (number, text) for the code an operator copies from a page: fenced lines, lines
+    indented four or more spaces outside a list (indented code), and inline code spans, which may
+    run over the lines of one paragraph."""
+    paragraph, in_list = [], False
+
+    def spans():
+        text = '\n'.join(line for _, line in paragraph)
+        for match in re.finditer(r'(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)', text, re.DOTALL):
+            yield paragraph[0][0] + text.count('\n', 0, match.start()), match.group(2)
+        paragraph.clear()
+
+    for number, line, fenced in markdown_lines(path, root):
+        body = BLOCKQUOTE.sub('', line)
+        if fenced:
+            yield from spans()
+            yield number, line
+            continue
+        if re.match(r' {0,3}(?:[-*+]|\d+[.)])(?: |$)', body):
+            in_list = True
+        elif body.strip() and not body.startswith(' '):
+            in_list = False
+        if body.startswith('    ') and not in_list:
+            yield number, line
+        if body.strip():
+            paragraph.append((number, body))
+        else:
+            yield from spans()
+    yield from spans()
 
 
 def rendered_caddyfile(root=ROOT):
     spec = importlib.util.spec_from_file_location('render_caddy', root / 'scripts/release/render-caddy.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.render(json.loads(read_text(root / 'web/headers.json', root)))
+    try:
+        return module.render(json.loads(read_text(root / 'web/headers.json', root)))
+    except ValueError:
+        # Its message quotes the header value; scripts/release/render-caddy.py shows it locally.
+        raise ValueError('web/headers.json: the Caddyfile does not render') from None
 
 
 def scan(root=ROOT):
@@ -184,28 +232,28 @@ def scan(root=ROOT):
     examples = sorted((root / 'packaging').glob('*.example.*'))
     texts = [(str(path.relative_to(root)), read_text(path, root)) for path in docs + examples]
     texts.append(('the Caddyfile rendered from web/headers.json', rendered_caddyfile(root)))
-    findings = [f'{label}:{number}: {name}' for label, text in texts
-                for number, line in enumerate(text.splitlines(), 1)
-                for name, pattern in SECRETS.items() if pattern.search(line)]
+    # Whole texts, so that a value on the line after its key is found too.
+    findings = [f'{label}:{text.count(chr(10), 0, match.start()) + 1}: {name}' for label, text in texts
+                for name, pattern in SECRETS.items() for match in pattern.finditer(text)]
     code = [(f'{label}:{number}', line) for label, text in texts[len(docs):]
             for number, line in enumerate(text.splitlines(), 1)]
     for path in sorted((root / 'docs/operator').rglob('*.md')):
-        code += [(f'{path.relative_to(root)}:{number}', text) for number, line, fenced in markdown_lines(path, root)
-                 for text in ([line] if fenced else code_spans(line))]
-    findings += [f'{place}: host name {host} is not an example host'
-                 for place, text in code for host in disallowed_hosts(text)]
+        code += [(f'{path.relative_to(root)}:{number}', text) for number, text in operator_code(path, root)]
+    findings += [f'{place}: a host name that is not an example host' for place, text in code
+                 for _ in range(disallowed_hosts(text))]
     require(not findings, 'P12 scan:\n' + '\n'.join(findings))
     return len(texts)
 
 
-def main():
-    documents = [ROOT / name for name in ('README.md', 'CONTRIBUTING.md', 'AGENTS.md', 'CLAUDE.md', 'docs/spec/README.md')]
-    documents = sorted(set(documents) | set((ROOT / 'docs/spec').rglob('*.md')) | set((ROOT / 'docs/operator').rglob('*.md')))
+def main(root=ROOT):
+    # The scan runs first: the link checks below quote what they refuse.
+    scanned = scan(root)
+    documents = [root / name for name in ('README.md', 'CONTRIBUTING.md', 'AGENTS.md', 'CLAUDE.md', 'docs/spec/README.md')]
+    documents = sorted(set(documents) | set((root / 'docs/spec').rglob('*.md')) | set((root / 'docs/operator').rglob('*.md')))
     for document in documents:
-        check_markdown(document)
-    check_form()
-    require(read_text(ROOT / 'CLAUDE.md') == '@AGENTS.md\n', 'CLAUDE.md must delegate to AGENTS.md')
-    scanned = scan()
+        check_markdown(document, root)
+    check_form(root)
+    require(read_text(root / 'CLAUDE.md', root) == '@AGENTS.md\n', 'CLAUDE.md must delegate to AGENTS.md')
     required = sum(field[2] for field in FIELDS.values())
     print(f'PASS: {len(documents)} guidance/specification/operator documents; local links/anchors, fences, whitespace; '
           f'issue-form YAML and {len(FIELDS)} fields ({required} required, {len(FIELDS) - required} optional); '
