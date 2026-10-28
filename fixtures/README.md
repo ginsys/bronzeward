@@ -173,9 +173,10 @@ identity provider runs: the page signs in through a synthetic provider in the ha
 (`web/e2e/provider.ts`) on `http://127.0.0.1:58445`.
 Each chrome and edge session gets a profile directory under one directory per run, removed when
 the run ends. Both browser tasks run WebdriverIO with a `TMPDIR` of their own, remove it after the
-run, and fail when a browser profile was left in it. They refuse to start when `TMPDIR` is longer
-than 51 bytes: Chrome binds a socket under the run's directory, and a Unix socket path holds at
-most 107 bytes. `BW_WDIO_CACHE` chooses where WebdriverIO keeps
+run, and fail when a browser profile was left in it (`scripts/ci/browser-tmp.sh`). When
+`BW_BROWSERS` names `chrome` or `edge`, they refuse to start with a `TMPDIR` longer than 51 bytes:
+Chrome binds a socket under the run's directory, and a Unix socket path holds at most 107 bytes.
+`BW_WDIO_CACHE` chooses where WebdriverIO keeps
 its browser and driver downloads; the tasks default it to the outer `TMPDIR`.
 
 `mise run browser-auth` runs the AUTH cases (`web/e2e/auth/`) after `dev-db` and `dev-idp`. It
