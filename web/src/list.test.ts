@@ -44,11 +44,13 @@ describe("cursor pages", () => {
     expect(await readPages(client([{ kind: "discarded" }]), "/machines", "", start, true)).toEqual({ kind: "discarded" });
   });
 
-  test("the count, the next page on request and the restart notice", () => {
-    expect(renderToStaticMarkup(h(More, { list: { items: [1, 2, 3, 4], next: undefined, restarted: false }, shown: 4, more: undefined }))).toBe('<p data-testid="count">Showing 4 of 4. </p>');
-    const more = renderToStaticMarkup(h(More, { list: { items: [1, 2], next: "c", restarted: true }, shown: 1, more: () => {} }));
+  test("the count, the next page on request (disabled while one is read) and the restart notice", () => {
+    expect(renderToStaticMarkup(h(More, { list: { items: [1, 2, 3, 4], next: undefined, restarted: false }, shown: 4, more: undefined, busy: false }))).toBe('<p data-testid="count">Showing 4 of 4. </p>');
+    const more = renderToStaticMarkup(h(More, { list: { items: [1, 2], next: "c", restarted: true }, shown: 1, more: () => {}, busy: false }));
     expect(more).toContain(`<p role="status" data-testid="restarted">${RESTARTED.replace(/'/g, "&#x27;")}</p>`);
     expect(more).toContain('Showing 1; more pages to read. <button type="button">Show more</button>');
+    const busy = renderToStaticMarkup(h(More, { list: { items: [1, 2], next: "c", restarted: false }, shown: 2, more: () => {}, busy: true }));
+    expect(busy).toContain('<button type="button" disabled="">Show more</button>');
   });
 
   test("G23: identifiers shortened to the prefix and four characters at each end", () => {
