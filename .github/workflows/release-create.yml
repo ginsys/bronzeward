@@ -71,19 +71,28 @@ jobs:
       - name: Wait for CI to pass on this commit
         env:
           GH_TOKEN: ${{ github.token }}
+        # One verdict per read: a completed successful run passes; a status GitHub does not document
+        # fails by name; any run not yet completed, or none yet, waits; otherwise every run completed
+        # without success.
         run: |
           deadline=$(($(date +%s) + 40 * 60))
           while :; do
-            runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&per_page=100" \
-              --jq '[.workflow_runs[] | {status, conclusion}] | tojson') || runs=unknown
-            case $runs in
-              unknown) ;;
-              *'"conclusion":"success"'*) echo "CI passed on $GITHUB_SHA."; exit 0 ;;
-              *'"status":"queued"'* | *'"status":"in_progress"'* | *'"status":"waiting"'* | *'"status":"pending"'* | '[]') ;;
-              *) echo "::error::no CI run passed on $GITHUB_SHA: $runs. Nothing was tagged."; exit 1 ;;
+            # shellcheck disable=SC2016 # $r and $odd are jq variables
+            verdict=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&per_page=100" \
+              --jq '[.workflow_runs[] | {status, conclusion}] as $r
+                | ($r | map(.status) | unique - ["queued", "in_progress", "requested", "waiting", "pending", "completed"]) as $odd
+                | if any($r[]; .status == "completed" and .conclusion == "success") then "success"
+                  elif $odd != [] then "odd \($odd | join(", "))"
+                  elif $r == [] or any($r[]; .status != "completed") then "wait \($r | tojson)"
+                  else "fail \($r | tojson)" end') || verdict="wait (the runs could not be read)"
+            case $verdict in
+              success) echo "CI passed on $GITHUB_SHA."; exit 0 ;;
+              "wait "*) ;;
+              "odd "*) echo "::error::a CI run on $GITHUB_SHA has an unknown status: ${verdict#odd }. Nothing was tagged."; exit 1 ;;
+              *) echo "::error::no CI run passed on $GITHUB_SHA: ${verdict#fail }. Nothing was tagged."; exit 1 ;;
             esac
             if [ "$(date +%s)" -ge "$deadline" ]; then
-              echo "::error::no CI run passed on $GITHUB_SHA within 40 minutes (last read: $runs). Nothing was tagged."
+              echo "::error::no CI run passed on $GITHUB_SHA within 40 minutes (last read: ${verdict#wait }). Nothing was tagged."
               exit 1
             fi
             sleep 30
