@@ -5,7 +5,7 @@
 
 import { useEffect, useRef } from "react";
 import type { components } from "./api/v1";
-import { type Load, type Page, Ref, type Reads, short, useHeld, useItem, useList, usePending, useReads } from "./list.tsx";
+import { type Dropped, type Load, type Page, Ref, type Reads, settling, short, useHeld, useItem, useList, usePending, useReads } from "./list.tsx";
 import { Head, type Machine, node, release } from "./machines.tsx";
 import type { ReadResult } from "./request.ts";
 import { clock } from "./states.tsx";
@@ -67,27 +67,36 @@ export function sentences(m: Machine, obs: Observation[]): string[] {
 // reads that page again with the cursor that read it and replaces its items from start.
 export interface Tail<T> { items: T[]; start: number; cursor: string | undefined }
 
-export async function readTail<T>(client: Reads["client"], path: string, from: Tail<T>): Promise<ReadResult<Tail<T>>> {
+// Reads on while `going` holds, as readPages does: a read a newer one superseded sends no further
+// request. A refused cursor (another epoch) reads the timeline again from its start, once; a failure
+// after that is dropped, with what was read before it.
+export async function readTail<T>(client: Reads["client"], path: string, from: Tail<T>, going: () => boolean = () => true): Promise<ReadResult<Tail<T>> | Dropped> {
   let { items, start, cursor } = from;
+  let restarted = false;
   for (;;) {
     const res = await client.read<Page<T>>(cursor === undefined ? path : `${path}?${new URLSearchParams({ cursor })}`);
-    // A refused cursor (another epoch) reads the list again from its start, once.
-    if (res.kind === "restart" && cursor !== undefined) {
-      [items, start, cursor] = [[], 0, undefined];
-      continue;
+    if (res.kind === "restart" && !restarted && cursor !== undefined) {
+      [items, start, cursor, restarted] = [[], 0, undefined, true];
+    } else if (res.kind === "ok") {
+      items = [...items.slice(0, start), ...res.data.items];
+      if (res.data.next === undefined) return { kind: "ok", data: { items, start, cursor } };
+      [start, cursor] = [items.length, res.data.next];
+    } else {
+      const failed = res.kind === "restart" ? { kind: "refused" as const, status: 400, problem: res.problem } : res;
+      return restarted && failed.kind !== "discarded" ? { kind: "dropped", failed } : failed;
     }
-    if (res.kind === "restart") return { kind: "refused", status: 400, problem: res.problem };
-    if (res.kind !== "ok") return res;
-    items = [...items.slice(0, start), ...res.data.items];
-    if (res.data.next === undefined) return { kind: "ok", data: { items, start, cursor } };
-    [start, cursor] = [items.length, res.data.next];
+    if (!going()) return { kind: "discarded" };
   }
 }
+
+const EMPTY: Tail<never> = { items: [], start: 0, cursor: undefined };
+// The tail the next poll reads on from: the answer's, none after a drop, else the one it had.
+export const nextTail = <T,>(tail: Tail<T>, res: ReadResult<Tail<T>> | Dropped): Tail<T> => (res.kind === "ok" ? res.data : res.kind === "dropped" ? EMPTY : tail);
 
 export const POLL_MS = 5000;
 
 // Reads now, then POLL_MS after each answer for which read returns true. While the page is
-// hidden a due read waits for the next check, POLL_MS later. Returns the stop.
+// hidden a due read, the first one too, waits for the next check, POLL_MS later. Returns the stop.
 export function polled(read: () => Promise<boolean>, page: Pick<Document, "visibilityState"> = document): () => void {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let live = true;
@@ -95,7 +104,7 @@ export function polled(read: () => Promise<boolean>, page: Pick<Document, "visib
     if (live && more) timer = setTimeout(due, POLL_MS);
   });
   const due = () => (page.visibilityState === "visible" ? run() : (timer = setTimeout(due, POLL_MS)));
-  run();
+  due();
   return () => {
     live = false;
     clearTimeout(timer);
@@ -104,14 +113,15 @@ export function polled(read: () => Promise<boolean>, page: Pick<Document, "visib
 
 // The timeline, read to its end and then polled while the page is visible, showing loading when the
 // path changes and keeping what it shows when the page reads again. A transport failure keeps
-// polling, so the shell's offline banner clears once a poll answers again. A superseded poll settles
-// as not live, so the shell still takes its refusal of the credentials.
-function useTimeline(path: string): Load<Tail<Entry>> {
+// polling, so the shell's offline banner clears once a poll answers again. A failure after a refused
+// cursor drops the timeline and that cursor. A superseded poll reads no further page and settles as
+// not live, so the shell still takes its refusal of the credentials.
+function useTimeline(path: string): Load<Tail<Entry>> | Dropped {
   const { client, settle, undropped, again } = useReads();
-  const [tl, put, held] = useHeld<Tail<Entry>>();
+  const [tl, put, held] = useHeld<Tail<Entry>, Dropped>();
   const key = useRef<string | undefined>(undefined);
   useEffect(() => {
-    let tail: Tail<Entry> = { items: [], start: 0, cursor: undefined };
+    let tail: Tail<Entry> = EMPTY;
     let live = true;
     const ok = undropped();
     if (key.current !== path) {
@@ -119,11 +129,12 @@ function useTimeline(path: string): Load<Tail<Entry>> {
       put({ kind: "loading" });
     }
     const stop = polled(async () => {
-      const res = await readTail<Entry>(client, path, tail);
-      settle(res, put, () => live && ok(), held);
+      const res = await readTail<Entry>(client, path, tail, () => live && ok());
+      const [r, set, shows] = settling(res, put, held);
+      settle(r, set, () => live && ok(), shows);
       if (!live || !ok()) return false;
-      if (res.kind === "ok") tail = res.data;
-      return res.kind === "ok" || res.kind === "transport";
+      tail = nextTail(tail, res);
+      return r.kind === "ok" || r.kind === "transport";
     });
     return () => {
       live = false;

@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import { ADOPTED, details, EITHER, type Entry, FROZEN, HEALTH, latestUnread, type Observation, POLL_MS, polled, readTail, sentences, type Tail } from "./machine.tsx";
+import { ADOPTED, details, EITHER, type Entry, FROZEN, HEALTH, latestUnread, nextTail, type Observation, POLL_MS, polled, readTail, sentences, type Tail } from "./machine.tsx";
 import type { Machine } from "./machines.tsx";
 import type { ReadResult } from "./request.ts";
 import { clock } from "./states.tsx";
@@ -114,6 +114,51 @@ describe("the timeline poll (client contracts §8.6 item 6)", () => {
     expect(await readTail(c, "/t", { items: [1, 2], start: 1, cursor: "old" })).toEqual({ kind: "ok", data: { items: [9], start: 0, cursor: undefined } });
     expect(await readTail(client([restart]), "/t", empty)).toMatchObject({ kind: "refused", status: 400 });
     expect(await readTail(client([{ kind: "transport" }]), "/t", empty)).toEqual({ kind: "transport" });
+  });
+
+  test("review R1-F1: a restart that fails drops the timeline read before it and its refused cursor", async () => {
+    const c = client([restart, { kind: "transport" }]);
+    const from = { items: [1, 2], start: 1, cursor: "old" };
+    const res = await readTail(c, "/t", from);
+    expect(res).toEqual({ kind: "dropped", failed: { kind: "transport" } });
+    expect(c.paths).toEqual(["/t?cursor=old", "/t"]);
+    // The next poll reads from the start; an ordinary failure keeps the tail it had.
+    expect(nextTail(from, res)).toEqual(empty);
+    expect(nextTail(from, { kind: "transport" })).toBe(from);
+  });
+
+  test("review R1-F2: one restart per read: a cursor refused again is surfaced, not read again", async () => {
+    const c = client([restart, page([1], "c1"), restart, page([1], "c1"), restart]);
+    expect(await readTail(c, "/t", { items: [1], start: 1, cursor: "c1" })).toMatchObject({ kind: "dropped", failed: { kind: "refused", status: 400 } });
+    expect(c.paths).toEqual(["/t?cursor=c1", "/t", "/t?cursor=c1"]);
+  });
+
+  test("review R1-F3: a traversal a newer read superseded sends no further page request, and still hands on the answer in flight", async () => {
+    let going = true;
+    const c = client([page([1], "c1"), page([2])]);
+    const res = readTail(c, "/t", empty, () => going);
+    going = false;
+    expect(await res).toEqual({ kind: "discarded" });
+    expect(c.paths).toEqual(["/t"]);
+    const revoked: ReadResult<unknown> = { kind: "revoked", problem: { type: "urn:bronzeward:problem:identity-revoked", title: "Identity revoked", status: 403 } };
+    expect(await readTail(client([revoked]), "/t", empty, () => false)).toEqual(revoked);
+  });
+
+  test("review R1-F4: a page opened hidden reads nothing until it is visible", async () => {
+    vi.useFakeTimers();
+    try {
+      const page = { visibilityState: "hidden" as DocumentVisibilityState };
+      let reads = 0;
+      const stop = polled(() => Promise.resolve((reads++, true)), page);
+      await vi.advanceTimersByTimeAsync(4 * POLL_MS);
+      expect(reads).toBe(0);
+      page.visibilityState = "visible";
+      await vi.advanceTimersByTimeAsync(POLL_MS);
+      expect(reads).toBe(1);
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("polled every 5 s, not while the page is hidden, resumed at the next check once visible, and stopped", async () => {
