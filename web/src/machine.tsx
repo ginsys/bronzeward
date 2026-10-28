@@ -5,10 +5,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { components } from "./api/v1";
-import { type Dropped, type Load, type Page, Ref, type Reads, settling, short, useHeld, useItem, useList, usePending, useReads } from "./list.tsx";
+import { type Dropped, type Listed, type Load, type Page, Ref, type Reads, RESTARTED, settling, short, useHeld, useItem, useList, usePending, useReads } from "./list.tsx";
 import { Head, type Machine, node, release } from "./machines.tsx";
 import type { ReadResult } from "./request.ts";
-import { clock } from "./states.tsx";
+import { clock, Status } from "./states.tsx";
 
 export type Observation = components["schemas"]["ObservationBody"];
 export type Entry = components["schemas"]["TimelineEntry"];
@@ -212,6 +212,8 @@ export function details(e: Entry): string {
     .join(" ");
 }
 
+const byBasis = (items: Observation[]) => [...items].sort((x, y) => y.basis - x.basis);
+
 export function MachineItem({ id }: { id: string }) {
   const path = `/machines/${encodeURIComponent(id)}`;
   const m = useItem<Machine>(path);
@@ -221,7 +223,7 @@ export function MachineItem({ id }: { id: string }) {
   if (m.kind !== "ok") return <><h2>Machine {short(id)}</h2>{pm}</>;
   if (obs.kind !== "ok") return <><h2>Machine {short(id)}</h2>{po}</>;
   const d = m.data;
-  const list = [...obs.data.items].sort((x, y) => y.basis - x.basis);
+  const list = byBasis(obs.data.items);
   return (
     <>
       <h2>Machine {d.id}</h2>
@@ -234,6 +236,23 @@ export function MachineItem({ id }: { id: string }) {
         <dt>Scope</dt><dd>{d.scopeState}</dd>
       </dl>
       <h3>Observations</h3>
+      <Observations read={obs.data} />
+      <h3>Timeline (newest first)</h3>
+      {tl.kind !== "ok" ? timeline : <TimelineRows tl={tl.data} older={older} busy={busy} />}
+    </>
+  );
+}
+
+// A section read again from its start after a refused cursor says so, with a list's notice, until
+// the view changes (PAGE-02, journeys §8 "Epoch changed").
+const restartedNotice = (restarted: boolean, testid: string) => restarted && <Status testid={testid}>{RESTARTED}</Status>;
+
+// The observations as read, newest basis first; the whole read, so its `restarted` goes with it.
+export function Observations({ read }: { read: Listed<Observation> }) {
+  const list = byBasis(read.items);
+  return (
+    <>
+      {restartedNotice(read.restarted, "observations-restarted")}
       {list.length === 0 ? <p>No observation recorded.</p> : (
         <table data-testid="observations">
           <Head cols={["Observation", "Basis", "Read at", "Purpose", "Not read"]} />
@@ -250,13 +269,20 @@ export function MachineItem({ id }: { id: string }) {
           </tbody>
         </table>
       )}
-      <h3>Timeline (newest first)</h3>
-      {tl.kind !== "ok" ? timeline : tl.data.items.length === 0 ? <p>No timeline entry recorded.</p> : (
+    </>
+  );
+}
+
+export function TimelineRows({ tl, older, busy }: { tl: Timeline<Entry>; older: (() => void) | undefined; busy: boolean }) {
+  return (
+    <>
+      {restartedNotice(tl.restarted, "timeline-restarted")}
+      {tl.items.length === 0 ? <p>No timeline entry recorded.</p> : (
         <>
           <table data-testid="timeline">
             <Head cols={["At", "Kind", "Details"]} />
             <tbody>
-              {tl.data.items.map((e) => (
+              {tl.items.map((e) => (
                 <tr key={`${e.epoch}:${e.revision}`}>
                   <td>{at(e.at)}</td>
                   <td>{e.kind}</td>

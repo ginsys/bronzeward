@@ -1,6 +1,8 @@
 import { describe, expect, test, vi } from "vitest";
+import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ADOPTED, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, latestUnread, nextTimeline, type Observation, POLL_MS, polled, readLater, readOlder, sentences, type Timeline, UNREAD } from "./machine.tsx";
+import { ADOPTED, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, latestUnread, nextTimeline, type Observation, Observations, POLL_MS, polled, readLater, readOlder, sentences, type Timeline, TimelineRows, UNREAD } from "./machine.tsx";
+import { RESTARTED } from "./list.tsx";
 import type { Machine } from "./machines.tsx";
 import type { ReadResult } from "./request.ts";
 
@@ -184,6 +186,16 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
     expect(later).toEqual({ kind: "ok", data: shown([10, 9], "o9", "t10", true) });
     expect(await readOlder(c, "/t", (later as { data: Timeline<number> }).data, on)).toEqual({ kind: "ok", data: shown([10, 9, 8], undefined, "t10", true) });
     expect(await readLater(client([page([1], undefined, "t1")]), "/t", UNREAD)).toMatchObject({ kind: "ok", data: { restarted: false } });
+  });
+
+  test("#424 item 1: the timeline and the observations each show the shared restart notice after a restart (PAGE-02), and not before", () => {
+    const notice = (testid: string) => `<p role="status" data-testid="${testid}">${RESTARTED.replace(/'/g, "&#x27;")}</p>`;
+    const rows = (restarted: boolean) => renderToStaticMarkup(createElement(TimelineRows, { tl: { ...UNREAD, read: true, restarted }, older: undefined, busy: false }));
+    const observations = (restarted: boolean) => renderToStaticMarkup(createElement(Observations, { read: { items: [], next: undefined, restarted } }));
+    expect(rows(true)).toContain(notice("timeline-restarted"));
+    expect(observations(true)).toContain(notice("observations-restarted"));
+    expect(rows(false)).not.toContain(RESTARTED.slice(0, 20));
+    expect(observations(false)).not.toContain(RESTARTED.slice(0, 20));
   });
 
   test("review R1-F1: a restart that fails drops the timeline read before it and its refused cursor", async () => {
