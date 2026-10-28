@@ -11,15 +11,17 @@ import (
 
 // store is where an OIDC context's sign-in is kept (client-contracts.md §9.2 item 3): its D2 (b)
 // token file when it has one, else the operating system's credential store, else (D2 (a)) only
-// this process's memory, for the reason in none.
+// this process's memory, for the reason in none. With noPrompt (--no-input) the credential store
+// is never asked to show its unlock prompt: a locked one is refused (errStoreLocked).
 type store struct {
-	x    *Context
-	file string
-	none string
+	x        *Context
+	file     string
+	none     string
+	noPrompt bool
 }
 
-func openStore(x *Context) *store {
-	s := &store{x: x, file: x.TokenFile()}
+func openStore(x *Context, noPrompt bool) *store {
+	s := &store{x: x, file: x.TokenFile(), noPrompt: noPrompt}
 	if s.file == "" {
 		s.none = keyringUnavailable()
 	}
@@ -59,9 +61,15 @@ func (s *store) load() (*Tokens, error) {
 	return t, nil
 }
 
-// read is load without its fallback: a failing credential store is an error. It may wait, at most
-// a minute, on the credential store's unlock prompt, so it is never used under the renewal lock.
-func (s *store) read() (*Tokens, error) { return s.get(keyringGet) }
+// read is load without its fallback: a failing credential store is an error. Unless noPrompt, it
+// may wait, at most a minute, on the credential store's unlock prompt, so it is never used under
+// the renewal lock.
+func (s *store) read() (*Tokens, error) {
+	if s.noPrompt {
+		return s.readHeld()
+	}
+	return s.get(keyringGet)
+}
 
 // readHeld is read under the renewal lock: a locked credential store is refused (errStoreLocked).
 func (s *store) readHeld() (*Tokens, error) { return s.get(keyringGetHeld) }
@@ -90,9 +98,9 @@ func (s *store) get(fromKeyring func(string) (string, bool, error)) (*Tokens, er
 //
 // The lock is never held across the credential store's unlock prompt, which go-keyring's calls
 // wait on for as long as the operator leaves it: every other bronzewardctl command on the context
-// would wait as long. A read bounded by within, before the lock, lets a locked store prompt; under
-// the lock every call (readHeld, save, keyringDelete) refuses a store that is still, or again,
-// locked, without a prompt.
+// would wait as long. A read bounded by within, before the lock, lets a locked store prompt (unless
+// noPrompt); under the lock every call (readHeld, save, keyringDelete) refuses a store that is
+// still, or again, locked, without a prompt.
 func (s *store) lock() (func(), error) {
 	if s.file != "" {
 		return renewalLock(s.file + ".lock")
@@ -106,7 +114,7 @@ func (s *store) lock() (func(), error) {
 		dir = filepath.Join(home, ".local", "state")
 	}
 	if s.none == "" {
-		if _, _, err := keyringGet(s.x.Name); err != nil {
+		if _, err := s.read(); err != nil {
 			return nil, err
 		}
 	}
@@ -204,7 +212,8 @@ func within[T any](f func() (T, error)) (T, error) {
 // ClearStored removes the credential-store entry of a context being removed, under its renewal
 // lock, so that a renewal in flight finishes first and a waiting one finds the entry gone; a file
 // is the operator's to remove. Without the store it returns a note that an entry is not reached.
-func ClearStored(x *Context) (string, error) {
+// With noInput a locked store is refused, not prompted.
+func ClearStored(x *Context, noInput bool) (string, error) {
 	// A name that cannot name its lock file never had an entry: every sign-in refuses it.
 	if x.Credential != "oidc" || x.TokenFile() != "" || x.checkName() != nil {
 		return "", nil
@@ -218,7 +227,7 @@ func ClearStored(x *Context) (string, error) {
 	failed := func(err error) error {
 		return fmt.Errorf("removing the stored sign-in of context %q from the system credential store: %w", x.Name, err)
 	}
-	unlock, err := openStore(x).lock()
+	unlock, err := openStore(x, noInput).lock()
 	if err != nil {
 		return "", failed(err)
 	}
