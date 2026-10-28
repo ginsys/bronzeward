@@ -204,7 +204,8 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
 
   // Read until it answers with data, each time the page reads again. A read a newer one or a new
   // page superseded is ignored when it completes, so it cannot replace a newer answer; so is one
-  // the process's refusal dropped, whatever the client already answered it.
+  // the process's refusal dropped, whatever the client already answered it. A move to another path
+  // or query discards it in the client, so the read starts again under the new view.
   const known = server.kind === "ok";
   useEffect(() => {
     if (known) return;
@@ -217,7 +218,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
       settle(res, setServer, "server", current);
     });
     return () => void (live = false);
-  }, [client, known, again, settle]);
+  }, [client, known, path, query, principal, again, settle]);
 
   // The header's identity, and the recovery banner's scopes while in recovery mode, read again on
   // every page and each time the page reads again.

@@ -182,6 +182,26 @@ describe("the machines", () => {
     expect(await $('[data-testid="offline"]').isExisting()).toBe(false);
   });
 
+  it("a cluster filter in the query stays shown while the clusters are not read, and their read without answer is shown", async () => {
+    const at = await disposable();
+    const [a, b] = [await cluster(at, "lab-a"), await cluster(at, "lab-b")];
+    const [id] = await machines(at, a.id, 1);
+    await machines(at, b.id, 1, 1);
+    // A deep link filtered to lab-a; the cluster filter's read is held, then finds no answer.
+    expect((await fetch(`${CONTROL}/next?human=h-viewer`)).ok).toBe(true);
+    await faults({ upstream: at, redirect: "/clusters", held: "/clusters" });
+    await browser.url(`${FIXTURE_PAGE}/machines?cluster=${a.id}`);
+    await asked("/clusters", 1);
+    await shows(1);
+    expect(await rows()).toEqual([id]);
+    const select = $("label*=Cluster").$("select");
+    expect(await select.getValue()).toBe(a.id);
+    await release();
+    await statusIs(TRANSPORT_FAILURE);
+    expect(await select.getValue()).toBe(a.id);
+    expect(await rows()).toEqual([id]);
+  });
+
   it("a refresh holds Show more: while the list is read again, no next page is read", async () => {
     const at = await disposable();
     const cl = await cluster(at, "lab-a");
