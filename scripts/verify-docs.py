@@ -45,9 +45,10 @@ def read_text(path, root=ROOT):
 BLOCKQUOTE = re.compile(r'^(?: {0,3}>)+ ?')
 
 
-def markdown_lines(path, root=ROOT):
+def markdown_lines(path, root=ROOT, markers=False):
     """Yield (number, line, fenced) for every line but the markers that open or close a fence, one
-    inside a blockquote included; verify fences and whitespace."""
+    inside a blockquote included; verify fences and whitespace. With markers, a marker is yielded
+    too, with fenced None."""
     fence = None
     label = path.relative_to(root)
     for number, line in enumerate(read_text(path, root).splitlines(), 1):
@@ -61,6 +62,9 @@ def markdown_lines(path, root=ROOT):
             fence = None
         else:
             yield number, line, fence is not None
+            continue
+        if markers:
+            yield number, line, None
     require(fence is None, f'{label}: unclosed code fence')
 
 
@@ -189,10 +193,11 @@ def disallowed_hosts(text):
 
 def operator_code(path, root=ROOT):
     """Yield (number, text) for the code an operator copies from a page: fenced lines, indented
-    code (four or more spaces past a list item's content, or past the margin outside a list), and
-    inline code spans, which may run over the lines of one paragraph. A tab counts as four
-    spaces."""
-    paragraph, content = [], None  # content: the open list item's content indentation
+    code (four or more spaces past the innermost open list item's content, or past the margin
+    outside a list; on an item's own line, five or more spaces after its marker), and inline code
+    spans, which may run over the lines of one paragraph. A line or fence marker indented less than
+    an item's content closes that item. A tab counts as four spaces."""
+    paragraph, items = [], []  # items: each open list item's content indentation, innermost last
 
     def spans():
         text = '\n'.join(line for _, line in paragraph)
@@ -200,20 +205,29 @@ def operator_code(path, root=ROOT):
             yield paragraph[0][0] + text.count('\n', 0, match.start()), match.group(2)
         paragraph.clear()
 
-    for number, line, fenced in markdown_lines(path, root):
+    for number, line, fenced in markdown_lines(path, root, markers=True):
         body = BLOCKQUOTE.sub('', line).expandtabs(4)
         if fenced:
             yield from spans()
             yield number, line
             continue
         indent = len(body) - len(body.lstrip(' '))
-        item = re.match(r' *(?:[-*+]|\d+[.)])(?: {1,4}|$)', body)
-        if body.strip() and indent >= (content or 0) + 4:
+        if body.strip() and fenced is not None and indent >= (items[-1] if items else 0) + 4:
             yield number, line
-        elif item:
-            content = item.end()
-        elif body.strip() and not indent:
-            content = None
+        elif body.strip():
+            while items and indent < items[-1]:
+                items.pop()
+            item = fenced is not None and re.match(r' *(?:[-*+]|\d+[.)])( *)', body)
+            if item and (item.group(1) or item.end() == len(body)):
+                # With nothing after the marker, or five or more spaces, the content starts one space
+                # after it; in the second case the rest of the line is indented code.
+                gap = len(item.group(1))
+                items.append(item.end() if 0 < gap <= 4 else item.start(1) + 1)
+                if gap > 4:
+                    yield number, line
+        if fenced is None:
+            yield from spans()
+            continue
         if body.strip():
             paragraph.append((number, body))
         else:

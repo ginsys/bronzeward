@@ -115,6 +115,14 @@ with tempfile.TemporaryDirectory() as work:
     fails('host in a tab-indented fence in a list item', OPERATOR,
           f'\n1. Configure:\n\n\t```sh\n\texport BW_ISSUER={host}\n\n\tbronzeward login\n\t```\n', HOST)
     passes('host in a list continuation', OPERATOR, f'\n- Step one\n\n    see {host} later.\n')
+    # ginsys/bronzeward#419: an item a dedent or a fence closes, and code on the marker's own line.
+    fails('host in indented code after a nested list ends', OPERATOR,
+          f'\n- Outer\n  - Inner\n\n  Run:\n\n      curl {host}\n', HOST)
+    fails('host in indented code after a fence ends a list', OPERATOR,
+          f'\n- Step one\n\n```sh\nbronzeward version\n```\n\n    curl {host}\n', HOST)
+    fails('host in indented code on a bullet marker line', OPERATOR, f'\n-     curl {host}\n', HOST)
+    fails('host in indented code on an ordered marker line', OPERATOR, f'\n1.     curl {host}\n', HOST)
+    passes('host in a nested list continuation', OPERATOR, f'\n- Outer\n  - Inner\n\n      see {host} later.\n')
     passes('host in operator prose', OPERATOR, f'\nSee [the provider]({host}) or {host}.\n')
     passes('host in a specification code block', DOC, f'\n```sh\ncurl {host}\n```\n')
     fails('mail domain', OPERATOR, '\n`h-author@corp.test`\n', HOST)
