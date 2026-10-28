@@ -796,8 +796,11 @@ current token expires
    item 3). CLI processes that share that file renew one at a time, holding a lock on it while
    they renew, and read the new pair from it; a context kept in the credential store has a lock
    of its own in the user's state directory. That lock is never held across the store's unlock
-   prompt: the store is read, and may prompt, for at most a minute before the lock is taken, and
-   a store found locked once it is held refuses the command, with nothing written or removed.
+   prompt: the store is read, and may prompt, for at most a minute before the lock is taken.
+   Under the lock no call to the store shows a prompt, so a store locked by then refuses the
+   command, with nothing written or removed. One that locks while a renewal waits on the identity
+   provider refuses the renewed pair: its rotated refresh token is lost, as with any failed write,
+   and the operator signs in again once the current access token expires.
    The opt-in is the context's `oidc.tokenFile`
    ([§5](#5-endpoint-discovery-and-context-selection));
    only in a context that has it may `BRONZEWARD_TOKEN_FILE` override its path. The CLI writes
