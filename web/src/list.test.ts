@@ -1,7 +1,7 @@
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
-import { type Listed, More, readPages, RESTARTED, short } from "./list.tsx";
+import { type Dropped, type Listed, type Load, More, type Reads, ReadsProvider, readPages, RESTARTED, settling, short, usePending } from "./list.tsx";
 import type { ReadResult } from "./request.ts";
 import { badges, type Machine, observed } from "./machines.tsx";
 
@@ -34,9 +34,47 @@ describe("cursor pages", () => {
     const c = client([restart, page([1, 2], "c9"), page([3])]);
     expect(await readPages(c, "/machines", "", { items: [7, 8], next: "old", restarted: false }, true)).toEqual({ kind: "ok", data: { items: [1, 2, 3], next: undefined, restarted: true } });
     expect(c.paths).toEqual(["/machines?cursor=old", "/machines", "/machines?cursor=c9"]);
-    // A first page refused that way, or a second restart, is a refusal.
+    // A first page refused that way is a refusal; a second restart is one too, after the list was
+    // dropped (#420).
     expect(await readPages(client([restart]), "/machines", "", start, false)).toMatchObject({ kind: "refused", status: 400 });
-    expect(await readPages(client([restart, page([1], "c1"), restart]), "/machines", "", { items: [], next: "old", restarted: false }, true)).toMatchObject({ kind: "refused", status: 400 });
+    expect(await readPages(client([restart, page([1], "c1"), restart]), "/machines", "", { items: [], next: "old", restarted: false }, true)).toMatchObject({ kind: "dropped", failed: { kind: "refused", status: 400 } });
+  });
+
+  test("#420: a restart that fails drops the list read before the refused cursor, its rows and that cursor, and shows the restart notice", async () => {
+    const c = client([restart, { kind: "transport" }]);
+    const res = await readPages(c, "/machines", "", { items: [7, 8], next: "old", restarted: false }, false);
+    expect(res).toEqual({ kind: "dropped", failed: { kind: "transport" } });
+    expect(c.paths).toEqual(["/machines?cursor=old", "/machines"]);
+    // A discarded restart says nothing, so nothing is dropped.
+    expect(await readPages(client([restart, { kind: "discarded" }]), "/machines", "", { items: [7], next: "old", restarted: false }, false)).toEqual({ kind: "discarded" });
+    // Settled, it holds no data, so a failure without answer is not kept under the offline banner,
+    // and it is shown as dropped: the notice over the failure, no rows, no Show more.
+    const put: (Load<Listed<number>> | Dropped)[] = [];
+    const [r, set, held] = settling(res, (x) => put.push(x), () => true);
+    expect([r, held()]).toEqual([{ kind: "transport" }, false]);
+    set(r);
+    expect(put).toEqual([res]);
+    const Probe = () => usePending(put[0]!, "machines");
+    const shown = renderToStaticMarkup(h(ReadsProvider, { value: { failure: () => "FAILED" } as unknown as Reads }, h(Probe)));
+    expect(shown).toContain(`<p role="status" data-testid="restarted">${RESTARTED.replace(/'/g, "&#x27;")}</p>`);
+    expect(shown).toMatch(/FAILED$/);
+    expect(shown).not.toContain("Show more");
+  });
+
+  test("#420: a traversal a newer read superseded sends no further page request, and still hands on the answer in flight", async () => {
+    let going = true;
+    const c = client([page([1], "c1"), page([2], "c2"), page([3])]);
+    const res = readPages(c, "/clusters", "", start, true, () => going);
+    going = false;
+    expect(await res).toEqual({ kind: "discarded" });
+    expect(c.paths).toEqual(["/clusters"]);
+    // Nor does it restart after a refused cursor.
+    const r = client([restart, page([1])]);
+    expect(await readPages(r, "/machines", "", { items: [7], next: "old", restarted: false }, false, () => false)).toEqual({ kind: "discarded" });
+    expect(r.paths).toEqual(["/machines?cursor=old"]);
+    // A revocation answering the request in flight still reaches the shell.
+    const revoked: ReadResult<unknown> = { kind: "revoked", problem: { type: "urn:bronzeward:problem:identity-revoked", title: "Identity revoked", status: 403 } };
+    expect(await readPages(client([revoked]), "/clusters", "", start, true, () => false)).toEqual(revoked);
   });
 
   test("any other answer is the list's", async () => {

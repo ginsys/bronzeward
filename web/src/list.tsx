@@ -9,6 +9,9 @@ import { Loading, Status } from "./states.tsx";
 
 export type Load<T> = { kind: "loading" } | ReadResult<T>;
 export type Failed = Exclude<ReadResult<unknown>, { kind: "ok" | "discarded" }>;
+// A list's read that failed after the server refused its cursor: what was read before is gone with
+// the cursor (§8.2), so nothing of it stays shown.
+export type Dropped = { kind: "dropped"; failed: Failed };
 
 export interface Reads {
   client: Pick<Client, "read">;
@@ -31,10 +34,11 @@ export const useReads = () => useContext(ReadContext)!;
 
 // What a view shows until its read answers with data: loading, nothing for a discarded read, or the
 // failure; undefined once there is data.
-export function usePending(load: Load<unknown>, what: string): ReactNode | undefined {
+export function usePending(load: Load<unknown> | Dropped, what: string): ReactNode | undefined {
   const { failure } = useReads();
   if (load.kind === "loading") return <Loading what={what} />;
   if (load.kind === "discarded") return null;
+  if (load.kind === "dropped") return <><Status testid="restarted">{RESTARTED}</Status>{failure(load.failed)}</>;
   return load.kind === "ok" ? undefined : failure(load);
 }
 
@@ -43,9 +47,11 @@ export const RESTARTED = "The server no longer accepted this list's position, so
 export interface Listed<T> { items: T[]; next: string | undefined; restarted: boolean }
 export type Page<T> = { items: T[]; next?: string };
 
-// Reads on from `from`: one page, or every page left when `all`. A 400 cursor-invalid drops the
-// items read so far and restarts once from the first page.
-export async function readPages<T>(client: Reads["client"], path: string, query: string, from: Listed<T>, all: boolean): Promise<ReadResult<Listed<T>>> {
+// Reads on from `from`: one page, or every page left when `all`, while `going` holds: a read a newer
+// one superseded sends no further request, though the answer in flight still settles. A 400
+// cursor-invalid drops the items read so far and restarts once from the first page; a failure after
+// that is dropped, never the list read before it.
+export async function readPages<T>(client: Reads["client"], path: string, query: string, from: Listed<T>, all: boolean, going: () => boolean = () => true): Promise<ReadResult<Listed<T>> | Dropped> {
   let { items, next } = from;
   let restarted = false;
   for (;;) {
@@ -54,35 +60,44 @@ export async function readPages<T>(client: Reads["client"], path: string, query:
     const res = await client.read<Page<T>>(q.size > 0 ? `${path}?${q}` : path);
     if (res.kind === "restart" && !restarted && next !== undefined) {
       [items, next, restarted] = [[], undefined, true];
-      continue;
+    } else if (res.kind === "ok") {
+      [items, next] = [[...items, ...res.data.items], res.data.next];
+      if (!all || next === undefined) return { kind: "ok", data: { items, next, restarted } };
+    } else {
+      const failed = res.kind === "restart" ? { kind: "refused" as const, status: 400, problem: res.problem } : res;
+      return restarted && failed.kind !== "discarded" ? { kind: "dropped", failed } : failed;
     }
-    if (res.kind === "restart") return { kind: "refused", status: 400, problem: res.problem };
-    if (res.kind !== "ok") return res;
-    [items, next] = [[...items, ...res.data.items], res.data.next];
-    if (!all || next === undefined) return { kind: "ok", data: { items, next, restarted } };
+    if (!going()) return { kind: "discarded" };
   }
 }
 
 // A read's result, and whether it holds data: a read again that finds no answer keeps that data
 // under the offline banner, whatever the page's other reads showed.
-export function useHeld<T>():[Load<T>, (r: Load<T>) => void, () => boolean] {
-  const [load, setLoad] = useState<Load<T>>({ kind: "loading" });
+export function useHeld<T, X extends { kind: string } = never>(): [Load<T> | X, (r: Load<T> | X) => void, () => boolean] {
+  const [load, setLoad] = useState<Load<T> | X>({ kind: "loading" });
   const has = useRef(false);
-  const put = useCallback((r: Load<T>) => {
+  const put = useCallback((r: Load<T> | X) => {
     has.current = r.kind === "ok";
     setLoad(r);
   }, []);
   return [load, put, useCallback(() => has.current, [])];
 }
 
+// What settles a list's read: a dropped read hands its failure on, holds no data, so a failure
+// without answer is never kept under the offline banner, and is shown as dropped.
+export function settling<T>(res: ReadResult<Listed<T>> | Dropped, put: (r: Load<Listed<T>> | Dropped) => void, held: () => boolean): [ReadResult<Listed<T>>, (r: Load<Listed<T>>) => void, () => boolean] {
+  return res.kind === "dropped" ? [res.failed, () => put(res), () => false] : [res, put, held];
+}
+
 // A list read from its start each time the path, query or `all` changes, showing loading, and each
 // time the view changes or the page reads again, keeping what it shows until the read answers: the
 // same list under a new view is still the same data. `more` reads on. One read at a time: while a
-// start's read or a `more` is in flight, `more` waits. A read that a newer start superseded settles
-// as not live: the shell still takes its refusal of the credentials, and ignores the rest.
-export function useList<T>(path: string, query: string, all: boolean): [Load<Listed<T>>, (() => void) | undefined, boolean] {
+// start's read or a `more` is in flight, `more` waits. A read that a newer start superseded reads no
+// further page and settles as not live: the shell still takes its refusal of the credentials, and
+// ignores the rest.
+export function useList<T>(path: string, query: string, all: boolean): [Load<Listed<T>> | Dropped, (() => void) | undefined, boolean] {
   const { client, settle, undropped, again, view } = useReads();
-  const [list, put, held] = useHeld<Listed<T>>();
+  const [list, put, held] = useHeld<Listed<T>, Dropped>();
   const start = useRef(0);
   const key = useRef<string | undefined>(undefined);
   // The start whose read is in flight, the first page's or a `more`'s.
@@ -92,13 +107,14 @@ export function useList<T>(path: string, query: string, all: boolean): [Load<Lis
     const n = (reading.current = start.current);
     const ok = undropped();
     setBusy(true);
-    void readPages<T>(client, path, query, from, every).then((res) => {
+    void readPages<T>(client, path, query, from, every, () => n === start.current).then((res) => {
       const live = n === start.current;
       if (live) {
         reading.current = undefined;
         setBusy(false);
       }
-      settle(res, put, () => live && ok(), held);
+      const [r, set, shows] = settling(res, put, held);
+      settle(r, set, () => live && ok(), shows);
     });
   }, [client, settle, undropped, put, held, path, query]);
   useEffect(() => {
