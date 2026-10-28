@@ -9,6 +9,7 @@
 # every session fails as "user data directory is already in use". So `start` refuses a TMPDIR that
 # long when BW_BROWSERS (default chrome,firefox, as in web/e2e/wdio.conf.ts) names chrome or edge.
 set -euo pipefail
+export LC_ALL=C # ${#…} counts bytes, not a UTF-8 locale's characters
 case ${1:-}:${2:-} in
   start:?*)
     tmp=${TMPDIR:-/tmp}

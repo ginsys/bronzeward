@@ -25,7 +25,11 @@ tmpdir() {
 start() {
   local t rc=0 out
   t=$(tmpdir "$1")
-  out=$(TMPDIR=$t BW_BROWSERS=$2 "$tool" start browser 2>"$root/err") || rc=$?
+  if [ "$2" = unset ]; then
+    out=$(env -u BW_BROWSERS TMPDIR="$t" "$tool" start browser 2>"$root/err") || rc=$?
+  else
+    out=$(TMPDIR=$t BW_BROWSERS=$2 "$tool" start browser 2>"$root/err") || rc=$?
+  fi
   if [ "$rc" -ne "$3" ]; then bad "start at $1 bytes with '$2': rc=$rc, want $3"; return; fi
   if [ "$rc" -eq 0 ]; then
     if [ -d "$out" ] && [ "${out%/*}" = "$t" ]; then ok; else bad "start at $1 bytes printed '$out', not a directory in $t"; fi
@@ -42,12 +46,28 @@ start 42 chrome,firefox 0
 start 51 chrome,firefox 0
 start 52 chrome,firefox 1
 start 62 chrome,firefox 1
-start 52 '' 1                      # empty is checked as wdio.conf.ts's default, chrome,firefox
+start 52 unset 1                   # wdio.conf.ts's default, chrome,firefox
+start 52 '' 1                      # wdio refuses an empty list; the guard treats it as the default
 start 52 edge 1
 start 52 firefox-esr,chrome 1
 start 52 firefox 0                 # no Chromium session, no socket
 start 52 firefox,firefox-esr,safari 0
 start 52 chromeless 0              # a name, not a substring
+
+# The length is in bytes whatever the locale: 52 bytes of two-byte characters are refused in C.UTF-8,
+# where they are fewer characters (checked, so a missing locale cannot pass this vacuously).
+p=$((52 - ${#root} - 1))
+mb="$root/$([ $((p % 2)) -eq 0 ] || printf a)$(printf 'é%.0s' $(seq $((p / 2))))"
+mkdir -p "$mb"
+rc=0
+LC_ALL=C.UTF-8 TMPDIR=$mb BW_BROWSERS=chrome "$tool" start browser >/dev/null 2>"$root/err" || rc=$?
+if [ "$(printf %s "$mb" | wc -c)" -ne 52 ] || [ "$(LC_ALL=C.UTF-8 bash -c 'echo ${#1}' _ "$mb")" -ge 52 ]; then
+  bad "the multibyte TMPDIR is not 52 bytes of fewer characters in C.UTF-8 (missing locale?)"
+elif [ "$rc" -eq 1 ] && grep -q 'would be 108 bytes' "$root/err"; then
+  ok
+else
+  bad "a 52-byte multibyte TMPDIR: rc=$rc $(cat "$root/err")"
+fi
 
 # finish ENTRY WANT: finish's status after the run left ENTRY (none: nothing) in its directory.
 finish() {
