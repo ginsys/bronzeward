@@ -48,9 +48,9 @@ func subjectID(t *testing.T, db *sql.DB, sub string) string {
 }
 
 // §10, choice §17.40 (#335): a human's display follows the default claim, name, else
-// preferred_username, across its admitted mutating requests; a token without it, with an empty or
-// non-string one, and a read leave it as it is; a service identity and a row the token tool
-// created have none.
+// preferred_username, across its admitted mutating requests; a token without it, with an empty,
+// non-string or NUL-holding one, and a read leave it as it is, each request admitted; a service
+// identity and a row the token tool created have none.
 func TestPrincipalsDisplay(t *testing.T) {
 	e := newEnv(t, options{extra: []*route{testRoute(nil)}})
 	n := 0
@@ -77,6 +77,9 @@ func TestPrincipalsDisplay(t *testing.T) {
 	want("an empty claim", "BWSYNTH Ann Other")
 	write(map[string]any{"name": 42})
 	want("a claim that is not a string", "BWSYNTH Ann Other")
+	// PostgreSQL text cannot hold a NUL: written, it would refuse every request this token makes.
+	write(map[string]any{"name": "BWSYNTH Ann\x00Nul"})
+	want("a claim holding a NUL character", "BWSYNTH Ann Other")
 	if rec := e.do(e.api, call{method: "GET", path: prefix + "/clusters", token: e.humanWith("h-author", map[string]any{"name": "BWSYNTH Read"})}); rec.Code != http.StatusOK {
 		t.Fatalf("read: %d %s", rec.Code, rec.Body)
 	}
