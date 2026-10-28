@@ -30,7 +30,8 @@ permissions:
 # skips forks and merge groups outright (the proxy is in-cluster only). The exceptions to this
 # rule always run GitHub-hosted: go-db and idp, whose containers need a Docker daemon, browser
 # and safari, which need browsers, and browser-auth, which needs both; the in-cluster runners have
-# neither.
+# neither. package, package-check and hosting run GitHub-hosted too: two separate machines build
+# the archives, and hosting needs Docker.
 
 env:
   # The setting `mise run` honours (`mise help run`, --skip-tools); MISE_EXEC_AUTO_INSTALL does
@@ -85,15 +86,18 @@ jobs:
   test:
     # The commit-lint fixtures: every accepted and rejected subject shape, plus the range-walk
     # failure cases. `commit-lint` below checks only this PR's own subjects. Also the fixtures for
-    # `checks`' own script.
+    # `checks`' own script, and for the packaging check's comparison and Caddy rendering.
     runs-on: ${{ (github.event_name == 'merge_group' || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'autops-kube-ginsys' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
         with:
           cache_save: ${{ github.ref == 'refs/heads/main' }}
-          install: false   # the fixtures need only bash and git
+          install: false   # the fixtures need only bash, git and python3
       - run: mise run test
 
   go:
@@ -314,12 +318,75 @@ jobs:
       - if: always()
         run: mise run dev-down
 
+  package:
+    # The release archives (mise run package), built twice on separate GitHub-hosted runners, so
+    # package-check can compare the two (ginsys/bronzeward#262 P6). Snapshot mode: nothing is
+    # tagged or published. The version names the commit, so both builds share it.
+    strategy:
+      matrix:
+        build: [a, b]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BW_VERSION: v0.0.0-ci.g${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
+          install_args: go node goreleaser
+      - run: mise run package
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: package-${{ matrix.build }}
+          path: |
+            dist/*.tar.gz
+            dist/SHA256SUMS
+          retention-days: 14
+
+  package-check:
+    # The packaging check (ginsys/bronzeward#262 P6, P7): the two builds' SHA256SUMS agree but for
+    # the listed exceptions, and each build's binaries name this commit and version.
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BW_VERSION: v0.0.0-ci.g${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
+          install_args: go
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: package-*
+          path: packages
+      - run: scripts/release/compare-sums.sh packages/package-a/SHA256SUMS packages/package-b/SHA256SUMS
+      - run: EXPECT_REVISION="$GITHUB_SHA" scripts/release/check-build.sh packages/package-a
+      - run: EXPECT_REVISION="$GITHUB_SHA" scripts/release/check-build.sh packages/package-b
+
+  hosting:
+    # The web tarball through its rendered Caddyfile in the pinned Caddy image (mise run hosting):
+    # every page carries web/headers.json's set, /api/v1/ and /livez reach the server.
+    # GitHub-hosted for the Docker daemon, as go-db.
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: package-a
+          path: package
+      - run: python3 scripts/test/hosting-test.py package
+
   checks:
     # Aggregator: passes only when every needed job succeeded. `commit-lint` is skipped by design
     # outside pull requests, so `skipped` counts as success only for that job there. Any other
     # result fails, including `abandoned` (a job that never got a runner).
     if: always()
-    needs: [docs, site, actionlint, test, go, web, browser, safari, go-db, commit-lint, action-pins]
+    needs: [docs, site, actionlint, test, go, web, browser, safari, go-db, commit-lint, action-pins, package-check, hosting]
     runs-on: ${{ (github.event_name == 'merge_group' || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'autops-kube-ginsys' }}
     timeout-minutes: 2
     steps:

@@ -1,0 +1,6 @@
+{
+  "issuer": "https://idp.example.invalid",
+  "audience": "example-api-project-id",
+  "cliClientId": "example-cli-client-id",
+  "webClientId": "example-web-client-id"
+}
