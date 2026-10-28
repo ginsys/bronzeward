@@ -77,6 +77,15 @@ pack "$a"
 resum
 expect 1 "the linux/amd64 client in the darwin/arm64 archive" "the binary is not built for darwin"
 
+# A longer version holds the expected one as a prefix: its NUL now follows one byte later.
+fresh
+a=bronzewardctl_${v}_darwin_arm64.tar.gz
+unpack "$a" "$work/x"
+python3 -c 'import sys; p, v = sys.argv[1], sys.argv[2].encode(); b = open(p, "rb").read(); assert b.count(v + b"\0") == 1; open(p, "wb").write(b.replace(v + b"\0", v + b"0"))' "$work/x/bronzewardctl" "$BW_VERSION"
+pack "$a"
+resum
+expect 1 "a darwin/arm64 client stamped with a longer version" "darwin_arm64.tar.gz: the binary holds no version"
+
 fresh
 EXPECT_REVISION=0000000000000000000000000000000000000000 expect 1 "another revision" "vcs.revision is not"
 

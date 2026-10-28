@@ -45,8 +45,11 @@ for os_arch in linux_amd64 linux_arm64 darwin_amd64 darwin_arm64; do
 		grep -qxE "[[:space:]]+build[[:space:]]+GOOS=${os_arch%_*}" <<<"$info" || fail "${a##*/}: the binary is not built for ${os_arch%_*}"
 		grep -qxE "[[:space:]]+build[[:space:]]+GOARCH=${os_arch#*_}" <<<"$info" || fail "${a##*/}: the binary is not built for ${os_arch#*_}"
 		# -trimpath leaves -ldflags out of the build information, so the -X value is looked for in
-		# the binary itself; the linux/amd64 ones are also run below.
-		grep -qaF -- "$BW_VERSION" "$bin" || fail "${a##*/}: the binary holds no version $BW_VERSION"
+		# the binary itself, whole: the linker ends the string -X sets with a NUL byte, so a longer
+		# version such as v0.1.0-alpha.10 does not pass for v0.1.0-alpha.1. The linux/amd64 ones
+		# are also run below.
+		python3 -c 'import sys; sys.exit(sys.argv[2].encode() + b"\0" not in open(sys.argv[1], "rb").read())' "$bin" "$BW_VERSION" ||
+			fail "${a##*/}: the binary holds no version $BW_VERSION"
 		grep -qxE "[[:space:]]+build[[:space:]]+vcs\.revision=$EXPECT_REVISION" <<<"$info" || fail "${a##*/}: vcs.revision is not $EXPECT_REVISION"
 		grep -qxE '[[:space:]]+build[[:space:]]+vcs\.modified=false' <<<"$info" || fail "${a##*/}: vcs.modified is not false"
 	done
