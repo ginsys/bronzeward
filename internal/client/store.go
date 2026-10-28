@@ -54,14 +54,16 @@ func (s *store) load() (*Tokens, error) {
 		return s.read()
 	}
 	t, err := s.read()
-	if err != nil {
+	if err != nil && !errors.Is(err, ErrNotTokenFile) {
 		s.none = "the credential store failed: " + err.Error()
 		return nil, nil
 	}
-	return t, nil
+	return t, err
 }
 
-// read is load without its fallback: a failing credential store is an error. Unless noPrompt, it
+// read is load without its fallback: a failing credential store is an error. An entry holding a
+// refresh token but no access token is returned with ErrNotTokenFile, as ReadTokens returns such a
+// document, so that logout still removes it and revokes its refresh token. Unless noPrompt, it
 // may wait, at most a minute, on the credential store's unlock prompt, so it is never used under
 // the renewal lock.
 func (s *store) read() (*Tokens, error) {
@@ -86,9 +88,12 @@ func (s *store) get(fromKeyring func(string) (string, bool, error)) (*Tokens, er
 		return nil, err
 	}
 	var e entry
-	if !found || json.Unmarshal([]byte(v), &e) != nil || e.AccessToken == "" ||
+	if !found || json.Unmarshal([]byte(v), &e) != nil || e.AccessToken == "" && e.RefreshToken == "" ||
 		e.Server != s.x.Server || e.Issuer != s.x.OIDC.Issuer {
 		return nil, nil
+	}
+	if e.AccessToken == "" {
+		return &e.Tokens, fmt.Errorf("the sign-in stored in the system credential store: %w", ErrNotTokenFile)
 	}
 	return &e.Tokens, nil
 }
@@ -159,13 +164,16 @@ func (s *store) clear(match func(*Tokens) bool) (*Tokens, error) {
 	}
 	defer unlock()
 	t, err := s.readHeld()
-	if err != nil || t == nil {
+	if err != nil && !errors.Is(err, ErrNotTokenFile) || t == nil {
 		return nil, err
 	}
 	if match != nil && !match(t) {
 		return t, ErrOtherSignIn
 	}
-	return t, keyringDelete(s.x.Name)
+	if derr := keyringDelete(s.x.Name); derr != nil {
+		return nil, derr
+	}
+	return t, err
 }
 
 // gone says that the store holds no sign-in.
@@ -214,10 +222,10 @@ func within[T any](f func() (T, error)) (T, error) {
 	}
 }
 
-// ClearStored removes the credential-store entry of a context being removed, under its renewal
-// lock, so that a renewal in flight finishes first and a waiting one finds the entry gone; a file
-// is the operator's to remove. Without the store it returns a note that an entry is not reached.
-// With noInput a locked store is refused, not prompted.
+// ClearStored removes the credential-store entry of a context removed from the contexts file,
+// under its renewal lock, so that a renewal in flight finishes first and a waiting one finds the
+// entry gone; a file is the operator's to remove. Without the store it returns a note that an
+// entry is not reached. With noInput a locked store is refused, not prompted.
 func ClearStored(x *Context, noInput bool) (string, error) {
 	// A name that cannot name its lock file never had an entry: every sign-in refuses it.
 	if x.Credential != "oidc" || x.TokenFile() != "" || x.checkName() != nil {
@@ -237,6 +245,24 @@ func ClearStored(x *Context, noInput bool) (string, error) {
 		return "", failed(err)
 	}
 	defer unlock()
+	// The contexts file is read under the lock, as SignIn reads it before keeping a sign-in: a
+	// sign-in finishing meanwhile is kept before this and removed by it, or finds its context gone.
+	// A context added again under the name since owns the entry now.
+	cfg, err := LoadConfig()
+	if err != nil {
+		return "", failed(err)
+	}
+	if cfg.Find(x.Name) != nil {
+		return "", nil
+	}
+	// lock read the store before taking the lock, bounded and, unless noInput, with its unlock
+	// prompt; this read under the lock refuses a store locked again since, without a prompt.
+	if _, found, err := keyringGetHeld(x.Name); err != nil || !found {
+		if err != nil {
+			err = failed(err)
+		}
+		return "", err
+	}
 	if err := keyringDelete(x.Name); err != nil {
 		return "", failed(err)
 	}

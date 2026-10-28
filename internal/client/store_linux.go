@@ -13,12 +13,38 @@ import (
 
 // keyringUnavailable is why the Secret Service is not used, "" when it is (decisions T3, T4 of
 // #254). Only a session bus the environment names is used: the D-Bus library would otherwise find
-// the login session's bus by itself or start one.
+// the login session's bus by itself or start one. A named bus on which no program offers the
+// Secret Service, as on many SSH logins, is no store either; one that cannot be asked is used, so
+// that its failure is shown.
 func keyringUnavailable() string {
 	if a := os.Getenv("DBUS_SESSION_BUS_ADDRESS"); a == "" || a == "autolaunch:" {
 		return "no D-Bus session bus is named (DBUS_SESSION_BUS_ADDRESS)"
 	}
+	if offered, err := secretServiceOffered(); err == nil && !offered {
+		return "no program on the D-Bus session bus offers the Secret Service (" + ssName + ")"
+	}
 	return ""
+}
+
+// secretServiceOffered reports whether a program on the session bus owns the Secret Service's
+// name, or the bus can start one for it (D-Bus activation). Replaced in tests.
+var secretServiceOffered = func() (bool, error) {
+	return within(func() (bool, error) {
+		c, err := dbus.ConnectSessionBus()
+		if err != nil {
+			return false, err
+		}
+		defer c.Close()
+		var owned bool
+		if err := c.BusObject().Call("org.freedesktop.DBus.NameHasOwner", 0, ssName).Store(&owned); err != nil || owned {
+			return owned, err
+		}
+		var names []string
+		if err := c.BusObject().Call("org.freedesktop.DBus.ListActivatableNames", 0).Store(&names); err != nil {
+			return false, err
+		}
+		return slices.Contains(names, ssName), nil
+	})
 }
 
 // unreached says, after a sentence, that a sign-in another session kept in the Secret Service is
