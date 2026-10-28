@@ -111,8 +111,16 @@ func TestMigrateFailureRollsBackThatMigration(t *testing.T) {
 	}
 }
 
+// concurrentBusyTimeoutMS is how long TestMigrateConcurrentRunnersApplyOnce's runners wait for one
+// another's write lock. A runner waiting at BEGIN IMMEDIATE can be passed over for the whole of
+// another runner's migrations, committed back to back, and on a slow disk that outlasts
+// sqliteBusyTimeoutMS: CI's runners then failed with SQLITE_BUSY at schema_migrations (#426). The
+// test's claim is that each migration is applied once, not how long a runner waits, which S8
+// measures with the fixed timeout; 60 s covers a runner's full sequence at 2 s per fsync.
+const concurrentBusyTimeoutMS = 60_000
+
 func TestMigrateConcurrentRunnersApplyOnce(t *testing.T) {
-	db := testDB(t)
+	db := testDBWaiting(t, concurrentBusyTimeoutMS)
 	ctx := context.Background()
 	ms, err := Migrations(db.D)
 	if err != nil {

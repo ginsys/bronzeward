@@ -12,6 +12,12 @@ import (
 // below runs against whichever it gets; CI has no PostgreSQL, so there it is SQLite only.
 func testDB(t *testing.T) *DB {
 	t.Helper()
+	return testDBWaiting(t, sqliteBusyTimeoutMS)
+}
+
+// testDBWaiting is testDB with SQLite's busy timeout set to busyMS.
+func testDBWaiting(t *testing.T, busyMS int) *DB {
+	t.Helper()
 	ctx := context.Background()
 	var (
 		db  *DB
@@ -23,7 +29,7 @@ func testDB(t *testing.T) *DB {
 			err = resetPostgres(ctx, db)
 		}
 	} else {
-		db, err = OpenSQLite(ctx, filepath.Join(t.TempDir(), "e4.db"))
+		db, err = openSQLite(ctx, filepath.Join(t.TempDir(), "e4.db"), busyMS, "immediate")
 	}
 	if err != nil {
 		t.Fatal(err)
