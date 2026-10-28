@@ -220,12 +220,14 @@ export class Renewer {
 
   // #400: a `redirecting` whose redirect this tab already has a newer pair from, a late or repeated
   // one, starts no wait; a wait already running keeps its own end. Without `from`, this tab's own
-  // expiry stands for it.
+  // expiry stands for it. One from another sender can arrive after a newer one, so an older `from`
+  // never lowers the boundary of a deadline still running.
   #redirecting(from: number | undefined): void {
     const own = this.session()?.expiresAt ?? 0;
     if (from !== undefined && own > from) return;
+    const running = this.#redirectUntil > Date.now();
     this.#redirectUntil = Date.now() + REDIRECT_WAIT_MS;
-    this.#redirectFrom = from ?? own;
+    this.#redirectFrom = Math.max(running ? this.#redirectFrom : 0, from ?? own);
   }
 
   // Take a new tab lock, then open the channel. A lock taken from this tab (another holder found it

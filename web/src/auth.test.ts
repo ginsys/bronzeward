@@ -645,6 +645,28 @@ describe("§9.7 item 2 sign-out", () => {
     }
   });
 
+  test("a refresh request that times out during sign-out's wait is still waited for, within the same SIGN_OUT_WAIT_MS", async () => {
+    vi.useFakeTimers();
+    try {
+      let release!: (r: Response) => void;
+      const f = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => (url === provider.tokenEndpoint ? new Promise<Response>((r) => (release = r)) : Promise.resolve(new Response(null, { status: 200 }))));
+      const s = new Session(config, { ...provider, endSessionEndpoint: undefined }, tokens(), { fetch: f as unknown as typeof fetch });
+      void s.renew();
+      await vi.advanceTimersByTimeAsync(REFRESH_WAIT_MS - 1_000);
+      let to: string | undefined;
+      void s.signOut(ORIGIN).then((u) => (to = u));
+      // The request times out 1 s into the wait and its answer comes 1 s after that.
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(to).toBeUndefined();
+      release(json({ access_token: "SYNTH-a2", refresh_token: "SYNTH-r2", expires_in: 300 }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(to).toBe(SIGNED_OUT_PATH);
+      expect(f.mock.calls.filter((c) => c[0] === provider.revocationEndpoint).map((c) => form(c[1])["token"])).toEqual(["SYNTH-r1", "SYNTH-r2"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("after a cleared page, sign-out revokes nothing", async () => {
     const f = answers([]);
     const s = new Session(config, provider, tokens(), { fetch: f as unknown as typeof fetch });
