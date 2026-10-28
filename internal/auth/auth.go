@@ -234,15 +234,16 @@ func (v *Verifier) roles(payload []byte) ([]Role, map[string]any, error) {
 
 // display is a human's display name from its token (§10, choice §17.40): the claim
 // auth.oidc.displayClaim names, or, unset, name, else preferred_username. A claim that is
-// missing, empty or not a string gives none, which leaves the stored name as it is; a display
-// name refuses no request.
+// missing, empty or not a string counts as absent, and so does one holding a NUL character, which
+// a PostgreSQL text column cannot store. None leaves the stored name as it is; a display name
+// refuses no request.
 func (v *Verifier) display(claims map[string]any) string {
 	names := []string{"name", "preferred_username"}
 	if v.oidc.DisplayClaim != "" {
 		names = []string{v.oidc.DisplayClaim}
 	}
 	for _, n := range names {
-		if s, ok := claims[n].(string); ok && s != "" {
+		if s, ok := claims[n].(string); ok && s != "" && !strings.ContainsRune(s, 0) {
 			return s
 		}
 	}

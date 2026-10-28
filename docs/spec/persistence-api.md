@@ -2614,8 +2614,9 @@ before the request's transaction, writes the claim's value in a statement of
 its own:
 `UPDATE principal SET display = $display WHERE id = $id AND kind = 'human' AND NOT revoked AND display IS DISTINCT FROM $display`.
 The value comes only from the subject's own verified token, never from a body
-or another principal's token. A claim that is missing, empty or not a string
-writes nothing and refuses nothing, so the stored name stays as it was. A read
+or another principal's token. A claim that is missing, empty or not a string,
+or holds a NUL character, which a `text` column cannot store, counts as absent:
+it writes nothing and refuses nothing, so the stored name stays as it was. A read
 writes nothing, so a subject who only reads keeps the name its last mutating
 request carried, or none. A row created without the subject's token has no name
 until the subject's own admitted mutating request: the token tool creates the
