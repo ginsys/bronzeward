@@ -122,6 +122,23 @@ describe("the machines", () => {
     expect(await rows()).toEqual(late);
     expect(await count()).toBe("Showing 1 of 1.");
   });
+
+  it("a state filter changed while the list is read reads it again under the new filter", async () => {
+    const at = await disposable();
+    const cl = await cluster(at, "lab-a");
+    const ids = await machines(at, cl.id, 2);
+    await write(at, `/machines/${ids[1]}/freezes`, { reason: "synthetic incident" });
+    // Every unfiltered list read is held 4 s: the filter changes while the first is in flight, and
+    // the client discards its answer with the old view.
+    expect((await fetch(`${CONTROL}/next?human=h-viewer`)).ok).toBe(true);
+    await faults({ upstream: at, hold: { path: "/machines", query: "", ms: 4000 } });
+    await browser.url(`${FIXTURE_PAGE}/machines`);
+    await expect($('[data-testid="status"]')).toHaveText("Loading machines", { wait: 20_000 });
+    await $("label*=State").$("select").selectByAttribute("value", "frozen");
+    await shows(1);
+    expect(await rows()).toEqual([ids[1]]);
+    expect(await count()).toBe("Showing 1 of 2.");
+  });
 });
 
 describe("cursor pages", () => {
@@ -133,8 +150,16 @@ describe("cursor pages", () => {
     expect(await fixtureSignIn("h-viewer", {}, { upstream: at })).toMatch(SERVER);
     await shows(50);
     expect(await count()).toBe("Showing 50; more pages to read. Show more");
+    // One page at a time: while the next page is read (held 3 s), Show more is disabled and a second
+    // click reads nothing.
+    await faults({ upstream: at, hold: { path: "/machines", ms: 3000 } });
     await $("button=Show more").click();
+    await expect($("button=Show more")).toBeDisabled();
+    await browser.execute(() => document.querySelector<HTMLButtonElement>('[data-testid="count"] button')!.click());
     await shows(100);
+    await faults({ upstream: at });
+    await browser.pause(1000);
+    expect((await answers()).filter((a) => a.startsWith("/machines?cursor="))).toHaveLength(1);
     await $("button=Show more").click();
     await shows(120);
     expect(await rows()).toEqual(ids);

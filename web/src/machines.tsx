@@ -63,7 +63,7 @@ export function Machines({ query, go }: { query: string; go: (to: string) => voi
   const q = new URLSearchParams(query);
   const cluster = q.get("cluster") ?? "";
   const state = STATES.find(([v]) => v === q.get("state"));
-  const [list, more] = useList<Machine>("/machines", cluster === "" ? "" : new URLSearchParams({ cluster }).toString(), state !== undefined);
+  const [list, more, busy] = useList<Machine>("/machines", cluster === "" ? "" : new URLSearchParams({ cluster }).toString(), state !== undefined);
   const [clusters] = useList<Cluster>("/clusters", "", true);
   let body = usePending(list, "machines");
   const filter = (k: string, v: string) => {
@@ -93,7 +93,7 @@ export function Machines({ query, go }: { query: string; go: (to: string) => voi
               ))}
             </tbody>
           </table>
-          <More list={list.data} shown={shown.length} more={more} />
+          <More list={list.data} shown={shown.length} more={more} busy={busy} />
         </>
       );
   }
@@ -123,7 +123,7 @@ export function MachineItem({ id }: { id: string }) {
 }
 
 export function Clusters() {
-  const [list, more] = useList<Cluster>("/clusters", "", false);
+  const [list, more, busy] = useList<Cluster>("/clusters", "", false);
   let body = usePending(list, "clusters");
   if (list.kind === "ok") {
     body = list.data.items.length === 0 ? <Empty text="No clusters recorded yet." /> : (
@@ -141,7 +141,7 @@ export function Clusters() {
             ))}
           </tbody>
         </table>
-        <More list={list.data} shown={list.data.items.length} more={more} />
+        <More list={list.data} shown={list.data.items.length} more={more} busy={busy} />
       </>
     );
   }

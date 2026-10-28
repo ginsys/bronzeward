@@ -13,10 +13,13 @@ export type Failed = Exclude<ReadResult<unknown>, { kind: "ok" | "discarded" }>;
 export interface Reads {
   client: Pick<Client, "read">;
   // Renders a read's answer while `live`, or hands it to the shell (sign-in, revocation, offline,
-  // the process's refusal).
-  settle: <T>(res: ReadResult<T>, set: (r: Load<T>) => void, live: () => boolean) => void;
+  // the process's refusal); without an answer, what `held` says is shown stays under the banner.
+  settle: <T>(res: ReadResult<T>, set: (r: Load<T>) => void, live: () => boolean, held: () => boolean) => void;
   // From now, true until the process's refusal drops every read in flight.
   undropped: () => () => boolean;
+  // The client's view, path and query: an answer read under another is discarded, so a page's
+  // reads start again on each change, the browser's own filters included.
+  view: string;
   // Bumped each time the page reads again.
   again: number;
   go: (to: string) => void;
@@ -60,38 +63,73 @@ export async function readPages<T>(client: Reads["client"], path: string, query:
   }
 }
 
-// A list read from its start each time the path, query or `all` changes, and read on by `more`. A
-// read that a newer start superseded is ignored when it completes, a `more` included.
-export function useList<T>(path: string, query: string, all: boolean): [Load<Listed<T>>, (() => void) | undefined] {
-  const { client, settle, undropped, again } = useReads();
-  const [list, setList] = useState<Load<Listed<T>>>({ kind: "loading" });
+// A read's result, and whether it holds data: a read again that finds no answer keeps that data
+// under the offline banner, whatever the page's other reads showed.
+function useHeld<T>(): [Load<T>, (r: Load<T>) => void, () => boolean] {
+  const [load, setLoad] = useState<Load<T>>({ kind: "loading" });
+  const has = useRef(false);
+  const put = useCallback((r: Load<T>) => {
+    has.current = r.kind === "ok";
+    setLoad(r);
+  }, []);
+  return [load, put, useCallback(() => has.current, [])];
+}
+
+// A list read from its start each time the view, path, query or `all` changes, showing loading, and
+// each time the page reads again, keeping what it shows until the read answers. `more` reads on,
+// one page at a time. A read that a newer start superseded is ignored when it completes.
+export function useList<T>(path: string, query: string, all: boolean): [Load<Listed<T>>, (() => void) | undefined, boolean] {
+  const { client, settle, undropped, again, view } = useReads();
+  const [list, put, held] = useHeld<Listed<T>>();
   const start = useRef(0);
+  const key = useRef<string | undefined>(undefined);
+  // The start a `more` in flight belongs to; another waits for it.
+  const reading = useRef<number | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
   useEffect(() => {
     const n = ++start.current;
     const ok = undropped();
-    setList({ kind: "loading" });
-    void readPages<T>(client, path, query, { items: [], next: undefined, restarted: false }, all).then((res) => settle(res, setList, () => n === start.current && ok()));
+    setBusy(false);
+    const k = JSON.stringify([view, path, query, all]);
+    if (key.current !== k) {
+      key.current = k;
+      put({ kind: "loading" });
+    }
+    void readPages<T>(client, path, query, { items: [], next: undefined, restarted: false }, all).then((res) => settle(res, put, () => n === start.current && ok(), held));
     return () => void start.current++;
-  }, [client, settle, undropped, path, query, all, again]);
+  }, [client, settle, undropped, put, held, view, path, query, all, again]);
   const more = useCallback(() => {
-    if (list.kind !== "ok") return;
-    const n = start.current;
+    if (list.kind !== "ok" || reading.current === start.current) return;
+    const n = (reading.current = start.current);
     const ok = undropped();
-    void readPages<T>(client, path, query, list.data, false).then((res) => settle(res, setList, () => n === start.current && ok()));
-  }, [client, settle, undropped, path, query, list]);
-  return [list, list.kind === "ok" && list.data.next !== undefined ? more : undefined];
+    setBusy(true);
+    void readPages<T>(client, path, query, list.data, false).then((res) => {
+      if (n !== start.current) return;
+      reading.current = undefined;
+      setBusy(false);
+      settle(res, put, ok, held);
+    });
+  }, [client, settle, undropped, put, held, path, query, list]);
+  return [list, list.kind === "ok" && list.data.next !== undefined ? more : undefined, busy];
 }
 
+// An item read each time the view or path changes, showing loading, and each time the page reads
+// again, keeping what it shows until the read answers.
 export function useItem<T>(path: string): Load<T> {
-  const { client, settle, undropped, again } = useReads();
-  const [item, setItem] = useState<Load<T>>({ kind: "loading" });
+  const { client, settle, undropped, again, view } = useReads();
+  const [item, put, held] = useHeld<T>();
+  const key = useRef<string | undefined>(undefined);
   useEffect(() => {
     const ok = undropped();
     let live = true;
-    setItem({ kind: "loading" });
-    void client.read<T>(path).then((res) => settle(res, setItem, () => live && ok()));
+    const k = JSON.stringify([view, path]);
+    if (key.current !== k) {
+      key.current = k;
+      put({ kind: "loading" });
+    }
+    void client.read<T>(path).then((res) => settle(res, put, () => live && ok(), held));
     return () => void (live = false);
-  }, [client, settle, undropped, path, again]);
+  }, [client, settle, undropped, put, held, view, path, again]);
   return item;
 }
 
@@ -107,14 +145,14 @@ export function Ref({ to, id, children }: { to: string; id: string; children?: R
   return <a href={to} title={id} onClick={(e) => follow(e, go, to)}>{children ?? short(id)}</a>;
 }
 
-// The count, the next page on request, and the restart notice.
-export function More({ list, shown, more }: { list: Listed<unknown>; shown: number; more: (() => void) | undefined }) {
+// The count, the next page on request (one at a time), and the restart notice.
+export function More({ list, shown, more, busy }: { list: Listed<unknown>; shown: number; more: (() => void) | undefined; busy: boolean }) {
   return (
     <>
       {list.restarted && <Status testid="restarted">{RESTARTED}</Status>}
       <p data-testid="count">
         {more === undefined ? `Showing ${shown} of ${list.items.length}.` : `Showing ${shown}; more pages to read.`}{" "}
-        {more !== undefined && <button type="button" onClick={more}>Show more</button>}
+        {more !== undefined && <button type="button" onClick={more} disabled={busy}>Show more</button>}
       </p>
     </>
   );

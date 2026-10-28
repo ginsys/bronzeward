@@ -102,9 +102,9 @@ export function observed(res: ReadResult<unknown>, shown: boolean): ConnectionEv
   if (res.kind !== "transport") return "answered";
   return shown ? "lost" : undefined;
 }
-// Whether each resource's data was shown: the shell's three reads, and the page's as one.
-type Shown = Record<"server" | "identity" | "recovery" | "page", boolean>;
-const noneShown = (): Shown => ({ server: false, identity: false, recovery: false, page: false });
+// Whether each of the shell's three reads showed data; a page's reads each keep their own.
+type Shown = Record<"server" | "identity" | "recovery", boolean>;
+const noneShown = (): Shown => ({ server: false, identity: false, recovery: false });
 // Offline since the earlier cause, undefined while neither holds.
 export const offlineSince = ({ down, lost }: Connection) => (down === undefined || (lost !== undefined && lost < down) ? lost : down);
 
@@ -163,14 +163,15 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
   // it is shown as the disconnected state.
   // A refusal ends the page whichever read carried it, a superseded one too: the client already
   // dropped the credentials it refused. Any other answer of a superseded read says nothing more.
-  const settle = useCallback(<T,>(res: ReadResult<T>, set: (r: Load<T>) => void, what: keyof Shown, live: () => boolean) => {
+  // `what` names the shell's own reads; a page's read (none) says through `held` whether it shows data.
+  const settleAs = useCallback(<T,>(res: ReadResult<T>, set: (r: Load<T>) => void, what: keyof Shown | undefined, live: () => boolean, held: () => boolean) => {
     if (res.kind === "discarded") return;
     if (res.kind === "unauthenticated") return onUnauthenticated(res);
     if (res.kind === "revoked") return onRevoked(res);
     if (!live()) return;
     if (startRefusal(res)) setMode("recovery");
     const now = new Date();
-    const e = observed(res, shown.current[what]);
+    const e = observed(res, held());
     if (e !== undefined) observe([e, now]);
     if (e === "lost") return;
     // The process's refusal on any other read means the process restarted for recovery, its entry
@@ -187,17 +188,16 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
       return;
     }
     // A refusal replaces the data, so a later read without answer has nothing to keep shown.
-    shown.current[what] = res.kind === "ok";
+    if (what !== undefined) shown.current[what] = res.kind === "ok";
     if (res.kind === "ok") readAt.current = now;
     set(res);
   }, [client, onUnauthenticated, onRevoked]);
-  // A page's reads settle as one resource, which a new path or query has not shown yet.
-  const settlePage = useCallback(<T,>(res: ReadResult<T>, set: (r: Load<T>) => void, live: () => boolean) => settle(res, set, "page", live), [settle]);
+  const settle = useCallback(<T,>(res: ReadResult<T>, set: (r: Load<T>) => void, what: keyof Shown, live: () => boolean) => settleAs(res, set, what, live, () => shown.current[what]), [settleAs]);
+  const settlePage = useCallback(<T,>(res: ReadResult<T>, set: (r: Load<T>) => void, live: () => boolean, held: () => boolean) => settleAs(res, set, undefined, live, held), [settleAs]);
   const undropped = useCallback(() => {
     const at = dropped.current;
     return () => at === dropped.current;
   }, []);
-  useEffect(() => void (shown.current.page = false), [path, query]);
 
   // Reads still in flight when the shell goes (a refusal, sign-out) are discarded, and renew no more.
   useEffect(() => () => client.setView({ principal: "", route: "", query: "" }), [client]);
@@ -289,7 +289,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
           </nav>
         )}
       </header>
-      <ReadsProvider value={{ client, settle: settlePage, undropped, again, go, failure: (res) => <Failure res={res} sub={sub} /> }}><main>{main}</main></ReadsProvider>
+      <ReadsProvider value={{ client, settle: settlePage, undropped, view: JSON.stringify([path, query]), again, go, failure: (res) => <Failure res={res} sub={sub} /> }}><main>{main}</main></ReadsProvider>
       <VersionFooter server={server.kind === "ok" ? server.data : undefined} />
     </ShellContext>
   );
