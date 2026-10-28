@@ -18,7 +18,8 @@ export interface Reads {
   // Renders a read's answer while `live`, or hands it to the shell (sign-in, revocation, offline,
   // the process's refusal); without an answer, what `held` says is shown stays under the banner.
   settle: <T>(res: ReadResult<T>, set: (r: Load<T>) => void, live: () => boolean, held: () => boolean) => void;
-  // From now, true until the process's refusal drops every read in flight.
+  // From now, true until the shell invalidates every read in flight: the process's refusal, a new
+  // epoch, a revocation or sign-out.
   undropped: () => () => boolean;
   // The client's view, path and query: an answer read under another is discarded, so a page's
   // reads start again on each change, the browser's own filters included.
