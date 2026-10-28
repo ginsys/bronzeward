@@ -1,5 +1,6 @@
-// #388: the signed-out page releases its renewer, so it holds no tab lock and is not one of the tabs
-// the renewer holder waits on before it sends a refresh token (renewer.ts).
+// #388: the signed-out page must release its renewer, since before it sends a refresh token the
+// renewer holder waits, up to ACK_WAIT_MS, for an ack from every other held tab lock (renewer.ts).
+// This checks that the page holds and waits for no renewer lock.
 import { $, browser, expect } from "@wdio/globals";
 import { SIGNED_OUT } from "../src/app.tsx";
 import { LOCK, TAB } from "../src/renewer.ts";
@@ -16,9 +17,9 @@ const ours = () =>
   );
 
 describe("the signed-out page", () => {
-  // Positive control: any other page holds its tab lock once settled, so the query below can see a
-  // held one. It shows the query sees the lock, not how the page settled.
-  it("a page other than /signed-out holds a tab lock once settled", async () => {
+  // Positive control: the page at / holds a tab lock once settled, so the query can see a held one.
+  // It does not show how the page settled.
+  it("the page at / holds a tab lock once settled", async () => {
     await browser.url("/");
     await browser.waitUntil(async () => {
       const [at, status] = await browser.execute(() => [
@@ -33,12 +34,12 @@ describe("the signed-out page", () => {
   it("#388: holds no renewer lock, held or waited for", async () => {
     await browser.url("/signed-out");
     await expect($('[data-testid="status"]')).toHaveText(SIGNED_OUT);
-    // Without release() the tab lock it requests on load is held from then on.
+    // With the release() call deleted, this times out: the tab lock requested on load stays held.
     await browser.waitUntil(async () => {
       const { held, pending } = await ours();
       return held.length === 0 && pending.length === 0;
     }, { timeout: 5_000, timeoutMsg: "the signed-out page holds or waits for a renewer lock" });
-    // Still none a while later: no lock was granted to it after the first empty answer.
+    // Checked again a second later: none held or pending then either.
     await browser.pause(1_000);
     expect(await ours()).toEqual({ held: [], pending: [] });
   });
