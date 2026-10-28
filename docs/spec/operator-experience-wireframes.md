@@ -145,7 +145,8 @@ with `Applied`; an observation equal to `Desired` or an older release is still d
 sentences are those of [§2.4](operator-experience.md#24-desired-applied-and-observed).
 
 The timeline opens on its newest page and polls on from its tail, as
-[client contracts §8.6](client-contracts.md#86-event-resumption) item 6 has it. "Load older"
+[client contracts §8.6](client-contracts.md#86-event-resumption) item 6 has it, and a poll with
+new entries reads the machine and its observations again. "Load older"
 reads the page before the oldest entry shown and is gone once the machine's first entry is shown.
 
 ## W4. Draft editor

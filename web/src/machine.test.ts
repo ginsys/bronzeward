@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ADOPTED, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, latestUnread, nextTimeline, type Observation, Observations, POLL_MS, polled, queued, readLater, readOlder, sentences, type Timeline, TimelineRows, UNREAD } from "./machine.tsx";
+import { ADOPTED, advanced, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, latestUnread, nextTimeline, type Observation, Observations, POLL_MS, polled, queued, readLater, readOlder, sentences, type Timeline, TimelineRows, UNREAD } from "./machine.tsx";
 import { type Reads, ReadsProvider, RESTARTED } from "./list.tsx";
 import type { Machine } from "./machines.tsx";
 import type { ReadResult } from "./request.ts";
@@ -328,6 +328,17 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  test("#424 item 2: a poll that brings entries not shown reads the machine again; the first read, an unchanged poll and a failure do not", async () => {
+    const from = shown([1], undefined, "t1");
+    const later = await readLater(client([page([2], undefined, "t2")]), "/t", from);
+    expect(advanced(from, later)).toBe(true);
+    expect(advanced(UNREAD, await readLater(client([page([1], undefined, "t1")]), "/t", UNREAD))).toBe(false);
+    expect(advanced(from, await readLater(client([page([], undefined, "t1")]), "/t", from))).toBe(false);
+    expect(advanced(from, { kind: "transport" })).toBe(false);
+    // A restart's newest page with entries not shown counts too.
+    expect(advanced(from, await readLater(client([restart, page([3], undefined, "t3")]), "/t", from))).toBe(true);
   });
 
   test("an entry's details: who, why and what it names, identifiers shortened", () => {

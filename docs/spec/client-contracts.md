@@ -737,7 +737,10 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
    none), in `oldest` order, no more often than every 5 s, follows `next` while it is present,
    and keeps the `tail` of the last page, the one without `next`. A server below API revision 3
    refuses `order` as `400 invalid-request` and serves no `tail`, so a client that reads the timeline this way declares
-   revision 3 as its minimum.
+   revision 3 as its minimum. When a poll returns entries the client did not show, a view that
+   also shows the machine and its observations reads both again. It keeps what it shows until
+   they answer, and the timeline poll goes on unrestarted: the timeline can record a freeze, an
+   observation or an applied release that the first machine read predates.
 
 ## 9. Authentication
 
