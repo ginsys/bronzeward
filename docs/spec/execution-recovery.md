@@ -1577,13 +1577,15 @@ C, which would create operation O, race.
 
 - **R commits first.** C fails comparison 1. No operation is created, nothing
   is sent, and P is `revoked` (DS row 002).
-- **R starts while C holds the approval.** R locks the approval `FOR UPDATE`,
-  so it waits for C's `FOR SHARE` read and commits after it (§2). O is
-  `committed`. If R then takes M's row before O's attempt transaction, the
-  attempt fails comparison 1: `committed` → `unresolved` → `cancelled`,
-  nothing sent (DS row 003; that R waited is inferred from the harness's
-  record, DS §4.1). If the attempt transaction takes it first, R waits for
-  that transaction too, and the outcome is DS row 005's (**choice §10.31**).
+- **R starts while C holds the approval.** R locks M's row `FOR UPDATE` before
+  the approval (`persistence-api.md` §5, T5b), so it waits for C, which holds
+  M's row, and commits after it (§2). O is `committed`. C updated M's row, so
+  once C commits, R locks the row's new version afresh. If R takes it before O's
+  attempt transaction, R then locks the approval and commits, and the attempt
+  fails comparison 1: `committed` → `unresolved` → `cancelled`, nothing sent
+  (DS row 003; that R waited is inferred from the harness's record, DS §4.1).
+  If the attempt transaction takes M's row first, R waits for that
+  transaction too, and the outcome is DS row 005's (**choice §10.31**).
 - **R commits after C, before the attempt.** The same outcome (DS row 004).
 - **R commits after the attempt transaction.** The attempt is sent, lands and
   completes. R prevents any retry and undoes nothing (DS row 005). This is the
