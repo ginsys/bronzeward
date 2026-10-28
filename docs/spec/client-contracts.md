@@ -851,8 +851,9 @@ current token expires
    - A refresh-token request unanswered after 15 s fails the renewal (§9.5 item 3), so that a
      request the provider never answers holds back no later renewal and no pair for a new tab. Its
      answer, whenever it comes, is not kept: the refresh token it brings, which no tab holds, is
-     revoked, and the one sent stays held for sign-out's revocation. A sign-out while that answer is
-     outstanding waits for it within its 5 s bound (§9.7 item 2), so a rotated refresh token that
+     revoked, and the one sent stays held for sign-out's revocation. A sign-out waits for that answer
+     within its 5 s bound (§9.7 item 2), also when the request times out during that wait, so a
+     rotated refresh token that
      arrives in time is revoked before the page navigates
      ([#396](https://github.com/ginsys/bronzeward/issues/396)). The request is not aborted,
      since an abort cannot recall a request the provider may already have answered.
@@ -864,8 +865,9 @@ current token expires
      for that redirect's pair and redirects itself only if none comes, so that one renewal is one
      redirect, not one per tab. `redirecting` names the expiry of the pair the holder leaves with.
      The first pair newer than that ends the wait, and the 10 s with it, so that the next renewal
-     of that pair does not wait for a redirect already over; a `redirecting` that reaches a tab
-     already holding such a pair, late or repeated, starts no wait
+     of that pair does not wait for a redirect already over; while the 10 s run, the newest such
+     expiry received counts, since another sender's older `redirecting` can arrive after it. A
+     `redirecting` that reaches a tab already holding a newer pair, late or repeated, starts no wait
      ([#400](https://github.com/ginsys/bronzeward/issues/400)).
    - A holder whose renewal answered a request due first has a new pair, and its own renewal
      timer waits for that pair's threshold instead of renewing again.

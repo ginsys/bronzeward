@@ -370,8 +370,14 @@ export class Session {
     if (held !== undefined && held === this.#inFlight) this.#inFlight = undefined;
     this.#tokens = undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // The late answers are read once the renewal in flight has settled, since its own request can
+    // time out during this wait and become one of them.
+    const renewal = (async () => {
+      await this.#renewing?.catch(() => false);
+      await Promise.all(this.#late);
+    })();
     await Promise.race([
-      Promise.all([this.#revoke(held), this.#renewing?.catch(() => false), ...this.#late]),
+      Promise.all([this.#revoke(held), renewal]),
       new Promise((r) => (timer = setTimeout(r, SIGN_OUT_WAIT_MS))),
     ]);
     clearTimeout(timer);

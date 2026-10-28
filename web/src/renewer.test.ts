@@ -798,6 +798,21 @@ describe("#400 redirect handover deadline", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(answered()).toBe(false);
   });
+
+  test("an older `redirecting` arriving after a newer one does not let a pair between the two end the newer one's wait", async () => {
+    const { b, y, before } = await handover();
+    // Another sender's redirect, leaving with a newer pair, then a delayed copy of the first one's.
+    y.renewer.onMessage({ type: "redirecting", from: before + 120_000 });
+    y.renewer.onMessage({ type: "redirecting", from: before });
+    b.open().renewer.post(first({ access: "SYNTH-a7", refresh: undefined, expiresAt: before + 60_000 }));
+    await settle();
+    expect(y.session?.token()).toBe("SYNTH-a7");
+    const answered = await answer(y);
+    await vi.advanceTimersByTimeAsync(REDIRECT_WAIT_MS - 1_000);
+    expect(answered()).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(answered()).toBe(false);
+  });
 });
 
 describe("#406 stale channels of a rejoined tab", () => {
