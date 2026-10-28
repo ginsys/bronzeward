@@ -58,6 +58,7 @@ snapshot:
 changelog:
   disable: true
 
-# Publishing is ginsys/bronzeward#401's Release / Publish, and waits for the licence (#16).
+# GoReleaser only builds. Release / Publish (.github/workflows/release-publish.yml) publishes these
+# same snapshot archives with their signature and SBOMs, and waits for the licence (#16).
 release:
   disable: true
