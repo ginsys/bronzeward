@@ -796,7 +796,8 @@ current token expires
    item 3). CLI processes that share that file renew one at a time, holding a lock on it while
    they renew, and read the new pair from it; a context kept in the credential store has a lock
    of its own in the user's state directory. That lock is never held across the store's unlock
-   prompt: the store is read, and may prompt, for at most a minute before the lock is taken.
+   prompt: the store is read, and may prompt, for at most a minute before the lock is taken;
+   with `--no-input` it never prompts, and a locked store is refused as one that failed.
    Under the lock no call to the store shows a prompt, so a store locked by then refuses the
    command, with nothing written or removed. One that locks while a renewal waits on the identity
    provider refuses the renewed pair: its rotated refresh token is lost, as with any failed write,

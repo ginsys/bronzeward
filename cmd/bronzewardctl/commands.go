@@ -67,7 +67,7 @@ func (e *env) contextCmd(args []string) error {
 		}
 		// Its credential-store entry goes with it; a D2 (b) file is left where the operator put it.
 		if verb == "remove" {
-			note, err := client.ClearStored(&removed)
+			note, err := client.ClearStored(&removed, e.noInput)
 			if note != "" {
 				msg += " " + note + "."
 			}
@@ -289,7 +289,7 @@ func (e *env) logoutCmd(args []string) error {
 	if err != nil {
 		return err
 	}
-	msg, failed := client.SignOut(x)
+	msg, failed := client.SignOut(x, e.noInput)
 	if msg == "" {
 		return failed
 	}

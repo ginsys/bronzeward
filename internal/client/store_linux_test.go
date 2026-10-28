@@ -92,7 +92,7 @@ func TestKeyringLockedRefused(t *testing.T) {
 	keyringGetHeldCall = func(string, string) (string, error) { return string(b), refuse(&heldReads) }
 	keyringSetCall = func(string, string, string) error { return refuse(&writes) }
 	keyringDeleteCall = func(string, string) error { return refuse(&writes) }
-	s := openStore(&x)
+	s := openStore(&x, false)
 
 	// The control: an unlocked store is written under the lock, read first outside it.
 	unlock, err := s.lock()
@@ -129,7 +129,7 @@ func TestKeyringLockedRefused(t *testing.T) {
 	if err := held(func() error { _, err := s.clear(nil); return err }); !errors.Is(err, errStoreLocked) {
 		t.Errorf("clear on a locked store: %v, want errStoreLocked", err)
 	}
-	if err := held(func() error { _, err := ClearStored(&x); return err }); err == nil || !errors.Is(err, errStoreLocked) ||
+	if err := held(func() error { _, err := ClearStored(&x, false); return err }); err == nil || !errors.Is(err, errStoreLocked) ||
 		!strings.Contains(err.Error(), `removing the stored sign-in of context "store" from the system credential store`) {
 		t.Errorf("context remove on a locked store: %v, want the removal named and errStoreLocked", err)
 	}
@@ -145,9 +145,49 @@ func TestKeyringLockedRefused(t *testing.T) {
 	}
 	// A store whose read before the lock fails: context remove names the removal too.
 	keyringGetCall = func(string, string) (string, error) { return "", errors.New("BWSYNTH-no-answer") }
-	if _, err := ClearStored(&x); err == nil || !strings.Contains(err.Error(),
+	if _, err := ClearStored(&x, false); err == nil || !strings.Contains(err.Error(),
 		`removing the stored sign-in of context "store" from the system credential store: BWSYNTH-no-answer`) {
 		t.Errorf("context remove on a store that does not answer: %v, want the removal named", err)
+	}
+}
+
+// TestNoInputNeverPrompts checks that with --no-input no call to the credential store can show its
+// unlock prompt, before the renewal lock as under it: a locked store is refused instead.
+func TestNoInputNeverPrompts(t *testing.T) {
+	get, getHeld, set, del := keyringGetCall, keyringGetHeldCall, keyringSetCall, keyringDeleteCall
+	t.Cleanup(func() { keyringGetCall, keyringGetHeldCall, keyringSetCall, keyringDeleteCall = get, getHeld, set, del })
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", home)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path="+filepath.Join(home, "bus"))
+	x := Context{Name: "store", Server: "https://bw.example.invalid", Credential: "oidc",
+		OIDC: &OIDC{Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli"}}
+	var prompting, refused, writes atomic.Int32
+	keyringGetCall = func(string, string) (string, error) { prompting.Add(1); return "", errStoreLocked }
+	keyringGetHeldCall = func(string, string) (string, error) { refused.Add(1); return "", errStoreLocked }
+	keyringSetCall = func(string, string, string) error { writes.Add(1); return nil }
+	keyringDeleteCall = func(string, string) error { writes.Add(1); return nil }
+
+	// The control: without --no-input the store is read with go-keyring's prompting call.
+	if _, err := ClearStored(&x, false); err == nil || prompting.Load() != 1 {
+		t.Fatalf("a command without --no-input: %v after %d prompting reads; want one", err, prompting.Load())
+	}
+	prompting.Store(0)
+	refused.Store(0)
+	if _, err := openSignIn(&x, true, io.Discard); err == nil ||
+		!strings.Contains(err.Error(), "the system credential store is locked") || !strings.Contains(err.Error(), "--no-input forbids") {
+		t.Errorf("a command with --no-input on a locked store: %v, want it refused, naming the locked store", err)
+	}
+	if _, err := SignOut(&x, true); !errors.Is(err, errStoreLocked) {
+		t.Errorf("logout --no-input on a locked store: %v, want errStoreLocked", err)
+	}
+	if _, err := ClearStored(&x, true); !errors.Is(err, errStoreLocked) {
+		t.Errorf("context remove --no-input on a locked store: %v, want errStoreLocked", err)
+	}
+	if prompting.Load() != 0 || refused.Load() != 3 || writes.Load() != 0 {
+		t.Errorf("with --no-input: %d prompting reads, %d refused reads, %d writes or deletions; want 0, 3, 0",
+			prompting.Load(), refused.Load(), writes.Load())
 	}
 }
 

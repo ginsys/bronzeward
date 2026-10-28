@@ -245,7 +245,8 @@ func SignIn(x *Context, device bool, prompts io.Writer) (*Tokens, string, error)
 	if x.Credential != "oidc" {
 		return nil, "", x.fail(errors.New("an automation context has no sign-in"))
 	}
-	s := openStore(x)
+	// login waits for the operator anyway: --no-input refuses it before this (bronzewardctl).
+	s := openStore(x, false)
 	switch {
 	case s.file != "":
 		if err := ownTokenFile(s.file); err != nil {
@@ -308,8 +309,8 @@ func ownTokenFile(p string) error {
 // token at the provider's revocation endpoint where discovery names one (RFC 7009, §9.7 item 1).
 // An access token already issued stays valid at the server until it expires, plus its leeway. It
 // returns what it did, for the operator; a failed revocation still signs out, and is returned
-// beside that text.
-func SignOut(x *Context) (string, error) {
+// beside that text. With noInput a locked credential store is refused, not prompted.
+func SignOut(x *Context, noInput bool) (string, error) {
 	// Only what reaching the store needs: a refused server or issuer still has its sign-in removed.
 	if err := x.checkName(); err != nil {
 		return "", x.fail(err)
@@ -320,7 +321,7 @@ func SignOut(x *Context) (string, error) {
 	if x.Credential != "oidc" {
 		return "", x.fail(errors.New("an automation context has no sign-in; its token file is the operator's and is left as it is"))
 	}
-	s := openStore(x)
+	s := openStore(x, noInput)
 	if s.file == "" && s.none != "" {
 		return fmt.Sprintf("Not signed in to %s: the sign-in is kept in %s, so none is stored.%s", x.Where(), s.kept(), unreached()), nil
 	}
