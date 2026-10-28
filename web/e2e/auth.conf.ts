@@ -245,25 +245,39 @@ function stop(p: ChildProcess): Promise<void> {
 }
 
 async function cleanup() {
-  // The browsers' profiles go first, so that a database left behind does not keep them.
-  removeProfiles();
-  // Each server must be gone before its database can be dropped.
-  await Promise.all(procs.splice(0).map(stop));
-  await Promise.all(servers.splice(0).map((s) => new Promise((r) => (s.closeAllConnections(), s.close(r)))));
-  const left = databases.filter((db) => {
-    try {
-      execFileSync("dropdb", [...PG, "--force", db]);
-      return false;
-    } catch (e) {
-      console.error(`dropdb ${db}: ${String(e)}`);
-      return true;
-    }
-  });
-  // A later cleanup tries them again, and keeps the state directory while any is left.
-  databases.splice(0, databases.length, ...left);
-  if (left.length > 0) throw new Error(`databases left behind: ${left.join(", ")} (named in ${state})`);
-  if (ownState) rmSync(state, { recursive: true, force: true });
-  ownState = false;
+  let failed = false;
+  let failure: unknown;
+  try {
+    // Each server must be gone before its database can be dropped.
+    await Promise.all(procs.splice(0).map(stop));
+    await Promise.all(servers.splice(0).map((s) => new Promise((r) => (s.closeAllConnections(), s.close(r)))));
+    const left = databases.filter((db) => {
+      try {
+        execFileSync("dropdb", [...PG, "--force", db]);
+        return false;
+      } catch (e) {
+        console.error(`dropdb ${db}: ${String(e)}`);
+        return true;
+      }
+    });
+    // A later cleanup tries them again, and keeps the state directory while any is left.
+    databases.splice(0, databases.length, ...left);
+    if (left.length > 0) throw new Error(`databases left behind: ${left.join(", ")} (named in ${state})`);
+    if (ownState) rmSync(state, { recursive: true, force: true });
+    ownState = false;
+  } catch (e) {
+    failed = true;
+    failure = e;
+  }
+  // The browsers' profiles go last and whatever the teardown left, so that failing to remove them
+  // leaves nothing else undone; a teardown failure stays the error, with this one logged.
+  try {
+    removeProfiles();
+  } catch (e) {
+    if (!failed) throw e;
+    console.error(`browser profiles: ${String(e)}`);
+  }
+  if (failed) throw failure;
 }
 
 export const config: WebdriverIO.Config = {
