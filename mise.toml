@@ -379,9 +379,19 @@ rm -rf web/e2e/out
 cd web
 # The run gets a TMPDIR of its own, and fails on a browser profile left in it (#430), or when that
 # directory cannot be read or removed; a failed run keeps its own status. wdio keeps its browser
-# and driver downloads where it cached them before.
-export BW_WDIO_CACHE=${BW_WDIO_CACHE:-${TMPDIR:-/tmp}}
-run_tmp=$(mktemp -d "${TMPDIR:-/tmp}/bw-browser-run.XXXXXX")
+# and driver downloads where it cached them before. Chrome binds a socket at
+# <TMPDIR>/.org.chromium.Chromium.XXXXXX/SingletonSocket, and a Unix socket path holds at most 107
+# bytes: past that every session fails as "user data directory is already in use", so the run
+# refuses to start instead.
+tmp=${TMPDIR:-/tmp}
+export BW_WDIO_CACHE=${BW_WDIO_CACHE:-$tmp}
+run_tmp=$(mktemp -d "$tmp/bw.XXXXXX")
+[ $((${#run_tmp} + 46)) -le 107 ] || {
+  printf 'browser: TMPDIR %s is too long: the Chrome socket path under it would be %s bytes, over the 107 a Unix socket allows; use a TMPDIR of at most %s bytes\n' \
+    "$tmp" $((${#run_tmp} + 46)) $((61 - ${#run_tmp} + ${#tmp})) >&2
+  rmdir "$run_tmp"
+  exit 1
+}
 rc=0
 TMPDIR=$run_tmp BW_WEB_CANARY=$canary npx wdio run e2e/wdio.conf.ts || rc=$?
 left=$(find "$run_tmp" -mindepth 1 -maxdepth 1 \( -name '.org.chromium.Chromium.*' -o -name 'bw-browser-profiles-*' \) 2>&1) || left="$left (cannot read $run_tmp)"
@@ -407,9 +417,17 @@ cd web
 # The run's console goes to a file the scan reads, not to the job log: a failing expect prints its
 # received value. The scan runs after a failed run too, and the console is shown only once it passes.
 rc=0
-# As in browser: a TMPDIR of its own, failed on a browser profile left in it (#430).
-export BW_WDIO_CACHE=${BW_WDIO_CACHE:-${TMPDIR:-/tmp}}
-run_tmp=$(mktemp -d "${TMPDIR:-/tmp}/bw-browser-run.XXXXXX")
+# As in browser: a TMPDIR of its own, failed on a browser profile left in it (#430), and refused
+# when Chrome's socket path under it would be too long.
+tmp=${TMPDIR:-/tmp}
+export BW_WDIO_CACHE=${BW_WDIO_CACHE:-$tmp}
+run_tmp=$(mktemp -d "$tmp/bw.XXXXXX")
+[ $((${#run_tmp} + 46)) -le 107 ] || {
+  printf 'browser-auth: TMPDIR %s is too long: the Chrome socket path under it would be %s bytes, over the 107 a Unix socket allows; use a TMPDIR of at most %s bytes\n' \
+    "$tmp" $((${#run_tmp} + 46)) $((61 - ${#run_tmp} + ${#tmp})) >&2
+  rmdir "$run_tmp"
+  exit 1
+}
 TMPDIR=$run_tmp BW_WEB_CANARY=$canary npx wdio run e2e/auth.conf.ts > e2e/out/console.log 2>&1 || rc=$?
 left=$(find "$run_tmp" -mindepth 1 -maxdepth 1 \( -name '.org.chromium.Chromium.*' -o -name 'bw-browser-profiles-*' \) 2>&1) || left="$left (cannot read $run_tmp)"
 rm -rf "$run_tmp" || left="$left (cannot remove $run_tmp)"
