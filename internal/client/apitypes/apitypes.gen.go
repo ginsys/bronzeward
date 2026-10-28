@@ -1505,6 +1505,9 @@ type PlanValidation struct {
 
 // PrincipalBody What one principal identifier names (persistence and API §9.2). A member that does not apply to its kind is null. Nothing else of the row is served, its revocation and responsible human included.
 type PrincipalBody struct {
+	// Display A human's display name, from the claim auth.oidc.displayClaim names in its own access token, kept current by its admitted mutating requests (API revision 5; persistence and API §10, choice §17.40); null for a service, an unknown identifier, or a human none of whose admitted mutating requests carried the claim. A client shows the subject when it is null. Many providers let users edit the claim, so it does not identify the human; the subject does.
+	Display *string `json:"display"`
+
 	// Id The identifier as given.
 	Id string `json:"id"`
 

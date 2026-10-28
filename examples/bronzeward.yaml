@@ -14,6 +14,9 @@ auth:
     issuer: http://127.0.0.1:5556
     audience: bronzeward
     groupsClaim: groups
+    # The claim a human's display name is read from; unset, name, else preferred_username
+    # (persistence-api.md §10).
+    # displayClaim: name
     maxTokenLifetime: 15m
     # Hosts reached over plain http on a network the deployment protects, by exact name; loopback
     # needs no entry. A Kubernetes deployment with TLS terminated at its ingress might list the

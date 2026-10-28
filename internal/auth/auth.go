@@ -72,6 +72,7 @@ type Principal struct {
 	ID      string // idn identifier; empty for a human with no row yet (§10: the first admitted mutating request creates it)
 	Issuer  string // human only
 	Subject string // human only
+	Display string // human only: the display claim of its token, empty when it has none (§10, choice §17.40)
 	TokenID string // service only
 	Epoch   string // service only: the epoch its token was issued in, rechecked under later reads (§10.2)
 	Roles   []Role
@@ -179,14 +180,14 @@ func (v *Verifier) human(ctx context.Context, raw string) (Principal, error) {
 	case c.ID == "":
 		return Principal{}, fmt.Errorf("%w: no jti", ErrUnauthenticated)
 	}
-	roles, err := v.roles(payload)
+	roles, all, err := v.roles(payload)
 	if err != nil {
 		return Principal{}, fmt.Errorf("%w: %v", ErrUnauthenticated, err)
 	}
 	if v.denied.Human(c.Issuer, c.Subject) {
 		return Principal{}, fmt.Errorf("%w: %s is in deniedSubjects", ErrIdentityRevoked, c.Subject)
 	}
-	p := Principal{Kind: Human, Issuer: c.Issuer, Subject: c.Subject, Roles: roles, Expiry: c.Expiry.Time()}
+	p := Principal{Kind: Human, Issuer: c.Issuer, Subject: c.Subject, Display: v.display(all), Roles: roles, Expiry: c.Expiry.Time()}
 	var revoked bool
 	err = v.db.QueryRowContext(ctx, `SELECT id, revoked FROM principal WHERE kind = 'human' AND iss = $1 AND sub = $2`,
 		c.Issuer, c.Subject).Scan(&p.ID, &revoked)
@@ -204,31 +205,48 @@ func (v *Verifier) human(ctx context.Context, raw string) (Principal, error) {
 // roles maps the groups claim to roles (§10.1). A missing or null claim grants none; one that is
 // not an array whose every element is a string is a defect. It decodes into []any, not
 // []string: encoding/json leaves a string untouched for a JSON null element, without error
-// (encoding/json/decode.go:94-97, Go 1.27).
-func (v *Verifier) roles(payload []byte) ([]Role, error) {
+// (encoding/json/decode.go:94-97, Go 1.27). It also returns the decoded claims.
+func (v *Verifier) roles(payload []byte) ([]Role, map[string]any, error) {
 	var all map[string]any
 	if err := json.Unmarshal(payload, &all); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	claim := all[v.oidc.GroupsClaim]
 	if claim == nil {
-		return nil, nil
+		return nil, all, nil
 	}
 	elems, ok := claim.([]any)
 	if !ok {
-		return nil, fmt.Errorf("claim %s is not an array", v.oidc.GroupsClaim)
+		return nil, nil, fmt.Errorf("claim %s is not an array", v.oidc.GroupsClaim)
 	}
 	has := map[Role]bool{}
 	for _, e := range elems {
 		g, ok := e.(string)
 		if !ok {
-			return nil, fmt.Errorf("claim %s holds a non-string element", v.oidc.GroupsClaim)
+			return nil, nil, fmt.Errorf("claim %s holds a non-string element", v.oidc.GroupsClaim)
 		}
 		for _, r := range v.groups[g] {
 			has[r] = true
 		}
 	}
-	return ordered(has), nil
+	return ordered(has), all, nil
+}
+
+// display is a human's display name from its token (§10, choice §17.40): the claim
+// auth.oidc.displayClaim names, or, unset, name, else preferred_username. A claim that is
+// missing, empty or not a string gives none, which leaves the stored name as it is; a display
+// name refuses no request.
+func (v *Verifier) display(claims map[string]any) string {
+	names := []string{"name", "preferred_username"}
+	if v.oidc.DisplayClaim != "" {
+		names = []string{v.oidc.DisplayClaim}
+	}
+	for _, n := range names {
+		if s, ok := claims[n].(string); ok && s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 // idToken reports whether a token carries nonce or at_hash, present even as null: claims only an
