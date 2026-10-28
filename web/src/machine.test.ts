@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ADOPTED, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, latestUnread, nextTimeline, type Observation, Observations, POLL_MS, polled, readLater, readOlder, sentences, type Timeline, TimelineRows, UNREAD } from "./machine.tsx";
+import { ADOPTED, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, latestUnread, nextTimeline, type Observation, Observations, POLL_MS, polled, queued, readLater, readOlder, sentences, type Timeline, TimelineRows, UNREAD } from "./machine.tsx";
 import { type Reads, ReadsProvider, RESTARTED } from "./list.tsx";
 import type { Machine } from "./machines.tsx";
 import type { ReadResult } from "./request.ts";
@@ -296,6 +296,35 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
       polled(() => Promise.resolve((once++, false)), page);
       await vi.advanceTimersByTimeAsync(4 * POLL_MS);
       expect(once).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("#429: a poll queued behind a slow Load older sends nothing while the page is hidden, and polls again once it is visible", async () => {
+    vi.useFakeTimers();
+    try {
+      const doc = { visibilityState: "visible" as DocumentVisibilityState };
+      const c = client([page([1], "o1", "t1"), page([2])]);
+      const settled: string[] = [];
+      const step = queued<number>(on, on, (res) => settled.push(res.kind));
+      const stop = polled((visible) => step((from) => readLater<number>(c, "/t", from, on), visible), doc);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(c.paths).toEqual(["/t?order=newest"]);
+      let answer = () => {};
+      const slow = new Promise<void>((r) => (answer = r));
+      void step(async (from) => (await slow, { kind: "ok", data: from }), on);
+      // The poll falls due while the page is visible and waits behind Load older; the page hides first.
+      await vi.advanceTimersByTimeAsync(POLL_MS);
+      doc.visibilityState = "hidden";
+      answer();
+      await vi.advanceTimersByTimeAsync(4 * POLL_MS);
+      expect(c.paths).toEqual(["/t?order=newest"]);
+      expect(settled).toEqual(["ok", "ok"]);
+      doc.visibilityState = "visible";
+      await vi.advanceTimersByTimeAsync(POLL_MS);
+      expect(c.paths).toEqual(["/t?order=newest", "/t?cursor=t1"]);
+      stop();
     } finally {
       vi.useRealTimers();
     }
