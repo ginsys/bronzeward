@@ -59,6 +59,9 @@ describe("cursor pages", () => {
   });
 });
 
+// The clock the observed column is rendered at, pinned.
+const NOW = Date.parse("2026-10-28T09:46:30Z");
+
 // Synthetic machine reads, as the generated types describe them.
 const machine = (over: Partial<Machine>): Machine => ({
   id: "mch_a", cluster: "cl_a", hardware: { smbiosUuid: null, talosNodeId: "node-a", serial: null }, platform: "metal", talosEndpoint: "10.5.0.2:50000",
@@ -77,14 +80,22 @@ describe("W2 badges and the observed column", () => {
   test("openDrift is the only authority for drift: an observation equal to Desired with drift open is no match of Applied", () => {
     const m = machine({ desired: "rel_next", observed: { observation: "obs_b", at: "2026-10-26T09:46:00Z", release: "rel_next" }, openDrift: { revision: 2, observation: "obs_b", lastObservation: "obs_b", lateLanding: null } });
     expect(badges(m)).toEqual(["Drifted"]);
-    expect(observed(m)).toMatch(/^= desired, read \d\d:\d\d$/);
+    expect(observed(m, NOW)).toBe("= desired, 2 d ago");
     // A read that matched neither, without drift open, is not drift and not a match.
     expect(badges(machine({ observed: { observation: "obs_c", at: "2026-10-26T09:46:00Z", release: null } }))).toEqual([]);
   });
 
   test("observed names what the read matched, or none", () => {
-    expect(observed(machine({}))).toMatch(/^= applied, read \d\d:\d\d$/);
-    expect(observed(machine({ observed: { observation: "obs_c", at: "2026-10-26T09:46:00Z", release: null } }))).toMatch(/^no match, read/);
-    expect(observed(machine({ observed: null }))).toBe("none");
+    expect(observed(machine({}), NOW)).toBe("= applied, 2 d ago");
+    expect(observed(machine({ observed: { observation: "obs_c", at: "2026-10-26T09:46:00Z", release: null } }), NOW)).toBe("no match, 2 d ago");
+    expect(observed(machine({ observed: null }), NOW)).toBe("none");
+  });
+
+  test("observed shows the reading's age, so readings at the same time on different days differ", () => {
+    const read = (at: string) => observed(machine({ observed: { observation: "obs_d", at, release: "rel_new" } }), NOW);
+    expect(read("2026-10-28T09:46:00Z")).toBe("= applied, just now");
+    expect(read("2026-10-28T09:44:00Z")).toBe("= applied, 2 min ago");
+    expect(read("2026-10-28T06:40:00Z")).toBe("= applied, 3 h ago");
+    expect(read("2026-10-21T09:46:00Z")).toBe("= applied, 7 d ago");
   });
 });
