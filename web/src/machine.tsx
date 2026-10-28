@@ -3,7 +3,7 @@
 // stream; it is polled with its cursor no more often than every 5 s while the page is visible
 // (client contracts §8.6 item 6).
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { components } from "./api/v1";
 import { type Dropped, type Load, type Page, Ref, type Reads, settling, short, useHeld, useItem, useList, usePending, useReads } from "./list.tsx";
 import { Head, type Machine, node, release } from "./machines.tsx";
@@ -72,35 +72,57 @@ export function sentences(m: Machine, obs: Observation[]): string[] {
   return out;
 }
 
-// A list read to its end, and the page it ended on: the last page has no next, so the next poll
-// reads that page again with the cursor that read it and replaces its items from start.
-export interface Tail<T> { items: T[]; start: number; cursor: string | undefined }
+// The timeline as shown, newest first: `older` reads the page before the oldest shown (order=newest),
+// `tail` is where the poll reads on from (oldest order), and `read` is false until the newest page
+// answered.
+export interface Timeline<T> { items: T[]; older: string | undefined; tail: string | undefined; read: boolean }
+type TimelinePage<T> = Page<T> & { tail?: string };
 
-// Reads on while `going` holds, as readPages does: a read a newer one superseded sends no further
-// request. A refused cursor (another epoch) reads the timeline again from its start, once; a failure
-// after that is dropped, with what was read before it.
-export async function readTail<T>(client: Reads["client"], path: string, from: Tail<T>, going: () => boolean = () => true): Promise<ReadResult<Tail<T>> | Dropped> {
-  let { items, start, cursor } = from;
-  let restarted = false;
+export const UNREAD: Timeline<never> = { items: [], older: undefined, tail: undefined, read: false };
+
+// The newest page, which the first read and the read after a refused cursor take.
+async function readNewest<T>(client: Reads["client"], path: string): Promise<ReadResult<Timeline<T>>> {
+  const res = await client.read<TimelinePage<T>>(`${path}?order=newest`);
+  if (res.kind === "restart") return { kind: "refused", status: 400, problem: res.problem };
+  return res.kind === "ok" ? { kind: "ok", data: { items: res.data.items, older: res.data.next, tail: res.data.tail, read: true } } : res;
+}
+
+// A refused cursor (another epoch) reads the newest page again, once; a failure after that is
+// dropped, with what was shown before it.
+async function restart<T>(client: Reads["client"], path: string): Promise<ReadResult<Timeline<T>> | Dropped> {
+  const res = await readNewest<T>(client, path);
+  return res.kind === "ok" || res.kind === "discarded" ? res : { kind: "dropped", failed: res };
+}
+
+// The poll: the newest page first, then on from `tail` in oldest order, following next while
+// `going` holds, as readPages does, and keeping the tail of the last page. Later entries go first.
+export async function readLater<T>(client: Reads["client"], path: string, from: Timeline<T>, going: () => boolean = () => true): Promise<ReadResult<Timeline<T>> | Dropped> {
+  if (!from.read) return readNewest(client, path);
+  let cursor = from.tail;
+  let later: T[] = [];
   for (;;) {
-    const res = await client.read<Page<T>>(cursor === undefined ? path : `${path}?${new URLSearchParams({ cursor })}`);
-    if (res.kind === "restart" && !restarted && cursor !== undefined) {
-      [items, start, cursor, restarted] = [[], 0, undefined, true];
-    } else if (res.kind === "ok") {
-      items = [...items.slice(0, start), ...res.data.items];
-      if (res.data.next === undefined) return { kind: "ok", data: { items, start, cursor } };
-      [start, cursor] = [items.length, res.data.next];
-    } else {
-      const failed = res.kind === "restart" ? { kind: "refused" as const, status: 400, problem: res.problem } : res;
-      return restarted && failed.kind !== "discarded" ? { kind: "dropped", failed } : failed;
-    }
+    const res = await client.read<TimelinePage<T>>(cursor === undefined ? path : `${path}?${new URLSearchParams({ cursor })}`);
+    if (res.kind === "restart" && cursor !== undefined) return restart(client, path);
+    if (res.kind === "restart") return { kind: "refused", status: 400, problem: res.problem };
+    if (res.kind !== "ok") return res;
+    later = [...later, ...res.data.items];
+    if (res.data.next === undefined) return { kind: "ok", data: { ...from, items: [...later.reverse(), ...from.items], tail: res.data.tail ?? from.tail } };
+    cursor = res.data.next;
     if (!going()) return { kind: "discarded" };
   }
 }
 
-const EMPTY: Tail<never> = { items: [], start: 0, cursor: undefined };
-// The tail the next poll reads on from: the answer's, none after a drop, else the one it had.
-export const nextTail = <T,>(tail: Tail<T>, res: ReadResult<Tail<T>> | Dropped): Tail<T> => (res.kind === "ok" ? res.data : res.kind === "dropped" ? EMPTY : tail);
+// "Load older": the page before the oldest shown, appended; none left once its answer has no next.
+export async function readOlder<T>(client: Reads["client"], path: string, from: Timeline<T>): Promise<ReadResult<Timeline<T>> | Dropped> {
+  if (from.older === undefined) return { kind: "ok", data: from };
+  const res = await client.read<TimelinePage<T>>(`${path}?${new URLSearchParams({ order: "newest", cursor: from.older })}`);
+  if (res.kind === "restart") return restart(client, path);
+  return res.kind === "ok" ? { kind: "ok", data: { ...from, items: [...from.items, ...res.data.items], older: res.data.next } } : res;
+}
+
+// What the next read starts from: the answer's timeline, the newest page again after a drop, else
+// the one it had.
+export const nextTimeline = <T,>(tl: Timeline<T>, res: ReadResult<Timeline<T>> | Dropped): Timeline<T> => (res.kind === "ok" ? res.data : res.kind === "dropped" ? UNREAD : tl);
 
 export const POLL_MS = 5000;
 
@@ -120,37 +142,52 @@ export function polled(read: () => Promise<boolean>, page: Pick<Document, "visib
   };
 }
 
-// The timeline, read to its end and then polled while the page is visible, showing loading when the
-// path changes and keeping what it shows when the page reads again. A transport failure keeps
-// polling, so the shell's offline banner clears once a poll answers again. A failure after a refused
-// cursor drops the timeline and that cursor. A superseded poll reads no further page and settles as
-// not live, so the shell still takes its refusal of the credentials.
-function useTimeline(path: string): Load<Tail<Entry>> | Dropped {
+// The timeline, its newest page first and then polled while the page is visible, showing loading
+// when the path changes and keeping what it shows when the page reads again: a new view reads the
+// newest page again, as a list reads its first. A transport failure keeps polling, so the shell's
+// offline banner clears once a poll answers again. A failure after a refused cursor drops the
+// timeline and that cursor. A superseded poll reads no further page and settles as not live, so the
+// shell still takes its refusal of the credentials. The poll and "Load older" read one at a time,
+// each on from what the one before left; `older` is undefined at the timeline's start.
+function useTimeline(path: string): [Load<Timeline<Entry>> | Dropped, (() => void) | undefined, boolean] {
   const { client, settle, undropped, again, view } = useReads();
-  const [tl, put, held] = useHeld<Tail<Entry>, Dropped>();
+  const [tl, put, held] = useHeld<Timeline<Entry>, Dropped>();
   const key = useRef<string | undefined>(undefined);
+  const older = useRef<(() => void) | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
   useEffect(() => {
-    let tail: Tail<Entry> = EMPTY;
+    let shown: Timeline<Entry> = UNREAD;
     let live = true;
+    let queue = Promise.resolve(true);
     const ok = undropped();
     if (key.current !== path) {
       key.current = path;
       put({ kind: "loading" });
     }
-    const stop = polled(async () => {
-      const res = await readTail<Entry>(client, path, tail, () => live && ok());
-      const [r, set, shows] = settling(res, put, held);
-      settle(r, set, () => live && ok(), shows);
-      if (!live || !ok()) return false;
-      tail = nextTail(tail, res);
-      return r.kind === "ok" || r.kind === "transport";
-    });
+    const step = (read: (from: Timeline<Entry>) => Promise<ReadResult<Timeline<Entry>> | Dropped>) =>
+      (queue = queue.then(async () => {
+        if (!live) return false;
+        const res = await read(shown);
+        const [r, set, shows] = settling(res, put, held);
+        settle(r, set, () => live && ok(), shows);
+        if (!live || !ok()) return false;
+        shown = nextTimeline(shown, res);
+        return r.kind === "ok" || r.kind === "transport";
+      }));
+    older.current = () => {
+      setBusy(true);
+      void step((from) => readOlder<Entry>(client, path, from)).then(() => live && setBusy(false));
+    };
+    const stop = polled(() => step((from) => readLater<Entry>(client, path, from, () => live && ok())));
     return () => {
       live = false;
+      older.current = undefined;
+      setBusy(false);
       stop();
     };
   }, [client, settle, undropped, put, held, view, path, again]);
-  return tl;
+  const more = useCallback(() => older.current?.(), []);
+  return [tl, tl.kind === "ok" && tl.data.older !== undefined ? more : undefined, busy];
 }
 
 // The observed read's attribution, shown apart from the sentences: under an open drift they speak of
@@ -170,7 +207,7 @@ export function MachineItem({ id }: { id: string }) {
   const path = `/machines/${encodeURIComponent(id)}`;
   const m = useItem<Machine>(path);
   const [obs] = useList<Observation>(`${path}/observations`, "", true);
-  const tl = useTimeline(`${path}/timeline`);
+  const [tl, older, busy] = useTimeline(`${path}/timeline`);
   const [pm, po, timeline] = [usePending(m, "the machine"), usePending(obs, "the observations"), usePending(tl, "the timeline")];
   if (m.kind !== "ok") return <><h2>Machine {short(id)}</h2>{pm}</>;
   if (obs.kind !== "ok") return <><h2>Machine {short(id)}</h2>{po}</>;
@@ -206,18 +243,21 @@ export function MachineItem({ id }: { id: string }) {
       )}
       <h3>Timeline (newest first)</h3>
       {tl.kind !== "ok" ? timeline : tl.data.items.length === 0 ? <p>No timeline entry recorded.</p> : (
-        <table data-testid="timeline">
-          <Head cols={["At", "Kind", "Details"]} />
-          <tbody>
-            {[...tl.data.items].reverse().map((e) => (
-              <tr key={`${e.epoch}:${e.revision}`}>
-                <td>{at(e.at)}</td>
-                <td>{e.kind}</td>
-                <td>{details(e)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <>
+          <table data-testid="timeline">
+            <Head cols={["At", "Kind", "Details"]} />
+            <tbody>
+              {tl.data.items.map((e) => (
+                <tr key={`${e.epoch}:${e.revision}`}>
+                  <td>{at(e.at)}</td>
+                  <td>{e.kind}</td>
+                  <td>{details(e)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {older !== undefined && <p><button type="button" onClick={older} disabled={busy}>Load older</button></p>}
+        </>
       )}
     </>
   );

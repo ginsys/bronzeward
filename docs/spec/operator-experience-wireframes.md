@@ -135,12 +135,9 @@ with `Applied`; an observation equal to `Desired` or an older release is still d
 "No release selected", "No configuration read recorded") and shows no time. The status
 sentences are those of [§2.4](operator-experience.md#24-desired-applied-and-observed).
 
-The web client has no "Load older" yet: it reads the whole timeline in the default oldest-first
-order and shows it newest first, then polls by re-reading its last page with the cursor that read
-it. The API has served `order=newest` and a `tail` cursor since API revision 3
-(`internal/api/operations.go:400-406`), which [client contracts §8.6](client-contracts.md#86-event-resumption)
-item 6 reads with; moving W3 to them, with "Load older", is the web part of
-[#375](https://github.com/ginsys/bronzeward/issues/375).
+The timeline opens on its newest page and polls on from its tail, as
+[client contracts §8.6](client-contracts.md#86-event-resumption) item 6 has it. "Load older"
+reads the page before the oldest entry shown and is gone once the machine's first entry is shown.
 
 ## W4. Draft editor
 
