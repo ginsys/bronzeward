@@ -145,6 +145,14 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
     expect(await readLater(client([page([1], undefined, "t1")]), "/t", UNREAD)).toEqual({ kind: "ok", data: shown([1], undefined, "t1") });
   });
 
+  test("review C1: Load older before a new view's newest page answered reads nothing and replaces nothing shown", async () => {
+    const c = client([page([1], undefined, "t1")]);
+    const res = await readOlder(c, "/t", UNREAD, on);
+    expect(res).toEqual({ kind: "discarded" });
+    expect(c.paths).toEqual([]);
+    expect(nextTimeline(UNREAD, res)).toBe(UNREAD);
+  });
+
   test("the poll reads on from tail in oldest order, follows next, keeps the last page's tail and shows later entries first", async () => {
     const c = client([page([4, 5], "c5", "t5"), page([6], undefined, "t6"), page([], undefined, "t6")]);
     const first = await readLater(c, "/t", shown([3, 2], "o2", "t3"));
