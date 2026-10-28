@@ -76,6 +76,9 @@ func TestRevokeListedServiceIdentity(t *testing.T) {
 		"identifier and name": {[]config.DeniedSubject{{Identity: "", Name: "ci"}}, true},
 		"another name":        {[]config.DeniedSubject{{Identity: "", Name: "other"}}, false},
 		"name of another":     {[]config.DeniedSubject{{Identity: id.New(id.Principal), Name: "ci"}}, false},
+		// Another entry for the same identifier, either side, does not hide the one naming both.
+		"after another name for it":  {[]config.DeniedSubject{{Identity: "", Name: "ci"}, {Identity: "", Name: "other"}}, true},
+		"before another name for it": {[]config.DeniedSubject{{Identity: "", Name: "other"}, {Identity: "", Name: "ci"}}, true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := newEnv(t, options{})
