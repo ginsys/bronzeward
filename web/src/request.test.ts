@@ -361,6 +361,20 @@ describe("stale-response discard", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  test("a read whose epoch is ambiguous when it arrives after the reads were dropped is not sent again", async () => {
+    const { fetchImpl: slow, release } = delayed(ok({ stale: true }, "e1"));
+    const answers: (Response | typeof fetch)[] = [ok({}), slow, ok({}, "e2"), ok({}, "e2")];
+    const c = new Client({ fetch: scripted(answers) });
+    c.setView(base);
+    await c.read("/server"); // e1 recorded
+    const pending = c.read("/identity"); // in flight under e1
+    expect(await c.read("/recovery")).toEqual({ kind: "discarded" }); // reveals e2
+    c.dropReads();
+    release(); // e1 after e2 was recorded: the repeat that would learn the epoch is not sent
+    expect(await pending).toEqual({ kind: "discarded" });
+    expect(answers).toHaveLength(1);
+  });
+
   test("a revocation whose answer arrives after the reads were dropped still clears the sign-in's credential", async () => {
     const { fetchImpl, release } = slowBody(403, "application/problem+json", {
       type: "urn:bronzeward:problem:identity-revoked", title: "revoked", status: 403,

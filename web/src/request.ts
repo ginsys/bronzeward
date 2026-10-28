@@ -67,6 +67,7 @@ export class Client {
   private view: View = { principal: "", route: "", query: "" };
   private epoch: string | undefined;
   private generation = 0;
+  private drops = 0;
   private epochRecords = 0;
   private recovery = false;
   private readonly deprecated = new Set<string>();
@@ -85,13 +86,16 @@ export class Client {
   }
 
   // Every read in flight is stale, under the same view: an answer still to come is discarded (a
-  // revocation of the sign-in still current excepted, as for any stale read) and no retry is sent.
+  // revocation of the sign-in still current excepted, as for any stale read) and nothing is sent
+  // again, not even to learn an ambiguous epoch.
   dropReads(): void {
     this.generation++;
+    this.drops++;
   }
 
   async read<T>(path: string): Promise<ReadResult<T>> {
     const sent = this.generation;
+    const drops = this.drops;
     const principal = this.view.principal;
     let renewed = false;
     for (let attempt = 0; ; attempt++) {
@@ -107,7 +111,7 @@ export class Client {
       // so the read is sent again to learn the current one. Any other is read, even on a stale read.
       const epoch = res.headers.get("Bronzeward-Epoch");
       if (epoch !== null && epoch !== this.epoch && records !== this.epochRecords) {
-        if (attempt + 1 >= MAX_TRIES) return { kind: "discarded" };
+        if (attempt + 1 >= MAX_TRIES || drops !== this.drops) return { kind: "discarded" };
         continue;
       }
       // A 403 is read before a stale answer is dropped: identity-revoked of the sign-in still current
