@@ -37,6 +37,8 @@ export interface Injector {
   // Every API path asked, in order, and each server answer passed on: path, query and status.
   seen: string[];
   answered: string[];
+  // The path of each answer the `held` fault holds now, so a case acts only once one is held.
+  holding: string[];
   // Lets every held answer go on; resolves once each has been sent.
   release: () => Promise<void>;
 }
@@ -53,8 +55,9 @@ export function startInjector(upstream: string, port: number): Promise<Injector>
   // Each held answer: its release, and its having been sent.
   const waiting: { go: () => void; sent: Promise<void> }[] = [];
   const inj: Injector = {
-    faults: {}, seen: [], answered: [], server: undefined as never,
+    faults: {}, seen: [], answered: [], holding: [], server: undefined as never,
     release: async () => {
+      inj.holding = [];
       const now = waiting.splice(0);
       for (const w of now) w.go();
       await Promise.all(now.map((w) => w.sent));
@@ -68,6 +71,7 @@ export function startInjector(upstream: string, port: number): Promise<Injector>
     void (async () => {
       if (f.hold?.path === route && (f.hold.query ?? search) === search) await new Promise((r) => setTimeout(r, f.hold!.ms));
       if ([f.held ?? []].flat().includes(route)) {
+        inj.holding.push(route);
         await new Promise<void>((go) => waiting.push({ go, sent: new Promise((done) => res.once("close", () => done())) }));
       }
       if (f.redirect === route) return void res.writeHead(302, { Location: "http://127.0.0.1:9/" }).end();

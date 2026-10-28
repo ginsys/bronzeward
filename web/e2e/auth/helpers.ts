@@ -55,6 +55,8 @@ export const seen = async (): Promise<string[]> => (await fetch(`${CONTROL}/seen
 // The server's answers the injector passed on, as "<route><query> <status>".
 export const answers = async (): Promise<string[]> => (await fetch(`${CONTROL}/answered`)).json() as never;
 export const faults = async (f: Faults) => expect((await fetch(`${CONTROL}/faults`, { method: "POST", body: JSON.stringify(f) })).ok).toBe(true);
+// The paths whose answers the `held` fault holds now.
+export const holding = async (): Promise<string[]> => (await fetch(`${CONTROL}/held`)).json() as never;
 // Lets the answers the `held` fault holds go; returns once the injector has sent each.
 export const release = async () => expect((await fetch(`${CONTROL}/release`, { method: "POST" })).ok).toBe(true);
 // Whether the page has received every answer to `path` it asked for, by the browser's resource
