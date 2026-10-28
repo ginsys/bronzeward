@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	gokeyring "github.com/zalando/go-keyring"
 	"go.yaml.in/yaml/v3"
 
 	"github.com/ginsys/bronzeward/internal/client"
@@ -88,7 +89,17 @@ func (f *fixture) browser(line string) {
 // unlocked with a synthetic password, and returns the environment that names it. Nothing reaches
 // the operator's own session bus or keyring. Skipped where either daemon is not installed.
 func keyring(t *testing.T) []string {
-	for _, b := range []string{"dbus-daemon", "dbus-send", "gnome-keyring-daemon"} {
+	if _, err := exec.LookPath("gnome-keyring-daemon"); err != nil {
+		t.Skip("gnome-keyring-daemon is not installed")
+	}
+	return sessionBus(t, true)
+}
+
+// sessionBus starts a private session bus that starts no program by itself (D-Bus activation),
+// with gnome-keyring's Secret Service on it when secrets is set, and returns the environment that
+// names it. Skipped where dbus-daemon or dbus-send is not installed.
+func sessionBus(t *testing.T, secrets bool) []string {
+	for _, b := range []string{"dbus-daemon", "dbus-send"} {
 		if _, err := exec.LookPath(b); err != nil {
 			t.Skipf("%s is not installed", b)
 		}
@@ -109,6 +120,16 @@ func keyring(t *testing.T) []string {
 	addr := "unix:path=" + filepath.Join(d, "bus")
 	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "XDG_DATA_HOME=" + filepath.Join(home, "data"),
 		"XDG_RUNTIME_DIR=" + run, "DBUS_SESSION_BUS_ADDRESS=" + addr}
+	// No servicedir: the bus would start the host's own Secret Service for a caller.
+	conf := filepath.Join(d, "bus.conf")
+	if err := os.WriteFile(conf, []byte(`<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig><type>session</type><listen>`+addr+`</listen><auth>EXTERNAL</auth>
+<policy context="default"><allow send_destination="*" eavesdrop="true"/><allow eavesdrop="true"/><allow own="*"/></policy>
+</busconfig>
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	daemon := func(stdin string, name string, args ...string) {
 		var log bytes.Buffer
 		cmd := exec.Command(name, args...)
@@ -124,7 +145,7 @@ func keyring(t *testing.T) []string {
 			}
 		})
 	}
-	daemon("", "dbus-daemon", "--session", "--nofork", "--address="+addr)
+	daemon("", "dbus-daemon", "--nofork", "--config-file="+conf)
 	owned := func() bool {
 		cmd := exec.Command("dbus-send", "--session", "--print-reply", "--dest=org.freedesktop.DBus", "/org/freedesktop/DBus",
 			"org.freedesktop.DBus.NameHasOwner", "string:org.freedesktop.secrets")
@@ -140,6 +161,9 @@ func keyring(t *testing.T) []string {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+	if !secrets {
+		return []string{"DBUS_SESSION_BUS_ADDRESS=" + addr}
+	}
 	daemon("BWSYNTH-keyring", "gnome-keyring-daemon", "--unlock", "--components=secrets", "--foreground")
 	for i := 0; !owned(); i++ {
 		if i == 50 {
@@ -148,6 +172,25 @@ func keyring(t *testing.T) []string {
 		time.Sleep(100 * time.Millisecond)
 	}
 	return []string{"DBUS_SESSION_BUS_ADDRESS=" + addr}
+}
+
+// entry reads, or with v writes, the credential-store entry bronzewardctl keeps for the context
+// name in the Secret Service env names, from this test process.
+func entry(t *testing.T, env []string, name string, v ...string) (string, bool) {
+	t.Helper()
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", strings.TrimPrefix(env[0], "DBUS_SESSION_BUS_ADDRESS="))
+	if len(v) > 0 {
+		if err := gokeyring.Set("bronzewardctl", name, v[0]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s, err := gokeyring.Get("bronzewardctl", name)
+	if errors.Is(err, gokeyring.ErrNotFound) {
+		return "", false
+	} else if err != nil {
+		t.Fatal(err)
+	}
+	return s, true
 }
 
 // TestLogin checks bronzewardctl login and the stores it keeps a sign-in in (§9.2, decisions
@@ -170,7 +213,8 @@ func TestLogin(t *testing.T) {
 
 	t.Run("loopback", func(t *testing.T) {
 		f.idp.login(nil, "")
-		f.want(login(nil, "file"), 0, "Sign in to file", "Signed in to file", "as h-viewer at "+f.iss.URL, "kept in the token file "+file)
+		f.want(login(nil, "file"), 0, "Sign in to file", "run bronzewardctl login --device instead", "Signed in to file",
+			"as h-viewer at "+f.iss.URL, "kept in the token file "+file)
 		q := f.idp.asked()
 		redirect, _ := url.Parse(q.Get("redirect_uri"))
 		if q.Get("response_type") != "code" || q.Get("client_id") != "BWSYNTH-cli" || q.Get("code_challenge_method") != "S256" ||
@@ -206,11 +250,38 @@ func TestLogin(t *testing.T) {
 				t.Errorf("the file now holds %q after %d exchanges, want it unchanged with none", b, f.idp.exchange.Load()-n)
 			}
 		}
+		// This client's own refresh-only document is signed in over.
+		if err := os.WriteFile(file, []byte(`{"refreshToken":"BWSYNTH-rt-old"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		f.idp.login(nil, "")
+		f.want(login(nil, "file"), 0, "Signed in to file")
+		if s := f.stored(file); s.RefreshToken != "BWSYNTH-rt-1" {
+			t.Errorf("the file holds the new refresh token: %v", s.RefreshToken == "BWSYNTH-rt-1")
+		}
+		// A symbolic link at the token path is refused before the sign-in and left as it is.
+		target := filepath.Join(f.home, "elsewhere.json")
+		os.Remove(file)
+		if err := os.Symlink(target, file); err != nil {
+			t.Fatal(err)
+		}
+		f.idp.login(nil, "")
+		f.want(login(nil, "file"), 1, "token file "+file+" is a symbolic link")
+		if l, err := os.Readlink(file); err != nil || l != target || f.idp.exchange.Load() != 0 {
+			t.Errorf("the link now points at %q (%v) after %d exchanges, want it unchanged with none", l, err, f.idp.exchange.Load())
+		}
+		if _, err := os.Stat(target); !os.IsNotExist(err) {
+			t.Errorf("login wrote through the link: %v", err)
+		}
+		os.Remove(file)
 		// A sign-in that cannot be kept, here because another program's file replaced the token file
 		// during the sign-in, has its refresh token revoked, and says so when the provider refuses.
-		replaced := func() result {
+		replaced := func(setup func()) result {
 			os.Remove(file)
 			f.idp.login(nil, "")
+			if setup != nil {
+				setup()
+			}
 			unlock := hold(t, file+".lock")
 			var r result
 			var wg sync.WaitGroup
@@ -226,14 +297,22 @@ func TestLogin(t *testing.T) {
 			}
 			return r
 		}
-		f.want(replaced(), 1, "holds neither bronzewardctl's tokens", "its refresh token is revoked at the identity provider")
+		f.want(replaced(nil), 1, "holds neither bronzewardctl's tokens", "its refresh token is revoked at the identity provider")
 		if r := f.idp.revocations(); len(r) != 1 || r[0].Get("token") != "BWSYNTH-rt-1" {
 			t.Errorf("revoked %v, want the new refresh token", r)
 		}
 		f.idp.revoking(func() (int, any) { return http.StatusBadRequest, map[string]string{"error": "invalid_request"} })
-		f.want(replaced(), 1, "holds neither bronzewardctl's tokens", "its refresh token is not revoked, so it stays usable",
+		f.want(replaced(nil), 1, "holds neither bronzewardctl's tokens", "its refresh token is not revoked, so it stays usable",
 			"refused the revocation")
+		f.idp.revoking(nil)
+		f.want(replaced(nil), 1, "holds neither bronzewardctl's tokens",
+			"its refresh token is not revoked: the identity provider offers no revocation endpoint")
 		f.idp.revoking(func() (int, any) { return http.StatusOK, map[string]any{} })
+		f.want(replaced(func() { f.idp.noRefresh.Store(true) }), 1, "holds neither bronzewardctl's tokens",
+			"the identity provider issued no refresh token")
+		if r := f.idp.revocations(); len(r) != 0 {
+			t.Errorf("revoked %v with no refresh token issued", r)
+		}
 		os.Remove(file)
 	})
 
@@ -288,11 +367,54 @@ func TestLogin(t *testing.T) {
 		}
 	})
 
+	// A callback carrying another state, which any local process that finds the port can send, is
+	// answered and ignored; the sign-in goes on.
 	t.Run("another state", func(t *testing.T) {
-		f.idp.login(func(v url.Values) url.Values { v.Set("state", "BWSYNTH-state"); return v }, "")
-		f.want(login(nil, "file"), 1, "carries another state", "nothing was exchanged")
-		if n := f.idp.exchange.Load(); n != 0 {
-			t.Errorf("%d exchanges, want none", n)
+		f.idp.login(nil, "")
+		os.Remove(file)
+		bogus := func(line string) {
+			if s := strings.TrimSpace(line); strings.HasPrefix(s, f.iss.URL+"/authorize?") {
+				u, _ := url.Parse(s)
+				back := u.Query().Get("redirect_uri")
+				for _, q := range []string{"state=BWSYNTH-state&code=BWSYNTH-code", "state=BWSYNTH-state&error=access_denied", "code=BWSYNTH-code"} {
+					r, err := http.Get(back + "?" + q)
+					if err != nil {
+						t.Errorf("a callback with %s: %v", q, err)
+						continue
+					}
+					r.Body.Close()
+					if r.StatusCode != http.StatusBadRequest {
+						t.Errorf("a callback with %s: %s, want 400", q, r.Status)
+					}
+				}
+			}
+			f.browser(line)
+		}
+		f.want(f.interact(nil, bogus, "--context", "file", "login"), 0, "Signed in to file")
+		if n := f.idp.exchange.Load(); n != 1 {
+			t.Errorf("%d exchanges, want one", n)
+		}
+		os.Remove(file)
+	})
+
+	// A sign-in whose context is removed while it runs is not kept, and its refresh token is revoked.
+	t.Run("context removed", func(t *testing.T) {
+		gone := filepath.Join(f.home, "gone.json")
+		add(nil, "gone", "--oidc-token-file", gone)
+		f.idp.login(nil, "")
+		remove := func(line string) {
+			if strings.HasPrefix(strings.TrimSpace(line), f.iss.URL+"/authorize?") {
+				f.want(f.ctl(nil, "", "context", "remove", "gone"), 0, `Context "gone" removed.`)
+			}
+			f.browser(line)
+		}
+		f.want(f.interact(nil, remove, "--context", "gone", "login"), 1, `context "gone" was removed or changed during the sign-in`,
+			"its refresh token is revoked at the identity provider")
+		if _, err := os.Stat(gone); !os.IsNotExist(err) {
+			t.Errorf("the sign-in was kept for a removed context: %v", err)
+		}
+		if r := f.idp.revocations(); len(r) != 1 || r[0].Get("token") != "BWSYNTH-rt-1" {
+			t.Errorf("revoked %v, want the new refresh token", r)
 		}
 	})
 
@@ -451,6 +573,19 @@ func TestLogin(t *testing.T) {
 		f.idp.verification = ""
 		f.idp.mu.Unlock()
 		f.want(r, 1, "the identity provider's verification_uri", "must be https")
+		// A device authorization answer that is null, or names an interval that cannot be waited, is
+		// refused before anything is shown.
+		for _, answer := range []string{"null",
+			`{"device_code":"BWSYNTH-device","user_code":"BWSY-NTH1","verification_uri":"` + f.iss.URL + `/activate","expires_in":60,"interval":-1}`,
+			`{"device_code":"BWSYNTH-device","user_code":"BWSY-NTH1","verification_uri":"` + f.iss.URL + `/activate","expires_in":60,"interval":9223372036854775807}`,
+		} {
+			f.idp.mu.Lock()
+			f.idp.device = []byte(answer)
+			f.idp.mu.Unlock()
+			f.want(f.ctl(nil, "", "--context", "file", "login", "--device"), 1,
+				"device authorization at the identity provider "+f.iss.URL+": its answer could not be read")
+		}
+		f.idp.login(nil, "")
 	})
 
 	t.Run("logout revokes", func(t *testing.T) {
@@ -480,11 +615,28 @@ func TestLogin(t *testing.T) {
 			"so none is stored", unreached)
 		f.want(f.ctl(nil, "", "context", "remove", "memory"), 0, `Context "memory" removed.`,
 			"The system credential store is not reached, since no D-Bus session bus is named", "so a sign-in another session kept there is not removed.")
-		// A named store that cannot be reached fails the removal of its entry.
+		// A named store that cannot be reached refuses a sign-in before anything is issued, and fails
+		// the removal of its entry.
 		add(nil, "unreachable")
 		bus := []string{"DBUS_SESSION_BUS_ADDRESS=unix:path=" + filepath.Join(t.TempDir(), "missing")}
+		f.idp.login(nil, "")
+		f.want(login(bus, "unreachable"), 1, "the system credential store failed, so a sign-in could not be kept there")
+		if n := f.idp.exchange.Load(); n != 0 {
+			t.Errorf("%d exchanges, want none", n)
+		}
 		f.want(f.ctl(bus, "", "context", "remove", "unreachable"), 1, `Context "unreachable" removed.`,
 			`removing the stored sign-in of context "unreachable" from the system credential store`)
+	})
+
+	// A session bus on which no program offers the Secret Service, or would be started for it, is
+	// no store: the sign-in is kept in memory, as with no bus.
+	t.Run("no secret service", func(t *testing.T) {
+		bus := sessionBus(t, false)
+		add(nil, "nosecrets")
+		defer f.ctl(nil, "", "context", "remove", "nosecrets")
+		f.idp.login(nil, "")
+		f.want(login(bus, "nosecrets"), 0, "kept in this process's memory only",
+			"no program on the D-Bus session bus offers the Secret Service (org.freedesktop.secrets)")
 	})
 
 	// T3/T4: the system credential store, a private Secret Service here.
@@ -515,11 +667,28 @@ func TestLogin(t *testing.T) {
 		var wg sync.WaitGroup
 		wg.Go(func() { r = ctl("context", "remove", "store") })
 		waiting(t, lock, 1)
+		if _, ok := entry(t, env, "store"); !ok {
+			t.Error("the entry was removed before the renewal lock was taken")
+		}
 		unlock()
 		wg.Wait()
 		f.want(r, 0, `Context "store" removed.`)
+		if _, ok := entry(t, env, "store"); ok {
+			t.Error("the entry is still stored after context remove")
+		}
 		add(env, "store")
 		f.want(ctl("--context", "store", "whoami"), 1, "nothing is stored in the system credential store")
+		// An entry holding only a refresh token is removed by logout, and the token revoked.
+		f.idp.login(nil, "")
+		entry(t, env, "store", `{"server":"`+f.base+`","issuer":"`+f.iss.URL+`","refreshToken":"BWSYNTH-rt-9"}`)
+		f.want(ctl("--context", "store", "logout"), 0, "the sign-in is removed from the system credential store",
+			"The refresh token is revoked at the identity provider.")
+		if r := f.idp.revocations(); len(r) != 1 || r[0].Get("token") != "BWSYNTH-rt-9" {
+			t.Errorf("revoked %v, want the stored refresh token", r)
+		}
+		if _, ok := entry(t, env, "store"); ok {
+			t.Error("the refresh-only entry is still stored after logout")
+		}
 		// An entry left under a context edited to automation is never read for it.
 		f.want(login(env, "store"), 0, "kept in the system credential store")
 		f.edit(func(c *client.Config) {

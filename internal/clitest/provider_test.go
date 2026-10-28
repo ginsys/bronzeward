@@ -31,13 +31,15 @@ import (
 // target holding a C1 control, "other" names another issuer, "keys" keys on plain http off
 // loopback, "keysdown" keys that answer 503 with a body of control characters, and "garbled" an
 // answer whose status line holds a refresh token.
-// verification, when set, is the device grant's verification_uri.
+// verification, when set, is the device grant's verification_uri, and device, when set, the
+// device authorization's whole answer instead.
 type provider struct {
 	iss *issuer.Issuer
 
 	mu           sync.Mutex
 	discovery    string
 	verification string
+	device       []byte
 	query        string
 	seen         string
 	endpoint     any
@@ -53,6 +55,7 @@ type provider struct {
 	calls        atomic.Int32                // refresh redemptions
 	approved     atomic.Bool                 // the operator approved the device request
 	exchange     atomic.Int32                // code exchanges
+	noRefresh    atomic.Bool                 // sign-ins are issued without a refresh token
 }
 
 type authorization struct{ challenge, nonce, redirect string }
@@ -70,7 +73,9 @@ func (p *provider) login(callback func(url.Values) url.Values, nonce string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.callback, p.nonce, p.codes, p.request, p.revoked, p.exchanged, p.idToken = callback, nonce, map[string]authorization{}, nil, nil, nil, nil
+	p.device = nil
 	p.approved.Store(false)
+	p.noRefresh.Store(false)
 	p.exchange.Store(0)
 }
 
@@ -181,8 +186,13 @@ func (p *provider) wrap(iss *issuer.Issuer) http.Handler {
 	})
 	mux.HandleFunc("POST /device", func(w http.ResponseWriter, r *http.Request) {
 		p.mu.Lock()
-		verify := p.verification
+		verify, device := p.verification, p.device
 		p.mu.Unlock()
+		if device != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(device)
+			return
+		}
 		if verify == "" {
 			verify = iss.URL + "/activate?client=cli"
 		}
@@ -293,6 +303,9 @@ func (p *provider) issue(w http.ResponseWriter, id string) {
 		return
 	}
 	body := map[string]any{"access_token": at, "token_type": "Bearer", "expires_in": 300, "refresh_token": "BWSYNTH-rt-1"}
+	if p.noRefresh.Load() {
+		delete(body, "refresh_token")
+	}
 	if id != "" {
 		body["id_token"] = id
 	}

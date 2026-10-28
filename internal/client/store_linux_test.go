@@ -352,3 +352,84 @@ func secretServiceLock(t *testing.T, lock bool) {
 		t.Fatalf("unlocking the collection: %v", err)
 	}
 }
+
+// TestClearStored checks context remove's removal of a credential-store entry (ginsys/bronzeward#389
+// J1, Y2, Y3) against a stand-in Secret Service.
+func TestClearStored(t *testing.T) {
+	bound, offered, get, getHeld, del := storeBound, secretServiceOffered, keyringGetCall, keyringGetHeldCall, keyringDeleteCall
+	t.Cleanup(func() {
+		storeBound, secretServiceOffered, keyringGetCall, keyringGetHeldCall, keyringDeleteCall = bound, offered, get, getHeld, del
+	})
+	secretServiceOffered = func() (bool, error) { return true, nil }
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", home)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path="+filepath.Join(home, "bus"))
+	x := Context{Name: "store", Server: "https://bw.example.invalid", Credential: "oidc",
+		OIDC: &OIDC{Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli"}}
+	var deleted atomic.Int32
+	keyringDeleteCall = func(string, string) error { deleted.Add(1); return nil }
+	stored := func(found bool) {
+		keyringGetCall = func(string, string) (string, error) {
+			if !found {
+				return "", keyring.ErrNotFound
+			}
+			return "{}", nil
+		}
+		keyringGetHeldCall = keyringGetCall
+	}
+	remove := func() error {
+		t.Helper()
+		deleted.Store(0)
+		note, err := ClearStored(&x, false)
+		if note != "" {
+			t.Errorf("a note with the store reached: %q", note)
+		}
+		return err
+	}
+
+	stored(true)
+	if err := remove(); err != nil || deleted.Load() != 1 {
+		t.Errorf("a stored entry: %v, %d deletions, want one", err, deleted.Load())
+	}
+	stored(false)
+	if err := remove(); err != nil || deleted.Load() != 0 {
+		t.Errorf("nothing stored: %v, %d deletions, want none", err, deleted.Load())
+	}
+
+	// J1: a context added again under the name owns the entry, whatever it holds.
+	stored(true)
+	if err := UpdateConfig(func(c *Config) error { c.Contexts = append(c.Contexts, x); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := remove(); err != nil || deleted.Load() != 0 {
+		t.Errorf("a context added again: %v, %d deletions, want none", err, deleted.Load())
+	}
+	if err := UpdateConfig(func(c *Config) error { c.Contexts = nil; return nil }); err != nil {
+		t.Fatal(err)
+	}
+
+	// Y2: a locked store fails the removal within the bound, and nothing is deleted.
+	storeBound = 50 * time.Millisecond
+	keyringGetCall = func(string, string) (string, error) { time.Sleep(time.Second); return "{}", nil }
+	start := time.Now()
+	err := remove()
+	if err == nil || !strings.Contains(err.Error(), `removing the stored sign-in of context "store" from the system credential store`) ||
+		time.Since(start) > 500*time.Millisecond || deleted.Load() != 0 {
+		t.Errorf("a locked store: %v after %v, %d deletions; want a refusal within the bound and none", err, time.Since(start), deleted.Load())
+	}
+	storeBound = bound
+
+	// Y3: a renewal lock that cannot be taken says which removal failed.
+	stored(true)
+	state := filepath.Join(home, "state-file")
+	if err := os.WriteFile(state, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_STATE_HOME", state)
+	if err := remove(); err == nil || !strings.Contains(err.Error(), `removing the stored sign-in of context "store" from the system credential store`) ||
+		deleted.Load() != 0 {
+		t.Errorf("no renewal lock: %v, %d deletions; want the removal named and none", err, deleted.Load())
+	}
+}

@@ -779,7 +779,10 @@ current token expires
 1. `bronzewardctl login` runs the authorization-code grant with PKCE `S256`, `state` and `nonce`,
    using a loopback redirect on `127.0.0.1` with a port the operating system chooses, and opens
    the system browser. If no browser can be opened it prints the URL for the operator to open on
-   the same host. The listener accepts one callback, checks `state`, and closes.
+   the same host, and names `login --device` for a host without a browser. The listener accepts
+   one callback carrying the sign-in's `state`, and closes; a callback carrying another `state`,
+   which any local process that finds the port can send, is answered with an error and ignored,
+   and the wait goes on.
 2. Headless use, where no browser runs on the host, uses the device-authorization grant only
    (decision D4 (a)): the CLI prints the user code and the verification URI, shows the URI's host
    prominently so that a lookalike prompt stands out, and polls the token endpoint. There is no
@@ -790,7 +793,14 @@ current token expires
 3. **Store.** The refresh token and the current access token are kept in the operating system's
    credential store (Secret Service, Keychain or Windows Credential Manager) under the context's
    name. Where no store is available (decision D2 (a) and (b)), the tokens are kept in memory for
-   that process only and each new process runs `login`. An explicit per-context opt-in keeps them
+   that process only and each new process runs `login`. On Linux no store is available when no
+   D-Bus session bus is named, or when no program on it owns the Secret Service name
+   (`org.freedesktop.secrets`) and none can be started for it; a store that answers and then
+   fails refuses `login` before the sign-in starts, so nothing is issued that cannot be kept. A
+   sign-in whose context was removed or changed while it ran is not kept, and its refresh token
+   is revoked. Removing a context removes its stored sign-in under the renewal lock, with a
+   bounded read first, and leaves an entry alone when a context of that name was added again
+   meanwhile. An explicit per-context opt-in keeps them
    in a file readable only by its owner instead, offered only when the provider issues rotating,
    client-bound refresh tokens to public clients ([§9.1](#91-identity-provider-requirements)
    item 3). CLI processes that share that file renew one at a time, holding a lock on it while
@@ -807,7 +817,8 @@ current token expires
    only in a context that has it may `BRONZEWARD_TOKEN_FILE` override its path. The CLI writes
    that file and clears it as its own stored credential ([§8.2](#82-errors)), and refuses to
    write or clear a file that holds an automation token (`bwt_`) or anything else that is not
-   its own document; `login` checks the file before the sign-in starts and again before writing.
+   its own document, a refresh-only one included; `login` checks the file before the sign-in
+   starts and again before writing, and refuses a symbolic link at its path.
 4. No token is printed, written to the configuration file, passed in argv or placed in an
    environment variable by the CLI. No command prints a token.
 5. `whoami` shows the issuer and subject from the token's claims, read without verification and

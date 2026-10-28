@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -24,6 +25,7 @@ import (
 // idp is a context's identity provider, read from its discovery document for one command.
 type idp struct {
 	ctx  context.Context
+	hc   *http.Client
 	p    *oidc.Provider
 	conf oauth2.Config
 }
@@ -31,7 +33,7 @@ type idp struct {
 // openIDP reads the discovery document (discover), within d. Every endpoint it uses must be https
 // or loopback (§6 item 1), and the client, being public, sends its ID in the form.
 func openIDP(x *Context, d time.Duration) (*idp, context.CancelFunc, error) {
-	ctx, cancel, _, p, err := discover(x, d)
+	ctx, cancel, hc, p, err := discover(x, d)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -59,7 +61,7 @@ func openIDP(x *Context, d time.Duration) (*idp, context.CancelFunc, error) {
 	} else if !slices.Contains(scopes, "openid") {
 		scopes = append([]string{"openid"}, scopes...)
 	}
-	return &idp{ctx: ctx, p: p, conf: oauth2.Config{ClientID: x.OIDC.ClientID, Endpoint: ep, Scopes: scopes}}, cancel, nil
+	return &idp{ctx: ctx, hc: hc, p: p, conf: oauth2.Config{ClientID: x.OIDC.ClientID, Endpoint: ep, Scopes: scopes}}, cancel, nil
 }
 
 // refusal shows a token endpoint's refusal by its status and error code only, never its body
@@ -107,9 +109,9 @@ func (i *idp) device(x *Context, prompts io.Writer) (*oauth2.Token, error) {
 	if i.conf.Endpoint.DeviceAuthURL == "" {
 		return nil, fmt.Errorf("the identity provider %s offers no device authorization", x.OIDC.Issuer)
 	}
-	d, err := i.conf.DeviceAuth(i.ctx)
+	d, err := i.deviceAuth(x)
 	if err != nil {
-		return nil, i.refusal(x, "device authorization", "device authorization", err)
+		return nil, err
 	}
 	// RFC 8628 lets the verification URI carry a query.
 	if err := providerEndpoint(d.VerificationURI, "the identity provider's verification_uri"); err != nil {
@@ -126,6 +128,56 @@ func (i *idp) device(x *Context, prompts io.Writer) (*oauth2.Token, error) {
 	return t, nil
 }
 
+// maxInterval and maxExpiry, in seconds, bound the polling interval and the lifetime a device
+// authorization may give: oauth2 hands the interval to time.NewTicker, which panics on a negative
+// one and on one that overflows a time.Duration.
+const maxInterval, maxExpiry = 3600, 24 * 3600
+
+// deviceAuth requests a device code (RFC 8628 §3.1) and reads the answer itself: oauth2 panics on a
+// null answer and on an interval out of range. An answer without the fields the grant needs is
+// refused as unreadable, like the token endpoint's.
+func (i *idp) deviceAuth(x *Context) (*oauth2.DeviceAuthResponse, error) {
+	form := url.Values{"client_id": {i.conf.ClientID}, "scope": {strings.Join(i.conf.Scopes, " ")}}
+	q, err := http.NewRequestWithContext(i.ctx, http.MethodPost, i.conf.Endpoint.DeviceAuthURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	q.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	q.Header.Set("Accept", "application/json")
+	r, err := i.hc.Do(q)
+	if err != nil {
+		return nil, fmt.Errorf("device authorization at the identity provider %s: %w", x.OIDC.Issuer, remoteFailure(err))
+	}
+	defer r.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		return nil, fmt.Errorf("device authorization at the identity provider %s: %w", x.OIDC.Issuer, remoteFailure(err))
+	}
+	if r.StatusCode != http.StatusOK {
+		var e struct {
+			Code string `json:"error"`
+		}
+		_ = json.Unmarshal(body, &e) // a body that is no error document names no code
+		return nil, fmt.Errorf("the identity provider %s refused the device authorization: %s", x.OIDC.Issuer, refusal(r.StatusCode, e.Code))
+	}
+	var d struct {
+		DeviceCode      string `json:"device_code"`
+		UserCode        string `json:"user_code"`
+		VerificationURI string `json:"verification_uri"`
+		ExpiresIn       int64  `json:"expires_in"`
+		Interval        int64  `json:"interval"`
+	}
+	if json.Unmarshal(body, &d) != nil || d.DeviceCode == "" || d.UserCode == "" || d.VerificationURI == "" ||
+		d.ExpiresIn < 0 || d.ExpiresIn > maxExpiry || d.Interval < 0 || d.Interval > maxInterval {
+		return nil, fmt.Errorf("device authorization at the identity provider %s: its answer could not be read", x.OIDC.Issuer)
+	}
+	a := &oauth2.DeviceAuthResponse{DeviceCode: d.DeviceCode, UserCode: d.UserCode, VerificationURI: d.VerificationURI, Interval: d.Interval}
+	if d.ExpiresIn > 0 {
+		a.Expiry = time.Now().Add(time.Duration(d.ExpiresIn) * time.Second)
+	}
+	return a, nil
+}
+
 func (i *idp) loopback(x *Context, prompts io.Writer) (*oauth2.Token, error) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -136,10 +188,17 @@ func (i *idp) loopback(x *Context, prompts io.Writer) (*oauth2.Token, error) {
 	conf.RedirectURL = fmt.Sprintf("http://%s/callback", l.Addr())
 	verifier, state, nonce := oauth2.GenerateVerifier(), random(), random()
 	authURL := conf.AuthCodeURL(state, oauth2.S256ChallengeOption(verifier), oidc.Nonce(nonce))
-	opened := openBrowser(authURL)
-	fmt.Fprintf(prompts, "Sign in to %s in the browser%s:\n\n    %s\n\nWaiting for the sign-in...\n",
-		x.Where(), map[bool]string{true: " that opened, or open this address on this host", false: ": open this address on this host"}[opened], authURL)
-	// One callback, checked against state; anything else on the listener is not found.
+	if openBrowser(authURL) {
+		fmt.Fprintf(prompts, "Sign in to %s in the browser that opened, or open this address on this host:\n\n    %s\n\nWaiting for the sign-in...\n",
+			x.Where(), authURL)
+	} else {
+		fmt.Fprintf(prompts, "Sign in to %s in the browser: open this address on this host:\n\n    %s\n\n"+
+			"On a host without a browser, stop this and run bronzewardctl login --device instead.\n\nWaiting for the sign-in...\n",
+			x.Where(), authURL)
+	}
+	// One callback carrying this sign-in's state. One carrying another, which any local process
+	// that finds the port can send, is ignored, and the wait goes on; anything else on the listener
+	// is not found.
 	got := make(chan url.Values, 1)
 	srv := &http.Server{ReadHeaderTimeout: 10 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/callback" {
@@ -148,6 +207,11 @@ func (i *idp) loopback(x *Context, prompts io.Writer) (*oauth2.Token, error) {
 		}
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		if r.URL.Query().Get("state") != state {
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprintln(w, "This answer is not the sign-in bronzewardctl waits for, and is ignored.")
+			return
+		}
 		fmt.Fprintln(w, "bronzewardctl received the sign-in answer; you can close this page.")
 		select {
 		case got <- r.URL.Query():
@@ -170,8 +234,6 @@ func (i *idp) loopback(x *Context, prompts io.Writer) (*oauth2.Token, error) {
 		return nil, errors.New("no sign-in answer arrived in time")
 	}
 	switch {
-	case q.Get("state") != state:
-		return nil, errors.New("the sign-in answer carries another state, so it is not this sign-in's; nothing was exchanged")
 	case q.Get("error") != "":
 		// Only an error code as RFC 6749 allows one: the rest of the answer is not shown.
 		code := q.Get("error")
@@ -235,9 +297,10 @@ func openBrowser(u string) bool {
 
 // SignIn runs Login and keeps the sign-in under the renewal lock, so that neither a renewal nor
 // an identity-revoked clear in another process interleaves with the write; it returns where it is
-// kept. A credential store that fails, and a token file that is not this client's (ReadTokens),
-// are refused before the sign-in, so nothing is issued that cannot be kept; a sign-in whose write
-// still fails has its refresh token revoked.
+// kept. A credential store that answers and then fails, and a token file that is not this
+// client's (ownTokenFile), are refused before the sign-in, so nothing is issued that cannot be
+// kept; a sign-in whose write still fails, or whose context was removed or changed while it ran,
+// has its refresh token revoked.
 func SignIn(x *Context, device bool, prompts io.Writer) (*Tokens, string, error) {
 	if err := x.Check(); err != nil {
 		return nil, "", x.fail(err)
@@ -253,7 +316,7 @@ func SignIn(x *Context, device bool, prompts io.Writer) (*Tokens, string, error)
 			return nil, "", x.fail(err)
 		}
 	case s.none == "":
-		if _, err := s.read(); err != nil {
+		if _, err := s.read(); err != nil && !errors.Is(err, ErrNotTokenFile) {
 			return nil, "", x.fail(fmt.Errorf("the system credential store failed, so a sign-in could not be kept there: %w", err))
 		}
 	}
@@ -270,6 +333,14 @@ func SignIn(x *Context, device bool, prompts io.Writer) (*Tokens, string, error)
 			return err
 		}
 		defer unlock()
+		// Under the lock, as context remove reads it before removing an entry (ClearStored).
+		cfg, err := LoadConfig()
+		if err != nil {
+			return err
+		}
+		if y := cfg.Find(x.Name); y == nil || !y.sameSignIn(x) {
+			return fmt.Errorf("context %q was removed or changed during the sign-in", x.Name)
+		}
 		// Read again under the lock: the file may have been replaced during the sign-in.
 		if s.file != "" {
 			if err := ownTokenFile(s.file); err != nil {
@@ -297,12 +368,25 @@ func SignIn(x *Context, device bool, prompts io.Writer) (*Tokens, string, error)
 }
 
 // ownTokenFile refuses a token file that login must not overwrite: anything but a missing file or
-// this client's own document, a refresh-only one included (ReadTokens).
+// this client's own document, a refresh-only one included (ReadTokens). A symbolic link is refused
+// too: the write would replace the link, leaving the file it named, and its refresh token, as
+// they are.
 func ownTokenFile(p string) error {
+	if fi, err := os.Lstat(p); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("token file %s is a symbolic link; bronzewardctl keeps a sign-in only in a regular file. "+
+			"Point oidc.tokenFile, or BRONZEWARD_TOKEN_FILE, at the file itself", p)
+	}
 	if _, err := ReadTokens(p); err != nil && !errors.Is(err, ErrNotTokenFile) {
 		return err
 	}
 	return nil
+}
+
+// sameSignIn: x signs in where y does, to the same server through the same provider and client,
+// kept in the same place.
+func (x *Context) sameSignIn(y *Context) bool {
+	return y.Server == x.Server && y.Credential == x.Credential && y.OIDC != nil && x.OIDC != nil &&
+		y.OIDC.Issuer == x.OIDC.Issuer && y.OIDC.ClientID == x.OIDC.ClientID && y.OIDC.TokenFile == x.OIDC.TokenFile
 }
 
 // SignOut removes x's stored sign-in, one without an access token too, and revokes its refresh
