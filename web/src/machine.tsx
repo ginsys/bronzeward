@@ -133,19 +133,43 @@ export const nextTimeline = <T,>(tl: Timeline<T>, res: ReadResult<Timeline<T>> |
 export const POLL_MS = 5000;
 
 // Reads now, then POLL_MS after each answer for which read returns true. While the page is
-// hidden a due read, the first one too, waits for the next check, POLL_MS later. Returns the stop.
-export function polled(read: () => Promise<boolean>, page: Pick<Document, "visibilityState"> = document): () => void {
+// hidden a due read, the first one too, waits for the next check, POLL_MS later; `visible` lets a
+// read that waits its turn check again when it starts. Returns the stop.
+export function polled(read: (visible: () => boolean) => Promise<boolean>, page: Pick<Document, "visibilityState"> = document): () => void {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let live = true;
-  const run = () => void read().then((more) => {
+  const visible = () => page.visibilityState === "visible";
+  const run = () => void read(visible).then((more) => {
     if (live && more) timer = setTimeout(due, POLL_MS);
   });
-  const due = () => (page.visibilityState === "visible" ? run() : (timer = setTimeout(due, POLL_MS)));
+  const due = () => (visible() ? run() : (timer = setTimeout(due, POLL_MS)));
   due();
   return () => {
     live = false;
     clearTimeout(timer);
   };
+}
+
+type TimelineRead<T> = (from: Timeline<T>) => Promise<ReadResult<Timeline<T>> | Dropped>;
+
+// The timeline's reads, one at a time, each on from what the one before left, each answer handed
+// to `settle`; none starts once `live` fails, and none goes on once `going` fails. A read whose
+// `when` fails by its turn (a poll queued while the page went hidden) sends nothing, changes
+// nothing, and polling goes on. Each says whether polling goes on.
+export function queued<T>(live: () => boolean, going: () => boolean, settle: (res: ReadResult<Timeline<T>> | Dropped) => void) {
+  let shown: Timeline<T> = UNREAD;
+  let queue = Promise.resolve(true);
+  return (read: TimelineRead<T>, when: () => boolean) =>
+    (queue = queue.then(async () => {
+      if (!live()) return false;
+      if (!when()) return true;
+      const res = await read(shown);
+      settle(res);
+      if (!going()) return false;
+      shown = nextTimeline(shown, res);
+      const r = res.kind === "dropped" ? res.failed : res;
+      return r.kind === "ok" || r.kind === "transport";
+    }));
 }
 
 // The timeline, its newest page first and then polled while the page is visible, showing loading
@@ -162,32 +186,24 @@ function useTimeline(path: string): [Load<Timeline<Entry>> | Dropped, (() => voi
   const older = useRef<(() => void) | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
-    let shown: Timeline<Entry> = UNREAD;
     let live = true;
-    let queue = Promise.resolve(true);
     const ok = undropped();
     if (key.current !== path) {
       key.current = path;
       put({ kind: "loading" });
     }
-    const step = (read: (from: Timeline<Entry>) => Promise<ReadResult<Timeline<Entry>> | Dropped>) =>
-      (queue = queue.then(async () => {
-        if (!live) return false;
-        const res = await read(shown);
-        const [r, set, shows] = settling(res, put, held);
-        settle(r, set, () => live && ok(), shows);
-        if (!live || !ok()) return false;
-        shown = nextTimeline(shown, res);
-        return r.kind === "ok" || r.kind === "transport";
-      }));
     // A read queued behind another starts only while neither a new view nor the process's refusal
     // has dropped it.
     const going = () => live && ok();
+    const step = queued<Entry>(() => live, going, (res) => {
+      const [r, set, shows] = settling(res, put, held);
+      settle(r, set, going, shows);
+    });
     older.current = () => {
       setBusy(true);
-      void step((from) => readOlder<Entry>(client, path, from, going)).then(() => live && setBusy(false));
+      void step((from) => readOlder<Entry>(client, path, from, going), () => true).then(() => live && setBusy(false));
     };
-    const stop = polled(() => step((from) => readLater<Entry>(client, path, from, going)));
+    const stop = polled((visible) => step((from) => readLater<Entry>(client, path, from, going), visible));
     return () => {
       live = false;
       older.current = undefined;
