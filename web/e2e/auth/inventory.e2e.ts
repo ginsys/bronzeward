@@ -213,7 +213,9 @@ describe("the machines", () => {
     await asked("/machines", 2);
     await faults({ upstream: at });
     await browser.execute(() => void dispatchEvent(new Event("online")));
-    await browser.waitUntil(async () => (await answers()).includes("/machines 200"), { timeout: 20_000, timeoutMsg: "the newer list read did not answer" });
+    // The read again is the third list request and the second first-page answer.
+    await asked("/machines", 3);
+    await browser.waitUntil(async () => (await answers()).filter((a) => a === "/machines 200").length === 2, { timeout: 20_000, timeoutMsg: "the newer list read did not answer" });
     await release();
     await statusIs(REVOKED);
     expect(await $('[data-testid="principal"]').isExisting()).toBe(false);
