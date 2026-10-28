@@ -65,7 +65,7 @@ export async function readPages<T>(client: Reads["client"], path: string, query:
 
 // A read's result, and whether it holds data: a read again that finds no answer keeps that data
 // under the offline banner, whatever the page's other reads showed.
-function useHeld<T>(): [Load<T>, (r: Load<T>) => void, () => boolean] {
+export function useHeld<T>():[Load<T>, (r: Load<T>) => void, () => boolean] {
   const [load, setLoad] = useState<Load<T>>({ kind: "loading" });
   const has = useRef(false);
   const put = useCallback((r: Load<T>) => {
