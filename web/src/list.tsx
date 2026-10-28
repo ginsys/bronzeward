@@ -75,9 +75,10 @@ function useHeld<T>(): [Load<T>, (r: Load<T>) => void, () => boolean] {
   return [load, put, useCallback(() => has.current, [])];
 }
 
-// A list read from its start each time the view, path, query or `all` changes, showing loading, and
-// each time the page reads again, keeping what it shows until the read answers. `more` reads on,
-// one page at a time. A read that a newer start superseded is ignored when it completes.
+// A list read from its start each time the path, query or `all` changes, showing loading, and each
+// time the view changes or the page reads again, keeping what it shows until the read answers: the
+// same list under a new view is still the same data. `more` reads on, one page at a time. A read
+// that a newer start superseded is ignored when it completes.
 export function useList<T>(path: string, query: string, all: boolean): [Load<Listed<T>>, (() => void) | undefined, boolean] {
   const { client, settle, undropped, again, view } = useReads();
   const [list, put, held] = useHeld<Listed<T>>();
@@ -90,7 +91,7 @@ export function useList<T>(path: string, query: string, all: boolean): [Load<Lis
     const n = ++start.current;
     const ok = undropped();
     setBusy(false);
-    const k = JSON.stringify([view, path, query, all]);
+    const k = JSON.stringify([path, query, all]);
     if (key.current !== k) {
       key.current = k;
       put({ kind: "loading" });
@@ -113,8 +114,8 @@ export function useList<T>(path: string, query: string, all: boolean): [Load<Lis
   return [list, list.kind === "ok" && list.data.next !== undefined ? more : undefined, busy];
 }
 
-// An item read each time the view or path changes, showing loading, and each time the page reads
-// again, keeping what it shows until the read answers.
+// An item read each time its path changes, showing loading, and each time the view changes or the
+// page reads again, keeping what it shows until the read answers.
 export function useItem<T>(path: string): Load<T> {
   const { client, settle, undropped, again, view } = useReads();
   const [item, put, held] = useHeld<T>();
@@ -122,9 +123,8 @@ export function useItem<T>(path: string): Load<T> {
   useEffect(() => {
     const ok = undropped();
     let live = true;
-    const k = JSON.stringify([view, path]);
-    if (key.current !== k) {
-      key.current = k;
+    if (key.current !== path) {
+      key.current = path;
       put({ kind: "loading" });
     }
     void client.read<T>(path).then((res) => settle(res, put, () => live && ok(), held));

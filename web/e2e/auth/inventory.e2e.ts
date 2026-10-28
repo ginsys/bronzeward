@@ -3,9 +3,9 @@
 // recorded through the API as h-author.
 import { randomBytes } from "node:crypto";
 import { $, $$, browser, expect } from "@wdio/globals";
-import { EPOCH_CHANGED } from "../../src/request.ts";
+import { EPOCH_CHANGED, TRANSPORT_FAILURE } from "../../src/request.ts";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
-import { answers, faults, fixtureSignIn, mint, param, storageEmpty, where } from "./helpers.ts";
+import { answers, faults, fixtureSignIn, mint, param, release, storageEmpty, where } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 
@@ -40,6 +40,9 @@ async function machines(at: string, cl: string, n: number, from = 0): Promise<st
 const rows = async () => $$("main tbody tr th a").map((a) => a.getAttribute("title"));
 const count = () => $('[data-testid="count"]').getText();
 const shows = (n: number) => browser.waitUntil(async () => (await rows()).length === n, { timeout: 20_000, timeoutMsg: `the list did not show ${n} rows` });
+// Read in the page on each try: one state's message replaces the element of the one before it.
+const statusIs = (text: string) =>
+  browser.waitUntil(async () => (await browser.execute(() => document.querySelector('[data-testid="status"]')?.textContent ?? "")) === text, { timeout: 20_000, timeoutMsg: `the status did not show ${text}` });
 
 describe("the machines", () => {
   it("empty: a deployment with no machine says so, as a status message", async () => {
@@ -128,16 +131,46 @@ describe("the machines", () => {
     const cl = await cluster(at, "lab-a");
     const ids = await machines(at, cl.id, 2);
     await write(at, `/machines/${ids[1]}/freezes`, { reason: "synthetic incident" });
-    // Every unfiltered list read is held 4 s: the filter changes while the first is in flight, and
-    // the client discards its answer with the old view.
+    // Every unfiltered list read is held 4 s. From one state filter to another the server's query
+    // and the read of every page stay the same; only the view changes, and the client discards the
+    // answer read under the old one.
     expect((await fetch(`${CONTROL}/next?human=h-viewer`)).ok).toBe(true);
     await faults({ upstream: at, hold: { path: "/machines", query: "", ms: 4000 } });
-    await browser.url(`${FIXTURE_PAGE}/machines`);
-    await expect($('[data-testid="status"]')).toHaveText("Loading machines", { wait: 20_000 });
+    await browser.url(`${FIXTURE_PAGE}/machines?state=pending`);
+    await statusIs("Loading machines");
     await $("label*=State").$("select").selectByAttribute("value", "frozen");
     await shows(1);
     expect(await rows()).toEqual([ids[1]]);
     expect(await count()).toBe("Showing 1 of 2.");
+  });
+
+  it("a refresh keeps the list shown: a read again without answer leaves it under the offline banner", async () => {
+    const at = await disposable();
+    const cl = await cluster(at, "lab-a");
+    const ids = await machines(at, cl.id, 2);
+    expect(await fixtureSignIn("h-viewer", {}, { upstream: at })).toMatch(SERVER);
+    await shows(2);
+    // The online event reads every resource again: the list's read finds no answer, and the
+    // identity's and the cluster filter's answers are held until after, so none ends the banner.
+    await faults({ upstream: at, redirect: "/machines", held: "/identity", hold: { path: "/clusters", ms: 8000 } });
+    await browser.execute(() => void dispatchEvent(new Event("online")));
+    await $('[data-testid="offline"]').waitForExist({ timeout: 10_000 });
+    expect(await rows()).toEqual(ids);
+    expect(await $('[data-testid="status"]').isExisting()).toBe(false);
+    await faults({ upstream: at });
+    await release();
+  });
+
+  it("each list keeps its own data: the machine list's first read without answer is disconnected, though the cluster filter's answered", async () => {
+    const at = await disposable();
+    await cluster(at, "lab-a");
+    // The cluster filter's list answers; the machine list's read finds no answer 3 s later.
+    expect((await fetch(`${CONTROL}/next?human=h-viewer`)).ok).toBe(true);
+    await faults({ upstream: at, redirect: "/machines", hold: { path: "/machines", ms: 3000 } });
+    await browser.url(`${FIXTURE_PAGE}/machines`);
+    await $("label*=Cluster").$("select").$("option=lab-a").waitForExist({ timeout: 20_000 });
+    await statusIs(TRANSPORT_FAILURE);
+    expect(await $('[data-testid="offline"]').isExisting()).toBe(false);
   });
 });
 

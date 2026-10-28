@@ -67,14 +67,15 @@ describe("the shell", () => {
       history.pushState(null, "", "/?cluster=c1");
       dispatchEvent(new PopStateEvent("popstate"));
     });
-    // Each move reads the identity and the machine list, filtered by the query; the cluster filter's
-    // own list has no query and is not read again.
-    await reads(6);
+    // Each move reads the identity, the machine list filtered by the query, and the cluster filter's
+    // list: the client discards an answer read under the old view, so every page read starts again.
+    await reads(7);
     await browser.execute(() => history.back());
-    await reads(8);
+    await reads(10);
     const s = await seen();
     expect(s.filter((p) => p === "/identity")).toHaveLength(3);
     expect(s.filter((p) => p === "/machines")).toHaveLength(3);
+    expect(s.filter((p) => p === "/clusters")).toHaveLength(3);
   });
 
   it("COMP-01: a server below the client's minimum API revision is refused before any other read, both revisions named", async () => {

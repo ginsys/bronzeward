@@ -265,7 +265,9 @@ async function cleanup() {
 
 export const config: WebdriverIO.Config = {
   ...base,
-  specs: ["./auth/*.e2e.ts"],
+  // Every spec file unless BW_SPECS names some (comma-separated, e.g. "inventory,shell"), for a local
+  // rerun; CI sets none.
+  specs: process.env["BW_SPECS"] ? process.env["BW_SPECS"].split(",").map((s) => `./auth/${s}.e2e.ts`) : ["./auth/*.e2e.ts"],
   baseUrl: IDP_PAGE,
   async onPrepare() {
     try {
