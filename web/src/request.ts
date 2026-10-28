@@ -84,6 +84,12 @@ export class Client {
     }
   }
 
+  // Every read in flight is stale, under the same view: an answer still to come is discarded (a
+  // revocation of the sign-in still current excepted, as for any stale read) and no retry is sent.
+  dropReads(): void {
+    this.generation++;
+  }
+
   async read<T>(path: string): Promise<ReadResult<T>> {
     const sent = this.generation;
     const principal = this.view.principal;
