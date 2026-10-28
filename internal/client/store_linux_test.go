@@ -189,6 +189,23 @@ func TestNoInputNeverPrompts(t *testing.T) {
 		t.Errorf("with --no-input: %d prompting reads, %d refused reads, %d writes or deletions; want 0, 3, 0",
 			prompting.Load(), refused.Load(), writes.Load())
 	}
+
+	// A context that lost its oidc section still has its stored entry removed, with or without
+	// --no-input: the read before the lock does not decode the entry.
+	b, err := json.Marshal(entry{Server: x.Server, Issuer: x.OIDC.Issuer, Tokens: Tokens{AccessToken: "BWSYNTH-at"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyringGetCall = func(string, string) (string, error) { return string(b), nil }
+	keyringGetHeldCall = keyringGetCall
+	bare := Context{Name: x.Name, Server: x.Server, Credential: "oidc"}
+	for _, noInput := range []bool{false, true} {
+		writes.Store(0)
+		if _, err := ClearStored(&bare, noInput); err != nil || writes.Load() != 1 {
+			t.Errorf("context remove (--no-input %v) without an oidc section: %v, %d deletions; want the entry removed",
+				noInput, err, writes.Load())
+		}
+	}
 }
 
 // TestSecretServiceNeverPrompts checks the calls made under the renewal lock against gnome-keyring

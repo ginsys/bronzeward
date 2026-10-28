@@ -114,7 +114,12 @@ func (s *store) lock() (func(), error) {
 		dir = filepath.Join(home, ".local", "state")
 	}
 	if s.none == "" {
-		if _, err := s.read(); err != nil {
+		// The entry is not decoded: context remove clears one whose context lost its oidc section.
+		get := keyringGet
+		if s.noPrompt {
+			get = keyringGetHeld
+		}
+		if _, _, err := get(s.x.Name); err != nil {
 			return nil, err
 		}
 	}
