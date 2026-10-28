@@ -247,6 +247,25 @@ describe("recovery", () => {
     await announced("recovery", new RegExp(`^Recovery mode since \\d\\d:\\d\\d, epoch ${literal(epoch)}\\. No machine scopes\\. Drafts can be edited\\. ${literal(RECOVERY_START)}$`));
     expect(await testid("epoch").getText()).toBe(`Epoch ${epoch}`);
     expect(await testid("server").getText()).toMatch(SERVER);
+    // The process restarts for recovery again, under the same epoch: whichever of the page's next
+    // reads meets its refusal first, nothing read before stays shown, the other read's late answer
+    // included, and the page reads again on request.
+    const since = new RegExp(`^Recovery mode since \\d\\d:\\d\\d, epoch ${literal(epoch)}\\.`);
+    for (const [refused, late, page] of [["/recovery", "/identity", "Machines"], ["/identity", "/recovery", "Changes"]] as const) {
+      await faults({ upstream: at, processRefused: [refused, "/server"], held: late });
+      await nav(page).click();
+      await announced("status", PRE_ENTRY);
+      await announced("recovery", `Recovery mode. Drafts can be edited. ${RECOVERY_START}`);
+      expect(await testid("principal").isExisting()).toBe(false);
+      await release();
+      await browser.pause(500);
+      expect(await testid("principal").isExisting()).toBe(false);
+      expect(await testid("recovery").getText()).toBe(`Recovery mode. Drafts can be edited. ${RECOVERY_START}`);
+      await faults({ upstream: at });
+      await $("button=Read again").click();
+      await expect(testid("principal")).toHaveText("Signed in as h-viewer");
+      await announced("recovery", since);
+    }
   });
 
   it("REC-01: an open page whose next read meets the process's refusal, under the same epoch, shows the state before the entry and reads again on request", async () => {
