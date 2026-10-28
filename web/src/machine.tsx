@@ -115,9 +115,11 @@ export async function readLater<T>(client: Reads["client"], path: string, from: 
 }
 
 // "Load older": the page before the oldest shown, appended; none left once its answer has no next.
-// Superseded as the poll is; `going` has no default, so no caller can leave it out.
+// Superseded as the poll is; `going` has no default, so no caller can leave it out. Before the newest
+// page answered (a new view whose first read failed) there is nothing to read on from, and what is
+// still shown stays.
 export async function readOlder<T>(client: Reads["client"], path: string, from: Timeline<T>, going: () => boolean): Promise<ReadResult<Timeline<T>> | Dropped> {
-  if (!going()) return { kind: "discarded" };
+  if (!going() || !from.read) return { kind: "discarded" };
   if (from.older === undefined) return { kind: "ok", data: from };
   const res = await client.read<TimelinePage<T>>(`${path}?${new URLSearchParams({ order: "newest", cursor: from.older })}`);
   if (res.kind === "restart") return going() ? restart(client, path) : { kind: "discarded" };
