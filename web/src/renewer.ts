@@ -191,9 +191,11 @@ export class Renewer {
     const accept = (p: Tokens) => p.expiresAt > before || p.iss !== who.iss || p.sub !== who.sub;
     let t = this.#holder ? "holder" : await this.#wait(RENEW_WAIT_MS, accept, { type: "request", due: before });
     // #388: within REDIRECT_WAIT_MS of the previous holder's `redirecting`, a holder that would
-    // redirect too waits for that redirect's pair, granted the lock while it asked or before.
+    // redirect too waits for that redirect's pair, granted the lock while it asked or before. #400:
+    // that pair is newer than the one the redirect left with, not merely newer than this tab's.
     const left = this.#redirectUntil - Date.now();
-    if (t === "holder" && this.session() === s && s.byRedirect && left > 0) t = (await this.#wait(left, accept)) ?? "holder";
+    const redirected = (p: Tokens) => p.expiresAt > Math.max(before, this.#redirectFrom) || p.iss !== who.iss || p.sub !== who.sub;
+    if (t === "holder" && this.session() === s && s.byRedirect && left > 0) t = (await this.#wait(left, redirected)) ?? "holder";
     if (this.session() !== s || t === undefined) return false;
     return t === "holder" ? s.renew() : t.iss === who.iss && t.sub === who.sub;
   }
