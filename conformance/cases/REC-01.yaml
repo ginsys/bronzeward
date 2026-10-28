@@ -18,4 +18,4 @@ runs:
   web:
     check: web/e2e/auth/shell.e2e.ts, mise run browser-auth; the banner's texts and the start mode in web/src/recovery.test.ts, mise run web
     browsers: [chrome, edge, firefox, firefox-esr]
-    covers: the banner and the process's refusal before the entry, on a fresh page and, injected under the same epoch, on an open page's next read (on GET /identity or GET /recovery first, nothing read before left shown); a scope's refusal comes with the first write view (#257) and the recovery console (#261)
+    covers: the banner and the process's refusal before the entry, on a fresh page and, injected under the same epoch, on an open page's next read (on GET /identity or GET /recovery first, nothing read before left shown); the reads it drops at once, their answers and retries, in web/src/request.test.ts; a scope's refusal comes with the first write view (#257) and the recovery console (#261)

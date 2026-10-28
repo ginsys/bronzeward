@@ -341,6 +341,40 @@ describe("stale-response discard", () => {
     expect(onRevoked).toHaveBeenCalledTimes(1);
   });
 
+  test("a read in flight when the reads are dropped is discarded under the same view; a read sent after renders", async () => {
+    const { fetchImpl, release } = delayed(ok({ stale: true }));
+    const c = new Client({ fetch: fetchImpl });
+    c.setView(base);
+    const pending = c.read("/identity");
+    c.dropReads();
+    release();
+    expect(await pending).toEqual({ kind: "discarded" });
+    expect(await c.read("/server")).toEqual({ kind: "ok", data: { stale: true } });
+  });
+
+  test("a read waiting out a 503 retry when the reads are dropped is not sent again", async () => {
+    const held: { c?: Client } = {};
+    const { c, fetchMock } = client([problem(503, "dependency-unavailable"), ok({})], { sleep: async () => held.c!.dropReads() });
+    held.c = c;
+    c.setView(base);
+    expect(await c.read("/identity")).toEqual({ kind: "discarded" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("a revocation whose answer arrives after the reads were dropped still clears the sign-in's credential", async () => {
+    const { fetchImpl, release } = slowBody(403, "application/problem+json", {
+      type: "urn:bronzeward:problem:identity-revoked", title: "revoked", status: 403,
+    });
+    const onRevoked = vi.fn();
+    const c = new Client({ fetch: fetchImpl, onRevoked });
+    c.setView(base);
+    const pending = c.read("/identity");
+    c.dropReads();
+    release();
+    expect(await pending).toMatchObject({ kind: "revoked" });
+    expect(onRevoked).toHaveBeenCalledTimes(1);
+  });
+
   test("a revocation whose body arrives after a new sign-in clears nothing", async () => {
     const { fetchImpl, release } = slowBody(403, "application/problem+json", {
       type: "urn:bronzeward:problem:identity-revoked", title: "revoked", status: 403,

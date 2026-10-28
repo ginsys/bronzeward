@@ -167,8 +167,10 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
     if (e === "lost") return;
     // The process's refusal on any other read means the process restarted for recovery, its entry
     // not yet made, possibly under the same epoch: the page shows that state as GET /server's own
-    // answer, which it then reads again (§8.5 item 1), and nothing read before it stays shown.
+    // answer, which it then reads again (§8.5 item 1), and nothing read before it stays shown: every
+    // read still in flight is dropped at once, its answer discarded and its retries not sent.
     if (what !== "server" && res.kind === "refused" && startRefusal(res)) {
+      client.dropReads();
       shown.current = { server: false, identity: false, recovery: false };
       setIdentity({ kind: "loading" });
       setRecovery({ kind: "loading" });
@@ -179,7 +181,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
     shown.current[what] = res.kind === "ok";
     if (res.kind === "ok") readAt.current = now;
     set(res);
-  }, [onUnauthenticated, onRevoked]);
+  }, [client, onUnauthenticated, onRevoked]);
 
   // Reads still in flight when the shell goes (a refusal, sign-out) are discarded, and renew no more.
   useEffect(() => () => client.setView({ principal: "", route: "", query: "" }), [client]);
