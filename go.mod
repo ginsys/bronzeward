@@ -13,6 +13,7 @@ require (
 	github.com/cosi-project/runtime v1.14.1
 	github.com/evanphx/json-patch v5.9.11+incompatible
 	github.com/go-jose/go-jose/v4 v4.1.5
+	github.com/godbus/dbus/v5 v5.2.2
 	github.com/gowebpki/jcs v1.0.2
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/oapi-codegen/runtime v1.8.0
@@ -42,7 +43,6 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/gertd/go-pluralize v0.2.1 // indirect
 	github.com/ghodss/yaml v1.0.0 // indirect
-	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/google/cel-go v0.27.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
