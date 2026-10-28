@@ -25,11 +25,14 @@ commands:
   context add <name> --server <url> [--certificate-authority <file>] [--automation-token-file <path>]
   context add <name> --server <url> --issuer <url> --client-id <id> [--audience <aud>] [--scopes a,b]
               [--oidc-certificate-authority <file>] [--oidc-token-file <path>]
-  context add <name> --from <url> [--server <url>]
-              the issuer, audience and CLI client ID from <url>/bronzeward-client.json
+  context add <name> --from <url> [--server <url>] [--certificate-authority <file>] [--scopes a,b]
+              [--oidc-certificate-authority <file>] [--oidc-token-file <path>]
+              the issuer, audience, CLI client ID and scopes from <url>/bronzeward-client.json
   version     this client's version, the server's and its API revision
   whoami      the identity, roles and epoch the server sees, and this client's reading of a sign-in
-  logout      remove an oidc context's stored sign-in
+  login [--device]
+              sign in to an oidc context in this host's browser, or with --device on any device
+  logout      remove an oidc context's stored sign-in and revoke its refresh token
   status      start mode, recovery mode, open drift and unresolved operations
   cluster list | show <id>
   machine list [--cluster <id>] | show <id> | timeline <id> | observations <id>
@@ -97,7 +100,7 @@ func harden() error {
 
 func run(args []string, stdout, stderr io.Writer) int {
 	e := &env{output: "table", out: stdout, err: stderr}
-	commands := map[string]func([]string) error{"context": e.contextCmd, "version": e.versionCmd, "whoami": e.whoamiCmd, "logout": e.logoutCmd,
+	commands := map[string]func([]string) error{"context": e.contextCmd, "version": e.versionCmd, "whoami": e.whoamiCmd, "login": e.loginCmd, "logout": e.logoutCmd,
 		"status": e.statusCmd, "cluster": e.clusterCmd, "machine": e.machineCmd,
 		"fragment": e.fragmentCmd, "profile": e.profileCmd, "assignment": e.assignmentCmd,
 		"draft": e.draftCmd, "release": e.releaseCmd, "plan": e.planCmd, "operation": e.operationCmd, "act": e.actCmd}
@@ -164,15 +167,20 @@ func (e *env) parse(name string, args []string, n int, extra func(*flag.FlagSet)
 
 // open selects the context and reads its token (client-contracts.md §5 item 1, §9.4).
 func (e *env) open() (*client.Client, error) {
+	x, err := e.selected()
+	if err != nil {
+		return nil, err
+	}
+	return client.Open(x, client.TokenInput{NoInput: e.noInput, File: e.tokenFile, Stdin: e.tokenStdin}, e.err, e.verboseOut())
+}
+
+// selected is the context §5 item 1 selects.
+func (e *env) selected() (*client.Context, error) {
 	cfg, err := client.LoadConfig()
 	if err != nil {
 		return nil, err
 	}
-	x, err := cfg.Select(e.context)
-	if err != nil {
-		return nil, err
-	}
-	return client.Open(x, client.TokenInput{File: e.tokenFile, Stdin: e.tokenStdin}, e.err, e.verboseOut())
+	return cfg.Select(e.context)
 }
 
 // verboseOut is where -v output goes: standard error, or nowhere.

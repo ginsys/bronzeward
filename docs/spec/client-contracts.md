@@ -285,7 +285,8 @@ it. It holds no secret.
    [#332](https://github.com/ginsys/bronzeward/issues/332)). The
    web client reads it from its own origin and uses the web client's ID, and the CLI imports it
    with `context add --from <url>` under the TLS rules of [§6](#6-tls-trust) and stores the CLI
-   client's ID. Entering them by hand stays possible. The server is never asked
+   client's ID, and as `oidc.scopes` `openid offline_access` followed by the file's scopes unless
+   `--scopes` names others. Entering them by hand stays possible. The server is never asked
    for them through an authenticated route: the client needs them before it can authenticate.
 5. A context's `server` is checked once when it is added: `GET /livez` must answer `204`
    (`internal/server/server.go:19-21`), which shows only that something answers; it proves
@@ -782,7 +783,10 @@ current token expires
 2. Headless use, where no browser runs on the host, uses the device-authorization grant only
    (decision D4 (a)): the CLI prints the user code and the verification URI, shows the URI's host
    prominently so that a lookalike prompt stands out, and polls the token endpoint. There is no
-   fallback to a loopback redirect over a forwarded port.
+   fallback to a loopback redirect over a forwarded port. A sign-in the CLI starts by itself
+   (item 3's memory-only case) on a host without a desktop session uses this grant. An explicit
+   `bronzewardctl login` keeps item 1's grant unless `--device` is given, because a browser may
+   still run on the host without one, for example on another console.
 3. **Store.** The refresh token and the current access token are kept in the operating system's
    credential store (Secret Service, Keychain or Windows Credential Manager) under the context's
    name. Where no store is available (decision D2 (a) and (b)), the tokens are kept in memory for
@@ -790,11 +794,20 @@ current token expires
    in a file readable only by its owner instead, offered only when the provider issues rotating,
    client-bound refresh tokens to public clients ([§9.1](#91-identity-provider-requirements)
    item 3). CLI processes that share that file renew one at a time, holding a lock on it while
-   they renew, and read the new pair from it. The opt-in is the context's `oidc.tokenFile`
+   they renew, and read the new pair from it; a context kept in the credential store has a lock
+   of its own in the user's state directory. That lock is never held across the store's unlock
+   prompt: the store is read, and may prompt, for at most a minute before the lock is taken;
+   with `--no-input` it never prompts, and a locked store is refused as one that failed.
+   Under the lock no call to the store shows a prompt, so a store locked by then refuses the
+   command, with nothing written or removed. One that locks while a renewal waits on the identity
+   provider refuses the renewed pair: its rotated refresh token is lost, as with any failed write,
+   and the operator signs in again once the current access token expires.
+   The opt-in is the context's `oidc.tokenFile`
    ([§5](#5-endpoint-discovery-and-context-selection));
    only in a context that has it may `BRONZEWARD_TOKEN_FILE` override its path. The CLI writes
    that file and clears it as its own stored credential ([§8.2](#82-errors)), and refuses to
-   write or clear a file that holds an automation token (`bwt_`).
+   write or clear a file that holds an automation token (`bwt_`) or anything else that is not
+   its own document; `login` checks the file before the sign-in starts and again before writing.
 4. No token is printed, written to the configuration file, passed in argv or placed in an
    environment variable by the CLI. No command prints a token.
 5. `whoami` shows the issuer and subject from the token's claims, read without verification and

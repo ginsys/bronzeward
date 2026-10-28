@@ -13,8 +13,9 @@ import (
 // item 1): a file named by --token-file, or standard input with --token-stdin. Never an argument
 // value or an environment value.
 type TokenInput struct {
-	File  string
-	Stdin bool
+	NoInput bool // never sign in interactively (an oidc context without a store, D2 (a))
+	File    string
+	Stdin   bool
 }
 
 // automationToken reads the token for x: --token-stdin, else the first of --token-file, the
