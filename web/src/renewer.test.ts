@@ -813,6 +813,19 @@ describe("#400 redirect handover deadline", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(answered()).toBe(false);
   });
+
+  test("a renewal waiting out a redirect is not ended by a pair older than the one that redirect left with", async () => {
+    const { b, y, before } = await handover();
+    y.renewer.onMessage({ type: "redirecting", from: before + 120_000 });
+    const answered = await answer(y);
+    // Newer than y's pair, older than the redirect's: taken, but the wait goes on.
+    b.open().renewer.post(first({ access: "SYNTH-a6", refresh: undefined, expiresAt: before + 60_000 }));
+    await settle();
+    expect(y.session?.token()).toBe("SYNTH-a6");
+    expect(answered()).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(REDIRECT_WAIT_MS);
+    expect(answered()).toBe(false);
+  });
 });
 
 describe("#406 stale channels of a rejoined tab", () => {
