@@ -180,6 +180,9 @@ export class Session {
   #inFlight: string | undefined;
   // Every refresh token sent for revocation, none of which is sent again (#388).
   readonly #revoked = new Set<string>();
+  // #396: the revocations of what the answers of timed-out refresh requests bring, settled when the
+  // answer has come and its refresh token has gone; sign-out waits for them within its bound.
+  readonly #late = new Set<Promise<void>>();
   // #388: given up after this tab may have missed a `renewing`, until another pair is taken.
   #forfeited = false;
 
@@ -288,7 +291,12 @@ export class Session {
     const late = new Promise<"late">((r) => (timer = setTimeout(() => r("late"), REFRESH_WAIT_MS)));
     const answer = request === undefined ? undefined : await Promise.race([request, late]);
     clearTimeout(timer);
-    if (answer === "late") void request?.then((a) => (a.kind === "ok" ? this.#revoke(a.body.refresh_token || undefined) : undefined));
+    if (answer === "late" && request !== undefined) {
+      const revoked: Promise<void> = request
+        .then((a) => (a.kind === "ok" ? this.#revoke(a.body.refresh_token || undefined) : undefined), () => undefined)
+        .finally(() => this.#late.delete(revoked));
+      this.#late.add(revoked);
+    }
     // The sent token, unless sign-out has taken it to revoke.
     const sent = this.#inFlight === refresh ? refresh : undefined;
     if (answer === undefined || answer === "late" || answer.kind !== "ok") {
@@ -339,8 +347,8 @@ export class Session {
   // §9.7 item 2: forget the tokens, revoke the refresh token where the provider allows it, and
   // return where to go: the provider's end-session endpoint if it has one, else the signed-out page.
   // A renewal in flight revokes the pair it receives, or the token it sent if sign-out did not take
-  // it; the wait for both is bounded, so a stalled provider delays the redirect by at most
-  // SIGN_OUT_WAIT_MS.
+  // it, and a refresh request that timed out the pair its answer brings (#396); the wait for all of
+  // them is bounded, so a stalled provider delays the redirect by at most SIGN_OUT_WAIT_MS.
   async signOut(origin: string): Promise<string> {
     await this.end();
     if (this.provider.endSessionEndpoint === undefined) return SIGNED_OUT_PATH;
@@ -363,7 +371,7 @@ export class Session {
     this.#tokens = undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([
-      Promise.all([this.#revoke(held), this.#renewing?.catch(() => false)]),
+      Promise.all([this.#revoke(held), this.#renewing?.catch(() => false), ...this.#late]),
       new Promise((r) => (timer = setTimeout(r, SIGN_OUT_WAIT_MS))),
     ]);
     clearTimeout(timer);

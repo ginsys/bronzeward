@@ -615,6 +615,36 @@ describe("§9.7 item 2 sign-out", () => {
     }
   });
 
+  // #396: the timed-out request is no renewal in flight, but its answer may still bring a pair.
+  test("a sign-out after a refresh request timed out waits for its late answer and revokes the refresh token it brings, at most SIGN_OUT_WAIT_MS", async () => {
+    vi.useFakeTimers();
+    try {
+      let release!: (r: Response) => void;
+      const f = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => (url === provider.tokenEndpoint ? new Promise<Response>((r) => (release = r)) : Promise.resolve(new Response(null, { status: 200 }))));
+      const s = new Session(config, { ...provider, endSessionEndpoint: undefined }, tokens(), { fetch: f as unknown as typeof fetch });
+      expect(await Promise.all([s.renew(), vi.advanceTimersByTimeAsync(REFRESH_WAIT_MS)]).then(([ok]) => ok)).toBe(false);
+      let to: string | undefined;
+      void s.signOut(ORIGIN).then((u) => (to = u));
+      await vi.advanceTimersByTimeAsync(SIGN_OUT_WAIT_MS - 1);
+      expect(to).toBeUndefined();
+      release(json({ access_token: "SYNTH-a2", refresh_token: "SYNTH-r2", expires_in: 300 }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(to).toBe(SIGNED_OUT_PATH);
+      expect(f.mock.calls.filter((c) => c[0] === provider.revocationEndpoint).map((c) => form(c[1])["token"])).toEqual(["SYNTH-r1", "SYNTH-r2"]);
+      const hung = new Session(config, { ...provider, endSessionEndpoint: undefined }, tokens(), { fetch: ((url: RequestInfo | URL) => (url === provider.tokenEndpoint ? new Promise<Response>(() => {}) : Promise.resolve(new Response(null, { status: 200 })))) as typeof fetch });
+      void hung.renew();
+      await vi.advanceTimersByTimeAsync(REFRESH_WAIT_MS);
+      let out: string | undefined;
+      void hung.signOut(ORIGIN).then((u) => (out = u));
+      await vi.advanceTimersByTimeAsync(SIGN_OUT_WAIT_MS - 1);
+      expect(out).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(out).toBe(SIGNED_OUT_PATH);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("after a cleared page, sign-out revokes nothing", async () => {
     const f = answers([]);
     const s = new Session(config, provider, tokens(), { fetch: f as unknown as typeof fetch });
