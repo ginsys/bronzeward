@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { components } from "./api/v1";
-import { type Dropped, Head, type Listed, type Load, type Page, Ref, type Reads, RESTARTED, Scroll, settling, short, useHeld, useItem, useList, usePending, useReads } from "./list.tsx";
+import { type Dropped, Head, type Listed, type Load, type Page, Ref, type Reads, ReadsProvider, RESTARTED, Scroll, settling, short, useHeld, useItem, useList, usePending, useReads } from "./list.tsx";
 import { type Machine, node, release } from "./machines.tsx";
 import type { ReadResult } from "./request.ts";
 import { clock, Status } from "./states.tsx";
@@ -130,6 +130,10 @@ export async function readOlder<T>(client: Reads["client"], path: string, from: 
 // the one it had.
 export const nextTimeline = <T,>(tl: Timeline<T>, res: ReadResult<Timeline<T>> | Dropped): Timeline<T> => (res.kind === "ok" ? res.data : res.kind === "dropped" ? UNREAD : tl);
 
+// Whether a read after the first brought entries the timeline did not show, a restart's included:
+// W3 then reads the machine and its observations again (#424).
+export const advanced = <T,>(from: Timeline<T>, res: ReadResult<Timeline<T>> | Dropped) => from.read && res.kind === "ok" && res.data.items[0] !== from.items[0];
+
 export const POLL_MS = 5000;
 
 // Reads now, then POLL_MS after each answer for which read returns true. While the page is
@@ -178,13 +182,15 @@ export function queued<T>(live: () => boolean, going: () => boolean, settle: (re
 // offline banner clears once a poll answers again. A failure after a refused cursor drops the
 // timeline and that cursor. A superseded poll reads no further page and settles as not live, so the
 // shell still takes its refusal of the credentials. The poll and "Load older" read one at a time,
-// each on from what the one before left; `older` is undefined at the timeline's start.
-function useTimeline(path: string): [Load<Timeline<Entry>> | Dropped, (() => void) | undefined, boolean] {
+// each on from what the one before left; `older` is undefined at the timeline's start. The count
+// goes up each time a poll brings entries the timeline did not show.
+function useTimeline(path: string): [Load<Timeline<Entry>> | Dropped, (() => void) | undefined, boolean, number] {
   const { client, settle, undropped, again, view } = useReads();
   const [tl, put, held] = useHeld<Timeline<Entry>, Dropped>();
   const key = useRef<string | undefined>(undefined);
   const older = useRef<(() => void) | undefined>(undefined);
   const [busy, setBusy] = useState(false);
+  const [advances, setAdvances] = useState(0);
   useEffect(() => {
     let live = true;
     const ok = undropped();
@@ -203,7 +209,11 @@ function useTimeline(path: string): [Load<Timeline<Entry>> | Dropped, (() => voi
       setBusy(true);
       void step((from) => readOlder<Entry>(client, path, from, going), () => true).then(() => live && setBusy(false));
     };
-    const stop = polled((visible) => step((from) => readLater<Entry>(client, path, from, going), visible));
+    const stop = polled((visible) => step(async (from) => {
+      const res = await readLater<Entry>(client, path, from, going);
+      if (going() && advanced(from, res)) setAdvances((n) => n + 1);
+      return res;
+    }, visible));
     return () => {
       live = false;
       older.current = undefined;
@@ -212,7 +222,7 @@ function useTimeline(path: string): [Load<Timeline<Entry>> | Dropped, (() => voi
     };
   }, [client, settle, undropped, put, held, view, path, again]);
   const more = useCallback(() => older.current?.(), []);
-  return [tl, tl.kind === "ok" && tl.data.older !== undefined ? more : undefined, busy];
+  return [tl, tl.kind === "ok" && tl.data.older !== undefined ? more : undefined, busy, advances];
 }
 
 // The observed read's attribution, shown apart from the sentences: under an open drift they speak of
@@ -230,11 +240,23 @@ export function details(e: Entry): string {
 
 const byBasis = (items: Observation[]) => [...items].sort((x, y) => y.basis - x.basis);
 
+// The timeline is read under the page's reads. The machine and its observations are read again, as
+// when the page reads again, each time a poll brings timeline entries W3 did not show; the poll goes
+// on unrestarted (#424).
 export function MachineItem({ id }: { id: string }) {
   const path = `/machines/${encodeURIComponent(id)}`;
+  const reads = useReads();
+  const [tl, older, busy, advances] = useTimeline(`${path}/timeline`);
+  return (
+    <ReadsProvider value={{ ...reads, again: reads.again + advances }}>
+      <MachineState id={id} path={path} tl={tl} older={older} busy={busy} />
+    </ReadsProvider>
+  );
+}
+
+function MachineState({ id, path, tl, older, busy }: { id: string; path: string; tl: Load<Timeline<Entry>> | Dropped; older: (() => void) | undefined; busy: boolean }) {
   const m = useItem<Machine>(path);
   const [obs] = useList<Observation>(`${path}/observations`, "", true);
-  const [tl, older, busy] = useTimeline(`${path}/timeline`);
   const [pm, po, timeline] = [usePending(m, "the machine"), usePending(obs, "the observations"), usePending(tl, "the timeline")];
   if (m.kind !== "ok") return <><h2>Machine {short(id)}</h2>{pm}</>;
   if (obs.kind !== "ok") return <><h2>Machine {short(id)}</h2>{po}</>;

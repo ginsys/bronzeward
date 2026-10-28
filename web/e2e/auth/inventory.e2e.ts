@@ -8,7 +8,7 @@ import { $, $$, browser, expect } from "@wdio/globals";
 import type { components } from "../../src/api/v1";
 import { REVOKED } from "../../src/app.tsx";
 import { short } from "../../src/list.tsx";
-import { HEALTH, type Observation, sentences } from "../../src/machine.tsx";
+import { FROZEN, HEALTH, type Observation, sentences } from "../../src/machine.tsx";
 import type { Machine } from "../../src/machines.tsx";
 import { EPOCH_CHANGED, TRANSPORT_FAILURE } from "../../src/request.ts";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
@@ -382,6 +382,41 @@ describe("the machine detail (W3)", () => {
     expect(shown.at(-1)).toBe(0);
     expect((await answers()).filter((a) => a.startsWith(`/machines/${id}/timeline?order=newest&cursor=`))).toHaveLength(1);
     expect(await $("button=Load older").isExisting()).toBe(false);
+  });
+
+  it("#424 item 2: a poll with new timeline entries reads the machine and its observations again; the Frozen line and the Observed row follow", async function () {
+    this.timeout(90_000);
+    const at = await disposable();
+    const cl = await cluster(at, "lab-a");
+    const [id] = await machines(at, cl.id, 1);
+    const obs = (c: string, basis: number, when: string): Observation => ({
+      id: `obs_${c.repeat(26)}`, machine: id!, basis, revision: basis + 1, purpose: "scheduled", publicationGeneration: null, plan: null,
+      operation: null, endpoint: "192.0.2.1:50000", controller: `ctl_${"c".repeat(26)}`, startedAt: when, at: when, access: null, smbiosUuid: null,
+      talosNodeId: "synthetic-node-0", talosClusterId: null, assignmentEvidence: null, runningVersion: null, resourceVersion: null, health: null, unread: {},
+    });
+    const [m1, m2] = [obs("m", 2, "2026-10-26T08:46:00Z"), obs("n", 3, "2026-10-26T08:51:00Z")];
+    const machine = (o: Observation, frozen: boolean): Machine => ({
+      id: id!, cluster: cl.id, hardware: { smbiosUuid: null, talosNodeId: "synthetic-node-0", serial: null }, platform: "metal", talosEndpoint: "192.0.2.1:50000",
+      desired: null, applied: null, pendingConvergence: false, observed: { observation: o.id, at: o.at, release: null }, frozen, scopeState: "normal", openDrift: null,
+    });
+    const bodies = (o: Observation[], frozen: boolean) => ({ [`/machines/${id}`]: machine(o[0]!, frozen), [`/machines/${id}/observations`]: { items: o } });
+    expect(await fixtureSignIn("h-viewer", {}, { upstream: at, bodies: bodies([m1], false) })).toMatch(SERVER);
+    await $(`a[title="${id}"]`).click();
+    await expect($("main h2")).toHaveText(`Machine ${id}`);
+    expect(await texts('[data-testid="sentences"] li')).not.toContain(FROZEN);
+    expect(await $('[data-testid="observed"]').getText()).toContain(short(m1.id));
+    const reads = async () => (await answers()).filter((a) => a === `/machines/${id} 200`).length;
+    const before = await reads();
+    // A freeze recorded outside the page, and a later read, reach the page by the timeline's poll.
+    await faults({ upstream: at, bodies: bodies([m2, m1], true) });
+    await write(at, `/machines/${id}/freezes`, { reason: "synthetic re-read check" });
+    await expect($('[data-testid="timeline"]')).toHaveText(expect.stringContaining('"synthetic re-read check"'), { wait: 20_000 });
+    await browser.waitUntil(async () => (await texts('[data-testid="sentences"] li')).includes(FROZEN), { timeout: 20_000, timeoutMsg: "the Frozen line did not follow the timeline" });
+    expect(await $('[data-testid="observed"]').getText()).toContain(short(m2.id));
+    expect(await texts('[data-testid="observations"] tbody tr th')).toEqual([short(m2.id), short(m1.id)]);
+    expect((await reads()) - before).toBeGreaterThanOrEqual(1);
+    // The timeline went on polling, not read anew.
+    expect((await answers()).filter((a) => a.startsWith(`/machines/${id}/timeline?order=newest`))).toHaveLength(1);
   });
 });
 
