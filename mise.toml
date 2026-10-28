@@ -377,7 +377,16 @@ go build -o bin/webhost ./fixtures/webhost
 canary="BWSYNTH-web-$(od -An -tx1 -N8 /dev/urandom | tr -d ' \n')"
 rm -rf web/e2e/out
 cd web
-BW_WEB_CANARY=$canary npx wdio run e2e/wdio.conf.ts
+# The run gets a TMPDIR of its own, and fails on a browser profile left in it (#430); wdio keeps
+# its browser and driver downloads where it cached them before.
+export BW_WDIO_CACHE=${BW_WDIO_CACHE:-${TMPDIR:-/tmp}}
+run_tmp=$(mktemp -d "${TMPDIR:-/tmp}/bw-browser-run.XXXXXX")
+rc=0
+TMPDIR=$run_tmp BW_WEB_CANARY=$canary npx wdio run e2e/wdio.conf.ts || rc=$?
+left=$(find "$run_tmp" -mindepth 1 -maxdepth 1 \( -name '.org.chromium.Chromium.*' -o -name 'bw-browser-profiles-*' \))
+rm -rf "$run_tmp"
+[ -z "$left" ] || { printf 'browser: the run left browser profiles behind:\n%s\n' "$left" >&2; exit 1; }
+[ "$rc" -eq 0 ] || exit "$rc"
 node e2e/scan.ts e2e/out "$canary"
 '''
 
@@ -397,9 +406,15 @@ cd web
 # The run's console goes to a file the scan reads, not to the job log: a failing expect prints its
 # received value. The scan runs after a failed run too, and the console is shown only once it passes.
 rc=0
-BW_WEB_CANARY=$canary npx wdio run e2e/auth.conf.ts > e2e/out/console.log 2>&1 || rc=$?
+# As in browser: a TMPDIR of its own, failed on a browser profile left in it (#430).
+export BW_WDIO_CACHE=${BW_WDIO_CACHE:-${TMPDIR:-/tmp}}
+run_tmp=$(mktemp -d "${TMPDIR:-/tmp}/bw-browser-run.XXXXXX")
+TMPDIR=$run_tmp BW_WEB_CANARY=$canary npx wdio run e2e/auth.conf.ts > e2e/out/console.log 2>&1 || rc=$?
+left=$(find "$run_tmp" -mindepth 1 -maxdepth 1 \( -name '.org.chromium.Chromium.*' -o -name 'bw-browser-profiles-*' \))
+rm -rf "$run_tmp"
 node e2e/scan.ts e2e/out "$canary" "$password" @../.dev/idp/login.pat || exit 1
 cat e2e/out/console.log
+[ -z "$left" ] || { printf 'browser-auth: the run left browser profiles behind:\n%s\n' "$left" >&2; exit 1; }
 exit "$rc"
 '''
 

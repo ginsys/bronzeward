@@ -3,7 +3,10 @@
 // request with a redirect to that target (fixtures/webhost -redirect-api), then runs the specs
 // once per browser in BW_BROWSERS.
 import { spawn, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 // The launcher logs and ignores any other error a launcher hook throws, and runs the specs anyway.
 import { SevereServiceError } from "webdriverio";
@@ -27,6 +30,22 @@ const capabilities: Record<string, WebdriverIO.Capabilities> = {
 const browsers = (process.env["BW_BROWSERS"] ?? "chrome,firefox").split(",");
 for (const b of browsers) if (!(b in capabilities)) throw new Error(`unknown browser ${b}`);
 
+// Each chrome and edge session gets a profile directory of its own, under one directory per run
+// that the run removes when it ends: left to itself the driver makes one in TMPDIR per session and
+// never removes it (#430). The launcher makes the run's directory; its workers inherit the name.
+const profiles = (process.env["BW_BROWSER_PROFILES"] ??= mkdtempSync(`${tmpdir()}/bw-browser-profiles-`));
+export function removeProfiles() {
+  rmSync(profiles, { recursive: true, force: true });
+}
+function ownProfile(capabilities: WebdriverIO.Capabilities) {
+  const options = capabilities.browserName === "chrome" ? (capabilities["goog:chromeOptions"] ??= {})
+    : capabilities.browserName === "MicrosoftEdge" ? (capabilities["ms:edgeOptions"] ??= {}) : undefined;
+  if (options === undefined) return;
+  const dir = `${profiles}/${randomUUID()}`;
+  mkdirSync(dir, { recursive: true });
+  options.args = [...(options.args ?? []), `--user-data-dir=${dir}`];
+}
+
 let target: Server | undefined;
 let provider: Server | undefined;
 let host: ChildProcess | undefined;
@@ -44,6 +63,9 @@ export const config: WebdriverIO.Config = {
   reporters: ["spec"],
   mochaOpts: { timeout: 60_000 },
   ...(process.env["BW_WDIO_CACHE"] !== undefined ? { cacheDir: process.env["BW_WDIO_CACHE"] } : {}),
+  beforeSession(_config, capabilities) {
+    ownProfile(capabilities as WebdriverIO.Capabilities);
+  },
 
   // The target counts every request but its own two control routes, and answers with the canary
   // (readable by the page, so the positive control delivers it into the page's memory).
@@ -79,5 +101,6 @@ export const config: WebdriverIO.Config = {
     host?.kill();
     target?.close();
     provider?.close();
+    removeProfiles();
   },
 };

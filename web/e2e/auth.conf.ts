@@ -17,7 +17,7 @@ import { createServer, type Server } from "node:http";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { SevereServiceError } from "webdriverio";
-import { config as base } from "./wdio.conf.ts";
+import { config as base, removeProfiles } from "./wdio.conf.ts";
 import { type Faults, type Injector, startInjector } from "./injector.ts";
 import { type Counts, type Grant, type Provider, startProvider } from "./provider.ts";
 
@@ -245,6 +245,8 @@ function stop(p: ChildProcess): Promise<void> {
 }
 
 async function cleanup() {
+  // The browsers' profiles go first, so that a database left behind does not keep them.
+  removeProfiles();
   // Each server must be gone before its database can be dropped.
   await Promise.all(procs.splice(0).map(stop));
   await Promise.all(servers.splice(0).map((s) => new Promise((r) => (s.closeAllConnections(), s.close(r)))));
