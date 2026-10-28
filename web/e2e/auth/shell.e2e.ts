@@ -205,13 +205,15 @@ describe("the state catalogue", () => {
 
   it("offline: identity-revoked on a superseded read still ends the page with the revocation", async () => {
     await fixtureSignIn("h-viewer");
-    // Each online event reads the identity, the machine list and its cluster filter again.
+    // On a page that reads only the identity: any other read that answers would end the banner.
+    await nav("Changes").click();
+    await reads(5);
     await faults({ held: "/identity", revoked: "/identity" });
     await event("online");
-    await reads(7);
+    await reads(6);
     await faults({ redirect: "/identity" });
     await event("online");
-    await reads(10);
+    await reads(7);
     // The newer read lost its answer; the old read's revocation, released after it, still ends the page.
     await announced("offline", /^Offline since /);
     await release();
