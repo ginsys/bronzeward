@@ -53,7 +53,7 @@ def markdown_lines(path, root=ROOT):
     for number, line in enumerate(read_text(path, root).splitlines(), 1):
         require(line == line.rstrip(), f'{label}:{number}: trailing whitespace')
         # At any indentation, so that a fence inside a list item counts too.
-        marker = re.match(r'^ *(`{3,}|~{3,})(.*)$', BLOCKQUOTE.sub('', line))
+        marker = re.match(r'^ *(`{3,}|~{3,})(.*)$', BLOCKQUOTE.sub('', line).expandtabs(4))
         if marker and fence is None:
             fence = marker.group(1)
         elif marker and marker.group(1)[0] == fence[0] and len(marker.group(1)) >= len(fence) \
@@ -188,10 +188,11 @@ def disallowed_hosts(text):
 
 
 def operator_code(path, root=ROOT):
-    """Yield (number, text) for the code an operator copies from a page: fenced lines, lines
-    indented four or more spaces outside a list (indented code), and inline code spans, which may
-    run over the lines of one paragraph."""
-    paragraph, in_list = [], False
+    """Yield (number, text) for the code an operator copies from a page: fenced lines, indented
+    code (four or more spaces past a list item's content, or past the margin outside a list), and
+    inline code spans, which may run over the lines of one paragraph. A tab counts as four
+    spaces."""
+    paragraph, content = [], None  # content: the open list item's content indentation
 
     def spans():
         text = '\n'.join(line for _, line in paragraph)
@@ -200,17 +201,19 @@ def operator_code(path, root=ROOT):
         paragraph.clear()
 
     for number, line, fenced in markdown_lines(path, root):
-        body = BLOCKQUOTE.sub('', line)
+        body = BLOCKQUOTE.sub('', line).expandtabs(4)
         if fenced:
             yield from spans()
             yield number, line
             continue
-        if re.match(r' {0,3}(?:[-*+]|\d+[.)])(?: |$)', body):
-            in_list = True
-        elif body.strip() and not body.startswith(' '):
-            in_list = False
-        if body.startswith('    ') and not in_list:
+        indent = len(body) - len(body.lstrip(' '))
+        item = re.match(r' *(?:[-*+]|\d+[.)])(?: {1,4}|$)', body)
+        if body.strip() and indent >= (content or 0) + 4:
             yield number, line
+        elif item:
+            content = item.end()
+        elif body.strip() and not indent:
+            content = None
         if body.strip():
             paragraph.append((number, body))
         else:
