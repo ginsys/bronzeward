@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ADOPTED, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, latestUnread, nextTail, type Observation, POLL_MS, polled, readTail, sentences, type Tail } from "./machine.tsx";
+import { ADOPTED, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, latestUnread, nextTimeline, type Observation, POLL_MS, polled, readLater, readOlder, sentences, type Timeline, UNREAD } from "./machine.tsx";
 import type { Machine } from "./machines.tsx";
 import type { ReadResult } from "./request.ts";
 
@@ -112,59 +112,131 @@ function client(answers: ReadResult<unknown>[]) {
   const paths: string[] = [];
   return { paths, read: <T,>(path: string) => (paths.push(path), Promise.resolve(answers.shift() as ReadResult<T>)) };
 }
-const page = (items: number[], next?: string): ReadResult<unknown> => ({ kind: "ok", data: next === undefined ? { items } : { items, next } });
+const page = (items: number[], next?: string, tail?: string): ReadResult<unknown> => ({
+  kind: "ok", data: { items, ...(next === undefined ? {} : { next }), ...(tail === undefined ? {} : { tail }) },
+});
 const restart: ReadResult<unknown> = { kind: "restart", problem: { type: "urn:bronzeward:problem:cursor-invalid", title: "Cursor invalid", status: 400 } };
-const empty: Tail<number> = { items: [], start: 0, cursor: undefined };
+// A timeline read, newest first, with its cursors.
+// A read no newer one has superseded.
+const on = () => true;
+const shown = (items: number[], older?: string, tail?: string, restarted = false): Timeline<number> => ({ items, older, tail, read: true, restarted });
 
-describe("the timeline poll (client contracts §8.6 item 6)", () => {
-  test("read to its end, then the last page read again with the cursor that read it", async () => {
-    const c = client([page([1, 2], "c1"), page([3]), page([3, 4])]);
-    const first = await readTail(c, "/t", empty);
-    expect(first).toEqual({ kind: "ok", data: { items: [1, 2, 3], start: 2, cursor: "c1" } });
-    expect(await readTail(c, "/t", (first as { data: Tail<number> }).data)).toEqual({ kind: "ok", data: { items: [1, 2, 3, 4], start: 2, cursor: "c1" } });
-    expect(c.paths).toEqual(["/t", "/t?cursor=c1", "/t?cursor=c1"]);
+describe("the timeline: newest page, Load older and the poll (client contracts §8.6 item 6)", () => {
+  test("the first read is the newest page, in one request with order=newest, shown as answered", async () => {
+    const c = client([page([5, 4, 3], "o3", "t5")]);
+    expect(await readLater(c, "/t", UNREAD)).toEqual({ kind: "ok", data: shown([5, 4, 3], "o3", "t5") });
+    expect(c.paths).toEqual(["/t?order=newest"]);
   });
 
-  test("a single page is read again from the start; a new page moves the cursor on", async () => {
-    const c = client([page([1]), page([1, 2], "c1"), page([3])]);
-    const first = await readTail(c, "/t", empty);
-    expect(await readTail(c, "/t", (first as { data: Tail<number> }).data)).toEqual({ kind: "ok", data: { items: [1, 2, 3], start: 2, cursor: "c1" } });
-    expect(c.paths).toEqual(["/t", "/t", "/t?cursor=c1"]);
+  test("Load older appends the older page, read with order=newest from the page's next", async () => {
+    const c = client([page([2, 1], "o1", "t6")]);
+    // The answer's tail is the poll's to follow, not Load older's.
+    expect(await readOlder(c, "/t", shown([5, 4, 3], "o3", "t5"), on)).toEqual({ kind: "ok", data: shown([5, 4, 3, 2, 1], "o1", "t5") });
+    expect(c.paths).toEqual(["/t?order=newest&cursor=o3"]);
   });
 
-  test("a refused cursor reads the timeline again from its start, once", async () => {
-    const c = client([restart, page([9])]);
-    expect(await readTail(c, "/t", { items: [1, 2], start: 1, cursor: "old" })).toEqual({ kind: "ok", data: { items: [9], start: 0, cursor: undefined } });
-    expect(await readTail(client([restart]), "/t", empty)).toMatchObject({ kind: "refused", status: 400 });
-    expect(await readTail(client([{ kind: "transport" }]), "/t", empty)).toEqual({ kind: "transport" });
+  test("the end of the timeline: a page without next leaves nothing older, so Load older is not offered", async () => {
+    const c = client([page([2, 1], undefined, "t5")]);
+    const res = await readOlder(c, "/t", shown([5, 4, 3], "o3", "t5"), on);
+    expect(res).toEqual({ kind: "ok", data: shown([5, 4, 3, 2, 1], undefined, "t5") });
+    // Nothing is read once the start is shown, and a first page without next is the whole timeline.
+    expect(await readOlder(c, "/t", shown([1]), on)).toEqual({ kind: "ok", data: shown([1]) });
+    expect(c.paths).toEqual(["/t?order=newest&cursor=o3"]);
+    expect(await readLater(client([page([1], undefined, "t1")]), "/t", UNREAD)).toEqual({ kind: "ok", data: shown([1], undefined, "t1") });
+  });
+
+  test("review C1: Load older before a new view's newest page answered reads nothing and replaces nothing shown", async () => {
+    const c = client([page([1], undefined, "t1")]);
+    const res = await readOlder(c, "/t", UNREAD, on);
+    expect(res).toEqual({ kind: "discarded" });
+    expect(c.paths).toEqual([]);
+    expect(nextTimeline(UNREAD, res)).toBe(UNREAD);
+  });
+
+  test("the poll reads on from tail in oldest order, follows next, keeps the last page's tail and shows later entries first", async () => {
+    const c = client([page([4, 5], "c5", "t5"), page([6], undefined, "t6"), page([], undefined, "t6")]);
+    const first = await readLater(c, "/t", shown([3, 2], "o2", "t3"));
+    expect(first).toEqual({ kind: "ok", data: shown([6, 5, 4, 3, 2], "o2", "t6") });
+    expect(await readLater(c, "/t", (first as { data: Timeline<number> }).data)).toEqual(first);
+    expect(c.paths).toEqual(["/t?cursor=t3", "/t?cursor=c5", "/t?cursor=t6"]);
+  });
+
+  test("no tail while the machine has none: the poll reads from the start", async () => {
+    const c = client([page([1, 2], undefined, "t2")]);
+    expect(await readLater(c, "/t", shown([]))).toEqual({ kind: "ok", data: shown([2, 1], undefined, "t2") });
+    expect(c.paths).toEqual(["/t"]);
+  });
+
+  test("a refused cursor reads the newest page again, once, for the poll and for Load older", async () => {
+    const c = client([restart, page([9], "o9", "t9"), restart, page([9], "o9", "t9")]);
+    expect(await readLater(c, "/t", shown([1, 2], undefined, "old"))).toEqual({ kind: "ok", data: shown([9], "o9", "t9", true) });
+    expect(await readOlder(c, "/t", shown([2], "old", "t2"), on)).toEqual({ kind: "ok", data: shown([9], "o9", "t9", true) });
+    expect(c.paths).toEqual(["/t?cursor=old", "/t?order=newest", "/t?order=newest&cursor=old", "/t?order=newest"]);
+    expect(await readLater(client([restart]), "/t", UNREAD)).toMatchObject({ kind: "refused", status: 400 });
+    expect(await readLater(client([{ kind: "transport" }]), "/t", UNREAD)).toEqual({ kind: "transport" });
+  });
+
+  test("a restarted timeline says so (PAGE-02) through the reads after it; a first read does not", async () => {
+    const c = client([restart, page([9], "o9", "t9"), page([10], undefined, "t10"), page([8], undefined, "t10")]);
+    const res = await readLater(c, "/t", shown([1], undefined, "old"));
+    expect(res).toMatchObject({ kind: "ok", data: { restarted: true } });
+    const later = await readLater(c, "/t", (res as { data: Timeline<number> }).data);
+    expect(later).toEqual({ kind: "ok", data: shown([10, 9], "o9", "t10", true) });
+    expect(await readOlder(c, "/t", (later as { data: Timeline<number> }).data, on)).toEqual({ kind: "ok", data: shown([10, 9, 8], undefined, "t10", true) });
+    expect(await readLater(client([page([1], undefined, "t1")]), "/t", UNREAD)).toMatchObject({ kind: "ok", data: { restarted: false } });
   });
 
   test("review R1-F1: a restart that fails drops the timeline read before it and its refused cursor", async () => {
     const c = client([restart, { kind: "transport" }]);
-    const from = { items: [1, 2], start: 1, cursor: "old" };
-    const res = await readTail(c, "/t", from);
+    const from = shown([1, 2], undefined, "old");
+    const res = await readLater(c, "/t", from);
     expect(res).toEqual({ kind: "dropped", failed: { kind: "transport" } });
-    expect(c.paths).toEqual(["/t?cursor=old", "/t"]);
-    // The next poll reads from the start; an ordinary failure keeps the tail it had.
-    expect(nextTail(from, res)).toEqual(empty);
-    expect(nextTail(from, { kind: "transport" })).toBe(from);
+    expect(c.paths).toEqual(["/t?cursor=old", "/t?order=newest"]);
+    // The next poll reads the newest page again; an ordinary failure keeps the timeline it had.
+    expect(nextTimeline(from, res)).toEqual(UNREAD);
+    expect(nextTimeline(from, { kind: "transport" })).toBe(from);
   });
 
   test("review R1-F2: one restart per read: a cursor refused again is surfaced, not read again", async () => {
-    const c = client([restart, page([1], "c1"), restart, page([1], "c1"), restart]);
-    expect(await readTail(c, "/t", { items: [1], start: 1, cursor: "c1" })).toMatchObject({ kind: "dropped", failed: { kind: "refused", status: 400 } });
-    expect(c.paths).toEqual(["/t?cursor=c1", "/t", "/t?cursor=c1"]);
+    const c = client([restart, restart, page([1], "c1")]);
+    expect(await readLater(c, "/t", shown([1], undefined, "c1"))).toMatchObject({ kind: "dropped", failed: { kind: "refused", status: 400 } });
+    expect(c.paths).toEqual(["/t?cursor=c1", "/t?order=newest"]);
   });
 
   test("review R1-F3: a traversal a newer read superseded sends no further page request, and still hands on the answer in flight", async () => {
     let going = true;
     const c = client([page([1], "c1"), page([2])]);
-    const res = readTail(c, "/t", empty, () => going);
+    const res = readLater(c, "/t", shown([], undefined, "t0"), () => going);
     going = false;
     expect(await res).toEqual({ kind: "discarded" });
-    expect(c.paths).toEqual(["/t"]);
+    expect(c.paths).toEqual(["/t?cursor=t0"]);
     const revoked: ReadResult<unknown> = { kind: "revoked", problem: { type: "urn:bronzeward:problem:identity-revoked", title: "Identity revoked", status: 403 } };
-    expect(await readTail(client([revoked]), "/t", empty, () => false)).toEqual(revoked);
+    going = true;
+    const refused = readLater(client([revoked]), "/t", shown([], undefined, "t0"), () => going);
+    going = false;
+    expect(await refused).toEqual(revoked);
+  });
+
+  test("review L1-F1: a superseded read whose cursor is refused does not read the newest page again", async () => {
+    let going = true;
+    // Each refused cursor is followed by the page a restart would read.
+    const c = client([restart, restart, page([9], "o9", "t9"), page([9], "o9", "t9")]);
+    const later = readLater(c, "/t", shown([1], "old", "old"), () => going);
+    going = false;
+    expect(await later).toEqual({ kind: "discarded" });
+    going = true;
+    const older = readOlder(c, "/t", shown([1], "old", "t1"), () => going);
+    going = false;
+    expect(await older).toEqual({ kind: "discarded" });
+    expect(c.paths).toEqual(["/t?cursor=old", "/t?order=newest&cursor=old"]);
+  });
+
+  test("review L1-F2: a read queued behind another sends nothing once it is superseded or the shell dropped the reads", async () => {
+    const c = client([page([9], "o9", "t9")]);
+    expect(await readLater(c, "/t", UNREAD, () => false)).toEqual({ kind: "discarded" });
+    expect(await readLater(c, "/t", shown([1], "o1", "t1"), () => false)).toEqual({ kind: "discarded" });
+    expect(await readOlder(c, "/t", shown([1], "o1", "t1"), () => false)).toEqual({ kind: "discarded" });
+    expect(c.paths).toEqual([]);
   });
 
   test("review R1-F4: a page opened hidden reads nothing until it is visible", async () => {

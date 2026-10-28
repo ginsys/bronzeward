@@ -18,8 +18,8 @@ export type Identity = components["schemas"]["IdentityBody"];
 export type Role = Identity["roles"][number];
 
 // §7 item 3: revision 2 added Bronzeward-Expected-Epoch, which every write but the recovery entry
-// sends (§8.1).
-export const MIN_API_REVISION = 2;
+// sends (§8.1); revision 3 the timeline's order and tail, which W3 reads with (§8.6 item 6).
+export const MIN_API_REVISION = 3;
 
 declare const __BW_VERSION__: string;
 export const clientVersion = () => __BW_VERSION__;
