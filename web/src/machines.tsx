@@ -65,6 +65,11 @@ export function Machines({ query, go }: { query: string; go: (to: string) => voi
   const state = STATES.find(([v]) => v === q.get("state"));
   const [list, more, busy] = useList<Machine>("/machines", cluster === "" ? "" : new URLSearchParams({ cluster }).toString(), state !== undefined);
   const [clusters] = useList<Cluster>("/clusters", "", true);
+  const unread = usePending(clusters, "clusters");
+  const options: (readonly [string, string])[] = clusters.kind === "ok" ? clusters.data.items.map((c) => [c.id, c.name]) : [];
+  // The selected cluster keeps its option while the clusters are not read, so the filter never
+  // says "all" over a filtered list.
+  if (cluster !== "" && !options.some(([id]) => id === cluster)) options.push([cluster, short(cluster)]);
   let body = usePending(list, "machines");
   const filter = (k: string, v: string) => {
     if (v === "") q.delete(k);
@@ -100,7 +105,8 @@ export function Machines({ query, go }: { query: string; go: (to: string) => voi
   return (
     <>
       <h2>Machines</h2>
-      <Filter label="Cluster:" value={cluster} options={clusters.kind === "ok" ? clusters.data.items.map((c) => [c.id, c.name]) : []} onChange={(v) => filter("cluster", v)} />
+      <Filter label="Cluster:" value={cluster} options={options} onChange={(v) => filter("cluster", v)} />
+      {clusters.kind !== "loading" && unread}
       <Filter label="State:" value={state?.[0] ?? ""} options={STATES} onChange={(v) => filter("state", v)} />
       {body}
       <p>Health is not checked.</p>

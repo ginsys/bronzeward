@@ -108,6 +108,22 @@ describe("the shell", () => {
     // §7 item 5: the view the refused GET /server ended the shell with still names both versions.
     expect(await $("footer").getText()).toMatch(/^Client .+\. Server unknown$/);
   });
+
+  it("a move to another page while the server's version is read reads it again under the new page", async () => {
+    // GET /server is held until released. Back/Forward moves the view, so the client discards the
+    // held answer; the shell reads it again under the new page before either answers.
+    await load({ held: "/server" });
+    await browser.waitUntil(async () => (await seen()).includes("/server"), { timeout: 10_000, timeoutMsg: "GET /server was not asked" });
+    await announced("status", "Loading the server's version");
+    await browser.execute(() => {
+      history.pushState(null, "", "/plans");
+      dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await browser.waitUntil(async () => (await seen()).filter((p) => p === "/server").length === 2, { timeout: 10_000, timeoutMsg: "GET /server was not asked again" });
+    await release();
+    await expect($("main h2")).toHaveText("Plans", { wait: 20_000 });
+    expect(await testid("server").getText()).toMatch(SERVER);
+  });
 });
 
 describe("the state catalogue", () => {
