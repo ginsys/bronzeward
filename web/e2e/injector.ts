@@ -26,8 +26,10 @@ export interface Faults {
   // A 409 recovery-mode-active problem without a scope member for these paths, instead of the
   // server's answer: a process restarted for recovery under the same epoch, its entry not yet made.
   processRefused?: string[];
-  // W3: the body of a successful answer to each path, with the server's status and headers: the
-  // synthetic machine and observation reads a deployment without a Talos node cannot produce.
+  // W3 and the read-only items: the body of a successful answer to each path, with the server's
+  // status and headers, or, for an item the deployment does not hold, its 404 answered 200: the
+  // server has authenticated the read, and the body is a read the deployment cannot produce without
+  // a Talos node or a publication. A refusal is never replaced.
   bodies?: Record<string, unknown>;
 }
 
@@ -95,10 +97,15 @@ export function startInjector(upstream: string, port: number): Promise<Injector>
       if (route === "/server" && f.revision !== undefined && up.ok) {
         out = Buffer.from(JSON.stringify({ ...JSON.parse(out.toString()), apiRevision: f.revision }));
       }
-      if (up.ok && f.bodies?.[route] !== undefined) out = Buffer.from(JSON.stringify(f.bodies[route]));
+      let status = up.status;
+      const stand = f.bodies?.[route];
+      if (stand !== undefined && (up.ok || up.status === 404)) {
+        out = Buffer.from(JSON.stringify(stand));
+        if (!up.ok) [status, back["content-type"]] = [200, "application/json"];
+      }
       if (f.deprecate === route) back["deprecation"] = "@1767225600";
       inj.answered.push(`${route}${search} ${up.status}`);
-      res.writeHead(up.status, back).end(out);
+      res.writeHead(status, back).end(out);
     })().catch(() => req.socket.destroy());
   });
   return new Promise((resolve, reject) => {

@@ -16,8 +16,10 @@ const nav = (title: string) => $('nav[aria-label="Main"]').$(`a=${title}`);
 // The browser's own connectivity events, as the shell listens for them.
 const event = (name: "offline" | "online") => browser.execute((n: string) => void dispatchEvent(new Event(n)), name);
 const reads = (n: number) => browser.waitUntil(async () => (await seen()).length === n, { timeout: 10_000, timeoutMsg: `the page did not make ${n} reads` });
-// The machine list and its cluster filter are read at once, so they arrive in either order.
-const ordered = async () => (await seen()).join(" ").replaceAll("/clusters /machines", "/machines /clusters").split(" ");
+// A page's lists and the header's identity are read at once, so they arrive in any order: the
+// server's version first, then every other read as many times as expected.
+const sorted = ([first, ...rest]: string[]) => [first, ...rest.sort()];
+const ordered = async () => sorted(await seen());
 
 // Loads the page without waiting for it to settle, so a state on the way can be read.
 async function load(f: Faults) {
@@ -57,12 +59,13 @@ describe("the shell", () => {
     await expect($("main h2")).toHaveText("Machines");
     expect(await where()).toBe(`${FIXTURE_PAGE}/`);
     // The server's version first (§7 item 3), the header's identity on each page, the machine list
-    // and its cluster filter once the identity is shown. Reads sent together arrive in any order.
+    // and its cluster filter once the identity is shown, and each page's own list. Reads sent
+    // together arrive in any order.
+    await reads(9);
     const s = await seen();
     expect(s.slice(0, 2)).toEqual(["/server", "/identity"]);
     expect(s.slice(2, 4).sort()).toEqual(["/clusters", "/machines"]);
-    expect(s[4]).toBe("/identity");
-    expect(s.slice(5).sort()).toEqual(["/clusters", "/identity", "/machines"]);
+    expect(s.slice(4).sort()).toEqual(["/clusters", "/identity", "/identity", "/machines", "/plans"]);
   });
 
   it("a query-only move reads the identity again under the new view", async () => {
@@ -97,7 +100,10 @@ describe("the shell", () => {
     await expect($("main h2")).toHaveText("Audit");
     await nav("Sources").click();
     await expect($("main h2")).toHaveText("Sources");
-    expect(await ordered()).toEqual(["/server", "/identity", "/machines", "/clusters", "/identity", "/identity"]);
+    await reads(12);
+    expect(await ordered()).toEqual(sorted([
+      "/server", "/identity", "/machines", "/clusters", "/acts", "/identity", "/fragments", "/profiles", "/assignments", "/dependencies", "/dependency-alerts", "/identity",
+    ]));
     expect(await $$('[data-testid="deprecation"]').length).toBe(1);
   });
 
@@ -153,7 +159,8 @@ describe("the state catalogue", () => {
 
   it("offline: the last data stays under the banner until a read answers again", async () => {
     await fixtureSignIn("h-viewer");
-    await faults({ redirect: "/identity" });
+    // The operations list answers late, so its read cannot end the offline state first.
+    await faults({ redirect: "/identity", hold: { path: "/operations", ms: 8000 } });
     await nav("Operations").click();
     await announced("offline", /^Offline since \d\d:\d\d\. Showing data read at \d\d:\d\d\. Actions are disabled\.$/);
     expect(await testid("principal").getText()).toBe("Signed in as h-viewer");
@@ -161,12 +168,13 @@ describe("the state catalogue", () => {
     await nav("Changes").click();
     await expect($("main h2")).toHaveText("Changes");
     await expect(testid("offline")).not.toBeExisting({ wait: 10_000 });
-    expect(await testid("status").isExisting()).toBe(false);
+    await expect(testid("status")).toHaveText("No releases published yet.");
   });
 
   it("offline: a refusal the server answers ends the banner too, and is shown", async () => {
     await fixtureSignIn("h-viewer");
-    await faults({ redirect: "/identity" });
+    // The operations list answers late, so its read cannot end the offline state first.
+    await faults({ redirect: "/identity", hold: { path: "/operations", ms: 8000 } });
     await nav("Operations").click();
     await announced("offline", /^Offline since /);
     await faults({ missing: "/identity" });
@@ -198,7 +206,9 @@ describe("the state catalogue", () => {
     await event("online");
     await expect(testid("principal")).toHaveText("Signed in as h-viewer");
     expect(await testid("offline").isExisting()).toBe(false);
-    expect(await ordered()).toEqual(["/server", "/identity", "/machines", "/clusters", "/identity", "/identity"]);
+    // The changes page reads its list each time it is shown, under the refused identity too.
+    await reads(8);
+    expect(await ordered()).toEqual(sorted(["/server", "/identity", "/machines", "/clusters", "/identity", "/releases", "/identity", "/releases"]));
   });
 
   it("offline: a read an online event superseded is ignored when it completes, and the newer answer shown", async () => {
@@ -226,8 +236,12 @@ describe("the state catalogue", () => {
 
   it("offline: identity-revoked on a superseded read still ends the page with the revocation", async () => {
     await fixtureSignIn("h-viewer");
-    // On a page that reads only the identity: any other read that answers would end the banner.
-    await nav("Changes").click();
+    // On a path with no view, which reads only the identity: any other read that answers would end
+    // the banner.
+    await browser.execute(() => {
+      history.pushState(null, "", "/no-view");
+      dispatchEvent(new PopStateEvent("popstate"));
+    });
     await reads(5);
     await faults({ held: "/identity", revoked: "/identity" });
     await event("online");
@@ -315,7 +329,8 @@ describe("recovery", () => {
     expect(await testid("problem").getText()).toBe(INJECTED_REFUSAL);
     expect(await testid("principal").isExisting()).toBe(false);
     expect(await testid("server").getText()).toBe("Server unknown");
-    expect((await seen()).slice(-2)).toEqual(["/identity", "/server"]);
+    // The changes page's own list may arrive before or after the identity.
+    expect((await seen()).filter((p) => p !== "/releases").slice(-2)).toEqual(["/identity", "/server"]);
     await faults({});
     await $("button=Read again").click();
     await expect(testid("principal")).toHaveText("Signed in as h-viewer");
