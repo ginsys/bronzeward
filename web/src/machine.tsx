@@ -73,24 +73,24 @@ export function sentences(m: Machine, obs: Observation[]): string[] {
 }
 
 // The timeline as shown, newest first: `older` reads the page before the oldest shown (order=newest),
-// `tail` is where the poll reads on from (oldest order), and `read` is false until the newest page
-// answered.
-export interface Timeline<T> { items: T[]; older: string | undefined; tail: string | undefined; read: boolean }
+// `tail` is where the poll reads on from (oldest order), `read` is false until the newest page
+// answered, and `restarted` says a refused cursor read the timeline again (PAGE-02), as a list's does.
+export interface Timeline<T> { items: T[]; older: string | undefined; tail: string | undefined; read: boolean; restarted: boolean }
 type TimelinePage<T> = Page<T> & { tail?: string };
 
-export const UNREAD: Timeline<never> = { items: [], older: undefined, tail: undefined, read: false };
+export const UNREAD: Timeline<never> = { items: [], older: undefined, tail: undefined, read: false, restarted: false };
 
 // The newest page, which the first read and the read after a refused cursor take.
-async function readNewest<T>(client: Reads["client"], path: string): Promise<ReadResult<Timeline<T>>> {
+async function readNewest<T>(client: Reads["client"], path: string, restarted = false): Promise<ReadResult<Timeline<T>>> {
   const res = await client.read<TimelinePage<T>>(`${path}?order=newest`);
   if (res.kind === "restart") return { kind: "refused", status: 400, problem: res.problem };
-  return res.kind === "ok" ? { kind: "ok", data: { items: res.data.items, older: res.data.next, tail: res.data.tail, read: true } } : res;
+  return res.kind === "ok" ? { kind: "ok", data: { items: res.data.items, older: res.data.next, tail: res.data.tail, read: true, restarted } } : res;
 }
 
-// A refused cursor (another epoch) reads the newest page again, once; a failure after that is
-// dropped, with what was shown before it.
+// A refused cursor (another epoch) reads the newest page again, once, and the timeline then says it
+// restarted; a failure after that is dropped, with what was shown before it.
 async function restart<T>(client: Reads["client"], path: string): Promise<ReadResult<Timeline<T>> | Dropped> {
-  const res = await readNewest<T>(client, path);
+  const res = await readNewest<T>(client, path, true);
   return res.kind === "ok" || res.kind === "discarded" ? res : { kind: "dropped", failed: res };
 }
 

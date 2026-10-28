@@ -117,7 +117,7 @@ const page = (items: number[], next?: string, tail?: string): ReadResult<unknown
 });
 const restart: ReadResult<unknown> = { kind: "restart", problem: { type: "urn:bronzeward:problem:cursor-invalid", title: "Cursor invalid", status: 400 } };
 // A timeline read, newest first, with its cursors.
-const shown = (items: number[], older?: string, tail?: string): Timeline<number> => ({ items, older, tail, read: true });
+const shown = (items: number[], older?: string, tail?: string, restarted = false): Timeline<number> => ({ items, older, tail, read: true, restarted });
 
 describe("the timeline: newest page, Load older and the poll (client contracts ยง8.6 item 6)", () => {
   test("the first read is the newest page, in one request with order=newest, shown as answered", async () => {
@@ -159,11 +159,21 @@ describe("the timeline: newest page, Load older and the poll (client contracts ย
 
   test("a refused cursor reads the newest page again, once, for the poll and for Load older", async () => {
     const c = client([restart, page([9], "o9", "t9"), restart, page([9], "o9", "t9")]);
-    expect(await readLater(c, "/t", shown([1, 2], undefined, "old"))).toEqual({ kind: "ok", data: shown([9], "o9", "t9") });
-    expect(await readOlder(c, "/t", shown([2], "old", "t2"))).toEqual({ kind: "ok", data: shown([9], "o9", "t9") });
+    expect(await readLater(c, "/t", shown([1, 2], undefined, "old"))).toEqual({ kind: "ok", data: shown([9], "o9", "t9", true) });
+    expect(await readOlder(c, "/t", shown([2], "old", "t2"))).toEqual({ kind: "ok", data: shown([9], "o9", "t9", true) });
     expect(c.paths).toEqual(["/t?cursor=old", "/t?order=newest", "/t?order=newest&cursor=old", "/t?order=newest"]);
     expect(await readLater(client([restart]), "/t", UNREAD)).toMatchObject({ kind: "refused", status: 400 });
     expect(await readLater(client([{ kind: "transport" }]), "/t", UNREAD)).toEqual({ kind: "transport" });
+  });
+
+  test("a restarted timeline says so (PAGE-02) through the reads after it; a first read does not", async () => {
+    const c = client([restart, page([9], "o9", "t9"), page([10], undefined, "t10"), page([8], undefined, "t10")]);
+    const res = await readLater(c, "/t", shown([1], undefined, "old"));
+    expect(res).toMatchObject({ kind: "ok", data: { restarted: true } });
+    const later = await readLater(c, "/t", (res as { data: Timeline<number> }).data);
+    expect(later).toEqual({ kind: "ok", data: shown([10, 9], "o9", "t10", true) });
+    expect(await readOlder(c, "/t", (later as { data: Timeline<number> }).data)).toEqual({ kind: "ok", data: shown([10, 9, 8], undefined, "t10", true) });
+    expect(await readLater(client([page([1], undefined, "t1")]), "/t", UNREAD)).toMatchObject({ kind: "ok", data: { restarted: false } });
   });
 
   test("review R1-F1: a restart that fails drops the timeline read before it and its refused cursor", async () => {
