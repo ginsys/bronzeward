@@ -54,7 +54,10 @@ describe("the recovery banner", () => {
   });
 
   test("before the entry: the process's restriction, and a read again", () => {
-    expect(status(h(PreEntry, { onRead: () => {} }))).toBe(PRE_ENTRY);
-    expect(html(h(PreEntry, { onRead: () => {} }))).toContain(">Read again</button>");
+    const refused = { kind: "refused", status: 409, problem: { type: "urn:bronzeward:problem:recovery-mode-active", title: "Recovery mode active", status: 409, detail: "only the recovery entry", instance: "req-pre" } } as const;
+    expect(status(h(PreEntry, { res: refused, onRead: () => {} }))).toBe(PRE_ENTRY);
+    expect(html(h(PreEntry, { res: refused, onRead: () => {} }))).toContain(">Read again</button>");
+    // §8.2: the refusal's title, detail and request ID stay shown under the restriction.
+    expect(html(h(PreEntry, { res: refused, onRead: () => {} }))).toContain('<p data-testid="problem">Not read: Recovery mode active (only the recovery entry). Request req-pre.</p>');
   });
 });
