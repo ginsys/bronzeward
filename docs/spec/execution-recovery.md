@@ -1579,9 +1579,11 @@ C, which would create operation O, race.
   is sent, and P is `revoked` (DS row 002).
 - **R starts while C holds the approval.** R locks the approval `FOR UPDATE`,
   so it waits for C's `FOR SHARE` read and commits after it (§2). O is
-  `committed`, and O's attempt transaction then fails
-  comparison 1: `committed` → `unresolved` → `cancelled`, nothing sent (DS row
-  003; that R waited is inferred from the harness's record, DS §4.1).
+  `committed`. If R then takes M's row before O's attempt transaction, the
+  attempt fails comparison 1: `committed` → `unresolved` → `cancelled`,
+  nothing sent (DS row 003; that R waited is inferred from the harness's
+  record, DS §4.1). If the attempt transaction takes it first, R waits for
+  that transaction too, and the outcome is DS row 005's (**choice §10.31**).
 - **R commits after C, before the attempt.** The same outcome (DS row 004).
 - **R commits after the attempt transaction.** The attempt is sent, lands and
   completes. R prevents any retry and undoes nothing (DS row 005). This is the
@@ -2275,8 +2277,10 @@ conservative option; those that do not say so. Each is marked in place as
     008). This is the selected test route, not a claim that no fault
     could reach them: a Go check fixes the interleaving that a live run would
     have to arrange across processes. Row 003 is also one of §3.5's condition
-    rows; its attempt is refused before any mutating Talos request, so a
-    stand-in meets it (§3.5). Each is a Go check driving
+    rows; when its revocation takes the machine row first, the attempt is
+    refused before any mutating Talos request, so a stand-in meets it (§3.5).
+    The other order's outcome is row 005's, which runs live (choice §10.31).
+    Each is a Go check driving
     the implementation's transactions, or its executor with a Talos stand-in,
     against PostgreSQL. Row 011's control is the schema's, not a transaction's:
     with both scope indexes dropped, a second plan's operation rows insert
