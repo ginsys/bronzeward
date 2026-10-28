@@ -19,6 +19,10 @@ export const JOIN_WAIT_MS = 5_000;
 // how long a tab granted the lock waits for the pair of a redirect before it redirects itself.
 export const ACK_WAIT_MS = 3_000;
 export const REDIRECT_WAIT_MS = 10_000;
+// #406: how long a rejoined tab keeps its earlier channels open once its new one has opened, for
+// what other tabs posted to them before. Channels order only one sender's messages, so no message
+// can mark the others as delivered; one still in transit after this is lost (§9.3 item 3, Limits).
+export const STALE_WAIT_MS = 3_000;
 
 export type Message =
   | { type: "signed-out" }
@@ -30,8 +34,9 @@ export type Message =
   // from a new tab, which takes the current pair.
   | { type: "request"; due?: number }
   | { type: "pair"; tokens: Tokens }
-  // The holder leaves to renew by the redirect, whose pair comes to every tab.
-  | { type: "redirecting" };
+  // The holder leaves to renew by the redirect, whose pair comes to every tab. `from`: the expiry
+  // of the pair it leaves with; a pair newer than that is the redirect's, or a later one (#400).
+  | { type: "redirecting"; from?: number };
 
 export interface Channel {
   postMessage(message: Message): void;
@@ -56,10 +61,13 @@ export class Renewer {
   #ready: Promise<void> = Promise.resolve();
   #leave: (() => void) | undefined;
   // The channels of the tab locks taken from this tab: they still deliver what was posted to them
-  // before, of which this tab keeps only a sign-out and the refresh tokens announced as spent (#388).
-  readonly #stale: Channel[] = [];
-  // Until when another tab's redirect may still bring a pair.
+  // before, of which this tab keeps only a sign-out and the refresh tokens announced as spent (#388),
+  // until STALE_WAIT_MS after the next channel opens (#406).
+  #stale: Channel[] = [];
+  // Until when another tab's redirect may still bring a pair, and the expiry that pair exceeds: once
+  // a pair newer than that comes, the redirect is over and its deadline cleared (#400).
   #redirectUntil = 0;
+  #redirectFrom = 0;
   // A sign-out, this tab's or another's, is acted on once: a second one must not cut short the
   // first one's bounded wait (#388).
   #signedOut = false;
@@ -123,7 +131,8 @@ export class Renewer {
   // §9.3 item 3: just before the holder's renewal by the redirect, so that the next holder waits
   // for its pair rather than redirecting too (#388).
   redirecting(): void {
-    this.#now({ type: "redirecting" });
+    const from = this.session()?.expiresAt;
+    this.#now(from === undefined ? { type: "redirecting" } : { type: "redirecting", from });
   }
 
   // Posted at once, not when the channel opens: the page may be released first. While a rejoin
@@ -167,7 +176,8 @@ export class Renewer {
     this.release();
     this.#channel?.close();
     this.#channel = undefined;
-    for (const c of this.#stale.splice(0)) c.close();
+    for (const c of this.#stale) c.close();
+    this.#stale = [];
   }
 
   // §9.5 item 1: the holder renews; another tab asks it and waits for a newer pair, at most 10 s,
@@ -200,11 +210,22 @@ export class Renewer {
       this.#post({ type: "ack", of: m.of, tab: this.#tab });
     }
     if (m.type === "ack") for (const a of this.#acks) a(m);
-    if (m.type === "redirecting") this.#redirectUntil = Date.now() + REDIRECT_WAIT_MS;
+    if (m.type === "redirecting") this.#redirecting(typeof m.from === "number" ? m.from : undefined);
     if (m.type === "request") void this.#answer(typeof m.due === "number" ? m.due : undefined);
     if (m.type !== "pair" || !isTokens(m.tokens)) return;
+    if (m.tokens.expiresAt > this.#redirectFrom) this.#redirectUntil = 0;
     for (const w of this.#waiting) w(m.tokens);
     this.onPair(m.tokens);
+  }
+
+  // #400: a `redirecting` whose redirect this tab already has a newer pair from, a late or repeated
+  // one, starts no wait; a wait already running keeps its own end. Without `from`, this tab's own
+  // expiry stands for it.
+  #redirecting(from: number | undefined): void {
+    const own = this.session()?.expiresAt ?? 0;
+    if (from !== undefined && own > from) return;
+    this.#redirectUntil = Date.now() + REDIRECT_WAIT_MS;
+    this.#redirectFrom = from ?? own;
   }
 
   // Take a new tab lock, then open the channel. A lock taken from this tab (another holder found it
@@ -226,6 +247,7 @@ export class Renewer {
         };
         this.#channel = channel;
         opened();
+        this.#drain();
         return held;
       })
       .catch(() => this.#rejoin(tab));
@@ -252,6 +274,18 @@ export class Renewer {
     this.#leave?.();
     this.#start();
     this.#post({ type: "request" });
+  }
+
+  // #406: the new channel has opened and hears everything posted from now on; the earlier ones are
+  // closed STALE_WAIT_MS later, once what other tabs posted to them before has normally arrived.
+  // Closed only now, since until the new channel opened this tab's own messages went out on them.
+  #drain(): void {
+    const old = [...this.#stale];
+    if (old.length === 0) return;
+    setTimeout(() => {
+      for (const c of old) c.close();
+      this.#stale = this.#stale.filter((c) => !old.includes(c));
+    }, STALE_WAIT_MS);
   }
 
   // A released tab still posts the pair of a renewal it had in flight; it acks and asks no more.

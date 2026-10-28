@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { type Provider, Session, type Tokens } from "./auth.ts";
 import type { ClientConfig } from "./config.ts";
-import { ACK_WAIT_MS, type Channel, JOIN_WAIT_MS, type Locks, type Message, REDIRECT_WAIT_MS, Renewer, RENEW_WAIT_MS, TAB } from "./renewer.ts";
+import { ACK_WAIT_MS, type Channel, JOIN_WAIT_MS, type Locks, type Message, REDIRECT_WAIT_MS, Renewer, RENEW_WAIT_MS, STALE_WAIT_MS, TAB } from "./renewer.ts";
 
 const ISSUER = "http://localhost:58280";
 const config: ClientConfig = { issuer: ISSUER, audience: "bronzeward", cliClientId: "cli", webClientId: "web", scopes: [] };
@@ -45,6 +45,9 @@ class Browser {
   // Every open channel, and the tab it belongs to. A message reaches the channels open when it
   // was posted that are still open when it is delivered, the sender's excepted.
   readonly channels = new Map<Channel, Tab>();
+  // A channel delivers one sender's messages in order, but nothing orders different senders' (#406):
+  // a tab held here has its messages held back, behind later ones of other tabs, until released.
+  readonly #holds = new Map<Tab, (() => void)[]>();
   readonly sent: string[] = [];
   readonly revoked: string[] = [];
   latest = "SYNTH-r1";
@@ -74,6 +77,21 @@ class Browser {
     return new Tab(this);
   }
 
+  // Holds back what `tab` posts from now on; the returned function delivers it, in its order.
+  hold(tab: Tab): () => void {
+    const held: (() => void)[] = [];
+    this.#holds.set(tab, held);
+    return () => {
+      this.#holds.delete(tab);
+      for (const d of held.splice(0)) d();
+    };
+  }
+
+  // The channels of `tab` still open.
+  openChannels(tab: Tab): number {
+    return [...this.channels.values()].filter((t) => t === tab).length;
+  }
+
   channel(tab: Tab): Channel {
     const c: Channel = {
       onmessage: null,
@@ -81,9 +99,12 @@ class Browser {
       postMessage: (m: Message) => {
         const sent = structuredClone(m);
         const to = [...this.channels].filter(([o]) => o !== c);
-        queueMicrotask(() => {
+        const deliver = () => {
           for (const [o, t] of to) if (this.channels.has(o)) t.deliver(o, structuredClone(sent));
-        });
+        };
+        const held = this.#holds.get(tab);
+        if (held !== undefined) held.push(deliver);
+        else queueMicrotask(deliver);
       },
       close: () => void this.channels.delete(c),
     };
@@ -727,5 +748,101 @@ describe("#388 announced renewals", () => {
     grant();
     await settle();
     expect(joined).toBe(true);
+  });
+});
+
+describe("#400 redirect handover deadline", () => {
+  // x renews by the redirect; y, granted the lock, takes the pair the redirect brings.
+  const handover = async () => {
+    const b = new Browser();
+    const [x, y] = [b.open(), b.open()];
+    const before = Date.now() + 60_000;
+    x.signIn(first({ refresh: undefined, expiresAt: before }));
+    await settle();
+    await y.join();
+    x.renewer.redirecting();
+    x.close();
+    await settle();
+    expect(y.renewer.holder).toBe(true);
+    return { b, y, before };
+  };
+  const answer = async (y: Tab) => {
+    let answered: boolean | undefined;
+    void y.renewer.renew().then((r) => (answered = r));
+    await settle();
+    return () => answered;
+  };
+
+  test("once the redirect's pair is taken, the next renewal by the redirect does not wait out that redirect's deadline, nor a late copy of its `redirecting`", async () => {
+    const { b, y, before } = await handover();
+    b.open().renewer.post(first({ access: "SYNTH-a9", refresh: undefined }));
+    await settle();
+    expect(y.session?.token()).toBe("SYNTH-a9");
+    // A `redirecting` from a tab still on the pair the redirect left with, delivered after its pair.
+    const z = b.open();
+    z.signIn(first({ refresh: undefined, expiresAt: before }));
+    await settle();
+    z.renewer.redirecting();
+    await settle();
+    // The pair has no refresh token: false means y renews by the redirect itself, at once.
+    expect((await answer(y))()).toBe(false);
+  });
+
+  test("a pair no newer than the one the redirect left with does not end its wait", async () => {
+    const { b, y, before } = await handover();
+    b.open().renewer.post(first({ access: "SYNTH-a8", refresh: undefined, expiresAt: before }));
+    await settle();
+    const answered = await answer(y);
+    await vi.advanceTimersByTimeAsync(REDIRECT_WAIT_MS - 1_000);
+    expect(answered()).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(answered()).toBe(false);
+  });
+});
+
+describe("#406 stale channels of a rejoined tab", () => {
+  test("after repeated rejoins, no earlier channel stays open STALE_WAIT_MS after the new one opened", async () => {
+    const b = new Browser();
+    const [x, y] = [b.open(), b.open()];
+    x.signIn(first());
+    await settle();
+    await y.join();
+    for (let i = 0; i < 3; i++) {
+      y.freeze();
+      const renewed = x.renewer.renew();
+      await vi.advanceTimersByTimeAsync(ACK_WAIT_MS);
+      expect(await renewed).toBe(true);
+      y.resume();
+      await settle();
+    }
+    expect(b.openChannels(y)).toBeLessThanOrEqual(2);
+    await vi.advanceTimersByTimeAsync(STALE_WAIT_MS);
+    expect(b.openChannels(y)).toBe(1);
+  });
+
+  // Other tabs' messages, posted before y rejoined, arrive after its new channel opened.
+  test("another tab's sign-out and `renewing` posted before a rejoin still apply when they arrive after it, within STALE_WAIT_MS", async () => {
+    const b = new Browser();
+    const [x, y, z] = [b.open(), b.open(), b.open()];
+    x.signIn(first());
+    await settle();
+    await y.join();
+    await z.join();
+    const fromZ = b.hold(z);
+    z.renewer.signOut();
+    const fromX = b.hold(x);
+    // Neither x's `renewing` nor z's ack arrives: x takes y's and z's tab locks, and they rejoin.
+    const renewed = x.renewer.renew();
+    await vi.advanceTimersByTimeAsync(ACK_WAIT_MS);
+    expect(await renewed).toBe(true);
+    await settle();
+    // y's new channel is open, and its earlier one still is.
+    expect(b.openChannels(y)).toBe(2);
+    expect([y.signedOut, y.renewer.hooks.spent?.("SYNTH-r1")]).toEqual([0, false]);
+    await vi.advanceTimersByTimeAsync(STALE_WAIT_MS - 1);
+    fromX();
+    fromZ();
+    await settle();
+    expect([y.signedOut, y.renewer.hooks.spent?.("SYNTH-r1")]).toEqual([1, true]);
   });
 });

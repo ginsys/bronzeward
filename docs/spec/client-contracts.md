@@ -839,7 +839,10 @@ current token expires
      before, of which the tab takes only a `signed-out` and the tokens a `renewing` names, never a
      pair: the holder may have sent a pair's refresh token without waiting for this tab, before its
      `renewing` naming it arrives. Until the new channel opens, its own `signed-out` and
-     `redirecting` go out on the old one. It then takes the holder's current pair, even one of the same expiry as its own, or, granted the
+     `redirecting` go out on the old one. The new channel hears everything posted after it opened;
+     3 s later the tab closes its earlier channels, for what other tabs posted to them before has
+     normally arrived by then ([#406](https://github.com/ginsys/bronzeward/issues/406)). It then
+     takes the holder's current pair, even one of the same expiry as its own, or, granted the
      renewer lock first, renews by the redirect. A holder whose own tab lock was taken before it
      sent sends nothing, and does the same. A tab that stops for good (`pagehide`, sign-out, the
      signed-out page) gives up its tab lock and is not waited for. A tab's own sign-in redirect
@@ -848,7 +851,10 @@ current token expires
    - A refresh-token request unanswered after 15 s fails the renewal (§9.5 item 3), so that a
      request the provider never answers holds back no later renewal and no pair for a new tab. Its
      answer, whenever it comes, is not kept: the refresh token it brings, which no tab holds, is
-     revoked, and the one sent stays held for sign-out's revocation. The request is not aborted,
+     revoked, and the one sent stays held for sign-out's revocation. A sign-out while that answer is
+     outstanding waits for it within its 5 s bound (§9.7 item 2), so a rotated refresh token that
+     arrives in time is revoked before the page navigates
+     ([#396](https://github.com/ginsys/bronzeward/issues/396)). The request is not aborted,
      since an abort cannot recall a request the provider may already have answered.
    - A tab without the lock never renews: under the 60 s threshold or after a `401` (§9.5 item 1)
      it posts a request and waits for the holder's pair, at most 10 s, then treats renewal as
@@ -856,7 +862,11 @@ current token expires
      renew by redirect posts `redirecting` first. A tab that received it in the last 10 s and is
      granted the lock, while it asks or before its own threshold, waits out the rest of those 10 s
      for that redirect's pair and redirects itself only if none comes, so that one renewal is one
-     redirect, not one per tab.
+     redirect, not one per tab. `redirecting` names the expiry of the pair the holder leaves with.
+     The first pair newer than that ends the wait, and the 10 s with it, so that the next renewal
+     of that pair does not wait for a redirect already over; a `redirecting` that reaches a tab
+     already holding such a pair, late or repeated, starts no wait
+     ([#400](https://github.com/ginsys/bronzeward/issues/400)).
    - A holder whose renewal answered a request due first has a new pair, and its own renewal
      timer waits for that pair's threshold instead of renewing again.
    - A refresh token named in a `renewing` is spent in every other tab, whatever the answer: a tab
@@ -888,6 +898,14 @@ current token expires
      extra redirect, which the provider answers from its session, and no refresh token sent
      twice. Having every tab acknowledge `redirecting`, as it does `renewing`, would close this at
      up to 3 s added to every redirect renewal; that is not done.
+     A channel delivers one sender's messages in order, but nothing orders different senders', so
+     no message can show that another tab's earlier posts have reached a rejoined tab's earlier
+     channel. One still in transit 3 s after the new channel opened is lost when that channel
+     closes. A lost `signed-out` leaves that tab signed in, showing its data, until it is signed
+     out itself or a renewal fails; a lost `renewing` names a refresh token the tab gave up on
+     rejoining. Keeping every earlier channel open
+     until the page is released would close this at one more open channel per rejoin; that is not
+     done ([#406](https://github.com/ginsys/bronzeward/issues/406)).
 
    Rejected: a lock taken per renewal, because a waiting tab can be granted it before the previous
    holder's pair reaches it and then spend the used token; a counter in `localStorage`, which
@@ -1013,7 +1031,9 @@ expiry, at most `maxTokenLifetime` after issue, plus the server's 60 s leeway
    refresh token the tab held if the provider allows it, even one it no longer sends for renewal
    (after a failed or unrotated renewal, or one another tab may have spent), or else the refresh
    token a renewal in flight sent, at once and without waiting for that renewal, and then the pair
-   it brings, tells other open tabs of the same origin to discard theirs
+   it brings, and the pair brought by the late answer of a refresh request that timed out
+   ([§9.3](#93-browser-sign-in) item 3, [#396](https://github.com/ginsys/bronzeward/issues/396)),
+   tells other open tabs of the same origin to discard theirs
    (assumption S3), and redirects to the provider's end-session endpoint where it offers one, with
    `client_id` and `post_logout_redirect_uri` only. It sends no `id_token_hint`: the test
    provider's ID token carries the access token's issuer, audience and lifetime, so the server
@@ -1021,8 +1041,10 @@ expiry, at most `maxTokenLifetime` after issue, plus the server's 60 s leeway
    hint that provider sends the browser through its login UI's logout page. It then shows a
    signed-out page that holds no data. A tab told of another tab's sign-out hides what it shows at
    once and revokes the last refresh token it holds, as its own sign-out would, since the other
-   tab may not have had it (a renewal answered just before its message). It waits at most 5 s for
-   that and for a renewal in flight to revoke the pair it brings, then shows the signed-out page,
+   tab may not have had it (a renewal answered just before its message). Either sign-out waits at
+   most 5 s for those revocations, for a renewal in flight to revoke the pair it brings and for a
+   timed-out request's answer to revoke its pair; the page then navigates, and an answer that comes
+   later finds no page. A told tab then shows the signed-out page,
    which holds no lock and records no other tab's refresh token. A tab acts on one sign-out only:
    a second tab's, or one after its own, would cut that wait short
    ([#388](https://github.com/ginsys/bronzeward/issues/388)).
