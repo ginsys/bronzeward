@@ -57,8 +57,12 @@ describe("the shell", () => {
     await expect($("main h2")).toHaveText("Machines");
     expect(await where()).toBe(`${FIXTURE_PAGE}/`);
     // The server's version first (§7 item 3), the header's identity on each page, the machine list
-    // and its cluster filter once the identity is shown.
-    expect(await ordered()).toEqual(["/server", "/identity", "/machines", "/clusters", "/identity", "/machines", "/clusters", "/identity"]);
+    // and its cluster filter once the identity is shown. Reads sent together arrive in any order.
+    const s = await seen();
+    expect(s.slice(0, 2)).toEqual(["/server", "/identity"]);
+    expect(s.slice(2, 4).sort()).toEqual(["/clusters", "/machines"]);
+    expect(s[4]).toBe("/identity");
+    expect(s.slice(5).sort()).toEqual(["/clusters", "/identity", "/machines"]);
   });
 
   it("a query-only move reads the identity again under the new view", async () => {
