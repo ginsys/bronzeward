@@ -278,13 +278,15 @@ describe("the machine detail (W3)", () => {
     await expect($("main h2")).toHaveText(`Machine ${id}`);
     const said = await texts('[data-testid="sentences"] li');
     expect(said).toEqual(sentences(machine, [p, m1, k]));
-    expect(said[0]).toMatch(new RegExp(`^Drifted since \\d\\d:\\d\\d: a read differed from what Bronzeward last verified \\(${short(rel("a"))}\\)\\.$`));
+    expect(said[0]).toMatch(new RegExp(`^Drifted since 2026-10-2\\d \\d\\d:\\d\\d: a read differed from what Bronzeward last verified \\(${short(rel("a"))}\\)\\.$`));
     expect(said).toContain("It equals the selected release; that does not close the drift.");
-    expect(said).toEqual(expect.arrayContaining([expect.stringMatching(/^The latest read at \d\d:\d\d could not read: node unreachable\.$/)]));
+    expect(said).toEqual(expect.arrayContaining([expect.stringMatching(/^The latest read at 2026-10-2\d \d\d:\d\d could not read: configDigest \(node unreachable\)\.$/)]));
+    // The observed read's attribution is shown under the open drift too (#423 C5).
+    expect(await $('[data-testid="observed"]').getText()).toMatch(new RegExp(`^read at 2026-10-2\\d \\d\\d:\\d\\d \\(${short(m1.id)}\\): attributed to ${short(rel("b"))}$`));
     expect(said.at(-1)).toBe(HEALTH);
     // Pending convergence is not stated while the drift is open (§2.4: they are different).
     expect(said.join(" ")).not.toContain("Pending convergence");
-    expect(await texts('[data-testid="observations"] tbody tr td:last-child')).toEqual(["node unreachable", "nothing", "nothing"]);
+    expect(await texts('[data-testid="observations"] tbody tr td:last-child')).toEqual(["configDigest (node unreachable)", "nothing", "nothing"]);
     // The principal is the identity Bronzeward recorded for h-author, shortened (G23).
     await expect($('[data-testid="timeline"]')).toHaveText(expect.stringMatching(/freeze idn_[a-z2-7]{4}…[a-z2-7]{4} author "synthetic incident"/), { wait: 20_000 });
     expect(await $("main").getText()).not.toMatch(/healthy|converged/i);
@@ -315,6 +317,33 @@ describe("the machine detail (W3)", () => {
     const left = await timelineReads(id!);
     await browser.pause(6_000);
     expect(await timelineReads(id!)).toBe(left);
+  });
+
+  it("#423 C4: Back/Forward to the same machine under another query while a timeline poll is in flight keeps the timeline polled", async function () {
+    this.timeout(90_000);
+    const at = await disposable();
+    const cl = await cluster(at, "lab-a");
+    const [id] = await machines(at, cl.id, 1);
+    const path = `/machines/${id}/timeline`;
+    expect(await fixtureSignIn("h-viewer", {}, { upstream: at })).toMatch(SERVER);
+    await $(`a[title="${id}"]`).click();
+    await expect($("main h2")).toHaveText(`Machine ${id}`);
+    await expect($("main")).toHaveText(expect.stringContaining("No timeline entry recorded."));
+    // The next poll is held; the view moves while it is in flight, so the client discards its answer.
+    const asked = (await seen()).filter((p) => p === path).length;
+    await faults({ upstream: at, held: path });
+    await browser.waitUntil(async () => (await seen()).filter((p) => p === path).length > asked, { timeout: 20_000, timeoutMsg: "no timeline poll was sent" });
+    await browser.execute((to: string) => {
+      history.pushState(null, "", to);
+      dispatchEvent(new PopStateEvent("popstate"));
+    }, `/machines/${id}?from=c4`);
+    await expect($("main h2")).toHaveText(`Machine ${id}`);
+    await faults({ upstream: at });
+    await release();
+    // The timeline still polls under the new view.
+    const after = await timelineReads(id!);
+    await browser.pause(11_000);
+    expect((await timelineReads(id!)) - after).toBeGreaterThanOrEqual(1);
   });
 });
 

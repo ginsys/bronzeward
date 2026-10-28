@@ -20,15 +20,24 @@ export const FROZEN =
   "Frozen: no new commitment or attempt until an approver unfreezes; an attempt already recorded is not stopped, and an adoption can still be recorded.";
 export const HEALTH = "Health: not checked.";
 
-const at = (s: string) => clock(new Date(s));
-const causes = (o: Observation) => Object.values(o.unread).map((u) => u.cause);
+// A read's date and time: this view shows the machine's whole history, so the time of day alone
+// would make an old read look like today's. Built by hand, so every browser shows it alike.
+const two = (n: number) => String(n).padStart(2, "0");
+export function at(s: string): string {
+  const d = new Date(s);
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${clock(d)}`;
+}
+// What a read could not read, field by field: the API gives several fields the same cause.
+const causes = (o: Observation) => Object.entries(o.unread).map(([field, u]) => `${field} (${u.cause})`);
 
 // The newest read, when it has a higher basis than the one observed names and could not read
-// something. The machine read selects observed by highest basis among reads of the digest.
+// something. The machine read selects observed by highest basis among reads of the digest. The
+// machine and its observations are read apart, so when observed names a read the observations
+// do not hold yet, nothing is said to be newer than it.
 export function latestUnread(m: Machine, obs: Observation[]): Observation | undefined {
   const latest = obs.reduce<Observation | undefined>((a, o) => (a === undefined || o.basis > a.basis ? o : a), undefined);
-  const basis = obs.find((o) => o.id === m.observed?.observation)?.basis ?? -1;
-  return latest !== undefined && latest.basis > basis && causes(latest).length > 0 ? latest : undefined;
+  const basis = m.observed === null ? -1 : obs.find((o) => o.id === m.observed?.observation)?.basis;
+  return latest !== undefined && basis !== undefined && latest.basis > basis && causes(latest).length > 0 ? latest : undefined;
 }
 
 // Journeys §2.4's sentences. openDrift alone says "drifted"; a matching release never says healthy.
@@ -117,7 +126,7 @@ export function polled(read: () => Promise<boolean>, page: Pick<Document, "visib
 // cursor drops the timeline and that cursor. A superseded poll reads no further page and settles as
 // not live, so the shell still takes its refusal of the credentials.
 function useTimeline(path: string): Load<Tail<Entry>> | Dropped {
-  const { client, settle, undropped, again } = useReads();
+  const { client, settle, undropped, again, view } = useReads();
   const [tl, put, held] = useHeld<Tail<Entry>, Dropped>();
   const key = useRef<string | undefined>(undefined);
   useEffect(() => {
@@ -140,9 +149,13 @@ function useTimeline(path: string): Load<Tail<Entry>> | Dropped {
       live = false;
       stop();
     };
-  }, [client, settle, undropped, put, held, path, again]);
+  }, [client, settle, undropped, put, held, view, path, again]);
   return tl;
 }
+
+// The observed read's attribution, shown apart from the sentences: under an open drift they speak of
+// the drift, and desired, applied and observed stay separate states.
+export const attribution = (r: string | null) => (r === null ? "matches neither Applied nor Desired" : <>attributed to {release(r)}</>);
 
 // A timeline entry's members that name what it is about; the rest stays in the API.
 const SHOWN = ["change", "resolution", "from", "to", "principal", "role", "reason", "cause", "observation", "operation", "plan"];
@@ -171,7 +184,7 @@ export function MachineItem({ id }: { id: string }) {
       <dl>
         <dt>Desired</dt><dd>{release(d.desired)}</dd>
         <dt>Applied</dt><dd>{d.applied === null ? "none" : <>{release(d.applied.release)} by {d.applied.source}</>}</dd>
-        <dt>Observed</dt><dd>{d.observed === null ? "none" : <>read at {at(d.observed.at)} (<span title={d.observed.observation}>{short(d.observed.observation)}</span>)</>}</dd>
+        <dt>Observed</dt><dd data-testid="observed">{d.observed === null ? "none" : <>read at {at(d.observed.at)} (<span title={d.observed.observation}>{short(d.observed.observation)}</span>): {attribution(d.observed.release)}</>}</dd>
         <dt>Scope</dt><dd>{d.scopeState}</dd>
       </dl>
       <h3>Observations</h3>

@@ -125,8 +125,11 @@ Machine mch_w4ze…n3fa   cluster cl_9fd… (lab-a)   10.5.0.4:50000   node 9Zs�
 
 `Observed` is the highest-basis observation that read the configuration digest, which need not
 be the newest one; the newest read and its unread causes come from the observations list.
-Observation rows with unread parts show each cause ("node unreachable", "provider access
-denied") and never a healthy badge. "Drifted" comes from the open drift record, which compares
+Observation rows with unread parts show each field with its cause ("configDigest (node
+unreachable)"), because the API gives several fields the same cause, and never a healthy badge.
+The `Observed` row keeps its attribution under an open drift too, where the sentences speak of the
+drift. The web client shows each time with its date, since the page covers the machine's whole
+history. "Drifted" comes from the open drift record, which compares
 with `Applied`; an observation equal to `Desired` or an older release is still drift. With no
 `Applied`, `Desired` or observation the row says so ("Not applied or adopted by Bronzeward",
 "No release selected", "No configuration read recorded") and shows no time. The status
