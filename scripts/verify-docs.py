@@ -212,11 +212,12 @@ def operator_code(path, root=ROOT):
             yield number, line
             continue
         indent = len(body) - len(body.lstrip(' '))
+        # Closed items first, so that a line dedented straight onto an outer item's code is code.
+        while body.strip() and items and indent < items[-1]:
+            items.pop()
         if body.strip() and fenced is not None and indent >= (items[-1] if items else 0) + 4:
             yield number, line
         elif body.strip():
-            while items and indent < items[-1]:
-                items.pop()
             item = fenced is not None and re.match(r' *(?:[-*+]|\d+[.)])( *)', body)
             if item and (item.group(1) or item.end() == len(body)):
                 # With nothing after the marker, or five or more spaces, the content starts one space
