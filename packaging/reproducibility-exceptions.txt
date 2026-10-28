@@ -1,0 +1,4 @@
+# Files whose SHA256SUMS line may differ between the packaging check's two builds
+# (ginsys/bronzeward#262 P6), read by scripts/release/compare-sums.sh. One per line:
+#   <file name, as SHA256SUMS names it> <the cause, and the issue that removes it>
+# Every other difference fails the check. None is listed.

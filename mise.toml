@@ -7,6 +7,8 @@ shellcheck = "0.11.0"
 go = "1.27.1"
 # The current LTS; web/package.json's engines names the same version.
 node = "24.22.1"
+# mise run package: the release archives (.goreleaser.yaml).
+goreleaser = "2.19.0"
 
 [tasks.lint]
 description = "actionlint on the workflows, shellcheck on the scripts"
@@ -14,7 +16,7 @@ description = "actionlint on the workflows, shellcheck on the scripts"
 # finding CI reports with a clean environment.
 run = """
 env -u SHELLCHECK_OPTS actionlint
-env -u SHELLCHECK_OPTS shellcheck scripts/ci/*.sh scripts/test/*.sh
+env -u SHELLCHECK_OPTS shellcheck scripts/ci/*.sh scripts/release/*.sh scripts/test/*.sh
 env -u SHELLCHECK_OPTS shellcheck -x fixtures/lib.sh fixtures/dev-idp fixtures/bin/* fixtures/scenarios/* experiments/e1-secret-ingress/run/* \
   experiments/e5-provider-capabilities/run/* experiments/e5-retention-classification/run/* \
   experiments/e4-dispatch-safety/run/* \
@@ -26,8 +28,25 @@ env -u SHELLCHECK_OPTS shellcheck -x fixtures/lib.sh fixtures/dev-idp fixtures/b
 """
 
 [tasks.test]
-description = "Fixture tests for scripts/ci/commit-lint.sh and scripts/ci/needs-check.sh"
-run = ["bash scripts/test/commit-lint-test.sh", "bash scripts/test/needs-check-test.sh"]
+description = "Fixture tests for scripts/ci/commit-lint.sh, scripts/ci/needs-check.sh and scripts/release/compare-sums.sh and render-caddy.py"
+run = ["bash scripts/test/commit-lint-test.sh", "bash scripts/test/needs-check-test.sh", "bash scripts/test/compare-sums-test.sh", "python3 scripts/test/render-caddy-test.py"]
+
+[tasks.package]
+description = "Build the release archives at BW_VERSION into dist/ (ginsys/bronzeward#262 P3, P6): the web tarball and notices, then GoReleaser in snapshot mode; publishes nothing"
+run = """
+: "${BW_VERSION:?set BW_VERSION, e.g. v0.0.0-dev}"
+bash scripts/release/web-package.sh
+goreleaser release --snapshot --clean
+cp build/bronzeward-web_*.tar.gz dist/
+"""
+
+[tasks."package:check"]
+description = "Check dist/ from mise run package at HEAD: versions, revisions, contents (scripts/release/check-build.sh)"
+run = 'EXPECT_REVISION=$(git rev-parse HEAD) bash scripts/release/check-build.sh dist'
+
+[tasks.hosting]
+description = "Serve dist/'s web tarball through its rendered Caddyfile in the pinned Caddy image and compare the served headers and routes (needs Docker)"
+run = "python3 scripts/test/hosting-test.py dist"
 
 [tasks.docs]
 description = "Documentation checks (needs Python 3.9+ with PyYAML 6)"
@@ -405,5 +424,5 @@ FIRST_PARTY_WORKFLOW_RE='^(go-kure|ginsys)/[^/]+/\\.github/workflows/[^@]+@main$
 """
 
 [tasks.verify]
-description = "Everything ci.yml runs except go-db, idp and the browser jobs (they need running services or browsers; mise run go-db, mise run go-idp, mise run browser): lint, tests, docs, site, whitespace, commit subjects, go, web, action pins"
+description = "Everything ci.yml runs except go-db, idp, the browser jobs and the packaging jobs (they need running services, browsers, Docker or two builds; mise run go-db, mise run go-idp, mise run browser, mise run package, package:check, hosting): lint, tests, docs, site, whitespace, commit subjects, go, web, action pins"
 depends = ["lint", "test", "docs", "site", "whitespace", "commit-lint", "go", "web", "action-pins"]

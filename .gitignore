@@ -14,6 +14,11 @@ __pycache__/
 /bin/
 /.dev/
 
+# mise run package's output: GoReleaser's archives in dist/, the web tarball and notices in build/.
+# Ignored, so a release build's binaries still record vcs.modified=false.
+/dist/
+/build/
+
 # The web package's dependencies, build output, generated API types and browser-run artifacts.
 /web/node_modules/
 /web/dist/

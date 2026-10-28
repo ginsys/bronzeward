@@ -17,6 +17,9 @@ const apiRevision = 3
 // reads the main module's version from the build information.
 var version string
 
+// Version is what GET /server reports as this binary's version.
+func Version() string { return serverVersion() }
+
 func serverVersion() string {
 	if version != "" {
 		return version

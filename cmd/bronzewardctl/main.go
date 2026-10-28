@@ -183,8 +183,15 @@ func (e *env) verboseOut() io.Writer {
 	return nil
 }
 
-// clientVersion is the module version the build information records.
+// version is the client's version when the build sets it, as a release build does
+// (-ldflags "-X main.version=…"); otherwise clientVersion reads the main module's version from the
+// build information.
+var version string
+
 func clientVersion() string {
+	if version != "" {
+		return version
+	}
 	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" {
 		return bi.Main.Version
 	}

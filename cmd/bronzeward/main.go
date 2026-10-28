@@ -28,10 +28,13 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: bronzeward serve|migrate|token|orphans ...")
+		fmt.Fprintln(os.Stderr, "usage: bronzeward serve|migrate|token|orphans|version ...")
 		os.Exit(2)
 	}
 	switch os.Args[1] {
+	case "version":
+		// The version GET /server reports, without a configuration or a database.
+		fmt.Println(api.Version())
 	case "serve":
 		if err := serve(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "bronzeward serve:", err)
