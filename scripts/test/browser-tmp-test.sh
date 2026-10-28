@@ -4,7 +4,8 @@
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 tool="$here/../ci/browser-tmp.sh"
-root=$(mktemp -d)
+# Under /tmp, not TMPDIR: the cases need absolute paths of 42 to 62 bytes, and a TMPDIR can be longer.
+root=$(mktemp -d /tmp/bwt.XXXXXX)
 trap 'rm -rf "$root"' EXIT
 [ "${#root}" -le 40 ] || { echo "browser-tmp-test: $root is too long to build the TMPDIRs it needs" >&2; exit 1; }
 pass=0
