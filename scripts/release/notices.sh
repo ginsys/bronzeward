@@ -10,7 +10,7 @@ cd "$(git rev-parse --show-toplevel)"
 
 notice() { # <component> <directory>
 	local files
-	files=$(find "$2" -maxdepth 1 -type f \( -iname 'LICENSE*' -o -iname 'LICENCE*' -o -iname 'COPYING*' -o -iname 'NOTICE*' -o -iname 'PATENTS*' \) | LC_ALL=C sort)
+	files=$(find "$2" -maxdepth 1 -type f \( -iname 'LICENSE*' -o -iname 'LICENCE*' -o -iname 'COPYING*' -o -iname 'NOTICE*' -o -iname 'PATENTS*' -o -iname 'THIRD-PARTY*' \) | LC_ALL=C sort)
 	if [ -z "$files" ]; then
 		echo "notices: $1 has no licence file in $2" >&2
 		return 1
@@ -33,8 +33,10 @@ packages=$(cd web && npm ls --omit=dev --all --parseable | tail -n +2 | LC_ALL=C
 	while read -r mod dir; do
 		notice "$mod" "$dir"
 	done <<<"$modules"
-	# vite build also inserts its module-preload helper into the bundle.
+	# The bundlers are development dependencies but put code of their own into the bundle: vite its
+	# module-preload helper, rolldown its runtime (the CommonJS interop helpers, derived from rollup,
+	# whose licence is in rolldown's THIRD-PARTY-LICENSE).
 	while IFS= read -r dir; do
 		notice "npm:$(cd "$dir" && node -p 'const p = require("./package.json"); p.name + "@" + p.version')" "$dir"
-	done <<<"$packages"$'\n'"$PWD/web/node_modules/vite"
+	done <<<"$packages"$'\n'"$PWD/web/node_modules/vite"$'\n'"$PWD/web/node_modules/rolldown"
 } >"$out"

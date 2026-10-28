@@ -41,8 +41,11 @@ cp build/bronzeward-web_*.tar.gz dist/
 """
 
 [tasks."package:check"]
-description = "Check dist/ from mise run package at HEAD: versions, revisions, contents (scripts/release/check-build.sh)"
-run = 'EXPECT_REVISION=$(git rev-parse HEAD) bash scripts/release/check-build.sh dist'
+description = "Check dist/ from mise run package at HEAD: versions, revisions, targets, contents (scripts/release/check-build.sh), and that planted defects fail it (scripts/test/check-build-test.sh)"
+run = [
+  'EXPECT_REVISION=$(git rev-parse HEAD) bash scripts/release/check-build.sh dist',
+  'EXPECT_REVISION=$(git rev-parse HEAD) bash scripts/test/check-build-test.sh dist',
+]
 
 [tasks.hosting]
 description = "Serve dist/'s web tarball through its rendered Caddyfile in the pinned Caddy image and compare the served headers and routes (needs Docker)"

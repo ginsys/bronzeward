@@ -346,7 +346,7 @@ jobs:
 
   package-check:
     # The packaging check (ginsys/bronzeward#262 P6, P7): the two builds' SHA256SUMS agree but for
-    # the listed exceptions, and each build's binaries name this commit and version.
+    # the listed exceptions, and each build's binaries name this commit, version and target.
     needs: package
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -365,6 +365,8 @@ jobs:
       - run: scripts/release/compare-sums.sh packages/package-a/SHA256SUMS packages/package-b/SHA256SUMS
       - run: EXPECT_REVISION="$GITHUB_SHA" scripts/release/check-build.sh packages/package-a
       - run: EXPECT_REVISION="$GITHUB_SHA" scripts/release/check-build.sh packages/package-b
+      - name: Planted defects fail the check
+        run: EXPECT_REVISION="$GITHUB_SHA" scripts/test/check-build-test.sh packages/package-a
 
   hosting:
     # The web tarball through its rendered Caddyfile in the pinned Caddy image (mise run hosting):
