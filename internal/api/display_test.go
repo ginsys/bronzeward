@@ -77,7 +77,8 @@ func TestPrincipalsDisplay(t *testing.T) {
 	want("an empty claim", "BWSYNTH Ann Other")
 	write(map[string]any{"name": 42})
 	want("a claim that is not a string", "BWSYNTH Ann Other")
-	// PostgreSQL text cannot hold a NUL: written, it would refuse every request this token makes.
+	// PostgreSQL text cannot hold a NUL: written, it would refuse every mutating request this token
+	// makes, at the display refresh.
 	write(map[string]any{"name": "BWSYNTH Ann\x00Nul"})
 	want("a claim holding a NUL character", "BWSYNTH Ann Other")
 	if rec := e.do(e.api, call{method: "GET", path: prefix + "/clusters", token: e.humanWith("h-author", map[string]any{"name": "BWSYNTH Read"})}); rec.Code != http.StatusOK {
