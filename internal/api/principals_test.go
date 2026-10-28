@@ -79,6 +79,13 @@ func TestPrincipalsRead(t *testing.T) {
 	if got := readPrincipals(t, e, e.api, e.human("h-viewer"), nobody, e.robotID, hAll); !principalsEqual(got, []principalBody{want[2], want[1], want[0]}) {
 		t.Fatalf("reversed: %s", principalsText(got))
 	}
+	// The reads recorded nothing, not even a principal row for a human never seen before.
+	if n := count(t, e.db, "SELECT count(*) FROM act"); n != acts {
+		t.Fatalf("acts %d → %d from the role reads", acts, n)
+	}
+	if n := count(t, e.db, "SELECT count(*) FROM principal"); n != principals {
+		t.Fatalf("principals %d → %d from the role reads", principals, n)
+	}
 	// A revoked identity is still answered by its kind and name; its revocation is not served.
 	revocationOf(t, revoke(e, e.human("h-recovery"), "k-revoke-robot-0123456789", `{"identity":"`+e.robotID+`","reason":"left"}`))
 	// The revocation recorded its act and h-recovery's first row; the reads after it record nothing.

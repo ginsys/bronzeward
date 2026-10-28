@@ -202,7 +202,13 @@ func paramErrors(doc, op map[string]any, r *http.Request, where string) []string
 		schema := described[at]["schema"] // validated as written: a $ref's siblings apply too
 		resolved, _ := deref(doc, schema).(map[string]any)
 		if resolved["type"] == "array" && len(values) > 0 {
-			// A form-exploded array (GET /principals' id): the repeated values are its items.
+			// A form-exploded array (GET /principals' id): the repeated values are its items. Any
+			// other serialization sends one value the handler does not split.
+			style, explode := described[at]["style"], described[at]["explode"]
+			if (style != nil && style != "form") || explode == false {
+				errs = append(errs, fmt.Sprintf("%s: %s %s is not a form-exploded array (style %v, explode %v)", where, in, name, style, explode))
+				continue
+			}
 			items := make([]any, len(values))
 			for i, s := range values {
 				items[i] = s
@@ -847,7 +853,8 @@ func TestExchangeErrorsReportEachMismatch(t *testing.T) {
 		return r
 	}
 	page := `{"items":[` + cluster + `],"next":"c"}`
-	idnA, idnB := "idn_"+strings.Repeat("a", 26), "idn_"+strings.Repeat("b", 26)
+	// Canonical identifiers: 128 bits leave the last character's two low bits zero.
+	idnA, idnB := "idn_"+strings.Repeat("a", 26), "idn_"+strings.Repeat("b", 25)+"a"
 	principals := `{"items":[{"id":"` + idnA + `","kind":"unknown","issuer":null,"subject":null,"service":null}]}`
 	for _, tc := range []struct {
 		name string
@@ -870,6 +877,8 @@ func TestExchangeErrorsReportEachMismatch(t *testing.T) {
 		{"a repeated array value", req(http.MethodGet, "/principals?id="+idnA+"&id="+idnB), answer(200, "application/json", principals), ""},
 		{"an array item the schema refuses", req(http.MethodGet, "/principals?id="+idnA+"&id=idn_x"),
 			answer(200, "application/json", principals), "query id"},
+		{"a noncanonical array item", req(http.MethodGet, "/principals?id=idn_"+strings.Repeat("b", 26)),
+			answer(200, "application/json", principals), "query id"},
 		{"a header value the schema refuses", req(http.MethodPost, "/clusters", "Idempotency-Key", "short"),
 			answer(201, "application/json", cluster), "header Idempotency-Key"},
 	} {
@@ -884,5 +893,21 @@ func TestExchangeErrorsReportEachMismatch(t *testing.T) {
 		case tc.want != "" && !slices.ContainsFunc(errs, func(e string) bool { return strings.Contains(e, tc.want) }):
 			t.Errorf("%s: got %q, want an error containing %q", tc.name, errs, tc.want)
 		}
+	}
+	// Negative control: described as not exploded, the same repeated id no longer fits, since a
+	// generated client would send one comma-separated value the handler refuses.
+	paths := doc["paths"].(map[string]any)
+	op := maps.Clone(paths["/principals"].(map[string]any)["get"].(map[string]any))
+	param := maps.Clone(op["parameters"].([]any)[0].(map[string]any))
+	param["explode"] = false
+	op["parameters"] = []any{param}
+	changedPaths := maps.Clone(paths)
+	changedPaths["/principals"] = map[string]any{"get": op}
+	changed := maps.Clone(doc)
+	changed["paths"] = changedPaths
+	r := req(http.MethodGet, "/principals?id="+idnA+"&id="+idnB)
+	if errs := exchangeErrors(changed, r, "", answer(200, "application/json", principals)); !slices.ContainsFunc(errs,
+		func(e string) bool { return strings.Contains(e, "query id is not a form-exploded array") }) {
+		t.Errorf("explode false: got %q", errs)
 	}
 }
