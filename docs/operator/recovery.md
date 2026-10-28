@@ -24,7 +24,8 @@ nothing in Bronzeward checks them:
 - Keep the OpenBao unseal share apart from every backup. Without it OpenBao stays sealed: `serve`
   still starts and answers reads, but compilation, execution and provider-dependent recovery fail.
 - Before recording any identity revocation, add its subject to `auth.deniedSubjects`, and leave it
-  there. A restore can erase the revocation; it does not rewind the list.
+  there: a human by `iss` and `sub`, a service identity by its `identity` and its `name`. A restore
+  can erase the revocation, and a service identity's row with it; it does not rewind the list.
 - Take the OpenBao backup no earlier than the database backup it pairs with, and keep the
   credential store's backup matched to them.
 - While a database backup that names a Transit key version may still be restored, keep that
@@ -166,7 +167,9 @@ fixtures/bin/inject bao-restore <name>
 ```
 
 Before anything starts, put every subject revoked since the backup in `auth.deniedSubjects`. The
-restore erased those revocations; the list refuses them whatever the database says.
+restore erased those revocations; the list refuses them whatever the database says. A service
+identity created after the backup is gone too, row and all; its entry's `name` keeps
+`bronzeward token issue` from creating it again under that name.
 
 ### 2. Start one instance in recovery mode
 

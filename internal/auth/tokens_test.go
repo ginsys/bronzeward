@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ginsys/bronzeward/internal/config"
+	"github.com/ginsys/bronzeward/internal/id"
 )
 
 const testIssuerURL = "https://idp.test"
@@ -234,13 +235,29 @@ func TestReissueAfterRestoreRefusedForDeniedIdentity(t *testing.T) {
 	is := issued(t, storeFor(db), "ci")
 	newEpoch(t, db)
 	cfg := testAuth(testIssuerURL)
-	cfg.DeniedSubjects = []config.DeniedSubject{{Identity: is.Identity}}
+	cfg.DeniedSubjects = []config.DeniedSubject{{Identity: is.Identity, Name: "ci"}}
 	if _, err := NewStore(db, cfg).Rotate(t.Context(), is.Identity, nil, DefaultExpiry, "h-operator"); !errors.Is(err, ErrIdentityRevoked) {
 		t.Fatalf("reissue to a denied identity: %v", err)
+	}
+	// #391: an entry listing its name under another identifier refuses it too, the name read
+	// under the lock.
+	cfg.DeniedSubjects = []config.DeniedSubject{{Identity: id.New(id.Principal), Name: "ci"}}
+	if _, err := NewStore(db, cfg).Rotate(t.Context(), is.Identity, nil, DefaultExpiry, "h-operator"); !errors.Is(err, ErrIdentityRevoked) {
+		t.Fatalf("reissue to an identity whose name is denied: %v", err)
 	}
 	// The control: without the list entry the same reissue proceeds.
 	if _, err := storeFor(db).Rotate(t.Context(), is.Identity, nil, DefaultExpiry, "h-operator"); err != nil {
 		t.Fatalf("control: %v", err)
+	}
+}
+
+// An entry without a name, which config refuses, matches no lookup without a name.
+func TestDeniedEmptyNameMatchesNothing(t *testing.T) {
+	listed, other := id.New(id.Principal), id.New(id.Principal)
+	d := NewDenied([]config.DeniedSubject{{Identity: listed}})
+	if !d.Service(listed, "") || d.Service(other, "") || d.Service("", "") || d.ServiceEntry(listed, "ci") {
+		t.Fatalf("Service(listed) %v, Service(other) %v, Service(none) %v, ServiceEntry %v",
+			d.Service(listed, ""), d.Service(other, ""), d.Service("", ""), d.ServiceEntry(listed, "ci"))
 	}
 }
 
@@ -316,9 +333,73 @@ func TestList(t *testing.T) {
 	}
 	// §10.4: an identity deniedSubjects lists is refused whatever its row says; list says so.
 	cfg := testAuth(testIssuerURL)
-	cfg.DeniedSubjects = []config.DeniedSubject{{Identity: is.Identity}}
+	cfg.DeniedSubjects = []config.DeniedSubject{{Identity: is.Identity, Name: "ci"}}
 	if ls, err = NewStore(db, cfg).List(t.Context()); err != nil || len(ls) != 1 || !ls[0].IdentityDenied {
 		t.Fatalf("list with the identity denied: %+v, %v", ls, err)
+	}
+	// #391: an entry whose identifier a restore lost denies an identity created under its name.
+	cfg.DeniedSubjects = []config.DeniedSubject{{Identity: id.New(id.Principal), Name: "ci"}}
+	if ls, err = NewStore(db, cfg).List(t.Context()); err != nil || len(ls) != 1 || !ls[0].IdentityDenied {
+		t.Fatalf("list with the name denied: %+v, %v", ls, err)
+	}
+	cfg.DeniedSubjects = []config.DeniedSubject{{Identity: id.New(id.Principal), Name: "other"}}
+	if ls, err = NewStore(db, cfg).List(t.Context()); err != nil || len(ls) != 1 || ls[0].IdentityDenied {
+		t.Fatalf("list with another name denied: %+v, %v", ls, err)
+	}
+}
+
+// §16, #391: a service identity created and revoked after the backup loses its row, name included,
+// to a restore. deniedSubjects lists it by identifier and name, so the tool refuses to create a new
+// identity under that name, and the refusal leaves no row.
+func TestIssueAfterRestoreRefusedForDeniedServiceName(t *testing.T) {
+	db := migrated(t)
+	cfg := testAuth(testIssuerURL)
+	cfg.DeniedSubjects = []config.DeniedSubject{{Identity: id.New(id.Principal), Name: "ci"}}
+	if _, err := NewStore(db, cfg).Issue(t.Context(), "ci", []Role{Author}, DefaultExpiry, "h-all", "h-operator"); !errors.Is(err, ErrIdentityRevoked) {
+		t.Fatalf("issue under a denied name: %v; want ErrIdentityRevoked", err)
+	}
+	if n := count(t, db, "SELECT count(*) FROM principal"); n != 0 {
+		t.Fatalf("%d principal rows after the refusal", n)
+	}
+	if n := count(t, db, "SELECT count(*) FROM automation_token"); n != 0 {
+		t.Fatalf("%d tokens after the refusal", n)
+	}
+	// The control: without the entry the same issue proceeds.
+	if _, err := storeFor(db).Issue(t.Context(), "ci", []Role{Author}, DefaultExpiry, "h-all", "h-operator"); err != nil {
+		t.Fatalf("control: %v", err)
+	}
+}
+
+// #391, no restore: a revoked identity that deniedSubjects lists by identifier and name keeps its
+// row and is refused as before, by the tool and at authentication.
+func TestDeniedServiceNameWithoutRestore(t *testing.T) {
+	db := migrated(t)
+	is := issued(t, storeFor(db), "ci")
+	if err := revokeIdentity(t, db, is.Identity); err != nil {
+		t.Fatal(err)
+	}
+	row := func() string {
+		var r string
+		if err := db.QueryRow(`SELECT concat_ws('|', id, kind, name, responsible, revoked) FROM principal WHERE id = $1`, is.Identity).Scan(&r); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	before, tokens := row(), count(t, db, "SELECT count(*) FROM automation_token")
+	cfg := testAuth(testIssuerURL)
+	cfg.DeniedSubjects = []config.DeniedSubject{{Identity: is.Identity, Name: "ci"}}
+	s := NewStore(db, cfg)
+	if _, err := s.Rotate(t.Context(), is.Identity, nil, DefaultExpiry, "h-operator"); !errors.Is(err, ErrIdentityRevoked) {
+		t.Errorf("rotate: %v; want ErrIdentityRevoked", err)
+	}
+	if _, err := s.Issue(t.Context(), "ci", []Role{Author}, DefaultExpiry, "h-all", "h-operator"); !errors.Is(err, ErrIdentityRevoked) {
+		t.Errorf("issue under its name: %v; want ErrIdentityRevoked", err)
+	}
+	if _, err := automationVerifier(db, cfg).Authenticate(t.Context(), "Bearer "+is.Token); !errors.Is(err, ErrIdentityRevoked) {
+		t.Errorf("authenticate: %v; want ErrIdentityRevoked", err)
+	}
+	if after := row(); after != before || count(t, db, "SELECT count(*) FROM automation_token") != tokens {
+		t.Fatalf("row %q -> %q, tokens %d -> %d", before, after, tokens, count(t, db, "SELECT count(*) FROM automation_token"))
 	}
 }
 

@@ -114,6 +114,11 @@ func (s *Store) Issue(ctx context.Context, name string, roles []Role, expiry tim
 	if name == "" {
 		return Issued{}, errors.New("token: a service identity needs a name")
 	}
+	// A restore can free the name of a revoked identity created after the backup (§10.4, #391):
+	// a listed name is refused as the unique index refuses it while that identity's row exists.
+	if s.denied.Service("", name) {
+		return Issued{}, fmt.Errorf("token: %w: the name %s is in deniedSubjects", ErrIdentityRevoked, name)
+	}
 	if err := checkGrant(roles, expiry); err != nil {
 		return Issued{}, err
 	}
@@ -130,7 +135,7 @@ func (s *Store) Issue(ctx context.Context, name string, roles []Role, expiry tim
 		if s.o.beforeLock != nil {
 			s.o.beforeLock()
 		}
-		if _, err := s.lockPrincipals(ctx, tx, "", resp, op); err != nil {
+		if _, _, err := s.lockPrincipals(ctx, tx, "", resp, op); err != nil {
 			return Issued{}, err
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO principal (id, kind, name, responsible, created_at)
@@ -152,7 +157,8 @@ func (s *Store) Rotate(ctx context.Context, identity string, roles []Role, expir
 	if err := id.MustHave(identity, id.Principal); err != nil {
 		return Issued{}, fmt.Errorf("token: %w", err)
 	}
-	if s.denied.Service(identity) {
+	// Its name is checked under the lock, once the row is read.
+	if s.denied.Service(identity, "") {
 		return Issued{}, fmt.Errorf("token: %w: %s is in deniedSubjects", ErrIdentityRevoked, identity)
 	}
 	check := checkExpiry(expiry)
@@ -170,12 +176,15 @@ func (s *Store) Rotate(ctx context.Context, identity string, roles []Role, expir
 		if s.o.beforeLock != nil {
 			s.o.beforeLock()
 		}
-		revoked, err := s.lockPrincipals(ctx, tx, identity, op)
+		revoked, name, err := s.lockPrincipals(ctx, tx, identity, op)
 		if err != nil {
 			return Issued{}, err
 		}
-		if revoked {
+		switch {
+		case revoked:
 			return Issued{}, fmt.Errorf("%w: %s", ErrIdentityRevoked, identity)
+		case s.denied.Service(identity, name):
+			return Issued{}, fmt.Errorf("%w: %s's name %s is in deniedSubjects", ErrIdentityRevoked, identity, name)
 		}
 		grant := roles
 		if grant == nil {
@@ -210,7 +219,7 @@ func (s *Store) Revoke(ctx context.Context, identity, operator string) ([]string
 		if s.o.beforeLock != nil {
 			s.o.beforeLock()
 		}
-		if _, err := s.lockPrincipals(ctx, tx, identity, op); err != nil {
+		if _, _, err := s.lockPrincipals(ctx, tx, identity, op); err != nil {
 			return "", err
 		}
 		var err error
@@ -239,8 +248,9 @@ func lockEpoch(ctx context.Context, tx *sql.Tx) error {
 // lockPrincipals locks the principals a tool transaction acts on, in id order (rule 5): the
 // service identity, if service is not empty, FOR UPDATE, and each human FOR SHARE, against
 // identity revocation's FOR UPDATE (T5c). EnsureHuman's check ran before the transaction, so a
-// human is checked again here, under the lock (rule 2). It reports whether service is revoked.
-func (s *Store) lockPrincipals(ctx context.Context, tx *sql.Tx, service string, humans ...string) (revoked bool, err error) {
+// human is checked again here, under the lock (rule 2). It reports whether service is revoked,
+// and its name.
+func (s *Store) lockPrincipals(ctx context.Context, tx *sql.Tx, service string, humans ...string) (revoked bool, name string, err error) {
 	ids := slices.Clone(humans)
 	if service != "" {
 		ids = append(ids, service)
@@ -248,38 +258,39 @@ func (s *Store) lockPrincipals(ctx context.Context, tx *sql.Tx, service string, 
 	slices.Sort(ids)
 	for _, p := range slices.Compact(ids) {
 		if p == service {
-			if revoked, err = s.lockService(ctx, tx, p); err != nil {
-				return false, err
+			if revoked, name, err = s.lockService(ctx, tx, p); err != nil {
+				return false, "", err
 			}
 			continue
 		}
 		var r bool
 		if err := tx.QueryRowContext(ctx, `SELECT revoked FROM principal WHERE id = $1 FOR SHARE`, p).Scan(&r); err != nil {
-			return false, err
+			return false, "", err
 		}
 		if r {
-			return false, fmt.Errorf("%w: %s", ErrIdentityRevoked, p)
+			return false, "", fmt.Errorf("%w: %s", ErrIdentityRevoked, p)
 		}
 	}
-	return revoked, nil
+	return revoked, name, nil
 }
 
-// lockService locks identity's principal row FOR UPDATE and reports whether it is revoked.
-func (s *Store) lockService(ctx context.Context, tx *sql.Tx, identity string) (revoked bool, err error) {
-	q := `SELECT kind, revoked FROM principal WHERE id = $1`
+// lockService locks identity's principal row FOR UPDATE and reports whether it is revoked, and
+// its name.
+func (s *Store) lockService(ctx context.Context, tx *sql.Tx, identity string) (revoked bool, name string, err error) {
+	q := `SELECT kind, revoked, coalesce(name, '') FROM principal WHERE id = $1`
 	if !s.o.noPrincipalLock {
 		q += ` FOR UPDATE`
 	}
 	var kind string
-	switch err := tx.QueryRowContext(ctx, q, identity).Scan(&kind, &revoked); {
+	switch err := tx.QueryRowContext(ctx, q, identity).Scan(&kind, &revoked, &name); {
 	case errors.Is(err, sql.ErrNoRows):
-		return false, fmt.Errorf("no identity %s", identity)
+		return false, "", fmt.Errorf("no identity %s", identity)
 	case err != nil:
-		return false, err
+		return false, "", err
 	case kind != string(Service):
-		return false, fmt.Errorf("%s is a human, not a service identity", identity)
+		return false, "", fmt.Errorf("%s is a human, not a service identity", identity)
 	}
-	return revoked, nil
+	return revoked, name, nil
 }
 
 // issue revokes identity's unrevoked token and inserts a new one in the current epoch. The caller
@@ -429,7 +440,7 @@ func (s *Store) List(ctx context.Context) ([]Listed, error) {
 			return nil, err
 		}
 		l.Roles = ParseRoles(roles)
-		l.IdentityDenied = s.denied.Service(l.Identity)
+		l.IdentityDenied = s.denied.Service(l.Identity, l.Name)
 		if revokedAt.Valid {
 			l.TokenRevoked = &revokedAt.Time
 		}

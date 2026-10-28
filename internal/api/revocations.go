@@ -68,7 +68,7 @@ func prepareRevocation(ctx context.Context, a *API, q *request) error {
 
 const revocationNote = "A database restore can remove this revocation. deniedSubjects in the deployment " +
 	"configuration survives a restore, so it must list this identity: a human by iss and sub, a service " +
-	"identity by its idn identifier (persistence-api.md §10.4)."
+	"identity by its idn identifier and its name, in one entry (persistence-api.md §10.4)."
 
 type revocationBody struct {
 	Identity             string    `json:"identity"`
@@ -123,8 +123,8 @@ func revokeIdentity(ctx context.Context, a *API, tx *sql.Tx, q *request) (result
 		}
 	}
 	var kind string
-	var iss, sub sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT kind, iss, sub FROM principal WHERE id = $1`, in.target).Scan(&kind, &iss, &sub); err != nil {
+	var iss, sub, name sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT kind, iss, sub, name FROM principal WHERE id = $1`, in.target).Scan(&kind, &iss, &sub, &name); err != nil {
 		return result{}, err
 	}
 	b := revocationBody{Identity: in.target, RevokedBy: q.principal.ID, Role: q.role, Reason: in.Reason, Act: q.actID,
@@ -132,7 +132,9 @@ func revokeIdentity(ctx context.Context, a *API, tx *sql.Tx, q *request) (result
 	if kind == string(auth.Human) {
 		b.DeniedSubjectsListed = a.denied.Human(iss.String, sub.String)
 	} else {
-		b.DeniedSubjectsListed = a.denied.Service(in.target)
+		// Listed as §10.4 asks: one entry naming both, so a restore that frees the name still
+		// refuses a new identity created under it.
+		b.DeniedSubjectsListed = a.denied.ServiceEntry(in.target, name.String)
 	}
 	// PA §5 rule 4: the time follows every lock wait, the principals' and the act-order lock's,
 	// so a plan read can tell whether the revocation came before its approved plan's expiry (§8.1).

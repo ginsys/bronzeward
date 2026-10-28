@@ -117,7 +117,7 @@ func TestAutomationRevokedOrDeniedIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := testAuth(testIssuerURL)
-	cfg.DeniedSubjects = []config.DeniedSubject{{Identity: b.Identity}}
+	cfg.DeniedSubjects = []config.DeniedSubject{{Identity: b.Identity, Name: "ci-b"}}
 	v := automationVerifier(db, cfg)
 	if _, err := v.Authenticate(t.Context(), "Bearer "+a.Token); !errors.Is(err, ErrIdentityRevoked) {
 		t.Errorf("revoked identity (its token revoked with it): %v; want ErrIdentityRevoked", err)
@@ -131,5 +131,22 @@ func TestAutomationRevokedOrDeniedIdentity(t *testing.T) {
 	newEpoch(t, db)
 	if _, err := v.Authenticate(t.Context(), "Bearer "+b.Token); !errors.Is(err, ErrIdentityRevoked) {
 		t.Errorf("denied identity after a restore: %v; want ErrIdentityRevoked", err)
+	}
+}
+
+// #391: an entry denies the identity holding its name too, the one a restore let the tool create
+// under a revoked identity's name; the name is read with the token, in the same query.
+func TestAutomationDeniedByName(t *testing.T) {
+	db := migrated(t)
+	is := issued(t, storeFor(db), "ci")
+	cfg := testAuth(testIssuerURL)
+	cfg.DeniedSubjects = []config.DeniedSubject{{Identity: id.New(id.Principal), Name: "ci"}}
+	if _, err := automationVerifier(db, cfg).Authenticate(t.Context(), "Bearer "+is.Token); !errors.Is(err, ErrIdentityRevoked) {
+		t.Errorf("identity under a denied name: %v; want ErrIdentityRevoked", err)
+	}
+	// The control: an entry naming another identity and name admits it.
+	cfg.DeniedSubjects = []config.DeniedSubject{{Identity: id.New(id.Principal), Name: "other"}}
+	if _, err := automationVerifier(db, cfg).Authenticate(t.Context(), "Bearer "+is.Token); err != nil {
+		t.Errorf("control: %v", err)
 	}
 }

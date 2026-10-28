@@ -220,11 +220,13 @@ type Roles struct {
 	RecoveryAdmin []string `yaml:"recovery-admin"`
 }
 
-// DeniedSubject names a human by issuer and subject, or a service identity by its idn identifier.
+// DeniedSubject names a human by issuer and subject, or a service identity by its idn identifier
+// and its name, which a restore can free for a new identity (persistence-api.md §10.4).
 type DeniedSubject struct {
 	Iss      string `yaml:"iss"`
 	Sub      string `yaml:"sub"`
 	Identity string `yaml:"identity"`
+	Name     string `yaml:"name"`
 }
 
 // Load parses exactly one YAML document, refusing unknown fields and missing required ones.
@@ -360,15 +362,17 @@ func (a *Auth) validate() error {
 		return errors.New("config: auth.oidc.maxTokenLifetime must be positive")
 	}
 	for i, d := range a.DeniedSubjects {
-		human := d.Iss != "" || d.Sub != ""
+		human, service := d.Iss != "" || d.Sub != "", d.Identity != "" || d.Name != ""
 		switch {
-		case human && d.Identity != "":
+		case human && service:
 			return fmt.Errorf("config: auth.deniedSubjects[%d] names both a human and a service identity", i)
 		case human && (d.Iss == "" || d.Sub == ""):
 			return fmt.Errorf("config: auth.deniedSubjects[%d]: a human needs both iss and sub", i)
-		case !human && d.Identity == "":
+		case !human && !service:
 			return fmt.Errorf("config: auth.deniedSubjects[%d] is empty", i)
-		case !human:
+		case service && (d.Identity == "" || d.Name == ""):
+			return fmt.Errorf("config: auth.deniedSubjects[%d]: a service identity needs both identity and name", i)
+		case service:
 			if err := id.MustHave(d.Identity, id.Principal); err != nil {
 				return fmt.Errorf("config: auth.deniedSubjects[%d]: %w", i, err)
 			}

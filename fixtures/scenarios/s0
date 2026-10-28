@@ -189,7 +189,7 @@ run() {
   if issue ci-s0-denied; then
     tok=$issued_token
     check 'S0 step 3' 'automation token, before deniedSubjects lists it: 200 (control)' answers 200 - GET /api/v1/acts "$tok"
-    set_denied "[{identity: $issued}]"
+    set_denied "[{identity: $issued, name: ci-s0-denied}]"
     restart_a || die "A did not come back with its identity in deniedSubjects"
     check 'S0 step 3' 'automation token, listed in deniedSubjects: 403 identity-revoked' \
       answers 403 identity-revoked GET /api/v1/acts "$tok"

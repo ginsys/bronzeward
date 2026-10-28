@@ -61,7 +61,7 @@ func TestLoadAuth(t *testing.T) {
     recovery-admin: [bw-recovery]
   deniedSubjects:
     - {iss: https://idp.example.test/realms/ops, sub: alice}
-    - {identity: idn_fgqvcvz3ck7h7234ljgdbzsj6m}
+    - {identity: idn_fgqvcvz3ck7h7234ljgdbzsj6m, name: ci}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -74,7 +74,7 @@ func TestLoadAuth(t *testing.T) {
 	if !slices.Equal(a.Roles.Viewer, []string{"bw-viewers"}) || !slices.Equal(a.Roles.RecoveryAdmin, []string{"bw-recovery"}) || a.Roles.Author != nil {
 		t.Fatalf("roles: %+v", a.Roles)
 	}
-	want := []DeniedSubject{{Iss: "https://idp.example.test/realms/ops", Sub: "alice"}, {Identity: "idn_fgqvcvz3ck7h7234ljgdbzsj6m"}}
+	want := []DeniedSubject{{Iss: "https://idp.example.test/realms/ops", Sub: "alice"}, {Identity: "idn_fgqvcvz3ck7h7234ljgdbzsj6m", Name: "ci"}}
 	if !slices.Equal(a.DeniedSubjects, want) {
 		t.Fatalf("deniedSubjects: %+v", a.DeniedSubjects)
 	}
@@ -106,10 +106,15 @@ func TestLoadRefusesAuth(t *testing.T) {
 		"integer lifetime":   oidc("    maxTokenLifetime: 900\n"),
 		"negative lifetime":  oidc("    maxTokenLifetime: -5m\n"),
 		"unknown role":       oidc("  roles:\n    admin: [x]\n"),
-		"both forms":         oidc("  deniedSubjects:\n    - {iss: https://idp.example.test, sub: a, identity: idn_fgqvcvz3ck7h7234ljgdbzsj6m}\n"),
+		"both forms":         oidc("  deniedSubjects:\n    - {iss: https://idp.example.test, sub: a, identity: idn_fgqvcvz3ck7h7234ljgdbzsj6m, name: ci}\n"),
+		"human with a name":  oidc("  deniedSubjects:\n    - {iss: https://idp.example.test, sub: a, name: ci}\n"),
 		"iss without sub":    oidc("  deniedSubjects:\n    - {iss: https://idp.example.test}\n"),
 		"empty entry":        oidc("  deniedSubjects:\n    - {}\n"),
-		"not an idn":         oidc("  deniedSubjects:\n    - {identity: tok_fgqvcvz3ck7h7234ljgdbzsj6m}\n"),
+		"not an idn":         oidc("  deniedSubjects:\n    - {identity: tok_fgqvcvz3ck7h7234ljgdbzsj6m, name: ci}\n"),
+		// §10.4 (#391): a service identity is listed by both, so a restore that frees its name
+		// cannot let a new identity take it.
+		"identity without a name":  oidc("  deniedSubjects:\n    - {identity: idn_fgqvcvz3ck7h7234ljgdbzsj6m}\n"),
+		"name without an identity": oidc("  deniedSubjects:\n    - {name: ci}\n"),
 	} {
 		if _, err := Load(strings.NewReader(in)); err == nil {
 			t.Errorf("%s: accepted", name)

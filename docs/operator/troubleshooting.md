@@ -26,7 +26,7 @@ call POST /plans "$publisher" "$body" troubleshoot-plan-1 | jq '{type, status, d
 | `scope-busy` | 409 | An operation holds the machine's scope | Wait for it, or settle it ([recovery](recovery.md#interrupted-operations)) |
 | `recovery-mode-active` | 409 | Recovery mode, or a scope not yet released | Finish [the restore](recovery.md#restoring-from-a-backup) |
 | `conflict` | 409 | A state the act does not apply to; `detail` names it | Read the object, then act on its current state |
-| `identity-revoked` | 403 | The subject or service identity is revoked, or in `auth.deniedSubjects` | Revocation is permanent and a new token does not lift it: act as another human subject, or issue a new service identity (`bronzeward token issue`) |
+| `identity-revoked` | 403 | The subject or service identity is revoked, or in `auth.deniedSubjects` | Revocation is permanent and a new token does not lift it: act as another human subject, or issue a new service identity (`bronzeward token issue`) under a name `auth.deniedSubjects` does not list |
 | `forbidden` | 403 | The token lacks the role, or a human-only act from automation | Check `auth.roles` and the groups claim |
 | `machine-identity-mismatch` | 409 | The node's SMBIOS UUID, node ID or cluster ID is not the recorded one | Check the endpoint points at the right machine |
 | `talos-access-unavailable` | 503 | No talosconfig in the provider, access denied, or the node unreachable | Check OpenBao, the access path and the network |

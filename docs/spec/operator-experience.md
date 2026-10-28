@@ -250,7 +250,7 @@ does not stop an attempt already recorded, and does not block an adoption record
 Roles are separate grants, installation-wide in the PoC, mapped from the identity provider's
 group claims for humans; automation holds only `viewer`, `author` and `publisher`
 ([design §13.7](../design/Talos_Configuration_and_Machine_Management_Design.md#137-poc-identity-and-approval-policy);
-`internal/auth/tokens.go:365-370`). Human-only routes refuse automation whatever its roles
+`internal/auth/tokens.go:376-381`). Human-only routes refuse automation whatever its roles
 ([persistence and API §10.3](persistence-api.md#103-authorization)).
 
 | Role | Can, through the clients | Human only in this role |
@@ -363,7 +363,7 @@ Token     expires in 14m                                      # renewal: #253
 ```
 
 By default the server refuses a human token whose lifetime exceeds 15 minutes
-(`internal/auth/auth.go:175`, `internal/config/config.go:125`, `internal/config/config.go:354-355`),
+(`internal/auth/auth.go:175`, `internal/config/config.go:125`, `internal/config/config.go:359-360`),
 so renewal is part of every journey, not an edge case.
 The server answers a token it does not accept, whether for issuer, audience, expiry or
 signature, with the same `401 unauthenticated` and no detail; a revoked identity with

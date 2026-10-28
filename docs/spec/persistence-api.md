@@ -129,8 +129,9 @@ It needs from compilation, as cross-contract points:
    backup was taken, and reissues automation tokens rather than re-recording
    their revocations: every token from an earlier epoch is refused (§12.3).
    The tool reissues no token to a service identity that `deniedSubjects`
-   lists, so a reissue before the re-recording cannot revive a revoked one
-   (§10.2, §10.4).
+   lists, so a reissue before the re-recording cannot revive a revoked one,
+   and creates no identity under a name it lists, so one the restore removed
+   is not admitted again under its name (§10.2, §10.4).
 6. The operation of a plan is created by the dispatch commitment, not with the
    plan (§8.1) **(choice §17.11)**; comparison 0 ("no operation exists for this
    plan yet") is the unique index of §7.3.
@@ -2734,7 +2735,10 @@ with it. It:
 
 - creates a service identity with roles drawn only from `viewer`, `author` and
   `publisher`, refusing `approver` and `recovery-admin`; a check constraint
-  refuses them too (design §13.7 item 2);
+  refuses them too (design §13.7 item 2). It refuses a name that a
+  `deniedSubjects` entry lists, as the name's unique index refuses it while
+  the listed identity's row exists: a restore can remove that row and free
+  the name (§10.4);
 - records a responsible human principal for the identity
   **(choice §17.18)**, used by §10.5;
 - sets a mandatory expiry, default 30 days, at most 90 **(choice §17.17)**;
@@ -2747,7 +2751,8 @@ with it. It:
   order). It then locks, in id order, the principal row `FOR UPDATE`, the
   lock T5c takes, and each human it records `FOR SHARE`, refusing one that
   is revoked by then; it refuses to issue a token to a revoked
-  identity or to one that `deniedSubjects` lists (§10.4): two
+  identity or to one that `deniedSubjects` lists, by identifier or by name,
+  the name read from the locked row (§10.4): two
   rotations of one identity serialize, the second replacing the first's
   token, and a rotation racing an identity revocation either precedes it,
   its token then revoked by T5c, or waits and is refused. A partial unique
@@ -2756,8 +2761,9 @@ with it. It:
   given to the tool.
 
 A token issued before the current recovery epoch is refused (§12.3), and the
-token of an identity that `deniedSubjects` lists is refused
-`403 identity-revoked` (§10.4).
+token of an identity that `deniedSubjects` lists, by identifier or by name,
+is refused `403 identity-revoked` (§10.4). The name is read with the token, in
+the same query.
 
 ### 10.3 Authorization
 
@@ -2835,14 +2841,29 @@ A restore can remove a revocation recorded after the backup. The deployment
 configuration's `deniedSubjects` list survives a database restore, so the
 operator adds the subject to that list before recording the revocation, not
 after it and not after a restore: a human by `(iss, sub)`, a service identity
-by its `idn` identifier. A revocation recorded first could be lost to a
-failure and a restore before the list names the subject, leaving no trace of
-it. The revocation's response restates the rule. A restored database that lost the revocation
+by its `idn` identifier and its name, both in one entry. A revocation recorded
+first could be lost to a failure and a restore before the list names the
+subject, leaving no trace of it. The revocation's response restates the rule,
+and its `deniedSubjectsListed` is true for a service identity only if one entry
+names both. A restored database that lost the revocation
 then still refuses the subject before and after entry, so a revoked
 `recovery-admin` can neither enter recovery mode nor act in it, and the tool
 issues no token to a listed service identity, even before the lost revocation
 is re-recorded (§10.2). The recovery procedure re-records the lost revocation
 rows (§12.3) **(choice §17.19)**.
+
+A service identity's name survives in the list because a restore can remove
+the identity's row with its revocation: an identity created and revoked after
+the backup. A human's `(iss, sub)` survives at the identity provider, so its
+next request is refused by the list and its row is created again only by the
+re-recorded revocation (§12.3). A service identity's row is created only by the
+tool, under a new identifier, so the list's identifier alone would not refuse
+an identity created again under the same name. The tool therefore refuses to
+create an identity under a listed name, and authentication and the reissue
+refuse an identity whose name is listed as one whose identifier is (§10.2). A
+name is not reused while its identity's row exists, so in a database the
+restore left alone the name check refuses no identity the identifier check
+admits.
 
 **Losing a role** without an identity revocation is not acted on
 **(choice §17.23)**. A human's roles are known only from the token presented
@@ -3122,7 +3143,7 @@ For a database restored to a backup taken at time *T*:
 | Idempotency records from before *T* | earlier epoch once entry commits | a retry is refused `409 conflict` (§7.2) |
 | Display names written after *T* | as at *T*, or none for a row the backup lacks | rewritten by the subject's next admitted mutating request whose token carries the claim (§10) |
 | Principals created after *T* | absent | `GET /principals` answers their identifiers `unknown` (§9.2); a human's row is created again, under a new identifier, by its next admitted mutating request, or, for a human `deniedSubjects` refuses, by its identity revocation, recorded or re-recorded (§10, §10.4) |
-| Identity revocations after *T* | absent | re-recorded by `recovery-admin`; the subject, human or service identity, is already refused by `deniedSubjects`, and the tool reissues no token to a listed service identity (§10.2, §10.4) |
+| Identity revocations after *T* | absent | re-recorded by `recovery-admin`; the subject, human or service identity, is already refused by `deniedSubjects`, and the tool reissues no token to a listed service identity (§10.2, §10.4). A service identity also created after *T* has no row to re-record a revocation on: the list keeps it refused, and the tool creates no identity under its listed name, so it is not admitted again under that name (§10.4) |
 | Automation tokens | earlier epoch | refused; reissued with the tool **(choice §17.27)** |
 | Tokens revoked after *T* | valid again in the rows | refused anyway: earlier epoch |
 | `DependencyStatus` | as at *T* | a dependency recorded `retained` and now answering 404 alerts at once as a regression (§6.3) |
@@ -3132,8 +3153,9 @@ For a database restored to a backup taken at time *T*:
 The automation-token rule costs a reissue of every service identity's token
 after each restore. It is the only way this contract finds to refuse a token
 replaced by a rotation after *T*, which the restore revived; a token whose
-identity was revoked after *T* is also refused through `deniedSubjects`
-(§10.4).
+identity was revoked after *T* is also refused through `deniedSubjects`,
+and an identity created and revoked after *T* is not created again under its
+listed name (§10.4).
 
 The provider may be restored too. The operator pairs the backups: the provider
 backup no older than the database backup, the credential store matched to the
@@ -3487,7 +3509,12 @@ each (design §7.7 consequences):
   identity revocation, leaving at most one valid token and none after the
   revocation, with a control that drops the principal lock; a reissue after a
   restore refused for a service identity that `deniedSubjects` lists although
-  the restored database lost its revocation; two concurrent
+  the restored database lost its revocation; the creation of a service
+  identity refused under a name that `deniedSubjects` lists although the
+  restored database lost the listed identity's row, with no row left and a
+  control without the entry; a revoked identity whose row the restore kept,
+  listed by identifier and name, refused as before with its row unchanged;
+  an automation token refused because its identity's name is listed; two concurrent
   inventory requests for one SMBIOS UUID under different keys, one refused,
   and the same for one Talos node ID and for one Talos cluster ID; an
   inventory body with both `smbiosUuid` and `talosNodeId`, or neither, refused;
@@ -3879,6 +3906,26 @@ design and evidence do not settle the question. Each is marked in place as
     is corrected by issuing a new subject, never by un-revoking. Alternative:
     revocation that only invalidates approvals, as design §13.7 item 4 states
     it, or a reversible revocation, which needs its own restore rules.
+    A service identity is listed by its identifier and its name, and the
+    tool creates no identity under a listed name (§10.2, §10.4;
+    [#391](https://github.com/ginsys/bronzeward/issues/391)). Decided by the
+    lead, 2026-10-28, under the owner's 2026-10-07 delegation; the owner may
+    overrule it. Reason: it adds no policy. A restore can remove an identity
+    created and revoked after the backup, row and name together, and the
+    name is then free for a new identity the list's identifier does not
+    refuse; listing the name makes "a revocation is permanent" hold across a
+    restore as it holds without one, where the name stays bound by its unique
+    index. It only tightens admission and adds no stored state. Rejected:
+    (B) re-recording the lost revocation on a re-created revoked row, old
+    identifier and name, which needs a new `recovery-admin` write path for a
+    service with no row and its name, and leaves a window until it is
+    re-recorded, while the operator needs the name anyway; (C) stating why it
+    is not refused, as a deliberate new identity whose roles the operator
+    chooses, which is weak because re-creating an identity the restore
+    removed is a routine post-restore step and the result would differ from
+    the case without a restore; refusing at the tool only, without the check
+    at authentication, which leaves an identity created again before the
+    name was listed admitted.
 20. **With several qualifying roles, the act is recorded under the first in
     the route's order** (§10.3). Alternative: the client names its role in a
     header.
