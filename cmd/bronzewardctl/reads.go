@@ -382,7 +382,7 @@ func (e *env) statusCmd(args []string) error {
 		rec := recs[0]
 		return e.emit(raw, func(w *tabwriter.Writer) {
 			fmt.Fprintf(w, "Context\t%s\n", c.Context.Where())
-			fmt.Fprintf(w, "Server\t%s, API revision %d, start mode %s\n", srv.Version, srv.ApiRevision, srv.StartMode)
+			fmt.Fprintf(w, "Server\t%s, API revision %d, start mode %s\n", client.Printable(srv.Version), srv.ApiRevision, client.ShownStartMode(string(srv.StartMode)))
 			mode := "off"
 			if rec.RecoveryMode {
 				mode = "on"

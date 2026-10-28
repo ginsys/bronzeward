@@ -5,6 +5,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/ginsys/bronzeward/internal/client/apitypes"
 )
 
 // printable is s as bronzewardctl shows text that a remote party may have chosen (client-contracts.md
@@ -29,6 +31,19 @@ func printable(s string) string {
 		i += n
 	}
 	return b.String()
+}
+
+// Printable is printable for bronzewardctl's commands, which show remote text outside an error:
+// the sign-in line's subject and issuer, for one (#383).
+func Printable(s string) string { return printable(s) }
+
+// ShownStartMode is the start mode as shown: normal or recovery, the values GET /server documents,
+// else unknown, so a start mode the server or a hand-edited contexts file holds is never echoed.
+func ShownStartMode(m string) string {
+	if !apitypes.ServerBodyStartMode(m).Valid() {
+		return "unknown"
+	}
+	return m
 }
 
 // printableError is err with its text made printable; errors.Is and errors.As still find what err

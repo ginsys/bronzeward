@@ -26,6 +26,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode"
 
 	"go.yaml.in/yaml/v3"
 
@@ -333,6 +334,11 @@ func (in *injector) requests() []string {
 }
 
 // rewrite replaces old with new in a proxied answer's body.
+// controlShown is whether s, a command's output, holds a control character other than a newline.
+func controlShown(s string) bool {
+	return strings.ContainsFunc(s, func(c rune) bool { return unicode.IsControl(c) && c != '\n' })
+}
+
 func rewrite(r *http.Response, old, new string) {
 	b, _ := io.ReadAll(r.Body)
 	b = bytes.ReplaceAll(b, []byte(old), []byte(new))
@@ -347,6 +353,14 @@ var servedRevision = regexp.MustCompile(`"apiRevision":[0-9]+`)
 func revisionOne(r *http.Response) {
 	b, _ := io.ReadAll(r.Body)
 	b = servedRevision.ReplaceAll(b, []byte(`"apiRevision":1`))
+	r.Body, r.ContentLength = io.NopCloser(bytes.NewReader(b)), int64(len(b))
+	r.Header.Set("Content-Length", fmt.Sprint(len(b)))
+}
+
+// serverVersion rewrites a GET /server answer's version member to v, a JSON string body.
+func serverVersion(r *http.Response, v string) {
+	b, _ := io.ReadAll(r.Body)
+	b = regexp.MustCompile(`"version":"[^"]*"`).ReplaceAll(b, []byte(`"version":"`+v+`"`))
 	r.Body, r.ContentLength = io.NopCloser(bytes.NewReader(b)), int64(len(b))
 	r.Header.Set("Content-Length", fmt.Sprint(len(b)))
 }
@@ -425,6 +439,14 @@ var sharedCases = map[string]func(*testing.T, *fixture, *injector){
 		pages := len(slices.DeleteFunc(in.requests(), func(q string) bool { return q != "GET /api/v1/machines" }))
 		if n := strings.Count(r.err, "is deprecated"); pages < 2 || n != 2 {
 			t.Errorf("%d page reads, %d deprecations shown, want 2 or more and 2 (GET /server and the list):\n%s", pages, n, r.err)
+		}
+		// The header's value is the server's text, shown escaped (#383). Go's client refuses a header
+		// line with an ASCII control, so a C1 control and a byte that is not UTF-8 stand for them.
+		in.set(nil, func(r *http.Response) { r.Header.Set("Deprecation", "@1798761600\u009b2J\xff") })
+		r = f.ctl(nil, "", "--context", "trusted", "whoami")
+		f.want(r, 0, `GET /api/v1/identity is deprecated (Deprecation: @1798761600\x9b2J\xff)`)
+		if controlShown(r.err) || strings.Contains(r.err, "\xff") {
+			t.Errorf("the deprecation notice showed a control character:\n%q", r.err)
 		}
 		in.set(nil, nil)
 	},

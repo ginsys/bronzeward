@@ -189,6 +189,42 @@ func TestRequestCore(t *testing.T) {
 	if n := strings.Count(strings.Join(in.requests(), "\n"), "/api/v1/server"); n != 2 {
 		t.Errorf("GET /server sent %d times, want 2: %v", n, in.requests())
 	}
+	// A start mode GET /server does not document is shown as unknown, never echoed (#383).
+	in.set(nil, func(r *http.Response) {
+		r.Header.Set("Bronzeward-Recovery-Mode", "true")
+		if on("/server")(r.Request) {
+			rewrite(r, `"startMode":"normal"`, `"startMode":"BWSYNTH-\u001b[2J"`)
+		}
+	})
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"whoami"}, "RECOVERY MODE is on in lab (" + in.URL + ") (start mode: unknown)"},
+		{[]string{"status"}, "start mode unknown"},
+		{[]string{"version"}, "start mode unknown"},
+	} {
+		r := f.ctl(nil, "", c.args...)
+		f.want(r, 0, c.want)
+		if controlShown(r.out+r.err) || strings.Contains(r.out+r.err, "BWSYNTH") {
+			t.Errorf("%s echoed the start mode:\n%q", c.args[0], r.out+r.err)
+		}
+	}
+	// The server's version is its own text, shown escaped by status and version (#383). The same
+	// epoch is served, so the one kept above stays.
+	in.set(nil, func(r *http.Response) {
+		r.Header.Set("Bronzeward-Epoch", "ep_BWSYNTH-other")
+		if on("/server")(r.Request) {
+			serverVersion(r, `BWSYNTH-v\u001b[2J`)
+		}
+	})
+	for _, args := range []string{"status", "version"} {
+		r := f.ctl(nil, "", args)
+		f.want(r, 0, `BWSYNTH-v\x1b[2J, API revision`)
+		if controlShown(r.out + r.err) {
+			t.Errorf("%s showed the server's version raw:\n%q", args, r.out+r.err)
+		}
+	}
 	cfg, _ := os.ReadFile(filepath.Join(config, "config.yaml"))
 	if !strings.Contains(string(cfg), "lastEpoch: ep_BWSYNTH-other") {
 		t.Errorf("the new epoch was not kept:\n%s", cfg)

@@ -155,6 +155,27 @@ func init() {
 				t.Errorf("%s: the injector saw %v, want GET /server once and no renewal", defect, seen)
 			}
 		}
+		// The token's subject and issuer are the provider's text, shown escaped (#383): whoami's
+		// reading of an accepted token, and the 401 reading of a token from another issuer.
+		f.store(f.humanFile(), f.viewerToken("h-viewer\x1b]0;t\a", 0, 5*time.Minute), "")
+		in.set(nil, nil)
+		r := f.signedIn("--context", "human", "whoami")
+		f.want(r, 0, `subject h-viewer\x1b]0;t\x07, issuer `+f.iss.URL)
+		now := time.Now()
+		tok, err := f.iss.Sign(map[string]any{"iss": f.iss.URL + "/\x1b[2J", "aud": "bronzeward", "sub": "h-viewer", "groups": []string{"bw-viewers"},
+			"iat": now.Unix(), "nbf": now.Unix(), "exp": now.Add(5 * time.Minute).Unix(), "jti": issuer.JTI()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.store(f.humanFile(), tok, "")
+		in.set(nil, nil)
+		r2 := f.signedIn("--context", "human", "whoami")
+		f.want(r2, 1, reading+"The token is from "+f.iss.URL+`/\x1b[2J; this context expects `+f.iss.URL+".")
+		for _, x := range []result{r, r2} {
+			if controlShown(x.out + x.err) {
+				t.Errorf("whoami showed the token's text raw:\n%q", x.out+x.err)
+			}
+		}
 	}
 	sharedCases["AUTH-03"] = func(t *testing.T, f *fixture, in *injector) {
 		in.set(nil, nil)
@@ -283,6 +304,18 @@ func TestSignIn(t *testing.T) {
 		f.store(file, f.viewerToken("h-viewer", 270*time.Second, 30*time.Second), "BWSYNTH-rt-7")
 		f.idp.set(func(string) (int, any) { return issued(f.viewerToken("h-other", 0, issuer.Lifetime), "BWSYNTH-rt-8") })
 		f.want(whoami(), 0, "a new sign-in: the renewed token is for h-other at "+f.iss.URL+", not h-viewer at "+f.iss.URL, "subject h-other")
+	})
+
+	// The renewed token's subject is the provider's text, shown escaped (#383).
+	t.Run("new subject escaped", func(t *testing.T) {
+		f.store(file, f.viewerToken("h-viewer", 270*time.Second, 30*time.Second), "BWSYNTH-rt-9")
+		f.idp.set(func(string) (int, any) {
+			return issued(f.viewerToken("h-other\x1b[2J", 0, issuer.Lifetime), "BWSYNTH-rt-10")
+		})
+		r := whoami()
+		if !strings.Contains(r.err, `a new sign-in: the renewed token is for h-other\x1b[2J at `+f.iss.URL+", not h-viewer") || controlShown(r.err) {
+			t.Errorf("the renewal notice did not show the subject escaped:\n%q", r.err)
+		}
 	})
 
 	// T6: two processes renewing together redeem the refresh token once; the second uses the
@@ -551,7 +584,11 @@ func TestSignIn(t *testing.T) {
 			"moved":    "the identity provider " + f.iss.URL + ": " + moved,
 			"fragment": "the identity provider " + f.iss.URL + ": it redirected to " + f.iss.URL + ", which bronzewardctl does not follow",
 			"escape":   "the identity provider " + f.iss.URL + ": it redirected to " + f.iss.URL + ", which bronzewardctl does not follow",
-			"other":    "its discovery document names another issuer",
+			"c1path":   "the identity provider " + f.iss.URL + ": it redirected to " + f.iss.URL + ", which bronzewardctl does not follow",
+			// Not fix-dependent: Go's URL parser refuses an ASCII control in the Location before the
+			// redirect check runs, so this redirect is refused as a failed request.
+			"escpath": "cannot reach the identity provider " + f.iss.URL + ": the request failed",
+			"other":   "its discovery document names another issuer",
 		} {
 			f.idp.mu.Lock()
 			f.idp.discovery = mode
@@ -565,7 +602,7 @@ func TestSignIn(t *testing.T) {
 			shown := r.out + r.err
 			if strings.ContainsFunc(shown, func(r rune) bool { return unicode.IsControl(r) && r != '\n' }) || strings.Contains(shown, "down") || strings.Contains(shown, "BWSYNTH-body") ||
 				strings.Contains(shown, "BWSYNTH-phrase") || mode == "other" && strings.Contains(shown, "idp.example.invalid") ||
-				strings.Contains(shown, "cannot reach") || strings.Count(shown, "redirected to") > 1 {
+				mode != "escpath" && strings.Contains(shown, "cannot reach") || strings.Count(shown, "redirected to") > 1 {
 				t.Errorf("logout in discovery mode %s showed what the failed discovery sent:\n%s", mode, shown)
 			}
 		}

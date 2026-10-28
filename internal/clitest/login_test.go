@@ -597,6 +597,36 @@ func TestLogin(t *testing.T) {
 		}
 	})
 
+	// The device prompt's code and the token's subject are the provider's text, shown escaped (#383).
+	t.Run("device text escaped", func(t *testing.T) {
+		f.idp.login(nil, "")
+		os.Remove(file)
+		f.idp.mu.Lock()
+		f.idp.userCode = "BWSY-\x1b[2J"
+		f.idp.exchanged = func() (int, any) {
+			return issued(f.viewerToken("h-viewer\x1b]0;t\a", 0, 5*time.Minute), "BWSYNTH-rt-1")
+		}
+		f.idp.mu.Unlock()
+		approve := func(line string) {
+			if strings.Contains(line, "enter the code") {
+				f.idp.approved.Store(true)
+			}
+		}
+		r := f.interact(nil, approve, "--context", "file", "login", "--device")
+		f.idp.login(nil, "")
+		t.Run("device code", func(t *testing.T) {
+			if !strings.Contains(r.err, `enter the code BWSY-\x1b[2J.`) || controlShown(r.err) {
+				t.Errorf("the device prompt did not show the code escaped:\n%q", r.err)
+			}
+		})
+		t.Run("sign-in line", func(t *testing.T) {
+			if r.code != 0 || !strings.Contains(r.out, `as h-viewer\x1b]0;t\x07 at `) || controlShown(r.out) {
+				t.Errorf("exit %d; the sign-in line did not show the subject escaped:\n%q", r.code, r.out)
+			}
+		})
+		os.Remove(file)
+	})
+
 	// D2 (a): with no store, each command signs in for itself, which --no-input refuses; with no
 	// desktop, as here, with the device grant (D4 (a)).
 	t.Run("memory", func(t *testing.T) {

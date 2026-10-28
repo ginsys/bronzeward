@@ -200,7 +200,7 @@ func (e *env) versionCmd(args []string) error {
 		if srv == nil {
 			fmt.Fprintln(w, "Server\tunknown")
 		} else {
-			fmt.Fprintf(w, "Server\t%s, API revision %d, start mode %s\t%s\n", srv.Version, srv.ApiRevision, srv.StartMode, where)
+			fmt.Fprintf(w, "Server\t%s, API revision %d, start mode %s\t%s\n", client.Printable(srv.Version), srv.ApiRevision, client.ShownStartMode(string(srv.StartMode)), where)
 		}
 	}))
 }
@@ -241,7 +241,7 @@ func (e *env) whoamiCmd(args []string) (err error) {
 		// The client's own reading of its token, labelled as such, beside the server's (§9.2 item 5).
 		if t := c.TokenClaims(); t != nil {
 			fmt.Fprintf(w, "Token (bronzewardctl's reading)\tsubject %s, issuer %s, expires %s\n",
-				t.Subject, t.Issuer, t.ExpiresAt().UTC().Format("2006-01-02 15:04:05 MST"))
+				client.Printable(t.Subject), client.Printable(t.Issuer), t.ExpiresAt().UTC().Format("2006-01-02 15:04:05 MST"))
 		}
 	})
 }
@@ -265,7 +265,7 @@ func (e *env) loginCmd(args []string) error {
 	}
 	who := "an unreadable token"
 	if c := client.ReadClaims(t.AccessToken); c != nil {
-		who = fmt.Sprintf("%s at %s (bronzewardctl's reading of the token), until %s", c.Subject, c.Issuer, c.ExpiresAt().UTC().Format("2006-01-02 15:04:05 MST"))
+		who = fmt.Sprintf("%s at %s (bronzewardctl's reading of the token), until %s", client.Printable(c.Subject), client.Printable(c.Issuer), c.ExpiresAt().UTC().Format("2006-01-02 15:04:05 MST"))
 	}
 	msg := fmt.Sprintf("Signed in to %s as %s, kept in %s.", x.Where(), who, kept)
 	if strings.HasPrefix(kept, "this process's memory") {

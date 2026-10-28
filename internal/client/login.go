@@ -120,7 +120,7 @@ func (i *idp) device(x *Context, prompts io.Writer) (*oauth2.Token, error) {
 	u, _ := url.Parse(d.VerificationURI)
 	// The host stands alone, so a look-alike prompt stands out (D4 (a)).
 	fmt.Fprintf(prompts, "To sign in to %s, open %s on any device and enter the code %s.\n\n    Check that the page's host is: %s\n\nWaiting for the sign-in...\n",
-		x.Where(), d.VerificationURI, d.UserCode, strings.ToUpper(u.Host))
+		x.Where(), d.VerificationURI, printable(d.UserCode), strings.ToUpper(u.Host))
 	t, err := i.conf.DeviceAccessToken(i.ctx, d)
 	if err != nil {
 		return nil, i.refusal(x, "device sign-in", "device sign-in", err)

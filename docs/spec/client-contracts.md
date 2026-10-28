@@ -313,7 +313,11 @@ it. It holds no secret.
    terminal. The escaping holds toward the server, toward an https proxy and toward the identity
    provider, in discovery, renewal and revocation, and for the server's own text in an error: the
    reason phrase of every status shown and each member of a problem document
-   (`internal/client/printable.go`). A server or issuer URL that holds a character the escaping
+   (`internal/client/printable.go`). It holds outside errors too, for the remote text a notice, a
+   sign-in or a read shows: a `Deprecation` header, the subject and issuer of a signed-in or renewed
+   token, of the token `whoami` reads and of the token a 401 is read for, the device grant's
+   `user_code` and the server's version; a start mode `GET /server` does not document, `normal` or
+   `recovery`, is shown as unknown. A server or issuer URL that holds a character the escaping
    would change is refused before any request uses it, as is such an endpoint or redirect the
    identity provider names. Toward the identity provider and the host `context add --from` reads,
    which may send a token in any of them, an error shows nothing those sent beyond the status code
