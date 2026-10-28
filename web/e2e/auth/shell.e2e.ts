@@ -211,6 +211,7 @@ describe("the state catalogue", () => {
 });
 
 const literal = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const INJECTED_REFUSAL = "Not read: Recovery mode active (injected). Request req-injected.";
 
 describe("recovery", () => {
   it("REC-01: a recovery start before its entry names the process's restriction; after it, the banner, the scopes and the epoch change", async () => {
@@ -220,6 +221,8 @@ describe("recovery", () => {
     // Before the entry: GET /server refused as every request but the entry, so nothing else is read.
     expect(await fixtureSignIn("h-viewer", {}, { upstream: at })).toBe(PRE_ENTRY);
     expect(await testid("status").getAttribute("role")).toBe("status");
+    // §8.2: the refusal's own title, detail and request ID stay shown under the restriction.
+    expect(await testid("problem").getText()).toMatch(/^Not read: .+\. Request \S+\.$/);
     expect(await testid("principal").isExisting()).toBe(false);
     expect(await testid("server").getText()).toBe("Server unknown");
     expect(await seen()).toEqual(["/server"]);
@@ -255,6 +258,7 @@ describe("recovery", () => {
       await faults({ upstream: at, processRefused: [refused, "/server"], held: late });
       await nav(page).click();
       await announced("status", PRE_ENTRY);
+      expect(await testid("problem").getText()).toBe(INJECTED_REFUSAL);
       await announced("recovery", `Recovery mode. Drafts can be edited. ${RECOVERY_START}`);
       expect(await testid("principal").isExisting()).toBe(false);
       await release();
@@ -274,6 +278,7 @@ describe("recovery", () => {
     await faults({ processRefused: ["/identity", "/server"] });
     await nav("Changes").click();
     await announced("status", PRE_ENTRY);
+    expect(await testid("problem").getText()).toBe(INJECTED_REFUSAL);
     expect(await testid("principal").isExisting()).toBe(false);
     expect(await testid("server").getText()).toBe("Server unknown");
     expect((await seen()).slice(-2)).toEqual(["/identity", "/server"]);

@@ -132,6 +132,9 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
   const [again, setAgain] = useState(0);
   const readAt = useRef<Date | undefined>(undefined);
   const shown = useRef({ server: false, identity: false, recovery: false });
+  // Bumped when the process's refusal drops every read in flight: a read started before it is no
+  // longer live, though its effect's cleanup has not run yet.
+  const dropped = useRef(0);
   const [client] = useState(() => {
     const c = new Client({
       ...auth,
@@ -171,6 +174,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
     // read still in flight is dropped at once, its answer discarded and its retries not sent.
     if (what !== "server" && res.kind === "refused" && startRefusal(res)) {
       client.dropReads();
+      dropped.current++;
       shown.current = { server: false, identity: false, recovery: false };
       setIdentity({ kind: "loading" });
       setRecovery({ kind: "loading" });
@@ -187,15 +191,18 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
   useEffect(() => () => client.setView({ principal: "", route: "", query: "" }), [client]);
 
   // Read until it answers with data, each time the page reads again. A read a newer one or a new
-  // page superseded is ignored when it completes, so it cannot replace a newer answer.
+  // page superseded is ignored when it completes, so it cannot replace a newer answer; so is one
+  // the process's refusal dropped, whatever the client already answered it.
   const known = server.kind === "ok";
   useEffect(() => {
     if (known) return;
+    const at = dropped.current;
     let live = true;
+    const current = () => live && at === dropped.current;
     void client.read<Server>("/server").then((res) => {
       const m = startModeOf(res);
-      if (m !== undefined && live) setMode(m);
-      settle(res, setServer, "server", () => live);
+      if (m !== undefined && current()) setMode(m);
+      settle(res, setServer, "server", current);
     });
     return () => void (live = false);
   }, [client, known, again, settle]);
@@ -206,14 +213,16 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
   useEffect(() => {
     if (!compatible) return;
     client.setView({ principal, route: path, query });
+    const at = dropped.current;
     let live = true;
-    void client.read<Identity>("/identity").then((res) => settle(res, setIdentity, "identity", () => live));
+    void client.read<Identity>("/identity").then((res) => settle(res, setIdentity, "identity", () => live && at === dropped.current));
     return () => void (live = false);
   }, [client, compatible, path, query, principal, again, settle]);
   useEffect(() => {
     if (!compatible || !recoveryMode) return;
+    const at = dropped.current;
     let live = true;
-    void client.read<Recovery>("/recovery").then((res) => settle(res, setRecovery, "recovery", () => live));
+    void client.read<Recovery>("/recovery").then((res) => settle(res, setRecovery, "recovery", () => live && at === dropped.current));
     return () => void (live = false);
   }, [client, compatible, recoveryMode, path, query, again, settle]);
 
@@ -236,7 +245,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
   let main: ReactNode;
   if (server.kind === "loading") main = <Loading what="the server's version" />;
   // GET /server is refused this way only before a recovery start's entry (§8.5 item 1).
-  else if (startRefusal(server)) main = <PreEntry onRead={() => setAgain((n) => n + 1)} />;
+  else if (startRefusal(server)) main = <PreEntry res={server} onRead={() => setAgain((n) => n + 1)} />;
   else if (server.kind !== "ok") main = server.kind !== "discarded" && <Failure res={server} sub={sub} />;
   else if (!compatible) main = <Status>{incompatible(server.data.apiRevision)}</Status>;
   else if (identity.kind === "loading") main = <Loading what="your identity" />;

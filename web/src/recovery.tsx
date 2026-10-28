@@ -3,7 +3,7 @@
 // start's entry.
 
 import type { ReadResult } from "./request.ts";
-import { clock, Disconnected, Refused, Status } from "./states.tsx";
+import { clock, Disconnected, ProblemFields, problemFields, Refused, Status } from "./states.tsx";
 import type { components } from "./api/v1";
 
 export type Recovery = components["schemas"]["RecoveryBody"];
@@ -60,6 +60,10 @@ export function RecoveryRead({ res }: { res: ReadResult<Recovery> }) {
   return <Refused testid="recovery-read" problem={res.problem} status={"status" in res ? res.status : 0} verb="read" />;
 }
 
-export const PreEntry =({ onRead }: { onRead: () => void }) => (
-  <Status actions={<button type="button" onClick={onRead}>Read again</button>}>{PRE_ENTRY}</Status>
+// The refusal's own fields stay under the restriction (§8.2): title, detail and the request ID.
+export const PreEntry = ({ res, onRead }: { res: ReadResult<unknown>; onRead: () => void }) => (
+  <>
+    <Status actions={<button type="button" onClick={onRead}>Read again</button>}>{PRE_ENTRY}</Status>
+    <ProblemFields text={problemFields(res)} />
+  </>
 );
