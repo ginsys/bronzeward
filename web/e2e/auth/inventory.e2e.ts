@@ -11,7 +11,7 @@ import { HEALTH, type Observation, sentences } from "../../src/machine.tsx";
 import type { Machine } from "../../src/machines.tsx";
 import { EPOCH_CHANGED, TRANSPORT_FAILURE } from "../../src/request.ts";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
-import { answers, faults, fixtureSignIn, mint, param, release, seen, storageEmpty, where } from "./helpers.ts";
+import { answers, faults, fixtureSignIn, holding, mint, param, release, seen, storageEmpty, where } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 
@@ -329,10 +329,10 @@ describe("the machine detail (W3)", () => {
     await $(`a[title="${id}"]`).click();
     await expect($("main h2")).toHaveText(`Machine ${id}`);
     await expect($("main")).toHaveText(expect.stringContaining("No timeline entry recorded."));
-    // The next poll is held; the view moves while it is in flight, so the client discards its answer.
-    const asked = (await seen()).filter((p) => p === path).length;
+    // The next poll is held; once the injector holds it, the view moves while it is in flight, so
+    // the client discards its answer.
     await faults({ upstream: at, held: path });
-    await browser.waitUntil(async () => (await seen()).filter((p) => p === path).length > asked, { timeout: 20_000, timeoutMsg: "no timeline poll was sent" });
+    await browser.waitUntil(async () => (await holding()).includes(path), { timeout: 20_000, timeoutMsg: "no timeline poll was held" });
     await browser.execute((to: string) => {
       history.pushState(null, "", to);
       dispatchEvent(new PopStateEvent("popstate"));

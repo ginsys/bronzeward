@@ -106,8 +106,8 @@ function host(listen: string, clientConfig: object, issuer: string, api: string)
 // provider's counts, and sends the browser to a URL holding a code without naming it over
 // WebDriver, whose log the artifact scan reads (POST /go stores it, GET /go redirects there once).
 // POST /faults sets the injector's faults, GET /seen lists the API paths it passed on and GET
-// /answered the server's answers to them, POST /release lets its held answers go and answers once
-// they are sent; the next sign-in clears all four. POST /disposable answers the URL of B's
+// /answered the server's answers to them, GET /held the paths whose answers it holds now, POST
+// /release lets its held answers go and answers once they are sent; the next sign-in clears all. POST /disposable answers the URL of B's
 // deployment just started on a fresh database, replacing any earlier one: ?start=recovery with
 // -recovery-start, its entry not yet made, and with &keep on the earlier one's database.
 function control(provider: Provider, next: { grant: Grant }, injector: Injector, disposable: (recovery: boolean, keep: boolean) => Promise<string>): Server {
@@ -117,6 +117,7 @@ function control(provider: Provider, next: { grant: Grant }, injector: Injector,
     if (url.pathname === "/counts") return res.end(JSON.stringify(provider.counts));
     if (url.pathname === "/seen") return res.end(JSON.stringify(injector.seen));
     if (url.pathname === "/answered") return res.end(JSON.stringify(injector.answered));
+    if (url.pathname === "/held") return res.end(JSON.stringify(injector.holding));
     if (url.pathname === "/release" && req.method === "POST") return void injector.release().then(() => res.end());
     if (url.pathname === "/disposable" && req.method === "POST") {
       const started = disposable(url.searchParams.get("start") === "recovery", url.searchParams.has("keep"));
