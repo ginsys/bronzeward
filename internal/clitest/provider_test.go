@@ -31,8 +31,8 @@ import (
 // target holding a C1 control, "other" names another issuer, "keys" keys on plain http off
 // loopback, "keysdown" keys that answer 503 with a body of control characters, and "garbled" an
 // answer whose status line holds a refresh token.
-// verification, when set, is the device grant's verification_uri, and device, when set, the
-// device authorization's whole answer instead.
+// verification, when set, is the device grant's verification_uri, and userCode its user_code;
+// device, when set, is the device authorization's whole answer instead.
 type provider struct {
 	iss *issuer.Issuer
 
@@ -40,6 +40,7 @@ type provider struct {
 	discovery    string
 	verification string
 	device       []byte
+	userCode     string
 	query        string
 	seen         string
 	endpoint     any
@@ -74,6 +75,7 @@ func (p *provider) login(callback func(url.Values) url.Values, nonce string) {
 	defer p.mu.Unlock()
 	p.callback, p.nonce, p.codes, p.request, p.revoked, p.exchanged, p.idToken = callback, nonce, map[string]authorization{}, nil, nil, nil, nil
 	p.device = nil
+	p.userCode = ""
 	p.approved.Store(false)
 	p.noRefresh.Store(false)
 	p.exchange.Store(0)
@@ -136,6 +138,14 @@ func (p *provider) wrap(iss *issuer.Issuer) http.Handler {
 			w.Header().Set("Location", iss.URL+"/.well-known/openid-configuration?\u009b2J")
 			w.WriteHeader(http.StatusFound)
 			return
+		case "c1path", "escpath":
+			// A control in the path (#383): Go percent-encodes the C1 one in the URL it rebuilds, so
+			// the Location header is checked as sent; a redirect followed would read a 404.
+			c := map[string]string{"c1path": "\u009b2J", "escpath": "\x1b[2J"}[p.discovery]
+			p.mu.Unlock()
+			w.Header().Set("Location", iss.URL+"/"+c+"/.well-known/openid-configuration")
+			w.WriteHeader(http.StatusFound)
+			return
 		case "garbage":
 			p.mu.Unlock()
 			w.Write([]byte("\x1b[2J BWSYNTH-body"))
@@ -186,7 +196,7 @@ func (p *provider) wrap(iss *issuer.Issuer) http.Handler {
 	})
 	mux.HandleFunc("POST /device", func(w http.ResponseWriter, r *http.Request) {
 		p.mu.Lock()
-		verify, device := p.verification, p.device
+		verify, device, code := p.verification, p.device, p.userCode
 		p.mu.Unlock()
 		if device != nil {
 			w.Header().Set("Content-Type", "application/json")
@@ -196,7 +206,10 @@ func (p *provider) wrap(iss *issuer.Issuer) http.Handler {
 		if verify == "" {
 			verify = iss.URL + "/activate?client=cli"
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"device_code": "BWSYNTH-device", "user_code": "BWSY-NTH1",
+		if code == "" {
+			code = "BWSY-NTH1"
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"device_code": "BWSYNTH-device", "user_code": code,
 			"verification_uri": verify, "expires_in": 60, "interval": 1})
 	})
 	mux.HandleFunc("GET /keysdown", func(w http.ResponseWriter, r *http.Request) {

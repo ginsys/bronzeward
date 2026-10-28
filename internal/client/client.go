@@ -248,7 +248,7 @@ func (c *Client) observe(route string, r *http.Response) {
 	c.recovery = c.recovery || r.Header.Get("Bronzeward-Recovery-Mode") == "true"
 	if d := r.Header.Get("Deprecation"); d != "" && !c.warned[route] {
 		c.warned[route] = true
-		fmt.Fprintf(c.Notices, "%s: %s is deprecated (Deprecation: %s)\n", c.Context.Where(), route, d)
+		fmt.Fprintf(c.Notices, "%s: %s is deprecated (Deprecation: %s)\n", c.Context.Where(), route, printable(d))
 	}
 }
 
@@ -256,11 +256,7 @@ func (c *Client) observe(route string, r *http.Response) {
 func (c *Client) banner() {
 	if c.recovery && !c.warned["recovery"] {
 		c.warned["recovery"] = true
-		mode := c.Context.StartMode
-		if mode == "" {
-			mode = "unknown"
-		}
-		fmt.Fprintf(c.Notices, "RECOVERY MODE is on in %s (start mode: %s).\n", c.Context.Where(), mode)
+		fmt.Fprintf(c.Notices, "RECOVERY MODE is on in %s (start mode: %s).\n", c.Context.Where(), ShownStartMode(c.Context.StartMode))
 	}
 }
 

@@ -305,7 +305,7 @@ func (c *Client) adopt(t *Tokens) {
 	was, now := ReadClaims(c.signIn.tokens.AccessToken), ReadClaims(t.AccessToken)
 	if was != nil && now != nil && (was.Subject != now.Subject || was.Issuer != now.Issuer) {
 		fmt.Fprintf(c.Notices, "%s: a new sign-in: the renewed token is for %s at %s, not %s at %s.\n",
-			c.Context.Where(), now.Subject, now.Issuer, was.Subject, was.Issuer)
+			c.Context.Where(), printable(now.Subject), printable(now.Issuer), printable(was.Subject), printable(was.Issuer))
 	}
 	c.signIn.tokens, c.token = t, t.AccessToken
 }
@@ -445,9 +445,13 @@ func issuerClient(x *Context) (*http.Client, error) {
 		return nil, err
 	}
 	hc.CheckRedirect = func(r *http.Request, via []*http.Request) error {
-		// Go drops an empty fragment from the target, so the Location header is checked as sent.
-		if len(via) >= 10 || r.Response != nil && strings.Contains(r.Response.Header.Get("Location"), "#") ||
-			providerEndpoint(r.URL.String(), "redirect") != nil {
+		// Go drops an empty fragment from the target and percent-encodes a C1 control in its path,
+		// so the Location header is checked as sent, too.
+		l := ""
+		if r.Response != nil {
+			l = r.Response.Header.Get("Location")
+		}
+		if len(via) >= 10 || strings.Contains(l, "#") || printable(l) != l || providerEndpoint(r.URL.String(), "redirect") != nil {
 			return &refusedRedirect{to: r.URL, many: len(via) >= 10}
 		}
 		return nil
