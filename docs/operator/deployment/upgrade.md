@@ -20,8 +20,10 @@ Migrations change the schema, only through `migrate`, with every server stopped
 ([persistence and API §11](../../spec/persistence-api.md#11-migrations)). `serve` refuses a schema
 that is not exactly its own binary's, so no instance runs across a migration.
 
-1. Take a backup of the database and the OpenBao data that you can restore. It is the only way
-   back (below).
+1. Take matched backups of the three things [recovery](../recovery.md#before-you-need-it) names:
+   PostgreSQL, the OpenBao node and the credential store holding provider tokens, with the OpenBao
+   backup taken no earlier than the database one. Check that you can restore them: they are the only
+   way back (below).
 2. Stop every instance. `migrate` must run with the service stopped (§11 rule 1).
 3. Run the new binary's `bronzeward migrate -config bronzeward.yaml`. It prints
    `the schema is at version N, exactly this binary's migrations`.
@@ -42,7 +44,8 @@ refuses a schema that a newer one migrated, so going back across a migration mea
 backup of step 1:
 
 1. Stop every instance.
-2. Restore the database, and OpenBao with it if the backup holds both, as
+2. Restore the database from step 1, and OpenBao or the credential store only from the same matched
+   set, as
    [Recovery: restoring from a backup](../recovery.md#restoring-from-a-backup) describes.
 3. Start one instance of the older binary with `serve -recovery-start`, and follow that page to the
    end. A restore always enters recovery mode. Everything after the backup is lost, and each

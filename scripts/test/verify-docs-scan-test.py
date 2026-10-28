@@ -109,6 +109,11 @@ with tempfile.TemporaryDirectory() as work:
     fails('host in indented code', OPERATOR, f'\nRun:\n\n    curl {host}\n', HOST)
     fails('host in a fence inside a list item', OPERATOR,
           f'\n1. Configure the client:\n\n    ```sh\n    export BW_ISSUER={host}\n\n    bronzeward login\n    ```\n', HOST)
+    fails('host in indented code in an ordered list item', OPERATOR, f'\n1. Run:\n\n       curl {host}\n', HOST)
+    fails('host in indented code in a bullet list item', OPERATOR, f'\n- Run:\n\n      curl {host}\n', HOST)
+    fails('host in tab-indented code', OPERATOR, f'\nRun:\n\n\tcurl {host}\n', HOST)
+    fails('host in a tab-indented fence in a list item', OPERATOR,
+          f'\n1. Configure:\n\n\t```sh\n\texport BW_ISSUER={host}\n\n\tbronzeward login\n\t```\n', HOST)
     passes('host in a list continuation', OPERATOR, f'\n- Step one\n\n    see {host} later.\n')
     passes('host in operator prose', OPERATOR, f'\nSee [the provider]({host}) or {host}.\n')
     passes('host in a specification code block', DOC, f'\n```sh\ncurl {host}\n```\n')
