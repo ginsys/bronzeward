@@ -171,7 +171,10 @@ request with a `307` to that origin instead, the fault of conformance cases TLS-
 canary, a `BWSYNTH-` value only the target serves, and for any JWT. No server, database or
 identity provider runs: the page signs in through a synthetic provider in the harness
 (`web/e2e/provider.ts`) on `http://127.0.0.1:58445`.
-`BW_WDIO_CACHE` moves WebdriverIO's browser and driver downloads out of `TMPDIR`.
+Each chrome and edge session gets a profile directory under one directory per run, removed when
+the run ends. Both browser tasks run WebdriverIO with a `TMPDIR` of their own, remove it after the
+run, and fail when a browser profile was left in it. `BW_WDIO_CACHE` chooses where WebdriverIO keeps
+its browser and driver downloads; the tasks default it to the outer `TMPDIR`.
 
 `mise run browser-auth` runs the AUTH cases (`web/e2e/auth/`) after `dev-db` and `dev-idp`. It
 creates two databases on dev-db's PostgreSQL and drops them at the end, with two servers and
