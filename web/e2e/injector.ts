@@ -9,9 +9,9 @@ export interface Faults {
   revision?: number;
   // COMP-02: a Deprecation header on the answers to this path.
   deprecate?: string;
-  // A redirect for this path, which the page refuses: a transport failure as the page sees it
-  // (client contracts §6 item 7). A connection closed here would reach the page as the static
-  // host's 502.
+  // A redirect for this path, after any hold, which the page refuses: a transport failure as the
+  // page sees it (client contracts §6 item 7). A connection closed here would reach the page as the
+  // static host's 502.
   redirect?: string;
   // The answer to this path held this long, in milliseconds; with a query, only to that query.
   hold?: { path: string; ms: number; query?: string };
@@ -61,12 +61,12 @@ export function startInjector(upstream: string, port: number): Promise<Injector>
     if (path.startsWith("/api/v1/")) inj.seen.push(path.slice("/api/v1".length));
     const f = inj.faults;
     const route = path.slice("/api/v1".length);
-    if (f.redirect === route) return void res.writeHead(302, { Location: "http://127.0.0.1:9/" }).end();
     void (async () => {
       if (f.hold?.path === route && (f.hold.query ?? search) === search) await new Promise((r) => setTimeout(r, f.hold!.ms));
       if (f.held === route) {
         await new Promise<void>((go) => waiting.push({ go, sent: new Promise((done) => res.once("close", () => done())) }));
       }
+      if (f.redirect === route) return void res.writeHead(302, { Location: "http://127.0.0.1:9/" }).end();
       if (f.missing === route) {
         const problem = { type: "urn:bronzeward:problem:not-found", title: "Not found", status: 404, detail: "injected", instance: "req-injected" };
         return void res.writeHead(404, { "Content-Type": "application/problem+json" }).end(JSON.stringify(problem));
