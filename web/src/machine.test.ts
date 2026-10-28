@@ -1,8 +1,8 @@
 import { describe, expect, test, vi } from "vitest";
-import { ADOPTED, details, EITHER, type Entry, FROZEN, HEALTH, latestUnread, nextTail, type Observation, POLL_MS, polled, readTail, sentences, type Tail } from "./machine.tsx";
+import { renderToStaticMarkup } from "react-dom/server";
+import { ADOPTED, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, latestUnread, nextTail, type Observation, POLL_MS, polled, readTail, sentences, type Tail } from "./machine.tsx";
 import type { Machine } from "./machines.tsx";
 import type { ReadResult } from "./request.ts";
-import { clock } from "./states.tsx";
 
 // Synthetic machine and observation reads, as the generated types describe them.
 const machine = (over: Partial<Machine>): Machine => ({
@@ -15,7 +15,7 @@ const observation = (id: string, basis: number, at: string, unread: Observation[
   endpoint: "10.5.0.2:50000", controller: "ctl_a", startedAt: at, at, access: null, smbiosUuid: null, talosNodeId: "node-a",
   talosClusterId: null, assignmentEvidence: null, runningVersion: null, resourceVersion: null, health: null, unread,
 });
-const T = (at: string) => clock(new Date(at));
+const T = at;
 const READ = "2026-10-26T09:46:00Z";
 const obsA = observation("obs_a", 4, READ);
 const drift = { revision: 3, observation: "obs_k", lastObservation: "obs_a", lateLanding: null };
@@ -63,10 +63,33 @@ describe("journeys §2.4 status sentences, field by field", () => {
 
   test("a later read that could not read, named by its causes; an earlier one or a complete one is not", () => {
     const late = observation("obs_p", 5, "2026-10-26T09:51:00Z", { configDigest: { code: "unreachable", cause: "node unreachable" } });
-    expect(sentences(machine({}), [obsA, late])).toContain(`The latest read at ${T(late.at)} could not read: node unreachable.`);
+    expect(sentences(machine({}), [obsA, late])).toContain(`The latest read at ${T(late.at)} could not read: configDigest (node unreachable).`);
     const early = observation("obs_e", 3, "2026-10-26T09:40:00Z", { configDigest: { cause: "node unreachable" } });
     expect(latestUnread(machine({}), [obsA, early])).toBeUndefined();
     expect(latestUnread(machine({}), [obsA, observation("obs_q", 6, READ)])).toBeUndefined();
+  });
+
+  test("#423 C1: a read's time carries its date, so reads at the same time on different days differ", () => {
+    expect(T("2026-10-26T09:46:00Z")).not.toBe(T("2026-10-25T09:46:00Z"));
+    expect(T(READ)).toMatch(/^2026-10-2[5-7] \d\d:\d\d$/);
+  });
+
+  test("#423 C2: what a read could not read is named field by field, causes shared or not", () => {
+    const both = observation("obs_p", 5, "2026-10-26T09:51:00Z", { configDigest: { cause: "none-bound" }, health: { cause: "none-bound" } });
+    expect(sentences(machine({}), [obsA, both])).toContain(`The latest read at ${T(both.at)} could not read: configDigest (none-bound); health (none-bound).`);
+  });
+
+  test("#423 C3: a read observed names that the observations do not hold yet makes no older read the latest", () => {
+    const late = observation("obs_p", 5, "2026-10-26T09:51:00Z", { configDigest: { cause: "node unreachable" } });
+    const m = machine({ observed: { observation: "obs_z", at: "2026-10-26T09:56:00Z", release: "rel_new" } });
+    expect(latestUnread(m, [obsA, late])).toBeUndefined();
+    // Without an observed read every unread read is newer.
+    expect(latestUnread(machine({ observed: null }), [late])).toBe(late);
+  });
+
+  test("#423 C5: the observed read's attribution, apart from the drift sentences", () => {
+    expect(renderToStaticMarkup(attribution(null))).toBe("matches neither Applied nor Desired");
+    expect(renderToStaticMarkup(attribution("rel_new"))).toBe('attributed to <span title="rel_new">rel_new</span>');
   });
 
   test("nothing applied, selected or read, and frozen: no time shown", () => {
