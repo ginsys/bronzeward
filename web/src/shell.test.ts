@@ -1,7 +1,7 @@
 import { createElement as h, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, test } from "vitest";
-import { Action, connection, Deprecations, deprecated, Failure, incompatible, MIN_API_REVISION, observed, offlineSince, ShellContext } from "./shell.tsx";
+import { describe, expect, test, vi } from "vitest";
+import { Action, connection, Deprecations, deprecated, Failure, incompatible, MIN_API_REVISION, observed, offlineSince, ShellContext, type ShellEvents, ShellReads } from "./shell.tsx";
 import { Conflict, Disconnected, Empty, HUMAN_ONLY, Loading, NOT_ACCEPTED, NotAccepted, Offline, Refused, REPLAYED, Replayed, SET_ASIDE, SetAside, Unknown, UNKNOWN, Unread, Withheld, WITHHELD } from "./states.tsx";
 import { TRANSPORT_FAILURE } from "./request.ts";
 
@@ -111,5 +111,88 @@ describe("the shell", () => {
 
   test("§7 item 3: the refusal of an older server names both revisions", () => {
     expect(incompatible(1)).toBe(`This server serves API revision 1; this client needs API revision ${MIN_API_REVISION} or later.`);
+  });
+});
+
+// #410: the shell's one invalidation point, against a client whose fetch answers each request in
+// turn; an answer given as a promise holds its request until the test resolves it.
+describe("the shell's reads", () => {
+  const view = { principal: "iss sub", route: "/machines", query: "" };
+  const answer = (status: number, body: unknown, epoch: string) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": status === 200 ? "application/json" : "application/problem+json", "Bronzeward-Epoch": epoch },
+    });
+  const problem = (status: number, code: string, epoch: string) =>
+    answer(status, { type: `urn:bronzeward:problem:${code}`, title: code, status }, epoch);
+  function shell(answers: (Response | Promise<Response>)[]) {
+    const fetch = vi.fn(async () => {
+      const next = answers.shift();
+      if (next === undefined) throw new Error("no answer left");
+      return next;
+    });
+    const events: ShellEvents = { onUnauthenticated: vi.fn(), onRevoked: vi.fn(), onEpochChange: vi.fn(), onPreEntry: vi.fn(), setMode: vi.fn(), observe: vi.fn() };
+    const reads = new ShellReads({ fetch: fetch as unknown as typeof globalThis.fetch, sleep: async () => {} }, () => events);
+    reads.client.setView(view);
+    return { reads, fetch, events };
+  }
+
+  test("an identity answer from the old epoch, settled after the new epoch cleared the shell, is not shown", async () => {
+    const { reads, events } = shell([answer(200, { version: "v" }, "e1"), answer(200, { subject: "old" }, "e1"), answer(200, {}, "e2")]);
+    await reads.client.read("/server"); // e1 recorded
+    const valid = reads.since();
+    const old = await reads.client.read("/identity"); // answered under e1, its settle still to come
+    expect(old).toMatchObject({ kind: "ok" });
+    expect(await reads.client.read("/recovery")).toEqual({ kind: "discarded" }); // announces e2
+    expect(events.onEpochChange).toHaveBeenCalledTimes(1);
+    const set = vi.fn();
+    reads.settle(old, set, "identity", valid, () => false);
+    expect(set).not.toHaveBeenCalled();
+    expect(reads.shown.identity).toBe(false);
+  });
+
+  test("GET /server's refusal before the entry drops the reads in flight: none is sent again", async () => {
+    let release!: (r: Response) => void;
+    const held = new Promise<Response>((r) => (release = r));
+    const { reads, fetch, events } = shell([held, problem(409, "recovery-mode-active", "e2")]);
+    const pending = reads.client.read("/identity"); // sent before any epoch was recorded
+    const refusal = await reads.client.read("/server"); // e2 recorded
+    const set = vi.fn();
+    reads.settle(refusal, set, "server", reads.since(), () => false);
+    expect(set).toHaveBeenCalledWith(refusal); // shown as GET /server's own answer
+    expect(events.onPreEntry).not.toHaveBeenCalled();
+    release(answer(200, { subject: "old" }, "e1")); // an epoch other than e2: ambiguous, not read again
+    expect(await pending).toEqual({ kind: "discarded" });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  test("a revocation ends the page, and an answer from before it is not shown", async () => {
+    const { reads, events } = shell([answer(200, { subject: "old" }, "e1"), problem(403, "identity-revoked", "e1")]);
+    const valid = reads.since();
+    const old = await reads.client.read("/identity");
+    const revoked = await reads.client.read("/server");
+    reads.settle(revoked, vi.fn(), "server", reads.since(), () => false);
+    expect(events.onRevoked).toHaveBeenCalledWith(revoked);
+    const set = vi.fn();
+    reads.settle(old, set, "identity", valid, () => false);
+    expect(set).not.toHaveBeenCalled();
+  });
+
+  test("sign-out: a read answered before it is not shown, and one in flight is not sent again", async () => {
+    let release!: (r: Response) => void;
+    const held = new Promise<Response>((r) => (release = r));
+    const { reads, fetch } = shell([answer(200, { subject: "old" }, "e1"), held]);
+    const valid = reads.since();
+    const old = await reads.client.read("/identity");
+    const retrying = reads.client.read("/server");
+    const signOut = vi.fn();
+    reads.signOut(signOut);
+    expect(signOut).toHaveBeenCalledTimes(1);
+    const set = vi.fn();
+    reads.settle(old, set, "identity", valid, () => false);
+    expect(set).not.toHaveBeenCalled();
+    release(problem(503, "dependency-unavailable", "e1")); // retried, but for the sign-out
+    expect(await retrying).toEqual({ kind: "discarded" });
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 });

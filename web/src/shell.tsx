@@ -122,6 +122,100 @@ export const VersionFooter = ({ server }: { server?: Server | undefined }) => (
 export const Deprecations = ({ routes }: { routes: readonly string[] }) =>
   routes.map((route) => <Status key={route} testid="deprecation">{deprecated(route)}</Status>);
 
+// What settling an answer changes in the shell besides the read's own state.
+export interface ShellEvents {
+  onUnauthenticated: (res: ReadResult<unknown>) => void;
+  onRevoked: (res: ReadResult<unknown>) => void;
+  // §8.5: a new epoch; what was read is discarded with it, and GET /server read again for the mode.
+  onEpochChange: () => void;
+  // The process's refusal on another read: the state before the entry, as GET /server's answer.
+  onPreEntry: (res: Extract<ReadResult<unknown>, { kind: "refused" }>) => void;
+  setMode: (mode: StartMode) => void;
+  observe: (e: ConnectionEvent, at: Date) => void;
+}
+
+// The shell's client and its one invalidation point (#410). The process's recovery refusal, a new
+// epoch, and a revocation or sign-out each make every read in flight stale: a read started before
+// any of them is not settled into page state, whatever the client already answered it, though its
+// effect's cleanup has not run yet. Credential refusals are handled before that check.
+export class ShellReads {
+  readonly client: Client;
+  // Whether each of the shell's three reads showed data, and when a read last answered with data.
+  shown = noneShown();
+  readAt: Date | undefined;
+  private invalidations = 0;
+
+  constructor(opts: Omit<ClientOptions, "onEpochChange">, private readonly events: () => ShellEvents) {
+    this.client = new Client({
+      ...opts,
+      // At once, before any answer the client gave under the old epoch is settled.
+      onEpochChange: () => {
+        this.invalidate(false);
+        this.shown = noneShown();
+        this.events().onEpochChange();
+      },
+      // The page ends with the revocation: nothing read before it is settled, or sent again.
+      onRevoked: () => {
+        this.invalidate(true);
+        opts.onRevoked?.();
+      },
+    });
+  }
+
+  // Every read in flight is stale; with `drop`, the client sends none of them again either, not
+  // even to learn an ambiguous epoch.
+  invalidate(drop: boolean): void {
+    if (drop) this.client.dropReads();
+    this.invalidations++;
+  }
+
+  // Sign-out: nothing read before it is settled, or sent again, while the page moves on.
+  signOut(then: () => void): void {
+    this.invalidate(true);
+    then();
+  }
+
+  // From now, true until the reads are invalidated.
+  readonly since = (): (() => boolean) => {
+    const at = this.invalidations;
+    return () => at === this.invalidations;
+  };
+
+  // A transport failure keeps the data this resource showed under the offline banner; without any,
+  // it is shown as the disconnected state.
+  // A refusal ends the page whichever read carried it, a superseded one too: the client already
+  // dropped the credentials it refused. Any other answer of a superseded read says nothing more.
+  // `what` names the shell's own reads; a page's read (none) says through `held` whether it shows data.
+  settle<T>(res: ReadResult<T>, set: (r: Load<T>) => void, what: keyof Shown | undefined, live: () => boolean, held: () => boolean): void {
+    const on = this.events();
+    if (res.kind === "discarded") return;
+    if (res.kind === "unauthenticated") return on.onUnauthenticated(res);
+    if (res.kind === "revoked") return on.onRevoked(res);
+    if (!live()) return;
+    if (startRefusal(res)) on.setMode("recovery");
+    const now = new Date();
+    const e = observed(res, held());
+    if (e !== undefined) on.observe(e, now);
+    if (e === "lost") return;
+    // The process's refusal means the process restarted for recovery, its entry not yet made,
+    // possibly under the same epoch: every read still in flight is dropped at once, its answer
+    // discarded and its retries not sent, GET /server's own refusal included. On any other read the
+    // page shows that state as GET /server's own answer, which it then reads again (§8.5 item 1),
+    // and nothing read before it stays shown.
+    if (res.kind === "refused" && startRefusal(res)) {
+      this.invalidate(true);
+      if (what !== "server") {
+        this.shown = noneShown();
+        return on.onPreEntry(res);
+      }
+    }
+    // A refusal replaces the data, so a later read without answer has nothing to keep shown.
+    if (what !== undefined) this.shown[what] = res.kind === "ok";
+    if (res.kind === "ok") this.readAt = now;
+    set(res);
+  }
+}
+
 export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, onDeprecation, signOut, notices = [] }: SignedInProps & { notices?: readonly string[] }) {
   const [path, go, query] = usePath();
   const [server, setServer] = useState<Load<Server>>({ kind: "loading" });
@@ -134,110 +228,72 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
   const offline = offlineSince(conn);
   // Bumped to read again: back online, asked by the operator, or after a new epoch.
   const [again, setAgain] = useState(0);
-  const readAt = useRef<Date | undefined>(undefined);
-  const shown = useRef(noneShown());
-  // Bumped when the process's refusal drops every read in flight: a read started before it is no
-  // longer live, though its effect's cleanup has not run yet.
-  const dropped = useRef(0);
-  const [client] = useState(() => {
-    const c = new Client({
-      ...auth,
-      onDeprecation,
-      // §8.5: what was read is discarded with its epoch, and GET /server read again for the mode.
-      onEpochChange: () => {
-        setEpochChanged(true);
-        setServer({ kind: "loading" });
-        setIdentity({ kind: "loading" });
-        setRecovery({ kind: "loading" });
-        shown.current = noneShown();
-        setAgain((n) => n + 1);
-      },
-      onRecoveryModeChange: setRecoveryMode,
-    });
-    return c;
-  });
+  const events = useRef<ShellEvents>(undefined);
+  events.current = {
+    onUnauthenticated,
+    onRevoked,
+    onEpochChange: () => {
+      setEpochChanged(true);
+      setServer({ kind: "loading" });
+      setIdentity({ kind: "loading" });
+      setRecovery({ kind: "loading" });
+      setAgain((n) => n + 1);
+    },
+    onPreEntry: (res) => {
+      setIdentity({ kind: "loading" });
+      setRecovery({ kind: "loading" });
+      setServer({ kind: "refused", status: res.status, problem: res.problem });
+    },
+    setMode,
+    observe: (e, at) => observe([e, at]),
+  };
+  const [reads] = useState(() => new ShellReads({ ...auth, onDeprecation, onRecoveryModeChange: setRecoveryMode }, () => events.current!));
+  const client = reads.client;
   // In render, before any page's effect sends a read for the new path or query: effects run child
   // first, so a page's read sent before this shell's effect would be discarded with the old ones.
   client.setView({ principal, route: path, query });
 
-  // A transport failure keeps the data this resource showed under the offline banner; without any,
-  // it is shown as the disconnected state.
-  // A refusal ends the page whichever read carried it, a superseded one too: the client already
-  // dropped the credentials it refused. Any other answer of a superseded read says nothing more.
-  // `what` names the shell's own reads; a page's read (none) says through `held` whether it shows data.
-  const settleAs = useCallback(<T,>(res: ReadResult<T>, set: (r: Load<T>) => void, what: keyof Shown | undefined, live: () => boolean, held: () => boolean) => {
-    if (res.kind === "discarded") return;
-    if (res.kind === "unauthenticated") return onUnauthenticated(res);
-    if (res.kind === "revoked") return onRevoked(res);
-    if (!live()) return;
-    if (startRefusal(res)) setMode("recovery");
-    const now = new Date();
-    const e = observed(res, held());
-    if (e !== undefined) observe([e, now]);
-    if (e === "lost") return;
-    // The process's refusal on any other read means the process restarted for recovery, its entry
-    // not yet made, possibly under the same epoch: the page shows that state as GET /server's own
-    // answer, which it then reads again (§8.5 item 1), and nothing read before it stays shown: every
-    // read still in flight is dropped at once, its answer discarded and its retries not sent.
-    if (what !== "server" && res.kind === "refused" && startRefusal(res)) {
-      client.dropReads();
-      dropped.current++;
-      shown.current = noneShown();
-      setIdentity({ kind: "loading" });
-      setRecovery({ kind: "loading" });
-      setServer({ kind: "refused", status: res.status, problem: res.problem });
-      return;
-    }
-    // A refusal replaces the data, so a later read without answer has nothing to keep shown.
-    if (what !== undefined) shown.current[what] = res.kind === "ok";
-    if (res.kind === "ok") readAt.current = now;
-    set(res);
-  }, [client, onUnauthenticated, onRevoked]);
-  const settle = useCallback(<T,>(res: ReadResult<T>, set: (r: Load<T>) => void, what: keyof Shown, live: () => boolean) => settleAs(res, set, what, live, () => shown.current[what]), [settleAs]);
-  const settlePage = useCallback(<T,>(res: ReadResult<T>, set: (r: Load<T>) => void, live: () => boolean, held: () => boolean) => settleAs(res, set, undefined, live, held), [settleAs]);
-  const undropped = useCallback(() => {
-    const at = dropped.current;
-    return () => at === dropped.current;
-  }, []);
+  const settle = useCallback(<T,>(res: ReadResult<T>, set: (r: Load<T>) => void, what: keyof Shown, live: () => boolean) => reads.settle(res, set, what, live, () => reads.shown[what]), [reads]);
+  const settlePage = useCallback(<T,>(res: ReadResult<T>, set: (r: Load<T>) => void, live: () => boolean, held: () => boolean) => reads.settle(res, set, undefined, live, held), [reads]);
 
   // Reads still in flight when the shell goes (a refusal, sign-out) are discarded, and renew no more.
   useEffect(() => () => client.setView({ principal: "", route: "", query: "" }), [client]);
 
   // Read until it answers with data, each time the page reads again. A read a newer one or a new
   // page superseded is ignored when it completes, so it cannot replace a newer answer; so is one
-  // the process's refusal dropped, whatever the client already answered it. A move to another path
-  // or query discards it in the client, so the read starts again under the new view.
+  // the shell invalidated, whatever the client already answered it. A move to another path or
+  // query discards it in the client, so the read starts again under the new view.
   const known = server.kind === "ok";
   useEffect(() => {
     if (known) return;
-    const at = dropped.current;
+    const valid = reads.since();
     let live = true;
-    const current = () => live && at === dropped.current;
+    const current = () => live && valid();
     void client.read<Server>("/server").then((res) => {
       const m = startModeOf(res);
       if (m !== undefined && current()) setMode(m);
       settle(res, setServer, "server", current);
     });
     return () => void (live = false);
-  }, [client, known, path, query, principal, again, settle]);
+  }, [client, reads, known, path, query, principal, again, settle]);
 
   // The header's identity, and the recovery banner's scopes while in recovery mode, read again on
   // every page and each time the page reads again.
   const compatible = known && server.data.apiRevision >= MIN_API_REVISION;
   useEffect(() => {
     if (!compatible) return;
-    const at = dropped.current;
+    const valid = reads.since();
     let live = true;
-    void client.read<Identity>("/identity").then((res) => settle(res, setIdentity, "identity", () => live && at === dropped.current));
+    void client.read<Identity>("/identity").then((res) => settle(res, setIdentity, "identity", () => live && valid()));
     return () => void (live = false);
-  }, [client, compatible, path, query, principal, again, settle]);
+  }, [client, reads, compatible, path, query, principal, again, settle]);
   useEffect(() => {
     if (!compatible || !recoveryMode) return;
-    const at = dropped.current;
+    const valid = reads.since();
     let live = true;
-    void client.read<Recovery>("/recovery").then((res) => settle(res, setRecovery, "recovery", () => live && at === dropped.current));
+    void client.read<Recovery>("/recovery").then((res) => settle(res, setRecovery, "recovery", () => live && valid()));
     return () => void (live = false);
-  }, [client, compatible, recoveryMode, path, query, again, settle]);
+  }, [client, reads, compatible, recoveryMode, path, query, again, settle]);
 
   useEffect(() => {
     const down = () => observe(["offline", new Date()]);
@@ -277,12 +333,12 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
             <span data-testid="epoch">Epoch {id.epoch}</span>
           </p>
         )}
-        <button type="button" onClick={signOut}>Sign out</button>
+        <button type="button" onClick={() => reads.signOut(signOut)}>Sign out</button>
         {recoveryMode && <RecoveryBanner recovery={recovery.kind === "ok" ? recovery.data : undefined} mode={mode} />}
         {recoveryMode && recovery.kind !== "loading" && <RecoveryRead res={recovery} />}
         {epochChanged && <Status testid="epoch-changed">{EPOCH_CHANGED}.</Status>}
         <Deprecations routes={notices} />
-        {offline !== undefined && <Offline since={offline} readAt={readAt.current} />}
+        {offline !== undefined && <Offline since={offline} readAt={reads.readAt} />}
         {id !== undefined && (
           <nav aria-label="Main">
             {PAGES.map(([to, title]) => (
@@ -291,7 +347,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
           </nav>
         )}
       </header>
-      <ReadsProvider value={{ client, settle: settlePage, undropped, view: JSON.stringify([path, query]), again, go, failure: (res) => <Failure res={res} sub={sub} /> }}><main>{main}</main></ReadsProvider>
+      <ReadsProvider value={{ client, settle: settlePage, undropped: reads.since, view: JSON.stringify([path, query]), again, go, failure: (res) => <Failure res={res} sub={sub} /> }}><main>{main}</main></ReadsProvider>
       <VersionFooter server={server.kind === "ok" ? server.data : undefined} />
     </ShellContext>
   );
