@@ -6,5 +6,5 @@ export default defineConfig({
   // server names a build without one.
   define: { __BW_VERSION__: JSON.stringify(process.env["BW_VERSION"] ?? "(devel)") },
   build: { outDir: "dist", emptyOutDir: true, modulePreload: { polyfill: false } },
-  test: { include: ["src/**/*.test.ts"], environment: "node" },
+  test: { include: ["src/**/*.test.ts", "e2e/**/*.test.ts"], environment: "node" },
 });

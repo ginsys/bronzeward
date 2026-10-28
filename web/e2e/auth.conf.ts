@@ -17,7 +17,8 @@ import { createServer, type Server } from "node:http";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { SevereServiceError } from "webdriverio";
-import { config as base, printFailure, removeProfiles } from "./wdio.conf.ts";
+import { printFailure } from "./print-failure.ts";
+import { config as base, removeProfiles } from "./wdio.conf.ts";
 import { type Faults, type Injector, startInjector } from "./injector.ts";
 import { type Counts, type Grant, type Provider, startProvider } from "./provider.ts";
 

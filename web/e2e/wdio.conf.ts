@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 // The launcher logs and ignores any other error a launcher hook throws, and runs the specs anyway.
 import { SevereServiceError } from "webdriverio";
+import { printFailure } from "./print-failure.ts";
 import { FAKE_ISSUER, startProvider } from "./provider.ts";
 
 export const PAGE_ORIGIN = "http://localhost:58443";
@@ -36,17 +37,6 @@ for (const b of browsers) if (!(b in capabilities)) throw new Error(`unknown bro
 const profiles = (process.env["BW_BROWSER_PROFILES"] ??= mkdtempSync(`${tmpdir()}/bw-browser-profiles-`));
 export function removeProfiles() {
   rmSync(profiles, { recursive: true, force: true });
-}
-
-// An onComplete that throws fails the run, but the launcher sends the error only to its own log, so
-// the run's output would not say why (#435): print it, then rethrow.
-export async function printFailure(complete: () => unknown) {
-  try {
-    await complete();
-  } catch (e) {
-    console.error(String(e));
-    throw e;
-  }
 }
 function ownProfile(capabilities: WebdriverIO.Capabilities) {
   const options = capabilities.browserName === "chrome" ? (capabilities["goog:chromeOptions"] ??= {})
