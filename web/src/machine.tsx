@@ -3,9 +3,9 @@
 // stream; it is polled with its cursor no more often than every 5 s while the page is visible
 // (client contracts §8.6 item 6).
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef } from "react";
 import type { components } from "./api/v1";
-import { type Load, type Page, Ref, type Reads, short, useItem, useList, usePending, useReads } from "./list.tsx";
+import { type Load, type Page, Ref, type Reads, short, useHeld, useItem, useList, usePending, useReads } from "./list.tsx";
 import { Head, type Machine, node, release } from "./machines.tsx";
 import type { ReadResult } from "./request.ts";
 import { clock } from "./states.tsx";
@@ -102,27 +102,34 @@ export function polled(read: () => Promise<boolean>, page: Pick<Document, "visib
   };
 }
 
-// The timeline, read to its end and then polled while the page is visible. A transport failure
-// keeps polling, so the shell's offline banner clears once a poll answers again.
+// The timeline, read to its end and then polled while the page is visible, showing loading when the
+// path changes and keeping what it shows when the page reads again. A transport failure keeps
+// polling, so the shell's offline banner clears once a poll answers again. A superseded poll settles
+// as not live, so the shell still takes its refusal of the credentials.
 function useTimeline(path: string): Load<Tail<Entry>> {
-  const { client, settle, again } = useReads();
-  const [tl, setTl] = useState<Load<Tail<Entry>>>({ kind: "loading" });
+  const { client, settle, undropped, again } = useReads();
+  const [tl, put, held] = useHeld<Tail<Entry>>();
+  const key = useRef<string | undefined>(undefined);
   useEffect(() => {
     let tail: Tail<Entry> = { items: [], start: 0, cursor: undefined };
     let live = true;
-    setTl({ kind: "loading" });
+    const ok = undropped();
+    if (key.current !== path) {
+      key.current = path;
+      put({ kind: "loading" });
+    }
     const stop = polled(async () => {
       const res = await readTail<Entry>(client, path, tail);
-      if (!live) return false;
+      settle(res, put, () => live && ok(), held);
+      if (!live || !ok()) return false;
       if (res.kind === "ok") tail = res.data;
-      settle(res, setTl);
       return res.kind === "ok" || res.kind === "transport";
     });
     return () => {
       live = false;
       stop();
     };
-  }, [client, settle, path, again]);
+  }, [client, settle, undropped, put, held, path, again]);
   return tl;
 }
 
