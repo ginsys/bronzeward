@@ -77,40 +77,43 @@ function useHeld<T>(): [Load<T>, (r: Load<T>) => void, () => boolean] {
 
 // A list read from its start each time the path, query or `all` changes, showing loading, and each
 // time the view changes or the page reads again, keeping what it shows until the read answers: the
-// same list under a new view is still the same data. `more` reads on, one page at a time. A read
-// that a newer start superseded is ignored when it completes.
+// same list under a new view is still the same data. `more` reads on. One read at a time: while a
+// start's read or a `more` is in flight, `more` waits. A read that a newer start superseded settles
+// as not live: the shell still takes its refusal of the credentials, and ignores the rest.
 export function useList<T>(path: string, query: string, all: boolean): [Load<Listed<T>>, (() => void) | undefined, boolean] {
   const { client, settle, undropped, again, view } = useReads();
   const [list, put, held] = useHeld<Listed<T>>();
   const start = useRef(0);
   const key = useRef<string | undefined>(undefined);
-  // The start a `more` in flight belongs to; another waits for it.
+  // The start whose read is in flight, the first page's or a `more`'s.
   const reading = useRef<number | undefined>(undefined);
   const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    const n = ++start.current;
+  const read = useCallback((from: Listed<T>, every: boolean) => {
+    const n = (reading.current = start.current);
     const ok = undropped();
-    setBusy(false);
+    setBusy(true);
+    void readPages<T>(client, path, query, from, every).then((res) => {
+      const live = n === start.current;
+      if (live) {
+        reading.current = undefined;
+        setBusy(false);
+      }
+      settle(res, put, () => live && ok(), held);
+    });
+  }, [client, settle, undropped, put, held, path, query]);
+  useEffect(() => {
+    start.current++;
     const k = JSON.stringify([path, query, all]);
     if (key.current !== k) {
       key.current = k;
       put({ kind: "loading" });
     }
-    void readPages<T>(client, path, query, { items: [], next: undefined, restarted: false }, all).then((res) => settle(res, put, () => n === start.current && ok(), held));
+    read({ items: [], next: undefined, restarted: false }, all);
     return () => void start.current++;
-  }, [client, settle, undropped, put, held, view, path, query, all, again]);
+  }, [read, put, view, path, query, all, again]);
   const more = useCallback(() => {
-    if (list.kind !== "ok" || reading.current === start.current) return;
-    const n = (reading.current = start.current);
-    const ok = undropped();
-    setBusy(true);
-    void readPages<T>(client, path, query, list.data, false).then((res) => {
-      if (n !== start.current) return;
-      reading.current = undefined;
-      setBusy(false);
-      settle(res, put, ok, held);
-    });
-  }, [client, settle, undropped, put, held, path, query, list]);
+    if (list.kind === "ok" && reading.current !== start.current) read(list.data, false);
+  }, [read, list]);
   return [list, list.kind === "ok" && list.data.next !== undefined ? more : undefined, busy];
 }
 

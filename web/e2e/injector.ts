@@ -15,9 +15,10 @@ export interface Faults {
   redirect?: string;
   // The answer to this path held this long, in milliseconds; with a query, only to that query.
   hold?: { path: string; ms: number; query?: string };
-  // The answer to this path held until the case releases it (POST /release on the control server),
-  // so a case orders a late answer after what it asserted first, whatever the runner's timing.
-  held?: string;
+  // The answer to this path (or these) held until the case releases it (POST /release on the
+  // control server), so a case orders a late answer after what it asserted first, whatever the
+  // runner's timing.
+  held?: string | string[];
   // A 404 not-found problem for this path, instead of the server's answer.
   missing?: string;
   // A 403 identity-revoked problem for this path, instead of the server's answer.
@@ -63,7 +64,7 @@ export function startInjector(upstream: string, port: number): Promise<Injector>
     const route = path.slice("/api/v1".length);
     void (async () => {
       if (f.hold?.path === route && (f.hold.query ?? search) === search) await new Promise((r) => setTimeout(r, f.hold!.ms));
-      if (f.held === route) {
+      if ([f.held ?? []].flat().includes(route)) {
         await new Promise<void>((go) => waiting.push({ go, sent: new Promise((done) => res.once("close", () => done())) }));
       }
       if (f.redirect === route) return void res.writeHead(302, { Location: "http://127.0.0.1:9/" }).end();

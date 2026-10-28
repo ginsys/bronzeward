@@ -3,9 +3,10 @@
 // recorded through the API as h-author.
 import { randomBytes } from "node:crypto";
 import { $, $$, browser, expect } from "@wdio/globals";
+import { REVOKED } from "../../src/app.tsx";
 import { EPOCH_CHANGED, TRANSPORT_FAILURE } from "../../src/request.ts";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
-import { answers, faults, fixtureSignIn, mint, param, release, storageEmpty, where } from "./helpers.ts";
+import { answers, faults, fixtureSignIn, mint, param, release, seen, storageEmpty, where } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 
@@ -40,6 +41,9 @@ async function machines(at: string, cl: string, n: number, from = 0): Promise<st
 const rows = async () => $$("main tbody tr th a").map((a) => a.getAttribute("title"));
 const count = () => $('[data-testid="count"]').getText();
 const shows = (n: number) => browser.waitUntil(async () => (await rows()).length === n, { timeout: 20_000, timeoutMsg: `the list did not show ${n} rows` });
+// The page has asked the injector for `path` at least `n` times since this sign-in.
+const asked = (path: string, n: number) =>
+  browser.waitUntil(async () => (await seen()).filter((p) => p === path).length >= n, { timeout: 20_000, timeoutMsg: `${path} was not asked ${n} times` });
 // Read in the page on each try: one state's message replaces the element of the one before it.
 const statusIs = (text: string) =>
   browser.waitUntil(async () => (await browser.execute(() => document.querySelector('[data-testid="status"]')?.textContent ?? "")) === text, { timeout: 20_000, timeoutMsg: `the status did not show ${text}` });
@@ -131,14 +135,17 @@ describe("the machines", () => {
     const cl = await cluster(at, "lab-a");
     const ids = await machines(at, cl.id, 2);
     await write(at, `/machines/${ids[1]}/freezes`, { reason: "synthetic incident" });
-    // Every unfiltered list read is held 4 s. From one state filter to another the server's query
-    // and the read of every page stay the same; only the view changes, and the client discards the
-    // answer read under the old one.
+    // The list's answers are held until released. From one state filter to another the server's
+    // query and the read of every page stay the same; only the view changes, and the client
+    // discards the answer read under the old one, so the list is asked again before any answers.
     expect((await fetch(`${CONTROL}/next?human=h-viewer`)).ok).toBe(true);
-    await faults({ upstream: at, hold: { path: "/machines", query: "", ms: 4000 } });
+    await faults({ upstream: at, held: "/machines" });
     await browser.url(`${FIXTURE_PAGE}/machines?state=pending`);
+    await asked("/machines", 1);
     await statusIs("Loading machines");
     await $("label*=State").$("select").selectByAttribute("value", "frozen");
+    await asked("/machines", 2);
+    await release();
     await shows(1);
     expect(await rows()).toEqual([ids[1]]);
     expect(await count()).toBe("Showing 1 of 2.");
@@ -152,7 +159,7 @@ describe("the machines", () => {
     await shows(2);
     // The online event reads every resource again: the list's read finds no answer, and the
     // identity's and the cluster filter's answers are held until after, so none ends the banner.
-    await faults({ upstream: at, redirect: "/machines", held: "/identity", hold: { path: "/clusters", ms: 8000 } });
+    await faults({ upstream: at, redirect: "/machines", held: ["/identity", "/clusters"] });
     await browser.execute(() => void dispatchEvent(new Event("online")));
     await $('[data-testid="offline"]').waitForExist({ timeout: 10_000 });
     expect(await rows()).toEqual(ids);
@@ -164,13 +171,52 @@ describe("the machines", () => {
   it("each list keeps its own data: the machine list's first read without answer is disconnected, though the cluster filter's answered", async () => {
     const at = await disposable();
     await cluster(at, "lab-a");
-    // The cluster filter's list answers; the machine list's read finds no answer 3 s later.
+    // The machine list's read is held until the cluster filter shows its answer, then finds none.
     expect((await fetch(`${CONTROL}/next?human=h-viewer`)).ok).toBe(true);
-    await faults({ upstream: at, redirect: "/machines", hold: { path: "/machines", ms: 3000 } });
+    await faults({ upstream: at, redirect: "/machines", held: "/machines" });
     await browser.url(`${FIXTURE_PAGE}/machines`);
+    await asked("/machines", 1);
     await $("label*=Cluster").$("select").$("option=lab-a").waitForExist({ timeout: 20_000 });
+    await release();
     await statusIs(TRANSPORT_FAILURE);
     expect(await $('[data-testid="offline"]').isExisting()).toBe(false);
+  });
+
+  it("a refresh holds Show more: while the list is read again, no next page is read", async () => {
+    const at = await disposable();
+    const cl = await cluster(at, "lab-a");
+    await machines(at, cl.id, 60);
+    expect(await fixtureSignIn("h-viewer", {}, { upstream: at })).toMatch(SERVER);
+    await shows(50);
+    // The online event reads the list again, held until released; the 50 rows stay shown.
+    await faults({ upstream: at, held: "/machines" });
+    await browser.execute(() => void dispatchEvent(new Event("online")));
+    await asked("/machines", 2);
+    await expect($("button=Show more")).toBeDisabled();
+    await browser.execute(() => document.querySelector<HTMLButtonElement>('[data-testid="count"] button')!.click());
+    await release();
+    await expect($("button=Show more")).toBeEnabled({ wait: 10_000 });
+    expect((await seen()).filter((p) => p === "/machines")).toHaveLength(2);
+    expect(await count()).toBe("Showing 50; more pages to read. Show more");
+  });
+
+  it("a revocation on a next page a refresh superseded still ends the page", async () => {
+    const at = await disposable();
+    const cl = await cluster(at, "lab-a");
+    await machines(at, cl.id, 60);
+    expect(await fixtureSignIn("h-viewer", {}, { upstream: at })).toMatch(SERVER);
+    await shows(50);
+    // The next page is held and then refused identity-revoked; the online event's newer reads
+    // answer first, so only the superseded read carries the revocation.
+    await faults({ upstream: at, held: "/machines", revoked: "/machines" });
+    await $("button=Show more").click();
+    await asked("/machines", 2);
+    await faults({ upstream: at });
+    await browser.execute(() => void dispatchEvent(new Event("online")));
+    await browser.waitUntil(async () => (await answers()).includes("/machines 200"), { timeout: 20_000, timeoutMsg: "the newer list read did not answer" });
+    await release();
+    await statusIs(REVOKED);
+    expect(await $('[data-testid="principal"]').isExisting()).toBe(false);
   });
 });
 
@@ -183,15 +229,16 @@ describe("cursor pages", () => {
     expect(await fixtureSignIn("h-viewer", {}, { upstream: at })).toMatch(SERVER);
     await shows(50);
     expect(await count()).toBe("Showing 50; more pages to read. Show more");
-    // One page at a time: while the next page is read (held 3 s), Show more is disabled and a second
-    // click reads nothing.
-    await faults({ upstream: at, hold: { path: "/machines", ms: 3000 } });
+    // One page at a time: while the next page is read (held until released), Show more is disabled
+    // and a second click reads nothing.
+    await faults({ upstream: at, held: "/machines" });
     await $("button=Show more").click();
+    await asked("/machines", 2);
     await expect($("button=Show more")).toBeDisabled();
     await browser.execute(() => document.querySelector<HTMLButtonElement>('[data-testid="count"] button')!.click());
-    await shows(100);
     await faults({ upstream: at });
-    await browser.pause(1000);
+    await release();
+    await shows(100);
     expect((await answers()).filter((a) => a.startsWith("/machines?cursor="))).toHaveLength(1);
     await $("button=Show more").click();
     await shows(120);
