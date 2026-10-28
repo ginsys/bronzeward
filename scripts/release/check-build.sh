@@ -21,7 +21,11 @@ for os_arch in linux_amd64 linux_arm64 darwin_amd64 darwin_arm64; do
 	case $os_arch in linux_*) expected+=("bronzeward_${v}_$os_arch.tar.gz") ;; esac
 done
 # The two builds are compared through their SHA256SUMS, so it must name every artifact, once.
-listed=$(awk '{sub(/^\*/, "", $2); print $2}' "$dir/SHA256SUMS" | LC_ALL=C sort)
+if grep -qvE '^[0-9a-f]{64} [ *].+$' "$dir/SHA256SUMS"; then
+	fail "SHA256SUMS has a line that is not a SHA-256 checksum and a file name"
+fi
+# The whole name after the checksum and its text or binary marker, as sha256sum reads it.
+listed=$(sed -E 's/^[0-9a-f]{64} [ *]//' "$dir/SHA256SUMS" | LC_ALL=C sort)
 [ "$listed" = "$(printf '%s\n' "${expected[@]}" | LC_ALL=C sort)" ] || fail "SHA256SUMS does not name exactly the ${#expected[@]} artifacts: $(tr '\n' ' ' <<<"$listed")"
 (cd "$dir" && sha256sum --check --strict SHA256SUMS) || fail "SHA256SUMS does not match the files"
 for os_arch in linux_amd64 linux_arm64 darwin_amd64 darwin_arm64; do
