@@ -66,6 +66,33 @@ func TestRevokeByIdentity(t *testing.T) {
 	wantProblem(t, e.do(e.api, call{method: "GET", path: prefix + "/clusters", token: e.robot}), http.StatusForbidden, "identity-revoked")
 }
 
+// #391: deniedSubjectsListed is true for a service identity only if one entry names its identifier
+// and its name, as §10.4 has the operator list it before the revocation.
+func TestRevokeListedServiceIdentity(t *testing.T) {
+	for name, c := range map[string]struct {
+		entries []config.DeniedSubject
+		want    bool
+	}{
+		"identifier and name": {[]config.DeniedSubject{{Identity: "", Name: "ci"}}, true},
+		"another name":        {[]config.DeniedSubject{{Identity: "", Name: "other"}}, false},
+		"name of another":     {[]config.DeniedSubject{{Identity: id.New(id.Principal), Name: "ci"}}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t, options{})
+			for i := range c.entries {
+				if c.entries[i].Identity == "" {
+					c.entries[i].Identity = e.robotID
+				}
+			}
+			e.cfg.DeniedSubjects = c.entries
+			e.api = e.build(options{})
+			if b := revocationOf(t, revoke(e, e.human("h-recovery"), key, `{"identity":"`+e.robotID+`","reason":"retired"}`)); b.DeniedSubjectsListed != c.want {
+				t.Fatalf("deniedSubjectsListed %v; want %v", b.DeniedSubjectsListed, c.want)
+			}
+		})
+	}
+}
+
 func TestRevocationRefusals(t *testing.T) {
 	e := newEnv(t, options{})
 	rec := e.human("h-recovery")

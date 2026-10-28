@@ -68,7 +68,7 @@ The blocks:
 | `database.dsn` | Your PostgreSQL DSN, with credentials. |
 | `auth.oidc` | Your identity provider's issuer, the audience, the groups claim, the longest token lifetime accepted (default 15 minutes). |
 | `auth.roles` | Which groups grant `viewer`, `author`, `publisher`, `approver` and `recovery-admin`. |
-| `auth.deniedSubjects` | Subjects refused from configuration, which survives a database restore; list a subject here before revoking it (persistence API §10.4). |
+| `auth.deniedSubjects` | Subjects refused from configuration, which survives a database restore; list a subject here before revoking it: a human as `{iss: ..., sub: ...}`, a service identity as `{identity: idn_..., name: ...}`, both in one entry (persistence API §10.4). |
 | `execution` | `maxTransportDeadline` (required), and the defaults a plan binds when its request leaves a value out. |
 | `provider` | OpenBao's address, the four Transit key names and one token file per identity. Without it, ingestion and publication answer `503`. |
 | `ingestion` | Required with `provider`: this instance's name and the claim and job timers. |

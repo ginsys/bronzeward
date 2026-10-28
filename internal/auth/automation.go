@@ -17,7 +17,7 @@ import (
 // automation verifies a Bronzeward-issued token (§10.2), in this order:
 //  1. the secret, compared in constant time, so a caller without it learns nothing;
 //  2. a revoked or denied identity, 403, although identity revocation revoked its token too
-//     (§10.4, §14);
+//     (§10.4, §14); deniedSubjects denies it by its identifier or its name, read in this query;
 //  3. the token itself: revoked, expired, or from an earlier epoch (§12.3), 401.
 func (v *Verifier) automation(ctx context.Context, raw string) (Principal, error) {
 	tok, secret, err := parseToken(raw)
@@ -26,15 +26,15 @@ func (v *Verifier) automation(ctx context.Context, raw string) (Principal, error
 	}
 	sum := sha256.Sum256(secret)
 	var (
-		owner, roles, epoch                                  string
+		owner, name, roles, epoch                            string
 		stored                                               []byte
 		expires                                              time.Time
 		expired, tokenRevoked, earlierEpoch, identityRevoked bool
 	)
 	err = v.db.QueryRowContext(ctx, `SELECT t.owner, t.secret_sha256, array_to_string(t.roles, ','), t.expires_at,
-			t.expires_at <= now(), t.revoked_at IS NOT NULL, t.epoch, t.epoch <> i.epoch, p.revoked
+			t.expires_at <= now(), t.revoked_at IS NOT NULL, t.epoch, t.epoch <> i.epoch, p.revoked, coalesce(p.name, '')
 		FROM automation_token t JOIN principal p ON p.id = t.owner CROSS JOIN installation_state i
-		WHERE t.id = $1`, tok).Scan(&owner, &stored, &roles, &expires, &expired, &tokenRevoked, &epoch, &earlierEpoch, &identityRevoked)
+		WHERE t.id = $1`, tok).Scan(&owner, &stored, &roles, &expires, &expired, &tokenRevoked, &epoch, &earlierEpoch, &identityRevoked, &name)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return Principal{}, fmt.Errorf("%w: unknown token %s", ErrUnauthenticated, tok)
@@ -42,7 +42,7 @@ func (v *Verifier) automation(ctx context.Context, raw string) (Principal, error
 		return Principal{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	case subtle.ConstantTimeCompare(sum[:], stored) != 1:
 		return Principal{}, fmt.Errorf("%w: wrong secret for %s", ErrUnauthenticated, tok)
-	case identityRevoked || v.denied.Service(owner):
+	case identityRevoked || v.denied.Service(owner, name):
 		return Principal{}, fmt.Errorf("%w: %s", ErrIdentityRevoked, owner)
 	case tokenRevoked:
 		return Principal{}, fmt.Errorf("%w: token %s is revoked", ErrUnauthenticated, tok)

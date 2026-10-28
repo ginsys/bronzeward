@@ -68,7 +68,7 @@ Kept unchanged, as the issue requires:
 - Five capability roles, human roles from identity-provider groups, automation limited to
   `viewer`, `author` and `publisher`
   ([design §13.7](../design/Talos_Configuration_and_Machine_Management_Design.md#137-poc-identity-and-approval-policy);
-  `internal/auth/tokens.go:361-380`).
+  `internal/auth/tokens.go:372-391`).
 - Human-only routes refuse automation whatever its roles (`internal/api/api.go:382-383`).
 - Automation tokens are issued, rotated and listed, and revoked without revoking their identity,
   only by the server-side command; no route does any of that
@@ -297,7 +297,7 @@ it. It holds no secret.
 
 1. `server` and `oidc.issuer` must be `https`. Plain `http` is accepted only to a loopback
    address. This is the loopback half of the server's own rule for its issuer, which also admits
-   hosts the deployment lists (`internal/config/config.go:382-398`); a client has no such list,
+   hosts the deployment lists (`internal/config/config.go:386-402`); a client has no such list,
    because it cannot know which network protects a host. The development setup
    (`examples/bronzeward.yaml:7`, `examples/bronzeward.yaml:14`) works and nothing else does.
 2. Certificates are verified against the system trust store, or against the context's
@@ -744,7 +744,7 @@ non-empty `sub`, and `exp - iat` at most `maxTokenLifetime`, 15 minutes by defau
 a token carrying `nonce` or `at_hash`, which mark an ID token, and one without a `jti`; roles
 come from the configured groups claim, mapped in deployment configuration
 (`internal/auth/auth.go:145-248`, `internal/config/config.go:121-125`,
-`internal/config/config.go:353-356`). A disabled account or removed group takes effect when the
+`internal/config/config.go:359-360`). A disabled account or removed group takes effect when the
 current token expires
 ([persistence and API §10.1](persistence-api.md#101-humans-oidc)).
 
@@ -948,7 +948,7 @@ current token expires
 ### 9.4 Automation token input
 
 Facts: an automation token is `bwt_<token id>.<secret>`, printed once by the server-side command
-(`internal/auth/tokens.go:21`, `internal/auth/tokens.go:295-311`; [persistence and API §10.2](persistence-api.md#102-automation-bronzeward-issued-tokens)),
+(`internal/auth/tokens.go:21`, `internal/auth/tokens.go:306-322`; [persistence and API §10.2](persistence-api.md#102-automation-bronzeward-issued-tokens)),
 valid at most 90 days (`internal/auth/tokens.go:25`) and refused when revoked, expired or from
 an earlier epoch (`internal/auth/automation.go:47-52`).
 
@@ -998,7 +998,7 @@ and the expired-token text, are the CLI's
 | Token expired | `401` (`internal/auth/auth.go:165-166`) | renew ([§9.5](#95-renewal)); if the provider refuses, the CLI says "Your sign-in expired: sign in again" |
 | Wrong issuer | `401` | if the token's `iss` differs from `oidc.issuer`: "The token is from `<iss>`; this context expects `<issuer>`. Check the context or the server's configuration." |
 | Wrong audience | `401` | if `aud` lacks `oidc.audience`: "The token is not issued for `<audience>`; the identity provider needs an audience mapping" ([§9.1](#91-identity-provider-requirements) item 1) |
-| Lifetime over the maximum | `401` (`internal/auth/auth.go:175-176`); the maximum is the deployment's `maxTokenLifetime`, 15 minutes unless configured (`internal/config/config.go:125`, `internal/config/config.go:353-356`) | `GET /server` serves the maximum as `maxTokenLifetimeSeconds` since [#278](https://github.com/ginsys/bronzeward/issues/278), but only to an accepted token, so the client pre-checks against the value the context last read; with none read yet it reports the `401` as any other. If `exp - iat` exceeds it: "The token lives longer than this server accepts; the identity provider's access-token lifetime must be shortened" |
+| Lifetime over the maximum | `401` (`internal/auth/auth.go:175-176`); the maximum is the deployment's `maxTokenLifetime`, 15 minutes unless configured (`internal/config/config.go:125`, `internal/config/config.go:359-360`) | `GET /server` serves the maximum as `maxTokenLifetimeSeconds` since [#278](https://github.com/ginsys/bronzeward/issues/278), but only to an accepted token, so the client pre-checks against the value the context last read; with none read yet it reports the `401` as any other. If `exp - iat` exceeds it: "The token lives longer than this server accepts; the identity provider's access-token lifetime must be shortened" |
 | An ID token, or no `jti` | `401` (`internal/auth/auth.go:177-180`) | if the token carries `nonce` or `at_hash`, or lacks `jti`: "The identity provider sent an ID token, or an access token without `jti`; the client or the provider's configuration is at fault" ([§9.1](#91-identity-provider-requirements) item 1) |
 | Groups claim malformed | `401` (`internal/auth/auth.go:217-227`) | "Not accepted by `<context>`: sign in again"; nothing more can be read safely |
 | No role for the action | `403 forbidden` with the route's roles | "Needs `<roles>`; you are signed in as `<sub>`" |
