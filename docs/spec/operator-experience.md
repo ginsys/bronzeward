@@ -342,9 +342,9 @@ Synthetic data throughout. Identifiers are shortened as `mch_tqhc…35uq`; real 
 whole. Text after `#` is commentary, not output. Each transcript names the role the signed-in
 identity holds. Other people appear by readable names (`ops-ben`). The API serves only their
 principal identifiers today; gap G15 ([§11](#11-api-gap-audit)) adds a human's subject and
-issuer, and a readable name for a human depends on pending owner choice BW-335-display-1
-([persistence and API §10](persistence-api.md#10-authentication-and-authorization)). Without
-it, a human is shown by subject and issuer.
+issuer, and its display name from API revision 5
+([persistence and API §10](persistence-api.md#10-authentication-and-authorization)). A human
+without one is shown by subject and issuer.
 
 ### 5.1 Sign-in and context
 

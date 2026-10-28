@@ -16,7 +16,7 @@ import (
 )
 
 // principalMembers is §9.2's entry of GET /principals, every member always present.
-var principalMembers = []string{"id", "issuer", "kind", "service", "subject"}
+var principalMembers = []string{"display", "id", "issuer", "kind", "service", "subject"}
 
 // principalsPath is GET /principals with ids as its id parameters, in order.
 func principalsPath(ids ...string) string {
@@ -197,7 +197,8 @@ func mustRecordHuman(t *testing.T, e *env, sub string) string {
 func principalsEqual(a, b []principalBody) bool {
 	return slices.EqualFunc(a, b, func(x, y principalBody) bool {
 		eq := func(p, q *string) bool { return (p == nil) == (q == nil) && (p == nil || *p == *q) }
-		return x.ID == y.ID && x.Kind == y.Kind && eq(x.Issuer, y.Issuer) && eq(x.Subject, y.Subject) && eq(x.Service, y.Service)
+		return x.ID == y.ID && x.Kind == y.Kind && eq(x.Issuer, y.Issuer) && eq(x.Subject, y.Subject) &&
+			eq(x.Display, y.Display) && eq(x.Service, y.Service)
 	})
 }
 

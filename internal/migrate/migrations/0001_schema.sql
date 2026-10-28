@@ -27,13 +27,15 @@ CALL make_immutable('schema_migrations');
 -- A human is (iss, sub), created on first admitted use (§10); a service identity has a name and a
 -- responsible human (§10.2, choice §17.18) and is created by the token tool. No row stores roles:
 -- a human's come from each token, a service identity's from its token row. revoked is set once,
--- by identity revocation (§10.4, T5c).
+-- by identity revocation (§10.4, T5c). display is a human's display name, from the claim of its own
+-- access token (§10, choice §17.40); it is kept nowhere else and goes with the row.
 CREATE TABLE principal (
   id          text PRIMARY KEY CHECK (id ~ '^idn_[a-z2-7]{26}$'),
   kind        text NOT NULL CHECK (kind IN ('human', 'service')),
   iss         text,
   sub         text,
   name        text,
+  display     text CHECK (display IS NULL OR (kind = 'human' AND display <> '')),
   responsible text,
   -- The responsible principal must be a human: the key below names its kind, as act's does.
   responsible_kind text GENERATED ALWAYS AS (CASE WHEN responsible IS NOT NULL THEN 'human' END) STORED,

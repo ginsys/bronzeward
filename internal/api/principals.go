@@ -20,6 +20,7 @@ type principalBody struct {
 	Kind    string  `json:"kind"` // human, service, or unknown for an identifier no row holds
 	Issuer  *string `json:"issuer"`
 	Subject *string `json:"subject"`
+	Display *string `json:"display"` // a human's display name, null until its own token gave one
 	Service *string `json:"service"`
 }
 
@@ -39,21 +40,24 @@ func getPrincipals(a *API, w http.ResponseWriter, q *request) {
 			items[i] = principalBody{ID: idn, Kind: "unknown"}
 			at[idn] = i
 		}
-		rows, err := tx.QueryContext(ctx, `SELECT id, kind, iss, sub, name FROM principal WHERE id = ANY ($1)`, ids)
+		rows, err := tx.QueryContext(ctx, `SELECT id, kind, iss, sub, display, name FROM principal WHERE id = ANY ($1)`, ids)
 		if err != nil {
 			return "", nil, err
 		}
 		defer func() { _ = rows.Close() }()
 		for rows.Next() {
 			var idn, kind string
-			var iss, sub, name sql.NullString
-			if err := rows.Scan(&idn, &kind, &iss, &sub, &name); err != nil {
+			var iss, sub, display, name sql.NullString
+			if err := rows.Scan(&idn, &kind, &iss, &sub, &display, &name); err != nil {
 				return "", nil, err
 			}
 			b := &items[at[idn]]
 			b.Kind = kind
 			if kind == "human" {
 				b.Issuer, b.Subject = &iss.String, &sub.String
+				if display.Valid {
+					b.Display = &display.String
+				}
 			} else {
 				b.Service = &name.String
 			}

@@ -48,7 +48,7 @@ func TestContextsTokensAndOutput(t *testing.T) {
 		t.Errorf("GET /identity %v; -o json %v; -o yaml %v", direct, viaJSON, viaYAML)
 	}
 	f.want(f.ctl(nil, "", "whoami", "-o", "wide"), 2, "give table, json or yaml")
-	f.want(f.ctl(nil, "", "version"), 0, "needs API revision 2 or later", "API revision 4, start mode normal")
+	f.want(f.ctl(nil, "", "version"), 0, "needs API revision 2 or later", "API revision 5, start mode normal")
 
 	// Selection: --context, then BRONZEWARD_CONTEXT, then the current context.
 	other := []string{"BRONZEWARD_TOKEN_FILE=" + f.tokenFile}

@@ -34,6 +34,20 @@ func EnsureHuman(ctx context.Context, db *sql.DB, d Denied, iss, sub string) (st
 	return idn, nil
 }
 
+// RefreshDisplay writes display as the human identity's display name, in its own statement, when
+// it differs from the stored one (persistence-api.md §10, choice §17.40). The UPDATE changes no
+// key, so it locks the row FOR NO KEY UPDATE, and only when it writes: an unchanged name takes no
+// lock. An empty display, a token without the claim, leaves the stored name as it is, and a
+// revoked row is left as it is.
+func RefreshDisplay(ctx context.Context, db *sql.DB, identity, display string) error {
+	if display == "" {
+		return nil
+	}
+	_, err := db.ExecContext(ctx, `UPDATE principal SET display = $2
+		WHERE id = $1 AND kind = 'human' AND NOT revoked AND display IS DISTINCT FROM $2`, identity, display)
+	return err
+}
+
 // RecordHuman returns the principal of the human (iss, sub), inserting it in its own short
 // transaction if it has none (§10), with no deniedSubjects or revocation check: identity
 // revocation (T5c) names subjects the operator has already listed (§10.4). Every other caller

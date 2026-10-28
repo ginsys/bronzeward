@@ -1745,6 +1745,7 @@ API revisions:
 | 2 | `Bronzeward-Expected-Epoch` on mutations and `412 epoch-mismatch` (§7.2) |
 | 3 | `order` and `tail` on `GET /machines/{id}/timeline` (§9.2) |
 | 4 | `GET /principals` (§9.2) |
+| 5 | `display` on `GET /principals` (§9.2, §10) |
 
 ### 9.2 Resources and routes
 
@@ -1763,7 +1764,7 @@ idempotency and conflict behavior.
 | `GET /plans[/{id}]`, `/approvals/{id}`, `/operations[/{id}]`, `/operations/{id}/events`, `/acts`, `/recovery` | 200 | any role |
 | `GET /dependencies[/{id}[/releases\|/alerts]]`, `/dependency-alerts` ([dependency monitor §7.2](dependency-monitor.md#72-read-routes)) | 200 | any role |
 | `GET /identity` (the caller's own identity; no query, no ETag): `kind` (`human` or `service`); `issuer` and `subject` for a human, `service`, the service identity's name, for automation, each `null` for the other kind; `principal`, its identifier, `null` for a human with no row yet, which the read does not create (§10); `roles`, those the credential maps to in design §13.7's order, `[]` for none; `expiresAt`, the token's `exp` or the automation token's expiry; `epoch`, the epoch the read held, as its `Bronzeward-Epoch`. Nothing else of the credential, its token ID and claims included | 200 | any authenticated credential, roles or none (§10.3) |
-| `GET /principals?id=…` (what principal identifiers name, for display; no ETag): `items`, one entry per distinct identifier given, in the order first given: `id`; `kind`, `human`, `service` or `unknown`, the last for an identifier no row holds; `issuer` and `subject` for a human, `service`, the service identity's name, for a service, each `null` otherwise. Nothing else of the row, its revocation and responsible human included; the read records no act **(choice §17.40)** | 200 | any role |
+| `GET /principals?id=…` (what principal identifiers name, for display; no ETag): `items`, one entry per distinct identifier given, in the order first given: `id`; `kind`, `human`, `service` or `unknown`, the last for an identifier no row holds; `issuer`, `subject` and `display`, its display name, `null` when it has none (§10), for a human, `service`, the service identity's name, for a service, each `null` otherwise. Nothing else of the row, its revocation and responsible human included; the read records no act **(choice §17.40)** | 200 | any role |
 | `GET /server` (the version, API revision, features and start mode of the process that answered, and the read-only settings a client shows) | 200 | any role |
 | `POST /ingestions` (import or drift adoption of a machine's configuration), with `If-Match` carrying the named draft's ETag, which the operation binds | 202, `ingest`, created `running` with its staging claim (§5.1) | `author`, human only (§10.3) |
 | `GET /ingestions/{id}/review` (the staged change of a paused ingestion, compilation §3.6) | 200, `Cache-Control: no-store` | `author`, human only (§10.3) |
@@ -2602,36 +2603,47 @@ the operator given to it the same way when they have none, with the same
 `deniedSubjects` check. No human or automation principal
 has an OpenBao identity (design §13.7 item 1, derived).
 
-**Pending owner choice BW-335-display-1: a human's display name.** The row
-holds no name for a human, so `GET /principals` (§9.2) shows one by its issuer
-and subject. Whether it also serves a display name, and from where, is the
-owner's choice, recorded in §17.40 once made. Options:
+**A human's display name (choice §17.40).** `GET /principals` (§9.2) serves a
+human's `display`, a display name taken from its own access token and kept in
+the row's nullable `display` column; `name` holds a service identity's name and
+stays `NULL` for a human, and `display` stays `NULL` for a service identity,
+whose `service` name serves. The claim is the one `auth.oidc.displayClaim`
+names (§10.1); unset, it is `name`, else `preferred_username`. Each admitted
+mutating request of a human, once its row is found or created as above and
+before the request's transaction, writes the claim's value in a statement of
+its own:
+`UPDATE principal SET display = $display WHERE id = $id AND kind = 'human' AND NOT revoked AND display IS DISTINCT FROM $display`.
+The value comes only from the subject's own verified token, never from a body
+or another principal's token. A claim that is missing, empty or not a string
+writes nothing and refuses nothing, so the stored name stays as it was. A read
+writes nothing, so a subject who only reads keeps the name its last mutating
+request carried, or none. A row created without the subject's token has no name
+until the subject's own admitted mutating request: the token tool creates the
+rows of the responsible human and of the operator given to it (above), and an
+identity revocation creates a row it revokes at once, whose subject never signs
+in again, so that row never has one (§10.4).
 
-- (a) issuer and subject only. Nothing to store or keep current, and nothing a
-  user can change; but a provider whose subject is an opaque number (the
-  fixture's Zitadel issues one) shows people by that number.
-- (b) a nullable `display` member, taken from a claim the deployment names,
-  default `name`, else `preferred_username`, kept in a new column of the row
-  (not `name`, which holds a service identity's name and is `NULL` for a
-  human), taken only from the subject's own token, by admitted requests the
-  subject makes; `null` for a service identity, whose `service` name serves.
-  Readable names; but many providers let users edit these claims, so a view
-  could show a name chosen to look like someone else's next to the true
-  subject; an access token need not carry either claim, so the member may be
-  `null` throughout; a row created without the subject's token has no name
-  until the subject's own admitted request: the token tool creates the rows
-  of the responsible human and of the operator given to it (above), and an
-  identity revocation creates a row it revokes at once, whose subject never
-  signs in again, so that row never has one (§10.4); and a refresh writes
-  the principal row, so it contends with every transaction that locks that
-  row (§5); where the write runs, and how it orders with them, is part of
-  the choice.
-- (c) names kept in a table of their own, maintained by an operator. Names a
-  user cannot change; but this specification names no source or route that
-  fills the table, and the choice would have to add one.
+The statement updates no key column, so it locks the row `FOR NO KEY UPDATE`,
+and only when it writes: a request whose token carries the stored name locks
+nothing. That lock does not conflict with the `FOR KEY SHARE` each mutating
+request takes on its own principal (§5 rule 5) or with the foreign keys that
+reference the row. It waits for a transaction holding the row `FOR SHARE`
+(approval, approval revocation, cancellation, the token tool's principal locks)
+or `FOR UPDATE` (identity revocation, T5c), and they wait for it. It commits
+before the request's own transaction begins and holds no other lock, so it adds
+nothing to rule 5's order and no deadlock can include it; a revocation that
+commits first leaves the row unwritten. A statement that fails answers
+`503 dependency-unavailable` and the request runs no further, as after a
+failed first-use insert; a row that insert created stays. If the request is then refused, the name written stays:
+it is the subject's own and grants nothing (§14).
 
-Until the choice, the read serves issuer and subject only; (b) would only add
-a member.
+**Retention.** A display name is personal data the identity provider supplies.
+It is kept only in its principal row's `display` column: no act, idempotency
+record, timeline entry, operation event, log line or other body copies it, and
+only `GET /principals` serves it, from that row. The subject's next changed
+value replaces it, and it goes with the row. A restore to an older backup
+brings back the name the row held then, or none for a row it lacks, until the
+subject's next admitted mutating request (§12.3).
 
 ### 10.1 Humans: OIDC
 
@@ -2670,6 +2682,7 @@ auth:
     issuer: https://idp.example.test/realms/ops
     audience: bronzeward
     groupsClaim: groups
+    # displayClaim: name  # unset: name, else preferred_username (§10)
     maxTokenLifetime: 15m
   roles:
     viewer: [bw-viewers]
@@ -3102,6 +3115,7 @@ For a database restored to a backup taken at time *T*:
 | Approvals, scope releases | earlier epoch | authorize nothing; a plan needs an approval in the new epoch |
 | Idempotency records after *T* | absent | a retry executes afresh, or is refused `412 epoch-mismatch` if its `Bronzeward-Expected-Epoch` names an earlier epoch (§7.2, §12.4) |
 | Idempotency records from before *T* | earlier epoch once entry commits | a retry is refused `409 conflict` (§7.2) |
+| Display names written after *T* | as at *T*, or none for a row the backup lacks | rewritten by the subject's next admitted mutating request whose token carries the claim (§10) |
 | Principals created after *T* | absent | `GET /principals` answers their identifiers `unknown` (§9.2); a human's row is created again, under a new identifier, by its next admitted mutating request, or, for a human `deniedSubjects` refuses, by its identity revocation, recorded or re-recorded (§10, §10.4) |
 | Identity revocations after *T* | absent | re-recorded by `recovery-admin`; the subject, human or service identity, is already refused by `deniedSubjects`, and the tool reissues no token to a listed service identity (§10.2, §10.4) |
 | Automation tokens | earlier epoch | refused; reissued with the tool **(choice §17.27)** |
@@ -3369,7 +3383,8 @@ or Desired change; it does not erase earlier evidence.
 mutating request creates before its first lookup and every later refusal
 leaves: the first lookup's `412 epoch-mismatch`, a refusal of the work its
 route does before its transaction and one inside that transaction (§7.2,
-§10). It is also apart from the row an identity revocation creates, before its
+§10). The display name an admitted mutating request writes before its first
+lookup stays the same way (§10). It is also apart from the row an identity revocation creates, before its
 transaction, for a subject that never signed in, which a refusal inside that
 transaction leaves too; neither row grants anything. The `401`, `403` and
 `428` rows, and the refusals under the recovery-start flag before entry,
@@ -3436,6 +3451,11 @@ each (design §7.7 consequences):
   its own entry, taking over and starting an ingestion in the new epoch;
 - two requests with one idempotency key in flight together, with a control
   that drops the key lock;
+- the display name (§10): a human's `display` following the configured claim
+  across two admitted mutating requests with different values, unchanged by
+  one whose token lacks the claim and by a read, and `null` for a service
+  identity and for a row the token tool created, with a control that drops
+  the refresh;
 - the principals read (§9.2): a human, a service identity and an identifier
   no row holds answered in the order given, a repeated identifier answered
   once, and no `id`, 101 of them, a malformed one, an empty one and another
@@ -4032,7 +4052,7 @@ design and evidence do not settle the question. Each is marked in place as
     equal marks differ.
 40. **Clients resolve principal identifiers with one batch read, not names
     in bodies** (§9.2): `GET /principals` maps up to 100 identifiers to their
-    kind and issuer and subject or service name, for any role, and answers
+    kind and issuer, subject and display name or service name, for any role, and answers
     one no row holds as `unknown`. A client resolves the identifiers a view
     shows in requests of at most 100 identifiers each, each given once. Every role already reads the bodies that name these
     principals and the act log (§10.5), so the read adds only the issuer and
@@ -4049,7 +4069,30 @@ design and evidence do not settle the question. Each is marked in place as
     a revocation leaves the row unrevoked while the subject stays refused
     (§10.4, §12.3), so the member would show a refused principal as
     unrevoked, and a display needs no revocation state. A human's display
-    name is pending owner choice BW-335-display-1 (§10).
+    name, owner choice BW-335-display-1, is option (b) below, the owner's
+    answer of 27 October 2026: the claim `auth.oidc.displayClaim` names,
+    default `name`, else `preferred_username`, kept in the row's own
+    `display` column, taken only from the subject's own access token and
+    refreshed by each of its admitted mutating requests in a statement of its
+    own before the request's transaction (§10). It gives readable names, at a
+    cost: many providers let users edit these claims, so a view could show a
+    name chosen to look like someone else's, and only the subject served next
+    to it identifies the human; an access token need not carry the claim, so
+    the member may be `null` throughout, and a client then shows the subject;
+    a row created without the subject's token has none until the subject's
+    own admitted mutating request; and the refresh, written only when the
+    value changed, locks the row `FOR NO KEY UPDATE`, which waits for the
+    row's `FOR SHARE` and `FOR UPDATE` holders (§10) but not for rule 5's
+    `FOR KEY SHARE` (§5). Alternatives: (a) issuer and subject only, with
+    nothing to store or keep current and nothing a user can change, but a
+    provider whose subject is an opaque number (the fixture's Zitadel issues
+    one) shows people by that number; (c) names kept in a table of their own,
+    maintained by an operator, which a user cannot change, but this
+    specification names no source or route that fills the table; the name
+    taken from a read's token too, which would make reads write; the row's
+    `name` column, which holds a service identity's name and which the row's
+    check keeps `NULL` for a human; and a write on every mutating request,
+    which would lock the row each time whether or not the name changed.
 
 ## 18. Traceability
 

@@ -855,7 +855,7 @@ func TestExchangeErrorsReportEachMismatch(t *testing.T) {
 	page := `{"items":[` + cluster + `],"next":"c"}`
 	// Canonical identifiers: 128 bits leave the last character's two low bits zero.
 	idnA, idnB := "idn_"+strings.Repeat("a", 26), "idn_"+strings.Repeat("b", 25)+"a"
-	principals := `{"items":[{"id":"` + idnA + `","kind":"unknown","issuer":null,"subject":null,"service":null}]}`
+	principals := `{"items":[{"id":"` + idnA + `","kind":"unknown","issuer":null,"subject":null,"display":null,"service":null}]}`
 	for _, tc := range []struct {
 		name string
 		r    *http.Request

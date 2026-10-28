@@ -119,9 +119,12 @@ type Auth struct {
 }
 
 type OIDC struct {
-	Issuer           string        `yaml:"issuer"`
-	Audience         string        `yaml:"audience"`
-	GroupsClaim      string        `yaml:"groupsClaim"`      // default "groups"
+	Issuer      string `yaml:"issuer"`
+	Audience    string `yaml:"audience"`
+	GroupsClaim string `yaml:"groupsClaim"` // default "groups"
+	// DisplayClaim names the claim a human's display name is read from (persistence-api.md §10,
+	// choice §17.40). Unset, it is name, else preferred_username.
+	DisplayClaim     string        `yaml:"displayClaim"`
 	MaxTokenLifetime time.Duration `yaml:"maxTokenLifetime"` // a Go duration string; default 15m
 	// PlainHTTPHosts are hosts reached over plain http, by exact name, on a network the
 	// deployment protects: a cluster-internal issuer, with TLS terminated in front of it

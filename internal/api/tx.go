@@ -141,20 +141,28 @@ func (a *API) keyedFingerprint(ctx context.Context, q *request, version int) *re
 }
 
 // admit creates a human's principal row on its first admitted mutating request, in its own short
-// transaction (§10). A denied or revoked subject gets 403 and no row.
+// transaction (§10). A denied or revoked subject gets 403 and no row. It then refreshes the
+// human's display name from the token, in a statement of its own that commits before the
+// request's transaction begins, so it holds no lock that transaction orders (§5 rule 5).
 func (a *API) admit(ctx context.Context, q *request) *refusal {
-	if q.principal.ID != "" {
+	if q.principal.Kind != auth.Human {
 		return nil
 	}
-	idn, err := auth.EnsureHuman(ctx, a.db, a.denied, q.principal.Issuer, q.principal.Subject)
-	switch {
-	case errors.Is(err, auth.ErrIdentityRevoked):
-		return refuse(http.StatusForbidden, "identity-revoked", "")
-	case err != nil:
-		a.o.logf("%s: first-use principal: %v", q.id, err)
+	if q.principal.ID == "" {
+		idn, err := auth.EnsureHuman(ctx, a.db, a.denied, q.principal.Issuer, q.principal.Subject)
+		switch {
+		case errors.Is(err, auth.ErrIdentityRevoked):
+			return refuse(http.StatusForbidden, "identity-revoked", "")
+		case err != nil:
+			a.o.logf("%s: first-use principal: %v", q.id, err)
+			return refuse(http.StatusServiceUnavailable, "dependency-unavailable", "the database could not be written; nothing was committed")
+		}
+		q.principal.ID = idn
+	}
+	if err := auth.RefreshDisplay(ctx, a.db, q.principal.ID, q.principal.Display); err != nil {
+		a.o.logf("%s: display name: %v", q.id, err)
 		return refuse(http.StatusServiceUnavailable, "dependency-unavailable", "the database could not be written; nothing was committed")
 	}
-	q.principal.ID = idn
 	return nil
 }
 
