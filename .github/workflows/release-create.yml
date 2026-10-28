@@ -1,0 +1,118 @@
+name: Release / Create
+
+# The one way a release is made (ginsys/bronzeward#262 P1, P7), run by hand on main with a tag
+# name: check the tag, its CHANGELOG.md section and the licence (scripts/release/guard.sh), wait
+# for CI to pass on the commit, tag it, then call Release / Publish, which builds, checks, signs and
+# publishes. Nothing else starts either workflow: Publish has no tag trigger, and a tag pushed
+# with the workflow token starts no workflow anyway. No tag is pushed by hand. `dry_run`, the
+# default, makes every check and the whole build and changes nothing: no tag, no signature, no
+# release. A real run stops at the guard while the repository has no LICENSE
+# (ginsys/bronzeward#16).
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "The tag, v0.N.0-alpha.M (or -beta.M, -rc.M); CHANGELOG.md needs its section"
+        required: true
+        type: string
+      dry_run:
+        description: "Dry run: check and build, change nothing"
+        required: false
+        type: boolean
+        default: true
+
+# One release at a time.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Check the branch, tag, changelog and licence
+        env:
+          VERSION: ${{ inputs.version }}
+          DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
+        run: |
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::Release / Create runs on main only, not $GITHUB_REF. Nothing was tagged."
+            exit 1
+          fi
+          scripts/release/guard.sh "$VERSION"
+          # Three answers: 0 the tag exists, 2 it does not, anything else unknown and refused.
+          rc=0
+          git ls-remote --exit-code --tags origin "refs/tags/$VERSION" >/dev/null || rc=$?
+          case $rc in
+            2) ;;
+            0) echo "::error::$VERSION is already a tag. Nothing was tagged."; exit 1 ;;
+            *) echo "::error::could not read the remote's tags (git ls-remote exit $rc). Nothing was tagged."; exit 1 ;;
+          esac
+
+  ci:
+    # The tested revision ships (P7): a CI run on this commit passed, the packaging check included.
+    # A push run on main can be cancelled by the next push, so any successful run of ci.yml on the
+    # commit counts, the merge queue's included.
+    needs: guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Wait for CI to pass on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          deadline=$(($(date +%s) + 40 * 60))
+          while :; do
+            runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&per_page=100" \
+              --jq '[.workflow_runs[] | {status, conclusion}] | tojson') || runs=unknown
+            case $runs in
+              unknown) ;;
+              *'"conclusion":"success"'*) echo "CI passed on $GITHUB_SHA."; exit 0 ;;
+              *'"status":"queued"'* | *'"status":"in_progress"'* | *'"status":"waiting"'* | *'"status":"pending"'* | '[]') ;;
+              *) echo "::error::no CI run passed on $GITHUB_SHA: $runs. Nothing was tagged."; exit 1 ;;
+            esac
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::no CI run passed on $GITHUB_SHA within 40 minutes (last read: $runs). Nothing was tagged."
+              exit 1
+            fi
+            sleep 30
+          done
+
+  tag:
+    needs: [guard, ci]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Tag the commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$VERSION" -f sha="$GITHUB_SHA" --silent
+
+  publish:
+    needs: [guard, ci, tag]
+    # The tag job is skipped on a dry run only.
+    if: ${{ !cancelled() && needs.ci.result == 'success' && (needs.tag.result == 'success' || (inputs.dry_run && needs.tag.result == 'skipped')) }}
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/release-publish.yml
+    with:
+      version: ${{ inputs.version }}
+      commit: ${{ github.sha }}
+      dry_run: ${{ inputs.dry_run }}

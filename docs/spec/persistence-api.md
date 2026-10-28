@@ -2925,7 +2925,11 @@ Rules **(choice §17.24)**:
    that creates what it changes, and no migration alters another. A database
    migrated from an earlier version of that file fails rule 2's checksum
    comparison and is recreated; nothing upgrades it. Rule 4 binds from the
-   first release.
+   first release. A pre-release (`v0.N.0-alpha.M`, `-beta.M`, `-rc.M`) is not
+   the first release: the first is the first tag without a pre-release
+   suffix, so a pre-release's database may be recreated by the next one
+   (owner decision BW-262-firstrel-1,
+   [ginsys/bronzeward#262](https://github.com/ginsys/bronzeward/issues/262)).
 
 DB tested the engine properties only. No v1 migration tool, online migration
 of a large table or downgrade was attempted
