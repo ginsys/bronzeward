@@ -5,6 +5,7 @@
 // serves in place of the server's, typed by the generated API types.
 import { randomBytes } from "node:crypto";
 import { $, $$, browser, expect } from "@wdio/globals";
+import type { components } from "../../src/api/v1";
 import { REVOKED } from "../../src/app.tsx";
 import { short } from "../../src/list.tsx";
 import { HEALTH, type Observation, sentences } from "../../src/machine.tsx";
@@ -436,6 +437,251 @@ describe("cursor pages", () => {
     expect(await rows()).toEqual(ids.slice(0, 50));
     expect((await answers()).filter((a) => a.startsWith("/machines"))).toEqual(["/machines 200", expect.stringMatching(/^\/machines\?cursor=\S+ 400$/), "/machines 200"]);
     expect(await count()).toBe("Showing 50; more pages to read. Show more");
+  });
+});
+
+// The read-only lists and items: the deployment's own empty lists and acts; sources, a release, a
+// plan, an operation and a dependency as synthetic bodies (no publication runs on it), typed by the
+// generated API types.
+type S = components["schemas"];
+const sid = (prefix: string, c: string) => `${prefix}_${c.repeat(26)}`;
+const T0 = "2026-10-26T08:30:00Z";
+function synthetic(cl: string, machine: string) {
+  const author = sid("idn", "a");
+  const frg: S["FragmentBody"] = { id: sid("frg", "f"), cluster: cl, scope: "cluster", name: "registries", layer: "cluster", revision: sid("frv", "r"), headRevision: 3, createdAt: T0 };
+  const frv: S["FragmentRevisionBody"] = {
+    id: frg.revision!, cluster: cl, name: "registries", layer: "cluster", author, createdAt: T0,
+    document: `machine:\n  registries:\n    config:\n      registry.example.test:\n        auth: {username: "${"x".repeat(120)}"}\n`,
+    declarations: { references: { "registry/example-pass": { kind: "string", version: 1 } }, embedded: [] },
+  };
+  const rel: S["ReleaseBody"] = {
+    id: sid("rel", "h"), cluster: cl, draft: sid("drf", "d"), draftRevision: 2, operation: sid("op", "p"), publishedBy: { principal: author, role: "publisher" }, publishedAt: T0,
+    renderer: { contract: "v1.13", machineryVersion: "v1.13.6", machineryChecksum: "sha256:synthetic", kubernetesVersion: "v1.34.1" },
+    sources: [{ kind: "fragment", head: frg.id, revision: frv.id, headRevision: 3 }],
+    machines: [{ machine, mode: "metal", review: "redacted", publicationObservation: sid("obs", "o") }],
+  };
+  const plan: S["PlanBody"] = {
+    id: sid("pln", "q"), revision: 1, state: "proposed", committedOperation: null, approval: null, cluster: cl, machine, release: rel.id, operation: "apply-config",
+    mode: "no-reboot", assignmentRevision: sid("asr", "s"), desiredRelease: rel.id, baselineRevision: 4, driftRecord: null, route: "192.0.2.1:50000",
+    maxObservationAgeSeconds: 300, checkValiditySeconds: 120, transportDeadlineSeconds: 60, verificationDeadlineSeconds: 600, maxAttempts: 3, rolloutLimit: 1,
+    approvalPolicy: "one-approver", createdBy: { principal: author, role: "publisher" }, epoch: "ep_synthetic", timelineRevision: 7, createdAt: T0, expiresAt: "2026-10-27T08:30:00Z",
+    evidence: {
+      diff: { from: sid("rel", "g"), to: rel.id, withheld: false, unified: "--- applied\n+++ release\n machine:\n   nodeLabels:\n+    team: storage\n" },
+      validation: { result: "passed", at: "publication", contract: "v1.13", kubernetesVersion: "v1.34.1", machineryVersion: "v1.13.6", platformMode: "metal" },
+      dryRun: { available: false, reason: "the PoC has none" },
+    },
+  };
+  const op: S["OperationBody"] = {
+    id: sid("op", "w"), kind: "apply-config", state: "unresolved", epoch: "ep_synthetic", lastEvent: 4, subject: { plan: plan.id, machine },
+    createdBy: { principal: author, role: "approver" }, createdAt: T0, result: null, error: null,
+    attempts: [{
+      id: sid("att", "t"), number: 1, controller: "ctl-b", generation: 3, route: "192.0.2.1:50000", observation: sid("obs", "o"), transportDeadline: "2026-10-26T08:32:00Z",
+      verificationDeadline: "2026-10-26T08:41:00Z", at: "2026-10-26T08:31:00Z", revision: 8, classification: null, response: null, accounting: null,
+    }],
+  };
+  const dep: S["DependencyBody"] = {
+    id: sid("dep", "e"), provider: "openbao", object: "registry/example-pass", version: 1, created: T0, class: "unknown", reason: "provider unreachable",
+    firstRetainedAt: T0, unknownSince: "2026-10-26T08:40:00Z", observedFrom: "2026-10-26T08:40:00Z", recordedAt: "2026-10-26T08:41:00Z", stale: true,
+  };
+  const alert: S["AlertBody"] = {
+    id: sid("dal", "l"), kind: "class-change", dependency: dep.id, provider: "openbao", object: dep.object, version: 1, created: T0, class: "unknown",
+    reason: "provider unreachable", releases: [rel.id], deletion: null, observedFrom: dep.observedFrom, answerDate: null, epoch: "ep_synthetic", recordedAt: dep.recordedAt,
+  };
+  const page = <T,>(...items: T[]) => ({ items });
+  const bodies: Record<string, unknown> = {
+    "/fragments": page(frg), [`/fragments/${frg.id}`]: frg, [`/fragments/${frg.id}/revisions`]: page(frv), [`/fragment-revisions/${frv.id}`]: frv,
+    "/releases": page(rel), [`/releases/${rel.id}`]: rel, "/plans": page(plan), [`/plans/${plan.id}`]: plan, "/operations": page(op), [`/operations/${op.id}`]: op,
+    "/dependencies": { ...page(dep), lastPass: T0 } satisfies S["DependencyPage"], [`/dependencies/${dep.id}`]: dep, "/dependency-alerts": page(alert),
+    [`/dependencies/${dep.id}/releases`]: page<S["DependencyReleaseBody"]>({ release: rel.id, cluster: cl, publishedAt: T0, records: [{ machine, kind: "effective" }] }),
+    [`/dependencies/${dep.id}/alerts`]: page(alert),
+  };
+  return { frg, frv, rel, plan, op, dep, bodies };
+}
+
+const nav = async (title: string) => {
+  await $('nav[aria-label="Main"]').$(`a=${title}`).click();
+  await expect($("main h2")).toHaveText(title);
+};
+const loaded = () => browser.waitUntil(async () => !(await texts('main [data-testid="status"]')).some((t) => t.startsWith("Loading")), { timeout: 20_000, timeoutMsg: "a list was still loading" });
+
+// The focused element after one Tab, or Shift+Tab, which must show its focus (WCAG 2.4.7).
+async function tab(back = false) {
+  await browser.keys(back ? ["Shift", "Tab"] : "Tab");
+  const f = await browser.execute(() => {
+    const e = document.activeElement as HTMLElement;
+    const s = getComputedStyle(e);
+    return { tag: e.tagName, text: e.textContent?.trim() ?? "", title: e.getAttribute("title"), outline: s.outlineStyle, width: parseFloat(s.outlineWidth) };
+  });
+  if (f.outline === "none" || f.width < 2) throw new Error(`focus on ${f.tag} "${f.text}" is not visible: outline ${f.outline} ${f.width}px`);
+  return f;
+}
+// Tabs until the match, answering the text of every focus on the way.
+async function tabTo(match: (f: Awaited<ReturnType<typeof tab>>) => boolean, what: string): Promise<string[]> {
+  const passed: string[] = [];
+  for (let i = 0; i < 40; i++) {
+    const f = await tab();
+    if (match(f)) return passed;
+    passed.push(f.text);
+  }
+  throw new Error(`Tab never reached ${what}`);
+}
+const focused = () => browser.execute(() => document.activeElement?.id ?? "");
+// A click on the header's title, which takes no focus, starts the next Tab from there.
+const fromTitle = () => $("header h1").click();
+
+// The lowest contrast of any shown text (WCAG 1.4.3) and the controls under 24 px (2.5.8), measured
+// in the page.
+const measure = () => browser.execute(() => {
+  const lum = (c: string) => {
+    const [r, g, b] = (c.match(/[\d.]+/g) ?? []).slice(0, 3).map((v) => {
+      const s = Number(v) / 255;
+      return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+  };
+  const back = (e: Element | null): string => {
+    for (; e !== null; e = e.parentElement) {
+      const c = getComputedStyle(e).backgroundColor;
+      if (!/rgba\(.*, 0\)|transparent/.test(c)) return c;
+    }
+    return "rgb(255, 255, 255)";
+  };
+  let low = Infinity;
+  for (const e of document.querySelectorAll("body *")) {
+    if (![...e.childNodes].some((n) => n.nodeType === 3 && n.textContent!.trim() !== "") || e.getClientRects().length === 0) continue;
+    const [a, b] = [lum(getComputedStyle(e).color), lum(back(e))];
+    low = Math.min(low, (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05));
+  }
+  const small = [...document.querySelectorAll("button, select, nav a")].map((e) => e.getBoundingClientRect()).filter((r) => r.width < 24 || r.height < 24).length;
+  return { contrast: low, small };
+});
+const overflows = () => browser.execute(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+
+describe("the read-only lists and items", () => {
+  it("empty lists are status messages; the audit lists the acts of real writes, principals shortened", async () => {
+    const at = await disposable();
+    const cl = await cluster(at, "lab-a");
+    expect(await fixtureSignIn("h-viewer", {}, { upstream: at })).toMatch(SERVER);
+    await nav("Sources");
+    await loaded();
+    expect(await texts('main [data-testid="status"]')).toEqual(expect.arrayContaining(["No fragments recorded yet.", "No profiles recorded yet.", "No assignments recorded yet.", "No dependency alerts raised."]));
+    await expect($('[data-testid="last-pass"]')).toHaveText(/^(Last completed monitor pass: .+|No monitor pass has completed yet)\.$/);
+    for (const [page, empty] of [["Changes", "No releases published yet."], ["Plans", "No plans created yet."], ["Operations", "No operations recorded yet."]] as const) {
+      await nav(page);
+      await expect($('main [data-testid="status"]')).toHaveText(empty);
+    }
+    await nav("Audit");
+    const row = $(`//main//tbody/tr[contains(., "${short(cl.id)}")]`);
+    await expect(row).toHaveText(expect.stringContaining("cluster.create"));
+    expect(await row.$$("td").map((td) => td.getText())).toEqual(expect.arrayContaining([expect.stringMatching(/^idn_[a-z2-7]{4}…[a-z2-7]{4} \(\w+\)$/)]));
+  });
+
+  it("keyboard only: every focus visible, the skip link, a filter, and each identifier's link opens its item at its path", async () => {
+    const at = await disposable();
+    const cl = await cluster(at, "lab-a");
+    const [m] = await machines(at, cl.id, 1);
+    const s = synthetic(cl.id, m!);
+    expect(await fixtureSignIn("h-viewer", {}, { upstream: at, bodies: s.bodies })).toMatch(SERVER);
+    await fromTitle();
+    expect((await tab(true)).text).toBe("Skip to the page");
+    await browser.keys("Enter");
+    expect(await focused()).toBe("main");
+    // T2: from the skipped-to list, the machine and its three values.
+    await tabTo((f) => f.title === m, "the machine");
+    await browser.keys("Enter");
+    await expect($("main h2")).toHaveText(`Machine ${m}`);
+    expect(await focused()).toBe("main");
+    await expect($("main dl")).toHaveText(expect.stringContaining("Desired"));
+    // T1: Sign out is on the way to the navigation.
+    await fromTitle();
+    expect(await tabTo((f) => f.text === "Sources", "the Sources link")).toContain("Sign out");
+    await browser.keys("Enter");
+    await expect($("main h2")).toHaveText("Sources");
+    expect(await focused()).toBe("main");
+    expect(await where()).toBe(`${FIXTURE_PAGE}/sources`);
+    await tabTo((f) => f.title === s.frg.id, "the fragment");
+    await browser.keys("Enter");
+    await expect($("main h2")).toHaveText("Fragment registries");
+    expect(await where()).toBe(`${FIXTURE_PAGE}/fragments/${s.frg.id}`);
+    await tabTo((f) => f.title === s.frv.id && f.tag === "A", "the revision");
+    await browser.keys("Enter");
+    await expect($("main h2")).toHaveText(`Fragment revision ${short(s.frv.id)} of registries`);
+    await expect($('[data-testid="document"]')).toHaveText(expect.stringContaining("registry.example.test"));
+    await expect($("main")).toHaveText(expect.stringContaining("registry/example-pass"));
+    // A filter set by keyboard lands in the query.
+    await nav("Plans");
+    await tabTo((f) => f.tag === "SELECT", "the state filter");
+    await browser.keys("ArrowDown");
+    await browser.waitUntil(async () => (await param("state")) === "proposed", { timeout: 10_000, timeoutMsg: "the state filter did not reach the query" });
+    const seen = await measure();
+    expect(seen.contrast).toBeGreaterThanOrEqual(4.5);
+    expect(seen.small).toBe(0);
+  });
+
+  it("a release, a plan, its operations and a dependency, each from its link, with their records", async () => {
+    const at = await disposable();
+    const cl = await cluster(at, "lab-a");
+    const [m] = await machines(at, cl.id, 1);
+    const s = synthetic(cl.id, m!);
+    expect(await fixtureSignIn("h-viewer", {}, { upstream: at, bodies: s.bodies })).toMatch(SERVER);
+    await nav("Changes");
+    await $(`a[title="${s.rel.id}"]`).click();
+    await expect($("main h2")).toHaveText(`Release ${short(s.rel.id)}`);
+    await expect($("main")).toHaveText(expect.stringContaining("Source revisions this release was built from (these are not configuration)"));
+    await expect($("main")).toHaveText(expect.stringContaining("contract v1.13 · machinery v1.13.6 · Kubernetes v1.34.1"));
+    await expect($$(`main a[title="${s.frg.id}"]`)).toBeElementsArrayOfSize(1);
+    await expect($$(`main a[title="${m}"]`)).toBeElementsArrayOfSize(1);
+    await nav("Plans");
+    await $(`a[title="${s.plan.id}"]`).click();
+    await expect($("main h2")).toHaveText(`Plan ${short(s.plan.id)}: proposed`);
+    await expect($('[data-testid="diff"]')).toHaveText(expect.stringContaining("+    team: storage"));
+    await expect($("main")).toHaveText(expect.stringContaining("transport 1 min, verification 10 min, observation age 5 min, check validity 2 min, attempts 3, rollout limit 1"));
+    await $("a=Operations of this plan").click();
+    await expect($("main h2")).toHaveText("Operations");
+    expect(await param("plan")).toBe(s.plan.id);
+    await expect($("main")).toHaveText(expect.stringContaining(`Plan ${short(s.plan.id)} Show all`));
+    await $(`a[title="${s.op.id}"]`).click();
+    await expect($("main h2")).toHaveText(`Operation ${short(s.op.id)}: apply-config, unresolved`);
+    await expect($$("main tbody tr")).toBeElementsArrayOfSize(1);
+    expect((await answers()).some((a) => a.startsWith(`/operations?plan=${s.plan.id} `))).toBe(true);
+    await nav("Sources");
+    await expect($('[data-testid="last-pass"]')).toHaveText(/^Last completed monitor pass: .+\.$/);
+    await expect($(`(//main//tbody/tr[contains(., "${short(s.dep.id)}")])[1]`)).toHaveText(expect.stringContaining("unknown (stale: not observed recently)"));
+    // Linked from the dependencies table and from its alert's row: the first is the dependency's own.
+    await $(`(//main//a[@title="${s.dep.id}"])[1]`).click();
+    await expect($("main h2")).toHaveText("Dependency registry/example-pass, version 1");
+    await expect($$(`main a[title="${s.rel.id}"]`)).toBeElementsArrayOfSize(2);
+    await expect($("main")).toHaveText(expect.stringContaining("class-change"));
+  });
+
+  it("reflow at 320 CSS pixels: no page scrolls sideways; only a table scrolls on its own", async () => {
+    const at = await disposable();
+    const cl = await cluster(at, "lab-a");
+    const [m] = await machines(at, cl.id, 1);
+    const s = synthetic(cl.id, m!);
+    expect(await fixtureSignIn("h-viewer", {}, { upstream: at, bodies: s.bodies })).toMatch(SERVER);
+    await browser.setViewport({ width: 320, height: 640 });
+    try {
+      expect(await browser.execute(() => innerWidth)).toBe(320);
+      await expect($("main tbody tr")).toBeExisting();
+      expect(["machines", await overflows()]).toEqual(["machines", 0]);
+      for (const [page, item, title] of [["Plans", s.plan.id, "Plan"], ["Sources", s.frg.id, "Fragment"], ["Operations", s.op.id, "Operation"]] as const) {
+        await nav(page);
+        await loaded();
+        expect([page, await overflows()]).toEqual([page, 0]);
+        await $(`a[title="${item}"]`).click();
+        await expect($("main h2")).toHaveText(expect.stringContaining(title));
+        await loaded();
+        expect([item, await overflows()]).toEqual([item, 0]);
+      }
+      await nav("Sources");
+      await $(`a[title="${s.frg.id}"]`).click();
+      await $(`main tbody a[title="${s.frv.id}"]`).click();
+      await expect($('[data-testid="document"]')).toBeExisting();
+      expect(["the fragment revision", await overflows()]).toEqual(["the fragment revision", 0]);
+    } finally {
+      await browser.setViewport({ width: 1280, height: 800 });
+    }
   });
 });
 
