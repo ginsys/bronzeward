@@ -18,3 +18,4 @@ var errNoKeyring = errors.New(keyringUnavailable())
 func keyringGet(string) (string, bool, error) { return "", false, errNoKeyring }
 func keyringSet(string, string) error         { return errNoKeyring }
 func keyringDelete(string) error              { return errNoKeyring }
+func keyringLocked() (bool, error)            { return false, errNoKeyring }

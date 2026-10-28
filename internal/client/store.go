@@ -81,6 +81,11 @@ func (s *store) read() (*Tokens, error) {
 
 // lock takes the sign-in's renewal lock (§9.2 item 3). A token file's lies beside it, shared by
 // every context that uses the file; any other context's is its own, in the state directory.
+//
+// The lock is never held across the credential store's unlock prompt, which go-keyring's calls
+// wait on for as long as the operator leaves it: every other bronzewardctl command on the context
+// would wait as long. A read bounded by within, before the lock, lets a locked store prompt; once
+// the lock is held, a store that is still, or again, locked is refused without a prompt.
 func (s *store) lock() (func(), error) {
 	if s.file != "" {
 		return renewalLock(s.file + ".lock")
@@ -93,8 +98,27 @@ func (s *store) lock() (func(), error) {
 		}
 		dir = filepath.Join(home, ".local", "state")
 	}
-	return renewalLock(filepath.Join(dir, "bronzeward", s.x.Name+".renewal.lock"))
+	if s.none == "" {
+		if _, _, err := keyringGet(s.x.Name); err != nil {
+			return nil, err
+		}
+	}
+	unlock, err := renewalLock(filepath.Join(dir, "bronzeward", s.x.Name+".renewal.lock"))
+	if err != nil || s.none != "" {
+		return unlock, err
+	}
+	if locked, err := keyringLocked(); err != nil || locked {
+		unlock()
+		if err == nil {
+			err = errStoreLocked
+		}
+		return nil, err
+	}
+	return unlock, nil
 }
+
+// errStoreLocked: the credential store is locked, and is not unlocked under the renewal lock.
+var errStoreLocked = errors.New("the system credential store is locked; unlock it, then run the command again")
 
 func (s *store) save(t *Tokens) error {
 	switch {
@@ -195,13 +219,16 @@ func ClearStored(x *Context) (string, error) {
 		}
 		return fmt.Sprintf("The system credential store is not reached, since %s, so a sign-in another session kept there is not removed", why), nil
 	}
+	failed := func(err error) error {
+		return fmt.Errorf("removing the stored sign-in of context %q from the system credential store: %w", x.Name, err)
+	}
 	unlock, err := openStore(x).lock()
 	if err != nil {
-		return "", err
+		return "", failed(err)
 	}
 	defer unlock()
 	if err := keyringDelete(x.Name); err != nil {
-		return "", fmt.Errorf("removing the stored sign-in of context %q from the system credential store: %w", x.Name, err)
+		return "", failed(err)
 	}
 	return "", nil
 }
