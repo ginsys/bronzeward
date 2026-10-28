@@ -267,7 +267,7 @@ func (c *Client) renew() (err error) {
 	old := s.tokens
 	// Strictly: a credential store that fails now must not read as empty, or the refresh token it
 	// still holds would be redeemed and the rotated one never kept.
-	t, err := s.store.read()
+	t, err := s.store.readHeld()
 	if err != nil {
 		return err
 	}

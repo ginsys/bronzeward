@@ -59,15 +59,21 @@ func (s *store) load() (*Tokens, error) {
 	return t, nil
 }
 
-// read is load without its fallback: a failing credential store is an error.
-func (s *store) read() (*Tokens, error) {
+// read is load without its fallback: a failing credential store is an error. It may wait, at most
+// a minute, on the credential store's unlock prompt, so it is never used under the renewal lock.
+func (s *store) read() (*Tokens, error) { return s.get(keyringGet) }
+
+// readHeld is read under the renewal lock: a locked credential store is refused (errStoreLocked).
+func (s *store) readHeld() (*Tokens, error) { return s.get(keyringGetHeld) }
+
+func (s *store) get(fromKeyring func(string) (string, bool, error)) (*Tokens, error) {
 	switch {
 	case s.file != "":
 		return ReadTokens(s.file)
 	case s.none != "":
 		return nil, nil
 	}
-	v, found, err := keyringGet(s.x.Name)
+	v, found, err := fromKeyring(s.x.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -84,8 +90,9 @@ func (s *store) read() (*Tokens, error) {
 //
 // The lock is never held across the credential store's unlock prompt, which go-keyring's calls
 // wait on for as long as the operator leaves it: every other bronzewardctl command on the context
-// would wait as long. A read bounded by within, before the lock, lets a locked store prompt; once
-// the lock is held, a store that is still, or again, locked is refused without a prompt.
+// would wait as long. A read bounded by within, before the lock, lets a locked store prompt; under
+// the lock every call (readHeld, save, keyringDelete) refuses a store that is still, or again,
+// locked, without a prompt.
 func (s *store) lock() (func(), error) {
 	if s.file != "" {
 		return renewalLock(s.file + ".lock")
@@ -103,18 +110,7 @@ func (s *store) lock() (func(), error) {
 			return nil, err
 		}
 	}
-	unlock, err := renewalLock(filepath.Join(dir, "bronzeward", s.x.Name+".renewal.lock"))
-	if err != nil || s.none != "" {
-		return unlock, err
-	}
-	if locked, err := keyringLocked(); err != nil || locked {
-		unlock()
-		if err == nil {
-			err = errStoreLocked
-		}
-		return nil, err
-	}
-	return unlock, nil
+	return renewalLock(filepath.Join(dir, "bronzeward", s.x.Name+".renewal.lock"))
 }
 
 // errStoreLocked: the credential store is locked, and is not unlocked under the renewal lock.
@@ -149,7 +145,7 @@ func (s *store) clear(match func(*Tokens) bool) (*Tokens, error) {
 		return nil, err
 	}
 	defer unlock()
-	t, err := s.read()
+	t, err := s.readHeld()
 	if err != nil || t == nil {
 		return nil, err
 	}
