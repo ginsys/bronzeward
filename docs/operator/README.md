@@ -4,10 +4,22 @@ How to build, configure and start the Bronzeward proof of concept, and where to 
 [walkthrough](walkthrough.md) then takes one existing cluster through adoption, publication,
 approval, a safe apply and drift handling.
 
-This is a proof of concept under implementation. Nothing here is a release or a production
-deployment guide: the supported scope is
+Bronzeward is a proof of concept. Its releases are pre-releases (`v0.N.0-alpha.M`), never a
+production version, and none is published until the licence is decided
+([ginsys/bronzeward#16](https://github.com/ginsys/bronzeward/issues/16)). The supported scope is
 [design §18.2](../design/Talos_Configuration_and_Machine_Management_Design.md#182-phase-1---configuration-control-on-an-existing-cluster),
 and the [acceptance plan](../spec/acceptance-plan.md) defines what must be checked.
+
+The guide has three parts:
+
+- **Operator clients**: `bronzewardctl` and the web interface. Their pages are being written
+  ([ginsys/bronzeward#404](https://github.com/ginsys/bronzeward/issues/404)).
+- **Deployment**: [hosting](deployment/hosting.md) (TLS, routing, the web files and the
+  client-configuration file), the [identity provider](deployment/identity-provider.md) (Zitadel),
+  and [upgrade and rollback](deployment/upgrade.md).
+- **Server administration**: this page (build, configuration, migration, tokens), the
+  [walkthrough](walkthrough.md), [recovery](recovery.md) with its external prerequisites,
+  [limits](limits.md) and [troubleshooting](troubleshooting.md).
 
 ## The profile
 
