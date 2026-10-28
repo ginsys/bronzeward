@@ -345,6 +345,43 @@ describe("the machine detail (W3)", () => {
     await browser.pause(11_000);
     expect((await timelineReads(id!)) - after).toBeGreaterThanOrEqual(1);
   });
+
+  it("#375: the timeline's newest page first, never the whole timeline; Load older appends the older page and is gone at its start", async function () {
+    this.timeout(120_000);
+    const at = await disposable();
+    const cl = await cluster(at, "lab-a");
+    const [id] = await machines(at, cl.id, 1);
+    // More entries than the server's 50-entry page: freezes and unfreezes, each with its step.
+    // h-all unfreezes: the deployment denies h-approver (AUTH-10).
+    for (let i = 0; i < 30; i++) {
+      await write(at, `/machines/${id}/freezes`, { reason: `synthetic step ${2 * i}` });
+      await write(at, `/machines/${id}/unfreezes`, { reason: `synthetic step ${2 * i + 1}` }, "h-all");
+    }
+    const all = await fetch(`${at}/api/v1/machines/${id}/timeline?limit=500`, { headers: { Authorization: `Bearer ${mint("h-viewer")}` } });
+    const total = ((await all.json()) as { items: unknown[] }).items.length;
+    expect(total).toBeGreaterThan(50);
+    expect(await fixtureSignIn("h-viewer", {}, { upstream: at })).toMatch(SERVER);
+    await $(`a[title="${id}"]`).click();
+    await expect($("main h2")).toHaveText(`Machine ${id}`);
+    const entries = () => $$('[data-testid="timeline"] tbody tr');
+    await browser.waitUntil(async () => (await entries().length) === 50, { timeout: 20_000, timeoutMsg: "the timeline did not show its newest page" });
+    const steps = async () => (await texts('[data-testid="timeline"] tbody tr td:last-child')).map((t) => /synthetic step (\d+)/.exec(t)?.[1]).filter((s) => s !== undefined).map(Number);
+    const newest = await steps();
+    expect(newest[0]).toBe(59);
+    expect(newest).toEqual([...newest].sort((x, y) => y - x));
+    // One request read that page, newest first; the polls read on from its tail, not from the start.
+    const reads = (await answers()).filter((a) => a.startsWith(`/machines/${id}/timeline`));
+    expect(reads[0]).toBe(`/machines/${id}/timeline?order=newest 200`);
+    expect(reads.slice(1).every((a) => /\?cursor=\S+ 200$/.test(a))).toBe(true);
+    await $("button=Load older").click();
+    await browser.waitUntil(async () => (await entries().length) === total, { timeout: 20_000, timeoutMsg: "Load older did not append the older page" });
+    const shown = await steps();
+    expect(shown.slice(0, newest.length)).toEqual(newest);
+    expect(shown).toEqual([...shown].sort((x, y) => y - x));
+    expect(shown.at(-1)).toBe(0);
+    expect((await answers()).filter((a) => a.startsWith(`/machines/${id}/timeline?order=newest&cursor=`))).toHaveLength(1);
+    expect(await $("button=Load older").isExisting()).toBe(false);
+  });
 });
 
 describe("cursor pages", () => {
