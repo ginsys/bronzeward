@@ -177,7 +177,10 @@ jobs:
           cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: go
       # The tasks below run under mise: it must find setup-node's node, at mise.toml's version.
+      # `mise exec` would otherwise install every missing tool of mise.toml first, which the
+      # workflow's MISE_TASK_RUN_AUTO_INSTALL does not stop.
       - env:
+          MISE_EXEC_AUTO_INSTALL: "false"
           WANT: ${{ steps.node.outputs.version }}
         run: |
           got=$(mise exec -- node --version)
