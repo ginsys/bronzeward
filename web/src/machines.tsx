@@ -30,14 +30,22 @@ export function badges(m: Machine): string[] {
   return out;
 }
 
-const time = (at: string) => new Date(at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+// A reading's age at `now`, as W2 shows it, so a reading from another day never looks current. The
+// list takes `now` when it renders, and a read again renders it anew.
+function age(at: string, now: number): string {
+  const min = Math.floor((now - Date.parse(at)) / 60_000);
+  if (min < 1) return "just now";
+  if (min < 60) return `${min} min ago`;
+  if (min < 1440) return `${Math.floor(min / 60)} h ago`;
+  return `${Math.floor(min / 1440)} d ago`;
+}
 
-export function observed(m: Machine): string {
+export function observed(m: Machine, now: number): string {
   const o = m.observed;
   if (o === null) return "none";
   const to = o.release ?? undefined;
   const what = to !== undefined && to === m.applied?.release ? "= applied" : to !== undefined && to === m.desired ? "= desired" : "no match";
-  return `${what}, read ${time(o.at)}`;
+  return `${what}, ${age(o.at, now)}`;
 }
 
 // G8: the node ID when the machine was recorded by it, else its SMBIOS UUID.
@@ -77,6 +85,7 @@ export function Machines({ query, go }: { query: string; go: (to: string) => voi
     go(q.size > 0 ? `/machines?${q}` : "/machines");
   };
   if (list.kind === "ok") {
+    const now = Date.now();
     const shown = list.data.items.filter((m) => state === undefined || badges(m).includes(state[1]));
     body = shown.length === 0 && more === undefined
       ? <Empty text={cluster === "" && state === undefined ? "No machines recorded yet." : "No machine matches this filter."} />
@@ -92,7 +101,7 @@ export function Machines({ query, go }: { query: string; go: (to: string) => voi
                   <td>{node(m)}</td>
                   <td>{release(m.desired)}</td>
                   <td>{m.applied === null ? "none" : <>{release(m.applied.release)} ({m.applied.source})</>}</td>
-                  <td>{observed(m)}</td>
+                  <td title={m.observed?.at}>{observed(m, now)}</td>
                   <td>{badges(m).join(", ")}</td>
                 </tr>
               ))}
