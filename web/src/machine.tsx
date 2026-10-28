@@ -96,13 +96,15 @@ async function restart<T>(client: Reads["client"], path: string): Promise<ReadRe
 
 // The poll: the newest page first, then on from `tail` in oldest order, following next while
 // `going` holds, as readPages does, and keeping the tail of the last page. Later entries go first.
+// A read superseded before it starts, or before a restart, sends nothing more.
 export async function readLater<T>(client: Reads["client"], path: string, from: Timeline<T>, going: () => boolean = () => true): Promise<ReadResult<Timeline<T>> | Dropped> {
+  if (!going()) return { kind: "discarded" };
   if (!from.read) return readNewest(client, path);
   let cursor = from.tail;
   let later: T[] = [];
   for (;;) {
     const res = await client.read<TimelinePage<T>>(cursor === undefined ? path : `${path}?${new URLSearchParams({ cursor })}`);
-    if (res.kind === "restart" && cursor !== undefined) return restart(client, path);
+    if (res.kind === "restart" && cursor !== undefined) return going() ? restart(client, path) : { kind: "discarded" };
     if (res.kind === "restart") return { kind: "refused", status: 400, problem: res.problem };
     if (res.kind !== "ok") return res;
     later = [...later, ...res.data.items];
@@ -113,10 +115,12 @@ export async function readLater<T>(client: Reads["client"], path: string, from: 
 }
 
 // "Load older": the page before the oldest shown, appended; none left once its answer has no next.
-export async function readOlder<T>(client: Reads["client"], path: string, from: Timeline<T>): Promise<ReadResult<Timeline<T>> | Dropped> {
+// Superseded as the poll is; `going` has no default, so no caller can leave it out.
+export async function readOlder<T>(client: Reads["client"], path: string, from: Timeline<T>, going: () => boolean): Promise<ReadResult<Timeline<T>> | Dropped> {
+  if (!going()) return { kind: "discarded" };
   if (from.older === undefined) return { kind: "ok", data: from };
   const res = await client.read<TimelinePage<T>>(`${path}?${new URLSearchParams({ order: "newest", cursor: from.older })}`);
-  if (res.kind === "restart") return restart(client, path);
+  if (res.kind === "restart") return going() ? restart(client, path) : { kind: "discarded" };
   return res.kind === "ok" ? { kind: "ok", data: { ...from, items: [...from.items, ...res.data.items], older: res.data.next } } : res;
 }
 
@@ -174,11 +178,14 @@ function useTimeline(path: string): [Load<Timeline<Entry>> | Dropped, (() => voi
         shown = nextTimeline(shown, res);
         return r.kind === "ok" || r.kind === "transport";
       }));
+    // A read queued behind another starts only while neither a new view nor the process's refusal
+    // has dropped it.
+    const going = () => live && ok();
     older.current = () => {
       setBusy(true);
-      void step((from) => readOlder<Entry>(client, path, from)).then(() => live && setBusy(false));
+      void step((from) => readOlder<Entry>(client, path, from, going)).then(() => live && setBusy(false));
     };
-    const stop = polled(() => step((from) => readLater<Entry>(client, path, from, () => live && ok())));
+    const stop = polled(() => step((from) => readLater<Entry>(client, path, from, going)));
     return () => {
       live = false;
       older.current = undefined;
