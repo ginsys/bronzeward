@@ -38,8 +38,8 @@ with ([`fixtures/dev-idp`](../../../fixtures/dev-idp)):
 - `accessTokenLifetime` must not exceed `auth.oidc.maxTokenLifetime`. It also bounds how long the
   server accepts a token after sign-out (see the consequences below).
 - `refreshTokenExpiration` is the absolute limit on renewal, however active the session is. Keep it
-  short. It is the only bound on a copied refresh token (consequence 1). #281 saw it enforced to
-  the second: at 600 s, renewal every 60 s worked to t+550 s and was refused from t+610 s.
+  short. It is the only bound on a copied refresh token (consequence 1). #281 saw it enforced: at
+  600 s, renewal every 60 s worked to t+550 s and was refused from t+610 s.
 - `refreshTokenIdleExpiration` ends a session nobody renewed: refused after 130 s idle at 120 s.
 
 ## 2. The project and its roles

@@ -31,8 +31,8 @@ that is not exactly its own binary's, so no instance runs across a migration.
 
 **Between pre-releases** (`v0.N.0-alpha.M`, `-beta.M`, `-rc.M`), the schema is one migration that
 is edited in place, and nothing upgrades a database made by an earlier version of it
-([§11](../../spec/persistence-api.md#11-migrations) item 6). If `migrate` refuses a migration
-"applied with another name or checksum", that pre-release changed the schema. The database has to be
+([§11](../../spec/persistence-api.md#11-migrations) item 6). If `migrate` refuses because the
+database records the migration with another name or checksum, that pre-release changed the schema. The database has to be
 created again, and its contents are lost. Pre-releases are for evaluation, not for data you keep.
 
 ## Roll back
