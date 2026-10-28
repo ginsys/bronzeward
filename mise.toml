@@ -5,7 +5,8 @@
 actionlint = "1.7.12"
 shellcheck = "0.11.0"
 go = "1.27.1"
-# The current LTS; web/package.json's engines names the same version.
+# The current LTS; web/package.json's engines names the same version. ci.yml's safari job reads
+# this line, in this form, for actions/setup-node (ginsys/bronzeward#415).
 node = "24.22.1"
 # mise run package: the release archives (.goreleaser.yaml).
 goreleaser = "2.19.0"

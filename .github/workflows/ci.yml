@@ -156,12 +156,33 @@ jobs:
     timeout-minutes: 20
     env:
       BW_BROWSERS: safari
+      # node comes from actions/setup-node below; mise leaves it out, so its tasks run that one.
+      MISE_DISABLE_TOOLS: node
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # ginsys/bronzeward#415: mise fetches node from nodejs.org, which served this macOS runner at
+      # under 1 to 60 kB/s, so after a mise.toml change left the job without a cache every run
+      # timed out installing it. actions/setup-node fetches the same version from GitHub's
+      # actions/node-versions releases instead. mise.toml stays the one place naming it.
+      - id: node
+        run: |
+          v=$(sed -n 's/^node = "\(.*\)"$/\1/p' mise.toml)
+          [ -n "$v" ] || { echo "safari: no node = \"<version>\" line in mise.toml" >&2; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ steps.node.outputs.version }}
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
         with:
           cache_save: ${{ github.ref == 'refs/heads/main' }}
-          install_args: node go
+          install_args: go
+      # The tasks below run under mise: it must find setup-node's node, at mise.toml's version.
+      - env:
+          WANT: ${{ steps.node.outputs.version }}
+        run: |
+          got=$(mise exec -- node --version)
+          [ "$got" = "v$WANT" ] || { echo "safari: mise runs node $got, not v$WANT" >&2; exit 1; }
+          mise exec -- npm --version
       - run: sudo safaridriver --enable
       - run: mise run browser
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
