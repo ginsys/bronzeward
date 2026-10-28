@@ -589,7 +589,9 @@ the selection returns to the owner. The machinery client met the condition
 not built. Two of the condition's rows do not run through the controller, as
 choice §10.32 records: row 003's revocation refuses the attempt before any
 mutating Talos request, so its outcome, no apply sent, does not depend on the
-dispatch client, and its Go check uses a Talos stand-in, for the evidence
+dispatch client. When the attempt takes the machine row first (choice
+§10.31), the outcome is row 005's, which the controller runs. Row 003's Go
+check uses a Talos stand-in, for the evidence
 observation's reads too (the live rows take those reads from the worker); row
 022's invalid configuration is sent by the
 machinery client to the worker's own endpoint directly, since no plan carries
@@ -2236,7 +2238,10 @@ conservative option; those that do not say so. Each is marked in place as
     principal's row unlocked therefore still waits, and §9.2's
     unlocked control is not constructible for these two locks. The verification
     is the race itself: a revocation started while the commitment holds its
-    locks waits for it, and the attempt is then refused (DS row 003). DS row
+    locks waits for it. Then either the attempt is refused, or the attempt
+    takes the machine row first, is recorded, and the revocation waits for it
+    too (DS row 003). Either way no attempt is recorded after a committed
+    revocation; an attempt recorded before it is sent, as in DS row 005. DS row
     006's control places the revocation after the commitment, before the
     attempt: before the commitment, the plan's state, `revoked`, is terminal
     (§2) and the database refuses moving it to `committed`, so no controller
@@ -2246,6 +2251,17 @@ conservative option; those that do not say so. Each is marked in place as
     machine and plan-state locks as well, which would no longer test the
     approval's lock; dropping the `FOR SHARE` reads as redundant, which
     couples comparison 1's ordering to every revocation's lock order.
+    Amended 2026-10-28, lead decision at 19:02 CET (ginsys/bronzeward#431):
+    the outcome had been stated as the refusal alone. A waiting locker does
+    not keep its place across an update on PostgreSQL. The commitment updates
+    the machine row (its timeline entry's revision), so once it commits, the
+    revocation that waited on the old row version has to lock the new one
+    (READ COMMITTED's update-chain recheck, EvalPlanQual). An attempt
+    transaction started after the commit can lock that version first.
+    `TestExecutorRevocationHeld/attempt-first` forces this order. Rejected
+    alternative: making the refusal certain by keeping the revocation ahead of
+    any later attempt. Every way of doing that works against PostgreSQL's
+    row-lock semantics, and safety does not depend on it.
 32. **DS rows that need an interleaving inside a transaction run as Go
     checks** (§3.5, §9.2). Rows 003, 009, 010
     and 023 and the controls of rows 006 and 008 act inside a commitment

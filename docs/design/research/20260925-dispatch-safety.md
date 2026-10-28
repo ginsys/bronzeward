@@ -215,6 +215,14 @@ cells, which §4.4 reports.
   reads `after-commit`. The attempt transaction's comparison 1 would also refuse X without
   `FOR SHARE`. The evidence that the revocation waited is `revoker_waited=yes`: the harness
   found it still running 2 s after it started. The 3 ms log order is further evidence.
+  *Amended 2026-10-28 (ginsys/bronzeward#431); the recorded run is unchanged.* The refusal is
+  one of two outcomes, not the only one. X's commitment updates the machine row, so once X
+  commits, the waiting revocation has to lock the row's new version (PostgreSQL's update-chain
+  recheck, EvalPlanQual), and an attempt transaction started after that `COMMIT` can lock it
+  first. Then the attempt is recorded, the revocation waits for it, and the outcome is row 005's.
+  Either way, no attempt is recorded after a committed revocation. The service's Go check forces
+  the attempt-first order and accepts either outcome when PostgreSQL picks the order.
+  Specification choice §10.31 records the decision.
 - **Rows 002 and 004** show the two sides of the boundary without a race. Before it, nothing is
   committed; after it, nothing is attempted.
 - **Row 005 is the residual that specification §3.3 states, measured.** The attempt was recorded at
@@ -385,7 +393,9 @@ skipped, in each capture.
 The dispatch commitment boundary is the `COMMIT` of `Store.Commit`.
 - In row 003, a revocation racing the boundary finished after the commitment's `COMMIT` and
   prevented every attempt. That it waited on the `FOR SHARE` lock is inferred from
-  `revoker_waited=yes` and the log order, not read from PostgreSQL's lock view (§4.1).
+  `revoker_waited=yes` and the log order, not read from PostgreSQL's lock view (§4.1). An
+  attempt that locks the machine row before the waiting revocation re-locks it is recorded
+  first, and its outcome is row 005's (§4.1, amended 2026-10-28).
 - Rows 002 and 004 show the same outcome from either side.
 - The control row 006 shows the prevention failing without the in-transaction comparison.
 
