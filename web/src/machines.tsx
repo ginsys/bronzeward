@@ -31,9 +31,13 @@ export function badges(m: Machine): string[] {
 }
 
 // A reading's age at `now`, as W2 shows it, so a reading from another day never looks current. The
-// list takes `now` when it renders, and a read again renders it anew.
+// list takes `now` when it renders, and a read again renders it anew. A time more than a minute ahead
+// of this browser's clock is said so, never "just now", and a time that does not parse has no age.
 function age(at: string, now: number): string {
-  const min = Math.floor((now - Date.parse(at)) / 60_000);
+  const ms = now - Date.parse(at);
+  if (Number.isNaN(ms)) return "age unknown";
+  if (ms < -60_000) return "ahead of this browser's clock";
+  const min = Math.floor(ms / 60_000);
   if (min < 1) return "just now";
   if (min < 60) return `${min} min ago`;
   if (min < 1440) return `${Math.floor(min / 60)} h ago`;

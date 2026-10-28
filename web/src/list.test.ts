@@ -98,4 +98,12 @@ describe("W2 badges and the observed column", () => {
     expect(read("2026-10-28T06:40:00Z")).toBe("= applied, 3 h ago");
     expect(read("2026-10-21T09:46:00Z")).toBe("= applied, 7 d ago");
   });
+
+  test("a reading ahead of the browser's clock never looks fresh, and an unparseable time has no age", () => {
+    const read = (at: string) => observed(machine({ observed: { observation: "obs_e", at, release: "rel_new" } }), NOW);
+    expect(read("2026-10-28T09:47:00Z")).toBe("= applied, just now");
+    expect(read("2026-10-29T09:46:00Z")).toBe("= applied, ahead of this browser's clock");
+    expect(read("")).toBe("= applied, age unknown");
+    expect(read("not a time")).toBe("= applied, age unknown");
+  });
 });
