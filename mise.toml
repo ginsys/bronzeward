@@ -53,8 +53,8 @@ description = "Serve dist/'s web tarball through its rendered Caddyfile in the p
 run = "python3 scripts/test/hosting-test.py dist"
 
 [tasks.docs]
-description = "Documentation checks (needs Python 3.9+ with PyYAML 6)"
-run = "python3 scripts/verify-docs.py"
+description = "Documentation checks and the planted-sentinel test of their example scan (needs Python 3.9+ with PyYAML 6)"
+run = ["python3 scripts/verify-docs.py", "python3 scripts/test/verify-docs-scan-test.py"]
 
 [tasks."site:install"]
 description = "Install requirements-site.txt into .venv-site (gitignored; needs Python 3.10+)"
