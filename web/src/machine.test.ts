@@ -117,6 +117,8 @@ const page = (items: number[], next?: string, tail?: string): ReadResult<unknown
 });
 const restart: ReadResult<unknown> = { kind: "restart", problem: { type: "urn:bronzeward:problem:cursor-invalid", title: "Cursor invalid", status: 400 } };
 // A timeline read, newest first, with its cursors.
+// A read no newer one has superseded.
+const on = () => true;
 const shown = (items: number[], older?: string, tail?: string, restarted = false): Timeline<number> => ({ items, older, tail, read: true, restarted });
 
 describe("the timeline: newest page, Load older and the poll (client contracts ยง8.6 item 6)", () => {
@@ -129,16 +131,16 @@ describe("the timeline: newest page, Load older and the poll (client contracts ย
   test("Load older appends the older page, read with order=newest from the page's next", async () => {
     const c = client([page([2, 1], "o1", "t6")]);
     // The answer's tail is the poll's to follow, not Load older's.
-    expect(await readOlder(c, "/t", shown([5, 4, 3], "o3", "t5"))).toEqual({ kind: "ok", data: shown([5, 4, 3, 2, 1], "o1", "t5") });
+    expect(await readOlder(c, "/t", shown([5, 4, 3], "o3", "t5"), on)).toEqual({ kind: "ok", data: shown([5, 4, 3, 2, 1], "o1", "t5") });
     expect(c.paths).toEqual(["/t?order=newest&cursor=o3"]);
   });
 
   test("the end of the timeline: a page without next leaves nothing older, so Load older is not offered", async () => {
     const c = client([page([2, 1], undefined, "t5")]);
-    const res = await readOlder(c, "/t", shown([5, 4, 3], "o3", "t5"));
+    const res = await readOlder(c, "/t", shown([5, 4, 3], "o3", "t5"), on);
     expect(res).toEqual({ kind: "ok", data: shown([5, 4, 3, 2, 1], undefined, "t5") });
     // Nothing is read once the start is shown, and a first page without next is the whole timeline.
-    expect(await readOlder(c, "/t", shown([1]))).toEqual({ kind: "ok", data: shown([1]) });
+    expect(await readOlder(c, "/t", shown([1]), on)).toEqual({ kind: "ok", data: shown([1]) });
     expect(c.paths).toEqual(["/t?order=newest&cursor=o3"]);
     expect(await readLater(client([page([1], undefined, "t1")]), "/t", UNREAD)).toEqual({ kind: "ok", data: shown([1], undefined, "t1") });
   });
@@ -160,7 +162,7 @@ describe("the timeline: newest page, Load older and the poll (client contracts ย
   test("a refused cursor reads the newest page again, once, for the poll and for Load older", async () => {
     const c = client([restart, page([9], "o9", "t9"), restart, page([9], "o9", "t9")]);
     expect(await readLater(c, "/t", shown([1, 2], undefined, "old"))).toEqual({ kind: "ok", data: shown([9], "o9", "t9", true) });
-    expect(await readOlder(c, "/t", shown([2], "old", "t2"))).toEqual({ kind: "ok", data: shown([9], "o9", "t9", true) });
+    expect(await readOlder(c, "/t", shown([2], "old", "t2"), on)).toEqual({ kind: "ok", data: shown([9], "o9", "t9", true) });
     expect(c.paths).toEqual(["/t?cursor=old", "/t?order=newest", "/t?order=newest&cursor=old", "/t?order=newest"]);
     expect(await readLater(client([restart]), "/t", UNREAD)).toMatchObject({ kind: "refused", status: 400 });
     expect(await readLater(client([{ kind: "transport" }]), "/t", UNREAD)).toEqual({ kind: "transport" });
@@ -172,7 +174,7 @@ describe("the timeline: newest page, Load older and the poll (client contracts ย
     expect(res).toMatchObject({ kind: "ok", data: { restarted: true } });
     const later = await readLater(c, "/t", (res as { data: Timeline<number> }).data);
     expect(later).toEqual({ kind: "ok", data: shown([10, 9], "o9", "t10", true) });
-    expect(await readOlder(c, "/t", (later as { data: Timeline<number> }).data)).toEqual({ kind: "ok", data: shown([10, 9, 8], undefined, "t10", true) });
+    expect(await readOlder(c, "/t", (later as { data: Timeline<number> }).data, on)).toEqual({ kind: "ok", data: shown([10, 9, 8], undefined, "t10", true) });
     expect(await readLater(client([page([1], undefined, "t1")]), "/t", UNREAD)).toMatchObject({ kind: "ok", data: { restarted: false } });
   });
 
@@ -201,7 +203,32 @@ describe("the timeline: newest page, Load older and the poll (client contracts ย
     expect(await res).toEqual({ kind: "discarded" });
     expect(c.paths).toEqual(["/t?cursor=t0"]);
     const revoked: ReadResult<unknown> = { kind: "revoked", problem: { type: "urn:bronzeward:problem:identity-revoked", title: "Identity revoked", status: 403 } };
-    expect(await readLater(client([revoked]), "/t", shown([], undefined, "t0"), () => false)).toEqual(revoked);
+    going = true;
+    const refused = readLater(client([revoked]), "/t", shown([], undefined, "t0"), () => going);
+    going = false;
+    expect(await refused).toEqual(revoked);
+  });
+
+  test("review L1-F1: a superseded read whose cursor is refused does not read the newest page again", async () => {
+    let going = true;
+    // Each refused cursor is followed by the page a restart would read.
+    const c = client([restart, restart, page([9], "o9", "t9"), page([9], "o9", "t9")]);
+    const later = readLater(c, "/t", shown([1], "old", "old"), () => going);
+    going = false;
+    expect(await later).toEqual({ kind: "discarded" });
+    going = true;
+    const older = readOlder(c, "/t", shown([1], "old", "t1"), () => going);
+    going = false;
+    expect(await older).toEqual({ kind: "discarded" });
+    expect(c.paths).toEqual(["/t?cursor=old", "/t?order=newest&cursor=old"]);
+  });
+
+  test("review L1-F2: a read queued behind another sends nothing once it is superseded or the shell dropped the reads", async () => {
+    const c = client([page([9], "o9", "t9")]);
+    expect(await readLater(c, "/t", UNREAD, () => false)).toEqual({ kind: "discarded" });
+    expect(await readLater(c, "/t", shown([1], "o1", "t1"), () => false)).toEqual({ kind: "discarded" });
+    expect(await readOlder(c, "/t", shown([1], "o1", "t1"), () => false)).toEqual({ kind: "discarded" });
+    expect(c.paths).toEqual([]);
   });
 
   test("review R1-F4: a page opened hidden reads nothing until it is visible", async () => {
