@@ -118,6 +118,8 @@ with tempfile.TemporaryDirectory() as work:
     # ginsys/bronzeward#419: an item a dedent or a fence closes, and code on the marker's own line.
     fails('host in indented code after a nested list ends', OPERATOR,
           f'\n- Outer\n  - Inner\n\n  Run:\n\n      curl {host}\n', HOST)
+    fails('host in code dedented straight from a nested item', OPERATOR,
+          f'\n- Outer\n     - Inner\n\n      curl {host}\n', HOST)
     fails('host in indented code after a fence ends a list', OPERATOR,
           f'\n- Step one\n\n```sh\nbronzeward version\n```\n\n    curl {host}\n', HOST)
     fails('host in indented code on a bullet marker line', OPERATOR, f'\n-     curl {host}\n', HOST)
