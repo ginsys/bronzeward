@@ -234,8 +234,15 @@ jobs:
       BW_TEST_PG_DSN: postgres://bronzeward@localhost:5432/bronzeward?sslmode=disable
       BW_TEST_BAO_ADDR: http://localhost:8200
       BW_TEST_BAO_TOKEN: bw-dev-root-token
+      # The keyring tests (a private session bus with gnome-keyring's Secret Service) fail
+      # instead of skipping when a program they need is missing.
+      BW_REQUIRE_KEYRING: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install the Secret Service for the keyring tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends dbus-daemon dbus-bin gnome-keyring
       - name: Service images are the fixture's pins
         # Each service's `image:` line against its versions.env pin, and no other `image:` line in
         # this file, so either side moving alone fails.

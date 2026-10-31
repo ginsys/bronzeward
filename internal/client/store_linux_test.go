@@ -261,10 +261,14 @@ func TestSecretServiceNeverPrompts(t *testing.T) {
 
 // secretServiceBus starts a private session bus with gnome-keyring's Secret Service, its login
 // keyring unlocked with a synthetic password, and names it in DBUS_SESSION_BUS_ADDRESS. Nothing
-// reaches the operator's own session bus or keyring. Skipped where either daemon is not installed.
+// reaches the operator's own session bus or keyring. Skipped where either daemon is not installed,
+// or failed with BW_REQUIRE_KEYRING=1 (CI's go-db job), so that job cannot skip it.
 func secretServiceBus(t *testing.T) {
 	for _, b := range []string{"dbus-daemon", "gnome-keyring-daemon"} {
 		if _, err := exec.LookPath(b); err != nil {
+			if os.Getenv("BW_REQUIRE_KEYRING") == "1" {
+				t.Fatalf("%s is not installed, and BW_REQUIRE_KEYRING=1", b)
+			}
 			t.Skipf("%s is not installed", b)
 		}
 	}

@@ -22,6 +22,7 @@ import (
 	gokeyring "github.com/zalando/go-keyring"
 	"go.yaml.in/yaml/v3"
 
+	"github.com/ginsys/bronzeward/fixtures/oidc/issuer"
 	"github.com/ginsys/bronzeward/internal/client"
 )
 
@@ -87,12 +88,23 @@ func (f *fixture) browser(line string) {
 
 // keyring starts a private session bus with gnome-keyring's Secret Service, its login keyring
 // unlocked with a synthetic password, and returns the environment that names it. Nothing reaches
-// the operator's own session bus or keyring. Skipped where either daemon is not installed.
+// the operator's own session bus or keyring. Skipped where either daemon is not installed, or
+// failed with BW_REQUIRE_KEYRING=1 (CI's go-db job).
 func keyring(t *testing.T) []string {
 	if _, err := exec.LookPath("gnome-keyring-daemon"); err != nil {
-		t.Skip("gnome-keyring-daemon is not installed")
+		missing(t, "gnome-keyring-daemon")
 	}
 	return sessionBus(t, busSecrets)
+}
+
+// missing skips the test for a program that is not installed, or fails it with
+// BW_REQUIRE_KEYRING=1, so that a CI job meant to run the keyring tests cannot skip them.
+func missing(t *testing.T, program string) {
+	t.Helper()
+	if os.Getenv("BW_REQUIRE_KEYRING") == "1" {
+		t.Fatalf("%s is not installed, and BW_REQUIRE_KEYRING=1", program)
+	}
+	t.Skipf("%s is not installed", program)
 }
 
 // busKind is what a private session bus offers for the Secret Service's name.
@@ -106,11 +118,11 @@ const (
 
 // sessionBus starts a private session bus offering what kind names, and returns the environment
 // that names it. It starts no program of the host's by itself. Skipped where dbus-daemon or
-// dbus-send is not installed.
+// dbus-send is not installed (see missing).
 func sessionBus(t *testing.T, kind busKind) []string {
 	for _, b := range []string{"dbus-daemon", "dbus-send"} {
 		if _, err := exec.LookPath(b); err != nil {
-			t.Skipf("%s is not installed", b)
+			missing(t, b)
 		}
 	}
 	// Not t.TempDir: its long name pushes the keyring's control socket past the 108-byte limit
@@ -216,6 +228,16 @@ func entry(t *testing.T, env []string, name string, v ...string) (string, bool) 
 		t.Fatal(err)
 	}
 	return s, true
+}
+
+// forget deletes the credential-store entry bronzewardctl keeps for the context name in the Secret
+// Service env names, as another process may.
+func forget(t *testing.T, env []string, name string) {
+	t.Helper()
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", strings.TrimPrefix(env[0], "DBUS_SESSION_BUS_ADDRESS="))
+	if err := gokeyring.Delete("bronzewardctl", name); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // TestLogin checks bronzewardctl login and the stores it keeps a sign-in in (§9.2, decisions
@@ -802,6 +824,56 @@ func TestLogin(t *testing.T) {
 		}
 		if _, ok := entry(t, env, "store"); ok {
 			t.Error("the refresh-only entry is still stored after logout")
+		}
+
+		// §9.7 item 3 on the credential-store path (#386). The subjects come from fixture-minted
+		// tokens stored directly, so the two identities differ whatever the provider issues.
+		stored := func(at, rt string) string {
+			b, err := json.Marshal(map[string]string{"server": f.base, "issuer": f.iss.URL, "accessToken": at, "refreshToken": rt})
+			if err != nil {
+				t.Fatal(err)
+			}
+			v, _ := entry(t, env, "store", string(b))
+			return v
+		}
+		// An identity-revoked answer clears the stored entry.
+		stored(f.viewerToken("h-denied", 0, issuer.Lifetime), "")
+		f.want(ctl("--context", "store", "whoami"), 1, "(identity-revoked)",
+			"The stored sign-in was cleared; signing in again does not restore access.")
+		if _, ok := entry(t, env, "store"); ok {
+			t.Error("the refused identity's entry is still stored after the identity-revoked answer")
+		}
+		// Another identity's sign-in, stored while the refused whoami waits for the renewal lock, is
+		// kept: the clear removes only the sign-in it refused.
+		stored(f.viewerToken("h-denied", 0, issuer.Lifetime), "")
+		var r2 result
+		unlock = hold(t, lock)
+		wg.Go(func() { r2 = ctl("--context", "store", "whoami") })
+		waiting(t, lock, 1)
+		other := stored(f.viewerToken("h-viewer", 0, issuer.Lifetime), "BWSYNTH-rt-18")
+		unlock()
+		wg.Wait()
+		f.want(r2, 1, "(identity-revoked)", "The stored sign-in is now for h-viewer at "+f.iss.URL+", not the refused identity, and is kept.")
+		if v, ok := entry(t, env, "store"); !ok || v != other {
+			t.Error("the other identity's entry was not kept as it was")
+		}
+		// A renewal whose entry was deleted while it waited for the renewal lock redeems nothing and
+		// does not write the entry back.
+		stored(f.viewerToken("h-viewer", 270*time.Second, 30*time.Second), "BWSYNTH-rt-12")
+		f.idp.set(func(string) (int, any) { return issued(f.mint("h-viewer", ""), "BWSYNTH-rt-13") })
+		defer f.idp.set(nil)
+		unlock = hold(t, lock)
+		wg.Go(func() { r2 = ctl("--context", "store", "whoami") })
+		waiting(t, lock, 1)
+		forget(t, env, "store")
+		unlock()
+		wg.Wait()
+		f.want(r2, 0, "subject h-viewer", "the stored sign-in was removed meanwhile")
+		if n := f.idp.calls.Load(); n != 0 {
+			t.Errorf("%d redemptions, want 0", n)
+		}
+		if _, ok := entry(t, env, "store"); ok {
+			t.Error("the renewal wrote the deleted entry back")
 		}
 		// An entry left under a context edited to automation is never read for it.
 		f.want(login(env, "store"), 0, "kept in the system credential store")
