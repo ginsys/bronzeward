@@ -40,6 +40,8 @@ func TestPrintable(t *testing.T) {
 		"raw \x9b byte":          `raw \x9b byte`,
 		"tab\tline\n":            `tab\x09line\x0a`,
 		"replacement � is kept":  "replacement � is kept",
+		"bidi \u202eroot\u2066":            `bidi \u202eroot\u2066`,
+		"marks \u200e\u200f\u061c":              `marks \u200e\u200f\u061c`,
 	} {
 		if got := printable(in); got != want {
 			t.Errorf("printable(%q) = %q, want %q", in, got, want)
