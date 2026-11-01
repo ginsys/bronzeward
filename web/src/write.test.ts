@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 import { type Attempt, Client, type ClientOptions } from "./request.ts";
-import { BACKOFF, EPOCH_CHANGED_ASIDE, NO_EPOCH, newKey, SIGN_IN_CHANGED, SIGN_IN_REFUSED, Write, Writes } from "./write.ts";
+import { BACKOFF, EPOCH_CHANGED_ASIDE, NO_EPOCH, newKey, RENEWED_LAST, SIGN_IN_CHANGED, SIGN_IN_REFUSED, Write, Writes } from "./write.ts";
 
 const EPOCH = "e1";
 const PRINCIPAL = "https://idp.invalid SYNTH-sub-1";
@@ -176,6 +176,17 @@ describe("repeats (§8.2, §8.4 item 2)", () => {
     expect(await writes.submit(spec())).toMatchObject({ kind: "refused", status: 401 });
     expect(renew).toHaveBeenCalledTimes(1);
     expect(writesSent()).toHaveLength(2);
+  });
+
+  test("a 401 on the last attempt still renews: the sign-in stays and the write is not done", async () => {
+    const renew = vi.fn(async () => true);
+    const busy = () => problem(503, "dependency-unavailable");
+    const { writes, writesSent } = page([busy(), busy(), busy(), problem(401, "unauthenticated", {}, null)], [], { renew });
+    writes.onEnded = vi.fn();
+    expect(await writes.submit(spec())).toMatchObject({ kind: "not-done", why: RENEWED_LAST, problem: { type: "urn:bronzeward:problem:unauthenticated" } });
+    expect(renew).toHaveBeenCalledTimes(1);
+    expect(writesSent()).toHaveLength(4);
+    expect(writes.onEnded).not.toHaveBeenCalled();
   });
 
   test("403 identity-revoked clears the credential", async () => {
