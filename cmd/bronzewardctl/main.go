@@ -46,12 +46,17 @@ commands:
   draft list [--cluster <id>] | show <draft>
   draft create --cluster <id> --title <title>
   draft discard <draft>
+  fragment set <name> --draft <draft> --layer <layer> --file <path or -> [--declarations <path>]
+              [--marks] [--ingest-wait <duration>] the document from a file, or - for standard
+              input; --marks reads one mark per line from a prompt or standard input until an
+              empty line; Linux only; a repeat waits while the first request still ingests, for
+              --ingest-wait (2m) or the server's claim lease, whichever is longer
   profile set <name> --draft <draft> --fragments <name or frv_ ID>[,...]
               a name pins the revision the draft proposes, else the fragment's head revision
   assignment set <machine> --draft <draft> [--profiles <name>[,...]]
               [--fragment <layer>=<name>[,...]]... the layer global, site, cluster, role,
               workload or override
-  profile | assignment rm <name or machine> --draft <draft>
+  fragment | profile | assignment rm <name or machine> --draft <draft>
               a write to a draft sends the ETag of the last draft show or write of that draft, or
               --if-match <etag>; if the draft changed since, it saves nothing and says so
               draft writes take author; repeat one with the outcome-unknown block's flags,

@@ -25,11 +25,15 @@ import (
 // as it (T11). Repeat holds an operator's T10 repeat flags.
 // Read reads the resource after an unknown or set-aside outcome and says what it shows; Check is
 // the command that shows it, after "bronzewardctl --context <the context>", which Send adds.
+// Ingests marks a draft fragment write, whose in-progress 409 is waited for up to Wait, raised to
+// the claim lease the server serves (§8.4 item 2).
 type Write struct {
 	Method, Path   string
 	Body           []byte
 	IfMatch, Draft string
 	HumanOnly      bool
+	Ingests        bool
+	Wait           time.Duration
 	Repeat         *Repeat
 	Read           func(*Client) (string, error)
 	Check          string
@@ -149,8 +153,13 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 	if rp := w.Repeat; rp != nil {
 		key, ref = rp.Key, rp.Epoch
 	}
-	if _, _, err := c.Server(); err != nil {
+	_, srv, err := c.Server()
+	if err != nil {
 		return nil, err
+	}
+	bound := w.Wait
+	if l := srv.IngestionClaim; l != nil && time.Duration(float64(l.LeaseSeconds)*float64(time.Second)) > bound {
+		bound = time.Duration(float64(l.LeaseSeconds) * float64(time.Second))
 	}
 	// GET /server can renew the sign-in and adopt one another process stored for another subject
 	// (§9.5 item 2), so the principal is read again before the first send (§8.4 item 3, T10).
@@ -187,13 +196,24 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 	// A T10 repeat exists because an earlier process's attempt was ambiguous (§8.4 item 4).
 	ambiguous, renewed := w.Repeat != nil, false
 	var last error
+	// ingesting names the first request a fragment write's in-progress 409 says still runs; waited
+	// is how long this process has waited for it.
+	var ingesting string
+	var waited time.Duration
 	for try := 0; ; try++ {
-		if try > 0 {
-			if try > len(backoff) {
+		if ingesting != "" || try > 0 {
+			if ingesting != "" {
+				step := min(time.Second<<min(waited/time.Second, 2), bound-waited)
+				fmt.Fprintf(c.Notices, "%s: the first request with this key is still ingesting (ingestion %s); repeat with the same key in %s\n",
+					c.Context.Where(), ingesting, step)
+				sleep(step)
+				waited += step
+			} else if try > len(backoff) {
 				break
+			} else {
+				fmt.Fprintf(c.Notices, "%s: %v; repeat %d of %d with the same key in %s\n", c.Context.Where(), last, try, len(backoff), backoff[try-1])
+				sleep(backoff[try-1])
 			}
-			fmt.Fprintf(c.Notices, "%s: %v; repeat %d of %d with the same key in %s\n", c.Context.Where(), last, try, len(backoff), backoff[try-1])
-			sleep(backoff[try-1])
 			if now, err := c.principal(nil); err != nil {
 				u.Why = "the credential's principal cannot be read (" + printable(err.Error()) + "), so it cannot be compared with " + printable(who)
 				return nil, c.setAside(w, u, ambiguous)
@@ -211,7 +231,7 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 		if p != nil {
 			code = p.Code()
 		}
-		last = a.err
+		last, ingesting = a.err, ""
 		switch {
 		case a.r != nil:
 			if a.r.Header.Get("Idempotent-Replayed") == "true" {
@@ -239,6 +259,16 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 				fmt.Fprintf(c.Notices, "%s: %v.\n", c.Context.Where(), rerr)
 				return nil, c.after(ambiguous, w, u, a.err)
 			}
+		case w.Ingests && code == "conflict" && p.Doc["ingestion"] != nil && p.Doc["draft"] == nil && (try > 0 || w.Repeat != nil):
+			// A repeat's in-progress 409: the first request still runs, or ended without committing
+			// while its claim's lease runs (§8.4 item 2, AMB-02). It is repeated with the same key
+			// until it answers otherwise, within the wait bound, and counts as no repeat.
+			if waited >= bound {
+				u.Why = fmt.Sprintf("the first request with this key was still ingesting (ingestion %s) after %s", printable(fmt.Sprint(p.Doc["ingestion"])), waited)
+				return nil, c.unknown(w, u)
+			}
+			ingesting = printable(fmt.Sprint(p.Doc["ingestion"]))
+			try--
 		case code == "conflict" && p.Doc["request"] != nil && p.Doc["epoch"] != nil:
 			u.Why = "the key's record is from an earlier epoch (" + printable(fmt.Sprint(p.Doc["epoch"])) + ")"
 			return nil, c.setAside(w, u, ambiguous)
