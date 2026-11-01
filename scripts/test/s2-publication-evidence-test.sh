@@ -6,7 +6,7 @@ set -euo pipefail
 
 source_script=${1:?usage: harness.sh source-script artifact-directory}
 artifacts=${2:?usage: harness.sh source-script artifact-directory}
-dsn=${BW_TEST_PG_DSN:-postgres://bronzeward@127.0.0.1:55433/bronzeward?sslmode=disable}
+dsn=${BW_TEST_PG_DSN:-postgres://bronzeward@127.0.0.1:11432/bronzeward?sslmode=disable}
 mkdir -p -- "$artifacts"
 function_file=$artifacts/released_once.sh
 awk '/^released_once\(\) \{/ { copy=1 } copy { print } copy && /^}$/ { exit }' "$source_script" >"$function_file"

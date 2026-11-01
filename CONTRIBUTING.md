@@ -102,8 +102,8 @@ The implementation is the root Go module (`cmd/`, `internal/`); the Go version c
 ```sh
 mise run go                                        # the generated-types check, then format, go.mod tidiness, build, vet and test checks (per module, as mise.toml lists them); database tests skip
 mise run generate                                  # regenerate internal/client/apitypes from api/openapi.yaml with the pinned oapi-codegen; commit the result with the description change
-mise run dev-db                                    # a disposable development PostgreSQL on 127.0.0.1:55433
-mise run dev-bao                                   # a disposable dev-mode OpenBao on http://127.0.0.1:58201, root token bw-dev-root-token
+mise run dev-db                                    # a disposable development PostgreSQL on 127.0.0.1:11432
+mise run dev-bao                                   # a disposable dev-mode OpenBao on http://127.0.0.1:11200, root token bw-dev-root-token
 mise run dev-down                                  # stop dev-db, dev-bao and dev-idp, which removes them and their data (shared by every worktree on the host; with BW_DEV_INSTANCE, only that instance's)
 mise run go-db                                     # the root module's tests against PostgreSQL and OpenBao (BW_TEST_PG_DSN and BW_TEST_BAO_ADDR/BW_TEST_BAO_TOKEN, else dev-db's and dev-bao's, those of BW_DEV_INSTANCE when set); a missing service fails
 mise run dev-idp && mise run go-idp                # the sign-in self-test against a Zitadel test provider and dev-db's database (fixtures/README.md); mise run dev-idp-down removes the provider
@@ -122,16 +122,16 @@ curl -s -H "Authorization: Bearer $(go run ./fixtures/oidc mint -key <file> -iss
 
 ### Several instances on one host
 
-`dev-db`, `dev-bao` and `dev-idp` start one fixed set of containers per host, and `dev-down` stops it for every worktree. Two full `go-db` runs on one `dev-db` can fail with "too many clients already". To give each person, agent or worktree its own disposable services, set `BW_DEV_INSTANCE=<name>` (1 to 16 characters of `a-z` and `0-9`, not `pg` or `groups`) on every `mise run` of the tasks `dev-db`, `dev-bao`, `dev-idp`, `go-db`, `go-idp`, `browser-auth`, `dev-down` and `dev-idp-down`. Unset or empty, every name, port and command stays as it was.
+`dev-db`, `dev-bao` and `dev-idp` start one fixed set of containers per host, and `dev-down` stops it for every worktree. Two full `go-db` runs on one `dev-db` can fail with "too many clients already". To give each person, agent or worktree its own disposable services, set `BW_DEV_INSTANCE=<name>` (1 to 16 characters of `a-z` and `0-9`, not `pg` or `groups`) on every `mise run` of the tasks `dev-db`, `dev-bao`, `dev-idp`, `go-db`, `go-idp`, `browser-auth`, `dev-down` and `dev-idp-down`. Unset or empty, the default instance's names, ports and commands apply.
 
 | | default | `BW_DEV_INSTANCE=<name>` |
 |---|---|---|
-| PostgreSQL | `bw-dev-pg` on 127.0.0.1:55433 | `bw-dev-pg-<name>` on 127.0.0.1:12000+slot |
-| OpenBao | `bw-dev-bao` on 127.0.0.1:58201 | `bw-dev-bao-<name>` on 127.0.0.1:13000+slot |
-| Identity provider | `bw-dev-idp`, `-pg`, `-groups` on http://localhost:58280 | `bw-dev-idp-<name>`, `bw-dev-idp-pg-<name>`, `bw-dev-idp-groups-<name>` on http://localhost:14000+slot |
+| PostgreSQL | `bw-dev-pg` on 127.0.0.1:11432 | `bw-dev-pg-<name>` on 127.0.0.1:12000+slot |
+| OpenBao | `bw-dev-bao` on 127.0.0.1:11200 | `bw-dev-bao-<name>` on 127.0.0.1:13000+slot |
+| Identity provider | `bw-dev-idp`, `-pg`, `-groups` on http://localhost:11080 | `bw-dev-idp-<name>`, `bw-dev-idp-pg-<name>`, `bw-dev-idp-groups-<name>` on http://localhost:14000+slot |
 | Provider state | `.dev/idp/` | `.dev/idp-<name>/` |
 
-The slot is `cksum(name) mod 1000` (POSIX `cksum`), so a name gives the same ports on every host and every port is below 32768, outside the Linux ephemeral range. Two names on the same slot share their ports: the second start fails with "port is already allocated", so pick another name. `scripts/dev/instance.sh` holds the whole scheme.
+The default instance's ports are fixed in the 11000 block, which no slot reaches. The slot is `cksum(name) mod 1000` (POSIX `cksum`), so a name gives the same ports on every host. Every port is below 32768, outside the Linux ephemeral range. A default instance started before ginsys/bronzeward#464 still publishes 55433, 58201 and 58280: run `mise run dev-down` and `mise run dev-idp-down`, then start it again. Two names on the same slot share their ports: the second start fails with "port is already allocated", so pick another name. `scripts/dev/instance.sh` holds the whole scheme.
 
 ```sh
 export BW_DEV_INSTANCE=alice                     # or prefix each command; the second terminal uses another name

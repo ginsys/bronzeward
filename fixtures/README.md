@@ -125,7 +125,7 @@ the slot rule are in [CONTRIBUTING.md](../CONTRIBUTING.md#several-instances-on-o
 
 - **Shape.** Zitadel, its own PostgreSQL (`POSTGRES_IMAGE`, not dev-db's container, whose
   databases the tests create and drop) and the groups target share the Docker network
-  `bw-dev-idp`. Only Zitadel is published, as `http://localhost:58280`, the issuer every caller
+  `bw-dev-idp`. Only Zitadel is published, as `http://localhost:11080`, the issuer every caller
   must use: Zitadel serves an instance by its external name. The server needs no
   `plainHTTPHosts` entry for it (loopback).
 - **Seed.** One project `bronzeward` with the five role keys of `examples/bronzeward.yaml`; the

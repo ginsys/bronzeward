@@ -210,7 +210,7 @@ BW_REQUIRE_PG=1 BW_REQUIRE_BAO=1 go test -count=1 -timeout 25m ./...
 '''
 
 [tasks.dev-db]
-description = "Start a disposable development PostgreSQL at the fixture's image pin: 127.0.0.1:55433, user bronzeward, no password; BW_DEV_INSTANCE=<name> starts bw-dev-pg-<name> on 127.0.0.1:12000+slot instead"
+description = "Start a disposable development PostgreSQL at the fixture's image pin: 127.0.0.1:11432, user bronzeward, no password; BW_DEV_INSTANCE=<name> starts bw-dev-pg-<name> on 127.0.0.1:12000+slot instead"
 # Trust auth, bound to loopback, removed on stop (mise run dev-down). examples/bronzeward.yaml
 # and mise run go-db default to it. Never a deployment database. The container's name and port come
 # from scripts/dev/instance.sh: the default instance, or the one BW_DEV_INSTANCE names.
@@ -258,7 +258,7 @@ exit 1
 '''
 
 [tasks.dev-bao]
-description = "Start a disposable development OpenBao at the fixture's image pin: dev mode, in memory, http://127.0.0.1:58201, root token bw-dev-root-token; BW_DEV_INSTANCE=<name> starts bw-dev-bao-<name> on 127.0.0.1:13000+slot instead"
+description = "Start a disposable development OpenBao at the fixture's image pin: dev mode, in memory, http://127.0.0.1:11200, root token bw-dev-root-token; BW_DEV_INSTANCE=<name> starts bw-dev-bao-<name> on 127.0.0.1:13000+slot instead"
 # The image's default command is `server -dev`: unsealed, KV v2 at secret/, nothing persisted, and
 # removed on stop (mise run dev-down). The root token is a fixed, synthetic value, bound to
 # loopback like dev-db's trust auth; mise run go-db defaults to it. Never a deployment provider,
@@ -295,7 +295,7 @@ exit 1
 '''
 
 [tasks.dev-idp]
-description = "Start the test identity provider (Zitadel at the fixture's pin) on http://localhost:58280, seeded with the synthetic humans; prints the issuer, project and client IDs. BW_DEV_INSTANCE=<name> starts bw-dev-idp-<name> on 14000+slot, with its variables in .dev/idp-<name>/"
+description = "Start the test identity provider (Zitadel at the fixture's pin) on http://localhost:11080, seeded with the synthetic humans; prints the issuer, project and client IDs. BW_DEV_INSTANCE=<name> starts bw-dev-idp-<name> on 14000+slot, with its variables in .dev/idp-<name>/"
 # Everything is in fixtures/dev-idp, kept out of this file because mise renders run scripts with
 # Tera. Its test variables go to .dev/idp/idp.env (gitignored; .dev/idp-<name>/idp.env for a named
 # instance); mise run go-idp reads them.

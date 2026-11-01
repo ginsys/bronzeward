@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # scripts/dev/instance.sh (ginsys/bronzeward#458), run under /bin/sh as the mise tasks run it, with no
-# Docker: the default instance keeps today's names and ports, a named instance gets its suffix and
+# Docker: the default instance gets its names and its ports in the 11000 block (ginsys/bronzeward#464),
+# a named instance gets its suffix and
 # slot ports, a bad name is refused, no two instances share a container name or a port, and no dev
 # task or fixtures/dev-idp hardcodes a default name or port outside the helper. Synthetic names only.
 set -euo pipefail
@@ -31,22 +32,28 @@ resolve() {
   env -i PATH="$PATH" "${stale[@]}" "${inst[@]}" sh -c '. "$1" || exit 1; env' sh "$helper" | sort | grep -e '^BW_DEV_' | grep -v -e '^BW_DEV_INSTANCE='
 }
 
-default=$'BW_DEV_BAO_ADDR=http://127.0.0.1:58201
+default=$'BW_DEV_BAO_ADDR=http://127.0.0.1:11200
 BW_DEV_BAO_CONTAINER=bw-dev-bao
-BW_DEV_BAO_PORT=58201
+BW_DEV_BAO_PORT=11200
 BW_DEV_IDP_CONTAINER=bw-dev-idp
 BW_DEV_IDP_DIR=.dev/idp
 BW_DEV_IDP_GROUPS_CONTAINER=bw-dev-idp-groups
-BW_DEV_IDP_ISSUER=http://localhost:58280
+BW_DEV_IDP_ISSUER=http://localhost:11080
 BW_DEV_IDP_NET=bw-dev-idp
 BW_DEV_IDP_PG_CONTAINER=bw-dev-idp-pg
-BW_DEV_IDP_PORT=58280
+BW_DEV_IDP_PORT=11080
 BW_DEV_PFX=
 BW_DEV_PG_CONTAINER=bw-dev-pg
-BW_DEV_PG_DSN=postgres://bronzeward@127.0.0.1:55433/bronzeward?sslmode=disable
-BW_DEV_PG_PORT=55433'
+BW_DEV_PG_DSN=postgres://bronzeward@127.0.0.1:11432/bronzeward?sslmode=disable
+BW_DEV_PG_PORT=11432'
 
-expect "unset keeps today's names and ports (and overwrites a stale environment)" "$default" "$(resolve -unset)"
+expect "unset is the default instance's names and ports (and overwrites a stale environment)" "$default" "$(resolve -unset)"
+# ginsys/bronzeward#464: the default ports, and 11081 that ginsys/bronzeward#367 takes as the
+# identity provider's port + 1, lie in the 11000 block: below the Linux ephemeral range (32768),
+# below every named slot (12000 and up) and below the browser tests' 15000 to 19999.
+for p in $(sed -n 's/^BW_DEV_[A-Z]*_PORT=//p' <<<"$default") $(($(sed -n 's/^BW_DEV_IDP_PORT=//p' <<<"$default") + 1)); do
+  if [ "$p" -ge 11000 ] && [ "$p" -lt 12000 ]; then ok "default port $p is in the 11000 block"; else bad "default port $p is in the 11000 block"; fi
+done
 expect "an empty BW_DEV_INSTANCE is the default instance" "$default" "$(resolve '')"
 
 # cksum("bww2") mod 1000 = 459.
@@ -108,9 +115,9 @@ ok "${#names[@]} instance names: bands, slots and container names checked agains
 # No dev task or dev-idp hardcodes what the helper owns: a default container name or port, or the
 # state directory, outside a comment or a task description.
 code() { grep -v -e '^[[:space:]]*#' -e '^description = ' "$1" || true; }
-hard=$(code "$root/mise.toml" | grep -n -e '55433' -e '58201' -e '58280' -e 'bw-dev-pg' -e 'bw-dev-bao' -e 'bw-dev-idp' -e '\.dev/idp' || true)
+hard=$(code "$root/mise.toml" | grep -n -e '11432' -e '11200' -e '11080' -e '55433' -e '58201' -e '58280' -e 'bw-dev-pg' -e 'bw-dev-bao' -e 'bw-dev-idp' -e '\.dev/idp' || true)
 expect "mise.toml hardcodes no default name, port or idp state directory" "" "$hard"
-hard=$(code "$root/fixtures/dev-idp" | grep -n -e '55433' -e '58201' -e '58280' -e 'bw-dev-pg' -e 'bw-dev-bao' -e 'bw-dev-idp' -e '\.dev/idp' || true)
+hard=$(code "$root/fixtures/dev-idp" | grep -n -e '11432' -e '11200' -e '11080' -e '55433' -e '58201' -e '58280' -e 'bw-dev-pg' -e 'bw-dev-bao' -e 'bw-dev-idp' -e '\.dev/idp' || true)
 expect "fixtures/dev-idp hardcodes no default name, port or idp state directory" "" "$hard"
 
 exit "$fail"
