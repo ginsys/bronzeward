@@ -119,7 +119,7 @@ mise run dev-idp-down    # its containers, network and .dev/idp/; mise run dev-d
 ```
 
 With `BW_DEV_INSTANCE=<name>` set on each of these (and `dev-db`), the provider is the named
-instance's: containers and network suffixed `-<name>`, the issuer on `http://localhost:` 14000+slot,
+instance's: containers and network suffixed `-<name>`, the issuer on `http://localhost:<port>` with the port 14000+slot,
 state in `.dev/idp-<name>/`, and `dev-idp-down` removes only that instance's. The names, ports and
 the slot rule are in [CONTRIBUTING.md](../CONTRIBUTING.md#several-instances-on-one-host).
 
