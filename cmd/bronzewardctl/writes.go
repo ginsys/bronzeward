@@ -94,9 +94,13 @@ func (e *env) writeAfter(prep func(*client.Client) error, w *client.Write, say f
 	lines, err := say(c, r)
 	var out []byte
 	if err == nil && e.output != "table" {
-		// say can succeed without reading the answer, and -o yaml cannot convert one that is not
-		// JSON: the write still succeeded, so it is the same unreadable answer.
-		out, err = e.render(r.Body)
+		// say can succeed without reading the answer: one that is not JSON is the same unreadable
+		// answer, which -o yaml would otherwise convert or fail on.
+		if len(r.Body) > 0 && !json.Valid(r.Body) {
+			err = errors.New("the answer is not JSON")
+		} else {
+			out, err = e.render(r.Body)
+		}
 	}
 	if err != nil {
 		fmt.Fprintf(e.err, "bronzewardctl: %s: %s /api/v1%s succeeded, but its answer cannot be read: %v\n", c.Context.Where(), w.Method, w.Path, err)
