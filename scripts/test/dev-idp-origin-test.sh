@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # fixtures/dev-idp up (ginsys/bronzeward#459), with no Docker: on a provider this checkout already
 # runs, up keeps it only when it was seeded for this run's web origin, the browser tests' page of
-# BW_E2E_PORT_BASE (default 16000) or BW_DEV_IDP_WEB_ORIGIN, and refuses it otherwise. docker and
-# curl are stubs that report the provider running and answering. Synthetic names and values only.
+# BW_E2E_PORT_BASE (default 16000) or BW_DEV_IDP_WEB_ORIGIN, and refuses it otherwise. Without
+# BW_DEV_IDP_WEB_ORIGIN, up refuses a base that the browser tests refuse. docker and curl are stubs
+# that report the provider running and answering, and jq is a stub. Synthetic names and values only.
 set -euo pipefail
 
 root=$(CDPATH='' cd -P -- "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
@@ -21,7 +22,9 @@ stubs=$(mktemp -d)
 trap 'rm -rf -- "$state" "$stubs"' EXIT
 printf '#!/bin/sh\necho synthetic-container-id\n' >"$stubs/docker"
 printf '#!/bin/sh\nexit 0\n' >"$stubs/curl"
-chmod +x "$stubs/docker" "$stubs/curl"
+# dev-idp up checks that jq exists; a provider it keeps is not seeded again, so jq never runs.
+printf '#!/bin/sh\nexit 0\n' >"$stubs/jq"
+chmod +x "$stubs/docker" "$stubs/curl" "$stubs/jq"
 
 # seed <web origin>: the state of a provider seeded for that origin.
 seed() {
@@ -54,4 +57,9 @@ up 1 "BW_E2E_PORT_BASE=16016 refuses a provider seeded for 16000 and names dev-i
 seed http://localhost:58443
 up 1 "a provider seeded for the old default 58443 is refused" "web origin is http://localhost:58443, not http://localhost:16000"
 up 0 "BW_DEV_IDP_WEB_ORIGIN wins over BW_E2E_PORT_BASE" "(http://localhost:58443)" BW_E2E_PORT_BASE=16016 BW_DEV_IDP_WEB_ORIGIN=http://localhost:58443
+for b in 16001 016000 19985 15984 abc; do
+  seed "http://localhost:$b"
+  up 1 "BW_E2E_PORT_BASE=$b is refused, even for a provider seeded for it" "BW_E2E_PORT_BASE must be 16000+16*n" BW_E2E_PORT_BASE=$b
+done
+up 0 "BW_DEV_IDP_WEB_ORIGIN skips the base check" "(http://localhost:abc)" BW_E2E_PORT_BASE=abc BW_DEV_IDP_WEB_ORIGIN=http://localhost:abc
 exit "$fail"
