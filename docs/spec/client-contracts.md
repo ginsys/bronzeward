@@ -365,8 +365,9 @@ it. It holds no secret.
      item 4.
    - `context list` and `context add` show names, servers and credential kinds from the contexts
      file. That file can come from someone else, so its text is remote text.
-   - A document or a diff is split on the document's own line feeds. Each line is then escaped,
-     the tab included, and shown whole. A person sees a tab as `\x09` and a carriage return as
+   - A document or a diff is split on the document's own line feeds. This is the one exception to
+     the line feed escape, because those line feeds are the document's lines. Each line is then
+     escaped, the tab included, and shown whole. A person sees a tab as `\x09` and a carriage return as
      `\x0d`. The line itself is never rewrapped.
    - Where the CLI shows a value as JSON text that it encodes itself (a timeline entry, an
      operation result or error), the JSON encoder leaves DEL and the C1 range raw. The text is
@@ -378,15 +379,24 @@ it. It holds no secret.
      raw, and `cluster list` wrote a cluster's name raw while the server's version was escaped.
      The rule removes that difference.
 
-   **Required check.** One test sets every string member of every response type in
-   `internal/client/apitypes` to a value that holds ESC, a tab, a line feed, a carriage return, a
-   C1 character and a byte that is not UTF-8. It runs every command that shows those types in
-   `-o table`. It fails in any of these cases: the output holds a raw control byte outside the
-   CLI's own separators; a value does not appear in its escaped form, with `\x09` for the tab; a
-   line has a different number of columns, or the output a different number of lines, from the
-   same command run with plain values. The test therefore catches a tab that becomes padding, which
-   leaves no raw tab and no extra row. A new response type or a new command passes this test
-   before it ships.
+   **Required check.** One test fills each remote source with a value that holds ESC, a tab, a
+   line feed, a carriage return, DEL, a C1 character and a byte that is not UTF-8. The sources
+   are every string member of every response type in `internal/client/apitypes`, every member of
+   the contexts file, and every remote value that the CLI puts into an error it words itself. It
+   runs each command that shows a source in `-o table`, and each such error branch. It fails in
+   any of these cases:
+   - The output holds a raw control byte outside the CLI's own separators.
+   - A plain value does not appear in its escaped form: `\x09` for the tab, `\x0a` for the line
+     feed, `\x0d` for the carriage return.
+   - A line has a different number of columns, or the output a different number of lines, from
+     the same command run with plain values. This catches a tab that becomes padding, which
+     leaves no raw tab and no extra row.
+   - A document or a diff line differs from the document's own line, escaped. Those lines are the
+     only ones that the document's line feeds may split.
+   - In JSON text that the CLI encodes itself, C0 characters do not appear in the JSON escape
+     (`\t`, `\u001b`), or DEL and the C1 range do not appear as `\xNN`.
+
+   A new response type, a new command or a new error branch passes this test before it ships.
 
    **Limit.** `-o json` passes the server's bytes on unchanged, and `-o yaml` passes the values
    through the YAML encoder. This item does not cover them. The same test also runs every command
