@@ -2,6 +2,7 @@ package main
 
 import (
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 const headersFile = "../../web/headers.json"
@@ -160,6 +162,8 @@ func TestProxiesTheAPIAndLiveness(t *testing.T) {
 
 // TestUpstreamCloseClosesTheConnection: an upstream that closes the connection without an answer, as
 // the browser cases' injected drop does, reaches the client as a closed connection, not as a 502.
+// The client gets exactly the start of a status line before the close, so a browser cannot take
+// the close for a connection that failed before any answer and send the request again by itself.
 func TestUpstreamCloseClosesTheConnection(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, _, err := http.NewResponseController(w).Hijack()
@@ -180,6 +184,25 @@ func TestUpstreamCloseClosesTheConnection(t *testing.T) {
 	if err == nil {
 		_ = res.Body.Close()
 		t.Fatalf("answered %d, want the connection closed", res.StatusCode)
+	}
+	// The same drop on a raw connection: every byte up to the close.
+	conn, err := net.Dial("tcp", srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	if err := conn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(conn, "POST /api/v1/clusters HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := io.ReadAll(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != partialAnswer {
+		t.Errorf("got %q before the close, want %q", got, partialAnswer)
 	}
 }
 
