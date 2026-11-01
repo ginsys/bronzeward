@@ -7,7 +7,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { createServer, type Server, type ServerResponse } from "node:http";
 
-export const FAKE_ISSUER = "http://127.0.0.1:58445";
+export { FAKE_ISSUER } from "./ports.ts";
 
 export interface Grant {
   access: string;
