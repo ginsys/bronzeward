@@ -130,9 +130,11 @@ export async function readOlder<T>(client: Reads["client"], path: string, from: 
 // the one it had.
 export const nextTimeline = <T,>(tl: Timeline<T>, res: ReadResult<Timeline<T>> | Dropped): Timeline<T> => (res.kind === "ok" ? res.data : res.kind === "dropped" ? UNREAD : tl);
 
-// Whether a read after the first brought entries the timeline did not show, a restart's included:
-// W3 then reads the machine and its observations again (#424).
-export const advanced = <T,>(from: Timeline<T>, res: ReadResult<Timeline<T>> | Dropped) => from.read && res.kind === "ok" && res.data.items[0] !== from.items[0];
+// Whether a read after the first brought entries the last answered timeline did not show, a
+// restart's included: W3 then reads the machine and its observations again (#424). A restart reads
+// the entries again, so they compare by value.
+export const advanced = <T,>(last: Timeline<T>, res: ReadResult<Timeline<T>> | Dropped) =>
+  last.read && res.kind === "ok" && JSON.stringify(res.data.items[0]) !== JSON.stringify(last.items[0]);
 
 export const POLL_MS = 5000;
 
@@ -159,18 +161,22 @@ type TimelineRead<T> = (from: Timeline<T>) => Promise<ReadResult<Timeline<T>> | 
 // The timeline's reads, one at a time, each on from what the one before left, each answer handed
 // to `settle`; none starts once `live` fails, and none goes on once `going` fails. A read whose
 // `when` fails by its turn (a poll queued while the page went hidden) sends nothing, changes
-// nothing, and polling goes on. Each says whether polling goes on.
-export function queued<T>(live: () => boolean, going: () => boolean, settle: (res: ReadResult<Timeline<T>> | Dropped) => void) {
+// nothing, and polling goes on. `settle` also learns whether the answer advanced past the last one
+// answered, whichever read brought it: a poll, a Load older that restarted, or the read after a drop.
+// Each says whether polling goes on.
+export function queued<T>(live: () => boolean, going: () => boolean, settle: (res: ReadResult<Timeline<T>> | Dropped, moved: boolean) => void) {
   let shown: Timeline<T> = UNREAD;
+  let last: Timeline<T> = UNREAD;
   let queue = Promise.resolve(true);
   return (read: TimelineRead<T>, when: () => boolean) =>
     (queue = queue.then(async () => {
       if (!live()) return false;
       if (!when()) return true;
       const res = await read(shown);
-      settle(res);
+      settle(res, advanced(last, res));
       if (!going()) return false;
       shown = nextTimeline(shown, res);
+      if (res.kind === "ok") last = res.data;
       const r = res.kind === "dropped" ? res.failed : res;
       return r.kind === "ok" || r.kind === "transport";
     }));
@@ -183,7 +189,7 @@ export function queued<T>(live: () => boolean, going: () => boolean, settle: (re
 // timeline and that cursor. A superseded poll reads no further page and settles as not live, so the
 // shell still takes its refusal of the credentials. The poll and "Load older" read one at a time,
 // each on from what the one before left; `older` is undefined at the timeline's start. The count
-// goes up each time a poll brings entries the timeline did not show.
+// goes up each time a read, a poll or a restarted Load older, brings entries the timeline did not show.
 function useTimeline(path: string): [Load<Timeline<Entry>> | Dropped, (() => void) | undefined, boolean, number] {
   const { client, settle, undropped, again, view } = useReads();
   const [tl, put, held] = useHeld<Timeline<Entry>, Dropped>();
@@ -201,19 +207,16 @@ function useTimeline(path: string): [Load<Timeline<Entry>> | Dropped, (() => voi
     // A read queued behind another starts only while neither a new view nor the process's refusal
     // has dropped it.
     const going = () => live && ok();
-    const step = queued<Entry>(() => live, going, (res) => {
+    const step = queued<Entry>(() => live, going, (res, moved) => {
       const [r, set, shows] = settling(res, put, held);
       settle(r, set, going, shows);
+      if (moved && going()) setAdvances((n) => n + 1);
     });
     older.current = () => {
       setBusy(true);
       void step((from) => readOlder<Entry>(client, path, from, going), () => true).then(() => live && setBusy(false));
     };
-    const stop = polled((visible) => step(async (from) => {
-      const res = await readLater<Entry>(client, path, from, going);
-      if (going() && advanced(from, res)) setAdvances((n) => n + 1);
-      return res;
-    }, visible));
+    const stop = polled((visible) => step((from) => readLater<Entry>(client, path, from, going), visible));
     return () => {
       live = false;
       older.current = undefined;
@@ -241,7 +244,7 @@ export function details(e: Entry): string {
 const byBasis = (items: Observation[]) => [...items].sort((x, y) => y.basis - x.basis);
 
 // The timeline is read under the page's reads. The machine and its observations are read again, as
-// when the page reads again, each time a poll brings timeline entries W3 did not show; the poll goes
+// when the page reads again, each time a timeline read brings entries W3 did not show; the poll goes
 // on unrestarted (#424).
 export function MachineItem({ id }: { id: string }) {
   const path = `/machines/${encodeURIComponent(id)}`;
