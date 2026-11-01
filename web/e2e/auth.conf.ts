@@ -173,13 +173,16 @@ function control(provider: Provider, next: { grant: Grant }, injector: Injector,
     } catch (e) {
       return res.writeHead(500).end(String(e));
     }
-    for (const k of Object.keys(provider.counts) as (keyof Counts)[]) provider.counts[k] = 0;
-    injector.faults = {};
-    injector.seen.length = 0;
-    injector.answered.length = 0;
-    injector.writes.length = 0;
-    void injector.release();
-    res.end();
+    // An answer an earlier case left held goes on and is sent before the logs are cleared, so
+    // nothing of that case reaches the next one's.
+    void injector.release().then(() => {
+      for (const k of Object.keys(provider.counts) as (keyof Counts)[]) provider.counts[k] = 0;
+      injector.faults = {};
+      injector.seen.length = 0;
+      injector.answered.length = 0;
+      injector.writes.length = 0;
+      res.end();
+    });
   });
 }
 

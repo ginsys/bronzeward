@@ -100,14 +100,15 @@ export function startInjector(upstream: string, port: number): Promise<Injector>
       req.socket.destroy();
       if (step === "commit-drop-epoch") inj.epoch();
     };
+    // A write is logged as it arrives, so a case reads it while its answer is held.
+    const write = req.method !== "GET" && req.method !== "HEAD";
+    if (write) inj.writes.push(`${req.method} ${route} ${req.headers["idempotency-key"]} ${req.headers["bronzeward-expected-epoch"]}`);
     void (async () => {
       if (f.hold?.path === route && (f.hold.query ?? search) === search) await new Promise((r) => setTimeout(r, f.hold!.ms));
       if ([f.held ?? []].flat().includes(route)) {
         inj.holding.push(route);
         await new Promise<void>((go) => waiting.push({ go, sent: new Promise((done) => res.once("close", () => done())) }));
       }
-      const write = req.method !== "GET" && req.method !== "HEAD";
-      if (write) inj.writes.push(`${req.method} ${route} ${req.headers["idempotency-key"]} ${req.headers["bronzeward-expected-epoch"]}`);
       const step = write && f.steps?.path === route ? f.steps.take.shift() : undefined;
       // A step that cannot be taken (the epoch refused) closes the connection, and is logged.
       if (step !== undefined) return void answerStep(step).catch((e: unknown) => (console.error(`injector step ${step}: ${String(e)}`), req.socket.destroy()));

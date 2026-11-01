@@ -27,6 +27,8 @@ const sends = (n: number) => browser.waitUntil(async () => (await writes()).leng
 // Signs in as h-author on the disposable deployment and opens Add cluster from the machine list.
 async function open(flags: Record<string, string> = {}): Promise<string> {
   expect(await fixtureSignIn("h-author", flags, { upstream: at })).toMatch(SERVER);
+  // The sign-in cleared the write log, and no write of an earlier case reached it since.
+  expect(await writes()).toEqual([]);
   await $('nav[aria-label="Main"]').$("a=Machines").click();
   await $("main").$("button=Add cluster").click();
   await expect($("main h2")).toHaveText("Add cluster");
@@ -132,8 +134,9 @@ describe("the write views (#338)", () => {
     const name = await add(["commit-drop-epoch"]);
     await expect(notice()).toHaveText(expect.stringContaining(SET_ASIDE), { wait: 20_000 });
     await oneWrite(1);
-    expect(await notice().$("button=Repeat exactly").isEnabled()).toBe(false);
-    await notice().$("button=Show current state").click();
+    // The notice's buttons follow its text, in the same block.
+    expect(await notice().parentElement().$("button=Repeat exactly").isEnabled()).toBe(false);
+    await notice().parentElement().$("button=Show current state").click();
     await expect($("main")).toHaveText(expect.stringContaining(name), { wait: 20_000 });
   });
 
