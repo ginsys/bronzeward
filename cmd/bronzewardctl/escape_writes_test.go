@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"unicode"
 
@@ -61,6 +62,90 @@ func TestRemoteTextInDraftDiscard(t *testing.T) {
 		t.Errorf("the answer %q lacks %q", o.String(), want)
 	}
 	noRawControl(t, "draft discard", o.String()+e.String())
+}
+
+// TestRemoteTextInDraftSourceWrites: profile set and rm, and assignment set and rm, print their
+// sentences escaped; after an unknown outcome their read-back callback prints what the draft shows
+// of the entry, and that text from the server is escaped too. The sweep cannot run them, because it
+// keeps no ETag for a draft.
+func TestRemoteTextInDraftSourceWrites(t *testing.T) {
+	profile, machine := "p"+tail, "m"+tail
+	// A draft whose state is not "open" keeps no ETag, so draft show answers an open one.
+	body := func(state string) []byte {
+		b, _ := json.Marshal(map[string]any{"id": "d1", "cluster": "c1", "title": "t", "state": state, "revision": 2, "entries": []any{
+			map[string]any{"kind": "profile", "name": profile, "base": 1, "head": "prv_h", "revision": "prv_9" + tail},
+			map[string]any{"kind": "assignment", "machine": machine, "base": 1, "head": "asr_h", "revision": "asr_9" + tail},
+		}})
+		return b
+	}
+	var unknown, plain atomic.Bool // a write is redirected, an outcome unknown, when set
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Bronzeward-Epoch", "ep_1")
+		w.Header().Set("ETag", `"2-x"`)
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/v1/server":
+			fmt.Fprint(w, `{"version":"v","apiRevision":2,"startMode":"normal"}`)
+		case r.URL.Path == "/api/v1/identity":
+			fmt.Fprint(w, newFiller(false).answer(apitypes.IdentityBody{}))
+		case r.URL.Path == "/api/v1/drafts/d1" && r.Method == http.MethodGet && plain.Load():
+			w.Write(body("open"))
+		case r.URL.Path == "/api/v1/drafts/d1" && r.Method == http.MethodGet:
+			w.Write(body("open" + tail))
+		case unknown.Load():
+			http.Redirect(w, r, "https://x.example.invalid/", http.StatusTemporaryRedirect)
+		default:
+			w.Write(body("open"))
+		}
+	}))
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	var o, e bytes.Buffer
+	keepETag := func() {
+		plain.Store(true)
+		defer plain.Store(false)
+		if got := run([]string{"draft", "show", "d1"}, &o, &e); got != 0 {
+			t.Fatalf("draft show exited %d: %s", got, e.String())
+		}
+	}
+	for _, c := range []struct {
+		args []string
+		want string // after an unknown outcome
+	}{
+		{[]string{"profile", "set", profile, "--draft", "d1", "--fragments", "frv_1"}, "with profile p" + tailEsc + " at prv_9"},
+		{[]string{"profile", "rm", profile, "--draft", "d1"}, "with profile p" + tailEsc + " at prv_9"},
+		{[]string{"assignment", "set", machine, "--draft", "d1", "--profiles", "p"}, "with assignment m" + tailEsc + " at asr_9"},
+		{[]string{"assignment", "rm", machine, "--draft", "d1"}, "with assignment m" + tailEsc + " at asr_9"},
+	} {
+		name := strings.Join(c.args[:2], " ")
+		for _, lost := range []bool{false, true} {
+			keepETag()
+			unknown.Store(lost)
+			o.Reset()
+			e.Reset()
+			got := run(c.args, &o, &e)
+			if got != map[bool]int{false: 0, true: 3}[lost] {
+				t.Errorf("%s (outcome unknown: %v) exited %d: %s", name, lost, got, e.String())
+			}
+			noRawControl(t, name, o.String()+e.String())
+			if lost && !strings.Contains(o.String()+e.String(), c.want+tailEsc) {
+				t.Errorf("%s: the read-back %q lacks %q", name, o.String()+e.String(), c.want+tailEsc)
+			}
+		}
+	}
+	unknown.Store(false)
+}
+
+// TestOwnArgumentInParserError: the flag parser quotes an argument as given, and the CLI shows the
+// line feed in it escaped, so that an argument cannot forge a line of its own.
+func TestOwnArgumentInParserError(t *testing.T) {
+	var o, e bytes.Buffer
+	if got := run([]string{"--bad\nFORGED"}, &o, &e); got != 2 {
+		t.Fatalf("exit %d, want 2: %s", got, e.String())
+	}
+	if strings.Contains(e.String(), "\nFORGED") || !strings.Contains(e.String(), `-bad\x0aFORGED`) {
+		t.Errorf("the usage error %q does not show the argument's line feed as \\x0a", e.String())
+	}
 }
 
 // TestRemoteTextInDecodeError: a decoder error quotes the byte that the server chose, and the CLI
