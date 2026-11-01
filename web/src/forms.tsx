@@ -147,8 +147,9 @@ export function existing(status: number, p: Problem | null, resource: string): {
   return undefined;
 }
 
-// The form's own line for its write; an unknown outcome is the notice's.
+// The form's own line for its write; an unknown outcome is the notice's, until it is dismissed.
 export function Result({ w, done }: { w: Write | undefined; done: (data: unknown) => ReactNode }) {
+  const writes = useWrites();
   const o: Outcome | undefined = w?.outcome;
   if (w === undefined) return null;
   if (o === undefined) return <Status testid="write-result">Saving</Status>;
@@ -176,7 +177,9 @@ export function Result({ w, done }: { w: Write | undefined; done: (data: unknown
     case "unknown":
       // Set aside before any attempt that may have committed, nothing was; otherwise the notice says.
       if (o.kind === "set-aside" && !o.ambiguous) return <Status testid="write-result">Not saved: {o.why}. Nothing of it was committed.{problemTail(o.problem)}</Status>;
-      return <Status testid="write-result">See the notice at the top of the page: its key and what to read.</Status>;
+      if (writes?.notices.includes(w) !== false) return <Status testid="write-result">See the notice at the top of the page: its key and what to read.</Status>;
+      // Its notice was dismissed: the form says what the notice said of it.
+      return <Status testid="write-result">Unknown whether this was saved, and its notice was dismissed.{record(w).named}{detail(w, record(w).to)}</Status>;
   }
 }
 

@@ -105,7 +105,7 @@ export class Client {
 
   // §8.2, §9.6: the sign-in this client sends ended. It is set in the same step that refuses or
   // clears the credential (identity-revoked, a 401 its renewal did not clear, a sign-out), before
-  // any further send, and it is never cleared: from then on attempt() sends nothing.
+  // any further send, and it is never cleared: from then on send() sends nothing, on any path.
   get writesEnded(): boolean { return this.ended; }
   onWritesEnded(f: () => void): () => void {
     this.enders.add(f);
@@ -141,6 +141,8 @@ export class Client {
     for (let attempt = 0; ; attempt++) {
       const records = this.epochRecords;
       const res = await this.send(path);
+      // The sign-in ended: the page that asked is ending too.
+      if (res === NOT_SENT) return { kind: "discarded" };
       if (res === undefined) return sent === this.generation ? { kind: "transport" } : { kind: "discarded" };
       const route = API_BASE + path.split("?")[0];
       if (res.headers.has("Deprecation") && !this.deprecated.has(route)) {
@@ -201,13 +203,11 @@ export class Client {
   // epoch goes to `end`, and to `end.now` at once, even when this answer is then lost or stalls.
   // `epochOnly` is a read sent only for its epoch, which its headers carry: only a credential
   // refusal's or a 409's body is read, any other is not waited for, since it may stall (data null).
-  // NOT_SENT when the sign-in ended or the page no longer holds its credential: nothing went out,
-  // so nothing can have committed, and no send leaves without the credential.
+  // NOT_SENT when send() sent nothing: nothing can have committed.
   async attempt(method: string, path: string, headers: Record<string, string> = {}, body?: string, end: End = {}, epochOnly = false): Promise<Attempt | undefined | typeof NOT_SENT> {
-    if (this.ended || (this.opts.token !== undefined && this.opts.token() === undefined)) return NOT_SENT;
     const records = this.epochRecords;
     const res = await this.send(path, method, headers, body);
-    if (res === undefined) return undefined;
+    if (res === NOT_SENT || res === undefined) return res;
     const ending = await this.learnEpoch(res, records, end);
     if (ending !== undefined) {
       end.e = ending;
@@ -236,9 +236,12 @@ export class Client {
     this.opts.onRevoked?.();
   }
 
-  private async send(path: string, method = "GET", extra: Record<string, string> = {}, body?: string): Promise<Response | undefined> {
+  // The client's one network call, for every read, write and epoch read. NOT_SENT once the sign-in
+  // ended, or when the page no longer holds its credential: no send leaves without it (§8.2, §9.6).
+  private async send(path: string, method = "GET", extra: Record<string, string> = {}, body?: string): Promise<Response | undefined | typeof NOT_SENT> {
     const headers: Record<string, string> = { Accept: "application/json", ...extra };
     const token = this.opts.token?.();
+    if (this.ended || (this.opts.token !== undefined && token === undefined)) return NOT_SENT;
     if (token !== undefined) headers["Authorization"] = `Bearer ${token}`;
     try {
       return await (this.opts.fetch ?? fetch)(API_BASE + path, {
@@ -272,7 +275,8 @@ export class Client {
       if (tries + 1 >= MAX_TRIES) return undefined;
       const sent = this.epochRecords;
       const next = await this.send("/recovery");
-      if (next === undefined) return undefined;
+      // Not sent, the sign-in ended: the epoch stays unlearned, and the answer still settles the write.
+      if (next === undefined || next === NOT_SENT) return undefined;
       // Only a credential refusal's or a 409's body is read: any other answer names its epoch in its
       // headers.
       const body = await credentialProblem(next);

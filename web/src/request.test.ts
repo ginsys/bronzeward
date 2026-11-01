@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 import { API_BASE, type Attempt, Client, type ClientOptions, NOT_SENT } from "./request.ts";
+import { type ShellEvents, ShellReads } from "./shell.tsx";
 
 // An attempt that was sent: its answer, or undefined when none came.
 function sentOne(a: Attempt | undefined | typeof NOT_SENT): Attempt | undefined {
@@ -258,6 +259,41 @@ describe("§8.5 epoch changes", () => {
     expect(paths).toEqual(["/server", "/clusters", "/machines", "/recovery"]);
   });
 
+  // §8.2, §9.6: a sign-out before that late answer arrives ends every send of the client, the read
+  // that would decide its epoch included; the answer still settles the write. Signed in, the read goes.
+  test.each([true, false])("a sign-out before a late answer: no GET /recovery leaves and the answer stands (signed out: %s)", async (out) => {
+    let release!: (r: Response) => void;
+    const late = new Promise<Response>((r) => (release = r));
+    const answers: (Response | Promise<Response>)[] = [ok({}), late, ok({}, "e2"), ok({}, "e2")];
+    const paths: string[] = [];
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+      paths.push(String(url).slice(API_BASE.length));
+      return answers.shift()!;
+    });
+    const reads = new ShellReads({ token: () => "SYNTH-token", fetch: fetchMock as unknown as typeof fetch }, () => ({ onEpochChange: () => {} }) as unknown as ShellEvents);
+    const c = reads.client;
+    await c.read("/server");
+    const write = c.attempt("POST", "/clusters", {}, "{}");
+    await c.read("/machines");
+    if (out) reads.signOut(() => {});
+    release(ok({ id: "c1" }));
+    expect(sentOne(await write)?.data).toEqual({ id: "c1" });
+    expect(paths).toEqual(out ? ["/server", "/clusters", "/machines"] : ["/server", "/clusters", "/machines", "/recovery"]);
+  });
+
+  // Every send path goes through send(): once the sign-in ended, or without a credential, none fetches.
+  test.each([
+    ["the sign-in ended", (c: Client) => c.endWrites(), () => "SYNTH-token"],
+    ["the page holds no credential", () => {}, () => undefined],
+  ])("%s: no read, write or epoch read fetches anything", async (_, end, token) => {
+    const { c, fetchMock } = client([ok({}), ok({}), ok({})], { token });
+    end(c);
+    expect(await c.read("/server")).toEqual({ kind: "discarded" });
+    expect(await c.attempt("POST", "/clusters", {}, "{}")).toBe(NOT_SENT);
+    expect(await c.attempt("GET", "/recovery", {}, undefined, {}, true)).toBe(NOT_SENT);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   // The same late answer, with the GET /recovery that decides its epoch answered by `recovery`.
   async function lateWrite(recovery: Response[], renew: () => Promise<boolean> = async () => false) {
     const onRevoked = vi.fn();
@@ -346,11 +382,12 @@ describe("§8.5 epoch changes", () => {
   test("recovery mode is reported from the first epoch on and clears on an exit that keeps the epoch", async () => {
     const onEpochChange = vi.fn();
     const onRecoveryModeChange = vi.fn();
-    const answers = [ok({}, EPOCH, true), problem(401, "unauthenticated", {}, null), ok({}, EPOCH, true), ok({})];
+    // A refusal that leaves the sign-in standing: after a 401 that ends it, nothing more is sent.
+    const answers = [ok({}, EPOCH, true), problem(403, "forbidden", {}, null), ok({}, EPOCH, true), ok({})];
     const { c } = client(answers, { onEpochChange, onRecoveryModeChange });
     await c.read("/server");
     expect(c.recoveryMode).toBe(true);
-    expect((await c.read("/server")).kind).toBe("unauthenticated"); // no epoch header: says nothing
+    expect((await c.read("/server")).kind).toBe("refused"); // no epoch header: says nothing
     await c.read("/server");
     expect(c.recoveryMode).toBe(true);
     expect((await c.read("/server")).kind).toBe("ok"); // the exit
