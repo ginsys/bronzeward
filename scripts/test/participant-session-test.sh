@@ -18,7 +18,8 @@ session=$repo/fixtures/participants/session
 # docker: A (fixtures/versions.env names the fixture) and Zitadel exist, A runs unless STUB_STOPPED
 # is set, and each logs a line. The fixture claim is held by STUB_OWNER, this copy's checkout by
 # default, on the daemon STUB_DAEMON (daemon-1, bin/up's record, by default). An inspect of the
-# forwarder fails, as for a removed container. rm and network calls are logged. Set, STUB_PS_FAIL
+# forwarder fails, as for a removed container. rm and network calls are logged, and log reads are
+# logged apart, in STUB_LOGS_LOG. Set, STUB_PS_FAIL
 # fails the container list, STUB_FWD still lists the forwarder,
 # STUB_LOGS_FAIL fails a log read, and STUB_LOG_LEAK puts a session password in A's log.
 cat >"$t/bin/docker" <<'EOF'
@@ -33,6 +34,7 @@ ps)
   [ -z "${STUB_FWD:-}" ] || echo bw-dev-forward
   ;;
 logs)
+  echo "logs $2" >>"$STUB_LOGS_LOG"
   [ -z "${STUB_LOGS_FAIL:-}" ] || exit 1
   echo "log of $2"
   if [ -n "${STUB_LOG_LEAK:-}" ] && [ "$2" = bw-fixture-bronzeward-a ]; then echo "BWSYNTH-pw-abcd1234-5678"; fi
@@ -63,7 +65,7 @@ chmod +x "$t/bin/docker" "$t/bin/go" "$t/bin/npm" "$repo/fixtures/bin/inject" "$
 # bin/up's record of its daemon (lib.sh daemon_own), and session start's.
 echo daemon-1 >"$repo/fixtures/.state/up-daemon"
 echo daemon-1 >"$repo/.dev/participants/daemon"
-export STUB_LOG=$t/calls
+export STUB_LOG=$t/calls STUB_LOGS_LOG=$t/log-reads
 STUB_OWNER=$(CDPATH='' cd -P -- "$repo/fixtures" && pwd -P)
 export STUB_OWNER
 
@@ -83,9 +85,13 @@ running() {
 }
 run() { env PATH="$t/bin:$PATH" bash "$session" "$@" 2>&1; }
 
+: >"$STUB_LOGS_LOG"
 out=$(run scan)
 rc=$?
-if [ "$rc" = 0 ] && [ "$(controls)" = 0 ]; then ok "a clean scan passes and leaves no control"; else bad "clean scan: rc=$rc controls=$(controls): $out"; fi
+# The log reads are recorded: the daemon cases below rely on that record.
+if [ "$rc" = 0 ] && [ "$(controls)" = 0 ] && [ -s "$STUB_LOGS_LOG" ]; then
+  ok "a clean scan passes, reads the logs and leaves no control"
+else bad "clean scan: rc=$rc controls=$(controls) log reads=$(wc -l <"$STUB_LOGS_LOG"): $out"; fi
 
 printf 'BWSYNTH-pw-abcd1234-5678\n' >"$repo/fixtures/.state/leak"
 out=$(run scan)
@@ -121,12 +127,22 @@ if [ "$rc" != 0 ] && [[ $out == *"cannot read the log of"* ]] && [ "$(controls)"
 else bad "log read fails: rc=$rc: $out"; fi
 
 # Another Docker daemon than session start's: its containers of the same names are not the session's.
+: >"$STUB_LOGS_LOG"
 out=$(STUB_DAEMON=daemon-2 run scan)
 rc=$?
-if [ "$rc" != 0 ] && [[ $out == *"this shell reaches daemon-2"* ]] && [ "$(controls)" = 0 ] &&
-  [ ! -e "$repo/.dev/participants/scan-logs" ]; then
+if [ "$rc" != 0 ] && [[ $out == *"this shell reaches daemon-2"* ]] && [ "$(controls)" = 0 ] && [ ! -s "$STUB_LOGS_LOG" ]; then
   ok "a scan on another Docker daemon than session start's fails, and reads no log"
-else bad "scan, other daemon: rc=$rc controls=$(controls): $out"; fi
+else bad "scan, other daemon: rc=$rc controls=$(controls) log reads=$(wc -l <"$STUB_LOGS_LOG"): $out"; fi
+
+# No record of session start's daemon: scan cannot tell whose the containers are.
+rm -f "$repo/.dev/participants/daemon"
+: >"$STUB_LOGS_LOG"
+out=$(run scan)
+rc=$?
+echo daemon-1 >"$repo/.dev/participants/daemon"
+if [ "$rc" != 0 ] && [[ $out == *"has no record of the Docker daemon"* ]] && [ "$(controls)" = 0 ] && [ ! -s "$STUB_LOGS_LOG" ]; then
+  ok "a scan without the session's daemon record fails, and reads no log"
+else bad "scan, no daemon record: rc=$rc controls=$(controls) log reads=$(wc -l <"$STUB_LOGS_LOG"): $out"; fi
 
 # A file of the controls' name in a named path is not this scan's control: its hit counts.
 mkdir -p "$t/profile"
