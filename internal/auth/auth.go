@@ -78,6 +78,9 @@ type Principal struct {
 	Roles   []Role
 	Expiry  time.Time // the credential's end: an event stream ends no later (§8.3)
 	Checked time.Time // the database's now() that Expiry was checked against (PA §5 rule 4): Expiry minus Checked is the time left
+	// CheckedLocal is this process's clock just before Checked was read. The time left runs from it,
+	// so the time the verification and routing took counts against the token, not after its exp.
+	CheckedLocal time.Time
 }
 
 var (
@@ -160,6 +163,7 @@ func (v *Verifier) human(ctx context.Context, raw string) (Principal, error) {
 		return Principal{}, fmt.Errorf("%w: claims: %v", ErrUnauthenticated, err)
 	}
 	// Time checks use the database's clock, never this process's (PA §5 rule 4, §10.1 "now()").
+	local := time.Now()
 	now, err := v.clock(ctx)
 	if err != nil {
 		return Principal{}, fmt.Errorf("%w: clock: %v", ErrUnavailable, err)
@@ -188,7 +192,7 @@ func (v *Verifier) human(ctx context.Context, raw string) (Principal, error) {
 	if v.denied.Human(c.Issuer, c.Subject) {
 		return Principal{}, fmt.Errorf("%w: %s is in deniedSubjects", ErrIdentityRevoked, c.Subject)
 	}
-	p := Principal{Kind: Human, Issuer: c.Issuer, Subject: c.Subject, Display: v.display(all), Roles: roles, Expiry: c.Expiry.Time(), Checked: now}
+	p := Principal{Kind: Human, Issuer: c.Issuer, Subject: c.Subject, Display: v.display(all), Roles: roles, Expiry: c.Expiry.Time(), Checked: now, CheckedLocal: local}
 	var revoked bool
 	err = v.db.QueryRowContext(ctx, `SELECT id, revoked FROM principal WHERE kind = 'human' AND iss = $1 AND sub = $2`,
 		c.Issuer, c.Subject).Scan(&p.ID, &revoked)

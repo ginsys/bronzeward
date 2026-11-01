@@ -31,6 +31,7 @@ func (v *Verifier) automation(ctx context.Context, raw string) (Principal, error
 		expires, checked                                     time.Time
 		expired, tokenRevoked, earlierEpoch, identityRevoked bool
 	)
+	local := time.Now() // before the database's now() is read: see Principal.CheckedLocal
 	err = v.db.QueryRowContext(ctx, `SELECT t.owner, t.secret_sha256, array_to_string(t.roles, ','), t.expires_at, now(),
 			t.expires_at <= now(), t.revoked_at IS NOT NULL, t.epoch, t.epoch <> i.epoch, p.revoked, coalesce(p.name, '')
 		FROM automation_token t JOIN principal p ON p.id = t.owner CROSS JOIN installation_state i
@@ -55,7 +56,7 @@ func (v *Verifier) automation(ctx context.Context, raw string) (Principal, error
 	for _, r := range ParseRoles(roles) {
 		has[r] = true
 	}
-	return Principal{Kind: Service, ID: owner, TokenID: tok, Epoch: epoch, Roles: ordered(has), Expiry: expires, Checked: checked}, nil
+	return Principal{Kind: Service, ID: owner, TokenID: tok, Epoch: epoch, Roles: ordered(has), Expiry: expires, Checked: checked, CheckedLocal: local}, nil
 }
 
 // parseToken splits bwt_<tok id>.<secret>, refusing anything the tool could not have printed.

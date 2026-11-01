@@ -257,20 +257,20 @@ func streamEvents(a *API, w http.ResponseWriter, q *request) {
 	// it is written. A token the verifier accepted inside its skew after exp (§10.1) cannot open a
 	// stream that ends no later than exp (§8.3): it is answered 401 before any read, and so is a
 	// first read the expiry ends, never as a database failure. Whether exp has passed is decided on
-	// the database's clock, which the verifier read (PA §5 rule 4); only the time left is carried
-	// onto this process's clock for the deadlines.
+	// the database's clock, which the verifier read (PA §5 rule 4). The time left at that read is
+	// carried onto this process's clock from just before it, so the stream's end is never later
+	// than exp, whatever the verification and routing took.
 	rc := http.NewResponseController(w)
 	ctx := q.r.Context()
-	exp := q.principal.Expiry
-	if !exp.IsZero() {
-		left := exp.Sub(q.principal.Checked)
-		if q.principal.Checked.IsZero() || left <= 0 {
-			a.o.logf("%s %s %s: the token's exp %s has passed at the database's %s", q.id, q.r.Method, q.r.URL.EscapedPath(),
-				exp.UTC().Format(time.RFC3339), q.principal.Checked.UTC().Format(time.RFC3339Nano))
+	p := q.principal
+	if exp := p.Expiry; !exp.IsZero() {
+		end := p.CheckedLocal.Add(exp.Sub(p.Checked))
+		if p.Checked.IsZero() || p.CheckedLocal.IsZero() || !time.Now().Before(end) {
+			a.o.logf("%s %s %s: the token's exp %s has passed (the database's clock read %s)", q.id, q.r.Method, q.r.URL.EscapedPath(),
+				exp.UTC().Format(time.RFC3339), p.Checked.UTC().Format(time.RFC3339Nano))
 			a.problem(w, q, refuse(http.StatusUnauthorized, "unauthenticated", ""))
 			return
 		}
-		end := time.Now().Add(left)
 		_ = rc.SetWriteDeadline(end)
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithDeadlineCause(ctx, end, errTokenExpired)
