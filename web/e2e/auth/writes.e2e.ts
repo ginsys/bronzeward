@@ -107,7 +107,11 @@ describe("the write views (#338)", () => {
   it("AMB-08: a write answered 503 dependency-unavailable each time is repeated 3 times with the same key, then not done", async function () {
     this.timeout(60_000);
     await add(["503", "503", "503", "503"]);
-    await expect(result()).toHaveText("Not saved: every attempt was answered 503 dependency-unavailable, which commits nothing.", { wait: 30_000 });
+    const said = "Not saved: every attempt was answered 503 dependency-unavailable, which commits nothing.";
+    await expect(result()).toHaveText(expect.stringContaining(said), { wait: 30_000 });
+    // The fixed sentence, then the last answer's problem fields (the injector's title, detail and instance).
+    const text = await result().getText();
+    expect([text.slice(0, said.length), text.slice(said.length)]).toEqual([said, " dependency-unavailable: injected. Request req-injected."]);
     await oneWrite(4);
     expect(await notice().isExisting()).toBe(false);
   });
