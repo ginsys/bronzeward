@@ -39,7 +39,10 @@ export const SIGN_IN_REFUSED = "the server no longer accepts your sign-in";
 export const SHELL_GONE = "the page that sent it ended";
 export const NO_CREDENTIAL = "the page no longer holds your sign-in";
 export const RECOVERY_START = "the server was started for recovery and serves only the recovery entry until it is recorded";
-export const RENEWED_LAST = "the last attempt was answered 401 and your sign-in was renewed, with no attempt left to send it again";
+export const TOO_LARGE = "the input is larger than 1 MiB, the most the server takes, so nothing was sent";
+// The largest body the server takes, in UTF-8 bytes (§8.1, internal/api/body.go maxBody).
+export const MAX_BODY = 1 << 20;
+export const RENEWED_LAST ="the last attempt was answered 401 and your sign-in was renewed, with no attempt left to send it again";
 // The page failed while it held the write, for example a renewal that threw.
 const PAGE_FAILED = "the page failed while it sent it";
 
@@ -230,6 +233,9 @@ export class Writes {
     const client = this.client;
     const who = this.principal();
     if (client === undefined || who === undefined) return { kind: "not-done", why: "there is no sign-in to send it under", problem: null };
+    const body = JSON.stringify(w.spec.body);
+    // A larger body is refused here, before any send and before the read of the epoch (§8.1).
+    if (body !== undefined && new TextEncoder().encode(body).length > MAX_BODY) return { kind: "not-done", why: TOO_LARGE, problem: null };
     // A [Repeat exactly] is a repeat: it is checked before it is sent.
     const again = w.epoch !== undefined;
     if (!again) {
@@ -244,7 +250,6 @@ export class Writes {
     }
     const headers: Record<string, string> = { "Content-Type": "application/json", "Idempotency-Key": w.key, "Bronzeward-Expected-Epoch": w.epoch! };
     if (w.spec.ifMatch !== undefined) headers["If-Match"] = w.spec.ifMatch;
-    const body = JSON.stringify(w.spec.body);
     // The last answer, as status and code, and its problem; undefined and null while the last
     // attempt got none. A [Repeat exactly] starts from the problem of the answer it repeats.
     let last: string | undefined;
