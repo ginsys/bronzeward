@@ -156,7 +156,7 @@ the slot rule are in [CONTRIBUTING.md](../CONTRIBUTING.md#several-instances-on-o
   provider from the same one.
 - **Self-test gate.** Without `BW_TEST_IDP_ISSUER` the tests skip; `go-idp` sets
   `BW_REQUIRE_IDP=1`, so there a missing provider fails them. CI's `idp` job runs the three
-  tasks and then checks that `dev-down` left nothing; it is not a required check.
+  tasks and then checks that `dev-down` left nothing; `checks` needs it.
 - **Live checks.** The provider behaviour these rest on, and its residuals, are recorded in
   [the Zitadel test-provider record](../docs/design/research/20261022-zitadel-test-idp.md).
 

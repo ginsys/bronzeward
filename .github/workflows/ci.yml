@@ -269,12 +269,11 @@ jobs:
       - run: mise run go-db
 
   idp:
-    # The sign-in self-test against the test identity provider (fixtures/dev-idp). Not in
-    # `checks`' needs on purpose: whether it becomes required is the owner's branch-protection
-    # call. Steps, not `services:`, because a service container cannot be given Zitadel's
-    # command; dev-idp and dev-db read their images from versions.env, so this file holds no
-    # copy of those pins (go-db's step above counts every `image:` line). GitHub-hosted for the
-    # Docker daemon, as go-db.
+    # The sign-in self-test against the test identity provider (fixtures/dev-idp). In `checks`'
+    # needs, by the owner's decision of 2026-11-01. Steps, not `services:`, because a service
+    # container cannot be given Zitadel's command; dev-idp and dev-db read their images from
+    # versions.env, so this file holds no copy of those pins (go-db's step above counts every
+    # `image:` line). GitHub-hosted for the Docker daemon, as go-db.
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -326,12 +325,20 @@ jobs:
 
   browser-auth:
     # The AUTH cases (mise run browser-auth) in the browsers of the browser job, against the test
-    # identity provider and the fixture issuer. Not in `checks`' needs, as idp. Not on macOS: its
-    # hosted runner has no Docker for the provider. Uploaded only if the scan passes.
+    # identity provider and the fixture issuer, one browser per runner so that requiring the job
+    # adds little time (the four in one job took 22 to 23 minutes). `checks` needs every leg: the
+    # owner decided on 2026-11-01 to require browser-auth and idp, after this split. The job's
+    # result is success only when all four legs succeed. fail-fast stays off so that one failing
+    # browser does not hide another's result. Not on macOS: its hosted runner has no Docker for the
+    # provider. Each leg uploads only if its scan passes, under its own artifact name.
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chrome, edge, firefox, firefox-esr]
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
     env:
-      BW_BROWSERS: chrome,edge,firefox,firefox-esr
+      BW_BROWSERS: ${{ matrix.browser }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
@@ -344,7 +351,7 @@ jobs:
       - run: mise run browser-auth
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: browser-auth-linux
+          name: browser-auth-linux-${{ matrix.browser }}
           path: web/e2e/out
           retention-days: 14
       - if: always()
@@ -420,7 +427,7 @@ jobs:
     # outside pull requests, so `skipped` counts as success only for that job there. Any other
     # result fails, including `abandoned` (a job that never got a runner).
     if: always()
-    needs: [docs, site, actionlint, test, go, web, browser, safari, go-db, commit-lint, action-pins, package-check, hosting]
+    needs: [docs, site, actionlint, test, go, web, browser, safari, go-db, idp, browser-auth, commit-lint, action-pins, package-check, hosting]
     runs-on: ${{ (github.event_name == 'merge_group' || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'autops-kube-ginsys' }}
     timeout-minutes: 2
     steps:
