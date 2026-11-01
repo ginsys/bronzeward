@@ -44,6 +44,18 @@ commands:
               exactly with --idempotency-key, --expect-epoch and --expect-principal as printed
   fragment | profile | assignment show <head or revision ID> | history <head ID>
   draft list [--cluster <id>] | show <draft>
+  draft create --cluster <id> --title <title>
+  draft discard <draft>
+  profile set <name> --draft <draft> --fragments <name or frv_ ID>[,...]
+              a name pins the revision the draft proposes, else the fragment's head revision
+  assignment set <machine> --draft <draft> [--profiles <name>[,...]]
+              [--fragment <layer>=<name>[,...]]... the layer global, site, cluster, role,
+              workload or override
+  profile | assignment rm <name or machine> --draft <draft>
+              a write to a draft sends the ETag of the last draft show or write of that draft, or
+              --if-match <etag>; if the draft changed since, it saves nothing and says so
+              draft writes take author; repeat one with the outcome-unknown block's flags,
+              --if-match included
   release list [--cluster <id>] [--draft <id>] | show <release>
   plan list [--state <s>] [--machine <id>] | show <plan>
   operation list [--plan <id>] [--machine <id>] [--state <s>] [--kind <k>] | show <operation>

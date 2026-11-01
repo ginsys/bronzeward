@@ -332,6 +332,35 @@ var writeCases = map[string]func(*testing.T, *fixture, *injector, func(...string
 			t.Errorf("%d refresh grants, standard output %q: want 1, none and no act", n, r.out)
 		}
 	},
+	"ETAG-01": func(t *testing.T, f *fixture, in *injector, ctl func(...string) result) {
+		s := f.seed()
+		var deletes atomic.Int32
+		in.set(func(_ http.ResponseWriter, r *http.Request) bool {
+			if r.Method == http.MethodDelete {
+				deletes.Add(1)
+			}
+			return false
+		}, nil)
+		f.want(ctl("--context", "human", "draft", "show", s.draft), 0, s.draft)
+		// Another author's write moves the draft as a draft update does (internal/api/runner.go); an
+		// update that saves an entry needs the provider this server lacks.
+		if _, err := f.db.Exec(`UPDATE draft SET revision = revision + 1, etag_token = $2 WHERE id = $1`, s.draft, "bwsynthotherauthorwritesaa"); err != nil {
+			t.Fatal(err)
+		}
+		before := f.actCount()
+		rm := []string{"--context", "human", "profile", "rm", "workers", "--draft", s.draft}
+		for n := int32(1); n <= 2; n++ { // run again: the kept ETag was neither refetched nor replaced
+			r := ctl(rm...)
+			f.want(r, 1, "412", "precondition-failed", "The draft changed since you last read it (you saw revision 1, it is now revision 2). Nothing was saved.",
+				"bronzewardctl --context 'human' draft show '"+s.draft+"'")
+			if deletes.Load() != n || r.out != "" {
+				t.Errorf("run %d: %d DELETEs, standard output %q; want %d and none", n, deletes.Load(), r.out, n)
+			}
+		}
+		if f.actCount() != before {
+			t.Error("a refused draft write recorded an act")
+		}
+	},
 }
 
 func TestWriteCases(t *testing.T) {
@@ -378,9 +407,9 @@ func TestWriteCases(t *testing.T) {
 	f.scanFiles()
 }
 
-// scanFiles fails on a token in the CLI's non-secret files: its state directory, which these
-// routes leave empty (a token file's renewal lock sits beside it, and only draft writes keep an
-// ETag, #347), and its contexts file, which every case rewrote, so the scan never reads nothing.
+// scanFiles fails on a token in the CLI's non-secret files: its state directory, which holds the
+// draft ETags ETAG-01 kept (a token file's renewal lock sits beside it), and its contexts file,
+// which every case rewrote, so the scan never reads nothing.
 func (f *fixture) scanFiles() {
 	f.t.Helper()
 	files := 0

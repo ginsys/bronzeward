@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptrace"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -19,8 +20,9 @@ import (
 )
 
 // Write is one logical write (client-contracts.md §8.4, decision T9 of #256): Path is under
-// /api/v1 and Body the JSON object sent. IfMatch is sent where the route takes one, and Draft names
-// the draft whose kept ETag the answer replaces (T11). Repeat holds an operator's T10 repeat flags.
+// /api/v1 and Body the JSON object sent, nil for a DELETE. IfMatch is sent where the route takes
+// one, and Draft names the draft whose kept ETag the answer replaces and, with no IfMatch, is sent
+// as it (T11). Repeat holds an operator's T10 repeat flags.
 // Read reads the resource after an unknown or set-aside outcome and says what it shows; Check is
 // the command that shows it, after "bronzewardctl --context <the context>", which Send adds.
 type Write struct {
@@ -118,6 +120,16 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 	if who, err = c.principal(w.Repeat); err != nil {
 		return nil, err
 	}
+	if w.Draft != "" && w.IfMatch == "" {
+		// T11: the ETag kept from the last read or write of the draft, read after the context-use read,
+		// so an epoch change it saw leaves none (§8.3). With none, the write waits for a read.
+		if w.IfMatch, err = ETag(c.Context, w.Draft); err != nil {
+			return nil, c.Context.fail(fmt.Errorf("reading the kept ETag of %s: %w", printable(w.Draft), err))
+		} else if w.IfMatch == "" {
+			return nil, c.Context.fail(fmt.Errorf("%s not sent: no ETag of draft %s is kept for this context at its current epoch. Read the draft first: bronzewardctl --context %s draft show %s",
+				route, printable(w.Draft), ShellWord(c.Context.Name), ShellWord(w.Draft)))
+		}
+	}
 	if w.Repeat == nil {
 		// The last epoch seen before the first send, the context-use read's included (§8.4 item 3).
 		ref = c.Context.LastEpoch
@@ -205,6 +217,11 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 			// nothing of the attempt it repeats (§8.2; AMB-13).
 			u.Why = "this send was refused (" + printable(a.err.Error()) + ") and did nothing; the original outcome is still unknown"
 			return nil, c.unknown(w, u)
+		case code == "precondition-failed" && w.Draft != "":
+			// Another write moved the draft first (ETAG-01): stop and show the newer revision, never
+			// read the new ETag and resend (§8.3, T11). An attempt of this process that committed
+			// would have been replayed, not refused.
+			return nil, c.moved(w, a.err)
 		default:
 			// This send's own answer: an identical earlier attempt in this process met the same input
 			// checks, and a repeat that found the key's record would have replayed it.
@@ -245,6 +262,30 @@ func (c *Client) unknown(w *Write, u *Unknown) error {
 		u.Shows = printable(s)
 	}
 	return u
+}
+
+// moved is ETAG-01's refusal (journeys §5.4): the revision the sent ETag names and the one a read
+// shows now. The read's ETag is not kept, so the next write still needs a read of the change.
+func (c *Client) moved(w *Write, err error) error {
+	now := "unknown (reading the draft failed)"
+	if r, rerr := c.Get("/drafts/" + url.PathEscape(w.Draft)); rerr == nil {
+		var d apitypes.DraftBody
+		if json.Unmarshal(r.Body, &d) == nil {
+			now = fmt.Sprint(d.Revision)
+		}
+	}
+	return fmt.Errorf("%w\nThe draft changed since you last read it (you saw revision %s, it is now revision %s). Nothing was saved. Review the change before writing again:\n  bronzewardctl --context %s draft show %s",
+		err, DraftRevision(w.IfMatch), now, ShellWord(c.Context.Name), ShellWord(w.Draft))
+}
+
+// DraftRevision is the draft revision a draft's ETag names: the server writes "<revision>-<token>"
+// (internal/api/inventory.go). It is "unknown" for any other ETag.
+func DraftRevision(etag string) string {
+	n, _, ok := strings.Cut(strings.Trim(strings.TrimPrefix(etag, "W/"), `"`), "-")
+	if !ok || n == "" || strings.Trim(n, "0123456789") != "" {
+		return "unknown"
+	}
+	return n
 }
 
 // keepETag replaces the draft's kept ETag with the answer's, even when the command fails later
@@ -312,8 +353,13 @@ func (c *Client) post(w *Write, key, epoch string) attempt {
 	route := w.Method + " /api/v1" + w.Path
 	var a attempt
 	trace := &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { a.sent = true }}
+	// A DELETE sends no body and no Content-Type (§8.1); NoBody gives the transport nothing to resend.
+	var send io.Reader = http.NoBody
+	if w.Body != nil {
+		send = bytes.NewReader(w.Body)
+	}
 	q, err := http.NewRequestWithContext(httptrace.WithClientTrace(context.Background(), trace), w.Method,
-		strings.TrimSuffix(c.Context.Server, "/")+"/api/v1"+w.Path, bytes.NewReader(w.Body))
+		strings.TrimSuffix(c.Context.Server, "/")+"/api/v1"+w.Path, send)
 	if err != nil {
 		a.err = c.Context.fail(err)
 		return a
@@ -325,7 +371,9 @@ func (c *Client) post(w *Write, key, epoch string) attempt {
 	q.GetBody = nil
 	q.Header.Set("Authorization", "Bearer "+c.token)
 	q.Header.Set("Accept", "application/json")
-	q.Header.Set("Content-Type", "application/json")
+	if w.Body != nil {
+		q.Header.Set("Content-Type", "application/json")
+	}
 	q.Header.Set("Idempotency-Key", key)
 	q.Header.Set("Bronzeward-Expected-Epoch", epoch)
 	if w.IfMatch != "" {
