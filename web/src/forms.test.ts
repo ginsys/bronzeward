@@ -1,10 +1,10 @@
 import { createElement as h, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { AddCluster, existing, guardsUnload, leaving, record, Result, WriteNotices, WritesProvider } from "./forms.tsx";
-import { type Reads, ReadsProvider } from "./list.tsx";
+import { AddCluster, ClusterField, existing, guardsUnload, leaving, record, Result, WriteNotices, WritesProvider } from "./forms.tsx";
+import { type Failed, type Reads, ReadsProvider } from "./list.tsx";
 import type { Client, Problem } from "./request.ts";
-import { ShellContext } from "./shell.tsx";
+import { Failure, ShellContext } from "./shell.tsx";
 import { REPEATING, REPLAYED, setAside, unknown } from "./states.tsx";
 import { EARLIER_EPOCH, EPOCH_CHANGED_ASIDE, NO_EPOCH, NO_EPOCH_HEADER, type Outcome, Write, Writes } from "./write.ts";
 
@@ -314,5 +314,19 @@ describe("the forms", () => {
     const writes = new Writes(() => PRINCIPAL);
     expect(html(writes, h(AddCluster), ["viewer"])).toMatch(/<button type="submit" disabled="" aria-describedby="(.+?)">Add cluster<\/button><span id="\1"> Needs author<\/span>/);
     expect(html(writes, h(AddCluster))).toMatch(/<button type="submit">Add cluster<\/button>/);
+  });
+
+  test("Record machine shows why its cluster read failed, and only waits while the read runs", () => {
+    const reads = { failure: (res: Failed) => h(Failure, { res, sub: "SYNTH-sub-1" }) } as unknown as Reads;
+    const field = (clusters: Parameters<typeof ClusterField>[0]["clusters"]) =>
+      html(new Writes(() => PRINCIPAL), h(ReadsProvider, { value: reads }, h(ClusterField, { clusters, chosen: "", choose: () => {} })));
+    const problem: Problem = { type: "urn:bronzeward:problem:dependency-unavailable", title: "Dependency unavailable", status: 503, detail: "the store is not reachable", instance: "/requests/SYNTH-1" };
+    const failed = field({ kind: "unavailable", status: 503, problem });
+    expect(failed).toContain("clusters not read");
+    expect(failed).toContain("Not read: dependency-unavailable. Dependency unavailable: the store is not reachable Request /requests/SYNTH-1.");
+    const loading = field({ kind: "loading" });
+    expect(loading).toContain("clusters not read");
+    expect(loading).not.toContain("Not read");
+    expect(field({ kind: "ok", data: { items: [{ id: "cl_SYNTH1", name: "lab" } as never], next: undefined, restarted: false } })).toContain('<option value="cl_SYNTH1">lab</option>');
   });
 });
