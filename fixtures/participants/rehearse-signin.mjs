@@ -11,6 +11,10 @@ import { join } from "node:path";
 const human = process.argv[2] ?? "h-viewer";
 const password = process.env[`BW_PW_${human.toUpperCase().replaceAll("-", "_")}`];
 if (!password) throw new Error(`no password for ${human} in the environment (run through session passwords --exec)`);
+// The passwords leave this process's environment at once, so that no child (ChromeDriver, the CLI)
+// gets them. NODE_DEBUG, read at Node's start, would print what a child is given and more.
+for (const k of Object.keys(process.env)) if (k.startsWith("BW_PW_")) delete process.env[k];
+if (process.env.NODE_DEBUG) throw new Error("NODE_DEBUG is set; unset it, because its output bypasses the redaction");
 const repo = new URL("../../", import.meta.url).pathname;
 const part = join(repo, ".dev/participants");
 const require = createRequire(join(repo, "web/package.json"));
@@ -56,7 +60,6 @@ async function signIn() {
 }
 
 const env = { ...process.env, XDG_CONFIG_HOME: join(part, "home/config"), XDG_STATE_HOME: join(part, "home/state") };
-for (const k of Object.keys(env)) if (k.startsWith("BW_PW_")) delete env[k];
 const ctl = join(part, "bin/bronzewardctl");
 let failed = false;
 
