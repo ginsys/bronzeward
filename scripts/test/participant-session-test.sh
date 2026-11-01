@@ -80,6 +80,18 @@ cat >"$repo/fixtures/bin/up" <<'EOF'
 #!/usr/bin/env bash
 echo "bin/up" >>"$STUB_LOG"
 EOF
+# cp copies, except with STUB_CP_FAIL set: a copy to A's backup path then writes part of the file
+# and fails, as on a full disk.
+cat >"$t/bin/cp" <<'EOF'
+#!/usr/bin/env bash
+dst=${*: -1}
+if [ -n "${STUB_CP_FAIL:-}" ] && [[ $dst == *config.yaml.fixture* ]]; then
+  head -c 10 -- "${*: -2:1}" >"$dst"
+  exit 1
+fi
+exec /bin/cp "$@"
+EOF
+chmod +x "$t/bin/cp"
 # start's other prerequisites: npm, and mise for the web build.
 for c in npm mise; do printf '#!/bin/sh\nexit 0\n' >"$t/bin/$c"; done
 chmod +x "$t/bin/docker" "$t/bin/go" "$t/bin/npm" "$t/bin/mise" "$repo/fixtures/bin/inject" "$repo/fixtures/dev-idp" "$repo/fixtures/bin/up"
@@ -321,10 +333,12 @@ if [ "$rc" != 0 ] && [[ $out == *"cannot start"* ]] && [ -f "$cfg.fixture" ]; th
 else bad "start fails: rc=$rc: $out"; fi
 
 setup
+# A partial issuer change that a failed start left.
+echo partial >"$cfg.partial"
 out=$(run stop)
 rc=$?
 calls=$(tr '\n' ';' <"$STUB_LOG")
-if [ "$rc" = 0 ] && [ ! -e "$cfg.fixture" ] && [ "$(cat "$cfg")" = fixture ] &&
+if [ "$rc" = 0 ] && [ ! -e "$cfg.fixture" ] && [ ! -e "$cfg.partial" ] && [ "$(cat "$cfg")" = fixture ] &&
   [ "$calls" = "docker rm;docker network;inject kill A;inject start A;dev-idp down;" ] && [ ! -e "$repo/.dev/participants" ]; then
   ok "stop puts A back on its configuration and restarts it, then removes the backup and the state"
 else bad "stop: rc=$rc calls=$calls: $out"; fi
@@ -465,6 +479,21 @@ if [ "$rc" = 0 ] && kill -0 "$other" 2>/dev/null; then
   fi
 else bad "stop, reused pid: rc=$rc: $out"; fi
 kill "$other" 2>/dev/null
+
+# A copy of A's configuration to its backup fails part-way: the rollback leaves A's configuration
+# as it was, and no backup, partial or not.
+setup
+rm -f "$cfg.fixture"
+rm -rf "$repo/.dev/idp" "$repo/.dev/participants"
+printf '    issuer: http://issuer:5556\n    plainHTTPHosts: [issuer]\n    audience: bronzeward\n' >"$cfg"
+before=$(cat "$cfg")
+out=$(STUB_CP_FAIL=1 STUB_IDP_ENV=1 run start)
+rc=$?
+mkdir -p "$repo/.dev/idp"
+if [ "$rc" != 0 ] && [[ $out == *"session start failed"* ]] && [ "$(cat "$cfg")" = "$before" ] &&
+  [ ! -e "$cfg.fixture" ] && [ ! -e "$cfg.fixture.partial" ]; then
+  ok "a failed copy of A's configuration to its backup leaves the configuration as it was"
+else bad "start, failed backup copy: rc=$rc cfg=$(head -c 40 "$cfg"): $out"; fi
 
 # A start that fails after it spawns the web host, because the web host's pid record cannot be
 # written: the rollback ends the web host by the pid that start captured, and its port is free. The
