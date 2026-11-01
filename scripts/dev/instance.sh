@@ -28,7 +28,8 @@ if [ -z "$bw_dev_name" ]; then
   BW_DEV_IDP_DIR=.dev/idp
 else
   case $bw_dev_name in
-  pg | groups | *[!a-z0-9]*)
+  # The set is spelled out: a range such as a-z follows the locale's collation in some shells.
+  pg | groups | *[!abcdefghijklmnopqrstuvwxyz0123456789]*)
     echo "BW_DEV_INSTANCE=$bw_dev_name: use 1 to 16 characters of a-z and 0-9, not pg or groups" >&2
     unset bw_dev_name bw_dev_sfx
     return 1
