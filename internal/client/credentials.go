@@ -30,7 +30,7 @@ type Tokens struct {
 }
 
 // renewBefore is how long before its expiry an access token is renewed (§9.5 item 1).
-const renewBefore = 60 * time.Second
+var renewBefore = 60 * time.Second // a variable for tests
 
 // TokenFile is the context's D2 (b) token file, "" without the opt-in. BRONZEWARD_TOKEN_FILE
 // overrides its path only in a context that has one (§9.2 item 3).
