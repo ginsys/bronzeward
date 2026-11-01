@@ -40,6 +40,7 @@ type importFake struct {
 	emptyOnMove          bool // the operation has no event at the second epoch
 	ingReads             int  // the reads of the claim
 	streams              int  // the event streams opened
+	reviews              int  // review reads answered
 }
 
 const ingAccepted = `{"ingestion":"ing_BWSYNTH","operation":"op_BWSYNTH-ing"}`
@@ -114,6 +115,21 @@ func (f *importFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(http.StatusAccepted)
 		fmt.Fprint(w, ingAccepted)
+	case route == "POST /ingestions/ing_BWSYNTH/marks":
+		body, _ := io.ReadAll(r.Body)
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		record()
+		if bytes.Contains(body, []byte("BWSYNTH-not-a-path")) {
+			w.Header().Set("Content-Type", "application/problem+json")
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			fmt.Fprint(w, `{"type":"urn:bronzeward:problem:validation-failed","title":"Validation failed","status":422,"instance":"req_BWSYNTH","position":1}`)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+		fmt.Fprint(w, `{"operation":"op_BWSYNTH-ing","ingestion":"ing_BWSYNTH","generation":2}`)
+	case route == "GET /ingestions/ing_BWSYNTH/review":
+		f.reviews++
+		fmt.Fprint(w, `{"ingestion":"ing_BWSYNTH","document":"BWSYNTH","declarations":{"references":{},"embedded":[]}}`)
 	case route == "POST /ingestions/ing_BWSYNTH/abandonments":
 		record()
 		f.claim = "abandoned"
@@ -162,13 +178,6 @@ func (f *importFake) set(claim string, gen int, lease time.Duration, state, resu
 }
 
 func ev(typ, data string) [2]string { return [2]string{typ, data} }
-
-func orNull(s string) string {
-	if s == "" {
-		return "null"
-	}
-	return s
-}
 
 // TestImportWaitIgnoresReadsOfAnotherEpoch: once its stream ended, the watch reads the operation and
 // then asks whether the lapsed lease decides. That question reads the claim and the operation again.
@@ -249,18 +258,17 @@ func TestImportWaitDecidesOnAnswersWithoutEpoch(t *testing.T) {
 	}
 }
 
-// TestImportLifecycle checks import start, continue, takeover, abandon and status (T15 of #256):
-// each wait's end and exit code, the history before this command's generation ignored, ETAG-02's
-// two cases, the lapsed lease of PROT-06, and the usage refusal of a review without encrypted
-// staging.
-func TestImportLifecycle(t *testing.T) {
+// importSteps serves an importFake to an automation context with no lease margin, and returns it
+// with step, which runs one command and checks its exit code, that its standard output and error
+// hold out and errText, and the writes it sent.
+func importSteps(t *testing.T) (*importFake, func(name string, args []string, code int, out, errText string, writes ...string)) {
 	f := &importFake{draftFake: &draftFake{rev: 1, state: "open"}}
 	srv := httptest.NewServer(f)
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 	automationContext(t, srv.URL)
 	leaseMargin = 0
 	t.Cleanup(func() { leaseMargin = 10 * time.Second })
-	step := func(name string, args []string, code int, out, errText string, writes ...string) {
+	return f, func(name string, args []string, code int, out, errText string, writes ...string) {
 		t.Helper()
 		var o, e bytes.Buffer
 		got := run(args, &o, &e)
@@ -276,6 +284,21 @@ func TestImportLifecycle(t *testing.T) {
 			t.Errorf("%s: sent\n  %s\nwant\n  %s", name, strings.Join(took, "\n  "), strings.Join(writes, "\n  "))
 		}
 	}
+}
+
+func orNull(s string) string {
+	if s == "" {
+		return "null"
+	}
+	return s
+}
+
+// TestImportLifecycle checks import start, continue, takeover, abandon and status (T15 of #256):
+// each wait's end and exit code, the history before this command's generation ignored, ETAG-02's
+// two cases, the lapsed lease of PROT-06, and the usage refusal of a review without encrypted
+// staging.
+func TestImportLifecycle(t *testing.T) {
+	f, step := importSteps(t)
 	start := []string{"import", "start", "--machine", "mch_BWSYNTH", "--draft", "drf_BWSYNTH"}
 	startBody := func(etag, extra string) string {
 		return `POST /ingestions if-match=` + etag + ` body={"draft":"drf_BWSYNTH","kind":"import","machine":"mch_BWSYNTH",` + extra + `"source":"machine","staging":"encrypted"}`

@@ -149,10 +149,10 @@ func TestLongMark(t *testing.T) {
 func TestMarkTotal(t *testing.T) {
 	line := "machine.files." + strings.Repeat("k", 1009) + "\n" // 1024 bytes
 	at := strings.Repeat(line, maxBody/len(line))
-	if m, err := scanMarks(strings.NewReader(at), false); err != nil || len(m) != maxBody/len(line) {
+	if m, err := scanMarks(strings.NewReader(at), false, nil); err != nil || len(m) != maxBody/len(line) {
 		t.Errorf("at the limit: %d marks, %v; want %d marks", len(m), err, maxBody/len(line))
 	}
-	if m, err := scanMarks(strings.NewReader(at+"x\n"), false); err == nil || !strings.Contains(err.Error(), "the marks are over the server's 1 MiB body limit") {
+	if m, err := scanMarks(strings.NewReader(at+"x\n"), false, nil); err == nil || !strings.Contains(err.Error(), "the marks are over the server's 1 MiB body limit") {
 		t.Errorf("one mark over the limit: %d marks, %v; want the refusal", len(m), err)
 	}
 }
@@ -194,7 +194,7 @@ func TestMarkRefusals(t *testing.T) {
 		{"a cut terminal line ending in a carriage return", "machine.files\n" + long[:terminalLine-1] + "\r\n\n", true, "mark 2 is 4095 bytes or more"},
 		{"a long line from a pipe", "machine.files\n" + long + "\n\n", false, ""},
 	} {
-		m, err := scanMarks(strings.NewReader(c.in), c.terminal)
+		m, err := scanMarks(strings.NewReader(c.in), c.terminal, nil)
 		switch {
 		case c.says == "" && (err != nil || len(m) != 2):
 			t.Errorf("%s: %d marks, %v; want 2 marks", c.name, len(m), err)
