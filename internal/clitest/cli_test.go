@@ -76,6 +76,7 @@ type fixture struct {
 	iss                               *issuer.Issuer
 	idp                               *provider
 	db                                *sql.DB
+	srv                               *served
 }
 
 var tokenPattern = regexp.MustCompile(`bwt_\S+`)
@@ -125,28 +126,61 @@ func startConfig(t *testing.T, roles, issuerURL, audience, extra string) *fixtur
 	if err := os.WriteFile(f.tokenFile, []byte(f.token+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	var log bytes.Buffer
-	serve := exec.Command(filepath.Join(f.bin, "bronzeward"), "serve", "-config", cfg)
-	serve.Stdout, serve.Stderr = &log, &log
-	if err := serve.Start(); err != nil {
-		t.Fatal(err)
-	}
+	f.srv = &served{cfg: cfg}
 	t.Cleanup(func() {
-		serve.Process.Kill()
-		serve.Wait()
+		f.srv.stop()
 		if t.Failed() {
-			t.Logf("serve log:\n%s", log.String())
+			t.Logf("serve log:\n%s", f.srv.log.String())
 		}
 	})
+	f.serveUp()
+	return f
+}
+
+// served is the fixture's bronzeward serve: its configuration, its process, and the output of
+// every process a restart started.
+type served struct {
+	cfg string
+	cmd *exec.Cmd
+	log bytes.Buffer
+}
+
+// serveUp starts bronzeward serve on the fixture's configuration, with flags such as
+// -recovery-start, and waits until it answers.
+func (f *fixture) serveUp(flags ...string) {
+	f.t.Helper()
+	cmd := exec.Command(filepath.Join(f.bin, "bronzeward"), append([]string{"serve", "-config", f.srv.cfg}, flags...)...)
+	cmd.Stdout, cmd.Stderr = &f.srv.log, &f.srv.log
+	if err := cmd.Start(); err != nil {
+		f.t.Fatal(err)
+	}
+	f.srv.cmd = cmd
 	for i := 0; ; i++ {
 		if r, err := http.Get(f.base + "/livez"); err == nil && r.StatusCode == http.StatusNoContent {
 			r.Body.Close()
-			return f
+			return
 		} else if i == 100 {
-			t.Fatalf("serve did not answer /livez: %v\n%s", err, log.String())
+			f.t.Fatalf("serve did not answer /livez: %v\n%s", err, f.srv.log.String())
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+}
+
+// stop kills serve, as a crash would, and waits for it to exit.
+func (s *served) stop() {
+	if s.cmd != nil {
+		s.cmd.Process.Kill()
+		s.cmd.Wait()
+		s.cmd = nil
+	}
+}
+
+// restart kills serve and starts it again on the same database and port, started with flags: a
+// recovery start (-recovery-start) after the restore it stands in for.
+func (f *fixture) restart(flags ...string) {
+	f.t.Helper()
+	f.srv.stop()
+	f.serveUp(flags...)
 }
 
 // server runs a bronzeward subcommand and returns its standard output.

@@ -1,0 +1,152 @@
+package clitest
+
+import (
+	"net/http"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+
+	"go.yaml.in/yaml/v3"
+)
+
+// syntheticProvider is a provider and ingestion block whose address answers nothing and whose
+// token files hold synthetic values. Serve reads the token files at start and contacts the
+// provider only from its workers, so the recovery entry, which needs ingestion's owner identity,
+// is served without a provider running.
+func syntheticProvider(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	block := "provider:\n  address: http://127.0.0.1:1\n  keys: {baseline: bw-baseline, staging: bw-staging, digest: bw-digest, artifact: bw-artifact}\n"
+	for _, p := range []string{"ingestion", "compiler", "metadata", "executor"} {
+		path := filepath.Join(dir, p+".token")
+		if err := os.WriteFile(path, []byte("BWSYNTH-"+p+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		block += "  " + p + "TokenFile: " + path + "\n"
+	}
+	return block + "ingestion: {instance: a, heartbeat: 5s, lease: 15s, absoluteExpiry: 10m, sweep: 15s}\n"
+}
+
+// recoveryCases are the client-contracts.md §12 recovery cases bronzewardctl's recovery enter runs;
+// testdata/recovery-cases.yaml holds their records, and TestRecovery runs exactly those, in order.
+var recoveryCases = []string{"REC-02", "REC-04"}
+
+// TestRecovery runs recovery enter, status and exit and identity revoke through the CLI against a
+// served bronzeward: on a normal start, then on a recovery start of the same database.
+func TestRecovery(t *testing.T) {
+	b, err := os.ReadFile("testdata/recovery-cases.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var records []struct {
+		ID string `yaml:"id"`
+	}
+	if err := yaml.Unmarshal(b, &records); err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, r := range records {
+		ids = append(ids, r.ID)
+	}
+	if !slices.Equal(ids, recoveryCases) {
+		t.Fatalf("records %v, cases %v: want one record per case, in order", ids, recoveryCases)
+	}
+
+	f := startConfig(t, "viewer", "", "bronzeward", syntheticProvider(t))
+	s := f.seed()
+	in := newInjector(t, f.base)
+	in.writing = true
+	f.want(f.ctl(nil, "", "context", "add", "human", "--server", in.URL, "--certificate-authority", in.ca,
+		"--issuer", f.iss.URL, "--client-id", "BWSYNTH-cli", "--audience", "bronzeward", "--oidc-token-file", f.humanFile()), 0, "credential oidc")
+	ctl := func(stdin string, args ...string) result {
+		return f.scan(f.exec(nil, stdin, append([]string{"--context", "human"}, args...)...), args)
+	}
+	enter := []string{"recovery", "enter", "--restored", "family=database,backup=BWSYNTH-pg,taken-at=2026-11-01T08:30:00Z",
+		"--stopped-at", "2026-11-01T08:31:00Z", "--reason", "BWSYNTH drill"}
+	contexts := func() string { return ctl("", "context", "list", "-o", "json").out }
+	epoch := func() string {
+		var e string
+		if err := f.db.QueryRow(`SELECT epoch FROM installation_state`).Scan(&e); err != nil {
+			t.Fatal(err)
+		}
+		return e
+	}
+
+	// identity revoke, on the normal start: h-viewer signs in once, so its identity exists.
+	f.store(f.humanFile(), f.mint("h-viewer", ""), "")
+	f.want(ctl("", "whoami"), 0, "h-viewer")
+	f.store(f.humanFile(), f.mint("h-recovery", ""), "")
+	revoke := []string{"identity", "revoke", "--iss", f.iss.URL, "--sub", "h-viewer", "--reason", "BWSYNTH left"}
+	in.set(nil, nil)
+	f.want(ctl("BWSYNTH-wrong\n", revoke...), 2, "A revocation is permanent", "nothing was sent")
+	if slices.Contains(in.requests(), "POST /api/v1/identity-revocations") {
+		t.Errorf("a wrong confirmation sent the revocation: %v", in.requests())
+	}
+	f.want(ctl("h-viewer\n", revoke...), 0, "Revoked idn_", "auth.deniedSubjects lists it: no: add it now")
+
+	// REC-02, first: the entry sent to a normal start.
+	before := f.actCount()
+	in.set(nil, nil)
+	f.want(ctl("enter\n", enter...), 1, "409", "(conflict)", "This server was started normally; only a server started for recovery serves the entry.")
+	if c := contexts(); !strings.Contains(c, `"startMode":"normal"`) {
+		t.Errorf("REC-02 normal start: the context does not read a normal start:\n%s", c)
+	}
+
+	// The typed confirmation on the recovery start: nothing is sent unless enter is typed back.
+	f.restart("-recovery-start")
+	for _, typed := range []string{"", "\n", "BWSYNTH-wrong\n", "enterx\n"} {
+		in.set(nil, nil)
+		f.want(ctl(typed, enter...), 2, "It marks every machine's scope pre-restore-unaccounted.", "nothing was sent")
+		if seen := in.requests(); len(seen) != 0 {
+			t.Errorf("typed %q: sent %v", typed, seen)
+		}
+	}
+	in.set(nil, nil)
+	f.want(ctl("", append(slices.Clone(enter), "--no-input")...), 2, "--no-input forbids", "nothing was sent")
+	if seen := in.requests(); len(seen) != 0 {
+		t.Errorf("--no-input: sent %v", seen)
+	}
+
+	// REC-04 (a): the entry commits and the injector drops its 201.
+	var posts sent
+	in.set(posts.posting(func(n int, w http.ResponseWriter, r *http.Request) {
+		if n == 0 {
+			in.commit(w, r)
+			return
+		}
+		in.proxy.ServeHTTP(w, r)
+	}), nil)
+	previous := epoch()
+	r := ctl("enter\n", enter...)
+	minted := epoch()
+	f.want(r, 0, "repeat 1 of 3 with the same key", "already done earlier; showing that result",
+		"Recovery mode entered (act act_", "Epoch "+minted+", was "+previous+".", "Scopes marked pre-restore-unaccounted: 1 machines.")
+	posts.one(t, 2)
+	if posts.expected[0] != "" {
+		t.Errorf("REC-04: the entry was sent with Bronzeward-Expected-Epoch %q", posts.expected[0])
+	}
+	if want := []string{"GET /api/v1/server", "POST /api/v1/recovery/entries", "GET /api/v1/recovery", "POST /api/v1/recovery/entries"}; !slices.Equal(in.requests(), want) {
+		t.Errorf("REC-04: the injector saw %v, want %v", in.requests(), want)
+	}
+	if c := contexts(); minted == previous || !strings.Contains(c, `"lastEpoch":"`+minted+`"`) || !strings.Contains(c, `"startMode":"recovery"`) {
+		t.Errorf("REC-04: epoch %s, was %s; the context does not keep the minted epoch and a recovery start:\n%s", minted, previous, c)
+	}
+
+	// REC-02, second: another entry to the recovery start whose entry committed under REC-04's key.
+	in.set(nil, nil)
+	f.want(ctl("enter\n", enter...), 1, "409", "(conflict)", "Another recovery entry committed first (epoch "+minted+"); this one recorded nothing.")
+	if c := contexts(); strings.Contains(c, `"startMode":"normal"`) || !strings.Contains(c, `"startMode":"recovery"`) {
+		t.Errorf("REC-02 recovery start: the context reads a normal start:\n%s", c)
+	}
+	if n := f.actCount(); n != before+1 {
+		t.Errorf("%d acts recorded by the entries, want 1", n-before)
+	}
+
+	// recovery status and exit: the seeded machine's scope is not released.
+	f.want(ctl("", "recovery", "status"), 0, "Recovery mode", "on", "BWSYNTH drill",
+		s.machine, "pre-restore-unaccounted", "recovery scope-account '"+s.machine+"'")
+	f.want(ctl("", "recovery", "exit"), 1, "409", "The first scope not released: machine '"+s.machine+"', 'pre-restore-unaccounted'.")
+	f.scanFiles()
+}
