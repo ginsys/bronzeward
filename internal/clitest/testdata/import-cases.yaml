@@ -1,0 +1,82 @@
+# Shared conformance case records (docs/spec/client-contracts.md §12) of the import lifecycle
+# (#349), run by import_test.go TestImports against a disposable bronzeward serve with an OpenBao
+# provider (the test's, through baotest and a proxy that can hold a staging decrypt), behind the
+# in-process TLS injector, with short claim timers (heartbeat 300 ms, lease 1.5 s, absolute expiry
+# 3 min, sweep 1 s). Data is synthetic: fixture-issuer tokens for the human h-all, who holds
+# author; documents whose token is a sentinel; a Talos stand-in (talostest) on loopback for the
+# machine source, whose configuration and talosconfig the test generates.
+#
+# Every run's argv, standard output and standard error are scanned for the token, the sentinels
+# and the stand-in's secrets.
+
+- id: AMB-08
+  setup: a server with no provider, so ingestion is not configured; the seeded draft read with draft show
+  action: import start --machine mch_... --draft drf_...
+  exchange:
+    - "POST /api/v1/ingestions, headers: Idempotency-Key, If-Match, Bronzeward-Expected-Epoch; 503 dependency-unavailable"
+    - the same request, the same key, repeated three times
+  fault: none; the server answers 503 dependency-unavailable to every attempt
+  expect:
+    client: repeats the request at most 3 times with the same key and expected epoch, then reports it not done
+    server: no ingest operation and no claim
+    shown: >-
+      "repeat 1 of 3 with the same key" to "repeat 3 of 3", then "Not done: none of the 4 attempts
+      committed anything of its own."; exit 1
+    absent: [token in stdout, stderr, argv]
+
+- id: ETAG-02
+  setup: the seeded draft read with draft show, its ETag kept
+  action: import start (with --review, then import continue); then fragment set with no read between
+  exchange:
+    - "POST /api/v1/ingestions, If-Match the kept ETag; 202"
+    - "POST /api/v1/ingestions/ing_.../continuations; 202"
+    - GET /api/v1/operations/op_.../events and the operation, until it succeeded
+    - "GET /api/v1/drafts/drf_..., the re-read"
+    - "PUT /api/v1/drafts/drf_.../fragments/..., If-Match the re-read's ETag"
+  fault: >-
+    second case: the injector moves the draft in the database, as another author's write does,
+    when the client's re-read after the import's success arrives
+  expect:
+    client: >-
+      first case: the re-read's revision equals the operation's result.draftRevision, its ETag is
+      kept and the next write sends it; second case: the revision is higher, treated as 412, the
+      ETag not kept, so the next write sends the ETag before the import and is refused
+    server: "first case: the import released and the fragment saved; second case: the import released, the fragment not saved"
+    shown: >-
+      first: "Import ing_... released into draft drf_... (revision N), import base ibr_...", then
+      "Fragment ... saved", exit 0 each; second: "draft drf_... is now revision N+1: another write
+      followed this import's revision N. Its ETag is not kept.", exit 1, then "The draft changed
+      since you last read it", exit 1
+    absent: [token and sentinels in stdout, stderr, argv]
+
+- id: PROT-06
+  setup: >-
+    an import started with --review and paused; the provider proxy holds the staging decrypt, the
+    first step of a continued or taken-over run, so the run writes no event
+  action: import continue ing_... (second case); import takeover ing_... (third case)
+  exchange:
+    - "POST /api/v1/ingestions/ing_.../continuations or /takeovers; 202 with the operation"
+    - GET /api/v1/operations/op_.../events, Accept text/event-stream
+    - the stream ends when serve is killed; the client's requests wait until serve is back
+    - GET /api/v1/operations/op_..., then the stream again
+    - GET /api/v1/ingestions/ing_..., once the lease the client last read passed by its margin
+  fault: >-
+    serve is killed once the run holds its decrypt, then started again on the same database and
+    port (test-only); the claim is left with no heartbeat
+  expect:
+    client: >-
+      reads the ingestion once its leaseUntil passed; held (continuation) or resumed (takeover)
+      with the lease passed ends the watch with the operation still running; reported as of
+      unknown outcome, never as not applied; a later read, import takeover and import abandon
+      offered; no wait until the absolute expiry
+    server: the claim held or resumed, staged, its lease lapsed; the operation running
+    shown: >-
+      "import ing_...: its claim is held (resumed) and its lease lapsed ..., while operation op_...
+      still runs: the outcome is unknown.", the three commands; exit 3
+    absent: [token and sentinels in stdout, stderr, argv]
+  not run: >-
+    the first case (a mark) is import mark's (#350); the fourth needs a server-side hook delaying
+    a draft transaction's COMMIT, which the server binary does not have (#263)
+  unit: >-
+    cmd/bronzewardctl TestImportLifecycle covers a lapsed lease with exit 3, history before this
+    command's generation ignored, and resume-failed

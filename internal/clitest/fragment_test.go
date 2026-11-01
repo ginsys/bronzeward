@@ -36,6 +36,10 @@ type slowBao struct {
 	delay  atomic.Int64
 	b      *baotest.Bao
 	digest string // this server's digest key, its own so that a case may rotate it
+	// hold, when set, keeps each staging decrypt, a continued or taken-over run's first provider
+	// call, until it closes or the server that sent it goes away; held counts the decrypts kept.
+	hold atomic.Pointer[chan struct{}]
+	held atomic.Int32
 }
 
 // retire makes the digest key's current versions uncomputable: it rotates the key and raises its
@@ -86,6 +90,12 @@ func TestLatestVersion(t *testing.T) {
 // the test ends.
 func startProvider(t *testing.T, roles string) (*fixture, *slowBao) {
 	t.Helper()
+	return startTimers(t, roles, "{instance: a, heartbeat: 5s, lease: 15s, absoluteExpiry: 10m, sweep: 15s}")
+}
+
+// startTimers is startProvider with the server's ingestion claim timers, a YAML flow mapping.
+func startTimers(t *testing.T, roles, timers string) (*fixture, *slowBao) {
+	t.Helper()
 	b := baotest.New(t)
 	digest := b.Name("digest")
 	if status, body, err := b.Do(b.Admin(), http.MethodPost, "/v1/transit/keys/"+digest, map[string]any{}); err != nil || status/100 != 2 {
@@ -108,6 +118,14 @@ func startProvider(t *testing.T, roles string) (*fixture, *slowBao) {
 		if r.Method != http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/secret/data/") {
 			time.Sleep(time.Duration(sb.delay.Load()))
 		}
+		if h := sb.hold.Load(); h != nil && strings.HasPrefix(r.URL.Path, "/v1/transit/decrypt/") {
+			sb.held.Add(1)
+			select {
+			case <-*h:
+			case <-r.Context().Done():
+				return
+			}
+		}
 		rp.ServeHTTP(w, r)
 	}))
 	t.Cleanup(sb.Close)
@@ -124,7 +142,7 @@ func startProvider(t *testing.T, roles string) (*fixture, *slowBao) {
 		}
 		cfg += "  " + p + "TokenFile: " + file + "\n"
 	}
-	cfg += "ingestion: {instance: a, heartbeat: 5s, lease: 15s, absoluteExpiry: 10m, sweep: 15s}\n"
+	cfg += "ingestion: " + timers + "\n"
 	return startConfig(t, roles, "", "bronzeward", cfg), sb
 }
 
