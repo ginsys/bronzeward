@@ -144,7 +144,7 @@ func pins(c *client.Client, draft string, names []string) ([]string, error) {
 		// chosen without it could be the wrong one: refuse, as entryRead does.
 		x, err := item.AsSourceEntry()
 		if err != nil {
-			return nil, fmt.Errorf("GET /api/v1/drafts/%s: an entry cannot be read: %w; nothing was sent", url.PathEscape(draft), err)
+			return nil, ef("GET /api/v1/drafts/%s: an entry cannot be read: %w; nothing was sent", url.PathEscape(draft), err)
 		}
 		if x.Kind == apitypes.SourceEntryKindFragment && x.Name != nil {
 			proposed[*x.Name] = x.Revision
@@ -187,7 +187,7 @@ func fragmentHeads(c *client.Client, cluster string) (map[string]*string, error)
 	for i, raw := range items {
 		var f apitypes.FragmentBody
 		if err := json.Unmarshal(raw, &f); err != nil {
-			return nil, fmt.Errorf("GET /api/v1/fragments: item %d cannot be read: %w", i, err)
+			return nil, ef("GET /api/v1/fragments: item %d cannot be read: %w", i, err)
 		}
 		if f.Cluster == cluster {
 			heads[f.Name] = f.Revision
@@ -287,7 +287,7 @@ func entryRead(draft string, kind apitypes.SourceEntryKind, name string) func(*c
 		for _, item := range d.Entries {
 			x, err := item.AsSourceEntry()
 			if err != nil {
-				return "", fmt.Errorf("GET /api/v1/drafts/%s: an entry cannot be read: %w", url.PathEscape(draft), err)
+				return "", ef("GET /api/v1/drafts/%s: an entry cannot be read: %w", url.PathEscape(draft), err)
 			}
 			if x.Kind == kind && (x.Name != nil && *x.Name == name || x.Machine != nil && *x.Machine == name) {
 				return sf("%s, with %s %s at %s", shows, kind, name, or(x.Revision, "removed")), nil
@@ -304,7 +304,7 @@ func readDraft(c *client.Client, draft string) (*apitypes.DraftBody, error) {
 	}
 	var d apitypes.DraftBody
 	if err := json.Unmarshal(r.Body, &d); err != nil {
-		return nil, fmt.Errorf("GET /api/v1/drafts/%s cannot be read: %w", url.PathEscape(draft), err)
+		return nil, ef("GET /api/v1/drafts/%s cannot be read: %w", url.PathEscape(draft), err)
 	}
 	return &d, nil
 }

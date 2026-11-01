@@ -32,16 +32,16 @@ import (
 // and that other text, non-ASCII included, is left as it is.
 func TestPrintable(t *testing.T) {
 	for in, want := range map[string]string{
-		"BWSYNTH-plain host:443": "BWSYNTH-plain host:443",
-		"BWSYNTH-bücher":         "BWSYNTH-bücher",
-		"a\x1b[2Jb":              `a\x1b[2Jb`,
-		"cr\rbel\adel\x7f":       `cr\x0dbel\x07del\x7f`,
-		"c1 \u009b31m csi":       `c1 \x9b31m csi`,
-		"raw \x9b byte":          `raw \x9b byte`,
-		"tab\tline\n":            `tab\x09line\x0a`,
-		"replacement � is kept":  "replacement � is kept",
-		"bidi \u202eroot\u2066":            `bidi \u202eroot\u2066`,
-		"marks \u200e\u200f\u061c":              `marks \u200e\u200f\u061c`,
+		"BWSYNTH-plain host:443":   "BWSYNTH-plain host:443",
+		"BWSYNTH-bücher":           "BWSYNTH-bücher",
+		"a\x1b[2Jb":                `a\x1b[2Jb`,
+		"cr\rbel\adel\x7f":         `cr\x0dbel\x07del\x7f`,
+		"c1 \u009b31m csi":         `c1 \x9b31m csi`,
+		"raw \x9b byte":            `raw \x9b byte`,
+		"tab\tline\n":              `tab\x09line\x0a`,
+		"replacement � is kept":    "replacement � is kept",
+		"bidi \u202eroot\u2066":    `bidi \u202eroot\u2066`,
+		"marks \u200e\u200f\u061c": `marks \u200e\u200f\u061c`,
 	} {
 		if got := printable(in); got != want {
 			t.Errorf("printable(%q) = %q, want %q", in, got, want)

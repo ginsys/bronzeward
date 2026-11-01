@@ -74,7 +74,7 @@ func decode[T any](c *client.Client, raw ...json.RawMessage) ([]T, error) {
 	out := make([]T, len(raw))
 	for i, r := range raw {
 		if err := json.Unmarshal(r, &out[i]); err != nil {
-			return nil, fmt.Errorf("%s: %w", c.Context.Where(), err)
+			return nil, ef("%s: %w", c.Context.Where(), err)
 		}
 	}
 	return out, nil

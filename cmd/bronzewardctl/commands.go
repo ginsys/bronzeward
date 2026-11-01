@@ -144,7 +144,7 @@ func (e *env) contextAdd(args []string) error {
 	if from != "" {
 		cc, err := client.FetchClientConfig(&x, from, e.verboseOut())
 		if err != nil {
-			return fmt.Errorf("%s: %w", x.Where(), err)
+			return ef("%s: %w", x.Where(), err)
 		}
 		o.Issuer, o.Audience, o.ClientID = cc.Issuer, cc.Audience, cc.CLIClientID
 		if o.Scopes == nil {
@@ -225,7 +225,7 @@ func (e *env) whoamiCmd(args []string) (err error) {
 	}
 	var id apitypes.IdentityBody
 	if err := json.Unmarshal(r.Body, &id); err != nil {
-		return fmt.Errorf("%s: GET /identity: %w", c.Context.Where(), err)
+		return ef("%s: GET /identity: %w", c.Context.Where(), err)
 	}
 	roles := []string{}
 	for _, x := range id.Roles {
