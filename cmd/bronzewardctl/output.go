@@ -12,20 +12,8 @@ import (
 // colour or terminal control, so NO_COLOR and non-terminal output are already plain text with
 // the same information (operator-experience.md §13).
 func (e *env) emit(raw []byte, table func(*tabwriter.Writer)) error {
-	switch e.output {
-	case "json":
-		if !bytes.HasSuffix(raw, []byte("\n")) {
-			raw = append(raw, '\n')
-		}
-		_, err := e.out.Write(raw)
-		return err
-	case "yaml":
-		var n yaml.Node
-		if err := yaml.Unmarshal(raw, &n); err != nil {
-			return err
-		}
-		block(&n)
-		b, err := yaml.Marshal(&n)
+	if e.output == "json" || e.output == "yaml" {
+		b, err := e.render(raw)
 		if err != nil {
 			return err
 		}
@@ -35,6 +23,23 @@ func (e *env) emit(raw []byte, table func(*tabwriter.Writer)) error {
 	w := tabwriter.NewWriter(e.out, 0, 0, 2, ' ', tabwriter.StripEscape)
 	table(w)
 	return w.Flush()
+}
+
+// render is what emit prints for -o json or yaml, built in memory so that a conversion failure
+// is known before anything is written.
+func (e *env) render(raw []byte) ([]byte, error) {
+	if e.output == "json" {
+		if !bytes.HasSuffix(raw, []byte("\n")) {
+			raw = append(raw, '\n')
+		}
+		return raw, nil
+	}
+	var n yaml.Node
+	if err := yaml.Unmarshal(raw, &n); err != nil {
+		return nil, err
+	}
+	block(&n)
+	return yaml.Marshal(&n)
 }
 
 // block drops JSON's flow and quoting styles; the encoder still quotes a string that would

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -82,12 +83,17 @@ func TestUnreadableAnswers(t *testing.T) {
 	}))
 	defer srv.Close()
 	automationContext(t, srv.URL)
-	for _, o := range []string{"table", "json"} {
+	for _, o := range []string{"table", "json", "yaml"} {
 		var out, errb bytes.Buffer
 		code := run([]string{"-o", o, "cluster", "add", "--name", "lab-a"}, &out, &errb)
 		wantOut := map[string]string{"table": "", "json": `"BWSYNTH"`}[o]
 		if code != 0 || !strings.Contains(errb.String(), "succeeded, but its answer cannot be read") || !strings.Contains(out.String(), wantOut) || o == "table" && out.Len() != 0 {
 			t.Errorf("-o %s: exit %d, stdout %q, stderr %q; want 0, the answer as served for json, the failure on stderr", o, code, out.String(), errb.String())
+		}
+		// Standard output failing part way: the answer is written once and the failure is the exit.
+		short := &shortWriter{}
+		if code := run([]string{"-o", o, "cluster", "add", "--name", "lab-a"}, short, io.Discard); o != "table" && (code != 1 || short.calls != 1) {
+			t.Errorf("-o %s with standard output failing: exit %d after %d writes; want 1 after 1", o, code, short.calls)
 		}
 	}
 	unknown.Store(true)

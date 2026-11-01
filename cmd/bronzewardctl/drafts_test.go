@@ -189,6 +189,14 @@ func TestProfileSetRepeat(t *testing.T) {
 	}
 }
 
+// shortWriter takes half of each write and fails it, as a closed pipe can; calls counts the writes.
+type shortWriter struct{ calls int }
+
+func (w *shortWriter) Write(p []byte) (int, error) {
+	w.calls++
+	return len(p) / 2, io.ErrShortWrite
+}
+
 // automationContext records the context "lab" on srv with a synthetic automation token.
 func automationContext(t *testing.T, srv string) {
 	t.Helper()
