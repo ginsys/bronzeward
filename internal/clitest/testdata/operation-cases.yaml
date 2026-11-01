@@ -26,7 +26,10 @@
       state, and reads the pages from the start, following each page's next to the last page
     server: no change; the adoption stays completed
     shown: >-
-      each of the operation's events (three or more) once, in order, marked with the server's time;
+      each of the operation's two events, adoption and applied-change, once, in order, marked with
+      the server's time (two, because an adoption has no commitment, attempt or state change:
+      docs/spec/execution-recovery.md §6.3 step 4 creates its operation directly in completed, and
+      the record that sets Applied writes the applied-change entry, internal/api/adoption.go);
       "Completed at <time> (server): adopted; the adoption of plan pln_... records Applied from the
       node's own bytes. Nothing was sent to the machine."; exit 0
     absent: [tokens and the stand-in's secrets in stdout, stderr, argv]
