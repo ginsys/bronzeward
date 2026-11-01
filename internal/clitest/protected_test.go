@@ -508,7 +508,8 @@ var expiresAt = regexp.MustCompile(`expires \d{4}-\d\d-\d\d \d\d:\d\d:\d\d \S+?\
 
 // journey runs the journey task T3's import part (operator-experience.md §13) as a script through
 // the CLI: a draft, an import with review, the review on a terminal marking the unmarked secret,
-// the continuation, the machine's assignment and the publication. Its probe "Is the secret in the
+// the continuation and the publication. The handover's assignment, adopt plan and approval follow
+// with the plan commands (#258). Its probe "Is the secret in the
 // draft?" is answered by the release's provenance, which names the marked path as a reference. The
 // output is kept in testdata/journeys/t3.txt, except the review's, which stays in memory.
 func (e *importEnv) journey(t *testing.T) {
@@ -519,7 +520,6 @@ func (e *importEnv) journey(t *testing.T) {
 		{"import", "start", "--machine", "{machine}", "--draft", "{draft}", "--review"},
 		{"import", "review", "{ingestion}"},
 		{"import", "continue", "{ingestion}"},
-		{"assignment", "set", "{machine}", "--draft", "{draft}"},
 		{"publish", "{draft}"},
 		{"release", "provenance", "{release}", "{machine}"},
 	} {

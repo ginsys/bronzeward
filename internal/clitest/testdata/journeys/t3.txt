@@ -1,0 +1,58 @@
+$ bronzewardctl --context human draft create --cluster {cluster} --title import worker
+Draft drf_… open, revision 1.
+[exit 0]
+
+$ bronzewardctl --context human import start --machine {machine} --draft {draft} --review
+Import ing_… started (operation op_…). Staging: encrypted. Review: requested.
+Paused for review (generation 1, expires <time>).
+Review it, then continue it, or abandon it:
+  bronzewardctl import review ing_…
+  bronzewardctl import continue ing_…
+  bronzewardctl import abandon ing_…
+  started
+  talos-access
+  staged
+  paused (generation 1)
+[exit 0]
+
+$ bronzewardctl --context human import review {ingestion}
+(the protected review, on a terminal: matched in memory, not kept)
+[exit 0]
+
+$ bronzewardctl --context human import continue {ingestion}
+Continued import ing_… (operation op_…).
+Import ing_… released into draft drf_… (revision 2), import base ibr_….
+  started
+  talos-access
+  staged
+  paused (generation 1)
+  marked (generation 2)
+  paused (generation 2)
+  continued (generation 3)
+  succeeded
+[exit 0]
+
+$ bronzewardctl --context human publish {draft}
+Publishing draft drf_… revision 2 (operation op_…).
+Publication succeeded: release rel_… is now Desired for 1 machine. Nothing has been sent to any machine.
+  mch_… has no Applied release: hand it over with an adopt plan.
+Review a machine's rendered configuration: bronzewardctl release review rel_… <machine>
+  queued
+  claimed
+  succeeded
+[exit 0]
+
+$ bronzewardctl --context human release provenance {release} {machine}
+REFERENCE                     VERSION  FROM (REVISION, PATH)                                                     RENDERED AT
+s-…  1        ibr_…, doc[0]/machine/token                      doc[0]/machine/token
+s-…  1        ibr_…, doc[0]/machine/ca/key                     doc[0]/machine/ca/key
+s-…  1        ibr_…, doc[0]/machine/files/0/content            doc[0]/machine/files/0/content
+s-…  1        ibr_…, doc[0]/cluster/secret                     doc[0]/cluster/secret
+s-…  1        ibr_…, doc[0]/cluster/token                      doc[0]/cluster/token
+s-…  1        ibr_…, doc[0]/cluster/secretboxEncryptionSecret  doc[0]/cluster/secretboxEncryptionSecret
+s-…  1        ibr_…, doc[0]/cluster/ca/key                     doc[0]/cluster/ca/key
+s-…  1        ibr_…, doc[0]/cluster/aggregatorCA/key           doc[0]/cluster/aggregatorCA/key
+s-…  1        ibr_…, doc[0]/cluster/serviceAccount/key         doc[0]/cluster/serviceAccount/key
+s-…  1        ibr_…, doc[0]/cluster/etcd/ca/key                doc[0]/cluster/etcd/ca/key
+Provenance covers secret references only; other fields are not traced.
+[exit 0]
