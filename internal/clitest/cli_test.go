@@ -88,6 +88,12 @@ func start(t *testing.T, roles string) *fixture {
 // startFor is start with the server trusting issuerURL for audience; "" is the fixture issuer.
 func startFor(t *testing.T, roles, issuerURL, audience string) *fixture {
 	t.Helper()
+	return startConfig(t, roles, issuerURL, audience, "")
+}
+
+// startConfig is startFor with extra appended to the server's configuration.
+func startConfig(t *testing.T, roles, issuerURL, audience, extra string) *fixture {
+	t.Helper()
 	db, dsn := dbtest.New(t)
 	f := &fixture{t: t, bin: binaries(t), home: t.TempDir(), db: db}
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -105,7 +111,7 @@ func startFor(t *testing.T, roles, issuerURL, audience string) *fixture {
 	body := "listen: " + addr + "\ndatabase:\n  dsn: " + dsn + "\nauth:\n  oidc:\n    issuer: " + issuerURL + "\n    audience: " + audience + "\n" +
 		"  roles: {viewer: [bw-viewers], author: [bw-authors], publisher: [bw-publishers], approver: [bw-approvers], recovery-admin: [bw-recovery]}\n" +
 		"  deniedSubjects: [{iss: \"" + f.iss.URL + "\", sub: h-denied}]\n" +
-		"execution: {maxTransportDeadline: 5m}\n"
+		"execution: {maxTransportDeadline: 5m}\n" + extra
 	if err := os.WriteFile(cfg, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}

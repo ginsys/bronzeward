@@ -1,0 +1,39 @@
+$ bronzewardctl --context human draft show {draft}
+Draft drf_… "worker labels" open, revision 4, cluster cl_…
+  fragment    worker-labels                   frv_…  new
+  profile     workers                         prv_…  new
+  assignment  mch_…  asr_…  new
+Not rendered: publish to see each machine's configuration.
+[exit 0]
+
+$ bronzewardctl --context other draft show {draft}
+Draft drf_… "worker labels" open, revision 4, cluster cl_…
+  fragment    worker-labels                   frv_…  new
+  profile     workers                         prv_…  new
+  assignment  mch_…  asr_…  new
+Not rendered: publish to see each machine's configuration.
+[exit 0]
+
+$ bronzewardctl --context other fragment set worker-sysctls --draft {draft} --layer role --file worker-sysctls.yaml
+Fragment worker-sysctls saved in draft drf_… (revision frv_…; draft revision 5).
+[exit 0]
+
+$ bronzewardctl --context human fragment set worker-labels --draft {draft} --layer role --file worker-labels-2.yaml
+bronzewardctl: human (https://127.0.0.1:<port>): PUT /api/v1/drafts/drf_…/fragments/worker-labels answered 412 The If-Match header does not match (precondition-failed): the draft has moved (instance req_…)
+The draft changed since you last read it (you saw revision 4, it is now revision 5). Nothing was saved. Review the change before writing again:
+  bronzewardctl --context 'human' draft show 'drf_…'
+[exit 1]
+
+$ bronzewardctl --context human draft show {draft}
+Draft drf_… "worker labels" open, revision 5, cluster cl_…
+  fragment    worker-labels                   frv_…  new
+  fragment    worker-sysctls                  frv_…  new
+  profile     workers                         prv_…  new
+  assignment  mch_…  asr_…  new
+Not rendered: publish to see each machine's configuration.
+[exit 0]
+
+$ bronzewardctl --context human fragment set worker-labels --draft {draft} --layer role --file worker-labels-2.yaml
+Fragment worker-labels saved in draft drf_… (revision frv_…; draft revision 6).
+[exit 0]
+

@@ -1,0 +1,105 @@
+# Shared conformance case records (docs/spec/client-contracts.md §12) of fragment set (#347), run
+# by fragment_test.go TestFragments: exactly the cases recorded here, in this order, against a
+# disposable bronzeward serve with an OpenBao provider (the test's, through baotest), behind the
+# in-process TLS injector. Data is synthetic: fixture-issuer tokens for the human h-all, who holds
+# author, and documents whose secret value is a BWSYNTH sentinel. Each case is signed in as h-all
+# through the oidc context "human" and first reads the seeded draft, so its ETag is kept (T11).
+# Each sends fragment set <name> --draft drf_... --layer role --file <synthetic file>:
+# PUT /api/v1/drafts/drf_.../fragments/<name>, a keyed route with If-Match.
+#
+# Where a case needs a state no client action reaches, it sets it as named in its setup or fault:
+# AMB-02 slows the provider's KV writes through a proxy, AMB-06 retires the digest key version in
+# the provider, and AMB-13 moves the draft in the database. Every case's argv, standard output and
+# standard error are scanned for the token and the sentinels.
+#
+# AMB-13 is also covered by #346's unit test TestOutcomes, "a repeat refused for its input says
+# nothing of the attempt it repeats" (internal/client/write_test.go).
+
+- id: AMB-02
+  setup: the provider holds each KV write for 5 s, so an ingestion holds its draft-update claim that long
+  action: fragment set amb-02 ...
+  exchange:
+    - "PUT /api/v1/drafts/drf_.../fragments/amb-02, headers: Idempotency-Key, If-Match, Bronzeward-Expected-Epoch"
+    - GET /api/v1/recovery, the confirming read
+    - PUT, the same key, answered 409 conflict with ingestion and no draft while the first runs, then replayed
+  fault: the injector passes the first PUT to the server and closes the client's connection without an answer
+  expect:
+    client: >-
+      repeats with the same key; repeats each in-progress 409 after 1 s, 2 s, then 4 s, within the
+      wait bound (--ingest-wait, 2 minutes, or the served claim lease if longer), without counting
+      it as a repeat; shows the replay as its result
+    server: answers the repeats 409 while the first ingests, then replays its 200; one act
+    shown: '"the first request with this key is still ingesting (ingestion ing_...)", "already done earlier", "Fragment amb-02 saved"; exit 0'
+    absent: [token and sentinels in stdout, stderr, argv]
+  unit: >-
+    the wait bound ending in outcome unknown, a served lease raising the bound, and a 409 with
+    ingestion and draft (the draft published meanwhile) reported refused and not repeated are
+    internal/client TestInProgress's cases
+
+- id: AMB-04
+  setup: as AMB-02, without the held provider
+  action: fragment set amb-04 ..., then the same command with the printed repeat flags and a changed file
+  exchange:
+    - PUT, committed by the server, its answer replaced
+    - three repeats with the same key, each answered 500 internal-error by the injector
+    - the operator's repeat with the printed key, epoch, principal and If-Match
+  fault: the injector passes the first PUT to the server and drops its answer; it answers the repeats 500
+  expect:
+    client: exits 3 with outcome unknown and the read showing the entry; the operator's repeat with another document is reported as doing nothing, the original outcome still unknown
+    server: answers the operator's repeat 422 idempotency-key-reused; one act
+    shown: '"the key is recorded for another request; this send did nothing, and the original outcome is still unknown", the read "with fragment amb-04 at frv_..."; standard output empty; exit 3'
+    absent: [token and sentinels in stdout, stderr, argv]
+
+- id: AMB-06
+  setup: as AMB-04
+  action: fragment set amb-06 ...
+  exchange:
+    - PUT, committed by the server, its answer dropped
+    - PUT, the same key; no new key is sent
+  fault: >-
+    the first attempt commits and its answer is dropped; the case then rotates the fixture's own
+    digest key and raises its min_encryption_version to the new version, so the provider refuses
+    to compute under the version the record names
+  expect:
+    client: reports the repeat's 422 as outcome unknown, with the read, and sends no new key
+    server: answers the repeat 422 idempotency-key-reused, since it cannot compare it; one act
+    shown: '"the key is recorded for another request; this send did nothing, and the original outcome is still unknown", "with fragment amb-06 at frv_..."; exit 3'
+    absent: [token and sentinels in stdout, stderr, argv]
+
+- id: AMB-10
+  setup: as AMB-04
+  action: fragment set amb-10 ..., then the same command with the printed repeat flags and a changed file
+  exchange:
+    - four PUTs with one key, each closed by the injector before the server receives it
+    - the operator's repeat, which the server receives
+  fault: the injector closes every PUT's connection without passing it on, so no record exists
+  expect:
+    client: exits 3 with outcome unknown; reports the changed input's answer as its own result, never as a replay; no client check can prevent this (§8.4 item 4)
+    server: executes the changed input as a new request; one act
+    shown: '"with no fragment amb-10 entry"; then "Fragment amb-10 saved", without "already done earlier"; exit 0'
+    absent: [token and sentinels in stdout, stderr, argv]
+
+- id: AMB-11
+  setup: as AMB-10
+  action: the same command with the printed key, epoch and principal, and --if-match omitted
+  exchange: []
+  fault: as AMB-10; the other variants (another principal, another epoch) are write-cases.yaml's AMB-11
+  expect:
+    client: refuses before sending anything
+    server: receives nothing
+    shown: '"a repeat needs --idempotency-key, --expect-epoch, --expect-principal and --if-match ... nothing was sent"; exit 2'
+    absent: [token and sentinels in stdout, stderr, argv]
+
+- id: AMB-13
+  setup: as AMB-10
+  action: the same command with the printed repeat flags after the draft moved, then with --if-match given a freshly read ETag
+  exchange:
+    - four PUTs closed before the server receives them
+    - the repeat with the printed If-Match, answered 412
+    - the repeat with the fresh ETag, executed
+  fault: as AMB-10; the case then moves the draft in the database, as another author's write does
+  expect:
+    client: reports the 412 as this send doing nothing, the original outcome still unknown, with the read; reports the fresh ETag's answer as its own result; no client check can tell the fresh ETag from the printed one
+    server: answers 412 precondition-failed, then executes the fresh ETag's request; one act
+    shown: '"this send was refused (... 412 ... precondition-failed ...) and did nothing; the original outcome is still unknown", exit 3; then "Fragment amb-13 saved", exit 0'
+    absent: [token and sentinels in stdout, stderr, argv]

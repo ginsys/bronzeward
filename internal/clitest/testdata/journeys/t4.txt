@@ -1,0 +1,41 @@
+$ bronzewardctl --context human draft create --cluster {cluster} --title worker labels
+Draft drf_… open, revision 1.
+[exit 0]
+
+$ bronzewardctl --context human fragment set worker-labels --draft {draft} --layer role --file worker-labels.yaml
+Fragment worker-labels saved in draft drf_… (revision frv_…; draft revision 2).
+[exit 0]
+
+$ bronzewardctl --context human profile set workers --draft {draft} --fragments worker-labels,frv_…
+bronzewardctl: human (https://127.0.0.1:<port>): PUT /api/v1/drafts/drf_…/profiles/workers answered 422 Compilation refused the input (validation-failed): a pin must be the revision this draft proposes for its fragment or, with no entry for it, the fragment's head revision (instance req_…)
+Refused: path fragments[1], revision frv_….
+[exit 1]
+
+$ bronzewardctl --context human profile set workers --draft {draft} --fragments worker-labels
+Profile workers saved: pins worker-labels frv_… (draft revision 3).
+A profile pins revisions: after changing a fragment, set the profile again to use it.
+[exit 0]
+
+$ bronzewardctl --context human assignment set {machine} --draft {draft} --profiles workers
+Assignment saved (draft revision 4).
+[exit 0]
+
+$ bronzewardctl --context human draft show {draft}
+Draft drf_… "worker labels" open, revision 4, cluster cl_…
+  fragment    worker-labels                   frv_…  new
+  profile     workers                         prv_…  new
+  assignment  mch_…  asr_…  new
+Not rendered: publish to see each machine's configuration.
+[exit 0]
+
+$ bronzewardctl --context human machine show {machine}
+Machine   mch_…  cluster cl_…
+Endpoint  10.55.0.3:50000                 platform container
+Hardware  node ID none                    SMBIOS UUID 0b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b
+Scope     normal
+No configuration read recorded.
+Not applied or adopted by Bronzeward.
+No release selected.
+Health: not checked.
+[exit 0]
+

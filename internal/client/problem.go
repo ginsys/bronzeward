@@ -58,6 +58,18 @@ func (p *Problem) Error() string {
 		if p.Subject != "" {
 			s += " You are signed in as " + printable(p.Subject) + "."
 		}
+	case "validation-failed":
+		// The rule and where in the body: a path, position or name the server gives, never a value
+		// (client-contracts.md §8.2; #347).
+		var at []string
+		for _, k := range []string{"rule", "path", "paths", "position", "reference", "revision", "machine"} {
+			if v, ok := p.Doc[k]; ok {
+				at = append(at, k+" "+printable(fmt.Sprint(v)))
+			}
+		}
+		if len(at) > 0 {
+			s += "\nRefused: " + strings.Join(at, ", ") + "."
+		}
 	case "recovery-mode-active":
 		// A scope refusal names the machine and its scope state; without a scope it is the
 		// process's own restriction (§8.2, §8.5 item 1).
