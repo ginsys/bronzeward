@@ -190,6 +190,12 @@ describe("set aside (§8.4 item 3, §8.5 item 2, journeys §8)", () => {
     expect(sent.map((s) => s.path)).toEqual(["/recovery", "/clusters", "/recovery"]);
   });
 
+  test("set aside before any attempt that may have committed, it is not open: nothing committed", async () => {
+    const p = page([problem(503, "dependency-unavailable")], [EPOCH, "e2"]);
+    expect(await p.writes.submit(spec())).toEqual({ kind: "set-aside", why: EPOCH_CHANGED_ASIDE, ambiguous: false });
+    expect(p.writes.open).toEqual([]);
+  });
+
   test("a confirming read with no epoch sets it aside", async () => {
     const { writes, writesSent } = page([new TypeError("Failed to fetch")], [EPOCH, null]);
     expect(await writes.submit(spec())).toMatchObject({ kind: "set-aside", why: NO_EPOCH });

@@ -1,15 +1,17 @@
 // The page: sign-in (W1), the callback, the signed-out page, and the shell while signed in. Client
 // contracts §9.3, §9.5-§9.7, §10.3.
 
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { beginSignIn, CALLBACK_PATH, completeSignIn, discover, type Failure, localReading, PENDING_KEY, type Provider, Session, SIGNED_OUT_PATH, type Tokens } from "./auth.ts";
 import { type ClientConfig, loadClientConfig } from "./config.ts";
+import { useUnloadGuard, WriteNotices, WritesProvider } from "./forms.tsx";
 import { navigate, PageState, renewals } from "./page.ts";
 import { type Channel, Renewer } from "./renewer.ts";
 import { TRANSPORT_FAILURE } from "./request.ts";
 import { Deprecations, SignedIn, type SignedInProps, VersionFooter } from "./shell.tsx";
 import { NOT_ACCEPTED, ProblemFields, problemFields } from "./states.tsx";
+import { SIGN_IN_CHANGED, Writes } from "./write.ts";
 
 // §9.6 texts. The server says only `401`, so the page never names a cause it cannot read.
 export { NOT_ACCEPTED };
@@ -37,6 +39,10 @@ export function App() {
   const [view, setView] = useState<View>({ kind: "loading" });
   // §7 item 4: each route a response marked deprecated, once per page load.
   const [notices, setNotices] = useState<readonly string[]>([]);
+  // B10, B11: the page's writes, held in memory only, for the sign-in they were sent under.
+  const who = useRef<string | undefined>(undefined);
+  const [writes] = useState(() => new Writes(() => who.current));
+  useUnloadGuard(writes);
 
   useEffect(() => {
     // The page-level state (page.ts): every await below is followed by a check of its mark.
@@ -66,6 +72,7 @@ export function App() {
       renewer.release();
     };
     const forget = () => {
+      who.current = undefined;
       stop();
       session?.clear();
       session = undefined;
@@ -101,11 +108,14 @@ export function App() {
       // A renewal that answers after the page was refused or ended changes nothing on it.
       changed = () => {
         if (!page.to("changed")) return;
+        // AUTH-07: no write goes on under another account; the notice stays on the sign-in view.
+        writes.setAside(SIGN_IN_CHANGED);
         forget();
         offer(PRINCIPAL_CHANGED, config, provider);
       };
       const s = new Session(config, provider, tokens, { onPrincipalChange: () => changed?.(), ...renewer.hooks });
       session = s;
+      who.current = `${s.principal?.iss} ${s.principal?.sub}`;
       renewer.hold();
       // B1: the renewal goes through the lock holder; §9.3 item 3: by the redirect without rotation.
       const timer = renewals(page, {
@@ -157,6 +167,7 @@ export function App() {
           },
           onDeprecation: (route) => setNotices((n) => [...n, route]),
           signOut,
+          writes,
         },
       });
     };
@@ -206,9 +217,9 @@ export function App() {
       removeEventListener("pagehide", onHide);
       removeEventListener("pageshow", onShow);
     };
-  }, []);
+  }, [writes]);
 
-  return <Screen view={view} notices={notices} />;
+  return <WritesProvider value={writes}><Screen view={view} notices={notices} /></WritesProvider>;
 }
 
 // What each view shows; exported for the rendered-view tests. The deprecation notices stay on the
@@ -236,6 +247,7 @@ export function Screen({ view, notices = [] }: { view: View; notices?: readonly 
           <p role="alert" data-testid="status">{view.message}</p>
           <ProblemFields text={view.problem} />
           <Deprecations routes={notices} />
+          <WriteNotices go={(to) => location.assign(to)} />
           {view.reading !== undefined && <p data-testid="reading">This browser's own reading: {view.reading}.</p>}
           <button type="button" onClick={view.signIn}>
             Sign in with the identity provider

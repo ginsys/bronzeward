@@ -3,6 +3,7 @@
 // they show endpoint and node ID (G8).
 
 import type { components } from "./api/v1";
+import { AddClusterAction, RecordMachineAction } from "./forms.tsx";
 import { EmptyList, Head, Id, More, Ref, Scroll, short, useItem, useList, usePending } from "./list.tsx";
 
 export type Machine = components["schemas"]["MachineBody"];
@@ -117,6 +118,7 @@ export function Machines({ query, go }: { query: string; go: (to: string) => voi
       <Filter label="Cluster:" value={cluster} options={options} onChange={(v) => filter("cluster", v)} />
       {clusters.kind !== "loading" && unread}
       <Filter label="State:" value={state?.[0] ?? ""} options={STATES} onChange={(v) => filter("state", v)} />
+      <RecordMachineAction cluster={cluster} />
       {body}
       <p>Health is not checked.</p>
     </>
@@ -146,7 +148,7 @@ export function Clusters() {
       </>
     );
   }
-  return <><h2>Clusters</h2>{body}</>;
+  return <><h2>Clusters</h2><AddClusterAction />{body}</>;
 }
 
 export function ClusterItem({ id }: { id: string }) {

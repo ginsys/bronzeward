@@ -6,7 +6,8 @@ import type { ReactNode } from "react";
 import { type Problem, type ReadResult, TRANSPORT_FAILURE } from "./request.ts";
 
 export const WITHHELD = "Configuration not shown: it could not be redacted.";
-export const UNKNOWN = "Unknown whether this was saved: the connection dropped.";
+export const unknown = (why: string) => `Unknown whether this was saved: ${why}.`;
+export const UNKNOWN = unknown("the connection dropped");
 export const SET_ASIDE =
   "Your sign-in or the installation's epoch changed. A change with an unknown outcome is pending: it may already have been committed. It was not repeated, and repeating it stays disabled.";
 export const REPLAYED = "Already done earlier; showing that result.";
@@ -77,13 +78,20 @@ export const Conflict = ({ what, revision, onShow }: { what: string; revision: n
   <Status actions={button("Show their change", onShow)}>Someone changed this {what} (revision {revision}). Your text is not saved.</Status>
 );
 
+// A write's notice (B11): `detail` names its key, route and the resource to read, and `onDismiss`
+// ends it.
+interface Notice { onShow: () => void; detail?: ReactNode; onDismiss?: (() => void) | undefined; testid?: string }
+const dismiss = (onDismiss: (() => void) | undefined) => onDismiss !== undefined && button("Dismiss", onDismiss);
+
 // [Repeat exactly] only while the page holds the request, for the same sign-in and epoch.
-export const Unknown = ({ onRepeat, onShow }: { onRepeat?: (() => void) | undefined; onShow: () => void }) => (
-  <Status actions={onRepeat !== undefined ? button("Repeat exactly", onRepeat) : button("Show current state", onShow)}>{UNKNOWN}</Status>
+export const Unknown = ({ why, onRepeat, onShow, detail, onDismiss, testid }: Notice & { why?: string; onRepeat?: (() => void) | undefined }) => (
+  <Status testid={testid} actions={<>{onRepeat !== undefined ? button("Repeat exactly", onRepeat) : button("Show current state", onShow)}{dismiss(onDismiss)}</>}>
+    {why === undefined ? UNKNOWN : unknown(why)}{detail}
+  </Status>
 );
 
-export const SetAside = ({ onShow }: { onShow: () => void }) => (
-  <Status actions={<>{button("Repeat exactly", () => {}, true)}{button("Show current state", onShow)}</>}>{SET_ASIDE}</Status>
+export const SetAside = ({ onShow, detail, onDismiss, testid }: Notice) => (
+  <Status testid={testid} actions={<>{button("Repeat exactly", () => {}, true)}{button("Show current state", onShow)}{dismiss(onDismiss)}</>}>{SET_ASIDE}{detail}</Status>
 );
 
 export const Replayed = () => <Status>{REPLAYED}</Status>;
