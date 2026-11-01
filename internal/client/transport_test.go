@@ -137,14 +137,17 @@ func TestHTTPSProxyTrust(t *testing.T) {
 }
 
 // selfSigned is a certificate for 127.0.0.1 that no other test certificate signs.
-func selfSigned(t *testing.T) (tls.Certificate, []byte) {
+func selfSigned(t *testing.T) (tls.Certificate, []byte) { return selfSignedAs(t, "BWSYNTH-proxy") }
+
+// selfSignedAs is selfSigned for a certificate whose subject has the common name cn.
+func selfSignedAs(t *testing.T, cn string) (tls.Certificate, []byte) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
 	tmpl := &x509.Certificate{
-		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "BWSYNTH-proxy"},
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: cn},
 		IPAddresses: []net.IP{net.IPv4(127, 0, 0, 1)},
 		NotBefore:   time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
 		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
@@ -158,4 +161,40 @@ func selfSigned(t *testing.T) (tls.Certificate, []byte) {
 		t.Fatal(err)
 	}
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key, Leaf: leaf}, der
+}
+
+// TestRefusedCertificateIsEscaped: the subject of a refused certificate, the server's and a
+// proxy's, shows a tab as \x09 and keeps its backslashes single (client-contracts.md section 6
+// item 8), as %q would not.
+func TestRefusedCertificateIsEscaped(t *testing.T) {
+	cert, _ := selfSignedAs(t, "a\tb")
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	srv.TLS = &tls.Config{Certificates: []tls.Certificate{cert}}
+	srv.StartTLS()
+	defer srv.Close()
+	proxyURL, _ := url.Parse(srv.URL)
+	for name, get := range map[string]func() error{
+		"server": func() error {
+			hc, err := newHTTPClient(&Context{Name: "lab", Server: srv.URL, Credential: "automation"}, nil, func(*http.Request) (*url.URL, error) { return nil, nil }, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = hc.Get(srv.URL + "/livez")
+			return transportError(&Context{Name: "lab"}, strings.TrimPrefix(srv.URL, "https://"), err)
+		},
+		"proxy": func() error {
+			hc, err := newHTTPClient(&Context{Name: "lab", Server: "https://bw.example.invalid", Credential: "automation"}, nil,
+				func(*http.Request) (*url.URL, error) { return proxyURL, nil }, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = hc.Get("https://bw.example.invalid/livez")
+			return err
+		},
+	} {
+		err := get()
+		if tr := (*trust)(nil); !errors.As(err, &tr) || !strings.Contains(err.Error(), `subject "CN=a\x09b"`) || printable(err.Error()) != err.Error() {
+			t.Errorf("%s: %v; want a trust refusal naming the subject as CN=a\\x09b", name, err)
+		}
+	}
 }

@@ -49,7 +49,7 @@ func (e *env) contextCmd(args []string) error {
 		if err := client.UpdateConfig(func(cfg *client.Config) error {
 			x := cfg.Find(pos[0])
 			if x == nil {
-				return fmt.Errorf("context %q does not exist", pos[0])
+				return fmt.Errorf("context \"%s\" does not exist", client.Printable(pos[0]))
 			}
 			msg = "Current context: " + x.Where() + "."
 			if verb == "use" {
@@ -120,7 +120,7 @@ func (e *env) contextAdd(args []string) error {
 	case from != "" && byHand:
 		return usageError{errors.New("give --from or the identity provider's values by hand, not both")}
 	case oidc && x.Credential != "" && x.Credential != "oidc":
-		return usageError{fmt.Errorf("--from and the identity provider's flags need --credential oidc, not %q", x.Credential)}
+		return usageError{fmt.Errorf("--from and the identity provider's flags need --credential oidc, not \"%s\"", client.Printable(x.Credential))}
 	case from != "" && x.Server == "":
 		x.Server = from
 	}
@@ -160,7 +160,7 @@ func (e *env) contextAdd(args []string) error {
 	var current string
 	if err := client.UpdateConfig(func(cfg *client.Config) error {
 		if cfg.Find(x.Name) != nil {
-			return fmt.Errorf("context %q exists: remove it first", x.Name)
+			return fmt.Errorf("context \"%s\" exists: remove it first", client.Printable(x.Name))
 		}
 		cfg.Contexts = append(cfg.Contexts, x)
 		if cfg.Current == "" {

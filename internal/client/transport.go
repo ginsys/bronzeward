@@ -80,8 +80,8 @@ func newHTTPClient(x *Context, verbose io.Writer, from func(*http.Request) (*url
 			var v *tls.CertificateVerificationError
 			if errors.As(err, &v) && len(v.UnverifiedCertificates) > 0 {
 				c := v.UnverifiedCertificates[0]
-				return nil, &trust{fmt.Errorf("the certificate of the proxy %s (subject %q, issuer %q) is not trusted by the system trust store: %s; nothing was sent",
-					addr, c.Subject, c.Issuer, certReason(v.Err))}
+				return nil, &trust{fmt.Errorf("the certificate of the proxy %s (subject \"%s\", issuer \"%s\") is not trusted by the system trust store: %s; nothing was sent",
+					printable(addr), printable(c.Subject.String()), printable(c.Issuer.String()), certReason(v.Err))}
 			}
 			// tls quotes, in its error, certificate contents it cannot parse.
 			return nil, fmt.Errorf("the proxy %s, verified by the system trust store: %w", addr, &remote{why(err, "the TLS handshake failed"), err})
@@ -119,6 +119,6 @@ func refusedTrust(x *Context, host string, err error) error {
 	if x.CertificateAuthority != "" {
 		source = "the bundle " + x.CertificateAuthority
 	}
-	return &trust{fmt.Errorf("the certificate of %s (subject %q, issuer %q) is not trusted by %s: %s; nothing was sent",
-		host, c.Subject, c.Issuer, source, certReason(v.Err))}
+	return &trust{fmt.Errorf("the certificate of %s (subject \"%s\", issuer \"%s\") is not trusted by %s: %s; nothing was sent",
+		printable(host), printable(c.Subject.String()), printable(c.Issuer.String()), printable(source), certReason(v.Err))}
 }

@@ -437,7 +437,7 @@ func (c *Client) post(w *Write, key, epoch string) attempt {
 	a.sent, a.status, a.replayed = true, r.StatusCode, r.Header.Get("Idempotent-Replayed") == "true"
 	c.observe(route, r)
 	if r.StatusCode >= 300 && r.StatusCode < 400 {
-		a.err = fmt.Errorf("%s answered %s redirecting to %q, which bronzewardctl does not follow; it is not repeated",
+		a.err = fmt.Errorf("%s answered %s redirecting to \"%s\", which bronzewardctl does not follow; it is not repeated",
 			route, printable(r.Status), printable(r.Header.Get("Location")))
 		return a
 	}

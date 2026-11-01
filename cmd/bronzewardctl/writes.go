@@ -109,9 +109,13 @@ func (e *env) writeAfter(prep func(*client.Client) error, w *client.Write, say f
 			return nil
 		}
 		// The answer as served, unconverted for -o json and yaml alike (#347) but for the escape that
-		// every JSON output gets (client-contracts.md §6 item 8), chosen in memory, so it
+		// -o json gets (-o yaml has none; client-contracts.md §6 item 8), chosen in memory, so it
 		// is written once and a write failure is reported.
-		if out = client.EscapeJSON(r.Body); !bytes.HasSuffix(out, []byte("\n")) {
+		out = r.Body
+		if e.output == "json" {
+			out = client.EscapeJSON(out)
+		}
+		if !bytes.HasSuffix(out, []byte("\n")) {
 			out = append(out, '\n')
 		}
 	}

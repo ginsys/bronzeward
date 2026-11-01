@@ -93,7 +93,7 @@ func Live(x *Context, verbose io.Writer) error {
 	r.Body.Close()
 	if r.StatusCode != http.StatusNoContent {
 		if l := r.Header.Get("Location"); l != "" {
-			return x.fail(fmt.Errorf("GET /livez answered %s redirecting to %q, which bronzewardctl does not follow", printable(r.Status), l))
+			return x.fail(fmt.Errorf("GET /livez answered %s redirecting to \"%s\", which bronzewardctl does not follow", printable(r.Status), printable(l)))
 		}
 		return x.fail(fmt.Errorf("GET /livez answered %s, not 204: this is not a Bronzeward server, or not its base URL", printable(r.Status)))
 	}
@@ -186,8 +186,8 @@ func (c *Client) once(path string) (*Response, bool, error) {
 	defer r.Body.Close()
 	c.observe(route, r)
 	if r.StatusCode >= 300 && r.StatusCode < 400 {
-		return nil, false, c.Context.fail(fmt.Errorf("%s answered %s redirecting to %q; bronzewardctl follows no redirect, and nothing was resent",
-			route, printable(r.Status), r.Header.Get("Location")))
+		return nil, false, c.Context.fail(fmt.Errorf("%s answered %s redirecting to \"%s\"; bronzewardctl follows no redirect, and nothing was resent",
+			route, printable(r.Status), printable(r.Header.Get("Location"))))
 	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
