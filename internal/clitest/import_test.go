@@ -1,6 +1,7 @@
 package clitest
 
 import (
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -127,19 +128,23 @@ func (e *importEnv) fragment(name string) result {
 
 // crash waits until the run holds its staging decrypt at the provider, the run's first step, so
 // that it wrote no event, then kills serve and starts it again on the same database and port. The
-// client's requests wait meanwhile, as they would for a server that is back.
-func (e *importEnv) crash(held int32) {
+// client's requests wait meanwhile, as they would for a server that is back. The waiting requests
+// are let go however the restart ends, so that the injector's cleanup does not wait on them.
+func (e *importEnv) crash(held int32) error {
 	e.t.Helper()
 	for deadline := time.Now().Add(30 * time.Second); e.bao.held.Load() <= held; time.Sleep(50 * time.Millisecond) {
 		if time.Now().After(deadline) {
-			e.t.Fatal("the run never asked the provider to decrypt its envelope")
+			return errors.New("the run never asked the provider to decrypt its envelope")
 		}
 	}
 	up := make(chan struct{})
 	e.in.set(func(http.ResponseWriter, *http.Request) bool { <-up; return false }, nil)
+	defer func() {
+		close(up)
+		e.in.set(nil, nil)
+	}()
 	e.f.restart()
-	close(up)
-	e.in.set(nil, nil)
+	return nil
 }
 
 // TestImports runs the import lifecycle through the CLI against a server with a provider and short
@@ -246,8 +251,12 @@ func TestImports(t *testing.T) {
 			done := make(chan result, 1)
 			began := time.Now()
 			go func() { done <- e.run("import", c.verb, ing) }()
-			e.crash(held)
+			// The command's goroutine reports to t, so t waits for it before any failure ends t.
+			err := e.crash(held)
 			r := <-done
+			if err != nil {
+				t.Fatal(err)
+			}
 			e.f.want(r, 3, "import "+ing+": its claim is "+c.state+" and its lease lapsed", "still runs: the outcome is unknown",
 				"bronzewardctl import status "+ing, "bronzewardctl import takeover "+ing, "bronzewardctl import abandon "+ing)
 			if strings.Contains(r.err, "not applied") {
