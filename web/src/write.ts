@@ -106,7 +106,10 @@ export class Writes {
     if (w.outcome !== undefined && !this.repeatable(w)) return Promise.resolve(w.outcome);
     this.all.add(w);
     w.outcome = undefined;
-    w.running = this.run(w).then((o) => {
+    w.running = this.run(w).then((r) => {
+      // Set aside while its last attempt was in flight, a write that then got no answer is not
+      // offered for repeating; an answer still settles it.
+      const o: Outcome = r.kind === "unknown" && w.aside !== undefined ? { kind: "set-aside", why: w.aside, ambiguous: true } : r;
       if (o.kind === "unknown") w.ambiguous = true;
       w.outcome = o;
       w.running = undefined;

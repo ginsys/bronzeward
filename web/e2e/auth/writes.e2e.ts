@@ -1,6 +1,6 @@
 // The first write views (ginsys/bronzeward#338) against a disposable deployment through the
 // injector: AMB-01, AMB-03, AMB-05, AMB-07, AMB-08, AMB-09, AMB-12, TLS-03's write and AUTH-07's
-// pending write (conformance/cases/), a second submit, the leave guard and a keyboard-only add.
+// pending write (conformance/cases/), a second submit, the leave guards and a keyboard-only add.
 // Each write is "Add cluster" as h-author, with a synthetic name and a random cluster ID. The
 // injector's `steps` fault answers each send of the write in turn and lets the rest through; its
 // epoch commits a new epoch in the deployment's database, as a recovery entry does.
@@ -176,6 +176,22 @@ describe("the write views (#338)", () => {
     await expect($("main h2")).toHaveText("Add cluster");
     await release();
     await expect(result()).toHaveText(expect.stringContaining("recorded as"), { wait: 20_000 });
+  });
+
+  // WebDriver accepts the browser's own leave dialog of a reload, so the case reads the guard's
+  // answer to an unload event and then reloads: the pending write is dropped, never repeated.
+  it("a reload with a write pending is guarded, and drops the write", async () => {
+    await add([], { held: "/clusters" });
+    await browser.waitUntil(async () => (await holding()).includes("/clusters"), { timeout: 20_000, timeoutMsg: "the write was not held" });
+    const guarded = () => browser.execute(() => !dispatchEvent(new Event("beforeunload", { cancelable: true })));
+    expect(await guarded()).toBe(true);
+    await browser.refresh();
+    expect(await guarded()).toBe(false);
+    await release();
+    // Longer than the three repeats' 1 + 2 + 4 s.
+    await browser.pause(8_000);
+    await oneWrite(1);
+    expect(await notice().isExisting()).toBe(false);
   });
 
   it("keyboard only: the form is filled and sent without the pointer", async () => {
