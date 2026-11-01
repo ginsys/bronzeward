@@ -73,8 +73,7 @@ func (c *Client) Watch(op string, w Watch) (*apitypes.OperationBody, error) {
 		before, began := steps, time.Now()
 		opened, err := false, error(nil)
 		if pages {
-			opened = true
-			_, err = c.drain(op, &last, w)
+			opened, err = true, c.drain(op, &last, w)
 		} else {
 			opened, pages, err = c.stream(op, &last, w)
 		}
@@ -83,14 +82,14 @@ func (c *Client) Watch(op string, w Watch) (*apitypes.OperationBody, error) {
 		}
 		// The attempt's own time: an operation read that is slow does not skip the backoff.
 		took := time.Since(began)
-		o, err := c.Operation(op)
+		o, epoch, err := c.operation(op)
 		if err != nil {
 			return nil, err
 		}
 		if Terminal(o.State) {
-			// A drain that crossed into another epoch read events of a restored installation, where
-			// the operation can be in another state: read it again before the watch ends.
-			if crossed, err := c.drain(op, &last, w); err != nil || !crossed {
+			// Events of another epoch than the operation read's are of a restored installation, where
+			// the operation can be in another state: it is read again before the watch ends.
+			if err := c.drain(op, &last, w); err != nil || epoch == "" || last == "" || epochOf(last) == epoch {
 				return o, err
 			}
 			continue
@@ -110,17 +109,17 @@ func (c *Client) Watch(op string, w Watch) (*apitypes.OperationBody, error) {
 	}
 }
 
-// Operation reads GET /operations/{op}.
-func (c *Client) Operation(op string) (*apitypes.OperationBody, error) {
+// operation reads GET /operations/{op} and the epoch the read held.
+func (c *Client) operation(op string) (*apitypes.OperationBody, string, error) {
 	r, err := c.Get("/operations/" + url.PathEscape(op))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	var o apitypes.OperationBody
 	if err := json.Unmarshal(r.Body, &o); err != nil {
-		return nil, c.Context.fail(fmt.Errorf("GET /api/v1/operations/%s: %w", printable(op), err))
+		return nil, "", c.Context.fail(fmt.Errorf("GET /api/v1/operations/%s: %w", printable(op), err))
 	}
-	return &o, nil
+	return &o, r.Header.Get("Bronzeward-Epoch"), nil
 }
 
 // renewSoon renews a sign-in about to expire, so a long wait goes on (§9.5 item 4). A failure
@@ -242,24 +241,24 @@ func (c *Client) stream(op string, last *string, w Watch) (opened, pages bool, e
 
 // drain reads the JSON event pages to their end and shows every event after *last (§8.6 item 2).
 // Events of another epoch than the last one shown are read after a restore or a recovery entry:
-// what was shown is cleared, every event shown again, and crossed reports it.
-func (c *Client) drain(op string, last *string, w Watch) (crossed bool, err error) {
+// what was shown is cleared and every event shown again.
+func (c *Client) drain(op string, last *string, w Watch) error {
 	items, err := c.List("/operations/" + url.PathEscape(op) + "/events")
 	if err != nil {
-		return false, err
+		return err
 	}
 	for i, raw := range items {
 		var ev Event
 		if err := json.Unmarshal(raw, &ev); err != nil {
-			return crossed, c.Context.fail(fmt.Errorf("GET /api/v1/operations/%s/events: an event does not decode: %w", printable(op), err))
+			return c.Context.fail(fmt.Errorf("GET /api/v1/operations/%s/events: an event does not decode: %w", printable(op), err))
 		}
 		if i == 0 && *last != "" && epochOf(ev.ID) != epochOf(*last) {
 			c.cleared(w, "the installation was restored or entered recovery mode")
-			*last, crossed = "", true
+			*last = ""
 		}
 		show(w, ev, last)
 	}
-	return crossed, nil
+	return nil
 }
 
 // cleared says why what the watch showed no longer holds, then clears it.
