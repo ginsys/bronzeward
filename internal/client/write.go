@@ -82,26 +82,29 @@ type Unknown struct {
 	SetAside, Ambiguous                                                    bool
 }
 
-func (u *Unknown) Error() string {
+func (u *Unknown) Error() string { return strings.Join(u.Lines(), "\n") }
+
+// Lines are the lines of the block; a line feed inside one is text.
+func (u *Unknown) Lines() []string {
 	head := "outcome unknown: " + u.Why
 	if u.SetAside && u.Ambiguous {
 		head = "set aside, not repeated: " + u.Why + ". Its outcome is unknown: it may already have been committed"
 	} else if u.SetAside {
 		head = "set aside, not repeated: " + u.Why + ". No attempt of it can have committed anything"
 	}
-	s := fmt.Sprintf("%s: %s: %s.\n  key:       %s\n  request:   %s\n  context:   %s\n  principal: %s\n  epoch:     %s\n",
-		u.Where, u.Route, head, u.Key, u.Route, u.Where, printable(u.Principal), printable(u.Epoch))
+	ls := []string{fmt.Sprintf("%s: %s: %s.", u.Where, u.Route, head), "  key:       " + u.Key, "  request:   " + u.Route, "  context:   " + u.Where,
+		"  principal: " + printable(u.Principal), "  epoch:     " + printable(u.Epoch)}
 	repeat := fmt.Sprintf("--idempotency-key %s --expect-epoch %s --expect-principal %s", u.Key, ShellWord(u.Epoch), ShellWord(u.Principal))
 	if u.IfMatch != "" {
-		s += "  if-match:  " + printable(u.IfMatch) + "\n"
+		ls = append(ls, "  if-match:  "+printable(u.IfMatch))
 		repeat += " --if-match " + ShellWord(u.IfMatch)
 	}
-	s += "  read:      " + u.Shows + "; read it again with: " + printable(u.Check) + "\n"
+	ls = append(ls, "  read:      "+u.Shows+"; read it again with: "+printable(u.Check))
 	input := "the same input"
 	if u.Input != "" {
 		input = "the same input, with " + u.Input + ","
 	}
-	return s + "To repeat exactly this request, give " + input + " and: " + repeat
+	return append(ls, "To repeat exactly this request, give "+input+" and: "+repeat)
 }
 
 // ShellWord is s as one shell word, its unprintable characters escaped.
@@ -192,7 +195,7 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 			if try > len(backoff) {
 				break
 			}
-			fmt.Fprintf(c.Notices, "%s: %v; repeat %d of %d with the same key in %s\n", c.Context.Where(), last, try, len(backoff), backoff[try-1])
+			fmt.Fprintf(c.Notices, "%s: %s; repeat %d of %d with the same key in %s\n", c.Context.Where(), Shown(last), try, len(backoff), backoff[try-1])
 			sleep(backoff[try-1])
 			if now, err := c.principal(nil); err != nil {
 				u.Why = "the credential's principal cannot be read (" + printable(err.Error()) + "), so it cannot be compared with " + printable(who)
@@ -229,14 +232,14 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 			return nil, c.unknown(w, u)
 		case p != nil && a.replayed:
 			// The key's stored refusal, replayed: the earlier attempt's known outcome (§8.4 item 2).
-			return nil, fmt.Errorf("%w\nThis is the stored answer to an earlier attempt with this key: that attempt was refused.", a.err)
+			return nil, &Blocked{a.err, []string{"This is the stored answer to an earlier attempt with this key: that attempt was refused."}}
 		case p == nil && (a.status == 0 || a.status >= 500), p != nil && (code == "internal-error" || a.status >= 500 && !p.unavailable() && code != "epoch-superseded"):
 			ambiguous = true
 		case p != nil && p.unavailable():
 		case p != nil && p.Status == http.StatusUnauthorized && c.signIn != nil && !renewed && !c.signIn.failed && c.signIn.tokens.RefreshToken != "":
 			renewed = true
 			if rerr := c.renew(); rerr != nil {
-				fmt.Fprintf(c.Notices, "%s: %v.\n", c.Context.Where(), rerr)
+				fmt.Fprintf(c.Notices, "%s: %s.\n", c.Context.Where(), Shown(rerr))
 				return nil, c.after(ambiguous, w, u, a.err)
 			}
 		case code == "conflict" && p.Doc["request"] != nil && p.Doc["epoch"] != nil:
@@ -271,7 +274,7 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 		}
 	}
 	if !ambiguous {
-		return nil, fmt.Errorf("%w\nNot done: none of the %d attempts committed anything of its own.", last, len(backoff)+1)
+		return nil, &Blocked{last, []string{fmt.Sprintf("Not done: none of the %d attempts committed anything of its own.", len(backoff)+1)}}
 	}
 	return nil, c.after(ambiguous, w, u, last)
 }
@@ -316,8 +319,9 @@ func (c *Client) moved(w *Write, err error) error {
 			now = fmt.Sprint(d.Revision)
 		}
 	}
-	return fmt.Errorf("%w\nThe draft changed since you last read it (you saw revision %s, it is now revision %s). Nothing was saved. Review the change before writing again:\n  bronzewardctl --context %s draft show %s",
-		err, DraftRevision(w.IfMatch), now, ShellWord(c.Context.Name), ShellWord(w.Draft))
+	return &Blocked{err, []string{
+		fmt.Sprintf("The draft changed since you last read it (you saw revision %s, it is now revision %s). Nothing was saved. Review the change before writing again:", DraftRevision(w.IfMatch), now),
+		fmt.Sprintf("  bronzewardctl --context %s draft show %s", ShellWord(c.Context.Name), ShellWord(w.Draft))}}
 }
 
 // DraftRevision is the draft revision a draft's ETag names: the server writes "<revision>-<token>"
@@ -335,7 +339,7 @@ func DraftRevision(etag string) string {
 func (c *Client) keepETag(w *Write, r *Response) {
 	if et := r.Header.Get("ETag"); w.Draft != "" && et != "" {
 		if err := KeepETag(c.Context, w.Draft, et); err != nil {
-			fmt.Fprintf(c.Notices, "%s: keeping the ETag of %s: %v\n", c.Context.Where(), w.Draft, err)
+			fmt.Fprintf(c.Notices, "%s: keeping the ETag of %s: %s\n", c.Context.Where(), printable(w.Draft), Shown(err))
 		}
 	}
 }

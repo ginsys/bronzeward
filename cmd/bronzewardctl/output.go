@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"reflect"
-	"strings"
 	"text/tabwriter"
 
 	"github.com/ginsys/bronzeward/internal/client"
@@ -55,16 +54,11 @@ func ef(format string, args ...any) error {
 	return fmt.Errorf(format, out...)
 }
 
-// linesShown is an error whose text is escaped line by line; errors.Is and errors.As see through it.
+// linesShown is an error whose text is client.Shown's: escaped, but for the line breaks of the
+// client's own multi-line errors; errors.Is and errors.As see through it.
 type linesShown struct{ err error }
 
-func (e linesShown) Error() string {
-	ls := strings.Split(e.err.Error(), "\n")
-	for i, l := range ls {
-		ls[i] = client.Printable(l)
-	}
-	return strings.Join(ls, "\n")
-}
+func (e linesShown) Error() string { return client.Shown(e.err) }
 
 func (e linesShown) Unwrap() error { return e.err }
 

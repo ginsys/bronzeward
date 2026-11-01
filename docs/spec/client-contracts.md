@@ -382,6 +382,10 @@ it. It holds no secret.
      the line feed escape, because those line feeds are the document's lines. Each line is then
      escaped, the tab included, and shown whole. A person sees a tab as `\x09` and a carriage return as
      `\x0d`. The line itself is never rewrapped.
+   - Every error passes one place before the CLI prints it. That place escapes all of the text,
+     line feeds included, so an error from outside the CLI (a keyring or a library) cannot start
+     a line of its own. The one exception is a multi-line error that the CLI builds itself, such as
+     the outcome-unknown block: each of its lines is escaped and the CLI joins them.
    - Where the CLI shows a value as JSON text that it encodes itself (a timeline entry, an
      operation result or error), the JSON encoder leaves DEL and the C1 range raw. The text is
      escaped again by this rule.

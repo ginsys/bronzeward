@@ -70,6 +70,10 @@ func (p *Problem) Error() string {
 	return s
 }
 
+// Lines are the lines of the answer. Every part from the server is escaped when it is added, so a line
+// feed in the text is one of the client's own.
+func (p *Problem) Lines() []string { return strings.Split(p.Error(), "\n") }
+
 func (p *Problem) str(k string) string { s, _ := p.Doc[k].(string); return printable(s) }
 
 // Host is the server's host and port, as a trust failure names it.
