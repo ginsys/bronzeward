@@ -51,6 +51,24 @@ func shown(out string) [][]string {
 	return all
 }
 
+// lockedBuffer is a process's output, which the test reads while the process writes it.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
 // watch is operation watch of op on the context "human".
 func (e *watchEnv) watch(op string, extra ...string) result {
 	return e.ctl(append([]string{"--context", "human", "operation", "watch", op}, extra...)...)
@@ -219,7 +237,8 @@ var operationCases = map[string]func(*testing.T, *watchEnv){
 			" records Applied from the node's own bytes. Nothing was sent to the machine.\n")
 		_, types := e.served(t, e.adoption)
 		got := shown(r.out)
-		if len(types) < 3 || len(got) != 1 || !slices.Equal(got[0], types) || strings.Contains(r.out, "received ") {
+		// An adoption records two events: adoption and applied-change.
+		if len(types) < 2 || len(got) != 1 || !slices.Equal(got[0], types) || strings.Contains(r.out, "received ") {
 			t.Errorf("shown %q; want each of the %d events %q once, in order, at the server's time:\n%s", got, len(types), types, r.out)
 		}
 		// The stream request, then one page per event.
@@ -461,7 +480,8 @@ var operationCases = map[string]func(*testing.T, *watchEnv){
 		}, nil)
 		args := []string{"--context", "human", "operation", "watch", op, "--timeout", "5m"}
 		cmd := f.command(nil, args...)
-		var out, errb bytes.Buffer
+		var out lockedBuffer
+		var errb bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &out, &errb
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
@@ -485,6 +505,16 @@ var operationCases = map[string]func(*testing.T, *watchEnv){
 		case <-reopened:
 		case <-time.After(2 * time.Minute):
 			t.Fatal("the watch did not open the stream again within two minutes of the entry")
+		}
+		// The second stream's request comes before its events: Ctrl-C waits until the watch shows
+		// them again, with the new one.
+		for deadline := time.Now().Add(time.Minute); ; time.Sleep(100 * time.Millisecond) {
+			if got := shown(out.String()); len(got) == 2 && len(got[1]) > len(got[0]) {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("the watch did not show the events again with the new one within a minute:\n%s", out.String())
+			}
 		}
 		cmd.Process.Signal(os.Interrupt)
 		waited := make(chan error, 1)
