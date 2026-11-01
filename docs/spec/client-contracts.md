@@ -766,8 +766,8 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
      list goes with its cursor ([§8.2](#82-errors)). W3 still shows the machine's own rows with
      the observations' failure; only the latest read's line needs the observations. If the machine
      read also failed, its failure is still shown (`web/src/machine.test.ts:230`,
-     `web/src/machine.test.ts:252`). Today W3 shows only its heading and the failures when the
-     observations keep nothing (`web/src/machine.tsx:292`), which
+     `web/src/machine.test.ts:322`). Today W3 shows only its heading and the failures when the
+     observations keep nothing (`web/src/machine.tsx:325`), which
      [#443](https://github.com/ginsys/bronzeward/issues/443) fixes.
    - A new view keeps nothing of the old view. When the view changes, the old view's answer still
      shows at first. A later failure does not keep it, and the restart flag does not carry over
@@ -1643,8 +1643,8 @@ Limits:
   expected-epoch check, which are read with
   [#277](https://github.com/ginsys/bronzeward/issues/277) and
   [#293](https://github.com/ginsys/bronzeward/issues/293) respectively applied (see the opening),
-  and those to the web client in [§8.6](#86-event-resumption) item 6, which are read with
-  [#438](https://github.com/ginsys/bronzeward/pull/438) applied. They move as the code changes.
+  and those to the web client in [§8.6](#86-event-resumption) item 6, which are read at
+  `3ed1b48`. They move as the code changes.
 - Every choice in [§13](#13-alternatives-and-open-choices) and every implementation choice above
   is decided. This document decides no credential policy.
 - It does not change any role, human-only rule, route, schema or server setting.
