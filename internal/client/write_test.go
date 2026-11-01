@@ -244,6 +244,11 @@ func TestOutcomes(t *testing.T) {
 			says:     "it may already have been committed",
 			recovery: func(int) string { return "" },
 			post:     func(_ int, w http.ResponseWriter, _ *http.Request) { drop(w) }},
+		{name: "a repeat refused for its input says nothing of the attempt it repeats (AMB-04's shape)", repeat: true, posts: 1, unknown: true,
+			says: "answered 422 BWSYNTH (validation-failed) (instance req_BWSYNTH)) and did nothing; the original outcome is still unknown",
+			post: func(_ int, w http.ResponseWriter, _ *http.Request) {
+				problemAnswer(w, http.StatusUnprocessableEntity, "validation-failed", "")
+			}},
 		{name: "a 403 to a repeat says nothing of the attempt it repeats", repeat: true, posts: 1, unknown: true, says: "403 BWSYNTH (forbidden)",
 			post: func(_ int, w http.ResponseWriter, _ *http.Request) {
 				problemAnswer(w, http.StatusForbidden, "forbidden", `,"roles":["author"]`)
