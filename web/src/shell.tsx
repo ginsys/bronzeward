@@ -286,7 +286,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
   const ended = useCallback((e: Ending) => (e.kind === "unauthenticated" ? onUnauthenticated(e) : onRevoked(e)), [onUnauthenticated, onRevoked]);
   writes.onEnded = ended;
   useEffect(() => () => {
-    if (writes.client === client) writes.client = undefined;
+    writes.disconnect(client);
     if (writes.onEnded === ended) writes.onEnded = undefined;
   }, [writes, client, ended]);
   // A navigation to another path moves focus to the new page, where the keyboard and a screen

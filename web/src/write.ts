@@ -108,6 +108,13 @@ export class Writes {
     return () => void this.listeners.delete(f);
   };
   readonly snapshot = () => this.version;
+  // The shell that bound `client` is gone: no write is repeated through it, so the notices render
+  // again without [Repeat exactly].
+  disconnect(client: Client): void {
+    if (this.client !== client) return;
+    this.client = undefined;
+    this.changed();
+  }
   private changed(): void {
     this.version++;
     for (const f of this.listeners) f();
