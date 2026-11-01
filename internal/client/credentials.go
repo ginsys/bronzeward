@@ -313,6 +313,10 @@ func (c *Client) adopt(t *Tokens) {
 // renewalLock takes a renewal lock (§9.2 item 3), the file l, which holds nothing secret. A token
 // file's is the file p.lock beside it: it belongs to the file, not the context, so contexts that
 // share a token file (BRONZEWARD_TOKEN_FILE overrides every one) renew one at a time.
+//
+// It waits at most lockBound (§9.2 item 3, ginsys/bronzeward#437): longer than a holder can
+// legitimately keep it, a renewal's bounded read, refresh and write together, so a holder that
+// still has it is taken to hang.
 func renewalLock(l string) (func(), error) {
 	if err := os.MkdirAll(filepath.Dir(l), 0o700); err != nil {
 		return nil, err
@@ -321,12 +325,23 @@ func renewalLock(l string) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		f.Close()
-		return nil, err
+	for deadline := time.Now().Add(lockBound); ; time.Sleep(lockPoll) {
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			return func() { f.Close() }, nil
+		}
+		if !errors.Is(err, syscall.EWOULDBLOCK) || !time.Now().Before(deadline) {
+			f.Close()
+			if errors.Is(err, syscall.EWOULDBLOCK) {
+				return nil, fmt.Errorf("another bronzewardctl process holds the renewal lock %s and did not release it within four minutes; nothing was changed", l)
+			}
+			return nil, err
+		}
 	}
-	return func() { f.Close() }, nil
 }
+
+// lockBound is how long renewalLock waits for another process's lock, polling every lockPoll.
+var lockBound, lockPoll = 4 * time.Minute, 100 * time.Millisecond
 
 // discover reads the provider's discovery document through issuerClient; it returns that client
 // and a context that carries it, which ends after d. The issuer is checked first, as context add

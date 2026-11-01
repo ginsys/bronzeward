@@ -19,9 +19,10 @@ import (
 	ss "github.com/zalando/go-keyring/secret_service"
 )
 
-// TestKeyringWritesUnbounded checks that a credential-store write slower than within's bound is
-// waited for: one given up on would land after its caller released the renewal lock.
-func TestKeyringWritesUnbounded(t *testing.T) {
+// TestKeyringWritesNotAbandoned checks that a credential-store write slower than within's bound is
+// waited for, not left running by within: its own bound is the Secret Service calls' deadline
+// (TestSecretServiceBounded).
+func TestKeyringWritesNotAbandoned(t *testing.T) {
 	bound, set, del := storeBound, keyringSetCall, keyringDeleteCall
 	t.Cleanup(func() { storeBound, keyringSetCall, keyringDeleteCall = bound, set, del })
 	storeBound = 10 * time.Millisecond

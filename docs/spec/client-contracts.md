@@ -852,7 +852,15 @@ current token expires
    prompt: the store is read, and may prompt, for at most a minute before the lock is taken;
    with `--no-input` it never prompts, and a locked store is refused as one that failed.
    Under the lock no call to the store shows a prompt, so a store locked by then refuses the
-   command, with nothing written or removed. One that locks while a renewal waits on the identity
+   command, with nothing written or removed. Each store operation under the lock gets at most a
+   minute for its calls together, because neither the session bus nor the D-Bus library ends a
+   call that gets no answer. A store that does not answer in time fails the command. If the call
+   that writes or removes the entry was not yet sent, nothing was written or removed. If that call
+   itself got no answer, the command says that its outcome is unknown: the store may still carry
+   it out after the lock is released. A command waits at most four minutes for a lock that another
+   bronzewardctl process holds, longer than a renewal's bounded read, refresh and write together,
+   and then fails, with nothing changed, naming the lock file.
+   One that locks while a renewal waits on the identity
    provider refuses the renewed pair: its rotated refresh token is lost, as with any failed write,
    and the operator signs in again once the current access token expires.
    The opt-in is the context's `oidc.tokenFile`

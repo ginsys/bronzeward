@@ -1,10 +1,12 @@
 package client
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"slices"
+	"time"
 
 	"github.com/godbus/dbus/v5"
 	"github.com/zalando/go-keyring"
@@ -85,10 +87,8 @@ var (
 	keyringGetHeldCall, keyringSetCall, keyringDeleteCall = ssGet, ssSet, ssDelete
 )
 
-// keyringSet and keyringDelete are not bounded by within: a write given up on would still land
-// after its caller released the renewal lock, over a newer sign-in or one cleared meanwhile. So a
-// store that stops answering mid-write holds the lock, and blocks other bronzewardctl commands on
-// that context, until it answers. That wait is never an unlock prompt: a locked store is refused.
+// keyringSet and keyringDelete are bounded by the Secret Service calls' own deadline (ssBound),
+// not by within, which would leave the call running after it gave up.
 func keyringSet(user, v string) error {
 	return keyringSetCall(keyringService, user, v)
 }
@@ -114,21 +114,48 @@ const (
 // go-keyring's calls it never shows a prompt, which they wait on for as long as the operator
 // leaves it: a collection that is locked, or any answer that needs a prompt, is refused
 // (errStoreLocked).
+//
+// Its calls together get ssBound (§9.2 item 3): neither the session bus nor the D-Bus library
+// ends a call that gets no answer (ginsys/bronzeward#437). At the deadline the connection closes,
+// which fails the call in flight, and the operation returns errStoreSlow.
 func secretService(f func(c *dbus.Conn, col dbus.BusObject) error) error {
-	c, err := dbus.ConnectSessionBus()
-	if err != nil {
-		return err
+	ctx, cancel := context.WithTimeout(context.Background(), ssBound)
+	defer cancel()
+	err := func() error {
+		c, err := dbus.ConnectSessionBus(dbus.WithContext(ctx))
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+		path := ssLogin
+		v, err := c.Object(ssName, ssPath).GetProperty(ssIface + "Service.Collections")
+		if listed, _ := v.Value().([]dbus.ObjectPath); err != nil || !slices.Contains(listed, path) {
+			path = ssAlias
+		}
+		if err := ssUnlocked(c, path); err != nil {
+			return err
+		}
+		return f(c, c.Object(ssName, path))
+	}()
+	if err != nil && ctx.Err() != nil {
+		return errStoreSlow
 	}
-	defer c.Close()
-	path := ssLogin
-	v, err := c.Object(ssName, ssPath).GetProperty(ssIface + "Service.Collections")
-	if listed, _ := v.Value().([]dbus.ObjectPath); err != nil || !slices.Contains(listed, path) {
-		path = ssAlias
+	return err
+}
+
+// ssBound is how long one Secret Service operation under the renewal lock waits for its answers.
+var ssBound = time.Minute
+
+// errStoreSlow: the Secret Service did not answer within ssBound, before any write was sent.
+var errStoreSlow = errors.New("the system credential store did not answer within a minute; nothing was written or removed")
+
+// unsettled is the error of an operation whose write, sent, got no answer within ssBound: the
+// Secret Service may still carry it out after the renewal lock is released.
+func unsettled(err error, sent bool, what string) error {
+	if sent && errors.Is(err, errStoreSlow) {
+		return fmt.Errorf("the system credential store did not answer within a minute; the sign-in may still be %s after this command ends", what)
 	}
-	if err := ssUnlocked(c, path); err != nil {
-		return err
-	}
-	return f(c, c.Object(ssName, path))
+	return err
 }
 
 // ssUnlocked asks the Secret Service to unlock p, which an unlocked object needs no prompt for,
@@ -200,7 +227,8 @@ func ssGet(service, user string) (string, error) {
 }
 
 func ssSet(service, user, pass string) error {
-	return secretService(func(c *dbus.Conn, col dbus.BusObject) error {
+	sent := false
+	err := secretService(func(c *dbus.Conn, col dbus.BusObject) error {
 		session, err := ssSession(c)
 		if err != nil {
 			return err
@@ -210,23 +238,28 @@ func ssSet(service, user, pass string) error {
 			ssIface + "Item.Attributes": dbus.MakeVariant(map[string]string{"username": user, "service": service}),
 		}
 		var item, prompt dbus.ObjectPath
+		sent = true
 		if err := col.Call(ssIface+"Collection.CreateItem", 0, props, ss.NewSecret(session, pass), true).Store(&item, &prompt); err != nil {
 			return err
 		}
 		return ssNoPrompt(c, prompt)
 	})
+	return unsettled(err, sent, "written")
 }
 
 func ssDelete(service, user string) error {
-	return secretService(func(c *dbus.Conn, col dbus.BusObject) error {
+	sent := false
+	err := secretService(func(c *dbus.Conn, col dbus.BusObject) error {
 		item, err := ssFind(col, service, user)
 		if err != nil {
 			return err
 		}
 		var prompt dbus.ObjectPath
+		sent = true
 		if err := c.Object(ssName, item).Call(ssIface+"Item.Delete", 0).Store(&prompt); err != nil {
 			return err
 		}
 		return ssNoPrompt(c, prompt)
 	})
+	return unsettled(err, sent, "removed")
 }
