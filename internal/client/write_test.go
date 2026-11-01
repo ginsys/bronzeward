@@ -623,6 +623,17 @@ func TestETagState(t *testing.T) {
 	if et, _ := ETag(&again, "drf_BWSYNTH-other"); et != `"BWSYNTH-etag-other"` {
 		t.Errorf("dropping the old server's entry dropped the new server's: %q", et)
 	}
+	// Forgetting the entry's last ETag writes it with none, which reads back with no map: keeping
+	// the next one at the same epoch must still work.
+	if err := KeepETag(&again, "drf_BWSYNTH-other", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := KeepETag(&again, "drf_BWSYNTH-next", `"BWSYNTH-etag-next"`); err != nil {
+		t.Fatal(err)
+	}
+	if et, _ := ETag(&again, "drf_BWSYNTH-next"); et != `"BWSYNTH-etag-next"` {
+		t.Errorf("after the last ETag was forgotten, the next was kept as %q", et)
+	}
 }
 
 // TestDeleteNotReplayedByTransport: Go's transport replays an http.NoBody request that carries
