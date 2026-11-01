@@ -29,7 +29,7 @@ func clusterAdd(name string, extra ...string) []string {
 		"--contract", "v1.13", "--talos-cluster-id", base64.URLEncoding.EncodeToString(sum[:])}, extra...)
 }
 
-// sent records the key and the expected epoch of each POST the injector received.
+// sent records the key and the expected epoch of each write the injector received.
 type sent struct {
 	mu             sync.Mutex
 	keys, expected []string
@@ -38,8 +38,13 @@ type sent struct {
 // posting is a hook that records each POST and answers the nth, from 0, with step; reads go to the
 // server.
 func (s *sent) posting(step func(n int, w http.ResponseWriter, r *http.Request)) func(http.ResponseWriter, *http.Request) bool {
+	return s.sending(http.MethodPost, step)
+}
+
+// sending is posting for requests of method.
+func (s *sent) sending(method string, step func(n int, w http.ResponseWriter, r *http.Request)) func(http.ResponseWriter, *http.Request) bool {
 	return func(w http.ResponseWriter, r *http.Request) bool {
-		if r.Method != http.MethodPost {
+		if r.Method != method {
 			return false
 		}
 		s.mu.Lock()
@@ -51,7 +56,7 @@ func (s *sent) posting(step func(n int, w http.ResponseWriter, r *http.Request))
 	}
 }
 
-// one fails unless n POSTs were received, all with one key and one expected epoch.
+// one fails unless n writes were received, all with one key and one expected epoch.
 func (s *sent) one(t *testing.T, n int) {
 	t.Helper()
 	s.mu.Lock()
