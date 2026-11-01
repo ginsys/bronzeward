@@ -4,7 +4,7 @@
 // as If-Match (client contracts §8.3). A document is typed into a plain textarea (B12) and lives in
 // this page's state only: never stored, and guarded while unsaved (§11.4).
 
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import type { components } from "./api/v1";
 import { Form, field, Result, Text, useSend, useUnsaved, useWrites } from "./forms.tsx";
 import { Id, Ref, short, useItem, useList, useReads, usePending } from "./list.tsx";
@@ -37,6 +37,17 @@ export const keptETag = (draft: string, epoch: string | undefined) => {
   return e !== undefined && e.epoch === epoch ? e.etag : undefined;
 };
 export const forgetETag = (draft: string) => void etags.delete(draft);
+
+// A write's done outcome the first time it is asked for, else undefined: the page acts on each
+// done write once, however often it renders after it.
+type Done = Extract<Outcome, { kind: "done" }>;
+const acted = new WeakSet<Write>();
+export function doneOnce(w: Write | undefined): Done | undefined {
+  const o = w?.outcome;
+  if (w === undefined || o?.kind !== "done" || acted.has(w)) return undefined;
+  acted.add(w);
+  return o;
+}
 
 const enc = encodeURIComponent;
 const isSource = (e: Draft["entries"][number]): e is Source => e.kind !== "import-base";
@@ -134,10 +145,10 @@ export function DraftItem({ id }: { id: string }) {
   const [selected, select] = useState<string | undefined>();
   const pending = usePending(item, "the draft");
   const d = item.kind === "ok" ? item.data : undefined;
-  const written = (etag: string | undefined) => {
+  const written = useCallback((etag: string | undefined) => {
     if (etag !== undefined) keepETag(id, etag, writes?.client?.currentEpoch);
     reread((x) => x + 1);
-  };
+  }, [id, writes]);
   const seeChange = () => {
     keep.current = true;
     reread((x) => x + 1);
@@ -176,10 +187,10 @@ function DiscardDraft({ draft, written }: { draft: Draft; written: (etag: string
   const [note, setNote] = useState<string | undefined>();
   const o = w?.outcome;
   useEffect(() => {
-    if (o?.kind !== "done") return;
+    if (doneOnce(w) === undefined) return;
     forgetETag(draft.id);
     written(undefined);
-  }, [o, draft.id, written]);
+  }, [o, w, draft.id, written]);
   const discard = () => {
     if (!confirm(`Discard draft ${draft.id} "${draft.title}"? It cannot be published afterwards.`)) return;
     const ifMatch = keptETag(draft.id, writes?.client?.currentEpoch);
@@ -235,6 +246,9 @@ export function FragmentPane({ draft, entry, written, seeChange }: { draft: Draf
   const [note, setNote] = useState<string | undefined>();
   const [conflict, setConflict] = useState<{ mine: Held; revision?: number; theirs?: string } | undefined>();
   const [w, send] = useSend();
+  // What the last save or removal sent: once it is done, that text is saved, also for an entry
+  // new in the draft, whose pane reads no revision.
+  const sent = useRef<Held>(EMPTY);
   const text = useRef<HTMLTextAreaElement>(null);
   const marks = useRef<HTMLTextAreaElement>(null);
   const open = draft.state === "open";
@@ -255,7 +269,11 @@ export function FragmentPane({ draft, entry, written, seeChange }: { draft: Draf
 
   const o = w?.outcome;
   useEffect(() => {
-    if (o?.kind === "done") written(o.etag);
+    const done = doneOnce(w);
+    if (done !== undefined) {
+      setSaved(sent.current);
+      written(done.etag);
+    }
     if (o?.kind === "refused" && o.status === 412 && conflict === undefined) {
       const mine = held;
       setConflict({ mine });
@@ -273,11 +291,14 @@ export function FragmentPane({ draft, entry, written, seeChange }: { draft: Draf
     const lines = held.marks.split("\n").filter((l) => l !== "");
     const declarations = Object.keys(held.declared).length === 0 && held.embedded.length === 0 ? null : { references: held.declared, embedded: held.embedded };
     setNote(undefined);
+    sent.current = held;
     send({ method: "PUT", path, ifMatch: m, ingests: true, resource: `/drafts/${draft.id}`, body: { layer: held.layer, document: held.document, marks: lines.length === 0 ? null : lines, declarations } });
   };
   const remove = () => {
     const m = ifMatch();
     if (m === undefined) return setNote(NO_ETAG);
+    // A removal drops the entry's text on purpose: once done, the editor holds nothing unsaved.
+    sent.current = held;
     send({ method: "DELETE", path, ifMatch: m, resource: `/drafts/${draft.id}`, body: undefined });
   };
   const revert = async () => {
