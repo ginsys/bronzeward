@@ -51,6 +51,7 @@ func (e *env) approve(args []string) error {
 			view = view[:len(view)-1] // its one state line points at this approve command
 		}
 		printLines(tw, view)
+		tw.Flush() // the prediction keeps its own column, not the evidence's
 		printLines(tw, predict(c, &p))
 		if p.Operation == "apply-config" && p.DriftRecord != nil {
 			fmt.Fprintf(tw, "Overwrites\tthe drifted configuration of drift record %d, which no reviewer has seen.\n", *p.DriftRecord)
