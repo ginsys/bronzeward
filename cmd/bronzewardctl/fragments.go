@@ -109,18 +109,9 @@ func (e *env) fragmentBody(in apitypes.FragmentInput, file, decl string, marks b
 		defer f.Close()
 		src = f
 	}
-	doc, err := io.ReadAll(io.LimitReader(src, maxBody+1))
-	switch {
-	case err != nil:
-		return nil, fmt.Errorf("--file: reading the document: %w; nothing was sent", err)
-	case len(doc) > maxBody:
-		return nil, fmt.Errorf("the document is over the server's 1 MiB body limit; nothing was sent")
-	case !utf8.Valid(doc):
-		return nil, fmt.Errorf("the document is not UTF-8 text; nothing was sent")
-	}
-	// The file opened, not its name: /dev/stdin or /dev/tty is a terminal too.
-	if err := terminalLines(doc, isTerminal(src)); err != nil {
-		return nil, err
+	doc, err := readInput(src, "the document")
+	if err != nil {
+		return nil, fmt.Errorf("--file: %w; nothing was sent", err)
 	}
 	in.Document = string(doc)
 	if marks {
@@ -142,7 +133,12 @@ func (e *env) fragmentBody(in apitypes.FragmentInput, file, decl string, marks b
 // the file, which stays out of the output. A second YAML document is refused: yaml.Unmarshal reads
 // the first only, so a declaration in a later one would be dropped without a word (design §8).
 func declarations(p string) (*apitypes.Declarations, error) {
-	b, err := os.ReadFile(p)
+	f, err := os.Open(p)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	b, err := readInput(f, "the declarations file")
 	if err != nil {
 		return nil, err
 	}
@@ -225,16 +221,37 @@ func (e *env) readMarks(docOnStdin bool) ([]string, error) {
 // without an error, so a line this long from a terminal may have been cut short.
 const terminalLine = 4095
 
-// terminalLines refuses a document read from a terminal with a line long enough that canonical mode
+// readInput reads an input the CLI takes whole from f, what naming it in a refusal. It refuses more
+// than the body limit, text that is not UTF-8, and a terminal line that may have been cut short.
+// The check is on the file opened, not its name: /dev/stdin or /dev/tty is a terminal too. The
+// refusals quote nothing from the input. The document and the declarations are read here, and
+// marks a line at a time by scanMarks, with the same terminal limit. No other input is read.
+func readInput(f *os.File, what string) ([]byte, error) {
+	b, err := io.ReadAll(io.LimitReader(f, maxBody+1))
+	switch {
+	case err != nil:
+		return nil, fmt.Errorf("reading %s: %w", what, err)
+	case len(b) > maxBody:
+		return nil, fmt.Errorf("%s is over the server's 1 MiB body limit", what)
+	case !utf8.Valid(b):
+		return nil, fmt.Errorf("%s is not UTF-8 text", what)
+	}
+	if err := terminalLines(b, isTerminal(f), what); err != nil {
+		return nil, err
+	}
+	return b, nil
+}
+
+// terminalLines refuses an input read from a terminal with a line long enough that canonical mode
 // may have cut it short. The refusal names the line number only.
-func terminalLines(doc []byte, terminal bool) error {
+func terminalLines(b []byte, terminal bool, what string) error {
 	if !terminal {
 		return nil
 	}
-	for n, line := range bytes.Split(doc, []byte("\n")) {
+	for n, line := range bytes.Split(b, []byte("\n")) {
 		if len(line) >= terminalLine {
-			return fmt.Errorf("line %d of the document is %d bytes or more, which a terminal can cut short; give a long document in a file or on standard input that is not a terminal; nothing was sent",
-				n+1, terminalLine)
+			return fmt.Errorf("line %d of %s is %d bytes or more, which a terminal can cut short; give it from a file or a pipe, not a terminal",
+				n+1, what, terminalLine)
 		}
 	}
 	return nil

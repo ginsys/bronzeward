@@ -204,7 +204,7 @@ func TestDocumentTerminalLines(t *testing.T) {
 		{"one byte under the terminal limit", "machine:\n" + long[:terminalLine-1] + "\n", true, ""},
 		{"a long line from a pipe", "machine:\n  " + long + ": x\n", false, ""},
 	} {
-		err := terminalLines([]byte(c.doc), c.terminal)
+		err := terminalLines([]byte(c.doc), c.terminal, "the document")
 		switch {
 		case c.says == "" && err != nil:
 			t.Errorf("%s: %v; want the document taken", c.name, err)

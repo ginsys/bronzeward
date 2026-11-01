@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
@@ -35,10 +36,11 @@ func pty(t *testing.T) (*os.File, string) {
 	return ctl, fmt.Sprintf("/dev/pts/%d", n)
 }
 
-// TestDocumentFromTerminalFile checks that a document read from a terminal is refused with a line
-// that canonical mode cut short, whatever name --file gives the terminal: the check is on the file
-// opened, not on "-".
-func TestDocumentFromTerminalFile(t *testing.T) {
+// TestTerminalInputs checks every input fragment set reads, each from a real terminal: a line that
+// canonical mode cut short is refused, by its position only, and nothing is sent. The check is on
+// the file opened, so a terminal named by its path is refused as standard input is. Each cut input
+// is still valid, so without the check it would be sent.
+func TestTerminalInputs(t *testing.T) {
 	f := &draftFake{}
 	srv := httptest.NewServer(f)
 	defer srv.Close()
@@ -49,20 +51,51 @@ func TestDocumentFromTerminalFile(t *testing.T) {
 	if got := run([]string{"draft", "show", "drf_BWSYNTH"}, &o, &e); got != 0 {
 		t.Fatalf("draft show: exit %d, stderr %q", got, e.String())
 	}
-	o.Reset()
-	e.Reset()
-	ctl, tty := pty(t)
-	// The kernel keeps 4095 bytes of the long line and drops the rest. Ctrl-D at the start of a line
-	// ends the input.
-	if _, err := ctl.WriteString("machine:\n  BWSYNTH-" + strings.Repeat("k", 5000) + ": x\n\x04"); err != nil {
+	doc := filepath.Join(t.TempDir(), "doc.yaml")
+	if err := os.WriteFile(doc, []byte("machine:\n  nodeLabels:\n    BWSYNTH-doc: x\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got := run([]string{"fragment", "set", "worker-labels", "--draft", "drf_BWSYNTH", "--layer", "role", "--file", tty}, &o, &e)
-	if want := "line 2 of the document is 4095 bytes or more, which a terminal can cut short"; got != 1 || !strings.Contains(e.String(), want) ||
-		strings.Contains(e.String(), "BWSYNTH-") {
-		t.Errorf("exit %d, stderr %q; want 1 and %q, with no document text", got, e.String(), want)
-	}
-	if took := f.took(); len(took) != 0 {
-		t.Errorf("sent %v", took)
+	// The kernel keeps 4095 bytes of the long line and drops the rest. Ctrl-D at the start of a line
+	// ends the input, and an empty line ends the marks.
+	long := "BWSYNTH-" + strings.Repeat("k", 5000)
+	for _, c := range []struct {
+		name  string
+		args  func(tty string) []string
+		stdin bool
+		input string
+		says  string
+	}{
+		{"--file names the terminal", func(tty string) []string { return []string{"--file", tty} }, false,
+			"machine:\n  " + long + ": x\n\x04", "line 2 of the document is 4095 bytes or more, which a terminal can cut short"},
+		{"--file - on a terminal", func(string) []string { return []string{"--file", "-"} }, true,
+			"machine:\n  " + long + ": x\n\x04", "line 2 of the document is 4095 bytes or more, which a terminal can cut short"},
+		{"--declarations names the terminal", func(tty string) []string { return []string{"--file", doc, "--declarations", tty} }, false,
+			"embedded:\n- path: machine." + long + "\n  format: yaml\n\x04", "line 2 of the declarations file is 4095 bytes or more, which a terminal can cut short"},
+		{"--marks from a terminal", func(string) []string { return []string{"--file", doc, "--marks"} }, true,
+			"machine.files\nmachine." + long + "\n\n", "mark 2 is 4095 bytes or more, which a terminal can cut short"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			ctl, tty := pty(t)
+			if c.stdin {
+				in, err := os.OpenFile(tty, os.O_RDWR|syscall.O_NOCTTY, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				old := stdin
+				stdin = in
+				t.Cleanup(func() { stdin = old; in.Close() })
+			}
+			if _, err := ctl.WriteString(c.input); err != nil {
+				t.Fatal(err)
+			}
+			var o, e bytes.Buffer
+			got := run(append([]string{"fragment", "set", "worker-labels", "--draft", "drf_BWSYNTH", "--layer", "role"}, c.args(tty)...), &o, &e)
+			if got != 1 || !strings.Contains(e.String(), c.says) || strings.Contains(e.String(), "BWSYNTH-") {
+				t.Errorf("exit %d, stderr %q; want 1 and %q, with no input text", got, e.String(), c.says)
+			}
+			if took := f.took(); len(took) != 0 {
+				t.Errorf("sent %v", took)
+			}
+		})
 	}
 }
