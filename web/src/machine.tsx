@@ -246,11 +246,13 @@ const byBasis = (items: Observation[]) => [...items].sort((x, y) => y.basis - x.
 // What W3 shows of a read within one view (#424): its last answer, kept under a read again that
 // failed, and whether a read restarted it from its first page, said through the reads after it. A
 // new path or view, and a dropped read (a restart that failed), keep nothing; a new epoch and the
-// process's recovery refusal end the page, and a refusal of the credentials never reaches it.
-export interface Kept<T> { view: string; data: T | undefined; restarted: boolean }
+// process's recovery refusal end the page, and a refusal of the credentials never reaches it. Only
+// an answer new to `was` says it restarted: a new view first shows the old view's answer.
+export interface Kept<T> { view: string; load?: Load<T> | Dropped; data: T | undefined; restarted: boolean }
 export function kept<T>(was: Kept<T> | undefined, load: Load<T> | Dropped, view: string, restarted: (d: T) => boolean = () => false): Kept<T> {
   const k = was?.view === view && load.kind !== "loading" && load.kind !== "dropped" ? was : { view, data: undefined, restarted: false };
-  return load.kind === "ok" ? { view, data: load.data, restarted: k.restarted || restarted(load.data) } : k;
+  if (load.kind !== "ok") return { ...k, load };
+  return { view, load, data: load.data, restarted: k.restarted || (load !== was?.load && restarted(load.data)) };
 }
 function useKept<T>(load: Load<T> | Dropped, restarted?: (d: T) => boolean): Kept<T> {
   const { view } = useReads();
@@ -276,6 +278,11 @@ function MachineState({ id, path, tl, older, busy }: { id: string; path: string;
   const m = useItem<Machine>(path);
   const [obs] = useList<Observation>(`${path}/observations`, "", true);
   const [km, ko] = [useKept(m), useKept(obs, (o) => o.restarted)];
+  return <MachineShown id={id} m={m} obs={obs} km={km} ko={ko} tl={tl} older={older} busy={busy} />;
+}
+
+// W3 as read: what each read keeps, with a read again's failure above it.
+export function MachineShown({ id, m, obs, km, ko, tl, older, busy }: { id: string; m: Load<Machine>; obs: Load<Listed<Observation>> | Dropped; km: Kept<Machine>; ko: Kept<Listed<Observation>>; tl: Load<Timeline<Entry>> | Dropped; older: (() => void) | undefined; busy: boolean }) {
   const [pm, po, timeline] = [usePending(m, "the machine"), usePending(obs, "the observations"), usePending(tl, "the timeline")];
   if (km.data === undefined) return <><h2>Machine {short(id)}</h2>{pm}</>;
   if (ko.data === undefined) return <><h2>Machine {short(id)}</h2>{po}</>;

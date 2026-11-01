@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ADOPTED, advanced, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, kept, latestUnread, nextTimeline, type Observation, Observations, POLL_MS, polled, queued, readLater, readOlder, sentences, type Timeline, TimelineRows, UNREAD } from "./machine.tsx";
+import { ADOPTED, advanced, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, kept, latestUnread, MachineShown, nextTimeline, type Observation, Observations, POLL_MS, polled, queued, readLater, readOlder, sentences, type Timeline, TimelineRows, UNREAD } from "./machine.tsx";
 import { type Reads, ReadsProvider, RESTARTED } from "./list.tsx";
 import type { Machine } from "./machines.tsx";
 import type { ReadResult } from "./request.ts";
@@ -207,6 +207,24 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
     expect(after.restarted).toBe(true);
     expect(kept(after, ok(false), "w", flag).restarted).toBe(false);
     expect(kept(kept(undefined, ok(false), "v", flag), ok(false), "v", flag).restarted).toBe(false);
+    // A view that changes only the query first shows the old view's answer: its flag stays behind.
+    const old = ok(true);
+    const moved = kept(kept(kept(undefined, old, "v", flag), old, "w", flag), ok(false), "w", flag);
+    expect(moved.restarted).toBe(false);
+  });
+
+  test("#424: W3 shows a read again's failure above the data kept, and the observations' notice from what is kept", () => {
+    const m = machine({ frozen: true });
+    const read = { items: [obsA], next: undefined, restarted: false };
+    const failed = { kind: "unavailable" as const, status: 503, problem: null };
+    const reads = { go: () => {}, failure: () => "FAILED" } as unknown as Reads;
+    const out = renderToStaticMarkup(createElement(ReadsProvider, { value: reads }, createElement(MachineShown, {
+      id: "mch_a", m: failed, obs: { kind: "ok", data: read }, km: { view: "v", data: m, restarted: false }, ko: { view: "v", data: read, restarted: true },
+      tl: { kind: "ok", data: { ...UNREAD, read: true } }, older: undefined, busy: false,
+    })));
+    expect(out).toMatch(/<h2>Machine mch_a<\/h2>FAILED<p>Cluster /);
+    expect(out).toContain(FROZEN);
+    expect(out).toContain('data-testid="observations-restarted"');
   });
 
   test("#424 item 2: a read again that fails, its 503 retries spent too, keeps the last answer under it; a new path, view or a dropped read keeps nothing", () => {
