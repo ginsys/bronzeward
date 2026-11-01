@@ -1,0 +1,136 @@
+# Shared conformance case records (docs/spec/client-contracts.md §12) of the CLI's write layer
+# (decisions T9 and T10 of #256), run by write_test.go TestWriteCases: exactly the cases recorded
+# here, in this order, against a disposable bronzeward serve behind the in-process TLS injector.
+# Data is synthetic: fixture-issuer tokens for the humans h-all and h-author, both holding author.
+# Each case sends cluster add, POST /api/v1/clusters, a route without If-Match, signed in as h-all
+# through the oidc context "human", whose epoch a whoami read sets first.
+#
+# A recovery entry needs a configured provider, which this server lacks, so the cases that need
+# one commit the new epoch in the database as the entry does: a recovery_epoch row and
+# installation_state.epoch, with recovery mode left off. The server reads the epoch from the
+# database on every request. Human tokens stay valid across it; automation tokens would not.
+
+- id: AMB-01
+  setup: 'every answer carries "Connection: close", so each request takes a new connection'
+  action: cluster add --name amb-01 ...
+  exchange:
+    - GET /api/v1/server
+    - "POST /api/v1/clusters, headers: Idempotency-Key, Bronzeward-Expected-Epoch"
+    - GET /api/v1/recovery, the confirming read
+    - POST /api/v1/clusters, the same key
+  fault: the injector closes the first POST's connection before its TLS handshake
+  expect:
+    client: repeats after 1 s with the same key, since nothing reached the server
+    server: receives the POST once; one act
+    shown: '"repeat 1 of 3 with the same key", then "Cluster cl_... recorded"; exit 0'
+    absent: [token in stdout, stderr, argv, state directory]
+
+- id: AMB-03
+  setup: as AMB-01, without the connection fault
+  action: cluster add --name amb-03 ...
+  exchange:
+    - POST /api/v1/clusters
+    - GET /api/v1/recovery
+    - POST /api/v1/clusters, the same key
+  fault: the first POST reaches the server, which commits it; the injector replaces its 201 with 500 internal-error
+  expect:
+    client: repeats with the same key; shows the replayed result as its own
+    server: answers the repeat 201 with Idempotent-Replayed true; one act
+    shown: '"already done earlier; showing that result", "Cluster cl_... recorded"; exit 0'
+    absent: [token in stdout, stderr, argv, state directory]
+
+- id: AMB-05
+  setup: as AMB-03
+  action: cluster add --name amb-05 ...
+  exchange:
+    - POST /api/v1/clusters, committed, its answer dropped
+    - GET /api/v1/recovery, the confirming read, under the new epoch
+    - GET /api/v1/clusters, the resource read
+  fault: the injector drops the first POST's connection after the server answered it, then commits a new epoch
+  expect:
+    client: does not repeat; sets the write aside and reads the resource
+    server: receives one POST; one act
+    shown: '"set aside, not repeated: the epoch is now ep_...", the key, the reference epoch, the read showing the cluster, the repeat flags; standard output empty; exit 3'
+    absent: [token in stdout, stderr, argv, state directory]
+
+- id: AMB-07
+  setup: as AMB-03, signed in as a human principal
+  action: cluster add --name amb-07 ...
+  exchange:
+    - POST /api/v1/clusters, committed, its answer dropped
+    - GET /api/v1/recovery, the confirming read, still the reference epoch
+    - POST /api/v1/clusters, the same key and Bronzeward-Expected-Epoch, after the new epoch
+    - GET /api/v1/clusters
+  fault: as AMB-05, but the new epoch is committed after the confirming read, when the repeat arrives
+  expect:
+    client: sets the write aside on 409 conflict with request and epoch; sends no new key
+    server: answers the repeat 409 conflict from the earlier epoch's record; one act
+    shown: '"set aside, not repeated: the key''s record is from an earlier epoch", the read showing the cluster; standard output empty; exit 3'
+    absent: [token in stdout, stderr, argv, state directory]
+
+- id: AMB-09
+  setup: as AMB-03
+  action: cluster add --name amb-09 ...; then the same input with the printed repeat flags
+  exchange:
+    - POST /api/v1/clusters, committed, its answer dropped
+    - three times GET /api/v1/recovery and POST /api/v1/clusters, the same key, answered 503
+    - "the operator's repeat: GET /api/v1/recovery, GET /api/v1/server, POST /api/v1/clusters, the printed key and epoch"
+  fault: the first POST's answer dropped; the injector answers every repeat 503 dependency-unavailable without forwarding it
+  expect:
+    client: repeats three times after 1 s, 2 s and 4 s; reports the outcome unknown, not "Not done"; the operator's repeat is replayed
+    server: one act, from the first POST
+    shown: '"outcome unknown: an attempt may have committed", the read showing the cluster; exit 3; then "already done earlier; showing that result"; exit 0'
+    absent: [token in stdout, stderr, argv, state directory]
+
+- id: AMB-11
+  setup: as AMB-05, whose block gives the repeat flags; for the principal variant the token file holds h-author's sign-in
+  action: cluster add --name amb-11 ... with the printed --idempotency-key, --expect-epoch and --expect-principal
+  exchange:
+    - "principal variant: none"
+    - "epoch variant: GET /api/v1/recovery only"
+  fault: another principal signed in; the epoch changed from the printed --expect-epoch
+  expect:
+    client: refuses before sending the write
+    server: no act
+    shown: '"not the given --expect-principal"; exit 2; then "not the given --expect-epoch"; exit 2'
+    absent: [token in stdout, stderr, argv, state directory]
+
+- id: AMB-12
+  setup: as AMB-03
+  action: cluster add --name amb-12 ...
+  exchange:
+    - POST /api/v1/clusters, dropped before the server receives it
+    - GET /api/v1/recovery, still the reference epoch
+    - POST /api/v1/clusters, the same key and Bronzeward-Expected-Epoch, after the new epoch
+    - GET /api/v1/clusters
+  fault: the injector reads the first POST and closes its connection without forwarding it; it commits a new epoch when the repeat arrives
+  expect:
+    client: sets the write aside on 412 epoch-mismatch
+    server: answers 412 epoch-mismatch naming the new epoch; no act, no cluster
+    shown: '"set aside, not repeated: the epoch is now ep_..., and this send committed nothing", the read showing no cluster; standard output empty; exit 3'
+    absent: [token in stdout, stderr, argv, state directory]
+
+- id: TLS-02 write
+  setup: as AMB-03; a second server as the redirect target, counting requests
+  action: cluster add --name tls-02 ...
+  exchange:
+    - POST /api/v1/clusters
+  fault: the injector answers the POST 307 to the target's origin
+  expect:
+    client: does not follow; sends nothing to the target; does not repeat
+    server: the injector sees the POST once; the target sees no request
+    shown: the 307 and its target, "does not follow"; the outcome-unknown block; standard output empty; exit 3
+    absent: [token in stdout, stderr, argv, state directory]
+
+- id: AUTH-07 set-aside
+  setup: as AMB-03, the stored sign-in of h-all with a refresh token; the provider's refresh answer is a sign-in of h-author
+  action: cluster add --name auth-07 ...
+  exchange:
+    - POST /api/v1/clusters, answered 401 by the injector
+    - the refresh grant at the provider
+  fault: the injector answers the first POST 401 unauthenticated without forwarding it
+  expect:
+    client: renews once, finds another subject, and sets the write aside without repeating it; the changed-subject half is #263's
+    server: receives no POST; no act
+    shown: '"set aside, not repeated: the credential now names <issuer>|h-author, not the principal <issuer>|h-all"; standard output empty; exit 3'
+    absent: [token in stdout, stderr, argv, state directory]
