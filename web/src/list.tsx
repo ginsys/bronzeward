@@ -160,8 +160,8 @@ export function useList<T>(path: string, query: string, all: boolean, keep?: Kee
 }
 
 // An item read each time its path changes, showing loading, and each time the view changes or the
-// page reads again, keeping what it shows until the read answers.
-export function useItem<T>(path: string, keep?: Keep): Load<T> {
+// page reads again, keeping what it shows until the read answers. A change of `n` reads it again.
+export function useItem<T>(path: string, keep?: Keep, n = 0): Load<T> {
   const { client, settle, undropped, again, view } = useReads();
   const [item, put, own] = useHeld<T>();
   const [held, lost] = useKeep(keep, own);
@@ -175,7 +175,7 @@ export function useItem<T>(path: string, keep?: Keep): Load<T> {
     }
     void client.read<T>(path).then((res) => settleKept(settle, lost, res, put, () => live && ok(), held));
     return () => void (live = false);
-  }, [client, settle, undropped, put, held, lost, view, path, again]);
+  }, [client, settle, undropped, put, held, lost, view, path, again, n]);
   return item;
 }
 
@@ -193,7 +193,7 @@ export function Ref({ to, id, children }: { to: string; id: string; children?: R
 
 // The view each identifier prefix links to; any other identifier is shown shortened.
 const VIEWS: Record<string, string> = {
-  cl: "clusters", mch: "machines", frg: "fragments", frv: "fragment-revisions", prf: "profiles", prv: "profile-revisions",
+  cl: "clusters", drf: "drafts", mch: "machines", frg: "fragments", frv: "fragment-revisions", prf: "profiles", prv: "profile-revisions",
   asg: "assignments", asr: "assignment-revisions", rel: "releases", pln: "plans", op: "operations", dep: "dependencies",
 };
 export const viewOf = (id: string) => {

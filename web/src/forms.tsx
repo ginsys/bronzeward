@@ -79,24 +79,36 @@ export function WriteNotices({ go }: { go: (to: string) => void }) {
   });
 }
 
-// The in-app router's guard: a move to another page while a write is pending or unknown asks first,
-// repeating the notices. The writes stay, and so do their notices. A notice's own [Show current
-// state] (`notice`, W11) is the notice's way out: it asks nothing on the writes' account. `from` is
+// The editors holding text not saved, each by what it edits (#339): never stored, only guarded.
+export const unsaved = new Set<string>();
+export function useUnsaved(what: string, dirty: boolean): void {
+  useEffect(() => {
+    if (!dirty) return;
+    unsaved.add(what);
+    return () => void unsaved.delete(what);
+  }, [what, dirty]);
+}
+
+// The in-app router's guard: a move to another page while a write is pending or unknown, or while
+// an editor holds unsaved text, asks first, repeating the notices. The writes stay, and so do their
+// notices. A notice's own [Show current state] (`notice`, W11) is the notice's way out: it asks
+// nothing on the writes' account, but still asks for unsaved text, which leaving drops. `from` is
 // the page shown, which Back and Forward have already left in `location` when they ask.
 export function leaving(writes: Writes, to: string, notice = false, from = location.pathname): boolean {
   const open = notice ? [] : writes.open;
-  if (open.length === 0 || new URL(to, location.href).pathname === new URL(from, location.href).pathname) return true;
+  if ((open.length === 0 && unsaved.size === 0) || new URL(to, location.href).pathname === new URL(from, location.href).pathname) return true;
   const lines = open.map((w) => (w.outcome === undefined && w.doubt === undefined && w.repeating === undefined && w.aside === undefined ? "Sent, with no answer yet." : "Unknown whether this was saved.") + record(w).named + detail(w, record(w).to));
+  for (const what of unsaved) lines.push(`Unsaved text in ${what}: leaving drops it.`);
   return confirm(`${lines.join("\n")}\nLeave this page?`);
 }
 
-// A reload or a tab close drops every pending write, so it is guarded by the browser's own dialog,
-// unless the page is being left by a notice's own [Show current state]. That exemption covers one
-// unload only: if the operator stops the navigation, the next reload or close asks again.
+// A reload or a tab close drops every pending write and unsaved text, so it is guarded by the
+// browser's own dialog. A notice's own [Show current state] exempts the writes for one unload only:
+// if the operator stops the navigation, the next reload or close asks again. Unsaved text still asks.
 export function guardsUnload(writes: Writes): boolean {
   const exempt = writes.unloading;
   writes.unloading = false;
-  return writes.open.length > 0 && !exempt;
+  return (writes.open.length > 0 && !exempt) || unsaved.size > 0;
 }
 export function useUnloadGuard(writes: Writes): void {
   useEffect(() => {
@@ -120,7 +132,7 @@ export function PageNotices() {
 
 // One form's logical write: a second submit while it runs, or while its outcome is unknown, sends
 // nothing new. A new write, under a new key, starts only after it ended or its notice was dismissed.
-function useSend(): [Write | undefined, (spec: WriteSpec) => void] {
+export function useSend(): [Write | undefined, (spec: WriteSpec) => void] {
   const writes = useWrites()!;
   const current = useRef<Write>(undefined);
   const [, shown] = useState<Write>();
@@ -186,7 +198,7 @@ export function Result({ w, done }: { w: Write | undefined; done: (data: unknown
   }
 }
 
-function Form({ title, label, onSubmit, w, done, children }: { title?: string; label: string; onSubmit: (data: FormData) => void; w: Write | undefined; done: (data: unknown) => ReactNode; children: ReactNode }) {
+export function Form({ title, label, onSubmit, w, done, children }: { title?: string; label: string; onSubmit: (data: FormData) => void; w: Write | undefined; done: (data: unknown) => ReactNode; children: ReactNode }) {
   const writes = useWrites()!;
   const held = w !== undefined && writes.open.includes(w);
   const submit = (e: FormEvent<HTMLFormElement>) => {
@@ -202,8 +214,8 @@ function Form({ title, label, onSubmit, w, done, children }: { title?: string; l
   );
 }
 
-const field = (data: FormData, name: string) => String(data.get(name) ?? "");
-const Text = ({ label, name, hint, value }: { label: string; name: string; hint?: string; value?: string }) => (
+export const field = (data: FormData, name: string) => String(data.get(name) ?? "");
+export const Text =({ label, name, hint, value }: { label: string; name: string; hint?: string; value?: string }) => (
   <p><label>{label} <input name={name} required defaultValue={value} autoComplete="off" /></label>{hint !== undefined && ` ${hint}`}</p>
 );
 

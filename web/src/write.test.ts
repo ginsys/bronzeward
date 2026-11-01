@@ -440,6 +440,13 @@ describe("a fragment write's in-progress 409 (§8.4 item 2, AMB-02)", () => {
     expect(waits.slice(1).reduce((a, b) => a + b, 0)).toBe(300_000);
   });
 
+  test("a done write carries the answer's ETag (§8.3)", async () => {
+    const answer = ok();
+    answer.headers.set("ETag", '"7-u"');
+    const { writes } = page([answer]);
+    expect(await writes.submit(fragment())).toEqual({ kind: "done", status: 200, data: { draft: "drf_1" }, replayed: true, etag: '"7-u"' });
+  });
+
   test("a 409 with ingestion and draft (published meanwhile) is refused and not repeated", async () => {
     const { writes, writesSent } = page([new TypeError("Failed to fetch"), inProgress({ draft: "drf_1" })]);
     const o = await writes.submit(fragment());

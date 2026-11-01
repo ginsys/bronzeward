@@ -22,7 +22,8 @@ export interface WriteSpec {
 
 export type Outcome =
   // `defect` when the success carried no Bronzeward-Epoch header (§8.5): still saved, never repeated.
-  | { kind: "done"; status: number; data: unknown; replayed: boolean; defect?: string }
+  // `etag` where the answer carries one (§8.3).
+  | { kind: "done"; status: number; data: unknown; replayed: boolean; defect?: string; etag?: string }
   // This send's refusal, or the earlier attempt's when replayed (§8.4 item 2).
   | { kind: "refused"; status: number; problem: Problem | null; replayed: boolean }
   // Every attempt was answered a 503 that committed nothing (§8.2), or nothing was sent.
@@ -335,8 +336,10 @@ export class Writes {
       const replayed = a.headers.get("Idempotent-Replayed") === "true";
       if (a.status >= 200 && a.status < 300) {
         const done: Outcome = { kind: "done", status: a.status, data: a.data === NOT_JSON ? null : a.data, replayed };
+        const etag = a.headers.get("ETag");
+        const tagged: Outcome = etag === null ? done : { ...done, etag };
         // An authenticated success always names the epoch: a missing header is reported (§8.5).
-        return a.headers.has("Bronzeward-Epoch") ? done : { ...done, defect: NO_EPOCH_HEADER };
+        return a.headers.has("Bronzeward-Epoch") ? tagged : { ...tagged, defect: NO_EPOCH_HEADER };
       }
       const p = problemOf(a.data);
       const code = p === null ? undefined : p.type.slice(PREFIX.length);

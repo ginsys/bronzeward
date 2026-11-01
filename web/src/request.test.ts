@@ -78,6 +78,12 @@ describe("§8.2 read rows", () => {
     expect(await client([ok({ version: "v" })]).c.read("/server")).toEqual({ kind: "ok", data: { version: "v" } });
   });
 
+  test("a success carries its ETag, where it has one (§8.3)", async () => {
+    const r = ok({ id: "drf_1" });
+    r.headers.set("ETag", '"6-t"');
+    expect(await client([r]).c.read("/drafts/drf_1")).toEqual({ kind: "ok", data: { id: "drf_1" }, etag: '"6-t"' });
+  });
+
   test("a success without Bronzeward-Epoch is a defect, not rendered", async () => {
     expect((await client([ok({}, null)]).c.read("/server")).kind).toBe("defect");
   });

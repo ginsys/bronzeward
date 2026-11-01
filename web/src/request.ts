@@ -26,7 +26,8 @@ export interface Problem {
 }
 
 export type ReadResult<T> =
-  | { kind: "ok"; data: T }
+  // `etag` where the answer carries one (§8.3).
+  | { kind: "ok"; data: T; etag?: string }
   // The principal, epoch, route or query changed while the read was in flight: not rendered.
   | { kind: "discarded" }
   // 400 cursor-invalid: drop the cursor and read the list from its start.
@@ -349,7 +350,8 @@ export class Client {
     if (sent !== this.generation) return { kind: "discarded" };
     if (body === CUT) return { kind: "transport" };
     if (body === NOT_JSON) return { kind: "defect", message: "the response is not JSON" };
-    return { kind: "ok", data: body as T };
+    const etag = res.headers.get("ETag");
+    return etag === null ? { kind: "ok", data: body as T } : { kind: "ok", data: body as T, etag };
   }
 }
 
