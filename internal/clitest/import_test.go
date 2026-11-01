@@ -170,7 +170,7 @@ func TestImports(t *testing.T) {
 	e := newImportEnv(t, f, bao)
 	e.st = f.newStandIn(t, bao.b, e.s, func(args ...string) result { return e.ctl(nil, "", args...) })
 
-	t.Run("continuation, draft unmoved; ETAG-02", func(t *testing.T) {
+	t.Run("continuation, draft unmoved, ETAG-02", func(t *testing.T) {
 		e := e.sub(t)
 		r, ing := e.start("", "--review")
 		e.f.want(r, 0, "Import "+ing+" started", "Staging: encrypted. Review: requested.", "Paused for review (generation 1, expires ",
@@ -225,7 +225,7 @@ func TestImports(t *testing.T) {
 		}
 	})
 
-	t.Run("PROT-06; lease lapse and takeover", func(t *testing.T) {
+	t.Run("PROT-06, lease lapse and takeover", func(t *testing.T) {
 		e := e.sub(t)
 		r, ing := e.start("prot-06", "--review")
 		e.f.want(r, 0, "Paused for review (generation 1")
