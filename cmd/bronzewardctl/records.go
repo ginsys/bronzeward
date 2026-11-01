@@ -302,9 +302,11 @@ func (e *env) draftCmd(args []string) error {
 			})
 	}
 	// T11: the read's ETag is the next write's If-Match while the draft is open; a closed draft's
-	// is dropped.
+	// is dropped, and so is one read at an epoch older than the newest this command saw (§8.5
+	// item 1): the GET /server a new epoch calls for can show a newer one still.
 	return showThen(e, "/drafts/"+url.PathEscape(pos[0]), func(c *client.Client, r *client.Response, d *apitypes.DraftBody) {
-		keep(e, c, d.Id, map[bool]string{true: r.Header.Get("ETag")}[d.State == "open"])
+		current := d.State == "open" && r.Header.Get("Bronzeward-Epoch") == c.Context.LastEpoch
+		keep(e, c, d.Id, map[bool]string{true: r.Header.Get("ETag")}[current])
 	}, func(w *tabwriter.Writer, d *apitypes.DraftBody) {
 		fmt.Fprintf(w, "Draft %s %q %s, revision %d, cluster %s\n", d.Id, d.Title, d.State, d.Revision, d.Cluster)
 		for _, item := range d.Entries {

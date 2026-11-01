@@ -34,6 +34,8 @@ type draftFake struct {
 	// recovery mode.
 	epoch    string
 	recovery bool
+	// serverEpoch replaces the epoch on GET /server's answer alone.
+	serverEpoch string
 }
 
 func (f *draftFake) etag() string { return fmt.Sprintf(`"%d-BWSYNTH"`, f.rev) }
@@ -75,6 +77,9 @@ func (f *draftFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		fmt.Fprint(w, `{}`)
 	case "GET /server":
+		if f.serverEpoch != "" {
+			w.Header().Set("Bronzeward-Epoch", f.serverEpoch)
+		}
 		fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":2,"startMode":"normal"}`)
 	case "GET /identity":
 		fmt.Fprint(w, `{"kind":"service","principal":"svc_BWSYNTH"}`)
@@ -198,6 +203,20 @@ func TestProfileSetRepeat(t *testing.T) {
 	if code != 0 || o.String() != "{\"BWSYNTH\":\n" || !strings.Contains(eb.String(), "succeeded, but its answer cannot be read") {
 		t.Errorf("-o yaml with a malformed answer: exit %d, stdout %q, stderr %q; want 0, the answer as served, the failure on stderr", code, o.String(), eb.String())
 	}
+	// profile set reads nothing of its answer: one that is not JSON is unreadable under -o json and
+	// yaml alike, though YAML could convert it.
+	f.mu.Lock()
+	f.answer = "result: BWSYNTH"
+	f.mu.Unlock()
+	for _, mode := range []string{"json", "yaml"} {
+		o.Reset()
+		eb.Reset()
+		code = run([]string{"-o", mode, "profile", "set", "workers", "--draft", "drf_BWSYNTH", "--fragments", "frv_BWSYNTH-given"}, &o, &eb)
+		f.took()
+		if code != 0 || o.String() != "result: BWSYNTH\n" || !strings.Contains(eb.String(), "succeeded, but its answer cannot be read: the answer is not JSON") {
+			t.Errorf("-o %s with an answer that is not JSON: exit %d, stdout %q, stderr %q; want 0, the answer as served, the failure on stderr", mode, code, o.String(), eb.String())
+		}
+	}
 
 	// The server entered recovery mode since the lost write: the repeat is refused after the identity
 	// and confirming reads alone, with no GET /server between, and shows the recovery banner.
@@ -307,8 +326,15 @@ func TestDraftEditing(t *testing.T) {
 	step("--if-match gives the ETag", []string{"assignment", "rm", "mch_BWSYNTH", "--draft", "drf_BWSYNTH", `--if-match="9-BWSYNTH"`}, 0,
 		"Assignment mch_BWSYNTH removed from draft drf_BWSYNTH (draft revision 10).", "",
 		`DELETE /drafts/drf_BWSYNTH/assignments/mch_BWSYNTH if-match="9-BWSYNTH" type= body=`)
+	// The draft is read at a new epoch, and the GET /server that calls for shows a newer one still:
+	// the ETag belongs to the older epoch, so none is kept (§8.5 item 1).
 	f.mu.Lock()
-	f.rev = 12
+	f.rev, f.epoch, f.serverEpoch = 12, "ep_BWSYNTH-2", "ep_BWSYNTH-3"
+	f.mu.Unlock()
+	step("draft show at an epoch the server read passed keeps none", []string{"draft", "show", "drf_BWSYNTH"}, 0, "drf_BWSYNTH", "")
+	step("so the write is refused before sending", []string{"profile", "rm", "workers", "--draft", "drf_BWSYNTH"}, 1, "", "Read the draft first")
+	f.mu.Lock()
+	f.epoch, f.serverEpoch = "", ""
 	f.mu.Unlock()
 	step("draft show keeps the ETag", []string{"draft", "show", "drf_BWSYNTH"}, 0, "drf_BWSYNTH", "")
 	step("discard sends {} with the shown ETag", []string{"draft", "discard", "drf_BWSYNTH"}, 0, "Draft drf_BWSYNTH discarded (revision 13).", "",
