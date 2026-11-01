@@ -81,6 +81,8 @@ describe("the write views (#338)", () => {
   });
 
   it("the harness commits a new epoch only in the disposable deployment", async () => {
+    // The page is open, on the fixture deployment, so the storage check after each case reads it.
+    expect(await fixtureSignIn("h-viewer")).toMatch(SERVER);
     await faults({});
     const refused = await fetch(`${CONTROL}/epoch`, { method: "POST" });
     expect([refused.status, await refused.text()]).toEqual([500, expect.stringContaining("only in this run's disposable deployment")]);
