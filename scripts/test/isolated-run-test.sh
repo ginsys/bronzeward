@@ -37,8 +37,11 @@ seen() {
 
 fail=0
 # The control starts from an empty environment, as isolated_run does, so no MISE_* setting of the
-# caller (MISE_CONFIG_FILE, MISE_ENV, ...) decides what it reads.
+# caller (MISE_CONFIG_FILE, MISE_ENV, ...) decides what it reads. Only the global configuration is
+# let through: the host's system one stays unread, as under isolated_run, so its [env] or
+# env._.source cannot run here when the test itself runs under isolated_run (S0's verify).
 control=$(cd -- "$clone" && env -i PATH="$PATH" HOME="$home" "${dirs[@]}" \
+  MISE_SYSTEM_CONFIG_FILE=/dev/null/config.toml \
   MISE_TRUSTED_CONFIG_PATHS="$clone" MISE_CEILING_PATHS="$work" \
   mise env -s bash 2>&1) || { echo "FAIL control: mise env without isolated_run failed: $control"; exit 1; }
 if [ "$(seen "$control")" = BW_ISOLATED_GLOBAL,BW_ISOLATED_CONF_D,BW_ISOLATED_CLONE, ]; then
