@@ -361,10 +361,13 @@ description = "Run the server on 127.0.0.1:8080 against dev-db and dev-bao, with
 # when the server exits; the containers stay up for mise run go-db.
 # Not for a named instance (BW_DEV_INSTANCE): examples/bronzeward.yaml names the default dev-db and
 # dev-bao, so the refusal comes first, before dev-db and dev-bao start containers that nothing uses.
-run = [
-  '[ -z "${BW_DEV_INSTANCE:-}" ] || { echo "dev: not for BW_DEV_INSTANCE=$BW_DEV_INSTANCE (examples/bronzeward.yaml names the default dev-db and dev-bao); unset it" >&2; exit 1; }',
-  { tasks = ["dev-db", "dev-bao", "build"] },
-  '''
+run = '''
+[ -z "${BW_DEV_INSTANCE:-}" ] || { echo "dev: not for BW_DEV_INSTANCE=$BW_DEV_INSTANCE (examples/bronzeward.yaml names the default dev-db and dev-bao); unset it" >&2; exit 1; }
+# One after the other, not as dependencies: a dependency would start its containers before the
+# refusal above, and a run array of tasks needs a newer mise than the rest of this file.
+mise run dev-db || exit 1
+mise run dev-bao || exit 1
+mise run build || exit 1
 # A port is free only when the connection is refused (curl exit 7); a listener that accepts and
 # never answers counts as taken.
 for port in 8080 5556; do
@@ -392,8 +395,7 @@ trap 'exit 0' INT TERM
 echo 'dev: curl -i http://127.0.0.1:8080/livez' >&2
 echo 'dev: curl -s -H "Authorization: Bearer $(bin/oidc-fixture mint -key .dev/oidc.key -issuer http://127.0.0.1:5556 -human h-viewer)" http://127.0.0.1:8080/api/v1/acts' >&2
 bin/bronzeward serve -config examples/bronzeward.yaml
-''',
-]
+'''
 
 [tasks."web:install"]
 description = "Install web/'s locked dependencies into web/node_modules (gitignored) when the lockfile is newer"

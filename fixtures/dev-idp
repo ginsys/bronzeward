@@ -110,6 +110,11 @@ up() {
   if [ -n "$ids" ]; then
     die "network $net exists without the provider (an interrupted up); run ${BW_DEV_PFX}mise run dev-idp-down, then ${BW_DEV_PFX}mise run dev-idp"
   fi
+  # A taken port fails here, before the state directory, the network or a container exists. Two
+  # names on one slot are the usual cause. A connection that opens means a listener holds it.
+  if (exec 3<>"/dev/tcp/127.0.0.1/$BW_DEV_IDP_PORT") 2>/dev/null; then
+    die "127.0.0.1:$BW_DEV_IDP_PORT is taken (a second instance name on the same slot?); pick another name: BW_DEV_INSTANCE=<name> mise run dev-idp"
+  fi
   rm -rf -- "$state"
   mkdir -p "$state"
   chmod 700 "$state"

@@ -140,7 +140,7 @@ BW_DEV_INSTANCE=bob mise run dev-db && BW_DEV_INSTANCE=bob mise run dev-bao && B
 BW_DEV_INSTANCE=alice mise run dev-down          # stops alice's containers only; bob's and the default ones keep running
 ```
 
-`go-db` and `go-idp` use the instance's addresses unless `BW_TEST_PG_DSN` or `BW_TEST_BAO_ADDR` is set. Each instance still needs memory for its PostgreSQL, OpenBao and, for `dev-idp`, Zitadel with its own PostgreSQL. `mise run dev` is for the default instance only and refuses when `BW_DEV_INSTANCE` is set, because `examples/bronzeward.yaml` names the default `dev-db` and `dev-bao`. `mise run browser` needs no database, OpenBao or provider, and the browser tests' own fixed ports (including `browser-auth`'s) are not part of the instance.
+`go-db` and `go-idp` use the instance's addresses unless `BW_TEST_PG_DSN` or `BW_TEST_BAO_ADDR` is set. Each instance still needs memory for its PostgreSQL, OpenBao and, for `dev-idp`, Zitadel with its own PostgreSQL. `mise run dev` is for the default instance only and refuses when `BW_DEV_INSTANCE` is set, because `examples/bronzeward.yaml` names the default `dev-db` and `dev-bao`. `mise run browser` needs no database, OpenBao or provider, and the browser tests' own fixed ports (including `browser-auth`'s) are not part of the instance. The fixture scenarios (`fixtures/scenarios/s*`) and `scripts/test/s2-publication-evidence-test.sh` still use the default instance's addresses, whatever `BW_DEV_INSTANCE` says.
 
 Publication reads every covered node through the executor before compilation and
 retains the observation on each release machine. An offline node or unreadable
