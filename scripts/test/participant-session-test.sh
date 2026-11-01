@@ -49,19 +49,40 @@ cat >"$repo/fixtures/bin/inject" <<'EOF'
 echo "inject $*" >>"$STUB_LOG"
 [ "$1 ${STUB_KILL_FAIL:-}" != "kill 1" ] && [ "$1 ${STUB_START_FAIL:-}" != "start 1" ]
 EOF
-# dev-idp up fails while STUB_IDP_UP_FAIL is set, as it does on another checkout's containers.
+# dev-idp up fails while STUB_IDP_UP_FAIL is set, as it does on another checkout's containers. With
+# STUB_IDP_ENV set, dev-idp up writes the provider's idp.env.
 cat >"$repo/fixtures/dev-idp" <<'EOF'
 #!/usr/bin/env bash
 echo "dev-idp $*" >>"$STUB_LOG"
+if [ "$1" = up ] && [ -n "${STUB_IDP_ENV:-}" ]; then
+  mkdir -p "$(dirname "$0")/../.dev/idp"
+  printf '%s\n' BW_TEST_IDP_ISSUER=http://localhost:11080 BW_TEST_IDP_PROJECT=1001 \
+    BW_TEST_IDP_CLI_CLIENT=1002 BW_TEST_IDP_WEB_CLIENT=1003 >"$(dirname "$0")/../.dev/idp/idp.env"
+fi
 [ "$1 ${STUB_IDP_UP_FAIL:-}" != "up 1" ]
+EOF
+# go build -o <path>: at a path that ends in /webhost, a web host stand-in. It listens on its -listen
+# address, with bw-stub-webhost-<port> as its last argument. With STUB_PID_FAIL set, the web host's pid
+# record cannot be written, as on a full disk.
+cat >"$t/bin/go" <<'EOF'
+#!/usr/bin/env bash
+[ "$1 $2" = "build -o" ] && [ "${3##*/}" = webhost ] || exit 0
+cat >"$3" <<'W'
+#!/usr/bin/env bash
+exec python3 -c 'import socket, sys, time
+s = socket.socket(); h, p = sys.argv[1].rsplit(":", 1); s.bind((h, int(p))); s.listen(); time.sleep(60)' \
+  "$2" "bw-stub-webhost-${2##*:}"
+W
+chmod +x "$3"
+[ -z "${STUB_PID_FAIL:-}" ] || mkdir -p "${3%/*}/webhost.pid"
 EOF
 cat >"$repo/fixtures/bin/up" <<'EOF'
 #!/usr/bin/env bash
 echo "bin/up" >>"$STUB_LOG"
 EOF
-# start's other prerequisites, which the cases below never reach.
-for c in go npm; do printf '#!/bin/sh\nexit 0\n' >"$t/bin/$c"; done
-chmod +x "$t/bin/docker" "$t/bin/go" "$t/bin/npm" "$repo/fixtures/bin/inject" "$repo/fixtures/dev-idp" "$repo/fixtures/bin/up"
+# start's other prerequisites: npm, and mise for the web build.
+for c in npm mise; do printf '#!/bin/sh\nexit 0\n' >"$t/bin/$c"; done
+chmod +x "$t/bin/docker" "$t/bin/go" "$t/bin/npm" "$t/bin/mise" "$repo/fixtures/bin/inject" "$repo/fixtures/dev-idp" "$repo/fixtures/bin/up"
 # bin/up's record of its daemon (lib.sh daemon_own), and session start's.
 echo daemon-1 >"$repo/fixtures/.state/up-daemon"
 echo daemon-1 >"$repo/.dev/participants/daemon"
@@ -444,5 +465,44 @@ if [ "$rc" = 0 ] && kill -0 "$other" 2>/dev/null; then
   fi
 else bad "stop, reused pid: rc=$rc: $out"; fi
 kill "$other" 2>/dev/null
+
+# A start that fails after it spawns the web host, because the web host's pid record cannot be
+# written: the rollback ends the web host by the pid that start captured, and its port is free. The
+# copies use a free port, not 58443, which a real session on this host can hold. The negative
+# control is the same start without kill_spawned in its trap, and it must leave the web host.
+port=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+with_port=$repo/fixtures/participants/session-port
+no_kill=$repo/fixtures/participants/session-nokill
+sed "s/58443/$port/g" "$session" >"$with_port"
+sed 's/kill_spawned; stop/stop/' "$with_port" >"$no_kill"
+listens() { (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; }
+stub_host() { pgrep -f " bw-stub-webhost-$port\$"; }
+# spawn_start <script>: a fresh start with the provider stub's idp.env and a failing pid record.
+spawn_start() {
+  setup
+  rm -f "$cfg.fixture"
+  rm -rf "$repo/.dev/idp" "$repo/.dev/participants"
+  printf '    issuer: http://issuer:5556\n    plainHTTPHosts: [issuer]\n    audience: bronzeward\n' >"$cfg"
+  out=$(STUB_PID_FAIL=1 STUB_IDP_ENV=1 env PATH="$t/bin:$PATH" bash "$1" start 2>&1)
+  rc=$?
+  mkdir -p "$repo/.dev/idp"
+}
+if grep -q "127.0.0.1:$port" "$with_port" && ! cmp -s "$with_port" "$no_kill" && ! listens; then
+  spawn_start "$no_kill"
+  for _ in $(seq 50); do listens && break; sleep 0.1; done
+  left=$(stub_host)
+  if [ "$rc" != 0 ] && [ -n "$left" ] && listens; then
+    for p in $left; do kill "$p" 2>/dev/null; done
+    for _ in $(seq 50); do listens || break; sleep 0.1; done
+    spawn_start "$with_port"
+    sleep 1
+    # The start reached the spawn: it failed on the pid record, and the rollback ran.
+    if [ "$rc" != 0 ] && [[ $out == *"webhost.pid: Is a directory"*"session start failed"* ]] &&
+      [ -z "$(stub_host)" ] && ! listens; then
+      ok "a start that fails after it spawns the web host ends it, without its pid record"
+    else bad "start, pid record fails: rc=$rc host=$(stub_host): $out"; fi
+  else bad "start, pid record fails, negative control left no web host: rc=$rc: $out"; fi
+  for p in $left $(stub_host); do kill "$p" 2>/dev/null; done
+else bad "start, pid record fails: the copies with port $port are wrong, or the port is taken"; fi
 
 exit "$fail"
