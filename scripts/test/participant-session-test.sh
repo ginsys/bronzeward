@@ -73,6 +73,13 @@ bad() {
   fail=1
 }
 controls() { find "$repo" -name .bw-scan-control 2>/dev/null | wc -l; }
+# running <pid>: the process exists and is not a zombie.
+running() {
+  local s
+  s=$(cat "/proc/$1/stat" 2>/dev/null) || return 1
+  s=${s##*) }
+  [ "${s%% *}" != Z ]
+}
 run() { env PATH="$t/bin:$PATH" bash "$session" "$@" 2>&1; }
 
 out=$(run scan)
@@ -287,8 +294,13 @@ if [ "$rc" = 0 ] && kill -0 "$other" 2>/dev/null; then
   echo "$own" >"$repo/.dev/participants/webhost.pid"
   out=$(run stop)
   rc=$?
+  # The control ends by itself after 60 s, so it must end within 5 s of stop. A signalled child
+  # stays a zombie until wait reaps it, and kill -0 still finds a zombie.
+  for _ in $(seq 50); do running "$own" || break; sleep 0.1; done
+  ended=yes
+  if running "$own"; then ended=no; fi
   wait "$own" 2>/dev/null
-  if [ "$rc" = 0 ] && ! kill -0 "$own" 2>/dev/null; then
+  if [ "$rc" = 0 ] && [ "$ended" = yes ]; then
     ok "stop signals the web host, and not another process with its pid"
   else
     kill "$own" 2>/dev/null
