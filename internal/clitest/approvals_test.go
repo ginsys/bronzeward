@@ -288,7 +288,9 @@ func (e *planEnv) t8(t *testing.T) {
 	f.want(r, 0, "Changes shown below", "node.example.test/tier: b")
 	r = step(p+"\n", "--context", "approver", "approve", p)
 	f.want(r, 0, "Self-approval  predicted: no reason from the plan's creator", "Recorded self-approval reasons: none.")
-	keepJourney(t, "t8", localTimes.ReplaceAllString(out.String(), "<local time>"), dir)
+	// The prompt ends in a space, which the repository's whitespace check refuses in a kept file.
+	kept := regexp.MustCompile(`(?m)[ \t]+$`).ReplaceAllString(localTimes.ReplaceAllString(out.String(), "<local time>"), "")
+	keepJourney(t, "t8", kept, dir)
 	e.until(t, "committed", `SELECT state FROM plan_state WHERE plan = $1`, p)
 	var op string
 	if err := f.db.QueryRow(`SELECT operation FROM plan_state WHERE plan = $1`, p).Scan(&op); err != nil || f.ended(op) != "completed" {
