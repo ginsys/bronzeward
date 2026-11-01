@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # isolated_run (fixtures/lib.sh) against the installed mise, without a fixture: mise accepts the
 # configuration files it names, and a global config.toml and conf.d planted where mise looks by
-# default reach `mise env` without isolated_run, not with it (#446). Only git_isolated and
+# default reach `mise env` without isolated_run, not with it, and isolated_run names that same
+# file for the system configuration, which no test can plant under /etc (#446). Only git_isolated and
 # isolated_run are extracted; the rest of lib.sh is never run. Synthetic values only.
 set -euo pipefail
 
@@ -21,8 +22,9 @@ mkdir -p -- "$home/.config/mise/conf.d" "$clone"
 printf '[env]\nBW_ISOLATED_GLOBAL = "global"\n' >"$home/.config/mise/config.toml"
 printf '[env]\nBW_ISOLATED_CONF_D = "conf.d"\n' >"$home/.config/mise/conf.d/isolated.toml"
 printf '[env]\nBW_ISOLATED_CLONE = "clone"\n' >"$clone/mise.toml"
-# mise's data stays the caller's, where its tools are installed.
-data=${XDG_DATA_HOME:-$HOME/.local/share}
+# mise's data stays the caller's, where its tools are installed; its state and cache go under $work.
+data=${MISE_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/mise}
+dirs=(MISE_DATA_DIR="$data" XDG_STATE_HOME="$work/state" XDG_CACHE_HOME="$work/cache")
 
 # The names of the three variables `mise env` sets, in order, comma-separated.
 seen() {
@@ -33,8 +35,10 @@ seen() {
 }
 
 fail=0
-control=$(cd -- "$clone" && env -u XDG_CONFIG_HOME -u MISE_CONFIG_DIR -u MISE_GLOBAL_CONFIG_FILE -u MISE_SYSTEM_CONFIG_FILE \
-  HOME="$home" XDG_DATA_HOME="$data" MISE_TRUSTED_CONFIG_PATHS="$clone" MISE_CEILING_PATHS="$work" \
+# The control starts from an empty environment, as isolated_run does, so no MISE_* setting of the
+# caller (MISE_CONFIG_FILE, MISE_ENV, ...) decides what it reads.
+control=$(cd -- "$clone" && env -i PATH="$PATH" HOME="$home" "${dirs[@]}" \
+  MISE_TRUSTED_CONFIG_PATHS="$clone" MISE_CEILING_PATHS="$work" \
   mise env -s bash 2>&1) || { echo "FAIL control: mise env without isolated_run failed: $control"; exit 1; }
 if [ "$(seen "$control")" = BW_ISOLATED_GLOBAL,BW_ISOLATED_CONF_D,BW_ISOLATED_CLONE, ]; then
   echo "ok   control: without isolated_run, the global config.toml and conf.d reach mise env"
@@ -44,7 +48,7 @@ else
 fi
 
 rc=0
-got=$(HOME="$home" XDG_DATA_HOME="$data" isolated_run "$clone" mise env -s bash 2>&1) || rc=$?
+got=$(export HOME="$home" "${dirs[@]}" && isolated_run "$clone" mise env -s bash 2>&1) || rc=$?
 if [ "$rc" -ne 0 ]; then
   echo "FAIL under isolated_run mise refused the configuration it was given (status $rc): $got"
   fail=1
@@ -55,5 +59,15 @@ else
   fail=1
 fi
 
-[ "$fail" -eq 0 ] && echo "isolated-run-test: 2 passed, 0 failed"
+# The system configuration lives under /etc, where this test cannot plant one. The run above shows
+# that mise accepts the name; this pins isolated_run to give that name for both files.
+names=$(isolated_run "$clone" printenv MISE_GLOBAL_CONFIG_FILE MISE_SYSTEM_CONFIG_FILE 2>&1) || true
+if [ "$names" = $'/dev/null/config.toml\n/dev/null/config.toml' ]; then
+  echo "ok   under isolated_run both the global and the system configuration file are /dev/null/config.toml"
+else
+  echo "FAIL under isolated_run the configuration files are named: $names"
+  fail=1
+fi
+
+[ "$fail" -eq 0 ] && echo "isolated-run-test: 3 passed, 0 failed"
 exit "$fail"

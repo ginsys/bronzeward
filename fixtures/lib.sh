@@ -498,9 +498,9 @@ clean_git() {
 # directory; mise 2026.10 refuses /dev/null itself as a config file of unknown type (#446). Named
 # there, mise reads neither the default file nor the conf.d beside it (the selftest and
 # scripts/test/isolated-run-test.sh show it for the global one; the system one, under /etc, they
-# cannot plant). Whether the tasks then
-# resolve in <dir> is tasks_outside's to check. The caller's values (a DSN, a token, a proxy URL
-# with credentials) reach the command through a pipe on descriptor 3, never as an argument of env
+# cannot plant, and the test pins its name). Whether the tasks then resolve in <dir> is
+# tasks_outside's to check. The caller's values (a DSN, a token, a proxy URL with credentials)
+# reach the command through a pipe on descriptor 3, never as an argument of env
 # or of any other process: a bash under env -i exports them and then runs the command (adding
 # only its own PWD, SHLVL and _). They are written by the printf builtin, so a function of that
 # name the caller exported neither sees nor adds to them, and end with a record no variable can
