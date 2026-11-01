@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import { Client, type ClientOptions } from "./request.ts";
+import { type Attempt, Client, type ClientOptions } from "./request.ts";
 import { BACKOFF, EPOCH_CHANGED_ASIDE, NO_EPOCH, newKey, SIGN_IN_CHANGED, SIGN_IN_REFUSED, Write, Writes } from "./write.ts";
 
 const EPOCH = "e1";
@@ -254,6 +254,41 @@ describe("the confirming read's credential refusals (§8.2)", () => {
     expect(await writes.submit(spec())).toMatchObject({ kind: "not-done", why: SIGN_IN_REFUSED, problem: { type: "urn:bronzeward:problem:unauthenticated" } });
     expect(writes.onEnded).toHaveBeenCalledWith(expect.objectContaining({ kind: "unauthenticated" }));
     expect(writesSent()).toEqual([]);
+  });
+
+  // A client whose write answers come with the ending its epoch read met (request.ts learnEpoch).
+  const ending = { kind: "revoked" as const, problem: { type: "urn:bronzeward:problem:identity-revoked", title: "Identity revoked", status: 403 } };
+  function ended(answer: Attempt | undefined) {
+    const sends: string[] = [];
+    const writes = new Writes(() => PRINCIPAL, async () => {});
+    writes.client = {
+      currentEpoch: EPOCH,
+      attempt: async (_m: string, path: string, _h: unknown, _b: unknown, end: { e?: unknown }) => {
+        sends.push(path);
+        if (path === "/recovery") return { status: 200, headers: new Headers({ "Bronzeward-Epoch": EPOCH }), data: {} };
+        end.e = ending;
+        return answer;
+      },
+    } as unknown as Client;
+    const outcomes: unknown[] = [];
+    const w = spec();
+    writes.onEnded = vi.fn(() => void outcomes.push(w.outcome));
+    return { writes, w, sends, outcomes };
+  }
+
+  test("refused on the read that learns a write's epoch: a success stands and the page ends after it", async () => {
+    const { writes, w, outcomes } = ended({ status: 201, headers: new Headers(), data: { id: "c1" } });
+    expect(await writes.submit(w)).toMatchObject({ kind: "done", status: 201 });
+    expect(writes.onEnded).toHaveBeenCalledWith(ending);
+    expect(outcomes).toEqual([expect.objectContaining({ kind: "done" })]);
+  });
+
+  test("refused on the read that learns a lost write's epoch: nothing is repeated, the write is set aside and the page ends", async () => {
+    const { writes, w, sends } = ended(undefined);
+    expect(await writes.submit(w)).toEqual({ kind: "set-aside", why: SIGN_IN_REFUSED, ambiguous: true });
+    expect(sends).toEqual(["/clusters"]);
+    expect(writes.onEnded).toHaveBeenCalledWith(ending);
+    expect(writes.open).toEqual([w]);
   });
 });
 
