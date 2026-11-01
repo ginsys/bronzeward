@@ -65,6 +65,10 @@ func KeepETag(x *Context, draft, etag string) error {
 			ss = &serverState{Epoch: x.LastEpoch, ETags: map[string]string{}}
 			s.Contexts[x.Name][x.Server] = ss
 		}
+		if ss.ETags == nil {
+			// An entry whose last ETag was forgotten is written without the map and reads back without it.
+			ss.ETags = map[string]string{}
+		}
 		if etag == "" {
 			delete(ss.ETags, draft)
 		} else {
