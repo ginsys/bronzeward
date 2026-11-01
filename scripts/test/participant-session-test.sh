@@ -156,7 +156,9 @@ cfg=$repo/fixtures/.state/server/a/config.yaml
 setup() {
   echo participant >"$cfg"
   echo fixture >"$cfg.fixture"
-  mkdir -p "$repo/.dev/participants"
+  mkdir -p "$repo/.dev/participants" "$repo/.dev/idp"
+  # This session's start made the provider.
+  : >"$repo/.dev/participants/idp-started"
   : >"$STUB_LOG"
 }
 
@@ -248,14 +250,51 @@ if [ "$rc" != 0 ] && [[ $calls == "bin/up;dev-idp up --participants;"* ]] && [[ 
   ok "start without this checkout's provider state never takes dev-idp down"
 else bad "start, other provider: rc=$rc calls=$calls: $out"; fi
 
-# With this checkout's state, start takes its own provider down first, to start it in participant mode.
+# A provider state, which can be stale, from another Docker daemon: start refuses before it
+# changes anything, and takes no provider down.
 setup
 rm -f "$cfg.fixture"
-out=$(STUB_IDP_UP_FAIL=1 run start)
+rm -rf "$repo/.dev/participants"
+out=$(run start)
 rc=$?
 calls=$(tr '\n' ';' <"$STUB_LOG")
-if [ "$rc" != 0 ] && [[ $calls == "bin/up;dev-idp down;dev-idp up --participants;"* ]]; then
-  ok "start with this checkout's provider state takes it down before the participant start"
-else bad "start, own provider: rc=$rc calls=$calls: $out"; fi
+if [ "$rc" != 0 ] && [[ $out == *"run fixtures/dev-idp down"* ]] && [ -z "$calls" ]; then
+  ok "start with a provider state already there refuses, and touches nothing"
+else bad "start, provider state: rc=$rc calls=$calls: $out"; fi
+
+# A provider state that this session's start did not make: stop leaves the provider alone.
+setup
+rm -f "$repo/.dev/participants/idp-started"
+out=$(run stop)
+rc=$?
+calls=$(tr '\n' ';' <"$STUB_LOG")
+if [ "$rc" = 0 ] && [[ $calls != *"dev-idp down"* ]] && [ ! -e "$repo/.dev/participants" ]; then
+  ok "stop takes down only the provider that this session's start made"
+else bad "stop, provider not this session's: rc=$rc calls=$calls: $out"; fi
+
+# The web host's pid now names another process: stop leaves it alone. The control runs under the
+# web host's command, and stop ends it.
+setup
+sleep 60 &
+other=$!
+echo "$other" >"$repo/.dev/participants/webhost.pid"
+out=$(run stop)
+rc=$?
+if [ "$rc" = 0 ] && kill -0 "$other" 2>/dev/null; then
+  setup
+  (exec -a "$repo/.dev/participants/webhost" sleep 60) &
+  own=$!
+  echo "$own" >"$repo/.dev/participants/webhost.pid"
+  out=$(run stop)
+  rc=$?
+  wait "$own" 2>/dev/null
+  if [ "$rc" = 0 ] && ! kill -0 "$own" 2>/dev/null; then
+    ok "stop signals the web host, and not another process with its pid"
+  else
+    kill "$own" 2>/dev/null
+    bad "stop, own web host: rc=$rc: $out"
+  fi
+else bad "stop, reused pid: rc=$rc: $out"; fi
+kill "$other" 2>/dev/null
 
 exit "$fail"
