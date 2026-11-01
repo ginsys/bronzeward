@@ -107,6 +107,29 @@ func TestFragmentEditing(t *testing.T) {
 		`DELETE /drafts/drf_BWSYNTH/fragments/worker-labels if-match="5-BWSYNTH" type= body=`)
 }
 
+// TestDeclarationsNull checks that null references and embedded, which the API takes, are accepted
+// under their exact names only, and that an embedded entry without the required format is refused.
+func TestDeclarationsNull(t *testing.T) {
+	for _, c := range []struct {
+		file string
+		ok   bool
+	}{
+		{"embedded: null\n", true},
+		{"references: null\n", true},
+		{"references: null\nembedded:\n- {path: machine.files, format: yaml}\n", true},
+		{"Embedded: null\n", false},
+		{"embedded:\n- {path: machine.files}\n", false},
+	} {
+		p := filepath.Join(t.TempDir(), "d.yaml")
+		if err := os.WriteFile(p, []byte(c.file), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := declarations(p); (err == nil) != c.ok {
+			t.Errorf("%q: %v; want accepted %v", c.file, err, c.ok)
+		}
+	}
+}
+
 // TestLongMark checks that a mark longer than bufio.Scanner's default 64 KiB line is read whole:
 // the API sets no length on one mark.
 func TestLongMark(t *testing.T) {

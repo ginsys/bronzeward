@@ -169,11 +169,23 @@ func declarations(p string) (*apitypes.Declarations, error) {
 	}
 	// encoding/json matches member names without regard to case, so a name in another case was
 	// taken, and the same name in two cases kept one list and dropped the other without a word. The
-	// declarations must encode back to the file's own members.
+	// declarations must encode back to the file's own members. The API takes null for references and
+	// embedded, which encode back as no member, so a null under the exact name is left out of the
+	// comparison.
 	if v != nil {
 		var got, want any
 		back, err := json.Marshal(d)
-		if err != nil || json.Unmarshal(back, &got) != nil || json.Unmarshal(j, &want) != nil || !reflect.DeepEqual(got, want) {
+		if err != nil || json.Unmarshal(back, &got) != nil || json.Unmarshal(j, &want) != nil {
+			return nil, unknown
+		}
+		if m, ok := want.(map[string]any); ok {
+			for _, k := range []string{"references", "embedded"} {
+				if x, ok := m[k]; ok && x == nil {
+					delete(m, k)
+				}
+			}
+		}
+		if !reflect.DeepEqual(got, want) {
 			return nil, unknown
 		}
 	}
