@@ -252,6 +252,51 @@ describe("§8.5 epoch changes", () => {
     expect(paths).toEqual(["/server", "/clusters", "/machines", "/recovery"]);
   });
 
+  // The same late answer, with the GET /recovery that decides its epoch answered by `recovery`.
+  async function lateWrite(recovery: Response[], renew: () => Promise<boolean> = async () => false) {
+    const onRevoked = vi.fn();
+    let release!: (r: Response) => void;
+    const late = new Promise<Response>((r) => (release = r));
+    const answers: (Response | Promise<Response>)[] = [ok({}), late, ok({}, "e2"), ...recovery];
+    const paths: string[] = [];
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+      paths.push(String(url).slice(API_BASE.length));
+      return answers.shift()!;
+    });
+    const renewMock = vi.fn(renew);
+    const c = new Client({ onRevoked, renew: renewMock, fetch: fetchMock as unknown as typeof fetch });
+    await c.read("/server");
+    const end: { e?: unknown } = {};
+    const write = c.attempt("POST", "/clusters", {}, "{}", end as never);
+    await c.read("/machines");
+    release(ok({ id: "c1" }));
+    const a = await write;
+    return { a, end, paths, onRevoked, renewMock, c };
+  }
+
+  test("the read that decides a late answer's epoch, refused identity-revoked, clears the credential and ends the page; the write's answer stands", async () => {
+    const { a, end, paths, onRevoked, c } = await lateWrite([problem(403, "identity-revoked", {}, "e2")]);
+    expect(a?.data).toEqual({ id: "c1" });
+    expect(end.e).toMatchObject({ kind: "revoked", problem: { type: "urn:bronzeward:problem:identity-revoked" } });
+    expect(onRevoked).toHaveBeenCalledTimes(1);
+    expect(c.currentEpoch).toBe("e2");
+    expect(paths).toEqual(["/server", "/clusters", "/machines", "/recovery"]);
+  });
+
+  test("that read's 401 renews once and reads again; a second 401 ends the page", async () => {
+    const twice = await lateWrite([problem(401, "unauthenticated", {}, "e2"), problem(401, "unauthenticated", {}, "e2")], async () => true);
+    expect(twice.end.e).toMatchObject({ kind: "unauthenticated", problem: { type: "urn:bronzeward:problem:unauthenticated" } });
+    expect(twice.renewMock).toHaveBeenCalledTimes(1);
+    expect(twice.paths).toEqual(["/server", "/clusters", "/machines", "/recovery", "/recovery"]);
+    const renewed = await lateWrite([problem(401, "unauthenticated", {}, "e2"), ok({}, "e2")], async () => true);
+    expect(renewed.end.e).toBeUndefined();
+    expect(renewed.c.currentEpoch).toBe("e2");
+    expect(renewed.paths).toEqual(["/server", "/clusters", "/machines", "/recovery", "/recovery"]);
+    const failed = await lateWrite([problem(401, "unauthenticated", {}, "e2")]);
+    expect(failed.end.e).toMatchObject({ kind: "unauthenticated" });
+    expect(failed.a?.data).toEqual({ id: "c1" });
+  });
+
   test("recovery mode is reported from the first epoch on and clears on an exit that keeps the epoch", async () => {
     const onEpochChange = vi.fn();
     const onRecoveryModeChange = vi.fn();

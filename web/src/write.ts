@@ -5,7 +5,7 @@
 // write's in-progress 409 and the recovery entry's exception (§8.4 items 2 and 3) are not served
 // here: no form of this layer sends either route.
 
-import { type Client, NOT_JSON, type Problem } from "./request.ts";
+import { type Client, type Ending, NOT_JSON, type Problem } from "./request.ts";
 
 export interface WriteSpec {
   method: "POST" | "PUT" | "DELETE";
@@ -37,9 +37,7 @@ export const SIGN_IN_REFUSED = "the server no longer accepts your sign-in";
 // The page failed while it held the write, for example a renewal that threw.
 const PAGE_FAILED = "the page failed while it sent it";
 
-// A credential refusal that ends the signed-in page, as a read's does (§8.2 401 and 403 rows,
-// §9.6): a 401 its one renewal did not clear, or identity-revoked of the sign-in still current.
-export type Ending = { kind: "unauthenticated"; problem: Problem | null } | { kind: "revoked"; problem: Problem };
+export type { Ending };
 const DROPPED = "the connection dropped";
 const PREFIX = "urn:bronzeward:problem:";
 // The 503s a write repeats; each states that its own attempt committed nothing (§8.2).
@@ -188,12 +186,14 @@ export class Writes {
     let p503: Problem | null = null;
     let renewed = false;
     for (let n = 0; n <= BACKOFF.length; n++) {
+      // A read sent to learn the last answer's epoch ended the sign-in: nothing is repeated.
+      if (n > 0 && end.e !== undefined) return aside(SIGN_IN_REFUSED);
       if (n > 0) await this.wait(BACKOFF[n - 1]!);
       if (n > 0 || again) {
         const why = await this.check(client, w, end);
         if (why !== undefined) return aside(why);
       }
-      const a = await client.attempt(w.spec.method, w.spec.path, headers, body);
+      const a = await client.attempt(w.spec.method, w.spec.path, headers, body, end);
       // No complete answer, a redirect the browser refused included: some byte may have gone out
       // (§8.4 item 2, TLS-03).
       if (a === undefined) {
@@ -264,7 +264,8 @@ export class Writes {
   // ends the page through `end`.
   private async confirm(client: Client, end: { e?: Ending }): Promise<string | undefined> {
     for (let renewed = false; ; renewed = true) {
-      const a = await client.attempt("GET", "/recovery");
+      const a = await client.attempt("GET", "/recovery", {}, undefined, end);
+      if (end.e !== undefined) return undefined;
       const p = a === undefined ? null : problemOf(a.data);
       const code = p?.type.slice(PREFIX.length);
       if (a?.status === 401 && code === "unauthenticated") {

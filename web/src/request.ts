@@ -41,6 +41,10 @@ export interface Attempt {
   data: unknown;
 }
 
+// A credential refusal that ends the signed-in page, as a read's does (§8.2 401 and 403 rows,
+// §9.6): a 401 its one renewal did not clear, or identity-revoked of the sign-in still current.
+export type Ending = { kind: "unauthenticated"; problem: Problem | null } | { kind: "revoked"; problem: Problem };
+
 // What a response must still match to be rendered.
 export interface View {
   principal: string;
@@ -164,12 +168,14 @@ export class Client {
   // One send of a write, or of its confirming read, for the write layer (write.ts): never repeated
   // here and never discarded as stale. Its epoch is observed as a read's is, so a new one sets every
   // pending write aside through onEpochChange. Undefined when no complete answer arrived, a redirect
-  // refused by the browser included (§6 item 7).
-  async attempt(method: string, path: string, headers: Record<string, string> = {}, body?: string): Promise<Attempt | undefined> {
+  // refused by the browser included (§6 item 7). A credential refusal of a read sent to learn its
+  // epoch goes to `end`, even when this answer is then lost.
+  async attempt(method: string, path: string, headers: Record<string, string> = {}, body?: string, end: { e?: Ending } = {}): Promise<Attempt | undefined> {
     const records = this.epochRecords;
     const res = await this.send(path, method, headers, body);
     if (res === undefined) return undefined;
-    await this.learnEpoch(res, records);
+    const ending = await this.learnEpoch(res, records);
+    if (ending !== undefined) end.e = ending;
     const route = API_BASE + path.split("?")[0];
     if (res.headers.has("Deprecation") && !this.deprecated.has(route)) {
       this.deprecated.add(route);
@@ -211,20 +217,36 @@ export class Client {
   // Epochs are unordered (§8.5). An answer that names another epoch than one recorded after its
   // send may be the older one, so it is not adopted: GET /recovery is read, at most MAX_TRIES times,
   // until an answer names the epoch recorded last or nothing was recorded since its own send, as a
-  // read is sent again. The write itself is never sent again here.
-  private async learnEpoch(res: Response, records: number): Promise<void> {
+  // read is sent again. The write itself is never sent again here. Each read's credential refusals
+  // are a read's (§8.2): a 401 renews once and reads again; a second 401 or identity-revoked stops
+  // and is returned, the epoch unlearned.
+  private async learnEpoch(res: Response, records: number): Promise<Ending | undefined> {
+    let renewed = false;
     for (let tries = 0; ; tries++) {
       const epoch = res.headers.get("Bronzeward-Epoch");
       if (epoch === null || epoch === this.epoch || records === this.epochRecords) {
         this.observeEpoch(res);
-        return;
+        return undefined;
       }
-      if (tries + 1 >= MAX_TRIES) return;
-      records = this.epochRecords;
+      if (tries + 1 >= MAX_TRIES) return undefined;
+      const sent = this.epochRecords;
       const next = await this.send("/recovery");
-      if (next === undefined) return;
-      await next.arrayBuffer().catch(() => undefined);
+      if (next === undefined) return undefined;
+      const body = next.ok ? await next.arrayBuffer().then(() => null, () => null) : await readProblem(next);
+      const problem = body === NOT_JSON || body === CUT ? null : body;
+      const code = problem?.type.slice(PROBLEM_PREFIX.length);
+      if (next.status === 401 && code === "unauthenticated") {
+        if (renewed || !(await this.renew())) return { kind: "unauthenticated", problem };
+        // `res` is still the answer to learn from: the next turn reads again.
+        renewed = true;
+        continue;
+      }
+      if (next.status === 403 && code === "identity-revoked" && problem !== null) {
+        this.revoked();
+        return { kind: "revoked", problem };
+      }
       res = next;
+      records = sent;
     }
   }
 
