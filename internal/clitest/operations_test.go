@@ -1,0 +1,537 @@
+package clitest
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"errors"
+	"io"
+	"maps"
+	"net"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/ginsys/bronzeward/fixtures/oidc/issuer"
+)
+
+// watchEnv is TestOperations' server: newPlanEnv's, with the seeded machine adopted (plan adopted,
+// operation adoption), and the operation EVT-02 leaves sending, which EVT-05 watches.
+type watchEnv struct {
+	*planEnv
+	adopted, adoption, sending string
+}
+
+// eventLine is the type of an event line of operation watch.
+var eventLine = regexp.MustCompile(`(?m)^(?:received|server) +\d\d:\d\d:\d\d  (\S+)`)
+
+// clearedLine is what operation watch prints when what it showed no longer holds.
+const clearedLine = "(the events above no longer hold; they are shown again from the start)"
+
+// shown are the event types of operation watch's lines in out, in order, one list for each display:
+// a clear starts the next.
+func shown(out string) [][]string {
+	var all [][]string
+	for _, part := range strings.Split(out, clearedLine) {
+		var types []string
+		for _, m := range eventLine.FindAllStringSubmatch(part, -1) {
+			types = append(types, m[1])
+		}
+		all = append(all, types)
+	}
+	return all
+}
+
+// watch is operation watch of op on the context "human".
+func (e *watchEnv) watch(op string, extra ...string) result {
+	return e.ctl(append([]string{"--context", "human", "operation", "watch", op}, extra...)...)
+}
+
+// served are the IDs and types of op's events, read from its JSON event pages as h-all.
+func (e *watchEnv) served(t *testing.T, op string) (ids, types []string) {
+	t.Helper()
+	q, _ := http.NewRequest(http.MethodGet, e.f.base+"/api/v1/operations/"+op+"/events?limit=500", nil)
+	q.Header.Set("Authorization", "Bearer "+e.f.mint("h-all", ""))
+	var page struct {
+		Items []struct{ ID, Type string }
+		Next  string
+	}
+	if err := json.Unmarshal(e.f.do(q, http.StatusOK), &page); err != nil || page.Next != "" {
+		t.Fatalf("the events of %s: %v, next %q", op, err, page.Next)
+	}
+	for _, ev := range page.Items {
+		ids, types = append(ids, ev.ID), append(types, ev.Type)
+	}
+	return ids, types
+}
+
+// operationOf is the operation plan is committed to, once it is.
+func (e *watchEnv) operationOf(t *testing.T, plan string) string {
+	t.Helper()
+	e.until(t, "committed", `SELECT state FROM plan_state WHERE plan = $1`, plan)
+	var op string
+	if err := e.f.db.QueryRow(`SELECT operation FROM plan_state WHERE plan = $1`, plan).Scan(&op); err != nil {
+		t.Fatal(err)
+	}
+	return op
+}
+
+// held is an apply-config operation of rel whose one apply the stand-in holds until release runs.
+func (e *watchEnv) held(t *testing.T) (op string, release func()) {
+	t.Helper()
+	arrived, release := e.st.node.HoldApply(t)
+	e.in.set(nil, nil)
+	p := planID.FindString(e.ctl(e.create("apply-config", "--transport-deadline", "2m", "--verification-deadline", "2m", "--max-attempts", "1")...).out)
+	e.approve(t, p)
+	select {
+	case <-arrived:
+	case <-time.After(2 * time.Minute):
+		t.Fatal("the apply did not reach the stand-in within two minutes")
+	}
+	return e.operationOf(t, p), release
+}
+
+// recovery sends a recovery-admin's POST to base, h-recovery's, and returns the answer's body.
+func (f *fixture) recovery(base, path, key, body string, status int) []byte {
+	f.t.Helper()
+	q, _ := http.NewRequest(http.MethodPost, base+"/api/v1"+path, strings.NewReader(body))
+	q.Header.Set("Authorization", "Bearer "+f.mint("h-recovery", ""))
+	q.Header.Set("Content-Type", "application/json")
+	q.Header.Set("Idempotency-Key", key)
+	return f.do(q, status)
+}
+
+// relay passes the event stream request r to the server and its answer to w, event by event. After
+// each event it flushes and asks each, with the event's ID and data; it stops once each answers
+// false, or the server ends the stream.
+func (f *fixture) relay(t *testing.T, w http.ResponseWriter, r *http.Request, each func(id, data string) bool) {
+	q, _ := http.NewRequestWithContext(r.Context(), r.Method, f.base+r.URL.RequestURI(), nil)
+	q.Header = r.Header.Clone()
+	a, err := http.DefaultClient.Do(q)
+	if err != nil {
+		t.Errorf("opening the stream: %v", err)
+		w.WriteHeader(http.StatusBadGateway)
+		return
+	}
+	defer a.Body.Close()
+	maps.Copy(w.Header(), a.Header)
+	w.WriteHeader(a.StatusCode)
+	lines := bufio.NewReader(a.Body)
+	var id, data string
+	for {
+		line, err := lines.ReadString('\n')
+		if err != nil {
+			return
+		}
+		io.WriteString(w, line)
+		switch {
+		case strings.HasPrefix(line, "id: "):
+			id = strings.TrimSpace(strings.TrimPrefix(line, "id: "))
+		case strings.HasPrefix(line, "data: "):
+			data = strings.TrimSpace(strings.TrimPrefix(line, "data: "))
+		case line == "\n":
+			w.(http.Flusher).Flush()
+			if id != "" && !each(id, data) {
+				return
+			}
+			id, data = "", ""
+		}
+	}
+}
+
+// another starts a second bronzeward serve on the fixture's database and configuration at another
+// address, with flags, and returns its base URL and its stop; the test's end stops it too.
+func (f *fixture) another(t *testing.T, flags ...string) (string, func()) {
+	t.Helper()
+	b, err := os.ReadFile(f.srv.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := l.Addr().String()
+	l.Close()
+	old := []byte("listen: " + strings.TrimPrefix(f.base, "http://") + "\n")
+	if !bytes.Contains(b, old) {
+		t.Fatalf("the configuration holds no %q", old)
+	}
+	cfg := filepath.Join(t.TempDir(), "another.yaml")
+	if err := os.WriteFile(cfg, bytes.Replace(b, old, []byte("listen: "+addr+"\n"), 1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := &served{cfg: cfg}
+	s.cmd = exec.Command(filepath.Join(f.bin, "bronzeward"), append([]string{"serve", "-config", cfg}, flags...)...)
+	s.cmd.Stdout, s.cmd.Stderr = &s.log, &s.log
+	if err := s.cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	stop := sync.OnceFunc(s.stop)
+	t.Cleanup(func() {
+		stop()
+		if t.Failed() {
+			t.Logf("serve %s log:\n%s", flags, s.log.String())
+		}
+	})
+	base := "http://" + addr
+	for i := 0; ; i++ {
+		if r, err := http.Get(base + "/livez"); err == nil && r.StatusCode == http.StatusNoContent {
+			r.Body.Close()
+			return base, stop
+		} else if i == 100 {
+			t.Fatalf("the second serve did not answer /livez: %v", err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// operationCases are the client-contracts.md §12 cases of operation watch (#354);
+// testdata/operation-cases.yaml holds their records in the order they run, and TestOperations runs
+// exactly those. The machine holds one operation at a time, so each case's operation ends before
+// the next case's starts, except EVT-02's, which EVT-05 watches.
+var operationCases = map[string]func(*testing.T, *watchEnv){
+	"PAGE-01": func(t *testing.T, e *watchEnv) {
+		var pages atomic.Int32
+		// The stream is answered with the JSON page, as a server without one answers, and every page
+		// holds one event.
+		e.in.set(func(_ http.ResponseWriter, r *http.Request) bool {
+			if strings.HasSuffix(r.URL.Path, "/events") {
+				q := r.URL.Query()
+				q.Set("limit", "1")
+				r.URL.RawQuery = q.Encode()
+				r.Header.Del("Accept")
+				pages.Add(1)
+			}
+			return false
+		}, nil)
+		r := e.watch(e.adoption)
+		e.f.want(r, 0, "Completed at ", " (server): adopted; the adoption of plan "+e.adopted+
+			" records Applied from the node's own bytes. Nothing was sent to the machine.\n")
+		_, types := e.served(t, e.adoption)
+		got := shown(r.out)
+		if len(types) < 3 || len(got) != 1 || !slices.Equal(got[0], types) || strings.Contains(r.out, "received ") {
+			t.Errorf("shown %q; want each of the %d events %q once, in order, at the server's time:\n%s", got, len(types), types, r.out)
+		}
+		// The stream request, then one page per event.
+		if n := int(pages.Load()); n != len(types)+1 {
+			t.Errorf("%d events requests for %d events; want the stream's and one page per event", n, len(types))
+		}
+	},
+
+	"EVT-01": func(t *testing.T, e *watchEnv) {
+		op, release := e.held(t)
+		defer release()
+		var mu sync.Mutex
+		var first string
+		var resumed []string
+		var streams atomic.Int32
+		// The first stream is cut after its first event; the stand-in accepts the apply once the
+		// watch has opened the stream again.
+		e.in.set(func(w http.ResponseWriter, r *http.Request) bool {
+			if r.Header.Get("Accept") != "text/event-stream" {
+				return false
+			}
+			if streams.Add(1) == 1 {
+				e.f.relay(t, w, r, func(id, _ string) bool { mu.Lock(); first = id; mu.Unlock(); return false })
+				return true
+			}
+			mu.Lock()
+			resumed = append(resumed, r.Header.Get("Last-Event-ID"))
+			mu.Unlock()
+			release()
+			return false
+		}, nil)
+		r := e.watch(op)
+		e.f.want(r, 0, "Completed at ", " (server): applied "+e.rel+", confirmed by observation obs_")
+		_, types := e.served(t, op)
+		mu.Lock()
+		defer mu.Unlock()
+		if got := shown(r.out); first == "" || len(resumed) == 0 || resumed[0] != first || len(got) != 1 || !slices.Equal(got[0], types) {
+			t.Errorf("cut after %q, reopened with Last-Event-ID %q; shown %q, want %q once each", first, resumed, got, types)
+		}
+	},
+
+	"AUTH-06": func(t *testing.T, e *watchEnv) {
+		f := e.f
+		op, release := e.held(t)
+		defer release()
+		// 62 s left: more than the 60 s renewal margin, so the watch opens the stream on this token, and
+		// the server ends the stream when it expires.
+		short, err := f.iss.Mint("h-all", "", time.Now().Add(62*time.Second-issuer.Lifetime))
+		if err != nil {
+			t.Fatal(err)
+		}
+		renewed := f.mint("h-all", "")
+		f.store(f.humanFile(), short, "BWSYNTH-rt-6")
+		f.idp.mu.Lock()
+		f.idp.answer = func(rt string) (int, any) {
+			if rt != "BWSYNTH-rt-6" {
+				return http.StatusBadRequest, map[string]string{"error": "invalid_grant"}
+			}
+			return issued(renewed, "BWSYNTH-rt-7")
+		}
+		f.idp.mu.Unlock()
+		defer func() {
+			f.idp.mu.Lock()
+			f.idp.answer = nil
+			f.idp.mu.Unlock()
+			f.store(f.humanFile(), f.mint("h-all", ""), "")
+		}()
+		calls := f.idp.calls.Load()
+		type opened struct{ bearer, last string }
+		var mu sync.Mutex
+		var streams []opened
+		e.in.set(func(_ http.ResponseWriter, r *http.Request) bool {
+			if r.Header.Get("Accept") == "text/event-stream" {
+				mu.Lock()
+				streams = append(streams, opened{strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), r.Header.Get("Last-Event-ID")})
+				mu.Unlock()
+				if r.Header.Get("Last-Event-ID") != "" {
+					release()
+				}
+			}
+			return false
+		}, nil)
+		r := e.watch(op)
+		e.f.want(r, 0, "Completed at ", " (server): applied "+e.rel)
+		_, types := e.served(t, op)
+		mu.Lock()
+		defer mu.Unlock()
+		switch got := shown(r.out); {
+		case len(streams) < 2 || streams[0].bearer != short || streams[0].last != "" || streams[1].bearer != renewed || streams[1].last == "":
+			// The tokens are not printed: the test's output is no place for them.
+			for i, s := range streams {
+				t.Errorf("stream %d: the expiring token %v, the renewed one %v, Last-Event-ID %q", i, s.bearer == short, s.bearer == renewed, s.last)
+			}
+			t.Errorf("%d streams; want the first on the expiring token without Last-Event-ID, the next on the renewed one with it", len(streams))
+		case f.idp.calls.Load() != calls+1:
+			t.Errorf("%d refresh redemptions; want 1", f.idp.calls.Load()-calls)
+		case f.stored(f.humanFile()).RefreshToken != "BWSYNTH-rt-7":
+			t.Error("the renewed sign-in was not stored")
+		case len(got) != 1 || !slices.Equal(got[0], types):
+			t.Errorf("shown %q; want %q once each", got, types)
+		}
+	},
+
+	"EVT-03": func(t *testing.T, e *watchEnv) {
+		f := e.f
+		// No attempt can be recorded, so the operation stays committed, and a resolution can cancel it
+		// once it is unresolved: cancelled says that nothing was sent.
+		for _, q := range []string{`CREATE FUNCTION bwsynth_no_attempt() RETURNS trigger LANGUAGE plpgsql AS
+				$$BEGIN RAISE EXCEPTION 'BWSYNTH: EVT-03 records no attempt'; END$$`,
+			`CREATE TRIGGER bwsynth_no_attempt BEFORE INSERT ON attempt FOR EACH ROW EXECUTE FUNCTION bwsynth_no_attempt()`} {
+			if _, err := f.db.Exec(q); err != nil {
+				t.Fatalf("%s: %v", q, err)
+			}
+		}
+		defer func() {
+			for _, q := range []string{`DROP TRIGGER bwsynth_no_attempt ON attempt`, `DROP FUNCTION bwsynth_no_attempt()`} {
+				if _, err := f.db.Exec(q); err != nil {
+					t.Errorf("%s: %v", q, err)
+				}
+			}
+		}()
+		e.in.set(nil, nil)
+		p := planID.FindString(e.ctl(e.create("apply-config", "--transport-deadline", "2m", "--verification-deadline", "2m", "--max-attempts", "1")...).out)
+		e.approve(t, p)
+		op := e.operationOf(t, p)
+		var gen int
+		if err := f.db.QueryRow(`SELECT owner_gen FROM operation WHERE id = $1 AND state = 'committed'`, op).Scan(&gen); err != nil {
+			t.Fatalf("the operation %s is not committed: %v", op, err)
+		}
+		unresolved := make(chan struct{})
+		seen := sync.OnceFunc(func() { close(unresolved) })
+		e.in.set(func(w http.ResponseWriter, r *http.Request) bool {
+			if r.Header.Get("Accept") != "text/event-stream" {
+				return false
+			}
+			e.f.relay(t, w, r, func(_, data string) bool {
+				if strings.Contains(strings.ReplaceAll(data, " ", ""), `"to":"unresolved"`) {
+					seen()
+				}
+				return true
+			})
+			return true
+		}, nil)
+		done := make(chan result, 1)
+		go func() { done <- e.watch(op, "--timeout", "5m") }()
+		f.recovery(f.base, "/operations/"+op+"/takeovers", "k-evt03-takeover-"+op,
+			`{"generation":`+strconv.Itoa(gen)+`,"reason":"BWSYNTH: EVT-03 takes the operation over before its first attempt"}`, http.StatusCreated)
+		select {
+		case <-unresolved:
+		case <-time.After(2 * time.Minute):
+			t.Fatal("the stream did not send the move to unresolved within two minutes")
+		}
+		f.recovery(f.base, "/operations/"+op+"/resolutions", "k-evt03-resolution-"+op,
+			`{"to":"cancelled","reason":"BWSYNTH: no attempt was recorded"}`, http.StatusCreated)
+		var r result
+		select {
+		case r = <-done:
+		case <-time.After(2 * time.Minute):
+			t.Fatal("the watch did not end within two minutes of the resolution")
+		}
+		f.want(r, 4, "operation-state       from committed, to unresolved, cause takeover\n", "Cancelled at ", " (server): resolution.\n"+
+			"Nothing more is sent for this plan. The plan names the command for a new one: bronzewardctl plan show '"+p+"'\n",
+			"operation "+op+" ended cancelled")
+		_, types := e.served(t, op)
+		if got := shown(r.out); len(got) != 1 || !slices.Equal(got[0], types) ||
+			strings.Index(r.out, "to unresolved") > strings.Index(r.out, "Cancelled at") {
+			t.Errorf("shown %q; want %q once each, unresolved before the end", got, types)
+		}
+	},
+
+	"EVT-02": func(t *testing.T, e *watchEnv) {
+		op, release := e.held(t)
+		t.Cleanup(release)
+		e.sending = op
+		var mu sync.Mutex
+		var first, resumed string
+		var streams atomic.Int32
+		// The first stream is cut after its first event, and a new epoch committed, as a restore
+		// does, before the watch opens the stream again.
+		e.in.set(func(w http.ResponseWriter, r *http.Request) bool {
+			if r.Header.Get("Accept") != "text/event-stream" {
+				return false
+			}
+			if streams.Add(1) == 1 {
+				e.f.relay(t, w, r, func(id, _ string) bool {
+					mu.Lock()
+					first = id
+					mu.Unlock()
+					e.f.newEpoch()
+					return false
+				})
+				return true
+			}
+			mu.Lock()
+			if resumed == "" {
+				resumed = r.Header.Get("Last-Event-ID")
+			}
+			mu.Unlock()
+			return false
+		}, nil)
+		r := e.watch(op, "--timeout", "10s")
+		e.f.want(r, 5, clearedLine, "restored or entered recovery mode; the operation's events are shown again from the start",
+			"Still sending after --timeout 10s.\n", "Follow it again with: bronzewardctl operation watch '"+op+"'\n")
+		_, types := e.served(t, op)
+		mu.Lock()
+		defer mu.Unlock()
+		if got := shown(r.out); first == "" || resumed != first || len(got) != 2 || len(got[0]) != 1 || !slices.Equal(got[1], types) {
+			t.Errorf("cut after %q, reopened with Last-Event-ID %q; shown %q, want one event, a clear, then %q", first, resumed, got, types)
+		}
+	},
+
+	// EVT-05 watches EVT-02's operation, which a restarted serve takes over, so its controller holds
+	// the epoch, and ends the watch with Ctrl-C, which stops only the watcher.
+	"EVT-05": func(t *testing.T, e *watchEnv) {
+		f, op := e.f, e.sending
+		if op == "" {
+			t.Fatal("EVT-02 left no operation")
+		}
+		f.restart()
+		e.until(t, "unresolved", `SELECT state FROM operation WHERE id = $1`, op)
+		var mu sync.Mutex
+		var lasts []string
+		opened, reopened := make(chan struct{}), make(chan struct{})
+		first, again := sync.OnceFunc(func() { close(opened) }), sync.OnceFunc(func() { close(reopened) })
+		e.in.set(func(w http.ResponseWriter, r *http.Request) bool {
+			if r.Header.Get("Accept") != "text/event-stream" {
+				return false
+			}
+			mu.Lock()
+			lasts = append(lasts, r.Header.Get("Last-Event-ID"))
+			n := len(lasts)
+			mu.Unlock()
+			if n == 1 {
+				first()
+			} else {
+				again()
+			}
+			return false
+		}, nil)
+		args := []string{"--context", "human", "operation", "watch", op, "--timeout", "5m"}
+		cmd := f.command(nil, args...)
+		var out, errb bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &out, &errb
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		defer cmd.Process.Kill()
+		select {
+		case <-opened:
+		case <-time.After(time.Minute):
+			t.Fatal("the watch opened no stream within a minute")
+		}
+		// The recovery entry on another process, a recovery start over the same database, while the
+		// stream stays open; then a normal start, whose controller takes the operation over in the
+		// new epoch, which writes the stream's next event.
+		recov, stopRecov := f.another(t, "-recovery-start")
+		at := func(d time.Duration) string { return time.Now().Add(-d).UTC().Format(time.RFC3339) }
+		f.recovery(recov, "/recovery/entries", "k-evt05-recovery-entry", `{"restored":[{"family":"database","backup":"BWSYNTH-pg",`+
+			`"takenAt":"`+at(time.Hour)+`"}],"stoppedAt":"`+at(time.Minute)+`","reason":"BWSYNTH: EVT-05 restore drill"}`, http.StatusCreated)
+		stopRecov()
+		f.another(t)
+		select {
+		case <-reopened:
+		case <-time.After(2 * time.Minute):
+			t.Fatal("the watch did not open the stream again within two minutes of the entry")
+		}
+		cmd.Process.Signal(os.Interrupt)
+		waited := make(chan error, 1)
+		go func() { waited <- cmd.Wait() }()
+		r := result{code: -1}
+		select {
+		case err := <-waited:
+			var exit *exec.ExitError
+			if r.code = 0; errors.As(err, &exit) {
+				r.code = exit.ExitCode()
+			}
+		case <-time.After(30 * time.Second):
+			t.Fatal("the watch did not end within 30 s of Ctrl-C")
+		}
+		r.out, r.err = out.String(), errb.String()
+		f.scan(r, args)
+		f.want(r, 130, clearedLine, "entered recovery mode or was restored while the events were read",
+			"Stopped watching at your request. Operation "+op+" is still unresolved, as the server last read it; it goes on.\n")
+		var state string
+		if err := f.db.QueryRow(`SELECT state FROM operation WHERE id = $1`, op).Scan(&state); err != nil || state != "unresolved" {
+			t.Errorf("after Ctrl-C the operation is %q, %v; want unresolved", state, err)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if got := shown(r.out); len(lasts) < 2 || lasts[0] != "" || lasts[1] != "" || len(got) != 2 || len(got[0]) == 0 || len(got[1]) <= len(got[0]) {
+			t.Errorf("streams opened with Last-Event-ID %q; shown %q: want the events, a clear and the events again with the new one", lasts, got)
+		}
+	},
+}
+
+// TestOperations runs operation watch (#354, decision T23 of #258) through the CLI against a
+// server with a provider and a Talos stand-in: the cases of testdata/operation-cases.yaml, in their
+// order, after the seeded machine's adoption.
+func TestOperations(t *testing.T) {
+	ids := cases(t, "testdata/operation-cases.yaml", operationCases)
+	e := &watchEnv{planEnv: newPlanEnv(t)}
+	e.in.set(nil, nil)
+	e.adopted = planID.FindString(e.ctl(e.create("adopt")...).out)
+	e.approve(t, e.adopted)
+	e.adoption = e.operationOf(t, e.adopted)
+	if state := e.f.ended(e.adoption); state != "completed" {
+		t.Fatalf("the adoption %s ended %s", e.adoption, state)
+	}
+	for _, id := range ids {
+		if !t.Run(id, func(t *testing.T) { operationCases[id](t, e) }) {
+			break // each case's operation must end for the next one's to start
+		}
+	}
+	e.f.scanFiles()
+}

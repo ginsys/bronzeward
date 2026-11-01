@@ -1,0 +1,144 @@
+# Shared conformance case records (docs/spec/client-contracts.md §12) of operation watch (#354,
+# decision T23 of #258), run in this order by operations_test.go TestOperations against a disposable
+# bronzeward serve with an OpenBao provider (the test's, through baotest), behind the in-process TLS
+# injector. Data is synthetic: fixture-issuer tokens for the humans h-all (author, publisher and
+# approver), h-approver and h-recovery; a Talos stand-in (talostest) on loopback for the seeded
+# machine. Before the cases, the machine is published twice, adopted by a plan of h-all that
+# h-approver approves, and the adoption completes. Each later case starts an apply-config operation
+# the same way, except where its setup says otherwise.
+#
+# Every case's argv, standard output and standard error are scanned for the tokens and for the
+# stand-in's secrets.
+
+- id: PAGE-01
+  setup: the adoption's operation, completed
+  action: operation watch op_...
+  exchange:
+    - "GET /api/v1/operations/op_.../events, Accept: text/event-stream"
+    - "GET /api/v1/operations/op_.../events, the JSON event pages, one request per page"
+    - GET /api/v1/operations/op_..., the operation read
+  fault: >-
+    the injector answers the stream request with the JSON page, as a server without a stream does,
+    and sets limit=1 on every events request, so the pages hold one event each
+  expect:
+    client: >-
+      takes the JSON answer as a server without a stream, reads the operation, sees its terminal
+      state, and reads the pages from the start, following each page's next to the last page
+    server: no change; the adoption stays completed
+    shown: >-
+      each of the operation's events (three or more) once, in order, marked with the server's time;
+      "Completed at <time> (server): adopted; the adoption of plan pln_... records Applied from the
+      node's own bytes. Nothing was sent to the machine."; exit 0
+    absent: [tokens and the stand-in's secrets in stdout, stderr, argv]
+  unit: the JSON pages where no stream opens are internal/client TestWatch's case
+
+- id: EVT-01
+  setup: an apply-config operation whose apply the stand-in holds
+  action: operation watch op_...
+  exchange:
+    - "GET /api/v1/operations/op_.../events, Accept: text/event-stream, no Last-Event-ID"
+    - GET /api/v1/operations/op_..., after the stream ends
+    - "GET /api/v1/operations/op_.../events, Accept: text/event-stream, Last-Event-ID: the first event's ID"
+  fault: >-
+    the injector passes the first stream's headers and first event, then ends the stream; the
+    stand-in accepts the held apply once the stream is opened again
+  expect:
+    client: >-
+      reads the operation, which is not terminal, and opens the stream again with Last-Event-ID; ends
+      when the operation completes
+    server: the operation completed; the machine's Applied is the release
+    shown: >-
+      each of the operation's events once, in order; "Completed at <time> (server): applied rel_...,
+      confirmed by observation obs_..."; exit 0
+    absent: [tokens and the stand-in's secrets in stdout, stderr, argv]
+  unit: the resumption with Last-Event-ID is internal/client TestWatch's case
+
+- id: AUTH-06
+  setup: >-
+    an apply-config operation whose apply the stand-in holds; the context's stored sign-in is an
+    h-all access token with 62 s left, beyond the 60 s renewal margin, and refresh token
+    BWSYNTH-rt-6, which the fixture provider redeems once for a new h-all token and BWSYNTH-rt-7
+  action: operation watch op_...
+  exchange:
+    - "GET /api/v1/operations/op_.../events, Accept: text/event-stream, no Last-Event-ID, on the expiring token"
+    - "the server ends the stream when the token expires"
+    - "GET /api/v1/operations/op_..., 401; POST <provider>/token, grant_type refresh_token; the read again, 200"
+    - "GET /api/v1/operations/op_.../events, Accept: text/event-stream, Last-Event-ID, on the renewed token"
+  fault: "none; the stand-in accepts the held apply once the stream is opened with Last-Event-ID"
+  expect:
+    client: >-
+      renews the sign-in in process and stores the renewed pair; resumes the stream with
+      Last-Event-ID; ends when the operation completes
+    server: the operation completed
+    shown: >-
+      each of the operation's events once, in order; "Completed at <time> (server): applied
+      rel_..."; exit 0
+    absent: [tokens, refresh tokens and the stand-in's secrets in stdout, stderr, argv]
+  unit: a renewal during the wait is internal/client TestWatchRenewal's case
+
+- id: EVT-03
+  setup: >-
+    an apply-config operation that stays committed: a database trigger refuses every attempt row, so
+    none is recorded; the trigger is dropped after the case
+  action: operation watch op_... --timeout 5m
+  exchange:
+    - "GET /api/v1/operations/op_.../events, Accept: text/event-stream"
+    - "POST /api/v1/operations/op_.../takeovers as h-recovery, by the test: 201, the operation unresolved"
+    - "POST /api/v1/operations/op_.../resolutions as h-recovery, by the test, once the stream sent the move to unresolved: 201, to cancelled"
+  fault: none
+  expect:
+    client: does not end at unresolved; reads on until the operation is cancelled
+    server: the operation cancelled by the resolution; no attempt recorded
+    shown: >-
+      the move to unresolved, cause takeover, before the end; each of the operation's events once, in
+      order; "Cancelled at <time> (server): resolution." and the next step, plan show pln_...;
+      "operation op_... ended cancelled" on standard error; exit 4
+    absent: [tokens and the stand-in's secrets in stdout, stderr, argv]
+  unit: the outcome lines of each terminal state are cmd/bronzewardctl TestOperationWatch's
+
+- id: EVT-02
+  setup: an apply-config operation whose apply the stand-in holds until the test ends
+  action: operation watch op_... --timeout 10s
+  exchange:
+    - "GET /api/v1/operations/op_.../events, Accept: text/event-stream, no Last-Event-ID"
+    - GET /api/v1/operations/op_..., after the stream ends
+    - "GET /api/v1/operations/op_.../events, Accept: text/event-stream, Last-Event-ID: the first event's ID, of the earlier epoch"
+  fault: >-
+    the injector passes the first stream's headers and first event; the test then commits a new
+    epoch in the database, as a restore's recovery entry does, and the injector ends the stream
+  expect:
+    client: >-
+      on the server's reset, clears what it showed, says why on standard error and shows the events
+      again from the start; --timeout then ends the watch
+    server: the reset event, then every event of the operation with IDs of the new epoch
+    shown: >-
+      the first event; the clear line; each of the operation's events once; "Still sending after
+      --timeout 10s." and "Follow it again with: bronzewardctl operation watch 'op_...'"; exit 5
+    absent: [tokens and the stand-in's secrets in stdout, stderr, argv]
+  unit: the reset is internal/client TestWatch's case
+
+- id: EVT-05
+  setup: >-
+    EVT-02's operation; serve is restarted, so a controller of the new epoch takes it over and it is
+    unresolved
+  action: operation watch op_... --timeout 5m, then Ctrl-C (SIGINT) once the stream is opened again
+  exchange:
+    - "GET /api/v1/operations/op_.../events, Accept: text/event-stream, no Last-Event-ID; the stream stays open"
+    - "POST /api/v1/recovery/entries as h-recovery on a second bronzeward serve, a recovery start over the same database, by the test: 201"
+    - >-
+      the second serve stopped and a third, a normal start, started; its controller takes the
+      operation over and writes the stream's next event, of the entry's epoch
+    - GET /api/v1/operations/op_..., after the stream ends
+    - "GET /api/v1/operations/op_.../events, Accept: text/event-stream, no Last-Event-ID"
+  fault: none
+  expect:
+    client: >-
+      ends the stream at the first event ID of another epoch, reads the operation, clears what it
+      showed, says why on standard error and opens the stream again without Last-Event-ID; on
+      Ctrl-C stops watching and names the state the watch last read
+    server: the operation still unresolved after Ctrl-C
+    shown: >-
+      the events, the clear line, the events again with the new one; "Stopped watching at your
+      request. Operation op_... is still unresolved, as the server last read it; it goes on."; exit 130
+    absent: [tokens and the stand-in's secrets in stdout, stderr, argv]
+  unit: an event ID of another epoch is internal/client TestWatch's case

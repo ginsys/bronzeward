@@ -671,31 +671,50 @@ time: an open drift carries its revision and observations only
 
 ```text
 $ bronzewardctl operation watch op_q8r…t2na
-apply-config  mch_b3c…aa2q  plan pln_f645…cawy
-10:06:02  committed            attempt 1 (controller ctl-b, generation 3)
-10:06:03  sending              route 10.5.0.5:50000
-10:06:04  response accepted
-10:06:31  verifying            observation obs_x7m…
-10:06:40  completed            applied rel_h7rt…2bd (operation)
-$ bronzewardctl operation watch op_q8r…t2na          # after a network drop
-Reconnected; resumed after event ep_bqek…ekgi:14.
+apply-config  plan pln_f645…cawy, machine mch_b3c…aa2q
+Times marked "received" are this client's clock when the event arrived; the completion line shows the server's time.
+received 10:06:02  commitment            plan pln_f645…cawy, approval apr_k2v…, observation obs_r4d…, controller ctl_b…, generation 3
+received 10:06:03  attempt               attempt 1, route 10.5.0.5:50000, transport deadline 2026-11-01T10:07:03Z, controller ctl_b…, generation 3
+received 10:06:04  response              attempt 1, class accepted
+received 10:06:40  classification        outcome completed, observation obs_x7m…, controller ctl_b…, generation 3
+received 10:06:40  operation-state       from verifying, to completed
+Completed at 2026-11-01 10:06:40 CET (server): applied rel_h7rt…2bd, confirmed by observation obs_x7m….
 ```
 
-Events stream as Server-Sent Events with `Last-Event-ID` `<epoch>:<number>`; a different epoch
-yields a `reset` event and a replay from the start; the stream ends at a terminal state or at the
-expiry of the token that opened it (`internal/api/operations.go:231-266`). `unresolved` is not
-terminal (`internal/api/operations.go:144-151`). **Proposed:** `watch` reconnects with the last
-event ID and a renewed token; on `reset` it prints "The installation was restored to an earlier
-state; replaying this operation's events from the start" and clears what it showed.
+Each event line names the event's type and what its data holds. An event of a type this client
+does not know prints its data as JSON. Text that the server chose is quoted when it holds a control
+character. An event carries no time on the stream, so its line shows when this client received it, marked
+`received`, whether the stream or the JSON event pages delivered it. After a terminal state the
+watch reads the last event from the JSON event pages once more, and the completion line shows that
+event's server time. If the installation was restored meanwhile, the last event is of another epoch
+than the operation read, and the line says "The server's time of this end was not read." instead.
+
+Events stream as Server-Sent Events with `Last-Event-ID` `<epoch>:<number>`. A different epoch
+yields a `reset` event and a replay from the start. The stream ends at a terminal state or at the
+expiry of the token that opened it (`internal/api/operations.go:231-266`). `watch` reconnects with
+the last event ID and a renewed token, and shows no event twice. On a `reset`, or on an event ID of
+another epoch, it says why on standard error, prints
+`(the events above no longer hold; they are shown again from the start)` and shows every event
+again.
+
+`unresolved` is not terminal (`internal/api/operations.go:144-151`), so the watch goes on past it.
+`--timeout` (default `30m`) ends the watch with exit 5 and names the state. The watch checks the
+timeout between its reads, so it can pass by about 45 seconds:
 
 ```text
-10:06:03  sending              route 10.5.0.5:50000
-10:07:03  transport deadline passed; no response recorded
-10:07:03  unresolved           completion and retry safety are unknown. A recovery
-                               administrator must account for attempt 1. No conflicting
-                               work on this machine proceeds until then.
-Still unresolved; exiting with 5.
+received 10:07:03  operation-state       from verifying, to unresolved, cause an attempt is not accounted for
+Still unresolved after --timeout 30m0s.
+Unresolved: completion and retry safety are unknown. A recovery administrator must account for attempt 1. No conflicting work on this machine proceeds until then.
+Follow it again with: bronzewardctl operation watch 'op_q8r…t2na'
 ```
+
+A `failed`, `rejected` or `cancelled` operation ends the watch with exit 4. The outcome line names
+the cause and the attempt count, and the next line names the next safe step. A cancelled operation
+records no cause, so the line takes it from the operation's last event. Ctrl-C ends the watch with
+exit 130 and stops only the watcher. The watch waits up to 3 seconds for the operation's state,
+then says that the operation goes on, and names the state if it read one. `operation show` prints the same outcome lines without the server's time, because it reads no
+event. With `-o json` or `-o yaml`, the event lines go to standard error and the operation resource
+to standard output.
 
 ### 5.8 Drift: freeze, then adopt or revert
 
