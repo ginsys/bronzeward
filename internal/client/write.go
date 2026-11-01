@@ -113,6 +113,11 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 	if _, _, err := c.Server(); err != nil {
 		return nil, err
 	}
+	// GET /server can renew the sign-in and adopt one another process stored for another subject
+	// (§9.5 item 2), so the principal is read again before the first send (§8.4 item 3, T10).
+	if who, err = c.principal(w.Repeat); err != nil {
+		return nil, err
+	}
 	if w.Repeat == nil {
 		// The last epoch seen before the first send, the context-use read's included (§8.4 item 3).
 		ref = c.Context.LastEpoch
