@@ -171,17 +171,17 @@ describe("the draft editor (#339)", () => {
   it("Create draft, then a fragment saved: the entry is new, the footer says the draft is not rendered, and unsaved text is guarded", async () => {
     expect(await fixtureSignIn("h-author", {}, { upstream: at })).toMatch(SERVER);
     await $('nav[aria-label="Main"]').$("a=Changes").click();
-    await $("main button=Create draft").click();
+    await $("main").$("button=Create draft").click();
     await expect($("main h2")).toHaveText("Create draft");
     await $('select[name="cluster"]').selectByVisibleText(cluster.name);
     const title = `synthetic ${hex()}`;
     await $('input[name="title"]').setValue(title);
-    await $("main form button=Create draft").click();
+    await $("main form").$("button=Create draft").click();
     await expect($('[data-testid="write-result"]')).toHaveText(expect.stringContaining(`"${title}" created in cluster`), { wait: 20_000 });
     await $('[data-testid="write-result"]').$("a").click();
     await expect($("main h2")).toHaveText(expect.stringContaining(`"${title}" open, revision`));
     await expect($('[data-testid="not-rendered"]')).toHaveText(NOT_RENDERED);
-    await $("main button=Add fragment").click();
+    await $("main").$("button=Add fragment").click();
     const name = `save-${hex()}`;
     await pane().$("label*=name").$("input").setValue(name);
     await putDocument(name);
@@ -270,7 +270,7 @@ describe("the draft editor (#339)", () => {
     const name = `ref-${hex()}`;
     const { id } = await seeded(`base-${hex()}`);
     await openDraft(id);
-    await $("main button=Add fragment").click();
+    await $("main").$("button=Add fragment").click();
     await pane().$("label*=name").$("input").setValue(name);
     await pane().$("label*=Document").$("textarea").setValue("machine:\n  nodeLabels:\n    example.test/ref: !bwref ghost\n");
     await pane().$("button=Declare").click();
@@ -313,10 +313,10 @@ describe("the draft editor (#339)", () => {
     await expect($('main ul[aria-label="Entries"]')).toHaveText(expect.stringContaining(`fragment ${name} removed`));
     // Dismissed, nothing is sent; accepted, the draft is discarded.
     const before = (await writes()).length;
-    expect((await dialogs(false, () => $("main button=Discard draft").click()))[0]).toContain(`Discard draft ${id}`);
+    expect((await dialogs(false, () => $("main").$("button=Discard draft").click()))[0]).toContain(`Discard draft ${id}`);
     await browser.pause(500);
     expect(await writes()).toHaveLength(before);
-    await dialogs(true, () => $("main button=Discard draft").click());
+    await dialogs(true, () => $("main").$("button=Discard draft").click());
     await expect($("main h2")).toHaveText(expect.stringContaining("discarded"), { wait: 20_000 });
     expect((await writes()).map(([m, r]) => `${m} ${r}`).slice(before)).toEqual([`POST /drafts/${id}/discard`]);
   });
