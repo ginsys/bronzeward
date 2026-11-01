@@ -366,6 +366,16 @@ func show(w Watch, ev Event, last *string) {
 
 func epochOf(id string) string { e, _, _ := strings.Cut(id, ":"); return e }
 
+// EpochOf is the epoch of an event ID, which has the form <epoch>:<number>: the part a caller
+// compares with the Bronzeward-Epoch header of an answer, as the watch does.
+func EpochOf(id string) string { return epochOf(id) }
+
+// OperationEpoch reads GET /operations/{op} once and returns the operation and the epoch of that
+// answer, as the watch reads it.
+func (c *Client) OperationEpoch(op string) (*apitypes.OperationBody, string, error) {
+	return c.operation(op)
+}
+
 func number(id string) int64 {
 	_, n, _ := strings.Cut(id, ":")
 	v, _ := strconv.ParseInt(n, 10, 64)
