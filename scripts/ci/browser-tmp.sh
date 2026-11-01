@@ -13,8 +13,10 @@
 # ChromeDriver makes .org.chromium.Chromium.XXXXXX directories too: a profile when a session has no
 # --user-data-dir (the leak of #430), and one to unpack extensions into, empty when a session loads
 # none. wdio kills ChromeDriver with SIGKILL once a session is deleted, which can come before
-# ChromeDriver removes its directories (#485). An empty one is removed with the run's directory. A
-# profile is never empty, so it still fails the task.
+# ChromeDriver removes its directories (#485). An empty one is removed with the run's directory and
+# does not fail the task, whatever it was. A profile killed while ChromeDriver was deleting its last
+# entry is empty too, and passes. A session without --user-data-dir leaves a full profile at almost
+# every kill, so that regression still fails the task.
 set -euo pipefail
 export LC_ALL=C # ${#…} counts bytes, not a UTF-8 locale's characters
 case ${1:-}:${2:-} in
