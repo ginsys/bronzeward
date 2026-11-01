@@ -147,6 +147,21 @@ async function dialogs(accept: boolean, act: () => Promise<void>): Promise<strin
 
 const guarded = () => browser.execute(() => !dispatchEvent(new Event("beforeunload", { cancelable: true })));
 
+// At 320 CSS pixels (journeys §13, WCAG 1.4.10): how far the page scrolls sideways, and whether
+// the region `sel` scrolls on its own, so the wide row is really there. The window is restored.
+async function narrow(sel: string): Promise<{ page: number; region: boolean }> {
+  const size = await browser.getWindowSize();
+  await browser.setWindowSize(320 + size.width - (await browser.execute(() => document.documentElement.clientWidth)), size.height);
+  try {
+    return await browser.execute((s: string) => {
+      const r = document.querySelector(s);
+      return { page: document.documentElement.scrollWidth - document.documentElement.clientWidth, region: r !== null && r.scrollWidth > r.clientWidth };
+    }, sel);
+  } finally {
+    await browser.setWindowSize(size.width, size.height);
+  }
+}
+
 describe("the draft editor (#339)", () => {
   before(async () => {
     const res = await fetch(`${CONTROL}/disposable?start=normal`, { method: "POST" });
@@ -347,6 +362,23 @@ describe("the draft editor (#339)", () => {
     await browser.keys("Enter");
     await expect(result()).toHaveText(expect.stringContaining(`Fragment ${name} saved in draft`), { wait: 30_000 });
     await oneWrite(1);
+  });
+
+  it("at 320 CSS pixels a wide row scrolls inside the Drafts and References tables, and the page does not", async () => {
+    const wide = `w${"x".repeat(119)}`;
+    const d = await api("h-author", "POST", "/drafts", { cluster: cluster.id, title: `synthetic ${wide}` });
+    expect(d.status).toBe(201);
+    const id = d.body!["id"] as string;
+    expect(await fixtureSignIn("h-author", {}, { upstream: at })).toMatch(SERVER);
+    await $('nav[aria-label="Main"]').$("a=Changes").click();
+    await $(`main a[title="${id}"]`).waitForExist({ timeout: 20_000 });
+    expect(await narrow('main [role="region"][aria-label="Drafts"]')).toEqual({ page: 0, region: true });
+    await $(`main a[title="${id}"]`).click();
+    await expect($("main h2")).toHaveText(expect.stringContaining("synthetic"));
+    await $("main").$("button=Add fragment").click();
+    await pane().$("label*=Document").$("textarea").setValue(`machine:\n  nodeLabels:\n    example.test/ref: !bwref ${wide}\n`);
+    await expect(pane().$('[role="region"][aria-label="References in this document"]')).toBeExisting();
+    expect(await narrow('main [role="region"][aria-label="References in this document"]')).toEqual({ page: 0, region: true });
   });
 
   // Last: the digest key's earlier versions stay retired for the rest of the run.
