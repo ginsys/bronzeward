@@ -2,6 +2,7 @@ package client
 
 import (
 	"fmt"
+	"io"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -68,6 +69,27 @@ func EscapeJSON(b []byte) []byte {
 // Printable is printable for bronzewardctl's commands, which show remote text outside an error:
 // the sign-in line's subject and issuer, for one (#383).
 func Printable(s string) string { return printable(s) }
+
+// GuardWriter is w with every text written to it made printable but for its line feeds: the last
+// guard before the terminal for text that no one escaped at its source (the -v lines, a notice, a
+// sentence that a command built without the escaping helpers). It cannot tell a line feed of the
+// client from one of a remote value, so the places that print a value escape that at the source.
+// A write is taken whole, as fmt.Fprintf sends it; escaping is idempotent, so text that was
+// escaped already passes unchanged.
+func GuardWriter(w io.Writer) io.Writer { return guard{w} }
+
+type guard struct{ w io.Writer }
+
+func (g guard) Write(p []byte) (int, error) {
+	lines := strings.Split(string(p), "\n")
+	for i, l := range lines {
+		lines[i] = printable(l)
+	}
+	if _, err := io.WriteString(g.w, strings.Join(lines, "\n")); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
 
 // ShownStartMode is the start mode as shown: normal or recovery, the values GET /server documents,
 // else unknown, so a start mode the server or a hand-edited contexts file holds is never echoed.

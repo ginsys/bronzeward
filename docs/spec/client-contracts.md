@@ -386,6 +386,12 @@ it. It holds no secret.
      line feeds included, so an error from outside the CLI (a keyring or a library) cannot start
      a line of its own. The one exception is a multi-line error that the CLI builds itself, such as
      the outcome-unknown block: each of its lines is escaped and the CLI joins them.
+   - Everything the CLI writes to the terminal passes one last guard: standard error always (errors,
+     notices, prompts and the `-v` lines, such as the proxy URL from the environment), and
+     standard output in `-o table`. The guard writes every control character but the line feed
+     as an escape. It cannot tell a line feed in a value from the CLI's own, so each place that
+     prints a value escapes it first. A flag error shows its rejected value in the same escape
+     form, not the quoted form of the Go parser.
    - Where the CLI shows a value as JSON text that it encodes itself (a timeline entry, an
      operation result or error), the JSON encoder leaves DEL and the C1 range raw. The text is
      escaped again by this rule.
