@@ -116,6 +116,11 @@ func (e *env) fragmentBody(in apitypes.FragmentInput, file, decl string, marks b
 	case !utf8.Valid(doc):
 		return nil, fmt.Errorf("the document is not UTF-8 text; nothing was sent")
 	}
+	if file == "-" {
+		if err := terminalLines(doc, isTerminal(stdin)); err != nil {
+			return nil, err
+		}
+	}
 	in.Document = string(doc)
 	if marks {
 		m, err := e.readMarks(file == "-")
@@ -195,6 +200,21 @@ func (e *env) readMarks(docOnStdin bool) ([]string, error) {
 // terminalLine is the most a Linux terminal in canonical mode keeps of one line: it drops the rest
 // without an error, so a line this long from a terminal may have been cut short.
 const terminalLine = 4095
+
+// terminalLines refuses a document read from a terminal with a line long enough that canonical mode
+// may have cut it short. The refusal names the line number only.
+func terminalLines(doc []byte, terminal bool) error {
+	if !terminal {
+		return nil
+	}
+	for n, line := range bytes.Split(doc, []byte("\n")) {
+		if len(line) >= terminalLine {
+			return fmt.Errorf("line %d of the document is %d bytes or more, which a terminal can cut short; give a long document in a file or on standard input that is not a terminal; nothing was sent",
+				n+1, terminalLine)
+		}
+	}
+	return nil
+}
 
 // scanMarks reads marks, one per line until an empty line or the end of input. A mark is sent as
 // the text that was given (PA §9.3), so a mark that is not UTF-8, which json.Marshal would alter,

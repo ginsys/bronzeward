@@ -160,6 +160,32 @@ func TestMarkRefusals(t *testing.T) {
 	}
 }
 
+// TestDocumentTerminalLines checks that a document from a terminal is refused with a line long
+// enough that canonical mode may have cut it short, by line number only. From a file or a pipe the
+// same document is taken.
+func TestDocumentTerminalLines(t *testing.T) {
+	long := "BWSYNTH-" + strings.Repeat("k", terminalLine)
+	for _, c := range []struct {
+		name, doc string
+		terminal  bool
+		says      string
+	}{
+		{"a long terminal line", "machine:\n  " + long + ": x\n", true, "line 2 of the document is 4095 bytes or more, which a terminal can cut short"},
+		{"a long last line with no line feed", "machine:\n" + long, true, "line 2 of the document is 4095 bytes or more"},
+		{"one byte under the terminal limit", "machine:\n" + long[:terminalLine-1] + "\n", true, ""},
+		{"a long line from a pipe", "machine:\n  " + long + ": x\n", false, ""},
+	} {
+		err := terminalLines([]byte(c.doc), c.terminal)
+		switch {
+		case c.says == "" && err != nil:
+			t.Errorf("%s: %v; want the document taken", c.name, err)
+		case c.says != "" && (err == nil || !strings.Contains(err.Error(), c.says) || strings.Contains(err.Error(), "BWSYNTH") ||
+			strings.Contains(err.Error(), "kkkk")):
+			t.Errorf("%s: %v; want the refusal %q, with no document text", c.name, err, c.says)
+		}
+	}
+}
+
 // TestProtectedOnLinuxOnly checks that the protected commands refuse outside Linux (#256
 // BW-256-env-1), where the guard is not yet verified.
 func TestProtectedOnLinuxOnly(t *testing.T) {
