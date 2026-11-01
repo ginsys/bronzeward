@@ -37,7 +37,7 @@ export interface Faults {
 
 // drop: the request read and its connection closed, nothing forwarded; commit-drop: forwarded, the
 // server's answer dropped; commit-500: forwarded, its answer replaced by 500 internal-error; 503:
-// answered 503 dependency-unavailable, nothing forwarded; redirect: answered 302; epoch: a new epoch
+// answered 503 dependency-unavailable, nothing forwarded; redirect: answered 302 to REDIRECTED; epoch: a new epoch
 // committed, then forwarded; commit-drop-epoch: as commit-drop, then a new epoch.
 export type Step = "drop" | "commit-drop" | "commit-500" | "503" | "redirect" | "epoch" | "commit-drop-epoch";
 
@@ -55,7 +55,13 @@ export interface Injector {
   writes: string[];
   // Commits a new epoch in the deployment the writes go to, as a recovery entry does.
   epoch: () => void;
+  // The requests that reached REDIRECTED: a redirect the page followed.
+  redirected: number;
 }
+
+// Where every injected redirect points: a path on the page's own origin, which the page's CSP admits
+// and the static host passes to this injector, so only the page's own refusal keeps it unreached.
+export const REDIRECTED = "/api/v1/__redirected";
 
 const body = (req: IncomingMessage) =>
   new Promise<Buffer>((resolve, reject) => {
@@ -69,7 +75,7 @@ export function startInjector(upstream: string, port: number): Promise<Injector>
   // Each held answer: its release, and its having been sent.
   const waiting: { go: () => void; sent: Promise<void> }[] = [];
   const inj: Injector = {
-    faults: {}, seen: [], answered: [], holding: [], writes: [], server: undefined as never, epoch: () => {},
+    faults: {}, seen: [], answered: [], holding: [], writes: [], redirected: 0, server: undefined as never, epoch: () => {},
     release: async () => {
       inj.holding = [];
       const now = waiting.splice(0);
@@ -79,6 +85,10 @@ export function startInjector(upstream: string, port: number): Promise<Injector>
   };
   inj.server = createServer((req, res) => {
     const { pathname: path, search } = new URL(req.url ?? "/", upstream);
+    if (path === REDIRECTED) {
+      inj.redirected++;
+      return void res.writeHead(200, { "Content-Type": "application/json" }).end("{}");
+    }
     if (path.startsWith("/api/v1/")) inj.seen.push(path.slice("/api/v1".length));
     const f = inj.faults;
     const route = path.slice("/api/v1".length);
@@ -90,7 +100,7 @@ export function startInjector(upstream: string, port: number): Promise<Injector>
       const sent = new Uint8Array(await body(req));
       if (step === "drop") return req.socket.destroy();
       if (step === "503") return problem(503, "dependency-unavailable");
-      if (step === "redirect") return res.writeHead(302, { Location: "http://127.0.0.1:9/" }).end();
+      if (step === "redirect") return res.writeHead(302, { Location: REDIRECTED }).end();
       if (step === "epoch") inj.epoch();
       const up = await fetch((f.upstream ?? upstream) + (req.url ?? "/"), { method: req.method!, headers: forwarded(), body: sent, redirect: "manual" });
       const out = Buffer.from(await up.arrayBuffer());
@@ -112,7 +122,7 @@ export function startInjector(upstream: string, port: number): Promise<Injector>
       const step = write && f.steps?.path === route ? f.steps.take.shift() : undefined;
       // A step that cannot be taken (the epoch refused) closes the connection, and is logged.
       if (step !== undefined) return void answerStep(step).catch((e: unknown) => (console.error(`injector step ${step}: ${String(e)}`), req.socket.destroy()));
-      if (f.redirect === route) return void res.writeHead(302, { Location: "http://127.0.0.1:9/" }).end();
+      if (f.redirect === route) return void res.writeHead(302, { Location: REDIRECTED }).end();
       if (f.missing === route) {
         const problem = { type: "urn:bronzeward:problem:not-found", title: "Not found", status: 404, detail: "injected", instance: "req-injected" };
         return void res.writeHead(404, { "Content-Type": "application/problem+json" }).end(JSON.stringify(problem));

@@ -115,7 +115,7 @@ function host(listen: string, clientConfig: object, issuer: string, api: string)
 // POST /faults sets the injector's faults, GET /seen lists the API paths it passed on and GET
 // /answered the server's answers to them, GET /held the paths whose answers it holds now, POST
 // /release lets its held answers go and answers once they are sent, GET /writes lists the writes
-// it received and POST /epoch commits a new epoch where they go; the next sign-in clears all. POST /disposable answers the URL of B's
+// it received, GET /redirected counts the requests that followed its redirects, and POST /epoch commits a new epoch where they go; the next sign-in clears all. POST /disposable answers the URL of B's
 // deployment just started on a fresh database, replacing any earlier one: ?start=recovery with
 // -recovery-start, its entry not yet made, and with &keep on the earlier one's database.
 function control(provider: Provider, next: { grant: Grant }, injector: Injector, disposable: (recovery: boolean, keep: boolean) => Promise<string>): Server {
@@ -127,6 +127,7 @@ function control(provider: Provider, next: { grant: Grant }, injector: Injector,
     if (url.pathname === "/answered") return res.end(JSON.stringify(injector.answered));
     if (url.pathname === "/held") return res.end(JSON.stringify(injector.holding));
     if (url.pathname === "/writes") return res.end(JSON.stringify(injector.writes));
+    if (url.pathname === "/redirected") return res.end(JSON.stringify(injector.redirected));
     if (url.pathname === "/epoch" && req.method === "POST") {
       try {
         injector.epoch();
@@ -180,6 +181,7 @@ function control(provider: Provider, next: { grant: Grant }, injector: Injector,
       injector.seen.length = 0;
       injector.answered.length = 0;
       injector.writes.length = 0;
+      injector.redirected = 0;
       res.end();
     });
   });
