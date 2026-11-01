@@ -208,11 +208,12 @@ export class Writes {
     if (w.spec.ifMatch !== undefined) headers["If-Match"] = w.spec.ifMatch;
     const body = JSON.stringify(w.spec.body);
     // The last answer, as status and code, and its problem; undefined and null while the last
-    // attempt got none.
+    // attempt got none. A [Repeat exactly] starts from the problem of the answer it repeats.
     let last: string | undefined;
-    let lastProblem: Problem | null = null;
-    // Set aside by a check before a send (no answer), or by this answer's refusal.
-    const aside = (why: string, problem: Problem | null = null): Outcome => ({ kind: "set-aside", why, ambiguous: w.ambiguous, problem });
+    let lastProblem: Problem | null = w.repeating?.problem ?? null;
+    // Set aside by a check before a send or by an answer's refusal: either way with the last
+    // answer's problem (§8.2), which a check before a send leaves as it was.
+    const aside = (why: string): Outcome => ({ kind: "set-aside", why, ambiguous: w.ambiguous, problem: lastProblem });
     const unknown = (why = last === undefined ? DROPPED : `the server answered ${last}`): Outcome => ({ kind: "unknown", why, problem: lastProblem });
     // A refusal decided before the idempotency lookup says nothing of an earlier ambiguous attempt.
     const early = (o: Outcome): Outcome => (w.ambiguous ? unknown() : o);
@@ -276,10 +277,10 @@ export class Writes {
       // The route-level role check, decided before the lookup; only the plan cancellation's creator
       // check, which carries `plan`, refuses after it (§8.2 403 row).
       if (a.status === 403 && code === "forbidden" && p?.["plan"] === undefined) return early(refused);
-      if (a.status === 409 && code === "conflict" && p?.["request"] !== undefined && p["epoch"] !== undefined) return aside("the key's record is from an earlier epoch", p);
+      if (a.status === 409 && code === "conflict" && p?.["request"] !== undefined && p["epoch"] !== undefined) return aside("the key's record is from an earlier epoch");
       // A process refusal, decided before the lookup (§8.2 409 row).
       if (a.status === 409 && code === "recovery-mode-active" && p?.["scope"] === undefined) return early(refused);
-      if (a.status === 412 && code === "epoch-mismatch") return aside(EPOCH_CHANGED_ASIDE, p);
+      if (a.status === 412 && code === "epoch-mismatch") return aside(EPOCH_CHANGED_ASIDE);
       if (a.status === 422 && code === "idempotency-key-reused" && (n > 0 || again)) return unknown("this repeat could not be matched to the earlier request under its key, so it did nothing");
       if (a.status === 503 && (REPEATED_503.has(code ?? "") || code === "epoch-superseded")) {
         p503 = p;

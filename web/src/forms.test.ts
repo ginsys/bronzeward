@@ -64,6 +64,51 @@ describe("the notice (B11)", () => {
     expect(html(writes, h(WriteNotices, { go: () => {} }))).toContain(`${setAside(EPOCH_CHANGED_ASIDE)}${fields} Key ${w.key}`);
   });
 
+  // A page under epoch e1 whose write answers come from `answer`, and whose waits before each
+  // repeat call `waited`.
+  function scripted(answer: (n: number) => unknown, waited: (writes: Writes) => void = () => {}): [Writes, Write] {
+    const writes: Writes = new Writes(() => PRINCIPAL, async () => waited(writes));
+    let n = 0;
+    writes.client = {
+      currentEpoch: "e1",
+      attempt: async (_m: string, path: string) => (path === "/recovery" ? { status: 200, headers: new Headers({ "Bronzeward-Epoch": "e1" }), data: {} } : answer(++n)),
+    } as unknown as Client;
+    return [writes, new Write({ method: "POST", path: "/clusters", body: { name: "lab" }, resource: "/clusters" })];
+  }
+  const internal = { status: 500, headers: new Headers(), data: { type: "urn:bronzeward:problem:internal-error", title: "Internal error", status: 500, detail: "boom", instance: "req-5" } };
+  const fields500 = " Internal error: boom. Request req-5.";
+
+  test("set aside while its repeats run after a 500, the notice shows the 500's problem at once", async () => {
+    let out = "";
+    const [writes, w] = scripted(() => internal, (page) => {
+      if (out !== "") return;
+      page.setAside(EPOCH_CHANGED_ASIDE);
+      out = html(page, h(WriteNotices, { go: () => {} }));
+    });
+    await writes.submit(w);
+    expect(out).toContain(`${setAside(EPOCH_CHANGED_ASIDE)}${fields500} Key ${w.key}`);
+  });
+
+  test("a [Repeat exactly] whose attempt drops shows that drop while it repeats, not the earlier 500", async () => {
+    let out = "";
+    const [writes, w] = scripted((n) => (n <= 4 ? internal : undefined), (page) => {
+      if (w.repeating !== undefined && w.doubt !== undefined && out === "") out = html(page, h(WriteNotices, { go: () => {} }));
+    });
+    expect(await writes.submit(w)).toMatchObject({ kind: "unknown", why: "the server answered 500 internal-error" });
+    await writes.submit(w);
+    expect(out).toContain(`${unknown("the connection dropped")}${REPEATING} Key ${w.key}`);
+    expect(out).not.toContain("Internal error");
+  });
+
+  test("a refusal that settles a notice kept since it was set aside shows what the route accepts", async () => {
+    const p = { type: "urn:bronzeward:problem:forbidden", title: "forbidden", status: 403, detail: "not allowed", roles: ["author"], instance: "req-1" };
+    let page: Writes | undefined;
+    const [writes, w] = scripted(() => (page!.setAside(EPOCH_CHANGED_ASIDE), { status: 403, headers: new Headers(), data: p }));
+    page = writes;
+    expect(await writes.submit(w)).toMatchObject({ kind: "refused", status: 403 });
+    expect(html(writes, h(WriteNotices, { go: () => {} }))).toContain("Not saved: the server answered 403. Needs author. forbidden: not allowed. Request req-1. Key");
+  });
+
   test("set aside because the epoch read got no answer, it says so, not that the epoch changed", async () => {
     const [writes, w] = await unknownWrite();
     writes.setAside(NO_EPOCH);

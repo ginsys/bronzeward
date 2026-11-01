@@ -7,7 +7,7 @@ import type { components } from "./api/v1";
 import { Ref, short, useList, useReads } from "./list.tsx";
 import type { Cluster, Machine } from "./machines.tsx";
 import { Action } from "./shell.tsx";
-import { problemLine, problemTail, Refused, Repeated, REPLAYED, SetAside, Status, Unknown } from "./states.tsx";
+import { problemTail, Refused,Repeated, REPLAYED, SetAside, Status, Unknown } from "./states.tsx";
 import { type Outcome, Write, type Writes, type WriteSpec } from "./write.ts";
 
 type EndpointChange = components["schemas"]["EndpointChangeBody"];
@@ -29,16 +29,15 @@ const detail = (w: Write) => ` Key ${w.key}, ${w.route}. To learn the outcome, r
 // A settled [Repeat exactly]'s result, as its notice shows it (journeys §8, the Replayed row).
 function settled(o: Outcome): string {
   const earlier = "replayed" in o && o.replayed ? `${REPLAYED} ` : "";
-  const fields = "problem" in o && o.problem !== null ? ` ${problemLine(o.problem)}` : "";
+  // The answer's problem with what the route accepts (§8.2), as every notice shows it.
+  const fields = "problem" in o ? problemTail(o.problem) : "";
   switch (o.kind) {
     case "done":
       return `${earlier}Saved (the server answered ${o.status}).`;
     case "refused":
       return `${earlier}Not saved: the server answered ${o.status}.${fields}`;
-    case "not-done":
-      return `Not saved: ${o.why}.${fields}`;
     default:
-      return `Not saved: ${o.why}.${problemTail(o.problem)}`;
+      return `Not saved: ${o.why}.${fields}`;
   }
 }
 
@@ -52,13 +51,15 @@ export function WriteNotices({ go }: { go: (to: string) => void }) {
     if (o !== undefined && w.kept) return <Repeated key={w.key} line={settled(o)} {...props} detail={` Key ${w.key}, ${w.route}. Read ${w.spec.resource}.`} />;
     if (o?.kind === "unknown") return <Unknown key={w.key} why={o.why} problem={o.problem} onRepeat={writes.repeatable(w) ? () => void writes.submit(w) : undefined} {...props} />;
     if (o?.kind === "set-aside") return <SetAside key={w.key} why={o.why} problem={o.problem} {...props} />;
+    // While the run is in flight, the latest state that made the outcome unknown: an attempt of
+    // this run that may have committed, else the earlier attempt a [Repeat exactly] repeats.
+    const live = o === undefined ? (w.doubt ?? w.repeating) : undefined;
     // Set aside while its answer is still on its way: shown at once, with no dismissal until that
-    // answer settles it (§8.5 item 2).
-    if (o === undefined && w.aside !== undefined) return <SetAside key={w.key} why={w.aside} {...props} onDismiss={undefined} />;
-    // [Repeat exactly] in flight: the earlier attempt stays unknown, and its notice stays.
-    if (o === undefined && w.repeating !== undefined) return <Unknown key={w.key} why={w.repeating.why} problem={w.repeating.problem} repeating {...props} />;
-    // An attempt that may have committed, while the automatic repeats run: unknown already (B11).
-    if (o === undefined && w.doubt !== undefined) return <Unknown key={w.key} why={w.doubt.why} problem={w.doubt.problem} repeating {...props} />;
+    // answer settles it (§8.5 item 2), and with the problem of the answer behind it.
+    if (o === undefined && w.aside !== undefined) return <SetAside key={w.key} why={w.aside} problem={live?.problem ?? null} {...props} onDismiss={undefined} />;
+    // An attempt that may have committed, while the automatic repeats run, or a [Repeat exactly]
+    // in flight: unknown already (B11), and the notice stays.
+    if (live !== undefined) return <Unknown key={w.key} why={live.why} problem={live.problem} repeating {...props} />;
     return null;
   });
 }
@@ -138,8 +139,8 @@ export function Result({ w, done }: { w: Write | undefined; done: (data: unknown
     case "refused":
       return <Refused testid="write-result" problem={o.problem} status={o.status} verb="saved" replayed={o.replayed} />;
     case "not-done":
-      // The last answer's problem fields, when it carried any (§8.2).
-      return <Status testid="write-result">Not saved: {o.why}.{o.problem !== null && ` ${problemLine(o.problem)}`}</Status>;
+      // The last answer's problem, when it carried one (§8.2).
+      return <Status testid="write-result">Not saved: {o.why}.{problemTail(o.problem)}</Status>;
     case "set-aside":
     case "unknown":
       // Set aside before any attempt that may have committed, nothing was; otherwise the notice says.
