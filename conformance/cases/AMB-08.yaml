@@ -1,0 +1,17 @@
+id: AMB-08
+setup: as AMB-01
+action: send Add cluster
+exchange:
+  - request: POST /api/v1/clusters
+    headers: ["Authorization: Bearer <token>", "Content-Type: application/json", "Idempotency-Key: <key>", "Bronzeward-Expected-Epoch: <epoch>"]
+fault: the injector answers every send 503 dependency-unavailable, forwarding nothing
+expect:
+  server: not reached by the write
+  client: the write repeated 3 times after 1 s, 2 s and 4 s, with the same key and the same request, then reported not done
+  shown: '"Not saved: every attempt was answered 503 dependency-unavailable, which commits nothing."; no unknown-outcome notice'
+  absent: [token in the harness log, retained artifacts or browser storage]
+runs:
+  web:
+    check: web/e2e/auth/writes.e2e.ts, mise run browser-auth
+    browsers: [chrome, edge, firefox, firefox-esr]
+    covers: an injected 503 in place of a route that answers it

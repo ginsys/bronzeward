@@ -34,6 +34,13 @@ const PG = ["-h", "127.0.0.1", "-p", PG_PORT, "-U", "bronzeward"];
 // The subject the fixture deployment lists in deniedSubjects (AUTH-10).
 export const DENIED = "h-approver";
 
+// RFC 4648 base32 in lower case without padding, as internal/id encodes an identifier's body.
+const base32 = (b: Buffer) => {
+  let bits = "";
+  for (const x of b) bits += x.toString(2).padStart(8, "0");
+  return (bits.match(/.{1,5}/g) ?? []).map((s) => "abcdefghijklmnopqrstuvwxyz234567"[parseInt(s.padEnd(5, "0"), 2)]).join("");
+};
+
 const root = fileURLToPath(new URL("../..", import.meta.url));
 const state = `${root}.dev/browser-auth`;
 // wdio.conf.ts has checked it.
@@ -107,7 +114,8 @@ function host(listen: string, clientConfig: object, issuer: string, api: string)
 // WebDriver, whose log the artifact scan reads (POST /go stores it, GET /go redirects there once).
 // POST /faults sets the injector's faults, GET /seen lists the API paths it passed on and GET
 // /answered the server's answers to them, GET /held the paths whose answers it holds now, POST
-// /release lets its held answers go and answers once they are sent; the next sign-in clears all. POST /disposable answers the URL of B's
+// /release lets its held answers go and answers once they are sent, GET /writes lists the writes
+// it received and POST /epoch commits a new epoch where they go; the next sign-in clears all. POST /disposable answers the URL of B's
 // deployment just started on a fresh database, replacing any earlier one: ?start=recovery with
 // -recovery-start, its entry not yet made, and with &keep on the earlier one's database.
 function control(provider: Provider, next: { grant: Grant }, injector: Injector, disposable: (recovery: boolean, keep: boolean) => Promise<string>): Server {
@@ -118,6 +126,15 @@ function control(provider: Provider, next: { grant: Grant }, injector: Injector,
     if (url.pathname === "/seen") return res.end(JSON.stringify(injector.seen));
     if (url.pathname === "/answered") return res.end(JSON.stringify(injector.answered));
     if (url.pathname === "/held") return res.end(JSON.stringify(injector.holding));
+    if (url.pathname === "/writes") return res.end(JSON.stringify(injector.writes));
+    if (url.pathname === "/epoch" && req.method === "POST") {
+      try {
+        injector.epoch();
+      } catch (e) {
+        return res.writeHead(500).end(String(e));
+      }
+      return res.end();
+    }
     if (url.pathname === "/release" && req.method === "POST") return void injector.release().then(() => res.end());
     if (url.pathname === "/disposable" && req.method === "POST") {
       const started = disposable(url.searchParams.get("start") === "recovery", url.searchParams.has("keep"));
@@ -159,6 +176,7 @@ function control(provider: Provider, next: { grant: Grant }, injector: Injector,
     injector.faults = {};
     injector.seen.length = 0;
     injector.answered.length = 0;
+    injector.writes.length = 0;
     void injector.release();
     res.end();
   });
@@ -226,6 +244,17 @@ async function prepare() {
 
   const a = server("idp", IDP_API.slice(7), `issuer: ${idp["BW_TEST_IDP_ISSUER"]}\naudience: "${idp["BW_TEST_IDP_PROJECT"]}"`, "  deniedSubjects: []").p;
   const b = server("fixture", FIXTURE_API.slice(7), fixtureOidc, fixtureDenied).p;
+  // A new epoch in the disposable deployment's database, as a recovery entry commits it; the server
+  // reads the epoch on each request. Only a database this run created for that deployment: any
+  // other, B's included, is refused, so no case changes a database it does not own.
+  injector.epoch = () => {
+    const db = disposable?.db;
+    if (injector.faults.upstream !== DISPOSABLE_API || db === undefined || !db.startsWith("bw_auth_disposable_") || !databases.includes(db)) {
+      throw new Error("a new epoch is committed only in this run's disposable deployment, with the faults' upstream on it");
+    }
+    const ep = `ep_${base32(randomBytes(16))}`;
+    execFileSync("psql", [...PG, "-v", "ON_ERROR_STOP=1", "-q", "-d", db, "-c", `INSERT INTO recovery_epoch (epoch, entered_at) VALUES ('${ep}', now())`, "-c", `UPDATE installation_state SET epoch = '${ep}'`]);
+  };
   await ready(`${IDP_API}/livez`, a);
   await ready(`${FIXTURE_API}/livez`, b);
   const ha = host(PAGE_LISTEN, {

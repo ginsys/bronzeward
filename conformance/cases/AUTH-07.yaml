@@ -12,6 +12,6 @@ expect:
   absent: [token in the harness log, retained artifacts or browser storage]
 runs:
   web:
-    check: web/e2e/auth/tabs.e2e.ts, mise run browser-auth
+    check: web/e2e/auth/tabs.e2e.ts and web/e2e/auth/writes.e2e.ts, mise run browser-auth
     browsers: [chrome, edge, firefox, firefox-esr]
-    covers: the change shown and the cached state discarded, in two tabs; the pending write set aside comes with the first web write (ginsys/bronzeward#257)
+    covers: the change shown and the cached state discarded, in two tabs (tabs.e2e.ts); in one tab, an Add cluster sent as h-author whose answer the injector holds over the renewal for h-publisher, then drops after the commit, is set aside and not repeated (writes.e2e.ts)

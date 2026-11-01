@@ -31,7 +31,15 @@ export interface Faults {
   // server has authenticated the read, and the body is a read the deployment cannot produce without
   // a Talos node or a publication. A refusal is never replaced.
   bodies?: Record<string, unknown>;
+  // The write cases (#338): each write to `path` takes the next step, and passes once none is left.
+  steps?: { path: string; take: Step[] };
 }
+
+// drop: the request read and its connection closed, nothing forwarded; commit-drop: forwarded, the
+// server's answer dropped; commit-500: forwarded, its answer replaced by 500 internal-error; 503:
+// answered 503 dependency-unavailable, nothing forwarded; redirect: answered 302; epoch: a new epoch
+// committed, then forwarded; commit-drop-epoch: as commit-drop, then a new epoch.
+export type Step = "drop" | "commit-drop" | "commit-500" | "503" | "redirect" | "epoch" | "commit-drop-epoch";
 
 export interface Injector {
   server: Server;
@@ -43,6 +51,10 @@ export interface Injector {
   holding: string[];
   // Lets every held answer go on; resolves once each has been sent.
   release: () => Promise<void>;
+  // Every write received, as "<method> <route> <Idempotency-Key> <Bronzeward-Expected-Epoch>".
+  writes: string[];
+  // Commits a new epoch in the deployment the writes go to, as a recovery entry does.
+  epoch: () => void;
 }
 
 const body = (req: IncomingMessage) =>
@@ -57,7 +69,7 @@ export function startInjector(upstream: string, port: number): Promise<Injector>
   // Each held answer: its release, and its having been sent.
   const waiting: { go: () => void; sent: Promise<void> }[] = [];
   const inj: Injector = {
-    faults: {}, seen: [], answered: [], holding: [], server: undefined as never,
+    faults: {}, seen: [], answered: [], holding: [], writes: [], server: undefined as never, epoch: () => {},
     release: async () => {
       inj.holding = [];
       const now = waiting.splice(0);
@@ -70,12 +82,35 @@ export function startInjector(upstream: string, port: number): Promise<Injector>
     if (path.startsWith("/api/v1/")) inj.seen.push(path.slice("/api/v1".length));
     const f = inj.faults;
     const route = path.slice("/api/v1".length);
+    const problem = (status: number, code: string) => res.writeHead(status, { "Content-Type": "application/problem+json" })
+      .end(JSON.stringify({ type: `urn:bronzeward:problem:${code}`, title: code, status, detail: "injected", instance: "req-injected" }));
+    const forwarded = () => Object.fromEntries(Object.entries(req.headers).filter(([k]) => k !== "host" && k !== "connection")) as Record<string, string>;
+    const passed = (up: Response) => Object.fromEntries([...up.headers].filter(([k]) => !["content-length", "content-encoding", "transfer-encoding", "connection"].includes(k)));
+    const answerStep = async (step: Step) => {
+      const sent = new Uint8Array(await body(req));
+      if (step === "drop") return req.socket.destroy();
+      if (step === "503") return problem(503, "dependency-unavailable");
+      if (step === "redirect") return res.writeHead(302, { Location: "http://127.0.0.1:9/" }).end();
+      if (step === "epoch") inj.epoch();
+      const up = await fetch((f.upstream ?? upstream) + (req.url ?? "/"), { method: req.method!, headers: forwarded(), body: sent, redirect: "manual" });
+      const out = Buffer.from(await up.arrayBuffer());
+      inj.answered.push(`${route}${search} ${up.status}`);
+      if (step === "commit-500") return problem(500, "internal-error");
+      if (step === "epoch") return res.writeHead(up.status, passed(up)).end(out);
+      req.socket.destroy();
+      if (step === "commit-drop-epoch") inj.epoch();
+    };
     void (async () => {
       if (f.hold?.path === route && (f.hold.query ?? search) === search) await new Promise((r) => setTimeout(r, f.hold!.ms));
       if ([f.held ?? []].flat().includes(route)) {
         inj.holding.push(route);
         await new Promise<void>((go) => waiting.push({ go, sent: new Promise((done) => res.once("close", () => done())) }));
       }
+      const write = req.method !== "GET" && req.method !== "HEAD";
+      if (write) inj.writes.push(`${req.method} ${route} ${req.headers["idempotency-key"]} ${req.headers["bronzeward-expected-epoch"]}`);
+      const step = write && f.steps?.path === route ? f.steps.take.shift() : undefined;
+      // A step that cannot be taken (the epoch refused) closes the connection, and is logged.
+      if (step !== undefined) return void answerStep(step).catch((e: unknown) => (console.error(`injector step ${step}: ${String(e)}`), req.socket.destroy()));
       if (f.redirect === route) return void res.writeHead(302, { Location: "http://127.0.0.1:9/" }).end();
       if (f.missing === route) {
         const problem = { type: "urn:bronzeward:problem:not-found", title: "Not found", status: 404, detail: "injected", instance: "req-injected" };
