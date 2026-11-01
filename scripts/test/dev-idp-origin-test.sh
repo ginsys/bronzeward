@@ -27,7 +27,8 @@ printf '#!/bin/sh\nexit 0\n' >"$stubs/curl"
 printf '#!/bin/sh\nexit 0\n' >"$stubs/jq"
 chmod +x "$stubs/docker" "$stubs/curl" "$stubs/jq"
 
-# seed <web origin>: the state of a provider seeded for that origin.
+# seed <web origin> [device code lifetime]: the state of a provider seeded for that origin, in
+# default mode (60 s) unless a lifetime is given.
 seed() {
   mkdir -p "$state"
   printf 'synthetic-seed-token\n' >"$state/seed.pat"
@@ -37,6 +38,7 @@ BW_TEST_IDP_PROJECT=synthetic-project
 BW_TEST_IDP_CLI_CLIENT=synthetic-cli
 BW_TEST_IDP_WEB_CLIENT=synthetic-web
 BW_TEST_IDP_WEB_ORIGIN=$1
+BW_TEST_IDP_DEVICE_LIFETIME=${2:-60}
 EOF
 }
 
@@ -55,6 +57,9 @@ seed http://localhost:16000
 up 0 "unset BW_E2E_PORT_BASE keeps a provider seeded for http://localhost:16000" "(http://localhost:16000)"
 up 1 "BW_E2E_PORT_BASE=16016 refuses a provider seeded for 16000 and names dev-idp-down" \
   "the running provider's web origin is http://localhost:16000, not http://localhost:16016; run BW_DEV_INSTANCE=$instance mise run dev-idp-down" BW_E2E_PORT_BASE=16016
+seed http://localhost:16000 300
+up 1 "a provider started with --participants (300 s device codes) is refused without the flag" \
+  "the running provider was started with --participants; run BW_DEV_INSTANCE=$instance mise run dev-idp-down"
 seed http://localhost:58443
 up 1 "a provider seeded for the old default 58443 is refused" "web origin is http://localhost:58443, not http://localhost:16000"
 up 0 "BW_DEV_IDP_WEB_ORIGIN wins over BW_E2E_PORT_BASE" "(http://localhost:58443)" BW_E2E_PORT_BASE=16016 BW_DEV_IDP_WEB_ORIGIN=http://localhost:58443
