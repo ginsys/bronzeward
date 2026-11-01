@@ -675,6 +675,10 @@ describe("the read-only lists and items", () => {
     await expect($("main h2")).toHaveText("Operations");
     expect(await param("plan")).toBe(s.plan.id);
     await expect($("main")).toHaveText(expect.stringContaining(`Plan ${short(s.plan.id)} Show all`));
+    // Show all removes its own button: focus moves on to the next filter, not to the page's start.
+    await $("button=Show all").click();
+    await browser.waitUntil(async () => (await param("plan")) === null, { timeoutMsg: "Show all kept the plan filter" });
+    expect(await browser.execute(() => document.activeElement?.closest("label")?.textContent?.trim().split(/\s/)[0])).toBe("Kind:");
     await $(`a[title="${s.op.id}"]`).click();
     await expect($("main h2")).toHaveText(`Operation ${short(s.op.id)}: apply-config, unresolved`);
     await expect($$("main tbody tr")).toBeElementsArrayOfSize(1);

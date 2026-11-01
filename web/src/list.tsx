@@ -5,7 +5,7 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
 import type { Client, ReadResult } from "./request.ts";
 import { follow } from "./router.ts";
-import { Loading, Status } from "./states.tsx";
+import { Empty, Loading, Status } from "./states.tsx";
 
 export type Load<T> = { kind: "loading" } | ReadResult<T>;
 export type Failed = Exclude<ReadResult<unknown>, { kind: "ok" | "discarded" }>;
@@ -189,6 +189,11 @@ export const Head = ({ cols }: { cols: readonly string[] }) => <thead><tr>{cols.
 // by keyboard to scroll.
 export const Scroll = ({ label, testid, children }: { label: string; testid?: string; children: ReactNode }) => (
   <div className="scroll" role="region" aria-label={label} tabIndex={0}><table data-testid={testid}>{children}</table></div>
+);
+
+// A list with nothing in it, which still says when it was read again from its start (PAGE-02).
+export const EmptyList = ({ list, text }: { list: Listed<unknown>; text: string }) => (
+  <>{list.restarted && <Status testid="restarted">{RESTARTED}</Status>}<Empty text={text} /></>
 );
 
 // The count, the next page on request (one at a time), and the restart notice.

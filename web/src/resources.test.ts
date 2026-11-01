@@ -3,7 +3,7 @@ import { createElement as h, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import type { components } from "./api/v1";
-import { Id, type Listed, readPages, type Reads, ReadsProvider, viewOf } from "./list.tsx";
+import { EmptyList, Id, type Listed, readPages, type Reads, ReadsProvider, RESTARTED, viewOf } from "./list.tsx";
 import { MachineItem } from "./machine.tsx";
 import { ClusterItem, Clusters, Machines } from "./machines.tsx";
 import {
@@ -60,6 +60,15 @@ describe("the read-only views", () => {
     expect(await readPages(one({ items: [1], lastPass: "2026-10-26T08:00:00Z" }), "/dependencies", "", start, true))
       .toEqual({ kind: "ok", data: { items: [1], next: undefined, restarted: false, extra: { lastPass: "2026-10-26T08:00:00Z" } } });
     expect(await readPages(one({ items: [1] }), "/fragments", "", start, true)).toStrictEqual({ kind: "ok", data: { items: [1], next: undefined, restarted: false } });
+  });
+
+  test("an empty list read again from its start still says it restarted (PAGE-02)", () => {
+    const empty = (restarted: boolean) => html(h(EmptyList, { list: { items: [], next: undefined, restarted }, text: "No plans created yet." }));
+    // The markup escapes the notice's apostrophe; its end has none.
+    const notice = RESTARTED.slice(RESTARTED.indexOf("so it was"));
+    expect(empty(true)).toContain(notice);
+    expect(empty(true)).toContain("No plans created yet.");
+    expect(empty(false)).not.toContain(notice);
   });
 
   test("a dependency's class and staleness are words, never a colour alone", () => {

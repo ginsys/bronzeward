@@ -3,8 +3,7 @@
 // they show endpoint and node ID (G8).
 
 import type { components } from "./api/v1";
-import { Head, Id, More, Ref, Scroll, short, useItem, useList, usePending } from "./list.tsx";
-import { Empty } from "./states.tsx";
+import { EmptyList, Head, Id, More, Ref, Scroll, short, useItem, useList, usePending } from "./list.tsx";
 
 export type Machine = components["schemas"]["MachineBody"];
 export type Cluster = components["schemas"]["ClusterBody"];
@@ -89,7 +88,7 @@ export function Machines({ query, go }: { query: string; go: (to: string) => voi
     const now = Date.now();
     const shown = list.data.items.filter((m) => state === undefined || badges(m).includes(state[1]));
     body = shown.length === 0 && more === undefined
-      ? <Empty text={cluster === "" && state === undefined ? "No machines recorded yet." : "No machine matches this filter."} />
+      ? <EmptyList list={list.data} text={cluster === "" && state === undefined ? "No machines recorded yet." : "No machine matches this filter."} />
       : (
         <>
           <Scroll label="Machines">
@@ -128,7 +127,7 @@ export function Clusters() {
   const [list, more, busy] = useList<Cluster>("/clusters", "", false);
   let body = usePending(list, "clusters");
   if (list.kind === "ok") {
-    body = list.data.items.length === 0 ? <Empty text="No clusters recorded yet." /> : (
+    body = list.data.items.length === 0 ? <EmptyList list={list.data} text="No clusters recorded yet." /> : (
       <>
         <Scroll label="Clusters">
           <Head cols={["Cluster", "Kubernetes endpoint", "Contract", "Talos cluster ID"]} />
