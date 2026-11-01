@@ -381,14 +381,17 @@ it. It holds no secret.
    **Required check.** One test sets every string member of every response type in
    `internal/client/apitypes` to a value that holds ESC, a tab, a line feed, a carriage return, a
    C1 character and a byte that is not UTF-8. It runs every command that shows those types in
-   `-o table`, and it fails if the output holds a raw control byte outside the CLI's own
-   separators, or a different number of rows from the number of items. A new response type or a
-   new command passes this test before it ships.
+   `-o table`. It fails in any of these cases: the output holds a raw control byte outside the
+   CLI's own separators; a value does not appear in its escaped form, with `\x09` for the tab; a
+   line has a different number of columns, or the output a different number of lines, from the
+   same command run with plain values. The test therefore catches a tab that becomes padding, which
+   leaves no raw tab and no extra row. A new response type or a new command passes this test
+   before it ships.
 
    **Limit.** `-o json` passes the server's bytes on unchanged, and `-o yaml` passes the values
-   through the YAML encoder. This item does not cover them. Whether a raw control byte can reach
-   the terminal through `-o json` is a separate question. The test above shows it, and a separate
-   issue records it if it does.
+   through the YAML encoder. This item does not cover them. The same test also runs every command
+   in `-o json` with the same values and reports whether a raw control byte reaches the output.
+   That result is not part of the rule. A raw byte there goes into a separate issue.
 
    **Alternatives and reasons.** (a) Escape only fields that hold free text, and show IDs and
    enumerations raw. The API does not promise those formats, so a server that does not follow them
