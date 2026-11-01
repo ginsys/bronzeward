@@ -10,7 +10,7 @@ management API, for
 in [04 - Operator experience: CLI and web UI](https://github.com/ginsys/bronzeward/milestone/4).
 It implements no client, adds no route and changes no role, credential policy or server
 behaviour. Each design decision it needs is listed in [§13](#13-alternatives-and-open-choices)
-with its options and how it was decided: four by the lead, the other six by the owner. The
+with its options and how it was decided: five by the lead, the other six by the owner. The
 owner's choices of CLI language, frontend framework, reference identity provider and browser
 support matrix are recorded in [§15](#15-assumptions-and-limits).
 
@@ -404,10 +404,13 @@ it. It holds no secret.
    - The output holds a raw control byte outside the CLI's own separators.
    - Outside documents, diffs and JSON text that the CLI encodes, a plain value does not appear in
      its escaped form: `\x1b` for ESC, `\x09` for the tab, `\x0a` for the line feed, `\x0d` for the
-     carriage return, `\x7f` for DEL, `\x85` for a C1 character such as U+0085, and `\xNN` with the
-     byte's own value for a byte that is not UTF-8 (`\xff` for `0xff`). A replacement such as `?`
-     fails. Documents, diffs and JSON text have their own forms, which the two last cases below
-     and the rules above state.
+     carriage return, `\x7f` for DEL and `\x85` for a C1 character such as U+0085. A replacement
+     such as `?` fails. A byte that is not UTF-8 is injected only in a source where decoding keeps
+     it (the contexts file, a response header and a value that the CLI builds into an error). The
+     JSON decoder of a response body replaces such a byte with U+FFFD before the CLI sees it, so
+     the test does not inject one there. Where it is injected, the escaped form is `\xNN` with the
+     byte's own value. Documents, diffs and JSON text have their own forms, which the two last
+     cases below and the rules above state.
    - Outside documents and diffs, a line has a different number of columns, or the output a
      different number of lines, from the same command run with plain values. This catches a tab
      that becomes padding, which leaves no raw tab and no extra row.
