@@ -36,4 +36,3 @@ Not rendered: publish to see each machine's configuration.
 $ bronzewardctl --context human fragment set worker-labels --draft {draft} --layer role --file worker-labels-2.yaml
 Fragment worker-labels saved in draft drf_… (revision frv_…; draft revision 6).
 [exit 0]
-
