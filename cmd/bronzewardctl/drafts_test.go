@@ -22,14 +22,20 @@ type draftFake struct {
 	rev    int
 	state  string
 	writes []string
+	// unreadable adds an entry no SourceEntry decodes: its name is a number.
+	unreadable bool
 }
 
 func (f *draftFake) etag() string { return fmt.Sprintf(`"%d-BWSYNTH"`, f.rev) }
 
 func (f *draftFake) draft() string {
+	extra := ""
+	if f.unreadable {
+		extra = `,{"kind":"fragment","name":7,"base":1,"head":"frv_BWSYNTH-odd","revision":"frv_BWSYNTH-odd"}`
+	}
 	return fmt.Sprintf(`{"id":"drf_BWSYNTH","cluster":"cl_BWSYNTH","title":"BWSYNTH","state":%q,"revision":%d,"entries":[`+
 		`{"kind":"fragment","name":"worker-labels","base":1,"head":"frv_BWSYNTH-base","revision":"frv_BWSYNTH-proposed"},`+
-		`{"kind":"fragment","name":"gone","base":1,"head":"frv_BWSYNTH-gone","revision":null}]}`, f.state, f.rev)
+		`{"kind":"fragment","name":"gone","base":1,"head":"frv_BWSYNTH-gone","revision":null}%s]}`, f.state, f.rev, extra)
 }
 
 func (f *draftFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -141,6 +147,15 @@ func TestDraftEditing(t *testing.T) {
 		"draft drf_BWSYNTH removes the fragment 'gone', so a profile cannot pin it; nothing was sent")
 	step("profile set: no such fragment", []string{"profile", "set", "workers", "--draft", "drf_BWSYNTH", "--fragments", "absent"}, 1, "",
 		"cluster cl_BWSYNTH has no fragment 'absent' with a revision")
+	// An entry that cannot be read may be the draft's proposal for the fragment named, so no pin is chosen.
+	f.mu.Lock()
+	f.unreadable = true
+	f.mu.Unlock()
+	step("profile set: a draft entry that cannot be read", []string{"profile", "set", "workers", "--draft", "drf_BWSYNTH", "--fragments", "worker-sysctls"}, 1, "",
+		"GET /api/v1/drafts/drf_BWSYNTH: an entry cannot be read")
+	f.mu.Lock()
+	f.unreadable = false
+	f.mu.Unlock()
 	step("assignment set", []string{"assignment", "set", "mch_BWSYNTH", "--draft", "drf_BWSYNTH", "--profiles", "workers",
 		"--fragment", "cluster=cluster-base", "--fragment", "role=a,b", "--fragment", "role=c"}, 0, "Assignment saved (draft revision 3).", "",
 		`PUT /drafts/drf_BWSYNTH/assignments/mch_BWSYNTH if-match="2-BWSYNTH" type=`+ctype+
