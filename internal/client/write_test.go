@@ -842,6 +842,21 @@ func TestInProgress(t *testing.T) {
 				}
 				inProgress(w)
 			}},
+		{name: "the bound holds after a 503 between in-progress answers", wait: 15 * time.Second, posts: 3,
+			waits: []time.Duration{time.Second, time.Second, 2 * time.Second},
+			says:  "outcome unknown: the first request with this key was still ingesting (ingestion ing_BWSYNTH) after 23s",
+			answer: func(n int, w http.ResponseWriter) {
+				switch n {
+				case 1:
+					drop(w)
+				case 2:
+					inProgress(w)
+				default:
+					// A slow 503 after the in-progress answer: the ordinary repeat that follows starts past the bound.
+					fakeNow.Add(int64(20 * time.Second))
+					problemAnswer(w, http.StatusServiceUnavailable, "dependency-unavailable", "")
+				}
+			}},
 		{name: "a 409 naming the draft is a refusal, not waited for", wait: time.Minute, posts: 2, waits: []time.Duration{time.Second},
 			says: "409 BWSYNTH (conflict)",
 			answer: func(n int, w http.ResponseWriter) {
