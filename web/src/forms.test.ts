@@ -61,7 +61,7 @@ describe("the notice (B11)", () => {
     await run;
   });
 
-  test("set aside while its answer is still on its way, the notice shows at once, with no dismissal; the answer settles it", async () => {
+  test("set aside while its answer is still on its way, the notice shows at once, with no dismissal; the answer settles it, and the notice shows the result until dismissed", async () => {
     const writes = new Writes(() => PRINCIPAL, async () => {});
     let answer: (a: unknown) => void = () => {};
     writes.client = { currentEpoch: "e1", attempt: () => new Promise((r) => (answer = r)) } as unknown as Client;
@@ -74,6 +74,10 @@ describe("the notice (B11)", () => {
     expect(out).not.toContain("Dismiss");
     answer({ status: 201, headers: new Headers(), data: { id: "c1" } });
     expect((await run).kind).toBe("done");
+    const settled = html(writes, h(WriteNotices, { go: () => {} }));
+    expect(settled).toContain(`Saved (the server answered 201). Key ${w.key}, POST /api/v1/clusters. Read /clusters.`);
+    expect(settled).toContain("Dismiss");
+    writes.dismiss(w);
     expect(html(writes, h(WriteNotices, { go: () => {} }))).toBe("");
   });
 });

@@ -79,6 +79,9 @@ test("B11: a dropped attempt shows the unknown notice at once, while the automat
   expect(html).not.toContain("Dismiss");
   answer({ status: 201, headers: new Headers(), data: { id: "c1" } });
   expect((await done).kind).toBe("done");
+  // The operator saw the notice, so it shows the result until dismissed.
+  expect(notices()).toContain(`Saved (the server answered 201). Key ${w.key}`);
+  writes.dismiss(w);
   expect(notices()).toBe("");
 });
 

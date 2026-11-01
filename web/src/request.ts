@@ -173,7 +173,9 @@ export class Client {
   // pending write aside through onEpochChange. Undefined when no complete answer arrived, a redirect
   // refused by the browser included (§6 item 7). A credential refusal of a read sent to learn its
   // epoch goes to `end`, and to `end.now` at once, even when this answer is then lost or stalls.
-  async attempt(method: string, path: string, headers: Record<string, string> = {}, body?: string, end: End = {}): Promise<Attempt | undefined> {
+  // `epochOnly` is a read sent only for its epoch, which its headers carry: only a credential
+  // refusal's body is read, any other is not waited for, since it may stall (data null).
+  async attempt(method: string, path: string, headers: Record<string, string> = {}, body?: string, end: End = {}, epochOnly = false): Promise<Attempt | undefined> {
     const records = this.epochRecords;
     const res = await this.send(path, method, headers, body);
     if (res === undefined) return undefined;
@@ -187,7 +189,7 @@ export class Client {
       this.deprecated.add(route);
       this.opts.onDeprecation?.(route);
     }
-    const data = res.ok ? await readJson(res) : await readProblem(res);
+    const data = epochOnly ? await credentialProblem(res) : res.ok ? await readJson(res) : await readProblem(res);
     if (data === CUT) return undefined;
     return { status: res.status, headers: res.headers, data };
   }
@@ -238,9 +240,8 @@ export class Client {
       const sent = this.epochRecords;
       const next = await this.send("/recovery");
       if (next === undefined) return undefined;
-      // A success names its epoch in its headers: its body is not waited for, since it may stall.
-      if (next.ok) void next.body?.cancel().catch(() => {});
-      const body = next.ok ? null : await readProblem(next);
+      // Only a credential refusal's body is read: any other answer names its epoch in its headers.
+      const body = await credentialProblem(next);
       const problem = body === NOT_JSON || body === CUT ? null : body;
       const code = problem?.type.slice(PROBLEM_PREFIX.length);
       if (next.status === 401 && code === "unauthenticated") {
@@ -316,6 +317,15 @@ async function readProblem(res: Response): Promise<Problem | null | typeof NOT_J
   if (body === CUT || body === NOT_JSON) return body;
   const type = typeof body === "object" && body !== null && "type" in body ? body.type : undefined;
   return typeof type === "string" && type.startsWith(PROBLEM_PREFIX) ? (body as Problem) : null;
+}
+
+// A read sent only for its epoch needs a body only to tell a credential refusal (a 401 or 403
+// problem): any other body, a success's included, is cancelled unread, since it may stall.
+async function credentialProblem(res: Response): Promise<Problem | null | typeof NOT_JSON | typeof CUT> {
+  const problem = (res.headers.get("Content-Type") ?? "").startsWith("application/problem+json");
+  if ((res.status === 401 || res.status === 403) && problem) return readProblem(res);
+  void res.body?.cancel().catch(() => {});
+  return null;
 }
 
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
