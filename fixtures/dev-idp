@@ -150,6 +150,13 @@ up() {
       [ -n "$participants" ] && was=without
       die "the running provider was started $was --participants; run ${BW_DEV_PFX}mise run dev-idp-down, then start it again"
     fi
+    # A login container that exited is still listed; sign-in needs it running and answering.
+    if [ -n "$participants" ]; then
+      ids=$(docker ps -q --filter "name=^$login\$" --filter status=running) || die "cannot list containers (docker ps)"
+      if [ -z "$ids" ] || ! curl -s --noproxy '*' -o /dev/null --max-time 2 "$loginbase/"; then
+        die "the login page ($login) does not run or does not answer on $loginbase; run ${BW_DEV_PFX}mise run dev-idp-down, then start it again"
+      fi
+    fi
     summary
     return
   fi

@@ -15,22 +15,32 @@ cp "$repo_src/scripts/dev/instance.sh" "$repo/scripts/dev/"
 mkdir -p "$repo/fixtures/.state/server/a" "$repo/.dev/idp" "$repo/.dev/participants"
 session=$repo/fixtures/participants/session
 
-# docker: A (fixtures/versions.env names the fixture) and Zitadel exist and run, and each logs a
-# line; the forwarder is gone; a container list fails while STUB_PS_FAIL is set.
+# docker: A (fixtures/versions.env names the fixture) and Zitadel exist, A runs unless STUB_STOPPED
+# is set, and each logs a line. An inspect of the forwarder fails, as for a removed container. Set,
+# STUB_PS_FAIL fails the container list, STUB_FWD still lists the forwarder, STUB_LOGS_FAIL fails a log read, and STUB_LOG_LEAK puts a session password in A's log.
 cat >"$t/bin/docker" <<'EOF'
 #!/usr/bin/env bash
 case "$1" in
 context) echo stub ;;
-ps) [ -z "${STUB_PS_FAIL:-}" ] || exit 1; printf 'bw-fixture-bronzeward-a\nbw-dev-idp\n' ;;
-logs) echo "log of $2" ;;
-inspect) case "$*" in *bw-dev-forward*) exit 1 ;; *State.Running*) echo true ;; *Networks*) echo "bw-fixture_default " ;; esac ;;
+ps)
+  [ -z "${STUB_PS_FAIL:-}" ] || exit 1
+  printf 'bw-fixture-bronzeward-a\nbw-dev-idp\n'
+  [ -z "${STUB_FWD:-}" ] || echo bw-dev-forward
+  ;;
+logs)
+  [ -z "${STUB_LOGS_FAIL:-}" ] || exit 1
+  echo "log of $2"
+  if [ -n "${STUB_LOG_LEAK:-}" ] && [ "$2" = bw-fixture-bronzeward-a ]; then echo "BWSYNTH-pw-abcd1234-5678"; fi
+  ;;
+inspect) case "$*" in *bw-dev-forward*) exit 1 ;; *State.Running*) if [ -n "${STUB_STOPPED:-}" ]; then echo false; else echo true; fi ;; *Networks*) echo "bw-fixture_default " ;; esac ;;
 esac
 EOF
-# inject and dev-idp log their calls; inject kill fails while STUB_KILL_FAIL is set.
+# inject and dev-idp log their calls; inject kill fails while STUB_KILL_FAIL is set, and inject
+# start while STUB_START_FAIL is.
 cat >"$repo/fixtures/bin/inject" <<'EOF'
 #!/usr/bin/env bash
 echo "inject $*" >>"$STUB_LOG"
-[ "$1 ${STUB_KILL_FAIL:-}" != "kill 1" ]
+[ "$1 ${STUB_KILL_FAIL:-}" != "kill 1" ] && [ "$1 ${STUB_START_FAIL:-}" != "start 1" ]
 EOF
 cat >"$repo/fixtures/dev-idp" <<'EOF'
 #!/usr/bin/env bash
@@ -73,6 +83,18 @@ elif [ "$rc" != 0 ] && [[ $out == *"proves nothing"* ]] && [ "$(controls)" = 0 ]
   ok "a read error fails the scan, and no control stays"
 else bad "read error: rc=$rc controls=$(controls): $out"; fi
 
+out=$(STUB_LOG_LEAK=1 run scan)
+rc=$?
+if [ "$rc" != 0 ] && [[ $out == *"scan-logs/bw-fixture-bronzeward-a.log"* ]] && [ "$(controls)" = 0 ]; then
+  ok "a session password in A's container log is found"
+else bad "log leak: rc=$rc: $out"; fi
+
+out=$(STUB_LOGS_FAIL=1 run scan)
+rc=$?
+if [ "$rc" != 0 ] && [[ $out == *"cannot read the log of"* ]] && [ "$(controls)" = 0 ]; then
+  ok "a container log that cannot be read fails the scan"
+else bad "log read fails: rc=$rc: $out"; fi
+
 # A grep that hangs on the recursive read, so the scan is interrupted with its controls planted. The
 # scan runs in its own process group, which is signalled whole, as a terminal's Ctrl-C reaches grep.
 realgrep=$(type -P grep)
@@ -114,12 +136,33 @@ if [ "$rc" != 0 ] && [[ $out == *"cannot list containers"* ]] && [ -f "$cfg.fixt
 else bad "container list fails: rc=$rc: $out"; fi
 
 setup
+out=$(STUB_FWD=1 run stop)
+rc=$?
+if [ "$rc" != 0 ] && [[ $out == *"forwarder bw-dev-forward is still there"* ]] && [ -f "$cfg.fixture" ] && [ -d "$repo/.dev/participants" ]; then
+  ok "a forwarder still listed after its removal fails stop"
+else bad "forwarder stays: rc=$rc: $out"; fi
+
+setup
 out=$(STUB_KILL_FAIL=1 run stop)
 rc=$?
 if [ "$rc" != 0 ] && [[ $out == *"run session stop again"* ]] && [ -f "$cfg.fixture" ] && [ "$(cat "$cfg")" = fixture ] &&
   [ -d "$repo/.dev/participants" ]; then
-  ok "a failed restart of A fails stop and keeps the backup for the next stop"
-else bad "restart fails: rc=$rc: $out"; fi
+  ok "a failed stop of A fails stop and keeps the backup for the next stop"
+else bad "kill fails: rc=$rc: $out"; fi
+
+# A stopped, then not started again: the next stop, which finds A stopped, starts it.
+setup
+out=$(STUB_START_FAIL=1 run stop)
+rc=$?
+if [ "$rc" != 0 ] && [[ $out == *"cannot start"* ]] && [ -f "$cfg.fixture" ]; then
+  : >"$STUB_LOG"
+  out=$(STUB_STOPPED=1 run stop)
+  rc=$?
+  calls=$(tr '\n' ';' <"$STUB_LOG")
+  if [ "$rc" = 0 ] && [ "$calls" = "inject start A;dev-idp down;" ] && [ ! -e "$cfg.fixture" ] && [ ! -e "$cfg.restart" ]; then
+    ok "a failed start of A fails stop, and the next stop starts A"
+  else bad "retry after a failed start: rc=$rc calls=$calls: $out"; fi
+else bad "start fails: rc=$rc: $out"; fi
 
 setup
 out=$(run stop)

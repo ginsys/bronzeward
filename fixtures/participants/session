@@ -222,7 +222,7 @@ scan_clean() {
 # not read fails it. A container list, a log or a file that cannot be read fails it too.
 scan() {
   local pattern="${marker}[a-z0-9]{8}-[0-9]{4}" control=.bw-scan-control
-  local logs=$part/scan-logs errs names hits c d rc=0 missing=''
+  local logs=$part/scan-logs errs names selected hits c d rc=0 missing=''
   local roots=("$STATE" "$idp" "$part" "$logs")
   for d in "$STATE" "$idp" "$part"; do [ -d "$d" ] || die "no $d to scan; run scan before session stop"; done
   trap scan_clean EXIT
@@ -238,8 +238,14 @@ scan() {
   rm -rf -- "$logs"
   scan_made+=("$logs")
   mkdir -p -- "$logs"
-  for c in $(grep -E "^($FIXTURE_NAME-.*|$BW_DEV_IDP_CONTAINER|$BW_DEV_IDP_PG_CONTAINER|$BW_DEV_IDP_GROUPS_CONTAINER|bw-dev-login|$fwd)\$" <<<"$names" || true); do
+  # grep's status 1 is "none of them", which A's check above rules out; any other failure stops.
+  selected=$(grep -E "^($FIXTURE_NAME-.*|$BW_DEV_IDP_CONTAINER|$BW_DEV_IDP_PG_CONTAINER|$BW_DEV_IDP_GROUPS_CONTAINER|bw-dev-login|$fwd)\$" <<<"$names") ||
+    die "cannot select the containers to read the logs of"
+  for c in $selected; do
     docker logs "$c" >"$logs/$c.log" 2>&1 || die "cannot read the log of $c"
+  done
+  for c in "$BW_A" "$BW_DEV_IDP_CONTAINER"; do
+    [ -f "$logs/$c.log" ] || die "the log of $c was not read"
   done
   for d in "${roots[@]}"; do
     scan_made+=("$d/$control")
@@ -272,9 +278,10 @@ stop() {
     if kill -0 "$pid" 2>/dev/null; then die "the web host (pid $pid) still runs after 10 s; kill it, then run session stop again"; fi
   fi
   docker rm -f "$fwd" >/dev/null 2>&1 || true
-  if docker inspect --type container "$fwd" >/dev/null 2>&1; then die "the forwarder $fwd is still there (docker rm -f $fwd)"; fi
-  # A container list that fails is not "no A": stop would then skip A's network and restart.
+  # A container list that fails is not "no forwarder" or "no A": stop would then leave the forwarder,
+  # or skip A's network and restart.
   names=$(docker ps -a --format '{{.Names}}') || die "cannot list containers (docker ps)"
+  if grep -qxF -- "$fwd" <<<"$names"; then die "the forwarder $fwd is still there (docker rm -f $fwd)"; fi
   if grep -qxF -- "$BW_A" <<<"$names"; then
     # dev-idp down removes its network, which refuses while A is attached to it.
     docker network disconnect "$BW_DEV_IDP_NET" "$BW_A" >/dev/null 2>&1 || true
@@ -284,13 +291,18 @@ stop() {
     running=$(docker inspect --type container --format '{{.State.Running}}' "$BW_A") || die "cannot inspect $BW_A"
   fi
   # The backup stays until A runs on it again, so that a failure here leaves it for the next stop.
+  # $cfg.restart marks a restart begun: a stop that stopped A and could not start it again leaves
+  # A stopped, and the next stop starts it. A that no longer exists (bin/down) has none to finish.
   if [ -f "$cfg.fixture" ]; then
     cp -- "$cfg.fixture" "$cfg"
-    if [ "$running" = true ]; then
-      "$bin/inject" kill A >/dev/null || die "cannot stop $BW_A to restart it on bin/up's configuration; run session stop again"
+    if [ "$running" = true ]; then : >"$cfg.restart"; fi
+    if [ -f "$cfg.restart" ] && grep -qxF -- "$BW_A" <<<"$names"; then
+      if [ "$running" = true ]; then
+        "$bin/inject" kill A >/dev/null || die "cannot stop $BW_A to restart it on bin/up's configuration; run session stop again"
+      fi
       "$bin/inject" start A >/dev/null || die "cannot start $BW_A on bin/up's configuration; run session stop again"
     fi
-    rm -f -- "$cfg.fixture"
+    rm -f -- "$cfg.restart" "$cfg.fixture"
   fi
   "$FIXTURES/dev-idp" down
   rm -rf -- "$part"
