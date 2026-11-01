@@ -2,9 +2,9 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
 import { Screen, type View } from "./app.tsx";
-import { WritesProvider } from "./forms.tsx";
+import { WriteNotices, WritesProvider } from "./forms.tsx";
 import type { Client } from "./request.ts";
-import { problemFields, problemText } from "./states.tsx";
+import { problemFields, problemText, REPLAYED } from "./states.tsx";
 import { Write, Writes } from "./write.ts";
 
 const shown = (view: View) => renderToStaticMarkup(createElement(Screen, { view }));
@@ -50,6 +50,24 @@ test("B11: a write whose outcome is unknown keeps its notice on the views that e
   const on = (view: View) => renderToStaticMarkup(createElement(WritesProvider, { value: writes }, createElement(Screen, { view })));
   expect(on({ kind: "failed", message: "revoked" })).toContain('data-testid="write-notice"');
   expect(on({ kind: "sign-in", message: "W1", signIn: () => {} })).toContain('data-testid="write-notice"');
+});
+
+test("journeys §8 Replayed: a [Repeat exactly] from the notice shows its result there, with no form shown", async () => {
+  const writes = new Writes(() => "https://idp.invalid SYNTH-sub-1", async () => {});
+  let answer: unknown;
+  writes.client = {
+    currentEpoch: "e1",
+    attempt: async (_m: string, path: string) =>
+      path === "/recovery" ? { status: 200, headers: new Headers({ "Bronzeward-Epoch": "e1" }), data: {} } : answer,
+  } as unknown as Client;
+  const w = new Write({ method: "POST", path: "/clusters", body: { name: "lab" }, resource: "/clusters" });
+  await writes.submit(w);
+  answer = { status: 201, headers: new Headers({ "Idempotent-Replayed": "true" }), data: { id: "c1" } };
+  await writes.submit(w);
+  const html = renderToStaticMarkup(createElement(WritesProvider, { value: writes }, createElement(WriteNotices, { go: () => {} })));
+  expect(html).toContain(`${REPLAYED} Saved (the server answered 201).`);
+  expect(html).toContain("Dismiss");
+  expect(html).not.toContain("Repeat exactly");
 });
 
 test("§7 item 4: a deprecation notice stays on the refusal that ends the shell", () => {

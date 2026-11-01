@@ -7,7 +7,7 @@ import type { components } from "./api/v1";
 import { Ref, short, useList, useReads } from "./list.tsx";
 import type { Cluster, Machine } from "./machines.tsx";
 import { Action } from "./shell.tsx";
-import { problemLine, Refused, REPLAYED, SetAside, Status, Unknown } from "./states.tsx";
+import { problemLine, Refused, Repeated, REPLAYED, SetAside, Status, Unknown } from "./states.tsx";
 import { type Outcome, Write, type Writes, type WriteSpec } from "./write.ts";
 
 type EndpointChange = components["schemas"]["EndpointChangeBody"];
@@ -26,12 +26,30 @@ export function useWrites(): Writes | undefined {
 // What the notice and the leave dialog say of one write: its key, its route and what to read.
 const detail = (w: Write) => ` Key ${w.key}, ${w.route}. To learn the outcome, read ${w.spec.resource}.`;
 
-// Shown as soon as a write's outcome is unknown, until dismissed (B11). `go` opens the resource.
+// A settled [Repeat exactly]'s result, as its notice shows it (journeys §8, the Replayed row).
+function settled(o: Outcome): string {
+  const earlier = "replayed" in o && o.replayed ? `${REPLAYED} ` : "";
+  const fields = "problem" in o && o.problem !== null ? ` ${problemLine(o.problem)}` : "";
+  switch (o.kind) {
+    case "done":
+      return `${earlier}Saved (the server answered ${o.status}).`;
+    case "refused":
+      return `${earlier}Not saved: the server answered ${o.status}.${fields}`;
+    case "not-done":
+      return `Not saved: ${o.why}.${fields}`;
+    default:
+      return `Not saved: ${o.why}.`;
+  }
+}
+
+// Shown as soon as a write's outcome is unknown, until dismissed (B11), and after a [Repeat exactly]
+// settles, with its result, until dismissed. `go` opens the resource.
 export function WriteNotices({ go }: { go: (to: string) => void }) {
   const writes = useWrites();
-  return writes?.open.map((w) => {
+  return writes?.notices.map((w) => {
     const o = w.outcome;
     const props = { onShow: () => go(w.spec.resource), detail: detail(w), onDismiss: () => writes.dismiss(w), testid: "write-notice" };
+    if (o !== undefined && w.repeated) return <Repeated key={w.key} line={settled(o)} {...props} detail={` Key ${w.key}, ${w.route}. Read ${w.spec.resource}.`} />;
     if (o?.kind === "unknown") return <Unknown key={w.key} why={o.why} onRepeat={writes.repeatable(w) ? () => void writes.submit(w) : undefined} {...props} />;
     if (o?.kind === "set-aside") return <SetAside key={w.key} why={o.why} {...props} />;
     // [Repeat exactly] in flight: the earlier attempt stays unknown, and its notice stays.

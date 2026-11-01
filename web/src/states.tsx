@@ -114,6 +114,11 @@ export const SetAside = ({ why, onShow, detail, onDismiss, testid }: Notice & { 
   <Status testid={testid} actions={<>{button("Repeat exactly", () => {}, true)}{button("Show current state", onShow)}{dismiss(onDismiss)}</>}>{setAside(why)}{detail}</Status>
 );
 
+// A [Repeat exactly] that settled: its result, until dismissed.
+export const Repeated = ({ line, onShow, detail, onDismiss, testid }: Notice & { line: string }) => (
+  <Status testid={testid} actions={<>{button("Show current state", onShow)}{dismiss(onDismiss)}</>}>{line}{detail}</Status>
+);
+
 export const Replayed = () => <Status>{REPLAYED}</Status>;
 
 // A banner over the page's last data.
