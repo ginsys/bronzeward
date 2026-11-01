@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# The usability task setups' own steps (fixtures/participants/session), on the acceptance
+# scenarios' helpers and identities. Each runs while A trusts the fixture issuer, except t11-check,
+# which reads only the database and docker. Each check writes PASS or FAIL to participants.tsv in
+# its evidence directory and to stdout; exit 1 on any FAIL.
+#
+#   prepare labels          h-author's role fragment participants-labels, one node label
+#                           (bw-team: blue), listed in the workers profile, published by h-publisher
+#   prepare t6-draft        h-author's saved, unpublished draft for T6: bw-team changed to green and
+#                           an empty label bw-note, the empty-looking field of T7
+#   prepare t7-publish      that draft published by h-publisher, unless it is published already
+#   prepare links linksplit|linkjoin   A's, B's and C's links to the worker
+#   prepare applied         the apply T9 followed completed: Applied is Desired, from an operation
+#   prepare drift-closed    T10's drift closed; a scope still frozen is unfrozen by h-approver
+#   prepare t11-check       A started in the current epoch after its entry, with its ingestion
+#                           configuration; the control plane's scope still pre-restore
+#                           unaccounted; no apply-config operation since S7's stop
+set -euo pipefail
+here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
+bin=$here/../bin
+# shellcheck source-path=SCRIPTDIR source=../lib.sh
+. "$here/../lib.sh"
+
+step=${1:-}
+case $step in
+  labels | t6-draft | t7-publish | links | applied | drift-closed | t11-check) ;;
+  *) die "usage: fixtures/participants/prepare labels|t6-draft|t7-publish|links linksplit|linkjoin|applied|drift-closed|t11-check" ;;
+esac
+need docker curl jq timeout id sleep date
+need_state
+umask 077
+image_id=$(cat -- "$STATE/up-image") || die "no server image is recorded in $STATE; run fixtures/bin/up"
+image_own "$image_id" || die "the recorded server image is not this run's; run fixtures/bin/down, then up"
+EV=$STATE/evidence/participants-$step-$(date -u +%Y%m%dT%H%M%SZ)
+mkdir -p -- "$EV" "$EV/http"
+scenario=participants
+# shellcheck source-path=SCRIPTDIR source=../scenarios/common.sh
+. "$here/../scenarios/common.sh"
+run_key=$(date -u +%s%N)
+ref="participants $step"
+
+cluster=$(sql "SELECT id FROM cluster WHERE name = 'bw-fixture'") || die "cannot read the cluster"
+machine_w=$(sql "SELECT id FROM machine WHERE cluster = '$cluster' AND talos_endpoint::text = '$TALOS_WORKER_IP:50000'") ||
+  die "cannot read the worker's machine"
+machine_cp=$(sql "SELECT id FROM machine WHERE cluster = '$cluster' AND talos_endpoint::text = '$TALOS_CONTROLPLANE_IP:50000'") ||
+  die "cannot read the control plane's machine"
+
+# labels_put <who> <name> <document>: the role fragment participants-labels in the draft, under its
+# ETag: 200, the ETag replaced; its revision in frag_rev.
+labels_put() {
+  fresh "$1"
+  answers 200 - PUT "/api/v1/drafts/$draft/fragments/participants-labels" "$tok" \
+    "$(jq -nc --arg d "$3" '{layer: "role", document: $d, marks: []}')" "$(key "fragment-$2")" "$etag" || return 1
+  etag=$(etag_of_last)
+  frag_rev=$(jq -er '.entry.revision' "$EV/last.body")
+}
+# profile_with <who> <name>: the workers profile, under the draft's ETag, listing its head's
+# fragment revisions with frag_rev in place of any earlier participants-labels revision.
+profile_with() {
+  local body
+  fresh "$1"
+  body=$(sql "SELECT coalesce(jsonb_agg(f.fragment_revision ORDER BY f.position), '[]'::jsonb)
+    FROM profile p JOIN profile_revision_fragment f ON f.revision = p.head_revision_id
+    JOIN fragment_revision r ON r.id = f.fragment_revision
+    WHERE p.cluster = '$cluster' AND p.name = 'workers' AND r.name <> 'participants-labels'") || return 1
+  body=$(jq -nc --argjson l "$body" --arg f "$frag_rev" '{fragments: ($l + [$f])}') || return 1
+  answers 200 - PUT "/api/v1/drafts/$draft/profiles/workers" "$tok" "$body" "$(key "profile-$2")" "$etag" || return 1
+  etag=$(etag_of_last)
+}
+# t6_open: the one open draft titled "participants t6", its id in draft and its ETag in etag.
+t6_open() {
+  draft=$(sql "SELECT id FROM draft WHERE title = 'participants t6' AND state = 'open'") || return 1
+  [ -z "$draft" ] && return 0
+  fresh h-author
+  answers 200 - GET "/api/v1/drafts/$draft" "$tok" && etag=$(etag_of_last) && [ -n "$etag" ]
+}
+# a_started_after_entry: A's container started after the current epoch's entry, so the epoch A read
+# at its start (cmd/bronzeward/main.go) is that epoch, which still is current.
+a_started_after_entry() {
+  local started entered
+  started=$(docker inspect --type container --format '{{.State.StartedAt}}' "$BW_A") || return 1
+  entered=$(sql "SELECT extract(epoch FROM r.entered_at) FROM recovery_epoch r JOIN installation_state i ON i.epoch = r.epoch
+    WHERE i.recovery_mode") || return 1
+  [ -n "$entered" ] && [ "$(date -u -d "$started" +%s)" -gt "${entered%.*}" ]
+}
+# applied_desired: the worker's Applied is its Desired, and an operation applied it.
+applied_desired() {
+  same "$(sql "SELECT (applied_release = desired)::text || ' ' || applied_source FROM machine_state WHERE machine = '$machine_w'")" \
+    'true operation'
+}
+
+case $step in
+  labels)
+    check "$ref" 'h-author opens a draft: 201' draft_by h-author labels
+    check "$ref" 'h-author puts the role fragment participants-labels, bw-team: blue: 200' \
+      labels_put h-author labels $'machine:\n  nodeLabels:\n    bw-team: blue\n'
+    check "$ref" 'h-author lists it in the workers profile: 200' profile_with h-author labels
+    check "$ref" "h-publisher publishes it: 202, one release, the worker's Desired" publish_by h-publisher labels
+    ;;
+  t6-draft)
+    check "$ref" 'h-author opens the draft "participants t6": 201' draft_by h-author t6
+    check "$ref" 'h-author changes bw-team to green and adds the empty label bw-note: 200' \
+      labels_put h-author t6 $'machine:\n  nodeLabels:\n    bw-team: green\n    bw-note: ""\n'
+    check "$ref" 'h-author lists the new revision in the workers profile: 200' profile_with h-author t6
+    ;;
+  t7-publish)
+    t6_open || die "cannot read T6's draft"
+    if [ -n "$draft" ]; then
+      check "$ref" "h-publisher publishes T6's draft: 202, one release, the worker's Desired" publish_by h-publisher t7
+    else
+      check "$ref" "T6's draft is published already" \
+        same "$(sql "SELECT count(*) FROM draft WHERE title = 'participants t6' AND state = 'published'")" 1
+    fi
+    ;;
+  links)
+    case ${2:-} in linksplit | linkjoin) ;; *) die "usage: prepare links linksplit|linkjoin" ;; esac
+    check "$ref" "inject $2 A, B and C to the worker" worker_links "$2"
+    ;;
+  applied)
+    check "$ref" "the worker's Applied is its Desired, from an operation, within four minutes" within 240 applied_desired
+    ;;
+  drift-closed)
+    check "$ref" "T10's drift is closed: no open drift record on the worker" \
+      same "$(sql "SELECT count(*) FROM drift_record WHERE machine = '$machine_w' AND closed IS NULL")" 0
+    if [ "$failed" -eq 0 ] && [ "$(sql "SELECT frozen FROM machine WHERE id = '$machine_w'")" = t ]; then
+      fresh h-approver
+      check "$ref" "the worker's scope, still frozen after T10, unfrozen by h-approver: 201" \
+        answers 201 - POST "/api/v1/machines/$machine_w/unfreezes" "$tok" '{"reason": "T11 setup"}' "$(key unfreeze)"
+    fi
+    ;;
+  t11-check)
+    check "$ref" "A's configuration has its ingestion block, so A owns claims and decides as the controller" \
+      grep --quiet --extended-regexp '^ingestion:' "$STATE/server/a/config.yaml"
+    check "$ref" "A started after the current epoch's entry, so A's owner epoch is the current one" a_started_after_entry
+    check "$ref" "the control plane's scope: pre-restore unaccounted, with no accounting or release in this epoch" \
+      same "$(sql "SELECT m.scope_state || ' ' || (SELECT count(*) FROM scope_accounting a WHERE a.machine = m.id AND a.epoch = i.epoch)
+        || ' ' || (SELECT count(*) FROM scope_release r WHERE r.machine = m.id AND r.epoch = i.epoch)
+        FROM machine m, installation_state i WHERE m.id = '$machine_cp'")" 'pre-restore-unaccounted 0 0'
+    stopped=$(sed -n 's/^stopped\t//p' "$STATE/participants-t11" 2>/dev/null) && [ -n "$stopped" ] ||
+      die "no S7 t11 stop is recorded in $STATE; run fixtures/scenarios/s7 t11 first"
+    check "$ref" "no apply-config operation was created since S7's stop" \
+      same "$(sql "SELECT count(*) FROM operation WHERE kind = 'apply-config' AND created_at > '$stopped'")" 0
+    ;;
+esac
+say "prepare $step: $failed failed; evidence in $EV"
+[ "$failed" -eq 0 ]
