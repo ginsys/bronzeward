@@ -65,11 +65,11 @@ func (e *env) contextCmd(args []string) error {
 		}); err != nil {
 			return err
 		}
-		// Its credential-store entry and kept ETags go with it; a D2 (b) file is left where the
-		// operator put it.
+		// Its credential-store entry and the ETags kept for its server go with it; a D2 (b) file is
+		// left where the operator put it.
 		if verb == "remove" {
 			note, err := client.ClearStored(&removed, e.noInput)
-			err = errors.Join(err, client.DropState(removed.Name))
+			err = errors.Join(err, client.DropState(removed.Name, removed.Server))
 			if note != "" {
 				msg += " " + note + "."
 			}

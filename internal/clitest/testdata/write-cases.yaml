@@ -1,9 +1,10 @@
 # Shared conformance case records (docs/spec/client-contracts.md §12) of the CLI's write layer
-# (decisions T9 and T10 of #256), run by write_test.go TestWriteCases: exactly the cases recorded
-# here, in this order, against a disposable bronzeward serve behind the in-process TLS injector.
-# Data is synthetic: fixture-issuer tokens for the humans h-all and h-author, both holding author.
-# Each case sends cluster add, POST /api/v1/clusters, a route without If-Match, signed in as h-all
-# through the oidc context "human", whose epoch a whoami read sets first.
+# (decisions T9, T10 and T11 of #256), run by write_test.go TestWriteCases: exactly the cases
+# recorded here, in this order, against a disposable bronzeward serve behind the in-process TLS
+# injector. Data is synthetic: fixture-issuer tokens for the humans h-all and h-author, both
+# holding author. Each case is signed in as h-all through the oidc context "human", whose epoch a
+# whoami read sets first. Each sends cluster add, POST /api/v1/clusters, a route without If-Match,
+# except ETAG-01, which writes to a draft.
 #
 # A recovery entry needs a configured provider, which this server lacks, so the cases that need
 # one commit the new epoch in the database as the entry does: a recovery_epoch row and
@@ -133,4 +134,21 @@
     client: renews once, finds another subject, and sets the write aside without repeating it; the changed-subject half is #263's
     server: receives no POST; no act
     shown: '"set aside, not repeated: the credential now names <issuer>|h-author, not the principal <issuer>|h-all"; standard output empty; exit 3'
+    absent: [token in stdout, stderr, argv, state directory]
+
+- id: ETAG-01
+  setup: the seeded empty open draft at revision 1; draft show keeps its ETag (T11)
+  action: profile rm workers --draft drf_..., run twice
+  exchange:
+    - GET /api/v1/drafts/drf_..., the draft show
+    - DELETE /api/v1/drafts/drf_.../profiles/workers, If-Match the kept ETag
+    - GET /api/v1/drafts/drf_..., the read naming the current revision
+  fault: >-
+    another author writes first: the case moves the draft to revision 2 with a new ETag token in
+    the database, as a draft update does; an update that saves an entry needs the provider this
+    server lacks
+  expect:
+    client: stops on 412; never fetches the new ETag to send the write again, so the second run sends the same If-Match
+    server: answers each DELETE 412 precondition-failed; no act
+    shown: '"The draft changed since you last read it (you saw revision 1, it is now revision 2). Nothing was saved.", then draft show; standard output empty; exit 1'
     absent: [token in stdout, stderr, argv, state directory]
