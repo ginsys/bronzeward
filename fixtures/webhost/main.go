@@ -122,6 +122,9 @@ func handler(c config) (http.Handler, error) {
 	})
 	// No ServeMux: its path-cleaning redirects would answer a page without the headers.
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Every connection serves one request. A browser sends a request again by itself when a
+		// reused connection closes before any answer, so the page would never meet the injected drop.
+		w.Header().Set("Connection", "close")
 		switch {
 		case r.URL.Path == "/livez", strings.HasPrefix(r.URL.Path, "/api/v1/") && c.redirectAPI == "":
 			proxy.ServeHTTP(w, r)
