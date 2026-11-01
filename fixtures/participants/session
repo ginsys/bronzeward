@@ -83,8 +83,17 @@ trust_zitadel() {
   local issuer project line
   issuer=$(idp_var BW_TEST_IDP_ISSUER)
   project=$(idp_var BW_TEST_IDP_PROJECT)
-  # A second start begins again from bin/up's configuration.
-  if [ -f "$cfg.fixture" ]; then cp -- "$cfg.fixture" "$cfg"; else cp -- "$cfg" "$cfg.fixture"; fi
+  # A second start begins again from bin/up's configuration. The backup gets its name only when it
+  # is complete, because stop puts any backup it finds over A's configuration.
+  if [ -f "$cfg.fixture" ]; then
+    cp -- "$cfg.fixture" "$cfg"
+  else
+    cp -- "$cfg" "$cfg.fixture.partial" || {
+      rm -f -- "$cfg.fixture.partial"
+      die "cannot copy A's configuration to $cfg.fixture.partial; A's configuration is unchanged"
+    }
+    mv --no-target-directory -- "$cfg.fixture.partial" "$cfg.fixture"
+  fi
   while IFS= read -r line; do
     case $line in
     '    issuer: http://issuer:5556') printf '    issuer: %s\n' "$issuer" ;;
@@ -407,7 +416,7 @@ stop() {
       fi
       "$bin/inject" start A >/dev/null || die "cannot start $BW_A on bin/up's configuration; run session stop again"
     fi
-    rm -f -- "$cfg.restart" "$cfg.fixture"
+    rm -f -- "$cfg.restart" "$cfg.fixture" "$cfg.partial"
   fi
   # Only the provider this session's start made is taken down. Another provider state can be
   # stale, from another Docker daemon, where dev-idp down would remove another checkout's provider.
