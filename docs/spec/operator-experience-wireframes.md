@@ -183,6 +183,11 @@ the editor keeps the unsaved text, shows "Someone changed this draft (revision 7
 not saved." and offers [Show their change] and [Copy my text into the new revision], never an
 automatic overwrite.
 
+[Revert to base] puts the base revision's text in the editor, not saved. Save then writes it as
+a new revision of the entry, and the entry stays in the draft. (2026-11-01, lead ruling: no route
+drops a draft entry; Revert to base restores the base text for saving, and the saved entry is a
+new revision whose content equals the base)
+
 ## W5. Protected import review
 
 ```text
