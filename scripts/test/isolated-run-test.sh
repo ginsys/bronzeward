@@ -24,7 +24,8 @@ printf '[env]\nBW_ISOLATED_CONF_D = "conf.d"\n' >"$home/.config/mise/conf.d/isol
 printf '[env]\nBW_ISOLATED_CLONE = "clone"\n' >"$clone/mise.toml"
 # mise's data stays the caller's, where its tools are installed; its state and cache go under $work.
 data=${MISE_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/mise}
-dirs=(MISE_DATA_DIR="$data" XDG_STATE_HOME="$work/state" XDG_CACHE_HOME="$work/cache")
+dirs=(MISE_DATA_DIR="$data" MISE_STATE_DIR="$work/state/mise" MISE_CACHE_DIR="$work/cache/mise"
+  XDG_STATE_HOME="$work/state" XDG_CACHE_HOME="$work/cache")
 
 # The names of the three variables `mise env` sets, in order, comma-separated.
 seen() {
