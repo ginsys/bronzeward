@@ -299,7 +299,7 @@ func TestPlans(t *testing.T) {
 		r := e.ctl(append(h, "plan", "show", adopted)...)
 		op := opID.FindString(r.out)
 		f.want(r, 0, "Committed: operation "+op+". Follow it with: bronzewardctl operation watch '"+op+"'")
-		if state := f.ended(op); state != "succeeded" {
+		if state := f.ended(op); state != "completed" {
 			t.Fatalf("the adoption ended %s: %s", state, f.events(op))
 		}
 	})
