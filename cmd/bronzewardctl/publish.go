@@ -52,8 +52,11 @@ func (e *env) publish(args []string) (err error) {
 		}
 		return lines, nil
 	})
-	if err != nil || noWait || op.Id == "" {
+	if err != nil || noWait {
 		return err
+	}
+	if op.Id == "" {
+		return fmt.Errorf("%s: the publication was accepted without naming its operation; find it with: bronzewardctl operation list --kind publish", c.Context.Where())
 	}
 	defer func() { err = errors.Join(err, c.Save()) }()
 	o, err := c.Watch(op.Id, client.Watch{
