@@ -101,6 +101,24 @@ const notShown = "AccessVersionBody.Created AccessVersionBody.Path ActItem.Epoch
 	"Reference.Encoding ReleaseMachineBody.Review RendererBody.MachineryChecksum " +
 	"RestoredBackup.Backup RestoredBackup.Family ServerBody.Features ServerBody.StartMode TimelineEntry.Epoch UnreadValue.Code"
 
+// markersShown is, for each command of the sweep with plain booleans, how many marked values it
+// shows. The sweep credits a member to any command that shows it, so a command that stops showing
+// a member another command still shows (or shows a placeholder for it) changes this number.
+var markersShown = map[string]int{
+	"status": 5, "version": 1, "whoami": 5, "context list": 3,
+	"cluster list": 6, "cluster show c1": 5,
+	"machine list": 7, "machine show m1": 11, "machine timeline m1": 3, "machine observations m1": 6,
+	"fragment show f1": 6, "fragment show frv_1": 8, "fragment history f1": 5,
+	"profile show p1": 5, "profile show prv_1": 5, "profile history p1": 5,
+	"assignment show a1": 4, "assignment show asr_1": 6, "assignment history a1": 6,
+	"draft list": 5, "draft show d1": 6, "release list": 6, "release show r1": 15,
+	"plan list": 6, "plan show pl1": 27, "operation list": 8, "operation show o1": 15, "act list": 8,
+	"cluster add --name n --endpoint https://e --contract c --talos-cluster-id t":    5,
+	"machine add --cluster c1 --talos-node-id n --platform metal --talos-endpoint e": 4,
+	"machine set-endpoint m1 --talos-endpoint e":                                     3,
+	"draft create --cluster c1 --title t":                                            2,
+}
+
 var timeType = reflect.TypeFor[time.Time]()
 
 // tree is a value of type t as JSON-ready data, with every string and every map key a marked one.
@@ -310,9 +328,28 @@ func checkSweep(t *testing.T, yes bool, omit string, seen map[string]bool) {
 	bad.yes, plain.yes = yes, yes
 	bad.omit, plain.omit = omit, omit
 	badOut, badErr := sweep(t, bad, "table")
-	plainOut, _ := sweep(t, plain, "table")
+	plainOut, plainErr := sweep(t, plain, "table")
 	for i, c := range commands {
 		name := strings.Join(c, " ")
+		// Both runs number their markers alike, so a command must show each marker the plain run
+		// shows, as often, and in its escaped form: a value replaced by a placeholder fails here
+		// even when another command still shows the same member.
+		withPlain, withBad := plainOut[i]+"\n"+plainErr[i], badOut[i]+"\n"+badErr[i]
+		shownMarkers := 0
+		for m := range bad.src {
+			if strings.Contains(withBad, m) {
+				shownMarkers++
+			}
+		}
+		if want, ok := markersShown[name]; !yes && omit == "" && (!ok || shownMarkers != want) {
+			t.Errorf("%s shows %d marked values, want %d: a value is lost or a placeholder replaces it", name, shownMarkers, want)
+		}
+		for m, want := range bad.want {
+			n := strings.Count(withPlain, m)
+			if got, esc := strings.Count(withBad, m), strings.Count(withBad, want); got != n || esc != n {
+				t.Errorf("%s: %s shows %d times, %d in its escaped form %q; the plain run shows it %d times", name, m, got, esc, want, n)
+			}
+		}
 		for _, text := range []string{badOut[i], badErr[i]} {
 			if !utf8.ValidString(text) {
 				t.Errorf("%s: the output holds invalid UTF-8: %q", name, text)

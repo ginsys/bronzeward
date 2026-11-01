@@ -32,11 +32,11 @@ func newHTTPClient(x *Context, verbose io.Writer, from func(*http.Request) (*url
 	if x.CertificateAuthority != "" {
 		pem, err := os.ReadFile(x.CertificateAuthority)
 		if err != nil {
-			return nil, fmt.Errorf("certificateAuthority: %w", err)
+			return nil, fmt.Errorf("certificateAuthority: %w", printableError(err))
 		}
 		tc.RootCAs = x509.NewCertPool()
 		if !tc.RootCAs.AppendCertsFromPEM(pem) {
-			return nil, fmt.Errorf("certificateAuthority %s holds no PEM certificate", x.CertificateAuthority)
+			return nil, fmt.Errorf("certificateAuthority %s holds no PEM certificate", printable(x.CertificateAuthority))
 		}
 	}
 	var tlsProxies sync.Map // the dial address of each https proxy, to its host name
