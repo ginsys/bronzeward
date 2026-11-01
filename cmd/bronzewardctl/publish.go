@@ -141,7 +141,10 @@ func (e *env) releaseReview(verb string, args []string) error {
 		}
 		fmt.Fprintf(w, "Release %s, machine %s, validated: %s\n", r.Release, r.Machine, r.Mode)
 		if r.Configuration == nil {
-			fmt.Fprintln(w, "Configuration not shown: it could not be redacted. "+or(r.Notice, ""))
+			fmt.Fprintln(w, "Configuration not shown: it could not be redacted.")
+			if r.Notice != nil && *r.Notice != "" {
+				fmt.Fprintln(w, "Server notice: "+verbatim(*r.Notice))
+			}
 			return
 		}
 		for _, l := range strings.Split(strings.TrimSuffix(*r.Configuration, "\n"), "\n") {
