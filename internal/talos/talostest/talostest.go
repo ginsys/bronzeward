@@ -225,6 +225,25 @@ func (n *Node) AcceptApply(t testing.TB) {
 	})
 }
 
+// HoldApply makes the node hold each apply until release runs, then accept it as AcceptApply
+// does. arrived is closed when the first apply reaches the node. A held apply whose request ends
+// first answers the request's error.
+func (n *Node) HoldApply(t testing.TB) (arrived <-chan struct{}, release func()) {
+	in, out := make(chan struct{}), make(chan struct{})
+	first := sync.OnceFunc(func() { close(in) })
+	n.OnApply(func(ctx context.Context, req *machine.ApplyConfigurationRequest) (*machine.ApplyConfigurationResponse, error) {
+		first()
+		select {
+		case <-out:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		n.SetMachineConfig(t, req.GetData())
+		return &machine.ApplyConfigurationResponse{Messages: []*machine.ApplyConfiguration{{Mode: req.GetMode()}}}, nil
+	})
+	return in, sync.OnceFunc(func() { close(out) })
+}
+
 // AppliedRequests are the ApplyConfiguration requests that reached the node, in order.
 func (n *Node) AppliedRequests() []Applied {
 	n.mu.Lock()
