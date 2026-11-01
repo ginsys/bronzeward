@@ -101,6 +101,17 @@ func TestFragmentEditing(t *testing.T) {
 		`DELETE /drafts/drf_BWSYNTH/fragments/worker-labels if-match="5-BWSYNTH" type= body=`)
 }
 
+// TestLongMark checks that a mark longer than bufio.Scanner's default 64 KiB line is read whole:
+// the API sets no length on one mark.
+func TestLongMark(t *testing.T) {
+	long := "machine.files." + strings.Repeat("k", 70<<10)
+	setStdin(t, long+"\nmachine.files\n\n")
+	m, err := (&env{}).readMarks(false)
+	if err != nil || len(m) != 2 || m[0] != long || m[1] != "machine.files" {
+		t.Errorf("%d marks, %v; want the 70 KiB mark and machine.files", len(m), err)
+	}
+}
+
 // TestProtectedOnLinuxOnly checks that the protected commands refuse outside Linux (#256
 // BW-256-env-1), where the guard is not yet verified.
 func TestProtectedOnLinuxOnly(t *testing.T) {

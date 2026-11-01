@@ -185,6 +185,8 @@ func (e *env) readMarks(docOnStdin bool) ([]string, error) {
 	}
 	var marks []string
 	s := bufio.NewScanner(in)
+	// The API sets no length on one mark, so a line may be as long as the body limit allows.
+	s.Buffer(nil, maxBody)
 	for s.Scan() {
 		m := strings.TrimSuffix(s.Text(), "\r")
 		if m == "" {
