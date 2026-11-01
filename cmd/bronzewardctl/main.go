@@ -35,7 +35,13 @@ commands:
   logout      remove an oidc context's stored sign-in and revoke its refresh token
   status      start mode, recovery mode, open drift and unresolved operations
   cluster list | show <id>
+  cluster add --name <name> --endpoint <https url> --contract <v1.x> --talos-cluster-id <id>
   machine list [--cluster <id>] | show <id> | timeline <id> | observations <id>
+  machine add --cluster <id> (--talos-node-id <id> | --smbios-uuid <uuid>) [--serial <s>]
+              --platform metal|container|cloud --talos-endpoint <ip>[:<port>]
+  machine set-endpoint <id> --talos-endpoint <ip>[:<port>]
+              writes, by a person signed in as author, repeat a write whose outcome was unknown
+              exactly with --idempotency-key, --expect-epoch and --expect-principal as printed
   fragment | profile | assignment show <head or revision ID> | history <head ID>
   draft list [--cluster <id>] | show <draft>
   release list [--cluster <id>] [--draft <id>] | show <release>
@@ -55,7 +61,7 @@ global flags, before or after the command:
   --no-input            never prompt
   -v                    name a proxy a request goes through
 
-exit codes: 0 success; 1 refused or failed; 2 usage error; 3 outcome unknown`
+exit codes: 0 success; 1 refused or failed; 2 usage error or refused repeat; 3 outcome unknown`
 
 type usageError struct{ error }
 
@@ -113,6 +119,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		err = commands[pos[0]](pos[1:])
 	}
 	var u usageError
+	var refused client.RefusedRepeat
+	var unknown *client.Unknown
 	switch {
 	case err == nil:
 		return 0
@@ -124,6 +132,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	fmt.Fprintln(stderr, "bronzewardctl:", err)
+	switch {
+	case errors.As(err, &unknown):
+		return 3
+	case errors.As(err, &refused):
+		return 2
+	}
 	return 1
 }
 

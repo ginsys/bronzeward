@@ -6,6 +6,7 @@ package clitest
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -73,6 +74,7 @@ type fixture struct {
 	bin, base, home, token, tokenFile string
 	iss                               *issuer.Issuer
 	idp                               *provider
+	db                                *sql.DB
 }
 
 var tokenPattern = regexp.MustCompile(`bwt_\S+`)
@@ -85,8 +87,8 @@ func start(t *testing.T, roles string) *fixture {
 // startFor is start with the server trusting issuerURL for audience; "" is the fixture issuer.
 func startFor(t *testing.T, roles, issuerURL, audience string) *fixture {
 	t.Helper()
-	_, dsn := dbtest.New(t)
-	f := &fixture{t: t, bin: binaries(t), home: t.TempDir()}
+	db, dsn := dbtest.New(t)
+	f := &fixture{t: t, bin: binaries(t), home: t.TempDir(), db: db}
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -272,7 +274,8 @@ func (f *fixture) do(q *http.Request, status int) []byte {
 
 // injector is a TLS proxy to the server. hook may answer a request itself; edit may change a
 // proxied answer. seen lists the requests it received since the last set; writes lists every
-// request it ever received that was not a GET.
+// request it ever received that was not a GET, which fails the test unless writing is set. With
+// dropNext set, the next connection accepted is closed before its TLS handshake.
 type injector struct {
 	*httptest.Server
 	mu           sync.Mutex
@@ -280,12 +283,32 @@ type injector struct {
 	edit         func(*http.Response)
 	seen, writes []string
 	ca           string
+	proxy        http.Handler
+	writing      bool
+	dropNext     atomic.Bool
+}
+
+// dropping closes the connection it accepts while its injector's dropNext is set, once.
+type dropping struct {
+	net.Listener
+	in *injector
+}
+
+func (l dropping) Accept() (net.Conn, error) {
+	for {
+		c, err := l.Listener.Accept()
+		if err != nil || !l.in.dropNext.CompareAndSwap(true, false) {
+			return c, err
+		}
+		c.Close()
+	}
 }
 
 func newInjector(t *testing.T, target string) *injector {
 	u, _ := url.Parse(target)
 	in := &injector{}
 	rp := httputil.NewSingleHostReverseProxy(u)
+	in.proxy = rp
 	rp.ModifyResponse = func(r *http.Response) error {
 		in.mu.Lock()
 		edit := in.edit
@@ -295,7 +318,7 @@ func newInjector(t *testing.T, target string) *injector {
 		}
 		return nil
 	}
-	in.Server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	in.Server = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		in.mu.Lock()
 		in.seen = append(in.seen, r.Method+" "+r.URL.Path)
 		if r.Method != http.MethodGet {
@@ -307,9 +330,11 @@ func newInjector(t *testing.T, target string) *injector {
 			rp.ServeHTTP(w, r)
 		}
 	}))
+	in.Listener = dropping{in.Listener, in}
+	in.StartTLS()
 	t.Cleanup(func() {
 		in.Close()
-		if len(in.writes) > 0 {
+		if len(in.writes) > 0 && !in.writing {
 			t.Errorf("read commands sent %v", in.writes)
 		}
 	})
