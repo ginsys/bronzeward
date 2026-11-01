@@ -45,6 +45,25 @@ describe("the notice (B11)", () => {
     expect(html(writes, h(WriteNotices, { go: () => {} }))).toBe("");
   });
 
+  test("an unknown outcome refused 403 forbidden on its repeat shows what the route accepts and the problem's fields, in the notice and after it settles aside", async () => {
+    const writes = new Writes(() => PRINCIPAL, async () => {});
+    let sends = 0;
+    const p = { type: "urn:bronzeward:problem:forbidden", title: "forbidden", status: 403, detail: "not allowed", roles: ["author"], instance: "req-1" };
+    writes.client = {
+      currentEpoch: "e1",
+      attempt: async (_m: string, path: string) => {
+        if (path === "/recovery") return { status: 200, headers: new Headers({ "Bronzeward-Epoch": "e1" }), data: {} };
+        return ++sends === 1 ? undefined : { status: 403, headers: new Headers(), data: p };
+      },
+    } as unknown as Client;
+    const w = new Write({ method: "POST", path: "/clusters", body: { name: "lab" }, resource: "/clusters" });
+    await writes.submit(w);
+    const fields = " Needs author. forbidden: not allowed. Request req-1.";
+    expect(html(writes, h(WriteNotices, { go: () => {} }))).toContain(`${unknown("the server answered 403 forbidden")}${fields} Key ${w.key}`);
+    writes.setAside(EPOCH_CHANGED_ASIDE);
+    expect(html(writes, h(WriteNotices, { go: () => {} }))).toContain(`${setAside(EPOCH_CHANGED_ASIDE)}${fields} Key ${w.key}`);
+  });
+
   test("set aside because the epoch read got no answer, it says so, not that the epoch changed", async () => {
     const [writes, w] = await unknownWrite();
     writes.setAside(NO_EPOCH);

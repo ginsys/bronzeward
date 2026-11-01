@@ -250,7 +250,7 @@ describe("the confirming read's credential refusals (§8.2)", () => {
     const onRevoked = vi.fn();
     const { writes, writesSent } = page([new TypeError("Failed to fetch")], [EPOCH, problem(403, "identity-revoked", {}, null)], { onRevoked });
     writes.onEnded = vi.fn();
-    expect(await writes.submit(spec())).toEqual({ kind: "set-aside", why: SIGN_IN_REFUSED, ambiguous: true });
+    expect(await writes.submit(spec())).toEqual({ kind: "set-aside", why: SIGN_IN_REFUSED, ambiguous: true, problem: null });
     expect(onRevoked).toHaveBeenCalledTimes(1);
     expect(writes.onEnded).toHaveBeenCalledWith(expect.objectContaining({ kind: "revoked" }));
     expect(writesSent()).toHaveLength(1);
@@ -301,7 +301,7 @@ describe("the confirming read's credential refusals (§8.2)", () => {
 
   test("refused on the read that learns a lost write's epoch: nothing is repeated, the write is set aside and the page ends", async () => {
     const { writes, w, sends } = ended(undefined);
-    expect(await writes.submit(w)).toEqual({ kind: "set-aside", why: SIGN_IN_REFUSED, ambiguous: true });
+    expect(await writes.submit(w)).toEqual({ kind: "set-aside", why: SIGN_IN_REFUSED, ambiguous: true, problem: null });
     expect(sends).toEqual(["/clusters"]);
     expect(writes.onEnded).toHaveBeenCalledWith(ending);
     expect(writes.open).toEqual([w]);
@@ -332,13 +332,13 @@ describe("the confirming read's credential refusals (§8.2)", () => {
 describe("set aside (§8.4 item 3, §8.5 item 2, journeys §8)", () => {
   test("AMB-05: the confirming read shows another epoch, so the write is not repeated", async () => {
     const { writes, sent } = page([new TypeError("Failed to fetch")], [EPOCH, "e2"]);
-    expect(await writes.submit(spec())).toEqual({ kind: "set-aside", why: EPOCH_CHANGED_ASIDE, ambiguous: true });
+    expect(await writes.submit(spec())).toEqual({ kind: "set-aside", why: EPOCH_CHANGED_ASIDE, ambiguous: true, problem: null });
     expect(sent.map((s) => s.path)).toEqual(["/recovery", "/clusters", "/recovery"]);
   });
 
   test("set aside before any attempt that may have committed, it is not open: nothing committed", async () => {
     const p = page([problem(503, "dependency-unavailable")], [EPOCH, "e2"]);
-    expect(await p.writes.submit(spec())).toEqual({ kind: "set-aside", why: EPOCH_CHANGED_ASIDE, ambiguous: false });
+    expect(await p.writes.submit(spec())).toEqual({ kind: "set-aside", why: EPOCH_CHANGED_ASIDE, ambiguous: false, problem: null });
     expect(p.writes.open).toEqual([]);
   });
 
@@ -362,7 +362,7 @@ describe("set aside (§8.4 item 3, §8.5 item 2, journeys §8)", () => {
     const p = page([new TypeError("Failed to fetch")]);
     const run = p.writes.submit(spec());
     p.signIn("https://idp.invalid SYNTH-sub-2");
-    expect(await run).toEqual({ kind: "set-aside", why: SIGN_IN_CHANGED, ambiguous: true });
+    expect(await run).toEqual({ kind: "set-aside", why: SIGN_IN_CHANGED, ambiguous: true, problem: null });
     expect(p.writesSent()).toHaveLength(1);
   });
 
@@ -375,7 +375,7 @@ describe("set aside (§8.4 item 3, §8.5 item 2, journeys §8)", () => {
     const run = p.writes.submit(flying);
     p.writes.setAside(EPOCH_CHANGED_ASIDE);
     expect(await run).toMatchObject({ kind: "set-aside", why: EPOCH_CHANGED_ASIDE });
-    expect(unknown.outcome).toEqual({ kind: "set-aside", why: EPOCH_CHANGED_ASIDE, ambiguous: true });
+    expect(unknown.outcome).toEqual({ kind: "set-aside", why: EPOCH_CHANGED_ASIDE, ambiguous: true, problem: null });
     expect(p.writes.repeatable(unknown)).toBe(false);
     expect(await p.writes.submit(unknown)).toBe(unknown.outcome);
   });
@@ -384,7 +384,7 @@ describe("set aside (§8.4 item 3, §8.5 item 2, journeys §8)", () => {
     const drop = () => new TypeError("Failed to fetch");
     const p = page([drop(), drop(), drop(), () => (p.writes.setAside(EPOCH_CHANGED_ASIDE), drop())]);
     const w = spec();
-    expect(await p.writes.submit(w)).toEqual({ kind: "set-aside", why: EPOCH_CHANGED_ASIDE, ambiguous: true });
+    expect(await p.writes.submit(w)).toEqual({ kind: "set-aside", why: EPOCH_CHANGED_ASIDE, ambiguous: true, problem: null });
     expect(p.writesSent()).toHaveLength(4);
     expect(p.writes.repeatable(w)).toBe(false);
     expect(p.writes.open).toEqual([w]);
@@ -480,6 +480,50 @@ describe("a notice once shown stays until dismissed (B11)", () => {
   });
 });
 
+describe("an unknown or set-aside outcome keeps the problem of the answer behind it (§8.2)", () => {
+  const forbidden = () => problem(403, "forbidden", { roles: ["author"], instance: "req-1" });
+
+  test("Add cluster loses its first answer, then a repeat is refused 403 forbidden: unknown, with that refusal's roles and fields", async () => {
+    const { writes } = page([new TypeError("Failed to fetch"), forbidden()]);
+    expect(await writes.submit(spec())).toEqual({
+      kind: "unknown",
+      why: "the server answered 403 forbidden",
+      problem: { type: "urn:bronzeward:problem:forbidden", title: "forbidden", status: 403, roles: ["author"], instance: "req-1" },
+    });
+  });
+
+  test("after an ambiguous attempt, repeats answered 503 to the end: unknown, with the last 503's problem", async () => {
+    const { writes } = page([new TypeError("Failed to fetch"), ...Array.from({ length: 3 }, () => problem(503, "transient-conflict"))]);
+    expect(await writes.submit(spec())).toMatchObject({ kind: "unknown", problem: { type: "urn:bronzeward:problem:transient-conflict" } });
+  });
+
+  test("a dropped last attempt has no problem, and neither has a set-aside no answer decided", async () => {
+    const drop = () => new TypeError("Failed to fetch");
+    expect(await page([drop(), drop(), drop(), drop()]).writes.submit(spec())).toMatchObject({ kind: "unknown", problem: null });
+    expect(await page([drop()], [EPOCH, "e2"]).writes.submit(spec())).toMatchObject({ kind: "set-aside", problem: null });
+  });
+
+  test("set aside by a 412 epoch-mismatch or a 409 earlier-epoch record, it keeps that answer's problem", async () => {
+    const mismatch = await page([new TypeError("Failed to fetch"), problem(412, "epoch-mismatch", { epoch: "e2" }, "e2")]).writes.submit(spec());
+    expect(mismatch).toMatchObject({ kind: "set-aside", problem: { type: "urn:bronzeward:problem:epoch-mismatch" } });
+    const conflict = await page([new TypeError("Failed to fetch"), problem(409, "conflict", { request: "r1", epoch: "e0" })]).writes.submit(spec());
+    expect(conflict).toMatchObject({ kind: "set-aside", problem: { type: "urn:bronzeward:problem:conflict" } });
+  });
+
+  test("while the repeats run after a 500, the unknown state carries the 500's problem; setAside keeps an unknown one's", async () => {
+    let seen: unknown;
+    const p = page([problem(500, "internal-error"), () => ((seen = w.doubt), new TypeError("Failed to fetch")), new TypeError("Failed to fetch"), new TypeError("Failed to fetch")]);
+    const w = spec();
+    await p.writes.submit(w);
+    expect(seen).toMatchObject({ kind: "unknown", why: "the server answered 500 internal-error", problem: { type: "urn:bronzeward:problem:internal-error" } });
+    const q = page([new TypeError("Failed to fetch"), forbidden()]);
+    const v = spec();
+    await q.writes.submit(v);
+    q.writes.setAside(EPOCH_CHANGED_ASIDE);
+    expect(v.outcome).toMatchObject({ kind: "set-aside", problem: { type: "urn:bronzeward:problem:forbidden" } });
+  });
+});
+
 describe("a body that never ends does not hold a write", () => {
   const stalled = (status: number, type: string, epoch: string | null = EPOCH) =>
     new Response(new ReadableStream({ start: () => {} }), { status, headers: { "Content-Type": type, ...(epoch === null ? {} : { "Bronzeward-Epoch": epoch }) } });
@@ -492,9 +536,9 @@ describe("a body that never ends does not hold a write", () => {
 
   test("a confirming read refused other than for the sign-in is not waited for: the write is set aside", async () => {
     const proxy = await submitWith(stalled(502, "text/html", null));
-    expect(proxy).toEqual({ kind: "set-aside", why: NO_EPOCH, ambiguous: true });
+    expect(proxy).toEqual({ kind: "set-aside", why: NO_EPOCH, ambiguous: true, problem: null });
     const busy = await submitWith(stalled(503, "application/problem+json", null));
-    expect(busy).toEqual({ kind: "set-aside", why: NO_EPOCH, ambiguous: true });
+    expect(busy).toEqual({ kind: "set-aside", why: NO_EPOCH, ambiguous: true, problem: null });
   });
 
   async function submitWith(confirming: Response) {

@@ -7,7 +7,7 @@ import type { components } from "./api/v1";
 import { Ref, short, useList, useReads } from "./list.tsx";
 import type { Cluster, Machine } from "./machines.tsx";
 import { Action } from "./shell.tsx";
-import { problemLine, Refused, Repeated, REPLAYED, SetAside, Status, Unknown } from "./states.tsx";
+import { problemLine, problemTail, Refused, Repeated, REPLAYED, SetAside, Status, Unknown } from "./states.tsx";
 import { type Outcome, Write, type Writes, type WriteSpec } from "./write.ts";
 
 type EndpointChange = components["schemas"]["EndpointChangeBody"];
@@ -38,7 +38,7 @@ function settled(o: Outcome): string {
     case "not-done":
       return `Not saved: ${o.why}.${fields}`;
     default:
-      return `Not saved: ${o.why}.`;
+      return `Not saved: ${o.why}.${problemTail(o.problem)}`;
   }
 }
 
@@ -50,15 +50,15 @@ export function WriteNotices({ go }: { go: (to: string) => void }) {
     const o = w.outcome;
     const props = { onShow: () => go(w.spec.resource), detail: detail(w), onDismiss: () => writes.dismiss(w), testid: "write-notice" };
     if (o !== undefined && w.kept) return <Repeated key={w.key} line={settled(o)} {...props} detail={` Key ${w.key}, ${w.route}. Read ${w.spec.resource}.`} />;
-    if (o?.kind === "unknown") return <Unknown key={w.key} why={o.why} onRepeat={writes.repeatable(w) ? () => void writes.submit(w) : undefined} {...props} />;
-    if (o?.kind === "set-aside") return <SetAside key={w.key} why={o.why} {...props} />;
+    if (o?.kind === "unknown") return <Unknown key={w.key} why={o.why} problem={o.problem} onRepeat={writes.repeatable(w) ? () => void writes.submit(w) : undefined} {...props} />;
+    if (o?.kind === "set-aside") return <SetAside key={w.key} why={o.why} problem={o.problem} {...props} />;
     // Set aside while its answer is still on its way: shown at once, with no dismissal until that
     // answer settles it (§8.5 item 2).
     if (o === undefined && w.aside !== undefined) return <SetAside key={w.key} why={w.aside} {...props} onDismiss={undefined} />;
     // [Repeat exactly] in flight: the earlier attempt stays unknown, and its notice stays.
-    if (o === undefined && w.repeating !== undefined) return <Unknown key={w.key} why={w.repeating.why} repeating {...props} />;
+    if (o === undefined && w.repeating !== undefined) return <Unknown key={w.key} why={w.repeating.why} problem={w.repeating.problem} repeating {...props} />;
     // An attempt that may have committed, while the automatic repeats run: unknown already (B11).
-    if (o === undefined && w.doubt !== undefined) return <Unknown key={w.key} why={w.doubt} repeating {...props} />;
+    if (o === undefined && w.doubt !== undefined) return <Unknown key={w.key} why={w.doubt.why} problem={w.doubt.problem} repeating {...props} />;
     return null;
   });
 }
@@ -143,7 +143,7 @@ export function Result({ w, done }: { w: Write | undefined; done: (data: unknown
     case "set-aside":
     case "unknown":
       // Set aside before any attempt that may have committed, nothing was; otherwise the notice says.
-      if (o.kind === "set-aside" && !o.ambiguous) return <Status testid="write-result">Not saved: {o.why}. Nothing of it was committed.</Status>;
+      if (o.kind === "set-aside" && !o.ambiguous) return <Status testid="write-result">Not saved: {o.why}. Nothing of it was committed.{problemTail(o.problem)}</Status>;
       return <Status testid="write-result">See the notice at the top of the page: its key and what to read.</Status>;
   }
 }
