@@ -2,10 +2,53 @@ package main
 
 import (
 	"bytes"
+	"fmt"
+	"io"
+	"reflect"
 	"text/tabwriter"
 
+	"github.com/ginsys/bronzeward/internal/client"
 	"go.yaml.in/yaml/v3"
 )
+
+// shown is args with every string escaped as a value (client-contracts.md §6 item 8): a string
+// argument is remote text until the CLI proves it is its own, and escaping the CLI's own text
+// changes nothing. An error argument is shown by its escaped text. Any other type is not text.
+func shown(args []any) []any {
+	out := make([]any, len(args))
+	for i, a := range args {
+		out[i] = a
+		if err, ok := a.(error); ok {
+			out[i] = client.Printable(err.Error())
+		} else if v := reflect.ValueOf(a); v.Kind() == reflect.String {
+			out[i] = client.Printable(v.String())
+		}
+	}
+	return out
+}
+
+// tf writes a formatted line of human output. Every table line, record line and sentence is
+// written through tf or sf, so no remote string reaches the terminal as received.
+func tf(w io.Writer, format string, args ...any) error {
+	_, err := fmt.Fprintf(w, format, shown(args)...)
+	return err
+}
+
+// sf is tf for a line that is built first, as a write's answer is.
+func sf(format string, args ...any) string { return fmt.Sprintf(format, shown(args)...) }
+
+// ef is fmt.Errorf with the string arguments escaped. An error argument stays whole, so %w wraps
+// it and errors.Is and errors.As still find what it wraps.
+func ef(format string, args ...any) error {
+	out := make([]any, len(args))
+	for i, a := range args {
+		out[i] = a
+		if _, ok := a.(error); !ok {
+			out[i] = shown([]any{a})[0]
+		}
+	}
+	return fmt.Errorf(format, out...)
+}
 
 // emit prints raw, a JSON document, as -o asks: json prints it unchanged; yaml prints the same
 // members in the same order and with the same values; table runs table. The CLI uses no
@@ -20,7 +63,7 @@ func (e *env) emit(raw []byte, table func(*tabwriter.Writer)) error {
 		_, err = e.out.Write(b)
 		return err
 	}
-	w := tabwriter.NewWriter(e.out, 0, 0, 2, ' ', tabwriter.StripEscape)
+	w := tabwriter.NewWriter(e.out, 0, 0, 2, ' ', 0)
 	table(w)
 	return w.Flush()
 }
