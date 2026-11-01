@@ -182,6 +182,18 @@ func (e *env) readMarks(docOnStdin bool) ([]string, error) {
 	if prompt != nil {
 		fmt.Fprintln(prompt, "Marks, one path per line; an empty line ends them:")
 	}
+	return scanMarks(in, prompt != nil)
+}
+
+// terminalLine is the most a Linux terminal in canonical mode keeps of one line: it drops the rest
+// without an error, so a line this long from a terminal may have been cut short.
+const terminalLine = 4095
+
+// scanMarks reads marks, one per line until an empty line or the end of input. A mark is sent as
+// the text that was given (PA §9.3), so a mark that is not UTF-8, which json.Marshal would alter,
+// or a terminal line that may have been cut short is refused. A refusal names the mark's position,
+// never its text.
+func scanMarks(in io.Reader, terminal bool) ([]string, error) {
 	var marks []string
 	s := bufio.NewScanner(in)
 	// The API sets no length on one mark, so a line may be as long as the body limit allows.
@@ -191,6 +203,13 @@ func (e *env) readMarks(docOnStdin bool) ([]string, error) {
 		m := s.Text()
 		if m == "" {
 			break
+		}
+		switch {
+		case !utf8.ValidString(m):
+			return nil, fmt.Errorf("mark %d is not UTF-8 text; nothing was sent", len(marks)+1)
+		case terminal && len(m) >= terminalLine:
+			return nil, fmt.Errorf("mark %d is %d bytes or more, which a terminal can cut short; give long marks on standard input; nothing was sent",
+				len(marks)+1, terminalLine)
 		}
 		marks = append(marks, m)
 	}
