@@ -54,6 +54,8 @@ export function WriteNotices({ go }: { go: (to: string) => void }) {
     if (o?.kind === "set-aside") return <SetAside key={w.key} why={o.why} {...props} />;
     // [Repeat exactly] in flight: the earlier attempt stays unknown, and its notice stays.
     if (o === undefined && w.repeating !== undefined) return <Unknown key={w.key} why={w.repeating.why} repeating {...props} />;
+    // An attempt that may have committed, while the automatic repeats run: unknown already (B11).
+    if (o === undefined && w.doubt !== undefined) return <Unknown key={w.key} why={w.doubt} repeating {...props} />;
     return null;
   });
 }
@@ -65,7 +67,7 @@ export function WriteNotices({ go }: { go: (to: string) => void }) {
 export function leaving(writes: Writes, to: string, notice = false, from = location.pathname): boolean {
   const open = notice ? [] : writes.open;
   if (open.length === 0 || new URL(to, location.href).pathname === new URL(from, location.href).pathname) return true;
-  const lines = open.map((w) => (w.outcome === undefined ? "Sent, with no answer yet." : "Unknown whether this was saved.") + detail(w));
+  const lines = open.map((w) => (w.outcome === undefined && w.doubt === undefined ? "Sent, with no answer yet." : "Unknown whether this was saved.") + detail(w));
   return confirm(`${lines.join("\n")}\nLeave this page?`);
 }
 
