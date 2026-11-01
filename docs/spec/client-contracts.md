@@ -381,9 +381,13 @@ it. It holds no secret.
 
    **Required check.** One test fills each remote source with a value that holds ESC, a tab, a
    line feed, a carriage return, DEL, a C1 character and a byte that is not UTF-8. The sources
-   are every string member of every response type in `internal/client/apitypes`, every member of
-   the contexts file, and every remote value that the CLI puts into an error it words itself. It
-   runs each command that shows a source in `-o table`, and each such error branch. It fails in
+   are all the remote text that item 8 and item 4 name: every string member of every response type
+   in `internal/client/apitypes`, the response headers the CLI shows (`Deprecation`), the
+   identity provider's and the proxy's text, every member of the contexts file, and every remote
+   value that the CLI puts into an error it words itself. The response-type sweep is one part of
+   it. The implementation issue lists the sources, and a source that the list lacks is a defect of
+   the list. The test runs each command that shows a source in `-o table`, and each such error
+   branch. It fails in
    any of these cases:
    - The output holds a raw control byte outside the CLI's own separators.
    - A plain value does not appear in its escaped form: `\x09` for the tab, `\x0a` for the line
