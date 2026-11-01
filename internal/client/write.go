@@ -44,11 +44,18 @@ type Write struct {
 // CheckRepeat runs a T10 repeat's checks, the principal and the confirming GET /recovery, for the
 // next Send of w on c: a command that reads before Send calls it first, so a refused repeat sends
 // only item 3's reads (§8.4 item 4). For a first send it does nothing.
-func (c *Client) CheckRepeat(w *Write) error {
+func (c *Client) CheckRepeat(w *Write) (err error) {
 	rp := w.Repeat
 	if rp == nil || w.checked == c {
 		return nil
 	}
+	defer func() {
+		if err != nil {
+			// A refusal ends the command before any other read: the recovery banner its reads called
+			// for, with the start mode last shown (§8.5).
+			c.banner()
+		}
+	}()
 	if _, err := c.principal(rp); err != nil {
 		return err
 	}
@@ -340,7 +347,13 @@ func (c *Client) principal(rp *Repeat) (string, error) {
 	} else if c.service != "" {
 		who = c.service
 	} else {
-		r, err := c.Get("/identity")
+		// A repeat's check sends only the identity and confirming reads (§8.4 item 4), so a new epoch
+		// this read shows is followed by GET /server later, at Send's context-use read (§8.5).
+		read := c.Get
+		if rp != nil {
+			read = c.retry
+		}
+		r, err := read("/identity")
 		if err != nil {
 			return "", err
 		}

@@ -58,7 +58,7 @@ func TestRepeatFlags(t *testing.T) {
 }
 
 // TestUnreadableAnswers: a write that succeeded exits 0 though its answer cannot be read, and -o
-// json prints the answer as served; after an unknown outcome, a list item that cannot be read fails
+// json and yaml print the answer as served, unconverted; after an unknown outcome, a list item that cannot be read fails
 // the confirming read rather than being skipped, since it could be the one looked for.
 func TestUnreadableAnswers(t *testing.T) {
 	var unknown atomic.Bool // the POST is redirected, an outcome unknown, when set
@@ -86,9 +86,9 @@ func TestUnreadableAnswers(t *testing.T) {
 	for _, o := range []string{"table", "json", "yaml"} {
 		var out, errb bytes.Buffer
 		code := run([]string{"-o", o, "cluster", "add", "--name", "lab-a"}, &out, &errb)
-		wantOut := map[string]string{"table": "", "json": `"BWSYNTH"`}[o]
-		if code != 0 || !strings.Contains(errb.String(), "succeeded, but its answer cannot be read") || !strings.Contains(out.String(), wantOut) || o == "table" && out.Len() != 0 {
-			t.Errorf("-o %s: exit %d, stdout %q, stderr %q; want 0, the answer as served for json, the failure on stderr", o, code, out.String(), errb.String())
+		wantOut := map[string]string{"table": "", "json": "{\"id\":[\"BWSYNTH\"]}\n", "yaml": "{\"id\":[\"BWSYNTH\"]}\n"}[o]
+		if code != 0 || !strings.Contains(errb.String(), "succeeded, but its answer cannot be read") || out.String() != wantOut {
+			t.Errorf("-o %s: exit %d, stdout %q, stderr %q; want 0, the answer as served for json and yaml, the failure on stderr", o, code, out.String(), errb.String())
 		}
 		// Standard output failing part way: the answer is written once and the failure is the exit.
 		short := &shortWriter{}
