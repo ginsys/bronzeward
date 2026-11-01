@@ -2,8 +2,9 @@
 # fixtures/dev-idp up (ginsys/bronzeward#459), with no Docker: on a provider this checkout already
 # runs, up keeps it only when it was seeded for this run's web origin, the browser tests' page of
 # BW_E2E_PORT_BASE (default 16000) or BW_DEV_IDP_WEB_ORIGIN, and refuses it otherwise. Without
-# BW_DEV_IDP_WEB_ORIGIN, up refuses a base that the browser tests refuse. docker and curl are stubs
-# that report the provider running and answering, and jq is a stub. Synthetic names and values only.
+# BW_DEV_IDP_WEB_ORIGIN, up refuses a base that the browser tests refuse, an empty one included.
+# docker and curl are stubs that report the provider running and answering, and jq is a stub.
+# Synthetic names and values only.
 set -euo pipefail
 
 root=$(CDPATH='' cd -P -- "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
@@ -62,6 +63,9 @@ for b in 16001 016000 19985 15984 abc 18446744073709567616; do
   seed "http://localhost:$b"
   up 1 "BW_E2E_PORT_BASE=$b is refused, even for a provider seeded for it" "BW_E2E_PORT_BASE must be 16000+16*n" BW_E2E_PORT_BASE=$b
 done
+# The default applies to an unset base only (ginsys/bronzeward#464), as in web/e2e/ports.ts.
+seed http://localhost:16000
+up 1 "an empty BW_E2E_PORT_BASE is refused, not read as the default" "BW_E2E_PORT_BASE must be 16000+16*n with n from 0 to 249 (16000, 16016, ..., 19984), not ''" BW_E2E_PORT_BASE=
 seed http://localhost:abc
 up 0 "BW_DEV_IDP_WEB_ORIGIN skips the base check" "(http://localhost:abc)" BW_E2E_PORT_BASE=abc BW_DEV_IDP_WEB_ORIGIN=http://localhost:abc
 exit "$fail"
