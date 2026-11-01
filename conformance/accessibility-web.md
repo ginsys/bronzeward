@@ -42,4 +42,4 @@ Not run here: Safari, whose WebDriver needs a macOS runner; previous major versi
 | NVDA with Firefox | pending: owner or designated tester | pending: owner or designated tester |
 | NVDA with Chrome | pending: owner or designated tester | pending: owner or designated tester |
 
-[#334](https://github.com/ginsys/bronzeward/issues/334) stays open until these passes run.
+[#447](https://github.com/ginsys/bronzeward/issues/447) holds these passes and closes when they run. [#334](https://github.com/ginsys/bronzeward/issues/334) closes on its automated acceptance, by the owner's decision of 1 November 2026.
