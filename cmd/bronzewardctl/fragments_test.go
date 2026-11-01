@@ -80,8 +80,22 @@ func TestFragmentEditing(t *testing.T) {
 	step("a body over 1 MiB once encoded", append(set, "--file", write("quotes", strings.Repeat(`"`, maxBody/2+1))), 1, "",
 		"over the server's 1 MiB limit; nothing was sent")
 	step("a document that is not UTF-8", append(set, "--file", write("bin", "\xff\xfe")), 1, "", "the document is not UTF-8 text; nothing was sent")
-	step("an unknown declarations member", append(set, "--file", doc, "--declarations", write("bad.yaml", "secrets: [x]\n")), 1, "",
-		`unknown field "secrets"; nothing was sent`)
+	// The decoders quote member names and some values; the refusals quote nothing from the file.
+	for _, c := range []struct{ name, file, says string }{
+		{"an unknown declarations member", "BWSYNTH-member: [x]\n", "a member the API does not define, or a value of the wrong type; nothing was sent"},
+		{"a number where the API takes a string", "embedded:\n- {path: 4242424242, format: yaml}\n", "a member the API does not define, or a value of the wrong type; nothing was sent"},
+		{"a number as a member name", "embedded: []\n4242424242: x\n", "a member the API does not define, or a value of the wrong type; nothing was sent"},
+		{"a member name YAML cannot hold", "? [BWSYNTH-key, 4242424242]\n: x\n", "not YAML or JSON; nothing was sent"},
+	} {
+		var o, e bytes.Buffer
+		if got := run(append(set, "--file", doc, "--declarations", write("bad.yaml", c.file)), &o, &e); got != 1 || !strings.Contains(e.String(), c.says) ||
+			strings.Contains(e.String(), "BWSYNTH-") || strings.Contains(e.String(), "4242") {
+			t.Errorf("%s: exit %d, stderr %q; want 1 and %q, with nothing from the file", c.name, got, e.String(), c.says)
+		}
+		if took := f.took(); len(took) != 0 {
+			t.Errorf("%s: sent %v", c.name, took)
+		}
+	}
 	step("fragment rm", []string{"fragment", "rm", "worker-labels", "--draft", "drf_BWSYNTH"}, 0,
 		"Fragment worker-labels removed from draft drf_BWSYNTH (draft revision 6).", "",
 		`DELETE /drafts/drf_BWSYNTH/fragments/worker-labels if-match="5-BWSYNTH" type= body=`)
