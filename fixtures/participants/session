@@ -1,0 +1,226 @@
+#!/usr/bin/env bash
+# The participant environment of the usability sessions (#367, facilitator script README.md):
+# the fixture, with instance A trusting Zitadel's login page instead of the fixture issuer, the web
+# interface for A, and one command per task that brings the fixture to the task's precondition.
+#
+#   session start         fixtures/bin/up, dev-idp up --participants, A trusts Zitadel, the web host
+#   session passwords     a new password for every seeded human, shown once on this terminal;
+#                         --exec <command> gives them to that command's environment instead
+#   session shell         the participant's shell: its own client configuration, no history file
+#   session t1            T1's precondition, then the reads that confirm it
+#   session scan [path]   no session password in any retained file or log, with a planted control
+#   session stop          the web host and dev-idp; fixtures/bin/down removes the fixture
+#
+# Everything is synthetic. A session password starts with BWSYNTH-pw-, which is what scan looks
+# for; it is never written to a file by this script.
+set -euo pipefail
+here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
+# shellcheck source-path=SCRIPTDIR source=../lib.sh
+. "$here/../lib.sh"
+bin=$FIXTURES/bin
+# The participant environment runs on the default dev-idp instance, whose issuer and login page
+# ports it uses; a named one (scripts/dev/instance.sh) would leave this script on another provider.
+[ -z "${BW_DEV_INSTANCE:-}" ] || die "the participant environment uses the default dev-idp instance; unset BW_DEV_INSTANCE"
+repo=$(dirname -- "$FIXTURES")
+idp=$repo/.dev/idp
+# The participant's own state: its client configuration and the web host. Gitignored (.dev/).
+part=$repo/.dev/participants
+web=http://localhost:58443
+marker=BWSYNTH-pw-
+# Not bw-dev-idp-forward: that is BW_DEV_INSTANCE=forward's Zitadel.
+fwd=bw-dev-forward
+
+idp_var() { sed -n "s/^$1=//p" "$idp/idp.env"; }
+
+# trust_zitadel: A's configuration names Zitadel as its issuer, by the issuer URL the browser and
+# the CLI use, and the project as its audience. The rest is bin/up's. The clients accept plain http
+# to localhost only (client contracts §6 item 1), so A reaches that URL through forward_idp.
+trust_zitadel() {
+  local cfg=$STATE/server/a/config.yaml issuer project line
+  issuer=$(idp_var BW_TEST_IDP_ISSUER)
+  project=$(idp_var BW_TEST_IDP_PROJECT)
+  while IFS= read -r line; do
+    case $line in
+    '    issuer: http://issuer:5556') printf '    issuer: %s\n' "$issuer" ;;
+    '    plainHTTPHosts: [issuer]') printf '    plainHTTPHosts: []\n' ;;
+    '    audience: bronzeward') printf '    audience: "%s"\n' "$project" ;;
+    *) printf '%s\n' "$line" ;;
+    esac
+  done <"$cfg" >"$cfg.partial"
+  if ! grep --quiet --fixed-strings -- "    issuer: $issuer" "$cfg.partial" ||
+    ! grep --quiet --fixed-strings -- "    audience: \"$project\"" "$cfg.partial"; then
+    die "A's configuration has no fixture issuer lines to replace ($cfg)"
+  fi
+  mv --no-target-directory -- "$cfg.partial" "$cfg"
+}
+
+# forward_idp: a forwarder in A's network namespace, listening on its 127.0.0.1:58280 and passing
+# each connection to Zitadel on the dev-idp network, so that A reaches the issuer URL that the
+# browser and the CLI use. Never published on the host. A start makes a new namespace, so this runs
+# after every start of A. Node is in the login page's pinned image.
+forward_idp() {
+  docker rm -f "$fwd" >/dev/null 2>&1 || true
+  docker run -d --name "$fwd" --network "container:$BW_A" --user "$(id -u):$(id -g)" --entrypoint node \
+    "$ZITADEL_LOGIN_IMAGE" -e 'const net = require("net");
+net.createServer((c) => { const z = net.connect(8080, "bw-dev-idp"); c.pipe(z).pipe(c);
+  c.on("error", () => z.destroy()); z.on("error", () => c.destroy()); }).listen(58280, "127.0.0.1");' \
+    >/dev/null || die "cannot start the issuer forwarder in $BW_A's network namespace"
+  for _ in $(seq 20); do
+    if docker exec "$fwd" node -e 'require("http").get({ host: "127.0.0.1", port: 58280,
+      path: "/.well-known/openid-configuration", headers: { Host: "localhost:58280" } },
+      (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on("error", () => process.exit(1))' 2>/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+  die "A's namespace does not reach Zitadel's discovery document through the forwarder (docker logs $fwd)"
+}
+
+start() {
+  need docker curl jq go npm
+  "$bin/up"
+  "$FIXTURES/dev-idp" down
+  # The web client's origin is the web host's, not the browser tests' page.
+  BW_DEV_IDP_WEB_ORIGIN=$web "$FIXTURES/dev-idp" up --participants >/dev/null
+  trust_zitadel
+  docker network connect bw-dev-idp "$BW_A" || die "cannot connect $BW_A to the dev-idp network"
+  rm -rf -- "$part"
+  mkdir -p -- "$part/bin" "$part/home"
+  chmod 700 "$part"
+  go build -o "$part/bin/bronzewardctl" "$repo/cmd/bronzewardctl"
+  go build -o "$part/webhost" "$FIXTURES/webhost"
+  (cd "$repo" && mise run web) >"$part/web-build.log" 2>&1 || die "the web build failed ($part/web-build.log)"
+  local project
+  project=$(idp_var BW_TEST_IDP_PROJECT)
+  # Zitadel puts the project in aud only when this scope asks for it (client contracts §5 item 4).
+  jq -n --arg i "$(idp_var BW_TEST_IDP_ISSUER)" --arg a "$project" --arg c "$(idp_var BW_TEST_IDP_CLI_CLIENT)" \
+    --arg w "$(idp_var BW_TEST_IDP_WEB_CLIENT)" \
+    '{issuer: $i, audience: $a, cliClientId: $c, webClientId: $w, scopes: ("urn:zitadel:iam:org:project:id:" + $a + ":aud")}' \
+    >"$part/client.json"
+  nohup "$part/webhost" -listen 127.0.0.1:58443 -dist "$repo/web/dist" -headers "$repo/web/headers.json" \
+    -client-config "$part/client.json" -issuer "$(idp_var BW_TEST_IDP_ISSUER)" \
+    -api "http://127.0.0.1:$SERVER_A_PORT" >"$part/webhost.log" 2>&1 &
+  echo $! >"$part/webhost.pid"
+  curl -sf --noproxy '*' -o /dev/null --max-time 2 --retry 10 --retry-connrefused --retry-delay 1 "$web/" ||
+    die "the web host did not answer on $web ($part/webhost.log)"
+  echo "participant environment up: web $web, login page http://localhost:58281/ui/v2/login" >&2
+  echo "next: fixtures/participants/session passwords, then the first task's setup" >&2
+}
+
+# passwords [--exec <command>...]: a new password for every seeded human, through Zitadel's user
+# API. It goes to Zitadel on standard input and to this terminal, and nowhere else. With --exec
+# (the agent's rehearsal), nothing is printed: the command runs with each password in its
+# environment only, as BW_PW_<NAME> (h-author: BW_PW_H_AUTHOR).
+passwords() {
+  local exec=''
+  if [ "${1:-}" = --exec ]; then
+    shift
+    [ $# -gt 0 ] || die "passwords --exec needs a command"
+    exec=1
+  else
+    [ -t 1 ] || die "passwords shows each password once, on a terminal; standard output is not one"
+  fi
+  local issuer pair name uid pw letters digits env=()
+  issuer=$(idp_var BW_TEST_IDP_ISSUER)
+  for pair in $(idp_var BW_TEST_IDP_USERS | tr ',' ' '); do
+    name=${pair%%=*} uid=${pair#*=}
+    # From a bounded read: `tr </dev/urandom | head` ends in SIGPIPE, which pipefail turns into a
+    # silent exit.
+    letters=$(LC_ALL=C tr -dc 'a-z0-9' < <(head -c 1024 /dev/urandom))
+    digits=$(LC_ALL=C tr -dc '0-9' < <(head -c 1024 /dev/urandom))
+    [ "${#letters}" -ge 8 ] && [ "${#digits}" -ge 4 ] || die "could not make a password for $name"
+    pw=$marker${letters:0:8}-${digits:0:4}
+    P=$pw jq -nc '{newPassword: {password: env.P, changeRequired: false}}' |
+      curl -sSf --noproxy '*' -o /dev/null -X POST "$issuer/v2/users/$uid/password" \
+        -H "Authorization: Bearer $(cat "$idp/seed.pat")" -H 'Content-Type: application/json' -d @- ||
+      die "could not set the password of $name"
+    if [ -n "$exec" ]; then
+      name=${name^^}
+      env+=("BW_PW_${name//-/_}=$pw")
+    else
+      printf '%-12s %s\n' "$name" "$pw"
+    fi
+  done
+  pw=''
+  # Exported in a subshell, not passed to env(1), so that no password is ever an argument.
+  if [ -n "$exec" ]; then (
+    for pw in "${env[@]}"; do export "${pw?}"; done
+    exec "$@"
+  ); fi
+}
+
+# in_part <command>...: a command as the participant's client sees it.
+in_part() {
+  env XDG_CONFIG_HOME="$part/home/config" XDG_STATE_HOME="$part/home/state" PATH="$part/bin:$PATH" "$@"
+}
+
+shell() {
+  [ -x "$part/bin/bronzewardctl" ] || die "no participant environment; run fixtures/participants/session start"
+  exec env XDG_CONFIG_HOME="$part/home/config" XDG_STATE_HOME="$part/home/state" PATH="$part/bin:$PATH" \
+    HISTFILE=/dev/null PS1='participant$ ' bash --norc --noprofile -i
+}
+
+# read_ok <what> <command>...: one read the setup names; the setup fails on the first that fails.
+read_ok() {
+  local what=$1
+  shift
+  if "$@" >/dev/null 2>&1; then echo "read ok: $what"; else die "read failed: $what (recreate the fixture)"; fi
+}
+
+t1() {
+  "$bin/bw" migrate >/dev/null
+  "$bin/inject" start A >/dev/null
+  forward_idp
+  rm -rf -- "${part:?}/home"
+  mkdir -p -- "$part/home"
+  in_part bronzewardctl context add lab --from "$web" >/dev/null
+  echo "names: none"
+  read_ok "A answers" curl -sf --noproxy '*' -o /dev/null --max-time 5 "http://127.0.0.1:$SERVER_A_PORT/livez"
+  read_ok "the web host names Zitadel as the issuer" \
+    sh -c "curl -sf --noproxy '*' --max-time 5 '$web/bronzeward-client.json' | jq -e --arg i '$(idp_var BW_TEST_IDP_ISSUER)' '.issuer == \$i'"
+  read_ok "the client has the context lab" sh -c "env XDG_CONFIG_HOME='$part/home/config' '$part/bin/bronzewardctl' context list | grep -q lab"
+  read_ok "the client is not signed in" sh -c "! env XDG_CONFIG_HOME='$part/home/config' XDG_STATE_HOME='$part/home/state' '$part/bin/bronzewardctl' --no-input whoami"
+}
+
+# scan [path]...: the retained files of this checkout's fixture, dev-idp and participant state,
+# the logs of their containers and any path named, for a session password. A planted control is
+# written first and must be found, so that a scan that reads nothing cannot pass.
+scan() {
+  local control=$part/scan-control dir hits c logs found=''
+  local pattern="${marker}[a-z0-9]{8}-[0-9]{4}"
+  mkdir -p -- "$control"
+  printf 'planted %splanted0-0000\n' "$marker" >"$control/canary"
+  logs=$part/scan-logs
+  rm -rf -- "$logs"
+  mkdir -p -- "$logs"
+  for c in $(docker ps -a --format '{{.Names}}' | grep -E "^($FIXTURE_NAME-.*|bw-dev-idp|bw-dev-idp-pg|bw-dev-idp-groups|bw-dev-login|bw-dev-forward)\$" || true); do
+    docker logs "$c" >"$logs/$c.log" 2>&1 || true
+  done
+  hits=$(grep -rlE --binary-files=text -- "$pattern" "$STATE" "$idp" "$part" "$logs" "$@" 2>/dev/null || true)
+  rm -rf -- "$logs"
+  rm -f -- "$control/canary"
+  for dir in $hits; do
+    if [ "$dir" = "$control/canary" ]; then found=1; else echo "session password pattern in $dir"; fi
+  done
+  [ -n "$found" ] || die "the planted control was not found: the scan read nothing it was meant to"
+  hits=$(printf '%s\n' "$hits" | grep -vxF -- "$control/canary" || true)
+  [ -z "$hits" ] || die "a session password pattern is in a retained file or log (above)"
+  echo "scan: no session password in a retained file or log; the planted control was found"
+}
+
+stop() {
+  if [ -f "$part/webhost.pid" ]; then kill "$(cat "$part/webhost.pid")" 2>/dev/null || true; fi
+  docker rm -f "$fwd" >/dev/null 2>&1 || true
+  # dev-idp down removes its network, which refuses while A is attached to it.
+  docker network disconnect bw-dev-idp "$BW_A" >/dev/null 2>&1 || true
+  "$FIXTURES/dev-idp" down
+  rm -rf -- "$part"
+}
+
+cmd=${1:-}
+[ $# -gt 0 ] && shift
+case $cmd in
+start | shell | t1 | stop) "$cmd" ;;
+passwords | scan) "$cmd" "$@" ;;
+*) die "usage: fixtures/participants/session start | passwords [--exec <command>...] | shell | t1 | scan [path]... | stop" ;;
+esac
