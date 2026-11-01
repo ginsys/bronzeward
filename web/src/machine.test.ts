@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ADOPTED, advanced, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, kept, keptW3, latestUnread, MachineShown, nextTimeline, type Observation, Observations, POLL_MS, polled, queued, readLater, readOlder, sentences, type Timeline, TimelineRows, UNREAD } from "./machine.tsx";
+import { ADOPTED, ADVANCE_READS, advanced, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, kept, keptW3, latestUnread, MachineShown, nextTimeline, type Observation, Observations, POLL_MS, polled, queued, readLater, readOlder, sentences, stepAdvance, type Timeline, TimelineRows, UNREAD } from "./machine.tsx";
 import { type Reads, ReadsProvider, RESTARTED } from "./list.tsx";
 import type { Machine } from "./machines.tsx";
 import type { ReadResult } from "./request.ts";
@@ -220,7 +220,7 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
     const reads = { go: () => {}, failure: () => "FAILED" } as unknown as Reads;
     const out = renderToStaticMarkup(createElement(ReadsProvider, { value: reads }, createElement(MachineShown, {
       id: "mch_a", m: failed, obs: { kind: "ok", data: read }, km: { view: "v", data: m, restarted: false }, ko: { view: "v", data: read, restarted: true },
-      tl: { kind: "ok", data: { ...UNREAD, read: true } }, older: undefined, busy: false,
+      tl: { kind: "ok", data: { ...UNREAD, read: true } }, kt: { view: "v", data: { ...UNREAD, read: true }, restarted: false }, older: undefined, busy: false,
     })));
     expect(out).toMatch(/<h2>Machine mch_a<\/h2>FAILED<p>Cluster /);
     expect(out).toContain(FROZEN);
@@ -243,10 +243,42 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
 
   test("#424: W3 keeps the machine under a failure and the observations' restart flag, each from its own read", () => {
     const list = (restarted: boolean) => ({ kind: "ok" as const, data: { items: [obsA], next: undefined, restarted } });
-    const first = keptW3(undefined, { kind: "ok", data: machine({ frozen: true }) }, list(true), "v");
-    const [km, ko] = keptW3(first, { kind: "unavailable", status: 503, problem: null }, list(false), "v");
+    const tl = { kind: "ok" as const, data: { ...UNREAD, read: true } };
+    const first = keptW3(undefined, { kind: "ok", data: machine({ frozen: true }) }, list(true), tl, "v");
+    const [km, ko] = keptW3(first, { kind: "unavailable", status: 503, problem: null }, list(false), tl, "v");
     expect(km.data).toEqual(machine({ frozen: true }));
     expect(ko.restarted).toBe(true);
+  });
+
+  test("#424 item 2: advances faster than one read again do not abandon it; one more read again follows when both its reads settle", () => {
+    const run = (events: ("advance" | { settled: number })[]) => events.reduce(stepAdvance, ADVANCE_READS);
+    // The first page's two reads settle; the first advance then reads again.
+    const first = run([{ settled: 0 }, { settled: 0 }, "advance"]);
+    expect(first).toEqual({ n: 1, left: 2, dirty: false });
+    // Three more advances while the read again is in flight: it stays the one in flight.
+    const busy = run([{ settled: 0 }, { settled: 0 }, "advance", "advance", "advance", "advance"]);
+    expect(busy.n).toBe(1);
+    // A late answer from an earlier read counts for nothing; the read again's own two complete it.
+    const done = stepAdvance(stepAdvance(busy, { settled: 0 }), { settled: 1 });
+    expect(done).toEqual({ n: 1, left: 1, dirty: true });
+    expect(stepAdvance(done, { settled: 1 })).toEqual({ n: 2, left: 2, dirty: false });
+    // With no advance meanwhile, it ends there.
+    expect(run([{ settled: 0 }, { settled: 0 }, "advance", { settled: 1 }, { settled: 1 }])).toEqual({ n: 1, left: 0, dirty: false });
+  });
+
+  test("#424 item 1: the timeline's restart notice stays through a read again in the same view, and goes with the view", () => {
+    const m = { kind: "ok" as const, data: machine({}) };
+    const obs = { kind: "ok" as const, data: { items: [], next: undefined, restarted: false } };
+    // A read again (back online, the operator's read again) reads the timeline from its newest page: no restart.
+    const tl = (restarted: boolean) => ({ kind: "ok" as const, data: { ...UNREAD, read: true, restarted } });
+    const after = keptW3(keptW3(undefined, m, obs, tl(true), "v"), m, obs, tl(false), "v");
+    expect(after[2].restarted).toBe(true);
+    const reads = { go: () => {}, failure: () => "FAILED" } as unknown as Reads;
+    const out = renderToStaticMarkup(createElement(ReadsProvider, { value: reads }, createElement(MachineShown, {
+      id: "mch_a", m, obs, km: after[0], ko: after[1], tl: tl(false), kt: after[2], older: undefined, busy: false,
+    })));
+    expect(out).toContain('data-testid="timeline-restarted"');
+    expect(keptW3(after, m, obs, tl(false), "w")[2].restarted).toBe(false);
   });
 
   test("#424: a machine read again that fails shows its failure even when the observations keep nothing", () => {
@@ -254,7 +286,7 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
     const out = renderToStaticMarkup(createElement(ReadsProvider, { value: reads }, createElement(MachineShown, {
       id: "mch_a", m: { kind: "refused", status: 404, problem: null }, obs: { kind: "dropped", failed: { kind: "transport" } },
       km: { view: "v", data: machine({}), restarted: false }, ko: { view: "v", data: undefined, restarted: false },
-      tl: { kind: "ok", data: { ...UNREAD, read: true } }, older: undefined, busy: false,
+      tl: { kind: "ok", data: { ...UNREAD, read: true } }, kt: { view: "v", data: { ...UNREAD, read: true }, restarted: false }, older: undefined, busy: false,
     })));
     expect(out).toMatch(/<\/h2>FAILED<div><p role="status" data-testid="restarted">/);
   });

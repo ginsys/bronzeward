@@ -3,7 +3,7 @@
 // stream; it is polled with its cursor no more often than every 5 s while the page is visible
 // (client contracts §8.6 item 6).
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { components } from "./api/v1";
 import { type Dropped, Head, type Listed, type Load, type Page, Ref, type Reads, ReadsProvider, RESTARTED, Scroll, settling, short, useHeld, useItem, useList, usePending, useReads } from "./list.tsx";
 import { type Machine, node, release } from "./machines.tsx";
@@ -256,19 +256,42 @@ export function kept<T>(was: Kept<T> | undefined, load: Load<T> | Dropped, view:
   if (load.kind !== "ok" || (!fresh && k.data === undefined)) return { ...k, load };
   return { view, load, data: load.data, restarted: k.restarted || (fresh && restarted(load.data)) };
 }
-export type W3Kept = [Kept<Machine>, Kept<Listed<Observation>>];
-export const keptW3 = (was: W3Kept | undefined, m: Load<Machine>, obs: Load<Listed<Observation>> | Dropped, view: string): W3Kept =>
-  [kept(was?.[0], m, view), kept(was?.[1], obs, view, (o) => o.restarted)];
+// The timeline keeps only its restart flag: a read again of the page (back online, the operator's
+// read again) reads it from its newest page, an answer that carries no restart.
+export type W3Kept = [Kept<Machine>, Kept<Listed<Observation>>, Kept<Timeline<Entry>>];
+export const keptW3 = (was: W3Kept | undefined, m: Load<Machine>, obs: Load<Listed<Observation>> | Dropped, tl: Load<Timeline<Entry>> | Dropped, view: string): W3Kept =>
+  [kept(was?.[0], m, view), kept(was?.[1], obs, view, (o) => o.restarted), kept(was?.[2], tl, view, (t) => t.restarted)];
+
+// The machine and its observations read again for the timeline's advances, one read again at a
+// time: `n` counts them, `left` is how many of the current one's two reads (the machine and its
+// observations) have not settled, the first page's reads included. An advance while they are in
+// flight does not abandon them: it marks one more read again, which starts when both settle.
+// Advances faster than one read would otherwise discard every read again before it answers.
+export type AdvanceReads = { n: number; left: number; dirty: boolean };
+export const ADVANCE_READS: AdvanceReads = { n: 0, left: 2, dirty: false };
+export const stepAdvance = (a: AdvanceReads, e: "advance" | { settled: number }): AdvanceReads => {
+  const next = { n: a.n + 1, left: 2, dirty: false };
+  if (e === "advance") return a.left > 0 ? { ...a, dirty: true } : next;
+  if (e.settled !== a.n || a.left === 0) return a;
+  return a.left === 1 && a.dirty ? next : { ...a, left: a.left - 1 };
+};
 
 // The timeline is read under the page's reads. The machine and its observations are read again, as
-// when the page reads again, each time a timeline read brings entries W3 did not show; the poll goes
-// on unrestarted (#424).
+// when the page reads again, each time a timeline read brings entries W3 did not show, one read
+// again at a time; the poll goes on unrestarted (#424).
 export function MachineItem({ id }: { id: string }) {
   const path = `/machines/${encodeURIComponent(id)}`;
   const reads = useReads();
   const [tl, older, busy, advances] = useTimeline(`${path}/timeline`);
+  const [again, step] = useReducer(stepAdvance, ADVANCE_READS);
+  useEffect(() => void (advances > 0 && step("advance")), [advances]);
+  const outer = reads.settle;
+  const settle = useCallback<Reads["settle"]>((res, set, live, held) => {
+    outer(res, set, live, held);
+    step({ settled: again.n });
+  }, [outer, again.n]);
   return (
-    <ReadsProvider value={{ ...reads, again: reads.again + advances }}>
+    <ReadsProvider value={{ ...reads, settle, again: reads.again + again.n }}>
       <MachineState id={id} path={path} tl={tl} older={older} busy={busy} />
     </ReadsProvider>
   );
@@ -279,12 +302,12 @@ function MachineState({ id, path, tl, older, busy }: { id: string; path: string;
   const [obs] = useList<Observation>(`${path}/observations`, "", true);
   const { view } = useReads();
   const k = useRef<W3Kept>(undefined);
-  const [km, ko] = (k.current = keptW3(k.current, m, obs, view));
-  return <MachineShown id={id} m={m} obs={obs} km={km} ko={ko} tl={tl} older={older} busy={busy} />;
+  const [km, ko, kt] = (k.current = keptW3(k.current, m, obs, tl, view));
+  return <MachineShown id={id} m={m} obs={obs} km={km} ko={ko} tl={tl} kt={kt} older={older} busy={busy} />;
 }
 
 // W3 as read: each read's answer, else what it keeps with its failure above it.
-export function MachineShown({ id, m, obs, km, ko, tl, older, busy }: { id: string; m: Load<Machine>; obs: Load<Listed<Observation>> | Dropped; km: Kept<Machine>; ko: Kept<Listed<Observation>>; tl: Load<Timeline<Entry>> | Dropped; older: (() => void) | undefined; busy: boolean }) {
+export function MachineShown({ id, m, obs, km, ko, tl, kt, older, busy }: { id: string; m: Load<Machine>; obs: Load<Listed<Observation>> | Dropped; km: Kept<Machine>; ko: Kept<Listed<Observation>>; tl: Load<Timeline<Entry>> | Dropped; kt: Kept<Timeline<Entry>>; older: (() => void) | undefined; busy: boolean }) {
   const [pm, po, timeline] = [usePending(m, "the machine"), usePending(obs, "the observations"), usePending(tl, "the timeline")];
   const d = m.kind === "ok" ? m.data : km.data;
   const read = obs.kind === "ok" ? obs.data : ko.data;
@@ -311,7 +334,7 @@ export function MachineShown({ id, m, obs, km, ko, tl, older, busy }: { id: stri
       <h3>Observations</h3>
       <Observations read={{ ...read, restarted: ko.restarted }} />
       <h3>Timeline (newest first)</h3>
-      {tl.kind !== "ok" ? timeline : <TimelineRows tl={tl.data} older={older} busy={busy} />}
+      {tl.kind !== "ok" ? timeline : <TimelineRows tl={{ ...tl.data, restarted: kt.restarted }} older={older} busy={busy} />}
     </>
   );
 }
