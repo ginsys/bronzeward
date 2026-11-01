@@ -740,7 +740,9 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
    revision 3 as its minimum. When a poll returns entries the client did not show, a view that
    also shows the machine and its observations reads both again. It keeps what it shows until
    they answer, and the timeline poll goes on unrestarted: the timeline can record a freeze, an
-   observation or an applied release that the first machine read predates.
+   observation or an applied release that the first machine read predates. Only one such read
+   again is in flight. A poll with new entries during it does not abandon it: the client reads
+   both once more after both answer, so polls that come faster than a read do not stop every read.
 
 ## 9. Authentication
 
