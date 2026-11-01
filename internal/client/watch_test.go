@@ -15,17 +15,20 @@ import (
 // opServer serves the operation op_BWSYNTH: its nth stream request (from 0, the last repeating) is
 // answered by streams, its nth operation read shows states (the last repeating), and the JSON
 // event list holds pages. A stream request whose epochs entry is set moves the installation to
-// that epoch: from then on every answer carries it. An operation read takes slow.
+// that epoch: from then on every answer carries it. An operation read takes slow. A pagesStatus
+// refuses the JSON pages; from the gone-th operation read on (from 1), the operation is not found.
 type opServer struct {
-	mu      sync.Mutex
-	streams []func(w http.ResponseWriter, r *http.Request)
-	epochs  []string
-	states  []string
-	pages   []string
-	epoch   string
-	opened  []*http.Request
-	reads   int
-	slow    time.Duration
+	pagesStatus int
+	gone        int
+	mu          sync.Mutex
+	streams     []func(w http.ResponseWriter, r *http.Request)
+	epochs      []string
+	states      []string
+	pages       []string
+	epoch       string
+	opened      []*http.Request
+	reads       int
+	slow        time.Duration
 }
 
 func (o *opServer) serve(w http.ResponseWriter, r *http.Request) {
@@ -43,10 +46,15 @@ func (o *opServer) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	defer o.mu.Unlock()
 	o.answerLocked(w)
-	switch r.URL.Path {
-	case "/api/v1/operations/op_BWSYNTH/events":
+	switch {
+	case r.URL.Path == "/api/v1/operations/op_BWSYNTH/events" && o.pagesStatus != 0:
+		problemAnswer(w, o.pagesStatus, "forbidden", "")
+	case r.URL.Path == "/api/v1/operations/op_BWSYNTH/events":
 		fmt.Fprintf(w, `{"items":[%s]}`, strings.Join(o.pages, ","))
-	case "/api/v1/operations/op_BWSYNTH":
+	case r.URL.Path == "/api/v1/operations/op_BWSYNTH" && o.gone > 0 && o.reads+1 >= o.gone:
+		o.reads++
+		problemAnswer(w, http.StatusNotFound, "not-found", "")
+	case r.URL.Path == "/api/v1/operations/op_BWSYNTH":
 		time.Sleep(o.slow)
 		state := o.states[min(o.reads, len(o.states)-1)]
 		o.reads++
@@ -201,6 +209,19 @@ func TestWatch(t *testing.T) {
 		shown, _, state, _, err := watched(t, o, e1, nil)
 		if want := []string{e2 + ":1", e2 + ":2", e2 + ":3"}; err != nil || state != "succeeded" || !slices.Equal(shown, want) || o.reads != 2 {
 			t.Errorf("watch: %v, state %q, shown %q, %d operation reads; want succeeded, %q, 2 reads", err, state, shown, o.reads, want)
+		}
+	})
+	t.Run("a refused drain keeps a terminal state read again in the same epoch, with the refusal", func(t *testing.T) {
+		o := &opServer{streams: []handler{sse(ev(e1+":1", "queued"))}, epochs: []string{e1}, states: []string{"failed"}, pagesStatus: http.StatusForbidden}
+		if _, _, state, _, err := watched(t, o, e1, nil); state != "failed" || err == nil || !strings.Contains(err.Error(), "403") || o.reads != 2 {
+			t.Errorf("watch: %v, state %q, %d operation reads; want failed with the 403 after 2 reads", err, state, o.reads)
+		}
+	})
+	t.Run("a refused drain of an operation gone on the read again ends with no state", func(t *testing.T) {
+		o := &opServer{streams: []handler{sse(ev(e1+":1", "queued"))}, epochs: []string{e1}, states: []string{"failed"},
+			pagesStatus: http.StatusNotFound, gone: 2}
+		if _, _, state, _, err := watched(t, o, e1, nil); state != "" || err == nil || !strings.Contains(err.Error(), "404") {
+			t.Errorf("watch: %v, state %q; want no state and the 404", err, state)
 		}
 	})
 	t.Run("a slow operation read does not skip the backoff", func(t *testing.T) {

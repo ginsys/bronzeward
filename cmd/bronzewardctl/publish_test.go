@@ -43,7 +43,7 @@ func (f *publishFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if state == "succeeded" {
 		result = `{"release":"rel_BWSYNTH"}`
 	} else {
-		problem = `{"type":"urn:bronzeward:problem:validation-failed","title":"BWSYNTH","status":422}`
+		problem = "{\"type\":\"urn:bronzeward:problem:validation-failed\",\"title\":\"BWSYNTH\u009b2J\",\"status\":422}" // a raw C1 CSI
 	}
 	w.Header().Set("Bronzeward-Epoch", "ep_BWSYNTH-1")
 	w.Header().Set("Content-Type", "application/json")
@@ -142,7 +142,10 @@ func TestPublication(t *testing.T) {
 	f.state = "failed"
 	f.mu.Unlock()
 	step("a failed publication exits 4", pub, 4, "Publishing draft", `publication operation op_BWSYNTH-pub failed: {"type":"urn:bronzeward:problem:validation-failed",`+
-		`"title":"BWSYNTH","status":422}; nothing was sent to any machine`, "Publication succeeded")
+		`"title":"BWSYNTH\x9b2J","status":422}; nothing was sent to any machine`, "Publication succeeded")
+	if strings.Contains(stderr, "\u009b") {
+		t.Errorf("a failed publication: stderr %q holds the raw C1 control", stderr)
+	}
 	if out := step("-o json prints the answer unchanged", append(pub, "-o", "json"), 4, "", "failed"); out != fmt.Sprintf(publishOp, "queued", `null`, `null`)+"\n" {
 		t.Errorf("-o json printed %q", out)
 	}
@@ -162,8 +165,8 @@ func TestPublication(t *testing.T) {
 	f.bare = false
 	f.mu.Unlock()
 
-	step("review: verbatim, the token kept and the tab a tab", []string{"release", "review", "rel_BWSYNTH", "mch_a"}, 0,
-		"Release rel_BWSYNTH, machine mch_a, validated: metal\n"+rendered, "")
+	step("review: line by line, the token kept and the tab escaped", []string{"release", "review", "rel_BWSYNTH", "mch_a"}, 0,
+		"Release rel_BWSYNTH, machine mch_a, validated: metal\n"+strings.ReplaceAll(rendered, "\t", `\x09`), "", "\t")
 	step("review withheld: the notice, escaped, and no document", []string{"release", "review", "rel_BWSYNTH", "mch_b"}, 0,
 		"Configuration not shown: it could not be redacted.\nServer notice: BWSYNTH no redacted form\\x1b[2J\n", "", "machine:", "configuration", "\x1b")
 	if out := step("review -o json", []string{"release", "review", "rel_BWSYNTH", "mch_b", "-o", "json"}, 0, "", ""); !strings.Contains(out, `"configuration":null`) {

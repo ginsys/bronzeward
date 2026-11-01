@@ -88,9 +88,22 @@ func (c *Client) Watch(op string, w Watch) (*apitypes.OperationBody, error) {
 		}
 		if Terminal(o.State) {
 			// Events of another epoch than the operation read's are of a restored installation, where
-			// the operation can be in another state: it is read again before the watch ends.
-			if err := c.drain(op, &last, w); err != nil || epoch == "" || last == "" || epochOf(last) == epoch {
-				return o, err
+			// the operation can be in another state: it is read again before the watch ends. A failed
+			// drain shows no epoch, so the operation is read again, and its state stands only if the
+			// epoch held.
+			derr := c.drain(op, &last, w)
+			if derr != nil {
+				again, now, err := c.operation(op)
+				switch {
+				case err != nil:
+					return nil, errors.Join(derr, err)
+				case now == epoch && Terminal(again.State):
+					return again, derr
+				}
+				continue
+			}
+			if epoch == "" || last == "" || epochOf(last) == epoch {
+				return o, nil
 			}
 			continue
 		}
