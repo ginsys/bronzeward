@@ -127,7 +127,13 @@ func pins(c *client.Client, draft string, names []string) ([]string, error) {
 	}
 	proposed := map[string]*string{}
 	for _, item := range d.Entries {
-		if x, err := item.AsSourceEntry(); err == nil && x.Kind == apitypes.SourceEntryKindFragment && x.Name != nil {
+		// An entry that cannot be read may be the draft's fragment proposal or removal, so a pin
+		// chosen without it could be the wrong one: refuse, as entryRead does.
+		x, err := item.AsSourceEntry()
+		if err != nil {
+			return nil, fmt.Errorf("GET /api/v1/drafts/%s: an entry cannot be read: %w; nothing was sent", url.PathEscape(draft), err)
+		}
+		if x.Kind == apitypes.SourceEntryKindFragment && x.Name != nil {
 			proposed[*x.Name] = x.Revision
 		}
 	}
