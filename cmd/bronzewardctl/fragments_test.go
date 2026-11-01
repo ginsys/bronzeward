@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -109,6 +110,16 @@ func TestLongMark(t *testing.T) {
 	m, err := (&env{}).readMarks(false)
 	if err != nil || len(m) != 2 || m[0] != long || m[1] != "machine.files" {
 		t.Errorf("%d marks, %v; want the 70 KiB mark and machine.files", len(m), err)
+	}
+}
+
+// TestMarkCarriageReturn checks that a CRLF line end is dropped once: a carriage return before it
+// is part of the mark, as a key may end in one.
+func TestMarkCarriageReturn(t *testing.T) {
+	setStdin(t, "machine.nodeLabels.key\r\r\nmachine.files\r\n\n")
+	m, err := (&env{}).readMarks(false)
+	if err != nil || !slices.Equal(m, []string{"machine.nodeLabels.key\r", "machine.files"}) {
+		t.Errorf("%q, %v; want the key's own carriage return kept", m, err)
 	}
 }
 

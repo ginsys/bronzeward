@@ -12,7 +12,6 @@ import (
 	"net/url"
 	"os"
 	"runtime"
-	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -188,7 +187,8 @@ func (e *env) readMarks(docOnStdin bool) ([]string, error) {
 	// The API sets no length on one mark, so a line may be as long as the body limit allows.
 	s.Buffer(nil, maxBody)
 	for s.Scan() {
-		m := strings.TrimSuffix(s.Text(), "\r")
+		// ScanLines already drops the carriage return of a CRLF end; one more belongs to the mark.
+		m := s.Text()
 		if m == "" {
 			break
 		}
