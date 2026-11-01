@@ -2,13 +2,55 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"golang.org/x/oauth2"
 )
+
+// TestDevicePromptIsEscaped: the device prompt shows the user code, which the identity provider
+// chose, escaped, and the prompt keeps the lines of a plain code. A verification address with a
+// control character is refused, and the refusal shows it escaped (client-contracts.md section 6
+// item 8). The guard on standard error escapes ESC; only the line feed shows a missing escape here.
+func TestDevicePromptIsEscaped(t *testing.T) {
+	prompt := func(userCode, verification string) (string, error) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if r.URL.Path == "/token" {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"error":"authorization_pending"}`))
+				return
+			}
+			v := verification
+			if v == "" {
+				v = "http://" + r.Host + "/activate"
+			}
+			b, _ := json.Marshal(map[string]any{"device_code": "BWSYNTH-device", "user_code": userCode, "verification_uri": v, "expires_in": 5, "interval": 1})
+			_, _ = w.Write(b)
+		}))
+		defer srv.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		defer cancel()
+		i := &idp{ctx: ctx, hc: srv.Client(), conf: oauth2.Config{ClientID: "bronzewardctl",
+			Endpoint: oauth2.Endpoint{DeviceAuthURL: srv.URL + "/device", TokenURL: srv.URL + "/token"}}}
+		var b strings.Builder
+		_, err := i.device(&Context{Name: "lab", Server: srv.URL, OIDC: &OIDC{Issuer: srv.URL}}, &b)
+		return b.String(), err
+	}
+	plain, _ := prompt("BWSY-NTH1", "")
+	hostile, _ := prompt("BW\x1b[2J\nFORGED", "")
+	if !strings.Contains(hostile, `BW\x1b[2J\x0aFORGED`) || strings.Count(hostile, "\n") != strings.Count(plain, "\n") || strings.Contains(hostile, "\nFORGED") {
+		t.Errorf("the prompt %q does not show the code escaped on the lines of %q", hostile, plain)
+	}
+	_, err := prompt("BWSY-NTH1", "http://bw.example.invalid/\x1b[2J\nFORGED")
+	if err == nil || strings.Contains(Shown(err), "\n") || strings.Contains(Shown(err), "\x1b") {
+		t.Errorf("a verification address with a control character: %v; want a refusal that shows on one line, escaped", err)
+	}
+}
 
 // TestDeviceAuthExpiryFromRequest checks that a device code's lifetime counts from before the
 // request (#444), as golang.org/x/oauth2 counted it: an answer that arrives late does not lengthen

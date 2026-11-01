@@ -142,6 +142,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 	} else if err == nil {
 		err = commands[pos[0]](pos[1:])
 	}
+	return report(err, stdout, stderr)
+}
+
+// report prints the error of a command, the one place that does, and returns the exit code.
+func report(err error, stdout, stderr io.Writer) int {
 	var u usageError
 	var refused client.RefusedRepeat
 	var unknown *client.Unknown
