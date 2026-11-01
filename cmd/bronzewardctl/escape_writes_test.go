@@ -206,7 +206,8 @@ func TestRemoteTextInTokenFilePath(t *testing.T) {
 	srv := httptest.NewServer(http.NotFoundHandler())
 	defer srv.Close()
 	automationContext(t, srv.URL)
-	path := t.TempDir() + "/t" + tail
+	dir := t.TempDir()
+	path := dir + "/t" + tail
 	if err := client.UpdateConfig(func(c *client.Config) error {
 		c.Contexts = append(c.Contexts, client.Context{Name: "idp", Server: srv.URL, Credential: "oidc",
 			OIDC: &client.OIDC{Issuer: "https://idp.invalid", ClientID: "c", Audience: "a", TokenFile: path}})
@@ -224,8 +225,11 @@ func TestRemoteTextInTokenFilePath(t *testing.T) {
 		var o, e bytes.Buffer
 		run(append([]string{"--context", "idp"}, c...), &o, &e)
 		noRawControl(t, strings.Join(c, " "), o.String()+e.String())
-		if c[0] == "logout" && !strings.Contains(o.String(), `\x1b`) {
-			t.Errorf("logout %q does not name the path escaped", o.String())
+		// The guard escapes every control but the line feed, so the line feed of the path shows as
+		// \x0a only if store.gone escaped it at the source; the sentence is one line.
+		if want := "the token file " + dir + "/t" + tailEsc + " does not exist"; c[0] == "logout" &&
+			(!strings.Contains(o.String(), want) || strings.Count(o.String(), "\n") != 1) {
+			t.Errorf("logout %q lacks the sentence %q on one line", o.String(), want)
 		}
 	}
 	for _, c := range [][]string{{"logout"}, {"whoami"}} {
