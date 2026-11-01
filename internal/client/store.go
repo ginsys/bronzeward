@@ -108,7 +108,8 @@ func (s *store) get(fromKeyring func(string) (string, bool, error)) (*Tokens, er
 // still, or again, locked, without a prompt.
 func (s *store) lock() (func(), error) {
 	if s.file != "" {
-		return renewalLock(s.file + ".lock")
+		unlock, err := renewalLock(s.file + ".lock")
+		return unlock, printableError(err)
 	}
 	dir, err := stateDir()
 	if err != nil {

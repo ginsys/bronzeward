@@ -103,6 +103,9 @@ func TestRemoteTextInTokenFilePath(t *testing.T) {
 	if err := client.UpdateConfig(func(c *client.Config) error {
 		c.Contexts = append(c.Contexts, client.Context{Name: "idp", Server: srv.URL, Credential: "oidc",
 			OIDC: &client.OIDC{Issuer: "https://idp.invalid", ClientID: "c", Audience: "a", TokenFile: path}})
+		// A path below a file that is not a directory fails with ENOTDIR, whose error names the path.
+		c.Contexts = append(c.Contexts, client.Context{Name: "bad", Server: srv.URL, Credential: "oidc",
+			OIDC: &client.OIDC{Issuer: "https://idp.invalid", ClientID: "c", Audience: "a", TokenFile: "/dev/null/t" + tail}})
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -113,6 +116,15 @@ func TestRemoteTextInTokenFilePath(t *testing.T) {
 		noRawControl(t, strings.Join(c, " "), o.String()+e.String())
 		if c[0] == "logout" && !strings.Contains(o.String(), `\x1b`) {
 			t.Errorf("logout %q does not name the path escaped", o.String())
+		}
+	}
+	for _, c := range [][]string{{"logout"}, {"whoami"}} {
+		var o, e bytes.Buffer
+		run(append([]string{"--context", "bad"}, c...), &o, &e)
+		noRawControl(t, "bad "+strings.Join(c, " "), o.String()+e.String())
+		// Logout fails on the lock directory, whose path holds no escape; whoami reads the file.
+		if c[0] == "whoami" && !strings.Contains(o.String()+e.String(), `\x1b`) {
+			t.Errorf("%s: the output %q does not name the path escaped", strings.Join(c, " "), o.String()+e.String())
 		}
 	}
 }
