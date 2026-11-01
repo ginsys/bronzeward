@@ -763,10 +763,12 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
    - A new epoch and the process's recovery refusal end the page ([§8.5](#85-epoch-changes)), and
      nothing stays (`web/src/shell.test.ts:140`, `web/src/shell.test.ts:154`).
    - An observations read that restarted after a refused cursor and then failed keeps nothing: the
-     list goes with its cursor ([§8.2](#82-errors)). The status sentences need the observations,
-     so W3 then shows only its heading and the failures, without the machine's rows. If the machine
-     read also failed, its failure is still shown (`web/src/machine.tsx:292`,
-     `web/src/machine.test.ts:230`, `web/src/machine.test.ts:252`).
+     list goes with its cursor ([§8.2](#82-errors)). W3 still shows the machine's own rows with
+     the observations' failure; only the latest read's line needs the observations. If the machine
+     read also failed, its failure is still shown (`web/src/machine.test.ts:230`,
+     `web/src/machine.test.ts:252`). Today W3 shows only its heading and the failures when the
+     observations keep nothing (`web/src/machine.tsx:292`), which
+     [#443](https://github.com/ginsys/bronzeward/issues/443) fixes.
    - A new view keeps nothing of the old view. When the view changes, the old view's answer still
      shows at first. A later failure does not keep it, and the restart flag does not carry over
      (`web/src/machine.test.ts:203`, `web/src/machine.test.ts:230`). Today this holds for a failure
