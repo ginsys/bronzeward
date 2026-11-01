@@ -287,8 +287,13 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 		case w.Entry && code == "conflict":
 			// Another entry committed, under another key or in an earlier process: refused here, not set
 			// aside, since only an earlier attempt of this one can make it ambiguous (§8.4 item 3; REC-02).
-			last = fmt.Errorf("%w\nAnother recovery entry committed first (epoch %s); this one recorded nothing. Read it with: recovery status.",
-				a.err, printable(fmt.Sprint(p.Doc["epoch"])))
+			// A refusal shows the epoch; an unknown-outcome block prints none for the entry (REC-04 (a)).
+			if ambiguous {
+				last = fmt.Errorf("%w\nAnother recovery entry committed first; this one recorded nothing. Read it with: recovery status.", a.err)
+			} else {
+				last = fmt.Errorf("%w\nAnother recovery entry committed first (epoch %s); this one recorded nothing. Read it with: recovery status.",
+					a.err, printable(fmt.Sprint(p.Doc["epoch"])))
+			}
 			return nil, c.after(ambiguous, w, u, last)
 		case a.r != nil:
 			if a.r.Header.Get("Idempotent-Replayed") == "true" {
