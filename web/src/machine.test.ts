@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ADOPTED, advanced, advanceReads, countingSettle, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, keepW3, kept, keptW3, latestUnread, lostSince, MachineShown, nextTimeline, type Observation, Observations, pacer, POLL_MS, polled, queued, readLater, readOlder, sentences, stepAdvance, type Timeline, TimelineRows, UNREAD, type W3Kept } from "./machine.tsx";
+import { ADOPTED, advanced, advanceReads, countingSettle, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, keepW3, kept, keptW3, latestUnread, lostSince, MachineShown, nextTimeline, type Observation, Observations, pacer, POLL_MS, polled, queued, readLater, readOlder, recovery, sentences, stepAdvance, type Timeline, TimelineRows, UNREAD, type W3Kept } from "./machine.tsx";
 import { type ShellEvents, ShellReads } from "./shell.tsx";
 import { type Load, type Reads, ReadsProvider, RESTARTED } from "./list.tsx";
 import type { Machine } from "./machines.tsx";
@@ -461,6 +461,53 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
       stop();
       ask();
       expect(runs).toEqual([0, 3 * POLL_MS, 3 * POLL_MS + 10]);
+    });
+
+    test("W3 reads again after each banner end that follows a lost read, also one held behind a slow read, paced from each start; a new view drops what waits", () => {
+      let t = 0;
+      const asks: number[] = [];
+      const timers: number[] = [];
+      const fire: (() => void)[] = [];
+      const after = (f: () => void, ms: number) => (timers.push(t + ms), fire.push(f), 0 as unknown as ReturnType<typeof setTimeout>);
+      const lost = { current: [false, false] as [boolean, boolean] };
+      const [observe] = recovery(lost, () => asks.push(t), () => t, after);
+      let [n, r] = [0, 0];
+      observe("v", n, r);
+      // 1: the machine found no answer; the banner end asks, and the read again starts at once.
+      lost.current = [true, false];
+      observe("v", n, ++r);
+      observe("v", ++n, r);
+      expect(asks).toEqual([0]);
+      // 2: one second later the observations found no answer: the ask waits a full interval from that start.
+      t = 1000;
+      lost.current = [false, true];
+      observe("v", n, ++r);
+      expect(asks).toEqual([0]);
+      expect(timers).toEqual([POLL_MS]);
+      // 3: asked at POLL_MS, held behind a slow read; a banner end meanwhile adds nothing, and it starts later.
+      t = POLL_MS;
+      fire.shift()!();
+      expect(asks).toEqual([0, POLL_MS]);
+      t = 2 * POLL_MS;
+      lost.current = [true, false];
+      observe("v", n, ++r);
+      expect([asks, timers]).toEqual([[0, POLL_MS], [POLL_MS]]);
+      t = 2 * POLL_MS + 1000;
+      observe("v", ++n, r);
+      // 4: a moment after that start, the next lost read waits a full interval from it.
+      t += 10;
+      lost.current = [true, false];
+      observe("v", n, ++r);
+      expect([asks, timers]).toEqual([[0, POLL_MS], [POLL_MS, 3 * POLL_MS + 1000]]);
+      // 5: a new view drops that wait and the marks: its banner ends ask nothing until a read of its own finds no answer.
+      lost.current = [true, true];
+      observe("w", n, r);
+      expect(lost.current).toEqual([false, false]);
+      observe("w", n, ++r);
+      expect(timers).toHaveLength(2);
+      lost.current = [true, false];
+      observe("w", n, ++r);
+      expect(timers).toEqual([POLL_MS, 3 * POLL_MS + 1000, 3 * POLL_MS + 1000]);
     });
   });
 
