@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 import { type Attempt, Client, type ClientOptions } from "./request.ts";
-import { BACKOFF, EPOCH_CHANGED_ASIDE, NO_EPOCH, newKey, RENEWED_LAST, SHELL_GONE, SIGN_IN_CHANGED, SIGN_IN_REFUSED, Write, Writes } from "./write.ts";
+import { BACKOFF, EPOCH_CHANGED_ASIDE, NO_EPOCH, newKey, RECOVERY_START, RENEWED_LAST, SHELL_GONE, SIGN_IN_CHANGED, SIGN_IN_REFUSED, Write, Writes } from "./write.ts";
 
 const EPOCH = "e1";
 const PRINCIPAL = "https://idp.invalid SYNTH-sub-1";
@@ -409,7 +409,21 @@ describe("set aside (§8.4 item 3, §8.5 item 2, journeys §8)", () => {
     expect(p.writesSent()).toHaveLength(0);
   });
 
-  test("a recovery start's process refusal of a write is told to the shell once the write settles", async () => {
+  test("a sign-out between the last check before a repeat and its send sends nothing more", async () => {
+    const p = page([new TypeError("Failed to fetch")], [EPOCH, EPOCH]);
+    // The checks pass; the sign-out lands before run() resumes after them.
+    const writes = p.writes as unknown as { check: (...a: unknown[]) => Promise<string | undefined> };
+    const check = writes.check.bind(p.writes);
+    writes.check = async (...a) => {
+      const why = await check(...a);
+      p.signIn(undefined);
+      return why;
+    };
+    expect(await p.writes.submit(spec())).toEqual({ kind: "set-aside", why: SIGN_IN_CHANGED, ambiguous: true, problem: null });
+    expect(p.writesSent()).toHaveLength(1);
+  });
+
+  test("a recovery start's process refusal of a write or of its confirming read is told to the shell once the write settles", async () => {
     const start = (scope?: string) => problem(409, "recovery-mode-active", scope === undefined ? {} : { scope });
     // Of the write: refused, and told once; a scope's refusal says nothing of the start.
     let p = page([start()]);
@@ -423,13 +437,20 @@ describe("set aside (§8.4 item 3, §8.5 item 2, journeys §8)", () => {
     tell(p.writes);
     await p.writes.submit(spec());
     expect(told).toEqual([]);
-    // The confirming read reads no 409 body, but the refusal carries the same epoch: the repeat it
-    // admits is refused too, and the dropped write stays unknown.
-    p = page([new TypeError("Failed to fetch"), start()], [EPOCH, start()]);
+    // Of the confirming read before a repeat, under the same epoch: the dropped write is set aside
+    // and not sent again, and the shell is told although no write answer follows.
+    p = page([new TypeError("Failed to fetch")], [EPOCH, start()]);
     tell(p.writes);
-    expect(await p.writes.submit(spec())).toMatchObject({ kind: "unknown", problem: { type: "urn:bronzeward:problem:recovery-mode-active" } });
-    expect(p.writesSent()).toHaveLength(2);
+    expect(await p.writes.submit(spec())).toEqual({ kind: "set-aside", why: RECOVERY_START, ambiguous: true, problem: null });
+    expect(p.writesSent()).toHaveLength(1);
     expect(told).toEqual(["urn:bronzeward:problem:recovery-mode-active 1"]);
+    // Of the read that learns the first send's epoch: nothing is sent.
+    p = page([], [start()]);
+    told = [];
+    tell(p.writes);
+    expect(await p.writes.submit(spec())).toMatchObject({ kind: "not-done", why: RECOVERY_START, problem: { type: "urn:bronzeward:problem:recovery-mode-active" } });
+    expect(p.writesSent()).toHaveLength(0);
+    expect(told).toEqual(["urn:bronzeward:problem:recovery-mode-active 0"]);
   });
 
   test("setAside marks a write in flight and turns an unknown one aside; neither is repeatable", async () => {

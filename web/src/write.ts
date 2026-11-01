@@ -37,6 +37,7 @@ export const EPOCH_CHANGED_ASIDE = "the installation's epoch changed";
 export const NO_EPOCH = "the read of the installation's epoch got no answer that names one";
 export const SIGN_IN_REFUSED = "the server no longer accepts your sign-in";
 export const SHELL_GONE = "the page that sent it ended";
+export const RECOVERY_START = "the server was started for recovery and serves only the recovery entry until it is recorded";
 export const RENEWED_LAST = "the last attempt was answered 401 and your sign-in was renewed, with no attempt left to send it again";
 // The page failed while it held the write, for example a renewal that threw.
 const PAGE_FAILED = "the page failed while it sent it";
@@ -220,8 +221,9 @@ export class Writes {
       // The last epoch seen before the first send, else one GET /recovery (§8.4 item 3).
       w.epoch = client.currentEpoch ?? (await this.confirm(client, end));
       if (end.e !== undefined) return { kind: "not-done", why: SIGN_IN_REFUSED, problem: end.e.problem };
-      if (this.principal() !== who) return { kind: "not-done", why: SIGN_IN_CHANGED, problem: null };
-      if (this.client !== client) return { kind: "not-done", why: SHELL_GONE, problem: null };
+      if (end.pre !== undefined) return { kind: "not-done", why: RECOVERY_START, problem: end.pre };
+      const gone = this.gone(w, client);
+      if (gone !== undefined) return { kind: "not-done", why: gone, problem: null };
       if (w.epoch === undefined) return { kind: "not-done", why: NO_EPOCH, problem: null };
     }
     const headers: Record<string, string> = { "Content-Type": "application/json", "Idempotency-Key": w.key, "Bronzeward-Expected-Epoch": w.epoch! };
@@ -251,7 +253,9 @@ export class Writes {
       if (n > 0 && end.e !== undefined) return aside(SIGN_IN_REFUSED);
       if (n > 0) await this.wait(BACKOFF[n - 1]!);
       if (n > 0 || again) {
-        const why = await this.check(client, w, end);
+        // Looked at again once run() resumes: a sign-out, an end of the shell or a set-aside can
+        // land between check()'s last look and this send.
+        const why = (await this.check(client, w, end)) ?? w.aside ?? this.gone(w, client);
         if (why !== undefined) return aside(why);
       }
       let a: Attempt | undefined;
@@ -326,24 +330,31 @@ export class Writes {
   }
 
   // Before a repeat: the same sign-in, and one GET /recovery that shows the reference epoch.
-  private async check(client: Client, w: Write, end: End): Promise<string | undefined> {
-    // A sign-out or the end of the shell that held the client sends nothing more through it, so
-    // both are checked again after the read below too.
-    const gone = () => (this.principal() !== w.principal ? SIGN_IN_CHANGED : this.client !== client ? SHELL_GONE : undefined);
+  private async check(client: Client, w: Write, end: RunEnd): Promise<string | undefined> {
     if (w.aside !== undefined) return w.aside;
-    if (gone() !== undefined) return gone();
+    const before = this.gone(w, client);
+    if (before !== undefined) return before;
     const now = await this.confirm(client, end);
     if (w.aside !== undefined) return w.aside;
     if (end.e !== undefined) return SIGN_IN_REFUSED;
-    if (gone() !== undefined) return gone();
+    if (end.pre !== undefined) return RECOVERY_START;
+    const after = this.gone(w, client);
+    if (after !== undefined) return after;
     if (now === undefined) return NO_EPOCH;
     return now === w.epoch ? undefined : EPOCH_CHANGED_ASIDE;
+  }
+
+  // A sign-out or the end of the shell that held the client: nothing more is sent through it. Looked
+  // at after every wait, since either can land while a read is answered.
+  private gone(w: Write, client: Client): string | undefined {
+    if (this.principal() !== w.principal) return SIGN_IN_CHANGED;
+    return this.client === client ? undefined : SHELL_GONE;
   }
 
   // The epoch one GET /recovery shows (§8.4 item 3). It is a read, so its credential refusals are
   // a read's (§8.2): a 401 renews once and is sent again, and a second 401 or identity-revoked
   // ends the page through `end`.
-  private async confirm(client: Client, end: End): Promise<string | undefined> {
+  private async confirm(client: Client, end: RunEnd): Promise<string | undefined> {
     for (let renewed = false; ; renewed = true) {
       const a = await client.attempt("GET", "/recovery", {}, undefined, end, true);
       if (end.e !== undefined) return undefined;
@@ -357,6 +368,11 @@ export class Writes {
       if (a?.status === 403 && code === "identity-revoked") {
         client.revoked();
         end.e = { kind: "revoked", problem: p! };
+        return undefined;
+      }
+      // A recovery start's process refusal (§8.5 item 1): nothing is sent, and the shell is told.
+      if (a?.status === 409 && code === "recovery-mode-active" && p?.["scope"] === undefined) {
+        end.pre = p!;
         return undefined;
       }
       return a?.headers.get("Bronzeward-Epoch") ?? undefined;

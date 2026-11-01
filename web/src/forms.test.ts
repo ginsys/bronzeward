@@ -1,9 +1,9 @@
 import { createElement as h, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { AddCluster, guardsUnload, leaving, Result, WriteNotices, WritesProvider } from "./forms.tsx";
+import { AddCluster, existing, guardsUnload, leaving, Result, WriteNotices, WritesProvider } from "./forms.tsx";
 import { type Reads, ReadsProvider } from "./list.tsx";
-import type { Client } from "./request.ts";
+import type { Client, Problem } from "./request.ts";
 import { ShellContext } from "./shell.tsx";
 import { REPEATING, REPLAYED, setAside, unknown } from "./states.tsx";
 import { EPOCH_CHANGED_ASIDE, NO_EPOCH, type Outcome, Write, Writes } from "./write.ts";
@@ -230,6 +230,15 @@ describe("the form's result", () => {
     w.outcome = o;
     return html(new Writes(() => PRINCIPAL), h(ReadsProvider, { value: reads }, h(Result, { w, done: () => "DONE" })));
   };
+
+  test("a 409 conflict naming the cluster or machine already recorded links to it; the write's own resource is not repeated", () => {
+    const problem = (extra: Record<string, string>): Problem => ({ type: "urn:bronzeward:problem:conflict", title: "Conflict", status: 409, detail: "already recorded", ...extra });
+    const conflict = (extra: Record<string, string>): Outcome => ({ kind: "refused", status: 409, replayed: false, problem: problem(extra) });
+    expect(result(conflict({ cluster: "cl_SYNTH1" }))).toContain('The cluster already recorded: <a href="/clusters/cl_SYNTH1" title="cl_SYNTH1">cl_SYNTH1</a>.');
+    expect(result(conflict({ machine: "mch_SYNTH1" }))).toContain('The machine already recorded: <a href="/machines/mch_SYNTH1" title="mch_SYNTH1">mch_SYNTH1</a>.');
+    expect(existing(409, problem({ machine: "mch_SYNTH1" }), "/machines/mch_SYNTH1")).toBeUndefined();
+    expect(result(conflict({}))).not.toContain("already recorded:");
+  });
 
   test("a success whose answer could not be read is saved, names the page to read, and says when replayed", () => {
     expect(result({ kind: "done", status: 201, data: null, replayed: false })).toContain('Saved (the server answered 201), but its answer could not be read. Read <a href="/clusters" title="/clusters">/clusters</a>.');
