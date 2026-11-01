@@ -26,10 +26,30 @@ type Event struct {
 
 // Watch is how a watch shows what it reads: Show gets each event once, in order, and Clear says
 // that what was shown no longer holds, before the events are shown again from the start.
+// Until, when set, ends the watch before the operation's state is terminal: it is asked after each
+// event shown, at each keep-alive and after each read of the operation, and once it answers true
+// the watch returns the operation as it last read it. Its error ends the watch.
 type Watch struct {
 	Show  func(Event)
 	Clear func()
+	Until func() (bool, error)
 	sleep func(time.Duration) // time.Sleep; tests replace it
+	halt  *halt
+}
+
+// halt is what Until answered: once done, the watch ends.
+type halt struct {
+	done bool
+	err  error
+}
+
+// stop asks Until, once it has not yet ended the watch.
+func (w Watch) stop() bool {
+	if !w.halt.done && w.Until != nil {
+		w.halt.done, w.halt.err = w.Until()
+		w.halt.done = w.halt.done || w.halt.err != nil
+	}
+	return w.halt.done
 }
 
 // streamIdle ends a stream that sent nothing, not even its keep-alive comment every 15 s, for this
@@ -56,6 +76,7 @@ func (c *Client) Watch(op string, w Watch) (*apitypes.OperationBody, error) {
 	if w.sleep == nil {
 		w.sleep = time.Sleep
 	}
+	w.halt = &halt{}
 	// steps counts the events shown: an attempt that showed none is a failure. A clear is not
 	// counted, so a stream whose events never match its epoch, cleared on every attempt, backs off.
 	steps, shows := 0, w.Show
@@ -81,6 +102,8 @@ func (c *Client) Watch(op string, w Watch) (*apitypes.OperationBody, error) {
 			return nil, err
 		}
 		if Terminal(o.State) {
+			// A terminal state settles the watch, so the last events are all shown, Until or not.
+			w.Until, w.halt = nil, &halt{}
 			// Events of another epoch than the operation read's are of a restored installation, where
 			// the operation can be in another state: it is read again before the watch ends. A failed
 			// drain shows no epoch, so the operation is read again, and its state stands only if the
@@ -102,6 +125,12 @@ func (c *Client) Watch(op string, w Watch) (*apitypes.OperationBody, error) {
 			w.sleep(delay)
 			delay = min(2*delay, 30*time.Second)
 			continue
+		}
+		if w.stop() {
+			if w.halt.err != nil {
+				return nil, w.halt.err
+			}
+			return o, nil
 		}
 		// An attempt that showed nothing waits the delay, which doubles until an attempt shows
 		// something or a stream stays open for 30 s. JSON pages are read again after the delay.
@@ -219,7 +248,11 @@ func (c *Client) stream(op string, last *string, w Watch) (opened, pages bool, e
 			idle.Reset(streamIdle)
 			line := sc.Text()
 			if strings.HasPrefix(line, ":") {
-				continue // a comment: the keep-alive (§8.6 item 5)
+				// A comment: the keep-alive (§8.6 item 5).
+				if w.stop() {
+					return true, false, nil
+				}
+				continue
 			}
 			if line != "" {
 				field, value, _ := strings.Cut(line, ":")
@@ -251,6 +284,9 @@ func (c *Client) stream(op string, last *string, w Watch) (opened, pages bool, e
 				return true, false, nil
 			default:
 				show(w, ev, last)
+				if w.stop() {
+					return true, false, nil
+				}
 			}
 			ev, data = Event{}, false
 		}
@@ -276,6 +312,9 @@ func (c *Client) drain(op string, last *string, w Watch) error {
 			*last = ""
 		}
 		show(w, ev, last)
+		if w.stop() {
+			return nil
+		}
 	}
 	return nil
 }
