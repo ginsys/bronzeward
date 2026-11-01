@@ -44,6 +44,9 @@ export interface Attempt {
 // A credential refusal that ends the signed-in page, as a read's does (§8.2 401 and 403 rows,
 // §9.6): a 401 its one renewal did not clear, or identity-revoked of the sign-in still current.
 export type Ending = { kind: "unauthenticated"; problem: Problem | null } | { kind: "revoked"; problem: Problem };
+// A write's record of the ending its sends met. `now` hears one learned before the write's own
+// answer is read, so the page ends even if that answer's body never arrives.
+export interface End { e?: Ending; now?: (e: Ending) => void }
 
 // What a response must still match to be rendered.
 export interface View {
@@ -169,13 +172,16 @@ export class Client {
   // here and never discarded as stale. Its epoch is observed as a read's is, so a new one sets every
   // pending write aside through onEpochChange. Undefined when no complete answer arrived, a redirect
   // refused by the browser included (§6 item 7). A credential refusal of a read sent to learn its
-  // epoch goes to `end`, even when this answer is then lost.
-  async attempt(method: string, path: string, headers: Record<string, string> = {}, body?: string, end: { e?: Ending } = {}): Promise<Attempt | undefined> {
+  // epoch goes to `end`, and to `end.now` at once, even when this answer is then lost or stalls.
+  async attempt(method: string, path: string, headers: Record<string, string> = {}, body?: string, end: End = {}): Promise<Attempt | undefined> {
     const records = this.epochRecords;
     const res = await this.send(path, method, headers, body);
     if (res === undefined) return undefined;
     const ending = await this.learnEpoch(res, records);
-    if (ending !== undefined) end.e = ending;
+    if (ending !== undefined) {
+      end.e = ending;
+      end.now?.(ending);
+    }
     const route = API_BASE + path.split("?")[0];
     if (res.headers.has("Deprecation") && !this.deprecated.has(route)) {
       this.deprecated.add(route);

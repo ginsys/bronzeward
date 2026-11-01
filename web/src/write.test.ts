@@ -306,6 +306,27 @@ describe("the confirming read's credential refusals (§8.2)", () => {
     expect(writes.onEnded).toHaveBeenCalledWith(ending);
     expect(writes.open).toEqual([w]);
   });
+
+  test("refused on that read while the write's own body has not arrived: the page ends at once, and once", async () => {
+    const writes = new Writes(() => PRINCIPAL, async () => {});
+    let answer: (a: Attempt) => void = () => {};
+    writes.client = {
+      currentEpoch: EPOCH,
+      attempt: (_m: string, _p: string, _h: unknown, _b: unknown, end: { e?: unknown; now?: (e: unknown) => void }) => {
+        end.e = ending;
+        end.now?.(ending);
+        return new Promise((r) => (answer = r));
+      },
+    } as unknown as Client;
+    writes.onEnded = vi.fn();
+    const w = spec();
+    const run = writes.submit(w);
+    await vi.waitFor(() => expect(writes.onEnded).toHaveBeenCalledWith(ending));
+    expect(w.outcome).toBeUndefined();
+    answer({ status: 201, headers: new Headers(), data: { id: "c1" } });
+    expect(await run).toMatchObject({ kind: "done" });
+    expect(writes.onEnded).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("set aside (§8.4 item 3, §8.5 item 2, journeys §8)", () => {

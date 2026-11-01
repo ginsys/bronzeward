@@ -60,6 +60,22 @@ describe("the notice (B11)", () => {
     expect(out).not.toContain("Dismiss");
     await run;
   });
+
+  test("set aside while its answer is still on its way, the notice shows at once, with no dismissal; the answer settles it", async () => {
+    const writes = new Writes(() => PRINCIPAL, async () => {});
+    let answer: (a: unknown) => void = () => {};
+    writes.client = { currentEpoch: "e1", attempt: () => new Promise((r) => (answer = r)) } as unknown as Client;
+    const w = new Write({ method: "POST", path: "/clusters", body: { name: "lab" }, resource: "/clusters" });
+    const run = writes.submit(w);
+    writes.setAside(EPOCH_CHANGED_ASIDE);
+    const out = html(writes, h(WriteNotices, { go: () => {} }));
+    expect(out).toContain(`${setAside(EPOCH_CHANGED_ASIDE)} Key ${w.key}, POST /api/v1/clusters. To learn the outcome, read /clusters.`);
+    expect(out).toContain('<button type="button" disabled="">Repeat exactly</button><button type="button">Show current state</button>');
+    expect(out).not.toContain("Dismiss");
+    answer({ status: 201, headers: new Headers(), data: { id: "c1" } });
+    expect((await run).kind).toBe("done");
+    expect(html(writes, h(WriteNotices, { go: () => {} }))).toBe("");
+  });
 });
 
 describe("the in-app leave guard (B11)", () => {
@@ -96,6 +112,18 @@ describe("the in-app leave guard (B11)", () => {
     expect(ask).toHaveBeenCalledTimes(1);
     expect(leaving(writes, "/machines?cluster=c1", false, "/machines?cluster=c2")).toBe(true);
     expect(ask).toHaveBeenCalledTimes(1);
+  });
+
+  test("while [Repeat exactly] runs, the dialog says the outcome is unknown, as the notice does", async () => {
+    const ask = vi.fn(() => false);
+    vi.stubGlobal("confirm", ask);
+    vi.stubGlobal("location", new URL("https://bw.invalid/clusters/new"));
+    const [writes, w] = await unknownWrite();
+    const run = writes.submit(w);
+    expect(w.outcome).toBeUndefined();
+    expect(leaving(writes, "/machines")).toBe(false);
+    expect(ask).toHaveBeenCalledWith(`Unknown whether this was saved. Key ${w.key}, POST /api/v1/clusters. To learn the outcome, read /clusters.\nLeave this page?`);
+    await run;
   });
 });
 

@@ -5,7 +5,7 @@
 // write's in-progress 409 and the recovery entry's exception (§8.4 items 2 and 3) are not served
 // here: no form of this layer sends either route.
 
-import { type Attempt, type Client, type Ending, NOT_JSON, type Problem } from "./request.ts";
+import { type Attempt, type Client, type End, type Ending, NOT_JSON, type Problem } from "./request.ts";
 
 export interface WriteSpec {
   method: "POST" | "PUT" | "DELETE";
@@ -132,7 +132,15 @@ export class Writes {
     w.repeating = w.outcome?.kind === "unknown" ? w.outcome : undefined;
     const repeat = w.repeating !== undefined;
     w.outcome = undefined;
-    const end: { e?: Ending } = {};
+    // An ending learned before the write's own answer is read ends the page at once; any other
+    // reaches it when the write settles. Either reaches it once.
+    let told = false;
+    const tell = (e: Ending) => {
+      if (told) return;
+      told = true;
+      this.onEnded?.(e);
+    };
+    const end: End = { now: tell };
     // A run that throws settles the write too: unknown once an attempt may have committed.
     const failed = (): Outcome => (w.ambiguous ? { kind: "unknown", why: PAGE_FAILED } : { kind: "not-done", why: PAGE_FAILED, problem: null });
     w.running = this.run(w, end).catch(failed).then((r) => {
@@ -149,7 +157,7 @@ export class Writes {
         else this.all.delete(w);
       }
       this.changed();
-      if (end.e !== undefined) this.onEnded?.(end.e);
+      if (end.e !== undefined) tell(end.e);
       return o;
     });
     this.changed();
@@ -177,7 +185,7 @@ export class Writes {
     this.changed();
   }
 
-  private async run(w: Write, end: { e?: Ending }): Promise<Outcome> {
+  private async run(w: Write, end: End): Promise<Outcome> {
     const client = this.client;
     const who = this.principal();
     if (client === undefined || who === undefined) return { kind: "not-done", why: "there is no sign-in to send it under", problem: null };
@@ -280,7 +288,7 @@ export class Writes {
   }
 
   // Before a repeat: the same sign-in, and one GET /recovery that shows the reference epoch.
-  private async check(client: Client, w: Write, end: { e?: Ending }): Promise<string | undefined> {
+  private async check(client: Client, w: Write, end: End): Promise<string | undefined> {
     if (w.aside !== undefined) return w.aside;
     if (this.principal() !== w.principal) return SIGN_IN_CHANGED;
     const now = await this.confirm(client, end);
@@ -293,7 +301,7 @@ export class Writes {
   // The epoch one GET /recovery shows (§8.4 item 3). It is a read, so its credential refusals are
   // a read's (§8.2): a 401 renews once and is sent again, and a second 401 or identity-revoked
   // ends the page through `end`.
-  private async confirm(client: Client, end: { e?: Ending }): Promise<string | undefined> {
+  private async confirm(client: Client, end: End): Promise<string | undefined> {
     for (let renewed = false; ; renewed = true) {
       const a = await client.attempt("GET", "/recovery", {}, undefined, end);
       if (end.e !== undefined) return undefined;

@@ -188,6 +188,9 @@ describe("the write views (#338)", () => {
     await add(["commit-drop"], { held: "/clusters" }, { rotate: "1", lifetime: "24", "renew-as": "h-publisher" });
     await browser.waitUntil(async () => (await holding()).includes("/clusters"), { timeout: 20_000, timeoutMsg: "the write was not held" });
     await expect($('[data-testid="status"]')).toHaveText(PRINCIPAL_CHANGED, { wait: 30_000 });
+    // Set aside while its answer is still held: the notice shows at once, with no dismissal.
+    await expect(notice()).toHaveText(expect.stringContaining(SET_ASIDE), { wait: 20_000 });
+    expect(await notice().parentElement().$("button=Dismiss").isExisting()).toBe(false);
     await release();
     await expect(notice()).toHaveText(expect.stringContaining(SET_ASIDE), { wait: 20_000 });
     await oneWrite(1);
