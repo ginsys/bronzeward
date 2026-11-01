@@ -157,6 +157,11 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 	if who, err = c.principal(w.Repeat); err != nil {
 		return nil, err
 	}
+	if rp := w.Repeat; rp != nil && c.Context.LastEpoch != rp.Epoch {
+		// A read after the confirming one, the context-use read's included, saw another epoch: the
+		// change is known, so the repeat is refused, not sent under the old epoch (§8.4 item 3, §8.5).
+		return nil, RefusedRepeat{c.Context.fail(fmt.Errorf("%s not sent: the epoch is now %s, not the given --expect-epoch %s", route, printable(c.Context.LastEpoch), printable(rp.Epoch)))}
+	}
 	if w.Draft != "" && w.IfMatch == "" {
 		// T11: the ETag kept from the last read or write of the draft, read after the context-use read,
 		// so an epoch change it saw leaves none (§8.3). With none, the write waits for a read.

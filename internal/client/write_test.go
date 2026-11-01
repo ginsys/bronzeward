@@ -526,8 +526,18 @@ func TestRepeatRefusals(t *testing.T) {
 	if got := f.requests(); !slices.Equal(got, []string{"GET /api/v1/recovery"}) {
 		t.Errorf("another epoch sent %v", got)
 	}
+	// The confirming read shows the repeat's epoch, but the context-use read after it shows another.
 	f.mu.Lock()
-	f.seen = nil
+	f.seen, f.recovery = nil, func(int) string { return "ep_BWSYNTH-1" }
+	f.mu.Unlock()
+	if _, err := c.Send(w); !errors.As(err, &refused) || !strings.Contains(err.Error(), "the epoch is now ep_BWSYNTH-2, not the given --expect-epoch ep_BWSYNTH-1") {
+		t.Errorf("an epoch the context-use read shows: %v", err)
+	}
+	if got := f.requests(); !slices.Equal(got, []string{"GET /api/v1/recovery", "GET /api/v1/server"}) {
+		t.Errorf("an epoch the context-use read shows sent %v", got)
+	}
+	f.mu.Lock()
+	f.seen, f.recovery = nil, nil
 	f.mu.Unlock()
 	w.Repeat.Epoch = "ep_BWSYNTH-2"
 	if _, err := c.Send(w); err != nil {
