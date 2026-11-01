@@ -3,12 +3,12 @@
 // resource has its path (B3) and every identifier links to its view where it has one. The release
 // review, plan and drift actions, and the operation watch come with their own tickets.
 
-import { Fragment as Group, type ReactNode } from "react";
+import { Fragment as Group, type ReactNode, useRef } from "react";
 import type { components } from "./api/v1";
-import { Head, Id, type Listed, More, Ref, Scroll, short, useItem, useList, usePending } from "./list.tsx";
+import { EmptyList, Head, Id, type Listed, More, Ref, Scroll, short, useItem, useList, usePending } from "./list.tsx";
 import { MachineItem } from "./machine.tsx";
 import { ClusterItem, Clusters, Filter, Machines } from "./machines.tsx";
-import { Empty, when } from "./states.tsx";
+import { when } from "./states.tsx";
 
 type S = components["schemas"];
 type Col<T> = readonly [string, (t: T) => ReactNode];
@@ -46,7 +46,7 @@ function ListOf<T>({ label, path, query = "", cols, empty, keyOf = byId, head }:
   return (
     <>
       {head?.(list.data)}
-      {items.length === 0 && more === undefined ? <Empty text={empty} /> : (
+      {items.length === 0 && more === undefined ? <EmptyList list={list.data} text={empty} /> : (
         <><Rows label={label} cols={cols} items={items} keyOf={keyOf} /><More list={list.data} shown={items.length} more={more} busy={busy} /></>
       )}
     </>
@@ -83,8 +83,25 @@ function useFilters(base: string, query: string, go: (to: string) => void) {
 }
 
 // A filter set by a link from another view, such as a machine's plans, with the way to clear it.
-const Pinned = ({ label, id, clear }: { label: string; id: string | null; clear: () => void }) =>
-  id === null ? null : <p>{label} <Id id={id} /> <button type="button" onClick={clear}>Show all</button></p>;
+// Clearing it removes its button, so focus first moves on to the page's next control: a filter
+// change keeps focus on the filters (WCAG 2.4.3).
+function Pinned({ label, id, clear }: { label: string; id: string | null; clear: () => void }) {
+  const own = useRef<HTMLParagraphElement>(null);
+  if (id === null) return null;
+  const all = () => {
+    nextControl(own.current)?.focus();
+    clear();
+  };
+  return <p ref={own}>{label} <Id id={id} /> <button type="button" onClick={all}>Show all</button></p>;
+}
+
+// The first control after `from` and outside it, else the page.
+function nextControl(from: HTMLElement | null): HTMLElement | null {
+  const page = from?.closest<HTMLElement>("main") ?? null;
+  if (from === null || page === null) return null;
+  const controls = [...page.querySelectorAll<HTMLElement>("a[href], button, input, select, textarea")];
+  return controls.find((c) => !from.contains(c) && (from.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0) ?? page;
+}
 
 const CREATED: Col<{ createdAt: string }> = ["Created", (t) => when(t.createdAt)];
 const CLUSTER: Col<{ cluster: string }> = ["Cluster", (t) => <Id id={t.cluster} />];
