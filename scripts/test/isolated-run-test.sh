@@ -9,6 +9,8 @@ set -euo pipefail
 root=$(CDPATH='' cd -P -- "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
+# A relative TMPDIR gives a relative path, and the control below runs in the clone (#451).
+work=$(CDPATH='' cd -P -- "$work" && pwd -P)
 awk '/^git_isolated=\(/ { copy=1 } copy { print } copy && /\)$/ { exit }' "$root/fixtures/lib.sh" >"$work/lib.sh"
 awk '/^isolated_run\(\) \{/ { copy=1 } copy { print } copy && /^}$/ { exit }' "$root/fixtures/lib.sh" >>"$work/lib.sh"
 grep -q '^isolated_run() {' "$work/lib.sh" && grep -q '^git_isolated=(' "$work/lib.sh"
