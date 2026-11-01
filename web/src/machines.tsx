@@ -3,7 +3,7 @@
 // they show endpoint and node ID (G8).
 
 import type { components } from "./api/v1";
-import { More, Ref, short, useItem, useList, usePending } from "./list.tsx";
+import { Head, Id, More, Ref, Scroll, short, useItem, useList, usePending } from "./list.tsx";
 import { Empty } from "./states.tsx";
 
 export type Machine = components["schemas"]["MachineBody"];
@@ -54,10 +54,9 @@ export function observed(m: Machine, now: number): string {
 
 // G8: the node ID when the machine was recorded by it, else its SMBIOS UUID.
 export const node = (m: Machine) => (m.hardware.talosNodeId != null ? `node ${m.hardware.talosNodeId}` : `UUID ${m.hardware.smbiosUuid ?? "unknown"}`);
-// A release's link comes with its view (#334's third part).
-export const release = (id: string | null) => (id === null ? "none" : <span title={id}>{short(id)}</span>);
+export const release = (id: string | null) => <Id id={id} />;
 
-function Filter({ label, value, options, onChange }: { label: string; value: string; options: readonly (readonly [string, string])[]; onChange: (v: string) => void }) {
+export function Filter({ label, value, options, onChange }: { label: string; value: string; options: readonly (readonly [string, string])[]; onChange: (v: string) => void }) {
   return (
     <label>
       {label}{" "}
@@ -68,8 +67,6 @@ function Filter({ label, value, options, onChange }: { label: string; value: str
     </label>
   );
 }
-
-export const Head = ({ cols }: { cols: string[] }) => <thead><tr>{cols.map((c) => <th key={c} scope="col">{c}</th>)}</tr></thead>;
 
 export function Machines({ query, go }: { query: string; go: (to: string) => void }) {
   const q = new URLSearchParams(query);
@@ -95,7 +92,7 @@ export function Machines({ query, go }: { query: string; go: (to: string) => voi
       ? <Empty text={cluster === "" && state === undefined ? "No machines recorded yet." : "No machine matches this filter."} />
       : (
         <>
-          <table>
+          <Scroll label="Machines">
             <Head cols={["Machine", "Endpoint", "Node", "Desired", "Applied (source)", "Observed", "State"]} />
             <tbody>
               {shown.map((m) => (
@@ -110,7 +107,7 @@ export function Machines({ query, go }: { query: string; go: (to: string) => voi
                 </tr>
               ))}
             </tbody>
-          </table>
+          </Scroll>
           <More list={list.data} shown={shown.length} more={more} busy={busy} />
         </>
       );
@@ -133,7 +130,7 @@ export function Clusters() {
   if (list.kind === "ok") {
     body = list.data.items.length === 0 ? <Empty text="No clusters recorded yet." /> : (
       <>
-        <table>
+        <Scroll label="Clusters">
           <Head cols={["Cluster", "Kubernetes endpoint", "Contract", "Talos cluster ID"]} />
           <tbody>
             {list.data.items.map((c) => (
@@ -145,7 +142,7 @@ export function Clusters() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </Scroll>
         <More list={list.data} shown={list.data.items.length} more={more} busy={busy} />
       </>
     );

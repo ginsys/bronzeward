@@ -15,6 +15,8 @@ export const NOT_ACCEPTED = "Not accepted by this installation. Sign in again.";
 
 // A time as the wireframes show it, 10:12.
 export const clock = (d: Date) => d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+// A recorded instant in a list or record, 26 Oct 2026, 10:12; none when absent.
+export const when = (at: string | null | undefined) => (at == null ? "none" : new Date(at).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }));
 
 export function Status({ children, actions, testid = "status" }: { children: ReactNode; actions?: ReactNode; testid?: string | undefined }) {
   return (

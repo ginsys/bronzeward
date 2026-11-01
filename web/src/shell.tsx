@@ -5,10 +5,9 @@
 
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useId, useReducer, useRef, useState } from "react";
 import { type Load, ReadsProvider } from "./list.tsx";
-import { MachineItem } from "./machine.tsx";
-import { ClusterItem, Clusters, Machines } from "./machines.tsx";
 import { PreEntry, type Recovery, RecoveryBanner, RecoveryRead, type StartMode, startModeOf, startRefusal } from "./recovery.tsx";
 import { Client, type ClientOptions, EPOCH_CHANGED, type ReadResult } from "./request.ts";
+import { view } from "./resources.tsx";
 import { follow, PAGES, usePath } from "./router.ts";
 import { Disconnected, HumanOnly, Loading, Offline, ProblemFields, problemFields, Refused, Status } from "./states.tsx";
 import type { components } from "./api/v1";
@@ -249,6 +248,14 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
   };
   const [reads] = useState(() => new ShellReads({ ...auth, onDeprecation, onRecoveryModeChange: setRecoveryMode }, () => events.current!));
   const client = reads.client;
+  // A navigation to another path moves focus to the new page, where the keyboard and a screen
+  // reader continue; a filter change keeps it on the filter.
+  const page = useRef<HTMLElement>(null);
+  const shownPath = useRef(path);
+  useEffect(() => {
+    if (shownPath.current !== path) page.current?.focus();
+    shownPath.current = path;
+  }, [path]);
   // In render, before any page's effect sends a read for the new path or query: effects run child
   // first, so a page's read sent before this shell's effect would be discarded with the old ones.
   client.setView({ principal, route: path, query });
@@ -324,6 +331,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
   const id = identity.kind === "ok" ? identity.data : undefined;
   return (
     <ShellContext value={{ roles: id?.roles ?? [], offline: offline !== undefined }}>
+      <a className="skip" href="#main">Skip to the page</a>
       <header>
         <h1>Bronzeward</h1>
         {id !== undefined && (
@@ -347,7 +355,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
           </nav>
         )}
       </header>
-      <ReadsProvider value={{ client, settle: settlePage, undropped: reads.since, view: JSON.stringify([path, query]), again, go, failure: (res) => <Failure res={res} sub={sub} /> }}><main>{main}</main></ReadsProvider>
+      <ReadsProvider value={{ client, settle: settlePage, undropped: reads.since, view: JSON.stringify([path, query]), again, go, failure: (res) => <Failure res={res} sub={sub} /> }}><main id="main" ref={page} tabIndex={-1}>{main}</main></ReadsProvider>
       <VersionFooter server={server.kind === "ok" ? server.data : undefined} />
     </ShellContext>
   );
@@ -356,13 +364,6 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
 // The root is the machine list, the hub of the journeys (§6).
 const current = (path: string) => (path === "/" ? "/machines" : path);
 
-// Each page's view comes with its own ticket (#334 onwards).
 function Page({ path, query, go }: { path: string; query: string; go: (to: string) => void }) {
-  // An identifier is never percent-encoded; one that is answers 404 once the view encodes it again.
-  const [, kind, id] = /^\/(machines|clusters)(?:\/([^/]+))?$/.exec(current(path)) ?? [];
-  if (kind === "machines") return id === undefined ? <Machines query={query} go={go} /> : <MachineItem id={id} />;
-  if (kind === "clusters") return id === undefined ? <Clusters /> : <ClusterItem id={id} />;
-  const page = PAGES.find(([to]) => to === current(path));
-  if (page === undefined) return <><h2>Not found</h2><Status>No page at {path}.</Status></>;
-  return <h2>{page[1]}</h2>;
+  return view(path, query, go) ?? <><h2>Not found</h2><Status>No page at {path}.</Status></>;
 }

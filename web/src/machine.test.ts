@@ -2,7 +2,7 @@ import { describe, expect, test, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ADOPTED, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, latestUnread, nextTimeline, type Observation, Observations, POLL_MS, polled, readLater, readOlder, sentences, type Timeline, TimelineRows, UNREAD } from "./machine.tsx";
-import { RESTARTED } from "./list.tsx";
+import { type Reads, ReadsProvider, RESTARTED } from "./list.tsx";
 import type { Machine } from "./machines.tsx";
 import type { ReadResult } from "./request.ts";
 
@@ -91,7 +91,9 @@ describe("journeys §2.4 status sentences, field by field", () => {
 
   test("#423 C5: the observed read's attribution, apart from the drift sentences", () => {
     expect(renderToStaticMarkup(attribution(null))).toBe("matches neither Applied nor Desired");
-    expect(renderToStaticMarkup(attribution("rel_new"))).toBe('attributed to <span title="rel_new">rel_new</span>');
+    // A release links to its view.
+    const reads = { go: () => {} } as unknown as Reads;
+    expect(renderToStaticMarkup(createElement(ReadsProvider, { value: reads }, attribution("rel_new")))).toBe('attributed to <a href="/releases/rel_new" title="rel_new">rel_new</a>');
   });
 
   test("nothing applied, selected or read, and frozen: no time shown", () => {

@@ -45,7 +45,8 @@ export function usePending(load: Load<unknown> | Dropped, what: string): ReactNo
 
 export const RESTARTED = "The server no longer accepted this list's position, so it was read again from its start.";
 
-export interface Listed<T> { items: T[]; next: string | undefined; restarted: boolean }
+// `extra` holds the last page's other members, such as the dependencies' lastPass.
+export interface Listed<T> { items: T[]; next: string | undefined; restarted: boolean; extra?: Record<string, unknown> }
 export type Page<T> = { items: T[]; next?: string };
 
 // Reads on from `from`: one page, or every page left when `all`, while `going` holds: a read a newer
@@ -62,8 +63,9 @@ export async function readPages<T>(client: Reads["client"], path: string, query:
     if (res.kind === "restart" && !restarted && next !== undefined) {
       [items, next, restarted] = [[], undefined, true];
     } else if (res.kind === "ok") {
-      [items, next] = [[...items, ...res.data.items], res.data.next];
-      if (!all || next === undefined) return { kind: "ok", data: { items, next, restarted } };
+      const { items: got, next: after, ...extra } = res.data;
+      [items, next] = [[...items, ...got], after];
+      if (!all || next === undefined) return { kind: "ok", data: { items, next, restarted, ...(Object.keys(extra).length > 0 && { extra }) } };
     } else {
       const failed = res.kind === "restart" ? { kind: "refused" as const, status: 400, problem: res.problem } : res;
       return restarted && failed.kind !== "discarded" ? { kind: "dropped", failed } : failed;
@@ -164,6 +166,30 @@ export function Ref({ to, id, children }: { to: string; id: string; children?: R
   const { go } = useReads();
   return <a href={to} title={id} onClick={(e) => follow(e, go, to)}>{children ?? short(id)}</a>;
 }
+
+// The view each identifier prefix links to; any other identifier is shown shortened.
+const VIEWS: Record<string, string> = {
+  cl: "clusters", mch: "machines", frg: "fragments", frv: "fragment-revisions", prf: "profiles", prv: "profile-revisions",
+  asg: "assignments", asr: "assignment-revisions", rel: "releases", pln: "plans", op: "operations", dep: "dependencies",
+};
+export const viewOf = (id: string) => {
+  const prefix = id.slice(0, Math.max(id.indexOf("_"), 0));
+  return Object.hasOwn(VIEWS, prefix) ? VIEWS[prefix] : undefined;
+};
+
+export function Id({ id, none = "none" }: { id: string | null | undefined; none?: string }) {
+  if (id == null) return none;
+  const view = viewOf(id);
+  return view === undefined ? <span title={id}>{short(id)}</span> : <Ref to={`/${view}/${id}`} id={id} />;
+}
+
+export const Head = ({ cols }: { cols: readonly string[] }) => <thead><tr>{cols.map((c) => <th key={c} scope="col">{c}</th>)}</tr></thead>;
+
+// A table that scrolls on its own at narrow widths instead of the page (WCAG 1.4.10), reachable
+// by keyboard to scroll.
+export const Scroll = ({ label, testid, children }: { label: string; testid?: string; children: ReactNode }) => (
+  <div className="scroll" role="region" aria-label={label} tabIndex={0}><table data-testid={testid}>{children}</table></div>
+);
 
 // The count, the next page on request (one at a time), and the restart notice.
 export function More({ list, shown, more, busy }: { list: Listed<unknown>; shown: number; more: (() => void) | undefined; busy: boolean }) {
