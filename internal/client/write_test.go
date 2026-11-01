@@ -31,6 +31,8 @@ type fake struct {
 	server   string // GET /server's answer; "" for the default
 	seen     []*http.Request
 	posts    int
+	// beforeEntry refuses GET /server as a recovery start does before its entry.
+	beforeEntry bool
 }
 
 func (f *fake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -53,6 +55,10 @@ func (f *fake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	switch r.Method + " " + r.URL.Path {
 	case "GET /api/v1/server":
+		if f.beforeEntry {
+			problemAnswer(w, http.StatusConflict, "recovery-mode-active", "")
+			return
+		}
 		fmt.Fprint(w, cmp.Or(f.server, `{"version":"BWSYNTH","apiRevision":2,"startMode":"normal","maxTokenLifetimeSeconds":300}`))
 	case "GET /api/v1/identity":
 		fmt.Fprint(w, `{"kind":"service","principal":"svc_BWSYNTH","service":"ci","roles":["author"],"epoch":"`+epoch+`"}`)
