@@ -231,7 +231,8 @@ export function Screen({ view, notices = [] }: { view: View; notices?: readonly 
     case "loading":
       return <Page><p role="status" data-testid="status">Loading</p></Page>;
     case "signing-out":
-      return <Page><p role="status" data-testid="status">{SIGNING_OUT}</p></Page>;
+      // The unload guard can stop the move to the provider: the notices stay until the page goes (B11).
+      return <Page><p role="status" data-testid="status">{SIGNING_OUT}</p><PageNotices /></Page>;
     case "signed-out":
       return (
         <Page>

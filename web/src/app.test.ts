@@ -4,7 +4,7 @@ import { expect, test } from "vitest";
 import { Screen, type View } from "./app.tsx";
 import { WriteNotices, WritesProvider } from "./forms.tsx";
 import type { Client } from "./request.ts";
-import { problemFields, problemText, REPLAYED } from "./states.tsx";
+import { problemFields, problemText, REPEATING, REPLAYED, unknown } from "./states.tsx";
 import { Write, Writes } from "./write.ts";
 
 const shown = (view: View) => renderToStaticMarkup(createElement(Screen, { view }));
@@ -50,6 +50,48 @@ test("B11: a write whose outcome is unknown keeps its notice on the views that e
   const on = (view: View) => renderToStaticMarkup(createElement(WritesProvider, { value: writes }, createElement(Screen, { view })));
   expect(on({ kind: "failed", message: "revoked" })).toContain('data-testid="write-notice"');
   expect(on({ kind: "sign-in", message: "W1", signIn: () => {} })).toContain('data-testid="write-notice"');
+  // Sign out, then the unload guard's dialog cancelled: the page stays on this view.
+  expect(on({ kind: "signing-out" })).toContain('data-testid="write-notice"');
+});
+
+test("B11: a dropped attempt shows the unknown notice at once, while the automatic repeats still run", async () => {
+  const writes = new Writes(() => "https://idp.invalid SYNTH-sub-1", async () => {});
+  let sends = 0;
+  let answer: (a: unknown) => void = () => {};
+  writes.client = {
+    currentEpoch: "e1",
+    attempt: (_m: string, path: string) => {
+      if (path === "/recovery") return Promise.resolve({ status: 200, headers: new Headers({ "Bronzeward-Epoch": "e1" }), data: {} });
+      // The first send drops; the repeat gets no answer until the test gives one.
+      return ++sends === 1 ? Promise.resolve(undefined) : new Promise((r) => (answer = r));
+    },
+  } as unknown as Client;
+  const w = new Write({ method: "POST", path: "/clusters", body: { name: "lab" }, resource: "/clusters" });
+  const done = writes.submit(w);
+  const notices = () => renderToStaticMarkup(createElement(WritesProvider, { value: writes }, createElement(WriteNotices, { go: () => {} })));
+  for (let i = 0; i < 20 && sends < 2; i++) await Promise.resolve();
+  expect(sends).toBe(2);
+  expect(w.outcome).toBeUndefined();
+  const html = notices();
+  expect(html).toContain(unknown("the connection dropped"));
+  expect(html).toContain(REPEATING);
+  expect(html).toContain(`Key ${w.key}`);
+  expect(html).not.toContain("Dismiss");
+  answer({ status: 201, headers: new Headers(), data: { id: "c1" } });
+  expect((await done).kind).toBe("done");
+  expect(notices()).toBe("");
+});
+
+test("B11: a write with no answer yet and no attempt in doubt shows no notice", async () => {
+  const writes = new Writes(() => "https://idp.invalid SYNTH-sub-1", async () => {});
+  let answer: (a: unknown) => void = () => {};
+  writes.client = { currentEpoch: "e1", attempt: () => new Promise((r) => (answer = r)) } as unknown as Client;
+  const w = new Write({ method: "POST", path: "/clusters", body: { name: "lab" }, resource: "/clusters" });
+  const done = writes.submit(w);
+  await Promise.resolve();
+  expect(renderToStaticMarkup(createElement(WritesProvider, { value: writes }, createElement(WriteNotices, { go: () => {} })))).toBe("");
+  answer({ status: 201, headers: new Headers(), data: { id: "c1" } });
+  await done;
 });
 
 test("journeys §8 Replayed: a [Repeat exactly] from the notice shows its result there, with no form shown", async () => {

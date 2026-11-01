@@ -60,6 +60,9 @@ export class Write {
   epoch: string | undefined;
   // Some attempt may have committed.
   ambiguous = false;
+  // While the automatic repeats run after an attempt that may have committed: why the outcome is
+  // unknown, so the notice shows at once (B11), before the run settles.
+  doubt: string | undefined;
   // Why the write was set aside while a run was in flight (§8.5 item 2).
   aside: string | undefined;
   outcome: Outcome | undefined;
@@ -139,6 +142,7 @@ export class Writes {
       if (o.kind === "unknown") w.ambiguous = true;
       w.outcome = o;
       w.repeating = undefined;
+      w.doubt = undefined;
       w.running = undefined;
       if (!isOpen(w)) {
         if (repeat) w.repeated = true;
@@ -197,6 +201,13 @@ export class Writes {
     const early = (o: Outcome): Outcome => (w.ambiguous ? unknown() : o);
     let p503: Problem | null = null;
     let renewed = false;
+    // An attempt that may have committed: the outcome is unknown from now on, and shown so while
+    // the repeats run.
+    const doubt = () => {
+      w.ambiguous = true;
+      w.doubt = last === undefined ? DROPPED : `the server answered ${last}`;
+      this.changed();
+    };
     for (let n = 0; n <= BACKOFF.length; n++) {
       // A read sent to learn the last answer's epoch ended the sign-in: nothing is repeated.
       if (n > 0 && end.e !== undefined) return aside(SIGN_IN_REFUSED);
@@ -217,8 +228,8 @@ export class Writes {
       // No complete answer, a redirect the browser refused included: some byte may have gone out
       // (§8.4 item 2, TLS-03).
       if (a === undefined) {
-        w.ambiguous = true;
         last = undefined;
+        doubt();
         continue;
       }
       const replayed = a.headers.get("Idempotent-Replayed") === "true";
@@ -259,7 +270,7 @@ export class Writes {
       }
       if (a.status >= 500 && code !== "not-implemented") {
         // 500 internal-error, an unknown 5xx code, or a 5xx that is not a Bronzeward problem.
-        w.ambiguous = true;
+        doubt();
         continue;
       }
       // This send's own answer: a repeat that found the key's record would have replayed it.
