@@ -126,10 +126,16 @@ func writeClient(t *testing.T, f *fake, epoch string) (*Client, *bytes.Buffer, *
 		t.Fatal(err)
 	}
 	var waits []time.Duration
-	sleep = func(d time.Duration) { waits = append(waits, d) }
-	t.Cleanup(func() { sleep = time.Sleep })
+	fakeNow.Store(0)
+	clock = func() time.Time { return time.Unix(0, fakeNow.Load()) }
+	sleep = func(d time.Duration) { waits = append(waits, d); fakeNow.Add(int64(d)) }
+	t.Cleanup(func() { sleep, clock = time.Sleep, time.Now })
 	return c, &notices, &waits
 }
+
+// fakeNow is the time writeClient's clock shows, in nanoseconds: it moves only by the recorded
+// waits and by a fake server that takes time to answer.
+var fakeNow atomic.Int64
 
 func clusterWrite() *Write {
 	return &Write{Method: http.MethodPost, Path: "/clusters", Body: []byte(`{"name":"lab-a"}`), HumanOnly: true,
@@ -806,6 +812,17 @@ func TestInProgress(t *testing.T) {
 					drop(w)
 					return
 				}
+				inProgress(w)
+			}},
+		{name: "the repeats' own time counts toward the bound", wait: 15 * time.Second, posts: 3, waits: []time.Duration{time.Second, 4 * time.Second},
+			says: "outcome unknown: the first request with this key was still ingesting (ingestion ing_BWSYNTH) after 24s",
+			answer: func(n int, w http.ResponseWriter) {
+				if n == 1 {
+					drop(w)
+					return
+				}
+				// Each in-progress answer takes 10 s: counting only the waits, it would take six repeats.
+				fakeNow.Add(int64(10 * time.Second))
 				inProgress(w)
 			}},
 		{name: "a 409 naming the draft is a refusal, not waited for", wait: time.Minute, posts: 2, waits: []time.Duration{time.Second},
