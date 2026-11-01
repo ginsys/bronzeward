@@ -74,7 +74,8 @@ const problemOf = (d: unknown): Problem | null =>
 // sign-in's issuer and subject.
 export class Writes {
   client: Client | undefined;
-  // The page is being left by a notice's own [Show current state]: the unload guard does not ask.
+  // The page is being left by a notice's own [Show current state]: the next unload guard does not
+  // ask, and clears it.
   unloading = false;
   private readonly all = new Set<Write>();
   private readonly listeners = new Set<() => void>();

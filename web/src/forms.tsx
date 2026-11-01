@@ -50,8 +50,13 @@ export function leaving(writes: Writes, to: string, notice = false, from = locat
 }
 
 // A reload or a tab close drops every pending write, so it is guarded by the browser's own dialog,
-// unless the page is being left by a notice's own [Show current state].
-export const guardsUnload = (writes: Writes) => writes.open.length > 0 && !writes.unloading;
+// unless the page is being left by a notice's own [Show current state]. That exemption covers one
+// unload only: if the operator stops the navigation, the next reload or close asks again.
+export function guardsUnload(writes: Writes): boolean {
+  const exempt = writes.unloading;
+  writes.unloading = false;
+  return writes.open.length > 0 && !exempt;
+}
 export function useUnloadGuard(writes: Writes): void {
   useEffect(() => {
     const guard = (e: BeforeUnloadEvent) => {
