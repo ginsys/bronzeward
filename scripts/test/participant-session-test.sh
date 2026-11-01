@@ -469,12 +469,19 @@ kill "$other" 2>/dev/null
 # A start that fails after it spawns the web host, because the web host's pid record cannot be
 # written: the rollback ends the web host by the pid that start captured, and its port is free. The
 # copies use a free port, not 58443, which a real session on this host can hold. The negative
-# control is the same start without kill_spawned in its trap, and it must leave the web host.
+# control is the same start without kill_spawned in its trap, and it must leave the web host. The
+# start's list of spawned pids also holds the pid of a process that is not its child, as after the
+# web host exits and another process gets its pid. That process must survive.
 port=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
 with_port=$repo/fixtures/participants/session-port
 no_kill=$repo/fixtures/participants/session-nokill
 sed "s/58443/$port/g" "$session" >"$with_port"
 sed 's/kill_spawned; stop/stop/' "$with_port" >"$no_kill"
+# shellcheck disable=SC2016 # the session copy's own shell text, not this script's
+sed -i 's/spawned+=("\$!")/spawned+=("$STUB_FOREIGN" "$!")/' "$with_port"
+sleep 60 &
+foreign=$!
+export STUB_FOREIGN=$foreign
 listens() { (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; }
 stub_host() { pgrep -f " bw-stub-webhost-$port\$"; }
 # spawn_start <script>: a fresh start with the provider stub's idp.env and a failing pid record.
@@ -487,7 +494,9 @@ spawn_start() {
   rc=$?
   mkdir -p "$repo/.dev/idp"
 }
-if grep -q "127.0.0.1:$port" "$with_port" && ! cmp -s "$with_port" "$no_kill" && ! listens; then
+# shellcheck disable=SC2016 # the session copy's own shell text, not this script's
+if grep -q "127.0.0.1:$port" "$with_port" && grep -qF 'spawned+=("$STUB_FOREIGN"' "$with_port" &&
+  grep -q 'kill_spawned; stop' "$with_port" && ! grep -q 'kill_spawned; stop' "$no_kill" && ! listens; then
   spawn_start "$no_kill"
   for _ in $(seq 50); do listens && break; sleep 0.1; done
   left=$(stub_host)
@@ -498,11 +507,13 @@ if grep -q "127.0.0.1:$port" "$with_port" && ! cmp -s "$with_port" "$no_kill" &&
     sleep 1
     # The start reached the spawn: it failed on the pid record, and the rollback ran.
     if [ "$rc" != 0 ] && [[ $out == *"webhost.pid: Is a directory"*"session start failed"* ]] &&
-      [ -z "$(stub_host)" ] && ! listens; then
-      ok "a start that fails after it spawns the web host ends it, without its pid record"
-    else bad "start, pid record fails: rc=$rc host=$(stub_host): $out"; fi
+      [ -z "$(stub_host)" ] && ! listens && running "$foreign"; then
+      ok "a start that fails after it spawns the web host ends it, without its pid record, and no other process"
+    else bad "start, pid record fails: rc=$rc host=$(stub_host) foreign running=$(running "$foreign" && echo yes || echo no): $out"; fi
   else bad "start, pid record fails, negative control left no web host: rc=$rc: $out"; fi
   for p in $left $(stub_host); do kill "$p" 2>/dev/null; done
 else bad "start, pid record fails: the copies with port $port are wrong, or the port is taken"; fi
+kill "$foreign" 2>/dev/null
+wait "$foreign" 2>/dev/null
 
 exit "$fail"
