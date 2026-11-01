@@ -493,9 +493,12 @@ clean_git() {
 # functions, SHELLCHECK_OPTS, ...). git is as git_isolated sets it for every git the command runs
 # (S0 step 1's commit-lint, whitespace and upstream-sync); mise trusts <dir>'s mise.toml and reads
 # no configuration but what <dir> holds: none above <dir>'s parent, and not the operator's global
-# or system one, whose [env], env._.source or [settings] could change what a task runs. A global or
-# system config file of /dev/null also keeps out the conf.d and mise.toml beside it (the selftest
-# shows it for the global one; the system one, under /etc, it cannot plant). Whether the tasks then
+# or system one, whose [env], env._.source or [settings] could change what a task runs. Each is
+# named as /dev/null/config.toml, a file that can never exist, because /dev/null is not a
+# directory; mise 2026.10 refuses /dev/null itself as a config file of unknown type (#446). Named
+# there, mise reads neither the default file nor the conf.d beside it (the selftest and
+# scripts/test/isolated-run-test.sh show it for the global one; the system one, under /etc, they
+# cannot plant). Whether the tasks then
 # resolve in <dir> is tasks_outside's to check. The caller's values (a DSN, a token, a proxy URL
 # with credentials) reach the command through a pipe on descriptor 3, never as an argument of env
 # or of any other process: a bash under env -i exports them and then runs the command (adding
@@ -515,7 +518,8 @@ isolated_run() {
   done
   # shellcheck disable=SC2016 # the bash -c text expands in the inner shell
   (cd -- "$dir" && exec env -i "${git_isolated[@]}" MISE_TRUSTED_CONFIG_PATHS="$dir" \
-    MISE_CEILING_PATHS="${dir%/*}" MISE_GLOBAL_CONFIG_FILE=/dev/null MISE_SYSTEM_CONFIG_FILE=/dev/null \
+    MISE_CEILING_PATHS="${dir%/*}" MISE_GLOBAL_CONFIG_FILE=/dev/null/config.toml \
+    MISE_SYSTEM_CONFIG_FILE=/dev/null/config.toml \
     "$BASH" -c 'ok=
       while IFS= read -r -d "" kv; do
         if [ "$kv" = = ]; then ok=1; break; fi
