@@ -3,8 +3,8 @@ import { describe, expect, test, vi } from "vitest";
 import { beginSignIn, claims, completeSignIn, discover, localReading, PENDING_KEY, type Provider, REFRESH_WAIT_MS, renewDelay, returnPath, Session, SIGN_OUT_WAIT_MS, SIGNED_OUT_PATH, type Tokens } from "./auth.ts";
 import type { ClientConfig } from "./config.ts";
 
-const ORIGIN = "http://localhost:58443";
-const ISSUER = "http://localhost:58280";
+const ORIGIN = "http://localhost:16000";
+const ISSUER = "http://localhost:16002";
 const config: ClientConfig = { issuer: ISSUER, audience: "bronzeward", cliClientId: "cli", webClientId: "web", scopes: ["urn:example:aud"] };
 const provider: Provider = {
   issuer: ISSUER,
