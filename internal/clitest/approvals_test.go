@@ -154,8 +154,8 @@ func TestApprovals(t *testing.T) {
 	}
 
 	t.Run("T21 confirmation", func(t *testing.T) {
-		in.set(nil, nil)
 		p := planID.FindString(e.ctl(e.create("adopt")...).out)
+		in.set(nil, nil) // clears the request log, so it holds only the unconfirmed approvals' requests
 		for _, c := range []struct{ stdin, want string }{
 			{"pln_aaaaaaaaaaaaaaaaaaaaaaaaaa\n", "the typed text is not the plan ID " + p + "; nothing was sent"},
 			{"\n", "stopped: no plan ID was typed; nothing was sent"},
