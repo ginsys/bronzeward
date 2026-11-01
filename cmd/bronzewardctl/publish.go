@@ -76,7 +76,7 @@ func (e *env) publish(args []string) (err error) {
 		fmt.Fprintf(e.err, "bronzewardctl: %v; the operation's last events were not shown\n", err)
 	}
 	if o.State != "succeeded" {
-		return operationFailed{fmt.Errorf("%s: publication operation %s %s: %s; nothing was sent to any machine", c.Context.Where(), pr(o.Id), pr(o.State), compact(o.Error))}
+		return operationFailed{fmt.Errorf("%s: publication operation %s %s: %s; nothing was sent to any machine", c.Context.Where(), pr(o.Id), pr(o.State), pr(compact(o.Error)))}
 	}
 	keep(e, c, d, "")
 	var res apitypes.PublishResult
@@ -84,7 +84,7 @@ func (e *env) publish(args []string) (err error) {
 		res, err = o.Result.AsPublishResult()
 	}
 	if o.Result == nil || err != nil || res.Release == "" {
-		return fmt.Errorf("%s: publication operation %s succeeded without naming its release: %s", c.Context.Where(), pr(o.Id), compact(o.Result))
+		return fmt.Errorf("%s: publication operation %s succeeded without naming its release: %s", c.Context.Where(), pr(o.Id), pr(compact(o.Result)))
 	}
 	lines, err := nextSteps(c, res.Release)
 	if err != nil || e.output != "table" {
@@ -166,8 +166,10 @@ func (e *env) releaseReview(verb string, args []string) error {
 			}
 			return
 		}
+		// The line feeds between the document's lines are the CLI's own; a tab or any other control
+		// character in a line is escaped (client-contracts.md §6 item 8).
 		for _, l := range strings.Split(strings.TrimSuffix(*r.Configuration, "\n"), "\n") {
-			fmt.Fprintln(w, verbatim(l))
+			fmt.Fprintln(w, verbatim(pr(l)))
 		}
 	})
 }
