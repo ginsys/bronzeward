@@ -575,7 +575,7 @@ func TestETagState(t *testing.T) {
 	}}
 	c, _, _ := writeClient(t, f, "ep_BWSYNTH-1")
 	w := clusterWrite()
-	w.Draft = "drf_BWSYNTH"
+	w.Draft, w.IfMatch = "drf_BWSYNTH", `"BWSYNTH-etag-0"`
 	if _, err := c.Send(w); err != nil {
 		t.Fatal(err)
 	}
@@ -589,11 +589,28 @@ func TestETagState(t *testing.T) {
 			t.Errorf("%s in %s sees %q", other.Server, other.LastEpoch, et)
 		}
 	}
-	if err := DropState(x.Name); err != nil {
+	// The same name added again for another server: removing the old context, or a command of the
+	// old one crossing an epoch, leaves the new server's ETags alone (client-contracts.md §8.3).
+	again := Context{Name: x.Name, Server: "https://other.example.test", LastEpoch: "ep_BWSYNTH-9"}
+	if err := KeepETag(&again, "drf_BWSYNTH-other", `"BWSYNTH-etag-other"`); err != nil {
+		t.Fatal(err)
+	}
+	if et, _ := ETag(&x, "drf_BWSYNTH"); et != `"BWSYNTH-etag"` {
+		t.Errorf("keeping another server's ETag replaced this server's: %q", et)
+	}
+	crossed := x
+	crossed.LastEpoch = "ep_BWSYNTH-2"
+	if err := dropEarlier(&crossed); err != nil {
+		t.Fatal(err)
+	}
+	if err := DropState(x.Name, x.Server); err != nil {
 		t.Fatal(err)
 	}
 	if et, _ := ETag(&x, "drf_BWSYNTH"); et != "" {
 		t.Errorf("a dropped context still has %q", et)
+	}
+	if et, _ := ETag(&again, "drf_BWSYNTH-other"); et != `"BWSYNTH-etag-other"` {
+		t.Errorf("dropping the old server's entry dropped the new server's: %q", et)
 	}
 }
 
@@ -613,7 +630,7 @@ func TestETagAcrossEpochs(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := clusterWrite()
-	w.Draft = "drf_BWSYNTH"
+	w.Draft, w.IfMatch = "drf_BWSYNTH", `"BWSYNTH-etag-1"`
 	if _, err := c.Send(w); err != nil {
 		t.Fatal(err)
 	}

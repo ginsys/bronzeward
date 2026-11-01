@@ -3,47 +3,97 @@ package main
 import (
 	"bytes"
 	"errors"
+	"flag"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
-
-	"github.com/ginsys/bronzeward/internal/client"
 )
 
 // TestRepeatFlags checks each refusal of decision T10's repeat flags (#256), all before sending.
 func TestRepeatFlags(t *testing.T) {
-	key := "BWSYNTH-aaaaaaaaaaaaaaa"
+	key, epoch, principal, ifMatch := "--idempotency-key=BWSYNTH-aaaaaaaaaaaaaaa", "--expect-epoch=ep_1", "--expect-principal=svc_1", `--if-match="e"`
 	for _, c := range []struct {
 		name         string
-		f            repeatFlags
+		args         []string
 		takesIfMatch bool
 		want         string // "" for a repeat, "first" for a first send, else the refusal
 	}{
-		{"none: a first send", repeatFlags{}, false, "first"},
-		{"all three", repeatFlags{key, "ep_1", "svc_1", ""}, false, ""},
-		{"all four where the route takes If-Match", repeatFlags{key, "ep_1", "svc_1", `"e"`}, true, ""},
-		{"no key", repeatFlags{"", "ep_1", "svc_1", ""}, false, "a repeat needs --idempotency-key, --expect-epoch and --expect-principal"},
-		{"no epoch", repeatFlags{key, "", "svc_1", ""}, false, "a repeat needs"},
-		{"no principal", repeatFlags{key, "ep_1", "", ""}, false, "a repeat needs"},
-		{"no if-match where the route takes one", repeatFlags{key, "ep_1", "svc_1", ""}, true, "and --if-match, each as the outcome-unknown block printed it"},
-		{"if-match where the route takes none", repeatFlags{key, "ep_1", "svc_1", `"e"`}, false, "this route takes no If-Match"},
-		{"a key not as printed", repeatFlags{"short", "ep_1", "svc_1", ""}, false, "give the key as printed"},
+		{"none: a first send", nil, false, "first"},
+		{"--if-match alone: a first send with that ETag", []string{ifMatch}, true, "first"},
+		{"all three", []string{key, epoch, principal}, false, ""},
+		{"all four where the route takes If-Match", []string{key, epoch, principal, ifMatch}, true, ""},
+		{"no key", []string{epoch, principal}, false, "a repeat needs --idempotency-key, --expect-epoch and --expect-principal"},
+		{"no epoch", []string{key, principal}, false, "a repeat needs"},
+		{"no principal", []string{key, epoch}, false, "a repeat needs"},
+		{"no if-match where the route takes one", []string{key, epoch, principal}, true, "and --if-match, each as the outcome-unknown block printed it"},
+		{"if-match where the route takes none", []string{key, epoch, principal, ifMatch}, false, "this route takes no If-Match"},
+		{"a key not as printed", []string{"--idempotency-key=short", epoch, principal}, false, "give the key as printed"},
+		// A script's unset variables: never a first send with a new key.
+		{"all given empty", []string{"--idempotency-key=", "--expect-epoch=", "--expect-principal="}, false, "was given an empty value"},
+		{"one given empty", []string{key, epoch, "--expect-principal="}, false, "--expect-principal was given an empty value"},
+		{"if-match given empty", []string{"--if-match="}, true, "--if-match was given an empty value"},
 	} {
-		r, err := c.f.repeat(c.takesIfMatch)
+		var f repeatFlags
+		fs := flag.NewFlagSet(c.name, flag.ContinueOnError)
+		f.flags(fs)
+		if err := fs.Parse(c.args); err != nil {
+			t.Fatal(err)
+		}
+		r, err := f.repeat(c.takesIfMatch)
 		var u usageError
 		switch {
 		case c.want == "first" && (r != nil || err != nil):
 			t.Errorf("%s: %v, %v; want a first send", c.name, r, err)
-		case c.want == "" && (err != nil || r == nil || r.Key != c.f.key || r.Epoch != c.f.epoch || r.Principal != c.f.principal):
+		case c.want == "" && (err != nil || r == nil || r.Key != f.key.v || r.Epoch != "ep_1" || r.Principal != "svc_1"):
 			t.Errorf("%s: %v, %v; want the repeat", c.name, r, err)
 		case c.want != "" && c.want != "first" && (!errors.As(err, &u) || !strings.Contains(err.Error(), c.want)):
 			t.Errorf("%s: %v; want a usage error saying %q", c.name, err, c.want)
 		}
+	}
+}
+
+// TestUnreadableAnswers: a write that succeeded exits 0 though its answer cannot be read, and -o
+// json prints the answer as served; after an unknown outcome, a list item that cannot be read fails
+// the confirming read rather than being skipped, since it could be the one looked for.
+func TestUnreadableAnswers(t *testing.T) {
+	var unknown atomic.Bool // the POST is redirected, an outcome unknown, when set
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Bronzeward-Epoch", "ep_BWSYNTH-1")
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/server":
+			fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":2,"startMode":"normal"}`)
+		case "GET /api/v1/identity":
+			fmt.Fprint(w, `{"kind":"service","principal":"svc_BWSYNTH"}`)
+		case "GET /api/v1/clusters":
+			fmt.Fprint(w, `{"items":[["BWSYNTH"]]}`)
+		case "POST /api/v1/clusters":
+			if unknown.Load() {
+				http.Redirect(w, r, "https://BWSYNTH.example.invalid/", http.StatusTemporaryRedirect)
+				return
+			}
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"id":["BWSYNTH"]}`)
+		}
+	}))
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	for _, o := range []string{"table", "json"} {
+		var out, errb bytes.Buffer
+		code := run([]string{"-o", o, "cluster", "add", "--name", "lab-a"}, &out, &errb)
+		wantOut := map[string]string{"table": "", "json": `"BWSYNTH"`}[o]
+		if code != 0 || !strings.Contains(errb.String(), "succeeded, but its answer cannot be read") || !strings.Contains(out.String(), wantOut) || o == "table" && out.Len() != 0 {
+			t.Errorf("-o %s: exit %d, stdout %q, stderr %q; want 0, the answer as served for json, the failure on stderr", o, code, out.String(), errb.String())
+		}
+	}
+	unknown.Store(true)
+	var out, errb bytes.Buffer
+	if code := run([]string{"cluster", "add", "--name", "lab-a"}, &out, &errb); code != 3 || !strings.Contains(errb.String(), "GET /api/v1/clusters: item 0 cannot be read") {
+		t.Errorf("an unreadable item after an unknown outcome: exit %d, stderr %q; want 3 and the item named", code, errb.String())
 	}
 }
 
@@ -70,19 +120,7 @@ func TestUnknownOutcomeOutput(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	home := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", home)
-	t.Setenv("XDG_STATE_HOME", home)
-	tok := filepath.Join(home, "token")
-	if err := os.WriteFile(tok, []byte("bwt_BWSYNTH.BWSYNTH-secret\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := client.UpdateConfig(func(c *client.Config) error {
-		c.Current, c.Contexts = "lab", []client.Context{{Name: "lab", Server: srv.URL, Credential: "automation", Automation: &client.Automation{TokenFile: tok}}}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
+	automationContext(t, srv.URL)
 	for _, o := range []string{"table", "json", "yaml"} {
 		var out, errb bytes.Buffer
 		code := run([]string{"-o", o, "cluster", "add", "--name", "lab-a"}, &out, &errb)
