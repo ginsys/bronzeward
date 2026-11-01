@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { type Attempt, Client, type ClientOptions } from "./request.ts";
 import { type ShellEvents, ShellReads } from "./shell.tsx";
-import { BACKOFF, EARLIER_EPOCH, EPOCH_CHANGED_ASIDE, MAX_BODY, NO_CREDENTIAL, NO_EPOCH, NO_EPOCH_HEADER, newKey, RECOVERY_START, RENEWED_LAST, SHELL_GONE, SIGN_IN_CHANGED, SIGN_IN_REFUSED, TOO_LARGE, Write, Writes } from "./write.ts";
+import { BACKOFF, EARLIER_EPOCH, EPOCH_CHANGED_ASIDE, INGEST_WAIT, MAX_BODY, NO_CREDENTIAL, NO_EPOCH, NO_EPOCH_HEADER, newKey, RECOVERY_START, RENEWED_LAST, SHELL_GONE, SIGN_IN_CHANGED, SIGN_IN_REFUSED, TOO_LARGE, Write, Writes } from "./write.ts";
 
 const EPOCH = "e1";
 const PRINCIPAL = "https://idp.invalid SYNTH-sub-1";
@@ -390,6 +390,77 @@ describe("the confirming read's credential refusals (§8.2)", () => {
     answer({ status: 201, headers: new Headers(), data: { id: "c1" } });
     expect(await run).toMatchObject({ kind: "done" });
     expect(writes.onEnded).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("a fragment write's in-progress 409 (§8.4 item 2, AMB-02)", () => {
+  const fragment = () =>
+    new Write({ method: "PUT", path: "/drafts/drf_1/fragments/f", body: { layer: "role", document: "a: 1\n" }, ifMatch: '"6-t"', resource: "/drafts/drf_1", ingests: true });
+  const inProgress = (extra: Record<string, unknown> = {}) => problem(409, "conflict", { ingestion: "ing_1", ...extra });
+  // The last in-progress answer's problem, which every unknown or set-aside outcome carries (§8.2).
+  const inProgressProblem = { type: "urn:bronzeward:problem:conflict", title: "conflict", status: 409, ingestion: "ing_1" };
+  const server = (leaseSeconds: number) =>
+    new Response(JSON.stringify({ ingestionClaim: { leaseSeconds, absoluteExpirySeconds: 3600 } }), { status: 200, headers: { "Content-Type": "application/json", "Bronzeward-Epoch": EPOCH } });
+  const ok = () => new Response(JSON.stringify({ draft: "drf_1" }), { status: 200, headers: { "Content-Type": "application/json", "Bronzeward-Epoch": EPOCH, "Idempotent-Replayed": "true" } });
+
+  test("a repeat's in-progress 409 is repeated with the same key after 1, 2, then 4 s, each after the checks, and counts as no repeat", async () => {
+    const drop = () => new TypeError("Failed to fetch");
+    const { writes, waits, sent, writesSent } = page([drop(), inProgress(), server(30), inProgress(), inProgress(), inProgress(), ok()]);
+    const w = fragment();
+    expect(await writes.submit(w)).toEqual({ kind: "done", status: 200, data: { draft: "drf_1" }, replayed: true });
+    // The backoff's first wait, then the in-progress waits; the three repeats are not spent.
+    expect(waits).toEqual([1000, 1000, 2000, 4000, 4000]);
+    expect(new Set(writesSent().filter((s) => s.method === "PUT").map((s) => s.headers["Idempotency-Key"]))).toEqual(new Set([w.key]));
+    expect(sent.filter((s) => s.path === "/server")).toHaveLength(1);
+    expect(sent.filter((s) => s.path === "/recovery")).toHaveLength(6);
+    expect(w.ingesting).toBeUndefined();
+  });
+
+  test("names the ingestion while it waits", async () => {
+    const seen: (string | undefined)[] = [];
+    const { writes } = page([new TypeError("Failed to fetch"), inProgress(), server(30), ok()]);
+    const w = fragment();
+    writes.subscribe(() => seen.push(w.ingesting));
+    await writes.submit(w);
+    expect(seen).toContain("ing_1");
+    expect(seen.at(-1)).toBeUndefined();
+  });
+
+  test("still in progress at the bound, the outcome is unknown", async () => {
+    const { writes, waits } = page([new TypeError("Failed to fetch"), inProgress(), server(30), ...Array.from({ length: 40 }, () => inProgress())]);
+    const o = await writes.submit(fragment());
+    expect(o).toEqual({ kind: "unknown", why: "the first request with this key was still ingesting (ingestion ing_1) after 120 s", problem: inProgressProblem });
+    expect(waits.slice(1).reduce((a, b) => a + b, 0)).toBe(INGEST_WAIT);
+  });
+
+  test("a served claim lease longer than the wait raises the bound", async () => {
+    const { writes, waits } = page([new TypeError("Failed to fetch"), inProgress(), server(300), ...Array.from({ length: 90 }, () => inProgress())]);
+    const o = await writes.submit(fragment());
+    expect(o).toEqual({ kind: "unknown", why: "the first request with this key was still ingesting (ingestion ing_1) after 300 s", problem: inProgressProblem });
+    expect(waits.slice(1).reduce((a, b) => a + b, 0)).toBe(300_000);
+  });
+
+  test("a 409 with ingestion and draft (published meanwhile) is refused and not repeated", async () => {
+    const { writes, writesSent } = page([new TypeError("Failed to fetch"), inProgress({ draft: "drf_1" })]);
+    const o = await writes.submit(fragment());
+    expect(o).toMatchObject({ kind: "refused", status: 409 });
+    expect(writesSent()).toHaveLength(2);
+  });
+
+  test("another sign-in during the wait sets it aside, and nothing more is sent", async () => {
+    // The sign-in changes once the 409 is answered, before the wait ends.
+    let signIn = (_: string) => {};
+    const env = page([new TypeError("Failed to fetch"), inProgress(), () => (signIn("https://idp.invalid SYNTH-sub-2"), server(30))]);
+    signIn = env.signIn;
+    expect(await env.writes.submit(fragment())).toEqual({ kind: "set-aside", why: SIGN_IN_CHANGED, ambiguous: true, problem: inProgressProblem });
+    expect(env.writesSent().filter((s) => s.method === "PUT")).toHaveLength(2);
+  });
+
+  test("a write that does not ingest refuses the same 409", async () => {
+    const { writes, writesSent } = page([new TypeError("Failed to fetch"), inProgress()]);
+    const o = await writes.submit(spec());
+    expect(o).toMatchObject({ kind: "refused", status: 409 });
+    expect(writesSent()).toHaveLength(2);
   });
 });
 
