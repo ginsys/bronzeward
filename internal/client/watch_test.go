@@ -195,6 +195,14 @@ func TestWatch(t *testing.T) {
 			t.Errorf("watch: %v, state %q, shown %q, %d operation reads, notices %q; want succeeded, %q, 2 reads", err, state, shown, o.reads, notices, want)
 		}
 	})
+	t.Run("a drain of another epoch than the operation read's, nothing shown before, reads the operation again", func(t *testing.T) {
+		o := &opServer{streams: []handler{sse(), sse(ev(e2+":3", "succeeded"))}, epochs: []string{e1, e2},
+			states: []string{"failed", "succeeded"}, pages: []string{item(e2+":1", "queued"), item(e2+":2", "started"), item(e2+":3", "succeeded")}}
+		shown, _, state, _, err := watched(t, o, e1, nil)
+		if want := []string{e2 + ":1", e2 + ":2", e2 + ":3"}; err != nil || state != "succeeded" || !slices.Equal(shown, want) || o.reads != 2 {
+			t.Errorf("watch: %v, state %q, shown %q, %d operation reads; want succeeded, %q, 2 reads", err, state, shown, o.reads, want)
+		}
+	})
 	t.Run("a slow operation read does not skip the backoff", func(t *testing.T) {
 		o := &opServer{streams: []handler{sse(), sse(ev(e1+":1", "succeeded"))}, states: []string{"running", "succeeded"},
 			pages: []string{item(e1+":1", "succeeded")}, slow: 1100 * time.Millisecond}

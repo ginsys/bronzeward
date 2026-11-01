@@ -49,9 +49,9 @@ func (e *env) publish(args []string) (err error) {
 		if op.Id == "" {
 			return []string{fmt.Sprintf("Publishing draft %s revision %s.", d, rev)}, nil
 		}
-		lines := []string{fmt.Sprintf("Publishing draft %s revision %s (operation %s).", d, rev, op.Id)}
+		lines := []string{fmt.Sprintf("Publishing draft %s revision %s (operation %s).", d, rev, pr(op.Id))}
 		if noWait {
-			lines = append(lines, "Nothing has been sent to any machine. Follow it with: bronzewardctl operation show "+op.Id)
+			lines = append(lines, "Nothing has been sent to any machine. Follow it with: bronzewardctl operation show "+pr(op.Id))
 		}
 		return lines, nil
 	})
@@ -65,7 +65,7 @@ func (e *env) publish(args []string) (err error) {
 	}
 	defer func() { err = errors.Join(err, c.Save()) }()
 	o, err := c.Watch(op.Id, client.Watch{
-		Show:  func(ev client.Event) { fmt.Fprintf(e.err, "  %s\n", client.Printable(ev.Type)) },
+		Show:  func(ev client.Event) { fmt.Fprintf(e.err, "  %s\n", pr(ev.Type)) },
 		Clear: func() { fmt.Fprintln(e.err, "  (the events above no longer hold)") },
 	})
 	if o == nil {
@@ -76,7 +76,7 @@ func (e *env) publish(args []string) (err error) {
 		fmt.Fprintf(e.err, "bronzewardctl: %v; the operation's last events were not shown\n", err)
 	}
 	if o.State != "succeeded" {
-		return operationFailed{fmt.Errorf("%s: publication operation %s %s: %s; nothing was sent to any machine", c.Context.Where(), o.Id, o.State, compact(o.Error))}
+		return operationFailed{fmt.Errorf("%s: publication operation %s %s: %s; nothing was sent to any machine", c.Context.Where(), pr(o.Id), pr(o.State), compact(o.Error))}
 	}
 	keep(e, c, d, "")
 	var res apitypes.PublishResult
@@ -84,7 +84,7 @@ func (e *env) publish(args []string) (err error) {
 		res, err = o.Result.AsPublishResult()
 	}
 	if o.Result == nil || err != nil || res.Release == "" {
-		return fmt.Errorf("%s: publication operation %s succeeded without naming its release: %s", c.Context.Where(), o.Id, compact(o.Result))
+		return fmt.Errorf("%s: publication operation %s succeeded without naming its release: %s", c.Context.Where(), pr(o.Id), compact(o.Result))
 	}
 	lines, err := nextSteps(c, res.Release)
 	if err != nil || e.output != "table" {
@@ -93,6 +93,9 @@ func (e *env) publish(args []string) (err error) {
 	_, err = fmt.Fprintln(e.out, strings.Join(lines, "\n"))
 	return err
 }
+
+// pr escapes the control characters of text the server chose (client-contracts.md §6 item 4).
+var pr = client.Printable
 
 // nextSteps names the release and, for each of its machines, the plan it needs: an adopt plan
 // hands over a machine with no Applied release, an apply-config plan the others. Plans are made
@@ -110,7 +113,7 @@ func nextSteps(c *client.Client, release string) ([]string, error) {
 	if len(rel.Machines) == 1 {
 		machines = "1 machine"
 	}
-	lines := []string{fmt.Sprintf("Publication succeeded: release %s is now Desired for %s. Nothing has been sent to any machine.", rel.Id, machines)}
+	lines := []string{fmt.Sprintf("Publication succeeded: release %s is now Desired for %s. Nothing has been sent to any machine.", pr(rel.Id), machines)}
 	for _, m := range rel.Machines {
 		r, err := c.Get("/machines/" + url.PathEscape(m.Machine))
 		var x apitypes.MachineBody
@@ -119,14 +122,14 @@ func nextSteps(c *client.Client, release string) ([]string, error) {
 		}
 		switch {
 		case err != nil:
-			lines = append(lines, fmt.Sprintf("  %s: its Applied release cannot be read: %v", m.Machine, err))
+			lines = append(lines, fmt.Sprintf("  %s: its Applied release cannot be read: %s", pr(m.Machine), pr(err.Error())))
 		case x.Applied == nil:
-			lines = append(lines, fmt.Sprintf("  %s has no Applied release: hand it over with an adopt plan.", m.Machine))
+			lines = append(lines, fmt.Sprintf("  %s has no Applied release: hand it over with an adopt plan.", pr(m.Machine)))
 		default:
-			lines = append(lines, fmt.Sprintf("  %s has Applied release %s: plan an apply-config.", m.Machine, x.Applied.Release))
+			lines = append(lines, fmt.Sprintf("  %s has Applied release %s: plan an apply-config.", pr(m.Machine), pr(x.Applied.Release)))
 		}
 	}
-	return append(lines, "Review a machine's rendered configuration: bronzewardctl release review "+rel.Id+" <machine>"), nil
+	return append(lines, "Review a machine's rendered configuration: bronzewardctl release review "+pr(rel.Id)+" <machine>"), nil
 }
 
 // releaseReview prints a machine's review of a release (GET /releases/{id}/machines/{m}/review,
@@ -143,23 +146,23 @@ func (e *env) releaseReview(verb string, args []string) error {
 		if verb == "provenance" {
 			fmt.Fprintln(w, "REFERENCE\tVERSION\tFROM (REVISION, PATH)\tRENDERED AT")
 			for _, p := range r.Provenance {
-				ref, at := p.Reference, or(p.Output, "-")
+				ref, at := pr(p.Reference), pr(or(p.Output, "-"))
 				if p.Member != nil {
 					ref += fmt.Sprintf("#%d", *p.Member)
 				}
 				if p.OverriddenBy != nil {
-					at = "overridden by " + p.OverriddenBy.Revision
+					at = "overridden by " + pr(p.OverriddenBy.Revision)
 				}
-				fmt.Fprintf(w, "%s\t%d\t%s, %s\t%s\n", ref, p.Version, p.Source.Revision, verbatim(p.Source.Path), verbatim(at))
+				fmt.Fprintf(w, "%s\t%d\t%s, %s\t%s\n", verbatim(ref), p.Version, verbatim(pr(p.Source.Revision)), verbatim(pr(p.Source.Path)), verbatim(at))
 			}
 			fmt.Fprintln(w, "Provenance covers secret references only; other fields are not traced.")
 			return
 		}
-		fmt.Fprintf(w, "Release %s, machine %s, validated: %s\n", r.Release, r.Machine, r.Mode)
+		fmt.Fprintf(w, "Release %s, machine %s, validated: %s\n", pr(r.Release), pr(r.Machine), pr(r.Mode))
 		if r.Configuration == nil {
 			fmt.Fprintln(w, "Configuration not shown: it could not be redacted.")
 			if r.Notice != nil && *r.Notice != "" {
-				fmt.Fprintln(w, "Server notice: "+verbatim(client.Printable(*r.Notice)))
+				fmt.Fprintln(w, "Server notice: "+verbatim(pr(*r.Notice)))
 			}
 			return
 		}

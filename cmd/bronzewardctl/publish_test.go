@@ -86,7 +86,7 @@ func (f *publishFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case path == "/releases/rel_BWSYNTH/machines/mch_a/review":
 		fmt.Fprintf(w, `{"release":"rel_BWSYNTH","machine":"mch_a","mode":"metal","configuration":%q,"provenance":[`+
 			`{"reference":"registry/example-pass","version":1,"source":{"revision":"frv_BWSYNTH-a","path":"doc[0]/machine/registries/config/registry.example.invalid/auth/password","digest":"d","occurrence":0},"output":"doc[0]/machine/registries/config/registry.example.invalid/auth/password"},`+
-			`{"reference":"tls/key","version":2,"member":1,"source":{"revision":"frv_BWSYNTH-b","path":"doc[0]/machine/x","digest":"d","occurrence":0},"overriddenBy":{"revision":"frv_BWSYNTH-c","digest":"d"}}]}`, rendered)
+			`{"reference":"tls/key","version":2,"member":1,"source":{"revision":"frv_BWSYNTH-b","path":"doc[0]/machine/x\u001b[2J","digest":"d","occurrence":0},"overriddenBy":{"revision":"frv_BWSYNTH-c","digest":"d"}}]}`, rendered)
 	case path == "/releases/rel_BWSYNTH/machines/mch_b/review":
 		fmt.Fprint(w, `{"release":"rel_BWSYNTH","machine":"mch_b","mode":"metal","configuration":null,"notice":"BWSYNTH no redacted form\u001b[2J","provenance":[]}`)
 	default:
@@ -169,10 +169,10 @@ func TestPublication(t *testing.T) {
 	if out := step("review -o json", []string{"release", "review", "rel_BWSYNTH", "mch_b", "-o", "json"}, 0, "", ""); !strings.Contains(out, `"configuration":null`) {
 		t.Errorf("-o json printed %q", out)
 	}
-	step("provenance: exactly the records served", []string{"release", "provenance", "rel_BWSYNTH", "mch_a"}, 0,
+	step("provenance: exactly the records served, a path's control character escaped", []string{"release", "provenance", "rel_BWSYNTH", "mch_a"}, 0,
 		"registry/example-pass  1        frv_BWSYNTH-a, doc[0]/machine/registries/config/registry.example.invalid/auth/password  doc[0]/machine/registries/config/registry.example.invalid/auth/password\n"+
-			"tls/key#1              2        frv_BWSYNTH-b, doc[0]/machine/x                                                         overridden by frv_BWSYNTH-c\n"+
-			"Provenance covers secret references only; other fields are not traced.\n", "")
+			"tls/key#1              2        frv_BWSYNTH-b, doc[0]/machine/x\\x1b[2J                                                  overridden by frv_BWSYNTH-c\n"+
+			"Provenance covers secret references only; other fields are not traced.\n", "", "\x1b")
 	step("provenance with none", []string{"release", "provenance", "rel_BWSYNTH", "mch_b"}, 0,
 		"Provenance covers secret references only; other fields are not traced.", "", "registry")
 }
