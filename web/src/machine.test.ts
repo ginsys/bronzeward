@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ADOPTED, advanced, advanceReads, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, kept, keptW3, latestUnread, MachineShown, nextTimeline, type Observation, Observations, POLL_MS, polled, queued, readLater, readOlder, sentences, stepAdvance, type Timeline, TimelineRows, UNREAD } from "./machine.tsx";
+import { ADOPTED, advanced, advanceReads, countingSettle, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, kept, keptW3, latestUnread, MachineShown, nextTimeline, type Observation, Observations, POLL_MS, polled, queued, readLater, readOlder, sentences, stepAdvance, type Timeline, TimelineRows, UNREAD } from "./machine.tsx";
 import { type Reads, ReadsProvider, RESTARTED } from "./list.tsx";
 import type { Machine } from "./machines.tsx";
 import type { ReadResult } from "./request.ts";
@@ -284,6 +284,24 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
     expect(stepAdvance(waiting, { key: "v\n1", settled: 1 })).toEqual({ key: "v\n1", n: 2, left: 2, dirty: false });
     // The same key again changes nothing.
     expect(stepAdvance(moved, { key: "v\n1" })).toBe(moved);
+  });
+
+  test("#424 item 2, the read-again counter: a read from an earlier visit to the same view settles on the page but counts for nothing", () => {
+    // A, then B, then A again with no advance: the key and read again are A's first visit's.
+    const k = "A\n0";
+    let a = stepAdvance(stepAdvance(advanceReads(k), { key: "B\n0" }), { key: k });
+    const outer: unknown[] = [];
+    const settle = countingSettle((res) => outer.push(res), (e) => (a = stepAdvance(a, e)), k, a.n);
+    const res = { kind: "ok", status: 200, data: {} } as unknown as Parameters<typeof settle>[0];
+    // The first visit's two reads settle late: the page still takes both, the count does not move.
+    settle(res, () => {}, () => false, () => false);
+    settle(res, () => {}, () => false, () => false);
+    expect(outer).toHaveLength(2);
+    expect(a).toEqual({ key: k, n: 0, left: 2, dirty: false });
+    // The return visit's own two reads count.
+    settle(res, () => {}, () => true, () => false);
+    settle(res, () => {}, () => true, () => false);
+    expect(a).toEqual({ key: k, n: 0, left: 0, dirty: false });
   });
 
   test("#424 item 1: the timeline's restart notice stays through a read again in the same view, and goes with the view", () => {
