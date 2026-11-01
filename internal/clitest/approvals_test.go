@@ -240,7 +240,7 @@ func TestApprovals(t *testing.T) {
 		release()
 		f.want(r, 0, "The plan "+p+" stays committed to operation "+op+". A revocation ends an uncommitted approval and undoes no commitment; "+
 			"it does not stop an attempt already recorded.\nFollow it with: bronzewardctl operation watch '"+op+"'\n")
-		if state := f.ended(op); state != "succeeded" {
+		if state := f.ended(op); state != "completed" {
 			t.Errorf("the operation with a recorded attempt ended %s: %s", state, f.events(op))
 		}
 		if n := len(e.st.node.AppliedRequests()); n != 1 {
@@ -291,7 +291,7 @@ func (e *planEnv) t8(t *testing.T) {
 	keepJourney(t, "t8", localTimes.ReplaceAllString(out.String(), "<local time>"), dir)
 	e.until(t, "committed", `SELECT state FROM plan_state WHERE plan = $1`, p)
 	var op string
-	if err := f.db.QueryRow(`SELECT operation FROM plan_state WHERE plan = $1`, p).Scan(&op); err != nil || f.ended(op) != "succeeded" {
+	if err := f.db.QueryRow(`SELECT operation FROM plan_state WHERE plan = $1`, p).Scan(&op); err != nil || f.ended(op) != "completed" {
 		t.Errorf("T8's operation %s ended %s, %v: %s", op, f.ended(op), err, f.events(op))
 	}
 }
