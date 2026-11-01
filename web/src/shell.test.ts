@@ -1,7 +1,7 @@
 import { createElement as h, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
-import { Action, connection, Deprecations, deprecated, Failure, incompatible, MIN_API_REVISION, observed, offlineSince, regaining, ShellContext, type ShellEvents, ShellReads } from "./shell.tsx";
+import { Action, connection, Deprecations, deprecated, Failure, incompatible, MIN_API_REVISION, observed, offlineSince, regaining, ShellContext, type ShellEvents, ShellReads, showCurrent } from "./shell.tsx";
 import { Conflict, Disconnected, Empty, HUMAN_ONLY, Loading, NOT_ACCEPTED, NotAccepted, Offline, Refused, REPEATING, REPLAYED, Replayed, SET_ASIDE, SetAside, Unknown, UNKNOWN, Unread, Withheld, WITHHELD } from "./states.tsx";
 import { NO_EPOCH } from "./write.ts";
 import { TRANSPORT_FAILURE } from "./request.ts";
@@ -65,6 +65,17 @@ describe("W11 state catalogue: every text a status message", () => {
 });
 
 describe("the shell", () => {
+  test("[Show current state] on the view already shown reads it again; on another view it moves there", () => {
+    const moved: string[] = [];
+    let reads = 0;
+    const show = (to: string, here: string) => showCurrent(to, here, (t) => void moved.push(t), () => void reads++);
+    show("/clusters", "/clusters");
+    expect([moved, reads]).toEqual([[], 1]);
+    show("/clusters", "/machines");
+    show("/clusters", "/clusters?cluster=c1");
+    expect([moved, reads]).toEqual([["/clusters", "/clusters"], 1]);
+  });
+
   const action = (roles: string[], offline = false) =>
     html(h(ShellContext, { value: { roles: roles as never, offline } }, h(Action, { label: "Create draft", needs: ["author"], onClick: noop })));
 
