@@ -2,7 +2,8 @@
 # cli_test.go TestSharedCases runs exactly the cases recorded here without a test member, in this
 # order, against a disposable bronzeward serve behind an in-process TLS injector. A record with a
 # test member names the test that runs it instead, as its subtest named by the ID; that test
-# refuses to run when its records differ from its subtests. Data is synthetic: a viewer automation
+# refuses to run when its records differ from its subtests, and a test member naming no such test
+# fails every test that reads this file. Data is synthetic: a viewer automation
 # token issued by bronzeward token for the test database, and the fixture issuer's or the test
 # identity provider's synthetic subjects. An exchange item is one string, with its headers after
 # the request line.
@@ -148,7 +149,7 @@
     - GET /api/v1/identity
   fault: the token file holds an h-viewer token 30 seconds from expiry; the renewed token's subject differs
   expect:
-    client: renews once; shows the renewal as a new sign-in for another subject before the result. This is the sign-in half; the pending write set aside needs the client-side fault injector of ginsys/bronzeward#263
+    client: renews once; shows the renewal on stderr as a new sign-in for another subject, and the result on stdout. The renewal goes to the provider, so the test counts it there and checks the injector's reads apart. This is the sign-in half; the pending write set aside needs the client-side fault injector of ginsys/bronzeward#263
     server: answers the reads for h-other
     shown: '"a new sign-in: the renewed token is for h-other at <issuer>, not h-viewer at <issuer>", then "subject h-other"; exit 0'
     absent: [token in stdout, stderr, argv]
@@ -176,7 +177,7 @@
     - GET /api/v1/machines
   fault: none
   expect:
-    client: stores the sign-in in the token file; sends the reads with the access token; records the server's Bronzeward-Epoch on the context
+    client: stores the sign-in in the token file; sends the reads with the access token; records the server's Bronzeward-Epoch on the context. The provider enforces PKCE and the loopback redirect; the test does not read the authorization request, so it does not check the nonce
     server: answers every read for h-viewer as viewer
     shown: '"Signed in to idp as <subject> at <issuer>", "kept in the token file <file>"; whoami "viewer"; the list; lastEpoch in the context list; exit 0 each'
     absent: [token in stdout, stderr, argv]
@@ -190,7 +191,7 @@
     - GET /api/v1/operations, each time
   fault: none; the access token expired
   expect:
-    client: renews once with the rotated refresh token and stores the new pair; the second read uses the live token and does not renew. This is the renewal half; the stream half with Last-Event-ID needs operation watch
+    client: renews with the refresh token and stores the new pair; the second read uses the live token and does not renew. The test checks the rotation at the provider, not the count of renewals inside the first read, nor the 5-minute lifetime, which the provider's configuration sets. This is the renewal half; the stream half with Last-Event-ID needs operation watch
     server: answers both reads
     shown: the operation list, exit 0 each time
     absent: [token in stdout, stderr, argv, and the provider redeeming the rotated-out refresh token]
@@ -203,7 +204,7 @@
     - POST <revocation_endpoint>, the refresh token
   fault: none
   expect:
-    client: removes the token file; revokes the refresh token at the provider; states that the access token stays valid at the server until it expires
-    server: still accepts the access token on GET /api/v1/identity until its exp, as stated
+    client: removes the token file; revokes the refresh token at the provider; states that the access token stays valid at the server until it expires. This is the token-file half; the credential-store half runs against the fixture provider in login_test.go TestLogin "system credential store", which skips without dbus-daemon, dbus-send and gnome-keyring-daemon (ginsys/bronzeward#386)
+    server: still accepts the access token on GET /api/v1/identity after the logout; the test does not check the time stated
     shown: '"the token file <file> is removed", "The refresh token is revoked at the identity provider.", "stays valid at the server until"; exit 0'
     absent: [token in stdout, stderr, argv, the token file, and the provider redeeming the revoked refresh token]

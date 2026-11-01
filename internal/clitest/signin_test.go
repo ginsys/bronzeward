@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -188,10 +189,18 @@ func init() {
 		f.store(f.humanFile(), f.viewerToken("h-viewer", 270*time.Second, 30*time.Second), "BWSYNTH-rt-7")
 		f.idp.set(func(string) (int, any) { return issued(f.viewerToken("h-other", 0, issuer.Lifetime), "BWSYNTH-rt-8") })
 		t.Cleanup(func() { f.idp.set(nil) })
-		f.want(f.signedIn("--context", "human", "whoami"), 0,
-			"a new sign-in: the renewed token is for h-other at "+f.iss.URL+", not h-viewer at "+f.iss.URL, "subject h-other")
+		notice := "a new sign-in: the renewed token is for h-other at " + f.iss.URL + ", not h-viewer at " + f.iss.URL
+		r := f.signedIn("--context", "human", "whoami")
+		f.want(r, 0, notice, "subject h-other")
+		if !strings.Contains(r.err, notice) || !strings.Contains(r.out, "subject h-other") {
+			t.Errorf("want the notice on stderr and the result on stdout:\nstdout %q\nstderr %q", r.out, r.err)
+		}
 		if n := f.idp.calls.Load(); n != 1 {
 			t.Errorf("%d renewals, want 1", n)
+		}
+		// The renewal goes to the provider, not through the injector, which sees the reads only.
+		if seen := in.requests(); !slices.Equal(seen, []string{"GET /api/v1/server", "GET /api/v1/identity"}) {
+			t.Errorf("the injector saw %v, want GET /api/v1/server, then GET /api/v1/identity", seen)
 		}
 	}
 	sharedCases["AUTH-10"] = func(t *testing.T, f *fixture, in *injector) {

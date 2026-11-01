@@ -430,8 +430,12 @@ var sharedCases = map[string]func(*testing.T, *fixture, *injector){
 	},
 }
 
+// recordTests are the tests that run testdata/cases.yaml records: "" is TestSharedCases.
+var recordTests = []string{"", "TestLoginIdentityProvider"}
+
 // recorded returns, in file order, the IDs of the testdata/cases.yaml records that test runs: the
 // records whose test member names it, or for "" the records without one, which TestSharedCases runs.
+// A record naming any other test fails every caller, so that no record claims a case nothing runs.
 func recorded(t *testing.T, test string) []string {
 	t.Helper()
 	b, err := os.ReadFile("testdata/cases.yaml")
@@ -447,6 +451,9 @@ func recorded(t *testing.T, test string) []string {
 	}
 	var ids []string
 	for _, r := range records {
+		if !slices.Contains(recordTests, r.Test) {
+			t.Fatalf("testdata/cases.yaml record %s names test %q, which runs no records", r.ID, r.Test)
+		}
 		if r.Test == test {
 			ids = append(ids, r.ID)
 		}
