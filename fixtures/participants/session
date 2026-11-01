@@ -5,9 +5,13 @@
 #
 #   session start         fixtures/bin/up, dev-idp up --participants, A trusts Zitadel, the web host
 #   session passwords     a new password for every seeded human, shown once on this terminal;
-#                         --exec <command> gives them to that command's environment instead
+#                         --exec <command> gives them to that command's environment instead;
+#                         --only <human> sets that one human's alone
 #   session shell         the participant's shell: its own client configuration, no history file
-#   session t1            T1's precondition, then the reads that confirm it
+#   session t1 ... t11    the task's precondition, the names to read out, then the reads that
+#                         confirm it; in the session order T1, T3 to T9, T2, T10, T11
+#   session t5 collide    h-all's competing save into the participant's open draft (collide.mjs)
+#   session t9 disconnect the instances' links to the worker cut for 60 s, then joined again
 #   session scan [path]   no session password in any retained file or log, with a planted control
 #   session stop          the web host and dev-idp; fixtures/bin/down removes the fixture
 #
@@ -110,6 +114,47 @@ trust_zitadel() {
   mv --no-target-directory -- "$cfg.partial" "$cfg"
 }
 
+# set_issuer zitadel|fixture: A's configuration names one issuer, for a task setup. Zitadel, as
+# trust_zitadel sets it, is where the participant signs in. The fixture issuer is the one the
+# scenarios mint their tokens for, so each task setup runs on it and hands over on Zitadel. A trusts
+# one issuer at a time and reads it at its start (restart_a). Only the three issuer lines change:
+# the scenarios write other lines of A's configuration (deniedSubjects, driftInterval, the keys,
+# S7's ingestion block), which a copy of bin/up's configuration would lose.
+set_issuer() {
+  local line i
+  # Read through the from and to namerefs below.
+  # shellcheck disable=SC2034
+  local fixture=('    issuer: http://issuer:5556' '    plainHTTPHosts: [issuer]' '    audience: bronzeward') \
+    zitadel=("    issuer: $(idp_var BW_TEST_IDP_ISSUER)" '    plainHTTPHosts: []' "    audience: \"$(idp_var BW_TEST_IDP_PROJECT)\"")
+  if [ "$1" = zitadel ]; then local -n from=fixture to=zitadel; else local -n from=zitadel to=fixture; fi
+  while IFS= read -r line; do
+    for i in 0 1 2; do
+      if [ "$line" = "${from[$i]}" ]; then
+        line=${to[$i]}
+        break
+      fi
+    done
+    printf '%s\n' "$line"
+  done <"$cfg" >"$cfg.partial"
+  for i in 0 1 2; do
+    grep --quiet --line-regexp --fixed-strings -- "${to[$i]}" "$cfg.partial" || {
+      rm -f -- "$cfg.partial"
+      die "A's configuration has no issuer line to set to $1 ($cfg): ${to[$i]# *}"
+    }
+  done
+  mv --no-target-directory -- "$cfg.partial" "$cfg"
+}
+
+running() { [ "$(docker inspect --type container --format '{{.State.Running}}' "$1" 2>/dev/null)" = true ]; }
+
+# restart_a: A started again on its configuration, and on Zitadel the forwarder in its new network
+# namespace. inject start puts back any recorded link split.
+restart_a() {
+  if running "$BW_A"; then "$bin/inject" kill A >/dev/null; fi
+  "$bin/inject" start A >/dev/null
+  if grep --quiet --line-regexp --fixed-strings -- '    plainHTTPHosts: []' "$cfg"; then forward_idp; fi
+}
+
 # forward_idp: a forwarder in A's network namespace, listening on its 127.0.0.1 at the issuer's port
 # and passing each connection to Zitadel on the dev-idp network, so that A reaches the issuer URL
 # that the browser and the CLI use. Never published on the host. A start makes a new namespace, so
@@ -201,7 +246,11 @@ start() {
 # (the agent's rehearsal), nothing is printed: the command runs with each password in its
 # environment only, as BW_PW_<NAME> (h-author: BW_PW_H_AUTHOR).
 passwords() {
-  local exec=''
+  local exec='' only=''
+  if [ "${1:-}" = --only ]; then
+    only=${2:?passwords --only needs a human}
+    shift 2
+  fi
   if [ "${1:-}" = --exec ]; then
     shift
     [ $# -gt 0 ] || die "passwords --exec needs a command"
@@ -209,10 +258,11 @@ passwords() {
   else
     [ -t 1 ] || die "passwords shows each password once, on a terminal; standard output is not one"
   fi
-  local issuer pair name uid pw letters digits env=()
+  local issuer pair name uid pw letters digits env=() set=0
   issuer=$(idp_var BW_TEST_IDP_ISSUER)
   for pair in $(idp_var BW_TEST_IDP_USERS | tr ',' ' '); do
     name=${pair%%=*} uid=${pair#*=}
+    [ -z "$only" ] || [ "$name" = "$only" ] || continue
     # From a bounded read: `tr </dev/urandom | head` ends in SIGPIPE, which pipefail turns into a
     # silent exit.
     letters=$(LC_ALL=C tr -dc 'a-z0-9' < <(head -c 1024 /dev/urandom))
@@ -224,6 +274,7 @@ passwords() {
       curl --disable -sSf --noproxy '*' -o /dev/null -X POST "$issuer/v2/users/$uid/password" \
         -H "Authorization: Bearer $(cat "$idp/seed.pat")" -H 'Content-Type: application/json' -d @- ||
       die "could not set the password of $name"
+    set=$((set + 1))
     if [ -n "$exec" ]; then
       name=${name^^}
       env+=("BW_PW_${name//-/_}=$pw")
@@ -232,6 +283,7 @@ passwords() {
     fi
   done
   pw=''
+  [ -z "$only" ] || [ "$set" -eq 1 ] || die "passwords --only: no seeded human $only"
   # Exported in a subshell, not passed to env(1), so that no password is ever an argument.
   if [ -n "$exec" ]; then (
     for pw in "${env[@]}"; do export "${pw?}"; done
@@ -280,6 +332,179 @@ t1() {
   # shellcheck disable=SC2016 # $out and $1 are the inner shell's
   read_ok "the client is not signed in" in_part sh -c 'out=$(bronzewardctl --no-input whoami 2>&1) && exit 1
     case $out in *"not signed in: nothing is stored in the token file $1;"*) ;; *) exit 1 ;; esac' sh "$part/home/lab-token"
+}
+
+# The task setups T2-T11, in the session order of README.md: T1, T3 to T9, T2, T10, T11. Each runs
+# the acceptance scenarios' steps up to the task's precondition, on the fixture issuer, then hands A
+# back on Zitadel. A database restore cannot undo a change on a node, so a setup restores only to a
+# point no node has moved from since: p-base (seeded, nothing registered), p-s2 (S2's publication,
+# nothing applied) and p-labels (p-s2 and the published label bw-team). Each scenario's output goes
+# to the task's log in $part.
+
+# sql <statement>: a read of the fixture's database, through the containers need_state verified
+# (the dispatch below runs it for every setup).
+sql() { pg psql -U bronzeward -d bronzeward -Atc "$1"; }
+worker() { sql "SELECT id FROM machine WHERE talos_endpoint::text = '$TALOS_WORKER_IP:50000'"; }
+
+# stage <command>...: one setup step, its output in the task's log; the setup stops on a failure.
+stage() {
+  printf '== %s\n' "$*" >>"$log"
+  "$@" >>"$log" 2>&1 || {
+    grep -- $'^FAIL\t' "$log" >&2 || true
+    die "setup $task: $(basename -- "$1") ${*:2} failed; its output is in $log"
+  }
+}
+snap() {
+  stage "$bin/inject" db-snapshot "p-$1"
+  stage "$bin/inject" bao-snapshot "p-$1"
+}
+# restore <point>: the database and OpenBao back to that point, with every running instance
+# paused meanwhile, as S5 step 7 does.
+restore() {
+  local i c up=()
+  for i in A B C; do
+    c=BW_$i
+    if running "${!c}"; then up+=("$i"); fi
+  done
+  for i in "${up[@]}"; do stage "$bin/inject" pause "$i"; done
+  stage "$bin/inject" db-restore "p-$1"
+  stage "$bin/inject" bao-restore "p-$1"
+  for i in "${up[@]}"; do stage "$bin/inject" unpause "$i"; done
+}
+scenario() { stage "$FIXTURES/scenarios/$1" "${@:2}"; }
+prepare() { stage "$here/prepare" "$@"; }
+
+# setup <task>: the task's own setup function, between A switched to the fixture issuer and A back
+# on Zitadel; the seconds it took, for the README's timings. A setup that fails still hands A back
+# on Zitadel, so that the task before can go on and the setup can run again.
+handback() {
+  echo "setup $task failed: A goes back on Zitadel" >&2
+  set_issuer zitadel && restart_a >>"$log" 2>&1 || echo "A could not be handed back on Zitadel; recreate the fixture" >&2
+}
+setup() {
+  local t0=$SECONDS
+  task=$1 log=$part/setup-$1.log
+  : >"$log"
+  trap handback EXIT
+  set_issuer fixture
+  stage restart_a
+  "setup_$1"
+  trap - EXIT
+  set_issuer zitadel
+  stage restart_a
+  echo "setup $task: $((SECONDS - t0)) s"
+}
+
+setup_t3() {
+  [ -s "$STATE/automation-token" ] || stage "$bin/seed"
+  snap base
+  scenario s1 register
+}
+setup_t4() {
+  restore base
+  scenario s1 pass
+  scenario s3 handover
+  scenario s2 pass
+  snap s2
+  prepare labels
+  snap labels
+}
+setup_t5() { restore labels; }
+setup_t6() {
+  restore labels
+  prepare t6-draft
+}
+setup_t7() { prepare t7-publish; }
+setup_t8() {
+  restore s2
+  prepare links linksplit
+}
+setup_t9() {
+  if linksplits_of A || linksplits_of B || linksplits_of C; then prepare links linkjoin; fi
+  restore s2
+  scenario s3 pass
+}
+setup_t2() {
+  prepare applied
+  scenario s5 drift
+}
+setup_t11() {
+  prepare drift-closed
+  scenario s7 t11
+  # S7's A; the participant's A is the only instance from here.
+  if running "$BW_C"; then stage "$bin/inject" kill C; fi
+}
+
+t3() {
+  setup t3
+  echo "names: machine $(worker) (the worker, $TALOS_WORKER_IP)"
+  read_ok "the cluster is registered, nothing imported" \
+    test "$(sql "SELECT count(*) FROM machine")/$(sql "SELECT count(*) FROM release")" = 2/0
+}
+t4() {
+  setup t4
+  echo "names: label bw-zone, value lab"
+  read_ok "the label draft is published, and no draft is open" \
+    test "$(sql "SELECT count(*) FROM draft WHERE title = 'participants labels' AND state = 'published'")/$(sql "SELECT count(*) FROM draft WHERE state = 'open'")" = 1/0
+}
+t5() {
+  if [ "${1:-}" = collide ]; then
+    passwords --only h-all --exec node "$here/collide.mjs" "$SERVER_A_PORT" yellow "$STATE" "$FIXTURE_NAME"
+    return
+  fi
+  setup t5
+  echo "names: label bw-team, value red"
+  echo "next: fixtures/participants/session t5 collide, once the participant has saved the draft"
+}
+t6() {
+  setup t6
+  echo "names: machine $(worker) (the worker)"
+  read_ok "h-author's draft is saved and open" test "$(sql "SELECT count(*) FROM draft WHERE state = 'open'")" = 1
+}
+t7() {
+  setup t7
+  echo "names: empty field machine.nodeLabels.bw-note, redacted field machine.nodeLabels.tier"
+  read_ok "T6's draft is published" \
+    test "$(sql "SELECT count(*) FROM draft WHERE title = 'participants t6' AND state = 'published'")" = 1
+}
+t8() {
+  setup t8
+  echo "names: none"
+  read_ok "A's, B's and C's links to the worker are cut" sh -c "grep -c '^[ABC] worker' '$STATE/linksplits' | grep -qx 3"
+}
+t9() {
+  if [ "${1:-}" = disconnect ]; then
+    task=t9 log=$part/setup-t9.log
+    prepare links linksplit
+    echo "the links to the worker are cut for 60 s"
+    sleep 60
+    prepare links linkjoin
+    echo "the links to the worker are joined again"
+    return
+  fi
+  setup t9
+  # Last, on Zitadel: the apply starts once the links are joined, so no restart of A meets it.
+  prepare links linkjoin
+  echo "names: none; the apply starts now and completes within 4 minutes"
+}
+t2() {
+  setup t2
+  echo "names: none"
+  read_ok "one drift record is open on the worker, the scope not frozen" \
+    test "$(sql "SELECT count(*) FROM drift_record WHERE closed IS NULL")/$(sql "SELECT frozen FROM machine WHERE id = '$(worker)'")" = 1/f
+}
+# t10: T2's state, read only. T10 follows T2 in the session order.
+t10() {
+  echo "names: machine $(worker) (the worker)"
+  read_ok "one drift record is open on the worker, the scope not frozen" \
+    test "$(sql "SELECT count(*) FROM drift_record WHERE closed IS NULL")/$(sql "SELECT frozen FROM machine WHERE id = '$(worker)'")" = 1/f
+}
+t11() {
+  setup t11
+  # After A's normal start on Zitadel, before the handover: A owns the new epoch, the control
+  # plane's scope is as S7 left it and nothing was dispatched since. A failure is named.
+  prepare t11-check
+  echo "names: none"
 }
 
 # What this scan made: its planted controls, the copied logs and its error file. scan_clean removes
@@ -440,5 +665,9 @@ cmd=${1:-}
 case $cmd in
 start | shell | t1 | stop) "$cmd" ;;
 passwords | scan) "$cmd" "$@" ;;
-*) die "usage: fixtures/participants/session start | passwords [--exec <command>...] | shell | t1 | scan [path]... | stop (run stop before fixtures/bin/down or fixtures/dev-idp down; one participant session per Docker daemon; the session uses the host's one default dev-idp, so no other checkout may start or stop the default dev-idp on that daemon while a session starts or runs)" ;;
+t2 | t3 | t4 | t5 | t6 | t7 | t8 | t9 | t10 | t11)
+  need_state
+  "$cmd" "$@"
+  ;;
+*) die "usage: fixtures/participants/session start | passwords [--only <human>] [--exec <command>...] | shell | t1 | t2 | t3 | t4 | t5 [collide] | t6 | t7 | t8 | t9 [disconnect] | t10 | t11 | scan [path]... | stop (run stop before fixtures/bin/down or fixtures/dev-idp down; one participant session per Docker daemon; the session uses the host's one default dev-idp, so no other checkout may start or stop the default dev-idp on that daemon while a session starts or runs)" ;;
 esac

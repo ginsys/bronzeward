@@ -40,8 +40,8 @@ at `daa4393`. Everything in the environment is synthetic.
    client configuration and keeps no command history.
 4. Run the setup command of the first task: `fixtures/participants/session t1`. Each setup command
    prints the names to read out with the prompt (a machine, a field, a label value) and the reads
-   that confirm its precondition. If a read fails, stop and recreate the fixture. Only T1 has a
-   setup command yet. The setup commands of T2 to T11 come in a later change under #367.
+   that confirm its precondition. If a read fails, stop and recreate the fixture. Run the tasks in
+   the session order below.
 
 ## After each session
 
@@ -49,6 +49,26 @@ Run `fixtures/participants/session scan`, and name the browser profile's directo
 It searches the fixture, provider and participant state and the containers' logs for a session
 password. It first plants a control that it must find. If it reports a password, record that in
 the session notes and recreate the fixture before the next session.
+
+## Session order
+
+Run the tasks in this order: T1, T3, T4, T5, T6, T7, T8, T9, T2, T10, T11. The setups build on
+one fixture, and some steps change the Talos nodes, which a database restore cannot undo. T3 needs
+a cluster that nothing has imported yet, so it comes before the import of T4's setup. T2 and T10
+need a machine that has drifted after an apply, so they come after T9's apply. T11 starts from the
+state that T10 leaves, and its setup fails and names the drift record if T10 left it open.
+
+T2 is therefore the ninth task. When you assess T2's measures, read them as taken after eight
+practice tasks, not as a first contact with the clients.
+
+Setup times on the fixture host, in seconds, from the first timed run: `session start` 159 (before
+the session), t1 3, t3 24, t4 281, t5 17 and `t5 collide` 16, t6 20, t7 8, t8 34, t9 200 and
+`t9 disconnect` 71, t2 87, t10 1, t11 437. That is about 20 minutes of setup in a session. Plan a
+pause of about 7 minutes before T11.
+
+Between `session start` and the end of the t4 setup, change no tracked file in the checkout: no
+commit and no edit. S2's steps in the t4 setup check that the checkout is the commit that the
+server image was built from, and a commit or an edited tracked file fails them.
 
 ## Running a task
 
@@ -114,7 +134,8 @@ facilitator only. Setup `tN` means `fixtures/participants/session tN`.
 
 ### T5: a concurrent edit
 
-- Role: author. Setup: `t5`, then `t5 collide` after the participant starts the edit.
+- Role: author. Setup: `t5`, then `t5 collide` after the participant saves the draft once. The
+  competing change is h-all's, the setup's own account, which no participant uses.
 - Prompt: "Change the value of the node label `<label>` to `<value>`, and save it."
 - Done when: the other change is read and the participant's own change is applied again.
 - Probe: none.
@@ -155,7 +176,8 @@ facilitator only. Setup `tN` means `fixtures/participants/session tN`.
 
 ### T10: a drifted machine
 
-- Roles: author, then approver. Setup: `t10`.
+- Roles: author, publisher and approver. Setup: `t10`. Either choice needs a publisher's plan
+  and an approver's approval, and keeping the configuration also needs an author's draft.
 - Prompt: "Machine `<machine>` has drifted. Stop Bronzeward from changing it. Then decide
   whether to put it back to its desired configuration or to keep its current configuration, and
   carry that out."
