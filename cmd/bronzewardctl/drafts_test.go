@@ -116,6 +116,10 @@ func (f *draftFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprint(w, f.answer)
 			return
 		}
+		if r.Method == http.MethodPut && strings.Contains(route, "/fragments/") {
+			fmt.Fprint(w, `{"draft":"drf_BWSYNTH","entry":{"kind":"fragment","name":"worker-labels","base":1,"head":null,"revision":"frv_BWSYNTH-new"},"ingestion":"ing_BWSYNTH"}`)
+			return
+		}
 		fmt.Fprint(w, `{}`)
 	}
 }

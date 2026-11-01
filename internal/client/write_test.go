@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -27,6 +28,7 @@ type fake struct {
 	epoch    string
 	recovery func(n int) string // the epoch the nth GET /recovery shows; nil: epoch
 	post     func(n int, w http.ResponseWriter, r *http.Request)
+	server   string // GET /server's answer; "" for the default
 	seen     []*http.Request
 	posts    int
 }
@@ -51,7 +53,7 @@ func (f *fake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	switch r.Method + " " + r.URL.Path {
 	case "GET /api/v1/server":
-		fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":2,"startMode":"normal","maxTokenLifetimeSeconds":300}`)
+		fmt.Fprint(w, cmp.Or(f.server, `{"version":"BWSYNTH","apiRevision":2,"startMode":"normal","maxTokenLifetimeSeconds":300}`))
 	case "GET /api/v1/identity":
 		fmt.Fprint(w, `{"kind":"service","principal":"svc_BWSYNTH","service":"ci","roles":["author"],"epoch":"`+epoch+`"}`)
 	case "GET /api/v1/recovery":
@@ -756,5 +758,96 @@ func TestETagAcrossEpochs(t *testing.T) {
 	}
 	if et, _ := ETag(&kept, "drf_BWSYNTH"); et != "" {
 		t.Errorf("a command that crossed to ep_BWSYNTH-3 left %q kept at ep_BWSYNTH-2", et)
+	}
+}
+
+// TestInProgress checks a fragment write's in-progress 409 (§8.4 item 2, AMB-02): after an
+// ambiguous attempt, a 409 conflict with ingestion and no draft is repeated with the same key
+// until it answers otherwise, counting as no repeat, up to the wait bound, which the served claim
+// lease raises; then the outcome is unknown. A 409 with ingestion and draft is a refusal.
+func TestInProgress(t *testing.T) {
+	inProgress := func(w http.ResponseWriter) {
+		problemAnswer(w, http.StatusConflict, "conflict", `,"ingestion":"ing_BWSYNTH"`)
+	}
+	for _, tc := range []struct {
+		name   string
+		server string
+		wait   time.Duration
+		answer func(n int, w http.ResponseWriter)
+		posts  int
+		waits  []time.Duration
+		says   string // "" for success
+	}{
+		{name: "waited for, then saved", wait: time.Minute, posts: 5, waits: []time.Duration{time.Second, time.Second, 2 * time.Second, 4 * time.Second},
+			answer: func(n int, w http.ResponseWriter) {
+				switch n {
+				case 1:
+					drop(w)
+				case 5:
+					created(w)
+				default:
+					inProgress(w)
+				}
+			}},
+		{name: "still ingesting at the bound is unknown", wait: 3 * time.Second, posts: 4, waits: []time.Duration{time.Second, time.Second, 2 * time.Second},
+			says: "outcome unknown: the first request with this key was still ingesting (ingestion ing_BWSYNTH) after 3s",
+			answer: func(n int, w http.ResponseWriter) {
+				if n == 1 {
+					drop(w)
+					return
+				}
+				inProgress(w)
+			}},
+		{name: "the served lease raises the bound", wait: time.Second, posts: 4, waits: []time.Duration{time.Second, time.Second, time.Second},
+			server: `{"version":"BWSYNTH","apiRevision":2,"startMode":"normal","ingestionClaim":{"leaseSeconds":2,"absoluteExpirySeconds":600}}`,
+			says:   "after 2s",
+			answer: func(n int, w http.ResponseWriter) {
+				if n == 1 {
+					drop(w)
+					return
+				}
+				inProgress(w)
+			}},
+		{name: "a 409 naming the draft is a refusal, not waited for", wait: time.Minute, posts: 2, waits: []time.Duration{time.Second},
+			says: "409 BWSYNTH (conflict)",
+			answer: func(n int, w http.ResponseWriter) {
+				if n == 1 {
+					drop(w)
+					return
+				}
+				problemAnswer(w, http.StatusConflict, "conflict", `,"ingestion":"ing_BWSYNTH","draft":"drf_BWSYNTH"`)
+			}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fake{epoch: "ep_BWSYNTH-1", server: tc.server, post: func(n int, w http.ResponseWriter, _ *http.Request) { tc.answer(n, w) }}
+			c, notices, waits := writeClient(t, f, "ep_BWSYNTH-1")
+			w := clusterWrite()
+			w.Ingests, w.Wait = true, tc.wait
+			_, err := c.Send(w)
+			var u *Unknown
+			switch {
+			case tc.says == "" && err != nil:
+				t.Errorf("%v; want saved", err)
+			case tc.says != "" && (err == nil || !strings.Contains(err.Error(), tc.says)):
+				t.Errorf("%v; want it to say %q", err, tc.says)
+			case strings.Contains(tc.says, "outcome unknown") && !errors.As(err, &u):
+				t.Errorf("%T; want *Unknown", err)
+			}
+			if f.posts != tc.posts || !slices.Equal(*waits, tc.waits) {
+				t.Errorf("%d posts after waits %v; want %d after %v", f.posts, *waits, tc.posts, tc.waits)
+			}
+			keys := map[string]bool{}
+			for _, r := range f.seen {
+				if r.Method == http.MethodPost {
+					keys[r.Header.Get("Idempotency-Key")] = true
+				}
+			}
+			if len(keys) != 1 {
+				t.Errorf("%d keys sent; want one", len(keys))
+			}
+			if tc.posts > 2 && !strings.Contains(notices.String(), "still ingesting (ingestion ing_BWSYNTH)") {
+				t.Errorf("notices %q", notices.String())
+			}
+		})
 	}
 }

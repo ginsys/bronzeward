@@ -222,6 +222,13 @@ func sourceShow[H, R any](e *env, noun, revPrefix string, args []string, h func(
 }
 
 func (e *env) fragmentCmd(args []string) error {
+	if v, rest, err := e.verb("fragment", args, "show", "history", "set", "rm"); err != nil {
+		return err
+	} else if v == "set" {
+		return e.fragmentSet(rest)
+	} else if v == "rm" {
+		return e.sourceRm(apitypes.SourceEntryKindFragment, rest)
+	}
 	return sourceShow(e, "fragment", "frv", args, func(w *tabwriter.Writer, f *apitypes.FragmentBody) {
 		head(w, "Fragment", f.Id, f.Name+", layer "+f.Layer+", scope "+f.Scope, f.Cluster, f.Revision, f.HeadRevision, f.CreatedAt)
 	}, func(w *tabwriter.Writer, r *apitypes.FragmentRevisionBody) {
