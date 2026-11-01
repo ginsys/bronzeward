@@ -486,7 +486,40 @@ func (f *fixture) protectedFiles(dir string) []string {
 }
 
 // journeyIDs are the generated identifiers, times and ports a journey's kept output replaces.
-var journeyIDs = regexp.MustCompile(`\b(drf|frv|frg|prv|prf|asr|asg|ing|req|cl|mch|ep|act)_[a-z2-7]{26}\b|\d{4}-\d\d-\d\dT[0-9:.]+Z|127\.0\.0\.1:\d+`)
+var journeyIDs = regexp.MustCompile(`\b(drf|frv|frg|prv|prf|asr|asg|ing|req|cl|mch|ep|act|op|rel|ibr)_[a-z2-7]{26}\b|\d{4}-\d\d-\d\dT[0-9:.]+Z|127\.0\.0\.1:\d+`)
+
+// generatedBase64 is a run of base64 of 40 characters or more, as a certificate or ID the test
+// generates is written in a rendered configuration.
+var generatedBase64 = regexp.MustCompile(`[A-Za-z0-9+/]{40,}={0,2}`)
+
+// keepJourney keeps a scripted journey's output in testdata/journeys/<name>.txt, identifiers
+// replaced by their prefix and dir's paths by their file name, or with -update rewrites it.
+func keepJourney(t *testing.T, name, out, dir string) {
+	t.Helper()
+	// The steps are separated by a blank line; the file ends with the last step's exit line.
+	kept := journeyIDs.ReplaceAllStringFunc(strings.TrimSuffix(out, "\n"), func(m string) string {
+		if p, _, ok := strings.Cut(m, "_"); ok && !strings.Contains(m, ":") {
+			return p + "_…"
+		}
+		if strings.HasPrefix(m, "127.") {
+			return "127.0.0.1:<port>"
+		}
+		return "<time>"
+	})
+	// A generated certificate or ID differs on every run.
+	kept = generatedBase64.ReplaceAllString(kept, "<base64>")
+	kept = strings.ReplaceAll(kept, dir+string(filepath.Separator), "")
+	path := filepath.Join("testdata", "journeys", name+".txt")
+	if *update {
+		if err := os.WriteFile(path, []byte(kept), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(path)
+	if err != nil || string(want) != kept {
+		t.Errorf("%s: the run's output differs from %s (rerun with -update to keep it):\n%s", name, path, kept)
+	}
+}
 
 // journeys runs the journey tasks T4 and T5 (operator-experience.md §13) as scripts through the
 // CLI, and keeps their output in testdata/journeys, identifiers replaced by their prefix; -update
@@ -527,27 +560,7 @@ func (f *fixture) journeys(t *testing.T, in *injector, s seeded) {
 			}
 			fmt.Fprintf(&out, "$ bronzewardctl %s\n%s%s[exit %d]\n\n", strings.Join(step, " "), r.out, r.err, r.code)
 		}
-		// The steps are separated by a blank line; the file ends with the last step's exit line.
-		kept := journeyIDs.ReplaceAllStringFunc(strings.TrimSuffix(out.String(), "\n"), func(m string) string {
-			if p, _, ok := strings.Cut(m, "_"); ok && !strings.Contains(m, ":") {
-				return p + "_…"
-			}
-			if strings.HasPrefix(m, "127.") {
-				return "127.0.0.1:<port>"
-			}
-			return "<time>"
-		})
-		kept = strings.ReplaceAll(kept, dir+string(filepath.Separator), "")
-		path := filepath.Join("testdata", "journeys", name+".txt")
-		if *update {
-			if err := os.WriteFile(path, []byte(kept), 0o644); err != nil {
-				t.Fatal(err)
-			}
-		}
-		want, err := os.ReadFile(path)
-		if err != nil || string(want) != kept {
-			t.Errorf("%s: the run's output differs from %s (rerun with -update to keep it):\n%s", name, path, kept)
-		}
+		keepJourney(t, name, out.String(), dir)
 	}
 	h := []string{"--context", "human"}
 	o := []string{"--context", "other"}
