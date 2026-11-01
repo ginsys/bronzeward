@@ -101,22 +101,24 @@ const notShown = "AccessVersionBody.Created AccessVersionBody.Path ActItem.Epoch
 	"Reference.Encoding ReleaseMachineBody.Review RendererBody.MachineryChecksum " +
 	"RestoredBackup.Backup RestoredBackup.Family ServerBody.Features ServerBody.StartMode SourceEntry.Head TimelineEntry.Epoch UnreadValue.Code"
 
-// markersShown is, for each command of the sweep with plain booleans, how many marked values it
-// shows. The sweep credits a member to any command that shows it, so a command that stops showing
-// a member another command still shows (or shows a placeholder for it) changes this number.
-var markersShown = map[string]int{
-	"status": 5, "version": 1, "whoami": 5, "context list": 3,
-	"cluster list": 6, "cluster show c1": 5,
-	"machine list": 7, "machine show m1": 11, "machine timeline m1": 3, "machine observations m1": 6,
-	"fragment show f1": 6, "fragment show frv_1": 8, "fragment history f1": 5,
-	"profile show p1": 5, "profile show prv_1": 5, "profile history p1": 5,
-	"assignment show a1": 4, "assignment show asr_1": 6, "assignment history a1": 6,
-	"draft list": 5, "draft show d1": 9, "release list": 6, "release show r1": 15,
-	"plan list": 6, "plan show pl1": 27, "operation list": 8, "operation show o1": 15, "act list": 8,
-	"cluster add --name n --endpoint https://e --contract c --talos-cluster-id t":    5,
-	"machine add --cluster c1 --talos-node-id n --platform metal --talos-endpoint e": 4,
-	"machine set-endpoint m1 --talos-endpoint e":                                     3,
-	"draft create --cluster c1 --title t":                                            2,
+// markersShown is, for each command of the sweep, how many marked values it shows in each of the
+// three runs: plain booleans, every boolean set, and a machine's open drift left out. The sweep
+// credits a member to any command that shows it, so a command that stops showing a member another
+// command still shows (or shows a placeholder for it) changes a number here. The runs differ for
+// status (the recovery members, the release observed) and plan show (the withheld-diff sentence).
+var markersShown = map[string][3]int{
+	"status": {5, 7, 4}, "version": {1, 1, 1}, "whoami": {5, 5, 5}, "context list": {3, 3, 3},
+	"cluster list": {6, 6, 6}, "cluster show c1": {5, 5, 5},
+	"machine list": {7, 7, 7}, "machine show m1": {11, 11, 11}, "machine timeline m1": {3, 3, 3}, "machine observations m1": {6, 6, 6},
+	"fragment show f1": {6, 6, 6}, "fragment show frv_1": {8, 8, 8}, "fragment history f1": {5, 5, 5},
+	"profile show p1": {5, 5, 5}, "profile show prv_1": {5, 5, 5}, "profile history p1": {5, 5, 5},
+	"assignment show a1": {4, 4, 4}, "assignment show asr_1": {6, 6, 6}, "assignment history a1": {6, 6, 6},
+	"draft list": {5, 5, 5}, "draft show d1": {9, 9, 9}, "release list": {6, 6, 6}, "release show r1": {15, 15, 15},
+	"plan list": {6, 6, 6}, "plan show pl1": {27, 25, 27}, "operation list": {8, 8, 8}, "operation show o1": {15, 15, 15}, "act list": {8, 8, 8},
+	"cluster add --name n --endpoint https://e --contract c --talos-cluster-id t":    {5, 5, 5},
+	"machine add --cluster c1 --talos-node-id n --platform metal --talos-endpoint e": {4, 4, 4},
+	"machine set-endpoint m1 --talos-endpoint e":                                     {3, 3, 3},
+	"draft create --cluster c1 --title t":                                            {2, 2, 2},
 }
 
 var timeType = reflect.TypeFor[time.Time]()
@@ -359,8 +361,14 @@ func checkSweep(t *testing.T, yes bool, omit string, seen map[string]bool) {
 				shownMarkers++
 			}
 		}
-		if want, ok := markersShown[name]; !yes && omit == "" && (!ok || shownMarkers != want) {
-			t.Errorf("%s shows %d marked values, want %d: a value is lost or a placeholder replaces it", name, shownMarkers, want)
+		which := 0
+		if yes {
+			which = 1
+		} else if omit != "" {
+			which = 2
+		}
+		if pins, ok := markersShown[name]; !ok || shownMarkers != pins[which] {
+			t.Errorf("%s shows %d marked values, want %d: a value is lost or a placeholder replaces it", name, shownMarkers, pins[which])
 		}
 		for m, want := range bad.want {
 			n := strings.Count(withPlain, m)

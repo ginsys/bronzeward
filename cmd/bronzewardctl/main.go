@@ -145,12 +145,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, usage)
 		return 0
 	case errors.As(err, &u):
-		fmt.Fprintf(stderr, "bronzewardctl: %v\n\n%s\n", linesShown{err}, usage)
+		fmt.Fprintf(stderr, "bronzewardctl: %s\n\n%s\n", client.Shown(err), usage)
 		return 2
 	}
-	// The last guard: an error that reaches here from a path nobody escaped shows no control
-	// character but the line feeds of the CLI's own blocks.
-	fmt.Fprintln(stderr, "bronzewardctl:", linesShown{err})
+	// The sink of every error: client.Shown escapes all of it but the line breaks of the client's own
+	// multi-line errors, so no error from outside can start a line of its own.
+	fmt.Fprintln(stderr, "bronzewardctl:", client.Shown(err))
 	switch {
 	case errors.As(err, &unknown):
 		return 3

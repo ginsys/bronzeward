@@ -62,7 +62,7 @@ func Open(x *Context, in TokenInput, notices, verbose io.Writer) (*Client, error
 		c.token = c.signIn.tokens.AccessToken
 		if c.signIn.expiring() && c.signIn.tokens.RefreshToken != "" {
 			if err := c.renew(); err != nil {
-				fmt.Fprintf(notices, "%s: %v; the current token stays in use until the server refuses it.\n", x.Where(), err)
+				fmt.Fprintf(notices, "%s: %s; the current token stays in use until the server refuses it.\n", x.Where(), Shown(err))
 			}
 		}
 		return c, nil
@@ -157,13 +157,13 @@ func (c *Client) retry(path string) (*Response, error) {
 				try--
 				continue
 			} else {
-				fmt.Fprintf(c.Notices, "%s: %v.\n", c.Context.Where(), rerr)
+				fmt.Fprintf(c.Notices, "%s: %s.\n", c.Context.Where(), Shown(rerr))
 			}
 		}
 		if !retry || try == 5 {
 			return r, err
 		}
-		fmt.Fprintf(c.Notices, "%s: %v; try %d of 5 in %s\n", c.Context.Where(), err, try+1, delay)
+		fmt.Fprintf(c.Notices, "%s: %s; try %d of 5 in %s\n", c.Context.Where(), Shown(err), try+1, delay)
 		time.Sleep(delay)
 		delay = min(2*delay, 30*time.Second)
 	}

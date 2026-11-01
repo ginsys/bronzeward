@@ -110,12 +110,17 @@ func TestRemoteTextInDraftSourceWrites(t *testing.T) {
 	}
 	for _, c := range []struct {
 		args []string
+		done string // the sentence of a write that succeeded
 		want string // after an unknown outcome
 	}{
-		{[]string{"profile", "set", profile, "--draft", "d1", "--fragments", "frv_1"}, "with profile p" + tailEsc + " at prv_9"},
-		{[]string{"profile", "rm", profile, "--draft", "d1"}, "with profile p" + tailEsc + " at prv_9"},
-		{[]string{"assignment", "set", machine, "--draft", "d1", "--profiles", "p"}, "with assignment m" + tailEsc + " at asr_9"},
-		{[]string{"assignment", "rm", machine, "--draft", "d1"}, "with assignment m" + tailEsc + " at asr_9"},
+		{[]string{"profile", "set", profile, "--draft", "d1", "--fragments", "frv_1"},
+			"Profile p" + tailEsc + " saved: pins frv_1 (draft revision 2).", "with profile p" + tailEsc + " at prv_9"},
+		{[]string{"profile", "rm", profile, "--draft", "d1"},
+			"Profile p" + tailEsc + " removed from draft d1 (draft revision 2).", "with profile p" + tailEsc + " at prv_9"},
+		{[]string{"assignment", "set", machine, "--draft", "d1", "--profiles", "p"},
+			"Assignment saved (draft revision 2).", "with assignment m" + tailEsc + " at asr_9"},
+		{[]string{"assignment", "rm", machine, "--draft", "d1"},
+			"Assignment m" + tailEsc + " removed from draft d1 (draft revision 2).", "with assignment m" + tailEsc + " at asr_9"},
 	} {
 		name := strings.Join(c.args[:2], " ")
 		for _, lost := range []bool{false, true} {
@@ -128,6 +133,9 @@ func TestRemoteTextInDraftSourceWrites(t *testing.T) {
 				t.Errorf("%s (outcome unknown: %v) exited %d: %s", name, lost, got, e.String())
 			}
 			noRawControl(t, name, o.String()+e.String())
+			if !lost && !strings.Contains(o.String(), c.done) {
+				t.Errorf("%s: the answer %q lacks %q", name, o.String(), c.done)
+			}
 			if lost && !strings.Contains(o.String()+e.String(), c.want+tailEsc) {
 				t.Errorf("%s: the read-back %q lacks %q", name, o.String()+e.String(), c.want+tailEsc)
 			}
