@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -227,14 +228,19 @@ func scanMarks(in io.Reader, terminal bool) ([]string, error) {
 	s.Buffer(nil, maxBody)
 	s.Split(markLines)
 	for s.Scan() {
-		m := s.Text()
+		// The length check counts the line as the terminal gave it, a CRLF carriage return included.
+		raw, ended := strings.CutSuffix(s.Text(), "\n")
+		m := raw
+		if ended {
+			m = strings.TrimSuffix(raw, "\r")
+		}
 		if m == "" {
 			break
 		}
 		switch {
 		case !utf8.ValidString(m):
 			return nil, fmt.Errorf("mark %d is not UTF-8 text; nothing was sent", len(marks)+1)
-		case terminal && len(m) >= terminalLine:
+		case terminal && len(raw) >= terminalLine:
 			return nil, fmt.Errorf("mark %d is %d bytes or more, which a terminal can cut short; give long marks on standard input; nothing was sent",
 				len(marks)+1, terminalLine)
 		}
@@ -246,12 +252,12 @@ func scanMarks(in io.Reader, terminal bool) ([]string, error) {
 	return marks, nil
 }
 
-// markLines splits marks at a line feed and drops only the carriage return of a CRLF end. Any
-// other carriage return belongs to the mark, as a key may end in one: bufio.ScanLines also drops
-// one at the end of input.
+// markLines splits marks at a line feed and keeps the line feed, so that scanMarks drops only the
+// carriage return of a CRLF end. Any other carriage return belongs to the mark, as a key may end in
+// one: bufio.ScanLines also drops one at the end of input.
 func markLines(data []byte, atEOF bool) (int, []byte, error) {
 	if i := bytes.IndexByte(data, '\n'); i >= 0 {
-		return i + 1, bytes.TrimSuffix(data[:i], []byte("\r")), nil
+		return i + 1, data[:i+1], nil
 	}
 	if atEOF && len(data) > 0 {
 		return len(data), data, nil

@@ -147,6 +147,8 @@ func TestMarkRefusals(t *testing.T) {
 		{"not UTF-8", "machine.files\nmachine.nodeLabels.BWSYNTH-\xff\n\n", false, "mark 2 is not UTF-8 text; nothing was sent"},
 		{"a long terminal line", "machine.files\n" + long + "\n\n", true, "mark 2 is 4095 bytes or more, which a terminal can cut short"},
 		{"one byte under the terminal limit", "machine.files\n" + long[:terminalLine-1] + "\n\n", true, ""},
+		// With CR translation off, a cut line can end in a carriage return the user typed mid-line.
+		{"a cut terminal line ending in a carriage return", "machine.files\n" + long[:terminalLine-1] + "\r\n\n", true, "mark 2 is 4095 bytes or more"},
 		{"a long line from a pipe", "machine.files\n" + long + "\n\n", false, ""},
 	} {
 		m, err := scanMarks(strings.NewReader(c.in), c.terminal)
