@@ -175,8 +175,9 @@ func (s *served) stop() {
 	}
 }
 
-// restart kills serve and starts it again on the same database and port, started with flags: a
-// recovery start (-recovery-start) after the restore it stands in for.
+// restart kills serve and starts it again on the same database and port, started with flags. With
+// no flags it is a test-only stand-in for a server that crashed and came back (PROT-06); with
+// -recovery-start it is a recovery start after the restore it stands in for.
 func (f *fixture) restart(flags ...string) {
 	f.t.Helper()
 	f.srv.stop()
