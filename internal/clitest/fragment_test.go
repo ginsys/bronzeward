@@ -489,8 +489,13 @@ func (f *fixture) protectedFiles(dir string) []string {
 var journeyIDs = regexp.MustCompile(`\b(drf|frv|frg|prv|prf|asr|asg|ing|req|cl|mch|ep|act|op|rel|ibr)_[a-z2-7]{26}\b|\d{4}-\d\d-\d\dT[0-9:.]+Z|127\.0\.0\.1:\d+`)
 
 // generatedBase64 is a run of base64 of 40 characters or more, as a certificate or ID the test
-// generates is written in a rendered configuration.
-var generatedBase64 = regexp.MustCompile(`[A-Za-z0-9+/]{40,}={0,2}`)
+// generates is written in a rendered configuration: standard, or URL-safe and padded, as the
+// generated Talos cluster ID is.
+var generatedBase64 = regexp.MustCompile(`[A-Za-z0-9+/]{40,}={0,2}|[A-Za-z0-9_-]{40,}={1,2}`)
+
+// secretRefs are the provider references a run's import generates, shown in a review and its
+// provenance.
+var secretRefs = regexp.MustCompile(`\bs-[a-z2-7]{26}\b`)
 
 // keepJourney keeps a scripted journey's output in testdata/journeys/<name>.txt, identifiers
 // replaced by their prefix and dir's paths by their file name, or with -update rewrites it.
@@ -510,6 +515,7 @@ func keepJourney(t *testing.T, name, out, dir string) {
 	// The run's directory goes first: its path is a run of base64 characters too.
 	kept = strings.ReplaceAll(kept, dir+string(filepath.Separator), "")
 	kept = generatedBase64.ReplaceAllString(kept, "<base64>")
+	kept = secretRefs.ReplaceAllString(kept, "s-…")
 	path := filepath.Join("testdata", "journeys", name+".txt")
 	if *update {
 		if err := os.WriteFile(path, []byte(kept), 0o644); err != nil {
