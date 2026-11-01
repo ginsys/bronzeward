@@ -144,6 +144,15 @@ func nextStep(c *client.Client, s apitypes.RecoveryScope) string {
 
 func asList(v any) []any { l, _ := v.([]any); return l }
 
+// shownIDs is count of ids a server named, each escaped as a value.
+func shownIDs(ids []string) string {
+	shown := make([]string, len(ids))
+	for i, id := range ids {
+		shown[i] = client.Printable(id)
+	}
+	return count(shown)
+}
+
 func restoredList(rs []apitypes.RestoredBackup) string {
 	var s []string
 	for _, b := range rs {
@@ -267,7 +276,7 @@ func (e *env) recoveryEnter(args []string) error {
 		var x apitypes.EntryBody
 		err := json.Unmarshal(resp.Body, &x)
 		return []string{fmt.Sprintf("Recovery mode entered (act %s). Epoch %s, was %s.", client.Printable(x.Act), client.Printable(x.Epoch), client.Printable(x.PreviousEpoch)),
-			fmt.Sprintf("Scopes marked pre-restore-unaccounted: %d machines. Operations taken over or ended: %s.", x.Machines, count(x.Operations)),
+			fmt.Sprintf("Scopes marked pre-restore-unaccounted: %d machines. Operations taken over or ended: %s.", x.Machines, shownIDs(x.Operations)),
 			"Restart the server normally when ready; recovery mode continues.",
 			"Next: recovery status."}, err
 	})
@@ -316,7 +325,7 @@ func (e *env) recoveryExit(args []string) error {
 		var x apitypes.ExitBody
 		err := json.Unmarshal(resp.Body, &x)
 		return []string{fmt.Sprintf("Recovery mode left (act %s) in epoch %s.", client.Printable(x.Act), client.Printable(x.Epoch)),
-			"Scopes returned to normal: " + count(x.Scopes) + "."}, err
+			"Scopes returned to normal: " + shownIDs(x.Scopes) + "."}, err
 	})
 	var p *client.Problem
 	if errors.As(err, &p) && p.Code() == "conflict" && p.Doc["machine"] != nil {
