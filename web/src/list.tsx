@@ -16,8 +16,9 @@ export type Dropped = { kind: "dropped"; failed: Failed };
 export interface Reads {
   client: Pick<Client, "read">;
   // Renders a read's answer while `live`, or hands it to the shell (sign-in, revocation, offline,
-  // the process's refusal); without an answer, what `held` says is shown stays under the banner.
-  settle: <T>(res: ReadResult<T>, set: (r: Load<T>) => void, live: () => boolean, held: () => boolean) => void;
+  // the process's refusal); without an answer, what `held` says is shown stays under the banner,
+  // and the result is true.
+  settle: <T>(res: ReadResult<T>, set: (r: Load<T>) => void, live: () => boolean, held: () => boolean) => boolean;
   // From now, true until the shell invalidates every read in flight: the process's refusal, a new
   // epoch, a revocation or sign-out.
   undropped: () => () => boolean;
@@ -26,6 +27,8 @@ export interface Reads {
   view: string;
   // Bumped each time the page reads again.
   again: number;
+  // Bumped each time the offline banner ends because a read answered.
+  regained: number;
   go: (to: string) => void;
   failure: (res: Failed) => ReactNode;
 }
@@ -92,15 +95,28 @@ export function settling<D>(res: ReadResult<D> | Dropped, put: (r: Load<D> | Dro
   return res.kind === "dropped" ? [res.failed, () => put(res), () => false] : [res, put, held];
 }
 
+// What a view that keeps its own data gives a read (W3, #443): whether it keeps data now, which a
+// read without answer keeps under the banner; a count it bumps to read again; and, at each read that
+// settles, whether it found no answer and kept the data.
+export interface Keep { held: () => boolean; again: number; lost: (lost: boolean) => void }
+
+// The read's own `held`, or the keeping view's; `lost` is told each settled read's outcome.
+function useKeep(keep: Keep | undefined, held: () => boolean): [() => boolean, (lost: boolean) => void] {
+  const k = useRef(keep);
+  k.current = keep;
+  return [useCallback(() => (k.current === undefined ? held() : k.current.held()), [held]), useCallback((lost: boolean) => k.current?.lost(lost), [])];
+}
+
 // A list read from its start each time the path, query or `all` changes, showing loading, and each
 // time the view changes or the page reads again, keeping what it shows until the read answers: the
 // same list under a new view is still the same data. `more` reads on. One read at a time: while a
 // start's read or a `more` is in flight, `more` waits. A read that a newer start superseded reads no
 // further page and settles as not live: the shell still takes its refusal of the credentials, and
 // ignores the rest.
-export function useList<T>(path: string, query: string, all: boolean): [Load<Listed<T>> | Dropped, (() => void) | undefined, boolean] {
+export function useList<T>(path: string, query: string, all: boolean, keep?: Keep): [Load<Listed<T>> | Dropped, (() => void) | undefined, boolean] {
   const { client, settle, undropped, again, view } = useReads();
-  const [list, put, held] = useHeld<Listed<T>, Dropped>();
+  const [list, put, own] = useHeld<Listed<T>, Dropped>();
+  const [held, lost] = useKeep(keep, own);
   const start = useRef(0);
   const key = useRef<string | undefined>(undefined);
   // The start whose read is in flight, the first page's or a `more`'s.
@@ -117,9 +133,9 @@ export function useList<T>(path: string, query: string, all: boolean): [Load<Lis
         setBusy(false);
       }
       const [r, set, shows] = settling(res, put, held);
-      settle(r, set, () => live && ok(), shows);
+      lost(settle(r, set, () => live && ok(), shows));
     });
-  }, [client, settle, undropped, put, held, path, query]);
+  }, [client, settle, undropped, put, held, lost, path, query]);
   useEffect(() => {
     start.current++;
     const k = JSON.stringify([path, query, all]);
@@ -129,7 +145,7 @@ export function useList<T>(path: string, query: string, all: boolean): [Load<Lis
     }
     read({ items: [], next: undefined, restarted: false }, all);
     return () => void start.current++;
-  }, [read, put, view, path, query, all, again]);
+  }, [read, put, view, path, query, all, again, keep?.again]);
   const more = useCallback(() => {
     if (list.kind === "ok" && reading.current !== start.current) read(list.data, false);
   }, [read, list]);
@@ -138,9 +154,10 @@ export function useList<T>(path: string, query: string, all: boolean): [Load<Lis
 
 // An item read each time its path changes, showing loading, and each time the view changes or the
 // page reads again, keeping what it shows until the read answers.
-export function useItem<T>(path: string): Load<T> {
+export function useItem<T>(path: string, keep?: Keep): Load<T> {
   const { client, settle, undropped, again, view } = useReads();
-  const [item, put, held] = useHeld<T>();
+  const [item, put, own] = useHeld<T>();
+  const [held, lost] = useKeep(keep, own);
   const key = useRef<string | undefined>(undefined);
   useEffect(() => {
     const ok = undropped();
@@ -149,9 +166,9 @@ export function useItem<T>(path: string): Load<T> {
       key.current = path;
       put({ kind: "loading" });
     }
-    void client.read<T>(path).then((res) => settle(res, put, () => live && ok(), held));
+    void client.read<T>(path).then((res) => lost(settle(res, put, () => live && ok(), held)));
     return () => void (live = false);
-  }, [client, settle, undropped, put, held, view, path, again]);
+  }, [client, settle, undropped, put, held, lost, view, path, again, keep?.again]);
   return item;
 }
 

@@ -1,7 +1,8 @@
 import { describe, expect, test, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ADOPTED, advanced, advanceReads, countingSettle, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, kept, keptW3, latestUnread, MachineShown, nextTimeline, type Observation, Observations, POLL_MS, polled, queued, readLater, readOlder, sentences, stepAdvance, type Timeline, TimelineRows, UNREAD } from "./machine.tsx";
+import { ADOPTED, advanced, advanceReads, againW3, countingSettle, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, keepW3, kept, keptW3, latestUnread, MachineShown, nextTimeline, type Observation, Observations, POLL_MS, polled, queued, readLater, readOlder, sentences, stepAdvance, type Timeline, TimelineRows, UNREAD, type W3Kept } from "./machine.tsx";
+import { type ShellEvents, ShellReads } from "./shell.tsx";
 import { type Load, type Reads, ReadsProvider, RESTARTED } from "./list.tsx";
 import type { Machine } from "./machines.tsx";
 import type { ReadResult } from "./request.ts";
@@ -291,7 +292,7 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
     const k = "A\n0";
     let a = stepAdvance(stepAdvance(advanceReads(k), { key: "B\n0" }), { key: k });
     const outer: unknown[] = [];
-    const settle = countingSettle((res) => outer.push(res), (e) => (a = stepAdvance(a, e)), k, a.n);
+    const settle = countingSettle((res) => outer.push(res) < 0, (e) => (a = stepAdvance(a, e)), k, a.n);
     const res = { kind: "ok", status: 200, data: {} } as unknown as Parameters<typeof settle>[0];
     // The first visit's two reads settle late: the page still takes both, the count does not move.
     settle(res, () => {}, () => false, () => false);
@@ -327,6 +328,75 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
       tl: { kind: "ok", data: { ...UNREAD, read: true } }, kt: { view: "v", data: { ...UNREAD, read: true }, restarted: false }, older: undefined, busy: false,
     })));
     expect(out).toMatch(/<\/h2>FAILED<div><p role="status" data-testid="restarted">/);
+  });
+
+  test("#443: an observations read again that fails shows its failure after the heading, and the observations kept still show", () => {
+    const reads = { go: () => {}, failure: () => "FAILED" } as unknown as Reads;
+    const read = { items: [obsA], next: undefined, restarted: false };
+    const failed = { kind: "unavailable" as const, status: 503, problem: null };
+    const shown = (m: Load<Machine>) => renderToStaticMarkup(createElement(ReadsProvider, { value: reads }, createElement(MachineShown, {
+      id: "mch_a", m, obs: failed, km: { view: "v", data: machine({ frozen: true }), restarted: false }, ko: { view: "v", data: read, restarted: false },
+      tl: { kind: "ok", data: { ...UNREAD, read: true } }, kt: { view: "v", data: { ...UNREAD, read: true }, restarted: false }, older: undefined, busy: false,
+    })));
+    const out = shown({ kind: "ok", data: machine({ frozen: true }) });
+    expect(out).toMatch(/<h2>Machine mch_a<\/h2>FAILED<p>Cluster /);
+    expect(out).toContain('data-testid="observations"');
+    expect(out).toContain('title="obs_a"');
+    // Both reads failed, both kept: both failures, then the machine's rows and the observations.
+    const both = shown(failed);
+    expect(both).toMatch(/<h2>Machine mch_a<\/h2>FAILEDFAILED<p>Cluster /);
+    expect(both).toContain(FROZEN);
+    expect(both).toContain('data-testid="observations"');
+  });
+
+  describe("#443: a read without answer, settled by the shell with what W3 keeps", () => {
+    const events: ShellEvents = { onUnauthenticated: vi.fn(), onRevoked: vi.fn(), onEpochChange: vi.fn(), onPreEntry: vi.fn(), setMode: vi.fn(), observe: vi.fn() };
+    const shell = new ShellReads({ fetch: vi.fn() as unknown as typeof globalThis.fetch, sleep: async () => {} }, () => events);
+    const okM = { kind: "ok" as const, data: machine({ frozen: true }) };
+    const list = { kind: "ok" as const, data: { items: [obsA], next: undefined, restarted: false } };
+    const failed = { kind: "unavailable" as const, status: 503, problem: null };
+    const tl = { kind: "ok" as const, data: { ...UNREAD, read: true } };
+    // Settles `res` for resource `i` as W3 does, and says whether it was kept under the banner.
+    function settled(k: W3Kept, i: 0 | 1, res: ReadResult<unknown>, was: [boolean, boolean] = [false, false]) {
+      const lost = { current: [...was] as [boolean, boolean] };
+      const keep = keepW3({ current: k }, i, 0, lost);
+      const set = vi.fn();
+      vi.mocked(events.observe).mockClear();
+      keep.lost(shell.settle(res, set, undefined, () => true, keep.held));
+      return { set, lost: lost.current, observed: vi.mocked(events.observe).mock.calls.map(([e]) => e) };
+    }
+
+    test("after a kept failure: the data stays under the banner, and the failure does not move", () => {
+      // The machine's last read failed: its own result holds no data, but W3 keeps the answer before.
+      const k = keptW3(keptW3(undefined, okM, list, tl, "v"), failed, list, tl, "v");
+      expect(k[0].data).toEqual(machine({ frozen: true }));
+      const r = settled(k, 0, { kind: "transport" });
+      expect(r.set).not.toHaveBeenCalled();
+      expect(r.observed).toEqual(["lost"]);
+      expect(r.lost).toEqual([true, false]);
+      // The observations, kept from their own answer, too.
+      expect(settled(k, 1, { kind: "transport" }).lost).toEqual([false, true]);
+    });
+
+    test("in a new view: nothing is kept until the new view first answers, so the read shows the disconnected state", () => {
+      const k = keptW3(keptW3(undefined, okM, list, tl, "v"), okM, list, tl, "w");
+      const r = settled(k, 0, { kind: "transport" });
+      expect(r.set).toHaveBeenCalledWith({ kind: "transport" });
+      expect(r.observed).toEqual([]);
+      expect(r.lost).toEqual([false, false]);
+      // Once the new view answers, its own answer is kept under the banner.
+      const answered = keptW3(k, { kind: "ok", data: machine({}) }, list, tl, "w");
+      expect(settled(answered, 0, { kind: "transport" }).lost).toEqual([true, false]);
+    });
+
+    test("an answer clears the lost mark; a banner ended by an answer reads each lost resource again once", () => {
+      const k = keptW3(undefined, okM, list, tl, "v");
+      expect(settled(k, 0, okM, [true, true]).lost).toEqual([false, true]);
+      expect(settled(k, 1, failed, [true, true]).lost).toEqual([true, false]);
+      expect(againW3([3, 5], [true, false])).toEqual([4, 5]);
+      expect(againW3([3, 5], [true, true])).toEqual([4, 6]);
+      expect(againW3([3, 5], [false, false])).toEqual([3, 5]);
+    });
   });
 
   test("#443 case 5: with no observations kept, W3 still shows the machine's own rows under the observations' failure", () => {
