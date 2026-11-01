@@ -5,8 +5,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { components } from "./api/v1";
-import { type Dropped, type Listed, type Load, type Page, Ref, type Reads, RESTARTED, settling, short, useHeld, useItem, useList, usePending, useReads } from "./list.tsx";
-import { Head, type Machine, node, release } from "./machines.tsx";
+import { type Dropped, Head, type Listed, type Load, type Page, Ref, type Reads, RESTARTED, Scroll, settling, short, useHeld, useItem, useList, usePending, useReads } from "./list.tsx";
+import { type Machine, node, release } from "./machines.tsx";
 import type { ReadResult } from "./request.ts";
 import { clock, Status } from "./states.tsx";
 
@@ -235,6 +235,10 @@ export function MachineItem({ id }: { id: string }) {
         <dt>Observed</dt><dd data-testid="observed">{d.observed === null ? "none" : <>read at {at(d.observed.at)} (<span title={d.observed.observation}>{short(d.observed.observation)}</span>): {attribution(d.observed.release)}</>}</dd>
         <dt>Scope</dt><dd>{d.scopeState}</dd>
       </dl>
+      <p>
+        <Ref to={`/plans?machine=${d.id}`} id={d.id}>Plans for this machine</Ref>{" · "}
+        <Ref to={`/operations?machine=${d.id}`} id={d.id}>Operations on this machine</Ref>
+      </p>
       <h3>Observations</h3>
       <Observations read={obs.data} />
       <h3>Timeline (newest first)</h3>
@@ -254,7 +258,7 @@ export function Observations({ read }: { read: Listed<Observation> }) {
     <>
       {restartedNotice(read.restarted, "observations-restarted")}
       {list.length === 0 ? <p>No observation recorded.</p> : (
-        <table data-testid="observations">
+        <Scroll label="Observations" testid="observations">
           <Head cols={["Observation", "Basis", "Read at", "Purpose", "Not read"]} />
           <tbody>
             {list.map((o) => (
@@ -267,7 +271,7 @@ export function Observations({ read }: { read: Listed<Observation> }) {
               </tr>
             ))}
           </tbody>
-        </table>
+        </Scroll>
       )}
     </>
   );
@@ -279,7 +283,7 @@ export function TimelineRows({ tl, older, busy }: { tl: Timeline<Entry>; older: 
       {restartedNotice(tl.restarted, "timeline-restarted")}
       {tl.items.length === 0 ? <p>No timeline entry recorded.</p> : (
         <>
-          <table data-testid="timeline">
+          <Scroll label="Timeline" testid="timeline">
             <Head cols={["At", "Kind", "Details"]} />
             <tbody>
               {tl.items.map((e) => (
@@ -290,7 +294,7 @@ export function TimelineRows({ tl, older, busy }: { tl: Timeline<Entry>; older: 
                 </tr>
               ))}
             </tbody>
-          </table>
+          </Scroll>
           {older !== undefined && <p><button type="button" onClick={older} disabled={busy}>Load older</button></p>}
         </>
       )}

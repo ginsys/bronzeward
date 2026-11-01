@@ -1,0 +1,18 @@
+/* Every view's layout (journeys §13): the page reflows at 320 CSS pixels and only a table scrolls on
+   its own (WCAG 1.4.10), focus is always visible (2.4.7) and targets are at least 24 px (2.5.8). No
+   meaning is carried by colour. */
+body { margin: 0 auto; padding: 0 1rem; max-width: 80rem; font-family: system-ui, sans-serif; line-height: 1.5; color: #111; background: #fff; }
+:focus-visible { outline: 3px solid #1a4fc4; outline-offset: 2px; }
+main:focus { outline: none; }
+.skip { position: absolute; left: -100vw; }
+.skip:focus { position: static; }
+nav { display: flex; flex-wrap: wrap; gap: 0 1rem; }
+nav a, button, select { min-height: 24px; min-width: 24px; }
+nav a { display: inline-block; padding: 0.25rem 0; }
+p, dd, li, h2 { overflow-wrap: anywhere; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+dt { font-weight: bold; }
+dd { margin-left: 1rem; }
+.scroll { max-width: 100%; overflow-x: auto; }
+table { border-collapse: collapse; }
+th, td { padding: 0.25rem 0.5rem; text-align: left; vertical-align: top; border-bottom: 1px solid #767676; }
