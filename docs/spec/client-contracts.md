@@ -388,11 +388,11 @@ it. It holds no secret.
    - The output holds a raw control byte outside the CLI's own separators.
    - A plain value does not appear in its escaped form: `\x09` for the tab, `\x0a` for the line
      feed, `\x0d` for the carriage return.
-   - A line has a different number of columns, or the output a different number of lines, from
-     the same command run with plain values. This catches a tab that becomes padding, which
-     leaves no raw tab and no extra row.
-   - A document or a diff line differs from the document's own line, escaped. Those lines are the
-     only ones that the document's line feeds may split.
+   - Outside documents and diffs, a line has a different number of columns, or the output a
+     different number of lines, from the same command run with plain values. This catches a tab
+     that becomes padding, which leaves no raw tab and no extra row.
+   - In a document or a diff, the lines are not those of the input split on its line feeds, each
+     escaped. The expected lines come from the input, not from the plain-value run.
    - In JSON text that the CLI encodes itself, C0 characters do not appear in the JSON escape
      (`\t`, `\u001b`), or DEL and the C1 range do not appear as `\xNN`.
 
