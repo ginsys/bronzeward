@@ -5,7 +5,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { beginSignIn, CALLBACK_PATH, completeSignIn, discover, type Failure, localReading, PENDING_KEY, type Provider, Session, SIGNED_OUT_PATH, type Tokens } from "./auth.ts";
 import { type ClientConfig, loadClientConfig } from "./config.ts";
-import { useUnloadGuard, WriteNotices, WritesProvider } from "./forms.tsx";
+import { PageNotices, useUnloadGuard, WritesProvider } from "./forms.tsx";
 import { navigate, PageState, renewals } from "./page.ts";
 import { type Channel, Renewer } from "./renewer.ts";
 import { TRANSPORT_FAILURE } from "./request.ts";
@@ -247,7 +247,7 @@ export function Screen({ view, notices = [] }: { view: View; notices?: readonly 
           <p role="alert" data-testid="status">{view.message}</p>
           <ProblemFields text={view.problem} />
           <Deprecations routes={notices} />
-          <WriteNotices go={(to) => location.assign(to)} />
+          <PageNotices />
           {view.reading !== undefined && <p data-testid="reading">This browser's own reading: {view.reading}.</p>}
           <button type="button" onClick={view.signIn}>
             Sign in with the identity provider

@@ -187,7 +187,7 @@ describe("the write views (#338)", () => {
     await oneWrite(1);
   });
 
-  it("the leave guard asks before the page moves on from a write with no answer, and the write stays", async () => {
+  it("the leave guard asks before the page moves on from a write with no answer, Back included, and the write stays", async () => {
     await add([], { held: "/clusters" });
     await browser.waitUntil(async () => (await holding()).includes("/clusters"), { timeout: 20_000, timeoutMsg: "the write was not held" });
     const { key } = await oneWrite(1);
@@ -197,11 +197,16 @@ describe("the write views (#338)", () => {
     try {
       await $('nav[aria-label="Main"]').$("a=Machines").click();
       await browser.waitUntil(async () => asked.length === 1, { timeout: 10_000, timeoutMsg: "no leave dialog" });
+      await expect($("main h2")).toHaveText("Add cluster");
+      // Back to the machine list: refused, the page and its address stay on the form.
+      await browser.back();
+      await browser.waitUntil(async () => asked.length === 2, { timeout: 10_000, timeoutMsg: "no leave dialog on Back" });
     } finally {
       browser.off("dialog", answer);
     }
-    expect(asked[0]).toContain(`Sent, with no answer yet. Key ${key}, POST /api/v1/clusters.`);
+    for (const a of asked) expect(a).toContain(`Sent, with no answer yet. Key ${key}, POST /api/v1/clusters.`);
     await expect($("main h2")).toHaveText("Add cluster");
+    expect(new URL(await browser.getUrl()).pathname).toBe("/clusters/new");
     await release();
     await expect(result()).toHaveText(expect.stringContaining("recorded as"), { wait: 20_000 });
   });
