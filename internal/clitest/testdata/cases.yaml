@@ -1,8 +1,11 @@
 # Shared conformance case records (docs/spec/client-contracts.md §12) that bronzewardctl runs.
-# cli_test.go TestSharedCases runs exactly the cases recorded here, in this order, against a
-# disposable bronzeward serve behind an in-process TLS injector. Data is synthetic: a viewer
-# automation token issued by bronzeward token for the test database. An exchange item is one
-# string, with its headers after the request line.
+# cli_test.go TestSharedCases runs exactly the cases recorded here without a test member, in this
+# order, against a disposable bronzeward serve behind an in-process TLS injector. A record with a
+# test member names the test that runs it instead, as its subtest named by the ID; that test
+# refuses to run when its records differ from its subtests. Data is synthetic: a viewer automation
+# token issued by bronzeward token for the test database, and the fixture issuer's or the test
+# identity provider's synthetic subjects. An exchange item is one string, with its headers after
+# the request line.
 
 - id: TLS-01
   setup: server behind the injector, whose certificate is from a test CA outside the system store; viewer automation token
@@ -136,6 +139,20 @@
     shown: '"contact a recovery administrator. The stored sign-in was cleared", exit 1; then "not signed in", exit 1'
     absent: [token in stdout, stderr, argv]
 
+- id: AUTH-07
+  setup: context human; the fixture provider answers the refresh grant with a token for h-other
+  action: whoami
+  exchange:
+    - POST <token_endpoint>, grant_type=refresh_token, once
+    - GET /api/v1/server
+    - GET /api/v1/identity
+  fault: the token file holds an h-viewer token 30 seconds from expiry; the renewed token's subject differs
+  expect:
+    client: renews once; shows the renewal as a new sign-in for another subject before the result. This is the sign-in half; the pending write set aside needs the client-side fault injector of ginsys/bronzeward#263
+    server: answers the reads for h-other
+    shown: '"a new sign-in: the renewed token is for h-other at <issuer>, not h-viewer at <issuer>", then "subject h-other"; exit 0'
+    absent: [token in stdout, stderr, argv]
+
 - id: AUTH-10
   setup: context human; the server's deniedSubjects lists h-denied at the fixture issuer
   action: whoami, twice
@@ -147,3 +164,46 @@
     server: answers 403 identity-revoked
     shown: as AUTH-05
     absent: [token in stdout, stderr, argv]
+
+- id: AUTH-01
+  test: TestLoginIdentityProvider
+  setup: 'context idp: oidc, issuer the test identity provider (mise run dev-idp), audience its project, a D2 (b) token file; a disposable server trusting that provider; run by mise run go-idp'
+  action: login, the provider's page driven headlessly as h-viewer; then whoami; machine list; context list -o json
+  exchange:
+    - GET <authorization_endpoint>, response_type=code, code_challenge_method=S256, state, nonce, a loopback redirect_uri
+    - POST <token_endpoint>, grant_type=authorization_code with the PKCE verifier
+    - "GET /api/v1/server, headers: Authorization, Accept: application/json"
+    - GET /api/v1/machines
+  fault: none
+  expect:
+    client: stores the sign-in in the token file; sends the reads with the access token; records the server's Bronzeward-Epoch on the context
+    server: answers every read for h-viewer as viewer
+    shown: '"Signed in to idp as <subject> at <issuer>", "kept in the token file <file>"; whoami "viewer"; the list; lastEpoch in the context list; exit 0 each'
+    absent: [token in stdout, stderr, argv]
+
+- id: AUTH-06
+  test: TestLoginIdentityProvider
+  setup: context idp signed in by AUTH-01, its access token living 5 minutes; skipped under -short, which mise run verify uses
+  action: wait past the access token's expiry; operation list; then operation list again
+  exchange:
+    - POST <token_endpoint>, grant_type=refresh_token, once
+    - GET /api/v1/operations, each time
+  fault: none; the access token expired
+  expect:
+    client: renews once with the rotated refresh token and stores the new pair; the second read uses the live token and does not renew. This is the renewal half; the stream half with Last-Event-ID needs operation watch
+    server: answers both reads
+    shown: the operation list, exit 0 each time
+    absent: [token in stdout, stderr, argv, and the provider redeeming the rotated-out refresh token]
+
+- id: AUTH-09
+  test: TestLoginIdentityProvider
+  setup: context idp signed in, after AUTH-06 and the device grant's sign-in as h-publisher
+  action: logout
+  exchange:
+    - POST <revocation_endpoint>, the refresh token
+  fault: none
+  expect:
+    client: removes the token file; revokes the refresh token at the provider; states that the access token stays valid at the server until it expires
+    server: still accepts the access token on GET /api/v1/identity until its exp, as stated
+    shown: '"the token file <file> is removed", "The refresh token is revoked at the identity provider.", "stays valid at the server until"; exit 0'
+    absent: [token in stdout, stderr, argv, the token file, and the provider redeeming the revoked refresh token]

@@ -12,6 +12,10 @@ restates it for the check that runs it and adds one member:
 A client change adds the records of the cases it runs, and extends a record when it runs another
 part of the case. A case without a record has not run.
 
+The table lists the web client's records. The records of the cases that `bronzewardctl` runs are in
+[`internal/clitest/testdata/cases.yaml`](../internal/clitest/testdata/cases.yaml), in §12's record
+format, and its tests run exactly the cases recorded there.
+
 | Record | Runs |
 | --- | --- |
 | [AUTH-01](cases/AUTH-01.yaml) | web, sign-in and the server read: `mise run browser-auth` |
