@@ -63,6 +63,16 @@ commands:
               --if-match <etag>; if the draft changed since, it saves nothing and says so
               draft writes take author; repeat one with the outcome-unknown block's flags,
               --if-match included
+  import start --machine <id> --draft <draft> [--file <path or ->] [--staging encrypted|transient]
+              [--review] [--marks] [--no-wait]
+              the machine's configuration, or with --file a document, into the draft, sending its
+              kept ETag or --if-match; waits until the import pauses for review or ends
+  import continue | takeover <ingestion> [--no-wait]
+              continue an import paused for review, or take over one whose lease lapsed; waits
+  import abandon <ingestion>
+  import status [<ingestion>] | [--state <s>] [--machine <id>]
+              one import's state, lease and next steps, or a list: --state paused or held finds
+              imports to continue or take over
   publish <draft> [--no-wait]
               publisher; sends the draft's kept ETag or --if-match, waits for the publication
               and names the release; nothing is sent to any machine
@@ -96,7 +106,8 @@ global flags, before or after the command:
   --no-input            never prompt
   -v                    name a proxy a request goes through
 
-exit codes: 0 success; 1 refused or failed; 2 usage error or refused repeat; 3 outcome unknown;
+exit codes: 0 success; 1 refused or failed; 2 usage error or refused repeat; 3 outcome unknown, or
+an import's lease lapsed while its operation runs;
 4 a waited-for operation ended failed, rejected or cancelled`
 
 type usageError struct{ error }
@@ -154,7 +165,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	commands := map[string]func([]string) error{"context": e.contextCmd, "version": e.versionCmd, "whoami": e.whoamiCmd, "login": e.loginCmd, "logout": e.logoutCmd,
 		"status": e.statusCmd, "cluster": e.clusterCmd, "machine": e.machineCmd,
 		"fragment": e.fragmentCmd, "profile": e.profileCmd, "assignment": e.assignmentCmd,
-		"draft": e.draftCmd, "publish": e.publish, "release": e.releaseCmd, "plan": e.planCmd, "operation": e.operationCmd, "act": e.actCmd,
+		"draft": e.draftCmd, "import": e.importCmd, "publish": e.publish, "release": e.releaseCmd, "plan": e.planCmd, "operation": e.operationCmd, "act": e.actCmd,
 		"recovery": e.recoveryCmd, "identity": e.identityCmd}
 	pos, err := e.parse("bronzewardctl", args, -1, nil)
 	if err == nil && len(pos) == 0 {
@@ -171,6 +182,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 func report(err error, stdout, stderr io.Writer) int {
 	var u usageError
 	var failed operationFailed
+	var settled outcomeUnknown
 	var refused client.RefusedRepeat
 	var declined notConfirmed
 	var unknown *client.Unknown
@@ -188,7 +200,7 @@ func report(err error, stdout, stderr io.Writer) int {
 	// multi-line errors, so no error from outside can start a line of its own.
 	fmt.Fprintln(stderr, "bronzewardctl:", client.Shown(err))
 	switch {
-	case errors.As(err, &unknown):
+	case errors.As(err, &unknown), errors.As(err, &settled):
 		return 3
 	case errors.As(err, &failed):
 		return 4
@@ -198,8 +210,12 @@ func report(err error, stdout, stderr io.Writer) int {
 	return 1
 }
 
-// parse reads the global flags and extra's anywhere among args and wants n positional arguments;
-// with n < 0 it stops at the first one, the command, whose own flags follow.
+// anyArgs asks parse for every positional argument, however many.
+const anyArgs = -2
+
+// parse reads the global flags and extra's anywhere among args and wants n positional arguments,
+// or with anyArgs any number; with n = -1 it stops at the first one, the command, whose own flags
+// follow.
 func (e *env) parse(name string, args []string, n int, extra func(*flag.FlagSet)) ([]string, error) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -219,7 +235,7 @@ func (e *env) parse(name string, args []string, n int, extra func(*flag.FlagSet)
 		} else if err != nil {
 			return nil, usageError{flagError(err)}
 		}
-		if fs.NArg() == 0 || n < 0 {
+		if fs.NArg() == 0 || n == -1 {
 			pos = append(pos, fs.Args()...)
 			break
 		}
