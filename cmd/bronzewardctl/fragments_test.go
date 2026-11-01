@@ -87,6 +87,7 @@ func TestFragmentEditing(t *testing.T) {
 		{"a number where the API takes a string", "embedded:\n- {path: 4242424242, format: yaml}\n", "a member the API does not define, or a value of the wrong type; nothing was sent"},
 		{"a number as a member name", "embedded: []\n4242424242: x\n", "a member the API does not define, or a value of the wrong type; nothing was sent"},
 		{"a member name YAML cannot hold", "? [BWSYNTH-key, 4242424242]\n: x\n", "not YAML or JSON; nothing was sent"},
+		{"a declaration in a second YAML document", "{}\n---\nembedded:\n- {path: machine.BWSYNTH-4242, format: json}\n", "more than one YAML document; nothing was sent"},
 	} {
 		var o, e bytes.Buffer
 		if got := run(append(set, "--file", doc, "--declarations", write("bad.yaml", c.file)), &o, &e); got != 1 || !strings.Contains(e.String(), c.says) ||
