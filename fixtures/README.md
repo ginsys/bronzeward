@@ -118,6 +118,11 @@ mise run go-idp          # the self-test, internal/api/idp_test.go and internal/
 mise run dev-idp-down    # its containers, network and .dev/idp/; mise run dev-down does this too
 ```
 
+With `BW_DEV_INSTANCE=<name>` set on each of these (and `dev-db`), the provider is the named
+instance's: containers and network suffixed `-<name>`, the issuer on `http://localhost:` 14000+slot,
+state in `.dev/idp-<name>/`, and `dev-idp-down` removes only that instance's. The names, ports and
+the slot rule are in [CONTRIBUTING.md](../CONTRIBUTING.md#several-instances-on-one-host).
+
 - **Shape.** Zitadel, its own PostgreSQL (`POSTGRES_IMAGE`, not dev-db's container, whose
   databases the tests create and drop) and the groups target share the Docker network
   `bw-dev-idp`. Only Zitadel is published, as `http://localhost:58280`, the issuer every caller

@@ -5,12 +5,18 @@
 # Everything in it is synthetic. State, including the login client's token, goes to .dev/idp/
 # (gitignored) and nowhere else; stdout gets the issuer, project and client IDs, nothing secret.
 # Usage: fixtures/dev-idp up | down   (mise run dev-idp, mise run dev-idp-down)
+# The container and network names, the issuer's port and the state directory are the instance's:
+# the default ones, or those of BW_DEV_INSTANCE=<name> (scripts/dev/instance.sh), so that several
+# providers run side by side and down removes only the one named.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# shellcheck source=scripts/dev/instance.sh
+. scripts/dev/instance.sh || exit 1
 
-net=bw-dev-idp pg=bw-dev-idp-pg zitadel=bw-dev-idp groups=bw-dev-idp-groups
-state=$PWD/.dev/idp
-issuer=http://localhost:58280
+net=$BW_DEV_IDP_NET pg=$BW_DEV_IDP_PG_CONTAINER zitadel=$BW_DEV_IDP_CONTAINER groups=$BW_DEV_IDP_GROUPS_CONTAINER
+state=$PWD/$BW_DEV_IDP_DIR
+issuer=$BW_DEV_IDP_ISSUER
+# The browser tests' page port is theirs (ginsys/bronzeward#459), not the instance's.
 web=${BW_DEV_IDP_WEB_ORIGIN:-http://localhost:58443}
 password='Synthetic-Pass-1!'
 # The device code's lifetime in seconds. idp.env carries it, and the self-test asserts it.
@@ -40,7 +46,7 @@ alive() {
     running=$(docker inspect -f '{{.State.Running}}' "$c") || die "cannot inspect $c (docker inspect)"
     [ "$running" = true ] && continue
     docker logs --tail 50 "$c" >&2 || true
-    die "$c exited during start-up, its log tail above (docker logs $c; mise run dev-idp-down)"
+    die "$c exited during start-up, its log tail above (docker logs $c; ${BW_DEV_PFX}mise run dev-idp-down)"
   done
 }
 
@@ -97,12 +103,12 @@ up() {
   fi
   for c in "$pg" "$zitadel" "$groups"; do
     if present "$c"; then
-      die "$c exists but is not this checkout's complete provider (another checkout's, or an interrupted up); run mise run dev-idp-down, then mise run dev-idp"
+      die "$c exists but is not this checkout's complete provider (another checkout's, or an interrupted up); run ${BW_DEV_PFX}mise run dev-idp-down, then ${BW_DEV_PFX}mise run dev-idp"
     fi
   done
   ids=$(docker network ls -q --filter "name=^$net\$") || die "cannot list networks (docker network ls)"
   if [ -n "$ids" ]; then
-    die "network $net exists without the provider (an interrupted up); run mise run dev-idp-down, then mise run dev-idp"
+    die "network $net exists without the provider (an interrupted up); run ${BW_DEV_PFX}mise run dev-idp-down, then ${BW_DEV_PFX}mise run dev-idp"
   fi
   rm -rf -- "$state"
   mkdir -p "$state"
@@ -127,9 +133,9 @@ up() {
   # network: a setting for this throwaway provider only, never a production default.
   # ZITADEL_OIDC_DEVICEAUTH_LIFETIME shortens the device code's 5-minute default so that the
   # self-test sees one expire.
-  docker run -d --name "$zitadel" --network "$net" -p 127.0.0.1:58280:8080 --user "$(id -u):$(id -g)" \
+  docker run -d --name "$zitadel" --network "$net" -p "127.0.0.1:$BW_DEV_IDP_PORT:8080" --user "$(id -u):$(id -g)" \
     -v "$state:/state" \
-    -e ZITADEL_EXTERNALDOMAIN=localhost -e ZITADEL_EXTERNALPORT=58280 -e ZITADEL_EXTERNALSECURE=false \
+    -e ZITADEL_EXTERNALDOMAIN=localhost -e ZITADEL_EXTERNALPORT="$BW_DEV_IDP_PORT" -e ZITADEL_EXTERNALSECURE=false \
     -e ZITADEL_TLS_ENABLED=false -e ZITADEL_HTTPCLIENT_DENYLIST=169.254.0.0/16 \
     -e ZITADEL_OIDC_DEVICEAUTH_LIFETIME="${devicelife}s" \
     -e ZITADEL_DATABASE_POSTGRES_HOST="$pg" -e ZITADEL_DATABASE_POSTGRES_PORT=5432 \

@@ -104,9 +104,10 @@ mise run go                                        # the generated-types check, 
 mise run generate                                  # regenerate internal/client/apitypes from api/openapi.yaml with the pinned oapi-codegen; commit the result with the description change
 mise run dev-db                                    # a disposable development PostgreSQL on 127.0.0.1:55433
 mise run dev-bao                                   # a disposable dev-mode OpenBao on http://127.0.0.1:58201, root token bw-dev-root-token
-mise run dev-down                                  # stop dev-db, dev-bao and dev-idp, which removes them and their data (shared by every worktree on the host)
-mise run go-db                                     # the root module's tests against PostgreSQL and OpenBao (BW_TEST_PG_DSN and BW_TEST_BAO_ADDR/BW_TEST_BAO_TOKEN, else dev-db's and dev-bao's); a missing service fails
+mise run dev-down                                  # stop dev-db, dev-bao and dev-idp, which removes them and their data (shared by every worktree on the host; with BW_DEV_INSTANCE, only that instance's)
+mise run go-db                                     # the root module's tests against PostgreSQL and OpenBao (BW_TEST_PG_DSN and BW_TEST_BAO_ADDR/BW_TEST_BAO_TOKEN, else dev-db's and dev-bao's, those of BW_DEV_INSTANCE when set); a missing service fails
 mise run dev-idp && mise run go-idp                # the sign-in self-test against a Zitadel test provider and dev-db's database (fixtures/README.md); mise run dev-idp-down removes the provider
+BW_DEV_INSTANCE=mine mise run dev-db               # instance "mine" of the same services, beside the default ones: see "Several instances on one host" below
 mise run build                                     # bin/bronzeward and the fixture issuer bin/oidc-fixture (bin/ is gitignored)
 mise run dev                                       # dev-db, dev-bao and build, then migrate, the fixture issuer and serve, as the lines below do by hand, until Ctrl-C
 go run ./cmd/bronzeward migrate -config examples/bronzeward.yaml   # apply the embedded migrations and record the installation; run with the server stopped
@@ -118,6 +119,28 @@ go run ./fixtures/oidc serve -key <file> -issuer http://127.0.0.1:5556  # the is
 go run ./fixtures/oidc mint -key <file> -issuer http://127.0.0.1:5556 -human h-author [-defect expired]
 curl -s -H "Authorization: Bearer $(go run ./fixtures/oidc mint -key <file> -issuer http://127.0.0.1:5556 -human h-viewer)" http://127.0.0.1:8080/api/v1/acts
 ```
+
+### Several instances on one host
+
+`dev-db`, `dev-bao` and `dev-idp` start one fixed set of containers per host, and `dev-down` stops it for every worktree. Two full `go-db` runs on one `dev-db` can fail with "too many clients already". To give each person, agent or worktree its own disposable services, set `BW_DEV_INSTANCE=<name>` (1 to 16 characters of `a-z` and `0-9`, not `pg` or `groups`) on every `mise run` of the tasks `dev-db`, `dev-bao`, `dev-idp`, `go-db`, `go-idp`, `browser-auth`, `dev-down` and `dev-idp-down`. Unset or empty, every name, port and command stays as it was.
+
+| | default | `BW_DEV_INSTANCE=<name>` |
+|---|---|---|
+| PostgreSQL | `bw-dev-pg` on 127.0.0.1:55433 | `bw-dev-pg-<name>` on 127.0.0.1:12000+slot |
+| OpenBao | `bw-dev-bao` on 127.0.0.1:58201 | `bw-dev-bao-<name>` on 127.0.0.1:13000+slot |
+| Identity provider | `bw-dev-idp`, `-pg`, `-groups` on http://localhost:58280 | `bw-dev-idp-<name>`, `bw-dev-idp-pg-<name>`, `bw-dev-idp-groups-<name>` on http://localhost:14000+slot |
+| Provider state | `.dev/idp/` | `.dev/idp-<name>/` |
+
+The slot is `cksum(name) mod 1000` (POSIX `cksum`), so a name gives the same ports on every host and every port is below 32768, outside the Linux ephemeral range. Two names on the same slot share their ports: the second start fails with "port is already allocated", so pick another name. `scripts/dev/instance.sh` holds the whole scheme.
+
+```sh
+export BW_DEV_INSTANCE=alice                     # or prefix each command; the second terminal uses another name
+mise run dev-db && mise run dev-bao && mise run go-db
+BW_DEV_INSTANCE=bob mise run dev-db && BW_DEV_INSTANCE=bob mise run dev-bao && BW_DEV_INSTANCE=bob mise run go-db   # at the same time
+BW_DEV_INSTANCE=alice mise run dev-down          # stops alice's containers only; bob's and the default ones keep running
+```
+
+`go-db` and `go-idp` use the instance's addresses unless `BW_TEST_PG_DSN` or `BW_TEST_BAO_ADDR` is set. Each instance still needs memory for its PostgreSQL, OpenBao and, for `dev-idp`, Zitadel with its own PostgreSQL. `mise run dev` is for the default instance only and refuses when `BW_DEV_INSTANCE` is set, because `examples/bronzeward.yaml` names the default `dev-db` and `dev-bao`. `mise run browser` needs no database, OpenBao or provider, and the browser tests' own fixed ports (including `browser-auth`'s) are not part of the instance.
 
 Publication reads every covered node through the executor before compilation and
 retains the observation on each release machine. An offline node or unreadable
