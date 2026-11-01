@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -180,8 +181,15 @@ func (z *zitadel) refreshes(rt string) bool {
 
 // TestLoginIdentityProvider signs in to the test identity provider with bronzewardctl: AUTH-01
 // through the loopback, renewal with rotation past the access token's expiry on operation list
-// (AUTH-06's renewal half), the device grant, and AUTH-09's logout with revocation.
+// (AUTH-06's renewal half), the device grant, and AUTH-09's logout with revocation. The shared
+// cases among them are the testdata/cases.yaml records naming this test, each run as the subtest
+// named by its ID.
 func TestLoginIdentityProvider(t *testing.T) {
+	records := recorded(t, "TestLoginIdentityProvider")
+	cases := []string{"AUTH-01", "AUTH-06", "AUTH-09"}
+	if !slices.Equal(records, cases) {
+		t.Fatalf("testdata/cases.yaml records %v for this test, which runs %v", records, cases)
+	}
 	z := newZitadel(t)
 	f := startFor(t, "viewer", z.issuer, z.project)
 	file := filepath.Join(f.home, "idp.json")
@@ -214,7 +222,8 @@ func TestLoginIdentityProvider(t *testing.T) {
 		f.want(ctl("context", "list", "-o", "json"), 0, `"name":"idp"`, `"lastEpoch":"`)
 	})
 
-	t.Run("renewal past expiry", func(t *testing.T) {
+	// AUTH-06's renewal half; its stream half needs operation watch.
+	t.Run("AUTH-06", func(t *testing.T) {
 		if testing.Short() {
 			t.Skip("waits out a 5-minute access token")
 		}

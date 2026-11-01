@@ -203,6 +203,18 @@ func init() {
 		}
 	}
 	sharedCases["AUTH-05"] = func(t *testing.T, f *fixture, in *injector) { revoked(t, f, in, f.mint("h-author", "")) }
+	// AUTH-07's sign-in half: a renewal that returns another subject is shown as a new sign-in.
+	sharedCases["AUTH-07"] = func(t *testing.T, f *fixture, in *injector) {
+		in.set(nil, nil)
+		f.store(f.humanFile(), f.viewerToken("h-viewer", 270*time.Second, 30*time.Second), "BWSYNTH-rt-7")
+		f.idp.set(func(string) (int, any) { return issued(f.viewerToken("h-other", 0, issuer.Lifetime), "BWSYNTH-rt-8") })
+		t.Cleanup(func() { f.idp.set(nil) })
+		f.want(f.signedIn("--context", "human", "whoami"), 0,
+			"a new sign-in: the renewed token is for h-other at "+f.iss.URL+", not h-viewer at "+f.iss.URL, "subject h-other")
+		if n := f.idp.calls.Load(); n != 1 {
+			t.Errorf("%d renewals, want 1", n)
+		}
+	}
 	sharedCases["AUTH-10"] = func(t *testing.T, f *fixture, in *injector) {
 		revoked(t, f, in, f.viewerToken("h-denied", 0, issuer.Lifetime))
 	}
@@ -298,12 +310,6 @@ func TestSignIn(t *testing.T) {
 		if s := f.stored(file); s.RefreshToken != "" {
 			t.Error("the unrotated refresh token was kept")
 		}
-	})
-
-	t.Run("new subject", func(t *testing.T) {
-		f.store(file, f.viewerToken("h-viewer", 270*time.Second, 30*time.Second), "BWSYNTH-rt-7")
-		f.idp.set(func(string) (int, any) { return issued(f.viewerToken("h-other", 0, issuer.Lifetime), "BWSYNTH-rt-8") })
-		f.want(whoami(), 0, "a new sign-in: the renewed token is for h-other at "+f.iss.URL+", not h-viewer at "+f.iss.URL, "subject h-other")
 	})
 
 	// The renewed token's subject is the provider's text, shown escaped (#383).
