@@ -70,7 +70,11 @@ func recoveryServer(t *testing.T, answers map[string]string, post string) func()
 		mu.Unlock()
 		w.Header().Set("Bronzeward-Epoch", "ep_BWSYNTH-1")
 		w.Header().Set("Content-Type", "application/json")
-		switch a, ok := answers[r.Method+" "+r.URL.Path]; {
+		key := r.Method + " " + r.URL.Path
+		if cur := r.URL.Query().Get("cursor"); cur != "" {
+			key += "?cursor=" + cur
+		}
+		switch a, ok := answers[key]; {
 		case r.URL.Path == "/api/v1/server":
 			fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":3,"startMode":"recovery"}`)
 		case r.URL.Path == "/api/v1/identity":
@@ -190,5 +194,59 @@ func TestRecoveryStatus(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "mch_f") || strings.Contains(out.String(), "Every scope is released") {
 		t.Errorf("a normal scope was listed, or the exit offered with scopes not released:\n%s", out.String())
+	}
+}
+
+// TestRecoveryStatusFollowsTheTimeline: a blocked scope's latest restoration mark can lie on a later
+// page of the timeline, behind newer observations, and status still names what it misses. Only the
+// end of the history, with no mark found, says the scope was not marked.
+func TestRecoveryStatusFollowsTheTimeline(t *testing.T) {
+	scopes := `"exit":null,"scopes":[{"machine":"mch_c","state":"blocked"}]}`
+	for _, c := range []struct{ name, page2, want string }{
+		{"mark on page 2", `{"items":[{"kind":"scope-state","entry":{"to":"blocked","cause":"restoration-mark","missing":["provider"]}}]}`,
+			"missing provider: then recovery mark 'mch_c' again"},
+		{"no mark in the history", `{"items":[{"kind":"observation","entry":{}}]}`, "not marked since it was blocked: recovery mark 'mch_c'"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			recoveryServer(t, map[string]string{
+				"GET /api/v1/recovery":                          `{"epoch":"ep_BWSYNTH-1","recoveryMode":true,` + scopes,
+				"GET /api/v1/machines/mch_c/timeline":           `{"items":[{"kind":"observation","entry":{}}],"next":"p2"}`,
+				"GET /api/v1/machines/mch_c/timeline?cursor=p2": c.page2,
+			}, "")
+			var out, errb bytes.Buffer
+			if code := run([]string{"recovery", "status"}, &out, &errb); code != 0 {
+				t.Fatalf("exit %d\n%s", code, errb.String())
+			}
+			if flat := strings.Join(strings.Fields(out.String()), " "); !strings.Contains(flat, c.want) {
+				t.Errorf("output lacks %q:\n%s", c.want, out.String())
+			}
+		})
+	}
+}
+
+// TestRecoveryTextIsEscaped: every string of a server's answer that the recovery commands print is
+// escaped as a value, a line feed included, so none can forge a row or move the cursor
+// (client-contracts.md section 6 item 8).
+func TestRecoveryTextIsEscaped(t *testing.T) {
+	hostile := `evil\u001b[2J\nFORGED`
+	recoveryServer(t, map[string]string{
+		"GET /api/v1/recovery": `{"epoch":"ep_BWSYNTH-1","recoveryMode":true,"entry":{"enteredBy":"` + hostile + `","enteredAt":"2026-11-01T08:40:00Z","stoppedAt":"2026-11-01T08:31:00Z",` +
+			`"reason":"` + hostile + `","restored":[{"family":"database","backup":"` + hostile + `","takenAt":"2026-11-01T08:30:00Z"}]},"exit":null,` +
+			`"scopes":[{"machine":"mch_a` + hostile + `","state":"released"}]}`,
+	}, `{"act":"`+hostile+`","identity":"`+hostile+`","note":"`+hostile+`","deniedSubjectsListed":true}`)
+	for _, args := range [][]string{
+		{"recovery", "status"},
+		{"identity", "revoke", "--identity", "svc_x", "--reason", "r"},
+	} {
+		var out, errb bytes.Buffer
+		withStdin(t, "svc_x\n", func() { run(args, &out, &errb) })
+		if args[0] == "identity" && !strings.Contains(out.String(), "Revoked") {
+			t.Fatalf("the revocation was not sent:\n%s\n%s", out.String(), errb.String())
+		}
+		for _, s := range []string{out.String(), errb.String()} {
+			if strings.ContainsRune(s, '\x1b') || strings.Contains(s, "\nFORGED") {
+				t.Errorf("%v: hostile text reached the terminal raw:\n%q", args, s)
+			}
+		}
 	}
 }

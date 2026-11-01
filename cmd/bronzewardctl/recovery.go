@@ -50,19 +50,19 @@ func (e *env) recoveryStatus(args []string) error {
 			if s.State == "released" {
 				released++
 			}
-			rows = append(rows, s.Machine+"\t"+s.State+"\t"+nextStep(c, s))
+			rows = append(rows, client.Printable(s.Machine)+"\t"+client.Printable(string(s.State))+"\t"+nextStep(c, s))
 		}
 		return e.emit(r.Body, func(w *tabwriter.Writer) {
-			fmt.Fprintf(w, "Epoch\t%s\n", rec.Epoch)
+			fmt.Fprintf(w, "Epoch\t%s\n", client.Printable(rec.Epoch))
 			fmt.Fprintf(w, "Recovery mode\t%s\n", map[bool]string{true: "on", false: "off"}[rec.RecoveryMode])
-			fmt.Fprintf(w, "Start mode\t%s (GET /server)\n", srv.StartMode)
+			fmt.Fprintf(w, "Start mode\t%s (GET /server)\n", client.ShownStartMode(string(srv.StartMode)))
 			if en := rec.Entry; en != nil {
-				fmt.Fprintf(w, "Entered\t%s by %s: %s\n", when(en.EnteredAt), en.EnteredBy, en.Reason)
+				fmt.Fprintf(w, "Entered\t%s by %s: %s\n", when(en.EnteredAt), client.Printable(en.EnteredBy), client.Printable(en.Reason))
 				fmt.Fprintf(w, "Restore stopped\t%s\n", when(en.StoppedAt))
 				fmt.Fprintf(w, "Restored\t%s\n", restoredList(en.Restored))
 			}
 			if x := rec.Exit; x != nil {
-				fmt.Fprintf(w, "Exited\t%s by %s (act %s)\n", when(x.At), x.ExitedBy, x.Act)
+				fmt.Fprintf(w, "Exited\t%s by %s (act %s)\n", when(x.At), client.Printable(x.ExitedBy), client.Printable(x.Act))
 			}
 			if len(rows) == 0 {
 				fmt.Fprintln(w, "Scopes\tnone in recovery")
@@ -100,33 +100,44 @@ func nextStep(c *client.Client, s apitypes.RecoveryScope) string {
 		r, err := c.Get("/operations/" + url.PathEscape(ops[0].Id))
 		var op apitypes.OperationBody
 		if err != nil || json.Unmarshal(r.Body, &op) != nil {
-			return "operation " + ops[0].Id + " holds it: operation show " + ops[0].Id
+			return "operation " + client.Printable(ops[0].Id) + " holds it: operation show " + client.ShellWord(ops[0].Id)
 		}
 		if op.Attempts != nil && len(*op.Attempts) > 0 {
-			return "operation " + op.Id + " holds it, with an attempt: classified after the normal restart, then recovery mark " + m
+			return "operation " + client.Printable(op.Id) + " holds it, with an attempt: classified after the normal restart, then recovery mark " + m
 		}
-		return "operation " + op.Id + " holds it, with no attempt: recovery resolve " + op.Id
+		return "operation " + client.Printable(op.Id) + " holds it, with no attempt: recovery resolve " + client.ShellWord(op.Id)
 	case "blocked":
-		r, err := c.Get("/machines/" + url.PathEscape(s.Machine) + "/timeline?order=newest&limit=100")
-		var page struct{ Items []apitypes.TimelineEntry }
-		if err != nil || json.Unmarshal(r.Body, &page) != nil {
-			return "see machine timeline " + m + ", then recovery mark " + m
+		// Newest first, page by page, until the scope's latest move to blocked: later observations can
+		// push it past the first page. A bound on the pages ends in the command that shows the history.
+		path, cursor := "/machines/"+url.PathEscape(s.Machine)+"/timeline?order=newest&limit=100", ""
+		for range 20 {
+			pg, err := c.Page(path, cursor)
+			var entries []apitypes.TimelineEntry
+			if err == nil {
+				entries, err = decode[apitypes.TimelineEntry](c, pg.Items...)
+			}
+			if err != nil {
+				return "see machine timeline " + m + ", then recovery mark " + m
+			}
+			for _, t := range entries {
+				x, _ := t.Entry.(map[string]any)
+				if t.Kind != "scope-state" || x["to"] != "blocked" {
+					continue
+				}
+				var missing []string
+				for _, v := range asList(x["missing"]) {
+					missing = append(missing, client.Printable(fmt.Sprint(v)))
+				}
+				if x["cause"] != "restoration-mark" || len(missing) == 0 {
+					return "not marked since it was blocked: recovery mark " + m
+				}
+				return "missing " + strings.Join(missing, ", ") + ": then recovery mark " + m + " again, or a new release for a lost key version"
+			}
+			if cursor = pg.Next; cursor == "" {
+				return "not marked since it was blocked: recovery mark " + m
+			}
 		}
-		for _, t := range page.Items {
-			x, _ := t.Entry.(map[string]any)
-			if t.Kind != "scope-state" || x["to"] != "blocked" {
-				continue
-			}
-			var missing []string
-			for _, v := range asList(x["missing"]) {
-				missing = append(missing, fmt.Sprint(v))
-			}
-			if x["cause"] != "restoration-mark" || len(missing) == 0 {
-				break
-			}
-			return "missing " + strings.Join(missing, ", ") + ": then recovery mark " + m + " again, or a new release for a lost key version"
-		}
-		return "not marked since it was blocked: recovery mark " + m
+		return "see machine timeline " + m + ", then recovery mark " + m
 	}
 	return "see machine timeline " + m
 }
@@ -136,7 +147,7 @@ func asList(v any) []any { l, _ := v.([]any); return l }
 func restoredList(rs []apitypes.RestoredBackup) string {
 	var s []string
 	for _, b := range rs {
-		s = append(s, fmt.Sprintf("%s backup %s taken at %s", b.Family, b.Backup, when(b.TakenAt)))
+		s = append(s, fmt.Sprintf("%s backup %s taken at %s", client.Printable(string(b.Family)), client.Printable(b.Backup), when(b.TakenAt)))
 	}
 	return strings.Join(s, "; ")
 }
@@ -244,7 +255,7 @@ func (e *env) recoveryEnter(args []string) error {
 	in.Restored, in.StoppedAt = restored, t
 	body, _ := json.Marshal(in)
 	confirm := func(c *client.Client) error {
-		fmt.Fprintf(e.err, "Recovery entry in %s\n  restored:   %s\n  stopped at: %s\n  reason:     %s\n", c.Context.Where(), restoredList(restored), when(t), in.Reason)
+		fmt.Fprintf(e.err, "Recovery entry in %s\n  restored:   %s\n  stopped at: %s\n  reason:     %s\n", c.Context.Where(), restoredList(restored), when(t), client.Printable(in.Reason))
 		fmt.Fprint(e.err, "The entry mints a new epoch: every other client's pending write is refused.\n"+
 			"It marks every machine's scope pre-restore-unaccounted.\n"+
 			"It takes over every non-terminal apply-config operation as unresolved, and ends the running import and publish jobs.\n"+
@@ -255,7 +266,7 @@ func (e *env) recoveryEnter(args []string) error {
 		Repeat: rp, Check: "recovery status", Read: recoveryRead}, func(_ *client.Client, resp *client.Response) ([]string, error) {
 		var x apitypes.EntryBody
 		err := json.Unmarshal(resp.Body, &x)
-		return []string{fmt.Sprintf("Recovery mode entered (act %s). Epoch %s, was %s.", x.Act, x.Epoch, x.PreviousEpoch),
+		return []string{fmt.Sprintf("Recovery mode entered (act %s). Epoch %s, was %s.", client.Printable(x.Act), client.Printable(x.Epoch), client.Printable(x.PreviousEpoch)),
 			fmt.Sprintf("Scopes marked pre-restore-unaccounted: %d machines. Operations taken over or ended: %s.", x.Machines, count(x.Operations)),
 			"Restart the server normally when ready; recovery mode continues.",
 			"Next: recovery status."}, err
@@ -270,9 +281,9 @@ func recoveryRead(c *client.Client) (string, error) {
 	}
 	var x apitypes.RecoveryBody
 	err = json.Unmarshal(r.Body, &x)
-	s := fmt.Sprintf("GET /api/v1/recovery shows epoch %s, recovery mode %t", x.Epoch, x.RecoveryMode)
+	s := fmt.Sprintf("GET /api/v1/recovery shows epoch %s, recovery mode %t", client.Printable(x.Epoch), x.RecoveryMode)
 	if x.Entry != nil {
-		s += ", entered at " + when(x.Entry.EnteredAt) + " by " + x.Entry.EnteredBy
+		s += ", entered at " + when(x.Entry.EnteredAt) + " by " + client.Printable(x.Entry.EnteredBy)
 	}
 	if x.Exit != nil {
 		s += ", exited at " + when(x.Exit.At)
@@ -304,7 +315,7 @@ func (e *env) recoveryExit(args []string) error {
 		Check: "recovery status", Read: recoveryRead}, func(_ *client.Client, resp *client.Response) ([]string, error) {
 		var x apitypes.ExitBody
 		err := json.Unmarshal(resp.Body, &x)
-		return []string{fmt.Sprintf("Recovery mode left (act %s) in epoch %s.", x.Act, x.Epoch),
+		return []string{fmt.Sprintf("Recovery mode left (act %s) in epoch %s.", client.Printable(x.Act), client.Printable(x.Epoch)),
 			"Scopes returned to normal: " + count(x.Scopes) + "."}, err
 	})
 	var p *client.Problem
@@ -352,7 +363,7 @@ func (e *env) identityCmd(args []string) error {
 	}
 	body, _ := json.Marshal(in)
 	confirm := func(c *client.Client) error {
-		fmt.Fprintf(e.err, "Revoking %s in %s. Reason: %s\n", client.ShellWord(target), c.Context.Where(), in.Reason)
+		fmt.Fprintf(e.err, "Revoking %s in %s. Reason: %s\n", client.ShellWord(target), c.Context.Where(), client.Printable(in.Reason))
 		fmt.Fprint(e.err, "A revocation is permanent: no command undoes it.\n"+
 			"It adds no auth.deniedSubjects entry and reissues no token, and a restore of the database can erase it.\n"+
 			"Administrator steps (operator guide, recovery): first add the subject to auth.deniedSubjects, a human by iss and sub,\n"+
@@ -362,8 +373,8 @@ func (e *env) identityCmd(args []string) error {
 	w := &client.Write{Method: http.MethodPost, Path: "/identity-revocations", Body: body, HumanOnly: true, Repeat: rp, Check: "act list"}
 	if identity != "" {
 		w.Read = func(c *client.Client) (string, error) {
-			return find(c, "/acts", "identity.revoke act for "+identity, func(a apitypes.ActItem) string {
-				return map[bool]string{true: "the act " + a.Id + " revoking " + identity}[a.Action == "identity.revoke" && slices.Contains(a.Subjects, identity)]
+			return find(c, "/acts", "identity.revoke act for "+client.Printable(identity), func(a apitypes.ActItem) string {
+				return map[bool]string{true: "the act " + client.Printable(a.Id) + " revoking " + client.Printable(identity)}[a.Action == "identity.revoke" && slices.Contains(a.Subjects, identity)]
 			})
 		}
 	}
@@ -374,6 +385,6 @@ func (e *env) identityCmd(args []string) error {
 		if !x.DeniedSubjectsListed {
 			listed = "no: add it now, since a restore can erase this revocation"
 		}
-		return []string{fmt.Sprintf("Revoked %s (act %s).", x.Identity, x.Act), "auth.deniedSubjects lists it: " + listed + ".", x.Note}, err
+		return []string{fmt.Sprintf("Revoked %s (act %s).", client.Printable(x.Identity), client.Printable(x.Act)), "auth.deniedSubjects lists it: " + listed + ".", client.Printable(x.Note)}, err
 	})
 }
