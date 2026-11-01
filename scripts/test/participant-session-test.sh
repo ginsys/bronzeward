@@ -272,7 +272,7 @@ else bad "no daemon record: rc=$rc calls=$calls: $out"; fi
 # checkout's provider. dev-idp up refuses that provider, and the rollback leaves it too.
 setup
 rm -f "$cfg.fixture"
-rm -rf "$repo/.dev/idp"
+rm -rf "$repo/.dev/idp" "$repo/.dev/participants"
 out=$(STUB_IDP_UP_FAIL=1 run start)
 rc=$?
 calls=$(tr '\n' ';' <"$STUB_LOG")
@@ -293,6 +293,25 @@ calls=$(tr '\n' ';' <"$STUB_LOG")
 if [ "$rc" != 0 ] && [[ $out == *"run fixtures/dev-idp down"* ]] && [ -z "$calls" ]; then
   ok "start with a provider state already there refuses, and touches nothing"
 else bad "start, provider state: rc=$rc calls=$calls: $out"; fi
+
+# An earlier session's state, with its web host still running: start refuses and keeps the state,
+# so stop can still find that web host.
+setup
+rm -f "$cfg.fixture"
+rm -rf "$repo/.dev/idp"
+(exec -a "$repo/.dev/participants/webhost" sleep 60) &
+host=$!
+echo "$host" >"$repo/.dev/participants/webhost.pid"
+out=$(run start)
+rc=$?
+calls=$(tr '\n' ';' <"$STUB_LOG")
+mkdir -p "$repo/.dev/idp"
+if [ "$rc" != 0 ] && [[ $out == *"run session stop first"* ]] && [ -z "$calls" ] && running "$host" &&
+  [ "$(cat "$repo/.dev/participants/webhost.pid")" = "$host" ]; then
+  ok "start with an earlier session's state refuses, and keeps its web host's record"
+else bad "start, earlier session: rc=$rc calls=$calls: $out"; fi
+kill "$host" 2>/dev/null
+wait "$host" 2>/dev/null
 
 # A provider state that this session's start did not make: stop leaves the provider alone.
 setup
