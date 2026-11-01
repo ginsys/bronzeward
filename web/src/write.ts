@@ -33,6 +33,13 @@ export type Outcome =
 export const SIGN_IN_CHANGED = "your sign-in changed";
 export const EPOCH_CHANGED_ASIDE = "the installation's epoch changed";
 export const NO_EPOCH = "the read of the installation's epoch got no answer that names one";
+export const SIGN_IN_REFUSED = "the server no longer accepts your sign-in";
+// The page failed while it held the write, for example a renewal that threw.
+const PAGE_FAILED = "the page failed while it sent it";
+
+// A credential refusal that ends the signed-in page, as a read's does (§8.2 401 and 403 rows,
+// §9.6): a 401 its one renewal did not clear, or identity-revoked of the sign-in still current.
+export type Ending = { kind: "unauthenticated"; problem: Problem | null } | { kind: "revoked"; problem: Problem };
 const DROPPED = "the connection dropped";
 const PREFIX = "urn:bronzeward:problem:";
 // The 503s a write repeats; each states that its own attempt committed nothing (§8.2).
@@ -58,6 +65,8 @@ export class Write {
   // Why the write was set aside while a run was in flight (§8.5 item 2).
   aside: string | undefined;
   outcome: Outcome | undefined;
+  // While [Repeat exactly] runs: the unknown outcome it repeats, which the notice keeps showing.
+  repeating: Extract<Outcome, { kind: "unknown" }> | undefined;
   // The run in flight; a second submit returns it and sends nothing.
   running: Promise<Outcome> | undefined;
   constructor(readonly spec: WriteSpec) {
@@ -77,6 +86,9 @@ export class Writes {
   // The page is being left by a notice's own [Show current state]: the next unload guard does not
   // ask, and clears it.
   unloading = false;
+  // The shell's handling of a credential refusal, bound while it is shown. A write's answer reaches
+  // it after the write's own outcome is settled, so the write's notice survives the page's change.
+  onEnded: ((e: Ending) => void) | undefined;
   private readonly all = new Set<Write>();
   private readonly listeners = new Set<() => void>();
   private version = 0;
@@ -108,16 +120,22 @@ export class Writes {
     if (w.running !== undefined) return w.running;
     if (w.outcome !== undefined && !this.repeatable(w)) return Promise.resolve(w.outcome);
     this.all.add(w);
+    w.repeating = w.outcome?.kind === "unknown" ? w.outcome : undefined;
     w.outcome = undefined;
-    w.running = this.run(w).then((r) => {
+    const end: { e?: Ending } = {};
+    // A run that throws settles the write too: unknown once an attempt may have committed.
+    const failed = (): Outcome => (w.ambiguous ? { kind: "unknown", why: PAGE_FAILED } : { kind: "not-done", why: PAGE_FAILED, problem: null });
+    w.running = this.run(w, end).catch(failed).then((r) => {
       // Set aside while its last attempt was in flight, a write that then got no answer is not
       // offered for repeating; an answer still settles it.
       const o: Outcome = r.kind === "unknown" && w.aside !== undefined ? { kind: "set-aside", why: w.aside, ambiguous: true } : r;
       if (o.kind === "unknown") w.ambiguous = true;
       w.outcome = o;
+      w.repeating = undefined;
       w.running = undefined;
       if (!isOpen(w)) this.all.delete(w);
       this.changed();
+      if (end.e !== undefined) this.onEnded?.(end.e);
       return o;
     });
     this.changed();
@@ -145,7 +163,7 @@ export class Writes {
     this.changed();
   }
 
-  private async run(w: Write): Promise<Outcome> {
+  private async run(w: Write, end: { e?: Ending }): Promise<Outcome> {
     const client = this.client;
     const who = this.principal();
     if (client === undefined || who === undefined) return { kind: "not-done", why: "there is no sign-in to send it under", problem: null };
@@ -154,7 +172,8 @@ export class Writes {
     if (!again) {
       w.principal = who;
       // The last epoch seen before the first send, else one GET /recovery (§8.4 item 3).
-      w.epoch = client.currentEpoch ?? (await this.confirm(client));
+      w.epoch = client.currentEpoch ?? (await this.confirm(client, end));
+      if (end.e !== undefined) return { kind: "not-done", why: SIGN_IN_REFUSED, problem: end.e.problem };
       if (w.epoch === undefined) return { kind: "not-done", why: NO_EPOCH, problem: null };
     }
     const headers: Record<string, string> = { "Content-Type": "application/json", "Idempotency-Key": w.key, "Bronzeward-Expected-Epoch": w.epoch! };
@@ -171,7 +190,7 @@ export class Writes {
     for (let n = 0; n <= BACKOFF.length; n++) {
       if (n > 0) await this.wait(BACKOFF[n - 1]!);
       if (n > 0 || again) {
-        const why = await this.check(client, w);
+        const why = await this.check(client, w, end);
         if (why !== undefined) return aside(why);
       }
       const a = await client.attempt(w.spec.method, w.spec.path, headers, body);
@@ -194,10 +213,14 @@ export class Writes {
           renewed = true;
           continue;
         }
+        // Any other 401 code is a refusal by its status class, as for a read.
+        if (code === "unauthenticated") end.e = { kind: "unauthenticated", problem: p };
         return early(refused);
       }
       if (a.status === 403 && code === "identity-revoked") {
         client.revoked();
+        // A code is read only from a problem, so `p` is one.
+        end.e = { kind: "revoked", problem: p! };
         return early(refused);
       }
       // The route-level role check, decided before the lookup; only the plan cancellation's creator
@@ -226,18 +249,35 @@ export class Writes {
   }
 
   // Before a repeat: the same sign-in, and one GET /recovery that shows the reference epoch.
-  private async check(client: Client, w: Write): Promise<string | undefined> {
+  private async check(client: Client, w: Write, end: { e?: Ending }): Promise<string | undefined> {
     if (w.aside !== undefined) return w.aside;
     if (this.principal() !== w.principal) return SIGN_IN_CHANGED;
-    const now = await this.confirm(client);
+    const now = await this.confirm(client, end);
     if (w.aside !== undefined) return w.aside;
+    if (end.e !== undefined) return SIGN_IN_REFUSED;
     if (now === undefined) return NO_EPOCH;
     return now === w.epoch ? undefined : EPOCH_CHANGED_ASIDE;
   }
 
-  // The epoch one GET /recovery shows (§8.4 item 3).
-  private async confirm(client: Client): Promise<string | undefined> {
-    const a = await client.attempt("GET", "/recovery");
-    return a?.headers.get("Bronzeward-Epoch") ?? undefined;
+  // The epoch one GET /recovery shows (§8.4 item 3). It is a read, so its credential refusals are
+  // a read's (§8.2): a 401 renews once and is sent again, and a second 401 or identity-revoked
+  // ends the page through `end`.
+  private async confirm(client: Client, end: { e?: Ending }): Promise<string | undefined> {
+    for (let renewed = false; ; renewed = true) {
+      const a = await client.attempt("GET", "/recovery");
+      const p = a === undefined ? null : problemOf(a.data);
+      const code = p?.type.slice(PREFIX.length);
+      if (a?.status === 401 && code === "unauthenticated") {
+        if (!renewed && (await client.renew())) continue;
+        end.e = { kind: "unauthenticated", problem: p };
+        return undefined;
+      }
+      if (a?.status === 403 && code === "identity-revoked") {
+        client.revoked();
+        end.e = { kind: "revoked", problem: p! };
+        return undefined;
+      }
+      return a?.headers.get("Bronzeward-Epoch") ?? undefined;
+    }
   }
 }

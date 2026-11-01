@@ -2,7 +2,8 @@ import { createElement as h, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
 import { Action, connection, Deprecations, deprecated, Failure, incompatible, MIN_API_REVISION, observed, offlineSince, regaining, ShellContext, type ShellEvents, ShellReads } from "./shell.tsx";
-import { Conflict, Disconnected, Empty, HUMAN_ONLY, Loading, NOT_ACCEPTED, NotAccepted, Offline, Refused, REPLAYED, Replayed, SET_ASIDE, SetAside, Unknown, UNKNOWN, Unread, Withheld, WITHHELD } from "./states.tsx";
+import { Conflict, Disconnected, Empty, HUMAN_ONLY, Loading, NOT_ACCEPTED, NotAccepted, Offline, Refused, REPEATING, REPLAYED, Replayed, SET_ASIDE, SetAside, Unknown, UNKNOWN, Unread, Withheld, WITHHELD } from "./states.tsx";
+import { NO_EPOCH } from "./write.ts";
 import { TRANSPORT_FAILURE } from "./request.ts";
 
 const html = (e: ReactElement) => renderToStaticMarkup(e);
@@ -33,6 +34,14 @@ describe("W11 state catalogue: every text a status message", () => {
     expect(status(h(Refused, { problem: null, status: 502, verb: "read" }))).toBe("Not read: the server answered 502.");
   });
 
+  test("a write's 403 names what the route accepts, as a read's does (§8.2 403 row)", () => {
+    const forbidden = (extra: Record<string, unknown>) => ({ type: "urn:bronzeward:problem:forbidden", title: "Forbidden", status: 403, instance: "req-2", ...extra });
+    expect(status(h(Refused, { problem: forbidden({ roles: ["author"] }), status: 403, verb: "saved" }))).toBe("Not saved: forbidden. Needs author. Forbidden Request req-2.");
+    expect(status(h(Refused, { problem: forbidden({ humanOnly: true, roles: ["approver"] }), status: 403, verb: "saved" }))).toBe(`Not saved: forbidden. ${HUMAN_ONLY} Forbidden Request req-2.`);
+    // The plan cancellation's creator check says it in its detail.
+    expect(status(h(Refused, { problem: forbidden({ plan: "pln_1", roles: ["publisher"], detail: "only the creator" }), status: 403, verb: "saved" }))).toBe("Not saved: forbidden. Forbidden: only the creator Request req-2.");
+  });
+
   test("write states, exercised from #257 on", () => {
     expect(status(h(Conflict, { what: "draft", revision: 7, onShow: noop }))).toBe("Someone changed this draft (revision 7). Your text is not saved.");
     expect(html(h(Conflict, { what: "draft", revision: 7, onShow: noop }))).toContain(">Show their change</button>");
@@ -40,8 +49,16 @@ describe("W11 state catalogue: every text a status message", () => {
     // Repeat exactly only while the page holds the request.
     expect(html(h(Unknown, { onRepeat: noop, onShow: noop }))).toContain(">Repeat exactly</button>");
     expect(html(h(Unknown, { onShow: noop }))).not.toContain("Repeat exactly");
-    expect(status(h(SetAside, { onShow: noop }))).toBe(SET_ASIDE);
-    expect(html(h(SetAside, { onShow: noop }))).toContain('<button type="button" disabled="">Repeat exactly</button>');
+    // The reason it was set aside comes first: an epoch read with no answer is not an epoch change.
+    expect(status(h(SetAside, { why: NO_EPOCH, onShow: noop }))).toBe(`Set aside: ${NO_EPOCH}. ${SET_ASIDE}`);
+    expect(html(h(SetAside, { why: NO_EPOCH, onShow: noop }))).toContain('<button type="button" disabled="">Repeat exactly</button>');
+    // While [Repeat exactly] runs, the notice stays, with no second repeat and no dismissal.
+    const notice = h(Unknown, { onRepeat: noop, onShow: noop, onDismiss: noop, repeating: true });
+    expect(status(notice)).toBe(`${UNKNOWN}${REPEATING}`);
+    const repeating = html(notice);
+    expect(repeating).toContain(">Show current state</button>");
+    expect(repeating).not.toContain("Repeat exactly");
+    expect(repeating).not.toContain("Dismiss");
     expect(status(h(Replayed))).toBe(REPLAYED);
     expect(status(h(NotAccepted, { onSignIn: noop }))).toBe(NOT_ACCEPTED);
   });
