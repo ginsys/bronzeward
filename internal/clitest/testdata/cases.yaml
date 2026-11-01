@@ -101,7 +101,7 @@
   expect:
     client: shows the recovery banner and the scopes; names the scope, or the process restriction when there is none
     server: answers the status reads; the injector refuses the machine reads
-    shown: '"RECOVERY MODE is on in trusted", "Scopes: 1: <machine> ready", exit 0; then "the scope of machine <machine> is pre-restore-unaccounted" and "a process restriction of a server started for recovery", exit 1'
+    shown: '"RECOVERY MODE is on in trusted", "Scopes: 1: <machine> ready", exit 0; then "the scope of machine <machine> is pre-restore-unaccounted" and "the server was started for recovery", "A restriction of the process, not of one scope", exit 1'
     absent: [token in stdout, stderr, argv]
 
 - id: AUTH-02
