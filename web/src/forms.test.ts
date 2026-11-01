@@ -259,6 +259,15 @@ describe("the form's result", () => {
     expect(result({ kind: "done", status: 201, data: {}, replayed: false })).toContain(">DONE</p>");
   });
 
+  test("an unknown outcome points to its notice, and says what the notice said once it is dismissed (B11)", async () => {
+    const [writes, w] = await unknownWrite();
+    const form = () => html(writes, h(ReadsProvider, { value: reads }, h(Result, { w, done: () => "DONE" })));
+    expect(form()).toContain("See the notice at the top of the page");
+    writes.dismiss(w);
+    expect(form()).not.toContain("See the notice");
+    expect(form()).toContain(`Unknown whether this was saved, and its notice was dismissed. Key ${w.key}, POST /api/v1/clusters. To learn the outcome, read /clusters.`);
+  });
+
   test("a replayed refusal is the earlier attempt's, and says so", () => {
     expect(result({ kind: "refused", status: 409, problem: null, replayed: true })).toContain(`${REPLAYED} Not saved: the server answered 409.`);
     expect(result({ kind: "refused", status: 409, problem: null, replayed: false })).toContain(">Not saved: the server answered 409.</p>");
