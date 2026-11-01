@@ -233,15 +233,23 @@ func TestRecoveryTextIsEscaped(t *testing.T) {
 		"GET /api/v1/recovery": `{"epoch":"ep_BWSYNTH-1","recoveryMode":true,"entry":{"enteredBy":"` + hostile + `","enteredAt":"2026-11-01T08:40:00Z","stoppedAt":"2026-11-01T08:31:00Z",` +
 			`"reason":"` + hostile + `","restored":[{"family":"database","backup":"` + hostile + `","takenAt":"2026-11-01T08:30:00Z"}]},"exit":null,` +
 			`"scopes":[{"machine":"mch_a` + hostile + `","state":"released"}]}`,
-	}, `{"act":"`+hostile+`","identity":"`+hostile+`","note":"`+hostile+`","deniedSubjectsListed":true}`)
-	for _, args := range [][]string{
-		{"recovery", "status"},
-		{"identity", "revoke", "--identity", "svc_x", "--reason", "r"},
+	}, `{"act":"`+hostile+`","epoch":"`+hostile+`","previousEpoch":"`+hostile+`","identity":"`+hostile+`","note":"`+hostile+`","deniedSubjectsListed":true,`+
+		`"machines":1,"operations":["`+hostile+`"],"scopes":["`+hostile+`"]}`)
+	for _, c := range []struct {
+		args  []string
+		typed string
+		shows string
+	}{
+		{[]string{"recovery", "status"}, "", "Epoch"},
+		{[]string{"recovery", "enter", "--restored", "family=database,backup=pg,taken-at=2026-11-01T08:30:00Z", "--stopped-at", "2026-11-01T08:31:00Z", "--reason", "r"}, "enter\n", "Recovery mode entered"},
+		{[]string{"recovery", "exit"}, "", "Recovery mode left"},
+		{[]string{"identity", "revoke", "--identity", "svc_x", "--reason", "r"}, "svc_x\n", "Revoked"},
 	} {
+		args := c.args
 		var out, errb bytes.Buffer
-		withStdin(t, "svc_x\n", func() { run(args, &out, &errb) })
-		if args[0] == "identity" && !strings.Contains(out.String(), "Revoked") {
-			t.Fatalf("the revocation was not sent:\n%s\n%s", out.String(), errb.String())
+		withStdin(t, c.typed, func() { run(args, &out, &errb) })
+		if !strings.Contains(out.String(), c.shows) {
+			t.Fatalf("%v: the answer was not shown:\n%s\n%s", args, out.String(), errb.String())
 		}
 		for _, s := range []string{out.String(), errb.String()} {
 			if strings.ContainsRune(s, '\x1b') || strings.Contains(s, "\nFORGED") {
