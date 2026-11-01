@@ -194,8 +194,9 @@ func TestSecretServiceDialBounded(t *testing.T) {
 
 // TestSecretServiceStoppedReader checks that a session bus that stops reading during CreateItem
 // fails the operation within ssBound, with its outcome named unknown. A relay in front of the
-// stand-in's bus stops reading from the client after 64 KiB, so the 8 MiB value fills the socket
-// and the write waits.
+// stand-in's bus stops reading from the client after 64 KiB, so the 1 MiB value fills the socket
+// and the write waits. The value is kept that small because the deadline does not cut short the
+// marshalling before the write: an 8 MiB value took over 10 s under -race on a loaded host.
 func TestSecretServiceStoppedReader(t *testing.T) {
 	stub := stubSecretService(t)
 	stub.reset("")
@@ -241,7 +242,7 @@ func TestSecretServiceStoppedReader(t *testing.T) {
 	}()
 	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path="+p)
 	done := make(chan error, 1)
-	go func() { done <- ssSet("BWSYNTH-service", "a", "BWSYNTH-"+strings.Repeat("x", 8<<20)) }()
+	go func() { done <- ssSet("BWSYNTH-service", "a", "BWSYNTH-"+strings.Repeat("x", 1<<20)) }()
 	select {
 	case err := <-done:
 		if want := "the sign-in may still be written after this command ends"; err == nil || !strings.Contains(err.Error(), want) {
