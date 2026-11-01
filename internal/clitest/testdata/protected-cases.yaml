@@ -1,0 +1,125 @@
+# Shared conformance case records (docs/spec/client-contracts.md §12) of the protected review and
+# marks (#350), run by protected_test.go TestProtected against a disposable bronzeward serve with an
+# OpenBao provider (the test's, through baotest and a proxy that can hold a staging decrypt or
+# answer a path's writes 503), behind the in-process TLS injector, with short claim timers
+# (heartbeat 300 ms, lease 1.5 s, absolute expiry 3 min, sweep 1 s). Data is synthetic:
+# fixture-issuer tokens for the human h-all, who holds author; a Talos stand-in (talostest) on
+# loopback whose generated configuration holds BWSYNTH-unmarked-secret in a file's content, which
+# the schema does not recognise.
+#
+# A review runs on a pseudo-terminal; its output is matched in memory, never written to a file or
+# a failure message, and cleared once matched. Every other run's argv, standard output and
+# standard error are scanned for the token, the sentinels and the stand-in's secrets, the
+# unmarked one included.
+
+- id: PROT-01
+  setup: an import of the stand-in started with --review and paused at generation 1
+  action: >-
+    import review ing_... on a terminal, paged to the end and back, then the mark
+    doc[0]/machine/files/0/content at the prompt; import review again with no mark; import continue
+  exchange:
+    - "GET /api/v1/ingestions/ing_.../review; 200, no-store"
+    - "POST /api/v1/ingestions/ing_.../marks, the mark from the prompt; 202 with generation 2"
+    - GET /api/v1/operations/op_.../events, until the paused event at generation 2
+    - "GET /api/v1/ingestions/ing_.../review; 200"
+    - "POST /api/v1/ingestions/ing_.../continuations; 202"
+  fault: none
+  expect:
+    client: >-
+      the notice, then the review in the alternate screen, which it leaves on q; the marks prompt;
+      the mark applied on the pause at its generation
+    server: the claim paused at generation 2 with the value extracted, then released
+    shown: >-
+      the unmarked secret inside the first review only, never after the pager closes; "Marked 1
+      path; re-staged and paused again (generation 2)."; "No marks given." after the second; exit 0
+    absent: [token, sentinels and the stand-in's secrets in any retained output or the CLI's files]
+
+- id: PROT-02
+  setup: an import started with --review and paused
+  action: import review ing_... with standard input a terminal and standard output a buffer; then with both redirected; then with -o json
+  exchange: []
+  fault: none
+  expect:
+    client: refused before the context is opened, with no override
+    server: no review read
+    shown: '"... only when standard input and standard output are a terminal, with no override; nothing was read or written"; exit 2; nothing on standard output'
+    absent: [a review read]
+
+- id: PROT-03
+  setup: an import started with --review and paused at generation 1
+  action: >-
+    import mark with two marks, the second not a path; a mark addressing no node; the unmarked
+    path while the provider answers its KV writes 503
+  exchange:
+    - "POST /api/v1/ingestions/ing_.../marks; 422 validation-failed, position 1"
+    - "POST /api/v1/ingestions/ing_.../marks; 202 with generation 2; marked, mark-refused (422, rule mark-unaddressed, position 0), paused"
+    - "POST /api/v1/ingestions/ing_.../marks; 202 with generation 3; marked, mark-refused (503 dependency-unavailable), paused"
+  fault: third case only, the provider proxy answers 503 to every write under /v1/secret/data/
+  expect:
+    client: >-
+      the first refused at once by position; the second and third not applied, the second by rule
+      and position, the third by its code; none reported as accepted
+    server: the claim paused again after each, its envelope unchanged
+    shown: >-
+      "Refused: position 1."; "was not applied: it was refused (422 validation-failed, rule
+      mark-unaddressed, the mark at position 0 (the first is 0))"; "was not applied: it was refused
+      (503 dependency-unavailable)"; exit 1 each
+    absent: [the mark's path in stdout or stderr, "Marked"]
+
+- id: PROT-04
+  setup: an import started with --review and paused
+  action: import review ing_... on a terminal, quit with no mark
+  exchange:
+    - "GET /api/v1/ingestions/ing_.../review; the injector sends 200 and part of the body, then drops the connection"
+    - "GET /api/v1/ingestions/ing_.../review; 200"
+  fault: the first review read's connection dropped part way through the answer
+  expect:
+    client: the read repeated; nothing of the cut answer shown or kept
+    server: unchanged
+    shown: the review, then "No marks given."; exit 0
+    absent: [a file holding a sentinel or the unmarked secret]
+
+- id: PROT-05
+  setup: an import started with --review and paused at generation 1
+  action: import mark with the unmarked path while the provider answers its decrypts 503; import takeover once the lease lapsed
+  exchange:
+    - "POST /api/v1/ingestions/ing_.../marks; 202 with generation 2"
+    - GET /api/v1/operations/op_.../events; marked, then resume-failed with dependency-unavailable
+    - "POST /api/v1/ingestions/ing_.../takeovers; 202; taken-over and paused at generation 3"
+  fault: the provider proxy answers 503 to every write under /v1/transit/decrypt/ during the mark
+  expect:
+    client: >-
+      the watch ends on resume-failed with the operation still running; the mark not applied;
+      import takeover and import abandon offered; the takeover resumes without the mark and pauses
+    server: the claim held at generation 2, staged, the operation running
+    shown: >-
+      "the mark on import ing_... was not applied: its staged input could not be decrypted
+      (resume-failed, dependency-unavailable)", the two commands; exit 1
+    absent: [a wait without end]
+
+- id: PROT-06
+  setup: an import started with --review and paused; the provider proxy holds the staging decrypt, the mark's run's first step
+  action: import mark with the unmarked path
+  exchange:
+    - "POST /api/v1/ingestions/ing_.../marks; 202 with generation 2"
+    - GET /api/v1/operations/op_.../events, Accept text/event-stream
+    - the stream ends when serve is killed; the client's requests wait until serve is back
+    - GET /api/v1/ingestions/ing_..., once the lease the client last read passed by its margin
+  fault: >-
+    serve is killed once the run holds its decrypt, then started again on the same database and
+    port (test-only); the claim is left with no heartbeat
+  expect:
+    client: >-
+      the first case: the claim held with its lease passed ends the watch with the operation still
+      running; the mark reported as of unknown outcome, never as not applied; a later read, import
+      takeover and import abandon offered
+    server: the claim held at generation 2, staged, its lease lapsed; the operation running
+    shown: '"the mark on import ing_...: its claim is held and its lease lapsed ..., while operation op_... still runs: the outcome is unknown."; exit 3'
+    absent: ['"not applied"', a wait until the absolute expiry]
+  not run: >-
+    the second and third cases are import-cases.yaml's (#349); the fourth needs a server-side hook
+    delaying a draft transaction's COMMIT, which the server binary does not have (#263, #366), and
+    no stand-in replaces it
+  unit: >-
+    cmd/bronzewardctl TestImportMark covers each outcome against a fake server, an earlier pause
+    ignored and a success without the mark's pause read as not applied

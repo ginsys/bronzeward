@@ -75,7 +75,7 @@
       still runs: the outcome is unknown.", the three commands; exit 3
     absent: [token and sentinels in stdout, stderr, argv]
   not run: >-
-    the first case (a mark) is import mark's (#350); the fourth needs a server-side hook delaying
+    the first case (a mark) is protected-cases.yaml's (#350); the fourth needs a server-side hook delaying
     a draft transaction's COMMIT, which the server binary does not have (#263)
   unit: >-
     cmd/bronzewardctl TestImportLifecycle covers a lapsed lease with exit 3, history before this

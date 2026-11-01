@@ -40,6 +40,9 @@ type slowBao struct {
 	// call, until it closes or the server that sent it goes away; held counts the decrypts kept.
 	hold atomic.Pointer[chan struct{}]
 	held atomic.Int32
+	// fail, when set, is a path prefix whose writes the proxy answers 503, as an unavailable
+	// provider does.
+	fail atomic.Pointer[string]
 }
 
 // retire makes the digest key's current versions uncomputable: it rotates the key and raises its
@@ -115,6 +118,10 @@ func startTimers(t *testing.T, roles, timers string) (*fixture, *slowBao) {
 	rp := httputil.NewSingleHostReverseProxy(u)
 	sb := &slowBao{b: b, digest: digest}
 	sb.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if p := sb.fail.Load(); p != nil && r.Method != http.MethodGet && strings.HasPrefix(r.URL.Path, *p) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		if r.Method != http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/secret/data/") {
 			time.Sleep(time.Duration(sb.delay.Load()))
 		}
