@@ -270,11 +270,16 @@ var fragmentCases = map[string]func(*testing.T, *fixture, *injector, *fragmentEn
 	},
 	"AMB-06": func(t *testing.T, f *fixture, in *injector, e *fragmentEnv, ctl func(...string) result) {
 		var s sent
+		// The repeat waits until the retire returns: commit closes the connection first, so a slow
+		// retire would otherwise let the repeat reach the provider while the old version still works.
+		retired := make(chan struct{})
 		in.set(s.sending(http.MethodPut, func(n int, w http.ResponseWriter, r *http.Request) {
 			if n > 0 {
+				<-retired
 				in.proxy.ServeHTTP(w, r)
 				return
 			}
+			defer close(retired)
 			in.commit(w, r)
 			// The version the record was computed under becomes one the provider cannot compute.
 			e.bao.retire(t)

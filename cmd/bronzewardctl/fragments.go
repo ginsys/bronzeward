@@ -133,15 +133,22 @@ func (e *env) fragmentBody(in apitypes.FragmentInput, file, decl string, marks b
 
 // declarations reads a declarations file, YAML or JSON, with no member the API does not define.
 // Its refusals are fixed text: the decoders' own errors quote member names, and some values, from
-// the file, which stays out of the output.
+// the file, which stays out of the output. A second YAML document is refused: yaml.Unmarshal reads
+// the first only, so a declaration in a later one would be dropped without a word (design §8).
 func declarations(p string) (*apitypes.Declarations, error) {
 	b, err := os.ReadFile(p)
 	if err != nil {
 		return nil, err
 	}
 	var v any
-	if yaml.Unmarshal(b, &v) != nil {
+	yd := yaml.NewDecoder(bytes.NewReader(b))
+	// An empty file is io.EOF here, and stays an empty declarations object, as before.
+	if err := yd.Decode(&v); err != nil && !errors.Is(err, io.EOF) {
 		return nil, errors.New("the file is not YAML or JSON")
+	}
+	var more any
+	if err := yd.Decode(&more); !errors.Is(err, io.EOF) {
+		return nil, errors.New("the file holds more than one YAML document")
 	}
 	j, err := json.Marshal(v)
 	if err != nil {
