@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ADOPTED, advanced, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, latestUnread, nextTimeline, type Observation, Observations, POLL_MS, polled, queued, readLater, readOlder, sentences, type Timeline, TimelineRows, UNREAD } from "./machine.tsx";
+import { ADOPTED, advanced, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, kept, latestUnread, nextTimeline, type Observation, Observations, POLL_MS, polled, queued, readLater, readOlder, sentences, type Timeline, TimelineRows, UNREAD } from "./machine.tsx";
 import { type Reads, ReadsProvider, RESTARTED } from "./list.tsx";
 import type { Machine } from "./machines.tsx";
 import type { ReadResult } from "./request.ts";
@@ -198,6 +198,26 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
     expect(observations(true)).toContain(notice("observations-restarted"));
     expect(rows(false)).not.toContain(RESTARTED.slice(0, 20));
     expect(observations(false)).not.toContain(RESTARTED.slice(0, 20));
+  });
+
+  test("#424 item 1: the observations' restart notice stays through the reads again after it, and goes with the view", () => {
+    const flag = (o: { restarted: boolean }) => o.restarted;
+    const ok = (restarted: boolean) => ({ kind: "ok" as const, data: { items: [], next: undefined, restarted } });
+    const after = kept(kept(undefined, ok(true), "v", flag), ok(false), "v", flag);
+    expect(after.restarted).toBe(true);
+    expect(kept(after, ok(false), "w", flag).restarted).toBe(false);
+    expect(kept(kept(undefined, ok(false), "v", flag), ok(false), "v", flag).restarted).toBe(false);
+  });
+
+  test("#424 item 2: a read again that fails, its 503 retries spent too, keeps the last answer under it; a new path, view or a dropped read keeps nothing", () => {
+    const shown = kept(undefined, { kind: "ok", data: machine({ frozen: true }) }, "v");
+    const failed = kept<Machine>(shown, { kind: "unavailable", status: 503, problem: null }, "v");
+    expect(failed.data).toEqual(machine({ frozen: true }));
+    expect(kept<Machine>(failed, { kind: "refused", status: 404, problem: null }, "v").data).toEqual(machine({ frozen: true }));
+    expect(kept<Machine>(failed, { kind: "ok", data: machine({}) }, "v").data).toEqual(machine({}));
+    expect(kept<Machine>(failed, { kind: "unavailable", status: 503, problem: null }, "w").data).toBeUndefined();
+    expect(kept<Machine>(failed, { kind: "loading" }, "v").data).toBeUndefined();
+    expect(kept<Machine>(failed, { kind: "dropped", failed: { kind: "transport" } }, "v").data).toBeUndefined();
   });
 
   test("review R1-F1: a restart that fails drops the timeline read before it and its refused cursor", async () => {
