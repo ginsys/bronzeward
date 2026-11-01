@@ -5,7 +5,7 @@
 // write's in-progress 409 and the recovery entry's exception (§8.4 items 2 and 3) are not served
 // here: no form of this layer sends either route.
 
-import { type Client, type Ending, NOT_JSON, type Problem } from "./request.ts";
+import { type Attempt, type Client, type Ending, NOT_JSON, type Problem } from "./request.ts";
 
 export interface WriteSpec {
   method: "POST" | "PUT" | "DELETE";
@@ -65,6 +65,9 @@ export class Write {
   outcome: Outcome | undefined;
   // While [Repeat exactly] runs: the unknown outcome it repeats, which the notice keeps showing.
   repeating: Extract<Outcome, { kind: "unknown" }> | undefined;
+  // A [Repeat exactly] settled it: the notice, where the repeat started, shows the result until
+  // dismissed, since the form that sent it may no longer be shown.
+  repeated = false;
   // The run in flight; a second submit returns it and sends nothing.
   running: Promise<Outcome> | undefined;
   constructor(readonly spec: WriteSpec) {
@@ -104,11 +107,16 @@ export class Writes {
     for (const f of this.listeners) f();
   }
 
-  // The writes the notice shows and the leave guards ask about: in flight, unknown, or set aside
+  // The writes the leave guards ask about and a form waits on: in flight, unknown, or set aside
   // after an attempt that may have committed. One set aside before any such attempt committed
   // nothing, and the form says so.
   get open(): Write[] {
     return [...this.all].filter(isOpen);
+  }
+
+  // The writes the notices show: the open ones, and each settled [Repeat exactly] until dismissed.
+  get notices(): Write[] {
+    return [...this.all].filter((w) => isOpen(w) || w.repeated);
   }
 
   // Sends `w`, or returns the run in flight: a second submit of the same logical write sends nothing.
@@ -119,6 +127,7 @@ export class Writes {
     if (w.outcome !== undefined && !this.repeatable(w)) return Promise.resolve(w.outcome);
     this.all.add(w);
     w.repeating = w.outcome?.kind === "unknown" ? w.outcome : undefined;
+    const repeat = w.repeating !== undefined;
     w.outcome = undefined;
     const end: { e?: Ending } = {};
     // A run that throws settles the write too: unknown once an attempt may have committed.
@@ -131,7 +140,10 @@ export class Writes {
       w.outcome = o;
       w.repeating = undefined;
       w.running = undefined;
-      if (!isOpen(w)) this.all.delete(w);
+      if (!isOpen(w)) {
+        if (repeat) w.repeated = true;
+        else this.all.delete(w);
+      }
       this.changed();
       if (end.e !== undefined) this.onEnded?.(end.e);
       return o;
@@ -193,7 +205,15 @@ export class Writes {
         const why = await this.check(client, w, end);
         if (why !== undefined) return aside(why);
       }
-      const a = await client.attempt(w.spec.method, w.spec.path, headers, body, end);
+      let a: Attempt | undefined;
+      try {
+        a = await client.attempt(w.spec.method, w.spec.path, headers, body, end);
+      } catch (e) {
+        // attempt() catches its own send's failure, so a throw comes after the write went out, for
+        // example a renewal that threw while its epoch was learned: it may have committed.
+        w.ambiguous = true;
+        throw e;
+      }
       // No complete answer, a redirect the browser refused included: some byte may have gone out
       // (§8.4 item 2, TLS-03).
       if (a === undefined) {

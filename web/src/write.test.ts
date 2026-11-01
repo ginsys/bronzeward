@@ -227,6 +227,22 @@ describe("repeats (§8.2, §8.4 item 2)", () => {
     expect((await b.writes.submit(v)).kind).toBe("unknown");
     expect(b.writes.open).toEqual([v]);
   });
+
+  test("a first send whose answer handling throws, as a renewal while its epoch is learned, may have committed: unknown", async () => {
+    const writes = new Writes(() => PRINCIPAL, async () => {});
+    const sends: string[] = [];
+    writes.client = {
+      currentEpoch: EPOCH,
+      attempt: async (_m: string, path: string) => {
+        sends.push(path);
+        throw new Error("synthetic renewal failure");
+      },
+    } as unknown as Client;
+    const w = spec();
+    expect((await writes.submit(w)).kind).toBe("unknown");
+    expect(sends).toEqual(["/clusters"]);
+    expect(writes.open).toEqual([w]);
+  });
 });
 
 describe("the confirming read's credential refusals (§8.2)", () => {
@@ -365,6 +381,25 @@ describe("[Repeat exactly]", () => {
     expect(p.sent.map((s) => s.path)).toEqual(["/recovery", "/clusters"]);
     expect(p.sent[1]!.headers["Idempotency-Key"]).toBe(w.key);
     expect(p.writes.open).toEqual([]);
+  });
+
+  test("a settled repeat stays in the notices with its result until dismissed, but no longer holds the page", async () => {
+    const drop = () => new TypeError("Failed to fetch");
+    const p = page([drop(), drop(), drop(), drop(), created({ id: "c1" }, true)]);
+    const w = spec();
+    await p.writes.submit(w);
+    await p.writes.submit(w);
+    expect(p.writes.open).toEqual([]);
+    expect(p.writes.notices).toEqual([w]);
+    expect(w.outcome).toMatchObject({ kind: "done", replayed: true });
+    p.writes.dismiss(w);
+    expect(p.writes.notices).toEqual([]);
+  });
+
+  test("a first send that settles leaves no notice", async () => {
+    const p = page([created({ id: "c1" })]);
+    await p.writes.submit(spec());
+    expect(p.writes.notices).toEqual([]);
   });
 
   test("keeps the unknown outcome it repeats as `repeating` while it runs", async () => {
