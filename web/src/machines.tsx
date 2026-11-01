@@ -119,6 +119,7 @@ export function Machines({ query, go }: { query: string; go: (to: string) => voi
       {clusters.kind !== "loading" && unread}
       <Filter label="State:" value={state?.[0] ?? ""} options={STATES} onChange={(v) => filter("state", v)} />
       <RecordMachineAction cluster={cluster} />
+      <AddClusterAction />
       {body}
       <p>Health is not checked.</p>
     </>
