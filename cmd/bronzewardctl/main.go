@@ -72,6 +72,17 @@ commands:
   plan list [--state <s>] [--machine <id>] | show <plan>
   operation list [--plan <id>] [--machine <id>] [--state <s>] [--kind <k>] | show <operation>
   act list    the audit record
+  recovery status
+              the epoch, recovery mode, the entry and exit, and each scope's next step
+  recovery enter --restored family=<f>,backup=<id>,taken-at=<time> [--restored ...]
+              --stopped-at <time> --reason <text>
+              on a server started for recovery; sent only when enter is typed back; a repeat
+              of an unknown outcome takes --idempotency-key and --expect-principal, no epoch
+  recovery exit [--fact name=value]...
+              once every scope is released
+  identity revoke (--identity <id> | --iss <iss> --sub <sub>) --reason <text>
+              permanent; sent only when the identity (or the subject) is typed back
+              these writes need a person signed in as recovery-admin; times are RFC 3339
               lists, timeline, observations and history read one page: --limit <n>, --cursor <next>;
               --all reads every page, which -o json and yaml print as one {"items": [...]}; the
               draft and release filters apply to the items read
@@ -143,7 +154,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	commands := map[string]func([]string) error{"context": e.contextCmd, "version": e.versionCmd, "whoami": e.whoamiCmd, "login": e.loginCmd, "logout": e.logoutCmd,
 		"status": e.statusCmd, "cluster": e.clusterCmd, "machine": e.machineCmd,
 		"fragment": e.fragmentCmd, "profile": e.profileCmd, "assignment": e.assignmentCmd,
-		"draft": e.draftCmd, "publish": e.publish, "release": e.releaseCmd, "plan": e.planCmd, "operation": e.operationCmd, "act": e.actCmd}
+		"draft": e.draftCmd, "publish": e.publish, "release": e.releaseCmd, "plan": e.planCmd, "operation": e.operationCmd, "act": e.actCmd,
+		"recovery": e.recoveryCmd, "identity": e.identityCmd}
 	pos, err := e.parse("bronzewardctl", args, -1, nil)
 	if err == nil && len(pos) == 0 {
 		err = usageError{errors.New("no command")}
@@ -160,6 +172,7 @@ func report(err error, stdout, stderr io.Writer) int {
 	var u usageError
 	var failed operationFailed
 	var refused client.RefusedRepeat
+	var declined notConfirmed
 	var unknown *client.Unknown
 	switch {
 	case err == nil:
@@ -179,7 +192,7 @@ func report(err error, stdout, stderr io.Writer) int {
 		return 3
 	case errors.As(err, &failed):
 		return 4
-	case errors.As(err, &refused):
+	case errors.As(err, &refused), errors.As(err, &declined):
 		return 2
 	}
 	return 1
