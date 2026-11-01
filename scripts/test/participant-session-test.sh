@@ -154,12 +154,56 @@ if [ "$rc" != 0 ] && [[ $out == *"in $t/profile/.bw-scan-control"* ]] && [ "$(co
   ok "a session password in another file of the controls' name is found"
 else bad "same-named file: rc=$rc controls=$(controls): $out"; fi
 
+# A file already at a control's path, holding a session password: the scan refuses and keeps it.
+printf 'BWSYNTH-pw-abcd1234-5678\n' >"$repo/.dev/idp/.bw-scan-control"
+out=$(run scan)
+rc=$?
+kept=$(cat "$repo/.dev/idp/.bw-scan-control" 2>/dev/null)
+rm -f "$repo/.dev/idp/.bw-scan-control"
+if [ "$rc" != 0 ] && [[ $out == *"did not plant it"* ]] && [ "$kept" = BWSYNTH-pw-abcd1234-5678 ] && [ "$(controls)" = 0 ]; then
+  ok "a file already at a control's path fails the scan, and is kept as it was"
+else bad "existing control path: rc=$rc kept=$kept controls=$(controls): $out"; fi
+
+# A symbolic link below a root, to a log outside it that holds a session password: the scan follows it.
+mkdir -p "$t/outside"
+printf 'BWSYNTH-pw-abcd1234-5678\n' >"$t/outside/log"
+ln -s "$t/outside/log" "$repo/fixtures/.state/linked-log"
+out=$(run scan)
+rc=$?
+rm -f "$repo/fixtures/.state/linked-log"
+if [ "$rc" != 0 ] && [[ $out == *"in $repo/fixtures/.state/linked-log"* ]] && [ "$(controls)" = 0 ]; then
+  ok "a session password behind a symbolic link is found"
+else bad "linked leak: rc=$rc controls=$(controls): $out"; fi
+
+# A symbolic link that cannot be followed: the scan cannot tell what it hides, so it fails.
+ln -s "$t/outside/gone" "$repo/.dev/participants/dangling"
+out=$(run scan)
+rc=$?
+rm -f "$repo/.dev/participants/dangling"
+if [ "$rc" != 0 ] && [[ $out == *"proves nothing"* ]] && [ "$(controls)" = 0 ]; then
+  ok "a symbolic link that cannot be followed fails the scan"
+else bad "dangling link: rc=$rc controls=$(controls): $out"; fi
+
+# The participant's shell: no desktop session bus and no inherited token file reach its client, so a
+# sign-in never goes to the desktop's credential store or outside the participant home.
+mkdir -p "$repo/.dev/participants/bin"
+cat >"$repo/.dev/participants/bin/bronzewardctl" <<'EOF'
+#!/bin/sh
+echo "bus=[${DBUS_SESSION_BUS_ADDRESS-unset}] tokenfile=[${BRONZEWARD_TOKEN_FILE-unset}] config=[$XDG_CONFIG_HOME]"
+EOF
+chmod +x "$repo/.dev/participants/bin/bronzewardctl"
+out=$(printf 'bronzewardctl\nexit\n' | DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent BRONZEWARD_TOKEN_FILE=$t/elsewhere run shell)
+rm -rf "$repo/.dev/participants/bin"
+if [[ $out == *"bus=[unset] tokenfile=[unset] config=[$repo/.dev/participants/home/config]"* ]]; then
+  ok "the participant's shell gives its client no session bus and no inherited token file"
+else bad "shell environment: $out"; fi
+
 # A grep that hangs on the recursive read, so the scan is interrupted with its controls planted. The
 # scan runs in its own process group, which is signalled whole, as a terminal's Ctrl-C reaches grep.
 realgrep=$(type -P grep)
 cat >"$t/bin/grep" <<EOF
 #!/usr/bin/env bash
-for a in "\$@"; do [ "\$a" = -rlE ] && exec sleep 30; done
+for a in "\$@"; do [ "\$a" = -RlE ] && exec sleep 30; done
 exec '$realgrep' "\$@"
 EOF
 chmod +x "$t/bin/grep"
