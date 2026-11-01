@@ -395,6 +395,50 @@ func (f *fixture) scanFiles() {
 	}
 }
 
+// warnedBeforeAnswer reports whether standard error holds the warning line and then answer in the
+// lines after it. The warning line starts with the context's address, which holds the test
+// server's random port, so a search from the start of standard error can match a status code in
+// the port (40312 holds "403").
+func warnedBeforeAnswer(stderr, warning, answer string) bool {
+	i := strings.Index(stderr, warning)
+	if i < 0 {
+		return false
+	}
+	_, after, _ := strings.Cut(stderr[i:], "\n")
+	return strings.Contains(after, answer)
+}
+
+// TestWarnedBeforeAnswer is the negative control for the order check of TestWrites. The context
+// address holds "403" in its port, and the old check, the first "403" against the warning's
+// position, reports the warning as late. The helper must not.
+func TestWarnedBeforeAnswer(t *testing.T) {
+	const warning = "is for a person signed in"
+	line := func(port string) string {
+		return "lab (https://127.0.0.1:" + port + "): POST /api/v1/clusters " + warning + ", not an automation token: the server refuses it.\n"
+	}
+	answer := "403 (forbidden)\nThis needs a person signed in, not an automation token.\n"
+	for _, c := range []struct {
+		name, stderr string
+		want         bool
+	}{
+		{"a port without 403", line("41234") + answer, true},
+		{"a port that starts with 403", line("40312") + answer, true},
+		{"a port that ends with 403", line("34403") + answer, true},
+		{"the answer before the warning", answer + line("41234"), false},
+		{"no answer after the warning", line("40312"), false},
+		{"no warning", answer, false},
+	} {
+		if got := warnedBeforeAnswer(c.stderr, warning, "403"); got != c.want {
+			t.Errorf("%s: warnedBeforeAnswer = %v, want %v\n%s", c.name, got, c.want, c.stderr)
+		}
+	}
+	// The old check, kept here only to show that the control catches it.
+	old := line("40312") + answer
+	if strings.Index(old, warning) <= strings.Index(old, "403") {
+		t.Errorf("the control no longer holds: the old check passes on a port with 403, so this test cannot show the fix")
+	}
+}
+
 // TestWrites runs the three writes through the CLI: success, the human-only warning and refusal
 // for an automation token on each route, and the roles a human without author is shown.
 func TestWrites(t *testing.T) {
@@ -418,8 +462,8 @@ func TestWrites(t *testing.T) {
 		r := ctl(append([]string{"--context", "lab"}, args...)...)
 		f.want(r, 1, route+" is for a person signed in, not an automation token: the server refuses it.", "403", "(forbidden)",
 			"This needs a person signed in, not an automation token.")
-		if strings.Index(r.err, "is for a person signed in") > strings.Index(r.err, "403") || r.out != "" {
-			t.Errorf("%s: the warning follows the answer, or standard output holds %q", route, r.out)
+		if !warnedBeforeAnswer(r.err, "is for a person signed in", "403") || r.out != "" {
+			t.Errorf("%s: the warning does not come before the answer, or standard output holds %q", route, r.out)
 		}
 		if seen := in.requests(); !slices.Contains(seen, route) {
 			t.Errorf("%s was not sent: %v", route, seen)
