@@ -29,9 +29,11 @@ export type Outcome =
   // Not repeated and not sent under a new key (§8.4 item 3, journeys §8).
   | { kind: "set-aside"; why: string; ambiguous: boolean };
 
-export const SIGN_IN_CHANGED = "Your sign-in changed";
-export const EPOCH_CHANGED_ASIDE = "The installation's epoch changed";
-export const NO_EPOCH = "The confirming read of the epoch got no answer that names one";
+// Each `why` is a clause the notice and the forms show after "Not saved:" or the state's text.
+export const SIGN_IN_CHANGED = "your sign-in changed";
+export const EPOCH_CHANGED_ASIDE = "the installation's epoch changed";
+export const NO_EPOCH = "the read of the installation's epoch got no answer that names one";
+const DROPPED = "the connection dropped";
 const PREFIX = "urn:bronzeward:problem:";
 // The 503s a write repeats; each states that its own attempt committed nothing (§8.2).
 const REPEATED_503 = new Set(["dependency-unavailable", "talos-access-unavailable", "transient-conflict"]);
@@ -63,6 +65,7 @@ export class Write {
   }
 }
 
+const isOpen = (w: Write) => w.outcome === undefined || w.outcome.kind === "unknown" || (w.outcome.kind === "set-aside" && w.outcome.ambiguous);
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const problemOf = (d: unknown): Problem | null =>
   typeof d === "object" && d !== null && typeof (d as Problem).type === "string" && (d as Problem).type.startsWith(PREFIX) ? (d as Problem) : null;
@@ -88,9 +91,11 @@ export class Writes {
     for (const f of this.listeners) f();
   }
 
-  // The writes the notice shows and the leave guards ask about: in flight, unknown or set aside.
+  // The writes the notice shows and the leave guards ask about: in flight, unknown, or set aside
+  // after an attempt that may have committed. One set aside before any such attempt committed
+  // nothing, and the form says so.
   get open(): Write[] {
-    return [...this.all].filter((w) => w.outcome === undefined || w.outcome.kind === "unknown" || w.outcome.kind === "set-aside");
+    return [...this.all].filter(isOpen);
   }
 
   // Sends `w`, or returns the run in flight: a second submit of the same logical write sends nothing.
@@ -105,7 +110,7 @@ export class Writes {
       if (o.kind === "unknown") w.ambiguous = true;
       w.outcome = o;
       w.running = undefined;
-      if (o.kind === "done" || o.kind === "refused" || o.kind === "not-done") this.all.delete(w);
+      if (!isOpen(w)) this.all.delete(w);
       this.changed();
       return o;
     });
@@ -137,7 +142,7 @@ export class Writes {
   private async run(w: Write): Promise<Outcome> {
     const client = this.client;
     const who = this.principal();
-    if (client === undefined || who === undefined) return { kind: "not-done", why: "There is no sign-in to send it under.", problem: null };
+    if (client === undefined || who === undefined) return { kind: "not-done", why: "there is no sign-in to send it under", problem: null };
     // A [Repeat exactly] is a repeat: it is checked before it is sent.
     const again = w.epoch !== undefined;
     if (!again) {
@@ -150,10 +155,11 @@ export class Writes {
     if (w.spec.ifMatch !== undefined) headers["If-Match"] = w.spec.ifMatch;
     const body = JSON.stringify(w.spec.body);
     const aside = (why: string): Outcome => ({ kind: "set-aside", why, ambiguous: w.ambiguous });
-    const unknown = (): Outcome => ({ kind: "unknown", why: `An attempt may have committed. The last answer was ${last}.` });
+    // The last answer, as status and code; undefined while the last attempt got none.
+    let last: string | undefined;
+    const unknown = (why = last === undefined ? DROPPED : `the server answered ${last}`): Outcome => ({ kind: "unknown", why });
     // A refusal decided before the idempotency lookup says nothing of an earlier ambiguous attempt.
     const early = (o: Outcome): Outcome => (w.ambiguous ? unknown() : o);
-    let last = "none";
     let p503: Problem | null = null;
     let renewed = false;
     for (let n = 0; n <= BACKOFF.length; n++) {
@@ -167,7 +173,7 @@ export class Writes {
       // (§8.4 item 2, TLS-03).
       if (a === undefined) {
         w.ambiguous = true;
-        last = "no complete answer";
+        last = undefined;
         continue;
       }
       const replayed = a.headers.get("Idempotent-Replayed") === "true";
@@ -191,11 +197,11 @@ export class Writes {
       // The route-level role check, decided before the lookup; only the plan cancellation's creator
       // check, which carries `plan`, refuses after it (§8.2 403 row).
       if (a.status === 403 && code === "forbidden" && p?.["plan"] === undefined) return early(refused);
-      if (a.status === 409 && code === "conflict" && p?.["request"] !== undefined && p["epoch"] !== undefined) return aside("The key's record is from an earlier epoch");
+      if (a.status === 409 && code === "conflict" && p?.["request"] !== undefined && p["epoch"] !== undefined) return aside("the key's record is from an earlier epoch");
       // A process refusal, decided before the lookup (§8.2 409 row).
       if (a.status === 409 && code === "recovery-mode-active" && p?.["scope"] === undefined) return early(refused);
       if (a.status === 412 && code === "epoch-mismatch") return aside(EPOCH_CHANGED_ASIDE);
-      if (a.status === 422 && code === "idempotency-key-reused" && (n > 0 || again)) return unknown();
+      if (a.status === 422 && code === "idempotency-key-reused" && (n > 0 || again)) return unknown("this repeat could not be matched to the earlier request under its key, so it did nothing");
       if (a.status === 503 && (REPEATED_503.has(code ?? "") || code === "epoch-superseded")) {
         p503 = p;
         // epoch-superseded cannot succeed against this server process (§8.2 503 row).
@@ -210,7 +216,7 @@ export class Writes {
       // This send's own answer: a repeat that found the key's record would have replayed it.
       return refused;
     }
-    return w.ambiguous ? unknown() : { kind: "not-done", why: `Every attempt was answered ${last}, which commits nothing.`, problem: p503 };
+    return w.ambiguous ? unknown() : { kind: "not-done", why: `every attempt was answered ${last}, which commits nothing`, problem: p503 };
   }
 
   // Before a repeat: the same sign-in, and one GET /recovery that shows the reference epoch.

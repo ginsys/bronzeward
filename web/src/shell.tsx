@@ -4,12 +4,14 @@
 // recovery banner, start mode and epoch-change notice of §8.5.
 
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useId, useReducer, useRef, useState } from "react";
+import { leaving, WriteNotices } from "./forms.tsx";
 import { type Load, ReadsProvider } from "./list.tsx";
 import { PreEntry, type Recovery, RecoveryBanner, RecoveryRead, type StartMode, startModeOf, startRefusal } from "./recovery.tsx";
 import { Client, type ClientOptions, EPOCH_CHANGED, type ReadResult } from "./request.ts";
 import { view } from "./resources.tsx";
 import { follow, PAGES, usePath } from "./router.ts";
 import { Disconnected, HumanOnly, Loading, Offline, ProblemFields, problemFields, Refused, Status } from "./states.tsx";
+import { EPOCH_CHANGED_ASIDE, type Writes } from "./write.ts";
 import type { components } from "./api/v1";
 
 export type Server = components["schemas"]["ServerBody"];
@@ -33,13 +35,16 @@ export const ShellContext = Shell.Provider;
 
 // An action the roles do not allow is disabled with its reason; the server's refusal stays
 // authoritative (journeys §7), so `needs` only names what the route accepts.
-export function Action({ label, needs, onClick }: { label: string; needs: readonly Role[]; onClick: () => void }) {
+export function useGate(needs: readonly Role[]): string | undefined {
   const { roles, offline } = useContext(Shell);
+  return offline ? "Offline" : needs.some((r) => roles.includes(r)) ? undefined : `Needs ${needs.join(" or ")}`;
+}
+export function Action({ label, needs, onClick, submit = false, busy = false }: { label: string; needs: readonly Role[]; onClick?: () => void; submit?: boolean; busy?: boolean }) {
+  const reason = useGate(needs);
   const id = useId();
-  const reason = offline ? "Offline" : needs.some((r) => roles.includes(r)) ? undefined : `Needs ${needs.join(" or ")}`;
   return (
     <span>
-      <button type="button" onClick={onClick} disabled={reason !== undefined} aria-describedby={reason !== undefined ? id : undefined}>{label}</button>
+      <button type={submit ? "submit" : "button"} onClick={onClick} disabled={reason !== undefined || busy} aria-describedby={reason !== undefined ? id : undefined}>{label}</button>
       {reason !== undefined && <span id={id}> {reason}</span>}
     </span>
   );
@@ -72,6 +77,8 @@ export interface SignedInProps {
   // §7 item 4: the page keeps the notices, so one on a refusal's answer outlives the shell.
   onDeprecation: (route: string) => void;
   signOut: () => void;
+  // The page's writes, which outlive the shell (B10, B11).
+  writes: Writes;
 }
 
 // The offline banner's two causes: the browser's offline event, and a read that found no answer
@@ -224,8 +231,12 @@ export class ShellReads {
   }
 }
 
-export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, onDeprecation, signOut, notices = [] }: SignedInProps & { notices?: readonly string[] }) {
-  const [path, go, query] = usePath();
+export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, onDeprecation, signOut, writes, notices = [] }: SignedInProps & { notices?: readonly string[] }) {
+  const [path, move, query] = usePath();
+  // B11: a move to another page while a write is pending or unknown asks first.
+  const go = useCallback((to: string) => {
+    if (leaving(writes, to)) move(to);
+  }, [move, writes]);
   const [server, setServer] = useState<Load<Server>>({ kind: "loading" });
   const [identity, setIdentity] = useState<Load<Identity>>({ kind: "loading" });
   const [recovery, setRecovery] = useState<Load<Recovery>>({ kind: "loading" });
@@ -241,6 +252,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
     onUnauthenticated,
     onRevoked,
     onEpochChange: () => {
+      writes.setAside(EPOCH_CHANGED_ASIDE);
       setEpochChanged(true);
       setServer({ kind: "loading" });
       setIdentity({ kind: "loading" });
@@ -257,6 +269,11 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
   };
   const [reads] = useState(() => new ShellReads({ ...auth, onDeprecation, onRecoveryModeChange: setRecoveryMode }, () => events.current!));
   const client = reads.client;
+  // The page's writes go through this shell's client while it is shown.
+  writes.client = client;
+  useEffect(() => () => {
+    if (writes.client === client) writes.client = undefined;
+  }, [writes, client]);
   // A navigation to another path moves focus to the new page, where the keyboard and a screen
   // reader continue; a filter change keeps it on the filter.
   const page = useRef<HTMLElement>(null);
@@ -355,6 +372,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
         {recoveryMode && recovery.kind !== "loading" && <RecoveryRead res={recovery} />}
         {epochChanged && <Status testid="epoch-changed">{EPOCH_CHANGED}.</Status>}
         <Deprecations routes={notices} />
+        <WriteNotices go={go} />
         {offline !== undefined && <Offline since={offline} readAt={reads.readAt} />}
         {id !== undefined && (
           <nav aria-label="Main">

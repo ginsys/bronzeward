@@ -5,6 +5,7 @@
 
 import { Fragment as Group, type ReactNode, useRef } from "react";
 import type { components } from "./api/v1";
+import { AddCluster, RecordMachine } from "./forms.tsx";
 import { EmptyList, Head, Id, type Listed, More, Ref, Scroll, short, useItem, useList, usePending } from "./list.tsx";
 import { MachineItem } from "./machine.tsx";
 import { ClusterItem, Clusters, Filter, Machines } from "./machines.tsx";
@@ -406,6 +407,9 @@ export function view(path: string, query: string, go: (to: string) => void): Rea
   const [, kind, id] = /^\/([a-z-]+)(?:\/([^/]+))?$/.exec(path === "/" ? "/machines" : path) ?? [];
   const source = /^(fragment|profile|assignment)s$/.exec(kind ?? "")?.[1] as Kind | undefined;
   const revision = /^(fragment|profile|assignment)-revisions$/.exec(kind ?? "")?.[1] as Kind | undefined;
+  // No identifier is "new": every one starts with its type's prefix.
+  if (id === "new" && kind === "clusters") return <AddCluster />;
+  if (id === "new" && kind === "machines") return <RecordMachine query={query} />;
   if (id === undefined) {
     const pages: Record<string, () => ReactNode> = {
       machines: () => <Machines query={query} go={go} />, clusters: () => <Clusters />, changes: () => <Changes />,
