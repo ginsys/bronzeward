@@ -164,8 +164,9 @@ setup() {
   echo participant >"$cfg"
   echo fixture >"$cfg.fixture"
   mkdir -p "$repo/.dev/participants" "$repo/.dev/idp"
-  # This session's start made the provider.
+  # This session's start made the provider, on daemon-1.
   : >"$repo/.dev/participants/idp-started"
+  echo daemon-1 >"$repo/.dev/participants/daemon"
   : >"$STUB_LOG"
 }
 
@@ -244,6 +245,29 @@ if [ "$rc" != 0 ] && [[ $out == *"daemon-2"* ]] && [ -z "$calls" ] && [ -f "$cfg
   ok "stop on another Docker daemon than bin/up's touches nothing"
 else bad "other daemon: rc=$rc calls=$calls: $out"; fi
 
+# fixtures/bin/down removed .state and bin/up's daemon record, and the shell reaches another
+# daemon: the session's own record still tells, and nothing is touched.
+setup
+mv "$repo/fixtures/.state" "$repo/fixtures/.state.away"
+out=$(STUB_DAEMON=daemon-2 run stop)
+rc=$?
+calls=$(tr '\n' ';' <"$STUB_LOG")
+mv "$repo/fixtures/.state.away" "$repo/fixtures/.state"
+if [ "$rc" != 0 ] && [[ $out == *"started on the Docker daemon daemon-1, and this shell reaches daemon-2"* ]] && [ -z "$calls" ] &&
+  [ -f "$repo/.dev/participants/idp-started" ]; then
+  ok "stop after fixtures/bin/down, on another Docker daemon, touches nothing"
+else bad "other daemon, no .state: rc=$rc calls=$calls: $out"; fi
+
+# Participant state without the daemon record: stop cannot tell whose the containers are.
+setup
+rm -f "$repo/.dev/participants/daemon"
+out=$(run stop)
+rc=$?
+calls=$(tr '\n' ';' <"$STUB_LOG")
+if [ "$rc" != 0 ] && [[ $out == *"has no record of the Docker daemon"* ]] && [ -z "$calls" ] && [ -f "$cfg.fixture" ]; then
+  ok "stop without the session's daemon record refuses, and touches nothing"
+else bad "no daemon record: rc=$rc calls=$calls: $out"; fi
+
 # start without this checkout's dev-idp state: no dev-idp down, which would remove another
 # checkout's provider. dev-idp up refuses that provider, and the rollback leaves it too.
 setup
@@ -253,7 +277,8 @@ out=$(STUB_IDP_UP_FAIL=1 run start)
 rc=$?
 calls=$(tr '\n' ';' <"$STUB_LOG")
 mkdir -p "$repo/.dev/idp"
-if [ "$rc" != 0 ] && [[ $calls == "bin/up;dev-idp up --participants;"* ]] && [[ $calls != *"dev-idp down"* ]]; then
+# The rollback stop ran its teardown, so start recorded its daemon before it.
+if [ "$rc" != 0 ] && [[ $calls == "bin/up;dev-idp up --participants;docker rm;"* ]] && [[ $calls != *"dev-idp down"* ]]; then
   ok "start without this checkout's provider state never takes dev-idp down"
 else bad "start, other provider: rc=$rc calls=$calls: $out"; fi
 
