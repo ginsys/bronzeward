@@ -33,7 +33,8 @@ at `daa4393`. Everything in the environment is synthetic.
    client configuration and keeps no command history.
 4. Run the setup command of the first task: `fixtures/participants/session t1`. Each setup command
    prints the names to read out with the prompt (a machine, a field, a label value) and the reads
-   that confirm its precondition. If a read fails, stop and recreate the fixture.
+   that confirm its precondition. If a read fails, stop and recreate the fixture. Only T1 has a
+   setup command yet. The setup commands of T2 to T11 come in a later change under #367.
 
 ## After each session
 

@@ -37,13 +37,18 @@ fwd=bw-dev-forward
 
 idp_var() { sed -n "s/^$1=//p" "$idp/idp.env"; }
 
+# A's configuration, and bin/up's copy of it, which stop puts back.
+cfg=$STATE/server/a/config.yaml
+
 # trust_zitadel: A's configuration names Zitadel as its issuer, by the issuer URL the browser and
 # the CLI use, and the project as its audience. The rest is bin/up's. The clients accept plain http
 # to localhost only (client contracts §6 item 1), so A reaches that URL through forward_idp.
 trust_zitadel() {
-  local cfg=$STATE/server/a/config.yaml issuer project line
+  local issuer project line
   issuer=$(idp_var BW_TEST_IDP_ISSUER)
   project=$(idp_var BW_TEST_IDP_PROJECT)
+  # A second start begins again from bin/up's configuration.
+  if [ -f "$cfg.fixture" ]; then cp -- "$cfg.fixture" "$cfg"; else cp -- "$cfg" "$cfg.fixture"; fi
   while IFS= read -r line; do
     case $line in
     '    issuer: http://issuer:5556') printf '    issuer: %s\n' "$issuer" ;;
@@ -87,6 +92,8 @@ start() {
   need docker curl jq go npm
   "$bin/up"
   "$FIXTURES/dev-idp" down
+  # From here, a failure undoes the start: stop removes what it made and puts back A's configuration.
+  trap 'echo "session start failed; undoing it with session stop" >&2; stop' EXIT
   # The web client's origin is the web host's, not the browser tests' page.
   BW_DEV_IDP_WEB_ORIGIN=$web "$FIXTURES/dev-idp" up --participants >/dev/null
   trust_zitadel
@@ -110,6 +117,7 @@ start() {
   echo $! >"$part/webhost.pid"
   curl -sf --noproxy '*' -o /dev/null --max-time 2 --retry 10 --retry-connrefused --retry-delay 1 "$web/" ||
     die "the web host did not answer on $web ($part/webhost.log)"
+  trap - EXIT
   echo "participant environment up: web $web, login page $login" >&2
   echo "next: fixtures/participants/session passwords, then the first task's setup" >&2
 }
@@ -190,36 +198,75 @@ t1() {
 }
 
 # scan [path]...: the retained files of this checkout's fixture, dev-idp and participant state,
-# the logs of their containers and any path named, for a session password. A planted control is
-# written first and must be found, so that a scan that reads nothing cannot pass.
+# the logs of their containers and any path named, for a session password. Run it before stop.
+# Each of the four places gets a planted control that must be found, so that a place the scan does
+# not read fails it. A container list, a log or a file that cannot be read fails it too.
 scan() {
-  local control=$part/scan-control dir hits c logs found=''
-  local pattern="${marker}[a-z0-9]{8}-[0-9]{4}"
-  mkdir -p -- "$control"
-  printf 'planted %splanted0-0000\n' "$marker" >"$control/canary"
-  logs=$part/scan-logs
+  local pattern="${marker}[a-z0-9]{8}-[0-9]{4}" control=.bw-scan-control
+  local logs=$part/scan-logs errs names hits c d rc=0 missing=''
+  local roots=("$STATE" "$idp" "$part" "$logs")
+  for d in "$STATE" "$idp" "$part"; do [ -d "$d" ] || die "no $d to scan; run scan before session stop"; done
+  # Outside the places scanned: grep refuses to read the file its own output goes to.
+  errs=$(mktemp)
+  for d in "$@"; do [ -r "$d" ] || die "cannot read $d"; done
+  names=$(docker ps -a --format '{{.Names}}') || die "cannot list containers (docker ps)"
+  for c in "$BW_A" "$BW_DEV_IDP_CONTAINER"; do
+    grep -qxF -- "$c" <<<"$names" || die "no container $c to read the log of; run scan before session stop"
+  done
   rm -rf -- "$logs"
   mkdir -p -- "$logs"
-  for c in $(docker ps -a --format '{{.Names}}' | grep -E "^($FIXTURE_NAME-.*|$BW_DEV_IDP_CONTAINER|$BW_DEV_IDP_PG_CONTAINER|$BW_DEV_IDP_GROUPS_CONTAINER|bw-dev-login|$fwd)\$" || true); do
-    docker logs "$c" >"$logs/$c.log" 2>&1 || true
+  for c in $(grep -E "^($FIXTURE_NAME-.*|$BW_DEV_IDP_CONTAINER|$BW_DEV_IDP_PG_CONTAINER|$BW_DEV_IDP_GROUPS_CONTAINER|bw-dev-login|$fwd)\$" <<<"$names" || true); do
+    docker logs "$c" >"$logs/$c.log" 2>&1 || die "cannot read the log of $c"
   done
-  hits=$(grep -rlE --binary-files=text -- "$pattern" "$STATE" "$idp" "$part" "$logs" "$@" 2>/dev/null || true)
+  for d in "${roots[@]}"; do printf 'planted %splanted0-0000\n' "$marker" >"$d/$control"; done
+  hits=$(grep -rlE --binary-files=text --devices=skip -- "$pattern" "${roots[@]}" "$@" 2>"$errs") || rc=$?
+  for d in "${roots[@]}"; do
+    grep -qxF -- "$d/$control" <<<"$hits" || missing+=" $d"
+    rm -f -- "$d/$control"
+  done
   rm -rf -- "$logs"
-  rm -f -- "$control/canary"
-  for dir in $hits; do
-    if [ "$dir" = "$control/canary" ]; then found=1; else echo "session password pattern in $dir"; fi
-  done
-  [ -n "$found" ] || die "the planted control was not found: the scan read nothing it was meant to"
-  hits=$(printf '%s\n' "$hits" | grep -vxF -- "$control/canary" || true)
-  [ -z "$hits" ] || die "a session password pattern is in a retained file or log (above)"
-  echo "scan: no session password in a retained file or log; the planted control was found"
+  if [ "$rc" -gt 1 ]; then
+    cat -- "$errs" >&2
+    rm -f -- "$errs"
+    die "the scan could not read everything (above), so it proves nothing"
+  fi
+  rm -f -- "$errs"
+  [ -z "$missing" ] || die "the planted control was not found in:$missing; the scan did not read it"
+  hits=$(grep -vE -- "/$control\$" <<<"$hits" || true)
+  if [ -n "$hits" ]; then
+    while IFS= read -r d; do echo "session password pattern in $d"; done <<<"$hits"
+    die "a session password pattern is in a retained file or log (above)"
+  fi
+  echo "scan: no session password in a retained file or log; the planted control was found in each of ${#roots[@]} places"
 }
 
+# stop: the web host, the forwarder and dev-idp gone, A off the dev-idp network and back on bin/up's
+# configuration (started again if it runs), each checked before the participant state is removed.
 stop() {
-  if [ -f "$part/webhost.pid" ]; then kill "$(cat "$part/webhost.pid")" 2>/dev/null || true; fi
+  local pid nets
+  trap - EXIT
+  if [ -f "$part/webhost.pid" ]; then
+    pid=$(cat "$part/webhost.pid")
+    kill "$pid" 2>/dev/null || true
+    for _ in $(seq 10); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+    if kill -0 "$pid" 2>/dev/null; then die "the web host (pid $pid) still runs after 10 s; kill it, then run session stop again"; fi
+  fi
   docker rm -f "$fwd" >/dev/null 2>&1 || true
-  # dev-idp down removes its network, which refuses while A is attached to it.
-  docker network disconnect "$BW_DEV_IDP_NET" "$BW_A" >/dev/null 2>&1 || true
+  if docker inspect --type container "$fwd" >/dev/null 2>&1; then die "the forwarder $fwd is still there (docker rm -f $fwd)"; fi
+  if docker inspect --type container "$BW_A" >/dev/null 2>&1; then
+    # dev-idp down removes its network, which refuses while A is attached to it.
+    docker network disconnect "$BW_DEV_IDP_NET" "$BW_A" >/dev/null 2>&1 || true
+    nets=$(docker inspect --type container --format '{{range $n, $_ := .NetworkSettings.Networks}}{{$n}} {{end}}' "$BW_A") ||
+      die "cannot inspect $BW_A"
+    case " $nets" in *" $BW_DEV_IDP_NET "*) die "$BW_A is still on the network $BW_DEV_IDP_NET" ;; esac
+  fi
+  if [ -f "$cfg.fixture" ]; then
+    mv --no-target-directory -- "$cfg.fixture" "$cfg"
+    if [ "$(docker inspect --type container --format '{{.State.Running}}' "$BW_A" 2>/dev/null)" = true ]; then
+      "$bin/inject" kill A >/dev/null
+      "$bin/inject" start A >/dev/null
+    fi
+  fi
   "$FIXTURES/dev-idp" down
   rm -rf -- "$part"
 }
