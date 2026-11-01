@@ -30,6 +30,10 @@ type draftFake struct {
 	reads []string
 	// answer replaces the {} a draft write is answered with.
 	answer string
+	// epoch replaces ep_BWSYNTH-1 on every answer; recovery marks GET /recovery's answer as served in
+	// recovery mode.
+	epoch    string
+	recovery bool
 }
 
 func (f *draftFake) etag() string { return fmt.Sprintf(`"%d-BWSYNTH"`, f.rev) }
@@ -47,7 +51,11 @@ func (f *draftFake) draft() string {
 func (f *draftFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	w.Header().Set("Bronzeward-Epoch", "ep_BWSYNTH-1")
+	epoch := "ep_BWSYNTH-1"
+	if f.epoch != "" {
+		epoch = f.epoch
+	}
+	w.Header().Set("Bronzeward-Epoch", epoch)
 	w.Header().Set("Content-Type", "application/json")
 	route := r.Method + " " + strings.TrimPrefix(r.URL.Path, "/api/v1")
 	if r.Method != http.MethodGet {
@@ -62,6 +70,9 @@ func (f *draftFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch route {
 	case "GET /recovery":
+		if f.recovery {
+			w.Header().Set("Bronzeward-Recovery-Mode", "true")
+		}
 		fmt.Fprint(w, `{}`)
 	case "GET /server":
 		fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":2,"startMode":"normal"}`)
@@ -186,6 +197,22 @@ func TestProfileSetRepeat(t *testing.T) {
 	f.took()
 	if code != 0 || o.String() != "{\"BWSYNTH\":\n" || !strings.Contains(eb.String(), "succeeded, but its answer cannot be read") {
 		t.Errorf("-o yaml with a malformed answer: exit %d, stdout %q, stderr %q; want 0, the answer as served, the failure on stderr", code, o.String(), eb.String())
+	}
+
+	// The server entered recovery mode since the lost write: the repeat is refused after the identity
+	// and confirming reads alone, with no GET /server between, and shows the recovery banner.
+	f.mu.Lock()
+	f.epoch, f.recovery = "ep_BWSYNTH-2", true
+	f.mu.Unlock()
+	o.Reset()
+	eb.Reset()
+	code = run(append(repeat, "--expect-epoch", "ep_BWSYNTH-1", "--fragments", "frv_BWSYNTH-proposed,frv_BWSYNTH-head"), &o, &eb)
+	f.mu.Lock()
+	read = f.reads
+	f.mu.Unlock()
+	if took := f.took(); code != 2 || len(took) != 0 || strings.Join(read, ", ") != "GET /identity, GET /recovery" ||
+		!strings.Contains(eb.String(), "not the given --expect-epoch ep_BWSYNTH-1") || !strings.Contains(eb.String(), "RECOVERY MODE is on in ") {
+		t.Errorf("a repeat after a recovery entry: exit %d, read %v, sent %v, stderr %q; want 2, only item 3's reads, nothing sent, the banner", code, read, took, eb.String())
 	}
 }
 
