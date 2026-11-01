@@ -2,13 +2,16 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 	"unicode"
 
 	"github.com/ginsys/bronzeward/internal/client"
@@ -241,6 +244,49 @@ func TestRemoteTextInTokenFilePath(t *testing.T) {
 			t.Errorf("%s: the output %q does not name the path escaped", strings.Join(c, " "), o.String()+e.String())
 		}
 	}
+}
+
+// TestRemoteTextInSignInClaims: whoami in an oidc context shows the subject and the issuer that
+// the client reads from the access token, text the identity provider chose, escaped and on one line.
+func TestRemoteTextInSignInClaims(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Bronzeward-Epoch", "ep_1")
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/server" {
+			fmt.Fprint(w, `{"version":"v","apiRevision":2,"startMode":"normal"}`)
+			return
+		}
+		fmt.Fprint(w, newFiller(false).answer(apitypes.IdentityBody{}))
+	}))
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	enc := base64.RawURLEncoding.EncodeToString
+	claims, _ := json.Marshal(map[string]any{"sub": "s" + tail, "iss": "https://idp.invalid/" + tail, "exp": time.Now().Add(time.Hour).Unix()})
+	token := enc([]byte(`{"alg":"none"}`)) + "." + enc(claims) + "." + enc([]byte("sig"))
+	path := t.TempDir() + "/tokens"
+	doc, _ := json.Marshal(map[string]string{"accessToken": token})
+	if err := os.WriteFile(path, doc, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.UpdateConfig(func(c *client.Config) error {
+		c.Contexts = append(c.Contexts, client.Context{Name: "idp", Server: srv.URL, Credential: "oidc",
+			OIDC: &client.OIDC{Issuer: "https://idp.invalid", ClientID: "c", Audience: "a", TokenFile: path}})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var o, e bytes.Buffer
+	if got := run([]string{"--context", "idp", "whoami"}, &o, &e); got != 0 {
+		t.Fatalf("whoami exited %d: %s", got, e.String())
+	}
+	want := "subject s" + tailEsc + ", issuer https://idp.invalid/" + tailEsc + ", expires "
+	if !strings.Contains(o.String(), want) || strings.Contains(o.String(), "\n\r") {
+		t.Errorf("whoami %q lacks the token's reading %q", o.String(), want)
+	}
+	if lines := strings.Count(o.String(), "\n"); lines != 7 {
+		t.Errorf("whoami printed %d lines, want 7: %q", lines, o.String())
+	}
+	noRawControl(t, "whoami", o.String()+e.String())
 }
 
 // TestRemoteTextInUnreadableAnswer: a write whose answer cannot be read prints the answer as served,

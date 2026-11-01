@@ -7,6 +7,18 @@ import (
 	"testing"
 )
 
+// TestPrintableIsIdempotent: the layers (the call that builds a text, tf and sf, Shown, the guard)
+// can each escape the same text, so a second pass must change nothing. The backslash stays as it is,
+// which is what makes this hold.
+func TestPrintableIsIdempotent(t *testing.T) {
+	for _, s := range []string{"\x1b[2J", "a\nb", "a\tb", `a\b`, `a\x1b`, "\xc2\x85", "\x7f", "\xff", "\xe2\x80\xae", "\xe2\x81\xa6", `\\x0a`, "plain"} {
+		once := Printable(s)
+		if twice := Printable(once); twice != once {
+			t.Errorf("Printable(%q) = %q, and again %q", s, once, twice)
+		}
+	}
+}
+
 // TestGuardWriter: the last guard before the terminal escapes every control character but the line
 // feed, and passes text that is escaped already unchanged.
 func TestGuardWriter(t *testing.T) {
