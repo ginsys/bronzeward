@@ -14,21 +14,21 @@ cd "$(dirname "$0")/.."
 . scripts/dev/instance.sh || exit 1
 
 net=$BW_DEV_IDP_NET pg=$BW_DEV_IDP_PG_CONTAINER zitadel=$BW_DEV_IDP_CONTAINER groups=$BW_DEV_IDP_GROUPS_CONTAINER
-# The login page's container (--participants). Not bw-dev-idp-login: that is BW_DEV_INSTANCE=login's
-# Zitadel.
-login=bw-dev-login${BW_DEV_IDP_CONTAINER#bw-dev-idp}
+# The login page's container (--participants), with the instance's suffix so that down removes only
+# its own. Not the idp container name plus -login: that is BW_DEV_INSTANCE=login's Zitadel.
+login=bw-dev-login${BW_DEV_PFX:+-$BW_DEV_INSTANCE}
 state=$PWD/$BW_DEV_IDP_DIR
 issuer=$BW_DEV_IDP_ISSUER
 # The web origin is the browser tests' page, the first port of their block (web/e2e/ports.ts), which
 # BW_E2E_PORT_BASE selects; mise run browser-auth refuses a provider registered for another page.
 web=${BW_DEV_IDP_WEB_ORIGIN:-http://localhost:${BW_E2E_PORT_BASE:-16000}}
-# --participants (#367): Zitadel's login page as well, on the default instance only, whose ports
-# fixtures/participants/session uses. The issuer stays the same: the clients accept plain http to
-# localhost only (client contracts §6 item 1), so a fixture server reaches Zitadel through a
-# forwarder on its own localhost (fixtures/participants/session).
+# --participants (#367): Zitadel's login page as well, on the default instance only, on the port
+# after the issuer's. The issuer stays the same: the clients accept plain http to localhost only
+# (client contracts §6 item 1), so a fixture server reaches Zitadel through a forwarder on its own
+# localhost (fixtures/participants/session).
 participants=""
 [ "${2:-}" = --participants ] && participants=1
-loginport=58281
+loginport=$((BW_DEV_IDP_PORT + 1))
 loginbase=http://localhost:$loginport/ui/v2/login
 password='Synthetic-Pass-1!'
 # The device code's lifetime in seconds. idp.env carries it, and the self-test asserts it. A
@@ -132,9 +132,10 @@ up() {
     ! { [[ $base =~ ^[1-9][0-9]{4}$ ]] && ((base >= 16000 && base <= 19984 && (base - 16000) % 16 == 0)); }; then
     die "BW_E2E_PORT_BASE must be 16000+16*n with n from 0 to 249 (16000, 16016, ..., 19984), not $base"
   fi
-  # The login page's port is fixed, and the participant session uses the default instance's issuer.
+  # The participant clients' redirect URIs are seeded for one origin, the participant session's
+  # web host, which runs against the default instance.
   if [ -n "$participants" ] && [ -n "$BW_DEV_PFX" ]; then
-    die "--participants runs on the default instance only; unset BW_DEV_INSTANCE"
+    die "--participants runs on the default instance only, because the participant clients' redirect URIs are seeded for one origin; unset BW_DEV_INSTANCE"
   fi
   if ours; then
     # The web client's redirect URIs were seeded for one origin and are not changed afterwards.

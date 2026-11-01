@@ -20,9 +20,14 @@ here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 bin=$FIXTURES/bin
 # The participant environment runs on the default dev-idp instance, whose issuer and login page
 # ports it uses; a named one (scripts/dev/instance.sh) would leave this script on another provider.
-[ -z "${BW_DEV_INSTANCE:-}" ] || die "the participant environment uses the default dev-idp instance; unset BW_DEV_INSTANCE"
+[ -z "${BW_DEV_INSTANCE:-}" ] || die "the participant environment uses the default dev-idp instance, because the participant clients' redirect URIs are seeded for one origin; unset BW_DEV_INSTANCE"
 repo=$(dirname -- "$FIXTURES")
-idp=$repo/.dev/idp
+# The default instance's names, issuer port and state directory. The login page is on the port after
+# the issuer's (fixtures/dev-idp).
+# shellcheck source-path=SCRIPTDIR source=../../scripts/dev/instance.sh
+. "$repo/scripts/dev/instance.sh" || exit 1
+idp=$repo/$BW_DEV_IDP_DIR
+login=http://localhost:$((BW_DEV_IDP_PORT + 1))/ui/v2/login
 # The participant's own state: its client configuration and the web host. Gitignored (.dev/).
 part=$repo/.dev/participants
 web=http://localhost:58443
@@ -54,20 +59,22 @@ trust_zitadel() {
   mv --no-target-directory -- "$cfg.partial" "$cfg"
 }
 
-# forward_idp: a forwarder in A's network namespace, listening on its 127.0.0.1:58280 and passing
-# each connection to Zitadel on the dev-idp network, so that A reaches the issuer URL that the
-# browser and the CLI use. Never published on the host. A start makes a new namespace, so this runs
-# after every start of A. Node is in the login page's pinned image.
+# forward_idp: a forwarder in A's network namespace, listening on its 127.0.0.1 at the issuer's port
+# and passing each connection to Zitadel on the dev-idp network, so that A reaches the issuer URL
+# that the browser and the CLI use. Never published on the host. A start makes a new namespace, so
+# this runs after every start of A. Node is in the login page's pinned image.
 forward_idp() {
   docker rm -f "$fwd" >/dev/null 2>&1 || true
-  docker run -d --name "$fwd" --network "container:$BW_A" --user "$(id -u):$(id -g)" --entrypoint node \
-    "$ZITADEL_LOGIN_IMAGE" -e 'const net = require("net");
-net.createServer((c) => { const z = net.connect(8080, "bw-dev-idp"); c.pipe(z).pipe(c);
-  c.on("error", () => z.destroy()); z.on("error", () => c.destroy()); }).listen(58280, "127.0.0.1");' \
+  docker run -d --name "$fwd" --network "container:$BW_A" --user "$(id -u):$(id -g)" \
+    -e "BW_PORT=$BW_DEV_IDP_PORT" -e "BW_IDP=$BW_DEV_IDP_CONTAINER" --entrypoint node \
+    "$ZITADEL_LOGIN_IMAGE" -e 'const net = require("net"), p = Number(process.env.BW_PORT);
+net.createServer((c) => { const z = net.connect(8080, process.env.BW_IDP); c.pipe(z).pipe(c);
+  c.on("error", () => z.destroy()); z.on("error", () => c.destroy()); }).listen(p, "127.0.0.1");' \
     >/dev/null || die "cannot start the issuer forwarder in $BW_A's network namespace"
   for _ in $(seq 20); do
-    if docker exec "$fwd" node -e 'require("http").get({ host: "127.0.0.1", port: 58280,
-      path: "/.well-known/openid-configuration", headers: { Host: "localhost:58280" } },
+    if docker exec "$fwd" node -e 'const p = Number(process.env.BW_PORT);
+      require("http").get({ host: "127.0.0.1", port: p,
+      path: "/.well-known/openid-configuration", headers: { Host: "localhost:" + p } },
       (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on("error", () => process.exit(1))' 2>/dev/null; then
       return 0
     fi
@@ -83,7 +90,7 @@ start() {
   # The web client's origin is the web host's, not the browser tests' page.
   BW_DEV_IDP_WEB_ORIGIN=$web "$FIXTURES/dev-idp" up --participants >/dev/null
   trust_zitadel
-  docker network connect bw-dev-idp "$BW_A" || die "cannot connect $BW_A to the dev-idp network"
+  docker network connect "$BW_DEV_IDP_NET" "$BW_A" || die "cannot connect $BW_A to the dev-idp network"
   rm -rf -- "$part"
   mkdir -p -- "$part/bin" "$part/home"
   chmod 700 "$part"
@@ -103,7 +110,7 @@ start() {
   echo $! >"$part/webhost.pid"
   curl -sf --noproxy '*' -o /dev/null --max-time 2 --retry 10 --retry-connrefused --retry-delay 1 "$web/" ||
     die "the web host did not answer on $web ($part/webhost.log)"
-  echo "participant environment up: web $web, login page http://localhost:58281/ui/v2/login" >&2
+  echo "participant environment up: web $web, login page $login" >&2
   echo "next: fixtures/participants/session passwords, then the first task's setup" >&2
 }
 
@@ -193,7 +200,7 @@ scan() {
   logs=$part/scan-logs
   rm -rf -- "$logs"
   mkdir -p -- "$logs"
-  for c in $(docker ps -a --format '{{.Names}}' | grep -E "^($FIXTURE_NAME-.*|bw-dev-idp|bw-dev-idp-pg|bw-dev-idp-groups|bw-dev-login|bw-dev-forward)\$" || true); do
+  for c in $(docker ps -a --format '{{.Names}}' | grep -E "^($FIXTURE_NAME-.*|$BW_DEV_IDP_CONTAINER|$BW_DEV_IDP_PG_CONTAINER|$BW_DEV_IDP_GROUPS_CONTAINER|bw-dev-login|$fwd)\$" || true); do
     docker logs "$c" >"$logs/$c.log" 2>&1 || true
   done
   hits=$(grep -rlE --binary-files=text -- "$pattern" "$STATE" "$idp" "$part" "$logs" "$@" 2>/dev/null || true)
@@ -212,7 +219,7 @@ stop() {
   if [ -f "$part/webhost.pid" ]; then kill "$(cat "$part/webhost.pid")" 2>/dev/null || true; fi
   docker rm -f "$fwd" >/dev/null 2>&1 || true
   # dev-idp down removes its network, which refuses while A is attached to it.
-  docker network disconnect bw-dev-idp "$BW_A" >/dev/null 2>&1 || true
+  docker network disconnect "$BW_DEV_IDP_NET" "$BW_A" >/dev/null 2>&1 || true
   "$FIXTURES/dev-idp" down
   rm -rf -- "$part"
 }

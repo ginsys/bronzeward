@@ -147,11 +147,13 @@ the slot rule are in [CONTRIBUTING.md](../CONTRIBUTING.md#several-instances-on-o
   (`IAM_LOGIN_CLIENT`) creates a session through the Session API and finishes the authorization
   request with CreateCallback. No login container runs.
 - **Participant sessions (#367).** `fixtures/dev-idp up --participants` also starts Zitadel's
-  login page (`ZITADEL_LOGIN_IMAGE`, container `bw-dev-login`, published as
-  `http://localhost:58281`), so that a person signs in through it. It runs on the default instance
-  only and refuses a set `BW_DEV_INSTANCE`, because the login page's port is fixed. The issuer stays `http://localhost:58280`, because the clients accept plain
-  http to localhost only (client contracts §6 item 1). A fixture server reaches that URL through a
-  forwarder on its own 127.0.0.1:58280, inside its network namespace and never on the host
+  login page (`ZITADEL_LOGIN_IMAGE`, container `bw-dev-login`), so that a person signs in through
+  it. The login page is published on the port after the issuer's, `http://localhost:58281`. It runs
+  on the default instance only and refuses a set `BW_DEV_INSTANCE`, because the participant
+  clients' redirect URIs are seeded for one origin. The issuer stays `http://localhost:58280`,
+  because the clients accept plain http to localhost only (client contracts §6 item 1). A fixture
+  server reaches that URL through a forwarder (container `bw-dev-forward`) on its own 127.0.0.1 at
+  the issuer's port, inside its network namespace and never on the host
   (`fixtures/participants/session`). A device code lives 5 minutes, because a person types it.
   The login policy offers no second-factor setup after the password. The device code page is
   Zitadel's own built-in page, and the web sign-in uses the login page.
