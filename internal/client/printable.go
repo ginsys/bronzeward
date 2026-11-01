@@ -14,7 +14,7 @@ import (
 // Go escape, `\x1b` for ESC, so none reaches the terminal as itself. A certificate's DNS name, for
 // one, may hold any ASCII, and Go's TLS errors list those names unquoted.
 func printable(s string) string {
-	if !strings.ContainsFunc(s, func(r rune) bool { return r == utf8.RuneError || unicode.IsControl(r) }) {
+	if !strings.ContainsFunc(s, func(r rune) bool { return r == utf8.RuneError || unicode.IsControl(r) || isBidi(r) }) {
 		return s
 	}
 	var b strings.Builder
@@ -25,12 +25,21 @@ func printable(s string) string {
 			fmt.Fprintf(&b, `\x%02x`, s[i])
 		case unicode.IsControl(r):
 			fmt.Fprintf(&b, `\x%02x`, r) // every control character is below U+0100
+		case isBidi(r):
+			fmt.Fprintf(&b, `\u%04x`, r)
 		default:
 			b.WriteString(s[i : i+n])
 		}
 		i += n
 	}
 	return b.String()
+}
+
+// isBidi is a character that changes the order in which a terminal draws the text around it: the
+// Arabic letter mark, the left and right marks, the embeddings and overrides, and the isolates.
+// Remote text can use them to make one string read as another, so printable writes each as \uNNNN.
+func isBidi(r rune) bool {
+	return r == 0x061C || r == 0x200E || r == 0x200F || r >= 0x202A && r <= 0x202E || r >= 0x2066 && r <= 0x2069
 }
 
 // Printable is printable for bronzewardctl's commands, which show remote text outside an error:
