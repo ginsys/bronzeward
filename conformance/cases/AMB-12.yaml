@@ -1,0 +1,19 @@
+id: AMB-12
+setup: as AMB-07
+action: send Add cluster
+exchange:
+  - request: POST /api/v1/clusters
+    headers: ["Authorization: Bearer <token>", "Content-Type: application/json", "Idempotency-Key: <key>", "Bronzeward-Expected-Epoch: <epoch>"]
+  - request: GET /api/v1/recovery
+    headers: ["Authorization: Bearer <token>", "Accept: application/json"]
+fault: the injector reads the first attempt and closes the connection, forwarding nothing, so no record of it exists; after the confirming read, and before forwarding the repeat, it commits a new epoch in the deployment's database
+expect:
+  server: the repeat, carrying the first attempt's epoch in Bronzeward-Expected-Epoch, is refused 412 epoch-mismatch
+  client: the write set aside; no new key sent
+  shown: the set-aside notice with the key, the route and the resource to read, and Show current state
+  absent: [token in the harness log, retained artifacts or browser storage]
+runs:
+  web:
+    check: web/e2e/auth/writes.e2e.ts, mise run browser-auth
+    browsers: [chrome, edge, firefox, firefox-esr]
+    covers: the first attempt that never committed; a restore that removed its record is not run

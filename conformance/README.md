@@ -25,7 +25,14 @@ the write cases. Its tests run exactly the cases recorded there.
 | [AUTH-02](cases/AUTH-02.yaml) | web: `mise run browser-auth` |
 | [AUTH-03](cases/AUTH-03.yaml) | web: `mise run browser-auth` |
 | [AUTH-05](cases/AUTH-05.yaml) | web: `mise run browser-auth` |
-| [AUTH-07](cases/AUTH-07.yaml) | web, the change shown with no write pending: `mise run browser-auth` |
+| [AMB-01](cases/AMB-01.yaml) | web, as a keyed repeat: `mise run browser-auth` |
+| [AMB-03](cases/AMB-03.yaml) | web: `mise run browser-auth` |
+| [AMB-05](cases/AMB-05.yaml) | web: `mise run browser-auth` |
+| [AMB-07](cases/AMB-07.yaml) | web: `mise run browser-auth` |
+| [AMB-08](cases/AMB-08.yaml) | web, an injected 503: `mise run browser-auth` |
+| [AMB-09](cases/AMB-09.yaml) | web: `mise run browser-auth` |
+| [AMB-12](cases/AMB-12.yaml) | web, the first attempt never committed: `mise run browser-auth` |
+| [AUTH-07](cases/AUTH-07.yaml) | web, the change shown and a pending write set aside: `mise run browser-auth` |
 | [AUTH-08](cases/AUTH-08.yaml) | web, the client's half: `mise run browser-auth` |
 | [AUTH-10](cases/AUTH-10.yaml) | web: `mise run browser-auth` |
 | [AUTH-11](cases/AUTH-11.yaml) | web: `mise run browser-auth`; the tab protocol in `mise run web` |
@@ -35,7 +42,7 @@ the write cases. Its tests run exactly the cases recorded there.
 | [PAGE-02](cases/PAGE-02.yaml) | web, the machine list: `mise run browser-auth` |
 | [REC-01](cases/REC-01.yaml) | web, the banner and the process's refusal: `mise run browser-auth` |
 | [TLS-02](cases/TLS-02.yaml) | web: `mise run browser` |
-| [TLS-03](cases/TLS-03.yaml) | web, the read case: `mise run browser` |
+| [TLS-03](cases/TLS-03.yaml) | web, the read case: `mise run browser`; the write case: `mise run browser-auth` |
 
 The web accessibility passes of journeys §13 are not §12 cases; they are recorded per browser in
 [accessibility-web.md](accessibility-web.md).

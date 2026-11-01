@@ -10,6 +10,6 @@ expect:
   absent: [the target's address on the page, synthetic value in retained artifacts or browser storage]
 runs:
   web:
-    check: web/e2e/tls.e2e.ts, mise run browser
+    check: the read case in web/e2e/tls.e2e.ts, mise run browser; the write case in web/e2e/auth/writes.e2e.ts, mise run browser-auth, where the injector answers each send of Add cluster with a redirect
     browsers: [chrome, edge, firefox, firefox-esr, safari]
-    covers: the read case; the write case runs with the first web write
+    covers: the read case in every browser listed; the write case in all but safari, repeated with the same key and then shown as an unknown outcome with its key and the resource to read, never as not done, and naming no target

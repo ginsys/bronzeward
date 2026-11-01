@@ -1,0 +1,18 @@
+id: AMB-07
+setup: as AMB-01, signed in as a human principal
+action: send Add cluster
+exchange:
+  - request: POST /api/v1/clusters
+    headers: ["Authorization: Bearer <token>", "Content-Type: application/json", "Idempotency-Key: <key>", "Bronzeward-Expected-Epoch: <epoch>"]
+  - request: GET /api/v1/recovery
+    headers: ["Authorization: Bearer <token>", "Accept: application/json"]
+fault: the injector forwards the write and closes the connection without its answer; after the confirming read, and before forwarding the repeat, it commits a new epoch in the deployment's database
+expect:
+  server: the repeat meets the earlier epoch's record and is refused 409 conflict with request and epoch
+  client: the write set aside; no new key sent
+  shown: the set-aside notice with the key, the route and the resource to read, and Show current state
+  absent: [token in the harness log, retained artifacts or browser storage]
+runs:
+  web:
+    check: web/e2e/auth/writes.e2e.ts, mise run browser-auth
+    browsers: [chrome, edge, firefox, firefox-esr]

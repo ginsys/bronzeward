@@ -1,0 +1,17 @@
+id: AMB-01
+setup: a disposable deployment; the fixture page signed in as h-author; Add cluster filled with a synthetic name and a random cluster ID
+action: send Add cluster
+exchange:
+  - request: POST /api/v1/clusters
+    headers: ["Authorization: Bearer <token>", "Content-Type: application/json", "Idempotency-Key: <key>", "Bronzeward-Expected-Epoch: <epoch>"]
+fault: the injector reads the request and closes the connection, forwarding nothing
+expect:
+  server: the repeat is the first request it receives, and it executes
+  client: the write repeated once with the same key and the same request; a browser cannot tell how much of a dropped request went out, so the web client treats the drop as ambiguous (client contracts §8.4 item 2)
+  shown: the cluster recorded, not as a replay; no unknown-outcome notice
+  absent: [token in the harness log, retained artifacts or browser storage]
+runs:
+  web:
+    check: web/e2e/auth/writes.e2e.ts, mise run browser-auth
+    browsers: [chrome, edge, firefox, firefox-esr]
+    covers: the ordinary retry, sent as a keyed repeat
