@@ -313,8 +313,8 @@ it. It holds no secret.
    terminal. The escaping holds toward the server, toward an https proxy and toward the identity
    provider, in discovery, renewal and revocation, and for the server's own text in an error: the
    reason phrase of every status shown and each member of a problem document
-   (`internal/client/printable.go`). It holds outside errors too, for the remote text a notice, a
-   sign-in or a read shows: a `Deprecation` header, the subject and issuer of a signed-in or renewed
+   (`internal/client/printable.go`). It holds outside errors too, for every remote string a command
+   shows (item 8 states that rule, with no list). The cases named first were: a `Deprecation` header, the subject and issuer of a signed-in or renewed
    token, of the token `whoami` reads and of the token a 401 is read for, the device grant's
    `user_code` and the server's version; a start mode `GET /server` does not document, `normal` or
    `recovery`, is shown as unknown. A server or issuer URL that holds a character the escaping
@@ -347,6 +347,57 @@ it. It holds no secret.
    `Authorization` to a proxy in clear text: an `https` URL goes through a proxy only by a
    tunnel. The server's own issuer fetches follow a comparable rule
    ([persistence and API §10.1](persistence-api.md#101-humans-oidc)).
+8. **Remote text in human output.** The CLI escapes every string that it shows in table, record
+   or sentence output (`-o table`, the default) and that did not come from the CLI itself. That
+   covers text from the server, the identity provider and a proxy, and text read from a file that
+   the CLI did not write. It escapes the string before it formats it into a line, as follows:
+   - Each control character (C0, DEL, C1) and each byte that is not UTF-8 becomes `\xNN`, as in
+     item 4. The tab and the line feed are included: they become `\x09` and `\x0a`. A value that
+     holds either could otherwise move a column or forge a row. Only the separators that the CLI
+     writes itself stay raw.
+   - The rule has no list of fields. An ID, a state, a name, a title, a principal, a reason, a
+     release identifier and a cell the CLI builds from such values are all remote text. The API
+     schemas do not promise a format for them (`api/openapi.yaml`, `ClusterBody` and `DraftBody`
+     give each member as a plain string), and the input rules differ from field to field:
+     `ClusterInput.name` bans control characters, while `DraftInput.title` limits only its length.
+   - A string that the CLI builds into an error from a remote value, such as a cluster or draft ID
+     in a refusal it words itself, follows the same rule. The client's own errors already follow
+     item 4.
+   - `context list` and `context add` show names, servers and credential kinds from the contexts
+     file. That file can come from someone else, so its text is remote text.
+   - A document or a diff is split on the document's own line feeds. Each line is then escaped,
+     the tab included, and shown whole. A person sees a tab as `\x09` and a carriage return as
+     `\x0d`. The line itself is never rewrapped.
+   - Where the CLI shows a value as JSON text that it encodes itself (a timeline entry, an
+     operation result or error), the JSON encoder leaves DEL and the C1 range raw. The text is
+     escaped again by this rule.
+   - A writer between the table writer and the terminal may escape ESC, the C1 range and bytes
+     that are not UTF-8 as a second guard. It is not the rule, because it cannot tell a field's
+     line feed or tab from the CLI's own separators.
+   - Before this item, `draft show` wrote the title with `%q` (escaped) and `draft list` wrote it
+     raw, and `cluster list` wrote a cluster's name raw while the server's version was escaped.
+     The rule removes that difference.
+
+   **Required check.** One test sets every string member of every response type in
+   `internal/client/apitypes` to a value that holds ESC, a tab, a line feed, a carriage return, a
+   C1 character and a byte that is not UTF-8. It runs every command that shows those types in
+   `-o table`, and it fails if the output holds a raw control byte outside the CLI's own
+   separators, or a different number of rows from the number of items. A new response type or a
+   new command passes this test before it ships.
+
+   **Limit.** `-o json` passes the server's bytes on unchanged, and `-o yaml` passes the values
+   through the YAML encoder. This item does not cover them. Whether a raw control byte can reach
+   the terminal through `-o json` is a separate question. The test above shows it, and a separate
+   issue records it if it does.
+
+   **Alternatives and reasons.** (a) Escape only fields that hold free text, and show IDs and
+   enumerations raw. The API does not promise those formats, so a server that does not follow them
+   reaches the terminal. The list of fields also grows with every command, which is the drift that
+   left the server's version escaped and a cluster's name raw. (b) Keep the list of remote texts
+   in item 4, and rely on the server to refuse control characters in its inputs. The CLI would
+   then trust the server for resource text and distrust it for the version string. A control
+   character that one input route does not refuse, or that arrived before a rule existed, still
+   reaches the terminal.
 
 ## 7. Compatibility and versioning
 
@@ -1418,7 +1469,9 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 D3, D7, D8 and D9 are decided by the lead on 2026-10-21, under the owner's 2026-10-07
 delegation, as their rows state. The owner decided D1, D2, D4, D5, D6 and D10 on 2026-10-22, at
 the times their rows give; D10's option (a) is served by
-[#293](https://github.com/ginsys/bronzeward/issues/293).
+[#293](https://github.com/ginsys/bronzeward/issues/293). The lead ruled D11 on 2026-11-01, when
+the specification review asked the question in
+[#463](https://github.com/ginsys/bronzeward/issues/463); the owner can overrule it.
 
 | ID | Choice | Options | Decision and reason |
 | --- | --- | --- | --- |
@@ -1432,6 +1485,7 @@ the times their rows give; D10's option (a) is served by
 | D8 | Conformance case format and home | (a) case records in the repository run by both clients' harnesses; (b) separate suites per client | **Decided** by the lead, 2026-10-21, under the owner's 2026-10-07 delegation: (a), as [§12](#12-shared-conformance-cases) |
 | D9 | Idempotency key metadata across a CLI restart | (a) no local journal: on giving up, the CLI prints the key, route, principal, epoch and `If-Match`, and the operator repeats with them and the same input ([§8.4](#84-idempotency-and-ambiguous-responses) item 4); (b) a local journal of pending keys, owner-readable, replayed on the next run | **Decided** by the lead, 2026-10-21, under the owner's 2026-10-07 delegation: (a). Reason: a journal would hold request context on disk and need its own expiry and epoch rules. Its cost is that the operator must supply the exact input again: where no record exists, a changed input executes (AMB-10), so an operator who cannot reconstruct it reconciles from the resource; (b) avoids that reconstruction only if the journal holds the request itself, documents included, which on the keyed routes (fragment write, ingestion start, mark) would write protected plaintext to disk against [§11.2](#112-rules-for-both-clients) item 4 and the secret-ingress boundary. So (b) could journal request bodies only for non-keyed routes, and for the keyed ones offers nothing over (a) |
 | D10 | Epoch check on a human's repeated write (G21) | (a) server-enforced: mutations accept an expected-epoch request header and refuse, committing no act or idempotency record, when it differs from the current epoch, giving humans an epoch check like the one service tokens already get (API issue A6); (b) client-only check of [§8.4](#84-idempotency-and-ambiguous-responses) item 3 for humans, with the race between its confirming read and the repeat explicitly accepted | **Decided** by the owner (Serge, 2026-10-22 08:43 CEST): (a), served by [#293](https://github.com/ginsys/bronzeward/issues/293). Reason: it closes the race at the only place that knows the epoch at commit time, and keeps the earlier-epoch `409` of AMB-07 because, unlike the service check, which refuses before any record is answered (`internal/api/idempotency.go:47-49`), it runs only when a lookup finds no record and refuses only under the key's lock: the write's own, a fragment write's claim transaction's or the first lookup's fresh read (`internal/api/idempotency.go:52-58`, `internal/api/tx.go:204-210`, `internal/api/fragments.go:95-103`, `internal/api/tx.go:71-81`, as A6). Rejected: (b), which needs no server change and leaves a short window, but a human's repeat that lands in it after a restore removed the record, or whose first attempt never committed, executes afresh, with no error to any party |
+| D11 | Which remote text the CLI escapes in human output | (a) all remote text, with no list of fields, escaped as a value before it is formatted, tab and line feed included; (b) only fields that hold free text; (c) the list of item 4 as it stands, with the server refusing control characters in its inputs | **Ruled** by the lead (2026-11-01): (a) ([§6](#6-tls-trust) item 8). Reason: the API schemas promise no format for any response member, so no field can be called safe by its format, and a list of fields goes out of date with every command. A test that fills every string member of every response type is what keeps the rule true. Rejected: (b), which needs that list and trusts the formats the schemas do not give; (c), which trusts the server for resource text and not for its version string, and leaves the CLI open to any input the server does not refuse |
 
 ## 14. Proposed API-gap issues and downstream refinement
 
