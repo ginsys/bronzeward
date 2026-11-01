@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ADOPTED, advanced, advanceReads, countingSettle, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, keepW3, kept, keptW3, latestUnread, lostSince, MachineShown, nextTimeline, type Observation, Observations, POLL_MS, polled, queued, readLater, readOlder, sentences, stepAdvance, type Timeline, TimelineRows, UNREAD, type W3Kept } from "./machine.tsx";
+import { ADOPTED, advanced, advanceReads, countingSettle, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, keepW3, kept, keptW3, latestUnread, lostSince, MachineShown, nextTimeline, type Observation, Observations, pacer, POLL_MS, polled, queued, readLater, readOlder, sentences, stepAdvance, type Timeline, TimelineRows, UNREAD, type W3Kept } from "./machine.tsx";
 import { type ShellEvents, ShellReads } from "./shell.tsx";
 import { type Load, type Reads, ReadsProvider, RESTARTED } from "./list.tsx";
 import type { Machine } from "./machines.tsx";
@@ -404,6 +404,31 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
       const asked = stepAdvance(inFlight, "advance");
       expect(asked).toEqual({ key: "v\n0", n: 1, left: 2, dirty: true });
       expect([s(1), s(1)].reduce(stepAdvance, asked)).toEqual({ key: "v\n0", n: 2, left: 2, dirty: false });
+    });
+
+    test("a resource that keeps getting no answer is read again at most once per poll interval; a stop drops the wait it cleared", () => {
+      let t = 0;
+      const runs: number[] = [];
+      const timers: { f: () => void; at: number }[] = [];
+      const after = (f: () => void, ms: number) => (timers.push({ f, at: t + ms }), 0 as unknown as ReturnType<typeof setTimeout>);
+      const [ask, stop] = pacer(() => runs.push(t), () => t, after);
+      ask();
+      expect(runs).toEqual([0]);
+      // Each banner end the read again's own lost read causes asks again at once: it waits.
+      t = 40;
+      ask();
+      ask();
+      expect(runs).toEqual([0]);
+      expect(timers).toEqual([{ f: expect.any(Function), at: POLL_MS }]);
+      t = POLL_MS;
+      timers.shift()!.f();
+      expect(runs).toEqual([0, POLL_MS]);
+      t = POLL_MS + 10;
+      ask();
+      stop();
+      ask();
+      expect(timers.map((x) => x.at)).toEqual([2 * POLL_MS, 2 * POLL_MS]);
+      expect(runs).toEqual([0, POLL_MS]);
     });
   });
 

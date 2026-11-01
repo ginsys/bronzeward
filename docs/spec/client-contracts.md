@@ -755,9 +755,12 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
      (`web/src/shell.test.ts:88`, `web/src/machine.test.ts:369`). A read with nothing to show
      shows the disconnected state in place. When the banner ends because a read answered, W3 reads
      the machine and its observations again once, as for a timeline poll with new entries: one
-     read again at a time. It never shows data older than a failed read without a sign
+     read again at a time. Until they answer, W3 shows what it keeps, as during any read again.
+     After that, no data older than a failed read stays shown without a sign
      (`web/src/shell.test.ts:106`, `web/src/machine.test.ts:392`,
-     `web/e2e/auth/inventory.e2e.ts:350`).
+     `web/e2e/auth/inventory.e2e.ts:350`). A transport failure answers at once, so this read again
+     runs at most once per poll interval. A resource that keeps getting no answer is not read again
+     at network speed (`web/src/machine.test.ts:409`).
    - A refusal of the credentials (`401` after renewal, `403 identity-revoked`) ends the page
      ([§9.6](#96-failure-cases)), and nothing stays (`web/src/request.test.ts:96`,
      `web/src/request.test.ts:115`, `web/src/shell.test.ts:181`).
@@ -767,7 +770,7 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
      list goes with its cursor ([§8.2](#82-errors)). W3 still shows the machine's own rows with
      the observations' failure; only the latest read's line needs the observations. If the machine
      read also failed, its failure is still shown (`web/src/machine.test.ts:231`,
-     `web/src/machine.test.ts:323`, `web/src/machine.test.ts:410`).
+     `web/src/machine.test.ts:323`, `web/src/machine.test.ts:435`).
    - A new view keeps nothing of the old view. When the view changes, the old view's answer still
      shows at first. A later failure does not keep it, a read without answer included, and the
      restart flag does not carry over (`web/src/machine.test.ts:204`, `web/src/machine.test.ts:231`,
