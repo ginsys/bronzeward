@@ -110,7 +110,9 @@ func TestRemoteTextInTokenFilePath(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	for _, c := range [][]string{{"logout"}, {"login", "--no-input"}, {"whoami"}} {
+	// Login is not run: with --no-input it refuses before it reads the path, and without it waits for
+	// an identity provider. Its sentence passes through the same store.kept as logout's.
+	for _, c := range [][]string{{"logout"}, {"whoami"}} {
 		var o, e bytes.Buffer
 		run(append([]string{"--context", "idp"}, c...), &o, &e)
 		noRawControl(t, strings.Join(c, " "), o.String()+e.String())
