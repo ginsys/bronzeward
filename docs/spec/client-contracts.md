@@ -354,7 +354,10 @@ it. It holds no secret.
    - Each control character (C0, DEL, C1) and each byte that is not UTF-8 becomes `\xNN`, as in
      item 4. The tab and the line feed are included: they become `\x09` and `\x0a`. A value that
      holds either could otherwise move a column or forge a row. Only the separators that the CLI
-     writes itself stay raw.
+     writes itself stay raw. A backslash in remote text stays as it is, as in item 4. A value
+     that holds the text `\x0a` shows as that text. It looks like an escape but cannot act on the
+     terminal, and escaping every backslash would change each value that holds one for no gain in
+     safety.
    - The rule has no list of fields. An ID, a state, a name, a title, a principal, a reason, a
      release identifier and a cell the CLI builds from such values are all remote text. The API
      schemas do not promise a format for them (`api/openapi.yaml`, `ClusterBody` and `DraftBody`
@@ -390,8 +393,10 @@ it. It holds no secret.
    branch. It fails in
    any of these cases:
    - The output holds a raw control byte outside the CLI's own separators.
-   - A plain value does not appear in its escaped form: `\x09` for the tab, `\x0a` for the line
-     feed, `\x0d` for the carriage return.
+   - Outside documents, diffs and JSON text that the CLI encodes, a plain value does not appear in
+     its escaped form: `\x09` for the tab, `\x0a` for the line feed, `\x0d` for the carriage
+     return. Documents, diffs and JSON text have their own forms, which the two last cases below and
+     the rules above state.
    - Outside documents and diffs, a line has a different number of columns, or the output a
      different number of lines, from the same command run with plain values. This catches a tab
      that becomes padding, which leaves no raw tab and no extra row.
