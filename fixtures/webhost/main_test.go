@@ -183,6 +183,21 @@ func TestUpstreamCloseClosesTheConnection(t *testing.T) {
 	}
 }
 
+// TestOneRequestPerConnection: every answer closes its connection, pages, the API and the
+// redirect injection alike, so no browser request is sent on a reused connection.
+func TestOneRequestPerConnection(t *testing.T) {
+	for _, redirect := range []string{"", "http://127.0.0.1:16001/"} {
+		srv, _ := host(t, redirect)
+		for _, path := range []string{"/", "/assets/index-x.js", "/api/v1/server", "/livez"} {
+			res, _ := get(t, srv.URL+path)
+			// The client reads Connection: close into Close.
+			if !res.Close {
+				t.Errorf("redirect %q, %s: the connection stays open; want it closed", redirect, path)
+			}
+		}
+	}
+}
+
 func TestRedirectInjection(t *testing.T) {
 	srv, hits := host(t, "http://127.0.0.1:16001/")
 	res, _ := get(t, srv.URL+"/api/v1/server?x=1")
