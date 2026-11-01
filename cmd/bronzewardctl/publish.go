@@ -67,7 +67,7 @@ func (e *env) publish(args []string) (err error) {
 		return err
 	}
 	if o.State != "succeeded" {
-		return fmt.Errorf("%s: publication operation %s %s: %s; nothing was sent to any machine", c.Context.Where(), o.Id, o.State, compact(o.Error))
+		return operationFailed{fmt.Errorf("%s: publication operation %s %s: %s; nothing was sent to any machine", c.Context.Where(), o.Id, o.State, compact(o.Error))}
 	}
 	keep(e, c, d, "")
 	var res apitypes.PublishResult

@@ -85,9 +85,14 @@ global flags, before or after the command:
   --no-input            never prompt
   -v                    name a proxy a request goes through
 
-exit codes: 0 success; 1 refused or failed; 2 usage error or refused repeat; 3 outcome unknown`
+exit codes: 0 success; 1 refused or failed; 2 usage error or refused repeat; 3 outcome unknown;
+4 a waited-for operation ended failed, rejected or cancelled`
 
 type usageError struct{ error }
+
+// operationFailed is a waited-for operation that ended failed, rejected or cancelled: exit 4
+// (operator-experience.md §4).
+type operationFailed struct{ error }
 
 type env struct {
 	context, output, tokenFile   string
@@ -153,6 +158,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 // report prints the error of a command, the one place that does, and returns the exit code.
 func report(err error, stdout, stderr io.Writer) int {
 	var u usageError
+	var failed operationFailed
 	var refused client.RefusedRepeat
 	var unknown *client.Unknown
 	switch {
@@ -171,6 +177,8 @@ func report(err error, stdout, stderr io.Writer) int {
 	switch {
 	case errors.As(err, &unknown):
 		return 3
+	case errors.As(err, &failed):
+		return 4
 	case errors.As(err, &refused):
 		return 2
 	}

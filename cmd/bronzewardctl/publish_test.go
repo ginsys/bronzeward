@@ -124,9 +124,9 @@ func TestPublication(t *testing.T) {
 	f.mu.Lock()
 	f.state = "failed"
 	f.mu.Unlock()
-	step("a failed publication", pub, 1, "Publishing draft", `publication operation op_BWSYNTH-pub failed: {"type":"urn:bronzeward:problem:validation-failed",`+
+	step("a failed publication exits 4", pub, 4, "Publishing draft", `publication operation op_BWSYNTH-pub failed: {"type":"urn:bronzeward:problem:validation-failed",`+
 		`"title":"BWSYNTH","status":422}; nothing was sent to any machine`, "Publication succeeded")
-	if out := step("-o json prints the answer unchanged", append(pub, "-o", "json"), 1, "", "failed"); out != fmt.Sprintf(publishOp, "queued", `null`, `null`)+"\n" {
+	if out := step("-o json prints the answer unchanged", append(pub, "-o", "json"), 4, "", "failed"); out != fmt.Sprintf(publishOp, "queued", `null`, `null`)+"\n" {
 		t.Errorf("-o json printed %q", out)
 	}
 
