@@ -266,13 +266,16 @@ export const keptW3 = (was: W3Kept | undefined, m: Load<Machine>, obs: Load<List
 // time: `n` counts them, `left` is how many of the current one's two reads (the machine and its
 // observations) have not settled, the first page's reads included. An advance while they are in
 // flight does not abandon them: it marks one more read again, which starts when both settle.
-// Advances faster than one read would otherwise discard every read again before it answers.
-export type AdvanceReads = { n: number; left: number; dirty: boolean };
-export const ADVANCE_READS: AdvanceReads = { n: 0, left: 2, dirty: false };
-export const stepAdvance = (a: AdvanceReads, e: "advance" | { settled: number }): AdvanceReads => {
-  const next = { n: a.n + 1, left: 2, dirty: false };
+// Advances faster than one read would otherwise discard every read again before it answers. Each
+// read is counted under the page's own reads (`key`: its view and read again): a new key starts its
+// own two reads, and a read of an earlier key, which still settles, counts for nothing.
+export type AdvanceReads = { key: string; n: number; left: number; dirty: boolean };
+export const advanceReads = (key: string): AdvanceReads => ({ key, n: 0, left: 2, dirty: false });
+export const stepAdvance = (a: AdvanceReads, e: "advance" | { key: string } | { key: string; settled: number }): AdvanceReads => {
+  const next = { ...a, n: a.n + 1, left: 2, dirty: false };
   if (e === "advance") return a.left > 0 ? { ...a, dirty: true } : next;
-  if (e.settled !== a.n || a.left === 0) return a;
+  if (!("settled" in e)) return e.key === a.key ? a : { ...a, key: e.key, left: 2, dirty: false };
+  if (e.key !== a.key || e.settled !== a.n || a.left === 0) return a;
   return a.left === 1 && a.dirty ? next : { ...a, left: a.left - 1 };
 };
 
@@ -283,13 +286,15 @@ export function MachineItem({ id }: { id: string }) {
   const path = `/machines/${encodeURIComponent(id)}`;
   const reads = useReads();
   const [tl, older, busy, advances] = useTimeline(`${path}/timeline`);
-  const [again, step] = useReducer(stepAdvance, ADVANCE_READS);
+  const key = `${reads.view}\n${reads.again}`;
+  const [again, step] = useReducer(stepAdvance, key, advanceReads);
+  useEffect(() => step({ key }), [key]);
   useEffect(() => void (advances > 0 && step("advance")), [advances]);
   const outer = reads.settle;
   const settle = useCallback<Reads["settle"]>((res, set, live, held) => {
     outer(res, set, live, held);
-    step({ settled: again.n });
-  }, [outer, again.n]);
+    step({ key, settled: again.n });
+  }, [outer, key, again.n]);
   return (
     <ReadsProvider value={{ ...reads, settle, again: reads.again + again.n }}>
       <MachineState id={id} path={path} tl={tl} older={older} busy={busy} />

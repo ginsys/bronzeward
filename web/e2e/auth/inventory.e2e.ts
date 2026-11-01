@@ -701,7 +701,8 @@ describe("the read-only lists and items", () => {
   it("reflow at 320 CSS pixels: no page scrolls sideways; only a table scrolls on its own", async () => {
     const at = await disposable();
     // The longest valid name (128 bytes, no space to wrap at) is an option of the cluster filter.
-    const cl = await cluster(at, `${"a".repeat(63)}.${"b".repeat(62)}.c`);
+    const long = `${"a".repeat(63)}.${"b".repeat(62)}.c`;
+    const cl = await cluster(at, long);
     const [m] = await machines(at, cl.id, 1);
     const s = synthetic(cl.id, m!);
     expect(await fixtureSignIn("h-viewer", {}, { upstream: at, bodies: s.bodies })).toMatch(SERVER);
@@ -709,6 +710,8 @@ describe("the read-only lists and items", () => {
     try {
       expect(await browser.execute(() => innerWidth)).toBe(320);
       await expect($("main tbody tr")).toBeExisting();
+      // The clusters are a read of their own: measure once the long option is in the filter.
+      await expect($(`main option[value="${cl.id}"]`)).toHaveElementProperty("text", long);
       expect(["machines", await overflows()]).toEqual(["machines", 0]);
       for (const [page, item, title] of [["Plans", s.plan.id, "Plan"], ["Sources", s.frg.id, "Fragment"], ["Operations", s.op.id, "Operation"]] as const) {
         await nav(page);

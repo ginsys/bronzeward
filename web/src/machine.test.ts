@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ADOPTED, ADVANCE_READS, advanced, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, kept, keptW3, latestUnread, MachineShown, nextTimeline, type Observation, Observations, POLL_MS, polled, queued, readLater, readOlder, sentences, stepAdvance, type Timeline, TimelineRows, UNREAD } from "./machine.tsx";
+import { ADOPTED, advanced, advanceReads, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, kept, keptW3, latestUnread, MachineShown, nextTimeline, type Observation, Observations, POLL_MS, polled, queued, readLater, readOlder, sentences, stepAdvance, type Timeline, TimelineRows, UNREAD } from "./machine.tsx";
 import { type Reads, ReadsProvider, RESTARTED } from "./list.tsx";
 import type { Machine } from "./machines.tsx";
 import type { ReadResult } from "./request.ts";
@@ -250,20 +250,40 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
     expect(ko.restarted).toBe(true);
   });
 
-  test("#424 item 2: advances faster than one read again do not abandon it; one more read again follows when both its reads settle", () => {
-    const run = (events: ("advance" | { settled: number })[]) => events.reduce(stepAdvance, ADVANCE_READS);
+  // The counter's steps only: MachineItem's wiring of them is not rendered here (no DOM renderer).
+  test("#424 item 2, the read-again counter: advances faster than one read again do not abandon it; one more read again follows when both its reads settle", () => {
+    const k = "v\n0";
+    const s = (settled: number, key = k) => ({ key, settled });
+    const run = (events: Parameters<typeof stepAdvance>[1][], from = advanceReads(k)) => events.reduce(stepAdvance, from);
     // The first page's two reads settle; the first advance then reads again.
-    const first = run([{ settled: 0 }, { settled: 0 }, "advance"]);
-    expect(first).toEqual({ n: 1, left: 2, dirty: false });
+    const first = run([s(0), s(0), "advance"]);
+    expect(first).toEqual({ key: k, n: 1, left: 2, dirty: false });
     // Three more advances while the read again is in flight: it stays the one in flight.
-    const busy = run([{ settled: 0 }, { settled: 0 }, "advance", "advance", "advance", "advance"]);
+    const busy = run([s(0), s(0), "advance", "advance", "advance", "advance"]);
     expect(busy.n).toBe(1);
     // A late answer from an earlier read counts for nothing; the read again's own two complete it.
-    const done = stepAdvance(stepAdvance(busy, { settled: 0 }), { settled: 1 });
-    expect(done).toEqual({ n: 1, left: 1, dirty: true });
-    expect(stepAdvance(done, { settled: 1 })).toEqual({ n: 2, left: 2, dirty: false });
+    const done = run([s(0), s(1)], busy);
+    expect(done).toEqual({ key: k, n: 1, left: 1, dirty: true });
+    expect(stepAdvance(done, s(1))).toEqual({ key: k, n: 2, left: 2, dirty: false });
     // With no advance meanwhile, it ends there.
-    expect(run([{ settled: 0 }, { settled: 0 }, "advance", { settled: 1 }, { settled: 1 }])).toEqual({ n: 1, left: 0, dirty: false });
+    expect(run([s(0), s(0), "advance", s(1), s(1)])).toEqual({ key: k, n: 1, left: 0, dirty: false });
+  });
+
+  test("#424 item 2, the read-again counter: a new view or read again of the page counts only its own reads", () => {
+    const k = "v\n0";
+    const run = (events: Parameters<typeof stepAdvance>[1][], from = advanceReads(k)) => events.reduce(stepAdvance, from);
+    // A read again in flight with one more marked, then the page reads again (a new key).
+    const moved = run([{ key: k, settled: 0 }, { key: k, settled: 0 }, "advance", "advance", { key: "v\n1" }]);
+    expect(moved).toEqual({ key: "v\n1", n: 1, left: 2, dirty: false });
+    // The earlier key's two reads still settle: they neither complete the new reads nor start another.
+    const late = run([{ key: k, settled: 1 }, { key: k, settled: 1 }], moved);
+    expect(late).toBe(moved);
+    // An advance while the new key's reads are in flight waits for them.
+    const waiting = run(["advance", { key: "v\n1", settled: 1 }], moved);
+    expect(waiting).toEqual({ key: "v\n1", n: 1, left: 1, dirty: true });
+    expect(stepAdvance(waiting, { key: "v\n1", settled: 1 })).toEqual({ key: "v\n1", n: 2, left: 2, dirty: false });
+    // The same key again changes nothing.
+    expect(stepAdvance(moved, { key: "v\n1" })).toBe(moved);
   });
 
   test("#424 item 1: the timeline's restart notice stays through a read again in the same view, and goes with the view", () => {
