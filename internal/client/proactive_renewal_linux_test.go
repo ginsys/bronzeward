@@ -4,7 +4,8 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -118,12 +119,67 @@ func TestProactiveRenewalStoreTimeoutContinues(t *testing.T) {
 	}
 }
 
-// TestProactiveRenewalUnsettledWriteStatesOutcome checks the words of a store write that got no
-// answer: the notice of a proactive renewal carries them, so the operator knows the rotated pair
-// may still be kept.
+// TestProactiveRenewalUnsettledWriteStatesOutcome drives Open through a refresh that succeeds and
+// a store write that gets no answer. The renewal fails, the command goes on with the original
+// token, and the notice states that the sign-in may still be written after the command ends: the
+// operator then knows the rotated pair may be kept.
 func TestProactiveRenewalUnsettledWriteStatesOutcome(t *testing.T) {
-	err := unsettled(errStoreSlow, true, "written")
-	if err == nil || !strings.Contains(err.Error(), "the sign-in may still be written after this command ends") || errors.Is(err, errStoreSlow) {
-		t.Errorf("unsettled write: %v; want the outcome stated", err)
+	proxyAsTheProxyTestNamesIt(t)
+	offered, get, getHeld, set, del := secretServiceOffered, keyringGetCall, keyringGetHeldCall, keyringSetCall, keyringDeleteCall
+	t.Cleanup(func() {
+		secretServiceOffered, keyringGetCall, keyringGetHeldCall, keyringSetCall, keyringDeleteCall = offered, get, getHeld, set, del
+	})
+	secretServiceOffered = func() (bool, error) { return true, nil }
+	var iss *httptest.Server
+	var redeemed int
+	iss = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			json.NewEncoder(w).Encode(map[string]any{"issuer": iss.URL, "authorization_endpoint": iss.URL + "/authorize",
+				"token_endpoint": iss.URL + "/token", "revocation_endpoint": iss.URL + "/revoke", "jwks_uri": iss.URL + "/jwks",
+				"id_token_signing_alg_values_supported": []string{"ES256"}})
+		case "/token":
+			redeemed++
+			json.NewEncoder(w).Encode(map[string]any{"access_token": "BWSYNTH-renewed", "refresh_token": "BWSYNTH-rt2",
+				"token_type": "Bearer", "expires_in": 900})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer iss.Close()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", home)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
+	t.Setenv("BRONZEWARD_TOKEN_FILE", "")
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path="+filepath.Join(home, "bus"))
+	x := Context{Name: "store", Server: "https://bw.example.invalid", Credential: "oidc",
+		OIDC: &OIDC{Issuer: iss.URL, ClientID: "BWSYNTH-cli", CertificateAuthority: bundleOf(t, iss.Certificate().Raw)}}
+	current := Tokens{AccessToken: expiringJWT(), RefreshToken: "BWSYNTH-rt"}
+	b, err := json.Marshal(entry{Server: x.Server, Issuer: x.OIDC.Issuer, Tokens: current})
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyringGetCall = func(string, string) (string, error) { return string(b), nil }
+	keyringGetHeldCall = func(string, string) (string, error) { return string(b), nil }
+	keyringSetCall = func(string, string, string) error {
+		return unsettled(errStoreSlow, true, "written")
+	}
+	var notices bytes.Buffer
+	c, err := Open(&x, TokenInput{}, &notices, nil)
+	if err != nil {
+		t.Fatalf("Open with a write that got no answer: %v; want the command to go on", err)
+	}
+	for _, want := range []string{"the sign-in may still be written after this command ends", "the current token stays in use until the server refuses it"} {
+		if !strings.Contains(notices.String(), want) {
+			t.Errorf("the notice %q lacks %q", notices.String(), want)
+		}
+	}
+	if redeemed != 1 {
+		t.Errorf("%d redemptions, want 1: the refresh must succeed so that the write is reached", redeemed)
+	}
+	if c.token != current.AccessToken {
+		t.Errorf("the command uses another token than the original one, though the write got no answer")
 	}
 }
