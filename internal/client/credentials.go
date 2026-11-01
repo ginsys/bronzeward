@@ -324,7 +324,8 @@ func (c *Client) adopt(t *Tokens) {
 // then hands the lock to waiters in its own order, and lists each waiter in /proc/locks, which the
 // process tests read to order their steps. A flock given up on is left to finish, and the lock it
 // then takes is released at once.
-func renewalLock(l string) (func(), error) {
+func renewalLock(l string) (unlock func(), err error) {
+	defer func() { err = printableError(err) }() // the path comes from the contexts file
 	if err := os.MkdirAll(filepath.Dir(l), 0o700); err != nil {
 		return nil, err
 	}
