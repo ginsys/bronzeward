@@ -21,7 +21,8 @@ import (
 )
 
 // TestRenewalLockBounded checks that a command waiting on a renewal lock another process holds
-// past lockBound fails with an error naming the lock, and changes nothing (ginsys/bronzeward#437).
+// past lockBound fails with an error naming the lock, and keeps the stored sign-in
+// (ginsys/bronzeward#437).
 func TestRenewalLockBounded(t *testing.T) {
 	bound := lockBound
 	t.Cleanup(func() { lockBound = bound })
@@ -44,9 +45,11 @@ func TestRenewalLockBounded(t *testing.T) {
 	go func() { _, err := ClearTokens(p, nil); done <- err }()
 	select {
 	case err := <-done:
-		want := "another bronzewardctl process holds the renewal lock " + p + ".lock"
-		if err == nil || !strings.Contains(err.Error(), want) {
-			t.Errorf("ClearTokens under a held lock: %v; want an error containing %q", err, want)
+		// The message promises only that the stored sign-in is unchanged: context remove reaches it
+		// after the context is removed (ClearStored).
+		want := "another bronzewardctl process holds the renewal lock " + p + ".lock and did not release it within four minutes, so the stored sign-in was not changed"
+		if err == nil || !strings.HasSuffix(err.Error(), want) {
+			t.Errorf("ClearTokens under a held lock: %v; want an error ending in %q", err, want)
 		}
 		if d := time.Since(start); d < lockBound {
 			t.Errorf("ClearTokens gave up after %v, before the bound %v", d, lockBound)

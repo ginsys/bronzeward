@@ -862,7 +862,8 @@ current token expires
    itself got no answer, the command says that its outcome is unknown: the store may still carry
    it out after the lock is released. A command waits at most four minutes for a lock that another
    bronzewardctl process holds, longer than a renewal's bounded read, refresh and write together,
-   and then fails, with nothing changed, naming the lock file.
+   and then fails, naming the lock file. The stored sign-in is not changed. Other changes of the
+   command stay, for example the context that `context remove` already removed.
    One that locks while a renewal waits on the identity
    provider refuses the renewed pair: its rotated refresh token is lost, as with any failed write,
    and the operator signs in again once the current access token expires.
