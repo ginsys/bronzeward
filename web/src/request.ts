@@ -1,5 +1,5 @@
-// The request layer every page uses for API reads (client contracts §6 item 7, §8.2, §8.5, §10.3).
-// Writes, their idempotency keys and ambiguous outcomes (§8.4) arrive with the first write view.
+// The request layer every page uses for API reads (client contracts §6 item 7, §8.2, §8.5, §10.3),
+// and the single send the write layer (write.ts, §8.4) repeats under its own rules.
 
 export const API_BASE = "/api/v1";
 
@@ -32,6 +32,14 @@ export type ReadResult<T> =
   | { kind: "unavailable"; status: number; problem: Problem | null }
   | { kind: "transport" }
   | { kind: "defect"; message: string };
+
+// A write's answer: a success's JSON or NOT_JSON; for a refusal its problem, null when the answer
+// is not a Bronzeward problem, or NOT_JSON.
+export interface Attempt {
+  status: number;
+  headers: Headers;
+  data: unknown;
+}
 
 // What a response must still match to be rendered.
 export interface View {
@@ -153,14 +161,43 @@ export class Client {
     }
   }
 
-  private async send(path: string): Promise<Response | undefined> {
-    const headers: Record<string, string> = { Accept: "application/json" };
+  // One send of a write, or of its confirming read, for the write layer (write.ts): never repeated
+  // here and never discarded as stale. Its epoch is observed as a read's is, so a new one sets every
+  // pending write aside through onEpochChange. Undefined when no complete answer arrived, a redirect
+  // refused by the browser included (§6 item 7).
+  async attempt(method: string, path: string, headers: Record<string, string> = {}, body?: string): Promise<Attempt | undefined> {
+    const res = await this.send(path, method, headers, body);
+    if (res === undefined) return undefined;
+    this.observeEpoch(res);
+    const route = API_BASE + path.split("?")[0];
+    if (res.headers.has("Deprecation") && !this.deprecated.has(route)) {
+      this.deprecated.add(route);
+      this.opts.onDeprecation?.(route);
+    }
+    const data = res.ok ? await readJson(res) : await readProblem(res);
+    if (data === CUT) return undefined;
+    return { status: res.status, headers: res.headers, data };
+  }
+
+  // §9.5 renewal, for a write's 401: true when the page holds a renewed token.
+  renew(): Promise<boolean> {
+    return this.opts.renew?.() ?? Promise.resolve(false);
+  }
+
+  // §8.2 identity-revoked of the sign-in still current, from a write's answer.
+  revoked(): void {
+    this.opts.onRevoked?.();
+  }
+
+  private async send(path: string, method = "GET", extra: Record<string, string> = {}, body?: string): Promise<Response | undefined> {
+    const headers: Record<string, string> = { Accept: "application/json", ...extra };
     const token = this.opts.token?.();
     if (token !== undefined) headers["Authorization"] = `Bearer ${token}`;
     try {
       return await (this.opts.fetch ?? fetch)(API_BASE + path, {
-        method: "GET",
+        method,
         headers,
+        ...(body === undefined ? {} : { body }),
         cache: "no-store",
         redirect: "error",
         credentials: "omit",
