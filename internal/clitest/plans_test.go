@@ -1,7 +1,6 @@
 package clitest
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/siderolabs/talos/pkg/machinery/api/machine"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -313,13 +311,8 @@ func TestPlans(t *testing.T) {
 	// T22: a cancellation of a committed plan whose attempt is recorded does not stop it.
 	t.Run("cancellation after commitment", func(t *testing.T) {
 		in.set(nil, nil)
-		arrived, release := make(chan struct{}), make(chan struct{})
-		e.st.node.OnApply(func(_ context.Context, req *machine.ApplyConfigurationRequest) (*machine.ApplyConfigurationResponse, error) {
-			close(arrived)
-			<-release
-			e.st.node.SetMachineConfig(t, req.GetData())
-			return &machine.ApplyConfigurationResponse{Messages: []*machine.ApplyConfiguration{{Mode: req.GetMode()}}}, nil
-		})
+		arrived, release := e.st.node.HoldApply(t)
+		defer release()
 		r := e.ctl(e.create("apply-config", "--transport-deadline", "1m", "--verification-deadline", "1m", "--max-attempts", "1")...)
 		p := planID.FindString(r.out)
 		f.want(r, 0, "apply-config, mode no-reboot", "transport 60s, verification 60s")
@@ -339,7 +332,7 @@ func TestPlans(t *testing.T) {
 			t.Fatalf("plan %s: operation %q, %d attempts, %v; want one recorded attempt", p, op, attempts, err)
 		}
 		r = e.ctl(append(h, "plan", "cancel", p, "--reason", "BWSYNTH cancelled after commitment")...)
-		close(release)
+		release()
 		f.want(r, 0, "Cancellation of plan "+p+" recorded by ", "The plan stays committed to operation "+op+
 			". A cancellation ends a committed plan's operation only while no attempt is recorded; it does not stop an attempt already recorded.\n"+
 			"Follow it with: bronzewardctl operation watch '"+op+"'\n")
