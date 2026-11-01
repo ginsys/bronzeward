@@ -80,7 +80,7 @@ func (e *env) importReview(args []string) error {
 // pager shows text on the terminal out in the alternate screen, with standard input in raw mode
 // for the keys, and restores both before it returns, so the review leaves the screen.
 func (e *env) pager(out *os.File, text string) error {
-	rows, cols, err := term.GetSize(int(out.Fd()))
+	cols, rows, err := term.GetSize(int(out.Fd())) // width, then height
 	if err != nil {
 		rows, cols = 24, 80
 	}
