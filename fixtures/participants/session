@@ -41,6 +41,25 @@ fwd=bw-dev-forward
 
 idp_var() { sed -n "s/^$1=//p" "$idp/idp.env"; }
 
+# The processes that start spawns, by the pid that start captures at each spawn. A failed start
+# ends them from this list, because stop finds a process only by a record that start may have
+# failed to write. Until this shell reaps a child, no other process can get its pid.
+spawned=()
+kill_spawned() {
+  local p s
+  for p in "${spawned[@]}"; do
+    kill "$p" 2>/dev/null || continue
+    for _ in $(seq 10); do
+      s=$(cat "/proc/$p/stat" 2>/dev/null) || break
+      s=${s##*) }
+      [ "${s%% *}" != Z ] || break
+      sleep 1
+    done
+    kill -KILL "$p" 2>/dev/null || true
+    wait "$p" 2>/dev/null || true
+  done
+}
+
 # webhost_runs <pid>: the process is this checkout's web host, by the command start runs.
 webhost_runs() {
   local arg0
@@ -121,7 +140,7 @@ start() {
   # session's. dev-idp up refuses another checkout's containers before it writes its state.
   : >"$part/idp-started"
   # From here, a failure undoes the start: stop removes what it made and puts back A's configuration.
-  trap 'echo "session start failed; undoing it with session stop" >&2; stop' EXIT
+  trap 'echo "session start failed; undoing it with session stop" >&2; kill_spawned; stop' EXIT
   # The web client's origin is the web host's, not the browser tests' page.
   BW_DEV_IDP_WEB_ORIGIN=$web "$FIXTURES/dev-idp" up --participants >/dev/null
   trust_zitadel
@@ -143,6 +162,7 @@ start() {
   nohup "$part/webhost" -listen 127.0.0.1:58443 -dist "$repo/web/dist" -headers "$repo/web/headers.json" \
     -client-config "$part/client.json" -issuer "$(idp_var BW_TEST_IDP_ISSUER)" \
     -api "http://127.0.0.1:$SERVER_A_PORT" >"$part/webhost.log" 2>&1 &
+  spawned+=("$!")
   local pid=$!
   echo "$pid" >"$part/webhost.pid"
   curl --disable -sf --noproxy '*' -o "$part/served.json" --max-time 2 --retry 10 --retry-connrefused --retry-delay 1 \
