@@ -5,8 +5,10 @@
 // and titles, never a password or a code.
 // Usage: node fixtures/participants/rehearse-signin.mjs <human>   (from web/, for webdriverio)
 import { spawn } from "node:child_process";
+import { mkdirSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const human = process.argv[2] ?? "h-viewer";
 const password = process.env[`BW_PW_${human.toUpperCase().replaceAll("-", "_")}`];
@@ -15,7 +17,8 @@ if (!password) throw new Error(`no password for ${human} in the environment (run
 // gets them. NODE_DEBUG, read at Node's start, would print what a child is given and more.
 for (const k of Object.keys(process.env)) if (k.startsWith("BW_PW_")) delete process.env[k];
 if (process.env.NODE_DEBUG) throw new Error("NODE_DEBUG is set; unset it, because its output bypasses the redaction");
-const repo = new URL("../../", import.meta.url).pathname;
+// A file path, not the URL's path, which keeps percent-encoding (a space as %20).
+const repo = fileURLToPath(new URL("../../", import.meta.url));
 const part = join(repo, ".dev/participants");
 const require = createRequire(join(repo, "web/package.json"));
 // WDIO_LOG_LEVEL overrides logLevel below, and WDIO_LOG_PATH would keep that log outside the scan's
@@ -29,11 +32,20 @@ const web = "http://localhost:58443";
 // password is one of them (setValue).
 const out = (line) => console.log(String(line).replaceAll(password, "[password]").replace(/BWSYNTH-pw-[a-z0-9]{8}-[0-9]{4}/g, "[password]"));
 
+// chrome <n>: a new, empty Chrome profile for sign-in n, in the participant state. Left to itself,
+// ChromeDriver makes a profile in TMPDIR and never removes it. Here session scan reads the profile
+// and session stop removes it. Each sign-in gets its own, so the web one starts signed out.
+function chrome(n) {
+  const dir = join(part, `rehearse-profile-${n}`);
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  return { browserName: "chrome", "goog:chromeOptions": { args: ["--headless=new", `--user-data-dir=${dir}`] } };
+}
+
 const browser = await remote({
   // No WebDriver log of its own: a command log would carry the password.
   logLevel: "silent",
-  // A WebDriver session is always a fresh profile, so nothing a page stores outlives it.
-  capabilities: { browserName: "chrome", "goog:chromeOptions": { args: ["--headless=new"] } },
+  capabilities: chrome(1),
 });
 const say = async (what) => out(`${what}: ${await browser.getTitle()} <${new URL(await browser.getUrl()).pathname}>`);
 
@@ -62,10 +74,11 @@ async function signIn() {
 const env = { ...process.env, XDG_CONFIG_HOME: join(part, "home/config"), XDG_STATE_HOME: join(part, "home/state") };
 const ctl = join(part, "bin/bronzewardctl");
 let failed = false;
+let login;
 
 try {
   // 1. The CLI, device grant: the address and code it prints, approved in the browser.
-  const login = spawn(ctl, ["login", "--device"], { env, stdio: ["ignore", "pipe", "pipe"] });
+  login = spawn(ctl, ["login", "--device"], { env, stdio: ["ignore", "pipe", "pipe"] });
   let cliOut = "";
   const done = new Promise((resolve) => login.on("exit", resolve));
   login.stdout.on("data", (d) => (cliOut += d));
@@ -92,7 +105,7 @@ try {
 
   // 2. The web interface, authorization code. Signed in means back on the web host's origin, with
   // the shell's "Signed in as" line, which shows only after the server answered the identity read.
-  await browser.reloadSession();
+  await browser.reloadSession(chrome(2));
   await browser.url(`${web}/`);
   await browser.pause(2000);
   await say("web start");
@@ -111,6 +124,8 @@ try {
   out(`failed: ${e.message}`);
   await say("page at the failure").catch(() => {});
 } finally {
+  // A step that failed while the CLI still polled the provider leaves it running: stop it.
+  if (login && login.exitCode === null && login.signalCode === null) login.kill();
   await browser.deleteSession();
 }
 process.exit(failed ? 1 : 0);
