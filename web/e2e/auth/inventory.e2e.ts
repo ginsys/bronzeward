@@ -347,6 +347,38 @@ describe("the machine detail (W3)", () => {
     expect((await timelineReads(id!)) - after).toBeGreaterThanOrEqual(1);
   });
 
+  it("#443: a read without answer after a kept failure keeps the data under the banner; the answer that ends it reads the machine again once", async function () {
+    this.timeout(90_000);
+    const at = await disposable();
+    const cl = await cluster(at, "lab-a");
+    const [id] = await machines(at, cl.id, 1);
+    const path = `/machines/${id}`;
+    const machineReads = async () => (await seen()).filter((p) => p === path).length;
+    expect(await fixtureSignIn("h-viewer", {}, { upstream: at })).toMatch(SERVER);
+    await $(`a[title="${id}"]`).click();
+    await expect($('[data-testid="sentences"]')).toBeExisting({ wait: 20_000 });
+    // A read again the server refuses: its failure above the machine kept.
+    await faults({ upstream: at, missing: path });
+    await browser.execute(() => void dispatchEvent(new Event("online")));
+    await expect($('main [data-testid="problem"]')).toBeExisting({ wait: 20_000 });
+    // The next read finds no answer; every other read is held, so none ends the banner first.
+    await faults({ upstream: at, redirect: path, held: ["/identity", `${path}/observations`, `${path}/timeline`] });
+    await browser.execute(() => void dispatchEvent(new Event("online")));
+    await $('[data-testid="offline"]').waitForExist({ timeout: 20_000 });
+    expect(await $$('main [data-testid="problem"]').length).toBe(1);
+    expect(await $("main").getText()).not.toContain(TRANSPORT_FAILURE);
+    expect(await $('[data-testid="sentences"]').isExisting()).toBe(true);
+    // The held answers end the banner; W3 then reads the machine again, once, and shows its answer.
+    const before = await machineReads();
+    await faults({ upstream: at });
+    await release();
+    await $('[data-testid="offline"]').waitForExist({ timeout: 20_000, reverse: true });
+    await browser.waitUntil(async () => (await machineReads()) === before + 1, { timeout: 20_000, timeoutMsg: "W3 did not read the machine again" });
+    await expect($('main [data-testid="problem"]')).not.toBeExisting({ wait: 20_000 });
+    await browser.pause(6_000);
+    expect(await machineReads()).toBe(before + 1);
+  });
+
   it("#375: the timeline's newest page first, never the whole timeline; Load older appends the older page and is gone at its start", async function () {
     this.timeout(120_000);
     const at = await disposable();

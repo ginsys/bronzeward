@@ -12,7 +12,7 @@ import {
 } from "./resources.tsx";
 
 const go = () => {};
-const reads: Reads = { client: { read: () => new Promise(() => {}) }, settle: () => {}, undropped: () => () => true, view: "", again: 0, go, failure: () => null };
+const reads: Reads = { client: { read: () => new Promise(() => {}) }, settle: () => false, undropped: () => () => true, view: "", again: 0, regained: 0, go, failure: () => null };
 const html = (e: ReactNode) => renderToStaticMarkup(h(ReadsProvider, { value: reads }, e));
 const at = (path: string, query = "") => view(path, query, go) as ReactElement<Record<string, unknown>> | undefined;
 

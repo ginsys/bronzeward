@@ -748,34 +748,31 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
    - A failure the server answers keeps what the view last read and shows the failure above it.
      These failures are a refusal the page shows, a `503` after its retries, and `epoch-superseded`,
      which the client reads as unavailable (`web/src/request.ts:149`;
-     `web/src/machine.test.ts:216`, `web/src/machine.test.ts:230`).
+     `web/src/machine.test.ts:217`, `web/src/machine.test.ts:231`, `web/src/machine.test.ts:263`).
    - A read that gets no answer while the view still shows data reports it only through the
      offline banner ([W11](operator-experience-wireframes.md#w11-empty-withheld-error-and-offline-states)).
-     The data stays, with no failure of its own above it (`web/src/shell.test.ts:88`). A read with
-     nothing to show shows the disconnected state in place. When the banner ends because a read
-     answered, W3 reads the lost resource again once, so it never shows data older than a failed
-     read without a sign. Today the client does not read it again, and a read without answer after
-     a kept failure shows its failure above the kept data, not the banner:
-     [#443](https://github.com/ginsys/bronzeward/issues/443) fixes both.
+     The data stays, with no failure of its own above it, also after a failure the server answered
+     (`web/src/shell.test.ts:88`, `web/src/machine.test.ts:298`). A read with nothing to show
+     shows the disconnected state in place. When the banner ends because a read answered, W3 reads
+     the lost resource again once, so it never shows data older than a failed read without a sign
+     (`web/src/shell.test.ts:106`, `web/src/machine.test.ts:321`,
+     `web/e2e/auth/inventory.e2e.ts:350`).
    - A refusal of the credentials (`401` after renewal, `403 identity-revoked`) ends the page
      ([§9.6](#96-failure-cases)), and nothing stays (`web/src/request.test.ts:96`,
-     `web/src/request.test.ts:115`, `web/src/shell.test.ts:169`).
+     `web/src/request.test.ts:115`, `web/src/shell.test.ts:181`).
    - A new epoch and the process's recovery refusal end the page ([§8.5](#85-epoch-changes)), and
-     nothing stays (`web/src/shell.test.ts:140`, `web/src/shell.test.ts:154`).
+     nothing stays (`web/src/shell.test.ts:152`, `web/src/shell.test.ts:166`).
    - An observations read that restarted after a refused cursor and then failed keeps nothing: the
      list goes with its cursor ([§8.2](#82-errors)). W3 still shows the machine's own rows with
      the observations' failure; only the latest read's line needs the observations. If the machine
-     read also failed, its failure is still shown (`web/src/machine.test.ts:230`,
-     `web/src/machine.test.ts:322`). Today W3 shows only its heading and the failures when the
-     observations keep nothing (`web/src/machine.tsx:325`), which
-     [#443](https://github.com/ginsys/bronzeward/issues/443) fixes.
+     read also failed, its failure is still shown (`web/src/machine.test.ts:231`,
+     `web/src/machine.test.ts:253`, `web/src/machine.test.ts:331`).
    - A new view keeps nothing of the old view. When the view changes, the old view's answer still
-     shows at first. A later failure does not keep it, and the restart flag does not carry over
-     (`web/src/machine.test.ts:203`, `web/src/machine.test.ts:230`). Today this holds for a failure
-     the server answers only: a read without answer in the new view keeps the old view's answer
-     under the banner, which [#443](https://github.com/ginsys/bronzeward/issues/443) fixes.
+     shows at first. A later failure does not keep it, a read without answer included, and the
+     restart flag does not carry over (`web/src/machine.test.ts:204`, `web/src/machine.test.ts:231`,
+     `web/src/machine.test.ts:310`).
    - The observations' restart notice stays through the reads again after it within the view
-     (`web/src/machine.test.ts:203`, `web/src/machine.test.ts:244`).
+     (`web/src/machine.test.ts:204`, `web/src/machine.test.ts:245`).
 
 ## 9. Authentication
 
@@ -1655,8 +1652,8 @@ Limits:
   expected-epoch check, which are read with
   [#277](https://github.com/ginsys/bronzeward/issues/277) and
   [#293](https://github.com/ginsys/bronzeward/issues/293) respectively applied (see the opening),
-  and those to the web client in [§8.6](#86-event-resumption) item 6, which are read at
-  `3ed1b48`. They move as the code changes.
+  and those to the web client in [§8.6](#86-event-resumption) item 6, which are read with
+  [#443](https://github.com/ginsys/bronzeward/issues/443) applied. They move as the code changes.
 - Every choice in [§13](#13-alternatives-and-open-choices) and every implementation choice above
   is decided. This document decides no credential policy.
 - It does not change any role, human-only rule, route, schema or server setting.

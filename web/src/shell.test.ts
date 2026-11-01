@@ -1,7 +1,7 @@
 import { createElement as h, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
-import { Action, connection, Deprecations, deprecated, Failure, incompatible, MIN_API_REVISION, observed, offlineSince, ShellContext, type ShellEvents, ShellReads } from "./shell.tsx";
+import { Action, connection, Deprecations, deprecated, Failure, incompatible, MIN_API_REVISION, observed, offlineSince, regaining, ShellContext, type ShellEvents, ShellReads } from "./shell.tsx";
 import { Conflict, Disconnected, Empty, HUMAN_ONLY, Loading, NOT_ACCEPTED, NotAccepted, Offline, Refused, REPLAYED, Replayed, SET_ASIDE, SetAside, Unknown, UNKNOWN, Unread, Withheld, WITHHELD } from "./states.tsx";
 import { TRANSPORT_FAILURE } from "./request.ts";
 
@@ -101,6 +101,18 @@ describe("the shell", () => {
     expect(observed({ kind: "transport" }, true)).toBe("lost");
     expect(observed({ kind: "transport" }, false)).toBeUndefined();
     expect(observed({ kind: "discarded" }, true)).toBeUndefined();
+  });
+
+  test("#443: the count bumps only when a read's answer ends the banner", () => {
+    const [t1, t2] = [at("10:11"), at("10:12")];
+    const lost = regaining([{}, 0], "lost", t1);
+    expect(lost[1]).toBe(0);
+    expect(regaining(lost, "answered", t2)).toEqual([{ lost: undefined }, 1]);
+    // An answer with no banner, or one that leaves the browser's offline event standing, does not.
+    expect(regaining([{}, 0], "answered", t2)[1]).toBe(0);
+    expect(regaining(regaining(lost, "offline", t2), "answered", t2)[1]).toBe(0);
+    // The online event ends its own cause; the shell reads every page again then, through `again`.
+    expect(regaining(regaining([{}, 0], "offline", t1), "online", t2)[1]).toBe(0);
   });
 
   test("§7 item 4: the deprecation notices render once each, as status messages", () => {
