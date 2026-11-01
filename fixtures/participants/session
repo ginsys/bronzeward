@@ -111,12 +111,21 @@ start() {
     --arg w "$(idp_var BW_TEST_IDP_WEB_CLIENT)" \
     '{issuer: $i, audience: $a, cliClientId: $c, webClientId: $w, scopes: ("urn:zitadel:iam:org:project:id:" + $a + ":aud")}' \
     >"$part/client.json"
+  # Another listener on the port would answer the readiness read for a web host that failed to bind.
+  if curl --disable -s --noproxy '*' -o /dev/null --max-time 2 "$web/"; then
+    die "something already answers on $web; stop it, then run session start again"
+  fi
   nohup "$part/webhost" -listen 127.0.0.1:58443 -dist "$repo/web/dist" -headers "$repo/web/headers.json" \
     -client-config "$part/client.json" -issuer "$(idp_var BW_TEST_IDP_ISSUER)" \
     -api "http://127.0.0.1:$SERVER_A_PORT" >"$part/webhost.log" 2>&1 &
-  echo $! >"$part/webhost.pid"
-  curl -sf --noproxy '*' -o /dev/null --max-time 2 --retry 10 --retry-connrefused --retry-delay 1 "$web/" ||
-    die "the web host did not answer on $web ($part/webhost.log)"
+  local pid=$!
+  echo "$pid" >"$part/webhost.pid"
+  curl --disable -sf --noproxy '*' -o "$part/served.json" --max-time 2 --retry 10 --retry-connrefused --retry-delay 1 \
+    "$web/bronzeward-client.json" || die "the web host did not answer on $web ($part/webhost.log)"
+  # The answer is this web host's: it still runs, and it serves this start's client configuration.
+  kill -0 "$pid" 2>/dev/null || die "the web host (pid $pid) exited ($part/webhost.log)"
+  cmp -s -- "$part/client.json" "$part/served.json" || die "$web serves another client configuration than $part/client.json"
+  rm -f -- "$part/served.json"
   trap - EXIT
   echo "participant environment up: web $web, login page $login" >&2
   echo "next: fixtures/participants/session passwords, then the first task's setup" >&2
@@ -145,8 +154,9 @@ passwords() {
     digits=$(LC_ALL=C tr -dc '0-9' < <(head -c 1024 /dev/urandom))
     [ "${#letters}" -ge 8 ] && [ "${#digits}" -ge 4 ] || die "could not make a password for $name"
     pw=$marker${letters:0:8}-${digits:0:4}
+    # --disable first: a facilitator's curlrc could name a trace file, which would get the body.
     P=$pw jq -nc '{newPassword: {password: env.P, changeRequired: false}}' |
-      curl -sSf --noproxy '*' -o /dev/null -X POST "$issuer/v2/users/$uid/password" \
+      curl --disable -sSf --noproxy '*' -o /dev/null -X POST "$issuer/v2/users/$uid/password" \
         -H "Authorization: Bearer $(cat "$idp/seed.pat")" -H 'Content-Type: application/json' -d @- ||
       die "could not set the password of $name"
     if [ -n "$exec" ]; then
@@ -197,6 +207,15 @@ t1() {
   read_ok "the client is not signed in" sh -c "! env XDG_CONFIG_HOME='$part/home/config' XDG_STATE_HOME='$part/home/state' '$part/bin/bronzewardctl' --no-input whoami"
 }
 
+# What this scan made: its planted controls, the copied logs and its error file. scan_clean removes
+# them, on any exit too, so that no control stays behind in retained state.
+scan_made=()
+scan_clean() {
+  local f
+  for f in ${scan_made[@]+"${scan_made[@]}"}; do rm -rf -- "$f"; done
+  scan_made=()
+}
+
 # scan [path]...: the retained files of this checkout's fixture, dev-idp and participant state,
 # the logs of their containers and any path named, for a session password. Run it before stop.
 # Each of the four places gets a planted control that must be found, so that a place the scan does
@@ -206,31 +225,32 @@ scan() {
   local logs=$part/scan-logs errs names hits c d rc=0 missing=''
   local roots=("$STATE" "$idp" "$part" "$logs")
   for d in "$STATE" "$idp" "$part"; do [ -d "$d" ] || die "no $d to scan; run scan before session stop"; done
+  trap scan_clean EXIT
+  trap 'exit 130' INT TERM
   # Outside the places scanned: grep refuses to read the file its own output goes to.
   errs=$(mktemp)
+  scan_made+=("$errs")
   for d in "$@"; do [ -r "$d" ] || die "cannot read $d"; done
   names=$(docker ps -a --format '{{.Names}}') || die "cannot list containers (docker ps)"
   for c in "$BW_A" "$BW_DEV_IDP_CONTAINER"; do
     grep -qxF -- "$c" <<<"$names" || die "no container $c to read the log of; run scan before session stop"
   done
   rm -rf -- "$logs"
+  scan_made+=("$logs")
   mkdir -p -- "$logs"
   for c in $(grep -E "^($FIXTURE_NAME-.*|$BW_DEV_IDP_CONTAINER|$BW_DEV_IDP_PG_CONTAINER|$BW_DEV_IDP_GROUPS_CONTAINER|bw-dev-login|$fwd)\$" <<<"$names" || true); do
     docker logs "$c" >"$logs/$c.log" 2>&1 || die "cannot read the log of $c"
   done
-  for d in "${roots[@]}"; do printf 'planted %splanted0-0000\n' "$marker" >"$d/$control"; done
-  hits=$(grep -rlE --binary-files=text --devices=skip -- "$pattern" "${roots[@]}" "$@" 2>"$errs") || rc=$?
   for d in "${roots[@]}"; do
-    grep -qxF -- "$d/$control" <<<"$hits" || missing+=" $d"
-    rm -f -- "$d/$control"
+    scan_made+=("$d/$control")
+    printf 'planted %splanted0-0000\n' "$marker" >"$d/$control"
   done
-  rm -rf -- "$logs"
-  if [ "$rc" -gt 1 ]; then
-    cat -- "$errs" >&2
-    rm -f -- "$errs"
-    die "the scan could not read everything (above), so it proves nothing"
-  fi
-  rm -f -- "$errs"
+  hits=$(grep -rlE --binary-files=text --devices=skip -- "$pattern" "${roots[@]}" "$@" 2>"$errs") || rc=$?
+  for d in "${roots[@]}"; do grep -qxF -- "$d/$control" <<<"$hits" || missing+=" $d"; done
+  [ "$rc" -le 1 ] || cat -- "$errs" >&2
+  scan_clean
+  trap - EXIT INT TERM
+  [ "$rc" -le 1 ] || die "the scan could not read everything (above), so it proves nothing"
   [ -z "$missing" ] || die "the planted control was not found in:$missing; the scan did not read it"
   hits=$(grep -vE -- "/$control\$" <<<"$hits" || true)
   if [ -n "$hits" ]; then
@@ -243,7 +263,7 @@ scan() {
 # stop: the web host, the forwarder and dev-idp gone, A off the dev-idp network and back on bin/up's
 # configuration (started again if it runs), each checked before the participant state is removed.
 stop() {
-  local pid nets
+  local pid nets names running=''
   trap - EXIT
   if [ -f "$part/webhost.pid" ]; then
     pid=$(cat "$part/webhost.pid")
@@ -253,19 +273,24 @@ stop() {
   fi
   docker rm -f "$fwd" >/dev/null 2>&1 || true
   if docker inspect --type container "$fwd" >/dev/null 2>&1; then die "the forwarder $fwd is still there (docker rm -f $fwd)"; fi
-  if docker inspect --type container "$BW_A" >/dev/null 2>&1; then
+  # A container list that fails is not "no A": stop would then skip A's network and restart.
+  names=$(docker ps -a --format '{{.Names}}') || die "cannot list containers (docker ps)"
+  if grep -qxF -- "$BW_A" <<<"$names"; then
     # dev-idp down removes its network, which refuses while A is attached to it.
     docker network disconnect "$BW_DEV_IDP_NET" "$BW_A" >/dev/null 2>&1 || true
     nets=$(docker inspect --type container --format '{{range $n, $_ := .NetworkSettings.Networks}}{{$n}} {{end}}' "$BW_A") ||
       die "cannot inspect $BW_A"
     case " $nets" in *" $BW_DEV_IDP_NET "*) die "$BW_A is still on the network $BW_DEV_IDP_NET" ;; esac
+    running=$(docker inspect --type container --format '{{.State.Running}}' "$BW_A") || die "cannot inspect $BW_A"
   fi
+  # The backup stays until A runs on it again, so that a failure here leaves it for the next stop.
   if [ -f "$cfg.fixture" ]; then
-    mv --no-target-directory -- "$cfg.fixture" "$cfg"
-    if [ "$(docker inspect --type container --format '{{.State.Running}}' "$BW_A" 2>/dev/null)" = true ]; then
-      "$bin/inject" kill A >/dev/null
-      "$bin/inject" start A >/dev/null
+    cp -- "$cfg.fixture" "$cfg"
+    if [ "$running" = true ]; then
+      "$bin/inject" kill A >/dev/null || die "cannot stop $BW_A to restart it on bin/up's configuration; run session stop again"
+      "$bin/inject" start A >/dev/null || die "cannot start $BW_A on bin/up's configuration; run session stop again"
     fi
+    rm -f -- "$cfg.fixture"
   fi
   "$FIXTURES/dev-idp" down
   rm -rf -- "$part"

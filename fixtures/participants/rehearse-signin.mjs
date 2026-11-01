@@ -60,13 +60,13 @@ let failed = false;
 try {
   // 1. The CLI, device grant: the address and code it prints, approved in the browser.
   const login = spawn(ctl, ["login", "--device"], { env, stdio: ["ignore", "pipe", "pipe"] });
-  let out = "";
+  let cliOut = "";
   const done = new Promise((resolve) => login.on("exit", resolve));
-  login.stdout.on("data", (d) => (out += d));
-  login.stderr.on("data", (d) => (out += d));
-  for (let i = 0; i < 30 && !/open (\S+) on any device/.test(out); i++) await browser.pause(500);
-  const url = out.match(/open (\S+) on any device/)?.[1];
-  const code = out.match(/enter the code (\S+?)\.\s/)?.[1];
+  login.stdout.on("data", (d) => (cliOut += d));
+  login.stderr.on("data", (d) => (cliOut += d));
+  for (let i = 0; i < 30 && !/open (\S+) on any device/.test(cliOut); i++) await browser.pause(500);
+  const url = cliOut.match(/open (\S+) on any device/)?.[1];
+  const code = cliOut.match(/enter the code (\S+?)\.\s/)?.[1];
   if (!url || !code) throw new Error("the CLI printed no device address and code");
   out(`CLI device address: ${new URL(url).pathname}`);
   await browser.url(url);
