@@ -45,8 +45,16 @@ export interface Attempt {
 // §9.6): a 401 its one renewal did not clear, or identity-revoked of the sign-in still current.
 export type Ending = { kind: "unauthenticated"; problem: Problem | null } | { kind: "revoked"; problem: Problem };
 // A write's record of the ending its sends met. `now` hears one learned before the write's own
-// answer is read, so the page ends even if that answer's body never arrives.
-export interface End { e?: Ending; now?: (e: Ending) => void }
+// answer is read, so the page ends even if that answer's body never arrives. `pre` is the process
+// refusal of a recovery start that any of its answers carried (§8.5 item 1), set only by attempt().
+export interface End { e?: Ending; now?: (e: Ending) => void; pre?: Problem }
+
+// §8.5 item 1: a recovery start's process refusal, a 409 recovery-mode-active without a scope.
+export function preEntry(status: number, body: unknown): Problem | undefined {
+  if (status !== 409 || typeof body !== "object" || body === null) return undefined;
+  const p = body as Problem;
+  return p.type === `${PROBLEM_PREFIX}recovery-mode-active` && p["scope"] === undefined ? p : undefined;
+}
 
 // What a response must still match to be rendered.
 export interface View {
@@ -179,7 +187,7 @@ export class Client {
     const records = this.epochRecords;
     const res = await this.send(path, method, headers, body);
     if (res === undefined) return undefined;
-    const ending = await this.learnEpoch(res, records);
+    const ending = await this.learnEpoch(res, records, end);
     if (ending !== undefined) {
       end.e = ending;
       end.now?.(ending);
@@ -191,6 +199,8 @@ export class Client {
     }
     const data = epochOnly ? await credentialProblem(res) : res.ok ? await readJson(res) : await readProblem(res);
     if (data === CUT) return undefined;
+    const pre = preEntry(res.status, data);
+    if (pre !== undefined) end.pre ??= pre;
     return { status: res.status, headers: res.headers, data };
   }
 
@@ -227,8 +237,9 @@ export class Client {
   // until an answer names the epoch recorded last or nothing was recorded since its own send, as a
   // read is sent again. The write itself is never sent again here. Each read's credential refusals
   // are a read's (§8.2): a 401 renews once and reads again; a second 401 or identity-revoked stops
-  // and is returned, the epoch unlearned.
-  private async learnEpoch(res: Response, records: number): Promise<Ending | undefined> {
+  // and is returned, the epoch unlearned. A recovery start's process refusal goes to `end.pre` and
+  // stops the reads, the epoch unlearned.
+  private async learnEpoch(res: Response, records: number, end: End): Promise<Ending | undefined> {
     let renewed = false;
     for (let tries = 0; ; tries++) {
       const epoch = res.headers.get("Bronzeward-Epoch");
@@ -240,9 +251,15 @@ export class Client {
       const sent = this.epochRecords;
       const next = await this.send("/recovery");
       if (next === undefined) return undefined;
-      // Only a credential refusal's body is read: any other answer names its epoch in its headers.
+      // Only a credential refusal's or a 409's body is read: any other answer names its epoch in its
+      // headers.
       const body = await credentialProblem(next);
       const problem = body === NOT_JSON || body === CUT ? null : body;
+      const pre = preEntry(next.status, problem);
+      if (pre !== undefined) {
+        end.pre ??= pre;
+        return undefined;
+      }
       const code = problem?.type.slice(PROBLEM_PREFIX.length);
       if (next.status === 401 && code === "unauthenticated") {
         if (renewed || !(await this.renew())) return { kind: "unauthenticated", problem };

@@ -453,6 +453,22 @@ describe("set aside (§8.4 item 3, §8.5 item 2, journeys §8)", () => {
     expect(told).toEqual(["urn:bronzeward:problem:recovery-mode-active 0"]);
   });
 
+  test.each([
+    ["without a scope, a recovery start: the shell is told once", undefined, 1],
+    ["with a scope, no recovery start: the shell is told nothing", "mch_a", 0],
+  ])("a write answered after the page saw another epoch, whose GET /recovery is a 409 recovery-mode-active %s", async (_, scope, times) => {
+    // The first epoch read shows e1; the page sees e2 while the write is answered under e1, so the
+    // client reads GET /recovery to learn which is current (request.ts learnEpoch).
+    const p = page(
+      [() => ((p.client as unknown as { observeEpoch(r: Response): boolean }).observeEpoch(recovery("e2")), created({ id: "c1" }))],
+      [EPOCH, problem(409, "recovery-mode-active", scope === undefined ? {} : { scope }, null)],
+    );
+    p.writes.onPreEntry = vi.fn();
+    expect(await p.writes.submit(spec())).toMatchObject({ kind: "done", status: 201 });
+    expect(p.sent.map((s) => s.path)).toEqual(["/recovery", "/clusters", "/recovery"]);
+    expect(p.writes.onPreEntry).toHaveBeenCalledTimes(times);
+  });
+
   test("setAside marks a write in flight and turns an unknown one aside; neither is repeatable", async () => {
     const drop = () => new TypeError("Failed to fetch");
     const p = page([drop(), drop(), drop(), drop(), drop()]);
