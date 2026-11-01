@@ -301,35 +301,39 @@ export function MachineItem({ id }: { id: string }) {
   useEffect(() => step({ key }), [key]);
   useEffect(() => void (advances > 0 && step("advance")), [advances]);
   const settle = useMemo(() => countingSettle(reads.settle, step, key, again.n), [reads.settle, key, again.n]);
+  const readAgain = useCallback(() => step("advance"), []);
   return (
     <ReadsProvider value={{ ...reads, settle, again: reads.again + again.n }}>
-      <MachineState id={id} path={path} tl={tl} older={older} busy={busy} />
+      <MachineState id={id} path={path} tl={tl} older={older} busy={busy} readAgain={readAgain} />
     </ReadsProvider>
   );
 }
 
 // A read of the machine or its observations that finds no answer keeps what this view kept under the
-// offline banner, and none of an old view's answer; when a read's answer ends the banner, the
-// resource that found none is read again once (client contracts §8.6 item 6, #443).
-export function keepW3(k: { current: W3Kept | undefined }, i: 0 | 1, again: number, lost: { current: [boolean, boolean] }): Keep {
-  return { held: () => k.current?.[i].data !== undefined, again, lost: (l) => void (lost.current[i] = l) };
+// offline banner, and none of an old view's answer (client contracts §8.6 item 6, #443).
+export function keepW3(k: { current: W3Kept | undefined }, i: 0 | 1, lost: { current: [boolean, boolean] }): Keep {
+  return { held: () => k.current?.[i].data !== undefined, lost: (l) => void (lost.current[i] = l) };
 }
-// The reads again that a banner ended by an answer asks for: one more for each resource lost.
-export const againW3 = ([m, o]: [number, number], [lm, lo]: [boolean, boolean]): [number, number] => [m + Number(lm), o + Number(lo)];
+// Whether a banner ended by an answer asks for a read again: a resource found no answer since the
+// last one. It clears the marks it reads.
+export function lostSince(lost: { current: [boolean, boolean] }): boolean {
+  const [m, o] = lost.current;
+  lost.current = [false, false];
+  return m || o;
+}
 
-function MachineState({ id, path, tl, older, busy }: { id: string; path: string; tl: Load<Timeline<Entry>> | Dropped; older: (() => void) | undefined; busy: boolean }) {
+// When a read's answer ends the banner and a resource found no answer, the machine and its
+// observations are read again once, as for a timeline advance: one read again at a time, so this
+// read again and the timeline's do not abandon each other.
+function MachineState({ id, path, tl, older, busy, readAgain }: { id: string; path: string; tl: Load<Timeline<Entry>> | Dropped; older: (() => void) | undefined; busy: boolean; readAgain: () => void }) {
   const { view, regained } = useReads();
   const k = useRef<W3Kept>(undefined);
   const lost = useRef<[boolean, boolean]>([false, false]);
-  const [again, setAgain] = useState<[number, number]>([0, 0]);
-  const m = useItem<Machine>(path, keepW3(k, 0, again[0], lost));
-  const [obs] = useList<Observation>(`${path}/observations`, "", true, keepW3(k, 1, again[1], lost));
+  const m = useItem<Machine>(path, keepW3(k, 0, lost));
+  const [obs] = useList<Observation>(`${path}/observations`, "", true, keepW3(k, 1, lost));
   useEffect(() => {
-    const was = lost.current;
-    if (!was[0] && !was[1]) return;
-    lost.current = [false, false];
-    setAgain((n) => againW3(n, was));
-  }, [regained]);
+    if (lostSince(lost)) readAgain();
+  }, [regained, readAgain]);
   const [km, ko, kt] = (k.current = keptW3(k.current, m, obs, tl, view));
   return <MachineShown id={id} m={m} obs={obs} km={km} ko={ko} tl={tl} kt={kt} older={older} busy={busy} />;
 }

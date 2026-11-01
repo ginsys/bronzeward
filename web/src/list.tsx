@@ -96,9 +96,9 @@ export function settling<D>(res: ReadResult<D> | Dropped, put: (r: Load<D> | Dro
 }
 
 // What a view that keeps its own data gives a read (W3, #443): whether it keeps data now, which a
-// read without answer keeps under the banner; a count it bumps to read again; and, at each read that
-// settles, whether it found no answer and kept the data.
-export interface Keep { held: () => boolean; again: number; lost: (lost: boolean) => void }
+// read without answer keeps under the banner; and, at each read that settles, whether it found no
+// answer and kept the data. The view reads again through the page's own `again`.
+export interface Keep { held: () => boolean; lost: (lost: boolean) => void }
 
 // The read's own `held`, or the keeping view's; `lost` is told each settled read's outcome.
 function useKeep(keep: Keep | undefined, held: () => boolean): [() => boolean, (lost: boolean) => void] {
@@ -145,7 +145,7 @@ export function useList<T>(path: string, query: string, all: boolean, keep?: Kee
     }
     read({ items: [], next: undefined, restarted: false }, all);
     return () => void start.current++;
-  }, [read, put, view, path, query, all, again, keep?.again]);
+  }, [read, put, view, path, query, all, again]);
   const more = useCallback(() => {
     if (list.kind === "ok" && reading.current !== start.current) read(list.data, false);
   }, [read, list]);
@@ -168,7 +168,7 @@ export function useItem<T>(path: string, keep?: Keep): Load<T> {
     }
     void client.read<T>(path).then((res) => lost(settle(res, put, () => live && ok(), held)));
     return () => void (live = false);
-  }, [client, settle, undropped, put, held, lost, view, path, again, keep?.again]);
+  }, [client, settle, undropped, put, held, lost, view, path, again]);
   return item;
 }
 
