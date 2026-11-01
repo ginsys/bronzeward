@@ -25,7 +25,11 @@ at `daa4393`. Everything in the environment is synthetic.
 
 1. Recreate the fixture: `fixtures/participants/session stop`, `fixtures/bin/down`, then
    `fixtures/participants/session start`. If this checkout already runs a dev-idp provider, start
-   refuses: run `mise run dev-idp-down` first.
+   refuses: run `mise run dev-idp-down` first. Start also refuses while an earlier session's state
+   exists: run `session stop` first. Keep this order: run `session stop` before `fixtures/bin/down`
+   or `fixtures/dev-idp down`, and run one participant session per Docker daemon. `session stop`
+   removes the forwarder and dev-idp by name, so outside this order it can remove another
+   checkout's containers.
 2. Generate this session's passwords: `fixtures/participants/session passwords`. It shows each
    password once, on the terminal only. Give the participant the password of each account when a
    task needs it. Write none down. Tell the participant to refuse when the browser offers to save
