@@ -247,9 +247,17 @@ scan_clean() {
 # not read fails it. A container list, a log or a file that cannot be read fails it too.
 scan() {
   local pattern="${marker}[a-z0-9]{8}-[0-9]{4}" control=.bw-scan-control
-  local logs=$part/scan-logs errs names selected hits c d rc=0 missing=''
+  local logs=$part/scan-logs errs names selected hits c d rc=0 missing='' planted recorded reached
   local roots=("$STATE" "$idp" "$part" "$logs")
   for d in "$STATE" "$idp" "$part"; do [ -d "$d" ] || die "no $d to scan; run scan before session stop"; done
+  # The logs are read by container name, so on another Docker daemon they would be other containers'.
+  [ -f "$part/daemon" ] && IFS= read -r recorded <"$part/daemon" && [ -n "$recorded" ] ||
+    die "$part has no record of the Docker daemon its session start used, so scan cannot tell which logs are the session's"
+  reached=$(docker info --format '{{.ID}}') || die "the Docker daemon does not answer"
+  [ "$recorded" = "$reached" ] ||
+    die "the participant session was started on the Docker daemon $recorded, and this shell reaches $reached (DOCKER_HOST or the Docker context changed); point the shell back at that daemon and run scan again"
+  # The controls this scan plants, one per line, by the exact path that grep prints for each.
+  planted=$(for d in "${roots[@]}"; do printf '%s/%s\n' "$d" "$control"; done)
   trap scan_clean EXIT
   trap 'exit 130' INT TERM
   # Outside the places scanned: grep refuses to read the file its own output goes to.
@@ -283,8 +291,9 @@ scan() {
   trap - EXIT INT TERM
   [ "$rc" -le 1 ] || die "the scan could not read everything (above), so it proves nothing"
   [ -z "$missing" ] || die "the planted control was not found in:$missing; the scan did not read it"
-  # Status 1 is "no hit but the controls"; any other failure would read as a clean scan.
-  hits=$(grep -vE -- "/$control\$" <<<"$hits") || [ $? = 1 ] || die "cannot filter the scan's hits, so it proves nothing"
+  # Only this scan's own controls are dropped; another file of the same name is a hit. Status 1 is
+  # "no hit but the controls"; any other failure would read as a clean scan.
+  hits=$(grep -vxF -- "$planted" <<<"$hits") || [ $? = 1 ] || die "cannot filter the scan's hits, so it proves nothing"
   if [ -n "$hits" ]; then
     while IFS= read -r d; do echo "session password pattern in $d"; done <<<"$hits"
     die "a session password pattern is in a retained file or log (above)"

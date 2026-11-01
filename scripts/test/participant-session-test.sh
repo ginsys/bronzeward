@@ -60,8 +60,9 @@ EOF
 # start's other prerequisites, which the cases below never reach.
 for c in go npm; do printf '#!/bin/sh\nexit 0\n' >"$t/bin/$c"; done
 chmod +x "$t/bin/docker" "$t/bin/go" "$t/bin/npm" "$repo/fixtures/bin/inject" "$repo/fixtures/dev-idp" "$repo/fixtures/bin/up"
-# bin/up's record of its daemon (lib.sh daemon_own).
+# bin/up's record of its daemon (lib.sh daemon_own), and session start's.
 echo daemon-1 >"$repo/fixtures/.state/up-daemon"
+echo daemon-1 >"$repo/.dev/participants/daemon"
 export STUB_LOG=$t/calls
 STUB_OWNER=$(CDPATH='' cd -P -- "$repo/fixtures" && pwd -P)
 export STUB_OWNER
@@ -119,6 +120,24 @@ if [ "$rc" != 0 ] && [[ $out == *"cannot read the log of"* ]] && [ "$(controls)"
   ok "a container log that cannot be read fails the scan"
 else bad "log read fails: rc=$rc: $out"; fi
 
+# Another Docker daemon than session start's: its containers of the same names are not the session's.
+out=$(STUB_DAEMON=daemon-2 run scan)
+rc=$?
+if [ "$rc" != 0 ] && [[ $out == *"this shell reaches daemon-2"* ]] && [ "$(controls)" = 0 ] &&
+  [ ! -e "$repo/.dev/participants/scan-logs" ]; then
+  ok "a scan on another Docker daemon than session start's fails, and reads no log"
+else bad "scan, other daemon: rc=$rc controls=$(controls): $out"; fi
+
+# A file of the controls' name in a named path is not this scan's control: its hit counts.
+mkdir -p "$t/profile"
+printf 'BWSYNTH-pw-abcd1234-5678\n' >"$t/profile/.bw-scan-control"
+out=$(run scan "$t/profile")
+rc=$?
+rm -rf "$t/profile"
+if [ "$rc" != 0 ] && [[ $out == *"in $t/profile/.bw-scan-control"* ]] && [ "$(controls)" = 0 ]; then
+  ok "a session password in another file of the controls' name is found"
+else bad "same-named file: rc=$rc controls=$(controls): $out"; fi
+
 # A grep that hangs on the recursive read, so the scan is interrupted with its controls planted. The
 # scan runs in its own process group, which is signalled whole, as a terminal's Ctrl-C reaches grep.
 realgrep=$(type -P grep)
@@ -147,7 +166,7 @@ else bad "interrupt: planted=$planted left=$(controls) status=$rc"; fi
 # A grep that fails on the final filter, after the controls were found, with a hit to report.
 cat >"$t/bin/grep" <<EOF
 #!/usr/bin/env bash
-for a in "\$@"; do [ "\$a" = -vE ] && exit 2; done
+for a in "\$@"; do [ "\$a" = -vxF ] && exit 2; done
 exec '$realgrep' "\$@"
 EOF
 chmod +x "$t/bin/grep"
