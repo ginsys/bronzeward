@@ -341,6 +341,21 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
     expect(advanced(from, await readLater(client([restart, page([3], undefined, "t3")]), "/t", from))).toBe(true);
   });
 
+  test("#424 item 2: a Load older that restarts, and the read after a dropped restart, count when they bring entries not shown", async () => {
+    const moved: boolean[] = [];
+    const step = queued<number>(on, on, (_res, m) => moved.push(m));
+    const c = client([page([1], "o1", "t1"), restart, page([2, 1], "o1", "t2"), restart, { kind: "transport" }, page([3, 2, 1], "o1", "t3"), page([], undefined, "t3")]);
+    await step((from) => readLater<number>(c, "/t", from), on);
+    // Load older on a refused cursor reads the newest page again, with an entry not shown.
+    await step((from) => readOlder<number>(c, "/t", from, on), on);
+    // A poll's refused cursor, then a failure: dropped; the next poll reads the newest page from UNREAD.
+    await step((from) => readLater<number>(c, "/t", from), on);
+    await step((from) => readLater<number>(c, "/t", from), on);
+    // Nothing new: no count.
+    await step((from) => readLater<number>(c, "/t", from), on);
+    expect(moved).toEqual([false, true, false, true, false]);
+  });
+
   test("an entry's details: who, why and what it names, identifiers shortened", () => {
     const e = (kind: string, entry: unknown): Entry => ({ revision: 1, epoch: "ep", at: READ, kind, entry });
     expect(details(e("freeze", { principal: "h-author", role: "author", reason: "synthetic incident" }))).toBe('h-author author "synthetic incident"');
