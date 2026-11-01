@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { type Attempt, Client, type ClientOptions } from "./request.ts";
 import { type ShellEvents, ShellReads } from "./shell.tsx";
-import { BACKOFF, EPOCH_CHANGED_ASIDE, NO_CREDENTIAL, NO_EPOCH, newKey, RECOVERY_START, RENEWED_LAST, SHELL_GONE, SIGN_IN_CHANGED, SIGN_IN_REFUSED, Write, Writes } from "./write.ts";
+import { BACKOFF, EPOCH_CHANGED_ASIDE, MAX_BODY, NO_CREDENTIAL, NO_EPOCH, newKey, RECOVERY_START, RENEWED_LAST, SHELL_GONE, SIGN_IN_CHANGED, SIGN_IN_REFUSED, TOO_LARGE, Write, Writes } from "./write.ts";
 
 const EPOCH = "e1";
 const PRINCIPAL = "https://idp.invalid SYNTH-sub-1";
@@ -93,6 +93,19 @@ describe("each send (§8.4 item 3)", () => {
     const { writes, writesSent } = page([], [null]);
     expect(await writes.submit(spec())).toEqual({ kind: "not-done", why: NO_EPOCH, problem: null });
     expect(writesSent()).toEqual([]);
+  });
+
+  test("§8.1: a body over 1 MiB in UTF-8 is refused before any send, one of exactly 1 MiB is sent", async () => {
+    // {"name":"…"} around the name: 11 bytes. Each é is two bytes and one UTF-16 unit, so the
+    // larger body is about half a million characters long.
+    const name = "a" + "é".repeat((MAX_BODY - 11 - 1) / 2);
+    const at = (n: string) => new Write({ method: "POST", path: "/clusters", body: { name: n }, resource: "/clusters" });
+    const big = page([]);
+    expect(await big.writes.submit(at(name + "a"))).toEqual({ kind: "not-done", why: TOO_LARGE, problem: null });
+    expect(big.sent).toEqual([]);
+    const fits = page([created({ id: "c1" })]);
+    expect(await fits.writes.submit(at(name))).toMatchObject({ kind: "done" });
+    expect(new TextEncoder().encode(String(fits.writesSent()[0]!.body)).length).toBe(MAX_BODY);
   });
 
   test("a second submit while the first runs sends nothing and returns the same outcome", async () => {
