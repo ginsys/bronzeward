@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/godbus/dbus/v5"
@@ -115,14 +117,15 @@ const (
 // leaves it: a collection that is locked, or any answer that needs a prompt, is refused
 // (errStoreLocked).
 //
-// Its calls together get ssBound (§9.2 item 3): neither the session bus nor the D-Bus library
-// ends a call that gets no answer (ginsys/bronzeward#437). At the deadline the connection closes,
-// which fails the call in flight, and the operation returns errStoreSlow.
+// Its connection and calls together get ssBound (§9.2 item 3): neither the session bus nor the
+// D-Bus library ends a call that gets no answer (ginsys/bronzeward#437). At the deadline the dial,
+// read or write in flight fails (ssConnect), and the operation returns errStoreSlow.
 func secretService(f func(c *dbus.Conn, col dbus.BusObject) error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), ssBound)
 	defer cancel()
+	deadline, _ := ctx.Deadline()
 	err := func() error {
-		c, err := dbus.ConnectSessionBus(dbus.WithContext(ctx))
+		c, err := ssConnect(ctx, deadline)
 		if err != nil {
 			return err
 		}
@@ -137,10 +140,77 @@ func secretService(f func(c *dbus.Conn, col dbus.BusObject) error) error {
 		}
 		return f(c, c.Object(ssName, path))
 	}()
-	if err != nil && ctx.Err() != nil {
+	// The socket's deadline and the context's are one instant, so a failure the socket's deadline
+	// caused can arrive before the context reports it: the clock decides.
+	if err != nil && !time.Now().Before(deadline) {
 		return errStoreSlow
 	}
 	return err
+}
+
+// ssConnect connects to the session bus that DBUS_SESSION_BUS_ADDRESS names, as the D-Bus library
+// does, but with the deadline on the dial and on every later read and write on the socket. The
+// library bounds neither: its dial does not take the context, and its Close waits for a send that a
+// bus no longer reading has blocked (ginsys/bronzeward#437). Only the unix and tcp transports are
+// dialled. An address with no such transport fails before anything is sent.
+func ssConnect(ctx context.Context, deadline time.Time) (*dbus.Conn, error) {
+	err := errors.New("the D-Bus session bus address names no unix or tcp transport")
+	var d net.Dialer
+	for _, a := range strings.Split(os.Getenv("DBUS_SESSION_BUS_ADDRESS"), ";") {
+		network, target, ok := ssTransport(a)
+		if !ok {
+			continue
+		}
+		var nc net.Conn
+		if nc, err = d.DialContext(ctx, network, target); err != nil {
+			continue
+		}
+		if err := nc.SetDeadline(deadline); err != nil {
+			nc.Close()
+			return nil, err
+		}
+		c, err := dbus.NewConn(nc, dbus.WithContext(ctx))
+		if err != nil {
+			nc.Close()
+			return nil, err
+		}
+		if err := c.Auth(nil); err != nil {
+			c.Close()
+			return nil, err
+		}
+		if err := c.Hello(); err != nil {
+			c.Close()
+			return nil, err
+		}
+		return c, nil
+	}
+	return nil, err
+}
+
+// ssTransport is the network and target of one D-Bus address, read as the D-Bus library reads
+// its unix and tcp transports, or false for another transport or an incomplete address.
+func ssTransport(a string) (network, target string, ok bool) {
+	kind, keys, _ := strings.Cut(a, ":")
+	key := func(k string) string {
+		for _, kv := range strings.Split(keys, ",") {
+			if v, found := strings.CutPrefix(kv, k+"="); found {
+				if v, err := dbus.UnescapeBusAddressValue(v); err == nil {
+					return v
+				}
+			}
+		}
+		return ""
+	}
+	switch path, abstract := key("path"), key("abstract"); {
+	case kind == "unix" && path != "" && abstract == "":
+		return "unix", path, true
+	case kind == "unix" && abstract != "" && path == "":
+		return "unix", "@" + abstract, true
+	case kind == "tcp" && key("host") != "" && key("port") != "":
+		network = map[string]string{"": "tcp", "ipv4": "tcp4", "ipv6": "tcp6"}[key("family")]
+		return network, net.JoinHostPort(key("host"), key("port")), network != ""
+	}
+	return "", "", false
 }
 
 // ssBound is how long one Secret Service operation under the renewal lock waits for its answers.

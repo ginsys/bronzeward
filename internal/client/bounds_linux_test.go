@@ -2,11 +2,14 @@ package client
 
 import (
 	"bufio"
+	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -133,6 +136,119 @@ func TestSecretServiceBounded(t *testing.T) {
 				t.Errorf("the stand-in saw %v; want %s and no %q", got, c.hang, c.notSent)
 			}
 		})
+	}
+}
+
+// TestSecretServiceDialBounded checks that a session bus whose dial gets no answer fails the
+// operation within ssBound, with nothing written. The bus is a TCP listener whose accept queue is
+// full, so the kernel drops each later connection request and a dial waits.
+func TestSecretServiceDialBounded(t *testing.T) {
+	bound := ssBound
+	t.Cleanup(func() { ssBound = bound })
+	ssBound = 300 * time.Millisecond
+	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { syscall.Close(fd) })
+	if err := syscall.Bind(fd, &syscall.SockaddrInet4{Addr: [4]byte{127, 0, 0, 1}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Listen(fd, 0); err != nil {
+		t.Fatal(err)
+	}
+	sa, err := syscall.Getsockname(fd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(sa.(*syscall.SockaddrInet4).Port))
+	// With a backlog of 0, one connection that nobody accepts fills the queue.
+	filler, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer filler.Close()
+	if probe, err := net.DialTimeout("tcp", addr, 200*time.Millisecond); err == nil {
+		probe.Close()
+		t.Skip("the kernel accepted a second connection on a full accept queue")
+	}
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "tcp:host=127.0.0.1,port="+strconv.Itoa(sa.(*syscall.SockaddrInet4).Port))
+	done := make(chan error, 1)
+	start := time.Now()
+	go func() { done <- ssSet("BWSYNTH-service", "a", "BWSYNTH-a") }()
+	select {
+	case err := <-done:
+		if want := "nothing was written or removed"; err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("with a dial that gets no answer: %v; want an error containing %q", err, want)
+		}
+		if d := time.Since(start); d < ssBound {
+			t.Errorf("ssSet gave up after %v, before the bound %v", d, ssBound)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("with a dial that gets no answer the call is still waiting after 10 s")
+	}
+}
+
+// TestSecretServiceStoppedReader checks that a session bus that stops reading during CreateItem
+// fails the operation within ssBound, with its outcome named unknown. A relay in front of the
+// stand-in's bus stops reading from the client after 64 KiB, so the 8 MiB value fills the socket
+// and the write waits.
+func TestSecretServiceStoppedReader(t *testing.T) {
+	stub := stubSecretService(t)
+	stub.reset("")
+	bound := ssBound
+	t.Cleanup(func() { ssBound = bound })
+	ssBound = 300 * time.Millisecond
+	network, target, ok := ssTransport(os.Getenv("DBUS_SESSION_BUS_ADDRESS"))
+	if !ok {
+		t.Fatalf("the private bus address %q names no unix or tcp transport", os.Getenv("DBUS_SESSION_BUS_ADDRESS"))
+	}
+	p := filepath.Join(t.TempDir(), "bus")
+	l, err := net.Listen("unix", p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var open []net.Conn
+	t.Cleanup(func() {
+		l.Close()
+		mu.Lock()
+		defer mu.Unlock()
+		for _, c := range open {
+			c.Close()
+		}
+	})
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			b, err := net.Dial(network, target)
+			if err != nil {
+				c.Close()
+				continue
+			}
+			mu.Lock()
+			open = append(open, c, b)
+			mu.Unlock()
+			go io.Copy(c, b)
+			go io.Copy(b, io.LimitReader(c, 64<<10))
+		}
+	}()
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path="+p)
+	done := make(chan error, 1)
+	go func() { done <- ssSet("BWSYNTH-service", "a", "BWSYNTH-"+strings.Repeat("x", 8<<20)) }()
+	select {
+	case err := <-done:
+		if want := "the sign-in may still be written after this command ends"; err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("with a bus that stopped reading: %v; want an error containing %q", err, want)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("with a bus that stopped reading the call is still waiting after 10 s")
+	}
+	if got := stub.calls(); slices.Contains(got, "CreateItem") {
+		t.Errorf("the stand-in saw %v; want no CreateItem, which the relay never passed on whole", got)
 	}
 }
 

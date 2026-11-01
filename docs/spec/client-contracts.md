@@ -853,8 +853,11 @@ current token expires
    with `--no-input` it never prompts, and a locked store is refused as one that failed.
    Under the lock no call to the store shows a prompt, so a store locked by then refuses the
    command, with nothing written or removed. Each store operation under the lock gets at most a
-   minute for its calls together, because neither the session bus nor the D-Bus library ends a
-   call that gets no answer. A store that does not answer in time fails the command. If the call
+   minute for its connection to the session bus and its calls together. Neither the session bus
+   nor the D-Bus library ends a connection or a call that gets no answer, or a write that a bus no
+   longer reads. Under the lock the session bus is reached only over a Unix socket or TCP. Another
+   transport fails the command, with nothing written or removed. A store that does not answer in
+   time fails the command. If the call
    that writes or removes the entry was not yet sent, nothing was written or removed. If that call
    itself got no answer, the command says that its outcome is unknown: the store may still carry
    it out after the lock is released. A command waits at most four minutes for a lock that another
