@@ -24,8 +24,9 @@ const redirected = async () => (await (await fetch(`${CONTROL}/redirected`)).jso
 const writeAnswers = async () => (await answers()).filter((a) => a.startsWith("/clusters ") && a !== "/clusters 200");
 const result = () => $('[data-testid="write-result"]');
 const notice = () => $('[data-testid="write-notice"]');
-// The page's own view of each write it sends, in order: the status its fetch resolved with, or
-// "failed" when the fetch rejected, as on a closed connection. Watched from before the form is sent.
+// The page's own view of each write it sends to the API, in order: the status its fetch resolved
+// with, or "failed" when the fetch rejected, as on a closed connection. Watched from before the form
+// is sent. A renewal's POST to the provider is not a write.
 const watch = () =>
   browser.execute(() => {
     const w = window as unknown as { seenWrites: string[]; watched?: boolean };
@@ -34,7 +35,8 @@ const watch = () =>
     w.watched = true;
     const real = window.fetch.bind(window);
     window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-      const write = (init?.method ?? "GET") !== "GET";
+      const url = new URL(input instanceof Request ? input.url : String(input), location.href);
+      const write = (init?.method ?? "GET") !== "GET" && url.origin === location.origin && url.pathname.startsWith("/api/v1/");
       try {
         const res = await real(input, init);
         if (write) w.seenWrites.push(String(res.status));
