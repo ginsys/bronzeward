@@ -37,6 +37,12 @@ fwd=bw-dev-forward
 
 idp_var() { sed -n "s/^$1=//p" "$idp/idp.env"; }
 
+# webhost_runs <pid>: the process is this checkout's web host, by the command start runs.
+webhost_runs() {
+  local arg0
+  { IFS= read -r -d '' arg0 <"/proc/$1/cmdline"; } 2>/dev/null && [ "$arg0" = "$part/webhost" ]
+}
+
 # A's configuration, and bin/up's copy of it, which stop puts back.
 cfg=$STATE/server/a/config.yaml
 
@@ -90,13 +96,19 @@ net.createServer((c) => { const z = net.connect(8080, process.env.BW_IDP); c.pip
 
 start() {
   need docker curl jq go npm
+  # start takes no provider down. The provider state can be stale, from another Docker daemon,
+  # and dev-idp down removes containers by name, so it would remove another checkout's provider.
+  if [ -d "$idp" ]; then
+    die "this checkout has a dev-idp provider ($idp); if it is this checkout's, run fixtures/dev-idp down, then session start again"
+  fi
   "$bin/up"
-  # A default provider without this checkout's state is another checkout's; dev-idp up refuses it.
-  if [ -d "$idp" ]; then "$FIXTURES/dev-idp" down; fi
   # The participant state marks the session as this checkout's, for stop.
   rm -rf -- "$part"
   mkdir -p -- "$part/bin" "$part/home"
   chmod 700 "$part"
+  # The provider state did not exist, so the provider that dev-idp up makes from here is this
+  # session's. dev-idp up refuses another checkout's containers before it writes its state.
+  : >"$part/idp-started"
   # From here, a failure undoes the start: stop removes what it made and puts back A's configuration.
   trap 'echo "session start failed; undoing it with session stop" >&2; stop' EXIT
   # The web client's origin is the web host's, not the browser tests' page.
@@ -286,11 +298,14 @@ stop() {
   owner=$(claim_owner) || die "could not ask Docker who holds the fixture claim"
   [ -z "$owner" ] || [ "$owner" = "$FIXTURES" ] ||
     die "the fixture belongs to the checkout at $owner; stop the participant session there"
+  # After the web host exits, another process can get its pid; only the web host is signalled.
   if [ -f "$part/webhost.pid" ]; then
     pid=$(cat "$part/webhost.pid")
-    kill "$pid" 2>/dev/null || true
-    for _ in $(seq 10); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
-    if kill -0 "$pid" 2>/dev/null; then die "the web host (pid $pid) still runs after 10 s; kill it, then run session stop again"; fi
+    if webhost_runs "$pid"; then
+      kill "$pid" 2>/dev/null || true
+      for _ in $(seq 10); do webhost_runs "$pid" || break; sleep 1; done
+      if webhost_runs "$pid"; then die "the web host (pid $pid) still runs after 10 s; kill it, then run session stop again"; fi
+    fi
   fi
   docker rm -f "$fwd" >/dev/null 2>&1 || true
   # A container list that fails is not "no forwarder" or "no A": stop would then leave the forwarder,
@@ -319,8 +334,9 @@ stop() {
     fi
     rm -f -- "$cfg.restart" "$cfg.fixture"
   fi
-  # A provider without this checkout's state is another checkout's.
-  if [ -d "$idp" ]; then "$FIXTURES/dev-idp" down; fi
+  # Only the provider this session's start made is taken down. Another provider state can be
+  # stale, from another Docker daemon, where dev-idp down would remove another checkout's provider.
+  if [ -f "$part/idp-started" ] && [ -d "$idp" ]; then "$FIXTURES/dev-idp" down; fi
   rm -rf -- "$part"
 }
 
