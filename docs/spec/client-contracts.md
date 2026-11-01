@@ -742,7 +742,9 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
    they answer, and the timeline poll goes on unrestarted: the timeline can record a freeze, an
    observation or an applied release that the first machine read predates. Within one view, a
    read again of the machine or its observations that fails, a refusal included, shows its failure
-   above what the view showed, which stays.
+   above what the view showed, which stays. Two failures keep nothing: an observations read that
+   restarted after a refused cursor and then failed, whose list goes with its cursor (§8.2), and
+   the process's recovery refusal, which ends the page (§8.5).
 
 ## 9. Authentication
 
