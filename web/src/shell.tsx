@@ -231,6 +231,13 @@ export class ShellReads {
   }
 }
 
+// A notice's [Show current state] (B11, W11): it opens the notice's resource, and reads it again
+// when that resource is the view already shown, since a move to the same path reads nothing.
+export function showCurrent(to: string, here: string, move: (to: string) => void, readAgain: () => void): void {
+  if (to === here) readAgain();
+  else move(to);
+}
+
 export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, onDeprecation, signOut, writes, notices = [] }: SignedInProps & { notices?: readonly string[] }) {
   // B11: a move to another page while a write is pending or unknown asks first, Back and Forward
   // included.
@@ -239,7 +246,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
     if (leaving(writes, to)) move(to);
   }, [move, writes]);
   const show = useCallback((to: string) => {
-    if (leaving(writes, to, true)) move(to);
+    if (leaving(writes, to, true)) showCurrent(to, location.pathname + location.search, move, () => setAgain((n) => n + 1));
   }, [move, writes]);
   const [server, setServer] = useState<Load<Server>>({ kind: "loading" });
   const [identity, setIdentity] = useState<Load<Identity>>({ kind: "loading" });
