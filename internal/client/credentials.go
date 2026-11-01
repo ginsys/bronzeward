@@ -338,13 +338,18 @@ func renewalLock(l string) (func(), error) {
 		}
 		return func() { f.Close() }, nil
 	case <-time.After(lockBound):
-		go func() { <-got; f.Close() }()
+		released := lateReleased
+		go func() { <-got; f.Close(); released() }()
 		return nil, fmt.Errorf("another bronzewardctl process holds the renewal lock %s and did not release it within four minutes; nothing was changed", l)
 	}
 }
 
-// lockBound is how long renewalLock waits for another process's lock.
-var lockBound = 4 * time.Minute
+// lockBound is how long renewalLock waits for another process's lock. lateReleased runs once a
+// given-up wait's late lock is released, so a test can wait for that release.
+var (
+	lockBound    = 4 * time.Minute
+	lateReleased = func() {}
+)
 
 // discover reads the provider's discovery document through issuerClient; it returns that client
 // and a context that carries it, which ends after d. The issuer is checked first, as context add
