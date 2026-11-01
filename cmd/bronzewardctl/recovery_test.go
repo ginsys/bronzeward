@@ -80,6 +80,18 @@ func recoveryServer(t *testing.T, answers map[string]string, post string) func()
 		case r.URL.Path == "/api/v1/identity":
 			fmt.Fprint(w, `{"kind":"service","principal":"svc_BWSYNTH"}`)
 		case ok:
+			// An answer that starts with a three-digit status and a space is sent with that status;
+			// a 3xx has a Location, an error is a problem document.
+			if code, body, found := strings.Cut(a, " "); found && len(code) == 3 && code[0] >= '3' && code[0] <= '5' {
+				status := int(code[0]-'0')*100 + int(code[1]-'0')*10 + int(code[2]-'0')
+				if status < 400 {
+					w.Header().Set("Location", "/elsewhere")
+				} else {
+					w.Header().Set("Content-Type", "application/problem+json")
+				}
+				w.WriteHeader(status)
+				a = body
+			}
 			fmt.Fprint(w, a)
 		case r.Method == http.MethodPost:
 			w.WriteHeader(http.StatusCreated)
@@ -256,5 +268,44 @@ func TestRecoveryTextIsEscaped(t *testing.T) {
 				t.Errorf("%v: hostile text reached the terminal raw:\n%q", args, s)
 			}
 		}
+	}
+}
+
+// TestEntryUnknownOutcomePrintsNoEpoch: the entry's outcome-unknown block, read through the real
+// read callback, shows no epoch anywhere (REC-04 (a)); the exit's block still shows it.
+func TestEntryUnknownOutcomePrintsNoEpoch(t *testing.T) {
+	recoveryServer(t, map[string]string{
+		"GET /api/v1/recovery":          `{"epoch":"ep_BWSYNTH-9","recoveryMode":true,"scopes":[]}`,
+		"POST /api/v1/recovery/entries": `302 {}`,
+		"POST /api/v1/recovery/exits":   `302 {}`,
+	}, "")
+	var out, errb bytes.Buffer
+	args := []string{"recovery", "enter", "--restored", "family=database,backup=pg,taken-at=2026-11-01T08:30:00Z", "--stopped-at", "2026-11-01T08:31:00Z", "--reason", "r"}
+	var rc int
+	withStdin(t, "enter\n", func() { rc = run(args, &out, &errb) })
+	if rc != 3 || !strings.Contains(errb.String(), "GET /api/v1/recovery shows recovery mode true") {
+		t.Fatalf("rc %d, want 3 with the read shown:\n%s", rc, errb.String())
+	}
+	if strings.Contains(errb.String(), "ep_BWSYNTH") {
+		t.Errorf("the entry's block names an epoch:\n%s", errb.String())
+	}
+	errb.Reset()
+	if rc = run([]string{"recovery", "exit"}, &out, &errb); rc != 3 || !strings.Contains(errb.String(), "shows epoch ep_BWSYNTH-9") {
+		t.Errorf("rc %d, the exit's block should show the epoch:\n%s", rc, errb.String())
+	}
+}
+
+// TestRefusedExitRepeatNamesTheScope: an operator's repeat of the exit, refused for an unreleased
+// scope, still names that scope, and keeps the unknown-outcome exit code.
+func TestRefusedExitRepeatNamesTheScope(t *testing.T) {
+	recoveryServer(t, map[string]string{
+		"GET /api/v1/recovery": `{"epoch":"ep_BWSYNTH-1","recoveryMode":true,"scopes":[]}`,
+		"POST /api/v1/recovery/exits": `409 {"type":"urn:bronzeward:problem:conflict","title":"BWSYNTH","status":409,"instance":"req_BWSYNTH",` +
+			`"machine":"mch_BWSYNTH","scope":"config"}`,
+	}, "")
+	var out, errb bytes.Buffer
+	rc := run([]string{"recovery", "exit", "--idempotency-key", "BWSYNTH-aaaaaaaaaaaaaaa", "--expect-epoch", "ep_BWSYNTH-1", "--expect-principal", "svc_BWSYNTH"}, &out, &errb)
+	if rc != 3 || !strings.Contains(errb.String(), "The first scope not released: machine 'mch_BWSYNTH', 'config'") {
+		t.Errorf("rc %d, want 3 naming the scope:\n%s", rc, errb.String())
 	}
 }

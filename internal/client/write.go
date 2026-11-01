@@ -91,7 +91,12 @@ type RefusedRepeat struct{ error }
 type Unknown struct {
 	Why, Key, Route, Where, Principal, Epoch, IfMatch, Shows, Check, Input string
 	SetAside, Ambiguous, Entry                                             bool
+	// Cause is the refusal a repeat got, kept so a command can read what the server named in it.
+	Cause error
 }
+
+// Unwrap gives the refusal the write was set aside after, if any.
+func (u *Unknown) Unwrap() error { return u.Cause }
 
 func (u *Unknown) Error() string { return strings.Join(u.Lines(), "\n") }
 
@@ -343,6 +348,7 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 			// the lookup, or after a lookup that found no record, so this send did nothing and says
 			// nothing of the attempt it repeats (§8.2; AMB-13).
 			u.Why = "this send was refused (" + printable(a.err.Error()) + ") and did nothing; the original outcome is still unknown"
+			u.Cause = a.err
 			return nil, c.unknown(w, u)
 		case code == "precondition-failed" && w.Draft != "":
 			// Another write moved the draft first (ETAG-01): stop and show the newer revision, never

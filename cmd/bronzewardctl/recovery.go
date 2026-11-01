@@ -272,25 +272,33 @@ func (e *env) recoveryEnter(args []string) error {
 		return e.confirmTyped("enter", "enter")
 	}
 	return e.writeAfter(confirm, &client.Write{Method: http.MethodPost, Path: "/recovery/entries", Body: body, HumanOnly: true, Entry: true,
-		Repeat: rp, Check: "recovery status", Read: recoveryRead}, func(_ *client.Client, resp *client.Response) ([]string, error) {
+		Repeat: rp, Check: "recovery status", Read: recoveryEntryRead}, func(_ *client.Client, resp *client.Response) ([]string, error) {
 		var x apitypes.EntryBody
 		err := json.Unmarshal(resp.Body, &x)
 		return []string{fmt.Sprintf("Recovery mode entered (act %s). Epoch %s, was %s.", client.Printable(x.Act), client.Printable(x.Epoch), client.Printable(x.PreviousEpoch)),
-			fmt.Sprintf("Scopes marked pre-restore-unaccounted: %d machines. Operations taken over or ended: %s.", x.Machines, shownIDs(x.Operations)),
+			fmt.Sprintf("Scopes marked pre-restore-unaccounted: %d machines. Apply-config operations taken over: %s.", x.Machines, shownIDs(x.Operations)),
 			"Restart the server normally when ready; recovery mode continues.",
 			"Next: recovery status."}, err
 	})
 }
 
-// recoveryRead is what GET /recovery shows after an entry or exit of unknown outcome.
-func recoveryRead(c *client.Client) (string, error) {
+// recoveryRead is what GET /recovery shows after an exit of unknown outcome.
+func recoveryRead(c *client.Client) (string, error) { return readRecovery(c, true) }
+
+// recoveryEntryRead is the same for the entry, whose block prints no epoch (REC-04).
+func recoveryEntryRead(c *client.Client) (string, error) { return readRecovery(c, false) }
+
+func readRecovery(c *client.Client, epoch bool) (string, error) {
 	r, err := c.Get("/recovery")
 	if err != nil {
 		return "", err
 	}
 	var x apitypes.RecoveryBody
 	err = json.Unmarshal(r.Body, &x)
-	s := fmt.Sprintf("GET /api/v1/recovery shows epoch %s, recovery mode %t", client.Printable(x.Epoch), x.RecoveryMode)
+	s := fmt.Sprintf("GET /api/v1/recovery shows recovery mode %t", x.RecoveryMode)
+	if epoch {
+		s = fmt.Sprintf("GET /api/v1/recovery shows epoch %s, recovery mode %t", client.Printable(x.Epoch), x.RecoveryMode)
+	}
 	if x.Entry != nil {
 		s += ", entered at " + when(x.Entry.EnteredAt) + " by " + client.Printable(x.Entry.EnteredBy)
 	}
