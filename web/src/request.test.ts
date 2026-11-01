@@ -1,5 +1,11 @@
 import { describe, expect, test, vi } from "vitest";
-import { API_BASE, Client, type ClientOptions } from "./request.ts";
+import { API_BASE, type Attempt, Client, type ClientOptions, NOT_SENT } from "./request.ts";
+
+// An attempt that was sent: its answer, or undefined when none came.
+function sentOne(a: Attempt | undefined | typeof NOT_SENT): Attempt | undefined {
+  expect(a).not.toBe(NOT_SENT);
+  return a as Attempt | undefined;
+}
 
 const EPOCH = "e1";
 
@@ -246,7 +252,7 @@ describe("§8.5 epoch changes", () => {
     const write = c.attempt("POST", "/clusters", {}, "{}");
     expect(await c.read("/machines")).toEqual({ kind: "discarded" });
     release(ok({ id: "c1" }));
-    expect((await write)?.data).toEqual({ id: "c1" });
+    expect(sentOne(await write)?.data).toEqual({ id: "c1" });
     expect(c.currentEpoch).toBe("e2");
     expect(onEpochChange).toHaveBeenCalledTimes(1);
     expect(paths).toEqual(["/server", "/clusters", "/machines", "/recovery"]);
@@ -270,7 +276,7 @@ describe("§8.5 epoch changes", () => {
     const write = c.attempt("POST", "/clusters", {}, "{}", end as never);
     await c.read("/machines");
     release(ok({ id: "c1" }));
-    const a = await write;
+    const a = sentOne(await write);
     return { a, end, paths, onRevoked, renewMock, c };
   }
 

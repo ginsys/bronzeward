@@ -191,8 +191,10 @@ export class ShellReads {
     on.onPreEntry(res);
   }
 
-  // Sign-out: nothing read before it is settled, or sent again, while the page moves on.
+  // Sign-out: nothing read before it is settled, or sent again, while the page moves on, and no
+  // write is sent again, before the credential goes.
   signOut(then: () => void): void {
+    this.client.endWrites();
     this.invalidate(true);
     then();
   }

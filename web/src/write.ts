@@ -5,7 +5,7 @@
 // write's in-progress 409 and the recovery entry's exception (§8.4 items 2 and 3) are not served
 // here: no form of this layer sends either route.
 
-import { type Attempt, type Client, type End, type Ending, NOT_JSON, preEntry, type Problem } from "./request.ts";
+import { type Attempt, type Client, type End, type Ending, NOT_JSON, NOT_SENT, preEntry, type Problem } from "./request.ts";
 
 export interface WriteSpec {
   method: "POST" | "PUT" | "DELETE";
@@ -37,6 +37,7 @@ export const EPOCH_CHANGED_ASIDE = "the installation's epoch changed";
 export const NO_EPOCH = "the read of the installation's epoch got no answer that names one";
 export const SIGN_IN_REFUSED = "the server no longer accepts your sign-in";
 export const SHELL_GONE = "the page that sent it ended";
+export const NO_CREDENTIAL = "the page no longer holds your sign-in";
 export const RECOVERY_START = "the server was started for recovery and serves only the recovery entry until it is recorded";
 export const RENEWED_LAST = "the last attempt was answered 401 and your sign-in was renewed, with no attempt left to send it again";
 // The page failed while it held the write, for example a renewal that threw.
@@ -91,7 +92,8 @@ const problemOf = (d: unknown): Problem | null =>
 // The page's writes. `client` is the shell's, bound while it is shown; `principal` is the current
 // sign-in's issuer and subject.
 export class Writes {
-  client: Client | undefined;
+  private bound: Client | undefined;
+  private unbind: (() => void) | undefined;
   // The page is being left by a notice's own [Show current state]: the next unload guard does not
   // ask, and clears it.
   unloading = false;
@@ -107,6 +109,17 @@ export class Writes {
   private version = 0;
 
   constructor(private readonly principal: () => string | undefined, private readonly wait: (ms: number) => Promise<void> = sleep) {}
+
+  // The notices render again without [Repeat exactly] once the bound client's sign-in ends.
+  get client(): Client | undefined {
+    return this.bound;
+  }
+  set client(c: Client | undefined) {
+    if (c === this.bound) return;
+    this.unbind?.();
+    this.bound = c;
+    this.unbind = c?.onWritesEnded?.(() => this.changed());
+  }
 
   // useSyncExternalStore's pair.
   readonly subscribe = (f: () => void) => {
@@ -194,7 +207,7 @@ export class Writes {
 
   // [Repeat exactly]: only while this page holds the request, for the same sign-in and epoch.
   repeatable(w: Write): boolean {
-    return w.outcome?.kind === "unknown" && this.principal() === w.principal && this.client?.currentEpoch === w.epoch;
+    return w.outcome?.kind === "unknown" && this.principal() === w.principal && this.client?.writesEnded !== true && this.client?.currentEpoch === w.epoch;
   }
 
   // §8.5 item 2 and journeys §8: a new epoch or another sign-in sets every open write aside. One in
@@ -263,7 +276,7 @@ export class Writes {
         const why = (await this.check(client, w, end)) ?? w.aside ?? this.gone(w, client);
         if (why !== undefined) return aside(why);
       }
-      let a: Attempt | undefined;
+      let a: Attempt | undefined | typeof NOT_SENT;
       try {
         a = await client.attempt(w.spec.method, w.spec.path, headers, body, end);
       } catch (e) {
@@ -271,6 +284,11 @@ export class Writes {
         // example a renewal that threw while its epoch was learned: it may have committed.
         w.ambiguous = true;
         throw e;
+      }
+      // Nothing went out: the sign-in ended, or its credential is gone, since the checks above.
+      if (a === NOT_SENT) {
+        const why = this.gone(w, client) ?? NO_CREDENTIAL;
+        return n > 0 || again ? aside(why) : { kind: "not-done", why, problem: null };
       }
       // No complete answer, a redirect the browser refused included: some byte may have gone out
       // (§8.4 item 2, TLS-03).
@@ -296,7 +314,10 @@ export class Writes {
           return early({ kind: "not-done", why: RENEWED_LAST, problem: p });
         }
         // Any other 401 code is a refusal by its status class, as for a read.
-        if (code === "unauthenticated") end.e = { kind: "unauthenticated", problem: p };
+        if (code === "unauthenticated") {
+          client.endWrites();
+          end.e = { kind: "unauthenticated", problem: p };
+        }
         return early(refused);
       }
       if (a.status === 403 && code === "identity-revoked") {
@@ -346,11 +367,11 @@ export class Writes {
     return now === w.epoch ? undefined : EPOCH_CHANGED_ASIDE;
   }
 
-  // A sign-out or the end of the shell that held the client: nothing more is sent through it. Looked
-  // at after every wait, since either can land while a read is answered.
+  // A sign-out, an ended sign-in or the end of the shell that held the client: nothing more is sent
+  // through it. Looked at after every wait, since any of them can land while a read is answered.
   private gone(w: Write, client: Client): string | undefined {
     if (this.principal() !== w.principal) return SIGN_IN_CHANGED;
-    return this.client === client ? undefined : SHELL_GONE;
+    return this.client === client && client.writesEnded !== true ? undefined : SHELL_GONE;
   }
 
   // The epoch one GET /recovery shows (§8.4 item 3). It is a read, so its credential refusals are
@@ -359,12 +380,14 @@ export class Writes {
   private async confirm(client: Client, end: End): Promise<string | undefined> {
     for (let renewed = false; ; renewed = true) {
       const a = await client.attempt("GET", "/recovery", {}, undefined, end, true);
-      // An ending, or a recovery start's process refusal (§8.5 item 1) that attempt() recorded.
-      if (end.e !== undefined || end.pre !== undefined) return undefined;
+      // An ending, or a recovery start's process refusal (§8.5 item 1) that attempt() recorded; or
+      // nothing sent, which the caller's next look names.
+      if (end.e !== undefined || end.pre !== undefined || a === NOT_SENT) return undefined;
       const p = a === undefined ? null : problemOf(a.data);
       const code = p?.type.slice(PREFIX.length);
       if (a?.status === 401 && code === "unauthenticated") {
         if (!renewed && (await client.renew())) continue;
+        client.endWrites();
         end.e = { kind: "unauthenticated", problem: p };
         return undefined;
       }

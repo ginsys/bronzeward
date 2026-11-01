@@ -94,12 +94,28 @@ export class Client {
   private drops = 0;
   private epochRecords = 0;
   private recovery = false;
+  private ended = false;
+  private readonly enders = new Set<() => void>();
   private readonly deprecated = new Set<string>();
 
   constructor(private readonly opts: ClientOptions = {}) {}
 
   get currentEpoch(): string | undefined { return this.epoch; }
   get recoveryMode(): boolean { return this.recovery; }
+
+  // §8.2, §9.6: the sign-in this client sends ended. It is set in the same step that refuses or
+  // clears the credential (identity-revoked, a 401 its renewal did not clear, a sign-out), before
+  // any further send, and it is never cleared: from then on attempt() sends nothing.
+  get writesEnded(): boolean { return this.ended; }
+  onWritesEnded(f: () => void): () => void {
+    this.enders.add(f);
+    return () => void this.enders.delete(f);
+  }
+  endWrites(): void {
+    if (this.ended) return;
+    this.ended = true;
+    for (const f of this.enders) f();
+  }
 
   // A change of principal, route or query makes every read in flight stale.
   setView(view: View): void {
@@ -147,7 +163,7 @@ export class Client {
       const problem = body === NOT_JSON || body === CUT ? null : body;
       const code = problem?.type.slice(PROBLEM_PREFIX.length);
       if (res.status === 403 && code === "identity-revoked" && problem !== null && principal === this.view.principal) {
-        this.opts.onRevoked?.();
+        this.revoked();
         return { kind: "revoked", problem };
       }
       if (stale || sent !== this.generation) return { kind: "discarded" }; // changed while the body arrived
@@ -162,6 +178,7 @@ export class Client {
           if (sent !== this.generation) return { kind: "discarded" };
           if (again) { attempt--; continue; }
         }
+        this.endWrites();
         return { kind: "unauthenticated", problem };
       }
       if (res.status === 400 && code === "cursor-invalid" && problem !== null) return { kind: "restart", problem };
@@ -184,7 +201,10 @@ export class Client {
   // epoch goes to `end`, and to `end.now` at once, even when this answer is then lost or stalls.
   // `epochOnly` is a read sent only for its epoch, which its headers carry: only a credential
   // refusal's or a 409's body is read, any other is not waited for, since it may stall (data null).
-  async attempt(method: string, path: string, headers: Record<string, string> = {}, body?: string, end: End = {}, epochOnly = false): Promise<Attempt | undefined> {
+  // NOT_SENT when the sign-in ended or the page no longer holds its credential: nothing went out,
+  // so nothing can have committed, and no send leaves without the credential.
+  async attempt(method: string, path: string, headers: Record<string, string> = {}, body?: string, end: End = {}, epochOnly = false): Promise<Attempt | undefined | typeof NOT_SENT> {
+    if (this.ended || (this.opts.token !== undefined && this.opts.token() === undefined)) return NOT_SENT;
     const records = this.epochRecords;
     const res = await this.send(path, method, headers, body);
     if (res === undefined) return undefined;
@@ -212,6 +232,7 @@ export class Client {
 
   // §8.2 identity-revoked of the sign-in still current, from a write's answer.
   revoked(): void {
+    this.endWrites();
     this.opts.onRevoked?.();
   }
 
@@ -266,7 +287,10 @@ export class Client {
       }
       const code = problem?.type.slice(PROBLEM_PREFIX.length);
       if (next.status === 401 && code === "unauthenticated") {
-        if (renewed || !(await this.renew())) return { kind: "unauthenticated", problem };
+        if (renewed || !(await this.renew())) {
+          this.endWrites();
+          return { kind: "unauthenticated", problem };
+        }
         // `res` is still the answer to learn from: the next turn reads again.
         renewed = true;
         continue;
@@ -322,6 +346,8 @@ export class Client {
 
 // A body's JSON; NOT_JSON when it does not parse, CUT when the network cut it off.
 export const NOT_JSON = Symbol("not JSON");
+// attempt() sent nothing (see there).
+export const NOT_SENT = Symbol("not sent");
 export const CUT = Symbol("cut off");
 export async function readJson(res: Response): Promise<unknown> {
   return res.json().catch((e: unknown) => (e instanceof SyntaxError ? NOT_JSON : CUT));

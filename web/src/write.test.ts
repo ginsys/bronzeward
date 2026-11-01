@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { type Attempt, Client, type ClientOptions } from "./request.ts";
-import { BACKOFF, EPOCH_CHANGED_ASIDE, NO_EPOCH, newKey, RECOVERY_START, RENEWED_LAST, SHELL_GONE, SIGN_IN_CHANGED, SIGN_IN_REFUSED, Write, Writes } from "./write.ts";
+import { type ShellEvents, ShellReads } from "./shell.tsx";
+import { BACKOFF, EPOCH_CHANGED_ASIDE, NO_CREDENTIAL, NO_EPOCH, newKey, RECOVERY_START, RENEWED_LAST, SHELL_GONE, SIGN_IN_CHANGED, SIGN_IN_REFUSED, Write, Writes } from "./write.ts";
 
 const EPOCH = "e1";
 const PRINCIPAL = "https://idp.invalid SYNTH-sub-1";
@@ -40,7 +41,7 @@ function page(answers: (Response | Error | (() => Response | Error))[], epochs: 
   const waits: number[] = [];
   const writes = new Writes(() => who, async (ms) => void waits.push(ms));
   writes.client = client;
-  return { client, writes, sent, waits, signIn: (p: string | undefined) => (who = p), writesSent: () => sent.filter((s) => s.path !== "/recovery") };
+  return { client, writes, sent, waits, fetch: fetchMock as unknown as typeof fetch, signIn: (p: string | undefined) => (who = p), writesSent: () => sent.filter((s) => s.path !== "/recovery") };
 }
 
 const spec = () => new Write({ method: "POST", path: "/clusters", body: { name: "lab" }, resource: "/clusters" });
@@ -676,4 +677,67 @@ describe("a body that never ends does not hold a write", () => {
     const p = page([new TypeError("Failed to fetch")], [EPOCH, confirming]);
     return p.writes.submit(spec());
   }
+});
+
+// §8.2, §9.6: where the client's sign-in ends, every pending write of that client stops in the same
+// step, before any further send. No shell is bound here, so only the client stops them.
+describe("a sign-in that ends stops every other write of its client at once", () => {
+  // Write A's first attempt gets no answer, and A waits to repeat until `go`. Its repeat would be the
+  // POST after the answers in `rest`.
+  async function waiting(rest: Response[], opts: ClientOptions = {}, make?: (f: typeof fetch) => Client) {
+    let go!: () => void;
+    const gate = new Promise<void>((r) => (go = r));
+    const p = page([new TypeError("Failed to fetch"), ...rest, created({ id: "c1" })], [], opts);
+    const client = make?.(p.fetch) ?? p.client;
+    const writes = new Writes(() => PRINCIPAL, () => gate);
+    writes.client = client;
+    const a = writes.submit(spec());
+    await vi.waitFor(() => expect(p.writesSent()).toHaveLength(1));
+    return { ...p, client, writes, a, go };
+  }
+
+  test.each([
+    ["a write's identity-revoked", 403, "identity-revoked", true],
+    ["a write's 401 that its renewal did not clear", 401, "unauthenticated", true],
+    ["a read's identity-revoked", 403, "identity-revoked", false],
+    ["a read's 401 that its renewal did not clear", 401, "unauthenticated", false],
+  ])("%s: the waiting write sends nothing more", async (_, status, code, write) => {
+    let token: string | undefined = "SYNTH-token";
+    const t = await waiting([problem(status, code)], { token: () => token, onRevoked: () => (token = undefined) });
+    if (write) expect(await t.writes.submit(spec())).toMatchObject({ kind: "refused", status });
+    else expect(await t.client.read("/server")).toMatchObject({ kind: status === 401 ? "unauthenticated" : "revoked" });
+    expect(t.client.writesEnded).toBe(true);
+    t.go();
+    expect(await t.a).toEqual({ kind: "set-aside", why: SHELL_GONE, ambiguous: true, problem: null });
+    expect(t.writesSent()).toHaveLength(2);
+  });
+
+  test("a sign-out: the waiting write sends nothing more", async () => {
+    let reads!: ShellReads;
+    const t = await waiting([], {}, (f) => (reads = new ShellReads({ token: () => "SYNTH-token", fetch: f }, () => ({}) as ShellEvents)).client);
+    reads.signOut(() => {});
+    t.go();
+    expect(await t.a).toEqual({ kind: "set-aside", why: SHELL_GONE, ambiguous: true, problem: null });
+    expect(t.writesSent()).toHaveLength(1);
+  });
+
+  test("negative control: a refusal that leaves the sign-in standing lets the waiting write repeat", async () => {
+    const t = await waiting([problem(403, "forbidden")]);
+    expect(await t.writes.submit(spec())).toMatchObject({ kind: "refused", status: 403 });
+    expect(t.client.writesEnded).toBe(false);
+    t.go();
+    expect(await t.a).toMatchObject({ kind: "done", status: 201 });
+    expect(t.writesSent()).toHaveLength(3);
+  });
+
+  // The page dropped the credential while the repeat's confirming read was answered, before any
+  // shell handling: no POST leaves without it.
+  test("a send whose credential is gone ends as not sent", async () => {
+    let token: string | undefined = "SYNTH-token";
+    const drop = () => ((token = undefined), recovery());
+    const { writes, sent, writesSent } = page([new TypeError("Failed to fetch"), created({ id: "c1" })], [EPOCH, drop], { token: () => token });
+    expect(await writes.submit(spec())).toEqual({ kind: "set-aside", why: NO_CREDENTIAL, ambiguous: true, problem: null });
+    expect(writesSent()).toHaveLength(1);
+    expect(sent.filter((s) => s.method === "POST").every((s) => s.headers["Authorization"] === "Bearer SYNTH-token")).toBe(true);
+  });
 });
