@@ -46,7 +46,11 @@ func (e *env) approve(args []string) error {
 			return err
 		}
 		tw := tabwriter.NewWriter(e.err, 0, 0, 2, ' ', tabwriter.StripEscape) // as output.go's, for planView's verbatim diff lines
-		printLines(tw, planView(c, &p))
+		view := planView(c, &p)
+		if p.State == "proposed" {
+			view = view[:len(view)-1] // its one state line points at this approve command
+		}
+		printLines(tw, view)
 		printLines(tw, predict(c, &p))
 		if p.Operation == "apply-config" && p.DriftRecord != nil {
 			fmt.Fprintf(tw, "Overwrites\tthe drifted configuration of drift record %d, which no reviewer has seen.\n", *p.DriftRecord)

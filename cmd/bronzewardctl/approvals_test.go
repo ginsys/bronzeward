@@ -62,7 +62,8 @@ func TestApprove(t *testing.T) {
 		}
 	}
 	if code != 0 || out != "Approved (apr_BWSYNTH). Recorded self-approval reasons: created-plan, published, authored-change.\n"+
-		"The controller re-checks the plan at use time; it applies it only if every check passes.\n" || strings.Contains(errOut, "Overwrites") {
+		"The controller re-checks the plan at use time; it applies it only if every check passes.\n" || strings.Contains(errOut, "Overwrites") ||
+		strings.Contains(errOut, "until an approver approves") {
 		t.Errorf("approved: exit %d, stdout %q, stderr %q", code, out, errOut)
 	}
 	if b := f.took(); len(b) != 1 || b[0] != "/plans/pln_BWSYNTH/approvals {}" {
