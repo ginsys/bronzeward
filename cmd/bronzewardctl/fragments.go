@@ -133,23 +133,28 @@ func (e *env) fragmentBody(in apitypes.FragmentInput, file, decl string, marks b
 }
 
 // declarations reads a declarations file, YAML or JSON, with no member the API does not define.
+// Its refusals are fixed text: the decoders' own errors quote member names, and some values, from
+// the file, which stays out of the output.
 func declarations(p string) (*apitypes.Declarations, error) {
 	b, err := os.ReadFile(p)
 	if err != nil {
 		return nil, err
 	}
 	var v any
-	if err := yaml.Unmarshal(b, &v); err != nil {
-		return nil, err
+	if yaml.Unmarshal(b, &v) != nil {
+		return nil, errors.New("the file is not YAML or JSON")
 	}
 	j, err := json.Marshal(v)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("the file has a member name that is not a string")
 	}
 	dec := json.NewDecoder(bytes.NewReader(j))
 	dec.DisallowUnknownFields()
 	var d apitypes.Declarations
-	return &d, dec.Decode(&d)
+	if dec.Decode(&d) != nil {
+		return nil, errors.New("the file has a member the API does not define, or a value of the wrong type")
+	}
+	return &d, nil
 }
 
 // readMarks reads marks, one per line until an empty line or the end of input (T12): from standard
