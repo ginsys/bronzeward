@@ -360,9 +360,16 @@ it. It holds no secret.
      safety.
    - The rule has no list of fields. An ID, a state, a name, a title, a principal, a reason, a
      release identifier and a cell the CLI builds from such values are all remote text. The API
-     schemas do not promise a format for them (`api/openapi.yaml`, `ClusterBody` and `DraftBody`
-     give each member as a plain string), and the input rules differ from field to field:
-     `ClusterInput.name` bans control characters, while `DraftInput.title` limits only its length.
+     schemas give these members as plain strings with no format (`api/openapi.yaml`, `ClusterBody`
+     and `DraftBody`: `id`, `title`, `state` and the like), and the input rules differ from field
+     to field: `ClusterInput.name` bans control characters, while `DraftInput.title` limits only its
+     length. A member with an enumeration or a `date-time` format, such as `ServerBody.startMode`,
+     is no exception: the format binds a correct server, not the bytes that arrive. A number or an
+     array is not text, and the rule applies to the strings inside it.
+   - A value that the CLI replaces or hides before it shows it is not shown as received, so the
+     rule has nothing to escape in it. An unrecognised start mode appears as `unknown` (item 4),
+     and the identity provider's error text appears only as the status, the known code or the
+     transport cause that item 4 allows.
    - A string that the CLI builds into an error from a remote value, such as a cluster or draft ID
      in a refusal it words itself, follows the same rule. The client's own errors already follow
      item 4.
@@ -389,14 +396,18 @@ it. It holds no secret.
    identity provider's and the proxy's text, every member of the contexts file, and every remote
    value that the CLI puts into an error it words itself. The response-type sweep is one part of
    it. The implementation issue lists the sources, and a source that the list lacks is a defect of
-   the list. The test runs each command that shows a source in `-o table`, and each such error
-   branch. It fails in
+   the list. A source that the CLI replaces or hides (the start mode and the identity provider's
+   error text, above) is checked for its prescribed output instead: the test requires `unknown`,
+   or the status, code or transport cause, and fails if any injected byte appears. The test runs
+   each command that shows a source in `-o table`, and each such error branch. It fails in
    any of these cases:
    - The output holds a raw control byte outside the CLI's own separators.
    - Outside documents, diffs and JSON text that the CLI encodes, a plain value does not appear in
-     its escaped form: `\x09` for the tab, `\x0a` for the line feed, `\x0d` for the carriage
-     return. Documents, diffs and JSON text have their own forms, which the two last cases below and
-     the rules above state.
+     its escaped form: `\x1b` for ESC, `\x09` for the tab, `\x0a` for the line feed, `\x0d` for the
+     carriage return, `\x7f` for DEL, `\x85` for a C1 character such as U+0085, and `\xNN` with the
+     byte's own value for a byte that is not UTF-8 (`\xff` for `0xff`). A replacement such as `?`
+     fails. Documents, diffs and JSON text have their own forms, which the two last cases below
+     and the rules above state.
    - Outside documents and diffs, a line has a different number of columns, or the output a
      different number of lines, from the same command run with plain values. This catches a tab
      that becomes padding, which leaves no raw tab and no extra row.
@@ -409,12 +420,14 @@ it. It holds no secret.
 
    **Limit.** `-o json` passes the server's bytes on unchanged, and `-o yaml` passes the values
    through the YAML encoder. This item does not cover them. The same test also runs every command
-   in `-o json` with the same values and reports whether a raw control byte reaches the output.
-   That result is not part of the rule. A raw byte there goes into a separate issue.
+   in `-o json` with the same values and reports whether an unescaped control character reaches
+   the output inside a JSON string value. The whitespace between JSON tokens and the CLI's
+   trailing line feed are not counted. That result is not part of the rule. A raw control
+   character there goes into a separate issue.
 
    **Alternatives and reasons.** (a) Escape only fields that hold free text, and show IDs and
-   enumerations raw. The API does not promise those formats, so a server that does not follow them
-   reaches the terminal. The list of fields also grows with every command, which is the drift that
+   enumerations raw. The schemas give most of those members as plain strings, and a server that does
+   not follow a format it declares still reaches the terminal. The list of fields also grows with every command, which is the drift that
    left the server's version escaped and a cluster's name raw. (b) Keep the list of remote texts
    in item 4, and rely on the server to refuse control characters in its inputs. The CLI would
    then trust the server for resource text and distrust it for the version string. A control
@@ -440,8 +453,10 @@ is.
    refuses unknown request fields, a newer client sending a field an older server lacks fails with
    `400 invalid-request`, which is safe but useless; the client feature-gates such fields on the
    served API revision.
-2. A client ignores unknown response fields, and shows an unknown enumeration value raw, never as
-   a known state and never as success.
+2. A client ignores unknown response fields, and never maps an unknown enumeration value to a
+   known state or to success. It shows a start mode as `unknown` ([§6](#6-tls-trust) item 4) and
+   any other such value as the text it received. In the CLI's human output, [§6](#6-tls-trust)
+   item 8 escapes that text.
 3. A client declares the minimum API revision it needs. It reads `GET /server` on context use and
    refuses, with both revisions named, a server below that minimum, before any write. `GET /server`
    answered `409 recovery-mode-active` without a `scope` member is a recovery start before its
@@ -1507,7 +1522,7 @@ the specification review asked the question in
 | D8 | Conformance case format and home | (a) case records in the repository run by both clients' harnesses; (b) separate suites per client | **Decided** by the lead, 2026-10-21, under the owner's 2026-10-07 delegation: (a), as [§12](#12-shared-conformance-cases) |
 | D9 | Idempotency key metadata across a CLI restart | (a) no local journal: on giving up, the CLI prints the key, route, principal, epoch and `If-Match`, and the operator repeats with them and the same input ([§8.4](#84-idempotency-and-ambiguous-responses) item 4); (b) a local journal of pending keys, owner-readable, replayed on the next run | **Decided** by the lead, 2026-10-21, under the owner's 2026-10-07 delegation: (a). Reason: a journal would hold request context on disk and need its own expiry and epoch rules. Its cost is that the operator must supply the exact input again: where no record exists, a changed input executes (AMB-10), so an operator who cannot reconstruct it reconciles from the resource; (b) avoids that reconstruction only if the journal holds the request itself, documents included, which on the keyed routes (fragment write, ingestion start, mark) would write protected plaintext to disk against [§11.2](#112-rules-for-both-clients) item 4 and the secret-ingress boundary. So (b) could journal request bodies only for non-keyed routes, and for the keyed ones offers nothing over (a) |
 | D10 | Epoch check on a human's repeated write (G21) | (a) server-enforced: mutations accept an expected-epoch request header and refuse, committing no act or idempotency record, when it differs from the current epoch, giving humans an epoch check like the one service tokens already get (API issue A6); (b) client-only check of [§8.4](#84-idempotency-and-ambiguous-responses) item 3 for humans, with the race between its confirming read and the repeat explicitly accepted | **Decided** by the owner (Serge, 2026-10-22 08:43 CEST): (a), served by [#293](https://github.com/ginsys/bronzeward/issues/293). Reason: it closes the race at the only place that knows the epoch at commit time, and keeps the earlier-epoch `409` of AMB-07 because, unlike the service check, which refuses before any record is answered (`internal/api/idempotency.go:47-49`), it runs only when a lookup finds no record and refuses only under the key's lock: the write's own, a fragment write's claim transaction's or the first lookup's fresh read (`internal/api/idempotency.go:52-58`, `internal/api/tx.go:204-210`, `internal/api/fragments.go:95-103`, `internal/api/tx.go:71-81`, as A6). Rejected: (b), which needs no server change and leaves a short window, but a human's repeat that lands in it after a restore removed the record, or whose first attempt never committed, executes afresh, with no error to any party |
-| D11 | Which remote text the CLI escapes in human output | (a) all remote text, with no list of fields, escaped as a value before it is formatted, tab and line feed included; (b) only fields that hold free text; (c) the list of item 4 as it stands, with the server refusing control characters in its inputs | **Ruled** by the lead (2026-11-01): (a) ([§6](#6-tls-trust) item 8). Reason: the API schemas promise no format for any response member, so no field can be called safe by its format, and a list of fields goes out of date with every command. A test that fills every string member of every response type is what keeps the rule true. Rejected: (b), which needs that list and trusts the formats the schemas do not give; (c), which trusts the server for resource text and not for its version string, and leaves the CLI open to any input the server does not refuse |
+| D11 | Which remote text the CLI escapes in human output | (a) all remote text, with no list of fields, escaped as a value before it is formatted, tab and line feed included; (b) only fields that hold free text; (c) the list of item 4 as it stands, with the server refusing control characters in its inputs | **Ruled** by the lead (2026-11-01): (a) ([§6](#6-tls-trust) item 8). Reason: the API schemas give most text members as plain strings, and a format that a schema declares binds a correct server, not the bytes that arrive, so no field can be called safe by its format, and a list of fields goes out of date with every command. A test that fills every string member of every response type is what keeps the rule true. Rejected: (b), which needs that list and trusts the formats, declared or not, of a server it cannot check; (c), which trusts the server for resource text and not for its version string, and leaves the CLI open to any input the server does not refuse |
 
 ## 14. Proposed API-gap issues and downstream refinement
 
