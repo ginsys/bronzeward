@@ -507,8 +507,9 @@ func keepJourney(t *testing.T, name, out, dir string) {
 		return "<time>"
 	})
 	// A generated certificate or ID differs on every run.
-	kept = generatedBase64.ReplaceAllString(kept, "<base64>")
+	// The run's directory goes first: its path is a run of base64 characters too.
 	kept = strings.ReplaceAll(kept, dir+string(filepath.Separator), "")
+	kept = generatedBase64.ReplaceAllString(kept, "<base64>")
 	path := filepath.Join("testdata", "journeys", name+".txt")
 	if *update {
 		if err := os.WriteFile(path, []byte(kept), 0o644); err != nil {

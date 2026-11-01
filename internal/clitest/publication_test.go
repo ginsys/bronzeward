@@ -103,7 +103,7 @@ func (f *fixture) importMachine(t *testing.T, machine, draft string) {
 	q, _ := http.NewRequest(http.MethodPost, f.base+"/api/v1/ingestions", strings.NewReader(body))
 	q.Header.Set("Authorization", "Bearer "+f.mint("h-all", ""))
 	q.Header.Set("Content-Type", "application/json")
-	q.Header.Set("Idempotency-Key", "k-import-"+machine)
+	q.Header.Set("Idempotency-Key", "k-import-"+machine+"-"+draft)
 	q.Header.Set("If-Match", f.draftETag(draft))
 	var started struct {
 		Operation string `json:"operation"`
@@ -397,9 +397,14 @@ func (f *fixture) publicationJourneys(t *testing.T, in *injector, s seeded, ctl 
 			r := ctl(args...)
 			switch {
 			case args[2] == "draft" && args[3] == "create":
+				// A machine published from a draft needs an import base in it; no CLI command imports
+				// yet, so the test does, and the script's next step reads the draft it moved.
 				draft = regexp.MustCompile(`drf_[a-z2-7]{26}`).FindString(r.out)
+				f.importMachine(t, s.machine, draft)
 			case args[2] == "publish":
-				rel = regexp.MustCompile(`rel_[a-z2-7]{26}`).FindString(r.out)
+				if rel = regexp.MustCompile(`rel_[a-z2-7]{26}`).FindString(r.out); rel == "" {
+					t.Errorf("the journey's publication named no release:\n%s%s", r.out, r.err)
+				}
 			}
 			fmt.Fprintf(&out, "$ bronzewardctl %s\n%s%s[exit %d]\n\n", strings.Join(step, " "), r.out, r.err, r.code)
 		}
@@ -408,6 +413,7 @@ func (f *fixture) publicationJourneys(t *testing.T, in *injector, s seeded, ctl 
 	h := []string{"--context", "human"}
 	script("t6", [][]string{
 		append(h, "draft", "create", "--cluster", "{cluster}", "--title", "worker labels"),
+		append(h, "draft", "show", "{draft}"),
 		append(h, "fragment", "set", "worker-labels", "--draft", "{draft}", "--layer", "role", "--file", labels),
 		append(h, "profile", "set", "workers", "--draft", "{draft}", "--fragments", "worker-labels"),
 		append(h, "assignment", "set", "{machine}", "--draft", "{draft}", "--profiles", "workers"),
