@@ -70,7 +70,7 @@ export function WriteNotices({ go }: { go: (to: string) => void }) {
 export function leaving(writes: Writes, to: string, notice = false, from = location.pathname): boolean {
   const open = notice ? [] : writes.open;
   if (open.length === 0 || new URL(to, location.href).pathname === new URL(from, location.href).pathname) return true;
-  const lines = open.map((w) => (w.outcome === undefined && w.doubt === undefined && w.repeating === undefined ? "Sent, with no answer yet." : "Unknown whether this was saved.") + detail(w));
+  const lines = open.map((w) => (w.outcome === undefined && w.doubt === undefined && w.repeating === undefined && w.aside === undefined ? "Sent, with no answer yet." : "Unknown whether this was saved.") + detail(w));
   return confirm(`${lines.join("\n")}\nLeave this page?`);
 }
 

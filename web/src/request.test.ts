@@ -305,6 +305,15 @@ describe("§8.5 epoch changes", () => {
     expect(settled).toBe(false);
   });
 
+  test("that read's success names the epoch in its headers: a body that never ends does not hold the write", async () => {
+    const stalled = new Response(new ReadableStream({ start: () => {} }), { status: 200, headers: { "Content-Type": "application/json", "Bronzeward-Epoch": "e2" } });
+    const { a, end, paths, c } = await lateWrite([stalled]);
+    expect(a?.data).toEqual({ id: "c1" });
+    expect(end.e).toBeUndefined();
+    expect(c.currentEpoch).toBe("e2");
+    expect(paths).toEqual(["/server", "/clusters", "/machines", "/recovery"]);
+  });
+
   test("that read's 401 renews once and reads again; a second 401 ends the page", async () => {
     const twice = await lateWrite([problem(401, "unauthenticated", {}, "e2"), problem(401, "unauthenticated", {}, "e2")], async () => true);
     expect(twice.end.e).toMatchObject({ kind: "unauthenticated", problem: { type: "urn:bronzeward:problem:unauthenticated" } });

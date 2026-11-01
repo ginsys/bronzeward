@@ -114,6 +114,22 @@ describe("the in-app leave guard (B11)", () => {
     expect(ask).toHaveBeenCalledTimes(1);
   });
 
+  test("set aside while its first answer is on its way, the dialog says the outcome is unknown, as the notice does", async () => {
+    const ask = vi.fn(() => false);
+    vi.stubGlobal("confirm", ask);
+    vi.stubGlobal("location", new URL("https://bw.invalid/clusters/new"));
+    const writes = new Writes(() => PRINCIPAL, async () => {});
+    let answer: (a: unknown) => void = () => {};
+    writes.client = { currentEpoch: "e1", attempt: () => new Promise((r) => (answer = r)) } as unknown as Client;
+    const w = new Write({ method: "POST", path: "/clusters", body: { name: "lab" }, resource: "/clusters" });
+    const run = writes.submit(w);
+    writes.setAside(EPOCH_CHANGED_ASIDE);
+    expect(leaving(writes, "/machines")).toBe(false);
+    expect(ask).toHaveBeenCalledWith(`Unknown whether this was saved. Key ${w.key}, POST /api/v1/clusters. To learn the outcome, read /clusters.\nLeave this page?`);
+    answer({ status: 201, headers: new Headers(), data: { id: "c1" } });
+    await run;
+  });
+
   test("while [Repeat exactly] runs, the dialog says the outcome is unknown, as the notice does", async () => {
     const ask = vi.fn(() => false);
     vi.stubGlobal("confirm", ask);
