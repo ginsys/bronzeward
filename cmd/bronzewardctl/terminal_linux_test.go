@@ -36,6 +36,64 @@ func pty(t *testing.T) (*os.File, string) {
 	return ctl, fmt.Sprintf("/dev/pts/%d", n)
 }
 
+// TestStdinByIdentity checks that an input path naming standard input under another name takes
+// standard input as - does: marks are then not read from it, and no second input may read it. The
+// path is /proc/self/fd/N for the test's pipe, the link /dev/stdin is for fd 0.
+func TestStdinByIdentity(t *testing.T) {
+	f := &draftFake{}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	f.rev, f.state = 3, "open"
+	// The draft's ETag is kept, so only the refusal stops the send.
+	var o, e bytes.Buffer
+	if got := run([]string{"draft", "show", "drf_BWSYNTH"}, &o, &e); got != 0 {
+		t.Fatalf("draft show: exit %d, stderr %q", got, e.String())
+	}
+	doc := filepath.Join(t.TempDir(), "doc.yaml")
+	if err := os.WriteFile(doc, []byte("machine:\n  nodeLabels:\n    BWSYNTH-doc: x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const notFree = "--marks reads from a prompt on a terminal or from standard input, and neither is free here; nothing was sent"
+	for _, c := range []struct {
+		name, input string
+		args        func(alias string) []string
+		says        string
+	}{
+		{"--file names standard input, with --marks", "machine:\n  nodeLabels:\n    BWSYNTH-doc: x\n",
+			func(a string) []string { return []string{"--file", a, "--marks", "--no-input"} }, notFree},
+		{"--file names standard input, with --token-stdin", "machine:\n  nodeLabels:\n    BWSYNTH-doc: x\n",
+			func(a string) []string { return []string{"--file", a, "--token-stdin"} }, "--file and --token-stdin read standard input, which only one of them can"},
+		{"--declarations names standard input, with --marks", "embedded: []\n",
+			func(a string) []string { return []string{"--file", doc, "--declarations", a, "--marks", "--no-input"} }, notFree},
+		{"--declarations names standard input, with --file -", "embedded: []\n",
+			func(a string) []string { return []string{"--file", "-", "--declarations", a} }, "--file and --declarations read standard input, which only one of them can"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r, w, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := w.WriteString(c.input); err != nil {
+				t.Fatal(err)
+			}
+			w.Close()
+			old := stdin
+			stdin = r
+			t.Cleanup(func() { stdin = old; r.Close() })
+			var o, e bytes.Buffer
+			got := run(append([]string{"fragment", "set", "worker-labels", "--draft", "drf_BWSYNTH", "--layer", "role"},
+				c.args(fmt.Sprintf("/proc/self/fd/%d", r.Fd()))...), &o, &e)
+			if got != 2 || !strings.Contains(e.String(), c.says) {
+				t.Errorf("exit %d, stderr %q; want 2 and %q", got, e.String(), c.says)
+			}
+			if took := f.took(); len(took) != 0 {
+				t.Errorf("sent %v", took)
+			}
+		})
+	}
+}
+
 // TestTerminalInputs checks every input fragment set reads, each from a real terminal: a line that
 // canonical mode cut short is refused, by its position only, and nothing is sent. The check is on
 // the file opened, so a terminal named by its path is refused as standard input is. Each cut input

@@ -57,8 +57,8 @@ func (e *env) fragmentSet(args []string) error {
 	if draft == "" || layer == "" || file == "" {
 		return usageError{errors.New("fragment set needs --draft, --layer and --file")}
 	}
-	if file == "-" && e.tokenStdin {
-		return usageError{errors.New("--file - and --token-stdin both read standard input: give the token with --token-file")}
+	if u := stdinUsers(file, decl, e.tokenStdin); len(u) > 1 {
+		return usageError{fmt.Errorf("%s read standard input, which only one of them can: give the others from a file, the token with --token-file", strings.Join(u, " and "))}
 	}
 	rp, err := rf.repeat(true)
 	if err != nil {
@@ -90,6 +90,34 @@ func protectedOn(goos string) error {
 	return nil
 }
 
+// stdinUsers names the inputs of fragment set that read standard input: --file - or a --file path
+// that is standard input, a --declarations path that is, and --token-stdin. Marks read standard
+// input only when none of them does.
+func stdinUsers(file, decl string, token bool) []string {
+	var u []string
+	if file == "-" || isStdin(file) {
+		u = append(u, "--file")
+	}
+	if decl != "" && isStdin(decl) {
+		u = append(u, "--declarations")
+	}
+	if token {
+		u = append(u, "--token-stdin")
+	}
+	return u
+}
+
+// isStdin reports whether path is standard input, by the file it names, not by the name: /dev/stdin
+// or /dev/fd/0 reaches standard input as - does, and so does the file standard input comes from.
+func isStdin(path string) bool {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	si, err := stdin.Stat()
+	return err == nil && os.SameFile(fi, si)
+}
+
 // fragmentBody reads the inputs into in and returns the request body, refused when it is over the
 // server's limit.
 func (e *env) fragmentBody(in apitypes.FragmentInput, file, decl string, marks bool) ([]byte, error) {
@@ -115,7 +143,7 @@ func (e *env) fragmentBody(in apitypes.FragmentInput, file, decl string, marks b
 	}
 	in.Document = string(doc)
 	if marks {
-		m, err := e.readMarks(file == "-")
+		m, err := e.readMarks(len(stdinUsers(file, decl, false)) > 0)
 		if err != nil {
 			return nil, err
 		}
@@ -191,9 +219,10 @@ func declarations(p string) (*apitypes.Declarations, error) {
 // readMarks reads marks, one per line until an empty line or the end of input (T12): from standard
 // input when it is free and not a terminal, else from a prompt on the terminal, standard input
 // when it is one and free, else the controlling terminal. With neither, or with --no-input and
-// standard input taken or a terminal, it refuses.
-func (e *env) readMarks(docOnStdin bool) ([]string, error) {
-	free := !docOnStdin && !e.tokenStdin
+// standard input taken or a terminal, it refuses. taken says another input read standard input,
+// under any name (stdinUsers).
+func (e *env) readMarks(taken bool) ([]string, error) {
+	free := !taken && !e.tokenStdin
 	var in io.Reader
 	var prompt io.Writer
 	switch {
