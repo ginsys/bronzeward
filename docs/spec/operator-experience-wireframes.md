@@ -86,7 +86,7 @@ item 2).
 ## W2. Machines
 
 ```text
-Machines                                    Cluster: all ▾   State: all ▾   [Record machine]  (author, human)
+Machines                          Cluster: all ▾   State: all ▾   [Record machine] [Add cluster]  (author, human)
 +------------+----------------+-------------+--------------------------+--------------------------+-------------------------+
 | Machine    | Endpoint       | Desired     | Applied (source)         | Observed                 | State                   |
 +------------+----------------+-------------+--------------------------+--------------------------+-------------------------+
@@ -102,6 +102,11 @@ All four rows are at one moment: just after `mch_b3c…aa2q` was recorded
 ([§5.2](operator-experience.md#52-inventory)), before its import and handover
 ([§5.3](operator-experience.md#53-protected-import-with-review)), so it has no `Desired` and no
 `Applied` yet.
+
+[Add cluster] opens the form of `cluster add`
+([journeys §10](operator-experience.md#10-action-route-and-role-matrix)). (2026-11-01, lead
+ruling: #338 found no wireframe placing Add cluster; Machines is the hub and already reads
+`GET /clusters`.)
 
 ## W3. Machine detail
 

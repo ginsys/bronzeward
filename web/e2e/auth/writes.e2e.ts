@@ -24,10 +24,10 @@ const result = () => $('[data-testid="write-result"]');
 const notice = () => $('[data-testid="write-notice"]');
 const sends = (n: number) => browser.waitUntil(async () => (await writes()).length >= n, { timeout: 30_000, timeoutMsg: `the page did not send the write ${n} times` });
 
-// Signs in as h-author on the disposable deployment and opens Add cluster from the clusters list.
+// Signs in as h-author on the disposable deployment and opens Add cluster from the machine list.
 async function open(flags: Record<string, string> = {}): Promise<string> {
   expect(await fixtureSignIn("h-author", flags, { upstream: at })).toMatch(SERVER);
-  await $('nav[aria-label="Main"]').$("a=Clusters").click();
+  await $('nav[aria-label="Main"]').$("a=Machines").click();
   await $("main button=Add cluster").click();
   await expect($("main h2")).toHaveText("Add cluster");
   return `synthetic-${randomBytes(4).toString("hex")}`;
