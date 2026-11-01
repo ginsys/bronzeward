@@ -747,17 +747,18 @@ never ran:
 ```text
 $ bronzewardctl machine timeline mch_b3c…aa2q --follow
 REVISION  AT                       KIND                  ENTRY
-41        2026-11-01 10:05:12 CET  plan                  plan pln_f645…cawy, operation apply-config, release rel_h7rt…2bd, by h-pub (publisher)
-42        2026-11-01 10:05:30 CET  approval              approval apr_k2v…, plan pln_f645…cawy, by h-appr (approver), no self-approval reason
+41        2026-11-01 10:05:12 CET  plan                  plan pln_f645…cawy, operation apply-config, release rel_h7rt…2bd, by idn_p7q…3kfa (publisher)
+42        2026-11-01 10:05:30 CET  approval              approval apr_k2v…, plan pln_f645…cawy, by idn_d2w…9mta (approver), no self-approval reason
 43        2026-11-01 10:05:31 CET  refusal               plan pln_f645…cawy, comparison 2, cause the machine's Desired release changed
-44        2026-11-01 10:06:02 CET  plan-cancellation     plan pln_f645…cawy, by h-pub (publisher), reason Desired moved
+44        2026-11-01 10:06:02 CET  plan-cancellation     plan pln_f645…cawy, by idn_p7q…3kfa (publisher), reason Desired moved
 ^C
 Stopped following the timeline of machine mch_b3c…aa2q at your request.
 ```
 
 Each line names the entry's kind and what its record holds. A plan entry names the plan, its
 operation, its release and its creator. An approval entry names the approver and the recorded
-self-approval reasons. A refusal names the plan, the comparison that failed and its cause
+self-approval reasons. A principal is shown by its identity ID, because the timeline names no
+display name (G15). A refusal names the plan, the comparison that failed and its cause
 (`internal/api/commit.go:209-226`). A cancellation and a revocation name their reason. An entry of
 an operation names the operation first, then what its event line in `operation watch` shows. An
 entry of another kind prints its record as JSON.
