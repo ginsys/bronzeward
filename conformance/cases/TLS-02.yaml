@@ -4,7 +4,7 @@ action: load the web client, which reads GET /server
 exchange:
   - request: GET /api/v1/server
     headers: ["Accept: application/json"]
-fault: the host answers every /api/v1/ request with a 307 to http://127.0.0.1:58444, another origin
+fault: the host answers every /api/v1/ request with a 307 to the counting target's http://127.0.0.1 origin (web/e2e/ports.ts), another origin
 expect:
   client: the read fails as a transport error and is not repeated
   server: the target sees no request; a WebDriver-run fetch that follows redirects reaches it (positive control)

@@ -4,17 +4,17 @@
 // once per browser in BW_BROWSERS.
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 // The launcher logs and ignores any other error a launcher hook throws, and runs the specs anyway.
 import { SevereServiceError } from "webdriverio";
+import { FAKE_ISSUER, PAGE_LISTEN, PAGE_ORIGIN, TARGET_ORIGIN } from "./ports.ts";
 import { printFailure } from "./print-failure.ts";
-import { FAKE_ISSUER, startProvider } from "./provider.ts";
+import { startProvider } from "./provider.ts";
 
-export const PAGE_ORIGIN = "http://localhost:58443";
-export const TARGET_ORIGIN = "http://127.0.0.1:58444";
+export { PAGE_ORIGIN, TARGET_ORIGIN };
 const web = fileURLToPath(new URL("..", import.meta.url));
 const canary = process.env["BW_WEB_CANARY"];
 if (canary === undefined || !canary.startsWith("BWSYNTH-")) throw new Error("BW_WEB_CANARY must hold the run's synthetic canary");
@@ -50,6 +50,7 @@ function ownProfile(capabilities: WebdriverIO.Capabilities) {
 let target: Server | undefined;
 let provider: Server | undefined;
 let host: ChildProcess | undefined;
+let clientDir: string | undefined;
 let hits = 0;
 
 export const config: WebdriverIO.Config = {
@@ -77,7 +78,7 @@ export const config: WebdriverIO.Config = {
       hits++;
       res.writeHead(200, { "Cache-Control": "no-store", "Access-Control-Allow-Origin": PAGE_ORIGIN }).end(canary);
     });
-    await new Promise<void>((resolve) => target!.listen(58444, "127.0.0.1", resolve));
+    await new Promise<void>((resolve) => target!.listen(Number(new URL(TARGET_ORIGIN).port), "127.0.0.1", resolve));
     // Every token carries the run's canary, so the artifact scan finds any token an artifact keeps.
     // Severe, so that a provider port held by an earlier run stops the run instead of its specs.
     ({ server: provider } = await startProvider({
@@ -88,8 +89,12 @@ export const config: WebdriverIO.Config = {
     // A host left from an earlier run would answer the readiness check below with an old build.
     const hostUrl = `${PAGE_ORIGIN.replace("localhost", "127.0.0.1")}/`;
     if (await fetch(hostUrl).then(() => true, () => false)) throw new SevereServiceError("something already answers on the static host's port");
+    // The client configuration names this run's issuer, so it is written for the run.
+    clientDir = mkdtempSync(`${tmpdir()}/bw-client-`);
+    const clientConfig = `${clientDir}/bronzeward-client.json`;
+    writeFileSync(clientConfig, JSON.stringify({ issuer: FAKE_ISSUER, audience: "bronzeward", cliClientId: "synthetic-cli-client", webClientId: "synthetic-web-client" }));
     host = spawn(`${web}../bin/webhost`, [
-      "-dist", `${web}dist`, "-headers", `${web}headers.json`, "-client-config", `${web}e2e/bronzeward-client.json`,
+      "-listen", PAGE_LISTEN, "-dist", `${web}dist`, "-headers", `${web}headers.json`, "-client-config", clientConfig,
       "-issuer", FAKE_ISSUER, "-provider-origins", TARGET_ORIGIN, "-redirect-api", TARGET_ORIGIN,
     ], { stdio: "inherit" });
     for (let i = 0; ; i++) {
@@ -102,6 +107,7 @@ export const config: WebdriverIO.Config = {
     host?.kill();
     target?.close();
     provider?.close();
+    if (clientDir !== undefined) rmSync(clientDir, { recursive: true, force: true });
     removeProfiles();
   }),
 };

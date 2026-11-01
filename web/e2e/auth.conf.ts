@@ -20,17 +20,13 @@ import { SevereServiceError } from "webdriverio";
 import { printFailure } from "./print-failure.ts";
 import { config as base, removeProfiles } from "./wdio.conf.ts";
 import { type Faults, type Injector, startInjector } from "./injector.ts";
+import {
+  CONTROL, DISPOSABLE_API, FIXTURE_API, FIXTURE_ISSUER, FIXTURE_LISTEN, FIXTURE_PAGE, IDP_API, INJECTOR, KEYS,
+  PAGE_LISTEN, PAGE_ORIGIN as IDP_PAGE,
+} from "./ports.ts";
 import { type Counts, type Grant, type Provider, startProvider } from "./provider.ts";
 
-export const IDP_PAGE = "http://localhost:58443";
-export const FIXTURE_PAGE = "http://localhost:58448";
-export const FIXTURE_ISSUER = "http://127.0.0.1:58446";
-export const CONTROL = "http://127.0.0.1:58449";
-export const FIXTURE_API = "http://127.0.0.1:58451";
-const INJECTOR = "http://127.0.0.1:58452";
-const DISPOSABLE_API = "http://127.0.0.1:58453";
-const IDP_API = "http://127.0.0.1:58450";
-const KEYS = "127.0.0.1:58447";
+export { CONTROL, FIXTURE_API, FIXTURE_ISSUER, FIXTURE_PAGE, IDP_PAGE };
 // mise run browser-auth sets BW_DEV_PG_PORT and BW_DEV_IDP_DIR from BW_DEV_INSTANCE
 // (scripts/dev/instance.sh); the defaults are the default instance's.
 const PG_PORT = process.env["BW_DEV_PG_PORT"] ?? "55433";
@@ -170,7 +166,7 @@ function control(provider: Provider, next: { grant: Grant }, injector: Injector,
 
 async function prepare() {
   // Anything left on these ports from an earlier run would answer the readiness checks below.
-  for (const at of ["127.0.0.1:58443", "127.0.0.1:58448", FIXTURE_ISSUER.slice(7), CONTROL.slice(7), FIXTURE_API.slice(7), IDP_API.slice(7), INJECTOR.slice(7), DISPOSABLE_API.slice(7), KEYS]) {
+  for (const at of [PAGE_LISTEN, FIXTURE_LISTEN, FIXTURE_ISSUER.slice(7), CONTROL.slice(7), FIXTURE_API.slice(7), IDP_API.slice(7), INJECTOR.slice(7), DISPOSABLE_API.slice(7), KEYS]) {
     if (await fetch(`http://${at}/`).then(() => true, () => false)) throw new SevereServiceError(`something already answers on ${at}`);
   }
   // Made, never reused: one left behind names databases an earlier cleanup could not drop, and the
@@ -184,6 +180,10 @@ async function prepare() {
   }
   ownState = true;
   const idp = idpEnv();
+  // The provider sends the browser back only to the web origin dev-idp registered.
+  if (idp["BW_TEST_IDP_WEB_ORIGIN"] !== IDP_PAGE) {
+    throw new SevereServiceError(`dev-idp's web origin is ${idp["BW_TEST_IDP_WEB_ORIGIN"]}, not this run's page ${IDP_PAGE}: start dev-idp with the same BW_E2E_PORT_BASE, or with BW_DEV_IDP_WEB_ORIGIN=${IDP_PAGE}`);
+  }
   execFileSync(`${root}bin/oidc-fixture`, ["keygen", "-out", `${state}/fixture.key`]);
   const keys = start("oidc-fixture", ["serve", "-key", `${state}/fixture.key`, "-issuer", FIXTURE_ISSUER, "-listen", KEYS]);
   await ready(`http://${KEYS}/jwks`, keys);
@@ -228,14 +228,14 @@ async function prepare() {
   const b = server("fixture", FIXTURE_API.slice(7), fixtureOidc, fixtureDenied).p;
   await ready(`${IDP_API}/livez`, a);
   await ready(`${FIXTURE_API}/livez`, b);
-  const ha = host("127.0.0.1:58443", {
+  const ha = host(PAGE_LISTEN, {
     issuer: idp["BW_TEST_IDP_ISSUER"], audience: idp["BW_TEST_IDP_PROJECT"], cliClientId: idp["BW_TEST_IDP_CLI_CLIENT"], webClientId: idp["BW_TEST_IDP_WEB_CLIENT"],
     // Zitadel puts the project in aud only when this scope asks for it (client contracts §5 item 4).
     scopes: `urn:zitadel:iam:org:project:id:${idp["BW_TEST_IDP_PROJECT"]}:aud`,
   }, idp["BW_TEST_IDP_ISSUER"]!, IDP_API);
-  const hb = host("127.0.0.1:58448", { issuer: FIXTURE_ISSUER, audience: "bronzeward", cliClientId: "synthetic-cli-client", webClientId: "synthetic-web-client" }, FIXTURE_ISSUER, INJECTOR);
-  await ready("http://127.0.0.1:58443/", ha);
-  await ready("http://127.0.0.1:58448/", hb);
+  const hb = host(FIXTURE_LISTEN, { issuer: FIXTURE_ISSUER, audience: "bronzeward", cliClientId: "synthetic-cli-client", webClientId: "synthetic-web-client" }, FIXTURE_ISSUER, INJECTOR);
+  await ready(`http://${PAGE_LISTEN}/`, ha);
+  await ready(`http://${FIXTURE_LISTEN}/`, hb);
 }
 
 // Stopped, and killed after 10 s if it is still running.

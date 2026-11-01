@@ -38,7 +38,7 @@ describe("an API redirect to another origin", () => {
     expect(await $('[data-testid="server"]').getText()).toBe("Server unknown");
     expect(await $('[data-testid="principal"]').isExisting()).toBe(false);
     const page = await $("body").getText();
-    expect(page).not.toContain("58444");
+    expect(page).not.toContain(new URL(TARGET_ORIGIN).port);
     expect(page).not.toContain("127.0.0.1");
     expect(await hits()).toBe(0);
   });

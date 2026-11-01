@@ -166,16 +166,37 @@ the slot rule are in [CONTRIBUTING.md](../CONTRIBUTING.md#several-instances-on-o
 the server would ([client contracts §10.1](../docs/spec/client-contracts.md#101-hosting-and-origin)):
 every page with the §10.2 headers of `web/headers.json`, whose CSP placeholders it fills from
 `-issuer` and `-provider-origins`; `/api/v1/` and `/livez` proxied to `-api`; every other path
-answered with the application. It listens on `127.0.0.1:58443`, behind the test provider's
-seeded web origin `http://localhost:58443`. `-redirect-api <origin>` makes it answer every API
-request with a `307` to that origin instead, the fault of conformance cases TLS-02 and TLS-03.
+answered with the application. It listens on `-listen` (default `127.0.0.1:16000`).
+`-redirect-api <origin>` makes it answer every API request with a `307` to that origin instead,
+the fault of conformance cases TLS-02 and TLS-03.
+
+The browser tasks take every port from one block of 16 (`web/e2e/ports.ts`). `BW_E2E_PORT_BASE`
+selects it: `16000+16*n` with `n` from 0 to 249, default `16000`. Every block lies below the Linux
+ephemeral range (32768-60999). The harness refuses any other value, because an unaligned base can
+overlap another run's block. With base `B`, the ports are:
+
+| Port | Listener |
+|------|----------|
+| `B` | the test static host, page origin `http://localhost:B` (in `browser-auth`, the host of the server that trusts the test provider) |
+| `B+1` | `browser`'s counting target |
+| `B+2` | `browser`'s synthetic provider (`web/e2e/provider.ts`) |
+| `B+3` | `browser-auth`'s synthetic provider, the fixture issuer |
+| `B+4` | the fixture issuer's key set (`oidc-fixture serve`) |
+| `B+5` | the host of the server that trusts the fixture issuer, page origin `http://localhost:B+5` |
+| `B+6` | the control route |
+| `B+7`, `B+8` | the server that trusts the test provider, and the one that trusts the fixture issuer |
+| `B+9` | the fault injector in front of the fixture server |
+| `B+10` | the disposable deployment of the inventory and recovery cases |
+
+`browser-auth` refuses to start when dev-idp's web origin (`BW_TEST_IDP_WEB_ORIGIN` in
+`idp.env`) is not `http://localhost:B`. The WebDriver drivers choose free ports of their own.
 
 `mise run browser` builds it, starts it in that mode with a counting target on
-`http://127.0.0.1:58444`, runs `web/e2e/` in each browser of `BW_BROWSERS` (default
+`B+1`, runs `web/e2e/` in each browser of `BW_BROWSERS` (default
 `chrome,firefox`; also `edge`, `firefox-esr`, `safari`) and scans `web/e2e/out/` for the run's
 canary, a `BWSYNTH-` value only the target serves, and for any JWT. No server, database or
 identity provider runs: the page signs in through a synthetic provider in the harness
-(`web/e2e/provider.ts`) on `http://127.0.0.1:58445`.
+(`web/e2e/provider.ts`) on `B+2`.
 Each chrome and edge session gets a profile directory under one directory per run, removed when
 the run ends. A failure in that end-of-run cleanup (in `browser-auth` also a database left
 undropped) is printed and fails the run. Both browser tasks run WebdriverIO with a `TMPDIR` of their own, remove it after the
@@ -187,10 +208,10 @@ its browser and driver downloads; the tasks default it to the outer `TMPDIR`.
 
 `mise run browser-auth` runs the AUTH cases (`web/e2e/auth/`) after `dev-db` and `dev-idp`. It
 creates two databases on dev-db's PostgreSQL and drops them at the end, with two servers and
-two hosts on loopback: one server trusts the test provider, behind a host on `58443`; the other
-trusts the fixture issuer (`58447`), whose key set the synthetic provider serves on `58446`
-under its own issuer, behind a host on `58448`. A control route on `58449` chooses the minted
-token, defect included, the next sign-in receives. The servers listen on `58450` and `58451`.
+two hosts on loopback: one server trusts the test provider, behind a host on `B`; the other
+trusts the fixture issuer, which the synthetic provider serves on `B+3` with the key set of
+`B+4`, behind a host on `B+5`. A control route on `B+6` chooses the minted token, defect
+included, the next sign-in receives. The servers listen on `B+7` and `B+8`.
 The scan also looks for the provider's synthetic password and login token.
 
 ## Instance C and the interruption seam

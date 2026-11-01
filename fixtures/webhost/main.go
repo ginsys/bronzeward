@@ -34,7 +34,7 @@ type config struct {
 
 func run(args []string) error {
 	fs := flag.NewFlagSet("webhost", flag.ContinueOnError)
-	listen := fs.String("listen", "127.0.0.1:58443", "listen address; the test provider's web origin is http://localhost:58443")
+	listen := fs.String("listen", "127.0.0.1:16000", "listen address; the browser tests pass their block's page port (web/e2e/ports.ts)")
 	var c config
 	fs.StringVar(&c.dist, "dist", "web/dist", "the built web package")
 	fs.StringVar(&c.headers, "headers", "web/headers.json", "the §10.2 header set")
