@@ -32,7 +32,7 @@ func openStore(x *Context, noPrompt bool) *store {
 func (s *store) kept() string {
 	switch {
 	case s.file != "":
-		return "the token file " + s.file
+		return "the token file " + printable(s.file)
 	case s.none == "":
 		return "the system credential store"
 	}
@@ -189,7 +189,7 @@ func (s *store) clear(match func(*Tokens) bool) (*Tokens, error) {
 // gone says that the store holds no sign-in.
 func (s *store) gone() string {
 	if s.file != "" {
-		return "the token file " + s.file + " does not exist"
+		return "the token file " + printable(s.file) + " does not exist"
 	}
 	return "nothing is stored in " + s.kept()
 }
@@ -200,9 +200,9 @@ func (s *store) removed(err error) string {
 	case s.file == "":
 		return "the sign-in is removed from " + s.kept()
 	case errors.Is(err, ErrNotTokenFile):
-		return "the token file " + s.file + " held no access token and is removed"
+		return "the token file " + printable(s.file) + " held no access token and is removed"
 	}
-	return "the token file " + s.file + " is removed"
+	return "the token file " + printable(s.file) + " is removed"
 }
 
 // keyringService names this client's entries in the credential store.

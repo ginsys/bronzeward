@@ -383,7 +383,7 @@ func SignIn(x *Context, device bool, prompts io.Writer) (*Tokens, string, error)
 func ownTokenFile(p string) error {
 	if fi, err := os.Lstat(p); err == nil && fi.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("token file %s is a symbolic link; bronzewardctl keeps a sign-in only in a regular file. "+
-			"Point oidc.tokenFile, or BRONZEWARD_TOKEN_FILE, at the file itself", p)
+			"Point oidc.tokenFile, or BRONZEWARD_TOKEN_FILE, at the file itself", printable(p))
 	}
 	if _, err := ReadTokens(p); err != nil && !errors.Is(err, ErrNotTokenFile) {
 		return err

@@ -408,7 +408,7 @@ it. It holds no secret.
    - The output holds a raw control byte outside the CLI's own separators.
    - Outside documents, diffs and JSON text that the CLI encodes, a plain value does not appear in
      its escaped form: `\x1b` for ESC, `\x09` for the tab, `\x0a` for the line feed, `\x0d` for the
-     carriage return, `\x7f` for DEL, `\x85` for a C1 character such as U+0085 and `‮` for
+     carriage return, `\x7f` for DEL, `\x85` for a C1 character such as U+0085 and `\u202e` for
      a bidirectional control such as U+202E. A replacement
      such as `?` fails. A byte that is not UTF-8 and survives decoding appears as `\xNN` with the
      byte's own value. Documents, diffs and JSON text have their own forms, which the two last

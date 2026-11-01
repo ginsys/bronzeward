@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -36,16 +37,25 @@ const (
 // the output must show it.
 type filler struct {
 	control bool
+	yes     bool // every boolean member is true
 	n       int
 	want    map[string]string
 	docs    map[string][]string // the escaped lines of each document and diff, by its marker
+	src     map[string]string   // the response type and member that each marker fills
+	owner   string
+	member  string
 }
 
 func newFiller(control bool) *filler {
-	return &filler{control: control, want: map[string]string{}, docs: map[string][]string{}}
+	return &filler{control: control, want: map[string]string{}, docs: map[string][]string{}, src: map[string]string{}}
 }
 
-func (f *filler) mark() string { f.n++; return fmt.Sprintf("zQ%dz", f.n) }
+func (f *filler) mark() string {
+	f.n++
+	m := fmt.Sprintf("zQ%dz", f.n)
+	f.src[m] = f.owner + "." + f.member
+	return m
+}
 
 func (f *filler) text() string {
 	m := f.mark()
@@ -77,6 +87,19 @@ func (f *filler) raw() json.RawMessage {
 	return json.RawMessage(`{"k":"` + m + `\u001b\t\n\r` + "\x7f\u0085\u202e\u2066\xff" + `"}`)
 }
 
+// notShown is every response member, as Type.Member, that no command of the sweep shows.
+const notShown = "AccessVersionBody.Created AccessVersionBody.Path ActItem.Epoch ActItem.IdempotencyKey ActItem.RequestId " +
+	"AssignmentRevisionBody.Fragments AttemptAccounting.Basis AttemptBody.Observation AttemptResponse.Class " +
+	"Embedded.Format Embedded.Path EndpointChangeBody.Act EndpointChangeBody.ChangedBy EndpointChangeBody.Epoch " +
+	"EndpointChangeBody.Role Hardware.Serial IdentityBody.Issuer IdentityBody.Subject " +
+	"ObservationBody.AssignmentEvidence ObservationBody.Controller ObservationBody.Health ObservationBody.Machine " +
+	"ObservationBody.Operation ObservationBody.Plan ObservationBody.ResourceVersion ObservationBody.RunningVersion " +
+	"ObservationBody.SmbiosUuid ObservationBody.TalosClusterId ObservationBody.TalosNodeId " +
+	"ObservedBody.Observation ObservedBody.Release OpenDriftBody.LastObservation OpenDriftBody.LateLanding " +
+	"RecoveryEntryRef.EnteredBy RecoveryEntryRef.Reason RecoveryExitRef.Act RecoveryExitRef.ExitedBy " +
+	"Reference.Encoding ReleaseMachineBody.Review RendererBody.MachineryChecksum " +
+	"RestoredBackup.Backup RestoredBackup.Family ServerBody.Features ServerBody.StartMode TimelineEntry.Epoch"
+
 var timeType = reflect.TypeFor[time.Time]()
 
 // tree is a value of type t as JSON-ready data, with every string and every map key a marked one.
@@ -92,7 +115,7 @@ func (f *filler) tree(t reflect.Type, field string) any {
 	case t.Kind() == reflect.Int || t.Kind() == reflect.Float32 || t.Kind() == reflect.Float64:
 		return 2
 	case t.Kind() == reflect.Bool:
-		return false
+		return f.yes
 	case t.Kind() == reflect.Pointer:
 		return f.tree(t.Elem(), field)
 	case t.Kind() == reflect.Slice:
@@ -115,6 +138,7 @@ func (f *filler) tree(t reflect.Type, field string) any {
 		out := map[string]any{}
 		for sf := range t.Fields() {
 			if name, _, _ := strings.Cut(sf.Tag.Get("json"), ","); sf.IsExported() && name != "" && name != "-" {
+				f.owner, f.member = t.Name(), sf.Name
 				out[name] = f.tree(sf.Type, sf.Name)
 			}
 		}
@@ -249,9 +273,32 @@ func sweep(t *testing.T, f *filler, output string) (outs, errs []string) {
 // marked value shows in its escaped form, and the lines and columns are those of a run with plain
 // values (client-contracts.md §6 item 8).
 func TestRemoteTextIsEscaped(t *testing.T) {
-	bad := newFiller(true)
+	seen := map[string]bool{}
+	// The second run sets every boolean member, which shows the recovery-mode members.
+	for _, yes := range []bool{false, true} {
+		t.Run(fmt.Sprintf("booleans=%v", yes), func(t *testing.T) { checkSweep(t, yes, seen) })
+	}
+	// A member that no command shows proves nothing, so each is named: the list below is every
+	// member of a response type that the commands of this test never show.
+	var hidden []string
+	for s, shown := range seen {
+		if !shown {
+			hidden = append(hidden, s)
+		}
+	}
+	slices.Sort(hidden)
+	if got := strings.Join(hidden, " "); got != notShown {
+		t.Errorf("members that no command shows:\n%s\nwant:\n%s", got, notShown)
+	}
+}
+
+// checkSweep runs the commands with marked values, and again with plain ones, and checks both.
+// It records in seen, by Type.Member, whether any command showed the member.
+func checkSweep(t *testing.T, yes bool, seen map[string]bool) {
+	bad, plain := newFiller(true), newFiller(false)
+	bad.yes, plain.yes = yes, yes
 	badOut, badErr := sweep(t, bad, "table")
-	plainOut, _ := sweep(t, newFiller(false), "table")
+	plainOut, _ := sweep(t, plain, "table")
 	for i, c := range commands {
 		name := strings.Join(c, " ")
 		for _, text := range []string{badOut[i], badErr[i]} {
@@ -276,11 +323,13 @@ func TestRemoteTextIsEscaped(t *testing.T) {
 			}
 		}
 	}
-	all := strings.Join(badOut, "\n")
+	all := strings.Join(append(badOut, badErr...), "\n")
 	for m, want := range bad.want {
-		if n, w := strings.Count(all, m), strings.Count(all, want); n != w {
+		n, w := strings.Count(all, m), strings.Count(all, want)
+		if n != w {
 			t.Errorf("%s shows %d times and in its escaped form %q %d times", m, n, want, w)
 		}
+		seen[bad.src[m]] = seen[bad.src[m]] || n > 0
 	}
 	shownDocs := 0
 	for m, ls := range bad.docs {
@@ -294,8 +343,9 @@ func TestRemoteTextIsEscaped(t *testing.T) {
 			}
 		}
 	}
-	if shownDocs != 2 {
-		t.Errorf("%d documents and diffs shown, want 2: one document and one diff", shownDocs)
+	// With every boolean true a release or plan shows no diff, so that run shows the document alone.
+	if want := map[bool]int{false: 2, true: 1}[yes]; shownDocs != want {
+		t.Errorf("%d documents and diffs shown, want %d", shownDocs, want)
 	}
 	if !strings.Contains(all, "start mode unknown") {
 		t.Errorf("the start mode the server sent is not shown as unknown")

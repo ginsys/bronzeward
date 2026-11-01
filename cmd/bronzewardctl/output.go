@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/ginsys/bronzeward/internal/client"
@@ -37,18 +38,35 @@ func tf(w io.Writer, format string, args ...any) error {
 // sf is tf for a line that is built first, as a write's answer is.
 func sf(format string, args ...any) string { return fmt.Sprintf(format, shown(args)...) }
 
-// ef is fmt.Errorf with the string arguments escaped. An error argument stays whole, so %w wraps
-// it and errors.Is and errors.As still find what it wraps.
+// ef is fmt.Errorf with the string arguments escaped. An error argument keeps its place in the
+// chain, so %w wraps it and errors.Is and errors.As still find what it wraps. Its text is escaped
+// too, line feeds apart: a decoder error can quote a byte the server chose, and the errors of the
+// client are multi-line blocks.
 func ef(format string, args ...any) error {
 	out := make([]any, len(args))
 	for i, a := range args {
 		out[i] = a
-		if _, ok := a.(error); !ok {
+		if err, ok := a.(error); ok {
+			out[i] = linesShown{err}
+		} else {
 			out[i] = shown([]any{a})[0]
 		}
 	}
 	return fmt.Errorf(format, out...)
 }
+
+// linesShown is an error whose text is escaped line by line; errors.Is and errors.As see through it.
+type linesShown struct{ err error }
+
+func (e linesShown) Error() string {
+	ls := strings.Split(e.err.Error(), "\n")
+	for i, l := range ls {
+		ls[i] = client.Printable(l)
+	}
+	return strings.Join(ls, "\n")
+}
+
+func (e linesShown) Unwrap() error { return e.err }
 
 // emit prints raw, a JSON document, as -o asks: json prints it unchanged; yaml prints the same
 // members in the same order and with the same values; table runs table. The CLI uses no
