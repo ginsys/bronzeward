@@ -7,7 +7,7 @@ import { createContext, type ReactNode, useCallback, useContext, useEffect, useI
 import { leaving, WriteNotices } from "./forms.tsx";
 import { type Load, ReadsProvider } from "./list.tsx";
 import { PreEntry, type Recovery, RecoveryBanner, RecoveryRead, type StartMode, startModeOf, startRefusal } from "./recovery.tsx";
-import { Client, type ClientOptions, EPOCH_CHANGED, type ReadResult } from "./request.ts";
+import { Client, type ClientOptions, EPOCH_CHANGED, type Problem, type ReadResult } from "./request.ts";
 import { view } from "./resources.tsx";
 import { follow, PAGES, usePath } from "./router.ts";
 import { Disconnected, HumanOnly, Loading, Offline, ProblemFields, problemFields, Refused, Status } from "./states.tsx";
@@ -181,6 +181,16 @@ export class ShellReads {
     this.invalidations++;
   }
 
+  // The process's refusal of a recovery start on a page's read or on a write (§8.5 item 1): every
+  // read in flight is dropped, and the page shows the state before the entry as GET /server's answer.
+  preEntry(res: Extract<ReadResult<unknown>, { kind: "refused" }>): void {
+    this.invalidate(true);
+    this.shown = noneShown();
+    const on = this.events();
+    on.setMode("recovery");
+    on.onPreEntry(res);
+  }
+
   // Sign-out: nothing read before it is settled, or sent again, while the page moves on.
   signOut(then: () => void): void {
     this.invalidate(true);
@@ -216,12 +226,8 @@ export class ShellReads {
     // page shows that state as GET /server's own answer, which it then reads again (§8.5 item 1),
     // and nothing read before it stays shown.
     if (res.kind === "refused" && startRefusal(res)) {
+      if (what !== "server") return (this.preEntry(res), false);
       this.invalidate(true);
-      if (what !== "server") {
-        this.shown = noneShown();
-        on.onPreEntry(res);
-        return false;
-      }
     }
     // A refusal replaces the data, so a later read without answer has nothing to keep shown.
     if (what !== undefined) this.shown[what] = res.kind === "ok";
@@ -285,10 +291,14 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
   writes.client = client;
   const ended = useCallback((e: Ending) => (e.kind === "unauthenticated" ? onUnauthenticated(e) : onRevoked(e)), [onUnauthenticated, onRevoked]);
   writes.onEnded = ended;
+  // A write's process refusal shows the state before the entry as a read's does (§8.5 item 1).
+  const preEntry = useCallback((p: Problem) => reads.preEntry({ kind: "refused", status: 409, problem: p }), [reads]);
+  writes.onPreEntry = preEntry;
   useEffect(() => () => {
     writes.disconnect(client);
     if (writes.onEnded === ended) writes.onEnded = undefined;
-  }, [writes, client, ended]);
+    if (writes.onPreEntry === preEntry) writes.onPreEntry = undefined;
+  }, [writes, client, ended, preEntry]);
   // A navigation to another path moves focus to the new page, where the keyboard and a screen
   // reader continue; a filter change keeps it on the filter.
   const page = useRef<HTMLElement>(null);
