@@ -91,7 +91,20 @@ if [ -n "${STUB_CP_FAIL:-}" ] && [[ $dst == *config.yaml.fixture* ]]; then
 fi
 exec /bin/cp "$@"
 EOF
-chmod +x "$t/bin/cp"
+# mv moves, except with STUB_MV_FAIL set: the rename to A's backup then fails.
+cat >"$t/bin/mv" <<'EOF'
+#!/usr/bin/env bash
+if [ -n "${STUB_MV_FAIL:-}" ] && [[ ${*: -1} == *config.yaml.fixture ]]; then exit 1; fi
+exec /bin/mv "$@"
+EOF
+# chmod changes modes. With STUB_DAEMON_FAIL set, it also puts a directory where session start
+# writes its daemon record, so that write fails.
+cat >"$t/bin/chmod" <<'EOF'
+#!/usr/bin/env bash
+/bin/chmod "$@" || exit
+if [ -n "${STUB_DAEMON_FAIL:-}" ]; then /bin/mkdir -p -- "${*: -1}/daemon"; fi
+EOF
+chmod +x "$t/bin/cp" "$t/bin/mv" "$t/bin/chmod"
 # start's other prerequisites: npm, and mise for the web build.
 for c in npm mise; do printf '#!/bin/sh\nexit 0\n' >"$t/bin/$c"; done
 chmod +x "$t/bin/docker" "$t/bin/go" "$t/bin/npm" "$t/bin/mise" "$repo/fixtures/bin/inject" "$repo/fixtures/dev-idp" "$repo/fixtures/bin/up"
@@ -333,15 +346,28 @@ if [ "$rc" != 0 ] && [[ $out == *"cannot start"* ]] && [ -f "$cfg.fixture" ]; th
 else bad "start fails: rc=$rc: $out"; fi
 
 setup
-# A partial issuer change that a failed start left.
+# Temporary files that a failed start left beside A's configuration.
 echo partial >"$cfg.partial"
+echo partial >"$cfg.fixture.partial"
 out=$(run stop)
 rc=$?
 calls=$(tr '\n' ';' <"$STUB_LOG")
-if [ "$rc" = 0 ] && [ ! -e "$cfg.fixture" ] && [ ! -e "$cfg.partial" ] && [ "$(cat "$cfg")" = fixture ] &&
+if [ "$rc" = 0 ] && [ ! -e "$cfg.fixture" ] && [ ! -e "$cfg.partial" ] && [ ! -e "$cfg.fixture.partial" ] &&
+  [ "$(cat "$cfg")" = fixture ] &&
   [ "$calls" = "docker rm;docker network;inject kill A;inject start A;dev-idp down;" ] && [ ! -e "$repo/.dev/participants" ]; then
   ok "stop puts A back on its configuration and restarts it, then removes the backup and the state"
 else bad "stop: rc=$rc calls=$calls: $out"; fi
+
+# A temporary file beside A's configuration, without a backup (its rename failed): stop removes it.
+setup
+rm -f "$cfg.fixture"
+echo participant >"$cfg"
+echo partial >"$cfg.fixture.partial"
+out=$(run stop)
+rc=$?
+if [ "$rc" = 0 ] && [ ! -e "$cfg.fixture.partial" ] && [ "$(cat "$cfg")" = participant ]; then
+  ok "stop removes a temporary file beside A's configuration, also without a backup"
+else bad "stop, partial without a backup: rc=$rc: $out"; fi
 
 # Another checkout holds the fixture: its forwarder, A and provider are left alone.
 setup
@@ -480,20 +506,36 @@ if [ "$rc" = 0 ] && kill -0 "$other" 2>/dev/null; then
 else bad "stop, reused pid: rc=$rc: $out"; fi
 kill "$other" 2>/dev/null
 
-# A copy of A's configuration to its backup fails part-way: the rollback leaves A's configuration
-# as it was, and no backup, partial or not.
+# A copy of A's configuration to its backup fails part-way, or its rename fails: the rollback
+# leaves A's configuration as it was, and no backup, partial or not.
+for stub in STUB_CP_FAIL STUB_MV_FAIL; do
+  setup
+  rm -f "$cfg.fixture"
+  rm -rf "$repo/.dev/idp" "$repo/.dev/participants"
+  printf '    issuer: http://issuer:5556\n    plainHTTPHosts: [issuer]\n    audience: bronzeward\n' >"$cfg"
+  before=$(cat "$cfg")
+  out=$(env "$stub=1" STUB_IDP_ENV=1 PATH="$t/bin:$PATH" bash "$session" start 2>&1)
+  rc=$?
+  mkdir -p "$repo/.dev/idp"
+  if [ "$rc" != 0 ] && [[ $out == *"cannot back up A's configuration"*"session start failed"* ]] &&
+    [ "$(cat "$cfg")" = "$before" ] && [ ! -e "$cfg.fixture" ] && [ ! -e "$cfg.fixture.partial" ]; then
+    ok "a failed backup of A's configuration ($stub) leaves the configuration as it was, and no backup"
+  else bad "start, failed backup ($stub): rc=$rc cfg=$(head -c 40 "$cfg"): $out"; fi
+done
+
+# The daemon record cannot be written: start leaves no participant state, which neither start nor
+# stop would accept afterwards, and starts nothing.
 setup
 rm -f "$cfg.fixture"
 rm -rf "$repo/.dev/idp" "$repo/.dev/participants"
-printf '    issuer: http://issuer:5556\n    plainHTTPHosts: [issuer]\n    audience: bronzeward\n' >"$cfg"
-before=$(cat "$cfg")
-out=$(STUB_CP_FAIL=1 STUB_IDP_ENV=1 run start)
+out=$(STUB_DAEMON_FAIL=1 run start)
 rc=$?
+calls=$(tr '\n' ';' <"$STUB_LOG")
 mkdir -p "$repo/.dev/idp"
-if [ "$rc" != 0 ] && [[ $out == *"session start failed"* ]] && [ "$(cat "$cfg")" = "$before" ] &&
-  [ ! -e "$cfg.fixture" ] && [ ! -e "$cfg.fixture.partial" ]; then
-  ok "a failed copy of A's configuration to its backup leaves the configuration as it was"
-else bad "start, failed backup copy: rc=$rc cfg=$(head -c 40 "$cfg"): $out"; fi
+if [ "$rc" != 0 ] && [[ $out == *"daemon: Is a directory"* ]] && [ ! -e "$repo/.dev/participants" ] && [ -z "$calls" ]; then
+  ok "a failed write of the daemon record leaves no participant state, and starts nothing"
+else bad "start, daemon record fails: rc=$rc calls=$calls: $out"; fi
+mkdir -p "$repo/.dev/participants"
 
 # A start that fails after it spawns the web host, because the web host's pid record cannot be
 # written: the rollback ends the web host by the pid that start captured, and its port is free. The

@@ -88,11 +88,10 @@ trust_zitadel() {
   if [ -f "$cfg.fixture" ]; then
     cp -- "$cfg.fixture" "$cfg"
   else
-    cp -- "$cfg" "$cfg.fixture.partial" || {
+    { cp -- "$cfg" "$cfg.fixture.partial" && mv --no-target-directory -- "$cfg.fixture.partial" "$cfg.fixture"; } || {
       rm -f -- "$cfg.fixture.partial"
-      die "cannot copy A's configuration to $cfg.fixture.partial; A's configuration is unchanged"
+      die "cannot back up A's configuration to $cfg.fixture; A's configuration is unchanged"
     }
-    mv --no-target-directory -- "$cfg.fixture.partial" "$cfg.fixture"
   fi
   while IFS= read -r line; do
     case $line in
@@ -148,6 +147,9 @@ start() {
   # daemon that this start acts on (lib.sh pins the context for this process) before any start step.
   local daemon
   daemon=$(docker info --format '{{.ID}}') && [ -n "$daemon" ] || die "the Docker daemon does not answer; nothing was started"
+  # Until the rollback trap below, a failure removes the participant state: start refused an
+  # existing one, so it is this start's, and stop refuses it without a complete daemon record.
+  trap 'rm -rf -- "$part"' EXIT
   mkdir -p -- "$part/bin" "$part/home"
   chmod 700 "$part"
   printf '%s\n' "$daemon" >"$part/daemon"
@@ -416,8 +418,11 @@ stop() {
       fi
       "$bin/inject" start A >/dev/null || die "cannot start $BW_A on bin/up's configuration; run session stop again"
     fi
-    rm -f -- "$cfg.restart" "$cfg.fixture" "$cfg.partial"
+    rm -f -- "$cfg.restart" "$cfg.fixture"
   fi
+  # Every temporary file of a write beside A's configuration, by pattern, with or without a backup:
+  # a failed start can leave one at any step.
+  rm -f -- "$cfg".partial "$cfg".*.partial
   # Only the provider this session's start made is taken down. Another provider state can be
   # stale, from another Docker daemon, where dev-idp down would remove another checkout's provider.
   if [ -f "$part/idp-started" ] && [ -d "$idp" ]; then "$FIXTURES/dev-idp" down; fi
