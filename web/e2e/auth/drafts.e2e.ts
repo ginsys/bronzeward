@@ -291,6 +291,9 @@ describe("the draft editor (#339)", () => {
     await openDraft(id);
     await select(name);
     await edit("amb-02");
+    // The mark makes the ingestion write the new label's value as a generation: with no extracted
+    // value it writes nothing to the provider, and the hold holds nothing.
+    await pane().$("label*=Marks").$("textarea").setValue("doc[0]/machine/nodeLabels/example.test~1amb-02");
     // The first request's ingestion holds its claim while the provider holds its KV write.
     expect((await fetch(`${CONTROL}/bao/hold?ms=6000`, { method: "POST" })).status).toBe(200);
     await save(id, name, ["pass-drop"]);
