@@ -195,6 +195,22 @@ call POST /recovery/entries "$recovery" "$(jq -nc --arg s "$stopped_at" '{
   jq '{previousEpoch, epoch, machines, operations}'
 ```
 
+With `bronzewardctl`, a person signed in as `recovery-admin` records the entry on the recovery
+instance. The command states what the entry does, then sends it only when you type `enter`. There
+is no `--yes`, and `--no-input` sends nothing. It reads the process as started for recovery or
+normally from the answer.
+
+```sh
+bronzewardctl recovery enter --stopped-at 2026-10-18T08:10:00Z --reason "database and OpenBao restored" \
+  --restored family=database,backup=pg-t.dump,taken-at=2026-10-18T08:00:00Z \
+  --restored family=provider,backup=bao-t.snap,taken-at=2026-10-18T08:00:05Z
+```
+
+If the answer is lost, the command prints the key and principal of the request, and no epoch,
+because the entry is sent without one. Repeat it with `--idempotency-key` and `--expect-principal`.
+`recovery status` shows the epoch, the mode and each scope's next step. The CLI does not restore a
+backup, edit `auth.deniedSubjects` or reissue a token.
+
 The families are `database`, `provider` and `credential-store`. The entry starts a new epoch. A
 process started before it may issue no more ownership: its commitments, takeovers, job claims,
 ingestions, marks and recovery acts get `503 epoch-superseded`, though it may still answer reads.
@@ -208,7 +224,9 @@ Restart every such process. The entry also:
 
 Then, through the recovery instance:
 
-- Re-record every revocation the restore erased (`POST /identity-revocations`). Keep every subject
+- Re-record every revocation the restore erased (`POST /identity-revocations`, or `bronzewardctl
+  identity revoke`, which states that a revocation is permanent, adds no `auth.deniedSubjects`
+  entry and reissues no token, and sends only when you type the identity back). Keep every subject
   in `auth.deniedSubjects`, including the ones you just added: the list survives a later restore,
   which could erase the revocation again.
 - Reissue every automation token with `bronzeward token rotate`. A token issued before the entry
@@ -281,6 +299,7 @@ Each machine goes `pre-restore-unaccounted`, then `unresolved` or `blocked`, the
 call POST /recovery/exits "$recovery" '{"facts": {}}' recovery-exit-first | jq .scopes
 ```
 
-The exit is refused with `409 conflict` while any scope is unreleased. Restored operations are never
+`bronzewardctl recovery exit` does the same and, when it is refused, names the first scope not
+released. The exit is refused with `409 conflict` while any scope is unreleased. Restored operations are never
 retried. An approval recorded before the entry is refused at commitment (`the approval is of an
 earlier epoch`): plan and approve again.
