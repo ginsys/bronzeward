@@ -3,6 +3,7 @@ package clitest
 import (
 	"bytes"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -44,15 +45,39 @@ func (sb *slowBao) retire(t *testing.T) {
 	status, _, err := sb.b.Do(sb.b.Admin(), http.MethodPost, "/v1/transit/keys/"+sb.digest+"/rotate", nil)
 	if err == nil && status/100 == 2 {
 		var body []byte
+		var latest string
 		status, body, err = sb.b.Do(sb.b.Admin(), http.MethodGet, "/v1/transit/keys/"+sb.digest, nil)
-		latest := regexp.MustCompile(`"latest_version":(\d+)`).FindSubmatch(body)
-		if err == nil && latest != nil {
+		if err == nil && status/100 == 2 {
+			latest, err = latestVersion(body)
+		}
+		if err == nil && status/100 == 2 {
 			status, _, err = sb.b.Do(sb.b.Admin(), http.MethodPost, "/v1/transit/keys/"+sb.digest+"/config",
-				map[string]any{"min_encryption_version": string(latest[1])})
+				map[string]any{"min_encryption_version": latest})
 		}
 	}
 	if err != nil || status/100 != 2 {
 		t.Errorf("retiring the digest key's versions: status %d, %v", status, err)
+	}
+}
+
+// latestVersion is the latest_version of a Transit key read. Without one, retire cannot raise the
+// minimum, and the case would run without the fault it depends on.
+func latestVersion(body []byte) (string, error) {
+	m := regexp.MustCompile(`"latest_version":(\d+)`).FindSubmatch(body)
+	if m == nil {
+		return "", errors.New("the key read has no latest_version")
+	}
+	return string(m[1]), nil
+}
+
+// TestLatestVersion checks that a key read without latest_version is an error, so that retire
+// reports it instead of skipping the minimum it raises. It needs no server.
+func TestLatestVersion(t *testing.T) {
+	if v, err := latestVersion([]byte(`{"data":{"latest_version":3,"min_encryption_version":0}}`)); v != "3" || err != nil {
+		t.Errorf("%q, %v; want 3", v, err)
+	}
+	if v, err := latestVersion([]byte(`{"data":{"min_encryption_version":0}}`)); err == nil {
+		t.Errorf("%q, no error; want the missing latest_version reported", v)
 	}
 }
 

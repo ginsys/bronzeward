@@ -132,6 +132,33 @@ func TestMarkCarriageReturn(t *testing.T) {
 	}
 }
 
+// TestMarkRefusals checks that a mark the CLI cannot send as given is refused by its position,
+// never its text (PA §9.3): one that is not UTF-8, which json.Marshal would turn into U+FFFD, and a
+// terminal line long enough that canonical mode may have cut it short. The same line from a file
+// or a pipe is taken.
+func TestMarkRefusals(t *testing.T) {
+	long := "machine.files." + strings.Repeat("k", terminalLine)
+	for _, c := range []struct {
+		name, in string
+		terminal bool
+		says     string
+	}{
+		{"not UTF-8", "machine.files\nmachine.nodeLabels.BWSYNTH-\xff\n\n", false, "mark 2 is not UTF-8 text; nothing was sent"},
+		{"a long terminal line", "machine.files\n" + long + "\n\n", true, "mark 2 is 4095 bytes or more, which a terminal can cut short"},
+		{"one byte under the terminal limit", "machine.files\n" + long[:terminalLine-1] + "\n\n", true, ""},
+		{"a long line from a pipe", "machine.files\n" + long + "\n\n", false, ""},
+	} {
+		m, err := scanMarks(strings.NewReader(c.in), c.terminal)
+		switch {
+		case c.says == "" && (err != nil || len(m) != 2):
+			t.Errorf("%s: %d marks, %v; want 2 marks", c.name, len(m), err)
+		case c.says != "" && (err == nil || !strings.Contains(err.Error(), c.says) || strings.Contains(err.Error(), "BWSYNTH") ||
+			strings.Contains(err.Error(), "kkkk")):
+			t.Errorf("%s: %d marks, %v; want the refusal %q, with no mark text", c.name, len(m), err, c.says)
+		}
+	}
+}
+
 // TestProtectedOnLinuxOnly checks that the protected commands refuse outside Linux (#256
 // BW-256-env-1), where the guard is not yet verified.
 func TestProtectedOnLinuxOnly(t *testing.T) {
