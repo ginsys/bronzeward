@@ -131,7 +131,8 @@ the slot rule are in [CONTRIBUTING.md](../CONTRIBUTING.md#several-instances-on-o
 - **Seed.** One project `bronzeward` with the five role keys of `examples/bronzeward.yaml`; the
   Native app `bronzewardctl` (redirect `http://127.0.0.1/callback` on any port, no secret, code,
   refresh and device grants); the User Agent app `bronzeward-web` (callback and post-logout URI
-  under `http://localhost:58443`, or `BW_DEV_IDP_WEB_ORIGIN`); the humans of `issuer.Humans`
+  under `http://localhost:$BW_E2E_PORT_BASE`, default `http://localhost:16000`, the browser
+  tests' page, or under `BW_DEV_IDP_WEB_ORIGIN`); the humans of `issuer.Humans`
   with those roles as grants, and `h-none` with none. Access tokens live 5 minutes, refresh
   tokens 10 minutes idle and 1 hour absolute, a device code 1 minute (Zitadel's default is 5).
 - **Groups.** Zitadel's roles claim is an object, which the server refuses as `groups`, and the

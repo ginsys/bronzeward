@@ -16,8 +16,9 @@ cd "$(dirname "$0")/.."
 net=$BW_DEV_IDP_NET pg=$BW_DEV_IDP_PG_CONTAINER zitadel=$BW_DEV_IDP_CONTAINER groups=$BW_DEV_IDP_GROUPS_CONTAINER
 state=$PWD/$BW_DEV_IDP_DIR
 issuer=$BW_DEV_IDP_ISSUER
-# The browser tests' page port is theirs (ginsys/bronzeward#459), not the instance's.
-web=${BW_DEV_IDP_WEB_ORIGIN:-http://localhost:58443}
+# The web origin is the browser tests' page, the first port of their block (web/e2e/ports.ts), which
+# BW_E2E_PORT_BASE selects; mise run browser-auth refuses a provider registered for another page.
+web=${BW_DEV_IDP_WEB_ORIGIN:-http://localhost:${BW_E2E_PORT_BASE:-16000}}
 password='Synthetic-Pass-1!'
 # The device code's lifetime in seconds. idp.env carries it, and the self-test asserts it.
 devicelife=60
@@ -111,8 +112,12 @@ zitadel_failed() {
 }
 
 up() {
-  local c ids arch out
+  local c ids arch out seeded
   if ours; then
+    # The web client's redirect URIs were seeded for one origin and are not changed afterwards.
+    seeded=$(sed -n 's/^BW_TEST_IDP_WEB_ORIGIN=//p' "$state/idp.env")
+    [ "$seeded" = "$web" ] ||
+      die "the running provider's web origin is $seeded, not $web; run ${BW_DEV_PFX}mise run dev-idp-down, then ${BW_DEV_PFX}mise run dev-idp"
     summary
     return
   fi
