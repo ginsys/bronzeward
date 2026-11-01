@@ -443,3 +443,62 @@ describe("[Repeat exactly]", () => {
     expect(p.writes.repeatable(w)).toBe(false);
   });
 });
+
+describe("a notice once shown stays until dismissed (B11)", () => {
+  test("Add cluster loses its first answer and an automatic repeat succeeds: the notice shows the result until dismissed", async () => {
+    let shown: Write[] = [];
+    const p = page([new TypeError("Failed to fetch"), () => ((shown = p.writes.notices), created({ id: "c1" }, true))]);
+    const w = spec();
+    expect(await p.writes.submit(w)).toMatchObject({ kind: "done", replayed: true });
+    expect(shown).toEqual([w]);
+    expect(p.writes.open).toEqual([]);
+    expect(p.writes.notices).toEqual([w]);
+    p.writes.dismiss(w);
+    expect(p.writes.notices).toEqual([]);
+  });
+
+  test("set aside while its answer is on its way, a write that then settles keeps its notice until dismissed", async () => {
+    let answer: (r: Response) => void = () => {};
+    const p = page([() => new Promise<Response>((r) => (answer = r)) as unknown as Response]);
+    const w = spec();
+    const run = p.writes.submit(w);
+    await vi.waitFor(() => expect(p.writesSent()).toHaveLength(1));
+    p.writes.setAside(EPOCH_CHANGED_ASIDE);
+    expect(p.writes.notices).toEqual([w]);
+    answer(problem(422, "invalid-request"));
+    expect((await run).kind).toBe("refused");
+    expect(p.writes.notices).toEqual([w]);
+    p.writes.dismiss(w);
+    expect(p.writes.notices).toEqual([]);
+  });
+
+  test("a 500 the repeat answers as done keeps its notice too", async () => {
+    const p = page([problem(500, "internal-error"), created({ id: "c1" }, true)]);
+    const w = spec();
+    await p.writes.submit(w);
+    expect(p.writes.notices).toEqual([w]);
+  });
+});
+
+describe("a body that never ends does not hold a write", () => {
+  const stalled = (status: number, type: string, epoch: string | null = EPOCH) =>
+    new Response(new ReadableStream({ start: () => {} }), { status, headers: { "Content-Type": type, ...(epoch === null ? {} : { "Bronzeward-Epoch": epoch }) } });
+
+  test("after a dropped write, the confirming read's success names the epoch in its headers: the repeat is sent and settles", async () => {
+    const p = page([new TypeError("Failed to fetch"), created({ id: "c1" }, true)], [stalled(200, "application/json"), stalled(200, "application/json")]);
+    expect(await p.writes.submit(spec())).toMatchObject({ kind: "done", replayed: true });
+    expect(p.sent.map((s) => s.path)).toEqual(["/recovery", "/clusters", "/recovery", "/clusters"]);
+  });
+
+  test("a confirming read refused other than for the sign-in is not waited for: the write is set aside", async () => {
+    const proxy = await submitWith(stalled(502, "text/html", null));
+    expect(proxy).toEqual({ kind: "set-aside", why: NO_EPOCH, ambiguous: true });
+    const busy = await submitWith(stalled(503, "application/problem+json", null));
+    expect(busy).toEqual({ kind: "set-aside", why: NO_EPOCH, ambiguous: true });
+  });
+
+  async function submitWith(confirming: Response) {
+    const p = page([new TypeError("Failed to fetch")], [EPOCH, confirming]);
+    return p.writes.submit(spec());
+  }
+});

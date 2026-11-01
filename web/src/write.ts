@@ -68,9 +68,9 @@ export class Write {
   outcome: Outcome | undefined;
   // While [Repeat exactly] runs: the unknown outcome it repeats, which the notice keeps showing.
   repeating: Extract<Outcome, { kind: "unknown" }> | undefined;
-  // A [Repeat exactly] settled it: the notice, where the repeat started, shows the result until
-  // dismissed, since the form that sent it may no longer be shown.
-  repeated = false;
+  // The notice showed it before it settled (unknown, set aside, or a [Repeat exactly]): the notice
+  // shows its result until dismissed (B11), since the form that sent it may no longer be shown.
+  kept = false;
   // The run in flight; a second submit returns it and sends nothing.
   running: Promise<Outcome> | undefined;
   constructor(readonly spec: WriteSpec) {
@@ -117,9 +117,10 @@ export class Writes {
     return [...this.all].filter(isOpen);
   }
 
-  // The writes the notices show: the open ones, and each settled [Repeat exactly] until dismissed.
+  // The writes the notices show: the open ones, and each one a notice showed before it settled,
+  // until dismissed.
   get notices(): Write[] {
-    return [...this.all].filter((w) => isOpen(w) || w.repeated);
+    return [...this.all].filter((w) => isOpen(w) || w.kept);
   }
 
   // Sends `w`, or returns the run in flight: a second submit of the same logical write sends nothing.
@@ -148,12 +149,15 @@ export class Writes {
       // offered for repeating; an answer still settles it.
       const o: Outcome = r.kind === "unknown" && w.aside !== undefined ? { kind: "set-aside", why: w.aside, ambiguous: true } : r;
       if (o.kind === "unknown") w.ambiguous = true;
+      // Each state the notice shows while the run is in flight (see forms.tsx WriteNotices).
+      const shown = repeat || w.doubt !== undefined || w.aside !== undefined;
       w.outcome = o;
       w.repeating = undefined;
       w.doubt = undefined;
       w.running = undefined;
+      // The one removal before a dismissal: a write no notice showed, which its form reports.
       if (!isOpen(w)) {
-        if (repeat) w.repeated = true;
+        if (shown) w.kept = true;
         else this.all.delete(w);
       }
       this.changed();
@@ -303,7 +307,7 @@ export class Writes {
   // ends the page through `end`.
   private async confirm(client: Client, end: End): Promise<string | undefined> {
     for (let renewed = false; ; renewed = true) {
-      const a = await client.attempt("GET", "/recovery", {}, undefined, end);
+      const a = await client.attempt("GET", "/recovery", {}, undefined, end, true);
       if (end.e !== undefined) return undefined;
       const p = a === undefined ? null : problemOf(a.data);
       const code = p?.type.slice(PREFIX.length);

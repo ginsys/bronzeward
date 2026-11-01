@@ -42,14 +42,14 @@ function settled(o: Outcome): string {
   }
 }
 
-// Shown as soon as a write's outcome is unknown, until dismissed (B11), and after a [Repeat exactly]
-// settles, with its result, until dismissed. `go` opens the resource.
+// Shown as soon as a write's outcome is unknown, until dismissed (B11). A write this notice showed
+// keeps it after it settles, with its result, until dismissed. `go` opens the resource.
 export function WriteNotices({ go }: { go: (to: string) => void }) {
   const writes = useWrites();
   return writes?.notices.map((w) => {
     const o = w.outcome;
     const props = { onShow: () => go(w.spec.resource), detail: detail(w), onDismiss: () => writes.dismiss(w), testid: "write-notice" };
-    if (o !== undefined && w.repeated) return <Repeated key={w.key} line={settled(o)} {...props} detail={` Key ${w.key}, ${w.route}. Read ${w.spec.resource}.`} />;
+    if (o !== undefined && w.kept) return <Repeated key={w.key} line={settled(o)} {...props} detail={` Key ${w.key}, ${w.route}. Read ${w.spec.resource}.`} />;
     if (o?.kind === "unknown") return <Unknown key={w.key} why={o.why} onRepeat={writes.repeatable(w) ? () => void writes.submit(w) : undefined} {...props} />;
     if (o?.kind === "set-aside") return <SetAside key={w.key} why={o.why} {...props} />;
     // Set aside while its answer is still on its way: shown at once, with no dismissal until that

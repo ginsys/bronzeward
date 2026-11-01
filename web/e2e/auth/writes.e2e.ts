@@ -96,7 +96,10 @@ describe("the write views (#338)", () => {
     const name = await add(["drop"]);
     await expect(result()).toHaveText(expect.stringContaining(`Cluster ${name} recorded as`), { wait: 20_000 });
     expect((await result().getText()).includes(REPLAYED)).toBe(false);
-    await oneWrite(2);
+    const { key } = await oneWrite(2);
+    // The drop showed the unknown notice, so it shows the result until dismissed (B11).
+    expect(await notice().getText()).toContain(`Saved (the server answered 201). Key ${key}`);
+    await notice().parentElement().$("button=Dismiss").click();
     expect(await notice().isExisting()).toBe(false);
   });
 
