@@ -20,14 +20,16 @@ function created(body: unknown, replayed = false): Response {
 const recovery = (epoch: string | null = EPOCH) =>
   new Response(JSON.stringify({ mode: "normal" }), { status: 200, headers: { "Content-Type": "application/json", ...(epoch === null ? {} : { "Bronzeward-Epoch": epoch }) } });
 
-// A page whose writes are answered from `answers` and whose GET /recovery from `epochs`.
-function page(answers: (Response | Error)[], epochs: (string | null)[] = [], opts: ClientOptions = {}) {
+// A page whose writes are answered from `answers`, a function called at its send, and whose
+// GET /recovery from `epochs`.
+function page(answers: (Response | Error | (() => Response | Error))[], epochs: (string | null)[] = [], opts: ClientOptions = {}) {
   const sent: { method: string; path: string; headers: Record<string, string>; body: unknown }[] = [];
   const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
     const path = String(url).replace("/api/v1", "");
     const method = init?.method ?? "GET";
     sent.push({ method, path, headers: { ...(init?.headers as Record<string, string>) }, body: init?.body });
-    const next = path === "/recovery" ? (epochs.length > 0 ? recovery(epochs.shift()!) : recovery()) : answers.shift();
+    const given = path === "/recovery" ? (epochs.length > 0 ? recovery(epochs.shift()!) : recovery()) : answers.shift();
+    const next = typeof given === "function" ? given() : given;
     if (next === undefined) throw new Error("no answer left");
     if (next instanceof Error) throw next;
     return next;
@@ -232,6 +234,16 @@ describe("set aside (§8.4 item 3, §8.5 item 2, journeys §8)", () => {
     expect(unknown.outcome).toEqual({ kind: "set-aside", why: EPOCH_CHANGED_ASIDE, ambiguous: true });
     expect(p.writes.repeatable(unknown)).toBe(false);
     expect(await p.writes.submit(unknown)).toBe(unknown.outcome);
+  });
+
+  test("set aside during the last repeat, a write that then ends without an answer is set aside, not unknown", async () => {
+    const drop = () => new TypeError("Failed to fetch");
+    const p = page([drop(), drop(), drop(), () => (p.writes.setAside(EPOCH_CHANGED_ASIDE), drop())]);
+    const w = spec();
+    expect(await p.writes.submit(w)).toEqual({ kind: "set-aside", why: EPOCH_CHANGED_ASIDE, ambiguous: true });
+    expect(p.writesSent()).toHaveLength(4);
+    expect(p.writes.repeatable(w)).toBe(false);
+    expect(p.writes.open).toEqual([w]);
   });
 });
 
