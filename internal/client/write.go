@@ -191,8 +191,15 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 			// Decided before the idempotency lookup, or not by Bronzeward: nothing said of an earlier
 			// attempt (§8.2).
 			return nil, c.after(ambiguous, w, u, a.err)
+		case w.Repeat != nil:
+			// An operator's T10 repeat, refused: the server checks the input before its lookup, and
+			// a lookup that found the key's record would have replayed it, so this send did nothing
+			// and says nothing of the attempt it repeats (§8.2; AMB-04, AMB-13).
+			u.Why = "this send was refused (" + printable(a.err.Error()) + ") and did nothing; the original outcome is still unknown"
+			return nil, c.unknown(w, u)
 		default:
-			// This send's own answer: a repeat that found the key's record would have replayed it.
+			// This send's own answer: an identical earlier attempt in this process met the same input
+			// checks, and a repeat that found the key's record would have replayed it.
 			return nil, a.err
 		}
 	}
