@@ -72,15 +72,22 @@ func TestRemoteTextInDraftDiscard(t *testing.T) {
 // of the entry, and that text from the server is escaped too. The sweep cannot run them, because it
 // keeps no ETag for a draft.
 func TestRemoteTextInDraftSourceWrites(t *testing.T) {
-	profile, machine := "p"+tail, "m"+tail
+	profile, machine, fragment := "p"+tail, "m"+tail, "f"+tail
+	doc := t.TempDir() + "/doc.yaml"
+	if err := os.WriteFile(doc, []byte("machine:\n  nodeLabels:\n    BWSYNTH: x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	// A draft whose state is not "open" keeps no ETag, so draft show answers an open one.
 	body := func(state string) []byte {
 		b, _ := json.Marshal(map[string]any{"id": "d1", "cluster": "c1", "title": "t", "state": state, "revision": 2, "entries": []any{
 			map[string]any{"kind": "profile", "name": profile, "base": 1, "head": "prv_h", "revision": "prv_9" + tail},
 			map[string]any{"kind": "assignment", "machine": machine, "base": 1, "head": "asr_h", "revision": "asr_9" + tail},
+			map[string]any{"kind": "fragment", "name": fragment, "base": 1, "head": "frv_h", "revision": "frv_9" + tail},
 		}})
 		return b
 	}
+	// The answer to fragment set names the draft and the entry's revision, both remote text.
+	update, _ := json.Marshal(map[string]any{"draft": "d" + tail, "entry": map[string]any{"kind": "fragment", "name": fragment, "base": 1, "head": "frv_h", "revision": "frv_8" + tail}})
 	var unknown, plain atomic.Bool // a write is redirected, an outcome unknown, when set
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Bronzeward-Epoch", "ep_1")
@@ -97,6 +104,8 @@ func TestRemoteTextInDraftSourceWrites(t *testing.T) {
 			w.Write(body("open" + tail))
 		case unknown.Load():
 			http.Redirect(w, r, "https://x.example.invalid/", http.StatusTemporaryRedirect)
+		case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/api/v1/drafts/d1/fragments/"):
+			w.Write(update)
 		default:
 			w.Write(body("open"))
 		}
@@ -124,6 +133,10 @@ func TestRemoteTextInDraftSourceWrites(t *testing.T) {
 			"Assignment saved (draft revision 2).", "with assignment m" + tailEsc + " at asr_9"},
 		{[]string{"assignment", "rm", machine, "--draft", "d1"},
 			"Assignment m" + tailEsc + " removed from draft d1 (draft revision 2).", "with assignment m" + tailEsc + " at asr_9"},
+		{[]string{"fragment", "set", fragment, "--draft", "d1", "--layer", "role", "--file", doc},
+			"Fragment f" + tailEsc + " saved in draft d" + tailEsc + " (revision frv_8" + tailEsc + "; draft revision 2).", "with fragment f" + tailEsc + " at frv_9"},
+		{[]string{"fragment", "rm", fragment, "--draft", "d1"},
+			"Fragment f" + tailEsc + " removed from draft d1 (draft revision 2).", "with fragment f" + tailEsc + " at frv_9"},
 	} {
 		name := strings.Join(c.args[:2], " ")
 		for _, lost := range []bool{false, true} {
