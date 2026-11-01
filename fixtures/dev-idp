@@ -142,6 +142,14 @@ up() {
     seeded=$(sed -n 's/^BW_TEST_IDP_WEB_ORIGIN=//p' "$state/idp.env")
     [ "$seeded" = "$web" ] ||
       die "the running provider's web origin is $seeded, not $web; run ${BW_DEV_PFX}mise run dev-idp-down, then ${BW_DEV_PFX}mise run dev-idp"
+    # The mode is set at the start too: the device code's lifetime, and the login page with
+    # --participants only.
+    seeded=$(sed -n 's/^BW_TEST_IDP_DEVICE_LIFETIME=//p' "$state/idp.env")
+    if [ "$seeded" != "$devicelife" ] || { [ -n "$participants" ] && ! present "$login"; }; then
+      local was=with
+      [ -n "$participants" ] && was=without
+      die "the running provider was started $was --participants; run ${BW_DEV_PFX}mise run dev-idp-down, then start it again"
+    fi
     summary
     return
   fi

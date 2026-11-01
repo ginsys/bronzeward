@@ -15,13 +15,20 @@ const repo = new URL("../../", import.meta.url).pathname;
 const part = join(repo, ".dev/participants");
 const require = createRequire(join(repo, "web/package.json"));
 const { remote } = require("webdriverio");
+const web = "http://localhost:58443";
+
+// Every line this driver prints goes through out, which removes the password and anything shaped
+// like a session password. A WebDriver error can name the failed command's arguments, and the
+// password is one of them (setValue).
+const out = (line) => console.log(String(line).replaceAll(password, "[password]").replace(/BWSYNTH-pw-[a-z0-9]{8}-[0-9]{4}/g, "[password]"));
 
 const browser = await remote({
-  logLevel: "error",
+  // No WebDriver log of its own: a command log would carry the password.
+  logLevel: "silent",
   // A WebDriver session is always a fresh profile, so nothing a page stores outlives it.
   capabilities: { browserName: "chrome", "goog:chromeOptions": { args: ["--headless=new"] } },
 });
-const say = async (what) => console.log(`${what}: ${await browser.getTitle()} <${new URL(await browser.getUrl()).pathname}>`);
+const say = async (what) => out(`${what}: ${await browser.getTitle()} <${new URL(await browser.getUrl()).pathname}>`);
 
 // fill <selector> <value>, then the page's submit button.
 async function submit(selector, value) {
@@ -61,25 +68,26 @@ try {
   const url = out.match(/open (\S+) on any device/)?.[1];
   const code = out.match(/enter the code (\S+?)\.\s/)?.[1];
   if (!url || !code) throw new Error("the CLI printed no device address and code");
-  console.log(`CLI device address: ${new URL(url).pathname}`);
+  out(`CLI device address: ${new URL(url).pathname}`);
   await browser.url(url);
   await say("device page");
   // Zitadel's own device page (/ui/login/device), which then hands over to the login page.
   await submit('input[name="user_code"]', code);
   await signIn();
   const rc = await done;
-  console.log(`CLI login exit: ${rc}`);
+  out(`CLI login exit: ${rc}`);
   failed ||= rc !== 0;
   const who = spawn(ctl, ["--no-input", "whoami"], { env, stdio: ["ignore", "pipe", "inherit"] });
   let whoOut = "";
   who.stdout.on("data", (d) => (whoOut += d));
   const whoRc = await new Promise((resolve) => who.on("exit", resolve));
-  console.log(`CLI whoami exit ${whoRc}:\n${whoOut}`);
+  out(`CLI whoami exit ${whoRc}:\n${whoOut}`);
   failed ||= whoRc !== 0;
 
-  // 2. The web interface, authorization code.
+  // 2. The web interface, authorization code. Signed in means back on the web host's origin, with
+  // the shell's "Signed in as" line, which shows only after the server answered the identity read.
   await browser.reloadSession();
-  await browser.url("http://localhost:58443/");
+  await browser.url(`${web}/`);
   await browser.pause(2000);
   await say("web start");
   const signin = await browser.$("button*=Sign in");
@@ -87,12 +95,14 @@ try {
   await signIn();
   await browser.pause(3000);
   await say("web after sign-in");
-  const text = await (await browser.$("body")).getText();
-  console.log(`web shows the human: ${text.includes(human)}`);
-  failed ||= !new URL(await browser.getUrl()).host.startsWith("localhost:58443");
+  const origin = new URL(await browser.getUrl()).origin;
+  const principal = await browser.$('[data-testid="principal"]');
+  const signedIn = await principal.isExisting();
+  out(`web origin ${origin}, ${signedIn ? await principal.getText() : "not signed in"}`);
+  failed ||= origin !== web || !signedIn;
 } catch (e) {
   failed = true;
-  console.log(`failed: ${e.message}`);
+  out(`failed: ${e.message}`);
   await say("page at the failure").catch(() => {});
 } finally {
   await browser.deleteSession();
