@@ -4,7 +4,7 @@
 
 import { createContext, type FormEvent, type ReactNode, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { components } from "./api/v1";
-import { Ref, short, useList, useReads } from "./list.tsx";
+import { type Dropped, type Listed, type Load, Ref, short, useList, usePending, useReads } from "./list.tsx";
 import type { Cluster, Machine } from "./machines.tsx";
 import { Action, useOffline } from "./shell.tsx";
 import type { Problem } from "./request.ts";
@@ -230,6 +230,26 @@ export function AddCluster() {
   );
 }
 
+// Record machine's cluster choice. A cluster read that ended without data shows why, as the list
+// views do (§8.2): its problem's title, detail and instance, or what the route accepts.
+export function ClusterField({ clusters, chosen, choose }: { clusters: Load<Listed<Cluster>> | Dropped; chosen: string; choose: (id: string) => void }) {
+  const pending = usePending(clusters, "clusters");
+  const options = clusters.kind === "ok" ? clusters.data.items : [];
+  return (
+    <>
+      <p>
+        <label>Cluster:{" "}
+          <select name="cluster" required value={chosen} onChange={(e) => choose(e.target.value)}>
+            <option value="" disabled>{clusters.kind === "ok" ? "choose" : "clusters not read"}</option>
+            {options.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </label>
+      </p>
+      {clusters.kind !== "loading" && pending}
+    </>
+  );
+}
+
 export function RecordMachine({ query }: { query: string }) {
   const [w, send] = useSend();
   const [clusters] = useList<Cluster>("/clusters", "", true);
@@ -251,19 +271,11 @@ export function RecordMachine({ query }: { query: string }) {
       </>
     );
   };
-  const options = clusters.kind === "ok" ? clusters.data.items : [];
   return (
     <>
       <h2>Record machine</h2>
       <Form label="Record machine" onSubmit={submit} w={w} done={done}>
-        <p>
-          <label>Cluster:{" "}
-            <select name="cluster" required value={chosen} onChange={(e) => choose(e.target.value)}>
-              <option value="" disabled>{clusters.kind === "ok" ? "choose" : "clusters not read"}</option>
-              {options.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </label>
-        </p>
+        <ClusterField clusters={clusters} chosen={chosen} choose={choose} />
         <Text label="Talos node ID:" name="talosNodeId" hint="as talosctl get identity prints it" />
         <p>
           <label>Platform:{" "}
