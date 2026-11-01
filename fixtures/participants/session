@@ -43,26 +43,33 @@ idp_var() { sed -n "s/^$1=//p" "$idp/idp.env"; }
 
 # The processes that start spawns, by the pid that start captures at each spawn. A failed start
 # ends them from this list, because stop finds a process only by a record that start may have
-# failed to write. Until this shell reaps a child, no other process can get its pid.
+# failed to write. Bash reaps an exited child by itself, so its pid can then be another process's.
 spawned=()
 kill_spawned() {
-  local p s
+  local p
   for p in "${spawned[@]}"; do
+    webhost_runs "$p" || continue
     kill "$p" 2>/dev/null || continue
     for _ in $(seq 10); do
-      s=$(cat "/proc/$p/stat" 2>/dev/null) || break
-      s=${s##*) }
-      [ "${s%% *}" != Z ] || break
+      webhost_runs "$p" || break
       sleep 1
     done
-    kill -KILL "$p" 2>/dev/null || true
+    if webhost_runs "$p"; then kill -KILL "$p" 2>/dev/null || true; fi
     wait "$p" 2>/dev/null || true
   done
 }
 
-# webhost_runs <pid>: the process is this checkout's web host, by the command start runs.
+# webhost_runs <pid>: the process runs, and it is this checkout's web host. It is a child of this
+# shell (a failed start's web host, also before it runs its command), or it runs the command that
+# start runs. After the web host exits, another process can get its pid, and that process is
+# neither. The reads are builtins, so nothing forks between this check and a signal after it.
 webhost_runs() {
-  local arg0
+  local s arg0
+  { IFS= read -r s <"/proc/$1/stat"; } 2>/dev/null || return 1
+  s=${s##*) }
+  [ "${s%% *}" != Z ] || return 1
+  s=${s#* }
+  [ "${s%% *}" != "$$" ] || return 0
   { IFS= read -r -d '' arg0 <"/proc/$1/cmdline"; } 2>/dev/null && [ "$arg0" = "$part/webhost" ]
 }
 
