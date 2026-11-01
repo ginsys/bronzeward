@@ -377,54 +377,6 @@ func (e *env) releaseCmd(args []string) error {
 	})
 }
 
-func (e *env) planCmd(args []string) error {
-	var l listing
-	var state, machine string
-	f := map[string]*string{"state": &state, "machine": &machine}
-	v, pos, err := e.noun("plan", args, &l, filters(f))
-	if err != nil {
-		return err
-	}
-	if v == "list" {
-		return list(e, l, "/plans", values(f), nil, "PLAN\tSTATE\tMACHINE\tOPERATION\tRELEASE\tEXPIRES", "", func(w *tabwriter.Writer, p *apitypes.PlanBody) {
-			tf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", p.Id, p.State, p.Machine, p.Operation, p.Release, when(p.ExpiresAt))
-		})
-	}
-	return show(e, "/plans/"+url.PathEscape(pos[0]), func(w *tabwriter.Writer, p *apitypes.PlanBody) {
-		tf(w, "Plan %s\t%s\texpires %s\n", p.Id, p.State, when(p.ExpiresAt))
-		tf(w, "  Machine\t%s\tcluster %s, route %s\n", p.Machine, p.Cluster, p.Route)
-		tf(w, "  Operation\t%s, mode %s\n", p.Operation, or(p.Mode, "none"))
-		tf(w, "  Release\t%s\t(machine Desired: %s)\n", p.Release, or(p.DesiredRelease, "none"))
-		tf(w, "  Assignment\t%s\tbaseline revision %s, drift record: %s\n", p.AssignmentRevision, orInt(p.BaselineRevision, "none"), orInt(p.DriftRecord, "none"))
-		tf(w, "  Deadlines\ttransport %s, verification %s, observation age %ds, attempts %s\n", secs(p.TransportDeadlineSeconds),
-			secs(p.VerificationDeadlineSeconds), p.MaxObservationAgeSeconds, orInt(p.MaxAttempts, "-"))
-		tf(w, "  Created by\t%s (%s)\tepoch %s, %s\n", p.CreatedBy.Principal, p.CreatedBy.Role, p.Epoch, when(p.CreatedAt))
-		tf(w, "  Approval\t%s\tpolicy %s, committed operation %s\n", or(p.Approval, "none"), p.ApprovalPolicy, or(p.CommittedOperation, "none"))
-		ev := p.Evidence
-		fmt.Fprintln(w, "Evidence")
-		val := ev.Validation
-		tf(w, "  Validation\t%s at %s (contract %s, machinery %s, Kubernetes %s, %s)\n", val.Result, val.At, val.Contract,
-			val.MachineryVersion, val.KubernetesVersion, val.PlatformMode)
-		if ev.DryRun.Available {
-			fmt.Fprintln(w, "  Dry run\tavailable")
-		} else {
-			tf(w, "  Dry run\tnot available: %s\n", ev.DryRun.Reason)
-		}
-		if b := ev.Baseline; b != nil {
-			tf(w, "  Baseline\timport base %s, pending convergence: %t\n", b.ImportBaseRevision, b.PendingConvergence)
-		}
-		switch d := ev.Diff; {
-		case d == nil:
-			fmt.Fprintln(w, "  Diff\tnone")
-		case d.Withheld:
-			tf(w, "  Diff\twithheld, %s -> %s\n", d.From, d.To)
-		default:
-			tf(w, "  Diff\twhole redacted configuration, %s -> %s\n", d.From, d.To)
-			lines(w, "    ", d.Unified)
-		}
-	})
-}
-
 func (e *env) operationCmd(args []string) error {
 	var l listing
 	var plan, machine, state, kind string

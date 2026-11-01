@@ -97,10 +97,11 @@ func (e *env) publish(args []string) (err error) {
 // pr escapes the control characters of text the server chose (client-contracts.md §6 item 4).
 var pr = client.Printable
 
-// nextSteps names the release and, for each of its machines, the plan it needs: an adopt plan
-// hands over a machine with no Applied release, an apply-config plan the others. A machine whose
-// Desired release is another one, after a later publication or when a repeat recovered an earlier
-// one, gets no plan from this release. Plans are made with #258's commands; this names them.
+// nextSteps names the release and, for each of its machines, the plan create command it needs
+// (decision T25 of #258, journeys §5.3, §5.5): an adopt plan hands over a machine with no Applied
+// release, an apply-config plan the others. A machine whose Desired release is another one, after
+// a later publication or when a repeat recovered an earlier one, gets no plan from this release.
+// It names the commands and sends neither.
 func nextSteps(c *client.Client, release string) ([]string, error) {
 	r, err := c.Get("/releases/" + url.PathEscape(release))
 	if err != nil {
@@ -152,9 +153,11 @@ func nextSteps(c *client.Client, release string) ([]string, error) {
 			replaced++
 			lines = append(lines, fmt.Sprintf("  %s has Desired release %s, not this one: plan nothing for it from this release.", pr(m.Machine), pr(*x.Desired)))
 		case x.Applied == nil:
-			lines = append(lines, fmt.Sprintf("  %s has no Applied release: hand it over with an adopt plan.", pr(m.Machine)))
+			lines = append(lines, fmt.Sprintf("  %s has no Applied release: hand it over with an adopt plan:", pr(m.Machine)),
+				"    "+createLine(rel.Id, m.Machine, "adopt"))
 		default:
-			lines = append(lines, fmt.Sprintf("  %s has Applied release %s: plan an apply-config.", pr(m.Machine), pr(x.Applied.Release)))
+			lines = append(lines, fmt.Sprintf("  %s has Applied release %s: plan an apply-config:", pr(m.Machine), pr(x.Applied.Release)),
+				"    "+createLine(rel.Id, m.Machine, "apply-config"))
 		}
 	}
 	lines[0] = fmt.Sprintf("Publication succeeded: release %s is now Desired for %s. Nothing has been sent to any machine.", pr(rel.Id), machines)

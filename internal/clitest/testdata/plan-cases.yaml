@@ -1,0 +1,65 @@
+# Shared conformance case records (docs/spec/client-contracts.md §12) of plan creation (#352),
+# run by plans_test.go TestPlans against a disposable bronzeward serve with an OpenBao provider
+# (the test's, through baotest), behind the in-process TLS injector. Data is synthetic:
+# fixture-issuer tokens for the human h-all, who holds author, publisher and approver; a Talos
+# stand-in (talostest) on loopback for the seeded machine. The machine is published with an
+# assignment and has no Applied release, so each case sends plan create --operation adopt,
+# POST /api/v1/plans, a route without If-Match. Before each case every proposed plan of the
+# machine is cancelled, so the case's read shows only the case's own plan.
+#
+# A new epoch is committed in the database as a recovery entry does (write-cases.yaml).
+
+- id: AMB-03
+  setup: the machine published with an assignment, no Applied release, no proposed plan
+  action: plan create --release rel_... --machine mch_... --operation adopt
+  exchange:
+    - "POST /api/v1/plans, headers: Idempotency-Key, Bronzeward-Expected-Epoch"
+    - GET /api/v1/recovery
+    - POST /api/v1/plans, the same key
+  fault: the first POST reaches the server, which commits it; the injector replaces its 201 with 500 internal-error
+  expect:
+    client: repeats with the same key; shows the replayed plan as its own, through the plan display
+    server: answers the repeat 201 with Idempotent-Replayed true; one act, one proposed plan
+    shown: '"already done earlier; showing that result", "Plan pln_...", "nothing runs until an approver approves"; exit 0'
+    absent: [token in stdout, stderr, argv]
+
+- id: AMB-10
+  setup: as AMB-03
+  action: plan create ... --operation adopt, then the same command with the printed repeat flags and --expires-in 2h
+  exchange:
+    - four POSTs with one key, each closed by the injector before the server receives it
+    - the operator's repeat, which the server receives
+  fault: the injector closes every POST's connection without passing it on, so no record exists
+  expect:
+    client: exits 3 with outcome unknown; reports the changed input's answer as its own result, never as a replay; no client check can prevent this (§8.4 item 4)
+    server: executes the changed input as a new request; one act, one proposed plan expiring in 2 h
+    shown: '"shows no proposed plan for this release and operation"; then "Plan pln_...", "in 2h0m0s", without "already done earlier"; exit 0'
+    absent: [token in stdout, stderr, argv]
+
+- id: AMB-11
+  setup: as AMB-03; for the principal variant the token file holds h-author's sign-in
+  action: plan create ... with the printed --idempotency-key, --expect-epoch and --expect-principal
+  exchange:
+    - "principal variant: none"
+    - "epoch variant: GET /api/v1/recovery only"
+  fault: the first POST commits, its answer dropped, then a new epoch; then another principal signed in; then the epoch changed from the printed --expect-epoch
+  expect:
+    client: sets the first send aside; refuses each repeat before sending the write
+    server: one act and one proposed plan, from the first POST; none from the repeats
+    shown: '"set aside"; exit 3; then "not the given --expect-principal"; exit 2; then "not the given --expect-epoch"; exit 2'
+    absent: [token in stdout, stderr, argv]
+
+- id: AMB-12
+  setup: as AMB-03
+  action: plan create ... --operation adopt
+  exchange:
+    - POST /api/v1/plans, dropped before the server receives it
+    - GET /api/v1/recovery, still the reference epoch
+    - POST /api/v1/plans, the same key and Bronzeward-Expected-Epoch, after the new epoch
+    - GET /api/v1/plans?machine=mch_...
+  fault: the injector reads the first POST and closes its connection without forwarding it; it commits a new epoch when the repeat arrives
+  expect:
+    client: sets the write aside on 412 epoch-mismatch
+    server: answers 412 epoch-mismatch naming the new epoch; no act, no plan
+    shown: '"set aside, not repeated: the epoch is now ep_..., and this send committed nothing", "shows no proposed plan for this release and operation"; standard output empty; exit 3'
+    absent: [token in stdout, stderr, argv]
