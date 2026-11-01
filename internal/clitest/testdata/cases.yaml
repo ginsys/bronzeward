@@ -43,7 +43,7 @@
   expect:
     client: refuses after GET /server; sends no other request
     server: answers GET /server only
-    shown: '"serves API revision 1; this bronzewardctl needs revision 2 or later"; exit 1'
+    shown: '"serves API revision 1; this bronzewardctl needs revision 3 or later"; exit 1'
     absent: [token in stdout, stderr, argv]
 
 - id: COMP-02

@@ -41,6 +41,10 @@ commands:
   cluster list | show <id>
   cluster add --name <name> --endpoint <https url> --contract <v1.x> --talos-cluster-id <id>
   machine list [--cluster <id>] | show <id> | timeline <id> | observations <id>
+  machine timeline <id> --follow [--limit <n>]
+              the newest entries, then each new one as the server records it, read every 5s;
+              Ctrl-C stops it with exit 130; -o json prints one entry per line, -o yaml one
+              document per entry
   machine add --cluster <id> (--talos-node-id <id> | --smbios-uuid <uuid>) [--serial <s>]
               --platform metal|container|cloud --talos-endpoint <ip>[:<port>]
   machine set-endpoint <id> --talos-endpoint <ip>[:<port>]

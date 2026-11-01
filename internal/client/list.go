@@ -8,10 +8,12 @@ import (
 )
 
 // Page is one answer of a list route (client-contracts.md §2 pagination): its items, and the
-// cursor of the next page, empty on the last.
+// cursor of the next page, empty on the last. A machine timeline's also has Tail, the forward
+// cursor naming the newest entry the read saw, empty while the machine has none.
 type Page struct {
 	Items []json.RawMessage `json:"items"`
 	Next  string            `json:"next,omitempty"`
+	Tail  string            `json:"tail,omitempty"`
 	Body  []byte            `json:"-"`
 	// Epoch is the Bronzeward-Epoch of the answer itself, empty when the answer had none.
 	Epoch string `json:"-"`

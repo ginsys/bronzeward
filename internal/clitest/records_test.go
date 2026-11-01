@@ -234,8 +234,8 @@ func TestRecordReads(t *testing.T) {
 		{[]string{"draft", "show", "drf_test"}, "frv_new", "fragment labels frv_new new"},
 		{[]string{"draft", "show", "drf_test"}, "workers", "profile workers - removed"},
 		{[]string{"draft", "show", "drf_test"}, "asr_new", "assignment " + m + " asr_new changed (based on head revision 3)"},
-		{[]string{"machine", "timeline", m}, "adoption", `1 2026-10-22 10:00:00 UTC adoption {"approval":"apr_a","comparisons":["4.1","4.2","4.3","4.4","4.5"],` +
-			`"controller":"ctl-b","observation":"obs_a","operation":"op_adopt","plan":"pln_adopt"}`},
+		{[]string{"machine", "timeline", m}, "adoption", "1 2026-10-22 10:00:00 UTC adoption operation op_adopt, plan pln_adopt, approval apr_a, " +
+			"observation obs_a, controller ctl-b"},
 		{[]string{"plan", "list"}, "pln_test", "pln_test proposed " + m + " apply-config rel_test 2026-10-23 10:04:00 UTC"},
 		{[]string{"operation", "list"}, "op_test", "op_test apply-config unresolved plan pln_test, machine " + m + " 2026-10-22 10:06:00 UTC"},
 	} {
