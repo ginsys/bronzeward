@@ -2,7 +2,10 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
 import { Screen, type View } from "./app.tsx";
+import { WritesProvider } from "./forms.tsx";
+import type { Client } from "./request.ts";
 import { problemFields, problemText } from "./states.tsx";
+import { Write, Writes } from "./write.ts";
 
 const shown = (view: View) => renderToStaticMarkup(createElement(Screen, { view }));
 
@@ -38,6 +41,15 @@ test("§8.2: each refusal view renders the problem fields under its own message"
   expect(shown({ kind: "sign-in", message: "W1", problem: fields, signIn: () => {} })).toContain(paragraph);
   expect(shown({ kind: "failed", message: "revoked", problem: fields })).toContain(paragraph);
   expect(shown({ kind: "failed", message: "revoked" })).not.toContain('data-testid="problem"');
+});
+
+test("B11: a write whose outcome is unknown keeps its notice on the views that end the shell", async () => {
+  const writes = new Writes(() => "https://idp.invalid SYNTH-sub-1", async () => {});
+  writes.client = { currentEpoch: "e1", attempt: async () => undefined } as unknown as Client;
+  await writes.submit(new Write({ method: "POST", path: "/clusters", body: { name: "lab" }, resource: "/clusters" }));
+  const on = (view: View) => renderToStaticMarkup(createElement(WritesProvider, { value: writes }, createElement(Screen, { view })));
+  expect(on({ kind: "failed", message: "revoked" })).toContain('data-testid="write-notice"');
+  expect(on({ kind: "sign-in", message: "W1", signIn: () => {} })).toContain('data-testid="write-notice"');
 });
 
 test("§7 item 4: a deprecation notice stays on the refusal that ends the shell", () => {
