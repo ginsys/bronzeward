@@ -223,8 +223,9 @@ export class ShellReads {
 }
 
 export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, onDeprecation, signOut, writes, notices = [] }: SignedInProps & { notices?: readonly string[] }) {
-  const [path, move, query] = usePath();
-  // B11: a move to another page while a write is pending or unknown asks first.
+  // B11: a move to another page while a write is pending or unknown asks first, Back and Forward
+  // included.
+  const [path, move, query] = usePath((to, from) => leaving(writes, to, false, from));
   const go = useCallback((to: string) => {
     if (leaving(writes, to)) move(to);
   }, [move, writes]);

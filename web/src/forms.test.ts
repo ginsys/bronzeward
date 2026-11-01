@@ -1,11 +1,12 @@
 import { createElement as h, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { AddCluster, leaving, WriteNotices, WritesProvider } from "./forms.tsx";
+import { AddCluster, guardsUnload, leaving, Result, WriteNotices, WritesProvider } from "./forms.tsx";
+import { type Reads, ReadsProvider } from "./list.tsx";
 import type { Client } from "./request.ts";
 import { ShellContext } from "./shell.tsx";
-import { SET_ASIDE, unknown } from "./states.tsx";
-import { EPOCH_CHANGED_ASIDE, Write, Writes } from "./write.ts";
+import { REPLAYED, SET_ASIDE, unknown } from "./states.tsx";
+import { EPOCH_CHANGED_ASIDE, type Outcome, Write, Writes } from "./write.ts";
 
 const PRINCIPAL = "https://idp.invalid SYNTH-sub-1";
 const html = (writes: Writes, e: ReactElement, roles: string[] = ["author"]) =>
@@ -68,6 +69,47 @@ describe("the in-app leave guard (B11)", () => {
     expect(ask).not.toHaveBeenCalled();
     expect(leaving(writes, "/clusters")).toBe(false);
     expect(ask).toHaveBeenCalledTimes(1);
+  });
+
+  test("Back or Forward asks against the page shown, which the address has already left", async () => {
+    const ask = vi.fn(() => false);
+    vi.stubGlobal("confirm", ask);
+    vi.stubGlobal("location", new URL("https://bw.invalid/machines"));
+    const [writes] = await unknownWrite();
+    expect(leaving(writes, "/machines", false, "/clusters/new")).toBe(false);
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(leaving(writes, "/machines?cluster=c1", false, "/machines?cluster=c2")).toBe(true);
+    expect(ask).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the unload guard (B11)", () => {
+  test("asks while a write is open, unless a notice's own [Show current state] is leaving the page", async () => {
+    expect(guardsUnload(new Writes(() => PRINCIPAL))).toBe(false);
+    const [writes] = await unknownWrite();
+    expect(guardsUnload(writes)).toBe(true);
+    writes.unloading = true;
+    expect(guardsUnload(writes)).toBe(false);
+  });
+});
+
+describe("the form's result", () => {
+  const reads = { go: () => {} } as unknown as Reads;
+  const result = (o: Outcome) => {
+    const w = new Write({ method: "POST", path: "/clusters", body: {}, resource: "/clusters" });
+    w.outcome = o;
+    return html(new Writes(() => PRINCIPAL), h(ReadsProvider, { value: reads }, h(Result, { w, done: () => "DONE" })));
+  };
+
+  test("a success whose answer could not be read is saved, names the page to read, and says when replayed", () => {
+    expect(result({ kind: "done", status: 201, data: null, replayed: false })).toContain('Saved (the server answered 201), but its answer could not be read. Read <a href="/clusters" title="/clusters">/clusters</a>.');
+    expect(result({ kind: "done", status: 201, data: "text", replayed: true })).toContain(`${REPLAYED} Saved (the server answered 201)`);
+    expect(result({ kind: "done", status: 201, data: {}, replayed: false })).toContain(">DONE</p>");
+  });
+
+  test("a replayed refusal is the earlier attempt's, and says so", () => {
+    expect(result({ kind: "refused", status: 409, problem: null, replayed: true })).toContain(`${REPLAYED} Not saved: the server answered 409.`);
+    expect(result({ kind: "refused", status: 409, problem: null, replayed: false })).toContain(">Not saved: the server answered 409.</p>");
   });
 });
 
