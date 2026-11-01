@@ -29,7 +29,7 @@ import { type Counts, type Grant, type Provider, startProvider } from "./provide
 export { CONTROL, FIXTURE_API, FIXTURE_ISSUER, FIXTURE_PAGE, IDP_PAGE };
 // mise run browser-auth sets BW_DEV_PG_PORT and BW_DEV_IDP_DIR from BW_DEV_INSTANCE
 // (scripts/dev/instance.sh); the defaults are the default instance's.
-const PG_PORT = process.env["BW_DEV_PG_PORT"] ?? "55433";
+const PG_PORT = process.env["BW_DEV_PG_PORT"] ?? "11432";
 const PG = ["-h", "127.0.0.1", "-p", PG_PORT, "-U", "bronzeward"];
 // The subject the fixture deployment lists in deniedSubjects (AUTH-10).
 export const DENIED = "h-approver";

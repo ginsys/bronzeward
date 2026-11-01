@@ -4,9 +4,13 @@
 # mise run dev-db, dev-bao, dev-idp, dev-down, dev-idp-down, go-db, go-idp and browser-auth, and
 # fixtures/dev-idp, take their container names, host ports and idp state directory from here.
 #
-# BW_DEV_INSTANCE unset or empty is the one default instance, with the names and ports the tasks
-# always had. BW_DEV_INSTANCE=<name> is a named instance of 1 to 16 characters of [a-z0-9] (not
-# `pg` or `groups`, which would make bw-dev-idp-<name> the default idp's own containers). Its
+# BW_DEV_INSTANCE unset or empty is the one default instance, with the names the tasks always had
+# and fixed ports in the 11000 block: PostgreSQL 11432, OpenBao 11200, identity provider 11080
+# (ginsys/bronzeward#464; no named slot reaches them). 11081, the identity provider's port + 1, is
+# reserved for the participant login page (ginsys/bronzeward#367).
+#
+# BW_DEV_INSTANCE=<name> is a named instance of 1 to 16 characters of [a-z0-9] (not `pg` or
+# `groups`, which would make bw-dev-idp-<name> the default idp's own containers). Its
 # containers carry the name as a suffix and its ports are the name's slot on top of a fixed base:
 #   slot = cksum(name) mod 1000    (POSIX cksum: the same name gives the same ports everywhere)
 #   PostgreSQL 12000+slot, OpenBao 13000+slot, identity provider 14000+slot, all on 127.0.0.1
@@ -22,9 +26,9 @@ bw_dev_name=${BW_DEV_INSTANCE:-}
 if [ -z "$bw_dev_name" ]; then
   bw_dev_sfx=
   BW_DEV_PFX=
-  BW_DEV_PG_PORT=55433
-  BW_DEV_BAO_PORT=58201
-  BW_DEV_IDP_PORT=58280
+  BW_DEV_PG_PORT=11432
+  BW_DEV_BAO_PORT=11200
+  BW_DEV_IDP_PORT=11080
   BW_DEV_IDP_DIR=.dev/idp
 else
   case $bw_dev_name in

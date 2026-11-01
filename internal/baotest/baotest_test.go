@@ -11,8 +11,8 @@ func TestDecide(t *testing.T) {
 		addr, require string
 		skip, fail    bool
 	}{
-		{"http://127.0.0.1:58201", "", false, false},
-		{"http://127.0.0.1:58201", "1", false, false},
+		{"http://127.0.0.1:11200", "", false, false},
+		{"http://127.0.0.1:11200", "1", false, false},
 		{"", "", true, false},
 		{"", "0", true, false},
 		{"", "1", false, true},

@@ -17,7 +17,7 @@ import (
 )
 
 const serverAuth = `listen: 127.0.0.1:8080
-database: {dsn: postgres://bronzeward@127.0.0.1:55433/bronzeward}
+database: {dsn: postgres://bronzeward@127.0.0.1:11432/bronzeward}
 auth:
   oidc:
     issuer: http://127.0.0.1:5556
@@ -46,7 +46,7 @@ var serverConfigs = []struct {
   maxTransportDeadline: 2m
   planDefaults: {expiry: 12h, maxObservationAge: 2m, checkValidity: 3m, transportDeadline: 90s, verificationDeadline: 15m, maxAttempts: 5}
 provider:
-  address: http://127.0.0.1:58201
+  address: http://127.0.0.1:11200
   keys: {baseline: bw-baseline, staging: bw-staging, digest: bw-digest, artifact: bw-artifact}
   ingestionTokenFile: /etc/bronzeward/ingestion.token
   compilerTokenFile: /etc/bronzeward/compiler.token
