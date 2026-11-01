@@ -122,10 +122,12 @@ func newKey() string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-// backoff is the wait before each of a write's at most three repeats (T9); sleep waits it.
+// backoff is the wait before each of a write's at most three repeats (T9); sleep waits it. clock
+// measures the wait for an ingesting first request, its repeats' own time included.
 var (
 	backoff = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
 	sleep   = time.Sleep
+	clock   = time.Now
 )
 
 // Send sends w (T9). Before the first send it reads the principal it compares before every repeat
@@ -197,8 +199,10 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 	ambiguous, renewed := w.Repeat != nil, false
 	var last error
 	// ingesting names the first request a fragment write's in-progress 409 says still runs; waited
-	// is how long this process has waited for it.
+	// is the time since the send that got the first such 409, the repeats' own time included, so
+	// the bound is a fixed maximum (§8.4 item 2). A repeat already sent can end past it.
 	var ingesting string
+	var since time.Time
 	var waited time.Duration
 	for try := 0; ; try++ {
 		if ingesting != "" || try > 0 {
@@ -207,7 +211,6 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 				fmt.Fprintf(c.Notices, "%s: the first request with this key is still ingesting (ingestion %s); repeat with the same key in %s\n",
 					c.Context.Where(), ingesting, step)
 				sleep(step)
-				waited += step
 			} else if try > len(backoff) {
 				break
 			} else {
@@ -226,6 +229,7 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 				return nil, c.setAside(w, u, ambiguous)
 			}
 		}
+		sent := clock()
 		a := c.post(w, key, ref)
 		p, code := a.p, ""
 		if p != nil {
@@ -263,7 +267,10 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 			// A repeat's in-progress 409: the first request still runs, or ended without committing
 			// while its claim's lease runs (§8.4 item 2, AMB-02). It is repeated with the same key
 			// until it answers otherwise, within the wait bound, and counts as no repeat.
-			if waited >= bound {
+			if since.IsZero() {
+				since = sent
+			}
+			if waited = clock().Sub(since); waited >= bound {
 				u.Why = fmt.Sprintf("the first request with this key was still ingesting (ingestion %s) after %s", printable(fmt.Sprint(p.Doc["ingestion"])), waited)
 				return nil, c.unknown(w, u)
 			}
