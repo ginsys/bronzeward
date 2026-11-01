@@ -83,11 +83,22 @@ commands:
               imports to continue or take over
   publish <draft> [--no-wait]
               publisher; sends the draft's kept ETag or --if-match, waits for the publication
-              and names the release; nothing is sent to any machine
+              and names the release and each machine's plan create command; nothing is sent to
+              any machine
   release list [--cluster <id>] [--draft <id>] | show <release>
   release review | provenance <release> <machine>
               the rendered, redacted configuration, or the secret references it was built from
+  plan create --release <id> --machine <id> --operation apply-config|adopt [--mode no-reboot]
+              [--expires-in <d>] [--max-observation-age <d>] [--check-validity <d>]
+              [--transport-deadline <d>] [--verification-deadline <d>] [--max-attempts <n>]
+              publisher; a duration in whole seconds, such as 90s or 24h; an omitted value takes
+              the server's default; an adopt plan takes no mode, deadline or attempt limit; the
+              plan is not approved and nothing runs until an approver approves
   plan list [--state <s>] [--machine <id>] | show <plan>
+              show prints the plan's evidence, its state and what can be done next
+  plan cancel <plan> --reason <text>
+              a cancelled plan cannot be committed; a committed plan's operation ends only while
+              no attempt is recorded, and an attempt already recorded is not stopped
   operation list [--plan <id>] [--machine <id>] [--state <s>] [--kind <k>] | show <operation>
   act list    the audit record
   recovery status

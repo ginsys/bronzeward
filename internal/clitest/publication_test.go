@@ -254,7 +254,8 @@ func TestPublication(t *testing.T) {
 		in.set(f.cutStream(t, &cut), nil)
 		r := ctl("--context", "human", "publish", s.draft)
 		f.want(r, 0, "Publication succeeded: release rel_", "is now Desired for 1 machine. Nothing has been sent to any machine.",
-			s.machine+" has no Applied release: hand it over with an adopt plan.")
+			s.machine+" has no Applied release: hand it over with an adopt plan:\n    bronzewardctl plan create --release 'rel_",
+			"' --machine '"+s.machine+"' --operation adopt\n")
 		if op = opID.FindString(r.out); op == "" {
 			t.Fatalf("publish named no operation:\n%s", r.out)
 		}
