@@ -206,6 +206,23 @@ describe("the shell's reads", () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
+  test("a write's process refusal is handled as a page read's: the reads in flight are dropped and the state before the entry shown", async () => {
+    let release!: (r: Response) => void;
+    const held = new Promise<Response>((r) => (release = r));
+    const { reads, fetch, events } = shell([held]);
+    reads.shown = { server: true, identity: true, recovery: true };
+    const valid = reads.since();
+    const pending = reads.client.read("/identity");
+    const refusal = { kind: "refused", status: 409, problem: { type: "urn:bronzeward:problem:recovery-mode-active", title: "Recovery mode active", status: 409 } } as const;
+    reads.preEntry(refusal);
+    expect([valid(), reads.shown]).toEqual([false, { server: false, identity: false, recovery: false }]);
+    expect(events.setMode).toHaveBeenCalledWith("recovery");
+    expect(events.onPreEntry).toHaveBeenCalledWith(refusal);
+    release(answer(200, { subject: "old" }, "e1"));
+    expect(await pending).toEqual({ kind: "discarded" });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   test("a revocation ends the page, and an answer from before it is not shown", async () => {
     const { reads, events } = shell([answer(200, { subject: "old" }, "e1"), problem(403, "identity-revoked", "e1")]);
     const valid = reads.since();

@@ -36,6 +36,7 @@ export const SIGN_IN_CHANGED = "your sign-in changed";
 export const EPOCH_CHANGED_ASIDE = "the installation's epoch changed";
 export const NO_EPOCH = "the read of the installation's epoch got no answer that names one";
 export const SIGN_IN_REFUSED = "the server no longer accepts your sign-in";
+export const SHELL_GONE = "the page that sent it ended";
 export const RENEWED_LAST = "the last attempt was answered 401 and your sign-in was renewed, with no attempt left to send it again";
 // The page failed while it held the write, for example a renewal that threw.
 const PAGE_FAILED = "the page failed while it sent it";
@@ -81,6 +82,11 @@ export class Write {
   }
 }
 
+// A run's ending, and the process refusal of a recovery start it met, if any.
+interface RunEnd extends End {
+  pre?: Problem;
+}
+
 const isOpen = (w: Write) => w.outcome === undefined || w.outcome.kind === "unknown" || (w.outcome.kind === "set-aside" && w.outcome.ambiguous);
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const problemOf = (d: unknown): Problem | null =>
@@ -96,6 +102,9 @@ export class Writes {
   // The shell's handling of a credential refusal, bound while it is shown. A write's answer reaches
   // it after the write's own outcome is settled, so the write's notice survives the page's change.
   onEnded: ((e: Ending) => void) | undefined;
+  // The shell's handling of a recovery start's process refusal (§8.5 item 1), bound while it is
+  // shown. It is told once the write's outcome is settled.
+  onPreEntry: ((p: Problem) => void) | undefined;
   private readonly all = new Set<Write>();
   private readonly listeners = new Set<() => void>();
   private version = 0;
@@ -151,7 +160,7 @@ export class Writes {
       told = true;
       this.onEnded?.(e);
     };
-    const end: End = { now: tell };
+    const end: RunEnd = { now: tell };
     // A run that throws settles the write too: unknown once an attempt may have committed.
     const failed = (): Outcome => (w.ambiguous ? { kind: "unknown", why: PAGE_FAILED, problem: null } : { kind: "not-done", why: PAGE_FAILED, problem: null });
     w.running = this.run(w, end).catch(failed).then((r) => {
@@ -172,6 +181,7 @@ export class Writes {
       }
       this.changed();
       if (end.e !== undefined) tell(end.e);
+      else if (end.pre !== undefined) this.onPreEntry?.(end.pre);
       return o;
     });
     this.changed();
@@ -199,7 +209,7 @@ export class Writes {
     this.changed();
   }
 
-  private async run(w: Write, end: End): Promise<Outcome> {
+  private async run(w: Write, end: RunEnd): Promise<Outcome> {
     const client = this.client;
     const who = this.principal();
     if (client === undefined || who === undefined) return { kind: "not-done", why: "there is no sign-in to send it under", problem: null };
@@ -210,6 +220,8 @@ export class Writes {
       // The last epoch seen before the first send, else one GET /recovery (§8.4 item 3).
       w.epoch = client.currentEpoch ?? (await this.confirm(client, end));
       if (end.e !== undefined) return { kind: "not-done", why: SIGN_IN_REFUSED, problem: end.e.problem };
+      if (this.principal() !== who) return { kind: "not-done", why: SIGN_IN_CHANGED, problem: null };
+      if (this.client !== client) return { kind: "not-done", why: SHELL_GONE, problem: null };
       if (w.epoch === undefined) return { kind: "not-done", why: NO_EPOCH, problem: null };
     }
     const headers: Record<string, string> = { "Content-Type": "application/json", "Idempotency-Key": w.key, "Bronzeward-Expected-Epoch": w.epoch! };
@@ -288,8 +300,12 @@ export class Writes {
       // check, which carries `plan`, refuses after it (§8.2 403 row).
       if (a.status === 403 && code === "forbidden" && p?.["plan"] === undefined) return early(refused);
       if (a.status === 409 && code === "conflict" && p?.["request"] !== undefined && p["epoch"] !== undefined) return aside("the key's record is from an earlier epoch");
-      // A process refusal, decided before the lookup (§8.2 409 row).
-      if (a.status === 409 && code === "recovery-mode-active" && p?.["scope"] === undefined) return early(refused);
+      // A process refusal, decided before the lookup (§8.2 409 row): a recovery start, which the
+      // shell then shows (§8.5 item 1).
+      if (a.status === 409 && code === "recovery-mode-active" && p?.["scope"] === undefined) {
+        end.pre = p!;
+        return early(refused);
+      }
       if (a.status === 412 && code === "epoch-mismatch") return aside(EPOCH_CHANGED_ASIDE);
       if (a.status === 422 && code === "idempotency-key-reused" && (n > 0 || again)) return unknown("this repeat could not be matched to the earlier request under its key, so it did nothing");
       if (a.status === 503 && (REPEATED_503.has(code ?? "") || code === "epoch-superseded")) {
@@ -311,11 +327,15 @@ export class Writes {
 
   // Before a repeat: the same sign-in, and one GET /recovery that shows the reference epoch.
   private async check(client: Client, w: Write, end: End): Promise<string | undefined> {
+    // A sign-out or the end of the shell that held the client sends nothing more through it, so
+    // both are checked again after the read below too.
+    const gone = () => (this.principal() !== w.principal ? SIGN_IN_CHANGED : this.client !== client ? SHELL_GONE : undefined);
     if (w.aside !== undefined) return w.aside;
-    if (this.principal() !== w.principal) return SIGN_IN_CHANGED;
+    if (gone() !== undefined) return gone();
     const now = await this.confirm(client, end);
     if (w.aside !== undefined) return w.aside;
     if (end.e !== undefined) return SIGN_IN_REFUSED;
+    if (gone() !== undefined) return gone();
     if (now === undefined) return NO_EPOCH;
     return now === w.epoch ? undefined : EPOCH_CHANGED_ASIDE;
   }

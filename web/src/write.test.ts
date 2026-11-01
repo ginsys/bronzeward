@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 import { type Attempt, Client, type ClientOptions } from "./request.ts";
-import { BACKOFF, EPOCH_CHANGED_ASIDE, NO_EPOCH, newKey, RENEWED_LAST, SIGN_IN_CHANGED, SIGN_IN_REFUSED, Write, Writes } from "./write.ts";
+import { BACKOFF, EPOCH_CHANGED_ASIDE, NO_EPOCH, newKey, RENEWED_LAST, SHELL_GONE, SIGN_IN_CHANGED, SIGN_IN_REFUSED, Write, Writes } from "./write.ts";
 
 const EPOCH = "e1";
 const PRINCIPAL = "https://idp.invalid SYNTH-sub-1";
@@ -21,14 +21,14 @@ const recovery = (epoch: string | null = EPOCH) =>
   new Response(JSON.stringify({ mode: "normal" }), { status: 200, headers: { "Content-Type": "application/json", ...(epoch === null ? {} : { "Bronzeward-Epoch": epoch }) } });
 
 // A page whose writes are answered from `answers`, a function called at its send, and whose
-// GET /recovery from `epochs`: an epoch, none (null), or a whole answer.
-function page(answers: (Response | Error | (() => Response | Error))[], epochs: (string | null | Response)[] = [], opts: ClientOptions = {}) {
+// GET /recovery from `epochs`: an epoch, none (null), or a whole answer, given or made at its send.
+function page(answers: (Response | Error | (() => Response | Error))[], epochs: (string | null | Response | (() => Response))[] = [], opts: ClientOptions = {}) {
   const sent: { method: string; path: string; headers: Record<string, string>; body: unknown }[] = [];
   const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
     const path = String(url).replace("/api/v1", "");
     const method = init?.method ?? "GET";
     sent.push({ method, path, headers: { ...(init?.headers as Record<string, string>) }, body: init?.body });
-    const read = (e: string | null | Response) => (e instanceof Response ? e : recovery(e));
+    const read = (e: string | null | Response | (() => Response)) => (typeof e === "function" ? e() : e instanceof Response ? e : recovery(e));
     const given = path === "/recovery" ? (epochs.length > 0 ? read(epochs.shift()!) : recovery()) : answers.shift();
     const next = typeof given === "function" ? given() : given;
     if (next === undefined) throw new Error("no answer left");
@@ -384,11 +384,52 @@ describe("set aside (§8.4 item 3, §8.5 item 2, journeys §8)", () => {
   });
 
   test("AUTH-07: another sign-in before a repeat sends nothing more", async () => {
-    const p = page([new TypeError("Failed to fetch")]);
-    const run = p.writes.submit(spec());
-    p.signIn("https://idp.invalid SYNTH-sub-2");
-    expect(await run).toEqual({ kind: "set-aside", why: SIGN_IN_CHANGED, ambiguous: true, problem: null });
+    // The other sign-in arrives while the first send is answered.
+    const p = page([() => (p.signIn("https://idp.invalid SYNTH-sub-2"), new TypeError("Failed to fetch"))]);
+    expect(await p.writes.submit(spec())).toEqual({ kind: "set-aside", why: SIGN_IN_CHANGED, ambiguous: true, problem: null });
     expect(p.writesSent()).toHaveLength(1);
+  });
+
+  test.each([
+    ["a sign-out", SIGN_IN_CHANGED, true],
+    ["the end of the shell that held the client", SHELL_GONE, false],
+  ])("%s while a read that learns the epoch is answered sends nothing more", async (_, why, signOut) => {
+    const go = () => {
+      if (signOut) p.signIn(undefined);
+      p.writes.disconnect(p.client);
+      return recovery();
+    };
+    // The read before a repeat: the write is set aside after its one dropped attempt.
+    let p = page([new TypeError("Failed to fetch")], [EPOCH, go]);
+    expect(await p.writes.submit(spec())).toEqual({ kind: "set-aside", why, ambiguous: true, problem: null });
+    expect(p.writesSent()).toHaveLength(1);
+    // The read before the first send: nothing is sent.
+    p = page([], [go]);
+    expect(await p.writes.submit(spec())).toEqual({ kind: "not-done", why, problem: null });
+    expect(p.writesSent()).toHaveLength(0);
+  });
+
+  test("a recovery start's process refusal of a write is told to the shell once the write settles", async () => {
+    const start = (scope?: string) => problem(409, "recovery-mode-active", scope === undefined ? {} : { scope });
+    // Of the write: refused, and told once; a scope's refusal says nothing of the start.
+    let p = page([start()]);
+    let told: string[] = [];
+    const tell = (w: Writes) => (w.onPreEntry = (q) => void told.push(`${q.type} ${w.open.length}`));
+    tell(p.writes);
+    expect(await p.writes.submit(spec())).toMatchObject({ kind: "refused", status: 409 });
+    expect(told).toEqual(["urn:bronzeward:problem:recovery-mode-active 0"]);
+    p = page([start("mch_a")]);
+    told = [];
+    tell(p.writes);
+    await p.writes.submit(spec());
+    expect(told).toEqual([]);
+    // The confirming read reads no 409 body, but the refusal carries the same epoch: the repeat it
+    // admits is refused too, and the dropped write stays unknown.
+    p = page([new TypeError("Failed to fetch"), start()], [EPOCH, start()]);
+    tell(p.writes);
+    expect(await p.writes.submit(spec())).toMatchObject({ kind: "unknown", problem: { type: "urn:bronzeward:problem:recovery-mode-active" } });
+    expect(p.writesSent()).toHaveLength(2);
+    expect(told).toEqual(["urn:bronzeward:problem:recovery-mode-active 1"]);
   });
 
   test("setAside marks a write in flight and turns an unknown one aside; neither is repeatable", async () => {
