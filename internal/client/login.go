@@ -164,10 +164,16 @@ func (i *idp) deviceAuth(x *Context) (*oauth2.DeviceAuthResponse, error) {
 		DeviceCode      string `json:"device_code"`
 		UserCode        string `json:"user_code"`
 		VerificationURI string `json:"verification_uri"`
+		VerificationURL string `json:"verification_url"`
 		ExpiresIn       int64  `json:"expires_in"`
 		Interval        int64  `json:"interval"`
 	}
-	if json.Unmarshal(body, &d) != nil || d.DeviceCode == "" || d.UserCode == "" || d.VerificationURI == "" ||
+	err = json.Unmarshal(body, &d)
+	if d.VerificationURI == "" {
+		// Some providers send the URI under this older name, which golang.org/x/oauth2 accepts too.
+		d.VerificationURI = d.VerificationURL
+	}
+	if err != nil || d.DeviceCode == "" || d.UserCode == "" || d.VerificationURI == "" ||
 		d.ExpiresIn < 0 || d.ExpiresIn > maxExpiry || d.Interval < 0 || d.Interval > maxInterval {
 		return nil, fmt.Errorf("device authorization at the identity provider %s: its answer could not be read", x.OIDC.Issuer)
 	}
@@ -383,10 +389,11 @@ func ownTokenFile(p string) error {
 }
 
 // sameSignIn: x signs in where y does, to the same server through the same provider and client,
-// kept in the same place.
+// with the same scopes, kept in the same place.
 func (x *Context) sameSignIn(y *Context) bool {
 	return y.Server == x.Server && y.Credential == x.Credential && y.OIDC != nil && x.OIDC != nil &&
-		y.OIDC.Issuer == x.OIDC.Issuer && y.OIDC.ClientID == x.OIDC.ClientID && y.OIDC.TokenFile == x.OIDC.TokenFile
+		y.OIDC.Issuer == x.OIDC.Issuer && y.OIDC.ClientID == x.OIDC.ClientID && y.OIDC.TokenFile == x.OIDC.TokenFile &&
+		slices.Equal(y.OIDC.Scopes, x.OIDC.Scopes)
 }
 
 // SignOut removes x's stored sign-in, one without an access token too, and revokes its refresh
