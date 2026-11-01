@@ -24,7 +24,8 @@ at `daa4393`. Everything in the environment is synthetic.
 ## Before each session
 
 1. Recreate the fixture: `fixtures/participants/session stop`, `fixtures/bin/down`, then
-   `fixtures/participants/session start`.
+   `fixtures/participants/session start`. If this checkout already runs a dev-idp provider, start
+   refuses: run `mise run dev-idp-down` first.
 2. Generate this session's passwords: `fixtures/participants/session passwords`. It shows each
    password once, on the terminal only. Give the participant the password of each account when a
    task needs it. Write none down. Tell the participant to refuse when the browser offers to save
