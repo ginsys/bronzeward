@@ -204,7 +204,8 @@ func TestRemoteTextInTokenFilePath(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Login is not run: with --no-input it refuses before it reads the path, and without it waits for
-	// an identity provider. Its sentence passes through the same store.kept as logout's.
+	// an identity provider. Logout names the path through store.gone; what store.kept shows for a
+	// path is pinned by TestStoreKeptIsEscaped in internal/client.
 	for _, c := range [][]string{{"logout"}, {"whoami"}} {
 		var o, e bytes.Buffer
 		run(append([]string{"--context", "idp"}, c...), &o, &e)
