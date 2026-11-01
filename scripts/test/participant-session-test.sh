@@ -17,13 +17,15 @@ session=$repo/fixtures/participants/session
 
 # docker: A (fixtures/versions.env names the fixture) and Zitadel exist, A runs unless STUB_STOPPED
 # is set, and each logs a line. The fixture claim is held by STUB_OWNER, this copy's checkout by
-# default. An inspect of the forwarder fails, as for a removed container. rm and network calls are
-# logged. Set, STUB_PS_FAIL fails the container list, STUB_FWD still lists the forwarder,
+# default, on the daemon STUB_DAEMON (daemon-1, bin/up's record, by default). An inspect of the
+# forwarder fails, as for a removed container. rm and network calls are logged. Set, STUB_PS_FAIL
+# fails the container list, STUB_FWD still lists the forwarder,
 # STUB_LOGS_FAIL fails a log read, and STUB_LOG_LEAK puts a session password in A's log.
 cat >"$t/bin/docker" <<'EOF'
 #!/usr/bin/env bash
 case "$1" in
 context) echo stub ;;
+info) echo "${STUB_DAEMON:-daemon-1}" ;;
 rm | network) echo "docker $1" >>"$STUB_LOG" ;;
 ps)
   [ -z "${STUB_PS_FAIL:-}" ] || exit 1
@@ -45,11 +47,21 @@ cat >"$repo/fixtures/bin/inject" <<'EOF'
 echo "inject $*" >>"$STUB_LOG"
 [ "$1 ${STUB_KILL_FAIL:-}" != "kill 1" ] && [ "$1 ${STUB_START_FAIL:-}" != "start 1" ]
 EOF
+# dev-idp up fails while STUB_IDP_UP_FAIL is set, as it does on another checkout's containers.
 cat >"$repo/fixtures/dev-idp" <<'EOF'
 #!/usr/bin/env bash
 echo "dev-idp $*" >>"$STUB_LOG"
+[ "$1 ${STUB_IDP_UP_FAIL:-}" != "up 1" ]
 EOF
-chmod +x "$t/bin/docker" "$repo/fixtures/bin/inject" "$repo/fixtures/dev-idp"
+cat >"$repo/fixtures/bin/up" <<'EOF'
+#!/usr/bin/env bash
+echo "bin/up" >>"$STUB_LOG"
+EOF
+# start's other prerequisites, which the cases below never reach.
+for c in go npm; do printf '#!/bin/sh\nexit 0\n' >"$t/bin/$c"; done
+chmod +x "$t/bin/docker" "$t/bin/go" "$t/bin/npm" "$repo/fixtures/bin/inject" "$repo/fixtures/dev-idp" "$repo/fixtures/bin/up"
+# bin/up's record of its daemon (lib.sh daemon_own).
+echo daemon-1 >"$repo/fixtures/.state/up-daemon"
 export STUB_LOG=$t/calls
 STUB_OWNER=$(CDPATH='' cd -P -- "$repo/fixtures" && pwd -P)
 export STUB_OWNER
@@ -213,5 +225,37 @@ calls=$(tr '\n' ';' <"$STUB_LOG")
 if [ "$rc" = 0 ] && [[ $out == *"nothing to stop"* ]] && [ -z "$calls" ]; then
   ok "stop without a session in this checkout touches nothing"
 else bad "no session: rc=$rc calls=$calls: $out"; fi
+
+# The shell reaches another daemon than bin/up's: A reads as gone there, and nothing is touched.
+setup
+out=$(STUB_DAEMON=daemon-2 run stop)
+rc=$?
+calls=$(tr '\n' ';' <"$STUB_LOG")
+if [ "$rc" != 0 ] && [[ $out == *"daemon-2"* ]] && [ -z "$calls" ] && [ -f "$cfg.fixture" ] && [ -d "$repo/.dev/participants" ]; then
+  ok "stop on another Docker daemon than bin/up's touches nothing"
+else bad "other daemon: rc=$rc calls=$calls: $out"; fi
+
+# start without this checkout's dev-idp state: no dev-idp down, which would remove another
+# checkout's provider. dev-idp up refuses that provider, and the rollback leaves it too.
+setup
+rm -f "$cfg.fixture"
+rm -rf "$repo/.dev/idp"
+out=$(STUB_IDP_UP_FAIL=1 run start)
+rc=$?
+calls=$(tr '\n' ';' <"$STUB_LOG")
+mkdir -p "$repo/.dev/idp"
+if [ "$rc" != 0 ] && [[ $calls == "bin/up;dev-idp up --participants;"* ]] && [[ $calls != *"dev-idp down"* ]]; then
+  ok "start without this checkout's provider state never takes dev-idp down"
+else bad "start, other provider: rc=$rc calls=$calls: $out"; fi
+
+# With this checkout's state, start takes its own provider down first, to start it in participant mode.
+setup
+rm -f "$cfg.fixture"
+out=$(STUB_IDP_UP_FAIL=1 run start)
+rc=$?
+calls=$(tr '\n' ';' <"$STUB_LOG")
+if [ "$rc" != 0 ] && [[ $calls == "bin/up;dev-idp down;dev-idp up --participants;"* ]]; then
+  ok "start with this checkout's provider state takes it down before the participant start"
+else bad "start, own provider: rc=$rc calls=$calls: $out"; fi
 
 exit "$fail"
