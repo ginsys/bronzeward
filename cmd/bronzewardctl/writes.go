@@ -94,9 +94,10 @@ func (e *env) writeAfter(prep func(*client.Client) error, w *client.Write, say f
 	lines, err := say(c, r)
 	var out []byte
 	if err == nil && e.output != "table" {
-		// say can succeed without reading the answer: one that is not JSON is the same unreadable
-		// answer, which -o yaml would otherwise convert or fail on.
-		if len(r.Body) > 0 && !json.Valid(r.Body) {
+		// say can succeed without reading the answer: one that is not JSON, an empty one included, is
+		// the same unreadable answer, which -o yaml would otherwise convert or fail on. Every write
+		// route answers with a body.
+		if !json.Valid(r.Body) {
 			err = errors.New("the answer is not JSON")
 		} else {
 			out, err = e.render(r.Body)

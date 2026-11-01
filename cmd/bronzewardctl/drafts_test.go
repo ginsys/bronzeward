@@ -28,8 +28,9 @@ type draftFake struct {
 	// lost redirects a profile PUT, so its outcome is unknown; reads records each GET's route.
 	lost  bool
 	reads []string
-	// answer replaces the {} a draft write is answered with.
+	// answer replaces the {} a draft write is answered with; empty answers it with no body.
 	answer string
+	empty  bool
 	// epoch replaces ep_BWSYNTH-1 on every answer; recovery marks GET /recovery's answer as served in
 	// recovery mode.
 	epoch    string
@@ -108,6 +109,9 @@ func (f *draftFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		f.rev++
 		w.Header().Set("ETag", f.etag())
+		if f.empty {
+			return
+		}
 		if f.answer != "" {
 			fmt.Fprint(w, f.answer)
 			return
@@ -217,6 +221,22 @@ func TestProfileSetRepeat(t *testing.T) {
 			t.Errorf("-o %s with an answer that is not JSON: exit %d, stdout %q, stderr %q; want 0, the answer as served, the failure on stderr", mode, code, o.String(), eb.String())
 		}
 	}
+	// An empty answer is not JSON either: every draft write is answered with a body.
+	f.mu.Lock()
+	f.answer, f.empty = "", true
+	f.mu.Unlock()
+	for _, mode := range []string{"json", "yaml"} {
+		o.Reset()
+		eb.Reset()
+		code = run([]string{"-o", mode, "profile", "set", "workers", "--draft", "drf_BWSYNTH", "--fragments", "frv_BWSYNTH-given"}, &o, &eb)
+		f.took()
+		if code != 0 || o.String() != "\n" || !strings.Contains(eb.String(), "succeeded, but its answer cannot be read: the answer is not JSON") {
+			t.Errorf("-o %s with an empty answer: exit %d, stdout %q, stderr %q; want 0, the empty answer, the failure on stderr", mode, code, o.String(), eb.String())
+		}
+	}
+	f.mu.Lock()
+	f.empty = false
+	f.mu.Unlock()
 
 	// The server entered recovery mode since the lost write: the repeat is refused after the identity
 	// and confirming reads alone, with no GET /server between, and shows the recovery banner.
