@@ -28,7 +28,7 @@ const sends = (n: number) => browser.waitUntil(async () => (await writes()).leng
 async function open(flags: Record<string, string> = {}): Promise<string> {
   expect(await fixtureSignIn("h-author", flags, { upstream: at })).toMatch(SERVER);
   await $('nav[aria-label="Main"]').$("a=Machines").click();
-  await $("main button=Add cluster").click();
+  await $("main").$("button=Add cluster").click();
   await expect($("main h2")).toHaveText("Add cluster");
   return `synthetic-${randomBytes(4).toString("hex")}`;
 }
@@ -45,7 +45,7 @@ async function add(take: Step[], f: Faults = {}, flags: Record<string, string> =
   const name = await open(flags);
   await fill(name);
   await faults({ upstream: at, steps: { path: "/clusters", take }, ...f });
-  await $("main form button=Add cluster").click();
+  await $("main form").$("button=Add cluster").click();
   return name;
 }
 
@@ -165,7 +165,7 @@ describe("the write views (#338)", () => {
   it("a second submit while the write is in flight sends nothing new", async () => {
     const name = await add([], { held: "/clusters" });
     await browser.waitUntil(async () => (await holding()).includes("/clusters"), { timeout: 20_000, timeoutMsg: "the write was not held" });
-    expect(await $("main form button=Add cluster").isEnabled()).toBe(false);
+    expect(await $("main form").$("button=Add cluster").isEnabled()).toBe(false);
     // A second submit event of the same form, its button disabled or not: the form sends nothing new.
     await browser.execute(() => document.querySelector<HTMLFormElement>("main form")!.requestSubmit());
     await browser.pause(500);
@@ -222,7 +222,7 @@ describe("the write views (#338)", () => {
     const name = await add([]);
     await expect(result()).toHaveText(expect.stringContaining(`Cluster ${name} recorded as`), { wait: 20_000 });
     await $('nav[aria-label="Main"]').$("a=Machines").click();
-    await $("main button=Record machine").click();
+    await $("main").$("button=Record machine").click();
     await expect($("main h2")).toHaveText("Record machine");
     // The cluster is chosen by typing its name into the list, the platform left at metal.
     const [ip, next] = [`192.0.2.${1 + randomBytes(1)[0]! % 254}`, `198.51.100.${1 + randomBytes(1)[0]! % 254}`];
