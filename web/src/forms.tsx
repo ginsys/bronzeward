@@ -162,12 +162,16 @@ export function existing(status: number, p: Problem | null, resource: string): {
   return undefined;
 }
 
+// A fragment write's repeat that waits for the first request of its key (client contracts §8.4
+// item 2, AMB-02), as the CLI says it.
+export const stillIngesting = (ingestion: string) => `Saving: the first request with this key is still ingesting (ingestion ${ingestion}); waiting for it.`;
+
 // The form's own line for its write; an unknown outcome is the notice's, until it is dismissed.
 export function Result({ w, done }: { w: Write | undefined; done: (data: unknown) => ReactNode }) {
   const writes = useWrites();
   const o: Outcome | undefined = w?.outcome;
   if (w === undefined) return null;
-  if (o === undefined) return <Status testid="write-result">Saving</Status>;
+  if (o === undefined) return <Status testid="write-result">{w.ingesting === undefined ? "Saving" : stillIngesting(w.ingesting)}</Status>;
   switch (o.kind) {
     case "done":
       // A success whose body could not be read is still saved: it names the page to read, and is
