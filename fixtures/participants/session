@@ -101,11 +101,15 @@ start() {
   if [ -d "$idp" ]; then
     die "this checkout has a dev-idp provider ($idp); if it is this checkout's, run fixtures/dev-idp down, then session start again"
   fi
-  "$bin/up"
-  # The participant state marks the session as this checkout's, for stop.
+  # The participant state marks the session as this checkout's, for stop, and records the Docker
+  # daemon that this start acts on (lib.sh pins the context for this process) before any start step.
+  local daemon
+  daemon=$(docker info --format '{{.ID}}') && [ -n "$daemon" ] || die "the Docker daemon does not answer; nothing was started"
   rm -rf -- "$part"
   mkdir -p -- "$part/bin" "$part/home"
   chmod 700 "$part"
+  printf '%s\n' "$daemon" >"$part/daemon"
+  "$bin/up"
   # The provider state did not exist, so the provider that dev-idp up makes from here is this
   # session's. dev-idp up refuses another checkout's containers before it writes its state.
   : >"$part/idp-started"
@@ -292,6 +296,17 @@ stop() {
   if [ ! -d "$part" ] && [ ! -f "$cfg.fixture" ]; then
     echo "no participant session in this checkout; nothing to stop" >&2
     return 0
+  fi
+  # Every teardown below acts by name: the forwarder, A and the provider. On another daemon than
+  # the one this session's start used, the names can be another checkout's. The record survives
+  # fixtures/bin/down, which removes bin/up's record and makes daemon_own pass.
+  if [ -d "$part" ]; then
+    local recorded reached
+    [ -f "$part/daemon" ] && IFS= read -r recorded <"$part/daemon" && [ -n "$recorded" ] ||
+      die "$part has no record of the Docker daemon its session start used, so stop cannot tell which session the containers are; nothing was changed. Stop the session's containers by hand, then remove $part"
+    reached=$(docker info --format '{{.ID}}') || die "the Docker daemon does not answer; nothing was changed"
+    [ "$recorded" = "$reached" ] ||
+      die "the participant session was started on the Docker daemon $recorded, and this shell reaches $reached (DOCKER_HOST or the Docker context changed); nothing was changed. Point the shell back at that daemon and run session stop again"
   fi
   # On another Docker daemon than bin/up's, A would read as gone, and stop would drop the backup.
   daemon_own
