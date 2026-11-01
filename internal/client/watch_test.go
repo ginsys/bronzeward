@@ -15,7 +15,7 @@ import (
 // opServer serves the operation op_BWSYNTH: its nth stream request (from 0, the last repeating) is
 // answered by streams, its nth operation read shows states (the last repeating), and the JSON
 // event list holds pages. A stream request whose epochs entry is set moves the installation to
-// that epoch: from then on every answer carries it.
+// that epoch: from then on every answer carries it. An operation read takes slow.
 type opServer struct {
 	mu      sync.Mutex
 	streams []func(w http.ResponseWriter, r *http.Request)
@@ -25,6 +25,7 @@ type opServer struct {
 	epoch   string
 	opened  []*http.Request
 	reads   int
+	slow    time.Duration
 }
 
 func (o *opServer) serve(w http.ResponseWriter, r *http.Request) {
@@ -46,6 +47,7 @@ func (o *opServer) serve(w http.ResponseWriter, r *http.Request) {
 	case "/api/v1/operations/op_BWSYNTH/events":
 		fmt.Fprintf(w, `{"items":[%s]}`, strings.Join(o.pages, ","))
 	case "/api/v1/operations/op_BWSYNTH":
+		time.Sleep(o.slow)
 		state := o.states[min(o.reads, len(o.states)-1)]
 		o.reads++
 		fmt.Fprintf(w, `{"id":"op_BWSYNTH","kind":"publish","state":%q}`, state)
@@ -182,6 +184,40 @@ func TestWatch(t *testing.T) {
 			}
 		})
 	}
+	t.Run("a drain that crosses into another epoch reads the operation again", func(t *testing.T) {
+		// The operation read says failed in e1; the pages are of a restored installation, e2, where
+		// it went on and succeeded.
+		o := &opServer{streams: []handler{sse(ev(e1+":1", "queued")), sse(ev(e2+":3", "succeeded"))}, epochs: []string{e1, e2},
+			states: []string{"failed", "succeeded"}, pages: []string{item(e2+":1", "queued"), item(e2+":2", "started"), item(e2+":3", "succeeded")}}
+		shown, _, state, notices, err := watched(t, o, e1, nil)
+		if want := []string{e1 + ":1", "clear", e2 + ":1", e2 + ":2", e2 + ":3"}; err != nil || state != "succeeded" || !slices.Equal(shown, want) ||
+			!strings.Contains(notices, "restored or entered recovery mode") || o.reads != 2 {
+			t.Errorf("watch: %v, state %q, shown %q, %d operation reads, notices %q; want succeeded, %q, 2 reads", err, state, shown, o.reads, notices, want)
+		}
+	})
+	t.Run("a slow operation read does not skip the backoff", func(t *testing.T) {
+		o := &opServer{streams: []handler{sse(), sse(ev(e1+":1", "succeeded"))}, states: []string{"running", "succeeded"},
+			pages: []string{item(e1+":1", "succeeded")}, slow: 1100 * time.Millisecond}
+		if _, waits, state, _, err := watched(t, o, e1, nil); err != nil || state != "succeeded" || !slices.Equal(waits, []time.Duration{time.Second}) {
+			t.Errorf("watch: %v, state %q, waits %v; want succeeded after one 1 s wait", err, state, waits)
+		}
+	})
+	t.Run("a refusal whose body stalls ends after the idle limit", func(t *testing.T) {
+		defer func(d time.Duration) { streamIdle = d }(streamIdle)
+		streamIdle = 200 * time.Millisecond
+		stalled := func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprint(w, `{"type":`)
+			w.(http.Flusher).Flush()
+			<-r.Context().Done()
+		}
+		o := &opServer{streams: []handler{stalled, sse(ev(e1+":1", "succeeded"))}, states: []string{"running", "succeeded"},
+			pages: []string{item(e1+":1", "succeeded")}}
+		shown, waits, state, _, err := watched(t, o, e1, nil)
+		if err != nil || state != "succeeded" || !slices.Equal(shown, []string{e1 + ":1"}) || !slices.Equal(waits, []time.Duration{time.Second}) {
+			t.Errorf("watch: %v, state %q, shown %q, waits %v; want succeeded after one 1 s wait", err, state, shown, waits)
+		}
+	})
 	t.Run("a refused stream ends the watch with the refusal", func(t *testing.T) {
 		o := &opServer{streams: []handler{func(w http.ResponseWriter, _ *http.Request) {
 			problemAnswer(w, http.StatusForbidden, "forbidden", "")

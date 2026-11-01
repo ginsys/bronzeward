@@ -73,19 +73,27 @@ func (c *Client) Watch(op string, w Watch) (*apitypes.OperationBody, error) {
 		before, began := steps, time.Now()
 		opened, err := false, error(nil)
 		if pages {
-			opened, err = true, c.drain(op, &last, w)
+			opened = true
+			_, err = c.drain(op, &last, w)
 		} else {
 			opened, pages, err = c.stream(op, &last, w)
 		}
 		if err != nil {
 			return nil, err
 		}
+		// The attempt's own time: an operation read that is slow does not skip the backoff.
+		took := time.Since(began)
 		o, err := c.Operation(op)
 		if err != nil {
 			return nil, err
 		}
 		if Terminal(o.State) {
-			return o, c.drain(op, &last, w)
+			// A drain that crossed into another epoch read events of a restored installation, where
+			// the operation can be in another state: read it again before the watch ends.
+			if crossed, err := c.drain(op, &last, w); err != nil || !crossed {
+				return o, err
+			}
+			continue
 		}
 		// JSON pages are read again after the delay, which starts again at 1 s once they show
 		// something new.
@@ -93,7 +101,7 @@ func (c *Client) Watch(op string, w Watch) (*apitypes.OperationBody, error) {
 		if progress {
 			delay = time.Second
 		}
-		if pages || !progress && (!opened || time.Since(began) < time.Second) {
+		if pages || !progress && (!opened || took < time.Second) {
 			w.sleep(delay)
 			if !progress {
 				delay = min(2*delay, 30*time.Second)
@@ -148,6 +156,10 @@ func (c *Client) stream(op string, last *string, w Watch) (opened, pages bool, e
 		}
 		hc := *c.hc
 		hc.Timeout = 0 // a stream lasts; streamIdle bounds a silent one
+		// The idle timer runs from the request on, so a stalled answer, a refusal's body included,
+		// ends after streamIdle as a silent stream does.
+		idle := time.AfterFunc(streamIdle, cancel)
+		defer idle.Stop()
 		r, err := hc.Do(q)
 		if err != nil {
 			err = transportError(c.Context, c.Context.Host(), err)
@@ -186,8 +198,6 @@ func (c *Client) stream(op string, last *string, w Watch) (opened, pages bool, e
 			return true, true, nil
 		}
 		epoch := r.Header.Get("Bronzeward-Epoch")
-		idle := time.AfterFunc(streamIdle, cancel)
-		defer idle.Stop()
 		sc := bufio.NewScanner(r.Body)
 		sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
 		var ev Event
@@ -232,24 +242,24 @@ func (c *Client) stream(op string, last *string, w Watch) (opened, pages bool, e
 
 // drain reads the JSON event pages to their end and shows every event after *last (§8.6 item 2).
 // Events of another epoch than the last one shown are read after a restore or a recovery entry:
-// what was shown is cleared and every event shown again.
-func (c *Client) drain(op string, last *string, w Watch) error {
+// what was shown is cleared, every event shown again, and crossed reports it.
+func (c *Client) drain(op string, last *string, w Watch) (crossed bool, err error) {
 	items, err := c.List("/operations/" + url.PathEscape(op) + "/events")
 	if err != nil {
-		return err
+		return false, err
 	}
 	for i, raw := range items {
 		var ev Event
 		if err := json.Unmarshal(raw, &ev); err != nil {
-			return c.Context.fail(fmt.Errorf("GET /api/v1/operations/%s/events: an event does not decode: %w", printable(op), err))
+			return crossed, c.Context.fail(fmt.Errorf("GET /api/v1/operations/%s/events: an event does not decode: %w", printable(op), err))
 		}
 		if i == 0 && *last != "" && epochOf(ev.ID) != epochOf(*last) {
 			c.cleared(w, "the installation was restored or entered recovery mode")
-			*last = ""
+			*last, crossed = "", true
 		}
 		show(w, ev, last)
 	}
-	return nil
+	return crossed, nil
 }
 
 // cleared says why what the watch showed no longer holds, then clears it.
