@@ -179,7 +179,7 @@
   expect:
     client: stores the sign-in in the token file; sends the reads with the access token; records the server's Bronzeward-Epoch on the context. The provider enforces PKCE and the loopback redirect; the test does not read the authorization request, so it does not check the state or the nonce
     server: answers every read for h-viewer as viewer
-    shown: '"Signed in to idp as <subject> at <issuer>", "kept in the token file <file>"; whoami "viewer"; the list; lastEpoch in the context list; exit 0 each'
+    shown: '"Signed in to idp", "as <subject> at <issuer>", "kept in the token file <file>"; whoami "viewer"; the list; lastEpoch in the context list; exit 0 each'
     absent: [token in stdout, stderr, argv]
 
 - id: AUTH-06
