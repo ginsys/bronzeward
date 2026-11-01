@@ -39,9 +39,10 @@ export function WriteNotices({ go }: { go: (to: string) => void }) {
 }
 
 // The in-app router's guard: a move to another page while a write is pending or unknown asks first,
-// repeating the notices. The writes stay, and so do their notices.
-export function leaving(writes: Writes, to: string): boolean {
-  const open = writes.open;
+// repeating the notices. The writes stay, and so do their notices. A notice's own [Show current
+// state] (`notice`, W11) is the notice's way out: it asks nothing on the writes' account.
+export function leaving(writes: Writes, to: string, notice = false): boolean {
+  const open = notice ? [] : writes.open;
   if (open.length === 0 || new URL(to, location.href).pathname === location.pathname) return true;
   const lines = open.map((w) => (w.outcome === undefined ? "Sent, with no answer yet." : "Unknown whether this was saved.") + detail(w));
   return confirm(`${lines.join("\n")}\nLeave this page?`);
