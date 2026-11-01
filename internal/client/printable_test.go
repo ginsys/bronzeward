@@ -58,6 +58,30 @@ func TestPrintable(t *testing.T) {
 	}
 }
 
+// TestEscapeJSON: DEL, each C1 character and each bidirectional control becomes \uNNNN, anything
+// else stays as it is, and the escaped document decodes to the same text.
+func TestEscapeJSON(t *testing.T) {
+	esc := func(r rune) string { return fmt.Sprintf(`\u%04x`, r) }
+	for _, c := range []struct{ in, want string }{
+		{`{"k":"plain bücher"}`, `{"k":"plain bücher"}`},
+		{"{\"k\":\"a\x7fb\"}", `{"k":"a` + esc(0x7f) + `b"}`},
+		{"{\"k\":\"a\xc2\x85b\xc2\x9fc\"}", `{"k":"a` + esc(0x85) + `b` + esc(0x9f) + `c"}`},
+		{"{\"k\":\"\xe2\x80\xaeroot\xe2\x81\xa6\"}", `{"k":"` + esc(0x202e) + `root` + esc(0x2066) + `"}`},
+		{"{\"k\":\"\xd8\x9c\xe2\x80\x8e\xe2\x80\x8f\xe2\x81\xa9\"}", `{"k":"` + esc(0x61c) + esc(0x200e) + esc(0x200f) + esc(0x2069) + `"}`},
+		{"{\"k\":\"raw \xff byte, \\u001b escape\"}", "{\"k\":\"raw \xff byte, \\u001b escape\"}"},
+		{`{"k":"\u007f"}`, `{"k":"\u007f"}`},
+	} {
+		got := EscapeJSON([]byte(c.in))
+		if string(got) != c.want {
+			t.Errorf("EscapeJSON(%q) = %q, want %q", c.in, got, c.want)
+		}
+		var a, b map[string]string
+		if json.Unmarshal([]byte(c.in), &a) == nil && (json.Unmarshal(got, &b) != nil || a["k"] != b["k"]) {
+			t.Errorf("EscapeJSON(%q) = %q decodes to %q, want %q", c.in, got, b["k"], a["k"])
+		}
+	}
+}
+
 // hostileNames are DNS names a certificate may carry, since Go's x509 parser accepts any ASCII in
 // a dNSName; x509.HostnameError lists them unquoted.
 var hostileNames = []string{"BWSYNTH-\x1b[2J.example.invalid", "BWSYNTH-cr\r.example.invalid", "BWSYNTH-bel\a.example.invalid"}

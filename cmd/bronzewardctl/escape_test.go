@@ -362,15 +362,20 @@ func checkSweep(t *testing.T, yes bool, omit string, seen map[string]bool) {
 	if !strings.Contains(all, "start mode unknown") {
 		t.Errorf("the start mode the server sent is not shown as unknown")
 	}
-	// -o json passes the server's bytes on and is outside the rule: report what reaches it.
+	// -o json keeps the server's members but writes DEL, the C1 range and the bidirectional
+	// controls as \uNNNN, which the JSON encoder leaves raw.
 	jsonOut, _ := sweep(t, newFiller(true), "json")
-	raw := 0
-	for _, o := range jsonOut {
-		if strings.ContainsAny(o, "\x7f\u0085") {
-			raw++
+	for i, o := range jsonOut {
+		if !json.Valid([]byte(o)) {
+			t.Errorf("%s: -o json is not valid JSON: %q", strings.Join(commands[i], " "), o)
+		}
+		for _, r := range o {
+			if r == 0x7f || r >= 0x80 && r <= 0x9f || strings.ContainsRune(bidi, r) || r != '\n' && unicode.IsControl(r) {
+				t.Errorf("%s: -o json holds the raw character %U", strings.Join(commands[i], " "), r)
+				break
+			}
 		}
 	}
-	t.Logf("-o json: a raw DEL or C1 character reaches the output of %d of %d commands", raw, len(commands))
 }
 
 // TestRemoteTextInOwnErrors: an error that the CLI words itself from a remote value shows it

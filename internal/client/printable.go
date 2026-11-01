@@ -42,6 +42,29 @@ func isBidi(r rune) bool {
 	return r == 0x061C || r == 0x200E || r == 0x200F || r >= 0x202A && r <= 0x202E || r >= 0x2066 && r <= 0x2069
 }
 
+// EscapeJSON is a JSON document with each DEL, C1 and bidirectional control character written as
+// \uNNNN. The JSON encoder escapes the C0 range and leaves these raw. Inside a string the escape
+// decodes to the same text, so the document means what it meant. Bytes that are not UTF-8 stay.
+func EscapeJSON(b []byte) []byte {
+	var out []byte
+	for i := 0; i < len(b); {
+		r, n := utf8.DecodeRune(b[i:])
+		if r == 0x7f || r >= 0x80 && r <= 0x9f || isBidi(r) {
+			if out == nil {
+				out = append(make([]byte, 0, len(b)+16), b[:i]...)
+			}
+			out = fmt.Appendf(out, `\u%04x`, r)
+		} else if out != nil {
+			out = append(out, b[i:i+n]...)
+		}
+		i += n
+	}
+	if out == nil {
+		return b
+	}
+	return out
+}
+
 // Printable is printable for bronzewardctl's commands, which show remote text outside an error:
 // the sign-in line's subject and issuer, for one (#383).
 func Printable(s string) string { return printable(s) }
