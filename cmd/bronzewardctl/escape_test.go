@@ -37,7 +37,8 @@ const (
 // the output must show it.
 type filler struct {
 	control bool
-	yes     bool // every boolean member is true
+	yes     bool   // every boolean member is true
+	omit    string // the Type.Member that the answers leave out
 	n       int
 	want    map[string]string
 	docs    map[string][]string // the escaped lines of each document and diff, by its marker
@@ -89,16 +90,16 @@ func (f *filler) raw() json.RawMessage {
 
 // notShown is every response member, as Type.Member, that no command of the sweep shows.
 const notShown = "AccessVersionBody.Created AccessVersionBody.Path ActItem.Epoch ActItem.IdempotencyKey ActItem.RequestId " +
-	"AssignmentRevisionBody.Fragments AttemptAccounting.Basis AttemptBody.Observation AttemptResponse.Class " +
+	"AttemptAccounting.Basis AttemptBody.Observation AttemptResponse.Class " +
 	"Embedded.Format Embedded.Path EndpointChangeBody.Act EndpointChangeBody.ChangedBy EndpointChangeBody.Epoch " +
 	"EndpointChangeBody.Role Hardware.Serial IdentityBody.Issuer IdentityBody.Subject " +
 	"ObservationBody.AssignmentEvidence ObservationBody.Controller ObservationBody.Health ObservationBody.Machine " +
 	"ObservationBody.Operation ObservationBody.Plan ObservationBody.ResourceVersion ObservationBody.RunningVersion " +
 	"ObservationBody.SmbiosUuid ObservationBody.TalosClusterId ObservationBody.TalosNodeId " +
-	"ObservedBody.Observation ObservedBody.Release OpenDriftBody.LastObservation OpenDriftBody.LateLanding " +
+	"ObservedBody.Observation OpenDriftBody.LastObservation OpenDriftBody.LateLanding " +
 	"RecoveryEntryRef.EnteredBy RecoveryEntryRef.Reason RecoveryExitRef.Act RecoveryExitRef.ExitedBy " +
 	"Reference.Encoding ReleaseMachineBody.Review RendererBody.MachineryChecksum " +
-	"RestoredBackup.Backup RestoredBackup.Family ServerBody.Features ServerBody.StartMode TimelineEntry.Epoch"
+	"RestoredBackup.Backup RestoredBackup.Family ServerBody.Features ServerBody.StartMode TimelineEntry.Epoch UnreadValue.Code"
 
 var timeType = reflect.TypeFor[time.Time]()
 
@@ -121,6 +122,10 @@ func (f *filler) tree(t reflect.Type, field string) any {
 	case t.Kind() == reflect.Slice:
 		return []any{f.tree(t.Elem(), field)}
 	case t.Kind() == reflect.Map:
+		if field == "Fragments" {
+			// The CLI shows the fragments of a layer it knows, so the key is one of them.
+			return map[string]any{"global": f.tree(t.Elem(), field)}
+		}
 		return map[string]any{f.text(): f.tree(t.Elem(), field)}
 	case t.Kind() == reflect.Interface:
 		m := f.mark()
@@ -137,7 +142,7 @@ func (f *filler) tree(t reflect.Type, field string) any {
 	case t.Kind() == reflect.Struct:
 		out := map[string]any{}
 		for sf := range t.Fields() {
-			if name, _, _ := strings.Cut(sf.Tag.Get("json"), ","); sf.IsExported() && name != "" && name != "-" {
+			if name, _, _ := strings.Cut(sf.Tag.Get("json"), ","); sf.IsExported() && name != "" && name != "-" && t.Name()+"."+sf.Name != f.omit {
 				f.owner, f.member = t.Name(), sf.Name
 				out[name] = f.tree(sf.Type, sf.Name)
 			}
@@ -160,6 +165,7 @@ func (f *filler) answer(v any) string {
 // read of every page gets for its second request.
 func (f *filler) page(v any) (body, last string) {
 	items := `{"items":[` + f.answer(v) + `]`
+	f.owner, f.member = "Page", "next"
 	next, _ := json.Marshal(f.text())
 	return items + `,"next":` + string(next) + `}`, items + `}`
 }
@@ -253,6 +259,7 @@ func sweep(t *testing.T, f *filler, output string) (outs, errs []string) {
 	defer srv.Close()
 	automationContext(t, srv.URL)
 	// The contexts file is a source too: a name, a server and a credential kind that it holds.
+	f.owner, f.member = "Context", "contexts file"
 	if err := client.UpdateConfig(func(c *client.Config) error {
 		c.Contexts = append(c.Contexts, client.Context{Name: f.text(), Server: f.text(), Credential: f.text()})
 		return nil
@@ -275,8 +282,12 @@ func sweep(t *testing.T, f *filler, output string) (outs, errs []string) {
 func TestRemoteTextIsEscaped(t *testing.T) {
 	seen := map[string]bool{}
 	// The second run sets every boolean member, which shows the recovery-mode members.
-	for _, yes := range []bool{false, true} {
-		t.Run(fmt.Sprintf("booleans=%v", yes), func(t *testing.T) { checkSweep(t, yes, seen) })
+	// The third run leaves out a machine's open drift, which shows the release observed instead.
+	for _, run := range []struct {
+		yes  bool
+		omit string
+	}{{false, ""}, {true, ""}, {false, "MachineBody.OpenDrift"}} {
+		t.Run(fmt.Sprintf("booleans=%v omit=%q", run.yes, run.omit), func(t *testing.T) { checkSweep(t, run.yes, run.omit, seen) })
 	}
 	// A member that no command shows proves nothing, so each is named: the list below is every
 	// member of a response type that the commands of this test never show.
@@ -294,9 +305,10 @@ func TestRemoteTextIsEscaped(t *testing.T) {
 
 // checkSweep runs the commands with marked values, and again with plain ones, and checks both.
 // It records in seen, by Type.Member, whether any command showed the member.
-func checkSweep(t *testing.T, yes bool, seen map[string]bool) {
+func checkSweep(t *testing.T, yes bool, omit string, seen map[string]bool) {
 	bad, plain := newFiller(true), newFiller(false)
 	bad.yes, plain.yes = yes, yes
+	bad.omit, plain.omit = omit, omit
 	badOut, badErr := sweep(t, bad, "table")
 	plainOut, _ := sweep(t, plain, "table")
 	for i, c := range commands {
