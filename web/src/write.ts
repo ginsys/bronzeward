@@ -5,7 +5,7 @@
 // write's in-progress 409 and the recovery entry's exception (§8.4 items 2 and 3) are not served
 // here: no form of this layer sends either route.
 
-import { type Attempt, type Client, type End, type Ending, NOT_JSON, type Problem } from "./request.ts";
+import { type Attempt, type Client, type End, type Ending, NOT_JSON, preEntry, type Problem } from "./request.ts";
 
 export interface WriteSpec {
   method: "POST" | "PUT" | "DELETE";
@@ -83,11 +83,6 @@ export class Write {
   }
 }
 
-// A run's ending, and the process refusal of a recovery start it met, if any.
-interface RunEnd extends End {
-  pre?: Problem;
-}
-
 const isOpen = (w: Write) => w.outcome === undefined || w.outcome.kind === "unknown" || (w.outcome.kind === "set-aside" && w.outcome.ambiguous);
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const problemOf = (d: unknown): Problem | null =>
@@ -161,7 +156,7 @@ export class Writes {
       told = true;
       this.onEnded?.(e);
     };
-    const end: RunEnd = { now: tell };
+    const end: End = { now: tell };
     // A run that throws settles the write too: unknown once an attempt may have committed.
     const failed = (): Outcome => (w.ambiguous ? { kind: "unknown", why: PAGE_FAILED, problem: null } : { kind: "not-done", why: PAGE_FAILED, problem: null });
     w.running = this.run(w, end).catch(failed).then((r) => {
@@ -210,7 +205,7 @@ export class Writes {
     this.changed();
   }
 
-  private async run(w: Write, end: RunEnd): Promise<Outcome> {
+  private async run(w: Write, end: End): Promise<Outcome> {
     const client = this.client;
     const who = this.principal();
     if (client === undefined || who === undefined) return { kind: "not-done", why: "there is no sign-in to send it under", problem: null };
@@ -251,6 +246,8 @@ export class Writes {
     for (let n = 0; n <= BACKOFF.length; n++) {
       // A read sent to learn the last answer's epoch ended the sign-in: nothing is repeated.
       if (n > 0 && end.e !== undefined) return aside(SIGN_IN_REFUSED);
+      // A read sent to learn it met a recovery start: nothing is repeated, and nothing read again.
+      if (n > 0 && end.pre !== undefined) return aside(RECOVERY_START);
       if (n > 0) await this.wait(BACKOFF[n - 1]!);
       if (n > 0 || again) {
         // Looked at again once run() resumes: a sign-out, an end of the shell or a set-aside can
@@ -304,12 +301,9 @@ export class Writes {
       // check, which carries `plan`, refuses after it (§8.2 403 row).
       if (a.status === 403 && code === "forbidden" && p?.["plan"] === undefined) return early(refused);
       if (a.status === 409 && code === "conflict" && p?.["request"] !== undefined && p["epoch"] !== undefined) return aside("the key's record is from an earlier epoch");
-      // A process refusal, decided before the lookup (§8.2 409 row): a recovery start, which the
-      // shell then shows (§8.5 item 1).
-      if (a.status === 409 && code === "recovery-mode-active" && p?.["scope"] === undefined) {
-        end.pre = p!;
-        return early(refused);
-      }
+      // A process refusal, decided before the lookup (§8.2 409 row): a recovery start, which
+      // attempt() recorded in `end.pre` for the shell to show (§8.5 item 1).
+      if (preEntry(a.status, p) !== undefined) return early(refused);
       if (a.status === 412 && code === "epoch-mismatch") return aside(EPOCH_CHANGED_ASIDE);
       if (a.status === 422 && code === "idempotency-key-reused" && (n > 0 || again)) return unknown("this repeat could not be matched to the earlier request under its key, so it did nothing");
       if (a.status === 503 && (REPEATED_503.has(code ?? "") || code === "epoch-superseded")) {
@@ -330,7 +324,7 @@ export class Writes {
   }
 
   // Before a repeat: the same sign-in, and one GET /recovery that shows the reference epoch.
-  private async check(client: Client, w: Write, end: RunEnd): Promise<string | undefined> {
+  private async check(client: Client, w: Write, end: End): Promise<string | undefined> {
     if (w.aside !== undefined) return w.aside;
     const before = this.gone(w, client);
     if (before !== undefined) return before;
@@ -354,10 +348,11 @@ export class Writes {
   // The epoch one GET /recovery shows (§8.4 item 3). It is a read, so its credential refusals are
   // a read's (§8.2): a 401 renews once and is sent again, and a second 401 or identity-revoked
   // ends the page through `end`.
-  private async confirm(client: Client, end: RunEnd): Promise<string | undefined> {
+  private async confirm(client: Client, end: End): Promise<string | undefined> {
     for (let renewed = false; ; renewed = true) {
       const a = await client.attempt("GET", "/recovery", {}, undefined, end, true);
-      if (end.e !== undefined) return undefined;
+      // An ending, or a recovery start's process refusal (§8.5 item 1) that attempt() recorded.
+      if (end.e !== undefined || end.pre !== undefined) return undefined;
       const p = a === undefined ? null : problemOf(a.data);
       const code = p?.type.slice(PREFIX.length);
       if (a?.status === 401 && code === "unauthenticated") {
@@ -368,11 +363,6 @@ export class Writes {
       if (a?.status === 403 && code === "identity-revoked") {
         client.revoked();
         end.e = { kind: "revoked", problem: p! };
-        return undefined;
-      }
-      // A recovery start's process refusal (§8.5 item 1): nothing is sent, and the shell is told.
-      if (a?.status === 409 && code === "recovery-mode-active" && p?.["scope"] === undefined) {
-        end.pre = p!;
         return undefined;
       }
       return a?.headers.get("Bronzeward-Epoch") ?? undefined;
