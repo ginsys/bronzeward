@@ -453,6 +453,30 @@ func TestLogin(t *testing.T) {
 		}
 	})
 
+	// A context added again with other scopes while its sign-in runs is changed: the tokens, issued
+	// for the old scopes, are not kept, and their refresh token is revoked.
+	t.Run("context scopes changed", func(t *testing.T) {
+		moved := filepath.Join(f.home, "moved.json")
+		add(nil, "moved", "--oidc-token-file", moved)
+		f.idp.login(nil, "")
+		readd := func(line string) {
+			if strings.HasPrefix(strings.TrimSpace(line), f.iss.URL+"/authorize?") {
+				f.want(f.ctl(nil, "", "context", "remove", "moved"), 0, `Context "moved" removed.`)
+				add(nil, "moved", "--oidc-token-file", moved, "--scopes", "openid,offline_access,BWSYNTH-other")
+			}
+			f.browser(line)
+		}
+		f.want(f.interact(nil, readd, "--context", "moved", "login"), 1, `context "moved" was removed or changed during the sign-in`,
+			"its refresh token is revoked at the identity provider")
+		if _, err := os.Stat(moved); !os.IsNotExist(err) {
+			t.Errorf("the sign-in was kept for a changed context: %v", err)
+		}
+		if r := f.idp.revocations(); len(r) != 1 || r[0].Get("token") != "BWSYNTH-rt-1" {
+			t.Errorf("revoked %v, want the new refresh token", r)
+		}
+		f.want(f.ctl(nil, "", "context", "remove", "moved"), 0, `Context "moved" removed.`)
+	})
+
 	t.Run("refused", func(t *testing.T) {
 		f.idp.login(func(v url.Values) url.Values { v.Del("code"); v.Set("error", "access_denied"); return v }, "")
 		f.want(login(nil, "file"), 1, "refused the sign-in: access_denied")
@@ -620,6 +644,18 @@ func TestLogin(t *testing.T) {
 			f.want(f.ctl(nil, "", "--context", "file", "login", "--device"), 1,
 				"device authorization at the identity provider "+f.iss.URL+": its answer could not be read")
 		}
+		// The verification URI under its older name verification_url, which some providers send, is
+		// read as well.
+		f.idp.login(nil, "")
+		os.Remove(file)
+		f.idp.mu.Lock()
+		f.idp.device = []byte(`{"device_code":"BWSYNTH-device","user_code":"BWSY-NTH1","verification_url":"` + f.iss.URL + `/activate-url","expires_in":60,"interval":1}`)
+		f.idp.mu.Unlock()
+		f.want(f.interact(nil, approve, "--context", "file", "login", "--device"), 0, "open "+f.iss.URL+"/activate-url on any device",
+			"Signed in to file")
+		f.idp.mu.Lock()
+		f.idp.device = nil
+		f.idp.mu.Unlock()
 		f.idp.login(nil, "")
 	})
 
