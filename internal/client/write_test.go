@@ -133,6 +133,52 @@ func clusterWrite() *Write {
 		Check: "cluster list", Read: func(*Client) (string, error) { return "BWSYNTH shows", nil }}
 }
 
+// TestPrincipalAfterRenewal checks that a renewal during the context-use read GET /server, which
+// adopts a sign-in another process stored for another subject, refuses an operator's repeat before
+// it is sent, and that a first write's block names the principal it was sent as (T10, §8.4 item 3).
+func TestPrincipalAfterRenewal(t *testing.T) {
+	jwt := func(sub string) string {
+		return "e30." + base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"https://idp.example.invalid","sub":"`+sub+`"}`)) + ".BWSYNTH-sig"
+	}
+	first, other := jwt("h-author"), jwt("h-other")
+	for _, repeat := range []bool{true, false} {
+		f := &fake{epoch: "ep_BWSYNTH-1", post: func(_ int, w http.ResponseWriter, _ *http.Request) { drop(w) }}
+		c, notices, _ := writeClient(t, f, "ep_BWSYNTH-1")
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/v1/server" && r.Header.Get("Authorization") == "Bearer "+first {
+				problemAnswer(w, http.StatusUnauthorized, "unauthenticated", "")
+				return
+			}
+			f.ServeHTTP(w, r)
+		}))
+		t.Cleanup(srv.Close)
+		t.Setenv("BRONZEWARD_TOKEN_FILE", "")
+		tokens := filepath.Join(t.TempDir(), "tokens")
+		// Another process signed in as h-other meanwhile: the renewal adopts its stored pair.
+		if err := WriteTokens(tokens, &Tokens{AccessToken: other, RefreshToken: "BWSYNTH-rt2"}); err != nil {
+			t.Fatal(err)
+		}
+		c.Context.Server, c.Context.Credential = srv.URL, "oidc"
+		c.Context.OIDC = &OIDC{Issuer: "https://idp.example.invalid", TokenFile: tokens}
+		c.signIn = &signIn{store: openStore(c.Context, true), tokens: &Tokens{AccessToken: first, RefreshToken: "BWSYNTH-rt"}}
+		c.token, c.service = first, ""
+		w := clusterWrite()
+		if repeat {
+			w.Repeat = &Repeat{Key: "BWSYNTH-aaaaaaaaaaaaaaa", Epoch: "ep_BWSYNTH-1", Principal: "https://idp.example.invalid|h-author"}
+		}
+		_, err := c.Send(w)
+		var u *Unknown
+		switch {
+		case !strings.Contains(notices.String(), "a new sign-in"):
+			t.Errorf("repeat %v: notices %q; want the renewal to adopt the other sign-in", repeat, notices)
+		case repeat && (!errors.As(err, new(RefusedRepeat)) || len(f.postsSeen()) != 0):
+			t.Errorf("repeat: %v after %d posts; want the repeat refused before sending, as h-other is not the given principal", err, len(f.postsSeen()))
+		case !repeat && (!errors.As(err, &u) || u.Principal != "https://idp.example.invalid|h-other"):
+			t.Errorf("first write: %v; want an outcome-unknown block naming h-other, the principal it was sent as", err)
+		}
+	}
+}
+
 func TestKey(t *testing.T) {
 	a, b := newKey(), newKey()
 	raw, err := base64.RawURLEncoding.DecodeString(a)
