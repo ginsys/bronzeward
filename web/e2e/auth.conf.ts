@@ -8,7 +8,8 @@
 //     shell's states).
 //   - On a case's request, B's deployment on a fresh database, which the injector then passes B's
 //     page on to: started normally for the inventory cases (PAGE-01), with -recovery-start (REC-01),
-//     or restarted with it on the same database (PAGE-02).
+//     or restarted with it on the same database (PAGE-02). Its provider is mise run dev-bao's
+//     OpenBao behind a proxy (bao.ts), so the draft cases (#339) can ingest fragment documents.
 // It removes the databases with the processes, and fails the run when it cannot; then the state
 // directory, which names them, is kept, and the next run refuses to start until it is removed.
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
@@ -21,10 +22,11 @@ import { printFailure } from "./print-failure.ts";
 import { config as base, removeProfiles } from "./wdio.conf.ts";
 import { type Faults, type Injector, startInjector } from "./injector.ts";
 import {
-  CONTROL, DISPOSABLE_API, FIXTURE_API, FIXTURE_ISSUER, FIXTURE_LISTEN, FIXTURE_PAGE, IDP_API, INJECTOR, KEYS,
+  BAO_PROXY, CONTROL, DISPOSABLE_API, FIXTURE_API, FIXTURE_ISSUER, FIXTURE_LISTEN, FIXTURE_PAGE, IDP_API, INJECTOR, KEYS,
   PAGE_LISTEN, PAGE_ORIGIN as IDP_PAGE,
 } from "./ports.ts";
 import { type Counts, type Grant, type Provider, startProvider } from "./provider.ts";
+import { type Bao, startBao } from "./bao.ts";
 
 export { CONTROL, FIXTURE_API, FIXTURE_ISSUER, FIXTURE_PAGE, IDP_PAGE };
 // mise run browser-auth sets BW_DEV_PG_PORT and BW_DEV_IDP_DIR from BW_DEV_INSTANCE
@@ -46,6 +48,10 @@ const state = `${root}.dev/browser-auth`;
 // wdio.conf.ts has checked it.
 const canary = process.env["BW_WEB_CANARY"]!;
 
+// A draft case's fragment document (#339): its machine token carries the run's canary, so the
+// artifact scan finds the document in any retained file. Never typed or read over WebDriver.
+export const syntheticDocument = (name: string) => `machine:\n  token: ${canary}-doc-${name}\n  nodeLabels:\n    example.test/tier: ${name}\n`;
+
 // The test provider's variables, as mise run dev-idp writes them.
 export function idpEnv(): Record<string, string> {
   const file = `${root}${process.env["BW_DEV_IDP_DIR"] ?? ".dev/idp"}/idp.env`;
@@ -58,6 +64,8 @@ export function idpEnv(): Record<string, string> {
 const procs: ChildProcess[] = [];
 const servers: Server[] = [];
 const databases: string[] = [];
+// This run's OpenBao records, removed after the processes stop.
+let bao: Bao | undefined;
 // Set once this run has made the state directory; before that it may be another run's.
 let ownState = false;
 
@@ -117,8 +125,11 @@ function host(listen: string, clientConfig: object, issuer: string, api: string)
 // /release lets its held answers go and answers once they are sent, GET /writes lists the writes
 // it received, GET /redirected counts the requests that followed its redirects, and POST /epoch commits a new epoch where they go; the next sign-in clears all. POST /disposable answers the URL of B's
 // deployment just started on a fresh database, replacing any earlier one: ?start=recovery with
-// -recovery-start, its entry not yet made, and with &keep on the earlier one's database.
-function control(provider: Provider, next: { grant: Grant }, injector: Injector, disposable: (recovery: boolean, keep: boolean) => Promise<string>): Server {
+// -recovery-start, its entry not yet made, and with &keep on the earlier one's database. POST
+// /bao/hold?ms= holds each KV write of that deployment's provider this long (AMB-02), and POST
+// /bao/retire retires the versions of its digest key (AMB-06); both answer 500 unless the faults'
+// upstream is that deployment, and the next sign-in ends the hold.
+function control(provider: Provider, next: { grant: Grant }, injector: Injector, disposable: (recovery: boolean, keep: boolean) => Promise<string>, kv: (ms: number) => void): Server {
   let go: string | undefined;
   return createServer((req, res) => {
     const url = new URL(req.url ?? "/", CONTROL);
@@ -136,6 +147,15 @@ function control(provider: Provider, next: { grant: Grant }, injector: Injector,
       }
       return res.end();
     }
+    if (url.pathname === "/bao/hold" && req.method === "POST") {
+      try {
+        kv(Number(url.searchParams.get("ms") ?? 0));
+      } catch (e) {
+        return res.writeHead(500).end(String(e));
+      }
+      return res.end();
+    }
+    if (url.pathname === "/bao/retire" && req.method === "POST") return void injector.retire().then(() => res.end(), (e: unknown) => res.writeHead(500).end(String(e)));
     if (url.pathname === "/release" && req.method === "POST") return void injector.release().then(() => res.end());
     if (url.pathname === "/disposable" && req.method === "POST") {
       const started = disposable(url.searchParams.get("start") === "recovery", url.searchParams.has("keep"));
@@ -182,6 +202,7 @@ function control(provider: Provider, next: { grant: Grant }, injector: Injector,
       injector.answered.length = 0;
       injector.writes.length = 0;
       injector.redirected = 0;
+      if (bao !== undefined) bao.hold = 0;
       res.end();
     });
   });
@@ -189,7 +210,7 @@ function control(provider: Provider, next: { grant: Grant }, injector: Injector,
 
 async function prepare() {
   // Anything left on these ports from an earlier run would answer the readiness checks below.
-  for (const at of [PAGE_LISTEN, FIXTURE_LISTEN, FIXTURE_ISSUER.slice(7), CONTROL.slice(7), FIXTURE_API.slice(7), IDP_API.slice(7), INJECTOR.slice(7), DISPOSABLE_API.slice(7), KEYS]) {
+  for (const at of [PAGE_LISTEN, FIXTURE_LISTEN, FIXTURE_ISSUER.slice(7), CONTROL.slice(7), FIXTURE_API.slice(7), IDP_API.slice(7), INJECTOR.slice(7), DISPOSABLE_API.slice(7), KEYS, BAO_PROXY]) {
     if (await fetch(`http://${at}/`).then(() => true, () => false)) throw new SevereServiceError(`something already answers on ${at}`);
   }
   // Made, never reused: one left behind names databases an earlier cleanup could not drop, and the
@@ -211,36 +232,44 @@ async function prepare() {
   const keys = start("oidc-fixture", ["serve", "-key", `${state}/fixture.key`, "-issuer", FIXTURE_ISSUER, "-listen", KEYS]);
   await ready(`http://${KEYS}/jwks`, keys);
   const next = { grant: { access: "", sub: "" } };
-  const provider = await startProvider({ issuer: FIXTURE_ISSUER, pageOrigin: FIXTURE_PAGE, clientId: "synthetic-web-client", next: () => next.grant, keys: `http://${KEYS}`, refresh: canary });
+  const provider = await startProvider({ issuer: FIXTURE_ISSUER, pageOrigin: FIXTURE_PAGE, clientId: "synthetic-web-client", next: () => next.grant, keys: `http://${KEYS}`, refresh: canary, document: syntheticDocument });
   servers.push(provider.server);
   const injector = await startInjector(FIXTURE_API, Number(new URL(INJECTOR).port));
   servers.push(injector.server);
   // B's deployment, which the recovery starts share.
   const fixtureOidc = `issuer: ${FIXTURE_ISSUER}\naudience: bronzeward`;
   const fixtureDenied = `  deniedSubjects: [{iss: "${FIXTURE_ISSUER}", sub: ${DENIED}}]`;
-  // A recovery entry takes operations over as this process's owner identity, which needs a provider
-  // and ingestion block. No case imports, publishes or runs an operation, so nothing reaches the
-  // provider: its address answers nothing and its tokens are synthetic.
-  const tokens = ["ingestion", "compiler", "metadata", "executor"].map((t) => {
-    const file = `${state}/disposable-${t}.token`;
-    writeFileSync(file, `synthetic-unused-${t}-token\n`, { mode: 0o600 });
-    return `  ${t}TokenFile: ${file}`;
-  });
+  // A recovery entry takes operations over as this process's owner identity, and a fragment write
+  // ingests its document (#339): both need a provider and ingestion block. The provider is mise run
+  // dev-bao's OpenBao, through this run's proxy, with this run's own digest key and tokens (bao.ts).
+  bao = await startBao(root, state, Number(BAO_PROXY.split(":")[1]));
+  servers.push(bao.server);
   const disposableDeployment = [
     fixtureDenied,
-    "provider:",
-    "  address: http://127.0.0.1:9",
-    "  keys: {baseline: bw-baseline, staging: bw-staging, digest: bw-digest, artifact: bw-artifact}",
-    ...tokens,
-    "ingestion: {instance: rec-01, heartbeat: 10s, lease: 30s, absoluteExpiry: 1h, sweep: 1m}",
+    bao.block,
+    "ingestion: {instance: rec-01, heartbeat: 5s, lease: 15s, absoluteExpiry: 10m, sweep: 15s}",
   ].join("\n");
   let disposable: { db: string; p: ChildProcess } | undefined;
+  // Only the deployment this run started on a database it created, with the faults' upstream on it:
+  // the epoch, the KV hold and the key retirement act on nothing else.
+  const owned = (what: string) => {
+    const db = disposable?.db;
+    if (injector.faults.upstream !== DISPOSABLE_API || db === undefined || !db.startsWith("bw_auth_disposable_") || !databases.includes(db)) {
+      throw new Error(`${what} only in this run's disposable deployment, with the faults' upstream on it`);
+    }
+    return db;
+  };
+  const kv = (ms: number) => {
+    owned("a KV write is held");
+    if (!Number.isInteger(ms) || ms < 0 || ms > 60_000) throw new Error(`a KV hold of ${ms} ms: give 0 to 60000`);
+    bao!.hold = ms;
+  };
   const ctl = control(provider, next, injector, async (recovery, keep) => {
     if (disposable !== undefined) await stop(disposable.p);
     disposable = server("disposable", DISPOSABLE_API.slice(7), fixtureOidc, disposableDeployment, recovery ? ["-recovery-start"] : [], keep ? disposable?.db : undefined);
     await ready(`${DISPOSABLE_API}/livez`, disposable.p);
     return DISPOSABLE_API;
-  });
+  }, kv);
   await new Promise<void>((resolve, reject) => {
     ctl.once("error", reject);
     ctl.listen(Number(new URL(CONTROL).port), "127.0.0.1", resolve);
@@ -253,12 +282,14 @@ async function prepare() {
   // reads the epoch on each request. Only a database this run created for that deployment: any
   // other, B's included, is refused, so no case changes a database it does not own.
   injector.epoch = () => {
-    const db = disposable?.db;
-    if (injector.faults.upstream !== DISPOSABLE_API || db === undefined || !db.startsWith("bw_auth_disposable_") || !databases.includes(db)) {
-      throw new Error("a new epoch is committed only in this run's disposable deployment, with the faults' upstream on it");
-    }
+    const db = owned("a new epoch is committed");
     const ep = `ep_${base32(randomBytes(16))}`;
     execFileSync("psql", [...PG, "-v", "ON_ERROR_STOP=1", "-q", "-d", db, "-c", `INSERT INTO recovery_epoch (epoch, entered_at) VALUES ('${ep}', now())`, "-c", `UPDATE installation_state SET epoch = '${ep}'`]);
+  };
+  // This run's digest key only (bao.ts), and only while the writes go to the disposable deployment.
+  injector.retire = async () => {
+    owned("a digest key is retired");
+    await bao!.retire();
   };
   await ready(`${IDP_API}/livez`, a);
   await ready(`${FIXTURE_API}/livez`, b);
@@ -289,6 +320,9 @@ async function cleanup() {
     // Each server must be gone before its database can be dropped.
     await Promise.all(procs.splice(0).map(stop));
     await Promise.all(servers.splice(0).map((s) => new Promise((r) => (s.closeAllConnections(), s.close(r)))));
+    // A failure is reported after the databases are dropped.
+    const baoFailed = await (bao?.cleanup() ?? Promise.resolve()).then(() => undefined, (e: unknown) => e);
+    bao = undefined;
     const left = databases.filter((db) => {
       try {
         execFileSync("dropdb", [...PG, "--force", db]);
@@ -301,6 +335,7 @@ async function cleanup() {
     // A later cleanup tries them again, and keeps the state directory while any is left.
     databases.splice(0, databases.length, ...left);
     if (left.length > 0) throw new Error(`databases left behind: ${left.join(", ")} (named in ${state})`);
+    if (baoFailed !== undefined) throw baoFailed;
     if (ownState) rmSync(state, { recursive: true, force: true });
     ownState = false;
   } catch (e) {

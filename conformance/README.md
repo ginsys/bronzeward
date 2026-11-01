@@ -26,8 +26,10 @@ the write cases. Its tests run exactly the cases recorded there.
 | [AUTH-03](cases/AUTH-03.yaml) | web: `mise run browser-auth` |
 | [AUTH-05](cases/AUTH-05.yaml) | web: `mise run browser-auth` |
 | [AMB-01](cases/AMB-01.yaml) | web, as a keyed repeat: `mise run browser-auth` |
+| [AMB-02](cases/AMB-02.yaml) | web, the in-progress wait and the replay: `mise run browser-auth`; the bound and a published draft's `409`: `mise run web` |
 | [AMB-03](cases/AMB-03.yaml) | web: `mise run browser-auth` |
 | [AMB-05](cases/AMB-05.yaml) | web: `mise run browser-auth` |
+| [AMB-06](cases/AMB-06.yaml) | web: `mise run browser-auth` |
 | [AMB-07](cases/AMB-07.yaml) | web: `mise run browser-auth` |
 | [AMB-08](cases/AMB-08.yaml) | web, an injected 503: `mise run browser-auth` |
 | [AMB-09](cases/AMB-09.yaml) | web: `mise run browser-auth` |
@@ -38,6 +40,7 @@ the write cases. Its tests run exactly the cases recorded there.
 | [AUTH-11](cases/AUTH-11.yaml) | web: `mise run browser-auth`; the tab protocol in `mise run web` |
 | [COMP-01](cases/COMP-01.yaml) | web: `mise run browser-auth` |
 | [COMP-02](cases/COMP-02.yaml) | web: `mise run browser-auth` |
+| [ETAG-01](cases/ETAG-01.yaml) | web, a fragment entry: `mise run browser-auth` |
 | [PAGE-01](cases/PAGE-01.yaml) | web, the machine list: `mise run browser-auth` |
 | [PAGE-02](cases/PAGE-02.yaml) | web, the machine list: `mise run browser-auth` |
 | [REC-01](cases/REC-01.yaml) | web, the banner and the process's refusal: `mise run browser-auth` |

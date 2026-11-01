@@ -325,7 +325,8 @@ jobs:
 
   browser-auth:
     # The AUTH cases (mise run browser-auth) in the browsers of the browser job, against the test
-    # identity provider and the fixture issuer, one browser per runner so that requiring the job
+    # identity provider and the fixture issuer, with dev-bao's OpenBao as the provider of the cases'
+    # disposable deployment (the draft cases ingest documents), one browser per runner so that requiring the job
     # adds little time (the four in one job took 22 to 23 minutes). `checks` needs every leg: the
     # owner decided on 2026-11-01 to require browser-auth and idp, after this split. The job's
     # result is success only when all four legs succeed. fail-fast stays off so that one failing
@@ -347,6 +348,7 @@ jobs:
           install_args: node go
       - run: sudo chown root:root /opt/microsoft/msedge/msedge-sandbox && sudo chmod 4755 /opt/microsoft/msedge/msedge-sandbox
       - run: mise run dev-db
+      - run: mise run dev-bao
       - run: mise run dev-idp
       - run: mise run browser-auth
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
