@@ -1,7 +1,7 @@
 // Path routes over the History API (decision B3 of ginsys/bronzeward#255): no router library. The
 // static host answers every path outside /api/v1/ and /livez with the application.
 
-import { type MouseEvent, useCallback, useEffect, useState } from "react";
+import { type MouseEvent, useCallback, useEffect, useRef, useState } from "react";
 
 // The navigation of the header wireframe; Recovery is the recovery console's (#261).
 export const PAGES = [
@@ -15,16 +15,27 @@ export const PAGES = [
 
 // The current path, its query, and a navigation that adds a history entry. The query is tracked
 // apart from the path, so a query-only move (Back from ?cluster=c2 to ?cluster=c1) is seen too.
-export function usePath(): [string, (to: string) => void, string] {
+// `guard` is asked before Back or Forward moves the page from `from` to `to`; refused, the address
+// returns to the page still shown, under a new history entry.
+export function usePath(guard?: (to: string, from: string) => boolean): [string, (to: string) => void, string] {
   const [path, setPath] = useState(location.pathname);
   const [query, setQuery] = useState(location.search);
+  const shown = useRef(location.pathname + location.search);
+  const asks = useRef(guard);
+  asks.current = guard;
   const here = useCallback(() => {
+    shown.current = location.pathname + location.search;
     setPath(location.pathname);
     setQuery(location.search);
   }, []);
   useEffect(() => {
-    addEventListener("popstate", here);
-    return () => removeEventListener("popstate", here);
+    const popped = () => {
+      const to = location.pathname + location.search;
+      if (asks.current !== undefined && !asks.current(to, shown.current)) return history.pushState(null, "", shown.current);
+      here();
+    };
+    addEventListener("popstate", popped);
+    return () => removeEventListener("popstate", popped);
   }, [here]);
   const go = useCallback((to: string) => {
     if (to !== location.pathname + location.search) history.pushState(null, "", to);

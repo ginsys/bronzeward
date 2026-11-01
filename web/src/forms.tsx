@@ -40,23 +40,36 @@ export function WriteNotices({ go }: { go: (to: string) => void }) {
 
 // The in-app router's guard: a move to another page while a write is pending or unknown asks first,
 // repeating the notices. The writes stay, and so do their notices. A notice's own [Show current
-// state] (`notice`, W11) is the notice's way out: it asks nothing on the writes' account.
-export function leaving(writes: Writes, to: string, notice = false): boolean {
+// state] (`notice`, W11) is the notice's way out: it asks nothing on the writes' account. `from` is
+// the page shown, which Back and Forward have already left in `location` when they ask.
+export function leaving(writes: Writes, to: string, notice = false, from = location.pathname): boolean {
   const open = notice ? [] : writes.open;
-  if (open.length === 0 || new URL(to, location.href).pathname === location.pathname) return true;
+  if (open.length === 0 || new URL(to, location.href).pathname === new URL(from, location.href).pathname) return true;
   const lines = open.map((w) => (w.outcome === undefined ? "Sent, with no answer yet." : "Unknown whether this was saved.") + detail(w));
   return confirm(`${lines.join("\n")}\nLeave this page?`);
 }
 
-// A reload or a tab close drops every pending write, so it is guarded by the browser's own dialog.
+// A reload or a tab close drops every pending write, so it is guarded by the browser's own dialog,
+// unless the page is being left by a notice's own [Show current state].
+export const guardsUnload = (writes: Writes) => writes.open.length > 0 && !writes.unloading;
 export function useUnloadGuard(writes: Writes): void {
   useEffect(() => {
     const guard = (e: BeforeUnloadEvent) => {
-      if (writes.open.length > 0) e.preventDefault();
+      if (guardsUnload(writes)) e.preventDefault();
     };
     addEventListener("beforeunload", guard);
     return () => removeEventListener("beforeunload", guard);
   }, [writes]);
+}
+
+// The notices outside the shell (the sign-in view), whose [Show current state] loads the resource's
+// page: the notice's way out, so the unload guard does not ask.
+export function PageNotices() {
+  const writes = useWrites();
+  return <WriteNotices go={(to) => {
+    if (writes !== undefined) writes.unloading = true;
+    location.assign(to);
+  }} />;
 }
 
 // One form's logical write: a second submit while it runs, or while its outcome is unknown, sends
@@ -80,15 +93,20 @@ function useSend(): [Write | undefined, (spec: WriteSpec) => void] {
 }
 
 // The form's own line for its write; an unknown outcome is the notice's.
-function Result({ w, done }: { w: Write | undefined; done: (data: unknown) => ReactNode }) {
+export function Result({ w, done }: { w: Write | undefined; done: (data: unknown) => ReactNode }) {
   const o: Outcome | undefined = w?.outcome;
   if (w === undefined) return null;
   if (o === undefined) return <Status testid="write-result">Saving</Status>;
   switch (o.kind) {
     case "done":
+      // A success whose body could not be read is still saved: it names the page to read, and is
+      // never repeated.
+      if (typeof o.data !== "object" || o.data === null) {
+        return <Status testid="write-result">{o.replayed && `${REPLAYED} `}Saved (the server answered {o.status}), but its answer could not be read. Read <Ref to={w.spec.resource} id={w.spec.resource}>{w.spec.resource}</Ref>.</Status>;
+      }
       return <Status testid="write-result">{o.replayed && `${REPLAYED} `}{done(o.data)}</Status>;
     case "refused":
-      return <Refused testid="write-result" problem={o.problem} status={o.status} verb="saved" />;
+      return <Refused testid="write-result" problem={o.problem} status={o.status} verb="saved" replayed={o.replayed} />;
     case "not-done":
       return <Status testid="write-result">Not saved: {o.why}.</Status>;
     case "set-aside":

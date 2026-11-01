@@ -45,14 +45,16 @@ export const Unread = ({ at, causes }: { at: Date; causes: string[] }) => (
 );
 
 // A Bronzeward problem: its code, rule, title, detail and instance (client contracts §8.2), never a
-// request body. Any other answer is named by its status alone.
-export function Refused({ problem, status, verb, testid }: { problem: Problem | null; status: number; verb: "read" | "saved"; testid?: string }) {
-  if (problem === null) return <Status testid={testid}>Not {verb}: the server answered {status}.</Status>;
+// request body. Any other answer is named by its status alone. A replayed refusal is the earlier
+// attempt's, and says so (§8.4 item 2).
+export function Refused({ problem, status, verb, testid, replayed = false }: { problem: Problem | null; status: number; verb: "read" | "saved"; testid?: string; replayed?: boolean }) {
+  const earlier = replayed && `${REPLAYED} `;
+  if (problem === null) return <Status testid={testid}>{earlier}Not {verb}: the server answered {status}.</Status>;
   const code = problem.type.slice("urn:bronzeward:problem:".length);
   const rule = typeof problem["rule"] === "string" ? ` (rule ${problem["rule"]})` : "";
   return (
     <Status testid={testid}>
-      Not {verb}: {code}{rule}. {problem.title}{problem.detail !== undefined && `: ${problem.detail}`}
+      {earlier}Not {verb}: {code}{rule}. {problem.title}{problem.detail !== undefined && `: ${problem.detail}`}
       {problem.instance !== undefined && ` Request ${problem.instance}.`}
     </Status>
   );
