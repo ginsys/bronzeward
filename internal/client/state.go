@@ -1,6 +1,7 @@
 package client
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -39,7 +40,7 @@ func ETag(x *Context, draft string) (string, error) {
 	}
 	var s state
 	if err := yaml.Unmarshal(b, &s); err != nil {
-		return "", x.fail(err)
+		return "", x.fail(fmt.Errorf("%s", printable(err.Error())))
 	}
 	if ss := s.Contexts[x.Name][x.Server]; ss != nil && ss.Epoch == x.LastEpoch {
 		return ss.ETags[draft], nil

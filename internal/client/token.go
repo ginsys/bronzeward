@@ -40,11 +40,11 @@ func automationToken(x *Context, in TokenInput) (string, error) {
 		b, err = readOwnerOnly(src)
 	}
 	if err != nil {
-		return "", fmt.Errorf("token from %s: %w", src, err)
+		return "", fmt.Errorf("token from %s: %w", printable(src), printableError(err))
 	}
 	t := strings.TrimSpace(string(b))
 	if !strings.HasPrefix(t, "bwt_") || strings.ContainsAny(t, " \t\r\n") {
-		return "", fmt.Errorf("token from %s: not an automation token (bwt_…) on one line", src)
+		return "", fmt.Errorf("token from %s: not an automation token (bwt_…) on one line", printable(src))
 	}
 	return t, nil
 }
