@@ -316,14 +316,15 @@ function MachineState({ id, path, tl, older, busy }: { id: string; path: string;
   return <MachineShown id={id} m={m} obs={obs} km={km} ko={ko} tl={tl} kt={kt} older={older} busy={busy} />;
 }
 
-// W3 as read: each read's answer, else what it keeps with its failure above it.
+// W3 as read: each read's answer, else what it keeps with its failure above it. The machine's rows
+// need only the machine: with no observations to show, they show without the latest read's line and
+// the observations' list (client contracts §8.6 item 6, case 5).
 export function MachineShown({ id, m, obs, km, ko, tl, kt, older, busy }: { id: string; m: Load<Machine>; obs: Load<Listed<Observation>> | Dropped; km: Kept<Machine>; ko: Kept<Listed<Observation>>; tl: Load<Timeline<Entry>> | Dropped; kt: Kept<Timeline<Entry>>; older: (() => void) | undefined; busy: boolean }) {
   const [pm, po, timeline] = [usePending(m, "the machine"), usePending(obs, "the observations"), usePending(tl, "the timeline")];
   const d = m.kind === "ok" ? m.data : km.data;
   const read = obs.kind === "ok" ? obs.data : ko.data;
   if (d === undefined) return <><h2>Machine {short(id)}</h2>{pm}</>;
-  if (read === undefined) return <><h2>Machine {short(id)}</h2>{m.kind !== "ok" && pm}{po}</>;
-  const list = byBasis(read.items);
+  const list = read === undefined ? [] : byBasis(read.items);
   return (
     <>
       <h2>Machine {d.id}</h2>
@@ -341,8 +342,7 @@ export function MachineShown({ id, m, obs, km, ko, tl, kt, older, busy }: { id: 
         <Ref to={`/plans?machine=${d.id}`} id={d.id}>Plans for this machine</Ref>{" · "}
         <Ref to={`/operations?machine=${d.id}`} id={d.id}>Operations on this machine</Ref>
       </p>
-      <h3>Observations</h3>
-      <Observations read={{ ...read, restarted: ko.restarted }} />
+      {read !== undefined && <><h3>Observations</h3><Observations read={{ ...read, restarted: ko.restarted }} /></>}
       <h3>Timeline (newest first)</h3>
       {tl.kind !== "ok" ? timeline : <TimelineRows tl={{ ...tl.data, restarted: kt.restarted }} older={older} busy={busy} />}
     </>
