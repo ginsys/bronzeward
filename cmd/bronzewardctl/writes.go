@@ -12,6 +12,7 @@ import (
 
 	"github.com/ginsys/bronzeward/internal/client"
 	"github.com/ginsys/bronzeward/internal/client/apitypes"
+	"go.yaml.in/yaml/v3"
 )
 
 // repeatFlags are decision T10's flags (#256), which every write command takes: the values an
@@ -91,6 +92,12 @@ func (e *env) writeAfter(prep func(*client.Client) error, w *client.Write, say f
 		return err
 	}
 	lines, err := say(c, r)
+	if err == nil && e.output == "yaml" {
+		// say can succeed without reading the answer, and -o yaml cannot convert one that is not
+		// JSON: the write still succeeded, so it is the same unreadable answer.
+		var n yaml.Node
+		err = yaml.Unmarshal(r.Body, &n)
+	}
 	if err != nil {
 		fmt.Fprintf(e.err, "bronzewardctl: %s: %s /api/v1%s succeeded, but its answer cannot be read: %v\n", c.Context.Where(), w.Method, w.Path, err)
 		if e.output != "table" && e.emit(r.Body, nil) != nil {

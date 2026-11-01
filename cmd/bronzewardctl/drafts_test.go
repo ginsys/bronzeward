@@ -28,6 +28,8 @@ type draftFake struct {
 	// lost redirects a profile PUT, so its outcome is unknown; reads records each GET's route.
 	lost  bool
 	reads []string
+	// answer replaces the {} a draft write is answered with.
+	answer string
 }
 
 func (f *draftFake) etag() string { return fmt.Sprintf(`"%d-BWSYNTH"`, f.rev) }
@@ -90,6 +92,10 @@ func (f *draftFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		f.rev++
 		w.Header().Set("ETag", f.etag())
+		if f.answer != "" {
+			fmt.Fprint(w, f.answer)
+			return
+		}
 		fmt.Fprint(w, `{}`)
 	}
 }
@@ -169,6 +175,17 @@ func TestProfileSetRepeat(t *testing.T) {
 	var refused client.RefusedRepeat
 	if !errors.As(err, &refused) || prepRead || strings.Join(read, ", ") != "GET /identity, GET /recovery" {
 		t.Errorf("a repeat at another epoch with a reading prep: %v, prep ran %v, read %v; want refused before prep", err, prepRead, read)
+	}
+
+	// A write that succeeded with an answer -o yaml cannot convert still exits 0, the answer as served.
+	f.mu.Lock()
+	f.answer = `{"BWSYNTH":`
+	f.mu.Unlock()
+	var o, eb bytes.Buffer
+	code := run([]string{"-o", "yaml", "profile", "set", "workers", "--draft", "drf_BWSYNTH", "--fragments", "frv_BWSYNTH-given"}, &o, &eb)
+	f.took()
+	if code != 0 || o.String() != "{\"BWSYNTH\":\n" || !strings.Contains(eb.String(), "succeeded, but its answer cannot be read") {
+		t.Errorf("-o yaml with a malformed answer: exit %d, stdout %q, stderr %q; want 0, the answer as served, the failure on stderr", code, o.String(), eb.String())
 	}
 }
 
