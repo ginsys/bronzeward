@@ -7,7 +7,7 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import type { components } from "./api/v1";
 import { Form, field, Result, Text, useSend, useUnsaved, useWrites } from "./forms.tsx";
-import { Id, Ref, short, useItem, useList, useReads, usePending } from "./list.tsx";
+import { Id, Ref, Scroll, short, useItem, useList, useReads, usePending } from "./list.tsx";
 import type { Cluster } from "./machines.tsx";
 import { references, type Spot, spotOfLine, spotOfPath, spotOfReference } from "./position.ts";
 import { Action } from "./shell.tsx";
@@ -82,14 +82,14 @@ export function Drafts() {
         <Action label="Create draft" needs={["author"]} onClick={() => go("/drafts/new")} />
       </p>
       {pending ?? (shown.length === 0 ? <Status>No drafts{cluster === "" ? "" : " in this cluster"}.</Status> : (
-        <table aria-label="Drafts">
+        <Scroll label="Drafts">
           <thead><tr>{["Draft", "Title", "Cluster", "State", "Revision"].map((h) => <th key={h} scope="col">{h}</th>)}</tr></thead>
           <tbody>
             {shown.map((d) => (
               <tr key={d.id}><th scope="row"><Id id={d.id} /></th><td>{d.title}</td><td><Id id={d.cluster} /></td><td>{d.state}</td><td>{d.revision}</td></tr>
             ))}
           </tbody>
-        </table>
+        </Scroll>
       ))}
     </>
   );
@@ -363,10 +363,10 @@ export function FragmentPane({ draft, entry, written, seeChange }: { draft: Draf
       <p><label>Marks, one path per line <textarea ref={marks} value={held.marks} onChange={(e) => hold({ ...held, marks: e.target.value })} readOnly={!open} rows={3} cols={80} {...NO_ASSIST} /></label></p>
       <h4>References in this document</h4>
       {refs.length === 0 ? <p>None.</p> : (
-        <table aria-label="References in this document">
+        <Scroll label="References in this document">
           <thead><tr>{["Reference", "Kind", "Version", "Encoding", "State"].map((h) => <th key={h} scope="col">{h}</th>)}</tr></thead>
           <tbody>{refs.map((ref) => <ReferenceRow key={ref} name={ref} declared={held.declared[ref]} set={(r) => declare(ref, r)} open={open} />)}</tbody>
-        </table>
+        </Scroll>
       )}
       <EmbeddedList embedded={held.embedded} set={(embedded) => hold({ ...held, embedded })} open={open} />
       {open && (
