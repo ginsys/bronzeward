@@ -5,14 +5,17 @@
 // reads: the page fetches it from the synthetic provider inside a script, or the case writes it
 // through the API itself. Each document carries the run's canary (syntheticDocument), so the scan
 // finds one in any retained file; no case takes a screenshot or reads a document's text back. The
-// text a case types is a synthetic edit that holds no value. The cases sign in as h-author; the
-// other author of ETAG-01 is h-all, writing through the API with a token of their own.
+// text a case types or adds is a synthetic edit that holds no value. The cases sign in as
+// h-author. ETAG-01 runs with two browsers on one draft: a second session of the same browser,
+// signed in as h-all (wdio.conf.ts secondSession); a deterministic variant moves the draft
+// through the API as h-all instead.
 import { randomBytes } from "node:crypto";
 import { $, browser, expect } from "@wdio/globals";
 import { NOT_RENDERED } from "../../src/drafts.tsx";
 import { REPLAYED, unknown } from "../../src/states.tsx";
-import { CONTROL, FIXTURE_ISSUER, syntheticDocument } from "../auth.conf.ts";
+import { CONTROL, FIXTURE_ISSUER, FIXTURE_PAGE, syntheticDocument } from "../auth.conf.ts";
 import type { Step } from "../injector.ts";
+import { secondSession } from "../wdio.conf.ts";
 import { faults, fixtureSignIn, mint, storageEmpty } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
@@ -22,8 +25,10 @@ let cluster = { id: "", name: "" };
 const hex = () => randomBytes(4).toString("hex");
 // Every write the injector received since the sign-in, as [method, route, key, expected epoch].
 const writes = async (): Promise<string[][]> => ((await (await fetch(`${CONTROL}/writes`)).json()) as string[]).map((w) => w.split(" "));
-const pane = () => $('main section[aria-label^="Fragment"]');
-const result = () => pane().$('[data-testid="write-result"]');
+// Each helper acts in `b`, the spec's browser unless a case passes its second session (ETAG-01).
+type B = WebdriverIO.Browser;
+const pane = (b: B = browser) => b.$('main section[aria-label^="Fragment"]');
+const result = (b: B = browser) => pane(b).$('[data-testid="write-result"]');
 const notice = () => $('[data-testid="write-notice"]');
 
 // A write through the API as `human`, straight to the deployment: its answer's status, ETag and
@@ -75,28 +80,45 @@ async function putDocument(name: string) {
 
 // Whether the editor holds a document, read in the page; its text stays there. No case reads the
 // text of an element that holds a textarea: React keeps a controlled textarea's text in its DOM.
-const loaded = () => browser.waitUntil(() => browser.execute(() => {
+const loaded = (b: B = browser) => b.waitUntil(() => b.execute(() => {
   const area = [...document.querySelectorAll("main section label")].find((l) => l.firstChild?.textContent?.startsWith("Document"))?.querySelector("textarea");
   return (area?.value.length ?? 0) > 0;
 }), { timeout: 20_000, timeoutMsg: "the editor did not load the entry's revision" });
 
-// Appends a synthetic comment line to the document: an edit that holds no value.
-async function edit(line: string) {
-  await pane().$("label*=Document").$("textarea").click();
-  await browser.keys(["Control", "End"]);
-  await browser.keys(`\n# ${line}\n`.split(""));
+// Whether the editor's document holds the synthetic node label `example.test/<label>`, read in
+// the page; `their` reads the conflict view's "Their text" instead.
+const holds = (label: string, b: B = browser, their = false) => b.execute((l: string, t: boolean) => {
+  const area = [...document.querySelectorAll("main section label")].find((x) => x.firstChild?.textContent?.startsWith(t ? "Their text" : "Document"))?.querySelector("textarea");
+  return area?.value.includes(`example.test/${l}:`) ?? false;
+}, label, their);
+
+// Adds the synthetic node label `example.test/<label>: synthetic` next to the document's tier
+// label, at its indentation, as typing would: an edit that holds no value, made in the page so the
+// document stays there, whatever indentation the server's stored form uses.
+async function edit(label: string, b: B = browser) {
+  const ok = await b.execute((l: string) => {
+    const area = [...document.querySelectorAll("main section label")].find((x) => x.firstChild?.textContent?.startsWith("Document"))?.querySelector("textarea");
+    const m = area == null ? null : /^( *)example\.test\/tier:.*$/m.exec(area.value);
+    if (area == null || m == null) return false;
+    const at = m.index + m[0].length;
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(area, `${area.value.slice(0, at)}\n${m[1]}example.test/${l}: synthetic${area.value.slice(at)}`);
+    area.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+  }, label);
+  expect(ok).toBe(true);
 }
 
 // Selects the fragment entry `name` and waits for its revision.
-async function select(name: string) {
-  await $(`main ul[aria-label="Entries"] button=fragment ${name}`).click();
-  await loaded();
+async function select(name: string, b: B = browser) {
+  await b.$(`main ul[aria-label="Entries"] button=fragment ${name}`).click();
+  await loaded(b);
 }
 
-// Sets the faults for the fragment's sends and saves it.
-async function save(draft: string, name: string, take: Step[] = []) {
-  await faults({ upstream: at, steps: { path: `/drafts/${draft}/fragments/${name}`, take } });
-  await pane().$("button=Save").click();
+// Sets the faults for the fragment's sends (unless `keep`, as a second session's save does) and
+// saves it.
+async function save(draft: string, name: string, take: Step[] = [], b: B = browser, keep = false) {
+  if (!keep) await faults({ upstream: at, steps: { path: `/drafts/${draft}/fragments/${name}`, take } });
+  await pane(b).$("button=Save").click();
 }
 
 // One key and one reference epoch over every send of the fragment, n sends in all (at least n
@@ -177,7 +199,52 @@ describe("the draft editor (#339)", () => {
     await oneWrite(1);
   });
 
-  it("ETAG-01: another author writes first: 412, no resend, the newer state shown, then my text saved in the new revision", async () => {
+  it("ETAG-01: two browsers on one draft: the second to save gets 412, sends nothing more, sees the first's text, and re-applies its own", async function () {
+    this.timeout(120_000);
+    const name = `etag2-${hex()}`;
+    const { id } = await seeded(name);
+    // The other browser: a second session of this browser, signed in as h-all first, since the
+    // next sign-in's /next clears the injector's log.
+    const other = await secondSession(browser.requestedCapabilities as WebdriverIO.Capabilities);
+    try {
+      expect((await fetch(`${CONTROL}/next?human=h-all`)).ok).toBe(true);
+      await faults({ upstream: at });
+      await other.url(`${FIXTURE_PAGE}/`);
+      await other.$('nav[aria-label="Main"]').$("a=Changes").waitForClickable({ timeout: 20_000 });
+      await other.$('nav[aria-label="Main"]').$("a=Changes").click();
+      await other.$(`main a[title="${id}"]`).click();
+      await select(name, other);
+      await openDraft(id);
+      await select(name);
+      // Both pages hold the same ETag. The other saves first.
+      await edit("theirs", other);
+      await save(id, name, [], other, true);
+      await expect(result(other)).toHaveText(expect.stringContaining(`Fragment ${name} saved in draft`), { wait: 30_000 });
+      await edit("mine");
+      await save(id, name, [], browser, true);
+      await expect(pane().$('[data-testid="status"]')).toHaveText(expect.stringContaining("Someone changed this draft"), { wait: 20_000 });
+      // Nothing more is sent after the 412, once the repeats' backoff would have run.
+      await browser.pause(3_000);
+      const puts = (await writes()).filter(([m]) => m === "PUT");
+      expect(puts).toHaveLength(2);
+      expect(puts[0]![2]).not.toBe(puts[1]![2]);
+      const now = (await api("h-author", "GET", `/drafts/${id}`)).body!["revision"] as number;
+      await pane().$("button=Show their change").click();
+      await expect($("main h2")).toHaveText(expect.stringContaining(`revision ${now}`), { wait: 20_000 });
+      await browser.waitUntil(() => holds("theirs", browser, true), { timeout: 20_000, timeoutMsg: "the conflict view does not show the other browser's text" });
+      await pane().$("button=Copy my text into the new revision").click();
+      expect(await holds("mine")).toBe(true);
+      await save(id, name, [], browser, true);
+      await expect(result()).toHaveText(expect.stringContaining(`Fragment ${name} saved in draft`), { wait: 30_000 });
+      // The saved revision, read back, holds this browser's text.
+      await browser.waitUntil(() => holds("mine"), { timeout: 20_000, timeoutMsg: "the saved revision lost this browser's text" });
+      await other.execute(() => [localStorage.length, sessionStorage.length]).then((n) => expect(n).toEqual([0, 0]));
+    } finally {
+      await other.deleteSession();
+    }
+  });
+
+  it("ETAG-01, deterministic: another author's API write moves the draft: 412, no resend, the newer state shown, then my text saved", async () => {
     const name = `etag-${hex()}`;
     const { id, etag } = await seeded(name);
     await openDraft(id);

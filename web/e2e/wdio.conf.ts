@@ -9,7 +9,7 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 // The launcher logs and ignores any other error a launcher hook throws, and runs the specs anyway.
-import { SevereServiceError } from "webdriverio";
+import { remote, SevereServiceError } from "webdriverio";
 import { FAKE_ISSUER, PAGE_LISTEN, PAGE_ORIGIN, TARGET_ORIGIN } from "./ports.ts";
 import { printFailure } from "./print-failure.ts";
 import { startProvider } from "./provider.ts";
@@ -52,6 +52,22 @@ function ownProfile(capabilities: WebdriverIO.Capabilities) {
   const dir = `${profiles}/${randomUUID()}`;
   mkdirSync(dir, { recursive: true });
   options.args = [...(options.args ?? []), `--user-data-dir=${dir}`];
+}
+
+// A second session of the running browser, for a case with two browsers on one page (ETAG-01,
+// #339): the running session's requested capabilities with a profile of its own, its log in the
+// artifact directory the scan reads.
+export async function secondSession(requested: WebdriverIO.Capabilities): Promise<WebdriverIO.Browser> {
+  const capabilities = structuredClone(requested);
+  for (const k of ["goog:chromeOptions", "ms:edgeOptions"] as const) {
+    const o = capabilities[k];
+    if (o?.args !== undefined) o.args = o.args.filter((a) => !a.startsWith("--user-data-dir="));
+  }
+  ownProfile(capabilities);
+  return remote({
+    capabilities, logLevel: "info", outputDir: `${web}e2e/out`,
+    ...(process.env["BW_WDIO_CACHE"] !== undefined ? { cacheDir: process.env["BW_WDIO_CACHE"] } : {}),
+  });
 }
 
 let target: Server | undefined;
