@@ -77,7 +77,8 @@ func LoadConfig() (*Config, error) {
 	}
 	var c Config
 	if err := yaml.Unmarshal(b, &c); err != nil {
-		return nil, fmt.Errorf("%s: %w", p, err)
+		// The decoder quotes the file's own text, line feeds included, so the whole message is escaped.
+		return nil, fmt.Errorf("%s: %s", printable(p), printable(err.Error()))
 	}
 	return &c, nil
 }
@@ -110,7 +111,7 @@ func update[T any](p string, change func(*T) error) error {
 	c := new(T)
 	if b, err := os.ReadFile(p); err == nil {
 		if err := yaml.Unmarshal(b, c); err != nil {
-			return fmt.Errorf("%s: %w", p, err)
+			return fmt.Errorf("%s: %s", printable(p), printable(err.Error()))
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
