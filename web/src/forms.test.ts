@@ -84,12 +84,14 @@ describe("the in-app leave guard (B11)", () => {
 });
 
 describe("the unload guard (B11)", () => {
-  test("asks while a write is open, unless a notice's own [Show current state] is leaving the page", async () => {
+  test("asks while a write is open, unless a notice's own [Show current state] is leaving the page, for that unload only", async () => {
     expect(guardsUnload(new Writes(() => PRINCIPAL))).toBe(false);
     const [writes] = await unknownWrite();
     expect(guardsUnload(writes)).toBe(true);
     writes.unloading = true;
     expect(guardsUnload(writes)).toBe(false);
+    // The navigation was stopped: the next reload or close asks again.
+    expect(guardsUnload(writes)).toBe(true);
   });
 });
 
