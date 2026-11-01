@@ -26,6 +26,7 @@ type planFake struct {
 	state, op, evidence       string
 	approval, approvalEpoch   string
 	desired, assignment, open string
+	drift                     string // the plan's drift record, "" for none
 	expiresIn                 time.Duration
 	now                       time.Time // the expiry's clock when set, so two renders are equal
 	raw, fail                 map[string]string
@@ -37,7 +38,7 @@ type planFake struct {
 
 const planJSON = `{"id":"pln_BWSYNTH","revision":2,"state":%q,"committedOperation":%s,"approval":%s,"cluster":"cl_BWSYNTH",` +
 	`"machine":"mch_a","release":"rel_BWSYNTH","operation":%q,"mode":%s,"assignmentRevision":"asr_BWSYNTH-1","desiredRelease":"rel_BWSYNTH",` +
-	`"baselineRevision":%s,"driftRecord":null,"route":"10.5.0.5:50000","maxObservationAgeSeconds":300,"checkValiditySeconds":60,` +
+	`"baselineRevision":%s,"driftRecord":%s,"route":"10.5.0.5:50000","maxObservationAgeSeconds":300,"checkValiditySeconds":60,` +
 	`"transportDeadlineSeconds":%s,"verificationDeadlineSeconds":%s,"maxAttempts":%s,"rolloutLimit":1,"approvalPolicy":"one-approver",` +
 	`"createdBy":{"principal":"svc_BWSYNTH","role":"publisher"},"epoch":"ep_BWSYNTH-1","timelineRevision":7,` +
 	`"createdAt":"2026-11-01T06:00:00Z","expiresAt":%q,"evidence":%s}`
@@ -67,7 +68,11 @@ func (f *planFake) plan() string {
 	if f.expiresIn != 0 {
 		expires = now.Add(f.expiresIn)
 	}
-	return fmt.Sprintf(planJSON, f.state, committed, null(f.approval), f.op, mode, rev, deadlines[0], deadlines[1], deadlines[2],
+	drift := "null"
+	if f.drift != "" {
+		drift = f.drift
+	}
+	return fmt.Sprintf(planJSON, f.state, committed, null(f.approval), f.op, mode, rev, drift, deadlines[0], deadlines[1], deadlines[2],
 		expires.UTC().Format(time.RFC3339), f.evidence)
 }
 
@@ -134,6 +139,18 @@ func (f *planFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			`"selfApproval":{"marked":false,"reasons":[]},"unseenOverwrite":false}`, f.approvalEpoch)
 	case "/assignments":
 		fmt.Fprintf(w, `{"items":[{"id":"asg_BWSYNTH-b","machine":"mch_b","revision":"asr_BWSYNTH-9"},{"id":"asg_BWSYNTH","machine":"mch_a","revision":%q}]}`, f.assignment)
+	// approve's prediction reads: the release, its draft and its source revisions' authors. The
+	// caller authored frv_a, which the draft introduced, and asr_BWSYNTH-1, which it reuses.
+	case "/releases/rel_BWSYNTH":
+		fmt.Fprint(w, `{"id":"rel_BWSYNTH","draft":"drf_BWSYNTH","publishedBy":{"principal":"svc_BWSYNTH","role":"publisher"},"sources":[`+
+			`{"kind":"fragment","head":"frg_a","headRevision":1,"revision":"frv_a"},{"kind":"profile","head":"prf_b","headRevision":1,"revision":"prv_b"},`+
+			`{"kind":"assignment","head":"asg_BWSYNTH","headRevision":1,"revision":"asr_BWSYNTH-1"},{"kind":"fragment","head":"frg_gone","headRevision":2,"revision":null}]}`)
+	case "/drafts/drf_BWSYNTH":
+		fmt.Fprint(w, `{"id":"drf_BWSYNTH","entries":[{"kind":"fragment","name":"a","head":"frg_a","base":null,"revision":"frv_a"},{"kind":"import-base","machine":"mch_a","revision":"ibr_BWSYNTH"}]}`)
+	case "/fragment-revisions/frv_a", "/assignment-revisions/asr_BWSYNTH-1":
+		fmt.Fprint(w, `{"author":"svc_BWSYNTH"}`)
+	case "/profile-revisions/prv_b":
+		fmt.Fprint(w, `{"author":"h-other"}`)
 	default:
 		w.WriteHeader(http.StatusNotFound)
 	}

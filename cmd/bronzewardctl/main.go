@@ -99,6 +99,15 @@ commands:
   plan cancel <plan> --reason <text>
               a cancelled plan cannot be committed; a committed plan's operation ends only while
               no attempt is recorded, and an attempt already recorded is not stopped
+  approve <plan>
+              approver, a person signed in; prints the plan and the predicted self-approval on
+              standard error, then sends only when the plan ID is typed back, on the terminal or
+              as one line of standard input; there is no --yes, and --no-input refuses; an
+              approval starts no operation, so approve does not wait
+  approval show <approval>
+  approval revoke <approval> --reason <text>
+              a revocation ends an uncommitted approval and undoes no commitment; an attempt
+              already recorded is not stopped
   operation list [--plan <id>] [--machine <id>] [--state <s>] [--kind <k>] | show <operation>
   act list    the audit record
   recovery status
@@ -125,7 +134,8 @@ global flags, before or after the command:
   --no-input            never prompt
   -v                    name a proxy a request goes through
 
-exit codes: 0 success; 1 refused or failed; 2 usage error or refused repeat; 3 outcome unknown, or
+exit codes: 0 success; 1 refused or failed; 2 usage error, refused repeat or approval not
+confirmed; 3 outcome unknown, or
 an import's lease lapsed while its operation runs;
 4 a waited-for operation ended failed, rejected or cancelled`
 
@@ -202,7 +212,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	commands := map[string]func([]string) error{"context": e.contextCmd, "version": e.versionCmd, "whoami": e.whoamiCmd, "login": e.loginCmd, "logout": e.logoutCmd,
 		"status": e.statusCmd, "cluster": e.clusterCmd, "machine": e.machineCmd,
 		"fragment": e.fragmentCmd, "profile": e.profileCmd, "assignment": e.assignmentCmd,
-		"draft": e.draftCmd, "import": e.importCmd, "publish": e.publish, "release": e.releaseCmd, "plan": e.planCmd, "operation": e.operationCmd, "act": e.actCmd,
+		"draft": e.draftCmd, "import": e.importCmd, "publish": e.publish, "release": e.releaseCmd, "plan": e.planCmd,
+		"approve": e.approve, "approval": e.approvalCmd, "operation": e.operationCmd, "act": e.actCmd,
 		"recovery": e.recoveryCmd, "identity": e.identityCmd}
 	pos, err := e.parse("bronzewardctl", args, -1, nil)
 	if err == nil && len(pos) == 0 {

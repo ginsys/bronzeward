@@ -161,7 +161,7 @@ func init() {
 		in.set(refuse("/machines/"+m, http.StatusConflict, "recovery-mode-active", `,"machine":"`+m+`","scope":"pre-restore-unaccounted"`), nil)
 		f.want(f.ctl(nil, "", "--context", "trusted", "machine", "show", m), 1, "the scope of machine "+m+" is pre-restore-unaccounted")
 		in.set(refuse("/machines/"+m, http.StatusConflict, "recovery-mode-active", ""), nil)
-		f.want(f.ctl(nil, "", "--context", "trusted", "machine", "show", m), 1, "a process restriction of a server started for recovery")
+		f.want(f.ctl(nil, "", "--context", "trusted", "machine", "show", m), 1, "the server was started for recovery", "A restriction of the process, not of one scope")
 	}
 }
 

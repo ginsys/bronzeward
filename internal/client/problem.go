@@ -72,11 +72,13 @@ func (p *Problem) Error() string {
 		}
 	case "recovery-mode-active":
 		// A scope refusal names the machine and its scope state; without a scope it is the
-		// process's own restriction (§8.2, §8.5 item 1).
+		// process's own restriction (§8.2, §8.5 item 1; REC-03): before its entry a recovery start
+		// serves only the entry, after it every act but plan creation, approval and unfreeze.
 		if scope := p.str("scope"); scope != "" {
 			s += fmt.Sprintf("\nRecovery mode: the scope of machine %s is %s.", p.str("machine"), scope)
 		} else {
-			s += "\nRecovery mode: a process restriction of a server started for recovery, not of one scope."
+			s += "\nRecovery mode: the server was started for recovery: it refuses plan creation and approval, and before its recovery entry " +
+				"every request but the entry. A restriction of the process, not of one scope: it ends when the server is restarted without the flag."
 		}
 	}
 	return s
