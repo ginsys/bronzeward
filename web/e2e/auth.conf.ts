@@ -31,7 +31,10 @@ const INJECTOR = "http://127.0.0.1:58452";
 const DISPOSABLE_API = "http://127.0.0.1:58453";
 const IDP_API = "http://127.0.0.1:58450";
 const KEYS = "127.0.0.1:58447";
-const PG = ["-h", "127.0.0.1", "-p", "55433", "-U", "bronzeward"];
+// mise run browser-auth sets BW_DEV_PG_PORT and BW_DEV_IDP_DIR from BW_DEV_INSTANCE
+// (scripts/dev/instance.sh); the defaults are the default instance's.
+const PG_PORT = process.env["BW_DEV_PG_PORT"] ?? "55433";
+const PG = ["-h", "127.0.0.1", "-p", PG_PORT, "-U", "bronzeward"];
 // The subject the fixture deployment lists in deniedSubjects (AUTH-10).
 export const DENIED = "h-approver";
 
@@ -42,7 +45,7 @@ const canary = process.env["BW_WEB_CANARY"]!;
 
 // The test provider's variables, as mise run dev-idp writes them.
 export function idpEnv(): Record<string, string> {
-  const file = `${root}.dev/idp/idp.env`;
+  const file = `${root}${process.env["BW_DEV_IDP_DIR"] ?? ".dev/idp"}/idp.env`;
   return Object.fromEntries(readFileSync(file, "utf8").trim().split("\n").map((l) => {
     const i = l.indexOf("=");
     return [l.slice(0, i), l.slice(i + 1).replace(/^'(.*)'$/, "$1")];
@@ -80,7 +83,7 @@ function server(name: string, listen: string, oidc: string, extra: string, flags
   writeFileSync(file, [
     `listen: ${listen}`,
     "database:",
-    `  dsn: postgres://bronzeward@127.0.0.1:55433/${db}?sslmode=disable`,
+    `  dsn: postgres://bronzeward@127.0.0.1:${PG_PORT}/${db}?sslmode=disable`,
     "auth:",
     "  oidc:",
     ...oidc.split("\n").map((l) => `    ${l}`),
