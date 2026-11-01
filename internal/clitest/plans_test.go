@@ -270,6 +270,9 @@ func TestPlans(t *testing.T) {
 		t.Run(rec.ID, func(t *testing.T) { run(t, e) })
 	}
 	e.cancelAll(t)
+	// The cases' epochs, committed in the database, superseded serve's controller, which adopts and
+	// dispatches nothing until it is restarted.
+	f.restart()
 
 	t.Run("T20 display and T22 cancellation", func(t *testing.T) {
 		in.set(nil, nil)
