@@ -1,0 +1,113 @@
+# The measures record of one participant (ginsys/bronzeward#263 V10), copied once per participant
+# and client. Pseudonymous: P1 to P5 only, no name, account or contact detail. Fields, as in the
+# facilitator script (README.md, "Measures"):
+#   completed_unaided: yes or no; no when "Done when" does not hold or a hint was given
+#   seconds: from the end of the prompt to "done" or the stop
+#   refusals: refusals the client showed, counted from its output
+#   help_pages, help_invocations: documentation pages opened, `help` invocations
+#   probe_answer: word for word; probe_matches: yes or no against "Expected"; null where no probe
+participant: P1
+client: bronzewardctl # or web
+session: 1
+revision: "" # the assessed main revision (#263 V1)
+date: "" # YYYY-MM-DD
+tasks:
+  - task: T1
+    completed_unaided:
+    seconds:
+    refusals:
+    help_pages:
+    help_invocations:
+    probe_answer: null
+    probe_matches: null
+    notes: ""
+  - task: T2
+    completed_unaided:
+    seconds:
+    refusals:
+    help_pages:
+    help_invocations:
+    probe_answer: ""
+    probe_matches:
+    notes: ""
+  - task: T3
+    completed_unaided:
+    seconds:
+    refusals:
+    help_pages:
+    help_invocations:
+    probe_answer: ""
+    probe_matches:
+    notes: ""
+  - task: T4
+    completed_unaided:
+    seconds:
+    refusals:
+    help_pages:
+    help_invocations:
+    probe_answer: ""
+    probe_matches:
+    notes: ""
+  - task: T5
+    completed_unaided:
+    seconds:
+    refusals:
+    help_pages:
+    help_invocations:
+    probe_answer: null
+    probe_matches: null
+    notes: ""
+  - task: T6
+    completed_unaided:
+    seconds:
+    refusals:
+    help_pages:
+    help_invocations:
+    probe_answer: ""
+    probe_matches:
+    notes: ""
+  - task: T7
+    completed_unaided:
+    seconds:
+    refusals:
+    help_pages:
+    help_invocations:
+    probe_answer: ""
+    probe_matches:
+    notes: ""
+  - task: T8
+    completed_unaided:
+    seconds:
+    refusals:
+    help_pages:
+    help_invocations:
+    probe_answer: ""
+    probe_matches:
+    notes: ""
+  - task: T9
+    completed_unaided:
+    seconds:
+    refusals:
+    help_pages:
+    help_invocations:
+    probe_answer: null
+    probe_matches: null
+    notes: ""
+  - task: T10
+    completed_unaided:
+    seconds:
+    refusals:
+    help_pages:
+    help_invocations:
+    probe_answer: ""
+    probe_matches:
+    notes: ""
+  - task: T11
+    completed_unaided:
+    seconds:
+    refusals:
+    help_pages:
+    help_invocations:
+    probe_answer: ""
+    probe_matches:
+    notes: ""
