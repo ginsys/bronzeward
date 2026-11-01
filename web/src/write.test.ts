@@ -189,6 +189,20 @@ describe("repeats (§8.2, §8.4 item 2)", () => {
     expect(writes.onEnded).not.toHaveBeenCalled();
   });
 
+  test("the shell that held the client goes: no write is repeatable, and the notices render again", async () => {
+    const drop = () => new TypeError("Failed to fetch");
+    const { writes, client } = page([drop(), drop(), drop(), drop()]);
+    const w = spec();
+    await writes.submit(w);
+    expect(writes.repeatable(w)).toBe(true);
+    const rendered = vi.fn();
+    writes.subscribe(rendered);
+    writes.disconnect(new Client({ token: () => "SYNTH-token" }));
+    expect([writes.repeatable(w), rendered.mock.calls.length]).toEqual([true, 0]);
+    writes.disconnect(client);
+    expect([writes.repeatable(w), rendered.mock.calls.length]).toEqual([false, 1]);
+  });
+
   test("403 identity-revoked clears the credential", async () => {
     const onRevoked = vi.fn();
     const { writes } = page([problem(403, "identity-revoked", {}, null)], [], { onRevoked });
