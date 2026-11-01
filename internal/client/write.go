@@ -168,6 +168,9 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 		case a.status >= 300 && a.status < 400:
 			u.Why = printable(a.err.Error())
 			return nil, c.unknown(w, u)
+		case p != nil && a.replayed:
+			// The key's stored refusal, replayed: the earlier attempt's known outcome (§8.4 item 2).
+			return nil, fmt.Errorf("%w\nThis is the stored answer to an earlier attempt with this key: that attempt was refused.", a.err)
 		case p == nil && (a.status == 0 || a.status >= 500), p != nil && (code == "internal-error" || a.status >= 500 && !p.unavailable() && code != "epoch-superseded"):
 			ambiguous = true
 		case p != nil && p.unavailable():
@@ -192,9 +195,9 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 			// attempt (§8.2).
 			return nil, c.after(ambiguous, w, u, a.err)
 		case w.Repeat != nil:
-			// An operator's T10 repeat, refused: the server checks the input before its lookup, and
-			// a lookup that found the key's record would have replayed it, so this send did nothing
-			// and says nothing of the attempt it repeats (§8.2; AMB-04, AMB-13).
+			// An operator's T10 repeat, refused and not replayed: decided by the input checks before
+			// the lookup, or after a lookup that found no record, so this send did nothing and says
+			// nothing of the attempt it repeats (§8.2; AMB-13).
 			u.Why = "this send was refused (" + printable(a.err.Error()) + ") and did nothing; the original outcome is still unknown"
 			return nil, c.unknown(w, u)
 		default:
@@ -292,11 +295,12 @@ func (c *Client) confirm() (string, string) {
 // attempt is one send's answer: the 2xx, or the problem and the error to show; status is 0 with
 // no complete answer, and sent says a connection was taken, so some byte may have gone out.
 type attempt struct {
-	r      *Response
-	p      *Problem
-	status int
-	sent   bool
-	err    error
+	r        *Response
+	p        *Problem
+	status   int
+	sent     bool
+	replayed bool // the answer is a stored one, replayed for this key (§8.4 item 2)
+	err      error
 }
 
 func (c *Client) post(w *Write, key, epoch string) attempt {
@@ -328,7 +332,7 @@ func (c *Client) post(w *Write, key, epoch string) attempt {
 		return a
 	}
 	defer r.Body.Close()
-	a.sent, a.status = true, r.StatusCode
+	a.sent, a.status, a.replayed = true, r.StatusCode, r.Header.Get("Idempotent-Replayed") == "true"
 	c.observe(route, r)
 	if r.StatusCode >= 300 && r.StatusCode < 400 {
 		a.err = fmt.Errorf("%s answered %s redirecting to %q, which bronzewardctl does not follow; it is not repeated",
