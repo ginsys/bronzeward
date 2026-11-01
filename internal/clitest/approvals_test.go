@@ -188,8 +188,8 @@ func TestApprovals(t *testing.T) {
 		p := planID.FindString(e.ctl(e.create("adopt")...).out)
 		r := e.approveTyped("human", p)
 		reasons := "created-plan, published, authored-change"
-		f.want(r, 0, "Self-approval  predicted: created-plan (you created this plan), published (you published its release), "+
-			"authored-change (you authored a revision its release's draft introduced).", "Import-base authorship and automation you own are not predicted.",
+		f.want(r, 0, "Self-approval  predicted: you created this plan and published this release, "+
+			"and authored a fragment, profile or assignment revision its draft introduced.", "Import-base authorship and automation you own are not predicted.",
 			"Recorded self-approval reasons: "+reasons+".",
 			"The controller records the adoption without sending anything; Applied becomes "+e.rel+" (adoption) once it does.")
 		a := aprID.FindString(r.out)
@@ -287,7 +287,8 @@ func (e *planEnv) t8(t *testing.T) {
 	p := planID.FindString(r.out)
 	f.want(r, 0, "Changes shown below", "node.example.test/tier: b")
 	r = step(p+"\n", "--context", "approver", "approve", p)
-	f.want(r, 0, "Self-approval  predicted: no reason from the plan's creator", "Recorded self-approval reasons: none.")
+	f.want(r, 0, "Self-approval  predicted: you did not create this plan or publish this release, "+
+		"and authored no fragment, profile or assignment revision in it.", "Recorded self-approval reasons: none.")
 	// The prompt ends in a space, which the repository's whitespace check refuses in a kept file.
 	kept := regexp.MustCompile(`(?m)[ \t]+$`).ReplaceAllString(localTimes.ReplaceAllString(out.String(), "<local time>"), "")
 	keepJourney(t, "t8", kept, dir)

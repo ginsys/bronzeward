@@ -110,36 +110,33 @@ func (e *env) confirmID(id string) error {
 	return notConfirmed{errors.New("the typed text is not the plan ID " + id + "; nothing was sent")}
 }
 
-// predict is T21's self-approval prediction (journeys §5.6), labelled as one: created-plan from the
-// plan's creator, published from the release's publisher, authored-change and authored-reused from
-// the authors of the release's source revisions and the revisions its draft introduced
-// (internal/api/approvals.go selfApprovalReasons). Import-base authorship and owned automation
-// cannot be predicted, so the approver is never presented as clear.
+// predict is T21's self-approval prediction (journeys §5.6), labelled as one and said in the
+// journey's prose: created-plan from the plan's creator, published from the release's publisher,
+// authored-change and authored-reused from the authors of the release's source revisions and the
+// revisions its draft introduced (internal/api/approvals.go selfApprovalReasons). Import-base
+// authorship and owned automation cannot be predicted, so the approver is never presented as clear.
+// A failed read leaves out what it would have shown, rather than saying "did not".
 func predict(c *client.Client, p *apitypes.PlanBody) []string {
-	var reasons, unread []string
-	var me string
+	var unread []string
+	said := "nothing."
 	var id apitypes.IdentityBody
 	if err := getJSON(c, "/identity", &id); err != nil {
 		unread = append(unread, "your identity: "+err.Error())
-	} else if id.Principal != nil {
-		me = *id.Principal
-	}
-	if me != "" && p.CreatedBy.Principal == me {
-		reasons = append(reasons, "created-plan (you created this plan)")
-	}
-	var rel apitypes.ReleaseBody
-	if err := getJSON(c, "/releases/"+url.PathEscape(p.Release), &rel); err != nil {
-		unread = append(unread, "the release: "+err.Error())
 	} else {
-		if me != "" && rel.PublishedBy.Principal == me {
-			reasons = append(reasons, "published (you published its release)")
+		me := or(id.Principal, "") // a human with no principal row created, published and authored nothing
+		var w selfWork
+		w.created = me != "" && p.CreatedBy.Principal == me
+		var rel apitypes.ReleaseBody
+		if err := getJSON(c, "/releases/"+url.PathEscape(p.Release), &rel); err != nil {
+			unread = append(unread, "the release: "+err.Error())
+		} else {
+			w.knowPublished, w.published = true, me != "" && rel.PublishedBy.Principal == me
+			var unreadAuthors []string
+			w.change, w.reused, unreadAuthors = authored(c, &rel, me)
+			w.knowAuthored = len(unreadAuthors) == 0
+			unread = append(unread, unreadAuthors...)
 		}
-		authored, unreadAuthors := authoredReasons(c, &rel, me)
-		reasons, unread = append(reasons, authored...), append(unread, unreadAuthors...)
-	}
-	said := "no reason from the plan's creator, the release's publisher or its fragment, profile and assignment revisions."
-	if len(reasons) > 0 {
-		said = strings.Join(reasons, ", ") + "."
+		said = w.String()
 	}
 	lines := []string{"Self-approval\tpredicted: " + said,
 		"\tImport-base authorship and automation you own are not predicted. The approval records the actual reasons; self-approval is marked and allowed."}
@@ -149,11 +146,49 @@ func predict(c *client.Client, p *apitypes.PlanBody) []string {
 	return lines
 }
 
-// authoredReasons are authored-change and authored-reused for me in rel: a source revision me
+// selfWork is what the prediction found the approver did to the plan, as the journey's prose says
+// it: one clause per predicted reason. knowPublished and knowAuthored are false when a failed read
+// left that part unknown.
+type selfWork struct {
+	created, published, change, reused bool
+	knowPublished, knowAuthored        bool
+}
+
+func (w selfWork) String() string {
+	var acts string
+	switch {
+	case w.created && w.published:
+		acts = "created this plan and published this release"
+	case w.created && w.knowPublished:
+		acts = "created this plan but did not publish this release"
+	case w.created:
+		acts = "created this plan"
+	case w.published:
+		acts = "published this release but did not create this plan"
+	case w.knowPublished:
+		acts = "did not create this plan or publish this release"
+	default:
+		acts = "did not create this plan"
+	}
+	const revision = "a fragment, profile or assignment revision"
+	switch {
+	case w.change && w.reused:
+		return "you " + acts + ", and authored " + revision + " its draft introduced and one it reuses."
+	case w.change:
+		return "you " + acts + ", and authored " + revision + " its draft introduced."
+	case w.reused:
+		return "you " + acts + ", and authored " + revision + " it reuses."
+	case w.knowAuthored:
+		return "you " + acts + ", and authored no fragment, profile or assignment revision in it."
+	}
+	return "you " + acts + "."
+}
+
+// authored reports authored-change and authored-reused for me in rel: a source revision me
 // authored is a change when rel's draft introduced it, else reused.
-func authoredReasons(c *client.Client, rel *apitypes.ReleaseBody, me string) (reasons, unread []string) {
+func authored(c *client.Client, rel *apitypes.ReleaseBody, me string) (change, reused bool, unread []string) {
 	if me == "" {
-		return nil, nil // a human with no principal row has authored nothing
+		return false, false, nil // a human with no principal row has authored nothing
 	}
 	var d struct {
 		Entries []struct {
@@ -161,13 +196,12 @@ func authoredReasons(c *client.Client, rel *apitypes.ReleaseBody, me string) (re
 		} `json:"entries"`
 	}
 	if err := getJSON(c, "/drafts/"+url.PathEscape(rel.Draft), &d); err != nil {
-		return nil, []string{"the release's draft: " + err.Error()}
+		return false, false, []string{"the release's draft: " + err.Error()}
 	}
 	introduced := map[string]bool{}
 	for _, en := range d.Entries {
 		introduced[or(en.Revision, "")] = true
 	}
-	var change, reused bool
 	for _, s := range rel.Sources {
 		if s.Revision == nil {
 			continue
@@ -181,13 +215,7 @@ func authoredReasons(c *client.Client, rel *apitypes.ReleaseBody, me string) (re
 			change, reused = change || introduced[*s.Revision], reused || !introduced[*s.Revision]
 		}
 	}
-	if change {
-		reasons = append(reasons, "authored-change (you authored a revision its release's draft introduced)")
-	}
-	if reused {
-		reasons = append(reasons, "authored-reused (you authored a revision its release reuses)")
-	}
-	return reasons, unread
+	return change, reused, unread
 }
 
 func orList(s []string) string {
