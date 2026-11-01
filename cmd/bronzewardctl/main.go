@@ -131,7 +131,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if err == nil && len(pos) == 0 {
 		err = usageError{errors.New("no command")}
 	} else if err == nil && commands[pos[0]] == nil {
-		err = usageError{fmt.Errorf("unknown command %q", pos[0])}
+		err = usageError{fmt.Errorf("unknown command \"%s\"", client.Printable(pos[0]))}
 	} else if err == nil {
 		err = commands[pos[0]](pos[1:])
 	}
@@ -189,7 +189,7 @@ func (e *env) parse(name string, args []string, n int, extra func(*flag.FlagSet)
 	}
 	switch {
 	case e.output != "table" && e.output != "json" && e.output != "yaml":
-		return nil, usageError{fmt.Errorf("-o %q: give table, json or yaml", e.output)}
+		return nil, usageError{fmt.Errorf("-o \"%s\": give table, json or yaml", client.Printable(e.output))}
 	case e.tokenStdin && e.tokenFile != "":
 		return nil, usageError{errors.New("give --token-file or --token-stdin, not both")}
 	case n >= 0 && len(pos) != n:

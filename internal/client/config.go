@@ -159,7 +159,7 @@ func (c *Config) Select(flag string) (*Context, error) {
 	if x := c.Find(name); x != nil {
 		return x, nil
 	}
-	return nil, fmt.Errorf("context %q, named by %s, does not exist", name, from)
+	return nil, fmt.Errorf("context \"%s\", named by %s, does not exist", printable(name), printable(from))
 }
 
 // Check refuses a context that cannot be used as written.
@@ -174,7 +174,7 @@ func (x *Context) Check() error {
 	case x.Credential == "automation":
 		return nil
 	case x.Credential != "oidc":
-		return fmt.Errorf("credential %q: give automation or oidc", x.Credential)
+		return fmt.Errorf("credential \"%s\": give automation or oidc", printable(x.Credential))
 	case x.OIDC == nil || x.OIDC.ClientID == "":
 		return errors.New("an oidc context needs its issuer and client ID")
 	}
@@ -184,7 +184,7 @@ func (x *Context) Check() error {
 // checkName refuses a name that cannot name a file, such as its renewal lock.
 func (x *Context) checkName() error {
 	if x.Name == "" || strings.ContainsAny(x.Name, " \t\n/") {
-		return fmt.Errorf("context name %q: give a name without spaces or slashes", x.Name)
+		return fmt.Errorf("context name \"%s\": give a name without spaces or slashes", printable(x.Name))
 	}
 	return nil
 }
@@ -192,9 +192,9 @@ func (x *Context) checkName() error {
 // endpoint parses an https URL, or an http one to a loopback address (§6 item 1).
 func endpoint(raw, field string) error {
 	if u, err := url.Parse(raw); err == nil && (u.RawQuery != "" || u.ForceQuery) {
-		return fmt.Errorf("%s %q: give a URL with a host and no query, fragment or user", field, raw)
+		return fmt.Errorf("%s \"%s\": give a URL with a host and no query, fragment or user", printable(field), printable(raw))
 	}
-	return checkEndpoint(raw, fmt.Sprintf("%s %q", field, raw))
+	return checkEndpoint(raw, fmt.Sprintf("%s \"%s\"", printable(field), printable(raw)))
 }
 
 // providerEndpoint is endpoint for a URL the identity provider names (its token and revocation
