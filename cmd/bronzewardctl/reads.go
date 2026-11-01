@@ -66,7 +66,7 @@ func (l listing) read(c *client.Client, path string, q url.Values, show []string
 // more names the next page under a table.
 func more(w *tabwriter.Writer, next string) {
 	if next != "" {
-		fmt.Fprintf(w, "Next page: --cursor %s, or --all for every page.\n", next)
+		tf(w, "Next page: --cursor %s, or --all for every page.\n", next)
 	}
 }
 
@@ -149,7 +149,7 @@ func (e *env) clusterCmd(args []string) error {
 		return e.emit(raw, func(w *tabwriter.Writer) {
 			fmt.Fprintln(w, "CLUSTER\tNAME\tENDPOINT\tCONTRACT\tTALOS CLUSTER ID")
 			for _, x := range cs {
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", x.Id, x.Name, x.Endpoint, x.Contract, x.TalosClusterId)
+				tf(w, "%s\t%s\t%s\t%s\t%s\n", x.Id, x.Name, x.Endpoint, x.Contract, x.TalosClusterId)
 			}
 			more(w, next)
 		})
@@ -195,7 +195,7 @@ func (e *env) machineCmd(args []string) error {
 				if m.Applied != nil {
 					applied = m.Applied.Release + " (" + m.Applied.Source + ")"
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", m.Id, m.TalosEndpoint, deref(m.Desired), applied, observedCell(m), stateCell(m))
+				tf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", m.Id, m.TalosEndpoint, deref(m.Desired), applied, observedCell(m), stateCell(m))
 			}
 			more(w, next)
 			fmt.Fprintln(w, "Health is not checked in this installation.")
@@ -263,10 +263,10 @@ func (e *env) machineShow(c *client.Client, id string) error {
 	}
 	m := ms[0]
 	return e.emit(r.Body, func(w *tabwriter.Writer) {
-		fmt.Fprintf(w, "Machine\t%s\tcluster %s\n", m.Id, m.Cluster)
-		fmt.Fprintf(w, "Endpoint\t%s\tplatform %s\n", m.TalosEndpoint, m.Platform)
-		fmt.Fprintf(w, "Hardware\tnode ID %s\tSMBIOS UUID %s\n", deref(m.Hardware.TalosNodeId), deref(m.Hardware.SmbiosUuid))
-		fmt.Fprintf(w, "Scope\t%s\n", m.ScopeState)
+		tf(w, "Machine\t%s\tcluster %s\n", m.Id, m.Cluster)
+		tf(w, "Endpoint\t%s\tplatform %s\n", m.TalosEndpoint, m.Platform)
+		tf(w, "Hardware\tnode ID %s\tSMBIOS UUID %s\n", deref(m.Hardware.TalosNodeId), deref(m.Hardware.SmbiosUuid))
+		tf(w, "Scope\t%s\n", m.ScopeState)
 		for _, s := range sentences(m, obs) {
 			fmt.Fprintln(w, s)
 		}
@@ -277,7 +277,7 @@ func (e *env) machineShow(c *client.Client, id string) error {
 // read and its observations.
 func sentences(m apitypes.MachineBody, obs []apitypes.ObservationBody) []string {
 	var s []string
-	add := func(f string, a ...any) { s = append(s, fmt.Sprintf(f, a...)) }
+	add := func(f string, a ...any) { s = append(s, sf(f, a...)) }
 	at := func(t time.Time) string { return t.Format("2006-01-02 15:04:05 MST") }
 	basis, latest := -1, (*apitypes.ObservationBody)(nil)
 	for i, o := range obs {
@@ -390,8 +390,8 @@ func (e *env) statusCmd(args []string) error {
 		}
 		rec := recs[0]
 		return e.emit(raw, func(w *tabwriter.Writer) {
-			fmt.Fprintf(w, "Context\t%s\n", c.Context.Where())
-			fmt.Fprintf(w, "Server\t%s, API revision %d, start mode %s\n", client.Printable(srv.Version), srv.ApiRevision, client.ShownStartMode(string(srv.StartMode)))
+			tf(w, "Context\t%s\n", c.Context.Where())
+			tf(w, "Server\t%s, API revision %d, start mode %s\n", client.Printable(srv.Version), srv.ApiRevision, client.ShownStartMode(string(srv.StartMode)))
 			mode := "off"
 			if rec.RecoveryMode {
 				mode = "on"
@@ -406,14 +406,14 @@ func (e *env) statusCmd(args []string) error {
 				}
 				mode += ". Scopes: " + count(scopes)
 			}
-			fmt.Fprintf(w, "Epoch\t%s\n", rec.Epoch)
-			fmt.Fprintf(w, "Recovery mode\t%s\n", mode)
-			fmt.Fprintf(w, "Open drift\t%s\n", count(ids))
+			tf(w, "Epoch\t%s\n", rec.Epoch)
+			tf(w, "Recovery mode\t%s\n", mode)
+			tf(w, "Open drift\t%s\n", count(ids))
 			var opIDs []string
 			for _, o := range unresolved {
 				opIDs = append(opIDs, o.Id+" ("+o.Kind+")")
 			}
-			fmt.Fprintf(w, "Unresolved operations\t%s\n", count(opIDs))
+			tf(w, "Unresolved operations\t%s\n", count(opIDs))
 			fmt.Fprintln(w, "Health\tnot checked")
 		})
 	})

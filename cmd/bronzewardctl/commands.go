@@ -36,7 +36,7 @@ func (e *env) contextCmd(args []string) error {
 		return e.emit(raw, func(w *tabwriter.Writer) {
 			fmt.Fprintln(w, "CURRENT\tNAME\tSERVER\tCREDENTIAL")
 			for _, x := range cfg.Contexts {
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", map[bool]string{true: "*"}[x.Name == cfg.Current], x.Name, x.Server, x.Credential)
+				tf(w, "%s\t%s\t%s\t%s\n", map[bool]string{true: "*"}[x.Name == cfg.Current], x.Name, x.Server, x.Credential)
 			}
 		})
 	case "use", "remove":
@@ -56,7 +56,7 @@ func (e *env) contextCmd(args []string) error {
 				cfg.Current = x.Name
 				return nil
 			}
-			removed, msg = *x, fmt.Sprintf("Context %q removed.", x.Name)
+			removed, msg = *x, sf(`Context "%s" removed.`, x.Name)
 			if cfg.Current == x.Name {
 				cfg.Current, msg = "", msg+" No context is current now."
 			}
@@ -175,8 +175,7 @@ func (e *env) contextAdd(args []string) error {
 	if x.CertificateAuthority != "" {
 		trust = "the bundle " + x.CertificateAuthority
 	}
-	_, err = fmt.Fprintf(e.out, "Context %q added: %s, TLS trust from %s, credential %s. Current context: %s.\n", x.Name, x.Server, trust, x.Credential, current)
-	return err
+	return tf(e.out, "Context \"%s\" added: %s, TLS trust from %s, credential %s. Current context: %s.\n", x.Name, x.Server, trust, x.Credential, current)
 }
 
 // versionCmd prints both versions and the served API revision. The server's is "unknown" while
@@ -198,11 +197,11 @@ func (e *env) versionCmd(args []string) error {
 	}
 	out := fmt.Appendf(nil, `{"client":{"version":%q,"minimumApiRevision":%d},"server":%s}`, clientVersion(), client.MinRevision, raw)
 	return errors.Join(err, e.emit(out, func(w *tabwriter.Writer) {
-		fmt.Fprintf(w, "Client\tbronzewardctl %s, needs API revision %d or later\n", clientVersion(), client.MinRevision)
+		tf(w, "Client\tbronzewardctl %s, needs API revision %d or later\n", clientVersion(), client.MinRevision)
 		if srv == nil {
 			fmt.Fprintln(w, "Server\tunknown")
 		} else {
-			fmt.Fprintf(w, "Server\t%s, API revision %d, start mode %s\t%s\n", client.Printable(srv.Version), srv.ApiRevision, client.ShownStartMode(string(srv.StartMode)), where)
+			tf(w, "Server\t%s, API revision %d, start mode %s\t%s\n", client.Printable(srv.Version), srv.ApiRevision, client.ShownStartMode(string(srv.StartMode)), where)
 		}
 	}))
 }
@@ -234,15 +233,15 @@ func (e *env) whoamiCmd(args []string) (err error) {
 	}
 	recovery := map[bool]string{true: "on", false: "off"}[r.Header.Get("Bronzeward-Recovery-Mode") == "true"]
 	return e.emit(r.Body, func(w *tabwriter.Writer) {
-		fmt.Fprintf(w, "Context\t%s\n", c.Context.Where())
-		fmt.Fprintf(w, "Identity\t%s\t%s\n", deref(id.Service), id.Kind)
-		fmt.Fprintf(w, "Principal\t%s\n", deref(id.Principal))
-		fmt.Fprintf(w, "Roles\t%s\n", map[bool]string{true: "none"}[len(roles) == 0]+strings.Join(roles, ", "))
-		fmt.Fprintf(w, "Epoch\t%s\trecovery mode: %s\n", id.Epoch, recovery)
-		fmt.Fprintf(w, "Expires\t%s\n", id.ExpiresAt.Format("2006-01-02 15:04:05 MST"))
+		tf(w, "Context\t%s\n", c.Context.Where())
+		tf(w, "Identity\t%s\t%s\n", deref(id.Service), id.Kind)
+		tf(w, "Principal\t%s\n", deref(id.Principal))
+		tf(w, "Roles\t%s\n", map[bool]string{true: "none"}[len(roles) == 0]+strings.Join(roles, ", "))
+		tf(w, "Epoch\t%s\trecovery mode: %s\n", id.Epoch, recovery)
+		tf(w, "Expires\t%s\n", id.ExpiresAt.Format("2006-01-02 15:04:05 MST"))
 		// The client's own reading of its token, labelled as such, beside the server's (§9.2 item 5).
 		if t := c.TokenClaims(); t != nil {
-			fmt.Fprintf(w, "Token (bronzewardctl's reading)\tsubject %s, issuer %s, expires %s\n",
+			tf(w, "Token (bronzewardctl's reading)\tsubject %s, issuer %s, expires %s\n",
 				client.Printable(t.Subject), client.Printable(t.Issuer), t.ExpiresAt().UTC().Format("2006-01-02 15:04:05 MST"))
 		}
 	})
