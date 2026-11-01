@@ -90,6 +90,12 @@ func UpdateConfig(change func(*Config) error) error {
 	if err != nil {
 		return err
 	}
+	return update(p, change)
+}
+
+// update applies change to the YAML file p, a missing one read as T's zero value, as UpdateConfig
+// describes.
+func update[T any](p string, change func(*T) error) error {
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return err
 	}
@@ -101,8 +107,12 @@ func UpdateConfig(change func(*Config) error) error {
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
 		return err
 	}
-	c, err := LoadConfig()
-	if err != nil {
+	c := new(T)
+	if b, err := os.ReadFile(p); err == nil {
+		if err := yaml.Unmarshal(b, c); err != nil {
+			return fmt.Errorf("%s: %w", p, err)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	if err := change(c); err != nil {
@@ -112,7 +122,7 @@ func UpdateConfig(change func(*Config) error) error {
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(p), "config-*.yaml")
+	tmp, err := os.CreateTemp(filepath.Dir(p), "."+filepath.Base(p)+"-*")
 	if err != nil {
 		return err
 	}

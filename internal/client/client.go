@@ -27,9 +27,11 @@ type Client struct {
 	hc      *http.Client
 	token   string
 	signIn  *signIn // an OIDC context's; nil for automation
+	service string  // the automation principal GET /identity served, once read
 	warned  map[string]bool
 
-	changed, newEpoch, recovery bool
+	// crossed: an answer showed a new epoch, so the context's kept ETags are dropped (§8.5 item 1).
+	changed, newEpoch, recovery, crossed bool
 }
 
 // Response is a successful answer.
@@ -199,23 +201,36 @@ func (c *Client) once(path string) (*Response, bool, error) {
 		}
 		return &Response{Header: r.Header, Body: body}, false, nil
 	}
-	var doc map[string]any
-	mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if mt == "application/problem+json" && json.Unmarshal(body, &doc) == nil {
-		if t, _ := doc["type"].(string); strings.HasPrefix(t, problemPrefix) {
-			p := &Problem{Status: r.StatusCode, Doc: doc, Route: route, Where: c.Context.Where(), Subject: c.Subject()}
-			c.signedIn(p)
-			// Any answer 409 recovery-mode-active without a scope member is a recovery start
-			// before its entry (§8.5 item 1).
-			if p.Code() == "recovery-mode-active" && p.Doc["scope"] == nil {
-				c.setStartMode("recovery")
-			}
-			retry := r.StatusCode == http.StatusServiceUnavailable &&
-				slices.Contains([]string{"dependency-unavailable", "talos-access-unavailable", "transient-conflict"}, p.Code())
-			return nil, retry, p
-		}
+	if p := c.problem(route, r, body); p != nil {
+		return nil, p.unavailable(), p
 	}
 	return nil, r.StatusCode >= 500, c.Context.fail(fmt.Errorf("%s answered %s, not a Bronzeward problem", route, printable(r.Status)))
+}
+
+// problem is the Bronzeward problem document an answer carries, or nil.
+func (c *Client) problem(route string, r *http.Response, body []byte) *Problem {
+	var doc map[string]any
+	mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if mt != "application/problem+json" || json.Unmarshal(body, &doc) != nil {
+		return nil
+	}
+	if t, _ := doc["type"].(string); !strings.HasPrefix(t, problemPrefix) {
+		return nil
+	}
+	p := &Problem{Status: r.StatusCode, Doc: doc, Route: route, Where: c.Context.Where(), Subject: c.Subject()}
+	c.signedIn(p)
+	// Any answer 409 recovery-mode-active without a scope member is a recovery start before its
+	// entry (§8.5 item 1).
+	if p.Code() == "recovery-mode-active" && p.Doc["scope"] == nil {
+		c.setStartMode("recovery")
+	}
+	return p
+}
+
+// unavailable: a 503 that a read retries and a write repeats (§8.2).
+func (p *Problem) unavailable() bool {
+	return p.Status == http.StatusServiceUnavailable &&
+		slices.Contains([]string{"dependency-unavailable", "talos-access-unavailable", "transient-conflict"}, p.Code())
 }
 
 // observe applies the response headers every answer may carry: the epoch (§8.5), the recovery
@@ -228,6 +243,7 @@ func (c *Client) observe(route string, r *http.Response) {
 			fmt.Fprintf(c.Notices, "%s: The installation entered recovery mode or was restored; what was read before may no longer hold.\n", c.Context.Where())
 		}
 		c.Context.LastEpoch, c.changed, c.newEpoch = e, true, c.Context.LastEpoch != ""
+		c.crossed = c.crossed || c.newEpoch
 	}
 	c.recovery = c.recovery || r.Header.Get("Bronzeward-Recovery-Mode") == "true"
 	if d := r.Header.Get("Deprecation"); d != "" && !c.warned[route] {
@@ -263,6 +279,11 @@ func (c *Client) Save() error {
 	})
 	if err != nil {
 		return c.Context.fail(fmt.Errorf("keeping the epoch, start mode and maximum token lifetime: %w", err))
+	}
+	if c.crossed {
+		if err := dropEarlier(c.Context); err != nil {
+			return c.Context.fail(fmt.Errorf("dropping the ETags kept before the epoch change: %w", err))
+		}
 	}
 	return nil
 }
