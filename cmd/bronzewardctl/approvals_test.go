@@ -52,8 +52,8 @@ func TestApprove(t *testing.T) {
 	for _, w := range []string{
 		"Plan pln_BWSYNTH  proposed",
 		"Changes shown below",
-		"Self-approval  predicted: created-plan (you created this plan), published (you published its release), " +
-			"authored-change (you authored a revision its release's draft introduced), authored-reused (you authored a revision its release reuses).",
+		"Self-approval  predicted: you created this plan and published this release, " +
+			"and authored a fragment, profile or assignment revision its draft introduced and one it reuses.",
 		"Import-base authorship and automation you own are not predicted. The approval records the actual reasons; self-approval is marked and allowed.",
 		"POST /api/v1/plans/pln_BWSYNTH/approvals is for a person signed in, not an automation token: the server refuses it.",
 	} {
@@ -85,6 +85,31 @@ func TestApprove(t *testing.T) {
 	}
 	if code, out, _ = typed("-o", "json"); code != 0 || out != fmt.Sprintf(approvalJSON, false)+"\n" {
 		t.Errorf("-o json: exit %d, stdout %q; want the approval unchanged", code, out)
+	}
+}
+
+// TestSelfWork checks the prediction's prose: one clause per predicted reason, the journey's own
+// example, and nothing said as "did not" that a failed read left unknown.
+func TestSelfWork(t *testing.T) {
+	for _, c := range []struct {
+		w    selfWork
+		want string
+	}{
+		{selfWork{created: true, published: true, knowPublished: true, knowAuthored: true},
+			"you created this plan and published this release, and authored no fragment, profile or assignment revision in it."},
+		{selfWork{created: true, knowPublished: true, change: true},
+			"you created this plan but did not publish this release, and authored a fragment, profile or assignment revision its draft introduced."},
+		{selfWork{published: true, knowPublished: true, reused: true, knowAuthored: true},
+			"you published this release but did not create this plan, and authored a fragment, profile or assignment revision it reuses."},
+		{selfWork{knowPublished: true, knowAuthored: true},
+			"you did not create this plan or publish this release, and authored no fragment, profile or assignment revision in it."},
+		{selfWork{knowPublished: true}, "you did not create this plan or publish this release."},
+		{selfWork{created: true}, "you created this plan."},
+		{selfWork{}, "you did not create this plan."},
+	} {
+		if got := c.w.String(); got != c.want {
+			t.Errorf("%+v: %q; want %q", c.w, got, c.want)
+		}
 	}
 }
 

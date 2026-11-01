@@ -141,7 +141,7 @@ Evidence
      ---
      apiVersion: v1alpha1
      kind: HostnameConfig
-Self-approval  predicted: no reason from the plan's creator, the release's publisher or its fragment, profile and assignment revisions.
+Self-approval  predicted: you did not create this plan or publish this release, and authored no fragment, profile or assignment revision in it.
                Import-base authorship and automation you own are not predicted. The approval records the actual reasons; self-approval is marked and allowed.
 Type the plan ID to approve, or press Enter to stop:
 Approved (apr_…). Recorded self-approval reasons: none.
