@@ -89,8 +89,12 @@ func item(id, typ string) string {
 	return `{"id":"` + id + `","at":"2026-11-01T06:00:00Z","type":"` + typ + `","data":{"type":"` + typ + `"}}`
 }
 
-// onShow, when set, runs on the watch's goroutine after each event shown.
-var onShow func()
+// onShow, when set, runs on the watch's goroutine after each event shown; until is the watch's
+// Until.
+var (
+	onShow func()
+	until  func() (bool, error)
+)
 
 // watched runs a watch of op_BWSYNTH on o and returns the event IDs shown, with "clear" where
 // the watch cleared them, the waits between attempts, the final state and the notices.
@@ -111,6 +115,7 @@ func watched(t *testing.T, o *opServer, epoch string, prep func(*Client)) ([]str
 			}
 		},
 		Clear: func() { shown = append(shown, "clear") },
+		Until: until,
 		sleep: func(d time.Duration) { waits = append(waits, d) },
 	})
 	state := ""
@@ -303,6 +308,53 @@ func TestWatch(t *testing.T) {
 			t.Errorf("watch: %v; want the 403 refusal", err)
 		}
 	})
+}
+
+// TestWatchUntil checks that Until ends a watch before the operation's state is terminal, at an
+// event or a keep-alive, without opening the stream again; that a terminal state still shows every
+// event; and that Until's error ends the watch.
+func TestWatchUntil(t *testing.T) {
+	const e1 = "ep_BWSYNTH1"
+	type handler = func(http.ResponseWriter, *http.Request)
+	for _, c := range []struct {
+		name   string
+		frames []string
+		states []string
+		after  int // Until answers true from its after-th call (from 1)
+		fail   bool
+		shown  []string
+		state  string
+	}{
+		{"at an event", []string{ev(e1+":1", "started"), ev(e1+":2", "paused"), ev(e1+":3", "continued")}, []string{"running"}, 2, false,
+			[]string{e1 + ":1", e1 + ":2"}, "running"},
+		{"at a keep-alive", []string{ev(e1+":1", "started"), ": keep-alive\n\n", ev(e1+":2", "staged")}, []string{"running"}, 2, false,
+			[]string{e1 + ":1"}, "running"},
+		{"a terminal state shows every event", []string{ev(e1+":1", "started")}, []string{"failed"}, 1, false,
+			[]string{e1 + ":1", e1 + ":2"}, "failed"},
+		{"its error", []string{ev(e1+":1", "started")}, []string{"running"}, 1, true, []string{e1 + ":1"}, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			calls := 0
+			until = func() (bool, error) {
+				calls++
+				if c.fail {
+					return false, fmt.Errorf("BWSYNTH until")
+				}
+				return calls >= c.after, nil
+			}
+			t.Cleanup(func() { until = nil })
+			o := &opServer{streams: []handler{sse(c.frames...)}, states: c.states, pages: []string{item(e1+":1", "started"), item(e1+":2", "failed")}}
+			shown, _, state, _, err := watched(t, o, e1, nil)
+			switch {
+			case c.fail != (err != nil) || c.fail && !strings.Contains(err.Error(), "BWSYNTH until"):
+				t.Errorf("watch: %v; want an error %v", err, c.fail)
+			case state != c.state || !slices.Equal(shown, c.shown):
+				t.Errorf("state %q, shown %q; want %q, %q", state, shown, c.state, c.shown)
+			case len(o.opened) != 1:
+				t.Errorf("%d streams opened; want 1", len(o.opened))
+			}
+		})
+	}
 }
 
 // TestWatchRenewal checks that a wait renews in process (§9.5 item 4): a sign-in about to expire
