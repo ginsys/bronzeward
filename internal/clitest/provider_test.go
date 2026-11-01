@@ -56,6 +56,7 @@ type provider struct {
 	calls        atomic.Int32                // refresh redemptions
 	approved     atomic.Bool                 // the operator approved the device request
 	exchange     atomic.Int32                // code exchanges
+	devices      atomic.Int32                // device authorization requests
 	noRefresh    atomic.Bool                 // sign-ins are issued without a refresh token
 }
 
@@ -79,6 +80,7 @@ func (p *provider) login(callback func(url.Values) url.Values, nonce string) {
 	p.approved.Store(false)
 	p.noRefresh.Store(false)
 	p.exchange.Store(0)
+	p.devices.Store(0)
 }
 
 // revoking answers revocations with answer, nil for no revocation endpoint, and forgets those
@@ -195,6 +197,7 @@ func (p *provider) wrap(iss *issuer.Issuer) http.Handler {
 		http.Redirect(w, r, q.Get("redirect_uri")+"?"+back.Encode(), http.StatusFound)
 	})
 	mux.HandleFunc("POST /device", func(w http.ResponseWriter, r *http.Request) {
+		p.devices.Add(1)
 		p.mu.Lock()
 		verify, device, code := p.verification, p.device, p.userCode
 		p.mu.Unlock()

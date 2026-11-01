@@ -92,13 +92,22 @@ func keyring(t *testing.T) []string {
 	if _, err := exec.LookPath("gnome-keyring-daemon"); err != nil {
 		t.Skip("gnome-keyring-daemon is not installed")
 	}
-	return sessionBus(t, true)
+	return sessionBus(t, busSecrets)
 }
 
-// sessionBus starts a private session bus that starts no program by itself (D-Bus activation),
-// with gnome-keyring's Secret Service on it when secrets is set, and returns the environment that
-// names it. Skipped where dbus-daemon or dbus-send is not installed.
-func sessionBus(t *testing.T, secrets bool) []string {
+// busKind is what a private session bus offers for the Secret Service's name.
+type busKind int
+
+const (
+	busEmpty       busKind = iota // nothing, and nothing can be started for it
+	busActivatable                // a program that can be started for it (D-Bus activation), which exits at once
+	busSecrets                    // gnome-keyring's Secret Service
+)
+
+// sessionBus starts a private session bus offering what kind names, and returns the environment
+// that names it. It starts no program of the host's by itself. Skipped where dbus-daemon or
+// dbus-send is not installed.
+func sessionBus(t *testing.T, kind busKind) []string {
 	for _, b := range []string{"dbus-daemon", "dbus-send"} {
 		if _, err := exec.LookPath(b); err != nil {
 			t.Skipf("%s is not installed", b)
@@ -120,11 +129,27 @@ func sessionBus(t *testing.T, secrets bool) []string {
 	addr := "unix:path=" + filepath.Join(d, "bus")
 	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "XDG_DATA_HOME=" + filepath.Join(home, "data"),
 		"XDG_RUNTIME_DIR=" + run, "DBUS_SESSION_BUS_ADDRESS=" + addr}
-	// No servicedir: the bus would start the host's own Secret Service for a caller.
+	// No standard servicedir: the bus would start the host's own Secret Service for a caller.
+	services := ""
+	if kind == busActivatable {
+		exit, err := exec.LookPath("false")
+		if err != nil {
+			t.Skip("false is not installed")
+		}
+		dir := filepath.Join(d, "services")
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "org.freedesktop.secrets.service"),
+			[]byte("[D-BUS Service]\nName=org.freedesktop.secrets\nExec="+exit+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		services = "<servicedir>" + dir + "</servicedir>"
+	}
 	conf := filepath.Join(d, "bus.conf")
 	if err := os.WriteFile(conf, []byte(`<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
  "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
-<busconfig><type>session</type><listen>`+addr+`</listen><auth>EXTERNAL</auth>
+<busconfig><type>session</type><listen>`+addr+`</listen><auth>EXTERNAL</auth>`+services+`
 <policy context="default"><allow send_destination="*" eavesdrop="true"/><allow eavesdrop="true"/><allow own="*"/></policy>
 </busconfig>
 `), 0o600); err != nil {
@@ -161,7 +186,7 @@ func sessionBus(t *testing.T, secrets bool) []string {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	if !secrets {
+	if kind != busSecrets {
 		return []string{"DBUS_SESSION_BUS_ADDRESS=" + addr}
 	}
 	daemon("BWSYNTH-keyring", "gnome-keyring-daemon", "--unlock", "--components=secrets", "--foreground")
@@ -238,16 +263,20 @@ func TestLogin(t *testing.T) {
 		f.want(r, 0, "Signed in to file")
 		// --no-input forbids the wait for the operator.
 		f.want(f.ctl(nil, "", "--context", "file", "--no-input", "login"), 1, "which --no-input forbids")
-		// A token file that is not this client's is refused before the sign-in and left as it is.
-		for _, other := range []string{"bwt_BWSYNTH-automation\n", "kind: Config\nclusters: []\n", `{"theirs":"BWSYNTH"}`} {
+		// A token file that is not this client's is refused before the sign-in, on the loopback and
+		// the device path, and left as it is.
+		neither := "token file " + file + " holds neither bronzewardctl's tokens"
+		for other, says := range map[string]string{"bwt_BWSYNTH-automation\n": "token file " + file + " holds an automation token",
+			"kind: Config\nclusters: []\n": neither, `{"theirs":"BWSYNTH"}`: neither} {
 			if err := os.WriteFile(file, []byte(other), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			f.idp.login(nil, "")
-			n := f.idp.exchange.Load()
-			f.want(login(nil, "file"), 1, "token file "+file)
-			if b, _ := os.ReadFile(file); string(b) != other || f.idp.exchange.Load() != n {
-				t.Errorf("the file now holds %q after %d exchanges, want it unchanged with none", b, f.idp.exchange.Load()-n)
+			f.want(login(nil, "file"), 1, says)
+			f.want(f.ctl(nil, "", "--context", "file", "login", "--device"), 1, says)
+			if b, _ := os.ReadFile(file); string(b) != other || f.idp.exchange.Load() != 0 || f.idp.devices.Load() != 0 {
+				t.Errorf("the file now holds %q after %d exchanges and %d device requests, want it unchanged with none",
+					b, f.idp.exchange.Load(), f.idp.devices.Load())
 			}
 		}
 		// This client's own refresh-only document is signed in over.
@@ -313,6 +342,12 @@ func TestLogin(t *testing.T) {
 		if r := f.idp.revocations(); len(r) != 0 {
 			t.Errorf("revoked %v with no refresh token issued", r)
 		}
+		// A sign-in kept without a refresh token says that it ends with its access token.
+		os.Remove(file)
+		f.idp.login(nil, "")
+		f.idp.noRefresh.Store(true)
+		f.want(login(nil, "file"), 0, "Signed in to file",
+			"The identity provider issued no refresh token, so sign in again when the access token expires.")
 		os.Remove(file)
 	})
 
@@ -661,12 +696,25 @@ func TestLogin(t *testing.T) {
 	// A session bus on which no program offers the Secret Service, or would be started for it, is
 	// no store: the sign-in is kept in memory, as with no bus.
 	t.Run("no secret service", func(t *testing.T) {
-		bus := sessionBus(t, false)
+		bus := sessionBus(t, busEmpty)
 		add(nil, "nosecrets")
 		defer f.ctl(nil, "", "context", "remove", "nosecrets")
 		f.idp.login(nil, "")
 		f.want(login(bus, "nosecrets"), 0, "kept in this process's memory only",
 			"no program on the D-Bus session bus offers the Secret Service (org.freedesktop.secrets)")
+	})
+
+	// A bus that can start a program for the Secret Service's name is a store, even with no owner
+	// yet: here the program exits at once, so the store fails and nothing is issued.
+	t.Run("activatable secret service", func(t *testing.T) {
+		bus := sessionBus(t, busActivatable)
+		add(nil, "activatable")
+		defer f.ctl(nil, "", "context", "remove", "activatable")
+		f.idp.login(nil, "")
+		f.want(login(bus, "activatable"), 1, "the system credential store failed, so a sign-in could not be kept there")
+		if n := f.idp.exchange.Load(); n != 0 {
+			t.Errorf("%d exchanges, want none", n)
+		}
 	})
 
 	// T3/T4: the system credential store, a private Secret Service here.
