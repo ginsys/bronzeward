@@ -1822,6 +1822,12 @@ Limits:
   not implemented yet. No synthetic contract probe was run against the
   server for this document: every server behaviour
   above is read from source and contract text, and G17 is inferred, not observed.
+- For a person signed in as recovery-admin
+  ([#361](https://github.com/ginsys/bronzeward/issues/361)), bronzewardctl reads recovery status
+  and sends recovery enter, recovery exit and identity revoke; enter and revoke are sent only when
+  the confirmation is typed back. Its tests run REC-02 and REC-04 (a) against a served bronzeward.
+  REC-04 (b) waits for the server-side COMMIT fault hook of
+  [#263](https://github.com/ginsys/bronzeward/issues/263).
 - Line references were read at `3cbe953`, except those to the identity read and the
   expected-epoch check, which are read with
   [#277](https://github.com/ginsys/bronzeward/issues/277) and
