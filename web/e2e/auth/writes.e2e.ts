@@ -8,9 +8,9 @@
 import { randomBytes } from "node:crypto";
 import { $, browser, expect } from "@wdio/globals";
 import { PRINCIPAL_CHANGED } from "../../src/app.tsx";
-import { REPLAYED, SET_ASIDE, UNKNOWN, unknown } from "../../src/states.tsx";
+import { REPEATING, REPLAYED, SET_ASIDE, UNKNOWN, unknown } from "../../src/states.tsx";
 import { CONTROL } from "../auth.conf.ts";
-import type { Faults, Step } from "../injector.ts";
+import { type Faults, REDIRECTED, type Step } from "../injector.ts";
 import { answers, faults, fixtureSignIn, holding, release, storageEmpty } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
@@ -18,6 +18,8 @@ let at = "";
 
 // Every write the injector received since the sign-in, as [method, route, key, expected epoch].
 const writes = async (): Promise<string[][]> => ((await (await fetch(`${CONTROL}/writes`)).json()) as string[]).map((w) => w.split(" "));
+// The requests that reached the injector's redirect target since the sign-in.
+const redirected = async () => (await (await fetch(`${CONTROL}/redirected`)).json()) as number;
 // The server's answers to the write the injector passed on: the list's reads answer 200, a write never.
 const writeAnswers = async () => (await answers()).filter((a) => a.startsWith("/clusters ") && a !== "/clusters 200");
 const result = () => $('[data-testid="write-result"]');
@@ -128,10 +130,23 @@ describe("the write views (#338)", () => {
   it("TLS-03: a write that meets a refused redirect each time is repeated with the same key, then unknown, never not done", async function () {
     this.timeout(60_000);
     await add(["redirect", "redirect", "redirect", "redirect"]);
-    await expect(notice()).toHaveText(expect.stringContaining(UNKNOWN), { wait: 30_000 });
+    // Unknown from the first refused send on, while the automatic repeats still run (B11).
+    await expect(notice()).toHaveText(expect.stringContaining(REPEATING), { wait: 30_000 });
+    expect(await notice().getText()).toContain(UNKNOWN);
+    await sends(4);
+    await expect(notice()).not.toHaveText(expect.stringContaining(REPEATING), { wait: 30_000 });
+    expect(await notice().getText()).toContain(UNKNOWN);
     const { key } = await oneWrite(4);
     expect(await notice().getText()).toContain(`Key ${key}`);
-    expect(await notice().getText()).not.toContain("127.0.0.1:9");
+    expect(await notice().getText()).not.toContain(REDIRECTED);
+    // No send followed the redirect to its target.
+    expect(await redirected()).toBe(0);
+    // Positive control: the same redirect, met by a fetch that follows redirects, reaches the target
+    // and is counted, so the zero above is the page's refusal. Nothing is forwarded to the server.
+    await faults({ upstream: at, steps: { path: "/clusters", take: ["redirect"] } });
+    const status = await browser.execute(async () => (await fetch("/api/v1/clusters", { method: "POST", body: "{}" })).status);
+    expect(status).toBe(200);
+    expect(await redirected()).toBe(1);
   });
 
   it("AMB-05: a write dropped after the commit, then a new epoch, is set aside unrepeated; the resource read shows it", async () => {
