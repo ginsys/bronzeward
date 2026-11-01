@@ -14,6 +14,9 @@ if (!password) throw new Error(`no password for ${human} in the environment (run
 const repo = new URL("../../", import.meta.url).pathname;
 const part = join(repo, ".dev/participants");
 const require = createRequire(join(repo, "web/package.json"));
+// WDIO_LOG_LEVEL overrides logLevel below, and WDIO_LOG_PATH would keep that log outside the scan's
+// places: none of the caller's WebdriverIO settings reaches it.
+for (const k of Object.keys(process.env)) if (k.startsWith("WDIO_")) delete process.env[k];
 const { remote } = require("webdriverio");
 const web = "http://localhost:58443";
 
