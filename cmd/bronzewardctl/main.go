@@ -174,7 +174,8 @@ func (e *env) parse(name string, args []string, n int, extra func(*flag.FlagSet)
 		if err := fs.Parse(args); errors.Is(err, flag.ErrHelp) {
 			return nil, err
 		} else if err != nil {
-			return nil, usageError{err}
+			// The parser quotes the argument as given, line feeds included.
+			return nil, usageError{errors.New(client.Printable(err.Error()))}
 		}
 		if fs.NArg() == 0 || n < 0 {
 			pos = append(pos, fs.Args()...)
