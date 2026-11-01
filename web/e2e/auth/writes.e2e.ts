@@ -192,7 +192,9 @@ describe("the write views (#338)", () => {
     await expect(notice()).toHaveText(expect.stringContaining(SET_ASIDE), { wait: 20_000 });
     expect(await notice().parentElement().$("button=Dismiss").isExisting()).toBe(false);
     await release();
-    await expect(notice()).toHaveText(expect.stringContaining(SET_ASIDE), { wait: 20_000 });
+    // Settled: the notice can now be dismissed, so no repeat can still be scheduled.
+    await notice().parentElement().$("button=Dismiss").waitForExist({ timeout: 20_000 });
+    expect(await notice().getText()).toContain(SET_ASIDE);
     await oneWrite(1);
   });
 

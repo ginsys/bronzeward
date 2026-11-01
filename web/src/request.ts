@@ -238,7 +238,9 @@ export class Client {
       const sent = this.epochRecords;
       const next = await this.send("/recovery");
       if (next === undefined) return undefined;
-      const body = next.ok ? await next.arrayBuffer().then(() => null, () => null) : await readProblem(next);
+      // A success names its epoch in its headers: its body is not waited for, since it may stall.
+      if (next.ok) void next.body?.cancel().catch(() => {});
+      const body = next.ok ? null : await readProblem(next);
       const problem = body === NOT_JSON || body === CUT ? null : body;
       const code = problem?.type.slice(PROBLEM_PREFIX.length);
       if (next.status === 401 && code === "unauthenticated") {
