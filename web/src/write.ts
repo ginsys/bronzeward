@@ -1,9 +1,9 @@
 // The write layer every form uses (ginsys/bronzeward#338; #257 B10 and B11; client contracts §8.2
 // write rows, §8.4, §8.5 item 2). One logical write keeps one key from its first send to its last
 // repeat. Its answer is never discarded as stale: it settles the write's own record even after the
-// page moved on. Pending writes live in this page's memory only (§8.4 item 5). The fragment
-// write's in-progress 409 and the recovery entry's exception (§8.4 items 2 and 3) are not served
-// here: no form of this layer sends either route.
+// page moved on. Pending writes live in this page's memory only (§8.4 item 5). A fragment write's
+// in-progress 409 is repeated within the wait bound (§8.4 item 2, AMB-02; #339). The recovery
+// entry's exception (§8.4 item 3) is not served here: no form of this layer sends that route.
 
 import { type Attempt, type Client, type End, type Ending, NOT_JSON, NOT_SENT, preEntry, type Problem, WRITE_TRANSPORT_FAILURE } from "./request.ts";
 
@@ -16,6 +16,8 @@ export interface WriteSpec {
   ifMatch?: string;
   // The page that shows the resource, named in the notice and opened by [Show current state].
   resource: string;
+  // A fragment write, which ingests: a repeat's in-progress 409 waits for the first request.
+  ingests?: boolean;
 }
 
 export type Outcome =
@@ -55,6 +57,9 @@ const PREFIX = "urn:bronzeward:problem:";
 const REPEATED_503 = new Set(["dependency-unavailable", "talos-access-unavailable", "transient-conflict"]);
 // The waits before each of a write's at most three repeats (§8.4 item 2, as the CLI's #346).
 export const BACKOFF = [1000, 2000, 4000];
+// How long a repeat waits for the first request of its key to finish ingesting, unless the
+// served claim lease is longer (as the CLI's --ingest-wait, #347).
+export const INGEST_WAIT = 120_000;
 
 // One key per logical write: 128 bits from the browser's random source, base64url without padding
 // (§8.4 item 1), never derived from the content.
@@ -84,6 +89,8 @@ export class Write {
   kept = false;
   // The run in flight; a second submit returns it and sends nothing.
   running: Promise<Outcome> | undefined;
+  // The ingestion a repeat's in-progress 409 names while the run waits for it.
+  ingesting: string | undefined;
   constructor(readonly spec: WriteSpec) {
     this.route = `${spec.method} /api/v1${spec.path}`;
   }
@@ -202,6 +209,7 @@ export class Writes {
       w.repeating = undefined;
       w.doubt = undefined;
       w.running = undefined;
+      w.ingesting = undefined;
       // The one removal before a dismissal: a write no notice showed, which its form reports.
       if (!isOpen(w)) {
         if (shown) w.kept = true;
@@ -277,12 +285,20 @@ export class Writes {
       w.doubt = { kind: "unknown", why: last === undefined ? WRITE_TRANSPORT_FAILURE : `the server answered ${last}`, problem: lastProblem };
       this.changed();
     };
+    // The wait bound, read once at the first in-progress 409, and how long this run waited.
+    let bound: number | undefined;
+    let waited = 0;
     for (let n = 0; n <= BACKOFF.length; n++) {
       // A read sent to learn the last answer's epoch ended the sign-in: nothing is repeated.
       if (n > 0 && end.e !== undefined) return aside(SIGN_IN_REFUSED);
       // A read sent to learn it met a recovery start: nothing is repeated, and nothing read again.
       if (n > 0 && end.pre !== undefined) return aside(RECOVERY_START);
-      if (n > 0) await this.wait(BACKOFF[n - 1]!);
+      if (w.ingesting !== undefined) {
+        // Each wait doubles from 1 s up to 4 s and ends at the bound.
+        const step = Math.min(1000 << Math.min(Math.floor(waited / 1000), 2), bound! - waited);
+        await this.wait(step);
+        waited += step;
+      } else if (n > 0) await this.wait(BACKOFF[n - 1]!);
       if (n > 0 || again) {
         // Looked at again once run() resumes: a sign-out, an end of the shell or a set-aside can
         // land between check()'s last look and this send.
@@ -297,6 +313,10 @@ export class Writes {
         // example a renewal that threw while its epoch was learned: it may have committed.
         w.ambiguous = true;
         throw e;
+      }
+      if (w.ingesting !== undefined) {
+        w.ingesting = undefined;
+        this.changed();
       }
       // Nothing went out: the sign-in ended, or its credential is gone, since the checks above.
       if (a === NOT_SENT) {
@@ -353,6 +373,19 @@ export class Writes {
         w.ambiguous = true;
         return aside(EARLIER_EPOCH);
       }
+      // A repeat's in-progress 409: the first request still ingests, or ended without committing
+      // while its claim's lease runs (§8.4 item 2, AMB-02). It is repeated with the same key until
+      // it answers otherwise, within the bound, and counts as no repeat. One that also names a
+      // draft (published meanwhile) is this send's refusal, below.
+      if (w.spec.ingests && a.status === 409 && code === "conflict" && p?.["ingestion"] !== undefined && p["draft"] === undefined && (n > 0 || again)) {
+        const ingestion = String(p["ingestion"]);
+        bound ??= await this.ingestBound(client);
+        if (waited >= bound) return unknown(`the first request with this key was still ingesting (ingestion ${ingestion}) after ${Math.round(waited / 1000)} s`);
+        w.ingesting = ingestion;
+        this.changed();
+        n--;
+        continue;
+      }
       // A process refusal, decided before the lookup (§8.2 409 row): a recovery start, which
       // attempt() recorded in `end.pre` for the shell to show (§8.5 item 1).
       if (preEntry(a.status, p) !== undefined) return early(refused);
@@ -388,6 +421,13 @@ export class Writes {
     if (after !== undefined) return after;
     if (now === undefined) return NO_EPOCH;
     return now === w.epoch ? undefined : EPOCH_CHANGED_ASIDE;
+  }
+
+  // The in-progress wait bound: INGEST_WAIT, or the served claim lease if longer (§8.4 item 2).
+  private async ingestBound(client: Client): Promise<number> {
+    const r = await client.read<{ ingestionClaim?: { leaseSeconds?: unknown } }>("/server");
+    const lease = r.kind === "ok" ? r.data.ingestionClaim?.leaseSeconds : undefined;
+    return typeof lease === "number" && lease * 1000 > INGEST_WAIT ? lease * 1000 : INGEST_WAIT;
   }
 
   // A sign-out, an ended sign-in or the end of the shell that held the client: nothing more is sent
