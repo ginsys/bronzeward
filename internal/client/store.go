@@ -105,13 +105,9 @@ func (s *store) lock() (func(), error) {
 	if s.file != "" {
 		return renewalLock(s.file + ".lock")
 	}
-	dir := os.Getenv("XDG_STATE_HOME")
-	if dir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, err
-		}
-		dir = filepath.Join(home, ".local", "state")
+	dir, err := stateDir()
+	if err != nil {
+		return nil, err
 	}
 	if s.none == "" {
 		// The entry is not decoded: context remove clears one whose context lost its oidc section.
@@ -123,7 +119,21 @@ func (s *store) lock() (func(), error) {
 			return nil, err
 		}
 	}
-	return renewalLock(filepath.Join(dir, "bronzeward", s.x.Name+".renewal.lock"))
+	return renewalLock(filepath.Join(dir, s.x.Name+".renewal.lock"))
+}
+
+// stateDir is the CLI's non-secret state directory: $XDG_STATE_HOME/bronzeward, by default
+// ~/.local/state/bronzeward.
+func stateDir() (string, error) {
+	dir := os.Getenv("XDG_STATE_HOME")
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		dir = filepath.Join(home, ".local", "state")
+	}
+	return filepath.Join(dir, "bronzeward"), nil
 }
 
 // errStoreLocked: the credential store is locked, and is not unlocked under the renewal lock.
