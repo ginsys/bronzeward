@@ -160,7 +160,7 @@ export BW_DEV_INSTANCE=a BW_E2E_PORT_BASE=16000   # in the second checkout: BW_D
 mise run dev-db && mise run dev-idp && mise run browser-auth
 ```
 
-dev-idp registers `http://localhost:$BW_E2E_PORT_BASE` as the provider's web origin, and `browser-auth` refuses to start when the two differ. The WebDriver drivers choose free ports of their own, outside the block. The [fixtures README](fixtures/README.md#test-static-host) lists the port of each listener.
+dev-idp registers `http://localhost:$BW_E2E_PORT_BASE` as the provider's web origin. If its provider runs already with another web origin, dev-idp refuses: run `mise run dev-idp-down` first. `browser-auth` refuses to start when the provider's web origin is not its page. The WebDriver drivers choose free ports of their own, outside the block. The [fixtures README](fixtures/README.md#test-static-host) lists the port of each listener.
 
 ## Running S0 locally
 
