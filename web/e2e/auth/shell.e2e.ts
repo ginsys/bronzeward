@@ -168,7 +168,9 @@ describe("the state catalogue", () => {
     await nav("Changes").click();
     await expect($("main h2")).toHaveText("Changes");
     await expect(testid("offline")).not.toBeExisting({ wait: 10_000 });
-    await expect(testid("status")).toHaveText("No releases published yet.");
+    // Changes shows the drafts list's own status too, before the releases list's.
+    await browser.waitUntil(async () => (await $$('main [data-testid="status"]').map((e) => e.getText())).includes("No releases published yet."),
+      { timeout: 10_000, timeoutMsg: "Changes did not show its empty releases list" });
   });
 
   it("offline: a refusal the server answers ends the banner too, and is shown", async () => {
@@ -206,9 +208,9 @@ describe("the state catalogue", () => {
     await event("online");
     await expect(testid("principal")).toHaveText("Signed in as h-viewer");
     expect(await testid("offline").isExisting()).toBe(false);
-    // The changes page reads its list each time it is shown, under the refused identity too.
-    await reads(8);
-    expect(await ordered()).toEqual(sorted(["/server", "/identity", "/machines", "/clusters", "/identity", "/releases", "/identity", "/releases"]));
+    // The changes page reads its two lists each time it is shown, under the refused identity too.
+    await reads(10);
+    expect(await ordered()).toEqual(sorted(["/server", "/identity", "/machines", "/clusters", "/identity", "/drafts", "/releases", "/identity", "/drafts", "/releases"]));
   });
 
   it("offline: a read an online event superseded is ignored when it completes, and the newer answer shown", async () => {
