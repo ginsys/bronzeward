@@ -133,7 +133,7 @@ func TestPublication(t *testing.T) {
 	step("review: verbatim, the token kept and the tab a tab", []string{"release", "review", "rel_BWSYNTH", "mch_a"}, 0,
 		"Release rel_BWSYNTH, machine mch_a, validated: metal\n"+rendered, "")
 	step("review withheld: the notice and no document", []string{"release", "review", "rel_BWSYNTH", "mch_b"}, 0,
-		"Configuration not shown: it could not be redacted. BWSYNTH no redacted form", "", "machine:", "configuration")
+		"Configuration not shown: it could not be redacted.\nServer notice: BWSYNTH no redacted form\n", "", "machine:", "configuration")
 	if out := step("review -o json", []string{"release", "review", "rel_BWSYNTH", "mch_b", "-o", "json"}, 0, "", ""); !strings.Contains(out, `"configuration":null`) {
 		t.Errorf("-o json printed %q", out)
 	}
