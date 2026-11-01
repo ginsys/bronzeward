@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"reflect"
 	"runtime"
 	"strings"
 	"time"
@@ -99,7 +100,7 @@ func (e *env) fragmentBody(in apitypes.FragmentInput, file, decl string, marks b
 		}
 		in.Declarations = d
 	}
-	var src io.Reader = stdin
+	src := stdin
 	if file != "-" {
 		f, err := os.Open(file)
 		if err != nil {
@@ -117,10 +118,9 @@ func (e *env) fragmentBody(in apitypes.FragmentInput, file, decl string, marks b
 	case !utf8.Valid(doc):
 		return nil, fmt.Errorf("the document is not UTF-8 text; nothing was sent")
 	}
-	if file == "-" {
-		if err := terminalLines(doc, isTerminal(stdin)); err != nil {
-			return nil, err
-		}
+	// The file opened, not its name: /dev/stdin or /dev/tty is a terminal too.
+	if err := terminalLines(doc, isTerminal(src)); err != nil {
+		return nil, err
 	}
 	in.Document = string(doc)
 	if marks {
@@ -163,8 +163,19 @@ func declarations(p string) (*apitypes.Declarations, error) {
 	dec := json.NewDecoder(bytes.NewReader(j))
 	dec.DisallowUnknownFields()
 	var d apitypes.Declarations
+	unknown := errors.New("the file has a member the API does not define, or a value of the wrong type")
 	if dec.Decode(&d) != nil {
-		return nil, errors.New("the file has a member the API does not define, or a value of the wrong type")
+		return nil, unknown
+	}
+	// encoding/json matches member names without regard to case, so a name in another case was
+	// taken, and the same name in two cases kept one list and dropped the other without a word. The
+	// declarations must encode back to the file's own members.
+	if v != nil {
+		var got, want any
+		back, err := json.Marshal(d)
+		if err != nil || json.Unmarshal(back, &got) != nil || json.Unmarshal(j, &want) != nil || !reflect.DeepEqual(got, want) {
+			return nil, unknown
+		}
 	}
 	return &d, nil
 }
