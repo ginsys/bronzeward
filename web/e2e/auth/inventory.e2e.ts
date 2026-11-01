@@ -407,13 +407,18 @@ describe("the machine detail (W3)", () => {
     expect(await $('[data-testid="observed"]').getText()).toContain(short(m1.id));
     const reads = async () => (await answers()).filter((a) => a === `/machines/${id} 200`).length;
     const before = await reads();
+    // The first timeline read must end before the freeze: a first read that already holds it is no advance.
+    const timelineRead = async () => (await $('[data-testid="timeline"]').isExisting()) || (await $("main").getText()).includes("No timeline entry recorded.");
+    await browser.waitUntil(timelineRead, { timeout: 20_000, timeoutMsg: "the first timeline read did not end" });
     // A freeze recorded outside the page, and a later read, reach the page by the timeline's poll.
     await faults({ upstream: at, bodies: bodies([m2, m1], true) });
     await write(at, `/machines/${id}/freezes`, { reason: "synthetic re-read check" });
     await expect($('[data-testid="timeline"]')).toHaveText(expect.stringContaining('"synthetic re-read check"'), { wait: 20_000 });
     await browser.waitUntil(async () => (await texts('[data-testid="sentences"] li')).includes(FROZEN), { timeout: 20_000, timeoutMsg: "the Frozen line did not follow the timeline" });
     expect(await $('[data-testid="observed"]').getText()).toContain(short(m2.id));
-    expect(await texts('[data-testid="observations"] tbody tr th')).toEqual([short(m2.id), short(m1.id)]);
+    // The observations are a read of their own: their answer can arrive after the machine's.
+    const both = [short(m2.id), short(m1.id)];
+    await browser.waitUntil(async () => JSON.stringify(await texts('[data-testid="observations"] tbody tr th')) === JSON.stringify(both), { timeout: 20_000, timeoutMsg: "the observations did not follow the machine" });
     expect((await reads()) - before).toBeGreaterThanOrEqual(1);
     // The timeline went on polling, not read anew.
     expect((await answers()).filter((a) => a.startsWith(`/machines/${id}/timeline?order=newest`))).toHaveLength(1);
