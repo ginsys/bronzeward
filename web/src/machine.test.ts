@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ADOPTED, advanced, advanceReads, againW3, countingSettle, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, keepW3, kept, keptW3, latestUnread, MachineShown, nextTimeline, type Observation, Observations, POLL_MS, polled, queued, readLater, readOlder, sentences, stepAdvance, type Timeline, TimelineRows, UNREAD, type W3Kept } from "./machine.tsx";
+import { ADOPTED, advanced, advanceReads, countingSettle, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, keepW3, kept, keptW3, latestUnread, lostSince, MachineShown, nextTimeline, type Observation, Observations, POLL_MS, polled, queued, readLater, readOlder, sentences, stepAdvance, type Timeline, TimelineRows, UNREAD, type W3Kept } from "./machine.tsx";
 import { type ShellEvents, ShellReads } from "./shell.tsx";
 import { type Load, type Reads, ReadsProvider, RESTARTED } from "./list.tsx";
 import type { Machine } from "./machines.tsx";
@@ -359,7 +359,7 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
     // Settles `res` for resource `i` as W3 does, and says whether it was kept under the banner.
     function settled(k: W3Kept, i: 0 | 1, res: ReadResult<unknown>, was: [boolean, boolean] = [false, false]) {
       const lost = { current: [...was] as [boolean, boolean] };
-      const keep = keepW3({ current: k }, i, 0, lost);
+      const keep = keepW3({ current: k }, i, lost);
       const set = vi.fn();
       vi.mocked(events.observe).mockClear();
       keep.lost(shell.settle(res, set, undefined, () => true, keep.held));
@@ -389,13 +389,21 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
       expect(settled(answered, 0, { kind: "transport" }).lost).toEqual([true, false]);
     });
 
-    test("an answer clears the lost mark; a banner ended by an answer reads each lost resource again once", () => {
+    test("an answer clears the lost mark; a banner ended by an answer reads again once, through the read-again counter", () => {
       const k = keptW3(undefined, okM, list, tl, "v");
       expect(settled(k, 0, okM, [true, true]).lost).toEqual([false, true]);
       expect(settled(k, 1, failed, [true, true]).lost).toEqual([true, false]);
-      expect(againW3([3, 5], [true, false])).toEqual([4, 5]);
-      expect(againW3([3, 5], [true, true])).toEqual([4, 6]);
-      expect(againW3([3, 5], [false, false])).toEqual([3, 5]);
+      // A lost resource asks for one read again, and the marks clear, so the next banner end asks for none.
+      const lost = { current: [true, false] as [boolean, boolean] };
+      expect(lostSince(lost)).toBe(true);
+      expect(lost.current).toEqual([false, false]);
+      expect(lostSince(lost)).toBe(false);
+      // The read again is the counter's: with one in flight it waits for both reads, so the two never abandon each other.
+      const s = (settled: number) => ({ key: "v\n0", settled });
+      const inFlight = [s(0), s(0), "advance" as const].reduce(stepAdvance, advanceReads("v\n0"));
+      const asked = stepAdvance(inFlight, "advance");
+      expect(asked).toEqual({ key: "v\n0", n: 1, left: 2, dirty: true });
+      expect([s(1), s(1)].reduce(stepAdvance, asked)).toEqual({ key: "v\n0", n: 2, left: 2, dirty: false });
     });
   });
 
