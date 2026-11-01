@@ -740,13 +740,7 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
    revision 3 as its minimum. When a poll returns entries the client did not show, a view that
    also shows the machine and its observations reads both again. It keeps what it shows until
    they answer, and the timeline poll goes on unrestarted: the timeline can record a freeze, an
-   observation or an applied release that the first machine read predates. Within one view, a
-   read again of the machine or its observations that the page shows as failed (a refusal it
-   shows, or a server unavailable) shows that failure above what the view last read, which stays.
-   A transport failure keeps it under the offline banner instead. Nothing stays after a credential
-   refusal ([§9.6](#96-failure-cases)) or the process's recovery refusal (§8.5), which end the
-   page, or after an observations read that restarted after a refused cursor and then failed, whose
-   list goes with its cursor (§8.2).
+   observation or an applied release that the first machine read predates.
 
 ## 9. Authentication
 
