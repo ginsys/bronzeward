@@ -183,21 +183,20 @@ func (z *zitadel) refreshes(rt string) bool {
 // through the loopback, renewal with rotation past the access token's expiry on operation list
 // (AUTH-06's renewal half), the device grant, and AUTH-09's logout with revocation. The shared
 // cases among them are the testdata/cases.yaml records naming this test, each run as the subtest
-// named by its ID.
+// named by its ID. The subtests run in the order of steps, whose IDs the records must name.
 func TestLoginIdentityProvider(t *testing.T) {
+	steps := []string{"AUTH-01", "AUTH-06", "device", "AUTH-09"}
 	records := recorded(t, "TestLoginIdentityProvider")
-	cases := []string{"AUTH-01", "AUTH-06", "AUTH-09"}
-	if !slices.Equal(records, cases) {
+	if cases := slices.DeleteFunc(slices.Clone(steps), func(s string) bool { return !strings.HasPrefix(s, "AUTH-") }); !slices.Equal(records, cases) {
 		t.Fatalf("testdata/cases.yaml records %v for this test, which runs %v", records, cases)
 	}
-	z := newZitadel(t)
-	f := startFor(t, "viewer", z.issuer, z.project)
-	file := filepath.Join(f.home, "idp.json")
-	f.want(f.ctl(nil, "", "context", "add", "idp", "--server", f.base, "--issuer", z.issuer, "--client-id", z.cli, "--audience", z.project,
-		"--scopes", "openid,offline_access,urn:zitadel:iam:org:project:id:"+z.project+":aud", "--oidc-token-file", file), 0, "credential oidc")
+	// The steps are defined, and checked against steps, before the provider is needed; they use z
+	// and file once it runs.
+	var z *zitadel
+	var file string
 	// Every token the file has held is looked for in every later output.
 	var held []string
-	check := func(r result) result {
+	check := func(t *testing.T, r result) result {
 		t.Helper()
 		if s, err := client.ReadTokens(file); err == nil && s != nil {
 			held = append(held, s.AccessToken, s.RefreshToken)
@@ -209,28 +208,30 @@ func TestLoginIdentityProvider(t *testing.T) {
 		}
 		return r
 	}
-	ctl := func(args ...string) result { return check(f.scan(f.exec(nil, "", args...), args)) }
-	interact := func(act func(string), args ...string) result {
-		return check(f.interact(nil, act, append([]string{"--context", "idp"}, args...)...))
+	ctl := func(f *fixture, args ...string) result { return check(f.t, f.scan(f.exec(nil, "", args...), args)) }
+	interact := func(f *fixture, act func(string), args ...string) result {
+		return check(f.t, f.interact(nil, act, append([]string{"--context", "idp"}, args...)...))
 	}
 
-	t.Run("AUTH-01", func(t *testing.T) {
-		f.want(interact(z.browser("h-viewer"), "login"), 0, "Signed in to idp", "as "+z.users["h-viewer"]+" at "+z.issuer,
+	// Each step reports through its own subtest's t, so that a failed check fails that subtest.
+	run := map[string]func(t *testing.T, f *fixture){}
+	run["AUTH-01"] = func(t *testing.T, f *fixture) {
+		f.want(interact(f, z.browser("h-viewer"), "login"), 0, "Signed in to idp", "as "+z.users["h-viewer"]+" at "+z.issuer,
 			"kept in the token file "+file)
-		f.want(ctl("--context", "idp", "whoami"), 0, "viewer", "subject "+z.users["h-viewer"])
-		f.want(ctl("--context", "idp", "machine", "list"), 0)
-		f.want(ctl("context", "list", "-o", "json"), 0, `"name":"idp"`, `"lastEpoch":"`)
-	})
+		f.want(ctl(f, "--context", "idp", "whoami"), 0, "viewer", "subject "+z.users["h-viewer"])
+		f.want(ctl(f, "--context", "idp", "machine", "list"), 0)
+		f.want(ctl(f, "context", "list", "-o", "json"), 0, `"name":"idp"`, `"lastEpoch":"`)
+	}
 
 	// AUTH-06's renewal half; its stream half needs operation watch.
-	t.Run("AUTH-06", func(t *testing.T) {
+	run["AUTH-06"] = func(t *testing.T, f *fixture) {
 		if testing.Short() {
 			t.Skip("waits out a 5-minute access token")
 		}
 		before := f.stored(file)
 		exp := client.ReadClaims(before.AccessToken).ExpiresAt()
 		time.Sleep(time.Until(exp.Add(5 * time.Second)))
-		f.want(ctl("--context", "idp", "operation", "list"), 0)
+		f.want(ctl(f, "--context", "idp", "operation", "list"), 0)
 		after := f.stored(file)
 		if after.AccessToken == before.AccessToken || after.RefreshToken == "" || after.RefreshToken == before.RefreshToken {
 			t.Fatalf("the file after a read past expiry: renewed %v, refresh token rotated %v",
@@ -239,22 +240,22 @@ func TestLoginIdentityProvider(t *testing.T) {
 		if z.refreshes(before.RefreshToken) {
 			t.Error("the provider still redeems the rotated-out refresh token")
 		}
-		f.want(ctl("--context", "idp", "operation", "list"), 0)
+		f.want(ctl(f, "--context", "idp", "operation", "list"), 0)
 		if again := f.stored(file); again.RefreshToken != after.RefreshToken {
 			t.Error("a read with a live token renewed it again")
 		}
-	})
+	}
 
-	t.Run("device", func(t *testing.T) {
+	run["device"] = func(t *testing.T, f *fixture) {
 		host := strings.ToUpper(strings.TrimPrefix(z.issuer, "http://"))
-		f.want(interact(z.device("h-publisher"), "login", "--device"), 0, "Check that the page's host is: "+host,
+		f.want(interact(f, z.device("h-publisher"), "login", "--device"), 0, "Check that the page's host is: "+host,
 			"Signed in to idp", "as "+z.users["h-publisher"]+" at "+z.issuer)
-		f.want(ctl("--context", "idp", "whoami"), 0, "publisher", "subject "+z.users["h-publisher"])
-	})
+		f.want(ctl(f, "--context", "idp", "whoami"), 0, "publisher", "subject "+z.users["h-publisher"])
+	}
 
-	t.Run("AUTH-09", func(t *testing.T) {
+	run["AUTH-09"] = func(t *testing.T, f *fixture) {
 		s := f.stored(file)
-		f.want(ctl("--context", "idp", "logout"), 0, "the token file "+file+" is removed",
+		f.want(ctl(f, "--context", "idp", "logout"), 0, "the token file "+file+" is removed",
 			"The refresh token is revoked at the identity provider.", "stays valid at the server until")
 		if _, err := os.Stat(file); !os.IsNotExist(err) {
 			t.Errorf("the token file is still there: %v", err)
@@ -266,5 +267,28 @@ func TestLoginIdentityProvider(t *testing.T) {
 		q, _ := http.NewRequest(http.MethodGet, f.base+"/api/v1/identity", nil)
 		q.Header.Set("Authorization", "Bearer "+s.AccessToken)
 		f.do(q, http.StatusOK)
-	})
+	}
+
+	if len(run) != len(steps) {
+		t.Fatalf("%d steps defined, %d listed in steps", len(run), len(steps))
+	}
+	for _, name := range steps {
+		if run[name] == nil {
+			t.Fatalf("step %s is listed but not defined", name)
+		}
+	}
+
+	z = newZitadel(t)
+	f := startFor(t, "viewer", z.issuer, z.project)
+	file = filepath.Join(f.home, "idp.json")
+	f.want(f.ctl(nil, "", "context", "add", "idp", "--server", f.base, "--issuer", z.issuer, "--client-id", z.cli, "--audience", z.project,
+		"--scopes", "openid,offline_access,urn:zitadel:iam:org:project:id:"+z.project+":aud", "--oidc-token-file", file), 0, "credential oidc")
+	for _, name := range steps {
+		step := run[name]
+		t.Run(name, func(t *testing.T) {
+			g := *f
+			g.t = t
+			step(t, &g)
+		})
+	}
 }
