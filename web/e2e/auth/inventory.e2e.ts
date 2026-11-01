@@ -644,7 +644,8 @@ describe("the read-only lists and items", () => {
     await expect($('[data-testid="last-pass"]')).toHaveText(/^(Last completed monitor pass: .+|No monitor pass has completed yet)\.$/);
     for (const [page, empty] of [["Changes", "No releases published yet."], ["Plans", "No plans created yet."], ["Operations", "No operations recorded yet."]] as const) {
       await nav(page);
-      await expect($('main [data-testid="status"]')).toHaveText(empty);
+      // Changes shows the drafts list's own status too, before the releases list's.
+      await browser.waitUntil(async () => (await texts('main [data-testid="status"]')).includes(empty), { timeout: 20_000, timeoutMsg: `${page} did not show ${empty}` });
     }
     await nav("Audit");
     const row = $(`//main//tbody/tr[contains(., "${short(cl.id)}")]`);
