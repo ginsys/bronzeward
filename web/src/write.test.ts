@@ -336,9 +336,9 @@ describe("set aside (§8.4 item 3, §8.5 item 2, journeys §8)", () => {
     expect(sent.map((s) => s.path)).toEqual(["/recovery", "/clusters", "/recovery"]);
   });
 
-  test("set aside before any attempt that may have committed, it is not open: nothing committed", async () => {
+  test("set aside before any attempt that may have committed, it is not open: nothing committed, with the last 503's problem", async () => {
     const p = page([problem(503, "dependency-unavailable")], [EPOCH, "e2"]);
-    expect(await p.writes.submit(spec())).toEqual({ kind: "set-aside", why: EPOCH_CHANGED_ASIDE, ambiguous: false, problem: null });
+    expect(await p.writes.submit(spec())).toEqual({ kind: "set-aside", why: EPOCH_CHANGED_ASIDE, ambiguous: false, problem: { type: "urn:bronzeward:problem:dependency-unavailable", title: "dependency-unavailable", status: 503 } });
     expect(p.writes.open).toEqual([]);
   });
 
@@ -501,6 +501,15 @@ describe("an unknown or set-aside outcome keeps the problem of the answer behind
     const drop = () => new TypeError("Failed to fetch");
     expect(await page([drop(), drop(), drop(), drop()]).writes.submit(spec())).toMatchObject({ kind: "unknown", problem: null });
     expect(await page([drop()], [EPOCH, "e2"]).writes.submit(spec())).toMatchObject({ kind: "set-aside", problem: null });
+  });
+
+  test("after a 500, a repeat set aside by its epoch check keeps the 500's problem", async () => {
+    expect(await page([problem(500, "internal-error")], [EPOCH, "e2"]).writes.submit(spec())).toMatchObject({
+      kind: "set-aside",
+      why: EPOCH_CHANGED_ASIDE,
+      ambiguous: true,
+      problem: { type: "urn:bronzeward:problem:internal-error" },
+    });
   });
 
   test("set aside by a 412 epoch-mismatch or a 409 earlier-epoch record, it keeps that answer's problem", async () => {
