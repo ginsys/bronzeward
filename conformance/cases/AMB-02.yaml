@@ -1,6 +1,6 @@
 id: AMB-02
 setup: as ETAG-01, without the other author
-action: Save the edited fragment entry
+action: Save the edited fragment entry, its new node label marked, so its ingestion writes one generation to the provider
 exchange:
   - request: PUT /api/v1/drafts/<draft>/fragments/<name>
     headers: ["Authorization: Bearer <token>", "Content-Type: application/json", "Idempotency-Key: <key>", "Bronzeward-Expected-Epoch: <epoch>", "If-Match: <etag>"]
