@@ -10,8 +10,10 @@ import (
 	"io"
 	"log"
 	"os"
+	"regexp"
 	"runtime/debug"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -90,7 +92,7 @@ type env struct {
 
 func main() {
 	if err := harden(); err != nil {
-		fmt.Fprintln(os.Stderr, "bronzewardctl: disabling core dumps and tracebacks:", err)
+		fmt.Fprintln(client.GuardWriter(os.Stderr), "bronzewardctl: disabling core dumps and tracebacks:", client.Shown(err))
 		os.Exit(1)
 	}
 	defer func() {
@@ -122,7 +124,12 @@ func harden() error {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
-	e := &env{output: "table", out: stdout, err: stderr}
+	// Every byte that reaches the terminal passes client.GuardWriter: standard error always (errors,
+	// notices, prompts and the -v lines), and standard output in -o table, whose text is the CLI's own
+	// sentences and tables. json and yaml are the API resource, which the guard would change.
+	stderr = client.GuardWriter(stderr)
+	e := &env{output: "table", err: stderr}
+	e.out = tableGuard{e, stdout, client.GuardWriter(stdout)}
 	commands := map[string]func([]string) error{"context": e.contextCmd, "version": e.versionCmd, "whoami": e.whoamiCmd, "login": e.loginCmd, "logout": e.logoutCmd,
 		"status": e.statusCmd, "cluster": e.clusterCmd, "machine": e.machineCmd,
 		"fragment": e.fragmentCmd, "profile": e.profileCmd, "assignment": e.assignmentCmd,
@@ -179,8 +186,7 @@ func (e *env) parse(name string, args []string, n int, extra func(*flag.FlagSet)
 		if err := fs.Parse(args); errors.Is(err, flag.ErrHelp) {
 			return nil, err
 		} else if err != nil {
-			// The parser quotes the argument as given, line feeds included.
-			return nil, usageError{errors.New(client.Printable(err.Error()))}
+			return nil, usageError{flagError(err)}
 		}
 		if fs.NArg() == 0 || n < 0 {
 			pos = append(pos, fs.Args()...)
@@ -197,6 +203,23 @@ func (e *env) parse(name string, args []string, n int, extra func(*flag.FlagSet)
 		return nil, usageError{fmt.Errorf("%s takes %d argument(s), got %d", name, n, len(pos))}
 	}
 	return pos, nil
+}
+
+// rejectedValue is the start of the parser's error for a value that a flag cannot take. It quotes
+// the value with %q, the Go form (`\t`, `\\`), where the contract's form is `\x09` and `\`. The
+// quoted part is a Go string literal, so it matches exactly.
+var rejectedValue = regexp.MustCompile(`^(invalid (?:boolean )?value )("(?:[^"\\]|\\.)*")(.*)$`)
+
+// flagError is the parser's error with every argument in the contract's escape form. The parser
+// puts the name of a flag as given in its messages; a rejected value is rebuilt from the value itself.
+func flagError(err error) error {
+	text := err.Error()
+	if m := rejectedValue.FindStringSubmatch(text); m != nil {
+		if v, uerr := strconv.Unquote(m[2]); uerr == nil {
+			return errors.New(m[1] + "\"" + client.Printable(v) + "\"" + client.Printable(m[3]))
+		}
+	}
+	return errors.New(client.Printable(text))
 }
 
 // open selects the context and reads its token (client-contracts.md §5 item 1, §9.4).

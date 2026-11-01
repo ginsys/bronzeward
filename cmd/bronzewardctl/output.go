@@ -62,6 +62,21 @@ func (e linesShown) Error() string { return client.Shown(e.err) }
 
 func (e linesShown) Unwrap() error { return e.err }
 
+// tableGuard is standard output: guarded in -o table, as it is by the time of each write, since a
+// global flag can come after the command; json and yaml print the API resource unchanged.
+type tableGuard struct {
+	e       *env
+	raw     io.Writer
+	guarded io.Writer
+}
+
+func (t tableGuard) Write(p []byte) (int, error) {
+	if t.e.output == "table" {
+		return t.guarded.Write(p)
+	}
+	return t.raw.Write(p)
+}
+
 // emit prints raw, a JSON document, as -o asks: json prints it unchanged; yaml prints the same
 // members in the same order and with the same values; table runs table. The CLI uses no
 // colour or terminal control, so NO_COLOR and non-terminal output are already plain text with
