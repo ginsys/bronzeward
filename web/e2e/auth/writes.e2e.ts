@@ -121,6 +121,8 @@ describe("the write views (#338)", () => {
     expect((await result().getText()).includes(REPLAYED)).toBe(false);
     // The page met a closed connection, not an answer, then the repeat's 201.
     expect(await seen()).toEqual(["failed", "201"]);
+    // Only the repeat reached the server: the drop came before it saw the write.
+    expect(await writeAnswers()).toEqual(["/clusters 201"]);
     const { key } = await oneWrite(2);
     // The drop showed the unknown notice, so it shows the result until dismissed (B11).
     expect(await notice().getText()).toContain(`Saved (the server answered 201). Key ${key}`);
@@ -132,6 +134,8 @@ describe("the write views (#338)", () => {
     const name = await add(["commit-500"]);
     await expect(result()).toHaveText(expect.stringContaining(`${REPLAYED} Cluster ${name} recorded as`), { wait: 20_000 });
     await oneWrite(2);
+    // The first send committed (its 201 replaced by the 500), and the repeat was replayed.
+    expect(await writeAnswers()).toEqual(["/clusters 201", "/clusters 201"]);
   });
 
   it("AMB-08: a write answered 503 dependency-unavailable each time is repeated 3 times with the same key, then not done", async function () {
@@ -152,6 +156,8 @@ describe("the write views (#338)", () => {
     await expect(notice()).toHaveText(expect.stringContaining(unknown("the server answered 503 dependency-unavailable")), { wait: 30_000 });
     const { key } = await oneWrite(4);
     expect(await seen()).toEqual(["failed", "503", "503", "503"]);
+    // The first send committed before its answer was dropped; the 503s reached no server.
+    expect(await writeAnswers()).toEqual(["/clusters 201"]);
     expect(await notice().getText()).toContain(`Key ${key}, POST /api/v1/clusters. To learn the outcome, read /clusters.`);
     expect(await result().getText()).not.toContain("Not saved");
   });
@@ -168,8 +174,9 @@ describe("the write views (#338)", () => {
     const { key } = await oneWrite(4);
     expect(await notice().getText()).toContain(`Key ${key}`);
     expect(await notice().getText()).not.toContain(REDIRECTED);
-    // No send followed the redirect to its target.
+    // No send followed the redirect to its target, and none reached the server.
     expect(await redirected()).toBe(0);
+    expect(await writeAnswers()).toEqual([]);
     // Positive control: the same redirect, met by a fetch that follows redirects, reaches the target
     // and is counted, so the zero above is the page's refusal. Nothing is forwarded to the server.
     await faults({ upstream: at, steps: { path: "/clusters", take: ["redirect"] } });
@@ -183,6 +190,8 @@ describe("the write views (#338)", () => {
     await expect(notice()).toHaveText(expect.stringContaining(SET_ASIDE), { wait: 20_000 });
     await oneWrite(1);
     expect(await seen()).toEqual(["failed"]);
+    // The write committed before its answer was dropped.
+    expect(await writeAnswers()).toEqual(["/clusters 201"]);
     // The notice's buttons follow its text, in the same block.
     expect(await notice().parentElement().$("button=Repeat exactly").isEnabled()).toBe(false);
     // The notice's own way out asks nothing; a link elsewhere still does (the leave guard's case).

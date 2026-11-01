@@ -1,7 +1,7 @@
 import { createElement as h, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { AddCluster, existing, guardsUnload, leaving, Result, WriteNotices, WritesProvider } from "./forms.tsx";
+import { AddCluster, existing, guardsUnload, leaving, record, Result, WriteNotices, WritesProvider } from "./forms.tsx";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import type { Client, Problem } from "./request.ts";
 import { ShellContext } from "./shell.tsx";
@@ -107,6 +107,19 @@ describe("the notice (B11)", () => {
     page = writes;
     expect(await writes.submit(w)).toMatchObject({ kind: "refused", status: 403 });
     expect(html(writes, h(WriteNotices, { go: () => {} }))).toContain("Not saved: the server answered 403. Needs author. forbidden: not allowed. Request req-1. Key");
+  });
+
+  test("a kept notice settled by a 409 conflict naming the cluster already recorded names it and opens it (§8.2 409 row)", async () => {
+    const conflict = { type: "urn:bronzeward:problem:conflict", title: "Conflict", status: 409, detail: "already recorded", cluster: "cl_SYNTH1" };
+    // The first answer is lost, so the notice shows; the repeat is refused with the named record.
+    const [writes, w] = scripted((n) => (n === 1 ? undefined : { status: 409, headers: new Headers(), data: conflict }));
+    expect(await writes.submit(w)).toMatchObject({ kind: "refused", status: 409 });
+    expect(w.kept).toBe(true);
+    expect(html(writes, h(WriteNotices, { go: () => {} }))).toContain(
+      `Not saved: the server answered 409. Conflict: already recorded. The cluster already recorded: cl_SYNTH1. Key ${w.key}, POST /api/v1/clusters. Read /clusters/cl_SYNTH1.`,
+    );
+    // [Show current state] reads that record, not the list the write went to.
+    expect(record(w)).toEqual({ named: " The cluster already recorded: cl_SYNTH1.", to: "/clusters/cl_SYNTH1" });
   });
 
   test("set aside because the epoch read got no answer, it says so, not that the epoch changed", async () => {
