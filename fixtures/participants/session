@@ -11,6 +11,10 @@
 #   session scan [path]   no session password in any retained file or log, with a planted control
 #   session stop          the web host and dev-idp; fixtures/bin/down removes the fixture
 #
+# Supported order: run session stop before fixtures/bin/down or fixtures/dev-idp down, and run one
+# participant session per Docker daemon. stop removes the forwarder and dev-idp by name, so outside
+# that order it can remove another checkout's containers of the same names.
+#
 # Everything is synthetic. A session password starts with BWSYNTH-pw-, which is what scan looks
 # for; it is never written to a file by this script.
 set -euo pipefail
@@ -101,11 +105,14 @@ start() {
   if [ -d "$idp" ]; then
     die "this checkout has a dev-idp provider ($idp); if it is this checkout's, run fixtures/dev-idp down, then session start again"
   fi
+  # An earlier session's state names its web host and its daemon; removing it would lose them.
+  if [ -e "$part" ]; then
+    die "a participant session exists in this checkout ($part); run session stop first"
+  fi
   # The participant state marks the session as this checkout's, for stop, and records the Docker
   # daemon that this start acts on (lib.sh pins the context for this process) before any start step.
   local daemon
   daemon=$(docker info --format '{{.ID}}') && [ -n "$daemon" ] || die "the Docker daemon does not answer; nothing was started"
-  rm -rf -- "$part"
   mkdir -p -- "$part/bin" "$part/home"
   chmod 700 "$part"
   printf '%s\n' "$daemon" >"$part/daemon"
@@ -360,5 +367,5 @@ cmd=${1:-}
 case $cmd in
 start | shell | t1 | stop) "$cmd" ;;
 passwords | scan) "$cmd" "$@" ;;
-*) die "usage: fixtures/participants/session start | passwords [--exec <command>...] | shell | t1 | scan [path]... | stop" ;;
+*) die "usage: fixtures/participants/session start | passwords [--exec <command>...] | shell | t1 | scan [path]... | stop (run stop before fixtures/bin/down or fixtures/dev-idp down; one participant session per Docker daemon)" ;;
 esac
