@@ -44,6 +44,8 @@ func TestMain(m *testing.M) {
 	hostileProxy = proxy.URL + "/?q=BWSYNTH\xc2\x9b\xe2\x80\xaeEND"
 	os.Setenv("HTTP_PROXY", hostileProxy)
 	os.Setenv("HTTPS_PROXY", hostileProxy)
+	os.Unsetenv("NO_PROXY")
+	os.Unsetenv("no_proxy")
 	code := m.Run()
 	proxy.Close()
 	tls.Close()
