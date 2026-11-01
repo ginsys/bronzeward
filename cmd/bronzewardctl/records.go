@@ -20,6 +20,11 @@ import (
 
 // show prints the resource at path; table gets it decoded.
 func show[T any](e *env, path string, table func(*tabwriter.Writer, *T)) error {
+	return showThen(e, path, nil, table)
+}
+
+// showThen is show, running then (when not nil) on the decoded answer before it prints it.
+func showThen[T any](e *env, path string, then func(*client.Client, *client.Response, *T), table func(*tabwriter.Writer, *T)) error {
 	return e.session(func(c *client.Client, _ *client.Response, _ *apitypes.ServerBody) error {
 		r, err := c.Get(path)
 		if err != nil {
@@ -28,6 +33,9 @@ func show[T any](e *env, path string, table func(*tabwriter.Writer, *T)) error {
 		v, err := decode[T](c, r.Body)
 		if err != nil {
 			return err
+		}
+		if then != nil {
+			then(c, r, &v[0])
 		}
 		return e.emit(r.Body, func(w *tabwriter.Writer) { table(w, &v[0]) })
 	})
@@ -234,6 +242,13 @@ func (e *env) fragmentCmd(args []string) error {
 }
 
 func (e *env) profileCmd(args []string) error {
+	if v, rest, err := e.verb("profile", args, "show", "history", "set", "rm"); err != nil {
+		return err
+	} else if v == "set" {
+		return e.profileSet(rest)
+	} else if v == "rm" {
+		return e.sourceRm(apitypes.SourceEntryKindProfile, rest)
+	}
 	return sourceShow(e, "profile", "prv", args, func(w *tabwriter.Writer, p *apitypes.ProfileBody) {
 		head(w, "Profile", p.Id, p.Name+", scope "+p.Scope, p.Cluster, p.Revision, p.HeadRevision, p.CreatedAt)
 	}, func(w *tabwriter.Writer, r *apitypes.ProfileRevisionBody) {
@@ -244,6 +259,13 @@ func (e *env) profileCmd(args []string) error {
 }
 
 func (e *env) assignmentCmd(args []string) error {
+	if v, rest, err := e.verb("assignment", args, "show", "history", "set", "rm"); err != nil {
+		return err
+	} else if v == "set" {
+		return e.assignmentSet(rest)
+	} else if v == "rm" {
+		return e.sourceRm(apitypes.SourceEntryKindAssignment, rest)
+	}
 	return sourceShow(e, "assignment", "asr", args, func(w *tabwriter.Writer, a *apitypes.AssignmentBody) {
 		head(w, "Assignment", a.Id, "machine "+a.Machine, a.Cluster, a.Revision, a.HeadRevision, a.CreatedAt)
 	}, func(w *tabwriter.Writer, r *apitypes.AssignmentRevisionBody) {
@@ -260,6 +282,13 @@ func (e *env) assignmentCmd(args []string) error {
 }
 
 func (e *env) draftCmd(args []string) error {
+	if v, rest, err := e.verb("draft", args, "list", "show", "create", "discard"); err != nil {
+		return err
+	} else if v == "create" {
+		return e.draftCreate(rest)
+	} else if v == "discard" {
+		return e.draftDiscard(rest)
+	}
 	var l listing
 	var cluster string
 	v, pos, err := e.noun("draft", args, &l, filters(map[string]*string{"cluster": &cluster}))
@@ -272,7 +301,11 @@ func (e *env) draftCmd(args []string) error {
 				fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%d\t%s\n", d.Id, d.Cluster, d.State, d.Revision, len(d.Entries), d.Title)
 			})
 	}
-	return show(e, "/drafts/"+url.PathEscape(pos[0]), func(w *tabwriter.Writer, d *apitypes.DraftBody) {
+	// T11: the read's ETag is the next write's If-Match while the draft is open; a closed draft's
+	// is dropped.
+	return showThen(e, "/drafts/"+url.PathEscape(pos[0]), func(c *client.Client, r *client.Response, d *apitypes.DraftBody) {
+		keep(e, c, d.Id, map[bool]string{true: r.Header.Get("ETag")}[d.State == "open"])
+	}, func(w *tabwriter.Writer, d *apitypes.DraftBody) {
 		fmt.Fprintf(w, "Draft %s %q %s, revision %d, cluster %s\n", d.Id, d.Title, d.State, d.Revision, d.Cluster)
 		for _, item := range d.Entries {
 			x, err := item.AsSourceEntry()

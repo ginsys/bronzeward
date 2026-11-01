@@ -8,16 +8,16 @@ import (
 )
 
 // state is the CLI's non-secret state file (decision T11 of #256, client-contracts.md §8.3): the
-// last-seen ETag per context and draft. Each context's entry names the server and epoch its ETags
-// were seen at, so one kept for another server or an earlier epoch reads as none.
+// last-seen ETag per context and draft, kept under the context's name and then its server, so a
+// context removed and added again for another server never shares, overwrites or drops the other
+// server's entry. An entry names the epoch its ETags were seen at; at another epoch it reads as none.
 type state struct {
-	Contexts map[string]*contextState `yaml:"contexts,omitempty"`
+	Contexts map[string]map[string]*serverState `yaml:"contexts,omitempty"`
 }
 
-type contextState struct {
-	Server string            `yaml:"server"`
-	Epoch  string            `yaml:"epoch"`
-	ETags  map[string]string `yaml:"etags,omitempty"`
+type serverState struct {
+	Epoch string            `yaml:"epoch"`
+	ETags map[string]string `yaml:"etags,omitempty"`
 }
 
 func statePath() (string, error) {
@@ -41,8 +41,8 @@ func ETag(x *Context, draft string) (string, error) {
 	if err := yaml.Unmarshal(b, &s); err != nil {
 		return "", x.fail(err)
 	}
-	if cs := s.Contexts[x.Name]; cs != nil && cs.Server == x.Server && cs.Epoch == x.LastEpoch {
-		return cs.ETags[draft], nil
+	if ss := s.Contexts[x.Name][x.Server]; ss != nil && ss.Epoch == x.LastEpoch {
+		return ss.ETags[draft], nil
 	}
 	return "", nil
 }
@@ -54,38 +54,39 @@ func KeepETag(x *Context, draft, etag string) error {
 		return err
 	}
 	return update(p, func(s *state) error {
-		cs := s.Contexts[x.Name]
-		if cs == nil || cs.Server != x.Server || cs.Epoch != x.LastEpoch {
-			cs = &contextState{Server: x.Server, Epoch: x.LastEpoch}
-		}
-		if cs.ETags == nil {
-			cs.ETags = map[string]string{}
-		}
 		if s.Contexts == nil {
-			s.Contexts = map[string]*contextState{}
+			s.Contexts = map[string]map[string]*serverState{}
 		}
-		s.Contexts[x.Name] = cs
+		if s.Contexts[x.Name] == nil {
+			s.Contexts[x.Name] = map[string]*serverState{}
+		}
+		ss := s.Contexts[x.Name][x.Server]
+		if ss == nil || ss.Epoch != x.LastEpoch {
+			ss = &serverState{Epoch: x.LastEpoch, ETags: map[string]string{}}
+			s.Contexts[x.Name][x.Server] = ss
+		}
 		if etag == "" {
-			delete(cs.ETags, draft)
+			delete(ss.ETags, draft)
 		} else {
-			cs.ETags[draft] = etag
+			ss.ETags[draft] = etag
 		}
 		return nil
 	})
 }
 
-// DropState forgets everything kept for the context named name, when the context is removed.
-func DropState(name string) error {
-	return forget(name, func(*contextState) bool { return true })
+// DropState forgets what was kept for the context named name at server, when that context is
+// removed.
+func DropState(name, server string) error {
+	return forget(name, server, func(*serverState) bool { return true })
 }
 
-// dropEarlier forgets what x kept for another server or an earlier epoch (§8.5 item 1), keeping an
-// ETag this command kept at x's current epoch.
+// dropEarlier forgets what x kept at its server in an earlier epoch (§8.5 item 1), keeping an ETag
+// this command kept at x's current epoch.
 func dropEarlier(x *Context) error {
-	return forget(x.Name, func(cs *contextState) bool { return cs.Server != x.Server || cs.Epoch != x.LastEpoch })
+	return forget(x.Name, x.Server, func(ss *serverState) bool { return ss.Epoch != x.LastEpoch })
 }
 
-func forget(name string, stale func(*contextState) bool) error {
+func forget(name, server string, stale func(*serverState) bool) error {
 	p, err := statePath()
 	if err != nil {
 		return err
@@ -94,8 +95,11 @@ func forget(name string, stale func(*contextState) bool) error {
 		return nil
 	}
 	return update(p, func(s *state) error {
-		if cs := s.Contexts[name]; cs != nil && stale(cs) {
-			delete(s.Contexts, name)
+		if ss := s.Contexts[name][server]; ss != nil && stale(ss) {
+			delete(s.Contexts[name], server)
+			if len(s.Contexts[name]) == 0 {
+				delete(s.Contexts, name)
+			}
 		}
 		return nil
 	})
