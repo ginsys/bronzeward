@@ -46,25 +46,34 @@ func (e *env) publish(args []string) (err error) {
 		if op.Subject != nil {
 			rev = orInt(op.Subject.DraftRevision, "?")
 		}
+		if op.Id == "" {
+			return []string{fmt.Sprintf("Publishing draft %s revision %s.", d, rev)}, nil
+		}
 		lines := []string{fmt.Sprintf("Publishing draft %s revision %s (operation %s).", d, rev, op.Id)}
 		if noWait {
 			lines = append(lines, "Nothing has been sent to any machine. Follow it with: bronzewardctl operation show "+op.Id)
 		}
 		return lines, nil
 	})
-	if err != nil || noWait {
+	switch {
+	case err != nil:
 		return err
-	}
-	if op.Id == "" {
+	case op.Id == "":
 		return fmt.Errorf("%s: the publication was accepted without naming its operation; find it with: bronzewardctl operation list --kind publish", c.Context.Where())
+	case noWait:
+		return nil
 	}
 	defer func() { err = errors.Join(err, c.Save()) }()
 	o, err := c.Watch(op.Id, client.Watch{
-		Show:  func(ev client.Event) { fmt.Fprintf(e.err, "  %s\n", ev.Type) },
+		Show:  func(ev client.Event) { fmt.Fprintf(e.err, "  %s\n", client.Printable(ev.Type)) },
 		Clear: func() { fmt.Fprintln(e.err, "  (the events above no longer hold)") },
 	})
-	if err != nil {
+	if o == nil {
 		return err
+	}
+	// The operation's end decides the exit; a failed read of the events after it is reported beside.
+	if err != nil {
+		fmt.Fprintf(e.err, "bronzewardctl: %v; the operation's last events were not shown\n", err)
 	}
 	if o.State != "succeeded" {
 		return operationFailed{fmt.Errorf("%s: publication operation %s %s: %s; nothing was sent to any machine", c.Context.Where(), o.Id, o.State, compact(o.Error))}
@@ -150,7 +159,7 @@ func (e *env) releaseReview(verb string, args []string) error {
 		if r.Configuration == nil {
 			fmt.Fprintln(w, "Configuration not shown: it could not be redacted.")
 			if r.Notice != nil && *r.Notice != "" {
-				fmt.Fprintln(w, "Server notice: "+verbatim(*r.Notice))
+				fmt.Fprintln(w, "Server notice: "+verbatim(client.Printable(*r.Notice)))
 			}
 			return
 		}

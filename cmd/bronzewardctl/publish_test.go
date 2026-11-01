@@ -12,12 +12,16 @@ import (
 
 // publishFake is draftFake with a publication: its operation ends in state, with the release
 // rel_BWSYNTH of two machines, mch_a with an Applied release and mch_b with none, whose reviews are
-// rendered and withheld.
+// rendered and withheld. first is the type of the operation's first event; bare answers the
+// publication with an operation that has no ID, and pagesRefused refuses the JSON event pages.
 type publishFake struct {
 	*draftFake
-	mu      sync.Mutex
-	state   string
-	streams int
+	mu           sync.Mutex
+	state        string
+	streams      int
+	first        string
+	bare         bool
+	pagesRefused bool
 }
 
 const (
@@ -30,8 +34,11 @@ const (
 func (f *publishFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1")
 	f.mu.Lock()
-	state := f.state
+	state, first, bare, pagesRefused := f.state, f.first, f.bare, f.pagesRefused
 	f.mu.Unlock()
+	if first == "" {
+		first = "queued"
+	}
 	result, problem := `null`, `null`
 	if state == "succeeded" {
 		result = `{"release":"rel_BWSYNTH"}`
@@ -50,13 +57,21 @@ func (f *publishFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.writes = append(f.writes, "POST "+path+" if-match="+r.Header.Get("If-Match"))
 		f.draftFake.mu.Unlock()
 		w.WriteHeader(http.StatusAccepted)
+		if bare {
+			fmt.Fprint(w, `{}`)
+			return
+		}
 		fmt.Fprintf(w, publishOp, "queued", `null`, `null`)
 	case path == "/operations/op_BWSYNTH-pub/events" && r.Header.Get("Accept") == "text/event-stream":
 		f.mu.Lock()
 		f.streams++
 		f.mu.Unlock()
 		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(w, "id: ep_BWSYNTH-1:1\nevent: queued\ndata: {}\n\n: keep-alive\n\nid: ep_BWSYNTH-1:2\nevent: "+state+"\ndata: {}\n\n")
+		fmt.Fprint(w, "id: ep_BWSYNTH-1:1\nevent: "+first+"\ndata: {}\n\n: keep-alive\n\nid: ep_BWSYNTH-1:2\nevent: "+state+"\ndata: {}\n\n")
+	case path == "/operations/op_BWSYNTH-pub/events" && pagesRefused:
+		w.Header().Set("Content-Type", "application/problem+json")
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprint(w, `{"type":"urn:bronzeward:problem:forbidden","title":"BWSYNTH","status":403}`)
 	case path == "/operations/op_BWSYNTH-pub/events":
 		fmt.Fprintf(w, `{"items":[{"id":"ep_BWSYNTH-1:1","at":"2026-11-01T06:00:00Z","type":"queued","data":{}},`+
 			`{"id":"ep_BWSYNTH-1:2","at":"2026-11-01T06:00:01Z","type":%q,"data":{}}]}`, state)
@@ -73,7 +88,7 @@ func (f *publishFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			`{"reference":"registry/example-pass","version":1,"source":{"revision":"frv_BWSYNTH-a","path":"doc[0]/machine/registries/config/registry.example.invalid/auth/password","digest":"d","occurrence":0},"output":"doc[0]/machine/registries/config/registry.example.invalid/auth/password"},`+
 			`{"reference":"tls/key","version":2,"member":1,"source":{"revision":"frv_BWSYNTH-b","path":"doc[0]/machine/x","digest":"d","occurrence":0},"overriddenBy":{"revision":"frv_BWSYNTH-c","digest":"d"}}]}`, rendered)
 	case path == "/releases/rel_BWSYNTH/machines/mch_b/review":
-		fmt.Fprint(w, `{"release":"rel_BWSYNTH","machine":"mch_b","mode":"metal","configuration":null,"notice":"BWSYNTH no redacted form","provenance":[]}`)
+		fmt.Fprint(w, `{"release":"rel_BWSYNTH","machine":"mch_b","mode":"metal","configuration":null,"notice":"BWSYNTH no redacted form\u001b[2J","provenance":[]}`)
 	default:
 		f.draftFake.ServeHTTP(w, r)
 	}
@@ -88,10 +103,12 @@ func TestPublication(t *testing.T) {
 	srv := httptest.NewServer(f)
 	defer srv.Close()
 	automationContext(t, srv.URL)
+	var stderr string // the last step's standard error
 	step := func(name string, args []string, code int, out, errText string, absent ...string) string {
 		t.Helper()
 		var o, e bytes.Buffer
 		got := run(args, &o, &e)
+		stderr = e.String()
 		if got != code || !strings.Contains(o.String(), out) || !strings.Contains(e.String(), errText) {
 			t.Errorf("%s: exit %d, stdout %q, stderr %q; want %d, %q, %q", name, got, o.String(), e.String(), code, out, errText)
 		}
@@ -129,11 +146,26 @@ func TestPublication(t *testing.T) {
 	if out := step("-o json prints the answer unchanged", append(pub, "-o", "json"), 4, "", "failed"); out != fmt.Sprintf(publishOp, "queued", `null`, `null`)+"\n" {
 		t.Errorf("-o json printed %q", out)
 	}
+	f.mu.Lock()
+	f.pagesRefused, f.first = true, "queued\x1b[2J"
+	f.mu.Unlock()
+	step("a failed publication whose last events cannot be read still exits 4", pub, 4, "", "publication operation op_BWSYNTH-pub failed")
+	if !strings.Contains(stderr, "  queued\\x1b[2J\n") || strings.Contains(stderr, "\x1b") || !strings.Contains(stderr, "the operation's last events were not shown") {
+		t.Errorf("stderr %q; want the event type escaped and the unread events named", stderr)
+	}
+	f.mu.Lock()
+	f.pagesRefused, f.first, f.bare = false, "", true
+	f.mu.Unlock()
+	step("--no-wait on an operation with no ID", append(pub, "--no-wait"), 1, "Publishing draft drf_BWSYNTH revision ?.",
+		"the publication was accepted without naming its operation", "(operation", "Follow it with")
+	f.mu.Lock()
+	f.bare = false
+	f.mu.Unlock()
 
 	step("review: verbatim, the token kept and the tab a tab", []string{"release", "review", "rel_BWSYNTH", "mch_a"}, 0,
 		"Release rel_BWSYNTH, machine mch_a, validated: metal\n"+rendered, "")
-	step("review withheld: the notice and no document", []string{"release", "review", "rel_BWSYNTH", "mch_b"}, 0,
-		"Configuration not shown: it could not be redacted.\nServer notice: BWSYNTH no redacted form\n", "", "machine:", "configuration")
+	step("review withheld: the notice, escaped, and no document", []string{"release", "review", "rel_BWSYNTH", "mch_b"}, 0,
+		"Configuration not shown: it could not be redacted.\nServer notice: BWSYNTH no redacted form\\x1b[2J\n", "", "machine:", "configuration", "\x1b")
 	if out := step("review -o json", []string{"release", "review", "rel_BWSYNTH", "mch_b", "-o", "json"}, 0, "", ""); !strings.Contains(out, `"configuration":null`) {
 		t.Errorf("-o json printed %q", out)
 	}
