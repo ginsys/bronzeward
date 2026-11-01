@@ -23,7 +23,7 @@ func TestAutomationToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Kind != Service || p.ID != is.Identity || p.TokenID != is.TokenID || !slices.Equal(p.Roles, []Role{Author, Publisher}) || !p.Expiry.Equal(is.Expires) {
+	if p.Kind != Service || p.ID != is.Identity || p.TokenID != is.TokenID || !slices.Equal(p.Roles, []Role{Author, Publisher}) || !p.Expiry.Equal(is.Expires) || p.Checked.IsZero() {
 		t.Fatalf("principal %+v", p)
 	}
 }

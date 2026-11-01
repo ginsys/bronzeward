@@ -28,13 +28,13 @@ func (v *Verifier) automation(ctx context.Context, raw string) (Principal, error
 	var (
 		owner, name, roles, epoch                            string
 		stored                                               []byte
-		expires                                              time.Time
+		expires, checked                                     time.Time
 		expired, tokenRevoked, earlierEpoch, identityRevoked bool
 	)
-	err = v.db.QueryRowContext(ctx, `SELECT t.owner, t.secret_sha256, array_to_string(t.roles, ','), t.expires_at,
+	err = v.db.QueryRowContext(ctx, `SELECT t.owner, t.secret_sha256, array_to_string(t.roles, ','), t.expires_at, now(),
 			t.expires_at <= now(), t.revoked_at IS NOT NULL, t.epoch, t.epoch <> i.epoch, p.revoked, coalesce(p.name, '')
 		FROM automation_token t JOIN principal p ON p.id = t.owner CROSS JOIN installation_state i
-		WHERE t.id = $1`, tok).Scan(&owner, &stored, &roles, &expires, &expired, &tokenRevoked, &epoch, &earlierEpoch, &identityRevoked, &name)
+		WHERE t.id = $1`, tok).Scan(&owner, &stored, &roles, &expires, &checked, &expired, &tokenRevoked, &epoch, &earlierEpoch, &identityRevoked, &name)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return Principal{}, fmt.Errorf("%w: unknown token %s", ErrUnauthenticated, tok)
@@ -55,7 +55,7 @@ func (v *Verifier) automation(ctx context.Context, raw string) (Principal, error
 	for _, r := range ParseRoles(roles) {
 		has[r] = true
 	}
-	return Principal{Kind: Service, ID: owner, TokenID: tok, Epoch: epoch, Roles: ordered(has), Expiry: expires}, nil
+	return Principal{Kind: Service, ID: owner, TokenID: tok, Epoch: epoch, Roles: ordered(has), Expiry: expires, Checked: checked}, nil
 }
 
 // parseToken splits bwt_<tok id>.<secret>, refusing anything the tool could not have printed.

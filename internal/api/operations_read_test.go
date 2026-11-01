@@ -705,6 +705,40 @@ func TestEventStreamInsideSkewIsUnauthenticated(t *testing.T) {
 	}
 }
 
+// #453, PA §5 rule 4: a stream decides whether its token's exp has passed on the database's clock,
+// which the verifier read, not on this process's. The principals put the two clocks an hour apart.
+func TestEventStreamExpiryFollowsDatabaseClock(t *testing.T) {
+	t.Parallel()
+	ce := newCommitEnv(t, "")
+	ce.ready(t)
+	r, err := ce.a.commitPlan(t.Context(), ce.pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := ce.d
+	d.exec = testExecution()
+	stream := func(exp, checked time.Time) *httptest.ResponseRecorder {
+		p := auth.Principal{Kind: auth.Human, Issuer: ce.iss.URL, Subject: "h-all", Roles: []auth.Role{auth.Viewer}, Expiry: exp, Checked: checked}
+		// A stream bounded by this process's clock would run for the hour: the client leaves at 10 s.
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		defer cancel()
+		req := httptest.NewRequestWithContext(ctx, http.MethodGet, prefix+"/operations/"+r.Operation+"/events", nil)
+		req.Header.Set("Authorization", "Bearer x")
+		req.Header.Set("Accept", "text/event-stream")
+		rec := httptest.NewRecorder()
+		newAPI(ce.db, stubAuthn{p: p}, ce.cfg, d, options{logf: ce.logf}).ServeHTTP(rec, req)
+		return rec
+	}
+	// This process's clock is an hour before exp, and the database's a second past it.
+	exp := time.Now().Add(time.Hour)
+	wantProblem(t, stream(exp, exp.Add(time.Second)), http.StatusUnauthorized, "unauthenticated")
+	// This process's clock is an hour past exp, and the database's two seconds before it.
+	exp = time.Now().Add(-time.Hour)
+	if rec := stream(exp, exp.Add(-2*time.Second)); rec.Code != http.StatusOK {
+		t.Fatalf("a token with two seconds left on the database's clock: %d %s", rec.Code, rec.Body)
+	}
+}
+
 // #453: a database failure on a stream's first read is still 503 dependency-unavailable; only a
 // read that the token's expiry ends is answered 401. The read waits behind a lock on the
 // installation state, and the test terminates its backend.
