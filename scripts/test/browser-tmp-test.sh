@@ -70,12 +70,14 @@ else
   bad "a 52-byte multibyte TMPDIR: rc=$rc $(cat "$root/err")"
 fi
 
-# finish ENTRY WANT: finish's status after the run left ENTRY (none: nothing) in its directory.
+# finish ENTRY WANT [FILE]: finish's status after the run left ENTRY (none: nothing) in its
+# directory, empty or holding FILE.
 finish() {
   local t dir rc=0
   t=$(tmpdir 30)
   dir=$(mktemp -d "$t/bw.XXXXXX")
   [ "$1" = none ] || mkdir "$dir/$1"
+  [ -z "${3:-}" ] || : >"$dir/$1/$3"
   "$tool" finish browser "$dir" 2>"$root/err" || rc=$?
   if [ "$rc" -ne "$2" ]; then bad "finish with $1 left: rc=$rc, want $2"; return; fi
   if [ -e "$dir" ]; then bad "finish with $1 left kept $dir"; return; fi
@@ -83,7 +85,8 @@ finish() {
 }
 
 finish none 0
-finish .org.chromium.Chromium.Ab12Cd 1
+finish .org.chromium.Chromium.Ab12Cd 1 'First Run' # a ChromeDriver profile
+finish .org.chromium.Chromium.Ab12Cd 0             # ChromeDriver's empty extensions directory (#485)
 finish bw-browser-profiles-Ab12Cd 1
 finish wdio-other 0                # only browser profiles count
 

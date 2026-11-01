@@ -201,7 +201,8 @@ identity provider runs: the page signs in through a synthetic provider in the ha
 Each chrome and edge session gets a profile directory under one directory per run, removed when
 the run ends. A failure in that end-of-run cleanup (in `browser-auth` also a database left
 undropped) is printed and fails the run. Both browser tasks run WebdriverIO with a `TMPDIR` of their own, remove it after the
-run, and fail when a browser profile was left in it (`scripts/ci/browser-tmp.sh`). When
+run, and fail when a browser profile was left in it (`scripts/ci/browser-tmp.sh`). An empty
+directory that ChromeDriver leaves for extensions does not fail the run (#485). When
 `BW_BROWSERS` names `chrome` or `edge`, they refuse to start with a `TMPDIR` longer than 51 bytes:
 Chrome binds a socket under the run's directory, and a Unix socket path holds at most 107 bytes.
 `BW_WDIO_CACHE` chooses where WebdriverIO keeps

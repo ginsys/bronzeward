@@ -4,10 +4,17 @@
 #   browser-tmp.sh start <task>         makes the run's directory and prints it
 #   browser-tmp.sh finish <task> <dir>  removes it; fails, naming what was left, when a profile was,
 #                                       or when the directory cannot be read or removed
-# Chrome and Edge bind a socket at <dir>/.org.chromium.Chromium.XXXXXX/SingletonSocket (46 bytes
-# under <dir>, the longest of their names), and a Unix socket path holds at most 107 bytes: past that
-# every session fails as "user data directory is already in use". So `start` refuses a TMPDIR that
-# long when BW_BROWSERS (default chrome,firefox, as in web/e2e/wdio.conf.ts) names chrome or edge.
+# Chrome and Edge bind a socket in a directory of their own under <dir>. Chrome for Testing names it
+# .com.google.Chrome.XXXXXX; a Chromium build names it .org.chromium.Chromium.XXXXXX, which with
+# /SingletonSocket is 46 bytes under <dir>, the longest of their names. A Unix socket path holds at
+# most 107 bytes: past that every session fails as "user data directory is already in use". So
+# `start` refuses a TMPDIR that long when BW_BROWSERS (default chrome,firefox, as in
+# web/e2e/wdio.conf.ts) names chrome or edge.
+# ChromeDriver makes .org.chromium.Chromium.XXXXXX directories too: a profile when a session has no
+# --user-data-dir (the leak of #430), and one to unpack extensions into, empty when a session loads
+# none. wdio kills ChromeDriver with SIGKILL once a session is deleted, which can come before
+# ChromeDriver removes its directories (#485). An empty one is removed with the run's directory. A
+# profile is never empty, so it still fails the task.
 set -euo pipefail
 export LC_ALL=C # ${#…} counts bytes, not a UTF-8 locale's characters
 case ${1:-}:${2:-} in
@@ -28,7 +35,7 @@ case ${1:-}:${2:-} in
     ;;
   finish:?*)
     dir=${3:?browser-tmp.sh finish needs the run directory}
-    left=$(find "$dir" -mindepth 1 -maxdepth 1 \( -name '.org.chromium.Chromium.*' -o -name 'bw-browser-profiles-*' \) 2>&1) ||
+    left=$(find "$dir" -mindepth 1 -maxdepth 1 \( -name '.org.chromium.Chromium.*' ! -empty -o -name 'bw-browser-profiles-*' \) 2>&1) ||
       left="$left (cannot read $dir)"
     rm -rf "$dir" || left="$left (cannot remove $dir)"
     [ -z "$left" ] || { printf '%s: the run left browser profiles behind:\n%s\n' "$2" "$left" >&2; exit 1; }
