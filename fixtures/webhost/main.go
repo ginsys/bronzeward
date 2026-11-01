@@ -84,6 +84,9 @@ func handler(c config) (http.Handler, error) {
 		return nil, fmt.Errorf("-api: %w", err)
 	}
 	proxy := httputil.NewSingleHostReverseProxy(upstream)
+	// An upstream that closes the connection without an answer (the browser cases' injected drop)
+	// closes the browser's connection too, so the page meets a transport failure, not a 502.
+	proxy.ErrorHandler = func(http.ResponseWriter, *http.Request, error) { panic(http.ErrAbortHandler) }
 	// A rooted view of the build: a symlink inside it cannot reach a file outside it.
 	dist, err := os.OpenRoot(c.dist)
 	if err != nil {

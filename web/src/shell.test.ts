@@ -1,10 +1,10 @@
 import { createElement as h, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
-import { Action, connection, Deprecations, deprecated, Failure, incompatible, MIN_API_REVISION, observed, offlineSince, regaining, ShellContext, type ShellEvents, ShellReads, showCurrent } from "./shell.tsx";
+import { Action, connection, Deprecations, deprecated, ending, Failure, incompatible, MIN_API_REVISION, observed, offlineSince, regaining, ShellContext, type ShellEvents, ShellReads, showCurrent } from "./shell.tsx";
 import { Conflict, Disconnected, Empty, HUMAN_ONLY, Loading, NOT_ACCEPTED, NotAccepted, Offline, Refused, REPEATING, REPLAYED, Replayed, SET_ASIDE, SetAside, Unknown, UNKNOWN, Unread, Withheld, WITHHELD } from "./states.tsx";
-import { NO_EPOCH } from "./write.ts";
-import { TRANSPORT_FAILURE } from "./request.ts";
+import { NO_EPOCH, SHELL_GONE, Write, Writes } from "./write.ts";
+import { type Attempt, type Client, TRANSPORT_FAILURE } from "./request.ts";
 
 const html = (e: ReactElement) => renderToStaticMarkup(e);
 // The status message's text, and that it is announced as one.
@@ -252,4 +252,35 @@ describe("the shell's reads", () => {
     expect(await retrying).toEqual({ kind: "discarded" });
     expect(fetch).toHaveBeenCalledTimes(2);
   });
+});
+
+// §8.2, §9.6: a refusal that ends the page stops the other writes at once, before the shell's
+// effect cleanup runs.
+test("a write's identity-revoked ends the page: another write waiting to repeat sends nothing more", async () => {
+  const revoked = { type: "urn:bronzeward:problem:identity-revoked", title: "Identity revoked", status: 403 };
+  // The first write's attempt is dropped, the second's revoked; a third POST would be the repeat.
+  const posts: (Attempt | undefined)[] = [undefined, { status: 403, headers: new Headers(), data: revoked }, { status: 201, headers: new Headers(), data: {} }];
+  let sent = 0;
+  const client = {
+    currentEpoch: "e1",
+    revoked: () => {},
+    attempt: async (_m: string, path: string) => {
+      if (path === "/recovery") return { status: 200, headers: new Headers({ "Bronzeward-Epoch": "e1" }), data: null };
+      sent++;
+      return posts.shift();
+    },
+  } as unknown as Client;
+  let go!: () => void;
+  const waited = new Promise<void>((r) => (go = r));
+  const writes = new Writes(() => "iss sub", () => waited);
+  writes.client = client;
+  const page = vi.fn();
+  writes.onEnded = ending(writes, () => client, page);
+  const waiting = writes.submit(new Write({ method: "POST", path: "/clusters", body: { name: "a" }, resource: "/clusters" }));
+  await vi.waitFor(() => expect(sent).toBe(1));
+  expect(await writes.submit(new Write({ method: "POST", path: "/clusters", body: { name: "b" }, resource: "/clusters" }))).toMatchObject({ kind: "refused", status: 403 });
+  expect(page).toHaveBeenCalledTimes(1);
+  go();
+  expect(await waiting).toEqual({ kind: "set-aside", why: SHELL_GONE, ambiguous: true, problem: null });
+  expect(sent).toBe(2);
 });

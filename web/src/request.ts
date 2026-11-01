@@ -46,8 +46,9 @@ export interface Attempt {
 export type Ending = { kind: "unauthenticated"; problem: Problem | null } | { kind: "revoked"; problem: Problem };
 // A write's record of the ending its sends met. `now` hears one learned before the write's own
 // answer is read, so the page ends even if that answer's body never arrives. `pre` is the process
-// refusal of a recovery start that any of its answers carried (§8.5 item 1), set only by attempt().
-export interface End { e?: Ending; now?: (e: Ending) => void; pre?: Problem }
+// refusal of a recovery start that any of its answers carried (§8.5 item 1), set only by attempt();
+// `nowPre` hears one learned before the write's own answer is read, for the same reason.
+export interface End { e?: Ending; now?: (e: Ending) => void; pre?: Problem; nowPre?: (p: Problem) => void }
 
 // §8.5 item 1: a recovery start's process refusal, a 409 recovery-mode-active without a scope.
 export function preEntry(status: number, body: unknown): Problem | undefined {
@@ -257,7 +258,10 @@ export class Client {
       const problem = body === NOT_JSON || body === CUT ? null : body;
       const pre = preEntry(next.status, problem);
       if (pre !== undefined) {
-        end.pre ??= pre;
+        if (end.pre === undefined) {
+          end.pre = pre;
+          end.nowPre?.(pre);
+        }
         return undefined;
       }
       const code = problem?.type.slice(PROBLEM_PREFIX.length);

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 )
@@ -154,6 +155,31 @@ func TestProxiesTheAPIAndLiveness(t *testing.T) {
 	}
 	if n := hits.Load(); n != 3 {
 		t.Errorf("upstream got %d requests, want 3", n)
+	}
+}
+
+// TestUpstreamCloseClosesTheConnection: an upstream that closes the connection without an answer, as
+// the browser cases' injected drop does, reaches the client as a closed connection, not as a 502.
+func TestUpstreamCloseClosesTheConnection(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, _, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		_ = conn.Close()
+	}))
+	t.Cleanup(upstream.Close)
+	h, err := handler(config{dist: t.TempDir(), headers: headersFile, issuer: "http://idp.test", api: upstream.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	res, err := http.Post(srv.URL+"/api/v1/clusters", "application/json", strings.NewReader("{}"))
+	if err == nil {
+		_ = res.Body.Close()
+		t.Fatalf("answered %d, want the connection closed", res.StatusCode)
 	}
 }
 

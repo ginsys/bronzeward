@@ -244,6 +244,14 @@ export function showCurrent(to: string, here: string, move: (to: string) => void
   else move(to);
 }
 
+// A refusal that ends the page, a read's or a write's, stops every write through the shell's client
+// at once (§8.2, §9.6): the effect cleanup that also disconnects it runs only after the page changed,
+// and a repeat whose confirming read answers before that would still be sent.
+export const ending = <T,>(writes: Writes, client: () => Client, f: (res: T) => void) => (res: T) => {
+  writes.disconnect(client());
+  f(res);
+};
+
 export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, onDeprecation, signOut, writes, notices = [] }: SignedInProps & { notices?: readonly string[] }) {
   // B11: a move to another page while a write is pending or unknown asks first, Back and Forward
   // included.
@@ -266,8 +274,8 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
   const [again, setAgain] = useState(0);
   const events = useRef<ShellEvents>(undefined);
   events.current = {
-    onUnauthenticated,
-    onRevoked,
+    onUnauthenticated: ending(writes, () => reads.client, onUnauthenticated),
+    onRevoked: ending(writes, () => reads.client, onRevoked),
     onEpochChange: () => {
       writes.setAside(EPOCH_CHANGED_ASIDE);
       setEpochChanged(true);
@@ -289,7 +297,10 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
   // The page's writes go through this shell's client while it is shown, and a write's credential
   // refusal ends the page as a read's does (§8.2, §9.6).
   writes.client = client;
-  const ended = useCallback((e: Ending) => (e.kind === "unauthenticated" ? onUnauthenticated(e) : onRevoked(e)), [onUnauthenticated, onRevoked]);
+  const ended = useCallback(
+    ending(writes, () => client, (e: Ending) => (e.kind === "unauthenticated" ? onUnauthenticated(e) : onRevoked(e))),
+    [writes, client, onUnauthenticated, onRevoked],
+  );
   writes.onEnded = ended;
   // A write's process refusal shows the state before the entry as a read's does (§8.5 item 1).
   const preEntry = useCallback((p: Problem) => reads.preEntry({ kind: "refused", status: 409, problem: p }), [reads]);

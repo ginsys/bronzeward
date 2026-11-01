@@ -469,6 +469,25 @@ describe("set aside (§8.4 item 3, §8.5 item 2, journeys §8)", () => {
     expect(p.writes.onPreEntry).toHaveBeenCalledTimes(times);
   });
 
+  test("that recovery start reaches the shell at once while the write's own body has not arrived, and once", async () => {
+    let body: ReadableStreamDefaultController<Uint8Array> | undefined;
+    const stalled = () =>
+      new Response(new ReadableStream<Uint8Array>({ start: (c) => void (body = c) }), { status: 201, headers: { "Content-Type": "application/json", "Bronzeward-Epoch": EPOCH } });
+    const p = page(
+      [() => ((p.client as unknown as { observeEpoch(r: Response): boolean }).observeEpoch(recovery("e2")), stalled())],
+      [EPOCH, problem(409, "recovery-mode-active", {}, null)],
+    );
+    p.writes.onPreEntry = vi.fn();
+    const w = spec();
+    const run = p.writes.submit(w);
+    await vi.waitFor(() => expect(p.writes.onPreEntry).toHaveBeenCalledTimes(1));
+    expect(w.outcome).toBeUndefined();
+    body!.enqueue(new TextEncoder().encode(JSON.stringify({ id: "c1" })));
+    body!.close();
+    expect(await run).toMatchObject({ kind: "done", status: 201 });
+    expect(p.writes.onPreEntry).toHaveBeenCalledTimes(1);
+  });
+
   test("setAside marks a write in flight and turns an unknown one aside; neither is repeatable", async () => {
     const drop = () => new TypeError("Failed to fetch");
     const p = page([drop(), drop(), drop(), drop(), drop()]);
