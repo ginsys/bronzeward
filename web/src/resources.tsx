@@ -5,6 +5,7 @@
 
 import { Fragment as Group, type ReactNode, useRef } from "react";
 import type { components } from "./api/v1";
+import { CreateDraft, DraftItem, Drafts } from "./drafts.tsx";
 import { AddCluster, RecordMachine } from "./forms.tsx";
 import { EmptyList, Head, Id, type Listed, More, Ref, Scroll, short, useItem, useList, usePending } from "./list.tsx";
 import { MachineItem } from "./machine.tsx";
@@ -217,11 +218,13 @@ const RELEASES: readonly Col<S["ReleaseBody"]>[] = [
   ["Sources", (r) => r.sources.length], ["Machines", (r) => r.machines.length],
 ];
 
-// The Changes page; the drafts list comes with the draft editor.
+// The Changes page: drafts (#339), then releases.
 export function Changes() {
   return (
     <>
       <h2>Changes</h2>
+      <h3>Drafts</h3>
+      <Drafts />
       <h3>Releases</h3>
       <ListOf label="Releases" path="/releases" cols={RELEASES} empty="No releases published yet." />
     </>
@@ -410,6 +413,7 @@ export function view(path: string, query: string, go: (to: string) => void): Rea
   // No identifier is "new": every one starts with its type's prefix.
   if (id === "new" && kind === "clusters") return <AddCluster />;
   if (id === "new" && kind === "machines") return <RecordMachine query={query} />;
+  if (id === "new" && kind === "drafts") return <CreateDraft />;
   if (id === undefined) {
     const pages: Record<string, () => ReactNode> = {
       machines: () => <Machines query={query} go={go} />, clusters: () => <Clusters />, changes: () => <Changes />,
@@ -421,7 +425,7 @@ export function view(path: string, query: string, go: (to: string) => void): Rea
   if (source !== undefined) return <SourceItem kind={source} id={id} />;
   if (revision !== undefined) return <RevisionItem kind={revision} id={id} />;
   const items: Record<string, () => ReactNode> = {
-    machines: () => <MachineItem id={id} />, clusters: () => <ClusterItem id={id} />, releases: () => <ReleaseItem id={id} />,
+    machines: () => <MachineItem id={id} />, clusters: () => <ClusterItem id={id} />, releases: () => <ReleaseItem id={id} />, drafts: () => <DraftItem id={id} />,
     plans: () => <PlanItem id={id} />, operations: () => <OperationItem id={id} />, dependencies: () => <DependencyItem id={id} />,
   };
   return kind !== undefined && Object.hasOwn(items, kind) ? items[kind]!() : undefined;

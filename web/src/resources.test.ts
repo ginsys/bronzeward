@@ -3,6 +3,7 @@ import { createElement as h, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import type { components } from "./api/v1";
+import { CreateDraft, DraftItem } from "./drafts.tsx";
 import { EmptyList, Id, type Listed, readPages, type Reads, ReadsProvider, RESTARTED, viewOf } from "./list.tsx";
 import { MachineItem } from "./machine.tsx";
 import { ClusterItem, Clusters, Machines } from "./machines.tsx";
@@ -29,16 +30,17 @@ describe("paths (B3)", () => {
       ["/assignments/asg_a", SourceItem, { kind: "assignment", id: "asg_a" }],
       ["/fragment-revisions/frv_a", RevisionItem, { kind: "fragment", id: "frv_a" }], ["/profile-revisions/prv_a", RevisionItem, { kind: "profile", id: "prv_a" }],
       ["/assignment-revisions/asr_a", RevisionItem, { kind: "assignment", id: "asr_a" }], ["/releases/rel_a", ReleaseItem, { id: "rel_a" }],
-      ["/plans/pln_a", PlanItem, { id: "pln_a" }], ["/operations/op_a", OperationItem, { id: "op_a" }], ["/dependencies/dep_a", DependencyItem, { id: "dep_a" }],
+      ["/drafts/drf_a", DraftItem, { id: "drf_a" }], ["/plans/pln_a", PlanItem, { id: "pln_a" }], ["/operations/op_a", OperationItem, { id: "op_a" }], ["/dependencies/dep_a", DependencyItem, { id: "dep_a" }],
     ];
     for (const [path, type, props] of items) {
       expect(at(path)?.type, path).toBe(type);
       expect(at(path)?.props, path).toEqual(props);
     }
+    expect(at("/drafts/new")?.type).toBe(CreateDraft);
   });
 
   test("anything else is not found, an object's own property names included", () => {
-    for (const path of ["/recovery", "/constructor", "/toString", "/drafts/drf_a", "/acts", "/sources/frg_a", "/audit/act_a", "/machines/mch_a/review", "/Machines"]) {
+    for (const path of ["/recovery", "/constructor", "/toString", "/drafts/drf_a/fragments", "/acts", "/sources/frg_a", "/audit/act_a", "/machines/mch_a/review", "/Machines"]) {
       expect(at(path), path).toBeUndefined();
     }
   });
