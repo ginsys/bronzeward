@@ -87,6 +87,10 @@ func TestFragmentEditing(t *testing.T) {
 		{"a number where the API takes a string", "embedded:\n- {path: 4242424242, format: yaml}\n", "a member the API does not define, or a value of the wrong type; nothing was sent"},
 		{"a number as a member name", "embedded: []\n4242424242: x\n", "a member the API does not define, or a value of the wrong type; nothing was sent"},
 		{"a member name YAML cannot hold", "? [BWSYNTH-key, 4242424242]\n: x\n", "not YAML or JSON; nothing was sent"},
+		{"a member name in another case", "Embedded:\n- {path: machine.BWSYNTH-4242, format: json}\n", "a member the API does not define, or a value of the wrong type; nothing was sent"},
+		{"one member name in two cases", "Embedded:\n- {path: machine.BWSYNTH-4242, format: json}\nembedded:\n- {path: machine.files, format: yaml}\n",
+			"a member the API does not define, or a value of the wrong type; nothing was sent"},
+		{"a nested member name in another case", "embedded:\n- {Path: machine.BWSYNTH-4242, format: json}\n", "a member the API does not define, or a value of the wrong type; nothing was sent"},
 		{"a declaration in a second YAML document", "{}\n---\nembedded:\n- {path: machine.BWSYNTH-4242, format: json}\n", "more than one YAML document; nothing was sent"},
 	} {
 		var o, e bytes.Buffer
