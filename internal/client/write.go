@@ -200,10 +200,15 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 	var last error
 	// ingesting names the first request a fragment write's in-progress 409 says still runs; waited
 	// is the time since the send that got the first such 409, the repeats' own time included, so
-	// the bound is a fixed maximum (§8.4 item 2). A repeat already sent can end past it.
+	// the bound is a fixed maximum (§8.4 item 2). No repeat starts after it; one already sent can
+	// end past it.
 	var ingesting string
 	var since time.Time
 	var waited time.Duration
+	stillIngesting := func(ingestion string) error {
+		u.Why = fmt.Sprintf("the first request with this key was still ingesting (ingestion %s) after %s", ingestion, waited)
+		return c.unknown(w, u)
+	}
 	for try := 0; ; try++ {
 		if ingesting != "" || try > 0 {
 			if ingesting != "" {
@@ -227,6 +232,12 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 			if now, why := c.confirm(); now != ref {
 				u.Why = why + ", not the reference epoch"
 				return nil, c.setAside(w, u, ambiguous)
+			}
+			// The reads before a waited repeat take time too.
+			if ingesting != "" {
+				if waited = clock().Sub(since); waited > bound {
+					return nil, stillIngesting(ingesting)
+				}
 			}
 		}
 		sent := clock()
@@ -271,8 +282,7 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 				since = sent
 			}
 			if waited = clock().Sub(since); waited >= bound {
-				u.Why = fmt.Sprintf("the first request with this key was still ingesting (ingestion %s) after %s", printable(fmt.Sprint(p.Doc["ingestion"])), waited)
-				return nil, c.unknown(w, u)
+				return nil, stillIngesting(printable(fmt.Sprint(p.Doc["ingestion"])))
 			}
 			ingesting = printable(fmt.Sprint(p.Doc["ingestion"]))
 			try--

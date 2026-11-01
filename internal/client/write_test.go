@@ -776,13 +776,14 @@ func TestInProgress(t *testing.T) {
 		problemAnswer(w, http.StatusConflict, "conflict", `,"ingestion":"ing_BWSYNTH"`)
 	}
 	for _, tc := range []struct {
-		name   string
-		server string
-		wait   time.Duration
-		answer func(n int, w http.ResponseWriter)
-		posts  int
-		waits  []time.Duration
-		says   string // "" for success
+		name     string
+		server   string
+		recovery func(n int) string
+		wait     time.Duration
+		answer   func(n int, w http.ResponseWriter)
+		posts    int
+		waits    []time.Duration
+		says     string // "" for success
 	}{
 		{name: "waited for, then saved", wait: time.Minute, posts: 5, waits: []time.Duration{time.Second, time.Second, 2 * time.Second, 4 * time.Second},
 			answer: func(n int, w http.ResponseWriter) {
@@ -825,6 +826,22 @@ func TestInProgress(t *testing.T) {
 				fakeNow.Add(int64(10 * time.Second))
 				inProgress(w)
 			}},
+		{name: "no repeat starts after the bound", wait: 15 * time.Second, posts: 2, waits: []time.Duration{time.Second, time.Second},
+			says: "outcome unknown: the first request with this key was still ingesting (ingestion ing_BWSYNTH) after 21s",
+			// The epoch read before the first waited repeat takes 20 s and passes the bound.
+			recovery: func(n int) string {
+				if n == 2 {
+					fakeNow.Add(int64(20 * time.Second))
+				}
+				return "ep_BWSYNTH-1"
+			},
+			answer: func(n int, w http.ResponseWriter) {
+				if n == 1 {
+					drop(w)
+					return
+				}
+				inProgress(w)
+			}},
 		{name: "a 409 naming the draft is a refusal, not waited for", wait: time.Minute, posts: 2, waits: []time.Duration{time.Second},
 			says: "409 BWSYNTH (conflict)",
 			answer: func(n int, w http.ResponseWriter) {
@@ -836,7 +853,7 @@ func TestInProgress(t *testing.T) {
 			}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := &fake{epoch: "ep_BWSYNTH-1", server: tc.server, post: func(n int, w http.ResponseWriter, _ *http.Request) { tc.answer(n, w) }}
+			f := &fake{epoch: "ep_BWSYNTH-1", server: tc.server, recovery: tc.recovery, post: func(n int, w http.ResponseWriter, _ *http.Request) { tc.answer(n, w) }}
 			c, notices, waits := writeClient(t, f, "ep_BWSYNTH-1")
 			w := clusterWrite()
 			w.Ingests, w.Wait = true, tc.wait
