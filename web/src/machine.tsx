@@ -3,7 +3,7 @@
 // stream; it is polled with its cursor no more often than every 5 s while the page is visible
 // (client contracts §8.6 item 6).
 
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { components } from "./api/v1";
 import { type Dropped, Head, type Listed, type Load, type Page, Ref, type Reads, ReadsProvider, RESTARTED, Scroll, settling, short, useHeld, useItem, useList, usePending, useReads } from "./list.tsx";
 import { type Machine, node, release } from "./machines.tsx";
@@ -278,6 +278,15 @@ export const stepAdvance = (a: AdvanceReads, e: "advance" | { key: string } | { 
   if (e.key !== a.key || e.settled !== a.n || a.left === 0) return a;
   return a.left === 1 && a.dirty ? next : { ...a, left: a.left - 1 };
 };
+// The page's settle, which also counts the read for the read again in flight. Every answer goes to
+// the page's settle (a refusal of the credentials ends the page from any read), but only a live read
+// counts: a read the page no longer waits for, such as one from an earlier visit to the same view,
+// can carry the same key and read again.
+export const countingSettle = (outer: Reads["settle"], step: (e: { key: string; settled: number }) => void, key: string, n: number): Reads["settle"] =>
+  (res, set, live, held) => {
+    outer(res, set, live, held);
+    if (live()) step({ key, settled: n });
+  };
 
 // The timeline is read under the page's reads. The machine and its observations are read again, as
 // when the page reads again, each time a timeline read brings entries W3 did not show, one read
@@ -290,11 +299,7 @@ export function MachineItem({ id }: { id: string }) {
   const [again, step] = useReducer(stepAdvance, key, advanceReads);
   useEffect(() => step({ key }), [key]);
   useEffect(() => void (advances > 0 && step("advance")), [advances]);
-  const outer = reads.settle;
-  const settle = useCallback<Reads["settle"]>((res, set, live, held) => {
-    outer(res, set, live, held);
-    step({ key, settled: again.n });
-  }, [outer, key, again.n]);
+  const settle = useMemo(() => countingSettle(reads.settle, step, key, again.n), [reads.settle, key, again.n]);
   return (
     <ReadsProvider value={{ ...reads, settle, again: reads.again + again.n }}>
       <MachineState id={id} path={path} tl={tl} older={older} busy={busy} />
