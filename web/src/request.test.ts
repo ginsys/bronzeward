@@ -283,6 +283,28 @@ describe("§8.5 epoch changes", () => {
     expect(paths).toEqual(["/server", "/clusters", "/machines", "/recovery"]);
   });
 
+  test("that read's refusal reaches `end.now` at once, while the write's own body has not arrived", async () => {
+    const onRevoked = vi.fn();
+    let release!: (r: Response) => void;
+    const late = new Promise<Response>((r) => (release = r));
+    const answers: (Response | Promise<Response>)[] = [ok({}), late, ok({}, "e2"), problem(403, "identity-revoked", {}, "e2")];
+    const fetchMock = vi.fn(async () => answers.shift()!);
+    const c = new Client({ onRevoked, fetch: fetchMock as unknown as typeof fetch });
+    await c.read("/server");
+    const now = vi.fn();
+    const end: { e?: unknown; now?: unknown } = { now };
+    let settled = false;
+    void c.attempt("POST", "/clusters", {}, "{}", end as never).then(() => (settled = true));
+    await c.read("/machines");
+    // The write's answer names the older epoch, and its body never ends.
+    const stalled = new ReadableStream({ start: () => {} });
+    release(new Response(stalled, { status: 201, headers: { "Content-Type": "application/json", "Bronzeward-Epoch": EPOCH } }));
+    await vi.waitFor(() => expect(now).toHaveBeenCalledTimes(1));
+    expect(now.mock.calls[0]![0]).toMatchObject({ kind: "revoked" });
+    expect(onRevoked).toHaveBeenCalledTimes(1);
+    expect(settled).toBe(false);
+  });
+
   test("that read's 401 renews once and reads again; a second 401 ends the page", async () => {
     const twice = await lateWrite([problem(401, "unauthenticated", {}, "e2"), problem(401, "unauthenticated", {}, "e2")], async () => true);
     expect(twice.end.e).toMatchObject({ kind: "unauthenticated", problem: { type: "urn:bronzeward:problem:unauthenticated" } });
