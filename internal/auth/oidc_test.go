@@ -179,7 +179,7 @@ func TestHumanRoles(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", human, err)
 		}
-		if p.Kind != Human || p.ID != "" || p.Issuer != f.iss.URL || p.Subject != human || !slices.Equal(p.Roles, roles) || p.Expiry.IsZero() {
+		if p.Kind != Human || p.ID != "" || p.Issuer != f.iss.URL || p.Subject != human || !slices.Equal(p.Roles, roles) || p.Expiry.IsZero() || p.Checked.IsZero() {
 			t.Errorf("%s: %+v", human, p)
 		}
 	}
@@ -301,6 +301,20 @@ func TestTimeChecksUseDatabaseClock(t *testing.T) {
 	}
 	if _, err := f.verifier().Authenticate(t.Context(), h); err != nil {
 		t.Fatalf("the database's own clock: %v", err)
+	}
+	// The principal carries the database's time it was checked at, not this process's (#453).
+	v := f.verifier()
+	v.clock = func(ctx context.Context) (time.Time, error) {
+		var now time.Time
+		err := f.db.QueryRowContext(ctx, `SELECT now() + interval '1 minute'`).Scan(&now)
+		return now, err
+	}
+	p, err := v.Authenticate(t.Context(), h)
+	if err != nil {
+		t.Fatalf("the database a minute ahead: %v", err)
+	}
+	if ahead := time.Until(p.Checked); ahead < 50*time.Second || ahead > 70*time.Second {
+		t.Fatalf("Checked is %s ahead of this process; want the database's minute", ahead)
 	}
 }
 

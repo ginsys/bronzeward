@@ -77,6 +77,7 @@ type Principal struct {
 	Epoch   string // service only: the epoch its token was issued in, rechecked under later reads (§10.2)
 	Roles   []Role
 	Expiry  time.Time // the credential's end: an event stream ends no later (§8.3)
+	Checked time.Time // the database's now() that Expiry was checked against (PA §5 rule 4): Expiry minus Checked is the time left
 }
 
 var (
@@ -187,7 +188,7 @@ func (v *Verifier) human(ctx context.Context, raw string) (Principal, error) {
 	if v.denied.Human(c.Issuer, c.Subject) {
 		return Principal{}, fmt.Errorf("%w: %s is in deniedSubjects", ErrIdentityRevoked, c.Subject)
 	}
-	p := Principal{Kind: Human, Issuer: c.Issuer, Subject: c.Subject, Display: v.display(all), Roles: roles, Expiry: c.Expiry.Time()}
+	p := Principal{Kind: Human, Issuer: c.Issuer, Subject: c.Subject, Display: v.display(all), Roles: roles, Expiry: c.Expiry.Time(), Checked: now}
 	var revoked bool
 	err = v.db.QueryRowContext(ctx, `SELECT id, revoked FROM principal WHERE kind = 'human' AND iss = $1 AND sub = $2`,
 		c.Issuer, c.Subject).Scan(&p.ID, &revoked)
