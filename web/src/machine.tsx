@@ -243,22 +243,22 @@ export function details(e: Entry): string {
 
 const byBasis = (items: Observation[]) => [...items].sort((x, y) => y.basis - x.basis);
 
-// What W3 shows of a read within one view (#424): its last answer, kept under a read again that
-// failed, and whether a read restarted it from its first page, said through the reads after it. A
-// new path or view, and a dropped read (a restart that failed), keep nothing; a new epoch and the
-// process's recovery refusal end the page, and a refusal of the credentials never reaches it. Only
-// an answer new to `was` says it restarted: a new view first shows the old view's answer.
+// What W3 keeps of a read within one view (#424): the last answer this view read, shown under a
+// read again that failed, and whether a read restarted it from its first page, said through the
+// reads after it. Only an answer new to `was` is this view's: a new view first shows the old view's
+// answer, which it keeps nothing of. A new path or view, and a dropped read (a restart that failed),
+// keep nothing; a new epoch and the process's recovery refusal end the page, and a refusal of the
+// credentials never reaches it.
 export interface Kept<T> { view: string; load?: Load<T> | Dropped; data: T | undefined; restarted: boolean }
 export function kept<T>(was: Kept<T> | undefined, load: Load<T> | Dropped, view: string, restarted: (d: T) => boolean = () => false): Kept<T> {
   const k = was?.view === view && load.kind !== "loading" && load.kind !== "dropped" ? was : { view, data: undefined, restarted: false };
-  if (load.kind !== "ok") return { ...k, load };
-  return { view, load, data: load.data, restarted: k.restarted || (load !== was?.load && restarted(load.data)) };
+  const fresh = load !== was?.load;
+  if (load.kind !== "ok" || (!fresh && k.data === undefined)) return { ...k, load };
+  return { view, load, data: load.data, restarted: k.restarted || (fresh && restarted(load.data)) };
 }
-function useKept<T>(load: Load<T> | Dropped, restarted?: (d: T) => boolean): Kept<T> {
-  const { view } = useReads();
-  const k = useRef<Kept<T>>(undefined);
-  return (k.current = kept(k.current, load, view, restarted));
-}
+export type W3Kept = [Kept<Machine>, Kept<Listed<Observation>>];
+export const keptW3 = (was: W3Kept | undefined, m: Load<Machine>, obs: Load<Listed<Observation>> | Dropped, view: string): W3Kept =>
+  [kept(was?.[0], m, view), kept(was?.[1], obs, view, (o) => o.restarted)];
 
 // The timeline is read under the page's reads. The machine and its observations are read again, as
 // when the page reads again, each time a timeline read brings entries W3 did not show; the poll goes
@@ -277,17 +277,20 @@ export function MachineItem({ id }: { id: string }) {
 function MachineState({ id, path, tl, older, busy }: { id: string; path: string; tl: Load<Timeline<Entry>> | Dropped; older: (() => void) | undefined; busy: boolean }) {
   const m = useItem<Machine>(path);
   const [obs] = useList<Observation>(`${path}/observations`, "", true);
-  const [km, ko] = [useKept(m), useKept(obs, (o) => o.restarted)];
+  const { view } = useReads();
+  const k = useRef<W3Kept>(undefined);
+  const [km, ko] = (k.current = keptW3(k.current, m, obs, view));
   return <MachineShown id={id} m={m} obs={obs} km={km} ko={ko} tl={tl} older={older} busy={busy} />;
 }
 
-// W3 as read: what each read keeps, with a read again's failure above it.
+// W3 as read: each read's answer, else what it keeps with its failure above it.
 export function MachineShown({ id, m, obs, km, ko, tl, older, busy }: { id: string; m: Load<Machine>; obs: Load<Listed<Observation>> | Dropped; km: Kept<Machine>; ko: Kept<Listed<Observation>>; tl: Load<Timeline<Entry>> | Dropped; older: (() => void) | undefined; busy: boolean }) {
   const [pm, po, timeline] = [usePending(m, "the machine"), usePending(obs, "the observations"), usePending(tl, "the timeline")];
-  if (km.data === undefined) return <><h2>Machine {short(id)}</h2>{pm}</>;
-  if (ko.data === undefined) return <><h2>Machine {short(id)}</h2>{po}</>;
-  const d = km.data;
-  const list = byBasis(ko.data.items);
+  const d = m.kind === "ok" ? m.data : km.data;
+  const read = obs.kind === "ok" ? obs.data : ko.data;
+  if (d === undefined) return <><h2>Machine {short(id)}</h2>{pm}</>;
+  if (read === undefined) return <><h2>Machine {short(id)}</h2>{m.kind !== "ok" && pm}{po}</>;
+  const list = byBasis(read.items);
   return (
     <>
       <h2>Machine {d.id}</h2>
@@ -306,7 +309,7 @@ export function MachineShown({ id, m, obs, km, ko, tl, older, busy }: { id: stri
         <Ref to={`/operations?machine=${d.id}`} id={d.id}>Operations on this machine</Ref>
       </p>
       <h3>Observations</h3>
-      <Observations read={{ ...ko.data, restarted: ko.restarted }} />
+      <Observations read={{ ...read, restarted: ko.restarted }} />
       <h3>Timeline (newest first)</h3>
       {tl.kind !== "ok" ? timeline : <TimelineRows tl={tl.data} older={older} busy={busy} />}
     </>

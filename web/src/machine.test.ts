@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ADOPTED, advanced, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, kept, latestUnread, MachineShown, nextTimeline, type Observation, Observations, POLL_MS, polled, queued, readLater, readOlder, sentences, type Timeline, TimelineRows, UNREAD } from "./machine.tsx";
+import { ADOPTED, advanced, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, kept, keptW3, latestUnread, MachineShown, nextTimeline, type Observation, Observations, POLL_MS, polled, queued, readLater, readOlder, sentences, type Timeline, TimelineRows, UNREAD } from "./machine.tsx";
 import { type Reads, ReadsProvider, RESTARTED } from "./list.tsx";
 import type { Machine } from "./machines.tsx";
 import type { ReadResult } from "./request.ts";
@@ -236,6 +236,27 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
     expect(kept<Machine>(failed, { kind: "unavailable", status: 503, problem: null }, "w").data).toBeUndefined();
     expect(kept<Machine>(failed, { kind: "loading" }, "v").data).toBeUndefined();
     expect(kept<Machine>(failed, { kind: "dropped", failed: { kind: "transport" } }, "v").data).toBeUndefined();
+    // A view that changes only the query first shows the old view's answer; a failure then keeps none of it.
+    const old = { kind: "ok" as const, data: machine({ frozen: true }) };
+    expect(kept<Machine>(kept(kept(undefined, old, "v"), old, "w"), { kind: "unavailable", status: 503, problem: null }, "w").data).toBeUndefined();
+  });
+
+  test("#424: W3 keeps the machine under a failure and the observations' restart flag, each from its own read", () => {
+    const list = (restarted: boolean) => ({ kind: "ok" as const, data: { items: [obsA], next: undefined, restarted } });
+    const first = keptW3(undefined, { kind: "ok", data: machine({ frozen: true }) }, list(true), "v");
+    const [km, ko] = keptW3(first, { kind: "unavailable", status: 503, problem: null }, list(false), "v");
+    expect(km.data).toEqual(machine({ frozen: true }));
+    expect(ko.restarted).toBe(true);
+  });
+
+  test("#424: a machine read again that fails shows its failure even when the observations keep nothing", () => {
+    const reads = { go: () => {}, failure: () => "FAILED" } as unknown as Reads;
+    const out = renderToStaticMarkup(createElement(ReadsProvider, { value: reads }, createElement(MachineShown, {
+      id: "mch_a", m: { kind: "refused", status: 404, problem: null }, obs: { kind: "dropped", failed: { kind: "transport" } },
+      km: { view: "v", data: machine({}), restarted: false }, ko: { view: "v", data: undefined, restarted: false },
+      tl: { kind: "ok", data: { ...UNREAD, read: true } }, older: undefined, busy: false,
+    })));
+    expect(out).toMatch(/<\/h2>FAILED<div><p role="status" data-testid="restarted">/);
   });
 
   test("review R1-F1: a restart that fails drops the timeline read before it and its refused cursor", async () => {
