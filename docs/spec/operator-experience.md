@@ -659,9 +659,13 @@ automation token.
 A revert approval adds one line, from `unseenOverwrite` (`internal/api/approvals.go:49-51`):
 
 ```text
-Overwrites    the drifted configuration, which no reviewer has seen (drift opened 09:41).
+Overwrites    the drifted configuration of drift record 12, which no reviewer has seen.
               Approving records that you approve overwriting it.
 ```
+
+The line names the plan's `driftRecord`, not the time the drift opened. The API serves no such
+time: an open drift carries its revision and observations only
+(`internal/client/apitypes/apitypes.gen.go:1363-1368`).
 
 ### 5.7 Operation tracking
 
