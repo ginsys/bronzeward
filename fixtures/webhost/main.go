@@ -74,6 +74,10 @@ func renderHeaders(file, issuer, providerOrigins string) (map[string]string, err
 	return headers, nil
 }
 
+// The bytes the host writes before it closes a dropped request's connection: an answer cut off
+// inside its status line.
+const partialAnswer = "HTTP/1.1 5"
+
 func handler(c config) (http.Handler, error) {
 	headers, err := renderHeaders(c.headers, c.issuer, c.providerOrigins)
 	if err != nil {
@@ -85,8 +89,18 @@ func handler(c config) (http.Handler, error) {
 	}
 	proxy := httputil.NewSingleHostReverseProxy(upstream)
 	// An upstream that closes the connection without an answer (the browser cases' injected drop)
-	// closes the browser's connection too, so the page meets a transport failure, not a 502.
-	proxy.ErrorHandler = func(http.ResponseWriter, *http.Request, error) { panic(http.ErrAbortHandler) }
+	// closes the browser's connection too, so the page meets a transport failure, not a 502. The
+	// host first writes the start of a status line: a browser may send a request again by itself
+	// when a connection closes before any byte of an answer (Firefox does, even on a new
+	// connection), and then the page would never meet the drop.
+	proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, _ error) {
+		conn, _, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			panic(http.ErrAbortHandler)
+		}
+		_, _ = conn.Write([]byte(partialAnswer))
+		_ = conn.Close()
+	}
 	// A rooted view of the build: a symlink inside it cannot reach a file outside it.
 	dist, err := os.OpenRoot(c.dist)
 	if err != nil {

@@ -20,12 +20,19 @@ const canary = process.env["BW_WEB_CANARY"];
 if (canary === undefined || !canary.startsWith("BWSYNTH-")) throw new Error("BW_WEB_CANARY must hold the run's synthetic canary");
 
 const headless = process.env["BW_HEADED"] === undefined;
+// WebDriver's map form of unhandledPromptBehavior: only the leave dialog is accepted, and every
+// other prompt keeps the default (dismiss and report), so a case still meets the page's confirm().
+// WebdriverIO types the capability as the string form only.
+const acceptLeave = { beforeUnload: "accept" } as unknown as string;
 const capabilities: Record<string, WebdriverIO.Capabilities> = {
   chrome: { browserName: "chrome", "goog:chromeOptions": { args: headless ? ["--headless=new"] : [] } },
   edge: { browserName: "MicrosoftEdge", "ms:edgeOptions": { args: headless ? ["--headless=new"] : [] } },
-  // Both Firefoxes are downloaded at their current release, not taken from the host.
-  firefox: { browserName: "firefox", browserVersion: "stable", "moz:firefoxOptions": { args: headless ? ["-headless"] : [] } },
-  "firefox-esr": { browserName: "firefox", browserVersion: "esr", "moz:firefoxOptions": { args: headless ? ["-headless"] : [] } },
+  // Both Firefoxes are downloaded at their current release, not taken from the host. A case that
+  // leaves a page with a write still open meets its leave guard: Firefox shows that dialog and
+  // holds the navigation until it times out, where Chrome and Edge never show it without a user
+  // gesture. Firefox accepts it, so each case's own navigation proceeds as in the other browsers.
+  firefox: { browserName: "firefox", browserVersion: "stable", unhandledPromptBehavior: acceptLeave, "moz:firefoxOptions": { args: headless ? ["-headless"] : [] } },
+  "firefox-esr": { browserName: "firefox", browserVersion: "esr", unhandledPromptBehavior: acceptLeave, "moz:firefoxOptions": { args: headless ? ["-headless"] : [] } },
   safari: { browserName: "safari" },
 };
 const browsers = (process.env["BW_BROWSERS"] ?? "chrome,firefox").split(",");
