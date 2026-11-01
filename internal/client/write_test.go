@@ -244,9 +244,15 @@ func TestOutcomes(t *testing.T) {
 			says:     "it may already have been committed",
 			recovery: func(int) string { return "" },
 			post:     func(_ int, w http.ResponseWriter, _ *http.Request) { drop(w) }},
-		{name: "a repeat refused for its input says nothing of the attempt it repeats (AMB-04's shape)", repeat: true, posts: 1, unknown: true,
+		{name: "a repeat refused for its input says nothing of the attempt it repeats", repeat: true, posts: 1, unknown: true,
 			says: "answered 422 BWSYNTH (validation-failed) (instance req_BWSYNTH)) and did nothing; the original outcome is still unknown",
 			post: func(_ int, w http.ResponseWriter, _ *http.Request) {
+				problemAnswer(w, http.StatusUnprocessableEntity, "validation-failed", "")
+			}},
+		{name: "a repeat answered with the key's replayed refusal shows that refusal (§8.4 item 2)", repeat: true, posts: 1,
+			says: "This is the stored answer to an earlier attempt with this key: that attempt was refused.",
+			post: func(_ int, w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Idempotent-Replayed", "true")
 				problemAnswer(w, http.StatusUnprocessableEntity, "validation-failed", "")
 			}},
 		{name: "a 403 to a repeat says nothing of the attempt it repeats", repeat: true, posts: 1, unknown: true, says: "403 BWSYNTH (forbidden)",
