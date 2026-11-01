@@ -243,6 +243,21 @@ export function details(e: Entry): string {
 
 const byBasis = (items: Observation[]) => [...items].sort((x, y) => y.basis - x.basis);
 
+// What W3 shows of a read within one view (#424): its last answer, kept under a read again that
+// failed, and whether a read restarted it from its first page, said through the reads after it. A
+// new path or view, and a dropped read (a restart that failed), keep nothing; a new epoch and the
+// process's recovery refusal end the page, and a refusal of the credentials never reaches it.
+export interface Kept<T> { view: string; data: T | undefined; restarted: boolean }
+export function kept<T>(was: Kept<T> | undefined, load: Load<T> | Dropped, view: string, restarted: (d: T) => boolean = () => false): Kept<T> {
+  const k = was?.view === view && load.kind !== "loading" && load.kind !== "dropped" ? was : { view, data: undefined, restarted: false };
+  return load.kind === "ok" ? { view, data: load.data, restarted: k.restarted || restarted(load.data) } : k;
+}
+function useKept<T>(load: Load<T> | Dropped, restarted?: (d: T) => boolean): Kept<T> {
+  const { view } = useReads();
+  const k = useRef<Kept<T>>(undefined);
+  return (k.current = kept(k.current, load, view, restarted));
+}
+
 // The timeline is read under the page's reads. The machine and its observations are read again, as
 // when the page reads again, each time a timeline read brings entries W3 did not show; the poll goes
 // on unrestarted (#424).
@@ -260,14 +275,17 @@ export function MachineItem({ id }: { id: string }) {
 function MachineState({ id, path, tl, older, busy }: { id: string; path: string; tl: Load<Timeline<Entry>> | Dropped; older: (() => void) | undefined; busy: boolean }) {
   const m = useItem<Machine>(path);
   const [obs] = useList<Observation>(`${path}/observations`, "", true);
+  const [km, ko] = [useKept(m), useKept(obs, (o) => o.restarted)];
   const [pm, po, timeline] = [usePending(m, "the machine"), usePending(obs, "the observations"), usePending(tl, "the timeline")];
-  if (m.kind !== "ok") return <><h2>Machine {short(id)}</h2>{pm}</>;
-  if (obs.kind !== "ok") return <><h2>Machine {short(id)}</h2>{po}</>;
-  const d = m.data;
-  const list = byBasis(obs.data.items);
+  if (km.data === undefined) return <><h2>Machine {short(id)}</h2>{pm}</>;
+  if (ko.data === undefined) return <><h2>Machine {short(id)}</h2>{po}</>;
+  const d = km.data;
+  const list = byBasis(ko.data.items);
   return (
     <>
       <h2>Machine {d.id}</h2>
+      {m.kind !== "ok" && pm}
+      {obs.kind !== "ok" && po}
       <p>Cluster <Ref to={`/clusters/${d.cluster}`} id={d.cluster} />, {d.talosEndpoint}, {node(d)}, {d.platform}.</p>
       <ul aria-label="Status" data-testid="sentences">{sentences(d, list).map((s) => <li key={s}>{s}</li>)}</ul>
       <dl>
@@ -281,7 +299,7 @@ function MachineState({ id, path, tl, older, busy }: { id: string; path: string;
         <Ref to={`/operations?machine=${d.id}`} id={d.id}>Operations on this machine</Ref>
       </p>
       <h3>Observations</h3>
-      <Observations read={obs.data} />
+      <Observations read={{ ...ko.data, restarted: ko.restarted }} />
       <h3>Timeline (newest first)</h3>
       {tl.kind !== "ok" ? timeline : <TimelineRows tl={tl.data} older={older} busy={busy} />}
     </>
