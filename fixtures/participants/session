@@ -12,8 +12,10 @@
 #   session stop          the web host and dev-idp; fixtures/bin/down removes the fixture
 #
 # Supported order: run session stop before fixtures/bin/down or fixtures/dev-idp down, and run one
-# participant session per Docker daemon. stop removes the forwarder and dev-idp by name, so outside
-# that order it can remove another checkout's containers of the same names.
+# participant session per Docker daemon. The session uses the host's one default dev-idp, so no
+# other checkout may start or stop the default dev-idp on that daemon while a session starts or
+# runs. stop and a failed start's rollback remove the forwarder and dev-idp by name, so outside that
+# order they can remove another checkout's containers of the same names.
 #
 # Everything is synthetic. A session password starts with BWSYNTH-pw-, which is what scan looks
 # for; it is never written to a file by this script.
@@ -434,5 +436,5 @@ cmd=${1:-}
 case $cmd in
 start | shell | t1 | stop) "$cmd" ;;
 passwords | scan) "$cmd" "$@" ;;
-*) die "usage: fixtures/participants/session start | passwords [--exec <command>...] | shell | t1 | scan [path]... | stop (run stop before fixtures/bin/down or fixtures/dev-idp down; one participant session per Docker daemon)" ;;
+*) die "usage: fixtures/participants/session start | passwords [--exec <command>...] | shell | t1 | scan [path]... | stop (run stop before fixtures/bin/down or fixtures/dev-idp down; one participant session per Docker daemon; the session uses the host's one default dev-idp, so no other checkout may start or stop the default dev-idp on that daemon while a session starts or runs)" ;;
 esac
