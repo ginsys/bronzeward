@@ -90,6 +90,7 @@ func (e *env) emit(raw []byte, table func(*tabwriter.Writer)) error {
 // is known before anything is written.
 func (e *env) render(raw []byte) ([]byte, error) {
 	if e.output == "json" {
+		raw = client.EscapeJSON(raw)
 		if !bytes.HasSuffix(raw, []byte("\n")) {
 			raw = append(raw, '\n')
 		}

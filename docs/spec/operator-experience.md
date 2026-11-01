@@ -324,7 +324,9 @@ Global: --context, -o table|json|yaml, --no-input, --no-wait, --idempotency-key,
   deciding, [§8](#8-states-every-view-must-handle));
   4 a waited-for operation ended `failed`, `rejected` or `cancelled`; 5 still `unresolved` at the
   end of a wait.
-- `-o json` prints the API resource unchanged, so scripts never depend on table layout. The
+- `-o json` prints the API resource with the same members and values, so scripts never depend on
+  table layout. DEL, C1 and bidirectional control characters are written as `\uNNNN`
+  ([client contracts §6](client-contracts.md#6-tls-trust) item 8). The
   protected import review has no `-o json` or `-o yaml` form ([§9](#9-secret-handling-in-the-clients)). Tables
   follow `NO_COLOR` and degrade to plain text when stdout is not a terminal.
 - A command that starts an operation prints its ID and waits by default, showing events;
