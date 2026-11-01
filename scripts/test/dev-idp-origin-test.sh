@@ -57,9 +57,11 @@ up 1 "BW_E2E_PORT_BASE=16016 refuses a provider seeded for 16000 and names dev-i
 seed http://localhost:58443
 up 1 "a provider seeded for the old default 58443 is refused" "web origin is http://localhost:58443, not http://localhost:16000"
 up 0 "BW_DEV_IDP_WEB_ORIGIN wins over BW_E2E_PORT_BASE" "(http://localhost:58443)" BW_E2E_PORT_BASE=16016 BW_DEV_IDP_WEB_ORIGIN=http://localhost:58443
-for b in 16001 016000 19985 15984 abc; do
+# 18446744073709567616 is 2^64 + 16000, which bash arithmetic would read as 16000.
+for b in 16001 016000 19985 15984 abc 18446744073709567616; do
   seed "http://localhost:$b"
   up 1 "BW_E2E_PORT_BASE=$b is refused, even for a provider seeded for it" "BW_E2E_PORT_BASE must be 16000+16*n" BW_E2E_PORT_BASE=$b
 done
+seed http://localhost:abc
 up 0 "BW_DEV_IDP_WEB_ORIGIN skips the base check" "(http://localhost:abc)" BW_E2E_PORT_BASE=abc BW_DEV_IDP_WEB_ORIGIN=http://localhost:abc
 exit "$fail"

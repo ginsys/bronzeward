@@ -116,7 +116,7 @@ up() {
   # The browser tasks accept only these bases (web/e2e/ports.ts), so a provider seeded for any
   # other would match no run. BW_DEV_IDP_WEB_ORIGIN names the origin itself and is not checked.
   if [ -z "${BW_DEV_IDP_WEB_ORIGIN:-}" ] &&
-    ! { [[ $base =~ ^[1-9][0-9]*$ ]] && ((base >= 16000 && base <= 19984 && (base - 16000) % 16 == 0)); }; then
+    ! { [[ $base =~ ^[1-9][0-9]{4}$ ]] && ((base >= 16000 && base <= 19984 && (base - 16000) % 16 == 0)); }; then
     die "BW_E2E_PORT_BASE must be 16000+16*n with n from 0 to 249 (16000, 16016, ..., 19984), not $base"
   fi
   if ours; then
