@@ -147,12 +147,26 @@ func TestRemoteTextInDraftSourceWrites(t *testing.T) {
 // TestOwnArgumentInParserError: the flag parser quotes an argument as given, and the CLI shows the
 // line feed in it escaped, so that an argument cannot forge a line of its own.
 func TestOwnArgumentInParserError(t *testing.T) {
-	var o, e bytes.Buffer
-	if got := run([]string{"--bad\nFORGED"}, &o, &e); got != 2 {
-		t.Fatalf("exit %d, want 2: %s", got, e.String())
-	}
-	if strings.Contains(e.String(), "\nFORGED") || !strings.Contains(e.String(), `-bad\x0aFORGED`) {
-		t.Errorf("the usage error %q does not show the argument's line feed as \\x0a", e.String())
+	for _, c := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"an unknown flag", []string{"--bad\nFORGED"}, `flag provided but not defined: -bad\x0aFORGED`},
+		// The parser quotes a rejected value with %q (`\t`, `\\`); the contract's form is `\x09` and `\`.
+		{"an int flag", []string{"cluster", "list", "--limit", "a\tb\\c\nFORGED"}, `invalid value "a\x09b\c\x0aFORGED" for flag -limit: parse error`},
+		{"a bool flag", []string{"--no-input=x\ty\\z"}, `invalid boolean value "x\x09y\z" for -no-input: parse error`},
+		{"a global flag after the command", []string{"cluster", "list", "-o", "x\ty"}, `-o "x\x09y": give table, json or yaml`},
+		{"a flag without its value", []string{"cluster", "list", "--limit"}, `flag needs an argument: -limit`},
+	} {
+		var o, e bytes.Buffer
+		if got := run(c.args, &o, &e); got != 2 {
+			t.Errorf("%s: exit %d, want 2: %s", c.name, got, e.String())
+		}
+		if strings.Contains(e.String(), "\nFORGED") || !strings.Contains(e.String(), c.want) {
+			t.Errorf("%s: the usage error %q lacks %q, or an argument started a line", c.name, e.String(), c.want)
+		}
+		noRawControl(t, c.name, e.String())
 	}
 }
 

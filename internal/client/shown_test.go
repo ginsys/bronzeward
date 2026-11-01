@@ -7,6 +7,22 @@ import (
 	"testing"
 )
 
+// TestGuardWriter: the last guard before the terminal escapes every control character but the line
+// feed, and passes text that is escaped already unchanged.
+func TestGuardWriter(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"plain\nlines\n", "plain\nlines\n"},
+		{"a\x1b[2Jb\tc\rd\x7fe\xc2\x9bf\xffg\n", "a\\x1b[2Jb\\x09c\\x0dd\\x7fe\\x9bf\\xffg\n"},
+		{"already \\x1b and \\\\ stay", "already \\x1b and \\\\ stay"},
+	} {
+		var b strings.Builder
+		n, err := GuardWriter(&b).Write([]byte(c.in))
+		if err != nil || n != len(c.in) || b.String() != c.want {
+			t.Errorf("Write(%q) = %d, %v, wrote %q, want %d bytes and %q", c.in, n, err, b.String(), len(c.in), c.want)
+		}
+	}
+}
+
 // TestShown: the sink of every error escapes all of its text, line feeds included, and keeps only the
 // line breaks of the client's own multi-line errors (client-contracts.md section 6 item 8).
 func TestShown(t *testing.T) {
