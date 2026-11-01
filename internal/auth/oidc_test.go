@@ -179,7 +179,7 @@ func TestHumanRoles(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", human, err)
 		}
-		if p.Kind != Human || p.ID != "" || p.Issuer != f.iss.URL || p.Subject != human || !slices.Equal(p.Roles, roles) || p.Expiry.IsZero() || p.Checked.IsZero() {
+		if p.Kind != Human || p.ID != "" || p.Issuer != f.iss.URL || p.Subject != human || !slices.Equal(p.Roles, roles) || p.Expiry.IsZero() || p.Checked.IsZero() || p.CheckedLocal.IsZero() {
 			t.Errorf("%s: %+v", human, p)
 		}
 	}

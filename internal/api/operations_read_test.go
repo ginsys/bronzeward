@@ -717,8 +717,9 @@ func TestEventStreamExpiryFollowsDatabaseClock(t *testing.T) {
 	}
 	d := ce.d
 	d.exec = testExecution()
-	stream := func(exp, checked time.Time) *httptest.ResponseRecorder {
-		p := auth.Principal{Kind: auth.Human, Issuer: ce.iss.URL, Subject: "h-all", Roles: []auth.Role{auth.Viewer}, Expiry: exp, Checked: checked}
+	stream := func(exp, checked, local time.Time) *httptest.ResponseRecorder {
+		p := auth.Principal{Kind: auth.Human, Issuer: ce.iss.URL, Subject: "h-all", Roles: []auth.Role{auth.Viewer},
+			Expiry: exp, Checked: checked, CheckedLocal: local}
 		// A stream bounded by this process's clock would run for the hour: the client leaves at 10 s.
 		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 		defer cancel()
@@ -731,12 +732,14 @@ func TestEventStreamExpiryFollowsDatabaseClock(t *testing.T) {
 	}
 	// This process's clock is an hour before exp, and the database's a second past it.
 	exp := time.Now().Add(time.Hour)
-	wantProblem(t, stream(exp, exp.Add(time.Second)), http.StatusUnauthorized, "unauthenticated")
+	wantProblem(t, stream(exp, exp.Add(time.Second), time.Now()), http.StatusUnauthorized, "unauthenticated")
 	// This process's clock is an hour past exp, and the database's two seconds before it.
 	exp = time.Now().Add(-time.Hour)
-	if rec := stream(exp, exp.Add(-2*time.Second)); rec.Code != http.StatusOK {
+	if rec := stream(exp, exp.Add(-2*time.Second), time.Now()); rec.Code != http.StatusOK {
 		t.Fatalf("a token with two seconds left on the database's clock: %d %s", rec.Code, rec.Body)
 	}
+	// The same two seconds, read three seconds before the stream opens: they have run out.
+	wantProblem(t, stream(exp, exp.Add(-2*time.Second), time.Now().Add(-3*time.Second)), http.StatusUnauthorized, "unauthenticated")
 }
 
 // #453: a database failure on a stream's first read is still 503 dependency-unavailable; only a
