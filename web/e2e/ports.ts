@@ -1,11 +1,12 @@
 // The real-browser runs' ports (#459). A run takes the 16 ports from BW_E2E_PORT_BASE (default
 // 16000), below the Linux ephemeral range (32768-60999), so that runs with different bases can run
 // on one host at the same time. The base must be 16000+16*n with n from 0 to 249: a base between two
-// of them would overlap another run's block.
+// of them would overlap another run's block. It is written plainly, with no leading zero, because
+// fixtures/dev-idp puts the same text into the provider's web origin.
 export function portBase(raw: string | undefined): number {
   const s = raw ?? "16000";
   const base = Number(s);
-  if (!/^[0-9]+$/.test(s) || base < 16000 || base > 19984 || (base - 16000) % 16 !== 0) {
+  if (!/^[1-9][0-9]*$/.test(s) || base < 16000 || base > 19984 || (base - 16000) % 16 !== 0) {
     throw new Error(`BW_E2E_PORT_BASE must be 16000+16*n with n from 0 to 249 (16000, 16016, ..., 19984), not ${s}`);
   }
   return base;
