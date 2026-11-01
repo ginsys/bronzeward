@@ -36,6 +36,7 @@ export const SIGN_IN_CHANGED = "your sign-in changed";
 export const EPOCH_CHANGED_ASIDE = "the installation's epoch changed";
 export const NO_EPOCH = "the read of the installation's epoch got no answer that names one";
 export const SIGN_IN_REFUSED = "the server no longer accepts your sign-in";
+export const RENEWED_LAST = "the last attempt was answered 401 and your sign-in was renewed, with no attempt left to send it again";
 // The page failed while it held the write, for example a renewal that threw.
 const PAGE_FAILED = "the page failed while it sent it";
 
@@ -259,10 +260,12 @@ export class Writes {
       lastProblem = p;
       const refused: Outcome = { kind: "refused", status: a.status, problem: p, replayed };
       if (a.status === 401) {
-        // Renew once; renewed, the next attempt is a repeat with its checks (§8.2 401 row).
-        if (code === "unauthenticated" && !renewed && n < BACKOFF.length && (await client.renew())) {
+        // Renew once; renewed, the next attempt is a repeat with its checks (§8.2 401 row). Renewed
+        // after the last attempt, the sign-in stays and the write is not sent again.
+        if (code === "unauthenticated" && !renewed && (await client.renew())) {
           renewed = true;
-          continue;
+          if (n < BACKOFF.length) continue;
+          return early({ kind: "not-done", why: RENEWED_LAST, problem: p });
         }
         // Any other 401 code is a refusal by its status class, as for a read.
         if (code === "unauthenticated") end.e = { kind: "unauthenticated", problem: p };
