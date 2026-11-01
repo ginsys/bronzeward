@@ -759,8 +759,10 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
      After that, no data older than a failed read stays shown without a sign
      (`web/src/shell.test.ts:106`, `web/src/machine.test.ts:392`,
      `web/e2e/auth/inventory.e2e.ts:350`). A transport failure answers at once, so this read again
-     runs at most once per poll interval. A resource that keeps getting no answer is not read again
-     at network speed (`web/src/machine.test.ts:409`).
+     runs at most once per poll interval, counted from when the last one started. A resource that
+     keeps getting no answer is not read again at network speed, also when a slow read holds the
+     read again (`web/src/machine.test.ts:409`, `web/src/machine.test.ts:436`). A read again that
+     the old view asked for does not run in a new view.
    - A refusal of the credentials (`401` after renewal, `403 identity-revoked`) ends the page
      ([§9.6](#96-failure-cases)), and nothing stays (`web/src/request.test.ts:96`,
      `web/src/request.test.ts:115`, `web/src/shell.test.ts:181`).
@@ -770,7 +772,7 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
      list goes with its cursor ([§8.2](#82-errors)). W3 still shows the machine's own rows with
      the observations' failure; only the latest read's line needs the observations. If the machine
      read also failed, its failure is still shown (`web/src/machine.test.ts:231`,
-     `web/src/machine.test.ts:323`, `web/src/machine.test.ts:435`).
+     `web/src/machine.test.ts:323`, `web/src/machine.test.ts:467`).
    - A new view keeps nothing of the old view. When the view changes, the old view's answer still
      shows at first. A later failure does not keep it, a read without answer included, and the
      restart flag does not carry over (`web/src/machine.test.ts:204`, `web/src/machine.test.ts:231`,

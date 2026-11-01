@@ -411,8 +411,9 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
       const runs: number[] = [];
       const timers: { f: () => void; at: number }[] = [];
       const after = (f: () => void, ms: number) => (timers.push({ f, at: t + ms }), 0 as unknown as ReturnType<typeof setTimeout>);
-      const [ask, stop] = pacer(() => runs.push(t), () => t, after);
+      const [ask, started, stop] = pacer(() => runs.push(t), () => t, after);
       ask();
+      started();
       expect(runs).toEqual([0]);
       // Each banner end the read again's own lost read causes asks again at once: it waits.
       t = 40;
@@ -422,6 +423,7 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
       expect(timers).toEqual([{ f: expect.any(Function), at: POLL_MS }]);
       t = POLL_MS;
       timers.shift()!.f();
+      started();
       expect(runs).toEqual([0, POLL_MS]);
       t = POLL_MS + 10;
       ask();
@@ -429,6 +431,36 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
       ask();
       expect(timers.map((x) => x.at)).toEqual([2 * POLL_MS, 2 * POLL_MS]);
       expect(runs).toEqual([0, POLL_MS]);
+    });
+
+    test("review #478: a read again held behind a slow read is paced from when it starts, not from when it was asked", () => {
+      let t = 0;
+      const runs: number[] = [];
+      const timers: number[] = [];
+      const after = (_f: () => void, ms: number) => (timers.push(t + ms), 0 as unknown as ReturnType<typeof setTimeout>);
+      const [ask, started, stop] = pacer(() => runs.push(t), () => t, after);
+      // Asked at 0, held by the counter behind a read that settles after POLL_MS: asks meanwhile add nothing.
+      ask();
+      t = POLL_MS + 1000;
+      ask();
+      expect(runs).toEqual([0]);
+      expect(timers).toEqual([]);
+      // It starts now; the next banner end, a moment later, waits a full interval from this start.
+      started();
+      t += 10;
+      ask();
+      expect(runs).toEqual([0]);
+      expect(timers).toEqual([2 * POLL_MS + 1000]);
+      // A start the pacer did not ask for, such as a timeline advance, moves nothing; a stop drops a held ask.
+      stop();
+      t = 3 * POLL_MS;
+      started();
+      ask();
+      expect(runs).toEqual([0, 3 * POLL_MS]);
+      t += 10;
+      stop();
+      ask();
+      expect(runs).toEqual([0, 3 * POLL_MS, 3 * POLL_MS + 10]);
     });
   });
 

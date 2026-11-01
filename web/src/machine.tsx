@@ -322,44 +322,60 @@ export function lostSince(lost: { current: [boolean, boolean] }): boolean {
   return m || o;
 }
 
-// Runs `run` when asked, at most once per POLL_MS: an ask within POLL_MS of the last run waits
-// until then, and asks while one waits add nothing. A transport failure answers at once, so a read
-// again after each banner end, unpaced, could follow a resource that keeps failing at network speed.
-// Returns the ask and the stop.
-export function pacer(run: () => void, now: () => number = Date.now, after: (f: () => void, ms: number) => ReturnType<typeof setTimeout> = setTimeout): [() => void, () => void] {
+// Runs `run` when asked, and paces the work it asks for at most once per POLL_MS from when that work
+// starts: `run` can only ask, and the read-again counter can hold the read again behind a slow read
+// in flight. An ask within POLL_MS of the last start waits until then; asks while one waits, or while
+// a run's work has not started, add nothing. `started` marks the start; `stop` drops what waits. A
+// transport failure answers at once, so a read again after each banner end, unpaced, could follow a
+// resource that keeps failing at network speed.
+export function pacer(run: () => void, now: () => number = Date.now, after: (f: () => void, ms: number) => ReturnType<typeof setTimeout> = setTimeout): [() => void, () => void, () => void] {
   let last = -Infinity;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let asked = false;
   const go = () => {
     timer = undefined;
-    last = now();
+    asked = true;
     run();
   };
   const ask = () => {
-    if (timer !== undefined) return;
+    if (timer !== undefined || asked) return;
     const wait = last + POLL_MS - now();
     if (wait <= 0) go();
     else timer = after(go, wait);
   };
+  const started = () => {
+    if (!asked) return;
+    asked = false;
+    last = now();
+  };
   const stop = () => {
     clearTimeout(timer);
     timer = undefined;
+    asked = false;
   };
-  return [ask, stop];
+  return [ask, started, stop];
 }
 
 // When a read's answer ends the banner and a resource found no answer, the machine and its
 // observations are read again once, as for a timeline advance: one read again at a time, so this
-// read again and the timeline's do not abandon each other, and at most once per POLL_MS.
+// read again and the timeline's do not abandon each other, and at most once per POLL_MS from when the
+// last one started. Each read again of the page starts with a new `again`. A new view drops what an
+// old view's reads asked for: its own reads are the page's first.
 function MachineState({ id, path, tl, older, busy, readAgain }: { id: string; path: string; tl: Load<Timeline<Entry>> | Dropped; older: (() => void) | undefined; busy: boolean; readAgain: () => void }) {
-  const { view, regained } = useReads();
+  const { view, regained, again: n } = useReads();
   const k = useRef<W3Kept>(undefined);
   const lost = useRef<[boolean, boolean]>([false, false]);
   const m = useItem<Machine>(path, keepW3(k, 0, lost));
   const [obs] = useList<Observation>(`${path}/observations`, "", true, keepW3(k, 1, lost));
   const again = useRef(readAgain);
   again.current = readAgain;
-  const [ask, stop] = useMemo(() => pacer(() => again.current()), []);
+  const [ask, started, stop] = useMemo(() => pacer(() => again.current()), []);
   useEffect(() => stop, [stop]);
+  useEffect(() => {
+    stop();
+    lost.current = [false, false];
+  }, [view, stop]);
+  useEffect(started, [n, started]);
   useEffect(() => {
     if (lostSince(lost)) ask();
   }, [regained, ask]);
