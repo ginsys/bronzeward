@@ -95,8 +95,23 @@ summary() {
   echo "test variables: $state/idp.env"
 }
 
+# zitadel_failed <docker's output>: Zitadel's docker run failed. A taken port is the slot collision
+# that the probe in up can miss (a socket that is bound but does not listen, or a concurrent start):
+# remove what this start created (down touches this instance's names only) and name the cause.
+# Any other failure keeps the state, for diagnosis, and says how to remove it.
+zitadel_failed() {
+  echo "$1" >&2
+  case $1 in
+  *"port is already allocated"* | *"address already in use"*)
+    down
+    die "127.0.0.1:$BW_DEV_IDP_PORT is taken (a second instance name on the same slot?); pick another name: BW_DEV_INSTANCE=<name> mise run dev-idp"
+    ;;
+  esac
+  die "docker run $zitadel failed, its output above; ${BW_DEV_PFX}mise run dev-idp-down removes what was created"
+}
+
 up() {
-  local c ids arch
+  local c ids arch out
   if ours; then
     summary
     return
@@ -138,7 +153,7 @@ up() {
   # network: a setting for this throwaway provider only, never a production default.
   # ZITADEL_OIDC_DEVICEAUTH_LIFETIME shortens the device code's 5-minute default so that the
   # self-test sees one expire.
-  docker run -d --name "$zitadel" --network "$net" -p "127.0.0.1:$BW_DEV_IDP_PORT:8080" --user "$(id -u):$(id -g)" \
+  out=$(docker run -d --name "$zitadel" --network "$net" -p "127.0.0.1:$BW_DEV_IDP_PORT:8080" --user "$(id -u):$(id -g)" \
     -v "$state:/state" \
     -e ZITADEL_EXTERNALDOMAIN=localhost -e ZITADEL_EXTERNALPORT="$BW_DEV_IDP_PORT" -e ZITADEL_EXTERNALSECURE=false \
     -e ZITADEL_TLS_ENABLED=false -e ZITADEL_HTTPCLIENT_DENYLIST=169.254.0.0/16 \
@@ -154,7 +169,7 @@ up() {
     -e ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_USERNAME=bw-login -e ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_NAME=bw-login \
     -e ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_PAT_EXPIRATIONDATE=2099-01-01T00:00:00Z \
     -e ZITADEL_FIRSTINSTANCE_LOGINCLIENTPATPATH=/state/login.pat \
-    "$(pin ZITADEL_IMAGE)" start-from-init --masterkey MasterkeyNeedsToHave32Characters --tlsMode disabled >/dev/null
+    "$(pin ZITADEL_IMAGE)" start-from-init --masterkey MasterkeyNeedsToHave32Characters --tlsMode disabled 2>&1) || zitadel_failed "$out"
   # Ready once a management call answers: /debug/ready can answer before the REST gateway reaches
   # the API behind it.
   ready=""
