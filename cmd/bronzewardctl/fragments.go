@@ -27,6 +27,10 @@ import (
 // §8.1): a larger body is refused before it is sent.
 const maxBody = 1 << 20
 
+// overBodyLimit is the refusal of an input that holds more than maxBody bytes. Every reader stops
+// there before it reads further: the document, the declarations and the marks.
+const overBodyLimit = "over the server's 1 MiB body limit"
+
 // stdin is the process's standard input, which tests replace.
 var stdin = os.Stdin
 
@@ -151,7 +155,7 @@ func (e *env) fragmentBody(in apitypes.FragmentInput, file, decl string, marks b
 	}
 	body, err := json.Marshal(in)
 	if err == nil && len(body) > maxBody {
-		err = fmt.Errorf("the request body is %d bytes, over the server's 1 MiB limit; nothing was sent", len(body))
+		err = fmt.Errorf("the request body is %d bytes, %s; nothing was sent", len(body), overBodyLimit)
 	}
 	return body, err
 }
@@ -261,7 +265,7 @@ func readInput(f *os.File, what string) ([]byte, error) {
 	case err != nil:
 		return nil, fmt.Errorf("reading %s: %w", what, err)
 	case len(b) > maxBody:
-		return nil, fmt.Errorf("%s is over the server's 1 MiB body limit", what)
+		return nil, fmt.Errorf("%s is %s", what, overBodyLimit)
 	case !utf8.Valid(b):
 		return nil, fmt.Errorf("%s is not UTF-8 text", what)
 	}
@@ -296,7 +300,13 @@ func scanMarks(in io.Reader, terminal bool) ([]string, error) {
 	// The API sets no length on one mark, so a line may be as long as the body limit allows.
 	s.Buffer(nil, maxBody)
 	s.Split(markLines)
+	total := 0
 	for s.Scan() {
+		// All the marks together are held to the body limit too, so a long stream of lines is
+		// refused before it is read whole.
+		if total += len(s.Bytes()); total > maxBody {
+			return nil, fmt.Errorf("the marks are %s; nothing was sent", overBodyLimit)
+		}
 		// The length check counts the line as the terminal gave it, a CRLF carriage return included.
 		raw, ended := strings.CutSuffix(s.Text(), "\n")
 		m := raw
