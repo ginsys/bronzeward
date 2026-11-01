@@ -91,7 +91,8 @@ net.createServer((c) => { const z = net.connect(8080, process.env.BW_IDP); c.pip
 start() {
   need docker curl jq go npm
   "$bin/up"
-  "$FIXTURES/dev-idp" down
+  # A default provider without this checkout's state is another checkout's; dev-idp up refuses it.
+  if [ -d "$idp" ]; then "$FIXTURES/dev-idp" down; fi
   # The participant state marks the session as this checkout's, for stop.
   rm -rf -- "$part"
   mkdir -p -- "$part/bin" "$part/home"
@@ -274,12 +275,14 @@ stop() {
   local pid nets names owner running=''
   trap - EXIT
   # The forwarder, A and the default dev-idp have fixed names, so they can be another checkout's
-  # session. stop acts only on a session this checkout started, while this checkout holds the
-  # fixture claim (an empty claim: no fixture runs, and A with it).
+  # session. stop acts only on a session this checkout started, on the daemon bin/up used, while
+  # this checkout holds the fixture claim (an empty claim: no fixture runs, and A with it).
   if [ ! -d "$part" ] && [ ! -f "$cfg.fixture" ]; then
     echo "no participant session in this checkout; nothing to stop" >&2
     return 0
   fi
+  # On another Docker daemon than bin/up's, A would read as gone, and stop would drop the backup.
+  daemon_own
   owner=$(claim_owner) || die "could not ask Docker who holds the fixture claim"
   [ -z "$owner" ] || [ "$owner" = "$FIXTURES" ] ||
     die "the fixture belongs to the checkout at $owner; stop the participant session there"
