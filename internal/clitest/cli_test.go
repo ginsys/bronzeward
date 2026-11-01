@@ -477,23 +477,34 @@ var sharedCases = map[string]func(*testing.T, *fixture, *injector){
 	},
 }
 
-func TestSharedCases(t *testing.T) {
-	f := start(t, "viewer")
-	in := newInjector(t, f.base)
+// recorded returns, in file order, the IDs of the testdata/cases.yaml records that test runs: the
+// records whose test member names it, or for "" the records without one, which TestSharedCases runs.
+func recorded(t *testing.T, test string) []string {
+	t.Helper()
 	b, err := os.ReadFile("testdata/cases.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
 	var records []struct {
-		ID string `yaml:"id"`
+		ID   string `yaml:"id"`
+		Test string `yaml:"test"`
 	}
 	if err := yaml.Unmarshal(b, &records); err != nil {
 		t.Fatal(err)
 	}
 	var ids []string
 	for _, r := range records {
-		ids = append(ids, r.ID)
+		if r.Test == test {
+			ids = append(ids, r.ID)
+		}
 	}
+	return ids
+}
+
+func TestSharedCases(t *testing.T) {
+	f := start(t, "viewer")
+	in := newInjector(t, f.base)
+	ids := recorded(t, "")
 	for id := range sharedCases {
 		if !slices.Contains(ids, id) {
 			t.Errorf("case %s runs without a record", id)
