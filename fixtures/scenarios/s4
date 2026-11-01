@@ -290,11 +290,12 @@ cli_preconditions() {
   mkdir -p -- "$cli_dir/config" "$cli_dir/state" "$cli_dir/cache"
   check "$ref" 'bronzewardctl built from this checkout' go -C "$here/../.." build -o "$ctl_bin" ./cmd/bronzewardctl
   local who
+  # The client ID is not BWSYNTH-: that prefix is a leak-scan pattern, and commands.tsv keeps it.
   for who in h-publisher h-approver h-viewer; do
     : >"$cli_dir/$who.json"
     chmod 600 -- "$cli_dir/$who.json"
     check "$ref" "a context for $who with its token file" ctl_env context add "$who" --server "http://127.0.0.1:$SERVER_A_PORT" \
-      --issuer http://127.0.0.1:5556 --client-id BWSYNTH-cli --oidc-token-file "$cli_dir/$who.json"
+      --issuer http://127.0.0.1:5556 --client-id fixture-cli --oidc-token-file "$cli_dir/$who.json"
   done
 }
 # ctl_env <args>...: bronzewardctl with the run directory's configuration and no session bus.
@@ -353,7 +354,7 @@ cli_apply() {
   check "$ref" "the timeline's plan line names the plan and the release" kept timeline "  plan +plan $plan, operation apply-config, release $rel, by "
   check "$ref" "the timeline's approval line names the plan" kept timeline "  approval +approval apr_[a-z2-7]{26}, plan $plan, by h-approver "
   check "$ref" 'operation show as h-viewer prints the same completion' ctl show h-viewer operation show "$op"
-  check "$ref" "operation show's completion line names the release" kept show "^Completed at .* \(server\): applied $rel, "
+  check "$ref" "operation show's completion line names the release, without the server's time" kept show "^Completed: applied $rel, "
   rm -f -- "$cli_dir"/h-*.json
   evidence_to post || die "no post-state: bin/evidence failed"
   check "$ref" 'the post-state bundle: complete, no fixture secret but the scan control' scan_clean post
