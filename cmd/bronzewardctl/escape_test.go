@@ -99,7 +99,7 @@ const notShown = "AccessVersionBody.Created AccessVersionBody.Path ActItem.Epoch
 	"ObservedBody.Observation OpenDriftBody.LastObservation OpenDriftBody.LateLanding " +
 	"RecoveryEntryRef.EnteredBy RecoveryEntryRef.Reason RecoveryExitRef.Act RecoveryExitRef.ExitedBy " +
 	"Reference.Encoding ReleaseMachineBody.Review RendererBody.MachineryChecksum " +
-	"RestoredBackup.Backup RestoredBackup.Family ServerBody.Features ServerBody.StartMode TimelineEntry.Epoch UnreadValue.Code"
+	"RestoredBackup.Backup RestoredBackup.Family ServerBody.Features ServerBody.StartMode SourceEntry.Head TimelineEntry.Epoch UnreadValue.Code"
 
 // markersShown is, for each command of the sweep with plain booleans, how many marked values it
 // shows. The sweep credits a member to any command that shows it, so a command that stops showing
@@ -111,7 +111,7 @@ var markersShown = map[string]int{
 	"fragment show f1": 6, "fragment show frv_1": 8, "fragment history f1": 5,
 	"profile show p1": 5, "profile show prv_1": 5, "profile history p1": 5,
 	"assignment show a1": 4, "assignment show asr_1": 6, "assignment history a1": 6,
-	"draft list": 5, "draft show d1": 6, "release list": 6, "release show r1": 15,
+	"draft list": 5, "draft show d1": 9, "release list": 6, "release show r1": 15,
 	"plan list": 6, "plan show pl1": 27, "operation list": 8, "operation show o1": 15, "act list": 8,
 	"cluster add --name n --endpoint https://e --contract c --talos-cluster-id t":    5,
 	"machine add --cluster c1 --talos-node-id n --platform metal --talos-endpoint e": 4,
@@ -138,7 +138,18 @@ func (f *filler) tree(t reflect.Type, field string) any {
 	case t.Kind() == reflect.Pointer:
 		return f.tree(t.Elem(), field)
 	case t.Kind() == reflect.Slice:
-		return []any{f.tree(t.Elem(), field)}
+		items := []any{f.tree(t.Elem(), field)}
+		if t.Elem().Name() == "DraftBody_Entries_Item" {
+			// An assignment entry names a machine and has no name.
+			f.owner = "SourceEntry"
+			e := map[string]any{"kind": "assignment", "base": 1}
+			for _, k := range []string{"machine", "head", "revision"} {
+				f.member = strings.ToUpper(k[:1]) + k[1:]
+				e[k] = f.text()
+			}
+			items = append(items, e)
+		}
+		return items
 	case t.Kind() == reflect.Map:
 		if field == "Fragments" {
 			// The CLI shows the fragments of a layer it knows, so the key is one of them.
@@ -154,7 +165,14 @@ func (f *filler) tree(t reflect.Type, field string) any {
 		return map[string]any{"k": m}
 	case t.Kind() == reflect.Struct && t.NumField() == 1 && t.Field(0).Name == "union":
 		if t.Name() == "DraftBody_Entries_Item" {
-			return map[string]any{"kind": "fragment", "name": f.text(), "base": 1, "head": f.text(), "revision": f.text()}
+			// draft show prints Kind, Name, Machine and Revision of an entry: this one has a marked kind.
+			f.owner = "SourceEntry"
+			e := map[string]any{"base": 1}
+			for _, k := range []string{"kind", "name", "head", "revision"} {
+				f.member = strings.ToUpper(k[:1]) + k[1:]
+				e[k] = f.text()
+			}
+			return e
 		}
 		return f.raw()
 	case t.Kind() == reflect.Struct:
