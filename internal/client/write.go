@@ -33,6 +33,28 @@ type Write struct {
 	Repeat         *Repeat
 	Read           func(*Client) (string, error)
 	Check          string
+	// Input is the input a repeat gives where the command resolved what the operator typed, so the
+	// outcome-unknown block names it instead of "the same input".
+	Input   string
+	checked bool
+}
+
+// CheckRepeat runs a T10 repeat's checks, the principal and the confirming GET /recovery, once:
+// a command that reads before Send calls it first, so a refused repeat sends only item 3's reads
+// (§8.4 item 4). For a first send it does nothing.
+func (c *Client) CheckRepeat(w *Write) error {
+	rp := w.Repeat
+	if rp == nil || w.checked {
+		return nil
+	}
+	if _, err := c.principal(rp); err != nil {
+		return err
+	}
+	if now, why := c.confirm(); now != rp.Epoch {
+		return RefusedRepeat{c.Context.fail(fmt.Errorf("%s /api/v1%s not sent: %s, not the given --expect-epoch %s", w.Method, w.Path, why, printable(rp.Epoch)))}
+	}
+	w.checked = true
+	return nil
 }
 
 // Repeat is T10's repeat of a write whose outcome was unknown: its key, reference epoch and
@@ -47,8 +69,8 @@ type RefusedRepeat struct{ error }
 // Ambiguous says an attempt, this process's or the one a T10 repeat repeats, may have committed;
 // a write set aside without one is not repeated (§8.4 item 3), though none of it committed.
 type Unknown struct {
-	Why, Key, Route, Where, Principal, Epoch, IfMatch, Shows, Check string
-	SetAside, Ambiguous                                             bool
+	Why, Key, Route, Where, Principal, Epoch, IfMatch, Shows, Check, Input string
+	SetAside, Ambiguous                                                    bool
 }
 
 func (u *Unknown) Error() string {
@@ -66,7 +88,11 @@ func (u *Unknown) Error() string {
 		repeat += " --if-match " + ShellWord(u.IfMatch)
 	}
 	s += "  read:      " + u.Shows + "; read it again with: " + printable(u.Check) + "\n"
-	return s + "To repeat exactly this request, give the same input and: " + repeat
+	input := "the same input"
+	if u.Input != "" {
+		input = "the same input, with " + u.Input + ","
+	}
+	return s + "To repeat exactly this request, give " + input + " and: " + repeat
 }
 
 // ShellWord is s as one shell word, its unprintable characters escaped.
@@ -100,17 +126,17 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 	if w.HumanOnly && c.signIn == nil {
 		fmt.Fprintf(c.Notices, "%s: %s is for a person signed in, not an automation token: the server refuses it.\n", c.Context.Where(), route)
 	}
+	// Only item 3's reads come before a repeat's refusal, so the context-use read follows them.
+	if err := c.CheckRepeat(w); err != nil {
+		return nil, err
+	}
 	who, err := c.principal(w.Repeat)
 	if err != nil {
 		return nil, err
 	}
 	key, ref := newKey(), ""
 	if rp := w.Repeat; rp != nil {
-		// Only item 3's reads come before the refusal, so the context-use read follows them.
 		key, ref = rp.Key, rp.Epoch
-		if now, why := c.confirm(); now != ref {
-			return nil, RefusedRepeat{c.Context.fail(fmt.Errorf("%s not sent: %s, not the given --expect-epoch %s", route, why, printable(ref)))}
-		}
 	}
 	if _, _, err := c.Server(); err != nil {
 		return nil, err
@@ -140,7 +166,7 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 			return nil, c.Context.fail(fmt.Errorf("%s not sent: GET /api/v1/recovery showed no epoch to send it under", route))
 		}
 	}
-	u := &Unknown{Key: key, Route: route, Where: c.Context.Where(), Principal: who, Epoch: ref, IfMatch: w.IfMatch,
+	u := &Unknown{Key: key, Route: route, Where: c.Context.Where(), Principal: who, Epoch: ref, IfMatch: w.IfMatch, Input: w.Input,
 		Check: "bronzewardctl --context " + ShellWord(c.Context.Name) + " " + w.Check}
 	// A T10 repeat exists because an earlier process's attempt was ambiguous (§8.4 item 4).
 	ambiguous, renewed := w.Repeat != nil, false
