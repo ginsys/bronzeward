@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -102,9 +103,10 @@ func (e *env) writeAfter(prep func(*client.Client) error, w *client.Write, say f
 		if e.output == "table" {
 			return nil
 		}
-		// The answer as served, chosen in memory, so it is written once and a write failure is reported.
-		if out, err = e.render(r.Body); err != nil {
-			out = append(r.Body, '\n')
+		// The answer as served, unconverted for -o json and yaml alike (#347), chosen in memory, so it
+		// is written once and a write failure is reported.
+		if out = r.Body; !bytes.HasSuffix(out, []byte("\n")) {
+			out = append(out, '\n')
 		}
 	}
 	if out != nil {
