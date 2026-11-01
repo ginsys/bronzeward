@@ -1,7 +1,8 @@
 // The first write views (ginsys/bronzeward#338) against a disposable deployment through the
 // injector: AMB-01, AMB-03, AMB-05, AMB-07, AMB-08, AMB-09, AMB-12, TLS-03's write and AUTH-07's
-// pending write (conformance/cases/), a second submit, the leave guards and a keyboard-only add.
-// Each write is "Add cluster" as h-author, with a synthetic name and a random cluster ID. The
+// pending write (conformance/cases/), a second submit, the leave guards and each form sent by
+// keyboard only. Each faulted write is "Add cluster" as h-author, with a synthetic name and a
+// random cluster ID; machines get a synthetic node ID and a documentation-range address. The
 // injector's `steps` fault answers each send of the write in turn and lets the rest through; its
 // epoch commits a new epoch in the deployment's database, as a recovery entry does.
 import { randomBytes } from "node:crypto";
@@ -57,6 +58,19 @@ async function oneWrite(n: number): Promise<{ key: string; epoch: string }> {
   expect(key).toMatch(/^[A-Za-z0-9_-]{22}$/);
   for (const x of w) expect(x).toEqual(w[0]);
   return { key: key!, epoch: epoch! };
+}
+
+// Moves the focus to each named field with Tab only, types its value (replacing the field's own
+// when `replace`), and sends the form with Enter.
+async function type(values: [string, string][], replace = false) {
+  const focused = () => browser.execute(() => document.activeElement?.getAttribute("name"));
+  for (const [field, value] of values) {
+    for (let i = 0; i < 40 && (await focused()) !== field; i++) await browser.keys("Tab");
+    expect(await focused()).toBe(field);
+    if (replace) await browser.keys(["Control", "a"]);
+    await browser.keys(value.split(""));
+  }
+  await browser.keys("Enter");
 }
 
 describe("the write views (#338)", () => {
@@ -197,15 +211,28 @@ describe("the write views (#338)", () => {
   it("keyboard only: the form is filled and sent without the pointer", async () => {
     const name = await open();
     await faults({ upstream: at });
-    const values: [string, string][] = [["name", name], ["endpoint", `https://${name}.example.test:6443`], ["contract", "v1.13"], ["talosClusterId", `${randomBytes(32).toString("base64url")}=`]];
-    for (const [field, value] of values) {
-      for (let i = 0; i < 40 && (await browser.execute(() => document.activeElement?.getAttribute("name"))) !== field; i++) await browser.keys("Tab");
-      expect(await browser.execute(() => document.activeElement?.getAttribute("name"))).toBe(field);
-      await browser.keys(value.split(""));
-    }
-    await browser.keys("Enter");
+    await type([["name", name], ["endpoint", `https://${name}.example.test:6443`], ["contract", "v1.13"], ["talosClusterId", `${randomBytes(32).toString("base64url")}=`]]);
     await expect(result()).toHaveText(expect.stringContaining(`Cluster ${name} recorded as`), { wait: 20_000 });
     await oneWrite(1);
+  });
+
+  it("keyboard only: Record machine and Change endpoint are filled and sent without the pointer", async () => {
+    const name = await add([]);
+    await expect(result()).toHaveText(expect.stringContaining(`Cluster ${name} recorded as`), { wait: 20_000 });
+    await $('nav[aria-label="Main"]').$("a=Machines").click();
+    await $("main button=Record machine").click();
+    await expect($("main h2")).toHaveText("Record machine");
+    // The cluster is chosen by typing its name into the list, the platform left at metal.
+    const [ip, next] = [`192.0.2.${1 + randomBytes(1)[0]! % 254}`, `198.51.100.${1 + randomBytes(1)[0]! % 254}`];
+    await type([["cluster", name], ["talosNodeId", `synthetic-node-${randomBytes(4).toString("hex")}`], ["talosEndpoint", ip]]);
+    await expect(result()).toHaveText(expect.stringContaining(`Endpoint ${ip}:50000. Next: give Bronzeward the cluster's Talos access in the provider`), { wait: 20_000 });
+    await result().$("a").click();
+    await expect($("main h2")).toHaveText(expect.stringContaining("Machine "));
+    await type([["talosEndpoint", next]], true);
+    await expect(result()).toHaveText(expect.stringContaining(`Endpoint changed from ${ip}:50000 to ${next}:50000`), { wait: 20_000 });
+    const w = await writes();
+    expect(w.map(([m, r]) => `${m} ${r}`)).toEqual(["POST /clusters", "POST /machines", expect.stringMatching(/^POST \/machines\/[^/]+\/talos-endpoints$/)]);
+    expect(new Set(w.map((x) => x[2])).size).toBe(3);
   });
 });
 
