@@ -184,7 +184,7 @@
 
 - id: AUTH-06
   test: TestLoginIdentityProvider
-  setup: context idp signed in by AUTH-01, its access token living 5 minutes; skipped under -short, which mise run verify uses
+  setup: context idp signed in by AUTH-01, its access token living 5 minutes; skipped under go test -short
   action: wait past the access token's expiry; operation list; then operation list again
   exchange:
     - POST <token_endpoint>, grant_type=refresh_token, once
