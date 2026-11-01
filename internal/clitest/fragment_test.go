@@ -497,7 +497,8 @@ func (f *fixture) journeys(t *testing.T, in *injector, s seeded) {
 			}
 			fmt.Fprintf(&out, "$ bronzewardctl %s\n%s%s[exit %d]\n\n", strings.Join(step, " "), r.out, r.err, r.code)
 		}
-		kept := journeyIDs.ReplaceAllStringFunc(out.String(), func(m string) string {
+		// The steps are separated by a blank line; the file ends with the last step's exit line.
+		kept := journeyIDs.ReplaceAllStringFunc(strings.TrimSuffix(out.String(), "\n"), func(m string) string {
 			if p, _, ok := strings.Cut(m, "_"); ok && !strings.Contains(m, ":") {
 				return p + "_…"
 			}
