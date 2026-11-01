@@ -316,7 +316,10 @@ func (c *Client) adopt(t *Tokens) {
 //
 // It waits at most lockBound (§9.2 item 3, ginsys/bronzeward#437): longer than a holder can
 // legitimately keep it, a renewal's bounded read, refresh and write together, so a holder that
-// still has it is taken to hang.
+// still has it is taken to hang. The wait is a blocking flock, not a LOCK_NB poll: the kernel
+// then hands the lock to waiters in its own order, and lists each waiter in /proc/locks, which the
+// process tests read to order their steps. A flock given up on is left to finish, and the lock it
+// then takes is released at once.
 func renewalLock(l string) (func(), error) {
 	if err := os.MkdirAll(filepath.Dir(l), 0o700); err != nil {
 		return nil, err
@@ -325,23 +328,23 @@ func renewalLock(l string) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	for deadline := time.Now().Add(lockBound); ; time.Sleep(lockPoll) {
-		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-		if err == nil {
-			return func() { f.Close() }, nil
-		}
-		if !errors.Is(err, syscall.EWOULDBLOCK) || !time.Now().Before(deadline) {
+	got := make(chan error, 1)
+	go func() { got <- syscall.Flock(int(f.Fd()), syscall.LOCK_EX) }()
+	select {
+	case err := <-got:
+		if err != nil {
 			f.Close()
-			if errors.Is(err, syscall.EWOULDBLOCK) {
-				return nil, fmt.Errorf("another bronzewardctl process holds the renewal lock %s and did not release it within four minutes; nothing was changed", l)
-			}
 			return nil, err
 		}
+		return func() { f.Close() }, nil
+	case <-time.After(lockBound):
+		go func() { <-got; f.Close() }()
+		return nil, fmt.Errorf("another bronzewardctl process holds the renewal lock %s and did not release it within four minutes; nothing was changed", l)
 	}
 }
 
-// lockBound is how long renewalLock waits for another process's lock, polling every lockPoll.
-var lockBound, lockPoll = 4 * time.Minute, 100 * time.Millisecond
+// lockBound is how long renewalLock waits for another process's lock.
+var lockBound = 4 * time.Minute
 
 // discover reads the provider's discovery document through issuerClient; it returns that client
 // and a context that carries it, which ends after d. The issuer is checked first, as context add
