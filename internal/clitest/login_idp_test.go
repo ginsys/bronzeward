@@ -269,12 +269,14 @@ func TestLoginIdentityProvider(t *testing.T) {
 		f.do(q, http.StatusOK)
 	}
 
-	if len(run) != len(steps) {
-		t.Fatalf("%d steps defined, %d listed in steps", len(run), len(steps))
+	for i, name := range steps {
+		if run[name] == nil || slices.Contains(steps[:i], name) {
+			t.Fatalf("step %s is listed twice, or listed but not defined", name)
+		}
 	}
-	for _, name := range steps {
-		if run[name] == nil {
-			t.Fatalf("step %s is listed but not defined", name)
+	for name := range run {
+		if !slices.Contains(steps, name) {
+			t.Fatalf("step %s is defined but not listed", name)
 		}
 	}
 
