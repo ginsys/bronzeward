@@ -274,7 +274,10 @@ scan() {
   for c in "$BW_A" "$BW_DEV_IDP_CONTAINER"; do
     grep -qxF -- "$c" <<<"$names" || die "no container $c to read the log of; run scan before session stop"
   done
-  rm -rf -- "$logs"
+  # Every scan removes its log copies, so a scan-logs here is not this scan's: removing it would
+  # remove whatever it holds, a session password included.
+  [ ! -e "$logs" ] && [ ! -L "$logs" ] ||
+    die "$logs exists, and this scan did not make it; read it, remove it, and run scan again"
   scan_made+=("$logs")
   mkdir -p -- "$logs"
   # grep's status 1 is "none of them", which A's check above rules out; any other failure stops.

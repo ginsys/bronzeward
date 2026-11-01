@@ -164,6 +164,19 @@ if [ "$rc" != 0 ] && [[ $out == *"did not plant it"* ]] && [ "$kept" = BWSYNTH-p
   ok "a file already at a control's path fails the scan, and is kept as it was"
 else bad "existing control path: rc=$rc kept=$kept controls=$(controls): $out"; fi
 
+# A scan-logs that this scan did not make, with a control-named file that holds a session password:
+# the scan refuses before it removes anything, and the file is kept.
+mkdir -p "$repo/.dev/participants/scan-logs"
+printf 'BWSYNTH-pw-abcd1234-5678\n' >"$repo/.dev/participants/scan-logs/.bw-scan-control"
+out=$(run scan)
+rc=$?
+kept=$(cat "$repo/.dev/participants/scan-logs/.bw-scan-control" 2>/dev/null)
+rm -rf "$repo/.dev/participants/scan-logs"
+if [ "$rc" != 0 ] && [[ $out == *"scan-logs exists, and this scan did not make it"* ]] && [ "$kept" = BWSYNTH-pw-abcd1234-5678 ] &&
+  [ "$(controls)" = 0 ]; then
+  ok "an earlier scan-logs fails the scan, and is kept as it was"
+else bad "existing scan-logs: rc=$rc kept=$kept controls=$(controls): $out"; fi
+
 # A symbolic link below a root, to a log outside it that holds a session password: the scan follows it.
 mkdir -p "$t/outside"
 printf 'BWSYNTH-pw-abcd1234-5678\n' >"$t/outside/log"
