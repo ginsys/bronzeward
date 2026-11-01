@@ -511,7 +511,7 @@ func (f *fixture) protectedFiles(dir string) []string {
 }
 
 // journeyIDs are the generated identifiers, times and ports a journey's kept output replaces.
-var journeyIDs = regexp.MustCompile(`\b(drf|frv|frg|prv|prf|asr|asg|ing|req|cl|mch|ep|act|op|rel|ibr)_[a-z2-7]{26}\b|\d{4}-\d\d-\d\dT[0-9:.]+Z|127\.0\.0\.1:\d+`)
+var journeyIDs = regexp.MustCompile(`\b(drf|frv|frg|prv|prf|asr|asg|ing|req|cl|mch|ep|act|op|rel|ibr|pln|apr|idn)_[a-z2-7]{26}\b|\d{4}-\d\d-\d\dT[0-9:.]+Z|127\.0\.0\.1:\d+`)
 
 // generatedBase64 is a run of base64 of 40 characters or more, as a certificate or ID the test
 // generates is written in a rendered configuration: standard, or URL-safe and padded, as the

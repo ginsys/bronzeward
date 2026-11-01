@@ -1,0 +1,75 @@
+# Shared conformance case records (docs/spec/client-contracts.md §12) of approval (#353), run by
+# approvals_test.go TestApprovals against a disposable bronzeward serve with an OpenBao provider
+# (the test's, through baotest) and a Talos stand-in (talostest) on loopback, behind the in-process
+# TLS injector. Data is synthetic: fixture-issuer tokens for the humans h-all (author, publisher
+# and approver) and h-recovery (recovery-admin), and the fixture's automation token, which holds
+# viewer. The machine is published with an assignment and has no Applied release, so each case
+# approves an adopt plan. Before each case every proposed plan of the machine is cancelled.
+#
+# Each case sends approve <plan> with the plan ID typed back as one line of standard input,
+# POST /api/v1/plans/{id}/approvals, a route without If-Match. AUTH-04 runs first, while the
+# automation token's epoch is current. AMB-05 and AMB-07 first commit a new epoch in the database
+# as a recovery entry does (write-cases.yaml), so serve's controller, now of an earlier epoch,
+# commits none of their approvals. REC-03 runs last, after the other approval tests: its recovery
+# entry leaves the machine's scope unaccounted.
+
+- id: AUTH-04
+  setup: the context "auto" holds the automation token; a proposed adopt plan
+  action: bronzewardctl --context auto approve pln_..., the plan ID typed back
+  exchange:
+    - GET /api/v1/plans/pln_... and the display's reads
+    - "POST /api/v1/plans/pln_.../approvals, headers: Idempotency-Key, Bronzeward-Expected-Epoch"
+  fault: none; the route is human-only and the credential is automation
+  expect:
+    client: after the prompt and before sending, warns that the route is for a person signed in; sends once
+    server: answers 403 forbidden with humanOnly; no act; the plan stays proposed
+    shown: '"is for a person signed in, not an automation token: the server refuses it", then the 403 and "This needs a person signed in, not an automation token"; standard output empty; exit 1'
+    absent: [token in stdout, stderr, argv]
+
+- id: AMB-05
+  setup: a new epoch committed first; a proposed adopt plan in it
+  action: bronzewardctl --context human approve pln_..., the plan ID typed back
+  exchange:
+    - POST /api/v1/plans/pln_.../approvals, committed, its answer dropped
+    - GET /api/v1/recovery, the confirming read, under the next new epoch
+    - GET /api/v1/plans/pln_..., the resource read
+  fault: the injector drops the POST's connection after the server answered it, then commits a new epoch
+  expect:
+    client: does not repeat; sets the write aside and reads the plan
+    server: receives one POST; one act; the plan approved
+    shown: '"set aside, not repeated: the epoch is now ep_..., not the reference epoch", "shows state approved, approval apr_...", the plan show command, the repeat flags; standard output empty; exit 3'
+    absent: [token in stdout, stderr, argv]
+
+- id: AMB-07
+  setup: as AMB-05, signed in as the human h-all
+  action: bronzewardctl --context human approve pln_..., the plan ID typed back
+  exchange:
+    - POST /api/v1/plans/pln_.../approvals, committed, its answer dropped
+    - GET /api/v1/recovery, the confirming read, still the reference epoch
+    - POST /api/v1/plans/pln_.../approvals, the same key and Bronzeward-Expected-Epoch, after the new epoch
+    - GET /api/v1/plans/pln_...
+  fault: as AMB-05, but the new epoch is committed when the repeat arrives, after the confirming read
+  expect:
+    client: sets the write aside on 409 conflict with request and epoch; sends no new key
+    server: answers the repeat 409 conflict from the earlier epoch's record; one act
+    shown: '"set aside, not repeated: the key''s record is from an earlier epoch", "shows state approved, approval apr_..."; standard output empty; exit 3'
+    absent: [token in stdout, stderr, argv]
+
+- id: REC-03
+  setup: >-
+    serve restarted with -recovery-start; h-recovery enters recovery mode with POST
+    /api/v1/recovery/entries, which marks the machine's scope pre-restore-unaccounted; then serve
+    restarted without the flag
+  action: on the recovery start, plan create ... --operation apply-config and approve of the latest plan; on the normal start, plan create again
+  exchange:
+    - "recovery start: POST /api/v1/plans; POST /api/v1/plans/pln_.../approvals"
+    - "normal start: POST /api/v1/plans"
+  fault: none
+  expect:
+    client: >-
+      reads each recovery start refusal, without scope, as the process's restriction and records
+      startMode recovery; reads the normal start's refusal, with scope, as that scope's and leaves
+      the start mode normal
+    server: answers 409 recovery-mode-active without scope on the recovery start, then with machine and scope pre-restore-unaccounted; no act
+    shown: '"Recovery mode: the server was started for recovery: it refuses plan creation and approval", twice, exit 1; then "Recovery mode: the scope of machine mch_... is pre-restore-unaccounted.", exit 1'
+    absent: [token in stdout, stderr, argv]

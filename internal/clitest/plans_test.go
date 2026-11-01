@@ -26,6 +26,7 @@ type planEnv struct {
 	st        *standIn
 	rel0, rel string
 	ctl       func(...string) result
+	ctlIn     func(stdin string, args ...string) result // ctl with stdin as standard input
 }
 
 // create is plan create for the machine and rel with operation.
@@ -185,30 +186,44 @@ var planCases = map[string]func(*testing.T, *planEnv){
 	},
 }
 
-// TestPlans runs plan create, show and cancel (#352) through the CLI against a server with a
-// provider and a Talos stand-in: T19's refusals and their next steps, the cases of
-// testdata/plan-cases.yaml, T20's display of a proposed, cancelled, expired and committed plan,
-// and T22's cancellation of a committed plan whose attempt is recorded, which goes on.
-func TestPlans(t *testing.T) {
-	f, bao := startProvider(t, "viewer")
-	in := newInjector(t, f.base)
-	in.writing = true
-	b, err := os.ReadFile("testdata/plan-cases.yaml")
+// cases reads the ids a testdata file of case records holds, in its order, and fails unless they
+// are exactly run's.
+func cases[T any](t *testing.T, file string, run map[string]T) []string {
+	t.Helper()
+	b, err := os.ReadFile(file)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var records []struct {
 		ID string `yaml:"id"`
 	}
-	if err := yaml.Unmarshal(b, &records); err != nil || len(records) != len(planCases) {
-		t.Fatalf("plan-cases.yaml holds %d records, %v; planCases has %d", len(records), err, len(planCases))
+	if err := yaml.Unmarshal(b, &records); err != nil || len(records) != len(run) {
+		t.Fatalf("%s holds %d records, %v; the test runs %d", file, len(records), err, len(run))
 	}
+	var ids []string
+	for _, r := range records {
+		if _, ok := run[r.ID]; !ok {
+			t.Fatalf("%s records %s, which the test does not run", file, r.ID)
+		}
+		ids = append(ids, r.ID)
+	}
+	return ids
+}
+
+// newPlanEnv starts a server with a provider and a Talos stand-in behind the injector, the oidc
+// context "human" signed in as h-all, and publishes the seeded machine twice: rel0 from the seeded
+// draft with its import base only, so without an assignment, then rel with one, which is the
+// machine's Desired.
+func newPlanEnv(t *testing.T) *planEnv {
+	f, bao := startProvider(t, "viewer")
+	in := newInjector(t, f.base)
+	in.writing = true
 	f.want(f.ctl(nil, "", "context", "add", "human", "--server", in.URL, "--certificate-authority", in.ca,
 		"--issuer", f.iss.URL, "--client-id", "BWSYNTH-cli", "--audience", "bronzeward", "--oidc-token-file", f.humanFile()), 0, "credential oidc")
 	f.store(f.humanFile(), f.mint("h-all", ""), "")
 	e := &planEnv{f: f, in: in, s: f.seed()}
-	e.ctl = func(args ...string) result {
-		r := f.scan(f.exec(nil, "", args...), args)
+	e.ctlIn = func(stdin string, args ...string) result {
+		r := f.scan(f.exec(nil, stdin, args...), args)
 		if e.st == nil {
 			return r
 		}
@@ -219,6 +234,7 @@ func TestPlans(t *testing.T) {
 		}
 		return r
 	}
+	e.ctl = func(args ...string) result { return e.ctlIn("", args...) }
 	e.st = f.newStandIn(t, bao.b, e.s, e.ctl)
 	h := []string{"--context", "human"}
 	release := regexp.MustCompile(`rel_[a-z2-7]{26}`)
@@ -244,6 +260,18 @@ func TestPlans(t *testing.T) {
 	if e.rel = release.FindString(r.out); e.rel0 == "" || e.rel == "" {
 		t.Fatalf("the publications named releases %q and %q", e.rel0, e.rel)
 	}
+	return e
+}
+
+// TestPlans runs plan create, show and cancel (#352) through the CLI against a server with a
+// provider and a Talos stand-in: T19's refusals and their next steps, the cases of
+// testdata/plan-cases.yaml, T20's display of a proposed, cancelled, expired and committed plan,
+// and T22's cancellation of a committed plan whose attempt is recorded, which goes on.
+func TestPlans(t *testing.T) {
+	ids := cases(t, "testdata/plan-cases.yaml", planCases)
+	e := newPlanEnv(t)
+	f, in := e.f, e.in
+	h := []string{"--context", "human"}
 	m := "'" + e.s.machine + "'"
 
 	t.Run("T19 refusals", func(t *testing.T) {
@@ -270,13 +298,9 @@ func TestPlans(t *testing.T) {
 		}
 	})
 
-	for _, rec := range records {
-		run, ok := planCases[rec.ID]
-		if !ok {
-			t.Fatalf("plan-cases.yaml records %s, which TestPlans does not run", rec.ID)
-		}
+	for _, id := range ids {
 		e.cancelAll(t)
-		t.Run(rec.ID, func(t *testing.T) { run(t, e) })
+		t.Run(id, func(t *testing.T) { planCases[id](t, e) })
 	}
 	e.cancelAll(t)
 	// The cases' epochs, committed in the database, superseded serve's controller, which adopts and
