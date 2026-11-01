@@ -536,7 +536,10 @@ Not rendered yet: publish to see each machine's configuration.   # G5
 
 A profile lists fragment revision IDs, not names (`internal/api/sources.go:72-78`;
 `docs/operator/walkthrough.md:199`); the CLI resolves each name to its revision in the draft and
-says that the profile pins it. The draft's ETag changes on every write
+says that the profile pins it. A name can resolve to another revision later. So when the outcome
+of `profile set` is unknown, the block of
+[client contracts §8.4](client-contracts.md#84-idempotency-and-ambiguous-responses) item 4 names the revision IDs it
+sent, and a repeat takes only those IDs and resolves nothing. The draft's ETag changes on every write
 (`internal/api/drafts.go:174-180`). **Proposed:** the
 CLI remembers the last ETag it saw for each draft in the context, sends it as `If-Match`, and
 stores the new one from each response. If another author changed the draft:

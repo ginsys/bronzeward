@@ -94,14 +94,27 @@ func (e *env) profileSet(args []string) error {
 		return err
 	}
 	names := strings.Split(fragments, ",")
+	if rp != nil {
+		// A name resolved now can pin another revision than the first attempt did, and a changed body
+		// executes where that attempt left no record (§8.4 item 4): a repeat gives the revisions sent.
+		for _, n := range names {
+			if !strings.HasPrefix(n, "frv_") {
+				return usageError{fmt.Errorf("a repeat of profile set gives --fragments as the revisions the outcome-unknown block printed, not %s; nothing was sent", client.ShellWord(n))}
+			}
+		}
+	}
 	var pinned []string
 	w := &client.Write{Method: http.MethodPut, Path: "/drafts/" + url.PathEscape(draft) + "/profiles/" + url.PathEscape(pos[0]),
 		Draft: draft, IfMatch: rf.ifMatch.v, Repeat: rp, Check: "draft show " + client.ShellWord(draft),
 		Read: entryRead(draft, apitypes.SourceEntryKindProfile, pos[0])}
 	return e.writeAfter(func(c *client.Client) (err error) {
-		if pinned, err = pins(c, draft, names); err == nil {
-			w.Body, err = json.Marshal(apitypes.ProfileInput{Fragments: pinned})
+		if rp != nil {
+			pinned = names
+		} else if pinned, err = pins(c, draft, names); err != nil {
+			return err
 		}
+		w.Input = "--fragments " + client.ShellWord(strings.Join(pinned, ","))
+		w.Body, err = json.Marshal(apitypes.ProfileInput{Fragments: pinned})
 		return err
 	}, w, func(_ *client.Client, r *client.Response) ([]string, error) {
 		var pairs []string

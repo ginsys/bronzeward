@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -24,6 +25,9 @@ type draftFake struct {
 	writes []string
 	// unreadable adds an entry no SourceEntry decodes: its name is a number.
 	unreadable bool
+	// lost redirects a profile PUT, so its outcome is unknown; reads records each GET's route.
+	lost  bool
+	reads []string
 }
 
 func (f *draftFake) etag() string { return fmt.Sprintf(`"%d-BWSYNTH"`, f.rev) }
@@ -47,8 +51,16 @@ func (f *draftFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		body, _ := io.ReadAll(r.Body)
 		f.writes = append(f.writes, fmt.Sprintf("%s if-match=%s type=%s body=%s", route, r.Header.Get("If-Match"), r.Header.Get("Content-Type"), body))
+	} else {
+		f.reads = append(f.reads, route)
+	}
+	if f.lost && r.Method == http.MethodPut && strings.Contains(route, "/profiles/") {
+		http.Redirect(w, r, "https://BWSYNTH.example.invalid/", http.StatusTemporaryRedirect)
+		return
 	}
 	switch route {
+	case "GET /recovery":
+		fmt.Fprint(w, `{}`)
 	case "GET /server":
 		fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":2,"startMode":"normal"}`)
 	case "GET /identity":
@@ -92,8 +104,72 @@ func (f *draftFake) took() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	w := f.writes
-	f.writes = nil
+	f.writes, f.reads = nil, nil
 	return w
+}
+
+// TestProfileSetRepeat: the outcome-unknown block of profile set names the revisions it resolved;
+// a repeat takes only those, resolves nothing, and is refused after item 3's reads alone when the
+// epoch differs (client-contracts.md §8.4 item 4).
+func TestProfileSetRepeat(t *testing.T) {
+	f := &draftFake{rev: 2, state: "open"}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	step := func(name string, args []string, code int, errText string, reads []string, writes ...string) {
+		t.Helper()
+		var o, e bytes.Buffer
+		got := run(args, &o, &e)
+		f.mu.Lock()
+		read := f.reads
+		f.mu.Unlock()
+		took := f.took()
+		if got != code || !strings.Contains(e.String(), errText) {
+			t.Errorf("%s: exit %d, stderr %q; want %d, %q", name, got, e.String(), code, errText)
+		}
+		if reads != nil && strings.Join(read, ", ") != strings.Join(reads, ", ") {
+			t.Errorf("%s: read %v, want %v", name, read, reads)
+		}
+		if strings.Join(took, "\n") != strings.Join(writes, "\n") {
+			t.Errorf("%s: sent\n  %s\nwant\n  %s", name, strings.Join(took, "\n  "), strings.Join(writes, "\n  "))
+		}
+	}
+	const put = `PUT /drafts/drf_BWSYNTH/profiles/workers if-match="2-BWSYNTH" type=application/json body={"fragments":["frv_BWSYNTH-proposed","frv_BWSYNTH-head"]}`
+	step("show keeps the ETag", []string{"draft", "show", "drf_BWSYNTH"}, 0, "", nil)
+	f.mu.Lock()
+	f.lost = true
+	f.mu.Unlock()
+	step("a lost write names the revisions it pinned", []string{"profile", "set", "workers", "--draft", "drf_BWSYNTH", "--fragments", "worker-labels,worker-sysctls"},
+		3, "give the same input, with --fragments 'frv_BWSYNTH-proposed,frv_BWSYNTH-head', and: --idempotency-key ", nil, put)
+	f.mu.Lock()
+	f.lost = false
+	f.mu.Unlock()
+	repeat := []string{"profile", "set", "workers", "--draft", "drf_BWSYNTH", "--idempotency-key", "BWSYNTH-aaaaaaaaaaaaaaa",
+		"--expect-principal", "svc_BWSYNTH", `--if-match="2-BWSYNTH"`}
+	step("a repeat that names a fragment", append(repeat, "--expect-epoch", "ep_BWSYNTH-1", "--fragments", "worker-labels,frv_BWSYNTH-head"),
+		2, "a repeat of profile set gives --fragments as the revisions the outcome-unknown block printed, not 'worker-labels'", []string{})
+	step("a repeat at another epoch reads only item 3's", append(repeat, "--expect-epoch", "ep_BWSYNTH-0", "--fragments", "frv_BWSYNTH-proposed,frv_BWSYNTH-head"),
+		2, "not the given --expect-epoch ep_BWSYNTH-0", []string{"GET /identity", "GET /recovery"})
+	step("a repeat resolves nothing and sends the same body", append(repeat, "--expect-epoch", "ep_BWSYNTH-1", "--fragments", "frv_BWSYNTH-proposed,frv_BWSYNTH-head"),
+		0, "", []string{"GET /identity", "GET /recovery", "GET /server"}, put)
+
+	// A command whose prep reads: a repeat at another epoch is refused before those reads.
+	prepRead := false
+	e := &env{output: "table", out: io.Discard, err: io.Discard}
+	err := e.writeAfter(func(c *client.Client) error {
+		prepRead = true
+		_, err := c.Get("/drafts/drf_BWSYNTH")
+		return err
+	}, &client.Write{Method: http.MethodDelete, Path: "/drafts/drf_BWSYNTH/profiles/workers", Draft: "drf_BWSYNTH",
+		Repeat: &client.Repeat{Key: "BWSYNTH-aaaaaaaaaaaaaaa", Epoch: "ep_BWSYNTH-0", Principal: "svc_BWSYNTH"}}, nil)
+	f.mu.Lock()
+	read := f.reads
+	f.mu.Unlock()
+	f.took()
+	var refused client.RefusedRepeat
+	if !errors.As(err, &refused) || prepRead || strings.Join(read, ", ") != "GET /identity, GET /recovery" {
+		t.Errorf("a repeat at another epoch with a reading prep: %v, prep ran %v, read %v; want refused before prep", err, prepRead, read)
+	}
 }
 
 // automationContext records the context "lab" on srv with a synthetic automation token.
