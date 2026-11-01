@@ -51,7 +51,7 @@ func ReadTokens(p string) (*Tokens, error) {
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	} else if err != nil {
-		return nil, fmt.Errorf("token file %s: %w", p, err)
+		return nil, fmt.Errorf("token file %s: %w", printable(p), err)
 	}
 	if automation(b) {
 		return nil, automationFile(p)
@@ -59,10 +59,10 @@ func ReadTokens(p string) (*Tokens, error) {
 	var t Tokens
 	if !own(b) || json.Unmarshal(b, &t) != nil {
 		return nil, fmt.Errorf("token file %s holds neither bronzewardctl's tokens nor an automation token; bronzewardctl leaves it as it is. "+
-			"Point oidc.tokenFile, or BRONZEWARD_TOKEN_FILE, at bronzewardctl's own token file, or move this file away", p)
+			"Point oidc.tokenFile, or BRONZEWARD_TOKEN_FILE, at bronzewardctl's own token file, or move this file away", printable(p))
 	}
 	if t.AccessToken == "" {
-		return &t, fmt.Errorf("token file %s: %w", p, ErrNotTokenFile)
+		return &t, fmt.Errorf("token file %s: %w", printable(p), ErrNotTokenFile)
 	}
 	return &t, nil
 }
@@ -100,7 +100,7 @@ var ErrNotTokenFile = errors.New("it holds no access token")
 func automation(b []byte) bool { return bytes.HasPrefix(bytes.TrimSpace(b), []byte("bwt_")) }
 
 func automationFile(p string) error {
-	return fmt.Errorf("token file %s holds an automation token; bronzewardctl neither signs in with it nor writes or clears it", p)
+	return fmt.Errorf("token file %s holds an automation token; bronzewardctl neither signs in with it nor writes or clears it", printable(p))
 }
 
 // operators refuses to replace or remove a file that holds an automation token (§9.2 item 3).
