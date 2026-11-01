@@ -24,6 +24,28 @@ const redirected = async () => (await (await fetch(`${CONTROL}/redirected`)).jso
 const writeAnswers = async () => (await answers()).filter((a) => a.startsWith("/clusters ") && a !== "/clusters 200");
 const result = () => $('[data-testid="write-result"]');
 const notice = () => $('[data-testid="write-notice"]');
+// The page's own view of each write it sends, in order: the status its fetch resolved with, or
+// "failed" when the fetch rejected, as on a closed connection. Watched from before the form is sent.
+const watch = () =>
+  browser.execute(() => {
+    const w = window as unknown as { seenWrites: string[]; watched?: boolean };
+    w.seenWrites = [];
+    if (w.watched === true) return;
+    w.watched = true;
+    const real = window.fetch.bind(window);
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const write = (init?.method ?? "GET") !== "GET";
+      try {
+        const res = await real(input, init);
+        if (write) w.seenWrites.push(String(res.status));
+        return res;
+      } catch (e) {
+        if (write) w.seenWrites.push("failed");
+        throw e;
+      }
+    };
+  });
+const seen = () => browser.execute(() => (window as unknown as { seenWrites: string[] }).seenWrites);
 const sends = (n: number) => browser.waitUntil(async () => (await writes()).length >= n, { timeout: 30_000, timeoutMsg: `the page did not send the write ${n} times` });
 
 // Signs in as h-author on the disposable deployment and opens Add cluster from the machine list.
@@ -49,6 +71,7 @@ async function add(take: Step[], f: Faults = {}, flags: Record<string, string> =
   const name = await open(flags);
   await fill(name);
   await faults({ upstream: at, steps: { path: "/clusters", take }, ...f });
+  await watch();
   await $("main form").$("button=Add cluster").click();
   return name;
 }
@@ -96,6 +119,8 @@ describe("the write views (#338)", () => {
     const name = await add(["drop"]);
     await expect(result()).toHaveText(expect.stringContaining(`Cluster ${name} recorded as`), { wait: 20_000 });
     expect((await result().getText()).includes(REPLAYED)).toBe(false);
+    // The page met a closed connection, not an answer, then the repeat's 201.
+    expect(await seen()).toEqual(["failed", "201"]);
     const { key } = await oneWrite(2);
     // The drop showed the unknown notice, so it shows the result until dismissed (B11).
     expect(await notice().getText()).toContain(`Saved (the server answered 201). Key ${key}`);
@@ -126,6 +151,7 @@ describe("the write views (#338)", () => {
     await add(["commit-drop", "503", "503", "503"]);
     await expect(notice()).toHaveText(expect.stringContaining(unknown("the server answered 503 dependency-unavailable")), { wait: 30_000 });
     const { key } = await oneWrite(4);
+    expect(await seen()).toEqual(["failed", "503", "503", "503"]);
     expect(await notice().getText()).toContain(`Key ${key}, POST /api/v1/clusters. To learn the outcome, read /clusters.`);
     expect(await result().getText()).not.toContain("Not saved");
   });
@@ -156,6 +182,7 @@ describe("the write views (#338)", () => {
     const name = await add(["commit-drop-epoch"]);
     await expect(notice()).toHaveText(expect.stringContaining(SET_ASIDE), { wait: 20_000 });
     await oneWrite(1);
+    expect(await seen()).toEqual(["failed"]);
     // The notice's buttons follow its text, in the same block.
     expect(await notice().parentElement().$("button=Repeat exactly").isEnabled()).toBe(false);
     // The notice's own way out asks nothing; a link elsewhere still does (the leave guard's case).
@@ -175,6 +202,7 @@ describe("the write views (#338)", () => {
     await add(["commit-drop", "epoch"]);
     await expect(notice()).toHaveText(expect.stringContaining(SET_ASIDE), { wait: 20_000 });
     await oneWrite(2);
+    expect(await seen()).toEqual(["failed", "409"]);
     expect(await writeAnswers()).toEqual(["/clusters 201", "/clusters 409"]);
   });
 
@@ -182,14 +210,17 @@ describe("the write views (#338)", () => {
     await add(["drop", "epoch"]);
     await expect(notice()).toHaveText(expect.stringContaining(SET_ASIDE), { wait: 20_000 });
     await oneWrite(2);
+    expect(await seen()).toEqual(["failed", "412"]);
     expect(await writeAnswers()).toEqual(["/clusters 412"]);
   });
 
   it("AUTH-07: a renewal for another subject while the write is pending sets it aside", async function () {
     this.timeout(90_000);
     // expires_in 24 s: the renewal comes 12 s after the sign-in, while the write's answer is held.
-    await add(["commit-drop"], { held: "/clusters" }, { rotate: "1", lifetime: "24", "renew-as": "h-publisher" });
+    await add(["commit-drop"], { heldAnswered: "/clusters" }, { rotate: "1", lifetime: "24", "renew-as": "h-publisher" });
     await browser.waitUntil(async () => (await holding()).includes("/clusters"), { timeout: 20_000, timeoutMsg: "the write was not held" });
+    // Held only once the server answered it, so the write committed before the renewal below.
+    expect(await writeAnswers()).toEqual(["/clusters 201"]);
     await expect($('[data-testid="status"]')).toHaveText(PRINCIPAL_CHANGED, { wait: 30_000 });
     // Set aside while its answer is still held: the notice shows at once, with no dismissal.
     await expect(notice()).toHaveText(expect.stringContaining(SET_ASIDE), { wait: 20_000 });
@@ -199,6 +230,8 @@ describe("the write views (#338)", () => {
     await notice().parentElement().$("button=Dismiss").waitForExist({ timeout: 20_000 });
     expect(await notice().getText()).toContain(SET_ASIDE);
     await oneWrite(1);
+    // The held answer was dropped: the page met a closed connection.
+    expect(await seen()).toEqual(["failed"]);
   });
 
   it("a second submit while the write is in flight sends nothing new", async () => {

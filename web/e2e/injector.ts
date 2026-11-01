@@ -10,8 +10,8 @@ export interface Faults {
   // COMP-02: a Deprecation header on the answers to this path.
   deprecate?: string;
   // A redirect for this path, after any hold, which the page refuses: a transport failure as the
-  // page sees it (client contracts §6 item 7). A connection closed here would reach the page as the
-  // static host's 502.
+  // page sees it (client contracts §6 item 7). A connection closed here closes the page's too (the
+  // static host aborts its answer), so the page meets the same failure.
   redirect?: string;
   // The answer to this path held this long, in milliseconds; with a query, only to that query.
   hold?: { path: string; ms: number; query?: string };
@@ -19,6 +19,9 @@ export interface Faults {
   // control server), so a case orders a late answer after what it asserted first, whatever the
   // runner's timing.
   held?: string | string[];
+  // As `held`, for a write that takes a step: held after the server answered it and that answer
+  // was logged, so the case knows the write committed before it acts.
+  heldAnswered?: string;
   // A 404 not-found problem for this path, instead of the server's answer.
   missing?: string;
   // A 403 identity-revoked problem for this path, instead of the server's answer.
@@ -96,6 +99,11 @@ export function startInjector(upstream: string, port: number): Promise<Injector>
       .end(JSON.stringify({ type: `urn:bronzeward:problem:${code}`, title: code, status, detail: "injected", instance: "req-injected" }));
     const forwarded = () => Object.fromEntries(Object.entries(req.headers).filter(([k]) => k !== "host" && k !== "connection")) as Record<string, string>;
     const passed = (up: Response) => Object.fromEntries([...up.headers].filter(([k]) => !["content-length", "content-encoding", "transfer-encoding", "connection"].includes(k)));
+    // Holds this answer until the case releases it (POST /release), and logs that it is held.
+    const hold = () => {
+      inj.holding.push(route);
+      return new Promise<void>((go) => waiting.push({ go, sent: new Promise((done) => res.once("close", () => done())) }));
+    };
     const answerStep = async (step: Step) => {
       const sent = new Uint8Array(await body(req));
       if (step === "drop") return req.socket.destroy();
@@ -105,6 +113,7 @@ export function startInjector(upstream: string, port: number): Promise<Injector>
       const up = await fetch((f.upstream ?? upstream) + (req.url ?? "/"), { method: req.method!, headers: forwarded(), body: sent, redirect: "manual" });
       const out = Buffer.from(await up.arrayBuffer());
       inj.answered.push(`${route}${search} ${up.status}`);
+      if (f.heldAnswered === route) await hold();
       if (step === "commit-500") return problem(500, "internal-error");
       if (step === "epoch") return res.writeHead(up.status, passed(up)).end(out);
       req.socket.destroy();
@@ -115,10 +124,7 @@ export function startInjector(upstream: string, port: number): Promise<Injector>
     if (write) inj.writes.push(`${req.method} ${route} ${req.headers["idempotency-key"]} ${req.headers["bronzeward-expected-epoch"]}`);
     void (async () => {
       if (f.hold?.path === route && (f.hold.query ?? search) === search) await new Promise((r) => setTimeout(r, f.hold!.ms));
-      if ([f.held ?? []].flat().includes(route)) {
-        inj.holding.push(route);
-        await new Promise<void>((go) => waiting.push({ go, sent: new Promise((done) => res.once("close", () => done())) }));
-      }
+      if ([f.held ?? []].flat().includes(route)) await hold();
       const step = write && f.steps?.path === route ? f.steps.take.shift() : undefined;
       // A step that cannot be taken (the epoch refused) closes the connection, and is logged.
       if (step !== undefined) return void answerStep(step).catch((e: unknown) => (console.error(`injector step ${step}: ${String(e)}`), req.socket.destroy()));

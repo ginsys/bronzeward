@@ -99,7 +99,8 @@ export class Writes {
   // it after the write's own outcome is settled, so the write's notice survives the page's change.
   onEnded: ((e: Ending) => void) | undefined;
   // The shell's handling of a recovery start's process refusal (§8.5 item 1), bound while it is
-  // shown. It is told once the write's outcome is settled.
+  // shown. It is told once the write's outcome is settled, or at once when the read that learns
+  // the epoch of the write's answer meets it, so a stalled answer body cannot hide it.
   onPreEntry: ((p: Problem) => void) | undefined;
   private readonly all = new Set<Write>();
   private readonly listeners = new Set<() => void>();
@@ -156,7 +157,14 @@ export class Writes {
       told = true;
       this.onEnded?.(e);
     };
-    const end: End = { now: tell };
+    // A recovery start's process refusal reaches the shell the same way, once.
+    let toldPre = false;
+    const tellPre = (p: Problem) => {
+      if (toldPre) return;
+      toldPre = true;
+      this.onPreEntry?.(p);
+    };
+    const end: End = { now: tell, nowPre: tellPre };
     // A run that throws settles the write too: unknown once an attempt may have committed.
     const failed = (): Outcome => (w.ambiguous ? { kind: "unknown", why: PAGE_FAILED, problem: null } : { kind: "not-done", why: PAGE_FAILED, problem: null });
     w.running = this.run(w, end).catch(failed).then((r) => {
@@ -177,7 +185,7 @@ export class Writes {
       }
       this.changed();
       if (end.e !== undefined) tell(end.e);
-      else if (end.pre !== undefined) this.onPreEntry?.(end.pre);
+      else if (end.pre !== undefined) tellPre(end.pre);
       return o;
     });
     this.changed();
