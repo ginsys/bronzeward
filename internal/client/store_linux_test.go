@@ -152,6 +152,29 @@ func TestKeyringLockedRefused(t *testing.T) {
 	}
 }
 
+// TestKeyringErrorWithLineFeedIsShownEscaped: the credential store's error text is not the
+// client's. With a line feed in it, the error that reaches the terminal through Shown, the sink,
+// holds no line feed of it, where the error's own text does.
+func TestKeyringErrorWithLineFeedIsShownEscaped(t *testing.T) {
+	get := keyringGetCall
+	t.Cleanup(func() { keyringGetCall = get })
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", home)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path="+filepath.Join(home, "bus"))
+	x := Context{Name: "store", Server: "https://bw.example.invalid", Credential: "oidc",
+		OIDC: &OIDC{Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli"}}
+	keyringGetCall = func(string, string) (string, error) { return "", errors.New("BWSYNTH-no-answer\nFORGED") }
+	_, err := ClearStored(&x, false)
+	if err == nil || !strings.Contains(err.Error(), "BWSYNTH-no-answer\nFORGED") {
+		t.Fatalf("context remove on a store that fails: %v, want its error with the line feed (the control)", err)
+	}
+	if shown := Shown(x.fail(err)); strings.Contains(shown, "\n") || !strings.Contains(shown, `BWSYNTH-no-answer\x0aFORGED`) {
+		t.Errorf("the error as shown: %q, want the line feed escaped", shown)
+	}
+}
+
 // TestNoInputNeverPrompts checks that with --no-input no call to the credential store can show its
 // unlock prompt, before the renewal lock as under it: a locked store is refused instead.
 func TestNoInputNeverPrompts(t *testing.T) {
