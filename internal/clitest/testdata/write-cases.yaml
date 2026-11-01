@@ -130,7 +130,7 @@
     - the refresh grant at the provider
   fault: the injector answers the first POST 401 unauthenticated without forwarding it
   expect:
-    client: renews once, finds another subject, and sets the write aside without repeating it; the changed-subject half is #263's
+    client: renews once, finds another subject, and sets the write aside without repeating it. This is the set-aside half; the change shown is the cases.yaml record AUTH-07, which cli_test.go TestSharedCases runs with no write pending. This test checks the set-aside line, not a change notice beside it
     server: receives no POST; no act
     shown: '"set aside, not repeated: the credential now names <issuer>|h-author, not the principal <issuer>|h-all"; standard output empty; exit 3'
     absent: [token in stdout, stderr, argv, state directory]
