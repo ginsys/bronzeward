@@ -1,0 +1,41 @@
+# Shared conformance case records (docs/spec/client-contracts.md §12) of bronzewardctl's recovery
+# enter (decision T32 of #256, ginsys/bronzeward#361), run by recovery_test.go TestRecovery: exactly
+# the cases recorded here, in this order, against a disposable bronzeward serve behind the
+# in-process TLS injector. Both run on one database: first a normal start, then a recovery start of
+# it (serve -recovery-start), as after a restore.
+# Data is synthetic: fixture-issuer tokens for h-recovery, which holds recovery-admin, and one
+# seeded cluster and machine. The server's provider block names an address that answers nothing
+# and token files holding BWSYNTH values: the entry needs ingestion's owner identity, which the
+# server takes from that configuration, and contacts no provider.
+# Each entry is recovery enter --restored family=database,... --stopped-at ... --reason ..., with
+# enter typed back, signed in as h-recovery through the oidc context "human".
+# REC-04 (b), the server losing its own COMMIT reply, needs a server-side fault hook the server
+# binary does not have; its client side waits for that hook (#263).
+
+- id: REC-02
+  setup: 'first: serve started normally; second: serve started with -recovery-start, after REC-04 committed its entry under another key'
+  action: recovery enter ...
+  exchange:
+    - GET /api/v1/server
+    - "POST /api/v1/recovery/entries, headers: Idempotency-Key; no Bronzeward-Expected-Epoch"
+  fault: none; the server refuses each entry
+  expect:
+    client: 'first: reads 409 conflict without epoch or request as a normal start; second: reads 409 conflict with epoch as a recovery start, never as a normal one'
+    server: 'first: 409 conflict without epoch or request; second: 409 conflict with request and epoch; neither records an act'
+    shown: '"This server was started normally"; then "Another recovery entry committed first (epoch ep_...)"; exit 1 each; the context keeps start mode normal, then recovery'
+    absent: [token in stdout, stderr, argv, state directory]
+
+- id: REC-04
+  setup: serve started with -recovery-start; no entry committed yet
+  action: recovery enter ...
+  exchange:
+    - GET /api/v1/server, refused 409 recovery-mode-active without scope
+    - "POST /api/v1/recovery/entries, headers: Idempotency-Key; no Bronzeward-Expected-Epoch"
+    - GET /api/v1/recovery, the confirming read
+    - POST /api/v1/recovery/entries, the same key
+  fault: (a) the first POST reaches the server, which commits it; the injector drops its 201
+  expect:
+    client: repeats with the same key and no epoch check; shows the replayed result as its own; keeps the minted epoch and a recovery start; does not set the entry aside
+    server: answers the confirming read 200 with the new epoch and the repeat 201 with Idempotent-Replayed true; one act
+    shown: '"repeat 1 of 3 with the same key", "already done earlier; showing that result", "Recovery mode entered (act act_...). Epoch ep_..., was ep_..."; exit 0'
+    absent: [token in stdout, stderr, argv, state directory]
