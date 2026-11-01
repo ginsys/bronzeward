@@ -32,6 +32,7 @@ type importEnv struct {
 	s   seeded
 	dir string
 	st  *standIn
+	tmp string // TMPDIR of the commands run on a terminal, which must stay empty
 }
 
 // newImportEnv adds the human context through a new injector and seeds the server.

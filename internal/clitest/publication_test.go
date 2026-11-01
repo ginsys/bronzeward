@@ -22,6 +22,7 @@ import (
 	"github.com/siderolabs/talos/pkg/machinery/config/encoder"
 	"github.com/siderolabs/talos/pkg/machinery/config/generate"
 	"github.com/siderolabs/talos/pkg/machinery/config/machine"
+	"github.com/siderolabs/talos/pkg/machinery/config/types/v1alpha1"
 	"github.com/siderolabs/talos/pkg/machinery/constants"
 	"go.yaml.in/yaml/v3"
 
@@ -46,8 +47,10 @@ var configSecret = regexp.MustCompile(`(?m)^\s*(?:token|secret|key|aescbcEncrypt
 
 // newStandIn serves the stand-in, writes its talosconfig to the provider at
 // access/talos/<cluster> under the administrative identity, as the operator does (persistence-api
-// §5.4), and points the machine at it through the CLI.
-func (f *fixture) newStandIn(t *testing.T, b *baotest.Bao, s seeded, ctl func(...string) result) *standIn {
+// §5.4), and points the machine at it through the CLI. Each of unmarked is a synthetic secret its
+// configuration holds in a file's content, /var/etc/bwsynth-<n>.conf, which the schema does not
+// recognise, so only an operator's mark extracts it; the leak scan looks for it too.
+func (f *fixture) newStandIn(t *testing.T, b *baotest.Bao, s seeded, ctl func(...string) result, unmarked ...string) *standIn {
 	t.Helper()
 	pki := talostest.NewPKI(t)
 	node := talostest.Serve(t, pki)
@@ -62,12 +65,17 @@ func (f *fixture) newStandIn(t *testing.T, b *baotest.Bao, s seeded, ctl func(..
 	if err != nil {
 		t.Fatal(err)
 	}
+	for i, v := range unmarked {
+		mc := cfg.RawV1Alpha1().MachineConfig
+		mc.MachineFiles = append(mc.MachineFiles, &v1alpha1.MachineFile{FileContent: "token = " + v, FilePermissions: 0o644,
+			FilePath: fmt.Sprintf("/var/etc/bwsynth-%d.conf", i), FileOp: "create"})
+	}
 	doc, err := cfg.EncodeBytes(encoder.WithComments(encoder.CommentsDisabled))
 	if err != nil {
 		t.Fatal(err)
 	}
 	node.SetMachineConfig(t, doc)
-	st := &standIn{node: node, secrets: []string{base64.StdEncoding.EncodeToString(pki.KeyPEM)}}
+	st := &standIn{node: node, secrets: append([]string{base64.StdEncoding.EncodeToString(pki.KeyPEM)}, unmarked...)}
 	for _, m := range configSecret.FindAllStringSubmatch(string(doc), -1) {
 		st.secrets = append(st.secrets, m[1])
 	}
