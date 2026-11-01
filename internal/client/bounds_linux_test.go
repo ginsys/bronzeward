@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -65,8 +66,8 @@ func TestRenewalLockBounded(t *testing.T) {
 func TestRenewalLockLateRelease(t *testing.T) {
 	bound, late := lockBound, lateReleased
 	t.Cleanup(func() { lockBound, lateReleased = bound, late })
-	released := make(chan struct{})
-	lockBound, lateReleased = 100*time.Millisecond, func() { close(released) }
+	released := make(chan *os.File, 1)
+	lockBound, lateReleased = 100*time.Millisecond, func(f *os.File) { released <- f }
 	l := filepath.Join(t.TempDir(), "late.lock")
 	held, err := os.OpenFile(l, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
@@ -79,10 +80,12 @@ func TestRenewalLockLateRelease(t *testing.T) {
 		t.Fatal("renewalLock under a held lock returned no error")
 	}
 	// The given-up flock still waits; releasing the holder lets it take the lock, then close it.
-	// The probe follows that release, so a probe that took the lock first cannot hide a leak.
+	// The probe follows that release, so a probe that took the lock first cannot hide a leak, and
+	// the file stays reachable until after the probe, so its finalizer cannot close it either.
 	held.Close()
 	select {
-	case <-released:
+	case f := <-released:
+		defer runtime.KeepAlive(f)
 	case <-time.After(10 * time.Second):
 		t.Fatal("the given-up wait did not take and release the lock within 10 s")
 	}
