@@ -45,8 +45,10 @@ func (x *Context) TokenFile() string {
 }
 
 // ReadTokens reads a token file; a missing file is no sign-in. A file holding an automation token
-// is refused: it is the operator's, never this client's own credential.
-func ReadTokens(p string) (*Tokens, error) {
+// is refused: it is the operator's, never this client's own credential. An error shows the path,
+// which the contexts file chose, escaped.
+func ReadTokens(p string) (tok *Tokens, err error) {
+	defer func() { err = printableError(err) }()
 	b, err := readOwnerOnly(p)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -121,7 +123,8 @@ func operators(p string) error {
 }
 
 // WriteTokens replaces the token file whole, owner-only, through a rename.
-func WriteTokens(p string, t *Tokens) error {
+func WriteTokens(p string, t *Tokens) (err error) {
+	defer func() { err = printableError(err) }()
 	if err := operators(p); err != nil {
 		return err
 	}
@@ -149,7 +152,8 @@ func WriteTokens(p string, t *Tokens) error {
 // It returns the tokens it removed, read under the lock, and nil when there was no file. A file of
 // this client's that holds no access token is removed too, reported as ErrNotTokenFile; any other
 // file is left as it is, and so is one that match, when given, refuses (ErrOtherSignIn).
-func ClearTokens(p string, match func(*Tokens) bool) (*Tokens, error) {
+func ClearTokens(p string, match func(*Tokens) bool) (tok *Tokens, err error) {
+	defer func() { err = printableError(err) }()
 	if _, err := os.Lstat(p); errors.Is(err, os.ErrNotExist) {
 		return nil, nil // nothing to clear, so no lock file is made either
 	}
