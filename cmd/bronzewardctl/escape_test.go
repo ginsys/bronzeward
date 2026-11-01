@@ -22,11 +22,14 @@ import (
 // holds ESC, a tab, a line feed, a carriage return, DEL and a C1 character, and each command that
 // shows it runs in -o table. A run with plain values of the same shape is the baseline.
 const (
-	tail    = "\x1b\t\n\r\x7f\u0085"
-	tailEsc = `\x1b\x09\x0a\x0d\x7f\x85`
+	tail    = "\x1b\t\n\r\x7f\u0085\u202e\u2066"
+	tailEsc = `\x1b\x09\x0a\x0d\x7f\x85\u202e\u2066`
 	// inJSON is the same tail inside JSON text that the CLI encodes itself: the JSON encoder
-	// writes the C0 characters as escapes and leaves DEL and the C1 range raw, so the rule escapes those.
-	inJSON = `\u001b\t\n\r\x7f\x85`
+	// writes the C0 characters as escapes and leaves DEL, the C1 range and the bidi characters raw,
+	// so the rule escapes those.
+	inJSON = `\u001b\t\n\r\x7f\x85\u202e\u2066`
+	// bidi holds the characters that change the order in which a terminal draws text.
+	bidi = "\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
 )
 
 // filler builds the server's answers. A marker names each string; want maps it to the form in which
@@ -59,8 +62,8 @@ func (f *filler) doc() string {
 	if !f.control {
 		return m + " a b\n" + m + " c\n"
 	}
-	f.docs[m] = []string{m + ` a\x1b\x09\x0d\x7f\x85 b`, m + " c"}
-	return m + " a\x1b\t\r\x7f\u0085 b\n" + m + " c\n"
+	f.docs[m] = []string{m + ` a\x1b\x09\x0d\x7f\x85\u202e b`, m + " c"}
+	return m + " a\x1b\t\r\x7f\u0085\u202e b\n" + m + " c\n"
 }
 
 // raw is a JSON object as the server writes it: DEL, a C1 character and a byte that is not UTF-8
@@ -71,7 +74,7 @@ func (f *filler) raw() json.RawMessage {
 		return json.RawMessage(`{"k":"` + m + `"}`)
 	}
 	f.want[m] = m + inJSON + `\xff`
-	return json.RawMessage(`{"k":"` + m + `\u001b\t\n\r` + "\x7f\u0085\xff" + `"}`)
+	return json.RawMessage(`{"k":"` + m + `\u001b\t\n\r` + "\x7f\u0085\u202e\u2066\xff" + `"}`)
 }
 
 var timeType = reflect.TypeFor[time.Time]()
@@ -256,7 +259,7 @@ func TestRemoteTextIsEscaped(t *testing.T) {
 				t.Errorf("%s: the output holds invalid UTF-8: %q", name, text)
 			}
 			for _, r := range text {
-				if r != '\n' && unicode.IsControl(r) {
+				if r != '\n' && unicode.IsControl(r) || strings.ContainsRune(bidi, r) {
 					t.Errorf("%s: the output holds the raw control character %U: %q", name, r, text)
 					break
 				}
@@ -329,8 +332,8 @@ func TestRemoteTextInOwnErrors(t *testing.T) {
 	defer srv.Close()
 	automationContext(t, srv.URL)
 	for fragment, want := range map[string]string{
-		"gone":  `draft d1\x1b\x09\x0a\x0d\x7f\x85 removes the fragment`,
-		"other": `cluster c1\x1b\x09\x0a\x0d\x7f\x85 has no fragment`,
+		"gone":  `draft d1\x1b\x09\x0a\x0d\x7f\x85\u202e\u2066 removes the fragment`,
+		"other": `cluster c1\x1b\x09\x0a\x0d\x7f\x85\u202e\u2066 has no fragment`,
 	} {
 		var o, e bytes.Buffer
 		run([]string{"profile", "set", "p", "--draft", "d1", "--fragments", fragment}, &o, &e)

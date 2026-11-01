@@ -354,7 +354,10 @@ it. It holds no secret.
    - Each control character (C0, DEL, C1) and each byte that is not UTF-8 becomes `\xNN`, as in
      item 4. The tab and the line feed are included: they become `\x09` and `\x0a`. A value that
      holds either could otherwise move a column or forge a row. Only the separators that the CLI
-     writes itself stay raw. A backslash in remote text stays as it is, as in item 4. A value
+     writes itself stay raw. Each bidirectional control (U+061C, U+200E, U+200F, U+202A to
+     U+202E and U+2066 to U+2069) becomes `\uNNNN`, in item 4 too: it changes the order in which a
+     terminal draws the text around it, so a value could read as another. A backslash in remote
+     text stays as it is, as in item 4. A value
      that holds the text `\x0a` shows as that text. It looks like an escape but cannot act on the
      terminal, and escaping every backslash would change each value that holds one for no gain in
      safety.
@@ -390,7 +393,8 @@ it. It holds no secret.
      The rule removes that difference.
 
    **Required check.** One test fills each remote source with a value that holds ESC, a tab, a
-   line feed, a carriage return, DEL, a C1 character and a byte that is not UTF-8. The sources
+   line feed, a carriage return, DEL, a C1 character, a bidirectional control and a byte that is
+   not UTF-8. The sources
    are all the remote text that item 8 and item 4 name: every string member of every response type
    in `internal/client/apitypes`, the response headers the CLI shows (`Deprecation`), the
    identity provider's and the proxy's text, every member of the contexts file, and every remote
@@ -404,7 +408,8 @@ it. It holds no secret.
    - The output holds a raw control byte outside the CLI's own separators.
    - Outside documents, diffs and JSON text that the CLI encodes, a plain value does not appear in
      its escaped form: `\x1b` for ESC, `\x09` for the tab, `\x0a` for the line feed, `\x0d` for the
-     carriage return, `\x7f` for DEL and `\x85` for a C1 character such as U+0085. A replacement
+     carriage return, `\x7f` for DEL, `\x85` for a C1 character such as U+0085 and `‮` for
+     a bidirectional control such as U+202E. A replacement
      such as `?` fails. A byte that is not UTF-8 and survives decoding appears as `\xNN` with the
      byte's own value. Documents, diffs and JSON text have their own forms, which the two last
      cases below and the rules above state.
