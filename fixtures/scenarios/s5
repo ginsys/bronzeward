@@ -26,7 +26,10 @@
 # `pass`, the integrated run's: `run` without its negative controls (the frozen-scope revert plan,
 # the non-approver unfreeze) and without the interruption matrix of the drift adoption. It keeps
 # step 4's refused drift adoption: S5's pass criteria name the secret absent on rejection too.
-# Usage: scenarios/s5 run|pass|roles   (run or pass after scenarios/s4 run on the same up; roles after run)
+# `drift`: the preconditions and steps 1 and 2 alone, which leave the worker drifted with its record
+# open and the scope not frozen, for the usability tasks (fixtures/participants).
+# Usage: scenarios/s5 run|pass|roles|drift   (run, pass or drift after scenarios/s4 run on the same
+# up; roles after run)
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 bin=$here/../bin
@@ -35,7 +38,7 @@ bin=$here/../bin
 
 s5_mode=${1:-}
 pass_only=''
-case $s5_mode in run | roles) ;; pass) pass_only=1 ;; *) die "usage: scenarios/s5 run|pass|roles" ;; esac
+case $s5_mode in run | roles | drift) ;; pass) pass_only=1 ;; *) die "usage: scenarios/s5 run|pass|roles|drift" ;; esac
 need docker curl jq timeout id sleep date awk wc od head tr
 need_state
 umask 077
@@ -887,12 +890,20 @@ run() {
   restore_interval
 }
 
-if [ "$s5_mode" != roles ]; then
-  run
-else
-  withheld+=("$BW_CANARY")
-  roles
-fi
+case $s5_mode in
+  roles)
+    withheld+=("$BW_CANARY")
+    roles
+    ;;
+  drift)
+    # Steps 1 and 2 alone: the worker drifted, its record open, the scope not frozen (usability
+    # tasks T2 and T10, fixtures/participants). on_exit sets the interval back.
+    withheld+=("$BW_CANARY")
+    preconditions
+    detect
+    ;;
+  *) run ;;
+esac
 rm -f -- "$EV/last.body" "$EV/last.headers"
 # The final bundle: the evidence directory and the run directory scanned, as S4's does.
 ev_log=$(mktemp)
@@ -909,8 +920,8 @@ if final=$("$bin/evidence" "$EV" 2>"$ev_log"); then
     result PASS 'S5 evidence' 'the bundle is complete: bin/evidence captured every source'
   fi
   # The scan above covers the dump only if the bundle holds it expanded: the adopt operation's own
-  # row inside its COPY block, whose first column is the ID. Mode roles takes no dump.
-  if [ "$s5_mode" = roles ]; then
+  # row inside its COPY block, whose first column is the ID. Modes roles and drift take no dump.
+  if [ "$s5_mode" = roles ] || [ "$s5_mode" = drift ]; then
     :
   elif [ -n "$op" ] &&
     awk -v id="$op" '

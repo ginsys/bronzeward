@@ -44,6 +44,10 @@
 #        scenarios/s7 no-entry  (after scenarios/s7 run on the same up)
 #        scenarios/s7 transit   (after scenarios/s7 no-entry on the same up)
 #        scenarios/s7 old-bao   (after scenarios/s7 transit on the same up; it leaves recovery mode on)
+#        scenarios/s7 t11       (as run: steps 1 to 6, then the worker's scope alone accounted, marked
+#                                and released; it leaves recovery mode on, the control plane's scope
+#                                pre-restore unaccounted and every instance stopped, for usability
+#                                task T11, fixtures/participants)
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 bin=$here/../bin
@@ -51,7 +55,7 @@ bin=$here/../bin
 . "$here/../lib.sh"
 
 s7_mode=${1:-}
-case $s7_mode in run | closing | no-entry | transit | old-bao) ;; *) die "usage: scenarios/s7 run|closing|no-entry|transit|old-bao" ;; esac
+case $s7_mode in run | closing | no-entry | transit | old-bao | t11) ;; *) die "usage: scenarios/s7 run|closing|no-entry|transit|old-bao|t11" ;; esac
 need docker curl jq timeout id sleep date awk wc sha256sum
 need_state
 # No fixture lock of its own: inject and evidence each take the one they need.
@@ -515,6 +519,35 @@ after_t() {
   must "$ref" 'inject bao-snapshot s7-provider' "$bin/inject" bao-snapshot s7-provider
 }
 
+# t11_worker: mode t11's step 7 and 8 for the worker alone. h-recovery accounts the worker's scope
+# with a decision naming it alone, held is reclassified, and the worker is marked and released. The
+# control plane's scope is left pre-restore unaccounted, unmarked and unreleased for a participant
+# (usability task T11, fixtures/participants), and B-recovery is stopped. The control plane's ID,
+# the epoch and the time of the stop go to .state/participants-t11 for the session's checks.
+t11_worker() {
+  local ref='S7 t11'
+  must "$ref" "the worker's settle reads: a first read after the stop plus the maximum transport deadline, a recovery read a settle floor after it" \
+    within 600 scope_reads "$machine_w"
+  w_start=$s_start w_end=$s_end
+  fresh h-recovery
+  must "$ref" "h-recovery accounts the worker's scope alone: 201, unresolved, which held holds" \
+    answers_with "(.scopes | map(.machine)) == [\"$machine_w\"] and .scopes[0].state == \"unresolved\"" 201 - \
+    POST /api/v1/recovery/accountings "$tok" \
+    "$(jq -nc --arg w "$machine_w" --arg ws "$w_start" --arg we "$w_end" '{scopes: [{machine: $w, start: $ws, end: $we}], facts: {}}')" \
+    "$(key accounting-worker)"
+  must "$ref" "held, its journal holding no attempt, reclassified: cancelled with no attempt" within 120 held_cancelled
+  must "$ref" "the worker's mark: 201, ready, nothing missing" mark_as "$machine_w" '.state == "ready" and .missing == []' worker
+  must "$ref" 'h-recovery releases the worker scope: 201, released' release_scope "$machine_w" worker
+  # A mark needs an accounted scope, so a scope still pre-restore unaccounted is unmarked too.
+  must "$ref" "the control plane's scope: pre-restore unaccounted, with no accounting or release in this epoch" \
+    same "$(sql "SELECT m.scope_state || ' ' || (SELECT count(*) FROM scope_accounting a WHERE a.machine = m.id AND a.epoch = '$epoch')
+      || ' ' || (SELECT count(*) FROM scope_release r WHERE r.machine = m.id AND r.epoch = '$epoch')
+      FROM machine m WHERE m.id = '$machine_cp'")" 'pre-restore-unaccounted 0 0'
+  must "$ref" 'inject kill B-recovery' "$bin/inject" kill B-recovery
+  printf 'controlplane\t%s\nepoch\t%s\nstopped\t%s\n' "$machine_cp" "$epoch" "$(now_utc)" >"$STATE/participants-t11"
+  end_state="recovery mode on, the control plane's scope unaccounted, every instance stopped"
+}
+
 s7() {
   local ref
 
@@ -650,6 +683,10 @@ s7() {
   check "$ref" "h-author starts an import of the worker into the second draft under step 3's ETag: 202, its claim in the new epoch" \
     ingestion_in_epoch
   check "$ref" 'its claim ends, released or abandoned' within 60 claim_ended
+  if [ "$s7_mode" = t11 ]; then
+    t11_worker
+    return
+  fi
 
   # Step 7: both scopes accounted with one decision after the settle floor; held reclassified; the
   # control plane paused, then both scopes marked.
