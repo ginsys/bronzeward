@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 import { Client, type ClientOptions } from "./request.ts";
-import { BACKOFF, EPOCH_CHANGED_ASIDE, NO_EPOCH, newKey, SIGN_IN_CHANGED, Write, Writes } from "./write.ts";
+import { BACKOFF, EPOCH_CHANGED_ASIDE, NO_EPOCH, newKey, SIGN_IN_CHANGED, SIGN_IN_REFUSED, Write, Writes } from "./write.ts";
 
 const EPOCH = "e1";
 const PRINCIPAL = "https://idp.invalid SYNTH-sub-1";
@@ -21,14 +21,15 @@ const recovery = (epoch: string | null = EPOCH) =>
   new Response(JSON.stringify({ mode: "normal" }), { status: 200, headers: { "Content-Type": "application/json", ...(epoch === null ? {} : { "Bronzeward-Epoch": epoch }) } });
 
 // A page whose writes are answered from `answers`, a function called at its send, and whose
-// GET /recovery from `epochs`.
-function page(answers: (Response | Error | (() => Response | Error))[], epochs: (string | null)[] = [], opts: ClientOptions = {}) {
+// GET /recovery from `epochs`: an epoch, none (null), or a whole answer.
+function page(answers: (Response | Error | (() => Response | Error))[], epochs: (string | null | Response)[] = [], opts: ClientOptions = {}) {
   const sent: { method: string; path: string; headers: Record<string, string>; body: unknown }[] = [];
   const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
     const path = String(url).replace("/api/v1", "");
     const method = init?.method ?? "GET";
     sent.push({ method, path, headers: { ...(init?.headers as Record<string, string>) }, body: init?.body });
-    const given = path === "/recovery" ? (epochs.length > 0 ? recovery(epochs.shift()!) : recovery()) : answers.shift();
+    const read = (e: string | null | Response) => (e instanceof Response ? e : recovery(e));
+    const given = path === "/recovery" ? (epochs.length > 0 ? read(epochs.shift()!) : recovery()) : answers.shift();
     const next = typeof given === "function" ? given() : given;
     if (next === undefined) throw new Error("no answer left");
     if (next instanceof Error) throw next;
@@ -183,6 +184,77 @@ describe("repeats (§8.2, §8.4 item 2)", () => {
     expect((await writes.submit(spec())).kind).toBe("refused");
     expect(onRevoked).toHaveBeenCalledTimes(1);
   });
+
+  test("a 401 its renewal does not clear ends the page, after the write's outcome is settled", async () => {
+    const { writes } = page([problem(401, "unauthenticated", {}, null)], [], { renew: async () => false });
+    const w = spec();
+    const outcomes: unknown[] = [];
+    writes.onEnded = vi.fn(() => void outcomes.push(w.outcome));
+    await writes.submit(w);
+    expect(writes.onEnded).toHaveBeenCalledWith({ kind: "unauthenticated", problem: expect.objectContaining({ type: "urn:bronzeward:problem:unauthenticated" }) });
+    expect(outcomes).toEqual([expect.objectContaining({ kind: "refused", status: 401 })]);
+  });
+
+  test("another 401 code is a refusal by its status class and ends nothing", async () => {
+    const { writes } = page([problem(401, "some-new-code", {}, null)]);
+    writes.onEnded = vi.fn();
+    expect((await writes.submit(spec())).kind).toBe("refused");
+    expect(writes.onEnded).not.toHaveBeenCalled();
+  });
+
+  test("identity-revoked after an ambiguous attempt ends the page and keeps the write unknown", async () => {
+    const onRevoked = vi.fn();
+    const { writes } = page([new TypeError("Failed to fetch"), problem(403, "identity-revoked", {}, null)], [], { onRevoked });
+    const w = spec();
+    writes.onEnded = vi.fn();
+    expect((await writes.submit(w)).kind).toBe("unknown");
+    expect(onRevoked).toHaveBeenCalledTimes(1);
+    expect(writes.onEnded).toHaveBeenCalledWith({ kind: "revoked", problem: expect.objectContaining({ type: "urn:bronzeward:problem:identity-revoked" }) });
+    expect(writes.open).toEqual([w]);
+  });
+
+  test("a run that throws settles the write: not done before any attempt may have committed, else unknown", async () => {
+    const renew = async () => {
+      throw new Error("synthetic renewal failure");
+    };
+    const a = page([problem(401, "unauthenticated", {}, null)], [], { renew });
+    const w = spec();
+    expect((await a.writes.submit(w)).kind).toBe("not-done");
+    expect(w.running).toBeUndefined();
+    expect(a.writes.open).toEqual([]);
+    const b = page([new TypeError("Failed to fetch"), problem(401, "unauthenticated", {}, null)], [], { renew });
+    const v = spec();
+    expect((await b.writes.submit(v)).kind).toBe("unknown");
+    expect(b.writes.open).toEqual([v]);
+  });
+});
+
+describe("the confirming read's credential refusals (§8.2)", () => {
+  test("identity-revoked clears the credential, ends the page and sets the write aside", async () => {
+    const onRevoked = vi.fn();
+    const { writes, writesSent } = page([new TypeError("Failed to fetch")], [EPOCH, problem(403, "identity-revoked", {}, null)], { onRevoked });
+    writes.onEnded = vi.fn();
+    expect(await writes.submit(spec())).toEqual({ kind: "set-aside", why: SIGN_IN_REFUSED, ambiguous: true });
+    expect(onRevoked).toHaveBeenCalledTimes(1);
+    expect(writes.onEnded).toHaveBeenCalledWith(expect.objectContaining({ kind: "revoked" }));
+    expect(writesSent()).toHaveLength(1);
+  });
+
+  test("a 401 renews once and reads again", async () => {
+    const renew = vi.fn(async () => true);
+    const { writes, sent } = page([new TypeError("Failed to fetch"), created({ id: "c1" }, true)], [EPOCH, problem(401, "unauthenticated", {}, null), EPOCH], { renew });
+    expect(await writes.submit(spec())).toMatchObject({ kind: "done", replayed: true });
+    expect(renew).toHaveBeenCalledTimes(1);
+    expect(sent.map((s) => s.path)).toEqual(["/recovery", "/clusters", "/recovery", "/recovery", "/clusters"]);
+  });
+
+  test("before the first send, a 401 the renewal does not clear sends nothing and ends the page", async () => {
+    const { writes, writesSent } = page([], [problem(401, "unauthenticated", {}, null)], { renew: async () => false });
+    writes.onEnded = vi.fn();
+    expect(await writes.submit(spec())).toMatchObject({ kind: "not-done", why: SIGN_IN_REFUSED, problem: { type: "urn:bronzeward:problem:unauthenticated" } });
+    expect(writes.onEnded).toHaveBeenCalledWith(expect.objectContaining({ kind: "unauthenticated" }));
+    expect(writesSent()).toEqual([]);
+  });
 });
 
 describe("set aside (§8.4 item 3, §8.5 item 2, journeys §8)", () => {
@@ -258,6 +330,17 @@ describe("[Repeat exactly]", () => {
     expect(p.sent.map((s) => s.path)).toEqual(["/recovery", "/clusters"]);
     expect(p.sent[1]!.headers["Idempotency-Key"]).toBe(w.key);
     expect(p.writes.open).toEqual([]);
+  });
+
+  test("keeps the unknown outcome it repeats as `repeating` while it runs", async () => {
+    const drop = () => new TypeError("Failed to fetch");
+    let seen: unknown;
+    const p = page([drop(), drop(), drop(), drop(), () => ((seen = w.repeating), created({ id: "c1" }, true))]);
+    const w = spec();
+    const first = await p.writes.submit(w);
+    await p.writes.submit(w);
+    expect(seen).toBe(first);
+    expect(w.repeating).toBeUndefined();
   });
 
   test("is not offered under another sign-in", async () => {

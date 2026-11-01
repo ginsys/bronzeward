@@ -240,7 +240,8 @@ export function Screen({ view, notices = [] }: { view: View; notices?: readonly 
         </Page>
       );
     case "failed":
-      return <Page><p role="alert" data-testid="status">{view.message}</p><ProblemFields text={view.problem} /><Deprecations routes={notices} /></Page>;
+      // A write whose outcome is unknown keeps its notice here too (B11).
+      return <Page><p role="alert" data-testid="status">{view.message}</p><ProblemFields text={view.problem} /><Deprecations routes={notices} /><PageNotices /></Page>;
     case "sign-in":
       return (
         <Page>

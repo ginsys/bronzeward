@@ -5,8 +5,8 @@ import { AddCluster, guardsUnload, leaving, Result, WriteNotices, WritesProvider
 import { type Reads, ReadsProvider } from "./list.tsx";
 import type { Client } from "./request.ts";
 import { ShellContext } from "./shell.tsx";
-import { REPLAYED, SET_ASIDE, unknown } from "./states.tsx";
-import { EPOCH_CHANGED_ASIDE, type Outcome, Write, Writes } from "./write.ts";
+import { REPEATING, REPLAYED, setAside, unknown } from "./states.tsx";
+import { EPOCH_CHANGED_ASIDE, NO_EPOCH, type Outcome, Write, Writes } from "./write.ts";
 
 const PRINCIPAL = "https://idp.invalid SYNTH-sub-1";
 const html = (writes: Writes, e: ReactElement, roles: string[] = ["author"]) =>
@@ -39,10 +39,26 @@ describe("the notice (B11)", () => {
     const [writes, w] = await unknownWrite();
     writes.setAside(EPOCH_CHANGED_ASIDE);
     const out = html(writes, h(WriteNotices, { go: () => {} }));
-    expect(out).toContain(SET_ASIDE);
+    expect(out).toContain(`${setAside(EPOCH_CHANGED_ASIDE)} Key ${w.key}`);
     expect(out).toContain('<button type="button" disabled="">Repeat exactly</button><button type="button">Show current state</button>');
     writes.dismiss(w);
     expect(html(writes, h(WriteNotices, { go: () => {} }))).toBe("");
+  });
+
+  test("set aside because the epoch read got no answer, it says so, not that the epoch changed", async () => {
+    const [writes, w] = await unknownWrite();
+    writes.setAside(NO_EPOCH);
+    expect(html(writes, h(WriteNotices, { go: () => {} }))).toContain(`${setAside(NO_EPOCH)} Key ${w.key}`);
+  });
+
+  test("while [Repeat exactly] runs, the notice stays with its key, route and resource, and offers no second repeat", async () => {
+    const [writes, w] = await unknownWrite();
+    const run = writes.submit(w);
+    const out = html(writes, h(WriteNotices, { go: () => {} }));
+    expect(out).toContain(`${unknown("the connection dropped")}${REPEATING} Key ${w.key}, POST /api/v1/clusters. To learn the outcome, read /clusters.`);
+    expect(out).not.toContain("Repeat exactly");
+    expect(out).not.toContain("Dismiss");
+    await run;
   });
 });
 
@@ -112,6 +128,14 @@ describe("the form's result", () => {
   test("a replayed refusal is the earlier attempt's, and says so", () => {
     expect(result({ kind: "refused", status: 409, problem: null, replayed: true })).toContain(`${REPLAYED} Not saved: the server answered 409.`);
     expect(result({ kind: "refused", status: 409, problem: null, replayed: false })).toContain(">Not saved: the server answered 409.</p>");
+  });
+
+  test("not done shows the last answer's problem fields (§8.2)", () => {
+    const problem = { type: "urn:bronzeward:problem:epoch-superseded", title: "Epoch superseded", status: 503, detail: "this process started before the current epoch", instance: "req-9" };
+    expect(result({ kind: "not-done", why: "every attempt was answered 503 epoch-superseded, which commits nothing", problem })).toContain(
+      ">Not saved: every attempt was answered 503 epoch-superseded, which commits nothing. Epoch superseded: this process started before the current epoch. Request req-9.</p>",
+    );
+    expect(result({ kind: "not-done", why: NO_EPOCH, problem: null })).toContain(`>Not saved: ${NO_EPOCH}.</p>`);
   });
 });
 

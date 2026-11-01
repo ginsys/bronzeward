@@ -231,6 +231,27 @@ describe("§8.5 epoch changes", () => {
     expect(onEpochChange).toHaveBeenCalledWith("e2", false);
   });
 
+  test("a write's late answer naming an epoch older than one recorded since its send is not adopted: GET /recovery decides", async () => {
+    const onEpochChange = vi.fn();
+    let release!: (r: Response) => void;
+    const late = new Promise<Response>((r) => (release = r));
+    const answers: (Response | Promise<Response>)[] = [ok({}), late, ok({}, "e2"), ok({}, "e2")];
+    const paths: string[] = [];
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+      paths.push(String(url).slice(API_BASE.length));
+      return answers.shift()!;
+    });
+    const c = new Client({ onEpochChange, fetch: fetchMock as unknown as typeof fetch });
+    await c.read("/server");
+    const write = c.attempt("POST", "/clusters", {}, "{}");
+    expect(await c.read("/machines")).toEqual({ kind: "discarded" });
+    release(ok({ id: "c1" }));
+    expect((await write)?.data).toEqual({ id: "c1" });
+    expect(c.currentEpoch).toBe("e2");
+    expect(onEpochChange).toHaveBeenCalledTimes(1);
+    expect(paths).toEqual(["/server", "/clusters", "/machines", "/recovery"]);
+  });
+
   test("recovery mode is reported from the first epoch on and clears on an exit that keeps the epoch", async () => {
     const onEpochChange = vi.fn();
     const onRecoveryModeChange = vi.fn();
