@@ -2,7 +2,6 @@ package client
 
 import (
 	"bufio"
-	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -64,9 +63,10 @@ func TestRenewalLockBounded(t *testing.T) {
 // TestRenewalLockLateRelease checks that a lock a given-up wait takes after its bound is released
 // at once: a later holder gets it, and no other process finds it held.
 func TestRenewalLockLateRelease(t *testing.T) {
-	bound := lockBound
-	t.Cleanup(func() { lockBound = bound })
-	lockBound = 100 * time.Millisecond
+	bound, late := lockBound, lateReleased
+	t.Cleanup(func() { lockBound, lateReleased = bound, late })
+	released := make(chan struct{})
+	lockBound, lateReleased = 100*time.Millisecond, func() { close(released) }
 	l := filepath.Join(t.TempDir(), "late.lock")
 	held, err := os.OpenFile(l, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
@@ -79,20 +79,20 @@ func TestRenewalLockLateRelease(t *testing.T) {
 		t.Fatal("renewalLock under a held lock returned no error")
 	}
 	// The given-up flock still waits; releasing the holder lets it take the lock, then close it.
+	// The probe follows that release, so a probe that took the lock first cannot hide a leak.
 	held.Close()
+	select {
+	case <-released:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the given-up wait did not take and release the lock within 10 s")
+	}
 	other, err := os.OpenFile(l, os.O_RDWR, 0o600)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer other.Close()
-	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		err := syscall.Flock(int(other.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-		if err == nil {
-			break
-		}
-		if !errors.Is(err, syscall.EWOULDBLOCK) || time.Now().After(deadline) {
-			t.Fatalf("the lock taken after the bound is still held after 10 s: %v", err)
-		}
+	if err := syscall.Flock(int(other.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatalf("the lock taken after the bound is still held: %v", err)
 	}
 }
 
