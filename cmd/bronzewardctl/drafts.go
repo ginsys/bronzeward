@@ -46,7 +46,7 @@ func (e *env) draftCreate(args []string) error {
 			return nil, err
 		}
 		keep(e, c, d.Id, r.Header.Get("ETag"))
-		return []string{fmt.Sprintf("Draft %s %s, revision %d.", d.Id, d.State, d.Revision)}, nil
+		return []string{sf("Draft %s %s, revision %d.", d.Id, d.State, d.Revision)}, nil
 	})
 }
 
@@ -69,7 +69,7 @@ func (e *env) draftDiscard(args []string) error {
 			keep(e, c, d, "")
 			var x apitypes.DraftBody
 			err := json.Unmarshal(r.Body, &x)
-			return []string{fmt.Sprintf("Draft %s %s (revision %d).", x.Id, x.State, x.Revision)}, err
+			return []string{sf("Draft %s %s (revision %d).", x.Id, x.State, x.Revision)}, err
 		})
 }
 
@@ -124,7 +124,7 @@ func (e *env) profileSet(args []string) error {
 			}
 			pairs = append(pairs, n)
 		}
-		return []string{fmt.Sprintf("Profile %s saved: pins %s (draft revision %s).", pos[0], strings.Join(pairs, ", "), client.DraftRevision(r.Header.Get("ETag"))),
+		return []string{sf("Profile %s saved: pins %s (draft revision %s).", pos[0], strings.Join(pairs, ", "), client.DraftRevision(r.Header.Get("ETag"))),
 			"A profile pins revisions: after changing a fragment, set the profile again to use it."}, nil
 	})
 }
@@ -159,7 +159,7 @@ func pins(c *client.Client, draft string, names []string) ([]string, error) {
 			out[i] = n
 			continue
 		case inDraft && rev == nil:
-			return nil, fmt.Errorf("draft %s removes the fragment %s, so a profile cannot pin it; nothing was sent", d.Id, client.ShellWord(n))
+			return nil, ef("draft %s removes the fragment %s, so a profile cannot pin it; nothing was sent", d.Id, client.ShellWord(n))
 		case inDraft:
 			out[i] = *rev
 			continue
@@ -169,7 +169,7 @@ func pins(c *client.Client, draft string, names []string) ([]string, error) {
 			}
 		}
 		if heads[n] == nil {
-			return nil, fmt.Errorf("cluster %s has no fragment %s with a revision, and draft %s proposes none; nothing was sent", d.Cluster, client.ShellWord(n), d.Id)
+			return nil, ef("cluster %s has no fragment %s with a revision, and draft %s proposes none; nothing was sent", d.Cluster, client.ShellWord(n), d.Id)
 		}
 		out[i] = *heads[n]
 	}
@@ -267,7 +267,7 @@ func (e *env) sourceRm(kind apitypes.SourceEntryKind, args []string) error {
 	return e.write(&client.Write{Method: http.MethodDelete, Path: "/drafts/" + url.PathEscape(draft) + "/" + string(kind) + "s/" + url.PathEscape(pos[0]),
 		Draft: draft, IfMatch: rf.ifMatch.v, Repeat: rp, Check: "draft show " + client.ShellWord(draft),
 		Read: entryRead(draft, kind, pos[0])}, func(_ *client.Client, r *client.Response) ([]string, error) {
-		return []string{fmt.Sprintf("%s %s removed from draft %s (draft revision %s).", strings.ToUpper(string(kind[:1]))+string(kind[1:]), pos[0], draft,
+		return []string{sf("%s %s removed from draft %s (draft revision %s).", strings.ToUpper(string(kind[:1]))+string(kind[1:]), pos[0], draft,
 			client.DraftRevision(r.Header.Get("ETag")))}, nil
 	})
 }
@@ -280,7 +280,7 @@ func entryRead(draft string, kind apitypes.SourceEntryKind, name string) func(*c
 		if err != nil {
 			return "", err
 		}
-		shows := fmt.Sprintf("GET /api/v1/drafts/%s shows the draft %s at revision %d", url.PathEscape(draft), d.State, d.Revision)
+		shows := sf("GET /api/v1/drafts/%s shows the draft %s at revision %d", url.PathEscape(draft), d.State, d.Revision)
 		if kind == "" {
 			return shows, nil
 		}
@@ -290,10 +290,10 @@ func entryRead(draft string, kind apitypes.SourceEntryKind, name string) func(*c
 				return "", fmt.Errorf("GET /api/v1/drafts/%s: an entry cannot be read: %w", url.PathEscape(draft), err)
 			}
 			if x.Kind == kind && (x.Name != nil && *x.Name == name || x.Machine != nil && *x.Machine == name) {
-				return fmt.Sprintf("%s, with %s %s at %s", shows, kind, name, or(x.Revision, "removed")), nil
+				return sf("%s, with %s %s at %s", shows, kind, name, or(x.Revision, "removed")), nil
 			}
 		}
-		return fmt.Sprintf("%s, with no %s %s entry", shows, kind, name), nil
+		return sf("%s, with no %s %s entry", shows, kind, name), nil
 	}
 }
 
@@ -313,6 +313,6 @@ func readDraft(c *client.Client, draft string) (*apitypes.DraftBody, error) {
 // next write to the draft then needs a read first.
 func keep(e *env, c *client.Client, draft, etag string) {
 	if err := client.KeepETag(c.Context, draft, etag); err != nil {
-		fmt.Fprintf(e.err, "bronzewardctl: %s: keeping the ETag of %s: %v\n", c.Context.Where(), draft, err)
+		tf(e.err, "bronzewardctl: %s: keeping the ETag of %s: %v\n", c.Context.Where(), draft, err)
 	}
 }

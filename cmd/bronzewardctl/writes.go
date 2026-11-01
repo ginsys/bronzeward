@@ -104,7 +104,7 @@ func (e *env) writeAfter(prep func(*client.Client) error, w *client.Write, say f
 		}
 	}
 	if err != nil {
-		fmt.Fprintf(e.err, "bronzewardctl: %s: %s /api/v1%s succeeded, but its answer cannot be read: %v\n", c.Context.Where(), w.Method, w.Path, err)
+		tf(e.err, "bronzewardctl: %s: %s /api/v1%s succeeded, but its answer cannot be read: %v\n", c.Context.Where(), w.Method, w.Path, err)
 		if e.output == "table" {
 			return nil
 		}
@@ -120,7 +120,7 @@ func (e *env) writeAfter(prep func(*client.Client) error, w *client.Write, say f
 	}
 	return e.emit(r.Body, func(tw *tabwriter.Writer) {
 		for _, l := range lines {
-			fmt.Fprintln(tw, l)
+			fmt.Fprintln(tw, client.Printable(l)) // a sentence a write built without sf is escaped here
 		}
 	})
 }
@@ -135,7 +135,7 @@ func find[T any](c *client.Client, path, what string, match func(T) string) (str
 	for i, raw := range items {
 		var v T
 		if err := json.Unmarshal(raw, &v); err != nil {
-			return "", fmt.Errorf("GET /api/v1%s: item %d cannot be read: %w", path, i, err)
+			return "", ef("GET /api/v1%s: item %d cannot be read: %w", path, i, err)
 		}
 		if match(v) != "" {
 			return fmt.Sprintf("GET /api/v1%s shows %s", path, match(v)), nil
@@ -171,7 +171,7 @@ func (e *env) clusterAdd(args []string) error {
 		}}, func(_ *client.Client, r *client.Response) ([]string, error) {
 		var x apitypes.ClusterBody
 		err := json.Unmarshal(r.Body, &x)
-		return []string{fmt.Sprintf("Cluster %s recorded: %s, endpoint %s, contract %s, Talos cluster ID %s.",
+		return []string{sf("Cluster %s recorded: %s, endpoint %s, contract %s, Talos cluster ID %s.",
 			x.Id, x.Name, x.Endpoint, x.Contract, x.TalosClusterId)}, err
 	})
 }
@@ -230,7 +230,7 @@ func (e *env) machineAdd(args []string) error {
 				cluster += " (" + x.Name + ")"
 			}
 		}
-		return []string{fmt.Sprintf("Machine %s recorded in cluster %s. Endpoint %s.", m.Id, cluster, m.TalosEndpoint),
+		return []string{sf("Machine %s recorded in cluster %s. Endpoint %s.", m.Id, cluster, m.TalosEndpoint),
 			"Next: give Bronzeward the cluster's Talos access in the provider, then import its configuration."}, nil
 	})
 }
@@ -266,7 +266,7 @@ func (e *env) machineSetEndpoint(args []string) error {
 		}}, func(_ *client.Client, r *client.Response) ([]string, error) {
 		var x apitypes.EndpointChangeBody
 		err := json.Unmarshal(r.Body, &x)
-		return []string{fmt.Sprintf("Machine %s: Talos endpoint %s, was %s (timeline revision %d).",
+		return []string{sf("Machine %s: Talos endpoint %s, was %s (timeline revision %d).",
 			x.Machine, x.TalosEndpoint, x.PreviousEndpoint, x.Revision)}, err
 	})
 }
