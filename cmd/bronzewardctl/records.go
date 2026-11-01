@@ -343,6 +343,11 @@ func (e *env) draftCmd(args []string) error {
 }
 
 func (e *env) releaseCmd(args []string) error {
+	if v, rest, err := e.verb("release", args, "list", "show", "review", "provenance"); err != nil {
+		return err
+	} else if v == "review" || v == "provenance" {
+		return e.releaseReview(v, rest)
+	}
 	var l listing
 	var cluster, draft string
 	v, pos, err := e.noun("release", args, &l, filters(map[string]*string{"cluster": &cluster, "draft": &draft}))

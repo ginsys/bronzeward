@@ -63,7 +63,12 @@ commands:
               --if-match <etag>; if the draft changed since, it saves nothing and says so
               draft writes take author; repeat one with the outcome-unknown block's flags,
               --if-match included
+  publish <draft> [--no-wait]
+              publisher; sends the draft's kept ETag or --if-match, waits for the publication
+              and names the release; nothing is sent to any machine
   release list [--cluster <id>] [--draft <id>] | show <release>
+  release review | provenance <release> <machine>
+              the rendered, redacted configuration, or the secret references it was built from
   plan list [--state <s>] [--machine <id>] | show <plan>
   operation list [--plan <id>] [--machine <id>] [--state <s>] [--kind <k>] | show <operation>
   act list    the audit record
@@ -133,7 +138,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	commands := map[string]func([]string) error{"context": e.contextCmd, "version": e.versionCmd, "whoami": e.whoamiCmd, "login": e.loginCmd, "logout": e.logoutCmd,
 		"status": e.statusCmd, "cluster": e.clusterCmd, "machine": e.machineCmd,
 		"fragment": e.fragmentCmd, "profile": e.profileCmd, "assignment": e.assignmentCmd,
-		"draft": e.draftCmd, "release": e.releaseCmd, "plan": e.planCmd, "operation": e.operationCmd, "act": e.actCmd}
+		"draft": e.draftCmd, "publish": e.publish, "release": e.releaseCmd, "plan": e.planCmd, "operation": e.operationCmd, "act": e.actCmd}
 	pos, err := e.parse("bronzewardctl", args, -1, nil)
 	if err == nil && len(pos) == 0 {
 		err = usageError{errors.New("no command")}
