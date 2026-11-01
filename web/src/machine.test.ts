@@ -2,7 +2,7 @@ import { describe, expect, test, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ADOPTED, advanced, advanceReads, countingSettle, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, kept, keptW3, latestUnread, MachineShown, nextTimeline, type Observation, Observations, POLL_MS, polled, queued, readLater, readOlder, sentences, stepAdvance, type Timeline, TimelineRows, UNREAD } from "./machine.tsx";
-import { type Reads, ReadsProvider, RESTARTED } from "./list.tsx";
+import { type Load, type Reads, ReadsProvider, RESTARTED } from "./list.tsx";
 import type { Machine } from "./machines.tsx";
 import type { ReadResult } from "./request.ts";
 
@@ -327,6 +327,26 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
       tl: { kind: "ok", data: { ...UNREAD, read: true } }, kt: { view: "v", data: { ...UNREAD, read: true }, restarted: false }, older: undefined, busy: false,
     })));
     expect(out).toMatch(/<\/h2>FAILED<div><p role="status" data-testid="restarted">/);
+  });
+
+  test("#443 case 5: with no observations kept, W3 still shows the machine's own rows under the observations' failure", () => {
+    const reads = { go: () => {}, failure: () => "FAILED" } as unknown as Reads;
+    const shown = (m: Load<Machine>, km: Machine | undefined) => renderToStaticMarkup(createElement(ReadsProvider, { value: reads }, createElement(MachineShown, {
+      id: "mch_a", m, obs: { kind: "unavailable", status: 503, problem: null },
+      km: { view: "v", data: km, restarted: false }, ko: { view: "v", data: undefined, restarted: false },
+      tl: { kind: "ok", data: { ...UNREAD, read: true } }, kt: { view: "v", data: { ...UNREAD, read: true }, restarted: false }, older: undefined, busy: false,
+    })));
+    const answered = shown({ kind: "ok", data: machine({ frozen: true }) }, undefined);
+    expect(answered).toMatch(/<h2>Machine mch_a<\/h2>FAILED<p>Cluster /);
+    expect(answered).toContain('data-testid="sentences"');
+    expect(answered).toContain(FROZEN);
+    expect(answered).toContain("<dt>Desired</dt>");
+    expect(answered).toContain("<h3>Timeline (newest first)</h3>");
+    // Only the observations need the observations: no list, no empty list.
+    expect(answered).not.toContain("<h3>Observations</h3>");
+    expect(answered).not.toContain("No observation recorded.");
+    // Both reads failed, the machine kept: both failures, then the kept machine's rows.
+    expect(shown({ kind: "unavailable", status: 503, problem: null }, machine({ frozen: true }))).toMatch(/<\/h2>FAILEDFAILED<p>Cluster [^]*data-testid="sentences"/);
   });
 
   test("review R1-F1: a restart that fails drops the timeline read before it and its refused cursor", async () => {
