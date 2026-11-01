@@ -9,6 +9,8 @@ main:focus { outline: none; }
 nav { display: flex; flex-wrap: wrap; gap: 0 1rem; }
 nav a, button, select { min-height: 24px; min-width: 24px; }
 select { max-width: 100%; }
+/* A textarea's cols set its width on a wide page; at 320 CSS pixels it fits the page instead. */
+textarea { max-width: 100%; box-sizing: border-box; }
 nav a { display: inline-block; padding: 0.25rem 0; }
 p, dd, li, h2 { overflow-wrap: anywhere; }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; }
