@@ -80,7 +80,7 @@ func (e *env) fragmentSet(args []string) error {
 	}, w, func(_ *client.Client, r *client.Response) ([]string, error) {
 		var x apitypes.SourceUpdate
 		err := json.Unmarshal(r.Body, &x)
-		return []string{fmt.Sprintf("Fragment %s saved in draft %s (revision %s; draft revision %s).", pos[0], x.Draft, or(x.Entry.Revision, "none"),
+		return []string{sf("Fragment %s saved in draft %s (revision %s; draft revision %s).", pos[0], x.Draft, or(x.Entry.Revision, "none"),
 			client.DraftRevision(r.Header.Get("ETag")))}, err
 	})
 }
