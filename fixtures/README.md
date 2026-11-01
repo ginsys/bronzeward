@@ -148,9 +148,9 @@ the slot rule are in [CONTRIBUTING.md](../CONTRIBUTING.md#several-instances-on-o
   request with CreateCallback. No login container runs.
 - **Participant sessions (#367).** `fixtures/dev-idp up --participants` also starts Zitadel's
   login page (`ZITADEL_LOGIN_IMAGE`, container `bw-dev-login`), so that a person signs in through
-  it. The login page is published on the port after the issuer's, `http://localhost:58281`. It runs
+  it. The login page is published on the port after the issuer's, `http://localhost:11081`. It runs
   on the default instance only and refuses a set `BW_DEV_INSTANCE`, because the participant
-  clients' redirect URIs are seeded for one origin. The issuer stays `http://localhost:58280`,
+  clients' redirect URIs are seeded for one origin. The issuer stays `http://localhost:11080`,
   because the clients accept plain http to localhost only (client contracts §6 item 1). A fixture
   server reaches that URL through a forwarder (container `bw-dev-forward`) on its own 127.0.0.1 at
   the issuer's port, inside its network namespace and never on the host
