@@ -356,11 +356,33 @@ export function pacer(run: () => void, now: () => number = Date.now, after: (f: 
   return [ask, started, stop];
 }
 
+// W3's read again after a banner end, from what the page shows at each render: its view, its read
+// again count (`again`, which changes when a read again of the page starts) and its count of banner
+// ends (`regained`). A banner end asks the pacer when a resource found no answer since the last one;
+// a change of `again` marks the start; a new view drops what the old view asked for and its marks.
+// The first render only notes what it sees. Returns the observe and the stop.
+export function recovery(lost: { current: [boolean, boolean] }, run: () => void, now?: () => number, after?: (f: () => void, ms: number) => ReturnType<typeof setTimeout>): [(view: string, again: number, regained: number) => void, () => void] {
+  const [ask, started, stop] = pacer(run, now, after);
+  let seen: [string, number, number] | undefined;
+  const observe = (view: string, again: number, regained: number) => {
+    const was = seen;
+    seen = [view, again, regained];
+    if (was === undefined) return;
+    if (was[0] !== view) {
+      stop();
+      lost.current = [false, false];
+      return;
+    }
+    if (was[1] !== again) started();
+    if (was[2] !== regained && lostSince(lost)) ask();
+  };
+  return [observe, stop];
+}
+
 // When a read's answer ends the banner and a resource found no answer, the machine and its
 // observations are read again once, as for a timeline advance: one read again at a time, so this
 // read again and the timeline's do not abandon each other, and at most once per POLL_MS from when the
-// last one started. Each read again of the page starts with a new `again`. A new view drops what an
-// old view's reads asked for: its own reads are the page's first.
+// last one started (`recovery`).
 function MachineState({ id, path, tl, older, busy, readAgain }: { id: string; path: string; tl: Load<Timeline<Entry>> | Dropped; older: (() => void) | undefined; busy: boolean; readAgain: () => void }) {
   const { view, regained, again: n } = useReads();
   const k = useRef<W3Kept>(undefined);
@@ -369,16 +391,9 @@ function MachineState({ id, path, tl, older, busy, readAgain }: { id: string; pa
   const [obs] = useList<Observation>(`${path}/observations`, "", true, keepW3(k, 1, lost));
   const again = useRef(readAgain);
   again.current = readAgain;
-  const [ask, started, stop] = useMemo(() => pacer(() => again.current()), []);
+  const [observe, stop] = useMemo(() => recovery(lost, () => again.current()), []);
   useEffect(() => stop, [stop]);
-  useEffect(() => {
-    stop();
-    lost.current = [false, false];
-  }, [view, stop]);
-  useEffect(started, [n, started]);
-  useEffect(() => {
-    if (lostSince(lost)) ask();
-  }, [regained, ask]);
+  useEffect(() => observe(view, n, regained));
   const [km, ko, kt] = (k.current = keptW3(k.current, m, obs, tl, view));
   return <MachineShown id={id} m={m} obs={obs} km={km} ko={ko} tl={tl} kt={kt} older={older} busy={busy} />;
 }
