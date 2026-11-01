@@ -114,6 +114,20 @@ func TestEntry(t *testing.T) {
 			t.Errorf("another principal: err %v, %d posts", err, len(f.postsSeen()))
 		}
 	})
+	t.Run("operator repeat refused by another entry", func(t *testing.T) {
+		// An epoch-bearing conflict to a repeat leaves the outcome unknown; its block prints no epoch.
+		f := &fake{epoch: "ep_BWSYNTH-1", beforeEntry: true, post: func(_ int, w http.ResponseWriter, _ *http.Request) {
+			problemAnswer(w, http.StatusConflict, "conflict", `,"epoch":"ep_BWSYNTH-3"`)
+		}}
+		c, _, _ := writeClient(t, f, "ep_BWSYNTH-1")
+		w := entryWrite()
+		w.Repeat = &Repeat{Key: "BWSYNTH-" + strings.Repeat("k", 14), Principal: "svc_BWSYNTH"}
+		_, err := c.Send(w)
+		var u *Unknown
+		if !errors.As(err, &u) || !strings.Contains(err.Error(), "Another recovery entry committed first") || strings.Contains(err.Error(), "ep_BWSYNTH-3") {
+			t.Errorf("err %v; want an unknown-outcome block that names no epoch", err)
+		}
+	})
 	t.Run("block", func(t *testing.T) {
 		f := &fake{epoch: "ep_BWSYNTH-1", beforeEntry: true, post: func(_ int, w http.ResponseWriter, _ *http.Request) { drop(w) }}
 		c, _, _ := writeClient(t, f, "ep_BWSYNTH-1")
