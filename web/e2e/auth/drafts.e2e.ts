@@ -110,7 +110,7 @@ async function edit(label: string, b: B = browser) {
 
 // Selects the fragment entry `name` and waits for its revision.
 async function select(name: string, b: B = browser) {
-  await b.$(`main ul[aria-label="Entries"] button=fragment ${name}`).click();
+  await b.$('main ul[aria-label="Entries"]').$(`button=fragment ${name}`).click();
   await loaded(b);
 }
 
