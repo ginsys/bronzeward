@@ -77,6 +77,10 @@ func (e *env) writeAfter(prep func(*client.Client) error, w *client.Write, say f
 		return err
 	}
 	defer func() { err = errors.Join(err, c.Save()) }()
+	// A repeat is refused after item 3's reads alone, before prep's (§8.4 item 4).
+	if err := c.CheckRepeat(w); err != nil {
+		return err
+	}
 	if prep != nil {
 		if err := prep(c); err != nil {
 			return err
