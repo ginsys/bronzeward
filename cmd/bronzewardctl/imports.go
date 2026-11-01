@@ -52,22 +52,38 @@ var leaseMargin = 10 * time.Second
 // exit 3 (operator-experience.md §4).
 type outcomeUnknown struct{ error }
 
-// accepted is the 202 answer of an ingestion start, continuation or takeover.
+// accepted is the 202 answer of an ingestion start, continuation, takeover or mark. Only a mark's
+// names a generation, the one its run holds the claim at; marks is how many paths it sent.
 type accepted struct {
-	Ingestion string `json:"ingestion"`
-	Operation string `json:"operation"`
+	Ingestion  string `json:"ingestion"`
+	Operation  string `json:"operation"`
+	Generation int    `json:"generation"`
+	marks      int
 }
 
-// importCmd runs import start, status, continue, takeover and abandon (operator-experience.md §4,
-// §5.3; decisions T11 and T15 of #256).
+// settlement is how a watched run settled before its operation ended: how is the event that settled
+// it ("paused", "mark-refused", "resume-failed" or "taken-over"), or "" when none did; gen its
+// generation, code a resume-failed event's code and problem a mark-refused event's problem.
+type settlement struct {
+	how, code string
+	gen       int
+	problem   map[string]any
+}
+
+// importCmd runs import start, status, review, mark, continue, takeover and abandon
+// (operator-experience.md §4, §5.3; decisions T11, T14 and T15 of #256).
 func (e *env) importCmd(args []string) error {
-	v, rest, err := e.verb("import", args, "start", "status", "continue", "takeover", "abandon")
+	v, rest, err := e.verb("import", args, "start", "status", "review", "mark", "continue", "takeover", "abandon")
 	if err != nil {
 		return err
 	}
 	switch v {
 	case "start":
 		return e.importStart(rest)
+	case "review":
+		return e.importReview(rest)
+	case "mark":
+		return e.importMark(rest)
 	case "status":
 		return e.importStatus(rest)
 	case "abandon":
@@ -308,7 +324,7 @@ func allowed(b *apitypes.IngestionBody) []string {
 	cmd := func(verb string) string { return "  bronzewardctl import " + verb + " " + pr(b.Id) }
 	switch b.State {
 	case "paused":
-		return []string{"Paused for review. Continue it, or abandon it:", cmd("continue"), cmd("abandon")}
+		return []string{"Paused for review. Review it, continue it, or abandon it:", cmd("review"), cmd("continue"), cmd("abandon")}
 	case "held", "resumed":
 		switch {
 		case b.Mode != "encrypted" && time.Now().After(b.LeaseUntil):
@@ -343,7 +359,8 @@ func restart(b *apitypes.IngestionBody) []string {
 // carry a generation above before, pauses for review or records resume-failed; or when a read of
 // the ingestion, made once the lease it last showed passed leaseMargin ago by this host's clock,
 // shows the claim held or resumed with its lease passed (PROT-06). A claim read paused, released
-// or abandoned while the operation runs settles nothing: the operation does.
+// or abandoned while the operation runs settles nothing: the operation does. A mark's run is the
+// one after the marked event at the 202's generation, and markOutcome reports it.
 func (e *env) follow(c *client.Client, a accepted, before int) (err error) {
 	if a.Ingestion == "" || a.Operation == "" {
 		return fmt.Errorf("%s: the server accepted the import without naming its ingestion and operation; find it with: bronzewardctl import status --state held", c.Context.Where())
@@ -358,7 +375,9 @@ func (e *env) follow(c *client.Client, a accepted, before int) (err error) {
 	if latest {
 		before = b.OwnerGeneration - 1
 	}
-	gen, ours, settled, code := before, before == 0, "", ""
+	// A mark's run is the one after its marked event, at the generation its 202 names.
+	mark := a.Generation
+	gen, ours, s := before, before == 0 && mark == 0, settlement{}
 	next := b.LeaseUntil.Add(leaseMargin)
 	// seen is the number of the last event shown; behind, the operation's newest event when a lapsed
 	// lease was read with events still unshown. The lease decides only once those are shown.
@@ -371,8 +390,9 @@ func (e *env) follow(c *client.Client, a accepted, before int) (err error) {
 			shownEpoch, n, _ = strings.Cut(ev.ID, ":")
 			seen, _ = strconv.Atoi(n)
 			var d struct {
-				Generation int    `json:"generation"`
-				Code       string `json:"code"`
+				Generation int            `json:"generation"`
+				Code       string         `json:"code"`
+				Problem    map[string]any `json:"problem"`
 			}
 			_ = json.Unmarshal(ev.Data, &d)
 			note := ""
@@ -384,22 +404,38 @@ func (e *env) follow(c *client.Client, a accepted, before int) (err error) {
 			}
 			tf(e.err, "  %s%s\n", ev.Type, note)
 			switch {
+			case mark == 0:
+			case s.how != "":
+			case ev.Type == "marked" && d.Generation == mark:
+				ours = true
+			case ev.Type == "taken-over" && d.Generation > mark:
+				s = settlement{how: "taken-over", gen: d.Generation}
+			case !ours:
+			case (ev.Type == "paused" || ev.Type == "mark-refused") && d.Generation == mark:
+				s = settlement{how: ev.Type, gen: mark, problem: d.Problem}
+			case ev.Type == "resume-failed":
+				s = settlement{how: "resume-failed", code: d.Code}
+			}
+			if mark != 0 {
+				return
+			}
+			switch {
 			case (ev.Type == "continued" || ev.Type == "taken-over" || latest && ev.Type == "marked") && d.Generation > gen:
 				ours, gen = true, d.Generation
 			case !ours:
 			case ev.Type == "paused" && d.Generation >= gen:
-				settled, gen = "paused", d.Generation
+				s, gen = settlement{how: "paused", gen: d.Generation}, d.Generation
 			case ev.Type == "resume-failed":
-				settled, code = "resume-failed", d.Code
+				s = settlement{how: "resume-failed", code: d.Code}
 			}
 		},
 		Clear: func() {
 			fmt.Fprintln(e.err, "  (the events above no longer hold)")
-			gen, ours, settled, seen, behind, shownEpoch = before, before == 0, "", 0, 0, ""
+			gen, ours, s, seen, behind, shownEpoch = before, before == 0 && mark == 0, settlement{}, 0, 0, ""
 		},
 		Until: func() (bool, error) {
-			if settled != "" || seen < behind || time.Now().Before(next) {
-				return settled != "", nil
+			if s.how != "" || seen < behind || time.Now().Before(next) {
+				return s.how != "", nil
 			}
 			nb, claimEpoch, err := readIngestionAt(c, a.Ingestion)
 			if err != nil {
@@ -439,23 +475,36 @@ func (e *env) follow(c *client.Client, a accepted, before int) (err error) {
 		fmt.Fprintf(e.err, "bronzewardctl: %s; the operation's last events were not shown\n", client.Shown(err))
 	}
 	switch {
+	case mark != 0:
+		// A mark's settlement comes first: a later succeeded is never the mark applied.
+		return e.markOutcome(c, a, b, o, s)
 	case client.Terminal(o.State):
 		return e.ended(c, b, o)
-	case settled == "paused":
+	case s.how == "paused":
 		return e.say(append([]string{sf("Paused for review (generation %d, expires %s).", gen, when(b.ExpiresAt)),
-			"Continue it, or abandon it:"}, remedies(b.Id, "continue", "abandon")...)...)
-	case settled == "resume-failed":
-		return &client.Blocked{Err: fmt.Errorf("%s: import %s was not applied: its staged input could not be decrypted (resume-failed, %s). "+
-			"The claim stays held until its lease lapses. Read its lease with the first command; once it lapsed, take it over, or abandon it now:",
-			c.Context.Where(), b.Id, or(&code, "no code")), More: remedies(b.Id, "status", "takeover", "abandon")}
+			"Review it, then continue it, or abandon it:"}, remedies(b.Id, "review", "continue", "abandon")...)...)
+	case s.how == "resume-failed":
+		return resumeFailed(c, b, "import "+b.Id, s.code)
 	}
+	return lapsed(c, b, o, "import "+b.Id)
+}
+
+// resumeFailed reports what, a run that recorded resume-failed, as not applied: exit 1.
+func resumeFailed(c *client.Client, b *apitypes.IngestionBody, what, code string) error {
+	return &client.Blocked{Err: fmt.Errorf("%s: %s was not applied: its staged input could not be decrypted (resume-failed, %s). "+
+		"The claim stays held until its lease lapses. Read its lease with the first command; once it lapsed, take it over, or abandon it now:",
+		c.Context.Where(), pr(what), pr(or(&code, "no code"))), More: remedies(b.Id, "status", "takeover", "abandon")}
+}
+
+// lapsed reports what, whose claim's lease lapsed while its operation runs, as unknown: exit 3.
+func lapsed(c *client.Client, b *apitypes.IngestionBody, o *apitypes.OperationBody, what string) error {
 	act, verbs := "take it over, or abandon it", []string{"status", "takeover", "abandon"}
 	if b.Mode != "encrypted" {
 		act, verbs = "or abandon it (transient staging cannot be taken over)", []string{"status", "abandon"}
 	}
-	return &client.Blocked{Err: outcomeUnknown{fmt.Errorf("%s: import %s: its claim is %s and its lease lapsed %s, while operation %s still runs: the outcome is unknown. "+
+	return &client.Blocked{Err: outcomeUnknown{fmt.Errorf("%s: %s: its claim is %s and its lease lapsed %s, while operation %s still runs: the outcome is unknown. "+
 		"Read it again later, %s:",
-		c.Context.Where(), b.Id, b.State, ago(b.LeaseUntil), o.Id, act)}, More: remedies(b.Id, verbs...)}
+		c.Context.Where(), pr(what), b.State, ago(b.LeaseUntil), o.Id, act)}, More: remedies(b.Id, verbs...)}
 }
 
 // remedies are the lines `bronzewardctl import <verb> <id>`, one per verb, of an error's remedy.

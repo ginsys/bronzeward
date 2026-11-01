@@ -244,10 +244,12 @@ func (e *env) readMarks(taken bool) ([]string, error) {
 	if in == nil {
 		return nil, usageError{errors.New("--marks reads from a prompt on a terminal or from standard input, and neither is free here; nothing was sent")}
 	}
+	ask := func() {}
 	if prompt != nil {
-		fmt.Fprintln(prompt, "Marks, one path per line; an empty line ends them:")
+		fmt.Fprintln(prompt, "Mark a value as secret by its path, one per line; empty line to finish:")
+		ask = func() { fmt.Fprint(prompt, "mark> ") }
 	}
-	return scanMarks(in, prompt != nil)
+	return scanMarks(in, prompt != nil, ask)
 }
 
 // terminalLine is the most a Linux terminal in canonical mode keeps of one line: it drops the rest
@@ -293,15 +295,18 @@ func terminalLines(b []byte, terminal bool, what string) error {
 // scanMarks reads marks, one per line until an empty line or the end of input. A mark is sent as
 // the text that was given (PA §9.3), so a mark that is not UTF-8, which json.Marshal would alter,
 // or a terminal line that may have been cut short is refused. A refusal names the mark's position,
-// never its text.
-func scanMarks(in io.Reader, terminal bool) ([]string, error) {
+// never its text. ask, when not nil, prompts for each line.
+func scanMarks(in io.Reader, terminal bool, ask func()) ([]string, error) {
 	var marks []string
 	s := bufio.NewScanner(in)
 	// The API sets no length on one mark, so a line may be as long as the body limit allows.
 	s.Buffer(nil, maxBody)
 	s.Split(markLines)
+	if ask == nil {
+		ask = func() {}
+	}
 	total := 0
-	for s.Scan() {
+	for ask(); s.Scan(); ask() {
 		// All the marks together are held to the body limit too, so a long stream of lines is
 		// refused before it is read whole.
 		if total += len(s.Bytes()); total > maxBody {

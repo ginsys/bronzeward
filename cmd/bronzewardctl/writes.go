@@ -78,6 +78,11 @@ func (e *env) writeAfter(prep func(*client.Client) error, w *client.Write, say f
 		return err
 	}
 	defer func() { err = errors.Join(err, c.Save()) }()
+	return e.writeWith(c, prep, w, say)
+}
+
+// writeWith is writeAfter on a client already open, which the caller saves.
+func (e *env) writeWith(c *client.Client, prep func(*client.Client) error, w *client.Write, say func(*client.Client, *client.Response) ([]string, error)) error {
 	// A repeat is refused after item 3's reads alone, before prep's (§8.4 item 4).
 	if err := c.CheckRepeat(w); err != nil {
 		return err

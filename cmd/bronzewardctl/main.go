@@ -67,6 +67,12 @@ commands:
               [--review] [--marks] [--no-wait]
               the machine's configuration, or with --file a document, into the draft, sending its
               kept ETag or --if-match; waits until the import pauses for review or ends
+  import review <ingestion>
+              a paused import's staged document, only on a terminal, in a pager (space or f
+              forward, b back, q quit) that writes nothing else; then marks from the prompt
+  import mark <ingestion> [--no-wait]
+              mark values as secret by their paths, one per line from the prompt or standard
+              input, never an argument; waits until the import pauses again
   import continue | takeover <ingestion> [--no-wait]
               continue an import paused for review, or take over one whose lease lapsed; waits
   import abandon <ingestion>
