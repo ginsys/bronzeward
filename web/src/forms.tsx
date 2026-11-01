@@ -7,7 +7,8 @@ import type { components } from "./api/v1";
 import { Ref, short, useList, useReads } from "./list.tsx";
 import type { Cluster, Machine } from "./machines.tsx";
 import { Action } from "./shell.tsx";
-import { problemTail, Refused,Repeated, REPLAYED, SetAside, Status, Unknown } from "./states.tsx";
+import type { Problem } from "./request.ts";
+import { problemTail, Refused, Repeated, REPLAYED, SetAside, Status, Unknown } from "./states.tsx";
 import { type Outcome, Write, type Writes, type WriteSpec } from "./write.ts";
 
 type EndpointChange = components["schemas"]["EndpointChangeBody"];
@@ -123,6 +124,18 @@ function useSend(): [Write | undefined, (spec: WriteSpec) => void] {
   return [current.current, send];
 }
 
+// A 409 conflict that names another cluster or machine already recorded, as Add cluster's or
+// Record machine's does: the record to read (§8.2 409 row). Not the write's own resource, which a
+// Change endpoint conflict names.
+export function existing(status: number, p: Problem | null, resource: string): { kind: "cluster" | "machine"; id: string; to: string } | undefined {
+  if (status !== 409 || p?.type !== "urn:bronzeward:problem:conflict") return undefined;
+  for (const kind of ["cluster", "machine"] as const) {
+    const id = p[kind];
+    if (typeof id === "string" && `/${kind}s/${id}` !== resource) return { kind, id, to: `/${kind}s/${id}` };
+  }
+  return undefined;
+}
+
 // The form's own line for its write; an unknown outcome is the notice's.
 export function Result({ w, done }: { w: Write | undefined; done: (data: unknown) => ReactNode }) {
   const o: Outcome | undefined = w?.outcome;
@@ -136,8 +149,15 @@ export function Result({ w, done }: { w: Write | undefined; done: (data: unknown
         return <Status testid="write-result">{o.replayed && `${REPLAYED} `}Saved (the server answered {o.status}), but its answer could not be read. Read <Ref to={w.spec.resource} id={w.spec.resource}>{w.spec.resource}</Ref>.</Status>;
       }
       return <Status testid="write-result">{o.replayed && `${REPLAYED} `}{done(o.data)}</Status>;
-    case "refused":
-      return <Refused testid="write-result" problem={o.problem} status={o.status} verb="saved" replayed={o.replayed} />;
+    case "refused": {
+      const named = existing(o.status, o.problem, w.spec.resource);
+      return (
+        <>
+          <Refused testid="write-result" problem={o.problem} status={o.status} verb="saved" replayed={o.replayed} />
+          {named !== undefined && <Status testid="write-existing">The {named.kind} already recorded: <Ref to={named.to} id={named.id}>{named.id}</Ref>.</Status>}
+        </>
+      );
+    }
     case "not-done":
       // The last answer's problem, when it carried one (§8.2).
       return <Status testid="write-result">Not saved: {o.why}.{problemTail(o.problem)}</Status>;

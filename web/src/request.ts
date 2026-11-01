@@ -174,7 +174,7 @@ export class Client {
   // refused by the browser included (§6 item 7). A credential refusal of a read sent to learn its
   // epoch goes to `end`, and to `end.now` at once, even when this answer is then lost or stalls.
   // `epochOnly` is a read sent only for its epoch, which its headers carry: only a credential
-  // refusal's body is read, any other is not waited for, since it may stall (data null).
+  // refusal's or a 409's body is read, any other is not waited for, since it may stall (data null).
   async attempt(method: string, path: string, headers: Record<string, string> = {}, body?: string, end: End = {}, epochOnly = false): Promise<Attempt | undefined> {
     const records = this.epochRecords;
     const res = await this.send(path, method, headers, body);
@@ -320,10 +320,11 @@ async function readProblem(res: Response): Promise<Problem | null | typeof NOT_J
 }
 
 // A read sent only for its epoch needs a body only to tell a credential refusal (a 401 or 403
-// problem): any other body, a success's included, is cancelled unread, since it may stall.
+// problem) or a recovery start's process refusal (a 409 problem, §8.5 item 1): any other body, a
+// success's included, is cancelled unread, since it may stall.
 async function credentialProblem(res: Response): Promise<Problem | null | typeof NOT_JSON | typeof CUT> {
   const problem = (res.headers.get("Content-Type") ?? "").startsWith("application/problem+json");
-  if ((res.status === 401 || res.status === 403) && problem) return readProblem(res);
+  if ((res.status === 401 || res.status === 403 || res.status === 409) && problem) return readProblem(res);
   void res.body?.cancel().catch(() => {});
   return null;
 }
