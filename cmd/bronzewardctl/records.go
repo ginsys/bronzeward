@@ -165,20 +165,14 @@ func compact(v any) string {
 	return string(b)
 }
 
-// machineRecords reads a machine's timeline or observations.
-func (e *env) machineRecords(v string, args []string) error {
+// machineObservations reads a machine's observations.
+func (e *env) machineObservations(args []string) error {
 	var l listing
-	pos, err := e.paged("machine "+v, args, 1, &l, nil)
+	pos, err := e.paged("machine observations", args, 1, &l, nil)
 	if err != nil {
 		return err
 	}
-	path := "/machines/" + url.PathEscape(pos[0]) + "/" + v
-	if v == "timeline" {
-		return list(e, l, path, url.Values{}, nil, "REVISION\tAT\tKIND\tENTRY", "", func(w *tabwriter.Writer, t *apitypes.TimelineEntry) {
-			tf(w, "%d\t%s\t%s\t%s\n", t.Revision, when(t.At), t.Kind, compact(t.Entry))
-		})
-	}
-	return list(e, l, path, url.Values{}, nil, "OBSERVATION\tAT\tPURPOSE\tBASIS\tENDPOINT\tUNREAD", "Health is not checked in this installation.",
+	return list(e, l, "/machines/"+url.PathEscape(pos[0])+"/observations", url.Values{}, nil, "OBSERVATION\tAT\tPURPOSE\tBASIS\tENDPOINT\tUNREAD", "Health is not checked in this installation.",
 		func(w *tabwriter.Writer, o *apitypes.ObservationBody) {
 			var unread []string
 			for k, u := range o.Unread {

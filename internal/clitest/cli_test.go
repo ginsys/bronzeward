@@ -487,7 +487,7 @@ var sharedCases = map[string]func(*testing.T, *fixture, *injector){
 				revisionOne(r)
 			}
 		})
-		f.want(f.ctl(nil, "", "--context", "trusted", "whoami"), 1, "API revision 1", "needs revision 2 or later")
+		f.want(f.ctl(nil, "", "--context", "trusted", "whoami"), 1, "API revision 1", "needs revision 3 or later")
 		if slices.Contains(in.requests(), "GET /api/v1/identity") {
 			t.Error("the identity read was sent after the refusal")
 		}

@@ -159,8 +159,10 @@ func (e *env) clusterCmd(args []string) error {
 func (e *env) machineCmd(args []string) error {
 	if v, rest, err := e.verb("machine", args, "list", "show", "timeline", "observations", "add", "set-endpoint"); err != nil {
 		return err
-	} else if v == "timeline" || v == "observations" {
-		return e.machineRecords(v, rest)
+	} else if v == "timeline" {
+		return e.machineTimeline(rest)
+	} else if v == "observations" {
+		return e.machineObservations(rest)
 	} else if v == "add" {
 		return e.machineAdd(rest)
 	} else if v == "set-endpoint" {

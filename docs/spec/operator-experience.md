@@ -741,6 +741,37 @@ server read, the first operation read, or the read that follows a cut stream), t
 operation read, the state is unknown and the exit is 3: the message names `operation show` as the
 command that reads it. Only a problem document the server named keeps exit 1.
 
+The machine timeline shows what happened to the plans of one machine, including the ones that
+never ran:
+
+```text
+$ bronzewardctl machine timeline mch_b3c…aa2q --follow
+REVISION  AT                       KIND                  ENTRY
+41        2026-11-01 10:05:12 CET  plan                  plan pln_f645…cawy, operation apply-config, release rel_h7rt…2bd, by h-pub (publisher)
+42        2026-11-01 10:05:30 CET  approval              approval apr_k2v…, plan pln_f645…cawy, by h-appr (approver), no self-approval reason
+43        2026-11-01 10:05:31 CET  refusal               plan pln_f645…cawy, comparison 2, cause the machine's Desired release changed
+44        2026-11-01 10:06:02 CET  plan-cancellation     plan pln_f645…cawy, by h-pub (publisher), reason Desired moved
+^C
+Stopped following the timeline of machine mch_b3c…aa2q at your request.
+```
+
+Each line names the entry's kind and what its record holds. A plan entry names the plan, its
+operation, its release and its creator. An approval entry names the approver and the recorded
+self-approval reasons. A refusal names the plan, the comparison that failed and its cause
+(`internal/api/commit.go:209-226`). A cancellation and a revocation name their reason. An entry of
+an operation names the operation first, then what its event line in `operation watch` shows. An
+entry of another kind prints its record as JSON.
+
+Without `--follow`, `machine timeline` reads one page, oldest first, as every list does. With
+`--follow`, it shows the newest page, then reads forward from the page's `tail` every 5 s and
+shows each new entry as the server records it ([client contracts §8.6](client-contracts.md#86-event-resumption)
+item 6). If the server refuses the cursor, because the installation was restored or entered
+recovery mode, it says so on standard error, prints
+`(the entries above may no longer hold; the newest are shown again)` and starts again from the
+newest page. Ctrl-C ends it with exit 130. With `-o json`, each entry prints unchanged on its own
+line, and with `-o yaml` each entry is its own document. The client needs API revision 3, the
+first that serves `order` and `tail`.
+
 ### 5.8 Drift: freeze, then adopt or revert
 
 This scenario happens before the publications of §5.3 and §5.5, while every covered machine's

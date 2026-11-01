@@ -143,46 +143,10 @@ func eventLine(ev client.Event, now time.Time) string {
 // (client-contracts.md §6 item 8).
 func plain(s string) string { return client.Printable(s) }
 
-// eventText says what an event's data holds, by its type.
+// eventText says what an event's data holds, by its type; an unknown type's data prints raw.
 func eventText(typ string, d map[string]any, raw json.RawMessage) string {
-	s := func(k string) string {
-		if v, ok := d[k]; ok && v != nil {
-			return plain(fmt.Sprint(v))
-		}
-		return ""
-	}
-	join := func(parts ...string) string {
-		var kept []string
-		for i := 0; i+1 < len(parts); i += 2 {
-			if v := s(parts[i+1]); v != "" {
-				kept = append(kept, parts[i]+v)
-			}
-		}
-		return strings.Join(kept, ", ")
-	}
-	switch typ {
-	case "commitment":
-		return join("plan ", "plan", "approval ", "approval", "observation ", "observation", "controller ", "controller", "generation ", "generation")
-	case "attempt":
-		return join("attempt ", "number", "route ", "route", "transport deadline ", "transportDeadline", "controller ", "controller", "generation ", "generation")
-	case "refusal":
-		return join("plan ", "plan", "comparison ", "comparison", "cause ", "cause", "observation ", "observation")
-	case "use-time-check":
-		return join("result ", "result", "plan ", "plan", "controller ", "controller")
-	case "response":
-		return join("attempt ", "number", "class ", "class", "code ", "code")
-	case "accounting":
-		return join("attempt ", "attempt", "basis ", "basis", "class ", "class", "decided by ", "decidedBy", "role ", "role")
-	case "classification":
-		return join("outcome ", "outcome", "observation ", "observation", "controller ", "controller", "generation ", "generation")
-	case "ownership-transition":
-		return join("from ", "from", "to ", "to", "generation ", "generation", "reason ", "reason", "requested by ", "requestedBy")
-	case "operation-state":
-		return join("from ", "from", "to ", "to", "comparison ", "comparison", "cause ", "cause", "decided by ", "decidedBy")
-	case "adoption":
-		return join("plan ", "plan", "approval ", "approval", "observation ", "observation", "controller ", "controller")
-	case "applied-change":
-		return join("from ", "from", "to ", "to", "source ", "source")
+	if text, known := eventFields(typ, d); known {
+		return text
 	}
 	var v any
 	dec := json.NewDecoder(bytes.NewReader(raw))
@@ -191,4 +155,54 @@ func eventText(typ string, d map[string]any, raw json.RawMessage) string {
 		return plain(string(raw))
 	}
 	return compact(v) // JSON escapes every control character
+}
+
+// field is d's member k as plain text, or "" when it is absent or null.
+func field(d map[string]any, k string) string {
+	if v, ok := d[k]; ok && v != nil {
+		return plain(fmt.Sprint(v))
+	}
+	return ""
+}
+
+// fields joins the members of d that parts name, as label and member pairs, skipping the absent.
+func fields(d map[string]any, parts ...string) string {
+	var kept []string
+	for i := 0; i+1 < len(parts); i += 2 {
+		if v := field(d, parts[i+1]); v != "" {
+			kept = append(kept, parts[i]+v)
+		}
+	}
+	return strings.Join(kept, ", ")
+}
+
+// eventFields says what the data of an operation event of a plan's operation holds, by its type,
+// which is also its machine timeline entry's kind; known is false for any other type.
+func eventFields(typ string, d map[string]any) (text string, known bool) {
+	join := func(parts ...string) string { return fields(d, parts...) }
+	switch typ {
+	case "commitment":
+		return join("plan ", "plan", "approval ", "approval", "observation ", "observation", "controller ", "controller", "generation ", "generation"), true
+	case "attempt":
+		return join("attempt ", "number", "route ", "route", "transport deadline ", "transportDeadline", "controller ", "controller", "generation ", "generation"), true
+	case "refusal":
+		return join("plan ", "plan", "comparison ", "comparison", "cause ", "cause", "observation ", "observation"), true
+	case "use-time-check":
+		return join("result ", "result", "plan ", "plan", "controller ", "controller"), true
+	case "response":
+		return join("attempt ", "number", "class ", "class", "code ", "code"), true
+	case "accounting":
+		return join("attempt ", "attempt", "basis ", "basis", "class ", "class", "decided by ", "decidedBy", "role ", "role"), true
+	case "classification":
+		return join("outcome ", "outcome", "observation ", "observation", "controller ", "controller", "generation ", "generation"), true
+	case "ownership-transition":
+		return join("from ", "from", "to ", "to", "generation ", "generation", "reason ", "reason", "requested by ", "requestedBy"), true
+	case "operation-state":
+		return join("from ", "from", "to ", "to", "comparison ", "comparison", "cause ", "cause", "decided by ", "decidedBy"), true
+	case "adoption":
+		return join("plan ", "plan", "approval ", "approval", "observation ", "observation", "controller ", "controller"), true
+	case "applied-change":
+		return join("from ", "from", "to ", "to", "source ", "source"), true
+	}
+	return "", false
 }
