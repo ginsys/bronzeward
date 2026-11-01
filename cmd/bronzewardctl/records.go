@@ -382,6 +382,9 @@ func (e *env) releaseCmd(args []string) error {
 }
 
 func (e *env) operationCmd(args []string) error {
+	if a, err := e.parse("operation", args, -1, nil); err == nil && len(a) > 0 && a[0] == "watch" {
+		return e.operationWatch(a[1:])
+	}
 	var l listing
 	var plan, machine, state, kind string
 	f := map[string]*string{"plan": &plan, "machine": &machine, "state": &state, "kind": &kind}
@@ -410,8 +413,9 @@ func (e *env) operationCmd(args []string) error {
 					a.Controller, a.Generation, a.Route, orInt(a.Classification, "none"))
 			}
 		}
-		if o.State == "unresolved" {
-			fmt.Fprintln(w, unresolvedGuidance(o.Attempts))
+		if o.State == "unresolved" || client.Terminal(o.State) {
+			lines, _ := outcome(o, nil)
+			fmt.Fprintln(w, strings.Join(lines, "\n"))
 		}
 	})
 }

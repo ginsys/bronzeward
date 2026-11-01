@@ -472,3 +472,31 @@ func TestWatchRenewal(t *testing.T) {
 		})
 	}
 }
+
+// TestEpochOf: the epoch of an event ID is the part before the colon, whatever follows, and an ID
+// with no colon is its own epoch.
+func TestEpochOf(t *testing.T) {
+	for id, want := range map[string]string{"ep_BWSYNTH1:7": "ep_BWSYNTH1", "ep_BWSYNTH2:0:9": "ep_BWSYNTH2", "ep_BWSYNTH3": "ep_BWSYNTH3", "": ""} {
+		if got := EpochOf(id); got != want {
+			t.Errorf("EpochOf(%q) = %q, want %q", id, got, want)
+		}
+	}
+}
+
+// TestOperationEpoch: the operation read returns the state and the epoch header of that answer, and
+// a missing header gives an empty epoch.
+func TestOperationEpoch(t *testing.T) {
+	const e1 = "ep_BWSYNTH1"
+	for _, epoch := range []string{e1, ""} {
+		o := &opServer{states: []string{"completed"}, epoch: epoch}
+		f := &fake{epoch: epoch, post: func(_ int, w http.ResponseWriter, r *http.Request) { o.serve(w, r) }}
+		c, _, _ := writeClient(t, f, epoch)
+		op, got, err := c.OperationEpoch("op_BWSYNTH")
+		if err != nil {
+			t.Fatalf("epoch %q: %v", epoch, err)
+		}
+		if op.State != "completed" || got != epoch {
+			t.Errorf("epoch %q: got state %q and epoch %q", epoch, op.State, got)
+		}
+	}
+}
