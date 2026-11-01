@@ -416,8 +416,8 @@ it. It holds no secret.
    - The output holds an invalid UTF-8 sequence. The test injects a control character and a byte
      that is not UTF-8 into every remote value that it can reach, the raw JSON members
      `OperationBody.Error` and `OperationBody.Result` included, and checks this for every command
-     in `-o table`. The `-o json` run only reports it (Limit, below). Where decoding has already replaced the byte with U+FFFD,
-     the check still holds. It has no exemption by source.
+     in `-o table`. Where decoding has already replaced the byte with U+FFFD, the check still
+     holds. It has no exemption by source.
    - Outside documents and diffs, a line has a different number of columns, or the output a
      different number of lines, from the same command run with plain values. This catches a tab
      that becomes padding, which leaves no raw tab and no extra row.
@@ -428,12 +428,13 @@ it. It holds no secret.
 
    A new response type, a new command or a new error branch passes this test before it ships.
 
-   **Limit.** `-o json` passes the server's bytes on unchanged, and `-o yaml` passes the values
-   through the YAML encoder. This item does not cover them. The same test also runs every command
-   in `-o json` with the same values and reports whether an unescaped control character reaches
-   the output inside a JSON string value. The whitespace between JSON tokens and the CLI's
-   trailing line feed are not counted. That result is not part of the rule. A raw control
-   character there goes into a separate issue.
+   **JSON output.** `-o json` passes the server's document on, with each DEL, C1 and
+   bidirectional control character written as `\uNNNN`. The JSON encoder escapes the C0 range
+   and leaves these raw. The escape decodes to the same text, so the document keeps its meaning.
+   The same test runs every command in `-o json` and fails on a raw character of these kinds,
+   on a raw C0 character that is not a line feed, or on a document that is not valid JSON.
+
+   **Limit.** `-o yaml` passes the values through the YAML encoder. This item does not cover it.
 
    **Alternatives and reasons.** (a) Escape only fields that hold free text, and show IDs and
    enumerations raw. The schemas give most of those members as plain strings, and a server that does
@@ -1624,7 +1625,7 @@ web view or a table output shows in requests of at most 100 identifiers each, ea
 `display` name, served from API revision 5, or by subject and issuer when `display` is `null`
 ([persistence and API §10](persistence-api.md#10-authentication-and-authorization)), a service
 by its name, and the shortened identifier for one answered `unknown` or when the read fails.
-`-o json` and `-o yaml` print the resource unchanged, full identifiers included
+`-o json` and `-o yaml` print the resource with the same values, full identifiers included
 ([operator experience §4](operator-experience.md#4-command-tree)).
 
 **C1. Contract correction.** Add the `reset` event to the stream contract of
