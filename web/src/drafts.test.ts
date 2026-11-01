@@ -2,12 +2,12 @@ import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { components } from "./api/v1";
-import { change, FragmentPane, forgetETag, keepETag, keptETag, LAYERS, NOT_RENDERED } from "./drafts.tsx";
+import { change, doneOnce, FragmentPane, forgetETag, keepETag, keptETag, LAYERS, NOT_RENDERED } from "./drafts.tsx";
 import { leaving, unsaved, WritesProvider } from "./forms.tsx";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import { references, spotOfLine, spotOfPath, spotOfReference } from "./position.ts";
 import { ShellContext } from "./shell.tsx";
-import { Writes } from "./write.ts";
+import { Write, Writes } from "./write.ts";
 
 type Source = components["schemas"]["SourceEntry"];
 const entry = (e: Partial<Source>): Source => ({ kind: "fragment", name: "f", head: "frg_1", base: 3, revision: "frv_2", document: "a: 1\n", ...e });
@@ -33,6 +33,24 @@ describe("the last-seen ETag per draft (§8.3, §8.5 item 1)", () => {
     expect(keptETag("drf_2", "e1")).toBeUndefined();
     forgetETag("drf_1");
     expect(keptETag("drf_1", "e1")).toBeUndefined();
+  });
+});
+
+describe("a done write is acted on once", () => {
+  // A discard's done effect read the draft again on each render after it, and no read settled.
+  test("its outcome is given the first time only, and not before it is done", () => {
+    const w = new Write({ method: "POST", path: "/drafts/drf_1/discard", body: {}, resource: "/drafts/drf_1" });
+    expect(doneOnce(undefined)).toBeUndefined();
+    expect(doneOnce(w)).toBeUndefined();
+    w.outcome = { kind: "refused", status: 412, problem: null, replayed: false };
+    expect(doneOnce(w)).toBeUndefined();
+    const done = { kind: "done", status: 200, data: null, replayed: false, etag: '"7-t"' } as const;
+    w.outcome = done;
+    expect(doneOnce(w)).toBe(done);
+    expect(doneOnce(w)).toBeUndefined();
+    const other = new Write(w.spec);
+    other.outcome = done;
+    expect(doneOnce(other)).toBe(done);
   });
 });
 
