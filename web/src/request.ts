@@ -166,9 +166,10 @@ export class Client {
   // pending write aside through onEpochChange. Undefined when no complete answer arrived, a redirect
   // refused by the browser included (§6 item 7).
   async attempt(method: string, path: string, headers: Record<string, string> = {}, body?: string): Promise<Attempt | undefined> {
+    const records = this.epochRecords;
     const res = await this.send(path, method, headers, body);
     if (res === undefined) return undefined;
-    this.observeEpoch(res);
+    await this.learnEpoch(res, records);
     const route = API_BASE + path.split("?")[0];
     if (res.headers.has("Deprecation") && !this.deprecated.has(route)) {
       this.deprecated.add(route);
@@ -204,6 +205,26 @@ export class Client {
       });
     } catch {
       return undefined;
+    }
+  }
+
+  // Epochs are unordered (§8.5). An answer that names another epoch than one recorded after its
+  // send may be the older one, so it is not adopted: GET /recovery is read, at most MAX_TRIES times,
+  // until an answer names the epoch recorded last or nothing was recorded since its own send, as a
+  // read is sent again. The write itself is never sent again here.
+  private async learnEpoch(res: Response, records: number): Promise<void> {
+    for (let tries = 0; ; tries++) {
+      const epoch = res.headers.get("Bronzeward-Epoch");
+      if (epoch === null || epoch === this.epoch || records === this.epochRecords) {
+        this.observeEpoch(res);
+        return;
+      }
+      if (tries + 1 >= MAX_TRIES) return;
+      records = this.epochRecords;
+      const next = await this.send("/recovery");
+      if (next === undefined) return;
+      await next.arrayBuffer().catch(() => undefined);
+      res = next;
     }
   }
 

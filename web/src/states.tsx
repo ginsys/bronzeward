@@ -8,8 +8,11 @@ import { type Problem, type ReadResult, TRANSPORT_FAILURE } from "./request.ts";
 export const WITHHELD = "Configuration not shown: it could not be redacted.";
 export const unknown = (why: string) => `Unknown whether this was saved: ${why}.`;
 export const UNKNOWN = unknown("the connection dropped");
+// A write set aside after an attempt that may have committed: the reason it was set aside, then
+// SET_ASIDE.
 export const SET_ASIDE =
-  "Your sign-in or the installation's epoch changed. A change with an unknown outcome is pending: it may already have been committed. It was not repeated, and repeating it stays disabled.";
+  "A change with an unknown outcome is pending: it may already have been committed. It was not repeated, and repeating it stays disabled.";
+export const setAside = (why: string) => `Set aside: ${why}. ${SET_ASIDE}`;
 export const REPLAYED = "Already done earlier; showing that result.";
 export const HUMAN_ONLY = "This action needs a person signed in; automation tokens cannot approve.";
 export const NOT_ACCEPTED = "Not accepted by this installation. Sign in again.";
@@ -47,6 +50,19 @@ export const Unread = ({ at, causes }: { at: Date; causes: string[] }) => (
 // A Bronzeward problem: its code, rule, title, detail and instance (client contracts §8.2), never a
 // request body. Any other answer is named by its status alone. A replayed refusal is the earlier
 // attempt's, and says so (§8.4 item 2).
+// A 403 forbidden names what the route accepts (§8.2 403 row): "humans only" when `humanOnly` is
+// true, else its `roles`. The plan cancellation's creator check, which carries `plan`, says it in
+// its `detail` instead.
+export function needs(status: number, problem: Problem): string {
+  if (status !== 403 || problem["plan"] !== undefined) return "";
+  if (problem["humanOnly"] === true) return ` ${HUMAN_ONLY}`;
+  const roles = problem["roles"];
+  return Array.isArray(roles) && roles.length > 0 && roles.every((r) => typeof r === "string") ? ` Needs ${roles.join(" or ")}.` : "";
+}
+
+// A problem's title, its detail when present and its instance (§8.2), as one sentence or two.
+export const problemLine = (p: Problem) => `${p.title}${p.detail !== undefined ? `: ${p.detail}` : ""}.${p.instance !== undefined ? ` Request ${p.instance}.` : ""}`;
+
 export function Refused({ problem, status, verb, testid, replayed = false }: { problem: Problem | null; status: number; verb: "read" | "saved"; testid?: string; replayed?: boolean }) {
   const earlier = replayed && `${REPLAYED} `;
   if (problem === null) return <Status testid={testid}>{earlier}Not {verb}: the server answered {status}.</Status>;
@@ -54,7 +70,7 @@ export function Refused({ problem, status, verb, testid, replayed = false }: { p
   const rule = typeof problem["rule"] === "string" ? ` (rule ${problem["rule"]})` : "";
   return (
     <Status testid={testid}>
-      {earlier}Not {verb}: {code}{rule}. {problem.title}{problem.detail !== undefined && `: ${problem.detail}`}
+      {earlier}Not {verb}: {code}{rule}.{needs(status, problem)} {problem.title}{problem.detail !== undefined && `: ${problem.detail}`}
       {problem.instance !== undefined && ` Request ${problem.instance}.`}
     </Status>
   );
@@ -85,15 +101,17 @@ export const Conflict = ({ what, revision, onShow }: { what: string; revision: n
 interface Notice { onShow: () => void; detail?: ReactNode; onDismiss?: (() => void) | undefined; testid?: string }
 const dismiss = (onDismiss: (() => void) | undefined) => onDismiss !== undefined && button("Dismiss", onDismiss);
 
-// [Repeat exactly] only while the page holds the request, for the same sign-in and epoch.
-export const Unknown = ({ why, onRepeat, onShow, detail, onDismiss, testid }: Notice & { why?: string; onRepeat?: (() => void) | undefined }) => (
-  <Status testid={testid} actions={<>{onRepeat !== undefined ? button("Repeat exactly", onRepeat) : button("Show current state", onShow)}{dismiss(onDismiss)}</>}>
-    {why === undefined ? UNKNOWN : unknown(why)}{detail}
+// [Repeat exactly] only while the page holds the request, for the same sign-in and epoch. While
+// the repeat runs (`repeating`), the notice stays, with no second repeat and no dismissal.
+export const REPEATING = " Repeating it exactly; no answer yet.";
+export const Unknown = ({ why, onRepeat, onShow, detail, onDismiss, testid, repeating = false }: Notice & { why?: string; onRepeat?: (() => void) | undefined; repeating?: boolean }) => (
+  <Status testid={testid} actions={<>{onRepeat !== undefined && !repeating ? button("Repeat exactly", onRepeat) : button("Show current state", onShow)}{!repeating && dismiss(onDismiss)}</>}>
+    {why === undefined ? UNKNOWN : unknown(why)}{repeating && REPEATING}{detail}
   </Status>
 );
 
-export const SetAside = ({ onShow, detail, onDismiss, testid }: Notice) => (
-  <Status testid={testid} actions={<>{button("Repeat exactly", () => {}, true)}{button("Show current state", onShow)}{dismiss(onDismiss)}</>}>{SET_ASIDE}{detail}</Status>
+export const SetAside = ({ why, onShow, detail, onDismiss, testid }: Notice & { why: string }) => (
+  <Status testid={testid} actions={<>{button("Repeat exactly", () => {}, true)}{button("Show current state", onShow)}{dismiss(onDismiss)}</>}>{setAside(why)}{detail}</Status>
 );
 
 export const Replayed = () => <Status>{REPLAYED}</Status>;

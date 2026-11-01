@@ -11,7 +11,7 @@ import { Client, type ClientOptions, EPOCH_CHANGED, type ReadResult } from "./re
 import { view } from "./resources.tsx";
 import { follow, PAGES, usePath } from "./router.ts";
 import { Disconnected, HumanOnly, Loading, Offline, ProblemFields, problemFields, Refused, Status } from "./states.tsx";
-import { EPOCH_CHANGED_ASIDE, type Writes } from "./write.ts";
+import { type Ending, EPOCH_CHANGED_ASIDE, type Writes } from "./write.ts";
 import type { components } from "./api/v1";
 
 export type Server = components["schemas"]["ServerBody"];
@@ -273,11 +273,15 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
   };
   const [reads] = useState(() => new ShellReads({ ...auth, onDeprecation, onRecoveryModeChange: setRecoveryMode }, () => events.current!));
   const client = reads.client;
-  // The page's writes go through this shell's client while it is shown.
+  // The page's writes go through this shell's client while it is shown, and a write's credential
+  // refusal ends the page as a read's does (§8.2, §9.6).
   writes.client = client;
+  const ended = useCallback((e: Ending) => (e.kind === "unauthenticated" ? onUnauthenticated(e) : onRevoked(e)), [onUnauthenticated, onRevoked]);
+  writes.onEnded = ended;
   useEffect(() => () => {
     if (writes.client === client) writes.client = undefined;
-  }, [writes, client]);
+    if (writes.onEnded === ended) writes.onEnded = undefined;
+  }, [writes, client, ended]);
   // A navigation to another path moves focus to the new page, where the keyboard and a screen
   // reader continue; a filter change keeps it on the filter.
   const page = useRef<HTMLElement>(null);

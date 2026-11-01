@@ -7,7 +7,7 @@ import type { components } from "./api/v1";
 import { Ref, short, useList, useReads } from "./list.tsx";
 import type { Cluster, Machine } from "./machines.tsx";
 import { Action } from "./shell.tsx";
-import { Refused, REPLAYED, SetAside, Status, Unknown } from "./states.tsx";
+import { problemLine, Refused, REPLAYED, SetAside, Status, Unknown } from "./states.tsx";
 import { type Outcome, Write, type Writes, type WriteSpec } from "./write.ts";
 
 type EndpointChange = components["schemas"]["EndpointChangeBody"];
@@ -33,7 +33,9 @@ export function WriteNotices({ go }: { go: (to: string) => void }) {
     const o = w.outcome;
     const props = { onShow: () => go(w.spec.resource), detail: detail(w), onDismiss: () => writes.dismiss(w), testid: "write-notice" };
     if (o?.kind === "unknown") return <Unknown key={w.key} why={o.why} onRepeat={writes.repeatable(w) ? () => void writes.submit(w) : undefined} {...props} />;
-    if (o?.kind === "set-aside") return <SetAside key={w.key} {...props} />;
+    if (o?.kind === "set-aside") return <SetAside key={w.key} why={o.why} {...props} />;
+    // [Repeat exactly] in flight: the earlier attempt stays unknown, and its notice stays.
+    if (o === undefined && w.repeating !== undefined) return <Unknown key={w.key} why={w.repeating.why} repeating {...props} />;
     return null;
   });
 }
@@ -113,7 +115,8 @@ export function Result({ w, done }: { w: Write | undefined; done: (data: unknown
     case "refused":
       return <Refused testid="write-result" problem={o.problem} status={o.status} verb="saved" replayed={o.replayed} />;
     case "not-done":
-      return <Status testid="write-result">Not saved: {o.why}.</Status>;
+      // The last answer's problem fields, when it carried any (§8.2).
+      return <Status testid="write-result">Not saved: {o.why}.{o.problem !== null && ` ${problemLine(o.problem)}`}</Status>;
     case "set-aside":
     case "unknown":
       // Set aside before any attempt that may have committed, nothing was; otherwise the notice says.
@@ -169,7 +172,8 @@ export function AddCluster() {
 export function RecordMachine({ query }: { query: string }) {
   const [w, send] = useSend();
   const [clusters] = useList<Cluster>("/clusters", "", true);
-  const preset = new URLSearchParams(query).get("cluster") ?? "";
+  // The operator's choice, kept while the cluster list is read again; the query only presets it.
+  const [chosen, choose] = useState(() => new URLSearchParams(query).get("cluster") ?? "");
   const submit = (d: FormData) => {
     const cluster = field(d, "cluster");
     send({
@@ -193,7 +197,7 @@ export function RecordMachine({ query }: { query: string }) {
       <Form label="Record machine" onSubmit={submit} w={w} done={done}>
         <p>
           <label>Cluster:{" "}
-            <select name="cluster" required defaultValue={preset} key={options.length}>
+            <select name="cluster" required value={chosen} onChange={(e) => choose(e.target.value)}>
               <option value="" disabled>{clusters.kind === "ok" ? "choose" : "clusters not read"}</option>
               {options.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
