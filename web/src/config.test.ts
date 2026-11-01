@@ -34,7 +34,7 @@ test.each(["issuer", "audience", "cliClientId", "webClientId"])("refuses a file 
 
 test.each([
   ["http://idp.example.invalid", "invalid"],
-  ["http://localhost:58280", "ok"],
+  ["http://localhost:16002", "ok"],
   ["http://127.0.0.1:5556", "ok"],
   ["not a url", "invalid"],
 ])("issuer %s is %s (§6 item 1)", async (issuer, kind) => {

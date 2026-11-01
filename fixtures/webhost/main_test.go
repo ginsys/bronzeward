@@ -158,9 +158,9 @@ func TestProxiesTheAPIAndLiveness(t *testing.T) {
 }
 
 func TestRedirectInjection(t *testing.T) {
-	srv, hits := host(t, "http://127.0.0.1:58444/")
+	srv, hits := host(t, "http://127.0.0.1:16001/")
 	res, _ := get(t, srv.URL+"/api/v1/server?x=1")
-	if res.StatusCode != http.StatusTemporaryRedirect || res.Header.Get("Location") != "http://127.0.0.1:58444/api/v1/server?x=1" {
+	if res.StatusCode != http.StatusTemporaryRedirect || res.Header.Get("Location") != "http://127.0.0.1:16001/api/v1/server?x=1" {
 		t.Errorf("got %d to %q", res.StatusCode, res.Header.Get("Location"))
 	}
 	if n := hits.Load(); n != 0 {

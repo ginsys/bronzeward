@@ -3,7 +3,7 @@ import { type Provider, Session, type Tokens } from "./auth.ts";
 import type { ClientConfig } from "./config.ts";
 import { ACK_WAIT_MS, type Channel, JOIN_WAIT_MS, type Locks, type Message, REDIRECT_WAIT_MS, Renewer, RENEW_WAIT_MS, STALE_WAIT_MS, TAB } from "./renewer.ts";
 
-const ISSUER = "http://localhost:58280";
+const ISSUER = "http://localhost:16002";
 const config: ClientConfig = { issuer: ISSUER, audience: "bronzeward", cliClientId: "cli", webClientId: "web", scopes: [] };
 const provider: Provider = { issuer: ISSUER, authorizationEndpoint: `${ISSUER}/a`, tokenEndpoint: `${ISSUER}/t`, revocationEndpoint: `${ISSUER}/r`, endSessionEndpoint: undefined };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
