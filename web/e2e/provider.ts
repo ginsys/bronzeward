@@ -34,6 +34,10 @@ export interface ProviderOptions {
   // Hand out refresh tokens that start with this (the run's canary, so the artifact scan finds
   // one); uses, uses of a rotated-out token and revocations are counted.
   refresh?: string;
+  // GET /synthetic-document?name= answers this document text, for the page to fetch inside a
+  // script (the page's connect-src allows the provider): the draft cases (#339) put a document in
+  // the editor without its text crossing WebDriver, whose log the artifact scan reads.
+  document?: (name: string) => string;
 }
 
 export interface Counts {
@@ -82,6 +86,11 @@ export function startProvider(o: ProviderOptions): Promise<Provider> {
         res.writeHead(200, headers).end();
       });
       return;
+    }
+    if (url.pathname === "/synthetic-document" && o.document !== undefined) {
+      const name = url.searchParams.get("name") ?? "";
+      if (!/^[a-z0-9-]{1,40}$/.test(name)) return res.writeHead(400, headers).end();
+      return res.writeHead(200, { ...headers, "Content-Type": "text/plain" }).end(o.document(name));
     }
     if (url.pathname === "/jwks" && o.keys !== undefined) {
       void fetch(`${o.keys}/jwks`).then(async (r) => res.writeHead(r.status, headers).end(await r.text()), () => res.writeHead(502).end());

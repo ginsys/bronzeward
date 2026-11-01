@@ -41,8 +41,11 @@ export interface Faults {
 // drop: the request read and its connection closed, nothing forwarded; commit-drop: forwarded, the
 // server's answer dropped; commit-500: forwarded, its answer replaced by 500 internal-error; 503:
 // answered 503 dependency-unavailable, nothing forwarded; redirect: answered 302 to REDIRECTED; epoch: a new epoch
-// committed, then forwarded; commit-drop-epoch: as commit-drop, then a new epoch.
-export type Step = "drop" | "commit-drop" | "commit-500" | "503" | "redirect" | "epoch" | "commit-drop-epoch";
+// committed, then forwarded; commit-drop-epoch: as commit-drop, then a new epoch. For the draft
+// cases (#339): pass-drop: forwarded, and the client's connection closed at once while the server
+// runs on (AMB-02); commit-drop-retire: as commit-drop, then the digest key's versions retired
+// (AMB-06).
+export type Step = "drop" | "commit-drop" | "commit-500" | "503" | "redirect" | "epoch" | "commit-drop-epoch" | "pass-drop" | "commit-drop-retire";
 
 export interface Injector {
   server: Server;
@@ -60,6 +63,8 @@ export interface Injector {
   epoch: () => void;
   // The requests that reached REDIRECTED: a redirect the page followed.
   redirected: number;
+  // Retires the versions of the digest key of the deployment the writes go to (AMB-06).
+  retire: () => Promise<void>;
 }
 
 // Where every injected redirect points: a path on the page's own origin, which the page's CSP admits
@@ -78,7 +83,7 @@ export function startInjector(upstream: string, port: number): Promise<Injector>
   // Each held answer: its release, and its having been sent.
   const waiting: { go: () => void; sent: Promise<void> }[] = [];
   const inj: Injector = {
-    faults: {}, seen: [], answered: [], holding: [], writes: [], redirected: 0, server: undefined as never, epoch: () => {},
+    faults: {}, seen: [], answered: [], holding: [], writes: [], redirected: 0, server: undefined as never, epoch: () => {}, retire: async () => {},
     release: async () => {
       inj.holding = [];
       const now = waiting.splice(0);
@@ -110,6 +115,12 @@ export function startInjector(upstream: string, port: number): Promise<Injector>
       if (step === "503") return problem(503, "dependency-unavailable");
       if (step === "redirect") return res.writeHead(302, { Location: REDIRECTED }).end();
       if (step === "epoch") inj.epoch();
+      if (step === "pass-drop") {
+        // The server keeps running the request after the client lost its connection.
+        void fetch((f.upstream ?? upstream) + (req.url ?? "/"), { method: req.method!, headers: forwarded(), body: sent, redirect: "manual" })
+          .then(async (up) => (await up.arrayBuffer(), inj.answered.push(`${route}${search} ${up.status}`)), (e: unknown) => console.error(`injector pass-drop: ${String(e)}`));
+        return req.socket.destroy();
+      }
       const up = await fetch((f.upstream ?? upstream) + (req.url ?? "/"), { method: req.method!, headers: forwarded(), body: sent, redirect: "manual" });
       const out = Buffer.from(await up.arrayBuffer());
       inj.answered.push(`${route}${search} ${up.status}`);
@@ -118,6 +129,7 @@ export function startInjector(upstream: string, port: number): Promise<Injector>
       if (step === "epoch") return res.writeHead(up.status, passed(up)).end(out);
       req.socket.destroy();
       if (step === "commit-drop-epoch") inj.epoch();
+      if (step === "commit-drop-retire") await inj.retire();
     };
     // A write is logged as it arrives, so a case reads it while its answer is held.
     const write = req.method !== "GET" && req.method !== "HEAD";

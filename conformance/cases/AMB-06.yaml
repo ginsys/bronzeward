@@ -1,0 +1,18 @@
+id: AMB-06
+setup: as AMB-02
+action: Save the edited fragment entry
+exchange:
+  - request: PUT /api/v1/drafts/<draft>/fragments/<name>
+    headers: ["Authorization: Bearer <token>", "Content-Type: application/json", "Idempotency-Key: <key>", "Bronzeward-Expected-Epoch: <epoch>", "If-Match: <etag>"]
+  - request: GET /api/v1/recovery
+    headers: ["Authorization: Bearer <token>", "Accept: application/json"]
+fault: the injector forwards the write and closes the connection without its answer, then retires the versions of the run's own digest key (a rotation and a raised minimum encryption version), so the key's record can no longer be compared
+expect:
+  server: the write committed once; the repeat answered 422 idempotency-key-reused, nothing written
+  client: one repeat with the same key; the 422 reported as an unknown outcome; no new key sent
+  shown: the unknown-outcome notice with the key, the route and the resource to read
+  absent: [token or document in the harness log, retained artifacts or browser storage]
+runs:
+  web:
+    check: web/e2e/auth/drafts.e2e.ts, mise run browser-auth
+    browsers: [chrome, edge, firefox, firefox-esr]

@@ -31,3 +31,5 @@ export const IDP_API = `http://127.0.0.1:${at(7)}`;
 export const FIXTURE_API = `http://127.0.0.1:${at(8)}`;
 export const INJECTOR = `http://127.0.0.1:${at(9)}`;
 export const DISPOSABLE_API = `http://127.0.0.1:${at(10)}`;
+// The proxy in front of OpenBao that the disposable deployment uses as its provider (bao.ts).
+export const BAO_PROXY = `127.0.0.1:${at(11)}`;

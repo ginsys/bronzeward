@@ -261,9 +261,9 @@ exit 1
 description = "Start a disposable development OpenBao at the fixture's image pin: dev mode, in memory, http://127.0.0.1:11200, root token bw-dev-root-token; BW_DEV_INSTANCE=<name> starts bw-dev-bao-<name> on 127.0.0.1:13000+slot instead"
 # The image's default command is `server -dev`: unsealed, KV v2 at secret/, nothing persisted, and
 # removed on stop (mise run dev-down). The root token is a fixed, synthetic value, bound to
-# loopback like dev-db's trust auth; mise run go-db defaults to it. Never a deployment provider,
-# and not the fixture's Raft server. The container's name and port come from
-# scripts/dev/instance.sh, as dev-db's do.
+# loopback like dev-db's trust auth; mise run go-db and mise run browser-auth's disposable
+# deployment default to it. Never a real deployment's provider, and not the fixture's Raft server.
+# The container's name and port come from scripts/dev/instance.sh, as dev-db's do.
 run = '''
 . scripts/dev/instance.sh || exit 1
 c=$BW_DEV_BAO_CONTAINER
@@ -430,13 +430,15 @@ node e2e/scan.ts e2e/out "$canary"
 '''
 
 [tasks.browser-auth]
-description = "The AUTH real-browser cases (BW_BROWSERS) against two disposable servers on mise run dev-db's database, one trusting mise run dev-idp's provider and one the fixture issuer, then the artifact scan; the database and provider of BW_DEV_INSTANCE, when set"
-# web/e2e/auth.conf.ts creates and drops the servers' databases. The scan also looks for the
-# provider's synthetic password and login token, and for any JWT.
+description = "The AUTH real-browser cases (BW_BROWSERS) against two disposable servers on mise run dev-db's database, one trusting mise run dev-idp's provider and one the fixture issuer, then the artifact scan; the cases' disposable deployment uses mise run dev-bao's OpenBao; the database, OpenBao and provider of BW_DEV_INSTANCE, when set"
+# web/e2e/auth.conf.ts creates and drops the servers' databases, and creates and removes its own
+# OpenBao policies, digest key and tokens (web/e2e/bao.ts). The scan also looks for the provider's
+# synthetic password and login token, and for any JWT.
 depends = ["web", "build"]
 run = '''
-# BW_DEV_PG_PORT and BW_DEV_IDP_DIR reach web/e2e/auth.conf.ts, which takes the database and the
-# provider's variables from the instance (scripts/dev/instance.sh); the browser ports are its own.
+# BW_DEV_PG_PORT, BW_DEV_BAO_ADDR and BW_DEV_IDP_DIR reach web/e2e/auth.conf.ts, which takes the
+# database, OpenBao and the provider's variables from the instance (scripts/dev/instance.sh); the
+# browser ports are its own.
 . scripts/dev/instance.sh || exit 1
 [ -f "$BW_DEV_IDP_DIR/idp.env" ] || { echo "browser-auth: no $BW_DEV_IDP_DIR/idp.env; run ${BW_DEV_PFX}mise run dev-idp first" >&2; exit 1; }
 go build -o bin/webhost ./fixtures/webhost

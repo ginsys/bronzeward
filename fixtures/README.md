@@ -221,7 +221,11 @@ Chrome binds a socket under the run's directory, and a Unix socket path holds at
 `BW_WDIO_CACHE` chooses where WebdriverIO keeps
 its browser and driver downloads; the tasks default it to the outer `TMPDIR`.
 
-`mise run browser-auth` runs the AUTH cases (`web/e2e/auth/`) after `dev-db` and `dev-idp`. It
+`mise run browser-auth` runs the AUTH cases (`web/e2e/auth/`) after `dev-db`, `dev-bao` and
+`dev-idp`. The cases' disposable deployment (`B+10`) uses dev-bao's OpenBao as its provider,
+through a proxy on `B+11` that can hold each KV write. The run writes the fixture policies under
+names of its own, makes its own digest key and one token per role, and removes them at the end.
+Only the cases on that deployment hold KV writes or retire its digest key. It
 creates two databases on dev-db's PostgreSQL and drops them at the end, with two servers and
 two hosts on loopback: one server trusts the test provider, behind a host on `B`; the other
 trusts the fixture issuer, which the synthetic provider serves on `B+3` with the key set of
