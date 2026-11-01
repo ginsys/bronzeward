@@ -322,18 +322,47 @@ export function lostSince(lost: { current: [boolean, boolean] }): boolean {
   return m || o;
 }
 
+// Runs `run` when asked, at most once per POLL_MS: an ask within POLL_MS of the last run waits
+// until then, and asks while one waits add nothing. A transport failure answers at once, so a read
+// again after each banner end, unpaced, could follow a resource that keeps failing at network speed.
+// Returns the ask and the stop.
+export function pacer(run: () => void, now: () => number = Date.now, after: (f: () => void, ms: number) => ReturnType<typeof setTimeout> = setTimeout): [() => void, () => void] {
+  let last = -Infinity;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const go = () => {
+    timer = undefined;
+    last = now();
+    run();
+  };
+  const ask = () => {
+    if (timer !== undefined) return;
+    const wait = last + POLL_MS - now();
+    if (wait <= 0) go();
+    else timer = after(go, wait);
+  };
+  const stop = () => {
+    clearTimeout(timer);
+    timer = undefined;
+  };
+  return [ask, stop];
+}
+
 // When a read's answer ends the banner and a resource found no answer, the machine and its
 // observations are read again once, as for a timeline advance: one read again at a time, so this
-// read again and the timeline's do not abandon each other.
+// read again and the timeline's do not abandon each other, and at most once per POLL_MS.
 function MachineState({ id, path, tl, older, busy, readAgain }: { id: string; path: string; tl: Load<Timeline<Entry>> | Dropped; older: (() => void) | undefined; busy: boolean; readAgain: () => void }) {
   const { view, regained } = useReads();
   const k = useRef<W3Kept>(undefined);
   const lost = useRef<[boolean, boolean]>([false, false]);
   const m = useItem<Machine>(path, keepW3(k, 0, lost));
   const [obs] = useList<Observation>(`${path}/observations`, "", true, keepW3(k, 1, lost));
+  const again = useRef(readAgain);
+  again.current = readAgain;
+  const [ask, stop] = useMemo(() => pacer(() => again.current()), []);
+  useEffect(() => stop, [stop]);
   useEffect(() => {
-    if (lostSince(lost)) readAgain();
-  }, [regained, readAgain]);
+    if (lostSince(lost)) ask();
+  }, [regained, ask]);
   const [km, ko, kt] = (k.current = keptW3(k.current, m, obs, tl, view));
   return <MachineShown id={id} m={m} obs={obs} km={km} ko={ko} tl={tl} kt={kt} older={older} busy={busy} />;
 }
