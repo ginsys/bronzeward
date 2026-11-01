@@ -36,7 +36,7 @@ func (s *store) kept() string {
 	case s.none == "":
 		return "the system credential store"
 	}
-	return "this process's memory only, since " + s.none
+	return "this process's memory only, since " + printable(s.none)
 }
 
 // entry is a credential-store entry. It names the server and issuer it was signed in for, so a
