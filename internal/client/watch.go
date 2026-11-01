@@ -50,9 +50,8 @@ func Terminal(state string) bool {
 // (decision T16 of #256, client-contracts.md §8.6). It reads the event stream, and the JSON pages
 // when the server answers without one. When a stream ends it reads the operation: on a terminal
 // state it drains the pages of what the stream did not send; on any other state it renews a
-// sign-in about to expire (§9.5 item 4) and reconnects with Last-Event-ID. A stream that failed
-// to open, or ended within a second having shown nothing, is retried after 1 s, doubling to 30 s;
-// JSON pages are read again at the same pace.
+// sign-in about to expire (§9.5 item 4) and reconnects with Last-Event-ID. An attempt that showed
+// nothing is retried after 1 s, doubling to 30 s; JSON pages are read again at the same pace.
 func (c *Client) Watch(op string, w Watch) (*apitypes.OperationBody, error) {
 	if w.sleep == nil {
 		w.sleep = time.Sleep
@@ -107,13 +106,13 @@ func (c *Client) Watch(op string, w Watch) (*apitypes.OperationBody, error) {
 			}
 			continue
 		}
-		// JSON pages are read again after the delay, which starts again at 1 s once they show
-		// something new.
+		// An attempt that showed nothing waits the delay, which doubles until an attempt shows
+		// something or a stream stays open for 30 s. JSON pages are read again after the delay.
 		progress := steps != before
-		if progress {
+		if progress || opened && !pages && took >= 30*time.Second {
 			delay = time.Second
 		}
-		if pages || !progress && (!opened || took < time.Second) {
+		if pages || !progress {
 			w.sleep(delay)
 			if !progress {
 				delay = min(2*delay, 30*time.Second)
@@ -209,7 +208,12 @@ func (c *Client) stream(op string, last *string, w Watch) (opened, pages bool, e
 		if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt != "text/event-stream" {
 			return true, true, nil
 		}
+		// Without the header no event ID can be compared with it: the defect is reported (§8.5) and
+		// the events are shown as they come.
 		epoch := r.Header.Get("Bronzeward-Epoch")
+		if epoch == "" {
+			fmt.Fprintf(c.Notices, "%s: %s answered without Bronzeward-Epoch, a server defect\n", c.Context.Where(), route)
+		}
 		sc := bufio.NewScanner(r.Body)
 		sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
 		var ev Event
@@ -237,7 +241,7 @@ func (c *Client) stream(op string, last *string, w Watch) (opened, pages bool, e
 				c.cleared(w, "the installation was restored or entered recovery mode")
 				*last = ""
 			case ev.ID == "":
-			case epochOf(ev.ID) != epoch:
+			case epoch != "" && epochOf(ev.ID) != epoch:
 				// The installation entered recovery mode while the stream stayed open (§8.6 item 3):
 				// the operation read that follows applies §8.5, and the stream reopens from the start.
 				c.cleared(w, "the installation entered recovery mode or was restored while the events were read")

@@ -231,6 +231,27 @@ func TestWatch(t *testing.T) {
 			t.Errorf("watch: %v, state %q, waits %v; want succeeded after one 1 s wait", err, state, waits)
 		}
 	})
+	t.Run("streams cut after a second with nothing shown back off", func(t *testing.T) {
+		cut := func(w http.ResponseWriter, r *http.Request) { time.Sleep(1100 * time.Millisecond); sse()(w, r) }
+		o := &opServer{streams: []handler{cut, cut, sse(ev(e1+":1", "succeeded"))}, states: []string{"running", "running", "succeeded"},
+			pages: []string{item(e1+":1", "succeeded")}}
+		if _, waits, state, _, err := watched(t, o, e1, nil); err != nil || state != "succeeded" || !slices.Equal(waits, []time.Duration{time.Second, 2 * time.Second}) {
+			t.Errorf("watch: %v, state %q, waits %v; want succeeded after waits of 1 s and 2 s", err, state, waits)
+		}
+	})
+	t.Run("a stream without Bronzeward-Epoch is reported and its events shown", func(t *testing.T) {
+		bare := func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Del("Bronzeward-Epoch")
+			sse(ev(e1+":1", "queued"), ev(e1+":2", "succeeded"))(w, r)
+		}
+		o := &opServer{streams: []handler{bare}, states: []string{"succeeded"},
+			pages: []string{item(e1+":1", "queued"), item(e1+":2", "succeeded")}}
+		shown, _, state, notices, err := watched(t, o, e1, nil)
+		if want := []string{e1 + ":1", e1 + ":2"}; err != nil || state != "succeeded" || !slices.Equal(shown, want) ||
+			!strings.Contains(notices, "/events answered without Bronzeward-Epoch, a server defect") {
+			t.Errorf("watch: %v, state %q, shown %q, notices %q; want succeeded, %q and the defect reported", err, state, shown, notices, want)
+		}
+	})
 	t.Run("a refusal whose body stalls ends after the idle limit", func(t *testing.T) {
 		defer func(d time.Duration) { streamIdle = d }(streamIdle)
 		streamIdle = 200 * time.Millisecond
