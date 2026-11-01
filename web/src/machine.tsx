@@ -5,6 +5,7 @@
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { components } from "./api/v1";
+import { ChangeEndpoint } from "./forms.tsx";
 import { type Dropped, Head, type Listed, type Load, type Page, Ref, type Reads, ReadsProvider, RESTARTED, Scroll, settling, short, useHeld, useItem, useList, usePending, useReads } from "./list.tsx";
 import { type Machine, node, release } from "./machines.tsx";
 import type { ReadResult } from "./request.ts";
@@ -299,25 +300,28 @@ export function MachineItem({ id }: { id: string }) {
   const [again, step] = useReducer(stepAdvance, key, advanceReads);
   useEffect(() => step({ key }), [key]);
   useEffect(() => void (advances > 0 && step("advance")), [advances]);
+  // A changed endpoint reads the machine and its observations again as an advance does: after the
+  // reads in flight settle, and once for any advances while they are in flight.
+  const changed = useCallback(() => step("advance"), []);
   const settle = useMemo(() => countingSettle(reads.settle, step, key, again.n), [reads.settle, key, again.n]);
   return (
     <ReadsProvider value={{ ...reads, settle, again: reads.again + again.n }}>
-      <MachineState id={id} path={path} tl={tl} older={older} busy={busy} />
+      <MachineState id={id} path={path} tl={tl} older={older} busy={busy} changed={changed} />
     </ReadsProvider>
   );
 }
 
-function MachineState({ id, path, tl, older, busy }: { id: string; path: string; tl: Load<Timeline<Entry>> | Dropped; older: (() => void) | undefined; busy: boolean }) {
+function MachineState({ id, path, tl, older, busy, changed }: { id: string; path: string; tl: Load<Timeline<Entry>> | Dropped; older: (() => void) | undefined; busy: boolean; changed: () => void }) {
   const m = useItem<Machine>(path);
   const [obs] = useList<Observation>(`${path}/observations`, "", true);
   const { view } = useReads();
   const k = useRef<W3Kept>(undefined);
   const [km, ko, kt] = (k.current = keptW3(k.current, m, obs, tl, view));
-  return <MachineShown id={id} m={m} obs={obs} km={km} ko={ko} tl={tl} kt={kt} older={older} busy={busy} />;
+  return <MachineShown id={id} m={m} obs={obs} km={km} ko={ko} tl={tl} kt={kt} older={older} busy={busy} changed={changed} />;
 }
 
 // W3 as read: each read's answer, else what it keeps with its failure above it.
-export function MachineShown({ id, m, obs, km, ko, tl, kt, older, busy }: { id: string; m: Load<Machine>; obs: Load<Listed<Observation>> | Dropped; km: Kept<Machine>; ko: Kept<Listed<Observation>>; tl: Load<Timeline<Entry>> | Dropped; kt: Kept<Timeline<Entry>>; older: (() => void) | undefined; busy: boolean }) {
+export function MachineShown({ id, m, obs, km, ko, tl, kt, older, busy, changed }: { id: string; m: Load<Machine>; obs: Load<Listed<Observation>> | Dropped; km: Kept<Machine>; ko: Kept<Listed<Observation>>; tl: Load<Timeline<Entry>> | Dropped; kt: Kept<Timeline<Entry>>; older: (() => void) | undefined; busy: boolean; changed?: () => void }) {
   const [pm, po, timeline] = [usePending(m, "the machine"), usePending(obs, "the observations"), usePending(tl, "the timeline")];
   const d = m.kind === "ok" ? m.data : km.data;
   const read = obs.kind === "ok" ? obs.data : ko.data;
@@ -330,6 +334,7 @@ export function MachineShown({ id, m, obs, km, ko, tl, kt, older, busy }: { id: 
       {m.kind !== "ok" && pm}
       {obs.kind !== "ok" && po}
       <p>Cluster <Ref to={`/clusters/${d.cluster}`} id={d.cluster} />, {d.talosEndpoint}, {node(d)}, {d.platform}.</p>
+      {changed !== undefined && <ChangeEndpoint machine={d} onChanged={changed} />}
       <ul aria-label="Status" data-testid="sentences">{sentences(d, list).map((s) => <li key={s}>{s}</li>)}</ul>
       <dl>
         <dt>Desired</dt><dd>{release(d.desired)}</dd>
