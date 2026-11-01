@@ -290,7 +290,9 @@ describe("the write views (#338)", () => {
     const guarded = () => browser.execute(() => !dispatchEvent(new Event("beforeunload", { cancelable: true })));
     expect(await guarded()).toBe(true);
     await browser.refresh();
-    expect(await guarded()).toBe(false);
+    // Edge can return from the refresh while its old browsing context still answers, or is
+    // already gone ("Cannot find context"): either is the page before the reload, so not yet.
+    await browser.waitUntil(async () => (await guarded().catch(() => true)) === false, { timeout: 20_000, timeoutMsg: "the reloaded page still guards a write" });
     await release();
     // Longer than the three repeats' 1 + 2 + 4 s.
     await browser.pause(8_000);
