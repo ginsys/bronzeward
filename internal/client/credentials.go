@@ -340,7 +340,7 @@ func renewalLock(l string) (func(), error) {
 	case <-time.After(lockBound):
 		released := lateReleased
 		go func() { <-got; f.Close(); released(f) }()
-		return nil, fmt.Errorf("another bronzewardctl process holds the renewal lock %s and did not release it within four minutes; nothing was changed", l)
+		return nil, fmt.Errorf("another bronzewardctl process holds the renewal lock %s and did not release it within four minutes, so the stored sign-in was not changed", l)
 	}
 }
 
