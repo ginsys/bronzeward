@@ -356,6 +356,25 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
     expect(moved).toEqual([false, true, false, true, false]);
   });
 
+  test("#424 item 2: a restart, or the read after a drop, that reads the same newest entry again as a new object does not count", async () => {
+    type E = { revision: number };
+    const ok = (revisions: number[], next?: string, tail?: string): ReadResult<unknown> => ({
+      kind: "ok", data: { items: revisions.map((revision) => ({ revision })), ...(next === undefined ? {} : { next }), ...(tail === undefined ? {} : { tail }) },
+    });
+    const moved: boolean[] = [];
+    const step = queued<E>(on, on, (_res, m) => moved.push(m));
+    const c = client([ok([1], "o1", "t1"), restart, ok([1], "o1", "t1"), restart, { kind: "transport" }, ok([1], "o1", "t1"), restart, ok([2, 1], "o1", "t2")]);
+    await step((from) => readLater<E>(c, "/t", from), on);
+    // Load older on a refused cursor: the newest page again, its entry equal but built anew.
+    await step((from) => readOlder<E>(c, "/t", from, on), on);
+    // A poll's refused cursor, then a failure: dropped; the next poll reads the same newest entry.
+    await step((from) => readLater<E>(c, "/t", from), on);
+    await step((from) => readLater<E>(c, "/t", from), on);
+    // A restart that does bring a newer entry counts.
+    await step((from) => readOlder<E>(c, "/t", from, on), on);
+    expect(moved).toEqual([false, false, false, false, true]);
+  });
+
   test("an entry's details: who, why and what it names, identifiers shortened", () => {
     const e = (kind: string, entry: unknown): Entry => ({ revision: 1, epoch: "ep", at: READ, kind, entry });
     expect(details(e("freeze", { principal: "h-author", role: "author", reason: "synthetic incident" }))).toBe('h-author author "synthetic incident"');
