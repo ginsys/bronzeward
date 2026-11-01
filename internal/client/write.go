@@ -353,22 +353,23 @@ func (c *Client) post(w *Write, key, epoch string) attempt {
 	route := w.Method + " /api/v1" + w.Path
 	var a attempt
 	trace := &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { a.sent = true }}
-	// A DELETE sends no body and no Content-Type (§8.1); NoBody gives the transport nothing to resend.
-	var send io.Reader = http.NoBody
-	if w.Body != nil {
-		send = bytes.NewReader(w.Body)
-	}
 	q, err := http.NewRequestWithContext(httptrace.WithClientTrace(context.Background(), trace), w.Method,
-		strings.TrimSuffix(c.Context.Server, "/")+"/api/v1"+w.Path, send)
+		strings.TrimSuffix(c.Context.Server, "/")+"/api/v1"+w.Path, bytes.NewReader(w.Body))
 	if err != nil {
 		a.err = c.Context.fail(err)
 		return a
 	}
 	// Go's transport resends a request carrying Idempotency-Key on a reused connection the server
-	// closed, after bytes may have gone out. Without GetBody it resends only a request none of whose
-	// bytes were written, so every repeat that could reach the server is this layer's, after its
+	// closed, after bytes may have gone out, when the request has no body, http.NoBody or a
+	// GetBody (Request.isReplayable). Without GetBody and with a body that is never NoBody, it
+	// resends nothing, so every repeat that could reach the server is this layer's, after its
 	// checks; a failure once a connection is taken counts as ambiguous.
 	q.GetBody = nil
+	if w.Body == nil {
+		// A DELETE sends no body and no Content-Type (§8.1). NewRequest made an empty body NoBody;
+		// the transport reads this empty reader instead, finds it empty and sends no body.
+		q.Body = io.NopCloser(bytes.NewReader(nil))
+	}
 	q.Header.Set("Authorization", "Bearer "+c.token)
 	q.Header.Set("Accept", "application/json")
 	if w.Body != nil {
