@@ -25,7 +25,17 @@ export function useWrites(): Writes | undefined {
 }
 
 // What the notice and the leave dialog say of one write: its key, its route and what to read.
-const detail = (w: Write) => ` Key ${w.key}, ${w.route}. To learn the outcome, read ${w.spec.resource}.`;
+const detail = (w: Write, to = w.spec.resource) => ` Key ${w.key}, ${w.route}. To learn the outcome, read ${to}.`;
+
+// The record a write's notice names and opens: the one a 409 conflict of its latest answer names
+// (§8.2 409 row, through existing()), else the write's own resource. The notices render outside
+// the page's reads, so the record is named in text and [Show current state] reads it.
+export function record(w: Write): { named: string; to: string } {
+  const o = w.outcome;
+  const p = o === undefined ? ((w.doubt ?? w.repeating)?.problem ?? null) : "problem" in o ? o.problem : null;
+  const rec = p === null ? undefined : existing(p.status, p, w.spec.resource);
+  return rec === undefined ? { named: "", to: w.spec.resource } : { named: ` The ${rec.kind} already recorded: ${rec.id}.`, to: rec.to };
+}
 
 // A settled [Repeat exactly]'s result, as its notice shows it (journeys §8, the Replayed row).
 function settled(o: Outcome): string {
@@ -48,8 +58,9 @@ export function WriteNotices({ go }: { go: (to: string) => void }) {
   const writes = useWrites();
   return writes?.notices.map((w) => {
     const o = w.outcome;
-    const props = { onShow: () => go(w.spec.resource), detail: detail(w), onDismiss: () => writes.dismiss(w), testid: "write-notice" };
-    if (o !== undefined && w.kept) return <Repeated key={w.key} line={settled(o)} {...props} detail={` Key ${w.key}, ${w.route}. Read ${w.spec.resource}.`} />;
+    const { named, to } = record(w);
+    const props = { onShow: () => go(to), detail: named + detail(w, to), onDismiss: () => writes.dismiss(w), testid: "write-notice" };
+    if (o !== undefined && w.kept) return <Repeated key={w.key} line={settled(o)} {...props} detail={`${named} Key ${w.key}, ${w.route}. Read ${to}.`} />;
     if (o?.kind === "unknown") return <Unknown key={w.key} why={o.why} problem={o.problem} onRepeat={writes.repeatable(w) ? () => void writes.submit(w) : undefined} {...props} />;
     if (o?.kind === "set-aside") return <SetAside key={w.key} why={o.why} problem={o.problem} {...props} />;
     // While the run is in flight, the latest state that made the outcome unknown: an attempt of
@@ -72,7 +83,7 @@ export function WriteNotices({ go }: { go: (to: string) => void }) {
 export function leaving(writes: Writes, to: string, notice = false, from = location.pathname): boolean {
   const open = notice ? [] : writes.open;
   if (open.length === 0 || new URL(to, location.href).pathname === new URL(from, location.href).pathname) return true;
-  const lines = open.map((w) => (w.outcome === undefined && w.doubt === undefined && w.repeating === undefined && w.aside === undefined ? "Sent, with no answer yet." : "Unknown whether this was saved.") + detail(w));
+  const lines = open.map((w) => (w.outcome === undefined && w.doubt === undefined && w.repeating === undefined && w.aside === undefined ? "Sent, with no answer yet." : "Unknown whether this was saved.") + record(w).named + detail(w, record(w).to));
   return confirm(`${lines.join("\n")}\nLeave this page?`);
 }
 
