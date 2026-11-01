@@ -149,7 +149,7 @@
     - GET /api/v1/identity
   fault: the token file holds an h-viewer token 30 seconds from expiry; the renewed token's subject differs
   expect:
-    client: renews once; shows the renewal on stderr as a new sign-in for another subject, and the result on stdout. The renewal goes to the provider, so the test counts it there and checks the injector's reads apart. This is the sign-in half; the pending write set aside needs the client-side fault injector of ginsys/bronzeward#263
+    client: renews once; shows the renewal on stderr as a new sign-in for another subject, and the result on stdout. The renewal goes to the provider, so the test counts it there and checks the injector's reads apart. This is the sign-in half; the pending write set aside is the write-cases.yaml record "AUTH-07 set-aside", which write_test.go TestWriteCases runs
     server: answers the reads for h-other
     shown: '"a new sign-in: the renewed token is for h-other at <issuer>, not h-viewer at <issuer>", then "subject h-other"; exit 0'
     absent: [token in stdout, stderr, argv]
