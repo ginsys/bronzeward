@@ -636,7 +636,42 @@ func TestETagState(t *testing.T) {
 	}
 }
 
-// TestDeleteNotReplayedByTransport: Go's transport replays an http.NoBody request that carries
+// TestRepeatCheckServesOneSend: a passed CheckRepeat covers the next Send of the write only. A
+// second Send of the same write confirms the epoch again and refuses once it moved (§8.4 item 3).
+func TestRepeatCheckServesOneSend(t *testing.T) {
+	f := &fake{epoch: "ep_BWSYNTH-1", recovery: func(n int) string {
+		if n == 1 { // n counts this read
+			return "ep_BWSYNTH-1"
+		}
+		return "ep_BWSYNTH-2"
+	}, post: func(_ int, w http.ResponseWriter, _ *http.Request) { created(w) }}
+	c, _, _ := writeClient(t, f, "ep_BWSYNTH-1")
+	w := clusterWrite()
+	w.Repeat = &Repeat{Key: "BWSYNTH-aaaaaaaaaaaaaaa", Epoch: "ep_BWSYNTH-1", Principal: "svc_BWSYNTH"}
+	if err := c.CheckRepeat(w); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Send(w); err != nil {
+		t.Fatal(err)
+	}
+	var refused RefusedRepeat
+	if _, err := c.Send(w); !errors.As(err, &refused) {
+		t.Errorf("a second send after the epoch moved: %v, want a refused repeat", err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	recoveries := 0
+	for _, q := range f.seen {
+		if q.URL.Path == "/api/v1/recovery" {
+			recoveries++
+		}
+	}
+	if recoveries != 2 || f.posts != 1 {
+		t.Errorf("%d recovery reads and %d sends, want 2 and 1", recoveries, f.posts)
+	}
+}
+
+// TestDeleteNotReplayedByTransport:Go's transport replays an http.NoBody request that carries
 // Idempotency-Key on a reused connection the server closed (Request.isReplayable). A body-less
 // DELETE must not be one, or that replay skips the recovery read before every repeat (§8.4 item 3).
 func TestDeleteNotReplayedByTransport(t *testing.T) {

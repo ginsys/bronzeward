@@ -35,16 +35,18 @@ type Write struct {
 	Check          string
 	// Input is the input a repeat gives where the command resolved what the operator typed, so the
 	// outcome-unknown block names it instead of "the same input".
-	Input   string
-	checked bool
+	Input string
+	// checked is the client whose CheckRepeat passed for the next Send of this write; that Send
+	// consumes it.
+	checked *Client
 }
 
-// CheckRepeat runs a T10 repeat's checks, the principal and the confirming GET /recovery, once:
-// a command that reads before Send calls it first, so a refused repeat sends only item 3's reads
-// (§8.4 item 4). For a first send it does nothing.
+// CheckRepeat runs a T10 repeat's checks, the principal and the confirming GET /recovery, for the
+// next Send of w on c: a command that reads before Send calls it first, so a refused repeat sends
+// only item 3's reads (§8.4 item 4). For a first send it does nothing.
 func (c *Client) CheckRepeat(w *Write) error {
 	rp := w.Repeat
-	if rp == nil || w.checked {
+	if rp == nil || w.checked == c {
 		return nil
 	}
 	if _, err := c.principal(rp); err != nil {
@@ -53,7 +55,7 @@ func (c *Client) CheckRepeat(w *Write) error {
 	if now, why := c.confirm(); now != rp.Epoch {
 		return RefusedRepeat{c.Context.fail(fmt.Errorf("%s /api/v1%s not sent: %s, not the given --expect-epoch %s", w.Method, w.Path, why, printable(rp.Epoch)))}
 	}
-	w.checked = true
+	w.checked = c
 	return nil
 }
 
@@ -127,7 +129,9 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 		fmt.Fprintf(c.Notices, "%s: %s is for a person signed in, not an automation token: the server refuses it.\n", c.Context.Where(), route)
 	}
 	// Only item 3's reads come before a repeat's refusal, so the context-use read follows them.
-	if err := c.CheckRepeat(w); err != nil {
+	err = c.CheckRepeat(w)
+	w.checked = nil // a passed check serves this send only
+	if err != nil {
 		return nil, err
 	}
 	who, err := c.principal(w.Repeat)
