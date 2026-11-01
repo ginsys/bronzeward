@@ -748,14 +748,15 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
    - A failure the server answers keeps what the view last read and shows the failure above it.
      These failures are a refusal the page shows, a `503` after its retries, and `epoch-superseded`,
      which the client reads as unavailable (`web/src/request.ts:149`;
-     `web/src/machine.test.ts:217`, `web/src/machine.test.ts:231`, `web/src/machine.test.ts:263`).
+     `web/src/machine.test.ts:217`, `web/src/machine.test.ts:231`, `web/src/machine.test.ts:333`).
    - A read that gets no answer while the view still shows data reports it only through the
      offline banner ([W11](operator-experience-wireframes.md#w11-empty-withheld-error-and-offline-states)).
      The data stays, with no failure of its own above it, also after a failure the server answered
-     (`web/src/shell.test.ts:88`, `web/src/machine.test.ts:298`). A read with nothing to show
+     (`web/src/shell.test.ts:88`, `web/src/machine.test.ts:369`). A read with nothing to show
      shows the disconnected state in place. When the banner ends because a read answered, W3 reads
-     the lost resource again once, so it never shows data older than a failed read without a sign
-     (`web/src/shell.test.ts:106`, `web/src/machine.test.ts:321`,
+     the machine and its observations again once, as for a timeline poll with new entries: one
+     read again at a time. It never shows data older than a failed read without a sign
+     (`web/src/shell.test.ts:106`, `web/src/machine.test.ts:392`,
      `web/e2e/auth/inventory.e2e.ts:350`).
    - A refusal of the credentials (`401` after renewal, `403 identity-revoked`) ends the page
      ([§9.6](#96-failure-cases)), and nothing stays (`web/src/request.test.ts:96`,
@@ -766,11 +767,11 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
      list goes with its cursor ([§8.2](#82-errors)). W3 still shows the machine's own rows with
      the observations' failure; only the latest read's line needs the observations. If the machine
      read also failed, its failure is still shown (`web/src/machine.test.ts:231`,
-     `web/src/machine.test.ts:253`, `web/src/machine.test.ts:331`).
+     `web/src/machine.test.ts:323`, `web/src/machine.test.ts:410`).
    - A new view keeps nothing of the old view. When the view changes, the old view's answer still
      shows at first. A later failure does not keep it, a read without answer included, and the
      restart flag does not carry over (`web/src/machine.test.ts:204`, `web/src/machine.test.ts:231`,
-     `web/src/machine.test.ts:310`).
+     `web/src/machine.test.ts:381`).
    - The observations' restart notice stays through the reads again after it within the view
      (`web/src/machine.test.ts:204`, `web/src/machine.test.ts:245`).
 
