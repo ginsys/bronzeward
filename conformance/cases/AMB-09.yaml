@@ -1,0 +1,16 @@
+id: AMB-09
+setup: as AMB-01
+action: send Add cluster
+exchange:
+  - request: POST /api/v1/clusters
+    headers: ["Authorization: Bearer <token>", "Content-Type: application/json", "Idempotency-Key: <key>", "Bronzeward-Expected-Epoch: <epoch>"]
+fault: the injector forwards the write and closes the connection without its answer, then answers each of the 3 repeats 503 dependency-unavailable
+expect:
+  server: the write received once
+  client: the write repeated 3 times with the same key and the same request, then reported as an unknown outcome, not as not done
+  shown: the unknown-outcome notice naming the last answer, with the key, the route and the resource to read (client contracts §8.4 item 4)
+  absent: [token in the harness log, retained artifacts or browser storage]
+runs:
+  web:
+    check: web/e2e/auth/writes.e2e.ts, mise run browser-auth
+    browsers: [chrome, edge, firefox, firefox-esr]

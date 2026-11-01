@@ -1,0 +1,16 @@
+id: AMB-03
+setup: as AMB-01
+action: send Add cluster
+exchange:
+  - request: POST /api/v1/clusters
+    headers: ["Authorization: Bearer <token>", "Content-Type: application/json", "Idempotency-Key: <key>", "Bronzeward-Expected-Epoch: <epoch>"]
+fault: the injector forwards the write and replaces the server's answer with 500 internal-error
+expect:
+  server: the repeat finds the key's record and replays it with Idempotent-Replayed true
+  client: the write repeated once with the same key and the same request
+  shown: '"Already done earlier; showing that result." and the cluster recorded'
+  absent: [token in the harness log, retained artifacts or browser storage]
+runs:
+  web:
+    check: web/e2e/auth/writes.e2e.ts, mise run browser-auth
+    browsers: [chrome, edge, firefox, firefox-esr]
