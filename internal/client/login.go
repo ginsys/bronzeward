@@ -144,6 +144,9 @@ func (i *idp) deviceAuth(x *Context) (*oauth2.DeviceAuthResponse, error) {
 	}
 	q.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	q.Header.Set("Accept", "application/json")
+	// The code's lifetime counts from before the request, as golang.org/x/oauth2 counted it, so a
+	// slow answer does not lengthen the polling past the lifetime the provider gave.
+	sent := time.Now()
 	r, err := i.hc.Do(q)
 	if err != nil {
 		return nil, fmt.Errorf("device authorization at the identity provider %s: %w", x.OIDC.Issuer, remoteFailure(err))
@@ -179,7 +182,7 @@ func (i *idp) deviceAuth(x *Context) (*oauth2.DeviceAuthResponse, error) {
 	}
 	a := &oauth2.DeviceAuthResponse{DeviceCode: d.DeviceCode, UserCode: d.UserCode, VerificationURI: d.VerificationURI, Interval: d.Interval}
 	if d.ExpiresIn > 0 {
-		a.Expiry = time.Now().Add(time.Duration(d.ExpiresIn) * time.Second)
+		a.Expiry = sent.Add(time.Duration(d.ExpiresIn) * time.Second)
 	}
 	return a, nil
 }
