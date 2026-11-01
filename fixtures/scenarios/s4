@@ -46,10 +46,16 @@
 # observation (021): started again, it takes it over and completes it. The rows no request reaches,
 # node validation (022) among them, are their Go checks, run in a clone after the live rows. The
 # table is ds.tsv: row, result, source, outcome.
+# `cli`: the safe apply through bronzewardctl (ginsys/bronzeward#354), on the state S2 leaves (its
+# release the worker's Desired, no apply-config plan, the worker's links joined), in place of S3's
+# run: plan create as h-publisher, approve as h-approver, operation watch as h-viewer to its
+# completion line, then machine timeline and operation show. One approval and its act, one
+# operation and one attempt; each command's output and exit status are kept as cli-<name>.txt.
 # Each check writes PASS, FAIL or SKIP, its acceptance-plan reference and what it checked to s4.tsv
 # in the evidence directory and to stdout. Exit 1 on any FAIL.
-# Usage: scenarios/s4 controls|restores|run|ds   (after scenarios/s1 run, s3 handover, s2 run and s3
-# run on the same up; controls and restores, when run, before run; ds after run)
+# Usage: scenarios/s4 controls|restores|run|ds|cli   (after scenarios/s1 run, s3 handover, s2 run and
+# s3 run on the same up; controls and restores, when run, before run; ds after run; cli after s2 run
+# instead of s3 run)
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 bin=$here/../bin
@@ -57,8 +63,9 @@ bin=$here/../bin
 . "$here/../lib.sh"
 
 s4_mode=${1:-}
-case $s4_mode in controls | restores | run | ds) ;; *) die "usage: scenarios/s4 controls|restores|run|ds" ;; esac
+case $s4_mode in controls | restores | run | ds | cli) ;; *) die "usage: scenarios/s4 controls|restores|run|ds|cli" ;; esac
 need docker curl jq timeout id sleep date awk wc
+[ "$s4_mode" != cli ] || need go grep head chmod
 need_state
 # No fixture lock of its own: inject and evidence each take the one they need.
 umask 077
@@ -70,7 +77,7 @@ scenario=s4
 # shellcheck source-path=SCRIPTDIR source=common.sh
 . "$here/common.sh"
 run_key=$(date -u +%s%N)
-case $s4_mode in run) mutation_ref='S4 pass' ;; ds) mutation_ref='S4 DS re-run' ;; *) mutation_ref='S4 negative controls' ;; esac
+case $s4_mode in run) mutation_ref='S4 pass' ;; cli) mutation_ref='S4 CLI pass' ;; ds) mutation_ref='S4 DS re-run' ;; *) mutation_ref='S4 negative controls' ;; esac
 ds_ref='S4 DS row'
 # shellcheck source-path=SCRIPTDIR source=dispatch.sh
 . "$here/dispatch.sh"
@@ -257,6 +264,106 @@ safe_apply() {
   check "$ref" 'the operation, its attempt and response, as served' keep operation "/api/v1/operations/$op"
   check "$ref" "the worker's timeline, as served" keep timeline "/api/v1/machines/$machine_w/timeline?limit=500"
   check "$ref" "the worker's observation records, as served" keep observations "/api/v1/machines/$machine_w/observations?limit=500"
+}
+
+# The CLI's safe apply (mode cli, ginsys/bronzeward#354): bronzewardctl, built from this checkout,
+# runs on the host against A. Each human's context is in the run directory, with a token file that
+# holds a token minted just before each command. The context names a loopback stand-in issuer: the
+# fixture's issuer is on the Compose network only, and no command here reads the issuer. The
+# caller's configuration and credential store are never read: XDG directories are the run
+# directory's and the session bus is disabled.
+cli_dir='' ctl_bin=''
+cli_preconditions() {
+  local ref='S4 CLI precondition'
+  machines
+  rel=$(sql "SELECT desired FROM machine_state WHERE machine = '$machine_w'")
+  was=$(sql "SELECT applied_release FROM machine_state WHERE machine = '$machine_w'")
+  baseline=$(sql "SELECT baseline_revision FROM machine_state WHERE machine = '$machine_w'")
+  check "$ref" "the worker's Desired is a release that is not its Applied, and the adoption set its Applied" \
+    same "$(sql "SELECT (desired IS NOT NULL AND desired <> applied_release) || ' ' || applied_source FROM machine_state WHERE machine = '$machine_w'")" 'true adoption'
+  check "$ref" 'no apply-config plan or operation exists' \
+    same "$(sql "SELECT (SELECT count(*) FROM plan WHERE kind = 'apply-config') + (SELECT count(*) FROM operation WHERE kind = 'apply-config')")" 0
+  check "$ref" 'no link to the worker is recorded cut' worker_joined
+  check "$ref" 'A answers /livez' answers 204 - GET /livez ''
+  cli_dir=$STATE/cli
+  ctl_bin=$cli_dir/bronzewardctl
+  mkdir -p -- "$cli_dir/config" "$cli_dir/state" "$cli_dir/cache"
+  check "$ref" 'bronzewardctl built from this checkout' go -C "$here/../.." build -o "$ctl_bin" ./cmd/bronzewardctl
+  local who
+  for who in h-publisher h-approver h-viewer; do
+    : >"$cli_dir/$who.json"
+    chmod 600 -- "$cli_dir/$who.json"
+    check "$ref" "a context for $who with its token file" ctl_env context add "$who" --server "http://127.0.0.1:$SERVER_A_PORT" \
+      --issuer http://127.0.0.1:5556 --client-id BWSYNTH-cli --oidc-token-file "$cli_dir/$who.json"
+  done
+}
+# ctl_env <args>...: bronzewardctl with the run directory's configuration and no session bus.
+ctl_env() {
+  XDG_CONFIG_HOME=$cli_dir/config XDG_STATE_HOME=$cli_dir/state XDG_CACHE_HOME=$cli_dir/cache \
+    DBUS_SESSION_BUS_ADDRESS=disabled: "$ctl_bin" "$@"
+}
+# ctl <name> <human> <args>...: bronzewardctl as the human, with a token minted now (printf is a
+# builtin: the token is on no command line); standard input passes through. The output and the
+# exit status are kept as cli-<name>.txt; the status is ctl's.
+ctl() {
+  local name=$1 who=$2 tok rc=0
+  shift 2
+  tok=$(mint "$who") || return 1
+  keep_secret "$tok"
+  printf '{"accessToken":"%s"}' "$tok" >"$cli_dir/$who.json"
+  ctl_env --context "$who" "$@" >"$EV/cli-$name.txt" 2>&1 || rc=$?
+  printf '[%s, exit %d]\n' "bronzewardctl --context $who $*" "$rc" >>"$EV/cli-$name.txt"
+  return "$rc"
+}
+# kept <name> <ERE>: the kept output of cli-<name>.txt has a line matching the ERE.
+kept() { grep --quiet --extended-regexp -- "$2" "$EV/cli-$1.txt"; }
+# one_approval: one approval of the plan, and one approval act naming it.
+one_approval() {
+  [ "$(sql "SELECT (SELECT count(*) FROM approval WHERE plan = '$plan') || ' ' ||
+      (SELECT count(*) FROM act WHERE action = 'plan.approve' AND '$plan' = ANY (subjects))")" = '1 1' ]
+}
+# one_operation: one operation of the plan, the one completed.
+one_operation() { [ "$(sql "SELECT count(*) || ' ' || bool_and(id = '$op') FROM operation WHERE plan = '$plan'")" = '1 true' ]; }
+
+cli_apply() {
+  local ref='S4 CLI step 1'
+  cli_preconditions
+  pre_state
+  check "$ref" 'plan create as h-publisher: an apply-config plan of the Desired release for the worker, no-reboot' \
+    ctl plan-create h-publisher plan create --release "$rel" --machine "$machine_w" --operation apply-config --mode no-reboot
+  plan=$(grep --only-matching --extended-regexp -- 'pln_[a-z2-7]{26}' "$EV/cli-plan-create.txt" | head -n 1) || plan=
+  [ -n "$plan" ] || die "s4: plan create named no plan; nothing after it can run"
+  ref='S4 CLI step 2'
+  check "$ref" 'approve as h-approver, the plan ID typed back on standard input' ctl approve h-approver approve "$plan" <<<"$plan"
+  check "$ref" 'the operation that runs the plan exists within a minute' within 60 plan_operation
+  [ -n "$op" ] || die "s4: the plan has no operation; nothing after it can run"
+  ref='S4 CLI step 3'
+  check "$ref" "operation watch as h-viewer ends 0 with the completion line naming the release" \
+    ctl watch h-viewer operation watch "$op" --timeout 3m
+  check "$ref" "the watch's completion line carries the server's time and names the release" \
+    kept watch "^Completed at .* \(server\): applied $rel, "
+  check "$ref" "the plan's operation completed" completed
+  ref='S4 CLI pass'
+  check "$ref" 'one approval of the plan, recorded with one approval act' one_approval
+  check "$ref" 'one operation of the plan' one_operation
+  check "$ref" "one attempt, number 1, after the commitment, on the plan's route, its response accepted after it" one_attempt
+  check "$ref" 'on the timeline, in order: the commitment, the attempt, the response, the states to completed, the Applied change' states_in_order
+  check "$ref" "Applied the release from source operation, the baseline revision one more, one Applied change entry" applied_moved
+  check "$ref" "machine timeline as h-viewer shows the plan's entry and the approval" ctl timeline h-viewer machine timeline "$machine_w" --all
+  check "$ref" "the timeline's plan line names the plan and the release" kept timeline "  plan +plan $plan, operation apply-config, release $rel, by "
+  check "$ref" "the timeline's approval line names the plan" kept timeline "  approval +approval apr_[a-z2-7]{26}, plan $plan, by h-approver "
+  check "$ref" 'operation show as h-viewer prints the same completion' ctl show h-viewer operation show "$op"
+  check "$ref" "operation show's completion line names the release" kept show "^Completed at .* \(server\): applied $rel, "
+  rm -f -- "$cli_dir"/h-*.json
+  evidence_to post || die "no post-state: bin/evidence failed"
+  check "$ref" 'the post-state bundle: complete, no fixture secret but the scan control' scan_clean post
+  check "$ref" "the worker's digest is the artifact's and its resource version moved" node_applied
+  check "$ref" "the control plane's digest and resource version are the pre-state's" unchanged_node "$TALOS_CONTROLPLANE_IP"
+}
+# plan_operation: the plan's operation, in op.
+plan_operation() {
+  op=$(sql "SELECT operation FROM plan_state WHERE plan = '$plan' AND operation IS NOT NULL")
+  [ -n "$op" ]
 }
 
 # The controls (mode controls). act0 and approval0: the last act and step 3's approval at the start,
@@ -1047,6 +1154,10 @@ run() {
       safe_apply
       check 'S4 backups' 'inject db-snapshot: a dump of the bronzeward database after the apply' "$bin/inject" db-snapshot "$backup_name"
       ;;
+    cli)
+      cli_apply
+      check 'S4 backups' "inject db-snapshot: a dump of the bronzeward database after the CLI's apply" "$bin/inject" db-snapshot "$backup_name"
+      ;;
   esac
 }
 
@@ -1070,7 +1181,7 @@ if final=$("$bin/evidence" "$EV" 2>"$ev_log"); then
   # last row's of ds) or the held operation's (controls' or restores') own row inside its COPY block,
   # whose first column is the ID. The held operation's row is in the dump only: the restore after it
   # removed it from the database.
-  if [ "$s4_mode" = run ] || [ "$s4_mode" = ds ]; then
+  if [ "$s4_mode" = run ] || [ "$s4_mode" = ds ] || [ "$s4_mode" = cli ]; then
     dump_table=attempt dump_row='the attempt'
     dump_id=$(sql "SELECT id FROM attempt WHERE operation = '${op:-none}'") || dump_id=
   else
