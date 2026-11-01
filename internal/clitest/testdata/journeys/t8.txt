@@ -1,0 +1,149 @@
+$ bronzewardctl --context publisher plan create --release rel_… --machine mch_… --operation apply-config
+Plan pln_…  proposed                                         expires <local time> <local time>
+  Machine                            mch_…  127.0.0.1:<port>  cluster cl_… (lab-a), route 127.0.0.1:<port>
+  Operation                          apply-config, mode no-reboot
+  Release                            rel_…  machine Desired: rel_… at plan creation, rel_… now
+  Assignment                         asr_…  baseline revision 2, drift record none
+  Limits                             transport 60s, verification 600s, observation age 300s, check validity 300s, attempts 3, rollout 1
+  Created by                         idn_… (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision 41
+  Approval                           none                                        policy one-approver, committed operation none
+Evidence
+  Validation  passed at publication (contract v1.13, machinery v1.13.6, Kubernetes v1.36.2, container)
+  Dry run     not available: no dry run is available for this operation
+  Diff        Changes shown below: the whole redacted configuration, rel_… -> rel_…
+    @@ -3,10 +3,10 @@
+     persist: true
+     machine:
+       type: controlplane
+    -  token: <redacted:s-…@1>
+    +  token: <redacted:s-…@1>
+       ca:
+         crt: <base64>
+    -    key: <redacted:s-…@1>
+    +    key: <redacted:s-…@1>
+       certSANs: []
+       kubelet:
+         image: ghcr.io/siderolabs/kubelet:v1.36.2
+    @@ -26,10 +26,11 @@
+           forwardKubeDNSToHost: true
+       nodeLabels:
+         node.example.test/pool: workers
+    +    node.example.test/tier: b
+         node.kubernetes.io/exclude-from-external-load-balancers: ""
+     cluster:
+       id: <base64>
+    -  secret: <redacted:s-…@1>
+    +  secret: <redacted:s-…@1>
+       controlPlane:
+         endpoint: https://cp.example.test:6443
+       clusterName: bwsynth
+    @@ -39,16 +40,16 @@
+           - 10.244.0.0/16
+         serviceSubnets:
+           - 10.96.0.0/12
+    -  token: <redacted:s-…@1>
+    -  secretboxEncryptionSecret: <redacted:s-…@1>
+    +  token: <redacted:s-…@1>
+    +  secretboxEncryptionSecret: <redacted:s-…@1>
+       ca:
+         crt: <base64>
+    -    key: <redacted:s-…@1>
+    +    key: <redacted:s-…@1>
+       aggregatorCA:
+         crt: <base64>
+    -    key: <redacted:s-…@1>
+    +    key: <redacted:s-…@1>
+       serviceAccount:
+    -    key: <redacted:s-…@1>
+    +    key: <redacted:s-…@1>
+       apiServer:
+         image: registry.k8s.io/kube-apiserver:v1.36.2
+         admissionControl:
+    @@ -88,7 +89,7 @@
+       etcd:
+         ca:
+           crt: <base64>
+    -      key: <redacted:s-…@1>
+    +      key: <redacted:s-…@1>
+     ---
+     apiVersion: v1alpha1
+     kind: HostnameConfig
+It is not approved and nothing runs until an approver approves: bronzewardctl approve 'pln_…'
+[exit 0]
+
+$ bronzewardctl --context approver approve pln_…
+Plan pln_…  proposed                                         expires <local time> <local time>
+  Machine                            mch_…  127.0.0.1:<port>  cluster cl_… (lab-a), route 127.0.0.1:<port>
+  Operation                          apply-config, mode no-reboot
+  Release                            rel_…  machine Desired: rel_… at plan creation, rel_… now
+  Assignment                         asr_…  baseline revision 2, drift record none
+  Limits                             transport 60s, verification 600s, observation age 300s, check validity 300s, attempts 3, rollout 1
+  Created by                         idn_… (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision 41
+  Approval                           none                                        policy one-approver, committed operation none
+Evidence
+  Validation  passed at publication (contract v1.13, machinery v1.13.6, Kubernetes v1.36.2, container)
+  Dry run     not available: no dry run is available for this operation
+  Diff        Changes shown below: the whole redacted configuration, rel_… -> rel_…
+    @@ -3,10 +3,10 @@
+     persist: true
+     machine:
+       type: controlplane
+    -  token: <redacted:s-…@1>
+    +  token: <redacted:s-…@1>
+       ca:
+         crt: <base64>
+    -    key: <redacted:s-…@1>
+    +    key: <redacted:s-…@1>
+       certSANs: []
+       kubelet:
+         image: ghcr.io/siderolabs/kubelet:v1.36.2
+    @@ -26,10 +26,11 @@
+           forwardKubeDNSToHost: true
+       nodeLabels:
+         node.example.test/pool: workers
+    +    node.example.test/tier: b
+         node.kubernetes.io/exclude-from-external-load-balancers: ""
+     cluster:
+       id: <base64>
+    -  secret: <redacted:s-…@1>
+    +  secret: <redacted:s-…@1>
+       controlPlane:
+         endpoint: https://cp.example.test:6443
+       clusterName: bwsynth
+    @@ -39,16 +40,16 @@
+           - 10.244.0.0/16
+         serviceSubnets:
+           - 10.96.0.0/12
+    -  token: <redacted:s-…@1>
+    -  secretboxEncryptionSecret: <redacted:s-…@1>
+    +  token: <redacted:s-…@1>
+    +  secretboxEncryptionSecret: <redacted:s-…@1>
+       ca:
+         crt: <base64>
+    -    key: <redacted:s-…@1>
+    +    key: <redacted:s-…@1>
+       aggregatorCA:
+         crt: <base64>
+    -    key: <redacted:s-…@1>
+    +    key: <redacted:s-…@1>
+       serviceAccount:
+    -    key: <redacted:s-…@1>
+    +    key: <redacted:s-…@1>
+       apiServer:
+         image: registry.k8s.io/kube-apiserver:v1.36.2
+         admissionControl:
+    @@ -88,7 +89,7 @@
+       etcd:
+         ca:
+           crt: <base64>
+    -      key: <redacted:s-…@1>
+    +      key: <redacted:s-…@1>
+     ---
+     apiVersion: v1alpha1
+     kind: HostnameConfig
+Self-approval  predicted: no reason from the plan's creator, the release's publisher or its fragment, profile and assignment revisions.
+               Import-base authorship and automation you own are not predicted. The approval records the actual reasons; self-approval is marked and allowed.
+Type the plan ID to approve, or press Enter to stop: 
+Approved (apr_…). Recorded self-approval reasons: none.
+The controller re-checks the plan at use time; it applies it only if every check passes.
+[exit 0]
