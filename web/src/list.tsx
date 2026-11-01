@@ -107,6 +107,13 @@ function useKeep(keep: Keep | undefined, held: () => boolean): [() => boolean, (
   return [useCallback(() => (k.current === undefined ? held() : k.current.held()), [held]), useCallback((lost: boolean) => k.current?.lost(lost), [])];
 }
 
+// Settles a read and tells `lost` its outcome, only while it is live: a read a newer one superseded
+// settles late with nothing kept, and must not clear the lost mark the newer read set.
+export function settleKept<T>(settle: Reads["settle"], lost: (lost: boolean) => void, res: ReadResult<T>, set: (r: Load<T>) => void, live: () => boolean, held: () => boolean): void {
+  const kept = settle(res, set, live, held);
+  if (live()) lost(kept);
+}
+
 // A list read from its start each time the path, query or `all` changes, showing loading, and each
 // time the view changes or the page reads again, keeping what it shows until the read answers: the
 // same list under a new view is still the same data. `more` reads on. One read at a time: while a
@@ -133,7 +140,7 @@ export function useList<T>(path: string, query: string, all: boolean, keep?: Kee
         setBusy(false);
       }
       const [r, set, shows] = settling(res, put, held);
-      lost(settle(r, set, () => live && ok(), shows));
+      settleKept(settle, lost, r, set, () => live && ok(), shows);
     });
   }, [client, settle, undropped, put, held, lost, path, query]);
   useEffect(() => {
@@ -166,7 +173,7 @@ export function useItem<T>(path: string, keep?: Keep): Load<T> {
       key.current = path;
       put({ kind: "loading" });
     }
-    void client.read<T>(path).then((res) => lost(settle(res, put, () => live && ok(), held)));
+    void client.read<T>(path).then((res) => settleKept(settle, lost, res, put, () => live && ok(), held));
     return () => void (live = false);
   }, [client, settle, undropped, put, held, lost, view, path, again]);
   return item;

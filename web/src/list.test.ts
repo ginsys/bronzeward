@@ -1,7 +1,7 @@
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
-import { type Dropped, type Listed, type Load, More, type Reads, ReadsProvider, readPages, RESTARTED, settling, short, usePending } from "./list.tsx";
+import { type Dropped, type Listed, type Load, More, type Reads, ReadsProvider, readPages, RESTARTED, settleKept, settling, short, usePending } from "./list.tsx";
 import type { ReadResult } from "./request.ts";
 import { badges, type Machine, observed } from "./machines.tsx";
 
@@ -89,6 +89,20 @@ describe("cursor pages", () => {
     expect(more).toContain('Showing 1; more pages to read. <button type="button">Show more</button>');
     const busy = renderToStaticMarkup(h(More, { list: { items: [1, 2], next: "c", restarted: false }, shown: 2, more: () => {}, busy: true }));
     expect(busy).toContain('<button type="button" disabled="">Show more</button>');
+  });
+
+  test("#443: a superseded read that settles late leaves the lost mark of the newer read; a live answer clears it", () => {
+    // As the shell settles: a live read without answer keeps the data held, any other settles with nothing kept.
+    const settle: Reads["settle"] = (res, _set, live, held) => res.kind === "transport" && live() && held();
+    const marks: boolean[] = [];
+    const lost = (l: boolean) => void marks.push(l);
+    const held = () => true;
+    settleKept(settle, lost, { kind: "transport" }, () => {}, () => true, held);
+    settleKept(settle, lost, { kind: "ok", data: 1 }, () => {}, () => false, held);
+    settleKept(settle, lost, { kind: "transport" }, () => {}, () => false, held);
+    expect(marks).toEqual([true]);
+    settleKept(settle, lost, { kind: "ok", data: 2 }, () => {}, () => true, held);
+    expect(marks).toEqual([true, false]);
   });
 
   test("G23: identifiers shortened to the prefix and four characters at each end", () => {
