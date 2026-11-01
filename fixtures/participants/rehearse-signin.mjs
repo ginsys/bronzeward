@@ -71,8 +71,19 @@ async function signIn() {
   }
 }
 
+// The CLI's environment, as session's client_env: its own configuration and state, its sign-in in
+// the lab context's token file in the participant home, and no desktop session bus, so that no
+// sign-in reaches the desktop's credential store.
 const env = { ...process.env, XDG_CONFIG_HOME: join(part, "home/config"), XDG_STATE_HOME: join(part, "home/state") };
+delete env.DBUS_SESSION_BUS_ADDRESS;
+delete env.BRONZEWARD_TOKEN_FILE;
 const ctl = join(part, "bin/bronzewardctl");
+// ended <child>: its exit code, or the error that kept it from starting (a missing CLI), so that a
+// failed spawn goes through the catch and finally below instead of an uncaught exception.
+const ended = (child) => new Promise((resolve) => {
+  child.on("exit", resolve);
+  child.on("error", (e) => resolve(`not started: ${e.message}`));
+});
 let failed = false;
 let login;
 
@@ -80,7 +91,7 @@ try {
   // 1. The CLI, device grant: the address and code it prints, approved in the browser.
   login = spawn(ctl, ["login", "--device"], { env, stdio: ["ignore", "pipe", "pipe"] });
   let cliOut = "";
-  const done = new Promise((resolve) => login.on("exit", resolve));
+  const done = ended(login);
   login.stdout.on("data", (d) => (cliOut += d));
   login.stderr.on("data", (d) => (cliOut += d));
   for (let i = 0; i < 30 && !/open (\S+) on any device/.test(cliOut); i++) await browser.pause(500);
@@ -99,7 +110,7 @@ try {
   const who = spawn(ctl, ["--no-input", "whoami"], { env, stdio: ["ignore", "pipe", "inherit"] });
   let whoOut = "";
   who.stdout.on("data", (d) => (whoOut += d));
-  const whoRc = await new Promise((resolve) => who.on("exit", resolve));
+  const whoRc = await ended(who);
   out(`CLI whoami exit ${whoRc}:\n${whoOut}`);
   failed ||= whoRc !== 0;
 
