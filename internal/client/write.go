@@ -27,16 +27,19 @@ import (
 // the command that shows it, after "bronzewardctl --context <the context>", which Send adds.
 // Ingests marks a draft fragment write, whose in-progress 409 is waited for up to Wait, raised to
 // the claim lease the server serves (§8.4 item 2).
+// Entry marks the recovery entry, §8.4 item 3's one exception: it is sent without
+// Bronzeward-Expected-Epoch, its repeats check the principal and not the epoch, and the epoch change
+// its own commit causes never sets it aside.
 type Write struct {
-	Method, Path   string
-	Body           []byte
-	IfMatch, Draft string
-	HumanOnly      bool
-	Ingests        bool
-	Wait           time.Duration
-	Repeat         *Repeat
-	Read           func(*Client) (string, error)
-	Check          string
+	Method, Path     string
+	Body             []byte
+	IfMatch, Draft   string
+	HumanOnly, Entry bool
+	Ingests          bool
+	Wait             time.Duration
+	Repeat           *Repeat
+	Read             func(*Client) (string, error)
+	Check            string
 	// Input is the input a repeat gives where the command resolved what the operator typed, so the
 	// outcome-unknown block names it instead of "the same input".
 	Input string
@@ -63,15 +66,18 @@ func (c *Client) CheckRepeat(w *Write) (err error) {
 	if _, err := c.principal(rp); err != nil {
 		return err
 	}
-	if now, why := c.confirm(); now != rp.Epoch {
-		return RefusedRepeat{c.Context.fail(fmt.Errorf("%s /api/v1%s not sent: %s, not the given --expect-epoch %s", w.Method, w.Path, why, printable(rp.Epoch)))}
+	// The recovery entry confirms no epoch: its own commit mints one (§8.4 item 3).
+	if !w.Entry {
+		if now, why := c.confirm(); now != rp.Epoch {
+			return RefusedRepeat{c.Context.fail(fmt.Errorf("%s /api/v1%s not sent: %s, not the given --expect-epoch %s", w.Method, w.Path, why, printable(rp.Epoch)))}
+		}
 	}
 	w.checked = c
 	return nil
 }
 
 // Repeat is T10's repeat of a write whose outcome was unknown: its key, reference epoch and
-// principal, as the outcome-unknown block printed them.
+// principal, as the outcome-unknown block printed them. A recovery entry's has no epoch.
 type Repeat struct{ Key, Epoch, Principal string }
 
 // RefusedRepeat is a T10 repeat refused before the write was sent; the CLI exits 2.
@@ -81,9 +87,10 @@ type RefusedRepeat struct{ error }
 // is T10's block, which the CLI prints on standard error before it exits 3.
 // Ambiguous says an attempt, this process's or the one a T10 repeat repeats, may have committed;
 // a write set aside without one is not repeated (§8.4 item 3), though none of it committed.
+// Entry says it is the recovery entry's, sent with no epoch, so its repeat takes none (item 4).
 type Unknown struct {
 	Why, Key, Route, Where, Principal, Epoch, IfMatch, Shows, Check, Input string
-	SetAside, Ambiguous                                                    bool
+	SetAside, Ambiguous, Entry                                             bool
 }
 
 func (u *Unknown) Error() string { return strings.Join(u.Lines(), "\n") }
@@ -96,9 +103,12 @@ func (u *Unknown) Lines() []string {
 	} else if u.SetAside {
 		head = "set aside, not repeated: " + u.Why + ". No attempt of it can have committed anything"
 	}
+	epoch, repeat := printable(u.Epoch), fmt.Sprintf("--idempotency-key %s --expect-epoch %s --expect-principal %s", u.Key, ShellWord(u.Epoch), ShellWord(u.Principal))
+	if u.Entry {
+		epoch, repeat = "none: the recovery entry is sent without one", fmt.Sprintf("--idempotency-key %s --expect-principal %s", u.Key, ShellWord(u.Principal))
+	}
 	ls := []string{fmt.Sprintf("%s: %s: %s.", u.Where, u.Route, head), "  key:       " + u.Key, "  request:   " + u.Route, "  context:   " + u.Where,
-		"  principal: " + printable(u.Principal), "  epoch:     " + printable(u.Epoch)}
-	repeat := fmt.Sprintf("--idempotency-key %s --expect-epoch %s --expect-principal %s", u.Key, ShellWord(u.Epoch), ShellWord(u.Principal))
+		"  principal: " + printable(u.Principal), "  epoch:     " + epoch}
 	if u.IfMatch != "" {
 		ls = append(ls, "  if-match:  "+printable(u.IfMatch))
 		repeat += " --if-match " + ShellWord(u.IfMatch)
@@ -138,6 +148,8 @@ var (
 // same key, at most three times, after an ambiguous outcome, a 503 a write repeats, and a 401 it
 // renewed after; before each repeat it checks the principal and confirms the epoch with one
 // GET /recovery. It returns the 2xx answer, a refusal, an *Unknown or a *RefusedRepeat.
+// The recovery entry (w.Entry) carries no epoch and confirms none; its answers show the start mode
+// (§8.5 item 1, 2).
 func (c *Client) Send(w *Write) (r *Response, err error) {
 	route := w.Method + " /api/v1" + w.Path
 	defer c.banner()
@@ -158,12 +170,16 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 	if rp := w.Repeat; rp != nil {
 		key, ref = rp.Key, rp.Epoch
 	}
+	// A recovery start refuses GET /server until its entry commits: for the entry that refusal shows
+	// the start mode it needs (§8.5 item 1), not a failure.
 	_, srv, err := c.Server()
-	if err != nil {
+	if err != nil && !(w.Entry && processRefusal(err)) {
 		return nil, err
 	}
 	bound := w.Wait
-	if l := srv.IngestionClaim; l != nil && time.Duration(float64(l.LeaseSeconds)*float64(time.Second)) > bound {
+	if srv == nil {
+		// The entry's tolerated refusal served no settings, and the entry waits for no ingestion.
+	} else if l := srv.IngestionClaim; l != nil && time.Duration(float64(l.LeaseSeconds)*float64(time.Second)) > bound {
 		bound = time.Duration(float64(l.LeaseSeconds) * float64(time.Second))
 	}
 	// GET /server can renew the sign-in and adopt one another process stored for another subject
@@ -171,7 +187,7 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 	if who, err = c.principal(w.Repeat); err != nil {
 		return nil, err
 	}
-	if rp := w.Repeat; rp != nil && c.Context.LastEpoch != rp.Epoch {
+	if rp := w.Repeat; rp != nil && !w.Entry && c.Context.LastEpoch != rp.Epoch {
 		// A read after the confirming one, the context-use read's included, saw another epoch: the
 		// change is known, so the repeat is refused, not sent under the old epoch (§8.4 item 3, §8.5).
 		return nil, RefusedRepeat{c.Context.fail(fmt.Errorf("%s not sent: the epoch is now %s, not the given --expect-epoch %s", route, printable(c.Context.LastEpoch), printable(rp.Epoch)))}
@@ -186,17 +202,17 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 				route, printable(w.Draft), ShellWord(c.Context.Name), ShellWord(w.Draft)))
 		}
 	}
-	if w.Repeat == nil {
+	if w.Repeat == nil && !w.Entry {
 		// The last epoch seen before the first send, the context-use read's included (§8.4 item 3).
 		ref = c.Context.LastEpoch
 	}
-	if ref == "" {
+	if ref == "" && !w.Entry {
 		// A context that has seen no epoch takes it from GET /recovery (§8.4 item 3).
 		if ref, _ = c.confirm(); ref == "" {
 			return nil, c.Context.fail(fmt.Errorf("%s not sent: GET /api/v1/recovery showed no epoch to send it under", route))
 		}
 	}
-	u := &Unknown{Key: key, Route: route, Where: c.Context.Where(), Principal: who, Epoch: ref, IfMatch: w.IfMatch, Input: w.Input,
+	u := &Unknown{Key: key, Route: route, Where: c.Context.Where(), Principal: who, Epoch: ref, IfMatch: w.IfMatch, Input: w.Input, Entry: w.Entry,
 		Check: "bronzewardctl --context " + ShellWord(c.Context.Name) + " " + w.Check}
 	// A T10 repeat exists because an earlier process's attempt was ambiguous (§8.4 item 4).
 	ambiguous, renewed := w.Repeat != nil, false
@@ -233,7 +249,7 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 				u.Why = "the credential now names " + printable(now) + ", not the principal " + printable(who) + " the write was sent as"
 				return nil, c.setAside(w, u, ambiguous)
 			}
-			if now, why := c.confirm(); now != ref {
+			if now, why := c.confirm(); !w.Entry && now != ref {
 				u.Why = why + ", not the reference epoch"
 				return nil, c.setAside(w, u, ambiguous)
 			}
@@ -251,7 +267,24 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 			code = p.Code()
 		}
 		last, ingesting = a.err, ""
+		// The entry's not-a-recovery-start refusal: a 409 conflict with neither member (§8.5 item 2).
+		normal := w.Entry && code == "conflict" && p.Doc["epoch"] == nil && p.Doc["request"] == nil
+		if w.Entry && a.epoch && a.status != http.StatusUnauthorized && a.status != http.StatusForbidden && !normal {
+			// Any other entry answer after the role check, which carries the epoch, was given by a
+			// recovery start; a 401 or 403 shows nothing (§8.5 item 1).
+			c.setStartMode("recovery")
+		}
 		switch {
+		case normal:
+			c.setStartMode("normal")
+			last = fmt.Errorf("%w\nThis server was started normally; only a server started for recovery serves the entry.", a.err)
+			return nil, c.after(ambiguous, w, u, last)
+		case w.Entry && code == "conflict":
+			// Another entry committed, under another key or in an earlier process: refused here, not set
+			// aside, since only an earlier attempt of this one can make it ambiguous (§8.4 item 3; REC-02).
+			last = fmt.Errorf("%w\nAnother recovery entry committed first (epoch %s); this one recorded nothing. Read it with: recovery status.",
+				a.err, printable(fmt.Sprint(p.Doc["epoch"])))
+			return nil, c.after(ambiguous, w, u, last)
 		case a.r != nil:
 			if a.r.Header.Get("Idempotent-Replayed") == "true" {
 				fmt.Fprintf(c.Notices, "%s: %s: already done earlier; showing that result.\n", c.Context.Where(), route)
@@ -447,7 +480,15 @@ type attempt struct {
 	status   int
 	sent     bool
 	replayed bool // the answer is a stored one, replayed for this key (§8.4 item 2)
+	epoch    bool // the answer carried Bronzeward-Epoch
 	err      error
+}
+
+// processRefusal says err is a 409 recovery-mode-active without a scope member: the restriction of a
+// process started for recovery, which before its entry refuses every request but the entry.
+func processRefusal(err error) bool {
+	var p *Problem
+	return errors.As(err, &p) && p.Code() == "recovery-mode-active" && p.Doc["scope"] == nil
 }
 
 func (c *Client) post(w *Write, key, epoch string) attempt {
@@ -477,7 +518,9 @@ func (c *Client) post(w *Write, key, epoch string) attempt {
 		q.Header.Set("Content-Type", "application/json")
 	}
 	q.Header.Set("Idempotency-Key", key)
-	q.Header.Set("Bronzeward-Expected-Epoch", epoch)
+	if !w.Entry {
+		q.Header.Set("Bronzeward-Expected-Epoch", epoch)
+	}
 	if w.IfMatch != "" {
 		q.Header.Set("If-Match", w.IfMatch)
 	}
@@ -488,6 +531,7 @@ func (c *Client) post(w *Write, key, epoch string) attempt {
 	}
 	defer r.Body.Close()
 	a.sent, a.status, a.replayed = true, r.StatusCode, r.Header.Get("Idempotent-Replayed") == "true"
+	a.epoch = r.Header.Get("Bronzeward-Epoch") != ""
 	c.observe(route, r)
 	if r.StatusCode >= 300 && r.StatusCode < 400 {
 		a.err = fmt.Errorf("%s answered %s redirecting to \"%s\", which bronzewardctl does not follow; it is not repeated",
