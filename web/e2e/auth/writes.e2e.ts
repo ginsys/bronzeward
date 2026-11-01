@@ -136,8 +136,17 @@ describe("the write views (#338)", () => {
     await oneWrite(1);
     // The notice's buttons follow its text, in the same block.
     expect(await notice().parentElement().$("button=Repeat exactly").isEnabled()).toBe(false);
-    await notice().parentElement().$("button=Show current state").click();
-    await expect($("main")).toHaveText(expect.stringContaining(name), { wait: 20_000 });
+    // The notice's own way out asks nothing; a link elsewhere still does (the leave guard's case).
+    const asked: string[] = [];
+    const answer = (d: { message: () => string; dismiss: () => Promise<void> }) => void (asked.push(d.message()), d.dismiss());
+    browser.on("dialog", answer);
+    try {
+      await notice().parentElement().$("button=Show current state").click();
+      await expect($("main")).toHaveText(expect.stringContaining(name), { wait: 20_000 });
+    } finally {
+      browser.off("dialog", answer);
+    }
+    expect(asked).toEqual([]);
   });
 
   it("AMB-07: a new epoch after the confirming read meets the earlier epoch's record: 409, set aside, no new key", async () => {
