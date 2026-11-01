@@ -11,9 +11,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/ginsys/bronzeward/fixtures/oidc/issuer"
 	"github.com/ginsys/bronzeward/internal/auth"
 	"github.com/ginsys/bronzeward/internal/id"
 )
@@ -621,7 +623,7 @@ func TestOperationReadFollowsItsLock(t *testing.T) {
 }
 
 // The first read of a stream is bounded by the token's expiry too: held behind a lock, it ends
-// with the token and not with the lock.
+// with the token and not with the lock, and is answered 401, not as a database failure (#453).
 func TestEventStreamFirstReadEndsAtTokenExpiry(t *testing.T) {
 	t.Parallel()
 	ce := newCommitEnv(t, "")
@@ -650,13 +652,103 @@ func TestEventStreamFirstReadEndsAtTokenExpiry(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+short.Token)
 	req.Header.Set("Accept", "text/event-stream")
 	started := time.Now()
-	if resp, err := http.DefaultClient.Do(req); err == nil {
-		_, _ = io.Copy(io.Discard, resp.Body)
-		_ = resp.Body.Close()
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
 	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
 	if d := time.Since(started); d > 3*time.Second {
 		t.Fatalf("the stream's first read lasted %s on a token of 1s", d)
 	}
+	if resp.StatusCode != http.StatusUnauthorized || !strings.Contains(string(body), "urn:bronzeward:problem:unauthenticated") ||
+		resp.Header.Get("Bronzeward-Epoch") != "" {
+		t.Fatalf("the first read ended by the token's expiry: %d %v %s", resp.StatusCode, resp.Header, body)
+	}
+}
+
+// #453: a token past its exp but inside the verifier's 60 s skew (§10.1) is accepted for a
+// request, yet it cannot open a stream that ends no later than its exp (§8.3). The stream refuses
+// it 401 before any read, never 503 as a database failure, while the same token reads the
+// operation.
+func TestEventStreamInsideSkewIsUnauthenticated(t *testing.T) {
+	t.Parallel()
+	ce := newCommitEnv(t, "")
+	ce.ready(t)
+	r, err := ce.a.commitPlan(t.Context(), ce.pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reads atomic.Int32
+	counted := observer(t, ce.env, &fakeExecutor{}, options{beforeRead: func() { reads.Add(1) }})
+	tok, err := ce.iss.Mint("h-all", "", time.Now().Add(-issuer.Lifetime-30*time.Second)) // exp 30 s ago
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := ce.do(counted, call{method: http.MethodGet, path: prefix + "/operations/" + r.Operation, token: tok}); rec.Code != http.StatusOK {
+		t.Fatalf("the token inside the skew, on the operation read: %d %s", rec.Code, rec.Body)
+	}
+	before := reads.Load()
+	req := httptest.NewRequest(http.MethodGet, prefix+"/operations/"+r.Operation+"/events", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Accept", "text/event-stream")
+	rec := httptest.NewRecorder()
+	counted.ServeHTTP(rec, req)
+	checkAnswerHeaders(t, rec)
+	checkResponse(t, req, "", rec)
+	wantProblem(t, rec, http.StatusUnauthorized, "unauthenticated")
+	if rec.Header().Get("Bronzeward-Epoch") != "" || rec.Header().Get("Bronzeward-Recovery-Mode") != "" {
+		t.Fatalf("a 401 told the epoch: %v", rec.Header())
+	}
+	if n := reads.Load() - before; n != 0 {
+		t.Fatalf("the refused stream made %d reads", n)
+	}
+}
+
+// #453: a database failure on a stream's first read is still 503 dependency-unavailable; only a
+// read that the token's expiry ends is answered 401. The read waits behind a lock on the
+// installation state, and the test terminates its backend.
+func TestEventStreamFirstReadDatabaseFailure(t *testing.T) {
+	t.Parallel()
+	ce := newCommitEnv(t, "")
+	ce.ready(t)
+	r, err := ce.a.commitPlan(t.Context(), ce.pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := ce.db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tx.Rollback() })
+	if _, err := tx.Exec(`SELECT 1 FROM installation_state FOR UPDATE`); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, prefix+"/operations/"+r.Operation+"/events", nil)
+	req.Header.Set("Authorization", "Bearer "+ce.robot)
+	req.Header.Set("Accept", "text/event-stream")
+	rec := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ce.a.ServeHTTP(rec, req)
+	}()
+	for waited := time.Duration(0); ; waited += 50 * time.Millisecond {
+		var ended int
+		if err := ce.db.QueryRowContext(t.Context(), `SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity
+			WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%installation_state FOR SHARE%'`).Scan(&ended); err != nil {
+			t.Fatal(err)
+		}
+		if ended > 0 {
+			break
+		}
+		if waited > 10*time.Second {
+			t.Fatal("the stream's first read never waited on the installation state")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	<-done
+	wantProblem(t, rec, http.StatusServiceUnavailable, "dependency-unavailable")
 }
 
 // A read that finishes after the token's expiry writes no frame: the stream ends as the token does.

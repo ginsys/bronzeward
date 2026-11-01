@@ -213,7 +213,13 @@ const (
 	// streamKeepAlive is how long a stream stays silent before it sends a comment line, so a
 	// proxy's idle limit does not cut it (§8.3).
 	streamKeepAlive = 15 * time.Second
+	// expiredAnswerWrite bounds the write of the 401 that answers a stream whose first read the
+	// token's expiry ended, once the write deadline at exp is lifted.
+	expiredAnswerWrite = 10 * time.Second
 )
+
+// errTokenExpired is the cause of a stream's context that the opening token's exp ended.
+var errTokenExpired = errors.New("the token that opened the stream expired")
 
 // idleTimer is an event stream's keep-alive timer: c ticks once the stream has sent nothing for
 // the interval, rearm starts the interval again, and stop releases the timer.
@@ -248,13 +254,21 @@ func streamEvents(a *API, w http.ResponseWriter, q *request) {
 	}
 	// The token's expiry bounds every read and write of the stream, the first read included: its
 	// context ends the reads, its write deadline a blocked write, and each frame is checked before
-	// it is written.
+	// it is written. A token the verifier accepted inside its skew after exp (§10.1) cannot open a
+	// stream that ends no later than exp (§8.3): it is answered 401 before any read, and so is a
+	// first read the expiry ends, never as a database failure.
 	rc := http.NewResponseController(w)
 	ctx := q.r.Context()
-	if exp := q.principal.Expiry; !exp.IsZero() {
+	exp := q.principal.Expiry
+	if !exp.IsZero() {
+		if !time.Now().Before(exp) {
+			a.o.logf("%s %s %s: the token's exp %s has passed", q.id, q.r.Method, q.r.URL.EscapedPath(), exp.UTC().Format(time.RFC3339))
+			a.problem(w, q, refuse(http.StatusUnauthorized, "unauthenticated", ""))
+			return
+		}
 		_ = rc.SetWriteDeadline(exp)
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithDeadline(ctx, exp)
+		ctx, cancel = context.WithDeadlineCause(ctx, exp, errTokenExpired)
 		defer cancel()
 		q.r = q.r.WithContext(ctx)
 	}
@@ -289,6 +303,13 @@ func streamEvents(a *API, w http.ResponseWriter, q *request) {
 	h, batch, seqs, err := pass(true)
 	setEpoch(w, q)
 	if err != nil {
+		if errors.Is(context.Cause(ctx), errTokenExpired) {
+			// The write deadline is the passed exp: lift it for the problem document alone.
+			_ = rc.SetWriteDeadline(time.Now().Add(expiredAnswerWrite))
+			a.o.logf("%s %s %s: the first read ended at the token's exp: %v", q.id, q.r.Method, q.r.URL.EscapedPath(), err)
+			a.problem(w, q, refuse(http.StatusUnauthorized, "unauthenticated", ""))
+			return
+		}
 		a.fail(w, q, err)
 		return
 	}

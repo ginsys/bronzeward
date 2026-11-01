@@ -1590,7 +1590,10 @@ a plan operation and its event number for a `publish` or `ingest` operation
 (§5, T7); either increases along one operation's events. A client resumes
 with `Last-Event-ID`; an id from another epoch cannot be resumed, so the
 server sends a `reset` event and the timeline from its start. The server ends
-a stream no later than the `exp` of the token that opened it; the client
+a stream no later than the `exp` of the token that opened it. A token past its
+`exp` but inside the 60 seconds' skew of §10.1 opens no stream: the server
+answers it `401 unauthenticated` before any read, and so it answers a first
+read that the token's `exp` ends, never `503 dependency-unavailable`. The client
 reconnects with `Last-Event-ID` and a fresh token, verified as any request
 (§10.1), so an identity revocation, a denied subject or a changed group takes
 effect on a stream within the token's lifetime. A stream that has sent nothing
