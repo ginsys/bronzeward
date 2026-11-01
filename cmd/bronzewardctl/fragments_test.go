@@ -79,7 +79,9 @@ func TestFragmentEditing(t *testing.T) {
 	step("a document over 1 MiB", append(set, "--file", write("big", strings.Repeat("a", maxBody+1))), 1, "",
 		"the document is over the server's 1 MiB body limit; nothing was sent")
 	step("a body over 1 MiB once encoded", append(set, "--file", write("quotes", strings.Repeat(`"`, maxBody/2+1))), 1, "",
-		"over the server's 1 MiB limit; nothing was sent")
+		"bytes, over the server's 1 MiB body limit; nothing was sent")
+	setStdin(t, strings.Repeat("machine.files\n", maxBody/len("machine.files\n")+1))
+	step("marks over 1 MiB together", append(set, "--file", doc, "--marks"), 1, "", "the marks are over the server's 1 MiB body limit; nothing was sent")
 	step("a document that is not UTF-8", append(set, "--file", write("bin", "\xff\xfe")), 1, "", "the document is not UTF-8 text; nothing was sent")
 	// The decoders quote member names and some values; the refusals quote nothing from the file.
 	for _, c := range []struct{ name, file, says string }{
@@ -91,6 +93,7 @@ func TestFragmentEditing(t *testing.T) {
 		{"one member name in two cases", "Embedded:\n- {path: machine.BWSYNTH-4242, format: json}\nembedded:\n- {path: machine.files, format: yaml}\n",
 			"a member the API does not define, or a value of the wrong type; nothing was sent"},
 		{"a nested member name in another case", "embedded:\n- {Path: machine.BWSYNTH-4242, format: json}\n", "a member the API does not define, or a value of the wrong type; nothing was sent"},
+		{"a declarations file over 1 MiB", "#" + strings.Repeat("a", maxBody) + "\n", "the declarations file is over the server's 1 MiB body limit; nothing was sent"},
 		{"a declaration in a second YAML document", "{}\n---\nembedded:\n- {path: machine.BWSYNTH-4242, format: json}\n", "more than one YAML document; nothing was sent"},
 	} {
 		var o, e bytes.Buffer
@@ -138,6 +141,19 @@ func TestLongMark(t *testing.T) {
 	m, err := (&env{}).readMarks(false)
 	if err != nil || len(m) != 2 || m[0] != long || m[1] != "machine.files" {
 		t.Errorf("%d marks, %v; want the 70 KiB mark and machine.files", len(m), err)
+	}
+}
+
+// TestMarkTotal checks that all marks together are held to the body limit: marks of exactly
+// maxBody bytes, line feeds included, are read, and one byte more is refused before the rest.
+func TestMarkTotal(t *testing.T) {
+	line := "machine.files." + strings.Repeat("k", 1009) + "\n" // 1024 bytes
+	at := strings.Repeat(line, maxBody/len(line))
+	if m, err := scanMarks(strings.NewReader(at), false); err != nil || len(m) != maxBody/len(line) {
+		t.Errorf("at the limit: %d marks, %v; want %d marks", len(m), err, maxBody/len(line))
+	}
+	if m, err := scanMarks(strings.NewReader(at+"x\n"), false); err == nil || !strings.Contains(err.Error(), "the marks are over the server's 1 MiB body limit") {
+		t.Errorf("one mark over the limit: %d marks, %v; want the refusal", len(m), err)
 	}
 }
 
