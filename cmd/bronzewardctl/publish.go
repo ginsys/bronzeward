@@ -94,7 +94,11 @@ func nextSteps(c *client.Client, release string) ([]string, error) {
 	if err := json.Unmarshal(r.Body, &rel); err != nil {
 		return nil, fmt.Errorf("GET /api/v1/releases/%s cannot be read: %w", url.PathEscape(release), err)
 	}
-	lines := []string{fmt.Sprintf("Publication succeeded: release %s is now Desired for %d machines. Nothing has been sent to any machine.", rel.Id, len(rel.Machines))}
+	machines := fmt.Sprintf("%d machines", len(rel.Machines))
+	if len(rel.Machines) == 1 {
+		machines = "1 machine"
+	}
+	lines := []string{fmt.Sprintf("Publication succeeded: release %s is now Desired for %s. Nothing has been sent to any machine.", rel.Id, machines)}
 	for _, m := range rel.Machines {
 		r, err := c.Get("/machines/" + url.PathEscape(m.Machine))
 		var x apitypes.MachineBody

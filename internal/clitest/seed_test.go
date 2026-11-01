@@ -35,6 +35,13 @@ func serveIssuer(t *testing.T) (*issuer.Issuer, *provider) {
 	return iss, idp
 }
 
+// The seeded cluster's Talos cluster ID and its machine's SMBIOS UUID, which a Talos stand-in
+// reports for it (standIn).
+const (
+	seedClusterID = "c2VlZC1jbHVzdGVyLWlkLWZvci10aGUtY2xpLXRlc3Q="
+	seedUUID      = "0b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b"
+)
+
 // seeded names what seed recorded.
 type seeded struct{ cluster, machine, draft string }
 
@@ -64,9 +71,9 @@ func (f *fixture) seed() seeded {
 	}
 	var s seeded
 	s.cluster = create("/clusters", "k-seed-cluster-0123456",
-		`{"name":"lab-a","endpoint":"https://cp.example.test:6443","contract":"v1.13","talosClusterId":"c2VlZC1jbHVzdGVyLWlkLWZvci10aGUtY2xpLXRlc3Q="}`)
+		`{"name":"lab-a","endpoint":"https://cp.example.test:6443","contract":"v1.13","talosClusterId":"`+seedClusterID+`"}`)
 	s.machine = create("/machines", "k-seed-machine-0123456",
-		`{"cluster":"`+s.cluster+`","smbiosUuid":"0b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b","serial":"SN-1","platform":"container","talosEndpoint":"10.55.0.3"}`)
+		`{"cluster":"`+s.cluster+`","smbiosUuid":"`+seedUUID+`","serial":"SN-1","platform":"container","talosEndpoint":"10.55.0.3"}`)
 	s.draft = create("/drafts", "k-seed-draft-00123456", `{"cluster":"`+s.cluster+`","title":"worker labels"}`)
 	return s
 }

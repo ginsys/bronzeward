@@ -1,0 +1,36 @@
+# Shared conformance case record (docs/spec/client-contracts.md §12) of the publication wait
+# (#348), run by publication_test.go TestPublication against a disposable bronzeward serve with an
+# OpenBao provider (the test's, through baotest), behind the in-process TLS injector. Data is
+# synthetic: fixture-issuer tokens for the human h-all, who holds author and publisher; a Talos
+# stand-in (talostest) on loopback for the seeded machine, whose configuration and talosconfig the
+# test generates, the talosconfig written to the provider at access/talos/<cluster>. The machine
+# is imported into the seeded draft from the stand-in before the case, and the draft read, so its
+# ETag is kept (T11).
+#
+# The case's argv, standard output and standard error are scanned for the token and for every
+# secret value of the generated configuration and talosconfig.
+
+- id: EVT-04
+  setup: the seeded draft holds the machine's import base; the operator reads it with draft show
+  action: publish drf_...
+  exchange:
+    - "POST /api/v1/drafts/drf_.../publications, headers: Idempotency-Key, If-Match, Bronzeward-Expected-Epoch; 202 with the publish operation"
+    - "GET /api/v1/operations/op_.../events, Accept: text/event-stream, no Last-Event-ID"
+    - GET /api/v1/operations/op_..., the operation read after the stream ends
+    - "GET /api/v1/operations/op_.../events, the JSON event pages"
+  fault: >-
+    the injector passes the stream's headers and its first event, holds the rest until the
+    database shows the operation terminal, then ends the stream
+  expect:
+    client: >-
+      reads the operation after the stream ends, sees its terminal state, drains the JSON event
+      pages and shows each event the stream did not send, once; then reads the release and its
+      machines and ends the wait
+    server: one publish operation, succeeded; no apply-config or adopt operation; the machine's Applied unchanged
+    shown: >-
+      each of the operation's events once, in order, on standard error; "Publication succeeded:
+      release rel_... is now Desired for 1 machine. Nothing has been sent to any machine."; exit 0
+    absent: [token and the stand-in's secrets in stdout, stderr, argv]
+  unit: >-
+    the drain after a cut stream, and the stream's other T16 items, are internal/client
+    TestWatch's cases; a renewal during the wait is TestWatchRenewal's
