@@ -62,6 +62,9 @@ export function needs(status: number, problem: Problem): string {
 
 // A problem's title, its detail when present and its instance (§8.2), as one sentence or two.
 export const problemLine = (p: Problem) => `${p.title}${p.detail !== undefined ? `: ${p.detail}` : ""}.${p.instance !== undefined ? ` Request ${p.instance}.` : ""}`;
+// The problem an unknown or set-aside write's last answer carried, after its sentence: what the
+// route accepts (a 403's), then its fields. Nothing when no answer carried one.
+export const problemTail = (p: Problem | null) => (p === null ? "" : `${needs(p.status, p)} ${problemLine(p)}`);
 
 export function Refused({ problem, status, verb, testid, replayed = false }: { problem: Problem | null; status: number; verb: "read" | "saved"; testid?: string; replayed?: boolean }) {
   const earlier = replayed && `${REPLAYED} `;
@@ -104,14 +107,14 @@ const dismiss = (onDismiss: (() => void) | undefined) => onDismiss !== undefined
 // [Repeat exactly] only while the page holds the request, for the same sign-in and epoch. While
 // the repeat runs (`repeating`), the notice stays, with no second repeat and no dismissal.
 export const REPEATING = " Repeating it exactly; no answer yet.";
-export const Unknown = ({ why, onRepeat, onShow, detail, onDismiss, testid, repeating = false }: Notice & { why?: string; onRepeat?: (() => void) | undefined; repeating?: boolean }) => (
+export const Unknown = ({ why, problem = null, onRepeat, onShow, detail, onDismiss, testid, repeating = false }: Notice & { why?: string; problem?: Problem | null; onRepeat?: (() => void) | undefined; repeating?: boolean }) => (
   <Status testid={testid} actions={<>{onRepeat !== undefined && !repeating ? button("Repeat exactly", onRepeat) : button("Show current state", onShow)}{!repeating && dismiss(onDismiss)}</>}>
-    {why === undefined ? UNKNOWN : unknown(why)}{repeating && REPEATING}{detail}
+    {why === undefined ? UNKNOWN : unknown(why)}{problemTail(problem)}{repeating && REPEATING}{detail}
   </Status>
 );
 
-export const SetAside = ({ why, onShow, detail, onDismiss, testid }: Notice & { why: string }) => (
-  <Status testid={testid} actions={<>{button("Repeat exactly", () => {}, true)}{button("Show current state", onShow)}{dismiss(onDismiss)}</>}>{setAside(why)}{detail}</Status>
+export const SetAside = ({ why, problem = null, onShow, detail, onDismiss, testid }: Notice & { why: string; problem?: Problem | null }) => (
+  <Status testid={testid} actions={<>{button("Repeat exactly", () => {}, true)}{button("Show current state", onShow)}{dismiss(onDismiss)}</>}>{setAside(why)}{problemTail(problem)}{detail}</Status>
 );
 
 // A [Repeat exactly] that settled: its result, until dismissed.
