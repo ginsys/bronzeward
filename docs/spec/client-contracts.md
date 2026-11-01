@@ -801,6 +801,7 @@ current token expires
    D-Bus session bus is named, or when no program on it owns the Secret Service name
    (`org.freedesktop.secrets`) and none can be started for it; a store that answers and then
    fails refuses `login` before the sign-in starts, so nothing is issued that cannot be kept. A
+   named bus that cannot be asked, for example a stale address, counts as a store that fails. A
    sign-in whose context was removed or changed while it ran is not kept, and its refresh token
    is revoked. Removing a context removes its stored sign-in under the renewal lock, with a
    bounded read first, and leaves an entry alone when a context of that name was added again
