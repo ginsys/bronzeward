@@ -964,6 +964,13 @@ current token expires
    One that locks while a renewal waits on the identity
    provider refuses the renewed pair: its rotated refresh token is lost, as with any failed write,
    and the operator signs in again once the current access token expires.
+   One renewal is the exception to these failures: the renewal that a command starts by itself
+   when less than 60 s of the access token's life is left ([§9.5](#95-renewal) item 1). A store
+   that does not answer in time, a write that got no answer and a lock wait of four minutes make
+   that renewal fail under [§9.5](#95-renewal) item 3. They do not fail the command. The command
+   shows the error as a notice, with the unknown outcome of a write in the words above, and goes
+   on with the current token until the server refuses it. A renewal that follows a `401` is not
+   this case.
    The opt-in is the context's `oidc.tokenFile`
    ([§5](#5-endpoint-discovery-and-context-selection));
    only in a context that has it may `BRONZEWARD_TOKEN_FILE` override its path. The CLI writes
