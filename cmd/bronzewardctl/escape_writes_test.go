@@ -130,3 +130,33 @@ func TestRemoteTextInTokenFilePath(t *testing.T) {
 		}
 	}
 }
+
+// TestRemoteTextInUnreadableAnswer: a write whose answer cannot be read prints the answer as served,
+// but -o json, and only it, writes DEL, C1 and bidirectional controls as backslash-u escapes
+// (client-contracts.md section 6 item 8); -o yaml prints the answer unchanged.
+func TestRemoteTextInUnreadableAnswer(t *testing.T) {
+	served := "{\"id\":[\"a\x7f\xc2\x85\xe2\x80\xaeb\"]}"
+	escaped := "{\"id\":[\"a" + fmt.Sprintf(`\u%04x\u%04x\u%04x`, 0x7f, 0x85, 0x202e) + "b\"]}\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Bronzeward-Epoch", "ep_1")
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/server":
+			fmt.Fprint(w, `{"version":"v","apiRevision":2,"startMode":"normal"}`)
+		case "GET /api/v1/identity":
+			fmt.Fprint(w, `{"kind":"service","principal":"svc_1"}`)
+		case "POST /api/v1/clusters":
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, served)
+		}
+	}))
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	for o, want := range map[string]string{"json": escaped, "yaml": served + "\n", "table": ""} {
+		var out, errb bytes.Buffer
+		if code := run([]string{"-o", o, "cluster", "add", "--name", "lab-a"}, &out, &errb); code != 0 || out.String() != want {
+			t.Errorf("-o %s: exit %d, stdout %q, want %q (stderr %q)", o, code, out.String(), want, errb.String())
+		}
+		noRawControl(t, "-o "+o+" stderr", errb.String())
+	}
+}
