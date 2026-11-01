@@ -700,7 +700,8 @@ describe("the read-only lists and items", () => {
 
   it("reflow at 320 CSS pixels: no page scrolls sideways; only a table scrolls on its own", async () => {
     const at = await disposable();
-    const cl = await cluster(at, "lab-a");
+    // The longest valid name (128 bytes, no space to wrap at) is an option of the cluster filter.
+    const cl = await cluster(at, `${"a".repeat(63)}.${"b".repeat(62)}.c`);
     const [m] = await machines(at, cl.id, 1);
     const s = synthetic(cl.id, m!);
     expect(await fixtureSignIn("h-viewer", {}, { upstream: at, bodies: s.bodies })).toMatch(SERVER);
