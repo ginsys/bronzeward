@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # fixtures/participants/session scan and stop against stubs (#367): the planted controls never stay
-# behind, on a pass, a hit, a read error or an interrupt, and stop keeps A's configuration backup
-# until A runs on it again. No Docker, no fixture: docker, inject and dev-idp are stubs in a copy of
-# the scripts.
+# behind, on a pass, a hit, a read error or an interrupt; stop keeps A's configuration backup until
+# A runs on it again, and touches no other checkout's session. No Docker, no fixture: docker, inject
+# and dev-idp are stubs in a copy of the scripts.
 set -uo pipefail
 repo_src=$(CDPATH='' cd -- "$(dirname "$0")/../.." && pwd)
 t=$(mktemp -d)
@@ -16,12 +16,15 @@ mkdir -p "$repo/fixtures/.state/server/a" "$repo/.dev/idp" "$repo/.dev/participa
 session=$repo/fixtures/participants/session
 
 # docker: A (fixtures/versions.env names the fixture) and Zitadel exist, A runs unless STUB_STOPPED
-# is set, and each logs a line. An inspect of the forwarder fails, as for a removed container. Set,
-# STUB_PS_FAIL fails the container list, STUB_FWD still lists the forwarder, STUB_LOGS_FAIL fails a log read, and STUB_LOG_LEAK puts a session password in A's log.
+# is set, and each logs a line. The fixture claim is held by STUB_OWNER, this copy's checkout by
+# default. An inspect of the forwarder fails, as for a removed container. rm and network calls are
+# logged. Set, STUB_PS_FAIL fails the container list, STUB_FWD still lists the forwarder,
+# STUB_LOGS_FAIL fails a log read, and STUB_LOG_LEAK puts a session password in A's log.
 cat >"$t/bin/docker" <<'EOF'
 #!/usr/bin/env bash
 case "$1" in
 context) echo stub ;;
+rm | network) echo "docker $1" >>"$STUB_LOG" ;;
 ps)
   [ -z "${STUB_PS_FAIL:-}" ] || exit 1
   printf 'bw-fixture-bronzeward-a\nbw-dev-idp\n'
@@ -32,7 +35,7 @@ logs)
   echo "log of $2"
   if [ -n "${STUB_LOG_LEAK:-}" ] && [ "$2" = bw-fixture-bronzeward-a ]; then echo "BWSYNTH-pw-abcd1234-5678"; fi
   ;;
-inspect) case "$*" in *bw-dev-forward*) exit 1 ;; *State.Running*) if [ -n "${STUB_STOPPED:-}" ]; then echo false; else echo true; fi ;; *Networks*) echo "bw-fixture_default " ;; esac ;;
+inspect) case "$*" in *bw-fixture-claim*) echo "bw-fixture $STUB_OWNER" ;; *bw-dev-forward*) exit 1 ;; *State.Running*) if [ -n "${STUB_STOPPED:-}" ]; then echo false; else echo true; fi ;; *Networks*) echo "bw-fixture_default " ;; esac ;;
 esac
 EOF
 # inject and dev-idp log their calls; inject kill fails while STUB_KILL_FAIL is set, and inject
@@ -48,6 +51,8 @@ echo "dev-idp $*" >>"$STUB_LOG"
 EOF
 chmod +x "$t/bin/docker" "$repo/fixtures/bin/inject" "$repo/fixtures/dev-idp"
 export STUB_LOG=$t/calls
+STUB_OWNER=$(CDPATH='' cd -P -- "$repo/fixtures" && pwd -P)
+export STUB_OWNER
 
 fail=0
 ok() { echo "ok   $1"; }
@@ -120,6 +125,21 @@ if [ "$planted" = 4 ] && [ "$(controls)" = 0 ]; then
   ok "an interrupted scan removes its 4 controls (status $rc)"
 else bad "interrupt: planted=$planted left=$(controls) status=$rc"; fi
 
+# A grep that fails on the final filter, after the controls were found, with a hit to report.
+cat >"$t/bin/grep" <<EOF
+#!/usr/bin/env bash
+for a in "\$@"; do [ "\$a" = -vE ] && exit 2; done
+exec '$realgrep' "\$@"
+EOF
+chmod +x "$t/bin/grep"
+printf 'BWSYNTH-pw-abcd1234-5678\n' >"$repo/fixtures/.state/leak"
+out=$(run scan)
+rc=$?
+rm -f "$t/bin/grep" "$repo/fixtures/.state/leak"
+if [ "$rc" != 0 ] && [[ $out == *"cannot filter"* ]] && [ "$(controls)" = 0 ]; then
+  ok "a failed filter of the hits fails the scan"
+else bad "filter fails: rc=$rc: $out"; fi
+
 cfg=$repo/fixtures/.state/server/a/config.yaml
 setup() {
   echo participant >"$cfg"
@@ -159,7 +179,8 @@ if [ "$rc" != 0 ] && [[ $out == *"cannot start"* ]] && [ -f "$cfg.fixture" ]; th
   out=$(STUB_STOPPED=1 run stop)
   rc=$?
   calls=$(tr '\n' ';' <"$STUB_LOG")
-  if [ "$rc" = 0 ] && [ "$calls" = "inject start A;dev-idp down;" ] && [ ! -e "$cfg.fixture" ] && [ ! -e "$cfg.restart" ]; then
+  if [ "$rc" = 0 ] && [ "$calls" = "docker rm;docker network;inject start A;dev-idp down;" ] && [ ! -e "$cfg.fixture" ] &&
+    [ ! -e "$cfg.restart" ]; then
     ok "a failed start of A fails stop, and the next stop starts A"
   else bad "retry after a failed start: rc=$rc calls=$calls: $out"; fi
 else bad "start fails: rc=$rc: $out"; fi
@@ -169,8 +190,28 @@ out=$(run stop)
 rc=$?
 calls=$(tr '\n' ';' <"$STUB_LOG")
 if [ "$rc" = 0 ] && [ ! -e "$cfg.fixture" ] && [ "$(cat "$cfg")" = fixture ] &&
-  [ "$calls" = "inject kill A;inject start A;dev-idp down;" ] && [ ! -e "$repo/.dev/participants" ]; then
+  [ "$calls" = "docker rm;docker network;inject kill A;inject start A;dev-idp down;" ] && [ ! -e "$repo/.dev/participants" ]; then
   ok "stop puts A back on its configuration and restarts it, then removes the backup and the state"
 else bad "stop: rc=$rc calls=$calls: $out"; fi
+
+# Another checkout holds the fixture: its forwarder, A and provider are left alone.
+setup
+out=$(STUB_OWNER=/elsewhere/fixtures run stop)
+rc=$?
+calls=$(tr '\n' ';' <"$STUB_LOG")
+if [ "$rc" != 0 ] && [[ $out == *"belongs to the checkout at /elsewhere/fixtures"* ]] && [ -z "$calls" ] &&
+  [ -f "$cfg.fixture" ] && [ -d "$repo/.dev/participants" ]; then
+  ok "stop refuses a fixture another checkout holds, and touches nothing"
+else bad "foreign fixture: rc=$rc calls=$calls: $out"; fi
+
+# No session in this checkout: nothing is touched.
+setup
+rm -rf "$repo/.dev/participants" "$cfg.fixture"
+out=$(run stop)
+rc=$?
+calls=$(tr '\n' ';' <"$STUB_LOG")
+if [ "$rc" = 0 ] && [[ $out == *"nothing to stop"* ]] && [ -z "$calls" ]; then
+  ok "stop without a session in this checkout touches nothing"
+else bad "no session: rc=$rc calls=$calls: $out"; fi
 
 exit "$fail"
