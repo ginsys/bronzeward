@@ -559,9 +559,11 @@ func TestEventStreamKeepAlive(t *testing.T) {
 // newIdleTimer ticks once its interval passes, and again only after a rearm.
 func TestNewIdleTimer(t *testing.T) {
 	const d = 20 * time.Millisecond
+	// Read before the timer starts: time spent between the start and this read belongs to the first
+	// tick, so reading after it can measure two ticks in less than 2*d on a loaded host.
+	started := time.Now()
 	idle := newIdleTimer(d)
 	defer idle.stop()
-	started := time.Now()
 	for i := range 2 {
 		select {
 		case <-idle.c:
