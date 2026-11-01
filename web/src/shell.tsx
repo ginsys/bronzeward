@@ -228,6 +228,9 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
   const go = useCallback((to: string) => {
     if (leaving(writes, to)) move(to);
   }, [move, writes]);
+  const show = useCallback((to: string) => {
+    if (leaving(writes, to, true)) move(to);
+  }, [move, writes]);
   const [server, setServer] = useState<Load<Server>>({ kind: "loading" });
   const [identity, setIdentity] = useState<Load<Identity>>({ kind: "loading" });
   const [recovery, setRecovery] = useState<Load<Recovery>>({ kind: "loading" });
@@ -363,7 +366,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
         {recoveryMode && recovery.kind !== "loading" && <RecoveryRead res={recovery} />}
         {epochChanged && <Status testid="epoch-changed">{EPOCH_CHANGED}.</Status>}
         <Deprecations routes={notices} />
-        <WriteNotices go={go} />
+        <WriteNotices go={show} />
         {offline !== undefined && <Offline since={offline} readAt={reads.readAt} />}
         {id !== undefined && (
           <nav aria-label="Main">

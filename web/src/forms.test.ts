@@ -58,6 +58,17 @@ describe("the in-app leave guard (B11)", () => {
     expect(leaving(writes, "/machines")).toBe(false);
     expect(ask).toHaveBeenCalledWith(`Unknown whether this was saved. Key ${w.key}, POST /api/v1/clusters. To learn the outcome, read /clusters.\nLeave this page?`);
   });
+
+  test("a notice's own [Show current state] leaves without asking; any other move still asks", async () => {
+    const ask = vi.fn(() => false);
+    vi.stubGlobal("confirm", ask);
+    vi.stubGlobal("location", new URL("https://bw.invalid/clusters/new"));
+    const [writes] = await unknownWrite();
+    expect(leaving(writes, "/clusters", true)).toBe(true);
+    expect(ask).not.toHaveBeenCalled();
+    expect(leaving(writes, "/clusters")).toBe(false);
+    expect(ask).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("the forms", () => {
