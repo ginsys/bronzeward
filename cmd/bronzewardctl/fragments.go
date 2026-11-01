@@ -186,8 +186,8 @@ func (e *env) readMarks(docOnStdin bool) ([]string, error) {
 	s := bufio.NewScanner(in)
 	// The API sets no length on one mark, so a line may be as long as the body limit allows.
 	s.Buffer(nil, maxBody)
+	s.Split(markLines)
 	for s.Scan() {
-		// ScanLines already drops the carriage return of a CRLF end; one more belongs to the mark.
 		m := s.Text()
 		if m == "" {
 			break
@@ -198,4 +198,17 @@ func (e *env) readMarks(docOnStdin bool) ([]string, error) {
 		return nil, fmt.Errorf("reading marks: %w; nothing was sent", err)
 	}
 	return marks, nil
+}
+
+// markLines splits marks at a line feed and drops only the carriage return of a CRLF end. Any
+// other carriage return belongs to the mark, as a key may end in one: bufio.ScanLines also drops
+// one at the end of input.
+func markLines(data []byte, atEOF bool) (int, []byte, error) {
+	if i := bytes.IndexByte(data, '\n'); i >= 0 {
+		return i + 1, bytes.TrimSuffix(data[:i], []byte("\r")), nil
+	}
+	if atEOF && len(data) > 0 {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
 }

@@ -113,13 +113,22 @@ func TestLongMark(t *testing.T) {
 	}
 }
 
-// TestMarkCarriageReturn checks that a CRLF line end is dropped once: a carriage return before it
-// is part of the mark, as a key may end in one.
+// TestMarkCarriageReturn checks that only a CRLF line end is dropped: any other carriage return is
+// part of the mark, as a key may end in one, at the end of input too.
 func TestMarkCarriageReturn(t *testing.T) {
-	setStdin(t, "machine.nodeLabels.key\r\r\nmachine.files\r\n\n")
-	m, err := (&env{}).readMarks(false)
-	if err != nil || !slices.Equal(m, []string{"machine.nodeLabels.key\r", "machine.files"}) {
-		t.Errorf("%q, %v; want the key's own carriage return kept", m, err)
+	for _, c := range []struct {
+		in   string
+		want []string
+	}{
+		{"machine.nodeLabels.key\r\r\nmachine.files\r\n\n", []string{"machine.nodeLabels.key\r", "machine.files"}},
+		{"machine.files\r\nmachine.nodeLabels.key\r", []string{"machine.files", "machine.nodeLabels.key\r"}},
+		{"machine.files\r\n\r\nnot a mark\n", []string{"machine.files"}},
+	} {
+		setStdin(t, c.in)
+		m, err := (&env{}).readMarks(false)
+		if err != nil || !slices.Equal(m, c.want) {
+			t.Errorf("%q: %q, %v; want %q", c.in, m, err, c.want)
+		}
 	}
 }
 
