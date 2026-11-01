@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -603,6 +604,16 @@ func TestETagState(t *testing.T) {
 	if err := dropEarlier(&crossed); err != nil {
 		t.Fatal(err)
 	}
+	if et, _ := ETag(&x, "drf_BWSYNTH"); et != "" {
+		t.Errorf("a command crossing the epoch left %q", et)
+	}
+	if et, _ := ETag(&again, "drf_BWSYNTH-other"); et != `"BWSYNTH-etag-other"` {
+		t.Errorf("crossing the old server's epoch dropped the new server's: %q", et)
+	}
+	// Kept again at the context's own epoch, so only DropState can remove it.
+	if err := KeepETag(&x, "drf_BWSYNTH", `"BWSYNTH-etag"`); err != nil {
+		t.Fatal(err)
+	}
 	if err := DropState(x.Name, x.Server); err != nil {
 		t.Fatal(err)
 	}
@@ -611,6 +622,35 @@ func TestETagState(t *testing.T) {
 	}
 	if et, _ := ETag(&again, "drf_BWSYNTH-other"); et != `"BWSYNTH-etag-other"` {
 		t.Errorf("dropping the old server's entry dropped the new server's: %q", et)
+	}
+}
+
+// TestDeleteNotReplayedByTransport: Go's transport replays an http.NoBody request that carries
+// Idempotency-Key on a reused connection the server closed (Request.isReplayable). A body-less
+// DELETE must not be one, or that replay skips the recovery read before every repeat (§8.4 item 3).
+func TestDeleteNotReplayedByTransport(t *testing.T) {
+	var deletes atomic.Int32
+	f := &fake{epoch: "ep_BWSYNTH-1", post: func(_ int, w http.ResponseWriter, _ *http.Request) {
+		if deletes.Add(1) == 1 {
+			drop(w)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}}
+	c, _, _ := writeClient(t, f, "ep_BWSYNTH-1")
+	path := "/drafts/drf_BWSYNTH/profiles/workers"
+	w := &Write{Method: http.MethodDelete, Path: path, Check: "draft show", Read: func(*Client) (string, error) { return "BWSYNTH shows", nil }}
+	if _, err := c.Send(w); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"GET /api/v1/identity", "GET /api/v1/server", "DELETE /api/v1" + path, "GET /api/v1/recovery", "DELETE /api/v1" + path}
+	if got := f.requests(); !slices.Equal(got, want) {
+		t.Errorf("requests %v, want %v: a DELETE sent again with no recovery read is the transport's replay", got, want)
+	}
+	for _, r := range f.seen {
+		if r.Method == http.MethodDelete && (r.ContentLength != 0 || len(r.TransferEncoding) != 0 || r.Header.Get("Content-Type") != "") {
+			t.Errorf("a DELETE carried a body: length %d, encoding %v, type %q", r.ContentLength, r.TransferEncoding, r.Header.Get("Content-Type"))
+		}
 	}
 }
 
