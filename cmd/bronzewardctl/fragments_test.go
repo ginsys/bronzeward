@@ -74,7 +74,7 @@ func TestFragmentEditing(t *testing.T) {
 	step("marks with the document on standard input and no prompt", append(set, "--file", "-", "--marks", "--no-input"), 2, "",
 		"--marks reads from a prompt on a terminal or from standard input, and neither is free here; nothing was sent")
 	step("the document and the token both on standard input", append(set, "--file", "-", "--token-stdin"), 2, "",
-		"--file - and --token-stdin both read standard input")
+		"--file and --token-stdin read standard input, which only one of them can")
 	step("no --file", set, 2, "", "fragment set needs --draft, --layer and --file")
 	step("a document over 1 MiB", append(set, "--file", write("big", strings.Repeat("a", maxBody+1))), 1, "",
 		"the document is over the server's 1 MiB body limit; nothing was sent")
