@@ -1,16 +1,16 @@
 id: ETAG-01
-setup: a disposable deployment with mise run dev-bao's OpenBao as its provider; a draft with one fragment entry, written through the API as h-author; the fixture page signed in as h-author, the draft's page read (its ETag kept) and the entry edited
-action: another author (h-all) writes a second fragment entry to the draft through the API; then Save the edited entry
+setup: a disposable deployment with mise run dev-bao's OpenBao as its provider; a draft with one fragment entry, written through the API as h-author; two browsers on the draft's page, a second session of the same browser signed in as h-all and the first as h-author, each with the entry open and the same ETag kept
+action: the second browser edits the entry and saves; then the first edits it and saves
 exchange:
   - request: PUT /api/v1/drafts/<draft>/fragments/<name>
-    headers: ["Authorization: Bearer <token>", "Content-Type: application/json", "Idempotency-Key: <key>", "Bronzeward-Expected-Epoch: <epoch>", "If-Match: <the ETag the page read>"]
-fault: none; the other author's write moves the draft past the page's ETag
+    headers: ["Authorization: Bearer <token>", "Content-Type: application/json", "Idempotency-Key: <key>", "Bronzeward-Expected-Epoch: <epoch>", "If-Match: <the ETag both pages read>"]
+fault: none; the second browser's save moves the draft past the first's ETag
 expect:
-  server: 412 precondition-failed, nothing written
-  client: the write not resent; one read of the draft for the revision shown, its ETag not kept
-  shown: the conflict view with the draft's new revision; Show their change reads the draft again and shows the other entry; Copy my text into the new revision puts the operator's text back, and Save then writes it under the new ETag
+  server: the second browser's write saved; the first's answered 412 precondition-failed, nothing written
+  client: the first's write not resent; one read of the draft for the revision shown, its ETag not kept
+  shown: the conflict view with the draft's new revision and the other browser's text; Copy my text into the new revision puts the first browser's text back, and Save writes it under the new ETag, so nothing is lost
   absent: [token or document in the harness log, retained artifacts or browser storage]
 runs:
   web:
-    check: web/e2e/auth/drafts.e2e.ts, mise run browser-auth
+    check: web/e2e/auth/drafts.e2e.ts, mise run browser-auth; a deterministic variant moves the draft through the API instead of a second browser
     browsers: [chrome, edge, firefox, firefox-esr]
