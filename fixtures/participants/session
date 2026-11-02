@@ -170,15 +170,14 @@ net.createServer((c) => { const z = net.connect(8080, process.env.BW_IDP); c.pip
   c.on("error", () => z.destroy()); z.on("error", () => c.destroy()); }).listen(p, "127.0.0.1");' \
     >/dev/null || die "cannot start the issuer forwarder in $BW_A's network namespace"
   for _ in $(seq 20); do
-    if timeout -s KILL 30 docker exec "$fwd" node -e "$discovery_get" 2>/dev/null; then return 0; fi
+    if timeout 30 docker exec "$fwd" node -e "$discovery_get" 2>/dev/null; then return 0; fi
     sleep 1
   done
   die "A's namespace does not reach Zitadel's discovery document through the forwarder (docker logs $fwd)"
 }
 # discovery_get: node code that exits 0 if Zitadel's discovery document answers 200 on 127.0.0.1 at
 # the port in BW_PORT, the forwarder's. Without an answer within 5 s it exits 1, so that a forwarder
-# that accepts and never answers cannot hold a cleanup. The docker call around it is bounded too,
-# with KILL, because a cleanup's commands ignore TERM.
+# that accepts and never answers cannot hold a cleanup. The docker call around it is bounded too.
 discovery_get='const p = Number(process.env.BW_PORT);
   setTimeout(() => process.exit(1), 5000);
   require("http").get({ host: "127.0.0.1", port: p,
@@ -188,7 +187,7 @@ discovery_get='const p = Number(process.env.BW_PORT);
 # started before A's last start is in A's old namespace and still answers from there, so this asks
 # from a new container in A's current namespace.
 idp_reached() {
-  timeout -s KILL 60 docker run --rm --network "container:$BW_A" --user "$(id -u):$(id -g)" -e "BW_PORT=$BW_DEV_IDP_PORT" \
+  timeout 60 docker run --rm --network "container:$BW_A" --user "$(id -u):$(id -g)" -e "BW_PORT=$BW_DEV_IDP_PORT" \
     --entrypoint node "$ZITADEL_LOGIN_IMAGE" -e "$discovery_get" >/dev/null 2>&1
 }
 
@@ -395,10 +394,14 @@ prepare() { stage "$here/prepare" "$@"; }
 # Every paused instance is unpaused, whoever paused it: the scenarios' own restores (s2 pass, s3
 # pass) pause A, B and C too. The switch and the restart run in a subshell, because set_issuer and
 # forward_idp end the shell on a failure, and the message must still be printed. A second Ctrl-C
-# does not stop the cleanup: it ignores INT and TERM, and its commands inherit that.
+# ends the cleanup, for example on a Docker call that hangs, and says to recreate the fixture.
+cleanup_stopped() {
+  echo "the cleanup was interrupted; recreate the fixture" >&2
+  exit 130
+}
 handback() {
   local i c p
-  trap '' INT TERM
+  trap cleanup_stopped INT TERM
   echo "setup $task failed: A goes back on Zitadel" >&2
   for i in A B C; do
     c=BW_$i
@@ -594,9 +597,10 @@ t9_ids() {
 # Zitadel, so that the participant's server is never left stopped or unable to sign anyone in. A
 # start of A that failed or was interrupted can leave A running with no forwarder in its namespace.
 # Each repair runs in a subshell, because forward_idp ends the shell on a failure, and the message
-# to recreate the fixture must still be printed. As handback, it ignores a second Ctrl-C.
+# to recreate the fixture must still be printed. As in handback, a second Ctrl-C ends it with that
+# message.
 t9_clean() {
-  trap '' INT TERM
+  trap cleanup_stopped INT TERM
   if [ -n "$t9_reader" ]; then
     kill "$t9_reader" 2>/dev/null || true
     wait "$t9_reader" 2>/dev/null || true
