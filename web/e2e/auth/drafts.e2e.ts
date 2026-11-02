@@ -3,7 +3,9 @@
 // Discard draft, the unsaved guard, ETAG-01, AMB-02, AMB-06, a 422 with [Go to field], and the
 // fragment entry by keyboard only, the profile entry (pins moved by keyboard, ETAG-01, a 422
 // at its path) and the assignment entry (a layer's list moved by keyboard, ETAG-01, the composition
-// order). A document never crosses WebDriver, whose log the artifact scan
+// order, a 422 at the field for a fragment or a profile the draft removed). ETAG-01 on a fragment
+// also reads the entry back through the API after the 412: it still holds the first browser's text.
+// A document never crosses WebDriver, whose log the artifact scan
 // reads: the page fetches it from the synthetic provider inside a script, or the case writes it
 // through the API itself. Each document carries the run's canary (syntheticDocument), so the scan
 // finds one in any retained file; no case takes a screenshot or reads a document's text back. The
@@ -100,6 +102,16 @@ const holds = (label: string, b: B = browser, their = false) => b.execute((l: st
   const area = [...document.querySelectorAll("main section label")].find((x) => x.firstChild?.textContent?.startsWith(t ? "Their text" : "Document"))?.querySelector("textarea");
   return area?.value.includes(`example.test/${l}:`) ?? false;
 }, label, their);
+
+// Whether the document stored for fragment entry `name` of the draft holds the synthetic node label
+// `example.test/<label>: synthetic`, read through the API. It is compared here, so a failure prints
+// a boolean and never the document.
+async function storedHolds(draft: string, name: string, label: string): Promise<boolean> {
+  const entries = (await api("h-author", "GET", `/drafts/${draft}`)).body!["entries"] as { kind: string; name?: string; revision: string | null }[];
+  const revision = entries.find((e) => e.kind === "fragment" && e.name === name)?.revision;
+  expect(typeof revision).toBe("string");
+  return String((await api("h-author", "GET", `/fragment-revisions/${revision}`)).body!["document"]).includes(`example.test/${label}: synthetic`);
+}
 
 // Adds the synthetic node label `example.test/<label>: synthetic` next to the document's tier
 // label, at its indentation, as typing would: an edit that holds no value, made in the page so the
@@ -261,7 +273,10 @@ describe("the draft editor (#339)", () => {
       const puts = (await writes()).filter(([m]) => m === "PUT");
       expect(puts).toHaveLength(2);
       expect(puts[0]![2]).not.toBe(puts[1]![2]);
-      const now = (await api("h-author", "GET", `/drafts/${id}`)).body!["revision"] as number;
+      // The 412 lost nothing: the entry still holds the other browser's text, and not this one's.
+      expect(await storedHolds(id, name, "theirs")).toBe(true);
+      expect(await storedHolds(id, name, "mine")).toBe(false);
+      const now =(await api("h-author", "GET", `/drafts/${id}`)).body!["revision"] as number;
       await pane().$("button=Show their change").click();
       await expect($("main h2")).toHaveText(expect.stringContaining(`revision ${now}`), { wait: 20_000 });
       await browser.waitUntil(() => holds("theirs", browser, true), { timeout: 20_000, timeoutMsg: "the conflict view does not show the other browser's text" });
@@ -271,12 +286,7 @@ describe("the draft editor (#339)", () => {
       await expect(result()).toHaveText(expect.stringContaining(`Fragment ${name} saved in draft`), { wait: 30_000 });
       // The saved revision, read back through the API, holds this browser's text: the editor
       // already shows it, so the editor alone proves nothing.
-      const entries = (await api("h-author", "GET", `/drafts/${id}`)).body!["entries"] as { kind: string; name?: string; revision: string | null }[];
-      const revision = entries.find((e) => e.kind === "fragment" && e.name === name)?.revision;
-      expect(typeof revision).toBe("string");
-      // Compared here, so a failure prints a boolean and never the document.
-      const stored = String((await api("h-author", "GET", `/fragment-revisions/${revision}`)).body!["document"]).includes("example.test/mine: synthetic");
-      expect(stored).toBe(true);
+      expect(await storedHolds(id, name, "mine")).toBe(true);
       await browser.waitUntil(() => holds("mine"), { timeout: 20_000, timeoutMsg: "the saved revision lost this browser's text" });
       await other.execute(() => [localStorage.length, sessionStorage.length]).then((n) => expect(n).toEqual([0, 0]));
     } finally {
@@ -604,6 +614,47 @@ describe("the draft editor (#339)", () => {
       await asg().$("button=Save").click();
       await expect(asg().$('[data-testid="write-result"]')).toHaveText(expect.stringContaining("saved in draft"), { wait: 30_000 });
       expect(await storedFragments(first.id, m)).toEqual({ role: [b, a] });
+    });
+
+    // The assignment of `draft` for machine `m` names something the draft removed. Save is refused
+    // 422 at `where`: the text holds the rule and the path and no revision, and neither the draft nor
+    // the stored list moved.
+    const refusedAt = async (draft: string, m: string, where: string, revision: string) => {
+      const draftRevision = async () => (await api("h-author", "GET", `/drafts/${draft}`)).body!["revision"] as number;
+      const before = await draftRevision();
+      const stored = await storedFragments(draft, m);
+      await openAssignment(draft, 1);
+      await faults({ upstream: at });
+      await asg().$("button=Save").click();
+      const refused = asg().$('[data-testid="write-result"]');
+      await expect(refused).toHaveText(expect.stringContaining("validation-failed"), { wait: 30_000 });
+      await expect(asg().$('[data-testid="write-where"]')).toHaveText(`At ${where}.`);
+      expect(await refused.getText()).not.toContain(revision);
+      expect(await draftRevision()).toBe(before);
+      expect(await storedFragments(draft, m)).toEqual(stored);
+    };
+
+    it("an assignment that names a fragment the draft removed is refused 422 at the field, and nothing stored moves", async () => {
+      const a = `ag-${hex()}`;
+      const m = await machine();
+      const seed = await seeded(a);
+      const saved = await api("h-author", "PUT", `/drafts/${seed.id}/assignments/${m}`, { profiles: [], fragments: { role: [a] } }, seed.etag);
+      expect(saved.status).toBe(200);
+      expect((await api("h-author", "DELETE", `/drafts/${seed.id}/fragments/${a}`, undefined, saved.etag)).status).toBe(200);
+      await refusedAt(seed.id, m, "fragments.role[0]", seed.revision);
+    });
+
+    it("an assignment that names a profile the draft removed is refused 422 at the field, and nothing stored moves", async () => {
+      const a = `ah-${hex()}`;
+      const p = `asgrm-${hex()}`;
+      const m = await machine();
+      const seed = await seeded(a);
+      const profile = await api("h-author", "PUT", `/drafts/${seed.id}/profiles/${p}`, { fragments: [seed.revision] }, seed.etag);
+      expect(profile.status).toBe(200);
+      const saved = await api("h-author", "PUT", `/drafts/${seed.id}/assignments/${m}`, { profiles: [p], fragments: { role: [a] } }, profile.etag);
+      expect(saved.status).toBe(200);
+      expect((await api("h-author", "DELETE", `/drafts/${seed.id}/profiles/${p}`, undefined, saved.etag)).status).toBe(200);
+      await refusedAt(seed.id, m, "profiles[0]", seed.revision);
     });
 
     it("Show composition and references lists a profile's pin before the assignment's fragment of its layer, and no document", async () => {
