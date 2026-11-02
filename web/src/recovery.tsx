@@ -243,16 +243,19 @@ export function RecoveryConsole() {
   // A refresh asked for (n, or the shell's) cancels the schedule and reads once the read in flight
   // has settled: `flight` chains the reads, and a refresh superseded while it waits reads nothing.
   const flight = useRef<Promise<unknown>>(Promise.resolve());
+  // Whether the console shows an answer now: only then does a read without answer keep it under the
+  // offline banner. The first read failing shows the disconnected state instead of loading for good.
+  const shown = useRef(false);
   useEffect(() => {
     let live = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     // A read that rejects (a credential renewal that threw) is a read without answer: the next one
     // is still scheduled, and the chain never rejects.
-    const run = flight.current.then(() => (live ? settled<Recovery>("/recovery", () => live) : undefined)).catch(() => undefined);
+    const run = flight.current.then(() => (live ? settled<Recovery>("/recovery", () => live, () => shown.current) : undefined)).catch(() => undefined);
     flight.current = run;
     void run.then((res) => {
       if (!live) return;
-      if (res !== undefined) put(res);
+      if (res !== undefined) (shown.current = res.kind === "ok", put(res));
       timer = setTimeout(() => again((i) => i + 1), REREAD_MS);
     });
     return () => {

@@ -183,16 +183,16 @@ export function useItem<T>(path: string, keep?: Keep, n = 0): Load<T> {
 // the credentials ends the page, the process's refusal shows the state before the entry, and a read
 // without answer shows the offline banner, the view's own text kept (ginsys/bronzeward#517 H11). It
 // answers the read's result while `live` and not invalidated by the shell; otherwise undefined.
-export async function settledRead<T>(reads: Pick<Reads, "client" | "settle" | "undropped">, path: string, live: () => boolean = () => true): Promise<Load<T> | undefined> {
+export async function settledRead<T>(reads: Pick<Reads, "client" | "settle" | "undropped">, path: string, live: () => boolean = () => true, held: () => boolean = () => true): Promise<Load<T> | undefined> {
   const ok = reads.undropped();
   const res = await reads.client.read<T>(path);
   let out: Load<T> | undefined;
-  reads.settle(res, (r) => void (out = r), () => live() && ok(), () => true);
+  reads.settle(res, (r) => void (out = r), () => live() && ok(), held);
   return out;
 }
 export function useSettled() {
   const { client, settle, undropped } = useReads();
-  return useCallback(<T,>(path: string, live?: () => boolean) => settledRead<T>({ client, settle, undropped }, path, live), [client, settle, undropped]);
+  return useCallback(<T,>(path: string, live?: () => boolean, held?: () => boolean) => settledRead<T>({ client, settle, undropped }, path, live, held), [client, settle, undropped]);
 }
 
 // mch_k2pq…a7xz: the prefix and the first and last four characters; the whole in the title.
