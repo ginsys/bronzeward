@@ -315,6 +315,9 @@ describe("the draft editor (#339)", () => {
     await expect(result()).toHaveText(expect.stringContaining("the first request with this key is still ingesting (ingestion ing_"), { wait: 30_000 });
     await expect(result()).toHaveText(expect.stringContaining(`${REPLAYED} Fragment ${name} saved in draft`), { wait: 60_000 });
     await oneWrite(3, true);
+    // The drop showed the unknown notice, so it shows the replayed result until dismissed (B11).
+    expect(await notice().getText()).toContain(`${REPLAYED} Saved (the server answered 200).`);
+    await notice().parentElement().$("button=Dismiss").click();
     expect(await notice().isExisting()).toBe(false);
   });
 
