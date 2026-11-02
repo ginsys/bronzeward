@@ -30,6 +30,10 @@ type Client struct {
 	service string  // the automation principal GET /identity served, once read
 	warned  map[string]bool
 
+	// Revision is the API revision the latest GET /server showed: a read can refresh it after a new
+	// epoch, so a caller that gates on it reads it where it needs it (§7 item 1).
+	Revision int
+
 	// crossed: an answer showed a new epoch, so the context's kept ETags are dropped (§8.5 item 1).
 	changed, newEpoch, recovery, crossed bool
 }
@@ -114,6 +118,7 @@ func (c *Client) Server() (*Response, *apitypes.ServerBody, error) {
 	if err := json.Unmarshal(r.Body, &s); err != nil {
 		return nil, nil, c.Context.fail(fmt.Errorf("GET /server: %w", err))
 	}
+	c.Revision = s.ApiRevision
 	c.setStartMode(string(s.StartMode))
 	if m := int(s.MaxTokenLifetimeSeconds); m != c.Context.MaxTokenLifetimeSeconds {
 		c.Context.MaxTokenLifetimeSeconds, c.changed = m, true

@@ -33,6 +33,7 @@
     - "POST /api/v1/recovery/entries, headers: Idempotency-Key; no Bronzeward-Expected-Epoch"
     - GET /api/v1/recovery, the confirming read
     - POST /api/v1/recovery/entries, the same key
+    - GET /api/v1/server, after the entry committed
   fault: (a) the first POST reaches the server, which commits it; the injector drops its 201
   expect:
     client: repeats with the same key and no epoch check; shows the replayed result as its own; keeps the minted epoch and a recovery start; does not set the entry aside

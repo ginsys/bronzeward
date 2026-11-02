@@ -127,7 +127,7 @@ func TestRecovery(t *testing.T) {
 	if posts.expected[0] != "" {
 		t.Errorf("REC-04: the entry was sent with Bronzeward-Expected-Epoch %q", posts.expected[0])
 	}
-	if want := []string{"GET /api/v1/server", "POST /api/v1/recovery/entries", "GET /api/v1/recovery", "POST /api/v1/recovery/entries"}; !slices.Equal(in.requests(), want) {
+	if want := []string{"GET /api/v1/server", "POST /api/v1/recovery/entries", "GET /api/v1/recovery", "POST /api/v1/recovery/entries", "GET /api/v1/server"}; !slices.Equal(in.requests(), want) {
 		t.Errorf("REC-04: the injector saw %v, want %v", in.requests(), want)
 	}
 	if c := contexts(); minted == previous || !strings.Contains(c, `"lastEpoch":"`+minted+`"`) || !strings.Contains(c, `"startMode":"recovery"`) {

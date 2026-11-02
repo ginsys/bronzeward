@@ -720,7 +720,9 @@ contract's, and this specification does not close it.
    A1), epoch and the `If-Match` value it sent, if any, and what to read to find
    out. An ETag is not secret. An operator may then repeat with `--idempotency-key <key>
    --expect-epoch <epoch> --expect-principal <principal>`, plus `--if-match <etag>` where the
-   route takes one, all as printed. The client refuses, sending nothing, when one of them is
+   route takes one, all as printed. The recovery entry is the exception: its block prints no
+   epoch, and its repeat takes only `--idempotency-key <key> --expect-principal <principal>`
+   (the exception of item 3 above). The client refuses, sending nothing, when one of them is
    missing or, for a human, when its token's `iss` and `sub` are not the printed ones. An automation
    client first sends item 3's identity read and refuses when that `principal` is not the printed
    one. Otherwise it refuses after sending only item 3's reads (that identity read, for

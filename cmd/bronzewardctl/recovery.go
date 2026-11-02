@@ -32,7 +32,7 @@ func (e *env) recoveryStatus(args []string) error {
 	if _, err := e.parse("recovery status", args, 0, nil); err != nil {
 		return err
 	}
-	return e.session(func(c *client.Client, _ *client.Response, srv *apitypes.ServerBody) error {
+	return e.session(func(c *client.Client, _ *client.Response, _ *apitypes.ServerBody) error {
 		r, err := c.Get("/recovery")
 		if err != nil {
 			return err
@@ -53,7 +53,7 @@ func (e *env) recoveryStatus(args []string) error {
 			if e.output == "json" || e.output == "yaml" {
 				continue // those formats print the answer as it came and need no next step
 			}
-			rows = append(rows, client.Printable(s.Machine)+"\t"+client.Printable(string(s.State))+"\t"+nextStep(c, s, srv.ApiRevision))
+			rows = append(rows, client.Printable(s.Machine)+"\t"+client.Printable(string(s.State))+"\t"+nextStep(c, s, c.Revision))
 		}
 		if now := c.Context.LastEpoch; now != "" && now != rec.Epoch {
 			// A next-step read saw a new entry: the snapshot above is stale and could advise a release
