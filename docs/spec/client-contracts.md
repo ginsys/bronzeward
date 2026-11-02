@@ -1443,7 +1443,9 @@ The review is served to any human `author`, not only the one who started the ing
    process inherited as ignored (`nohup`) stays ignored and is not taken. This holds when the
    terminal has stopped taking output and a write is waiting: the pager stops waiting for that
    write on the signal, restores line mode, tries once, for a fraction of a second, to leave the
-   alternate screen, and ends the process by the signal. On a resize
+   alternate screen, and ends the process by the signal. If the pager ends by its quit key and
+   the terminal does not take the bytes that leave the alternate screen in that time, the
+   command fails with an error and starts no marks prompt. On a resize
    (SIGWINCH) it reads the new size: with the same width the page stays where it is, and with
    another width the text is wrapped again and the page starts at the same source line. A size
    below the smallest the pager takes shows a "Window too small" notice instead of the page,

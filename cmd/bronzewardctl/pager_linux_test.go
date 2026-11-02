@@ -414,7 +414,7 @@ func blockedWrite(t *testing.T, sig syscall.Signal, resume bool) {
 		}
 	}()
 	<-flood
-	outputFull(t, ctl)
+	outputFull(t, ctl, 1)
 	select {
 	case <-exited:
 		t.Fatalf("the process ended before the signal: %v", cmd.ProcessState)
@@ -447,12 +447,42 @@ func blockedWrite(t *testing.T, sig syscall.Signal, resume bool) {
 	}
 }
 
+// TestPagerQuitBlockedExit: the quit key while the terminal takes no output leaves the pager
+// unable to write the bytes that leave the alternate screen. The pager returns that failure
+// instead of nil, so the review does not go on as if the screen were back.
+func TestPagerQuitBlockedExit(t *testing.T) {
+	ctl, out := onPty(t, 24, 80)
+	s := watchScreen(ctl)
+	errc := make(chan error, 1)
+	go func() { errc <- (&env{}).pager(out, reviewLines(), 24, 80) }()
+	if s.count("space or f forward", 1) == 0 {
+		t.Fatalf("the pager showed no key line: %q", s.text())
+	}
+	s.hold.Store(true)
+	t.Cleanup(func() { s.hold.Store(false) })
+	outputFull(t, ctl, 4096)
+	ctl.WriteString("q")
+	select {
+	case err := <-errc:
+		if !errors.Is(err, errBlocked) {
+			t.Errorf("the pager returned %v; want the blocked exit write", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the pager did not return")
+	}
+	if !lineMode(t, ctl) {
+		t.Error("the terminal is still raw")
+	}
+}
+
 // outputFull waits up to 10 s for the terminal of ctl to take no more output, so that every write
-// to it waits, the pager's as well. The proof is a write of one byte to the terminal that does not
-// wait: the kernel refuses it with EAGAIN once the terminal's output is full. Reading /proc for
-// the process's own write needs ptrace access, which a CI container does not give. A refused
-// byte is not written; one taken before the output is full is a NUL, which no check here counts.
-func outputFull(t *testing.T, ctl *os.File) {
+// to it waits, the pager's as well. The proof is a write of size bytes to the terminal that does
+// not wait: the kernel refuses it with EAGAIN once the terminal's output is full. A size of 1
+// leaves the filling to the pager's own pages; a larger size fills the output from here. Reading
+// /proc for the process's own write needs ptrace access, which a CI container does not give. A
+// refused byte is not written; one taken before the output is full is a NUL, which no check here
+// counts.
+func outputFull(t *testing.T, ctl *os.File, size int) {
 	t.Helper()
 	peer, _, errno := syscall.Syscall(syscall.SYS_IOCTL, ctl.Fd(), unix.TIOCGPTPEER, uintptr(unix.O_RDWR|unix.O_NOCTTY|unix.O_NONBLOCK|unix.O_CLOEXEC))
 	if errno != 0 {
@@ -460,7 +490,7 @@ func outputFull(t *testing.T, ctl *os.File) {
 	}
 	defer unix.Close(int(peer))
 	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
-		if _, err := unix.Write(int(peer), []byte{0}); errors.Is(err, unix.EAGAIN) {
+		if _, err := unix.Write(int(peer), make([]byte, size)); errors.Is(err, unix.EAGAIN) {
 			return
 		} else if err != nil {
 			t.Fatalf("writing to the terminal: %v", err)
