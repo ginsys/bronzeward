@@ -176,8 +176,10 @@ net.createServer((c) => { const z = net.connect(8080, process.env.BW_IDP); c.pip
   die "A's namespace does not reach Zitadel's discovery document through the forwarder (docker logs $fwd)"
 }
 # discovery_get: node code that exits 0 if Zitadel's discovery document answers 200 on 127.0.0.1 at
-# the port in BW_PORT, the forwarder's.
+# the port in BW_PORT, the forwarder's. Without an answer within 5 s it exits 1, so that a forwarder
+# that accepts and never answers cannot hold a cleanup.
 discovery_get='const p = Number(process.env.BW_PORT);
+  setTimeout(() => process.exit(1), 5000);
   require("http").get({ host: "127.0.0.1", port: p,
   path: "/.well-known/openid-configuration", headers: { Host: "localhost:" + p } },
   (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on("error", () => process.exit(1))'
@@ -390,17 +392,21 @@ prepare() { stage "$here/prepare" "$@"; }
 # on Zitadel; the seconds it took, for the README's timings. A setup that fails or is interrupted
 # still hands A back on Zitadel, so that the task before can go on and the setup can run again.
 # Every paused instance is unpaused, whoever paused it: the scenarios' own restores (s2 pass, s3
-# pass) pause A, B and C too. restart_a runs in a subshell, because its forward_idp ends the shell
-# on a failure, and this message must still be printed.
+# pass) pause A, B and C too. The switch and the restart run in a subshell, because set_issuer and
+# forward_idp end the shell on a failure, and the message must still be printed.
 handback() {
-  local i c
+  local i c p
   echo "setup $task failed: A goes back on Zitadel" >&2
   for i in A B C; do
     c=BW_$i
-    [ "$(docker inspect --type container --format '{{.State.Paused}}' "${!c}" 2>/dev/null)" = true ] || continue
+    if ! p=$(docker inspect --type container --format '{{.State.Paused}}' "${!c}" 2>/dev/null); then
+      echo "$i could not be inspected, so it may still be paused; recreate the fixture" >&2
+      continue
+    fi
+    [ "$p" = true ] || continue
     "$bin/inject" unpause "$i" >>"$log" 2>&1 || echo "$i could not be unpaused; recreate the fixture" >&2
   done
-  set_issuer zitadel && (restart_a) >>"$log" 2>&1 || echo "A could not be handed back on Zitadel; recreate the fixture" >&2
+  (set_issuer zitadel && restart_a) >>"$log" 2>&1 || echo "A could not be handed back on Zitadel; recreate the fixture" >&2
 }
 setup() {
   local t0=$SECONDS
@@ -417,14 +423,15 @@ setup() {
   echo "setup $task: $((SECONDS - t0)) s"
 }
 
-# setup_t3: p-base is taken only while nothing is registered. A rerun after a partial s1 register
-# goes back to the p-base taken before it, so that t4 never restores a registered cluster.
+# setup_t3: a p-base that exists is restored, never taken again, and a new one is taken only while
+# nothing is registered. A rerun after a partial s1 register, or after a restore that stopped
+# halfway, goes back to the first p-base, so that t4 never restores a registered cluster.
 setup_t3() {
   [ -s "$STATE/automation-token" ] || stage "$bin/seed"
-  if [ "$(sql 'SELECT (SELECT count(*) FROM cluster) + (SELECT count(*) FROM machine)')" = 0 ]; then
-    snap base
-  elif [ -s "$STATE/backups/pg-p-base.dump" ] && [ -s "$STATE/backups/bao-p-base.snap" ]; then
+  if [ -s "$STATE/backups/pg-p-base.dump" ] && [ -s "$STATE/backups/bao-p-base.snap" ]; then
     restore base
+  elif [ "$(sql 'SELECT (SELECT count(*) FROM cluster) + (SELECT count(*) FROM machine)')" = 0 ]; then
+    snap base
   else
     die "setup t3: a cluster or a machine is registered, and there is no p-base snapshot to go back to; recreate the fixture"
   fi
