@@ -186,7 +186,9 @@ automatic overwrite.
 [Revert to base] puts the base revision's text in the editor, not saved. Save then writes it as
 a new revision of the entry, and the entry stays in the draft. (2026-11-01, lead ruling: no route
 drops a draft entry; Revert to base restores the base text for saving, and the saved entry is a
-new revision whose content equals the base)
+new revision whose content equals the base). After a `412`, [Revert to base] waits until
+[Show their change] put their text in the editor: until then the editor holds the operator's text
+that the conflict keeps.
 
 ## W5. Protected import review
 
