@@ -34,8 +34,9 @@ export const QUIET_MS = 100;
 // behind an in-app move or not. For two more quiet periods, the first move that lands where that
 // traversal lands is taken for it: it moves no page and asks nothing, and the history returns again,
 // without arming another marker. Position cannot tell that traversal from the operator's own move to
-// the same entry, so the marker is short; a slower one, or an own move of the same distance in that
-// time, reaches the leave question like any move.
+// the same entry, so the marker is short. An own move of the same distance in that time is taken for
+// it too: nothing is asked and the history returns to the shown page. After the marker expires, a
+// move reaches the leave question like any other.
 export function positions(h: Entries, here: () => string, later: (f: () => void) => void = (f) => void setTimeout(f, QUIET_MS)) {
   // The position of the entry the history is at, as the page last saw it.
   let current = position(h.state) ?? 0;
