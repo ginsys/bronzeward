@@ -235,7 +235,15 @@ describe("[Go to field] positions (B13)", () => {
         "- &e a: !bwref |-\n   x/foo\n",
         "a:\n  - &e !bwref |-\n    x/foo\n",
       ]) expect(references(one)).toEqual(["x/foo"]);
-      for (const none of ["- - &e !bwref |-\n  x/foo\n", "- &e a: !bwref |-\n  x/foo\n"]) expect(references(none)).toEqual([]);
+      // `&e:` is an anchored empty key (the anchor ends before the colon), so the content must pass
+      // the key's column: go-yaml refuses the first two and accepts the last two.
+      for (const none of [
+        "- - &e !bwref |-\n  x/foo\n",
+        "- &e a: !bwref |-\n  x/foo\n",
+        "- &e: !bwref |-\n  x/foo\n",
+        "- - &e: !bwref |-\n    x/foo\n",
+      ]) expect(references(none)).toEqual([]);
+      for (const one of ["- &e: !bwref |-\n   x/foo\n", "- - &e: !bwref |-\n     x/foo\n"]) expect(references(one)).toEqual(["x/foo"]);
       // The key's column binds a block scalar's content only. A plain scalar's next line is read as
       // before: go-yaml refuses the first (could not find expected ':') and folds the second into
       // "x/foo y", so neither names a reference.
