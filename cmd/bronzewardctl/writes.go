@@ -227,11 +227,12 @@ func (e *env) machineAdd(args []string) error {
 		if err := json.Unmarshal(r.Body, &m); err != nil {
 			return nil, err
 		}
-		// The cluster's name is shown when its read succeeds; the write is done either way.
+		// The cluster's name is shown when its read succeeds and carries the epoch of the write's
+		// answer; the write is done either way (client-contracts.md section 8.5).
 		cluster := m.Cluster
-		if r, err := c.Get("/clusters/" + url.PathEscape(m.Cluster)); err == nil {
+		if cr, err := c.Get("/clusters/" + url.PathEscape(m.Cluster)); err == nil && cr.Header.Get("Bronzeward-Epoch") == r.Header.Get("Bronzeward-Epoch") {
 			var x apitypes.ClusterBody
-			if json.Unmarshal(r.Body, &x) == nil {
+			if json.Unmarshal(cr.Body, &x) == nil {
 				cluster += " (" + x.Name + ")"
 			}
 		}

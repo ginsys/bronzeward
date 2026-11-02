@@ -134,7 +134,7 @@ func (e *env) profileSet(args []string) error {
 // revision in the draft's cluster. The server stays authoritative and refuses a pin it does not
 // accept.
 func pins(c *client.Client, draft string, names []string) ([]string, error) {
-	d, err := readDraft(c, draft)
+	d, first, err := readDraft(c, draft)
 	if err != nil {
 		return nil, err
 	}
@@ -166,6 +166,13 @@ func pins(c *client.Client, draft string, names []string) ([]string, error) {
 		case heads == nil:
 			if heads, err = fragmentHeads(c, d.Cluster); err != nil {
 				return nil, err
+			}
+			// The pins come from two reads. The draft answer's own epoch is the baseline: the client's
+			// last one can already be newer (client-contracts.md section 8.5).
+			if now := c.Context.LastEpoch; first != "" && now != "" && now != first {
+				return nil, ef("%s: the epoch changed from %s to %s while draft %s and the fragment heads were read; nothing was sent. "+
+					"Read the draft again with: draft show %s, then run this command again",
+					c.Context.Where(), client.ShellWord(first), client.ShellWord(now), d.Id, client.ShellWord(draft))
 			}
 		}
 		if heads[n] == nil {
@@ -276,7 +283,7 @@ func (e *env) sourceRm(kind apitypes.SourceEntryKind, args []string) error {
 // name, or of the draft itself when kind is "".
 func entryRead(draft string, kind apitypes.SourceEntryKind, name string) func(*client.Client) (string, error) {
 	return func(c *client.Client) (string, error) {
-		d, err := readDraft(c, draft)
+		d, _, err := readDraft(c, draft)
 		if err != nil {
 			return "", err
 		}
@@ -297,16 +304,17 @@ func entryRead(draft string, kind apitypes.SourceEntryKind, name string) func(*c
 	}
 }
 
-func readDraft(c *client.Client, draft string) (*apitypes.DraftBody, error) {
+// readDraft reads a draft and returns it with the epoch its answer carried.
+func readDraft(c *client.Client, draft string) (*apitypes.DraftBody, string, error) {
 	r, err := c.Get("/drafts/" + url.PathEscape(draft))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	var d apitypes.DraftBody
 	if err := json.Unmarshal(r.Body, &d); err != nil {
-		return nil, ef("GET /api/v1/drafts/%s cannot be read: %w", url.PathEscape(draft), err)
+		return nil, "", ef("GET /api/v1/drafts/%s cannot be read: %w", url.PathEscape(draft), err)
 	}
-	return &d, nil
+	return &d, r.Header.Get("Bronzeward-Epoch"), nil
 }
 
 // keep keeps etag as the draft's last-seen ETag, "" forgetting it (T11). A failure is shown: the

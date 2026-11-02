@@ -24,6 +24,9 @@ type publishFake struct {
 	bare         bool
 	pagesRefused bool
 	replaced     bool
+	// machineEpoch, when not empty, is the epoch the machine answers carry: the epoch moved after
+	// the release was read.
+	machineEpoch string
 }
 
 const (
@@ -36,7 +39,7 @@ const (
 func (f *publishFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1")
 	f.mu.Lock()
-	state, first, bare, pagesRefused := f.state, f.first, f.bare, f.pagesRefused
+	state, first, bare, pagesRefused, machineEpoch := f.state, f.first, f.bare, f.pagesRefused, f.machineEpoch
 	desiredA, desiredB := `"rel_BWSYNTH"`, `"rel_BWSYNTH"`
 	if f.replaced {
 		desiredA, desiredB = `"rel_BWSYNTH-new"`, `null`
@@ -52,6 +55,9 @@ func (f *publishFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		problem = "{\"type\":\"urn:bronzeward:problem:validation-failed\",\"title\":\"BWSYNTH\u009b2J\",\"status\":422}" // a raw C1 CSI
 	}
 	w.Header().Set("Bronzeward-Epoch", "ep_BWSYNTH-1")
+	if machineEpoch != "" && strings.HasPrefix(path, "/machines/") {
+		w.Header().Set("Bronzeward-Epoch", machineEpoch)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	switch {
 	case r.Method == http.MethodPost && path == "/drafts/drf_BWSYNTH/publications":
@@ -189,4 +195,16 @@ func TestPublication(t *testing.T) {
 			"Provenance covers secret references only; other fields are not traced.\n", "", "\x1b")
 	step("provenance with none", []string{"release", "provenance", "rel_BWSYNTH", "mch_b"}, 0,
 		"Provenance covers secret references only; other fields are not traced.", "", "registry")
+
+	// The epoch moves after the release was read: the machines' answers are of another snapshot, so no
+	// next step is shown (client-contracts.md section 8.5). The publication itself succeeded.
+	f.mu.Lock()
+	f.replaced, f.machineEpoch = false, "ep_BWSYNTH-2"
+	f.mu.Unlock()
+	step("draft show before the moved publish", []string{"draft", "show", "drf_BWSYNTH"}, 0, "drf_BWSYNTH", "")
+	step("an epoch change between the release and a machine shows no next step", pub, 0,
+		"Publication succeeded: release rel_BWSYNTH was published for 2 machines. Nothing has been sent to any machine.\n"+
+			"  The epoch changed from 'ep_BWSYNTH-1' to 'ep_BWSYNTH-2' while the machines were read, so no next step is shown. Read them again with: release show 'rel_BWSYNTH'\n"+
+			"Review a machine's rendered configuration: bronzewardctl release review rel_BWSYNTH <machine>\n",
+		"", "plan an", "hand it over", "is now Desired", "no Desired")
 }
