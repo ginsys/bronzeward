@@ -318,6 +318,24 @@ describe("the confirming read's credential refusals (§8.2)", () => {
     expect(writesSent()).toEqual([]);
   });
 
+  test("§8.4 item 2: an answer whose status is outside 100-599 is no answer: repeated under the key, then unknown, never not saved", async () => {
+    const keys: string[] = [];
+    const writes = new Writes(() => PRINCIPAL, async () => {});
+    writes.client = {
+      currentEpoch: EPOCH,
+      attempt: async (_m: string, path: string, h: Record<string, string>) => {
+        if (path === "/recovery") return { status: 200, headers: new Headers({ "Bronzeward-Epoch": EPOCH }), data: {} };
+        keys.push(h["Idempotency-Key"]!);
+        // A status line cut off over plain HTTP, as a browser reads it (fixtures/webhost).
+        return { status: 5, headers: new Headers(), data: null };
+      },
+    } as unknown as Client;
+    const w = spec();
+    expect(await writes.submit(w)).toMatchObject({ kind: "unknown" });
+    expect(keys).toEqual([w.key, w.key, w.key, w.key]);
+    expect(w.ambiguous).toBe(true);
+  });
+
   // A client whose write answers come with the ending its epoch read met (request.ts learnEpoch).
   const ending = { kind: "revoked" as const, problem: { type: "urn:bronzeward:problem:identity-revoked", title: "Identity revoked", status: 403 } };
   function ended(answer: Attempt | undefined) {

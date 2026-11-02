@@ -299,8 +299,9 @@ export class Writes {
         return n > 0 || again ? aside(why) : { kind: "not-done", why, problem: null };
       }
       // No complete answer, a redirect the browser refused included: some byte may have gone out
-      // (§8.4 item 2, TLS-03).
-      if (a === undefined) {
+      // (§8.4 item 2, TLS-03). A status outside 100-599 is no HTTP answer either: a browser reads a
+      // status line cut off by a close as a whole answer over plain HTTP.
+      if (a === undefined || a.status < 100 || a.status > 599) {
         last = undefined;
         lastProblem = null;
         doubt();
