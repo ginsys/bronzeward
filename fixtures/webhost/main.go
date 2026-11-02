@@ -10,6 +10,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -87,15 +88,20 @@ func handler(c config) (http.Handler, error) {
 	proxy := httputil.NewSingleHostReverseProxy(upstream)
 	// An upstream that closes the connection without an answer (the browser cases' injected drop)
 	// closes the browser's connection too, so the page meets a transport failure, not a 502. It
-	// closes with a TCP reset and writes nothing. A browser may send a request again by itself when
-	// a connection closes cleanly before any answer (Firefox does, even on a new connection). Every
-	// browser reads a status line cut off before the close as a whole answer over plain HTTP. A
-	// reset on a connection never reused is a network error in all of them.
+	// writes an interim 100 Continue, then closes with a TCP reset. A browser may send a request
+	// again by itself when a connection closes before any byte of an answer: Firefox does on a clean
+	// close, even on a new connection, and on a reset once the connection is about a second old (a
+	// held answer). An interim answer is a received byte that every browser reads past, so none
+	// sends again. Every browser reads a status line cut off before the close as a whole answer over
+	// plain HTTP, so nothing of a final answer is written.
 	proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, _ error) {
 		conn, _, err := http.NewResponseController(w).Hijack()
 		if err != nil {
 			panic(http.ErrAbortHandler)
 		}
+		_, _ = io.WriteString(conn, "HTTP/1.1 100 Continue\r\n\r\n")
+		// The reset discards what the browser has not yet read: it reads the interim answer first.
+		time.Sleep(200 * time.Millisecond)
 		if tcp, ok := conn.(*net.TCPConn); ok {
 			_ = tcp.SetLinger(0)
 		}
