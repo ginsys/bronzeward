@@ -2,8 +2,8 @@ import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { components } from "./api/v1";
-import { afterRead, change, createdId, doneOnce, EMPTY, FragmentPane, follow, forgetETag, type Held, holdsUnsaved, keepETag, keepOnDone, keptETag, LAYERS, markLine, mayDrop, NOT_RENDERED, where } from "./drafts.tsx";
-import { leaving, unsaved, WritesProvider } from "./forms.tsx";
+import { afterRead, change, createdId, doneOnce, EMPTY, FragmentPane, follow, forgetETag, type Held, holdsUnsaved, keepETag, keepOnDone, keptETag, LAYERS, markLine, mayDrop, NOT_RENDERED, rows, shown, where } from "./drafts.tsx";
+import { leaving, startsNew, unsaved, WritesProvider } from "./forms.tsx";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import { references, spotOfLine, spotOfPath, spotOfReference } from "./position.ts";
 import { ShellContext } from "./shell.tsx";
@@ -99,6 +99,21 @@ describe("[Go to field] positions (B13)", () => {
     expect(spotOfReference(text, "after-quote")).toBeUndefined();
   });
 
+  test("an apostrophe inside a plain scalar opens no quote, and '' stays inside a single-quoted one", () => {
+    const text = "a: can't # !bwref ghost\nb: 'it''s # x' # !bwref ghost\nc: !bwref ghost\n";
+    expect(references(text)).toEqual(["ghost"]);
+    const s = spotOfReference(text, "ghost");
+    expect(s!.start).toBe(text.indexOf("c: ") + 3);
+  });
+
+  test("a mapping key matches by its text, as the server reads it: 01 is not 1", async () => {
+    const text = "m:\n  01: first\n  1: second\n";
+    const s = await spotOfPath(text, "doc[0]/m/1");
+    expect(text.slice(s!.start, s!.end)).toBe("second");
+    const z = await spotOfPath(text, "doc[0]/m/01");
+    expect(text.slice(z!.start, z!.end)).toBe("first");
+  });
+
   test("a numeric pointer segment is a list index in a list and a key in a mapping", async () => {
     const text = "ports:\n  \"8080\": web\n  0: zero\nlist:\n  - first\n  - second\n";
     const key = await spotOfPath(text, "doc[0]/ports/8080");
@@ -164,18 +179,49 @@ describe("the editor's text is kept until the operator drops it (#339 round 1)",
     expect(follow({ ...c, showing: true }, 8)).toEqual({ ...c, showing: true, revision: 8 });
     expect(follow(undefined, 8)).toBeUndefined();
   });
+
+  test("Show their change keeps the text typed after the 412, not only the text refused", () => {
+    const later = held("m, then more");
+    expect(shown({ mine: held("m"), revision: 7 }, later)).toEqual({ mine: later, revision: 7, showing: true });
+    expect(shown(undefined, later)).toBeUndefined();
+  });
+
+  test("the references table lists the document's references, then declarations no reference uses", () => {
+    expect(rows("a: !bwref x/one\n", { "x/one": { kind: "string", version: 1 }, old: { kind: "string", version: 1 } })).toEqual(["x/one", "old"]);
+    expect(rows("a: 1\n", {})).toEqual([]);
+  });
+});
+
+describe("a Save that sends nothing new (§8.4 item 1)", () => {
+  test("starts a new write only once the form's last write is no longer open", async () => {
+    const writes = new Writes(() => "p");
+    expect(startsNew(writes, undefined)).toBe(true);
+    const w = new Write({ method: "PUT", path: "/x", body: {}, resource: "/x" });
+    // An unknown outcome keeps the write open: a second Save sends nothing, so its text is not the one sent.
+    w.outcome = { kind: "unknown", why: "w", problem: null };
+    (writes as unknown as { all: Set<Write> }).all.add(w);
+    expect(startsNew(writes, w)).toBe(false);
+    w.outcome = { kind: "done", status: 200, data: {}, replayed: false };
+    expect(startsNew(writes, w)).toBe(true);
+  });
 });
 
 describe("a write's answer, whether or not its view is still shown (§8.3)", () => {
-  test("a done write's ETag is kept for its draft under the epoch then current", () => {
+  test("a done write's ETag is kept for its draft under the epoch it was sent in, while that epoch is current", () => {
     let epoch = "e1";
+    const sentIn = (e: string) => Object.assign(new Write({ method: "PUT", path: "/x", body: {}, resource: "/x" }), { epoch: e });
     const settle = keepOnDone("drf_9", () => epoch);
-    settle({ kind: "refused", status: 412, problem: null, replayed: false });
+    settle({ kind: "refused", status: 412, problem: null, replayed: false }, sentIn("e1"));
     expect(keptETag("drf_9", "e1")).toBeUndefined();
-    settle({ kind: "done", status: 200, data: {}, replayed: false, etag: '"8-t"' });
+    settle({ kind: "done", status: 200, data: {}, replayed: false, etag: '"8-t"' }, sentIn("e1"));
     expect(keptETag("drf_9", "e1")).toBe('"8-t"');
+    // An answer to a write sent in e1 that settles once e2 is current keeps nothing: a tag read
+    // under e2 stays.
     epoch = "e2";
-    keepOnDone((o) => createdId(o.kind === "done" ? o.data : null), () => epoch)({ kind: "done", status: 201, data: { id: "drf_10" }, replayed: false, etag: '"1-t"' });
+    keepETag("drf_9", '"9-t"', "e2");
+    settle({ kind: "done", status: 200, data: {}, replayed: false, etag: '"8-u"' }, sentIn("e1"));
+    expect(keptETag("drf_9", "e2")).toBe('"9-t"');
+    keepOnDone((o) => createdId(o.kind === "done" ? o.data : null), () => epoch)({ kind: "done", status: 201, data: { id: "drf_10" }, replayed: false, etag: '"1-t"' }, sentIn("e2"));
     expect(keptETag("drf_10", "e2")).toBe('"1-t"');
   });
 
@@ -183,7 +229,8 @@ describe("a write's answer, whether or not its view is still shown (§8.3)", () 
     expect(createdId({ id: "drf_1" })).toBe("drf_1");
     for (const d of [null, "drf_1", {}, { id: 3 }]) expect(createdId(d)).toBeUndefined();
     // A done answer with no readable draft: the keep hook keeps nothing and throws nothing.
-    expect(() => keepOnDone((o) => createdId(o.kind === "done" ? o.data : null), () => "e1")({ kind: "done", status: 201, data: null, replayed: false, etag: '"1-t"' })).not.toThrow();
+    const w = Object.assign(new Write({ method: "POST", path: "/drafts", body: {}, resource: "/changes" }), { epoch: "e1" });
+    expect(() => keepOnDone((o) => createdId(o.kind === "done" ? o.data : null), () => "e1")({ kind: "done", status: 201, data: null, replayed: false, etag: '"1-t"' }, w)).not.toThrow();
   });
 });
 

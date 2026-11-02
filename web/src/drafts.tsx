@@ -6,7 +6,7 @@
 
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import type { components } from "./api/v1";
-import { Form, field, Result, Text, unsaved, useSend, useUnsaved, useWrites } from "./forms.tsx";
+import { Form, field, Result, startsNew, Text, unsaved, useSend, useUnsaved, useWrites } from "./forms.tsx";
 import { Id, Ref, Scroll, short, useItem, useList, useReads, usePending } from "./list.tsx";
 import type { Cluster } from "./machines.tsx";
 import { references, type Spot, spotOfLine, spotOfPath, spotOfReference } from "./position.ts";
@@ -39,12 +39,14 @@ export const keptETag = (draft: string, epoch: string | undefined) => {
 };
 export const forgetETag = (draft: string) => void etags.delete(draft);
 
-// A write spec's settled hook that keeps a done answer's ETag for its draft, under the epoch then
-// current. It runs when the write settles, whether or not the view that sent it is still shown.
-export const keepOnDone = (draft: string | ((o: Outcome) => string | undefined), epoch: () => string | undefined) => (o: Outcome) => {
-  if (o.kind !== "done" || o.etag === undefined) return;
+// A write spec's settled hook that keeps a done answer's ETag for its draft, under the epoch the
+// write was sent in, the one the server accepted it in. It runs when the write settles, whether
+// or not the view that sent it is still shown. An answer that settles after the epoch changed
+// keeps nothing: its tag is no longer valid, and a tag read since stays (§8.5 item 1).
+export const keepOnDone = (draft: string | ((o: Outcome) => string | undefined), epoch: () => string | undefined) => (o: Outcome, w: Write) => {
+  if (o.kind !== "done" || o.etag === undefined || w.epoch === undefined || w.epoch !== epoch()) return;
   const id = typeof draft === "string" ? draft : draft(o);
-  if (id !== undefined) keepETag(id, o.etag, epoch());
+  if (id !== undefined) keepETag(id, o.etag, w.epoch);
 };
 
 // The id of a created draft, when its answer could be read and names one.
@@ -256,6 +258,17 @@ interface Clash {
 }
 export const follow = (c: Clash | undefined, revision: number): Clash | undefined => (c?.showing === true ? { ...c, revision } : c);
 
+// Show their change: the conflict keeps the operator's text as typed now, edits after the 412
+// included, before the read replaces the editor's text with theirs.
+export const shown = (c: Clash | undefined, held: Held): Clash | undefined => (c === undefined ? c : { ...c, mine: held, showing: true });
+
+// The references table's rows: the document's references, then the declarations no reference
+// uses, so an obsolete declaration can be undeclared (rule unused-declaration).
+export const rows = (document: string, declared: Declared) => {
+  const refs = references(document);
+  return [...refs, ...Object.keys(declared).filter((d) => !refs.includes(d))];
+};
+
 // The line of the marks field holding the n-th mark sent: Save leaves out blank lines.
 export function markLine(marks: string, n: number): number | undefined {
   let seen = -1;
@@ -315,7 +328,9 @@ export function FragmentPane({ draft, entry, written, seeChange }: { draft: Draf
   const text = useRef<HTMLTextAreaElement>(null);
   const marks = useRef<HTMLTextAreaElement>(null);
   const open = draft.state === "open";
-  useUnsaved(`fragment ${name || "(new)"} of draft ${short(draft.id)}`, open && holdsUnsaved(held, saved, conflict?.mine));
+  // Guarded also once the draft no longer takes writes (discarded by another author): the text is
+  // still shown, and leaving drops it.
+  useUnsaved(`fragment ${name || "(new)"} of draft ${short(draft.id)}`, holdsUnsaved(held, saved, conflict?.mine));
 
   useEffect(() => {
     if (entry?.revision == null) return;
@@ -358,14 +373,15 @@ export function FragmentPane({ draft, entry, written, seeChange }: { draft: Draf
     const lines = held.marks.split("\n").filter((l) => l !== "");
     const declarations = Object.keys(held.declared).length === 0 && held.embedded.length === 0 ? null : { references: held.declared, embedded: held.embedded };
     setNote(undefined);
-    sent.current = held;
+    // A Save while the last write is still open sends nothing new, so its text is not the one sent.
+    if (startsNew(writes!, w)) sent.current = held;
     send({ method: "PUT", path, ifMatch: m, ingests: true, resource: `/drafts/${draft.id}`, body: { layer: held.layer, document: held.document, marks: lines.length === 0 ? null : lines, declarations }, settled });
   };
   const remove = () => {
     const m = ifMatch();
     if (m === undefined) return setNote(NO_ETAG);
     // A removal drops the entry's text on purpose: once done, the editor holds nothing unsaved.
-    sent.current = held;
+    if (startsNew(writes!, w)) sent.current = held;
     send({ method: "DELETE", path, ifMatch: m, resource: `/drafts/${draft.id}`, body: undefined, settled });
   };
   const revert = async () => {
@@ -396,7 +412,7 @@ export function FragmentPane({ draft, entry, written, seeChange }: { draft: Draf
   };
   const conflictView = conflict !== undefined && (
     <>
-      <Conflict what="draft" revision={conflict.revision ?? draft.revision} onShow={() => { setConflict((c) => c && { ...c, showing: true }); seeChange(); }} />
+      <Conflict what="draft" revision={conflict.revision ?? draft.revision} onShow={() => { setConflict((c) => shown(c, now.current.held)); seeChange(); }} />
       {entry !== undefined && conflict.revision === draft.revision && (
         <div>
           <label>Their text <textarea readOnly value={entry.document ?? "(removed)"} rows={8} cols={60} {...NO_ASSIST} /></label>
@@ -408,7 +424,8 @@ export function FragmentPane({ draft, entry, written, seeChange }: { draft: Draf
       </button>
     </>
   );
-  const refs = references(held.document);
+  const refs = rows(held.document, held.declared);
+  const used = references(held.document);
   const declare = (ref: string, r: Declared[string] | undefined) => {
     const next = { ...held.declared };
     if (r === undefined) delete next[ref];
@@ -433,7 +450,7 @@ export function FragmentPane({ draft, entry, written, seeChange }: { draft: Draf
       {refs.length === 0 ? <p>None.</p> : (
         <Scroll label="References in this document">
           <thead><tr>{["Reference", "Kind", "Version", "Encoding", "State"].map((h) => <th key={h} scope="col">{h}</th>)}</tr></thead>
-          <tbody>{refs.map((ref) => <ReferenceRow key={ref} name={ref} declared={held.declared[ref]} set={(r) => declare(ref, r)} open={open} />)}</tbody>
+          <tbody>{refs.map((ref) => <ReferenceRow key={ref} name={ref} declared={held.declared[ref]} used={used.includes(ref)} set={(r) => declare(ref, r)} open={open} />)}</tbody>
         </Scroll>
       )}
       <EmbeddedList embedded={held.embedded} set={(embedded) => hold({ ...held, embedded })} open={open} />
@@ -457,7 +474,7 @@ export function FragmentPane({ draft, entry, written, seeChange }: { draft: Draf
 // §11.4 item 2: browser spelling and fill services get nothing of a document or marks.
 const NO_ASSIST = { autoComplete: "off", spellCheck: false, autoCorrect: "off", autoCapitalize: "off" } as const;
 
-function ReferenceRow({ name, declared, set, open }: { name: string; declared: Declared[string] | undefined; set: (r: Declared[string] | undefined) => void; open: boolean }) {
+function ReferenceRow({ name, declared, used, set, open }: { name: string; declared: Declared[string] | undefined; used: boolean; set: (r: Declared[string] | undefined) => void; open: boolean }) {
   const kind = declared?.kind ?? "string";
   return (
     <tr>
@@ -477,7 +494,7 @@ function ReferenceRow({ name, declared, set, open }: { name: string; declared: D
         </select>
       </td>
       <td>
-        {declared === undefined ? "carried, not declared" : "declared"}{" "}
+        {declared === undefined ? "carried, not declared" : used ? "declared" : "declared, not in the document"}{" "}
         {open && (declared === undefined ? <button type="button" onClick={() => set({ kind, version: 1 })}>Declare</button> : <button type="button" onClick={() => set(undefined)}>Undeclare</button>)}
       </td>
     </tr>

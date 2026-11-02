@@ -132,14 +132,17 @@ export function PageNotices() {
 
 // One form's logical write: a second submit while it runs, or while its outcome is unknown, sends
 // nothing new. A new write, under a new key, starts only after it ended or its notice was dismissed.
+// Whether the form's next send starts a new write: only once its last one is no longer open.
+export const startsNew = (writes: Writes, w: Write | undefined) => w === undefined || !writes.open.includes(w);
+
 export function useSend(): [Write | undefined, (spec: WriteSpec) => void] {
   const writes = useWrites()!;
   const current = useRef<Write>(undefined);
   const [, shown] = useState<Write>();
   const send = (spec: WriteSpec) => {
     const w = current.current;
-    if (w !== undefined && writes.open.includes(w)) {
-      if (w.outcome === undefined) void writes.submit(w);
+    if (!startsNew(writes, w)) {
+      if (w!.outcome === undefined) void writes.submit(w!);
       return;
     }
     const next = new Write(spec);

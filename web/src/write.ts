@@ -20,7 +20,7 @@ export interface WriteSpec {
   ingests?: boolean;
   // Called with each outcome the write settles on, a [Repeat exactly]'s included, whether or not
   // the view that sent it is still shown: a draft's ETag is kept from it (§8.3, #339).
-  settled?: (o: Outcome) => void;
+  settled?: (o: Outcome, w: Write) => void;
 }
 
 export type Outcome =
@@ -219,7 +219,7 @@ export class Writes {
       w.doubt = undefined;
       w.running = undefined;
       w.ingesting = undefined;
-      w.spec.settled?.(o);
+      w.spec.settled?.(o, w);
       // The one removal before a dismissal: a write no notice showed, which its form reports.
       if (!isOpen(w)) {
         if (shown) w.kept = true;
