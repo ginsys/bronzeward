@@ -898,6 +898,26 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     expect(rest(editor(s, { kind: "copy" }))).toEqual(rest(s));
   });
 
+  test("ginsys/bronzeward#559 local review 1: a draft read that repeats the pane's own done Remove while a Save is open opens no conflict for it", () => {
+    // The pane reads its Remove's revision 9 before it sends the Save that restores the text.
+    const own = [{ kind: "send", removes: true }, { kind: "done" }, gone(9), { kind: "send" }] as EditorEvent[];
+    const s = run({ held: T, saved: T, conflict: theirs(M) }, [...own, gone(9), { kind: "done", revision: "frv_9" }]);
+    expect(rest(s)).toEqual({ held: T, saved: T, sent: sentOf(T, true), writes: 2, own: "frv_9" });
+    // A removal by another author at a newer revision, read while that Save is open, still shows.
+    const theirsGone = run({ held: T, saved: T, conflict: theirs(M) }, [...own, gone(11), { kind: "done", revision: "frv_10" }]);
+    expect(theirsGone.held).toBe(EMPTY);
+    expect(theirsGone.saved).toBe(EMPTY);
+    expect(theirsGone.conflict).toEqual(theirs(T, 11));
+  });
+
+  test("ginsys/bronzeward#559 local review 2: a newer read that shows at once replaces the read held back, so a done Save does not show the older one", () => {
+    const newer: EditorEvent = { kind: "read", text: T, since: 0, revision: 11, id: "frv_11" };
+    const s = run(sending({ ...theirs10, text: M }, newer), [{ kind: "done", revision: "frv_9" }]);
+    expect(s.held).toBe(T);
+    expect(s.conflict).toBeUndefined();
+    expect(run(s, [{ kind: "draft", revision: 11, changed: false }]).conflict).toBeUndefined();
+  });
+
   test("ginsys/bronzeward#559 item 4: a revision read that answers after a write finished is read again, not marked loaded", () => {
     // The editor drops the answer of a read that began before a done write ...
     expect(rest(run({ held: M, saved: M, writes: 1 }, [{ kind: "read", text: T, since: 0, revision: 10, id: "frv_10" }]))).toEqual({ held: M, saved: M, writes: 1 });

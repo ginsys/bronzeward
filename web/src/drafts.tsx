@@ -388,7 +388,13 @@ export const NOT_REVERTED = "Not reverted: the text changed while the base text 
 function noted(s: Editor, e: EditorEvent): Editor {
   const { conflict: c, sent } = s;
   if (e.kind !== "draft" || c?.phase !== "theirs" || sent?.open !== true || e.revision < (c.revision ?? 0)) return s;
-  if (e.removed === true) return { ...s, sent: { ...sent, later: { revision: e.revision, removed: true } } };
+  // A removal at a revision the conflict follows already, with the saved text empty, is taken as the
+  // pane's own done Remove read again. A draft read names no author, so this is an assumption. It
+  // fails when another author removes the entry again before the pane's read of its own Remove
+  // answers, with or without restoring it first: the entry is removed at that revision either way,
+  // and no text is lost.
+  // A removal at a newer revision is another author's (#559 local reviews 1 to 3).
+  if (e.removed === true) return same(s.saved, EMPTY) && sent.later?.removed !== true && c.revision !== undefined && e.revision <= c.revision ? s : { ...s, sent: { ...sent, later: { revision: e.revision, removed: true } } };
   return sent.later === undefined || e.changed ? s : { ...s, sent: { ...sent, later: { ...sent.later, revision: e.revision } } };
 }
 
@@ -506,8 +512,13 @@ function step(s: Editor, e: EditorEvent): Editor {
         const revision = e.revision ?? c?.revision;
         return { ...idle, saved: e.text, held: e.text, conflict: { ...(c === undefined ? { mine: s.held } : kept(c)), phase: "theirs", ...(revision !== undefined && { revision }) } };
       }
-      // Once theirs shows, a read never ends a repeated Show's wait: only its draft read does.
-      return { ...idle, saved: e.text, held: same(s.held, s.saved) ? e.text : s.held };
+      // Once theirs shows, a read never ends a repeated Show's wait: only its draft read does. A newer
+      // read of another author's text shows at once here, and a read held back is older than it: a
+      // done Save must not show that one (ginsys/bronzeward#559 review 2).
+      const shown = { ...idle, saved: e.text, held: same(s.held, s.saved) ? e.text : s.held };
+      if (!another || s.sent?.later === undefined) return shown;
+      const { later: _older, ...sent } = s.sent;
+      return { ...shown, sent };
     }
     case "copy":
       // Only once their text shows and no read is pending: a pending one could replace the copied text.
