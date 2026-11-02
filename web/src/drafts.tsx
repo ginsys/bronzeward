@@ -454,7 +454,8 @@ function step(s: Editor, e: EditorEvent): Editor {
         if (e.removed === true && same(s.saved, EMPTY) && s.sent?.open !== true) return e.revision > (s.gone ?? -1) ? { ...s, gone: e.revision } : s;
         if (e.removed !== true || same(s.saved, EMPTY)) return s;
         if (s.sent?.open === true) return { ...s, saved: EMPTY, sent: { ...s.sent, later: { revision: e.revision, removed: true } } };
-        return { ...s, held: EMPTY, saved: EMPTY, ...(!same(s.held, s.saved) && { conflict: { mine: s.held, phase: "theirs" as const, revision: e.revision } }) };
+        // The revision this removal read shows is followed too, so a newer one is told from it (#559).
+        return { ...s, held: EMPTY, saved: EMPTY, gone: e.revision, ...(!same(s.held, s.saved) && { conflict: { mine: s.held, phase: "theirs" as const, revision: e.revision } }) };
       }
       if (c.phase === "refused" || e.revision < (c.revision ?? 0)) return s;
       // The draft read a repeated Show started has answered (N1).
@@ -522,13 +523,23 @@ function step(s: Editor, e: EditorEvent): Editor {
       // read of another author's text shows at once here, and a read held back is older than it: a
       // done Save must not show that one (ginsys/bronzeward#559 review 2).
       const shown = { ...idle, saved: e.text, held: same(s.held, s.saved) ? e.text : s.held };
-      if (!another || s.sent?.later === undefined) return shown;
-      const { later: _older, ...sent } = s.sent;
-      return { ...shown, sent };
+      const open = s.sent;
+      const later = open?.later;
+      // The same text read again at a newer revision, while a Save is open, moves the read held
+      // back, so a failed or done Save names that revision (#559 follow-up 3).
+      if (open !== undefined && !another && later?.text !== undefined && e.revision !== undefined && e.revision > (later.revision ?? 0)) return { ...shown, sent: { ...open, later: { ...later, revision: e.revision, ...(e.id !== undefined && { id: e.id }) } } };
+      // A newer accepted read moves the conflict that shows their text to its revision, also when the
+      // Save that showed it is done, and also when its text is the one shown (#559 follow-up 2). The
+      // pane's own revision is not theirs.
+      const moved = c?.phase === "theirs" && e.revision !== undefined && e.revision > (c.revision ?? 0) && (e.id === undefined || e.id !== s.own) ? { ...shown, conflict: { ...c, revision: e.revision } } : shown;
+      if (!another || open === undefined || later === undefined) return moved;
+      const { later: _older, ...sent } = open;
+      return { ...moved, sent };
     }
     case "copy":
       // Only once their text shows and no read is pending: a pending one could replace the copied text.
-      return c?.phase === "theirs" && c.awaits !== true && s.reading !== true ? { ...ended, held: c.mine } : s;
+      // Their removal stays followed: a newer one, read while the next Save is open, is told from it (#559).
+      return c?.phase === "theirs" && c.awaits !== true && s.reading !== true ? { ...ended, held: c.mine, ...(same(s.saved, EMPTY) && c.revision !== undefined && { gone: c.revision }) } : s;
     case "send":
       return { ...s, sent: { text: s.held, whileTheirs: c?.phase === "theirs", open: true, ...(e.removes === true && { removes: true as const }) } };
     case "done": {
