@@ -265,7 +265,9 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     ["L1: a draft read with no change while a revision read is awaited keeps waiting", { held: A, saved: A, conflict: awaiting(A) }, { kind: "draft", revision: 8, changed: false }, { held: A, saved: A, conflict: awaiting(A) }],
     ["the asked revision read shows their text, the operator's aside", { held: M2, saved: A, conflict: asked(M2, 8) }, { kind: "read", text: T, since: 0 }, { held: T, saved: T, conflict: theirs(M2) }],
     ["the awaited revision read shows their text and ends the wait", { held: M2, saved: A, conflict: awaiting(M2) }, { kind: "read", text: T, since: 0 }, { held: T, saved: T, conflict: theirs(M2) }],
-    ["R3-F1: a Show once their text shows keeps the operator's text", { held: T, saved: T, conflict: theirs(M) }, { kind: "show" }, { held: T, saved: T, conflict: theirs(M) }],
+    ["R3-F1: a Show once their text shows keeps the operator's text", { held: T, saved: T, conflict: theirs(M) }, { kind: "show" }, { held: T, saved: T, conflict: { ...theirs(M), awaits: true } }],
+    ["PR review: Copy my text while a revision read is pending changes nothing", { held: T, saved: T, conflict: theirs(M), reading: true }, { kind: "copy" }, { held: T, saved: T, conflict: theirs(M), reading: true }],
+    ["PR review: Copy my text while Show waits for its reads changes nothing", { held: T, saved: T, conflict: { ...theirs(M), awaits: true } }, { kind: "copy" }, { held: T, saved: T, conflict: { ...theirs(M), awaits: true } }],
     ["text typed once their text shows leaves the operator's text aside", { held: T, saved: T, conflict: theirs(M) }, { kind: "type", held: T2 }, { held: T2, saved: T, conflict: theirs(M) }],
     ["R1-F5: once shown, the conflict follows the draft revision as read", { held: T, saved: T, conflict: theirs(M) }, { kind: "draft", revision: 9, changed: true }, { held: T, saved: T, conflict: theirs(M, 9) }],
     ["boundary, R4-1: a reconnect's revision read after the show keeps text typed since", { held: M2, saved: T, conflict: theirs(M) }, { kind: "read", text: T2, since: 0 }, { held: M2, saved: T2, conflict: theirs(M) }],
@@ -399,7 +401,30 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     // a failed one; without either the pane never edits, or stays waiting after Show.
     expect(src).toMatch(/setLoaded\(revision\);\n\s*act\(\{ kind: "read", text: fromRevision\(r\.data\), since: done \}\);/);
     expect(src).toMatch(/act\(\{ kind: "draft", revision: draft\.revision, changed[^\n]*\n\s*if \(!changed && failed\) retry\(\(x\) => x \+ 1\);/);
-    expect(src).toMatch(/\{unshown && item\.kind !== "ok" && item\.kind !== "loading" && <p><button [^>]*onClick=\{\(\) => reread\(\(x\) => x \+ 1\)\}>\{READ_DRAFT_AGAIN\}/);
+    // PR review: also when the page keeps the data it read before (a failed read with no answer).
+    expect(src).toMatch(/\{unshown && item\.kind !== "loading" && <p><button [^>]*onClick=\{\(\) => reread\(\(x\) => x \+ 1\)\}>\{READ_DRAFT_AGAIN\}/);
+    // PR review: Copy my text stays off while a repeated Show waits for its reads.
+    expect(src).toContain(`disabled={conflict.phase !== "theirs" || conflict.awaits === true || waits || conflict.revision !== draft.revision}`);
+  });
+
+  test("PR review: Show their change clicked again holds Copy until its reads answer", () => {
+    const shown = run({ held: A, saved: A }, [{ kind: "refused" }, { kind: "at", revision: 7 }, { kind: "show" }, { kind: "draft", revision: 8, changed: true }, { kind: "reading", on: true }, { kind: "read", text: T, since: 0 }]);
+    expect(rest(shown)).toEqual({ held: T, saved: T, conflict: theirs(A, 8) });
+    // Shown again: from the click, Copy changes nothing, also once the draft read names a newer
+    // revision whose read is pending.
+    const again = run(shown, [{ kind: "show" }]);
+    expect(again.conflict?.awaits).toBe(true);
+    expect(rest(editor(again, { kind: "copy" }))).toEqual(rest(again));
+    const pending = run(again, [{ kind: "draft", revision: 9, changed: true }, { kind: "reading", on: true }]);
+    expect(rest(editor(pending, { kind: "copy" }))).toEqual(rest(pending));
+    // The newer text shows, then Copy gives back the operator's text, which no read replaces.
+    const newer = run(pending, [{ kind: "read", text: T2, since: 0 }]);
+    expect(rest(newer)).toEqual({ held: T2, saved: T2, conflict: theirs(A, 9) });
+    expect(editor(newer, { kind: "copy" }).held).toBe(A);
+    // A draft read with no new revision ends the wait at once.
+    const same = run(again, [{ kind: "draft", revision: 8, changed: false }]);
+    expect(same.conflict?.awaits).toBeUndefined();
+    expect(editor(same, { kind: "copy" }).held).toBe(A);
   });
 
   test("#517 review round 2: a revision read that failed before Show keeps Show waiting, so the old text is never theirs", () => {
