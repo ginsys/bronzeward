@@ -197,6 +197,10 @@ describe("the shell", () => {
     expect(keepsPage(true, server(MIN_API_REVISION), transport as unknown as Parameters<typeof keepsPage>[2])).toBe(true);
     expect(keepsPage(true, server(MIN_API_REVISION), unavailable)).toBe(true);
     expect(keepsPage(true, server(MIN_API_REVISION), { kind: "refused", status: 403, problem: null })).toBe(false);
+    // PR review: the client's own answer once its retries of a 500 or 503 run out keeps it too.
+    const exhausted = { kind: "unavailable", status: 503, problem: null } as const;
+    expect(keepsPage(true, exhausted, loading)).toBe(true);
+    expect(keepsPage(true, server(MIN_API_REVISION), exhausted)).toBe(true);
   });
 
   test("ginsys/bronzeward#517 H10: a page kept across an epoch change sends nothing", () => {

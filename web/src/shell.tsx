@@ -307,10 +307,12 @@ export const ending = <T,>(writes: Writes, client: () => Client, f: (res: T) => 
 // §8.5: a new epoch reads the server and the identity again. A page that held unsaved text when the
 // epoch changed stays shown meanwhile, so the operator's text is not dropped with what was read
 // (ginsys/bronzeward#517 H10), also while a read fails in a way that a later read can mend: no
-// answer, or a server error. Its actions stay disabled until the operator opens another page
-// (useGate), so a read it makes under the new epoch lets it send nothing; the operator can copy the
-// text out. A refusal, a start's pre-entry state or an incompatible server still replaces it.
-const mendable = (r: Load<unknown>) => r.kind === "loading" || r.kind === "transport" || r.kind === "discarded" || (r.kind === "refused" && r.status >= 500);
+// answer, or a server error, the client's `unavailable` after its retries ran out included. Its
+// actions stay disabled until the operator opens another page (useGate), so a read it makes under the
+// new epoch lets it send nothing; the operator can copy the text out. A refusal, a start's pre-entry
+// state or an incompatible server still replaces it. #513's kept identity does not cover this case:
+// a new epoch forgets which reads answered, so its first identity read keeps nothing.
+const mendable = (r: Load<unknown>) => r.kind === "loading" || r.kind === "transport" || r.kind === "discarded" || r.kind === "unavailable" || (r.kind === "refused" && r.status >= 500);
 export const keepsPage = (kept: boolean, server: Load<Server>, identity: Load<Identity>) =>
   kept && (server.kind === "ok" ? server.data.apiRevision >= MIN_API_REVISION && identity.kind !== "ok" && mendable(identity) : mendable(server));
 
@@ -450,12 +452,12 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
     };
   }, []);
 
-  const holding = keepsPage(kept, server, identity);
+  const holding = keepsPage(kept, server, identity.load);
   // Once another page opens, the kept one is gone: going back to it opens it again.
   useEffect(() => {
     if (keptView !== undefined && !kept) keepView(undefined);
   }, [keptView, kept]);
-  const failedRead = server.kind !== "ok" ? server : identity;
+  const failedRead = server.kind !== "ok" ? server : identity.load;
 
   let main: ReactNode;
   if (holding) main = <Page path={path} query={query} go={go} />;
