@@ -166,7 +166,7 @@ func (e *env) releaseReview(verb string, args []string) error {
 				if p.OverriddenBy != nil {
 					at = "overridden by " + pr(p.OverriddenBy.Revision)
 				}
-				fmt.Fprintf(w, "%s\t%d\t%s, %s\t%s\n", verbatim(ref), p.Version, verbatim(pr(p.Source.Revision)), verbatim(pr(p.Source.Path)), verbatim(at))
+				fmt.Fprintf(w, "%s\t%d\t%s, %s\t%s\n", ref, p.Version, pr(p.Source.Revision), pr(p.Source.Path), at)
 			}
 			fmt.Fprintln(w, "Provenance covers secret references only; other fields are not traced.")
 			return
@@ -175,14 +175,14 @@ func (e *env) releaseReview(verb string, args []string) error {
 		if r.Configuration == nil {
 			fmt.Fprintln(w, "Configuration not shown: it could not be redacted.")
 			if r.Notice != nil && *r.Notice != "" {
-				fmt.Fprintln(w, "Server notice: "+verbatim(pr(*r.Notice)))
+				fmt.Fprintln(w, "Server notice: "+pr(*r.Notice))
 			}
 			return
 		}
 		// The line feeds between the document's lines are the CLI's own; a tab or any other control
 		// character in a line is escaped (client-contracts.md §6 item 8).
 		for _, l := range strings.Split(strings.TrimSuffix(*r.Configuration, "\n"), "\n") {
-			fmt.Fprintln(w, verbatim(pr(l)))
+			fmt.Fprintln(w, pr(l))
 		}
 	})
 }
