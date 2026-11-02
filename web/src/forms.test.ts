@@ -256,6 +256,16 @@ describe("the unload guard (B11)", () => {
     // The navigation was stopped: the next reload or close asks again.
     expect(guardsUnload(writes)).toBe(true);
   });
+
+  test("asks nothing once the page was hidden: the reload of a restored page drops no write it still shows", async () => {
+    const [writes] = await unknownWrite();
+    expect(guardsUnload(writes)).toBe(true);
+    writes.forget();
+    expect(writes.open).toEqual([]);
+    expect(writes.notices).toEqual([]);
+    expect(guardsUnload(writes)).toBe(false);
+    expect(leaving(writes, "/plans", false, "/machines")).toBe(true);
+  });
 });
 
 describe("the form's result", () => {

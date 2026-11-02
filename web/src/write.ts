@@ -139,6 +139,12 @@ export class Writes {
     this.client = undefined;
     this.changed();
   }
+  // The page was hidden (§10.3 item 3): its writes go with it. A page restored from the
+  // back-forward cache reloads, and that reload asks nothing for a write no notice shows any more.
+  forget(): void {
+    this.all.clear();
+    this.changed();
+  }
   private changed(): void {
     this.version++;
     for (const f of this.listeners) f();
