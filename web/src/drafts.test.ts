@@ -845,7 +845,7 @@ test("ginsys/bronzeward#517 H15: a Discard's 412 says the draft changed and offe
   expect(markup).toContain(">Show their change</button>");
 });
 
-test("§8.4 item 8: a 412 or 422 refusal whose answer was cut off says so, and shows no conflict or field view", () => {
+test("§8.4 item 8: a 412 or 422 refusal whose answer was cut off says so; a 412 still shows its conflict view, a 422 no field view", () => {
   const w = new Write({ method: "PUT", path: "/drafts/drf_1/sources/f", body: {}, resource: "/drafts/drf_1" });
   const shown = (status: number) => {
     w.outcome = { kind: "refused", status, problem: null, replayed: false, cut: true };
@@ -855,7 +855,8 @@ test("§8.4 item 8: a 412 or 422 refusal whose answer was cut off says so, and s
   for (const status of [412, 422]) {
     const out = shown(status);
     expect(out).toContain(`Not saved: the server answered ${status}. ${CUT_OFF}`);
-    expect(out).not.toContain("CONFLICT");
+    // The editor treats every 412 as a conflict, so the conflict view must show with the cut-off line.
+    expect(out.includes("CONFLICT")).toBe(status === 412);
     expect(out).not.toContain("Go to field");
   }
   w.outcome = { kind: "refused", status: 412, problem: null, replayed: false };

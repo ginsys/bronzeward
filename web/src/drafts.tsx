@@ -603,9 +603,17 @@ export function where(p: Problem | null, marks: string): string | undefined {
 // A write's line: 412 and 422 here, every other state as the forms show it.
 export function WriteResult({ w, done, conflict, goTo, marks = "" }: { w: Write | undefined; done: (data: unknown) => ReactNode; conflict?: ReactNode; goTo?: () => void; marks?: string }) {
   const o: Outcome | undefined = w?.outcome;
-  // A refusal whose answer was cut off (§8.4 item 8) has no problem to show: not a conflict view or a
-  // field refusal, but the status and the cut-off text, as every other form shows it.
-  if (o?.kind === "refused" && o.cut === true) return <Result w={w} done={done} />;
+  // A refusal whose answer was cut off (§8.4 item 8) has no problem to show, so it gets the status and
+  // the cut-off text, as every other form shows it. A 412 still opens its conflict view below that line:
+  // the editor treats every 412 as a conflict (it reads the draft again), and expects this view to show it.
+  if (o?.kind === "refused" && o.cut === true) {
+    return (
+      <>
+        <Result w={w} done={done} />
+        {o.status === 412 && conflict}
+      </>
+    );
+  }
   if (o?.kind === "refused" && o.status === 412 && conflict !== undefined) return conflict;
   if (o?.kind === "refused" && o.status === 422) {
     const at = where(o.problem, marks);
