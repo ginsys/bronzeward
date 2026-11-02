@@ -29,16 +29,18 @@ async function load(f: Faults) {
 }
 
 // Shown as a status message, which assistive technology announces without moving focus. Looked up
-// again on each try: one state's message replaces the one before it.
+// again on each try: one state's message replaces the one before it. A failure the shell keeps
+// above a page shows beside the page's own statuses, so any element with the id may carry it.
 async function announced(id: string, text: string | RegExp) {
-  const shows = async () => {
-    const el = await testid(id);
-    if (!(await el.isExisting())) return false;
-    const t = await el.getText().catch(() => "");
-    return typeof text === "string" ? t === text : text.test(t);
+  const match = (t: string) => (typeof text === "string" ? t === text : text.test(t));
+  const shown = async () => {
+    for (const el of await $$(`[data-testid="${id}"]`)) {
+      if (match(await el.getText().catch(() => ""))) return el;
+    }
+    return undefined;
   };
-  await browser.waitUntil(shows, { timeout: 20_000, timeoutMsg: `${id} did not show ${String(text)}` });
-  expect(await testid(id).getAttribute("role")).toBe("status");
+  await browser.waitUntil(async () => (await shown()) !== undefined, { timeout: 20_000, timeoutMsg: `${id} did not show ${String(text)}` });
+  expect(await (await shown())?.getAttribute("role")).toBe("status");
 }
 
 describe("the shell", () => {
@@ -185,15 +187,21 @@ describe("the state catalogue", () => {
     expect(await testid("offline").isExisting()).toBe(false);
   });
 
-  it("offline: after a refusal replaced the data, a read without answer shows as disconnected", async () => {
+  it("offline: after a refusal the shell kept above the page, a read without answer keeps the data under the banner", async () => {
     await fixtureSignIn("h-viewer");
     await faults({ missing: "/identity" });
     await nav("Changes").click();
     await announced("status", "Not read: not-found. Not found: injected Request req-injected.");
-    await faults({ redirect: "/identity" });
+    // The page's two lists have answered, and the online event's reads of them are held: an answer
+    // to either would end the banner before the case looks at it.
+    await browser.waitUntil(async () => (await answered("/drafts", 1)) && (await answered("/releases", 1)), { timeout: 10_000, timeoutMsg: "the lists were not read" });
+    await faults({ redirect: "/identity", held: ["/drafts", "/releases"] });
     await event("online");
-    await announced("status", TRANSPORT_FAILURE);
-    expect(await testid("offline").isExisting()).toBe(false);
+    // The identity answered before, so the page and the identity stay and the banner says the rest.
+    await announced("offline", /^Offline since /);
+    expect(await testid("principal").getText()).toBe("Signed in as h-viewer");
+    await expect($("main h2")).toHaveText("Changes");
+    await release();
   });
 
   it("offline: the browser's offline event holds the banner over answered reads until its online event, which reads again", async () => {
@@ -218,14 +226,16 @@ describe("the state catalogue", () => {
     await faults({ missing: "/identity" });
     await event("online");
     await announced("status", "Not read: not-found. Not found: injected Request req-injected.");
-    // The first online event read the machine list and its cluster filter again with the identity;
-    // the refusal then replaced the list, so this one reads the identity alone.
+    // The first online event read the machine list and its cluster filter again with the identity.
+    // The refusal does not unmount the page, so this one reads the three again: 7 reads, then 3 more.
     await faults({ held: "/identity", missing: "/identity" });
     await event("online");
-    await reads(8);
+    await reads(10);
     await faults({});
     await event("online");
-    // The newer read's data replaces the refusal while the older read is still held.
+    // The newer read's data replaces the refusal while the older read is still held. The header
+    // keeps its principal through the refusal, so the refusal's going is what shows the newer answer.
+    await browser.waitUntil(async () => !(await $("main").getText()).includes("Not read"), { timeout: 10_000, timeoutMsg: "the newer answer did not replace the refusal" });
     await expect(testid("principal")).toHaveText("Signed in as h-viewer");
     // The held read's refusal arrives after it and must not replace it.
     await release();
