@@ -56,6 +56,15 @@ describe("the references of a declared embedded document", () => {
   test("a lone carriage return breaks a line", () => {
     expect(references("b: 1\rcfg: 'a: !bwref x/cr'\r", at("doc[0]/cfg"))).toEqual(["x/cr"]);
   });
+  // go-yaml v3.0.5 decodes "# note\u2028  a: ..." folded to "# note\u2028a: ...", and a lone
+  // carriage return or U+0085 folded to a blank.
+  test("U+2028 and U+2029 break a line between fields and stay a line break in a folded document", () => {
+    expect(references("b: 1\u2028cfg: 'a: !bwref x/ls'\n", at("doc[0]/cfg"))).toEqual(["x/ls"]);
+    expect(references("cfg: >-\n  # note\u2028  a: !bwref x/ls\n", at("doc[0]/cfg"))).toEqual(["x/ls"]);
+    expect(references("cfg: >-\n  # note\u2029  a: !bwref x/ps\n", at("doc[0]/cfg"))).toEqual(["x/ps"]);
+    expect(references("cfg: >-\n  # note\r  a: !bwref x/cr\n", at("doc[0]/cfg"))).toEqual([]);
+    expect(references("cfg: >-\n  # note\u0085  a: !bwref x/nel\n", at("doc[0]/cfg"))).toEqual([]);
+  });
 
   // Positions are compared as numbers, so a failure prints no document text.
   test("a reference only an embedded document carries points at the scalar that holds it, or at its tag as written", () => {
@@ -64,5 +73,8 @@ describe("the references of a declared embedded document", () => {
     expect(spotOfReference(text, "x/sq")).toBeUndefined();
     const literal = "cfg: |\n  a: !bwref x/lit\n";
     expect(spotOfReference(literal, "x/lit", at("doc[0]/cfg"))).toEqual({ start: 12, end: 24 });
+    // Folded, the first tag is in the comment, so the scalar is the spot, never that tag.
+    const folded = "cfg: >-\n  # note\n  a: !bwref x/same\n\n  b: !bwref x/same\n";
+    expect(spotOfReference(folded, "x/same", at("doc[0]/cfg"))).toEqual({ start: 5, end: folded.length });
   });
 });
