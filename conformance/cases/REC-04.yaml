@@ -1,0 +1,19 @@
+id: REC-04
+setup: as AUTH-02, with the injector passing every request to the fixture deployment started with -recovery-start on a fresh database, its entry not yet made; signed in as h-recovery, the entry form filled with one synthetic database backup, a stop time and a reason, and enter typed
+action: send Enter recovery
+exchange:
+  - request: POST /api/v1/recovery/entries
+    headers: ["Authorization: Bearer <recovery-admin token>", "Idempotency-Key: <key>", "Content-Type: application/json"]
+  - request: POST /api/v1/recovery/entries
+    headers: ["Authorization: Bearer <recovery-admin token>", "Idempotency-Key: <key>", "Content-Type: application/json"]
+fault: (a) the injector forwards the entry, the server commits it, and the injector drops the 201
+expect:
+  server: the first entry commits and mints the epoch; the repeat under the same key answers 201 with Idempotent-Replayed true and the same body
+  client: the entry repeated once under the same key with no Bronzeward-Expected-Epoch header on either send (client contracts §8.4 item 3); the epoch change its own commit makes applied as §8.5 without setting the entry aside
+  shown: the entry's result in the header, "Recovery mode entered (act <act>)" with the minted epoch and the epoch before it; no set-aside notice
+  absent: [token in the harness log, retained artifacts or browser storage]
+runs:
+  web:
+    check: web/e2e/auth/recovery.e2e.ts, mise run browser-auth; the repeat, the key and the classification of the answers in web/src/write.test.ts, mise run web
+    browsers: [chrome, edge, firefox, firefox-esr]
+    covers: '(a) only, the dropped 201. (b), the server losing its own COMMIT reply, waits for the server-side COMMIT fault hook of #263 (client contracts §12, REC-04); the server side of (b) is covered by internal/api/recovery_entries_test.go'
