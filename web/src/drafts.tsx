@@ -501,11 +501,14 @@ function step(s: Editor, e: EditorEvent): Editor {
       const { own: _own, ...after } = ends ? ended : s;
       const done: Editor = { ...after, ...closed(s), ...(e.revision !== undefined && { own: e.revision }), saved: s.sent?.removes === true ? EMPTY : sent, writes: writes + 1 };
       // A read held back while the write was open, of a revision this write did not create, is
-      // another author's newer text: it shows, and the editor's text is kept aside (#551).
+      // another author's newer text: it shows, and the editor's text is kept aside (#551). An answer
+      // that names no revision cannot tell, so the read is dropped as before. The newer draft
+      // revision and a repeated Show's wait stay (local review).
       const later = s.sent?.later;
-      if (later?.text === undefined || later.id === e.revision) return done;
-      const revision = later.revision ?? done.conflict?.revision;
-      return { ...done, held: later.text, saved: later.text, conflict: { ...(done.conflict === undefined ? { mine: s.held } : kept(done.conflict)), phase: "theirs", ...(revision !== undefined && { revision }) } };
+      if (later?.text === undefined || e.revision === undefined || later.id === e.revision) return done;
+      const named = [later.revision, c?.revision].filter((r): r is number => r !== undefined);
+      const revision = named.length > 0 ? Math.max(...named) : undefined;
+      return { ...done, held: later.text, saved: later.text, conflict: { ...(done.conflict === undefined ? { mine: s.held } : kept(done.conflict)), phase: "theirs", ...(c?.awaits === true && { awaits: true as const }), ...(revision !== undefined && { revision }) } };
     }
     case "revert":
       // Once their text shows, the reverted text is the operator's, as typed text is (#551 local review).
