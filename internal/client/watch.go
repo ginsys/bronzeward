@@ -56,15 +56,10 @@ func (c *Client) Watch(op string, w Watch) (*apitypes.OperationBody, error) {
 	if w.sleep == nil {
 		w.sleep = time.Sleep
 	}
-	// steps counts what the watch showed or cleared: an attempt that changed nothing is a failure.
-	steps, shows, clears := 0, w.Show, w.Clear
+	// steps counts the events shown: an attempt that showed none is a failure. A clear is not
+	// counted, so a stream whose events never match its epoch, cleared on every attempt, backs off.
+	steps, shows := 0, w.Show
 	w.Show = func(e Event) { steps++; shows(e) }
-	w.Clear = func() {
-		steps++
-		if clears != nil {
-			clears()
-		}
-	}
 	var last string // the ID of the last event shown
 	pages, delay := false, time.Second
 	for {
@@ -288,7 +283,9 @@ func (c *Client) drain(op string, last *string, w Watch) error {
 // cleared says why what the watch showed no longer holds, then clears it.
 func (c *Client) cleared(w Watch, why string) {
 	fmt.Fprintf(c.Notices, "%s: %s; the operation's events are shown again from the start.\n", c.Context.Where(), why)
-	w.Clear()
+	if w.Clear != nil {
+		w.Clear()
+	}
 }
 
 // show shows ev unless it is not after *last, which a stream and the pages that follow it can
