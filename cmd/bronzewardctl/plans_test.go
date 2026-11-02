@@ -11,15 +11,21 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode"
 )
 
 // planFake serves one plan, pln_BWSYNTH, for machine mch_a, whose fields the test sets, and the
 // reads planView makes; POST /plans and the cancellation answer with post, recording each body.
+// A path in raw is answered with its body, one in fail with a 404 problem whose detail it holds;
+// epochFor, when set, gives each answer's epoch, ep_BWSYNTH-2 otherwise.
 type planFake struct {
 	mu                        sync.Mutex
 	state, op, evidence       string
 	approval, approvalEpoch   string
 	desired, assignment, open string
+	expiresIn                 time.Duration
+	raw, fail                 map[string]string
+	epochFor                  func(path string) string
 	post                      func(w http.ResponseWriter, path string)
 	bodies                    []string
 }
@@ -49,14 +55,36 @@ func (f *planFake) plan() string {
 	if f.state == "expired" {
 		expires = time.Now().Add(-time.Hour)
 	}
+	if f.expiresIn != 0 {
+		expires = time.Now().Add(f.expiresIn)
+	}
 	return fmt.Sprintf(planJSON, f.state, committed, null(f.approval), f.op, mode, rev, deadlines[0], deadlines[1], deadlines[2],
 		expires.UTC().Format(time.RFC3339), f.evidence)
 }
 
 func (f *planFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Bronzeward-Epoch", "ep_BWSYNTH-2")
-	w.Header().Set("Content-Type", "application/json")
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1")
+	f.mu.Lock()
+	epoch := "ep_BWSYNTH-2"
+	if f.epochFor != nil {
+		epoch = f.epochFor(path)
+	}
+	raw, isRaw := f.raw[path]
+	detail, fails := f.fail[path]
+	f.mu.Unlock()
+	w.Header().Set("Bronzeward-Epoch", epoch)
+	w.Header().Set("Content-Type", "application/json")
+	switch {
+	case fails && r.Method == http.MethodGet:
+		w.Header().Set("Content-Type", "application/problem+json")
+		w.WriteHeader(http.StatusNotFound)
+		b, _ := json.Marshal(map[string]any{"type": "urn:bronzeward:problem:not-found", "title": "Not Found", "status": 404, "detail": detail})
+		w.Write(b)
+		return
+	case isRaw && r.Method == http.MethodGet:
+		fmt.Fprint(w, raw)
+		return
+	}
 	if r.Method == http.MethodPost {
 		b, _ := io.ReadAll(r.Body)
 		f.mu.Lock()
@@ -139,7 +167,7 @@ func runCtl(t *testing.T, args ...string) (int, string, string) {
 func TestPlanView(t *testing.T) {
 	f := planServer(t)
 	show := []string{"plan", "show", "pln_BWSYNTH"}
-	again := "Create a new plan: bronzewardctl plan create --release 'rel_BWSYNTH' --machine 'mch_a' --operation apply-config"
+	again := "Create a new plan: bronzewardctl plan create --release 'rel_BWSYNTH' --machine 'mch_a' --operation 'apply-config'"
 	for _, c := range []struct {
 		name string
 		set  func(*planFake)
@@ -174,7 +202,7 @@ func TestPlanView(t *testing.T) {
 		{"cancelled", func(f *planFake) { f.state = "cancelled" }, []string{"Cancelled: it cannot be committed. " + again}},
 		{"approved in an earlier epoch", func(f *planFake) { f.state, f.approval, f.approvalEpoch = "approved", "apr_BWSYNTH", "ep_BWSYNTH-1" }, []string{
 			"Approved by h-approver (approver) in epoch ep_BWSYNTH-1. This approval is from before the last recovery entry and authorizes nothing; " +
-				"an approver may approve again: bronzewardctl approve 'pln_BWSYNTH'"}},
+				"an approver may approve again: bronzewardctl approve 'pln_BWSYNTH'\n" + again}},
 		{"approved, nothing moved", func(f *planFake) { f.approvalEpoch = "ep_BWSYNTH-2" }, []string{
 			"Approved by h-approver (approver) as apr_BWSYNTH. Not committed",
 			"A change of the machine's baseline revision is served by no read: the controller's refusal shows it on the timeline: bronzewardctl machine timeline 'mch_a'"}},
@@ -182,6 +210,15 @@ func TestPlanView(t *testing.T) {
 			"Predicted stale, by this client's reads: the machine's Desired is now rel_BWSYNTH-new. The controller will refuse its commitment, so it cannot run. " + again}},
 		{"approved, assignment moved and a drift opened", func(f *planFake) { f.desired, f.assignment, f.open = "rel_BWSYNTH", "asr_BWSYNTH-2", "12" }, []string{
 			"Predicted stale, by this client's reads: the machine's open drift record is 12, not the plan's; the machine's assignment is now at asr_BWSYNTH-2."}},
+		{"approved, Desired moved, assignment unread", func(f *planFake) {
+			f.desired, f.assignment, f.open, f.fail = "rel_BWSYNTH-new", "asr_BWSYNTH-1", "", map[string]string{"/assignments": "BWSYNTH no list"}
+		}, []string{
+			"Predicted stale, by this client's reads: the machine's Desired is now rel_BWSYNTH-new. The controller will refuse its commitment, so it cannot run. " + again + "\n" +
+				"The assignment cannot be read, so whether it is stale is not fully predicted: ", "BWSYNTH no list"}},
+		{"cluster unread", func(f *planFake) { f.fail = map[string]string{"/clusters/cl_BWSYNTH": "BWSYNTH no cluster"} }, []string{
+			"cluster cl_BWSYNTH (unread: ", "BWSYNTH no cluster"}},
+		{"less than a minute left", func(f *planFake) { f.state, f.fail, f.expiresIn = "proposed", nil, 20*time.Second }, []string{
+			"proposed               expires ", "(in 0s by this client's clock)"}},
 	} {
 		f.set(c.set)
 		code, out, errOut := runCtl(t, show...)
@@ -197,9 +234,133 @@ func TestPlanView(t *testing.T) {
 			t.Errorf("%s: the display says unchanged:\n%s", c.name, out)
 		}
 	}
-	f.set(func(f *planFake) { f.state = "proposed" })
+	f.set(func(f *planFake) { f.state, f.expiresIn = "proposed", 0 })
 	if code, out, _ := runCtl(t, append(show, "-o", "json")...); code != 0 || strings.TrimSuffix(out, "\n") != f.plan() {
 		t.Errorf("-o json: exit %d, printed %q; want the plan unchanged", code, out)
+	}
+}
+
+// TestPlanSnapshot checks client-contracts.md section 8.5 on the plan view: an epoch change
+// between the plan's answer and the view's last read, or a change and a change back, shows no
+// view. plan show then fails; plan create still reports the plan it created.
+func TestPlanSnapshot(t *testing.T) {
+	// moved answers ep_BWSYNTH-3 from the machine read on; back only to the machine read, so the
+	// GET /server that a new epoch calls for brings ep_BWSYNTH-2 back.
+	moved := func(back bool) func(*planFake) {
+		return func(f *planFake) {
+			seen := false
+			f.epochFor = func(path string) string {
+				if path == "/machines/mch_a" || seen && !back {
+					seen = true
+					return "ep_BWSYNTH-3"
+				}
+				return "ep_BWSYNTH-2"
+			}
+		}
+	}
+	for _, c := range []struct {
+		name string
+		back bool
+		want string
+	}{
+		{"moved", false, "the epoch changed from ep_BWSYNTH-2 to ep_BWSYNTH-3"},
+		{"moved and back", true, "the epoch changed from ep_BWSYNTH-2 and changed back"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := planServer(t)
+			f.set(moved(c.back))
+			code, out, errOut := runCtl(t, "plan", "show", "pln_BWSYNTH")
+			if code == 0 || out != "" || !strings.Contains(errOut, c.want+" while the plan was read; nothing is shown. Read it again with: plan show 'pln_BWSYNTH'") {
+				t.Errorf("plan show: exit %d, stdout %q, stderr %q; want a failure naming %q", code, out, errOut, c.want)
+			}
+		})
+	}
+	t.Run("plan create", func(t *testing.T) {
+		f := planServer(t)
+		f.set(func(f *planFake) {
+			f.post = func(w http.ResponseWriter, _ string) {
+				w.WriteHeader(http.StatusCreated)
+				f.mu.Unlock()
+				fmt.Fprint(w, f.plan())
+				f.mu.Lock()
+			}
+		})
+		f.set(moved(false))
+		code, out, errOut := runCtl(t, "plan", "create", "--release", "rel_BWSYNTH", "--machine", "mch_a", "--operation", "apply-config")
+		want := "Plan pln_BWSYNTH was created for machine mch_a, operation apply-config.\n" +
+			"  the epoch changed from ep_BWSYNTH-2 to ep_BWSYNTH-3 while the plan was read, so it is not shown. Read it again with: plan show 'pln_BWSYNTH'\n"
+		if code != 0 || !strings.Contains(out, want) || strings.Contains(out, "Evidence") {
+			t.Errorf("plan create: exit %d, stdout %q, stderr %q; want %q and no view", code, out, errOut, want)
+		}
+	})
+}
+
+// TestPlanViewEscapes sends hostile text in each field that a valid state prints, and in the
+// details of the reads that fail: no control character but the column tab and the line feed
+// reaches the terminal, no value starts a line of its own, and a printed command quotes it.
+func TestPlanViewEscapes(t *testing.T) {
+	const bad = "x\x1b[31m\nForged: line 'q"
+	const word = `'x\x1b[31m\x0aForged: line '\''q'`
+	js := func(v any) string {
+		b, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	f := planServer(t)
+	plan := func(state string, set map[string]any) string {
+		f.set(func(f *planFake) { f.state = state })
+		var m map[string]any
+		if err := json.Unmarshal([]byte(f.plan()), &m); err != nil {
+			t.Fatal(err)
+		}
+		for k, v := range set {
+			m[k] = v
+		}
+		return js(m)
+	}
+	machine := js(map[string]any{"id": "mch_a", "cluster": "cl_BWSYNTH", "talosEndpoint": bad, "desired": bad, "openDrift": nil})
+	assignments := js(map[string]any{"items": []any{map[string]any{"id": "asg_BWSYNTH", "machine": "mch_a", "revision": bad}}})
+	approval := js(map[string]any{"id": bad, "plan": "pln_BWSYNTH", "epoch": "ep_BWSYNTH-2", "approver": map[string]any{"principal": bad, "role": bad},
+		"selfApproval": map[string]any{"marked": false, "reasons": []any{}}, "unseenOverwrite": false})
+	for _, c := range []struct {
+		name      string
+		raw, fail map[string]string
+		want      []string
+	}{
+		{"committed", map[string]string{"/plans/pln_BWSYNTH": plan("committed", map[string]any{"committedOperation": bad})}, nil,
+			[]string{"bronzewardctl operation watch " + word}},
+		{"expired", map[string]string{"/plans/pln_BWSYNTH": plan("expired", map[string]any{"operation": bad, "release": bad})}, nil,
+			[]string{"bronzewardctl plan create --release " + word + " --machine 'mch_a' --operation " + word}},
+		{"approved, every read hostile", map[string]string{
+			"/plans/pln_BWSYNTH": plan("approved", map[string]any{"approval": bad, "assignmentRevision": bad, "desiredRelease": "rel_BWSYNTH"}),
+			"/machines/mch_a":    machine, "/assignments": assignments, "/approvals/" + bad: approval,
+		}, map[string]string{"/clusters/cl_BWSYNTH": bad}, []string{"Predicted stale", "unread: "}},
+		{"approval unread", map[string]string{"/plans/pln_BWSYNTH": plan("approved", map[string]any{"approval": "apr_BWSYNTH"})},
+			map[string]string{"/approvals/apr_BWSYNTH": bad}, []string{"Approved by apr_BWSYNTH, which cannot be read: "}},
+		{"assignment unread", map[string]string{"/plans/pln_BWSYNTH": plan("approved", map[string]any{"approval": bad}),
+			"/machines/mch_a": machine, "/approvals/" + bad: approval},
+			map[string]string{"/assignments": bad}, []string{"Predicted stale", "The assignment cannot be read"}},
+	} {
+		f.set(func(f *planFake) { f.raw, f.fail = c.raw, c.fail })
+		code, out, errOut := runCtl(t, "plan", "show", "pln_BWSYNTH")
+		if code != 0 {
+			t.Errorf("%s: exit %d, %s", c.name, code, errOut)
+		}
+		if strings.ContainsFunc(out, func(r rune) bool { return unicode.IsControl(r) && r != '\t' && r != '\n' }) {
+			t.Errorf("%s: a control character reaches the terminal:\n%q", c.name, out)
+		}
+		for _, l := range strings.Split(out, "\n") {
+			if strings.HasPrefix(strings.TrimLeft(l, " \t"), "Forged") {
+				t.Errorf("%s: a value starts a line of its own: %q", c.name, l)
+			}
+		}
+		for _, w := range append(c.want, `x\x1b[31m\x0aForged: line`) {
+			if !strings.Contains(out, w) {
+				t.Errorf("%s: no %q in\n%s", c.name, w, out)
+			}
+		}
 	}
 }
 
@@ -269,9 +430,9 @@ func TestPlanCreate(t *testing.T) {
 
 	for _, c := range []struct{ name, problem, want string }{
 		{"not the machine's Desired", `"detail":"an apply-config plan is for the machine's Desired release","desired":"rel_BWSYNTH-new"`,
-			"Plan the machine's Desired release instead: bronzewardctl plan create --release 'rel_BWSYNTH-new' --machine 'mch_a' --operation apply-config"},
+			"Plan the machine's Desired release instead: bronzewardctl plan create --release 'rel_BWSYNTH-new' --machine 'mch_a' --operation 'apply-config'"},
 		{"no Applied", `"detail":"the machine has no Applied configuration to plan an apply-config from; adopt it first","machine":"mch_a"`,
-			"Hand the machine over with an adopt plan: bronzewardctl plan create --release 'rel_BWSYNTH' --machine 'mch_a' --operation adopt"},
+			"Hand the machine over with an adopt plan: bronzewardctl plan create --release 'rel_BWSYNTH' --machine 'mch_a' --operation 'adopt'"},
 		{"assignment moved", `"detail":"the machine's assignment has moved since the release was compiled","release":"rel_BWSYNTH","machine":"mch_a"`,
 			"Publish a release from the machine's current assignment, then plan that release. The assignment's history: bronzewardctl machine timeline 'mch_a'"},
 	} {

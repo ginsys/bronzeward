@@ -23,8 +23,9 @@ func show[T any](e *env, path string, table func(*tabwriter.Writer, *T)) error {
 	return showThen(e, path, nil, table)
 }
 
-// showThen is show, running then (when not nil) on the decoded answer before it prints it.
-func showThen[T any](e *env, path string, then func(*client.Client, *client.Response, *T), table func(*tabwriter.Writer, *T)) error {
+// showThen is show, running then (when not nil) on the decoded answer before it prints it; an
+// error from then prints nothing.
+func showThen[T any](e *env, path string, then func(*client.Client, *client.Response, *T) error, table func(*tabwriter.Writer, *T)) error {
 	return e.session(func(c *client.Client, _ *client.Response, _ *apitypes.ServerBody) error {
 		r, err := c.Get(path)
 		if err != nil {
@@ -35,7 +36,9 @@ func showThen[T any](e *env, path string, then func(*client.Client, *client.Resp
 			return err
 		}
 		if then != nil {
-			then(c, r, &v[0])
+			if err := then(c, r, &v[0]); err != nil {
+				return err
+			}
 		}
 		return e.emit(r.Body, func(w *tabwriter.Writer) { table(w, &v[0]) })
 	})
@@ -314,9 +317,10 @@ func (e *env) draftCmd(args []string) error {
 	// T11: the read's ETag is the next write's If-Match while the draft is open; a closed draft's
 	// is dropped, and so is one read at an epoch older than the newest this command saw (§8.5
 	// item 1): the GET /server a new epoch calls for can show a newer one still.
-	return showThen(e, "/drafts/"+url.PathEscape(pos[0]), func(c *client.Client, r *client.Response, d *apitypes.DraftBody) {
+	return showThen(e, "/drafts/"+url.PathEscape(pos[0]), func(c *client.Client, r *client.Response, d *apitypes.DraftBody) error {
 		current := d.State == "open" && r.Header.Get("Bronzeward-Epoch") == c.Context.LastEpoch
 		keep(e, c, d.Id, map[bool]string{true: r.Header.Get("ETag")}[current])
+		return nil
 	}, func(w *tabwriter.Writer, d *apitypes.DraftBody) {
 		tf(w, "Draft %s \"%s\" %s, revision %d, cluster %s\n", d.Id, client.Quoted(d.Title), d.State, d.Revision, d.Cluster)
 		for _, item := range d.Entries {
