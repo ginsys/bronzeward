@@ -597,4 +597,64 @@ else bad "start, pid record fails: the copies with port $port are wrong, or the 
 kill "$foreign" 2>/dev/null
 wait "$foreign" 2>/dev/null
 
+# t9 disconnect's stream reads (t9_curl and t9_read, taken from the session) against a stub A:
+# a fresh request gets an event stream, a resumption with Last-Event-ID gets 404 with a JSON body,
+# and operation op-json gets 200 with a JSON body. curl exits 0 on both refusals, so only the
+# status and content type check fails the step on them.
+cat >"$t/stub-a.py" <<'EOF'
+import http.server, sys
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.headers.get("Authorization") != "Bearer BWSYNTH-token-t9":
+            self.send_response(401); self.end_headers(); return
+        if self.headers.get("Last-Event-ID") or self.path.endswith("/op-json/events"):
+            code = 404 if self.headers.get("Last-Event-ID") else 200
+            self.send_response(code); self.send_header("Content-Type", "application/json"); self.end_headers()
+            self.wfile.write(b'{"error":"refused"}'); return
+        self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.end_headers()
+        self.wfile.write(b"id: 1:1\ndata: a\n\nid: 1:2\ndata: b\n\n")
+    def log_message(self, *a): pass
+s = http.server.HTTPServer(("127.0.0.1", 0), H)
+open(sys.argv[1], "w").write(str(s.server_address[1]))
+s.serve_forever()
+EOF
+python3 -I "$t/stub-a.py" "$t/stub-a.port" &
+stub_a=$!
+for _ in $(seq 50); do [ -s "$t/stub-a.port" ] && break; sleep 0.1; done
+mkdir -p "$t/t9-state"
+printf 'BWSYNTH-token-t9' >"$t/t9-state/automation-token"
+sed -n -e '/^t9_curl() {$/,/^}$/p' -e '/^t9_read() {$/,/^}$/p' "$session" >"$t/t9.sh"
+# t9_case <op> <command>...: the command in a shell with only the two functions, a die that exits
+# 1, and the stub A's port.
+t9_case() {
+  local op=$1
+  shift
+  # shellcheck disable=SC2016 # the inner shell's own text
+  STATE=$t/t9-state SERVER_A_PORT=$(cat "$t/stub-a.port") t9_op=$op bash -c \
+    'die() { echo "die: $*"; exit 1; }; . "$0"; "$@"' "$t/t9.sh" "$@" 2>&1
+}
+if [ "$(grep -cE '^t9_(curl|read)\(\) \{$' "$t/t9.sh")" = 2 ] && [ -s "$t/stub-a.port" ]; then
+  out=$(t9_case op-1 t9_read "the stream" "$t/t9-fresh" 10)
+  rc=$?
+  if [ "$rc" = 0 ] && [ "$(grep -c '^id:' "$t/t9-fresh")" = 2 ]; then
+    ok "t9_read accepts a 200 event stream"
+  else bad "t9_read, event stream: rc=$rc: $out"; fi
+  out=$(t9_case op-1 t9_curl "$t/t9-control" 10 1:2)
+  rc=$?
+  out2=$(t9_case op-1 t9_read "the resumed stream" "$t/t9-resume" 10 1:2)
+  rc2=$?
+  # The control: curl alone ends with status 0 on the refused resumption, and writes no event.
+  if [ "$rc" = 0 ] && [ "$(grep -c '^id:' "$t/t9-control")" = 0 ] && [ "$rc2" != 0 ] &&
+    [[ $out2 == *"the resumed stream was refused: HTTP 404 application/json"* ]]; then
+    ok "a resumption refused with 404 and a JSON body fails t9_read, which curl's status alone passes"
+  else bad "t9_read, refused resumption: control rc=$rc ($out), rc=$rc2: $out2"; fi
+  out=$(t9_case op-json t9_read "the full replay" "$t/t9-json" 10)
+  rc=$?
+  if [ "$rc" != 0 ] && [[ $out == *"the full replay was refused: HTTP 200 application/json"* ]]; then
+    ok "a 200 answer that is not an event stream fails t9_read"
+  else bad "t9_read, JSON answer: rc=$rc: $out"; fi
+else bad "t9_read: the functions were not found in the session, or the stub A did not start"; fi
+kill "$stub_a" 2>/dev/null
+wait "$stub_a" 2>/dev/null
+
 exit "$fail"
