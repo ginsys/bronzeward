@@ -334,7 +334,17 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     ["PR review: Copy my text while Show waits for its reads changes nothing", { held: T, saved: T, conflict: { ...theirs(M), awaits: true } }, { kind: "copy" }, { held: T, saved: T, conflict: { ...theirs(M), awaits: true } }],
     ["text typed once their text shows leaves the operator's text aside", { held: T, saved: T, conflict: theirs(M) }, { kind: "type", held: T2 }, { held: T2, saved: T, conflict: theirs(M) }],
     ["R1-F5: once shown, the conflict follows the draft revision as read", { held: T, saved: T, conflict: theirs(M) }, { kind: "draft", revision: 9, changed: true }, { held: T, saved: T, conflict: theirs(M, 9) }],
-    ["boundary, R4-1: a reconnect's revision read after the show keeps text typed since", { held: M2, saved: T, conflict: theirs(M) }, { kind: "read", text: T2, since: 0 }, { held: M2, saved: T2, conflict: theirs(M) }],
+    ["ginsys/bronzeward#551 item 2: another author's newer text read after the show shows, the text typed since aside", { held: M2, saved: T, conflict: theirs(M) }, { kind: "read", text: T2, since: 0, revision: 9 }, { held: T2, saved: T2, conflict: theirs(M2, 9) }],
+    ["#551 item 2: the read of the pane's own saved revision after the show keeps text typed since", { held: M2, saved: T, conflict: theirs(M), own: "frv_9" }, { kind: "read", text: T2, since: 0, id: "frv_9" }, { held: M2, saved: T2, conflict: theirs(M), own: "frv_9" }],
+    ["#551 item 2: a read after the show while a Save is open is held back for that Save's answer", { held: M2, saved: T, conflict: theirs(M), sent: { ...sentOf(M2, true), open: true } }, { kind: "read", text: T2, since: 0, revision: 9 }, { held: M2, saved: T2, conflict: theirs(M), sent: { ...sentOf(M2, true), open: true, later: { revision: 9 } } }],
+    ["#551 item 2: that Save failing shows the held-back read, the typed text aside", { held: M2, saved: T2, conflict: theirs(M), sent: { ...sentOf(M2, true), open: true, later: { revision: 9 } } }, { kind: "failed" }, { held: T2, saved: T2, conflict: theirs(M2, 9), sent: sentOf(M2, true) }],
+    ["#551 item 2: that Save failing after a later draft read names the newer draft revision", { held: M2, saved: T2, conflict: theirs(M, 10), sent: { ...sentOf(M2, true), open: true, later: { revision: 9 } } }, { kind: "failed" }, { held: T2, saved: T2, conflict: theirs(M2, 10), sent: sentOf(M2, true) }],
+    ["#551 item 1: another author's removal after the show shows the removal, the operator's text still aside", { held: T, saved: T, conflict: theirs(M) }, { kind: "draft", revision: 9, changed: false, removed: true }, { held: EMPTY, saved: EMPTY, conflict: theirs(M, 9) }],
+    ["#551 item 1: a removal after the show keeps text typed since aside", { held: T2, saved: T, conflict: theirs(M) }, { kind: "draft", revision: 9, changed: false, removed: true }, { held: EMPTY, saved: EMPTY, conflict: theirs(T2, 9) }],
+    ["#551 item 1: a repeated Show's draft read that reports a removal shows it and ends the wait", { held: T, saved: T, conflict: { ...theirs(M), awaits: true } }, { kind: "draft", revision: 9, changed: false, removed: true }, { held: EMPTY, saved: EMPTY, conflict: theirs(M, 9) }],
+    ["#551 item 1, H8: the pane's own done Remove after the show keeps its text", { held: T, saved: EMPTY, conflict: theirs(M) }, { kind: "draft", revision: 9, changed: false, removed: true }, { held: T, saved: EMPTY, conflict: theirs(M, 9) }],
+    ["#551 item 1: a removal after the show while a write is open waits for that write's answer", { held: T2, saved: T, conflict: theirs(M), sent: { text: T2, whileTheirs: true, open: true, removes: true } }, { kind: "draft", revision: 9, changed: false, removed: true }, { held: T2, saved: T, conflict: theirs(M, 9), sent: { text: T2, whileTheirs: true, open: true, removes: true } }],
+    ["#551 item 3: a draft read that changes only another entry moves a held-back read's revision", { held: M, saved: T, sent: { ...sentOf(M), open: true, later: { revision: 8 } } }, { kind: "draft", revision: 9, changed: false }, { held: M, saved: T, sent: { ...sentOf(M), open: true, later: { revision: 9 } } }],
     ["a revision read after the show, with nothing typed, shows their latest text", { held: T, saved: T, conflict: theirs(M) }, { kind: "read", text: T2, since: 0 }, { held: T2, saved: T2, conflict: theirs(M) }],
     ["boundary: Copy my text puts the operator's text back and ends the conflict", { held: T2, saved: T, conflict: theirs(M) }, { kind: "copy" }, { held: M, saved: T }],
     ["R7-1: Copy my text before their text shows changes nothing", { held: M, saved: A, conflict: asked(M, 8) }, { kind: "copy" }, { held: M, saved: A, conflict: asked(M, 8) }],
@@ -408,9 +418,21 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
   });
 
   const run = (s: Editor, events: EditorEvent[]) => events.reduce(editor, s);
-  test("R4-1: after a Show that changed no text of this fragment, a later read keeps what was typed since", () => {
-    const s = run({ held: M, saved: A }, [{ kind: "refused" }, { kind: "at", revision: 7 }, { kind: "show" }, { kind: "draft", revision: 8, changed: false }, { kind: "type", held: M2 }, { kind: "draft", revision: 9, changed: true }, { kind: "read", text: T2, since: 0 }]);
-    expect(rest(s)).toEqual({ held: M2, saved: T2, conflict: theirs(M, 9) });
+  test("ginsys/bronzeward#551 item 2: after a Show that changed no text of this fragment, another author's later text shows and Copy my text gives back what was typed since", () => {
+    const s = run({ held: M, saved: A }, [{ kind: "refused" }, { kind: "at", revision: 7 }, { kind: "show" }, { kind: "draft", revision: 8, changed: false }, { kind: "type", held: M2 }, { kind: "draft", revision: 9, changed: true }, { kind: "read", text: T2, since: 0, revision: 9 }]);
+    expect(rest(s)).toEqual({ held: T2, saved: T2, conflict: theirs(M2, 9) });
+    expect(rest(editor(s, { kind: "copy" }))).toEqual({ held: M2, saved: T2 });
+  });
+
+  test("ginsys/bronzeward#551 item 1: a repeated Show whose draft read reports a removal shows the removal, and Copy my text gives back the operator's text", () => {
+    const s = run({ held: A, saved: A }, [{ kind: "type", held: M }, { kind: "refused" }, { kind: "at", revision: 7 }, { kind: "show" }, { kind: "draft", revision: 8, changed: false }, { kind: "show" }, { kind: "draft", revision: 9, changed: false, removed: true }]);
+    expect(rest(s)).toEqual({ held: EMPTY, saved: EMPTY, conflict: theirs(M, 9) });
+    expect(rest(editor(s, { kind: "copy" }))).toEqual({ held: M, saved: EMPTY });
+  });
+
+  test("ginsys/bronzeward#551 item 3: a read held back while a Save is open names the draft revision of a later draft read that changed only another entry", () => {
+    const s = run({ held: A, saved: A }, [{ kind: "type", held: M }, { kind: "send" }, { kind: "read", text: T, since: 0, revision: 8 }, { kind: "draft", revision: 9, changed: false }, { kind: "failed" }]);
+    expect(rest(s)).toEqual({ held: T, saved: T, sent: sentOf(M), conflict: theirs(M, 9) });
   });
 
   test("R5-1: a Save sent while asked, then typing, then their text: the done Save keeps the typed text", () => {

@@ -339,6 +339,8 @@ export const holdsUnsaved = (held: Held, saved: Held, mine: Held | undefined) =>
 // Without a 412, a conflict opens when a read shows another author's text or removal while the
 // editor holds unsaved text, or once a Discard's Show their change adopted that read's ETag
 // (ginsys/bronzeward#534 C1-C3): the typed text is kept aside, never saved over theirs unseen.
+// Once their text shows, another author's later text or removal shows the same way, text typed
+// since then kept aside in place of the older one (ginsys/bronzeward#551).
 // `sent.open`: the write may still commit, its answer not come yet. A read meanwhile may show that
 // write's own change, so it opens no such conflict; another author's change refuses the write with
 // a 412 instead (local review round 3). `sent.later`: such a read came, and the revision it named.
@@ -387,9 +389,13 @@ function step(s: Editor, e: EditorEvent): Editor {
       // text the last conflict kept aside (ginsys/bronzeward#517 H6). Before, both are the same.
       return c === undefined || c.phase === "theirs" ? { ...s, ...closed(s), conflict: { mine: s.held, phase: "refused" } } : { ...s, ...closed(s) };
     case "failed": {
+      // A read held back while the write was open shows now, also once their text shows: then the
+      // conflict has followed every draft read since, so the newer revision names it (#551 item 2).
       const later = s.sent?.later;
-      if (later === undefined || c !== undefined || same(s.held, s.saved)) return { ...s, ...closed(s) };
-      return { ...s, ...closed(s), held: s.saved, conflict: { mine: s.held, phase: "theirs", ...(later.revision !== undefined && { revision: later.revision }) } };
+      if (later === undefined || (c !== undefined && c.phase !== "theirs") || same(s.held, s.saved)) return { ...s, ...closed(s) };
+      const named = [later.revision, c?.revision].filter((r): r is number => r !== undefined);
+      const revision = named.length > 0 ? Math.max(...named) : undefined;
+      return { ...s, ...closed(s), held: s.saved, conflict: { ...c, mine: s.held, phase: "theirs", ...(revision !== undefined && { revision }) } };
     }
     case "at":
       return c !== undefined && c.revision === undefined ? at({ revision: e.revision }) : s;
@@ -402,6 +408,9 @@ function step(s: Editor, e: EditorEvent): Editor {
       // typed since the last read or save is kept aside. The pane's own done Remove saved EMPTY,
       // and keeps the text it shows (H8).
       if (c === undefined) {
+        // A read held back for the open write now stands for this draft revision: it changed only
+        // another entry (ginsys/bronzeward#551 item 3).
+        if (s.sent?.open === true && s.sent.later !== undefined && !e.changed && e.removed !== true) return { ...s, sent: { ...s.sent, later: { revision: e.revision } } };
         if (e.removed !== true || same(s.saved, EMPTY)) return s;
         if (s.sent?.open === true) return { ...s, saved: EMPTY, sent: { ...s.sent, later: { revision: e.revision } } };
         return { ...s, held: EMPTY, saved: EMPTY, ...(!same(s.held, s.saved) && { conflict: { mine: s.held, phase: "theirs" as const, revision: e.revision } }) };
@@ -420,6 +429,14 @@ function step(s: Editor, e: EditorEvent): Editor {
       // A revision read pending since before Show, a draft read ignored while refused started it,
       // also gives their text.
       if (c.phase === "asked" && (e.changed || s.reading === true)) return at({ revision: e.revision, awaits: true });
+      // Once their text shows, another author's removal shows too, as C3 does without a conflict, and
+      // ends a repeated Show's wait. Text typed since is the operator's text now (H6). The pane's own
+      // done Remove saved EMPTY and keeps its text (H8); an open write's answer settles it first
+      // (ginsys/bronzeward#551 item 1).
+      if (c.phase === "theirs" && e.removed === true && !same(s.saved, EMPTY) && s.sent?.open !== true) {
+        const { awaits: _awaited, ...shown } = c;
+        return { ...s, held: EMPTY, saved: EMPTY, conflict: { ...shown, mine: same(s.held, s.saved) ? c.mine : s.held, revision: e.revision } };
+      }
       // Shown again: the draft read it started ends the wait, since a newer draft read discards an
       // older one. A new revision it names is read next, and Copy waits for that read (`reading`);
       // a revision read that answers before this draft read ends nothing (round-6 review).
@@ -444,11 +461,13 @@ function step(s: Editor, e: EditorEvent): Editor {
         const { awaits, again, ...shown } = c;
         return { ...idle, saved: e.text, held: e.text, conflict: { ...shown, phase: "theirs", ...((awaits !== true || again === true) && { awaits: true as const }) } };
       }
-      // Without a conflict, another author's text read while the editor holds typed text shows, and
-      // the typed text is kept aside (C1, C2). The read of the pane's own done Save is not theirs.
-      if (c === undefined && (s.own === undefined || e.id !== s.own) && !same(s.held, s.saved) && !same(e.text, s.saved)) {
+      // Without a conflict or once their text shows, another author's text read while the editor
+      // holds typed text shows, and the typed text is kept aside (C1, C2, ginsys/bronzeward#551
+      // item 2); a repeated Show still waits. The read of the pane's own done Save is not theirs.
+      if ((c === undefined || c.phase === "theirs") && (s.own === undefined || e.id !== s.own) && !same(s.held, s.saved) && !same(e.text, s.saved)) {
         if (s.sent?.open === true) return { ...idle, saved: e.text, sent: { ...s.sent, later: { ...(e.revision !== undefined && { revision: e.revision }) } } };
-        return { ...idle, saved: e.text, held: e.text, conflict: { mine: s.held, phase: "theirs", ...(e.revision !== undefined && { revision: e.revision }) } };
+        const revision = e.revision ?? c?.revision;
+        return { ...idle, saved: e.text, held: e.text, conflict: { ...c, mine: s.held, phase: "theirs", ...(revision !== undefined && { revision }) } };
       }
       // Once theirs shows, a read never ends a repeated Show's wait: only its draft read does.
       return { ...idle, saved: e.text, held: same(s.held, s.saved) ? e.text : s.held };
