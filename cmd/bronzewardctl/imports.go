@@ -166,8 +166,7 @@ func (e *env) importStart(args []string) error {
 
 // importResume continues an import paused for review, or takes over a claim whose lease lapsed
 // (POST /ingestions/{id}/continuations or /takeovers, author, human only), then, unless --no-wait,
-// waits as start does. The run this command starts writes its events at a generation above the
-// claim's before it, which the client reads first.
+// waits as start does, for the run at the claim's generation once the server accepted the request.
 func (e *env) importResume(verb string, args []string) error {
 	var noWait bool
 	var rf repeatFlags
@@ -185,22 +184,15 @@ func (e *env) importResume(verb string, args []string) error {
 	ing := pos[0]
 	var c *client.Client
 	var a accepted
-	var before int
-	var replayed bool
 	done := map[string]string{"continue": "Continued", "takeover": "Took over"}[verb]
 	return e.held(func() error {
 		err := e.writeAfter(func(cl *client.Client) error {
 			c = cl
-			b, err := readIngestion(cl, ing)
-			if err == nil {
-				before = b.OwnerGeneration
-			}
-			return err
+			return nil
 		}, &client.Write{Method: http.MethodPost, Path: "/ingestions/" + url.PathEscape(ing) + "/" + map[string]string{"continue": "continuations", "takeover": "takeovers"}[verb],
 			Body: []byte("{}"), Repeat: rp, HumanOnly: true, Check: "import status " + client.ShellWord(ing), Read: ingestionRead(ing)},
 			func(_ *client.Client, r *client.Response) ([]string, error) {
 				err := json.Unmarshal(r.Body, &a)
-				replayed = r.Header.Get("Idempotent-Replayed") == "true"
 				lines := []string{sf("%s import %s (operation %s).", done, a.Ingestion, a.Operation)}
 				if noWait {
 					lines = append(lines, "Follow it with: bronzewardctl import status "+pr(a.Ingestion))
@@ -210,12 +202,11 @@ func (e *env) importResume(verb string, args []string) error {
 		if err != nil || noWait {
 			return err
 		}
-		if replayed {
-			// A replayed answer started no run: the earlier request with this key did, at a generation
-			// the read before this send may already show. The wait follows the claim's latest run.
-			before = latestRun
-		}
-		return e.follow(c, a, before)
+		// The server takes the claim at its next generation in the transaction that accepts the
+		// request, so the claim read after the answer shows this command's run, or one that took the
+		// claim since. A read before the send could show a generation another client took next, and
+		// a replayed answer started no run at all.
+		return e.follow(c, a, latestRun)
 	})
 }
 
@@ -236,7 +227,7 @@ func (e *env) held(run func() error) error {
 }
 
 // latestRun, as follow's before, follows the run at the claim's owner generation when follow
-// starts: the run a replayed continuation or takeover started, or one that took the claim since.
+// starts: the run the continuation or takeover started, or one that took the claim since.
 const latestRun = -1
 
 // importAbandon abandons an import (POST /ingestions/{id}/abandonments, author, human only): its
@@ -308,7 +299,12 @@ func allowed(b *apitypes.IngestionBody) []string {
 	case "paused":
 		return []string{"Paused for review. Continue it, or abandon it:", cmd("continue"), cmd("abandon")}
 	case "held", "resumed":
-		if time.Now().After(b.LeaseUntil) {
+		switch {
+		case b.Mode != "encrypted" && time.Now().After(b.LeaseUntil):
+			return []string{"Its run stopped renewing the lease. Transient staging cannot be taken over: abandon it and import again:", cmd("abandon"), restart(b)}
+		case b.Mode != "encrypted":
+			return []string{"Its run holds the claim. Transient staging cannot be taken over; it can be abandoned now:", cmd("abandon")}
+		case time.Now().After(b.LeaseUntil):
 			return []string{"Its run stopped renewing the lease. Take it over to resume, or abandon it:", cmd("takeover"), cmd("abandon")}
 		}
 		return []string{"Its run holds the claim. Once the lease lapses it can be taken over; it can be abandoned now:", cmd("abandon")}
@@ -338,9 +334,7 @@ func (e *env) follow(c *client.Client, a accepted, before int) (err error) {
 	if err != nil {
 		return err
 	}
-	// Following the latest run, a mark's new generation starts it too. Following this command's own
-	// run, a mark taken between the read and the send would start another's run, so only this
-	// command's continuation or takeover does.
+	// Following the latest run, a mark's new generation starts it too.
 	latest := before == latestRun
 	if latest {
 		before = b.OwnerGeneration - 1
@@ -406,9 +400,13 @@ func (e *env) follow(c *client.Client, a accepted, before int) (err error) {
 			"The claim stays held until its lease lapses at %s; then take it over, or abandon it now:",
 			c.Context.Where(), b.Id, or(&code, "no code"), when(b.LeaseUntil)), More: remedies(b.Id, "takeover", "abandon")}
 	}
+	act, verbs := "take it over, or abandon it", []string{"status", "takeover", "abandon"}
+	if b.Mode != "encrypted" {
+		act, verbs = "or abandon it (transient staging cannot be taken over)", []string{"status", "abandon"}
+	}
 	return &client.Blocked{Err: outcomeUnknown{fmt.Errorf("%s: import %s: its claim is %s and its lease lapsed %s, while operation %s still runs: the outcome is unknown. "+
-		"Read it again later, take it over, or abandon it:",
-		c.Context.Where(), b.Id, b.State, ago(b.LeaseUntil), o.Id)}, More: remedies(b.Id, "status", "takeover", "abandon")}
+		"Read it again later, %s:",
+		c.Context.Where(), b.Id, b.State, ago(b.LeaseUntil), o.Id, act)}, More: remedies(b.Id, verbs...)}
 }
 
 // remedies are the lines `bronzewardctl import <verb> <id>`, one per verb, of an error's remedy.
