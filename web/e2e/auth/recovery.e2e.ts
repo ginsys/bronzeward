@@ -93,6 +93,30 @@ describe("the recovery entry (#364)", () => {
     // Not set aside, though the epoch changed under the write.
     expect(await $("body").getText()).not.toContain(SET_ASIDE);
   });
+
+  it("the exit and the revocation stay off for a role without recovery-admin, and the page says why", async () => {
+    const at = await open("recovery");
+    const when = stamp();
+    const made = await fetch(`${at}/api/v1/recovery/entries`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${mint("h-recovery")}`, "Content-Type": "application/json", "Idempotency-Key": `rec-364-${Date.now()}-roles` },
+      body: JSON.stringify({ restored: [{ family: "database", backup: "synthetic-backup-roles", takenAt: when }], stoppedAt: when, reason: "roles synthetic restore" }),
+    });
+    expect(made.status).toBe(201);
+    // Another sign-in, as a viewer: recovery mode is on, so the page is in the navigation.
+    expect(await fixtureSignIn("h-viewer", {}, { upstream: at })).toMatch(/^Server .+, API revision \d+$/);
+    await $('nav[aria-label="Main"]').$("a=Recovery").click();
+    await expect($("main h2")).toHaveText("Recovery");
+    const exit = $("main form[aria-label='Exit recovery']");
+    const revoke = $("main form[aria-label='Revoke identity']");
+    await expect(exit).toBeExisting({ wait: 20_000 });
+    for (const [form, label] of [[exit, "Exit recovery"], [revoke, "Revoke identity"]] as const) {
+      expect(await form.$(`button=${label}`).isEnabled()).toBe(false);
+      expect(await form.getText()).toContain("Needs recovery-admin");
+    }
+    // Nothing was sent by the page.
+    expect((await writes()).filter(([, route]) => route !== "/recovery/entries")).toEqual([]);
+  });
 });
 
 afterEach(storageEmpty);
