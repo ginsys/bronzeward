@@ -194,6 +194,88 @@ describe("[Go to field] positions (B13)", () => {
     ]) expect(references(none)).toEqual([]);
   });
 
+  // ginsys/bronzeward#544: each expected result below was read from go-yaml v3.0.5 (go.mod's pin) by
+  // decoding the same document, not written from memory.
+  describe("ginsys/bronzeward#544: the scanner reads the four forms the way go-yaml does", () => {
+    test("case 1: a blank line with a tab in or after a block scalar refuses the document, so it names nothing", () => {
+      for (const none of [
+        "a: !bwref |-\n  x/foo\n\t\nb: c\n", // go-yaml: found a tab character where an indentation space is expected
+        "a: !bwref |-\n  x/foo\n \t\nb: c\n",
+        "a: !bwref |-\n  x/foo\n\t",
+        "a: !bwref |-\r\n  x/foo\r\n\t\r\nb: c\r\n",
+        "a: !bwref |-\n\t\n  x/foo\n",
+      ]) expect(references(none)).toEqual([]);
+      // Spaces alone on that line are still chomped.
+      expect(references("a: !bwref |-\n  x/foo\n  \nb: c\n")).toEqual(["x/foo"]);
+    });
+
+    test("case 2: content under a key that follows a sequence dash must be deeper than the key", () => {
+      for (const none of [
+        "- a: !bwref |-\n  x/foo\n", // go-yaml: could not find expected ':'
+        "- - a: !bwref |-\n    x/foo\n", // the key is at column 4
+        "- - a: !bwref |-\n  x/foo\n",
+        "-   a: !bwref |-\n  x/foo\n",
+        "- - !bwref |-\n  x/foo\n", // a tag straight after the inner dash: content must pass that dash
+      ]) expect(references(none)).toEqual([]);
+      for (const one of [
+        "- a: !bwref |-\n    x/foo\n",
+        "- a: !bwref |-\n   x/foo\n", // one space past the key's column 2 is not enough: column 3 is
+        "-   a: !bwref |-\n     x/foo\n",
+        "- !bwref |-\n  x/foo\n", // the entry's own value: indented past the dash
+        "- !bwref |-\n x/foo\n",
+        "- - !bwref |-\n   x/foo\n",
+      ]) expect(references(one)).toEqual(["x/foo"]);
+      // The key's column binds a block scalar's content only. A plain scalar's next line is read as
+      // before: go-yaml refuses the first (could not find expected ':') and folds the second into
+      // "x/foo y", so neither names a reference.
+      expect(references("- a: !bwref x/foo\n  y\n")).toEqual([]);
+      expect(references("- a: !bwref x/foo\n    y\n")).toEqual([]);
+    });
+
+    test("case 3: U+0085, U+2028 and U+2029 break a line, in comments, plain, quoted and block scalars alike", () => {
+      for (const br of ["\u0085", "\u{2028}", "\u{2029}"]) {
+        expect(references(`a: !bwref |-\n  x/foo${br}`)).toEqual(["x/foo"]);
+        expect(references(`a: !bwref |-\n  x/foo${br}b: c\n`)).toEqual(["x/foo"]);
+        expect(references(`a: !bwref x/foo # c${br}b: !bwref x/bar\n`)).toEqual(["x/foo", "x/bar"]);
+        expect(references(`a: !bwref x/foo${br}b: d\n`)).toEqual(["x/foo"]);
+        // The break folds the plain and single-quoted scalar into a blank: no name.
+        expect(references(`a: !bwref x/foo${br}  y\n`)).toEqual([]);
+        expect(references(`a: !bwref 'x/foo${br}  y'\n`)).toEqual([]);
+        // A second content line after the break: not one line of content.
+        expect(references(`a: !bwref |-\n  x/foo${br}  y\n`)).toEqual([]);
+      }
+      // After a backslash the break is an escaped line break, which a double-quoted scalar drops.
+      expect(references('a: !bwref "x/\\\u0085foo"\n')).toEqual(["x/foo"]);
+    });
+
+    test("case 4: a carriage return alone breaks a line, and CRLF stays one break", () => {
+      expect(references("a: !bwref |-\r  x/foo\r")).toEqual(["x/foo"]);
+      expect(references("a: !bwref |-\r  x/foo\rb: c\r")).toEqual(["x/foo"]);
+      expect(references("a: !bwref x/foo # c\rb: !bwref x/bar\r")).toEqual(["x/foo", "x/bar"]);
+      expect(references('a: !bwref "x/\\\rfoo"\n')).toEqual(["x/foo"]);
+      expect(references("a: !bwref |-\r  x/foo\r  y\r")).toEqual([]);
+      expect(references("a: !bwref x/foo\r  y\r")).toEqual([]);
+      // CRLF is one break: the same documents with CRLF read as with LF, and a CRLF does not add an
+      // empty line that would change what a block scalar holds.
+      expect(references("a: !bwref |-\r\n  x/foo\r\nb: c\r\n")).toEqual(["x/foo"]);
+      expect(references("a: !bwref |\r\n  x/foo\r\n")).toEqual([]);
+      expect(references("a: !bwref |-\r\n  x/foo\r\n\r\nb: c\r\n")).toEqual(["x/foo"]);
+      // A mix on one document: CR, LF and CRLF.
+      expect(references("a: !bwref x/one\rb: !bwref |-\n  x/two\r\nc: !bwref x/three\n")).toEqual(["x/one", "x/two", "x/three"]);
+    });
+
+    test("a spot still addresses the original text after a line break is read as one", () => {
+      for (const br of ["\r", "\u0085", "\u{2028}", "\u{2029}"]) {
+        const text = `a: !bwref |-${br}  x/foo${br}b: !bwref x/bar${br}`;
+        expect(references(text)).toEqual(["x/foo", "x/bar"]);
+        const s = spotOfReference(text, "x/foo");
+        expect(text.slice(s!.start, s!.end)).toBe(`!bwref |-${br}  x/foo`);
+        const b = spotOfReference(text, "x/bar");
+        expect(text.slice(b!.start, b!.end)).toBe("!bwref x/bar");
+      }
+    });
+  });
+
   test("a flow list's reference ends at its comma, and a comment's text is no reference", () => {
     const text = "a: [!bwref ghost, !bwref x/two]\n# !bwref commented\nb: c # !bwref trailing\nd: '# not a comment' # !bwref after-quote\n";
     expect(references(text)).toEqual(["ghost", "x/two"]);
