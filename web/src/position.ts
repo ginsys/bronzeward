@@ -123,18 +123,28 @@ function continues(masked: string, tag: number, end: number): boolean {
 // A block scalar's name and where it ends (YAML 1.2 §8.1, ginsys/bronzeward#534 C7). It names a
 // reference only with strip chomping (-), which ends it with no line break, and with one content
 // line, so none is inside it. That line is more indented than the node that holds the scalar, and
-// its indentation is the content's. The lines are read from the text: a # in them is no comment.
+// its indentation, in spaces only, is the content's. The scalar goes on until a line with text is
+// less indented: a later line with text at that indentation, or a blank line with more than it, is
+// content too. The lines are read from the text: a # in them is no comment.
 // With an indentation indicator the content's indentation depends on the holding node's column,
 // which this scan does not read: such a scalar names nothing here, and the server still checks it.
+const spaces = (line: string) => line.length - line.replace(/^ +/, "").length;
 function block(text: string, masked: string, tag: number, end: number, header: string): { name: string; end: number } | undefined {
   if (!header.includes("-") || /\d/.test(header)) return undefined;
   const start = text.indexOf("\n", end) + 1;
   const first = lineAt(text, start);
-  if (first.trim() === "" || indent(first) <= holder(masked, tag)) return undefined;
-  const after = start + first.length;
-  const next = nextLine(text, after + 1);
-  if (next !== undefined && indent(next) >= indent(first) && !MARKER.test(next)) return undefined;
-  return { name: first.slice(indent(first)), end: after };
+  const depth = spaces(first);
+  if (first.trim() === "" || depth <= holder(masked, tag)) return undefined;
+  for (let at = start + first.length + 1; at < text.length; ) {
+    const l = lineAt(text, at);
+    if (l.trim() !== "") {
+      if (spaces(l) >= depth && !MARKER.test(l)) return undefined;
+      break;
+    }
+    if (l.length > depth) return undefined;
+    at += l.length + 1;
+  }
+  return { name: first.slice(depth), end: start + first.length };
 }
 
 // A double-quoted scalar's text with YAML's escapes decoded (YAML 1.2 §5.7); undefined for an

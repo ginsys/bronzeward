@@ -152,7 +152,14 @@ describe("[Go to field] positions (B13)", () => {
       "a: !bwref |-\n", // no content at all
       'a: !bwref "x/\n  foo"\n', // an unescaped line break folds into a blank
       "a: !bwref |2-\n  x/foo\n", // an indentation indicator is not read here
+      // Local review: blanks beyond the content's indentation are content, and so is a
+      // non-breaking space, which is no indentation.
+      "a: !bwref |-\n  x/foo\n    \n",
+      "a: !bwref |-\n  x/foo\n   \nb: c\n",
+      "a: !bwref |-\n   x/foo\n",
     ]) expect(references(none)).toEqual([]);
+    // Blank lines no deeper than the content's indentation are chomped.
+    expect(references("a: !bwref |-\n  x/foo\n  \n\nb: c\n")).toEqual(["x/foo"]);
     // A tag that starts the document's second line, under an empty first one, is still read.
     expect(references("\n  !bwref x/a\n")).toEqual(["x/a"]);
   });
@@ -303,7 +310,9 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     ["R7-1: Copy my text before their text shows changes nothing", { held: M, saved: A, conflict: asked(M, 8) }, { kind: "copy" }, { held: M, saved: A, conflict: asked(M, 8) }],
     ["Copy my text without a conflict changes nothing", { held: M, saved: A }, { kind: "copy" }, { held: M, saved: A }],
     ["#534 C2: a revision read with another text while text is typed shows theirs, the typed text aside", { held: M, saved: A }, { kind: "read", text: T, since: 0, revision: 8 }, { held: T, saved: T, conflict: theirs(M) }],
-    ["R1-F2: a revision read of the saved text keeps text typed since, marks aside", { held: M2, saved: { ...M, marks: "doc[0]/a" } }, { kind: "read", text: M, since: 0 }, { held: M2, saved: M }],
+    ["local review: the read of the pane's own saved revision keeps text typed since, though the server stored another text", { held: M2, saved: M, own: "frv_9" }, { kind: "read", text: T, since: 0, id: "frv_9" }, { held: M2, saved: T, own: "frv_9" }],
+    ["R1-F2: a read again of the revision shown keeps text typed since", { held: M, saved: A }, { kind: "read", text: A, since: 0, id: "frv_8" }, { held: M, saved: A }],
+    ["a done Save records the revision it created", { held: M2, saved: A, sent: sentOf(M) }, { kind: "done", revision: "frv_9" }, { held: M2, saved: M, sent: sentOf(M), writes: 1, own: "frv_9" }],
     ["#534 C3: another author's removal empties a clean editor", { held: A, saved: A }, { kind: "draft", revision: 8, changed: false, removed: true }, { held: EMPTY, saved: EMPTY }],
     ["#534 C3: another author's removal keeps typed text aside", { held: M, saved: A }, { kind: "draft", revision: 8, changed: false, removed: true }, { held: EMPTY, saved: EMPTY, conflict: theirs(M) }],
     ["H8: the pane's own done Remove keeps its text when the draft read shows the removal", { held: M, saved: EMPTY }, { kind: "draft", revision: 8, changed: false, removed: true }, { held: M, saved: EMPTY }],
@@ -431,7 +440,7 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     expect(src).toMatch(/const waits = unread\(entry\?\.revision, loaded\);/);
     // #517 review round 3: a read with text records its revision, and a draft read again retries
     // a failed one; without either the pane never edits, or stays waiting after Show.
-    expect(src).toMatch(/setLoaded\(revision\);\n\s*act\(\{ kind: "read", text: fromRevision\(r\.data\), since: done, revision: draft\.revision \}\);/);
+    expect(src).toMatch(/setLoaded\(revision\);\n\s*act\(\{ kind: "read", text: fromRevision\(r\.data\), since: done, revision: draft\.revision, id: revision \}\);/);
     expect(src).toMatch(/act\(\{ kind: "draft", revision: draft\.revision, changed[^\n]*\n\s*if \(!changed && failed\) retry\(\(x\) => x \+ 1\);/);
     // PR review: also when the page keeps the data it read before (a failed read with no answer).
     expect(src).toMatch(/\{unshown && item\.kind !== "loading" && <p><button [^>]*onClick=\{\(\) => reread\(\(x\) => x \+ 1\)\}>\{READ_DRAFT_AGAIN\}/);
@@ -539,6 +548,16 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     // Save now sends the text that shows; Copy my text gives back the typed text.
     expect(sendRefusal(false, s.conflict, true)).toBeUndefined();
     expect(editor(s, { kind: "copy" }).held).toBe(M);
+  });
+
+  test("local review: the pane's own Save, typed into while it is sent, reads back a stored text that differs and opens no conflict", () => {
+    const s = run({ held: A, saved: A }, [{ kind: "type", held: M }, { kind: "send" }, { kind: "type", held: M2 }, { kind: "done", revision: "frv_9" }, { kind: "draft", revision: 8, changed: true }, { kind: "reading", on: true }, { kind: "read", text: T, since: 1, revision: 8, id: "frv_9" }]);
+    expect(s.conflict).toBeUndefined();
+    expect(s.held).toBe(M2);
+    expect(s.saved).toBe(T);
+    // Another author's revision read after it still shows as theirs.
+    const later = run(s, [{ kind: "draft", revision: 9, changed: true }, { kind: "read", text: T2, since: 1, revision: 9, id: "frv_10" }]);
+    expect(later.conflict).toEqual({ mine: M2, phase: "theirs", revision: 9 });
   });
 
   test("ginsys/bronzeward#534 C3: another author's removal read by a Discard's Show their change shows before any Save", () => {
