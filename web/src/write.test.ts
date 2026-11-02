@@ -1009,8 +1009,23 @@ describe("the recovery entry's exception (§8.4 item 3, REC-04 (a))", () => {
     expect(p.sent).toHaveLength(1);
   });
 
-  test("REC-02: a 409 conflict carrying an earlier record is the entry's refusal, which the form reads, not a set-aside", async () => {
+  test("REC-02: a 409 conflict with an epoch alone is a competing entry under another key: the entry's refusal, which the form reads", async () => {
+    const p = page([problem(409, "conflict", { epoch: "e2" })]);
+    expect(await p.writes.submit(entry())).toMatchObject({ kind: "refused", status: 409, problem: { epoch: "e2" } });
+  });
+
+  test("a 409 conflict carrying the key's earlier record (request and epoch) means the first send committed: set aside as unknown, never refused", async () => {
     const p = page([problem(409, "conflict", { request: "r1", epoch: "e2" })]);
-    expect(await p.writes.submit(entry())).toMatchObject({ kind: "refused", status: 409, problem: { epoch: "e2", request: "r1" } });
+    expect(await p.writes.submit(entry())).toMatchObject({ kind: "set-aside", why: EARLIER_EPOCH, ambiguous: true, problem: { epoch: "e2", request: "r1" } });
+  });
+
+  test("the shell that held the client goes: an unknown entry is not repeatable either", async () => {
+    const drop = () => new TypeError("Failed to fetch");
+    const { writes, client } = page([drop(), drop(), drop(), drop()]);
+    const w = entry();
+    await writes.submit(w);
+    expect(writes.repeatable(w)).toBe(true);
+    writes.disconnect(client);
+    expect(writes.repeatable(w)).toBe(false);
   });
 });

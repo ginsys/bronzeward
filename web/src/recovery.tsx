@@ -8,7 +8,7 @@ import { Head, Id, type Load, Scroll, useReads, useSettled } from "./list.tsx";
 import type { Problem, ReadResult } from "./request.ts";
 import type { Outcome } from "./write.ts";
 import { useGate, useOffline, useRecoveryState } from "./shell.tsx";
-import { clock, Disconnected, ProblemFields, problemFields, Refused, Status, when } from "./states.tsx";
+import { clock, Disconnected, ProblemFields, problemFields, problemTail, Refused, Status, when } from "./states.tsx";
 import type { components } from "./api/v1";
 
 export type Recovery = components["schemas"]["RecoveryBody"];
@@ -97,7 +97,7 @@ export const ENTRY_EFFECTS = [
   "It takes over every non-terminal apply-config operation as unresolved, and ends the running import and publish jobs.",
   "Recovery mode then lasts until recovery exit, once every scope is released.",
 ];
-export const NORMAL_START = "This server was started normally, so it takes no recovery entry. Restore the backups, stop every instance, and start one for recovery.";
+export const NORMAL_START = "This server was started normally, so it takes no recovery entry. Stop every instance, restore the backups, and start one for recovery.";
 export const REVOCATION_LIMITS = [
   "A revocation is permanent: nothing undoes it.",
   "It adds no auth.deniedSubjects entry and reissues no token, and a restore of the database can erase it.",
@@ -116,7 +116,7 @@ export function nextStep(state: string): string {
     case "unresolved":
       return "An operation holds it: read the machine's operations. It is classified after the normal restart, then mark the scope again.";
     case "blocked":
-      return "Keys are missing: read the machine's timeline, then mark the scope again, or publish a new release for a lost key version.";
+      return "Mark the scope, then read its recorded cause: a scope stays blocked until it is marked. If the cause names a missing key or observation, repair that, or publish a new release for a lost key version.";
     default:
       return "None.";
   }
@@ -128,9 +128,14 @@ export const unreleased = (scopes: readonly Scope[]) => inRecovery(scopes).filte
 
 // The result of the entry this page made, kept after the epoch change its commit causes replaced the
 // page it was sent from (the entry's form lives on the start's pre-entry state, which that read ends).
-// It is the entry's body; null when the success could not be read (it is still saved); "normal" when
-// the server answered that it takes no entry (REC-02), so the restriction the page showed is stale.
-type Noted = EntryBody | null | "normal";
+// It is the entry's body; null when the success could not be read (it is still saved); or the problem of
+// the 409 that refused it (REC-02): without `epoch` the server takes no entry, so the restriction the
+// page showed is stale; with `epoch` another entry committed under another key. The form does not
+// outlive either, so the header keeps the refusal's title, detail and request (§8.2).
+type Noted = EntryBody | null | { refused: Problem };
+// What a refused entry means (REC-02), one sentence.
+const reading = (p: Problem) =>
+  p["epoch"] === undefined ? NORMAL_START : `An entry is already recorded on this server, in epoch ${String(p["epoch"])}, under another request. Nothing was added. Read the console.`;
 let entered: Noted | undefined;
 const listeners = new Set<() => void>();
 export const noteEntry = (e: Noted | undefined) => {
@@ -143,9 +148,11 @@ export function Entered() {
   useSyncExternalStore(watch, () => entered, () => entered);
   if (entered === undefined) return null;
   const dismiss = <button type="button" onClick={() => noteEntry(undefined)}>Dismiss</button>;
-  if (entered === "normal") return <Status testid="entered" actions={dismiss}>{NORMAL_START}</Status>;
   if (entered === null) {
     return <Status testid="entered" actions={dismiss}>Recovery entry saved (the server answered), but its answer could not be read. Read the Recovery page.</Status>;
+  }
+  if ("refused" in entered) {
+    return <Status testid="entered" actions={dismiss}>{reading(entered.refused)}{problemTail(entered.refused)}</Status>;
   }
   return (
     <Status testid="entered" actions={dismiss}>
@@ -155,9 +162,18 @@ export function Entered() {
   );
 }
 
-const TIME = /^\d{4}-\d\d-\d\dT\d\d:\d\d(:\d\d(\.\d+)?)?(Z|[+-]\d\d:\d\d)$/;
+const TIME = /^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d)(?::(\d\d)(?:\.\d+)?)?(?:Z|[+-](\d\d):(\d\d))$/;
 const FAMILIES = ["database", "provider", "credential-store"] as const;
-const stamp = (v: string) => (TIME.test(v) && !Number.isNaN(Date.parse(v)) ? new Date(v).toISOString() : undefined);
+// An RFC 3339 time with a zone whose calendar parts exist: Date.parse rolls 2026-02-30 over to March,
+// which would record a different time than the operator typed.
+export const stamp = (v: string): string | undefined => {
+  const m = TIME.exec(v);
+  if (m === null) return undefined;
+  const [year, month, day, hour, minute, second = 0, zoneHour = 0, zoneMinute = 0] = m.slice(1).map((p) => (p === undefined ? undefined : Number(p)));
+  const days = new Date(Date.UTC(year!, month!, 0)).getUTCDate();
+  const exists = month! >= 1 && month! <= 12 && day! >= 1 && day! <= days && hour! < 24 && minute! < 60 && second < 60 && zoneHour < 24 && zoneMinute < 60;
+  return exists && !Number.isNaN(Date.parse(v)) ? new Date(v).toISOString() : undefined;
+};
 const text = (d: FormData, n: string) => String(d.get(n) ?? "").trim();
 // The 409 conflict an entry meets on a start that takes none (no `epoch`) or one already entered under
 // another key (with `epoch`).
@@ -196,8 +212,13 @@ export function EnterRecovery({ onRead }: { onRead?: () => void }) {
     if (why !== undefined) return;
     const settled = (o: Outcome) => {
       if (o.kind === "done") noteEntry(typeof o.data === "object" && o.data !== null ? (o.data as EntryBody) : null);
-      // REC-02: a start that takes no entry. The page's restriction is stale, so the shell reads again.
-      else if (conflict(o) !== undefined && conflict(o)?.["epoch"] === undefined) (noteEntry("normal"), onRead?.());
+      else {
+        // REC-02: the refusal is kept in the header, since the read it causes (or §8.5's move to the
+        // recovery state) replaces this form. Without `epoch` the start takes no entry and the page's
+        // restriction is stale, so the shell reads again.
+        const p = conflict(o);
+        if (p !== undefined) (noteEntry({ refused: p }), p["epoch"] === undefined && onRead?.());
+      }
     };
     send({ method: "POST", path: "/recovery/entries", resource: "/recovery", entry: true, body: { restored, stoppedAt, reason }, settled });
   };
@@ -223,9 +244,12 @@ export function EnterRecovery({ onRead }: { onRead?: () => void }) {
         {off !== undefined && ` ${off}`}
       </p>
       {bad !== undefined && <p role="alert" data-testid="entry-input">{bad}</p>}
-      {p === undefined ? <Result w={w} done={() => "Recovery mode entered."} /> : p["epoch"] === undefined
-        ? <Status testid="write-result">{NORMAL_START}</Status>
-        : <Status testid="write-result">An entry is already recorded on this server, in epoch {String(p["epoch"])}, under another request. Nothing was added. Read the console.</Status>}
+      {p === undefined || o?.kind !== "refused" ? <Result w={w} done={() => "Recovery mode entered."} /> : (
+        <>
+          <Refused testid="write-result" problem={p} status={o.status} verb="saved" replayed={o.replayed} />
+          <Status testid="write-reading">{reading(p)}</Status>
+        </>
+      )}
     </form>
   );
 }

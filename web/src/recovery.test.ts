@@ -4,7 +4,7 @@ import { describe, expect, test } from "vitest";
 import { WritesProvider } from "./forms.tsx";
 import {
   ENTRY_EFFECTS, EnterRecovery, Entered, ExitRecovery, nextStep, NORMAL_START, noteEntry, PRE_ENTRY, PreEntry, RECOVERY_START, RecoveryBanner, RecoveryRead, REVOCATION_LIMITS, Revocation, scopeSummary,
-  startModeOf, startRefusal, UNKNOWN_START, unreleased,
+  stamp, startModeOf, startRefusal, UNKNOWN_START, unreleased,
 } from "./recovery.tsx";
 import { type Problem, type ReadResult, TRANSPORT_FAILURE } from "./request.ts";
 import { type Role, ShellContext } from "./shell.tsx";
@@ -77,7 +77,9 @@ describe("the console's parts (#364)", () => {
     expect(nextStep("ready")).toBe("Release the scope. A release is not an approval.");
     expect(nextStep("released")).toBe("None.");
     expect(nextStep("unresolved")).toMatch(/classified after the normal restart/);
-    expect(nextStep("blocked")).toMatch(/Keys are missing/);
+    // A scope is also blocked after a plain accounting, until it is marked: the step does not claim a missing key.
+    expect(nextStep("blocked")).toMatch(/^Mark the scope, then read its recorded cause/);
+    expect(nextStep("blocked")).not.toMatch(/Keys are missing/);
     expect(unreleased(scopes("normal", "released", "ready", "blocked")).map((s) => s.state)).toEqual(["ready", "blocked"]);
   });
 
@@ -114,12 +116,36 @@ describe("the console's parts (#364)", () => {
       // A success whose body could not be read stays saved: no body is read from it.
       noteEntry(null);
       expect(html(h(Entered))).toContain("saved (the server answered), but its answer could not be read");
-      noteEntry("normal");
-      expect(html(h(Entered))).toContain(NORMAL_START.replaceAll("'", "&#x27;"));
+      // A refusal keeps its problem in the header: the form that showed it does not outlive the read.
+      const refused = (extra: Record<string, unknown>) =>
+        ({ type: "urn:bronzeward:problem:conflict", title: "conflict", detail: "SYNTH detail", status: 409, instance: "req_synth", ...extra }) as Problem;
+      noteEntry({ refused: refused({}) });
+      const normal = html(h(Entered));
+      expect(normal).toContain(NORMAL_START.replaceAll("'", "&#x27;"));
+      expect(normal).toContain("conflict: SYNTH detail.");
+      expect(normal).toContain("Request req_synth.");
+      noteEntry({ refused: refused({ epoch: "ep_other" }) });
+      const other = html(h(Entered));
+      expect(other).toContain("An entry is already recorded on this server, in epoch ep_other, under another request.");
+      expect(other).toContain("Request req_synth.");
+      expect(other).not.toContain("started normally");
     } finally {
       noteEntry(undefined);
     }
     expect(html(h(Entered))).toBe("");
+  });
+
+  test("a start that takes no entry names the operator's order: stop every instance, then restore (the runbook's step 1)", () => {
+    expect(NORMAL_START).toMatch(/Stop every instance, restore the backups, and start one for recovery\.$/);
+  });
+
+  test("the entry's times must exist on the calendar: an impossible date is refused, never rolled over", () => {
+    expect(stamp("2026-11-01T08:30:00Z")).toBe("2026-11-01T08:30:00.000Z");
+    expect(stamp("2026-11-01T09:30+01:00")).toBe("2026-11-01T08:30:00.000Z");
+    expect(stamp("2028-02-29T00:00:00Z")).toBe("2028-02-29T00:00:00.000Z");
+    for (const bad of ["2026-02-30T08:30:00Z", "2026-02-29T08:30:00Z", "2026-04-31T08:30:00Z", "2026-13-01T08:30:00Z", "2026-00-10T08:30:00Z", "2026-11-00T08:30:00Z", "2026-11-01T24:00:00Z", "2026-11-01T08:60:00Z", "2026-11-01T08:30:60Z", "2026-11-01T08:30:00+24:00", "2026-11-01T08:30:00", "yesterday"]) {
+      expect(stamp(bad), bad).toBeUndefined();
+    }
   });
 
   test("the revocation states its limits, and stays off without recovery-admin or a typed identity", () => {
