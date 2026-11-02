@@ -90,10 +90,15 @@ var (
 	recoveryRevision    = 3
 	// recoveryRevisionMoved, when not 0, is the revision GET /server shows once the epoch moved.
 	recoveryRevisionMoved = 0
+	// recoveryRefreshEpoch, when not empty, is the epoch of the first GET /server read after the epoch
+	// moved: the epoch moves a second time before the client refreshes its server facts.
+	recoveryRefreshEpoch = ""
 )
 
 func setServerFacts(t *testing.T, revision int, epochByPath map[string]string) {
-	t.Cleanup(func() { recoveryEpochByPath, recoveryRevision, recoveryRevisionMoved = nil, 3, 0 })
+	t.Cleanup(func() {
+		recoveryEpochByPath, recoveryRevision, recoveryRevisionMoved, recoveryRefreshEpoch = nil, 3, 0, ""
+	})
 	recoveryEpochByPath, recoveryRevision = epochByPath, revision
 }
 
@@ -114,6 +119,9 @@ func recoveryServer(t *testing.T, answers map[string]string, post string) func()
 			if ep, ok := recoveryEpochByPath[k]; ok {
 				moved = ep
 			}
+		}
+		if r.URL.Path == "/api/v1/server" && moved != "" && recoveryRefreshEpoch != "" {
+			moved = recoveryRefreshEpoch
 		}
 		epoch := recoveryEpochHeader
 		if moved != "" {
@@ -419,6 +427,17 @@ func TestMachineShowRefusesAMixedSnapshot(t *testing.T) {
 		var out, errb bytes.Buffer
 		if rc := run([]string{"machine", "show", "mch_a"}, &out, &errb); rc != 0 || !strings.Contains(out.String(), "mch_a") {
 			t.Errorf("rc %d, out %q, err %q; want the table", rc, out.String(), errb.String())
+		}
+	})
+	t.Run("the epoch moves again before the server refresh", func(t *testing.T) {
+		// The machine answer shows epoch 2; the refresh of GET /server, and then the observations, show epoch 3.
+		setServerFacts(t, 3, map[string]string{"/api/v1/machines/mch_a": "ep_BWSYNTH-2"})
+		recoveryRefreshEpoch = "ep_BWSYNTH-3"
+		recoveryServer(t, answers, "")
+		var out, errb bytes.Buffer
+		rc := run([]string{"machine", "show", "mch_a"}, &out, &errb)
+		if rc == 0 || out.Len() != 0 || !strings.Contains(errb.String(), "the epoch changed from 'ep_BWSYNTH-2' to 'ep_BWSYNTH-3'") {
+			t.Errorf("rc %d, out %q, err %q; want a refusal that shows no table", rc, out.String(), errb.String())
 		}
 	})
 	t.Run("the epoch holds", func(t *testing.T) {

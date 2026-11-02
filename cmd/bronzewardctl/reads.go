@@ -253,7 +253,8 @@ func (e *env) machineShow(c *client.Client, id string) error {
 	if e.output == "json" || e.output == "yaml" { // the resource alone; the sentences are the table's
 		return e.emit(r.Body, nil)
 	}
-	first := c.Context.LastEpoch // the epoch of the machine answer
+	// The epoch of the machine answer itself: Get may have refreshed LastEpoch past it already.
+	first := r.Header.Get("Bronzeward-Epoch")
 	items, err := c.List("/machines/" + url.PathEscape(id) + "/observations")
 	if err != nil {
 		return err
