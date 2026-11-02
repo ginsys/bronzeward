@@ -101,6 +101,9 @@ describe("the unsaved-change guard (§11.4 item 3)", () => {
     expect(leaving(writes, "/drafts/drf_1")).toBe(true);
     expect(leaving(writes, "/machines")).toBe(false);
     expect(ask).toHaveBeenCalledWith("Unsaved text in fragment f of draft drf_1: leaving drops it.\nLeave this page?");
+    // A write notice's own way out still asks for unsaved text.
+    expect(leaving(writes, "/machines", true)).toBe(false);
+    expect(ask).toHaveBeenCalledTimes(2);
   });
 });
 
