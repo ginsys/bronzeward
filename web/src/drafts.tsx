@@ -477,9 +477,12 @@ function step(s: Editor, e: EditorEvent): Editor {
       // the typed text is kept aside (C1, C2). Once their text shows, another author's newer text
       // shows, and text typed since is kept aside in place of the older (ginsys/bronzeward#551
       // item 2); a repeated Show still waits. The read of the pane's own done Save is not theirs,
-      // and a read while a write is open waits for that write's answer.
+      // and a read while a write is open waits for that write's answer. Once their text shows with
+      // nothing to keep aside, the read replaces the text, as below: held back, a done write would
+      // drop it (#551 local review).
       const another = (s.own === undefined || e.id !== s.own) && !same(e.text, s.saved);
-      if (another && (c?.phase === "theirs" || (c === undefined && !same(s.held, s.saved)))) {
+      const keeps = c === undefined ? !same(s.held, s.saved) : c.phase === "theirs" && (c.typed === true || !same(s.held, s.saved));
+      if (another && keeps) {
         if (s.sent?.open === true) return { ...idle, saved: e.text, sent: { ...s.sent, later: { ...(e.revision !== undefined && { revision: e.revision }) } } };
         const revision = e.revision ?? c?.revision;
         return { ...idle, saved: e.text, held: e.text, conflict: { ...(c === undefined ? { mine: s.held } : kept(c)), phase: "theirs", ...(revision !== undefined && { revision }) } };
@@ -502,7 +505,9 @@ function step(s: Editor, e: EditorEvent): Editor {
       return { ...after, ...closed(s), ...(e.revision !== undefined && { own: e.revision }), saved: s.sent?.removes === true ? EMPTY : sent, writes: writes + 1 };
     }
     case "revert":
-      return mayRevert(c) && e.at === (s.version ?? 0) ? { ...s, held: e.text, note: e.note } : { ...s, note: NOT_REVERTED };
+      // Once their text shows, the reverted text is the operator's, as typed text is (#551 local review).
+      if (!mayRevert(c) || e.at !== (s.version ?? 0)) return { ...s, note: NOT_REVERTED };
+      return { ...s, held: e.text, note: e.note, ...(c !== undefined && { conflict: { ...c, typed: true as const } }) };
     case "note":
       return { ...s, note: e.text };
   }

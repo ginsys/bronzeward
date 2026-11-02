@@ -377,7 +377,7 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     ["R5-2: text typed while Revert reads the base text is kept", { held: M2, saved: A, version: 1 }, { kind: "revert", at: 0, text: A, note: "n" }, { held: M2, saved: A, version: 1, note: NOT_REVERTED }],
     ["R5-2: a 412 while Revert reads the base text keeps the operator's text", { held: M, saved: A, conflict: refused(M, 7), version: 1 }, { kind: "revert", at: 0, text: A, note: "n" }, { held: M, saved: A, conflict: refused(M, 7), version: 1, note: NOT_REVERTED }],
     ["an older Revert's answer after a newer one's is not applied", { held: A, saved: T, version: 2 }, { kind: "revert", at: 1, text: T2, note: "n" }, { held: A, saved: T, version: 2, note: NOT_REVERTED }],
-    ["Revert to base while their text shows replaces the editor's text, the operator's still aside", { held: T, saved: T, conflict: theirs(M) }, { kind: "revert", at: 0, text: A, note: "n" }, { held: A, saved: T, conflict: theirs(M), note: "n" }],
+    ["Revert to base while their text shows replaces the editor's text, the operator's still aside, and marks it typed (#551 local review)", { held: T, saved: T, conflict: theirs(M) }, { kind: "revert", at: 0, text: A, note: "n" }, { held: A, saved: T, conflict: typed(theirs(M)), note: "n" }],
     // Draft read and Show, sweep (b): an older draft revision after a newer one.
     ["an older draft revision read after a newer one changes nothing", { held: T, saved: T, conflict: theirs(M, 9) }, { kind: "draft", revision: 8, changed: false }, { held: T, saved: T, conflict: theirs(M, 9) }],
     ["an older draft revision while asked shows nothing", { held: M, saved: A, conflict: asked(M, 9) }, { kind: "draft", revision: 8, changed: false }, { held: M, saved: A, conflict: asked(M, 9) }],
@@ -437,6 +437,18 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     const s = run({ held: A, saved: A }, [{ kind: "type", held: M }, { kind: "refused" }, { kind: "at", revision: 7 }, { kind: "show" }, { kind: "draft", revision: 8, changed: true }, { kind: "read", text: T, since: 0, revision: 8 }, { kind: "send", removes: true }, { kind: "done" }, { kind: "draft", revision: 9, changed: false, removed: true }, { kind: "reading", on: true }, { kind: "draft", revision: 10, changed: true }, { kind: "read", text: T2, since: 1, revision: 10 }]);
     expect(rest(s)).toEqual({ held: T2, saved: T2, conflict: theirs(M, 10), sent: { text: T, whileTheirs: true, removes: true }, writes: 1 });
     expect(editor(s, { kind: "copy" }).held).toEqual(M);
+  });
+
+  test("ginsys/bronzeward#551 local review round 2: with nothing typed since their text showed, a newer read during a Save shows at once, so the done Save cannot drop it", () => {
+    const s = run({ held: T, saved: T, conflict: theirs(M) }, [{ kind: "send" }, { kind: "read", text: T2, since: 0, revision: 10, id: "frv_10" }, { kind: "done", revision: "frv_9" }]);
+    expect(rest(s)).toEqual({ held: T2, saved: T, sent: sentOf(T, true), writes: 1, own: "frv_9" });
+    expect(holdsUnsaved(s.held, s.saved, s.conflict?.mine)).toBe(true);
+  });
+
+  test("ginsys/bronzeward#551 local review round 2: text from Revert to base after their text showed is the operator's when a newer read comes", () => {
+    const s = run({ held: T, saved: T, conflict: theirs(M) }, [{ kind: "revert", at: 0, text: A, note: "n" }, { kind: "read", text: T2, since: 0, revision: 9 }]);
+    expect(rest(s)).toEqual({ held: T2, saved: T2, conflict: theirs(A, 9), note: "n" });
+    expect(editor(s, { kind: "copy" }).held).toEqual(A);
   });
 
   test("ginsys/bronzeward#551 item 3: a read held back while a Save is open names the draft revision of a later draft read that changed only another entry", () => {
