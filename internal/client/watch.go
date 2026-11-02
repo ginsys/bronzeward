@@ -140,9 +140,10 @@ func (c *Client) Watch(op string, w Watch) (*apitypes.OperationBody, error) {
 		// Events of another epoch than the operation read's are of a restored installation, and the
 		// operation can have no event to replace them: they are cleared even when Until does not stop,
 		// so what Until kept from them does not hold the watch (client-contracts.md section 8.5).
+		stale := false
 		if epoch != "" && last != "" && epochOf(last) != epoch {
 			c.cleared(w, "the installation was restored or entered recovery mode")
-			last = ""
+			last, stale = "", true
 		}
 		if w.stop() {
 			if w.halt.err != nil {
@@ -154,11 +155,13 @@ func (c *Client) Watch(op string, w Watch) (*apitypes.OperationBody, error) {
 			// What Until answered rests on events of another epoch than the operation read's: they
 			// are cleared, which asks Until again, and the next stream shows the events from the start.
 			c.cleared(w, "the installation was restored or entered recovery mode")
-			last = ""
+			last, stale = "", true
 		}
 		// An attempt that showed nothing waits the delay, which doubles until an attempt shows
 		// something or a stream stays open for 30 s. JSON pages are read again after the delay.
-		progress := steps != before
+		// Events cleared at once are not progress: a server that replays them on every attempt
+		// would otherwise be asked again with no delay.
+		progress := steps != before && !stale
 		if progress || opened && !pages && took >= 30*time.Second {
 			delay = time.Second
 		}
