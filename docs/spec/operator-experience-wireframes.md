@@ -33,10 +33,11 @@ detail. Every screen has the [header](#header-on-every-screen) and the state var
 The header shows the identity, the roles and the epoch that `GET /identity` serves
 ([gap G1](operator-experience.md#11-api-gap-audit)); an action the roles do not allow is disabled,
 and the server's refusal stays authoritative. A read of `GET /identity` that fails after a good one
-(a refusal other than one that ends the session, or a `503` after its retries) keeps the header
+(a refusal other than the two below, or a `503` after its retries) keeps the header
 and the page, so the page keeps its unsaved text ([client contracts §11.4](client-contracts.md#114-web-review-and-document-input)),
 and shows the failure above the page. A refusal that ends the session (unauthenticated, revoked)
-still ends the page. The recovery banner states the
+still ends the page. The process-level `409 recovery-mode-active` refusal without `scope` also
+replaces the page and its unsaved text: the page shows the state before the recovery entry. The recovery banner states the
 scope summary and, while the server runs as started for recovery, that plan creation, approval
 and unfreeze wait for its normal restart and that accepted publications complete only then;
 imports complete on it. The client reads that start mode from `GET /server`
