@@ -69,16 +69,39 @@ func setEpochHeader(t *testing.T, epoch string) {
 	recoveryEpochHeader = epoch
 }
 
+// recoveryEpochByPath names the epoch that every answer carries from the first read of a path on, and
+// recoveryRevision is the API revision GET /server shows; a test sets them with setServerFacts.
+var (
+	recoveryEpochByPath map[string]string
+	recoveryRevision    = 3
+)
+
+func setServerFacts(t *testing.T, revision int, epochByPath map[string]string) {
+	t.Cleanup(func() { recoveryEpochByPath, recoveryRevision = nil, 3 })
+	recoveryEpochByPath, recoveryRevision = epochByPath, revision
+}
+
 // recoveryServer is a fake server for the recovery commands, answering reads from answers by
 // method and path, and every POST 201 with post's body. It lists the requests it saw.
 func recoveryServer(t *testing.T, answers map[string]string, post string) func() []string {
 	var mu sync.Mutex
 	var seen []string
+	var moved string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		seen = append(seen, r.Method+" "+r.URL.Path)
 		mu.Unlock()
-		w.Header().Set("Bronzeward-Epoch", recoveryEpochHeader)
+		// Once a path in recoveryEpochByPath is read, the epoch moved: every later answer carries it.
+		mu.Lock()
+		if ep, ok := recoveryEpochByPath[r.URL.Path]; ok {
+			moved = ep
+		}
+		epoch := recoveryEpochHeader
+		if moved != "" {
+			epoch = moved
+		}
+		mu.Unlock()
+		w.Header().Set("Bronzeward-Epoch", epoch)
 		w.Header().Set("Content-Type", "application/json")
 		key := r.Method + " " + r.URL.Path
 		if cur := r.URL.Query().Get("cursor"); cur != "" {
@@ -86,7 +109,7 @@ func recoveryServer(t *testing.T, answers map[string]string, post string) func()
 		}
 		switch a, ok := answers[key]; {
 		case r.URL.Path == "/api/v1/server":
-			fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":3,"startMode":"recovery"}`)
+			fmt.Fprintf(w, `{"version":"BWSYNTH","apiRevision":%d,"startMode":"recovery"}`, recoveryRevision)
 		case r.URL.Path == "/api/v1/identity":
 			fmt.Fprint(w, `{"kind":"service","principal":"svc_BWSYNTH"}`)
 		case ok:
@@ -265,27 +288,38 @@ func TestRecoveryStatusStructuredSkipsNextSteps(t *testing.T) {
 	}
 }
 
-// TestRecoveryStatusRefusesAStaleSnapshot: when the epoch the client holds is no longer the one the
-// answer names, the table shows nothing and says to read again. The fake server's header names
-// ep_BWSYNTH-1 and the body ep_BWSYNTH-0, so the client's latest epoch differs from the snapshot's.
+// TestRecoveryStatusRefusesAStaleSnapshot: when a next-step read shows a new epoch, the table shows
+// nothing and says to read again; when the epoch holds, the same status prints its table.
 func TestRecoveryStatusRefusesAStaleSnapshot(t *testing.T) {
-	recoveryServer(t, map[string]string{
-		"GET /api/v1/recovery": `{"epoch":"ep_BWSYNTH-0","recoveryMode":true,"scopes":[{"machine":"mch_a","state":"ready"}]}`,
-	}, "")
-	var out, errb bytes.Buffer
-	rc := run([]string{"recovery", "status"}, &out, &errb)
-	if rc == 0 || out.Len() != 0 || !strings.Contains(errb.String(), "the epoch changed from 'ep_BWSYNTH-0' to 'ep_BWSYNTH-1'") {
-		t.Errorf("rc %d, out %q, err %q; want a refusal that shows no table", rc, out.String(), errb.String())
+	answers := map[string]string{
+		"GET /api/v1/recovery":                `{"epoch":"ep_BWSYNTH-1","recoveryMode":true,"scopes":[{"machine":"mch_c","state":"blocked"}]}`,
+		"GET /api/v1/machines/mch_c/timeline": `{"items":[{"kind":"scope-state","revision":9,"entry":{"to":"blocked","cause":"restoration-mark","missing":["provider"]}}]}`,
 	}
+	t.Run("the epoch moves during the timeline read", func(t *testing.T) {
+		setServerFacts(t, 3, map[string]string{"/api/v1/machines/mch_c/timeline": "ep_BWSYNTH-2"})
+		recoveryServer(t, answers, "")
+		var out, errb bytes.Buffer
+		rc := run([]string{"recovery", "status"}, &out, &errb)
+		if rc == 0 || out.Len() != 0 || !strings.Contains(errb.String(), "the epoch changed from 'ep_BWSYNTH-1' to 'ep_BWSYNTH-2'") {
+			t.Errorf("rc %d, out %q, err %q; want a refusal that shows no table", rc, out.String(), errb.String())
+		}
+	})
+	t.Run("the epoch holds", func(t *testing.T) {
+		recoveryServer(t, answers, "")
+		var out, errb bytes.Buffer
+		if rc := run([]string{"recovery", "status"}, &out, &errb); rc != 0 || !strings.Contains(out.String(), "missing provider") {
+			t.Errorf("rc %d, out %q, err %q; want the table", rc, out.String(), errb.String())
+		}
+	})
 }
 
 // TestRecoveryStatusNamesTheRevisionForMissingKeys: a server of API revision 2 refuses order on the
-// timeline (client-contracts section 8.6 item 6); the next step says so and does not drop the keys
-// without a word.
+// timeline (client-contracts section 8.6 item 6), so the client does not send it (section 7 item 1)
+// and the next step says what the keys need.
 func TestRecoveryStatusNamesTheRevisionForMissingKeys(t *testing.T) {
-	recoveryServer(t, map[string]string{
-		"GET /api/v1/recovery":                `{"epoch":"ep_BWSYNTH-1","recoveryMode":true,"scopes":[{"machine":"mch_c","state":"blocked"}]}`,
-		"GET /api/v1/machines/mch_c/timeline": `400 {"type":"urn:bronzeward:problem:invalid-request","title":"BWSYNTH","status":400,"instance":"req_BWSYNTH"}`,
+	setServerFacts(t, 2, nil)
+	seen := recoveryServer(t, map[string]string{
+		"GET /api/v1/recovery": `{"epoch":"ep_BWSYNTH-1","recoveryMode":true,"scopes":[{"machine":"mch_c","state":"blocked"}]}`,
 	}, "")
 	var out, errb bytes.Buffer
 	if code := run([]string{"recovery", "status"}, &out, &errb); code != 0 {
@@ -294,6 +328,11 @@ func TestRecoveryStatusNamesTheRevisionForMissingKeys(t *testing.T) {
 	flat := strings.Join(strings.Fields(out.String()), " ")
 	if want := "the missing keys need API revision 3; see machine timeline 'mch_c', then recovery mark 'mch_c'"; !strings.Contains(flat, want) {
 		t.Errorf("output lacks %q:\n%s", want, out.String())
+	}
+	for _, r := range seen() {
+		if strings.Contains(r, "/timeline") {
+			t.Errorf("a revision 2 server was sent %s", r)
+		}
 	}
 }
 
