@@ -386,6 +386,39 @@ func TestRecoveryStatusRefusesAStaleSnapshot(t *testing.T) {
 	})
 }
 
+// TestStatusRefusesAStaleSnapshot: status builds one snapshot from GET /server and three later reads.
+// When an epoch change falls between the first read and the last, the server answer, with its
+// revision and start mode, is stale, so the command shows nothing in every output form (section 8.5).
+func TestStatusRefusesAStaleSnapshot(t *testing.T) {
+	answers := map[string]string{
+		"GET /api/v1/recovery":   `{"epoch":"ep_BWSYNTH-1","recoveryMode":true,"scopes":[]}`,
+		"GET /api/v1/machines":   `{"items":[]}`,
+		"GET /api/v1/operations": `{"items":[]}`,
+	}
+	for _, form := range [][]string{{"status"}, {"status", "-o", "json"}} {
+		for _, moves := range []string{"/api/v1/recovery", "/api/v1/machines", "/api/v1/operations"} {
+			t.Run(strings.Join(form, " ")+" "+moves, func(t *testing.T) {
+				setServerFacts(t, 3, map[string]string{moves: "ep_BWSYNTH-2"})
+				recoveryRevisionMoved = 2
+				recoveryServer(t, answers, "")
+				var out, errb bytes.Buffer
+				rc := run(form, &out, &errb)
+				if rc == 0 || out.Len() != 0 || !strings.Contains(errb.String(), "the epoch changed from 'ep_BWSYNTH-1' to 'ep_BWSYNTH-2'") ||
+					!strings.Contains(errb.String(), "Read it again with: status") {
+					t.Errorf("rc %d, out %q, err %q; want a refusal that shows no snapshot", rc, out.String(), errb.String())
+				}
+			})
+		}
+		t.Run(strings.Join(form, " ")+" epoch holds", func(t *testing.T) {
+			recoveryServer(t, answers, "")
+			var out, errb bytes.Buffer
+			if rc := run(form, &out, &errb); rc != 0 || !strings.Contains(out.String(), "3") {
+				t.Errorf("rc %d, out %q, err %q; want the snapshot", rc, out.String(), errb.String())
+			}
+		})
+	}
+}
+
 // TestRecoveryStatusNamesTheRevisionForMissingKeys: a server of API revision 2 refuses order on the
 // timeline (client-contracts section 8.6 item 6), so the client does not send it (section 7 item 1)
 // and the next step says what the keys need.
