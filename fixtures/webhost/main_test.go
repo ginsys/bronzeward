@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -162,8 +164,8 @@ func TestProxiesTheAPIAndLiveness(t *testing.T) {
 
 // TestUpstreamCloseClosesTheConnection: an upstream that closes the connection without an answer, as
 // the browser cases' injected drop does, reaches the client as a closed connection, not as a 502.
-// The client gets exactly the start of a status line before the close, so a browser cannot take
-// the close for a connection that failed before any answer and send the request again by itself.
+// The close is a TCP reset with no byte before it: a browser reads a cut-off status line as a whole
+// answer, and may send the request again by itself after a clean close.
 func TestUpstreamCloseClosesTheConnection(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, _, err := http.NewResponseController(w).Hijack()
@@ -198,11 +200,8 @@ func TestUpstreamCloseClosesTheConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := io.ReadAll(conn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != partialAnswer {
-		t.Errorf("got %q before the close, want %q", got, partialAnswer)
+	if len(got) != 0 || !errors.Is(err, syscall.ECONNRESET) {
+		t.Errorf("got %q, then %v; want no byte, then a connection reset", got, err)
 	}
 }
 
