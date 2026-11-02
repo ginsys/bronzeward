@@ -252,6 +252,25 @@ func TestWatch(t *testing.T) {
 			t.Errorf("watch: %v, state %q, shown %q, notices %q; want succeeded, %q and the defect reported", err, state, shown, notices, want)
 		}
 	})
+	t.Run("drained events that never match the operation read's epoch are read again with backoff", func(t *testing.T) {
+		// Every read says failed in e1 while the pages carry e2; from the 4th read on the operation
+		// is not found, which ends the watch.
+		o := &opServer{streams: []handler{sse()}, epochs: []string{e1}, states: []string{"failed"}, pages: []string{item(e2+":1", "failed")}, gone: 4}
+		if _, waits, _, _, err := watched(t, o, e1, nil); err == nil || !slices.Equal(waits, []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}) {
+			t.Errorf("watch: %v, waits %v; want the 404 after waits of 1 s, 2 s and 4 s", err, waits)
+		}
+	})
+	t.Run("the data lines of one event are joined with a line feed", func(t *testing.T) {
+		o := &opServer{streams: []handler{sse("id: " + e1 + ":1\nevent: succeeded\ndata: {\"a\":\ndata: 1}\n\n")}, states: []string{"succeeded"},
+			pages: []string{item(e1+":1", "succeeded")}}
+		f := &fake{epoch: e1, post: func(_ int, w http.ResponseWriter, r *http.Request) { o.serve(w, r) }}
+		c, _, _ := writeClient(t, f, e1)
+		var data []string
+		_, err := c.Watch("op_BWSYNTH", Watch{Show: func(e Event) { data = append(data, string(e.Data)) }, sleep: func(time.Duration) {}})
+		if want := []string{"{\"a\":\n1}"}; err != nil || !slices.Equal(data, want) {
+			t.Errorf("watch: %v, data %q; want %q", err, data, want)
+		}
+	})
 	t.Run("a refusal whose body stalls ends after the idle limit", func(t *testing.T) {
 		defer func(d time.Duration) { streamIdle = d }(streamIdle)
 		streamIdle = 200 * time.Millisecond
