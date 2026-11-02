@@ -13,7 +13,7 @@ require (
 	github.com/cosi-project/runtime v1.14.1
 	github.com/evanphx/json-patch v5.9.11+incompatible
 	github.com/go-jose/go-jose/v4 v4.1.5
-	github.com/godbus/dbus/v5 v5.2.2
+	github.com/godbus/dbus/v5 v5.2.4
 	github.com/gowebpki/jcs v1.0.2
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/oapi-codegen/runtime v1.8.0
