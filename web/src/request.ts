@@ -108,6 +108,15 @@ const drop = (res: Response) => {
   void res.body?.cancel().catch(() => {});
   endAttempt(res);
 };
+// A callback of the page runs while the body is unread: when it throws, the response is dropped.
+const guarded = <R>(res: Response, run: () => R): R => {
+  try {
+    return run();
+  } catch (e) {
+    drop(res);
+    throw e;
+  }
+};
 
 export class Client {
   private view: View = { principal: "", route: "", query: "" };
@@ -169,7 +178,7 @@ export class Client {
       const route = API_BASE + path.split("?")[0];
       if (res.headers.has("Deprecation") && !this.deprecated.has(route)) {
         this.deprecated.add(route);
-        this.opts.onDeprecation?.(route);
+        guarded(res, () => this.opts.onDeprecation?.(route));
       }
       // Epochs are unordered: another epoch than one recorded after the send may be older or newer,
       // so the read is sent again to learn the current one. Any other is read, even on a stale read.
@@ -181,7 +190,7 @@ export class Client {
       }
       // A 403 is read before a stale answer is dropped: identity-revoked of the sign-in still current
       // clears its credential at once (§8.2), even when the view moved on; its data stays dropped.
-      const stale = this.observeEpoch(res) || sent !== this.generation;
+      const stale = guarded(res, () => this.observeEpoch(res)) || sent !== this.generation;
       if (stale && !(res.status === 403 && principal === this.view.principal)) {
         drop(res);
         return { kind: "discarded" };
