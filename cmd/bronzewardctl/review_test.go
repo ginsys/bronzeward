@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/ginsys/bronzeward/internal/client"
 	"github.com/ginsys/bronzeward/internal/client/apitypes"
@@ -317,6 +319,30 @@ func TestWrapSpacingMark(t *testing.T) {
 	}
 	if got := wrap([]string{strings.Repeat("a", 18) + ka}, 20); !slices.Equal(got, []string{strings.Repeat("a", 18) + ka}) {
 		t.Errorf("wrap gives %q; want the syllable to fit the line", got)
+	}
+}
+
+// TestWrapOversizedMarkGroup: a base with more marks than a row holds never has a mark start a
+// screen line. The marks that do not fit show as their Go escape, and no row is wider than cols.
+func TestWrapOversizedMarkGroup(t *testing.T) {
+	got := wrap([]string{"क" + strings.Repeat("ा", 20)}, 20)
+	if len(got) < 2 {
+		t.Fatalf("wrap gives %q; want the marks that do not fit on a later row", got)
+	}
+	for i, l := range got {
+		width := 0
+		for _, r := range l {
+			width += cells(r)
+		}
+		if width > 20 {
+			t.Errorf("row %d is %d cells wide: %q", i, width, l)
+		}
+		if r, _ := utf8.DecodeRuneInString(l); unicode.IsMark(r) {
+			t.Errorf("row %d starts with a mark: %q", i, l)
+		}
+	}
+	if !strings.Contains(strings.Join(got, ""), `ा`) {
+		t.Errorf("wrap gives %q; want the marks that do not fit as escapes", got)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -230,11 +231,17 @@ func wrapLine(l string, cols int) []string {
 		for _, c := range s {
 			w += cells(c)
 		}
-		// A mark that is shown as itself joins the group before it, if the row has room for it.
-		if unicode.IsMark(r) && s == string(r) && group.Len() > 0 && gw+w <= cols {
-			group.WriteString(s)
-			gw += w
-			continue
+		// A mark that is shown as itself joins the group before it, if the row has room for it. When
+		// the group is already a whole row, the mark shows as its Go escape, like any other
+		// character the pager does not show as itself, so a mark never starts a screen line.
+		if unicode.IsMark(r) && s == string(r) && group.Len() > 0 {
+			if gw+w <= cols {
+				group.WriteString(s)
+				gw += w
+				continue
+			}
+			s = strings.Trim(strconv.QuoteToASCII(s), `"`)
+			w = len(s)
 		}
 		flush()
 		group.WriteString(s)

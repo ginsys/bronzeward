@@ -1446,7 +1446,8 @@ The review is served to any human `author`, not only the one who started the ing
    below the smallest the pager takes shows a "Window too small" notice instead of the page,
    ignores every key but quit, and shows the page again once the size is usable. A nonspacing
    or enclosing combining mark takes no column and a spacing mark takes one, and a wrap keeps
-   either with the character before it; full grapheme clusters, such as emoji joined by a
+   either with the character before it (marks beyond what a row holds show as their Go escape);
+   full grapheme clusters, such as emoji joined by a
    zero-width joiner, are not kept whole.
 2. Before showing it, the CLI states that terminal scrollback, session recording and screen
    capture are outside its control.
