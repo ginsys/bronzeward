@@ -1441,9 +1441,13 @@ The review is served to any human `author`, not only the one who started the ing
    the terminal is restored. On one it leaves the alternate screen, restores line mode, writes
    nothing more, starts no marks prompt, and ends the process by that signal. A signal the
    process inherited as ignored (`nohup`) stays ignored and is not taken. On a resize
-   (SIGWINCH) it reads the new size and shows the page that starts at the same line, wrapped to
-   it. A combining mark takes no column, so a wrap keeps it with the character before it; full
-   grapheme clusters, such as emoji joined by a zero-width joiner, are not kept whole.
+   (SIGWINCH) it reads the new size: with the same width the page stays where it is, and with
+   another width the text is wrapped again and the page starts at the same source line. A size
+   below the smallest the pager takes shows a "Window too small" notice instead of the page,
+   ignores every key but quit, and shows the page again once the size is usable. A nonspacing
+   or enclosing combining mark takes no column and a spacing mark takes one, and a wrap keeps
+   either with the character before it; full grapheme clusters, such as emoji joined by a
+   zero-width joiner, are not kept whole.
 2. Before showing it, the CLI states that terminal scrollback, session recording and screen
    capture are outside its control.
 3. Marks come from the prompt or standard input. At the prompt a line ends at a line feed, a

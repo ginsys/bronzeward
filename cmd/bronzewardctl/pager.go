@@ -14,10 +14,11 @@ import (
 	"github.com/ginsys/bronzeward/internal/client"
 )
 
-// cells is the terminal columns r takes: none for a combining mark, which sits on the character
-// before it, two for a wide or full-width character, else one.
+// cells is the terminal columns r takes: none for a non-spacing or enclosing mark, which sits on
+// the character before it, two for a wide or full-width character, else one. A spacing mark (Mc)
+// takes its own column, as wcwidth gives it.
 func cells(r rune) int {
-	if unicode.IsMark(r) {
+	if unicode.In(r, unicode.Mn, unicode.Me) {
 		return 0
 	}
 	switch width.LookupRune(r).Kind() {
@@ -74,18 +75,48 @@ func page(text []string, rows, cols int, keys io.Reader, w io.Writer) error {
 }
 
 // pageOn is page for a terminal that can be resized: on evResize it asks size for the new rows and
-// columns, wraps the text to them again and shows the page that starts at the same source line. It
-// returns errSignalled on evSignal, before it writes anything more. Everything it writes, it writes
+// columns. A size of 0 by 0 means the terminal is below the smallest the pager takes: it shows a
+// notice instead of a page, ignores every key but quit, and shows the page again once the size is
+// usable. With the same columns it keeps the page; with other columns it wraps the text again and
+// shows the page that starts at the same source line. It returns errSignalled on evSignal, before
+// it writes anything more. Everything it writes, it writes
 // from the goroutine that calls it, so a caller that restores the terminal after it returns cannot
 // race a redraw.
 func pageOn(text []string, size func() (rows, cols int), keys keySource, w io.Writer) error {
 	rows, cols := size()
+	small := rows == 0 || cols == 0
+	if small {
+		rows, cols = minRows, minCols
+	}
 	lines, src := wrapSrc(text, cols)
 	top := 0
 	for {
 		body := rows - 1
 		var b strings.Builder
 		b.WriteString(clearScreen)
+		if small {
+			// Short enough for a row of the smallest terminal, and not wrapped on one a little smaller.
+			b.WriteString("Window too small")
+			if _, err := io.WriteString(w, b.String()); err != nil {
+				return err
+			}
+			key, ev, err := keys.next()
+			if err == io.EOF {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			switch {
+			case ev == evSignal:
+				return errSignalled
+			case ev == evResize:
+				rows, cols, small = resized(text, size, rows, cols, &lines, &src, &top)
+			case key == 'q' || key == 0x03:
+				return nil
+			}
+			continue
+		}
 		end := min(top+body, len(lines))
 		for _, l := range lines[top:end] {
 			b.WriteString(l + "\r\n")
@@ -116,13 +147,7 @@ func pageOn(text []string, size func() (rows, cols int), keys keySource, w io.Wr
 		case evSignal:
 			return errSignalled
 		case evResize:
-			rows, cols = size()
-			first := 0
-			if top < len(src) {
-				first = src[top]
-			}
-			lines, src = wrapSrc(text, cols)
-			top = max(slices.Index(src, first), 0)
+			rows, cols, small = resized(text, size, rows, cols, &lines, &src, &top)
 			continue
 		}
 		switch key {
@@ -136,6 +161,27 @@ func pageOn(text []string, size func() (rows, cols int), keys keySource, w io.Wr
 			return nil
 		}
 	}
+}
+
+// resized reads the new size after a resize and fits the page to it: with the same columns the page
+// stays, with others the text is wrapped again and the page starts at the same source line. It
+// returns the dimensions to draw at and whether the terminal is now too small to draw on; a
+// terminal too small keeps the last usable dimensions and page.
+func resized(text []string, size func() (int, int), rows, cols int, lines *[]string, src *[]int, top *int) (int, int, bool) {
+	r, c := size()
+	if r == 0 || c == 0 {
+		return rows, cols, true
+	}
+	if c != cols {
+		first := 0
+		if *top < len(*src) {
+			first = (*src)[*top]
+		}
+		*lines, *src = wrapSrc(text, c)
+		*top = max(slices.Index(*src, first), 0)
+	}
+	*top = min(*top, max(len(*lines)-1, 0))
+	return r, c, false
 }
 
 // wrap escapes each of lines as all remote text is escaped (client-contracts.md §6 item 8) and cuts
@@ -159,26 +205,41 @@ func wrapSrc(lines []string, cols int) (out []string, src []int) {
 	return out, src
 }
 
-// wrapLine is the screen lines of one line.
+// wrapLine is the screen lines of one line. A character and the marks after it are one group that
+// is never cut, so a mark never starts a screen line, unless the group alone is wider than a row.
 func wrapLine(l string, cols int) []string {
 	var out []string
-	var b strings.Builder
-	n := 0
-	for i := 0; i < len(l); {
-		_, size := utf8.DecodeRuneInString(l[i:])
-		s := client.Printable(l[i : i+size])
-		i += size
-		w := 0
-		for _, r := range s {
-			w += cells(r)
-		}
-		if n > 0 && n+w > cols {
+	var b, group strings.Builder
+	n, gw := 0, 0
+	flush := func() {
+		if n > 0 && n+gw > cols {
 			out = append(out, b.String())
 			b.Reset()
 			n = 0
 		}
-		b.WriteString(s)
-		n += w
+		b.WriteString(group.String())
+		n += gw
+		group.Reset()
+		gw = 0
 	}
+	for i := 0; i < len(l); {
+		r, size := utf8.DecodeRuneInString(l[i:])
+		s := client.Printable(l[i : i+size])
+		i += size
+		w := 0
+		for _, c := range s {
+			w += cells(c)
+		}
+		// A mark that is shown as itself joins the group before it, if the row has room for it.
+		if unicode.IsMark(r) && s == string(r) && group.Len() > 0 && gw+w <= cols {
+			group.WriteString(s)
+			gw += w
+			continue
+		}
+		flush()
+		group.WriteString(s)
+		gw = w
+	}
+	flush()
 	return append(out, b.String())
 }

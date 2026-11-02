@@ -304,6 +304,72 @@ func TestWrapCombiningMark(t *testing.T) {
 	}
 }
 
+// TestWrapSpacingMark: a spacing mark (Mc) takes its own column, as wcwidth gives it, and a wrap
+// still never splits it from the character before it. At 20 columns, 19 letters and a Devanagari
+// syllable of two columns take 21, so the syllable moves whole to the next line.
+func TestWrapSpacingMark(t *testing.T) {
+	ka := "का" // U+0915 and the spacing mark U+093E
+	if got, want := cells('ा'), 1; got != want {
+		t.Errorf("a spacing mark takes %d cells, want %d", got, want)
+	}
+	if got := wrap([]string{strings.Repeat("a", 19) + ka}, 20); !slices.Equal(got, []string{strings.Repeat("a", 19), ka}) {
+		t.Errorf("wrap gives %q; want the syllable whole on the next line", got)
+	}
+	if got := wrap([]string{strings.Repeat("a", 18) + ka}, 20); !slices.Equal(got, []string{strings.Repeat("a", 18) + ka}) {
+		t.Errorf("wrap gives %q; want the syllable to fit the line", got)
+	}
+}
+
+// TestPageHeightOnlyResize: a resize that changes only the height shows the same screen line, also
+// when it is partway through a wrapped line (a Copilot finding on the first pull request).
+func TestPageHeightOnlyResize(t *testing.T) {
+	sizes := [][2]int{{4, 20}, {5, 20}}
+	n := 0
+	size := func() (int, int) {
+		s := sizes[min(n, len(sizes)-1)]
+		n++
+		return s[0], s[1]
+	}
+	var w bytes.Buffer
+	text := []string{strings.Repeat("a", 100), "z"}
+	if err := pageOn(text, size, &scriptKeys{[]scriptStep{{' ', evKey}, {0, evResize}, {'q', evKey}}}, &w); err != nil {
+		t.Fatal(err)
+	}
+	frames := strings.Split(w.String(), clearScreen)[1:]
+	a := strings.Repeat("a", 20)
+	if len(frames) != 3 || !strings.HasPrefix(frames[2], a+"\r\n"+a+"\r\nz\r\n") {
+		t.Errorf("after a height-only resize the frames are %q; want the page to go on from the fourth screen line", frames)
+	}
+}
+
+// TestPageUndersized: a resize below the smallest terminal shows a notice, not the page at the old
+// size, ignores the paging keys, and shows the page again once the size is usable.
+func TestPageUndersized(t *testing.T) {
+	sizes := [][2]int{{6, 40}, {0, 0}, {6, 40}}
+	n := 0
+	size := func() (int, int) {
+		s := sizes[min(n, len(sizes)-1)]
+		n++
+		return s[0], s[1]
+	}
+	var w bytes.Buffer
+	text := []string{"one", "two", "three", "four", "five", "six", "seven"}
+	keys := &scriptKeys{[]scriptStep{{0, evResize}, {' ', evKey}, {0, evResize}, {'q', evKey}}}
+	if err := pageOn(text, size, keys, &w); err != nil {
+		t.Fatal(err)
+	}
+	frames := strings.Split(w.String(), clearScreen)[1:]
+	if len(frames) != 4 {
+		t.Fatalf("%d frames, want 4: %q", len(frames), frames)
+	}
+	if frames[1] != "Window too small" || frames[2] != "Window too small" {
+		t.Errorf("while too small the frames are %q and %q; want the notice only", frames[1], frames[2])
+	}
+	if frames[3] != frames[0] {
+		t.Errorf("after the resize back the page is %q; want the first page %q (the space was ignored)", frames[3], frames[0])
+	}
+}
+
 // scriptKeys is a keySource that plays steps, then ends the keys.
 type scriptKeys struct{ steps []scriptStep }
 
