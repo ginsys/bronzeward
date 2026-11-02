@@ -243,8 +243,9 @@ const fromRevision = (r: Revision): Held => ({ layer: r.layer, document: r.docum
 const same = (a: Held, b: Held) => a.layer === b.layer && a.document === b.document && a.marks === b.marks && JSON.stringify(a.declared) === JSON.stringify(b.declared) && JSON.stringify(a.embedded) === JSON.stringify(b.embedded);
 
 // What the editor holds once a revision is read: the read text, unless the operator typed since
-// the last save. During a conflict the operator's text is kept aside, so the read is shown.
-export const afterRead = (held: Held, saved: Held, read: Held, conflicted: boolean): Held => (conflicted || same(held, saved) ? read : held);
+// the last save. The one read Show their change asks for shows their text: the conflict keeps the
+// operator's aside. Any other read (a reconnect's, during a conflict too) keeps typed text.
+export const afterRead = (held: Held, saved: Held, read: Held, asked: boolean): Held => (asked || same(held, saved) ? read : held);
 
 // Whether the editor holds text not saved: its own, or the operator's text a conflict keeps aside.
 export const holdsUnsaved = (held: Held, saved: Held, mine: Held | undefined) => !same(held, saved) || (mine !== undefined && !same(mine, saved));
@@ -259,8 +260,9 @@ interface Clash {
 export const follow = (c: Clash | undefined, revision: number): Clash | undefined => (c?.showing === true ? { ...c, revision } : c);
 
 // Show their change: the conflict keeps the operator's text as typed now, edits after the 412
-// included, before the read replaces the editor's text with theirs.
-export const shown = (c: Clash | undefined, held: Held): Clash | undefined => (c === undefined ? c : { ...c, mine: held, showing: true });
+// included, before the read replaces the editor's text with theirs. Once theirs shows, the
+// editor holds their text, so a second click keeps the operator's.
+export const shown = (c: Clash | undefined, held: Held): Clash | undefined => (c === undefined || c.showing === true ? c : { ...c, mine: held, showing: true });
 
 // The references table's rows: the document's references, then the declarations no reference
 // uses, so an obsolete declaration can be undeclared (rule unused-declaration).
@@ -325,6 +327,8 @@ export function FragmentPane({ draft, entry, written, seeChange }: { draft: Draf
   // The editor's state as last rendered, for a read that answers after it.
   const now = useRef({ held, saved, conflict });
   now.current = { held, saved, conflict };
+  // Set by the first Show their change: the next revision read shows their text, once.
+  const asked = useRef(false);
   const text = useRef<HTMLTextAreaElement>(null);
   const marks = useRef<HTMLTextAreaElement>(null);
   const open = draft.state === "open";
@@ -339,9 +343,10 @@ export function FragmentPane({ draft, entry, written, seeChange }: { draft: Draf
       if (!live) return;
       if (r.kind !== "ok") return setNote("The entry's revision could not be read.");
       const h = fromRevision(r.data);
-      const { held: typed, saved: was, conflict: c } = now.current;
+      const { held: typed, saved: was } = now.current;
       setSaved(h);
-      hold(afterRead(typed, was, h, c !== undefined));
+      hold(afterRead(typed, was, h, asked.current));
+      asked.current = false;
     });
     return () => void (live = false);
   }, [client, entry?.revision]);
@@ -375,6 +380,8 @@ export function FragmentPane({ draft, entry, written, seeChange }: { draft: Draf
     setNote(undefined);
     // A Save while the last write is still open sends nothing new, so its text is not the one sent.
     if (startsNew(writes!, w)) sent.current = held;
+    // A Show their change whose read changed no entry of this pane asks for nothing after a Save.
+    asked.current = false;
     send({ method: "PUT", path, ifMatch: m, ingests: true, resource: `/drafts/${draft.id}`, body: { layer: held.layer, document: held.document, marks: lines.length === 0 ? null : lines, declarations }, settled });
   };
   const remove = () => {
@@ -412,14 +419,19 @@ export function FragmentPane({ draft, entry, written, seeChange }: { draft: Draf
   };
   const conflictView = conflict !== undefined && (
     <>
-      <Conflict what="draft" revision={conflict.revision ?? draft.revision} onShow={() => { setConflict((c) => shown(c, now.current.held)); seeChange(); }} />
+      <Conflict what="draft" revision={conflict.revision ?? draft.revision} onShow={() => {
+        if (now.current.conflict?.showing === true) return seeChange();
+        asked.current = true;
+        setConflict((c) => shown(c, now.current.held));
+        seeChange();
+      }} />
       {entry !== undefined && conflict.revision === draft.revision && (
         <div>
           <label>Their text <textarea readOnly value={entry.document ?? "(removed)"} rows={8} cols={60} {...NO_ASSIST} /></label>
           <label>Your text <textarea readOnly value={conflict.mine.document} rows={8} cols={60} {...NO_ASSIST} /></label>
         </div>
       )}
-      <button type="button" onClick={() => { hold(conflict.mine); setConflict(undefined); }} disabled={conflict.revision !== draft.revision}>
+      <button type="button" onClick={() => { asked.current = false; hold(conflict.mine); setConflict(undefined); }} disabled={conflict.revision !== draft.revision}>
         Copy my text into the new revision
       </button>
     </>

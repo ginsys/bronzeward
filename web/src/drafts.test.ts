@@ -106,6 +106,12 @@ describe("[Go to field] positions (B13)", () => {
     expect(s!.start).toBe(text.indexOf("c: ") + 3);
   });
 
+  test("a quote opens no scalar inside a plain one, after a blank either", () => {
+    const text = "note: dogs 'n cats # !bwref ghost\nlist: [ 'a # b', \"c\" ] # !bwref ghost\n- 'x # y' # !bwref ghost\nref: !bwref ghost\n";
+    const s = spotOfReference(text, "ghost");
+    expect(s!.start).toBe(text.indexOf("ref: ") + 5);
+  });
+
   test("a mapping key matches by its text, as the server reads it: 01 is not 1", async () => {
     const text = "m:\n  01: first\n  1: second\n";
     const s = await spotOfPath(text, "doc[0]/m/1");
@@ -161,7 +167,9 @@ describe("the editor's text is kept until the operator drops it (#339 round 1)",
     const read = held("a: 2\n");
     expect(afterRead(saved, saved, read, false)).toBe(read);
     const typed = held("a: 1\nb: 2\n");
+    // A read the operator did not ask for (a reconnect's, during a conflict too) keeps typed text.
     expect(afterRead(typed, saved, read, false)).toBe(typed);
+    // The read Show their change asked for shows their text: the conflict keeps the operator's.
     expect(afterRead(typed, saved, read, true)).toBe(read);
   });
 
@@ -180,9 +188,12 @@ describe("the editor's text is kept until the operator drops it (#339 round 1)",
     expect(follow(undefined, 8)).toBeUndefined();
   });
 
-  test("Show their change keeps the text typed after the 412, not only the text refused", () => {
+  test("Show their change keeps the text typed after the 412, not only the text refused, and only the first time", () => {
     const later = held("m, then more");
-    expect(shown({ mine: held("m"), revision: 7 }, later)).toEqual({ mine: later, revision: 7, showing: true });
+    const first = shown({ mine: held("m"), revision: 7 }, later);
+    expect(first).toEqual({ mine: later, revision: 7, showing: true });
+    // Once their text shows, a second click keeps the operator's text, not theirs.
+    expect(shown(first, held("theirs"))).toBe(first);
     expect(shown(undefined, later)).toBeUndefined();
   });
 
