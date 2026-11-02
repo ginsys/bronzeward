@@ -98,7 +98,7 @@ jobs:
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
         with:
           cache_save: ${{ github.ref == 'refs/heads/main' }}
-          install: false   # the fixtures need only bash, git and python3
+          install_args: node   # the fixtures need bash, git, python3 and node (the t5 leak scan's test)
       - run: mise run test
 
   go:

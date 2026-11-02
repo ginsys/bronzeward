@@ -6,17 +6,19 @@
 // that the password is in this process's environment only.
 //
 // Afterwards a leak scan reads the fixture state, the provider and participant state and the
-// fixture's and provider's container logs for the token. It first plants a marker of its own and
-// must find it, so that a scan that reads nothing cannot pass. It prints addresses, statuses,
+// fixture's and provider's container logs for the token, through symbolic links (leakscan.mjs). It
+// first plants a marker of its own, in a new file, and must find it, so that a scan that reads
+// nothing cannot pass. It prints addresses, statuses,
 // counts and page titles, never a token, a code or a password.
 //
 // Usage: node fixtures/participants/collide.mjs <A's port> <value> <state dir> <container prefix>
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { files, plant } from "./leakscan.mjs";
 
 const [port, value, stateDir, prefix] = process.argv.slice(2);
 if (!port || !value || !stateDir || !prefix) throw new Error("usage: collide.mjs <A's port> <value> <state dir> <container prefix>");
@@ -148,23 +150,13 @@ async function collide(token) {
   out(`collide: h-all saved bw-team: ${value} into draft ${draft}: 200; the participant's next save is refused for its ETag`);
 }
 
-// files <dir>: every regular file under the directory.
-function files(dir) {
-  const found = [];
-  for (const e of readdirSync(dir, { withFileTypes: true })) {
-    const p = join(dir, e.name);
-    if (e.isDirectory()) found.push(...files(p));
-    else if (e.isFile()) found.push(p);
-  }
-  return found;
-}
-
 // scan <token>: the paths whose content holds the token, its signature or the planted marker.
-// The marker must be found in its file alone.
+// The marker must be found in its file alone. plant refuses a control path that is taken, before
+// the try: only a control this scan planted is removed.
 function scan(token) {
   const marker = `BWSYNTH-collide-control-${randomBytes(12).toString("hex")}`;
   const control = join(part, "collide-control");
-  writeFileSync(control, `planted ${marker}\n`, { mode: 0o600 });
+  plant(control, `planted ${marker}\n`);
   try {
     // A docker command that fails is a scan that read nothing there: it fails the scan.
     const docker = (args, encoding) => {
