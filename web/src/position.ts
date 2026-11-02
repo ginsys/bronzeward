@@ -4,7 +4,7 @@
 // with this module, not on the first lookup: the references of an embedded document are read on
 // every render of the fragment and assignment panes, so an import that resolves later would show a
 // declared reference as not in the document until it does (ginsys/bronzeward#569).
-import { isMap, isNode, isScalar, isSeq, parseAllDocuments } from "yaml";
+import { isAlias, isMap, isNode, isScalar, isSeq, parseAllDocuments } from "yaml";
 
 export interface Spot {
   start: number;
@@ -24,23 +24,34 @@ const segment = (s: string) => s.replace(/~1/g, "/").replace(/~0/g, "~");
 // that document. The part after "|" points into an embedded document, which is a string here, so
 // the field holding it is the node. Each segment follows the node it steps into: a list's index,
 // or a mapping's key by its text, unquoted, as the server compares it (internal/ingest/path.go):
-// 8080 and "8080" match "8080", and 01 does not match "1".
+// 8080 and "8080" match "8080", and 01 does not match "1". As on the server, an alias, as a key or
+// as a node, stands for the node its anchor names.
 function nodeAt(docs: ReturnType<typeof parseAllDocuments>, path: string): unknown {
   const m = /^doc\[(\d+)\]((?:\/[^|]*)?)/.exec(path);
   if (m === null) return undefined;
   const doc = Array.isArray(docs) ? docs[Number(m[1])] : undefined;
   if (doc === undefined) return undefined;
-  let node: unknown = doc.contents;
+  const deref = (n: unknown): unknown => (isAlias(n) ? n.resolve(doc) : n);
+  let node: unknown = deref(doc.contents);
   for (const k of m[2] === "" ? [] : m[2]!.slice(1).split("/").map(segment)) {
     if (isSeq(node)) node = /^(0|[1-9]\d*)$/.test(k) ? node.items[Number(k)] : undefined;
-    else if (isMap(node)) node = node.items.find((p) => isScalar(p.key) && (p.key.source ?? String(p.key.value)) === k)?.value;
+    else if (isMap(node))
+      node = node.items.find((p) => {
+        const key = deref(p.key);
+        return isScalar(key) && (key.source ?? String(key.value)) === k;
+      })?.value;
     else node = undefined;
+    node = deref(node);
   }
   return node;
 }
 
+// The documents of the text, parsed with every line break the server breaks a line at read as a
+// line feed (BREAKS, below), so positions stay positions in the text given.
+const parse = (text: string) => parseAllDocuments(text.replace(BREAKS, "\n"));
+
 export async function spotOfPath(text: string, path: string): Promise<Spot | undefined> {
-  const node = nodeAt(parseAllDocuments(text), path);
+  const node = nodeAt(parse(text), path);
   if (!isNode(node) || node.range == null) return undefined;
   return { start: node.range[0], end: node.range[1] };
 }
@@ -48,16 +59,18 @@ export async function spotOfPath(text: string, path: string): Promise<Spot | und
 // The embedded documents of the text that a fragment declares: each declared path that holds a
 // string scalar, with that scalar's decoded text and its place in the text. As the server
 // (internal/ingest/declare.go embeddedDocument), a scalar with a tag other than !!str holds no
-// embedded document, and a path into an embedded document (with "|") declares none. A path that
-// holds no string here adds nothing; the server refuses it (rule embedded).
+// embedded document, and a path into an embedded document (with "|") declares none. The
+// non-specific tag ! makes a quoted or block scalar a !!str (go-yaml), and a plain scalar cannot
+// hold a reference's tag. A path that holds no string here adds nothing; the server refuses it
+// (rule embedded).
 const STR = "tag:yaml.org,2002:str";
 function embeddedTexts(text: string, embedded: readonly EmbeddedPath[]): { text: string; spot: Spot }[] {
   if (embedded.length === 0) return [];
-  const docs = parseAllDocuments(text);
+  const docs = parse(text);
   const found: { text: string; spot: Spot }[] = [];
   for (const { path } of embedded) {
     const node = path.includes("|") ? undefined : nodeAt(docs, path);
-    if (!isScalar(node) || typeof node.value !== "string" || (node.tag !== undefined && node.tag !== STR) || node.range == null) continue;
+    if (!isScalar(node) || typeof node.value !== "string" || (node.tag !== undefined && node.tag !== STR && node.tag !== "!") || node.range == null) continue;
     found.push({ text: node.value, spot: { start: node.range[0], end: node.range[1] } });
   }
   return found;
@@ -272,13 +285,27 @@ function startsScalar(line: string, i: number): boolean {
   return (line[j] === "-" || line[j] === "?") && (j === 0 || line[j - 1] === " " || line[j - 1] === "\t");
 }
 
+// The tags of the text outside the declared embedded documents, and those documents. A declared
+// embedded document's references are read from its decoded text only, as on the server: a tag its
+// text shows can be in a comment once the document is decoded, for example a folded line after a
+// comment line.
+function scan(text: string, embedded: readonly EmbeddedPath[]) {
+  const held = embeddedTexts(text, embedded);
+  const outer = tags(text).filter((t) => !held.some((e) => t.index >= e.spot.start && t.index < e.spot.end));
+  return { outer, held };
+}
+
 // The tag of a reference the refusal names: the first `!bwref <name>` in the text. A reference
-// only an embedded document carries, whose tag the text shows quoted or escaped, points at the
-// scalar that holds that document.
+// only an embedded document carries points at its tag in that document's scalar when the text
+// shows the tag as written (a literal block), and else at the scalar.
 export function spotOfReference(text: string, name: string, embedded: readonly EmbeddedPath[] = []): Spot | undefined {
-  const t = tags(text).find((t) => t.name === name);
+  const { outer, held } = scan(text, embedded);
+  const t = outer.find((t) => t.name === name);
   if (t !== undefined) return { start: t.index, end: t.index + t.tag.length };
-  return embeddedTexts(text, embedded).find((e) => tags(e.text).some((t) => t.name === name))?.spot;
+  const e = held.find((e) => tags(e.text).some((t) => t.name === name));
+  if (e === undefined) return undefined;
+  const shown = tags(text).find((t) => t.name === name && t.index >= e.spot.start && t.index < e.spot.end);
+  return shown === undefined ? e.spot : { start: shown.index, end: shown.index + shown.tag.length };
 }
 
 // The n-th line (from 0) of the marks field.
@@ -289,10 +316,12 @@ export function spotOfLine(text: string, n: number): Spot | undefined {
   return { start, end: start + lines[n]!.length };
 }
 
-// The references a document carries, each once: those in its text in order, then those in the
-// decoded text of each embedded document it declares, in declaration order. The server reads an
-// embedded document's references from its parsed text (internal/ingest/declare.go walkEmbedded),
-// so a quoted or folded one carries them although its tags are not tags in the outer text.
-export const references = (text: string, embedded: readonly EmbeddedPath[] = []) => [
-  ...new Set([...tags(text), ...embeddedTexts(text, embedded).flatMap((e) => tags(e.text))].map((t) => t.name)),
-];
+// The references a document carries, each once: those in its text outside its declared embedded
+// documents in order, then those in the decoded text of each embedded document it declares, in
+// declaration order. The server reads an embedded document's references from its parsed text
+// (internal/ingest/declare.go walkEmbedded), so a quoted or folded one carries them although its
+// tags are not tags in the outer text.
+export const references = (text: string, embedded: readonly EmbeddedPath[] = []) => {
+  const { outer, held } = scan(text, embedded);
+  return [...new Set([...outer, ...held.flatMap((e) => tags(e.text))].map((t) => t.name))];
+};
