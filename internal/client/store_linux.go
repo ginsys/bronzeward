@@ -245,13 +245,46 @@ func ssUnlocked(c *dbus.Conn, p dbus.ObjectPath) error {
 	return nil
 }
 
+// ssDismissWait is how long ssNoPrompt waits for the Secret Service's answer to a dismissal. The
+// answer comes within about 30 ms from gnome-keyring (measured, ginsys/bronzeward#543); a service
+// that sends none costs the refusal this wait, so it is kept near one second.
+var ssDismissWait = time.Second
+
 // ssNoPrompt refuses an answer that needs a prompt. The prompt is dismissed, never shown.
+//
+// The dismissal asks for no reply, but gnome-keyring answers it with a Prompt.Completed signal
+// addressed to this connection, which therefore arrives without a match rule. The D-Bus library
+// panics, and ends the process, when its connection is closed while it decodes a message
+// (ginsys/bronzeward#543). So the caller's Close must not meet that signal in flight: it is read
+// first, or the wait ends with the operation's context or ssDismissWait, for a service that sends
+// none. A service that answers later than ssDismissWait is not covered: nothing observed does.
+//
+// The library closes the channel when the connection drops while this waits.
 func ssNoPrompt(c *dbus.Conn, prompt dbus.ObjectPath) error {
 	if prompt == "/" {
 		return nil
 	}
+	signals := make(chan *dbus.Signal, 16)
+	c.Signal(signals)
+	defer c.RemoveSignal(signals)
 	c.Object(ssName, prompt).Call(ssIface+"Prompt.Dismiss", dbus.FlagNoReplyExpected)
-	return errStoreLocked
+	wait := time.NewTimer(ssDismissWait)
+	defer wait.Stop()
+	for {
+		select {
+		case s, ok := <-signals:
+			if !ok {
+				return errStoreLocked
+			}
+			if s.Path == prompt && s.Name == ssIface+"Prompt.Completed" {
+				return errStoreLocked
+			}
+		case <-wait.C:
+			return errStoreLocked
+		case <-c.Context().Done():
+			return errStoreLocked
+		}
+	}
 }
 
 func ssSession(c *dbus.Conn) (dbus.ObjectPath, error) {
