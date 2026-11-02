@@ -102,13 +102,14 @@ func (c *Client) Watch(op string, w Watch) (*apitypes.OperationBody, error) {
 			return nil, err
 		}
 		if Terminal(o.State) {
-			// A terminal state settles the watch, so the last events are all shown, Until or not.
-			w.Until, w.halt = nil, &halt{}
+			// A terminal state settles the watch, so the drain shows the last events, Until or not.
 			// Events of another epoch than the operation read's are of a restored installation, where
-			// the operation can be in another state: it is read again before the watch ends. A failed
-			// drain shows no epoch, so the operation is read again, and its state stands only if the
-			// epoch held.
-			derr := c.drain(op, &last, w)
+			// the operation can be in another state: it is read again before the watch ends, and Until
+			// holds again if it goes on. A failed drain shows no epoch, so the operation is read
+			// again, and its state stands only if the epoch held.
+			all := w
+			all.Until, all.halt = nil, &halt{}
+			derr := c.drain(op, &last, all)
 			if derr != nil {
 				again, now, err := c.operation(op)
 				switch {
