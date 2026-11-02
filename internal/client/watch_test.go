@@ -260,6 +260,14 @@ func TestWatch(t *testing.T) {
 			t.Errorf("watch: %v, waits %v; want the 404 after waits of 1 s, 2 s and 4 s", err, waits)
 		}
 	})
+	t.Run("streams whose events never match their epoch are opened again with backoff", func(t *testing.T) {
+		// Every stream says e1 and sends an event of e2, which clears; the operation is running, and
+		// from the 4th read on it is not found, which ends the watch.
+		o := &opServer{streams: []handler{sse(ev(e2+":1", "queued"))}, epochs: []string{e1}, states: []string{"running"}, gone: 4}
+		if _, waits, _, _, err := watched(t, o, e1, nil); err == nil || !slices.Equal(waits, []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}) {
+			t.Errorf("watch: %v, waits %v; want the 404 after waits of 1 s, 2 s and 4 s", err, waits)
+		}
+	})
 	t.Run("the data lines of one event are joined with a line feed", func(t *testing.T) {
 		o := &opServer{streams: []handler{sse("id: " + e1 + ":1\nevent: succeeded\ndata: {\"a\":\ndata: 1}\n\n")}, states: []string{"succeeded"},
 			pages: []string{item(e1+":1", "succeeded")}}
