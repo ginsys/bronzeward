@@ -686,4 +686,55 @@ else bad "T9: the functions were not found in the session, or the stub A did not
 kill "$stub_a" 2>/dev/null
 wait "$stub_a" 2>/dev/null
 
+# handback and t9_clean (ginsys/bronzeward#509), taken out of the session with stubs around them.
+# PAUSED names the paused containers, A_STOPPED stops A, NO_IDP makes A's namespace miss Zitadel,
+# and RESTART_FAIL and FWD_FAIL end restart_a and forward_idp as their die does. Calls go to the log.
+sed -n -e '/^handback() {$/,/^}$/p' -e '/^t9_clean() {$/,/^}$/p' "$session" >"$t/clean.sh"
+mkdir -p "$t/cbin"
+cat >"$t/cbin/inject" <<'EOF'
+#!/bin/sh
+echo "inject $*" >>"$T/clean.log"
+EOF
+chmod +x "$t/cbin/inject"
+clean_case() {
+  : >"$t/clean.log"
+  # shellcheck disable=SC2016 # the inner shell's own text
+  bash -c 'set -uo pipefail
+    log=$T/clean.log task=t4 bin=$T/cbin t9_reader="" BW_A=a BW_B=b BW_C=c
+    running() { [ -z "${A_STOPPED:-}" ]; }
+    idp_reached() { [ -z "${NO_IDP:-}" ]; }
+    restart_a() { echo restart_a; [ -z "${RESTART_FAIL:-}" ] || exit 1; }
+    forward_idp() { echo forward_idp; [ -z "${FWD_FAIL:-}" ] || exit 1; }
+    set_issuer() { echo "set_issuer $1" >>"$log"; }
+    docker() { case " ${PAUSED:-} " in *" ${*: -1} "*) echo true ;; *) echo false ;; esac; }
+    . "$0"; "$1"' "$t/clean.sh" "$1" 2>&1
+}
+if [ "$(grep -cE '^(handback|t9_clean)\(\) \{' "$t/clean.sh")" = 2 ]; then
+  out=$(PAUSED="a c" clean_case handback)
+  calls=$(tr '\n' ' ' <"$t/clean.log")
+  if [ "$calls" = "inject unpause A inject unpause C set_issuer zitadel restart_a " ]; then
+    ok "handback unpauses every paused instance, whoever paused it, then hands A back on Zitadel"
+  else bad "handback, A and C paused: $calls ($out)"; fi
+  out=$(RESTART_FAIL=1 clean_case handback)
+  if [[ $out == *"A could not be handed back on Zitadel; recreate the fixture"* ]]; then
+    ok "handback says to recreate the fixture when A's restart ends the shell"
+  else bad "handback, restart fails: $out"; fi
+  out=$(A_STOPPED=1 clean_case t9_clean)
+  if [ "$(cat "$t/clean.log")" = restart_a ] && [[ $out == *"A is started again"* ]]; then
+    ok "t9_clean starts a stopped A again"
+  else bad "t9_clean, A stopped: $(cat "$t/clean.log") ($out)"; fi
+  out=$(NO_IDP=1 clean_case t9_clean)
+  if [ "$(cat "$t/clean.log")" = forward_idp ] && [[ $out == *"the forwarder is started again"* ]]; then
+    ok "t9_clean starts the forwarder again when A runs but its namespace does not reach Zitadel"
+  else bad "t9_clean, no forwarder: $(cat "$t/clean.log") ($out)"; fi
+  out=$(NO_IDP=1 FWD_FAIL=1 clean_case t9_clean)
+  if [[ $out == *"forwarder to Zitadel could not be started again; recreate the fixture"* ]]; then
+    ok "t9_clean says to recreate the fixture when the forwarder cannot start"
+  else bad "t9_clean, forwarder fails: $out"; fi
+  out=$(clean_case t9_clean)
+  if [ ! -s "$t/clean.log" ] && [ -z "$out" ]; then
+    ok "t9_clean leaves a running A that reaches Zitadel alone"
+  else bad "t9_clean, nothing to repair: $(cat "$t/clean.log") ($out)"; fi
+else bad "handback and t9_clean were not found in the session"; fi
+
 exit "$fail"
