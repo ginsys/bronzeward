@@ -341,8 +341,8 @@ func TestWrapOversizedMarkGroup(t *testing.T) {
 			t.Errorf("row %d starts with a mark: %q", i, l)
 		}
 	}
-	if !strings.Contains(strings.Join(got, ""), `ा`) {
-		t.Errorf("wrap gives %q; want the marks that do not fit as escapes", got)
+	if want := []string{"क" + strings.Repeat("ा", 19), "\\u093e"}; !slices.Equal(got, want) {
+		t.Errorf("wrap gives %q; want %q", got, want)
 	}
 }
 
