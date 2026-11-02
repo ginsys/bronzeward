@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -109,6 +110,20 @@ func TestImportReviewRefused(t *testing.T) {
 	step("--no-input", append(review, "--no-input"), 2, "", "takes neither --no-input nor --token-stdin")
 	if f.reviews != 0 {
 		t.Errorf("the review was read %d times", f.reviews)
+	}
+}
+
+// TestRawFile: import review finds the terminal beneath the table guard that run puts on standard
+// output, and no file when standard output is none.
+func TestRawFile(t *testing.T) {
+	e := &env{output: "table"}
+	e.out = tableGuard{e, os.Stdout, client.GuardWriter(os.Stdout)}
+	if e.rawFile() != os.Stdout {
+		t.Error("the file beneath the table guard is not found")
+	}
+	e.out = tableGuard{e, &bytes.Buffer{}, client.GuardWriter(&bytes.Buffer{})}
+	if e.rawFile() != nil {
+		t.Error("a buffer beneath the table guard is taken for a file")
 	}
 }
 

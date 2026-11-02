@@ -35,7 +35,7 @@ func (e *env) importReview(args []string) error {
 	if err := protectedOn(runtime.GOOS); err != nil {
 		return err
 	}
-	out, _ := e.out.(*os.File)
+	out := e.rawFile()
 	switch {
 	case e.output != "table":
 		return usageError{errors.New("import review has no -o json or yaml form: it shows the review on a terminal only; nothing was read")}
@@ -74,6 +74,18 @@ func (e *env) importReview(args []string) error {
 		return e.say(append([]string{"No marks given. Review again, continue or abandon it:"}, remedies(ing, "review", "continue", "abandon")...)...)
 	}
 	return e.sendMarks(c, ing, marks, nil, false)
+}
+
+// rawFile is standard output as the file it is beneath the table guard, or nil when it is no file.
+// The pager writes its own terminal control sequences, which the guard would escape, and it escapes
+// the review's text itself.
+func (e *env) rawFile() *os.File {
+	w := e.out
+	if g, ok := w.(tableGuard); ok {
+		w = g.raw
+	}
+	f, _ := w.(*os.File)
+	return f
 }
 
 // pager shows text on the terminal out in the alternate screen, with standard input in raw mode
