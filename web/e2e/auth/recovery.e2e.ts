@@ -216,6 +216,8 @@ describe("the recovery entry (#364)", () => {
     await clearRevocation(["Issuer", "Subject"]);
     await form.$("label*=Reason").$("input").setValue("synthetic revocation by identity");
     await form.$("label*=Type the identity").$("input").setValue(named!);
+    // The form reads the identity alone: the cleared issuer and subject are gone from its state too.
+    await browser.waitUntil(async () => form.$("button=Revoke identity").isEnabled(), { timeout: 5_000, timeoutMsg: "the revocation by identity stayed off" });
     await form.$("button=Revoke identity").click();
     await browser.waitUntil(async () => (await answers()).filter((a) => a.startsWith("/identity-revocations ")).length === 2, { timeout: 20_000, timeoutMsg: "the revocation by identity was not answered" });
     expect((await answers()).filter((a) => a.startsWith("/identity-revocations "))).toEqual(["/identity-revocations 201", "/identity-revocations 409"]);
@@ -251,8 +253,16 @@ async function fillRevocation(v: { iss: string; sub: string; reason: string }, t
   if (typed !== "") await form.$("label*=Type the identity").$("input").setValue(typed);
 }
 
+// Empties the inputs with the keys a person uses: the driver's own clear sends no input event in
+// Chrome, so the form's state would keep the old value.
 async function clearRevocation(labels: string[]) {
-  for (const label of labels) await $("main form[aria-label='Revoke identity']").$(`label*=${label}`).$("input").setValue("");
+  for (const label of labels) {
+    const input = $("main form[aria-label='Revoke identity']").$(`label*=${label}`).$("input");
+    await input.click();
+    await browser.keys(["Control", "a"]);
+    await browser.keys("Backspace");
+    expect(await input.getValue()).toBe("");
+  }
 }
 
 afterEach(storageEmpty);
