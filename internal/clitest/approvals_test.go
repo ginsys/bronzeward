@@ -198,7 +198,7 @@ func TestApprovals(t *testing.T) {
 		f.want(e.ctl(append(h, "approval", "revoke", a, "--reason", "BWSYNTH withdrawn")...), 0, "Revocation of approval "+a+" recorded by ",
 			"The plan "+p+" is revoked: it cannot be committed. A revocation ends an uncommitted approval and undoes no commitment; it does not stop an attempt already recorded.")
 		f.want(e.ctl(append(h, "approval", "revoke", a, "--reason", "BWSYNTH again")...), 1, "409", "the approval is already revoked; a revocation is permanent")
-		f.want(e.ctl(append(h, "plan", "show", p)...), 0, "Revoked: its approval was revoked, so it cannot be committed.")
+		f.want(e.ctl(append(h, "plan", "show", p)...), 0, "Revoked: its approval or its approver's identity was revoked, so it cannot be committed.")
 	})
 	e.cancelAll(t)
 	// The cases' epochs superseded serve's controller; the restarted one commits only approvals of
