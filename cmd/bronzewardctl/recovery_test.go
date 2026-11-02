@@ -262,6 +262,30 @@ func TestRecoveryStatus(t *testing.T) {
 	}
 }
 
+// TestRecoveryStatusUnresolvedWithNoHolder: a restored operation that was cancelled or classified
+// no longer holds its scope, but the scope stays unresolved until it is marked again. An empty
+// lookup advises the mark; a failed lookup keeps the command that shows the operations.
+func TestRecoveryStatusUnresolvedWithNoHolder(t *testing.T) {
+	for _, tc := range []struct{ name, list, want string }{
+		{"empty lookup", `{"items":[]}`, "mch_b unresolved no unresolved operation holds it now: recovery mark 'mch_b'"},
+		{"failed lookup", `404 {"type":"about:blank","title":"x","status":404}`, "mch_b unresolved an operation holds it: operation list --machine 'mch_b'"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recoveryServer(t, map[string]string{
+				"GET /api/v1/recovery":   `{"epoch":"ep_BWSYNTH-1","recoveryMode":true,"scopes":[{"machine":"mch_b","state":"unresolved"}]}`,
+				"GET /api/v1/operations": tc.list,
+			}, "")
+			var out, errb bytes.Buffer
+			if code := run([]string{"recovery", "status"}, &out, &errb); code != 0 {
+				t.Fatalf("exit %d\n%s", code, errb.String())
+			}
+			if flat := strings.Join(strings.Fields(out.String()), " "); !strings.Contains(flat, tc.want) {
+				t.Errorf("output lacks %q:\n%s", tc.want, out.String())
+			}
+		})
+	}
+}
+
 // TestRecoveryStatusReadsTheNewestMark: the timeline holds an old and a new restoration mark; the
 // server answers oldest first unless the request says order=newest, so dropping the order would
 // report the keys of the old mark.
