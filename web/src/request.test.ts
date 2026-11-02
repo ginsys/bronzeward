@@ -509,7 +509,13 @@ describe("stale-response discard", () => {
   });
 
   test("a read in flight when the reads are dropped is discarded under the same view; a read sent after renders", async () => {
-    const { fetchImpl, release } = delayed(ok({ stale: true }));
+    // Each call gets its own response, as a fetch gives: a dropped one has its body cancelled.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const fetchImpl = (async () => {
+      await gate;
+      return ok({ stale: true });
+    }) as unknown as typeof fetch;
     const c = new Client({ fetch: fetchImpl });
     c.setView(base);
     const pending = c.read("/identity");
@@ -918,6 +924,57 @@ describe("the attempt bound (§8.4 item 8)", () => {
     await expect(c.attempt("POST", "/clusters", {}, "{}")).rejects.toThrow("renewal failed");
     await vi.advanceTimersByTimeAsync(60_000);
     expect(signals[0]!.aborted).toBe(false);
+  });
+
+  const base = { principal: "p1", route: "/machines", query: "" };
+
+  // An answer whose body never ends, and whether the client cancelled it.
+  function spied(status: number, headers: Record<string, string>) {
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({ cancel: () => void (cancelled = true) });
+    return { res: new Response(stream, { status, headers }), cancelled: () => cancelled };
+  }
+
+  test("a response dropped as stale has its body cancelled when its timers end", async () => {
+    const s = spied(200, jsonHeaders);
+    let release = () => {};
+    const { c } = bounded(() => new Promise<Response>((resolve) => (release = () => resolve(s.res))));
+    c.setView(base);
+    const pending = c.read("/identity");
+    await vi.advanceTimersByTimeAsync(0);
+    c.dropReads();
+    release();
+    expect(await pending).toEqual({ kind: "discarded" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.cancelled()).toBe(true);
+  });
+
+  test("a response dropped for its epoch has its body cancelled when its timers end", async () => {
+    const s = spied(200, jsonHeaders);
+    let release = () => {};
+    const { c } = bounded((_init, n) => {
+      if (n === 1) return ok({}); // e1 recorded
+      if (n === 2) return new Promise<Response>((resolve) => (release = () => resolve(s.res))); // in flight under e1
+      return ok({}, "e2");
+    });
+    c.setView(base);
+    await c.read("/server");
+    const pending = c.read("/identity");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await c.read("/recovery")).toEqual({ kind: "discarded" }); // reveals e2
+    c.dropReads();
+    release();
+    expect(await pending).toEqual({ kind: "discarded" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.cancelled()).toBe(true);
+  });
+
+  test("a success without an epoch has its body cancelled when its timers end", async () => {
+    const s = spied(200, { "Content-Type": "application/json" });
+    const { c } = bounded(() => s.res);
+    expect(await c.read("/server")).toMatchObject({ kind: "defect" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.cancelled()).toBe(true);
   });
 
   test("a read sent only for the epoch is bounded too: a 401 body that never ends gives no answer", async () => {
