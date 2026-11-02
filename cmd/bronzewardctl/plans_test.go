@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -513,7 +515,9 @@ func TestPlanCreate(t *testing.T) {
 		{"an adopt plan with a mode", []string{"--operation", "adopt", "--mode", "no-reboot"}, "an adopt plan takes no --mode"},
 		{"an adopt plan with a deadline", []string{"--operation", "adopt", "--transport-deadline", "1m"}, "nothing was sent"},
 		{"an adopt plan with an attempt limit", []string{"--operation", "adopt", "--max-attempts", "2"}, "nothing was sent"},
+		{"an adopt plan with an empty mode", []string{"--operation", "adopt", "--mode", ""}, "an adopt plan takes no --mode"},
 		{"another mode", []string{"--operation", "apply-config", "--mode", "reboot"}, "no-reboot, its only mode"},
+		{"an empty mode", []string{"--operation", "apply-config", "--mode", ""}, "no-reboot, its only mode"},
 		{"part of a second", []string{"--operation", "apply-config", "--expires-in", "1500ms"}, "whole seconds"},
 		{"no attempts", []string{"--operation", "apply-config", "--max-attempts", "0"}, "at least 1"},
 	} {
@@ -604,5 +608,53 @@ func TestPlanCancel(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "The plan stays committed to operation op_BWSYNTH-apply. A cancellation ends a committed plan's operation "+
 		"only while no attempt is recorded; it does not stop an attempt already recorded.\nFollow it with: bronzewardctl operation watch 'op_BWSYNTH-apply'\n") {
 		t.Errorf("a committed plan: exit %d, stdout %q", code, out)
+	}
+
+	// A restore after the answer can undo the cancellation: across an epoch change, or one changed
+	// and back, the read-back says nothing about what the cancellation stopped.
+	for _, c := range []struct{ name, server, want string }{
+		{"moved after the answer", "ep_BWSYNTH-3", "the epoch changed from ep_BWSYNTH-2 to ep_BWSYNTH-3"},
+		{"moved and back after the answer", "ep_BWSYNTH-2", "the epoch changed from ep_BWSYNTH-2 and changed back"},
+	} {
+		posted := false
+		f.set(func(f *planFake) {
+			f.state = "proposed"
+			f.epochFor = func(path string) string {
+				if posted && (path != "/server" || c.server == "ep_BWSYNTH-3") {
+					return "ep_BWSYNTH-3"
+				}
+				return "ep_BWSYNTH-2"
+			}
+			post := f.post
+			f.post = func(w http.ResponseWriter, path string) { post(w, path); posted = true; f.post = post }
+		})
+		code, out, errOut := runCtl(t, append(cancel, "--reason", "BWSYNTH")...)
+		if code != 0 || strings.Contains(out, "cannot be committed") || !strings.HasSuffix(out, c.want+
+			" after the cancellation was recorded, so whether it still stands is not known. Read the plan with: plan show 'pln_BWSYNTH'\n"+cancelLimits+"\n") {
+			t.Errorf("%s: exit %d, stdout %q, stderr %q", c.name, code, out, errOut)
+		}
+		f.set(func(f *planFake) { f.epochFor = nil })
+	}
+}
+
+// TestPlanCreateSaveFails checks that a created plan is shown even when keeping what the answers
+// taught the context fails afterwards: the plan stands, so its ID must not be lost. The
+// configuration file is made unreadable as the plan is created.
+func TestPlanCreateSaveFails(t *testing.T) {
+	f := planServer(t)
+	f.set(func(f *planFake) {
+		f.post = func(w http.ResponseWriter, _ string) {
+			if err := os.WriteFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "bronzeward", "config.yaml"), []byte("{"), 0o600); err != nil {
+				t.Error(err)
+			}
+			w.WriteHeader(http.StatusCreated)
+			f.mu.Unlock()
+			fmt.Fprint(w, f.plan())
+			f.mu.Lock()
+		}
+	})
+	code, out, errOut := runCtl(t, "plan", "create", "--release", "rel_BWSYNTH", "--machine", "mch_a", "--operation", "apply-config")
+	if code != 1 || !strings.Contains(out, "Plan pln_BWSYNTH  proposed") || !strings.Contains(errOut, "keeping the epoch") {
+		t.Errorf("exit %d, stdout %q, stderr %q; want the plan shown and the save failure reported", code, out, errOut)
 	}
 }

@@ -59,8 +59,13 @@ func (e *env) planCmd(args []string) error {
 // answer, the GET /server it called for included, so that an epoch changed and changed back is
 // seen too.
 func planSnapshot(c *client.Client, r *client.Response, p *apitypes.PlanBody) ([]string, string) {
+	return snapshot(c, r, func() []string { return planView(c, p) })
+}
+
+// snapshot is planSnapshot for any lines that read builds from the answer r and further reads.
+func snapshot(c *client.Client, r *client.Response, read func() []string) ([]string, string) {
 	first := r.Header.Get("Bronzeward-Epoch")
-	lines := planView(c, p)
+	lines := read()
 	now := c.Context.LastEpoch
 	switch {
 	case first != "" && now != first:
@@ -98,15 +103,15 @@ func (s *seconds) Set(v string) error {
 // take.
 func (e *env) planCreate(args []string) error {
 	var in apitypes.PlanInput
-	var operation, mode string
+	var operation string
 	var expires, age, validity, transport, verification seconds
-	var attempts given
+	var mode, attempts given
 	var rf repeatFlags
 	if _, err := e.parse("plan create", args, 0, func(fs *flag.FlagSet) {
 		fs.StringVar(&in.ReleaseId, "release", "", "")
 		fs.StringVar(&in.Machine, "machine", "", "")
 		fs.StringVar(&operation, "operation", "", "")
-		fs.StringVar(&mode, "mode", "", "")
+		fs.Var(&mode, "mode", "")
 		fs.Var(&expires, "expires-in", "")
 		fs.Var(&age, "max-observation-age", "")
 		fs.Var(&validity, "check-validity", "")
@@ -123,11 +128,11 @@ func (e *env) planCreate(args []string) error {
 		return usageError{errors.New("plan create needs --release and --machine")}
 	case !in.Operation.Valid():
 		return usageError{errors.New("--operation: give apply-config or adopt")}
-	case in.Operation == apitypes.PlanInputOperationAdopt && (mode != "" || transport.n != nil || verification.n != nil || attempts.set):
+	case in.Operation == apitypes.PlanInputOperationAdopt && (mode.set || transport.n != nil || verification.n != nil || attempts.set):
 		return usageError{errors.New("an adopt plan takes no --mode, --transport-deadline, --verification-deadline or --max-attempts; nothing was sent")}
 	case in.Operation == apitypes.PlanInputOperationApplyConfig:
 		m := apitypes.PlanInputModeNoReboot
-		if mode != "" && apitypes.PlanInputMode(mode) != m {
+		if mode.set && apitypes.PlanInputMode(mode.v) != m {
 			return usageError{errors.New("--mode: an apply-config plan takes no-reboot, its only mode")}
 		}
 		in.Mode = &m
@@ -172,12 +177,13 @@ func (e *env) planCreate(args []string) error {
 	if next := createRefusalNext(err, in.ReleaseId, in.Machine); next != "" {
 		return fmt.Errorf("%w\n%s", err, next)
 	}
-	if err != nil || view == nil {
+	if view == nil {
 		return err
 	}
+	// The plan was created: its view shows even when saving the context failed after the answer.
 	w := tabwriter.NewWriter(e.out, 0, 0, 2, ' ', 0)
 	printLines(w, view)
-	return w.Flush()
+	return errors.Join(w.Flush(), err)
 }
 
 // createRefusalNext is the next step T19 names for plan creation's conflicts (internal/api/plans.go):
@@ -421,10 +427,17 @@ func (e *env) planCancel(args []string) error {
 		if err := json.Unmarshal(r.Body, &x); err != nil || e.output != "table" {
 			return nil, err
 		}
-		lines := []string{fmt.Sprintf("Cancellation of plan %s recorded by %s (%s), act %s.", x.Plan, x.CancelledBy, x.Role, x.Act)}
+		lines := []string{sf("Cancellation of plan %s recorded by %s (%s), act %s.", x.Plan, x.CancelledBy, x.Role, x.Act)}
 		var p apitypes.PlanBody
-		if err := getJSON(c, path, &p); err != nil {
-			return append(lines, "The plan cannot be read: "+err.Error(), cancelLimits), nil
+		var err error
+		// A restore between the answer and the read can undo the cancellation, so the read says what
+		// it stopped only from the answer's epoch (client-contracts.md section 8.5).
+		if _, change := snapshot(c, r, func() []string { err = getJSON(c, path, &p); return nil }); change != "" {
+			return append(lines, sf("%s after the cancellation was recorded, so whether it still stands is not known. Read the plan with: plan show ", change)+
+				client.ShellWord(plan), cancelLimits), nil
+		}
+		if err != nil {
+			return append(lines, sf("The plan cannot be read: %v", err), cancelLimits), nil
 		}
 		if p.State != "committed" {
 			return append(lines, "The plan is "+p.State+": it cannot be committed."), nil
