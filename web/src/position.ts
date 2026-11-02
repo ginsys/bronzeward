@@ -117,7 +117,7 @@ function holder(masked: string, tag: number, compact = false): number {
     const dashes = /^ *(?:-(?: +|$))*/.exec(before)![0];
     if (dashes.length === own) return own;
     const rest = before.slice(dashes.length);
-    return /^(?:&\S+\s+)*$/.test(rest) ? dashes.lastIndexOf("-") : dashes.length;
+    return /^(?:&[A-Za-z0-9_-]+\s+)*$/.test(rest) ? dashes.lastIndexOf("-") : dashes.length;
   }
   for (let e = start - 1; e >= 0; ) {
     const s = e === 0 ? 0 : masked.lastIndexOf("\n", e - 1) + 1;
