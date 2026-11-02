@@ -386,6 +386,63 @@ func TestRecoveryStatusRefusesAStaleSnapshot(t *testing.T) {
 	})
 }
 
+// TestMachineShowRefusesAMixedSnapshot: the table of machine show derives its status sentences from
+// the machine read and from every page of its observations. When an epoch change falls between those
+// reads, the machine and the observations come from different snapshots, so the table is not shown
+// (section 8.5). An epoch change that comes with the machine read itself leaves both reads in one epoch.
+// The -o json and -o yaml forms print the machine read alone and read no observations.
+func TestMachineShowRefusesAMixedSnapshot(t *testing.T) {
+	answers := map[string]string{
+		"GET /api/v1/machines/mch_a": `{"id":"mch_a","cluster":"c1","platform":"metal","talosEndpoint":"10.0.0.1","hardware":{"talosNodeId":"n1"},` +
+			`"scopeState":"normal","frozen":false,"pendingConvergence":false,"applied":null,"desired":null,"observed":null,"openDrift":null}`,
+		"GET /api/v1/machines/mch_a/observations":           `{"items":[],"next":"p2"}`,
+		"GET /api/v1/machines/mch_a/observations?cursor=p2": `{"items":[]}`,
+	}
+	for name, moves := range map[string]string{
+		"the first observation page":  "/api/v1/machines/mch_a/observations",
+		"the second observation page": "/api/v1/machines/mch_a/observations?cursor=p2",
+	} {
+		t.Run("the epoch moves with "+name, func(t *testing.T) {
+			setServerFacts(t, 3, map[string]string{moves: "ep_BWSYNTH-2"})
+			recoveryServer(t, answers, "")
+			var out, errb bytes.Buffer
+			rc := run([]string{"machine", "show", "mch_a"}, &out, &errb)
+			if rc == 0 || out.Len() != 0 || !strings.Contains(errb.String(), "the epoch changed from 'ep_BWSYNTH-1' to 'ep_BWSYNTH-2'") ||
+				!strings.Contains(errb.String(), "Read it again with: machine show 'mch_a'") {
+				t.Errorf("rc %d, out %q, err %q; want a refusal that shows no table", rc, out.String(), errb.String())
+			}
+		})
+	}
+	t.Run("the epoch moves with the machine read", func(t *testing.T) {
+		setServerFacts(t, 3, map[string]string{"/api/v1/machines/mch_a": "ep_BWSYNTH-2"})
+		recoveryServer(t, answers, "")
+		var out, errb bytes.Buffer
+		if rc := run([]string{"machine", "show", "mch_a"}, &out, &errb); rc != 0 || !strings.Contains(out.String(), "mch_a") {
+			t.Errorf("rc %d, out %q, err %q; want the table", rc, out.String(), errb.String())
+		}
+	})
+	t.Run("the epoch holds", func(t *testing.T) {
+		recoveryServer(t, answers, "")
+		var out, errb bytes.Buffer
+		if rc := run([]string{"machine", "show", "mch_a"}, &out, &errb); rc != 0 || !strings.Contains(out.String(), "mch_a") {
+			t.Errorf("rc %d, out %q, err %q; want the table", rc, out.String(), errb.String())
+		}
+	})
+	t.Run("-o json reads the machine alone", func(t *testing.T) {
+		setServerFacts(t, 3, map[string]string{"/api/v1/machines/mch_a/observations": "ep_BWSYNTH-2"})
+		seen := recoveryServer(t, answers, "")
+		var out, errb bytes.Buffer
+		if rc := run([]string{"machine", "show", "mch_a", "-o", "json"}, &out, &errb); rc != 0 || !strings.Contains(out.String(), `"id":"mch_a"`) {
+			t.Errorf("rc %d, out %q, err %q; want the machine", rc, out.String(), errb.String())
+		}
+		for _, r := range seen() {
+			if strings.Contains(r, "observations") {
+				t.Errorf("-o json read the observations: %v", seen())
+			}
+		}
+	})
+}
+
 // TestStatusRefusesAStaleSnapshot: status builds one snapshot from GET /server and three later reads.
 // When an epoch change falls between the first read and the last, the server answer, with its
 // revision and start mode, is stale, so the command shows nothing in every output form (section 8.5).
