@@ -28,11 +28,27 @@ export interface Bao {
 const KEYS = ["bw-artifact", "bw-baseline", "bw-staging", "bw-digest"];
 const ROLES = ["ingestion", "compiler", "metadata", "executor"];
 
+// mise run dev-bao's root token (mise.toml), which only a dev server accepts.
+export const DEV_ROOT_TOKEN = "bw-dev-root-token";
+
+// The OpenBao this run administers: only the instance's dev-bao, which mise run browser-auth names in
+// BW_DEV_BAO_ADDR (scripts/dev/instance.sh, http://127.0.0.1:<port>), with its root token. Setup
+// writes policies, keys and tokens there, and the proxy forwards ingestion writes there, so an
+// inherited BW_TEST_BAO_ADDR or BW_TEST_BAO_TOKEN that names another provider refuses the run.
+export function baoTarget(env: Record<string, string | undefined>): { addr: string; admin: string } {
+  const raw = env["BW_DEV_BAO_ADDR"];
+  if (raw === undefined || raw === "") throw new Error("BW_DEV_BAO_ADDR is unset: run the cases with mise run browser-auth, after mise run dev-bao");
+  const addr = raw.replace(/\/$/, "");
+  if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(addr)) throw new Error(`BW_DEV_BAO_ADDR ${addr} is not dev-bao's loopback address http://127.0.0.1:<port>: refused`);
+  const inherited = env["BW_TEST_BAO_ADDR"];
+  if (inherited !== undefined && inherited.replace(/\/$/, "") !== addr) throw new Error(`BW_TEST_BAO_ADDR names another OpenBao than the instance's dev-bao ${addr}: refused; unset it`);
+  const token = env["BW_TEST_BAO_TOKEN"];
+  if (token !== undefined && token !== DEV_ROOT_TOKEN) throw new Error("BW_TEST_BAO_TOKEN is not dev-bao's root token: refused; unset it");
+  return { addr, admin: DEV_ROOT_TOKEN };
+}
+
 export async function startBao(root: string, state: string, port: number): Promise<Bao> {
-  // mise run browser-auth sets BW_DEV_BAO_ADDR from BW_DEV_INSTANCE (scripts/dev/instance.sh); the
-  // default is the default instance's.
-  const addr = (process.env["BW_TEST_BAO_ADDR"] ?? process.env["BW_DEV_BAO_ADDR"] ?? "http://127.0.0.1:11200").replace(/\/$/, "");
-  const admin = process.env["BW_TEST_BAO_TOKEN"] ?? "bw-dev-root-token";
+  const { addr, admin } = baoTarget(process.env);
   const prefix = `bwweb-${randomBytes(6).toString("hex")}-`;
   const undo: (() => Promise<unknown>)[] = [];
   const call = async (method: string, path: string, body?: unknown) => {
