@@ -348,6 +348,8 @@ describe("the draft editor (#339)", () => {
     await pane().$("button=Remove").click();
     await expect(result()).toHaveText(expect.stringContaining(`Fragment ${name} removed from draft`), { wait: 20_000 });
     await expect($('main ul[aria-label="Entries"]')).toHaveText(expect.stringContaining(`fragment ${name} removed`));
+    // ginsys/bronzeward#517 H8: the draft stores the removal, so the text still shown is unsaved.
+    await expect(pane()).toHaveText(expect.stringContaining("-> unsaved"));
     // Dismissed, nothing is sent; accepted, the draft is discarded.
     const before = (await writes()).length;
     expect((await dialogs(false, () => $("main").$("button=Discard draft").click()))[0]).toContain(`Discard draft ${id}`);

@@ -289,18 +289,20 @@ export const holdsUnsaved = (held: Held, saved: Held, mine: Held | undefined) =>
 // started, so an answer older than the operator's action changes nothing. `version` counts the
 // events that changed the editor's text or the conflict: Revert to base applies only at its click's.
 // `awaits`: while asked, a draft read named a new revision of this entry, and only its revision read
-// shows their text (ginsys/bronzeward#517 L1).
+// shows their text (ginsys/bronzeward#517 L1). `sent.removes`: the write was a Remove, which saves
+// the removal, not the text (H8).
 export interface Clash { mine: Held; phase: "refused" | "asked" | "theirs"; revision?: number; awaits?: true }
-export interface Editor { held: Held; saved: Held; conflict?: Clash; sent?: { text: Held; whileTheirs: boolean }; writes?: number; note?: string | undefined; version?: number }
+export interface Editor { held: Held; saved: Held; conflict?: Clash; sent?: { text: Held; whileTheirs: boolean; removes?: true }; writes?: number; note?: string | undefined; version?: number }
 export type EditorEvent =
   | { kind: "type"; held: Held } // the operator's edit
   | { kind: "refused" } // a write's 412
   | { kind: "at"; revision: number } // the 412's own draft read
   | { kind: "show" } // Show their change
-  | { kind: "draft"; revision: number; changed: boolean } // the page's draft read; changed: this entry has a new revision to read
+  // The page's draft read. changed: this entry has a new revision to read; removed: the entry is a removal.
+  | { kind: "draft"; revision: number; changed: boolean; removed?: true }
   | { kind: "read"; text: Held; since: number } // the entry's revision read, started after `since` done writes
   | { kind: "copy" } // Copy my text into the new revision
-  | { kind: "send" } // a Save or Remove sends the editor's text
+  | { kind: "send"; removes?: true } // a Save or Remove sends the editor's text
   | { kind: "done" } // that write is done
   | { kind: "revert"; at: number; text: Held; note: string } // Revert to base's read answers; `at`: the version at the click
   | { kind: "note"; text?: string };
@@ -322,13 +324,20 @@ function step(s: Editor, e: EditorEvent): Editor {
     case "type":
       return c === undefined || c.phase === "theirs" ? { ...s, held: e.held } : at({ mine: e.held }, e.held);
     case "refused":
-      return c === undefined ? { ...s, conflict: { mine: s.held, phase: "refused" } } : s;
+      // Once their text shows, the operator's text is the editor's: a new 412 keeps that, not the
+      // text the last conflict kept aside (ginsys/bronzeward#517 H6). Before, both are the same.
+      return c === undefined || c.phase === "theirs" ? { ...s, conflict: { mine: s.held, phase: "refused" } } : s;
     case "at":
       return c !== undefined && c.revision === undefined ? at({ revision: e.revision }) : s;
     case "show":
       return c?.phase === "refused" ? at({ phase: "asked" }) : s;
     case "draft":
       if (c === undefined || c.phase === "refused" || e.revision < (c.revision ?? 0)) return s;
+      // Their change removed this entry: their text is the removal, which no revision read shows (H7).
+      if (c.phase === "asked" && e.removed === true) {
+        const { awaits: _awaited, ...shown } = c;
+        return { ...s, held: EMPTY, saved: EMPTY, conflict: { ...shown, phase: "theirs", revision: e.revision } };
+      }
       if (c.phase === "asked" && e.changed) return at({ revision: e.revision, awaits: true });
       // Their change left this entry as read: its saved text is theirs. A later draft read that
       // finds the awaited revision already named changes nothing.
@@ -346,12 +355,13 @@ function step(s: Editor, e: EditorEvent): Editor {
       // Only once their text shows: a revision read still pending could replace the copied text.
       return c?.phase === "theirs" ? { ...ended, held: c.mine } : s;
     case "send":
-      return { ...s, sent: { text: s.held, whileTheirs: c?.phase === "theirs" } };
+      return { ...s, sent: { text: s.held, whileTheirs: c?.phase === "theirs", ...(e.removes === true && { removes: true as const }) } };
     case "done": {
       const sent = s.sent?.text ?? s.held;
       // The text the operator chose is saved: a Save sent while theirs showed, or the kept text itself.
       const ends = c === undefined || s.sent?.whileTheirs === true || same(c.mine, sent);
-      return { ...(ends ? ended : s), saved: sent, writes: writes + 1 };
+      // A done Remove saves the removal: the text still shown is not stored anywhere (H8).
+      return { ...(ends ? ended : s), saved: s.sent?.removes === true ? EMPTY : sent, writes: writes + 1 };
     }
     case "revert":
       return mayRevert(c) && e.at === (s.version ?? 0) ? { ...s, held: e.text, note: e.note } : { ...s, note: NOT_REVERTED };
@@ -367,6 +377,12 @@ export const mayRevert = (c: Clash | undefined) => c === undefined || c.phase ==
 // overwrite or remove their change before it shows (ginsys/bronzeward#517 H5).
 export const maySend = mayRevert;
 export const NOT_SENT_CONFLICT = "Not sent: someone changed this draft. Show their change first; Save and Remove wait until their text shows.";
+
+// Whether the pane still lacks the entry's text: its revision read is pending or failed, and no
+// write of its own put the stored text in the editor. Until then the pane takes no edit and sends
+// nothing, so a Save cannot replace text it never showed (ginsys/bronzeward#517 H9).
+export const unread = (revision: string | null | undefined, load: "pending" | "failed" | "ok", done: number) => revision != null && load !== "ok" && done === 0;
+export const NOT_SENT_UNREAD = "Not sent: the entry's text is not read yet.";
 
 // The draft the page shows: the last read with data for this id, so a read again that fails keeps
 // the editor and its unsaved text (W4); the failure shows above it.
@@ -439,7 +455,11 @@ export function FragmentPane({ draft, entry, written, seeChange, claim = () => {
   const [w, send] = useSend();
   const text = useRef<HTMLTextAreaElement>(null);
   const marks = useRef<HTMLTextAreaElement>(null);
+  // The entry's revision read: until one answers, the pane takes no edit (H9).
+  const [load, setLoad] = useState<"pending" | "failed" | "ok">("pending");
+  const waits = unread(entry?.revision, load, done);
   const open = draft.state === "open";
+  const editable = open && !waits;
   // Guarded also once the draft no longer takes writes (discarded by another author): the text is
   // still shown, and leaving drops it.
   useUnsaved(`fragment ${name || "(new)"} of draft ${short(draft.id)}`, holdsUnsaved(held, saved, conflict?.mine));
@@ -447,20 +467,27 @@ export function FragmentPane({ draft, entry, written, seeChange, claim = () => {
   useEffect(() => {
     if (entry?.revision == null) return;
     let live = true;
+    setLoad((l) => (l === "ok" ? l : "pending"));
     void client.read<Revision>(`/fragment-revisions/${enc(entry.revision)}`).then((r) => {
       if (!live) return;
-      if (r.kind !== "ok") return setNote("The entry's revision could not be read.");
+      if (r.kind !== "ok") {
+        setLoad((l) => (l === "ok" ? l : "failed"));
+        return setNote("The entry's revision could not be read.");
+      }
+      setLoad("ok");
       act({ kind: "read", text: fromRevision(r.data), since: done });
     });
     return () => void (live = false);
   }, [client, entry?.revision, attempt]);
 
-  // Each draft read the page shows, and whether it gives this entry a new revision to read.
+  // Each draft read the page shows, and whether it gives this entry a new revision to read, or
+  // removes it. A draft read again also reads a revision that failed again.
   const readRevision = useRef(entry?.revision);
   useEffect(() => {
     const changed = entry?.revision != null && entry.revision !== readRevision.current;
     readRevision.current = entry?.revision;
-    act({ kind: "draft", revision: draft.revision, changed });
+    act({ kind: "draft", revision: draft.revision, changed, ...(entry?.revision === null && { removed: true as const }) });
+    if (!changed && load === "failed") retry((x) => x + 1);
   }, [draft]);
 
   const o = w?.outcome;
@@ -480,6 +507,7 @@ export function FragmentPane({ draft, entry, written, seeChange, claim = () => {
   const save = () => {
     const m = ifMatch();
     if (name === "") return setNote("Not sent: name the fragment first.");
+    if (waits) return setNote(NOT_SENT_UNREAD);
     if (!maySend(conflict)) return setNote(NOT_SENT_CONFLICT);
     if (entry === undefined && inUse(draft, name)) return setNote(`Not sent: this draft already holds fragment ${name}. Open it from Entries to change it.`);
     if (m === undefined) return setNote(NO_ETAG);
@@ -495,10 +523,11 @@ export function FragmentPane({ draft, entry, written, seeChange, claim = () => {
   };
   const remove = () => {
     const m = ifMatch();
+    if (waits) return setNote(NOT_SENT_UNREAD);
     if (!maySend(conflict)) return setNote(NOT_SENT_CONFLICT);
     if (m === undefined) return setNote(NO_ETAG);
-    // A removal drops the entry's text on purpose: once done, the editor holds nothing unsaved.
-    if (startsNew(writes!, w)) act({ kind: "send" });
+    // Once done, the removal is saved: the text still shown is unsaved until a Save stores it (H8).
+    if (startsNew(writes!, w)) act({ kind: "send", removes: true });
     send({ method: "DELETE", path, ifMatch: m, resource: `/drafts/${draft.id}`, body: undefined, settled });
   };
   // The reducer applies the base text only if nothing changed the text or the conflict since the
@@ -561,23 +590,26 @@ export function FragmentPane({ draft, entry, written, seeChange, claim = () => {
       <h3>Fragment {entry === undefined ? <label>name <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" required /></label> : name}</h3>
       <p>
         <label>Layer:{" "}
-          <select value={held.layer} onChange={(e) => hold({ ...held, layer: e.target.value })} disabled={!open}>
+          <select value={held.layer} onChange={(e) => hold({ ...held, layer: e.target.value })} disabled={!editable}>
             {LAYERS.map((l) => <option key={l}>{l}</option>)}
           </select>
         </label>{" "}
         {entry === undefined ? "new" : change(entry)}{!same(held, saved) && " -> unsaved"}
       </p>
       {entry?.revision === null && <Status>Removed in this draft.</Status>}
-      <p><label>Document <textarea ref={text} value={held.document} onChange={(e) => hold({ ...held, document: e.target.value })} readOnly={!open} rows={16} cols={80} {...NO_ASSIST} /></label></p>
-      <p><label>Marks, one path per line <textarea ref={marks} value={held.marks} onChange={(e) => hold({ ...held, marks: e.target.value })} readOnly={!open} rows={3} cols={80} {...NO_ASSIST} /></label></p>
+      {waits && (load === "failed"
+        ? <p><button type="button" onClick={() => retry((x) => x + 1)}>Read the entry again</button></p>
+        : <Status>Reading the entry's text.</Status>)}
+      <p><label>Document <textarea ref={text} value={held.document} onChange={(e) => hold({ ...held, document: e.target.value })} readOnly={!editable} rows={16} cols={80} {...NO_ASSIST} /></label></p>
+      <p><label>Marks, one path per line <textarea ref={marks} value={held.marks} onChange={(e) => hold({ ...held, marks: e.target.value })} readOnly={!editable} rows={3} cols={80} {...NO_ASSIST} /></label></p>
       <h4>References in this document</h4>
       {refs.length === 0 ? <p>None.</p> : (
         <Scroll label="References in this document">
           <thead><tr>{["Reference", "Kind", "Version", "Encoding", "State"].map((h) => <th key={h} scope="col">{h}</th>)}</tr></thead>
-          <tbody>{refs.map((ref) => <ReferenceRow key={ref} name={ref} declared={held.declared[ref]} used={used.includes(ref)} set={(r) => declare(ref, r)} open={open} />)}</tbody>
+          <tbody>{refs.map((ref) => <ReferenceRow key={ref} name={ref} declared={held.declared[ref]} used={used.includes(ref)} set={(r) => declare(ref, r)} open={editable} />)}</tbody>
         </Scroll>
       )}
-      <EmbeddedList embedded={held.embedded} set={(embedded) => hold({ ...held, embedded })} open={open} />
+      <EmbeddedList embedded={held.embedded} set={(embedded) => hold({ ...held, embedded })} open={editable} />
       {open && (
         <p>
           <Action label="Save" needs={["author"]} onClick={save} busy={w !== undefined && w.outcome === undefined} />{" "}

@@ -4,7 +4,7 @@
 // recovery banner, start mode and epoch-change notice of §8.5.
 
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useId, useReducer, useRef, useState } from "react";
-import { leaving, WriteNotices } from "./forms.tsx";
+import { leaving, signingOut, unsaved, WriteNotices } from "./forms.tsx";
 import { type Load, ReadsProvider } from "./list.tsx";
 import { PreEntry, type Recovery, RecoveryBanner, RecoveryRead, type StartMode, startModeOf, startRefusal } from "./recovery.tsx";
 import { Client, type ClientOptions, EPOCH_CHANGED, type Problem, type ReadResult } from "./request.ts";
@@ -300,6 +300,13 @@ export const ending = <T,>(writes: Writes, client: () => Client, f: (res: T) => 
   f(res);
 };
 
+// §8.5: a new epoch reads the server and the identity again. A page that held unsaved text when the
+// epoch changed stays shown meanwhile, so the operator's text is not dropped with what was read
+// (ginsys/bronzeward#517 H10). Its ETags are gone with the old epoch, so it sends nothing; the
+// operator can copy the text out. A refusal or an incompatible server still replaces it.
+export const keepsPage = (kept: boolean, server: Load<Server>, identity: Load<Identity>) =>
+  kept && (server.kind === "loading" || (server.kind === "ok" && server.data.apiRevision >= MIN_API_REVISION && identity.kind === "loading"));
+
 export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, onDeprecation, signOut, writes, notices = [] }: SignedInProps & { notices?: readonly string[] }) {
   // B11: a move to another page while a write is pending or unknown asks first, Back and Forward
   // included.
@@ -316,6 +323,8 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
   const [recoveryMode, setRecoveryMode] = useState(false);
   const [mode, setMode] = useState<StartMode>("unknown");
   const [epochChanged, setEpochChanged] = useState(false);
+  // Whether the page held unsaved text when the epoch last changed (keepsPage).
+  const [kept, keepPage] = useState(false);
   const [[conn, regained], observe] = useReducer((s: [Connection, number], [e, at]: [ConnectionEvent, Date]) => regaining(s, e, at), [{}, 0]);
   const offline = offlineSince(conn);
   // Bumped to read again: back online, asked by the operator, or after a new epoch.
@@ -327,6 +336,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
     onEpochChange: () => {
       writes.setAside(EPOCH_CHANGED_ASIDE);
       setEpochChanged(true);
+      keepPage(unsaved.size > 0);
       setServer({ kind: "loading" });
       setIdentity({ load: { kind: "loading" } });
       setRecovery({ kind: "loading" });
@@ -428,8 +438,14 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
     };
   }, []);
 
+  const holding = keepsPage(kept, server, identity);
+  useEffect(() => {
+    if (kept && !holding) keepPage(false);
+  }, [kept, holding]);
+
   let main: ReactNode;
-  if (server.kind === "loading") main = <Loading what="the server's version" />;
+  if (holding) main = <Page path={path} query={query} go={go} />;
+  else if (server.kind === "loading") main = <Loading what="the server's version" />;
   // GET /server is refused this way only before a recovery start's entry (§8.5 item 1).
   else if (startRefusal(server)) main = <PreEntry res={server} onRead={() => setAgain((n) => n + 1)} />;
   else if (server.kind !== "ok") main = server.kind !== "discarded" && <Failure res={server} sub={sub} />;
@@ -449,7 +465,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
             <span data-testid="epoch">Epoch {id.epoch}</span>
           </p>
         )}
-        <button type="button" onClick={() => reads.signOut(signOut)}>Sign out</button>
+        <button type="button" onClick={() => signingOut() && reads.signOut(signOut)}>Sign out</button>
         {recoveryMode && <RecoveryBanner recovery={recovery.kind === "ok" ? recovery.data : undefined} mode={mode} />}
         {recoveryMode && recovery.kind !== "loading" && <RecoveryRead res={recovery} />}
         {epochChanged && <Status testid="epoch-changed">{EPOCH_CHANGED}.</Status>}
@@ -464,7 +480,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
           </nav>
         )}
       </header>
-      <ReadsProvider value={{ client, settle: settlePage, undropped: reads.since, view: JSON.stringify([path, query]), again, regained, go, failure: (res) => <Failure res={res} sub={sub} /> }}><main id="main" ref={page} tabIndex={-1}>{main}</main></ReadsProvider>
+      <ReadsProvider value={{ client, settle: settlePage, undropped: reads.since, view: JSON.stringify([path, query]), again, regained, go, failure: (res) => <Failure res={res} sub={sub} /> }}><main id="main" ref={page} tabIndex={-1}>{holding && <Loading what="the server and your identity under the new epoch" />}{main}</main></ReadsProvider>
       <VersionFooter server={server.kind === "ok" ? server.data : undefined} />
     </ShellContext>
   );
