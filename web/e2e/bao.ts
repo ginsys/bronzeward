@@ -63,8 +63,11 @@ export async function startBao(root: string, state: string, port: number): Promi
     return r.body;
   };
   const undoAll = async () => {
+    // A step that fails stays, so a later cleanup tries it again (#517 H19).
     const failed: string[] = [];
-    for (const u of undo.splice(0).reverse()) await u().catch((e: unknown) => failed.push(String(e)));
+    const kept: (() => Promise<unknown>)[] = [];
+    for (const u of undo.splice(0).reverse()) await u().catch((e: unknown) => (kept.unshift(u), failed.push(String(e))));
+    undo.push(...kept);
     if (failed.length > 0) throw new Error(`OpenBao cleanup (records named ${prefix}*): ${failed.join("; ")}`);
   };
 
@@ -112,7 +115,8 @@ export async function startBao(root: string, state: string, port: number): Promi
             res.writeHead(r.statusCode ?? 502, r.headers);
             r.pipe(res);
           });
-          up.on("error", () => res.writeHead(502).end());
+          // Headers already sent cannot become a 502: the response is cut instead (#517 H20).
+          up.on("error", () => (res.headersSent ? res.destroy() : res.writeHead(502).end()));
           req.pipe(up);
         }, held);
       }),

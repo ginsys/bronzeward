@@ -33,16 +33,17 @@ export async function spotOfPath(text: string, path: string): Promise<Spot | und
 }
 
 // The reference tags in the text, outside comments: a reference name is the §5.1 grammar's
-// characters (internal/ingest/declare.go), so a flow list's comma or bracket ends it.
+// characters (internal/ingest/declare.go), so a flow list's comma or bracket ends it. The name may
+// be quoted, and may stand on a line after its tag (ginsys/bronzeward#517 H16). Comments are
+// blanked first, keeping every offset, so a match can cross a line without reading one. A scalar
+// followed by a colon and a blank is a key, never the tag's value.
 function tags(text: string): { index: number; tag: string; name: string }[] {
-  const found: { index: number; tag: string; name: string }[] = [];
-  let at = 0;
+  let masked = "";
   for (const line of text.split("\n")) {
-    const end = at + commentStart(line);
-    for (const m of text.slice(at, end).matchAll(/!bwref[ \t]+([a-z0-9][a-z0-9/-]*)/g)) found.push({ index: at + m.index, tag: m[0], name: m[1]! });
-    at += line.length + 1;
+    const end = commentStart(line);
+    masked += `${line.slice(0, end)}${" ".repeat(line.length - end)}\n`;
   }
-  return found;
+  return [...masked.matchAll(/!bwref\s+(["']?)([a-z0-9][a-z0-9/-]*)\1(?![a-z0-9/-]|[ \t]*:(?:\s|$))/g)].map((m) => ({ index: m.index, tag: text.slice(m.index, m.index + m[0].length), name: m[2]! }));
 }
 
 // Where a line's comment starts: a # at its start or after a blank, outside quotes; the line's

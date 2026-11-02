@@ -320,9 +320,10 @@ async function cleanup() {
     // Each server must be gone before its database can be dropped.
     await Promise.all(procs.splice(0).map(stop));
     await Promise.all(servers.splice(0).map((s) => new Promise((r) => (s.closeAllConnections(), s.close(r)))));
-    // A failure is reported after the databases are dropped.
+    // A failure is reported after the databases are dropped, and keeps `bao`, so a later cleanup
+    // tries its records again (#517 H19).
     const baoFailed = await (bao?.cleanup() ?? Promise.resolve()).then(() => undefined, (e: unknown) => e);
-    bao = undefined;
+    if (baoFailed === undefined) bao = undefined;
     const left = databases.filter((db) => {
       try {
         execFileSync("dropdb", [...PG, "--force", db]);
@@ -334,7 +335,9 @@ async function cleanup() {
     });
     // A later cleanup tries them again, and keeps the state directory while any is left.
     databases.splice(0, databases.length, ...left);
-    if (left.length > 0) throw new Error(`databases left behind: ${left.join(", ")} (named in ${state})`);
+    const lost = left.length > 0 ? new Error(`databases left behind: ${left.join(", ")} (named in ${state})`) : undefined;
+    if (lost !== undefined && baoFailed !== undefined) throw new AggregateError([lost, baoFailed], `${lost.message}; ${String(baoFailed)}`);
+    if (lost !== undefined) throw lost;
     if (baoFailed !== undefined) throw baoFailed;
     if (ownState) rmSync(state, { recursive: true, force: true });
     ownState = false;

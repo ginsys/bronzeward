@@ -212,6 +212,14 @@ new revision whose content equals the base). After a `412`, [Revert to base] wai
 [Show their change] put their text in the editor: until then the editor holds the operator's text
 that the conflict keeps.
 
+A `412` on [Discard draft] shows "Not discarded: someone changed this draft since this page read
+it." and offers [Show their change]. While an editor holds unsaved text, that button reads nothing
+and asks the operator to save the text or switch entries first.
+
+The editor lists a reference whose name is quoted, or stands on the line after its `!bwref` tag.
+A key that follows the tag is not its name. If the operator edited the marks after a refusal,
+[Go to field] finds the refused line where it is now. If that line is gone, it focuses the marks field and selects nothing.
+
 ## W5. Protected import review
 
 ```text
