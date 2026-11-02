@@ -248,6 +248,13 @@ export function showCurrent(to: string, here: string, move: (to: string) => void
   else move(to);
 }
 
+// The shell's go and show: the move asks its leave question (B11), then runs. While a refused Back or
+// Forward returns, an in-app move does nothing, so it asks nothing either (#505): a question the
+// operator accepted would still leave the page where it is.
+export function moveFree(returning: () => boolean, leave: () => boolean, act: () => void): void {
+  if (!returning() && leave()) act();
+}
+
 // A refusal that ends the page, a read's or a write's, stops every write through the shell's client
 // at once (§8.2, §9.6): the effect cleanup that also disconnects it runs only after the page changed,
 // and a repeat whose confirming read answers before that would still be sent.
@@ -259,13 +266,13 @@ export const ending = <T,>(writes: Writes, client: () => Client, f: (res: T) => 
 export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, onDeprecation, signOut, writes, notices = [] }: SignedInProps & { notices?: readonly string[] }) {
   // B11: a move to another page while a write is pending or unknown asks first, Back and Forward
   // included.
-  const [path, move, query] = usePath((to, from) => leaving(writes, to, false, from));
+  const [path, move, query, returning] = usePath((to, from) => leaving(writes, to, false, from));
   const go = useCallback((to: string) => {
-    if (leaving(writes, to)) move(to);
-  }, [move, writes]);
+    moveFree(returning, () => leaving(writes, to), () => move(to));
+  }, [move, returning, writes]);
   const show = useCallback((to: string) => {
-    if (leaving(writes, to, true)) showCurrent(to, location.pathname + location.search, move, () => setAgain((n) => n + 1));
-  }, [move, writes]);
+    moveFree(returning, () => leaving(writes, to, true), () => showCurrent(to, location.pathname + location.search, move, () => setAgain((n) => n + 1)));
+  }, [move, returning, writes]);
   const [server, setServer] = useState<Load<Server>>({ kind: "loading" });
   const [identity, setIdentity] = useState<Load<Identity>>({ kind: "loading" });
   const [recovery, setRecovery] = useState<Load<Recovery>>({ kind: "loading" });
