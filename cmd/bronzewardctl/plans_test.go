@@ -27,6 +27,7 @@ type planFake struct {
 	approval, approvalEpoch   string
 	desired, assignment, open string
 	expiresIn                 time.Duration
+	now                       time.Time // the expiry's clock when set, so two renders are equal
 	raw, fail                 map[string]string
 	epochFor                  func(path string) string
 	busy                      func(path string) bool
@@ -55,12 +56,16 @@ func (f *planFake) plan() string {
 	if f.op == "adopt" {
 		mode, rev, deadlines = "null", "null", []string{"null", "null", "null"}
 	}
-	expires := time.Now().Add(24 * time.Hour)
+	now := f.now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	expires := now.Add(24 * time.Hour)
 	if f.state == "expired" {
-		expires = time.Now().Add(-time.Hour)
+		expires = now.Add(-time.Hour)
 	}
 	if f.expiresIn != 0 {
-		expires = time.Now().Add(f.expiresIn)
+		expires = now.Add(f.expiresIn)
 	}
 	return fmt.Sprintf(planJSON, f.state, committed, null(f.approval), f.op, mode, rev, deadlines[0], deadlines[1], deadlines[2],
 		expires.UTC().Format(time.RFC3339), f.evidence)
@@ -253,7 +258,9 @@ func TestPlanView(t *testing.T) {
 			t.Errorf("%s: the display says unchanged:\n%s", c.name, out)
 		}
 	}
-	f.set(func(f *planFake) { f.state, f.expiresIn = "proposed", 0 })
+	// One clock for the served answer and the expected one: a second boundary between them would
+	// otherwise change expiresAt (ginsys/bronzeward#576).
+	f.set(func(f *planFake) { f.state, f.expiresIn, f.now = "proposed", 0, time.Now() })
 	if code, out, _ := runCtl(t, append(show, "-o", "json")...); code != 0 || strings.TrimSuffix(out, "\n") != f.plan() {
 		t.Errorf("-o json: exit %d, printed %q; want the plan unchanged", code, out)
 	}
