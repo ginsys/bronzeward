@@ -6,6 +6,7 @@
 
 import { type ReactNode, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { components } from "./api/v1";
+import { ProfilePane } from "./composition.tsx";
 import { Form, field, Result, startsNew, Text, unsaved, useSend, useUnsaved, useWrites } from "./forms.tsx";
 import { Id, type Load, Ref, Scroll, short, useItem, useList, useReads, usePending, useSettled } from "./list.tsx";
 import type { Cluster } from "./machines.tsx";
@@ -112,13 +113,13 @@ export function change(e: Source): string {
 // once a draft read shows it. The pane then reads that entry's revisions and conflicts
 // (ginsys/bronzeward#517 H1).
 export function paneEntry(sources: Source[], selected: string | undefined, claimed: string | undefined) {
-  const k = selected === "fragment:" && claimed !== undefined ? `fragment:${claimed}` : selected;
+  const k = (selected === "fragment:" || selected === "profile:") && claimed !== undefined ? `${selected}${claimed}` : selected;
   return sources.find((e) => keyOf(e) === k);
 }
 
-// Whether the draft already holds a fragment of this name, a removed one included: a PUT to it
-// would replace that entry unread (ginsys/bronzeward#517 H4).
-export const inUse = (draft: Pick<Draft, "entries">, name: string) => draft.entries.some((e) => isSource(e) && e.kind === "fragment" && nameOf(e) === name);
+// Whether the draft already holds an entry of this kind and name, a removed one included: a PUT to
+// it would replace that entry unread (ginsys/bronzeward#517 H4).
+export const inUse = (draft: Pick<Draft, "entries">, name: string, kind: "fragment" | "profile" = "fragment") => draft.entries.some((e) => isSource(e) && e.kind === kind && nameOf(e) === name);
 
 // The Changes page's drafts, every page read, filtered by cluster in the browser (#339 scope).
 export function Drafts() {
@@ -249,14 +250,17 @@ export function DraftItem({ id }: { id: string }) {
           <ul aria-label="Entries">
             {d.entries.map((e) => isSource(e) ? (
               <li key={keyOf(e)}>
-                {e.kind === "fragment" ? <button type="button" aria-pressed={current === keyOf(e)} onClick={() => pick(keyOf(e))}>fragment {nameOf(e)}</button> : <>{e.kind} {short(nameOf(e))}</>}
+                {e.kind === "fragment" || e.kind === "profile" ? <button type="button" aria-pressed={current === keyOf(e)} onClick={() => pick(keyOf(e))}>{e.kind} {nameOf(e)}</button> : <>{e.kind} {short(nameOf(e))}</>}
                 {" "}{change(e)}
               </li>
             ) : <li key={`import-base:${e.machine}`}>import base <Id id={e.machine} /> <Id id={e.revision} /></li>)}
           </ul>
-          {d.state === "open" && <p><Action label="Add fragment" needs={["author"]} onClick={() => pick("fragment:")} /></p>}
+          {d.state === "open" && <p><Action label="Add fragment" needs={["author"]} onClick={() => pick("fragment:")} />{" "}<Action label="Add profile" needs={["author"]} onClick={() => pick("profile:")} /></p>}
           {selected !== undefined && selected.startsWith("fragment:") && (
             <FragmentPane key={pane} draft={d} entry={entry} seeChange={seeChange} claim={claim} shown={!unshown} />
+          )}
+          {selected !== undefined && selected.startsWith("profile:") && (
+            <ProfilePane key={pane} draft={d} entry={entry} seeChange={seeChange} claim={claim} shown={!unshown} />
           )}
           <Status testid="not-rendered">{NOT_RENDERED}</Status>
           {d.state === "open" && <DiscardDraft draft={d} written={written} seeChange={seeChange} />}
@@ -553,12 +557,13 @@ export function where(p: Problem | null, marks: string): string | undefined {
     const line = markLine(marks, p["position"]);
     return line === undefined ? `Mark ${p["position"] + 1}.` : `Mark on line ${line + 1}.`;
   }
-  const paths = Array.isArray(p["paths"]) ? p["paths"].filter((x): x is string => typeof x === "string") : [];
+  // A profile's or an assignment's refusal names one path; a fragment's, a list of them.
+  const paths = Array.isArray(p["paths"]) ? p["paths"].filter((x): x is string => typeof x === "string") : typeof p["path"] === "string" ? [p["path"]] : [];
   return paths.length === 0 ? undefined : `At ${paths.join(", ")}.`;
 }
 
 // A write's line: 412 and 422 here, every other state as the forms show it.
-function WriteResult({ w, done, conflict, goTo, marks = "" }: { w: Write | undefined; done: (data: unknown) => ReactNode; conflict?: ReactNode; goTo?: () => void; marks?: string }) {
+export function WriteResult({ w, done, conflict, goTo, marks = "" }: { w: Write | undefined; done: (data: unknown) => ReactNode; conflict?: ReactNode; goTo?: () => void; marks?: string }) {
   const o: Outcome | undefined = w?.outcome;
   if (o?.kind === "refused" && o.status === 412 && conflict !== undefined) return conflict;
   if (o?.kind === "refused" && o.status === 422) {

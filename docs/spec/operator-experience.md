@@ -333,7 +333,7 @@ Global: --context, -o table|json|yaml, --no-input, --no-wait, --idempotency-key,
   `--no-wait` returns at once.
 - Names are accepted where the API keys by name (fragments, profiles and the draft path) and
   identifiers everywhere else. A cluster is addressed by its ID and displayed with its recorded
-  `name` beside it (`cl_9fd… (lab-a)`); the client resolves no names, except fragment names within a draft for a profile's pins ([§5.4](#54-editing-fragments-profiles-and-assignments)). Machines have no human name in the API
+  `name` beside it (`cl_9fd… (lab-a)`); the client resolves no names, except fragment names for a profile's pins, read from the draft's entries, the cluster's fragments or the pinned revision ([§5.4](#54-editing-fragments-profiles-and-assignments)). Machines have no human name in the API
   ([§11](#11-api-gap-audit), G8), so tables show the Talos endpoint beside the identifier, and
   the machine detail adds the node ID.
 - No command applies configuration. Dispatch is the controller's; the clients plan, approve,

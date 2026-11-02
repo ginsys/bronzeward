@@ -182,8 +182,15 @@ Changes › Draft drf_8kdq…z6pa "worker labels"   open, revision 6   cluster c
 +-------------------------------------------------------------------------------------------+
 ```
 
-Profile entry: an ordered list of fragment revisions with move up/down controls operable by
-keyboard. Assignment entry: profile names in order and per-layer fragment names. On a `412`
+Profile entry: an ordered list of fragment revisions with [Move up], [Move down] and [Remove from
+list] buttons per row, operable by keyboard. After a move, the focus stays on the moved row. The
+pane says "A profile pins these fragment revisions. A later save of a fragment does not change the
+pin." [Add profile] opens a new profile, and [Add to profile] adds the revision chosen in the
+list. That list offers the draft's own revision of each fragment, and for a fragment the draft
+holds no entry for, its head revision in the cluster. A pin that is no longer one of these shows
+"pin is not current", and a Save that sends it gets a `422` that names its path, never a
+revision. A profile pins 1 to 256 revisions, each once. [Save] and [Remove] follow the same `412`
+rules as the fragment entry. Assignment entry: profile names in order and per-layer fragment names. On a `412`
 the editor keeps the unsaved text, shows "Someone changed this draft (revision 7). Your text is
 not saved." and offers [Show their change] and [Copy my text into the new revision], never an
 automatic overwrite. [Copy my text into the new revision], [Save] and [Remove] wait until
