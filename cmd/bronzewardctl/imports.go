@@ -422,7 +422,8 @@ func (e *env) follow(c *client.Client, a accepted, before int) (err error) {
 			// Both reads must be of the epoch of the events shown: after a restore the operation can have
 			// fewer events, and its last event number would then read as shown (client-contracts.md
 			// section 8.5). The watch shows the events again from the start, and this is asked again.
-			if oe := r.Header.Get("Bronzeward-Epoch"); shownEpoch != "" && (claimEpoch != shownEpoch || oe != shownEpoch) {
+			oe := r.Header.Get("Bronzeward-Epoch")
+			if shownEpoch != "" && (claimEpoch != "" && claimEpoch != shownEpoch || oe != "" && oe != shownEpoch) {
 				next = time.Time{}
 				return false, nil
 			}
