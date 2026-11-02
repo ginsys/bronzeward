@@ -101,8 +101,9 @@ function nextLine(s: string, start: number): string | undefined {
 
 // The indentation of the node that holds the scalar tagged at `tag`: the key or entry on the tag's
 // line. With `compact`, after sequence dashes (`- - a: !bwref`) that is the column of the key, or of
-// the last dash when the tag follows it directly: a compact mapping's keys sit at the column after
-// the dash (ginsys/bronzeward#544). Only a block scalar's content is bound by that column. A plain
+// the last dash when the tag follows it directly, also after an anchor (`- &e !bwref |-`), which
+// belongs to the entry: a compact mapping's keys sit at the column after the dash
+// (ginsys/bronzeward#544). Only a block scalar's content is bound by that column. A plain
 // scalar's next line is read against the line's own indentation, as before, so that a form go-yaml
 // refuses (`- a: !bwref x/foo` then `  y`) still names nothing. A tag that starts its line is the
 // value of the nearest line above that is less indented, so the next line may continue it at the
@@ -115,7 +116,8 @@ function holder(masked: string, tag: number, compact = false): number {
     if (!compact) return own;
     const dashes = /^ *(?:-(?: +|$))*/.exec(before)![0];
     if (dashes.length === own) return own;
-    return before.slice(dashes.length).trim() !== "" ? dashes.length : dashes.lastIndexOf("-");
+    const rest = before.slice(dashes.length);
+    return /^(?:&\S+\s+)*$/.test(rest) ? dashes.lastIndexOf("-") : dashes.length;
   }
   for (let e = start - 1; e >= 0; ) {
     const s = e === 0 ? 0 : masked.lastIndexOf("\n", e - 1) + 1;
