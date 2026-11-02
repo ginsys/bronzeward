@@ -77,9 +77,11 @@ func TestImportReviewOnTerminal(t *testing.T) {
 	f.set("held", 2, -time.Minute, "running", "", "", ev("paused", `{"type":"paused","generation":1}`), ev("marked", `{"type":"marked","generation":2,"paths":1}`))
 	ctl, term := onPty(t, 24, 80)
 	// The controller types as a person would: q once the pager shows its key line, and the marks once
-	// the pager has left the alternate screen and the terminal is back in line mode.
+	// the pager has left the alternate screen and the terminal is back in line mode. If line mode
+	// does not come back, it types only an empty line, which ends the command, and the test fails.
 	var mu sync.Mutex
 	var screen []byte
+	var notRestored string
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -99,13 +101,24 @@ func TestImportReviewOnTerminal(t *testing.T) {
 				ctl.WriteString("q")
 			}
 			if quit && !marked && strings.Contains(s, altScreenOff) {
+				marked = true
+				why := "the terminal was not back in line mode 10 s after the pager quit"
 				for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
 					var tio syscall.Termios
-					if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, ctl.Fd(), syscall.TCGETS, uintptr(unsafe.Pointer(&tio))); errno == 0 && tio.Lflag&syscall.ICANON != 0 {
+					if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, ctl.Fd(), syscall.TCGETS, uintptr(unsafe.Pointer(&tio))); errno != 0 {
+						why = "reading the terminal modes: " + errno.Error()
+					} else if tio.Lflag&syscall.ICANON != 0 {
+						why = ""
 						break
 					}
 				}
-				marked = true
+				if why != "" {
+					mu.Lock()
+					notRestored = why
+					mu.Unlock()
+					ctl.WriteString("\n")
+					continue
+				}
 				ctl.WriteString("doc[0]/BWSYNTH\n\n")
 			}
 		}
@@ -119,8 +132,11 @@ func TestImportReviewOnTerminal(t *testing.T) {
 		t.Fatal("the terminal stayed open after the command ended")
 	}
 	mu.Lock()
-	s := string(screen)
+	s, why := string(screen), notRestored
 	mu.Unlock()
+	if why != "" {
+		t.Fatalf("no marks were typed: %s", why)
+	}
 	if got != 3 || !strings.Contains(e.String(), "the mark on import ing_BWSYNTH: its claim is held and its lease lapsed") {
 		t.Errorf("exit %d, stderr %q; want 3 and the lapsed lease", got, e.String())
 	}
