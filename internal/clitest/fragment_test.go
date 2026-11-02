@@ -490,8 +490,25 @@ var journeyIDs = regexp.MustCompile(`\b(drf|frv|frg|prv|prf|asr|asg|ing|req|cl|m
 
 // generatedBase64 is a run of base64 of 40 characters or more, as a certificate or ID the test
 // generates is written in a rendered configuration: standard, or URL-safe and padded, as the
-// generated Talos cluster ID is.
-var generatedBase64 = regexp.MustCompile(`[A-Za-z0-9+/]{40,}={0,2}|[A-Za-z0-9_-]{40,}={1,2}`)
+// generated Talos cluster ID is. One alphabet holds both, so a URL-safe value whose first - or _
+// comes after its 40th character is replaced whole, not up to that character.
+var generatedBase64 = regexp.MustCompile(`[A-Za-z0-9+/_-]{40,}={0,2}`)
+
+// TestGeneratedBase64 checks that each generated form is replaced whole, a URL-safe one whose
+// first - or _ comes late included, and that text shorter than 40 characters stays.
+func TestGeneratedBase64(t *testing.T) {
+	long := strings.Repeat("A", 40)
+	for in, want := range map[string]string{
+		"id: " + long + "+/8=\n": "id: <base64>\n",
+		"id: " + long + "-_8=\n": "id: <base64>\n",
+		"id: -_" + long + "\n":   "id: <base64>\n",
+		"id: BWSYNTH-short-id\n": "id: BWSYNTH-short-id\n",
+	} {
+		if got := generatedBase64.ReplaceAllString(in, "<base64>"); got != want {
+			t.Errorf("%q became %q; want %q", in, got, want)
+		}
+	}
+}
 
 // secretRefs are the provider references a run's import generates, shown in a review and its
 // provenance.
