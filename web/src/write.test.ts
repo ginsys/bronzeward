@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { type Attempt, Client, type ClientOptions } from "./request.ts";
 import { type ShellEvents, ShellReads } from "./shell.tsx";
-import { BACKOFF, EARLIER_EPOCH, EPOCH_CHANGED_ASIDE, INGEST_WAIT, MAX_BODY, NO_CREDENTIAL, NO_EPOCH, NO_EPOCH_HEADER, newKey, RECOVERY_START, RENEWED_LAST, SHELL_GONE, SIGN_IN_CHANGED, SIGN_IN_REFUSED, TOO_LARGE, Write, Writes } from "./write.ts";
+import { BACKOFF, EARLIER_EPOCH, EPOCH_CHANGED_ASIDE, INGEST_WAIT, MAX_BODY, NO_CREDENTIAL, NO_EPOCH, NO_EPOCH_HEADER, newKey, RECOVERY_START, RENEWED_LAST, SERVER_WAIT, SHELL_GONE, SIGN_IN_CHANGED, SIGN_IN_REFUSED, TOO_LARGE, Write, Writes } from "./write.ts";
 
 const EPOCH = "e1";
 const PRINCIPAL = "https://idp.invalid SYNTH-sub-1";
@@ -461,6 +461,42 @@ describe("a fragment write's in-progress 409 (§8.4 item 2, AMB-02)", () => {
 
   test("a served claim lease longer than the wait raises the bound", async () => {
     const { writes, waits } = page([new TypeError("Failed to fetch"), inProgress(), server(300), ...Array.from({ length: 90 }, () => inProgress())]);
+    const o = await writes.submit(fragment());
+    expect(o).toEqual({ kind: "unknown", why: "the first request with this key was still ingesting (ingestion ing_1) after 300 s", problem: inProgressProblem });
+    expect(waits.slice(1).reduce((a, b) => a + b, 0)).toBe(300_000);
+  });
+
+  test("ginsys/bronzeward#517 H12: the bound's /server read ends the sign-in on a final 401 and stops at a recovery start", async () => {
+    let p = page([new TypeError("Failed to fetch"), inProgress(), problem(401, "unauthenticated"), ...Array.from({ length: 5 }, () => inProgress())]);
+    p.writes.onEnded = vi.fn();
+    expect(await p.writes.submit(fragment())).toEqual({ kind: "set-aside", why: SIGN_IN_REFUSED, ambiguous: true, problem: inProgressProblem });
+    expect(p.writes.onEnded).toHaveBeenCalledTimes(1);
+    expect(p.writesSent().filter((s) => s.method === "PUT")).toHaveLength(2);
+    p = page([new TypeError("Failed to fetch"), inProgress(), problem(409, "recovery-mode-active"), ...Array.from({ length: 5 }, () => inProgress())]);
+    const told: string[] = [];
+    p.writes.onPreEntry = (q) => void told.push(q.type);
+    expect(await p.writes.submit(fragment())).toEqual({ kind: "set-aside", why: RECOVERY_START, ambiguous: true, problem: inProgressProblem });
+    expect(told).toEqual(["urn:bronzeward:problem:recovery-mode-active"]);
+    expect(p.writesSent().filter((s) => s.method === "PUT")).toHaveLength(2);
+  });
+
+  test("ginsys/bronzeward#517 H13: a /server read that stalls bounds the wait at INGEST_WAIT once SERVER_WAIT passed", async () => {
+    vi.useFakeTimers();
+    try {
+      const stall = () => new Promise<Response>(() => {}) as unknown as Response;
+      const { writes, waits } = page([new TypeError("Failed to fetch"), inProgress(), stall, ...Array.from({ length: 40 }, () => inProgress())]);
+      const run = writes.submit(fragment());
+      await vi.advanceTimersByTimeAsync(SERVER_WAIT);
+      expect(await run).toEqual({ kind: "unknown", why: "the first request with this key was still ingesting (ingestion ing_1) after 120 s", problem: inProgressProblem });
+      expect(waits.slice(1).reduce((a, b) => a + b, 0)).toBe(INGEST_WAIT);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("ginsys/bronzeward#517 H14: when the /server read fails, the lease the shell read still raises the bound", async () => {
+    const { writes, waits } = page([new TypeError("Failed to fetch"), inProgress(), problem(503, "unavailable"), ...Array.from({ length: 90 }, () => inProgress())]);
+    writes.lease = 300;
     const o = await writes.submit(fragment());
     expect(o).toEqual({ kind: "unknown", why: "the first request with this key was still ingesting (ingestion ing_1) after 300 s", problem: inProgressProblem });
     expect(waits.slice(1).reduce((a, b) => a + b, 0)).toBe(300_000);

@@ -1,8 +1,9 @@
+import { readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { components } from "./api/v1";
-import { change, type Clash, createdId, doneOnce, type Editor, type EditorEvent, editor, EMPTY, FragmentPane, forgetETag, type Held, holdsUnsaved, inUse, keepETag, keepOnDone, keptETag, LAYERS, lastGood, markLine, mayDrop, mayRevert, maySend, NOT_RENDERED, NOT_REVERTED, paneEntry, rows, settledFragment, unread, where } from "./drafts.tsx";
+import { change, type Clash, createdId, DiscardRefused, NOT_DISCARDED, doneOnce, type Editor, type EditorEvent, editor, EMPTY, FragmentPane, forgetETag, type Held, holdsUnsaved, inUse, keepETag, keepOnDone, keptETag, LAYERS, lastGood, markLine, mayDrop, mayRevert, maySend, NOT_RENDERED, NOT_REVERTED, paneEntry, rows, settledFragment, unread, where } from "./drafts.tsx";
 import { leaving, signingOut, startsNew, unsaved, WritesProvider } from "./forms.tsx";
 import { type Load, type Reads, ReadsProvider } from "./list.tsx";
 import { references, spotOfLine, spotOfPath, spotOfReference } from "./position.ts";
@@ -348,6 +349,16 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     expect(s.held).toBe(M);
     expect(s.note).toBe(NOT_REVERTED);
   });
+});
+
+test("ginsys/bronzeward#517 H15: a Discard's 412 says the draft changed and offers to show it", () => {
+  const markup = renderToStaticMarkup(h(DiscardRefused, { onShow: () => {} }));
+  expect(markup).toContain(NOT_DISCARDED);
+  expect(markup).toContain(">Show their change</button>");
+});
+
+test("ginsys/bronzeward#517 H11: the editor reads nothing past the shell's settle", () => {
+  expect(readFileSync(new URL("./drafts.tsx", import.meta.url), "utf8")).not.toMatch(/client\.read/);
 });
 
 describe("a new fragment and the entry it creates (ginsys/bronzeward#517 H1, H4)", () => {

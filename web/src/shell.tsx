@@ -391,6 +391,8 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
   // the shell invalidated, whatever the client already answered it. A move to another path or
   // query discards it in the client, so the read starts again under the new view.
   const known = server.kind === "ok";
+  // The write layer's fallback for its in-progress wait (ginsys/bronzeward#517 H14).
+  if (server.kind === "ok") writes.lease = server.data.ingestionClaim?.leaseSeconds;
   useEffect(() => {
     if (known) return;
     const valid = reads.since();
