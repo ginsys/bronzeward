@@ -204,14 +204,20 @@ func TestImportLifecycle(t *testing.T) {
 
 	f.set("abandoned", 1, time.Hour, "failed", "", `{"type":"urn:bronzeward:problem:precondition-failed","title":"BWSYNTH","status":412}`,
 		ev("paused", `{"type":"paused","generation":1}`), ev("continued", `{"type":"continued","generation":2}`), ev("failed", `{"type":"failed","code":"precondition-failed"}`))
-	step("an overtaken continuation exits 4 and offers a new start", []string{"import", "continue", "ing_BWSYNTH"}, 4, "",
-		"The draft changed after this import started, so the import was not applied and its claim is abandoned. Import again against the draft's current revision:\n"+
-			"  bronzewardctl import start --machine 'mch_BWSYNTH' --draft 'drf_BWSYNTH'", `POST /ingestions/ing_BWSYNTH/continuations if-match= body={}`)
+	// The kept ETag is the one from before the draft moved, so the new start needs a draft show first.
+	step("an overtaken continuation exits 4 and offers a draft show, then a new start", []string{"import", "continue", "ing_BWSYNTH"}, 4, "",
+		"The draft changed after this import started, so the import was not applied and its claim is abandoned. "+
+			"Read the draft's current revision, which keeps its ETag, then import again:\n"+
+			"  bronzewardctl --context 'lab' draft show 'drf_BWSYNTH'\n"+
+			"  bronzewardctl import start --machine 'mch_BWSYNTH' --draft 'drf_BWSYNTH' --review\n", `POST /ingestions/ing_BWSYNTH/continuations if-match= body={}`)
 
 	f.set("held", 1, time.Hour, "running", "", "",
 		ev("paused", `{"type":"paused","generation":1}`), ev("continued", `{"type":"continued","generation":2}`), ev("resume-failed", `{"type":"resume-failed","code":"dependency-unavailable"}`))
-	step("resume-failed exits 1, offering takeover and abandon", []string{"import", "continue", "ing_BWSYNTH"}, 1, "",
-		"or abandon it now:\n  bronzewardctl import takeover ing_BWSYNTH\n  bronzewardctl import abandon ing_BWSYNTH\n", `POST /ingestions/ing_BWSYNTH/continuations if-match= body={}`)
+	// The lease read before the resume-failed can be stale, so the message names no deadline.
+	step("resume-failed exits 1, offering status, takeover and abandon", []string{"import", "continue", "ing_BWSYNTH"}, 1, "",
+		"The claim stays held until its lease lapses. Read its lease with the first command; once it lapsed, take it over, or abandon it now:\n"+
+			"  bronzewardctl import status ing_BWSYNTH\n  bronzewardctl import takeover ing_BWSYNTH\n  bronzewardctl import abandon ing_BWSYNTH\n",
+		`POST /ingestions/ing_BWSYNTH/continuations if-match= body={}`)
 
 	f.set("held", 1, -time.Minute, "running", "", "", ev("continued", `{"type":"continued","generation":2}`))
 	// Exit 3 leaves standard output empty, the accepted answer included (#256's output rule).
@@ -229,8 +235,11 @@ func TestImportLifecycle(t *testing.T) {
 		`POST /ingestions/ing_BWSYNTH/takeovers if-match= body={}`)
 	step("abandon", []string{"import", "abandon", "ing_BWSYNTH"}, 0, "Import ing_BWSYNTH abandoned", "",
 		`POST /ingestions/ing_BWSYNTH/abandonments if-match= body={}`)
-	step("status of an ended import offers a new start", []string{"import", "status", "ing_BWSYNTH"}, 0,
-		"Ended: abandoned. Import again:\n  bronzewardctl import start --machine 'mch_BWSYNTH' --draft 'drf_BWSYNTH'", "")
+	// The ingestion shows its review and staging, not its source or marks: the new start keeps the
+	// first two and asks for the others again.
+	step("status of an ended import offers a new start with its review", []string{"import", "status", "ing_BWSYNTH"}, 0,
+		"Ended: abandoned. Import again:\n  bronzewardctl import start --machine 'mch_BWSYNTH' --draft 'drf_BWSYNTH' --review\n"+
+			"  (the server keeps no document and no marks: if the import had --file or --marks, add them again)", "")
 
 	// A replayed continuation or takeover started no run: the claim's generation already counts the
 	// run the earlier request started, which the wait follows.
@@ -295,9 +304,27 @@ func TestImportLifecycle(t *testing.T) {
 		strings.Replace(startBody(`"5-BWSYNTH"`, ""), `"encrypted"`, `"transient"`, 1))
 	step("status of a lapsed transient claim offers abandon and a new start", []string{"import", "status", "ing_BWSYNTH"}, 0,
 		"Transient staging cannot be taken over: abandon it and import again:\n  bronzewardctl import abandon ing_BWSYNTH\n"+
-			"  bronzewardctl import start --machine 'mch_BWSYNTH' --draft 'drf_BWSYNTH'", "")
+			"  bronzewardctl import start --machine 'mch_BWSYNTH' --draft 'drf_BWSYNTH' --staging transient --review\n", "")
 	f.set("held", 1, time.Hour, "running", "", "")
 	step("status of a live transient claim promises no takeover", []string{"import", "status", "ing_BWSYNTH"}, 0,
 		"Its run holds the claim. Transient staging cannot be taken over; it can be abandoned now:", "")
 	f.mode = ""
+
+	// An empty --file names no document: it is refused, never read as the machine source.
+	f.set("abandoned", 1, time.Hour, "failed", "", "")
+	step("an empty --file is refused", append(start, "--file", ""), 2, "", "--file needs a path, or - for standard input")
+
+	// An epoch change during the draft read after a success keeps no ETag: a restored draft can show
+	// the same revision with other content (client-contracts.md §8.3).
+	step("draft show before the epoch step", []string{"draft", "show", "drf_BWSYNTH"}, 0, "drf_BWSYNTH", "")
+	f.onIngested = func() {
+		f.draftFake.mu.Lock()
+		f.rev, f.draftFake.epoch = 6, "ep_BWSYNTH-2"
+		f.draftFake.mu.Unlock()
+	}
+	f.set("released", 1, time.Hour, "succeeded", `{"draft":"drf_BWSYNTH","draftRevision":6,"importBaseRevision":"ibr_BWSYNTH"}`, "",
+		ev("succeeded", `{"type":"succeeded"}`))
+	step("a success read back across an epoch change keeps no ETag", start, 1, "released into draft drf_BWSYNTH (revision 6)",
+		"the server's epoch changed while draft drf_BWSYNTH was read again after this import. Its ETag is not kept.", startBody(`"5-BWSYNTH"`, ""))
+	f.onIngested = nil
 }

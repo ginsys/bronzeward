@@ -470,8 +470,10 @@ Failure branches the clients must show, each from `GET /ingestions/{id}` states 
 $ bronzewardctl import continue ing_6fd…q2la
 Continued (operation op_zcfw…5mcm) ... failed: precondition-failed. The draft changed after
 this import started, so the import was not applied and its claim is abandoned.   # exit 4
-Import again against the draft's current revision:
+Read the draft's current revision, which keeps its ETag, then import again:
+  bronzewardctl --context lab draft show drf_2rmp…457a
   bronzewardctl import start --machine mch_b3c…aa2q --draft drf_2rmp…457a --review
+  (the server keeps no document and no marks: if the import had --file or --marks, add them again)
 $ bronzewardctl import status ing_8nw…c5ra                 # a different import, its runner gone
 State: held, lease lapsed 3m ago (owner generation 2). Encrypted staging.
 Take it over to resume, or abandon it:

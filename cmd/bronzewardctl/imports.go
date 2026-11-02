@@ -90,7 +90,13 @@ func (e *env) importStart(args []string) error {
 	if _, err := e.parse("import start", args, 0, func(fs *flag.FlagSet) {
 		fs.StringVar(&machine, "machine", "", "")
 		fs.StringVar(&draft, "draft", "", "")
-		fs.StringVar(&file, "file", "", "")
+		fs.Func("file", "", func(s string) error {
+			if s == "" {
+				return errors.New("--file needs a path, or - for standard input")
+			}
+			file = s
+			return nil
+		})
 		fs.StringVar(&staging, "staging", staging, "")
 		fs.BoolVar(&review, "review", false, "")
 		fs.BoolVar(&marks, "marks", false, "")
@@ -302,7 +308,7 @@ func allowed(b *apitypes.IngestionBody) []string {
 	case "held", "resumed":
 		switch {
 		case b.Mode != "encrypted" && time.Now().After(b.LeaseUntil):
-			return []string{"Its run stopped renewing the lease. Transient staging cannot be taken over: abandon it and import again:", cmd("abandon"), restart(b)}
+			return append([]string{"Its run stopped renewing the lease. Transient staging cannot be taken over: abandon it and import again:", cmd("abandon")}, restart(b)...)
 		case b.Mode != "encrypted":
 			return []string{"Its run holds the claim. Transient staging cannot be taken over; it can be abandoned now:", cmd("abandon")}
 		case time.Now().After(b.LeaseUntil):
@@ -312,12 +318,20 @@ func allowed(b *apitypes.IngestionBody) []string {
 	case "released":
 		return []string{"Released into draft " + pr(b.Draft) + ". Nothing is left to do."}
 	}
-	return []string{"Ended: " + pr(b.State) + ". Import again:", restart(b)}
+	return append([]string{"Ended: " + pr(b.State) + ". Import again:"}, restart(b)...)
 }
 
-// restart is the command that imports the ingestion's machine into its draft again.
-func restart(b *apitypes.IngestionBody) string {
-	return "  bronzewardctl import start --machine " + client.ShellWord(or(b.Machine, "<machine>")) + " --draft " + client.ShellWord(b.Draft)
+// restart is the command that imports the ingestion's machine into its draft again, with its
+// staging and review. The ingestion does not show its source or marks, so a note asks for them.
+func restart(b *apitypes.IngestionBody) []string {
+	cmd := "  bronzewardctl import start --machine " + client.ShellWord(or(b.Machine, "<machine>")) + " --draft " + client.ShellWord(b.Draft)
+	if b.Mode == "transient" {
+		cmd += " --staging transient"
+	}
+	if b.Review != nil {
+		cmd += " --review"
+	}
+	return []string{cmd, "  (the server keeps no document and no marks: if the import had --file or --marks, add them again)"}
 }
 
 // follow waits for the import a started (T15, client-contracts.md §11.3), its events on standard
@@ -417,8 +431,8 @@ func (e *env) follow(c *client.Client, a accepted, before int) (err error) {
 			"Continue it, or abandon it:"}, remedies(b.Id, "continue", "abandon")...)...)
 	case settled == "resume-failed":
 		return &client.Blocked{Err: fmt.Errorf("%s: import %s was not applied: its staged input could not be decrypted (resume-failed, %s). "+
-			"The claim stays held until its lease lapses at %s; then take it over, or abandon it now:",
-			c.Context.Where(), b.Id, or(&code, "no code"), when(b.LeaseUntil)), More: remedies(b.Id, "takeover", "abandon")}
+			"The claim stays held until its lease lapses. Read its lease with the first command; once it lapsed, take it over, or abandon it now:",
+			c.Context.Where(), b.Id, or(&code, "no code")), More: remedies(b.Id, "status", "takeover", "abandon")}
 	}
 	act, verbs := "take it over, or abandon it", []string{"status", "takeover", "abandon"}
 	if b.Mode != "encrypted" {
@@ -451,11 +465,11 @@ func (e *env) ended(c *client.Client, b *apitypes.IngestionBody, o *apitypes.Ope
 		var more []string
 		switch strings.TrimPrefix(p.Type, "urn:bronzeward:problem:") {
 		case "precondition-failed":
-			why += " The draft changed after this import started, so the import was not applied and its claim is abandoned. Import again against the draft's current revision:"
-			more = []string{restart(b)}
+			why += " The draft changed after this import started, so the import was not applied and its claim is abandoned. Read the draft's current revision, which keeps its ETag, then import again:"
+			more = append([]string{"  bronzewardctl --context " + client.ShellWord(c.Context.Name) + " draft show " + client.ShellWord(b.Draft)}, restart(b)...)
 		case "ingestion-abandoned":
 			why += " The ingestion was abandoned, so nothing of it reached the draft. Import again:"
-			more = []string{restart(b)}
+			more = restart(b)
 		}
 		return &client.Blocked{Err: operationFailed{fmt.Errorf("%s: %s", c.Context.Where(), why)}, More: more}
 	}
@@ -470,9 +484,16 @@ func (e *env) ended(c *client.Client, b *apitypes.IngestionBody, o *apitypes.Ope
 	if err := e.say(sf("Import %s released into draft %s (revision %d), import base %s.", b.Id, res.Draft, res.DraftRevision, res.ImportBaseRevision)); err != nil {
 		return err
 	}
+	epoch := c.Context.LastEpoch
 	r, err := c.Get("/drafts/" + url.PathEscape(res.Draft))
 	if err != nil {
 		return err
+	}
+	show := []string{"  bronzewardctl --context " + client.ShellWord(c.Context.Name) + " draft show " + client.ShellWord(res.Draft)}
+	if epoch != "" && c.Context.LastEpoch != epoch {
+		// A restored draft can show the import's revision with other content (client-contracts.md §8.3).
+		return &client.Blocked{Err: fmt.Errorf("%s: the server's epoch changed while draft %s was read again after this import. Its ETag is not kept. Review the draft before writing again:",
+			c.Context.Where(), res.Draft), More: show}
 	}
 	var d apitypes.DraftBody
 	if err := json.Unmarshal(r.Body, &d); err != nil {
@@ -481,8 +502,7 @@ func (e *env) ended(c *client.Client, b *apitypes.IngestionBody, o *apitypes.Ope
 	if d.Revision != res.DraftRevision {
 		// ETAG-02: another write followed the import's, treated as a 412.
 		return &client.Blocked{Err: fmt.Errorf("%s: draft %s is now revision %d: another write followed this import's revision %d. Its ETag is not kept. Review the change before writing again:",
-			c.Context.Where(), res.Draft, d.Revision, res.DraftRevision),
-			More: []string{"  bronzewardctl --context " + client.ShellWord(c.Context.Name) + " draft show " + client.ShellWord(res.Draft)}}
+			c.Context.Where(), res.Draft, d.Revision, res.DraftRevision), More: show}
 	}
 	keep(e, c, res.Draft, r.Header.Get("ETag"))
 	return nil
