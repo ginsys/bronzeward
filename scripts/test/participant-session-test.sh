@@ -691,20 +691,26 @@ wait "$stub_a" 2>/dev/null
 # NO_IDP makes A's namespace miss Zitadel, and ISSUER_FAIL, RESTART_FAIL and FWD_FAIL end
 # set_issuer, restart_a and forward_idp as their die does. INT_ON sends the shell a Ctrl-C (SIGINT)
 # during the inspect of that container, INT_PROBE during idp_reached, as a second Ctrl-C during the
-# cleanup does. Calls go to the log.
+# cleanup does. PREP_FAIL ends prepare, as a release of T9's hold that fails does. Calls go to the
+# log.
 sed -n -e '/^cleanup_stopped() {$/,/^}$/p' -e '/^handback() {$/,/^}$/p' -e '/^t9_clean() {$/,/^}$/p' \
-  "$session" >"$t/clean.sh"
+  -e '/^t9_release() {$/,/^}$/p' "$session" >"$t/clean.sh"
 mkdir -p "$t/cbin"
 cat >"$t/cbin/inject" <<'EOF'
 #!/bin/sh
 echo "inject $*" >>"$T/clean.log"
 EOF
-chmod +x "$t/cbin/inject"
+cat >"$t/cbin/prepare" <<'EOF'
+#!/bin/sh
+echo "prepare $*" >>"$T/clean.log"
+[ -z "${PREP_FAIL:-}" ]
+EOF
+chmod +x "$t/cbin/inject" "$t/cbin/prepare"
 clean_case() {
   : >"$t/clean.log"
   # shellcheck disable=SC2016 # the inner shell's own text
   bash -c 'set -uo pipefail
-    log=$T/clean.log task=t4 bin=$T/cbin t9_reader="" BW_A=a BW_B=b BW_C=c
+    log=$T/clean.log task=t4 bin=$T/cbin here=$T/cbin t9_reader="" BW_A=a BW_B=b BW_C=c
     running() { [ -z "${A_STOPPED:-}" ]; }
     idp_reached() { [ -z "${INT_PROBE:-}" ] || kill -INT $$; [ -z "${NO_IDP:-}" ]; }
     restart_a() { echo restart_a; [ -z "${RESTART_FAIL:-}" ] || exit 1; }
@@ -719,7 +725,7 @@ clean_case() {
     [ "$1" != t9_clean ] || trap "exit 130" INT TERM
     . "$0"; "$1"' "$t/clean.sh" "$1" 2>&1
 }
-if [ "$(grep -cE '^(handback|t9_clean)\(\) \{' "$t/clean.sh")" = 2 ]; then
+if [ "$(grep -cE '^(handback|t9_clean|t9_release)\(\) \{' "$t/clean.sh")" = 3 ]; then
   out=$(PAUSED="a c" clean_case handback)
   calls=$(tr '\n' ' ' <"$t/clean.log")
   if [ "$calls" = "inject unpause A inject unpause C set_issuer zitadel restart_a " ]; then
@@ -748,22 +754,45 @@ if [ "$(grep -cE '^(handback|t9_clean)\(\) \{' "$t/clean.sh")" = 2 ]; then
     ok "t9_clean ends on a second Ctrl-C and says to recreate the fixture"
   else bad "t9_clean, Ctrl-C during the cleanup: $(cat "$t/clean.log") ($out)"; fi
   out=$(A_STOPPED=1 clean_case t9_clean)
-  if [ "$(cat "$t/clean.log")" = restart_a ] && [[ $out == *"A is started again"* ]]; then
-    ok "t9_clean starts a stopped A again"
-  else bad "t9_clean, A stopped: $(cat "$t/clean.log") ($out)"; fi
+  calls=$(tr '\n' ' ' <"$t/clean.log")
+  if [ "$calls" = "restart_a prepare t9-release " ] && [[ $out == *"A is started again"* ]]; then
+    ok "t9_clean starts a stopped A again, then releases T9's hold"
+  else bad "t9_clean, A stopped: $calls ($out)"; fi
   out=$(NO_IDP=1 clean_case t9_clean)
-  if [ "$(cat "$t/clean.log")" = forward_idp ] && [[ $out == *"the forwarder is started again"* ]]; then
+  calls=$(tr '\n' ' ' <"$t/clean.log")
+  if [ "$calls" = "forward_idp prepare t9-release " ] && [[ $out == *"the forwarder is started again"* ]]; then
     ok "t9_clean starts the forwarder again when A runs but its namespace does not reach Zitadel"
-  else bad "t9_clean, no forwarder: $(cat "$t/clean.log") ($out)"; fi
+  else bad "t9_clean, no forwarder: $calls ($out)"; fi
   out=$(NO_IDP=1 FWD_FAIL=1 clean_case t9_clean)
-  if [[ $out == *"forwarder to Zitadel could not be started again; recreate the fixture"* ]]; then
-    ok "t9_clean says to recreate the fixture when the forwarder cannot start"
-  else bad "t9_clean, forwarder fails: $out"; fi
+  if [[ $out == *"forwarder to Zitadel could not be started again; recreate the fixture"* ]] &&
+    [ "$(tail -n 1 "$t/clean.log")" = "prepare t9-release" ]; then
+    ok "t9_clean says to recreate the fixture when the forwarder cannot start, and still releases T9's hold"
+  else bad "t9_clean, forwarder fails: $(tr '\n' ' ' <"$t/clean.log") ($out)"; fi
+  # T9's apply is held on C until t9 disconnect releases it (ginsys/bronzeward#512): a disconnect
+  # that ends early must not leave it held, or the next setup waits on an apply that never ends.
   out=$(clean_case t9_clean)
-  if [ ! -s "$t/clean.log" ] && [ -z "$out" ]; then
-    ok "t9_clean leaves a running A that reaches Zitadel alone"
+  if [ "$(cat "$t/clean.log")" = "prepare t9-release" ] && [ -z "$out" ]; then
+    ok "t9_clean releases T9's hold, and leaves a running A that reaches Zitadel alone"
   else bad "t9_clean, nothing to repair: $(cat "$t/clean.log") ($out)"; fi
-else bad "handback and t9_clean were not found in the session"; fi
+  out=$(PREP_FAIL=1 clean_case t9_clean)
+  if [[ $out == *"the hold on T9's apply could not be released; recreate the fixture"* ]]; then
+    ok "t9_clean says to recreate the fixture when T9's hold cannot be released"
+  else bad "t9_clean, release fails: $(cat "$t/clean.log") ($out)"; fi
+  out=$(clean_case t9_release)
+  if [ "$(cat "$t/clean.log")" = "prepare t9-release" ] && [ -z "$out" ]; then
+    ok "t9_release asks prepare to release the hold, and says nothing when it is released"
+  else bad "t9_release: $(cat "$t/clean.log") ($out)"; fi
+  # The setup after T9 releases the hold first, for a session that skipped t9 disconnect: its
+  # `prepare applied` waits for T9's apply to complete.
+  if [ "$(sed -n '/^setup_t2() {$/,/^}$/p' "$session" | grep -oE 't9-release|prepare applied' | tr '\n' ' ')" = "t9-release prepare applied " ]; then
+    ok "the t2 setup releases T9's hold before it waits for T9's apply"
+  else bad "the t2 setup does not release T9's hold before prepare applied"; fi
+  # A joined link lets A or B dispatch the apply, which then ends in about 50 ms, before any read.
+  t9_body=$(sed -n '/^t9() {$/,/^}$/p' "$session")
+  if [[ $t9_body == *'t9-hold'* ]] && [[ $t9_body != *'links linkjoin'* ]]; then
+    ok "the t9 setup holds the apply on C and joins no other instance's link to the worker"
+  else bad "the t9 setup joins every link to the worker, or does not hold the apply on C"; fi
+else bad "handback, t9_clean and t9_release were not found in the session"; fi
 
 # idp_reached with a docker client that ignores TERM, as one waiting on a daemon that hangs can. The
 # timeout's KILL ends it; the test shortens the timeout to 1 s and its KILL fallback to 1 s more.

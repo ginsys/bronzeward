@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # The usability task setups' own steps (fixtures/participants/session), on the acceptance
-# scenarios' helpers and identities. Each runs while A trusts the fixture issuer, except t11-check,
-# which reads only the database and docker. Each check writes PASS or FAIL to participants.tsv in
-# its evidence directory and to stdout; exit 1 on any FAIL.
+# scenarios' helpers and identities. Each runs while A trusts the fixture issuer, except t9-hold,
+# t9-release and t11-check, which use only the database, docker and the fixture's injections. Each
+# check writes PASS or FAIL to participants.tsv in its evidence directory and to stdout; exit 1 on
+# any FAIL.
 #
 #   prepare labels          h-author's role fragment participants-labels, one node label
 #                           (bw-team: blue), listed in the workers profile, published by h-publisher
@@ -11,6 +12,10 @@
 #   prepare t7-publish      that draft published by h-publisher, unless it is published already; the
 #                           worker's review shows S2's bw-s2 redacted and bw-note empty
 #   prepare links linksplit|linkjoin   A's, B's and C's links to the worker
+#   prepare t9-hold         T9's apply held on C, as S4 holds one: C alone joined to the worker, so
+#                           C alone commits the approved plan, and C stalls before its attempt
+#   prepare t9-release      the hold ended: C's stall removed, A's, B's and C's links joined; safe to
+#                           repeat
 #   prepare applied         the apply T9 followed completed: Applied is Desired, from an operation
 #   prepare drift-closed    T10's drift closed; a scope still frozen is unfrozen by h-approver
 #   prepare t11-check       A started in the current epoch after its entry, with its ingestion
@@ -24,8 +29,8 @@ bin=$here/../bin
 
 step=${1:-}
 case $step in
-  labels | t6-draft | t7-publish | links | applied | drift-closed | t11-check) ;;
-  *) die "usage: fixtures/participants/prepare labels|t6-draft|t7-publish|links linksplit|linkjoin|applied|drift-closed|t11-check" ;;
+  labels | t6-draft | t7-publish | links | t9-hold | t9-release | applied | drift-closed | t11-check) ;;
+  *) die "usage: fixtures/participants/prepare labels|t6-draft|t7-publish|links linksplit|linkjoin|t9-hold|t9-release|applied|drift-closed|t11-check" ;;
 esac
 need docker curl jq timeout id sleep date
 need_state
@@ -37,6 +42,9 @@ mkdir -p -- "$EV" "$EV/http"
 scenario=participants
 # shellcheck source-path=SCRIPTDIR source=../scenarios/common.sh
 . "$here/../scenarios/common.sh"
+# S4's held-operation checks (stalls_at, committed_held), for T9's hold.
+# shellcheck source-path=SCRIPTDIR source=../scenarios/dispatch.sh
+. "$here/../scenarios/dispatch.sh"
 run_key=$(date -u +%s%N)
 ref="participants $step"
 
@@ -129,6 +137,33 @@ case $step in
   links)
     case ${2:-} in linksplit | linkjoin) ;; *) die "usage: prepare links linksplit|linkjoin" ;; esac
     check "$ref" "inject $2 A, B and C to the worker" worker_links "$2"
+    ;;
+  t9-hold)
+    # A no-reboot apply ends in about 50 ms on the fixture, before any read can find it running
+    # (ginsys/bronzeward#512). So T9's apply is held as S4 holds one: C's control file names the
+    # stall first, and then C alone is joined to the worker, so that C alone can take the evidence
+    # observation and commit. C stalls after the commitment, before its attempt.
+    plan=$(sql "SELECT p.id FROM plan p JOIN plan_state s ON s.plan = p.id
+      WHERE p.machine = '$machine_w' AND p.kind = 'apply-config' AND s.state = 'approved'") ||
+      die "cannot read the worker's approved plan"
+    one_line "$plan" || die "not one approved apply-config plan on the worker; run the t9 setup"
+    [ "$(sql "SELECT count(*) FROM operation WHERE kind = 'apply-config' AND machine = '$machine_w'")" = 0 ] ||
+      die "an apply-config operation exists on the worker already; run the t9 setup again"
+    # With A's or B's link open, that instance could commit the plan and apply it at once.
+    counted 3 '^[ABC] worker$' "$STATE/linksplits" || die "not every link to the worker is cut; run the t9 setup again"
+    n=$(stalls_at dispatch-committed)
+    interrupt dispatch-committed stall || die "cannot write C's control file"
+    result PASS "$ref" 'C told to stall after the commitment'
+    check "$ref" 'inject linkjoin C worker, with A and B still cut' "$bin/inject" linkjoin C worker
+    check "$ref" 'the plan committed, its operation committed with no attempt; C stalls there' \
+      within 120 committed_held "$plan" "$n"
+    ;;
+  t9-release)
+    # The hold ends: a stalled C goes on, and every instance reaches the worker again, so whichever
+    # owns the apply now can complete it. A takes the apply over when it starts again.
+    interrupt - || die "cannot remove C's control file"
+    result PASS "$ref" "C's control file removed"
+    check "$ref" 'inject linkjoin A, B and C to the worker' worker_links linkjoin
     ;;
   applied)
     check "$ref" "the worker's Applied is its Desired, from an operation, within four minutes" within 240 applied_desired
