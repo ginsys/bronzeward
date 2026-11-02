@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/ginsys/bronzeward/internal/client"
 )
 
 // notConfirmed is a write the operator did not confirm, or could not be asked to: nothing was
@@ -26,7 +28,7 @@ func (e *env) confirmTyped(what, want string) error {
 		defer tty.Close()
 		in = tty
 	}
-	fmt.Fprintf(e.err, "Type %s to send it, or press Enter to stop: ", what)
+	fmt.Fprintf(e.err, "Type %s to send it, or press Enter to stop: ", client.Printable(what))
 	line, err := bufio.NewReader(in).ReadString('\n')
 	if !isTerminal(stdin) || e.tokenStdin {
 		fmt.Fprintln(e.err)
