@@ -68,11 +68,12 @@ async function signedIn() {
     let wait = (d.interval ?? 5) * 1000;
     const until = Date.now() + 120000;
     while (!ctl.signal.aborted && Date.now() < until) {
+      // The wait ends at the deadline at the latest, and no request starts after it.
       await new Promise((r) => {
-        const t = setTimeout(r, wait);
+        const t = setTimeout(r, Math.max(0, Math.min(wait, until - Date.now())));
         ctl.signal.addEventListener("abort", () => (clearTimeout(t), r()), { once: true });
       });
-      if (ctl.signal.aborted) break;
+      if (ctl.signal.aborted || Date.now() >= until) break;
       // The deadline bounds the request and its body read too, so a stalled endpoint ends the poll.
       const t = await fetch(disc.token_endpoint, {
         method: "POST",
