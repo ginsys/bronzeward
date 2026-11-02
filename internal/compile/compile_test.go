@@ -15,6 +15,7 @@ import (
 	"github.com/siderolabs/talos/pkg/machinery/config/configpatcher"
 	"github.com/siderolabs/talos/pkg/machinery/config/encoder"
 	"github.com/siderolabs/talos/pkg/machinery/config/generate"
+	"github.com/siderolabs/talos/pkg/machinery/config/generate/secrets"
 	"github.com/siderolabs/talos/pkg/machinery/config/machine"
 	"github.com/siderolabs/talos/pkg/machinery/constants"
 	"go.yaml.in/yaml/v3"
@@ -37,8 +38,15 @@ func shows(rendered, s string) bool {
 // it, with the install disk talosctl gen config sets by default.
 func generatedBase(t *testing.T) []byte {
 	t.Helper()
+	bundle, err := secrets.NewBundle(secrets.NewClock(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A random cluster id is a base64url scalar the guard scans like any other, so a test that
+	// plants a short stand-in ("abc") would sometimes find it inside the id and be refused there.
+	bundle.Cluster.ID = "compile-test-cluster-id"
 	in, err := generate.NewInput("compile-test", "https://192.0.2.20:6443", constants.DefaultKubernetesVersion,
-		generate.WithInstallDisk("/dev/sda"))
+		generate.WithInstallDisk("/dev/sda"), generate.WithSecretsBundle(bundle))
 	if err != nil {
 		t.Fatal(err)
 	}
