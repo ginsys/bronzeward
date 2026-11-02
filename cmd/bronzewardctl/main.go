@@ -221,7 +221,7 @@ func flagError(err error) error {
 	text := err.Error()
 	if m := rejectedValue.FindStringSubmatch(text); m != nil {
 		if v, uerr := strconv.Unquote(m[2]); uerr == nil {
-			return errors.New(m[1] + "\"" + client.Printable(v) + "\"" + client.Printable(m[3]))
+			return errors.New(m[1] + "\"" + client.Quoted(v) + "\"" + client.Printable(m[3]))
 		}
 	}
 	return errors.New(client.Printable(text))

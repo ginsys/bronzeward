@@ -44,9 +44,13 @@ func TestVerboseProxyNoticeIsEscaped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hc.Timeout = time.Second
-	hc.Get("https://bronzeward.example.invalid/livez") // the proxy refuses at once; only the notice matters
-	const want = `bronzeward.example.invalid: through the proxy http://127.0.0.1:1/?q=A\x85B`
+	// The transport's Proxy callback is called as it is for a request; the target host holds a C1
+	// control, which a request built by http.NewRequest would refuse.
+	req := &http.Request{URL: &url.URL{Scheme: "https", Host: "bronzeward\u0085.example.invalid"}}
+	if _, err := hc.Transport.(*http.Transport).Proxy(req); err != nil {
+		t.Fatal(err)
+	}
+	const want = `bronzeward\x85.example.invalid: through the proxy http://127.0.0.1:1/?q=A\x85B`
 	if !strings.Contains(b.String(), want) || printable(strings.TrimSuffix(b.String(), "\n")) != strings.TrimSuffix(b.String(), "\n") {
 		t.Errorf("verbose output %q; want it to hold %q and no raw control character", b.String(), want)
 	}
