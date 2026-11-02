@@ -269,6 +269,9 @@ export class Client {
       // arrive, unless its headers carried a 4xx: the server refused that attempt, so the status
       // stands and the answer is reported cut off. A read sent for its epoch has no such answer.
       if (data === CUT) return !epochOnly && res.status >= 400 && res.status < 500 ? { status: res.status, headers: res.headers, data } : undefined;
+      // A read sent for its epoch does not wait for its body, so a bound that fired while its own
+      // epoch was learned is checked here: that answer expired and is not one.
+      if (epochOnly && signals.get(res)?.aborted === true) return undefined;
       const pre = preEntry(res.status, data);
       if (pre !== undefined) end.pre ??= pre;
       return { status: res.status, headers: res.headers, data };

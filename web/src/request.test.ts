@@ -959,6 +959,25 @@ describe("the attempt bound (§8.4 item 8)", () => {
     expect(signals).toHaveLength(3);
   });
 
+  test("a read sent for its epoch whose bound fired while its own epoch was learned gives no answer", async () => {
+    // GET /recovery answers 200 at 29 s naming e2 while e1 was recorded, so its epoch is read again,
+    // and that read stalls to the bound. The 200 expired with it: its headers are not an answer.
+    const holder: { c?: Client } = {};
+    const { c } = bounded(async (init, n) => {
+      if (n === 1) {
+        await holder.c!.attempt("GET", "/recovery");
+        await new Promise((resolve) => setTimeout(resolve, 29_000));
+        return ok({}, "e2");
+      }
+      return n === 2 ? ok({}, "e1") : endlessBody(init, 401, problemHeaders);
+    });
+    holder.c = c;
+    const a = watch(c.attempt("GET", "/recovery", {}, undefined, {}, true));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(a.done).toBe(true);
+    expect(a.value).toBeUndefined();
+  });
+
   test("an epoch read that finished is not aborted later by the write it was sent within", async () => {
     // The read of GET /recovery is answered and dropped at once; the write's own body then stalls to 60 s.
     const holder: { c?: Client } = {};
