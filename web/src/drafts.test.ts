@@ -206,6 +206,7 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     ["boundary, R4-1: a reconnect's revision read after the show keeps text typed since", { held: M2, saved: T, conflict: theirs(M) }, { kind: "read", text: T2, since: 0 }, { held: M2, saved: T2, conflict: theirs(M) }],
     ["a revision read after the show, with nothing typed, shows their latest text", { held: T, saved: T, conflict: theirs(M) }, { kind: "read", text: T2, since: 0 }, { held: T2, saved: T2, conflict: theirs(M) }],
     ["boundary: Copy my text puts the operator's text back and ends the conflict", { held: T2, saved: T, conflict: theirs(M) }, { kind: "copy" }, { held: M, saved: T }],
+    ["R7-1: Copy my text before their text shows changes nothing", { held: M, saved: A, conflict: asked(M, 8) }, { kind: "copy" }, { held: M, saved: A, conflict: asked(M, 8) }],
     ["Copy my text without a conflict changes nothing", { held: M, saved: A }, { kind: "copy" }, { held: M, saved: A }],
     ["R1-F2: a revision read keeps text typed since the last save", { held: M, saved: A }, { kind: "read", text: T, since: 0 }, { held: M, saved: T }],
     ["a revision read replaces text nothing was typed into", { held: A, saved: A }, { kind: "read", text: T, since: 0 }, { held: T, saved: T }],
@@ -284,6 +285,13 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     expect(s.held).toBe(T);
     expect(s.conflict?.mine).toBe(M2);
     expect(holdsUnsaved(s.held, s.saved, s.conflict?.mine)).toBe(true);
+  });
+
+  test("R7-1: Copy my text before the asked revision read answers changes nothing, so that read cannot undo it", () => {
+    const s = run({ held: A, saved: A }, [{ kind: "refused" }, { kind: "at", revision: 7 }, { kind: "show" }, { kind: "draft", revision: 8, changed: true }, { kind: "copy" }, { kind: "read", text: T, since: 0 }]);
+    expect(rest(s)).toEqual({ held: T, saved: T, conflict: theirs(A) });
+    expect(rest(editor(s, { kind: "copy" }))).toEqual({ held: A, saved: T });
+    expect(holdsUnsaved(A, T, undefined)).toBe(true);
   });
 
   test("R6-1: a Revert clicked before a 412, Show their change and Copy my text does not replace the copied text", () => {

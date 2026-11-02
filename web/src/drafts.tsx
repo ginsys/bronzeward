@@ -304,7 +304,8 @@ function step(s: Editor, e: EditorEvent): Editor {
       if (c?.phase === "asked") return { ...s, saved: e.text, held: e.text, conflict: { ...c, phase: "theirs" } };
       return { ...s, saved: e.text, held: same(s.held, s.saved) ? e.text : s.held };
     case "copy":
-      return c === undefined ? s : { ...ended, held: c.mine };
+      // Only once their text shows: a revision read still pending could replace the copied text.
+      return c?.phase === "theirs" ? { ...ended, held: c.mine } : s;
     case "send":
       return { ...s, sent: { text: s.held, whileTheirs: c?.phase === "theirs" } };
     case "done": {
@@ -490,7 +491,7 @@ export function FragmentPane({ draft, entry, written, seeChange }: { draft: Draf
           <label>Your text <textarea readOnly value={conflict.mine.document} rows={8} cols={60} {...NO_ASSIST} /></label>
         </div>
       )}
-      <button type="button" onClick={() => act({ kind: "copy" })} disabled={conflict.revision !== draft.revision}>
+      <button type="button" onClick={() => act({ kind: "copy" })} disabled={conflict.phase !== "theirs" || conflict.revision !== draft.revision}>
         Copy my text into the new revision
       </button>
     </>
