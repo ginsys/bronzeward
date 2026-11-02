@@ -124,13 +124,12 @@ func nextSteps(c *client.Client, release string) ([]string, error) {
 		switch {
 		case err != nil:
 			lines = append(lines, fmt.Sprintf("  %s: its Applied release cannot be read: %s", pr(m.Machine), pr(err.Error())))
-		case x.Desired == nil || *x.Desired != rel.Id:
-			now := "none"
-			if x.Desired != nil {
-				now = *x.Desired
-			}
+		case x.Desired == nil:
 			replaced++
-			lines = append(lines, fmt.Sprintf("  %s has Desired release %s, not this one: plan nothing for it from this release.", pr(m.Machine), pr(now)))
+			lines = append(lines, fmt.Sprintf("  %s has no Desired release: plan nothing for it from this release.", pr(m.Machine)))
+		case *x.Desired != rel.Id:
+			replaced++
+			lines = append(lines, fmt.Sprintf("  %s has Desired release %s, not this one: plan nothing for it from this release.", pr(m.Machine), pr(*x.Desired)))
 		case x.Applied == nil:
 			lines = append(lines, fmt.Sprintf("  %s has no Applied release: hand it over with an adopt plan.", pr(m.Machine)))
 		default:
@@ -139,7 +138,7 @@ func nextSteps(c *client.Client, release string) ([]string, error) {
 	}
 	lines[0] = fmt.Sprintf("Publication succeeded: release %s is now Desired for %s. Nothing has been sent to any machine.", pr(rel.Id), machines)
 	if replaced > 0 {
-		lines[0] = fmt.Sprintf("Publication succeeded: release %s was published for %s, and another release is now Desired for %d of them. Nothing has been sent to any machine.",
+		lines[0] = fmt.Sprintf("Publication succeeded: release %s was published for %s, but it is no longer Desired for %d of them. Nothing has been sent to any machine.",
 			pr(rel.Id), machines, replaced)
 	}
 	return append(lines, "Review a machine's rendered configuration: bronzewardctl release review "+pr(rel.Id)+" <machine>"), nil

@@ -14,7 +14,7 @@ import (
 // rel_BWSYNTH of two machines, mch_a with an Applied release and mch_b with none, whose reviews are
 // rendered and withheld. first is the type of the operation's first event; bare answers the
 // publication with an operation that has no ID, and pagesRefused refuses the JSON event pages.
-// replaced makes a later release mch_a's Desired one.
+// replaced makes a later release mch_a's Desired one and leaves mch_b with none.
 type publishFake struct {
 	*draftFake
 	mu           sync.Mutex
@@ -37,9 +37,9 @@ func (f *publishFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1")
 	f.mu.Lock()
 	state, first, bare, pagesRefused := f.state, f.first, f.bare, f.pagesRefused
-	desiredA := "rel_BWSYNTH"
+	desiredA, desiredB := `"rel_BWSYNTH"`, `"rel_BWSYNTH"`
 	if f.replaced {
-		desiredA = "rel_BWSYNTH-new"
+		desiredA, desiredB = `"rel_BWSYNTH-new"`, `null`
 	}
 	f.mu.Unlock()
 	if first == "" {
@@ -86,9 +86,9 @@ func (f *publishFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case path == "/releases/rel_BWSYNTH":
 		fmt.Fprint(w, `{"id":"rel_BWSYNTH","cluster":"cl_BWSYNTH","machines":[{"machine":"mch_a"},{"machine":"mch_b"}]}`)
 	case path == "/machines/mch_a":
-		fmt.Fprintf(w, `{"id":"mch_a","desired":%q,"applied":{"release":"rel_BWSYNTH-old","source":"operation"}}`, desiredA)
+		fmt.Fprintf(w, `{"id":"mch_a","desired":%s,"applied":{"release":"rel_BWSYNTH-old","source":"operation"}}`, desiredA)
 	case path == "/machines/mch_b":
-		fmt.Fprint(w, `{"id":"mch_b","desired":"rel_BWSYNTH","applied":null}`)
+		fmt.Fprintf(w, `{"id":"mch_b","desired":%s,"applied":null}`, desiredB)
 	case path == "/releases/rel_BWSYNTH/machines/mch_a/review":
 		fmt.Fprintf(w, `{"release":"rel_BWSYNTH","machine":"mch_a","mode":"metal","configuration":%q,"provenance":[`+
 			`{"reference":"registry/example-pass","version":1,"source":{"revision":"frv_BWSYNTH-a","path":"doc[0]/machine/registries/config/registry.example.invalid/auth/password","digest":"d","occurrence":0},"output":"doc[0]/machine/registries/config/registry.example.invalid/auth/password"},`+
@@ -171,10 +171,10 @@ func TestPublication(t *testing.T) {
 	f.bare, f.state, f.replaced = false, "succeeded", true
 	f.mu.Unlock()
 	step("draft show again", []string{"draft", "show", "drf_BWSYNTH"}, 0, "drf_BWSYNTH", "")
-	step("a release no longer Desired gets no plan", pub, 0,
-		"Publication succeeded: release rel_BWSYNTH was published for 2 machines, and another release is now Desired for 1 of them. Nothing has been sent to any machine.\n"+
+	step("a release no longer Desired, for another release or for none, gets no plan", pub, 0,
+		"Publication succeeded: release rel_BWSYNTH was published for 2 machines, but it is no longer Desired for 2 of them. Nothing has been sent to any machine.\n"+
 			"  mch_a has Desired release rel_BWSYNTH-new, not this one: plan nothing for it from this release.\n"+
-			"  mch_b has no Applied release: hand it over with an adopt plan.\n", "", "is now Desired for 2", "plan an apply-config")
+			"  mch_b has no Desired release: plan nothing for it from this release.\n", "", "is now Desired for", "another release", "plan an", "hand it over")
 
 	step("review: line by line, the token kept and the tab escaped", []string{"release", "review", "rel_BWSYNTH", "mch_a"}, 0,
 		"Release rel_BWSYNTH, machine mch_a, validated: metal\n"+strings.ReplaceAll(rendered, "\t", `\x09`), "", "\t")
