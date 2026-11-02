@@ -1,8 +1,14 @@
 import { createElement as h, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
-import { PRE_ENTRY, PreEntry, RECOVERY_START, RecoveryBanner, RecoveryRead, scopeSummary, startModeOf, startRefusal, UNKNOWN_START } from "./recovery.tsx";
+import { WritesProvider } from "./forms.tsx";
+import {
+  ENTRY_EFFECTS, EnterRecovery, ExitRecovery, nextStep, PRE_ENTRY, PreEntry, RECOVERY_START, RecoveryBanner, RecoveryRead, REVOCATION_LIMITS, Revocation, scopeSummary,
+  startModeOf, startRefusal, UNKNOWN_START, unreleased,
+} from "./recovery.tsx";
 import { type Problem, type ReadResult, TRANSPORT_FAILURE } from "./request.ts";
+import { type Role, ShellContext } from "./shell.tsx";
+import { Writes } from "./write.ts";
 
 const html = (e: ReactElement) => renderToStaticMarkup(e);
 function status(e: ReactElement): string {
@@ -59,5 +65,54 @@ describe("the recovery banner", () => {
     expect(html(h(PreEntry, { res: refused, onRead: () => {} }))).toContain(">Read again</button>");
     // §8.2: the refusal's title, detail and request ID stay shown under the restriction.
     expect(html(h(PreEntry, { res: refused, onRead: () => {} }))).toContain('<p data-testid="problem">Not read: Recovery mode active (only the recovery entry). Request req-pre.</p>');
+  });
+});
+
+describe("the console's parts (#364)", () => {
+  const writes = new Writes(() => "https://idp.invalid SYNTH-sub-1");
+  const shell = (roles: Role[], e: ReactElement, offline = false) => html(h(ShellContext, { value: { roles, offline } }, h(WritesProvider, { value: writes }, e)));
+
+  test("each state's next step is text, and a scope outside recovery is not counted", () => {
+    expect(nextStep("pre-restore-unaccounted")).toMatch(/^Account the scope/);
+    expect(nextStep("ready")).toBe("Release the scope. A release is not an approval.");
+    expect(nextStep("released")).toBe("None.");
+    expect(nextStep("unresolved")).toMatch(/classified after the normal restart/);
+    expect(nextStep("blocked")).toMatch(/Keys are missing/);
+    expect(unreleased(scopes("normal", "released", "ready", "blocked")).map((s) => s.state)).toEqual(["ready", "blocked"]);
+  });
+
+  test("the entry form states the effects before its control, which stays off until enter is typed", () => {
+    const form = shell([], h(EnterRecovery));
+    const escaped = ENTRY_EFFECTS.map((e) => e.replaceAll("'", "&#x27;"));
+    for (const effect of escaped) expect(form).toContain(effect);
+    for (const family of ["database", "provider", "credential-store"]) expect(form).toContain(`name="${family}-backup"`);
+    expect(form.indexOf(escaped[0]!)).toBeLessThan(form.indexOf(">Enter recovery</button>"));
+    expect(form).toMatch(/<button type="submit" disabled="">Enter recovery<\/button>/);
+    // No role was read before the entry, so no role text is shown; offline is.
+    expect(form).not.toContain("Needs");
+    expect(shell([], h(EnterRecovery), true)).toContain("Offline");
+    // Outside the page's writes there is no form.
+    expect(html(h(EnterRecovery))).toBe("");
+  });
+
+  test("the exit is off for a role without recovery-admin, and while a scope is not released", () => {
+    const exit = (roles: Role[], held: number, recoveryMode = true) => shell(roles, h(ExitRecovery, { held, recoveryMode, onChanged: () => {} }));
+    expect(exit(["author"], 0)).toContain("Needs recovery-admin");
+    expect(exit(["recovery-admin"], 2)).toContain("2 scopes not released (ready is not released)");
+    expect(exit(["recovery-admin"], 1)).toContain("1 scope not released (ready is not released)");
+    expect(exit(["recovery-admin"], 0, false)).toContain("Recovery mode is off");
+    const open = exit(["recovery-admin"], 0);
+    expect(open).toMatch(/<button type="submit">Exit recovery<\/button>/);
+    expect(open).not.toContain("not released");
+  });
+
+  test("the revocation states its limits, and stays off without recovery-admin or a typed identity", () => {
+    for (const roles of [["author"], ["recovery-admin"]] as Role[][]) {
+      const form = shell(roles, h(Revocation));
+      for (const limit of REVOCATION_LIMITS) expect(form).toContain(limit);
+      expect(form).toMatch(/<button type="submit" disabled="">Revoke identity<\/button>/);
+    }
+    expect(shell(["author"], h(Revocation))).toContain("Needs recovery-admin");
+    expect(shell(["recovery-admin"], h(Revocation))).toContain("type the identity back");
   });
 });

@@ -2,12 +2,17 @@
 // recovery banner with its scope summary and process restriction, and the state before a recovery
 // start's entry.
 
+import { type FormEvent, type ReactNode, useEffect, useState, useSyncExternalStore } from "react";
+import { Result, useSend, useWrites } from "./forms.tsx";
+import { Head, Id, Scroll, useItem } from "./list.tsx";
 import type { ReadResult } from "./request.ts";
-import { clock, Disconnected, ProblemFields, problemFields, Refused, Status } from "./states.tsx";
+import { useGate, useOffline, useRecoveryState } from "./shell.tsx";
+import { clock, Disconnected, ProblemFields, problemFields, Refused, Status, when } from "./states.tsx";
 import type { components } from "./api/v1";
 
 export type Recovery = components["schemas"]["RecoveryBody"];
 type Scope = components["schemas"]["RecoveryScope"];
+type EntryBody = components["schemas"]["EntryBody"];
 
 // §8.5 start mode: the last one an answer showed, unknown before any.
 export type StartMode = "normal" | "recovery" | "unknown";
@@ -65,5 +70,266 @@ export const PreEntry = ({ res, onRead }: { res: ReadResult<unknown>; onRead: ()
   <>
     <Status actions={<button type="button" onClick={onRead}>Read again</button>}>{PRE_ENTRY}</Status>
     <ProblemFields text={problemFields(res)} />
+    <EnterRecovery />
   </>
 );
+
+// The administrator steps stay outside the browser (B30): the restores, the auth.deniedSubjects edit
+// and the restarts. The operator guide is published with the documentation site.
+const GUIDE = "https://ginsys.github.io/bronzeward/operator/recovery/";
+const STEPS = [
+  ["Restoring from a backup", "restoring-from-a-backup"],
+  ["Record the entry", "3-record-the-entry"],
+  ["Restart normally, still in recovery mode", "4-restart-normally-still-in-recovery-mode"],
+] as const;
+const Steps = () => (
+  <p>
+    Administrator steps, outside the browser:{" "}
+    {STEPS.map(([title, anchor], i) => <span key={anchor}>{i > 0 && ", "}<a href={`${GUIDE}#${anchor}`}>{title}</a></span>)}.
+  </p>
+);
+
+// T32's effects text, as the CLI says it (cmd/bronzewardctl/recovery.go).
+export const ENTRY_EFFECTS = [
+  "The entry mints a new epoch: every other client's pending write is refused.",
+  "It marks every machine's scope pre-restore-unaccounted.",
+  "It takes over every non-terminal apply-config operation as unresolved, and ends the running import and publish jobs.",
+  "Recovery mode then lasts until recovery exit, once every scope is released.",
+];
+export const NORMAL_START = "This server was started normally, so it takes no recovery entry. Restore the backups, stop every instance, and start one for recovery.";
+export const REVOCATION_LIMITS = [
+  "A revocation is permanent: nothing undoes it.",
+  "It adds no auth.deniedSubjects entry and reissues no token, and a restore of the database can erase it.",
+  "First add the subject to auth.deniedSubjects, a human by iss and sub, a service identity by its identity and name, and leave it there. After a restore, record this revocation again.",
+];
+
+// What each scope state needs next (T31), as text; the controls are the recovery decisions' (#365).
+export function nextStep(state: string): string {
+  switch (state) {
+    case "pre-restore-unaccounted":
+      return "Account the scope: record that no request sent before the restore can still land.";
+    case "ready":
+      return "Release the scope. A release is not an approval.";
+    case "released":
+      return "None.";
+    case "unresolved":
+      return "An operation holds it: read the machine's operations. It is classified after the normal restart, then mark the scope again.";
+    case "blocked":
+      return "Keys are missing: read the machine's timeline, then mark the scope again, or publish a new release for a lost key version.";
+    default:
+      return "None.";
+  }
+}
+
+// The scopes in recovery: a scope in `normal` state is outside it.
+const inRecovery = (scopes: readonly Scope[]) => scopes.filter((s) => s.state !== "normal");
+export const unreleased = (scopes: readonly Scope[]) => inRecovery(scopes).filter((s) => s.state !== "released");
+
+// The result of the entry this page made, kept after the epoch change its commit causes replaced the
+// page it was sent from (the entry's form lives on the start's pre-entry state, which that read ends).
+let entered: EntryBody | undefined;
+const listeners = new Set<() => void>();
+const enter = (e: EntryBody | undefined) => {
+  entered = e;
+  for (const f of listeners) f();
+};
+const watch = (f: () => void) => (listeners.add(f), () => void listeners.delete(f));
+
+export function Entered() {
+  useSyncExternalStore(watch, () => entered);
+  if (entered === undefined) return null;
+  return (
+    <Status testid="entered" actions={<button type="button" onClick={() => enter(undefined)}>Dismiss</button>}>
+      Recovery mode entered (act {entered.act}). Epoch {entered.epoch}, was {entered.previousEpoch}. Scopes marked pre-restore-unaccounted: {entered.machines} machines.
+      Apply-config operations taken over: {entered.operations.length === 0 ? "none" : entered.operations.join(", ")}. Restart the server normally when ready; recovery mode continues.
+    </Status>
+  );
+}
+
+const TIME = /^\d{4}-\d\d-\d\dT\d\d:\d\d(:\d\d(\.\d+)?)?(Z|[+-]\d\d:\d\d)$/;
+const FAMILIES = ["database", "provider", "credential-store"] as const;
+const stamp = (v: string) => (TIME.test(v) && !Number.isNaN(Date.parse(v)) ? new Date(v).toISOString() : undefined);
+const text = (d: FormData, n: string) => String(d.get(n) ?? "").trim();
+
+// B31, on a recovery start before its entry. REC-02: a 409 conflict without `epoch` is read as a
+// normal start; one with `epoch` is a recovery start whose entry committed under another key.
+export function EnterRecovery() {
+  const writes = useWrites();
+  const [w, send] = useSend();
+  const [typed, type] = useState("");
+  const [bad, complain] = useState<string>();
+  // Before the entry no role was read, so only the offline banner gates it: the server decides.
+  const off = useOffline() ? "Offline" : undefined;
+  if (writes === undefined) return null;
+  const held = w !== undefined && writes.open.includes(w);
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const d = new FormData(e.currentTarget);
+    const restored = FAMILIES.flatMap((family) => {
+      const backup = text(d, `${family}-backup`);
+      return backup === "" ? [] : [{ family, backup, takenAt: stamp(text(d, `${family}-taken`)) }];
+    });
+    const stoppedAt = stamp(text(d, "stoppedAt"));
+    const reason = text(d, "reason");
+    const why =
+      restored.length === 0 ? "Name at least one restored backup."
+      : restored.some((r) => r.takenAt === undefined) ? "Give the time each backup was taken in RFC 3339 with its zone, such as 2026-11-01T08:00:00Z."
+      : stoppedAt === undefined ? "Give the time the restore stopped writes in RFC 3339 with its zone, such as 2026-11-01T08:30:00Z."
+      : reason === "" ? "Give a reason."
+      : undefined;
+    complain(why);
+    if (why !== undefined) return;
+    send({ method: "POST", path: "/recovery/entries", resource: "/recovery", entry: true, body: { restored, stoppedAt, reason }, settled: (o) => o.kind === "done" && enter(o.data as EntryBody) });
+  };
+  const o = w?.outcome;
+  const p = o?.kind === "refused" && o.status === 409 && o.problem?.type === "urn:bronzeward:problem:conflict" ? o.problem : undefined;
+  return (
+    <form onSubmit={submit} aria-label="Enter recovery">
+      <h2>Enter recovery</h2>
+      <p>Name each restored backup, when it was taken, and when the restore stopped writes. Times are RFC 3339 with a zone.</p>
+      {FAMILIES.map((f) => (
+        <p key={f}>
+          <label>Restored {f} backup: <input name={`${f}-backup`} autoComplete="off" /></label>{" "}
+          <label>taken at: <input name={`${f}-taken`} autoComplete="off" placeholder="2026-11-01T08:00:00Z" /></label>
+        </p>
+      ))}
+      <p><label>Restore stopped at: <input name="stoppedAt" autoComplete="off" placeholder="2026-11-01T08:30:00Z" /></label></p>
+      <p><label>Reason: <input name="reason" autoComplete="off" /></label></p>
+      <ul>{ENTRY_EFFECTS.map((e) => <li key={e}>{e}</li>)}</ul>
+      <Steps />
+      <p>
+        <label>Type enter to record it: <input value={typed} onChange={(e) => type(e.target.value)} autoComplete="off" /></label>{" "}
+        <button type="submit" disabled={typed !== "enter" || off !== undefined || held}>Enter recovery</button>
+        {off !== undefined && ` ${off}`}
+      </p>
+      {bad !== undefined && <p role="alert" data-testid="entry-input">{bad}</p>}
+      {p === undefined ? <Result w={w} done={() => "Recovery mode entered."} /> : p["epoch"] === undefined
+        ? <Status testid="write-result">{NORMAL_START}</Status>
+        : <Status testid="write-result">An entry is already recorded on this server, in epoch {String(p["epoch"])}, under another request. Nothing was added. Read the console.</Status>}
+    </form>
+  );
+}
+
+// W10. Read again every 5 s while shown (no stream serves recovery state, cc §8.6 item 6).
+export const REREAD_MS = 5000;
+
+export function RecoveryConsole() {
+  const [n, again] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => again((i) => i + 1), REREAD_MS);
+    return () => clearInterval(t);
+  }, []);
+  const read = useItem<Recovery>("/recovery", undefined, n);
+  const { mode } = useRecoveryState();
+  if (read.kind === "loading") return <><h2>Recovery</h2><Status>Loading the recovery state</Status></>;
+  if (read.kind === "discarded") return null;
+  if (read.kind !== "ok") return <><h2>Recovery</h2><RecoveryRead res={read} /></>;
+  const r = read.data;
+  const held = unreleased(r.scopes);
+  return (
+    <>
+      <h2>Recovery</h2>
+      <Status testid="recovery-state">
+        Recovery mode {r.recoveryMode ? "on" : "off"}, epoch {r.epoch}. {mode === "recovery" ? RECOVERY_START : mode === "normal" ? "Server started normally." : UNKNOWN_START}
+      </Status>
+      {r.entry != null && (
+        <p data-testid="recovery-entry">
+          Entered {when(r.entry.enteredAt)} by {r.entry.enteredBy}: {r.entry.reason}. Restore stopped {when(r.entry.stoppedAt)}. Restored:{" "}
+          {r.entry.restored.map((b) => `${b.family} ${b.backup} (taken ${when(b.takenAt)})`).join("; ")}.
+        </p>
+      )}
+      {r.exit != null && <p data-testid="recovery-exit">Exited {when(r.exit.at)} by {r.exit.exitedBy} (act {r.exit.act}).</p>}
+      <Scopes scopes={inRecovery(r.scopes)} />
+      <ExitRecovery held={held.length} recoveryMode={r.recoveryMode} onChanged={() => again((i) => i + 1)} />
+      <Revocation />
+      <Steps />
+    </>
+  );
+}
+
+function Scopes({ scopes }: { scopes: readonly Scope[] }) {
+  if (scopes.length === 0) return <Status testid="scopes">No scope is in recovery.</Status>;
+  return (
+    <Scroll label="Scopes in recovery" testid="scopes">
+      <Head cols={["Machine", "Scope state", "Next step"]} />
+      <tbody>
+        {scopes.map((s) => (
+          <tr key={s.machine}>
+            <td><Id id={s.machine} /></td>
+            <td>{s.state}</td>
+            <td>{nextStep(s.state)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </Scroll>
+  );
+}
+
+// B31: disabled with the reason until `GET /recovery` shows every scope released. A send forced past it
+// shows the server's refusal, which names the scope (internal/api/recovery_exits.go).
+export function ExitRecovery({ held, recoveryMode, onChanged }: { held: number; recoveryMode: boolean; onChanged: () => void }) {
+  const [w, send] = useSend();
+  const gate = useGate(["recovery-admin"]);
+  const writes = useWrites();
+  const busy = w !== undefined && writes?.open.includes(w) === true;
+  const done = w?.outcome?.kind === "done";
+  useEffect(() => {
+    if (done) onChanged();
+  }, [done, onChanged]);
+  const reason = !recoveryMode ? "Recovery mode is off" : held > 0 ? `${held} ${held === 1 ? "scope" : "scopes"} not released (ready is not released)` : undefined;
+  const why = gate ?? reason;
+  return (
+    <form aria-label="Exit recovery" onSubmit={(e) => (e.preventDefault(), send({ method: "POST", path: "/recovery/exits", resource: "/recovery", body: {} }))}>
+      <h3>Exit recovery</h3>
+      <p>
+        <button type="submit" disabled={why !== undefined || busy}>Exit recovery</button>
+        {why !== undefined && ` ${why}`}
+      </p>
+      <Result w={w} done={(d) => `Recovery mode left (act ${(d as components["schemas"]["ExitBody"]).act}).`} />
+    </form>
+  );
+}
+
+// B35: the identity, or the issuer and subject, and a reason; sent only when the identity is typed back.
+export function Revocation() {
+  const [w, send] = useSend();
+  const [identity, setIdentity] = useState("");
+  const [iss, setIss] = useState("");
+  const [sub, setSub] = useState("");
+  const [reason, setReason] = useState("");
+  const [typed, type] = useState("");
+  const gate = useGate(["recovery-admin"]);
+  const writes = useWrites();
+  const busy = w !== undefined && writes?.open.includes(w) === true;
+  // The identity, or the issuer and subject, not both (RevocationInput). The identity typed back is
+  // the identity, or the subject (as the CLI asks).
+  const byIdentity = identity.trim() !== "" && iss.trim() === "" && sub.trim() === "";
+  const bySubject = identity.trim() === "" && iss.trim() !== "" && sub.trim() !== "";
+  const target = byIdentity ? identity.trim() : bySubject ? sub.trim() : "";
+  const ready = target !== "" && reason.trim() !== "" && typed === target;
+  const why = gate ?? (ready ? undefined : "Name the identity, or the issuer and subject, give a reason, and type the identity back");
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!ready) return;
+    const body = byIdentity ? { identity: target, reason: reason.trim() } : { iss: iss.trim(), sub: target, reason: reason.trim() };
+    send({ method: "POST", path: "/identity-revocations", resource: "/recovery", body });
+  };
+  return (
+    <form aria-label="Revoke identity" onSubmit={submit}>
+      <h3>Revoke identity</h3>
+      <ul>{REVOCATION_LIMITS.map((l) => <li key={l}>{l}</li>)}</ul>
+      <p><label>Identity: <input value={identity} onChange={(e) => setIdentity(e.target.value)} autoComplete="off" /></label></p>
+      <p>or <label>Issuer: <input value={iss} onChange={(e) => setIss(e.target.value)} autoComplete="off" /></label> <label>Subject: <input value={sub} onChange={(e) => setSub(e.target.value)} autoComplete="off" /></label></p>
+      <p><label>Reason: <input value={reason} onChange={(e) => setReason(e.target.value)} autoComplete="off" /></label></p>
+      <p><label>Type the identity to record it{target !== "" ? ` (${target})` : ""}: <input value={typed} onChange={(e) => type(e.target.value)} autoComplete="off" /></label></p>
+      <p>
+        <button type="submit" disabled={why !== undefined || busy}>Revoke identity</button>
+        {why !== undefined && ` ${why}`}
+      </p>
+      <Result w={w} done={(d) => revoked(d as components["schemas"]["RevocationBody"])} />
+    </form>
+  );
+}
+
+const revoked = (x: components["schemas"]["RevocationBody"]): ReactNode =>
+  `Revoked ${x.identity} (act ${x.act}). auth.deniedSubjects lists it: ${x.deniedSubjectsListed ? "yes" : "no, add it now, since a restore can erase this revocation"}. ${x.note}`;
