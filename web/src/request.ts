@@ -8,6 +8,11 @@ export const API_BASE = "/api/v1";
 export const TRANSPORT_FAILURE =
   "The server could not be reached. The network may be down, or the server answered with a redirect, which this page refuses.";
 
+// The same failure met by a write, as the reason its outcome is unknown (§8.4 item 2): the request may have
+// reached the server before the connection failed.
+export const WRITE_TRANSPORT_FAILURE =
+  "the connection failed. The network may be down, or the server answered with a redirect, which this page refuses";
+
 export const EPOCH_CHANGED =
   "The installation entered recovery mode or was restored; what was read before may no longer hold";
 

@@ -46,6 +46,8 @@ describe("W11 state catalogue: every text a status message", () => {
     expect(status(h(Conflict, { what: "draft", revision: 7, onShow: noop }))).toBe("Someone changed this draft (revision 7). Your text is not saved.");
     expect(html(h(Conflict, { what: "draft", revision: 7, onShow: noop }))).toContain(">Show their change</button>");
     expect(status(h(Unknown, { onShow: noop }))).toBe(UNKNOWN);
+    // A transport failure of a write names a refused redirect as one possible cause (client contracts §6 item 7).
+    expect(UNKNOWN).toBe("Unknown whether this was saved: the connection failed. The network may be down, or the server answered with a redirect, which this page refuses.");
     // Repeat exactly only while the page holds the request.
     expect(html(h(Unknown, { onRepeat: noop, onShow: noop }))).toContain(">Repeat exactly</button>");
     expect(html(h(Unknown, { onShow: noop }))).not.toContain("Repeat exactly");

@@ -5,7 +5,7 @@ import { AddCluster, ClusterField, existing, guardsUnload, leaving, record, Resu
 import { type Failed, type Reads, ReadsProvider } from "./list.tsx";
 import type { Client, Problem } from "./request.ts";
 import { Failure, ShellContext } from "./shell.tsx";
-import { REPEATING, REPLAYED, setAside, unknown } from "./states.tsx";
+import { REPEATING, REPLAYED, setAside, unknown, UNKNOWN } from "./states.tsx";
 import { EARLIER_EPOCH, EPOCH_CHANGED_ASIDE, NO_EPOCH, NO_EPOCH_HEADER, type Outcome, Write, Writes } from "./write.ts";
 
 const PRINCIPAL = "https://idp.invalid SYNTH-sub-1";
@@ -30,7 +30,7 @@ describe("the notice (B11)", () => {
   test("an unknown outcome names the key, the route and the resource, offers [Repeat exactly] and Dismiss", async () => {
     const [writes, w] = await unknownWrite();
     const out = html(writes, h(WriteNotices, { go: () => {} }));
-    expect(out).toContain(`${unknown("the connection dropped")} Key ${w.key}, POST /api/v1/clusters. To learn the outcome, read /clusters.`);
+    expect(out).toContain(`${UNKNOWN} Key ${w.key}, POST /api/v1/clusters. To learn the outcome, read /clusters.`);
     expect(out).toContain(">Repeat exactly</button>");
     expect(out).toContain(">Dismiss</button>");
   });
@@ -106,7 +106,7 @@ describe("the notice (B11)", () => {
     });
     expect(await writes.submit(w)).toMatchObject({ kind: "unknown", why: "the server answered 500 internal-error" });
     await writes.submit(w);
-    expect(out).toContain(`${unknown("the connection dropped")}${REPEATING} Key ${w.key}`);
+    expect(out).toContain(`${UNKNOWN}${REPEATING} Key ${w.key}`);
     expect(out).not.toContain("Internal error");
   });
 
@@ -154,7 +154,7 @@ describe("the notice (B11)", () => {
     const [writes, w] = await unknownWrite();
     const run = writes.submit(w);
     const out = html(writes, h(WriteNotices, { go: () => {} }));
-    expect(out).toContain(`${unknown("the connection dropped")}${REPEATING} Key ${w.key}, POST /api/v1/clusters. To learn the outcome, read /clusters.`);
+    expect(out).toContain(`${UNKNOWN}${REPEATING} Key ${w.key}, POST /api/v1/clusters. To learn the outcome, read /clusters.`);
     expect(out).not.toContain("Repeat exactly");
     expect(out).not.toContain("Dismiss");
     await run;
