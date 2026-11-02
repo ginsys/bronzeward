@@ -246,8 +246,10 @@ export function RecoveryConsole() {
   useEffect(() => {
     let live = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const run = flight.current.then(() => (live ? settled<Recovery>("/recovery", () => live) : undefined));
-    flight.current = run.catch(() => undefined);
+    // A read that rejects (a credential renewal that threw) is a read without answer: the next one
+    // is still scheduled, and the chain never rejects.
+    const run = flight.current.then(() => (live ? settled<Recovery>("/recovery", () => live) : undefined)).catch(() => undefined);
+    flight.current = run;
     void run.then((res) => {
       if (!live) return;
       if (res !== undefined) put(res);
