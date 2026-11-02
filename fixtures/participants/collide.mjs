@@ -7,22 +7,28 @@
 //
 // Afterwards a leak scan reads the fixture state, the provider and participant state and the
 // fixture's and provider's container logs for the token. It first plants a marker of its own and
-// must find it, so that a scan that reads nothing cannot pass. It prints addresses, statuses and
-// counts, never a token, a code or a password.
+// must find it, so that a scan that reads nothing cannot pass. It prints addresses, statuses,
+// counts and page titles, never a token, a code or a password.
 //
 // Usage: node fixtures/participants/collide.mjs <A's port> <value> <state dir> <container prefix>
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const [port, value, stateDir, prefix] = process.argv.slice(2);
 if (!port || !value || !stateDir || !prefix) throw new Error("usage: collide.mjs <A's port> <value> <state dir> <container prefix>");
 const human = "h-all";
 const password = process.env.BW_PW_H_ALL;
 if (!password) throw new Error("no password for h-all in the environment (run through session passwords --only h-all --exec)");
-const repo = new URL("../../", import.meta.url).pathname;
+// As rehearse-signin.mjs: the password leaves this process's environment at once, so that no child
+// (ChromeDriver, Chrome, docker) gets it, and none of the caller's WebdriverIO settings reaches it.
+for (const k of Object.keys(process.env)) if (k.startsWith("BW_PW_") || k.startsWith("WDIO_")) delete process.env[k];
+if (process.env.NODE_DEBUG) throw new Error("NODE_DEBUG is set; unset it, because its output bypasses the redaction");
+// A file path, not the URL's path, which keeps percent-encoding (a space as %20).
+const repo = fileURLToPath(new URL("../../", import.meta.url));
 const part = join(repo, ".dev/participants");
 const idpDir = join(repo, ".dev/idp");
 const client = JSON.parse(readFileSync(join(part, "client.json"), "utf8"));
@@ -31,8 +37,14 @@ const { remote } = require("webdriverio");
 const api = `http://127.0.0.1:${port}/api/v1`;
 const fragment = "participants-labels";
 
-// signedIn: h-all's access token, by the device grant, the code entered and approved in a
-// WebDriver session (always a fresh profile).
+// Every line printed goes through out, which removes the password and anything shaped like a
+// session password: a WebDriver error can name the failed command's arguments (setValue).
+const out = (line) => console.log(String(line).replaceAll(password, "[password]").replace(/BWSYNTH-pw-[a-z0-9]{8}-[0-9]{4}/g, "[password]"));
+
+// signedIn: h-all's access token, by the device grant. The code is entered and approved in headless
+// Chrome, in a new profile in the participant state, which session scan reads and session stop
+// removes. The browser stays open until the token poll ends: the consent's Allow comes some seconds
+// after the password on a loaded host, and closing the browser earlier can cut the approval off.
 async function signedIn() {
   const disc = await (await fetch(`${client.issuer}/.well-known/openid-configuration`)).json();
   const form = (o) => new URLSearchParams(o);
@@ -42,10 +54,34 @@ async function signedIn() {
   });
   if (!dev.ok) throw new Error(`device authorization: ${dev.status}`);
   const d = await dev.json();
+  let stop = false;
+  const poll = (async () => {
+    let wait = (d.interval ?? 5) * 1000;
+    const until = Date.now() + 120000;
+    while (!stop && Date.now() < until) {
+      await new Promise((r) => setTimeout(r, wait));
+      const t = await fetch(disc.token_endpoint, {
+        method: "POST",
+        body: form({ grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: d.device_code, client_id: client.cliClientId }),
+      });
+      const b = await t.json();
+      if (t.ok && b.access_token) return b.access_token;
+      if (b.error === "slow_down") wait += 5000;
+      else if (b.error !== "authorization_pending") throw new Error(`device token: ${t.status} ${b.error ?? ""}`);
+    }
+    throw new Error("device token: no approval within two minutes");
+  })();
+  // Read below; a failure before then must not end the process as an unhandled rejection.
+  poll.catch(() => {});
+  const profile = join(part, "collide-profile");
+  rmSync(profile, { recursive: true, force: true });
+  mkdirSync(profile, { recursive: true });
   const browser = await remote({
-    logLevel: "error",
-    capabilities: { browserName: "chrome", "goog:chromeOptions": { args: ["--headless=new"] } },
+    // No WebDriver log of its own: a command log would carry the password.
+    logLevel: "silent",
+    capabilities: { browserName: "chrome", "goog:chromeOptions": { args: ["--headless=new", `--user-data-dir=${profile}`] } },
   });
+  const say = async (what) => out(`${what}: ${await browser.getTitle()} <${new URL(await browser.getUrl()).pathname}>`);
   try {
     const submit = async (selector, v) => {
       const field = await browser.$(selector);
@@ -54,29 +90,24 @@ async function signedIn() {
       await (await browser.$('button[type="submit"]')).click();
     };
     await browser.url(d.verification_uri);
+    await say("device page");
     await submit('input[name="user_code"]', d.user_code);
     await submit('input[name="loginName"], input#loginName, input[autocomplete="username"]', human);
     await submit('input[type="password"]', password);
-    await browser.pause(2000);
+    await say("after the password");
+    // The device grant asks for consent after the password (Device Authorization, Allow).
     const allow = await browser.$("button*=Allow");
-    if (await allow.isExisting()) await allow.click();
+    await allow.waitForClickable({ timeout: 15000 });
+    await allow.click();
+    await say("after consent");
+    return await poll;
+  } catch (e) {
+    await say("page at the failure").catch(() => {});
+    throw e;
   } finally {
+    stop = true;
     await browser.deleteSession();
   }
-  let wait = (d.interval ?? 5) * 1000;
-  const until = Date.now() + 120000;
-  while (Date.now() < until) {
-    await new Promise((r) => setTimeout(r, wait));
-    const t = await fetch(disc.token_endpoint, {
-      method: "POST",
-      body: form({ grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: d.device_code, client_id: client.cliClientId }),
-    });
-    const b = await t.json();
-    if (t.ok && b.access_token) return b.access_token;
-    if (b.error === "slow_down") wait += 5000;
-    else if (b.error !== "authorization_pending") throw new Error(`device token: ${t.status} ${b.error ?? ""}`);
-  }
-  throw new Error("device token: no approval within two minutes");
 }
 
 // collide: the one open draft, read for its ETag, and h-all's bw-team value saved into it.
@@ -96,18 +127,18 @@ async function collide(token) {
     body: JSON.stringify({ layer: "role", document: `machine:\n  nodeLabels:\n    bw-team: "${value}"\n`, marks: [] }),
   });
   if (put.status !== 200) throw new Error(`PUT ${fragment}: ${put.status}`);
-  console.log(`collide: h-all saved bw-team: ${value} into draft ${draft}: 200; the participant's next save is refused for its ETag`);
+  out(`collide: h-all saved bw-team: ${value} into draft ${draft}: 200; the participant's next save is refused for its ETag`);
 }
 
 // files <dir>: every regular file under the directory.
 function files(dir) {
-  const out = [];
+  const found = [];
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     const p = join(dir, e.name);
-    if (e.isDirectory()) out.push(...files(p));
-    else if (e.isFile()) out.push(p);
+    if (e.isDirectory()) found.push(...files(p));
+    else if (e.isFile()) found.push(p);
   }
-  return out;
+  return found;
 }
 
 // scan <token>: the paths whose content holds the token, its signature or the planted marker.
@@ -153,15 +184,15 @@ try {
   await collide(token);
 } catch (e) {
   failed = true;
-  console.log(`collide failed: ${e.message}`);
+  out(`collide failed: ${e.message}`);
 }
 if (token) {
   const { read, hits, control } = scan(token);
   const found = hits.filter(([w, k]) => k === "marker" && w === control).length === 1;
   const leaks = hits.filter(([w, k]) => !(k === "marker" && w === control));
-  for (const [w, k] of leaks) console.log(`leak scan: ${k} in ${w}`);
-  if (!found) console.log("leak scan: the planted marker was not found: the scan read nothing it was meant to");
-  if (found && leaks.length === 0) console.log(`leak scan: ${read} files and logs read, the planted marker found, the token in none`);
+  for (const [w, k] of leaks) out(`leak scan: ${k} in ${w}`);
+  if (!found) out("leak scan: the planted marker was not found: the scan read nothing it was meant to");
+  if (found && leaks.length === 0) out(`leak scan: ${read} files and logs read, the planted marker found, the token in none`);
   failed ||= !found || leaks.length > 0;
 }
 token = "";
