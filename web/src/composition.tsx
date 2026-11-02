@@ -375,12 +375,25 @@ export const machineOffers = (draft: Pick<Draft, "cluster" | "entries">, machine
 // Composition order (operator-experience §5.4): layers from global to override; inside a layer the
 // profile pins first, in profile order, then the assignment's own fragments.
 export interface Composed { layer: Layer; name: string; revision: string; via: string | undefined }
+// A revision is composed once, at its first position, as the server composes it.
 export function compose(profiles: { name: string; pins: { name: string; revision: string; layer: string }[] }[], own: { layer: Layer; name: string; revision: string }[]): Composed[] {
+  const seen = new Set<string>();
   return LAYERS.flatMap((layer) => [
     ...profiles.flatMap((p) => p.pins.filter((x) => x.layer === layer).map((x) => ({ layer, name: x.name, revision: x.revision, via: p.name }))),
     ...own.filter((x) => x.layer === layer).map((x) => ({ layer, name: x.name, revision: x.revision, via: undefined })),
-  ]);
+  ]).filter((c) => !seen.has(c.revision) && seen.add(c.revision));
 }
+
+// The draft's own revision of a name, else the head of the cluster's: what a composition reads.
+export function revisionOf(draft: Pick<Draft, "cluster" | "entries">, profiles: Profile[], fragments: Fragment[], kind: "profile" | "fragment", name: string) {
+  const own = draft.entries.find((e): e is Source => e.kind === kind && e.name === name);
+  return own !== undefined ? own.revision : (kind === "profile" ? profiles : fragments).find((x) => x.cluster === draft.cluster && x.name === name)?.revision;
+}
+// What a composition read depends on: the lists and the revisions their names resolve to now. A
+// result belongs to the same key, so a change of either one makes it stale.
+export const sourceKey = (draft: Pick<Draft, "cluster" | "entries">, lists: Lists, profiles: Profile[], fragments: Fragment[]) =>
+  [...lists.profile.map((n) => `profile ${n} ${revisionOf(draft, profiles, fragments, "profile", n) ?? "-"}`),
+    ...LAYERS.flatMap((l) => lists[l].map((n) => `${l} ${n} ${revisionOf(draft, profiles, fragments, "fragment", n) ?? "-"}`))].join("\n");
 
 // What a fragment revision does with each reference: its name, its declaration, and the state.
 // Never a value, and never the document.
@@ -410,14 +423,9 @@ export async function readComposition(
     }
     return revisions[id];
   };
-  // The draft's own revision of a name, else the head of the cluster's.
-  const revisionOf = (kind: "profile" | "fragment", name: string) => {
-    const own = draft.entries.find((e): e is Source => e.kind === kind && e.name === name);
-    return own !== undefined ? own.revision : (kind === "profile" ? profiles : fragments).find((x) => x.cluster === draft.cluster && x.name === name)?.revision;
-  };
   const used: Parameters<typeof compose>[0] = [];
   for (const name of lists.profile) {
-    const id = revisionOf("profile", name);
+    const id = revisionOf(draft, profiles, fragments, "profile", name);
     if (id == null) return `Profile ${name} has no revision to read.`;
     const p = await get<S["ProfileRevisionBody"]>(`/profile-revisions/${enc(id)}`);
     if (p === undefined) return `The revision of profile ${name} could not be read.`;
@@ -432,10 +440,11 @@ export async function readComposition(
   const own: Parameters<typeof compose>[1] = [];
   for (const layer of LAYERS) {
     for (const name of lists[layer]) {
-      const id = revisionOf("fragment", name);
+      const id = revisionOf(draft, profiles, fragments, "fragment", name);
       if (id == null) return `Fragment ${name} has no revision to read.`;
       const f = await fragment(id);
       if (f === undefined) return `The revision of fragment ${name} could not be read.`;
+      if (f.layer !== layer) return `Fragment ${name} is in layer ${f.layer}, not ${layer}. Remove it from the list and add it again.`;
       own.push({ layer, name, revision: f.id });
     }
   }
@@ -519,17 +528,25 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
   const [machines] = useList<Machine>("/machines", new URLSearchParams({ cluster: draft.cluster }).toString(), true);
   const [layers, setLayers] = useState<Record<string, string>>({});
   const asked = useRef(new Set<string>());
+  // A layer read that failed is asked again by the next draft read or by the button: the fragment
+  // stays out of the pickers meanwhile, and Show stays off.
+  const [layerFailed, setLayerFailed] = useState(0);
+  const [layerTry, tryLayers] = useState(0);
   useEffect(() => {
     for (const e of draft.entries) {
       const r = e.kind === "fragment" ? e.revision : null;
       if (r == null || asked.current.has(r)) continue;
       asked.current.add(r);
       void read<Revision>(`/fragment-revisions/${enc(r)}`, () => mounted.current).then((x) => {
-        if (mounted.current) setLayers((l) => ({ ...l, [r]: x?.kind === "ok" ? x.data.layer : "" }));
+        if (!mounted.current) return;
+        if (x?.kind === "ok") return setLayers((l) => ({ ...l, [r]: x.data.layer }));
+        asked.current.delete(r);
+        setLayerFailed((n) => n + 1);
       });
     }
-  }, [read, draft.entries]);
-  const ready = profiles.kind === "ok" && fragments.kind === "ok" && draft.entries.every((e) => e.kind !== "fragment" || e.revision == null || layers[e.revision] !== undefined);
+  }, [read, draft.entries, layerTry]);
+  const layersRead = draft.entries.every((e) => e.kind !== "fragment" || e.revision == null || layers[e.revision] !== undefined);
+  const ready = profiles.kind === "ok" && fragments.kind === "ok" && layersRead;
   const profileList = profiles.kind === "ok" ? profiles.data.items : [];
   const fragmentList = fragments.kind === "ok" ? fragments.data.items : [];
   const forProfiles = profileOffers(draft, profileList);
@@ -609,11 +626,12 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
   };
 
   // Show composition and references: on request, one read at a time. The result belongs to the list
-  // it was read for.
+  // and the revisions its names resolved to when it was read.
   const [reads, setReads] = useState<number | undefined>();
   const [result, setResult] = useState<{ key: string; value: Composition | string } | undefined>();
+  const nowKey = sourceKey(draft, lists, profileList, fragmentList);
   const show = () => {
-    const key = held.document;
+    const key = nowKey;
     setReads(0);
     const get = async <T,>(p: string) => {
       const r = await read<T>(p, () => mounted.current);
@@ -626,7 +644,7 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
       setResult({ key, value });
     });
   };
-  const composed = result?.key === held.document && typeof result.value !== "string" ? result.value : undefined;
+  const composed = result?.key === nowKey && typeof result.value !== "string" ? result.value : undefined;
 
   const conflictView = conflict !== undefined && (
     <>
@@ -667,6 +685,9 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
       {waits && (failed
         ? <p><button type="button" onClick={() => retry((x) => x + 1)}>Read the entry again</button></p>
         : <Status>Reading the entry's text.</Status>)}
+      {!layersRead && layerFailed > 0 && (
+        <p><button type="button" onClick={() => tryLayers((x) => x + 1)}>Read the fragment layers again</button></p>
+      )}
       <Members slot="profile" names={lists.profile} offers={forProfiles} ready={ready} open={open} editable={editable} change={(next) => hold({ ...lists, profile: next })} />
       {LAYERS.map((l) => (
         <Members key={l} slot={l} names={lists[l]} offers={forLayers[l]} ready={ready} open={open} editable={editable} change={(next) => hold({ ...lists, [l]: next })} />
@@ -690,8 +711,8 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
         <button type="button" onClick={show} disabled={!ready || reads !== undefined || total(lists) === 0}>Show composition and references</button>
         {reads !== undefined && ` Reads done: ${reads}.`}
       </p>
-      {result !== undefined && result.key !== held.document && <Status>The list changed after this was read. Show it again.</Status>}
-      {result?.key === held.document && typeof result.value === "string" && <Status testid="composition-note">{result.value}</Status>}
+      {result !== undefined && result.key !== nowKey && <Status>The list or a revision it names changed after this was read. Show it again.</Status>}
+      {result?.key === nowKey && typeof result.value === "string" && <Status testid="composition-note">{result.value}</Status>}
       {composed !== undefined && (
         <>
           <ol aria-label="Composition order">

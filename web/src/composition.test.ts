@@ -4,7 +4,7 @@ import { describe, expect, test } from "vitest";
 import type { components } from "./api/v1";
 import {
   ASSIGNMENT_STATEMENT, AssignmentPane, assignmentBody, assignmentRefusal, choices, compose, fragmentOffers, fromRevision, isCurrent, listsOf, machineOffers, move, noLists, PINS_MAX, PINS_STATEMENT,
-  pinned, pinRefusal, pinsOf, ProfilePane, profileBody, profileOffers, readComposition, referenceStates, stillOffered, unknownPins, withLists, withoutPin, withPin,
+  pinned, pinRefusal, pinsOf, ProfilePane, profileBody, profileOffers, readComposition, referenceStates, sourceKey, stillOffered, unknownPins, withLists, withoutPin, withPin,
 } from "./composition.tsx";
 import { editor, EMPTY, holdsUnsaved, where } from "./drafts.tsx";
 import { WritesProvider } from "./forms.tsx";
@@ -259,6 +259,21 @@ describe("the composition order (operator-experience §5.4)", () => {
     );
     expect(order.map((c) => `${c.layer} ${c.name} ${c.via ?? "-"}`)).toEqual(["global b p1", "global g -", "role a p1", "role c p2", "role own -"]);
   });
+
+  test("a revision that two profiles pin, or that the assignment also selects, is composed once at its first place", () => {
+    const pin = { name: "a", revision: "rev_a", layer: "role" };
+    const order = compose([{ name: "p1", pins: [pin] }, { name: "p2", pins: [pin] }], [{ layer: "role", name: "a", revision: "rev_a" }, { layer: "role", name: "z", revision: "rev_z" }]);
+    expect(order.map((c) => `${c.name} ${c.via ?? "-"}`)).toEqual(["a p1", "z -"]);
+  });
+
+  test("the source key changes with a draft revision of a name and with the head of a cluster name", () => {
+    const lists = { ...noLists(), profile: ["p"], role: ["f"] };
+    const profile = (revision: string | null): components["schemas"]["ProfileBody"] => ({ id: "prf_1", cluster: "cl_1", scope: "s", name: "p", revision, headRevision: 1, createdAt: "t" });
+    const base = sourceKey({ cluster: "cl_1", entries: [] }, lists, [profile("prv_1")], [frag({ name: "f", revision: "frv_1" })]);
+    expect(sourceKey({ cluster: "cl_1", entries: [] }, lists, [profile("prv_2")], [frag({ name: "f", revision: "frv_1" })])).not.toBe(base);
+    expect(sourceKey({ cluster: "cl_1", entries: [src({ name: "f", revision: "frv_9" })] }, lists, [profile("prv_1")], [frag({ name: "f", revision: "frv_1" })])).not.toBe(base);
+    expect(sourceKey({ cluster: "cl_1", entries: [] }, lists, [profile("prv_1")], [frag({ name: "f", revision: "frv_1" })])).toBe(base);
+  });
 });
 
 describe("the reference states never carry a value", () => {
@@ -295,11 +310,14 @@ describe("reading the composition, one read at a time", () => {
     expect(typeof r).toBe("object");
     expect(asked).toEqual(["/profile-revisions/prv_own", "/fragment-revisions/frv_x", "/profile-revisions/prv_base", "/fragment-revisions/frv_y", "/fragment-revisions/frv_f"]);
     if (typeof r === "string") return;
-    expect(r.order.map((c) => `${c.name} ${c.via ?? "-"}`)).toEqual(["x pown", "y pbase", "x pbase", "f -"]);
+    expect(r.order.map((c) => `${c.name} ${c.via ?? "-"}`)).toEqual(["x pown", "y pbase", "f -"]);
   });
   test("a read that gives nothing ends it with a text that names the entry", async () => {
     expect(await readComposition(draft, lists, profiles, fragments, async () => undefined)).toBe("The revision of profile pown could not be read.");
     expect(await readComposition(draft, { ...noLists(), role: ["nope"] }, profiles, fragments, get)).toBe("Fragment nope has no revision to read.");
+  });
+  test("a selected fragment whose revision is in another layer than its list is reported, not composed", async () => {
+    expect(await readComposition(draft, { ...noLists(), override: ["f"] }, profiles, fragments, get)).toBe("Fragment f is in layer site, not override. Remove it from the list and add it again.");
   });
 });
 
