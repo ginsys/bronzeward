@@ -6,7 +6,7 @@ import { type Reads, ReadsProvider } from "./list.tsx";
 import type { Client, Problem } from "./request.ts";
 import { ShellContext } from "./shell.tsx";
 import { REPEATING, REPLAYED, setAside, unknown } from "./states.tsx";
-import { EPOCH_CHANGED_ASIDE, NO_EPOCH, type Outcome, Write, Writes } from "./write.ts";
+import { EARLIER_EPOCH, EPOCH_CHANGED_ASIDE, NO_EPOCH, type Outcome, Write, Writes } from "./write.ts";
 
 const PRINCIPAL = "https://idp.invalid SYNTH-sub-1";
 const html = (writes: Writes, e: ReactElement, roles: string[] = ["author"]) =>
@@ -120,6 +120,18 @@ describe("the notice (B11)", () => {
     );
     // [Show current state] reads that record, not the list the write went to.
     expect(record(w)).toEqual({ named: " The cluster already recorded: cl_SYNTH1.", to: "/clusters/cl_SYNTH1" });
+  });
+
+  test("a repeat that meets the key's earlier-epoch record names that record's request and epoch, in the notice and the form (§8.2 409 row, §8.4 item 7)", async () => {
+    const earlier = { type: "urn:bronzeward:problem:conflict", title: "Conflict", status: 409, detail: "from an earlier recovery epoch", request: "req_SYNTH0", epoch: "e0", instance: "req-9" };
+    // The first answer is lost; the repeat meets the record the first attempt left in epoch e0.
+    const [writes, w] = scripted((n) => (n === 1 ? undefined : { status: 409, headers: new Headers(), data: earlier }));
+    await writes.submit(w);
+    const fields = " Conflict: from an earlier recovery epoch. Request req-9. The key's earlier record: request req_SYNTH0, epoch e0.";
+    const out = html(writes, h(WriteNotices, { go: () => {} }));
+    expect(out).toContain(`${setAside(EARLIER_EPOCH)}${fields} Key ${w.key}`);
+    expect(out).not.toContain("Not saved");
+    expect(html(writes, h(Result, { w, done: () => "" }))).toContain("See the notice at the top of the page");
   });
 
   test("set aside because the epoch read got no answer, it says so, not that the epoch changed", async () => {

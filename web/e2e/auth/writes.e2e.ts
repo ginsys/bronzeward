@@ -212,6 +212,8 @@ describe("the write views (#338)", () => {
   it("AMB-07: a new epoch after the confirming read meets the earlier epoch's record: 409, set aside, no new key", async () => {
     await add(["commit-drop", "epoch"]);
     await expect(notice()).toHaveText(expect.stringContaining(SET_ASIDE), { wait: 20_000 });
+    // The record the first attempt left, by its request and epoch (§8.4 item 7).
+    await expect(notice()).toHaveText(expect.stringMatching(/The key's earlier record: request \S+, epoch \S+\./));
     await oneWrite(2);
     expect(await seen()).toEqual(["failed", "409"]);
     expect(await writeAnswers()).toEqual(["/clusters 201", "/clusters 409"]);

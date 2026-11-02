@@ -62,9 +62,13 @@ export function needs(status: number, problem: Problem): string {
 
 // A problem's title, its detail when present and its instance (§8.2), as one sentence or two.
 export const problemLine = (p: Problem) => `${p.title}${p.detail !== undefined ? `: ${p.detail}` : ""}.${p.instance !== undefined ? ` Request ${p.instance}.` : ""}`;
+// An earlier-epoch idempotency record's 409 (§8.2 409 row, §8.4 item 7): the request it recorded
+// and that request's epoch, which the operator reads and reports.
+export const earlierRecord = (p: Problem) =>
+  p.status === 409 && typeof p["request"] === "string" && typeof p["epoch"] === "string" ? ` The key's earlier record: request ${p["request"]}, epoch ${p["epoch"]}.` : "";
 // The problem an unknown or set-aside write's last answer carried, after its sentence: what the
 // route accepts (a 403's), then its fields. Nothing when no answer carried one.
-export const problemTail = (p: Problem | null) => (p === null ? "" : `${needs(p.status, p)} ${problemLine(p)}`);
+export const problemTail = (p: Problem | null) => (p === null ? "" : `${needs(p.status, p)} ${problemLine(p)}${earlierRecord(p)}`);
 
 export function Refused({ problem, status, verb, testid, replayed = false }: { problem: Problem | null; status: number; verb: "read" | "saved"; testid?: string; replayed?: boolean }) {
   const earlier = replayed && `${REPLAYED} `;
