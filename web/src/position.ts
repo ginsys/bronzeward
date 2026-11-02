@@ -101,8 +101,10 @@ const BREAKS = /\r(?!\n)|[\u0085\u{2028}\u{2029}]/gu;
 function tags(original: string): { index: number; tag: string; name: string }[] {
   const text = original.replace(BREAKS, "\n");
   let masked = "";
+  let flow = 0;
   for (const line of text.split("\n")) {
-    const end = commentStart(line);
+    let end: number;
+    ({ end, flow } = commentStart(line, flow));
     masked += `${line.slice(0, end)}${" ".repeat(line.length - end)}\n`;
   }
   const found: { index: number; tag: string; name: string }[] = [];
@@ -264,7 +266,9 @@ function decoded(body: string): string | undefined {
 // Where a line's comment starts: a # at its start or after a blank, outside quotes; the line's
 // length if it has none. A quote opens a scalar only where one starts, so the apostrophes in
 // `can't` and `dogs 'n cats` open none; '' inside a single-quoted scalar is an apostrophe.
-function commentStart(line: string): number {
+// `flow` is the depth of the flow collections ([ {) open at the line's start; the result carries
+// the depth at its end, so that the next line is read in the same context (ginsys/bronzeward#578).
+function commentStart(line: string, flow: number): { end: number; flow: number } {
   let quote: string | undefined;
   for (let i = 0; i < line.length; i++) {
     const c = line[i]!;
@@ -272,22 +276,36 @@ function commentStart(line: string): number {
       if (c === "'" && quote === "'" && line[i + 1] === "'") i++;
       else if (c === quote) quote = undefined;
       else if (c === "\\" && quote === '"') i++;
-    } else if ((c === '"' || c === "'") && startsScalar(line, i)) quote = c;
-    else if (c === "#" && (i === 0 || line[i - 1] === " " || line[i - 1] === "\t")) return i;
+    } else if ((c === '"' || c === "'") && startsScalar(line, i, flow > 0)) quote = c;
+    else if (c === "#" && (i === 0 || blank(line[i - 1]))) return { end: i, flow };
+    else if ((c === "[" || c === "{") && startsScalar(line, i, flow > 0)) flow++;
+    else if ((c === "]" || c === "}") && flow > 0) flow--;
   }
-  return line.length;
+  return { end: line.length, flow };
 }
 
-// Whether a scalar starts at `i`: at the line's indentation, after a flow indicator ([ { ,), or
-// after a blank that follows a key's colon or an item's or a complex key's indicator (- ?).
-// Anything else before it is a plain scalar already started.
-function startsScalar(line: string, i: number): boolean {
-  let j = i - 1;
-  while (j >= 0 && (line[j] === " " || line[j] === "\t")) j--;
-  if (j < 0 || "[{,".includes(line[j]!)) return true;
-  if (j === i - 1) return false;
-  if (line[j] === ":") return true;
-  return (line[j] === "-" || line[j] === "?") && (j === 0 || line[j - 1] === " " || line[j - 1] === "\t");
+// Whether a node starts at `i`: at the line's indentation, after a flow indicator ([ { ,), or
+// after a blank that follows a key's colon or an item's or a complex key's indicator (- ?). In a
+// flow collection a complex key's indicator needs no blank after it, as go-yaml reads it. Node
+// properties (a tag, an anchor) and the blanks after them may stand between the indicator and the
+// node. Anything else before it is a plain scalar already started.
+const blank = (c: string | undefined) => c === " " || c === "\t";
+function startsScalar(line: string, i: number, flow: boolean): boolean {
+  const indicator = (j: number) => j === 0 || blank(line[j - 1]) || "[{,".includes(line[j - 1]!);
+  for (let k = i; ; ) {
+    let j = k - 1;
+    while (j >= 0 && blank(line[j])) j--;
+    if (j < 0 || "[{,".includes(line[j]!)) return true;
+    if (flow && line[j] === "?" && indicator(j)) return true;
+    if (j === k - 1) return false;
+    if (line[j] === ":") return true;
+    if ((line[j] === "-" || line[j] === "?") && indicator(j)) return true;
+    let s = j;
+    while (s > 0 && !blank(line[s - 1]) && !"[{,".includes(line[s - 1]!)) s--;
+    if (flow && line[s] === "?" && indicator(s)) s++;
+    if (line[s] !== "!" && line[s] !== "&") return false;
+    k = s;
+  }
 }
 
 // The tags of the text outside the declared embedded documents, and those documents. A declared

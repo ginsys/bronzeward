@@ -327,6 +327,30 @@ describe("[Go to field] positions (B13)", () => {
     expect(s!.start).toBe(text.indexOf("ref: ") + 5);
   });
 
+  // ginsys/bronzeward#578: each expected result below was read from go-yaml v3.0.5 (go.mod's pin) by
+  // decoding the same document.
+  test("ginsys/bronzeward#578: a # in a quoted explicit key in a flow collection is no comment", () => {
+    for (const one of [
+      'a: [? "x # y", !bwref x/foo]\n',
+      'a: {? "x # y": 1, b: !bwref x/foo}\n',
+      // In a flow collection a ? is a key's indicator also without a blank after it.
+      'a: [?"x # y", !bwref x/foo]\n',
+      // A tag or an anchor may stand between the indicator and the quote.
+      'a: {?!t "x # y", b: !bwref x/foo}\n',
+      'a: [!t "x # y", !bwref x/foo]\n',
+      // The collection opened on an earlier line.
+      'a: [x,\n  ? &a "x # y": 1,\n  !bwref x/foo]\n',
+      "a: {k: 1,\n  ?'x # y' : 1, b: !bwref x/foo}\n",
+    ]) expect(references(one)).toEqual(["x/foo"]);
+    // Outside a flow collection a ? with no blank after it, a [ inside a plain scalar and a tag
+    // inside one start no node, so the # still starts a comment.
+    for (const one of [
+      'a: ?"x # y" # !bwref ghost\nb: !bwref x/foo\n',
+      'a: x[ ? "y # z" # !bwref ghost\nb: !bwref x/foo\n',
+      'a: x!t "y # z" # !bwref ghost\nb: !bwref x/foo\n',
+    ]) expect(references(one)).toEqual(["x/foo"]);
+  });
+
   test("a mapping key matches by its text, as the server reads it: 01 is not 1", async () => {
     const text = "m:\n  01: first\n  1: second\n";
     const s = await spotOfPath(text, "doc[0]/m/1");
