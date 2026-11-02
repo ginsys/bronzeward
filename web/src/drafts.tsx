@@ -7,7 +7,7 @@
 import { type ReactNode, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { components } from "./api/v1";
 import { Form, field, Result, startsNew, Text, unsaved, useSend, useUnsaved, useWrites } from "./forms.tsx";
-import { Id, type Load, Ref, Scroll, short, useItem, useList, useReads, usePending } from "./list.tsx";
+import { Id, type Load, Ref, Scroll, short, useItem, useList, useReads, usePending, useSettled } from "./list.tsx";
 import type { Cluster } from "./machines.tsx";
 import { references, type Spot, spotOfLine, spotOfPath, spotOfReference } from "./position.ts";
 import type { Problem } from "./request.ts";
@@ -232,14 +232,24 @@ export function DraftItem({ id }: { id: string }) {
             <FragmentPane key={pane} draft={d} entry={entry} written={written} seeChange={seeChange} claim={claim} />
           )}
           <Status testid="not-rendered">{NOT_RENDERED}</Status>
-          {d.state === "open" && <DiscardDraft draft={d} written={written} />}
+          {d.state === "open" && <DiscardDraft draft={d} written={written} seeChange={seeChange} />}
         </>
       )}
     </>
   );
 }
 
-function DiscardDraft({ draft, written }: { draft: Draft; written: () => void }) {
+// A Discard's 412: the draft changed since the page read it. Show their change reads it again and
+// keeps that read's ETag, so a Discard after it applies to the draft as shown (ginsys/bronzeward#517 H15).
+export const NOT_DISCARDED = "Not discarded: someone changed this draft since this page read it.";
+// The new ETag would also let the fragment editor's Save overwrite their change unseen, so an editor
+// with unsaved text is saved or left first.
+export const EDITOR_FIRST = "Not read: the fragment editor holds unsaved text. Save it or switch entries first.";
+export const DiscardRefused = ({ onShow }: { onShow: () => void }) => (
+  <Status testid="write-result" actions={<button type="button" onClick={onShow}>Show their change</button>}>{NOT_DISCARDED}</Status>
+);
+
+function DiscardDraft({ draft, written, seeChange }: { draft: Draft; written: () => void; seeChange: () => void }) {
   const [w, send] = useSend();
   const writes = useWrites();
   const [note, setNote] = useState<string | undefined>();
@@ -259,7 +269,7 @@ function DiscardDraft({ draft, written }: { draft: Draft; written: () => void })
     <>
       <p><Action label="Discard draft" needs={["author"]} onClick={discard} busy={w !== undefined && w.outcome === undefined} /></p>
       {note !== undefined && <Status>{note}</Status>}
-      <WriteResult w={w} done={() => `Draft ${short(draft.id)} discarded.`} />
+      <WriteResult w={w} conflict={<DiscardRefused onShow={() => (unsaved.size > 0 ? setNote(EDITOR_FIRST) : seeChange())} />} done={() => `Draft ${short(draft.id)} discarded.`} />
     </>
   );
 }
@@ -440,7 +450,8 @@ function WriteResult({ w, done, conflict, goTo, marks = "" }: { w: Write | undef
 // for saving (no route drops an entry).
 export function FragmentPane({ draft, entry, written, seeChange, claim = () => {} }: { draft: Draft; entry: Source | undefined; written: () => void; seeChange: () => void; claim?: (name: string) => void }) {
   const writes = useWrites();
-  const { client } = useReads();
+  // Every read settles through the shell: a refusal of the credentials ends the page (H11).
+  const read = useSettled();
   // A new fragment's typed name, until the pane edits the entry its Save created (H1).
   const [typed, setName] = useState("");
   const name = entry === undefined ? typed : nameOf(entry);
@@ -468,9 +479,9 @@ export function FragmentPane({ draft, entry, written, seeChange, claim = () => {
     if (entry?.revision == null) return;
     let live = true;
     setLoad((l) => (l === "ok" ? l : "pending"));
-    void client.read<Revision>(`/fragment-revisions/${enc(entry.revision)}`).then((r) => {
+    void read<Revision>(`/fragment-revisions/${enc(entry.revision)}`, () => live).then((r) => {
       if (!live) return;
-      if (r.kind !== "ok") {
+      if (r?.kind !== "ok") {
         setLoad((l) => (l === "ok" ? l : "failed"));
         return setNote("The entry's revision could not be read.");
       }
@@ -478,7 +489,7 @@ export function FragmentPane({ draft, entry, written, seeChange, claim = () => {
       act({ kind: "read", text: fromRevision(r.data), since: done });
     });
     return () => void (live = false);
-  }, [client, entry?.revision, attempt]);
+  }, [read, entry?.revision, attempt]);
 
   // Each draft read the page shows, and whether it gives this entry a new revision to read, or
   // removes it. A draft read again also reads a revision that failed again.
@@ -497,7 +508,7 @@ export function FragmentPane({ draft, entry, written, seeChange, claim = () => {
     if (o?.kind === "refused" && o.status === 412) {
       act({ kind: "refused" });
       // For the revision shown only: this read's ETag is not kept (§8.3).
-      void client.read<Draft>(`/drafts/${enc(draft.id)}`).then((r) => r.kind === "ok" && act({ kind: "at", revision: r.data.revision }));
+      void read<Draft>(`/drafts/${enc(draft.id)}`).then((r) => r?.kind === "ok" && act({ kind: "at", revision: r.data.revision }));
     }
   }, [o]);
 
@@ -536,12 +547,12 @@ export function FragmentPane({ draft, entry, written, seeChange, claim = () => {
     const at = version;
     if (!mayRevert(conflict)) return setNote(NOT_REVERTED);
     if (entry?.head == null) return setNote("No base: this fragment is new in the draft.");
-    const f = await client.read<Fragment>(`/fragments/${enc(entry.head)}`);
-    if (f.kind !== "ok") return setNote("The fragment's head could not be read.");
+    const f = await read<Fragment>(`/fragments/${enc(entry.head)}`);
+    if (f?.kind !== "ok") return setNote("The fragment's head could not be read.");
     if (f.data.revision === null) return setNote("No base text: the fragment's head is removed.");
     if (f.data.headRevision !== entry.base) return setNote(`No base text to restore: the head moved since this entry's base (revision ${entry.base ?? "none"}, now ${f.data.headRevision}).`);
-    const r = await client.read<Revision>(`/fragment-revisions/${enc(f.data.revision)}`);
-    if (r.kind !== "ok") return setNote("The base revision could not be read.");
+    const r = await read<Revision>(`/fragment-revisions/${enc(f.data.revision)}`);
+    if (r?.kind !== "ok") return setNote("The base revision could not be read.");
     act({ kind: "revert", at, text: fromRevision(r.data), note: `The base text (revision ${short(f.data.revision)}) is in the editor, not saved. Save writes it as a new revision of this entry; the entry stays in the draft.` });
   };
   const goTo = async () => {

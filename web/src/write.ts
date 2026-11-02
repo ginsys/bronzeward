@@ -64,6 +64,9 @@ export const BACKOFF = [1000, 2000, 4000];
 // How long a repeat waits for the first request of its key to finish ingesting, unless the
 // served claim lease is longer (as the CLI's --ingest-wait, #347).
 export const INGEST_WAIT = 120_000;
+// How long the in-progress wait's GET /server may take before the bound falls back without it
+// (ginsys/bronzeward#517 H13).
+export const SERVER_WAIT = 10_000;
 
 // One key per logical write: 128 bits from the browser's random source, base64url without padding
 // (§8.4 item 1), never derived from the content.
@@ -120,6 +123,9 @@ export class Writes {
   // shown. It is told once the write's outcome is settled, or at once when the read that learns
   // the epoch of the write's answer meets it, so a stalled answer body cannot hide it.
   onPreEntry: ((p: Problem) => void) | undefined;
+  // The claim lease, in seconds, of the shell's last GET /server: the in-progress wait's bound
+  // when its own read of it fails (ginsys/bronzeward#517 H14).
+  lease: number | undefined;
   private readonly all = new Set<Write>();
   private readonly listeners = new Set<() => void>();
   private version = 0;
@@ -398,7 +404,10 @@ export class Writes {
         const ingestion = String(p["ingestion"]);
         if (bound === undefined) {
           since = this.now();
-          bound = await this.ingestBound(client);
+          bound = await this.ingestBound(client, end);
+          // Its read ended the sign-in or met a recovery start: nothing is repeated (H12).
+          if (end.e !== undefined) return aside(SIGN_IN_REFUSED);
+          if (end.pre !== undefined) return aside(RECOVERY_START);
         }
         if (spent() >= bound) return unknown(`the first request with this key was still ingesting (ingestion ${ingestion}) after ${Math.round(spent() / 1000)} s`);
         w.ingesting = ingestion;
@@ -443,11 +452,18 @@ export class Writes {
     return now === w.epoch ? undefined : EPOCH_CHANGED_ASIDE;
   }
 
-  // The in-progress wait bound: INGEST_WAIT, or the served claim lease if longer (§8.4 item 2).
-  private async ingestBound(client: Client): Promise<number> {
-    const r = await client.read<{ ingestionClaim?: { leaseSeconds?: unknown } }>("/server");
-    const lease = r.kind === "ok" ? r.data.ingestionClaim?.leaseSeconds : undefined;
-    return typeof lease === "number" && lease * 1000 > INGEST_WAIT ? lease * 1000 : INGEST_WAIT;
+  // The in-progress wait bound: INGEST_WAIT, or the claim lease if longer (§8.4 item 2). The lease
+  // is the one GET /server serves now, or else the one the shell read (H14). That read is a read:
+  // its credential refusals and a recovery start's refusal go to `end` (H12). It is not waited for
+  // beyond SERVER_WAIT (H13).
+  private async ingestBound(client: Client, end: End): Promise<number> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<undefined>((r) => (timer = setTimeout(() => r(undefined), SERVER_WAIT)));
+    const a = await Promise.race([this.read(client, "/server", end, false), late]);
+    clearTimeout(timer);
+    const served = a?.status === 200 ? (a.data as { ingestionClaim?: { leaseSeconds?: unknown } } | null)?.ingestionClaim?.leaseSeconds : undefined;
+    const lease = typeof served === "number" ? served : this.lease;
+    return lease !== undefined && lease * 1000 > INGEST_WAIT ? lease * 1000 : INGEST_WAIT;
   }
 
   // A sign-out, an ended sign-in or the end of the shell that held the client: nothing more is sent
@@ -457,14 +473,18 @@ export class Writes {
     return this.client === client && client.writesEnded !== true ? undefined : SHELL_GONE;
   }
 
-  // The epoch one GET /recovery shows (§8.4 item 3). It is a read, so its credential refusals are
-  // a read's (§8.2): a 401 renews once and is sent again, and a second 401 or identity-revoked
-  // ends the page through `end`.
+  // The epoch one GET /recovery shows (§8.4 item 3).
   private async confirm(client: Client, end: End): Promise<string | undefined> {
+    return (await this.read(client, "/recovery", end, true))?.headers.get("Bronzeward-Epoch") ?? undefined;
+  }
+
+  // One read for the write layer. Its credential refusals are a read's (§8.2): a 401 renews once
+  // and is sent again, and a second 401 or identity-revoked ends the page through `end`.
+  // Undefined then, or after a recovery start's refusal that attempt() recorded in `end`, or when
+  // nothing was sent, which the caller's next look names.
+  private async read(client: Client, path: string, end: End, epochOnly: boolean): Promise<Attempt | undefined> {
     for (let renewed = false; ; renewed = true) {
-      const a = await client.attempt("GET", "/recovery", {}, undefined, end, true);
-      // An ending, or a recovery start's process refusal (§8.5 item 1) that attempt() recorded; or
-      // nothing sent, which the caller's next look names.
+      const a = await client.attempt("GET", path, {}, undefined, end, epochOnly);
       if (end.e !== undefined || end.pre !== undefined || a === NOT_SENT) return undefined;
       const p = a === undefined ? null : problemOf(a.data);
       const code = p?.type.slice(PREFIX.length);
@@ -479,7 +499,7 @@ export class Writes {
         end.e = { kind: "revoked", problem: p! };
         return undefined;
       }
-      return a?.headers.get("Bronzeward-Epoch") ?? undefined;
+      return a;
     }
   }
 }

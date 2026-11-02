@@ -1,7 +1,7 @@
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
-import { type Dropped, type Listed, type Load, More, type Reads, ReadsProvider, readPages, RESTARTED, settleKept, settling, short, usePending } from "./list.tsx";
+import { type Dropped, type Listed, type Load, More, type Reads, ReadsProvider, readPages, RESTARTED, settledRead, settleKept, settling, short, usePending } from "./list.tsx";
 import type { ReadResult } from "./request.ts";
 import { badges, type Machine, observed } from "./machines.tsx";
 
@@ -103,6 +103,27 @@ describe("cursor pages", () => {
     expect(marks).toEqual([true]);
     settleKept(settle, lost, { kind: "ok", data: 2 }, () => {}, () => true, held);
     expect(marks).toEqual([true, false]);
+  });
+
+  test("ginsys/bronzeward#517 H11: a view's own read settles through the shell, which takes a refusal and drops a read it invalidated", async () => {
+    const seen: [ReadResult<unknown>, boolean, boolean][] = [];
+    let valid = true;
+    const reads = (res: ReadResult<unknown>): Pick<Reads, "client" | "settle" | "undropped"> => ({
+      client: { read: <T,>() => Promise.resolve(res as ReadResult<T>) },
+      settle: (r, set, live, held) => {
+        seen.push([r, live(), held()]);
+        if (live() && r.kind !== "unauthenticated") set(r as never);
+        return false;
+      },
+      undropped: () => () => valid,
+    });
+    const revoked = { kind: "unauthenticated" } as unknown as ReadResult<unknown>;
+    expect(await settledRead(reads(revoked), "/fragment-revisions/frv_1")).toBeUndefined();
+    expect(seen[0]).toEqual([revoked, true, true]);
+    expect(await settledRead(reads({ kind: "ok", data: 1 }), "/drafts/drf_1")).toEqual({ kind: "ok", data: 1 });
+    valid = false;
+    expect(await settledRead(reads({ kind: "ok", data: 2 }), "/drafts/drf_1")).toBeUndefined();
+    expect(await settledRead(reads({ kind: "ok", data: 3 }), "/drafts/drf_1", () => false)).toBeUndefined();
   });
 
   test("G23: identifiers shortened to the prefix and four characters at each end", () => {
