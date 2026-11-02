@@ -14,6 +14,8 @@ export const SET_ASIDE =
   "A change with an unknown outcome is pending: it may already have been committed. It was not repeated, and repeating it stays disabled.";
 export const setAside = (why: string) => `Set aside: ${why}. ${SET_ASIDE}`;
 export const REPLAYED = "Already done earlier; showing that result.";
+// A 4xx write answer whose body the network or the attempt bound cut off (§8.4 item 8).
+export const CUT_OFF = "The answer was cut off, so its reason could not be read.";
 export const HUMAN_ONLY = "This action needs a person signed in; automation tokens cannot approve.";
 export const NOT_ACCEPTED = "Not accepted by this installation. Sign in again.";
 
@@ -70,9 +72,9 @@ export const earlierRecord = (p: Problem) =>
 // route accepts (a 403's), then its fields. Nothing when no answer carried one.
 export const problemTail = (p: Problem | null) => (p === null ? "" : `${needs(p.status, p)} ${problemLine(p)}${earlierRecord(p)}`);
 
-export function Refused({ problem, status, verb, testid, replayed = false }: { problem: Problem | null; status: number; verb: "read" | "saved"; testid?: string; replayed?: boolean }) {
+export function Refused({ problem, status, verb, testid, replayed = false, cut = false }: { problem: Problem | null; status: number; verb: "read" | "saved"; testid?: string; replayed?: boolean; cut?: boolean }) {
   const earlier = replayed && `${REPLAYED} `;
-  if (problem === null) return <Status testid={testid}>{earlier}Not {verb}: the server answered {status}.</Status>;
+  if (problem === null) return <Status testid={testid}>{earlier}Not {verb}: the server answered {status}.{cut && ` ${CUT_OFF}`}</Status>;
   const code = problem.type.slice("urn:bronzeward:problem:".length);
   const rule = typeof problem["rule"] === "string" ? ` (rule ${problem["rule"]})` : "";
   return (

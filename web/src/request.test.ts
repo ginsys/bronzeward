@@ -1,6 +1,7 @@
-import { describe, expect, test, vi } from "vitest";
-import { API_BASE, type Attempt, Client, type ClientOptions, NOT_SENT } from "./request.ts";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { API_BASE, type Attempt, Client, type ClientOptions, CUT, NOT_SENT } from "./request.ts";
 import { type ShellEvents, ShellReads } from "./shell.tsx";
+import { cutBody, endlessBody, lateBody, noHeaders } from "./test-stalls.ts";
 
 // An attempt that was sent: its answer, or undefined when none came.
 function sentOne(a: Attempt | undefined | typeof NOT_SENT): Attempt | undefined {
@@ -782,5 +783,128 @@ describe("refusals renewal never touches", () => {
     expect(await c.read("/server")).toEqual({ kind: "unavailable", status: 503, problem: null });
     expect(fetchMock).toHaveBeenCalledTimes(5);
     expect(sleeps).toEqual([1000, 2000, 4000, 8000]);
+  });
+});
+
+// §8.4 item 8 (ginsys/bronzeward#487): every attempt has its own abort signal. The response headers
+// must arrive within 30 s of the send, and the whole attempt, the body included, within 60 s. The
+// clock is fake, so no test waits.
+describe("the attempt bound (§8.4 item 8)", () => {
+  afterEach(() => vi.useRealTimers());
+
+  const problemHeaders = { "Content-Type": "application/problem+json", "Bronzeward-Epoch": EPOCH };
+  const jsonHeaders = { "Content-Type": "application/json", "Bronzeward-Epoch": EPOCH };
+
+  // A client whose fetch is `handler`; the signal of each request is kept.
+  function bounded(handler: (init: RequestInit | undefined, n: number) => Response | Promise<Response>) {
+    vi.useFakeTimers();
+    const signals: (AbortSignal | null | undefined)[] = [];
+    const fetchImpl = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      signals.push(init?.signal);
+      return handler(init, signals.length);
+    });
+    const c = new Client({ fetch: fetchImpl as unknown as typeof fetch, sleep: async () => {} });
+    return { c, fetchImpl, signals };
+  }
+
+  // What a promise settled with so far, so that a test can look before and after a given time.
+  function watch<T>(p: Promise<T>) {
+    const box: { done: boolean; value?: T } = { done: false };
+    void p.then((value) => Object.assign(box, { done: true, value }));
+    return box;
+  }
+
+  test("a read whose headers never arrive is a transport failure at 30 s, not before", async () => {
+    const { c, fetchImpl } = bounded((init) => noHeaders(init));
+    const r = watch(c.read("/server"));
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(r.done).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(r.value).toEqual({ kind: "transport" });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  test("a read whose body never ends is a transport failure at 60 s: the 30 s header bound is spent once the headers came", async () => {
+    const { c } = bounded((init) => endlessBody(init, 200, jsonHeaders));
+    const r = watch(c.read("/server"));
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(r.done).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(r.value).toEqual({ kind: "transport" });
+  });
+
+  test("a read whose problem body never ends is a transport failure at 60 s", async () => {
+    const { c } = bounded((init) => endlessBody(init, 403, problemHeaders));
+    const r = watch(c.read("/server"));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(r.value).toEqual({ kind: "transport" });
+  });
+
+  test("an answer inside the bound is unchanged: headers at 29 s, the whole body at 59 s", async () => {
+    const { c } = bounded(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 29_000));
+      return lateBody(200, jsonHeaders, { version: "v" }, 30_000);
+    });
+    const r = watch(c.read("/server"));
+    await vi.advanceTimersByTimeAsync(59_000);
+    expect(r.value).toEqual({ kind: "ok", data: { version: "v" } });
+  });
+
+  test("each attempt has its own signal and its own bound, and a finished attempt is never aborted", async () => {
+    const { c, signals } = bounded((init, n) => (n === 1 ? problem(500, "internal-error") : noHeaders(init)));
+    const r = watch(c.read("/server"));
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(r.value).toEqual({ kind: "transport" });
+    expect(signals).toHaveLength(2);
+    expect(signals[0]).not.toBe(signals[1]);
+    expect(signals[0]!.aborted).toBe(false);
+    expect(signals[1]!.aborted).toBe(true);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(signals[0]!.aborted).toBe(false);
+  });
+
+  test("a write whose headers never arrive gets no answer at 30 s", async () => {
+    const { c, fetchImpl } = bounded((init) => noHeaders(init));
+    const a = watch(c.attempt("POST", "/clusters", {}, "{}"));
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(a.done).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(a.done).toBe(true);
+    expect(a.value).toBeUndefined();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  test("a write whose success body never ends gets no answer at 60 s", async () => {
+    const { c } = bounded((init) => endlessBody(init, 201, jsonHeaders));
+    const a = watch(c.attempt("POST", "/clusters", {}, "{}"));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(a.done).toBe(true);
+    expect(a.value).toBeUndefined();
+  });
+
+  test.each([
+    ["the bound ends", () => bounded((init) => endlessBody(init, 422, problemHeaders)), 60_000],
+    ["the network cuts", () => bounded(() => cutBody(422, problemHeaders)), 0],
+  ])("§8.4 item 8: a 4xx write answer whose body %s keeps its status and is reported cut off", async (_who, make, ms) => {
+    const { c } = make();
+    const a = watch(c.attempt("POST", "/clusters", {}, "{}"));
+    await vi.advanceTimersByTimeAsync(ms);
+    expect(a.value).toMatchObject({ status: 422, data: CUT });
+  });
+
+  test("a 5xx write answer whose body is cut off stays an answer that did not arrive", async () => {
+    const { c } = bounded((init) => endlessBody(init, 502, { "Content-Type": "text/plain" }));
+    const a = watch(c.attempt("POST", "/clusters", {}, "{}"));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(a.done).toBe(true);
+    expect(a.value).toBeUndefined();
+  });
+
+  test("a read sent only for the epoch is bounded too: a 401 body that never ends gives no answer", async () => {
+    const { c } = bounded((init) => endlessBody(init, 401, problemHeaders));
+    const a = watch(c.attempt("GET", "/recovery", {}, undefined, {}, true));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(a.done).toBe(true);
+    expect(a.value).toBeUndefined();
   });
 });
