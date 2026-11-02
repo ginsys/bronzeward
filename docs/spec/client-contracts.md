@@ -815,6 +815,11 @@ the context. On a change it:
    recovery banner (journeys §8);
 4. records the new epoch. A context's first epoch is recorded without a notice.
 
+A command that shows one snapshot built from several reads (`status`, `recovery status`) shows
+nothing when an epoch change falls between its first read and its last, in every output form. It
+says so and names the command that reads again, because the first read, with its revision and start
+mode, no longer holds.
+
 An epoch is never ordered or parsed. A missing `Bronzeward-Epoch` on an authenticated success is
 a defect the client reports.
 

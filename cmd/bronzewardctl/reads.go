@@ -353,6 +353,7 @@ func (e *env) statusCmd(args []string) error {
 		return err
 	}
 	return e.session(func(c *client.Client, sr *client.Response, srv *apitypes.ServerBody) error {
+		first := c.Context.LastEpoch // the epoch of the GET /server above
 		r, err := c.Get("/recovery")
 		if err != nil {
 			return err
@@ -382,6 +383,12 @@ func (e *env) statusCmd(args []string) error {
 		unresolved, err := decode[apitypes.OperationBody](c, ops...)
 		if err != nil {
 			return err
+		}
+		if now := c.Context.LastEpoch; first != "" && now != first {
+			// A later read showed a new epoch: the server answer above, with its revision and start mode,
+			// is stale, and so is every other part of this snapshot (§8.5).
+			return fmt.Errorf("the epoch changed from %s to %s while the status was read; nothing is shown. Read it again with: status",
+				client.ShellWord(first), client.ShellWord(now))
 		}
 		raw, err := json.Marshal(map[string]any{"server": json.RawMessage(sr.Body), "recovery": json.RawMessage(r.Body),
 			"driftedMachines": drifted, "unresolvedOperations": ops})
