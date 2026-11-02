@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/http/httputil"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -112,7 +111,8 @@ func startTimers(t *testing.T, roles, timers string) (*fixture, *slowBao) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rp := httputil.NewSingleHostReverseProxy(u)
+	rp := newBackendProxy(t, u)
+	rp.Transport = wholeTransit(rp.Transport)
 	sb := &slowBao{b: b, digest: digest}
 	sb.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/secret/data/") {
