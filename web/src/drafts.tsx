@@ -341,13 +341,15 @@ export const holdsUnsaved = (held: Held, saved: Held, mine: Held | undefined) =>
 // (ginsys/bronzeward#534 C1-C3): the typed text is kept aside, never saved over theirs unseen.
 // `sent.open`: the write may still commit, its answer not come yet. A read meanwhile may show that
 // write's own change, so it opens no such conflict; another author's change refuses the write with
-// a 412 instead (local review round 3).
+// a 412 instead (local review round 3). `sent.later`: such a read came, and the revision it named.
+// If the write then ends without a done answer or a 412, that read shows as theirs, the typed text
+// kept aside (round 4).
 export interface Clash { mine: Held; phase: "refused" | "asked" | "theirs"; revision?: number; awaits?: true; again?: true }
-export interface Editor { held: Held; saved: Held; conflict?: Clash; sent?: { text: Held; whileTheirs: boolean; removes?: true; open?: true }; writes?: number; note?: string | undefined; version?: number; reading?: true; own?: string }
+export interface Editor { held: Held; saved: Held; conflict?: Clash; sent?: { text: Held; whileTheirs: boolean; removes?: true; open?: true; later?: { revision?: number } }; writes?: number; note?: string | undefined; version?: number; reading?: true; own?: string }
 export type EditorEvent =
   | { kind: "type"; held: Held } // the operator's edit
   | { kind: "refused" } // a write's 412
-  | { kind: "failed" } // any other refusal, or a write that committed nothing
+  | { kind: "failed" } // any other answer than done or a 412: the write committed nothing, or may have
   | { kind: "at"; revision: number } // the 412's own draft read
   | { kind: "show" } // Show their change
   // The page's draft read. changed: this entry has a new revision to read; removed: the entry is a removal.
@@ -382,8 +384,11 @@ function step(s: Editor, e: EditorEvent): Editor {
       // Once their text shows, the operator's text is the editor's: a new 412 keeps that, not the
       // text the last conflict kept aside (ginsys/bronzeward#517 H6). Before, both are the same.
       return c === undefined || c.phase === "theirs" ? { ...s, ...closed(s), conflict: { mine: s.held, phase: "refused" } } : { ...s, ...closed(s) };
-    case "failed":
-      return { ...s, ...closed(s) };
+    case "failed": {
+      const later = s.sent?.later;
+      if (later === undefined || c !== undefined || same(s.held, s.saved)) return { ...s, ...closed(s) };
+      return { ...s, ...closed(s), held: s.saved, conflict: { mine: s.held, phase: "theirs", ...(later.revision !== undefined && { revision: later.revision }) } };
+    }
     case "at":
       return c !== undefined && c.revision === undefined ? at({ revision: e.revision }) : s;
     case "show":
@@ -395,7 +400,8 @@ function step(s: Editor, e: EditorEvent): Editor {
       // typed since the last read or save is kept aside. The pane's own done Remove saved EMPTY,
       // and keeps the text it shows (H8).
       if (c === undefined) {
-        if (e.removed !== true || same(s.saved, EMPTY) || s.sent?.open === true) return s;
+        if (e.removed !== true || same(s.saved, EMPTY)) return s;
+        if (s.sent?.open === true) return { ...s, saved: EMPTY, sent: { ...s.sent, later: { revision: e.revision } } };
         return { ...s, held: EMPTY, saved: EMPTY, ...(!same(s.held, s.saved) && { conflict: { mine: s.held, phase: "theirs" as const, revision: e.revision } }) };
       }
       if (c.phase === "refused" || e.revision < (c.revision ?? 0)) return s;
@@ -438,7 +444,8 @@ function step(s: Editor, e: EditorEvent): Editor {
       }
       // Without a conflict, another author's text read while the editor holds typed text shows, and
       // the typed text is kept aside (C1, C2). The read of the pane's own done Save is not theirs.
-      if (c === undefined && s.sent?.open !== true && (s.own === undefined || e.id !== s.own) && !same(s.held, s.saved) && !same(e.text, s.saved)) {
+      if (c === undefined && (s.own === undefined || e.id !== s.own) && !same(s.held, s.saved) && !same(e.text, s.saved)) {
+        if (s.sent?.open === true) return { ...idle, saved: e.text, sent: { ...s.sent, later: { ...(e.revision !== undefined && { revision: e.revision }) } } };
         return { ...idle, saved: e.text, held: e.text, conflict: { mine: s.held, phase: "theirs", ...(e.revision !== undefined && { revision: e.revision }) } };
       }
       // Once theirs shows, a read never ends a repeated Show's wait: only its draft read does.
@@ -468,7 +475,7 @@ function step(s: Editor, e: EditorEvent): Editor {
 // The last write's answer came: a later read is no longer possibly that write's own.
 function closed(s: Editor): Pick<Editor, "sent"> {
   if (s.sent === undefined) return {};
-  const { open: _open, ...sent } = s.sent;
+  const { open: _open, later: _later, ...sent } = s.sent;
   return { sent };
 }
 
@@ -639,7 +646,7 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
       act({ kind: "refused" });
       // For the revision shown only: this read's ETag is not kept (§8.3).
       void read<Draft>(`/drafts/${enc(draft.id)}`).then((r) => r?.kind === "ok" && act({ kind: "at", revision: r.data.revision }));
-    } else if (o?.kind === "refused" || o?.kind === "not-done") act({ kind: "failed" });
+    } else if (o !== undefined && o.kind !== "done") act({ kind: "failed" });
   }, [o]);
 
   const path = `/drafts/${enc(draft.id)}/fragments/${enc(name)}`;
