@@ -162,8 +162,12 @@ func (e *env) pager(out *os.File, lines []string, rows, cols int) (err error) {
 	defer func() {
 		if raw {
 			_ = term.Restore(fd, old)
-			// After the restore, so that a terminal that does not drain delays nothing but this.
-			_ = po.last([]byte(clearScreen + altScreenOff))
+			// After the restore, so that a terminal that does not drain delays nothing but this. A
+			// failure is the result when there is no other, so the caller does not go on as if the
+			// screen were back; a signal below still wins over it.
+			if lerr := po.last([]byte(clearScreen + altScreenOff)); lerr != nil && err == nil {
+				err = fmt.Errorf("leaving the review's screen: %w", lerr)
+			}
 		}
 		signal.Stop(terms)
 		signal.Stop(winch)
