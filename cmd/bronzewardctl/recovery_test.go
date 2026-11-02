@@ -109,8 +109,11 @@ func recoveryServer(t *testing.T, answers map[string]string, post string) func()
 		mu.Unlock()
 		// Once a path in recoveryEpochByPath is read, the epoch moved: every later answer carries it.
 		mu.Lock()
-		if ep, ok := recoveryEpochByPath[r.URL.Path]; ok {
-			moved = ep
+		// A key may name one page: the path with "?cursor=<cursor>".
+		for _, k := range []string{r.URL.Path, r.URL.Path + "?cursor=" + r.URL.Query().Get("cursor")} {
+			if ep, ok := recoveryEpochByPath[k]; ok {
+				moved = ep
+			}
 		}
 		epoch := recoveryEpochHeader
 		if moved != "" {
@@ -448,6 +451,32 @@ func TestRecoveryStatusGatesEachTimelinePage(t *testing.T) {
 	}
 	if n != 1 {
 		t.Errorf("%d timeline requests; want the first page only, as the refreshed revision is 2", n)
+	}
+}
+
+// TestRecoveryStatusGatesTheCursorRestart: the second timeline page answers 400 cursor-invalid with a
+// new epoch, and the re-read of GET /server shows API revision 2. The client then does not read the
+// first page again with an order.
+func TestRecoveryStatusGatesTheCursorRestart(t *testing.T) {
+	const p = "/api/v1/machines/mch_c/timeline"
+	setServerFacts(t, 3, map[string]string{p + "?cursor=cur_BWSYNTH": "ep_BWSYNTH-2"})
+	recoveryRevisionMoved = 2
+	seen := recoveryServer(t, map[string]string{
+		"GET /api/v1/recovery":             `{"epoch":"ep_BWSYNTH-1","recoveryMode":true,"scopes":[{"machine":"mch_c","state":"blocked"}]}`,
+		"GET " + p:                         `{"items":[{"kind":"observation","revision":9,"entry":{}}],"next":"cur_BWSYNTH"}`,
+		"GET " + p + "?cursor=cur_BWSYNTH": `400 {"type":"urn:bronzeward:problem:cursor-invalid","title":"BWSYNTH","status":400,"instance":"req_BWSYNTH"}`,
+	}, "")
+	var out, errb bytes.Buffer
+	run([]string{"recovery", "status"}, &out, &errb)
+	n := 0
+	for _, r := range seen() {
+		if r == "GET "+p {
+			n++
+		}
+	}
+	// The fake records paths only: the first page and the refused cursor's page make two reads, a restart a third.
+	if n != 2 {
+		t.Errorf("%d timeline reads; want 2, with no restart on a revision 2 server", n)
 	}
 }
 
