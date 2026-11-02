@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -27,9 +28,9 @@ func TestApprove(t *testing.T) {
 		return runCtl(t, append(approve, extra...)...)
 	}
 	for _, c := range []struct{ name, stdin, want string }{
-		{"a wrong ID", "pln_OTHER\n", "the typed text is not the plan ID pln_BWSYNTH; nothing was sent"},
-		{"an empty line", "\n", "stopped: no plan ID was typed; nothing was sent"},
-		{"no input at all", "", "stopped: no plan ID was typed; nothing was sent"},
+		{"a wrong ID", "pln_OTHER\n", "the typed text is not the plan ID; nothing was sent"},
+		{"an empty line", "\n", "stopped: nothing was typed; nothing was sent"},
+		{"no input at all", "", "stopped: nothing was typed; nothing was sent"},
 	} {
 		setStdin(t, c.stdin)
 		code, out, errOut := runCtl(t, approve...)
@@ -48,7 +49,7 @@ func TestApprove(t *testing.T) {
 	}
 
 	code, out, errOut := typed()
-	prompt := strings.Index(errOut, "Type the plan ID to approve, or press Enter to stop: ")
+	prompt := strings.Index(errOut, "Type the plan ID to send it, or press Enter to stop: ")
 	for _, w := range []string{
 		"Plan pln_BWSYNTH  proposed",
 		"Changes shown below",
@@ -74,7 +75,7 @@ func TestApprove(t *testing.T) {
 	code, out, errOut = typed()
 	if i := strings.Index(errOut, "Overwrites     the drifted configuration of drift record 12, which no reviewer has seen.\n"+
 		"               Approving records that you approve overwriting it.\n"); code != 0 || i < 0 || i > strings.Index(errOut, "Type the plan ID") ||
-		!strings.Contains(out, "Overwrites  the drifted configuration, which no reviewer has seen: this approval records that you approve overwriting it.") {
+		!strings.Contains(out, "\nIt overwrites the drifted configuration, which no reviewer has seen: this approval records that you approve overwriting it.\n") {
 		t.Errorf("a revert: exit %d, stdout %q, stderr %q", code, out, errOut)
 	}
 
@@ -160,4 +161,149 @@ func TestApprovalShowRevoke(t *testing.T) {
 		"approval and undoes no commitment; it does not stop an attempt already recorded.\nFollow it with: bronzewardctl operation watch 'op_BWSYNTH-apply'\n") {
 		t.Errorf("a committed plan: exit %d, stdout %q", code, out)
 	}
+}
+
+// TestApprovalEpochs checks that each approval command judges the epoch from its own answer
+// (client-contracts.md section 8.5). approve shows and sends nothing when the epoch moves while the
+// plan is read. approval show compares the approval with its answer's epoch, not a later one. A
+// revocation says nothing about what it ended when the epoch moves after its answer.
+func TestApprovalEpochs(t *testing.T) {
+	f := planServer(t)
+	f.set(func(f *planFake) {
+		f.post = func(w http.ResponseWriter, path string) {
+			if strings.HasSuffix(path, "/approvals") {
+				w.WriteHeader(http.StatusCreated)
+				fmt.Fprintf(w, approvalJSON, false)
+				return
+			}
+			fmt.Fprint(w, `{"approval":"apr_BWSYNTH","plan":"pln_BWSYNTH","machine":"mch_a","revokedBy":"h-approver","role":"approver",`+
+				`"reason":"BWSYNTH","act":"act_BWSYNTH","epoch":"ep_BWSYNTH-2","at":"2026-11-01T06:10:00Z"}`)
+		}
+	})
+	cases := []struct {
+		name string
+		back bool
+		want string
+	}{
+		{"moved", false, "the epoch changed from ep_BWSYNTH-2 to ep_BWSYNTH-3"},
+		{"moved and back", true, "the epoch changed from ep_BWSYNTH-2 and changed back"},
+	}
+	// The prediction's release read moves the epoch: from there on, or only for that read, so that
+	// the GET /server it calls for brings ep_BWSYNTH-2 back.
+	for _, c := range cases {
+		f.set(func(f *planFake) {
+			seen := false
+			f.epochFor = func(path string) string {
+				if path == "/releases/rel_BWSYNTH" || seen && !c.back {
+					seen = true
+					return "ep_BWSYNTH-3"
+				}
+				return "ep_BWSYNTH-2"
+			}
+		})
+		setStdin(t, "pln_BWSYNTH\n")
+		code, out, errOut := runCtl(t, "approve", "pln_BWSYNTH")
+		if code == 0 || out != "" || !strings.Contains(errOut, c.want+" while the plan was read; nothing is shown and nothing was sent. "+
+			"Approve it again with: approve 'pln_BWSYNTH'") || strings.Contains(errOut, "Self-approval") || strings.Contains(errOut, "Type the plan ID") {
+			t.Errorf("approve, %s: exit %d, stdout %q, stderr %q", c.name, code, out, errOut)
+		}
+		if b := f.took(); len(b) != 0 {
+			t.Errorf("approve, %s: sent %v", c.name, b)
+		}
+	}
+
+	// The approval answer is in ep_BWSYNTH-3, as the approval is; the GET /server it calls for
+	// answers ep_BWSYNTH-4, which the approval is not from.
+	f.set(func(f *planFake) {
+		f.approvalEpoch = "ep_BWSYNTH-3"
+		f.epochFor = func(path string) string {
+			switch path {
+			case "/approvals/apr_BWSYNTH":
+				return "ep_BWSYNTH-3"
+			case "/server":
+				return "ep_BWSYNTH-4"
+			}
+			return "ep_BWSYNTH-2"
+		}
+	})
+	code, out, errOut := runCtl(t, "approval", "show", "apr_BWSYNTH")
+	if code != 0 || !strings.Contains(out, "Approval apr_BWSYNTH of plan pln_BWSYNTH, epoch ep_BWSYNTH-3") || strings.Contains(out, "From before") {
+		t.Errorf("approval show: exit %d, stdout %q, stderr %q", code, out, errOut)
+	}
+
+	// A restore after the revocation's answer can undo it.
+	for _, c := range cases {
+		posted := false
+		f.set(func(f *planFake) {
+			f.state, f.approval = "approved", "apr_BWSYNTH"
+			f.epochFor = func(path string) string {
+				if posted && (path != "/server" || !c.back) {
+					return "ep_BWSYNTH-3"
+				}
+				return "ep_BWSYNTH-2"
+			}
+			post := f.post
+			f.post = func(w http.ResponseWriter, path string) { post(w, path); posted = true; f.post = post }
+		})
+		code, out, errOut := runCtl(t, "approval", "revoke", "apr_BWSYNTH", "--reason", "BWSYNTH")
+		if code != 0 || strings.Contains(out, "is revoked") || !strings.HasSuffix(out, c.want+" after the revocation was recorded, "+
+			"so whether it still stands is not known. Read the plan with: plan show 'pln_BWSYNTH'\n"+revokeLimits+"\n") {
+			t.Errorf("revoke, %s: exit %d, stdout %q, stderr %q", c.name, code, out, errOut)
+		}
+		f.took()
+	}
+}
+
+// TestApprovalEscapes sends hostile text in each server string that approve, approval show and
+// approval revoke print: no value starts a line of its own, and a printed command quotes it.
+func TestApprovalEscapes(t *testing.T) {
+	const bad = "x\x1b[31m\nForged: line 'q"
+	const esc = `x\x1b[31m\x0aForged: line 'q`
+	js := func(v any) string {
+		b, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	f := planServer(t)
+	f.set(func(f *planFake) {
+		f.fail = map[string]string{"/profile-revisions/prv_b": bad}
+		f.post = func(w http.ResponseWriter, path string) {
+			if strings.HasSuffix(path, "/approvals") {
+				w.WriteHeader(http.StatusCreated)
+				fmt.Fprint(w, `{"id":`+js(bad)+`,"plan":"pln_BWSYNTH","epoch":"ep_BWSYNTH-2","approver":{"principal":"h-approver","role":"approver"},`+
+					`"selfApproval":{"marked":true,"reasons":[`+js(bad)+`]},"unseenOverwrite":false}`)
+				return
+			}
+			fmt.Fprint(w, `{"approval":`+js(bad)+`,"plan":`+js(bad)+`,"machine":"mch_a","revokedBy":`+js(bad)+`,"role":`+js(bad)+
+				`,"reason":"BWSYNTH","act":`+js(bad)+`,"epoch":"ep_BWSYNTH-2","at":"2026-11-01T06:10:00Z"}`)
+		}
+	})
+	check := func(name string, code int, out, errOut string, want ...string) {
+		t.Helper()
+		if code != 0 || strings.Contains(out+errOut, "\nForged") {
+			t.Errorf("%s: exit %d, a forged line in stdout %q, stderr %q", name, code, out, errOut)
+		}
+		for _, w := range want {
+			if !strings.Contains(out+errOut, w) {
+				t.Errorf("%s: no %q in stdout %q, stderr %q", name, w, out, errOut)
+			}
+		}
+	}
+	setStdin(t, "pln_BWSYNTH\n")
+	code, out, errOut := runCtl(t, "approve", "pln_BWSYNTH")
+	check("approve", code, out, errOut, "the profile revision prv_b: ", "Approved ("+esc+"). Recorded self-approval reasons: "+esc+".")
+	f.took()
+
+	f.set(func(f *planFake) {
+		f.raw = map[string]string{"/approvals/apr_BWSYNTH": `{"id":` + js(bad) + `,"plan":` + js(bad) + `,"epoch":` + js(bad) +
+			`,"approver":{"principal":` + js(bad) + `,"role":` + js(bad) + `},"selfApproval":{"marked":true,"reasons":[` + js(bad) + `]},"unseenOverwrite":false}`}
+	})
+	code, out, errOut = runCtl(t, "approval", "show", "apr_BWSYNTH")
+	check("approval show", code, out, errOut, "Approval "+esc+" of plan "+esc+", epoch "+esc, "recorded reasons: "+esc,
+		`plan show 'x\x1b[31m\x0aForged: line '\''q'`)
+
+	code, out, errOut = runCtl(t, "approval", "revoke", "apr_BWSYNTH", "--reason", "BWSYNTH")
+	check("revoke", code, out, errOut, "Revocation of approval "+esc+" recorded by "+esc+" ("+esc+"), act "+esc+".", "The plan "+esc+" cannot be read: ")
 }
