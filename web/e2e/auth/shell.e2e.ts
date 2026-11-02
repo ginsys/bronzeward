@@ -341,8 +341,9 @@ describe("recovery", () => {
     expect(await testid("problem").getText()).toBe(INJECTED_REFUSAL);
     expect(await testid("principal").isExisting()).toBe(false);
     expect(await testid("server").getText()).toBe("Server unknown");
-    // The changes page's own list may arrive before or after the identity.
-    expect((await seen()).filter((p) => p !== "/releases").slice(-2)).toEqual(["/identity", "/server"]);
+    // The changes page's own lists, its releases and its drafts, may arrive before or after the
+    // identity.
+    expect((await seen()).filter((p) => p !== "/releases" && p !== "/drafts").slice(-2)).toEqual(["/identity", "/server"]);
     await faults({});
     await $("button=Read again").click();
     await expect(testid("principal")).toHaveText("Signed in as h-viewer");
