@@ -88,6 +88,27 @@ describe("[Go to field] positions (B13)", () => {
   test("the references a document carries, each once, in order", () => {
     expect(references("a: !bwref x/one\nb: !bwref x/two\nc: !bwref x/one\n")).toEqual(["x/one", "x/two"]);
   });
+
+  test("a flow list's reference ends at its comma, and a comment's text is no reference", () => {
+    const text = "a: [!bwref ghost, !bwref x/two]\n# !bwref commented\nb: c # !bwref trailing\nd: '# not a comment' # !bwref after-quote\n";
+    expect(references(text)).toEqual(["ghost", "x/two"]);
+    const s = spotOfReference(text, "ghost");
+    expect(text.slice(s!.start, s!.end)).toBe("!bwref ghost");
+    expect(spotOfReference(text, "commented")).toBeUndefined();
+    expect(spotOfReference(text, "trailing")).toBeUndefined();
+    expect(spotOfReference(text, "after-quote")).toBeUndefined();
+  });
+
+  test("a numeric pointer segment is a list index in a list and a key in a mapping", async () => {
+    const text = "ports:\n  \"8080\": web\n  0: zero\nlist:\n  - first\n  - second\n";
+    const key = await spotOfPath(text, "doc[0]/ports/8080");
+    expect(text.slice(key!.start, key!.end)).toBe("web");
+    const zero = await spotOfPath(text, "doc[0]/ports/0");
+    expect(text.slice(zero!.start, zero!.end)).toBe("zero");
+    const item = await spotOfPath(text, "doc[0]/list/1");
+    expect(text.slice(item!.start, item!.end)).toBe("second");
+    expect(await spotOfPath(text, "doc[0]/list/x")).toBeUndefined();
+  });
 });
 
 describe("the unsaved-change guard (§11.4 item 3)", () => {
