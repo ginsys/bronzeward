@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { type Attempt, Client, type ClientOptions } from "./request.ts";
 import { type ShellEvents, ShellReads } from "./shell.tsx";
-import { BACKOFF, EARLIER_EPOCH, EPOCH_CHANGED_ASIDE, MAX_BODY, NO_CREDENTIAL, NO_EPOCH, newKey, RECOVERY_START, RENEWED_LAST, SHELL_GONE, SIGN_IN_CHANGED, SIGN_IN_REFUSED, TOO_LARGE, Write, Writes } from "./write.ts";
+import { BACKOFF, EARLIER_EPOCH, EPOCH_CHANGED_ASIDE, MAX_BODY, NO_CREDENTIAL, NO_EPOCH, NO_EPOCH_HEADER, newKey, RECOVERY_START, RENEWED_LAST, SHELL_GONE, SIGN_IN_CHANGED, SIGN_IN_REFUSED, TOO_LARGE, Write, Writes } from "./write.ts";
 
 const EPOCH = "e1";
 const PRINCIPAL = "https://idp.invalid SYNTH-sub-1";
@@ -78,6 +78,13 @@ describe("each send (§8.4 item 3)", () => {
       "If-Match": '"v1"',
     });
     expect(sent[1]!.body).toBe('{"name":"lab"}');
+  });
+
+  test("§8.5: a success without a Bronzeward-Epoch header is saved, sent once, and reports the defect", async () => {
+    const bare = new Response(JSON.stringify({ id: "c1" }), { status: 201, headers: { "Content-Type": "application/json" } });
+    const { writes, writesSent } = page([bare]);
+    expect(await writes.submit(spec())).toEqual({ kind: "done", status: 201, data: { id: "c1" }, replayed: false, defect: NO_EPOCH_HEADER });
+    expect(writesSent()).toHaveLength(1);
   });
 
   test("uses the last epoch the page saw, without a read, and sends no If-Match where none is given", async () => {

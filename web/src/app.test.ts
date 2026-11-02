@@ -77,7 +77,7 @@ test("B11: a dropped attempt shows the unknown notice at once, while the automat
   expect(html).toContain(REPEATING);
   expect(html).toContain(`Key ${w.key}`);
   expect(html).not.toContain("Dismiss");
-  answer({ status: 201, headers: new Headers(), data: { id: "c1" } });
+  answer({ status: 201, headers: new Headers({ "Bronzeward-Epoch": "e1" }), data: { id: "c1" } });
   expect((await done).kind).toBe("done");
   // The operator saw the notice, so it shows the result until dismissed.
   expect(notices()).toContain(`Saved (the server answered 201). Key ${w.key}`);
@@ -93,7 +93,7 @@ test("B11: a write with no answer yet and no attempt in doubt shows no notice", 
   const done = writes.submit(w);
   await Promise.resolve();
   expect(renderToStaticMarkup(createElement(WritesProvider, { value: writes }, createElement(WriteNotices, { go: () => {} })))).toBe("");
-  answer({ status: 201, headers: new Headers(), data: { id: "c1" } });
+  answer({ status: 201, headers: new Headers({ "Bronzeward-Epoch": "e1" }), data: { id: "c1" } });
   await done;
 });
 
@@ -107,7 +107,7 @@ test("journeys §8 Replayed: a [Repeat exactly] from the notice shows its result
   } as unknown as Client;
   const w = new Write({ method: "POST", path: "/clusters", body: { name: "lab" }, resource: "/clusters" });
   await writes.submit(w);
-  answer = { status: 201, headers: new Headers({ "Idempotent-Replayed": "true" }), data: { id: "c1" } };
+  answer = { status: 201, headers: new Headers({ "Idempotent-Replayed": "true", "Bronzeward-Epoch": "e1" }), data: { id: "c1" } };
   await writes.submit(w);
   const html = renderToStaticMarkup(createElement(WritesProvider, { value: writes }, createElement(WriteNotices, { go: () => {} })));
   expect(html).toContain(`${REPLAYED} Saved (the server answered 201).`);
