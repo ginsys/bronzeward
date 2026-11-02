@@ -605,6 +605,8 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
   // Guarded also once the draft no longer takes writes (discarded by another author): the text is
   // still shown, and leaving drops it.
   useUnsaved(`fragment ${name || "(new)"} of draft ${short(draft.id)}`, holdsUnsaved(held, saved, conflict?.mine));
+  // The draft revision the page shows now, for a revision read that answers later.
+  const drafted = useRef(draft.revision);
 
   useEffect(() => {
     const revision = entry?.revision;
@@ -620,7 +622,9 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
         return setNote("The entry's revision could not be read.");
       }
       setLoaded(revision);
-      act({ kind: "read", text: fromRevision(r.data), since: done, revision: draft.revision, id: revision });
+      // The draft revision shown when the read answers: one that changed only another entry while
+      // it was pending still names this text, and Copy my text compares with it (PR review).
+      act({ kind: "read", text: fromRevision(r.data), since: done, revision: drafted.current, id: revision });
     });
     return () => {
       live = false;
@@ -634,6 +638,7 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
   useEffect(() => {
     const changed = entry?.revision != null && entry.revision !== readRevision.current;
     readRevision.current = entry?.revision;
+    drafted.current = draft.revision;
     act({ kind: "draft", revision: draft.revision, changed, ...(entry?.revision === null && { removed: true as const }) });
     if (!changed && failed) retry((x) => x + 1);
   }, [draft]);
@@ -650,6 +655,12 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
       void read<Draft>(`/drafts/${enc(draft.id)}`).then((r) => r?.kind === "ok" && act({ kind: "at", revision: r.data.revision }));
     } else if (o?.kind === "refused" || o?.kind === "not-done" || o?.kind === "set-aside") act({ kind: "failed" });
   }, [o]);
+  // A dismissed unknown write leaves the registry with its outcome unchanged: no answer settles it
+  // now, and a new Save may send, so it ends the open write too (PR review).
+  const dismissed = o?.kind === "unknown" && writes?.open.includes(w!) !== true;
+  useEffect(() => {
+    if (dismissed) act({ kind: "failed" });
+  }, [dismissed]);
 
   const path = `/drafts/${enc(draft.id)}/fragments/${enc(name)}`;
   const ifMatch = () => keptETag(draft.id, writes?.client?.currentEpoch);
