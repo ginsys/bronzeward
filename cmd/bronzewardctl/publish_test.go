@@ -158,9 +158,9 @@ func TestPublication(t *testing.T) {
 	step("publish", pub, 0, "Publishing draft drf_BWSYNTH revision 1 (operation op_BWSYNTH-pub).\n"+
 		"Publication succeeded: release rel_BWSYNTH is now Desired for 2 machines. Nothing has been sent to any machine.\n"+
 		"  mch_a has Applied release rel_BWSYNTH-old: plan an apply-config:\n"+
-		"    bronzewardctl plan create --release 'rel_BWSYNTH' --machine 'mch_a' --operation apply-config\n"+
+		"    bronzewardctl plan create --release 'rel_BWSYNTH' --machine 'mch_a' --operation 'apply-config'\n"+
 		"  mch_b has no Applied release: hand it over with an adopt plan:\n"+
-		"    bronzewardctl plan create --release 'rel_BWSYNTH' --machine 'mch_b' --operation adopt\n", "  queued\n  succeeded\n")
+		"    bronzewardctl plan create --release 'rel_BWSYNTH' --machine 'mch_b' --operation 'adopt'\n", "  queued\n  succeeded\n")
 	if w := f.took(); len(w) != 1 || w[0] != `POST /drafts/drf_BWSYNTH/publications if-match="1-BWSYNTH"` {
 		t.Errorf("sent %q; want one publication with the kept ETag", w)
 	}

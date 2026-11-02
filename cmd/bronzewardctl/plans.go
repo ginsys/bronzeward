@@ -40,11 +40,34 @@ func (e *env) planCmd(args []string) error {
 		})
 	}
 	var lines []string
-	return showThen(e, "/plans/"+url.PathEscape(pos[0]), func(c *client.Client, _ *client.Response, p *apitypes.PlanBody) {
-		if e.output == "table" {
-			lines = planView(c, p)
+	return showThen(e, "/plans/"+url.PathEscape(pos[0]), func(c *client.Client, r *client.Response, p *apitypes.PlanBody) error {
+		if e.output != "table" {
+			return nil
 		}
+		var change string
+		if lines, change = planSnapshot(c, r, p); change != "" {
+			return fmt.Errorf("%s while the plan was read; nothing is shown. Read it again with: plan show %s", change, client.ShellWord(p.Id))
+		}
+		return nil
 	}, func(w *tabwriter.Writer, _ *apitypes.PlanBody) { printLines(w, lines) })
+}
+
+// planSnapshot is planView of the plan answer r, or no lines and the epoch change when one falls
+// between that answer and the view's last read: the view's reads then come from different
+// snapshots, and its sentences could describe a state that never existed (client-contracts.md
+// section 8.5). The plan answer's own epoch is compared, and so is the count of moves, so that an
+// epoch changed and changed back is seen too.
+func planSnapshot(c *client.Client, r *client.Response, p *apitypes.PlanBody) ([]string, string) {
+	first, moves := r.Header.Get("Bronzeward-Epoch"), c.EpochMoves()
+	lines := planView(c, p)
+	now := c.Context.LastEpoch
+	switch {
+	case first != "" && now != first:
+		return nil, sf("the epoch changed from %s to %s", first, now)
+	case c.EpochMoves() != moves:
+		return nil, sf("the epoch changed from %s and changed back", first)
+	}
+	return lines, ""
 }
 
 func printLines(w *tabwriter.Writer, lines []string) {
@@ -137,7 +160,12 @@ func (e *env) planCreate(args []string) error {
 		if err := json.Unmarshal(r.Body, &p); err != nil || e.output != "table" {
 			return nil, err
 		}
-		view = planView(c, &p)
+		var change string
+		if view, change = planSnapshot(c, r, &p); change != "" {
+			// The plan was created, which stands; only the view of it is not shown.
+			view = []string{sf("Plan %s was created for machine %s, operation %s.", p.Id, p.Machine, p.Operation),
+				sf("  %s while the plan was read, so it is not shown. Read it again with: plan show ", change) + client.ShellWord(p.Id)}
+		}
 		return nil, nil
 	})
 	if next := createRefusalNext(err, in.ReleaseId, in.Machine); next != "" {
@@ -179,7 +207,7 @@ func createRefusalNext(err error, release, machine string) string {
 // sends it by itself.
 func createLine(release, machine, operation string) string {
 	return "bronzewardctl plan create --release " + client.ShellWord(release) + " --machine " + client.ShellWord(machine) +
-		" --operation " + operation
+		" --operation " + client.ShellWord(operation)
 }
 
 // planView is T20's plan display: every PlanBody field, the machine and cluster reads, the
@@ -189,16 +217,18 @@ func planView(c *client.Client, p *apitypes.PlanBody) []string {
 	var m apitypes.MachineBody
 	mErr := getJSON(c, "/machines/"+url.PathEscape(p.Machine), &m)
 	var cl apitypes.ClusterBody
-	cluster := p.Cluster
-	if getJSON(c, "/clusters/"+url.PathEscape(p.Cluster), &cl) == nil {
-		cluster = sf("%s (%s)", p.Cluster, cl.Name)
+	var cluster string
+	if err := getJSON(c, "/clusters/"+url.PathEscape(p.Cluster), &cl); err != nil {
+		cluster = sf("%s (unread: %v)", p.Cluster, err)
 	} else {
-		cluster = pr(cluster)
+		cluster = sf("%s (%s)", p.Cluster, cl.Name)
 	}
-	left := time.Until(p.ExpiresAt).Round(time.Minute)
-	expiry := sf("expires %s (in %s by this client's clock)", when(p.ExpiresAt), left)
-	if left <= 0 {
-		expiry = sf("expired %s (%s ago by this client's clock)", when(p.ExpiresAt), -left)
+	// The sign is the unrounded time's: a plan with 20 seconds left is not expired, though the
+	// minutes shown round to 0.
+	until := time.Until(p.ExpiresAt)
+	expiry := sf("expires %s (in %s by this client's clock)", when(p.ExpiresAt), until.Round(time.Minute))
+	if until <= 0 {
+		expiry = sf("expired %s (%s ago by this client's clock)", when(p.ExpiresAt), (-until).Round(time.Minute))
 	}
 	endpoint, desired := "endpoint unread", sf("unread: %v", mErr)
 	if mErr == nil {
@@ -284,7 +314,7 @@ func stateLines(c *client.Client, p *apitypes.PlanBody, m apitypes.MachineBody, 
 	}
 	if a.Epoch != c.Context.LastEpoch {
 		return []string{sf("Approved by %s (%s) in epoch %s. This approval is from before the last recovery entry and authorizes nothing; "+
-			"an approver may approve again: bronzewardctl approve ", a.Approver.Principal, a.Approver.Role, a.Epoch) + client.ShellWord(p.Id)}
+			"an approver may approve again: bronzewardctl approve ", a.Approver.Principal, a.Approver.Role, a.Epoch) + client.ShellWord(p.Id), again}
 	}
 	lines := []string{sf("Approved by %s (%s) as %s. Not committed: the controller commits it only if its own checks pass; plan show then names the operation.",
 		a.Approver.Principal, a.Approver.Role, a.Id)}
@@ -302,16 +332,20 @@ func stateLines(c *client.Client, p *apitypes.PlanBody, m apitypes.MachineBody, 
 		}
 		stale = append(stale, "the machine's open drift record is "+open+", not the plan's")
 	}
+	// An assignment that cannot be read leaves the reasons already found standing.
 	head, err := assignmentHead(c, p.Machine)
-	if err != nil {
-		return append(lines, sf("Whether it is stale cannot be fully predicted: the assignment cannot be read: %v", err))
-	}
-	if head != p.AssignmentRevision {
+	if err == nil && head != p.AssignmentRevision {
 		stale = append(stale, sf("the machine's assignment is now at %s", or(&head, "none")))
 	}
 	if len(stale) > 0 {
-		return append(lines, "Predicted stale, by this client's reads: "+strings.Join(stale, "; ")+
+		lines = append(lines, "Predicted stale, by this client's reads: "+strings.Join(stale, "; ")+
 			". The controller will refuse its commitment, so it cannot run. "+again)
+	}
+	if err != nil {
+		return append(lines, sf("The assignment cannot be read, so whether it is stale is not fully predicted: %v", err))
+	}
+	if len(stale) > 0 {
+		return lines
 	}
 	return append(lines, "A change of the machine's baseline revision is served by no read: the controller's refusal shows it on the timeline: "+
 		"bronzewardctl machine timeline "+client.ShellWord(p.Machine))

@@ -243,9 +243,9 @@ func TestPlans(t *testing.T) {
 			"Publish a release from the machine's current assignment, then plan that release. The assignment's history: bronzewardctl machine timeline "+m)
 		f.want(e.ctl(append(h, "plan", "create", "--release", e.rel0, "--machine", e.s.machine, "--operation", "apply-config")...), 1,
 			"an apply-config plan is for the machine's Desired release",
-			"Plan the machine's Desired release instead: bronzewardctl plan create --release '"+e.rel+"' --machine "+m+" --operation apply-config")
+			"Plan the machine's Desired release instead: bronzewardctl plan create --release '"+e.rel+"' --machine "+m+" --operation 'apply-config'")
 		f.want(e.ctl(e.create("apply-config")...), 1, "has no Applied configuration",
-			"Hand the machine over with an adopt plan: bronzewardctl plan create --release '"+e.rel+"' --machine "+m+" --operation adopt")
+			"Hand the machine over with an adopt plan: bronzewardctl plan create --release '"+e.rel+"' --machine "+m+" --operation 'adopt'")
 		in.set(nil, nil)
 		f.want(e.ctl(e.create("adopt", "--mode", "no-reboot")...), 2, "an adopt plan takes no --mode", "nothing was sent")
 		f.want(e.ctl(e.create("adopt", "--expires-in", "1500ms")...), 2, "whole seconds")
@@ -283,7 +283,7 @@ func TestPlans(t *testing.T) {
 		f.want(e.ctl(append(h, "plan", "cancel", p, "--reason", "BWSYNTH superseded")...), 0,
 			"Cancellation of plan "+p+" recorded by ", "(publisher), act act_", "The plan is cancelled: it cannot be committed.")
 		f.want(e.ctl(append(h, "plan", "show", p)...), 0, "Cancelled: it cannot be committed. Create a new plan: bronzewardctl plan create --release '"+
-			e.rel+"' --machine "+m+" --operation adopt")
+			e.rel+"' --machine "+m+" --operation 'adopt'")
 
 		p = planID.FindString(e.ctl(e.create("adopt", "--expires-in", "1s")...).out)
 		time.Sleep(1500 * time.Millisecond)
@@ -336,8 +336,10 @@ func TestPlans(t *testing.T) {
 		f.want(r, 0, "Cancellation of plan "+p+" recorded by ", "The plan stays committed to operation "+op+
 			". A cancellation ends a committed plan's operation only while no attempt is recorded; it does not stop an attempt already recorded.\n"+
 			"Follow it with: bronzewardctl operation watch '"+op+"'\n")
-		if state := f.ended(op); state == "cancelled" {
-			t.Errorf("the operation with a recorded attempt ended cancelled: %s", f.events(op))
+		// The released stand-in applies the configuration, so the attempt verifies: only
+		// "completed" shows that the cancellation did not stop it, and not a failure for another cause.
+		if state := f.ended(op); state != "completed" {
+			t.Errorf("the operation with a recorded attempt ended %s, not completed: %s", state, f.events(op))
 		}
 		if a := e.st.node.AppliedRequests(); len(a) != 1 {
 			t.Errorf("the stand-in received %d applies; want the recorded attempt's one", len(a))
