@@ -405,14 +405,16 @@ func TestS5ExpiredLeaseIsReclaimedAndLateCompletionFenced(t *testing.T) {
 	if err := SeedJobs(ctx, db, 1); err != nil {
 		t.Fatal(err)
 	}
-	a, err := Claim(ctx, db, "a", ClaimGuarded, 200*time.Millisecond)
+	// The lease must outlast the second claim on a loaded CI runner: 200 ms did not.
+	const lease = 2 * time.Second
+	a, err := Claim(ctx, db, "a", ClaimGuarded, lease)
 	if err != nil || !a.OK {
 		t.Fatal(a, err)
 	}
 	if b, err := Claim(ctx, db, "b", ClaimGuarded, time.Minute); err != nil || b.OK {
 		t.Fatalf("claim of a job under an unexpired lease: %+v %v", b, err)
 	}
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(lease + 100*time.Millisecond)
 	b, err := Claim(ctx, db, "b", ClaimGuarded, time.Minute)
 	if err != nil || !b.OK || b.Job != a.Job || b.Fence != a.Fence+1 {
 		t.Fatalf("reclaim after expiry: %+v %v (first %+v)", b, err, a)
