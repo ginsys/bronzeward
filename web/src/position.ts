@@ -64,26 +64,36 @@ export async function spotOfPath(text: string, path: string): Promise<Spot | und
 // hold a reference's tag. A path that holds no string here adds nothing; the server refuses it
 // (rule embedded).
 //
-// go-yaml breaks a line at U+2028 and U+2029 but keeps the character in a scalar's value, where
-// the embedded document's own parse breaks a line at it again: a folded line after it is not
-// folded into the line before. The parser here does neither. So the text is first parsed with only
-// a lone carriage return and U+0085 read as a line feed, which go-yaml folds as one, and a path
-// not found there is looked up with every break read as a line feed (`parse`).
 const STR = "tag:yaml.org,2002:str";
-const FOLDED_BREAKS = /\r(?!\n)|\u0085/g;
 function embeddedTexts(text: string, embedded: readonly EmbeddedPath[]): { text: string; spot: Spot; literal: boolean }[] {
   if (embedded.length === 0) return [];
-  const written = parseAllDocuments(text.replace(FOLDED_BREAKS, "\n"));
-  let broken: ReturnType<typeof parse> | undefined;
+  const docs = parse(text);
   const found: { text: string; spot: Spot; literal: boolean }[] = [];
   for (const { path } of embedded) {
-    if (path.includes("|")) continue;
-    let node = nodeAt(written, path);
-    if (node === undefined) node = nodeAt((broken ??= parse(text)), path);
+    const node = path.includes("|") ? undefined : nodeAt(docs, path);
     if (!isScalar(node) || typeof node.value !== "string" || (node.tag !== undefined && node.tag !== STR && node.tag !== "!") || node.range == null) continue;
-    found.push({ text: node.value, spot: { start: node.range[0], end: node.range[1] }, literal: node.type === "BLOCK_LITERAL" });
+    const spot = { start: node.range[0], end: node.range[1] };
+    found.push({ text: decodedAgain(text.slice(spot.start, spot.end)) ?? node.value, spot, literal: node.type === "BLOCK_LITERAL" });
   }
   return found;
+}
+
+// go-yaml breaks a line at U+2028 and U+2029 (so `parse` finds the holder with each read as a line
+// feed) but keeps the character in a scalar's value, where the embedded document's own parse breaks
+// a line at it again: a folded line after it is not folded into the line before. The parser here
+// keeps the character only if it is not read as a line feed. So a holder whose text shows one is
+// decoded again from that text alone, with only a lone carriage return and U+0085 read as a line
+// feed (go-yaml folds them as one). Undefined when the text shows neither, or cannot be decoded
+// alone; the holder's value then stands.
+const SEPARATORS = new RegExp(`[${String.fromCharCode(0x2028, 0x2029)}]`);
+const FOLDED_BREAKS = /\r(?!\n)|\u0085/g;
+function decodedAgain(source: string): string | undefined {
+  if (!SEPARATORS.test(source)) return undefined;
+  const docs = parseAllDocuments(`x: ${source.replace(FOLDED_BREAKS, "\n")}`);
+  const doc = Array.isArray(docs) && docs.length === 1 ? docs[0]! : undefined;
+  if (doc === undefined || doc.errors.length > 0 || !isMap(doc.contents)) return undefined;
+  const v = doc.contents.items[0]?.value;
+  return isScalar(v) && typeof v.value === "string" ? v.value : undefined;
 }
 
 // The reference tags in the text, outside comments: a reference name is the §5.1 grammar's
