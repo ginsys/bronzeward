@@ -825,6 +825,20 @@ if [ "$(grep -cE '^(handback|t9_clean|t9_release|t9|t9_disconnect)\(\) \{' "$t/c
   if [[ $t9_body == *'t9-hold'* ]] && [[ $t9_body != *'links linkjoin'* ]]; then
     ok "the t9 setup holds the apply on C and joins no other instance's link to the worker"
   else bad "the t9 setup joins every link to the worker, or does not hold the apply on C"; fi
+  # A release with no hold, as t9 disconnect's cleanup before the t9 setup does, must leave T8's
+  # cut links cut. prepare needs a fixture, so its steps are read in order: t9-hold records the hold
+  # before it writes C's control file, and t9-release joins the links only under that record.
+  prep=$repo_src/fixtures/participants/prepare
+  hold_order=$(sed -n '/^  t9-hold)$/,/^    ;;$/p' "$prep" | grep -oE 'participants-t9-hold|interrupt dispatch-committed' | tr '\n' ' ')
+  # shellcheck disable=SC2016 # $STATE is prepare's text, not this shell's
+  release_order=$(sed -n '/^  t9-release)$/,/^    ;;$/p' "$prep" |
+    grep -oE '! -e "\$STATE/participants-t9-hold"|^ +else$|interrupt -|worker_links linkjoin|rm -f -- "\$STATE/participants-t9-hold"' |
+    sed 's/^ *//' | tr '\n' ' ')
+  # shellcheck disable=SC2016 # $STATE is prepare's text, not this shell's
+  if [ "$hold_order" = "participants-t9-hold interrupt dispatch-committed " ] &&
+    [ "$release_order" = '! -e "$STATE/participants-t9-hold" else interrupt - worker_links linkjoin rm -f -- "$STATE/participants-t9-hold" ' ]; then
+    ok "prepare t9-release joins the links only after t9-hold recorded a hold"
+  else bad "prepare: the hold record does not guard the release (hold: $hold_order; release: $release_order)"; fi
 else bad "handback, t9_clean and t9_release were not found in the session"; fi
 
 # idp_reached with a docker client that ignores TERM, as one waiting on a daemon that hangs can. The

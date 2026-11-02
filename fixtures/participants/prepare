@@ -15,7 +15,7 @@
 #   prepare t9-hold         T9's apply held on C, as S4 holds one: C alone joined to the worker, so
 #                           C alone commits the approved plan, and C stalls before its attempt
 #   prepare t9-release      the hold ended: C's stall removed, A's, B's and C's links joined; safe to
-#                           repeat
+#                           repeat; with no hold recorded by t9-hold, it changes nothing
 #   prepare applied         the apply T9 followed completed: Applied is Desired, from an operation
 #   prepare drift-closed    T10's drift closed; a scope still frozen is unfrozen by h-approver
 #   prepare t11-check       A started in the current epoch after its entry, with its ingestion
@@ -152,6 +152,8 @@ case $step in
     # With A's or B's link open, that instance could commit the plan and apply it at once.
     counted 3 '^[ABC] worker$' "$STATE/linksplits" || die "not every link to the worker is cut; run the t9 setup again"
     n=$(stalls_at dispatch-committed)
+    # The mark comes first: from here on, a release has a hold, or part of one, to end.
+    : >"$STATE/participants-t9-hold" || die "cannot record T9's hold in $STATE"
     interrupt dispatch-committed stall || die "cannot write C's control file"
     result PASS "$ref" 'C told to stall after the commitment'
     check "$ref" 'inject linkjoin C worker, with A and B still cut' "$bin/inject" linkjoin C worker
@@ -160,10 +162,17 @@ case $step in
     ;;
   t9-release)
     # The hold ends: a stalled C goes on, and every instance reaches the worker again, so whichever
-    # owns the apply now can complete it. A takes the apply over when it starts again.
-    interrupt - || die "cannot remove C's control file"
-    result PASS "$ref" "C's control file removed"
-    check "$ref" 'inject linkjoin A, B and C to the worker' worker_links linkjoin
+    # owns the apply now can complete it. A takes the apply over when it starts again. With no
+    # hold recorded, nothing changes: T8's setup cut the links on purpose, and joining them would
+    # let T8's approved plan go to the worker. The mark goes only after a full release.
+    if [ ! -e "$STATE/participants-t9-hold" ]; then
+      result PASS "$ref" 'no T9 hold is recorded: nothing to release'
+    else
+      interrupt - || die "cannot remove C's control file"
+      result PASS "$ref" "C's control file removed"
+      check "$ref" 'inject linkjoin A, B and C to the worker' worker_links linkjoin
+      if [ "$failed" -eq 0 ]; then rm -f -- "$STATE/participants-t9-hold"; fi
+    fi
     ;;
   applied)
     check "$ref" "the worker's Applied is its Desired, from an operation, within four minutes" within 240 applied_desired
