@@ -472,6 +472,8 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     // a failed one; without either the pane never edits, or stays waiting after Show.
     expect(src).toMatch(/setLoaded\(revision\);\n\s*act\(\{ kind: "read", text: fromRevision\(r\.data\), since: done, revision: draft\.revision, id: revision \}\);/);
     expect(src).toMatch(/act\(\{ kind: "draft", revision: draft\.revision, changed[^\n]*\n\s*if \(!changed && failed\) retry\(\(x\) => x \+ 1\);/);
+    // #534 round 4: every write outcome other than done or a 412 ends the open write, a set-aside one included.
+    expect(src).toMatch(/\} else if \(o !== undefined && o\.kind !== "done"\) act\(\{ kind: "failed" \}\);/);
     // PR review: also when the page keeps the data it read before (a failed read with no answer).
     expect(src).toMatch(/\{unshown && item\.kind !== "loading" && <p><button [^>]*onClick=\{\(\) => reread\(\(x\) => x \+ 1\)\}>\{READ_DRAFT_AGAIN\}/);
     // PR review: Copy my text stays off while a repeated Show waits for its reads.
@@ -623,6 +625,26 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     // A write that committed nothing is not the change a later read shows.
     const failed = run({ held: M, saved: A }, [{ kind: "send", removes: true }, { kind: "failed" }, { kind: "draft", revision: 9, changed: false, removed: true }]);
     expect(failed.conflict).toEqual(theirs(M, 9));
+  });
+
+  test("ginsys/bronzeward#534 round 4: a read held back while the pane's write was open shows as theirs once that write fails", () => {
+    // Another author's text, read while a Save is open: a write that commits nothing shows it.
+    const saving = run({ held: A, saved: A }, [{ kind: "type", held: M }, { kind: "send" }, { kind: "read", text: T, since: 0, revision: 8, id: "frv_8" }]);
+    expect(saving.held).toBe(M);
+    expect(saving.conflict).toBeUndefined();
+    expect(rest(run(saving, [{ kind: "failed" }]))).toEqual({ held: T, saved: T, conflict: theirs(M, 8), sent: sentOf(M) });
+    // Their removal, read while a Remove is open, also from a clean editor.
+    for (const held of [A, M]) {
+      const removing = run({ held, saved: A }, [{ kind: "send", removes: true }, { kind: "draft", revision: 9, changed: false, removed: true }, { kind: "failed" }]);
+      expect(removing.held).toBe(EMPTY);
+      expect(removing.conflict).toEqual(theirs(held, 9));
+    }
+    // A done answer or a 412 ends the held-back read: the write's own, or a conflict of its own.
+    const done = run(saving, [{ kind: "done", revision: "frv_9" }]);
+    expect(rest(done)).toEqual({ held: M, saved: M, sent: sentOf(M), writes: 1, own: "frv_9" });
+    const refusedRun = run(saving, [{ kind: "refused" }]);
+    expect(refusedRun.conflict).toEqual({ mine: M, phase: "refused" });
+    expect(refusedRun.sent?.later).toBeUndefined();
   });
 
   test("ginsys/bronzeward#534 N1: Show clicked again while asked holds Copy until its draft read answers, also when a revision read answers first", () => {
