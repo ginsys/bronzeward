@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -240,22 +241,26 @@ func TestRecoveryStatusFollowsTheTimeline(t *testing.T) {
 // escaped as a value, a line feed included, so none can forge a row or move the cursor
 // (client-contracts.md section 6 item 8).
 func TestRecoveryTextIsEscaped(t *testing.T) {
-	hostile := `evil\u001b[2J\nFORGED`
+	// Every field has its own marker with the whole character set of the rule: ESC, a line feed, a
+	// tab, a C1 control, a bidi override and DEL.
+	mk := func(n string) string { return n + "\x1b[2J\n\t\u0085\u202e\x7f" + n }
+	js := func(s string) string { b, _ := json.Marshal(s); return string(b) }
 	recoveryServer(t, map[string]string{
-		"GET /api/v1/recovery": `{"epoch":"ep_BWSYNTH-1","recoveryMode":true,"entry":{"enteredBy":"` + hostile + `","enteredAt":"2026-11-01T08:40:00Z","stoppedAt":"2026-11-01T08:31:00Z",` +
-			`"reason":"` + hostile + `","restored":[{"family":"database","backup":"` + hostile + `","takenAt":"2026-11-01T08:30:00Z"}]},"exit":null,` +
-			`"scopes":[{"machine":"mch_a` + hostile + `","state":"released"}]}`,
-	}, `{"act":"`+hostile+`","epoch":"`+hostile+`","previousEpoch":"`+hostile+`","identity":"`+hostile+`","note":"`+hostile+`","deniedSubjectsListed":true,`+
-		`"machines":1,"operations":["`+hostile+`"],"scopes":["`+hostile+`"]}`)
+		"GET /api/v1/recovery": `{"epoch":` + js(mk("EPOCH")) + `,"recoveryMode":true,"entry":{"enteredBy":` + js(mk("BY")) + `,"enteredAt":"2026-11-01T08:40:00Z","stoppedAt":"2026-11-01T08:31:00Z",` +
+			`"reason":` + js(mk("WHY")) + `,"restored":[{"family":"database","backup":` + js(mk("BACKUP")) + `,"takenAt":"2026-11-01T08:30:00Z"}]},"exit":null,` +
+			`"scopes":[{"machine":` + js("mch_"+mk("MACH")) + `,"state":"released"}]}`,
+	}, `{"act":`+js(mk("ACT"))+`,"epoch":`+js(mk("NEWEPOCH"))+`,"previousEpoch":`+js(mk("PREV"))+`,"identity":`+js(mk("IDENT"))+`,"note":`+js(mk("NOTE"))+`,"deniedSubjectsListed":true,`+
+		`"machines":1,"operations":[`+js(mk("OP"))+`],"scopes":[`+js(mk("SCOPE"))+`]}`)
 	for _, c := range []struct {
 		args  []string
 		typed string
 		shows string
+		marks []string
 	}{
-		{[]string{"recovery", "status"}, "", "Epoch"},
-		{[]string{"recovery", "enter", "--restored", "family=database,backup=pg,taken-at=2026-11-01T08:30:00Z", "--stopped-at", "2026-11-01T08:31:00Z", "--reason", "r"}, "enter\n", "Recovery mode entered"},
-		{[]string{"recovery", "exit"}, "", "Recovery mode left"},
-		{[]string{"identity", "revoke", "--identity", "svc_x", "--reason", "r"}, "svc_x\n", "Revoked"},
+		{[]string{"recovery", "status"}, "", "Epoch", []string{"EPOCH", "BY", "WHY", "BACKUP", "MACH"}},
+		{[]string{"recovery", "enter", "--restored", "family=database,backup=pg,taken-at=2026-11-01T08:30:00Z", "--stopped-at", "2026-11-01T08:31:00Z", "--reason", "r"}, "enter\n", "Recovery mode entered", []string{"ACT", "NEWEPOCH", "PREV", "OP"}},
+		{[]string{"recovery", "exit"}, "", "Recovery mode left", []string{"ACT", "NEWEPOCH", "SCOPE"}},
+		{[]string{"identity", "revoke", "--identity", "svc_x", "--reason", "r"}, "svc_x\n", "Revoked", []string{"IDENT", "ACT", "NOTE"}},
 	} {
 		args := c.args
 		var out, errb bytes.Buffer
@@ -264,13 +269,17 @@ func TestRecoveryTextIsEscaped(t *testing.T) {
 			t.Fatalf("%v: the answer was not shown:\n%s\n%s", args, out.String(), errb.String())
 		}
 		for _, s := range []string{out.String(), errb.String()} {
-			if strings.ContainsRune(s, '\x1b') || strings.Contains(s, "\nFORGED") {
-				t.Errorf("%v: hostile text reached the terminal raw:\n%q", args, s)
+			for _, r := range "\x1b\t\u0085\u202e\x7f" {
+				if strings.ContainsRune(s, r) {
+					t.Errorf("%v: hostile %q reached the terminal raw:\n%q", args, r, s)
+				}
 			}
 		}
-		// Dropping the hostile value would pass the checks above: each command shows it, escaped.
-		if !strings.Contains(out.String(), `evil\x1b[2J\x0aFORGED`) {
-			t.Errorf("%v: the escaped hostile value is missing:\n%s", args, out.String())
+		// Dropping a field would pass the checks above: each one shows, escaped as its own value.
+		for _, m := range c.marks {
+			if want := client.Printable(mk(m)); !strings.Contains(out.String(), want) {
+				t.Errorf("%v: %s is not shown as %q:\n%s", args, m, want, out.String())
+			}
 		}
 	}
 }
@@ -331,5 +340,25 @@ func TestIdentityPromptIsEscaped(t *testing.T) {
 	}
 	if !strings.Contains(errb.String(), `Type the identity svc_x\x0aFORGED: type yes to send it`) {
 		t.Errorf("the prompt lacks the escaped identity:\n%q", errb.String())
+	}
+}
+
+// TestIdentityConfirmationComparesTheRawValue: for an identity with a tab, the prompt shows \x09,
+// but only the raw spelling confirms; the shown spelling sends nothing.
+func TestIdentityConfirmationComparesTheRawValue(t *testing.T) {
+	args := []string{"identity", "revoke", "--identity", "svc_x\ty", "--reason", "r"}
+	for _, c := range []struct {
+		typed string
+		sent  bool
+	}{{"svc_x\ty\n", true}, {`svc_x\x09y` + "\n", false}} {
+		seen := recoveryServer(t, nil, `{"act":"act_BWSYNTH","identity":"idn_BWSYNTH","deniedSubjectsListed":true}`)
+		var out, errb bytes.Buffer
+		withStdin(t, c.typed, func() { run(args, &out, &errb) })
+		if got := slices.Contains(seen(), "POST /api/v1/identity-revocations"); got != c.sent {
+			t.Errorf("typed %q: sent %t, want %t\n%s", c.typed, got, c.sent, errb.String())
+		}
+		if !strings.Contains(errb.String(), `Type the identity svc_x\x09y to send it`) {
+			t.Errorf("typed %q: the prompt lacks the escaped tab:\n%q", c.typed, errb.String())
+		}
 	}
 }
