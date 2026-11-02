@@ -43,6 +43,11 @@ at `daa4393`. Everything in the environment is synthetic.
    that confirm its precondition. If a read fails, stop and recreate the fixture. Run the tasks in
    the session order below.
 
+If a setup fails or you stop it with Ctrl-C, it unpauses every fixture instance and hands A back on
+Zitadel, with A's forwarder to Zitadel. `t9 disconnect` does the same for A. If that cleanup fails,
+it tells you to recreate the fixture. Otherwise you can run the setup again. A second run of `t3`
+goes back to the snapshot that its first run took, before anything was registered.
+
 ## After each session
 
 Run `fixtures/participants/session scan`, and name the browser profile's directory as an argument.

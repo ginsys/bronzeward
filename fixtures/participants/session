@@ -170,15 +170,23 @@ net.createServer((c) => { const z = net.connect(8080, process.env.BW_IDP); c.pip
   c.on("error", () => z.destroy()); z.on("error", () => c.destroy()); }).listen(p, "127.0.0.1");' \
     >/dev/null || die "cannot start the issuer forwarder in $BW_A's network namespace"
   for _ in $(seq 20); do
-    if docker exec "$fwd" node -e 'const p = Number(process.env.BW_PORT);
-      require("http").get({ host: "127.0.0.1", port: p,
-      path: "/.well-known/openid-configuration", headers: { Host: "localhost:" + p } },
-      (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on("error", () => process.exit(1))' 2>/dev/null; then
-      return 0
-    fi
+    if docker exec "$fwd" node -e "$discovery_get" 2>/dev/null; then return 0; fi
     sleep 1
   done
   die "A's namespace does not reach Zitadel's discovery document through the forwarder (docker logs $fwd)"
+}
+# discovery_get: node code that exits 0 if Zitadel's discovery document answers 200 on 127.0.0.1 at
+# the port in BW_PORT, the forwarder's.
+discovery_get='const p = Number(process.env.BW_PORT);
+  require("http").get({ host: "127.0.0.1", port: p,
+  path: "/.well-known/openid-configuration", headers: { Host: "localhost:" + p } },
+  (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on("error", () => process.exit(1))'
+# idp_reached: A's network namespace, as it is now, reaches Zitadel through a forwarder. A forwarder
+# started before A's last start is in A's old namespace and still answers from there, so this asks
+# from a new container in A's current namespace.
+idp_reached() {
+  docker run --rm --network "container:$BW_A" --user "$(id -u):$(id -g)" -e "BW_PORT=$BW_DEV_IDP_PORT" \
+    --entrypoint node "$ZITADEL_LOGIN_IMAGE" -e "$discovery_get" >/dev/null 2>&1
 }
 
 start() {
@@ -363,41 +371,36 @@ snap() {
   stage "$bin/inject" bao-snapshot "p-$1"
 }
 # restore <point>: the database and OpenBao back to that point, with every running instance
-# paused meanwhile, as S5 step 7 does. paused names the instances paused so far, so that handback
-# unpauses them if the restore fails.
-paused=()
+# paused meanwhile, as S5 step 7 does. If the restore fails, handback unpauses them.
 restore() {
   local i c up=()
   for i in A B C; do
     c=BW_$i
     if running "${!c}"; then up+=("$i"); fi
   done
-  # Named before the pause: inject can pause the container and still fail afterwards.
-  for i in ${up[@]+"${up[@]}"}; do
-    paused+=("$i")
-    stage "$bin/inject" pause "$i"
-  done
+  for i in ${up[@]+"${up[@]}"}; do stage "$bin/inject" pause "$i"; done
   stage "$bin/inject" db-restore "p-$1"
   stage "$bin/inject" bao-restore "p-$1"
   for i in ${up[@]+"${up[@]}"}; do stage "$bin/inject" unpause "$i"; done
-  paused=()
 }
 scenario() { stage "$FIXTURES/scenarios/$1" "${@:2}"; }
 prepare() { stage "$here/prepare" "$@"; }
 
 # setup <task>: the task's own setup function, between A switched to the fixture issuer and A back
-# on Zitadel; the seconds it took, for the README's timings. A setup that fails still hands A back
-# on Zitadel, so that the task before can go on and the setup can run again.
+# on Zitadel; the seconds it took, for the README's timings. A setup that fails or is interrupted
+# still hands A back on Zitadel, so that the task before can go on and the setup can run again.
+# Every paused instance is unpaused, whoever paused it: the scenarios' own restores (s2 pass, s3
+# pass) pause A, B and C too. restart_a runs in a subshell, because its forward_idp ends the shell
+# on a failure, and this message must still be printed.
 handback() {
   local i c
   echo "setup $task failed: A goes back on Zitadel" >&2
-  for i in ${paused[@]+"${paused[@]}"}; do
+  for i in A B C; do
     c=BW_$i
     [ "$(docker inspect --type container --format '{{.State.Paused}}' "${!c}" 2>/dev/null)" = true ] || continue
     "$bin/inject" unpause "$i" >>"$log" 2>&1 || echo "$i could not be unpaused; recreate the fixture" >&2
   done
-  paused=()
-  set_issuer zitadel && restart_a >>"$log" 2>&1 || echo "A could not be handed back on Zitadel; recreate the fixture" >&2
+  set_issuer zitadel && (restart_a) >>"$log" 2>&1 || echo "A could not be handed back on Zitadel; recreate the fixture" >&2
 }
 setup() {
   local t0=$SECONDS
@@ -414,9 +417,17 @@ setup() {
   echo "setup $task: $((SECONDS - t0)) s"
 }
 
+# setup_t3: p-base is taken only while nothing is registered. A rerun after a partial s1 register
+# goes back to the p-base taken before it, so that t4 never restores a registered cluster.
 setup_t3() {
   [ -s "$STATE/automation-token" ] || stage "$bin/seed"
-  snap base
+  if [ "$(sql 'SELECT (SELECT count(*) FROM cluster) + (SELECT count(*) FROM machine)')" = 0 ]; then
+    snap base
+  elif [ -s "$STATE/backups/pg-p-base.dump" ] && [ -s "$STATE/backups/bao-p-base.snap" ]; then
+    restore base
+  else
+    die "setup t3: a cluster or a machine is registered, and there is no p-base snapshot to go back to; recreate the fixture"
+  fi
   scenario s1 register
 }
 setup_t4() {
@@ -565,8 +576,11 @@ t9_ids() {
     tr -d '\r' <"$f" | awk '/^id:/ { sub(/^id: */, ""); id = $0 } /^$/ { if (id != "") print id; id = "" }'
   done
 }
-# t9_clean: on any exit of t9 disconnect, the reader ends and A runs again, so that the participant's
-# server is never left stopped.
+# t9_clean: on any exit of t9 disconnect, the reader ends and A runs again with its forwarder to
+# Zitadel, so that the participant's server is never left stopped or unable to sign anyone in. A
+# start of A that failed or was interrupted can leave A running with no forwarder in its namespace.
+# Each repair runs in a subshell, because forward_idp ends the shell on a failure, and the message
+# to recreate the fixture must still be printed.
 t9_clean() {
   if [ -n "$t9_reader" ]; then
     kill "$t9_reader" 2>/dev/null || true
@@ -575,7 +589,10 @@ t9_clean() {
   fi
   if ! running "$BW_A"; then
     echo "t9 disconnect: A is started again" >&2
-    restart_a >>"$log" 2>&1 || echo "A could not be started again; recreate the fixture" >&2
+    (restart_a) >>"$log" 2>&1 || echo "A could not be started again; recreate the fixture" >&2
+  elif ! idp_reached; then
+    echo "t9 disconnect: A runs without its forwarder to Zitadel; the forwarder is started again" >&2
+    (forward_idp) >>"$log" 2>&1 || echo "A's forwarder to Zitadel could not be started again; recreate the fixture" >&2
   fi
 }
 
