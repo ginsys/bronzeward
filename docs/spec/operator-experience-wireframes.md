@@ -207,10 +207,12 @@ operator left the draft and opened it again. Their text, or the removal, then go
 editor in the same way. Text typed since the last read or save is kept for [Copy my text into the
 new revision], and is never saved over their change unseen. A read that arrives before the
 pane's own Save or Remove has its answer can show that write's own change. Such a read opens no
-conflict and keeps the editor's text. If another author changed the entry, that write gets a `412`.
-If the write's last answer is neither done nor a `412`, the change that read showed goes into
-the editor as theirs, and the typed text is kept for [Copy my text into the new revision]. An
-unknown outcome is not the last answer while [Repeat exactly] can still send the write.
+conflict and keeps the editor's text. If another author changed the entry before the write, that
+write gets a `412`. If the write's last answer is neither done nor a `412`, the change that read
+showed goes into the editor as theirs, and the typed text is kept for [Copy my text into the new
+revision]. A done Save names the revision it created. If that read showed another revision, its
+text goes into the editor as theirs in the same way. An unknown outcome is not the last answer
+while [Repeat exactly] can still send the write.
 
 The same rule applies after their text shows. If a later read shows another author's newer text,
 or their removal, the editor shows that change. Text typed since their text showed is kept for
