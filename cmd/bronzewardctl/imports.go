@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -125,40 +126,42 @@ func (e *env) importStart(args []string) error {
 	var a accepted
 	w := &client.Write{Method: http.MethodPost, Path: "/ingestions", Draft: draft, IfMatch: rf.ifMatch.v, Repeat: rp, HumanOnly: true,
 		Check: "import status --machine " + client.ShellWord(machine), Read: ingestionsRead(machine, draft)}
-	err = e.writeAfter(func(cl *client.Client) error {
-		c = cl
-		if file != "" {
-			doc, err := readDocument(file)
-			if err != nil {
-				return err
+	return e.held(func() error {
+		err := e.writeAfter(func(cl *client.Client) error {
+			c = cl
+			if file != "" {
+				doc, err := readDocument(file)
+				if err != nil {
+					return err
+				}
+				in.Source, in.Document = "document", &doc
 			}
-			in.Source, in.Document = "document", &doc
-		}
-		if marks {
-			m, err := e.readMarks(len(stdinUsers(file, "", false)) > 0)
-			if err != nil {
-				return err
+			if marks {
+				m, err := e.readMarks(len(stdinUsers(file, "", false)) > 0)
+				if err != nil {
+					return err
+				}
+				in.Marks = &m
 			}
-			in.Marks = &m
+			var err error
+			if w.Body, err = json.Marshal(in); err == nil && len(w.Body) > maxBody {
+				err = fmt.Errorf("the request body is %d bytes, %s; nothing was sent", len(w.Body), overBodyLimit)
+			}
+			return err
+		}, w, func(_ *client.Client, r *client.Response) ([]string, error) {
+			err := json.Unmarshal(r.Body, &a)
+			lines := []string{sf("Import %s started (operation %s). Staging: %s. Review: %s.", a.Ingestion, a.Operation, staging,
+				map[bool]string{true: "requested", false: "not requested"}[review])}
+			if noWait {
+				lines = append(lines, "Follow it with: bronzewardctl import status "+pr(a.Ingestion))
+			}
+			return lines, err
+		})
+		if err != nil || noWait {
+			return err
 		}
-		var err error
-		if w.Body, err = json.Marshal(in); err == nil && len(w.Body) > maxBody {
-			err = fmt.Errorf("the request body is %d bytes, %s; nothing was sent", len(w.Body), overBodyLimit)
-		}
-		return err
-	}, w, func(_ *client.Client, r *client.Response) ([]string, error) {
-		err := json.Unmarshal(r.Body, &a)
-		lines := []string{sf("Import %s started (operation %s). Staging: %s. Review: %s.", a.Ingestion, a.Operation, staging,
-			map[bool]string{true: "requested", false: "not requested"}[review])}
-		if noWait {
-			lines = append(lines, "Follow it with: bronzewardctl import status "+pr(a.Ingestion))
-		}
-		return lines, err
+		return e.follow(c, a, 0)
 	})
-	if err != nil || noWait {
-		return err
-	}
-	return e.follow(c, a, 0)
 }
 
 // importResume continues an import paused for review, or takes over a claim whose lease lapsed
@@ -185,33 +188,51 @@ func (e *env) importResume(verb string, args []string) error {
 	var before int
 	var replayed bool
 	done := map[string]string{"continue": "Continued", "takeover": "Took over"}[verb]
-	err = e.writeAfter(func(cl *client.Client) error {
-		c = cl
-		b, err := readIngestion(cl, ing)
-		if err == nil {
-			before = b.OwnerGeneration
-		}
-		return err
-	}, &client.Write{Method: http.MethodPost, Path: "/ingestions/" + url.PathEscape(ing) + "/" + map[string]string{"continue": "continuations", "takeover": "takeovers"}[verb],
-		Body: []byte("{}"), Repeat: rp, HumanOnly: true, Check: "import status " + client.ShellWord(ing), Read: ingestionRead(ing)},
-		func(_ *client.Client, r *client.Response) ([]string, error) {
-			err := json.Unmarshal(r.Body, &a)
-			replayed = r.Header.Get("Idempotent-Replayed") == "true"
-			lines := []string{sf("%s import %s (operation %s).", done, a.Ingestion, a.Operation)}
-			if noWait {
-				lines = append(lines, "Follow it with: bronzewardctl import status "+pr(a.Ingestion))
+	return e.held(func() error {
+		err := e.writeAfter(func(cl *client.Client) error {
+			c = cl
+			b, err := readIngestion(cl, ing)
+			if err == nil {
+				before = b.OwnerGeneration
 			}
-			return lines, err
-		})
-	if err != nil || noWait {
+			return err
+		}, &client.Write{Method: http.MethodPost, Path: "/ingestions/" + url.PathEscape(ing) + "/" + map[string]string{"continue": "continuations", "takeover": "takeovers"}[verb],
+			Body: []byte("{}"), Repeat: rp, HumanOnly: true, Check: "import status " + client.ShellWord(ing), Read: ingestionRead(ing)},
+			func(_ *client.Client, r *client.Response) ([]string, error) {
+				err := json.Unmarshal(r.Body, &a)
+				replayed = r.Header.Get("Idempotent-Replayed") == "true"
+				lines := []string{sf("%s import %s (operation %s).", done, a.Ingestion, a.Operation)}
+				if noWait {
+					lines = append(lines, "Follow it with: bronzewardctl import status "+pr(a.Ingestion))
+				}
+				return lines, err
+			})
+		if err != nil || noWait {
+			return err
+		}
+		if replayed {
+			// A replayed answer started no run: the earlier request with this key did, at a generation
+			// the read before this send may already show. The wait follows the claim's latest run.
+			before = latestRun
+		}
+		return e.follow(c, a, before)
+	})
+}
+
+// held runs an import write and its wait with standard output held back, and prints it only once
+// the exit is not 3: standard output stays empty when the outcome is unknown (#256's output rule).
+func (e *env) held(run func() error) error {
+	out, buf := e.out, &bytes.Buffer{}
+	e.out = buf
+	err := run()
+	e.out = out
+	var settled outcomeUnknown
+	var unknown *client.Unknown
+	if errors.As(err, &settled) || errors.As(err, &unknown) || buf.Len() == 0 {
 		return err
 	}
-	if replayed {
-		// A replayed answer started no run: the earlier request with this key did, at a generation
-		// the read before this send may already show. The wait follows the claim's latest run.
-		before = latestRun
-	}
-	return e.follow(c, a, before)
+	_, werr := out.Write(buf.Bytes())
+	return errors.Join(err, werr)
 }
 
 // latestRun, as follow's before, follows the run at the claim's owner generation when follow
@@ -317,7 +338,11 @@ func (e *env) follow(c *client.Client, a accepted, before int) (err error) {
 	if err != nil {
 		return err
 	}
-	if before == latestRun {
+	// Following the latest run, a mark's new generation starts it too. Following this command's own
+	// run, a mark taken between the read and the send would start another's run, so only this
+	// command's continuation or takeover does.
+	latest := before == latestRun
+	if latest {
 		before = b.OwnerGeneration - 1
 	}
 	gen, ours, settled, code := before, before == 0, "", ""
@@ -338,7 +363,7 @@ func (e *env) follow(c *client.Client, a accepted, before int) (err error) {
 			}
 			tf(e.err, "  %s%s\n", ev.Type, note)
 			switch {
-			case (ev.Type == "continued" || ev.Type == "taken-over") && d.Generation > gen:
+			case (ev.Type == "continued" || ev.Type == "taken-over" || latest && ev.Type == "marked") && d.Generation > gen:
 				ours, gen = true, d.Generation
 			case !ours:
 			case ev.Type == "paused" && d.Generation >= gen:
