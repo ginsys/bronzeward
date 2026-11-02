@@ -13,6 +13,8 @@ type Page struct {
 	Items []json.RawMessage `json:"items"`
 	Next  string            `json:"next,omitempty"`
 	Body  []byte            `json:"-"`
+	// Epoch is the Bronzeward-Epoch of the answer itself, empty when the answer had none.
+	Epoch string `json:"-"`
 }
 
 // Page reads the page of the list at path that cursor names, the first for "". A refused cursor
@@ -43,7 +45,7 @@ func (c *Client) page(path, cursor string) (*Page, error) {
 	if err != nil {
 		return nil, err
 	}
-	p := &Page{Body: r.Body}
+	p := &Page{Body: r.Body, Epoch: r.Header.Get("Bronzeward-Epoch")}
 	if err := json.Unmarshal(r.Body, p); err != nil {
 		return nil, c.Context.fail(fmt.Errorf("GET %s: %w", path, err))
 	}
@@ -64,7 +66,15 @@ func (c *Client) restart(path string, err error) bool {
 // List reads every page of the list at path and returns its items in order, reading the list
 // again from its start after a refused cursor. After three restarts the refusal is returned.
 func (c *Client) List(path string) ([]json.RawMessage, error) {
-	items, next := []json.RawMessage{}, ""
+	items, _, err := c.ListAt(path)
+	return items, err
+}
+
+// ListAt is List, and it returns the epoch of the last page read. Every page of one read holds the
+// epoch of its cursor, so that is the epoch of the whole list (§8.5). It is empty when that answer
+// had none.
+func (c *Client) ListAt(path string) ([]json.RawMessage, string, error) {
+	items, next, epoch := []json.RawMessage{}, "", ""
 	for restarts := 0; ; {
 		page, err := c.page(path, next)
 		if next != "" && restarts < 3 && c.restart(path, err) {
@@ -72,11 +82,11 @@ func (c *Client) List(path string) ([]json.RawMessage, error) {
 			continue
 		}
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
-		items = append(items, page.Items...)
+		items, epoch = append(items, page.Items...), page.Epoch
 		if next = page.Next; next == "" {
-			return items, nil
+			return items, epoch, nil
 		}
 	}
 }
