@@ -81,9 +81,11 @@ export function App() {
       page.to("ended");
       forget();
     };
-    // §10.3 items 3-4: cleared on pagehide; a page restored from the back-forward cache starts over.
+    // §10.3 items 3-4: cleared on pagehide, the writes too; a page restored from the back-forward
+    // cache starts over.
     const onHide = () => {
       end();
+      writes.forget();
       flushSync(() => setView({ kind: "blank" }));
     };
     const onShow = (e: PageTransitionEvent) => {
