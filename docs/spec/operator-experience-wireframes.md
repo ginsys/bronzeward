@@ -197,7 +197,7 @@ created.
 
 Until the pane read the revision that the draft shown names, the pane shows "Reading the entry's
 text.", takes no edit and sends nothing. This also applies when a later draft read names a newer
-revision. If that read fails, the pane offers [Read the entry again]. A draft read again also reads
+revision, the revision of the pane's own Save included. If that read fails, the pane offers [Read the entry again]. A draft read again also reads
 it again. While a `412` waits for [Show their change], a failed revision read keeps it waiting. After [Remove], the draft stores the removal: the text still in the editor is
 unsaved, and leaving or switching entries asks first.
 

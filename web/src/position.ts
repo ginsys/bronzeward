@@ -61,15 +61,24 @@ function tags(text: string): { index: number; tag: string; name: string }[] {
 }
 
 // Whether a plain scalar ending at `end` goes on to the next line: it ends its line, and the next
-// line with text is more indented than the tag's line and is no key, sequence entry or flow
-// indicator. A plain scalar holds no colon before a blank, so a line with one is a key.
+// line with text is more indented than the node that holds the scalar and is no key, sequence
+// entry or flow indicator. A plain scalar holds no colon before a blank, so a line with one is a
+// key. The holder is the key or entry on the tag's line; a tag that starts its line is the value
+// of the nearest line above that is less indented, so the next line may continue it at the tag's
+// own indentation.
 function continues(masked: string, tag: number, end: number): boolean {
   const eol = masked.indexOf("\n", end);
   if (masked.slice(end, eol).trim() !== "") return false;
   const indent = (line: string) => line.length - line.trimStart().length;
   const start = masked.lastIndexOf("\n", tag) + 1;
+  const own = indent(masked.slice(start, masked.indexOf("\n", start)));
+  let holder = own;
+  if (masked.slice(start, tag).trim() === "") {
+    const above = masked.slice(0, start).split("\n").reverse().find((l) => l.trim() !== "" && indent(l) < own);
+    holder = above === undefined ? -1 : indent(above);
+  }
   const next = masked.slice(eol + 1).split("\n").find((l) => l.trim() !== "");
-  if (next === undefined || indent(next) <= indent(masked.slice(start, masked.indexOf("\n", start)))) return false;
+  if (next === undefined || indent(next) <= holder) return false;
   const t = next.trim();
   return !/^(?:[,\]}]|[-?](?:\s|$))/.test(t) && !/:(?:\s|$)/.test(t);
 }
