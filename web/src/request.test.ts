@@ -949,6 +949,22 @@ describe("the attempt bound (§8.4 item 8)", () => {
     expect(signals).toHaveLength(3);
   });
 
+  test("an epoch read that finished is not aborted later by the write it was sent within", async () => {
+    // The read of GET /recovery is answered and dropped at once; the write's own body then stalls to 60 s.
+    const holder: { c?: Client } = {};
+    const { c, signals } = bounded((init, n) => {
+      if (n === 1) return holder.c!.attempt("GET", "/recovery").then(() => endlessBody(init, 201, { "Content-Type": "application/json", "Bronzeward-Epoch": "e2" }));
+      return ok({}, "e1");
+    });
+    holder.c = c;
+    const a = watch(c.attempt("POST", "/clusters", {}, "{}"));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(a.done).toBe(true);
+    expect(signals).toHaveLength(3);
+    expect(signals[0]!.aborted).toBe(true);
+    expect(signals[2]!.aborted).toBe(false);
+  });
+
   const base = { principal: "p1", route: "/machines", query: "" };
 
   // An answer whose body never ends, and whether the client cancelled it.
