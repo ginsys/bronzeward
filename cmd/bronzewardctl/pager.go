@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"strings"
@@ -41,7 +40,9 @@ func page(text []string, rows, cols int, keys io.Reader, w io.Writer) error {
 	lines := wrap(text, cols)
 	body := rows - 1
 	top := 0
-	k := bufio.NewReader(keys)
+	// One byte is read at a time, so nothing typed after the key that quits is taken from keys: the
+	// marks prompt reads it.
+	var key [1]byte
 	for {
 		var b strings.Builder
 		b.WriteString(clearScreen)
@@ -62,14 +63,14 @@ func page(text []string, rows, cols int, keys io.Reader, w io.Writer) error {
 		if _, err := io.WriteString(w, b.String()); err != nil {
 			return err
 		}
-		c, err := k.ReadByte()
+		_, err := io.ReadFull(keys, key[:])
 		if err == io.EOF {
 			return nil
 		}
 		if err != nil {
 			return err
 		}
-		switch c {
+		switch key[0] {
 		case ' ', 'f':
 			if end < len(lines) {
 				top = end

@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -17,7 +19,7 @@ import (
 // only on the paused event at the 202's generation, an earlier pause ignored; not applied, exit 1,
 // on a 422 at once, a mark-refused event by position or by code, resume-failed and a later
 // takeover, and on a success with no such pause; exit 4 on a failed operation; exit 3 on a lapsed
-// lease; and no marks, nothing sent.
+// lease and on a success whose last events were not shown; and no marks, nothing sent.
 func TestImportMark(t *testing.T) {
 	f, step := importSteps(t)
 	mark := []string{"import", "mark", "ing_BWSYNTH"}
@@ -79,8 +81,13 @@ func TestImportMark(t *testing.T) {
 	}{
 		{"paused, then the operation failed: exit 4", "abandoned", "failed", "", `{"type":"urn:bronzeward:problem:ingestion-abandoned","title":"BWSYNTH","status":409}`,
 			[][2]string{ev("paused", `{"type":"paused","generation":2}`), ev("failed", `{"type":"failed","code":"ingestion-abandoned"}`)}, 4, "", "(operation op_BWSYNTH-ing) failed"},
+		// The import ended, so the draft is named, not the commands of a paused import, and the success
+		// is reported as ended reports it.
 		{"refused, then the operation succeeded: not applied", "released", "succeeded", `{"draft":"drf_BWSYNTH","draftRevision":2,"importBaseRevision":"ibr_BWSYNTH"}`, "",
-			[][2]string{refusedAt("2"), ev("continued", `{"type":"continued","generation":3}`), ev("succeeded", `{"type":"succeeded"}`)}, 1, "", "was not applied: it was refused"},
+			[][2]string{refusedAt("2"), ev("continued", `{"type":"continued","generation":3}`), ev("succeeded", `{"type":"succeeded"}`)}, 1,
+			"Import ing_BWSYNTH released into draft drf_BWSYNTH (revision 2)",
+			"was not applied: it was refused (422 validation-failed, the mark at position 0 (the first is 0)), and operation op_BWSYNTH-ing then released the import without it. " +
+				"Read the draft before marking again:\n  bronzewardctl draft show 'drf_BWSYNTH'\n"},
 		{"paused, then continued and released: applied", "released", "succeeded", `{"draft":"drf_BWSYNTH","draftRevision":2,"importBaseRevision":"ibr_BWSYNTH"}`, "",
 			[][2]string{ev("paused", `{"type":"paused","generation":2}`), ev("continued", `{"type":"continued","generation":3}`), ev("succeeded", `{"type":"succeeded"}`)}, 0,
 			"Marked 1 path; re-staged and paused at generation 2, and released since.\nImport ing_BWSYNTH released into draft drf_BWSYNTH (revision 2)", ""},
@@ -103,10 +110,26 @@ func TestImportMark(t *testing.T) {
 	setStdin(t, "doc[0]/BWSYNTH\n")
 	f.set("released", 3, time.Hour, "succeeded", `{"draft":"drf_BWSYNTH","draftRevision":2,"importBaseRevision":"ibr_BWSYNTH"}`, "",
 		marked, ev("continued", `{"type":"continued","generation":3}`), ev("succeeded", `{"type":"succeeded"}`))
-	step("a success without the pause is not the mark applied", mark, 1, "", "was not applied: operation op_BWSYNTH-ing succeeded without pausing at the mark's generation 2", sent)
+	step("a success without the pause is not the mark applied", mark, 1, "Import ing_BWSYNTH released into draft drf_BWSYNTH (revision 2)",
+		"was not applied: operation op_BWSYNTH-ing succeeded without pausing at the mark's generation 2", sent)
 	if startedRecord(t, "ing_BWSYNTH", false) {
 		t.Error("a mark run that ended in success kept the record of this client's start")
 	}
+
+	// A success whose last events were not shown can have paused at the mark's generation among them:
+	// the outcome is unknown, so standard output stays empty. The stream ends after the marked event
+	// and the event pages are refused.
+	setStdin(t, "doc[0]/BWSYNTH\n")
+	f.set("released", 3, time.Hour, "succeeded", `{"draft":"drf_BWSYNTH","draftRevision":2,"importBaseRevision":"ibr_BWSYNTH"}`, "",
+		marked, ev("paused", `{"type":"paused","generation":2}`), ev("continued", `{"type":"continued","generation":3}`), ev("succeeded", `{"type":"succeeded"}`))
+	f.mu.Lock()
+	f.cut, f.pagesGone = 1, true
+	f.mu.Unlock()
+	step("a success with its last events not shown: unknown", mark, 3, nothing,
+		"operation op_BWSYNTH-ing succeeded, but its last events were not shown, so whether the mark was applied before the release is unknown.", sent)
+	f.mu.Lock()
+	f.pagesGone = false
+	f.mu.Unlock()
 
 	setStdin(t, "doc[0]/BWSYNTH\n")
 	f.set("abandoned", 2, time.Hour, "failed", "", `{"type":"urn:bronzeward:problem:validation-failed","title":"BWSYNTH","status":422}`,
@@ -120,6 +143,20 @@ func TestImportMark(t *testing.T) {
 
 	setStdin(t, "\n")
 	step("no marks: nothing sent", mark, 2, "", "no marks were given; nothing was sent")
+}
+
+// TestImportMarkReportsSave: a failure to keep the epoch the mark's answers showed is reported
+// beside the mark's own outcome. The configuration file is made unreadable as the mark is sent.
+func TestImportMarkReportsSave(t *testing.T) {
+	f, step := importSteps(t)
+	f.onMark = func() {
+		if err := os.WriteFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "bronzeward", "config.yaml"), []byte("{"), 0o600); err != nil {
+			t.Error(err)
+		}
+	}
+	setStdin(t, "doc[0]/BWSYNTH-not-a-path\n")
+	step("a 422, then the configuration cannot be updated", []string{"import", "mark", "ing_BWSYNTH"}, 1, "", "keeping the epoch, start mode and maximum token lifetime",
+		`POST /ingestions/ing_BWSYNTH/marks if-match= body={"marks":["doc[0]/BWSYNTH-not-a-path"]}`)
 }
 
 // startedRecord says whether the lab context keeps ing as an import this client started; with keep,
@@ -225,6 +262,15 @@ func TestPage(t *testing.T) {
 	w.Reset()
 	if err := page([]string{"x"}, 3, 20, strings.NewReader("q"), &w); err != nil || !strings.HasSuffix(w.String(), "\r\n-- (end) -- space or") {
 		t.Errorf("the key line is not cut to 20 columns: %v, %q", err, w.String())
+	}
+	// The pager takes the key that quits and nothing after it: marks typed or pasted with it stay for
+	// the marks prompt.
+	keys := strings.NewReader("fqdoc[0]/BWSYNTH\n")
+	if err := page([]string{"x"}, 3, 20, keys, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if rest, _ := io.ReadAll(keys); string(rest) != "doc[0]/BWSYNTH\n" {
+		t.Errorf("after the pager quit, the keys hold %q; want the marks typed after q", rest)
 	}
 	// A wide character takes two cells, so ten of them fill a line of 20.
 	if got := wrap([]string{strings.Repeat("界", 11)}, 20); len(got) != 2 || got[0] != strings.Repeat("界", 10) {

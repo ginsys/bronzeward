@@ -151,6 +151,88 @@ func TestImportReviewOnTerminal(t *testing.T) {
 	}
 }
 
+// TestImportReviewSignal: a signal sent to the process while the pager shows the review first puts
+// the terminal back in line mode and leaves the alternate screen, so the review does not stay on the
+// screen, and then ends the process as the signal would have. The test takes that end, so the pager
+// still runs: q and an empty line, typed as one line, end it and the marks.
+func TestImportReviewSignal(t *testing.T) {
+	f, _ := importSteps(t)
+	f.set("paused", 1, time.Hour, "running", "", "", ev("paused", `{"type":"paused","generation":1}`))
+	raised := make(chan os.Signal, 1)
+	old := raise
+	raise = func(sig os.Signal) { raised <- sig }
+	t.Cleanup(func() { raise = old })
+	ctl, term := onPty(t, 24, 80)
+	var mu sync.Mutex
+	var screen []byte
+	why := "the pager did not show its key line"
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		b := make([]byte, 4096)
+		sent, typed := false, false
+		for {
+			n, err := ctl.Read(b)
+			mu.Lock()
+			screen = append(screen, b[:n]...)
+			s := string(screen)
+			mu.Unlock()
+			if err != nil {
+				return
+			}
+			if !sent && strings.Contains(s, "space or f forward") {
+				sent = true
+				mu.Lock()
+				why = "the alternate screen was not left after the signal"
+				mu.Unlock()
+				if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
+					t.Errorf("sending the signal: %v", err)
+				}
+			}
+			if !sent || typed || !strings.Contains(s, altScreenOff) {
+				continue
+			}
+			typed = true
+			w := ""
+			select {
+			case sig := <-raised:
+				if sig != syscall.SIGTERM {
+					w = fmt.Sprintf("the process was ended by %v, not SIGTERM", sig)
+				}
+			case <-time.After(10 * time.Second):
+				w = "the process was not ended 10 s after it left the alternate screen"
+			}
+			var tio syscall.Termios
+			if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, ctl.Fd(), syscall.TCGETS, uintptr(unsafe.Pointer(&tio))); errno != 0 {
+				w = "reading the terminal modes: " + errno.Error()
+			} else if tio.Lflag&syscall.ICANON == 0 {
+				w = "the terminal was not back in line mode when the process was ended"
+			}
+			mu.Lock()
+			why = w
+			mu.Unlock()
+			ctl.WriteString("q\n")
+		}
+	}()
+	var e bytes.Buffer
+	got := run([]string{"import", "review", "ing_BWSYNTH"}, term, &e)
+	term.Close()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the terminal stayed open after the command ended")
+	}
+	mu.Lock()
+	s, w := string(screen), why
+	mu.Unlock()
+	if w != "" {
+		t.Fatal(w)
+	}
+	if got != 0 || !strings.Contains(s, "No marks given.") || strings.Count(s, altScreenOff) != 1 {
+		t.Errorf("exit %d, screen %q; want 0, no marks and the alternate screen left once", got, s)
+	}
+}
+
 // TestStdinByIdentity checks that an input path naming standard input under another name takes
 // standard input as - does: marks are then not read from it, and no second input may read it. The
 // path is /proc/self/fd/N for the test's pipe, the link /dev/stdin is for fd 0.
