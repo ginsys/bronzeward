@@ -68,6 +68,36 @@ export function Failure({ res, sub }: { res: Exclude<ReadResult<unknown>, { kind
   return <Refused problem={"problem" in res ? res.problem : null} status={"status" in res ? res.status : 0} verb="read" />;
 }
 
+// A read that did not answer with data.
+export type Unanswered = Exclude<ReadResult<unknown>, { kind: "ok" | "discarded" }>;
+
+// A shell read and the failure of a later one (#513): a read that fails after one that answered
+// keeps that answer, and the failure shows above the page instead of replacing it, so the page keeps
+// its unsaved text.
+export interface Reading<T> {
+  load: Load<T>;
+  failed?: Unanswered | undefined;
+}
+export function reading<T>(prev: Reading<T>, res: Load<T>, kept: boolean): Reading<T> {
+  if (!kept || prev.load.kind !== "ok" || res.kind === "ok" || res.kind === "loading" || res.kind === "discarded") return { load: res };
+  return { load: prev.load, failed: res };
+}
+
+// The page with the failure of a later read above it. The page keeps its place under this element
+// whether or not a failure shows, so React keeps it mounted.
+export function Kept({ failed, sub, children }: { failed: Unanswered | undefined; sub: string; children: ReactNode }) {
+  return <>{failed !== undefined && <Failure res={failed} sub={sub} />}{children}</>;
+}
+
+// What the shell shows once GET /server is compatible: the wait for the first identity, the failure
+// of that first read, or the page. The page element is the same one, at the same place, for every
+// identity that answered, whatever failure shows above it.
+export function identityMain(identity: Reading<Identity>, sub: string, page: ReactNode): ReactNode {
+  if (identity.load.kind === "loading") return <Loading what="your identity" />;
+  if (identity.load.kind !== "ok") return identity.load.kind !== "discarded" && <Failure res={identity.load} sub={sub} />;
+  return <Kept failed={identity.failed} sub={sub}>{page}</Kept>;
+}
+
 export interface SignedInProps {
   auth: Pick<ClientOptions, "token" | "renew" | "onRevoked">;
   // The token's principal, for discarding another sign-in's answers, and its subject for texts.
@@ -212,8 +242,9 @@ export class ShellReads {
   // A refusal ends the page whichever read carried it, a superseded one too: the client already
   // dropped the credentials it refused. Any other answer of a superseded read says nothing more.
   // `what` names the shell's own reads; a page's read (none) says through `held` whether it shows data.
-  // True when the read found no answer and its data stays under the banner.
-  settle<T>(res: ReadResult<T>, set: (r: Load<T>) => void, what: keyof Shown | undefined, live: () => boolean, held: () => boolean): boolean {
+  // `set` is told, as its second argument, when the read failed after one that answered and the shell
+  // keeps that answer (#513). True when the read found no answer and its data stays under the banner.
+  settle<T>(res: ReadResult<T>, set: (r: Load<T>, kept?: boolean) => void, what: keyof Shown | undefined, live: () => boolean, held: () => boolean): boolean {
     const on = this.events();
     if (res.kind === "discarded") return false;
     if (res.kind === "unauthenticated") return (on.onUnauthenticated(res), false);
@@ -233,10 +264,16 @@ export class ShellReads {
       if (what !== "server") return (this.preEntry(res), false);
       this.invalidate(true);
     }
-    // A refusal replaces the data, so a later read without answer has nothing to keep shown.
-    if (what !== undefined) this.shown[what] = res.kind === "ok";
+    // An identity read that fails after one that answered keeps that answer, so the page below stays
+    // mounted with its unsaved text and the failure shows above it (#513). A refusal that ends the
+    // session was taken above, and a read without answer keeps its data under the banner. GET /server
+    // is read again only while it has no data, so it never fails after a good read.
+    const kept = what === "identity" && this.shown.identity && res.kind !== "ok";
+    // Any other refusal replaces the data, so a later read without answer has nothing to keep shown.
+    if (what !== undefined && !kept) this.shown[what] = res.kind === "ok";
     if (res.kind === "ok") this.readAt = now;
-    set(res);
+    if (kept) set(res, true);
+    else set(res);
     return false;
   }
 }
@@ -274,7 +311,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
     moveFree(returning, () => leaving(writes, to, true), () => showCurrent(to, location.pathname + location.search, move, () => setAgain((n) => n + 1)));
   }, [move, returning, writes]);
   const [server, setServer] = useState<Load<Server>>({ kind: "loading" });
-  const [identity, setIdentity] = useState<Load<Identity>>({ kind: "loading" });
+  const [identity, setIdentity] = useState<Reading<Identity>>({ load: { kind: "loading" } });
   const [recovery, setRecovery] = useState<Load<Recovery>>({ kind: "loading" });
   const [recoveryMode, setRecoveryMode] = useState(false);
   const [mode, setMode] = useState<StartMode>("unknown");
@@ -291,12 +328,12 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
       writes.setAside(EPOCH_CHANGED_ASIDE);
       setEpochChanged(true);
       setServer({ kind: "loading" });
-      setIdentity({ kind: "loading" });
+      setIdentity({ load: { kind: "loading" } });
       setRecovery({ kind: "loading" });
       setAgain((n) => n + 1);
     },
     onPreEntry: (res) => {
-      setIdentity({ kind: "loading" });
+      setIdentity({ load: { kind: "loading" } });
       setRecovery({ kind: "loading" });
       setServer({ kind: "refused", status: res.status, problem: res.problem });
     },
@@ -333,7 +370,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
   // first, so a page's read sent before this shell's effect would be discarded with the old ones.
   client.setView({ principal, route: path, query });
 
-  const settle = useCallback(<T,>(res: ReadResult<T>, set: (r: Load<T>) => void, what: keyof Shown, live: () => boolean) => reads.settle(res, set, what, live, () => reads.shown[what]), [reads]);
+  const settle = useCallback(<T,>(res: ReadResult<T>, set: (r: Load<T>, kept?: boolean) => void, what: keyof Shown, live: () => boolean) => reads.settle(res, set, what, live, () => reads.shown[what]), [reads]);
   const settlePage = useCallback(<T,>(res: ReadResult<T>, set: (r: Load<T>) => void, live: () => boolean, held: () => boolean) => reads.settle(res, set, undefined, live, held), [reads]);
 
   // Reads still in flight when the shell goes (a refusal, sign-out) are discarded, and renew no more.
@@ -364,7 +401,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
     if (!compatible) return;
     const valid = reads.since();
     let live = true;
-    void client.read<Identity>("/identity").then((res) => settle(res, setIdentity, "identity", () => live && valid()));
+    void client.read<Identity>("/identity").then((res) => settle(res, (r, kept) => setIdentity((p) => reading(p, r, kept === true)), "identity", () => live && valid()));
     return () => void (live = false);
   }, [client, reads, compatible, path, query, principal, again, settle]);
   useEffect(() => {
@@ -397,11 +434,9 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
   else if (startRefusal(server)) main = <PreEntry res={server} onRead={() => setAgain((n) => n + 1)} />;
   else if (server.kind !== "ok") main = server.kind !== "discarded" && <Failure res={server} sub={sub} />;
   else if (!compatible) main = <Status>{incompatible(server.data.apiRevision)}</Status>;
-  else if (identity.kind === "loading") main = <Loading what="your identity" />;
-  else if (identity.kind !== "ok") main = identity.kind !== "discarded" && <Failure res={identity} sub={sub} />;
-  else main = <Page path={path} query={query} go={go} />;
+  else main = identityMain(identity, sub, <Page path={path} query={query} go={go} />);
 
-  const id = identity.kind === "ok" ? identity.data : undefined;
+  const id = identity.load.kind === "ok" ? identity.load.data : undefined;
   return (
     <ShellContext value={{ roles: id?.roles ?? [], offline: offline !== undefined }}>
       <a className="skip" href="#main">Skip to the page</a>
