@@ -185,7 +185,7 @@ func TestRecordReads(t *testing.T) {
 		{[]string{"fragment", "show", "frg_test"}, []string{"Fragment frg_test", "worker-labels, layer role, scope cluster", "frv_test, head revision 2",
 			"bronzewardctl fragment show frv_test", "2026-10-22 09:00:00 UTC"}},
 		{[]string{"fragment", "show", "frv_test"}, []string{"References  registry-pass (string, version 1)", "\n  machine:\n", "\n      team: storage\n",
-			"\n      motd: \"a\tb\"\n"}},
+			"\n      motd: \"a\\x09b\"\n"}},
 		{[]string{"fragment", "history", "frg_test"}, []string{"REVISION", "frv_test", "h-author", "fragment worker-labels, layer role"}},
 		{[]string{"profile", "show", "prv_test"}, []string{"profile workers pins frv_test"}},
 		{[]string{"assignment", "show", "asg_test"}, []string{"Assignment asg_test", "none: removed at head revision 3"}},
