@@ -10,9 +10,9 @@ import { Form, field, Result, Text, unsaved, useSend, useUnsaved, useWrites } fr
 import { Id, Ref, Scroll, short, useItem, useList, useReads, usePending } from "./list.tsx";
 import type { Cluster } from "./machines.tsx";
 import { references, type Spot, spotOfLine, spotOfPath, spotOfReference } from "./position.ts";
+import type { Problem } from "./request.ts";
 import { Action } from "./shell.tsx";
 import { Conflict, Refused, Status } from "./states.tsx";
-import type { Problem } from "./request.ts";
 import type { Outcome, Write } from "./write.ts";
 
 type S = components["schemas"];
