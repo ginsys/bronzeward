@@ -60,6 +60,15 @@ func TestRestoredFlag(t *testing.T) {
 	}
 }
 
+// recoveryEpochHeader is the epoch every answer of recoveryServer carries; a test sets it with
+// setEpochHeader, before it starts the server.
+var recoveryEpochHeader = "ep_BWSYNTH-1"
+
+func setEpochHeader(t *testing.T, epoch string) {
+	t.Cleanup(func() { recoveryEpochHeader = "ep_BWSYNTH-1" })
+	recoveryEpochHeader = epoch
+}
+
 // recoveryServer is a fake server for the recovery commands, answering reads from answers by
 // method and path, and every POST 201 with post's body. It lists the requests it saw.
 func recoveryServer(t *testing.T, answers map[string]string, post string) func() []string {
@@ -69,7 +78,7 @@ func recoveryServer(t *testing.T, answers map[string]string, post string) func()
 		mu.Lock()
 		seen = append(seen, r.Method+" "+r.URL.Path)
 		mu.Unlock()
-		w.Header().Set("Bronzeward-Epoch", "ep_BWSYNTH-1")
+		w.Header().Set("Bronzeward-Epoch", recoveryEpochHeader)
 		w.Header().Set("Content-Type", "application/json")
 		key := r.Method + " " + r.URL.Path
 		if cur := r.URL.Query().Get("cursor"); cur != "" {
@@ -237,6 +246,57 @@ func TestRecoveryStatusFollowsTheTimeline(t *testing.T) {
 	}
 }
 
+// TestRecoveryStatusStructuredSkipsNextSteps: -o json and -o yaml print the answer as it came, so
+// they read no operation or timeline for the next steps.
+func TestRecoveryStatusStructuredSkipsNextSteps(t *testing.T) {
+	for _, o := range []string{"json", "yaml"} {
+		seen := recoveryServer(t, map[string]string{
+			"GET /api/v1/recovery": `{"epoch":"ep_BWSYNTH-1","recoveryMode":true,"scopes":[{"machine":"mch_b","state":"unresolved"},{"machine":"mch_c","state":"blocked"}]}`,
+		}, "")
+		var out, errb bytes.Buffer
+		if code := run([]string{"-o", o, "recovery", "status"}, &out, &errb); code != 0 {
+			t.Fatalf("-o %s: exit %d\n%s", o, code, errb.String())
+		}
+		for _, r := range seen() {
+			if strings.Contains(r, "/operations") || strings.Contains(r, "/timeline") {
+				t.Errorf("-o %s read %s for a next step", o, r)
+			}
+		}
+	}
+}
+
+// TestRecoveryStatusRefusesAStaleSnapshot: when the epoch the client holds is no longer the one the
+// answer names, the table shows nothing and says to read again. The fake server's header names
+// ep_BWSYNTH-1 and the body ep_BWSYNTH-0, so the client's latest epoch differs from the snapshot's.
+func TestRecoveryStatusRefusesAStaleSnapshot(t *testing.T) {
+	recoveryServer(t, map[string]string{
+		"GET /api/v1/recovery": `{"epoch":"ep_BWSYNTH-0","recoveryMode":true,"scopes":[{"machine":"mch_a","state":"ready"}]}`,
+	}, "")
+	var out, errb bytes.Buffer
+	rc := run([]string{"recovery", "status"}, &out, &errb)
+	if rc == 0 || out.Len() != 0 || !strings.Contains(errb.String(), "the epoch changed from 'ep_BWSYNTH-0' to 'ep_BWSYNTH-1'") {
+		t.Errorf("rc %d, out %q, err %q; want a refusal that shows no table", rc, out.String(), errb.String())
+	}
+}
+
+// TestRecoveryStatusNamesTheRevisionForMissingKeys: a server of API revision 2 refuses order on the
+// timeline (client-contracts section 8.6 item 6); the next step says so and does not drop the keys
+// without a word.
+func TestRecoveryStatusNamesTheRevisionForMissingKeys(t *testing.T) {
+	recoveryServer(t, map[string]string{
+		"GET /api/v1/recovery":                `{"epoch":"ep_BWSYNTH-1","recoveryMode":true,"scopes":[{"machine":"mch_c","state":"blocked"}]}`,
+		"GET /api/v1/machines/mch_c/timeline": `400 {"type":"urn:bronzeward:problem:invalid-request","title":"BWSYNTH","status":400,"instance":"req_BWSYNTH"}`,
+	}, "")
+	var out, errb bytes.Buffer
+	if code := run([]string{"recovery", "status"}, &out, &errb); code != 0 {
+		t.Fatalf("exit %d\n%s", code, errb.String())
+	}
+	flat := strings.Join(strings.Fields(out.String()), " ")
+	if want := "the missing keys need API revision 3; see machine timeline 'mch_c', then recovery mark 'mch_c'"; !strings.Contains(flat, want) {
+		t.Errorf("output lacks %q:\n%s", want, out.String())
+	}
+}
+
 // TestRecoveryTextIsEscaped: every string of a server's answer that the recovery commands print is
 // escaped as a value, a line feed included, so none can forge a row or move the cursor
 // (client-contracts.md section 6 item 8).
@@ -245,8 +305,11 @@ func TestRecoveryTextIsEscaped(t *testing.T) {
 	// tab, a C1 control, a bidi override and DEL.
 	mk := func(n string) string { return n + "\x1b[2J\n\t\u0085\u202e\x7f" + n }
 	js := func(s string) string { b, _ := json.Marshal(s); return string(b) }
+	// The status epoch must equal the header's, which cannot hold ESC, a line feed or DEL.
+	epoch := "EPOCH\u0085‮EPOCH"
+	setEpochHeader(t, epoch)
 	recoveryServer(t, map[string]string{
-		"GET /api/v1/recovery": `{"epoch":` + js(mk("EPOCH")) + `,"recoveryMode":true,"entry":{"enteredBy":` + js(mk("BY")) + `,"enteredAt":"2026-11-01T08:40:00Z","stoppedAt":"2026-11-01T08:31:00Z",` +
+		"GET /api/v1/recovery": `{"epoch":` + js(epoch) + `,"recoveryMode":true,"entry":{"enteredBy":` + js(mk("BY")) + `,"enteredAt":"2026-11-01T08:40:00Z","stoppedAt":"2026-11-01T08:31:00Z",` +
 			`"reason":` + js(mk("WHY")) + `,"restored":[{"family":"database","backup":` + js(mk("BACKUP")) + `,"takenAt":"2026-11-01T08:30:00Z"}]},"exit":null,` +
 			`"scopes":[{"machine":` + js("mch_"+mk("MACH")) + `,"state":"released"}]}`,
 	}, `{"act":`+js(mk("ACT"))+`,"epoch":`+js(mk("NEWEPOCH"))+`,"previousEpoch":`+js(mk("PREV"))+`,"identity":`+js(mk("IDENT"))+`,"note":`+js(mk("NOTE"))+`,"deniedSubjectsListed":true,`+
@@ -277,7 +340,11 @@ func TestRecoveryTextIsEscaped(t *testing.T) {
 		}
 		// Dropping a field would pass the checks above: each one shows, escaped as its own value.
 		for _, m := range c.marks {
-			if want := client.Printable(mk(m)); !strings.Contains(out.String(), want) {
+			want := client.Printable(mk(m))
+			if m == "EPOCH" {
+				want = client.Printable(epoch)
+			}
+			if !strings.Contains(out.String(), want) {
 				t.Errorf("%v: %s is not shown as %q:\n%s", args, m, want, out.String())
 			}
 		}

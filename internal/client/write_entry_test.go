@@ -67,6 +67,8 @@ func TestEntry(t *testing.T) {
 		{"normal start", "", "normal", "This server was started normally; only a server started for recovery serves the entry.", false},
 		{"another key's entry", `,"epoch":"ep_BWSYNTH-3"`, "recovery", "Another recovery entry committed first (epoch ep_BWSYNTH-3)", false},
 		{"an earlier record", `,"epoch":"ep_BWSYNTH-0","request":"req_BWSYNTH"`, "recovery", "Another recovery entry committed first (epoch ep_BWSYNTH-0)", true},
+		// A conflict with a request and no epoch names no epoch, and never "<nil>".
+		{"a request without an epoch", `,"request":"req_BWSYNTH"`, "recovery", "Another recovery entry committed first; this one recorded nothing.", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &fake{epoch: "ep_BWSYNTH-1", beforeEntry: tc.before, post: func(_ int, w http.ResponseWriter, _ *http.Request) {
@@ -76,7 +78,7 @@ func TestEntry(t *testing.T) {
 			c.Context.StartMode = "unknown-BWSYNTH"
 			_, err := c.Send(entryWrite())
 			var u *Unknown
-			if err == nil || errors.As(err, &u) || !strings.Contains(err.Error(), tc.shown) {
+			if err == nil || errors.As(err, &u) || !strings.Contains(err.Error(), tc.shown) || strings.Contains(err.Error(), "<nil>") {
 				t.Errorf("err %v, want a refusal saying %q", err, tc.shown)
 			}
 			if c.Context.StartMode != tc.mode || len(f.postsSeen()) != 1 {

@@ -32,7 +32,7 @@ func (e *env) recoveryStatus(args []string) error {
 	if _, err := e.parse("recovery status", args, 0, nil); err != nil {
 		return err
 	}
-	return e.session(func(c *client.Client, _ *client.Response, srv *apitypes.ServerBody) error {
+	return e.session(func(c *client.Client, _ *client.Response, _ *apitypes.ServerBody) error {
 		r, err := c.Get("/recovery")
 		if err != nil {
 			return err
@@ -50,12 +50,21 @@ func (e *env) recoveryStatus(args []string) error {
 			if s.State == "released" {
 				released++
 			}
+			if e.output == "json" || e.output == "yaml" {
+				continue // those formats print the answer as it came and need no next step
+			}
 			rows = append(rows, client.Printable(s.Machine)+"\t"+client.Printable(string(s.State))+"\t"+nextStep(c, s))
+		}
+		if now := c.Context.LastEpoch; now != "" && now != rec.Epoch {
+			// A next-step read saw a new entry: the snapshot above is stale and could advise a release
+			// that the entry has reset.
+			return fmt.Errorf("the epoch changed from %s to %s while the next steps were read; nothing is shown. Read it again with: recovery status",
+				client.ShellWord(rec.Epoch), client.ShellWord(now))
 		}
 		return e.emit(r.Body, func(w *tabwriter.Writer) {
 			fmt.Fprintf(w, "Epoch\t%s\n", client.Printable(rec.Epoch))
 			fmt.Fprintf(w, "Recovery mode\t%s\n", map[bool]string{true: "on", false: "off"}[rec.RecoveryMode])
-			fmt.Fprintf(w, "Start mode\t%s (GET /server)\n", client.ShownStartMode(string(srv.StartMode)))
+			fmt.Fprintf(w, "Start mode\t%s (GET /server)\n", client.ShownStartMode(c.Context.StartMode))
 			if en := rec.Entry; en != nil {
 				fmt.Fprintf(w, "Entered\t%s by %s: %s\n", when(en.EnteredAt), client.Printable(en.EnteredBy), client.Printable(en.Reason))
 				fmt.Fprintf(w, "Restore stopped\t%s\n", when(en.StoppedAt))
@@ -117,6 +126,11 @@ func nextStep(c *client.Client, s apitypes.RecoveryScope) string {
 				entries, err = decode[apitypes.TimelineEntry](c, pg.Items...)
 			}
 			if err != nil {
+				var p *client.Problem
+				if errors.As(err, &p) && p.Code() == "invalid-request" {
+					// An API revision 2 server refuses order (client-contracts section 8.6 item 6).
+					return "the missing keys need API revision 3; see machine timeline " + m + ", then recovery mark " + m
+				}
 				return "see machine timeline " + m + ", then recovery mark " + m
 			}
 			for _, t := range entries {
