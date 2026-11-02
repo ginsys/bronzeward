@@ -110,7 +110,7 @@ func (e *env) profileSet(args []string) error {
 	return e.writeAfter(func(c *client.Client) (err error) {
 		if rp != nil {
 			pinned = names
-		} else if pinned, err = pins(c, draft, names); err != nil {
+		} else if pinned, w.Reads, err = pins(c, draft, names); err != nil {
 			return err
 		}
 		w.Input = "--fragments " + client.ShellWord(strings.Join(pinned, ","))
@@ -132,11 +132,11 @@ func (e *env) profileSet(args []string) error {
 // pins resolves --fragments (T17): an frv_ ID is used as given; a name is the revision the draft
 // proposes for that fragment, refused when the draft removes it, or else the fragment head's
 // revision in the draft's cluster. The server stays authoritative and refuses a pin it does not
-// accept.
-func pins(c *client.Client, draft string, names []string) ([]string, error) {
+// accept. It also returns the epoch of the draft answer, which the write checks before it sends.
+func pins(c *client.Client, draft string, names []string) ([]string, string, error) {
 	d, first, err := readDraft(c, draft)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	proposed := map[string]*string{}
 	for _, item := range d.Entries {
@@ -144,7 +144,7 @@ func pins(c *client.Client, draft string, names []string) ([]string, error) {
 		// chosen without it could be the wrong one: refuse, as entryRead does.
 		x, err := item.AsSourceEntry()
 		if err != nil {
-			return nil, ef("GET /api/v1/drafts/%s: an entry cannot be read: %w; nothing was sent", url.PathEscape(draft), err)
+			return nil, "", ef("GET /api/v1/drafts/%s: an entry cannot be read: %w; nothing was sent", url.PathEscape(draft), err)
 		}
 		if x.Kind == apitypes.SourceEntryKindFragment && x.Name != nil {
 			proposed[*x.Name] = x.Revision
@@ -159,28 +159,21 @@ func pins(c *client.Client, draft string, names []string) ([]string, error) {
 			out[i] = n
 			continue
 		case inDraft && rev == nil:
-			return nil, ef("draft %s removes the fragment %s, so a profile cannot pin it; nothing was sent", d.Id, client.ShellWord(n))
+			return nil, "", ef("draft %s removes the fragment %s, so a profile cannot pin it; nothing was sent", d.Id, client.ShellWord(n))
 		case inDraft:
 			out[i] = *rev
 			continue
 		case heads == nil:
 			if heads, err = fragmentHeads(c, d.Cluster); err != nil {
-				return nil, err
-			}
-			// The pins come from two reads. The draft answer's own epoch is the baseline: the client's
-			// last one can already be newer (client-contracts.md section 8.5).
-			if now := c.Context.LastEpoch; first != "" && now != "" && now != first {
-				return nil, ef("%s: the epoch changed from %s to %s while draft %s and the fragment heads were read; nothing was sent. "+
-					"Read the draft again with: draft show %s, then run this command again",
-					c.Context.Where(), client.ShellWord(first), client.ShellWord(now), d.Id, client.ShellWord(draft))
+				return nil, "", err
 			}
 		}
 		if heads[n] == nil {
-			return nil, ef("cluster %s has no fragment %s with a revision, and draft %s proposes none; nothing was sent", d.Cluster, client.ShellWord(n), d.Id)
+			return nil, "", ef("cluster %s has no fragment %s with a revision, and draft %s proposes none; nothing was sent", d.Cluster, client.ShellWord(n), d.Id)
 		}
 		out[i] = *heads[n]
 	}
-	return out, nil
+	return out, first, nil
 }
 
 // fragmentHeads maps the names of cluster's fragments to their head revisions, read from every

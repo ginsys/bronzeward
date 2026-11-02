@@ -27,6 +27,9 @@ type publishFake struct {
 	// machineEpoch, when not empty, is the epoch the machine answers carry: the epoch moved after
 	// the release was read.
 	machineEpoch string
+	// goneEpoch, when not empty, makes mch_b answer 404 under that epoch, as the release's last machine.
+	goneEpoch string
+	goneMoved bool
 }
 
 const (
@@ -39,7 +42,7 @@ const (
 func (f *publishFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1")
 	f.mu.Lock()
-	state, first, bare, pagesRefused, machineEpoch := f.state, f.first, f.bare, f.pagesRefused, f.machineEpoch
+	state, first, bare, pagesRefused, machineEpoch, goneEpoch, goneMoved := f.state, f.first, f.bare, f.pagesRefused, f.machineEpoch, f.goneEpoch, f.goneMoved
 	desiredA, desiredB := `"rel_BWSYNTH"`, `"rel_BWSYNTH"`
 	if f.replaced {
 		desiredA, desiredB = `"rel_BWSYNTH-new"`, `null`
@@ -93,6 +96,17 @@ func (f *publishFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"id":"rel_BWSYNTH","cluster":"cl_BWSYNTH","machines":[{"machine":"mch_a"},{"machine":"mch_b"}]}`)
 	case path == "/machines/mch_a":
 		fmt.Fprintf(w, `{"id":"mch_a","desired":%s,"applied":{"release":"rel_BWSYNTH-old","source":"operation"}}`, desiredA)
+	case path == "/server" && goneMoved:
+		w.Header().Set("Bronzeward-Epoch", goneEpoch)
+		fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":2,"startMode":"normal"}`)
+	case path == "/machines/mch_b" && goneEpoch != "":
+		f.mu.Lock()
+		f.goneMoved = true // the epoch moved: GET /server shows it from here on
+		f.mu.Unlock()
+		w.Header().Set("Bronzeward-Epoch", goneEpoch)
+		w.Header().Set("Content-Type", "application/problem+json")
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, `{"type":"urn:bronzeward:problem:not-found","title":"BWSYNTH","status":404}`)
 	case path == "/machines/mch_b":
 		fmt.Fprintf(w, `{"id":"mch_b","desired":%s,"applied":null}`, desiredB)
 	case path == "/releases/rel_BWSYNTH/machines/mch_a/review":
@@ -207,4 +221,15 @@ func TestPublication(t *testing.T) {
 			"  The epoch changed from 'ep_BWSYNTH-1' to 'ep_BWSYNTH-2' while the machines were read, so no next step is shown. Read them again with: release show 'rel_BWSYNTH'\n"+
 			"Review a machine's rendered configuration: bronzewardctl release review rel_BWSYNTH <machine>\n",
 		"", "plan an", "hand it over", "is now Desired", "no Desired")
+
+	// The change shows first in the failed read of the release's last machine: the advice built for
+	// the machine before it is of the earlier snapshot too.
+	f.mu.Lock()
+	f.machineEpoch, f.goneEpoch = "", "ep_BWSYNTH-2"
+	f.mu.Unlock()
+	step("draft show before the failed publish", []string{"draft", "show", "drf_BWSYNTH"}, 0, "drf_BWSYNTH", "")
+	step("an epoch change shown by a failed machine read shows no next step", pub, 0,
+		"Publication succeeded: release rel_BWSYNTH was published for 2 machines. Nothing has been sent to any machine.\n"+
+			"  The epoch changed from 'ep_BWSYNTH-1' to 'ep_BWSYNTH-2' while the machines were read, so no next step is shown. Read them again with: release show 'rel_BWSYNTH'\n",
+		"", "plan an", "hand it over", "is now Desired", "cannot be read")
 }

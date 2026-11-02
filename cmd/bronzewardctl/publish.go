@@ -123,13 +123,18 @@ func nextSteps(c *client.Client, release string) ([]string, error) {
 			err = json.Unmarshal(r.Body, &x)
 		}
 		// The machine answer's own epoch is compared, not the client's last one: a read that showed a
-		// new epoch has already refreshed it (client-contracts.md section 8.5). Machines read before
-		// are of the earlier snapshot, so none is described.
-		if err == nil && first != "" && r.Header.Get("Bronzeward-Epoch") != "" && r.Header.Get("Bronzeward-Epoch") != first {
+		// new epoch has already refreshed it (client-contracts.md section 8.5). A failed read has no
+		// answer to ask, so the last epoch seen stands for it. Machines read before are of the earlier
+		// snapshot, so none is described.
+		now := c.Context.LastEpoch
+		if r != nil && r.Header.Get("Bronzeward-Epoch") != "" {
+			now = r.Header.Get("Bronzeward-Epoch")
+		}
+		if first != "" && now != "" && now != first {
 			return []string{
 				sf("Publication succeeded: release %s was published for %s. Nothing has been sent to any machine.", pr(rel.Id), machines),
 				sf("  The epoch changed from %s to %s while the machines were read, so no next step is shown. Read them again with: release show %s",
-					client.ShellWord(first), client.ShellWord(r.Header.Get("Bronzeward-Epoch")), client.ShellWord(rel.Id)),
+					client.ShellWord(first), client.ShellWord(now), client.ShellWord(rel.Id)),
 				"Review a machine's rendered configuration: bronzewardctl release review " + pr(rel.Id) + " <machine>"}, nil
 		}
 		switch {

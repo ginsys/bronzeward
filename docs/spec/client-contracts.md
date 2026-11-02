@@ -832,10 +832,12 @@ again. A failed read that the command needs ends it with that read's own error.
 Three more commands read twice, and each compares the epoch of the answers themselves. After
 `publish` succeeds, it shows no next step for the machines when a machine answer has another epoch
 than the release answer. It still reports the publication, which is done, and names `release show`.
-`profile set` sends nothing when the draft answer and the fragment list have different epochs. It
-says that nothing was sent and names `draft show`. `machine add` names the cluster only when the
-cluster answer has the epoch of the write's answer. Every other multi-page read needs no such
-comparison, because a cursor carries its epoch and a change makes it `400 cursor-invalid`.
+`profile set` sends nothing when the draft answer and the fragment list have different epochs, or
+when the epoch changes before the send. It says that nothing was sent and names `draft show`.
+`machine add` names the cluster only when the cluster answer has the epoch of the write's answer.
+The wait of `import` does not end on a lapsed lease when the claim or operation answer has another
+epoch than the events shown. It reads both again. Every other multi-page read needs
+no such comparison, because a cursor carries its epoch and a change makes it `400 cursor-invalid`.
 
 An epoch is never ordered or parsed. A missing `Bronzeward-Epoch` on an authenticated success is
 a defect the client reports.
