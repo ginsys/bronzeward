@@ -256,7 +256,9 @@ describe("the draft editor (#339)", () => {
       const entries = (await api("h-author", "GET", `/drafts/${id}`)).body!["entries"] as { kind: string; name?: string; revision: string | null }[];
       const revision = entries.find((e) => e.kind === "fragment" && e.name === name)?.revision;
       expect(typeof revision).toBe("string");
-      expect(String((await api("h-author", "GET", `/fragment-revisions/${revision}`)).body!["document"])).toContain("example.test/mine: synthetic");
+      // Compared here, so a failure prints a boolean and never the document.
+      const stored = String((await api("h-author", "GET", `/fragment-revisions/${revision}`)).body!["document"]).includes("example.test/mine: synthetic");
+      expect(stored).toBe(true);
       await browser.waitUntil(() => holds("mine"), { timeout: 20_000, timeoutMsg: "the saved revision lost this browser's text" });
       await other.execute(() => [localStorage.length, sessionStorage.length]).then((n) => expect(n).toEqual([0, 0]));
     } finally {
