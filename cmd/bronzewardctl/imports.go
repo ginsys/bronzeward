@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -341,13 +342,13 @@ func (e *env) follow(c *client.Client, a accepted, before int) (err error) {
 	}
 	gen, ours, settled, code := before, before == 0, "", ""
 	next := b.LeaseUntil.Add(leaseMargin)
-	// shown is set by an event and cleared by the Until that follows it: Until asked right after an
-	// event can have more of the backlog behind it, so it reads no lease. A keep-alive, which the
-	// server sends only after it sent everything it had, and a read of the operation can.
-	shown := false
+	// seen is the number of the last event shown; behind, the operation's newest event when a lapsed
+	// lease was read with events still unshown. The lease decides only once those are shown.
+	seen, behind := 0, 0
 	o, err := c.Watch(a.Operation, client.Watch{
 		Show: func(ev client.Event) {
-			shown = true
+			_, n, _ := strings.Cut(ev.ID, ":")
+			seen, _ = strconv.Atoi(n)
 			var d struct {
 				Generation int    `json:"generation"`
 				Code       string `json:"code"`
@@ -373,12 +374,10 @@ func (e *env) follow(c *client.Client, a accepted, before int) (err error) {
 		},
 		Clear: func() {
 			fmt.Fprintln(e.err, "  (the events above no longer hold)")
-			gen, ours, settled = before, before == 0, ""
+			gen, ours, settled, seen, behind = before, before == 0, "", 0, 0
 		},
 		Until: func() (bool, error) {
-			after := shown
-			shown = false
-			if settled != "" || after || time.Now().Before(next) {
+			if settled != "" || seen < behind || time.Now().Before(next) {
 				return settled != "", nil
 			}
 			nb, err := readIngestion(c, a.Ingestion)
@@ -386,7 +385,21 @@ func (e *env) follow(c *client.Client, a accepted, before int) (err error) {
 				return false, err
 			}
 			b, next = nb, later(nb.LeaseUntil, time.Now()).Add(leaseMargin)
-			return (b.State == "held" || b.State == "resumed") && time.Now().After(b.LeaseUntil), nil
+			if b.State != "held" && b.State != "resumed" || !time.Now().After(b.LeaseUntil) {
+				return false, nil
+			}
+			// The events not yet shown (a stream cut short, pages not yet read) can hold this run's
+			// outcome: the lapsed lease decides only once the operation's newest event was shown.
+			r, err := c.Get("/operations/" + url.PathEscape(a.Operation))
+			if err != nil {
+				return false, err
+			}
+			var op apitypes.OperationBody
+			if err := json.Unmarshal(r.Body, &op); err != nil {
+				return false, fmt.Errorf("GET /api/v1/operations/%s: %w", pr(a.Operation), err)
+			}
+			behind, next = op.LastEvent, time.Time{}
+			return seen >= op.LastEvent, nil
 		},
 	})
 	if o == nil {
