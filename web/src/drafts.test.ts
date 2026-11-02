@@ -225,6 +225,17 @@ describe("[Go to field] positions (B13)", () => {
         "- !bwref |-\n x/foo\n",
         "- - !bwref |-\n   x/foo\n",
       ]) expect(references(one)).toEqual(["x/foo"]);
+      // An anchor after a dash belongs to the entry, not to a key (Copilot review of the PR): the
+      // content only has to pass the dash, as without the anchor. An anchored key is still a key.
+      for (const one of [
+        "- &entry !bwref |-\n  x/foo\n",
+        "- &entry !bwref |-\n x/foo\n",
+        "- - &e !bwref |-\n   x/foo\n",
+        "-   &e !bwref |-\n  x/foo\n",
+        "- &e a: !bwref |-\n   x/foo\n",
+        "a:\n  - &e !bwref |-\n    x/foo\n",
+      ]) expect(references(one)).toEqual(["x/foo"]);
+      for (const none of ["- - &e !bwref |-\n  x/foo\n", "- &e a: !bwref |-\n  x/foo\n"]) expect(references(none)).toEqual([]);
       // The key's column binds a block scalar's content only. A plain scalar's next line is read as
       // before: go-yaml refuses the first (could not find expected ':') and folds the second into
       // "x/foo y", so neither names a reference.
