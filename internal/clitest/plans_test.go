@@ -50,6 +50,9 @@ func (e *planEnv) proposed(t *testing.T) []string {
 		}
 		ids = append(ids, id)
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
 	return ids
 }
 
