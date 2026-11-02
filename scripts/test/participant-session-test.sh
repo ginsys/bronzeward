@@ -765,4 +765,26 @@ if [ "$(grep -cE '^(handback|t9_clean)\(\) \{' "$t/clean.sh")" = 2 ]; then
   else bad "t9_clean, nothing to repair: $(cat "$t/clean.log") ($out)"; fi
 else bad "handback and t9_clean were not found in the session"; fi
 
+# idp_reached with a docker client that ignores TERM, as one waiting on a daemon that hangs can. The
+# timeout's KILL ends it; the test shortens the timeout to 1 s and its KILL fallback to 1 s more.
+if ! grep -nE '(^|[ ;(])timeout( -s [A-Z]+)? [0-9]' "$session" >"$t/nokill"; then
+  ok "every timeout in the session has a KILL fallback"
+else bad "a timeout in the session has no KILL fallback: $(cat "$t/nokill")"; fi
+sed -n '/^idp_reached() {$/,/^}$/p' "$session" | sed 's/timeout -k 5 60 /timeout -k 1 1 /' >"$t/probe.sh"
+mkdir -p "$t/hbin"
+cat >"$t/hbin/docker" <<'EOF'
+#!/bin/sh
+trap '' TERM
+sleep 10
+EOF
+chmod +x "$t/hbin/docker"
+s0=$SECONDS
+# shellcheck disable=SC2016 # the inner shell's own text
+PATH=$t/hbin:$PATH bash -c 'BW_A=a BW_DEV_IDP_PORT=1 ZITADEL_LOGIN_IMAGE=i discovery_get=""
+  . "$0"; idp_reached' "$t/probe.sh" 2>/dev/null
+rc=$?
+if [ "$rc" != 0 ] && [ $((SECONDS - s0)) -lt 6 ]; then
+  ok "idp_reached ends a docker client that ignores TERM"
+else bad "idp_reached with a docker client that ignores TERM: rc $rc after $((SECONDS - s0)) s"; fi
+
 exit "$fail"
