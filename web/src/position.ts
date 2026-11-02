@@ -63,15 +63,25 @@ export async function spotOfPath(text: string, path: string): Promise<Spot | und
 // non-specific tag ! makes a quoted or block scalar a !!str (go-yaml), and a plain scalar cannot
 // hold a reference's tag. A path that holds no string here adds nothing; the server refuses it
 // (rule embedded).
+//
+// go-yaml breaks a line at U+2028 and U+2029 but keeps the character in a scalar's value, where
+// the embedded document's own parse breaks a line at it again: a folded line after it is not
+// folded into the line before. The parser here does neither. So the text is first parsed with only
+// a lone carriage return and U+0085 read as a line feed, which go-yaml folds as one, and a path
+// not found there is looked up with every break read as a line feed (`parse`).
 const STR = "tag:yaml.org,2002:str";
-function embeddedTexts(text: string, embedded: readonly EmbeddedPath[]): { text: string; spot: Spot }[] {
+const FOLDED_BREAKS = /\r(?!\n)|\u0085/g;
+function embeddedTexts(text: string, embedded: readonly EmbeddedPath[]): { text: string; spot: Spot; literal: boolean }[] {
   if (embedded.length === 0) return [];
-  const docs = parse(text);
-  const found: { text: string; spot: Spot }[] = [];
+  const written = parseAllDocuments(text.replace(FOLDED_BREAKS, "\n"));
+  let broken: ReturnType<typeof parse> | undefined;
+  const found: { text: string; spot: Spot; literal: boolean }[] = [];
   for (const { path } of embedded) {
-    const node = path.includes("|") ? undefined : nodeAt(docs, path);
+    if (path.includes("|")) continue;
+    let node = nodeAt(written, path);
+    if (node === undefined) node = nodeAt((broken ??= parse(text)), path);
     if (!isScalar(node) || typeof node.value !== "string" || (node.tag !== undefined && node.tag !== STR && node.tag !== "!") || node.range == null) continue;
-    found.push({ text: node.value, spot: { start: node.range[0], end: node.range[1] } });
+    found.push({ text: node.value, spot: { start: node.range[0], end: node.range[1] }, literal: node.type === "BLOCK_LITERAL" });
   }
   return found;
 }
@@ -296,15 +306,16 @@ function scan(text: string, embedded: readonly EmbeddedPath[]) {
 }
 
 // The tag of a reference the refusal names: the first `!bwref <name>` in the text. A reference
-// only an embedded document carries points at its tag in that document's scalar when the text
-// shows the tag as written (a literal block), and else at the scalar.
+// only an embedded document carries points at its first tag in a literal block, whose lines are
+// the document's lines, and else at the scalar: a folded or quoted scalar's text can show a tag
+// that a comment holds once the scalar is decoded.
 export function spotOfReference(text: string, name: string, embedded: readonly EmbeddedPath[] = []): Spot | undefined {
   const { outer, held } = scan(text, embedded);
   const t = outer.find((t) => t.name === name);
   if (t !== undefined) return { start: t.index, end: t.index + t.tag.length };
   const e = held.find((e) => tags(e.text).some((t) => t.name === name));
   if (e === undefined) return undefined;
-  const shown = tags(text).find((t) => t.name === name && t.index >= e.spot.start && t.index < e.spot.end);
+  const shown = e.literal ? tags(text).find((t) => t.name === name && t.index >= e.spot.start && t.index < e.spot.end) : undefined;
   return shown === undefined ? e.spot : { start: shown.index, end: shown.index + shown.tag.length };
 }
 
