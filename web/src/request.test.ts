@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { API_BASE, type Attempt, Client, type ClientOptions, CUT, NOT_SENT } from "./request.ts";
 import { type ShellEvents, ShellReads } from "./shell.tsx";
-import { cutBody, endlessBody, lateBody, noHeaders } from "./test-stalls.ts";
+import { abortError, cutBody, endlessBody, lateBody, noHeaders } from "./test-stalls.ts";
 
 // An attempt that was sent: its answer, or undefined when none came.
 function sentOne(a: Attempt | undefined | typeof NOT_SENT): Attempt | undefined {
@@ -929,13 +929,23 @@ describe("the attempt bound (§8.4 item 8)", () => {
   test("a stalled read of the write's epoch does not hold the attempt past 60 s", async () => {
     // The write's headers come at 29 s and name e2, while another answer recorded e1: GET /recovery is
     // read, and its refusal body never ends. That read is sent within the write's bound, so the write
-    // settles at 60 s from its own send (its whole body came at 29 s) and not at 89 s from the read's.
+    // settles at 60 s from its own send and not at 89 s from the read's. As in a browser, the unread
+    // body of the write errors once the bound fired, so the write gets no answer and is ambiguous.
     const holder: { c?: Client } = {};
     const { c, signals } = bounded(async (init, n) => {
       if (n === 1) {
         await holder.c!.attempt("GET", "/recovery");
         await new Promise((resolve) => setTimeout(resolve, 29_000));
-        return new Response("{}", { status: 201, headers: { "Content-Type": "application/json", "Bronzeward-Epoch": "e2" } });
+        const body = new ReadableStream<Uint8Array>(
+          {
+            pull(ctl) {
+              if (init?.signal?.aborted === true) ctl.error(abortError());
+              else (ctl.enqueue(new TextEncoder().encode("{}")), ctl.close());
+            },
+          },
+          { highWaterMark: 0 },
+        );
+        return new Response(body, { status: 201, headers: { "Content-Type": "application/json", "Bronzeward-Epoch": "e2" } });
       }
       return n === 2 ? ok({}, "e1") : endlessBody(init, 401, problemHeaders);
     });
@@ -945,7 +955,7 @@ describe("the attempt bound (§8.4 item 8)", () => {
     expect(a.done).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     expect(a.done).toBe(true);
-    expect(a.value).toMatchObject({ status: 201 });
+    expect(a.value).toBeUndefined();
     expect(signals).toHaveLength(3);
   });
 
