@@ -64,6 +64,10 @@ describe("the references of a declared embedded document", () => {
     expect(references("cfg: >-\n  # note\u2029  a: !bwref x/ps\n", at("doc[0]/cfg"))).toEqual(["x/ps"]);
     expect(references("cfg: >-\n  # note\r  a: !bwref x/cr\n", at("doc[0]/cfg"))).toEqual([]);
     expect(references("cfg: >-\n  # note\u0085  a: !bwref x/nel\n", at("doc[0]/cfg"))).toEqual([]);
+    // Both at once: the separator between fields and the one in the folded document.
+    expect(references("b: 1\u2028cfg: >-\n  # note\u2028  a: !bwref x/both\n", at("doc[0]/cfg"))).toEqual(["x/both"]);
+    expect(references("cfg: 'a: !bwref x/one'\u2028other: 1\n", at("doc[0]/cfg"))).toEqual(["x/one"]);
+    expect(references("cfg: 'a: !bwref x/two'\u2029other: 1\n", at("doc[0]/cfg"))).toEqual(["x/two"]);
   });
 
   // Positions are compared as numbers, so a failure prints no document text.
