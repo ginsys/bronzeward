@@ -23,60 +23,75 @@ const position = (state: unknown): number | undefined => {
 // How long the history must stay still before a refused move returns.
 export const QUIET_MS = 100;
 
-// Every entry the page adds carries its position in the history. A refused Back or Forward then
-// returns to the shown page's position (history.go), so the entries on both sides stay. A traversal
-// is relative and queued: a Back pressed while the leave question was open lands after the refusal.
-// So, until the history rests at the shown position again, a traversal asks nothing, and the one
-// return is aimed only once the history was still for QUIET_MS. An entry without a position, which
-// the page did not add, is left under a new entry instead.
+// Every entry carries its position in the history. A refused Back or Forward then returns to the
+// shown page's position (history.go), so the entries on both sides stay. A traversal is relative
+// and queued: a Back pressed while the leave question was open lands after the refusal. So, until
+// the return ends, a traversal asks nothing and an in-app move does nothing, and the return is aimed
+// once, after the history was still for QUIET_MS. If that does not reach the shown page's position
+// (an entry went, or the traversal went past the end and fired nothing), the current entry takes
+// the shown page's address instead. Either way the return ends with the address of the page shown.
 export function positions(h: Entries, here: () => string, later: (f: () => void) => void = (f) => void setTimeout(f, QUIET_MS)) {
-  if (position(h.state) === undefined) h.replaceState({ at: 0 }, "");
-  let shown = { to: here(), at: position(h.state) ?? 0 };
-  // The position a refusal returns to, until the history rests there.
+  // The position of the entry the history is at, as the page last saw it.
+  let current = position(h.state) ?? 0;
+  if (position(h.state) === undefined) h.replaceState({ at: current }, "");
+  let shown = { to: here(), at: current };
+  // The position a refusal returns to, until the return ends; whether its history.go was made.
   let home: number | undefined;
+  let aimed = false;
   let still = 0;
+  // The current entry's position. One without a position was added by a fragment link (Skip to the
+  // page), after the entry the history was at.
+  const locate = (): number => {
+    let at = position(h.state);
+    if (at === undefined) {
+      at = current + 1;
+      h.replaceState({ at }, "");
+    }
+    return (current = at);
+  };
+  const end = (at: number) => {
+    if (here() !== shown.to) h.replaceState({ at }, "", shown.to);
+    shown = { to: shown.to, at };
+    home = undefined;
+  };
   const settle = () => {
     const mine = ++still;
     later(() => {
       if (mine !== still || home === undefined) return;
-      const at = position(h.state);
-      if (at === home) {
-        home = undefined;
-      } else if (at === undefined) {
-        home = undefined;
-        shown = { to: shown.to, at: shown.at + 1 };
-        h.pushState({ at: shown.at }, "", shown.to);
-      } else {
-        h.go(home - at);
-      }
+      const at = locate();
+      if (at === home || aimed) return end(at);
+      aimed = true;
+      h.go(home - at);
+      settle();
     });
   };
   return {
     // On popstate: true when the page follows the move.
     popped(ask?: Ask): boolean {
       const to = here();
-      const at = position(h.state);
+      const at = locate();
       if (home !== undefined) {
-        if (at === home) home = undefined;
+        if (at === home) end(at);
         else settle();
         return false;
       }
       if (ask !== undefined && !ask(to, shown.to)) {
         home = shown.at;
+        aimed = false;
         settle();
         return false;
       }
-      if (at === undefined) h.replaceState({ at: shown.at + 1 }, "");
-      shown = { to, at: at ?? shown.at + 1 };
+      shown = { to, at };
       return true;
     },
-    // An in-app move, which adds an entry unless `to` is the address already. While a refused move
-    // returns, the address is not the shown page's yet: the move does nothing and is false.
+    // An in-app move, which adds an entry unless `to` is the address already. During a return the
+    // address is not the shown page's yet: the move does nothing and is false.
     moved(to: string): boolean {
       if (home !== undefined) return false;
       if (to === here()) return true;
-      shown = { to, at: shown.at + 1 };
-      h.pushState({ at: shown.at }, "", to);
+      current = locate() + 1;
+      shown = { to, at: current };
+      h.pushState({ at: current }, "", to);
       return true;
     },
   };

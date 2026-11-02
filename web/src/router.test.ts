@@ -21,9 +21,16 @@ function session(urls: string[]) {
       list.splice(i + 1, list.length, { url: url ?? list[i]!.url, state });
       i += 1;
     },
-    replaceState(state: unknown) {
+    replaceState(state: unknown, _: string, url?: string) {
       list[i]!.state = state;
+      if (url !== undefined) list[i]!.url = url;
     },
+  };
+  // A fragment link (Skip to the page): an entry without state after the current one, and popstate.
+  const fragment = () => {
+    list.splice(i + 1, list.length, { url: list[i]!.url, state: null });
+    i += 1;
+    pop();
   };
   // With `timers` false, only the queued traversals run, as within QUIET_MS.
   const run = (withTimers = true) => {
@@ -43,7 +50,7 @@ function session(urls: string[]) {
   };
   const p = positions(h, () => list[i]!.url, (f) => void timers.push(f));
   for (const u of urls.slice(1)) p.moved(u);
-  return { p, h, run, urls: () => list.map((e) => e.url), at: () => i, onPop: (f: () => void) => (pop = f) };
+  return { p, h, run, fragment, urls: () => list.map((e) => e.url), at: () => i, onPop: (f: () => void) => (pop = f) };
 }
 
 const asking = (s: ReturnType<typeof session>, answers: boolean[]) => {
@@ -132,15 +139,50 @@ describe("positions", () => {
     expect(asked).toEqual([["/changes", "/clusters/new"], ["/clusters/new", "/plans"]]);
   });
 
-  test("a refused move to an entry the page did not add leaves it under a new entry", () => {
+  test("an entry a fragment link added is numbered after the entry it left, and a refused Back to it returns", () => {
     const s = session(["/machines"]);
-    s.h.pushState(null, "", "/elsewhere");
-    s.p.moved("/changes");
-    asking(s, []);
-    // Back lands on the unnumbered /elsewhere; refused, /changes is shown under a new entry.
+    s.onPop(() => void s.p.popped());
+    s.fragment();
+    expect(s.p.moved("/changes")).toBe(true);
+    const { asked } = asking(s, []);
     s.h.go(-1);
     s.run();
-    expect(s.urls()).toEqual(["/machines", "/elsewhere", "/changes"]);
+    expect(asked).toEqual([["/machines", "/changes"]]);
+    expect(s.urls()).toEqual(["/machines", "/machines", "/changes"]);
     expect(s.at()).toBe(2);
+    expect(s.h.state).toEqual({ at: 2 });
+  });
+
+  test("a fragment link during a return, which drops the shown page's entry, ends the return at the shown page's address", () => {
+    const s = session(["/machines", "/changes", "/clusters/new"]);
+    const { asked } = asking(s, [false, false]);
+    s.h.go(-1);
+    s.run(false);
+    // Skip to the page on /changes: the fragment's entry replaces /clusters/new at its position.
+    s.fragment();
+    s.run();
+    expect(s.urls()).toEqual(["/machines", "/changes", "/clusters/new"]);
+    expect(s.at()).toBe(2);
+    // The numbering stays whole: a move, then a refused Back by two, returns to the move's entry.
+    expect(s.p.moved("/plans")).toBe(true);
+    s.h.go(-2);
+    s.run();
+    expect(s.at()).toBe(3);
+    expect(s.urls()[3]).toBe("/plans");
+    expect(asked).toEqual([["/changes", "/clusters/new"], ["/changes", "/plans"]]);
+  });
+
+  test("a return whose traversal fires nothing ends at the shown page's address, and in-app moves work again", () => {
+    const s = session(["/machines", "/changes", "/clusters/new"]);
+    asking(s, []);
+    s.h.go(-1);
+    s.run(false);
+    s.h.go = () => {};
+    s.run();
+    expect(s.urls()).toEqual(["/machines", "/clusters/new", "/clusters/new"]);
+    expect(s.at()).toBe(1);
+    expect(s.p.moved("/plans")).toBe(true);
+    expect(s.urls()).toEqual(["/machines", "/clusters/new", "/plans"]);
+    expect(s.h.state).toEqual({ at: 2 });
   });
 });
