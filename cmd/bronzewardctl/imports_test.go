@@ -40,13 +40,14 @@ const ingAccepted = `{"ingestion":"ing_BWSYNTH","operation":"op_BWSYNTH-ing"}`
 const nothing = "\x00nothing"
 
 func (f *importFake) ingestion() string {
-	mode := f.mode
+	// A review needs encrypted staging, so a transient import has none.
+	mode, review := f.mode, "null"
 	if mode == "" {
-		mode = "encrypted"
+		mode, review = "encrypted", `"pending"`
 	}
 	return fmt.Sprintf(`{"id":"ing_BWSYNTH","kind":"import","mode":%q,"state":%q,"machine":"mch_BWSYNTH","draft":"drf_BWSYNTH",`+
-		`"operation":"op_BWSYNTH-ing","review":"pending","ownerGeneration":%d,"leaseUntil":%q,"expiresAt":"2026-11-01T08:00:00Z","createdAt":"2026-11-01T06:00:00Z"}`,
-		mode, f.claim, f.gen, f.lease.UTC().Format(time.RFC3339))
+		`"operation":"op_BWSYNTH-ing","review":%s,"ownerGeneration":%d,"leaseUntil":%q,"expiresAt":"2026-11-01T08:00:00Z","createdAt":"2026-11-01T06:00:00Z"}`,
+		mode, f.claim, review, f.gen, f.lease.UTC().Format(time.RFC3339))
 }
 
 func (f *importFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -304,7 +305,7 @@ func TestImportLifecycle(t *testing.T) {
 		strings.Replace(startBody(`"5-BWSYNTH"`, ""), `"encrypted"`, `"transient"`, 1))
 	step("status of a lapsed transient claim offers abandon and a new start", []string{"import", "status", "ing_BWSYNTH"}, 0,
 		"Transient staging cannot be taken over: abandon it and import again:\n  bronzewardctl import abandon ing_BWSYNTH\n"+
-			"  bronzewardctl import start --machine 'mch_BWSYNTH' --draft 'drf_BWSYNTH' --staging transient --review\n", "")
+			"  bronzewardctl import start --machine 'mch_BWSYNTH' --draft 'drf_BWSYNTH' --staging transient\n", "")
 	f.set("held", 1, time.Hour, "running", "", "")
 	step("status of a live transient claim promises no takeover", []string{"import", "status", "ing_BWSYNTH"}, 0,
 		"Its run holds the claim. Transient staging cannot be taken over; it can be abandoned now:", "")
