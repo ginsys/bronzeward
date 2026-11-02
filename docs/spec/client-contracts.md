@@ -816,9 +816,10 @@ the context. On a change it:
 4. records the new epoch. A context's first epoch is recorded without a notice.
 
 A command that shows one snapshot built from several reads (`status`, `recovery status`) shows
-nothing when an epoch change falls between its first read and its last, in every output form. It
-says so and names the command that reads again, because the first read, with its revision and start
-mode, no longer holds.
+nothing when an epoch change falls between the first and the last answer it shows, in every output
+form, because the earlier answers, with the revision and start mode they carry, no longer hold.
+After reads that all succeed, it says so and names the command that reads again. A read that fails
+keeps its own error.
 
 An epoch is never ordered or parsed. A missing `Bronzeward-Epoch` on an authenticated success is
 a defect the client reports.
