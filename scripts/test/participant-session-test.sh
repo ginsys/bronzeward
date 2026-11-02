@@ -689,7 +689,9 @@ wait "$stub_a" 2>/dev/null
 # handback and t9_clean (ginsys/bronzeward#509), taken out of the session with stubs around them.
 # PAUSED names the paused containers, INSPECT_FAIL one whose inspect fails, A_STOPPED stops A,
 # NO_IDP makes A's namespace miss Zitadel, and ISSUER_FAIL, RESTART_FAIL and FWD_FAIL end
-# set_issuer, restart_a and forward_idp as their die does. Calls go to the log.
+# set_issuer, restart_a and forward_idp as their die does. INT_ON sends the shell a Ctrl-C (SIGINT)
+# during the inspect of that container, INT_PROBE during idp_reached, as a second Ctrl-C during the
+# cleanup does. Calls go to the log.
 sed -n -e '/^handback() {$/,/^}$/p' -e '/^t9_clean() {$/,/^}$/p' "$session" >"$t/clean.sh"
 mkdir -p "$t/cbin"
 cat >"$t/cbin/inject" <<'EOF'
@@ -703,14 +705,17 @@ clean_case() {
   bash -c 'set -uo pipefail
     log=$T/clean.log task=t4 bin=$T/cbin t9_reader="" BW_A=a BW_B=b BW_C=c
     running() { [ -z "${A_STOPPED:-}" ]; }
-    idp_reached() { [ -z "${NO_IDP:-}" ]; }
+    idp_reached() { [ -z "${INT_PROBE:-}" ] || kill -INT $$; [ -z "${NO_IDP:-}" ]; }
     restart_a() { echo restart_a; [ -z "${RESTART_FAIL:-}" ] || exit 1; }
     forward_idp() { echo forward_idp; [ -z "${FWD_FAIL:-}" ] || exit 1; }
     set_issuer() { echo "set_issuer $1"; [ -z "${ISSUER_FAIL:-}" ] || exit 1; }
     docker() {
       [ "${*: -1}" != "${INSPECT_FAIL:-}" ] || return 1
+      [ "${*: -1}" != "${INT_ON:-}" ] || kill -INT $$
       case " ${PAUSED:-} " in *" ${*: -1} "*) echo true ;; *) echo false ;; esac
     }
+    # As t9 disconnect does; a setup has no INT trap, and SIGINT ends the shell.
+    [ "$1" != t9_clean ] || trap "exit 130" INT TERM
     . "$0"; "$1"' "$t/clean.sh" "$1" 2>&1
 }
 if [ "$(grep -cE '^(handback|t9_clean)\(\) \{' "$t/clean.sh")" = 2 ]; then
@@ -731,6 +736,15 @@ if [ "$(grep -cE '^(handback|t9_clean)\(\) \{' "$t/clean.sh")" = 2 ]; then
     [ "$calls" = "inject unpause A inject unpause C set_issuer zitadel restart_a " ]; then
     ok "handback reports an instance it cannot inspect, and unpauses the others"
   else bad "handback, B not inspected: $calls ($out)"; fi
+  out=$(PAUSED="a b c" INT_ON=a clean_case handback)
+  calls=$(tr '\n' ' ' <"$t/clean.log")
+  if [ "$calls" = "inject unpause A inject unpause B inject unpause C set_issuer zitadel restart_a " ]; then
+    ok "handback finishes after a second Ctrl-C"
+  else bad "handback, Ctrl-C during the cleanup: $calls ($out)"; fi
+  out=$(NO_IDP=1 INT_PROBE=1 clean_case t9_clean)
+  if [ "$(cat "$t/clean.log")" = forward_idp ]; then
+    ok "t9_clean finishes after a second Ctrl-C"
+  else bad "t9_clean, Ctrl-C during the cleanup: $(cat "$t/clean.log") ($out)"; fi
   out=$(A_STOPPED=1 clean_case t9_clean)
   if [ "$(cat "$t/clean.log")" = restart_a ] && [[ $out == *"A is started again"* ]]; then
     ok "t9_clean starts a stopped A again"
