@@ -103,6 +103,11 @@ export const ATTEMPT_BOUND = 60_000;
 // The way a response ends its attempt's timers, once its body is read, cancelled or dropped.
 const timers = new WeakMap<Response, () => void>();
 const endAttempt = (res: Response) => timers.get(res)?.();
+// A response whose body is not read: cancelled first, since its timers no longer bound a stalled transfer.
+const drop = (res: Response) => {
+  void res.body?.cancel().catch(() => {});
+  endAttempt(res);
+};
 
 export class Client {
   private view: View = { principal: "", route: "", query: "" };
@@ -170,7 +175,7 @@ export class Client {
       // so the read is sent again to learn the current one. Any other is read, even on a stale read.
       const epoch = res.headers.get("Bronzeward-Epoch");
       if (epoch !== null && epoch !== this.epoch && records !== this.epochRecords) {
-        endAttempt(res);
+        drop(res);
         if (attempt + 1 >= MAX_TRIES || drops !== this.drops) return { kind: "discarded" };
         continue;
       }
@@ -178,7 +183,7 @@ export class Client {
       // clears its credential at once (§8.2), even when the view moved on; its data stays dropped.
       const stale = this.observeEpoch(res) || sent !== this.generation;
       if (stale && !(res.status === 403 && principal === this.view.principal)) {
-        endAttempt(res);
+        drop(res);
         return { kind: "discarded" };
       }
       if (res.ok) return this.success<T>(res, sent);
@@ -257,7 +262,7 @@ export class Client {
       return { status: res.status, headers: res.headers, data };
     } finally {
       // A renewal that threw while the epoch was learned leaves the body unread.
-      endAttempt(res);
+      drop(res);
     }
   }
 
@@ -385,7 +390,7 @@ export class Client {
   // A body that fails to parse is a defect; one cut off by the network is a transport failure.
   private async success<T>(res: Response, sent: number): Promise<ReadResult<T>> {
     if (!res.headers.has("Bronzeward-Epoch")) {
-      endAttempt(res);
+      drop(res);
       return { kind: "defect", message: "a success carried no Bronzeward-Epoch header" };
     }
     const body = await readJson(res);
@@ -438,8 +443,7 @@ async function readProblem(res: Response): Promise<Problem | null | typeof NOT_J
 async function credentialProblem(res: Response): Promise<Problem | null | typeof NOT_JSON | typeof CUT> {
   const problem = (res.headers.get("Content-Type") ?? "").startsWith("application/problem+json");
   if ((res.status === 401 || res.status === 403 || res.status === 409) && problem) return readProblem(res);
-  void res.body?.cancel().catch(() => {});
-  endAttempt(res);
+  drop(res);
   return null;
 }
 
