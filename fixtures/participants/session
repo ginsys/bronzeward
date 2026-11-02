@@ -512,8 +512,13 @@ t9_stream() {
 }
 # t9_ids <file>...: the IDs of the complete events the streams sent, in order. An event is complete
 # at its blank line; one that the stop cut off is not counted, so its resumption must send it.
+# Each file is parsed alone, so an unfinished event at a file's end is dropped, never completed by
+# the next file's lines.
 t9_ids() {
-  cat -- "$@" | tr -d '\r' | awk '/^id:/ { sub(/^id: */, ""); id = $0 } /^$/ { if (id != "") print id; id = "" }'
+  local f
+  for f in "$@"; do
+    tr -d '\r' <"$f" | awk '/^id:/ { sub(/^id: */, ""); id = $0 } /^$/ { if (id != "") print id; id = "" }'
+  done
 }
 # t9_clean: on any exit of t9 disconnect, the reader ends and A runs again, so that the participant's
 # server is never left stopped.
@@ -559,6 +564,9 @@ t9_disconnect() {
     sleep 1
   done
   [ -n "$(t9_ids "$dir/before")" ] || die "the stream on A sent no event within 20 s"
+  # The reader must still be open at the stop: one that already ended, by the apply's end or a
+  # failure of its own, met no stop.
+  kill -0 "$t9_reader" 2>/dev/null || die "the stream on A ended before the stop; run t9 disconnect right after the t9 setup"
   "$bin/inject" kill A >>"$log" 2>&1 || die "cannot stop A; its output is in $log"
   rc=0
   wait "$t9_reader" || rc=$?
