@@ -4,7 +4,7 @@ import { describe, expect, test } from "vitest";
 import type { components } from "./api/v1";
 import {
   ASSIGNMENT_STATEMENT, AssignmentPane, assignmentBody, assignmentRefusal, choices, compose, fragmentOffers, fromRevision, isCurrent, listsOf, machineOffers, move, noLists, PINS_MAX, PINS_STATEMENT,
-  pinned, pinRefusal, pinsOf, ProfilePane, profileBody, profileOffers, readComposition, referenceStates, shownResult, sourceKey, stillOffered, unknownPins, withLists, withoutPin, withPin,
+  type Composition, pinned, pinRefusal, pinsOf, ProfilePane, profileBody, profileOffers, readComposition, referenceLines, referenceStates, showable, shownResult, sourceKey, stillOffered, unknownPins, withLists, withoutPin, withPin,
 } from "./composition.tsx";
 import { editor, EMPTY, holdsUnsaved, where } from "./drafts.tsx";
 import { WritesProvider } from "./forms.tsx";
@@ -307,6 +307,41 @@ describe("the reference states never carry a value", () => {
   });
   test("a name that is an Object property is not a declaration", () => {
     expect(referenceStates("a: !bwref constructor\n", {})[0]).toMatchObject({ name: "constructor", declared: undefined, state: "carried, not declared" });
+  });
+});
+
+describe("Show needs the two lists only (ginsys/bronzeward#575)", () => {
+  test("a failed layer read of an unrelated revision does not turn it off", () => {
+    expect(showable({ kind: "ok" }, { kind: "ok" })).toBe(true);
+    expect(showable({ kind: "ok" }, { kind: "loading" })).toBe(false);
+    expect(showable({ kind: "error" }, { kind: "ok" })).toBe(false);
+  });
+  // The pane shows these lines from a memo of the completed composition, so a render caused by the
+  // read counter shows the same ones. They are a function of the composition alone.
+  const rev = (id: string, name: string, document: string, references: Record<string, { kind: "string"; version: number }>) =>
+    ({ id, name, layer: "site", document, declarations: { references, embedded: [] } }) as unknown as Composition["revisions"][string];
+  const composition: Composition = {
+    order: [
+      { layer: "site", name: "a", revision: "frv_a", via: undefined },
+      { layer: "site", name: "b", revision: "frv_b", via: "p" },
+      { layer: "role", name: "a", revision: "frv_a", via: undefined },
+    ],
+    revisions: {
+      frv_a: rev("frv_a", "a", "x: !bwref one\ny: !bwref two\n", { one: { kind: "string", version: 3 } }),
+      frv_b: rev("frv_b", "b", "z: 1\n", {}),
+    },
+  };
+  test("one line per reference of each distinct revision, and one for a revision with none", () => {
+    expect(referenceLines(composition).map((l) => l.text)).toEqual([
+      "a one: string, version 3, declared",
+      "a two: no declaration, carried, not declared",
+      "b: no references",
+    ]);
+  });
+  test("the lines are the same for the same composition, with the keys a list needs", () => {
+    const first = referenceLines(composition);
+    expect(referenceLines(composition)).toEqual(first);
+    expect(new Set(first.map((l) => l.key)).size).toBe(first.length);
   });
 });
 
