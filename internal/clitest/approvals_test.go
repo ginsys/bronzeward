@@ -47,7 +47,7 @@ var approvalCases = map[string]func(*testing.T, *planEnv){
 		p := planID.FindString(e.ctl(e.create("adopt")...).out)
 		before := e.f.actCount()
 		r := e.approveTyped("auto", p)
-		e.f.want(r, 1, "Type the plan ID to approve", "POST /api/v1/plans/"+p+"/approvals is for a person signed in, not an automation token: the server refuses it.",
+		e.f.want(r, 1, "Type the plan ID to send it", "POST /api/v1/plans/"+p+"/approvals is for a person signed in, not an automation token: the server refuses it.",
 			"answered 403", "(forbidden): this route is for humans only", "This needs a person signed in, not an automation token.")
 		if warned, sent := strings.Index(r.err, "is for a person signed in"), strings.Index(r.err, "answered 403"); warned > sent || r.out != "" {
 			t.Errorf("the warning is not before the 403, or standard output is %q:\n%s", r.out, r.err)
@@ -157,11 +157,11 @@ func TestApprovals(t *testing.T) {
 		p := planID.FindString(e.ctl(e.create("adopt")...).out)
 		in.set(nil, nil) // clears the request log, so it holds only the unconfirmed approvals' requests
 		for _, c := range []struct{ stdin, want string }{
-			{"pln_aaaaaaaaaaaaaaaaaaaaaaaaaa\n", "the typed text is not the plan ID " + p + "; nothing was sent"},
-			{"\n", "stopped: no plan ID was typed; nothing was sent"},
-			{"", "stopped: no plan ID was typed; nothing was sent"},
+			{"pln_aaaaaaaaaaaaaaaaaaaaaaaaaa\n", "the typed text is not the plan ID; nothing was sent"},
+			{"\n", "stopped: nothing was typed; nothing was sent"},
+			{"", "stopped: nothing was typed; nothing was sent"},
 		} {
-			f.want(e.ctlIn(c.stdin, append(h, "approve", p)...), 2, "Plan "+p, "Self-approval  predicted: ", "Type the plan ID to approve", c.want)
+			f.want(e.ctlIn(c.stdin, append(h, "approve", p)...), 2, "Plan "+p, "Self-approval  predicted: ", "Type the plan ID to send it", c.want)
 		}
 		f.want(e.ctlIn(p+"\n", append(h, "approve", p, "--no-input")...), 2, "which --no-input forbids; nothing was sent")
 		for _, q := range in.requests() {

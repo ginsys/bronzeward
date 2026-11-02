@@ -28,18 +28,21 @@ func (e *env) confirmTyped(what, want string) error {
 		defer tty.Close()
 		in = tty
 	}
-	fmt.Fprintf(e.err, "Type %s to send it, or press Enter to stop: ", client.Printable(what))
+	if _, err := fmt.Fprintf(e.err, "Type %s to send it, or press Enter to stop: ", client.Printable(what)); err != nil {
+		return notConfirmed{fmt.Errorf("showing the prompt: %w; nothing was sent", err)}
+	}
 	line, err := bufio.NewReader(in).ReadString('\n')
 	if !isTerminal(stdin) || e.tokenStdin {
 		fmt.Fprintln(e.err)
 	}
+	// An empty answer stops before it is compared, so an empty want matches nothing.
 	switch got := strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r"); {
-	case got == want:
-		return nil
 	case got == "" && (err == nil || errors.Is(err, io.EOF)):
 		return notConfirmed{errors.New("stopped: nothing was typed; nothing was sent")}
 	case err != nil && !errors.Is(err, io.EOF):
 		return notConfirmed{fmt.Errorf("reading %s: %w; nothing was sent", what, err)}
+	case got == want:
+		return nil
 	}
 	return notConfirmed{fmt.Errorf("the typed text is not %s; nothing was sent", what)}
 }

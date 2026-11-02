@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -47,6 +50,31 @@ func TestApprove(t *testing.T) {
 	if b := f.took(); len(b) != 0 {
 		t.Errorf("unconfirmed, yet sent %v", b)
 	}
+	// An answer naming another plan, or none, has an ID the operator could type back without it being
+	// the plan the approval goes to; an empty one would match no input.
+	for _, id := range []string{"", "pln_OTHER"} {
+		body := strings.Replace(f.plan(), `"id":"pln_BWSYNTH"`, `"id":"`+id+`"`, 1)
+		f.set(func(f *planFake) { f.raw = map[string]string{"/plans/pln_BWSYNTH": body} })
+		setStdin(t, id)
+		if code, out, errOut := runCtl(t, approve...); code == 0 || out != "" || strings.Contains(errOut, "Type the plan ID") ||
+			!strings.Contains(errOut, "GET /api/v1/plans/pln_BWSYNTH answered plan '"+id+"'; nothing is shown and nothing was sent") {
+			t.Errorf("an answer with ID %q: exit %d, stdout %q, stderr %q", id, code, out, errOut)
+		}
+	}
+	f.set(func(f *planFake) { f.raw = nil })
+	// A display that fails to reach the operator sends nothing, though the prompt shows and the right
+	// ID is typed: the plan view's write, then the prediction's.
+	for _, part := range []string{"Changes shown below", "Self-approval"} {
+		setStdin(t, "pln_BWSYNTH\n")
+		var errb failOn
+		errb.part = part
+		if code := run(approve, io.Discard, &errb); code == 0 || !strings.Contains(errb.String(), "showing the plan: ") {
+			t.Errorf("a failing %q: exit %d, stderr %q", part, code, errb.String())
+		}
+		if b := f.took(); len(b) != 0 {
+			t.Errorf("a failing %q: sent %v", part, b)
+		}
+	}
 
 	code, out, errOut := typed()
 	prompt := strings.Index(errOut, "Type the plan ID to send it, or press Enter to stop: ")
@@ -86,6 +114,38 @@ func TestApprove(t *testing.T) {
 	}
 	if code, out, _ = typed("-o", "json"); code != 0 || out != fmt.Sprintf(approvalJSON, false)+"\n" {
 		t.Errorf("-o json: exit %d, stdout %q; want the approval unchanged", code, out)
+	}
+}
+
+// failOn fails each write that holds part, and keeps every other. The buffer is a field, not
+// embedded, so its WriteString cannot bypass Write.
+type failOn struct {
+	buf  bytes.Buffer
+	part string
+}
+
+func (w *failOn) Write(p []byte) (int, error) {
+	if strings.Contains(string(p), w.part) {
+		return 0, io.ErrClosedPipe
+	}
+	return w.buf.Write(p)
+}
+
+func (w *failOn) String() string { return w.buf.String() }
+
+// TestConfirmEmpty checks that an empty answer never matches, even an empty wanted text, and that a
+// prompt that cannot be shown sends nothing.
+func TestConfirmEmpty(t *testing.T) {
+	for _, in := range []string{"", "\n"} {
+		setStdin(t, in)
+		var nc notConfirmed
+		if err := (&env{err: io.Discard}).confirmTyped("the plan ID", ""); !errors.As(err, &nc) {
+			t.Errorf("input %q against an empty want: %v; want it not confirmed", in, err)
+		}
+	}
+	setStdin(t, "pln_BWSYNTH\n")
+	if err := (&env{err: &shortWriter{}}).confirmTyped("the plan ID", "pln_BWSYNTH"); err == nil || !strings.Contains(err.Error(), "showing the prompt") {
+		t.Errorf("a prompt that cannot be shown: %v", err)
 	}
 }
 
@@ -212,6 +272,26 @@ func TestApprovalEpochs(t *testing.T) {
 		}
 	}
 
+	// The epoch moves after the confirmation, at the send's own preflight read: the plan the operator
+	// confirmed was shown from ep_BWSYNTH-2, so the approval is not sent under ep_BWSYNTH-3.
+	f.set(func(f *planFake) {
+		read, moved := false, false
+		f.epochFor = func(path string) string {
+			read = read || path == "/plans/pln_BWSYNTH"
+			moved = moved || read && path == "/server"
+			return map[bool]string{false: "ep_BWSYNTH-2", true: "ep_BWSYNTH-3"}[moved]
+		}
+	})
+	setStdin(t, "pln_BWSYNTH\n")
+	code, out, errOut := runCtl(t, "approve", "pln_BWSYNTH")
+	if code == 0 || out != "" || !strings.Contains(errOut, "Type the plan ID") ||
+		!strings.Contains(errOut, "not sent: the epoch changed from 'ep_BWSYNTH-2' to 'ep_BWSYNTH-3' after the request was built from reads of the earlier one") {
+		t.Errorf("approve, moved after the confirmation: exit %d, stdout %q, stderr %q", code, out, errOut)
+	}
+	if b := f.took(); len(b) != 0 {
+		t.Errorf("approve, moved after the confirmation: sent %v", b)
+	}
+
 	// The approval answer is in ep_BWSYNTH-3, as the approval is; the GET /server it calls for
 	// answers ep_BWSYNTH-4, which the approval is not from.
 	f.set(func(f *planFake) {
@@ -226,7 +306,7 @@ func TestApprovalEpochs(t *testing.T) {
 			return "ep_BWSYNTH-2"
 		}
 	})
-	code, out, errOut := runCtl(t, "approval", "show", "apr_BWSYNTH")
+	code, out, errOut = runCtl(t, "approval", "show", "apr_BWSYNTH")
 	if code != 0 || !strings.Contains(out, "Approval apr_BWSYNTH of plan pln_BWSYNTH, epoch ep_BWSYNTH-3") || strings.Contains(out, "From before") {
 		t.Errorf("approval show: exit %d, stdout %q, stderr %q", code, out, errOut)
 	}

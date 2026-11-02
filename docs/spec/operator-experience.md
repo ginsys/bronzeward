@@ -626,7 +626,7 @@ Self-approval   predicted: you created this plan and published this release, and
                 fragment, profile or assignment revision in it. Import-base authorship and
                 automation you own are not predicted. The approval records the actual
                 reasons; self-approval is marked and allowed.
-Type the plan ID to approve, or press Enter to stop: pln_f645…cawy
+Type the plan ID to send it, or press Enter to stop: pln_f645…cawy
 Approved (apr_2ztr…47vy). Recorded self-approval reasons: created-plan, published.
 The controller re-checks the plan at use time; it applies it only if every check passes.
 ```
