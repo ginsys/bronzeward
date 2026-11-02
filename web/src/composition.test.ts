@@ -4,7 +4,7 @@ import { describe, expect, test } from "vitest";
 import type { components } from "./api/v1";
 import {
   ASSIGNMENT_STATEMENT, AssignmentPane, assignmentBody, assignmentRefusal, choices, compose, fragmentOffers, fromRevision, isCurrent, listsOf, machineOffers, move, noLists, PINS_MAX, PINS_STATEMENT,
-  pinned, pinRefusal, pinsOf, ProfilePane, profileBody, profileOffers, readComposition, referenceStates, sourceKey, stillOffered, unknownPins, withLists, withoutPin, withPin,
+  pinned, pinRefusal, pinsOf, ProfilePane, profileBody, profileOffers, readComposition, referenceStates, shownResult, sourceKey, stillOffered, unknownPins, withLists, withoutPin, withPin,
 } from "./composition.tsx";
 import { editor, EMPTY, holdsUnsaved, where } from "./drafts.tsx";
 import { WritesProvider } from "./forms.tsx";
@@ -154,11 +154,28 @@ describe("the profile entry (W4)", () => {
 
 describe("the pin name lookup waits for the fragment list (ginsys/bronzeward#563)", () => {
   const known = new Map([["frv_a", "a"]]);
-  test("nothing is asked while the list loads", () => {
+  test("nothing is asked until the list was read", () => {
     expect(unknownPins(["frv_a", "frv_b"], known, {}, true)).toEqual([]);
   });
   test("once loaded, only a pin the list does not name and no read answered is asked", () => {
     expect(unknownPins(["frv_a", "frv_b", "frv_c"], known, { frv_c: "" }, false)).toEqual(["frv_b"]);
+  });
+});
+
+describe("a repeated Show keeps what it showed when a read had no answer", () => {
+  const first = { key: "k", value: { order: [], revisions: {} } };
+  test("an unanswered read leaves the earlier result", () => {
+    expect(shownResult(first, { key: "k", value: "could not be read" }, true)).toBe(first);
+  });
+  test("a refusal replaces it, and so does a new result", () => {
+    const refused = { key: "k", value: "refused" };
+    expect(shownResult(first, refused, false)).toBe(refused);
+    const next = { key: "j", value: { order: [], revisions: {} } };
+    expect(shownResult(first, next, true)).toBe(next);
+  });
+  test("with nothing before it, the error is shown", () => {
+    const err = { key: "k", value: "could not be read" };
+    expect(shownResult(undefined, err, true)).toBe(err);
   });
 });
 

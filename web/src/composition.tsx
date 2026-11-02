@@ -65,8 +65,9 @@ export function choices(draft: { cluster: string; entries: Draft["entries"] }, f
 }
 export const isCurrent = (pin: string, options: Choice[]) => options.some((c) => c.revision === pin);
 
-// The pins whose name a read must still give. Nothing is asked while the cluster's fragment list
-// pages: before it ends, every base pin looks unknown (ginsys/bronzeward#563).
+// The pins whose name a read must still give. Nothing is asked until the cluster's fragment list
+// has been read: before it ends or after it failed, every base pin looks unknown
+// (ginsys/bronzeward#563).
 export const unknownPins = (pins: string[], known: Map<string, string>, names: Record<string, string>, loading: boolean) =>
   loading ? [] : pins.filter((r) => !known.has(r) && names[r] === undefined);
 
@@ -111,7 +112,7 @@ export function ProfilePane({ draft, entry, seeChange, claim = () => {}, shown =
   const pins = pinsOf(held);
   const known = new Map(options.map((c) => [c.revision, c.name]));
   const label = (revision: string) => known.get(revision) ?? (names[revision] || short(revision));
-  const lookup = unknownPins(pins, known, names, fragments.kind === "loading").join(",");
+  const lookup = unknownPins(pins, known, names, !listed).join(",");
   // Each uncached pin is asked for once, on its own: an answer changes `lookup` and restarts this
   // effect, which must not ask again for a pin whose read is still in flight.
   const asked = useRef(new Set<string>());
@@ -407,6 +408,12 @@ export function referenceStates(document: string, declared: Declared): RefState[
 }
 
 export interface Composition { order: Composed[]; revisions: Record<string, Revision> }
+
+// The result a repeated Show leaves on view: the one before when a read had no answer (the offline
+// banner speaks) and this one only has an error to give, otherwise this one.
+export interface Shown { key: string; value: Composition | string }
+export const shownResult = (before: Shown | undefined, now: Shown, unanswered: boolean): Shown =>
+  unanswered && typeof now.value === "string" && before !== undefined ? before : now;
 // Reads what the order needs, one read at a time: the revision of each profile, the fragment
 // revisions it pins, and the revision of each fragment the assignment selects. The text of a failure
 // when a read gives none.
@@ -635,15 +642,18 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
   const show = () => {
     const key = nowKey;
     setReads(0);
+    // A read with no answer at all went to the shell's offline banner: it shows nothing here.
+    let unanswered = false;
     const get = async <T,>(p: string) => {
       const r = await read<T>(p, () => mounted.current);
       if (mounted.current) setReads((n) => (n ?? 0) + 1);
+      if (r === undefined) unanswered = true;
       return r?.kind === "ok" ? r.data : undefined;
     };
     void readComposition(draft, lists, profileList, fragmentList, get).then((value) => {
       if (!mounted.current) return;
       setReads(undefined);
-      setResult({ key, value });
+      setResult((before) => shownResult(before, { key, value }, unanswered));
     });
   };
   const composed = result?.key === nowKey && typeof result.value !== "string" ? result.value : undefined;
@@ -666,7 +676,9 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
       </button>
     </>
   );
-  const pending = usePending(entry === undefined ? machines : profiles, entry === undefined ? "machines" : "profiles");
+  const pendingMachines = usePending(machines, "machines");
+  const pendingProfiles = usePending(profiles, "profiles");
+  const pendingFragments = usePending(fragments, "fragments");
   const chooseable = machineOffers(draft, machines.kind === "ok" ? machines.data.items : []);
   return (
     <section aria-label={`Assignment ${machine === "" ? "(new)" : short(machine)}`}>
@@ -694,7 +706,9 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
       {LAYERS.map((l) => (
         <Members key={l} slot={l} names={lists[l]} offers={forLayers[l]} ready={ready} open={open} editable={editable} change={(next) => hold({ ...lists, [l]: next })} />
       ))}
-      {open && pending}
+      {open && entry === undefined && pendingMachines}
+      {open && pendingProfiles}
+      {open && pendingFragments}
       {open && (
         <p>
           <Action label="Save" needs={["author"]} onClick={save} busy={w !== undefined && w.outcome === undefined} />{" "}
