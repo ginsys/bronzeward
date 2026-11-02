@@ -102,27 +102,36 @@ const BREAKS = /\r(?!\n)|[\u0085\u{2028}\u{2029}]/gu;
 // allowed before it. The server also takes a # right after the header as a comment.
 const HEADER_END = /(?:^|[ \t])(?:[!&][^ \t]*[ \t]+)*[|>][-+1-9]{0,2}[ \t]*(?:#.*)?$/;
 // A line that ends where a node can follow on the next line: after a colon, a sequence entry's or
-// a complex key's indicator, a node property, or a document marker.
+// a complex key's indicator, a node property, or a document marker. An indicator or a property
+// counts only where a node can start (startsScalar): in `a: x -` the dash is the plain scalar's.
 const OPEN_END = /(?::|(?:^|[ \t])(?:[-?]|[!&][^ \t]*))$|^(?:---|\.\.\.)$/;
-// The column of the deepest block node a line starts: the key after its sequence dashes
-// (`- a: 1` starts a mapping at column 2), else its last dash (`- x` is an entry at column 0, so
-// a more indented line continues x), else its indentation.
+function opensNext(kept: string, start: boolean): boolean {
+  if (!OPEN_END.test(kept)) return false;
+  if (kept.endsWith(":") || /^(?:---|\.\.\.)$/.test(kept)) return true;
+  return startsScalar(kept, kept.search(/[^ \t]*$/), false, -1, start);
+}
+// The column of the deepest block node a line starts: the key after its indicators (sequence
+// dashes, a complex key's ? or its value's :), so `- a: 1` and `: a: 1` start a mapping at column
+// 2; else its last indicator (`- x` is an entry at column 0, so a more indented line continues x);
+// else its indentation.
 function column(kept: string): number {
-  const dashes = /^[ \t]*(?:-[ \t]+)*/.exec(kept)![0].length;
-  if (dashes === indent(kept) || /:(?:[ \t]|$)/.test(kept.slice(dashes))) return dashes;
-  return kept.lastIndexOf("-", dashes - 1);
+  const marks = /^[ \t]*(?:[-?:][ \t]+)*/.exec(kept)![0].length;
+  if (marks === indent(kept) || /:(?:[ \t]|$)/.test(kept.slice(marks))) return marks;
+  return Math.max(...[..."-?:"].map((c) => kept.lastIndexOf(c, marks - 1)));
 }
 function tags(original: string): { index: number; tag: string; name: string }[] {
   const text = original.replace(BREAKS, "\n");
   // The depth of the open flow collections carries from line to line (ginsys/bronzeward#578).
   // Only a line where a node can start opens one at its start: a line inside a flow collection, a
-  // line after one that ends open (OPEN_END), and a line no more indented than the last line that
-  // started a node. A more indented line continues a scalar. A block scalar's content lines, as
-  // deep as its first one, open none, and a document marker closes every collection.
+  // line after one that ends open (opensNext, and not inside a quoted scalar), and a line no more
+  // indented than the last line that started a node. A more indented line continues a scalar. A
+  // block scalar's content lines, as deep as its first one and deeper than the node that holds the
+  // scalar, open none, and a document marker closes every collection. A quoted scalar's later lines
+  // are read as lines of their own, as on main.
   let masked = "";
   let flow = 0;
   let content = -1; // the content's indentation; 0 before its first line with text; -1 outside one
-  let headed = 0; // the indentation of the line that holds the block scalar's header
+  let headed = 0; // the column of the node that holds the block scalar
   let base = 0;
   let open = true;
   for (const line of text.split("\n")) {
@@ -132,14 +141,15 @@ function tags(original: string): { index: number; tag: string; name: string }[] 
     }
     const held = content !== -1;
     if (MARKER.test(line)) [flow, open, base] = [0, true, 0];
-    const fresh = !held && flow === 0 && (open || indent(line) <= base);
-    const c = commentStart(line, held ? 0 : flow, held || flow > 0 || fresh);
+    const fresh: boolean = !held && flow === 0 && (open || indent(line) <= base);
+    const start: boolean = held || flow > 0 || fresh;
+    const c = commentStart(line, held ? 0 : flow, start);
     if (!held) {
       const kept = line.slice(0, c.end).trimEnd();
       if (fresh && kept.trim() !== "") base = column(kept);
-      if (kept.trim() !== "") open = OPEN_END.test(kept);
+      if (kept.trim() !== "") open = !c.quoted && opensNext(kept, start);
       flow = c.flow;
-      if (flow === 0 && HEADER_END.test(kept)) [content, headed] = [0, indent(line)];
+      if (flow === 0 && !c.quoted && HEADER_END.test(kept)) [content, headed] = [0, column(kept)];
     }
     masked += `${line.slice(0, c.end)}${" ".repeat(line.length - c.end)}\n`;
   }
@@ -303,10 +313,11 @@ function decoded(body: string): string | undefined {
 // length if it has none. A quote opens a scalar only where one starts, so the apostrophes in
 // `can't` and `dogs 'n cats` open none; '' inside a single-quoted scalar is an apostrophe.
 // `flow` is the depth of the flow collections ([ {) open at the line's start; the result carries
-// the depth at its end, so that the next line is read in the same context (ginsys/bronzeward#578).
-// A [ or { opens one only where a node starts, and a ] or } closes one only while one is open.
-// `start` says whether a node can start at the line's indentation (see tags).
-function commentStart(line: string, flow: number, start: boolean): { end: number; flow: number } {
+// the depth at its end, so that the next line is read in the same context, and whether the line
+// ends inside a quoted scalar (ginsys/bronzeward#578). A [ or { opens one only where a node starts,
+// and a ] or } closes one only while one is open. `start` says whether a node can start at the
+// line's indentation (see tags).
+function commentStart(line: string, flow: number, start: boolean): { end: number; flow: number; quoted: boolean } {
   let quote: string | undefined;
   let closed = -1;
   for (let i = 0; i < line.length; i++) {
@@ -316,11 +327,11 @@ function commentStart(line: string, flow: number, start: boolean): { end: number
       else if (c === quote) [quote, closed] = [undefined, i];
       else if (c === "\\" && quote === '"') i++;
     } else if ((c === '"' || c === "'") && startsScalar(line, i, flow > 0, closed, start)) quote = c;
-    else if (c === "#" && (i === 0 || blank(line[i - 1]))) return { end: i, flow };
+    else if (c === "#" && (i === 0 || blank(line[i - 1]))) return { end: i, flow, quoted: false };
     else if ((c === "[" || c === "{") && startsScalar(line, i, flow > 0, closed, start)) flow++;
     else if ((c === "]" || c === "}") && flow > 0) flow--;
   }
-  return { end: line.length, flow };
+  return { end: line.length, flow, quoted: quote !== undefined };
 }
 
 // Whether a node starts at `i`: at the line's indentation or after a document marker where

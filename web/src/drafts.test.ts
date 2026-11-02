@@ -355,8 +355,15 @@ describe("[Go to field] positions (B13)", () => {
       // A block scalar's content ends at the first line less indented than its first line, here
       // the compact mapping's next key.
       '- run: |\n    echo\n  with: [a,\n    b, "c # d", !bwref x/foo]\n',
-      // A line as indented as the key of a compact mapping, or a flow collection's line, is a key.
+      // An empty block scalar's content would be deeper than the node that holds it, so the compact
+      // mapping's next key is no content.
+      '- run: |\n  with: [a,\n    b, "c # d", !bwref x/foo]\n',
+      // A line as indented as the key of a compact mapping, after sequence dashes or a complex key's
+      // indicators, or a flow collection's line, is a key.
       '- a: 1\n  "b # c": !bwref x/foo\n',
+      '? k\n: a: 1\n  "b # c": !bwref x/foo\n',
+      '? - a: 1\n    "b # c": !bwref x/foo\n: v\n',
+      '- ? a: 1\n    "b # c": !bwref x/foo\n  : v\n',
       'a:\n  b: x\n  "c # d": !bwref x/foo\n',
       'a: [x,\n  y]\n"b # c": !bwref x/foo\n',
     ]) expect(references(one)).toEqual(["x/foo"]);
@@ -383,8 +390,11 @@ describe("[Go to field] positions (B13)", () => {
       'a: |#c\n  [x\nb: ?"y # !bwref ghost\nc: !bwref x/foo\n',
       'a: |\n  [x\nx ?"p: ["q # r", !bwref x/foo]\n',
       'a: !t >-\n  {x\nx ?"p: ["q # r", !bwref x/foo]\n',
-      // A more indented line after a sequence entry's scalar continues it.
+      // A more indented line after a sequence entry's scalar continues it, also after a scalar whose
+      // line ends in an indicator's character.
       'a:\n  - x\n    "y # !bwref ghost\nb: !bwref x/foo\n',
+      'a: x -\n  "y # !bwref ghost\nb: !bwref x/foo\n',
+      'a: "x:\n  " # !bwref ghost\nb: !bwref x/foo\n',
       'a:\n  - x\n  - "y # z"\nb: !bwref x/foo\n',
     ]) expect(references(one)).toEqual(["x/foo"]);
   });
