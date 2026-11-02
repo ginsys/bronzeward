@@ -196,10 +196,11 @@ facilitator only. Setup `tN` means `fixtures/participants/session tN`.
   from that observation, so the age of the evidence that the commitment used does not limit the
   hold. C's own attempt after the release is refused, because C no longer owns the apply. That
   refusal changes nothing.
-- The hold ends at the plan's expiry, about 2 hours after the `t9` setup. After that, A cancels
-  the apply with no attempt, and `t9 disconnect` names the cause and tells you to run the `t9`
-  setup again. The fixture run of this setup tested a hold of 2 minutes.
-- If you skip `t9 disconnect`, the `t2` setup ends the hold.
+- The hold does not end by itself. Only `t9 disconnect` or the `t2` setup ends it. The plan
+  expires about 2 hours after the `t9` setup, so run `t9 disconnect` before then. If you run it
+  later, A cancels the apply with no attempt when it takes the apply over. Then `t9 disconnect`
+  names the cause and tells you to run the `t9` setup again. The fixture run of this setup tested
+  a hold of 2 minutes.
 - Prompt: "The approved change is being applied. Follow it until it finishes, and tell me when
   it finished."
 - Done when: the completion is reported with its time.

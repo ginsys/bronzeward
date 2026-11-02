@@ -692,8 +692,8 @@ wait "$stub_a" 2>/dev/null
 # set_issuer, restart_a and forward_idp as their die does. INT_ON sends the shell a Ctrl-C (SIGINT)
 # during the inspect of that container, INT_PROBE during idp_reached, as a second Ctrl-C during the
 # cleanup does. PREP_FAIL ends prepare, as a release of T9's hold that fails does. HOLD_FAIL ends
-# prepare t9-hold, HOLD_INT sends the shell a Ctrl-C during it, and SQL_FAIL ends every database
-# read. Calls go to the log.
+# prepare t9-hold, HOLD_INT sends the shell a Ctrl-C during it, SQL_FAIL ends every database read,
+# and ERREXIT runs the function under set -e. Calls go to the log.
 sed -n -e '/^cleanup_stopped() {$/,/^}$/p' -e '/^handback() {$/,/^}$/p' -e '/^t9_clean() {$/,/^}$/p' \
   -e '/^t9_release() {$/,/^}$/p' -e '/^t9() {$/,/^}$/p' -e '/^t9_disconnect() {$/,/^}$/p' "$session" >"$t/clean.sh"
 mkdir -p "$t/cbin"
@@ -732,6 +732,8 @@ clean_case() {
     }
     # As t9 disconnect does; a setup has no INT trap, and SIGINT ends the shell.
     [ "$1" != t9_clean ] || trap "exit 130" INT TERM
+    # ERREXIT runs the function under set -e, as the session does.
+    [ -z "${ERREXIT:-}" ] || set -e
     . "$0"; "$1"' "$t/clean.sh" "$1" 2>&1
 }
 if [ "$(grep -cE '^(handback|t9_clean|t9_release|t9|t9_disconnect)\(\) \{' "$t/clean.sh")" = 5 ]; then
@@ -807,10 +809,12 @@ if [ "$(grep -cE '^(handback|t9_clean|t9_release|t9|t9_disconnect)\(\) \{' "$t/c
   if [ "$calls" = "prepare t9-hold prepare t9-release " ] && [[ $out != *"held on C"* ]]; then
     ok "the t9 setup releases the hold when a Ctrl-C stops it during the hold"
   else bad "t9, Ctrl-C during the hold: $calls ($out)"; fi
-  out=$(SQL_FAIL=1 clean_case t9_disconnect)
-  if [ "$(cat "$t/clean.log")" = "prepare t9-release" ] && [[ $out == *"no apply-config operation"* ]]; then
-    ok "t9 disconnect releases the hold when its first read fails"
-  else bad "t9 disconnect, first read fails: $(tr '\n' ' ' <"$t/clean.log") ($out)"; fi
+  # Under set -e, as in the session, a failed first read ends the shell at once, before any die.
+  rc=0
+  out=$(ERREXIT=1 SQL_FAIL=1 clean_case t9_disconnect) || rc=$?
+  if [ "$(cat "$t/clean.log")" = "prepare t9-release" ] && [ "$rc" != 0 ]; then
+    ok "t9 disconnect releases the hold and fails when its first read fails"
+  else bad "t9 disconnect, first read fails: status $rc, $(tr '\n' ' ' <"$t/clean.log") ($out)"; fi
   # The setup after T9 releases the hold first, for a session that skipped t9 disconnect: its
   # `prepare applied` waits for T9's apply to complete.
   if [ "$(sed -n '/^setup_t2() {$/,/^}$/p' "$session" | grep -oE 't9-release|prepare applied' | tr '\n' ' ')" = "t9-release prepare applied " ]; then
