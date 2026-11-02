@@ -26,6 +26,7 @@ type opServer struct {
 	states      []string
 	pages       []string
 	epoch       string
+	opEpoch     string // when set, the operation read answers this epoch whatever the stream said
 	opened      []*http.Request
 	reads       int
 	slow        time.Duration
@@ -46,6 +47,9 @@ func (o *opServer) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	defer o.mu.Unlock()
 	o.answerLocked(w)
+	if o.opEpoch != "" && r.URL.Path == "/api/v1/operations/op_BWSYNTH" {
+		w.Header().Set("Bronzeward-Epoch", o.opEpoch)
+	}
 	switch {
 	case r.URL.Path == "/api/v1/operations/op_BWSYNTH/events" && o.pagesStatus != 0:
 		problemAnswer(w, o.pagesStatus, "forbidden", "")
@@ -271,6 +275,16 @@ func TestWatch(t *testing.T) {
 		o := &opServer{streams: []handler{sse(ev(e2+":1", "queued"))}, epochs: []string{e1}, states: []string{"running"}, gone: 4}
 		if _, waits, _, _, err := watched(t, o, e1, nil); err == nil || !slices.Equal(waits, []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}) {
 			t.Errorf("watch: %v, waits %v; want the 404 after waits of 1 s, 2 s and 4 s", err, waits)
+		}
+	})
+	t.Run("streams of one epoch against operation reads of another are opened again with backoff", func(t *testing.T) {
+		// Every stream says e2 and sends an event of e2, but the running operation reads say e1, so the
+		// event is cleared on every attempt. A cleared event is not progress. From the 4th read on the
+		// operation is not found, which ends the watch.
+		o := &opServer{streams: []handler{sse(ev(e2+":1", "queued"))}, epochs: []string{e2}, opEpoch: e1, states: []string{"running"}, gone: 4}
+		shown, waits, _, _, err := watched(t, o, e1, nil)
+		if err == nil || !slices.Equal(waits, []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}) {
+			t.Errorf("watch: %v, waits %v; want the 404 after waits of 1 s, 2 s and 4 s (shown %v)", err, waits, shown)
 		}
 	})
 	t.Run("the data lines of one event are joined with a line feed", func(t *testing.T) {
