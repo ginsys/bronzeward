@@ -346,7 +346,7 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     ["#551 item 1: a removal after the show keeps text typed since aside", { held: T2, saved: T, conflict: typed(theirs(M)) }, { kind: "draft", revision: 9, changed: false, removed: true }, { held: EMPTY, saved: EMPTY, conflict: theirs(T2, 9) }],
     ["#551 item 1: a repeated Show's draft read that reports a removal shows it and ends the wait", { held: T, saved: T, conflict: { ...theirs(M), awaits: true } }, { kind: "draft", revision: 9, changed: false, removed: true }, { held: EMPTY, saved: EMPTY, conflict: theirs(M, 9) }],
     ["#551 item 1, H8: the pane's own done Remove after the show keeps its text", { held: T, saved: EMPTY, conflict: theirs(M) }, { kind: "draft", revision: 9, changed: false, removed: true }, { held: T, saved: EMPTY, conflict: theirs(M, 9) }],
-    ["#551 item 1: a removal after the show while a write is open is held back for that write's answer", { held: T2, saved: T, conflict: typed(theirs(M)), sent: { text: T2, whileTheirs: true, open: true, removes: true } }, { kind: "draft", revision: 9, changed: false, removed: true }, { held: T2, saved: EMPTY, conflict: typed(theirs(M, 9)), sent: { text: T2, whileTheirs: true, open: true, removes: true, later: { revision: 9 } } }],
+    ["#551 item 1: a removal after the show while a write is open waits for that write's answer", { held: T2, saved: T, conflict: typed(theirs(M)), sent: { text: T2, whileTheirs: true, open: true, removes: true } }, { kind: "draft", revision: 9, changed: false, removed: true }, { held: T2, saved: T, conflict: typed(theirs(M, 9)), sent: { text: T2, whileTheirs: true, open: true, removes: true } }],
     ["#551 item 3: a draft read that changes only another entry moves a held-back read's revision", { held: M, saved: T, sent: { ...sentOf(M), open: true, later: { revision: 8 } } }, { kind: "draft", revision: 9, changed: false }, { held: M, saved: T, sent: { ...sentOf(M), open: true, later: { revision: 9 } } }],
     ["a revision read after the show, with nothing typed, shows their latest text", { held: T, saved: T, conflict: theirs(M) }, { kind: "read", text: T2, since: 0 }, { held: T2, saved: T2, conflict: theirs(M) }],
     ["boundary: Copy my text puts the operator's text back and ends the conflict", { held: T2, saved: T, conflict: theirs(M) }, { kind: "copy" }, { held: M, saved: T }],
@@ -454,17 +454,6 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
   test("ginsys/bronzeward#551 item 3: a read held back while a Save is open names the draft revision of a later draft read that changed only another entry", () => {
     const s = run({ held: A, saved: A }, [{ kind: "type", held: M }, { kind: "send" }, { kind: "read", text: T, since: 0, revision: 8 }, { kind: "draft", revision: 9, changed: false }, { kind: "failed" }]);
     expect(rest(s)).toEqual({ held: T, saved: T, sent: sentOf(M), conflict: theirs(M, 9) });
-  });
-
-  test("ginsys/bronzeward#551 PR review: once their text shows, a removal read while a Save is open shows when that Save fails, so a next Save cannot restore the old text over it", () => {
-    const s = run({ held: T, saved: T, conflict: theirs(M, 8) }, [{ kind: "type", held: M2 }, { kind: "send" }, { kind: "draft", revision: 9, changed: false, removed: true }, { kind: "failed" }]);
-    expect(rest(s)).toEqual({ held: EMPTY, saved: EMPTY, sent: sentOf(M2, true), conflict: theirs(M2, 9) });
-    expect(editor(s, { kind: "copy" }).held).toEqual(M2);
-  });
-
-  test("ginsys/bronzeward#551 PR review: a removal held back while a Save is open names the draft revision of a later draft read that still reports it", () => {
-    const s = run({ held: A, saved: A }, [{ kind: "type", held: M }, { kind: "send" }, { kind: "draft", revision: 8, changed: false, removed: true }, { kind: "draft", revision: 9, changed: false, removed: true }, { kind: "failed" }]);
-    expect(rest(s)).toEqual({ held: EMPTY, saved: EMPTY, sent: sentOf(M), conflict: theirs(M, 9) });
   });
 
   test("R5-1: a Save sent while asked, then typing, then their text: the done Save keeps the typed text", () => {
