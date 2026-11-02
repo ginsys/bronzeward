@@ -274,6 +274,16 @@ if [ "$rc" != 0 ] && [[ $out == *"in $repo/.dev/participants/scan-backups/pg-p-t
   ok "a session password inside a database dump is found"
 else bad "dump leak: rc=$rc controls=$(controls) expansion $(expansion): $out"; fi
 
+# pg_restore writes a bytea value, such as a stored response body, in hex: BWSYNTH-pw-abcd1234-5678.
+printf 'COPY 1\t\\\\x7b22425753594e54482d70772d61626364313233342d35363738227d\n' | gzip >"$b/pg-p-t5.dump"
+out=$(run scan)
+rc=$?
+rm -f "$b/pg-p-t5.dump"
+if [ "$rc" != 0 ] && [[ $out == *"in $repo/.dev/participants/scan-backups/pg-p-t5.dump.sql"* ]] &&
+  [ "$(controls)" = 0 ] && [ "$(expansion)" = gone ]; then
+  ok "a session password in hex inside a database dump is found"
+else bad "hex dump leak: rc=$rc controls=$(controls) expansion $(expansion): $out"; fi
+
 mkdir -p "$t/store2/data"
 printf 'BWSYNTH-pw-abcd1234-5678\n' >"$t/store2/data/value"
 tar -czf "$b/store-p-t11.tgz" -C "$t/store2" data
