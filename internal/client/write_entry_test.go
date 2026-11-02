@@ -31,7 +31,7 @@ func entered(epoch string, replayed bool) func(int, http.ResponseWriter, *http.R
 func TestEntry(t *testing.T) {
 	t.Run("lost 201", func(t *testing.T) {
 		// The first answer is lost after the commit; the confirming read shows the new epoch.
-		f := &fake{epoch: "ep_BWSYNTH-1", beforeEntry: true, recovery: func(int) string { return "ep_BWSYNTH-2" },
+		f := &fake{epoch: "ep_BWSYNTH-1", beforeEntry: true, entered: "ep_BWSYNTH-2", recovery: func(int) string { return "ep_BWSYNTH-2" },
 			post: func(n int, w http.ResponseWriter, r *http.Request) {
 				if n == 1 {
 					drop(w)
@@ -100,6 +100,29 @@ func TestEntry(t *testing.T) {
 			t.Errorf("err %v, start mode %q; want the refusal and the mode the read before it showed", err, c.Context.StartMode)
 		}
 	})
+	t.Run("a cut-off conflict keeps the known mode", func(t *testing.T) {
+		// GET /server showed a normal start. A 409 with the epoch header whose body ends early is neither
+		// a problem nor a result, so it shows no start mode and does not make the start a recovery one.
+		f := &fake{epoch: "ep_BWSYNTH-1", post: func(_ int, w http.ResponseWriter, _ *http.Request) {
+			cutOff(w, http.StatusConflict, "ep_BWSYNTH-1")
+		}}
+		c, _, _ := writeClient(t, f, "ep_BWSYNTH-1")
+		_, _ = c.Send(entryWrite())
+		if len(f.postsSeen()) == 0 || c.Context.StartMode != "normal" {
+			t.Errorf("%d posts, start mode %q; want a send and the mode GET /server showed", len(f.postsSeen()), c.Context.StartMode)
+		}
+	})
+	t.Run("a failed read after the commit keeps the success", func(t *testing.T) {
+		f := &fake{epoch: "ep_BWSYNTH-1", beforeEntry: true, entered: "ep_BWSYNTH-2", serverFails: true, post: entered("ep_BWSYNTH-2", false)}
+		c, notices, _ := writeClient(t, f, "ep_BWSYNTH-1")
+		r, err := c.Send(entryWrite())
+		if err != nil || r == nil || !strings.Contains(string(r.Body), "ep_BWSYNTH-2") {
+			t.Fatalf("answer %v, err %v; want the entry's success", r, err)
+		}
+		if !strings.Contains(notices.String(), "the entry committed, but GET /server could not be read again") {
+			t.Errorf("no notice of the failed read:\n%s", notices)
+		}
+	})
 	t.Run("forbidden shows no mode", func(t *testing.T) {
 		// The 403 carries Bronzeward-Epoch, as one found at the role check does; GET /server showed a
 		// normal start, and the 403 does not make it a recovery start (§8.5 item 1).
@@ -112,7 +135,7 @@ func TestEntry(t *testing.T) {
 		}
 	})
 	t.Run("operator repeat", func(t *testing.T) {
-		f := &fake{epoch: "ep_BWSYNTH-1", beforeEntry: true, post: entered("ep_BWSYNTH-2", true)}
+		f := &fake{epoch: "ep_BWSYNTH-1", beforeEntry: true, entered: "ep_BWSYNTH-2", post: entered("ep_BWSYNTH-2", true)}
 		c, _, _ := writeClient(t, f, "ep_BWSYNTH-1")
 		w := entryWrite()
 		w.Repeat = &Repeat{Key: "BWSYNTH-" + strings.Repeat("k", 14), Principal: "svc_BWSYNTH"}
@@ -120,7 +143,8 @@ func TestEntry(t *testing.T) {
 			t.Fatal(err)
 		}
 		// No confirming read: the entry's repeat checks the principal and not the epoch (§8.4 item 4).
-		want := []string{"GET /api/v1/identity", "GET /api/v1/server", "POST /api/v1/recovery/entries"}
+		// GET /server is read again after the commit (§7 item 3).
+		want := []string{"GET /api/v1/identity", "GET /api/v1/server", "POST /api/v1/recovery/entries", "GET /api/v1/server"}
 		if got := f.requests(); !slices.Equal(got, want) || f.postsSeen()[0].Header.Get("Idempotency-Key") != w.Repeat.Key {
 			t.Errorf("requests %v, want %v under the given key", got, want)
 		}

@@ -88,10 +88,12 @@ func setEpochHeader(t *testing.T, epoch string) {
 var (
 	recoveryEpochByPath map[string]string
 	recoveryRevision    = 3
+	// recoveryRevisionMoved, when not 0, is the revision GET /server shows once the epoch moved.
+	recoveryRevisionMoved = 0
 )
 
 func setServerFacts(t *testing.T, revision int, epochByPath map[string]string) {
-	t.Cleanup(func() { recoveryEpochByPath, recoveryRevision = nil, 3 })
+	t.Cleanup(func() { recoveryEpochByPath, recoveryRevision, recoveryRevisionMoved = nil, 3, 0 })
 	recoveryEpochByPath, recoveryRevision = epochByPath, revision
 }
 
@@ -114,6 +116,10 @@ func recoveryServer(t *testing.T, answers map[string]string, post string) func()
 		if moved != "" {
 			epoch = moved
 		}
+		revision := recoveryRevision
+		if moved != "" && recoveryRevisionMoved != 0 {
+			revision = recoveryRevisionMoved
+		}
 		mu.Unlock()
 		w.Header().Set("Bronzeward-Epoch", epoch)
 		w.Header().Set("Content-Type", "application/json")
@@ -129,7 +135,7 @@ func recoveryServer(t *testing.T, answers map[string]string, post string) func()
 		}
 		switch a, ok := answers[key]; {
 		case r.URL.Path == "/api/v1/server":
-			fmt.Fprintf(w, `{"version":"BWSYNTH","apiRevision":%d,"startMode":"recovery"}`, recoveryRevision)
+			fmt.Fprintf(w, `{"version":"BWSYNTH","apiRevision":%d,"startMode":"recovery"}`, revision)
 		case r.URL.Path == "/api/v1/identity":
 			fmt.Fprint(w, `{"kind":"service","principal":"svc_BWSYNTH"}`)
 		case ok:
@@ -396,6 +402,29 @@ func TestRecoveryStatusNamesTheRevisionForMissingKeys(t *testing.T) {
 	for _, r := range seen() {
 		if strings.Contains(r, "/timeline") {
 			t.Errorf("a revision 2 server was sent %s", r)
+		}
+	}
+}
+
+// TestRecoveryStatusGatesOnTheRefreshedRevision: a next-step read shows a new epoch, the client reads
+// GET /server again, and that read shows API revision 2. The next scope then gets no order on its
+// timeline (section 7 item 1), though the first read showed revision 3.
+func TestRecoveryStatusGatesOnTheRefreshedRevision(t *testing.T) {
+	setServerFacts(t, 3, map[string]string{"/api/v1/operations": "ep_BWSYNTH-2"})
+	recoveryRevisionMoved = 2
+	seen := recoveryServer(t, map[string]string{
+		"GET /api/v1/recovery":   `{"epoch":"ep_BWSYNTH-1","recoveryMode":true,"scopes":[{"machine":"mch_b","state":"unresolved"},{"machine":"mch_c","state":"blocked"}]}`,
+		"GET /api/v1/operations": `{"items":[]}`,
+	}, "")
+	var out, errb bytes.Buffer
+	run([]string{"recovery", "status"}, &out, &errb)
+	reqs := seen()
+	if !slices.Contains(reqs, "GET /api/v1/operations") {
+		t.Fatalf("no operations read, so the epoch never moved: %v", reqs)
+	}
+	for _, r := range reqs {
+		if strings.Contains(r, "/timeline") {
+			t.Errorf("a revision 2 server was sent %s after the refresh", r)
 		}
 	}
 }

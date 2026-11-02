@@ -33,6 +33,10 @@ type fake struct {
 	posts    int
 	// beforeEntry refuses GET /server as a recovery start does before its entry.
 	beforeEntry bool
+	// entered, once a POST arrived, makes GET /server answer as a recovery start that took its entry:
+	// start mode recovery and this epoch. serverFails makes it answer 404 instead.
+	entered     string
+	serverFails bool
 }
 
 func (f *fake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -40,6 +44,10 @@ func (f *fake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.Body = io.NopCloser(bytes.NewReader(must(io.ReadAll(r.Body))))
 	f.seen = append(f.seen, r)
 	epoch, n := f.epoch, 0
+	committed := f.entered != "" && f.posts > 0
+	if committed && r.URL.Path == "/api/v1/server" {
+		epoch = f.entered
+	}
 	if r.Method == http.MethodGet && r.URL.Path == "/api/v1/recovery" {
 		n = len(slices.DeleteFunc(slices.Clone(f.seen), func(q *http.Request) bool { return q.URL.Path != "/api/v1/recovery" }))
 		if f.recovery != nil {
@@ -55,6 +63,14 @@ func (f *fake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	switch r.Method + " " + r.URL.Path {
 	case "GET /api/v1/server":
+		if committed && f.serverFails {
+			problemAnswer(w, http.StatusNotFound, "not-found", "")
+			return
+		}
+		if committed {
+			fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":2,"startMode":"recovery","maxTokenLifetimeSeconds":300}`)
+			return
+		}
 		if f.beforeEntry {
 			problemAnswer(w, http.StatusConflict, "recovery-mode-active", "")
 			return
@@ -112,6 +128,17 @@ func drop(w http.ResponseWriter) {
 	if err == nil {
 		conn.Close()
 	}
+}
+
+// cutOff answers status with the epoch header and the start of a problem body, then closes the
+// connection before the body ends.
+func cutOff(w http.ResponseWriter, status int, epoch string) {
+	conn, _, err := w.(http.Hijacker).Hijack()
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+	fmt.Fprintf(conn, "HTTP/1.1 %d X\r\nBronzeward-Epoch: %s\r\nContent-Type: application/problem+json\r\nContent-Length: 500\r\n\r\n{\"type\":\"urn:bron", status, epoch)
 }
 
 // writeClient is an automation client of f in a context that has seen epoch, with the waits

@@ -274,9 +274,10 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 		last, ingesting = a.err, ""
 		// The entry's not-a-recovery-start refusal: a 409 conflict with neither member (§8.5 item 2).
 		normal := w.Entry && code == "conflict" && p.Doc["epoch"] == nil && p.Doc["request"] == nil
-		if w.Entry && a.epoch && a.status != http.StatusUnauthorized && a.status != http.StatusForbidden && !normal {
+		if w.Entry && a.epoch && (a.p != nil || a.r != nil) && a.status != http.StatusUnauthorized && a.status != http.StatusForbidden && !normal {
 			// Any other entry answer after the role check, which carries the epoch, was given by a
-			// recovery start; a 401 or 403 shows nothing (§8.5 item 1).
+			// recovery start; a 401 or 403 shows nothing (§8.5 item 1). An answer cut off before its
+			// body is read shows neither a problem nor a result: the mode known so far stays.
 			c.setStartMode("recovery")
 		}
 		switch {
@@ -304,6 +305,13 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 				fmt.Fprintf(c.Notices, "%s: %s: already done earlier; showing that result.\n", c.Context.Where(), route)
 			}
 			c.keepETag(w, a.r)
+			if w.Entry {
+				// The entry committed: the minimum revision is read again, and the start mode with it
+				// (§7 item 3). A failed read changes nothing about the known success.
+				if _, _, serr := c.Server(); serr != nil {
+					fmt.Fprintf(c.Notices, "%s: the entry committed, but GET /server could not be read again: %s.\n", c.Context.Where(), Shown(serr))
+				}
+			}
 			return a.r, nil
 		case !a.sent:
 			// Nothing reached the server: repeated, never ambiguous (AMB-01).
