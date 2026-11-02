@@ -182,7 +182,14 @@ export class Client {
       if (res.status === 401 && code === "unauthenticated") {
         if (!renewed && this.opts.renew !== undefined) {
           renewed = true;
-          const again = await this.opts.renew();
+          // A renewal that throws is a failed one: the 401 settles as unauthenticated below, and the
+          // exception does not leave the read with no result for the page to show.
+          let again = false;
+          try {
+            again = await this.opts.renew();
+          } catch {
+            // again stays false
+          }
           if (sent !== this.generation) return { kind: "discarded" };
           if (again) { attempt--; continue; }
         }
