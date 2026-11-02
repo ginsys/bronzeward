@@ -20,32 +20,50 @@ const position = (state: unknown): number | undefined => {
   return typeof at === "number" ? at : undefined;
 };
 
+// How long the history must stay still before a refused move returns.
+export const QUIET_MS = 100;
+
 // Every entry the page adds carries its position in the history. A refused Back or Forward then
-// returns by the same distance (history.go), so the entries on both sides stay. The return fires one
-// more popstate, which is not asked again. An entry without a position, which the page did not add,
-// is left under a new entry instead.
-export function positions(h: Entries, here: () => string) {
+// returns to the shown page's position (history.go), so the entries on both sides stay. A traversal
+// is relative and queued: a Back pressed while the leave question was open lands after the refusal.
+// So, until the history rests at the shown position again, a traversal asks nothing, and the one
+// return is aimed only once the history was still for QUIET_MS. An entry without a position, which
+// the page did not add, is left under a new entry instead.
+export function positions(h: Entries, here: () => string, later: (f: () => void) => void = (f) => void setTimeout(f, QUIET_MS)) {
   if (position(h.state) === undefined) h.replaceState({ at: 0 }, "");
   let shown = { to: here(), at: position(h.state) ?? 0 };
-  let back: number | undefined;
+  // The position a refusal returns to, until the history rests there.
+  let home: number | undefined;
+  let still = 0;
+  const settle = () => {
+    const mine = ++still;
+    later(() => {
+      if (mine !== still || home === undefined) return;
+      const at = position(h.state);
+      if (at === home) {
+        home = undefined;
+      } else if (at === undefined) {
+        home = undefined;
+        shown = { to: shown.to, at: shown.at + 1 };
+        h.pushState({ at: shown.at }, "", shown.to);
+      } else {
+        h.go(home - at);
+      }
+    });
+  };
   return {
     // On popstate: true when the page follows the move.
     popped(ask?: Ask): boolean {
       const to = here();
       const at = position(h.state);
-      if (back !== undefined && at === back) {
-        back = undefined;
+      if (home !== undefined) {
+        if (at === home) home = undefined;
+        else settle();
         return false;
       }
-      back = undefined;
       if (ask !== undefined && !ask(to, shown.to)) {
-        if (at === undefined) {
-          shown = { to: shown.to, at: shown.at + 1 };
-          h.pushState({ at: shown.at }, "", shown.to);
-        } else {
-          back = shown.at;
-          h.go(shown.at - at);
-        }
+        home = shown.at;
+        settle();
         return false;
       }
       if (at === undefined) h.replaceState({ at: shown.at + 1 }, "");
@@ -53,6 +71,7 @@ export function positions(h: Entries, here: () => string) {
       return true;
     },
     pushed(to: string): void {
+      home = undefined;
       shown = { to, at: shown.at + 1 };
       h.pushState({ at: shown.at }, "", to);
     },
