@@ -628,8 +628,9 @@ contract's, and this specification does not close it.
    base64url without padding (22 characters, within `internal/api/api.go:394`). Never derived from
    the request content, so a key reveals nothing about a document.
 2. **Ambiguous.** A write's outcome is unknown when the connection fails after any byte of the
-   request was sent, when no complete response arrives, on `500`, or on a `5xx` that is not a
-   Bronzeward problem ([§8.2](#82-errors)). The client then repeats the
+   request was sent, when no complete response arrives (also when item 8's bound ends the
+   attempt), on `500`, or on a `5xx` that is not a Bronzeward problem ([§8.2](#82-errors)). The
+   client then repeats the
    identical request it still holds in memory, with the same key, at most 3 times with backoff.
    A write's `503` is repeated the same way; it states only that the attempt it answers committed
    nothing, so after an ambiguous attempt the outcome stays unknown ([§8.2](#82-errors)). The
@@ -749,6 +750,31 @@ contract's, and this specification does not close it.
    is wanted depends on the route and the state, which a client cannot judge. The
    client reads the resource, reports what it shows, and lets the operator send the write again as
    a new one if it is still wanted.
+8. **Attempt bound.** Every request that a client sends has its own bound, except the event
+   stream of [§8.6](#86-event-resumption). The response headers must arrive within 30 s of the
+   send. The whole attempt, which is the request, the headers and the complete body, must end
+   within 60 s. Each repeat of item 2 and each read of item 3 is a new attempt with a new bound.
+   A bound that fires ends the attempt in the same way as a connection that the network cut at
+   that point:
+   - A read reports the transport failure that it reports for a cut connection.
+   - A write is ambiguous under item 2 if a byte of the request possibly left. The web client
+     cannot see whether one did, so a write attempt that the bound ends is always ambiguous there,
+     never **not done**. The CLI counts an attempt as sent once it has a connection
+     (`internal/client/write.go:455-467`). A bound that fires before that is a failure with
+     nothing sent (AMB-01), and a bound that fires after it is ambiguous.
+   - An ambiguous write then takes the repeat path of item 2: the same key, at most 3 repeats,
+     then the outcome-unknown report of items 4 and 5.
+
+   So no write stays pending without end. The bound ends each attempt, item 2 limits the repeats,
+   and the outcome-unknown notice of item 5 settles and offers Dismiss. The in-progress wait of
+   item 2 keeps its own longer bound, and each repeat in that wait has the same attempt bound. A
+   write that the server answers after the bound is an ambiguous attempt like any other, and its
+   repeat uses the same key. The CLI's HTTP client already has these values (`internal/client/transport.go:91-95`):
+   `ResponseHeaderTimeout` is 30 s, and `Timeout` is 1 minute, which includes the body read. It
+   also bounds the TLS handshake to 10 s, which a browser does itself. The web client applies the
+   bound in its request layer, with one abort signal per attempt that covers the `fetch` and the
+   body read ([#487](https://github.com/ginsys/bronzeward/issues/487)). The alternatives are D12
+   in [§13](#13-alternatives-and-open-choices).
 
 ### 8.5 Epoch changes
 
@@ -1505,6 +1531,7 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 | AMB-12 | restore | as AMB-07, but the first attempt's record is missing: a restore to a backup taken before it removed it, or the first attempt never committed (G21) | the repeat carries the first attempt's epoch in `Bronzeward-Expected-Epoch` and is refused `412 epoch-mismatch` naming the current epoch, with no act or idempotency record committed (A6, [#293](https://github.com/ginsys/bronzeward/issues/293)); resource read |
 | AMB-08 | refusal | write answered `503 dependency-unavailable`, e.g. ingestion start with no provider configured | repeated at most 3 times with the same key; then reported not done |
 | AMB-09 | disconnect | write dropped after the body is sent; every repeat answered `503` | not reported as not done: outcome unknown, key and resource printed as in §8.4 item 4 |
+| AMB-14 | disconnect | the injector holds the response headers of a read and of a write for longer than 30 s; second case: it sends the headers and holds the body until 60 s after the send | the read reports a transport failure when the bound fires; the write is repeated with the same key at most 3 times, then reported as an unknown outcome with its key and the resource to read, never as not done; the web notice settles and offers Dismiss ([§8.4](#84-idempotency-and-ambiguous-responses) item 8) |
 | PAGE-01 | success | list over three pages | every item once, in order |
 | PAGE-02 | restore | cursor used after recovery entry | `400 cursor-invalid`; list restarted; notice shown |
 | EVT-01 | disconnect | stream cut mid-operation | reconnect with `Last-Event-ID`; no event shown twice |
@@ -1536,7 +1563,10 @@ delegation, as their rows state. The owner decided D1, D2, D4, D5, D6 and D10 on
 the times their rows give; D10's option (a) is served by
 [#293](https://github.com/ginsys/bronzeward/issues/293). The lead ruled D11 on 2026-11-01, when
 the specification review asked the question in
-[#463](https://github.com/ginsys/bronzeward/issues/463); the owner can overrule it.
+[#463](https://github.com/ginsys/bronzeward/issues/463); the owner can overrule it. The campaign
+lead decided D12 on 2026-11-02, when the specification review asked the question in
+[#486](https://github.com/ginsys/bronzeward/issues/486), under the owner's standing rule to take
+clearly recommended decisions; it is recorded for owner review.
 
 | ID | Choice | Options | Decision and reason |
 | --- | --- | --- | --- |
@@ -1551,6 +1581,7 @@ the specification review asked the question in
 | D9 | Idempotency key metadata across a CLI restart | (a) no local journal: on giving up, the CLI prints the key, route, principal, epoch and `If-Match`, and the operator repeats with them and the same input ([§8.4](#84-idempotency-and-ambiguous-responses) item 4); (b) a local journal of pending keys, owner-readable, replayed on the next run | **Decided** by the lead, 2026-10-21, under the owner's 2026-10-07 delegation: (a). Reason: a journal would hold request context on disk and need its own expiry and epoch rules. Its cost is that the operator must supply the exact input again: where no record exists, a changed input executes (AMB-10), so an operator who cannot reconstruct it reconciles from the resource; (b) avoids that reconstruction only if the journal holds the request itself, documents included, which on the keyed routes (fragment write, ingestion start, mark) would write protected plaintext to disk against [§11.2](#112-rules-for-both-clients) item 4 and the secret-ingress boundary. So (b) could journal request bodies only for non-keyed routes, and for the keyed ones offers nothing over (a) |
 | D10 | Epoch check on a human's repeated write (G21) | (a) server-enforced: mutations accept an expected-epoch request header and refuse, committing no act or idempotency record, when it differs from the current epoch, giving humans an epoch check like the one service tokens already get (API issue A6); (b) client-only check of [§8.4](#84-idempotency-and-ambiguous-responses) item 3 for humans, with the race between its confirming read and the repeat explicitly accepted | **Decided** by the owner (Serge, 2026-10-22 08:43 CEST): (a), served by [#293](https://github.com/ginsys/bronzeward/issues/293). Reason: it closes the race at the only place that knows the epoch at commit time, and keeps the earlier-epoch `409` of AMB-07 because, unlike the service check, which refuses before any record is answered (`internal/api/idempotency.go:47-49`), it runs only when a lookup finds no record and refuses only under the key's lock: the write's own, a fragment write's claim transaction's or the first lookup's fresh read (`internal/api/idempotency.go:52-58`, `internal/api/tx.go:204-210`, `internal/api/fragments.go:95-103`, `internal/api/tx.go:71-81`, as A6). Rejected: (b), which needs no server change and leaves a short window, but a human's repeat that lands in it after a restore removed the record, or whose first attempt never committed, executes afresh, with no error to any party |
 | D11 | Which remote text the CLI escapes in human output | (a) all remote text, with no list of fields, escaped as a value before it is formatted, tab and line feed included; (b) only fields that hold free text; (c) the list of item 4 as it stands, with the server refusing control characters in its inputs | **Ruled** by the lead (2026-11-01): (a) ([§6](#6-tls-trust) item 8). Reason: the API schemas give most text members as plain strings, and a format that a schema declares binds a correct server, not the bytes that arrive, so no field can be called safe by its format, and a list of fields goes out of date with every command. A test that fills every string member of every response type is what keeps the rule true. Rejected: (b), which needs that list and trusts the formats, declared or not, of a server it cannot check; (c), which trusts the server for resource text and not for its version string, and leaves the CLI open to any input the server does not refuse |
+| D12 | A client's bound on its own request | (a) no client bound, so the browser or the operating system decides; (b) one total bound per logical write, its repeats included; (c) a bound per attempt on the response headers and on the whole attempt, with the same values in both clients; (d) an idle bound that fires only when no byte arrives for some time | **Decided** by the campaign lead on 2026-11-02 under the owner's standing rule to take clearly recommended decisions, recorded for owner review: (c), with 30 s for the headers and 60 s for the attempt ([§8.4](#84-idempotency-and-ambiguous-responses) item 8). Reason: `fetch` has no timeout of its own, so under (a) a stalled answer keeps a write on "Saving" or "Repeating" until the operator leaves the page, which drops the write ([#486](https://github.com/ginsys/bronzeward/issues/486)). The CLI already bounds each attempt with these values (`internal/client/transport.go:91-95`), so one pair of values keeps both clients and AMB-14 the same. A request body is at most 1 MiB ([§8.1](#81-requests)), lists come in pages, and a write that starts a long job answers `202` and goes on as an operation ([§8.2](#82-errors)), so a working server is expected to answer well inside 60 s. A write that it answers later is handled as an ambiguous attempt, under the same key. Rejected: (b), which gives a repeat no time of its own after a stalled first attempt used the budget; (d), which a server that sends a byte from time to time never fires, and which Go's HTTP client does not offer for a body read |
 
 ## 14. Proposed API-gap issues and downstream refinement
 
