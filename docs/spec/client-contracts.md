@@ -579,7 +579,8 @@ wrote since, and the client treats it as a `412`: it stops and shows the newer s
 records each ingestion that its own `import start` was answered for in its non-secret state, under
 the context, its server and the current epoch, beside the ETags (`internal/client/state.go`). The
 record of an ingestion ends when the CLI follows it to its end or abandons it, and an epoch change
-drops it with the ETags. A continuation or takeover of an ingestion outside that record, another client's
+drops it with the ETags. A command that removes a record or an ETag at an earlier epoch leaves an
+entry that another command kept at a newer epoch unchanged. A continuation or takeover of an ingestion outside that record, another client's
 import, adopts no ETag after success: the CLI drops the draft's kept ETag, says so and offers a
 read of the draft, since the import can pass over an edit this client never read. ETags are kept per context and draft in memory; the
 CLI may keep them in its non-secret state for the length of a scripted sequence. On an epoch

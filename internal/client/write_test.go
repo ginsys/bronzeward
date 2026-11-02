@@ -687,6 +687,57 @@ func TestETagState(t *testing.T) {
 	}
 }
 
+// TestStartedState: the record of an import this client started lives at the epoch it was kept at,
+// and a removal from a command still at an earlier epoch leaves another command's newer entry alone
+// (client-contracts.md §8.3).
+func TestStartedState(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	e1 := Context{Name: "lab", Server: "https://lab.example.test", LastEpoch: "ep_BWSYNTH-1"}
+	e2 := e1
+	e2.LastEpoch = "ep_BWSYNTH-2"
+	started := func(x *Context, ing string) bool {
+		t.Helper()
+		ok, err := Started(x, ing)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ok
+	}
+	if err := KeepStarted(&e1, "ing_BWSYNTH-1", true); err != nil {
+		t.Fatal(err)
+	}
+	if !started(&e1, "ing_BWSYNTH-1") || started(&e2, "ing_BWSYNTH-1") {
+		t.Error("the record must read at its own epoch only")
+	}
+	// Another command keeps its state at the new epoch, which replaces the earlier entry.
+	if err := KeepETag(&e2, "drf_BWSYNTH", `"BWSYNTH-etag-2"`); err != nil {
+		t.Fatal(err)
+	}
+	if err := KeepStarted(&e2, "ing_BWSYNTH-2", true); err != nil {
+		t.Fatal(err)
+	}
+	if started(&e1, "ing_BWSYNTH-1") {
+		t.Error("an epoch change kept the earlier epoch's record")
+	}
+	// A command still at the earlier epoch ends its import late: its removals change nothing.
+	if err := KeepStarted(&e1, "ing_BWSYNTH-1", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := KeepETag(&e1, "drf_BWSYNTH", ""); err != nil {
+		t.Fatal(err)
+	}
+	if et, _ := ETag(&e2, "drf_BWSYNTH"); et != `"BWSYNTH-etag-2"` || !started(&e2, "ing_BWSYNTH-2") {
+		t.Errorf("a removal at the earlier epoch erased the newer entry: ETag %q, record %v", et, started(&e2, "ing_BWSYNTH-2"))
+	}
+	// At the entry's own epoch a removal forgets only its own item.
+	if err := KeepStarted(&e2, "ing_BWSYNTH-2", false); err != nil {
+		t.Fatal(err)
+	}
+	if et, _ := ETag(&e2, "drf_BWSYNTH"); et != `"BWSYNTH-etag-2"` || started(&e2, "ing_BWSYNTH-2") {
+		t.Errorf("forgetting the record: ETag %q, record %v; want the ETag kept and the record gone", et, started(&e2, "ing_BWSYNTH-2"))
+	}
+}
+
 // TestRepeatCheckServesOneSend: a passed CheckRepeat covers the next Send of the write only. A
 // second Send of the same write confirms the epoch again and refuses once it moved (§8.4 item 3).
 func TestRepeatCheckServesOneSend(t *testing.T) {

@@ -51,13 +51,18 @@ func kept(x *Context) (*serverState, error) {
 	return nil, nil
 }
 
-// keep changes x's entry at its server and current epoch, replacing one kept at another epoch.
-func keep(x *Context, change func(*serverState)) error {
+// keep changes x's entry at its server and current epoch. A change that adds replaces an entry kept
+// at another epoch; one that only removes leaves that entry alone, because what it removes was never
+// kept there, and another command may have just kept its own state at that epoch.
+func keep(x *Context, adds bool, change func(*serverState)) error {
 	p, err := statePath()
 	if err != nil {
 		return err
 	}
 	return update(p, func(s *state) error {
+		if ss := s.Contexts[x.Name][x.Server]; !adds && (ss == nil || ss.Epoch != x.LastEpoch) {
+			return nil
+		}
 		if s.Contexts == nil {
 			s.Contexts = map[string]map[string]*serverState{}
 		}
@@ -85,7 +90,7 @@ func ETag(x *Context, draft string) (string, error) {
 
 // KeepETag keeps etag as the last-seen ETag of draft in x; "" forgets it, as when the draft closes.
 func KeepETag(x *Context, draft, etag string) error {
-	return keep(x, func(ss *serverState) {
+	return keep(x, etag != "", func(ss *serverState) {
 		if ss.ETags == nil {
 			// An entry whose last ETag was forgotten is written without the map and reads back without it.
 			ss.ETags = map[string]string{}
@@ -107,7 +112,7 @@ func Started(x *Context, ing string) (bool, error) {
 // KeepStarted records that this client started ingestion ing; with started false it forgets it, as
 // when the ingestion ends. An epoch change drops the record with the entry's ETags.
 func KeepStarted(x *Context, ing string, started bool) error {
-	return keep(x, func(ss *serverState) {
+	return keep(x, started, func(ss *serverState) {
 		ss.Started = slices.DeleteFunc(ss.Started, func(s string) bool { return s == ing })
 		if started {
 			ss.Started = append(ss.Started, ing)

@@ -334,18 +334,36 @@ func TestImportLifecycle(t *testing.T) {
 	step("so the next write needs a read first", []string{"profile", "rm", "workers", "--draft", "drf_BWSYNTH"}, 1, "",
 		"no ETag of draft drf_BWSYNTH is kept for this context at its current epoch. Read the draft first")
 
+	// This client's own import adopts the ETag after its success, and its end forgets the record: a
+	// later takeover of the same ingestion is not this client's start.
+	step("draft show before this client's import", []string{"draft", "show", "drf_BWSYNTH"}, 0, "drf_BWSYNTH", "")
+	f.onIngested = func() {
+		f.draftFake.mu.Lock()
+		f.rev = 7
+		f.draftFake.mu.Unlock()
+	}
+	f.set("released", 1, time.Hour, "succeeded", `{"draft":"drf_BWSYNTH","draftRevision":7,"importBaseRevision":"ibr_BWSYNTH"}`, "",
+		ev("succeeded", `{"type":"succeeded"}`))
+	step("this client's import keeps the ETag after its success", start, 0, "released into draft drf_BWSYNTH (revision 7)", "", startBody(`"6-BWSYNTH"`, ""))
+	f.onIngested = nil
+	f.set("released", 2, time.Hour, "succeeded", `{"draft":"drf_BWSYNTH","draftRevision":7,"importBaseRevision":"ibr_BWSYNTH"}`, "",
+		ev("taken-over", `{"type":"taken-over","generation":2}`), ev("succeeded", `{"type":"succeeded"}`))
+	step("its success ended the record, so a later takeover keeps no ETag", []string{"import", "takeover", "ing_BWSYNTH"}, 0,
+		"This client did not start import ing_BWSYNTH, so it keeps no ETag of draft drf_BWSYNTH.", "",
+		`POST /ingestions/ing_BWSYNTH/takeovers if-match= body={}`)
+
 	// An epoch change during the draft read after a success keeps no ETag: a restored draft can show
 	// the same revision with other content (client-contracts.md §8.3).
 	step("draft show before the epoch step", []string{"draft", "show", "drf_BWSYNTH"}, 0, "drf_BWSYNTH", "")
 	f.onIngested = func() {
 		f.draftFake.mu.Lock()
-		f.rev, f.draftFake.epoch = 7, "ep_BWSYNTH-2"
+		f.rev, f.draftFake.epoch = 8, "ep_BWSYNTH-2"
 		f.draftFake.mu.Unlock()
 	}
-	f.set("released", 1, time.Hour, "succeeded", `{"draft":"drf_BWSYNTH","draftRevision":7,"importBaseRevision":"ibr_BWSYNTH"}`, "",
+	f.set("released", 1, time.Hour, "succeeded", `{"draft":"drf_BWSYNTH","draftRevision":8,"importBaseRevision":"ibr_BWSYNTH"}`, "",
 		ev("succeeded", `{"type":"succeeded"}`))
-	step("a success read back across an epoch change keeps no ETag", start, 1, "released into draft drf_BWSYNTH (revision 7)",
-		"the server's epoch changed while draft drf_BWSYNTH was read again after this import. Its ETag is not kept.", startBody(`"6-BWSYNTH"`, ""))
+	step("a success read back across an epoch change keeps no ETag", start, 1, "released into draft drf_BWSYNTH (revision 8)",
+		"the server's epoch changed while draft drf_BWSYNTH was read again after this import. Its ETag is not kept.", startBody(`"7-BWSYNTH"`, ""))
 	f.onIngested = nil
 	// The refusal alone is not the safety property: no ETag of the restored draft may be saved under
 	// the new epoch, so the next write is refused locally and sends nothing.
