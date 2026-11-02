@@ -3,7 +3,8 @@
 
 import { type MouseEvent, useCallback, useEffect, useRef, useState } from "react";
 
-// The navigation of the header wireframe; Recovery is the recovery console's (#261).
+// The navigation of the header wireframe. Recovery is the recovery console's (#261, #364): the shell
+// shows it to a recovery-admin, and to every role while recovery mode is on.
 export const PAGES = [
   ["/machines", "Machines"],
   ["/changes", "Changes"],
@@ -11,6 +12,7 @@ export const PAGES = [
   ["/operations", "Operations"],
   ["/sources", "Sources"],
   ["/audit", "Audit"],
+  ["/recovery", "Recovery"],
 ] as const;
 
 type Entries = Pick<History, "state" | "go" | "pushState" | "replaceState">;

@@ -10,6 +10,7 @@ import { AddCluster, RecordMachine } from "./forms.tsx";
 import { EmptyList, Head, Id, type Listed, More, Ref, Scroll, short, useItem, useList, usePending } from "./list.tsx";
 import { MachineItem } from "./machine.tsx";
 import { ClusterItem, Clusters, Filter, Machines } from "./machines.tsx";
+import { RecoveryConsole } from "./recovery.tsx";
 import { when } from "./states.tsx";
 
 type S = components["schemas"];
@@ -418,7 +419,7 @@ export function view(path: string, query: string, go: (to: string) => void): Rea
     const pages: Record<string, () => ReactNode> = {
       machines: () => <Machines query={query} go={go} />, clusters: () => <Clusters />, changes: () => <Changes />,
       plans: () => <Plans query={query} go={go} />, operations: () => <Operations query={query} go={go} />,
-      sources: () => <Sources query={query} go={go} />, audit: () => <Audit />,
+      sources: () => <Sources query={query} go={go} />, audit: () => <Audit />, recovery: () => <RecoveryConsole />,
     };
     return kind !== undefined && Object.hasOwn(pages, kind) ? pages[kind]!() : undefined;
   }

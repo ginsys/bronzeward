@@ -6,7 +6,7 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useId, useReducer, useRef, useState } from "react";
 import { leaving, signingOut, unsaved, WriteNotices } from "./forms.tsx";
 import { type Load, ReadsProvider } from "./list.tsx";
-import { PreEntry, type Recovery, RecoveryBanner, RecoveryRead, type StartMode, startModeOf, startRefusal } from "./recovery.tsx";
+import { Entered, PreEntry, type Recovery, RecoveryBanner, RecoveryRead, type StartMode, startModeOf, startRefusal } from "./recovery.tsx";
 import { Client, type ClientOptions, EPOCH_CHANGED, type Problem, type ReadResult } from "./request.ts";
 import { view } from "./resources.tsx";
 import { follow, PAGES, usePath } from "./router.ts";
@@ -30,9 +30,14 @@ export const incompatible = (served: number) =>
 export const deprecated = (route: string) => `The server marks ${route} as deprecated: it will be removed in a later release.`;
 
 // What an action needs to know: the roles GET /identity served, whether the page is offline, and
-// whether it is a page kept across an epoch change (keepsPage).
-const Shell = createContext<{ roles: readonly Role[]; offline: boolean; kept?: boolean }>({ roles: [], offline: false });
+// whether it is a page kept across an epoch change (keepsPage), and the recovery console's: the
+// start mode the last answer showed and whether recovery mode is on.
+const Shell = createContext<{ roles: readonly Role[]; offline: boolean; kept?: boolean; mode?: StartMode; recoveryMode?: boolean }>({ roles: [], offline: false });
 export const ShellContext = Shell.Provider;
+export const useRecoveryState = () => {
+  const { mode = "unknown", recoveryMode = false } = useContext(Shell);
+  return { mode, recoveryMode };
+};
 // The offline banner shows: no action sends anything (journeys §8 Offline row).
 export const useOffline = () => useContext(Shell).offline;
 
@@ -474,7 +479,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
 
   const id = identity.load.kind === "ok" ? identity.load.data : undefined;
   return (
-    <ShellContext value={{ roles: id?.roles ?? [], offline: offline !== undefined, kept }}>
+    <ShellContext value={{ roles: id?.roles ?? [], offline: offline !== undefined, kept, mode, recoveryMode }}>
       <a className="skip" href="#main">Skip to the page</a>
       <header>
         <h1>Bronzeward</h1>
@@ -488,13 +493,14 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
         <button type="button" onClick={() => signingOut() && reads.signOut(signOut)}>Sign out</button>
         {recoveryMode && <RecoveryBanner recovery={recovery.kind === "ok" ? recovery.data : undefined} mode={mode} />}
         {recoveryMode && recovery.kind !== "loading" && <RecoveryRead res={recovery} />}
+        <Entered />
         {epochChanged && <Status testid="epoch-changed">{EPOCH_CHANGED}.</Status>}
         <Deprecations routes={notices} />
         <WriteNotices go={show} />
         {offline !== undefined && <Offline since={offline} readAt={reads.readAt} />}
         {id !== undefined && (
           <nav aria-label="Main">
-            {PAGES.map(([to, title]) => (
+            {PAGES.filter(([to]) => to !== "/recovery" || recoveryMode || id.roles.includes("recovery-admin")).map(([to, title]) => (
               <a key={to} href={to} aria-current={current(path) === to ? "page" : undefined} onClick={(e) => follow(e, go, to)}>{title}</a>
             ))}
           </nav>

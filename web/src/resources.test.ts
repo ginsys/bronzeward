@@ -7,6 +7,7 @@ import { CreateDraft, DraftItem } from "./drafts.tsx";
 import { EmptyList, Id, type Listed, readPages, type Reads, ReadsProvider, RESTARTED, viewOf } from "./list.tsx";
 import { MachineItem } from "./machine.tsx";
 import { ClusterItem, Clusters, Machines } from "./machines.tsx";
+import { RecoveryConsole } from "./recovery.tsx";
 import {
   Audit, Change, Changes, DEPENDENCY_CLASSES, DependencyItem, klass, OPERATION_KINDS, OPERATION_STATES, OperationItem, Operations, PLAN_STATES,
   PlanItem, Plans, ReleaseItem, RevisionItem, seconds, SourceItem, Sources, view,
@@ -21,7 +22,7 @@ describe("paths (B3)", () => {
   test("each navigation page and each resource's item at its path", () => {
     const pages: [string, unknown][] = [
       ["/", Machines], ["/machines", Machines], ["/clusters", Clusters], ["/changes", Changes], ["/plans", Plans],
-      ["/operations", Operations], ["/sources", Sources], ["/audit", Audit],
+      ["/operations", Operations], ["/sources", Sources], ["/audit", Audit], ["/recovery", RecoveryConsole],
     ];
     for (const [path, type] of pages) expect(at(path)?.type, path).toBe(type);
     const items: [string, unknown, Record<string, unknown>][] = [
@@ -45,7 +46,7 @@ describe("paths (B3)", () => {
   });
 
   test("anything else is not found, an object's own property names included", () => {
-    for (const path of ["/recovery", "/constructor", "/toString", "/drafts/drf_a/fragments", "/acts", "/sources/frg_a", "/audit/act_a", "/machines/mch_a/review", "/Machines"]) {
+    for (const path of ["/recovery/operations", "/constructor", "/toString", "/drafts/drf_a/fragments", "/acts", "/sources/frg_a", "/audit/act_a", "/machines/mch_a/review", "/Machines"]) {
       expect(at(path), path).toBeUndefined();
     }
   });
