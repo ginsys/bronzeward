@@ -78,7 +78,8 @@ function continues(masked: string, tag: number, end: number): boolean {
     holder = above === undefined ? -1 : indent(above);
   }
   const next = masked.slice(eol + 1).split("\n").find((l) => l.trim() !== "");
-  if (next === undefined || indent(next) <= holder) return false;
+  // A document marker (--- or ...) ends every scalar, also a top-level one.
+  if (next === undefined || indent(next) <= holder || /^(?:---|\.\.\.)(?:\s|$)/.test(next)) return false;
   const t = next.trim();
   return !/^(?:[,\]}]|[-?](?:\s|$))/.test(t) && !/:(?:\s|$)/.test(t);
 }

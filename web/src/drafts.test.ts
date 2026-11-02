@@ -120,6 +120,10 @@ describe("[Go to field] positions (B13)", () => {
     expect(references("a:\n  !bwref x/foo\nb: c\n")).toEqual(["x/foo"]);
     expect(references("a: [\n  !bwref x/one,\n  !bwref x/two\n]\n")).toEqual(["x/one", "x/two"]);
     expect(references("a:\n  - !bwref x/one\n  - !bwref x/two\n")).toEqual(["x/one", "x/two"]);
+    // #517 review round 4: a document marker ends a top-level scalar.
+    expect(references("!bwref x/one\n---\n!bwref x/two\n")).toEqual(["x/one", "x/two"]);
+    expect(references("!bwref x/one\n...\n")).toEqual(["x/one"]);
+    expect(references("!bwref x/one\n--- # next\n")).toEqual(["x/one"]);
     // A more indented key or sequence entry is no continuation.
     expect(references("a: !bwref x/one\n  b: c\n")).toEqual(["x/one"]);
     expect(references("- !bwref x/one\n  - c\n")).toEqual(["x/one"]);
