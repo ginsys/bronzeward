@@ -36,7 +36,7 @@ func (e *env) planCmd(args []string) error {
 	}
 	if v == "list" {
 		return list(e, l, "/plans", values(f), nil, "PLAN\tSTATE\tMACHINE\tOPERATION\tRELEASE\tEXPIRES", "", func(w *tabwriter.Writer, p *apitypes.PlanBody) {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", p.Id, p.State, p.Machine, p.Operation, p.Release, when(p.ExpiresAt))
+			tf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", p.Id, p.State, p.Machine, p.Operation, p.Release, when(p.ExpiresAt))
 		})
 	}
 	var lines []string
@@ -122,6 +122,9 @@ func (e *env) planCreate(args []string) error {
 		return err
 	}
 	body, _ := json.Marshal(in)
+	// The write layer escapes each line of its answer whole, tabs included, so the plan view, whose
+	// cells planView escaped, is printed here, after the write, in its columns.
+	var view []string
 	err = e.write(&client.Write{Method: http.MethodPost, Path: "/plans", Body: body, Repeat: rp,
 		Check: "plan list --machine " + client.ShellWord(in.Machine),
 		Read: func(c *client.Client) (string, error) {
@@ -134,12 +137,18 @@ func (e *env) planCreate(args []string) error {
 		if err := json.Unmarshal(r.Body, &p); err != nil || e.output != "table" {
 			return nil, err
 		}
-		return planView(c, &p), nil
+		view = planView(c, &p)
+		return nil, nil
 	})
 	if next := createRefusalNext(err, in.ReleaseId, in.Machine); next != "" {
 		return fmt.Errorf("%w\n%s", err, next)
 	}
-	return err
+	if err != nil || view == nil {
+		return err
+	}
+	w := tabwriter.NewWriter(e.out, 0, 0, 2, ' ', 0)
+	printLines(w, view)
+	return w.Flush()
 }
 
 // createRefusalNext is the next step T19 names for plan creation's conflicts (internal/api/plans.go):
@@ -182,58 +191,62 @@ func planView(c *client.Client, p *apitypes.PlanBody) []string {
 	var cl apitypes.ClusterBody
 	cluster := p.Cluster
 	if getJSON(c, "/clusters/"+url.PathEscape(p.Cluster), &cl) == nil {
-		cluster += " (" + cl.Name + ")"
+		cluster = sf("%s (%s)", p.Cluster, cl.Name)
+	} else {
+		cluster = pr(cluster)
 	}
 	left := time.Until(p.ExpiresAt).Round(time.Minute)
-	expiry := fmt.Sprintf("expires %s (in %s by this client's clock)", when(p.ExpiresAt), left)
+	expiry := sf("expires %s (in %s by this client's clock)", when(p.ExpiresAt), left)
 	if left <= 0 {
-		expiry = fmt.Sprintf("expired %s (%s ago by this client's clock)", when(p.ExpiresAt), -left)
+		expiry = sf("expired %s (%s ago by this client's clock)", when(p.ExpiresAt), -left)
 	}
-	endpoint, desired := "endpoint unread", "unread: "+fmt.Sprint(mErr)
+	endpoint, desired := "endpoint unread", sf("unread: %v", mErr)
 	if mErr == nil {
-		endpoint, desired = m.TalosEndpoint, or(m.Desired, "none")
+		endpoint, desired = pr(m.TalosEndpoint), pr(or(m.Desired, "none"))
 	}
-	what := ", mode " + or(p.Mode, "none")
+	what := sf(", mode %s", or(p.Mode, "none"))
 	if p.Operation == "adopt" {
 		what = ": records Applied from the node's own bytes and sends nothing to the machine"
 	}
+	// Every cell is escaped as it is built (sf, pr), so the tabs that separate the columns are the
+	// only control characters in these lines.
 	lines := []string{
-		fmt.Sprintf("Plan %s\t%s\t%s", p.Id, p.State, expiry),
-		fmt.Sprintf("  Machine\t%s  %s\tcluster %s, route %s", p.Machine, endpoint, cluster, p.Route),
-		fmt.Sprintf("  Operation\t%s%s", p.Operation, what),
-		fmt.Sprintf("  Release\t%s\tmachine Desired: %s at plan creation, %s now", p.Release, or(p.DesiredRelease, "none"), desired),
-		fmt.Sprintf("  Assignment\t%s\tbaseline revision %s, drift record %s", p.AssignmentRevision, orInt(p.BaselineRevision, "none"), orInt(p.DriftRecord, "none")),
-		fmt.Sprintf("  Limits\ttransport %s, verification %s, observation age %ds, check validity %ds, attempts %s, rollout %d",
+		sf("Plan %s\t%s\t", p.Id, p.State) + expiry,
+		sf("  Machine\t%s  ", p.Machine) + endpoint + "\tcluster " + cluster + sf(", route %s", p.Route),
+		sf("  Operation\t%s", p.Operation) + what,
+		sf("  Release\t%s\tmachine Desired: %s at plan creation, ", p.Release, or(p.DesiredRelease, "none")) + desired + " now",
+		sf("  Assignment\t%s\tbaseline revision %s, drift record %s", p.AssignmentRevision, orInt(p.BaselineRevision, "none"), orInt(p.DriftRecord, "none")),
+		sf("  Limits\ttransport %s, verification %s, observation age %ds, check validity %ds, attempts %s, rollout %d",
 			secs(p.TransportDeadlineSeconds), secs(p.VerificationDeadlineSeconds), p.MaxObservationAgeSeconds, p.CheckValiditySeconds,
 			orInt(p.MaxAttempts, "-"), p.RolloutLimit),
-		fmt.Sprintf("  Created by\t%s (%s)\tepoch %s, %s, plan revision %d, timeline revision %d", p.CreatedBy.Principal, p.CreatedBy.Role,
+		sf("  Created by\t%s (%s)\tepoch %s, %s, plan revision %d, timeline revision %d", p.CreatedBy.Principal, p.CreatedBy.Role,
 			p.Epoch, when(p.CreatedAt), p.Revision, p.TimelineRevision),
-		fmt.Sprintf("  Approval\t%s\tpolicy %s, committed operation %s", or(p.Approval, "none"), p.ApprovalPolicy, or(p.CommittedOperation, "none")),
+		sf("  Approval\t%s\tpolicy %s, committed operation %s", or(p.Approval, "none"), p.ApprovalPolicy, or(p.CommittedOperation, "none")),
 	}
 	ev := p.Evidence
 	val := ev.Validation
-	lines = append(lines, "Evidence", fmt.Sprintf("  Validation\t%s at %s (contract %s, machinery %s, Kubernetes %s, %s)", val.Result, val.At,
+	lines = append(lines, "Evidence", sf("  Validation\t%s at %s (contract %s, machinery %s, Kubernetes %s, %s)", val.Result, val.At,
 		val.Contract, val.MachineryVersion, val.KubernetesVersion, val.PlatformMode))
 	if ev.DryRun.Available {
 		lines = append(lines, "  Dry run\tavailable")
 	} else {
-		lines = append(lines, "  Dry run\tnot available: "+ev.DryRun.Reason)
+		lines = append(lines, "  Dry run\tnot available: "+pr(ev.DryRun.Reason))
 	}
 	if b := ev.Baseline; b != nil {
 		pending := "no: the release's compiled configuration is byte-identical to the node's"
 		if b.PendingConvergence {
 			pending = "yes: the release's compiled configuration differs from the node's, which the adoption records; a later apply-config plan withholds its diff"
 		}
-		lines = append(lines, "  Baseline\timport base "+b.ImportBaseRevision+", the node's own bytes", "  Pending convergence\t"+pending)
+		lines = append(lines, "  Baseline\timport base "+pr(b.ImportBaseRevision)+", the node's own bytes", "  Pending convergence\t"+pending)
 	}
 	switch d := ev.Diff; {
 	case d == nil:
 	case d.Withheld:
-		lines = append(lines, fmt.Sprintf("  Diff\tDiff withheld: the change cannot be shown (%s -> %s)", d.From, d.To))
+		lines = append(lines, sf("  Diff\tDiff withheld: the change cannot be shown (%s -> %s)", d.From, d.To))
 	case d.Unified == "":
-		lines = append(lines, fmt.Sprintf("  Diff\tNo differences in the redacted configurations (%s -> %s)", d.From, d.To))
+		lines = append(lines, sf("  Diff\tNo differences in the redacted configurations (%s -> %s)", d.From, d.To))
 	default:
-		lines = append(lines, fmt.Sprintf("  Diff\tChanges shown below: the whole redacted configuration, %s -> %s", d.From, d.To))
+		lines = append(lines, sf("  Diff\tChanges shown below: the whole redacted configuration, %s -> %s", d.From, d.To))
 		for _, l := range strings.Split(strings.TrimSuffix(d.Unified, "\n"), "\n") {
 			lines = append(lines, "    "+client.Printable(l))
 		}
@@ -251,7 +264,7 @@ func stateLines(c *client.Client, p *apitypes.PlanBody, m apitypes.MachineBody, 
 		return []string{"It is not approved and nothing runs until an approver approves: bronzewardctl approve " + client.ShellWord(p.Id)}
 	case "committed":
 		op := or(p.CommittedOperation, "?")
-		return []string{"Committed: operation " + op + ". Follow it with: bronzewardctl operation watch " + client.ShellWord(op)}
+		return []string{sf("Committed: operation %s. Follow it with: bronzewardctl operation watch ", op) + client.ShellWord(op)}
 	case "expired":
 		return []string{"Expired: it can no longer be approved or committed. " + again}
 	case "revoked":
@@ -260,27 +273,27 @@ func stateLines(c *client.Client, p *apitypes.PlanBody, m apitypes.MachineBody, 
 		return []string{"Cancelled: it cannot be committed. " + again}
 	case "approved":
 	default:
-		return []string{"State " + p.State + ": this client does not know it."}
+		return []string{sf("State %s: this client does not know it.", p.State)}
 	}
 	var a apitypes.ApprovalBody
 	if p.Approval == nil {
 		return []string{"Approved, but the plan names no approval."}
 	}
 	if err := getJSON(c, "/approvals/"+url.PathEscape(*p.Approval), &a); err != nil {
-		return []string{"Approved by " + *p.Approval + ", which cannot be read: " + err.Error()}
+		return []string{sf("Approved by %s, which cannot be read: %v", *p.Approval, err)}
 	}
 	if a.Epoch != c.Context.LastEpoch {
-		return []string{fmt.Sprintf("Approved by %s (%s) in epoch %s. This approval is from before the last recovery entry and authorizes nothing; "+
-			"an approver may approve again: bronzewardctl approve %s", a.Approver.Principal, a.Approver.Role, a.Epoch, client.ShellWord(p.Id))}
+		return []string{sf("Approved by %s (%s) in epoch %s. This approval is from before the last recovery entry and authorizes nothing; "+
+			"an approver may approve again: bronzewardctl approve ", a.Approver.Principal, a.Approver.Role, a.Epoch) + client.ShellWord(p.Id)}
 	}
-	lines := []string{fmt.Sprintf("Approved by %s (%s) as %s. Not committed: the controller commits it only if its own checks pass; plan show then names the operation.",
+	lines := []string{sf("Approved by %s (%s) as %s. Not committed: the controller commits it only if its own checks pass; plan show then names the operation.",
 		a.Approver.Principal, a.Approver.Role, a.Id)}
 	var stale []string
 	if mErr != nil {
-		return append(lines, "Whether it is stale cannot be predicted: the machine cannot be read: "+mErr.Error())
+		return append(lines, sf("Whether it is stale cannot be predicted: the machine cannot be read: %v", mErr))
 	}
 	if or(m.Desired, "") != or(p.DesiredRelease, "") {
-		stale = append(stale, "the machine's Desired is now "+or(m.Desired, "none"))
+		stale = append(stale, sf("the machine's Desired is now %s", or(m.Desired, "none")))
 	}
 	if m.OpenDrift == nil && p.DriftRecord != nil || m.OpenDrift != nil && (p.DriftRecord == nil || *p.DriftRecord != m.OpenDrift.Revision) {
 		open := "none"
@@ -291,10 +304,10 @@ func stateLines(c *client.Client, p *apitypes.PlanBody, m apitypes.MachineBody, 
 	}
 	head, err := assignmentHead(c, p.Machine)
 	if err != nil {
-		return append(lines, "Whether it is stale cannot be fully predicted: the assignment cannot be read: "+err.Error())
+		return append(lines, sf("Whether it is stale cannot be fully predicted: the assignment cannot be read: %v", err))
 	}
 	if head != p.AssignmentRevision {
-		stale = append(stale, "the machine's assignment is now at "+or(&head, "none"))
+		stale = append(stale, sf("the machine's assignment is now at %s", or(&head, "none")))
 	}
 	if len(stale) > 0 {
 		return append(lines, "Predicted stale, by this client's reads: "+strings.Join(stale, "; ")+
