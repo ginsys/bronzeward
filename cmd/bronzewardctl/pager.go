@@ -6,6 +6,8 @@ import (
 	"io"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/ginsys/bronzeward/internal/client"
 )
 
 // Alternate-screen and cursor sequences of an xterm-compatible terminal.
@@ -63,34 +65,27 @@ func page(text string, rows, cols int, keys io.Reader, w io.Writer) error {
 	}
 }
 
-// wrap splits text into lines of at most cols runes, a tab counted as one. A carriage return is
-// shown as ^M, so a line cannot overwrite the one shown before it, every other C0 control
-// character as ^ and its letter, and a C1 one as ?, so none reaches the terminal as a control
-// sequence.
+// wrap splits text into its lines, escapes each line as all remote text is escaped
+// (client-contracts.md §6 item 8), and cuts it into lines of at most cols runes. The line feeds
+// alone stay: a tab, a carriage return, any other control character, a byte that is not UTF-8 and
+// a bidirectional control show as their Go escape, never as themselves, and an escape is never cut.
 func wrap(text string, cols int) []string {
 	var out []string
 	for _, l := range strings.Split(strings.TrimSuffix(text, "\n"), "\n") {
 		var b strings.Builder
 		n := 0
-		for _, r := range l {
-			s := string(r)
-			switch {
-			case r == '\t':
-				s = " "
-			case r < 0x20 || r == 0x7f:
-				s = "^" + string(rune(r^0x40))
-			case r == utf8.RuneError, r >= 0x80 && r < 0xa0:
-				s = "?"
+		for i := 0; i < len(l); {
+			_, size := utf8.DecodeRuneInString(l[i:])
+			s := client.Printable(l[i : i+size])
+			i += size
+			w := utf8.RuneCountInString(s)
+			if n > 0 && n+w > cols {
+				out = append(out, b.String())
+				b.Reset()
+				n = 0
 			}
-			for _, c := range s {
-				if n == cols {
-					out = append(out, b.String())
-					b.Reset()
-					n = 0
-				}
-				b.WriteRune(c)
-				n++
-			}
+			b.WriteString(s)
+			n += w
 		}
 		out = append(out, b.String())
 	}

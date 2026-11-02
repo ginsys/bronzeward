@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ginsys/bronzeward/internal/client"
 )
 
 // TestImportMark checks import mark's outcomes (T15 of #256, client-contracts.md §11.3): applied
@@ -48,10 +50,17 @@ func TestImportMark(t *testing.T) {
 	f.set("paused", 3, time.Hour, "running", "", "", marked, ev("taken-over", `{"type":"taken-over","generation":3}`), ev("paused", `{"type":"paused","generation":3}`))
 	step("a later takeover: not applied", mark, 1, "", "was not applied: a takeover at generation 3 resumed the import without it", sent)
 
+	// That success ends the import, so it also ends this client's record of having started it (§8.3).
+	if !startedRecord(t, "ing_BWSYNTH", true) {
+		t.Fatal("the record of this client's start was not kept")
+	}
 	setStdin(t, "doc[0]/BWSYNTH\n")
 	f.set("released", 3, time.Hour, "succeeded", `{"draft":"drf_BWSYNTH","draftRevision":2,"importBaseRevision":"ibr_BWSYNTH"}`, "",
 		marked, ev("continued", `{"type":"continued","generation":3}`), ev("succeeded", `{"type":"succeeded"}`))
 	step("a success without the pause is not the mark applied", mark, 1, "", "was not applied: operation op_BWSYNTH-ing succeeded without pausing at the mark's generation 2", sent)
+	if startedRecord(t, "ing_BWSYNTH", false) {
+		t.Error("a mark run that ended in success kept the record of this client's start")
+	}
 
 	setStdin(t, "doc[0]/BWSYNTH\n")
 	f.set("abandoned", 2, time.Hour, "failed", "", `{"type":"urn:bronzeward:problem:validation-failed","title":"BWSYNTH","status":422}`,
@@ -64,6 +73,30 @@ func TestImportMark(t *testing.T) {
 
 	setStdin(t, "\n")
 	step("no marks: nothing sent", mark, 2, "", "no marks were given; nothing was sent")
+}
+
+// startedRecord says whether the lab context keeps ing as an import this client started; with keep,
+// it records that first.
+func startedRecord(t *testing.T, ing string, keep bool) bool {
+	t.Helper()
+	cfg, err := client.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	x := cfg.Find("lab")
+	if x == nil {
+		t.Fatal("no context lab")
+	}
+	if keep {
+		if err := client.KeepStarted(x, ing, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ok, err := client.Started(x, ing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ok
 }
 
 // TestImportReviewRefused checks that import review reads nothing unless standard input and output
@@ -101,8 +134,9 @@ func TestPage(t *testing.T) {
 		t.Errorf("the end of the keys does not quit: %v, %q", err, w.String())
 	}
 
-	got := wrap("\x1b[31mred\rback\u009bcsi\tx\n"+strings.Repeat("a", 45), 20)
-	if want := []string{"^[[31mred^Mback?csi ", "x", strings.Repeat("a", 20), strings.Repeat("a", 20), "aaaaa"}; strings.Join(got, "|") != strings.Join(want, "|") {
+	// Each line is escaped as all remote text is, the line feeds alone kept, and no escape is cut.
+	got := wrap("\x1b[31mred\rback\u009bcsi\tx\xe2\x80\xae\xff\n"+strings.Repeat("a", 45), 20)
+	if want := []string{`\x1b[31mred\x0dback`, `\x9bcsi\x09x\` + "u202e", `\xff`, strings.Repeat("a", 20), strings.Repeat("a", 20), "aaaaa"}; strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Errorf("wrap gives %q, want %q", got, want)
 	}
 }
