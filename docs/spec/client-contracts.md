@@ -629,9 +629,8 @@ contract's, and this specification does not close it.
    the request content, so a key reveals nothing about a document.
 2. **Ambiguous.** A write's outcome is unknown when the connection fails after any byte of the
    request was sent, when no complete response arrives (also when item 8's bound ends the
-   attempt), on `500`, or on a `5xx` that is not a Bronzeward problem ([§8.2](#82-errors)). The
-   client then repeats the
-   identical request it still holds in memory, with the same key, at most 3 times with backoff.
+   attempt) unless its status is a `4xx` (item 8), on `500`, or on a `5xx` that is not a
+   Bronzeward problem ([§8.2](#82-errors)). The client then repeats the identical request it still holds in memory, with the same key, at most 3 times with backoff.
    A write's `503` is repeated the same way; it states only that the attempt it answers committed
    nothing, so after an ambiguous attempt the outcome stays unknown ([§8.2](#82-errors)). The
    in-progress `409` of a fragment write (route plus `409 conflict` plus an `ingestion` member,
@@ -751,17 +750,27 @@ contract's, and this specification does not close it.
    client reads the resource, reports what it shows, and lets the operator send the write again as
    a new one if it is still wanted.
 8. **Attempt bound.** Every request that a client sends has its own bound, except the event
-   stream of [§8.6](#86-event-resumption). The response headers must arrive within 30 s of the
-   send. The whole attempt, which is the request, the headers and the complete body, must end
-   within 60 s. Each repeat of item 2 and each read of item 3 is a new attempt with a new bound.
-   A bound that fires ends the attempt in the same way as a connection that the network cut at
-   that point:
+   stream of [§8.6](#86-event-resumption). The response headers must arrive within 30 s after
+   the request is sent. The whole attempt, which is the request, the headers and the complete
+   body, must end within 60 s. Each repeat of item 2 and each read of item 3 is a new attempt with
+   a new bound. The CLI starts the header timer when it has written the whole request, as Go's
+   `ResponseHeaderTimeout` does. The web client cannot see that moment, so it starts the timer
+   when it sends the request. That bound is stricter, by the time the upload takes, and a request
+   body is at most 1 MiB ([§8.1](#81-requests)). A bound that fires ends the attempt in the same
+   way as a connection that the network cut at that point:
    - A read reports the transport failure that it reports for a cut connection.
    - A write is ambiguous under item 2 if a byte of the request possibly left. The web client
      cannot see whether one did, so a write attempt that the bound ends is always ambiguous there,
      never **not done**. The CLI counts an attempt as sent once it has a connection
      (`internal/client/write.go:455-467`). A bound that fires before that is a failure with
      nothing sent (AMB-01), and a bound that fires after it is ambiguous.
+   - One exception: if a write's headers carried a `4xx` status and the bound fires during its
+     body, the server refused that attempt, so it is not ambiguous. The client reports the status
+     as a refusal, says that the answer was cut off, and does not repeat. After an earlier
+     ambiguous attempt, that refusal says nothing about the earlier attempt, so the outcome stays
+     unknown (item 4). This is also what the CLI does when the network cuts such a body
+     (`internal/client/write.go:497-503`, `internal/client/write.go:303-307`,
+     `internal/client/write.go:331-342`).
    - An ambiguous write then takes the repeat path of item 2: the same key, at most 3 repeats,
      then the outcome-unknown report of items 4 and 5.
 
@@ -769,8 +778,9 @@ contract's, and this specification does not close it.
    and the outcome-unknown notice of item 5 settles and offers Dismiss. The in-progress wait of
    item 2 keeps its own longer bound, and each repeat in that wait has the same attempt bound. A
    write that the server answers after the bound is an ambiguous attempt like any other, and its
-   repeat uses the same key. The CLI's HTTP client already has these values (`internal/client/transport.go:91-95`):
-   `ResponseHeaderTimeout` is 30 s, and `Timeout` is 1 minute, which includes the body read. It
+   repeat uses the same key. The CLI's HTTP client already has these values
+   (`internal/client/transport.go:91-95`): `ResponseHeaderTimeout` is 30 s, and `Timeout` is
+   1 minute, which includes the body read. It
    also bounds the TLS handshake to 10 s, which a browser does itself. The web client applies the
    bound in its request layer, with one abort signal per attempt that covers the `fetch` and the
    body read ([#487](https://github.com/ginsys/bronzeward/issues/487)). The alternatives are D12
@@ -1531,7 +1541,7 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 | AMB-12 | restore | as AMB-07, but the first attempt's record is missing: a restore to a backup taken before it removed it, or the first attempt never committed (G21) | the repeat carries the first attempt's epoch in `Bronzeward-Expected-Epoch` and is refused `412 epoch-mismatch` naming the current epoch, with no act or idempotency record committed (A6, [#293](https://github.com/ginsys/bronzeward/issues/293)); resource read |
 | AMB-08 | refusal | write answered `503 dependency-unavailable`, e.g. ingestion start with no provider configured | repeated at most 3 times with the same key; then reported not done |
 | AMB-09 | disconnect | write dropped after the body is sent; every repeat answered `503` | not reported as not done: outcome unknown, key and resource printed as in §8.4 item 4 |
-| AMB-14 | disconnect | the injector holds the response headers of a read and of a write for longer than 30 s; second case: it sends the headers and holds the body until 60 s after the send | the read reports a transport failure when the bound fires; the write is repeated with the same key at most 3 times, then reported as an unknown outcome with its key and the resource to read, never as not done; the web notice settles and offers Dismiss ([§8.4](#84-idempotency-and-ambiguous-responses) item 8) |
+| AMB-14 | disconnect | the injector holds the response headers of a read and of a write for longer than 30 s; second case: it sends `200` headers and holds the body until 60 s after the send; third case: as the second, with `400` headers on the write | first and second: the read reports a transport failure when the bound fires; the write is repeated with the same key at most 3 times, then reported as an unknown outcome with its key and the resource to read, never as not done; the web notice settles and offers Dismiss; third: the write is reported refused with status `400` and a cut-off answer, not repeated ([§8.4](#84-idempotency-and-ambiguous-responses) item 8) |
 | PAGE-01 | success | list over three pages | every item once, in order |
 | PAGE-02 | restore | cursor used after recovery entry | `400 cursor-invalid`; list restarted; notice shown |
 | EVT-01 | disconnect | stream cut mid-operation | reconnect with `Last-Event-ID`; no event shown twice |
