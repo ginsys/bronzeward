@@ -663,7 +663,10 @@ describe("the read-only lists and items", () => {
     expect((await tab(true)).text).toBe("Skip to the page");
     await browser.keys("Enter");
     expect(await focused()).toBe("main");
-    // T2: from the skipped-to list, the machine and its three values.
+    // T2: from the skipped-to list, the machine and its three values. Each Tab walk waits for the
+    // page's lists: a page shows its title before they arrive, and a Tab from a main that holds no
+    // link yet leaves the page (ginsys/bronzeward#532).
+    await loaded();
     await tabTo((f) => f.title === m, "the machine");
     await browser.keys("Enter");
     await expect($("main h2")).toHaveText(`Machine ${m}`);
@@ -676,10 +679,12 @@ describe("the read-only lists and items", () => {
     await expect($("main h2")).toHaveText("Sources");
     expect(await focused()).toBe("main");
     expect(await where()).toBe(`${FIXTURE_PAGE}/sources`);
+    await loaded();
     await tabTo((f) => f.title === s.frg.id, "the fragment");
     await browser.keys("Enter");
     await expect($("main h2")).toHaveText("Fragment registries");
     expect(await where()).toBe(`${FIXTURE_PAGE}/fragments/${s.frg.id}`);
+    await loaded();
     await tabTo((f) => f.title === s.frv.id && f.tag === "A", "the revision");
     await browser.keys("Enter");
     await expect($("main h2")).toHaveText(`Fragment revision ${short(s.frv.id)} of registries`);
@@ -687,6 +692,7 @@ describe("the read-only lists and items", () => {
     await expect($("main")).toHaveText(expect.stringContaining("registry/example-pass"));
     // A filter set by keyboard lands in the query.
     await nav("Plans");
+    await loaded();
     await tabTo((f) => f.tag === "SELECT", "the state filter");
     await browser.keys("ArrowDown");
     await browser.waitUntil(async () => (await param("state")) === "proposed", { timeout: 10_000, timeoutMsg: "the state filter did not reach the query" });
