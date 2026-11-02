@@ -17,6 +17,8 @@
 #   prepare t9-release      the hold ended: C's stall removed, A's, B's and C's links joined; safe to
 #                           repeat; with no hold recorded by t9-hold, it changes nothing
 #   prepare applied         the apply T9 followed completed: Applied is Desired, from an operation
+#   prepare t10-revert      the facilitator's close of a drift that T10 left open, as S5 step 6
+#                           reverts one: h-publisher's plan, h-approver's approval and unfreeze
 #   prepare drift-closed    T10's drift closed; a scope still frozen is unfrozen by h-approver
 #   prepare t11-check       A started in the current epoch after its entry, with its ingestion
 #                           configuration; the control plane's scope still pre-restore
@@ -29,8 +31,8 @@ bin=$here/../bin
 
 step=${1:-}
 case $step in
-  labels | t6-draft | t7-publish | links | t9-hold | t9-release | applied | drift-closed | t11-check) ;;
-  *) die "usage: fixtures/participants/prepare labels|t6-draft|t7-publish|links linksplit|linkjoin|t9-hold|t9-release|applied|drift-closed|t11-check" ;;
+  labels | t6-draft | t7-publish | links | t9-hold | t9-release | applied | t10-revert | drift-closed | t11-check) ;;
+  *) die "usage: fixtures/participants/prepare labels|t6-draft|t7-publish|links linksplit|linkjoin|t9-hold|t9-release|applied|t10-revert|drift-closed|t11-check" ;;
 esac
 need docker curl jq timeout id sleep date
 need_state
@@ -176,6 +178,29 @@ case $step in
     ;;
   applied)
     check "$ref" "the worker's Applied is its Desired, from an operation, within four minutes" within 240 applied_desired
+    ;;
+  t10-revert)
+    # Not a participant step: neither client can plan, approve or unfreeze yet. A session whose
+    # participant left T10's drift open needs it closed before T11's setup. A plan of the worker's
+    # Desired binds the open record, so h-approver's approval is of an unseen overwrite. A scope
+    # that the participant froze is unfrozen after the approval, as in S5 step 6.
+    drift_open=$(sql "SELECT opened FROM drift_record WHERE machine = '$machine_w' AND closed IS NULL")
+    if [ -z "$drift_open" ]; then
+      say "no drift record is open on the worker; nothing to revert"
+    else
+      check "$ref" "a plan of the worker's Desired as h-publisher, a revert: 201" plan_by h-publisher t10-revert
+      [ -n "$plan_id" ] || die "no revert plan; nothing after it can run"
+      check "$ref" "the plan binds the record opened at revision $drift_open" \
+        same "$(sql "SELECT drift_record FROM plan WHERE id = '$plan_id'")" "$drift_open"
+      check "$ref" "approved as h-approver: 201" approve_by h-approver "$plan_id" t10-revert
+      if [ "$(sql "SELECT frozen FROM machine WHERE id = '$machine_w'")" = t ]; then
+        fresh h-approver
+        check "$ref" "the worker's scope, frozen in T10, unfrozen by h-approver: 201" \
+          answers 201 - POST "/api/v1/machines/$machine_w/unfreezes" "$tok" '{"reason": "T10 revert"}' "$(key unfreeze)"
+      fi
+      reverted() { [ "$(sql "SELECT resolution FROM drift_record WHERE machine = '$machine_w' AND opened = $drift_open")" = reverted ]; }
+      check "$ref" "within 5 minutes the revert completes and closes the record reverted" within 300 reverted
+    fi
     ;;
   drift-closed)
     # A drift record is named by its machine and the revision that opened it, and a machine has at

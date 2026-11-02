@@ -67,6 +67,12 @@ a cluster that nothing has imported yet, so it comes before the import of T4's s
 need a machine that has drifted after an apply, so they come after T9's apply. T11 starts from the
 state that T10 leaves, and its setup fails and names the drift record if T10 left it open.
 
+If the participant did not close T10's drift, run `fixtures/participants/session t10 revert`
+before T11. This is a facilitator action, not a participant step. It reverts the worker to its
+desired configuration, as h-publisher and h-approver, and unfreezes the worker if the participant
+froze it. Until the clients can plan, approve and unfreeze, no participant can close the drift, so
+every session needs this step before T11.
+
 T2 is therefore the ninth task. When you assess T2's measures, read them as taken after eight
 practice tasks, not as a first contact with the clients.
 
@@ -217,6 +223,8 @@ facilitator only. Setup `tN` means `fixtures/participants/session tN`.
   carry that out."
 - Done when: the drift is closed as the participant chose.
 - Probe: "Did detection revert it?" Expected: no.
+- If the drift is still open after the task, run `t10 revert` before T11 (Session order). This is
+  a facilitator action, not a participant step.
 
 ### T11: recovery
 
