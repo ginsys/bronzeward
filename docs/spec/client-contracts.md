@@ -575,7 +575,13 @@ another author's change unseen. One exception: after an import the client itself
 draft reaches `succeeded`, it re-reads the draft, since the server's own write moved the ETag. It
 adopts the re-read ETag only if the draft's `revision` equals the import operation's
 `result.draftRevision` (`internal/api/runner.go:443-444`); a higher revision means someone else
-wrote since, and the client treats it as a `412`: it stops and shows the newer state. ETags are kept per context and draft in memory; the
+wrote since, and the client treats it as a `412`: it stops and shows the newer state. The CLI
+records each ingestion that its own `import start` was answered for in its non-secret state, under
+the context, its server and the current epoch, beside the ETags (`internal/client/state.go`). The
+record of an ingestion ends when the CLI follows it to its end or abandons it, and an epoch change
+drops it with the ETags. A continuation or takeover of an ingestion outside that record, another client's
+import, adopts no ETag after success: the CLI drops the draft's kept ETag, says so and offers a
+read of the draft, since the import can pass over an edit this client never read. ETags are kept per context and draft in memory; the
 CLI may keep them in its non-secret state for the length of a scripted sequence. On an epoch
 change it drops them all: more than the contract strictly needs, since a pre-backup ETag still
 matches, but the client cannot tell which ETags were issued after *T*. The ingestion start's

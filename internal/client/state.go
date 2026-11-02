@@ -3,6 +3,7 @@ package client
 import (
 	"os"
 	"path/filepath"
+	"slices"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -15,9 +16,12 @@ type state struct {
 	Contexts map[string]map[string]*serverState `yaml:"contexts,omitempty"`
 }
 
+// serverState's Started names the ingestions this client started at the entry's epoch: only after
+// one of them succeeds does the client adopt the draft's re-read ETag (client-contracts.md §8.3).
 type serverState struct {
-	Epoch string            `yaml:"epoch"`
-	ETags map[string]string `yaml:"etags,omitempty"`
+	Epoch   string            `yaml:"epoch"`
+	ETags   map[string]string `yaml:"etags,omitempty"`
+	Started []string          `yaml:"started,omitempty"`
 }
 
 func statePath() (string, error) {
@@ -25,30 +29,30 @@ func statePath() (string, error) {
 	return filepath.Join(dir, "state.yaml"), err
 }
 
-// ETag is the last-seen ETag of draft in x, "" when none is kept for x's server and epoch.
-func ETag(x *Context, draft string) (string, error) {
+// kept is x's entry at its server and current epoch, nil when none is kept.
+func kept(x *Context) (*serverState, error) {
 	p, err := statePath()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	b, err := os.ReadFile(p)
 	if os.IsNotExist(err) {
-		return "", nil
+		return nil, nil
 	} else if err != nil {
-		return "", err
+		return nil, err
 	}
 	var s state
 	if err := yaml.Unmarshal(b, &s); err != nil {
-		return "", x.fail(printableError(err))
+		return nil, x.fail(printableError(err))
 	}
 	if ss := s.Contexts[x.Name][x.Server]; ss != nil && ss.Epoch == x.LastEpoch {
-		return ss.ETags[draft], nil
+		return ss, nil
 	}
-	return "", nil
+	return nil, nil
 }
 
-// KeepETag keeps etag as the last-seen ETag of draft in x; "" forgets it, as when the draft closes.
-func KeepETag(x *Context, draft, etag string) error {
+// keep changes x's entry at its server and current epoch, replacing one kept at another epoch.
+func keep(x *Context, change func(*serverState)) error {
 	p, err := statePath()
 	if err != nil {
 		return err
@@ -62,9 +66,26 @@ func KeepETag(x *Context, draft, etag string) error {
 		}
 		ss := s.Contexts[x.Name][x.Server]
 		if ss == nil || ss.Epoch != x.LastEpoch {
-			ss = &serverState{Epoch: x.LastEpoch, ETags: map[string]string{}}
+			ss = &serverState{Epoch: x.LastEpoch}
 			s.Contexts[x.Name][x.Server] = ss
 		}
+		change(ss)
+		return nil
+	})
+}
+
+// ETag is the last-seen ETag of draft in x, "" when none is kept for x's server and epoch.
+func ETag(x *Context, draft string) (string, error) {
+	ss, err := kept(x)
+	if ss == nil {
+		return "", err
+	}
+	return ss.ETags[draft], nil
+}
+
+// KeepETag keeps etag as the last-seen ETag of draft in x; "" forgets it, as when the draft closes.
+func KeepETag(x *Context, draft, etag string) error {
+	return keep(x, func(ss *serverState) {
 		if ss.ETags == nil {
 			// An entry whose last ETag was forgotten is written without the map and reads back without it.
 			ss.ETags = map[string]string{}
@@ -74,7 +95,23 @@ func KeepETag(x *Context, draft, etag string) error {
 		} else {
 			ss.ETags[draft] = etag
 		}
-		return nil
+	})
+}
+
+// Started reports whether this client started ingestion ing at x's server and current epoch.
+func Started(x *Context, ing string) (bool, error) {
+	ss, err := kept(x)
+	return ss != nil && slices.Contains(ss.Started, ing), err
+}
+
+// KeepStarted records that this client started ingestion ing; with started false it forgets it, as
+// when the ingestion ends. An epoch change drops the record with the entry's ETags.
+func KeepStarted(x *Context, ing string, started bool) error {
+	return keep(x, func(ss *serverState) {
+		ss.Started = slices.DeleteFunc(ss.Started, func(s string) bool { return s == ing })
+		if started {
+			ss.Started = append(ss.Started, ing)
+		}
 	})
 }
 

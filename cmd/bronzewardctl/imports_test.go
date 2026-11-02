@@ -315,17 +315,36 @@ func TestImportLifecycle(t *testing.T) {
 	f.set("abandoned", 1, time.Hour, "failed", "", "")
 	step("an empty --file is refused", append(start, "--file", ""), 2, "", "--file needs a path, or - for standard input")
 
+	// Only an import this client started adopts the draft's ETag after a success (client-contracts.md
+	// §8.3). The lapsed transient start above is still this client's until it ends: abandoning it ends
+	// the record, so the takeover below follows an import this client did not start.
+	step("abandon ends this client's record of its import", []string{"import", "abandon", "ing_BWSYNTH"}, 0, "Import ing_BWSYNTH abandoned", "",
+		`POST /ingestions/ing_BWSYNTH/abandonments if-match= body={}`)
+	step("draft show keeps an ETag before another client's import", []string{"draft", "show", "drf_BWSYNTH"}, 0, "drf_BWSYNTH", "")
+	f.set("released", 3, time.Hour, "succeeded", `{"draft":"drf_BWSYNTH","draftRevision":6,"importBaseRevision":"ibr_BWSYNTH"}`, "",
+		ev("taken-over", `{"type":"taken-over","generation":3}`), ev("succeeded", `{"type":"succeeded"}`))
+	f.draftFake.mu.Lock()
+	f.rev = 6 // the import's own write
+	f.draftFake.mu.Unlock()
+	step("another client's import keeps no ETag after its success, and says so", []string{"import", "takeover", "ing_BWSYNTH"}, 0,
+		"Import ing_BWSYNTH released into draft drf_BWSYNTH (revision 6), import base ibr_BWSYNTH.\n"+
+			"This client did not start import ing_BWSYNTH, so it keeps no ETag of draft drf_BWSYNTH. Read the draft before writing to it:\n"+
+			"  bronzewardctl --context 'lab' draft show 'drf_BWSYNTH'\n",
+		"", `POST /ingestions/ing_BWSYNTH/takeovers if-match= body={}`)
+	step("so the next write needs a read first", []string{"profile", "rm", "workers", "--draft", "drf_BWSYNTH"}, 1, "",
+		"no ETag of draft drf_BWSYNTH is kept for this context at its current epoch. Read the draft first")
+
 	// An epoch change during the draft read after a success keeps no ETag: a restored draft can show
 	// the same revision with other content (client-contracts.md §8.3).
 	step("draft show before the epoch step", []string{"draft", "show", "drf_BWSYNTH"}, 0, "drf_BWSYNTH", "")
 	f.onIngested = func() {
 		f.draftFake.mu.Lock()
-		f.rev, f.draftFake.epoch = 6, "ep_BWSYNTH-2"
+		f.rev, f.draftFake.epoch = 7, "ep_BWSYNTH-2"
 		f.draftFake.mu.Unlock()
 	}
-	f.set("released", 1, time.Hour, "succeeded", `{"draft":"drf_BWSYNTH","draftRevision":6,"importBaseRevision":"ibr_BWSYNTH"}`, "",
+	f.set("released", 1, time.Hour, "succeeded", `{"draft":"drf_BWSYNTH","draftRevision":7,"importBaseRevision":"ibr_BWSYNTH"}`, "",
 		ev("succeeded", `{"type":"succeeded"}`))
-	step("a success read back across an epoch change keeps no ETag", start, 1, "released into draft drf_BWSYNTH (revision 6)",
-		"the server's epoch changed while draft drf_BWSYNTH was read again after this import. Its ETag is not kept.", startBody(`"5-BWSYNTH"`, ""))
+	step("a success read back across an epoch change keeps no ETag", start, 1, "released into draft drf_BWSYNTH (revision 7)",
+		"the server's epoch changed while draft drf_BWSYNTH was read again after this import. Its ETag is not kept.", startBody(`"6-BWSYNTH"`, ""))
 	f.onIngested = nil
 }
