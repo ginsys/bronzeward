@@ -766,14 +766,14 @@ describe("the attempt bound (§8.4 item 8)", () => {
   const jsonHeaders = { "Content-Type": "application/json", "Bronzeward-Epoch": EPOCH };
 
   // A client whose fetch is `handler`; the signal of each request is kept.
-  function bounded(handler: (init: RequestInit | undefined, n: number) => Response | Promise<Response>) {
+  function bounded(handler: (init: RequestInit | undefined, n: number) => Response | Promise<Response>, opts: ClientOptions = {}) {
     vi.useFakeTimers();
     const signals: (AbortSignal | null | undefined)[] = [];
     const fetchImpl = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
       signals.push(init?.signal);
       return handler(init, signals.length);
     });
-    const c = new Client({ fetch: fetchImpl as unknown as typeof fetch, sleep: async () => {} });
+    const c = new Client({ sleep: async () => {}, ...opts, fetch: fetchImpl as unknown as typeof fetch });
     return { c, fetchImpl, signals };
   }
 
@@ -868,6 +868,26 @@ describe("the attempt bound (§8.4 item 8)", () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(a.done).toBe(true);
     expect(a.value).toBeUndefined();
+  });
+
+  test("an attempt that throws while its epoch is learned still ends its timers: a finished attempt is never aborted later", async () => {
+    // The write is in flight while another answer records epoch e1, so its own e2 is read again; that
+    // read is answered 401 and the renewal throws, before the write's body is read.
+    const holder: { c?: Client } = {};
+    const { c, signals } = bounded(
+      async (_init, n) => {
+        if (n === 1) {
+          await holder.c!.attempt("GET", "/recovery");
+          return new Response("{}", { status: 201, headers: { "Content-Type": "application/json", "Bronzeward-Epoch": "e2" } });
+        }
+        return n === 2 ? ok({}, "e1") : problem(401, "unauthenticated");
+      },
+      { renew: async () => { throw new Error("renewal failed"); } },
+    );
+    holder.c = c;
+    await expect(c.attempt("POST", "/clusters", {}, "{}")).rejects.toThrow("renewal failed");
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(signals[0]!.aborted).toBe(false);
   });
 
   test("a read sent only for the epoch is bounded too: a 401 body that never ends gives no answer", async () => {
