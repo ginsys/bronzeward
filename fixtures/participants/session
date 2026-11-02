@@ -11,7 +11,8 @@
 #   session t1 ... t11    the task's precondition, the names to read out, then the reads that
 #                         confirm it; in the session order T1, T3 to T9, T2, T10, T11
 #   session t5 collide    h-all's competing save into the participant's open draft (collide.mjs)
-#   session t9 disconnect the instances' links to the worker cut for 60 s, then joined again
+#   session t9 disconnect A stopped for 60 s and started again; a stream resumed with
+#                         Last-Event-ID follows the apply to completion, no event lost or repeated
 #   session scan [path]   no session password in any retained file or log, with a planted control
 #   session stop          the web host and dev-idp; fixtures/bin/down removes the fixture
 #
@@ -150,8 +151,9 @@ running() { [ "$(docker inspect --type container --format '{{.State.Running}}' "
 # restart_a: A started again on its configuration, and on Zitadel the forwarder in its new network
 # namespace. inject start puts back any recorded link split.
 restart_a() {
-  if running "$BW_A"; then "$bin/inject" kill A >/dev/null; fi
-  "$bin/inject" start A >/dev/null
+  # Each step returns its failure: stage runs this in a `||` list, where errexit is off.
+  if running "$BW_A"; then "$bin/inject" kill A >/dev/null || return; fi
+  "$bin/inject" start A >/dev/null || return
   if grep --quiet --line-regexp --fixed-strings -- '    plainHTTPHosts: []' "$cfg"; then forward_idp; fi
 }
 
@@ -359,17 +361,23 @@ snap() {
   stage "$bin/inject" bao-snapshot "p-$1"
 }
 # restore <point>: the database and OpenBao back to that point, with every running instance
-# paused meanwhile, as S5 step 7 does.
+# paused meanwhile, as S5 step 7 does. paused names the instances paused so far, so that handback
+# unpauses them if the restore fails.
+paused=()
 restore() {
   local i c up=()
   for i in A B C; do
     c=BW_$i
     if running "${!c}"; then up+=("$i"); fi
   done
-  for i in "${up[@]}"; do stage "$bin/inject" pause "$i"; done
+  for i in ${up[@]+"${up[@]}"}; do
+    stage "$bin/inject" pause "$i"
+    paused+=("$i")
+  done
   stage "$bin/inject" db-restore "p-$1"
   stage "$bin/inject" bao-restore "p-$1"
-  for i in "${up[@]}"; do stage "$bin/inject" unpause "$i"; done
+  for i in ${up[@]+"${up[@]}"}; do stage "$bin/inject" unpause "$i"; done
+  paused=()
 }
 scenario() { stage "$FIXTURES/scenarios/$1" "${@:2}"; }
 prepare() { stage "$here/prepare" "$@"; }
@@ -378,7 +386,12 @@ prepare() { stage "$here/prepare" "$@"; }
 # on Zitadel; the seconds it took, for the README's timings. A setup that fails still hands A back
 # on Zitadel, so that the task before can go on and the setup can run again.
 handback() {
+  local i
   echo "setup $task failed: A goes back on Zitadel" >&2
+  for i in ${paused[@]+"${paused[@]}"}; do
+    "$bin/inject" unpause "$i" >>"$log" 2>&1 || echo "$i could not be unpaused; recreate the fixture" >&2
+  done
+  paused=()
   set_issuer zitadel && restart_a >>"$log" 2>&1 || echo "A could not be handed back on Zitadel; recreate the fixture" >&2
 }
 setup() {
@@ -389,9 +402,10 @@ setup() {
   set_issuer fixture
   stage restart_a
   "setup_$1"
-  trap - EXIT
+  # The trap stays until A runs on Zitadel again: a failure of this switch is handed back too.
   set_issuer zitadel
   stage restart_a
+  trap - EXIT
   echo "setup $task: $((SECONDS - t0)) s"
 }
 
@@ -420,8 +434,10 @@ setup_t8() {
   prepare links linksplit
 }
 setup_t9() {
-  if linksplits_of A || linksplits_of B || linksplits_of C; then prepare links linkjoin; fi
+  # The restore first, with T8's links still cut: it removes T8's approved plan before any
+  # instance reaches the worker again, so that plan is never dispatched.
   restore s2
+  if linksplits_of A || linksplits_of B || linksplits_of C; then prepare links linkjoin; fi
   scenario s3 pass
 }
 setup_t2() {
@@ -463,7 +479,7 @@ t6() {
 }
 t7() {
   setup t7
-  echo "names: empty field machine.nodeLabels.bw-note, redacted field machine.nodeLabels.tier"
+  echo "names: empty field machine.nodeLabels.bw-note, redacted field machine.nodeLabels.bw-s2"
   read_ok "T6's draft is published" \
     test "$(sql "SELECT count(*) FROM draft WHERE title = 'participants t6' AND state = 'published'")" = 1
 }
@@ -472,14 +488,71 @@ t8() {
   echo "names: none"
   read_ok "A's, B's and C's links to the worker are cut" sh -c "grep -c '^[ABC] worker' '$STATE/linksplits' | grep -qx 3"
 }
+# t9_stream <file> <seconds> [last event ID]: the event stream of t9_op on A, read with the
+# automation token, which A accepts on either issuer. The token goes to curl on stdin. The body goes
+# to <file>, curl's exit status to t9_rc.
+t9_op='' t9_rc=0
+t9_stream() {
+  local resume=()
+  [ -z "${3:-}" ] || resume=(--header "Last-Event-ID: $3")
+  t9_rc=0
+  printf 'Authorization: Bearer %s\n' "$(cat -- "$STATE/automation-token")" |
+    command curl --disable --noproxy '*' --silent --no-buffer --max-time "$2" --output "$1" \
+      --header @- --header 'Accept: text/event-stream' ${resume[@]+"${resume[@]}"} \
+      "http://127.0.0.1:$SERVER_A_PORT/api/v1/operations/$t9_op/events" || t9_rc=$?
+}
+# t9_ids <file>...: the event IDs the streams sent, in order.
+t9_ids() { cat -- "$@" | tr -d '\r' | sed -n 's/^id: *//p'; }
+
+# t9_disconnect: A stopped for 60 s and started again while the participant follows T9's apply,
+# so that the participant's event stream ends and must be resumed (journeys §5.7). The clients do
+# not follow an operation yet (ginsys/bronzeward#354 and #359), so this step proves the server half
+# with its own reader: a stream opened before the stop and resumed with Last-Event-ID after the
+# start follows the apply to its end, and its event IDs equal those of a full replay, none lost
+# and none repeated. If the apply does not survive A's restart, the step fails.
+t9_disconnect() {
+  local dir=$part/t9-disconnect reader last state
+  t9_op=$(sql "SELECT id FROM operation WHERE kind = 'apply-config' AND machine = '$(worker)' ORDER BY seq DESC LIMIT 1")
+  [ -n "$t9_op" ] || die "no apply-config operation on the worker; run the t9 setup first"
+  state=$(sql "SELECT state FROM operation WHERE id = '$t9_op'")
+  case $state in
+    completed | rejected | failed | cancelled) die "the apply ended ($state) before the disconnect; run t9 disconnect right after the t9 setup" ;;
+  esac
+  rm -rf -- "$dir"
+  mkdir -p -- "$dir"
+  t9_stream "$dir/before" 600 &
+  reader=$!
+  for _ in $(seq 20); do
+    [ -n "$(t9_ids "$dir/before" 2>/dev/null)" ] && break
+    sleep 1
+  done
+  if [ -z "$(t9_ids "$dir/before")" ]; then
+    kill "$reader" 2>/dev/null || true
+    die "the stream on A sent no event within 20 s"
+  fi
+  # A stream that already ended met no stop: the apply finished first, and nothing is resumed.
+  kill -0 "$reader" 2>/dev/null || die "the apply ended before the stop; run t9 disconnect right after the t9 setup"
+  "$bin/inject" kill A >>"$log" 2>&1 || die "cannot stop A; its output is in $log"
+  wait "$reader" || true
+  echo "A is stopped for 60 s: the participant's event stream has ended"
+  sleep 60
+  restart_a >>"$log" 2>&1 || die "cannot start A again; its output is in $log"
+  echo "A is started again: the participant's client can resume"
+  last=$(t9_ids "$dir/before" | tail -n 1)
+  t9_stream "$dir/after" 300 "$last"
+  [ "$t9_rc" -eq 0 ] || die "the resumed stream did not end by itself (curl $t9_rc)"
+  state=$(sql "SELECT state FROM operation WHERE id = '$t9_op'")
+  [ "$state" = completed ] || die "the apply did not complete after A's restart: $state (a product finding; keep $dir)"
+  t9_stream "$dir/full" 60
+  [ "$t9_rc" -eq 0 ] || die "the full replay did not end by itself (curl $t9_rc)"
+  [ "$(t9_ids "$dir/before" "$dir/after")" = "$(t9_ids "$dir/full")" ] ||
+    die "the resumed stream's events differ from the full replay: an event was lost or repeated (see $dir)"
+  read_ok "the stream resumed with Last-Event-ID after A's restart: $(t9_ids "$dir/full" | wc -l) events, none lost or repeated, the apply completed" true
+}
 t9() {
   if [ "${1:-}" = disconnect ]; then
     task=t9 log=$part/setup-t9.log
-    prepare links linksplit
-    echo "the links to the worker are cut for 60 s"
-    sleep 60
-    prepare links linkjoin
-    echo "the links to the worker are joined again"
+    t9_disconnect
     return
   fi
   setup t9
@@ -491,13 +564,13 @@ t2() {
   setup t2
   echo "names: none"
   read_ok "one drift record is open on the worker, the scope not frozen" \
-    test "$(sql "SELECT count(*) FROM drift_record WHERE closed IS NULL")/$(sql "SELECT frozen FROM machine WHERE id = '$(worker)'")" = 1/f
+    test "$(sql "SELECT count(*) FROM drift_record WHERE machine = '$(worker)' AND closed IS NULL")/$(sql "SELECT frozen FROM machine WHERE id = '$(worker)'")" = 1/f
 }
 # t10: T2's state, read only. T10 follows T2 in the session order.
 t10() {
   echo "names: machine $(worker) (the worker)"
   read_ok "one drift record is open on the worker, the scope not frozen" \
-    test "$(sql "SELECT count(*) FROM drift_record WHERE closed IS NULL")/$(sql "SELECT frozen FROM machine WHERE id = '$(worker)'")" = 1/f
+    test "$(sql "SELECT count(*) FROM drift_record WHERE machine = '$(worker)' AND closed IS NULL")/$(sql "SELECT frozen FROM machine WHERE id = '$(worker)'")" = 1/f
 }
 t11() {
   setup t11
