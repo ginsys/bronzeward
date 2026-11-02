@@ -98,8 +98,9 @@ func (e *env) publish(args []string) (err error) {
 var pr = client.Printable
 
 // nextSteps names the release and, for each of its machines, the plan it needs: an adopt plan
-// hands over a machine with no Applied release, an apply-config plan the others. Plans are made
-// with #258's commands; this names them.
+// hands over a machine with no Applied release, an apply-config plan the others. A machine whose
+// Desired release is another one, after a later publication or when a repeat recovered an earlier
+// one, gets no plan from this release. Plans are made with #258's commands; this names them.
 func nextSteps(c *client.Client, release string) ([]string, error) {
 	r, err := c.Get("/releases/" + url.PathEscape(release))
 	if err != nil {
@@ -113,7 +114,7 @@ func nextSteps(c *client.Client, release string) ([]string, error) {
 	if len(rel.Machines) == 1 {
 		machines = "1 machine"
 	}
-	lines := []string{fmt.Sprintf("Publication succeeded: release %s is now Desired for %s. Nothing has been sent to any machine.", pr(rel.Id), machines)}
+	lines, replaced := []string{""}, 0
 	for _, m := range rel.Machines {
 		r, err := c.Get("/machines/" + url.PathEscape(m.Machine))
 		var x apitypes.MachineBody
@@ -123,11 +124,23 @@ func nextSteps(c *client.Client, release string) ([]string, error) {
 		switch {
 		case err != nil:
 			lines = append(lines, fmt.Sprintf("  %s: its Applied release cannot be read: %s", pr(m.Machine), pr(err.Error())))
+		case x.Desired == nil || *x.Desired != rel.Id:
+			now := "none"
+			if x.Desired != nil {
+				now = *x.Desired
+			}
+			replaced++
+			lines = append(lines, fmt.Sprintf("  %s has Desired release %s, not this one: plan nothing for it from this release.", pr(m.Machine), pr(now)))
 		case x.Applied == nil:
 			lines = append(lines, fmt.Sprintf("  %s has no Applied release: hand it over with an adopt plan.", pr(m.Machine)))
 		default:
 			lines = append(lines, fmt.Sprintf("  %s has Applied release %s: plan an apply-config.", pr(m.Machine), pr(x.Applied.Release)))
 		}
+	}
+	lines[0] = fmt.Sprintf("Publication succeeded: release %s is now Desired for %s. Nothing has been sent to any machine.", pr(rel.Id), machines)
+	if replaced > 0 {
+		lines[0] = fmt.Sprintf("Publication succeeded: release %s was published for %s, and another release is now Desired for %d of them. Nothing has been sent to any machine.",
+			pr(rel.Id), machines, replaced)
 	}
 	return append(lines, "Review a machine's rendered configuration: bronzewardctl release review "+pr(rel.Id)+" <machine>"), nil
 }

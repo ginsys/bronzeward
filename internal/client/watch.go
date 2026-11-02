@@ -99,11 +99,13 @@ func (c *Client) Watch(op string, w Watch) (*apitypes.OperationBody, error) {
 				case now == epoch && Terminal(again.State):
 					return again, derr
 				}
-				continue
-			}
-			if epoch == "" || last == "" || epochOf(last) == epoch {
+			} else if epoch == "" || last == "" || epochOf(last) == epoch {
 				return o, nil
 			}
+			// The watch goes on after the delay, so a server whose events never match its operation
+			// read's epoch is not asked again without a pause.
+			w.sleep(delay)
+			delay = min(2*delay, 30*time.Second)
 			continue
 		}
 		// An attempt that showed nothing waits the delay, which doubles until an attempt shows
@@ -217,6 +219,7 @@ func (c *Client) stream(op string, last *string, w Watch) (opened, pages bool, e
 		sc := bufio.NewScanner(r.Body)
 		sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
 		var ev Event
+		data := false // ev has a data line
 		for sc.Scan() {
 			idle.Reset(streamIdle)
 			line := sc.Text()
@@ -232,7 +235,11 @@ func (c *Client) stream(op string, last *string, w Watch) (opened, pages bool, e
 				case "event":
 					ev.Type = value
 				case "data":
-					ev.Data = append(ev.Data, value...)
+					// The data lines of one event are joined with a line feed (the SSE format).
+					if data {
+						ev.Data = append(ev.Data, '\n')
+					}
+					ev.Data, data = append(ev.Data, value...), true
 				}
 				continue
 			}
@@ -250,7 +257,7 @@ func (c *Client) stream(op string, last *string, w Watch) (opened, pages bool, e
 			default:
 				show(w, ev, last)
 			}
-			ev = Event{}
+			ev, data = Event{}, false
 		}
 		return true, false, nil
 	}
