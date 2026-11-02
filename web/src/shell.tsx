@@ -32,6 +32,8 @@ export const deprecated = (route: string) => `The server marks ${route} as depre
 // What an action needs to know: the roles GET /identity served, and whether the page is offline.
 const Shell = createContext<{ roles: readonly Role[]; offline: boolean }>({ roles: [], offline: false });
 export const ShellContext = Shell.Provider;
+// The offline banner shows: no action sends anything (journeys §8 Offline row).
+export const useOffline = () => useContext(Shell).offline;
 
 // An action the roles do not allow is disabled with its reason; the server's refusal stays
 // authoritative (journeys §7), so `needs` only names what the route accepts.

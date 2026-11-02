@@ -6,7 +6,7 @@ import { createContext, type FormEvent, type ReactNode, useContext, useEffect, u
 import type { components } from "./api/v1";
 import { Ref, short, useList, useReads } from "./list.tsx";
 import type { Cluster, Machine } from "./machines.tsx";
-import { Action } from "./shell.tsx";
+import { Action, useOffline } from "./shell.tsx";
 import type { Problem } from "./request.ts";
 import { problemTail, Refused, Repeated, REPLAYED, SetAside, Status, Unknown } from "./states.tsx";
 import { type Outcome, Write, type Writes, type WriteSpec } from "./write.ts";
@@ -56,12 +56,15 @@ function settled(o: Outcome): string {
 // keeps it after it settles, with its result, until dismissed. `go` opens the resource.
 export function WriteNotices({ go }: { go: (to: string) => void }) {
   const writes = useWrites();
+  // Offline, [Repeat exactly] is not offered: its confirming read would get no answer and set the
+  // write aside for good. It is offered again once the page is online.
+  const offline = useOffline();
   return writes?.notices.map((w) => {
     const o = w.outcome;
     const { named, to } = record(w);
     const props = { onShow: () => go(to), detail: named + detail(w, to), onDismiss: () => writes.dismiss(w), testid: "write-notice" };
     if (o !== undefined && w.kept) return <Repeated key={w.key} line={settled(o)} {...props} detail={`${named} Key ${w.key}, ${w.route}. Read ${to}.`} />;
-    if (o?.kind === "unknown") return <Unknown key={w.key} why={o.why} problem={o.problem} onRepeat={writes.repeatable(w) ? () => void writes.submit(w) : undefined} {...props} />;
+    if (o?.kind === "unknown") return <Unknown key={w.key} why={o.why} problem={o.problem} onRepeat={writes.repeatable(w) && !offline ? () => void writes.submit(w) : undefined} {...props} />;
     if (o?.kind === "set-aside") return <SetAside key={w.key} why={o.why} problem={o.problem} {...props} />;
     // While the run is in flight, the latest state that made the outcome unknown: an attempt of
     // this run that may have committed, else the earlier attempt a [Repeat exactly] repeats.
