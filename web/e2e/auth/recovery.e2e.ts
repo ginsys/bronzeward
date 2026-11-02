@@ -1,0 +1,98 @@
+// The recovery console's entry (ginsys/bronzeward#364): REC-02 and REC-04 (a) (conformance/cases/)
+// against a disposable recovery start, through the injector. REC-04 (b) waits for the server's
+// COMMIT fault hook (#263). Every value is synthetic.
+import { $, browser, expect } from "@wdio/globals";
+import { NORMAL_START, PRE_ENTRY } from "../../src/recovery.tsx";
+import { SET_ASIDE } from "../../src/states.tsx";
+import { CONTROL } from "../auth.conf.ts";
+import { answers, faults, fixtureSignIn, mint, storageEmpty } from "./helpers.ts";
+
+const result = () => $('[data-testid="write-result"]');
+const entered = () => $('[data-testid="entered"]');
+// Every write the injector received since the sign-in, as [method, route, key, expected epoch].
+const writes = async (): Promise<string[][]> => ((await (await fetch(`${CONTROL}/writes`)).json()) as string[]).map((w) => w.split(" "));
+const entries = async () => (await writes()).filter(([, route]) => route === "/recovery/entries");
+const stamp = () => new Date(Date.now() - 60_000).toISOString();
+
+// Opens the entry form on a start of the disposable deployment: the page reads the process's
+// restriction (injected on a normal start) and shows the form.
+async function open(start: "normal" | "recovery", human = "h-recovery"): Promise<string> {
+  const started = await fetch(`${CONTROL}/disposable?start=${start}`, { method: "POST" });
+  expect(started.status).toBe(200);
+  const at = await started.text();
+  const refuse = start === "normal" ? { processRefused: ["/server", "/identity", "/recovery"] } : {};
+  expect(await fixtureSignIn(human, {}, { upstream: at, ...refuse })).toBe(PRE_ENTRY);
+  await expect($("main form[aria-label='Enter recovery']")).toBeExisting();
+  return at;
+}
+
+// Fills the form with synthetic values and types the confirmation.
+async function fill(reason: string) {
+  const when = stamp();
+  await $('input[name="database-backup"]').setValue("synthetic-backup-364");
+  await $('input[name="database-taken"]').setValue(when);
+  await $('input[name="stoppedAt"]').setValue(when);
+  await $('input[name="reason"]').setValue(reason);
+  expect(await $("main form").$("button=Enter recovery").isEnabled()).toBe(false);
+  await $("main form").$("label*=Type enter").$("input").setValue("enter");
+  expect(await $("main form").$("button=Enter recovery").isEnabled()).toBe(true);
+}
+
+describe("the recovery entry (#364)", () => {
+  it("REC-02: an entry sent to a normal start is read as one: 409 conflict without an epoch", async () => {
+    const at = await open("normal");
+    await fill("REC-02 synthetic restore");
+    // The injected refusal stood for the restriction; the entry itself reaches the normal start.
+    await faults({ upstream: at });
+    await $("main form").$("button=Enter recovery").click();
+    await expect(result()).toHaveText(expect.stringContaining(NORMAL_START), { wait: 20_000 });
+    const sent = await entries();
+    expect(sent).toHaveLength(1);
+    // The entry is sent without the epoch header (§8.4 item 3), the first send included.
+    expect(sent[0]![3]).toBe("undefined");
+    expect(await entered().isExisting()).toBe(false);
+  });
+
+  it("REC-02: an entry sent to a recovery start whose entry committed under another key is read as one: 409 conflict with an epoch", async () => {
+    const at = await open("recovery");
+    const when = stamp();
+    const first = await fetch(`${at}/api/v1/recovery/entries`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${mint("h-recovery")}`, "Content-Type": "application/json", "Idempotency-Key": `rec-02-${Date.now()}-other` },
+      body: JSON.stringify({ restored: [{ family: "database", backup: "synthetic-backup-rec-02", takenAt: when }], stoppedAt: when, reason: "REC-02 synthetic restore" }),
+    });
+    expect(first.status).toBe(201);
+    const { epoch } = (await first.json()) as { epoch: string };
+    // The page still shows the form it read before: it sends under its own key.
+    await fill("REC-02 second");
+    await $("main form").$("button=Enter recovery").click();
+    await expect(result()).toHaveText(expect.stringContaining(`An entry is already recorded on this server, in epoch ${epoch}, under another request.`), { wait: 20_000 });
+    expect(await result().getText()).not.toContain(NORMAL_START);
+    const sent = await entries();
+    expect(sent).toHaveLength(1);
+    expect(sent[0]![3]).toBe("undefined");
+  });
+
+  it("REC-04 (a): the 201 dropped after the commit: repeated under the same key, no epoch check, the minted epoch shown", async function () {
+    this.timeout(60_000);
+    const at = await open("recovery");
+    await fill("REC-04 synthetic restore");
+    await faults({ upstream: at, steps: { path: "/recovery/entries", take: ["commit-drop"] } });
+    await $("main form").$("button=Enter recovery").click();
+    // The result is kept in the header, since the epoch change ended the form's own page.
+    await expect(entered()).toHaveText(expect.stringContaining("Recovery mode entered (act"), { wait: 30_000 });
+    const sent = await entries();
+    expect(sent).toHaveLength(2);
+    // One key over both sends, and no epoch header on either (§8.4 item 3).
+    expect(sent[1]).toEqual(sent[0]);
+    expect(sent[0]![2]).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    expect(sent[0]![3]).toBe("undefined");
+    // The first send committed before its answer was dropped; the repeat was replayed.
+    expect((await answers()).filter((a) => a.startsWith("/recovery/entries "))).toEqual(["/recovery/entries 201", "/recovery/entries 201"]);
+    expect(await entered().getText()).toMatch(/Epoch \S+, was \S+\./);
+    // Not set aside, though the epoch changed under the write.
+    expect(await $("body").getText()).not.toContain(SET_ASIDE);
+  });
+});
+
+afterEach(storageEmpty);
