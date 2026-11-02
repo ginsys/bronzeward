@@ -249,7 +249,7 @@ func ClearStored(x *Context, noInput bool) (string, error) {
 		return fmt.Sprintf("The system credential store is not reached, since %s, so a sign-in another session kept there is not removed", why), nil
 	}
 	failed := func(err error) error {
-		return fmt.Errorf("removing the stored sign-in of context \"%s\" from the system credential store: %w", printable(x.Name), err)
+		return fmt.Errorf("removing the stored sign-in of context \"%s\" from the system credential store: %w", quoted(x.Name), err)
 	}
 	unlock, err := openStore(x, noInput).lock()
 	if err != nil {

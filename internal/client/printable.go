@@ -70,6 +70,14 @@ func EscapeJSON(b []byte) []byte {
 // the sign-in line's subject and issuer, for one (#383).
 func Printable(s string) string { return printable(s) }
 
+// Quoted is Printable for a value that the message puts between double quotation marks: a double
+// quote inside the value is written as \x22 as well, so the value cannot close the quotes early
+// and make its own text read as the words that follow (client-contracts.md §6 item 8). The
+// quotation marks themselves are the message's own.
+func Quoted(s string) string { return quoted(s) }
+
+func quoted(s string) string { return strings.ReplaceAll(printable(s), `"`, `\x22`) }
+
 // GuardWriter is w with every text written to it made printable but for its line feeds: the last
 // guard before the terminal for text that no one escaped at its source (the -v lines, a notice, a
 // sentence that a command built without the escaping helpers). It cannot tell a line feed of the

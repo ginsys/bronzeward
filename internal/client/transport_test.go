@@ -33,6 +33,47 @@ func TestLiveSaysItUsesAProxy(t *testing.T) {
 	}
 }
 
+// TestVerboseProxyNoticeIsEscaped: the -v line that names the proxy escapes the proxy URL from the
+// environment and the target host itself, with no terminal guard in front of the writer
+// (client-contracts.md section 6 item 8).
+func TestVerboseProxyNoticeIsEscaped(t *testing.T) {
+	proxyURL := &url.URL{Scheme: "http", Host: "127.0.0.1:1", Path: "/", RawQuery: "q=A\u0085B"}
+	var b strings.Builder
+	hc, err := newHTTPClient(&Context{Name: "remote", Server: "https://bronzeward.example.invalid", Credential: "automation"}, &b,
+		func(*http.Request) (*url.URL, error) { return proxyURL, nil }, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hc.Timeout = time.Second
+	hc.Get("https://bronzeward.example.invalid/livez") // the proxy refuses at once; only the notice matters
+	const want = `bronzeward.example.invalid: through the proxy http://127.0.0.1:1/?q=A\x85B`
+	if !strings.Contains(b.String(), want) || printable(strings.TrimSuffix(b.String(), "\n")) != strings.TrimSuffix(b.String(), "\n") {
+		t.Errorf("verbose output %q; want it to hold %q and no raw control character", b.String(), want)
+	}
+}
+
+// TestQuotedWritesTheDoubleQuoteAsAnEscape: Quoted escapes what printable escapes and the double
+// quote as well, and leaves the backslash single; printable keeps the double quote.
+func TestQuotedWritesTheDoubleQuoteAsAnEscape(t *testing.T) {
+	for in, want := range map[string]string{
+		`plain`:      `plain`,
+		`a"b`:        `a\x22b`,
+		"a\tb\"c\\d": `a\x09b\x22c\d`,
+		"\"\"":       `\x22\x22`,
+		"a\x85\"b":   `a\x85\x22b`,
+	} {
+		if got := Quoted(in); got != want {
+			t.Errorf("Quoted(%q) = %q, want %q", in, got, want)
+		}
+		if got := Quoted(Quoted(in)); got != want {
+			t.Errorf("Quoted twice on %q = %q, want %q: the escape must be idempotent", in, got, want)
+		}
+	}
+	if got := printable(`a"b`); got != `a"b` {
+		t.Errorf("printable(a\"b) = %q, want the double quote kept", got)
+	}
+}
+
 // TestHTTPSProxyTrust checks that an https proxy is verified by its own roots (the system store
 // outside tests), never by the context's bundle, which is for the Bronzeward server alone.
 func TestHTTPSProxyTrust(t *testing.T) {
