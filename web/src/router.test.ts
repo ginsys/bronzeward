@@ -25,7 +25,8 @@ function session(urls: string[]) {
       list[i]!.state = state;
     },
   };
-  const run = () => {
+  // With `timers` false, only the queued traversals run, as within QUIET_MS.
+  const run = (withTimers = true) => {
     for (;;) {
       const delta = queued.shift();
       if (delta !== undefined) {
@@ -34,13 +35,14 @@ function session(urls: string[]) {
         pop();
         continue;
       }
+      if (!withTimers) return;
       const t = timers.shift();
       if (t === undefined) return;
       t();
     }
   };
   const p = positions(h, () => list[i]!.url, (f) => void timers.push(f));
-  for (const u of urls.slice(1)) p.pushed(u);
+  for (const u of urls.slice(1)) p.moved(u);
   return { p, h, run, urls: () => list.map((e) => e.url), at: () => i, onPop: (f: () => void) => (pop = f) };
 }
 
@@ -110,10 +112,30 @@ describe("positions", () => {
     expect(s.urls()).toHaveLength(5);
   });
 
+  test("an in-app move while a refused move returns does nothing, and the numbering stays whole", () => {
+    const s = session(["/machines", "/changes", "/clusters/new"]);
+    const { asked } = asking(s, [false, false]);
+    s.h.go(-1);
+    s.run(false);
+    // The address is /changes, the page still shows /clusters/new: a move to either does nothing.
+    expect(s.p.moved("/plans")).toBe(false);
+    expect(s.p.moved("/changes")).toBe(false);
+    s.run();
+    expect(s.urls()).toEqual(["/machines", "/changes", "/clusters/new"]);
+    expect(s.at()).toBe(2);
+    // Once returned, a move adds its entry, and a refused Back from it returns to it.
+    expect(s.p.moved("/plans")).toBe(true);
+    s.h.go(-1);
+    s.run();
+    expect(s.urls()).toEqual(["/machines", "/changes", "/clusters/new", "/plans"]);
+    expect(s.at()).toBe(3);
+    expect(asked).toEqual([["/changes", "/clusters/new"], ["/clusters/new", "/plans"]]);
+  });
+
   test("a refused move to an entry the page did not add leaves it under a new entry", () => {
     const s = session(["/machines"]);
     s.h.pushState(null, "", "/elsewhere");
-    s.p.pushed("/changes");
+    s.p.moved("/changes");
     asking(s, []);
     // Back lands on the unnumbered /elsewhere; refused, /changes is shown under a new entry.
     s.h.go(-1);
