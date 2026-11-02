@@ -687,8 +687,9 @@ kill "$stub_a" 2>/dev/null
 wait "$stub_a" 2>/dev/null
 
 # handback and t9_clean (ginsys/bronzeward#509), taken out of the session with stubs around them.
-# PAUSED names the paused containers, A_STOPPED stops A, NO_IDP makes A's namespace miss Zitadel,
-# and RESTART_FAIL and FWD_FAIL end restart_a and forward_idp as their die does. Calls go to the log.
+# PAUSED names the paused containers, INSPECT_FAIL one whose inspect fails, A_STOPPED stops A,
+# NO_IDP makes A's namespace miss Zitadel, and ISSUER_FAIL, RESTART_FAIL and FWD_FAIL end
+# set_issuer, restart_a and forward_idp as their die does. Calls go to the log.
 sed -n -e '/^handback() {$/,/^}$/p' -e '/^t9_clean() {$/,/^}$/p' "$session" >"$t/clean.sh"
 mkdir -p "$t/cbin"
 cat >"$t/cbin/inject" <<'EOF'
@@ -705,8 +706,11 @@ clean_case() {
     idp_reached() { [ -z "${NO_IDP:-}" ]; }
     restart_a() { echo restart_a; [ -z "${RESTART_FAIL:-}" ] || exit 1; }
     forward_idp() { echo forward_idp; [ -z "${FWD_FAIL:-}" ] || exit 1; }
-    set_issuer() { echo "set_issuer $1" >>"$log"; }
-    docker() { case " ${PAUSED:-} " in *" ${*: -1} "*) echo true ;; *) echo false ;; esac; }
+    set_issuer() { echo "set_issuer $1"; [ -z "${ISSUER_FAIL:-}" ] || exit 1; }
+    docker() {
+      [ "${*: -1}" != "${INSPECT_FAIL:-}" ] || return 1
+      case " ${PAUSED:-} " in *" ${*: -1} "*) echo true ;; *) echo false ;; esac
+    }
     . "$0"; "$1"' "$t/clean.sh" "$1" 2>&1
 }
 if [ "$(grep -cE '^(handback|t9_clean)\(\) \{' "$t/clean.sh")" = 2 ]; then
@@ -715,10 +719,18 @@ if [ "$(grep -cE '^(handback|t9_clean)\(\) \{' "$t/clean.sh")" = 2 ]; then
   if [ "$calls" = "inject unpause A inject unpause C set_issuer zitadel restart_a " ]; then
     ok "handback unpauses every paused instance, whoever paused it, then hands A back on Zitadel"
   else bad "handback, A and C paused: $calls ($out)"; fi
-  out=$(RESTART_FAIL=1 clean_case handback)
-  if [[ $out == *"A could not be handed back on Zitadel; recreate the fixture"* ]]; then
-    ok "handback says to recreate the fixture when A's restart ends the shell"
-  else bad "handback, restart fails: $out"; fi
+  for f in ISSUER_FAIL RESTART_FAIL; do
+    out=$(export "$f=1" && clean_case handback)
+    if [[ $out == *"A could not be handed back on Zitadel; recreate the fixture"* ]]; then
+      ok "handback says to recreate the fixture when ${f%_FAIL} ends the shell"
+    else bad "handback, $f: $out"; fi
+  done
+  out=$(PAUSED="a b c" INSPECT_FAIL=b clean_case handback)
+  calls=$(tr '\n' ' ' <"$t/clean.log")
+  if [[ $out == *"B could not be inspected, so it may still be paused; recreate the fixture"* ]] &&
+    [ "$calls" = "inject unpause A inject unpause C set_issuer zitadel restart_a " ]; then
+    ok "handback reports an instance it cannot inspect, and unpauses the others"
+  else bad "handback, B not inspected: $calls ($out)"; fi
   out=$(A_STOPPED=1 clean_case t9_clean)
   if [ "$(cat "$t/clean.log")" = restart_a ] && [[ $out == *"A is started again"* ]]; then
     ok "t9_clean starts a stopped A again"
