@@ -292,6 +292,39 @@ func TestPlanSnapshot(t *testing.T) {
 			}
 		})
 	}
+	// A move at the plan answer itself is before the snapshot: the plan answer shows ep_BWSYNTH-3,
+	// and every read from it on stays there, so the whole view shows, for show and for create.
+	t.Run("moved at the plan answer", func(t *testing.T) {
+		f := planServer(t)
+		f.set(func(f *planFake) {
+			seen := false
+			f.epochFor = func(path string) string {
+				seen = seen || strings.HasPrefix(path, "/plans")
+				return map[bool]string{false: "ep_BWSYNTH-2", true: "ep_BWSYNTH-3"}[seen]
+			}
+			f.post = func(w http.ResponseWriter, _ string) {
+				w.WriteHeader(http.StatusCreated)
+				f.mu.Unlock()
+				fmt.Fprint(w, f.plan())
+				f.mu.Lock()
+			}
+		})
+		code, out, errOut := runCtl(t, "plan", "show", "pln_BWSYNTH")
+		if code != 0 || !strings.Contains(out, "Plan pln_BWSYNTH  proposed") || !strings.Contains(out, "Evidence") {
+			t.Errorf("plan show: exit %d, stdout %q, stderr %q; want the whole view", code, out, errOut)
+		}
+		f.set(func(f *planFake) {
+			seen := false
+			f.epochFor = func(path string) string {
+				seen = seen || strings.HasPrefix(path, "/plans")
+				return map[bool]string{false: "ep_BWSYNTH-3", true: "ep_BWSYNTH-4"}[seen]
+			}
+		})
+		code, out, errOut = runCtl(t, "plan", "create", "--release", "rel_BWSYNTH", "--machine", "mch_a", "--operation", "apply-config")
+		if code != 0 || !strings.Contains(out, "Plan pln_BWSYNTH  proposed") || !strings.Contains(out, "Evidence") {
+			t.Errorf("plan create: exit %d, stdout %q, stderr %q; want the whole view", code, out, errOut)
+		}
+	})
 	// The plan answer shows ep_BWSYNTH-3, so the client reads GET /server again: that answers 503 in
 	// ep_BWSYNTH-4, then ep_BWSYNTH-3 on the retry, and every later read stays in ep_BWSYNTH-3. The
 	// change and change back fall inside the plan's own read, after its answer.
