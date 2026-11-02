@@ -201,8 +201,9 @@ editor in the same way. Text typed since the last read or save is kept for [Copy
 new revision], and is never saved over their change unseen. A read that arrives before the
 pane's own Save or Remove has its answer can show that write's own change. Such a read opens no
 conflict and keeps the editor's text. If another author changed the entry, that write gets a `412`.
-If the write ends in any other way than done or a `412`, the change that read showed goes into
-the editor as theirs, and the typed text is kept for [Copy my text into the new revision].
+If the write's last answer is neither done nor a `412`, the change that read showed goes into
+the editor as theirs, and the typed text is kept for [Copy my text into the new revision]. An
+unknown outcome is not the last answer while [Repeat exactly] can still send the write.
 
 [Add fragment] refuses a name that the draft already holds, a removed entry included, and points
 to that entry in the list. Once the new fragment is saved, the pane edits the entry that it
