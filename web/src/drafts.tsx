@@ -312,11 +312,6 @@ export interface Held {
 export const EMPTY: Held = { layer: "role", document: "", marks: "", declared: {}, embedded: [] };
 const fromRevision = (r: Revision): Held => ({ layer: r.layer, document: r.document, marks: "", declared: { ...r.declarations.references }, embedded: [...r.declarations.embedded] });
 const same = (a: Held, b: Held) => a.layer === b.layer && a.document === b.document && a.marks === b.marks && JSON.stringify(a.declared) === JSON.stringify(b.declared) && JSON.stringify(a.embedded) === JSON.stringify(b.embedded);
-// Whether two texts store the same revision: a revision keeps no marks, and its declarations may
-// come back in another key order.
-const sorted = (v: unknown): unknown =>
-  Array.isArray(v) ? v.map(sorted) : typeof v === "object" && v !== null ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, x]) => [k, sorted(x)])) : v;
-const stores = (a: Held, b: Held) => JSON.stringify(sorted({ ...a, marks: "" })) === JSON.stringify(sorted({ ...b, marks: "" }));
 
 // Whether the editor holds text not saved: its own, or the operator's text a conflict keeps aside.
 export const holdsUnsaved = (held: Held, saved: Held, mine: Held | undefined) => !same(held, saved) || (mine !== undefined && !same(mine, saved));
@@ -339,11 +334,13 @@ export const holdsUnsaved = (held: Held, saved: Held, mine: Held | undefined) =>
 // for it too; only a read with text clears it. `again`: while asked, Show their change was clicked
 // again and its draft read has not answered, so a revision read that answers first shows their text
 // with Copy waiting (ginsys/bronzeward#534 N1).
+// `own`: the revision the pane's last done Save created. The server stores its own form of the
+// text sent, so the read of that revision is known by its id, not by its text.
 // Without a 412, a conflict opens when a read shows another author's text or removal while the
 // editor holds unsaved text, or once a Discard's Show their change adopted that read's ETag
 // (ginsys/bronzeward#534 C1-C3): the typed text is kept aside, never saved over theirs unseen.
 export interface Clash { mine: Held; phase: "refused" | "asked" | "theirs"; revision?: number; awaits?: true; again?: true }
-export interface Editor { held: Held; saved: Held; conflict?: Clash; sent?: { text: Held; whileTheirs: boolean; removes?: true }; writes?: number; note?: string | undefined; version?: number; reading?: true }
+export interface Editor { held: Held; saved: Held; conflict?: Clash; sent?: { text: Held; whileTheirs: boolean; removes?: true }; writes?: number; note?: string | undefined; version?: number; reading?: true; own?: string }
 export type EditorEvent =
   | { kind: "type"; held: Held } // the operator's edit
   | { kind: "refused" } // a write's 412
@@ -353,10 +350,11 @@ export type EditorEvent =
   | { kind: "draft"; revision: number; changed: boolean; removed?: true }
   | { kind: "reading"; on: boolean } // the entry's revision read starts, or is dropped for another
   // The entry's revision read, started after `since` done writes, for the draft revision that named it.
-  | { kind: "read"; text: Held; since: number; revision?: number }
+  // `id`: the revision read.
+  | { kind: "read"; text: Held; since: number; revision?: number; id?: string }
   | { kind: "copy" } // Copy my text into the new revision
   | { kind: "send"; removes?: true } // a Save or Remove sends the editor's text
-  | { kind: "done" } // that write is done
+  | { kind: "done"; revision?: string } // that write is done; a Save's answer names the revision it created
   | { kind: "revert"; at: number; text: Held; note: string } // Revert to base's read answers; `at`: the version at the click
   | { kind: "note"; text?: string };
 
@@ -433,8 +431,8 @@ function step(s: Editor, e: EditorEvent): Editor {
         return { ...idle, saved: e.text, held: e.text, conflict: { ...shown, phase: "theirs", ...((awaits !== true || again === true) && { awaits: true as const }) } };
       }
       // Without a conflict, another author's text read while the editor holds typed text shows, and
-      // the typed text is kept aside (C1, C2). The pane's own done Save reads back the text it sent.
-      if (c === undefined && !same(s.held, s.saved) && !stores(e.text, s.saved)) {
+      // the typed text is kept aside (C1, C2). The read of the pane's own done Save is not theirs.
+      if (c === undefined && (s.own === undefined || e.id !== s.own) && !same(s.held, s.saved) && !same(e.text, s.saved)) {
         return { ...idle, saved: e.text, held: e.text, conflict: { mine: s.held, phase: "theirs", ...(e.revision !== undefined && { revision: e.revision }) } };
       }
       // Once theirs shows, a read never ends a repeated Show's wait: only its draft read does.
@@ -451,7 +449,8 @@ function step(s: Editor, e: EditorEvent): Editor {
       // A Remove saves no text, so the operator's kept text stays for Copy my text (N2).
       const ends = c === undefined || (s.sent?.removes !== true && (s.sent?.whileTheirs === true || same(c.mine, sent)));
       // A done Remove saves the removal: the text still shown is not stored anywhere (H8).
-      return { ...(ends ? ended : s), saved: s.sent?.removes === true ? EMPTY : sent, writes: writes + 1 };
+      const { own: _own, ...after } = ends ? ended : s;
+      return { ...after, ...(e.revision !== undefined && { own: e.revision }), saved: s.sent?.removes === true ? EMPTY : sent, writes: writes + 1 };
     }
     case "revert":
       return mayRevert(c) && e.at === (s.version ?? 0) ? { ...s, held: e.text, note: e.note } : { ...s, note: NOT_REVERTED };
@@ -599,7 +598,7 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
         return setNote("The entry's revision could not be read.");
       }
       setLoaded(revision);
-      act({ kind: "read", text: fromRevision(r.data), since: done, revision: draft.revision });
+      act({ kind: "read", text: fromRevision(r.data), since: done, revision: draft.revision, id: revision });
     });
     return () => {
       live = false;
@@ -620,7 +619,9 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
   const o = w?.outcome;
   useEffect(() => {
     // The settled hook reads the draft again (H3).
-    if (doneOnce(w) !== undefined) act({ kind: "done" });
+    const d = doneOnce(w);
+    const created = (d?.data as Partial<S["SourceUpdate"]> | null | undefined)?.entry?.revision;
+    if (d !== undefined) act({ kind: "done", ...(typeof created === "string" && { revision: created }) });
     if (o?.kind === "refused" && o.status === 412) {
       act({ kind: "refused" });
       // For the revision shown only: this read's ETag is not kept (§8.3).
