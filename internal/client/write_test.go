@@ -68,7 +68,7 @@ func (f *fake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if committed {
-			fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":2,"startMode":"recovery","maxTokenLifetimeSeconds":300}`)
+			fmt.Fprint(w, cmp.Or(f.server, `{"version":"BWSYNTH","apiRevision":2,"startMode":"recovery","maxTokenLifetimeSeconds":300}`))
 			return
 		}
 		if f.beforeEntry {

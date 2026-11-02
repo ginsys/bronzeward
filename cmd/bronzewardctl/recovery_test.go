@@ -429,6 +429,28 @@ func TestRecoveryStatusGatesOnTheRefreshedRevision(t *testing.T) {
 	}
 }
 
+// TestRecoveryStatusGatesEachTimelinePage: the first timeline page shows a new epoch, and the re-read
+// of GET /server shows API revision 2. The client then sends no second page with an order.
+func TestRecoveryStatusGatesEachTimelinePage(t *testing.T) {
+	setServerFacts(t, 3, map[string]string{"/api/v1/machines/mch_c/timeline": "ep_BWSYNTH-2"})
+	recoveryRevisionMoved = 2
+	seen := recoveryServer(t, map[string]string{
+		"GET /api/v1/recovery":                `{"epoch":"ep_BWSYNTH-1","recoveryMode":true,"scopes":[{"machine":"mch_c","state":"blocked"}]}`,
+		"GET /api/v1/machines/mch_c/timeline": `{"items":[{"kind":"observation","revision":9,"entry":{}}],"next":"cur_BWSYNTH"}`,
+	}, "")
+	var out, errb bytes.Buffer
+	run([]string{"recovery", "status"}, &out, &errb)
+	n := 0
+	for _, r := range seen() {
+		if strings.Contains(r, "/timeline") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("%d timeline requests; want the first page only, as the refreshed revision is 2", n)
+	}
+}
+
 // TestRecoveryTextIsEscaped: every string of a server's answer that the recovery commands print is
 // escaped as a value, a line feed included, so none can forge a row or move the cursor
 // (client-contracts.md section 6 item 8).
