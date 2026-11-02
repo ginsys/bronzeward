@@ -530,7 +530,7 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
   const asked = useRef(new Set<string>());
   // A layer read that failed is asked again by the next draft read or by the button: the fragment
   // stays out of the pickers meanwhile, and Show stays off.
-  const [layerFailed, setLayerFailed] = useState(0);
+  const [layerFailed, setLayerFailed] = useState<Record<string, true>>({});
   const [layerTry, tryLayers] = useState(0);
   useEffect(() => {
     for (const e of draft.entries) {
@@ -541,11 +541,13 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
         if (!mounted.current) return;
         if (x?.kind === "ok") return setLayers((l) => ({ ...l, [r]: x.data.layer }));
         asked.current.delete(r);
-        setLayerFailed((n) => n + 1);
+        setLayerFailed((f) => ({ ...f, [r]: true }));
       });
     }
   }, [read, draft.entries, layerTry]);
   const layersRead = draft.entries.every((e) => e.kind !== "fragment" || e.revision == null || layers[e.revision] !== undefined);
+  // Only a revision the draft holds now, whose last read failed, offers the button.
+  const layersFailed = draft.entries.some((e) => e.kind === "fragment" && e.revision != null && layers[e.revision] === undefined && layerFailed[e.revision] === true);
   const ready = profiles.kind === "ok" && fragments.kind === "ok" && layersRead;
   const profileList = profiles.kind === "ok" ? profiles.data.items : [];
   const fragmentList = fragments.kind === "ok" ? fragments.data.items : [];
@@ -685,8 +687,8 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
       {waits && (failed
         ? <p><button type="button" onClick={() => retry((x) => x + 1)}>Read the entry again</button></p>
         : <Status>Reading the entry's text.</Status>)}
-      {!layersRead && layerFailed > 0 && (
-        <p><button type="button" onClick={() => tryLayers((x) => x + 1)}>Read the fragment layers again</button></p>
+      {layersFailed && (
+        <p><button type="button" onClick={() => { setLayerFailed({}); tryLayers((x) => x + 1); }}>Read the fragment layers again</button></p>
       )}
       <Members slot="profile" names={lists.profile} offers={forProfiles} ready={ready} open={open} editable={editable} change={(next) => hold({ ...lists, profile: next })} />
       {LAYERS.map((l) => (
