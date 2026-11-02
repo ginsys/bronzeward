@@ -5,7 +5,7 @@
 // write's in-progress 409 and the recovery entry's exception (§8.4 items 2 and 3) are not served
 // here: no form of this layer sends either route.
 
-import { type Attempt, type Client, type End, type Ending, NOT_JSON, NOT_SENT, preEntry, type Problem } from "./request.ts";
+import { type Attempt, type Client, type End, type Ending, NOT_JSON, NOT_SENT, preEntry, type Problem, WRITE_TRANSPORT_FAILURE } from "./request.ts";
 
 export interface WriteSpec {
   method: "POST" | "PUT" | "DELETE";
@@ -50,7 +50,6 @@ export const RENEWED_LAST ="the last attempt was answered 401 and your sign-in w
 const PAGE_FAILED = "the page failed while it sent it";
 
 export type { Ending };
-const DROPPED = "the connection dropped";
 const PREFIX = "urn:bronzeward:problem:";
 // The 503s a write repeats; each states that its own attempt committed nothing (§8.2).
 const REPEATED_503 = new Set(["dependency-unavailable", "talos-access-unavailable", "transient-conflict"]);
@@ -260,7 +259,7 @@ export class Writes {
     // Set aside by a check before a send or by an answer's refusal: either way with the last
     // answer's problem (§8.2), which a check before a send leaves as it was.
     const aside = (why: string): Outcome => ({ kind: "set-aside", why, ambiguous: w.ambiguous, problem: lastProblem });
-    const unknown = (why = last === undefined ? DROPPED : `the server answered ${last}`): Outcome => ({ kind: "unknown", why, problem: lastProblem });
+    const unknown = (why = last === undefined ? WRITE_TRANSPORT_FAILURE : `the server answered ${last}`): Outcome => ({ kind: "unknown", why, problem: lastProblem });
     // A refusal decided before the idempotency lookup says nothing of an earlier ambiguous attempt.
     const early = (o: Outcome): Outcome => (w.ambiguous ? unknown() : o);
     let p503: Problem | null = null;
@@ -269,7 +268,7 @@ export class Writes {
     // the repeats run.
     const doubt = () => {
       w.ambiguous = true;
-      w.doubt = { kind: "unknown", why: last === undefined ? DROPPED : `the server answered ${last}`, problem: lastProblem };
+      w.doubt = { kind: "unknown", why: last === undefined ? WRITE_TRANSPORT_FAILURE : `the server answered ${last}`, problem: lastProblem };
       this.changed();
     };
     for (let n = 0; n <= BACKOFF.length; n++) {

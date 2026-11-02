@@ -4,7 +4,7 @@ import { expect, test } from "vitest";
 import { Screen, type View } from "./app.tsx";
 import { WriteNotices, WritesProvider } from "./forms.tsx";
 import type { Client } from "./request.ts";
-import { problemFields, problemText, REPEATING, REPLAYED, unknown } from "./states.tsx";
+import { problemFields, problemText, REPEATING, REPLAYED, UNKNOWN } from "./states.tsx";
 import { Write, Writes } from "./write.ts";
 
 const shown = (view: View) => renderToStaticMarkup(createElement(Screen, { view }));
@@ -73,7 +73,7 @@ test("B11: a dropped attempt shows the unknown notice at once, while the automat
   expect(sends).toBe(2);
   expect(w.outcome).toBeUndefined();
   const html = notices();
-  expect(html).toContain(unknown("the connection dropped"));
+  expect(html).toContain(UNKNOWN);
   expect(html).toContain(REPEATING);
   expect(html).toContain(`Key ${w.key}`);
   expect(html).not.toContain("Dismiss");

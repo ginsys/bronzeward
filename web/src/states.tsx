@@ -3,11 +3,11 @@
 // the first write view (#257) on.
 
 import type { ReactNode } from "react";
-import { type Problem, type ReadResult, TRANSPORT_FAILURE } from "./request.ts";
+import { type Problem, type ReadResult, TRANSPORT_FAILURE, WRITE_TRANSPORT_FAILURE } from "./request.ts";
 
 export const WITHHELD = "Configuration not shown: it could not be redacted.";
 export const unknown = (why: string) => `Unknown whether this was saved: ${why}.`;
-export const UNKNOWN = unknown("the connection dropped");
+export const UNKNOWN = unknown(WRITE_TRANSPORT_FAILURE);
 // A write set aside after an attempt that may have committed: the reason it was set aside, then
 // SET_ASIDE.
 export const SET_ASIDE =
