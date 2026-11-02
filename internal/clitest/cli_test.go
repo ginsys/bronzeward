@@ -160,6 +160,7 @@ func (f *fixture) serveUp(flags ...string) {
 			r.Body.Close()
 			return
 		} else if i == 100 {
+			f.srv.stop() // the log is read only after the process, and its copy of the output, ended
 			f.t.Fatalf("serve did not answer /livez: %v\n%s", err, f.srv.log.String())
 		}
 		time.Sleep(100 * time.Millisecond)
