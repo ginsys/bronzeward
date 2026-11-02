@@ -64,6 +64,10 @@ export async function spotOfPath(text: string, path: string): Promise<Spot | und
 // hold a reference's tag. A path that holds no string here adds nothing; the server refuses it
 // (rule embedded).
 //
+// Known difference: go-yaml keeps U+2028 and U+2029 in a scalar's value, and the embedded
+// document's own parse breaks a line there, while `parse` reads them as line feeds that fold. So in
+// a folded or quoted holder, a line after one of them can be read here as part of the line before.
+// The server's reading stands. Matching it needs a copy of go-yaml's line handling.
 const STR = "tag:yaml.org,2002:str";
 function embeddedTexts(text: string, embedded: readonly EmbeddedPath[]): { text: string; spot: Spot; literal: boolean }[] {
   if (embedded.length === 0) return [];
@@ -72,28 +76,9 @@ function embeddedTexts(text: string, embedded: readonly EmbeddedPath[]): { text:
   for (const { path } of embedded) {
     const node = path.includes("|") ? undefined : nodeAt(docs, path);
     if (!isScalar(node) || typeof node.value !== "string" || (node.tag !== undefined && node.tag !== STR && node.tag !== "!") || node.range == null) continue;
-    const spot = { start: node.range[0], end: node.range[1] };
-    found.push({ text: decodedAgain(text.slice(spot.start, spot.end)) ?? node.value, spot, literal: node.type === "BLOCK_LITERAL" });
+    found.push({ text: node.value, spot: { start: node.range[0], end: node.range[1] }, literal: node.type === "BLOCK_LITERAL" });
   }
   return found;
-}
-
-// go-yaml breaks a line at U+2028 and U+2029 (so `parse` finds the holder with each read as a line
-// feed) but keeps the character in a scalar's value, where the embedded document's own parse breaks
-// a line at it again: a folded line after it is not folded into the line before. The parser here
-// keeps the character only if it is not read as a line feed. So a holder whose text shows one is
-// decoded again from that text alone, with only a lone carriage return and U+0085 read as a line
-// feed (go-yaml folds them as one). Undefined when the text shows neither, or cannot be decoded
-// alone; the holder's value then stands.
-const SEPARATORS = new RegExp(`[${String.fromCharCode(0x2028, 0x2029)}]`);
-const FOLDED_BREAKS = /\r(?!\n)|\u0085/g;
-function decodedAgain(source: string): string | undefined {
-  if (!SEPARATORS.test(source)) return undefined;
-  const docs = parseAllDocuments(`x: ${source.replace(FOLDED_BREAKS, "\n")}`);
-  const doc = Array.isArray(docs) && docs.length === 1 ? docs[0]! : undefined;
-  if (doc === undefined || doc.errors.length > 0 || !isMap(doc.contents)) return undefined;
-  const v = doc.contents.items[0]?.value;
-  return isScalar(v) && typeof v.value === "string" ? v.value : undefined;
 }
 
 // The reference tags in the text, outside comments: a reference name is the §5.1 grammar's
