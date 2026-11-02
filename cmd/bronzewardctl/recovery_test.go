@@ -268,6 +268,10 @@ func TestRecoveryTextIsEscaped(t *testing.T) {
 				t.Errorf("%v: hostile text reached the terminal raw:\n%q", args, s)
 			}
 		}
+		// Dropping the hostile value would pass the checks above: each command shows it, escaped.
+		if !strings.Contains(out.String(), `evil\x1b[2J\x0aFORGED`) {
+			t.Errorf("%v: the escaped hostile value is missing:\n%s", args, out.String())
+		}
 	}
 }
 
@@ -305,7 +309,27 @@ func TestRefusedExitRepeatNamesTheScope(t *testing.T) {
 	}, "")
 	var out, errb bytes.Buffer
 	rc := run([]string{"recovery", "exit", "--idempotency-key", "BWSYNTH-aaaaaaaaaaaaaaa", "--expect-epoch", "ep_BWSYNTH-1", "--expect-principal", "svc_BWSYNTH"}, &out, &errb)
-	if rc != 3 || !strings.Contains(errb.String(), "The first scope not released: machine 'mch_BWSYNTH', 'config'") {
-		t.Errorf("rc %d, want 3 naming the scope:\n%s", rc, errb.String())
+	if rc != 3 || !strings.Contains(errb.String(), "\nThe first scope not released: machine 'mch_BWSYNTH', 'config'") {
+		t.Errorf("rc %d, want 3 naming the scope on a line of its own:\n%s", rc, errb.String())
+	}
+	if strings.Contains(errb.String(), `\x0aThe first scope`) {
+		t.Errorf("the scope line was flattened into the error line:\n%s", errb.String())
+	}
+}
+
+// TestIdentityPromptIsEscaped: the identity the operator is asked to type back is shown escaped, a
+// line feed included, so a hostile --identity cannot forge a prompt line; the comparison still
+// uses the raw value (client-contracts.md section 6 item 8).
+func TestIdentityPromptIsEscaped(t *testing.T) {
+	recoveryServer(t, map[string]string{}, "")
+	var out, errb bytes.Buffer
+	withStdin(t, "\n", func() {
+		run([]string{"identity", "revoke", "--identity", "svc_x\nFORGED: type yes", "--reason", "r"}, &out, &errb)
+	})
+	if strings.Contains(errb.String(), "\nFORGED") {
+		t.Errorf("the prompt shows the identity raw:\n%q", errb.String())
+	}
+	if !strings.Contains(errb.String(), `Type the identity svc_x\x0aFORGED: type yes to send it`) {
+		t.Errorf("the prompt lacks the escaped identity:\n%q", errb.String())
 	}
 }

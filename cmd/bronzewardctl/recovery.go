@@ -337,8 +337,8 @@ func (e *env) recoveryExit(args []string) error {
 	})
 	var p *client.Problem
 	if errors.As(err, &p) && p.Code() == "conflict" && p.Doc["machine"] != nil {
-		return fmt.Errorf("%w\nThe first scope not released: machine %s, %s. Its next step: recovery status.", err,
-			client.ShellWord(fmt.Sprint(p.Doc["machine"])), client.ShellWord(fmt.Sprint(p.Doc["scope"])))
+		return &client.Blocked{Err: err, More: []string{fmt.Sprintf("The first scope not released: machine %s, %s. Its next step: recovery status.",
+			client.ShellWord(fmt.Sprint(p.Doc["machine"])), client.ShellWord(fmt.Sprint(p.Doc["scope"])))}}
 	}
 	return err
 }
