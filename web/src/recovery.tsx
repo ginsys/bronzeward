@@ -4,7 +4,7 @@
 
 import { type FormEvent, type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Result, useSend, useWrites } from "./forms.tsx";
-import { Head, Id, Scroll, useItem } from "./list.tsx";
+import { Head, Id, type Load, Scroll, useReads, useSettled } from "./list.tsx";
 import type { Problem, ReadResult } from "./request.ts";
 import type { Outcome } from "./write.ts";
 import { useGate, useOffline, useRecoveryState } from "./shell.tsx";
@@ -177,6 +177,8 @@ export function EnterRecovery({ onRead }: { onRead?: () => void }) {
   const held = w !== undefined && writes.open.includes(w);
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    // The button is off until enter is typed, but a submit event does not need the button.
+    if (typed !== "enter" || off !== undefined || held) return;
     const d = new FormData(e.currentTarget);
     const restored = FAMILIES.flatMap((family) => {
       const backup = text(d, `${family}-backup`);
@@ -232,15 +234,26 @@ export function EnterRecovery({ onRead }: { onRead?: () => void }) {
 export const REREAD_MS = 5000;
 
 export function RecoveryConsole() {
+  const settled = useSettled();
+  const { again: shellAgain, view } = useReads();
   const [n, again] = useState(0);
-  const read = useItem<Recovery>("/recovery", undefined, n);
-  // The next read is scheduled when the last one has settled, so a slow answer is never discarded by
-  // the next tick (a read started over an unsettled one invalidates it).
+  const [read, put] = useState<Load<Recovery>>({ kind: "loading" });
+  // One read at a time. The next is scheduled when the last one has settled, whatever its result (a
+  // read without answer keeps what is shown), so a slow answer is never discarded by the next tick.
+  // A refresh asked for (n, or the shell's) cancels the schedule and starts at once.
   useEffect(() => {
-    if (read.kind === "loading") return;
-    const t = setTimeout(() => again((i) => i + 1), REREAD_MS);
-    return () => clearTimeout(t);
-  }, [read]);
+    let live = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    void settled<Recovery>("/recovery", () => live).then((res) => {
+      if (!live) return;
+      if (res !== undefined) put(res);
+      timer = setTimeout(() => again((i) => i + 1), REREAD_MS);
+    });
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [settled, n, shellAgain, view]);
   const { mode } = useRecoveryState();
   if (read.kind === "loading") return <><h2>Recovery</h2><Status>Loading the recovery state</Status></>;
   if (read.kind === "discarded") return null;

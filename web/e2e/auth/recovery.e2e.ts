@@ -103,6 +103,20 @@ describe("the recovery entry (#364)", () => {
     expect(await $("body").getText()).not.toContain(SET_ASIDE);
   });
 
+  it("an entry submitted without the typed confirmation sends nothing, the disabled button bypassed", async () => {
+    await open("recovery");
+    const when = stamp();
+    await $('input[name="database-backup"]').setValue("synthetic-backup-364");
+    await $('input[name="database-taken"]').setValue(when);
+    await $('input[name="stoppedAt"]').setValue(when);
+    await $('input[name="reason"]').setValue("unconfirmed synthetic restore");
+    expect(await $("main form").$("button=Enter recovery").isEnabled()).toBe(false);
+    await browser.execute(() => document.querySelector<HTMLFormElement>("main form[aria-label='Enter recovery']")!.requestSubmit());
+    await browser.pause(1_000);
+    expect(await entries()).toEqual([]);
+    expect(await $("body").getText()).not.toContain("Recovery mode entered");
+  });
+
   it("the exit with no scope in recovery is sent once, and the console reads again once, not in a loop", async () => {
     const at = await open("recovery");
     const when = stamp();
@@ -120,10 +134,12 @@ describe("the recovery entry (#364)", () => {
     await exit.$("button=Exit recovery").click();
     await expect(exit.$('[data-testid="write-result"]')).toHaveText(expect.stringContaining("Recovery mode left"), { wait: 20_000 });
     const before = (await seen()).filter((p) => p === "/recovery").length;
-    // Longer than a re-read after each answer: a loop on the completed exit would add many reads.
+    // The completed exit reads the state once at once (so at least one more read), and a loop on it
+    // would add many reads within these seconds.
+    await browser.waitUntil(async () => (await seen()).filter((p) => p === "/recovery").length > before, { timeout: 10_000, timeoutMsg: "the console did not read again after the exit" });
     await browser.pause(3_000);
     const after = (await seen()).filter((p) => p === "/recovery").length;
-    expect(after - before).toBeLessThanOrEqual(1);
+    expect(after - before).toBeLessThanOrEqual(3);
     expect((await writes()).filter(([, route]) => route === "/recovery/exits")).toHaveLength(1);
   });
 
