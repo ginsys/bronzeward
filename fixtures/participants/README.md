@@ -172,11 +172,11 @@ facilitator only. Setup `tN` means `fixtures/participants/session tN`.
   the apply. `t9 disconnect` stops A for 60 s and starts it again, so that the participant's event
   stream ends and the client must resume it. Its own reader then checks that a stream resumed
   with `Last-Event-ID` follows the apply to completion, with no event lost or repeated. That
-  check covers the server only. The CLI has `operation show` but no `operation watch`, and the web
-  interface has no operation timeline, so no client resumes a stream yet: that half waits for
-  ginsys/bronzeward#354 (CLI watch) and ginsys/bronzeward#359 (web timeline). Until then, a
-  participant can follow the apply only with repeated `operation show`, and T9's measures do not
-  cover a resumed stream.
+  check covers the server only. No client follows an apply's events yet. The CLI's progress
+  reader resumes a stream only for `publish`, the CLI has no `operation watch`, and the web
+  interface has no operation timeline. That half waits for ginsys/bronzeward#354 (CLI watch) and
+  ginsys/bronzeward#359 (web timeline). Until then, a participant can follow the apply only with
+  repeated `operation show`, and T9's measures do not cover a resumed stream.
 - Prompt: "The approved change is being applied. Follow it until it finishes, and tell me when
   it finished."
 - Done when: the completion is reported with its time.
