@@ -372,6 +372,20 @@ func TestWatchUntil(t *testing.T) {
 			t.Errorf("watch: %v, state %q, shown %q; want running, %q", err, state, shown, want)
 		}
 	})
+	t.Run("an answer from before a drain into another epoch is asked again", func(t *testing.T) {
+		const e2 = "ep_BWSYNTH2"
+		// Until ends the first stream at e1:1. The terminal read is of e1, and the drain clears what
+		// e1:1 settled: in e2 the operation runs on, then succeeds.
+		o := &opServer{streams: []handler{sse(ev(e1+":1", "paused")), sse(ev(e2+":2", "continued"))}, epochs: []string{e1, e2},
+			states: []string{"failed", "running", "succeeded"}, pages: []string{item(e2+":1", "started"), item(e2+":2", "continued")}}
+		calls := 0
+		until = func() (bool, error) { calls++; return calls == 1, nil }
+		t.Cleanup(func() { until = nil })
+		shown, _, state, _, err := watched(t, o, e1, nil)
+		if want := []string{e1 + ":1", "clear", e2 + ":1", e2 + ":2"}; err != nil || state != "succeeded" || !slices.Equal(shown, want) {
+			t.Errorf("watch: %v, state %q, shown %q; want succeeded, %q", err, state, shown, want)
+		}
+	})
 }
 
 // TestWatchRenewal checks that a wait renews in process (§9.5 item 4): a sign-in about to expire
