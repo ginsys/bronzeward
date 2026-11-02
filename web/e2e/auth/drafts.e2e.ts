@@ -564,7 +564,7 @@ describe("the draft editor (#339)", () => {
       await add("Layer role", b, "Add to layer role");
       expect(await names("Layer role")).toEqual([a, b]);
       await faults({ upstream: at });
-      const up = asg().$(`button[aria-label="Move up role ${b}"]`);
+      const up = await asg().$(`button[aria-label="Move up role ${b}"]`);
       await browser.execute((e: HTMLElement) => e.focus(), up as unknown as HTMLElement);
       await browser.keys("Enter");
       expect(await names("Layer role")).toEqual([b, a]);
