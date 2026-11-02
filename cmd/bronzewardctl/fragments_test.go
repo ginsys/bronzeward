@@ -80,7 +80,9 @@ func TestFragmentEditing(t *testing.T) {
 		"the document is over the server's 1 MiB body limit; nothing was sent")
 	step("a body over 1 MiB once encoded", append(set, "--file", write("quotes", strings.Repeat(`"`, maxBody/2+1))), 1, "",
 		"bytes, over the server's 1 MiB body limit; nothing was sent")
-	setStdin(t, strings.Repeat("machine.files\n", maxBody/len("machine.files\n")+1))
+	// Marks of 1024 bytes each, line feed included, so the body limit comes before the count limit.
+	long := "machine.files." + strings.Repeat("k", 1009) + "\n"
+	setStdin(t, strings.Repeat(long, maxBody/len(long)+1))
 	step("marks over 1 MiB together", append(set, "--file", doc, "--marks"), 1, "", "the marks are over the server's 1 MiB body limit; nothing was sent")
 	step("a document that is not UTF-8", append(set, "--file", write("bin", "\xff\xfe")), 1, "", "the document is not UTF-8 text; nothing was sent")
 	// The decoders quote member names and some values; the refusals quote nothing from the file.
@@ -154,6 +156,20 @@ func TestMarkTotal(t *testing.T) {
 	}
 	if m, err := scanMarks(strings.NewReader(at+"x\n"), false, nil); err == nil || !strings.Contains(err.Error(), "the marks are over the server's 1 MiB body limit") {
 		t.Errorf("one mark over the limit: %d marks, %v; want the refusal", len(m), err)
+	}
+}
+
+// TestMarkCount checks that the marks are held to the 1024 that one request takes (MarkInput's
+// maxItems), short marks far under the body limit included, from a terminal and from standard input.
+func TestMarkCount(t *testing.T) {
+	at := strings.Repeat("doc[0]/x\n", maxMarks)
+	for _, terminal := range []bool{false, true} {
+		if m, err := scanMarks(strings.NewReader(at), terminal, nil); err != nil || len(m) != maxMarks {
+			t.Errorf("terminal=%v, at the limit: %d marks, %v; want %d marks", terminal, len(m), err, maxMarks)
+		}
+		if m, err := scanMarks(strings.NewReader(at+"doc[0]/x\n"), terminal, nil); err == nil || !strings.Contains(err.Error(), "more than 1024 marks were given") {
+			t.Errorf("terminal=%v, one mark over the limit: %d marks, %v; want the refusal", terminal, len(m), err)
+		}
 	}
 }
 

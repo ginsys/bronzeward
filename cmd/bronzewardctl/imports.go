@@ -476,7 +476,7 @@ func (e *env) follow(c *client.Client, a accepted, before int) (err error) {
 	}
 	switch {
 	case mark != 0:
-		// A mark's settlement comes first: a later succeeded is never the mark applied.
+		// A mark's run has its own outcomes: a later succeeded is never the mark applied.
 		return e.markOutcome(c, a, b, o, s)
 	case client.Terminal(o.State):
 		return e.ended(c, b, o)

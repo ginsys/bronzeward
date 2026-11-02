@@ -292,10 +292,13 @@ func terminalLines(b []byte, terminal bool, what string) error {
 	return nil
 }
 
+// maxMarks is the most marks one request takes (MarkInput's maxItems in api/openapi.yaml).
+const maxMarks = 1024
+
 // scanMarks reads marks, one per line until an empty line or the end of input. A mark is sent as
 // the text that was given (PA §9.3), so a mark that is not UTF-8, which json.Marshal would alter,
-// or a terminal line that may have been cut short is refused. A refusal names the mark's position,
-// never its text. ask, when not nil, prompts for each line.
+// or a terminal line that may have been cut short, or more than maxMarks marks, is refused. A
+// refusal names the mark's position, never its text. ask, when not nil, prompts for each line.
 func scanMarks(in io.Reader, terminal bool, ask func()) ([]string, error) {
 	var marks []string
 	s := bufio.NewScanner(in)
@@ -322,6 +325,8 @@ func scanMarks(in io.Reader, terminal bool, ask func()) ([]string, error) {
 			break
 		}
 		switch {
+		case len(marks) == maxMarks:
+			return nil, fmt.Errorf("more than %d marks were given, the most one request takes; nothing was sent", maxMarks)
 		case !utf8.ValidString(m):
 			return nil, fmt.Errorf("mark %d is not UTF-8 text; nothing was sent", len(marks)+1)
 		case terminal && len(raw) >= terminalLine:
