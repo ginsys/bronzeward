@@ -622,14 +622,8 @@ t9_clean() {
 # t9_release: the hold on T9's apply ends (prepare t9-release), so that the apply goes on. It is
 # safe to repeat. A release that fails leaves the apply held, and the setups after T9 wait on it.
 t9_release() {
+  trap cleanup_stopped INT TERM
   "$here/prepare" t9-release >>"$log" 2>&1 || echo "the hold on T9's apply could not be released; recreate the fixture" >&2
-}
-# t9_refused: the refusals of an attempt of T9's apply that settle it (comparisons 1, 2, 3 and 6),
-# as "comparison: cause", one per line. After A takes the apply over at its start, the released C's
-# own attempt is refused at comparison 7, which settles nothing and is not listed.
-t9_refused() {
-  sql "SELECT (entry->>'comparison') || ': ' || (entry->>'cause') FROM machine_event WHERE kind = 'refusal'
-    AND entry->>'operation' = '$t9_op' AND entry->>'comparison' IN ('1', '2', '3', '6') ORDER BY revision"
 }
 
 # t9_disconnect: A stopped for 60 s and started again while the participant follows T9's apply,
@@ -641,7 +635,10 @@ t9_refused() {
 # and at the start. A takes it over when it starts, and then the hold is released. If the apply does
 # not survive A's restart, the step fails.
 t9_disconnect() {
-  local dir=$part/t9-disconnect rc last state refused
+  local dir=$part/t9-disconnect rc last state cause
+  # The cleanup first: any exit from here on, a failed read included, releases T9's hold.
+  trap t9_clean EXIT
+  trap 'exit 130' INT TERM
   t9_op=$(sql "SELECT id FROM operation WHERE kind = 'apply-config' AND machine = '$(worker)' ORDER BY seq DESC LIMIT 1")
   [ -n "$t9_op" ] || die "no apply-config operation on the worker; run the t9 setup first"
   state=$(sql "SELECT state FROM operation WHERE id = '$t9_op'")
@@ -650,8 +647,6 @@ t9_disconnect() {
   esac
   rm -rf -- "$dir"
   mkdir -p -- "$dir"
-  trap t9_clean EXIT
-  trap 'exit 130' INT TERM
   t9_open "$dir/before"
   "$bin/inject" kill A >>"$log" 2>&1 || die "cannot stop A; its output is in $log"
   rc=0
@@ -673,17 +668,14 @@ t9_disconnect() {
   echo "the hold is released: the apply goes on"
   last=$(t9_ids "$dir/before" | tail -n 1)
   t9_read "the resumed stream" "$dir/after" 300 "$last"
-  # A hold past the evidence's age (300 s) has its first attempt refused at comparison 3: the apply
-  # goes unresolved, is observed again and is retried. One past the plan's expiry is cancelled.
-  refused=$(t9_refused) || die "cannot read the refusals of the apply"
-  if [ -n "$refused" ]; then
-    echo "the held apply's attempt was refused (comparison: cause):"
-    echo "$refused"
-  fi
   state=$(sql "SELECT state FROM operation WHERE id = '$t9_op'")
   case $state in
     completed) ;;
-    cancelled) die "the apply was cancelled with no attempt${refused:+, after the refusal above}; run the t9 setup again" ;;
+    cancelled)
+      # A hold past the plan's expiry: the owner cancels the apply before any attempt.
+      cause=$(sql "SELECT entry->>'cause' FROM machine_event WHERE kind = 'operation-state'
+        AND entry->>'operation' = '$t9_op' AND entry->>'to' = 'cancelled'") || cause='not readable'
+      die "the apply was cancelled with no attempt (${cause:-no cause recorded}); run the t9 setup again" ;;
     *) die "the apply did not complete after A's restart: $state (a product finding; keep $dir)" ;;
   esac
   t9_read "the full replay" "$dir/full" 60
@@ -701,15 +693,17 @@ t9() {
   setup t9
   # Last, on Zitadel, so that no restart of A meets the hold. A no-reboot apply ends in about 50 ms
   # on the fixture, before any read (ginsys/bronzeward#512), so C holds it after its commitment
-  # until t9 disconnect releases it. A hold that fails is released at once.
+  # until t9 disconnect releases it. A hold that fails or is interrupted is released at once.
+  trap t9_release EXIT
+  trap 'exit 130' INT TERM
   if ! "$here/prepare" t9-hold >>"$log" 2>&1; then
     grep -- $'^FAIL\t' "$log" >&2 || true
-    t9_release
     die "setup t9: the apply was not held on C; its output is in $log"
   fi
+  trap - EXIT INT TERM
   echo "read ok: the apply is committed on the worker and held on C"
   echo "names: none"
-  echo "next: fixtures/participants/session t9 disconnect, within 2 minutes, while the participant follows the apply"
+  echo "next: fixtures/participants/session t9 disconnect, while the participant follows the apply"
 }
 t2() {
   setup t2
