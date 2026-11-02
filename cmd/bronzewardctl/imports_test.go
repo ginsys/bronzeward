@@ -347,4 +347,8 @@ func TestImportLifecycle(t *testing.T) {
 	step("a success read back across an epoch change keeps no ETag", start, 1, "released into draft drf_BWSYNTH (revision 7)",
 		"the server's epoch changed while draft drf_BWSYNTH was read again after this import. Its ETag is not kept.", startBody(`"6-BWSYNTH"`, ""))
 	f.onIngested = nil
+	// The refusal alone is not the safety property: no ETag of the restored draft may be saved under
+	// the new epoch, so the next write is refused locally and sends nothing.
+	step("so a write after the epoch change needs a read first", []string{"profile", "rm", "workers", "--draft", "drf_BWSYNTH"}, 1, "",
+		"no ETag of draft drf_BWSYNTH is kept for this context at its current epoch. Read the draft first")
 }
