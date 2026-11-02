@@ -272,9 +272,12 @@ describe("the write views (#338)", () => {
       await $('nav[aria-label="Main"]').$("a=Machines").click();
       await browser.waitUntil(async () => asked.length === 1, { timeout: 10_000, timeoutMsg: "no leave dialog" });
       await expect($("main h2")).toHaveText("Add cluster");
-      // Back to the machine list: refused, the page and its address stay on the form.
+      // Back to the machine list: refused, the page and its address stay on the form, and the
+      // history returns to the form's own entry rather than adding one.
+      const entry = JSON.stringify(await browser.execute(() => history.state));
       await browser.back();
       await browser.waitUntil(async () => asked.length === 2, { timeout: 10_000, timeoutMsg: "no leave dialog on Back" });
+      await browser.waitUntil(async () => JSON.stringify(await browser.execute(() => history.state)) === entry, { timeout: 10_000, timeoutMsg: "the history did not return to the form's entry" });
     } finally {
       browser.off("dialog", answer);
     }
