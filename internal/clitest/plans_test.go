@@ -168,7 +168,15 @@ var planCases = map[string]func(*testing.T, *planEnv){
 		}), nil)
 		before := e.f.actCount()
 		r := e.ctl(e.create("adopt")...)
-		e.f.want(r, 3, "set aside, not repeated: the epoch is now "+<-epoch+", and this send committed nothing",
+		// The second send moves the epoch before the CLI's answer, so a missing one fails here at
+		// once instead of blocking the receive until the test timeout.
+		var now string
+		select {
+		case now = <-epoch:
+		default:
+			t.Fatalf("the CLI ended without its second send; exit %d, standard error %q", r.code, r.err)
+		}
+		e.f.want(r, 3, "set aside, not repeated: the epoch is now "+now+", and this send committed nothing",
 			"shows no proposed plan for this release and operation")
 		s.one(t, 2)
 		if n, p := e.f.actCount(), e.proposed(t); r.out != "" || n != before || len(p) != 0 {

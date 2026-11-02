@@ -213,7 +213,7 @@ func TestPlanView(t *testing.T) {
 		{"committed", func(f *planFake) { f.op, f.evidence, f.state = "apply-config", diffEvidence, "committed" },
 			[]string{"Committed: operation op_BWSYNTH-apply. Follow it with: bronzewardctl operation watch 'op_BWSYNTH-apply'"}},
 		{"expired", func(f *planFake) { f.state = "expired" }, []string{"Expired: it can no longer be approved or committed. " + again, "ago by this client's clock)"}},
-		{"revoked", func(f *planFake) { f.state = "revoked" }, []string{"Revoked: its approval was revoked, so it cannot be committed. " + again}},
+		{"revoked", func(f *planFake) { f.state = "revoked" }, []string{"Revoked: its approval or its approver's identity was revoked, so it cannot be committed. " + again}},
 		{"cancelled", func(f *planFake) { f.state = "cancelled" }, []string{"Cancelled: it cannot be committed. " + again}},
 		{"approved in an earlier epoch", func(f *planFake) { f.state, f.approval, f.approvalEpoch = "approved", "apr_BWSYNTH", "ep_BWSYNTH-1" }, []string{
 			"Approved by h-approver (approver) in epoch ep_BWSYNTH-1. This approval is from before the last recovery entry and authorizes nothing; " +

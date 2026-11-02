@@ -305,7 +305,7 @@ func stateLines(c *client.Client, p *apitypes.PlanBody, m apitypes.MachineBody, 
 	case "expired":
 		return []string{"Expired: it can no longer be approved or committed. " + again}
 	case "revoked":
-		return []string{"Revoked: its approval was revoked, so it cannot be committed. " + again}
+		return []string{"Revoked: its approval or its approver's identity was revoked, so it cannot be committed. " + again}
 	case "cancelled":
 		return []string{"Cancelled: it cannot be committed. " + again}
 	case "approved":
