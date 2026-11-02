@@ -114,7 +114,7 @@ export function nextStep(state: string): string {
     case "released":
       return "None.";
     case "unresolved":
-      return "An operation holds it: read the machine's operations. It is classified after the normal restart, then mark the scope again.";
+      return "Read the machine's operations. If one has not ended, it is classified after the normal restart: restart, then mark the scope again. If none holds the scope, mark it again now.";
     case "blocked":
       return "Mark the scope, then read its recorded cause: a scope stays blocked until it is marked. If the cause names a missing key or observation, repair that, or publish a new release for a lost key version.";
     default:

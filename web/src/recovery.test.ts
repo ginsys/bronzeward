@@ -76,7 +76,10 @@ describe("the console's parts (#364)", () => {
     expect(nextStep("pre-restore-unaccounted")).toMatch(/^Account the scope/);
     expect(nextStep("ready")).toBe("Release the scope. A release is not an approval.");
     expect(nextStep("released")).toBe("None.");
-    expect(nextStep("unresolved")).toMatch(/classified after the normal restart/);
+    // An unresolved scope can stay so after its operation ended, or the operation can be cancelled
+    // first: the restart is conditional, and the other way is to mark the scope now.
+    expect(nextStep("unresolved")).toMatch(/^Read the machine's operations\. If one has not ended, it is classified after the normal restart/);
+    expect(nextStep("unresolved")).toMatch(/If none holds the scope, mark it again now\.$/);
     // A scope is also blocked after a plain accounting, until it is marked: the step does not claim a missing key.
     expect(nextStep("blocked")).toMatch(/^Mark the scope, then read its recorded cause/);
     expect(nextStep("blocked")).not.toMatch(/Keys are missing/);
