@@ -188,12 +188,13 @@ func (e *env) pager(out *os.File, lines []string, rows, cols int) (err error) {
 	if _, err := fmt.Fprint(out, altScreenOn); err != nil {
 		return err
 	}
-	// A resize to less than the pager needs keeps the last size it could show.
+	// A resize to less than the pager needs is 0 by 0: the pager shows a notice until it is usable.
 	size := func() (int, int) {
-		if r, c, err := screenSize(out); err == nil {
-			rows, cols = r, c
+		r, c, err := screenSize(out)
+		if err != nil {
+			return 0, 0
 		}
-		return rows, cols
+		return r, c
 	}
 	err = pageOn(lines, size, pageKeys(keys), out)
 	_, _ = fmt.Fprint(out, clearScreen+altScreenOff)
