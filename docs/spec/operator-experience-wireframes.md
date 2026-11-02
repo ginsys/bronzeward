@@ -185,8 +185,13 @@ Profile entry: an ordered list of fragment revisions with move up/down controls 
 keyboard. Assignment entry: profile names in order and per-layer fragment names. On a `412`
 the editor keeps the unsaved text, shows "Someone changed this draft (revision 7). Your text is
 not saved." and offers [Show their change] and [Copy my text into the new revision], never an
-automatic overwrite. [Copy my text into the new revision] waits until [Show their change] put
-their text in the editor.
+automatic overwrite. [Copy my text into the new revision], [Save] and [Remove] wait until
+[Show their change] put their text in the editor. If the entry has a new revision, only the read
+of that revision puts their text there.
+
+[Add fragment] refuses a name that the draft already holds, a removed entry included, and points
+to that entry in the list. Once the new fragment is saved, the pane edits the entry that it
+created.
 
 [Revert to base] puts the base revision's text in the editor, not saved. Save then writes it as
 a new revision of the entry, and the entry stays in the draft. (2026-11-01, lead ruling: no route

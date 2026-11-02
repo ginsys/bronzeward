@@ -39,6 +39,11 @@ describe("paths (B3)", () => {
     expect(at("/drafts/new")?.type).toBe(CreateDraft);
   });
 
+  test("ginsys/bronzeward#517 H2: each draft's page is its own, so a move to another draft keeps none of its reads or editor", () => {
+    expect(at("/drafts/drf_a")?.key).toBe("drf_a");
+    expect(at("/drafts/drf_b")?.key).toBe("drf_b");
+  });
+
   test("anything else is not found, an object's own property names included", () => {
     for (const path of ["/recovery", "/constructor", "/toString", "/drafts/drf_a/fragments", "/acts", "/sources/frg_a", "/audit/act_a", "/machines/mch_a/review", "/Machines"]) {
       expect(at(path), path).toBeUndefined();
