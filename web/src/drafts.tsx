@@ -4,10 +4,10 @@
 // as If-Match (client contracts §8.3). A document is typed into a plain textarea (B12) and lives in
 // this page's state only: never stored, and guarded while unsaved (§11.4).
 
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { components } from "./api/v1";
 import { Form, field, Result, startsNew, Text, unsaved, useSend, useUnsaved, useWrites } from "./forms.tsx";
-import { Id, Ref, Scroll, short, useItem, useList, useReads, usePending } from "./list.tsx";
+import { Id, type Load, Ref, Scroll, short, useItem, useList, useReads, usePending } from "./list.tsx";
 import type { Cluster } from "./machines.tsx";
 import { references, type Spot, spotOfLine, spotOfPath, spotOfReference } from "./position.ts";
 import type { Problem } from "./request.ts";
@@ -166,7 +166,9 @@ export function DraftItem({ id }: { id: string }) {
   }, [item, id, epoch]);
   const [selected, select] = useState<string | undefined>();
   const pending = usePending(item, "the draft");
-  const d = item.kind === "ok" ? item.data : undefined;
+  const last = useRef<{ id: string; data: Draft }>(undefined);
+  last.current = lastGood(last.current, id, item);
+  const d = last.current?.data;
   // A write's answer keeps its ETag as it settles (keepOnDone); the page then reads the draft again.
   const written = useCallback(() => reread((x) => x + 1), []);
   // A switch to another entry, or to a new one, asks first while the editor holds unsaved text.
@@ -182,7 +184,8 @@ export function DraftItem({ id }: { id: string }) {
   return (
     <>
       <h2>Draft {short(id)}{d !== undefined && <> "{d.title}" {d.state}, revision {d.revision}, cluster <Id id={d.cluster} /></>}</h2>
-      {pending ?? (d !== undefined && (
+      {pending}
+      {d !== undefined && (
         <>
           <h3>Entries</h3>
           <ul aria-label="Entries">
@@ -200,7 +203,7 @@ export function DraftItem({ id }: { id: string }) {
           <Status testid="not-rendered">{NOT_RENDERED}</Status>
           {d.state === "open" && <DiscardDraft draft={d} written={written} />}
         </>
-      ))}
+      )}
     </>
   );
 }
@@ -242,27 +245,65 @@ export const EMPTY: Held = { layer: "role", document: "", marks: "", declared: {
 const fromRevision = (r: Revision): Held => ({ layer: r.layer, document: r.document, marks: "", declared: { ...r.declarations.references }, embedded: [...r.declarations.embedded] });
 const same = (a: Held, b: Held) => a.layer === b.layer && a.document === b.document && a.marks === b.marks && JSON.stringify(a.declared) === JSON.stringify(b.declared) && JSON.stringify(a.embedded) === JSON.stringify(b.embedded);
 
-// What the editor holds once a revision is read: the read text, unless the operator typed since
-// the last save. The one read Show their change asks for shows their text: the conflict keeps the
-// operator's aside. Any other read (a reconnect's, during a conflict too) keeps typed text.
-export const afterRead = (held: Held, saved: Held, read: Held, asked: boolean): Held => (asked || same(held, saved) ? read : held);
-
 // Whether the editor holds text not saved: its own, or the operator's text a conflict keeps aside.
 export const holdsUnsaved = (held: Held, saved: Held, mine: Held | undefined) => !same(held, saved) || (mine !== undefined && !same(mine, saved));
 
-// A 412's conflict: the operator's text, the draft revision it was refused at, and whether the
-// operator asked to see their change, after which it follows the draft's revision as read.
-interface Clash {
-  mine: Held;
-  revision?: number;
-  showing?: boolean;
-}
-export const follow = (c: Clash | undefined, revision: number): Clash | undefined => (c?.showing === true ? { ...c, revision } : c);
+// The fragment editor's text and a 412's conflict (W11 "Conflict", B14), changed only by `editor`.
+// `held` is the editor's text, `saved` the entry's text as last read or saved. A conflict is
+// "refused" after the 412, "asked" once Show their change read the draft again, and "theirs" once
+// their text shows. Until theirs shows, `mine` is the editor's text, so nothing typed is lost; then
+// it keeps the operator's text aside. `revision`: the draft revision refused at, once shown the
+// draft's revision as read.
+export interface Clash { mine: Held; phase: "refused" | "asked" | "theirs"; revision?: number }
+export interface Editor { held: Held; saved: Held; conflict?: Clash }
+export type EditorEvent =
+  | { kind: "type"; held: Held } // the operator's edit, Revert to base's too
+  | { kind: "refused" } // a write's 412
+  | { kind: "at"; revision: number } // the 412's own draft read
+  | { kind: "show" } // Show their change
+  | { kind: "draft"; revision: number; changed: boolean } // the page's draft read; changed: this entry has a new revision to read
+  | { kind: "read"; text: Held } // the entry's revision read
+  | { kind: "copy" } // Copy my text into the new revision
+  | { kind: "done"; sent: Held }; // a Save or Remove is done
 
-// Show their change: the conflict keeps the operator's text as typed now, edits after the 412
-// included, before the read replaces the editor's text with theirs. Once theirs shows, the
-// editor holds their text, so a second click keeps the operator's.
-export const shown = (c: Clash | undefined, held: Held): Clash | undefined => (c === undefined || c.showing === true ? c : { ...c, mine: held, showing: true });
+export function editor(s: Editor, e: EditorEvent): Editor {
+  const c = s.conflict;
+  const at = (x: Partial<Clash>, held = s.held): Editor => ({ ...s, held, conflict: { ...c!, ...x } });
+  switch (e.kind) {
+    case "type":
+      return c === undefined || c.phase === "theirs" ? { ...s, held: e.held } : at({ mine: e.held }, e.held);
+    case "refused":
+      return c === undefined ? { ...s, conflict: { mine: s.held, phase: "refused" } } : s;
+    case "at":
+      return c !== undefined && c.revision === undefined ? at({ revision: e.revision }) : s;
+    case "show":
+      return c?.phase === "refused" ? at({ phase: "asked" }) : s;
+    case "draft":
+      if (c === undefined || c.phase === "refused") return s;
+      // Their change left this entry as read: its saved text is theirs.
+      return c.phase === "asked" && !e.changed ? at({ phase: "theirs", revision: e.revision }, s.saved) : at({ revision: e.revision });
+    case "read":
+      // The read Show asked for shows their text; any other replaces only text not typed into.
+      if (c?.phase === "asked") return { saved: e.text, held: e.text, conflict: { ...c, phase: "theirs" } };
+      return { ...s, saved: e.text, held: same(s.held, s.saved) ? e.text : s.held };
+    case "copy":
+      return c === undefined ? s : { held: c.mine, saved: s.saved };
+    case "done":
+      // The write the operator chose is saved: the conflict ends.
+      return { held: s.held, saved: e.sent };
+  }
+}
+
+// Revert to base replaces the editor's text: before their text shows, that is the operator's text
+// the conflict keeps, so it waits until then.
+export const mayRevert = (c: Clash | undefined) => c === undefined || c.phase === "theirs";
+
+// The draft the page shows: the last read with data for this id, so a read again that fails keeps
+// the editor and its unsaved text (W4); the failure shows above it.
+export function lastGood<T>(last: { id: string; data: T } | undefined, id: string, item: Load<T>) {
+  if (item.kind === "ok") return { id, data: item.data };
+  return last?.id === id ? last : undefined;
+}
 
 // The references table's rows: the document's references, then the declarations no reference
 // uses, so an obsolete declaration can be undeclared (rule unused-declaration).
@@ -315,20 +356,14 @@ export function FragmentPane({ draft, entry, written, seeChange }: { draft: Draf
   const writes = useWrites();
   const { client } = useReads();
   const [name, setName] = useState(entry === undefined ? "" : nameOf(entry));
-  // The saved revision, as read; EMPTY for a new entry or a removal.
-  const [saved, setSaved] = useState<Held>(EMPTY);
-  const [held, hold] = useState<Held>(EMPTY);
+  // The saved text is EMPTY for a new entry or a removal.
+  const [{ held, saved, conflict }, act] = useReducer(editor, { held: EMPTY, saved: EMPTY });
+  const hold = (h: Held) => act({ kind: "type", held: h });
   const [note, setNote] = useState<string | undefined>();
-  const [conflict, setConflict] = useState<Clash | undefined>();
   const [w, send] = useSend();
   // What the last save or removal sent: once it is done, that text is saved, also for an entry
   // new in the draft, whose pane reads no revision.
   const sent = useRef<Held>(EMPTY);
-  // The editor's state as last rendered, for a read that answers after it.
-  const now = useRef({ held, saved, conflict });
-  now.current = { held, saved, conflict };
-  // Set by the first Show their change: the next revision read shows their text, once.
-  const asked = useRef(false);
   const text = useRef<HTMLTextAreaElement>(null);
   const marks = useRef<HTMLTextAreaElement>(null);
   const open = draft.state === "open";
@@ -342,29 +377,29 @@ export function FragmentPane({ draft, entry, written, seeChange }: { draft: Draf
     void client.read<Revision>(`/fragment-revisions/${enc(entry.revision)}`).then((r) => {
       if (!live) return;
       if (r.kind !== "ok") return setNote("The entry's revision could not be read.");
-      const h = fromRevision(r.data);
-      const { held: typed, saved: was } = now.current;
-      setSaved(h);
-      hold(afterRead(typed, was, h, asked.current));
-      asked.current = false;
+      act({ kind: "read", text: fromRevision(r.data) });
     });
     return () => void (live = false);
   }, [client, entry?.revision]);
 
-  // Once the operator asked to see their change, the conflict follows the draft as read.
-  useEffect(() => setConflict((c) => follow(c, draft.revision)), [draft.revision]);
+  // Each draft read the page shows, and whether it gives this entry a new revision to read.
+  const readRevision = useRef(entry?.revision);
+  useEffect(() => {
+    const changed = entry?.revision != null && entry.revision !== readRevision.current;
+    readRevision.current = entry?.revision;
+    act({ kind: "draft", revision: draft.revision, changed });
+  }, [draft]);
 
   const o = w?.outcome;
   useEffect(() => {
     if (doneOnce(w) !== undefined) {
-      setSaved(sent.current);
+      act({ kind: "done", sent: sent.current });
       written();
     }
-    if (o?.kind === "refused" && o.status === 412 && conflict === undefined) {
-      const mine = held;
-      setConflict({ mine });
+    if (o?.kind === "refused" && o.status === 412) {
+      act({ kind: "refused" });
       // For the revision shown only: this read's ETag is not kept (§8.3).
-      void client.read<Draft>(`/drafts/${enc(draft.id)}`).then((r) => r.kind === "ok" && setConflict((c) => (c !== undefined && c.revision === undefined ? { ...c, revision: r.data.revision } : c)));
+      void client.read<Draft>(`/drafts/${enc(draft.id)}`).then((r) => r.kind === "ok" && act({ kind: "at", revision: r.data.revision }));
     }
   }, [o]);
 
@@ -380,8 +415,6 @@ export function FragmentPane({ draft, entry, written, seeChange }: { draft: Draf
     setNote(undefined);
     // A Save while the last write is still open sends nothing new, so its text is not the one sent.
     if (startsNew(writes!, w)) sent.current = held;
-    // A Show their change whose read changed no entry of this pane asks for nothing after a Save.
-    asked.current = false;
     send({ method: "PUT", path, ifMatch: m, ingests: true, resource: `/drafts/${draft.id}`, body: { layer: held.layer, document: held.document, marks: lines.length === 0 ? null : lines, declarations }, settled });
   };
   const remove = () => {
@@ -392,6 +425,7 @@ export function FragmentPane({ draft, entry, written, seeChange }: { draft: Draf
     send({ method: "DELETE", path, ifMatch: m, resource: `/drafts/${draft.id}`, body: undefined, settled });
   };
   const revert = async () => {
+    if (!mayRevert(conflict)) return setNote("Not reverted: the conflict keeps your text. Show their change first.");
     if (entry?.head == null) return setNote("No base: this fragment is new in the draft.");
     const f = await client.read<Fragment>(`/fragments/${enc(entry.head)}`);
     if (f.kind !== "ok") return setNote("The fragment's head could not be read.");
@@ -420,9 +454,7 @@ export function FragmentPane({ draft, entry, written, seeChange }: { draft: Draf
   const conflictView = conflict !== undefined && (
     <>
       <Conflict what="draft" revision={conflict.revision ?? draft.revision} onShow={() => {
-        if (now.current.conflict?.showing === true) return seeChange();
-        asked.current = true;
-        setConflict((c) => shown(c, now.current.held));
+        act({ kind: "show" });
         seeChange();
       }} />
       {entry !== undefined && conflict.revision === draft.revision && (
@@ -431,7 +463,7 @@ export function FragmentPane({ draft, entry, written, seeChange }: { draft: Draf
           <label>Your text <textarea readOnly value={conflict.mine.document} rows={8} cols={60} {...NO_ASSIST} /></label>
         </div>
       )}
-      <button type="button" onClick={() => { asked.current = false; hold(conflict.mine); setConflict(undefined); }} disabled={conflict.revision !== draft.revision}>
+      <button type="button" onClick={() => act({ kind: "copy" })} disabled={conflict.revision !== draft.revision}>
         Copy my text into the new revision
       </button>
     </>

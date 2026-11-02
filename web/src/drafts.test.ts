@@ -2,9 +2,9 @@ import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { components } from "./api/v1";
-import { afterRead, change, createdId, doneOnce, EMPTY, FragmentPane, follow, forgetETag, type Held, holdsUnsaved, keepETag, keepOnDone, keptETag, LAYERS, markLine, mayDrop, NOT_RENDERED, rows, shown, where } from "./drafts.tsx";
+import { change, type Clash, createdId, doneOnce, type Editor, type EditorEvent, editor, EMPTY, FragmentPane, forgetETag, type Held, holdsUnsaved, keepETag, keepOnDone, keptETag, LAYERS, lastGood, markLine, mayDrop, mayRevert, NOT_RENDERED, rows, where } from "./drafts.tsx";
 import { leaving, startsNew, unsaved, WritesProvider } from "./forms.tsx";
-import { type Reads, ReadsProvider } from "./list.tsx";
+import { type Load, type Reads, ReadsProvider } from "./list.tsx";
 import { references, spotOfLine, spotOfPath, spotOfReference } from "./position.ts";
 import { ShellContext } from "./shell.tsx";
 import { Write, Writes } from "./write.ts";
@@ -162,17 +162,6 @@ describe("the editor's text is kept until the operator drops it (#339 round 1)",
     expect(ask).toHaveBeenCalledWith("Unsaved text in fragment f of draft drf_1: switching drops it.\nSwitch entry?");
   });
 
-  test("a revision read replaces the text only when nothing was typed since the last save, or a conflict keeps the typed text", () => {
-    const saved = held("a: 1\n");
-    const read = held("a: 2\n");
-    expect(afterRead(saved, saved, read, false)).toBe(read);
-    const typed = held("a: 1\nb: 2\n");
-    // A read the operator did not ask for (a reconnect's, during a conflict too) keeps typed text.
-    expect(afterRead(typed, saved, read, false)).toBe(typed);
-    // The read Show their change asked for shows their text: the conflict keeps the operator's.
-    expect(afterRead(typed, saved, read, true)).toBe(read);
-  });
-
   test("an open conflict keeps the guard, even once the editor shows their text", () => {
     const theirs = held("a: 2\n");
     expect(holdsUnsaved(theirs, theirs, undefined)).toBe(false);
@@ -181,25 +170,81 @@ describe("the editor's text is kept until the operator drops it (#339 round 1)",
     expect(holdsUnsaved(theirs, theirs, theirs)).toBe(false);
   });
 
-  test("a conflict shown follows the draft's revision read after it, a later author's included", () => {
-    const c = { mine: held("m"), revision: 7 };
-    expect(follow(c, 8)).toBe(c);
-    expect(follow({ ...c, showing: true }, 8)).toEqual({ ...c, showing: true, revision: 8 });
-    expect(follow(undefined, 8)).toBeUndefined();
-  });
-
-  test("Show their change keeps the text typed after the 412, not only the text refused, and only the first time", () => {
-    const later = held("m, then more");
-    const first = shown({ mine: held("m"), revision: 7 }, later);
-    expect(first).toEqual({ mine: later, revision: 7, showing: true });
-    // Once their text shows, a second click keeps the operator's text, not theirs.
-    expect(shown(first, held("theirs"))).toBe(first);
-    expect(shown(undefined, later)).toBeUndefined();
-  });
-
   test("the references table lists the document's references, then declarations no reference uses", () => {
     expect(rows("a: !bwref x/one\n", { "x/one": { kind: "string", version: 1 }, old: { kind: "string", version: 1 } })).toEqual(["x/one", "old"]);
     expect(rows("a: 1\n", {})).toEqual([]);
+  });
+});
+
+// The conflict flow's state table (W11 "Conflict", B14): one row per transition. A row named after
+// a review finding keeps that failure covered.
+describe("the editor's text and a 412's conflict, one transition per row", () => {
+  const held = (document: string): Held => ({ ...EMPTY, document });
+  const [A, M, M2, T, T2] = ["a: base\n", "a: mine\n", "a: mine\nb: more\n", "a: theirs\n", "a: later\n"].map(held) as [Held, Held, Held, Held, Held];
+  const refused = (h: Held, revision?: number): Clash => ({ mine: h, phase: "refused", ...(revision !== undefined && { revision }) });
+  const asked = (h: Held, revision = 7): Clash => ({ mine: h, phase: "asked", revision });
+  const theirs = (h: Held, revision = 8): Clash => ({ mine: h, phase: "theirs", revision });
+  const table: [string, Editor, EditorEvent, Editor][] = [
+    ["typing without a conflict changes only the text", { held: A, saved: A }, { kind: "type", held: M }, { held: M, saved: A }],
+    ["a 412 opens a conflict holding the editor's text", { held: M, saved: A }, { kind: "refused" }, { held: M, saved: A, conflict: refused(M) }],
+    ["a second 412 keeps the open conflict", { held: T, saved: T, conflict: theirs(M) }, { kind: "refused" }, { held: T, saved: T, conflict: theirs(M) }],
+    ["the 412's own draft read records the revision refused at", { held: M, saved: A, conflict: refused(M) }, { kind: "at", revision: 7 }, { held: M, saved: A, conflict: refused(M, 7) }],
+    ["a later draft read keeps the revision refused at", { held: M, saved: A, conflict: refused(M, 7) }, { kind: "at", revision: 8 }, { held: M, saved: A, conflict: refused(M, 7) }],
+    ["R2-F2: text typed after the 412 is the operator's text", { held: M, saved: A, conflict: refused(M, 7) }, { kind: "type", held: M2 }, { held: M2, saved: A, conflict: refused(M2, 7) }],
+    ["a draft read before Show their change compares nothing new", { held: M, saved: A, conflict: refused(M, 7) }, { kind: "draft", revision: 8, changed: true }, { held: M, saved: A, conflict: refused(M, 7) }],
+    ["R3-F2: a reconnect's revision read during a 412 keeps the typed text", { held: M, saved: A, conflict: refused(M, 7) }, { kind: "read", text: T }, { held: M, saved: T, conflict: refused(M, 7) }],
+    ["Show their change asks for their text", { held: M, saved: A, conflict: refused(M, 7) }, { kind: "show" }, { held: M, saved: A, conflict: asked(M) }],
+    ["a second Show while asked asks nothing more", { held: M, saved: A, conflict: asked(M) }, { kind: "show" }, { held: M, saved: A, conflict: asked(M) }],
+    ["boundary, R4-1: text typed while the asked read is pending is the operator's text", { held: M, saved: A, conflict: asked(M) }, { kind: "type", held: M2 }, { held: M2, saved: A, conflict: asked(M2) }],
+    ["boundary, R4-1: Show with no change to this fragment shows its stored text, the operator's aside", { held: M, saved: A, conflict: asked(M) }, { kind: "draft", revision: 8, changed: false }, { held: A, saved: A, conflict: theirs(M) }],
+    ["Show with this fragment changed waits for its revision read", { held: M, saved: A, conflict: asked(M) }, { kind: "draft", revision: 8, changed: true }, { held: M, saved: A, conflict: asked(M, 8) }],
+    ["the asked revision read shows their text, the operator's aside", { held: M2, saved: A, conflict: asked(M2, 8) }, { kind: "read", text: T }, { held: T, saved: T, conflict: theirs(M2) }],
+    ["R3-F1: a Show once their text shows keeps the operator's text", { held: T, saved: T, conflict: theirs(M) }, { kind: "show" }, { held: T, saved: T, conflict: theirs(M) }],
+    ["text typed once their text shows leaves the operator's text aside", { held: T, saved: T, conflict: theirs(M) }, { kind: "type", held: T2 }, { held: T2, saved: T, conflict: theirs(M) }],
+    ["R1-F5: once shown, the conflict follows the draft revision as read", { held: T, saved: T, conflict: theirs(M) }, { kind: "draft", revision: 9, changed: true }, { held: T, saved: T, conflict: theirs(M, 9) }],
+    ["boundary, R4-1: a reconnect's revision read after the show keeps text typed since", { held: M2, saved: T, conflict: theirs(M) }, { kind: "read", text: T2 }, { held: M2, saved: T2, conflict: theirs(M) }],
+    ["a revision read after the show, with nothing typed, shows their latest text", { held: T, saved: T, conflict: theirs(M) }, { kind: "read", text: T2 }, { held: T2, saved: T2, conflict: theirs(M) }],
+    ["boundary: Copy my text puts the operator's text back and ends the conflict", { held: T2, saved: T, conflict: theirs(M) }, { kind: "copy" }, { held: M, saved: T }],
+    ["Copy my text without a conflict changes nothing", { held: M, saved: A }, { kind: "copy" }, { held: M, saved: A }],
+    ["R1-F2: a revision read keeps text typed since the last save", { held: M, saved: A }, { kind: "read", text: T }, { held: M, saved: T }],
+    ["a revision read replaces text nothing was typed into", { held: A, saved: A }, { kind: "read", text: T }, { held: T, saved: T }],
+    ["R2-F1: a done write marks the text it sent saved, not the text typed since", { held: M2, saved: A }, { kind: "done", sent: M }, { held: M2, saved: M }],
+    ["a done write ends the conflict: the operator saved the text chosen", { held: T2, saved: T, conflict: theirs(M) }, { kind: "done", sent: T2 }, { held: T2, saved: T2 }],
+  ];
+  test.each(table)("%s", (_, from, e, to) => {
+    expect(editor(from, e)).toEqual(to);
+  });
+
+  test("Revert to base waits until their text shows, while the editor's text is the operator's kept text", () => {
+    expect(mayRevert(undefined)).toBe(true);
+    expect(mayRevert(refused(M, 7))).toBe(false);
+    expect(mayRevert(asked(M))).toBe(false);
+    expect(mayRevert(theirs(M))).toBe(true);
+  });
+
+  const run = (s: Editor, events: EditorEvent[]) => events.reduce(editor, s);
+  test("R4-1: after a Show that changed no text of this fragment, a later read keeps what was typed since", () => {
+    const s = run({ held: M, saved: A }, [{ kind: "refused" }, { kind: "at", revision: 7 }, { kind: "show" }, { kind: "draft", revision: 8, changed: false }, { kind: "type", held: M2 }, { kind: "draft", revision: 9, changed: true }, { kind: "read", text: T2 }]);
+    expect(s).toEqual({ held: M2, saved: T2, conflict: theirs(M, 9) });
+  });
+
+  test("R4-1: text typed while the asked read is pending stays the operator's text", () => {
+    const s = run({ held: M, saved: A }, [{ kind: "refused" }, { kind: "show" }, { kind: "type", held: M2 }, { kind: "draft", revision: 8, changed: true }, { kind: "read", text: T }]);
+    expect(s.held).toBe(T);
+    expect(s.conflict?.mine).toBe(M2);
+    expect(holdsUnsaved(s.held, s.saved, s.conflict?.mine)).toBe(true);
+  });
+});
+
+describe("a draft read again without data (#339 round 4)", () => {
+  const ok = (revision: number): Load<{ revision: number }> => ({ kind: "ok", data: { revision } });
+  const failed: Load<{ revision: number }> = { kind: "unavailable", status: 503, problem: null };
+
+  test("R4-2: keeps the last draft read for the same id, so the editor and its unsaved text stay", () => {
+    expect(lastGood(undefined, "drf_1", ok(1))).toEqual({ id: "drf_1", data: { revision: 1 } });
+    expect(lastGood({ id: "drf_1", data: { revision: 1 } }, "drf_1", failed)).toEqual({ id: "drf_1", data: { revision: 1 } });
+    expect(lastGood({ id: "drf_1", data: { revision: 1 } }, "drf_2", failed)).toBeUndefined();
+    expect(lastGood({ id: "drf_1", data: { revision: 1 } }, "drf_2", { kind: "loading" })).toBeUndefined();
   });
 });
 
