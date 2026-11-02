@@ -49,14 +49,27 @@ export const keepOnDone = (draft: string | ((o: Outcome) => string | undefined),
   if (id !== undefined) keepETag(id, o.etag, w.epoch);
 };
 
+// The draft pages shown now, per draft: each one's `written`, which reads that draft again.
+const shownPages = new Map<string, Set<() => void>>();
+export function watchWrites(draft: string, written: () => void): () => void {
+  const pages = shownPages.get(draft) ?? new Set();
+  shownPages.set(draft, pages.add(written));
+  return () => {
+    pages.delete(written);
+    if (pages.size === 0 && shownPages.get(draft) === pages) shownPages.delete(draft);
+  };
+}
+
 // A fragment write's settled hook: a done answer keeps its ETag and reads the draft again, also when
 // the operator moved to another entry while it was in flight. Otherwise the entry shows its old
 // revision under the new ETag, and a second Save overwrites the first unseen (ginsys/bronzeward#517 H3).
-export const settledFragment = (draft: string, epoch: () => string | undefined, written: () => void) => {
+// The page that reads it again is the one shown when the write settles, not the one that sent it:
+// the operator may have left and opened the draft again meanwhile (ginsys/bronzeward#534 C1).
+export const settledFragment = (draft: string, epoch: () => string | undefined) => {
   const keep = keepOnDone(draft, epoch);
   return (o: Outcome, w: Write) => {
     keep(o, w);
-    if (o.kind === "done") written();
+    if (o.kind === "done") for (const written of [...(shownPages.get(draft) ?? [])]) written();
   };
 };
 
@@ -208,6 +221,7 @@ export function DraftItem({ id }: { id: string }) {
   useEffect(() => {
     if (item.kind === "ok") setUnshown(false);
   }, [item]);
+  useEffect(() => watchWrites(id, written), [id, written]);
   const sources = d?.entries.filter(isSource) ?? [];
   const entry = paneEntry(sources, selected, claimed);
   const current = entry === undefined ? selected : keyOf(entry);
@@ -242,7 +256,7 @@ export function DraftItem({ id }: { id: string }) {
           </ul>
           {d.state === "open" && <p><Action label="Add fragment" needs={["author"]} onClick={() => pick("fragment:")} /></p>}
           {selected !== undefined && selected.startsWith("fragment:") && (
-            <FragmentPane key={pane} draft={d} entry={entry} written={written} seeChange={seeChange} claim={claim} shown={!unshown} />
+            <FragmentPane key={pane} draft={d} entry={entry} seeChange={seeChange} claim={claim} shown={!unshown} />
           )}
           <Status testid="not-rendered">{NOT_RENDERED}</Status>
           {d.state === "open" && <DiscardDraft draft={d} written={written} seeChange={seeChange} />}
@@ -298,6 +312,11 @@ export interface Held {
 export const EMPTY: Held = { layer: "role", document: "", marks: "", declared: {}, embedded: [] };
 const fromRevision = (r: Revision): Held => ({ layer: r.layer, document: r.document, marks: "", declared: { ...r.declarations.references }, embedded: [...r.declarations.embedded] });
 const same = (a: Held, b: Held) => a.layer === b.layer && a.document === b.document && a.marks === b.marks && JSON.stringify(a.declared) === JSON.stringify(b.declared) && JSON.stringify(a.embedded) === JSON.stringify(b.embedded);
+// Whether two texts store the same revision: a revision keeps no marks, and its declarations may
+// come back in another key order.
+const sorted = (v: unknown): unknown =>
+  Array.isArray(v) ? v.map(sorted) : typeof v === "object" && v !== null ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, x]) => [k, sorted(x)])) : v;
+const stores = (a: Held, b: Held) => JSON.stringify(sorted({ ...a, marks: "" })) === JSON.stringify(sorted({ ...b, marks: "" }));
 
 // Whether the editor holds text not saved: its own, or the operator's text a conflict keeps aside.
 export const holdsUnsaved = (held: Held, saved: Held, mine: Held | undefined) => !same(held, saved) || (mine !== undefined && !same(mine, saved));
@@ -317,8 +336,13 @@ export const holdsUnsaved = (held: Held, saved: Held, mine: Held | undefined) =>
 // `reading`. `sent.removes`: the write was a Remove, which saves
 // the removal, not the text (H8). `reading`: the entry's newest revision is not read yet, its read
 // pending or failed, whatever the conflict's phase was when it started, so Show their change waits
-// for it too; only a read with text clears it.
-export interface Clash { mine: Held; phase: "refused" | "asked" | "theirs"; revision?: number; awaits?: true }
+// for it too; only a read with text clears it. `again`: while asked, Show their change was clicked
+// again and its draft read has not answered, so a revision read that answers first shows their text
+// with Copy waiting (ginsys/bronzeward#534 N1).
+// Without a 412, a conflict opens when a read shows another author's text or removal while the
+// editor holds unsaved text, or once a Discard's Show their change adopted that read's ETag
+// (ginsys/bronzeward#534 C1-C3): the typed text is kept aside, never saved over theirs unseen.
+export interface Clash { mine: Held; phase: "refused" | "asked" | "theirs"; revision?: number; awaits?: true; again?: true }
 export interface Editor { held: Held; saved: Held; conflict?: Clash; sent?: { text: Held; whileTheirs: boolean; removes?: true }; writes?: number; note?: string | undefined; version?: number; reading?: true }
 export type EditorEvent =
   | { kind: "type"; held: Held } // the operator's edit
@@ -328,7 +352,8 @@ export type EditorEvent =
   // The page's draft read. changed: this entry has a new revision to read; removed: the entry is a removal.
   | { kind: "draft"; revision: number; changed: boolean; removed?: true }
   | { kind: "reading"; on: boolean } // the entry's revision read starts, or is dropped for another
-  | { kind: "read"; text: Held; since: number } // the entry's revision read, started after `since` done writes
+  // The entry's revision read, started after `since` done writes, for the draft revision that named it.
+  | { kind: "read"; text: Held; since: number; revision?: number }
   | { kind: "copy" } // Copy my text into the new revision
   | { kind: "send"; removes?: true } // a Save or Remove sends the editor's text
   | { kind: "done" } // that write is done
@@ -360,9 +385,21 @@ function step(s: Editor, e: EditorEvent): Editor {
     case "show":
       // Shown again once their text shows: Copy waits until the draft read, and the revision read it
       // starts, answer, so a newer revision cannot replace the copied text (PR review).
-      return c?.phase === "refused" ? at({ phase: "asked" }) : c?.phase === "theirs" ? at({ awaits: true }) : s;
+      return c?.phase === "refused" ? at({ phase: "asked" }) : c?.phase === "asked" ? at({ again: true }) : c?.phase === "theirs" ? at({ awaits: true }) : s;
     case "draft":
-      if (c === undefined || c.phase === "refused" || e.revision < (c.revision ?? 0)) return s;
+      // Another author removed this entry, which no 412 announced (C3): the removal shows, and text
+      // typed since the last read or save is kept aside. The pane's own done Remove saved EMPTY,
+      // and keeps the text it shows (H8).
+      if (c === undefined) {
+        if (e.removed !== true || same(s.saved, EMPTY)) return s;
+        return { ...s, held: EMPTY, saved: EMPTY, ...(!same(s.held, s.saved) && { conflict: { mine: s.held, phase: "theirs" as const, revision: e.revision } }) };
+      }
+      if (c.phase === "refused" || e.revision < (c.revision ?? 0)) return s;
+      // The draft read a repeated Show started has answered (N1).
+      if (c.again === true) {
+        const { again: _again, ...answered } = c;
+        return step({ ...s, conflict: answered }, e);
+      }
       // Their change removed this entry: their text is the removal, which no revision read shows (H7).
       if (c.phase === "asked" && e.removed === true) {
         const { awaits: _awaited, ...shown } = c;
@@ -388,10 +425,17 @@ function step(s: Editor, e: EditorEvent): Editor {
     case "read": {
       const { reading: _was, ...idle } = s;
       if (e.since !== writes) return idle;
-      // The read Show asked for shows their text; any other replaces only text not typed into.
+      // The read Show asked for shows their text; any other replaces only text not typed into. One
+      // that answers before Show's draft read leaves Copy waiting for that read (N1): it may name a
+      // newer revision.
       if (c?.phase === "asked") {
-        const { awaits: _awaited, ...shown } = c;
-        return { ...idle, saved: e.text, held: e.text, conflict: { ...shown, phase: "theirs" } };
+        const { awaits, again, ...shown } = c;
+        return { ...idle, saved: e.text, held: e.text, conflict: { ...shown, phase: "theirs", ...((awaits !== true || again === true) && { awaits: true as const }) } };
+      }
+      // Without a conflict, another author's text read while the editor holds typed text shows, and
+      // the typed text is kept aside (C1, C2). The pane's own done Save reads back the text it sent.
+      if (c === undefined && !same(s.held, s.saved) && !stores(e.text, s.saved)) {
+        return { ...idle, saved: e.text, held: e.text, conflict: { mine: s.held, phase: "theirs", ...(e.revision !== undefined && { revision: e.revision }) } };
       }
       // Once theirs shows, a read never ends a repeated Show's wait: only its draft read does.
       return { ...idle, saved: e.text, held: same(s.held, s.saved) ? e.text : s.held };
@@ -404,7 +448,8 @@ function step(s: Editor, e: EditorEvent): Editor {
     case "done": {
       const sent = s.sent?.text ?? s.held;
       // The text the operator chose is saved: a Save sent while theirs showed, or the kept text itself.
-      const ends = c === undefined || s.sent?.whileTheirs === true || same(c.mine, sent);
+      // A Remove saves no text, so the operator's kept text stays for Copy my text (N2).
+      const ends = c === undefined || (s.sent?.removes !== true && (s.sent?.whileTheirs === true || same(c.mine, sent)));
       // A done Remove saves the removal: the text still shown is not stored anywhere (H8).
       return { ...(ends ? ended : s), saved: s.sent?.removes === true ? EMPTY : sent, writes: writes + 1 };
     }
@@ -511,7 +556,7 @@ function WriteResult({ w, done, conflict, goTo, marks = "" }: { w: Write | undef
 // The fragment entry (W4): name, layer, the B12 textarea, marks, and the references list with each
 // `!bwref` and its declaration. Save is PUT, remove DELETE; Revert to base restores the base text
 // for saving (no route drops an entry).
-export function FragmentPane({ draft, entry, written, seeChange, claim = () => {}, shown = true }: { draft: Draft; entry: Source | undefined; written: () => void; seeChange: () => void; claim?: (name: string) => void; shown?: boolean }) {
+export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown = true }: { draft: Draft; entry: Source | undefined; seeChange: () => void; claim?: (name: string) => void; shown?: boolean }) {
   const writes = useWrites();
   // Every read settles through the shell: a refusal of the credentials ends the page (H11).
   const read = useSettled();
@@ -554,7 +599,7 @@ export function FragmentPane({ draft, entry, written, seeChange, claim = () => {
         return setNote("The entry's revision could not be read.");
       }
       setLoaded(revision);
-      act({ kind: "read", text: fromRevision(r.data), since: done });
+      act({ kind: "read", text: fromRevision(r.data), since: done, revision: draft.revision });
     });
     return () => {
       live = false;
@@ -585,7 +630,7 @@ export function FragmentPane({ draft, entry, written, seeChange, claim = () => {
 
   const path = `/drafts/${enc(draft.id)}/fragments/${enc(name)}`;
   const ifMatch = () => keptETag(draft.id, writes?.client?.currentEpoch);
-  const settled = settledFragment(draft.id, () => writes?.client?.currentEpoch, written);
+  const settled = settledFragment(draft.id, () => writes?.client?.currentEpoch);
   const save = () => {
     const m = ifMatch();
     if (name === "") return setNote("Not sent: name the fragment first.");
