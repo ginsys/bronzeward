@@ -418,7 +418,8 @@ function step(s: Editor, e: EditorEvent): Editor {
       if (c === undefined) {
         // A read held back for the open write now stands for this draft revision: it changed only
         // another entry (ginsys/bronzeward#551 item 3).
-        if (s.sent?.open === true && s.sent.later !== undefined && !e.changed && e.removed !== true) return { ...s, sent: { ...s.sent, later: { revision: e.revision } } };
+        // A removal already held back also stands for it (PR review).
+        if (s.sent?.open === true && s.sent.later !== undefined && !e.changed && (e.removed !== true || same(s.saved, EMPTY))) return { ...s, sent: { ...s.sent, later: { revision: e.revision } } };
         if (e.removed !== true || same(s.saved, EMPTY)) return s;
         if (s.sent?.open === true) return { ...s, saved: EMPTY, sent: { ...s.sent, later: { revision: e.revision } } };
         return { ...s, held: EMPTY, saved: EMPTY, ...(!same(s.held, s.saved) && { conflict: { mine: s.held, phase: "theirs" as const, revision: e.revision } }) };
@@ -439,10 +440,11 @@ function step(s: Editor, e: EditorEvent): Editor {
       if (c.phase === "asked" && (e.changed || s.reading === true)) return at({ revision: e.revision, awaits: true });
       // Once their text shows, another author's removal shows too, as C3 does without a conflict, and
       // ends a repeated Show's wait. Text typed since is the operator's text now (H6). The pane's own
-      // done Remove saved EMPTY and keeps its text (H8); an open write's answer settles it first
-      // (ginsys/bronzeward#551 item 1).
-      if (c.phase === "theirs" && e.removed === true && !same(s.saved, EMPTY) && s.sent?.open !== true) {
+      // done Remove saved EMPTY and keeps its text (H8). An open write's answer settles it first
+      // (ginsys/bronzeward#551 item 1): the removal is held back, and shows if that write fails (PR review).
+      if (c.phase === "theirs" && e.removed === true && !same(s.saved, EMPTY)) {
         const { awaits: _awaited, ...shown } = c;
+        if (s.sent?.open === true) return { ...s, saved: EMPTY, conflict: { ...shown, revision: e.revision }, sent: { ...s.sent, later: { revision: e.revision } } };
         return { ...s, held: EMPTY, saved: EMPTY, conflict: { ...kept(shown), revision: e.revision } };
       }
       // Shown again: the draft read it started ends the wait, since a newer draft read discards an
