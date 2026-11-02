@@ -146,6 +146,10 @@ describe("the console's parts (#364)", () => {
     expect(stamp("2026-11-01T08:30:00Z")).toBe("2026-11-01T08:30:00.000Z");
     expect(stamp("2026-11-01T09:30+01:00")).toBe("2026-11-01T08:30:00.000Z");
     expect(stamp("2028-02-29T00:00:00Z")).toBe("2028-02-29T00:00:00.000Z");
+    // Years 0 to 99 are not shifted to 1900 to 1999, and the century rule holds.
+    expect(stamp("0000-02-29T08:30:00Z")).toBe("0000-02-29T08:30:00.000Z");
+    expect(stamp("2000-02-29T08:30:00Z")).toBe("2000-02-29T08:30:00.000Z");
+    expect(stamp("2100-02-29T08:30:00Z")).toBeUndefined();
     for (const bad of ["2026-02-30T08:30:00Z", "2026-02-29T08:30:00Z", "2026-04-31T08:30:00Z", "2026-13-01T08:30:00Z", "2026-00-10T08:30:00Z", "2026-11-00T08:30:00Z", "2026-11-01T24:00:00Z", "2026-11-01T08:60:00Z", "2026-11-01T08:30:60Z", "2026-11-01T08:30:00+24:00", "2026-11-01T08:30:00", "yesterday"]) {
       expect(stamp(bad), bad).toBeUndefined();
     }

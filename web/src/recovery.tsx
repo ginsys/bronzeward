@@ -170,7 +170,8 @@ export const stamp = (v: string): string | undefined => {
   const m = TIME.exec(v);
   if (m === null) return undefined;
   const [year, month, day, hour, minute, second = 0, zoneHour = 0, zoneMinute = 0] = m.slice(1).map((p) => (p === undefined ? undefined : Number(p)));
-  const days = new Date(Date.UTC(year!, month!, 0)).getUTCDate();
+  const leap = (year! % 4 === 0 && year! % 100 !== 0) || year! % 400 === 0;
+  const days = month === 2 ? (leap ? 29 : 28) : [4, 6, 9, 11].includes(month!) ? 30 : 31;
   const exists = month! >= 1 && month! <= 12 && day! >= 1 && day! <= days && hour! < 24 && minute! < 60 && second < 60 && zoneHour < 24 && zoneMinute < 60;
   return exists && !Number.isNaN(Date.parse(v)) ? new Date(v).toISOString() : undefined;
 };
