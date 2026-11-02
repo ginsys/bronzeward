@@ -18,7 +18,13 @@ import (
 // right-to-left override (U+202E) in the query, as -v prints it.
 var hostileProxy string
 
+// helperMain is set on Linux by pager_linux_test.go.
+var helperMain func()
+
 func TestMain(m *testing.M) {
+	if os.Getenv("BW_PAGER_HELPER") != "" && helperMain != nil {
+		helperMain() // a process the pager's signal test starts; it does not return
+	}
 	tls := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	tls.Config.ErrorLog = log.New(io.Discard, "", 0) // the handshakes of a client that refuses its certificate
 	tls.StartTLS()

@@ -10,12 +10,14 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/signal"
 	"regexp"
 	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/ginsys/bronzeward/internal/client"
 )
@@ -139,7 +141,25 @@ func main() {
 			os.Exit(1)
 		}
 	}()
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+	code := run(os.Args[1:], os.Stdout, os.Stderr)
+	endByCause()
+	os.Exit(code)
+}
+
+// endedBy is the signal that ended a command (report sets it): the process is to end by it, so that
+// a parent sees the signal and not an exit code.
+var endedBy syscall.Signal
+
+// endByCause ends the process by endedBy, if a command was ended by a signal, after the command has
+// restored what it changed. The default action of the signal then applies.
+func endByCause() {
+	if endedBy == 0 {
+		return
+	}
+	signal.Reset(endedBy)
+	_ = syscall.Kill(os.Getpid(), endedBy)
+	// The signal is delivered at once or within moments; the exit code only backs a refusal.
+	time.Sleep(5 * time.Second)
 }
 
 // harden runs before any token is read (client-contracts.md §11.2 item 5). The traceback level
@@ -192,9 +212,13 @@ func report(err error, stdout, stderr io.Writer) int {
 	var refused client.RefusedRepeat
 	var declined notConfirmed
 	var unknown *client.Unknown
+	var signalled endedBySignal
 	switch {
 	case err == nil:
 		return 0
+	case errors.As(err, &signalled):
+		endedBy = signalled.sig
+		return 128 + int(signalled.sig)
 	case errors.Is(err, flag.ErrHelp):
 		fmt.Fprintln(stdout, usage)
 		return 0

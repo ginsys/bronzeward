@@ -542,24 +542,31 @@ var expiresAt = regexp.MustCompile(`expires \d{4}-\d\d-\d\d \d\d:\d\d:\d\d \S+?\
 
 // journey runs the journey task T3's import part (operator-experience.md §13) as a script through
 // the CLI: a draft, an import with review, the review on a terminal marking the unmarked secret,
-// the continuation and the publication. The handover's assignment, adopt plan and approval follow
-// with the plan commands (#258). Its probe "Is the secret in the
+// the continuation, the machine's assignment and the publication. The import leaves nothing to
+// assign (the draft holds the import base only), so a fragment is saved for the assignment to name;
+// the adopt plan and approval follow with the plan commands (#258). Its probe "Is the secret in the
 // draft?" is answered by the release's provenance, which names the marked path as a reference. The
 // output is kept in testdata/journeys/t3.txt, except the review's, which stays in memory.
 func (e *importEnv) journey(t *testing.T) {
 	var draft, ing, rel string
 	var out strings.Builder
+	labels := filepath.Join(e.dir, "worker-labels.yaml")
+	if err := os.WriteFile(labels, []byte("machine:\n  nodeLabels:\n    tier: workers\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	for _, step := range [][]string{
 		{"draft", "create", "--cluster", "{cluster}", "--title", "import worker"},
 		{"import", "start", "--machine", "{machine}", "--draft", "{draft}", "--review"},
 		{"import", "review", "{ingestion}"},
 		{"import", "continue", "{ingestion}"},
+		{"fragment", "set", "worker-labels", "--draft", "{draft}", "--layer", "role", "--file", "worker-labels.yaml"},
+		{"assignment", "set", "{machine}", "--draft", "{draft}", "--fragment", "role=worker-labels"},
 		{"publish", "{draft}"},
 		{"release", "provenance", "{release}", "{machine}"},
 	} {
 		args := slices.Clone(step)
 		for i, a := range args {
-			args[i] = strings.NewReplacer("{draft}", draft, "{ingestion}", ing, "{release}", rel, "{machine}", e.s.machine, "{cluster}", e.s.cluster).Replace(a)
+			args[i] = strings.NewReplacer("worker-labels.yaml", labels, "{draft}", draft, "{ingestion}", ing, "{release}", rel, "{machine}", e.s.machine, "{cluster}", e.s.cluster).Replace(a)
 		}
 		fmt.Fprintf(&out, "$ bronzewardctl --context human %s\n", strings.Join(step, " "))
 		if step[1] == "review" {
@@ -577,6 +584,10 @@ func (e *importEnv) journey(t *testing.T) {
 			rel = regexp.MustCompile(`rel_[a-z2-7]{26}`).FindString(r.out)
 		}
 		fmt.Fprintf(&out, "%s%s[exit %d]\n\n", r.out, r.err, r.code)
+	}
+	// #350 lists the assignment between the continuation and the publication.
+	if i, j := strings.Index(out.String(), "Assignment saved"), strings.Index(out.String(), "Publication succeeded"); i < 0 || j < i {
+		t.Errorf("the journey has no assignment before its publication:\n%s", out.String())
 	}
 	if !strings.Contains(out.String(), ", "+unmarkedPath+" ") {
 		t.Errorf("the provenance does not name %s as a reference", unmarkedPath)
