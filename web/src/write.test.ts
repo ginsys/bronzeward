@@ -956,3 +956,61 @@ describe("a sign-in that ends stops every other write of its client at once", ()
     expect(sent.filter((s) => s.method === "POST").every((s) => s.headers["Authorization"] === "Bearer SYNTH-token")).toBe(true);
   });
 });
+
+describe("the recovery entry's exception (§8.4 item 3, REC-04 (a))", () => {
+  const entry = () => new Write({ method: "POST", path: "/recovery/entries", body: { reason: "SYNTH" }, resource: "/recovery", entry: true });
+  const drop = () => new TypeError("Failed to fetch");
+  const observe = (p: ReturnType<typeof page>, epoch: string) => (p.client as unknown as { observeEpoch(r: Response): boolean }).observeEpoch(recovery(epoch));
+  // The entry's answer names the epoch its commit minted.
+  const minted = (replayed = true) => new Response("{}", { status: 201, headers: { "Content-Type": "application/json", "Bronzeward-Epoch": "e2", ...(replayed ? { "Idempotent-Replayed": "true" } : {}) } });
+
+  test("sends no Bronzeward-Expected-Epoch and reads no epoch before its first send", async () => {
+    const p = page([created({ epoch: "e2" })]);
+    const w = entry();
+    expect(await p.writes.submit(w)).toMatchObject({ kind: "done", status: 201 });
+    expect(p.sent.map((s) => `${s.method} ${s.path}`)).toEqual(["POST /recovery/entries"]);
+    expect(p.sent[0]!.headers["Bronzeward-Expected-Epoch"]).toBeUndefined();
+    expect(p.sent[0]!.headers["Idempotency-Key"]).toBe(w.key);
+  });
+
+  test.each([
+    ["the 201 was dropped", drop],
+    ["the server answered 500", () => problem(500, "internal-error")],
+  ])("REC-04: %s, so the repeat has the same key, no epoch header and no confirming read", async (_, first) => {
+    const p = page([first(), created({ epoch: "e2" }, true)]);
+    const w = entry();
+    expect(await p.writes.submit(w)).toMatchObject({ kind: "done", status: 201, replayed: true });
+    expect(p.sent.map((s) => s.path)).toEqual(["/recovery/entries", "/recovery/entries"]);
+    expect(p.sent.map((s) => s.headers["Idempotency-Key"])).toEqual([w.key, w.key]);
+    expect(p.sent.every((s) => s.headers["Bronzeward-Expected-Epoch"] === undefined)).toBe(true);
+    expect(p.waits).toEqual([1000]);
+  });
+
+  test("the epoch change its own commit causes does not set it aside, in flight or unknown", async () => {
+    const p = page([drop(), () => (observe(p, "e2"), p.writes.setAside(EPOCH_CHANGED_ASIDE), minted())]);
+    expect(await p.writes.submit(entry())).toMatchObject({ kind: "done", replayed: true });
+    expect(p.sent.map((s) => s.path)).toEqual(["/recovery/entries", "/recovery/entries"]);
+    // Unknown after every attempt: the page moved to the new epoch, and [Repeat exactly] stays offered.
+    const q = page([drop(), drop(), drop(), drop(), minted()]);
+    const w = entry();
+    expect((await q.writes.submit(w)).kind).toBe("unknown");
+    observe(q, "e2");
+    q.writes.setAside(EPOCH_CHANGED_ASIDE);
+    expect(w.outcome?.kind).toBe("unknown");
+    expect(q.writes.repeatable(w)).toBe(true);
+    q.sent.length = 0;
+    expect(await q.writes.submit(w)).toMatchObject({ kind: "done", replayed: true });
+    expect(q.sent.map((s) => s.path)).toEqual(["/recovery/entries"]);
+  });
+
+  test("another sign-in still sets it aside before a repeat", async () => {
+    const p = page([() => (p.signIn("https://idp.invalid SYNTH-sub-2"), drop())]);
+    expect(await p.writes.submit(entry())).toEqual({ kind: "set-aside", why: SIGN_IN_CHANGED, ambiguous: true, problem: null });
+    expect(p.sent).toHaveLength(1);
+  });
+
+  test("REC-02: a 409 conflict carrying an earlier record is the entry's refusal, which the form reads, not a set-aside", async () => {
+    const p = page([problem(409, "conflict", { request: "r1", epoch: "e2" })]);
+    expect(await p.writes.submit(entry())).toMatchObject({ kind: "refused", status: 409, problem: { epoch: "e2", request: "r1" } });
+  });
+});

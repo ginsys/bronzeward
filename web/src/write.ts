@@ -3,7 +3,7 @@
 // repeat. Its answer is never discarded as stale: it settles the write's own record even after the
 // page moved on. Pending writes live in this page's memory only (§8.4 item 5). A fragment write's
 // in-progress 409 is repeated within the wait bound (§8.4 item 2, AMB-02; #339). The recovery
-// entry's exception (§8.4 item 3) is not served here: no form of this layer sends that route.
+// entry's exception (§8.4 item 3) is the `entry` flag of the spec (#364).
 
 import { type Attempt, type Client, type End, type Ending, NOT_JSON, NOT_SENT, preEntry, type Problem, WRITE_TRANSPORT_FAILURE } from "./request.ts";
 
@@ -18,6 +18,10 @@ export interface WriteSpec {
   resource: string;
   // A fragment write, which ingests: a repeat's in-progress 409 waits for the first request.
   ingests?: boolean;
+  // The recovery entry (§8.4 item 3): its own commit mints the new epoch, so it is sent without
+  // Bronzeward-Expected-Epoch and with no epoch read, repeated under its key with the principal
+  // checked and not the epoch, and never set aside by an epoch change.
+  entry?: boolean;
   // Called with each outcome the write settles on, a [Repeat exactly]'s included, whether or not
   // the view that sent it is still shown: a draft's ETag is kept from it (§8.3, #339).
   settled?: (o: Outcome, w: Write) => void;
@@ -242,13 +246,16 @@ export class Writes {
 
   // [Repeat exactly]: only while this page holds the request, for the same sign-in and epoch.
   repeatable(w: Write): boolean {
-    return w.outcome?.kind === "unknown" && this.principal() === w.principal && this.client?.writesEnded !== true && this.client?.currentEpoch === w.epoch;
+    return w.outcome?.kind === "unknown" && this.principal() === w.principal && this.client?.writesEnded !== true && (w.spec.entry === true || this.client?.currentEpoch === w.epoch);
   }
 
   // §8.5 item 2 and journeys §8: a new epoch or another sign-in sets every open write aside. One in
   // flight is set aside before its next repeat; its answer still in flight still settles it.
   setAside(why: string): void {
     for (const w of this.all) {
+      // The recovery entry crosses the epoch change its own commit makes (§8.4 item 3); another
+      // sign-in still sets it aside.
+      if (w.spec.entry === true && why === EPOCH_CHANGED_ASIDE) continue;
       if (w.outcome === undefined) w.aside ??= why;
       else if (w.outcome.kind === "unknown") w.outcome = { kind: "set-aside", why, ambiguous: true, problem: w.outcome.problem };
     }
@@ -268,19 +275,24 @@ export class Writes {
     const body = JSON.stringify(w.spec.body);
     // A larger body is refused here, before any send and before the read of the epoch (§8.1).
     if (body !== undefined && new TextEncoder().encode(body).length > MAX_BODY) return { kind: "not-done", why: TOO_LARGE, problem: null };
-    // A [Repeat exactly] is a repeat: it is checked before it is sent.
-    const again = w.epoch !== undefined;
+    // A [Repeat exactly] is a repeat: it is checked before it is sent. The recovery entry has no
+    // reference epoch, so its first run is told by the principal it recorded.
+    const entry = w.spec.entry === true;
+    const again = entry ? w.principal !== "" : w.epoch !== undefined;
     if (!again) {
       w.principal = who;
-      // The last epoch seen before the first send, else one GET /recovery (§8.4 item 3).
-      w.epoch = client.currentEpoch ?? (await this.confirm(client, end));
-      if (end.e !== undefined) return { kind: "not-done", why: SIGN_IN_REFUSED, problem: end.e.problem };
-      if (end.pre !== undefined) return { kind: "not-done", why: RECOVERY_START, problem: end.pre };
-      const gone = this.gone(w, client);
-      if (gone !== undefined) return { kind: "not-done", why: gone, problem: null };
-      if (w.epoch === undefined) return { kind: "not-done", why: NO_EPOCH, problem: null };
+      if (!entry) {
+        // The last epoch seen before the first send, else one GET /recovery (§8.4 item 3).
+        w.epoch = client.currentEpoch ?? (await this.confirm(client, end));
+        if (end.e !== undefined) return { kind: "not-done", why: SIGN_IN_REFUSED, problem: end.e.problem };
+        if (end.pre !== undefined) return { kind: "not-done", why: RECOVERY_START, problem: end.pre };
+        const gone = this.gone(w, client);
+        if (gone !== undefined) return { kind: "not-done", why: gone, problem: null };
+        if (w.epoch === undefined) return { kind: "not-done", why: NO_EPOCH, problem: null };
+      }
     }
-    const headers: Record<string, string> = { "Content-Type": "application/json", "Idempotency-Key": w.key, "Bronzeward-Expected-Epoch": w.epoch! };
+    const headers: Record<string, string> = { "Content-Type": "application/json", "Idempotency-Key": w.key };
+    if (!entry) headers["Bronzeward-Expected-Epoch"] = w.epoch!;
     if (w.spec.ifMatch !== undefined) headers["If-Match"] = w.spec.ifMatch;
     // The last answer, as status and code, and its problem; undefined and null while the last
     // attempt got none. A [Repeat exactly] starts from the problem of the answer it repeats.
@@ -392,7 +404,8 @@ export class Writes {
       if (a.status === 403 && code === "forbidden" && p?.["plan"] === undefined) return early(refused);
       // An earlier epoch's record of this key: that request committed, and its effect may be in the
       // current state (§8.4 item 7). It is set aside as unknown, never as not saved.
-      if (a.status === 409 && code === "conflict" && p?.["request"] !== undefined && p["epoch"] !== undefined) {
+      // The entry's own such refusal is the second reading of REC-02, which its form shows.
+      if (!entry && a.status === 409 && code === "conflict" && p?.["request"] !== undefined && p["epoch"] !== undefined) {
         w.ambiguous = true;
         return aside(EARLIER_EPOCH);
       }
@@ -442,6 +455,8 @@ export class Writes {
     if (w.aside !== undefined) return w.aside;
     const before = this.gone(w, client);
     if (before !== undefined) return before;
+    // The entry checks the principal and not the epoch (§8.4 item 3).
+    if (w.spec.entry === true) return undefined;
     const now = await this.confirm(client, end);
     if (w.aside !== undefined) return w.aside;
     if (end.e !== undefined) return SIGN_IN_REFUSED;
