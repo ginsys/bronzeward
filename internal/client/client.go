@@ -36,7 +36,15 @@ type Client struct {
 
 	// crossed: an answer showed a new epoch, so the context's kept ETags are dropped (§8.5 item 1).
 	changed, newEpoch, recovery, crossed bool
+
+	// moves counts the answers that showed another epoch than the one before, a failed answer
+	// included, so a change that a later answer set back is still seen (§8.5).
+	moves int
 }
+
+// EpochMoves is the number of times an answer showed another epoch than the one before. A command
+// that builds one output from several reads compares it before and after them.
+func (c *Client) EpochMoves() int { return c.moves }
 
 // Response is a successful answer.
 type Response struct {
@@ -249,6 +257,9 @@ func (c *Client) observe(route string, r *http.Response) {
 		}
 		c.Context.LastEpoch, c.changed, c.newEpoch = e, true, c.Context.LastEpoch != ""
 		c.crossed = c.crossed || c.newEpoch
+		if c.newEpoch {
+			c.moves++
+		}
 	}
 	c.recovery = c.recovery || r.Header.Get("Bronzeward-Recovery-Mode") == "true"
 	if d := r.Header.Get("Deprecation"); d != "" && !c.warned[route] {

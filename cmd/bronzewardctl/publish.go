@@ -115,7 +115,7 @@ func nextSteps(c *client.Client, release string) ([]string, error) {
 		machines = "1 machine"
 	}
 	lines, replaced := []string{""}, 0
-	first := r.Header.Get("Bronzeward-Epoch")
+	first, moves := r.Header.Get("Bronzeward-Epoch"), c.EpochMoves()
 	for _, m := range rel.Machines {
 		r, err := c.Get("/machines/" + url.PathEscape(m.Machine))
 		var x apitypes.MachineBody
@@ -124,17 +124,22 @@ func nextSteps(c *client.Client, release string) ([]string, error) {
 		}
 		// The machine answer's own epoch is compared, not the client's last one: a read that showed a
 		// new epoch has already refreshed it (client-contracts.md section 8.5). A failed read has no
-		// answer to ask, so the last epoch seen stands for it. Machines read before are of the earlier
-		// snapshot, so none is described.
+		// answer to ask, and its refresh can set the epoch back, so the count of moves stands for it.
+		// Machines read before are of the earlier snapshot, so none is described.
 		now := c.Context.LastEpoch
 		if r != nil && r.Header.Get("Bronzeward-Epoch") != "" {
 			now = r.Header.Get("Bronzeward-Epoch")
 		}
-		if first != "" && now != "" && now != first {
+		moved := first != "" && now != "" && now != first || c.EpochMoves() != moves
+		if moved {
+			change := sf("The epoch changed from %s to %s", client.ShellWord(first), client.ShellWord(now))
+			if now == first {
+				change = sf("The epoch changed and changed back from %s", client.ShellWord(first))
+			}
 			return []string{
 				sf("Publication succeeded: release %s was published for %s. Nothing has been sent to any machine.", pr(rel.Id), machines),
-				sf("  The epoch changed from %s to %s while the machines were read, so no next step is shown. Read them again with: release show %s",
-					client.ShellWord(first), client.ShellWord(now), client.ShellWord(rel.Id)),
+				sf("  %s while the machines were read, so no next step is shown. Read them again with: release show %s",
+					change, client.ShellWord(rel.Id)),
 				"Review a machine's rendered configuration: bronzewardctl release review " + pr(rel.Id) + " <machine>"}, nil
 		}
 		switch {
