@@ -26,6 +26,8 @@ type importFake struct {
 	result     string
 	problem    string
 	onIngested func() // runs when an import start is accepted
+	replayed   bool   // a continuation or takeover answers as a replay
+	pagesGone  bool   // the event pages are refused
 }
 
 const ingAccepted = `{"ingestion":"ing_BWSYNTH","operation":"op_BWSYNTH-ing"}`
@@ -63,6 +65,9 @@ func (f *importFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, ingAccepted)
 	case route == "POST /ingestions/ing_BWSYNTH/continuations", route == "POST /ingestions/ing_BWSYNTH/takeovers":
 		record()
+		if f.replayed {
+			w.Header().Set("Idempotent-Replayed", "true")
+		}
 		w.WriteHeader(http.StatusAccepted)
 		fmt.Fprint(w, ingAccepted)
 	case route == "POST /ingestions/ing_BWSYNTH/abandonments":
@@ -79,6 +84,10 @@ func (f *importFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, "id: ep_BWSYNTH-1:%d\nevent: %s\ndata: %s\n\n", i+1, e[0], e[1])
 		}
 		fmt.Fprint(w, ": keep-alive\n\n")
+	case path == "/operations/op_BWSYNTH-ing/events" && f.pagesGone:
+		w.Header().Set("Content-Type", "application/problem+json")
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprint(w, `{"type":"urn:bronzeward:problem:forbidden","title":"BWSYNTH","status":403}`)
 	case path == "/operations/op_BWSYNTH-ing/events":
 		var items []string
 		for i, e := range f.events {
@@ -197,4 +206,32 @@ func TestImportLifecycle(t *testing.T) {
 		`POST /ingestions/ing_BWSYNTH/abandonments if-match= body={}`)
 	step("status of an ended import offers a new start", []string{"import", "status", "ing_BWSYNTH"}, 0,
 		"Ended: abandoned. Import again:\n  bronzewardctl import start --machine 'mch_BWSYNTH' --draft 'drf_BWSYNTH'", "")
+
+	// A replayed continuation or takeover started no run: the claim's generation already counts the
+	// run the earlier request started, which the wait follows.
+	f.replayed = true
+	f.set("held", 2, time.Hour, "running", "", "",
+		ev("paused", `{"type":"paused","generation":1}`), ev("continued", `{"type":"continued","generation":2}`), ev("resume-failed", `{"type":"resume-failed","code":"dependency-unavailable"}`))
+	step("a replayed continuation follows the run it started", []string{"import", "continue", "ing_BWSYNTH"}, 1,
+		"", "was not applied: its staged input could not be decrypted (resume-failed, dependency-unavailable)", `POST /ingestions/ing_BWSYNTH/continuations if-match= body={}`)
+	f.set("paused", 3, -time.Minute, "running", "", "", ev("taken-over", `{"type":"taken-over","generation":3}`), ev("paused", `{"type":"paused","generation":3}`))
+	step("a replayed takeover already paused ends at its pause", []string{"import", "takeover", "ing_BWSYNTH"}, 0, "Paused for review (generation 3,", "",
+		`POST /ingestions/ing_BWSYNTH/takeovers if-match= body={}`)
+	f.replayed = false
+
+	// Text from the server cannot start a line of its own.
+	f.set("held", 2, time.Hour, "running", "", "",
+		ev("continued", `{"type":"continued","generation":3}`), ev("resume-failed", `{"type":"resume-failed","code":"x\nbronzewardctl: BWSYNTH forged"}`))
+	step("an event's code is escaped", []string{"import", "continue", "ing_BWSYNTH"}, 1, "", `resume-failed: x\x0abronzewardctl: BWSYNTH forged`,
+		`POST /ingestions/ing_BWSYNTH/continuations if-match= body={}`)
+	f.set("ended\nBWSYNTH forged", 2, time.Hour, "failed", "", "")
+	step("a state is escaped", []string{"import", "status", "ing_BWSYNTH"}, 0, `Ended: ended\x0aBWSYNTH forged. Import again:`, "")
+
+	// A terminal operation decides the exit even when its last events cannot be read.
+	f.pagesGone = true
+	f.set("abandoned", 2, time.Hour, "failed", "", `{"type":"urn:bronzeward:problem:precondition-failed","title":"BWSYNTH","status":412}`,
+		ev("continued", `{"type":"continued","generation":3}`))
+	step("a failed drain keeps the failed import's exit 4", []string{"import", "continue", "ing_BWSYNTH"}, 4, "",
+		"the operation's last events were not shown", `POST /ingestions/ing_BWSYNTH/continuations if-match= body={}`)
+	f.pagesGone = false
 }

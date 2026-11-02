@@ -148,10 +148,10 @@ func (e *env) importStart(args []string) error {
 		return err
 	}, w, func(_ *client.Client, r *client.Response) ([]string, error) {
 		err := json.Unmarshal(r.Body, &a)
-		lines := []string{fmt.Sprintf("Import %s started (operation %s). Staging: %s. Review: %s.", a.Ingestion, a.Operation, staging,
+		lines := []string{sf("Import %s started (operation %s). Staging: %s. Review: %s.", a.Ingestion, a.Operation, staging,
 			map[bool]string{true: "requested", false: "not requested"}[review])}
 		if noWait {
-			lines = append(lines, "Follow it with: bronzewardctl import status "+a.Ingestion)
+			lines = append(lines, "Follow it with: bronzewardctl import status "+pr(a.Ingestion))
 		}
 		return lines, err
 	})
@@ -183,6 +183,7 @@ func (e *env) importResume(verb string, args []string) error {
 	var c *client.Client
 	var a accepted
 	var before int
+	var replayed bool
 	done := map[string]string{"continue": "Continued", "takeover": "Took over"}[verb]
 	err = e.writeAfter(func(cl *client.Client) error {
 		c = cl
@@ -195,17 +196,27 @@ func (e *env) importResume(verb string, args []string) error {
 		Body: []byte("{}"), Repeat: rp, HumanOnly: true, Check: "import status " + client.ShellWord(ing), Read: ingestionRead(ing)},
 		func(_ *client.Client, r *client.Response) ([]string, error) {
 			err := json.Unmarshal(r.Body, &a)
-			lines := []string{fmt.Sprintf("%s import %s (operation %s).", done, a.Ingestion, a.Operation)}
+			replayed = r.Header.Get("Idempotent-Replayed") == "true"
+			lines := []string{sf("%s import %s (operation %s).", done, a.Ingestion, a.Operation)}
 			if noWait {
-				lines = append(lines, "Follow it with: bronzewardctl import status "+a.Ingestion)
+				lines = append(lines, "Follow it with: bronzewardctl import status "+pr(a.Ingestion))
 			}
 			return lines, err
 		})
 	if err != nil || noWait {
 		return err
 	}
+	if replayed {
+		// A replayed answer started no run: the earlier request with this key did, at a generation
+		// the read before this send may already show. The wait follows the claim's latest run.
+		before = latestRun
+	}
 	return e.follow(c, a, before)
 }
+
+// latestRun, as follow's before, follows the run at the claim's owner generation when follow
+// starts: the run a replayed continuation or takeover started, or one that took the claim since.
+const latestRun = -1
 
 // importAbandon abandons an import (POST /ingestions/{id}/abandonments, author, human only): its
 // staged input is cleared and its running operation fails ingestion-abandoned.
@@ -224,7 +235,7 @@ func (e *env) importAbandon(args []string) error {
 		func(_ *client.Client, r *client.Response) ([]string, error) {
 			var b apitypes.IngestionBody
 			err := json.Unmarshal(r.Body, &b)
-			return []string{fmt.Sprintf("Import %s abandoned: its staged input is cleared, and nothing of it reaches draft %s.", b.Id, b.Draft)}, err
+			return []string{sf("Import %s abandoned: its staged input is cleared, and nothing of it reaches draft %s.", b.Id, b.Draft)}, err
 		})
 }
 
@@ -241,17 +252,17 @@ func (e *env) importStatus(args []string) error {
 	}
 	if len(pos) == 0 {
 		return list(e, l, "/ingestions", values(f), nil, "INGESTION\tSTATE\tLEASE\tMACHINE\tDRAFT\tOPERATION", "", func(w *tabwriter.Writer, b *apitypes.IngestionBody) {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", b.Id, b.State, lease(b), or(b.Machine, "-"), b.Draft, or(b.Operation, "-"))
+			tf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", b.Id, b.State, lease(b), or(b.Machine, "-"), b.Draft, or(b.Operation, "-"))
 		})
 	}
 	if len(pos) > 1 || state != "" || machine != "" || l != (listing{}) {
 		return usageError{errors.New("import status takes one ingestion, or the list's --state, --machine and paging flags")}
 	}
 	return show(e, "/ingestions/"+url.PathEscape(pos[0]), func(w *tabwriter.Writer, b *apitypes.IngestionBody) {
-		fmt.Fprintf(w, "Import %s\tstate %s\t%s, %s staging\n", b.Id, b.State, b.Kind, b.Mode)
-		fmt.Fprintf(w, "Machine\t%s\tdraft %s, operation %s\n", or(b.Machine, "-"), b.Draft, or(b.Operation, "-"))
-		fmt.Fprintf(w, "Owner generation\t%d\treview %s\n", b.OwnerGeneration, or(b.Review, "not requested"))
-		fmt.Fprintf(w, "Lease\t%s\texpires %s\n", lease(b), when(b.ExpiresAt))
+		tf(w, "Import %s\tstate %s\t%s, %s staging\n", b.Id, b.State, b.Kind, b.Mode)
+		tf(w, "Machine\t%s\tdraft %s, operation %s\n", or(b.Machine, "-"), b.Draft, or(b.Operation, "-"))
+		tf(w, "Owner generation\t%d\treview %s\n", b.OwnerGeneration, or(b.Review, "not requested"))
+		tf(w, "Lease\t%s\texpires %s\n", lease(b), when(b.ExpiresAt))
 		for _, l := range allowed(b) {
 			fmt.Fprintln(w, l)
 		}
@@ -271,7 +282,7 @@ func lease(b *apitypes.IngestionBody) string {
 
 // allowed is what an ingestion's state allows, as commands to run.
 func allowed(b *apitypes.IngestionBody) []string {
-	cmd := func(verb string) string { return "  bronzewardctl import " + verb + " " + b.Id }
+	cmd := func(verb string) string { return "  bronzewardctl import " + verb + " " + pr(b.Id) }
 	switch b.State {
 	case "paused":
 		return []string{"Paused for review. Continue it, or abandon it:", cmd("continue"), cmd("abandon")}
@@ -281,9 +292,9 @@ func allowed(b *apitypes.IngestionBody) []string {
 		}
 		return []string{"Its run holds the claim. Once the lease lapses it can be taken over; it can be abandoned now:", cmd("abandon")}
 	case "released":
-		return []string{"Released into draft " + b.Draft + ". Nothing is left to do."}
+		return []string{"Released into draft " + pr(b.Draft) + ". Nothing is left to do."}
 	}
-	return []string{"Ended: " + b.State + ". Import again:", restart(b)}
+	return []string{"Ended: " + pr(b.State) + ". Import again:", restart(b)}
 }
 
 // restart is the command that imports the ingestion's machine into its draft again.
@@ -306,6 +317,9 @@ func (e *env) follow(c *client.Client, a accepted, before int) (err error) {
 	if err != nil {
 		return err
 	}
+	if before == latestRun {
+		before = b.OwnerGeneration - 1
+	}
 	gen, ours, settled, code := before, before == 0, "", ""
 	next := b.LeaseUntil.Add(leaseMargin)
 	o, err := c.Watch(a.Operation, client.Watch{
@@ -320,9 +334,9 @@ func (e *env) follow(c *client.Client, a accepted, before int) (err error) {
 				note = fmt.Sprintf(" (generation %d)", d.Generation)
 			}
 			if d.Code != "" {
-				note += ": " + d.Code
+				note += ": " + pr(d.Code)
 			}
-			fmt.Fprintf(e.err, "  %s%s\n", ev.Type, note)
+			tf(e.err, "  %s%s\n", ev.Type, note)
 			switch {
 			case (ev.Type == "continued" || ev.Type == "taken-over") && d.Generation > gen:
 				ours, gen = true, d.Generation
@@ -349,15 +363,19 @@ func (e *env) follow(c *client.Client, a accepted, before int) (err error) {
 			return (b.State == "held" || b.State == "resumed") && time.Now().After(b.LeaseUntil), nil
 		},
 	})
-	if err != nil {
+	if o == nil {
 		return err
+	}
+	// A terminal operation decides the exit; a failed read of the events after it is reported beside.
+	if err != nil {
+		fmt.Fprintf(e.err, "bronzewardctl: %s; the operation's last events were not shown\n", client.Shown(err))
 	}
 	switch {
 	case client.Terminal(o.State):
 		return e.ended(c, b, o)
 	case settled == "paused":
-		return e.say(fmt.Sprintf("Paused for review (generation %d, expires %s).", gen, when(b.ExpiresAt)),
-			"Continue it, or abandon it:", "  bronzewardctl import continue "+b.Id, "  bronzewardctl import abandon "+b.Id)
+		return e.say(append([]string{sf("Paused for review (generation %d, expires %s).", gen, when(b.ExpiresAt)),
+			"Continue it, or abandon it:"}, remedies(b.Id, "continue", "abandon")...)...)
 	case settled == "resume-failed":
 		return &client.Blocked{Err: fmt.Errorf("%s: import %s was not applied: its staged input could not be decrypted (resume-failed, %s). "+
 			"The claim stays held until its lease lapses at %s; then take it over, or abandon it now:",
@@ -372,7 +390,7 @@ func (e *env) follow(c *client.Client, a accepted, before int) (err error) {
 func remedies(id string, verbs ...string) []string {
 	lines := make([]string, len(verbs))
 	for i, v := range verbs {
-		lines[i] = "  bronzewardctl import " + v + " " + id
+		lines[i] = "  bronzewardctl import " + v + " " + pr(id)
 	}
 	return lines
 }
@@ -406,7 +424,7 @@ func (e *env) ended(c *client.Client, b *apitypes.IngestionBody, o *apitypes.Ope
 	if o.Result == nil || err != nil || res.Draft == "" {
 		return fmt.Errorf("%s: import operation %s succeeded without naming its draft revision: %s", c.Context.Where(), o.Id, compact(o.Result))
 	}
-	if err := e.say(fmt.Sprintf("Import %s released into draft %s (revision %d), import base %s.", b.Id, res.Draft, res.DraftRevision, res.ImportBaseRevision)); err != nil {
+	if err := e.say(sf("Import %s released into draft %s (revision %d), import base %s.", b.Id, res.Draft, res.DraftRevision, res.ImportBaseRevision)); err != nil {
 		return err
 	}
 	r, err := c.Get("/drafts/" + url.PathEscape(res.Draft))

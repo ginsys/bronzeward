@@ -79,8 +79,18 @@ func (c *Client) Watch(op string, w Watch) (*apitypes.OperationBody, error) {
 	w.halt = &halt{}
 	// steps counts the events shown: an attempt that showed none is a failure. A clear is not
 	// counted, so a stream whose events never match its epoch, cleared on every attempt, backs off.
-	steps, shows := 0, w.Show
+	steps, shows, clears := 0, w.Show, w.Clear
 	w.Show = func(e Event) { steps++; shows(e) }
+	// What Until answered held for the events now cleared, the drain's own clears included: it is
+	// asked again. An error it returned stands.
+	w.Clear = func() {
+		if w.halt.err == nil {
+			w.halt.done = false
+		}
+		if clears != nil {
+			clears()
+		}
+	}
 	var last string // the ID of the last event shown
 	pages, delay := false, time.Second
 	for {
