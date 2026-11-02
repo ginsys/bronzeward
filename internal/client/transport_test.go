@@ -45,7 +45,7 @@ func TestVerboseProxyNoticeIsEscaped(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The transport's Proxy callback is called as it is for a request; the target host holds a C1
-	// control, which a request built by http.NewRequest would refuse.
+	// control, and the callback is called directly so that no network is used.
 	req := &http.Request{URL: &url.URL{Scheme: "https", Host: "bronzeward\u0085.example.invalid"}}
 	if _, err := hc.Transport.(*http.Transport).Proxy(req); err != nil {
 		t.Fatal(err)
