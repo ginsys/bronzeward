@@ -37,6 +37,7 @@ type importFake struct {
 	// lapseOnOp lapses the lease at the first read of the operation, so no clock decides the order.
 	moveAfterOp, opReads int
 	lapseOnOp, noHeader  bool // noHeader leaves the epoch off every answer except the event streams
+	emptyOnMove          bool // the operation has no event at the second epoch
 	ingReads             int  // the reads of the claim
 	streams              int  // the event streams opened
 }
@@ -45,6 +46,15 @@ const ingAccepted = `{"ingestion":"ing_BWSYNTH","operation":"op_BWSYNTH-ing"}`
 
 // nothing, as a step's wanted standard output, wants it empty.
 const nothing = "\x00nothing"
+
+// shownEvents are the events the operation has at epoch: none at the second epoch when emptyOnMove
+// is set, as after a restore to a history without them.
+func (f *importFake) shownEvents(epoch string) [][2]string {
+	if f.emptyOnMove && epoch == "ep_BWSYNTH-2" {
+		return nil
+	}
+	return f.events
+}
 
 func (f *importFake) ingestion() string {
 	// A review needs encrypted staging, so a transient import has none.
@@ -68,7 +78,7 @@ func (f *importFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if path == "/operations/op_BWSYNTH-ing" {
 		f.opReads++
-		if f.lapseOnOp && f.opReads == 1 {
+		if f.lapseOnOp && f.opReads == f.moveAfterOp {
 			f.claim = "held"
 		}
 	}
@@ -116,7 +126,7 @@ func (f *importFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case path == "/operations/op_BWSYNTH-ing/events" && r.Header.Get("Accept") == "text/event-stream" && !f.noStream:
 		w.Header().Set("Content-Type", "text/event-stream")
 		f.streams++
-		events, cut := f.events, f.cut > 0
+		events, cut := f.shownEvents(epoch), f.cut > 0
 		if cut {
 			events, f.cut = events[:f.cut], 0
 		}
@@ -132,13 +142,13 @@ func (f *importFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"type":"urn:bronzeward:problem:forbidden","title":"BWSYNTH","status":403}`)
 	case path == "/operations/op_BWSYNTH-ing/events":
 		var items []string
-		for i, e := range f.events {
+		for i, e := range f.shownEvents(epoch) {
 			items = append(items, fmt.Sprintf(`{"id":"%s:%d","at":"2026-11-01T06:00:00Z","type":%q,"data":%s}`, epoch, i+1, e[0], e[1]))
 		}
 		fmt.Fprintf(w, `{"items":[%s]}`, strings.Join(items, ","))
 	case path == "/operations/op_BWSYNTH-ing":
 		fmt.Fprintf(w, `{"id":"op_BWSYNTH-ing","kind":"ingest","state":%q,"subject":{"draft":"drf_BWSYNTH","draftRevision":1},`+
-			`"result":%s,"error":%s,"createdAt":"2026-11-01T06:00:00Z","epoch":%q,"lastEvent":%d}`, f.state, orNull(f.result), orNull(f.problem), epoch, len(f.events))
+			`"result":%s,"error":%s,"createdAt":"2026-11-01T06:00:00Z","epoch":%q,"lastEvent":%d}`, f.state, orNull(f.result), orNull(f.problem), epoch, len(f.shownEvents(epoch)))
 	default:
 		f.draftFake.ServeHTTP(w, r)
 	}
@@ -192,6 +202,30 @@ func TestImportWaitIgnoresReadsOfAnotherEpoch(t *testing.T) {
 	// does not decide. The watch shows the events again from a second stream before it ends.
 	if streams != 2 {
 		t.Errorf("%d event streams were opened; want 2: the first answer of the question rests on reads of the new epoch", streams)
+	}
+}
+
+// TestImportWaitEndsAfterARestoreToNoEvents: the server answers with JSON pages, and a restore leaves
+// the operation with no event. Nothing then replaces the events shown, so the watch clears them when
+// it reads the operation of the new epoch, and the wait ends on the lapsed lease instead of
+// refusing it for ever (client-contracts.md section 8.5).
+func TestImportWaitEndsAfterARestoreToNoEvents(t *testing.T) {
+	f := &importFake{draftFake: &draftFake{rev: 1, state: "open"}}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	leaseMargin = 0
+	t.Cleanup(func() { leaseMargin = 10 * time.Second })
+	f.set("pending", 1, -time.Hour, "running", "", "", ev("continued", `{"type":"continued","generation":2}`))
+	f.mu.Lock()
+	// The watch reads the operation once before it shows the first event from the pages, so the
+	// restore comes at its second read.
+	f.noStream, f.moveAfterOp, f.lapseOnOp, f.emptyOnMove = true, 2, true, true
+	f.mu.Unlock()
+	var o, e bytes.Buffer
+	code := run([]string{"import", "continue", "ing_BWSYNTH", "-o", "json"}, &o, &e)
+	if code != 3 || o.Len() != 0 || !strings.Contains(e.String(), "the outcome is unknown") {
+		t.Errorf("exit %d, stdout %q, stderr %q; want 3, nothing and the unknown outcome", code, o.String(), e.String())
 	}
 }
 

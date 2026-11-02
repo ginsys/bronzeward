@@ -137,6 +137,13 @@ func (c *Client) Watch(op string, w Watch) (*apitypes.OperationBody, error) {
 			delay = min(2*delay, 30*time.Second)
 			continue
 		}
+		// Events of another epoch than the operation read's are of a restored installation, and the
+		// operation can have no event to replace them: they are cleared even when Until does not stop,
+		// so what Until kept from them does not hold the watch (client-contracts.md section 8.5).
+		if epoch != "" && last != "" && epochOf(last) != epoch {
+			c.cleared(w, "the installation was restored or entered recovery mode")
+			last = ""
+		}
 		if w.stop() {
 			if w.halt.err != nil {
 				return nil, w.halt.err

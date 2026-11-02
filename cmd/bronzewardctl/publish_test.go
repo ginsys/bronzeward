@@ -30,6 +30,8 @@ type publishFake struct {
 	// goneEpoch, when not empty, makes mch_b answer 404 under that epoch, as the release's last machine.
 	goneEpoch string
 	goneMoved bool
+	// goneBack makes GET /server answer the first epoch again after that 404: the refresh sets the epoch back.
+	goneBack bool
 }
 
 const (
@@ -43,6 +45,7 @@ func (f *publishFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1")
 	f.mu.Lock()
 	state, first, bare, pagesRefused, machineEpoch, goneEpoch, goneMoved := f.state, f.first, f.bare, f.pagesRefused, f.machineEpoch, f.goneEpoch, f.goneMoved
+	goneBack := f.goneBack
 	desiredA, desiredB := `"rel_BWSYNTH"`, `"rel_BWSYNTH"`
 	if f.replaced {
 		desiredA, desiredB = `"rel_BWSYNTH-new"`, `null`
@@ -97,7 +100,11 @@ func (f *publishFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case path == "/machines/mch_a":
 		fmt.Fprintf(w, `{"id":"mch_a","desired":%s,"applied":{"release":"rel_BWSYNTH-old","source":"operation"}}`, desiredA)
 	case path == "/server" && goneMoved:
-		w.Header().Set("Bronzeward-Epoch", goneEpoch)
+		if goneBack {
+			w.Header().Set("Bronzeward-Epoch", "ep_BWSYNTH-1")
+		} else {
+			w.Header().Set("Bronzeward-Epoch", goneEpoch)
+		}
 		fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":2,"startMode":"normal"}`)
 	case path == "/machines/mch_b" && goneEpoch != "":
 		f.mu.Lock()
@@ -231,5 +238,16 @@ func TestPublication(t *testing.T) {
 	step("an epoch change shown by a failed machine read shows no next step", pub, 0,
 		"Publication succeeded: release rel_BWSYNTH was published for 2 machines. Nothing has been sent to any machine.\n"+
 			"  The epoch changed from 'ep_BWSYNTH-1' to 'ep_BWSYNTH-2' while the machines were read, so no next step is shown. Read them again with: release show 'rel_BWSYNTH'\n",
+		"", "plan an", "hand it over", "is now Desired", "cannot be read")
+
+	// The failed read shows the new epoch and the refresh after it answers the first one again: the
+	// client's last epoch equals the release's, and only the moves count shows the change.
+	f.mu.Lock()
+	f.goneMoved, f.goneBack = false, true
+	f.mu.Unlock()
+	step("draft show before the flapping publish", []string{"draft", "show", "drf_BWSYNTH"}, 0, "drf_BWSYNTH", "")
+	step("an epoch set back after a failed machine read shows no next step", pub, 0,
+		"Publication succeeded: release rel_BWSYNTH was published for 2 machines. Nothing has been sent to any machine.\n"+
+			"  The epoch changed and changed back from 'ep_BWSYNTH-1' while the machines were read, so no next step is shown. Read them again with: release show 'rel_BWSYNTH'\n",
 		"", "plan an", "hand it over", "is now Desired", "cannot be read")
 }
