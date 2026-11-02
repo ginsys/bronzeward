@@ -231,6 +231,12 @@ func TestImportLifecycle(t *testing.T) {
 		ev("paused", `{"type":"paused","generation":1}`), ev("continued", `{"type":"continued","generation":2}`), ev("resume-failed", `{"type":"resume-failed","code":"dependency-unavailable"}`))
 	step("a replayed continuation follows the run it started", []string{"import", "continue", "ing_BWSYNTH"}, 1,
 		"", "was not applied: its staged input could not be decrypted (resume-failed, dependency-unavailable)", `POST /ingestions/ing_BWSYNTH/continuations if-match= body={}`)
+	// Its lease lapsed since: the backlog is shown before the lease is read, so the recorded
+	// resume-failed decides the exit, not the lapsed lease.
+	f.set("held", 2, -time.Minute, "running", "", "",
+		ev("paused", `{"type":"paused","generation":1}`), ev("continued", `{"type":"continued","generation":2}`), ev("resume-failed", `{"type":"resume-failed","code":"dependency-unavailable"}`))
+	step("a replayed continuation whose lease lapsed since still ends at its resume-failed", []string{"import", "continue", "ing_BWSYNTH"}, 1,
+		"", "was not applied: its staged input could not be decrypted (resume-failed, dependency-unavailable)", `POST /ingestions/ing_BWSYNTH/continuations if-match= body={}`)
 	f.set("paused", 3, -time.Minute, "running", "", "", ev("taken-over", `{"type":"taken-over","generation":3}`), ev("paused", `{"type":"paused","generation":3}`))
 	step("a replayed takeover already paused ends at its pause", []string{"import", "takeover", "ing_BWSYNTH"}, 0, "Paused for review (generation 3,", "",
 		`POST /ingestions/ing_BWSYNTH/takeovers if-match= body={}`)
