@@ -63,8 +63,8 @@ practice tasks, not as a first contact with the clients.
 
 Setup times on the fixture host, in seconds, from the first timed run: `session start` 159 (before
 the session), t1 3, t3 24, t4 281, t5 17 and `t5 collide` 16, t6 20, t7 8, t8 34, t9 200 and
-`t9 disconnect` 71, t2 87, t10 1, t11 437. That is about 20 minutes of setup in a session. Plan a
-pause of about 7 minutes before T11.
+`t9 disconnect` 60 plus the rest of the apply, t2 87, t10 1, t11 437. That is about 20 minutes
+of setup in a session. Plan a pause of about 7 minutes before T11.
 
 Between `session start` and the end of the t4 setup, change no tracked file in the checkout: no
 commit and no edit. S2's steps in the t4 setup check that the checkout is the commit that the
@@ -168,7 +168,15 @@ facilitator only. Setup `tN` means `fixtures/participants/session tN`.
 
 ### T9: follow the apply
 
-- Role: viewer. Setup: `t9`, then `t9 disconnect` while the participant follows the apply.
+- Role: viewer. Setup: `t9`, then `t9 disconnect` right after it, while the participant follows
+  the apply. `t9 disconnect` stops A for 60 s and starts it again, so that the participant's event
+  stream ends and the client must resume it. Its own reader then checks that a stream resumed
+  with `Last-Event-ID` follows the apply to completion, with no event lost or repeated. That
+  check covers the server only. The CLI has `operation show` but no `operation watch`, and the web
+  interface has no operation timeline, so no client resumes a stream yet: that half waits for
+  ginsys/bronzeward#354 (CLI watch) and ginsys/bronzeward#359 (web timeline). Until then, a
+  participant can follow the apply only with repeated `operation show`, and T9's measures do not
+  cover a resumed stream.
 - Prompt: "The approved change is being applied. Follow it until it finishes, and tell me when
   it finished."
 - Done when: the completion is reported with its time.

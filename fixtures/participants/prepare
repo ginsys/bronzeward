@@ -8,7 +8,8 @@
 #                           (bw-team: blue), listed in the workers profile, published by h-publisher
 #   prepare t6-draft        h-author's saved, unpublished draft for T6: bw-team changed to green and
 #                           an empty label bw-note, the empty-looking field of T7
-#   prepare t7-publish      that draft published by h-publisher, unless it is published already
+#   prepare t7-publish      that draft published by h-publisher, unless it is published already; the
+#                           worker's review shows S2's bw-s2 redacted and bw-note empty
 #   prepare links linksplit|linkjoin   A's, B's and C's links to the worker
 #   prepare applied         the apply T9 followed completed: Applied is Desired, from an operation
 #   prepare drift-closed    T10's drift closed; a scope still frozen is unfrozen by h-approver
@@ -83,6 +84,18 @@ a_started_after_entry() {
     WHERE i.recovery_mode") || return 1
   [ -n "$entered" ] && [ "$(date -u -d "$started" +%s)" -gt "${entered%.*}" ]
 }
+# t7_review: the review of the worker's Desired, as T7's participant reads it: S2's label bw-s2
+# with its value redacted, and T6's label bw-note with an empty value, each on a line of the
+# rendered configuration.
+t7_review() {
+  local rel
+  rel=$(sql "SELECT desired FROM machine_state WHERE machine = '$machine_w'") && [ -n "$rel" ] || return 1
+  fresh h-author
+  answers 200 - GET "/api/v1/releases/$rel/machines/$machine_w/review" "$tok" || return 1
+  jq -e --arg q "'" '[.configuration | split("\n")[] | sub("^ +"; "")] as $ls
+    | ($ls | any(test("^bw-s2: [\"\($q)]?<redacted:[^>]+>[\"\($q)]?$")))
+      and ($ls | any(IN("bw-note: \"\"", "bw-note: \($q)\($q)")))' "$EV/last.body" >/dev/null
+}
 # applied_desired: the worker's Applied is its Desired, and an operation applied it.
 applied_desired() {
   same "$(sql "SELECT (applied_release = desired)::text || ' ' || applied_source FROM machine_state WHERE machine = '$machine_w'")" \
@@ -111,6 +124,7 @@ case $step in
       check "$ref" "T6's draft is published already" \
         same "$(sql "SELECT count(*) FROM draft WHERE title = 'participants t6' AND state = 'published'")" 1
     fi
+    check "$ref" "the worker's review shows bw-s2 redacted and bw-note empty" t7_review
     ;;
   links)
     case ${2:-} in linksplit | linkjoin) ;; *) die "usage: prepare links linksplit|linkjoin" ;; esac

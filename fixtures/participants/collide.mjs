@@ -37,9 +37,15 @@ const { remote } = require("webdriverio");
 const api = `http://127.0.0.1:${port}/api/v1`;
 const fragment = "participants-labels";
 
-// Every line printed goes through out, which removes the password and anything shaped like a
-// session password: a WebDriver error can name the failed command's arguments (setValue).
-const out = (line) => console.log(String(line).replaceAll(password, "[password]").replace(/BWSYNTH-pw-[a-z0-9]{8}-[0-9]{4}/g, "[password]"));
+// Every line printed goes through out, which removes the password, the device grant's codes once
+// known, and anything shaped like a session password: a WebDriver error can name the failed
+// command's arguments (setValue).
+const hidden = [password];
+const out = (line) => {
+  let s = String(line);
+  for (const h of hidden) s = s.replaceAll(h, "[redacted]");
+  console.log(s.replace(/BWSYNTH-pw-[a-z0-9]{8}-[0-9]{4}/g, "[redacted]"));
+};
 
 // signedIn: h-all's access token, by the device grant. The code is entered and approved in headless
 // Chrome, in a new profile in the participant state, which session scan reads and session stop
@@ -54,22 +60,30 @@ async function signedIn() {
   });
   if (!dev.ok) throw new Error(`device authorization: ${dev.status}`);
   const d = await dev.json();
-  let stop = false;
+  for (const c of [d.user_code, d.device_code]) if (c) hidden.push(c);
+  // The abort ends the poll's wait, its request and its body read, so that no token request
+  // follows the browser's end.
+  const ctl = new AbortController();
   const poll = (async () => {
     let wait = (d.interval ?? 5) * 1000;
     const until = Date.now() + 120000;
-    while (!stop && Date.now() < until) {
-      await new Promise((r) => setTimeout(r, wait));
+    while (!ctl.signal.aborted && Date.now() < until) {
+      await new Promise((r) => {
+        const t = setTimeout(r, wait);
+        ctl.signal.addEventListener("abort", () => (clearTimeout(t), r()), { once: true });
+      });
+      if (ctl.signal.aborted) break;
       const t = await fetch(disc.token_endpoint, {
         method: "POST",
         body: form({ grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: d.device_code, client_id: client.cliClientId }),
+        signal: ctl.signal,
       });
       const b = await t.json();
       if (t.ok && b.access_token) return b.access_token;
       if (b.error === "slow_down") wait += 5000;
       else if (b.error !== "authorization_pending") throw new Error(`device token: ${t.status} ${b.error ?? ""}`);
     }
-    throw new Error("device token: no approval within two minutes");
+    throw new Error(ctl.signal.aborted ? "device token: the poll was stopped" : "device token: no approval within two minutes");
   })();
   // Read below; a failure before then must not end the process as an unhandled rejection.
   poll.catch(() => {});
@@ -105,7 +119,9 @@ async function signedIn() {
     await say("page at the failure").catch(() => {});
     throw e;
   } finally {
-    stop = true;
+    // The poll ends before the browser does: aborted, then awaited, its failure read above.
+    ctl.abort();
+    await poll.catch(() => {});
     await browser.deleteSession();
   }
 }
@@ -148,11 +164,17 @@ function scan(token) {
   const control = join(part, "collide-control");
   writeFileSync(control, `planted ${marker}\n`, { mode: 0o600 });
   try {
-    const names = spawnSync("docker", ["ps", "-a", "--format", "{{.Names}}"], { encoding: "utf8" }).stdout.split("\n");
+    // A docker command that fails is a scan that read nothing there: it fails the scan.
+    const docker = (args, encoding) => {
+      const r = spawnSync("docker", args, { encoding, maxBuffer: 1 << 30 });
+      if (r.error || r.status !== 0) throw new Error(`leak scan: docker ${args.join(" ")} failed: ${r.error?.message ?? `exit ${r.status}`}`);
+      return r;
+    };
+    const names = docker(["ps", "-a", "--format", "{{.Names}}"], "utf8").stdout.split("\n");
     const logText = names
       // As session scan: the fixture's containers, the default dev-idp's, the login page and the forwarder.
       .filter((n) => n.startsWith(`${prefix}-`) || n.startsWith("bw-dev-idp") || n === "bw-dev-login" || n === "bw-dev-forward")
-      .map((n) => [n, spawnSync("docker", ["logs", n], { encoding: "latin1", maxBuffer: 1 << 30 })])
+      .map((n) => [n, docker(["logs", n], "latin1")])
       .map(([n, r]) => [`docker logs ${n}`, `${r.stdout}${r.stderr}`]);
     const needles = [token, token.split(".").pop(), marker].map((s) => Buffer.from(s));
     const hits = [];
@@ -186,8 +208,17 @@ try {
   failed = true;
   out(`collide failed: ${e.message}`);
 }
+let scanned = null;
 if (token) {
-  const { read, hits, control } = scan(token);
+  try {
+    scanned = scan(token);
+  } catch (e) {
+    failed = true;
+    out(e.message);
+  }
+}
+if (scanned) {
+  const { read, hits, control } = scanned;
   const found = hits.filter(([w, k]) => k === "marker" && w === control).length === 1;
   const leaks = hits.filter(([w, k]) => !(k === "marker" && w === control));
   for (const [w, k] of leaks) out(`leak scan: ${k} in ${w}`);
