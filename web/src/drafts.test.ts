@@ -468,6 +468,22 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     expect(rest(s)).toEqual({ held: M, saved: M, sent: sentOf(M), writes: 1, own: "frv_9" });
   });
 
+  test("ginsys/bronzeward#551 local review: a done Save that names no revision cannot tell a held-back read from its own, so it opens nothing", () => {
+    const s = run({ held: A, saved: A }, [{ kind: "type", held: M }, { kind: "send" }, { kind: "read", text: M2, since: 0, revision: 9, id: "frv_9" }, { kind: "done" }]);
+    expect(rest(s)).toEqual({ held: M, saved: M, sent: sentOf(M), writes: 1 });
+  });
+
+  test("ginsys/bronzeward#551 local review: a held-back read that shows once the Save is done keeps the newer draft revision of a later draft read", () => {
+    const s = run({ held: T, saved: T, conflict: theirs(M) }, [{ kind: "type", held: M2 }, { kind: "send" }, { kind: "read", text: T2, since: 0, revision: 9, id: "frv_10" }, { kind: "draft", revision: 10, changed: false }, { kind: "done", revision: "frv_9" }]);
+    expect(rest(s)).toEqual({ held: T2, saved: T2, conflict: theirs(M2, 10), sent: sentOf(M2, true), writes: 1, own: "frv_9" });
+  });
+
+  test("ginsys/bronzeward#551 local review: a held-back read that shows once the Save is done keeps a repeated Show's wait, so Copy my text waits", () => {
+    const s = run({ held: T, saved: T, conflict: theirs(M) }, [{ kind: "type", held: M2 }, { kind: "send" }, { kind: "show" }, { kind: "read", text: T2, since: 0, revision: 9, id: "frv_10" }, { kind: "done", revision: "frv_9" }]);
+    expect(rest(s)).toEqual({ held: T2, saved: T2, conflict: { ...theirs(M2, 9), awaits: true }, sent: sentOf(M2, true), writes: 1, own: "frv_9" });
+    expect(editor(s, { kind: "copy" }).held).toEqual(T2);
+  });
+
   test("ginsys/bronzeward#551 item 3: a read held back while a Save is open names the draft revision of a later draft read that changed only another entry", () => {
     const s = run({ held: A, saved: A }, [{ kind: "type", held: M }, { kind: "send" }, { kind: "read", text: T, since: 0, revision: 8 }, { kind: "draft", revision: 9, changed: false }, { kind: "failed" }]);
     expect(rest(s)).toEqual({ held: T, saved: T, sent: sentOf(M), conflict: theirs(M, 9) });
