@@ -303,3 +303,28 @@ call POST /recovery/exits "$recovery" '{"facts": {}}' recovery-exit-first | jq .
 released. The exit is refused with `409 conflict` while any scope is unreleased. Restored operations are never
 retried. An approval recorded before the entry is refused at commitment (`the approval is of an
 earlier epoch`): plan and approve again.
+
+## The web console
+
+The web interface has a **Recovery** page at `/recovery`. A person with the `recovery-admin` role
+sees it in the navigation. Every other role sees it while recovery mode is on, and its controls are
+off with the reason `Needs recovery-admin`.
+
+The page shows the epoch, the mode, the entry, the exit and the start mode. It lists each scope with
+its state and next step, and it reads the state again every 5 seconds.
+
+Three actions are on the web:
+
+- **Enter recovery** is on the page the web interface shows when the server was started for
+  recovery and has no entry yet. It takes one to three restored backups, the time the restore
+  stopped writes, and a reason. It sends only after you type `enter`. If the answer is lost, the
+  page repeats the entry with the same key. After a reload the page cannot repeat it. Read
+  `GET /recovery` to see if the entry was recorded.
+- **Exit recovery** stays off until every scope is released. The state `ready` is not released.
+- **Revoke identity** takes the identity, or the issuer and subject, and a reason. It sends only
+  after you type the identity back. A revocation is permanent. It adds no `auth.deniedSubjects`
+  entry and it issues no token again.
+
+These steps stay outside the browser: the restores, the `auth.deniedSubjects` edit, the restarts and
+the token rotation. The page links to them. The accounting, mark and release controls are not on the
+page yet. Use `bronzewardctl` for them.
