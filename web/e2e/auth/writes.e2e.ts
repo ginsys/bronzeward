@@ -241,8 +241,9 @@ describe("the write views (#338)", () => {
     await release();
     // Settled: the notice can now be dismissed, so no repeat can still be scheduled.
     await notice().parentElement().$("button=Dismiss").waitForExist({ timeout: 20_000 });
-    expect(await notice().getText()).toContain(SET_ASIDE);
+    // Sent once: a browser that sends the write again by itself meets the server's replay.
     await oneWrite(1);
+    expect(await notice().getText()).toContain(SET_ASIDE);
     // The held answer was dropped: the page met a closed connection.
     expect(await seen()).toEqual(["failed"]);
   });

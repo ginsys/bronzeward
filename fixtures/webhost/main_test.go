@@ -200,8 +200,8 @@ func TestUpstreamCloseClosesTheConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := io.ReadAll(conn)
-	if len(got) != 0 || !errors.Is(err, syscall.ECONNRESET) {
-		t.Errorf("got %q, then %v; want no byte, then a connection reset", got, err)
+	if string(got) != "HTTP/1.1 100 Continue\r\n\r\n" || !errors.Is(err, syscall.ECONNRESET) {
+		t.Errorf("got %q, then %v; want an interim 100 Continue alone, then a connection reset", got, err)
 	}
 }
 
