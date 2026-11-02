@@ -119,6 +119,17 @@ describe("§8.2 read rows", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  test("401 with a renewal that throws settles as unauthenticated, as a failed one does", async () => {
+    const renew = vi.fn(async (): Promise<boolean> => {
+      throw new Error("synthetic renewal failure");
+    });
+    const { c, fetchMock } = client([problem(401, "unauthenticated", {}, null)], { renew });
+    expect(await c.read("/machines")).toMatchObject({ kind: "unauthenticated" });
+    expect(renew).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(c.writesEnded).toBe(true);
+  });
+
   test("403 forbidden shows the roles, no retry", async () => {
     const { c, fetchMock } = client([problem(403, "forbidden", { roles: ["publisher"], humanOnly: true })]);
     expect(await c.read("/plans")).toMatchObject({ kind: "refused", status: 403, problem: { roles: ["publisher"], humanOnly: true } });
@@ -674,6 +685,19 @@ describe("stale-response discard", () => {
     c.setView(base);
     expect(await c.read("/machines")).toEqual({ kind: "discarded" });
     expect(renew).toHaveBeenCalledTimes(1);
+  });
+
+  test("a renewal that throws after the view changed is discarded, not shown", async () => {
+    let c!: Client;
+    const renew = vi.fn(async (): Promise<boolean> => {
+      c.setView({ ...base, principal: "p2" });
+      throw new Error("synthetic renewal failure");
+    });
+    c = new Client({ fetch: (async () => problem(401, "unauthenticated", {}, null)) as unknown as typeof fetch, renew });
+    c.setView(base);
+    expect(await c.read("/machines")).toEqual({ kind: "discarded" });
+    expect(renew).toHaveBeenCalledTimes(1);
+    expect(c.writesEnded).toBe(false);
   });
 
   test("a body cut off by the network is a transport failure; one that is not JSON is a defect", async () => {
