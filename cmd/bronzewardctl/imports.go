@@ -155,8 +155,11 @@ func (e *env) importStart(args []string) error {
 				err = fmt.Errorf("the request body is %d bytes, %s; nothing was sent", len(w.Body), overBodyLimit)
 			}
 			return err
-		}, w, func(_ *client.Client, r *client.Response) ([]string, error) {
+		}, w, func(cl *client.Client, r *client.Response) ([]string, error) {
 			err := json.Unmarshal(r.Body, &a)
+			if a.Ingestion != "" {
+				started(e, cl, a.Ingestion, true)
+			}
 			lines := []string{sf("Import %s started (operation %s). Staging: %s. Review: %s.", a.Ingestion, a.Operation, staging,
 				map[bool]string{true: "requested", false: "not requested"}[review])}
 			if noWait {
@@ -251,9 +254,10 @@ func (e *env) importAbandon(args []string) error {
 	}
 	return e.write(&client.Write{Method: http.MethodPost, Path: "/ingestions/" + url.PathEscape(pos[0]) + "/abandonments", Body: []byte("{}"),
 		Repeat: rp, HumanOnly: true, Check: "import status " + client.ShellWord(pos[0]), Read: ingestionRead(pos[0])},
-		func(_ *client.Client, r *client.Response) ([]string, error) {
+		func(c *client.Client, r *client.Response) ([]string, error) {
 			var b apitypes.IngestionBody
 			err := json.Unmarshal(r.Body, &b)
+			started(e, c, pos[0], false)
 			return []string{sf("Import %s abandoned: its staged input is cleared, and nothing of it reaches draft %s.", b.Id, b.Draft)}, err
 		})
 }
@@ -452,10 +456,27 @@ func remedies(id string, verbs ...string) []string {
 	return lines
 }
 
+// started records that this client started ingestion ing, or with on false forgets it (§8.3). A
+// failure is shown: the client then adopts no ETag after that import, or keeps a record it no longer
+// needs until the epoch changes.
+func started(e *env, c *client.Client, ing string, on bool) {
+	if err := client.KeepStarted(c.Context, ing, on); err != nil {
+		tf(e.err, "bronzewardctl: %s: recording import %s: %v\n", c.Context.Where(), pr(ing), err)
+	}
+}
+
 // ended reports an import operation's terminal state: on success the draft it was released into,
-// whose ETag the client adopts only at the result's revision (ETAG-02, client-contracts.md §8.3);
-// otherwise exit 4, a failure the draft caused offering a new start.
+// whose ETag the client adopts only after an import it started itself, and only at the result's
+// revision (ETAG-02, client-contracts.md §8.3); otherwise exit 4, a failure the draft caused offering
+// a new start. The import's record ends with it.
 func (e *env) ended(c *client.Client, b *apitypes.IngestionBody, o *apitypes.OperationBody) error {
+	ours, rerr := client.Started(c.Context, b.Id)
+	if rerr != nil {
+		tf(e.err, "bronzewardctl: %s: reading the record of import %s: %v\n", c.Context.Where(), pr(b.Id), rerr)
+	}
+	if ours {
+		started(e, c, b.Id, false)
+	}
 	if o.State != "succeeded" {
 		var p struct {
 			Type string `json:"type"`
@@ -483,6 +504,13 @@ func (e *env) ended(c *client.Client, b *apitypes.IngestionBody, o *apitypes.Ope
 	}
 	if err := e.say(sf("Import %s released into draft %s (revision %d), import base %s.", b.Id, res.Draft, res.DraftRevision, res.ImportBaseRevision)); err != nil {
 		return err
+	}
+	if !ours {
+		// Another client's import (a continuation or takeover): adopting the re-read ETag could pass
+		// over a draft edit this client never read. An ETag kept from before the import is stale too.
+		keep(e, c, res.Draft, "")
+		return e.say(sf("This client did not start import %s, so it keeps no ETag of draft %s. Read the draft before writing to it:", b.Id, res.Draft),
+			"  bronzewardctl --context "+client.ShellWord(c.Context.Name)+" draft show "+client.ShellWord(res.Draft))
 	}
 	epoch := c.Context.LastEpoch
 	r, err := c.Get("/drafts/" + url.PathEscape(res.Draft))
