@@ -219,11 +219,11 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     ["R5-4: a revision read started before a done write is dropped", { held: M, saved: M, writes: 1 }, { kind: "read", text: A, since: 0 }, { held: M, saved: M, writes: 1 }],
     ["a revision read started after the last done write applies", { held: M, saved: M, writes: 1 }, { kind: "read", text: T, since: 1 }, { held: T, saved: T, writes: 1 }],
     // Revert to base, sweep (a) and (b).
-    ["Revert to base puts the base text in the editor when nothing changed since the click", { held: M, saved: A }, { kind: "revert", from: M, text: A, note: "n" }, { held: A, saved: A, note: "n" }],
-    ["R5-2: text typed while Revert reads the base text is kept", { held: M2, saved: A }, { kind: "revert", from: M, text: A, note: "n" }, { held: M2, saved: A, note: NOT_REVERTED }],
-    ["R5-2: a 412 while Revert reads the base text keeps the operator's text", { held: M, saved: A, conflict: refused(M, 7) }, { kind: "revert", from: M, text: A, note: "n" }, { held: M, saved: A, conflict: refused(M, 7), note: NOT_REVERTED }],
-    ["an older Revert's answer after a newer one's is not applied", { held: A, saved: T }, { kind: "revert", from: M, text: T2, note: "n" }, { held: A, saved: T, note: NOT_REVERTED }],
-    ["Revert to base while their text shows replaces the editor's text, the operator's still aside", { held: T, saved: T, conflict: theirs(M) }, { kind: "revert", from: T, text: A, note: "n" }, { held: A, saved: T, conflict: theirs(M), note: "n" }],
+    ["Revert to base puts the base text in the editor when nothing changed since the click", { held: M, saved: A }, { kind: "revert", at: 0, text: A, note: "n" }, { held: A, saved: A, note: "n" }],
+    ["R5-2: text typed while Revert reads the base text is kept", { held: M2, saved: A, version: 1 }, { kind: "revert", at: 0, text: A, note: "n" }, { held: M2, saved: A, version: 1, note: NOT_REVERTED }],
+    ["R5-2: a 412 while Revert reads the base text keeps the operator's text", { held: M, saved: A, conflict: refused(M, 7), version: 1 }, { kind: "revert", at: 0, text: A, note: "n" }, { held: M, saved: A, conflict: refused(M, 7), version: 1, note: NOT_REVERTED }],
+    ["an older Revert's answer after a newer one's is not applied", { held: A, saved: T, version: 2 }, { kind: "revert", at: 1, text: T2, note: "n" }, { held: A, saved: T, version: 2, note: NOT_REVERTED }],
+    ["Revert to base while their text shows replaces the editor's text, the operator's still aside", { held: T, saved: T, conflict: theirs(M) }, { kind: "revert", at: 0, text: A, note: "n" }, { held: A, saved: T, conflict: theirs(M), note: "n" }],
     // Draft read and Show, sweep (b): an older draft revision after a newer one.
     ["an older draft revision read after a newer one changes nothing", { held: T, saved: T, conflict: theirs(M, 9) }, { kind: "draft", revision: 8, changed: false }, { held: T, saved: T, conflict: theirs(M, 9) }],
     ["an older draft revision while asked shows nothing", { held: M, saved: A, conflict: asked(M, 9) }, { kind: "draft", revision: 8, changed: false }, { held: M, saved: A, conflict: asked(M, 9) }],
@@ -231,8 +231,32 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     ["text typed while the 412's draft read is in flight stays when it answers", { held: M2, saved: A, conflict: refused(M2) }, { kind: "at", revision: 7 }, { held: M2, saved: A, conflict: refused(M2, 7) }],
     ["a note replaces the editor's note", { held: A, saved: A, note: "x" }, { kind: "note", text: "y" }, { held: A, saved: A, note: "y" }],
   ];
+  // `version` has its own rows below; these compare everything else.
+  const rest = ({ version: _, ...r }: Editor) => r;
   test.each(table)("%s", (_, from, e, to) => {
-    expect(editor(from, e)).toEqual(to);
+    expect(rest(editor(from, e))).toEqual(rest(to));
+  });
+
+  // R6-1: every event that changes the editor's text or the conflict raises `version`, and no other
+  // does. `editor` raises it after each event, so a new event kind cannot skip it.
+  const shown = (s: Editor) => JSON.stringify([s.held, s.conflict?.phase, s.conflict?.mine]);
+  test.each(table)("R6-1, version: %s", (_, from, e) => {
+    const to = editor(from, e);
+    expect(to.version ?? 0).toBe((from.version ?? 0) + (shown(to) === shown(from) ? 0 : 1));
+  });
+
+  // R6-1: a Revert to base pending while another event changes the text or the conflict is not applied.
+  const pending: [string, Editor, EditorEvent][] = [
+    ["Copy my text", { held: T, saved: T, conflict: theirs(M) }, { kind: "copy" }],
+    ["Show their change", { held: M, saved: A, conflict: refused(M, 7) }, { kind: "show" }],
+    ["a 412", { held: M, saved: A }, { kind: "refused" }],
+    ["a revision read", { held: A, saved: A }, { kind: "read", text: T, since: 0 }],
+  ];
+  test.each(pending)("R6-1: %s while Revert to base is pending keeps the editor's text", (_, from, e) => {
+    const between = editor(from, e);
+    const late = editor(between, { kind: "revert", at: from.version ?? 0, text: T2, note: "n" });
+    expect(late.held).toEqual(between.held);
+    expect(late.note).toBe(NOT_REVERTED);
   });
 
   test("Revert to base waits until their text shows, while the editor's text is the operator's kept text", () => {
@@ -245,7 +269,7 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
   const run = (s: Editor, events: EditorEvent[]) => events.reduce(editor, s);
   test("R4-1: after a Show that changed no text of this fragment, a later read keeps what was typed since", () => {
     const s = run({ held: M, saved: A }, [{ kind: "refused" }, { kind: "at", revision: 7 }, { kind: "show" }, { kind: "draft", revision: 8, changed: false }, { kind: "type", held: M2 }, { kind: "draft", revision: 9, changed: true }, { kind: "read", text: T2, since: 0 }]);
-    expect(s).toEqual({ held: M2, saved: T2, conflict: theirs(M, 9) });
+    expect(rest(s)).toEqual({ held: M2, saved: T2, conflict: theirs(M, 9) });
   });
 
   test("R5-1: a Save sent while asked, then typing, then their text: the done Save keeps the typed text", () => {
@@ -260,6 +284,12 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     expect(s.held).toBe(T);
     expect(s.conflict?.mine).toBe(M2);
     expect(holdsUnsaved(s.held, s.saved, s.conflict?.mine)).toBe(true);
+  });
+
+  test("R6-1: a Revert clicked before a 412, Show their change and Copy my text does not replace the copied text", () => {
+    const s = run({ held: M, saved: A }, [{ kind: "send" }, { kind: "refused" }, { kind: "at", revision: 7 }, { kind: "show" }, { kind: "draft", revision: 8, changed: true }, { kind: "read", text: T, since: 0 }, { kind: "copy" }, { kind: "revert", at: 0, text: A, note: "n" }]);
+    expect(s.held).toBe(M);
+    expect(s.note).toBe(NOT_REVERTED);
   });
 });
 
