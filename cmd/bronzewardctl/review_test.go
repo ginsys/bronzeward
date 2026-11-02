@@ -344,6 +344,12 @@ func TestWrapOversizedMarkGroup(t *testing.T) {
 	if want := []string{"क" + strings.Repeat("ा", 19), "\\u093e"}; !slices.Equal(got, want) {
 		t.Errorf("wrap gives %q; want %q", got, want)
 	}
+	// Every mark after the first that did not fit is an escape too, none raw beside an escape, and
+	// the next character that is not a mark starts a group of its own again.
+	got = wrap([]string{"क" + strings.Repeat("ा", 22) + "x" + "का"}, 20)
+	if want := []string{"क" + strings.Repeat("ा", 19), strings.Repeat("\\u093e", 3) + "x", "का"}; !slices.Equal(got, want) {
+		t.Errorf("wrap gives %q; want %q", got, want)
+	}
 }
 
 // TestPageHeightOnlyResize: a resize that changes only the height shows the same screen line, also

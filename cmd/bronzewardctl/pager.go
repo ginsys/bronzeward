@@ -212,6 +212,7 @@ func wrapLine(l string, cols int) []string {
 	var out []string
 	var b, group strings.Builder
 	n, gw := 0, 0
+	overflow := false // the marks since the last character were too many for a row
 	flush := func() {
 		if n > 0 && n+gw > cols {
 			out = append(out, b.String())
@@ -232,14 +233,23 @@ func wrapLine(l string, cols int) []string {
 			w += cells(c)
 		}
 		// A mark that is shown as itself joins the group before it, if the row has room for it. When
-		// the group is already a whole row, the mark shows as its Go escape, like any other
-		// character the pager does not show as itself, so a mark never starts a screen line.
-		if unicode.IsMark(r) && s == string(r) && group.Len() > 0 {
-			if gw+w <= cols {
+		// the group is already a whole row, that mark and every mark after it, up to the next
+		// character that is not a mark, show as their Go escape, like any other character the pager
+		// does not show as itself, so a mark never starts a screen line and none shows beside an
+		// escape.
+		mark := unicode.IsMark(r) && s == string(r)
+		if !mark {
+			overflow = false
+		}
+		if mark && group.Len() > 0 {
+			if !overflow && gw+w <= cols {
 				group.WriteString(s)
 				gw += w
 				continue
 			}
+			overflow = true
+		}
+		if mark && overflow {
 			s = strings.Trim(strconv.QuoteToASCII(s), `"`)
 			w = len(s)
 		}
