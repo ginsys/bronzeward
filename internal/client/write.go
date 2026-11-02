@@ -290,9 +290,11 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 			// A refusal shows the epoch; an unknown-outcome block prints none for the entry (REC-04 (a)).
 			if ambiguous {
 				last = fmt.Errorf("%w\nAnother recovery entry committed first; this one recorded nothing. Read it with: recovery status.", a.err)
-			} else {
+			} else if ep, _ := p.Doc["epoch"].(string); ep != "" {
 				last = fmt.Errorf("%w\nAnother recovery entry committed first (epoch %s); this one recorded nothing. Read it with: recovery status.",
-					a.err, printable(fmt.Sprint(p.Doc["epoch"])))
+					a.err, printable(ep))
+			} else {
+				last = fmt.Errorf("%w\nAnother recovery entry committed first; this one recorded nothing. Read it with: recovery status.", a.err)
 			}
 			return nil, c.after(ambiguous, w, u, last)
 		case a.r != nil:
