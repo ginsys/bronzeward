@@ -3,11 +3,12 @@ import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { components } from "./api/v1";
-import { change, type Clash, createdId, declaredOf, DiscardRefused, NOT_DISCARDED, doneOnce, type Editor, type EditorEvent, editor, EMPTY, FragmentPane, forgetETag, type Held, holdsUnsaved, inUse, keepETag, keepOnDone, keptETag, LAYERS, lastGood, markLine, mayDrop, mayRevert, maySend, NOT_RENDERED, NOT_REVERTED, NOT_SENT_CONFLICT, NOT_SENT_UNREAD, NOT_SENT_UNSHOWN, paneEntry, rows, selection, sendRefusal, settledFragment, spotOfMark, unread, watchWrites, where } from "./drafts.tsx";
+import { change, type Clash, createdId, WriteResult, declaredOf, DiscardRefused, NOT_DISCARDED, doneOnce, type Editor, type EditorEvent, editor, EMPTY, FragmentPane, forgetETag, type Held, holdsUnsaved, inUse, keepETag, keepOnDone, keptETag, LAYERS, lastGood, markLine, mayDrop, mayRevert, maySend, NOT_RENDERED, NOT_REVERTED, NOT_SENT_CONFLICT, NOT_SENT_UNREAD, NOT_SENT_UNSHOWN, paneEntry, rows, selection, sendRefusal, settledFragment, spotOfMark, unread, watchWrites, where } from "./drafts.tsx";
 import { leaving, signingOut, startsNew, unsaved, WritesProvider } from "./forms.tsx";
 import { type Load, type Reads, ReadsProvider } from "./list.tsx";
 import { references, spotOfLine, spotOfPath, spotOfReference } from "./position.ts";
 import { ShellContext } from "./shell.tsx";
+import { CUT_OFF } from "./states.tsx";
 import { Write, Writes } from "./write.ts";
 
 type Source = components["schemas"]["SourceEntry"];
@@ -842,6 +843,23 @@ test("ginsys/bronzeward#517 H15: a Discard's 412 says the draft changed and offe
   const markup = renderToStaticMarkup(h(DiscardRefused, { onShow: () => {} }));
   expect(markup).toContain(NOT_DISCARDED);
   expect(markup).toContain(">Show their change</button>");
+});
+
+test("§8.4 item 8: a 412 or 422 refusal whose answer was cut off says so, and shows no conflict or field view", () => {
+  const w = new Write({ method: "PUT", path: "/drafts/drf_1/sources/f", body: {}, resource: "/drafts/drf_1" });
+  const shown = (status: number) => {
+    w.outcome = { kind: "refused", status, problem: null, replayed: false, cut: true };
+    return renderToStaticMarkup(h(WritesProvider, { value: new Writes(() => "p") }, h(ShellContext, { value: { roles: ["author"], offline: false } },
+      h(WriteResult, { w, done: () => "DONE", conflict: h("p", null, "CONFLICT"), goTo: () => {} }))));
+  };
+  for (const status of [412, 422]) {
+    const out = shown(status);
+    expect(out).toContain(`Not saved: the server answered ${status}. ${CUT_OFF}`);
+    expect(out).not.toContain("CONFLICT");
+    expect(out).not.toContain("Go to field");
+  }
+  w.outcome = { kind: "refused", status: 412, problem: null, replayed: false };
+  expect(renderToStaticMarkup(h(WritesProvider, { value: new Writes(() => "p") }, h(WriteResult, { w, done: () => "DONE", conflict: h("p", null, "CONFLICT") })))).toContain("CONFLICT");
 });
 
 test("ginsys/bronzeward#517 H11: the editor reads nothing past the shell's settle", () => {
