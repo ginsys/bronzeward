@@ -90,6 +90,15 @@ describe("[Go to field] positions (B13)", () => {
     expect(references("a: !bwref x/one\nb: !bwref x/two\nc: !bwref x/one\n")).toEqual(["x/one", "x/two"]);
   });
 
+  test("ginsys/bronzeward#569: the fragment pane reads references with the embedded documents it holds", () => {
+    // The unit suite has no DOM; this guards the pane's three reads of the held document.
+    const src = readFileSync(new URL("./drafts.tsx", import.meta.url), "utf8");
+    expect(src).toContain("const refs = rows(held.document, held.declared, held.embedded);");
+    expect(src).toContain("const used = references(held.document, held.embedded);");
+    expect(src).toContain('spotOfReference(held.document, p["reference"], held.embedded)');
+    expect(rows("cfg: 'a: !bwref x/one'\n", {}, [{ path: "doc[0]/cfg" }])).toEqual(["x/one"]);
+  });
+
   test("ginsys/bronzeward#517 H16: a quoted name, and a name on the line after its tag, are references", () => {
     const text = "a: !bwref \"x/dq\"\nb: !bwref 'x/sq'\nc: !bwref\n  x/next\nd: !bwref\n  \"x/next-q\"\ne: !bwref \"x/open\n";
     expect(references(text)).toEqual(["x/dq", "x/sq", "x/next", "x/next-q"]);

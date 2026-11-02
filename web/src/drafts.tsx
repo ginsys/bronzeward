@@ -11,7 +11,7 @@ import { Form, field, Result, startsNew, Text, unsaved, useSend, useUnsaved, use
 import { LAYERS } from "./layers.ts";
 import { Id, type Load, Ref, Scroll, short, useItem, useList, useReads, usePending, useSettled } from "./list.tsx";
 import type { Cluster } from "./machines.tsx";
-import { references, type Spot, spotOfLine, spotOfPath, spotOfReference } from "./position.ts";
+import { type EmbeddedPath, references, type Spot, spotOfLine, spotOfPath, spotOfReference } from "./position.ts";
 import type { Problem } from "./request.ts";
 import { Action } from "./shell.tsx";
 import { Conflict, Refused, Status } from "./states.tsx";
@@ -558,9 +558,10 @@ export function lastGood<T>(last: { id: string; data: T } | undefined, id: strin
 export const declaredOf = (declared: Declared, ref: string): Declared[string] | undefined => (Object.hasOwn(declared, ref) ? declared[ref] : undefined);
 
 // The references table's rows: the document's references, then the declarations no reference
-// uses, so an obsolete declaration can be undeclared (rule unused-declaration).
-export const rows = (document: string, declared: Declared) => {
-  const refs = references(document);
+// uses, so an obsolete declaration can be undeclared (rule unused-declaration). The references of
+// the embedded documents it declares count as the document's (ginsys/bronzeward#569).
+export const rows = (document: string, declared: Declared, embedded: readonly EmbeddedPath[] = []) => {
+  const refs = references(document, embedded);
   return [...refs, ...Object.keys(declared).filter((d) => !refs.includes(d))];
 };
 
@@ -753,7 +754,7 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
     if (p === null) return;
     let spot: Spot | undefined;
     let into = text.current;
-    if (typeof p["reference"] === "string") spot = spotOfReference(held.document, p["reference"]);
+    if (typeof p["reference"] === "string") spot = spotOfReference(held.document, p["reference"], held.embedded);
     else if (typeof p["position"] === "number") {
       into = marks.current;
       spot = spotOfMark(sent?.text.marks ?? held.marks, held.marks, p["position"]);
@@ -782,8 +783,8 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
       </button>
     </>
   );
-  const refs = rows(held.document, held.declared);
-  const used = references(held.document);
+  const refs = rows(held.document, held.declared, held.embedded);
+  const used = references(held.document, held.embedded);
   const declare = (ref: string, r: Declared[string] | undefined) => {
     const next = { ...held.declared };
     if (r === undefined) delete next[ref];

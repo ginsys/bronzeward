@@ -299,6 +299,12 @@ describe("the reference states never carry a value", () => {
     const declared = { one: { kind: "string" as const, version: 1 }, three: { kind: "integer" as const, version: 2 } };
     expect(referenceStates(doc, declared).map((r) => `${r.name} ${r.state}`)).toEqual(["one declared", "two carried, not declared", "three declared, not in the document"]);
   });
+  test("ginsys/bronzeward#569: a reference in a quoted embedded document is in the document", () => {
+    const quoted = "cfg: 'a: !bwref one'\n";
+    const declared = { one: { kind: "string" as const, version: 1 } };
+    expect(referenceStates(quoted, declared, [{ path: "doc[0]/cfg" }]).map((r) => `${r.name} ${r.state}`)).toEqual(["one declared"]);
+    expect(referenceStates(quoted, declared).map((r) => `${r.name} ${r.state}`)).toEqual(["one declared, not in the document"]);
+  });
   test("a name that is an Object property is not a declaration", () => {
     expect(referenceStates("a: !bwref constructor\n", {})[0]).toMatchObject({ name: "constructor", declared: undefined, state: "carried, not declared" });
   });
