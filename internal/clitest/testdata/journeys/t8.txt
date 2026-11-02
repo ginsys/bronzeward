@@ -143,7 +143,7 @@ Evidence
      kind: HostnameConfig
 Self-approval  predicted: you did not create this plan or publish this release, and authored no fragment, profile or assignment revision in it.
                Import-base authorship and automation you own are not predicted. The approval records the actual reasons; self-approval is marked and allowed.
-Type the plan ID to approve, or press Enter to stop:
+Type the plan ID to send it, or press Enter to stop:
 Approved (apr_…). Recorded self-approval reasons: none.
 The controller re-checks the plan at use time; it applies it only if every check passes.
 [exit 0]

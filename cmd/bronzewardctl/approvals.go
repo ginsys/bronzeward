@@ -40,6 +40,13 @@ func (e *env) approve(args []string) error {
 	plan := pos[0]
 	path := "/plans/" + url.PathEscape(plan)
 	var p apitypes.PlanBody
+	w := &client.Write{Method: http.MethodPost, Path: path + "/approvals", Body: []byte("{}"), HumanOnly: true, Repeat: rp,
+		Check: "plan show " + client.ShellWord(plan),
+		Read: func(c *client.Client) (string, error) {
+			var now apitypes.PlanBody
+			err := getJSON(c, path, &now)
+			return sf("GET /api/v1%s shows state %s, approval %s", path, now.State, or(now.Approval, "none")), err
+		}}
 	confirm := func(c *client.Client) error {
 		r, err := c.Get(path)
 		if err != nil {
@@ -49,7 +56,10 @@ func (e *env) approve(args []string) error {
 		if err != nil {
 			return err
 		}
-		p = v[0]
+		if p = v[0]; p.Id != plan {
+			// The ID typed back must be the one the approval is sent to; an empty one would match no input.
+			return fmt.Errorf("GET /api/v1%s answered plan %s; nothing is shown and nothing was sent", path, client.ShellWord(p.Id))
+		}
 		var view, prediction []string
 		if _, change := snapshot(c, r, func() []string {
 			if view = planView(c, &p); p.State == "proposed" {
@@ -62,22 +72,22 @@ func (e *env) approve(args []string) error {
 		}
 		tw := tabwriter.NewWriter(e.err, 0, 0, 2, ' ', tabwriter.StripEscape) // as output.go's, for planView's verbatim diff lines
 		printLines(tw, view)
-		tw.Flush() // the prediction keeps its own column, not the evidence's
+		shown := tw.Flush() // the prediction keeps its own column, not the evidence's
 		printLines(tw, prediction)
 		if p.Operation == "apply-config" && p.DriftRecord != nil {
 			tf(tw, "Overwrites\tthe drifted configuration of drift record %d, which no reviewer has seen.\n", *p.DriftRecord)
 			fmt.Fprintln(tw, "\tApproving records that you approve overwriting it.")
 		}
-		tw.Flush()
+		if err := errors.Join(shown, tw.Flush()); err != nil {
+			// The operator would confirm evidence that was not shown.
+			return notConfirmed{fmt.Errorf("showing the plan: %w; nothing was sent", err)}
+		}
+		// The approval is sent only under the epoch the operator saw (§8.5): Send refuses a first send
+		// once its own preflight read shows another.
+		w.Reads = c.Context.LastEpoch
 		return e.confirmTyped("the plan ID", p.Id)
 	}
-	return e.writeAfter(confirm, &client.Write{Method: http.MethodPost, Path: path + "/approvals", Body: []byte("{}"), HumanOnly: true, Repeat: rp,
-		Check: "plan show " + client.ShellWord(plan),
-		Read: func(c *client.Client) (string, error) {
-			var now apitypes.PlanBody
-			err := getJSON(c, path, &now)
-			return sf("GET /api/v1%s shows state %s, approval %s", path, now.State, or(now.Approval, "none")), err
-		}}, func(_ *client.Client, r *client.Response) ([]string, error) {
+	return e.writeAfter(confirm, w, func(_ *client.Client, r *client.Response) ([]string, error) {
 		var a apitypes.ApprovalBody
 		if err := json.Unmarshal(r.Body, &a); err != nil || e.output != "table" {
 			return nil, err
