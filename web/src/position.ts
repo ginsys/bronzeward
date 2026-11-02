@@ -46,9 +46,8 @@ function tags(text: string): { index: number; tag: string; name: string }[] {
 }
 
 // Where a line's comment starts: a # at its start or after a blank, outside quotes; the line's
-// length if it has none. A quote opens a scalar only where one starts (at the line's start, after
-// a blank or a flow indicator), so the apostrophe in `can't` opens none; '' inside a
-// single-quoted scalar is an apostrophe.
+// length if it has none. A quote opens a scalar only where one starts, so the apostrophes in
+// `can't` and `dogs 'n cats` open none; '' inside a single-quoted scalar is an apostrophe.
 function commentStart(line: string): number {
   let quote: string | undefined;
   for (let i = 0; i < line.length; i++) {
@@ -57,10 +56,22 @@ function commentStart(line: string): number {
       if (c === "'" && quote === "'" && line[i + 1] === "'") i++;
       else if (c === quote) quote = undefined;
       else if (c === "\\" && quote === '"') i++;
-    } else if ((c === '"' || c === "'") && (i === 0 || " \t[{,".includes(line[i - 1]!))) quote = c;
+    } else if ((c === '"' || c === "'") && startsScalar(line, i)) quote = c;
     else if (c === "#" && (i === 0 || line[i - 1] === " " || line[i - 1] === "\t")) return i;
   }
   return line.length;
+}
+
+// Whether a scalar starts at `i`: at the line's indentation, after a flow indicator ([ { ,), or
+// after a blank that follows a key's colon or an item's or a complex key's indicator (- ?).
+// Anything else before it is a plain scalar already started.
+function startsScalar(line: string, i: number): boolean {
+  let j = i - 1;
+  while (j >= 0 && (line[j] === " " || line[j] === "\t")) j--;
+  if (j < 0 || "[{,".includes(line[j]!)) return true;
+  if (j === i - 1) return false;
+  if (line[j] === ":") return true;
+  return (line[j] === "-" || line[j] === "?") && (j === 0 || line[j - 1] === " " || line[j - 1] === "\t");
 }
 
 // The tag of a reference the refusal names: the first `!bwref <name>` in the text.
