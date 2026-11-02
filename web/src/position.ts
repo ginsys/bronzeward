@@ -1,35 +1,66 @@
-// Where a refusal points in a document the operator typed, for [Go to field] (#257 B13). The
-// `yaml` package parses the text for positions only: nothing is re-encoded, stored or sent. It is
-// loaded on the first lookup, so no other page carries it.
+// Where a refusal points in a document the operator typed, for [Go to field] (#257 B13), and the
+// references a document carries. The `yaml` package parses the text for positions and for the
+// decoded text of embedded documents only: nothing is re-encoded, stored or sent. It is imported
+// with this module, not on the first lookup: the references of an embedded document are read on
+// every render of the fragment and assignment panes, so an import that resolves later would show a
+// declared reference as not in the document until it does (ginsys/bronzeward#569).
+import { isMap, isNode, isScalar, isSeq, parseAllDocuments } from "yaml";
 
 export interface Spot {
   start: number;
   end: number;
 }
 
+// An embedded document a fragment declares (internal/ingest/declare.go Embedded): the path of the
+// string scalar that holds it.
+export interface EmbeddedPath {
+  path: string;
+}
+
 // One JSON Pointer segment, unescaped (RFC 6901): ~1 is "/", ~0 is "~".
 const segment = (s: string) => s.replace(/~1/g, "/").replace(/~0/g, "~");
 
-// A compilation §2.2 path: doc[<n>], then a JSON Pointer inside that document. The part after "|"
-// points into an embedded document, which is a string here, so the field holding it is the spot.
-export async function spotOfPath(text: string, path: string): Promise<Spot | undefined> {
+// The node at a compilation §2.2 path in parsed documents: doc[<n>], then a JSON Pointer inside
+// that document. The part after "|" points into an embedded document, which is a string here, so
+// the field holding it is the node. Each segment follows the node it steps into: a list's index,
+// or a mapping's key by its text, unquoted, as the server compares it (internal/ingest/path.go):
+// 8080 and "8080" match "8080", and 01 does not match "1".
+function nodeAt(docs: ReturnType<typeof parseAllDocuments>, path: string): unknown {
   const m = /^doc\[(\d+)\]((?:\/[^|]*)?)/.exec(path);
   if (m === null) return undefined;
-  const { isMap, isNode, isScalar, isSeq, parseAllDocuments } = await import("yaml");
-  const docs = parseAllDocuments(text);
   const doc = Array.isArray(docs) ? docs[Number(m[1])] : undefined;
   if (doc === undefined) return undefined;
-  // Each segment follows the node it steps into: a list's index, or a mapping's key by its text,
-  // unquoted, as the server compares it (internal/ingest/path.go): 8080 and "8080" match "8080",
-  // and 01 does not match "1".
   let node: unknown = doc.contents;
   for (const k of m[2] === "" ? [] : m[2]!.slice(1).split("/").map(segment)) {
     if (isSeq(node)) node = /^(0|[1-9]\d*)$/.test(k) ? node.items[Number(k)] : undefined;
     else if (isMap(node)) node = node.items.find((p) => isScalar(p.key) && (p.key.source ?? String(p.key.value)) === k)?.value;
     else node = undefined;
   }
+  return node;
+}
+
+export async function spotOfPath(text: string, path: string): Promise<Spot | undefined> {
+  const node = nodeAt(parseAllDocuments(text), path);
   if (!isNode(node) || node.range == null) return undefined;
   return { start: node.range[0], end: node.range[1] };
+}
+
+// The embedded documents of the text that a fragment declares: each declared path that holds a
+// string scalar, with that scalar's decoded text and its place in the text. As the server
+// (internal/ingest/declare.go embeddedDocument), a scalar with a tag other than !!str holds no
+// embedded document, and a path into an embedded document (with "|") declares none. A path that
+// holds no string here adds nothing; the server refuses it (rule embedded).
+const STR = "tag:yaml.org,2002:str";
+function embeddedTexts(text: string, embedded: readonly EmbeddedPath[]): { text: string; spot: Spot }[] {
+  if (embedded.length === 0) return [];
+  const docs = parseAllDocuments(text);
+  const found: { text: string; spot: Spot }[] = [];
+  for (const { path } of embedded) {
+    const node = path.includes("|") ? undefined : nodeAt(docs, path);
+    if (!isScalar(node) || typeof node.value !== "string" || (node.tag !== undefined && node.tag !== STR) || node.range == null) continue;
+    found.push({ text: node.value, spot: { start: node.range[0], end: node.range[1] } });
+  }
+  return found;
 }
 
 // The reference tags in the text, outside comments: a reference name is the §5.1 grammar's
@@ -241,10 +272,13 @@ function startsScalar(line: string, i: number): boolean {
   return (line[j] === "-" || line[j] === "?") && (j === 0 || line[j - 1] === " " || line[j - 1] === "\t");
 }
 
-// The tag of a reference the refusal names: the first `!bwref <name>` in the text.
-export function spotOfReference(text: string, name: string): Spot | undefined {
+// The tag of a reference the refusal names: the first `!bwref <name>` in the text. A reference
+// only an embedded document carries, whose tag the text shows quoted or escaped, points at the
+// scalar that holds that document.
+export function spotOfReference(text: string, name: string, embedded: readonly EmbeddedPath[] = []): Spot | undefined {
   const t = tags(text).find((t) => t.name === name);
-  return t === undefined ? undefined : { start: t.index, end: t.index + t.tag.length };
+  if (t !== undefined) return { start: t.index, end: t.index + t.tag.length };
+  return embeddedTexts(text, embedded).find((e) => tags(e.text).some((t) => t.name === name))?.spot;
 }
 
 // The n-th line (from 0) of the marks field.
@@ -255,5 +289,10 @@ export function spotOfLine(text: string, n: number): Spot | undefined {
   return { start, end: start + lines[n]!.length };
 }
 
-// The references a document carries, in order, each once.
-export const references = (text: string) => [...new Set(tags(text).map((t) => t.name))];
+// The references a document carries, each once: those in its text in order, then those in the
+// decoded text of each embedded document it declares, in declaration order. The server reads an
+// embedded document's references from its parsed text (internal/ingest/declare.go walkEmbedded),
+// so a quoted or folded one carries them although its tags are not tags in the outer text.
+export const references = (text: string, embedded: readonly EmbeddedPath[] = []) => [
+  ...new Set([...tags(text), ...embeddedTexts(text, embedded).flatMap((e) => tags(e.text))].map((t) => t.name)),
+];

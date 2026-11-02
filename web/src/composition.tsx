@@ -13,7 +13,7 @@ import { change, declaredOf, doneOnce, editor, EMPTY, type Held, holdsUnsaved, i
 import { startsNew, useSend, useUnsaved, useWrites } from "./forms.tsx";
 import { LAYERS } from "./layers.ts";
 import { short, useList, usePending, useSettled } from "./list.tsx";
-import { references } from "./position.ts";
+import { type EmbeddedPath, references } from "./position.ts";
 import { Action } from "./shell.tsx";
 import { Conflict, Status } from "./states.tsx";
 
@@ -399,9 +399,9 @@ export const sourceKey = (draft: Pick<Draft, "cluster" | "entries">, lists: List
 // What a fragment revision does with each reference: its name, its declaration, and the state.
 // Never a value, and never the document.
 export interface RefState { name: string; declared: Declared[string] | undefined; state: "declared" | "carried, not declared" | "declared, not in the document" }
-export function referenceStates(document: string, declared: Declared): RefState[] {
-  const used = references(document);
-  return rows(document, declared).map((name) => {
+export function referenceStates(document: string, declared: Declared, embedded: readonly EmbeddedPath[] = []): RefState[] {
+  const used = references(document, embedded);
+  return rows(document, declared, embedded).map((name) => {
     const d = declaredOf(declared, name);
     return { name, declared: d, state: d === undefined ? "carried, not declared" : used.includes(name) ? "declared" : "declared, not in the document" };
   });
@@ -737,7 +737,7 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
           <ul aria-label="Reference states">
             {[...new Set(composed.order.map((c) => c.revision))].flatMap((id) => {
               const f = composed.revisions[id]!;
-              const refs = referenceStates(f.document, f.declarations.references);
+              const refs = referenceStates(f.document, f.declarations.references, f.declarations.embedded);
               return refs.length === 0
                 ? [<li key={id}>{f.name}: no references</li>]
                 : refs.map((r) => <li key={`${id} ${r.name}`}>{f.name} {r.name}: {r.declared === undefined ? "no declaration" : `${r.declared.kind}, version ${r.declared.version}`}, {r.state}</li>);
