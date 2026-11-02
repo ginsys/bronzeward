@@ -197,7 +197,7 @@ describe("the recovery entry (#364)", () => {
   it("a revocation by issuer and subject is sent once and revokes that subject; one by its identity reaches that identity, not the signed-in human", async function () {
     this.timeout(60_000);
     const at = await openRevocation("revocation-targets");
-    const sub = "h-approver";
+    const sub = "h-publisher";
     await fillRevocation({ iss: FIXTURE_ISSUER, sub, reason: "synthetic revocation by subject" }, sub);
     const form = $("main form[aria-label='Revoke identity']");
     await form.$("button=Revoke identity").click();
