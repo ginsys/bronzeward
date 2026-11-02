@@ -604,7 +604,21 @@ t9() {
   setup t9
   # Last, on Zitadel: the apply starts once the links are joined, so no restart of A meets it.
   prepare links linkjoin
-  echo "names: none; the apply starts now and completes within 4 minutes"
+  # The restore left no apply-config operation, so the first one on the worker is this apply. The
+  # controller dispatches the approved plan within a few of its 5 s heartbeats after the join.
+  local w op=''
+  w=$(worker)
+  for _ in $(seq 30); do
+    op=$(sql "SELECT state FROM operation WHERE kind = 'apply-config' AND machine = '$w' ORDER BY seq DESC LIMIT 1")
+    [ -z "$op" ] || break
+    sleep 1
+  done
+  case $op in
+    '') die "no apply-config operation on the worker 30 s after the join: the apply did not start" ;;
+    completed | rejected | failed | cancelled) die "the apply ended ($op) before the participant could follow it" ;;
+  esac
+  echo "read ok: the apply started on the worker ($op)"
+  echo "names: none; the apply completes within 4 minutes"
 }
 t2() {
   setup t2
