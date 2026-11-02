@@ -49,14 +49,14 @@ func (e *env) contextCmd(args []string) error {
 		if err := client.UpdateConfig(func(cfg *client.Config) error {
 			x := cfg.Find(pos[0])
 			if x == nil {
-				return fmt.Errorf("context \"%s\" does not exist", client.Printable(pos[0]))
+				return fmt.Errorf("context \"%s\" does not exist", client.Quoted(pos[0]))
 			}
 			msg = "Current context: " + x.Where() + "."
 			if verb == "use" {
 				cfg.Current = x.Name
 				return nil
 			}
-			removed, msg = *x, sf(`Context "%s" removed.`, x.Name)
+			removed, msg = *x, sf(`Context "%s" removed.`, client.Quoted(x.Name))
 			if cfg.Current == x.Name {
 				cfg.Current, msg = "", msg+" No context is current now."
 			}
@@ -120,7 +120,7 @@ func (e *env) contextAdd(args []string) error {
 	case from != "" && byHand:
 		return usageError{errors.New("give --from or the identity provider's values by hand, not both")}
 	case oidc && x.Credential != "" && x.Credential != "oidc":
-		return usageError{fmt.Errorf("--from and the identity provider's flags need --credential oidc, not \"%s\"", client.Printable(x.Credential))}
+		return usageError{fmt.Errorf("--from and the identity provider's flags need --credential oidc, not \"%s\"", client.Quoted(x.Credential))}
 	case from != "" && x.Server == "":
 		x.Server = from
 	}
@@ -160,7 +160,7 @@ func (e *env) contextAdd(args []string) error {
 	var current string
 	if err := client.UpdateConfig(func(cfg *client.Config) error {
 		if cfg.Find(x.Name) != nil {
-			return fmt.Errorf("context \"%s\" exists: remove it first", client.Printable(x.Name))
+			return fmt.Errorf("context \"%s\" exists: remove it first", client.Quoted(x.Name))
 		}
 		cfg.Contexts = append(cfg.Contexts, x)
 		if cfg.Current == "" {
@@ -175,7 +175,7 @@ func (e *env) contextAdd(args []string) error {
 	if x.CertificateAuthority != "" {
 		trust = "the bundle " + x.CertificateAuthority
 	}
-	return tf(e.out, "Context \"%s\" added: %s, TLS trust from %s, credential %s. Current context: %s.\n", x.Name, x.Server, trust, x.Credential, current)
+	return tf(e.out, "Context \"%s\" added: %s, TLS trust from %s, credential %s. Current context: %s.\n", client.Quoted(x.Name), x.Server, trust, x.Credential, current)
 }
 
 // versionCmd prints both versions and the served API revision. The server's is "unknown" while

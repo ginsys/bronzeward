@@ -348,7 +348,7 @@ func SignIn(x *Context, device bool, prompts io.Writer) (*Tokens, string, error)
 			return err
 		}
 		if y := cfg.Find(x.Name); y == nil || !y.sameSignIn(x) {
-			return fmt.Errorf("context \"%s\" was removed or changed during the sign-in", printable(x.Name))
+			return fmt.Errorf("context \"%s\" was removed or changed during the sign-in", quoted(x.Name))
 		}
 		// Read again under the lock: the file may have been replaced during the sign-in.
 		if s.file != "" {

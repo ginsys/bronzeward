@@ -318,7 +318,7 @@ func (e *env) draftCmd(args []string) error {
 		current := d.State == "open" && r.Header.Get("Bronzeward-Epoch") == c.Context.LastEpoch
 		keep(e, c, d.Id, map[bool]string{true: r.Header.Get("ETag")}[current])
 	}, func(w *tabwriter.Writer, d *apitypes.DraftBody) {
-		tf(w, "Draft %s \"%s\" %s, revision %d, cluster %s\n", d.Id, d.Title, d.State, d.Revision, d.Cluster)
+		tf(w, "Draft %s \"%s\" %s, revision %d, cluster %s\n", d.Id, client.Quoted(d.Title), d.State, d.Revision, d.Cluster)
 		for _, item := range d.Entries {
 			x, err := item.AsSourceEntry()
 			if err != nil {

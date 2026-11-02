@@ -46,14 +46,14 @@ func newHTTPClient(x *Context, verbose io.Writer, from func(*http.Request) (*url
 			return nil, err
 		}
 		if verbose != nil {
-			fmt.Fprintf(verbose, "%s: through the proxy %s\n", r.URL.Host, u.Redacted())
+			fmt.Fprintf(verbose, "%s: through the proxy %s\n", printable(r.URL.Host), printable(u.Redacted()))
 		}
 		if u.Scheme == "https" {
 			// The dialer below finds the proxy by the address Go dials, host and port joined
 			// (IPv6 bracketed); an address it does not find is reached without TLS. Go dials an
 			// internationalized name by its ASCII form, so such a name is refused.
 			if strings.IndexFunc(u.Hostname(), func(r rune) bool { return r >= utf8.RuneSelf }) >= 0 {
-				return nil, fmt.Errorf("the https proxy %s: give its host name in ASCII (punycode)", u.Redacted())
+				return nil, fmt.Errorf("the https proxy %s: give its host name in ASCII (punycode)", printable(u.Redacted()))
 			}
 			plain := *u
 			plain.Scheme = "http"
@@ -81,10 +81,10 @@ func newHTTPClient(x *Context, verbose io.Writer, from func(*http.Request) (*url
 			if errors.As(err, &v) && len(v.UnverifiedCertificates) > 0 {
 				c := v.UnverifiedCertificates[0]
 				return nil, &trust{fmt.Errorf("the certificate of the proxy %s (subject \"%s\", issuer \"%s\") is not trusted by the system trust store: %s; nothing was sent",
-					printable(addr), printable(c.Subject.String()), printable(c.Issuer.String()), certReason(v.Err))}
+					printable(addr), quoted(c.Subject.String()), quoted(c.Issuer.String()), certReason(v.Err))}
 			}
 			// tls quotes, in its error, certificate contents it cannot parse.
-			return nil, fmt.Errorf("the proxy %s, verified by the system trust store: %w", addr, &remote{why(err, "the TLS handshake failed"), err})
+			return nil, fmt.Errorf("the proxy %s, verified by the system trust store: %w", printable(addr), &remote{why(err, "the TLS handshake failed"), err})
 		}
 		return pc, nil
 	}
@@ -120,5 +120,5 @@ func refusedTrust(x *Context, host string, err error) error {
 		source = "the bundle " + x.CertificateAuthority
 	}
 	return &trust{fmt.Errorf("the certificate of %s (subject \"%s\", issuer \"%s\") is not trusted by %s: %s; nothing was sent",
-		printable(host), printable(c.Subject.String()), printable(c.Issuer.String()), printable(source), certReason(v.Err))}
+		printable(host), quoted(c.Subject.String()), quoted(c.Issuer.String()), printable(source), certReason(v.Err))}
 }

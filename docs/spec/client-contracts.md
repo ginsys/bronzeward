@@ -392,6 +392,11 @@ it. It holds no secret.
      as an escape. It cannot tell a line feed in a value from the CLI's own, so each place that
      prints a value escapes it first. A flag error shows its rejected value in the same escape
      form, not the quoted form of the Go parser.
+   - A value that a message puts between double quotation marks, such as a draft title in
+     `draft show` or a context name in an error, also shows its own double quote as `\x22`.
+     Without that, a value could close the quotes early and make its text read as the words that
+     follow it. The Go `%q` verb did this for the draft title before item 8 replaced it. A
+     backslash stays single, as above.
    - Where the CLI shows a value as JSON text that it encodes itself (a timeline entry, an
      operation result or error), the JSON encoder leaves DEL and the C1 range raw. The text is
      escaped again by this rule.
