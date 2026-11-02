@@ -559,6 +559,16 @@ The client never fetches the new ETag and repeats the write by itself, which wou
 other author's change unseen ([persistence and API §4.1](persistence-api.md#41-etags)). A
 fragment `document` is never in argv: `--file` or stdin.
 
+The web editor edits an assignment as lists. The machine is the entry's key. The list of profile
+names and the list of each layer's fragment names are ordered, and the keyboard moves a row. An
+assignment stores names, so a later save of a profile or fragment changes what the machine
+composes. A profile stores revision IDs instead, and the editor shows that difference.
+"Show composition and references" reads the revisions that the lists name and shows the
+composition order above, with the profile pins of a layer first. For each fragment it shows each
+reference with its declared kind and version, and whether the reference is declared, carried and
+not declared, or declared and not in the document. It reads on request and shows no document or
+value.
+
 ### 5.5 Publication, rendered review and provenance
 
 ```text
