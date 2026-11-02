@@ -349,11 +349,14 @@ export const holdsUnsaved = (held: Held, saved: Held, mine: Held | undefined) =>
 // text alone does not tell (local review).
 // `sent.open`: the write may still commit, its answer not come yet. A read meanwhile may show that
 // write's own change, so it opens no such conflict; another author's change refuses the write with
-// a 412 instead (local review round 3). `sent.later`: such a read came, and the revision it named.
+// a 412 instead (local review round 3). `sent.later`: such a read came: the revision it named, its
+// id and text, or `removed` for another author's removal; each newer one replaces the older whole.
 // If the write's last answer is neither done nor a 412, that read shows as theirs, the typed text
-// kept aside (rounds 4 and 5).
+// kept aside (rounds 4 and 5). So does it once a Save is done, unless the read is the Save's own
+// revision, or the answer or the read has no id to tell (ginsys/bronzeward#559).
 export interface Clash { mine: Held; phase: "refused" | "asked" | "theirs"; revision?: number; awaits?: true; again?: true; typed?: true }
-export interface Editor { held: Held; saved: Held; conflict?: Clash; sent?: { text: Held; whileTheirs: boolean; removes?: true; open?: true; later?: { revision?: number } }; writes?: number; note?: string | undefined; version?: number; reading?: true; own?: string }
+export interface Later { revision?: number; id?: string; text?: Held; removed?: true }
+export interface Editor { held: Held; saved: Held; conflict?: Clash; sent?: { text: Held; whileTheirs: boolean; removes?: true; open?: true; later?: Later }; writes?: number; note?: string | undefined; version?: number; reading?: true; own?: string }
 export type EditorEvent =
   | { kind: "type"; held: Held } // the operator's edit
   | { kind: "refused" } // a write's 412
@@ -376,8 +379,18 @@ export type EditorEvent =
 
 export const NOT_REVERTED = "Not reverted: the text changed while the base text was read, or a conflict keeps your text. Show their change first.";
 
+// A draft read while a Save is open and their text shows: what the read held back stands for now.
+// A removal replaces it whole; a read that changed only another entry moves its revision, so a
+// later `failed` or done names the draft revision the conflict follows (ginsys/bronzeward#559).
+function noted(s: Editor, e: EditorEvent): Editor {
+  const { conflict: c, sent } = s;
+  if (e.kind !== "draft" || c?.phase !== "theirs" || sent?.open !== true || e.revision < (c.revision ?? 0)) return s;
+  if (e.removed === true) return { ...s, sent: { ...sent, later: { revision: e.revision, removed: true } } };
+  return sent.later === undefined || e.changed ? s : { ...s, sent: { ...sent, later: { ...sent.later, revision: e.revision } } };
+}
+
 export function editor(s: Editor, e: EditorEvent): Editor {
-  const n = step(s, e);
+  const n = step(noted(s, e), e);
   const moved = !same(s.held, n.held) || s.conflict?.phase !== n.conflict?.phase || (s.conflict !== undefined && n.conflict !== undefined && !same(s.conflict.mine, n.conflict.mine));
   return moved ? { ...n, version: (s.version ?? 0) + 1 } : n;
 }
@@ -405,8 +418,7 @@ function step(s: Editor, e: EditorEvent): Editor {
       // conflict has followed every draft read since, so the newer revision names it (#551 item 2).
       const later = s.sent?.later;
       if (later === undefined || (c !== undefined && c.phase !== "theirs") || same(s.held, s.saved)) return { ...s, ...closed(s) };
-      const named = [later.revision, c?.revision].filter((r): r is number => r !== undefined);
-      const revision = named.length > 0 ? Math.max(...named) : undefined;
+      const revision = later.revision;
       return { ...s, ...closed(s), held: s.saved, conflict: { ...(c === undefined ? { mine: s.held } : kept(c)), phase: "theirs", ...(revision !== undefined && { revision }) } };
     }
     case "at":
@@ -422,9 +434,11 @@ function step(s: Editor, e: EditorEvent): Editor {
       if (c === undefined) {
         // A read held back for the open write now stands for this draft revision: it changed only
         // another entry (ginsys/bronzeward#551 item 3).
-        if (s.sent?.open === true && s.sent.later !== undefined && !e.changed && e.removed !== true) return { ...s, sent: { ...s.sent, later: { revision: e.revision } } };
+        if (s.sent?.open === true && s.sent.later !== undefined && !e.changed && e.removed !== true) return { ...s, sent: { ...s.sent, later: { ...s.sent.later, revision: e.revision } } };
+        // A newer removal read moves the revision of a removal held back (#559).
+        if (e.removed === true && s.sent?.open === true && s.sent.later?.removed === true && e.revision > (s.sent.later.revision ?? 0)) return { ...s, sent: { ...s.sent, later: { revision: e.revision, removed: true } } };
         if (e.removed !== true || same(s.saved, EMPTY)) return s;
-        if (s.sent?.open === true) return { ...s, saved: EMPTY, sent: { ...s.sent, later: { revision: e.revision } } };
+        if (s.sent?.open === true) return { ...s, saved: EMPTY, sent: { ...s.sent, later: { revision: e.revision, removed: true } } };
         return { ...s, held: EMPTY, saved: EMPTY, ...(!same(s.held, s.saved) && { conflict: { mine: s.held, phase: "theirs" as const, revision: e.revision } }) };
       }
       if (c.phase === "refused" || e.revision < (c.revision ?? 0)) return s;
@@ -443,10 +457,12 @@ function step(s: Editor, e: EditorEvent): Editor {
       if (c.phase === "asked" && (e.changed || s.reading === true)) return at({ revision: e.revision, awaits: true });
       // Once their text shows, another author's removal shows too, as C3 does without a conflict, and
       // ends a repeated Show's wait. Text typed since is the operator's text now (H6). The pane's own
-      // done Remove saved EMPTY and keeps its text (H8); an open write's answer settles it first
-      // (ginsys/bronzeward#551 item 1).
-      if (c.phase === "theirs" && e.removed === true && !same(s.saved, EMPTY) && s.sent?.open !== true) {
+      // done Remove saved EMPTY and keeps its text (H8). An open write's answer settles it first
+      // (ginsys/bronzeward#551 item 1): the removal is held back as without a conflict, `noted` records
+      // it in `sent.later`, and it shows once that write fails or a Save is done (#559).
+      if (c.phase === "theirs" && e.removed === true && !same(s.saved, EMPTY)) {
         const { awaits: _awaited, ...shown } = c;
+        if (s.sent?.open === true) return { ...s, saved: EMPTY, conflict: { ...shown, revision: e.revision } };
         return { ...s, held: EMPTY, saved: EMPTY, conflict: { ...kept(shown), revision: e.revision } };
       }
       // Shown again: the draft read it started ends the wait, since a newer draft read discards an
@@ -483,7 +499,7 @@ function step(s: Editor, e: EditorEvent): Editor {
       const another = (s.own === undefined || e.id !== s.own) && !same(e.text, s.saved);
       const keeps = c === undefined ? !same(s.held, s.saved) : c.phase === "theirs" && (c.typed === true || !same(s.held, s.saved));
       if (another && keeps) {
-        if (s.sent?.open === true) return { ...idle, saved: e.text, sent: { ...s.sent, later: { ...(e.revision !== undefined && { revision: e.revision }) } } };
+        if (s.sent?.open === true) return { ...idle, saved: e.text, sent: { ...s.sent, later: { ...(e.revision !== undefined && { revision: e.revision }), ...(e.id !== undefined && { id: e.id }), text: e.text } } };
         const revision = e.revision ?? c?.revision;
         return { ...idle, saved: e.text, held: e.text, conflict: { ...(c === undefined ? { mine: s.held } : kept(c)), phase: "theirs", ...(revision !== undefined && { revision }) } };
       }
@@ -497,6 +513,16 @@ function step(s: Editor, e: EditorEvent): Editor {
       return { ...s, sent: { text: s.held, whileTheirs: c?.phase === "theirs", open: true, ...(e.removes === true && { removes: true as const }) } };
     case "done": {
       const sent = s.sent?.text ?? s.held;
+      // A Save's done: a read held back while it was open is another author's unless it is the
+      // Save's own revision. With no id on the answer or the read, it cannot be told, and stays the
+      // Save's own (ginsys/bronzeward#559). Their text or removal shows, the editor's text aside.
+      const later = s.sent?.later;
+      const other = s.sent?.removes === true || later === undefined ? undefined : later.removed === true ? EMPTY : later.id !== undefined && e.revision !== undefined && later.id !== e.revision ? later.text : undefined;
+      if (later !== undefined && other !== undefined) {
+        const { own: _own, ...after } = s;
+        return { ...after, ...closed(s), ...(e.revision !== undefined && { own: e.revision }), held: other, saved: other, writes: writes + 1,
+          conflict: { mine: s.held, phase: "theirs", ...(later.revision !== undefined && { revision: later.revision }), ...(c?.awaits === true && { awaits: true as const }) } };
+      }
       // The text the operator chose is saved: a Save sent while theirs showed, or the kept text itself.
       // A Remove saves no text, so the operator's kept text stays for Copy my text (N2).
       const ends = c === undefined || (s.sent?.removes !== true && (s.sent?.whileTheirs === true || same(c.mine, sent)));
@@ -647,6 +673,9 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
   useUnsaved(`fragment ${name || "(new)"} of draft ${short(draft.id)}`, holdsUnsaved(held, saved, conflict?.mine));
   // The draft revision the page shows now, for a revision read that answers later.
   const drafted = useRef(draft.revision);
+  // The done writes now, for a revision read that answers after one finished.
+  const finished = useRef(done);
+  finished.current = done;
 
   useEffect(() => {
     const revision = entry?.revision;
@@ -661,6 +690,10 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
         setFailed(true);
         return setNote("The entry's revision could not be read.");
       }
+      // A write finished while this read was pending: the editor drops the answer of a read that
+      // began before it, and no draft read names the revision again. Read it again, not as loaded
+      // (ginsys/bronzeward#559).
+      if (finished.current !== done) return retry((x) => x + 1);
       setLoaded(revision);
       // The draft revision shown when the read answers: one that changed only another entry while
       // it was pending still names this text, and Copy my text compares with it (PR review).
