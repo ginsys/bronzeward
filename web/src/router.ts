@@ -70,10 +70,14 @@ export function positions(h: Entries, here: () => string, later: (f: () => void)
       shown = { to, at: at ?? shown.at + 1 };
       return true;
     },
-    pushed(to: string): void {
-      home = undefined;
+    // An in-app move, which adds an entry unless `to` is the address already. While a refused move
+    // returns, the address is not the shown page's yet: the move does nothing and is false.
+    moved(to: string): boolean {
+      if (home !== undefined) return false;
+      if (to === here()) return true;
       shown = { to, at: shown.at + 1 };
       h.pushState({ at: shown.at }, "", to);
+      return true;
     },
   };
 }
@@ -104,8 +108,7 @@ export function usePath(guard?: Ask): [string, (to: string) => void, string] {
     return () => removeEventListener("popstate", popped);
   }, [here]);
   const go = useCallback((to: string) => {
-    if (to !== location.pathname + location.search) ours().pushed(to);
-    here();
+    if (ours().moved(to)) here();
   }, [here]);
   return [path, go, query];
 }
