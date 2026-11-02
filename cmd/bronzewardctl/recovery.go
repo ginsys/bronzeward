@@ -103,8 +103,13 @@ func nextStep(c *client.Client, s apitypes.RecoveryScope, revision int) string {
 	case "unresolved":
 		items, err := c.List("/operations?" + url.Values{"machine": {s.Machine}, "state": {"unresolved"}}.Encode())
 		ops, derr := decode[apitypes.OperationBody](c, items...)
-		if err != nil || derr != nil || len(ops) == 0 {
+		if err != nil || derr != nil {
 			return "an operation holds it: operation list --machine " + m
+		}
+		if len(ops) == 0 {
+			// A cancelled or classified operation updates itself, not the scope: it stays unresolved
+			// until it is marked again.
+			return "no unresolved operation holds it now: recovery mark " + m
 		}
 		r, err := c.Get("/operations/" + url.PathEscape(ops[0].Id))
 		var op apitypes.OperationBody
