@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { type Attempt, Client, type ClientOptions } from "./request.ts";
 import { type ShellEvents, ShellReads } from "./shell.tsx";
-import { BACKOFF, EPOCH_CHANGED_ASIDE, MAX_BODY, NO_CREDENTIAL, NO_EPOCH, newKey, RECOVERY_START, RENEWED_LAST, SHELL_GONE, SIGN_IN_CHANGED, SIGN_IN_REFUSED, TOO_LARGE, Write, Writes } from "./write.ts";
+import { BACKOFF, EARLIER_EPOCH, EPOCH_CHANGED_ASIDE, MAX_BODY, NO_CREDENTIAL, NO_EPOCH, newKey, RECOVERY_START, RENEWED_LAST, SHELL_GONE, SIGN_IN_CHANGED, SIGN_IN_REFUSED, TOO_LARGE, Write, Writes } from "./write.ts";
 
 const EPOCH = "e1";
 const PRINCIPAL = "https://idp.invalid SYNTH-sub-1";
@@ -390,6 +390,15 @@ describe("set aside (§8.4 item 3, §8.5 item 2, journeys §8)", () => {
   test("AMB-07: a 409 conflict carrying an earlier epoch's record", async () => {
     const { writes } = page([new TypeError("Failed to fetch"), problem(409, "conflict", { request: "r1", epoch: "e0" })]);
     expect((await writes.submit(spec())).kind).toBe("set-aside");
+  });
+
+  test("an earlier epoch's record is unknown and open even when every earlier answer committed nothing: the record shows a commit (§8.4 item 7)", async () => {
+    const p = page([problem(503, "dependency-unavailable"), problem(409, "conflict", { request: "r1", epoch: "e0" })]);
+    const w = spec();
+    expect(await p.writes.submit(w)).toEqual({
+      kind: "set-aside", why: EARLIER_EPOCH, ambiguous: true, problem: { type: "urn:bronzeward:problem:conflict", title: "conflict", status: 409, request: "r1", epoch: "e0" },
+    });
+    expect(p.writes.open).toEqual([w]);
   });
 
   test("AMB-12: a 412 epoch-mismatch", async () => {
