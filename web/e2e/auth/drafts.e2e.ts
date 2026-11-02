@@ -1,7 +1,8 @@
 // The draft editor (ginsys/bronzeward#339) against the disposable deployment, whose provider is
 // mise run dev-bao's OpenBao (bao.ts): Create draft, a fragment saved and removed, Revert to base,
 // Discard draft, the unsaved guard, ETAG-01, AMB-02, AMB-06, a 422 with [Go to field], and the
-// fragment entry by keyboard only. A document never crosses WebDriver, whose log the artifact scan
+// fragment entry by keyboard only, and the profile entry (pins moved by keyboard, ETAG-01, a 422
+// at its path). A document never crosses WebDriver, whose log the artifact scan
 // reads: the page fetches it from the synthetic provider inside a script, or the case writes it
 // through the API itself. Each document carries the run's canary (syntheticDocument), so the scan
 // finds one in any retained file; no case takes a screenshot or reads a document's text back. The
@@ -30,6 +31,7 @@ type B = WebdriverIO.Browser;
 const pane = (b: B = browser) => b.$('main section[aria-label^="Fragment"]');
 const result = (b: B = browser) => pane(b).$('[data-testid="write-result"]');
 const notice = () => $('[data-testid="write-notice"]');
+const profilePane = (b: B = browser) => b.$('main section[aria-label^="Profile"]');
 
 // A write through the API as `human`, straight to the deployment: its answer's status, ETag and
 // body, which no case prints.
@@ -46,13 +48,19 @@ async function api(human: string, method: string, path: string, body?: unknown, 
 }
 
 // A draft in the case's cluster, with one fragment entry `name` holding its synthetic document.
-async function seeded(name: string): Promise<{ id: string; etag: string }> {
+async function seeded(name: string): Promise<{ id: string; etag: string; revision: string }> {
   const d = await api("h-author", "POST", "/drafts", { cluster: cluster.id, title: `synthetic ${name}` });
   expect(d.status).toBe(201);
   const id = d.body!["id"] as string;
-  const f = await api("h-author", "PUT", `/drafts/${id}/fragments/${name}`, { layer: "role", document: syntheticDocument(name), marks: null, declarations: null }, d.etag);
+  return { id, ...(await putFragment(id, name, d.etag)) };
+}
+
+// A write of fragment `name` through the API: the draft's new ETag and the revision it proposes.
+// A `variant` writes another document, so the fragment has a second revision.
+async function putFragment(id: string, name: string, etag: string, human = "h-author", variant = "") {
+  const f = await api(human, "PUT", `/drafts/${id}/fragments/${name}`, { layer: "role", document: syntheticDocument(`${name}${variant}`), marks: null, declarations: null }, etag);
   expect(f.status).toBe(200);
-  return { id, etag: f.etag };
+  return { etag: f.etag, revision: (f.body!["entry"] as { revision: string }).revision };
 }
 
 // Signs in as h-author on the disposable deployment and opens the draft from the Changes list.
@@ -384,6 +392,115 @@ describe("the draft editor (#339)", () => {
     await expect(result()).toHaveText(expect.stringContaining(`Fragment ${name} saved in draft`), { wait: 30_000 });
     await oneWrite(1);
   });
+
+  // The profile entry's cases, registered here so that AMB-06 stays the last case (mocha runs a
+  // suite's own cases before its nested suites).
+  const profileCases = () => {
+    // The names of the pinned rows, in order: each row starts with its fragment's name.
+    const order = async () => {
+      const items = await profilePane().$$('ol[aria-label="Pinned fragment revisions"] li');
+      const names: string[] = [];
+      for (const li of items) names.push((await li.getText()).split(" ")[0]!);
+      return names;
+    };
+    // Focuses an element of the profile pane, as Tab would.
+    const focusOn = async (selector: string) => {
+      const el = await profilePane().$(selector);
+      await browser.execute((e: HTMLElement) => e.focus(), el as unknown as HTMLElement);
+    };
+    const active = () => browser.execute(() => document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.textContent ?? "");
+    const profileRevisions = async (draft: string, name: string) => {
+      const entries = (await api("h-author", "GET", `/drafts/${draft}`)).body!["entries"] as { kind: string; name?: string; revision: string | null }[];
+      const revision = entries.find((e) => e.kind === "profile" && e.name === name)?.revision;
+      expect(typeof revision).toBe("string");
+      return (await api("h-author", "GET", `/profile-revisions/${revision}`)).body!["fragments"] as string[];
+    };
+    const openProfile = async (draft: string, name: string, pins: number) => {
+      await openDraft(draft);
+      await $('main ul[aria-label="Entries"]').$(`button=profile ${name}`).click();
+      await browser.waitUntil(async () => (await order()).length === pins, { timeout: 20_000, timeoutMsg: "the editor did not load the profile's pins" });
+    };
+
+    it("a profile pins two revisions in order, one is moved and saved by keyboard, and the order reads back", async () => {
+      const a = `pa-${hex()}`;
+      const b = `pb-${hex()}`;
+      const p = `prof-${hex()}`;
+      const first = await seeded(a);
+      const second = await putFragment(first.id, b, first.etag);
+      await openDraft(first.id);
+      await $("main").$("button=Add profile").click();
+      await profilePane().$("label*=name").$("input").setValue(p);
+      for (const r of [first.revision, second.revision]) {
+        await profilePane().$("select").selectByAttribute("value", r);
+        await profilePane().$("button=Add to profile").click();
+      }
+      expect(await order()).toEqual([a, b]);
+      await expect(profilePane()).toHaveText(expect.stringContaining("A profile pins these fragment revisions."));
+      await faults({ upstream: at });
+      await focusOn(`button[aria-label="Move up ${b}"]`);
+      await browser.keys("Enter");
+      expect(await order()).toEqual([b, a]);
+      // The row is first now, so Move up is off and the focus stays on the row's other button.
+      expect(await active()).toBe(`Move down ${b}`);
+      await focusOn("button=Save");
+      await browser.keys("Enter");
+      await expect(profilePane().$('[data-testid="write-result"]')).toHaveText(expect.stringContaining(`Profile ${p} saved in draft`), { wait: 30_000 });
+      await oneWrite(1);
+      expect(await profileRevisions(first.id, p)).toEqual([second.revision, first.revision]);
+      // Signed in again, the page reads the order from the server.
+      await openProfile(first.id, p, 2);
+      expect(await order()).toEqual([b, a]);
+    });
+
+    it("ETAG-01 on a profile: another author's API write moves the draft: 412, no resend, the pins kept, then saved", async () => {
+      const a = `pe-${hex()}`;
+      const b = `pf-${hex()}`;
+      const p = `profe-${hex()}`;
+      const first = await seeded(a);
+      const second = await putFragment(first.id, b, first.etag);
+      const saved = await api("h-author", "PUT", `/drafts/${first.id}/profiles/${p}`, { fragments: [first.revision, second.revision] }, second.etag);
+      expect(saved.status).toBe(200);
+      await openProfile(first.id, p, 2);
+      await profilePane().$(`button[aria-label="Move up ${b}"]`).click();
+      expect(await order()).toEqual([b, a]);
+      const other = await putFragment(first.id, `other-${hex()}`, saved.etag, "h-all");
+      expect(other.etag).not.toBe(saved.etag);
+      const now = (await api("h-author", "GET", `/drafts/${first.id}`)).body!["revision"] as number;
+      await faults({ upstream: at });
+      await profilePane().$("button=Save").click();
+      await expect(profilePane().$('[data-testid="status"]')).toHaveText(expect.stringContaining("Someone changed this draft"), { wait: 20_000 });
+      // No resend: the 412 is the only answer, after the repeats' backoff would have run.
+      await browser.pause(3_000);
+      await oneWrite(1);
+      expect(await order()).toEqual([b, a]);
+      await profilePane().$("button=Show their change").click();
+      await expect($("main h2")).toHaveText(expect.stringContaining(`revision ${now}`), { wait: 20_000 });
+      await profilePane().$("button=Copy my text into the new revision").click();
+      expect(await order()).toEqual([b, a]);
+      await profilePane().$("button=Save").click();
+      await expect(profilePane().$('[data-testid="write-result"]')).toHaveText(expect.stringContaining(`Profile ${p} saved in draft`), { wait: 30_000 });
+      expect(await profileRevisions(first.id, p)).toEqual([second.revision, first.revision]);
+    });
+
+    it("a pin that is not the fragment's current revision is marked, and its 422 names the path and no revision", async () => {
+      const a = `ps-${hex()}`;
+      const p = `profs-${hex()}`;
+      const seed = await seeded(a);
+      const saved = await api("h-author", "PUT", `/drafts/${seed.id}/profiles/${p}`, { fragments: [seed.revision] }, seed.etag);
+      expect(saved.status).toBe(200);
+      // A second revision of the fragment in the draft: the profile's pin is the first.
+      await putFragment(seed.id, a, saved.etag, "h-author", "-2");
+      await openProfile(seed.id, p, 1);
+      await expect(profilePane().$('ol[aria-label="Pinned fragment revisions"]')).toHaveText(expect.stringContaining("pin is not current"), { wait: 20_000 });
+      await faults({ upstream: at });
+      await profilePane().$("button=Save").click();
+      const refused = profilePane().$('[data-testid="write-result"]');
+      await expect(refused).toHaveText(expect.stringContaining("validation-failed"), { wait: 30_000 });
+      await expect(profilePane().$('[data-testid="write-where"]')).toHaveText("At fragments[0].");
+      expect(await refused.getText()).not.toContain(seed.revision);
+    });
+  };
+  profileCases();
 
   it("at 320 CSS pixels a wide row scrolls inside the Drafts and References tables, and the page does not", async () => {
     const wide = `w${"x".repeat(119)}`;
