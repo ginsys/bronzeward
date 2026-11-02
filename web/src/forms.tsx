@@ -8,7 +8,7 @@ import { type Dropped, type Listed, type Load, Ref, short, useList, usePending, 
 import type { Cluster, Machine } from "./machines.tsx";
 import { Action, useOffline } from "./shell.tsx";
 import type { Problem } from "./request.ts";
-import { problemTail, Refused, Repeated, REPLAYED, SetAside, Status, Unknown } from "./states.tsx";
+import { CUT_OFF, problemTail, Refused, Repeated, REPLAYED, SetAside, Status, Unknown } from "./states.tsx";
 import { type Outcome, Write, type Writes, type WriteSpec } from "./write.ts";
 
 type EndpointChange = components["schemas"]["EndpointChangeBody"];
@@ -46,7 +46,7 @@ function settled(o: Outcome): string {
     case "done":
       return `${earlier}Saved (the server answered ${o.status}).${o.defect !== undefined ? ` ${o.defect}` : ""}`;
     case "refused":
-      return `${earlier}Not saved: the server answered ${o.status}.${fields}`;
+      return `${earlier}Not saved: the server answered ${o.status}.${o.cut ? ` ${CUT_OFF}` : ""}${fields}`;
     default:
       return `Not saved: ${o.why}.${fields}`;
   }
@@ -194,7 +194,7 @@ export function Result({ w, done }: { w: Write | undefined; done: (data: unknown
       const named = existing(o.status, o.problem, w.spec.resource);
       return (
         <>
-          <Refused testid="write-result" problem={o.problem} status={o.status} verb="saved" replayed={o.replayed} />
+          <Refused testid="write-result" problem={o.problem} status={o.status} verb="saved" replayed={o.replayed} cut={o.cut === true} />
           {named !== undefined && <Status testid="write-existing">The {named.kind} already recorded: <Ref to={named.to} id={named.id}>{named.id}</Ref>.</Status>}
         </>
       );

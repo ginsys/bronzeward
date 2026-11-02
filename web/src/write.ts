@@ -5,7 +5,7 @@
 // in-progress 409 is repeated within the wait bound (§8.4 item 2, AMB-02; #339). The recovery
 // entry's exception (§8.4 item 3) is the `entry` flag of the spec (#364).
 
-import { type Attempt, type Client, type End, type Ending, NOT_JSON, NOT_SENT, preEntry, type Problem, WRITE_TRANSPORT_FAILURE } from "./request.ts";
+import { type Attempt, type Client, CUT, type End, type Ending, NOT_JSON, NOT_SENT, preEntry, type Problem, WRITE_TRANSPORT_FAILURE } from "./request.ts";
 
 export interface WriteSpec {
   method: "POST" | "PUT" | "DELETE";
@@ -31,8 +31,9 @@ export type Outcome =
   // `defect` when the success carried no Bronzeward-Epoch header (§8.5): still saved, never repeated.
   // `etag` where the answer carries one (§8.3).
   | { kind: "done"; status: number; data: unknown; replayed: boolean; defect?: string; etag?: string }
-  // This send's refusal, or the earlier attempt's when replayed (§8.4 item 2).
-  | { kind: "refused"; status: number; problem: Problem | null; replayed: boolean }
+  // This send's refusal, or the earlier attempt's when replayed (§8.4 item 2). `cut` when the body of
+  // the 4xx answer was cut off, by the network or the attempt bound (§8.4 item 8): `problem` is then null.
+  | { kind: "refused"; status: number; problem: Problem | null; replayed: boolean; cut?: true }
   // Every attempt was answered a 503 that committed nothing (§8.2), or nothing was sent.
   | { kind: "not-done"; why: string; problem: Problem | null }
   // An attempt may have committed (§8.4 item 2). [Repeat exactly] is offered while `repeatable`.
@@ -379,7 +380,7 @@ export class Writes {
       const code = p === null ? undefined : p.type.slice(PREFIX.length);
       last = code === undefined ? `${a.status}` : `${a.status} ${code}`;
       lastProblem = p;
-      const refused: Outcome = { kind: "refused", status: a.status, problem: p, replayed };
+      const refused: Outcome = { kind: "refused", status: a.status, problem: p, replayed, ...(a.data === CUT ? { cut: true as const } : {}) };
       if (a.status === 401) {
         // Renew once; renewed, the next attempt is a repeat with its checks (§8.2 401 row). Renewed
         // after the last attempt, the sign-in stays and the write is not sent again.
@@ -453,8 +454,9 @@ export class Writes {
       // nothing of an earlier attempt: after a lost 201 and a normal restart the first send may have
       // committed, and the repeat is unknown, not "Not saved". With no earlier attempt it is REC-02's refusal.
       if (w.spec.entry === true && a.status === 409 && code === "conflict" && p?.["epoch"] === undefined) return early(refused);
-      // This send's own answer: a repeat that found the key's record would have replayed it.
-      return refused;
+      // This send's own answer: a repeat that found the key's record would have replayed it. A cut-off
+      // body cannot say which, so after an ambiguous attempt it says nothing of it (§8.4 item 8).
+      return a.data === CUT ? early(refused) : refused;
     }
     return w.ambiguous ? unknown() : { kind: "not-done", why: `every attempt was answered ${last}, which commits nothing`, problem: p503 };
   }
