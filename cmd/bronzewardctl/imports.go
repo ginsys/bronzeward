@@ -341,8 +341,13 @@ func (e *env) follow(c *client.Client, a accepted, before int) (err error) {
 	}
 	gen, ours, settled, code := before, before == 0, "", ""
 	next := b.LeaseUntil.Add(leaseMargin)
+	// shown is set by an event and cleared by the Until that follows it: Until asked right after an
+	// event can have more of the backlog behind it, so it reads no lease. A keep-alive, which the
+	// server sends only after it sent everything it had, and a read of the operation can.
+	shown := false
 	o, err := c.Watch(a.Operation, client.Watch{
 		Show: func(ev client.Event) {
+			shown = true
 			var d struct {
 				Generation int    `json:"generation"`
 				Code       string `json:"code"`
@@ -371,7 +376,9 @@ func (e *env) follow(c *client.Client, a accepted, before int) (err error) {
 			gen, ours, settled = before, before == 0, ""
 		},
 		Until: func() (bool, error) {
-			if settled != "" || time.Now().Before(next) {
+			after := shown
+			shown = false
+			if settled != "" || after || time.Now().Before(next) {
 				return settled != "", nil
 			}
 			nb, err := readIngestion(c, a.Ingestion)
