@@ -691,10 +691,11 @@ wait "$stub_a" 2>/dev/null
 # NO_IDP makes A's namespace miss Zitadel, and ISSUER_FAIL, RESTART_FAIL and FWD_FAIL end
 # set_issuer, restart_a and forward_idp as their die does. INT_ON sends the shell a Ctrl-C (SIGINT)
 # during the inspect of that container, INT_PROBE during idp_reached, as a second Ctrl-C during the
-# cleanup does. PREP_FAIL ends prepare, as a release of T9's hold that fails does. Calls go to the
-# log.
+# cleanup does. PREP_FAIL ends prepare, as a release of T9's hold that fails does. HOLD_FAIL ends
+# prepare t9-hold, HOLD_INT sends the shell a Ctrl-C during it, and SQL_FAIL ends every database
+# read. Calls go to the log.
 sed -n -e '/^cleanup_stopped() {$/,/^}$/p' -e '/^handback() {$/,/^}$/p' -e '/^t9_clean() {$/,/^}$/p' \
-  -e '/^t9_release() {$/,/^}$/p' "$session" >"$t/clean.sh"
+  -e '/^t9_release() {$/,/^}$/p' -e '/^t9() {$/,/^}$/p' -e '/^t9_disconnect() {$/,/^}$/p' "$session" >"$t/clean.sh"
 mkdir -p "$t/cbin"
 cat >"$t/cbin/inject" <<'EOF'
 #!/bin/sh
@@ -703,6 +704,10 @@ EOF
 cat >"$t/cbin/prepare" <<'EOF'
 #!/bin/sh
 echo "prepare $*" >>"$T/clean.log"
+if [ "$1" = t9-hold ]; then
+  if [ -n "${HOLD_INT:-}" ]; then kill -INT "$PPID"; sleep 1; fi
+  [ -z "${HOLD_FAIL:-}" ] || exit 1
+fi
 [ -z "${PREP_FAIL:-}" ]
 EOF
 chmod +x "$t/cbin/inject" "$t/cbin/prepare"
@@ -710,7 +715,11 @@ clean_case() {
   : >"$t/clean.log"
   # shellcheck disable=SC2016 # the inner shell's own text
   bash -c 'set -uo pipefail
-    log=$T/clean.log task=t4 bin=$T/cbin here=$T/cbin t9_reader="" BW_A=a BW_B=b BW_C=c
+    log=$T/clean.log task=t4 bin=$T/cbin here=$T/cbin part=$T/part t9_reader="" t9_op="" BW_A=a BW_B=b BW_C=c
+    die() { echo "die: $*" >&2; exit 1; }
+    setup() { :; }
+    sql() { [ -z "${SQL_FAIL:-}" ]; }
+    worker() { echo mch_w; }
     running() { [ -z "${A_STOPPED:-}" ]; }
     idp_reached() { [ -z "${INT_PROBE:-}" ] || kill -INT $$; [ -z "${NO_IDP:-}" ]; }
     restart_a() { echo restart_a; [ -z "${RESTART_FAIL:-}" ] || exit 1; }
@@ -725,7 +734,7 @@ clean_case() {
     [ "$1" != t9_clean ] || trap "exit 130" INT TERM
     . "$0"; "$1"' "$t/clean.sh" "$1" 2>&1
 }
-if [ "$(grep -cE '^(handback|t9_clean|t9_release)\(\) \{' "$t/clean.sh")" = 3 ]; then
+if [ "$(grep -cE '^(handback|t9_clean|t9_release|t9|t9_disconnect)\(\) \{' "$t/clean.sh")" = 5 ]; then
   out=$(PAUSED="a c" clean_case handback)
   calls=$(tr '\n' ' ' <"$t/clean.log")
   if [ "$calls" = "inject unpause A inject unpause C set_issuer zitadel restart_a " ]; then
@@ -782,6 +791,26 @@ if [ "$(grep -cE '^(handback|t9_clean|t9_release)\(\) \{' "$t/clean.sh")" = 3 ];
   if [ "$(cat "$t/clean.log")" = "prepare t9-release" ] && [ -z "$out" ]; then
     ok "t9_release asks prepare to release the hold, and says nothing when it is released"
   else bad "t9_release: $(cat "$t/clean.log") ($out)"; fi
+  # The hold is released on every way out of the t9 setup but success, and of t9 disconnect from
+  # its first read on.
+  out=$(clean_case t9)
+  if [ "$(cat "$t/clean.log")" = "prepare t9-hold" ] && [[ $out == *"held on C"* ]]; then
+    ok "the t9 setup keeps a hold that succeeded"
+  else bad "t9, hold succeeds: $(tr '\n' ' ' <"$t/clean.log") ($out)"; fi
+  out=$(HOLD_FAIL=1 clean_case t9)
+  calls=$(tr '\n' ' ' <"$t/clean.log")
+  if [ "$calls" = "prepare t9-hold prepare t9-release " ] && [[ $out == *"the apply was not held on C"* ]]; then
+    ok "the t9 setup releases a hold that failed"
+  else bad "t9, hold fails: $calls ($out)"; fi
+  out=$(HOLD_INT=1 clean_case t9)
+  calls=$(tr '\n' ' ' <"$t/clean.log")
+  if [ "$calls" = "prepare t9-hold prepare t9-release " ] && [[ $out != *"held on C"* ]]; then
+    ok "the t9 setup releases the hold when a Ctrl-C stops it during the hold"
+  else bad "t9, Ctrl-C during the hold: $calls ($out)"; fi
+  out=$(SQL_FAIL=1 clean_case t9_disconnect)
+  if [ "$(cat "$t/clean.log")" = "prepare t9-release" ] && [[ $out == *"no apply-config operation"* ]]; then
+    ok "t9 disconnect releases the hold when its first read fails"
+  else bad "t9 disconnect, first read fails: $(tr '\n' ' ' <"$t/clean.log") ($out)"; fi
   # The setup after T9 releases the hold first, for a session that skipped t9 disconnect: its
   # `prepare applied` waits for T9's apply to complete.
   if [ "$(sed -n '/^setup_t2() {$/,/^}$/p' "$session" | grep -oE 't9-release|prepare applied' | tr '\n' ' ')" = "t9-release prepare applied " ]; then

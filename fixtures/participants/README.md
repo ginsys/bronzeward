@@ -45,9 +45,10 @@ at `daa4393`. Everything in the environment is synthetic.
 
 If a setup fails or you stop it with Ctrl-C, it unpauses every fixture instance and hands A back on
 Zitadel, with A's forwarder to Zitadel. `t9 disconnect` does the same for A, and ends T9's hold on
-its apply. If that cleanup fails, it tells you to recreate the fixture. If the cleanup hangs, for example on Docker, a second Ctrl-C
-stops it, and it tells you to recreate the fixture. Otherwise you can run the setup again. A second run of `t3`
-goes back to the snapshot that its first run took, before anything was registered.
+its apply. If that cleanup fails, it tells you to recreate the fixture. If the cleanup hangs, for
+example on Docker, a second Ctrl-C stops it, and it tells you to recreate the fixture. Otherwise
+you can run the setup again. A second run of `t3` goes back to the snapshot that its first run
+took, before anything was registered.
 
 ## After each session
 
@@ -177,26 +178,27 @@ facilitator only. Setup `tN` means `fixtures/participants/session tN`.
 
 ### T9: follow the apply
 
-- Role: viewer. Setup: `t9`, then `t9 disconnect` within 2 minutes after it, while the
-  participant follows the apply.
+- Role: viewer. Setup: `t9`, then `t9 disconnect` right after it, while the participant follows
+  the apply.
 - On the fixture, an apply ends about 50 ms after it starts, which is too fast to follow. So `t9`
   holds the apply on instance C after its commitment, before C sends it to the worker. Until
   `t9 disconnect`, the participant sees an apply that is committed and does not go on.
 - `t9 disconnect` stops A for 60 s and starts it again, so that the participant's event stream
   ends and the client must resume it. Then it ends the hold, and the apply completes. Its own
   reader checks that a stream resumed with `Last-Event-ID` follows the apply to completion, with
-  no event lost or repeated. That
-  check covers the server only. No client follows an apply's events yet. The CLI's progress
-  reader resumes a stream only for `publish`, the CLI has no `operation watch`, and the web
-  interface has no operation timeline. That half waits for ginsys/bronzeward#354 (CLI watch) and
-  ginsys/bronzeward#359 (web timeline). Until then, a participant can follow the apply only with
-  repeated `operation show`, and T9's measures do not cover a resumed stream.
-- The hold has two limits. The plan accepts evidence that is at most 300 s old: its observation of
-  the worker before the commitment. If you start `t9 disconnect` within 2 minutes after `t9`, the
-  hold ends within that age. If you start it later, the first attempt is refused, and the apply is
-  observed again and retried. It still completes, with more events, and `t9 disconnect` lists the
-  refusal. The plan expires about 2 hours after the `t9` setup. After that, the apply is cancelled
-  with no attempt, and `t9 disconnect` tells you to run the `t9` setup again.
+  no event lost or repeated. That check covers the server only. No client follows an apply's
+  events yet. The CLI's progress reader resumes a stream only for `publish`, the CLI has no
+  `operation watch`, and the web interface has no operation timeline. That half waits for
+  ginsys/bronzeward#354 (CLI watch) and ginsys/bronzeward#359 (web timeline). Until then, a
+  participant can follow the apply only with repeated `operation show`, and T9's measures do not
+  cover a resumed stream.
+- When A starts again, it takes the apply over from C. It observes the worker again and applies
+  from that observation, so the age of the evidence that the commitment used does not limit the
+  hold. C's own attempt after the release is refused, because C no longer owns the apply. That
+  refusal changes nothing.
+- The hold ends at the plan's expiry, about 2 hours after the `t9` setup. After that, A cancels
+  the apply with no attempt, and `t9 disconnect` names the cause and tells you to run the `t9`
+  setup again. The fixture run of this setup tested a hold of 2 minutes.
 - If you skip `t9 disconnect`, the `t2` setup ends the hold.
 - Prompt: "The approved change is being applied. Follow it until it finishes, and tell me when
   it finished."
