@@ -246,7 +246,9 @@ export class Writes {
 
   // [Repeat exactly]: only while this page holds the request, for the same sign-in and epoch.
   repeatable(w: Write): boolean {
-    return w.outcome?.kind === "unknown" && this.principal() === w.principal && this.client?.writesEnded !== true && (w.spec.entry === true || this.client?.currentEpoch === w.epoch);
+    // A page with no client (after a disconnect) has nothing to send with: the entry's exception to the
+    // epoch check does not offer a repeat that would end as not done and drop the unknown outcome.
+    return w.outcome?.kind === "unknown" && this.principal() === w.principal && this.client !== undefined && this.client.writesEnded !== true && (w.spec.entry === true || this.client.currentEpoch === w.epoch);
   }
 
   // §8.5 item 2 and journeys §8: a new epoch or another sign-in sets every open write aside. One in
@@ -404,8 +406,11 @@ export class Writes {
       if (a.status === 403 && code === "forbidden" && p?.["plan"] === undefined) return early(refused);
       // An earlier epoch's record of this key: that request committed, and its effect may be in the
       // current state (§8.4 item 7). It is set aside as unknown, never as not saved.
-      // The entry's own such refusal is the second reading of REC-02, which its form shows.
-      if (!entry && a.status === 409 && code === "conflict" && p?.["request"] !== undefined && p["epoch"] !== undefined) {
+      // An entry's too: its key's record of an earlier epoch that is not this process's entry (the
+      // server answers `request` and `epoch`) means the first send committed, so a repeat that
+      // reaches a restarted process must not read it as a refusal. REC-02's competing entry under
+      // another key carries `epoch` alone.
+      if (a.status === 409 && code === "conflict" && p?.["request"] !== undefined && p["epoch"] !== undefined) {
         w.ambiguous = true;
         return aside(EARLIER_EPOCH);
       }

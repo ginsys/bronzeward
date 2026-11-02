@@ -50,6 +50,8 @@ describe("the recovery entry (#364)", () => {
     // The refusal says the start is normal, so the restriction the page showed is stale: the shell
     // reads again, finds the server and leaves the state before the entry, and the header keeps why.
     await expect(entered()).toHaveText(expect.stringContaining(NORMAL_START), { wait: 20_000 });
+    // With the refusal's own problem (§8.2), kept after the form went.
+    await expect(entered()).toHaveText(expect.stringContaining("Request "));
     await expect($("main h2")).toHaveText("Machines", { wait: 20_000 });
     expect(await $("body").getText()).not.toContain(PRE_ENTRY);
     const sent = await entries();
@@ -76,7 +78,9 @@ describe("the recovery entry (#364)", () => {
     await expect($('[data-testid="epoch"]')).toHaveText(`Epoch ${epoch}`, { wait: 20_000 });
     await expect($('[data-testid="recovery"]')).toHaveText(expect.stringContaining(`epoch ${epoch}`), { wait: 20_000 });
     expect(await $("body").getText()).not.toContain(NORMAL_START);
-    expect(await entered().isExisting()).toBe(false);
+    // The form is gone with the move, so the header keeps the refusal: its reading and its problem.
+    await expect(entered()).toHaveText(expect.stringContaining(`An entry is already recorded on this server, in epoch ${epoch}`));
+    await expect(entered()).toHaveText(expect.stringContaining("Request "));
     const sent = await entries();
     expect(sent).toHaveLength(1);
     expect(sent[0]![3]).toBe("undefined");
