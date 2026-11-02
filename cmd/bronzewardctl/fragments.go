@@ -313,17 +313,33 @@ func scanMarks(in io.Reader, terminal bool, ask func()) ([]string, error) {
 		ask = func() {}
 	}
 	total := 0
+	// line counts the bytes of the terminal's line read so far. The marks prompt reads the terminal
+	// in canonical mode, where only a line feed ends a line. A carriage return there is a key typed
+	// while the pager had the terminal raw, queued untranslated: it ends a mark (terminalMarkLines)
+	// but not the terminal's line, so the check counts all of the line up to the end of the mark.
+	// The terminal keeps the first terminalLine bytes of a line and drops the rest, so a mark that
+	// ends before that is whole, whatever follows it on the line. When canonical mode comes back, the terminal hands the queued keys on as a line of their
+	// own, and keys typed after that start a new line. The reads do not show where the queued keys
+	// end, so the count goes on into the keys typed after them: it can refuse a mark that was whole,
+	// as it does for a mark that runs on from the queued keys. The reads do not show a line feed
+	// quoted with Ctrl-V either, which does not end the terminal's line: the count resets there, as
+	// terminalLines does, so a line cut short around one is not seen.
+	line := 0
 	for ask(); s.Scan(); ask() {
 		// All the marks together are held to the body limit too, so a long stream of lines is
 		// refused before it is read whole.
-		// A line feed dropped from a split CRLF was read too, so it counts.
+		// A line feed dropped from a split CRLF was read too, so it counts, and it ended the line.
 		if total += len(s.Bytes()) + dropped; total > maxBody {
 			return nil, fmt.Errorf("the marks are %s; nothing was sent", overBodyLimit)
 		}
+		if dropped > 0 {
+			line = 0
+		}
 		dropped = 0
-		// The length check counts the line as the terminal gave it, its carriage return included,
+		// The length check counts the line as the terminal gave it, its carriage returns included,
 		// whether the line feed after it came in the same read or not.
 		raw, ended := strings.CutSuffix(s.Text(), "\n")
+		line += len(raw)
 		m := raw
 		if ended {
 			m = strings.TrimSuffix(raw, "\r")
@@ -339,11 +355,14 @@ func scanMarks(in io.Reader, terminal bool, ask func()) ([]string, error) {
 			return nil, fmt.Errorf("more than %d marks were given, the most one request takes; nothing was sent", maxMarks)
 		case !utf8.ValidString(m):
 			return nil, fmt.Errorf("mark %d is not UTF-8 text; nothing was sent", len(marks)+1)
-		case terminal && len(raw) >= terminalLine:
+		case terminal && line >= terminalLine:
 			return nil, fmt.Errorf("mark %d is %d bytes or more, which a terminal can cut short; give long marks on standard input; nothing was sent",
 				len(marks)+1, terminalLine)
 		}
 		marks = append(marks, m)
+		if ended {
+			line = 0
+		}
 	}
 	if err := s.Err(); err != nil {
 		return nil, fmt.Errorf("reading marks: %w; nothing was sent", err)

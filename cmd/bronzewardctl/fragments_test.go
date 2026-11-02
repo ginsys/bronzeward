@@ -371,3 +371,36 @@ func TestTerminalMarkLimitsInChunks(t *testing.T) {
 		}
 	}
 }
+
+// TestTerminalLineAcrossCarriageReturns: a carriage return typed while the pager had the terminal
+// raw ends a mark but not the terminal's line, so the limit counts the whole line, carriage returns
+// included (#580). A line feed ends the line, also one dropped from a CRLF that the reads split.
+func TestTerminalLineAcrossCarriageReturns(t *testing.T) {
+	first := "doc[0]/a\r"
+	cut := first + strings.Repeat("k", terminalLine-len(first)) + "\n\n"
+	under := first + strings.Repeat("k", terminalLine-len(first)-1) + "\n\n"
+	after := first + "\n" + strings.Repeat("k", terminalLine-1) + "\n\n"
+	// The terminal keeps the first terminalLine bytes of a line, so a mark that ends before them is
+	// whole, though the empty mark after it takes the line to terminalLine.
+	whole := strings.Repeat("k", terminalLine-2) + "\r\r\n"
+	for name, wrap := range map[string]func(io.Reader) io.Reader{
+		"whole": func(r io.Reader) io.Reader { return r },
+		"byte":  iotest.OneByteReader, // reads that end at each carriage return, and split each CRLF
+	} {
+		if _, err := scanMarks(wrap(strings.NewReader(cut)), true, nil); err == nil || !strings.Contains(err.Error(), "mark 2 is 4095 bytes or more") {
+			t.Errorf("%s: a %d-byte line split by a CR: %v; want mark 2 refused as cut short", name, terminalLine, err)
+		}
+		if got, err := scanMarks(wrap(strings.NewReader(under)), true, nil); err != nil || len(got) != 2 {
+			t.Errorf("%s: a %d-byte line split by a CR: %q, %v; want both marks", name, terminalLine-1, got, err)
+		}
+		if got, err := scanMarks(wrap(strings.NewReader(after)), true, nil); err != nil || len(got) != 2 {
+			t.Errorf("%s: a %d-byte line after a CRLF: %q, %v; want both marks", name, terminalLine-1, got, err)
+		}
+		if got, err := scanMarks(wrap(strings.NewReader(whole)), true, nil); err != nil || len(got) != 1 {
+			t.Errorf("%s: a mark that ends at byte %d, then an empty mark: %q, %v; want the mark", name, terminalLine-1, got, err)
+		}
+	}
+	if got, err := scanMarks(strings.NewReader(cut), false, nil); err != nil || len(got) != 1 {
+		t.Errorf("the same bytes from a pipe: %q, %v; want one mark", got, err)
+	}
+}
