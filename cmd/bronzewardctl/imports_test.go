@@ -28,6 +28,8 @@ type importFake struct {
 	onIngested func() // runs when an import start is accepted
 	replayed   bool   // a continuation or takeover answers as a replay
 	pagesGone  bool   // the event pages are refused
+	others     int    // generations other clients take before a continuation or takeover lands
+	mode       string // the staging mode, encrypted when empty
 }
 
 const ingAccepted = `{"ingestion":"ing_BWSYNTH","operation":"op_BWSYNTH-ing"}`
@@ -36,9 +38,13 @@ const ingAccepted = `{"ingestion":"ing_BWSYNTH","operation":"op_BWSYNTH-ing"}`
 const nothing = "\x00nothing"
 
 func (f *importFake) ingestion() string {
-	return fmt.Sprintf(`{"id":"ing_BWSYNTH","kind":"import","mode":"encrypted","state":%q,"machine":"mch_BWSYNTH","draft":"drf_BWSYNTH",`+
+	mode := f.mode
+	if mode == "" {
+		mode = "encrypted"
+	}
+	return fmt.Sprintf(`{"id":"ing_BWSYNTH","kind":"import","mode":%q,"state":%q,"machine":"mch_BWSYNTH","draft":"drf_BWSYNTH",`+
 		`"operation":"op_BWSYNTH-ing","review":"pending","ownerGeneration":%d,"leaseUntil":%q,"expiresAt":"2026-11-01T08:00:00Z","createdAt":"2026-11-01T06:00:00Z"}`,
-		f.claim, f.gen, f.lease.UTC().Format(time.RFC3339))
+		mode, f.claim, f.gen, f.lease.UTC().Format(time.RFC3339))
 }
 
 func (f *importFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -70,6 +76,9 @@ func (f *importFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		record()
 		if f.replayed {
 			w.Header().Set("Idempotent-Replayed", "true")
+		} else {
+			// The server takes the claim at its next generation as it accepts the request.
+			f.gen += f.others + 1
 		}
 		w.WriteHeader(http.StatusAccepted)
 		fmt.Fprint(w, ingAccepted)
@@ -160,7 +169,7 @@ func TestImportLifecycle(t *testing.T) {
 		"Import ing_BWSYNTH started (operation op_BWSYNTH-ing). Staging: encrypted. Review: requested.\nPaused for review (generation 1, expires ",
 		"  staged\n  paused (generation 1)\n", startBody(`"1-BWSYNTH"`, `"review":true,`))
 
-	f.set("released", 2, time.Hour, "succeeded", `{"draft":"drf_BWSYNTH","draftRevision":2,"importBaseRevision":"ibr_BWSYNTH"}`, "",
+	f.set("released", 1, time.Hour, "succeeded", `{"draft":"drf_BWSYNTH","draftRevision":2,"importBaseRevision":"ibr_BWSYNTH"}`, "",
 		ev("paused", `{"type":"paused","generation":1}`), ev("continued", `{"type":"continued","generation":2}`), ev("succeeded", `{"type":"succeeded"}`))
 	f.draftFake.mu.Lock()
 	f.rev = 2 // the import's own write
@@ -185,7 +194,7 @@ func TestImportLifecycle(t *testing.T) {
 	step("so the next write is refused, not resent", []string{"profile", "rm", "workers", "--draft", "drf_BWSYNTH"}, 1, "", "you saw revision 3, it is now revision 5",
 		`DELETE /drafts/drf_BWSYNTH/profiles/workers if-match="3-BWSYNTH" type= body=`)
 
-	f.set("abandoned", 2, time.Hour, "failed", "", `{"type":"urn:bronzeward:problem:precondition-failed","title":"BWSYNTH","status":412}`,
+	f.set("abandoned", 1, time.Hour, "failed", "", `{"type":"urn:bronzeward:problem:precondition-failed","title":"BWSYNTH","status":412}`,
 		ev("paused", `{"type":"paused","generation":1}`), ev("continued", `{"type":"continued","generation":2}`), ev("failed", `{"type":"failed","code":"precondition-failed"}`))
 	step("an overtaken continuation exits 4 and offers a new start", []string{"import", "continue", "ing_BWSYNTH"}, 4, "",
 		"The draft changed after this import started, so the import was not applied and its claim is abandoned. Import again against the draft's current revision:\n"+
@@ -196,7 +205,7 @@ func TestImportLifecycle(t *testing.T) {
 	step("resume-failed exits 1, offering takeover and abandon", []string{"import", "continue", "ing_BWSYNTH"}, 1, "",
 		"or abandon it now:\n  bronzewardctl import takeover ing_BWSYNTH\n  bronzewardctl import abandon ing_BWSYNTH\n", `POST /ingestions/ing_BWSYNTH/continuations if-match= body={}`)
 
-	f.set("held", 2, -time.Minute, "running", "", "", ev("continued", `{"type":"continued","generation":2}`))
+	f.set("held", 1, -time.Minute, "running", "", "", ev("continued", `{"type":"continued","generation":2}`))
 	// Exit 3 leaves standard output empty, the accepted answer included (#256's output rule).
 	step("a lease lapsed with the operation running exits 3 (PROT-06) with nothing on stdout", []string{"import", "continue", "ing_BWSYNTH", "-o", "json"}, 3, nothing,
 		"or abandon it:\n  bronzewardctl import status ing_BWSYNTH\n  bronzewardctl import takeover ing_BWSYNTH\n", `POST /ingestions/ing_BWSYNTH/continuations if-match= body={}`)
@@ -246,4 +255,28 @@ func TestImportLifecycle(t *testing.T) {
 	step("a failed drain keeps the failed import's exit 4", []string{"import", "continue", "ing_BWSYNTH"}, 4, "",
 		"the operation's last events were not shown", `POST /ingestions/ing_BWSYNTH/continuations if-match= body={}`)
 	f.pagesGone = false
+
+	// Another client takes the claim over and pauses at generation 3 between the read before this
+	// continuation and its arrival: the continuation runs at generation 4, and only its pause ends the wait.
+	f.others = 1
+	f.set("paused", 2, time.Hour, "running", "", "", ev("paused", `{"type":"paused","generation":2}`), ev("taken-over", `{"type":"taken-over","generation":3}`),
+		ev("paused", `{"type":"paused","generation":3}`), ev("continued", `{"type":"continued","generation":4}`), ev("paused", `{"type":"paused","generation":4}`))
+	step("another client's pause does not end this continuation's wait", []string{"import", "continue", "ing_BWSYNTH"}, 0, "Paused for review (generation 4,", "",
+		`POST /ingestions/ing_BWSYNTH/continuations if-match= body={}`)
+	f.others = 0
+
+	// Transient staging cannot be taken over (the server refuses it), so nothing offers a takeover.
+	f.mode = "transient"
+	step("draft show reads the current revision", []string{"draft", "show", "drf_BWSYNTH"}, 0, "drf_BWSYNTH", "")
+	f.set("held", 1, -time.Minute, "running", "", "", ev("started", `{"type":"started"}`))
+	step("a lapsed transient import exits 3 offering no takeover", append(start, "--staging", "transient"), 3, nothing,
+		"or abandon it (transient staging cannot be taken over):\n  bronzewardctl import status ing_BWSYNTH\n  bronzewardctl import abandon ing_BWSYNTH\n",
+		strings.Replace(startBody(`"5-BWSYNTH"`, ""), `"encrypted"`, `"transient"`, 1))
+	step("status of a lapsed transient claim offers abandon and a new start", []string{"import", "status", "ing_BWSYNTH"}, 0,
+		"Transient staging cannot be taken over: abandon it and import again:\n  bronzewardctl import abandon ing_BWSYNTH\n"+
+			"  bronzewardctl import start --machine 'mch_BWSYNTH' --draft 'drf_BWSYNTH'", "")
+	f.set("held", 1, time.Hour, "running", "", "")
+	step("status of a live transient claim promises no takeover", []string{"import", "status", "ing_BWSYNTH"}, 0,
+		"Its run holds the claim. Transient staging cannot be taken over; it can be abandoned now:", "")
+	f.mode = ""
 }
