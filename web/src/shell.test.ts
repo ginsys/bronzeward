@@ -1,7 +1,8 @@
+import { readFileSync } from "node:fs";
 import { createElement as h, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
-import { Action, connection, Deprecations, deprecated, ending, Failure, type Identity, identityMain, incompatible, KEPT_PAGE, keepsPage, Kept, MIN_API_REVISION, observed, offlineSince, reading, regaining, ShellContext, type ShellEvents, ShellReads, moveFree, showCurrent } from "./shell.tsx";
+import { Action, connection, Deprecations, deprecated, ending, Failure, heldPage, type Identity, identityMain, incompatible, KEPT_PAGE, keepsPage, Kept, MIN_API_REVISION, observed, offlineSince, reading, regaining, ShellContext, type ShellEvents, ShellReads, moveFree, showCurrent } from "./shell.tsx";
 import { Conflict, Disconnected, Empty, HUMAN_ONLY, Loading, NOT_ACCEPTED, NotAccepted, Offline, Refused, REPEATING, REPLAYED, Replayed, SET_ASIDE, SetAside, Unknown, UNKNOWN, Unread, Withheld, WITHHELD } from "./states.tsx";
 import { NO_EPOCH, SHELL_GONE, Write, Writes } from "./write.ts";
 import { type Attempt, type Client, TRANSPORT_FAILURE } from "./request.ts";
@@ -385,6 +386,19 @@ describe("an identity read that fails after a good one", () => {
     expect(again.props.failed).toBeUndefined();
     // A first read that fails has no page to keep.
     expect(slot({ load: unavailable }).type).not.toBe(good.type);
+  });
+
+  test("ginsys/bronzeward#517 H10 after the #513 rebase: the page kept across an epoch change has the identity branch's type, key and slot", () => {
+    const page = h("section", { id: "page" }, "editor");
+    const good = identityMain({ load: ok }, "s", page) as ReactElement<{ children: unknown; failed: unknown }>;
+    const held = heldPage("s", page) as ReactElement<{ children: unknown; failed: unknown }>;
+    expect(held.type).toBe(good.type);
+    expect(held.key).toBe(good.key);
+    expect(held.props.children).toBe(page);
+    expect(held.props.failed).toBeUndefined();
+    // The shell renders the kept page through it, not as a bare Page that React would mount anew.
+    const src = readFileSync(new URL("./shell.tsx", import.meta.url), "utf8");
+    expect(src).toContain("if (holding) main = heldPage(sub, <Page path={path} query={query} go={go} />);");
   });
 
   test("a refusal that ends the session still ends the page, and keeps nothing", () => {
