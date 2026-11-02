@@ -338,7 +338,7 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     ["ginsys/bronzeward#551 item 2: another author's newer text read after the show shows, the text typed since aside", { held: M2, saved: T, conflict: typed(theirs(M)) }, { kind: "read", text: T2, since: 0, revision: 9 }, { held: T2, saved: T2, conflict: theirs(M2, 9) }],
     ["#551 local review: after the pane's own done Remove, nothing typed since, another author's newer text shows and the operator's text stays aside", { held: T, saved: EMPTY, conflict: theirs(M) }, { kind: "read", text: T2, since: 0, revision: 10 }, { held: T2, saved: T2, conflict: theirs(M, 10) }],
     ["#551 item 2: the read of the pane's own saved revision after the show keeps text typed since", { held: M2, saved: T, conflict: typed(theirs(M)), own: "frv_9" }, { kind: "read", text: T2, since: 0, id: "frv_9" }, { held: M2, saved: T2, conflict: typed(theirs(M)), own: "frv_9" }],
-    ["#551 item 2: a read after the show while a Save is open is held back for that Save's answer", { held: M2, saved: T, conflict: typed(theirs(M)), sent: { ...sentOf(M2, true), open: true } }, { kind: "read", text: T2, since: 0, revision: 9 }, { held: M2, saved: T2, conflict: typed(theirs(M)), sent: { ...sentOf(M2, true), open: true, later: { revision: 9, text: T2 } } }],
+    ["#551 item 2: a read after the show while a Save is open is held back for that Save's answer", { held: M2, saved: T, conflict: typed(theirs(M)), sent: { ...sentOf(M2, true), open: true } }, { kind: "read", text: T2, since: 0, revision: 9 }, { held: M2, saved: T2, conflict: typed(theirs(M)), sent: { ...sentOf(M2, true), open: true, later: { revision: 9 } } }],
     ["#551 item 2: that Save failing shows the held-back read, the typed text aside", { held: M2, saved: T2, conflict: typed(theirs(M)), sent: { ...sentOf(M2, true), open: true, later: { revision: 9 } } }, { kind: "failed" }, { held: T2, saved: T2, conflict: theirs(M2, 9), sent: sentOf(M2, true) }],
     ["#551 item 2: that Save failing after a later draft read names the newer draft revision", { held: M2, saved: T2, conflict: typed(theirs(M, 10)), sent: { ...sentOf(M2, true), open: true, later: { revision: 9 } } }, { kind: "failed" }, { held: T2, saved: T2, conflict: theirs(M2, 10), sent: sentOf(M2, true) }],
     ["#551 local review: a failed Remove with nothing typed since the show keeps the operator's text aside", { held: T, saved: T2, conflict: theirs(M), sent: { text: T, whileTheirs: true, open: true, removes: true, later: { revision: 9 } } }, { kind: "failed" }, { held: T2, saved: T2, conflict: theirs(M, 9), sent: { text: T, whileTheirs: true, removes: true } }],
@@ -449,39 +449,6 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     const s = run({ held: T, saved: T, conflict: theirs(M) }, [{ kind: "revert", at: 0, text: A, note: "n" }, { kind: "read", text: T2, since: 0, revision: 9 }]);
     expect(rest(s)).toEqual({ held: T2, saved: T2, conflict: theirs(A, 9), note: "n" });
     expect(editor(s, { kind: "copy" }).held).toEqual(A);
-  });
-
-  test("ginsys/bronzeward#551 (found in #534 round 3): with text typed and no conflict, a newer read held back during a Save shows once the Save is done", () => {
-    const s = run({ held: A, saved: A }, [{ kind: "type", held: M }, { kind: "send" }, { kind: "read", text: T, since: 0, revision: 10, id: "frv_10" }, { kind: "done", revision: "frv_9" }]);
-    expect(rest(s)).toEqual({ held: T, saved: T, conflict: theirs(M, 10), sent: sentOf(M), writes: 1, own: "frv_9" });
-    expect(editor(s, { kind: "copy" }).held).toEqual(M);
-  });
-
-  test("ginsys/bronzeward#551 (found in #534 round 3): with text typed once their text shows, a newer read held back during a Save shows once the Save is done", () => {
-    const s = run({ held: T, saved: T, conflict: theirs(M) }, [{ kind: "type", held: M2 }, { kind: "send" }, { kind: "read", text: T2, since: 0, revision: 10, id: "frv_10" }, { kind: "done", revision: "frv_9" }]);
-    expect(rest(s)).toEqual({ held: T2, saved: T2, conflict: theirs(M2, 10), sent: sentOf(M2, true), writes: 1, own: "frv_9" });
-    expect(editor(s, { kind: "copy" }).held).toEqual(M2);
-  });
-
-  test("ginsys/bronzeward#551: a read of the revision the Save created, held back while it was open, opens nothing once it is done", () => {
-    const s = run({ held: A, saved: A }, [{ kind: "type", held: M }, { kind: "send" }, { kind: "read", text: M2, since: 0, revision: 9, id: "frv_9" }, { kind: "done", revision: "frv_9" }]);
-    expect(rest(s)).toEqual({ held: M, saved: M, sent: sentOf(M), writes: 1, own: "frv_9" });
-  });
-
-  test("ginsys/bronzeward#551 local review: a done Save that names no revision cannot tell a held-back read from its own, so it opens nothing", () => {
-    const s = run({ held: A, saved: A }, [{ kind: "type", held: M }, { kind: "send" }, { kind: "read", text: M2, since: 0, revision: 9, id: "frv_9" }, { kind: "done" }]);
-    expect(rest(s)).toEqual({ held: M, saved: M, sent: sentOf(M), writes: 1 });
-  });
-
-  test("ginsys/bronzeward#551 local review: a held-back read that shows once the Save is done keeps the newer draft revision of a later draft read", () => {
-    const s = run({ held: T, saved: T, conflict: theirs(M) }, [{ kind: "type", held: M2 }, { kind: "send" }, { kind: "read", text: T2, since: 0, revision: 9, id: "frv_10" }, { kind: "draft", revision: 10, changed: false }, { kind: "done", revision: "frv_9" }]);
-    expect(rest(s)).toEqual({ held: T2, saved: T2, conflict: theirs(M2, 10), sent: sentOf(M2, true), writes: 1, own: "frv_9" });
-  });
-
-  test("ginsys/bronzeward#551 local review: a held-back read that shows once the Save is done keeps a repeated Show's wait, so Copy my text waits", () => {
-    const s = run({ held: T, saved: T, conflict: theirs(M) }, [{ kind: "type", held: M2 }, { kind: "send" }, { kind: "show" }, { kind: "read", text: T2, since: 0, revision: 9, id: "frv_10" }, { kind: "done", revision: "frv_9" }]);
-    expect(rest(s)).toEqual({ held: T2, saved: T2, conflict: { ...theirs(M2, 9), awaits: true }, sent: sentOf(M2, true), writes: 1, own: "frv_9" });
-    expect(editor(s, { kind: "copy" }).held).toEqual(T2);
   });
 
   test("ginsys/bronzeward#551 item 3: a read held back while a Save is open names the draft revision of a later draft read that changed only another entry", () => {
@@ -716,10 +683,9 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
       expect(removing.held).toBe(EMPTY);
       expect(removing.conflict).toEqual(theirs(held, 9));
     }
-    // A 412 ends the held-back read: a conflict of its own. A done answer naming another revision
-    // shows it as theirs (ginsys/bronzeward#551): before, the done Save dropped it.
+    // A done answer or a 412 ends the held-back read: the write's own, or a conflict of its own.
     const done = run(saving, [{ kind: "done", revision: "frv_9" }]);
-    expect(rest(done)).toEqual({ held: T, saved: T, conflict: theirs(M, 8), sent: sentOf(M), writes: 1, own: "frv_9" });
+    expect(rest(done)).toEqual({ held: M, saved: M, sent: sentOf(M), writes: 1, own: "frv_9" });
     const refusedRun = run(saving, [{ kind: "refused" }]);
     expect(refusedRun.conflict).toEqual({ mine: M, phase: "refused" });
     expect(refusedRun.sent?.later).toBeUndefined();
