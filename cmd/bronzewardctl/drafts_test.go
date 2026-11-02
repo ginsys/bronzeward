@@ -378,14 +378,21 @@ func TestDraftEditing(t *testing.T) {
 // When the epoch moves after the draft was read, at any of these reads, the pins are of an earlier
 // snapshot: nothing is sent, and the refusal says so (client-contracts.md section 8.5).
 func TestProfileSetRefusesMixedPins(t *testing.T) {
+	const listWant = "the epoch changed from 'ep_BWSYNTH-1' to 'ep_BWSYNTH-2' while the pins were read, so nothing was sent; " +
+		"read the draft again with: bronzewardctl draft show 'drf_BWSYNTH'"
+	const sendWant = "not sent: the epoch changed from 'ep_BWSYNTH-1' to 'ep_BWSYNTH-2' after the request was built from reads of the earlier one. Nothing was sent. " +
+		"Read again with: bronzewardctl --context 'lab' draft show 'drf_BWSYNTH', then run this command again"
 	for _, c := range []struct {
 		name     string
 		fragment string // the name to pin
 		move     func(*draftFake)
+		want     string
 	}{
-		{"the fragment list shows the new epoch", "worker-sysctls", func(f *draftFake) { f.fragmentsEpoch, f.serverEpoch = "ep_BWSYNTH-2", "ep_BWSYNTH-2" }},
-		{"only the write's server read shows it", "worker-sysctls", func(f *draftFake) { f.serverEpoch = "ep_BWSYNTH-2" }},
-		{"the draft proposes the pin, so no list is read", "worker-labels", func(f *draftFake) { f.serverEpoch = "ep_BWSYNTH-2" }},
+		{"the fragment list shows the new epoch", "worker-sysctls", func(f *draftFake) { f.fragmentsEpoch, f.serverEpoch = "ep_BWSYNTH-2", "ep_BWSYNTH-2" }, listWant},
+		// The write's own server read answers the first epoch again, so only the list answer itself shows the change.
+		{"the fragment list shows it and the server read sets it back", "worker-sysctls", func(f *draftFake) { f.fragmentsEpoch = "ep_BWSYNTH-2" }, listWant},
+		{"only the write's server read shows it", "worker-sysctls", func(f *draftFake) { f.serverEpoch = "ep_BWSYNTH-2" }, sendWant},
+		{"the draft proposes the pin, so no list is read", "worker-labels", func(f *draftFake) { f.serverEpoch = "ep_BWSYNTH-2" }, sendWant},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			f := &draftFake{rev: 1, state: "open"}
@@ -407,10 +414,8 @@ func TestProfileSetRefusesMixedPins(t *testing.T) {
 			f.mu.Unlock()
 			// --if-match gives the write an ETag that the crossing did not drop, so only this check holds it back.
 			code, out, errText := exec("profile", "set", "workers", "--draft", "drf_BWSYNTH", "--fragments", c.fragment, `--if-match="1-BWSYNTH"`)
-			want := "not sent: the epoch changed from 'ep_BWSYNTH-1' to 'ep_BWSYNTH-2' after the request was built from reads of the earlier one. Nothing was sent. " +
-				"Read again with: bronzewardctl --context 'lab' draft show 'drf_BWSYNTH', then run this command again"
-			if code != 1 || out != "" || !strings.Contains(errText, want) {
-				t.Errorf("exit %d, stdout %q, stderr %q; want 1, nothing and %q", code, out, errText, want)
+			if code != 1 || out != "" || !strings.Contains(errText, c.want) {
+				t.Errorf("exit %d, stdout %q, stderr %q; want 1, nothing and %q", code, out, errText, c.want)
 			}
 			if w := f.took(); len(w) != 0 {
 				t.Errorf("sent %q; want nothing", w)

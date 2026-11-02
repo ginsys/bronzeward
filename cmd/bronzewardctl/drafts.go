@@ -164,8 +164,15 @@ func pins(c *client.Client, draft string, names []string) ([]string, string, err
 			out[i] = *rev
 			continue
 		case heads == nil:
-			if heads, err = fragmentHeads(c, d.Cluster); err != nil {
+			var listed string
+			if heads, listed, err = fragmentHeads(c, d.Cluster); err != nil {
 				return nil, "", err
+			}
+			// The list answer is compared with the draft answer itself: the write checks the client's
+			// last epoch, which a later read can set back (client-contracts.md section 8.5).
+			if first != "" && listed != "" && listed != first {
+				return nil, "", ef("the epoch changed from %s to %s while the pins were read, so nothing was sent; read the draft again with: bronzewardctl draft show %s",
+					client.ShellWord(first), client.ShellWord(listed), client.ShellWord(draft))
 			}
 		}
 		if heads[n] == nil {
@@ -178,22 +185,23 @@ func pins(c *client.Client, draft string, names []string) ([]string, string, err
 
 // fragmentHeads maps the names of cluster's fragments to their head revisions, read from every
 // page of GET /fragments, which serves no name filter (api/openapi.yaml).
-func fragmentHeads(c *client.Client, cluster string) (map[string]*string, error) {
-	items, err := c.List("/fragments")
+// It also returns the epoch of the list answer.
+func fragmentHeads(c *client.Client, cluster string) (map[string]*string, string, error) {
+	items, epoch, err := c.ListAt("/fragments")
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	heads := map[string]*string{}
 	for i, raw := range items {
 		var f apitypes.FragmentBody
 		if err := json.Unmarshal(raw, &f); err != nil {
-			return nil, ef("GET /api/v1/fragments: item %d cannot be read: %w", i, err)
+			return nil, "", ef("GET /api/v1/fragments: item %d cannot be read: %w", i, err)
 		}
 		if f.Cluster == cluster {
 			heads[f.Name] = f.Revision
 		}
 	}
-	return heads, nil
+	return heads, epoch, nil
 }
 
 // layerFragments is assignment set's repeated --fragment <layer>=<name>[,<name>].
