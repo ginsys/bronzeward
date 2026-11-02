@@ -770,3 +770,29 @@ func TestIdentityConfirmationComparesTheRawValue(t *testing.T) {
 		}
 	}
 }
+
+// TestMachineAddNamesTheClusterFromTheSameEpoch: machine add shows the cluster's name from a second
+// read. When the epoch moved after the write's answer, the name is of another snapshot: the
+// cluster ID is shown alone, and the write is still reported as done (client-contracts.md section 8.5).
+func TestMachineAddNamesTheClusterFromTheSameEpoch(t *testing.T) {
+	args := []string{"machine", "add", "--cluster", "cl_c", "--talos-node-id", "n", "--platform", "metal", "--talos-endpoint", "10.0.0.5:50000"}
+	for _, c := range []struct {
+		name  string
+		moved map[string]string
+		want  string
+	}{
+		{"the epoch holds", nil, "Machine mch_new recorded in cluster cl_c (lab-a). Endpoint 10.0.0.5:50000."},
+		{"the epoch moves before the cluster read", map[string]string{"/api/v1/clusters/cl_c": "ep_BWSYNTH-2"}, "Machine mch_new recorded in cluster cl_c. Endpoint 10.0.0.5:50000."},
+	} {
+		setServerFacts(t, 3, c.moved)
+		recoveryServer(t, map[string]string{
+			"GET /api/v1/recovery":      `{"epoch":"ep_BWSYNTH-1","recoveryMode":false}`,
+			"GET /api/v1/clusters/cl_c": `{"id":"cl_c","name":"lab-a"}`,
+		}, `{"id":"mch_new","cluster":"cl_c","talosEndpoint":"10.0.0.5:50000"}`)
+		var out, errb bytes.Buffer
+		code := run(args, &out, &errb)
+		if code != 0 || !strings.Contains(out.String(), c.want+"\n") {
+			t.Errorf("%s: exit %d, stdout %q, stderr %q; want 0 and %q", c.name, code, out.String(), errb.String(), c.want)
+		}
+	}
+}

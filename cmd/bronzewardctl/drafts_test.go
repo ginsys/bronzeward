@@ -35,8 +35,10 @@ type draftFake struct {
 	// recovery mode.
 	epoch    string
 	recovery bool
-	// serverEpoch replaces the epoch on GET /server's answer alone.
-	serverEpoch string
+	// serverEpoch replaces the epoch on GET /server's answer alone; fragmentsEpoch does the same for
+	// GET /fragments.
+	serverEpoch    string
+	fragmentsEpoch string
 }
 
 func (f *draftFake) etag() string { return fmt.Sprintf(`"%d-BWSYNTH"`, f.rev) }
@@ -85,6 +87,9 @@ func (f *draftFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "GET /identity":
 		fmt.Fprint(w, `{"kind":"service","principal":"svc_BWSYNTH"}`)
 	case "GET /fragments":
+		if f.fragmentsEpoch != "" {
+			w.Header().Set("Bronzeward-Epoch", f.fragmentsEpoch)
+		}
 		fmt.Fprint(w, `{"items":[{"id":"frg_1","name":"worker-sysctls","cluster":"cl_BWSYNTH","revision":"frv_BWSYNTH-head"},`+
 			`{"id":"frg_2","name":"worker-sysctls","cluster":"cl_BWSYNTH-other","revision":"frv_BWSYNTH-elsewhere"}]}`)
 	case "GET /drafts/drf_BWSYNTH":
@@ -366,4 +371,37 @@ func TestDraftEditing(t *testing.T) {
 	step("discard forgot the ETag", []string{"profile", "rm", "workers", "--draft", "drf_BWSYNTH"}, 1, "", "Read the draft first")
 	step("draft show of a closed draft keeps none", []string{"draft", "show", "drf_BWSYNTH"}, 0, "drf_BWSYNTH", "")
 	step("so a write still needs a read", []string{"profile", "rm", "workers", "--draft", "drf_BWSYNTH"}, 1, "", "Read the draft first")
+}
+
+// TestProfileSetRefusesMixedPins: the pins of profile set come from the draft and, for a name the
+// draft does not propose, from GET /fragments. When the epoch moves between the two reads, the pins
+// are of two snapshots: nothing is sent, and the refusal says so (client-contracts.md section 8.5).
+func TestProfileSetRefusesMixedPins(t *testing.T) {
+	f := &draftFake{rev: 1, state: "open"}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	exec := func(args ...string) (int, string, string) {
+		t.Helper()
+		var o, e bytes.Buffer
+		code := run(args, &o, &e)
+		return code, o.String(), e.String()
+	}
+	if code, _, e := exec("draft", "show", "drf_BWSYNTH"); code != 0 {
+		t.Fatalf("draft show: exit %d, stderr %q", code, e)
+	}
+	f.took()
+	f.mu.Lock()
+	f.fragmentsEpoch, f.serverEpoch = "ep_BWSYNTH-2", "ep_BWSYNTH-2"
+	f.mu.Unlock()
+	// --if-match gives the write an ETag that the crossing did not drop, so only this check holds it back.
+	code, out, errText := exec("profile", "set", "workers", "--draft", "drf_BWSYNTH", "--fragments", "worker-sysctls", `--if-match="1-BWSYNTH"`)
+	want := "the epoch changed from 'ep_BWSYNTH-1' to 'ep_BWSYNTH-2' while draft drf_BWSYNTH and the fragment heads were read; nothing was sent. " +
+		"Read the draft again with: draft show 'drf_BWSYNTH', then run this command again"
+	if code != 1 || out != "" || !strings.Contains(errText, want) {
+		t.Errorf("exit %d, stdout %q, stderr %q; want 1, nothing and %q", code, out, errText, want)
+	}
+	if w := f.took(); len(w) != 0 {
+		t.Errorf("sent %q; want nothing", w)
+	}
 }
