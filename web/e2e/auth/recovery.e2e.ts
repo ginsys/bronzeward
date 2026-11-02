@@ -5,7 +5,7 @@ import { $, browser, expect } from "@wdio/globals";
 import { NORMAL_START, PRE_ENTRY } from "../../src/recovery.tsx";
 import { SET_ASIDE } from "../../src/states.tsx";
 import { CONTROL } from "../auth.conf.ts";
-import { answers, faults, fixtureSignIn, mint, storageEmpty } from "./helpers.ts";
+import { answers, faults, fixtureSignIn, mint, seen, storageEmpty } from "./helpers.ts";
 
 const result = () => $('[data-testid="write-result"]');
 const entered = () => $('[data-testid="entered"]');
@@ -47,12 +47,15 @@ describe("the recovery entry (#364)", () => {
     // The injected refusal stood for the restriction; the entry itself reaches the normal start.
     await faults({ upstream: at });
     await $("main form").$("button=Enter recovery").click();
-    await expect(result()).toHaveText(expect.stringContaining(NORMAL_START), { wait: 20_000 });
+    // The refusal says the start is normal, so the restriction the page showed is stale: the shell
+    // reads again, finds the server and leaves the state before the entry, and the header keeps why.
+    await expect(entered()).toHaveText(expect.stringContaining(NORMAL_START), { wait: 20_000 });
+    await expect($("main h2")).toHaveText("Machines", { wait: 20_000 });
+    expect(await $("body").getText()).not.toContain(PRE_ENTRY);
     const sent = await entries();
     expect(sent).toHaveLength(1);
     // The entry is sent without the epoch header (§8.4 item 3), the first send included.
     expect(sent[0]![3]).toBe("undefined");
-    expect(await entered().isExisting()).toBe(false);
   });
 
   it("REC-02: an entry sent to a recovery start whose entry committed under another key is read as one: 409 conflict with an epoch", async () => {
@@ -98,6 +101,30 @@ describe("the recovery entry (#364)", () => {
     expect(await entered().getText()).toMatch(/Epoch \S+, was \S+\./);
     // Not set aside, though the epoch changed under the write.
     expect(await $("body").getText()).not.toContain(SET_ASIDE);
+  });
+
+  it("the exit with no scope in recovery is sent once, and the console reads again once, not in a loop", async () => {
+    const at = await open("recovery");
+    const when = stamp();
+    const made = await fetch(`${at}/api/v1/recovery/entries`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${mint("h-recovery")}`, "Content-Type": "application/json", "Idempotency-Key": `rec-364-${Date.now()}-exit` },
+      body: JSON.stringify({ restored: [{ family: "database", backup: "synthetic-backup-exit", takenAt: when }], stoppedAt: when, reason: "exit synthetic restore" }),
+    });
+    expect(made.status).toBe(201);
+    expect(await fixtureSignIn("h-recovery", {}, { upstream: at })).toMatch(/^Server .+, API revision \d+$/);
+    await $('nav[aria-label="Main"]').$("a=Recovery").click();
+    const exit = $("main form[aria-label='Exit recovery']");
+    await expect(exit).toBeExisting({ wait: 20_000 });
+    expect(await exit.$("button=Exit recovery").isEnabled()).toBe(true);
+    await exit.$("button=Exit recovery").click();
+    await expect(exit.$('[data-testid="write-result"]')).toHaveText(expect.stringContaining("Recovery mode left"), { wait: 20_000 });
+    const before = (await seen()).filter((p) => p === "/recovery").length;
+    // Longer than a re-read after each answer: a loop on the completed exit would add many reads.
+    await browser.pause(3_000);
+    const after = (await seen()).filter((p) => p === "/recovery").length;
+    expect(after - before).toBeLessThanOrEqual(1);
+    expect((await writes()).filter(([, route]) => route === "/recovery/exits")).toHaveLength(1);
   });
 
   it("the exit and the revocation stay off for a role without recovery-admin, and the page says why", async () => {

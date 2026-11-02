@@ -2,10 +2,11 @@
 // recovery banner with its scope summary and process restriction, and the state before a recovery
 // start's entry.
 
-import { type FormEvent, type ReactNode, useEffect, useState, useSyncExternalStore } from "react";
+import { type FormEvent, type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Result, useSend, useWrites } from "./forms.tsx";
 import { Head, Id, Scroll, useItem } from "./list.tsx";
-import type { ReadResult } from "./request.ts";
+import type { Problem, ReadResult } from "./request.ts";
+import type { Outcome } from "./write.ts";
 import { useGate, useOffline, useRecoveryState } from "./shell.tsx";
 import { clock, Disconnected, ProblemFields, problemFields, Refused, Status, when } from "./states.tsx";
 import type { components } from "./api/v1";
@@ -70,7 +71,7 @@ export const PreEntry = ({ res, onRead }: { res: ReadResult<unknown>; onRead: ()
   <>
     <Status actions={<button type="button" onClick={onRead}>Read again</button>}>{PRE_ENTRY}</Status>
     <ProblemFields text={problemFields(res)} />
-    <EnterRecovery />
+    <EnterRecovery onRead={onRead} />
   </>
 );
 
@@ -127,19 +128,27 @@ export const unreleased = (scopes: readonly Scope[]) => inRecovery(scopes).filte
 
 // The result of the entry this page made, kept after the epoch change its commit causes replaced the
 // page it was sent from (the entry's form lives on the start's pre-entry state, which that read ends).
-let entered: EntryBody | undefined;
+// It is the entry's body; null when the success could not be read (it is still saved); "normal" when
+// the server answered that it takes no entry (REC-02), so the restriction the page showed is stale.
+type Noted = EntryBody | null | "normal";
+let entered: Noted | undefined;
 const listeners = new Set<() => void>();
-const enter = (e: EntryBody | undefined) => {
+export const noteEntry = (e: Noted | undefined) => {
   entered = e;
   for (const f of listeners) f();
 };
 const watch = (f: () => void) => (listeners.add(f), () => void listeners.delete(f));
 
 export function Entered() {
-  useSyncExternalStore(watch, () => entered);
+  useSyncExternalStore(watch, () => entered, () => entered);
   if (entered === undefined) return null;
+  const dismiss = <button type="button" onClick={() => noteEntry(undefined)}>Dismiss</button>;
+  if (entered === "normal") return <Status testid="entered" actions={dismiss}>{NORMAL_START}</Status>;
+  if (entered === null) {
+    return <Status testid="entered" actions={dismiss}>Recovery entry saved (the server answered), but its answer could not be read. Read the Recovery page.</Status>;
+  }
   return (
-    <Status testid="entered" actions={<button type="button" onClick={() => enter(undefined)}>Dismiss</button>}>
+    <Status testid="entered" actions={dismiss}>
       Recovery mode entered (act {entered.act}). Epoch {entered.epoch}, was {entered.previousEpoch}. Scopes marked pre-restore-unaccounted: {entered.machines} machines.
       Apply-config operations taken over: {entered.operations.length === 0 ? "none" : entered.operations.join(", ")}. Restart the server normally when ready; recovery mode continues.
     </Status>
@@ -150,10 +159,14 @@ const TIME = /^\d{4}-\d\d-\d\dT\d\d:\d\d(:\d\d(\.\d+)?)?(Z|[+-]\d\d:\d\d)$/;
 const FAMILIES = ["database", "provider", "credential-store"] as const;
 const stamp = (v: string) => (TIME.test(v) && !Number.isNaN(Date.parse(v)) ? new Date(v).toISOString() : undefined);
 const text = (d: FormData, n: string) => String(d.get(n) ?? "").trim();
+// The 409 conflict an entry meets on a start that takes none (no `epoch`) or one already entered under
+// another key (with `epoch`).
+const conflict = (o: Outcome | undefined): Problem | undefined =>
+  o?.kind === "refused" && o.status === 409 && o.problem?.type === "urn:bronzeward:problem:conflict" ? o.problem : undefined;
 
 // B31, on a recovery start before its entry. REC-02: a 409 conflict without `epoch` is read as a
 // normal start; one with `epoch` is a recovery start whose entry committed under another key.
-export function EnterRecovery() {
+export function EnterRecovery({ onRead }: { onRead?: () => void }) {
   const writes = useWrites();
   const [w, send] = useSend();
   const [typed, type] = useState("");
@@ -179,10 +192,15 @@ export function EnterRecovery() {
       : undefined;
     complain(why);
     if (why !== undefined) return;
-    send({ method: "POST", path: "/recovery/entries", resource: "/recovery", entry: true, body: { restored, stoppedAt, reason }, settled: (o) => o.kind === "done" && enter(o.data as EntryBody) });
+    const settled = (o: Outcome) => {
+      if (o.kind === "done") noteEntry(typeof o.data === "object" && o.data !== null ? (o.data as EntryBody) : null);
+      // REC-02: a start that takes no entry. The page's restriction is stale, so the shell reads again.
+      else if (conflict(o) !== undefined && conflict(o)?.["epoch"] === undefined) (noteEntry("normal"), onRead?.());
+    };
+    send({ method: "POST", path: "/recovery/entries", resource: "/recovery", entry: true, body: { restored, stoppedAt, reason }, settled });
   };
   const o = w?.outcome;
-  const p = o?.kind === "refused" && o.status === 409 && o.problem?.type === "urn:bronzeward:problem:conflict" ? o.problem : undefined;
+  const p = conflict(o);
   return (
     <form onSubmit={submit} aria-label="Enter recovery">
       <h2>Enter recovery</h2>
@@ -215,11 +233,14 @@ export const REREAD_MS = 5000;
 
 export function RecoveryConsole() {
   const [n, again] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => again((i) => i + 1), REREAD_MS);
-    return () => clearInterval(t);
-  }, []);
   const read = useItem<Recovery>("/recovery", undefined, n);
+  // The next read is scheduled when the last one has settled, so a slow answer is never discarded by
+  // the next tick (a read started over an unsettled one invalidates it).
+  useEffect(() => {
+    if (read.kind === "loading") return;
+    const t = setTimeout(() => again((i) => i + 1), REREAD_MS);
+    return () => clearTimeout(t);
+  }, [read]);
   const { mode } = useRecoveryState();
   if (read.kind === "loading") return <><h2>Recovery</h2><Status>Loading the recovery state</Status></>;
   if (read.kind === "discarded") return null;
@@ -273,9 +294,12 @@ export function ExitRecovery({ held, recoveryMode, onChanged }: { held: number; 
   const writes = useWrites();
   const busy = w !== undefined && writes?.open.includes(w) === true;
   const done = w?.outcome?.kind === "done";
+  // Once per completed exit: the parent's callback changes on every render, so it is not a dependency.
+  const changed = useRef(onChanged);
+  changed.current = onChanged;
   useEffect(() => {
-    if (done) onChanged();
-  }, [done, onChanged]);
+    if (done) changed.current();
+  }, [done]);
   const reason = !recoveryMode ? "Recovery mode is off" : held > 0 ? `${held} ${held === 1 ? "scope" : "scopes"} not released (ready is not released)` : undefined;
   const why = gate ?? reason;
   return (
