@@ -2,7 +2,7 @@ import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { components } from "./api/v1";
-import { change, doneOnce, FragmentPane, forgetETag, keepETag, keptETag, LAYERS, NOT_RENDERED } from "./drafts.tsx";
+import { afterRead, change, createdId, doneOnce, EMPTY, FragmentPane, follow, forgetETag, type Held, holdsUnsaved, keepETag, keepOnDone, keptETag, LAYERS, markLine, mayDrop, NOT_RENDERED, where } from "./drafts.tsx";
 import { leaving, unsaved, WritesProvider } from "./forms.tsx";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import { references, spotOfLine, spotOfPath, spotOfReference } from "./position.ts";
@@ -125,6 +125,84 @@ describe("the unsaved-change guard (§11.4 item 3)", () => {
     // A write notice's own way out still asks for unsaved text.
     expect(leaving(writes, "/machines", true)).toBe(false);
     expect(ask).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("the editor's text is kept until the operator drops it (#339 round 1)", () => {
+  const held = (document: string): Held => ({ ...EMPTY, document });
+
+  test("a switch to another entry asks while an editor holds unsaved text", () => {
+    const ask = vi.fn(() => false);
+    vi.stubGlobal("confirm", ask);
+    expect(mayDrop()).toBe(true);
+    expect(ask).not.toHaveBeenCalled();
+    unsaved.add("fragment f of draft drf_1");
+    expect(mayDrop()).toBe(false);
+    expect(ask).toHaveBeenCalledWith("Unsaved text in fragment f of draft drf_1: switching drops it.\nSwitch entry?");
+  });
+
+  test("a revision read replaces the text only when nothing was typed since the last save, or a conflict keeps the typed text", () => {
+    const saved = held("a: 1\n");
+    const read = held("a: 2\n");
+    expect(afterRead(saved, saved, read, false)).toBe(read);
+    const typed = held("a: 1\nb: 2\n");
+    expect(afterRead(typed, saved, read, false)).toBe(typed);
+    expect(afterRead(typed, saved, read, true)).toBe(read);
+  });
+
+  test("an open conflict keeps the guard, even once the editor shows their text", () => {
+    const theirs = held("a: 2\n");
+    expect(holdsUnsaved(theirs, theirs, undefined)).toBe(false);
+    expect(holdsUnsaved(held("x"), theirs, undefined)).toBe(true);
+    expect(holdsUnsaved(theirs, theirs, held("a: mine\n"))).toBe(true);
+    expect(holdsUnsaved(theirs, theirs, theirs)).toBe(false);
+  });
+
+  test("a conflict shown follows the draft's revision read after it, a later author's included", () => {
+    const c = { mine: held("m"), revision: 7 };
+    expect(follow(c, 8)).toBe(c);
+    expect(follow({ ...c, showing: true }, 8)).toEqual({ ...c, showing: true, revision: 8 });
+    expect(follow(undefined, 8)).toBeUndefined();
+  });
+});
+
+describe("a write's answer, whether or not its view is still shown (§8.3)", () => {
+  test("a done write's ETag is kept for its draft under the epoch then current", () => {
+    let epoch = "e1";
+    const settle = keepOnDone("drf_9", () => epoch);
+    settle({ kind: "refused", status: 412, problem: null, replayed: false });
+    expect(keptETag("drf_9", "e1")).toBeUndefined();
+    settle({ kind: "done", status: 200, data: {}, replayed: false, etag: '"8-t"' });
+    expect(keptETag("drf_9", "e1")).toBe('"8-t"');
+    epoch = "e2";
+    keepOnDone((o) => createdId(o.kind === "done" ? o.data : null), () => epoch)({ kind: "done", status: 201, data: { id: "drf_10" }, replayed: false, etag: '"1-t"' });
+    expect(keptETag("drf_10", "e2")).toBe('"1-t"');
+  });
+
+  test("a created draft's id is read only from an object that carries one", () => {
+    expect(createdId({ id: "drf_1" })).toBe("drf_1");
+    for (const d of [null, "drf_1", {}, { id: 3 }]) expect(createdId(d)).toBeUndefined();
+    // A done answer with no readable draft: the keep hook keeps nothing and throws nothing.
+    expect(() => keepOnDone((o) => createdId(o.kind === "done" ? o.data : null), () => "e1")({ kind: "done", status: 201, data: null, replayed: false, etag: '"1-t"' })).not.toThrow();
+  });
+});
+
+describe("a 422 names where it points (W11 Refused)", () => {
+  const marks = "doc[0]/a\n\ndoc[0]/b\n";
+  test("the reference, the mark's line, or the paths", () => {
+    const p = (extra: Record<string, unknown>) => ({ type: "urn:bronzeward:problem:validation-failed", title: "t", status: 422, ...extra });
+    expect(where(p({ reference: "ghost" }), marks)).toBe("Reference ghost.");
+    // The position counts the marks sent, which leave out blank lines.
+    expect(where(p({ position: 1 }), marks)).toBe("Mark on line 3.");
+    expect(where(p({ paths: ["doc[0]/a", "doc[0]/b"] }), marks)).toBe("At doc[0]/a, doc[0]/b.");
+    expect(where(p({}), marks)).toBeUndefined();
+    expect(where(null, marks)).toBeUndefined();
+  });
+
+  test("a mark's position is the line of the n-th mark sent", () => {
+    expect(markLine(marks, 0)).toBe(0);
+    expect(markLine(marks, 1)).toBe(2);
+    expect(markLine(marks, 2)).toBeUndefined();
   });
 });
 
