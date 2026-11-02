@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -157,9 +158,12 @@ func (e *env) pager(out *os.File, lines []string, rows, cols int) (err error) {
 	raw := false
 	// The one exit: restore the terminal, then stop delivery and take what was already sent, so that
 	// a signal queued at any return is reported, and it wins over the result.
+	var po *pageOut
 	defer func() {
 		if raw {
 			_ = term.Restore(fd, old)
+			// After the restore, so that a terminal that does not drain delays nothing but this.
+			_ = po.last([]byte(clearScreen + altScreenOff))
 		}
 		signal.Stop(terms)
 		signal.Stop(winch)
@@ -185,7 +189,8 @@ func (e *env) pager(out *os.File, lines []string, rows, cols int) (err error) {
 		return fmt.Errorf("putting the terminal in raw mode for the review: %w; nothing was shown", err)
 	}
 	raw = true
-	if _, err := fmt.Fprint(out, altScreenOn); err != nil {
+	po = &pageOut{w: out, abort: keys.abort}
+	if _, err := io.WriteString(po, altScreenOn); err != nil {
 		return err
 	}
 	// A resize to less than the pager needs is 0 by 0: the pager shows a notice until it is usable.
@@ -196,9 +201,7 @@ func (e *env) pager(out *os.File, lines []string, rows, cols int) (err error) {
 		}
 		return r, c
 	}
-	err = pageOn(lines, size, pageKeys(keys), out)
-	_, _ = fmt.Fprint(out, clearScreen+altScreenOff)
-	return err
+	return pageOn(lines, size, pageKeys(keys), po)
 }
 
 // reviewText is the review as the pager shows it, as its lines: the staged document's lines, then
