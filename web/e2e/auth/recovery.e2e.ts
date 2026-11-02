@@ -194,32 +194,32 @@ describe("the recovery entry (#364)", () => {
     expect(await $("body").getText()).not.toContain("Revoked ");
   });
 
-  it("a revocation by issuer and subject is sent once and shows its result, and the subject is revoked; one by identity revokes that identity", async function () {
+  it("a revocation by issuer and subject is sent once and revokes that subject; one by its identity reaches that identity, not the signed-in human", async function () {
     this.timeout(60_000);
     const at = await openRevocation("revocation-targets");
-    const sub = "h-revokee-364";
+    const sub = "h-approver";
     await fillRevocation({ iss: FIXTURE_ISSUER, sub, reason: "synthetic revocation by subject" }, sub);
     const form = $("main form[aria-label='Revoke identity']");
     await form.$("button=Revoke identity").click();
     await expect(form.$('[data-testid="write-result"]')).toHaveText(expect.stringContaining("Revoked idn"), { wait: 20_000 });
     await expect(form.$('[data-testid="write-result"]')).toHaveText(expect.stringContaining("auth.deniedSubjects lists it: no"));
     expect(await revocations()).toHaveLength(1);
-    // The subject is the one revoked: its next request is refused as revoked.
-    const as = await fetch(`${at}/api/v1/identity`, { headers: { Authorization: `Bearer ${mint(sub)}` } });
-    expect(as.status).toBe(403);
-    // By identity: the signed-in human's own identity, read from the server, so the target is known.
-    const me = (await (await fetch(`${at}/api/v1/identity`, { headers: { Authorization: `Bearer ${mint("h-recovery")}` } })).json()) as { principal: string };
-    expect(me.principal).toMatch(/^idn/);
-    await $("main form[aria-label='Revoke identity']").$("label*=Identity:").$("input").setValue(me.principal);
+    // The subject is the one revoked: its next request is refused as revoked, the caller's is not.
+    const identity = (human: string) => fetch(`${at}/api/v1/identity`, { headers: { Authorization: `Bearer ${mint(human)}` } });
+    expect((await identity(sub)).status).toBe(403);
+    expect((await identity("h-recovery")).status).toBe(200);
+    // By identity: the identity the result named, not the caller's. The server resolves that one,
+    // finds it revoked and refuses with 409; a send that named the caller would revoke the caller.
+    const named = /Revoked (idn\S*) \(act/.exec(await form.$('[data-testid="write-result"]').getText())?.[1];
+    expect(named).toBeDefined();
+    await form.$("label*=Identity:").$("input").setValue(named!);
     await clearRevocation(["Issuer", "Subject"]);
-    await $("main form[aria-label='Revoke identity']").$("label*=Reason").$("input").setValue("synthetic revocation by identity");
-    await $("main form[aria-label='Revoke identity']").$("label*=Type the identity").$("input").setValue(me.principal);
-    await $("main form[aria-label='Revoke identity']").$("button=Revoke identity").click();
-    await browser.waitUntil(async () => (await revocations()).length === 2, { timeout: 20_000, timeoutMsg: "the revocation by identity was not sent" });
-    // Its target was that identity: the human the page is signed in as is revoked from then on.
-    const after = await fetch(`${at}/api/v1/identity`, { headers: { Authorization: `Bearer ${mint("h-recovery")}` } });
-    expect(after.status).toBe(403);
-    expect((await answers()).filter((a) => a.startsWith("/identity-revocations "))).toEqual(["/identity-revocations 201", "/identity-revocations 201"]);
+    await form.$("label*=Reason").$("input").setValue("synthetic revocation by identity");
+    await form.$("label*=Type the identity").$("input").setValue(named!);
+    await form.$("button=Revoke identity").click();
+    await browser.waitUntil(async () => (await answers()).filter((a) => a.startsWith("/identity-revocations ")).length === 2, { timeout: 20_000, timeoutMsg: "the revocation by identity was not answered" });
+    expect((await answers()).filter((a) => a.startsWith("/identity-revocations "))).toEqual(["/identity-revocations 201", "/identity-revocations 409"]);
+    expect((await identity("h-recovery")).status).toBe(200);
   });
 });
 
