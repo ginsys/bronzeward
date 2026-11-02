@@ -171,6 +171,27 @@ describe("[Go to field] positions (B13)", () => {
     expect(references("a: !bwref |-\n  x/foo\n  \n\nb: c\n")).toEqual(["x/foo"]);
     // A tag that starts the document's second line, under an empty first one, is still read.
     expect(references("\n  !bwref x/a\n")).toEqual(["x/a"]);
+    // Round 3, checked against go-yaml v3: a comment may follow the header, with or without a
+    // blank, a header holds each indicator once, and a CRLF line break is one line break.
+    for (const one of [
+      "a: !bwref |-# comment\n  x/foo\n",
+      "a: !bwref |- # comment\n  x/foo\n",
+      "a: !bwref >-#c\n  x/foo\n",
+      "a: !bwref |#c\n  x/foo",
+      "a: !bwref |-\r\n  x/foo\r\n",
+      "a: !bwref |\r\n  x/foo",
+      "a: !bwref |-\r\n  x/foo\r\n  \r\nb: c\r\n",
+      'a: !bwref "x/\\\r\n  foo"\n',
+    ]) expect(references(one)).toEqual(["x/foo"]);
+    const crlf = "a: !bwref |-\r\n  x/foo\r\nb: c\r\n";
+    const c = spotOfReference(crlf, "x/foo");
+    expect(crlf.slice(c!.start, c!.end)).toBe("!bwref |-\r\n  x/foo");
+    for (const none of [
+      "a: !bwref |--\n  x/foo\n", // go-yaml refuses a repeated indicator
+      "a: !bwref |-+\n  x/foo\n",
+      "a: !bwref |\r\n  x/foo\r\n", // clip chomping keeps the CRLF as a line break
+      "a: !bwref |-\r\n  x/foo\r\n   \r\nb: c\r\n", // a deeper blank line is content
+    ]) expect(references(none)).toEqual([]);
   });
 
   test("a flow list's reference ends at its comma, and a comment's text is no reference", () => {
@@ -327,8 +348,8 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     ["H8: the pane's own done Remove keeps its text when the draft read shows the removal", { held: M, saved: EMPTY }, { kind: "draft", revision: 8, changed: false, removed: true }, { held: M, saved: EMPTY }],
     ["a revision read replaces text nothing was typed into", { held: A, saved: A }, { kind: "read", text: T, since: 0 }, { held: T, saved: T }],
     // Save, sweep (a): the operator types while it is in flight.
-    ["a Save records the text it sends, and whether their text shows", { held: M, saved: A, conflict: theirs(M2) }, { kind: "send" }, { held: M, saved: A, conflict: theirs(M2), sent: sentOf(M, true) }],
-    ["H8: a Remove records that it removes the text", { held: M, saved: A }, { kind: "send", removes: true }, { held: M, saved: A, sent: { text: M, whileTheirs: false, removes: true } }],
+    ["a Save records the text it sends, and whether their text shows", { held: M, saved: A, conflict: theirs(M2) }, { kind: "send" }, { held: M, saved: A, conflict: theirs(M2), sent: { ...sentOf(M, true), open: true } }],
+    ["H8: a Remove records that it removes the text", { held: M, saved: A }, { kind: "send", removes: true }, { held: M, saved: A, sent: { text: M, whileTheirs: false, open: true, removes: true } }],
     ["#534 N2: a done Remove while their text shows keeps the operator's text aside for Copy", { held: T, saved: T, conflict: theirs(M), sent: { text: T, whileTheirs: true, removes: true } }, { kind: "done" }, { held: T, saved: EMPTY, conflict: theirs(M), sent: { text: T, whileTheirs: true, removes: true }, writes: 1 }],
     ["H8: a done Remove saves the removal, so the text still shown stays unsaved", { held: M, saved: A, sent: { text: M, whileTheirs: false, removes: true } }, { kind: "done" }, { held: M, saved: EMPTY, sent: { text: M, whileTheirs: false, removes: true }, writes: 1 }],
     ["R2-F1: a done write marks the text it sent saved, not the text typed since", { held: M2, saved: A, sent: sentOf(M) }, { kind: "done" }, { held: M2, saved: M, sent: sentOf(M), writes: 1 }],
@@ -578,6 +599,30 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     const own = run({ held: A, saved: A }, [{ kind: "send", removes: true }, { kind: "done" }, { kind: "draft", revision: 8, changed: false, removed: true }]);
     expect(own.held).toBe(A);
     expect(own.conflict).toBeUndefined();
+  });
+
+  test("ginsys/bronzeward#534 round 3: a read that shows the pane's own write before its answer opens no conflict", () => {
+    // A reconnect's draft read shows the pane's own Remove before the Remove's answer: the text stays (H8).
+    for (const held of [A, M]) {
+      const early = run({ held, saved: A }, [{ kind: "send", removes: true }, { kind: "draft", revision: 8, changed: false, removed: true }]);
+      expect(early.held).toBe(held);
+      expect(early.conflict).toBeUndefined();
+      const done = run(early, [{ kind: "done" }]);
+      expect(rest(done)).toEqual({ held, saved: EMPTY, sent: { text: held, whileTheirs: false, removes: true }, writes: 1 });
+    }
+    // The read of a Save's revision, before the Save's answer names it, keeps the typed text.
+    const saving = run({ held: M, saved: A }, [{ kind: "send" }, { kind: "type", held: M2 }, { kind: "read", text: T, since: 0, revision: 8, id: "frv_9" }]);
+    expect(saving.held).toBe(M2);
+    expect(saving.conflict).toBeUndefined();
+    expect(run(saving, [{ kind: "done", revision: "frv_9" }]).saved).toBe(M);
+    // Once the answer came, another author's removal shows again (C3), also after a 412.
+    const after = run({ held: A, saved: A }, [{ kind: "send" }, { kind: "done" }, { kind: "type", held: M }, { kind: "draft", revision: 9, changed: false, removed: true }]);
+    expect(after.conflict).toEqual(theirs(M, 9));
+    const refusedRun = run({ held: M, saved: A }, [{ kind: "send", removes: true }, { kind: "refused" }]);
+    expect(refusedRun.sent?.open).toBeUndefined();
+    // A write that committed nothing is not the change a later read shows.
+    const failed = run({ held: M, saved: A }, [{ kind: "send", removes: true }, { kind: "failed" }, { kind: "draft", revision: 9, changed: false, removed: true }]);
+    expect(failed.conflict).toEqual(theirs(M, 9));
   });
 
   test("ginsys/bronzeward#534 N1: Show clicked again while asked holds Copy until its draft read answers, also when a revision read answers first", () => {

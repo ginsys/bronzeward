@@ -339,11 +339,15 @@ export const holdsUnsaved = (held: Held, saved: Held, mine: Held | undefined) =>
 // Without a 412, a conflict opens when a read shows another author's text or removal while the
 // editor holds unsaved text, or once a Discard's Show their change adopted that read's ETag
 // (ginsys/bronzeward#534 C1-C3): the typed text is kept aside, never saved over theirs unseen.
+// `sent.open`: the write may still commit, its answer not come yet. A read meanwhile may show that
+// write's own change, so it opens no such conflict; another author's change refuses the write with
+// a 412 instead (local review round 3).
 export interface Clash { mine: Held; phase: "refused" | "asked" | "theirs"; revision?: number; awaits?: true; again?: true }
-export interface Editor { held: Held; saved: Held; conflict?: Clash; sent?: { text: Held; whileTheirs: boolean; removes?: true }; writes?: number; note?: string | undefined; version?: number; reading?: true; own?: string }
+export interface Editor { held: Held; saved: Held; conflict?: Clash; sent?: { text: Held; whileTheirs: boolean; removes?: true; open?: true }; writes?: number; note?: string | undefined; version?: number; reading?: true; own?: string }
 export type EditorEvent =
   | { kind: "type"; held: Held } // the operator's edit
   | { kind: "refused" } // a write's 412
+  | { kind: "failed" } // any other refusal, or a write that committed nothing
   | { kind: "at"; revision: number } // the 412's own draft read
   | { kind: "show" } // Show their change
   // The page's draft read. changed: this entry has a new revision to read; removed: the entry is a removal.
@@ -377,7 +381,9 @@ function step(s: Editor, e: EditorEvent): Editor {
     case "refused":
       // Once their text shows, the operator's text is the editor's: a new 412 keeps that, not the
       // text the last conflict kept aside (ginsys/bronzeward#517 H6). Before, both are the same.
-      return c === undefined || c.phase === "theirs" ? { ...s, conflict: { mine: s.held, phase: "refused" } } : s;
+      return c === undefined || c.phase === "theirs" ? { ...s, ...closed(s), conflict: { mine: s.held, phase: "refused" } } : { ...s, ...closed(s) };
+    case "failed":
+      return { ...s, ...closed(s) };
     case "at":
       return c !== undefined && c.revision === undefined ? at({ revision: e.revision }) : s;
     case "show":
@@ -389,7 +395,7 @@ function step(s: Editor, e: EditorEvent): Editor {
       // typed since the last read or save is kept aside. The pane's own done Remove saved EMPTY,
       // and keeps the text it shows (H8).
       if (c === undefined) {
-        if (e.removed !== true || same(s.saved, EMPTY)) return s;
+        if (e.removed !== true || same(s.saved, EMPTY) || s.sent?.open === true) return s;
         return { ...s, held: EMPTY, saved: EMPTY, ...(!same(s.held, s.saved) && { conflict: { mine: s.held, phase: "theirs" as const, revision: e.revision } }) };
       }
       if (c.phase === "refused" || e.revision < (c.revision ?? 0)) return s;
@@ -432,7 +438,7 @@ function step(s: Editor, e: EditorEvent): Editor {
       }
       // Without a conflict, another author's text read while the editor holds typed text shows, and
       // the typed text is kept aside (C1, C2). The read of the pane's own done Save is not theirs.
-      if (c === undefined && (s.own === undefined || e.id !== s.own) && !same(s.held, s.saved) && !same(e.text, s.saved)) {
+      if (c === undefined && s.sent?.open !== true && (s.own === undefined || e.id !== s.own) && !same(s.held, s.saved) && !same(e.text, s.saved)) {
         return { ...idle, saved: e.text, held: e.text, conflict: { mine: s.held, phase: "theirs", ...(e.revision !== undefined && { revision: e.revision }) } };
       }
       // Once theirs shows, a read never ends a repeated Show's wait: only its draft read does.
@@ -442,7 +448,7 @@ function step(s: Editor, e: EditorEvent): Editor {
       // Only once their text shows and no read is pending: a pending one could replace the copied text.
       return c?.phase === "theirs" && c.awaits !== true && s.reading !== true ? { ...ended, held: c.mine } : s;
     case "send":
-      return { ...s, sent: { text: s.held, whileTheirs: c?.phase === "theirs", ...(e.removes === true && { removes: true as const }) } };
+      return { ...s, sent: { text: s.held, whileTheirs: c?.phase === "theirs", open: true, ...(e.removes === true && { removes: true as const }) } };
     case "done": {
       const sent = s.sent?.text ?? s.held;
       // The text the operator chose is saved: a Save sent while theirs showed, or the kept text itself.
@@ -450,13 +456,20 @@ function step(s: Editor, e: EditorEvent): Editor {
       const ends = c === undefined || (s.sent?.removes !== true && (s.sent?.whileTheirs === true || same(c.mine, sent)));
       // A done Remove saves the removal: the text still shown is not stored anywhere (H8).
       const { own: _own, ...after } = ends ? ended : s;
-      return { ...after, ...(e.revision !== undefined && { own: e.revision }), saved: s.sent?.removes === true ? EMPTY : sent, writes: writes + 1 };
+      return { ...after, ...closed(s), ...(e.revision !== undefined && { own: e.revision }), saved: s.sent?.removes === true ? EMPTY : sent, writes: writes + 1 };
     }
     case "revert":
       return mayRevert(c) && e.at === (s.version ?? 0) ? { ...s, held: e.text, note: e.note } : { ...s, note: NOT_REVERTED };
     case "note":
       return { ...s, note: e.text };
   }
+}
+
+// The last write's answer came: a later read is no longer possibly that write's own.
+function closed(s: Editor): Pick<Editor, "sent"> {
+  if (s.sent === undefined) return {};
+  const { open: _open, ...sent } = s.sent;
+  return { sent };
 }
 
 // Revert to base replaces the editor's text: before their text shows, that is the operator's text
@@ -626,7 +639,7 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
       act({ kind: "refused" });
       // For the revision shown only: this read's ETag is not kept (§8.3).
       void read<Draft>(`/drafts/${enc(draft.id)}`).then((r) => r?.kind === "ok" && act({ kind: "at", revision: r.data.revision }));
-    }
+    } else if (o?.kind === "refused" || o?.kind === "not-done") act({ kind: "failed" });
   }, [o]);
 
   const path = `/drafts/${enc(draft.id)}/fragments/${enc(name)}`;

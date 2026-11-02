@@ -198,7 +198,9 @@ A draft read can show another author's change to the entry without a `412`. Exam
 after [Show their change] on a Discard's `412`, and the read after a Save that ended while the
 operator left the draft and opened it again. Their text, or the removal, then goes into the
 editor in the same way. Text typed since the last read or save is kept for [Copy my text into the
-new revision], and is never saved over their change unseen.
+new revision], and is never saved over their change unseen. A read that arrives before the
+pane's own Save or Remove has its answer can show that write's own change. Such a read opens no
+conflict and keeps the editor's text. If another author changed the entry, that write gets a `412`.
 
 [Add fragment] refuses a name that the draft already holds, a removed entry included, and points
 to that entry in the list. Once the new fragment is saved, the pane edits the entry that it
@@ -234,8 +236,9 @@ and asks the operator to save the text or switch entries first.
 The editor lists a reference whose name is quoted, or stands on the line after its `!bwref` tag.
 It also lists a name in a block scalar on one content line, if strip chomping (`|-` or `>-`) drops
 the line break after it or that line ends the document. A double-quoted name that continues after
-an escaped line break is listed too. A block scalar with an indentation
-indicator is not listed, but the server still checks its reference. A key that follows the tag is
+an escaped line break is listed too. A CRLF counts as one line break. A block scalar with an
+indentation indicator is not listed, and neither is a name after a line break that is a carriage
+return alone. The server still checks those references. A key that follows the tag is
 not its name. If the operator edited the marks after a refusal,
 [Go to field] finds the refused line where it is now. If that line is gone, it focuses the marks field and selects nothing.
 
