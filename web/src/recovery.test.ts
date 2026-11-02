@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import { WritesProvider } from "./forms.tsx";
 import {
-  ENTRY_EFFECTS, EnterRecovery, ExitRecovery, nextStep, PRE_ENTRY, PreEntry, RECOVERY_START, RecoveryBanner, RecoveryRead, REVOCATION_LIMITS, Revocation, scopeSummary,
+  ENTRY_EFFECTS, EnterRecovery, Entered, ExitRecovery, nextStep, NORMAL_START, noteEntry, PRE_ENTRY, PreEntry, RECOVERY_START, RecoveryBanner, RecoveryRead, REVOCATION_LIMITS, Revocation, scopeSummary,
   startModeOf, startRefusal, UNKNOWN_START, unreleased,
 } from "./recovery.tsx";
 import { type Problem, type ReadResult, TRANSPORT_FAILURE } from "./request.ts";
@@ -104,6 +104,22 @@ describe("the console's parts (#364)", () => {
     const open = exit(["recovery-admin"], 0);
     expect(open).toMatch(/<button type="submit">Exit recovery<\/button>/);
     expect(open).not.toContain("not released");
+  });
+
+  test("the entry's result in the header: its body, a saved success that could not be read, a start that takes none", () => {
+    try {
+      expect(html(h(Entered))).toBe("");
+      noteEntry({ act: "act_a", epoch: "ep_new", previousEpoch: "ep_old", machines: 2, operations: [] } as never);
+      expect(html(h(Entered))).toContain("Epoch ep_new, was ep_old");
+      // A success whose body could not be read stays saved: no body is read from it.
+      noteEntry(null);
+      expect(html(h(Entered))).toContain("saved (the server answered), but its answer could not be read");
+      noteEntry("normal");
+      expect(html(h(Entered))).toContain(NORMAL_START.replaceAll("'", "&#x27;"));
+    } finally {
+      noteEntry(undefined);
+    }
+    expect(html(h(Entered))).toBe("");
   });
 
   test("the revocation states its limits, and stays off without recovery-admin or a typed identity", () => {
