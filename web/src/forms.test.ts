@@ -6,7 +6,7 @@ import { type Reads, ReadsProvider } from "./list.tsx";
 import type { Client, Problem } from "./request.ts";
 import { ShellContext } from "./shell.tsx";
 import { REPEATING, REPLAYED, setAside, unknown } from "./states.tsx";
-import { EARLIER_EPOCH, EPOCH_CHANGED_ASIDE, NO_EPOCH, type Outcome, Write, Writes } from "./write.ts";
+import { EARLIER_EPOCH, EPOCH_CHANGED_ASIDE, NO_EPOCH, NO_EPOCH_HEADER, type Outcome, Write, Writes } from "./write.ts";
 
 const PRINCIPAL = "https://idp.invalid SYNTH-sub-1";
 const html = (writes: Writes, e: ReactElement, roles: string[] = ["author"]) =>
@@ -171,7 +171,7 @@ describe("the notice (B11)", () => {
     expect(out).toContain(`${setAside(EPOCH_CHANGED_ASIDE)} Key ${w.key}, POST /api/v1/clusters. To learn the outcome, read /clusters.`);
     expect(out).toContain('<button type="button" disabled="">Repeat exactly</button><button type="button">Show current state</button>');
     expect(out).not.toContain("Dismiss");
-    answer({ status: 201, headers: new Headers(), data: { id: "c1" } });
+    answer({ status: 201, headers: new Headers({ "Bronzeward-Epoch": "e1" }), data: { id: "c1" } });
     expect((await run).kind).toBe("done");
     const settled = html(writes, h(WriteNotices, { go: () => {} }));
     expect(settled).toContain(`Saved (the server answered 201). Key ${w.key}, POST /api/v1/clusters. Read /clusters.`);
@@ -229,7 +229,7 @@ describe("the in-app leave guard (B11)", () => {
     writes.setAside(EPOCH_CHANGED_ASIDE);
     expect(leaving(writes, "/machines")).toBe(false);
     expect(ask).toHaveBeenCalledWith(`Unknown whether this was saved. Key ${w.key}, POST /api/v1/clusters. To learn the outcome, read /clusters.\nLeave this page?`);
-    answer({ status: 201, headers: new Headers(), data: { id: "c1" } });
+    answer({ status: 201, headers: new Headers({ "Bronzeward-Epoch": "e1" }), data: { id: "c1" } });
     await run;
   });
 
@@ -279,6 +279,11 @@ describe("the form's result", () => {
     expect(result({ kind: "done", status: 201, data: null, replayed: false })).toContain('Saved (the server answered 201), but its answer could not be read. Read <a href="/clusters" title="/clusters">/clusters</a>.');
     expect(result({ kind: "done", status: 201, data: "text", replayed: true })).toContain(`${REPLAYED} Saved (the server answered 201)`);
     expect(result({ kind: "done", status: 201, data: {}, replayed: false })).toContain(">DONE</p>");
+  });
+
+  test("§8.5: a success without a Bronzeward-Epoch header shows the defect on the form", () => {
+    expect(result({ kind: "done", status: 201, data: {}, replayed: false, defect: NO_EPOCH_HEADER })).toContain(`DONE ${NO_EPOCH_HEADER}</p>`);
+    expect(result({ kind: "done", status: 201, data: null, replayed: false, defect: NO_EPOCH_HEADER })).toContain(`</a>. ${NO_EPOCH_HEADER}</p>`);
   });
 
   test("an unknown outcome points to its notice, and says what the notice said once it is dismissed (B11)", async () => {

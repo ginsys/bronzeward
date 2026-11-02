@@ -19,7 +19,8 @@ export interface WriteSpec {
 }
 
 export type Outcome =
-  | { kind: "done"; status: number; data: unknown; replayed: boolean }
+  // `defect` when the success carried no Bronzeward-Epoch header (§8.5): still saved, never repeated.
+  | { kind: "done"; status: number; data: unknown; replayed: boolean; defect?: string }
   // This send's refusal, or the earlier attempt's when replayed (§8.4 item 2).
   | { kind: "refused"; status: number; problem: Problem | null; replayed: boolean }
   // Every attempt was answered a 503 that committed nothing (§8.2), or nothing was sent.
@@ -39,7 +40,8 @@ export const SIGN_IN_REFUSED = "the server no longer accepts your sign-in";
 export const SHELL_GONE = "the page that sent it ended";
 export const NO_CREDENTIAL = "the page no longer holds your sign-in";
 export const RECOVERY_START = "the server was started for recovery and serves only the recovery entry until it is recorded";
-export const EARLIER_EPOCH = "the key's record is from an earlier epoch";
+export const NO_EPOCH_HEADER = "Its answer carried no Bronzeward-Epoch header, a defect of the server or of a proxy before it.";
+export const EARLIER_EPOCH ="the key's record is from an earlier epoch";
 export const TOO_LARGE ="the input is larger than 1 MiB, the most the server takes, so nothing was sent";
 // The largest body the server takes, in UTF-8 bytes (§8.1, internal/api/body.go maxBody).
 export const MAX_BODY = 1 << 20;
@@ -305,7 +307,11 @@ export class Writes {
         continue;
       }
       const replayed = a.headers.get("Idempotent-Replayed") === "true";
-      if (a.status >= 200 && a.status < 300) return { kind: "done", status: a.status, data: a.data === NOT_JSON ? null : a.data, replayed };
+      if (a.status >= 200 && a.status < 300) {
+        const done: Outcome = { kind: "done", status: a.status, data: a.data === NOT_JSON ? null : a.data, replayed };
+        // An authenticated success always names the epoch: a missing header is reported (§8.5).
+        return a.headers.has("Bronzeward-Epoch") ? done : { ...done, defect: NO_EPOCH_HEADER };
+      }
       const p = problemOf(a.data);
       const code = p === null ? undefined : p.type.slice(PREFIX.length);
       last = code === undefined ? `${a.status}` : `${a.status} ${code}`;

@@ -44,7 +44,7 @@ function settled(o: Outcome): string {
   const fields = "problem" in o ? problemTail(o.problem) : "";
   switch (o.kind) {
     case "done":
-      return `${earlier}Saved (the server answered ${o.status}).`;
+      return `${earlier}Saved (the server answered ${o.status}).${o.defect !== undefined ? ` ${o.defect}` : ""}`;
     case "refused":
       return `${earlier}Not saved: the server answered ${o.status}.${fields}`;
     default:
@@ -161,9 +161,9 @@ export function Result({ w, done }: { w: Write | undefined; done: (data: unknown
       // A success whose body could not be read is still saved: it names the page to read, and is
       // never repeated.
       if (typeof o.data !== "object" || o.data === null) {
-        return <Status testid="write-result">{o.replayed && `${REPLAYED} `}Saved (the server answered {o.status}), but its answer could not be read. Read <Ref to={w.spec.resource} id={w.spec.resource}>{w.spec.resource}</Ref>.</Status>;
+        return <Status testid="write-result">{o.replayed && `${REPLAYED} `}Saved (the server answered {o.status}), but its answer could not be read. Read <Ref to={w.spec.resource} id={w.spec.resource}>{w.spec.resource}</Ref>.{o.defect !== undefined && ` ${o.defect}`}</Status>;
       }
-      return <Status testid="write-result">{o.replayed && `${REPLAYED} `}{done(o.data)}</Status>;
+      return <Status testid="write-result">{o.replayed && `${REPLAYED} `}{done(o.data)}{o.defect !== undefined && ` ${o.defect}`}</Status>;
     case "refused": {
       const named = existing(o.status, o.problem, w.spec.resource);
       return (
