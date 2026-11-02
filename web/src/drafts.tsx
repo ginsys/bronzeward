@@ -347,9 +347,10 @@ export const holdsUnsaved = (held: Held, saved: Held, mine: Held | undefined) =>
 // write's own change, so it opens no such conflict; another author's change refuses the write with
 // a 412 instead (local review round 3). `sent.later`: such a read came, and the revision it named.
 // If the write's last answer is neither done nor a 412, that read shows as theirs, the typed text
-// kept aside (rounds 4 and 5).
+// kept aside (rounds 4 and 5). A done Save names the revision it created: a read of another
+// revision (`id`, `text`) shows as theirs too (ginsys/bronzeward#551).
 export interface Clash { mine: Held; phase: "refused" | "asked" | "theirs"; revision?: number; awaits?: true; again?: true; typed?: true }
-export interface Editor { held: Held; saved: Held; conflict?: Clash; sent?: { text: Held; whileTheirs: boolean; removes?: true; open?: true; later?: { revision?: number } }; writes?: number; note?: string | undefined; version?: number; reading?: true; own?: string }
+export interface Editor { held: Held; saved: Held; conflict?: Clash; sent?: { text: Held; whileTheirs: boolean; removes?: true; open?: true; later?: { revision?: number; id?: string; text?: Held } }; writes?: number; note?: string | undefined; version?: number; reading?: true; own?: string }
 export type EditorEvent =
   | { kind: "type"; held: Held } // the operator's edit
   | { kind: "refused" } // a write's 412
@@ -418,7 +419,7 @@ function step(s: Editor, e: EditorEvent): Editor {
       if (c === undefined) {
         // A read held back for the open write now stands for this draft revision: it changed only
         // another entry (ginsys/bronzeward#551 item 3).
-        if (s.sent?.open === true && s.sent.later !== undefined && !e.changed && e.removed !== true) return { ...s, sent: { ...s.sent, later: { revision: e.revision } } };
+        if (s.sent?.open === true && s.sent.later !== undefined && !e.changed && e.removed !== true) return { ...s, sent: { ...s.sent, later: { ...s.sent.later, revision: e.revision } } };
         if (e.removed !== true || same(s.saved, EMPTY)) return s;
         if (s.sent?.open === true) return { ...s, saved: EMPTY, sent: { ...s.sent, later: { revision: e.revision } } };
         return { ...s, held: EMPTY, saved: EMPTY, ...(!same(s.held, s.saved) && { conflict: { mine: s.held, phase: "theirs" as const, revision: e.revision } }) };
@@ -479,7 +480,7 @@ function step(s: Editor, e: EditorEvent): Editor {
       const another = (s.own === undefined || e.id !== s.own) && !same(e.text, s.saved);
       const keeps = c === undefined ? !same(s.held, s.saved) : c.phase === "theirs" && (c.typed === true || !same(s.held, s.saved));
       if (another && keeps) {
-        if (s.sent?.open === true) return { ...idle, saved: e.text, sent: { ...s.sent, later: { ...(e.revision !== undefined && { revision: e.revision }) } } };
+        if (s.sent?.open === true) return { ...idle, saved: e.text, sent: { ...s.sent, later: { text: e.text, ...(e.id !== undefined && { id: e.id }), ...(e.revision !== undefined && { revision: e.revision }) } } };
         const revision = e.revision ?? c?.revision;
         return { ...idle, saved: e.text, held: e.text, conflict: { ...(c === undefined ? { mine: s.held } : kept(c)), phase: "theirs", ...(revision !== undefined && { revision }) } };
       }
@@ -498,7 +499,13 @@ function step(s: Editor, e: EditorEvent): Editor {
       const ends = c === undefined || (s.sent?.removes !== true && (s.sent?.whileTheirs === true || same(c.mine, sent)));
       // A done Remove saves the removal: the text still shown is not stored anywhere (H8).
       const { own: _own, ...after } = ends ? ended : s;
-      return { ...after, ...closed(s), ...(e.revision !== undefined && { own: e.revision }), saved: s.sent?.removes === true ? EMPTY : sent, writes: writes + 1 };
+      const done: Editor = { ...after, ...closed(s), ...(e.revision !== undefined && { own: e.revision }), saved: s.sent?.removes === true ? EMPTY : sent, writes: writes + 1 };
+      // A read held back while the write was open, of a revision this write did not create, is
+      // another author's newer text: it shows, and the editor's text is kept aside (#551).
+      const later = s.sent?.later;
+      if (later?.text === undefined || later.id === e.revision) return done;
+      const revision = later.revision ?? done.conflict?.revision;
+      return { ...done, held: later.text, saved: later.text, conflict: { ...(done.conflict === undefined ? { mine: s.held } : kept(done.conflict)), phase: "theirs", ...(revision !== undefined && { revision }) } };
     }
     case "revert":
       // Once their text shows, the reverted text is the operator's, as typed text is (#551 local review).
