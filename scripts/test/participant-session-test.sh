@@ -21,10 +21,16 @@ session=$repo/fixtures/participants/session
 # forwarder fails, as for a removed container. rm and network calls are logged, and log reads are
 # logged apart, in STUB_LOGS_LOG. Set, STUB_PS_FAIL
 # fails the container list, STUB_FWD still lists the forwarder,
-# STUB_LOGS_FAIL fails a log read, and STUB_LOG_LEAK puts a session password in A's log.
+# STUB_LOGS_FAIL fails a log read, and STUB_LOG_LEAK puts a session password in A's log. pg_restore
+# in a container expands a gzip stream, which stands in for a custom-format dump; with
+# STUB_RESTORE_FAIL set, it fails.
 cat >"$t/bin/docker" <<'EOF'
 #!/usr/bin/env bash
 case "$1" in
+run)
+  [ "${*: -2}" = "pg_restore --file=-" ] && [ -z "${STUB_RESTORE_FAIL:-}" ] || exit 1
+  exec gzip -dc
+  ;;
 context) echo stub ;;
 info) echo "${STUB_DAEMON:-daemon-1}" ;;
 rm | network) echo "docker $1" >>"$STUB_LOG" ;;
@@ -242,6 +248,82 @@ rm -f "$repo/.dev/participants/dangling"
 if [ "$rc" != 0 ] && [[ $out == *"proves nothing"* ]] && [ "$(controls)" = 0 ]; then
   ok "a symbolic link that cannot be followed fails the scan"
 else bad "dangling link: rc=$rc controls=$(controls): $out"; fi
+
+# Backups hold their contents compressed, so a raw read finds nothing in them. The scan expands each
+# database dump and store archive into scan-backups, reads that, and removes it afterwards.
+b=$repo/fixtures/.state/backups
+mkdir -p "$b" "$t/store/data/sealed"
+expansion() { if [ -e "$repo/.dev/participants/scan-backups" ]; then echo left; else echo gone; fi; }
+printf 'clean row\n' | gzip >"$b/pg-p-base.dump"
+printf 'clean value\n' >"$t/store/data/sealed/kv"
+# A directory without write permission in the archive: the cleanup must still remove its expansion.
+chmod 555 "$t/store/data/sealed"
+tar -czf "$b/store-p-base.tgz" -C "$t/store" data
+out=$(run scan)
+rc=$?
+if [ "$rc" = 0 ] && [ "$(controls)" = 0 ] && [ "$(expansion)" = gone ]; then
+  ok "clean backups pass the scan, and their expansion is removed"
+else bad "clean backups: rc=$rc controls=$(controls) expansion $(expansion): $out"; fi
+
+printf 'INSERT BWSYNTH-pw-abcd1234-5678\n' | gzip >"$b/pg-p-t4.dump"
+out=$(run scan)
+rc=$?
+rm -f "$b/pg-p-t4.dump"
+if [ "$rc" != 0 ] && [[ $out == *"in $repo/.dev/participants/scan-backups/pg-p-t4.dump.sql"* ]] &&
+  [ "$(controls)" = 0 ] && [ "$(expansion)" = gone ]; then
+  ok "a session password inside a database dump is found"
+else bad "dump leak: rc=$rc controls=$(controls) expansion $(expansion): $out"; fi
+
+mkdir -p "$t/store2/data"
+printf 'BWSYNTH-pw-abcd1234-5678\n' >"$t/store2/data/value"
+tar -czf "$b/store-p-t11.tgz" -C "$t/store2" data
+out=$(run scan)
+rc=$?
+rm -f "$b/store-p-t11.tgz"
+if [ "$rc" != 0 ] && [[ $out == *"in $repo/.dev/participants/scan-backups/store-p-t11.tgz.d/data/value"* ]] &&
+  [ "$(controls)" = 0 ] && [ "$(expansion)" = gone ]; then
+  ok "a session password inside a store archive is found"
+else bad "archive leak: rc=$rc controls=$(controls) expansion $(expansion): $out"; fi
+
+# An interrupted snapshot's partial dump, cut short: what it holds cannot all be read, so the scan
+# fails. So does a dump that pg_restore refuses.
+seq 5000 | gzip | head -c 200 >"$b/pg-p-t5.dump.partial.Ab12Cd"
+out=$(run scan)
+rc=$?
+rm -f "$b/pg-p-t5.dump.partial.Ab12Cd"
+out2=$(STUB_RESTORE_FAIL=1 run scan)
+rc2=$?
+if [ "$rc" != 0 ] && [[ $out == *"cannot expand $b/pg-p-t5.dump.partial.Ab12Cd"* ]] &&
+  [ "$rc2" != 0 ] && [[ $out2 == *"cannot expand $b/pg-p-base.dump"* ]] && [ "$(controls)" = 0 ] && [ "$(expansion)" = gone ]; then
+  ok "a backup that cannot be expanded in full fails the scan"
+else bad "unexpandable backup: rc=$rc rc2=$rc2 controls=$(controls) expansion $(expansion): $out / $out2"; fi
+
+# A dump that is a symbolic link, or has a second name, is not one the fixture wrote: refused.
+ln -s "$t/outside/log" "$b/pg-p-linked.dump"
+out=$(run scan)
+rc=$?
+rm -f "$b/pg-p-linked.dump"
+ln "$b/pg-p-base.dump" "$t/second-name"
+out2=$(run scan)
+rc2=$?
+rm -f "$t/second-name"
+if [ "$rc" != 0 ] && [[ $out == *"pg-p-linked.dump is not a regular file with that one name"* ]] &&
+  [ "$rc2" != 0 ] && [[ $out2 == *"pg-p-base.dump is not a regular file with that one name"* ]] && [ "$(controls)" = 0 ]; then
+  ok "a backup that is a symbolic link or has a second name fails the scan"
+else bad "linked backup: rc=$rc rc2=$rc2 controls=$(controls): $out / $out2"; fi
+
+# A scan-backups that this scan did not make: refused before anything is removed, and kept.
+mkdir -p "$repo/.dev/participants/scan-backups"
+printf 'kept\n' >"$repo/.dev/participants/scan-backups/note"
+out=$(run scan)
+rc=$?
+kept=$(cat "$repo/.dev/participants/scan-backups/note" 2>/dev/null)
+rm -rf "$repo/.dev/participants/scan-backups"
+if [ "$rc" != 0 ] && [[ $out == *"scan-backups exists, and this scan did not make it"* ]] && [ "$kept" = kept ] && [ "$(controls)" = 0 ]; then
+  ok "an earlier scan-backups fails the scan, and is kept as it was"
+else bad "existing scan-backups: rc=$rc kept=$kept controls=$(controls): $out"; fi
+chmod -R u+w "$t/store"
+rm -rf "$b" "$t/store" "$t/store2"
 
 # The participant's shell: no desktop session bus and no inherited token file reach its client, so a
 # sign-in never goes to the desktop's credential store or outside the participant home.

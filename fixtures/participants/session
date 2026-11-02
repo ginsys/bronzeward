@@ -727,22 +727,50 @@ t11() {
   echo "names: none"
 }
 
-# What this scan made: its planted controls, the copied logs and its error file. scan_clean removes
-# them, on any exit too, so that no control stays behind in retained state.
+# What this scan made: its planted controls, the copied logs, the expanded backups and its error
+# file. scan_clean removes them, on any exit too, so that no control stays behind in retained state.
+# An expanded archive can hold a directory without write permission, which rm cannot empty.
 scan_made=()
 scan_clean() {
   local f
-  for f in ${scan_made[@]+"${scan_made[@]}"}; do rm -rf -- "$f"; done
+  for f in ${scan_made[@]+"${scan_made[@]}"}; do
+    rm -rf -- "$f" 2>/dev/null || { chmod -R u+rwX -- "$f" && rm -rf -- "$f"; }
+  done
   scan_made=()
 }
 
+# expand_backups <dir>: every database dump and store archive in the fixture's backups, expanded
+# into <dir>, which the scan reads. A dump or an archive is compressed, so a raw read of it is clean
+# for the wrong reason. The method is fixtures/bin/evidence's: pg_restore in a throwaway container
+# with no network, and tar. A snapshot that an interrupted inject left under its partial name is
+# expanded too. A backup that cannot be expanded in full fails the scan, because what it holds would
+# go unread. OpenBao's snapshots are not expanded: OpenBao encrypts what they hold, and the session
+# writes no password to OpenBao.
+expand_backups() {
+  local f to
+  for f in "$STATE"/backups/pg-*.dump "$STATE"/backups/pg-*.dump.partial.* \
+    "$STATE"/backups/store-*.tgz "$STATE"/backups/store-*.tgz.partial.*; do
+    [ -e "$f" ] || [ -L "$f" ] || continue
+    # A link or a second name is not a backup the fixture wrote: whatever the other name holds
+    # would be copied into the participant state. bin/evidence and bin/down refuse it too.
+    [ ! -L "$f" ] && [ -f "$f" ] && [ "$(stat --format=%h -- "$f")" = 1 ] ||
+      die "$f is not a regular file with that one name, which the fixture never makes; read it, remove it, and run scan again"
+    to=$1/$(basename -- "$f")
+    case ${f##*/} in
+      pg-*) docker run --rm --interactive --network none "$POSTGRES_IMAGE" pg_restore --file=- <"$f" >"$to.sql" ;;
+      *) mkdir -- "$to.d" && tar -xzf "$f" -C "$to.d" ;;
+    esac || die "cannot expand $f, so the scan cannot read what it holds. If an interrupted snapshot left it (a .partial. name), remove it and run scan again"
+  done
+}
+
 # scan [path]...: the retained files of this checkout's fixture, dev-idp and participant state,
-# the logs of their containers and any path named, for a session password. Run it before stop.
+# the logs of their containers and any path named, for a session password, with every database dump
+# and store archive in the fixture's backups expanded (expand_backups). Run it before stop.
 # Each of the four places gets a planted control that must be found, so that a place the scan does
 # not read fails it. A container list, a log or a file that cannot be read fails it too.
 scan() {
   local pattern="${marker}[a-z0-9]{8}-[0-9]{4}" control=.bw-scan-control
-  local logs=$part/scan-logs errs names selected hits c d rc=0 missing='' planted recorded reached
+  local logs=$part/scan-logs unpacked=$part/scan-backups errs names selected hits c d rc=0 missing='' planted recorded reached
   local roots=("$STATE" "$idp" "$part" "$logs")
   for d in "$STATE" "$idp" "$part"; do [ -d "$d" ] || die "no $d to scan; run scan before session stop"; done
   # The logs are read by container name, so on another Docker daemon they would be other containers'.
@@ -778,6 +806,13 @@ scan() {
   for c in "$BW_A" "$BW_DEV_IDP_CONTAINER"; do
     [ -f "$logs/$c.log" ] || die "the log of $c was not read"
   done
+  # Below $part, so the scan reads it with the participant state. Like scan-logs, one that this
+  # scan did not make is refused, not removed.
+  [ ! -e "$unpacked" ] && [ ! -L "$unpacked" ] ||
+    die "$unpacked exists, and this scan did not make it; read it, remove it, and run scan again"
+  scan_made+=("$unpacked")
+  mkdir -p -- "$unpacked"
+  expand_backups "$unpacked"
   # A file already at a control's path is not this scan's: planting would overwrite it and the
   # cleanup would delete it, with whatever it holds. Checked for all four before any is planted.
   for d in "${roots[@]}"; do
