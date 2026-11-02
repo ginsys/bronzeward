@@ -226,8 +226,9 @@ export function DraftItem({ id }: { id: string }) {
     <>
       <h2>Draft {short(id)}{d !== undefined && <> "{d.title}" {d.state}, revision {d.revision}, cluster <Id id={d.cluster} /></>}</h2>
       {pending}
-      {/* That read failed: reading it again keeps the editor, and lets Save and Remove send again. */}
-      {unshown && item.kind !== "ok" && item.kind !== "loading" && <p><button type="button" onClick={() => reread((x) => x + 1)}>{READ_DRAFT_AGAIN}</button></p>}
+      {/* That read failed, also when the page keeps the data read before (no answer): reading it
+          again keeps the editor, and lets Save and Remove send again. */}
+      {unshown && item.kind !== "loading" && <p><button type="button" onClick={() => reread((x) => x + 1)}>{READ_DRAFT_AGAIN}</button></p>}
       {d !== undefined && (
         <>
           <h3>Entries</h3>
@@ -311,7 +312,8 @@ export const holdsUnsaved = (held: Held, saved: Held, mine: Held | undefined) =>
 // started, so an answer older than the operator's action changes nothing. `version` counts the
 // events that changed the editor's text or the conflict: Revert to base applies only at its click's.
 // `awaits`: while asked, a draft read named a new revision of this entry, and only its revision read
-// shows their text (ginsys/bronzeward#517 L1). `sent.removes`: the write was a Remove, which saves
+// shows their text (ginsys/bronzeward#517 L1); once theirs, Show their change was clicked again and
+// its reads have not answered, so Copy waits. `sent.removes`: the write was a Remove, which saves
 // the removal, not the text (H8). `reading`: the entry's newest revision is not read yet, its read
 // pending or failed, whatever the conflict's phase was when it started, so Show their change waits
 // for it too; only a read with text clears it.
@@ -355,7 +357,9 @@ function step(s: Editor, e: EditorEvent): Editor {
     case "at":
       return c !== undefined && c.revision === undefined ? at({ revision: e.revision }) : s;
     case "show":
-      return c?.phase === "refused" ? at({ phase: "asked" }) : s;
+      // Shown again once their text shows: Copy waits until the draft read, and the revision read it
+      // starts, answer, so a newer revision cannot replace the copied text (PR review).
+      return c?.phase === "refused" ? at({ phase: "asked" }) : c?.phase === "theirs" ? at({ awaits: true }) : s;
     case "draft":
       if (c === undefined || c.phase === "refused" || e.revision < (c.revision ?? 0)) return s;
       // Their change removed this entry: their text is the removal, which no revision read shows (H7).
@@ -366,6 +370,11 @@ function step(s: Editor, e: EditorEvent): Editor {
       // A revision read pending since before Show, a draft read ignored while refused started it,
       // also gives their text.
       if (c.phase === "asked" && (e.changed || s.reading === true)) return at({ revision: e.revision, awaits: true });
+      // Shown again: a draft read with no new revision and none pending ends the wait.
+      if (c.phase === "theirs" && c.awaits === true && !e.changed && s.reading !== true) {
+        const { awaits: _awaited, ...shown } = c;
+        return { ...s, conflict: { ...shown, revision: e.revision } };
+      }
       // Their change left this entry as read: its saved text is theirs. A later draft read that
       // finds the awaited revision already named changes nothing.
       return c.phase === "asked" && c.awaits !== true ? at({ phase: "theirs", revision: e.revision }, s.saved) : at({ revision: e.revision });
@@ -381,11 +390,14 @@ function step(s: Editor, e: EditorEvent): Editor {
         const { awaits: _awaited, ...shown } = c;
         return { ...idle, saved: e.text, held: e.text, conflict: { ...shown, phase: "theirs" } };
       }
-      return { ...idle, saved: e.text, held: same(s.held, s.saved) ? e.text : s.held };
+      const read = { ...idle, saved: e.text, held: same(s.held, s.saved) ? e.text : s.held };
+      if (c?.awaits !== true) return read;
+      const { awaits: _awaited, ...shown } = c;
+      return { ...read, conflict: shown };
     }
     case "copy":
-      // Only once their text shows: a revision read still pending could replace the copied text.
-      return c?.phase === "theirs" ? { ...ended, held: c.mine } : s;
+      // Only once their text shows and no read is pending: a pending one could replace the copied text.
+      return c?.phase === "theirs" && c.awaits !== true && s.reading !== true ? { ...ended, held: c.mine } : s;
     case "send":
       return { ...s, sent: { text: s.held, whileTheirs: c?.phase === "theirs", ...(e.removes === true && { removes: true as const }) } };
     case "done": {
@@ -642,7 +654,7 @@ export function FragmentPane({ draft, entry, written, seeChange, claim = () => {
           <label>Your text <textarea readOnly value={conflict.mine.document} rows={8} cols={60} {...NO_ASSIST} /></label>
         </div>
       )}
-      <button type="button" onClick={() => act({ kind: "copy" })} disabled={conflict.phase !== "theirs" || conflict.revision !== draft.revision}>
+      <button type="button" onClick={() => act({ kind: "copy" })} disabled={conflict.phase !== "theirs" || conflict.awaits === true || waits || conflict.revision !== draft.revision}>
         Copy my text into the new revision
       </button>
     </>
