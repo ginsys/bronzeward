@@ -253,6 +253,7 @@ func (e *env) machineShow(c *client.Client, id string) error {
 	if e.output == "json" || e.output == "yaml" { // the resource alone; the sentences are the table's
 		return e.emit(r.Body, nil)
 	}
+	first := c.Context.LastEpoch // the epoch of the machine answer
 	items, err := c.List("/machines/" + url.PathEscape(id) + "/observations")
 	if err != nil {
 		return err
@@ -260,6 +261,12 @@ func (e *env) machineShow(c *client.Client, id string) error {
 	obs, err := decode[apitypes.ObservationBody](c, items...)
 	if err != nil {
 		return err
+	}
+	if now := c.Context.LastEpoch; first != "" && now != first {
+		// An observation page showed a new epoch: the machine above and the observations come from
+		// different snapshots, and the sentences could describe a state that never existed (§8.5).
+		return fmt.Errorf("the epoch changed from %s to %s while the machine was read; nothing is shown. Read it again with: machine show %s",
+			client.ShellWord(first), client.ShellWord(now), client.ShellWord(id))
 	}
 	m := ms[0]
 	return e.emit(r.Body, func(w *tabwriter.Writer) {

@@ -815,11 +815,12 @@ the context. On a change it:
    recovery banner (journeys §8);
 4. records the new epoch. A context's first epoch is recorded without a notice.
 
-A command that shows one snapshot built from several reads (`status`, `recovery status`) shows
-nothing when an epoch change falls between the first and the last answer it shows, in every output
-form, because the earlier answers, with the revision and start mode they carry, no longer hold.
-After reads that all succeed, it says so and names the command that reads again. A failed read that
-the command needs ends it with that read's own error.
+A command that shows one snapshot built from several reads (`status`, `recovery status`, the
+table of `machine show`) shows nothing when an epoch change falls between the first and the last
+answer it shows, in every output form, because the earlier answers, with the facts they carry, no
+longer hold. `machine show -o json` and `-o yaml` print the machine answer alone, so they have no
+second read to compare. After reads that all succeed, it says so and names the command that reads
+again. A failed read that the command needs ends it with that read's own error.
 
 An epoch is never ordered or parsed. A missing `Bronzeward-Epoch` on an authenticated success is
 a defect the client reports.
