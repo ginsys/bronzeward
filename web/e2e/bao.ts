@@ -57,6 +57,13 @@ export async function undoSteps(undo: (() => Promise<unknown>)[], prefix: string
   if (failed.length > 0) throw new Error(`OpenBao cleanup (records named ${prefix}*): ${failed.join("; ")}`);
 }
 
+// The teardown's OpenBao cleanup: the instance to keep, which stays while its cleanup failed so a
+// later teardown tries its records again (H19), and the failure, undefined when there is none.
+export async function cleanBao<B extends Pick<Bao, "cleanup">>(bao: B | undefined): Promise<{ kept: B | undefined; failed: unknown }> {
+  const failed = await (bao?.cleanup() ?? Promise.resolve()).then(() => undefined, (e: unknown) => e ?? new Error("OpenBao cleanup failed"));
+  return { kept: failed === undefined ? undefined : bao, failed };
+}
+
 // The teardown's error: the databases left behind and the OpenBao cleanup's failure, both when both
 // failed, so neither hides the other (H19). Undefined when neither failed.
 export function teardownFailure(lost: Error | undefined, bao: unknown): unknown {

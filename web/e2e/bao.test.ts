@@ -1,5 +1,6 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, test, vi } from "vitest";
-import { baoTarget, DEV_ROOT_TOKEN, teardownFailure, undoSteps, upstreamFailed } from "./bao.ts";
+import { baoTarget, cleanBao, DEV_ROOT_TOKEN, teardownFailure, undoSteps, upstreamFailed } from "./bao.ts";
 
 describe("ginsys/bronzeward#517 H19 and H20: the OpenBao cleanup and proxy fail visibly", () => {
   test("a cleanup step that fails stays for the next cleanup, which runs only it again", async () => {
@@ -16,6 +17,27 @@ describe("ginsys/bronzeward#517 H19 and H20: the OpenBao cleanup and proxy fail 
     await undoSteps(undo, "bwweb-x-");
     expect(order).toEqual(["token", "policy", "token"]);
     expect(undo).toHaveLength(0);
+  });
+
+  test("the teardown keeps the instance whose cleanup failed, and drops it once a later cleanup succeeds", async () => {
+    let down = true;
+    const bao = { cleanup: vi.fn(async () => {
+      if (down) throw new Error("synthetic revoke failure");
+    }) };
+    const first = await cleanBao(bao);
+    expect(first.kept).toBe(bao);
+    expect(String(first.failed)).toMatch(/synthetic revoke failure/);
+    down = false;
+    const second = await cleanBao(first.kept);
+    expect(second).toEqual({ kept: undefined, failed: undefined });
+    expect(bao.cleanup).toHaveBeenCalledTimes(2);
+    expect(await cleanBao(undefined)).toEqual({ kept: undefined, failed: undefined });
+  });
+
+  test("auth.conf.ts keeps its OpenBao handle through cleanBao", () => {
+    const src = readFileSync(new URL("./auth.conf.ts", import.meta.url), "utf8");
+    expect(src).toMatch(/const \{ kept, failed: baoFailed \} = await cleanBao\(bao\);\s*bao = kept;/);
+    expect(src).not.toMatch(/bao\?\.cleanup\(\)/);
   });
 
   test("databases left behind and a failed OpenBao cleanup are both reported", () => {

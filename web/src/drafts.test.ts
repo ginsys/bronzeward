@@ -109,6 +109,20 @@ describe("[Go to field] positions (B13)", () => {
     expect(escaped.slice(e!.start, e!.end)).toBe('!bwref "x/\\u0066oo"');
   });
 
+  test("#517 review round 2: YAML escapes decode, and a scalar with a blank or the grammar's bad segments names nothing", () => {
+    expect(references('a: !bwref "x/\\x66oo"\nb: !bwref "x/\\U00000066oo"\n')).toEqual(["x/foo"]);
+    expect(references('a: !bwref "x/\\qoo"\nb: !bwref "x/\\x6"\n')).toEqual([]);
+    expect(references("a: !bwref x/foo bar\n")).toEqual([]);
+    // A plain scalar folded onto a more indented line is one scalar, with a blank: no name.
+    expect(references("a: !bwref x/foo\n  bar\nb: !bwref x/two\n")).toEqual(["x/two"]);
+    // A more indented key or sequence entry is no continuation.
+    expect(references("a: !bwref x/one\n  b: c\n")).toEqual(["x/one"]);
+    expect(references("- !bwref x/one\n  - c\n")).toEqual(["x/one"]);
+    for (const bad of ["x/foo-", "x//foo", "-x", "x/", "X/foo"]) expect(references(`a: !bwref ${bad}\n`)).toEqual([]);
+    // A flow list closed on the next line still ends its name at the bracket.
+    expect(references("a: [!bwref x/one,\n   !bwref x/two\n   ]\n")).toEqual(["x/one", "x/two"]);
+  });
+
   test("a flow list's reference ends at its comma, and a comment's text is no reference", () => {
     const text = "a: [!bwref ghost, !bwref x/two]\n# !bwref commented\nb: c # !bwref trailing\nd: '# not a comment' # !bwref after-quote\n";
     expect(references(text)).toEqual(["ghost", "x/two"]);
@@ -358,8 +372,34 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     // A read that answered before Show already put their text in `saved`: Show shows it at once.
     const early = run({ held: A, saved: A }, [{ kind: "refused" }, { kind: "reading", on: true }, { kind: "read", text: T, since: 0 }, { kind: "show" }, { kind: "draft", revision: 8, changed: false }]);
     expect(rest(early)).toEqual({ held: T, saved: T, conflict: theirs(A, 8) });
-    // A read that failed waits no more; Show their change reads it again (awaits).
+    // A read dropped for another entry's read waits no more.
     expect(run({ held: A, saved: A }, [{ kind: "reading", on: true }, { kind: "reading", on: false }]).reading).toBeUndefined();
+  });
+
+  test("#517 review round 2: the components keep the wiring the repairs rely on", () => {
+    // The unit suite has no DOM; these guard the lines the reducer and helper rows above assume.
+    const src = readFileSync(new URL("./drafts.tsx", import.meta.url), "utf8");
+    expect(src).toMatch(/<FragmentPane [^>]*shown=\{!unshown\}/);
+    expect(src).toMatch(/const at = selection\(spot\);\n\s*into\.setSelectionRange\(at\.start, at\.end\);/);
+    // A failed revision read keeps `reading`: only the cleanup drops it.
+    const failure = /if \(r\?\.kind !== "ok"\) \{([^}]*)\}/.exec(src);
+    expect(failure?.[1]).toMatch(/setFailed\(true\)/);
+    expect(failure?.[1]).not.toMatch(/reading/);
+    expect(src).toMatch(/const waits = unread\(entry\?\.revision, loaded, done\);/);
+    expect(src).toMatch(/\{unshown && item\.kind !== "ok" && item\.kind !== "loading" && <p><button [^>]*onClick=\{\(\) => reread\(\(x\) => x \+ 1\)\}>\{READ_DRAFT_AGAIN\}/);
+  });
+
+  test("#517 review round 2: a revision read that failed before Show keeps Show waiting, so the old text is never theirs", () => {
+    // The failed read sends no event: `reading` stays until a read answers or the pane drops it.
+    const failed = run({ held: A, saved: A }, [{ kind: "refused" }, { kind: "at", revision: 7 }, { kind: "draft", revision: 8, changed: true }, { kind: "reading", on: true }]);
+    const s = run(failed, [{ kind: "show" }, { kind: "draft", revision: 8, changed: false }]);
+    expect(s.conflict?.phase).toBe("asked");
+    expect(s.conflict?.awaits).toBe(true);
+    expect(maySend(s.conflict)).toBe(false);
+    // The retried read answers: their text shows, and Copy my text gives back the operator's.
+    const shown = run(s, [{ kind: "read", text: T, since: 0 }]);
+    expect(rest(shown)).toEqual({ held: T, saved: T, conflict: theirs(A, 8) });
+    expect(shown.reading).toBeUndefined();
   });
 
   test("#517 review: Save and Remove send nothing until a settled write's draft read shows", () => {
@@ -383,12 +423,14 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
   });
 
   test("H9: the pane takes no edit until the entry's revision is read, or a write of its own is done", () => {
-    expect(unread("frv_2", "pending", 0)).toBe(true);
-    expect(unread("frv_2", "failed", 0)).toBe(true);
-    expect(unread("frv_2", "ok", 0)).toBe(false);
-    expect(unread("frv_2", "failed", 1)).toBe(false);
-    expect(unread(null, "pending", 0)).toBe(false);
-    expect(unread(undefined, "pending", 0)).toBe(false);
+    expect(unread("frv_2", undefined, 0)).toBe(true);
+    expect(unread("frv_2", "frv_2", 0)).toBe(false);
+    expect(unread("frv_2", undefined, 1)).toBe(false);
+    expect(unread(null, undefined, 0)).toBe(false);
+    expect(unread(undefined, undefined, 0)).toBe(false);
+    // #517 review round 2: a refreshed draft that names a newer revision than the one the pane
+    // read waits for that one, though an earlier read succeeded.
+    expect(unread("frv_3", "frv_2", 0)).toBe(true);
   });
 
   test("R6-1: a Revert clicked before a 412, Show their change and Copy my text does not replace the copied text", () => {

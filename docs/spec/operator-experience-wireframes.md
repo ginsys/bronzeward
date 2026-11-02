@@ -195,9 +195,10 @@ text.
 to that entry in the list. Once the new fragment is saved, the pane edits the entry that it
 created.
 
-Until the entry's revision is read, the pane shows "Reading the entry's text.", takes no edit and
-sends nothing. If that read fails, the pane offers [Read the entry again]. A draft read again also
-reads it again. After [Remove], the draft stores the removal: the text still in the editor is
+Until the pane read the revision that the draft shown names, the pane shows "Reading the entry's
+text.", takes no edit and sends nothing. This also applies when a later draft read names a newer
+revision. If that read fails, the pane offers [Read the entry again]. A draft read again also reads
+it again. While a `412` waits for [Show their change], a failed revision read keeps it waiting. After [Remove], the draft stores the removal: the text still in the editor is
 unsaved, and leaving or switching entries asks first.
 
 [Sign out] asks first while an editor holds unsaved text. When the installation's epoch changes,
@@ -207,7 +208,8 @@ shown above it. Its actions stay disabled until the operator opens another page,
 nothing. The operator can copy the text out, then open the page again.
 
 After a Save or Remove is done, the page reads the draft again. Until that read shows, [Save] and
-[Remove] send nothing, also in an entry the operator opened again meanwhile.
+[Remove] send nothing, also in an entry the operator opened again meanwhile. If that read fails,
+the page offers [Read the draft again], which keeps the editor's text.
 
 [Revert to base] puts the base revision's text in the editor, not saved. Save then writes it as
 a new revision of the entry, and the entry stays in the draft. (2026-11-01, lead ruling: no route
