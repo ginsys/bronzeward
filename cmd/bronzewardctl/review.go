@@ -71,8 +71,7 @@ func (e *env) importReview(args []string) error {
 		return err
 	}
 	if len(marks) == 0 {
-		return e.say("No marks given. Review again, continue or abandon it:", "  bronzewardctl import review "+ing,
-			"  bronzewardctl import continue "+ing, "  bronzewardctl import abandon "+ing)
+		return e.say(append([]string{"No marks given. Review again, continue or abandon it:"}, remedies(ing, "review", "continue", "abandon")...)...)
 	}
 	return e.sendMarks(c, ing, marks, nil, false)
 }
@@ -173,9 +172,9 @@ func (e *env) sendMarks(c *client.Client, ing string, marks []string, rp *client
 		Repeat: rp, HumanOnly: true, Check: "import status " + client.ShellWord(ing), Read: ingestionRead(ing)},
 		func(_ *client.Client, r *client.Response) ([]string, error) {
 			err := json.Unmarshal(r.Body, &a)
-			lines := []string{fmt.Sprintf("Sent %s for import %s (operation %s, generation %d).", paths(a.marks), a.Ingestion, a.Operation, a.Generation)}
+			lines := []string{sf("Sent %s for import %s (operation %s, generation %d).", paths(a.marks), a.Ingestion, a.Operation, a.Generation)}
 			if noWait {
-				lines = append(lines, "Follow it with: bronzewardctl import status "+a.Ingestion)
+				lines = append(lines, "Follow it with: bronzewardctl import status "+pr(a.Ingestion))
 			}
 			return lines, err
 		})
@@ -183,7 +182,8 @@ func (e *env) sendMarks(c *client.Client, ing string, marks []string, rp *client
 		return err
 	}
 	if a.Generation == 0 {
-		return fmt.Errorf("%s: the server accepted the mark without naming its generation; read the import with: bronzewardctl import status %s", c.Context.Where(), client.ShellWord(ing))
+		return &client.Blocked{Err: fmt.Errorf("%s: the server accepted the mark without naming its generation. Read the import with:", c.Context.Where()),
+			More: remedies(ing, "status")}
 	}
 	return e.follow(c, a, 0)
 }
@@ -202,25 +202,26 @@ func paths(n int) string {
 // operation that succeeded without one is not applied either.
 func (e *env) markOutcome(c *client.Client, a accepted, b *apitypes.IngestionBody, o *apitypes.OperationBody, s settlement) error {
 	what := "the mark on import " + b.Id
-	again := "Review it again and mark again, continue it, or abandon it:\n  bronzewardctl import review " + b.Id +
-		"\n  bronzewardctl import continue " + b.Id + "\n  bronzewardctl import abandon " + b.Id
 	switch {
 	case s.how == "paused":
-		return e.say(fmt.Sprintf("Marked %s; re-staged and paused again (generation %d). Review again, continue or abandon it:", paths(a.marks), a.Generation),
-			"  bronzewardctl import review "+b.Id, "  bronzewardctl import continue "+b.Id, "  bronzewardctl import abandon "+b.Id)
+		return e.say(append([]string{sf("Marked %s; re-staged and paused again (generation %d). Review again, continue or abandon it:", paths(a.marks), a.Generation)},
+			remedies(b.Id, "review", "continue", "abandon")...)...)
 	case s.how == "mark-refused":
-		return fmt.Errorf("%s: %s was not applied: it was refused (%s). The import is paused again at generation %d. %s",
-			c.Context.Where(), what, refusal(s.problem), a.Generation, again)
+		return &client.Blocked{Err: fmt.Errorf("%s: %s was not applied: it was refused (%s). The import is paused again at generation %d. "+
+			"Review it again and mark again, continue it, or abandon it:", c.Context.Where(), what, refusal(s.problem), a.Generation),
+			More: remedies(b.Id, "review", "continue", "abandon")}
 	case s.how == "resume-failed":
 		return resumeFailed(c, b, what, s.code)
 	case s.how == "taken-over":
-		return fmt.Errorf("%s: %s was not applied: a takeover at generation %d resumed the import without it. Once the import pauses again, review it and mark again:\n  bronzewardctl import status %s",
-			c.Context.Where(), what, s.gen, b.Id)
+		return &client.Blocked{Err: fmt.Errorf("%s: %s was not applied: a takeover at generation %d resumed the import without it. Once the import pauses again, review it and mark again:",
+			c.Context.Where(), what, s.gen), More: remedies(b.Id, "status")}
 	case client.Terminal(o.State) && o.State != "succeeded":
 		return e.ended(c, b, o)
 	case client.Terminal(o.State):
-		return fmt.Errorf("%s: %s was not applied: operation %s succeeded without pausing at the mark's generation %d. Read the draft before marking again:\n  bronzewardctl draft show %s",
-			c.Context.Where(), what, o.Id, a.Generation, client.ShellWord(b.Draft))
+		// The import ended, so this client's record of it ends too, as ended ends it (§8.3).
+		forget(e, c, b.Id)
+		return &client.Blocked{Err: fmt.Errorf("%s: %s was not applied: operation %s succeeded without pausing at the mark's generation %d. Read the draft before marking again:",
+			c.Context.Where(), what, o.Id, a.Generation), More: []string{"  bronzewardctl draft show " + pr(client.ShellWord(b.Draft))}}
 	}
 	return lapsed(c, b, o, what)
 }

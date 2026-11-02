@@ -525,18 +525,25 @@ func started(e *env, c *client.Client, ing string, on bool) {
 	}
 }
 
+// forget ends this client's record of import ing once the import ended, and says whether there was
+// one: whether this client started it.
+func forget(e *env, c *client.Client, ing string) bool {
+	ours, err := client.Started(c.Context, ing)
+	if err != nil {
+		tf(e.err, "bronzewardctl: %s: reading the record of import %s: %v\n", c.Context.Where(), pr(ing), err)
+	}
+	if ours {
+		started(e, c, ing, false)
+	}
+	return ours
+}
+
 // ended reports an import operation's terminal state: on success the draft it was released into,
 // whose ETag the client adopts only after an import it started itself, and only at the result's
 // revision (ETAG-02, client-contracts.md §8.3); otherwise exit 4, a failure the draft caused offering
 // a new start. The import's record ends with it.
 func (e *env) ended(c *client.Client, b *apitypes.IngestionBody, o *apitypes.OperationBody) error {
-	ours, rerr := client.Started(c.Context, b.Id)
-	if rerr != nil {
-		tf(e.err, "bronzewardctl: %s: reading the record of import %s: %v\n", c.Context.Where(), pr(b.Id), rerr)
-	}
-	if ours {
-		started(e, c, b.Id, false)
-	}
+	ours := forget(e, c, b.Id)
 	if o.State != "succeeded" {
 		var p struct {
 			Type string `json:"type"`
