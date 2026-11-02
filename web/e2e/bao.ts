@@ -8,7 +8,7 @@
 
 import { randomBytes } from "node:crypto";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { createServer, request, type Server } from "node:http";
+import { createServer, request, type Server, type ServerResponse } from "node:http";
 
 export interface Bao {
   // The proxy's URL, the deployment's provider address.
@@ -47,6 +47,29 @@ export function baoTarget(env: Record<string, string | undefined>): { addr: stri
   return { addr, admin: DEV_ROOT_TOKEN };
 }
 
+// The cleanup steps, last first. A step that fails stays, so a later cleanup tries it again
+// (ginsys/bronzeward#517 H19); every failure is reported.
+export async function undoSteps(undo: (() => Promise<unknown>)[], prefix: string): Promise<void> {
+  const failed: string[] = [];
+  const kept: (() => Promise<unknown>)[] = [];
+  for (const u of undo.splice(0).reverse()) await u().catch((e: unknown) => (kept.unshift(u), failed.push(String(e))));
+  undo.push(...kept);
+  if (failed.length > 0) throw new Error(`OpenBao cleanup (records named ${prefix}*): ${failed.join("; ")}`);
+}
+
+// The teardown's error: the databases left behind and the OpenBao cleanup's failure, both when both
+// failed, so neither hides the other (H19). Undefined when neither failed.
+export function teardownFailure(lost: Error | undefined, bao: unknown): unknown {
+  if (lost !== undefined && bao !== undefined) return new AggregateError([lost, bao], `${lost.message}; ${String(bao)}`);
+  return lost ?? bao;
+}
+
+// The proxy's upstream failed: a 502, or once the headers were sent, a cut response (H20).
+export function upstreamFailed(res: Pick<ServerResponse, "headersSent" | "destroy" | "writeHead">): void {
+  if (res.headersSent) res.destroy();
+  else res.writeHead(502).end();
+}
+
 export async function startBao(root: string, state: string, port: number): Promise<Bao> {
   const { addr, admin } = baoTarget(process.env);
   const prefix = `bwweb-${randomBytes(6).toString("hex")}-`;
@@ -62,14 +85,7 @@ export async function startBao(root: string, state: string, port: number): Promi
     if (Math.floor(r.status / 100) !== 2) throw new Error(`${method} ${path}: status ${r.status}: ${r.body}`);
     return r.body;
   };
-  const undoAll = async () => {
-    // A step that fails stays, so a later cleanup tries it again (#517 H19).
-    const failed: string[] = [];
-    const kept: (() => Promise<unknown>)[] = [];
-    for (const u of undo.splice(0).reverse()) await u().catch((e: unknown) => (kept.unshift(u), failed.push(String(e))));
-    undo.push(...kept);
-    if (failed.length > 0) throw new Error(`OpenBao cleanup (records named ${prefix}*): ${failed.join("; ")}`);
-  };
+  const undoAll = () => undoSteps(undo, prefix);
 
   const make = async (): Promise<Bao> => {
     const mount = async (path: string, type: string, options?: Record<string, string>) => {
@@ -115,8 +131,7 @@ export async function startBao(root: string, state: string, port: number): Promi
             res.writeHead(r.statusCode ?? 502, r.headers);
             r.pipe(res);
           });
-          // Headers already sent cannot become a 502: the response is cut instead (#517 H20).
-          up.on("error", () => (res.headersSent ? res.destroy() : res.writeHead(502).end()));
+          up.on("error", () => upstreamFailed(res));
           req.pipe(up);
         }, held);
       }),

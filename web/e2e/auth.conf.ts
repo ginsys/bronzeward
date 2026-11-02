@@ -26,7 +26,7 @@ import {
   PAGE_LISTEN, PAGE_ORIGIN as IDP_PAGE,
 } from "./ports.ts";
 import { type Counts, type Grant, type Provider, startProvider } from "./provider.ts";
-import { type Bao, startBao } from "./bao.ts";
+import { type Bao, startBao, teardownFailure } from "./bao.ts";
 
 export { CONTROL, FIXTURE_API, FIXTURE_ISSUER, FIXTURE_PAGE, IDP_PAGE };
 // mise run browser-auth sets BW_DEV_PG_PORT and BW_DEV_IDP_DIR from BW_DEV_INSTANCE
@@ -335,10 +335,8 @@ async function cleanup() {
     });
     // A later cleanup tries them again, and keeps the state directory while any is left.
     databases.splice(0, databases.length, ...left);
-    const lost = left.length > 0 ? new Error(`databases left behind: ${left.join(", ")} (named in ${state})`) : undefined;
-    if (lost !== undefined && baoFailed !== undefined) throw new AggregateError([lost, baoFailed], `${lost.message}; ${String(baoFailed)}`);
-    if (lost !== undefined) throw lost;
-    if (baoFailed !== undefined) throw baoFailed;
+    const failure = teardownFailure(left.length > 0 ? new Error(`databases left behind: ${left.join(", ")} (named in ${state})`) : undefined, baoFailed);
+    if (failure !== undefined) throw failure;
     if (ownState) rmSync(state, { recursive: true, force: true });
     ownState = false;
   } catch (e) {

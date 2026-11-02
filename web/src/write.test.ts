@@ -494,6 +494,25 @@ describe("a fragment write's in-progress 409 (§8.4 item 2, AMB-02)", () => {
     }
   });
 
+  test("ginsys/bronzeward#517 H13: a final 401 the stalled /server read gets after its write settled still ends the page, once", async () => {
+    vi.useFakeTimers();
+    try {
+      let answer: (r: Response) => void = () => {};
+      const late = () => new Promise<Response>((r) => (answer = r)) as unknown as Response;
+      const { writes } = page([new TypeError("Failed to fetch"), inProgress(), late, ...Array.from({ length: 40 }, () => inProgress())]);
+      writes.onEnded = vi.fn();
+      const run = writes.submit(fragment());
+      await vi.advanceTimersByTimeAsync(SERVER_WAIT);
+      expect(await run).toMatchObject({ kind: "unknown" });
+      expect(writes.onEnded).not.toHaveBeenCalled();
+      answer(problem(401, "unauthenticated"));
+      await vi.waitFor(() => expect(writes.onEnded).toHaveBeenCalledWith(expect.objectContaining({ kind: "unauthenticated" })));
+      expect(writes.onEnded).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("ginsys/bronzeward#517 H14: when the /server read fails, the lease the shell read still raises the bound", async () => {
     const { writes, waits } = page([new TypeError("Failed to fetch"), inProgress(), problem(503, "unavailable"), ...Array.from({ length: 90 }, () => inProgress())]);
     writes.lease = 300;

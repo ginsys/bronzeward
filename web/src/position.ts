@@ -35,15 +35,35 @@ export async function spotOfPath(text: string, path: string): Promise<Spot | und
 // The reference tags in the text, outside comments: a reference name is the §5.1 grammar's
 // characters (internal/ingest/declare.go), so a flow list's comma or bracket ends it. The name may
 // be quoted, and may stand on a line after its tag (ginsys/bronzeward#517 H16). Comments are
-// blanked first, keeping every offset, so a match can cross a line without reading one. A scalar
-// followed by a colon and a blank is a key, never the tag's value.
+// blanked first, keeping every offset, so a match can cross a line without reading one. The whole
+// scalar after the tag is read and decoded, then held to the grammar: a scalar followed by a colon
+// and a blank is a key, never the tag's value, and one with other characters names no reference.
+// A quoted scalar is read on one line; YAML escapes JSON lacks name no reference here.
+const NAME = /^[a-z0-9][a-z0-9/-]*$/;
 function tags(text: string): { index: number; tag: string; name: string }[] {
   let masked = "";
   for (const line of text.split("\n")) {
     const end = commentStart(line);
     masked += `${line.slice(0, end)}${" ".repeat(line.length - end)}\n`;
   }
-  return [...masked.matchAll(/!bwref\s+(["']?)([a-z0-9][a-z0-9/-]*)\1(?![a-z0-9/-]|[ \t]*:(?:\s|$))/g)].map((m) => ({ index: m.index, tag: text.slice(m.index, m.index + m[0].length), name: m[2]! }));
+  const found: { index: number; tag: string; name: string }[] = [];
+  for (const m of masked.matchAll(/!bwref\s+(?:"((?:[^"\\\n]|\\.)*)"|'((?:[^'\n]|'')*)'|([^\s,[\]{}]+))/g)) {
+    const end = m.index + m[0].length;
+    const plain = m[3];
+    if ((plain?.endsWith(":") === true && /^(?:\s|$)/.test(masked.slice(end))) || /^[ \t]*:(?:\s|$)/.test(masked.slice(end))) continue;
+    const name = m[1] !== undefined ? decoded(m[1]) : m[2] !== undefined ? m[2].replaceAll("''", "'") : plain!;
+    if (name !== undefined && NAME.test(name)) found.push({ index: m.index, tag: text.slice(m.index, end), name });
+  }
+  return found;
+}
+
+// A double-quoted scalar's text, its escapes decoded where JSON has them.
+function decoded(body: string): string | undefined {
+  try {
+    return JSON.parse(`"${body}"`) as string;
+  } catch {
+    return undefined;
+  }
 }
 
 // Where a line's comment starts: a # at its start or after a blank, outside quotes; the line's

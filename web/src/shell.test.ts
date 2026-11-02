@@ -1,7 +1,7 @@
 import { createElement as h, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
-import { Action, connection, Deprecations, deprecated, ending, Failure, type Identity, identityMain, incompatible, keepsPage, Kept, MIN_API_REVISION, observed, offlineSince, reading, regaining, ShellContext, type ShellEvents, ShellReads, moveFree, showCurrent } from "./shell.tsx";
+import { Action, connection, Deprecations, deprecated, ending, Failure, type Identity, identityMain, incompatible, KEPT_PAGE, keepsPage, Kept, MIN_API_REVISION, observed, offlineSince, reading, regaining, ShellContext, type ShellEvents, ShellReads, moveFree, showCurrent } from "./shell.tsx";
 import { Conflict, Disconnected, Empty, HUMAN_ONLY, Loading, NOT_ACCEPTED, NotAccepted, Offline, Refused, REPEATING, REPLAYED, Replayed, SET_ASIDE, SetAside, Unknown, UNKNOWN, Unread, Withheld, WITHHELD } from "./states.tsx";
 import { NO_EPOCH, SHELL_GONE, Write, Writes } from "./write.ts";
 import { type Attempt, type Client, TRANSPORT_FAILURE } from "./request.ts";
@@ -189,6 +189,19 @@ describe("the shell", () => {
     // An incompatible server reads no identity: the page goes.
     expect(keepsPage(true, server(MIN_API_REVISION - 1), loading)).toBe(false);
     expect(keepsPage(true, { kind: "refused", status: 409, problem: {} } as unknown as Parameters<typeof keepsPage>[1], loading)).toBe(false);
+    // A read a later one can mend keeps it: no answer, or a server error, of either read.
+    const transport = { kind: "transport" } as unknown as Parameters<typeof keepsPage>[1];
+    const unavailable = { kind: "refused", status: 503, problem: null } as const;
+    expect(keepsPage(true, transport, loading)).toBe(true);
+    expect(keepsPage(true, unavailable, loading)).toBe(true);
+    expect(keepsPage(true, server(MIN_API_REVISION), transport as unknown as Parameters<typeof keepsPage>[2])).toBe(true);
+    expect(keepsPage(true, server(MIN_API_REVISION), unavailable)).toBe(true);
+    expect(keepsPage(true, server(MIN_API_REVISION), { kind: "refused", status: 403, problem: null })).toBe(false);
+  });
+
+  test("ginsys/bronzeward#517 H10: a page kept across an epoch change sends nothing", () => {
+    const kept = html(h(ShellContext, { value: { roles: ["author"], offline: false, kept: true } }, h(Action, { label: "Save", needs: ["author"], onClick: noop })));
+    expect(kept).toMatch(new RegExp(`disabled="".*<span id=".+?"> ${KEPT_PAGE}</span>`));
   });
 });
 

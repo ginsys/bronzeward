@@ -1,5 +1,48 @@
-import { describe, expect, test } from "vitest";
-import { baoTarget, DEV_ROOT_TOKEN } from "./bao.ts";
+import { describe, expect, test, vi } from "vitest";
+import { baoTarget, DEV_ROOT_TOKEN, teardownFailure, undoSteps, upstreamFailed } from "./bao.ts";
+
+describe("ginsys/bronzeward#517 H19 and H20: the OpenBao cleanup and proxy fail visibly", () => {
+  test("a cleanup step that fails stays for the next cleanup, which runs only it again", async () => {
+    const order: string[] = [];
+    let down = true;
+    const undo = [async () => void order.push("policy"), async () => {
+      order.push("token");
+      if (down) throw new Error("synthetic revoke failure");
+    }];
+    await expect(undoSteps(undo, "bwweb-x-")).rejects.toThrow(/OpenBao cleanup \(records named bwweb-x-\*\): Error: synthetic revoke failure/);
+    expect(order).toEqual(["token", "policy"]);
+    expect(undo).toHaveLength(1);
+    down = false;
+    await undoSteps(undo, "bwweb-x-");
+    expect(order).toEqual(["token", "policy", "token"]);
+    expect(undo).toHaveLength(0);
+  });
+
+  test("databases left behind and a failed OpenBao cleanup are both reported", () => {
+    const lost = new Error("databases left behind: bw_a");
+    const bao = new Error("OpenBao cleanup: synthetic");
+    const both = teardownFailure(lost, bao);
+    expect(both).toBeInstanceOf(AggregateError);
+    expect((both as AggregateError).errors).toEqual([lost, bao]);
+    expect((both as Error).message).toMatch(/bw_a; Error: OpenBao cleanup: synthetic/);
+    expect(teardownFailure(lost, undefined)).toBe(lost);
+    expect(teardownFailure(undefined, bao)).toBe(bao);
+    expect(teardownFailure(undefined, undefined)).toBeUndefined();
+  });
+
+  test("an upstream error is a 502 before the headers, a cut response after them", () => {
+    const end = vi.fn();
+    const before = { headersSent: false, destroy: vi.fn(), writeHead: vi.fn(() => ({ end })) };
+    upstreamFailed(before as never);
+    expect(before.writeHead).toHaveBeenCalledWith(502);
+    expect(end).toHaveBeenCalled();
+    expect(before.destroy).not.toHaveBeenCalled();
+    const after = { headersSent: true, destroy: vi.fn(), writeHead: vi.fn() };
+    upstreamFailed(after as never);
+    expect(after.destroy).toHaveBeenCalled();
+    expect(after.writeHead).not.toHaveBeenCalled();
+  });
+});
 
 describe("the OpenBao the draft cases administer is the instance's disposable dev-bao", () => {
   test("the instance's loopback address with dev-bao's root token", () => {

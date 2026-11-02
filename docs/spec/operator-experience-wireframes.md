@@ -202,8 +202,12 @@ unsaved, and leaving or switching entries asks first.
 
 [Sign out] asks first while an editor holds unsaved text. When the installation's epoch changes,
 a page that holds unsaved text stays shown while the shell reads the server and the identity
-again. The ETags of the old epoch are gone, so that page sends nothing. The operator can copy the
-text out, then open the page again.
+again. It also stays if one of those reads gets no answer or a server error, with that failure
+shown above it. Its actions stay disabled until the operator opens another page, so it sends
+nothing. The operator can copy the text out, then open the page again.
+
+After a Save or Remove is done, the page reads the draft again. Until that read shows, [Save] and
+[Remove] send nothing, also in an entry the operator opened again meanwhile.
 
 [Revert to base] puts the base revision's text in the editor, not saved. Save then writes it as
 a new revision of the entry, and the entry stays in the draft. (2026-11-01, lead ruling: no route
