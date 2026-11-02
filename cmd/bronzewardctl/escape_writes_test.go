@@ -172,6 +172,8 @@ func TestOwnArgumentInParserError(t *testing.T) {
 		// The parser quotes a rejected value with %q (`\t`, `\\`); the contract's form is `\x09` and `\`.
 		{"an int flag", []string{"cluster", "list", "--limit", "a\tb\\c\nFORGED"}, `invalid value "a\x09b\c\x0aFORGED" for flag -limit: parse error`},
 		{"a bool flag", []string{"--no-input=x\ty\\z"}, `invalid boolean value "x\x09y\z" for -no-input: parse error`},
+		{"an int flag with a double quote", []string{"cluster", "list", "--limit", `a"b`}, `invalid value "a\x22b" for flag -limit: parse error`},
+		{"a bool flag with a double quote", []string{`--no-input=a"b`}, `invalid boolean value "a\x22b" for -no-input: parse error`},
 		{"a global flag after the command", []string{"cluster", "list", "-o", "x\ty"}, `-o "x\x09y": give table, json or yaml`},
 		{"a flag without its value", []string{"cluster", "list", "--limit"}, `flag needs an argument: -limit`},
 	} {
