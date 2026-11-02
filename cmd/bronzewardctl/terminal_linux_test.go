@@ -7,8 +7,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
+	"time"
 	"unsafe"
 )
 
@@ -34,6 +36,103 @@ func pty(t *testing.T) (*os.File, string) {
 	tio.Lflag &^= syscall.ECHO
 	ioctl(syscall.TCSETS, unsafe.Pointer(&tio))
 	return ctl, fmt.Sprintf("/dev/pts/%d", n)
+}
+
+// onPty opens the terminal of a new pseudo-terminal pair of rows by cols as standard input, and
+// returns its controller and the terminal.
+func onPty(t *testing.T, rows, cols uint16) (*os.File, *os.File) {
+	t.Helper()
+	ctl, tty := pty(t)
+	ws := struct{ rows, cols, x, y uint16 }{rows, cols, 0, 0}
+	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, ctl.Fd(), syscall.TIOCSWINSZ, uintptr(unsafe.Pointer(&ws))); errno != 0 {
+		t.Fatalf("setting the window size: %v", errno)
+	}
+	in, err := os.OpenFile(tty, os.O_RDWR|syscall.O_NOCTTY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := stdin
+	stdin = in
+	t.Cleanup(func() { stdin = old; in.Close() })
+	return ctl, in
+}
+
+// TestImportReviewOnTerminal runs import review on a pseudo-terminal. A terminal smaller than 20
+// columns by 2 rows is refused before the review is read. On a mark whose outcome is unknown (exit
+// 3), the review holds back its standard output: the terminal shows the review and nothing of the
+// mark (#256's output rule).
+func TestImportReviewOnTerminal(t *testing.T) {
+	f, _ := importSteps(t)
+	review := []string{"import", "review", "ing_BWSYNTH"}
+
+	_, small := onPty(t, 24, 19)
+	var e bytes.Buffer
+	if got := run(review, small, &e); got != 2 || !strings.Contains(e.String(), "needs a terminal at least 20 columns wide and 2 rows high, and this one is 19 by 24; nothing was read") {
+		t.Errorf("a terminal of 19 columns: exit %d, stderr %q; want 2 and the refusal", got, e.String())
+	}
+	if f.reviews != 0 {
+		t.Errorf("the review was read %d times on a terminal too small for it", f.reviews)
+	}
+
+	f.set("held", 2, -time.Minute, "running", "", "", ev("paused", `{"type":"paused","generation":1}`), ev("marked", `{"type":"marked","generation":2,"paths":1}`))
+	ctl, term := onPty(t, 24, 80)
+	// The controller types as a person would: q once the pager shows its key line, and the marks once
+	// the pager has left the alternate screen and the terminal is back in line mode.
+	var mu sync.Mutex
+	var screen []byte
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		b := make([]byte, 4096)
+		quit, marked := false, false
+		for {
+			n, err := ctl.Read(b)
+			mu.Lock()
+			screen = append(screen, b[:n]...)
+			s := string(screen)
+			mu.Unlock()
+			if err != nil {
+				return
+			}
+			if !quit && strings.Contains(s, "space or f forward") {
+				quit = true
+				ctl.WriteString("q")
+			}
+			if quit && !marked && strings.Contains(s, altScreenOff) {
+				for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+					var tio syscall.Termios
+					if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, ctl.Fd(), syscall.TCGETS, uintptr(unsafe.Pointer(&tio))); errno == 0 && tio.Lflag&syscall.ICANON != 0 {
+						break
+					}
+				}
+				marked = true
+				ctl.WriteString("doc[0]/BWSYNTH\n\n")
+			}
+		}
+	}()
+	e.Reset()
+	got := run(review, term, &e)
+	term.Close()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the terminal stayed open after the command ended")
+	}
+	mu.Lock()
+	s := string(screen)
+	mu.Unlock()
+	if got != 3 || !strings.Contains(e.String(), "the mark on import ing_BWSYNTH: its claim is held and its lease lapsed") {
+		t.Errorf("exit %d, stderr %q; want 3 and the lapsed lease", got, e.String())
+	}
+	if !strings.Contains(s, "protected review") || !strings.Contains(s, "BWSYNTH") {
+		t.Errorf("the terminal does not show the notice and the review: %q", s)
+	}
+	if off := strings.LastIndex(s, altScreenOff); off < 0 || strings.Contains(s[off:], "Sent") || strings.Contains(s[off:], "Marked") {
+		t.Errorf("the terminal shows the mark's acknowledgement on an unknown outcome: %q", s)
+	}
+	if took := f.took(); strings.Join(took, "\n") != `POST /ingestions/ing_BWSYNTH/marks if-match= body={"marks":["doc[0]/BWSYNTH"]}` {
+		t.Errorf("sent %v; want the mark", took)
+	}
 }
 
 // TestStdinByIdentity checks that an input path naming standard input under another name takes

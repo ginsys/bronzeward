@@ -44,6 +44,10 @@ func (e *env) importReview(args []string) error {
 	case out == nil || !isTerminal(out) || !isTerminal(stdin):
 		return usageError{errors.New("import review shows the review only when standard input and standard output are a terminal, with no override; nothing was read or written")}
 	}
+	rows, cols, err := screenSize(out)
+	if err != nil {
+		return err
+	}
 	ing := pos[0]
 	c, err := e.open()
 	if err != nil {
@@ -63,7 +67,7 @@ func (e *env) importReview(args []string) error {
 	if _, err := fmt.Fprintln(out, reviewNotice); err != nil {
 		return err
 	}
-	if err := e.pager(out, reviewText(rv)); err != nil {
+	if err := e.pager(out, reviewText(rv), rows, cols); err != nil {
 		return err
 	}
 	marks, err := e.readMarks(false)
@@ -88,13 +92,24 @@ func (e *env) rawFile() *os.File {
 	return f
 }
 
-// pager shows text on the terminal out in the alternate screen, with standard input in raw mode
-// for the keys, and restores both before it returns, so the review leaves the screen.
-func (e *env) pager(out *os.File, text string) error {
-	cols, rows, err := term.GetSize(int(out.Fd())) // width, then height
+// screenSize is the terminal out's rows and columns, 24 by 80 when it does not say. A terminal
+// smaller than the pager needs is refused before anything is read.
+func screenSize(out *os.File) (rows, cols int, err error) {
+	cols, rows, err = term.GetSize(int(out.Fd())) // width, then height
 	if err != nil {
 		rows, cols = 24, 80
 	}
+	if rows < minRows || cols < minCols {
+		return 0, 0, usageError{fmt.Errorf("import review needs a terminal at least %d columns wide and %d rows high, and this one is %d by %d; nothing was read",
+			minCols, minRows, cols, rows)}
+	}
+	return rows, cols, nil
+}
+
+// pager shows lines on the terminal out, of rows by cols, in the alternate screen, with standard
+// input in raw mode for the keys, and restores both before it returns, so the review leaves the
+// screen.
+func (e *env) pager(out *os.File, lines []string, rows, cols int) error {
 	old, err := term.MakeRaw(int(stdin.Fd()))
 	if err != nil {
 		return fmt.Errorf("putting the terminal in raw mode for the review: %w; nothing was shown", err)
@@ -103,20 +118,17 @@ func (e *env) pager(out *os.File, text string) error {
 	if _, err := fmt.Fprint(out, altScreenOn); err != nil {
 		return err
 	}
-	err = page(text, rows, cols, stdin, out)
+	err = page(lines, rows, cols, stdin, out)
 	_, _ = fmt.Fprint(out, clearScreen+altScreenOff)
 	return err
 }
 
-// reviewText is the review as the pager shows it: the staged document, then its declarations. Only
-// the document's own line feeds start a line: a declared path, kind or format is escaped whole, so
-// none can add a line that the pager would show as the review's own.
-func reviewText(rv apitypes.IngestionReviewBody) string {
-	var b strings.Builder
-	b.WriteString(rv.Document)
-	if !strings.HasSuffix(rv.Document, "\n") {
-		b.WriteString("\n")
-	}
+// reviewText is the review as the pager shows it, as its lines: the staged document's lines, then
+// its declarations, one line each. Only the document's own line feeds start a line. A declared
+// path, kind or format is put in its line as it came, and the pager escapes within each line, so a
+// line feed in one shows as \x0a inside its line, and the pager's wrap never cuts that escape.
+func reviewText(rv apitypes.IngestionReviewBody) []string {
+	lines := strings.Split(strings.TrimSuffix(rv.Document, "\n"), "\n")
 	paths := slices.Sorted(func(yield func(string) bool) {
 		for p := range rv.Declarations.References {
 			if !yield(p) {
@@ -124,16 +136,16 @@ func reviewText(rv apitypes.IngestionReviewBody) string {
 			}
 		}
 	})
-	fmt.Fprintf(&b, "\n# declared references: %d\n", len(paths))
+	lines = append(lines, "", fmt.Sprintf("# declared references: %d", len(paths)))
 	for _, p := range paths {
 		ref := rv.Declarations.References[p]
-		b.WriteString(sf("#   %s: %s version %d\n", p, ref.Kind, ref.Version))
+		lines = append(lines, fmt.Sprintf("#   %s: %s version %d", p, ref.Kind, ref.Version))
 	}
-	fmt.Fprintf(&b, "# declared embedded documents: %d\n", len(rv.Declarations.Embedded))
+	lines = append(lines, fmt.Sprintf("# declared embedded documents: %d", len(rv.Declarations.Embedded)))
 	for _, d := range rv.Declarations.Embedded {
-		b.WriteString(sf("#   %s: %s\n", d.Path, d.Format))
+		lines = append(lines, fmt.Sprintf("#   %s: %s", d.Path, d.Format))
 	}
-	return b.String()
+	return lines
 }
 
 // importMark marks values of a paused import as secret by their paths (POST
