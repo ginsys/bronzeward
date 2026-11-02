@@ -2,6 +2,7 @@ package client
 
 import (
 	"bufio"
+	"errors"
 	"io"
 	"net"
 	"os"
@@ -256,6 +257,72 @@ func TestSecretServiceStoppedReader(t *testing.T) {
 	}
 }
 
+// TestSecretServiceDismissWaitsForCompleted checks that a refusal that dismissed a prompt returns
+// only after the service's answer to the dismissal, its Completed signal, was read. The D-Bus
+// library panics, and ends the test binary, when its connection is closed while it decodes a
+// message, and gnome-keyring sends that signal about 30 ms after a dismissal that asked for no
+// reply (ginsys/bronzeward#543). The stand-in holds the signal behind a gate, so a refusal that
+// closes its connection at once returns before the gate opens. ssDismissWait is far longer than the
+// bound after the gate, so only the signal itself, not the wait running out, can end the refusal.
+func TestSecretServiceDismissWaitsForCompleted(t *testing.T) {
+	stub := stubSecretService(t)
+	stub.reset("")
+	wait := ssDismissWait
+	t.Cleanup(func() { ssDismissWait = wait })
+	ssDismissWait = time.Minute
+	stub.mu.Lock()
+	stub.prompt, stub.gate = true, make(chan struct{})
+	stub.mu.Unlock()
+	done := make(chan error, 1)
+	go func() { _, err := ssGet("BWSYNTH-service", "a"); done <- err }()
+	select {
+	case <-stub.dismissed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the stand-in saw no dismissal within 10 s")
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("the refusal returned %v before the service answered the dismissal", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	close(stub.gate)
+	select {
+	case err := <-done:
+		if !errors.Is(err, errStoreLocked) {
+			t.Errorf("after the Completed signal: %v, want errStoreLocked", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the refusal is still waiting 10 s after the Completed signal")
+	}
+}
+
+// TestSecretServiceDismissNoAnswer checks that a service that never answers a dismissal costs the
+// refusal ssDismissWait and no more.
+func TestSecretServiceDismissNoAnswer(t *testing.T) {
+	stub := stubSecretService(t)
+	stub.reset("")
+	stub.mu.Lock()
+	stub.prompt = true
+	stub.mu.Unlock()
+	wait := ssDismissWait
+	t.Cleanup(func() { ssDismissWait = wait })
+	ssDismissWait = 100 * time.Millisecond
+	done := make(chan error, 1)
+	start := time.Now()
+	go func() { _, err := ssGet("BWSYNTH-service", "a"); done <- err }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, errStoreLocked) {
+			t.Errorf("with no answer to the dismissal: %v, want errStoreLocked", err)
+		}
+		if d := time.Since(start); d < ssDismissWait {
+			t.Errorf("the refusal returned after %v, before ssDismissWait %v", d, ssDismissWait)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("with no answer to the dismissal the refusal is still waiting after 10 s")
+	}
+}
+
 // secretStub is a stand-in Secret Service with the calls ssSet and ssDelete make, one of which,
 // hang, it never answers. It has no Collections property, so they use the default alias.
 type secretStub struct {
@@ -263,7 +330,16 @@ type secretStub struct {
 	hang    string
 	seen    []string
 	release chan struct{}
+	// prompt, when set, makes Unlock answer with a prompt that Dismiss then answers, as
+	// gnome-keyring does, with a Completed signal to the caller alone, once gate is closed. A nil
+	// gate sends none. dismissed is closed by the first Dismiss.
+	prompt    bool
+	gate      chan struct{}
+	dismissed chan struct{}
+	conn      *dbus.Conn
 }
+
+const stubPrompt = dbus.ObjectPath("/org/freedesktop/secrets/prompt/p1")
 
 func (s *secretStub) reset(hang string) {
 	s.mu.Lock()
@@ -291,6 +367,11 @@ type stubService struct{ *secretStub }
 
 func (s stubService) Unlock(objects []dbus.ObjectPath) ([]dbus.ObjectPath, dbus.ObjectPath, *dbus.Error) {
 	s.answer("Unlock")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.prompt {
+		return nil, stubPrompt, nil
+	}
 	return objects, "/", nil
 }
 
@@ -309,6 +390,35 @@ func (s stubCollection) SearchItems(map[string]string) ([]dbus.ObjectPath, *dbus
 func (s stubCollection) CreateItem(map[string]dbus.Variant, ss.Secret, bool) (dbus.ObjectPath, dbus.ObjectPath, *dbus.Error) {
 	s.answer("CreateItem")
 	return stubItem, "/", nil
+}
+
+type stubPromptObject struct{ *secretStub }
+
+func (s stubPromptObject) Dismiss(sender dbus.Sender) *dbus.Error {
+	s.answer("Dismiss")
+	s.mu.Lock()
+	gate, dismissed := s.gate, s.dismissed
+	s.mu.Unlock()
+	close(dismissed)
+	if gate == nil {
+		return nil
+	}
+	select {
+	case <-gate:
+	case <-s.release:
+		return nil
+	}
+	err := s.conn.Send(&dbus.Message{Type: dbus.TypeSignal, Headers: map[dbus.HeaderField]dbus.Variant{
+		dbus.FieldPath:        dbus.MakeVariant(stubPrompt),
+		dbus.FieldInterface:   dbus.MakeVariant(ssIface + "Prompt"),
+		dbus.FieldMember:      dbus.MakeVariant("Completed"),
+		dbus.FieldDestination: dbus.MakeVariant(string(sender)),
+		dbus.FieldSignature:   dbus.MakeVariant(dbus.SignatureOf(true, dbus.MakeVariant(""))),
+	}, Body: []any{true, dbus.MakeVariant("")}}, nil)
+	if err.Err != nil {
+		return dbus.MakeFailedError(err.Err)
+	}
+	return nil
 }
 
 type stubItemObject struct{ *secretStub }
@@ -345,13 +455,13 @@ func stubSecretService(t *testing.T) *secretStub {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &secretStub{release: make(chan struct{})}
+	s := &secretStub{release: make(chan struct{}), dismissed: make(chan struct{}), conn: c}
 	t.Cleanup(func() { close(s.release); c.Close() })
 	for _, e := range []struct {
 		v     any
 		path  dbus.ObjectPath
 		iface string
-	}{{stubService{s}, ssPath, "Service"}, {stubCollection{s}, ssAlias, "Collection"}, {stubItemObject{s}, stubItem, "Item"}} {
+	}{{stubService{s}, ssPath, "Service"}, {stubCollection{s}, ssAlias, "Collection"}, {stubItemObject{s}, stubItem, "Item"}, {stubPromptObject{s}, stubPrompt, "Prompt"}} {
 		if err := c.Export(e.v, e.path, ssIface+e.iface); err != nil {
 			t.Fatal(err)
 		}
