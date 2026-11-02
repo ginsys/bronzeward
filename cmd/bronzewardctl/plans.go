@@ -55,16 +55,17 @@ func (e *env) planCmd(args []string) error {
 // planSnapshot is planView of the plan answer r, or no lines and the epoch change when one falls
 // between that answer and the view's last read: the view's reads then come from different
 // snapshots, and its sentences could describe a state that never existed (client-contracts.md
-// section 8.5). The plan answer's own epoch is compared, and so is the count of moves, so that an
-// epoch changed and changed back is seen too.
+// section 8.5). The plan answer's own epoch is compared, and so is the count of moves since that
+// answer, the GET /server it called for included, so that an epoch changed and changed back is
+// seen too.
 func planSnapshot(c *client.Client, r *client.Response, p *apitypes.PlanBody) ([]string, string) {
-	first, moves := r.Header.Get("Bronzeward-Epoch"), c.EpochMoves()
+	first := r.Header.Get("Bronzeward-Epoch")
 	lines := planView(c, p)
 	now := c.Context.LastEpoch
 	switch {
 	case first != "" && now != first:
 		return nil, sf("the epoch changed from %s to %s", first, now)
-	case c.EpochMoves() != moves:
+	case c.EpochMoves() != r.Moves:
 		return nil, sf("the epoch changed from %s and changed back", first)
 	}
 	return lines, ""
@@ -305,44 +306,46 @@ func stateLines(c *client.Client, p *apitypes.PlanBody, m apitypes.MachineBody, 
 	default:
 		return []string{sf("State %s: this client does not know it.", p.State)}
 	}
+	// Each read stands on its own: one that fails is named, and the others still give their lines.
+	var lines []string
 	var a apitypes.ApprovalBody
 	if p.Approval == nil {
-		return []string{"Approved, but the plan names no approval."}
-	}
-	if err := getJSON(c, "/approvals/"+url.PathEscape(*p.Approval), &a); err != nil {
-		return []string{sf("Approved by %s, which cannot be read: %v", *p.Approval, err)}
-	}
-	if a.Epoch != c.Context.LastEpoch {
+		lines = append(lines, "Approved, but the plan names no approval.")
+	} else if err := getJSON(c, "/approvals/"+url.PathEscape(*p.Approval), &a); err != nil {
+		lines = append(lines, sf("Approved by %s, which cannot be read: %v", *p.Approval, err))
+	} else if a.Epoch != c.Context.LastEpoch {
 		return []string{sf("Approved by %s (%s) in epoch %s. This approval is from before the last recovery entry and authorizes nothing; "+
 			"an approver may approve again: bronzewardctl approve ", a.Approver.Principal, a.Approver.Role, a.Epoch) + client.ShellWord(p.Id), again}
+	} else {
+		lines = append(lines, sf("Approved by %s (%s) as %s. Not committed: the controller commits it only if its own checks pass; plan show then names the operation.",
+			a.Approver.Principal, a.Approver.Role, a.Id))
 	}
-	lines := []string{sf("Approved by %s (%s) as %s. Not committed: the controller commits it only if its own checks pass; plan show then names the operation.",
-		a.Approver.Principal, a.Approver.Role, a.Id)}
-	var stale []string
+	var stale, unread []string
 	if mErr != nil {
-		return append(lines, sf("Whether it is stale cannot be predicted: the machine cannot be read: %v", mErr))
-	}
-	if or(m.Desired, "") != or(p.DesiredRelease, "") {
-		stale = append(stale, sf("the machine's Desired is now %s", or(m.Desired, "none")))
-	}
-	if m.OpenDrift == nil && p.DriftRecord != nil || m.OpenDrift != nil && (p.DriftRecord == nil || *p.DriftRecord != m.OpenDrift.Revision) {
-		open := "none"
-		if m.OpenDrift != nil {
-			open = strconv.Itoa(m.OpenDrift.Revision)
+		unread = append(unread, sf("the machine cannot be read: %v", mErr))
+	} else {
+		if or(m.Desired, "") != or(p.DesiredRelease, "") {
+			stale = append(stale, sf("the machine's Desired is now %s", or(m.Desired, "none")))
 		}
-		stale = append(stale, "the machine's open drift record is "+open+", not the plan's")
+		if m.OpenDrift == nil && p.DriftRecord != nil || m.OpenDrift != nil && (p.DriftRecord == nil || *p.DriftRecord != m.OpenDrift.Revision) {
+			open := "none"
+			if m.OpenDrift != nil {
+				open = strconv.Itoa(m.OpenDrift.Revision)
+			}
+			stale = append(stale, "the machine's open drift record is "+open+", not the plan's")
+		}
 	}
-	// An assignment that cannot be read leaves the reasons already found standing.
-	head, err := assignmentHead(c, p.Machine)
-	if err == nil && head != p.AssignmentRevision {
+	if head, err := assignmentHead(c, p.Machine); err != nil {
+		unread = append(unread, sf("the assignment cannot be read: %v", err))
+	} else if head != p.AssignmentRevision {
 		stale = append(stale, sf("the machine's assignment is now at %s", or(&head, "none")))
 	}
 	if len(stale) > 0 {
 		lines = append(lines, "Predicted stale, by this client's reads: "+strings.Join(stale, "; ")+
 			". The controller will refuse its commitment, so it cannot run. "+again)
 	}
-	if err != nil {
-		return append(lines, sf("The assignment cannot be read, so whether it is stale is not fully predicted: %v", err))
+	if len(unread) > 0 {
+		return append(lines, "Whether it is stale is not fully predicted: "+strings.Join(unread, "; "))
 	}
 	if len(stale) > 0 {
 		return lines

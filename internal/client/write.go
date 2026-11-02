@@ -580,7 +580,7 @@ func (c *Client) post(w *Write, key, epoch string) attempt {
 		if r.Header.Get("Bronzeward-Epoch") == "" {
 			fmt.Fprintf(c.Notices, "%s: %s answered without Bronzeward-Epoch, a server defect\n", c.Context.Where(), route)
 		}
-		a.r = &Response{Header: r.Header, Body: body}
+		a.r = &Response{Header: r.Header, Body: body, Moves: c.moves}
 		return a
 	}
 	if a.p = c.problem(route, r, body); a.p != nil {

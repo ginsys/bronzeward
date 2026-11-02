@@ -17,7 +17,8 @@ import (
 // planFake serves one plan, pln_BWSYNTH, for machine mch_a, whose fields the test sets, and the
 // reads planView makes; POST /plans and the cancellation answer with post, recording each body.
 // A path in raw is answered with its body, one in fail with a 404 problem whose detail it holds;
-// epochFor, when set, gives each answer's epoch, ep_BWSYNTH-2 otherwise.
+// epochFor, when set, gives each answer's epoch, ep_BWSYNTH-2 otherwise; a path busy accepts,
+// asked after epochFor, is answered with a retryable 503.
 type planFake struct {
 	mu                        sync.Mutex
 	state, op, evidence       string
@@ -26,6 +27,7 @@ type planFake struct {
 	expiresIn                 time.Duration
 	raw, fail                 map[string]string
 	epochFor                  func(path string) string
+	busy                      func(path string) bool
 	post                      func(w http.ResponseWriter, path string)
 	bodies                    []string
 }
@@ -71,10 +73,16 @@ func (f *planFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	raw, isRaw := f.raw[path]
 	detail, fails := f.fail[path]
+	busy := f.busy != nil && f.busy(path)
 	f.mu.Unlock()
 	w.Header().Set("Bronzeward-Epoch", epoch)
 	w.Header().Set("Content-Type", "application/json")
 	switch {
+	case busy:
+		w.Header().Set("Content-Type", "application/problem+json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		fmt.Fprint(w, `{"type":"urn:bronzeward:problem:dependency-unavailable","title":"Service Unavailable","status":503,"detail":"BWSYNTH busy"}`)
+		return
 	case fails && r.Method == http.MethodGet:
 		w.Header().Set("Content-Type", "application/problem+json")
 		w.WriteHeader(http.StatusNotFound)
@@ -214,9 +222,18 @@ func TestPlanView(t *testing.T) {
 			f.desired, f.assignment, f.open, f.fail = "rel_BWSYNTH-new", "asr_BWSYNTH-1", "", map[string]string{"/assignments": "BWSYNTH no list"}
 		}, []string{
 			"Predicted stale, by this client's reads: the machine's Desired is now rel_BWSYNTH-new. The controller will refuse its commitment, so it cannot run. " + again + "\n" +
-				"The assignment cannot be read, so whether it is stale is not fully predicted: ", "BWSYNTH no list"}},
+				"Whether it is stale is not fully predicted: the assignment cannot be read: ", "BWSYNTH no list"}},
 		{"cluster unread", func(f *planFake) { f.fail = map[string]string{"/clusters/cl_BWSYNTH": "BWSYNTH no cluster"} }, []string{
 			"cluster cl_BWSYNTH (unread: ", "BWSYNTH no cluster"}},
+		{"approved, approval unread, Desired moved", func(f *planFake) { f.fail = map[string]string{"/approvals/apr_BWSYNTH": "BWSYNTH no approval"} }, []string{
+			"Approved by apr_BWSYNTH, which cannot be read: ", "BWSYNTH no approval",
+			"Predicted stale, by this client's reads: the machine's Desired is now rel_BWSYNTH-new. The controller will refuse its commitment, so it cannot run. " + again}},
+		{"approved, machine unread, assignment moved", func(f *planFake) {
+			f.assignment, f.fail = "asr_BWSYNTH-2", map[string]string{"/machines/mch_a": "BWSYNTH no machine"}
+		}, []string{
+			"Approved by h-approver (approver) as apr_BWSYNTH.",
+			"Predicted stale, by this client's reads: the machine's assignment is now at asr_BWSYNTH-2. The controller will refuse its commitment, so it cannot run. " + again + "\n" +
+				"Whether it is stale is not fully predicted: the machine cannot be read: ", "BWSYNTH no machine"}},
 		{"less than a minute left", func(f *planFake) { f.state, f.fail, f.expiresIn = "proposed", nil, 20*time.Second }, []string{
 			"proposed               expires ", "(in 0s by this client's clock)"}},
 	} {
@@ -275,6 +292,32 @@ func TestPlanSnapshot(t *testing.T) {
 			}
 		})
 	}
+	// The plan answer shows ep_BWSYNTH-3, so the client reads GET /server again: that answers 503 in
+	// ep_BWSYNTH-4, then ep_BWSYNTH-3 on the retry, and every later read stays in ep_BWSYNTH-3. The
+	// change and change back fall inside the plan's own read, after its answer.
+	t.Run("moved and back in the refresh after the plan answer", func(t *testing.T) {
+		f := planServer(t)
+		f.set(func(f *planFake) {
+			plan, servers := false, 0
+			f.epochFor = func(path string) string {
+				plan = plan || path == "/plans/pln_BWSYNTH"
+				if !plan {
+					return "ep_BWSYNTH-2"
+				}
+				if path == "/server" {
+					if servers++; servers == 1 {
+						return "ep_BWSYNTH-4"
+					}
+				}
+				return "ep_BWSYNTH-3"
+			}
+			f.busy = func(path string) bool { return path == "/server" && servers == 1 && plan }
+		})
+		code, out, errOut := runCtl(t, "plan", "show", "pln_BWSYNTH")
+		if code == 0 || out != "" || !strings.Contains(errOut, "the epoch changed from ep_BWSYNTH-3 and changed back while the plan was read") {
+			t.Errorf("plan show: exit %d, stdout %q, stderr %q; want the change and change back named", code, out, errOut)
+		}
+	})
 	t.Run("plan create", func(t *testing.T) {
 		f := planServer(t)
 		f.set(func(f *planFake) {
@@ -322,8 +365,24 @@ func TestPlanViewEscapes(t *testing.T) {
 	}
 	machine := js(map[string]any{"id": "mch_a", "cluster": "cl_BWSYNTH", "talosEndpoint": bad, "desired": bad, "openDrift": nil})
 	assignments := js(map[string]any{"items": []any{map[string]any{"id": "asg_BWSYNTH", "machine": "mch_a", "revision": bad}}})
-	approval := js(map[string]any{"id": bad, "plan": "pln_BWSYNTH", "epoch": "ep_BWSYNTH-2", "approver": map[string]any{"principal": bad, "role": bad},
-		"selfApproval": map[string]any{"marked": false, "reasons": []any{}}, "unseenOverwrite": false})
+	approvalIn := func(epoch string) string {
+		return js(map[string]any{"id": bad, "plan": "pln_BWSYNTH", "epoch": epoch, "approver": map[string]any{"principal": bad, "role": bad},
+			"selfApproval": map[string]any{"marked": false, "reasons": []any{}}, "unseenOverwrite": false})
+	}
+	approval := approvalIn("ep_BWSYNTH-2")
+	// clean fails the test if out carries a control character but the column tab and the line
+	// feed, or a line that a value starts.
+	clean := func(name, out string) {
+		t.Helper()
+		if strings.ContainsFunc(out, func(r rune) bool { return unicode.IsControl(r) && r != '\t' && r != '\n' }) {
+			t.Errorf("%s: a control character reaches the terminal:\n%q", name, out)
+		}
+		for _, l := range strings.Split(out, "\n") {
+			if strings.HasPrefix(strings.TrimLeft(l, " \t"), "Forged") {
+				t.Errorf("%s: a value starts a line of its own: %q", name, l)
+			}
+		}
+	}
 	for _, c := range []struct {
 		name      string
 		raw, fail map[string]string
@@ -341,26 +400,56 @@ func TestPlanViewEscapes(t *testing.T) {
 			map[string]string{"/approvals/apr_BWSYNTH": bad}, []string{"Approved by apr_BWSYNTH, which cannot be read: "}},
 		{"assignment unread", map[string]string{"/plans/pln_BWSYNTH": plan("approved", map[string]any{"approval": bad}),
 			"/machines/mch_a": machine, "/approvals/" + bad: approval},
-			map[string]string{"/assignments": bad}, []string{"Predicted stale", "The assignment cannot be read"}},
+			map[string]string{"/assignments": bad}, []string{"Predicted stale", "the assignment cannot be read"}},
+		{"approved in an earlier epoch", map[string]string{"/plans/pln_BWSYNTH": plan("approved", map[string]any{"approval": bad, "release": bad}),
+			"/approvals/" + bad: approvalIn(bad)}, nil,
+			[]string{"This approval is from before the last recovery entry", "bronzewardctl plan create --release " + word}},
 	} {
 		f.set(func(f *planFake) { f.raw, f.fail = c.raw, c.fail })
 		code, out, errOut := runCtl(t, "plan", "show", "pln_BWSYNTH")
 		if code != 0 {
 			t.Errorf("%s: exit %d, %s", c.name, code, errOut)
 		}
-		if strings.ContainsFunc(out, func(r rune) bool { return unicode.IsControl(r) && r != '\t' && r != '\n' }) {
-			t.Errorf("%s: a control character reaches the terminal:\n%q", c.name, out)
-		}
-		for _, l := range strings.Split(out, "\n") {
-			if strings.HasPrefix(strings.TrimLeft(l, " \t"), "Forged") {
-				t.Errorf("%s: a value starts a line of its own: %q", c.name, l)
-			}
-		}
+		clean(c.name, out)
 		for _, w := range append(c.want, `x\x1b[31m\x0aForged: line`) {
 			if !strings.Contains(out, w) {
 				t.Errorf("%s: no %q in\n%s", c.name, w, out)
 			}
 		}
+	}
+
+	// An epoch change while the view is read: plan show's error and plan create's report name the
+	// plan's hostile ID, machine and operation.
+	hostile := plan("proposed", map[string]any{"id": bad, "machine": bad, "operation": bad})
+	f.set(func(f *planFake) {
+		f.raw, f.fail = map[string]string{"/plans/pln_BWSYNTH": hostile}, nil
+		seen := false
+		f.epochFor = func(path string) string {
+			seen = seen || strings.HasPrefix(path, "/machines/")
+			return map[bool]string{false: "ep_BWSYNTH-2", true: "ep_BWSYNTH-3"}[seen]
+		}
+		f.post = func(w http.ResponseWriter, _ string) {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, hostile)
+		}
+	})
+	code, out, errOut := runCtl(t, "plan", "show", "pln_BWSYNTH")
+	clean("plan show", errOut)
+	if code == 0 || out != "" || !strings.Contains(errOut, "Read it again with: plan show "+word) {
+		t.Errorf("plan show: exit %d, stdout %q, stderr %q; want the quoted ID", code, out, errOut)
+	}
+	f.set(func(f *planFake) {
+		seen := false
+		f.epochFor = func(path string) string {
+			seen = seen || strings.HasPrefix(path, "/machines/")
+			return map[bool]string{false: "ep_BWSYNTH-2", true: "ep_BWSYNTH-3"}[seen]
+		}
+	})
+	code, out, errOut = runCtl(t, "plan", "create", "--release", "rel_BWSYNTH", "--machine", "mch_a", "--operation", "apply-config")
+	clean("plan create", out)
+	if want := `Plan x\x1b[31m\x0aForged: line 'q was created for machine x\x1b[31m\x0aForged: line 'q, operation x\x1b[31m\x0aForged: line 'q.`; code != 0 ||
+		!strings.Contains(out, want) || !strings.Contains(out, "Read it again with: plan show "+word) {
+		t.Errorf("plan create: exit %d, stdout %q, stderr %q; want %q and the quoted ID", code, out, errOut, want)
 	}
 }
 
