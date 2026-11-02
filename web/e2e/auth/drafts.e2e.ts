@@ -251,7 +251,12 @@ describe("the draft editor (#339)", () => {
       expect(await holds("mine")).toBe(true);
       await save(id, name, [], browser, true);
       await expect(result()).toHaveText(expect.stringContaining(`Fragment ${name} saved in draft`), { wait: 30_000 });
-      // The saved revision, read back, holds this browser's text.
+      // The saved revision, read back through the API, holds this browser's text: the editor
+      // already shows it, so the editor alone proves nothing.
+      const entries = (await api("h-author", "GET", `/drafts/${id}`)).body!["entries"] as { kind: string; name?: string; revision: string | null }[];
+      const revision = entries.find((e) => e.kind === "fragment" && e.name === name)?.revision;
+      expect(typeof revision).toBe("string");
+      expect(String((await api("h-author", "GET", `/fragment-revisions/${revision}`)).body!["document"])).toContain("example.test/mine: synthetic");
       await browser.waitUntil(() => holds("mine"), { timeout: 20_000, timeoutMsg: "the saved revision lost this browser's text" });
       await other.execute(() => [localStorage.length, sessionStorage.length]).then((n) => expect(n).toEqual([0, 0]));
     } finally {
