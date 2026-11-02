@@ -969,6 +969,25 @@ describe("the attempt bound (§8.4 item 8)", () => {
     expect(s.cancelled()).toBe(true);
   });
 
+  test("a callback of the page that throws on a read drops the response: its body is cancelled and its timers end", async () => {
+    const s = spied(200, { ...jsonHeaders, Deprecation: "true" });
+    const { c, signals } = bounded(() => s.res, { onDeprecation: () => { throw new Error("page failed"); } });
+    await expect(c.read("/server")).rejects.toThrow("page failed");
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(s.cancelled()).toBe(true);
+    expect(signals[0]!.aborted).toBe(false);
+  });
+
+  test("a change-of-epoch callback that throws on a read drops the response the same way", async () => {
+    const s = spied(200, { ...jsonHeaders, "Bronzeward-Epoch": "e2" });
+    const { c, signals } = bounded((_init, n) => (n === 1 ? ok({}) : s.res), { onEpochChange: () => { throw new Error("page failed"); } });
+    await c.read("/server"); // e1 recorded, no notice
+    await expect(c.read("/server")).rejects.toThrow("page failed");
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(s.cancelled()).toBe(true);
+    expect(signals[1]!.aborted).toBe(false);
+  });
+
   test("a success without an epoch has its body cancelled when its timers end", async () => {
     const s = spied(200, { "Content-Type": "application/json" });
     const { c } = bounded(() => s.res);
