@@ -467,8 +467,8 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     ["local review: the read of the pane's own saved revision keeps text typed since, though the server stored another text", { held: M2, saved: M, own: "frv_9" }, { kind: "read", text: T, since: 0, id: "frv_9" }, { held: M2, saved: T, own: "frv_9" }],
     ["R1-F2: a read again of the revision shown keeps text typed since", { held: M, saved: A }, { kind: "read", text: A, since: 0, id: "frv_8" }, { held: M, saved: A }],
     ["a done Save records the revision it created", { held: M2, saved: A, sent: sentOf(M) }, { kind: "done", revision: "frv_9" }, { held: M2, saved: M, sent: sentOf(M), writes: 1, own: "frv_9" }],
-    ["#534 C3: another author's removal empties a clean editor", { held: A, saved: A }, { kind: "draft", revision: 8, changed: false, removed: true }, { held: EMPTY, saved: EMPTY }],
-    ["#534 C3: another author's removal keeps typed text aside", { held: M, saved: A }, { kind: "draft", revision: 8, changed: false, removed: true }, { held: EMPTY, saved: EMPTY, conflict: theirs(M) }],
+    ["#534 C3: another author's removal empties a clean editor", { held: A, saved: A }, { kind: "draft", revision: 8, changed: false, removed: true }, { held: EMPTY, saved: EMPTY, gone: 8 }],
+    ["#534 C3: another author's removal keeps typed text aside", { held: M, saved: A }, { kind: "draft", revision: 8, changed: false, removed: true }, { held: EMPTY, saved: EMPTY, gone: 8, conflict: theirs(M) }],
     ["H8: the pane's own done Remove keeps its text when the draft read shows the removal", { held: M, saved: EMPTY }, { kind: "draft", revision: 8, changed: false, removed: true }, { held: M, saved: EMPTY, gone: 8 }],
     ["a revision read replaces text nothing was typed into", { held: A, saved: A }, { kind: "read", text: T, since: 0 }, { held: T, saved: T }],
     // Save, sweep (a): the operator types while it is in flight.
@@ -541,7 +541,7 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
   test("ginsys/bronzeward#551 item 1: a repeated Show whose draft read reports a removal shows the removal, and Copy my text gives back the operator's text", () => {
     const s = run({ held: A, saved: A }, [{ kind: "type", held: M }, { kind: "refused" }, { kind: "at", revision: 7 }, { kind: "show" }, { kind: "draft", revision: 8, changed: false }, { kind: "show" }, { kind: "draft", revision: 9, changed: false, removed: true }]);
     expect(rest(s)).toEqual({ held: EMPTY, saved: EMPTY, conflict: theirs(M, 9) });
-    expect(rest(editor(s, { kind: "copy" }))).toEqual({ held: M, saved: EMPTY });
+    expect(rest(editor(s, { kind: "copy" }))).toEqual({ held: M, saved: EMPTY, gone: 9 });
   });
 
   test("ginsys/bronzeward#551 local review: after the pane's own done Remove, another author restores the entry, and Copy my text still gives back the operator's text", () => {
@@ -749,9 +749,9 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
 
   test("ginsys/bronzeward#534 C3: another author's removal read by a Discard's Show their change shows before any Save", () => {
     const clean = run({ held: A, saved: A }, [{ kind: "draft", revision: 8, changed: false, removed: true }]);
-    expect(rest(clean)).toEqual({ held: EMPTY, saved: EMPTY });
+    expect(rest(clean)).toEqual({ held: EMPTY, saved: EMPTY, gone: 8 });
     const typed = run({ held: A, saved: A }, [{ kind: "type", held: M }, { kind: "draft", revision: 8, changed: false, removed: true }]);
-    expect(rest(typed)).toEqual({ held: EMPTY, saved: EMPTY, conflict: theirs(M) });
+    expect(rest(typed)).toEqual({ held: EMPTY, saved: EMPTY, gone: 8, conflict: theirs(M) });
     // The pane's own Remove saves the removal, and the text it shows stays (H8).
     const own = run({ held: A, saved: A }, [{ kind: "send", removes: true }, { kind: "done" }, { kind: "draft", revision: 8, changed: false, removed: true }]);
     expect(own.held).toBe(A);
@@ -886,7 +886,7 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
 
   test("ginsys/bronzeward#559 r7 (c283b8fc): a second removal read in the theirs phase moves the held-back revision too, also after Copy my text", () => {
     const s = run(typedSend(theirs(M, 8)), [gone(9), gone(10), { kind: "copy" }, { kind: "failed" }]);
-    expect(rest(s)).toEqual({ held: EMPTY, saved: EMPTY, sent: sentOf(M2, true), conflict: theirs(M, 10) });
+    expect(rest(s)).toEqual({ held: EMPTY, saved: EMPTY, sent: sentOf(M2, true), conflict: theirs(M, 10), gone: 10 });
     // A draft read that changed only another entry, after the removal, moves it as well.
     const other = run(typedSend(theirs(M, 8)), [gone(9), { kind: "draft", revision: 10, changed: false }, { kind: "failed" }]);
     expect(other.conflict).toEqual(theirs(M2, 10));
@@ -940,6 +940,45 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     // Before the pane's own removal was read, a removal cannot be told from it: the text stays.
     const unread = run({ held: T, saved: T }, [{ kind: "send", removes: true }, { kind: "done" }, { kind: "send" }, gone(11), { kind: "done", revision: "frv_10" }]);
     expect(rest(unread)).toEqual({ held: T, saved: T, sent: sentOf(T), writes: 2, own: "frv_10" });
+  });
+
+  // The three findings the hosted review of #571 reported after the repair of 333ee670.
+  test("ginsys/bronzeward#559 follow-up 1: another author's removal that first empties a clean editor is followed, so a newer removal shows when a Save typed since is done", () => {
+    const s = run({ held: T, saved: T }, [gone(9), { kind: "type", held: T2 }, { kind: "send" }, gone(11), { kind: "done", revision: "frv_10" }]);
+    expect(rest(s)).toEqual({ held: EMPTY, saved: EMPTY, conflict: theirs(T2, 11), sent: sentOf(T2), writes: 1, own: "frv_10" });
+    expect(editor(s, { kind: "copy" }).held).toBe(T2);
+  });
+
+  test("ginsys/bronzeward#559 follow-up 2: once a done Save shows the read held back, a newer accepted read moves the conflict to its revision", () => {
+    const done = run(sending(theirs10, { kind: "draft", revision: 11, changed: true }), [{ kind: "done", revision: "frv_9" }]);
+    expect(done.conflict).toEqual(theirs(M, 10));
+    const s = run(done, [{ kind: "read", text: T2, since: 1, revision: 11, id: "frv_11" }]);
+    expect(rest(s)).toEqual({ held: T2, saved: T2, sent: sentOf(M), conflict: theirs(M, 11), writes: 1, own: "frv_9" });
+    // A read that names no newer revision leaves it.
+    expect(run(done, [{ kind: "read", text: T2, since: 1, revision: 9, id: "frv_8" }]).conflict).toEqual(theirs(M, 10));
+    // The same text, read again at the newer revision, moves it too (local review 1).
+    const same = run(done, [{ kind: "read", text: T, since: 1, revision: 11, id: "frv_11" }]);
+    expect(rest(same)).toEqual({ held: T, saved: T, sent: sentOf(M), conflict: theirs(M, 11), writes: 1, own: "frv_9" });
+  });
+
+  test("ginsys/bronzeward#559 follow-up 4: Copy my text keeps the revision of the removal shown, so a newer removal shows when the next Save is done", () => {
+    const shown = run(sending(gone(10)), [{ kind: "done", revision: "frv_9" }]);
+    expect(shown.conflict).toEqual(theirs(M, 10));
+    const s = run(shown, [{ kind: "copy" }, { kind: "send" }, gone(12), { kind: "done", revision: "frv_11" }]);
+    expect(s.held).toEqual(EMPTY);
+    expect(s.conflict).toEqual(theirs(M, 12));
+    // The removal shown again, at the same revision, is not newer.
+    const again = run(shown, [{ kind: "copy" }, { kind: "send" }, gone(10), { kind: "done", revision: "frv_11" }]);
+    expect(again.conflict).toBeUndefined();
+    expect(again.held).toEqual(M);
+  });
+
+  test("ginsys/bronzeward#559 follow-up 3: the same text read again at a newer revision while a Save is open moves the read held back, so a failed or done Save names that revision", () => {
+    const again: EditorEvent = { kind: "read", text: T, since: 0, revision: 11, id: "frv_11" };
+    const failed = run(sending(theirs10, again), [{ kind: "failed" }]);
+    expect(rest(failed)).toEqual({ held: T, saved: T, sent: sentOf(M), conflict: theirs(M, 11) });
+    const done = run(sending(theirs10, again), [{ kind: "done", revision: "frv_9" }]);
+    expect(rest(done)).toEqual({ held: T, saved: T, sent: sentOf(M), conflict: theirs(M, 11), writes: 1, own: "frv_9" });
   });
 
   test("ginsys/bronzeward#534 N1: Show clicked again while asked holds Copy until its draft read answers, also when a revision read answers first", () => {
