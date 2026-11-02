@@ -571,11 +571,13 @@ t9_disconnect() {
   rc=0
   wait "$t9_reader" || rc=$?
   t9_reader=''
-  # Only a stream that the stop cut is resumed. One that ended by itself (0) met the apply's end
-  # first, and one that curl's limit ended (28) met no stop.
+  # Only a stream that the stop cut is resumed, and curl names a cut connection by 18 (the transfer
+  # closed with data outstanding) or 56 (a receive failure). Any other status fails: 0 met the
+  # apply's end first, 28 curl's limit, and a signal or another error ended the reader on its own.
   case $rc in
+    18 | 56) ;;
     0) die "the apply ended before the stop; run t9 disconnect right after the t9 setup" ;;
-    28) die "the stream on A was still open at curl's limit, not ended by the stop" ;;
+    *) die "the stream on A ended with curl status $rc, not by the stop's cut connection" ;;
   esac
   echo "A is stopped for 60 s: the participant's event stream has ended"
   sleep 60
