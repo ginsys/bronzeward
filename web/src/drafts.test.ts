@@ -470,7 +470,7 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     expect(src).toMatch(/const waits = unread\(entry\?\.revision, loaded\);/);
     // #517 review round 3: a read with text records its revision, and a draft read again retries
     // a failed one; without either the pane never edits, or stays waiting after Show.
-    expect(src).toMatch(/setLoaded\(revision\);\n\s*act\(\{ kind: "read", text: fromRevision\(r\.data\), since: done, revision: draft\.revision, id: revision \}\);/);
+    expect(src).toMatch(/setLoaded\(revision\);\n(?:\s*\/\/[^\n]*\n)*\s*act\(\{ kind: "read", text: fromRevision\(r\.data\), since: done, revision: drafted\.current, id: revision \}\);/);
     expect(src).toMatch(/act\(\{ kind: "draft", revision: draft\.revision, changed[^\n]*\n\s*if \(!changed && failed\) retry\(\(x\) => x \+ 1\);/);
     // #534 rounds 4 and 5: a final outcome other than done or a 412 ends the open write, a set-aside
     // one included. An unknown one does not: [Repeat exactly] may still commit it, or answer 412.
@@ -674,6 +674,18 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     expect(s.conflict?.mine).toBe(M);
     expect(holdsUnsaved(s.held, s.saved, s.conflict?.mine)).toBe(true);
     expect(editor(s, { kind: "copy" }).held).toBe(M);
+  });
+
+  test("ginsys/bronzeward#534 PR review: a dismissed unknown write ends the open write, and a revision read names the draft revision shown when it answers", () => {
+    const src = readFileSync(new URL("./drafts.tsx", import.meta.url), "utf8");
+    // F3: dismissing an unknown write changes no outcome, so the pane watches registry membership.
+    expect(src).toMatch(/const dismissed = o\?\.kind === "unknown" && writes\?\.open\.includes\(w!\) !== true;\n\s*useEffect\(\(\) => \{\n\s*if \(dismissed\) act\(\{ kind: "failed" \}\);\n\s*\}, \[dismissed\]\);/);
+    // F4: a draft read that changed only another entry while the revision read was pending.
+    expect(src).toMatch(/readRevision\.current = entry\?\.revision;\n\s*drafted\.current = draft\.revision;/);
+    expect(src).not.toMatch(/kind: "read", text: fromRevision\(r\.data\), since: done, revision: draft\.revision/);
+    // What `failed` then does with a read held back while the write was open.
+    const s = run({ held: A, saved: A }, [{ kind: "type", held: M }, { kind: "send" }, { kind: "read", text: T, since: 0, revision: 9 }, { kind: "failed" }]);
+    expect(rest(s)).toEqual({ held: T, saved: T, sent: sentOf(M), conflict: theirs(M, 9) });
   });
 
   test("ginsys/bronzeward#534 C1: the draft page registers for its draft's settled writes while it is shown", () => {
