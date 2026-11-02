@@ -722,9 +722,16 @@ clean_case() {
     worker() { echo mch_w; }
     running() { [ -z "${A_STOPPED:-}" ]; }
     idp_reached() { [ -z "${INT_PROBE:-}" ] || kill -INT $$; [ -z "${NO_IDP:-}" ]; }
-    restart_a() { echo restart_a; [ -z "${RESTART_FAIL:-}" ] || exit 1; }
-    forward_idp() { echo forward_idp; [ -z "${FWD_FAIL:-}" ] || exit 1; }
-    set_issuer() { echo "set_issuer $1"; [ -z "${ISSUER_FAIL:-}" ] || exit 1; }
+    # INT_REPAIR: a second Ctrl-C during a repair subshell, through a child that survives it, as a
+    # Docker call under timeout does. A subshell with no trap of its own then goes on.
+    int_repair() {
+      [ -n "${INT_REPAIR:-}" ] || return 0
+      sh -c "trap \"\" INT; kill -INT \"\$1\" \"\$2\"; sleep 0.2" _ "$BASHPID" "$$"
+      echo "$1 went on"
+    }
+    restart_a() { echo restart_a; int_repair restart_a; [ -z "${RESTART_FAIL:-}" ] || exit 1; }
+    forward_idp() { echo forward_idp; int_repair forward_idp; [ -z "${FWD_FAIL:-}" ] || exit 1; }
+    set_issuer() { echo "set_issuer $1"; int_repair set_issuer; [ -z "${ISSUER_FAIL:-}" ] || exit 1; }
     docker() {
       [ "${*: -1}" != "${INSPECT_FAIL:-}" ] || return 1
       [ "${*: -1}" != "${INT_ON:-}" ] || kill -INT $$
@@ -764,6 +771,15 @@ if [ "$(grep -cE '^(handback|t9_clean|t9_release|t9|t9_disconnect)\(\) \{' "$t/c
   if [ ! -s "$t/clean.log" ] && [[ $out == *"the cleanup was interrupted; recreate the fixture"* ]]; then
     ok "t9_clean ends on a second Ctrl-C and says to recreate the fixture"
   else bad "t9_clean, Ctrl-C during the cleanup: $(cat "$t/clean.log") ($out)"; fi
+  # The same second Ctrl-C during a repair subshell ends the repair there, and nothing after it runs.
+  for c in "handback set_issuer" "t9_clean restart_a A_STOPPED" "t9_clean forward_idp NO_IDP"; do
+    read -r fn step cond <<<"$c"
+    out=$(if [ -n "${cond:-}" ]; then export "$cond=1"; fi && INT_REPAIR=1 clean_case "$fn")
+    calls=$(grep -vx 'the cleanup was interrupted; recreate the fixture' "$t/clean.log" | tr '\n' ' ')
+    if [ "$calls" = "${step/set_issuer/set_issuer zitadel} " ] && [[ $out == *"the cleanup was interrupted; recreate the fixture"* ]]; then
+      ok "$fn ends in its $step repair on a second Ctrl-C that the repair's command survives"
+    else bad "$fn, Ctrl-C during the $step repair: $calls ($out)"; fi
+  done
   out=$(A_STOPPED=1 clean_case t9_clean)
   calls=$(tr '\n' ' ' <"$t/clean.log")
   if [ "$calls" = "restart_a prepare t9-release " ] && [[ $out == *"A is started again"* ]]; then

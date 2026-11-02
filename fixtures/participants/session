@@ -396,7 +396,9 @@ prepare() { stage "$here/prepare" "$@"; }
 # Every paused instance is unpaused, whoever paused it: the scenarios' own restores (s2 pass, s3
 # pass) pause A, B and C too. The switch and the restart run in a subshell, because set_issuer and
 # forward_idp end the shell on a failure, and the message must still be printed. A second Ctrl-C
-# ends the cleanup, for example on a Docker call that hangs, and says to recreate the fixture.
+# ends the cleanup, for example on a Docker call that hangs, and says to recreate the fixture. The
+# subshell sets that trap again, because bash resets it there, and a subshell without it goes on
+# after a Ctrl-C that its command survived.
 cleanup_stopped() {
   echo "the cleanup was interrupted; recreate the fixture" >&2
   exit 130
@@ -414,7 +416,7 @@ handback() {
     [ "$p" = true ] || continue
     "$bin/inject" unpause "$i" >>"$log" 2>&1 || echo "$i could not be unpaused; recreate the fixture" >&2
   done
-  (set_issuer zitadel && restart_a) >>"$log" 2>&1 || echo "A could not be handed back on Zitadel; recreate the fixture" >&2
+  (trap cleanup_stopped INT TERM; set_issuer zitadel && restart_a) >>"$log" 2>&1 || echo "A could not be handed back on Zitadel; recreate the fixture" >&2
 }
 setup() {
   local t0=$SECONDS
@@ -602,7 +604,7 @@ t9_ids() {
 # start of A that failed or was interrupted can leave A running with no forwarder in its namespace.
 # Each repair runs in a subshell, because forward_idp ends the shell on a failure, and the message
 # to recreate the fixture must still be printed. As in handback, a second Ctrl-C ends it with that
-# message.
+# message, in the subshell too.
 t9_clean() {
   trap cleanup_stopped INT TERM
   if [ -n "$t9_reader" ]; then
@@ -612,10 +614,10 @@ t9_clean() {
   fi
   if ! running "$BW_A"; then
     echo "t9 disconnect: A is started again" >&2
-    (restart_a) >>"$log" 2>&1 || echo "A could not be started again; recreate the fixture" >&2
+    (trap cleanup_stopped INT TERM; restart_a) >>"$log" 2>&1 || echo "A could not be started again; recreate the fixture" >&2
   elif ! idp_reached; then
     echo "t9 disconnect: A runs without its forwarder to Zitadel; the forwarder is started again" >&2
-    (forward_idp) >>"$log" 2>&1 || echo "A's forwarder to Zitadel could not be started again; recreate the fixture" >&2
+    (trap cleanup_stopped INT TERM; forward_idp) >>"$log" 2>&1 || echo "A's forwarder to Zitadel could not be started again; recreate the fixture" >&2
   fi
   t9_release
 }
