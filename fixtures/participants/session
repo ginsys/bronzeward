@@ -493,32 +493,65 @@ t8() {
   echo "names: none"
   read_ok "A's, B's and C's links to the worker are cut" sh -c "grep -c '^[ABC] worker' '$STATE/linksplits' | grep -qx 3"
 }
-# t9_curl <file> <seconds> [last event ID]: the event stream of t9_op on A, read with the
-# automation token, which A accepts on either issuer. The token goes to curl on stdin, from the
-# shell's builtin printf. The body goes to <file>, and A's HTTP status and content type to stdout.
-# Its status is curl's.
+# Every HTTP read of T9 is t9_auth | t9_get, and every answer passes t9_head_ok. curl exits 0 on an
+# HTTP error, so only the answer's status line and content type tell a refused or wrong read from
+# an event stream. scripts/test/participant-session-test.sh runs t9_open and t9_read against a stub.
 t9_op='' t9_reader=''
-t9_curl() {
+# t9_auth: the automation token's header line, which A accepts on either issuer, for curl's stdin.
+# The builtin printf keeps the token off every command line.
+t9_auth() { printf 'Authorization: Bearer %s\n' "$(<"$STATE/automation-token")"; }
+# t9_get <file> <seconds> [last event ID]: the event stream of t9_op on A, with the header line on
+# stdin. The body goes to <file>, the answer's headers to <file>.headers. It replaces its shell with
+# curl, so it runs only as the last command of a pipeline: in the background, $! is then curl's.
+# Its callers remove an earlier read's files first, in their own shell, so that those cannot pass
+# for this read's.
+t9_get() {
   local resume=()
   [ -z "${3:-}" ] || resume=(--header "Last-Event-ID: $3")
-  printf 'Authorization: Bearer %s\n' "$(<"$STATE/automation-token")" |
-    command curl --disable --noproxy '*' --silent --no-buffer --max-time "$2" --output "$1" \
-      --write-out '%{http_code} %{content_type}' \
-      --header @- --header 'Accept: text/event-stream' ${resume[@]+"${resume[@]}"} \
-      "http://127.0.0.1:$SERVER_A_PORT/api/v1/operations/$t9_op/events"
+  exec curl --disable --noproxy '*' --silent --no-buffer --max-time "$2" --output "$1" --dump-header "$1.headers" \
+    --header @- --header 'Accept: text/event-stream' ${resume[@]+"${resume[@]}"} \
+    "http://127.0.0.1:$SERVER_A_PORT/api/v1/operations/$t9_op/events"
 }
-# t9_read <what> <file> <seconds> [last event ID]: t9_curl, and the step fails unless curl ended by
-# itself and A answered 200 with an event stream. curl exits 0 on an HTTP error, so a refused
-# resumption would otherwise read as one with no new event (scripts/test/participant-session-test.sh).
-t9_read() {
-  local what=$1 rc=0 got
-  shift
-  got=$(t9_curl "$@") || rc=$?
-  [ "$rc" -eq 0 ] || die "$what did not end by itself (curl $rc)"
+# t9_head_ok <what> <file>: the step fails unless the last answer in <file>.headers is 200 with an
+# event stream. curl writes the headers as they arrive, so a stream still open can be checked.
+t9_head_ok() {
+  local got
+  [ -s "$2.headers" ] || die "$1 got no answer from A"
+  got=$(tr -d '\r' <"$2.headers" | awk '
+    tolower($0) ~ /^http\// { code = $2; type = "" }
+    tolower($0) ~ /^content-type:/ { sub(/^[^:]*: */, ""); type = tolower($0) }
+    END { if (code != "") print code " " type }')
   case $got in
     '200 text/event-stream' | '200 text/event-stream;'*) ;;
-    *) die "$what was refused: HTTP ${got:-no answer}, not 200 with an event stream" ;;
+    *) die "$1 was refused: HTTP ${got:-no answer}, not 200 with an event stream" ;;
   esac
+}
+# t9_read <what> <file> <seconds> [last event ID]: a read that must end by itself, with 200 and an
+# event stream.
+t9_read() {
+  local what=$1 rc=0
+  shift
+  rm -f -- "$1" "$1.headers"
+  t9_auth | t9_get "$@" || rc=$?
+  t9_head_ok "$what" "$1"
+  [ "$rc" -eq 0 ] || die "$what did not end by itself (curl $rc)"
+}
+# t9_open <file>: the reader before the stop, in the background as t9_reader. The step fails unless
+# A answered 200 with an event stream, sent an event within 20 s, and the stream is still open.
+t9_open() {
+  rm -f -- "$1" "$1.headers"
+  t9_auth | t9_get "$1" 600 >/dev/null 2>&1 &
+  t9_reader=$!
+  for _ in $(seq 20); do
+    [ -n "$(t9_ids "$1" 2>/dev/null)" ] && break
+    kill -0 "$t9_reader" 2>/dev/null || break
+    sleep 1
+  done
+  t9_head_ok "the stream on A" "$1"
+  [ -n "$(t9_ids "$1")" ] || die "the stream on A sent no event within 20 s"
+  # The reader must still be open at the stop: one that already ended, by the apply's end or a
+  # failure of its own, met no stop.
+  kill -0 "$t9_reader" 2>/dev/null || die "the stream on A ended before the stop; run t9 disconnect right after the t9 setup"
 }
 # t9_ids <file>...: the IDs of the complete events the streams sent, in order. An event is complete
 # at its blank line; one that the stop cut off is not counted, so its resumption must send it.
@@ -562,21 +595,7 @@ t9_disconnect() {
   mkdir -p -- "$dir"
   trap t9_clean EXIT
   trap 'exit 130' INT TERM
-  # The pipeline itself in the background, not t9_curl, whose subshell would be $!: the last
-  # command is curl, so $! is curl's, kill reaches it and wait returns its status.
-  printf 'Authorization: Bearer %s\n' "$(<"$STATE/automation-token")" |
-    command curl --disable --noproxy '*' --silent --fail --no-buffer --max-time 600 --output "$dir/before" \
-      --header @---header 'Accept: text/event-stream' \
-      "http://127.0.0.1:$SERVER_A_PORT/api/v1/operations/$t9_op/events" &
-  t9_reader=$!
-  for _ in $(seq 20); do
-    [ -n "$(t9_ids "$dir/before" 2>/dev/null)" ] && break
-    sleep 1
-  done
-  [ -n "$(t9_ids "$dir/before")" ] || die "the stream on A sent no event within 20 s"
-  # The reader must still be open at the stop: one that already ended, by the apply's end or a
-  # failure of its own, met no stop.
-  kill -0 "$t9_reader" 2>/dev/null || die "the stream on A ended before the stop; run t9 disconnect right after the t9 setup"
+  t9_open "$dir/before"
   "$bin/inject" kill A >>"$log" 2>&1 || die "cannot stop A; its output is in $log"
   rc=0
   wait "$t9_reader" || rc=$?
