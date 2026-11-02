@@ -546,13 +546,14 @@ mkdir -p "$repo/.dev/participants"
 # web host exits and another process gets its pid. That process must survive.
 # Both copies wait until the web host listens before the pid record fails. Without the wait, the
 # rollback's stop can remove the participant directory, and the web host script in it, before the
-# web host starts: the negative control then finds no web host, and the case proves nothing.
+# web host starts: the negative control then finds no web host, and the case proves nothing. A web
+# host that does not listen within 5 s fails the start before the pid record, so the case fails.
 port=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
 with_port=$repo/fixtures/participants/session-port
 no_kill=$repo/fixtures/participants/session-nokill
-# shellcheck disable=SC2016 # the session copy's own shell text, not this script's
-printf '  for _ in $(seq 50); do (exec 3<>/dev/tcp/127.0.0.1/%s) 2>/dev/null && break; sleep 0.1; done\n' \
-  "$port" >"$t/wait-listen"
+printf '%s\n' "  for _ in \$(seq 50); do (exec 3<>/dev/tcp/127.0.0.1/$port) 2>/dev/null && break; sleep 0.1; done" \
+  "  (exec 3<>/dev/tcp/127.0.0.1/$port) 2>/dev/null || die \"test: the stub web host did not listen within 5 s\"" \
+  >"$t/wait-listen"
 # shellcheck disable=SC2016 # the session copy's own shell text, not this script's
 sed -e "s/58443/$port/g" -e '/^  spawned+=("\$!")$/r '"$t/wait-listen" "$session" >"$with_port"
 sed 's/kill_spawned; stop/stop/' "$with_port" >"$no_kill"
