@@ -7,7 +7,7 @@
 // The assignment entry (also #339) works the same way: its list lives in the editor's text as one
 // `<slot> <name>` line per member, where the slot is `profile` or one of the six layers.
 
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { components } from "./api/v1";
 import { change, declaredOf, doneOnce, editor, EMPTY, type Held, holdsUnsaved, inUse, keptETag, NO_ETAG, rows, sendRefusal, settledFragment, unread, WriteResult } from "./drafts.tsx";
 import { startsNew, useSend, useUnsaved, useWrites } from "./forms.tsx";
@@ -409,6 +409,23 @@ export function referenceStates(document: string, declared: Declared, embedded: 
 
 export interface Composition { order: Composed[]; revisions: Record<string, Revision> }
 
+// One line per reference of each distinct revision in the order, or one "no references" line. The
+// rows are a function of the completed composition alone: the pane computes them once per
+// composition, not on the renders that the read counter causes.
+export function referenceLines(c: Composition): { key: string; text: string }[] {
+  return [...new Set(c.order.map((x) => x.revision))].flatMap((id) => {
+    const f = c.revisions[id]!;
+    const refs = referenceStates(f.document, f.declarations.references, f.declarations.embedded);
+    return refs.length === 0
+      ? [{ key: id, text: `${f.name}: no references` }]
+      : refs.map((r) => ({ key: `${id} ${r.name}`, text: `${f.name} ${r.name}: ${r.declared === undefined ? "no declaration" : `${r.declared.kind}, version ${r.declared.version}`}, ${r.state}` }));
+  });
+}
+
+// Show reads its own sources, so it needs the profile and fragment lists and nothing else. A layer
+// read of a revision the list does not name limits only what the pickers offer.
+export const showable = (profiles: { kind: string }, fragments: { kind: string }) => profiles.kind === "ok" && fragments.kind === "ok";
+
 // The result a repeated Show leaves on view: the one before when a read had no answer (the offline
 // banner speaks) and this one only has an error to give, otherwise this one.
 export interface Shown { key: string; value: Composition | string }
@@ -536,7 +553,7 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
   const [layers, setLayers] = useState<Record<string, string>>({});
   const asked = useRef(new Set<string>());
   // A layer read that failed is asked again by the next draft read or by the button: the fragment
-  // stays out of the pickers meanwhile, and Show stays off.
+  // stays out of the pickers meanwhile. Show does not wait for it: it reads its own sources.
   const [layerFailed, setLayerFailed] = useState<Record<string, true>>({});
   const [layerTry, tryLayers] = useState(0);
   useEffect(() => {
@@ -555,7 +572,7 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
   const layersRead = draft.entries.every((e) => e.kind !== "fragment" || e.revision == null || layers[e.revision] !== undefined);
   // Only a revision the draft holds now, whose last read failed, offers the button.
   const layersFailed = draft.entries.some((e) => e.kind === "fragment" && e.revision != null && layers[e.revision] === undefined && layerFailed[e.revision] === true);
-  const ready = profiles.kind === "ok" && fragments.kind === "ok" && layersRead;
+  const ready = showable(profiles, fragments) && layersRead;
   const profileList = profiles.kind === "ok" ? profiles.data.items : [];
   const fragmentList = fragments.kind === "ok" ? fragments.data.items : [];
   const forProfiles = profileOffers(draft, profileList);
@@ -657,6 +674,9 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
     });
   };
   const composed = result?.key === nowKey && typeof result.value !== "string" ? result.value : undefined;
+  // Every input of the rows (each revision's document and declarations) is in the completed
+  // composition, which is never changed after it is set: the rows follow it, not the read counter.
+  const refLines = useMemo(() => composed === undefined ? [] : referenceLines(composed), [composed]);
 
   const conflictView = conflict !== undefined && (
     <>
@@ -724,7 +744,7 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
       }} />
       <h4>Composition and references</h4>
       <p>
-        <button type="button" onClick={show} disabled={!ready || reads !== undefined || total(lists) === 0}>Show composition and references</button>
+        <button type="button" onClick={show} disabled={!showable(profiles, fragments) || reads !== undefined || total(lists) === 0}>Show composition and references</button>
         {reads !== undefined && ` Reads done: ${reads}.`}
       </p>
       {result !== undefined && result.key !== nowKey && <Status>The list or a revision it names changed after this was read. Show it again.</Status>}
@@ -735,13 +755,7 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
             {composed.order.map((c, i) => <li key={i}>{c.layer} {c.name} <code>{short(c.revision)}</code> {c.via === undefined ? "from this assignment" : `pinned by profile ${c.via}`}</li>)}
           </ol>
           <ul aria-label="Reference states">
-            {[...new Set(composed.order.map((c) => c.revision))].flatMap((id) => {
-              const f = composed.revisions[id]!;
-              const refs = referenceStates(f.document, f.declarations.references, f.declarations.embedded);
-              return refs.length === 0
-                ? [<li key={id}>{f.name}: no references</li>]
-                : refs.map((r) => <li key={`${id} ${r.name}`}>{f.name} {r.name}: {r.declared === undefined ? "no declaration" : `${r.declared.kind}, version ${r.declared.version}`}, {r.state}</li>);
-            })}
+            {refLines.map((l) => <li key={l.key}>{l.text}</li>)}
           </ul>
         </>
       )}
