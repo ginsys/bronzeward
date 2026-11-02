@@ -26,7 +26,7 @@ import {
   PAGE_LISTEN, PAGE_ORIGIN as IDP_PAGE,
 } from "./ports.ts";
 import { type Counts, type Grant, type Provider, startProvider } from "./provider.ts";
-import { type Bao, startBao, teardownFailure } from "./bao.ts";
+import { type Bao, cleanBao, startBao, teardownFailure } from "./bao.ts";
 
 export { CONTROL, FIXTURE_API, FIXTURE_ISSUER, FIXTURE_PAGE, IDP_PAGE };
 // mise run browser-auth sets BW_DEV_PG_PORT and BW_DEV_IDP_DIR from BW_DEV_INSTANCE
@@ -322,8 +322,8 @@ async function cleanup() {
     await Promise.all(servers.splice(0).map((s) => new Promise((r) => (s.closeAllConnections(), s.close(r)))));
     // A failure is reported after the databases are dropped, and keeps `bao`, so a later cleanup
     // tries its records again (#517 H19).
-    const baoFailed = await (bao?.cleanup() ?? Promise.resolve()).then(() => undefined, (e: unknown) => e);
-    if (baoFailed === undefined) bao = undefined;
+    const { kept, failed: baoFailed } = await cleanBao(bao);
+    bao = kept;
     const left = databases.filter((db) => {
       try {
         execFileSync("dropdb", [...PG, "--force", db]);

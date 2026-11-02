@@ -36,10 +36,11 @@ export async function spotOfPath(text: string, path: string): Promise<Spot | und
 // characters (internal/ingest/declare.go), so a flow list's comma or bracket ends it. The name may
 // be quoted, and may stand on a line after its tag (ginsys/bronzeward#517 H16). Comments are
 // blanked first, keeping every offset, so a match can cross a line without reading one. The whole
-// scalar after the tag is read and decoded, then held to the grammar: a scalar followed by a colon
-// and a blank is a key, never the tag's value, and one with other characters names no reference.
-// A quoted scalar is read on one line; YAML escapes JSON lacks name no reference here.
-const NAME = /^[a-z0-9][a-z0-9/-]*$/;
+// scalar after the tag is read and decoded, then held to the server's grammar: a scalar followed
+// by a colon and a blank is a key, never the tag's value, and one with other characters names no
+// reference. A scalar written over several lines names none here either: a quoted one is read on
+// one line, and a plain one followed by a more indented line is skipped, never cut short.
+const NAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\/[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/;
 function tags(text: string): { index: number; tag: string; name: string }[] {
   let masked = "";
   for (const line of text.split("\n")) {
@@ -47,23 +48,57 @@ function tags(text: string): { index: number; tag: string; name: string }[] {
     masked += `${line.slice(0, end)}${" ".repeat(line.length - end)}\n`;
   }
   const found: { index: number; tag: string; name: string }[] = [];
-  for (const m of masked.matchAll(/!bwref\s+(?:"((?:[^"\\\n]|\\.)*)"|'((?:[^'\n]|'')*)'|([^\s,[\]{}]+))/g)) {
+  // A plain scalar's words: no blank, flow indicator, or colon before a blank; blanks between words.
+  const word = String.raw`(?:[^\s,[\]{}:]|:(?=[^\s,[\]{}]))+`;
+  for (const m of masked.matchAll(new RegExp(String.raw`!bwref\s+(?:"((?:[^"\\\n]|\\.)*)"|'((?:[^'\n]|'')*)'|(${word}(?:[ \t]+${word})*))`, "g"))) {
     const end = m.index + m[0].length;
-    const plain = m[3];
-    if ((plain?.endsWith(":") === true && /^(?:\s|$)/.test(masked.slice(end))) || /^[ \t]*:(?:\s|$)/.test(masked.slice(end))) continue;
-    const name = m[1] !== undefined ? decoded(m[1]) : m[2] !== undefined ? m[2].replaceAll("''", "'") : plain!;
+    if (/^[ \t]*:(?:\s|$)/.test(masked.slice(end))) continue;
+    if (m[3] !== undefined && continues(masked, m.index, end)) continue;
+    const name = m[1] !== undefined ? decoded(m[1]) : m[2] !== undefined ? m[2].replaceAll("''", "'") : m[3];
     if (name !== undefined && NAME.test(name)) found.push({ index: m.index, tag: text.slice(m.index, end), name });
   }
   return found;
 }
 
-// A double-quoted scalar's text, its escapes decoded where JSON has them.
+// Whether a plain scalar ending at `end` goes on to the next line: it ends its line, and the next
+// line with text is more indented than the tag's line and is no key, sequence entry or flow
+// indicator. A plain scalar holds no colon before a blank, so a line with one is a key.
+function continues(masked: string, tag: number, end: number): boolean {
+  const eol = masked.indexOf("\n", end);
+  if (masked.slice(end, eol).trim() !== "") return false;
+  const indent = (line: string) => line.length - line.trimStart().length;
+  const start = masked.lastIndexOf("\n", tag) + 1;
+  const next = masked.slice(eol + 1).split("\n").find((l) => l.trim() !== "");
+  if (next === undefined || indent(next) <= indent(masked.slice(start, masked.indexOf("\n", start)))) return false;
+  const t = next.trim();
+  return !/^(?:[,\]}]|[-?](?:\s|$))/.test(t) && !/:(?:\s|$)/.test(t);
+}
+
+// A double-quoted scalar's text with YAML's escapes decoded (YAML 1.2 §5.7); undefined for an
+// escape YAML does not have.
+const ESCAPES: Record<string, string> = { "0": "\0", a: "\x07", b: "\b", t: "\t", "\t": "\t", n: "\n", v: "\v", f: "\f", r: "\r", e: "\x1b", " ": " ", '"': '"', "/": "/", "\\": "\\", N: "\x85", _: "\xa0", L: " ", P: " " };
+const HEX: Record<string, number> = { x: 2, u: 4, U: 8 };
 function decoded(body: string): string | undefined {
-  try {
-    return JSON.parse(`"${body}"`) as string;
-  } catch {
-    return undefined;
+  let out = "";
+  for (let i = 0; i < body.length; i++) {
+    if (body[i] !== "\\") {
+      out += body[i];
+      continue;
+    }
+    const k = body[++i] ?? "";
+    const n = HEX[k];
+    if (n === undefined) {
+      if (!Object.hasOwn(ESCAPES, k)) return undefined;
+      out += ESCAPES[k];
+      continue;
+    }
+    const digits = body.slice(i + 1, i + 1 + n);
+    const code = /^[0-9a-fA-F]+$/.test(digits) && digits.length === n ? parseInt(digits, 16) : -1;
+    if (code < 0 || code > 0x10ffff) return undefined;
+    out += String.fromCodePoint(code);
+    i += n;
   }
+  return out;
 }
 
 // Where a line's comment starts: a # at its start or after a blank, outside quotes; the line's

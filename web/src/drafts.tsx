@@ -226,6 +226,8 @@ export function DraftItem({ id }: { id: string }) {
     <>
       <h2>Draft {short(id)}{d !== undefined && <> "{d.title}" {d.state}, revision {d.revision}, cluster <Id id={d.cluster} /></>}</h2>
       {pending}
+      {/* That read failed: reading it again keeps the editor, and lets Save and Remove send again. */}
+      {unshown && item.kind !== "ok" && item.kind !== "loading" && <p><button type="button" onClick={() => reread((x) => x + 1)}>{READ_DRAFT_AGAIN}</button></p>}
       {d !== undefined && (
         <>
           <h3>Entries</h3>
@@ -310,8 +312,9 @@ export const holdsUnsaved = (held: Held, saved: Held, mine: Held | undefined) =>
 // events that changed the editor's text or the conflict: Revert to base applies only at its click's.
 // `awaits`: while asked, a draft read named a new revision of this entry, and only its revision read
 // shows their text (ginsys/bronzeward#517 L1). `sent.removes`: the write was a Remove, which saves
-// the removal, not the text (H8). `reading`: a revision read is pending, whatever the conflict's
-// phase was when it started, so Show their change waits for it too.
+// the removal, not the text (H8). `reading`: the entry's newest revision is not read yet, its read
+// pending or failed, whatever the conflict's phase was when it started, so Show their change waits
+// for it too; only a read with text clears it.
 export interface Clash { mine: Held; phase: "refused" | "asked" | "theirs"; revision?: number; awaits?: true }
 export interface Editor { held: Held; saved: Held; conflict?: Clash; sent?: { text: Held; whileTheirs: boolean; removes?: true }; writes?: number; note?: string | undefined; version?: number; reading?: true }
 export type EditorEvent =
@@ -321,7 +324,7 @@ export type EditorEvent =
   | { kind: "show" } // Show their change
   // The page's draft read. changed: this entry has a new revision to read; removed: the entry is a removal.
   | { kind: "draft"; revision: number; changed: boolean; removed?: true }
-  | { kind: "reading"; on: boolean } // the entry's revision read starts, or ends without text
+  | { kind: "reading"; on: boolean } // the entry's revision read starts, or is dropped for another
   | { kind: "read"; text: Held; since: number } // the entry's revision read, started after `since` done writes
   | { kind: "copy" } // Copy my text into the new revision
   | { kind: "send"; removes?: true } // a Save or Remove sends the editor's text
@@ -407,14 +410,16 @@ export const mayRevert = (c: Clash | undefined) => c === undefined || c.phase ==
 export const maySend = mayRevert;
 export const NOT_SENT_CONFLICT = "Not sent: someone changed this draft. Show their change first; Save and Remove wait until their text shows.";
 
-// Whether the pane still lacks the entry's text: its revision read is pending or failed, and no
-// write of its own put the stored text in the editor. Until then the pane takes no edit and sends
-// nothing, so a Save cannot replace text it never showed (ginsys/bronzeward#517 H9).
-export const unread = (revision: string | null | undefined, load: "pending" | "failed" | "ok", done: number) => revision != null && load !== "ok" && done === 0;
+// Whether the pane still lacks the entry's text: the revision the draft shown names is not the
+// one it read last, and no write of its own put the stored text in the editor. Until then the pane
+// takes no edit and sends nothing, so a Save cannot replace text it never showed
+// (ginsys/bronzeward#517 H9), also after a draft read named a newer revision (review).
+export const unread = (revision: string | null | undefined, loaded: string | undefined, done: number) => revision != null && revision !== loaded && done === 0;
 export const NOT_SENT_UNREAD = "Not sent: the entry's text is not read yet.";
 // A fragment write settled and kept its ETag, but the draft read it started has not shown yet: the
 // entries shown are older than that ETag, so a pane opened on them would overwrite the write unseen.
 export const NOT_SENT_UNSHOWN = "Not sent: the draft is being read again after a save. Wait until it shows.";
+export const READ_DRAFT_AGAIN = "Read the draft again";
 
 // Why Save or Remove sends nothing now, if it does not send.
 export const sendRefusal = (waits: boolean, conflict: Clash | undefined, shown: boolean) =>
@@ -510,9 +515,11 @@ export function FragmentPane({ draft, entry, written, seeChange, claim = () => {
   const [w, send] = useSend();
   const text = useRef<HTMLTextAreaElement>(null);
   const marks = useRef<HTMLTextAreaElement>(null);
-  // The entry's revision read: until one answers, the pane takes no edit (H9).
-  const [load, setLoad] = useState<"pending" | "failed" | "ok">("pending");
-  const waits = unread(entry?.revision, load, done);
+  // The revision the pane read last, and whether the latest read failed: until it read the revision
+  // the draft shown names, the pane takes no edit (H9).
+  const [loaded, setLoaded] = useState<string | undefined>();
+  const [failed, setFailed] = useState(false);
+  const waits = unread(entry?.revision, loaded, done);
   const open = draft.state === "open";
   const editable = open && !waits;
   // Guarded also once the draft no longer takes writes (discarded by another author): the text is
@@ -520,18 +527,19 @@ export function FragmentPane({ draft, entry, written, seeChange, claim = () => {
   useUnsaved(`fragment ${name || "(new)"} of draft ${short(draft.id)}`, holdsUnsaved(held, saved, conflict?.mine));
 
   useEffect(() => {
-    if (entry?.revision == null) return;
+    const revision = entry?.revision;
+    if (revision == null) return;
     let live = true;
-    setLoad((l) => (l === "ok" ? l : "pending"));
+    setFailed(false);
     act({ kind: "reading", on: true });
-    void read<Revision>(`/fragment-revisions/${enc(entry.revision)}`, () => live).then((r) => {
+    void read<Revision>(`/fragment-revisions/${enc(revision)}`, () => live).then((r) => {
       if (!live) return;
+      // A failed read leaves the revision unread: Show their change still waits for it (review).
       if (r?.kind !== "ok") {
-        act({ kind: "reading", on: false });
-        setLoad((l) => (l === "ok" ? l : "failed"));
+        setFailed(true);
         return setNote("The entry's revision could not be read.");
       }
-      setLoad("ok");
+      setLoaded(revision);
       act({ kind: "read", text: fromRevision(r.data), since: done });
     });
     return () => {
@@ -547,7 +555,7 @@ export function FragmentPane({ draft, entry, written, seeChange, claim = () => {
     const changed = entry?.revision != null && entry.revision !== readRevision.current;
     readRevision.current = entry?.revision;
     act({ kind: "draft", revision: draft.revision, changed, ...(entry?.revision === null && { removed: true as const }) });
-    if (!changed && load === "failed") retry((x) => x + 1);
+    if (!changed && failed) retry((x) => x + 1);
   }, [draft]);
 
   const o = w?.outcome;
@@ -658,7 +666,7 @@ export function FragmentPane({ draft, entry, written, seeChange, claim = () => {
         {entry === undefined ? "new" : change(entry)}{!same(held, saved) && " -> unsaved"}
       </p>
       {entry?.revision === null && <Status>Removed in this draft.</Status>}
-      {waits && (load === "failed"
+      {waits && (failed
         ? <p><button type="button" onClick={() => retry((x) => x + 1)}>Read the entry again</button></p>
         : <Status>Reading the entry's text.</Status>)}
       <p><label>Document <textarea ref={text} value={held.document} onChange={(e) => hold({ ...held, document: e.target.value })} readOnly={!editable} rows={16} cols={80} {...NO_ASSIST} /></label></p>
