@@ -35,6 +35,16 @@ describe("the notice (B11)", () => {
     expect(out).toContain(">Dismiss</button>");
   });
 
+  test("offline, an unknown outcome's notice offers no [Repeat exactly], and offers it again online (journeys §8 Offline row)", async () => {
+    const [writes, w] = await unknownWrite();
+    const at = (offline: boolean) =>
+      renderToStaticMarkup(h(WritesProvider, { value: writes }, h(ShellContext, { value: { roles: ["author"], offline } }, h(WriteNotices, { go: () => {} }))));
+    expect(at(true)).not.toContain("Repeat exactly");
+    expect(at(true)).toContain(">Show current state</button>");
+    expect(at(false)).toContain(">Repeat exactly</button>");
+    expect(writes.repeatable(w)).toBe(true);
+  });
+
   test("set aside, repeating stays disabled; dismissed, the notice goes", async () => {
     const [writes, w] = await unknownWrite();
     writes.setAside(EPOCH_CHANGED_ASIDE);
