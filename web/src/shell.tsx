@@ -102,6 +102,10 @@ export function identityMain(identity: Reading<Identity>, sub: string, page: Rea
   return <Kept failed={identity.failed} sub={sub}>{page}</Kept>;
 }
 
+// The page kept across an epoch change (keepsPage) sits where identityMain puts it, under the same
+// element, so React keeps it mounted with its unsaved text both ways (ginsys/bronzeward#517 H10).
+export const heldPage = (sub: string, page: ReactNode): ReactNode => <Kept failed={undefined} sub={sub}>{page}</Kept>;
+
 export interface SignedInProps {
   auth: Pick<ClientOptions, "token" | "renew" | "onRevoked">;
   // The token's principal, for discarding another sign-in's answers, and its subject for texts.
@@ -460,7 +464,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
   const failedRead = server.kind !== "ok" ? server : identity.load;
 
   let main: ReactNode;
-  if (holding) main = <Page path={path} query={query} go={go} />;
+  if (holding) main = heldPage(sub, <Page path={path} query={query} go={go} />);
   else if (server.kind === "loading") main = <Loading what="the server's version" />;
   // GET /server is refused this way only before a recovery start's entry (§8.5 item 1).
   else if (startRefusal(server)) main = <PreEntry res={server} onRead={() => setAgain((n) => n + 1)} />;
