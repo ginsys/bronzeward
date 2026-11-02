@@ -379,8 +379,8 @@ export class Writes {
       // A repeat's in-progress 409: the first request still ingests, or ended without committing
       // while its claim's lease runs (§8.4 item 2, AMB-02). It is repeated with the same key until
       // it answers otherwise, within the bound, and counts as no repeat. One that also names a
-      // draft (published meanwhile) is this send's refusal, below.
-      if (w.spec.ingests && a.status === 409 && code === "conflict" && p?.["ingestion"] !== undefined && p["draft"] === undefined && (n > 0 || again)) {
+      // draft (published meanwhile), or a replayed one, is a recorded refusal, below.
+      if (w.spec.ingests && a.status === 409 && code === "conflict" && p?.["ingestion"] !== undefined && p["draft"] === undefined && !replayed && (n > 0 || again)) {
         const ingestion = String(p["ingestion"]);
         bound ??= await this.ingestBound(client);
         if (waited >= bound) return unknown(`the first request with this key was still ingesting (ingestion ${ingestion}) after ${Math.round(waited / 1000)} s`);
