@@ -4,7 +4,7 @@
 import { $, browser, expect } from "@wdio/globals";
 import { NORMAL_START, PRE_ENTRY } from "../../src/recovery.tsx";
 import { SET_ASIDE } from "../../src/states.tsx";
-import { CONTROL } from "../auth.conf.ts";
+import { CONTROL, FIXTURE_ISSUER } from "../auth.conf.ts";
 import { answers, faults, fixtureSignIn, holding, mint, release, seen, storageEmpty } from "./helpers.ts";
 
 const result = () => $('[data-testid="write-result"]');
@@ -176,7 +176,83 @@ describe("the recovery entry (#364)", () => {
     }
     // Nothing was sent by the page.
     expect((await writes()).filter(([, route]) => route !== "/recovery/entries")).toEqual([]);
+    // The role gate also stops a submit that skips the disabled button, the confirmation typed.
+    await fillRevocation({ iss: FIXTURE_ISSUER, sub: "h-viewer-revokee", reason: "viewer synthetic revocation" }, "h-viewer-revokee");
+    await browser.execute(() => document.querySelector<HTMLFormElement>("main form[aria-label='Revoke identity']")!.requestSubmit());
+    await browser.pause(1_000);
+    expect((await writes()).filter(([, route]) => route !== "/recovery/entries")).toEqual([]);
+    expect(await revoke.$('[data-testid="write-result"]').isExisting()).toBe(false);
+  });
+
+  it("a revocation submitted without the typed confirmation sends nothing, the disabled button bypassed", async () => {
+    await openRevocation("revocation-unconfirmed");
+    await fillRevocation({ iss: FIXTURE_ISSUER, sub: "h-revokee-unconfirmed", reason: "unconfirmed synthetic revocation" }, "");
+    expect(await $("main form[aria-label='Revoke identity']").$("button=Revoke identity").isEnabled()).toBe(false);
+    await browser.execute(() => document.querySelector<HTMLFormElement>("main form[aria-label='Revoke identity']")!.requestSubmit());
+    await browser.pause(1_000);
+    expect(await revocations()).toEqual([]);
+    expect(await $("body").getText()).not.toContain("Revoked ");
+  });
+
+  it("a revocation by issuer and subject is sent once and shows its result, and the subject is revoked; one by identity revokes that identity", async function () {
+    this.timeout(60_000);
+    const at = await openRevocation("revocation-targets");
+    const sub = "h-revokee-364";
+    await fillRevocation({ iss: FIXTURE_ISSUER, sub, reason: "synthetic revocation by subject" }, sub);
+    const form = $("main form[aria-label='Revoke identity']");
+    await form.$("button=Revoke identity").click();
+    await expect(form.$('[data-testid="write-result"]')).toHaveText(expect.stringContaining("Revoked idn"), { wait: 20_000 });
+    await expect(form.$('[data-testid="write-result"]')).toHaveText(expect.stringContaining("auth.deniedSubjects lists it: no"));
+    expect(await revocations()).toHaveLength(1);
+    // The subject is the one revoked: its next request is refused as revoked.
+    const as = await fetch(`${at}/api/v1/identity`, { headers: { Authorization: `Bearer ${mint(sub)}` } });
+    expect(as.status).toBe(403);
+    // By identity: the signed-in human's own identity, read from the server, so the target is known.
+    const me = (await (await fetch(`${at}/api/v1/identity`, { headers: { Authorization: `Bearer ${mint("h-recovery")}` } })).json()) as { principal: string };
+    expect(me.principal).toMatch(/^idn/);
+    await $("main form[aria-label='Revoke identity']").$("label*=Identity:").$("input").setValue(me.principal);
+    await clearRevocation(["Issuer", "Subject"]);
+    await $("main form[aria-label='Revoke identity']").$("label*=Reason").$("input").setValue("synthetic revocation by identity");
+    await $("main form[aria-label='Revoke identity']").$("label*=Type the identity").$("input").setValue(me.principal);
+    await $("main form[aria-label='Revoke identity']").$("button=Revoke identity").click();
+    await browser.waitUntil(async () => (await revocations()).length === 2, { timeout: 20_000, timeoutMsg: "the revocation by identity was not sent" });
+    // Its target was that identity: the human the page is signed in as is revoked from then on.
+    const after = await fetch(`${at}/api/v1/identity`, { headers: { Authorization: `Bearer ${mint("h-recovery")}` } });
+    expect(after.status).toBe(403);
+    expect((await answers()).filter((a) => a.startsWith("/identity-revocations "))).toEqual(["/identity-revocations 201", "/identity-revocations 201"]);
   });
 });
+
+const revocations = async () => (await writes()).filter(([, route]) => route === "/identity-revocations");
+
+// A recovery start with its entry made outside the page, signed in as h-recovery on the Recovery
+// page. `tag` keeps the entry's key apart from the other tests'.
+async function openRevocation(tag: string): Promise<string> {
+  const at = await open("recovery");
+  const when = stamp();
+  const made = await fetch(`${at}/api/v1/recovery/entries`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${mint("h-recovery")}`, "Content-Type": "application/json", "Idempotency-Key": `rec-364-${Date.now()}-${tag}` },
+    body: JSON.stringify({ restored: [{ family: "database", backup: `synthetic-backup-${tag}`, takenAt: when }], stoppedAt: when, reason: `${tag} synthetic restore` }),
+  });
+  expect(made.status).toBe(201);
+  expect(await fixtureSignIn("h-recovery", {}, { upstream: at })).toMatch(/^Server .+, API revision \d+$/);
+  await $('nav[aria-label="Main"]').$("a=Recovery").click();
+  await expect($("main form[aria-label='Revoke identity']")).toBeExisting({ wait: 20_000 });
+  return at;
+}
+
+// Fills the revocation form by issuer and subject, and types `typed` back as the confirmation.
+async function fillRevocation(v: { iss: string; sub: string; reason: string }, typed: string) {
+  const form = $("main form[aria-label='Revoke identity']");
+  await form.$("label*=Issuer").$("input").setValue(v.iss);
+  await form.$("label*=Subject").$("input").setValue(v.sub);
+  await form.$("label*=Reason").$("input").setValue(v.reason);
+  if (typed !== "") await form.$("label*=Type the identity").$("input").setValue(typed);
+}
+
+async function clearRevocation(labels: string[]) {
+  for (const label of labels) await $("main form[aria-label='Revoke identity']").$(`label*=${label}`).$("input").setValue("");
+}
 
 afterEach(storageEmpty);

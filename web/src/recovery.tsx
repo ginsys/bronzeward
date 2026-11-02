@@ -380,7 +380,9 @@ export function Revocation() {
   const why = gate ?? (ready ? undefined : "Name the identity, or the issuer and subject, give a reason, and type the identity back");
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (!ready) return;
+    // A submit event does not need the button: the guards that disable it also stop the send, so a
+    // permanent revocation goes out neither without the role, nor unconfirmed, nor twice.
+    if (why !== undefined || busy) return;
     const body = byIdentity ? { identity: target, reason: reason.trim() } : { iss: iss.trim(), sub: target, reason: reason.trim() };
     send({ method: "POST", path: "/identity-revocations", resource: "/recovery", body });
   };
