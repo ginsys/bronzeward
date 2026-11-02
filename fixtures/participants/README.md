@@ -69,9 +69,9 @@ T2 is therefore the ninth task. When you assess T2's measures, read them as take
 practice tasks, not as a first contact with the clients.
 
 Setup times on the fixture host, in seconds, from the first timed run: `session start` 159 (before
-the session), t1 3, t3 24, t4 281, t5 17 and `t5 collide` 16, t6 20, t7 8, t8 34, t9 200 and
-`t9 disconnect` 60 plus the rest of the apply, t2 87, t10 1, t11 437. That is about 20 minutes
-of setup in a session. Plan a pause of about 7 minutes before T11.
+the session), t1 3, t3 24, t4 281, t5 17 and `t5 collide` 16, t6 20, t7 8, t8 34, t9 243 and
+`t9 disconnect` 75 (both from a later run, with the hold), t2 87, t10 1, t11 437. That is about
+21 minutes of setup in a session. Plan a pause of about 7 minutes before T11.
 
 Between `session start` and the end of the t4 setup, change no tracked file in the checkout: no
 commit and no edit. S2's steps in the t4 setup check that the checkout is the commit that the
