@@ -240,11 +240,15 @@ export function RecoveryConsole() {
   const [read, put] = useState<Load<Recovery>>({ kind: "loading" });
   // One read at a time. The next is scheduled when the last one has settled, whatever its result (a
   // read without answer keeps what is shown), so a slow answer is never discarded by the next tick.
-  // A refresh asked for (n, or the shell's) cancels the schedule and starts at once.
+  // A refresh asked for (n, or the shell's) cancels the schedule and reads once the read in flight
+  // has settled: `flight` chains the reads, and a refresh superseded while it waits reads nothing.
+  const flight = useRef<Promise<unknown>>(Promise.resolve());
   useEffect(() => {
     let live = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    void settled<Recovery>("/recovery", () => live).then((res) => {
+    const run = flight.current.then(() => (live ? settled<Recovery>("/recovery", () => live) : undefined));
+    flight.current = run.catch(() => undefined);
+    void run.then((res) => {
       if (!live) return;
       if (res !== undefined) put(res);
       timer = setTimeout(() => again((i) => i + 1), REREAD_MS);

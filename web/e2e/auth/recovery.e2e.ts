@@ -5,7 +5,7 @@ import { $, browser, expect } from "@wdio/globals";
 import { NORMAL_START, PRE_ENTRY } from "../../src/recovery.tsx";
 import { SET_ASIDE } from "../../src/states.tsx";
 import { CONTROL } from "../auth.conf.ts";
-import { answers, faults, fixtureSignIn, mint, seen, storageEmpty } from "./helpers.ts";
+import { answers, faults, fixtureSignIn, holding, mint, release, seen, storageEmpty } from "./helpers.ts";
 
 const result = () => $('[data-testid="write-result"]');
 const entered = () => $('[data-testid="entered"]');
@@ -131,15 +131,22 @@ describe("the recovery entry (#364)", () => {
     const exit = $("main form[aria-label='Exit recovery']");
     await expect(exit).toBeExisting({ wait: 20_000 });
     expect(await exit.$("button=Exit recovery").isEnabled()).toBe(true);
+    const reads = async () => (await seen()).filter((p) => p === "/recovery").length;
+    // Hold the console's next poll, so one read is in flight when the exit completes.
+    await faults({ upstream: at, held: "/recovery" });
+    await browser.waitUntil(async () => (await holding()).includes("/recovery"), { timeout: 15_000, timeoutMsg: "the poll was not held" });
+    const inflight = await reads();
     await exit.$("button=Exit recovery").click();
     await expect(exit.$('[data-testid="write-result"]')).toHaveText(expect.stringContaining("Recovery mode left"), { wait: 20_000 });
-    const before = (await seen()).filter((p) => p === "/recovery").length;
-    // The completed exit reads the state once at once (so at least one more read), and a loop on it
-    // would add many reads within these seconds.
-    await browser.waitUntil(async () => (await seen()).filter((p) => p === "/recovery").length > before, { timeout: 10_000, timeoutMsg: "the console did not read again after the exit" });
+    // The exit's refresh waits for the read in flight: no second read overlaps it.
+    await browser.pause(1_500);
+    expect(await reads()).toBe(inflight);
+    await faults({ upstream: at });
+    await release();
+    // Once it settles the refresh reads at once, well before a poll is due, and only once: no loop.
+    await browser.waitUntil(async () => (await reads()) === inflight + 1, { timeout: 3_000, timeoutMsg: "the console did not read again after the exit" });
     await browser.pause(3_000);
-    const after = (await seen()).filter((p) => p === "/recovery").length;
-    expect(after - before).toBeLessThanOrEqual(3);
+    expect(await reads()).toBe(inflight + 1);
     expect((await writes()).filter(([, route]) => route === "/recovery/exits")).toHaveLength(1);
   });
 
