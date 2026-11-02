@@ -55,7 +55,8 @@ took, before anything was registered.
 Run `fixtures/participants/session scan`, and name the browser profile's directory as an argument.
 It searches the fixture, provider and participant state and the containers' logs for a session
 password. It expands each database dump and store archive that the setups took, and searches what
-they hold too. It first plants a control that it must find. If a backup cannot be expanded, the
+they hold too. It also matches a password written in hex, as a dump writes binary values. It
+first plants a control that it must find. If a backup cannot be expanded, the
 scan fails, because what that backup holds would go unread. If it reports a password, record that in
 the session notes and recreate the fixture before the next session.
 

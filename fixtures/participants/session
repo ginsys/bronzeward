@@ -778,9 +778,14 @@ expand_backups() {
 # and store archive in the fixture's backups expanded (expand_backups). Run it before stop.
 # Each of the four places gets a planted control that must be found, so that a place the scan does
 # not read fails it. A container list, a log or a file that cannot be read fails it too.
+# A password is also matched in lowercase hex, as pg_restore writes a bytea value such as
+# idempotency_record.body.
 scan() {
-  local pattern="${marker}[a-z0-9]{8}-[0-9]{4}" control=.bw-scan-control
+  local pattern control=.bw-scan-control hex
   local logs=$part/scan-logs unpacked=$part/scan-backups errs names selected hits c d rc=0 missing='' planted recorded reached
+  hex=$(printf %s "$marker" | od -An -tx1 | tr -d ' \n') && [ -n "$hex" ] || die "cannot hex-encode the password marker"
+  # Hex of [a-z0-9]: 30-39 and 61-7a; of "-": 2d.
+  pattern="${marker}[a-z0-9]{8}-[0-9]{4}|${hex}(3[0-9]|6[1-9a-f]|7[0-9a]){8}2d(3[0-9]){4}"
   local roots=("$STATE" "$idp" "$part" "$logs")
   for d in "$STATE" "$idp" "$part"; do [ -d "$d" ] || die "no $d to scan; run scan before session stop"; done
   # The logs are read by container name, so on another Docker daemon they would be other containers'.
