@@ -254,10 +254,12 @@ and asks the operator to save the text or switch entries first.
 The editor lists a reference whose name is quoted, or stands on the line after its `!bwref` tag.
 It also lists a name in a block scalar on one content line, if strip chomping (`|-` or `>-`) drops
 the line break after it or that line ends the document. A double-quoted name that continues after
-an escaped line break is listed too. A CRLF counts as one line break. A block scalar with an
-indentation indicator is not listed, and neither is a name after a line break that is a carriage
-return alone. The server still checks those references. A key that follows the tag is
-not its name. If the operator edited the marks after a refusal,
+an escaped line break is listed too. A CRLF, a carriage return alone, and U+0085, U+2028 and
+U+2029 each count as one line break, as the server reads them. A block scalar is not listed where
+the server refuses the document: content that is not indented past its key (also after a sequence
+dash), or a blank line with a tab in or after the scalar. A block scalar with an indentation
+indicator is not listed either. The server still checks that reference. A key that follows the tag
+is not its name. If the operator edited the marks after a refusal,
 [Go to field] finds the refused line where it is now. If that line is gone, it focuses the marks field and selects nothing.
 
 ## W5. Protected import review

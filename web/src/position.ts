@@ -43,7 +43,14 @@ export async function spotOfPath(text: string, path: string): Promise<Spot | und
 // blank names nothing. A plain one followed by a more indented line is skipped, never cut short.
 const NAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\/[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/;
 const MARKER = /^(?:---|\.\.\.)(?:\s|$)/;
-function tags(text: string): { index: number; tag: string; name: string }[] {
+// go-yaml (the server's parser) breaks a line at a line feed, a carriage return alone, and U+0085,
+// U+2028 and U+2029, in comments and in every kind of scalar; a CRLF is one break. Each of these is
+// read as a line feed here, so no later step has to know them. A replacement has the length of what
+// it replaces (each is one UTF-16 code unit, the unit the editor reports positions in), so the
+// positions found here are positions in the text given (ginsys/bronzeward#544).
+const BREAKS = /\r(?!\n)|[\u0085\u{2028}\u{2029}]/gu;
+function tags(original: string): { index: number; tag: string; name: string }[] {
+  const text = original.replace(BREAKS, "\n");
   let masked = "";
   for (const line of text.split("\n")) {
     const end = commentStart(line);
@@ -70,7 +77,7 @@ function tags(text: string): { index: number; tag: string; name: string }[] {
       if (continues(masked, m.index, end)) continue;
       name = m[4];
     } else name = m[1] !== undefined ? decoded(m[1]) : m[2]!.replaceAll("''", "'");
-    if (name !== undefined && NAME.test(name)) found.push({ index: m.index, tag: text.slice(m.index, end), name });
+    if (name !== undefined && NAME.test(name)) found.push({ index: m.index, tag: original.slice(m.index, end), name });
   }
   return found;
 }
@@ -93,12 +100,23 @@ function nextLine(s: string, start: number): string | undefined {
 }
 
 // The indentation of the node that holds the scalar tagged at `tag`: the key or entry on the tag's
-// line. A tag that starts its line is the value of the nearest line above that is less indented,
-// so the next line may continue it at the tag's own indentation; -1 if no line is above.
-function holder(masked: string, tag: number): number {
+// line. With `compact`, after sequence dashes (`- - a: !bwref`) that is the column of the key, or of
+// the last dash when the tag follows it directly: a compact mapping's keys sit at the column after
+// the dash (ginsys/bronzeward#544). Only a block scalar's content is bound by that column. A plain
+// scalar's next line is read against the line's own indentation, as before, so that a form go-yaml
+// refuses (`- a: !bwref x/foo` then `  y`) still names nothing. A tag that starts its line is the
+// value of the nearest line above that is less indented, so the next line may continue it at the
+// tag's own indentation; -1 if no line is above.
+function holder(masked: string, tag: number, compact = false): number {
   const start = masked.lastIndexOf("\n", tag) + 1;
   const own = indent(lineAt(masked, start));
-  if (masked.slice(start, tag).trim() !== "") return own;
+  const before = masked.slice(start, tag);
+  if (before.trim() !== "") {
+    if (!compact) return own;
+    const dashes = /^ *(?:-(?: +|$))*/.exec(before)![0];
+    if (dashes.length === own) return own;
+    return before.slice(dashes.length).trim() !== "" ? dashes.length : dashes.lastIndexOf("-");
+  }
   for (let e = start - 1; e >= 0; ) {
     const s = e === 0 ? 0 : masked.lastIndexOf("\n", e - 1) + 1;
     const l = masked.slice(s, e);
@@ -131,8 +149,10 @@ function continues(masked: string, tag: number, end: number): boolean {
 // content too. The lines are read from the text: a # in them is no comment.
 // With an indentation indicator the content's indentation depends on the holding node's column,
 // which this scan does not read: such a scalar names nothing here, and the server still checks it.
-// A CRLF is one line break: a line's carriage return before its line feed is no text. A carriage
-// return alone also breaks a line for the server; this scan does not read it as one.
+// A CRLF is one line break: a line's carriage return before its line feed is no text. A blank line
+// that holds a tab, before the next line with text, makes go-yaml refuse the whole document, so the
+// scalar names nothing (ginsys/bronzeward#544). The other line breaks are read as line feeds before
+// this runs (see BREAKS).
 const spaces = (line: string) => line.length - line.replace(/^ +/, "").length;
 const bare = (line: string) => (line.endsWith("\r") ? line.slice(0, -1) : line);
 function block(text: string, masked: string, tag: number, end: number, header: string): { name: string; end: number } | undefined {
@@ -142,7 +162,7 @@ function block(text: string, masked: string, tag: number, end: number, header: s
   const line = lineAt(text, start);
   const first = bare(line);
   const depth = spaces(first);
-  if (first.trim() === "" || depth <= Math.max(holder(masked, tag), 0)) return undefined;
+  if (first.trim() === "" || depth <= Math.max(holder(masked, tag, true), 0)) return undefined;
   if (!header.includes("-") && start + first.length < text.length) return undefined;
   for (let at = start + line.length + 1; at < text.length; ) {
     const l = lineAt(text, at);
@@ -150,7 +170,8 @@ function block(text: string, masked: string, tag: number, end: number, header: s
       if (spaces(l) >= depth && !MARKER.test(l)) return undefined;
       break;
     }
-    if (bare(l).length > depth) return undefined;
+    // go-yaml refuses a document with a tab on a blank line here, whatever else is on it.
+    if (l.includes("\t") || bare(l).length > depth) return undefined;
     at += l.length + 1;
   }
   return { name: first.slice(depth), end: start + first.length };
