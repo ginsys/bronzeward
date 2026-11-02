@@ -3,7 +3,7 @@ import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { components } from "./api/v1";
-import { change, type Clash, createdId, declaredOf, DiscardRefused, NOT_DISCARDED, doneOnce, type Editor, type EditorEvent, editor, EMPTY, FragmentPane, forgetETag, type Held, holdsUnsaved, inUse, keepETag, keepOnDone, keptETag, LAYERS, lastGood, markLine, mayDrop, mayRevert, maySend, NOT_RENDERED, NOT_REVERTED, paneEntry, rows, settledFragment, spotOfMark, unread, where } from "./drafts.tsx";
+import { change, type Clash, createdId, declaredOf, DiscardRefused, NOT_DISCARDED, doneOnce, type Editor, type EditorEvent, editor, EMPTY, FragmentPane, forgetETag, type Held, holdsUnsaved, inUse, keepETag, keepOnDone, keptETag, LAYERS, lastGood, markLine, mayDrop, mayRevert, maySend, NOT_RENDERED, NOT_REVERTED, NOT_SENT_CONFLICT, NOT_SENT_UNREAD, NOT_SENT_UNSHOWN, paneEntry, rows, selection, sendRefusal, settledFragment, spotOfMark, unread, where } from "./drafts.tsx";
 import { leaving, signingOut, startsNew, unsaved, WritesProvider } from "./forms.tsx";
 import { type Load, type Reads, ReadsProvider } from "./list.tsx";
 import { references, spotOfLine, spotOfPath, spotOfReference } from "./position.ts";
@@ -99,6 +99,14 @@ describe("[Go to field] positions (B13)", () => {
     expect(references("a: !bwref # x/not\n  x/after\n")).toEqual(["x/after"]);
     // A tag with no value, then a key on the next line: the key is no name.
     expect(references("a: !bwref\nb: x\nc: !bwref \"k\": v\n")).toEqual([]);
+    // #517 review: the whole scalar is read, so a key with characters outside the grammar is no
+    // name either, nor is a scalar the grammar refuses; a quoted name is decoded.
+    expect(references("a: !bwref\nb_key: value\n")).toEqual([]);
+    expect(references("a: !bwref foo_bar\nb: !bwref 'it''s'\n")).toEqual([]);
+    const escaped = 'a: !bwref "x/\\u0066oo"\n';
+    expect(references(escaped)).toEqual(["x/foo"]);
+    const e = spotOfReference(escaped, "x/foo");
+    expect(escaped.slice(e!.start, e!.end)).toBe('!bwref "x/\\u0066oo"');
   });
 
   test("a flow list's reference ends at its comma, and a comment's text is no reference", () => {
@@ -339,6 +347,28 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     expect(holdsUnsaved(copied.held, copied.saved, copied.conflict?.mine)).toBe(true);
   });
 
+  test("#517 review: a revision read started while refused still makes Show wait for it, so Copy my text is not undone", () => {
+    // The draft read that named the new revision came while the conflict was refused, so it set nothing.
+    const s = run({ held: A, saved: A }, [{ kind: "refused" }, { kind: "at", revision: 7 }, { kind: "draft", revision: 8, changed: true }, { kind: "reading", on: true }, { kind: "show" }, { kind: "draft", revision: 8, changed: false }]);
+    expect(s.conflict?.phase).toBe("asked");
+    expect(editor(s, { kind: "copy" }).held).toBe(A);
+    const shown = run(s, [{ kind: "read", text: T, since: 0 }]);
+    expect(rest(shown)).toEqual({ held: T, saved: T, conflict: theirs(A, 8) });
+    expect(holdsUnsaved(editor(shown, { kind: "copy" }).held, T, undefined)).toBe(true);
+    // A read that answered before Show already put their text in `saved`: Show shows it at once.
+    const early = run({ held: A, saved: A }, [{ kind: "refused" }, { kind: "reading", on: true }, { kind: "read", text: T, since: 0 }, { kind: "show" }, { kind: "draft", revision: 8, changed: false }]);
+    expect(rest(early)).toEqual({ held: T, saved: T, conflict: theirs(A, 8) });
+    // A read that failed waits no more; Show their change reads it again (awaits).
+    expect(run({ held: A, saved: A }, [{ kind: "reading", on: true }, { kind: "reading", on: false }]).reading).toBeUndefined();
+  });
+
+  test("#517 review: Save and Remove send nothing until a settled write's draft read shows", () => {
+    expect(sendRefusal(false, undefined, true)).toBeUndefined();
+    expect(sendRefusal(false, undefined, false)).toBe(NOT_SENT_UNSHOWN);
+    expect(sendRefusal(true, undefined, false)).toBe(NOT_SENT_UNREAD);
+    expect(sendRefusal(false, refused(M, 7), true)).toBe(NOT_SENT_CONFLICT);
+  });
+
   test("H5: Save and Remove wait until their text shows", () => {
     expect(maySend(undefined)).toBe(true);
     expect(maySend(refused(M, 7))).toBe(false);
@@ -492,6 +522,9 @@ describe("a 422 names where it points (W11 Refused)", () => {
     expect(line(edited, spotOfMark(sent, edited, 1))).toBe("doc[0]/b");
     expect(spotOfMark(sent, "doc[0]/a\n\ndoc[0]/x", 1)).toBeUndefined();
     expect(spotOfMark(sent, sent, 5)).toBeUndefined();
+    // #517 review: no spot selects nothing, so no earlier selection stays.
+    expect(selection(undefined)).toEqual({ start: 0, end: 0 });
+    expect(selection({ start: 3, end: 9 })).toEqual({ start: 3, end: 9 });
   });
 });
 

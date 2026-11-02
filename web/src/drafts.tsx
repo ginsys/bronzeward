@@ -197,7 +197,17 @@ export function DraftItem({ id }: { id: string }) {
   last.current = lastGood(last.current, id, item);
   const d = last.current?.data;
   // A write's answer keeps its ETag as it settles (keepOnDone); the page then reads the draft again.
-  const written = useCallback(() => reread((x) => x + 1), []);
+  // Until that read shows, the entries shown are older than the ETag, so no pane sends (finding of
+  // the ginsys/bronzeward#517 review: a pane opened again during that read showed the old text).
+  // A newer read discards an older one (useItem), so the next one with data is the one after it.
+  const [unshown, setUnshown] = useState(false);
+  const written = useCallback(() => {
+    setUnshown(true);
+    reread((x) => x + 1);
+  }, []);
+  useEffect(() => {
+    if (item.kind === "ok") setUnshown(false);
+  }, [item]);
   const sources = d?.entries.filter(isSource) ?? [];
   const entry = paneEntry(sources, selected, claimed);
   const current = entry === undefined ? selected : keyOf(entry);
@@ -229,7 +239,7 @@ export function DraftItem({ id }: { id: string }) {
           </ul>
           {d.state === "open" && <p><Action label="Add fragment" needs={["author"]} onClick={() => pick("fragment:")} /></p>}
           {selected !== undefined && selected.startsWith("fragment:") && (
-            <FragmentPane key={pane} draft={d} entry={entry} written={written} seeChange={seeChange} claim={claim} />
+            <FragmentPane key={pane} draft={d} entry={entry} written={written} seeChange={seeChange} claim={claim} shown={!unshown} />
           )}
           <Status testid="not-rendered">{NOT_RENDERED}</Status>
           {d.state === "open" && <DiscardDraft draft={d} written={written} seeChange={seeChange} />}
@@ -300,9 +310,10 @@ export const holdsUnsaved = (held: Held, saved: Held, mine: Held | undefined) =>
 // events that changed the editor's text or the conflict: Revert to base applies only at its click's.
 // `awaits`: while asked, a draft read named a new revision of this entry, and only its revision read
 // shows their text (ginsys/bronzeward#517 L1). `sent.removes`: the write was a Remove, which saves
-// the removal, not the text (H8).
+// the removal, not the text (H8). `reading`: a revision read is pending, whatever the conflict's
+// phase was when it started, so Show their change waits for it too.
 export interface Clash { mine: Held; phase: "refused" | "asked" | "theirs"; revision?: number; awaits?: true }
-export interface Editor { held: Held; saved: Held; conflict?: Clash; sent?: { text: Held; whileTheirs: boolean; removes?: true }; writes?: number; note?: string | undefined; version?: number }
+export interface Editor { held: Held; saved: Held; conflict?: Clash; sent?: { text: Held; whileTheirs: boolean; removes?: true }; writes?: number; note?: string | undefined; version?: number; reading?: true }
 export type EditorEvent =
   | { kind: "type"; held: Held } // the operator's edit
   | { kind: "refused" } // a write's 412
@@ -310,6 +321,7 @@ export type EditorEvent =
   | { kind: "show" } // Show their change
   // The page's draft read. changed: this entry has a new revision to read; removed: the entry is a removal.
   | { kind: "draft"; revision: number; changed: boolean; removed?: true }
+  | { kind: "reading"; on: boolean } // the entry's revision read starts, or ends without text
   | { kind: "read"; text: Held; since: number } // the entry's revision read, started after `since` done writes
   | { kind: "copy" } // Copy my text into the new revision
   | { kind: "send"; removes?: true } // a Save or Remove sends the editor's text
@@ -348,18 +360,25 @@ function step(s: Editor, e: EditorEvent): Editor {
         const { awaits: _awaited, ...shown } = c;
         return { ...s, held: EMPTY, saved: EMPTY, conflict: { ...shown, phase: "theirs", revision: e.revision } };
       }
-      if (c.phase === "asked" && e.changed) return at({ revision: e.revision, awaits: true });
+      // A revision read pending since before Show, a draft read ignored while refused started it,
+      // also gives their text.
+      if (c.phase === "asked" && (e.changed || s.reading === true)) return at({ revision: e.revision, awaits: true });
       // Their change left this entry as read: its saved text is theirs. A later draft read that
       // finds the awaited revision already named changes nothing.
       return c.phase === "asked" && c.awaits !== true ? at({ phase: "theirs", revision: e.revision }, s.saved) : at({ revision: e.revision });
+    case "reading": {
+      const { reading: _was, ...idle } = s;
+      return e.on ? { ...s, reading: true } : idle;
+    }
     case "read": {
-      if (e.since !== writes) return s;
+      const { reading: _was, ...idle } = s;
+      if (e.since !== writes) return idle;
       // The read Show asked for shows their text; any other replaces only text not typed into.
       if (c?.phase === "asked") {
         const { awaits: _awaited, ...shown } = c;
-        return { ...s, saved: e.text, held: e.text, conflict: { ...shown, phase: "theirs" } };
+        return { ...idle, saved: e.text, held: e.text, conflict: { ...shown, phase: "theirs" } };
       }
-      return { ...s, saved: e.text, held: same(s.held, s.saved) ? e.text : s.held };
+      return { ...idle, saved: e.text, held: same(s.held, s.saved) ? e.text : s.held };
     }
     case "copy":
       // Only once their text shows: a revision read still pending could replace the copied text.
@@ -393,6 +412,13 @@ export const NOT_SENT_CONFLICT = "Not sent: someone changed this draft. Show the
 // nothing, so a Save cannot replace text it never showed (ginsys/bronzeward#517 H9).
 export const unread = (revision: string | null | undefined, load: "pending" | "failed" | "ok", done: number) => revision != null && load !== "ok" && done === 0;
 export const NOT_SENT_UNREAD = "Not sent: the entry's text is not read yet.";
+// A fragment write settled and kept its ETag, but the draft read it started has not shown yet: the
+// entries shown are older than that ETag, so a pane opened on them would overwrite the write unseen.
+export const NOT_SENT_UNSHOWN = "Not sent: the draft is being read again after a save. Wait until it shows.";
+
+// Why Save or Remove sends nothing now, if it does not send.
+export const sendRefusal = (waits: boolean, conflict: Clash | undefined, shown: boolean) =>
+  waits ? NOT_SENT_UNREAD : !maySend(conflict) ? NOT_SENT_CONFLICT : !shown ? NOT_SENT_UNSHOWN : undefined;
 
 // The draft the page shows: the last read with data for this id, so a read again that fails keeps
 // the editor and its unsaved text (W4); the failure shows above it.
@@ -431,6 +457,9 @@ export function spotOfMark(sent: string, current: string, n: number): Spot | und
   return at < 0 ? undefined : spotOfLine(current, at);
 }
 
+// The range Go to field selects: the spot, or an empty range at the start.
+export const selection = (spot: Spot | undefined): Spot => spot ?? { start: 0, end: 0 };
+
 // Where a 422 points, as text beside the refusal: the reference, the mark's line, or the paths.
 export function where(p: Problem | null, marks: string): string | undefined {
   if (p === null) return undefined;
@@ -463,7 +492,7 @@ function WriteResult({ w, done, conflict, goTo, marks = "" }: { w: Write | undef
 // The fragment entry (W4): name, layer, the B12 textarea, marks, and the references list with each
 // `!bwref` and its declaration. Save is PUT, remove DELETE; Revert to base restores the base text
 // for saving (no route drops an entry).
-export function FragmentPane({ draft, entry, written, seeChange, claim = () => {} }: { draft: Draft; entry: Source | undefined; written: () => void; seeChange: () => void; claim?: (name: string) => void }) {
+export function FragmentPane({ draft, entry, written, seeChange, claim = () => {}, shown = true }: { draft: Draft; entry: Source | undefined; written: () => void; seeChange: () => void; claim?: (name: string) => void; shown?: boolean }) {
   const writes = useWrites();
   // Every read settles through the shell: a refusal of the credentials ends the page (H11).
   const read = useSettled();
@@ -494,16 +523,21 @@ export function FragmentPane({ draft, entry, written, seeChange, claim = () => {
     if (entry?.revision == null) return;
     let live = true;
     setLoad((l) => (l === "ok" ? l : "pending"));
+    act({ kind: "reading", on: true });
     void read<Revision>(`/fragment-revisions/${enc(entry.revision)}`, () => live).then((r) => {
       if (!live) return;
       if (r?.kind !== "ok") {
+        act({ kind: "reading", on: false });
         setLoad((l) => (l === "ok" ? l : "failed"));
         return setNote("The entry's revision could not be read.");
       }
       setLoad("ok");
       act({ kind: "read", text: fromRevision(r.data), since: done });
     });
-    return () => void (live = false);
+    return () => {
+      live = false;
+      act({ kind: "reading", on: false });
+    };
   }, [read, entry?.revision, attempt]);
 
   // Each draft read the page shows, and whether it gives this entry a new revision to read, or
@@ -533,8 +567,8 @@ export function FragmentPane({ draft, entry, written, seeChange, claim = () => {
   const save = () => {
     const m = ifMatch();
     if (name === "") return setNote("Not sent: name the fragment first.");
-    if (waits) return setNote(NOT_SENT_UNREAD);
-    if (!maySend(conflict)) return setNote(NOT_SENT_CONFLICT);
+    const refusal = sendRefusal(waits, conflict, shown);
+    if (refusal !== undefined) return setNote(refusal);
     if (entry === undefined && inUse(draft, name)) return setNote(`Not sent: this draft already holds fragment ${name}. Open it from Entries to change it.`);
     if (m === undefined) return setNote(NO_ETAG);
     const lines = held.marks.split("\n").filter((l) => l !== "");
@@ -549,8 +583,8 @@ export function FragmentPane({ draft, entry, written, seeChange, claim = () => {
   };
   const remove = () => {
     const m = ifMatch();
-    if (waits) return setNote(NOT_SENT_UNREAD);
-    if (!maySend(conflict)) return setNote(NOT_SENT_CONFLICT);
+    const refusal = sendRefusal(waits, conflict, shown);
+    if (refusal !== undefined) return setNote(refusal);
     if (m === undefined) return setNote(NO_ETAG);
     // Once done, the removal is saved: the text still shown is unsaved until a Save stores it (H8).
     if (startsNew(writes!, w)) act({ kind: "send", removes: true });
@@ -582,7 +616,9 @@ export function FragmentPane({ draft, entry, written, seeChange, claim = () => {
     } else if (Array.isArray(p["paths"]) && typeof p["paths"][0] === "string") spot = await spotOfPath(held.document, p["paths"][0]);
     if (into === null) return;
     into.focus();
-    if (spot !== undefined) into.setSelectionRange(spot.start, spot.end);
+    // No spot selects nothing: an earlier selection would point at an unrelated field (W4).
+    const at = selection(spot);
+    into.setSelectionRange(at.start, at.end);
   };
   const conflictView = conflict !== undefined && (
     <>

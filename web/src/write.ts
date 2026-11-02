@@ -459,8 +459,12 @@ export class Writes {
   private async ingestBound(client: Client, end: End): Promise<number> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const late = new Promise<undefined>((r) => (timer = setTimeout(() => r(undefined), SERVER_WAIT)));
-    const a = await Promise.race([this.read(client, "/server", end, false), late]);
+    const reading = this.read(client, "/server", end, false);
+    const a = await Promise.race([reading, late]);
     clearTimeout(timer);
+    // A refusal that read learns after the bound stopped waiting still ends the page, at once: the
+    // write may have settled already, and its settling tells only what it saw then. Told once.
+    if (a === undefined) void reading.then(() => (end.e !== undefined ? end.now?.(end.e) : end.pre !== undefined && end.nowPre?.(end.pre)), () => undefined);
     const served = a?.status === 200 ? (a.data as { ingestionClaim?: { leaseSeconds?: unknown } } | null)?.ingestionClaim?.leaseSeconds : undefined;
     const lease = typeof served === "number" ? served : this.lease;
     return lease !== undefined && lease * 1000 > INGEST_WAIT ? lease * 1000 : INGEST_WAIT;

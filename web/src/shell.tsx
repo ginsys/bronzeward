@@ -29,17 +29,21 @@ export const incompatible = (served: number) =>
   `This server serves API revision ${served}; this client needs API revision ${MIN_API_REVISION} or later.`;
 export const deprecated = (route: string) => `The server marks ${route} as deprecated: it will be removed in a later release.`;
 
-// What an action needs to know: the roles GET /identity served, and whether the page is offline.
-const Shell = createContext<{ roles: readonly Role[]; offline: boolean }>({ roles: [], offline: false });
+// What an action needs to know: the roles GET /identity served, whether the page is offline, and
+// whether it is a page kept across an epoch change (keepsPage).
+const Shell = createContext<{ roles: readonly Role[]; offline: boolean; kept?: boolean }>({ roles: [], offline: false });
 export const ShellContext = Shell.Provider;
 // The offline banner shows: no action sends anything (journeys §8 Offline row).
 export const useOffline = () => useContext(Shell).offline;
 
+export const KEPT_PAGE = "The epoch changed: copy your text, then open the page again";
+
 // An action the roles do not allow is disabled with its reason; the server's refusal stays
-// authoritative (journeys §7), so `needs` only names what the route accepts.
+// authoritative (journeys §7), so `needs` only names what the route accepts. A page kept across an
+// epoch change sends nothing (ginsys/bronzeward#517 H10).
 export function useGate(needs: readonly Role[]): string | undefined {
-  const { roles, offline } = useContext(Shell);
-  return offline ? "Offline" : needs.some((r) => roles.includes(r)) ? undefined : `Needs ${needs.join(" or ")}`;
+  const { roles, offline, kept = false } = useContext(Shell);
+  return offline ? "Offline" : kept ? KEPT_PAGE : needs.some((r) => roles.includes(r)) ? undefined : `Needs ${needs.join(" or ")}`;
 }
 export function Action({ label, needs, onClick, submit = false, busy = false }: { label: string; needs: readonly Role[]; onClick?: () => void; submit?: boolean; busy?: boolean }) {
   const reason = useGate(needs);
@@ -302,10 +306,13 @@ export const ending = <T,>(writes: Writes, client: () => Client, f: (res: T) => 
 
 // §8.5: a new epoch reads the server and the identity again. A page that held unsaved text when the
 // epoch changed stays shown meanwhile, so the operator's text is not dropped with what was read
-// (ginsys/bronzeward#517 H10). Its ETags are gone with the old epoch, so it sends nothing; the
-// operator can copy the text out. A refusal or an incompatible server still replaces it.
+// (ginsys/bronzeward#517 H10), also while a read fails in a way that a later read can mend: no
+// answer, or a server error. Its actions stay disabled until the operator opens another page
+// (useGate), so a read it makes under the new epoch lets it send nothing; the operator can copy the
+// text out. A refusal, a start's pre-entry state or an incompatible server still replaces it.
+const mendable = (r: Load<unknown>) => r.kind === "loading" || r.kind === "transport" || r.kind === "discarded" || (r.kind === "refused" && r.status >= 500);
 export const keepsPage = (kept: boolean, server: Load<Server>, identity: Load<Identity>) =>
-  kept && (server.kind === "loading" || (server.kind === "ok" && server.data.apiRevision >= MIN_API_REVISION && identity.kind === "loading"));
+  kept && (server.kind === "ok" ? server.data.apiRevision >= MIN_API_REVISION && identity.kind !== "ok" && mendable(identity) : mendable(server));
 
 export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, onDeprecation, signOut, writes, notices = [] }: SignedInProps & { notices?: readonly string[] }) {
   // B11: a move to another page while a write is pending or unknown asks first, Back and Forward
@@ -323,8 +330,11 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
   const [recoveryMode, setRecoveryMode] = useState(false);
   const [mode, setMode] = useState<StartMode>("unknown");
   const [epochChanged, setEpochChanged] = useState(false);
-  // Whether the page held unsaved text when the epoch last changed (keepsPage).
-  const [kept, keepPage] = useState(false);
+  // The view (path and query) that held unsaved text when the epoch last changed: that page is kept
+  // shown, and sends nothing, until the operator opens another (keepsPage, useGate).
+  const viewKey = JSON.stringify([path, query]);
+  const [keptView, keepView] = useState<string | undefined>();
+  const kept = keptView === viewKey;
   const [[conn, regained], observe] = useReducer((s: [Connection, number], [e, at]: [ConnectionEvent, Date]) => regaining(s, e, at), [{}, 0]);
   const offline = offlineSince(conn);
   // Bumped to read again: back online, asked by the operator, or after a new epoch.
@@ -336,7 +346,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
     onEpochChange: () => {
       writes.setAside(EPOCH_CHANGED_ASIDE);
       setEpochChanged(true);
-      keepPage(unsaved.size > 0);
+      keepView(unsaved.size > 0 ? viewKey : undefined);
       setServer({ kind: "loading" });
       setIdentity({ load: { kind: "loading" } });
       setRecovery({ kind: "loading" });
@@ -441,9 +451,11 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
   }, []);
 
   const holding = keepsPage(kept, server, identity);
+  // Once another page opens, the kept one is gone: going back to it opens it again.
   useEffect(() => {
-    if (kept && !holding) keepPage(false);
-  }, [kept, holding]);
+    if (keptView !== undefined && !kept) keepView(undefined);
+  }, [keptView, kept]);
+  const failedRead = server.kind !== "ok" ? server : identity;
 
   let main: ReactNode;
   if (holding) main = <Page path={path} query={query} go={go} />;
@@ -456,7 +468,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
 
   const id = identity.load.kind === "ok" ? identity.load.data : undefined;
   return (
-    <ShellContext value={{ roles: id?.roles ?? [], offline: offline !== undefined }}>
+    <ShellContext value={{ roles: id?.roles ?? [], offline: offline !== undefined, kept }}>
       <a className="skip" href="#main">Skip to the page</a>
       <header>
         <h1>Bronzeward</h1>
@@ -482,7 +494,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
           </nav>
         )}
       </header>
-      <ReadsProvider value={{ client, settle: settlePage, undropped: reads.since, view: JSON.stringify([path, query]), again, regained, go, failure: (res) => <Failure res={res} sub={sub} /> }}><main id="main" ref={page} tabIndex={-1}>{holding && <Loading what="the server and your identity under the new epoch" />}{main}</main></ReadsProvider>
+      <ReadsProvider value={{ client, settle: settlePage, undropped: reads.since, view: JSON.stringify([path, query]), again, regained, go, failure: (res) => <Failure res={res} sub={sub} /> }}><main id="main" ref={page} tabIndex={-1}>{holding && (failedRead.kind === "loading" || failedRead.kind === "discarded" || failedRead.kind === "ok" ? <Loading what="the server and your identity under the new epoch" /> : <Failure res={failedRead} sub={sub} />)}{main}</main></ReadsProvider>
       <VersionFooter server={server.kind === "ok" ? server.data : undefined} />
     </ShellContext>
   );
