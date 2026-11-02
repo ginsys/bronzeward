@@ -15,7 +15,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"net/http/httputil"
 	"net/url"
 	"os"
 	"os/exec"
@@ -350,7 +349,7 @@ func (l dropping) Accept() (net.Conn, error) {
 func newInjector(t *testing.T, target string) *injector {
 	u, _ := url.Parse(target)
 	in := &injector{}
-	rp := httputil.NewSingleHostReverseProxy(u)
+	rp := newBackendProxy(t, u)
 	in.proxy = rp
 	rp.ModifyResponse = func(r *http.Response) error {
 		in.mu.Lock()
