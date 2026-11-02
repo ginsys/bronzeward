@@ -454,6 +454,15 @@ describe("a fragment write's in-progress 409 (§8.4 item 2, AMB-02)", () => {
     expect(writesSent()).toHaveLength(2);
   });
 
+  test("a replayed 409 with ingestion is a recorded refusal, not repeated", async () => {
+    const replayed = inProgress();
+    replayed.headers.set("Idempotent-Replayed", "true");
+    const { writes, writesSent } = page([new TypeError("Failed to fetch"), replayed]);
+    const o = await writes.submit(fragment());
+    expect(o).toMatchObject({ kind: "refused", status: 409, replayed: true });
+    expect(writesSent()).toHaveLength(2);
+  });
+
   test("another sign-in during the wait sets it aside, and nothing more is sent", async () => {
     // The sign-in changes once the 409 is answered, before the wait ends.
     let signIn = (_: string) => {};
