@@ -1,6 +1,7 @@
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { type Attempt, Client, type ClientOptions } from "./request.ts";
 import { type ShellEvents, ShellReads } from "./shell.tsx";
+import { cutBody, endlessBody, noHeaders } from "./test-stalls.ts";
 import { BACKOFF, EARLIER_EPOCH, EPOCH_CHANGED_ASIDE, MAX_BODY, NO_CREDENTIAL, NO_EPOCH, NO_EPOCH_HEADER, newKey, RECOVERY_START, RENEWED_LAST, SHELL_GONE, SIGN_IN_CHANGED, SIGN_IN_REFUSED, TOO_LARGE, Write, Writes } from "./write.ts";
 
 const EPOCH = "e1";
@@ -786,5 +787,93 @@ describe("a sign-in that ends stops every other write of its client at once", ()
     expect(await writes.submit(spec())).toEqual({ kind: "set-aside", why: NO_CREDENTIAL, ambiguous: true, problem: null });
     expect(writesSent()).toHaveLength(1);
     expect(sent.filter((s) => s.method === "POST").every((s) => s.headers["Authorization"] === "Bearer SYNTH-token")).toBe(true);
+  });
+});
+
+// §8.4 items 2, 5 and 8 (ginsys/bronzeward#487): the bound of each attempt, on a fake clock. The
+// write's own answers come from `answers`, called with the request's init so that a stall can end
+// with the attempt's abort signal; the confirming GET /recovery before each repeat is answered at once.
+describe("the attempt bound on a write (§8.4 item 8)", () => {
+  afterEach(() => vi.useRealTimers());
+
+  const problemHeaders = { "Content-Type": "application/problem+json", "Bronzeward-Epoch": EPOCH };
+
+  function bounded(answers: ((init: RequestInit | undefined) => Response | Promise<Response> | Error)[]) {
+    vi.useFakeTimers();
+    const sent: { method: string; path: string; key: string | undefined }[] = [];
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(url).replace("/api/v1", "");
+      const method = init?.method ?? "GET";
+      sent.push({ method, path, key: (init?.headers as Record<string, string>)["Idempotency-Key"] });
+      if (path === "/recovery") return recovery();
+      const next = answers.shift()?.(init);
+      if (next === undefined) throw new Error("no answer left");
+      if (next instanceof Error) throw next;
+      return next;
+    });
+    const client = new Client({ token: () => "SYNTH-token", fetch: fetchMock as unknown as typeof fetch });
+    const writes = new Writes(() => PRINCIPAL, async () => {});
+    writes.client = client;
+    return { writes, writesSent: () => sent.filter((s) => s.path !== "/recovery") };
+  }
+
+  // The outcome of `w` as far as the run has got.
+  function run(writes: Writes, w: Write) {
+    const box: { outcome?: Awaited<ReturnType<Writes["submit"]>> } = {};
+    void writes.submit(w).then((o) => (box.outcome = o));
+    return box;
+  }
+
+  test.each([
+    ["headers that never arrive", 30_000, (init: RequestInit | undefined) => noHeaders(init)],
+    ["a success body that never ends", 60_000, (init: RequestInit | undefined) => endlessBody(init, 201, { "Content-Type": "application/json", "Bronzeward-Epoch": EPOCH })],
+    ["a 502 whose body never ends", 60_000, (init: RequestInit | undefined) => endlessBody(init, 502, { "Content-Type": "text/plain" })],
+  ])("%s: ambiguous, repeated under the same key at most 3 times, then unknown, and the notice offers Dismiss", async (_what, ms, stall) => {
+    const { writes, writesSent } = bounded([stall, stall, stall, stall]);
+    const w = spec();
+    const r = run(writes, w);
+    for (let n = 1; n <= 3; n++) {
+      await vi.advanceTimersByTimeAsync(ms);
+      expect(r.outcome).toBeUndefined();
+      expect(writesSent()).toHaveLength(n + 1);
+      expect(w.doubt).toMatchObject({ kind: "unknown" });
+    }
+    await vi.advanceTimersByTimeAsync(ms);
+    expect(r.outcome).toMatchObject({ kind: "unknown" });
+    expect(w.ambiguous).toBe(true);
+    expect(writesSent().map((s) => s.key)).toEqual(Array(4).fill(w.key));
+    expect(writes.notices).toEqual([w]);
+    writes.dismiss(w);
+    expect(writes.notices).toEqual([]);
+    expect(writes.open).toEqual([]);
+  });
+
+  test.each([
+    ["the bound ends", 60_000, (init: RequestInit | undefined) => endlessBody(init, 422, problemHeaders)],
+    ["the network cuts", 0, () => cutBody(422, problemHeaders)],
+  ])("a 4xx whose body %s is a refusal reported cut off: the status stands, nothing is repeated", async (_who, ms, cut) => {
+    const { writes, writesSent } = bounded([cut]);
+    const w = spec();
+    const r = run(writes, w);
+    await vi.advanceTimersByTimeAsync(ms);
+    expect(r.outcome).toEqual({ kind: "refused", status: 422, problem: null, replayed: false, cut: true });
+    expect(writesSent()).toHaveLength(1);
+    expect(w.ambiguous).toBe(false);
+  });
+
+  test("a 4xx cut off after an earlier ambiguous attempt says nothing of it: the outcome stays unknown and nothing more is sent", async () => {
+    const { writes, writesSent } = bounded([() => new TypeError("Failed to fetch"), () => cutBody(422, problemHeaders)]);
+    const w = spec();
+    const r = run(writes, w);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(r.outcome).toEqual({ kind: "unknown", why: "the server answered 422", problem: null });
+    expect(writesSent()).toHaveLength(2);
+  });
+
+  test("an answer inside the bound is unchanged", async () => {
+    const { writes } = bounded([() => created({ id: "c1" })]);
+    const r = run(writes, spec());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(r.outcome).toEqual({ kind: "done", status: 201, data: { id: "c1" }, replayed: false });
   });
 });

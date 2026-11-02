@@ -92,6 +92,17 @@ const RETRIED_503 = new Set(["dependency-unavailable", "talos-access-unavailable
 const MAX_TRIES = 5;
 const backoff = (attempt: number) => Math.min(1000 * 2 ** attempt, 30_000);
 
+// §8.4 item 8: every attempt has its own abort signal, which covers the fetch and the read of its
+// body. The headers must come within HEADERS_BOUND of the send, and the whole attempt within
+// ATTEMPT_BOUND. A browser's fetch rejects when the signal fires before the headers, and errors the
+// body stream when it fires after them: the first is a connection that failed, the second a body
+// the network cut off (readJson's CUT). The event stream is not sent through here.
+export const HEADERS_BOUND = 30_000;
+export const ATTEMPT_BOUND = 60_000;
+// The way a response ends its attempt's timers, once its body is read, cancelled or dropped.
+const timers = new WeakMap<Response, () => void>();
+const endAttempt = (res: Response) => timers.get(res)?.();
+
 export class Client {
   private view: View = { principal: "", route: "", query: "" };
   private epoch: string | undefined;
@@ -158,13 +169,17 @@ export class Client {
       // so the read is sent again to learn the current one. Any other is read, even on a stale read.
       const epoch = res.headers.get("Bronzeward-Epoch");
       if (epoch !== null && epoch !== this.epoch && records !== this.epochRecords) {
+        endAttempt(res);
         if (attempt + 1 >= MAX_TRIES || drops !== this.drops) return { kind: "discarded" };
         continue;
       }
       // A 403 is read before a stale answer is dropped: identity-revoked of the sign-in still current
       // clears its credential at once (§8.2), even when the view moved on; its data stays dropped.
       const stale = this.observeEpoch(res) || sent !== this.generation;
-      if (stale && !(res.status === 403 && principal === this.view.principal)) return { kind: "discarded" };
+      if (stale && !(res.status === 403 && principal === this.view.principal)) {
+        endAttempt(res);
+        return { kind: "discarded" };
+      }
       if (res.ok) return this.success<T>(res, sent);
       const body = await readProblem(res);
       const problem = body === NOT_JSON || body === CUT ? null : body;
@@ -224,7 +239,10 @@ export class Client {
       this.opts.onDeprecation?.(route);
     }
     const data = epochOnly ? await credentialProblem(res) : res.ok ? await readJson(res) : await readProblem(res);
-    if (data === CUT) return undefined;
+    // §8.4 items 2 and 8: a body cut off, by the network or the bound, is an answer that did not
+    // arrive, unless its headers carried a 4xx: the server refused that attempt, so the status
+    // stands and the answer is reported cut off. A read sent for its epoch has no such answer.
+    if (data === CUT) return !epochOnly && res.status >= 400 && res.status < 500 ? { status: res.status, headers: res.headers, data } : undefined;
     const pre = preEntry(res.status, data);
     if (pre !== undefined) end.pre ??= pre;
     return { status: res.status, headers: res.headers, data };
@@ -248,16 +266,25 @@ export class Client {
     const token = this.opts.token?.();
     if (this.ended || (this.opts.token !== undefined && token === undefined)) return NOT_SENT;
     if (token !== undefined) headers["Authorization"] = `Bearer ${token}`;
+    const bound = new AbortController();
+    const header = setTimeout(() => bound.abort(), HEADERS_BOUND);
+    const whole = setTimeout(() => bound.abort(), ATTEMPT_BOUND);
+    const end = () => (clearTimeout(header), clearTimeout(whole));
     try {
-      return await (this.opts.fetch ?? fetch)(API_BASE + path, {
+      const res = await (this.opts.fetch ?? fetch)(API_BASE + path, {
         method,
         headers,
         ...(body === undefined ? {} : { body }),
         cache: "no-store",
         redirect: "error",
         credentials: "omit",
+        signal: bound.signal,
       });
+      clearTimeout(header);
+      timers.set(res, end);
+      return res;
     } catch {
+      end();
       return undefined;
     }
   }
@@ -344,7 +371,10 @@ export class Client {
 
   // A body that fails to parse is a defect; one cut off by the network is a transport failure.
   private async success<T>(res: Response, sent: number): Promise<ReadResult<T>> {
-    if (!res.headers.has("Bronzeward-Epoch")) return { kind: "defect", message: "a success carried no Bronzeward-Epoch header" };
+    if (!res.headers.has("Bronzeward-Epoch")) {
+      endAttempt(res);
+      return { kind: "defect", message: "a success carried no Bronzeward-Epoch header" };
+    }
     const body = await readJson(res);
     if (sent !== this.generation) return { kind: "discarded" };
     if (body === CUT) return { kind: "transport" };
@@ -359,7 +389,13 @@ export const NOT_JSON = Symbol("not JSON");
 export const NOT_SENT = Symbol("not sent");
 export const CUT = Symbol("cut off");
 export async function readJson(res: Response): Promise<unknown> {
-  return res.json().catch((e: unknown) => (e instanceof SyntaxError ? NOT_JSON : CUT));
+  try {
+    return await res.json();
+  } catch (e) {
+    return e instanceof SyntaxError ? NOT_JSON : CUT;
+  } finally {
+    endAttempt(res);
+  }
 }
 
 // A Bronzeward problem document, null for any other answer (§8.2's last row), NOT_JSON or CUT.
@@ -367,7 +403,14 @@ async function readProblem(res: Response): Promise<Problem | null | typeof NOT_J
   if (res.ok) return null;
   // Any other answer's body is read too, so one cut off by the network is still a transport failure.
   if (!(res.headers.get("Content-Type") ?? "").startsWith("application/problem+json")) {
-    return res.arrayBuffer().then(() => null, () => CUT);
+    try {
+      await res.arrayBuffer();
+      return null;
+    } catch {
+      return CUT;
+    } finally {
+      endAttempt(res);
+    }
   }
   const body = await readJson(res);
   if (body === CUT || body === NOT_JSON) return body;
@@ -382,6 +425,7 @@ async function credentialProblem(res: Response): Promise<Problem | null | typeof
   const problem = (res.headers.get("Content-Type") ?? "").startsWith("application/problem+json");
   if ((res.status === 401 || res.status === 403 || res.status === 409) && problem) return readProblem(res);
   void res.body?.cancel().catch(() => {});
+  endAttempt(res);
   return null;
 }
 

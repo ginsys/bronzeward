@@ -5,7 +5,7 @@ import { AddCluster, ClusterField, existing, guardsUnload, leaving, record, Resu
 import { type Failed, type Reads, ReadsProvider } from "./list.tsx";
 import type { Client, Problem } from "./request.ts";
 import { Failure, ShellContext } from "./shell.tsx";
-import { REPEATING, REPLAYED, setAside, unknown, UNKNOWN } from "./states.tsx";
+import { CUT_OFF, REPEATING, REPLAYED, setAside, unknown, UNKNOWN } from "./states.tsx";
 import { EARLIER_EPOCH, EPOCH_CHANGED_ASIDE, NO_EPOCH, NO_EPOCH_HEADER, type Outcome, Write, Writes } from "./write.ts";
 
 const PRINCIPAL = "https://idp.invalid SYNTH-sub-1";
@@ -308,6 +308,10 @@ describe("the form's result", () => {
   test("a replayed refusal is the earlier attempt's, and says so", () => {
     expect(result({ kind: "refused", status: 409, problem: null, replayed: true })).toContain(`${REPLAYED} Not saved: the server answered 409.`);
     expect(result({ kind: "refused", status: 409, problem: null, replayed: false })).toContain(">Not saved: the server answered 409.</p>");
+  });
+
+  test("§8.4 item 8: a refusal whose answer was cut off says so, in the form and in a settled notice", () => {
+    expect(result({ kind: "refused", status: 422, problem: null, replayed: false, cut: true })).toContain(`>Not saved: the server answered 422. ${CUT_OFF}</p>`);
   });
 
   test("not done shows the last answer's problem fields (§8.2)", () => {
