@@ -131,7 +131,7 @@ func nextStep(c *client.Client, s apitypes.RecoveryScope) string {
 			if c.Revision < 3 {
 				return "the missing keys need API revision 3; see machine timeline " + m + ", then recovery mark " + m
 			}
-			pg, err := c.Page(path, cursor)
+			pg, err := c.PageIf(path, cursor, func() bool { return c.Revision >= 3 })
 			var entries []apitypes.TimelineEntry
 			if err == nil {
 				entries, err = decode[apitypes.TimelineEntry](c, pg.Items...)

@@ -18,8 +18,14 @@ type Page struct {
 // Page reads the page of the list at path that cursor names, the first for "". A refused cursor
 // is discarded and the first page read instead (§8.2).
 func (c *Client) Page(path, cursor string) (*Page, error) {
+	return c.PageIf(path, cursor, nil)
+}
+
+// PageIf is Page, but the first page is read again only while ok, called after the refused cursor's
+// answer and its GET /server re-read, still holds. A path that depends on the served revision uses it.
+func (c *Client) PageIf(path, cursor string, ok func() bool) (*Page, error) {
 	p, err := c.page(path, cursor)
-	if cursor != "" && c.restart(path, err) {
+	if cursor != "" && (ok == nil || ok()) && c.restart(path, err) {
 		return c.page(path, "")
 	}
 	return p, err
