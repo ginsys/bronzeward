@@ -30,6 +30,12 @@ export const QUIET_MS = 100;
 // once, after the history was still for QUIET_MS. If that does not reach the shown page's position
 // (an entry went, or the traversal went past the end and fired nothing), the current entry takes
 // the shown page's address instead. Either way the return ends with the address of the page shown.
+// The traversal of a return that ended by that fallback may still be queued and land later (#505),
+// behind an in-app move or not. For two more quiet periods, the first move that lands where that
+// traversal lands is taken for it: it moves no page and asks nothing, and the history returns again,
+// without arming another marker. Position cannot tell that traversal from the operator's own move to
+// the same entry, so the marker is short; a slower one, or an own move of the same distance in that
+// time, reaches the leave question like any move.
 export function positions(h: Entries, here: () => string, later: (f: () => void) => void = (f) => void setTimeout(f, QUIET_MS)) {
   // The position of the entry the history is at, as the page last saw it.
   let current = position(h.state) ?? 0;
@@ -39,6 +45,14 @@ export function positions(h: Entries, here: () => string, later: (f: () => void)
   let home: number | undefined;
   let aimed = false;
   let still = 0;
+  // The distance of the return's history.go, and, once the fallback ended the return, of the
+  // traversal that may still land.
+  let aim = 0;
+  let stray: number | undefined;
+  let lapse = 0;
+  // Whether the return began with a refusal. Only that return arms `stray`: one that began with a late
+  // traversal never does, or slow returns would bounce for good.
+  let refusal = false;
   // The current entry's position. One without a position was added by a fragment link (Skip to the
   // page), after the entry the history was at.
   const locate = (): number => {
@@ -59,9 +73,19 @@ export function positions(h: Entries, here: () => string, later: (f: () => void)
     later(() => {
       if (mine !== still || home === undefined) return;
       const at = locate();
-      if (at === home || aimed) return end(at);
+      if (at === home) return end(at);
+      if (aimed) {
+        end(at);
+        if (refusal) {
+          const mine = ++lapse;
+          stray = aim;
+          later(() => later(() => void (mine === lapse && (stray = undefined))));
+        }
+        return;
+      }
       aimed = true;
-      h.go(home - at);
+      aim = home - at;
+      h.go(aim);
       settle();
     });
   };
@@ -69,13 +93,21 @@ export function positions(h: Entries, here: () => string, later: (f: () => void)
     // On popstate: true when the page follows the move.
     popped(ask?: Ask): boolean {
       const to = here();
+      const from = current;
+      const fragment = position(h.state) === undefined;
       const at = locate();
       if (home !== undefined) {
         if (at === home) end(at);
         else settle();
         return false;
       }
-      if (ask !== undefined && !ask(to, shown.to)) {
+      // The late traversal of a return that ended: the history returns again, and nothing is asked. A
+      // fragment link's entry is not it, and a move that is not it leaves the marker for the traversal
+      // still to come.
+      const late = !fragment && stray !== undefined && at === from + stray;
+      refusal = !late;
+      if (late || (ask !== undefined && !ask(to, shown.to))) {
+        stray = undefined;
         home = shown.at;
         aimed = false;
         settle();
@@ -83,6 +115,10 @@ export function positions(h: Entries, here: () => string, later: (f: () => void)
       }
       shown = { to, at };
       return true;
+    },
+    // Whether a refused move is returning: an in-app move does nothing, so the page asks nothing for it.
+    returning(): boolean {
+      return home !== undefined;
     },
     // An in-app move, which adds an entry unless `to` is the address already. During a return the
     // address is not the shown page's yet: the move does nothing and is false.
@@ -104,8 +140,9 @@ const ours = () => (entries ??= positions(history, () => location.pathname + loc
 // The current path, its query, and a navigation that adds a history entry. The query is tracked
 // apart from the path, so a query-only move (Back from ?cluster=c2 to ?cluster=c1) is seen too.
 // `guard` is asked before Back or Forward moves the page from `from` to `to`; refused, the history
-// returns to the entry of the page still shown.
-export function usePath(guard?: Ask): [string, (to: string) => void, string] {
+// returns to the entry of the page still shown. The fourth value tells whether that return is under
+// way, when an in-app move does nothing.
+export function usePath(guard?: Ask): [string, (to: string) => void, string, () => boolean] {
   const [path, setPath] = useState(location.pathname);
   const [query, setQuery] = useState(location.search);
   const asks = useRef(guard);
@@ -125,7 +162,8 @@ export function usePath(guard?: Ask): [string, (to: string) => void, string] {
   const go = useCallback((to: string) => {
     if (ours().moved(to)) here();
   }, [here]);
-  return [path, go, query];
+  const returning = useCallback(() => ours().returning(), []);
+  return [path, go, query, returning];
 }
 
 // A plain left click navigates in the page; any other keeps the browser's own handling.

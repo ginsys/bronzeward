@@ -1,7 +1,7 @@
 import { createElement as h, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
-import { Action, connection, Deprecations, deprecated, ending, Failure, incompatible, MIN_API_REVISION, observed, offlineSince, regaining, ShellContext, type ShellEvents, ShellReads, showCurrent } from "./shell.tsx";
+import { Action, connection, Deprecations, deprecated, ending, Failure, incompatible, MIN_API_REVISION, observed, offlineSince, regaining, ShellContext, type ShellEvents, ShellReads, moveFree, showCurrent } from "./shell.tsx";
 import { Conflict, Disconnected, Empty, HUMAN_ONLY, Loading, NOT_ACCEPTED, NotAccepted, Offline, Refused, REPEATING, REPLAYED, Replayed, SET_ASIDE, SetAside, Unknown, UNKNOWN, Unread, Withheld, WITHHELD } from "./states.tsx";
 import { NO_EPOCH, SHELL_GONE, Write, Writes } from "./write.ts";
 import { type Attempt, type Client, TRANSPORT_FAILURE } from "./request.ts";
@@ -76,6 +76,29 @@ describe("the shell", () => {
     show("/clusters", "/machines");
     show("/clusters", "/clusters?cluster=c1");
     expect([moved, reads]).toEqual([["/clusters", "/clusters"], 1]);
+  });
+
+  test("during a refused move's return, go and show ask nothing and do nothing; afterwards they ask first", () => {
+    let busy = true;
+    const asked: string[] = [];
+    const moved: string[] = [];
+    let reads = 0;
+    const leave = (to: string, answer: boolean) => () => (asked.push(to), answer);
+    // The shell's go and show, as SignedIn builds them from the same helper.
+    const go = (to: string, answer = true) => moveFree(() => busy, leave(to, answer), () => void moved.push(to));
+    const show = (to: string, here: string) => moveFree(() => busy, leave(to, true), () => showCurrent(to, here, (t) => void moved.push(t), () => void reads++));
+    go("/plans");
+    show("/clusters", "/machines");
+    show("/clusters", "/clusters");
+    expect([asked, moved, reads]).toEqual([[], [], 0]);
+    busy = false;
+    go("/plans");
+    show("/clusters", "/machines");
+    show("/clusters", "/clusters");
+    expect([asked, moved, reads]).toEqual([["/plans", "/clusters", "/clusters"], ["/plans", "/clusters"], 1]);
+    // A refused question still stops the move.
+    go("/sources", false);
+    expect(moved).toEqual(["/plans", "/clusters"]);
   });
 
   const action = (roles: string[], offline = false) =>
