@@ -212,6 +212,15 @@ describe("the draft editor (#339)", () => {
     await expect($('main ul[aria-label="Entries"]')).toHaveText(expect.stringContaining(`fragment ${name} new`));
     expect(await guarded()).toBe(false);
     await oneWrite(1);
+    // ginsys/bronzeward#517 H1: the pane now edits the entry it created. H4: Add fragment with that
+    // name again sends nothing.
+    await expect(pane().$("label*=name")).not.toBeExisting();
+    await expect(pane().$("button=Remove")).toBeExisting();
+    await $("main").$("button=Add fragment").click();
+    await pane().$("label*=name").$("input").setValue(name);
+    await pane().$("button=Save").click();
+    await expect($('[data-testid="editor-note"]')).toHaveText(`Not sent: this draft already holds fragment ${name}. Open it from Entries to change it.`);
+    await oneWrite(1);
   });
 
   it("ETAG-01: two browsers on one draft: the second to save gets 412, sends nothing more, sees the first's text, and re-applies its own", async function () {

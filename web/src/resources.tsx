@@ -424,8 +424,10 @@ export function view(path: string, query: string, go: (to: string) => void): Rea
   }
   if (source !== undefined) return <SourceItem kind={source} id={id} />;
   if (revision !== undefined) return <RevisionItem kind={revision} id={id} />;
+  // A draft's page is keyed by its id: a move to another draft keeps none of the last one's reads,
+  // ETag or editor text (ginsys/bronzeward#517 H2).
   const items: Record<string, () => ReactNode> = {
-    machines: () => <MachineItem id={id} />, clusters: () => <ClusterItem id={id} />, releases: () => <ReleaseItem id={id} />, drafts: () => <DraftItem id={id} />,
+    machines: () => <MachineItem id={id} />, clusters: () => <ClusterItem id={id} />, releases: () => <ReleaseItem id={id} />, drafts: () => <DraftItem key={id} id={id} />,
     plans: () => <PlanItem id={id} />, operations: () => <OperationItem id={id} />, dependencies: () => <DependencyItem id={id} />,
   };
   return kind !== undefined && Object.hasOwn(items, kind) ? items[kind]!() : undefined;
