@@ -53,6 +53,28 @@ type terminal struct {
 	read   chan struct{}
 	once   sync.Once
 	code   int
+	before syscall.Termios // the modes before the command started
+}
+
+// modes reads the pair's terminal modes through the master.
+func (tm *terminal) modes() syscall.Termios {
+	tm.t.Helper()
+	var m syscall.Termios
+	if err := ioctl(tm.master, syscall.TCGETS, unsafe.Pointer(&m)); err != nil {
+		tm.t.Errorf("reading the terminal modes: %v", err)
+	}
+	return m
+}
+
+// restored checks that the command put the terminal back in the modes it started in: line
+// editing, echo and signal keys on again, as before the pager's raw mode.
+func (tm *terminal) restored(when string) {
+	tm.t.Helper()
+	m := tm.modes()
+	if m.Iflag != tm.before.Iflag || m.Oflag != tm.before.Oflag || m.Cflag != tm.before.Cflag || m.Lflag != tm.before.Lflag {
+		tm.t.Errorf("%s, the terminal modes are iflag %#x oflag %#x cflag %#x lflag %#x; want the modes before, %#x %#x %#x %#x",
+			when, m.Iflag, m.Oflag, m.Cflag, m.Lflag, tm.before.Iflag, tm.before.Oflag, tm.before.Cflag, tm.before.Lflag)
+	}
 }
 
 // onTerminal starts bronzewardctl in the human context on a new pseudo-terminal of 24 rows and 80
@@ -89,12 +111,16 @@ func (e *importEnv) onTerminal(out io.Writer, args ...string) *terminal {
 		cmd.Stdout = out
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0}
+	tm := &terminal{t: t, master: m, cmd: cmd, read: make(chan struct{})}
+	tm.before = tm.modes()
+	if tm.before.Lflag&(syscall.ICANON|syscall.ECHO|syscall.ISIG) != syscall.ICANON|syscall.ECHO|syscall.ISIG {
+		t.Fatalf("the new pseudo-terminal is not in line mode with echo and signal keys: lflag %#x", tm.before.Lflag)
+	}
 	err = cmd.Start()
 	s.Close()
 	if err != nil {
 		t.Fatal(err)
 	}
-	tm := &terminal{t: t, master: m, cmd: cmd, read: make(chan struct{})}
 	go func() {
 		defer close(tm.read)
 		b := make([]byte, 4096)
@@ -201,11 +227,12 @@ const (
 	keyLine      = "space or f forward, b back, q quit"
 )
 
-// review runs import review of ing on a terminal: it pages to the end, back once, quits, and types
-// marks at the prompt and then an empty line. It checks that the screen shows the notice before
+// review runs import review of ing on a terminal: it pages to the end, back once, quits with the
+// key quit (q or Ctrl-C), and types marks at the prompt and then an empty line. It checks that the
+// terminal modes at the prompt are those before the pager, that the screen shows the notice before
 // the pager, the review in the alternate screen, the unmarked secret only when secret is set, and
 // each of want, and returns the exit code.
-func (e *importEnv) review(ing string, secret bool, marks []string, want ...string) int {
+func (e *importEnv) review(ing, quit string, secret bool, marks []string, want ...string) int {
 	e.t.Helper()
 	tm := e.onTerminal(nil, "import", "review", ing)
 	defer tm.wipe()
@@ -225,10 +252,13 @@ func (e *importEnv) review(ing string, secret bool, marks []string, want ...stri
 	n := tm.count(keyLine)
 	tm.send("b")
 	tm.more("the page before", keyLine, n)
-	tm.send("q")
+	tm.send(quit)
 	for i, m := range append(slices.Clone(marks), "") {
 		if !tm.more("the marks prompt", "mark> ", i) {
 			break
+		}
+		if i == 0 {
+			tm.restored(fmt.Sprintf("after the pager quit on %q", quit))
 		}
 		tm.send(m + "\n")
 	}
@@ -312,12 +342,12 @@ func TestProtected(t *testing.T) {
 		e := e.sub(t)
 		r, ing := e.start("", "--review")
 		e.f.want(r, 0, "Paused for review (generation 1", "bronzewardctl import review "+ing)
-		if code := e.review(ing, true, []string{unmarkedPath}, "Mark a value as secret by its path, one per line; empty line to finish:",
+		if code := e.review(ing, "q", true, []string{unmarkedPath}, "Mark a value as secret by its path, one per line; empty line to finish:",
 			"Marked 1 path; re-staged and paused again (generation 2)."); code != 0 {
 			t.Errorf("the review and mark exited %d", code)
 		}
-		// Reviewed again, the marked value is a reference.
-		if code := e.review(ing, false, nil, "No marks given."); code != 0 {
+		// Reviewed again, the marked value is a reference; Ctrl-C quits the pager as q does.
+		if code := e.review(ing, "\x03", false, nil, "No marks given."); code != 0 {
 			t.Errorf("the second review exited %d", code)
 		}
 		e.f.want(e.run("import", "continue", ing), 0, "Import "+ing+" released into draft "+e.s.draft)
@@ -389,7 +419,7 @@ func TestProtected(t *testing.T) {
 			w.(http.Flusher).Flush()
 			panic(http.ErrAbortHandler)
 		}, nil)
-		if code := e.review(ing, true, nil, "No marks given."); code != 0 {
+		if code := e.review(ing, "q", true, nil, "No marks given."); code != 0 {
 			t.Errorf("the review exited %d", code)
 		}
 		if n := e.reviews(ing); n != 2 {
@@ -529,7 +559,7 @@ func (e *importEnv) journey(t *testing.T) {
 		}
 		fmt.Fprintf(&out, "$ bronzewardctl --context human %s\n", strings.Join(step, " "))
 		if step[1] == "review" {
-			code := e.review(ing, true, []string{unmarkedPath}, "Marked 1 path; re-staged and paused again (generation 2).")
+			code := e.review(ing, "q", true, []string{unmarkedPath}, "Marked 1 path; re-staged and paused again (generation 2).")
 			fmt.Fprintf(&out, "(the protected review, on a terminal: matched in memory, not kept)\n[exit %d]\n\n", code)
 			continue
 		}

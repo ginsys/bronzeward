@@ -73,7 +73,7 @@ func (e *env) importReview(args []string) error {
 	if len(marks) == 0 {
 		return e.say(append([]string{"No marks given. Review again, continue or abandon it:"}, remedies(ing, "review", "continue", "abandon")...)...)
 	}
-	return e.sendMarks(c, ing, marks, nil, false)
+	return e.held(func() error { return e.sendMarks(c, ing, marks, nil, false) })
 }
 
 // rawFile is standard output as the file it is beneath the table guard, or nil when it is no file.
@@ -108,7 +108,9 @@ func (e *env) pager(out *os.File, text string) error {
 	return err
 }
 
-// reviewText is the review as the pager shows it: the staged document, then its declarations.
+// reviewText is the review as the pager shows it: the staged document, then its declarations. Only
+// the document's own line feeds start a line: a declared path, kind or format is escaped whole, so
+// none can add a line that the pager would show as the review's own.
 func reviewText(rv apitypes.IngestionReviewBody) string {
 	var b strings.Builder
 	b.WriteString(rv.Document)
@@ -125,11 +127,11 @@ func reviewText(rv apitypes.IngestionReviewBody) string {
 	fmt.Fprintf(&b, "\n# declared references: %d\n", len(paths))
 	for _, p := range paths {
 		ref := rv.Declarations.References[p]
-		fmt.Fprintf(&b, "#   %s: %s version %d\n", p, ref.Kind, ref.Version)
+		b.WriteString(sf("#   %s: %s version %d\n", p, ref.Kind, ref.Version))
 	}
 	fmt.Fprintf(&b, "# declared embedded documents: %d\n", len(rv.Declarations.Embedded))
 	for _, d := range rv.Declarations.Embedded {
-		fmt.Fprintf(&b, "#   %s: %s\n", d.Path, d.Format)
+		b.WriteString(sf("#   %s: %s\n", d.Path, d.Format))
 	}
 	return b.String()
 }
@@ -164,7 +166,7 @@ func (e *env) importMark(args []string) error {
 	if err != nil {
 		return err
 	}
-	return e.sendMarks(c, pos[0], marks, rp, noWait)
+	return e.held(func() error { return e.sendMarks(c, pos[0], marks, rp, noWait) })
 }
 
 // sendMarks sends marks on ing and, unless noWait, follows the run.
@@ -211,9 +213,23 @@ func paths(n int) string {
 // at the mark's generation is applied; a mark-refused event there, a resume-failed event or a
 // later takeover leaves it not applied, exit 1; a failed operation is exit 4; and a lease that
 // lapsed with none of these leaves it unknown, exit 3. Only the paused event applies it, so an
-// operation that succeeded without one is not applied either.
+// operation that succeeded without one is not applied either. An operation read terminal ends the
+// import whatever the run settled before: a failure is reported as ended reports it, exit 4, and
+// every end ends this client's record of the import (§8.3).
 func (e *env) markOutcome(c *client.Client, a accepted, b *apitypes.IngestionBody, o *apitypes.OperationBody, s settlement) error {
 	what := "the mark on import " + b.Id
+	switch {
+	case client.Terminal(o.State) && o.State != "succeeded":
+		return e.ended(c, b, o)
+	case client.Terminal(o.State) && s.how == "paused":
+		// Applied at its pause, then continued and released since.
+		if err := e.say(sf("Marked %s; re-staged and paused at generation %d, and released since.", paths(a.marks), a.Generation)); err != nil {
+			return err
+		}
+		return e.ended(c, b, o)
+	case client.Terminal(o.State):
+		forget(e, c, b.Id)
+	}
 	switch {
 	case s.how == "paused":
 		return e.say(append([]string{sf("Marked %s; re-staged and paused again (generation %d). Review again, continue or abandon it:", paths(a.marks), a.Generation)},
@@ -227,11 +243,7 @@ func (e *env) markOutcome(c *client.Client, a accepted, b *apitypes.IngestionBod
 	case s.how == "taken-over":
 		return &client.Blocked{Err: fmt.Errorf("%s: %s was not applied: a takeover at generation %d resumed the import without it. Once the import pauses again, review it and mark again:",
 			c.Context.Where(), what, s.gen), More: remedies(b.Id, "status")}
-	case client.Terminal(o.State) && o.State != "succeeded":
-		return e.ended(c, b, o)
 	case client.Terminal(o.State):
-		// The import ended, so this client's record of it ends too, as ended ends it (§8.3).
-		forget(e, c, b.Id)
 		return &client.Blocked{Err: fmt.Errorf("%s: %s was not applied: operation %s succeeded without pausing at the mark's generation %d. Read the draft before marking again:",
 			c.Context.Where(), what, o.Id, a.Generation), More: []string{"  bronzewardctl draft show " + pr(client.ShellWord(b.Draft))}}
 	}
