@@ -313,7 +313,8 @@ export const holdsUnsaved = (held: Held, saved: Held, mine: Held | undefined) =>
 // events that changed the editor's text or the conflict: Revert to base applies only at its click's.
 // `awaits`: while asked, a draft read named a new revision of this entry, and only its revision read
 // shows their text (ginsys/bronzeward#517 L1); once theirs, Show their change was clicked again and
-// its reads have not answered, so Copy waits. `sent.removes`: the write was a Remove, which saves
+// its draft read has not answered, so Copy waits; a new revision that read names then waits on
+// `reading`. `sent.removes`: the write was a Remove, which saves
 // the removal, not the text (H8). `reading`: the entry's newest revision is not read yet, its read
 // pending or failed, whatever the conflict's phase was when it started, so Show their change waits
 // for it too; only a read with text clears it.
@@ -370,10 +371,12 @@ function step(s: Editor, e: EditorEvent): Editor {
       // A revision read pending since before Show, a draft read ignored while refused started it,
       // also gives their text.
       if (c.phase === "asked" && (e.changed || s.reading === true)) return at({ revision: e.revision, awaits: true });
-      // Shown again: a draft read with no new revision and none pending ends the wait.
-      if (c.phase === "theirs" && c.awaits === true && !e.changed && s.reading !== true) {
+      // Shown again: the draft read it started ends the wait, since a newer draft read discards an
+      // older one. A new revision it names is read next, and Copy waits for that read (`reading`);
+      // a revision read that answers before this draft read ends nothing (round-6 review).
+      if (c.phase === "theirs" && c.awaits === true) {
         const { awaits: _awaited, ...shown } = c;
-        return { ...s, conflict: { ...shown, revision: e.revision } };
+        return { ...s, ...(e.changed && { reading: true as const }), conflict: { ...shown, revision: e.revision } };
       }
       // Their change left this entry as read: its saved text is theirs. A later draft read that
       // finds the awaited revision already named changes nothing.
@@ -390,10 +393,8 @@ function step(s: Editor, e: EditorEvent): Editor {
         const { awaits: _awaited, ...shown } = c;
         return { ...idle, saved: e.text, held: e.text, conflict: { ...shown, phase: "theirs" } };
       }
-      const read = { ...idle, saved: e.text, held: same(s.held, s.saved) ? e.text : s.held };
-      if (c?.awaits !== true) return read;
-      const { awaits: _awaited, ...shown } = c;
-      return { ...read, conflict: shown };
+      // Once theirs shows, a read never ends a repeated Show's wait: only its draft read does.
+      return { ...idle, saved: e.text, held: same(s.held, s.saved) ? e.text : s.held };
     }
     case "copy":
       // Only once their text shows and no read is pending: a pending one could replace the copied text.

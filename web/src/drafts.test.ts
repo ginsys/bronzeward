@@ -427,6 +427,25 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     expect(editor(same, { kind: "copy" }).held).toBe(A);
   });
 
+  test("round-6 review: an older revision's read that answers before the repeated Show's draft read releases nothing", () => {
+    // Their text shows at revision 8, and the operator's kept text equals the saved text (the L1 case).
+    const shown = run({ held: T, saved: T, conflict: theirs(T, 8) }, []);
+    // Show again: it reads the draft again and retries the revision shown, whose read answers first.
+    const early = run(shown, [{ kind: "show" }, { kind: "reading", on: true }, { kind: "read", text: T, since: 0 }]);
+    expect(early.conflict?.awaits).toBe(true);
+    expect(rest(editor(early, { kind: "copy" }))).toEqual(rest(early));
+    // The draft read names revision 9: Copy waits for its read, and that read shows their newer text.
+    const named = run(early, [{ kind: "reading", on: true }, { kind: "draft", revision: 9, changed: true }]);
+    expect(named.conflict?.awaits).toBeUndefined();
+    expect(rest(editor(named, { kind: "copy" }))).toEqual(rest(named));
+    const newer = run(named, [{ kind: "read", text: T2, since: 0 }]);
+    expect(rest(newer)).toEqual({ held: T2, saved: T2, conflict: theirs(T, 9) });
+    // Copy now keeps the operator's text: no read is left to replace it.
+    expect(editor(newer, { kind: "copy" }).held).toBe(T);
+    // A changed draft read marks the revision read pending even before its reading event.
+    expect(run(early, [{ kind: "draft", revision: 9, changed: true }]).reading).toBe(true);
+  });
+
   test("#517 review round 2: a revision read that failed before Show keeps Show waiting, so the old text is never theirs", () => {
     // The failed read sends no event: `reading` stays until a read answers or the pane drops it.
     const failed = run({ held: A, saved: A }, [{ kind: "refused" }, { kind: "at", revision: 7 }, { kind: "draft", revision: 8, changed: true }, { kind: "reading", on: true }]);
