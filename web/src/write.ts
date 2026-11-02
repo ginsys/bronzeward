@@ -449,6 +449,10 @@ export class Writes {
         doubt();
         continue;
       }
+      // An entry sent to a start that takes none (no `epoch`) is refused before the lookup, so it says
+      // nothing of an earlier attempt: after a lost 201 and a normal restart the first send may have
+      // committed, and the repeat is unknown, not "Not saved". With no earlier attempt it is REC-02's refusal.
+      if (w.spec.entry === true && a.status === 409 && code === "conflict" && p?.["epoch"] === undefined) return early(refused);
       // This send's own answer: a repeat that found the key's record would have replayed it.
       return refused;
     }
