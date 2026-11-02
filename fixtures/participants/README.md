@@ -58,6 +58,9 @@ a cluster that nothing has imported yet, so it comes before the import of T4's s
 need a machine that has drifted after an apply, so they come after T9's apply. T11 starts from the
 state that T10 leaves, and its setup fails and names the drift record if T10 left it open.
 
+Until ginsys/bronzeward#512 lands, the T9 setup fails (T9 below). The setups of T2, T10 and T11
+build on T9's apply, so no session can run past T8 yet.
+
 T2 is therefore the ninth task. When you assess T2's measures, read them as taken after eight
 practice tasks, not as a first contact with the clients.
 
@@ -134,8 +137,11 @@ facilitator only. Setup `tN` means `fixtures/participants/session tN`.
 
 ### T5: a concurrent edit
 
-- Role: author. Setup: `t5`, then `t5 collide` after the participant saves the draft once. The
-  competing change is h-all's, the setup's own account, which no participant uses.
+- Role: author. Setup: `t5`, then `t5 collide` after the participant opens the draft
+  (`bronzewardctl draft create`) and before they save the label (`bronzewardctl fragment set`).
+  The CLI sends the ETag of its last show or write of the draft, so the save after `t5 collide`
+  is refused. If you run `t5 collide` after that save, no conflict occurs. The competing change is
+  h-all's, the setup's own account, which no participant uses.
 - Prompt: "Change the value of the node label `<label>` to `<value>`, and save it."
 - Done when: the other change is read and the participant's own change is applied again.
 - Probe: none.
@@ -168,6 +174,10 @@ facilitator only. Setup `tN` means `fixtures/participants/session tN`.
 
 ### T9: follow the apply
 
+- The T9 setup does not reach its precondition yet. On a fresh fixture, the apply that T9 needs
+  completes at once from an observation, before it sends any event, and `t9` fails with "the
+  apply ended (completed) before the participant could follow it". ginsys/bronzeward#512 tracks
+  the cause. Until it lands, a session cannot run T9.
 - Role: viewer. Setup: `t9`, then `t9 disconnect` right after it, while the participant follows
   the apply. `t9 disconnect` stops A for 60 s and starts it again, so that the participant's event
   stream ends and the client must resume it. Its own reader then checks that a stream resumed
