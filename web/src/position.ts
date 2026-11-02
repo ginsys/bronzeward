@@ -98,14 +98,26 @@ const MARKER = /^(?:---|\.\.\.)(?:\s|$)/;
 // it replaces (each is one UTF-16 code unit, the unit the editor reports positions in), so the
 // positions found here are positions in the text given (ginsys/bronzeward#544).
 const BREAKS = /\r(?!\n)|[\u0085\u{2028}\u{2029}]/gu;
+// A line that ends, a comment aside, with a block scalar's header after a blank or at its start,
+// node properties allowed before it.
+const HEADER_END = /(?:^|[ \t])(?:[!&][^ \t]*[ \t]+)*[|>][-+1-9]{0,2}[ \t]*$/;
 function tags(original: string): { index: number; tag: string; name: string }[] {
   const text = original.replace(BREAKS, "\n");
+  // The depth of the open flow collections carries from line to line. A block scalar's content
+  // lines (blank, or more indented than the line of its header) and a document marker open none.
   let masked = "";
   let flow = 0;
+  let content = -1;
   for (const line of text.split("\n")) {
-    let end: number;
-    ({ end, flow } = commentStart(line, flow));
-    masked += `${line.slice(0, end)}${" ".repeat(line.length - end)}\n`;
+    const held = content >= 0 && (line.trim() === "" || indent(line) > content);
+    if (!held) content = -1;
+    if (MARKER.test(line)) flow = 0;
+    const c = commentStart(line, held ? 0 : flow);
+    if (!held) {
+      flow = c.flow;
+      if (flow === 0 && HEADER_END.test(line.slice(0, c.end))) content = indent(line);
+    }
+    masked += `${line.slice(0, c.end)}${" ".repeat(line.length - c.end)}\n`;
   }
   const found: { index: number; tag: string; name: string }[] = [];
   // A plain scalar's words: no blank, flow indicator, or colon before a blank; blanks between words.
@@ -268,40 +280,46 @@ function decoded(body: string): string | undefined {
 // `can't` and `dogs 'n cats` open none; '' inside a single-quoted scalar is an apostrophe.
 // `flow` is the depth of the flow collections ([ {) open at the line's start; the result carries
 // the depth at its end, so that the next line is read in the same context (ginsys/bronzeward#578).
+// A [ or { opens one only where a node starts, and a ] or } closes one only while one is open.
 function commentStart(line: string, flow: number): { end: number; flow: number } {
   let quote: string | undefined;
+  let closed = -1;
   for (let i = 0; i < line.length; i++) {
     const c = line[i]!;
     if (quote !== undefined) {
       if (c === "'" && quote === "'" && line[i + 1] === "'") i++;
-      else if (c === quote) quote = undefined;
+      else if (c === quote) [quote, closed] = [undefined, i];
       else if (c === "\\" && quote === '"') i++;
-    } else if ((c === '"' || c === "'") && startsScalar(line, i, flow > 0)) quote = c;
+    } else if ((c === '"' || c === "'") && startsScalar(line, i, flow > 0, closed)) quote = c;
     else if (c === "#" && (i === 0 || blank(line[i - 1]))) return { end: i, flow };
-    else if ((c === "[" || c === "{") && startsScalar(line, i, flow > 0)) flow++;
+    else if ((c === "[" || c === "{") && startsScalar(line, i, flow > 0, closed)) flow++;
     else if ((c === "]" || c === "}") && flow > 0) flow--;
   }
   return { end: line.length, flow };
 }
 
-// Whether a node starts at `i`: at the line's indentation, after a flow indicator ([ { ,), or
-// after a blank that follows a key's colon or an item's or a complex key's indicator (- ?). In a
-// flow collection a complex key's indicator needs no blank after it, as go-yaml reads it. Node
+// Whether a node starts at `i`: at the line's indentation, after a blank that follows a key's
+// colon or an item's or a complex key's indicator (- ?), or, in a flow collection only, after a
+// flow indicator ([ { ,). In a flow collection, as go-yaml reads it, an indicator right after
+// a flow indicator counts, a complex key's indicator needs no blank after it, and neither does a
+// colon right after a quoted key (`closed` is where the last quote on the line closed). Node
 // properties (a tag, an anchor) and the blanks after them may stand between the indicator and the
 // node. Anything else before it is a plain scalar already started.
 const blank = (c: string | undefined) => c === " " || c === "\t";
-function startsScalar(line: string, i: number, flow: boolean): boolean {
-  const indicator = (j: number) => j === 0 || blank(line[j - 1]) || "[{,".includes(line[j - 1]!);
+function startsScalar(line: string, i: number, flow: boolean, closed: number): boolean {
+  const opener = (c: string | undefined) => flow && c !== undefined && "[{,".includes(c);
+  const indicator = (j: number) => j === 0 || blank(line[j - 1]) || opener(line[j - 1]);
   for (let k = i; ; ) {
     let j = k - 1;
     while (j >= 0 && blank(line[j])) j--;
-    if (j < 0 || "[{,".includes(line[j]!)) return true;
+    if (j < 0 || opener(line[j])) return true;
     if (flow && line[j] === "?" && indicator(j)) return true;
+    if (flow && line[j] === ":" && closed >= 0 && closed === j - 1) return true;
     if (j === k - 1) return false;
     if (line[j] === ":") return true;
     if ((line[j] === "-" || line[j] === "?") && indicator(j)) return true;
     let s = j;
-    while (s > 0 && !blank(line[s - 1]) && !"[{,".includes(line[s - 1]!)) s--;
+    while (s > 0 && !blank(line[s - 1]) && !opener(line[s - 1])) s--;
     if (flow && line[s] === "?" && indicator(s)) s++;
     if (line[s] !== "!" && line[s] !== "&") return false;
     k = s;

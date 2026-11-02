@@ -341,13 +341,29 @@ describe("[Go to field] positions (B13)", () => {
       // The collection opened on an earlier line.
       'a: [x,\n  ? &a "x # y": 1,\n  !bwref x/foo]\n',
       "a: {k: 1,\n  ?'x # y' : 1, b: !bwref x/foo}\n",
+      // A colon right after a quoted key needs no blank after it in a flow collection.
+      'a: {"k":"x # y", r: !bwref x/foo}\n',
+      "a: [\"k\":'x # y', !bwref x/foo]\n",
     ]) expect(references(one)).toEqual(["x/foo"]);
-    // Outside a flow collection a ? with no blank after it, a [ inside a plain scalar and a tag
-    // inside one start no node, so the # still starts a comment.
+    // Outside a flow collection a ? with no blank after it, a [ { or , inside a plain scalar, a tag
+    // inside one, and a colon after a quote inside one start no node: the quote stays in the plain
+    // scalar and the # starts a comment.
     for (const one of [
-      'a: ?"x # y" # !bwref ghost\nb: !bwref x/foo\n',
-      'a: x[ ? "y # z" # !bwref ghost\nb: !bwref x/foo\n',
-      'a: x!t "y # z" # !bwref ghost\nb: !bwref x/foo\n',
+      'a: ?"x # !bwref ghost\nb: !bwref x/foo\n',
+      'a: x[?"y # !bwref ghost\nb: !bwref x/foo\n',
+      'a: x!t "y # !bwref ghost\nb: !bwref x/foo\n',
+      'a: x,- "y # !bwref ghost\nb: !bwref x/foo\n',
+      'a: x, !t "y # !bwref ghost\nb: !bwref x/foo\n',
+      'a: x, "y # !bwref ghost\nb: !bwref x/foo\n',
+      'a: x"y":"z # !bwref ghost\nb: !bwref x/foo\n',
+      'x,- "p: ["q # r", !bwref x/foo]\n',
+      'x, !t "p: ["q # r", !bwref x/foo]\n',
+      // No flow collection opens in a plain scalar, in a block scalar's content, or past a
+      // document marker.
+      'a: x,[y\nb: ?"y # !bwref ghost\nc: !bwref x/foo\n',
+      'a: |\n  [x\nb: ?"y # !bwref ghost\nc: !bwref x/foo\n',
+      'a: |\n  [x\nx ?"p: ["q # r", !bwref x/foo]\n',
+      'a: !t >-\n  {x\nx ?"p: ["q # r", !bwref x/foo]\n',
     ]) expect(references(one)).toEqual(["x/foo"]);
   });
 
