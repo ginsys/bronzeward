@@ -115,6 +115,11 @@ describe("[Go to field] positions (B13)", () => {
     expect(references("a: !bwref x/foo bar\n")).toEqual([]);
     // A plain scalar folded onto a more indented line is one scalar, with a blank: no name.
     expect(references("a: !bwref x/foo\n  bar\nb: !bwref x/two\n")).toEqual(["x/two"]);
+    // #517 review round 3: a tag that starts its line folds onto a line at its own indentation.
+    expect(references("a:\n  !bwref x/foo\n  bar\nb: !bwref x/two\n")).toEqual(["x/two"]);
+    expect(references("a:\n  !bwref x/foo\nb: c\n")).toEqual(["x/foo"]);
+    expect(references("a: [\n  !bwref x/one,\n  !bwref x/two\n]\n")).toEqual(["x/one", "x/two"]);
+    expect(references("a:\n  - !bwref x/one\n  - !bwref x/two\n")).toEqual(["x/one", "x/two"]);
     // A more indented key or sequence entry is no continuation.
     expect(references("a: !bwref x/one\n  b: c\n")).toEqual(["x/one"]);
     expect(references("- !bwref x/one\n  - c\n")).toEqual(["x/one"]);
@@ -385,7 +390,11 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     const failure = /if \(r\?\.kind !== "ok"\) \{([^}]*)\}/.exec(src);
     expect(failure?.[1]).toMatch(/setFailed\(true\)/);
     expect(failure?.[1]).not.toMatch(/reading/);
-    expect(src).toMatch(/const waits = unread\(entry\?\.revision, loaded, done\);/);
+    expect(src).toMatch(/const waits = unread\(entry\?\.revision, loaded\);/);
+    // #517 review round 3: a read with text records its revision, and a draft read again retries
+    // a failed one; without either the pane never edits, or stays waiting after Show.
+    expect(src).toMatch(/setLoaded\(revision\);\n\s*act\(\{ kind: "read", text: fromRevision\(r\.data\), since: done \}\);/);
+    expect(src).toMatch(/act\(\{ kind: "draft", revision: draft\.revision, changed[^\n]*\n\s*if \(!changed && failed\) retry\(\(x\) => x \+ 1\);/);
     expect(src).toMatch(/\{unshown && item\.kind !== "ok" && item\.kind !== "loading" && <p><button [^>]*onClick=\{\(\) => reread\(\(x\) => x \+ 1\)\}>\{READ_DRAFT_AGAIN\}/);
   });
 
@@ -423,14 +432,16 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
   });
 
   test("H9: the pane takes no edit until the entry's revision is read, or a write of its own is done", () => {
-    expect(unread("frv_2", undefined, 0)).toBe(true);
-    expect(unread("frv_2", "frv_2", 0)).toBe(false);
-    expect(unread("frv_2", undefined, 1)).toBe(false);
-    expect(unread(null, undefined, 0)).toBe(false);
-    expect(unread(undefined, undefined, 0)).toBe(false);
+    expect(unread("frv_2", undefined)).toBe(true);
+    expect(unread("frv_2", "frv_2")).toBe(false);
+    expect(unread(null, undefined)).toBe(false);
+    expect(unread(undefined, undefined)).toBe(false);
     // #517 review round 2: a refreshed draft that names a newer revision than the one the pane
     // read waits for that one, though an earlier read succeeded.
-    expect(unread("frv_3", "frv_2", 0)).toBe(true);
+    expect(unread("frv_3", "frv_2")).toBe(true);
+    // #517 review round 3: a Save of the pane's own is no exception. After it, a Discard's Show
+    // their change can name another author's revision, which the pane must read before it edits.
+    expect(unread.length).toBe(2);
   });
 
   test("R6-1: a Revert clicked before a 412, Show their change and Copy my text does not replace the copied text", () => {

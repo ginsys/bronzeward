@@ -411,10 +411,11 @@ export const maySend = mayRevert;
 export const NOT_SENT_CONFLICT = "Not sent: someone changed this draft. Show their change first; Save and Remove wait until their text shows.";
 
 // Whether the pane still lacks the entry's text: the revision the draft shown names is not the
-// one it read last, and no write of its own put the stored text in the editor. Until then the pane
-// takes no edit and sends nothing, so a Save cannot replace text it never showed
-// (ginsys/bronzeward#517 H9), also after a draft read named a newer revision (review).
-export const unread = (revision: string | null | undefined, loaded: string | undefined, done: number) => revision != null && revision !== loaded && done === 0;
+// one it read last. Until then the pane takes no edit and sends nothing, so a Save cannot replace
+// text it never showed (ginsys/bronzeward#517 H9), also after a draft read named a newer revision.
+// A Save of its own is no exception: after it, a Discard's Show their change can name another
+// author's revision (review), so the pane reads even its own new revision before it edits again.
+export const unread = (revision: string | null | undefined, loaded: string | undefined) => revision != null && revision !== loaded;
 export const NOT_SENT_UNREAD = "Not sent: the entry's text is not read yet.";
 // A fragment write settled and kept its ETag, but the draft read it started has not shown yet: the
 // entries shown are older than that ETag, so a pane opened on them would overwrite the write unseen.
@@ -519,7 +520,7 @@ export function FragmentPane({ draft, entry, written, seeChange, claim = () => {
   // the draft shown names, the pane takes no edit (H9).
   const [loaded, setLoaded] = useState<string | undefined>();
   const [failed, setFailed] = useState(false);
-  const waits = unread(entry?.revision, loaded, done);
+  const waits = unread(entry?.revision, loaded);
   const open = draft.state === "open";
   const editable = open && !waits;
   // Guarded also once the draft no longer takes writes (discarded by another author): the text is
