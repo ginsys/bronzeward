@@ -297,11 +297,13 @@ export class Client {
     if (this.ended || (this.opts.token !== undefined && token === undefined)) return NOT_SENT;
     if (token !== undefined) headers["Authorization"] = `Bearer ${token}`;
     const bound = new AbortController();
+    const onWithin = () => bound.abort();
     if (within?.aborted === true) bound.abort();
-    else within?.addEventListener("abort", () => bound.abort(), { once: true });
+    else within?.addEventListener("abort", onWithin, { once: true });
     const header = setTimeout(() => bound.abort(), HEADERS_BOUND);
     const whole = setTimeout(() => bound.abort(), ATTEMPT_BOUND);
-    const end = () => (clearTimeout(header), clearTimeout(whole));
+    // A finished attempt is never aborted later, not by its own timers and not by the write it was sent within.
+    const end = () => (clearTimeout(header), clearTimeout(whole), within?.removeEventListener("abort", onWithin));
     try {
       const res = await (this.opts.fetch ?? fetch)(API_BASE + path, {
         method,
