@@ -32,8 +32,16 @@ Import ing_… released into draft drf_… (revision 2), import base ibr_….
   succeeded
 [exit 0]
 
+$ bronzewardctl --context human fragment set worker-labels --draft {draft} --layer role --file worker-labels.yaml
+Fragment worker-labels saved in draft drf_… (revision frv_…; draft revision 3).
+[exit 0]
+
+$ bronzewardctl --context human assignment set {machine} --draft {draft} --fragment role=worker-labels
+Assignment saved (draft revision 4).
+[exit 0]
+
 $ bronzewardctl --context human publish {draft}
-Publishing draft drf_… revision 2 (operation op_…).
+Publishing draft drf_… revision 4 (operation op_…).
 Publication succeeded: release rel_… is now Desired for 1 machine. Nothing has been sent to any machine.
   mch_… has no Applied release: hand it over with an adopt plan.
 Review a machine's rendered configuration: bronzewardctl release review rel_… <machine>

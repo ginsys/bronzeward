@@ -1,13 +1,17 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
+	"errors"
+	"io"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"testing/iotest"
 )
 
 // setStdin makes standard input a file holding s, which is not a terminal.
@@ -256,6 +260,114 @@ func TestProtectedOnLinuxOnly(t *testing.T) {
 	for _, goos := range []string{"darwin", "freebsd", "windows"} {
 		if err := protectedOn(goos); err == nil || !strings.Contains(err.Error(), "only on Linux so far; nothing was read or sent") {
 			t.Errorf("%s: %v; want the refusal", goos, err)
+		}
+	}
+}
+
+// TestTerminalMarkLineEnds: a mark typed at the prompt ends at a carriage return, a line feed or
+// both, because Enter typed ahead while the pager had the terminal raw arrives as a carriage return
+// (#546 part 5). From a file or a pipe only the line feed ends it (TestMarkCarriageReturn).
+func TestTerminalMarkLineEnds(t *testing.T) {
+	for _, c := range []struct {
+		in   string
+		want []string
+	}{
+		{"doc[0]/a\r\r", []string{"doc[0]/a"}},
+		{"doc[0]/a\r\n\r\n", []string{"doc[0]/a"}},
+		{"doc[0]/a\n\n", []string{"doc[0]/a"}},
+		{"doc[0]/a\rdoc[0]/b\r\n\n", []string{"doc[0]/a", "doc[0]/b"}},
+		{"doc[0]/a\r\rnot a mark\r", []string{"doc[0]/a"}},
+		{"doc[0]/a\r", []string{"doc[0]/a"}},
+		{"doc[0]/a\rb\n\r\n", []string{"doc[0]/a", "b"}},
+	} {
+		m, err := scanMarks(strings.NewReader(c.in), true, nil)
+		if err != nil || !slices.Equal(m, c.want) {
+			t.Errorf("%q: %q, %v; want %q", c.in, m, err, c.want)
+		}
+	}
+}
+
+// TestTerminalMarkLineEndsInChunks: the same bytes give the same marks however the terminal's reads
+// cut them, a CRLF cut between its carriage return and its line feed included.
+func TestTerminalMarkLineEndsInChunks(t *testing.T) {
+	in := "doc[0]/a\r\ndoc[0]/b\r\n\r\nnot a mark\n"
+	whole, err := scanMarks(strings.NewReader(in), true, nil)
+	if err != nil || !slices.Equal(whole, []string{"doc[0]/a", "doc[0]/b"}) {
+		t.Fatalf("whole: %q, %v", whole, err)
+	}
+	if got, err := scanMarks(iotest.OneByteReader(strings.NewReader(in)), true, nil); err != nil || !slices.Equal(got, whole) {
+		t.Errorf("one byte at a time: %q, %v; want %q", got, err, whole)
+	}
+	if got, err := scanMarks(iotest.HalfReader(strings.NewReader(in)), true, nil); err != nil || !slices.Equal(got, whole) {
+		t.Errorf("half reads: %q, %v; want %q", got, err, whole)
+	}
+}
+
+// readsOf returns the chunks as separate reads, then fails the next read: a scanner that reads
+// again, although the marks it has are complete, ends in that error, as a terminal would wait for
+// another key. The last chunk comes with io.EOF when eof is set.
+type readsOf struct {
+	chunks []string
+	eof    bool
+}
+
+func (r *readsOf) Read(p []byte) (int, error) {
+	if len(r.chunks) == 0 {
+		return 0, errors.New("read again after the marks were complete")
+	}
+	n := copy(p, r.chunks[0])
+	r.chunks = r.chunks[1:]
+	if r.eof && len(r.chunks) == 0 {
+		return n, io.EOF
+	}
+	return n, nil
+}
+
+// TestTerminalMarkLineEndsSplitCRLF: a read that starts with the line feed of a CRLF is split to
+// the end in the same call, so the mark that came with it is taken without a further read, and
+// with the end of input too (#546 part 5).
+func TestTerminalMarkLineEndsSplitCRLF(t *testing.T) {
+	for _, eof := range []bool{false, true} {
+		r := &readsOf{chunks: []string{"doc[0]/a\r", "\ndoc[0]/b\r\r"}, eof: eof}
+		got, err := scanMarks(r, true, nil)
+		if err != nil || !slices.Equal(got, []string{"doc[0]/a", "doc[0]/b"}) {
+			t.Errorf("eof=%v: %q, %v; want both marks", eof, got, err)
+		}
+	}
+}
+
+// TestTerminalMarkLimitsInChunks: the limits hold for the bytes as the terminal gave them, however
+// the reads cut a CRLF: a mark of terminalLine-1 bytes with its carriage return is refused whole or
+// cut, and the line feed that was dropped counts toward the body limit.
+func TestTerminalMarkLimitsInChunks(t *testing.T) {
+	long := strings.Repeat("a", terminalLine-1) + "\r\n\n"
+	ok := strings.Repeat("a", terminalLine-2) + "\r\n\n"
+	for name, wrap := range map[string]func(io.Reader) io.Reader{
+		"whole": func(r io.Reader) io.Reader { return r },
+		"byte":  iotest.OneByteReader,
+		"half":  iotest.HalfReader,
+	} {
+		if _, err := scanMarks(wrap(strings.NewReader(long)), true, nil); err == nil || !strings.Contains(err.Error(), "a terminal can cut short") {
+			t.Errorf("%s: %d-byte mark with its CR: %v; want it refused as cut short", name, terminalLine-1, err)
+		}
+		if got, err := scanMarks(wrap(strings.NewReader(ok)), true, nil); err != nil || len(got) != 1 {
+			t.Errorf("%s: %d-byte mark with its CR: %q, %v; want it taken", name, terminalLine-2, got, err)
+		}
+	}
+	// Every byte read is either in a line or counted as dropped.
+	in := "a\r\nb\r\n\r\n"
+	for name, wrap := range map[string]func(io.Reader) io.Reader{"whole": func(r io.Reader) io.Reader { return r }, "byte": iotest.OneByteReader} {
+		dropped := 0
+		s := bufio.NewScanner(wrap(strings.NewReader(in)))
+		s.Split(terminalMarkLines(&dropped))
+		total := 0
+		for s.Scan() {
+			total += len(s.Bytes()) + dropped
+			dropped = 0
+		}
+		total += dropped // a line feed dropped after the last line
+		if total != len(in) {
+			t.Errorf("%s: %d of %d bytes accounted for", name, total, len(in))
 		}
 	}
 }

@@ -305,6 +305,10 @@ func scanMarks(in io.Reader, terminal bool, ask func()) ([]string, error) {
 	// The API sets no length on one mark, so a line may be as long as the body limit allows.
 	s.Buffer(nil, maxBody)
 	s.Split(markLines)
+	dropped := 0
+	if terminal {
+		s.Split(terminalMarkLines(&dropped))
+	}
 	if ask == nil {
 		ask = func() {}
 	}
@@ -312,14 +316,20 @@ func scanMarks(in io.Reader, terminal bool, ask func()) ([]string, error) {
 	for ask(); s.Scan(); ask() {
 		// All the marks together are held to the body limit too, so a long stream of lines is
 		// refused before it is read whole.
-		if total += len(s.Bytes()); total > maxBody {
+		// A line feed dropped from a split CRLF was read too, so it counts.
+		if total += len(s.Bytes()) + dropped; total > maxBody {
 			return nil, fmt.Errorf("the marks are %s; nothing was sent", overBodyLimit)
 		}
-		// The length check counts the line as the terminal gave it, a CRLF carriage return included.
+		dropped = 0
+		// The length check counts the line as the terminal gave it, its carriage return included,
+		// whether the line feed after it came in the same read or not.
 		raw, ended := strings.CutSuffix(s.Text(), "\n")
 		m := raw
 		if ended {
 			m = strings.TrimSuffix(raw, "\r")
+		} else if r, cr := strings.CutSuffix(raw, "\r"); terminal && cr {
+			// A terminal line ends at a carriage return too (terminalMarkLines).
+			m = r
 		}
 		if m == "" {
 			break
@@ -339,6 +349,42 @@ func scanMarks(in io.Reader, terminal bool, ask func()) ([]string, error) {
 		return nil, fmt.Errorf("reading marks: %w; nothing was sent", err)
 	}
 	return marks, nil
+}
+
+// terminalMarkLines is markLines for a terminal, where a line also ends at a carriage return: a key
+// typed while the pager had the terminal in raw mode is queued untranslated, so Enter arrived as
+// a carriage return and not as the line feed the line mode makes of it. A carriage return that
+// goes on to a line feed (a CRLF) ends the line with both, as in markLines. A carriage return that
+// ends what has been read ends its line at once, so that one typed Enter does not wait for a second
+// key; if the next read then starts with a line feed, it is the other half of that CRLF and is
+// dropped, and the rest of what was read is split in the same call, so that a mark already read
+// is not held back for another key. The split function holds that one fact between calls, and adds
+// each line feed it drops to *dropped, so that the caller counts every byte that was read.
+func terminalMarkLines(dropped *int) bufio.SplitFunc {
+	dropLF := false
+	return func(data []byte, atEOF bool) (int, []byte, error) {
+		skip := 0
+		if dropLF && len(data) > 0 {
+			dropLF = false
+			if data[0] == '\n' {
+				skip = 1
+				*dropped++
+			}
+		}
+		rest := data[skip:]
+		i := bytes.IndexAny(rest, "\r\n")
+		switch {
+		case i < 0 && atEOF && len(rest) > 0:
+			return len(data), rest, nil
+		case i < 0:
+			return skip, nil, nil
+		case rest[i] == '\r' && i+1 < len(rest) && rest[i+1] == '\n':
+			return skip + i + 2, rest[:i+2], nil
+		case rest[i] == '\r' && i+1 == len(rest):
+			dropLF = true
+		}
+		return skip + i + 1, rest[:i+1], nil
+	}
 }
 
 // markLines splits marks at a line feed and keeps the line feed, so that scanMarks drops only the

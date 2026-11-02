@@ -8,9 +8,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"runtime"
 	"slices"
 	"strings"
+	"syscall"
 
 	"golang.org/x/term"
 
@@ -111,19 +113,89 @@ func screenSize(out *os.File) (rows, cols int, err error) {
 	return rows, cols, nil
 }
 
+// makeRaw is term.MakeRaw, and pageKeys the keys the pager reads; a test replaces them to act in
+// the window before the terminal is raw and after the key that quits.
+var (
+	makeRaw  = term.MakeRaw
+	pageKeys = func(k keySource) keySource { return k }
+)
+
+// endedBySignal is the error of a pager that SIGINT, SIGTERM or SIGHUP ended: the terminal is back
+// in line mode and off the alternate screen, and the process is to end by that signal (endByCause).
+type endedBySignal struct{ sig syscall.Signal }
+
+func (e endedBySignal) Error() string { return "ended by signal " + e.sig.String() }
+
 // pager shows lines on the terminal out, of rows by cols, in the alternate screen, with standard
 // input in raw mode for the keys, and restores both before it returns, so the review leaves the
-// screen.
-func (e *env) pager(out *os.File, lines []string, rows, cols int) error {
-	old, err := term.MakeRaw(int(stdin.Fd()))
-	if err != nil {
+// screen. It takes SIGINT, SIGTERM and SIGHUP from before the terminal is raw until it is restored,
+// so none falls in the window between and ends the process with the terminal raw, and it returns
+// endedBySignal for the first one, on every return after that, also one that came too late to reach
+// a key wait or while the pager was being set up. A signal the process inherited as ignored stays
+// ignored and is not taken. The pager is the only writer to out and writes from one goroutine, so
+// the restore never races a redraw. A SIGWINCH reads the size again and shows the page that starts
+// at the same line; it has a channel of its own, so a burst of resizes cannot displace a
+// termination signal.
+func (e *env) pager(out *os.File, lines []string, rows, cols int) (err error) {
+	fd := int(stdin.Fd())
+	terms := make(chan os.Signal, 4)
+	winch := make(chan os.Signal, 1)
+	// A signal the process inherited as ignored (nohup, a shell's background job) stays ignored: Go
+	// would restore that disposition after Stop, so the process could not end by it.
+	var take []os.Signal
+	for _, sig := range []syscall.Signal{syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP} {
+		if !signal.Ignored(sig) {
+			take = append(take, sig)
+		}
+	}
+	if len(take) > 0 { // Notify with no signals takes all of them
+		signal.Notify(terms, take...)
+	}
+	signal.Notify(winch, syscall.SIGWINCH)
+	keys, keysErr := newLiveKeys(fd)
+	var old *term.State
+	raw := false
+	// The one exit: restore the terminal, then stop delivery and take what was already sent, so that
+	// a signal queued at any return is reported, and it wins over the result.
+	defer func() {
+		if raw {
+			_ = term.Restore(fd, old)
+		}
+		signal.Stop(terms)
+		signal.Stop(winch)
+		close(terms)
+		close(winch)
+		var ended os.Signal
+		if keys != nil {
+			<-keys.done
+			ended = keys.endedBy()
+			keys.close()
+		} else {
+			ended = <-terms
+		}
+		if s, ok := ended.(syscall.Signal); ok {
+			err = endedBySignal{s}
+		}
+	}()
+	if keysErr != nil {
+		return fmt.Errorf("preparing the review's keys: %w; nothing was shown", keysErr)
+	}
+	go keys.watch(terms, winch)
+	if old, err = makeRaw(fd); err != nil {
 		return fmt.Errorf("putting the terminal in raw mode for the review: %w; nothing was shown", err)
 	}
-	defer func() { _ = term.Restore(int(stdin.Fd()), old) }()
+	raw = true
 	if _, err := fmt.Fprint(out, altScreenOn); err != nil {
 		return err
 	}
-	err = page(lines, rows, cols, stdin, out)
+	// A resize to less than the pager needs keeps the last size it could show.
+	size := func() (int, int) {
+		if r, c, err := screenSize(out); err == nil {
+			rows, cols = r, c
+		}
+		return rows, cols
+	}
+	err = pageOn(lines, size, pageKeys(keys), out)
 	_, _ = fmt.Fprint(out, clearScreen+altScreenOff)
 	return err
 }

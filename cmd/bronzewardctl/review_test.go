@@ -283,3 +283,93 @@ func TestPage(t *testing.T) {
 		t.Errorf("wrap gives %q, want %q", got, want)
 	}
 }
+
+// TestWrapCombiningMark: a combining mark takes no cell, so a wrap never splits it from the
+// character before it (#546 part 3). At 20 columns, 19 letters and an accented e fill the line, and
+// the accent stays on it; when the e itself starts the next line, the accent goes with it.
+func TestWrapCombiningMark(t *testing.T) {
+	acc := "é"
+	for _, c := range []struct {
+		name, in string
+		want     []string
+	}{
+		{"the accent fits", strings.Repeat("a", 19) + acc, []string{strings.Repeat("a", 19) + acc}},
+		{"the letter wraps, the accent goes with it", strings.Repeat("a", 20) + acc, []string{strings.Repeat("a", 20), acc}},
+		{"several marks on one letter", strings.Repeat("a", 19) + "ẹ́̂", []string{strings.Repeat("a", 19) + "ẹ́̂"}},
+		{"a mark that starts the line", "́" + strings.Repeat("a", 20), []string{"́" + strings.Repeat("a", 20)}},
+	} {
+		if got := wrap([]string{c.in}, 20); !slices.Equal(got, c.want) {
+			t.Errorf("%s: wrap gives %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// scriptKeys is a keySource that plays steps, then ends the keys.
+type scriptKeys struct{ steps []scriptStep }
+
+type scriptStep struct {
+	key byte
+	ev  event
+}
+
+func (k *scriptKeys) next() (byte, event, error) {
+	if len(k.steps) == 0 {
+		return 0, evKey, io.EOF
+	}
+	s := k.steps[0]
+	k.steps = k.steps[1:]
+	return s.key, s.ev, nil
+}
+
+// TestPageResize: on a resize the pager reads the size again, wraps to it and shows the page that
+// starts at the same line of the text (#546 part 2).
+func TestPageResize(t *testing.T) {
+	text := []string{"line 1", "line 2", "line 3", "line 4", "line 5", "line 6", "line 7", "line 8", "line 9", "line 10"}
+	sizes := [][2]int{{5, 40}, {3, 40}}
+	n := 0
+	size := func() (int, int) {
+		s := sizes[min(n, len(sizes)-1)]
+		n++
+		return s[0], s[1]
+	}
+	var w bytes.Buffer
+	keys := &scriptKeys{[]scriptStep{{' ', evKey}, {0, evResize}, {'q', evKey}}}
+	if err := pageOn(text, size, keys, &w); err != nil {
+		t.Fatal(err)
+	}
+	frames := strings.Split(w.String(), clearScreen)[1:]
+	want := []string{"line 1\r\nline 2\r\nline 3\r\nline 4\r\n-- lines 1-4 of 10", "line 5\r\nline 6\r\nline 7\r\nline 8\r\n-- lines 5-8 of 10",
+		"line 5\r\nline 6\r\n-- lines 5-6 of 10"}
+	if len(frames) != len(want) {
+		t.Fatalf("%d frames, want %d: %q", len(frames), len(want), frames)
+	}
+	for i, fr := range frames {
+		if !strings.HasPrefix(fr, want[i]) {
+			t.Errorf("frame %d is %q, want it to start %q", i, fr, want[i])
+		}
+	}
+
+	// A resize to fewer columns wraps again: the page still starts at its first line, and every
+	// line fits the new width.
+	sizes = [][2]int{{6, 40}, {6, 20}}
+	n = 0
+	w.Reset()
+	long := []string{strings.Repeat("a", 30), strings.Repeat("b", 30), "c"}
+	if err := pageOn(long, size, &scriptKeys{[]scriptStep{{0, evResize}, {'q', evKey}}}, &w); err != nil {
+		t.Fatal(err)
+	}
+	frames = strings.Split(w.String(), clearScreen)[1:]
+	if len(frames) != 2 || !strings.HasPrefix(frames[1], strings.Repeat("a", 20)+"\r\n"+strings.Repeat("a", 10)+"\r\n"+strings.Repeat("b", 20)) {
+		t.Errorf("after a resize to 20 columns the page is %q", frames)
+	}
+}
+
+// TestPageSignal: a signal ends the pager before it writes again.
+func TestPageSignal(t *testing.T) {
+	var w bytes.Buffer
+	keys := &scriptKeys{[]scriptStep{{'f', evKey}, {0, evSignal}, {'f', evKey}}}
+	err := pageOn([]string{"a", "b", "c", "d"}, func() (int, int) { return 3, 20 }, keys, &w)
+	if err != errSignalled || strings.Count(w.String(), clearScreen) != 2 {
+		t.Errorf("a signal: %v after %d frames; want errSignalled after 2", err, strings.Count(w.String(), clearScreen))
+	}
+}

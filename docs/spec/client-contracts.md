@@ -1436,10 +1436,20 @@ The review is served to any human `author`, not only the one who started the ing
 
 1. `import review` shows the review only when standard output is a terminal, through an
    in-process pager that writes nothing to disk. It is refused, with no override, when standard
-   output is not a terminal, and it has no `-o json`, `-o yaml`, save or export form.
+   output is not a terminal, and it has no `-o json`, `-o yaml`, save or export form. While it
+   shows the review it takes SIGINT, SIGTERM and SIGHUP from before the terminal goes raw until
+   the terminal is restored. On one it leaves the alternate screen, restores line mode, writes
+   nothing more, starts no marks prompt, and ends the process by that signal. A signal the
+   process inherited as ignored (`nohup`) stays ignored and is not taken. On a resize
+   (SIGWINCH) it reads the new size and shows the page that starts at the same line, wrapped to
+   it. A combining mark takes no column, so a wrap keeps it with the character before it; full
+   grapheme clusters, such as emoji joined by a zero-width joiner, are not kept whole.
 2. Before showing it, the CLI states that terminal scrollback, session recording and screen
    capture are outside its control.
-3. Marks come from the prompt or standard input. A refused mark is reported by its
+3. Marks come from the prompt or standard input. At the prompt a line ends at a line feed, a
+   carriage return or both, because Enter typed ahead while the pager had the terminal raw waits
+   in the queue as a carriage return; from standard input a line ends at a line feed, or a
+   carriage return and a line feed, and a lone carriage return stays in the mark. A refused mark is reported by its
    position only, as the server reports it, and a refusal can arrive two ways. A mark that is not
    a path at all is refused at once, `422 validation-failed` with a `position`
    (`internal/api/marks.go:42`). Every refusal compilation makes arrives after the `202`, as a
