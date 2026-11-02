@@ -86,6 +86,20 @@ func TestEntry(t *testing.T) {
 			}
 		})
 	}
+	t.Run("normal start without the epoch header shows no mode", func(t *testing.T) {
+		// The refusal is still told apart, but an entry answer with no Bronzeward-Epoch shows no
+		// start mode (§8.5).
+		f := &fake{epoch: "ep_BWSYNTH-1", beforeEntry: true, post: func(_ int, w http.ResponseWriter, _ *http.Request) {
+			w.Header().Del("Bronzeward-Epoch")
+			problemAnswer(w, http.StatusConflict, "conflict", "")
+		}}
+		c, _, _ := writeClient(t, f, "ep_BWSYNTH-1")
+		_, err := c.Send(entryWrite())
+		// GET /server, refused as a recovery start refuses it, showed "recovery" before the send.
+		if err == nil || !strings.Contains(err.Error(), "This server was started normally") || c.Context.StartMode != "recovery" {
+			t.Errorf("err %v, start mode %q; want the refusal and the mode the read before it showed", err, c.Context.StartMode)
+		}
+	})
 	t.Run("forbidden shows no mode", func(t *testing.T) {
 		// The 403 carries Bronzeward-Epoch, as one found at the role check does; GET /server showed a
 		// normal start, and the 403 does not make it a recovery start (§8.5 item 1).

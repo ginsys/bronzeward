@@ -107,6 +107,12 @@ func recoveryServer(t *testing.T, answers map[string]string, post string) func()
 		if cur := r.URL.Query().Get("cursor"); cur != "" {
 			key += "?cursor=" + cur
 		}
+		// An answer keyed with "?order=newest" is sent only to a request that asks for that order.
+		if o := r.URL.Query().Get("order"); o != "" {
+			if _, ok := answers[key+"?order="+o]; ok {
+				key += "?order=" + o
+			}
+		}
 		switch a, ok := answers[key]; {
 		case r.URL.Path == "/api/v1/server":
 			fmt.Fprintf(w, `{"version":"BWSYNTH","apiRevision":%d,"startMode":"recovery"}`, recoveryRevision)
@@ -239,6 +245,26 @@ func TestRecoveryStatus(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "mch_f") || strings.Contains(out.String(), "Every scope is released") {
 		t.Errorf("a normal scope was listed, or the exit offered with scopes not released:\n%s", out.String())
+	}
+}
+
+// TestRecoveryStatusReadsTheNewestMark: the timeline holds an old and a new restoration mark; the
+// server answers oldest first unless the request says order=newest, so dropping the order would
+// report the keys of the old mark.
+func TestRecoveryStatusReadsTheNewestMark(t *testing.T) {
+	recoveryServer(t, map[string]string{
+		"GET /api/v1/recovery": `{"epoch":"ep_BWSYNTH-1","recoveryMode":true,"scopes":[{"machine":"mch_c","state":"blocked"}]}`,
+		"GET /api/v1/machines/mch_c/timeline": `{"items":[{"kind":"scope-state","revision":3,"entry":{"to":"blocked","cause":"restoration-mark","missing":["old-key"]}},` +
+			`{"kind":"scope-state","revision":9,"entry":{"to":"blocked","cause":"restoration-mark","missing":["new-key"]}}]}`,
+		"GET /api/v1/machines/mch_c/timeline?order=newest": `{"items":[{"kind":"scope-state","revision":9,"entry":{"to":"blocked","cause":"restoration-mark","missing":["new-key"]}},` +
+			`{"kind":"scope-state","revision":3,"entry":{"to":"blocked","cause":"restoration-mark","missing":["old-key"]}}]}`,
+	}, "")
+	var out, errb bytes.Buffer
+	if code := run([]string{"recovery", "status"}, &out, &errb); code != 0 {
+		t.Fatalf("exit %d\n%s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "missing new-key") || strings.Contains(out.String(), "old-key") {
+		t.Errorf("status did not name the newest mark's keys alone:\n%s", out.String())
 	}
 }
 
@@ -387,6 +413,42 @@ func TestRecoveryTextIsEscaped(t *testing.T) {
 				t.Errorf("%v: %s is not shown as %q:\n%s", args, m, want, out.String())
 			}
 		}
+	}
+}
+
+// TestRecoveryStatusEscapesTheExitAndTheNextSteps: the exit row, the operation that holds an
+// unresolved scope and the keys a blocked scope misses come from reads after the first one; each
+// is shown escaped as its own value, a carriage return included.
+func TestRecoveryStatusEscapesTheExitAndTheNextSteps(t *testing.T) {
+	mk := func(n string) string { return n + "\x1b[2J\r\n\t\u0085\u202e\x7f" + n }
+	js := func(s string) string { b, _ := json.Marshal(s); return string(b) }
+	opID := "op_" + mk("OPID")
+	recoveryServer(t, map[string]string{
+		"GET /api/v1/recovery": `{"epoch":"ep_BWSYNTH-1","recoveryMode":true,"exit":{"at":"2026-11-01T09:00:00Z","exitedBy":` + js(mk("EXITBY")) + `,"act":` + js(mk("EXITACT")) + `},` +
+			`"scopes":[{"machine":"mch_b","state":"unresolved"},{"machine":"mch_c","state":"blocked"}]}`,
+		"GET /api/v1/operations":                           `{"items":[{"id":` + js(opID) + `,"kind":"apply-config","state":"unresolved"}]}`,
+		"GET /api/v1/operations/" + opID:                   `{"id":` + js(opID) + `,"kind":"apply-config","state":"unresolved"}`,
+		"GET /api/v1/machines/mch_c/timeline":              `{"items":[{"kind":"scope-state","revision":9,"entry":{"to":"blocked","cause":"restoration-mark","missing":[` + js(mk("KEY")) + `]}}]}`,
+		"GET /api/v1/machines/mch_c/timeline?order=newest": `{"items":[{"kind":"scope-state","revision":9,"entry":{"to":"blocked","cause":"restoration-mark","missing":[` + js(mk("KEY")) + `]}}]}`,
+	}, "")
+	var out, errb bytes.Buffer
+	if code := run([]string{"recovery", "status"}, &out, &errb); code != 0 {
+		t.Fatalf("exit %d\n%s", code, errb.String())
+	}
+	for _, s := range []string{out.String(), errb.String()} {
+		for _, r := range "\x1b\r\t\u0085\u202e\x7f" {
+			if strings.ContainsRune(s, r) {
+				t.Errorf("hostile %q reached the terminal raw:\n%q", r, s)
+			}
+		}
+	}
+	for _, m := range []string{"EXITBY", "EXITACT", "KEY"} {
+		if want := client.Printable(mk(m)); !strings.Contains(out.String(), want) {
+			t.Errorf("%s is not shown as %q:\n%s", m, want, out.String())
+		}
+	}
+	if want := client.Printable(opID); !strings.Contains(out.String(), "operation "+want+" holds it") {
+		t.Errorf("the operation is not shown as %q:\n%s", want, out.String())
 	}
 }
 

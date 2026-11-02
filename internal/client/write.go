@@ -281,7 +281,9 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 		}
 		switch {
 		case normal:
-			c.setStartMode("normal")
+			if a.epoch { // an entry answer without Bronzeward-Epoch shows no start mode (§8.5)
+				c.setStartMode("normal")
+			}
 			last = fmt.Errorf("%w\nThis server was started normally; only a server started for recovery serves the entry.", a.err)
 			return nil, c.after(ambiguous, w, u, last)
 		case w.Entry && code == "conflict":
