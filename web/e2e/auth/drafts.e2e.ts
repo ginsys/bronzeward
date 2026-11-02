@@ -628,6 +628,8 @@ describe("the draft editor (#339)", () => {
       await asg().$("button=Save").click();
       const refused = asg().$('[data-testid="write-result"]');
       await expect(refused).toHaveText(expect.stringContaining("validation-failed"), { wait: 30_000 });
+      // The rule the server states (updateAssignment), beside the path.
+      await expect(refused).toHaveText(expect.stringContaining("a name must have a head or be proposed by this draft, not removed by it"));
       await expect(asg().$('[data-testid="write-where"]')).toHaveText(`At ${where}.`);
       expect(await refused.getText()).not.toContain(revision);
       expect(await draftRevision()).toBe(before);
