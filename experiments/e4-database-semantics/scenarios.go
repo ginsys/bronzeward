@@ -74,7 +74,16 @@ type RaceOptions struct {
 	Rounds   int
 	Actor    string
 	Blind    bool
+	// RetryBusy retries a write that fails with a busy outcome until it commits or ctx ends,
+	// instead of counting it and giving up. Busy still counts every retry. A caller that sets it
+	// passes a ctx with a deadline: a write lock that is never released retries forever.
+	RetryBusy bool
+	// OnBusy, when set, is called for every busy outcome, from the writer's goroutine.
+	OnBusy func()
 }
+
+// raceRetryDelay is the pause before RaceRevisions retries a busy write under RetryBusy.
+const raceRetryDelay = 10 * time.Millisecond
 
 type RaceStats struct {
 	Wins, Conflicts, Busy int
@@ -100,11 +109,28 @@ func RaceRevisions(ctx context.Context, db *DB, opt RaceOptions) (RaceStats, err
 				rev, err := CurrentRevision(ctx, db, opt.Fragment)
 				read.Done()
 				<-start
-				won := false
-				if err == nil {
+				won, retries := false, 0
+				for err == nil {
 					won, err = UpdateFragment(ctx, db, opt.Fragment, fmt.Sprintf("%s/w%d", opt.Actor, w), rev, opt.Blind)
+					if Classify(err) != ClassBusy {
+						break
+					}
+					if opt.OnBusy != nil {
+						opt.OnBusy()
+					}
+					if !opt.RetryBusy {
+						break
+					}
+					retries++
+					select {
+					case <-ctx.Done():
+						err = ctx.Err()
+					case <-time.After(raceRetryDelay):
+						err = nil
+					}
 				}
 				mu.Lock()
+				st.Busy += retries
 				defer mu.Unlock()
 				switch {
 				case err == nil && won:
