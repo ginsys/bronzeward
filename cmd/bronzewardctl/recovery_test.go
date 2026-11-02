@@ -60,6 +60,20 @@ func TestRestoredFlag(t *testing.T) {
 	}
 }
 
+// TestRestoredFlagErrorUsesTheContractEncoding: a rejected component is shown as client-contracts
+// section 6 item 8 writes it: a tab as \x09, a backslash unchanged, a quote as \x22.
+func TestRestoredFlagErrorUsesTheContractEncoding(t *testing.T) {
+	recoveryServer(t, nil, "")
+	var out, errb bytes.Buffer
+	code := run([]string{"recovery", "enter", "--restored", "family=database,x\ty\\z\"", "--stopped-at", "2026-11-01T08:31:00Z", "--reason", "r"}, &out, &errb)
+	if code != 2 || !strings.Contains(errb.String(), `"x\x09y\z\x22": give family=<f>,backup=<id>,taken-at=<time>`) {
+		t.Errorf("exit %d; want 2 and the contract's encoding of the component:\n%s", code, errb.String())
+	}
+	if strings.ContainsAny(errb.String(), "\t") || strings.Contains(errb.String(), `\t`) || strings.Contains(errb.String(), `\\`) {
+		t.Errorf("a Go-quoted form reached the terminal:\n%q", errb.String())
+	}
+}
+
 // recoveryEpochHeader is the epoch every answer of recoveryServer carries; a test sets it with
 // setEpochHeader, before it starts the server.
 var recoveryEpochHeader = "ep_BWSYNTH-1"
@@ -375,8 +389,8 @@ func TestRecoveryTextIsEscaped(t *testing.T) {
 	setEpochHeader(t, epoch)
 	recoveryServer(t, map[string]string{
 		"GET /api/v1/recovery": `{"epoch":` + js(epoch) + `,"recoveryMode":true,"entry":{"enteredBy":` + js(mk("BY")) + `,"enteredAt":"2026-11-01T08:40:00Z","stoppedAt":"2026-11-01T08:31:00Z",` +
-			`"reason":` + js(mk("WHY")) + `,"restored":[{"family":"database","backup":` + js(mk("BACKUP")) + `,"takenAt":"2026-11-01T08:30:00Z"}]},"exit":null,` +
-			`"scopes":[{"machine":` + js("mch_"+mk("MACH")) + `,"state":"released"}]}`,
+			`"reason":` + js(mk("WHY")) + `,"restored":[{"family":` + js(mk("FAMILY")) + `,"backup":` + js(mk("BACKUP")) + `,"takenAt":"2026-11-01T08:30:00Z"}]},"exit":null,` +
+			`"scopes":[{"machine":` + js("mch_"+mk("MACH")) + `,"state":"released"},{"machine":"mch_s","state":` + js(mk("STATE")) + `}]}`,
 	}, `{"act":`+js(mk("ACT"))+`,"epoch":`+js(mk("NEWEPOCH"))+`,"previousEpoch":`+js(mk("PREV"))+`,"identity":`+js(mk("IDENT"))+`,"note":`+js(mk("NOTE"))+`,"deniedSubjectsListed":true,`+
 		`"machines":1,"operations":[`+js(mk("OP"))+`],"scopes":[`+js(mk("SCOPE"))+`]}`)
 	for _, c := range []struct {
@@ -385,7 +399,7 @@ func TestRecoveryTextIsEscaped(t *testing.T) {
 		shows string
 		marks []string
 	}{
-		{[]string{"recovery", "status"}, "", "Epoch", []string{"EPOCH", "BY", "WHY", "BACKUP", "MACH"}},
+		{[]string{"recovery", "status"}, "", "Epoch", []string{"EPOCH", "BY", "WHY", "FAMILY", "BACKUP", "MACH", "STATE"}},
 		{[]string{"recovery", "enter", "--restored", "family=database,backup=pg,taken-at=2026-11-01T08:30:00Z", "--stopped-at", "2026-11-01T08:31:00Z", "--reason", "r"}, "enter\n", "Recovery mode entered", []string{"ACT", "NEWEPOCH", "PREV", "OP"}},
 		{[]string{"recovery", "exit"}, "", "Recovery mode left", []string{"ACT", "NEWEPOCH", "SCOPE"}},
 		{[]string{"identity", "revoke", "--identity", "svc_x", "--reason", "r"}, "svc_x\n", "Revoked", []string{"IDENT", "ACT", "NOTE"}},
@@ -411,6 +425,19 @@ func TestRecoveryTextIsEscaped(t *testing.T) {
 			}
 			if !strings.Contains(out.String(), want) {
 				t.Errorf("%v: %s is not shown as %q:\n%s", args, m, want, out.String())
+			}
+		}
+		// The same command with -o json prints the answer, and no raw control character either.
+		var jout, jerr bytes.Buffer
+		withStdin(t, c.typed, func() { run(append([]string{"-o", "json"}, args...), &jout, &jerr) })
+		if !strings.Contains(jout.String(), `"epoch"`) && !strings.Contains(jout.String(), `"act"`) {
+			t.Fatalf("%v -o json: the answer was not shown:\n%s\n%s", args, jout.String(), jerr.String())
+		}
+		for _, s := range []string{jout.String(), jerr.String()} {
+			for _, r := range "\x1b\t\u0085\u202e\x7f" {
+				if strings.ContainsRune(s, r) {
+					t.Errorf("%v -o json: hostile %q reached the terminal raw:\n%q", args, r, s)
+				}
 			}
 		}
 	}

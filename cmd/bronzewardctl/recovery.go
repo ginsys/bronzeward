@@ -196,7 +196,7 @@ func (r *restoredFlag) Set(s string) error {
 			}
 			b.TakenAt = t
 		default:
-			return fmt.Errorf("%q: give family=<f>,backup=<id>,taken-at=<time>", kv)
+			return fmt.Errorf("\"%s\": give family=<f>,backup=<id>,taken-at=<time>", client.Quoted(kv))
 		}
 	}
 	if b.Family == "" || b.Backup == "" || b.TakenAt.IsZero() {
