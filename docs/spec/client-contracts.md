@@ -754,9 +754,11 @@ contract's, and this specification does not close it.
    is wanted depends on the route and the state, which a client cannot judge. The
    client reads the resource, reports what it shows, and lets the operator send the write again as
    a new one if it is still wanted.
-8. **Attempt bound.** Every request that a client sends has its own bound, except the event
-   stream of [§8.6](#86-event-resumption). The response headers must arrive within 30 s after
-   the request is sent. The whole attempt, which is the request, the headers and the complete
+8. **Attempt bound.** Every request that a client sends to the Bronzeward API has its own bound,
+   except the event stream of [§8.6](#86-event-resumption). This item does not cover a request to
+   the identity provider: the refresh-token request, for example, keeps the rule of
+   [§9.3](#93-browser-sign-in) item 3, and its late answer is still read. The response headers
+   must arrive within 30 s after the request is sent. The whole attempt, which is the request, the headers and the complete
    body, must end within 60 s. Each repeat of item 2 and each read of item 3 is a new attempt with
    a new bound. The CLI starts the header timer when it has written the whole request, as Go's
    `ResponseHeaderTimeout` does. The web client cannot see that moment, so it starts the timer
