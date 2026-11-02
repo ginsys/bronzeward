@@ -40,12 +40,21 @@ export function mint(human: string, flags: Record<string, string> = {}): string 
   return execFileSync(`${root}bin/oidc-fixture`, args).toString().trim();
 }
 
+// A case's start leaves the page an earlier case left, maybe with a write still open, without its
+// leave dialog. Firefox's navigation stops at that dialog, even with unhandledPromptBehavior
+// accepting it (wdio.conf.ts), so the next case would never start. A capturing listener on window
+// runs before the page's own (forms.tsx useUnloadGuard) and stops it. The guard keeps its own cases.
+async function leaveUnasked(): Promise<void> {
+  await browser.execute(() => addEventListener("beforeunload", (e) => e.stopImmediatePropagation(), { capture: true })).catch(() => {});
+}
+
 // Signs the fixture page in: the synthetic provider hands out the token the issuer mints with flags,
 // and the injector applies the faults.
 export async function fixtureSignIn(human: string, flags: Record<string, string> = {}, f: Faults = {}): Promise<string> {
   const q = new URLSearchParams({ human, ...flags });
   expect((await fetch(`${CONTROL}/next?${q}`)).ok).toBe(true);
   await faults(f);
+  await leaveUnasked();
   await browser.url(`${FIXTURE_PAGE}/`);
   return settled(FIXTURE_PAGE);
 }
