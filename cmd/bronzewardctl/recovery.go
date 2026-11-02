@@ -32,7 +32,7 @@ func (e *env) recoveryStatus(args []string) error {
 	if _, err := e.parse("recovery status", args, 0, nil); err != nil {
 		return err
 	}
-	return e.session(func(c *client.Client, _ *client.Response, _ *apitypes.ServerBody) error {
+	return e.session(func(c *client.Client, _ *client.Response, srv *apitypes.ServerBody) error {
 		r, err := c.Get("/recovery")
 		if err != nil {
 			return err
@@ -53,7 +53,7 @@ func (e *env) recoveryStatus(args []string) error {
 			if e.output == "json" || e.output == "yaml" {
 				continue // those formats print the answer as it came and need no next step
 			}
-			rows = append(rows, client.Printable(s.Machine)+"\t"+client.Printable(string(s.State))+"\t"+nextStep(c, s))
+			rows = append(rows, client.Printable(s.Machine)+"\t"+client.Printable(string(s.State))+"\t"+nextStep(c, s, srv.ApiRevision))
 		}
 		if now := c.Context.LastEpoch; now != "" && now != rec.Epoch {
 			// A next-step read saw a new entry: the snapshot above is stale and could advise a release
@@ -91,7 +91,7 @@ func (e *env) recoveryStatus(args []string) error {
 // nextStep is T31's next step for a scope in state s.State, with the reads it needs: the holding
 // operation of an unresolved scope, and the last mark of a blocked one. A failed read names the
 // command that shows it.
-func nextStep(c *client.Client, s apitypes.RecoveryScope) string {
+func nextStep(c *client.Client, s apitypes.RecoveryScope, revision int) string {
 	m := client.ShellWord(s.Machine)
 	switch s.State {
 	case "pre-restore-unaccounted":
@@ -116,6 +116,11 @@ func nextStep(c *client.Client, s apitypes.RecoveryScope) string {
 		}
 		return "operation " + client.Printable(op.Id) + " holds it, with no attempt: recovery resolve " + client.ShellWord(op.Id)
 	case "blocked":
+		// A revision 2 server refuses order on the timeline (client-contracts section 8.6 item 6), so
+		// the request is not sent to it (section 7 item 1).
+		if revision < 3 {
+			return "the missing keys need API revision 3; see machine timeline " + m + ", then recovery mark " + m
+		}
 		// Newest first, page by page, until the scope's latest move to blocked: later observations can
 		// push it past the first page. A bound on the pages ends in the command that shows the history.
 		path, cursor := "/machines/"+url.PathEscape(s.Machine)+"/timeline?order=newest&limit=100", ""
@@ -126,11 +131,6 @@ func nextStep(c *client.Client, s apitypes.RecoveryScope) string {
 				entries, err = decode[apitypes.TimelineEntry](c, pg.Items...)
 			}
 			if err != nil {
-				var p *client.Problem
-				if errors.As(err, &p) && p.Code() == "invalid-request" {
-					// An API revision 2 server refuses order (client-contracts section 8.6 item 6).
-					return "the missing keys need API revision 3; see machine timeline " + m + ", then recovery mark " + m
-				}
 				return "see machine timeline " + m + ", then recovery mark " + m
 			}
 			for _, t := range entries {
