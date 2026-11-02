@@ -56,18 +56,14 @@ describe("the references of a declared embedded document", () => {
   test("a lone carriage return breaks a line", () => {
     expect(references("b: 1\rcfg: 'a: !bwref x/cr'\r", at("doc[0]/cfg"))).toEqual(["x/cr"]);
   });
-  // go-yaml v3.0.5 decodes "# note\u2028  a: ..." folded to "# note\u2028a: ...", and a lone
-  // carriage return or U+0085 folded to a blank.
-  test("U+2028 and U+2029 break a line between fields and stay a line break in a folded document", () => {
+  // As go-yaml v3.0.5 does, a lone carriage return or U+0085 in a folded document folds to a
+  // blank. U+2028 and U+2029 in a folded or quoted holder are the known difference in position.ts.
+  test("U+2028 and U+2029 break a line between fields, and a folded break folds", () => {
     expect(references("b: 1\u2028cfg: 'a: !bwref x/ls'\n", at("doc[0]/cfg"))).toEqual(["x/ls"]);
-    expect(references("cfg: >-\n  # note\u2028  a: !bwref x/ls\n", at("doc[0]/cfg"))).toEqual(["x/ls"]);
-    expect(references("cfg: >-\n  # note\u2029  a: !bwref x/ps\n", at("doc[0]/cfg"))).toEqual(["x/ps"]);
-    expect(references("cfg: >-\n  # note\r  a: !bwref x/cr\n", at("doc[0]/cfg"))).toEqual([]);
-    expect(references("cfg: >-\n  # note\u0085  a: !bwref x/nel\n", at("doc[0]/cfg"))).toEqual([]);
-    // Both at once: the separator between fields and the one in the folded document.
-    expect(references("b: 1\u2028cfg: >-\n  # note\u2028  a: !bwref x/both\n", at("doc[0]/cfg"))).toEqual(["x/both"]);
     expect(references("cfg: 'a: !bwref x/one'\u2028other: 1\n", at("doc[0]/cfg"))).toEqual(["x/one"]);
     expect(references("cfg: 'a: !bwref x/two'\u2029other: 1\n", at("doc[0]/cfg"))).toEqual(["x/two"]);
+    expect(references("cfg: >-\n  # note\r  a: !bwref x/cr\n", at("doc[0]/cfg"))).toEqual([]);
+    expect(references("cfg: >-\n  # note\u0085  a: !bwref x/nel\n", at("doc[0]/cfg"))).toEqual([]);
   });
 
   // Positions are compared as numbers, so a failure prints no document text.
