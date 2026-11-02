@@ -30,6 +30,8 @@ type importFake struct {
 	pagesGone  bool   // the event pages are refused
 	others     int    // generations other clients take before a continuation or takeover lands
 	mode       string // the staging mode, encrypted when empty
+	cut        int    // the next stream ends after this many events, with no keep-alive
+	noStream   bool   // the server answers the event stream with the JSON pages
 }
 
 const ingAccepted = `{"ingestion":"ing_BWSYNTH","operation":"op_BWSYNTH-ing"}`
@@ -90,12 +92,18 @@ func (f *importFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, f.ingestion())
 	case route == "GET /ingestions":
 		fmt.Fprintf(w, `{"items":[%s]}`, f.ingestion())
-	case path == "/operations/op_BWSYNTH-ing/events" && r.Header.Get("Accept") == "text/event-stream":
+	case path == "/operations/op_BWSYNTH-ing/events" && r.Header.Get("Accept") == "text/event-stream" && !f.noStream:
 		w.Header().Set("Content-Type", "text/event-stream")
-		for i, e := range f.events {
+		events, cut := f.events, f.cut > 0
+		if cut {
+			events, f.cut = events[:f.cut], 0
+		}
+		for i, e := range events {
 			fmt.Fprintf(w, "id: ep_BWSYNTH-1:%d\nevent: %s\ndata: %s\n\n", i+1, e[0], e[1])
 		}
-		fmt.Fprint(w, ": keep-alive\n\n")
+		if !cut {
+			fmt.Fprint(w, ": keep-alive\n\n")
+		}
 	case path == "/operations/op_BWSYNTH-ing/events" && f.pagesGone:
 		w.Header().Set("Content-Type", "application/problem+json")
 		w.WriteHeader(http.StatusForbidden)
@@ -237,6 +245,13 @@ func TestImportLifecycle(t *testing.T) {
 		ev("paused", `{"type":"paused","generation":1}`), ev("continued", `{"type":"continued","generation":2}`), ev("resume-failed", `{"type":"resume-failed","code":"dependency-unavailable"}`))
 	step("a replayed continuation whose lease lapsed since still ends at its resume-failed", []string{"import", "continue", "ing_BWSYNTH"}, 1,
 		"", "was not applied: its staged input could not be decrypted (resume-failed, dependency-unavailable)", `POST /ingestions/ing_BWSYNTH/continuations if-match= body={}`)
+	f.cut = 2
+	step("a stream cut before the resume-failed reconnects for it before the lapsed lease decides", []string{"import", "continue", "ing_BWSYNTH"}, 1,
+		"", "was not applied: its staged input could not be decrypted (resume-failed, dependency-unavailable)", `POST /ingestions/ing_BWSYNTH/continuations if-match= body={}`)
+	f.noStream = true
+	step("the JSON pages are read for the resume-failed before the lapsed lease decides", []string{"import", "continue", "ing_BWSYNTH"}, 1,
+		"", "was not applied: its staged input could not be decrypted (resume-failed, dependency-unavailable)", `POST /ingestions/ing_BWSYNTH/continuations if-match= body={}`)
+	f.noStream = false
 	f.set("paused", 3, -time.Minute, "running", "", "", ev("taken-over", `{"type":"taken-over","generation":3}`), ev("paused", `{"type":"paused","generation":3}`))
 	step("a replayed takeover already paused ends at its pause", []string{"import", "takeover", "ing_BWSYNTH"}, 0, "Paused for review (generation 3,", "",
 		`POST /ingestions/ing_BWSYNTH/takeovers if-match= body={}`)
