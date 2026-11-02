@@ -38,9 +38,11 @@ export async function spotOfPath(text: string, path: string): Promise<Spot | und
 // blanked first, keeping every offset, so a match can cross a line without reading one. The whole
 // scalar after the tag is read and decoded, then held to the server's grammar: a scalar followed
 // by a colon and a blank is a key, never the tag's value, and one with other characters names no
-// reference. A scalar written over several lines names none here either: a quoted one is read on
-// one line, and a plain one followed by a more indented line is skipped, never cut short.
+// reference. A scalar written over several lines is read whole: a double-quoted one decodes an
+// escaped line break to nothing (ginsys/bronzeward#534 C7), and a line break YAML folds into a
+// blank names nothing. A plain one followed by a more indented line is skipped, never cut short.
 const NAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\/[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/;
+const MARKER = /^(?:---|\.\.\.)(?:\s|$)/;
 function tags(text: string): { index: number; tag: string; name: string }[] {
   let masked = "";
   for (const line of text.split("\n")) {
@@ -50,52 +52,108 @@ function tags(text: string): { index: number; tag: string; name: string }[] {
   const found: { index: number; tag: string; name: string }[] = [];
   // A plain scalar's words: no blank, flow indicator, or colon before a blank; blanks between words.
   const word = String.raw`(?:[^\s,[\]{}:]|:(?=[^\s,[\]{}]))+`;
-  for (const m of masked.matchAll(new RegExp(String.raw`!bwref\s+(?:"((?:[^"\\\n]|\\.)*)"|'((?:[^'\n]|'')*)'|(${word}(?:[ \t]+${word})*))`, "g"))) {
-    const end = m.index + m[0].length;
-    if (/^[ \t]*:(?:\s|$)/.test(masked.slice(end))) continue;
-    if (m[3] !== undefined && continues(masked, m.index, end)) continue;
-    const name = m[1] !== undefined ? decoded(m[1]) : m[2] !== undefined ? m[2].replaceAll("''", "'") : m[3];
+  // A block scalar's header ends its line: | or >, then its chomping and indentation indicators.
+  const header = String.raw`([|>][-+1-9]{0,2})(?=[ \t]*\n)`;
+  const key = /[ \t]*:(?:\s|$)/y;
+  for (const m of masked.matchAll(new RegExp(String.raw`!bwref\s+(?:"((?:[^"\\]|\\[^])*)"|'((?:[^'\n]|'')*)'|${header}|(${word}(?:[ \t]+${word})*))`, "g"))) {
+    let end = m.index + m[0].length;
+    key.lastIndex = end;
+    if (key.test(masked)) continue;
+    let name: string | undefined;
+    if (m[3] !== undefined) {
+      const b = block(text, masked, m.index, end, m[3]);
+      if (b === undefined) continue;
+      ({ name, end } = b);
+    } else if (m[4] !== undefined) {
+      if (continues(masked, m.index, end)) continue;
+      name = m[4];
+    } else name = m[1] !== undefined ? decoded(m[1]) : m[2]!.replaceAll("''", "'");
     if (name !== undefined && NAME.test(name)) found.push({ index: m.index, tag: text.slice(m.index, end), name });
   }
   return found;
 }
 
+const indent = (line: string) => line.length - line.trimStart().length;
+// The line that starts at `start`, without its line break.
+function lineAt(s: string, start: number): string {
+  const end = s.indexOf("\n", start);
+  return s.slice(start, end === -1 ? undefined : end);
+}
+// The first line at or after `start` that holds text. Each scan stops there, so the scan per tag
+// does not read the rest of the document (ginsys/bronzeward#534 N3).
+function nextLine(s: string, start: number): string | undefined {
+  for (let at = start; at < s.length; ) {
+    const l = lineAt(s, at);
+    if (l.trim() !== "") return l;
+    at += l.length + 1;
+  }
+  return undefined;
+}
+
+// The indentation of the node that holds the scalar tagged at `tag`: the key or entry on the tag's
+// line. A tag that starts its line is the value of the nearest line above that is less indented,
+// so the next line may continue it at the tag's own indentation; -1 if no line is above.
+function holder(masked: string, tag: number): number {
+  const start = masked.lastIndexOf("\n", tag) + 1;
+  const own = indent(lineAt(masked, start));
+  if (masked.slice(start, tag).trim() !== "") return own;
+  for (let e = start - 1; e >= 0; ) {
+    const s = e === 0 ? 0 : masked.lastIndexOf("\n", e - 1) + 1;
+    const l = masked.slice(s, e);
+    if (l.trim() !== "" && indent(l) < own) return indent(l);
+    e = s - 1;
+  }
+  return -1;
+}
+
 // Whether a plain scalar ending at `end` goes on to the next line: it ends its line, and the next
 // line with text is more indented than the node that holds the scalar and is no key, sequence
 // entry or flow indicator. A plain scalar holds no colon before a blank, so a line with one is a
-// key. The holder is the key or entry on the tag's line; a tag that starts its line is the value
-// of the nearest line above that is less indented, so the next line may continue it at the tag's
-// own indentation.
+// key.
 function continues(masked: string, tag: number, end: number): boolean {
   const eol = masked.indexOf("\n", end);
-  if (masked.slice(end, eol).trim() !== "") return false;
-  const indent = (line: string) => line.length - line.trimStart().length;
-  const start = masked.lastIndexOf("\n", tag) + 1;
-  const own = indent(masked.slice(start, masked.indexOf("\n", start)));
-  let holder = own;
-  if (masked.slice(start, tag).trim() === "") {
-    const above = masked.slice(0, start).split("\n").reverse().find((l) => l.trim() !== "" && indent(l) < own);
-    holder = above === undefined ? -1 : indent(above);
-  }
-  const next = masked.slice(eol + 1).split("\n").find((l) => l.trim() !== "");
+  if (eol === -1 || masked.slice(end, eol).trim() !== "") return false;
+  const next = nextLine(masked, eol + 1);
   // A document marker (--- or ...) ends every scalar, also a top-level one.
-  if (next === undefined || indent(next) <= holder || /^(?:---|\.\.\.)(?:\s|$)/.test(next)) return false;
+  if (next === undefined || indent(next) <= holder(masked, tag) || MARKER.test(next)) return false;
   const t = next.trim();
   return !/^(?:[,\]}]|[-?](?:\s|$))/.test(t) && !/:(?:\s|$)/.test(t);
 }
 
+// A block scalar's name and where it ends (YAML 1.2 §8.1, ginsys/bronzeward#534 C7). It names a
+// reference only with strip chomping (-), which ends it with no line break, and with one content
+// line, so none is inside it. That line is more indented than the node that holds the scalar, and
+// its indentation is the content's. The lines are read from the text: a # in them is no comment.
+// With an indentation indicator the content's indentation depends on the holding node's column,
+// which this scan does not read: such a scalar names nothing here, and the server still checks it.
+function block(text: string, masked: string, tag: number, end: number, header: string): { name: string; end: number } | undefined {
+  if (!header.includes("-") || /\d/.test(header)) return undefined;
+  const start = text.indexOf("\n", end) + 1;
+  const first = lineAt(text, start);
+  if (first.trim() === "" || indent(first) <= holder(masked, tag)) return undefined;
+  const after = start + first.length;
+  const next = nextLine(text, after + 1);
+  if (next !== undefined && indent(next) >= indent(first) && !MARKER.test(next)) return undefined;
+  return { name: first.slice(indent(first)), end: after };
+}
+
 // A double-quoted scalar's text with YAML's escapes decoded (YAML 1.2 §5.7); undefined for an
-// escape YAML does not have.
+// escape YAML does not have. An escaped line break and the next line's leading blanks are dropped;
+// an unescaped one folds into a blank or a line break, which no name holds.
 const ESCAPES: Record<string, string> = { "0": "\0", a: "\x07", b: "\b", t: "\t", "\t": "\t", n: "\n", v: "\v", f: "\f", r: "\r", e: "\x1b", " ": " ", '"': '"', "/": "/", "\\": "\\", N: "\x85", _: "\xa0", L: " ", P: " " };
 const HEX: Record<string, number> = { x: 2, u: 4, U: 8 };
 function decoded(body: string): string | undefined {
   let out = "";
   for (let i = 0; i < body.length; i++) {
     if (body[i] !== "\\") {
-      out += body[i];
+      out += body[i] === "\n" ? " " : body[i];
       continue;
     }
     const k = body[++i] ?? "";
+    if (k === "\n") {
+      while (body[i + 1] === " " || body[i + 1] === "\t") i++;
+      continue;
+    }
     const n = HEX[k];
     if (n === undefined) {
       if (!Object.hasOwn(ESCAPES, k)) return undefined;

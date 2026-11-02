@@ -3,7 +3,7 @@ import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { components } from "./api/v1";
-import { change, type Clash, createdId, declaredOf, DiscardRefused, NOT_DISCARDED, doneOnce, type Editor, type EditorEvent, editor, EMPTY, FragmentPane, forgetETag, type Held, holdsUnsaved, inUse, keepETag, keepOnDone, keptETag, LAYERS, lastGood, markLine, mayDrop, mayRevert, maySend, NOT_RENDERED, NOT_REVERTED, NOT_SENT_CONFLICT, NOT_SENT_UNREAD, NOT_SENT_UNSHOWN, paneEntry, rows, selection, sendRefusal, settledFragment, spotOfMark, unread, where } from "./drafts.tsx";
+import { change, type Clash, createdId, declaredOf, DiscardRefused, NOT_DISCARDED, doneOnce, type Editor, type EditorEvent, editor, EMPTY, FragmentPane, forgetETag, type Held, holdsUnsaved, inUse, keepETag, keepOnDone, keptETag, LAYERS, lastGood, markLine, mayDrop, mayRevert, maySend, NOT_RENDERED, NOT_REVERTED, NOT_SENT_CONFLICT, NOT_SENT_UNREAD, NOT_SENT_UNSHOWN, paneEntry, rows, selection, sendRefusal, settledFragment, spotOfMark, unread, watchWrites, where } from "./drafts.tsx";
 import { leaving, signingOut, startsNew, unsaved, WritesProvider } from "./forms.tsx";
 import { type Load, type Reads, ReadsProvider } from "./list.tsx";
 import { references, spotOfLine, spotOfPath, spotOfReference } from "./position.ts";
@@ -132,6 +132,31 @@ describe("[Go to field] positions (B13)", () => {
     expect(references("a: [!bwref x/one,\n   !bwref x/two\n   ]\n")).toEqual(["x/one", "x/two"]);
   });
 
+  test("ginsys/bronzeward#534 C7: a strip-chomped block scalar and a double-quoted name with an escaped line break are references", () => {
+    const text = 'a: !bwref |-\n  x/foo\nb: !bwref >-\n  x/folded\n\nc: !bwref "x/\\\n   esc"\n- !bwref |-\n  x/seq\nd:\n# c\n  !bwref |-\n    x/deep\n';
+    expect(references(text)).toEqual(["x/foo", "x/folded", "x/esc", "x/seq", "x/deep"]);
+    const s = spotOfReference(text, "x/foo");
+    expect(text.slice(s!.start, s!.end)).toBe("!bwref |-\n  x/foo");
+    const e = spotOfReference(text, "x/esc");
+    expect(text.slice(e!.start, e!.end)).toBe('!bwref "x/\\\n   esc"');
+    expect(references("!bwref |-\nx/root\n...\n")).toEqual(["x/root"]);
+    // Each of these decodes to a value with a line break or a blank, or to nothing (checked against
+    // the yaml package): no name.
+    for (const none of [
+      "a: !bwref |\n  x/foo\n", // clip chomping keeps the final line break
+      "a: !bwref |+\n  x/foo\n",
+      "a: !bwref |-\n  x/foo\n  x/bar\n", // two content lines
+      "a: !bwref |-\n\n  x/foo\n", // a leading empty line
+      "a: !bwref |-\n  x/foo # c\n", // a # inside a block scalar is text
+      "a: !bwref |-\nx/foo\n", // not more indented than its key: no content
+      "a: !bwref |-\n", // no content at all
+      'a: !bwref "x/\n  foo"\n', // an unescaped line break folds into a blank
+      "a: !bwref |2-\n  x/foo\n", // an indentation indicator is not read here
+    ]) expect(references(none)).toEqual([]);
+    // A tag that starts the document's second line, under an empty first one, is still read.
+    expect(references("\n  !bwref x/a\n")).toEqual(["x/a"]);
+  });
+
   test("a flow list's reference ends at its comma, and a comment's text is no reference", () => {
     const text = "a: [!bwref ghost, !bwref x/two]\n# !bwref commented\nb: c # !bwref trailing\nd: '# not a comment' # !bwref after-quote\n";
     expect(references(text)).toEqual(["ghost", "x/two"]);
@@ -256,14 +281,16 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     ["a draft read before Show their change compares nothing new", { held: M, saved: A, conflict: refused(M, 7) }, { kind: "draft", revision: 8, changed: true }, { held: M, saved: A, conflict: refused(M, 7) }],
     ["R3-F2: a reconnect's revision read during a 412 keeps the typed text", { held: M, saved: A, conflict: refused(M, 7) }, { kind: "read", text: T, since: 0 }, { held: M, saved: T, conflict: refused(M, 7) }],
     ["Show their change asks for their text", { held: M, saved: A, conflict: refused(M, 7) }, { kind: "show" }, { held: M, saved: A, conflict: asked(M) }],
-    ["a second Show while asked asks nothing more", { held: M, saved: A, conflict: asked(M) }, { kind: "show" }, { held: M, saved: A, conflict: asked(M) }],
+    ["ginsys/bronzeward#534 N1: a second Show while asked marks its draft read pending", { held: M, saved: A, conflict: asked(M) }, { kind: "show" }, { held: M, saved: A, conflict: { ...asked(M), again: true } }],
+    ["N1: a revision read before the repeated Show's draft read shows their text, with Copy waiting", { held: M, saved: A, conflict: { ...awaiting(M), again: true } }, { kind: "read", text: T, since: 0 }, { held: T, saved: T, conflict: { ...theirs(M), awaits: true } }],
+    ["N1: the repeated Show's draft read ends that mark, and the revision read is still awaited", { held: M, saved: A, conflict: { ...awaiting(M), again: true } }, { kind: "draft", revision: 8, changed: false }, { held: M, saved: A, conflict: awaiting(M) }],
     ["boundary, R4-1: text typed while the asked read is pending is the operator's text", { held: M, saved: A, conflict: asked(M) }, { kind: "type", held: M2 }, { held: M2, saved: A, conflict: asked(M2) }],
     ["boundary, R4-1: Show with no change to this fragment shows its stored text, the operator's aside", { held: M, saved: A, conflict: asked(M) }, { kind: "draft", revision: 8, changed: false }, { held: A, saved: A, conflict: theirs(M) }],
     ["Show with this fragment changed waits for its revision read", { held: M, saved: A, conflict: asked(M) }, { kind: "draft", revision: 8, changed: true }, { held: M, saved: A, conflict: awaiting(M) }],
     ["H7: Show with this fragment removed shows the removal, the operator's text aside", { held: M, saved: A, conflict: asked(M) }, { kind: "draft", revision: 8, changed: false, removed: true }, { held: EMPTY, saved: EMPTY, conflict: theirs(M) }],
     ["H7: a removal while a revision read is awaited shows the removal and ends the wait", { held: M, saved: A, conflict: awaiting(M) }, { kind: "draft", revision: 9, changed: false, removed: true }, { held: EMPTY, saved: EMPTY, conflict: theirs(M, 9) }],
     ["L1: a draft read with no change while a revision read is awaited keeps waiting", { held: A, saved: A, conflict: awaiting(A) }, { kind: "draft", revision: 8, changed: false }, { held: A, saved: A, conflict: awaiting(A) }],
-    ["the asked revision read shows their text, the operator's aside", { held: M2, saved: A, conflict: asked(M2, 8) }, { kind: "read", text: T, since: 0 }, { held: T, saved: T, conflict: theirs(M2) }],
+    ["N1: the asked revision read before Show's draft read shows their text, the operator's aside, Copy waiting", { held: M2, saved: A, conflict: asked(M2, 8) }, { kind: "read", text: T, since: 0 }, { held: T, saved: T, conflict: { ...theirs(M2), awaits: true } }],
     ["the awaited revision read shows their text and ends the wait", { held: M2, saved: A, conflict: awaiting(M2) }, { kind: "read", text: T, since: 0 }, { held: T, saved: T, conflict: theirs(M2) }],
     ["R3-F1: a Show once their text shows keeps the operator's text", { held: T, saved: T, conflict: theirs(M) }, { kind: "show" }, { held: T, saved: T, conflict: { ...theirs(M), awaits: true } }],
     ["PR review: Copy my text while a revision read is pending changes nothing", { held: T, saved: T, conflict: theirs(M), reading: true }, { kind: "copy" }, { held: T, saved: T, conflict: theirs(M), reading: true }],
@@ -275,11 +302,16 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     ["boundary: Copy my text puts the operator's text back and ends the conflict", { held: T2, saved: T, conflict: theirs(M) }, { kind: "copy" }, { held: M, saved: T }],
     ["R7-1: Copy my text before their text shows changes nothing", { held: M, saved: A, conflict: asked(M, 8) }, { kind: "copy" }, { held: M, saved: A, conflict: asked(M, 8) }],
     ["Copy my text without a conflict changes nothing", { held: M, saved: A }, { kind: "copy" }, { held: M, saved: A }],
-    ["R1-F2: a revision read keeps text typed since the last save", { held: M, saved: A }, { kind: "read", text: T, since: 0 }, { held: M, saved: T }],
+    ["#534 C2: a revision read with another text while text is typed shows theirs, the typed text aside", { held: M, saved: A }, { kind: "read", text: T, since: 0, revision: 8 }, { held: T, saved: T, conflict: theirs(M) }],
+    ["R1-F2: a revision read of the saved text keeps text typed since, marks aside", { held: M2, saved: { ...M, marks: "doc[0]/a" } }, { kind: "read", text: M, since: 0 }, { held: M2, saved: M }],
+    ["#534 C3: another author's removal empties a clean editor", { held: A, saved: A }, { kind: "draft", revision: 8, changed: false, removed: true }, { held: EMPTY, saved: EMPTY }],
+    ["#534 C3: another author's removal keeps typed text aside", { held: M, saved: A }, { kind: "draft", revision: 8, changed: false, removed: true }, { held: EMPTY, saved: EMPTY, conflict: theirs(M) }],
+    ["H8: the pane's own done Remove keeps its text when the draft read shows the removal", { held: M, saved: EMPTY }, { kind: "draft", revision: 8, changed: false, removed: true }, { held: M, saved: EMPTY }],
     ["a revision read replaces text nothing was typed into", { held: A, saved: A }, { kind: "read", text: T, since: 0 }, { held: T, saved: T }],
     // Save, sweep (a): the operator types while it is in flight.
     ["a Save records the text it sends, and whether their text shows", { held: M, saved: A, conflict: theirs(M2) }, { kind: "send" }, { held: M, saved: A, conflict: theirs(M2), sent: sentOf(M, true) }],
     ["H8: a Remove records that it removes the text", { held: M, saved: A }, { kind: "send", removes: true }, { held: M, saved: A, sent: { text: M, whileTheirs: false, removes: true } }],
+    ["#534 N2: a done Remove while their text shows keeps the operator's text aside for Copy", { held: T, saved: T, conflict: theirs(M), sent: { text: T, whileTheirs: true, removes: true } }, { kind: "done" }, { held: T, saved: EMPTY, conflict: theirs(M), sent: { text: T, whileTheirs: true, removes: true }, writes: 1 }],
     ["H8: a done Remove saves the removal, so the text still shown stays unsaved", { held: M, saved: A, sent: { text: M, whileTheirs: false, removes: true } }, { kind: "done" }, { held: M, saved: EMPTY, sent: { text: M, whileTheirs: false, removes: true }, writes: 1 }],
     ["R2-F1: a done write marks the text it sent saved, not the text typed since", { held: M2, saved: A, sent: sentOf(M) }, { kind: "done" }, { held: M2, saved: M, sent: sentOf(M), writes: 1 }],
     ["a Save sent while their text shows ends the conflict when done: the operator chose that text", { held: T2, saved: T, conflict: theirs(M), sent: sentOf(T2, true) }, { kind: "done" }, { held: T2, saved: T2, sent: sentOf(T2, true), writes: 1 }],
@@ -399,7 +431,7 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     expect(src).toMatch(/const waits = unread\(entry\?\.revision, loaded\);/);
     // #517 review round 3: a read with text records its revision, and a draft read again retries
     // a failed one; without either the pane never edits, or stays waiting after Show.
-    expect(src).toMatch(/setLoaded\(revision\);\n\s*act\(\{ kind: "read", text: fromRevision\(r\.data\), since: done \}\);/);
+    expect(src).toMatch(/setLoaded\(revision\);\n\s*act\(\{ kind: "read", text: fromRevision\(r\.data\), since: done, revision: draft\.revision \}\);/);
     expect(src).toMatch(/act\(\{ kind: "draft", revision: draft\.revision, changed[^\n]*\n\s*if \(!changed && failed\) retry\(\(x\) => x \+ 1\);/);
     // PR review: also when the page keeps the data it read before (a failed read with no answer).
     expect(src).toMatch(/\{unshown && item\.kind !== "loading" && <p><button [^>]*onClick=\{\(\) => reread\(\(x\) => x \+ 1\)\}>\{READ_DRAFT_AGAIN\}/);
@@ -497,6 +529,53 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     expect(s.held).toBe(M);
     expect(s.note).toBe(NOT_REVERTED);
   });
+
+  // A Discard's Show their change adopts the new ETag with no fragment 412 (H15): the pane's next
+  // reads must show what changed before any Save or Remove sends.
+  test("ginsys/bronzeward#534 C2: text typed during a Discard's Show their change is kept aside, and their revision shows", () => {
+    const s = run({ held: A, saved: A }, [{ kind: "type", held: M }, { kind: "draft", revision: 8, changed: true }, { kind: "reading", on: true }, { kind: "read", text: T, since: 0, revision: 8 }]);
+    expect(rest(s)).toEqual({ held: T, saved: T, conflict: theirs(M) });
+    expect(holdsUnsaved(s.held, s.saved, s.conflict?.mine)).toBe(true);
+    // Save now sends the text that shows; Copy my text gives back the typed text.
+    expect(sendRefusal(false, s.conflict, true)).toBeUndefined();
+    expect(editor(s, { kind: "copy" }).held).toBe(M);
+  });
+
+  test("ginsys/bronzeward#534 C3: another author's removal read by a Discard's Show their change shows before any Save", () => {
+    const clean = run({ held: A, saved: A }, [{ kind: "draft", revision: 8, changed: false, removed: true }]);
+    expect(rest(clean)).toEqual({ held: EMPTY, saved: EMPTY });
+    const typed = run({ held: A, saved: A }, [{ kind: "type", held: M }, { kind: "draft", revision: 8, changed: false, removed: true }]);
+    expect(rest(typed)).toEqual({ held: EMPTY, saved: EMPTY, conflict: theirs(M) });
+    // The pane's own Remove saves the removal, and the text it shows stays (H8).
+    const own = run({ held: A, saved: A }, [{ kind: "send", removes: true }, { kind: "done" }, { kind: "draft", revision: 8, changed: false, removed: true }]);
+    expect(own.held).toBe(A);
+    expect(own.conflict).toBeUndefined();
+  });
+
+  test("ginsys/bronzeward#534 N1: Show clicked again while asked holds Copy until its draft read answers, also when a revision read answers first", () => {
+    const asked8 = run({ held: A, saved: A }, [{ kind: "refused" }, { kind: "at", revision: 7 }, { kind: "show" }, { kind: "draft", revision: 8, changed: true }]);
+    const early = run(asked8, [{ kind: "show" }, { kind: "reading", on: true }, { kind: "read", text: T, since: 0 }]);
+    expect(early.conflict?.awaits).toBe(true);
+    expect(rest(editor(early, { kind: "copy" }))).toEqual(rest(early));
+    // That draft read names revision 9: Copy waits for its read.
+    const named = run(early, [{ kind: "reading", on: true }, { kind: "draft", revision: 9, changed: true }]);
+    expect(rest(editor(named, { kind: "copy" }))).toEqual(rest(named));
+    const newer = run(named, [{ kind: "read", text: T2, since: 0 }]);
+    expect(rest(newer)).toEqual({ held: T2, saved: T2, conflict: theirs(A, 9) });
+    expect(editor(newer, { kind: "copy" }).held).toBe(A);
+  });
+
+  test("ginsys/bronzeward#534 N2: a Remove after Show their change keeps the operator's text for Copy my text", () => {
+    const s = run({ held: M, saved: A }, [{ kind: "refused" }, { kind: "at", revision: 7 }, { kind: "show" }, { kind: "draft", revision: 8, changed: true }, { kind: "read", text: T, since: 0 }, { kind: "send", removes: true }, { kind: "done" }]);
+    expect(s.conflict?.mine).toBe(M);
+    expect(holdsUnsaved(s.held, s.saved, s.conflict?.mine)).toBe(true);
+    expect(editor(s, { kind: "copy" }).held).toBe(M);
+  });
+
+  test("ginsys/bronzeward#534 C1: the draft page registers for its draft's settled writes while it is shown", () => {
+    const src = readFileSync(new URL("./drafts.tsx", import.meta.url), "utf8");
+    expect(src).toContain("useEffect(() => watchWrites(id, written), [id, written]);");
+  });
 });
 
 test("ginsys/bronzeward#517 H15: a Discard's 412 says the draft changed and offers to show it", () => {
@@ -533,13 +612,40 @@ describe("a new fragment and the entry it creates (ginsys/bronzeward#517 H1, H4)
 describe("a fragment write that settles after its pane is gone (ginsys/bronzeward#517 H3)", () => {
   test("its done answer keeps the ETag and reads the draft again; any other answer reads nothing", () => {
     const written = vi.fn();
-    const settle = settledFragment("drf_11", () => "e1", written);
+    const stop = watchWrites("drf_11", written);
+    const settle = settledFragment("drf_11", () => "e1");
     const w = Object.assign(new Write({ method: "PUT", path: "/x", body: {}, resource: "/x" }), { epoch: "e1" });
     settle({ kind: "refused", status: 412, problem: null, replayed: false }, w);
     expect(written).not.toHaveBeenCalled();
     settle({ kind: "done", status: 200, data: {}, replayed: false, etag: '"3-t"' }, w);
     expect(keptETag("drf_11", "e1")).toBe('"3-t"');
     expect(written).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  test("ginsys/bronzeward#534 C1: a Save that settles after its page closed reads the draft again on the page shown now, which shows the saved text as a conflict", () => {
+    const [sender, reopened, otherDraft] = [vi.fn(), vi.fn(), vi.fn()];
+    const settle = settledFragment("drf_12", () => "e1");
+    // The operator saves, leaves before the Save commits, and opens the draft again: the new page
+    // read the old revision.
+    const leave = watchWrites("drf_12", sender);
+    leave();
+    const stop = watchWrites("drf_12", reopened);
+    const stopOther = watchWrites("drf_13", otherDraft);
+    const w = Object.assign(new Write({ method: "PUT", path: "/x", body: {}, resource: "/x" }), { epoch: "e1" });
+    settle({ kind: "done", status: 200, data: {}, replayed: false, etag: '"4-t"' }, w);
+    expect(sender).not.toHaveBeenCalled();
+    expect(reopened).toHaveBeenCalledTimes(1);
+    expect(otherDraft).not.toHaveBeenCalled();
+    stop();
+    stopOther();
+    // That read names the Save's revision. The pane holds text typed since it opened: the read shows
+    // the saved text and keeps the typed text aside, so no Save sends it over that revision unseen.
+    const [old, typed, saved] = ["a: old\n", "a: typed\n", "a: saved\n"].map((document) => ({ ...EMPTY, document })) as [Held, Held, Held];
+    const s = editor({ held: typed, saved: old }, { kind: "read", text: saved, since: 0, revision: 9 });
+    expect(s.held).toBe(saved);
+    expect(s.conflict).toEqual({ mine: typed, phase: "theirs", revision: 9 });
+    expect(holdsUnsaved(s.held, s.saved, s.conflict?.mine)).toBe(true);
   });
 });
 
@@ -634,7 +740,7 @@ describe("the fragment entry (W4, §11.4 item 2)", () => {
   const draft = { id: "drf_1", cluster: "cl_1", title: "t", state: "open", revision: 6, entries: [] };
   const pane = (state = "open") =>
     renderToStaticMarkup(h(WritesProvider, { value: new Writes(() => "p") }, h(ShellContext, { value: { roles: ["author"], offline: false } },
-      h(ReadsProvider, { value: reads }, h(FragmentPane, { draft: { ...draft, state }, entry: undefined, written: () => {}, seeChange: () => {} })))));
+      h(ReadsProvider, { value: reads }, h(FragmentPane, { draft: { ...draft, state }, entry: undefined, seeChange: () => {} })))));
 
   test("the document and marks fields give the browser's spelling and fill services nothing", () => {
     const out = pane();

@@ -190,7 +190,15 @@ automatic overwrite. [Copy my text into the new revision], [Save] and [Remove] w
 [Show their change] put their text in the editor. If the entry has a new revision, only the read
 of that revision puts their text there. If their change removed the entry, their text is empty.
 A second `412` after their text shows keeps the editor's text at that moment as the operator's
-text.
+text. If [Show their change] is clicked again, [Copy my text into the new revision] waits until the
+draft read that it starts answers. After [Remove], the conflict keeps the operator's text for [Copy
+my text into the new revision].
+
+A draft read can show another author's change to the entry without a `412`. Examples are the read
+after [Show their change] on a Discard's `412`, and the read after a Save that ended while the
+operator left the draft and opened it again. Their text, or the removal, then goes into the
+editor in the same way. Text typed since the last read or save is kept for [Copy my text into the
+new revision], and is never saved over their change unseen.
 
 [Add fragment] refuses a name that the draft already holds, a removed entry included, and points
 to that entry in the list. Once the new fragment is saved, the pane edits the entry that it
@@ -208,7 +216,7 @@ again. It also stays if one of those reads gets no answer or a server error, wit
 shown above it. Its actions stay disabled until the operator opens another page, so it sends
 nothing. The operator can copy the text out, then open the page again.
 
-After a Save or Remove is done, the page reads the draft again. Until that read shows, [Save] and
+After a Save or Remove is done, the draft page shown at that moment reads the draft again. Until that read shows, [Save] and
 [Remove] send nothing, also in an entry the operator opened again meanwhile. If that read fails,
 the page offers [Read the draft again], which keeps the editor's text.
 
@@ -224,7 +232,10 @@ it." and offers [Show their change]. While an editor holds unsaved text, that bu
 and asks the operator to save the text or switch entries first.
 
 The editor lists a reference whose name is quoted, or stands on the line after its `!bwref` tag.
-A key that follows the tag is not its name. If the operator edited the marks after a refusal,
+It also lists a name in a block scalar with strip chomping (`|-` or `>-`) on one content line, and a
+double-quoted name that continues after an escaped line break. A block scalar with an indentation
+indicator is not listed, but the server still checks its reference. A key that follows the tag is
+not its name. If the operator edited the marks after a refusal,
 [Go to field] finds the refused line where it is now. If that line is gone, it focuses the marks field and selects nothing.
 
 ## W5. Protected import review
