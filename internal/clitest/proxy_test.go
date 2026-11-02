@@ -2,6 +2,8 @@ package clitest
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -79,6 +81,10 @@ func (w *wholeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 }
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
 // cutOnce is a backend that answers its first request with a status line, a declared length and
 // half the body, then closes the connection, and every later request in full.
 func cutOnce(t *testing.T, whole string) (*url.URL, *atomic.Int32) {
@@ -148,6 +154,27 @@ func TestWholeTransit(t *testing.T) {
 		}
 		if calls.Load() != 1 {
 			t.Errorf("backend saw %d requests; want 1", calls.Load())
+		}
+	})
+
+	t.Run("canceled request not repeated", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		var calls atomic.Int32
+		wt := &wholeTransport{rt: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			calls.Add(1)
+			cancel()
+			return nil, ctx.Err()
+		})}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://backend.invalid/v1/transit/encrypt/bw-artifact", bytes.NewReader([]byte(`{}`)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := wt.RoundTrip(req); !errors.Is(err, context.Canceled) {
+			t.Errorf("error %v; want context canceled", err)
+		}
+		if calls.Load() != 1 || wt.retried.Load() != 0 {
+			t.Errorf("transport saw %d calls, %d repeated; want 1 and 0", calls.Load(), wt.retried.Load())
 		}
 	})
 
