@@ -341,9 +341,24 @@ describe("[Go to field] positions (B13)", () => {
       // The collection opened on an earlier line.
       'a: [x,\n  ? &a "x # y": 1,\n  !bwref x/foo]\n',
       "a: {k: 1,\n  ?'x # y' : 1, b: !bwref x/foo}\n",
-      // A colon right after a quoted key needs no blank after it in a flow collection.
+      // In a flow collection a value's colon needs no blank after it where a token starts: after a
+      // quoted key, a blank or a closing bracket, also before a tag or an anchor.
       'a: {"k":"x # y", r: !bwref x/foo}\n',
       "a: [\"k\":'x # y', !bwref x/foo]\n",
+      'a: {"k":!t "x # y", r: !bwref x/foo}\n',
+      'a: {"k":&a "x # y", r: !bwref x/foo}\n',
+      'a: {"k" :"x # y", r: !bwref x/foo}\n',
+      'a: {[k]:"x # y", r: !bwref x/foo}\n',
+      // A node starts after a document marker.
+      '--- ["a # b", !bwref x/foo]\n',
+      '--- {"k # c": !bwref x/foo}\n',
+      // A block scalar's content ends at the first line less indented than its first line, here
+      // the compact mapping's next key.
+      '- run: |\n    echo\n  with: [a,\n    b, "c # d", !bwref x/foo]\n',
+      // A line as indented as the key of a compact mapping, or a flow collection's line, is a key.
+      '- a: 1\n  "b # c": !bwref x/foo\n',
+      'a:\n  b: x\n  "c # d": !bwref x/foo\n',
+      'a: [x,\n  y]\n"b # c": !bwref x/foo\n',
     ]) expect(references(one)).toEqual(["x/foo"]);
     // Outside a flow collection a ? with no blank after it, a [ { or , inside a plain scalar, a tag
     // inside one, and a colon after a quote inside one start no node: the quote stays in the plain
@@ -358,12 +373,19 @@ describe("[Go to field] positions (B13)", () => {
       'a: x"y":"z # !bwref ghost\nb: !bwref x/foo\n',
       'x,- "p: ["q # r", !bwref x/foo]\n',
       'x, !t "p: ["q # r", !bwref x/foo]\n',
-      // No flow collection opens in a plain scalar, in a block scalar's content, or past a
-      // document marker.
+      // No flow collection opens in a plain scalar, on a line that continues a plain or quoted
+      // scalar, in a block scalar's content (also after a header with a comment right after it),
+      // or past a document marker.
       'a: x,[y\nb: ?"y # !bwref ghost\nc: !bwref x/foo\n',
+      'a: x\n  [y\nb: ?"z # !bwref ghost\nc: !bwref x/foo\n',
+      'a: "x\n  [y"\nb: ?"z # !bwref ghost\nc: !bwref x/foo\n',
       'a: |\n  [x\nb: ?"y # !bwref ghost\nc: !bwref x/foo\n',
+      'a: |#c\n  [x\nb: ?"y # !bwref ghost\nc: !bwref x/foo\n',
       'a: |\n  [x\nx ?"p: ["q # r", !bwref x/foo]\n',
       'a: !t >-\n  {x\nx ?"p: ["q # r", !bwref x/foo]\n',
+      // A more indented line after a sequence entry's scalar continues it.
+      'a:\n  - x\n    "y # !bwref ghost\nb: !bwref x/foo\n',
+      'a:\n  - x\n  - "y # z"\nb: !bwref x/foo\n',
     ]) expect(references(one)).toEqual(["x/foo"]);
   });
 

@@ -98,24 +98,48 @@ const MARKER = /^(?:---|\.\.\.)(?:\s|$)/;
 // it replaces (each is one UTF-16 code unit, the unit the editor reports positions in), so the
 // positions found here are positions in the text given (ginsys/bronzeward#544).
 const BREAKS = /\r(?!\n)|[\u0085\u{2028}\u{2029}]/gu;
-// A line that ends, a comment aside, with a block scalar's header after a blank or at its start,
-// node properties allowed before it.
-const HEADER_END = /(?:^|[ \t])(?:[!&][^ \t]*[ \t]+)*[|>][-+1-9]{0,2}[ \t]*$/;
+// A line that ends with a block scalar's header after a blank or at its start, node properties
+// allowed before it. The server also takes a # right after the header as a comment.
+const HEADER_END = /(?:^|[ \t])(?:[!&][^ \t]*[ \t]+)*[|>][-+1-9]{0,2}[ \t]*(?:#.*)?$/;
+// A line that ends where a node can follow on the next line: after a colon, a sequence entry's or
+// a complex key's indicator, a node property, or a document marker.
+const OPEN_END = /(?::|(?:^|[ \t])(?:[-?]|[!&][^ \t]*))$|^(?:---|\.\.\.)$/;
+// The column of the deepest block node a line starts: the key after its sequence dashes
+// (`- a: 1` starts a mapping at column 2), else its last dash (`- x` is an entry at column 0, so
+// a more indented line continues x), else its indentation.
+function column(kept: string): number {
+  const dashes = /^[ \t]*(?:-[ \t]+)*/.exec(kept)![0].length;
+  if (dashes === indent(kept) || /:(?:[ \t]|$)/.test(kept.slice(dashes))) return dashes;
+  return kept.lastIndexOf("-", dashes - 1);
+}
 function tags(original: string): { index: number; tag: string; name: string }[] {
   const text = original.replace(BREAKS, "\n");
-  // The depth of the open flow collections carries from line to line. A block scalar's content
-  // lines (blank, or more indented than the line of its header) and a document marker open none.
+  // The depth of the open flow collections carries from line to line (ginsys/bronzeward#578).
+  // Only a line where a node can start opens one at its start: a line inside a flow collection, a
+  // line after one that ends open (OPEN_END), and a line no more indented than the last line that
+  // started a node. A more indented line continues a scalar. A block scalar's content lines, as
+  // deep as its first one, open none, and a document marker closes every collection.
   let masked = "";
   let flow = 0;
-  let content = -1;
+  let content = -1; // the content's indentation; 0 before its first line with text; -1 outside one
+  let headed = 0; // the indentation of the line that holds the block scalar's header
+  let base = 0;
+  let open = true;
   for (const line of text.split("\n")) {
-    const held = content >= 0 && (line.trim() === "" || indent(line) > content);
-    if (!held) content = -1;
-    if (MARKER.test(line)) flow = 0;
-    const c = commentStart(line, held ? 0 : flow);
+    if (content !== -1 && line.trim() !== "") {
+      if (content === 0 && indent(line) > headed) content = indent(line);
+      else if (content === 0 || indent(line) < content) content = -1;
+    }
+    const held = content !== -1;
+    if (MARKER.test(line)) [flow, open, base] = [0, true, 0];
+    const fresh = !held && flow === 0 && (open || indent(line) <= base);
+    const c = commentStart(line, held ? 0 : flow, held || flow > 0 || fresh);
     if (!held) {
+      const kept = line.slice(0, c.end).trimEnd();
+      if (fresh && kept.trim() !== "") base = column(kept);
+      if (kept.trim() !== "") open = OPEN_END.test(kept);
       flow = c.flow;
-      if (flow === 0 && HEADER_END.test(line.slice(0, c.end))) content = indent(line);
+      if (flow === 0 && HEADER_END.test(kept)) [content, headed] = [0, indent(line)];
     }
     masked += `${line.slice(0, c.end)}${" ".repeat(line.length - c.end)}\n`;
   }
@@ -281,7 +305,8 @@ function decoded(body: string): string | undefined {
 // `flow` is the depth of the flow collections ([ {) open at the line's start; the result carries
 // the depth at its end, so that the next line is read in the same context (ginsys/bronzeward#578).
 // A [ or { opens one only where a node starts, and a ] or } closes one only while one is open.
-function commentStart(line: string, flow: number): { end: number; flow: number } {
+// `start` says whether a node can start at the line's indentation (see tags).
+function commentStart(line: string, flow: number, start: boolean): { end: number; flow: number } {
   let quote: string | undefined;
   let closed = -1;
   for (let i = 0; i < line.length; i++) {
@@ -290,36 +315,41 @@ function commentStart(line: string, flow: number): { end: number; flow: number }
       if (c === "'" && quote === "'" && line[i + 1] === "'") i++;
       else if (c === quote) [quote, closed] = [undefined, i];
       else if (c === "\\" && quote === '"') i++;
-    } else if ((c === '"' || c === "'") && startsScalar(line, i, flow > 0, closed)) quote = c;
+    } else if ((c === '"' || c === "'") && startsScalar(line, i, flow > 0, closed, start)) quote = c;
     else if (c === "#" && (i === 0 || blank(line[i - 1]))) return { end: i, flow };
-    else if ((c === "[" || c === "{") && startsScalar(line, i, flow > 0, closed)) flow++;
+    else if ((c === "[" || c === "{") && startsScalar(line, i, flow > 0, closed, start)) flow++;
     else if ((c === "]" || c === "}") && flow > 0) flow--;
   }
   return { end: line.length, flow };
 }
 
-// Whether a node starts at `i`: at the line's indentation, after a blank that follows a key's
-// colon or an item's or a complex key's indicator (- ?), or, in a flow collection only, after a
-// flow indicator ([ { ,). In a flow collection, as go-yaml reads it, an indicator right after
-// a flow indicator counts, a complex key's indicator needs no blank after it, and neither does a
-// colon right after a quoted key (`closed` is where the last quote on the line closed). Node
-// properties (a tag, an anchor) and the blanks after them may stand between the indicator and the
-// node. Anything else before it is a plain scalar already started.
+// Whether a node starts at `i`: at the line's indentation or after a document marker where
+// `start` allows one, after a blank that follows a key's colon or an item's or a complex key's
+// indicator (- ?), or, in a flow collection only, after a flow indicator ([ { ,). In a flow
+// collection, as go-yaml reads it, an indicator right after a flow indicator counts, a complex
+// key's indicator needs no blank after it, and a colon is a value's indicator, with no blank after
+// it, where a token starts: at the line's start, after a blank, a ] or }, or a quoted key
+// (`closed` is where the last quote on the line closed). Node properties (a tag, an anchor) and
+// the blanks after them may stand between the indicator and the node. Anything else before it is
+// a plain scalar already started.
 const blank = (c: string | undefined) => c === " " || c === "\t";
-function startsScalar(line: string, i: number, flow: boolean, closed: number): boolean {
+function startsScalar(line: string, i: number, flow: boolean, closed: number, start: boolean): boolean {
+  const from = MARKER.test(line) ? 3 : 0;
   const opener = (c: string | undefined) => flow && c !== undefined && "[{,".includes(c);
-  const indicator = (j: number) => j === 0 || blank(line[j - 1]) || opener(line[j - 1]);
+  const indicator = (j: number) => j === from || blank(line[j - 1]) || opener(line[j - 1]);
+  const colon = (j: number) => flow && line[j] === ":" && (j === 0 || blank(line[j - 1]) || closed === j - 1 || "]}".includes(line[j - 1]!) || opener(line[j - 1]));
   for (let k = i; ; ) {
     let j = k - 1;
-    while (j >= 0 && blank(line[j])) j--;
-    if (j < 0 || opener(line[j])) return true;
+    while (j >= from && blank(line[j])) j--;
+    if (j < from) return start;
+    if (opener(line[j])) return true;
     if (flow && line[j] === "?" && indicator(j)) return true;
-    if (flow && line[j] === ":" && closed >= 0 && closed === j - 1) return true;
+    if (colon(j)) return true;
     if (j === k - 1) return false;
     if (line[j] === ":") return true;
     if ((line[j] === "-" || line[j] === "?") && indicator(j)) return true;
     let s = j;
-    while (s > 0 && !blank(line[s - 1]) && !opener(line[s - 1])) s--;
+    while (s > from && !blank(line[s - 1]) && !opener(line[s - 1]) && !colon(s - 1)) s--;
     if (flow && line[s] === "?" && indicator(s)) s++;
     if (line[s] !== "!" && line[s] !== "&") return false;
     k = s;
