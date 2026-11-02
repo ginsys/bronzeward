@@ -3,7 +3,7 @@ import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { components } from "./api/v1";
-import { change, type Clash, createdId, DiscardRefused, NOT_DISCARDED, doneOnce, type Editor, type EditorEvent, editor, EMPTY, FragmentPane, forgetETag, type Held, holdsUnsaved, inUse, keepETag, keepOnDone, keptETag, LAYERS, lastGood, markLine, mayDrop, mayRevert, maySend, NOT_RENDERED, NOT_REVERTED, paneEntry, rows, settledFragment, unread, where } from "./drafts.tsx";
+import { change, type Clash, createdId, declaredOf, DiscardRefused, NOT_DISCARDED, doneOnce, type Editor, type EditorEvent, editor, EMPTY, FragmentPane, forgetETag, type Held, holdsUnsaved, inUse, keepETag, keepOnDone, keptETag, LAYERS, lastGood, markLine, mayDrop, mayRevert, maySend, NOT_RENDERED, NOT_REVERTED, paneEntry, rows, settledFragment, spotOfMark, unread, where } from "./drafts.tsx";
 import { leaving, signingOut, startsNew, unsaved, WritesProvider } from "./forms.tsx";
 import { type Load, type Reads, ReadsProvider } from "./list.tsx";
 import { references, spotOfLine, spotOfPath, spotOfReference } from "./position.ts";
@@ -88,6 +88,17 @@ describe("[Go to field] positions (B13)", () => {
 
   test("the references a document carries, each once, in order", () => {
     expect(references("a: !bwref x/one\nb: !bwref x/two\nc: !bwref x/one\n")).toEqual(["x/one", "x/two"]);
+  });
+
+  test("ginsys/bronzeward#517 H16: a quoted name, and a name on the line after its tag, are references", () => {
+    const text = "a: !bwref \"x/dq\"\nb: !bwref 'x/sq'\nc: !bwref\n  x/next\nd: !bwref\n  \"x/next-q\"\ne: !bwref \"x/open\n";
+    expect(references(text)).toEqual(["x/dq", "x/sq", "x/next", "x/next-q"]);
+    const s = spotOfReference(text, "x/next");
+    expect(text.slice(s!.start, s!.end)).toBe("!bwref\n  x/next");
+    // A comment between the tag and the next line hides nothing it does not hold.
+    expect(references("a: !bwref # x/not\n  x/after\n")).toEqual(["x/after"]);
+    // A tag with no value, then a key on the next line: the key is no name.
+    expect(references("a: !bwref\nb: x\nc: !bwref \"k\": v\n")).toEqual([]);
   });
 
   test("a flow list's reference ends at its comma, and a comment's text is no reference", () => {
@@ -179,6 +190,12 @@ describe("the editor's text is kept until the operator drops it (#339 round 1)",
     expect(holdsUnsaved(held("x"), theirs, undefined)).toBe(true);
     expect(holdsUnsaved(theirs, theirs, held("a: mine\n"))).toBe(true);
     expect(holdsUnsaved(theirs, theirs, theirs)).toBe(false);
+  });
+
+  test("ginsys/bronzeward#517 H17: a reference named like an object's own property is undeclared until declared", () => {
+    expect(declaredOf({}, "constructor")).toBeUndefined();
+    expect(declaredOf({}, "tostring")).toBeUndefined();
+    expect(declaredOf({ constructor: { kind: "string" as const, version: 1 } }, "constructor")).toEqual({ kind: "string", version: 1 });
   });
 
   test("the references table lists the document's references, then declarations no reference uses", () => {
@@ -465,6 +482,16 @@ describe("a 422 names where it points (W11 Refused)", () => {
     expect(markLine(marks, 0)).toBe(0);
     expect(markLine(marks, 1)).toBe(2);
     expect(markLine(marks, 2)).toBeUndefined();
+  });
+
+  test("ginsys/bronzeward#517 H18: Go to field finds the mark sent in the marks now shown", () => {
+    const sent = "doc[0]/a\n\ndoc[0]/b\ndoc[0]/c";
+    const line = (text: string, s: { start: number; end: number } | undefined) => (s === undefined ? undefined : text.slice(s.start, s.end));
+    expect(line(sent, spotOfMark(sent, sent, 1))).toBe("doc[0]/b");
+    const edited = "doc[0]/new\ndoc[0]/a\n\ndoc[0]/b\ndoc[0]/c";
+    expect(line(edited, spotOfMark(sent, edited, 1))).toBe("doc[0]/b");
+    expect(spotOfMark(sent, "doc[0]/a\n\ndoc[0]/x", 1)).toBeUndefined();
+    expect(spotOfMark(sent, sent, 5)).toBeUndefined();
   });
 });
 

@@ -401,6 +401,9 @@ export function lastGood<T>(last: { id: string; data: T } | undefined, id: strin
   return last?.id === id ? last : undefined;
 }
 
+// A reference's declaration: an own property only, so `constructor` is not Object's (ginsys/bronzeward#517 H17).
+export const declaredOf = (declared: Declared, ref: string): Declared[string] | undefined => (Object.hasOwn(declared, ref) ? declared[ref] : undefined);
+
 // The references table's rows: the document's references, then the declarations no reference
 // uses, so an obsolete declaration can be undeclared (rule unused-declaration).
 export const rows = (document: string, declared: Declared) => {
@@ -414,6 +417,18 @@ export function markLine(marks: string, n: number): number | undefined {
   const lines = marks.split("\n");
   for (let i = 0; i < lines.length; i++) if (lines[i] !== "" && ++seen === n) return i;
   return undefined;
+}
+
+// Go to field's spot for the n-th mark sent: that mark's text in the marks now shown, on the line
+// the refusal names while it still holds it, so text typed since the Save moves it to no other
+// mark (ginsys/bronzeward#517 H18). None once that mark is gone.
+export function spotOfMark(sent: string, current: string, n: number): Spot | undefined {
+  const line = markLine(sent, n);
+  if (line === undefined) return undefined;
+  const mark = sent.split("\n")[line]!;
+  const lines = current.split("\n");
+  const at = lines[line] === mark ? line : lines.indexOf(mark);
+  return at < 0 ? undefined : spotOfLine(current, at);
 }
 
 // Where a 422 points, as text beside the refusal: the reference, the mark's line, or the paths.
@@ -563,8 +578,7 @@ export function FragmentPane({ draft, entry, written, seeChange, claim = () => {
     if (typeof p["reference"] === "string") spot = spotOfReference(held.document, p["reference"]);
     else if (typeof p["position"] === "number") {
       into = marks.current;
-      const line = markLine(held.marks, p["position"]);
-      spot = line === undefined ? undefined : spotOfLine(held.marks, line);
+      spot = spotOfMark(sent?.text.marks ?? held.marks, held.marks, p["position"]);
     } else if (Array.isArray(p["paths"]) && typeof p["paths"][0] === "string") spot = await spotOfPath(held.document, p["paths"][0]);
     if (into === null) return;
     into.focus();
@@ -617,7 +631,7 @@ export function FragmentPane({ draft, entry, written, seeChange, claim = () => {
       {refs.length === 0 ? <p>None.</p> : (
         <Scroll label="References in this document">
           <thead><tr>{["Reference", "Kind", "Version", "Encoding", "State"].map((h) => <th key={h} scope="col">{h}</th>)}</tr></thead>
-          <tbody>{refs.map((ref) => <ReferenceRow key={ref} name={ref} declared={held.declared[ref]} used={used.includes(ref)} set={(r) => declare(ref, r)} open={editable} />)}</tbody>
+          <tbody>{refs.map((ref) => <ReferenceRow key={ref} name={ref} declared={declaredOf(held.declared, ref)} used={used.includes(ref)} set={(r) => declare(ref, r)} open={editable} />)}</tbody>
         </Scroll>
       )}
       <EmbeddedList embedded={held.embedded} set={(embedded) => hold({ ...held, embedded })} open={editable} />
