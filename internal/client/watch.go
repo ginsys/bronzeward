@@ -141,7 +141,13 @@ func (c *Client) Watch(op string, w Watch) (*apitypes.OperationBody, error) {
 			if w.halt.err != nil {
 				return nil, w.halt.err
 			}
-			return o, nil
+			if epoch == "" || last == "" || epochOf(last) == epoch {
+				return o, nil
+			}
+			// What Until answered rests on events of another epoch than the operation read's: they
+			// are cleared, which asks Until again, and the next stream shows the events from the start.
+			c.cleared(w, "the installation was restored or entered recovery mode")
+			last = ""
 		}
 		// An attempt that showed nothing waits the delay, which doubles until an attempt shows
 		// something or a stream stays open for 30 s. JSON pages are read again after the delay.

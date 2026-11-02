@@ -32,6 +32,9 @@ type importFake struct {
 
 const ingAccepted = `{"ingestion":"ing_BWSYNTH","operation":"op_BWSYNTH-ing"}`
 
+// nothing, as a step's wanted standard output, wants it empty.
+const nothing = "\x00nothing"
+
 func (f *importFake) ingestion() string {
 	return fmt.Sprintf(`{"id":"ing_BWSYNTH","kind":"import","mode":"encrypted","state":%q,"machine":"mch_BWSYNTH","draft":"drf_BWSYNTH",`+
 		`"operation":"op_BWSYNTH-ing","review":"pending","ownerGeneration":%d,"leaseUntil":%q,"expiresAt":"2026-11-01T08:00:00Z","createdAt":"2026-11-01T06:00:00Z"}`,
@@ -134,7 +137,11 @@ func TestImportLifecycle(t *testing.T) {
 		var o, e bytes.Buffer
 		got := run(args, &o, &e)
 		took := f.took()
-		if got != code || !strings.Contains(o.String(), out) || !strings.Contains(e.String(), errText) {
+		okOut := strings.Contains(o.String(), out)
+		if out == nothing {
+			okOut = o.Len() == 0
+		}
+		if got != code || !okOut || !strings.Contains(e.String(), errText) {
 			t.Errorf("%s: exit %d, stdout %q, stderr %q; want %d, %q, %q", name, got, o.String(), e.String(), code, out, errText)
 		}
 		if strings.Join(took, "\n") != strings.Join(writes, "\n") {
@@ -190,7 +197,8 @@ func TestImportLifecycle(t *testing.T) {
 		"or abandon it now:\n  bronzewardctl import takeover ing_BWSYNTH\n  bronzewardctl import abandon ing_BWSYNTH\n", `POST /ingestions/ing_BWSYNTH/continuations if-match= body={}`)
 
 	f.set("held", 2, -time.Minute, "running", "", "", ev("continued", `{"type":"continued","generation":2}`))
-	step("a lease lapsed with the operation running exits 3 (PROT-06)", []string{"import", "continue", "ing_BWSYNTH", "-o", "json"}, 3, ingAccepted,
+	// Exit 3 leaves standard output empty, the accepted answer included (#256's output rule).
+	step("a lease lapsed with the operation running exits 3 (PROT-06) with nothing on stdout", []string{"import", "continue", "ing_BWSYNTH", "-o", "json"}, 3, nothing,
 		"or abandon it:\n  bronzewardctl import status ing_BWSYNTH\n  bronzewardctl import takeover ing_BWSYNTH\n", `POST /ingestions/ing_BWSYNTH/continuations if-match= body={}`)
 	step("status of a lapsed claim offers takeover", []string{"import", "status", "ing_BWSYNTH"}, 0,
 		"Its run stopped renewing the lease. Take it over to resume, or abandon it:\n  bronzewardctl import takeover ing_BWSYNTH", "")
@@ -216,6 +224,10 @@ func TestImportLifecycle(t *testing.T) {
 		"", "was not applied: its staged input could not be decrypted (resume-failed, dependency-unavailable)", `POST /ingestions/ing_BWSYNTH/continuations if-match= body={}`)
 	f.set("paused", 3, -time.Minute, "running", "", "", ev("taken-over", `{"type":"taken-over","generation":3}`), ev("paused", `{"type":"paused","generation":3}`))
 	step("a replayed takeover already paused ends at its pause", []string{"import", "takeover", "ing_BWSYNTH"}, 0, "Paused for review (generation 3,", "",
+		`POST /ingestions/ing_BWSYNTH/takeovers if-match= body={}`)
+	f.set("paused", 3, -time.Minute, "running", "", "", ev("taken-over", `{"type":"taken-over","generation":2}`), ev("paused", `{"type":"paused","generation":2}`),
+		ev("marked", `{"type":"marked","generation":3,"paths":1}`), ev("paused", `{"type":"paused","generation":3}`))
+	step("a replayed takeover marked since ends at the mark's pause", []string{"import", "takeover", "ing_BWSYNTH"}, 0, "Paused for review (generation 3,", "",
 		`POST /ingestions/ing_BWSYNTH/takeovers if-match= body={}`)
 	f.replayed = false
 

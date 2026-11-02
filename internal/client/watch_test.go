@@ -386,6 +386,24 @@ func TestWatchUntil(t *testing.T) {
 			t.Errorf("watch: %v, state %q, shown %q; want succeeded, %q", err, state, shown, want)
 		}
 	})
+	t.Run("an answer from another epoch than a running operation's read is asked again", func(t *testing.T) {
+		const e2 = "ep_BWSYNTH2"
+		o := &opServer{epochs: []string{e1}, states: []string{"running", "succeeded"}, pages: []string{item(e2+":1", "started"), item(e2+":2", "continued")}}
+		// Until ends the first stream at e1:1; the operation read after it is of e2, where it runs on.
+		o.streams = []handler{func(w http.ResponseWriter, r *http.Request) {
+			sse(ev(e1+":1", "paused"))(w, r)
+			o.mu.Lock()
+			o.epoch = e2
+			o.mu.Unlock()
+		}, sse(ev(e2+":1", "started"), ev(e2+":2", "continued"))}
+		calls := 0
+		until = func() (bool, error) { calls++; return calls == 1, nil }
+		t.Cleanup(func() { until = nil })
+		shown, _, state, _, err := watched(t, o, e1, nil)
+		if want := []string{e1 + ":1", "clear", e2 + ":1", e2 + ":2"}; err != nil || state != "succeeded" || !slices.Equal(shown, want) {
+			t.Errorf("watch: %v, state %q, shown %q; want succeeded, %q", err, state, shown, want)
+		}
+	})
 }
 
 // TestWatchRenewal checks that a wait renews in process (§9.5 item 4): a sign-in about to expire
