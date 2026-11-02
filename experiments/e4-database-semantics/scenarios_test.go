@@ -89,8 +89,8 @@ func TestS1CompareAndSetKeepsEveryWrite(t *testing.T) {
 
 // The control: without the revision predicate every writer "wins" and all but one write is lost.
 // The reader must see it. A writer that waits past the busy timeout for the write lock is retried
-// (RetryBusy): on a slow disk it would otherwise count as neither a win nor a conflict, and one
-// write in 60 went missing from the count (#529).
+// (RetryBusy): it would otherwise count as neither a win nor a conflict, the likely reason one
+// write in 60 went missing from the count in CI (#529).
 func TestS1BlindWriteLosesUpdates(t *testing.T) {
 	db := migrated(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -112,9 +112,9 @@ func TestS1BlindWriteLosesUpdates(t *testing.T) {
 }
 
 // A blind writer that waits longer than the busy timeout for the write lock gets SQLITE_BUSY, and
-// RaceRevisions counts that outcome as neither a win nor a conflict. That is how
-// TestS1BlindWriteLosesUpdates saw 59 wins on a slow CI disk (#529). This forces the outcome: the
-// test holds the write lock past a 50 ms timeout, so every writer is refused. It releases the lock
+// RaceRevisions counts that outcome as neither a win nor a conflict. That is the likely reason
+// TestS1BlindWriteLosesUpdates saw 59 wins in CI (#529): the log has no busy count, so the cause is
+// inferred. This forces the outcome: the test holds the write lock past a 50 ms timeout, so every writer is refused. It releases the lock
 // when RaceRevisions reports a busy outcome (OnBusy) or, without a retry, once every writer has
 // given up, so no timer decides what the writers meet. It then shows that RetryBusy waits the lock
 // out and every blind write commits.
