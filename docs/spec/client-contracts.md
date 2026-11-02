@@ -818,8 +818,8 @@ the context. On a change it:
 A command that shows one snapshot built from several reads (`status`, `recovery status`) shows
 nothing when an epoch change falls between the first and the last answer it shows, in every output
 form, because the earlier answers, with the revision and start mode they carry, no longer hold.
-After reads that all succeed, it says so and names the command that reads again. A read that fails
-keeps its own error.
+After reads that all succeed, it says so and names the command that reads again. A failed read that
+the command needs ends it with that read's own error.
 
 An epoch is never ordered or parsed. A missing `Bronzeward-Epoch` on an authenticated success is
 a defect the client reports.
