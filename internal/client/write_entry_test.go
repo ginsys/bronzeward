@@ -123,6 +123,19 @@ func TestEntry(t *testing.T) {
 			t.Errorf("no notice of the failed read:\n%s", notices)
 		}
 	})
+	t.Run("a revision below the minimum after the commit keeps the success", func(t *testing.T) {
+		// COMP-01 refuses before any write, but a recovery start refuses the read until its entry commits.
+		f := &fake{epoch: "ep_BWSYNTH-1", beforeEntry: true, entered: "ep_BWSYNTH-2", post: entered("ep_BWSYNTH-2", false),
+			server: `{"version":"BWSYNTH","apiRevision":1,"startMode":"recovery"}`}
+		c, notices, _ := writeClient(t, f, "ep_BWSYNTH-1")
+		r, err := c.Send(entryWrite())
+		if err != nil || r == nil || !strings.Contains(string(r.Body), "ep_BWSYNTH-2") {
+			t.Fatalf("answer %v, err %v; want the entry's success", r, err)
+		}
+		if !strings.Contains(notices.String(), "the server serves API revision 1") {
+			t.Errorf("no notice of the revision:\n%s", notices)
+		}
+	})
 	t.Run("forbidden shows no mode", func(t *testing.T) {
 		// The 403 carries Bronzeward-Epoch, as one found at the role check does; GET /server showed a
 		// normal start, and the 403 does not make it a recovery start (§8.5 item 1).
