@@ -8,12 +8,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/signal"
 	"runtime"
 	"slices"
 	"strings"
-	"sync"
-	"syscall"
 
 	"golang.org/x/term"
 
@@ -116,41 +113,19 @@ func screenSize(out *os.File) (rows, cols int, err error) {
 
 // pager shows lines on the terminal out, of rows by cols, in the alternate screen, with standard
 // input in raw mode for the keys, and restores both before it returns, so the review leaves the
-// screen. A signal that ends the process, sent by another process while the pager runs, restores
-// them first and then ends the process as the signal would have; Ctrl-C reaches the pager as a key.
+// screen.
 func (e *env) pager(out *os.File, lines []string, rows, cols int) error {
 	old, err := term.MakeRaw(int(stdin.Fd()))
 	if err != nil {
 		return fmt.Errorf("putting the terminal in raw mode for the review: %w; nothing was shown", err)
 	}
-	var once sync.Once
-	leave := func() {
-		once.Do(func() {
-			_ = term.Restore(int(stdin.Fd()), old)
-			_, _ = fmt.Fprint(out, clearScreen+altScreenOff)
-		})
-	}
-	sigs, done := make(chan os.Signal, 1), make(chan struct{})
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-	go func() {
-		select {
-		case sig := <-sigs:
-			leave()
-			raise(sig)
-		case <-done:
-		}
-	}()
-	defer func() { signal.Stop(sigs); close(done); leave() }()
+	defer func() { _ = term.Restore(int(stdin.Fd()), old) }()
 	if _, err := fmt.Fprint(out, altScreenOn); err != nil {
 		return err
 	}
-	return page(lines, rows, cols, stdin, out)
-}
-
-// raise ends the process by sig, as if no handler had caught it. A test replaces it.
-var raise = func(sig os.Signal) {
-	signal.Reset(sig)
-	_ = syscall.Kill(os.Getpid(), sig.(syscall.Signal))
+	err = page(lines, rows, cols, stdin, out)
+	_, _ = fmt.Fprint(out, clearScreen+altScreenOff)
+	return err
 }
 
 // reviewText is the review as the pager shows it, as its lines: the staged document's lines, then
