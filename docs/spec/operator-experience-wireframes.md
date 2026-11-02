@@ -215,7 +215,10 @@ unknown outcome is not the last answer while [Repeat exactly] can still send the
 The same rule applies after their text shows. If a later read shows another author's newer text,
 or their removal, the editor shows that change. Text typed since their text showed is kept for
 [Copy my text into the new revision]. The pane's own Remove keeps its text, and a read of the
-pane's own Save opens nothing.
+pane's own Save opens nothing. One exception remains until
+[#559](https://github.com/ginsys/bronzeward/issues/559): after their text shows, a removal read
+while the pane's own Save or Remove has no answer yet is not held back. If that write fails, the
+editor does not show the removal.
 
 [Add fragment] refuses a name that the draft already holds, a removed entry included, and points
 to that entry in the list. Once the new fragment is saved, the pane edits the entry that it
