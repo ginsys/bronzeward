@@ -33,10 +33,36 @@ describe("the references of a declared embedded document", () => {
     expect(references("cfg:\n  a: !bwref x/map\n", at("doc[0]/cfg"))).toEqual(["x/map"]);
   });
 
-  test("a reference only an embedded document carries points at the scalar that holds it", () => {
+  test("a declared embedded document's references come from its decoded text only", () => {
+    // Folded, the comment line and the next line are one comment line.
+    const folded = "cfg: >-\n  # note\n  a: !bwref x/hidden\n";
+    expect(references(folded, at("doc[0]/cfg"))).toEqual([]);
+    expect(spotOfReference(folded, "x/hidden", at("doc[0]/cfg"))).toBeUndefined();
+    // Undeclared, the text is scanned as it is written, as before.
+    expect(references(folded)).toEqual(["x/hidden"]);
+    expect(references("cfg: |\n  # note\n  a: !bwref x/lit\n", at("doc[0]/cfg"))).toEqual(["x/lit"]);
+  });
+
+  // As on the server (go-yaml and internal/ingest/path.go), each of these reaches the document.
+  test("a quoted scalar with the non-specific tag holds an embedded document", () => {
+    expect(references("cfg: ! 'a: !bwref x/ns'\n", at("doc[0]/cfg"))).toEqual(["x/ns"]);
+  });
+  test("a path step matches an alias key by its anchored key", () => {
+    expect(references("key: &k cfg\n*k : 'a: !bwref x/key'\n", at("doc[0]/cfg"))).toEqual(["x/key"]);
+  });
+  test("a path that ends at an alias reaches the anchored scalar", () => {
+    expect(references("src: &s 'a: !bwref x/val'\ncfg: *s\n", at("doc[0]/cfg"))).toEqual(["x/val"]);
+  });
+  test("a lone carriage return breaks a line", () => {
+    expect(references("b: 1\rcfg: 'a: !bwref x/cr'\r", at("doc[0]/cfg"))).toEqual(["x/cr"]);
+  });
+
+  // Positions are compared as numbers, so a failure prints no document text.
+  test("a reference only an embedded document carries points at the scalar that holds it, or at its tag as written", () => {
     const text = "a: 1\ncfg: 'a: !bwref x/sq'\n";
-    const s = spotOfReference(text, "x/sq", at("doc[0]/cfg"));
-    expect(text.slice(s!.start, s!.end)).toBe("'a: !bwref x/sq'");
+    expect(spotOfReference(text, "x/sq", at("doc[0]/cfg"))).toEqual({ start: 10, end: 26 });
     expect(spotOfReference(text, "x/sq")).toBeUndefined();
+    const literal = "cfg: |\n  a: !bwref x/lit\n";
+    expect(spotOfReference(literal, "x/lit", at("doc[0]/cfg"))).toEqual({ start: 12, end: 24 });
   });
 });
