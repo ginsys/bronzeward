@@ -73,10 +73,11 @@ async function signedIn() {
         ctl.signal.addEventListener("abort", () => (clearTimeout(t), r()), { once: true });
       });
       if (ctl.signal.aborted) break;
+      // The deadline bounds the request and its body read too, so a stalled endpoint ends the poll.
       const t = await fetch(disc.token_endpoint, {
         method: "POST",
         body: form({ grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: d.device_code, client_id: client.cliClientId }),
-        signal: ctl.signal,
+        signal: AbortSignal.any([ctl.signal, AbortSignal.timeout(Math.max(1, until - Date.now()))]),
       });
       const b = await t.json();
       if (t.ok && b.access_token) return b.access_token;

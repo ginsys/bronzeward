@@ -272,9 +272,11 @@ passwords() {
     [ "${#letters}" -ge 8 ] && [ "${#digits}" -ge 4 ] || die "could not make a password for $name"
     pw=$marker${letters:0:8}-${digits:0:4}
     # --disable first: a facilitator's curlrc could name a trace file, which would get the body.
-    P=$pw jq -nc '{newPassword: {password: env.P, changeRequired: false}}' |
+    # The password reaches jq and the token reaches curl on a pipe, from the shell's builtin
+    # printf, never in a child's environment or command line.
+    printf '%s' "$pw" | jq -Rc '{newPassword: {password: ., changeRequired: false}}' |
       curl --disable -sSf --noproxy '*' -o /dev/null -X POST "$issuer/v2/users/$uid/password" \
-        -H "Authorization: Bearer $(cat "$idp/seed.pat")" -H 'Content-Type: application/json' -d @- ||
+        -H @<(printf 'Authorization: Bearer %s\n' "$(<"$idp/seed.pat")") -H 'Content-Type: application/json' -d @- ||
       die "could not set the password of $name"
     set=$((set + 1))
     if [ -n "$exec" ]; then
@@ -370,9 +372,10 @@ restore() {
     c=BW_$i
     if running "${!c}"; then up+=("$i"); fi
   done
+  # Named before the pause: inject can pause the container and still fail afterwards.
   for i in ${up[@]+"${up[@]}"}; do
-    stage "$bin/inject" pause "$i"
     paused+=("$i")
+    stage "$bin/inject" pause "$i"
   done
   stage "$bin/inject" db-restore "p-$1"
   stage "$bin/inject" bao-restore "p-$1"
@@ -386,9 +389,11 @@ prepare() { stage "$here/prepare" "$@"; }
 # on Zitadel; the seconds it took, for the README's timings. A setup that fails still hands A back
 # on Zitadel, so that the task before can go on and the setup can run again.
 handback() {
-  local i
+  local i c
   echo "setup $task failed: A goes back on Zitadel" >&2
   for i in ${paused[@]+"${paused[@]}"}; do
+    c=BW_$i
+    [ "$(docker inspect --type container --format '{{.State.Paused}}' "${!c}" 2>/dev/null)" = true ] || continue
     "$bin/inject" unpause "$i" >>"$log" 2>&1 || echo "$i could not be unpaused; recreate the fixture" >&2
   done
   paused=()
@@ -488,21 +493,41 @@ t8() {
   echo "names: none"
   read_ok "A's, B's and C's links to the worker are cut" sh -c "grep -c '^[ABC] worker' '$STATE/linksplits' | grep -qx 3"
 }
-# t9_stream <file> <seconds> [last event ID]: the event stream of t9_op on A, read with the
-# automation token, which A accepts on either issuer. The token goes to curl on stdin. The body goes
-# to <file>, curl's exit status to t9_rc.
-t9_op='' t9_rc=0
-t9_stream() {
+# t9_curl <file> <seconds> [last event ID]: the event stream of t9_op on A, read with the
+# automation token, which A accepts on either issuer. The token goes to curl on stdin, from the
+# shell's builtin printf. The body goes to <file>. Its status is curl's.
+t9_op='' t9_rc=0 t9_reader=''
+t9_curl() {
   local resume=()
   [ -z "${3:-}" ] || resume=(--header "Last-Event-ID: $3")
-  t9_rc=0
-  printf 'Authorization: Bearer %s\n' "$(cat -- "$STATE/automation-token")" |
+  printf 'Authorization: Bearer %s\n' "$(<"$STATE/automation-token")" |
     command curl --disable --noproxy '*' --silent --no-buffer --max-time "$2" --output "$1" \
       --header @- --header 'Accept: text/event-stream' ${resume[@]+"${resume[@]}"} \
-      "http://127.0.0.1:$SERVER_A_PORT/api/v1/operations/$t9_op/events" || t9_rc=$?
+      "http://127.0.0.1:$SERVER_A_PORT/api/v1/operations/$t9_op/events"
 }
-# t9_ids <file>...: the event IDs the streams sent, in order.
-t9_ids() { cat -- "$@" | tr -d '\r' | sed -n 's/^id: *//p'; }
+# t9_stream <file> <seconds> [last event ID]: t9_curl, its exit status in t9_rc.
+t9_stream() {
+  t9_rc=0
+  t9_curl "$@" || t9_rc=$?
+}
+# t9_ids <file>...: the IDs of the complete events the streams sent, in order. An event is complete
+# at its blank line; one that the stop cut off is not counted, so its resumption must send it.
+t9_ids() {
+  cat -- "$@" | tr -d '\r' | awk '/^id:/ { sub(/^id: */, ""); id = $0 } /^$/ { if (id != "") print id; id = "" }'
+}
+# t9_clean: on any exit of t9 disconnect, the reader ends and A runs again, so that the participant's
+# server is never left stopped.
+t9_clean() {
+  if [ -n "$t9_reader" ]; then
+    kill "$t9_reader" 2>/dev/null || true
+    wait "$t9_reader" 2>/dev/null || true
+    t9_reader=''
+  fi
+  if ! running "$BW_A"; then
+    echo "t9 disconnect: A is started again" >&2
+    restart_a >>"$log" 2>&1 || echo "A could not be started again; recreate the fixture" >&2
+  fi
+}
 
 # t9_disconnect: A stopped for 60 s and started again while the participant follows T9's apply,
 # so that the participant's event stream ends and must be resumed (journeys §5.7). The clients do
@@ -511,7 +536,7 @@ t9_ids() { cat -- "$@" | tr -d '\r' | sed -n 's/^id: *//p'; }
 # start follows the apply to its end, and its event IDs equal those of a full replay, none lost
 # and none repeated. If the apply does not survive A's restart, the step fails.
 t9_disconnect() {
-  local dir=$part/t9-disconnect reader last state
+  local dir=$part/t9-disconnect rc last state
   t9_op=$(sql "SELECT id FROM operation WHERE kind = 'apply-config' AND machine = '$(worker)' ORDER BY seq DESC LIMIT 1")
   [ -n "$t9_op" ] || die "no apply-config operation on the worker; run the t9 setup first"
   state=$(sql "SELECT state FROM operation WHERE id = '$t9_op'")
@@ -520,20 +545,30 @@ t9_disconnect() {
   esac
   rm -rf -- "$dir"
   mkdir -p -- "$dir"
-  t9_stream "$dir/before" 600 &
-  reader=$!
+  trap t9_clean EXIT
+  trap 'exit 130' INT TERM
+  # The pipeline itself in the background, not t9_curl, whose subshell would be $!: the last
+  # command is curl, so $! is curl's, kill reaches it and wait returns its status.
+  printf 'Authorization: Bearer %s\n' "$(<"$STATE/automation-token")" |
+    command curl --disable --noproxy '*' --silent --no-buffer --max-time 600 --output "$dir/before" \
+      --header @- --header 'Accept: text/event-stream' \
+      "http://127.0.0.1:$SERVER_A_PORT/api/v1/operations/$t9_op/events" &
+  t9_reader=$!
   for _ in $(seq 20); do
     [ -n "$(t9_ids "$dir/before" 2>/dev/null)" ] && break
     sleep 1
   done
-  if [ -z "$(t9_ids "$dir/before")" ]; then
-    kill "$reader" 2>/dev/null || true
-    die "the stream on A sent no event within 20 s"
-  fi
-  # A stream that already ended met no stop: the apply finished first, and nothing is resumed.
-  kill -0 "$reader" 2>/dev/null || die "the apply ended before the stop; run t9 disconnect right after the t9 setup"
+  [ -n "$(t9_ids "$dir/before")" ] || die "the stream on A sent no event within 20 s"
   "$bin/inject" kill A >>"$log" 2>&1 || die "cannot stop A; its output is in $log"
-  wait "$reader" || true
+  rc=0
+  wait "$t9_reader" || rc=$?
+  t9_reader=''
+  # Only a stream that the stop cut is resumed. One that ended by itself (0) met the apply's end
+  # first, and one that curl's limit ended (28) met no stop.
+  case $rc in
+    0) die "the apply ended before the stop; run t9 disconnect right after the t9 setup" ;;
+    28) die "the stream on A was still open at curl's limit, not ended by the stop" ;;
+  esac
   echo "A is stopped for 60 s: the participant's event stream has ended"
   sleep 60
   restart_a >>"$log" 2>&1 || die "cannot start A again; its output is in $log"
@@ -547,6 +582,7 @@ t9_disconnect() {
   [ "$t9_rc" -eq 0 ] || die "the full replay did not end by itself (curl $t9_rc)"
   [ "$(t9_ids "$dir/before" "$dir/after")" = "$(t9_ids "$dir/full")" ] ||
     die "the resumed stream's events differ from the full replay: an event was lost or repeated (see $dir)"
+  trap - EXIT INT TERM
   read_ok "the stream resumed with Last-Event-ID after A's restart: $(t9_ids "$dir/full" | wc -l) events, none lost or repeated, the apply completed" true
 }
 t9() {
