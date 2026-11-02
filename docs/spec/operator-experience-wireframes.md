@@ -232,8 +232,9 @@ it." and offers [Show their change]. While an editor holds unsaved text, that bu
 and asks the operator to save the text or switch entries first.
 
 The editor lists a reference whose name is quoted, or stands on the line after its `!bwref` tag.
-It also lists a name in a block scalar with strip chomping (`|-` or `>-`) on one content line, and a
-double-quoted name that continues after an escaped line break. A block scalar with an indentation
+It also lists a name in a block scalar on one content line, if strip chomping (`|-` or `>-`) drops
+the line break after it or that line ends the document. A double-quoted name that continues after
+an escaped line break is listed too. A block scalar with an indentation
 indicator is not listed, but the server still checks its reference. A key that follows the tag is
 not its name. If the operator edited the marks after a refusal,
 [Go to field] finds the refused line where it is now. If that line is gone, it focuses the marks field and selects nothing.

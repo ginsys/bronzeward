@@ -139,7 +139,10 @@ describe("[Go to field] positions (B13)", () => {
     expect(text.slice(s!.start, s!.end)).toBe("!bwref |-\n  x/foo");
     const e = spotOfReference(text, "x/esc");
     expect(text.slice(e!.start, e!.end)).toBe('!bwref "x/\\\n   esc"');
-    expect(references("!bwref |-\nx/root\n...\n")).toEqual(["x/root"]);
+    expect(references("!bwref |-\n x/root\n...\n")).toEqual(["x/root"]);
+    // Local review round 2, checked against go-yaml v3: a content line that ends the text keeps no
+    // line break, whatever the chomping.
+    for (const h of ["|", ">", "|+", ">+"]) expect(references(`a: !bwref ${h}\n  x/foo`)).toEqual(["x/foo"]);
     // Each of these decodes to a value with a line break or a blank, or to nothing (checked against
     // the yaml package): no name.
     for (const none of [
@@ -157,6 +160,12 @@ describe("[Go to field] positions (B13)", () => {
       "a: !bwref |-\n  x/foo\n    \n",
       "a: !bwref |-\n  x/foo\n   \nb: c\n",
       "a: !bwref |-\n   x/foo\n",
+      // Round 2 (go-yaml v3): a line break or a blank line after the content is kept, a top-level
+      // scalar's content needs one space, and a header that ends the text holds nothing.
+      "a: !bwref |\n  x/foo\n  ",
+      "a: !bwref |+\n  x/foo\n",
+      "!bwref |-\nx/root\n",
+      "a: !bwref |-",
     ]) expect(references(none)).toEqual([]);
     // Blank lines no deeper than the content's indentation are chomped.
     expect(references("a: !bwref |-\n  x/foo\n  \n\nb: c\n")).toEqual(["x/foo"]);
