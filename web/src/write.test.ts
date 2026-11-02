@@ -1014,6 +1014,20 @@ describe("the recovery entry's exception (§8.4 item 3, REC-04 (a))", () => {
     expect(await p.writes.submit(entry())).toMatchObject({ kind: "refused", status: 409, problem: { epoch: "e2" } });
   });
 
+  test("REC-02: a 409 conflict with no epoch on a first send is a start that takes no entry: refused, the reading the form shows", async () => {
+    const p = page([problem(409, "conflict")]);
+    expect(await p.writes.submit(entry())).toMatchObject({ kind: "refused", status: 409 });
+  });
+
+  test("a lost 201 followed by a normal restart: the repeat's 409 with no epoch and no request is unknown, never Not saved", async () => {
+    const p = page([drop(), problem(409, "conflict")]);
+    const w = entry();
+    expect(await p.writes.submit(w)).toMatchObject({ kind: "unknown", problem: { type: "urn:bronzeward:problem:conflict" } });
+    // Two sends with one key: the first may have committed, and the refusal came before the lookup.
+    expect(p.sent.map((s) => s.headers["Idempotency-Key"])).toEqual([w.key, w.key]);
+    expect(p.writes.repeatable(w)).toBe(true);
+  });
+
   test("a 409 conflict carrying the key's earlier record (request and epoch) means the first send committed: set aside as unknown, never refused", async () => {
     const p = page([problem(409, "conflict", { request: "r1", epoch: "e2" })]);
     expect(await p.writes.submit(entry())).toMatchObject({ kind: "set-aside", why: EARLIER_EPOCH, ambiguous: true, problem: { epoch: "e2", request: "r1" } });
