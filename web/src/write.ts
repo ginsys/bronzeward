@@ -39,7 +39,8 @@ export const SIGN_IN_REFUSED = "the server no longer accepts your sign-in";
 export const SHELL_GONE = "the page that sent it ended";
 export const NO_CREDENTIAL = "the page no longer holds your sign-in";
 export const RECOVERY_START = "the server was started for recovery and serves only the recovery entry until it is recorded";
-export const TOO_LARGE = "the input is larger than 1 MiB, the most the server takes, so nothing was sent";
+export const EARLIER_EPOCH = "the key's record is from an earlier epoch";
+export const TOO_LARGE ="the input is larger than 1 MiB, the most the server takes, so nothing was sent";
 // The largest body the server takes, in UTF-8 bytes (§8.1, internal/api/body.go maxBody).
 export const MAX_BODY = 1 << 20;
 export const RENEWED_LAST ="the last attempt was answered 401 and your sign-in was renewed, with no attempt left to send it again";
@@ -334,7 +335,12 @@ export class Writes {
       // The route-level role check, decided before the lookup; only the plan cancellation's creator
       // check, which carries `plan`, refuses after it (§8.2 403 row).
       if (a.status === 403 && code === "forbidden" && p?.["plan"] === undefined) return early(refused);
-      if (a.status === 409 && code === "conflict" && p?.["request"] !== undefined && p["epoch"] !== undefined) return aside("the key's record is from an earlier epoch");
+      // An earlier epoch's record of this key: that request committed, and its effect may be in the
+      // current state (§8.4 item 7). It is set aside as unknown, never as not saved.
+      if (a.status === 409 && code === "conflict" && p?.["request"] !== undefined && p["epoch"] !== undefined) {
+        w.ambiguous = true;
+        return aside(EARLIER_EPOCH);
+      }
       // A process refusal, decided before the lookup (§8.2 409 row): a recovery start, which
       // attempt() recorded in `end.pre` for the shell to show (§8.5 item 1).
       if (preEntry(a.status, p) !== undefined) return early(refused);
