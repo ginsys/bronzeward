@@ -44,6 +44,8 @@ the write cases. Its tests run exactly the cases recorded there.
 | [PAGE-01](cases/PAGE-01.yaml) | web, the machine list: `mise run browser-auth` |
 | [PAGE-02](cases/PAGE-02.yaml) | web, the machine list: `mise run browser-auth` |
 | [REC-01](cases/REC-01.yaml) | web, the banner and the process's refusal: `mise run browser-auth` |
+| [REC-02](cases/REC-02.yaml) | web, both refusals of the entry: `mise run browser-auth` |
+| [REC-04](cases/REC-04.yaml) | web, (a) the dropped `201` only; (b) waits for the server's COMMIT fault hook (#263): `mise run browser-auth` |
 | [TLS-02](cases/TLS-02.yaml) | web: `mise run browser` |
 | [TLS-03](cases/TLS-03.yaml) | web, the read case: `mise run browser`; the write case: `mise run browser-auth` |
 

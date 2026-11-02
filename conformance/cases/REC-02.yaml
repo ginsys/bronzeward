@@ -1,0 +1,19 @@
+id: REC-02
+setup: as AUTH-02, with the injector passing every request to a disposable deployment; first started normally (the injector answers the process's restriction on the page's first reads), then started with -recovery-start on a fresh database; signed in as h-recovery, the entry form filled with one synthetic database backup, a stop time and a reason, and enter typed
+action: send Enter recovery to the normal start; then, on the recovery start, make an entry as h-recovery outside the page under another key (one synthetic database backup), and send Enter recovery from the page under its own key
+exchange:
+  - request: POST /api/v1/recovery/entries
+    headers: ["Authorization: Bearer <recovery-admin token>", "Idempotency-Key: <key>", "Content-Type: application/json"]
+  - request: POST /api/v1/recovery/entries
+    headers: ["Authorization: Bearer <recovery-admin token>", "Idempotency-Key: <other key>", "Content-Type: application/json"]
+fault: none injected after the first reads; the normal start and the entry committed under another key are the setup
+expect:
+  server: the first entry refused 409 conflict without epoch or request, since only a process started for recovery serves the entry; the second refused 409 conflict with the epoch of the entry already recorded and without request
+  client: no Bronzeward-Expected-Epoch header on either send (client contracts §8.4 item 3), one send each, no repeat; the first refusal read as a normal start, so the shell reads again and leaves the state before the entry; the second read as a recovery start at that epoch, never as a normal one
+  shown: for the first, the header keeps "This server was started normally, so it takes no recovery entry. Stop every instance, restore the backups, and start one for recovery." with the refusal's title, detail and request ID, and the page shows the machines; for the second, the header's new epoch, the banner for that epoch, and the header keeps "An entry is already recorded on this server, in epoch <epoch>, under another request. Nothing was added. Read the console." with the refusal's request ID, and never the normal-start text
+  absent: [token in the harness log, retained artifacts or browser storage]
+runs:
+  web:
+    check: web/e2e/auth/recovery.e2e.ts, mise run browser-auth; the texts, the header and the classification of the answers in web/src/recovery.test.ts and web/src/write.test.ts, mise run web
+    browsers: [chrome, edge, firefox, firefox-esr]
+    covers: both refusals of the entry sent from the page, with the request counts and the missing epoch header
