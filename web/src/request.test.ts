@@ -926,6 +926,29 @@ describe("the attempt bound (§8.4 item 8)", () => {
     expect(signals[0]!.aborted).toBe(false);
   });
 
+  test("a stalled read of the write's epoch does not hold the attempt past 60 s", async () => {
+    // The write's headers come at 29 s and name e2, while another answer recorded e1: GET /recovery is
+    // read, and its refusal body never ends. That read is sent within the write's bound, so the write
+    // settles at 60 s from its own send (its whole body came at 29 s) and not at 89 s from the read's.
+    const holder: { c?: Client } = {};
+    const { c, signals } = bounded(async (init, n) => {
+      if (n === 1) {
+        await holder.c!.attempt("GET", "/recovery");
+        await new Promise((resolve) => setTimeout(resolve, 29_000));
+        return new Response("{}", { status: 201, headers: { "Content-Type": "application/json", "Bronzeward-Epoch": "e2" } });
+      }
+      return n === 2 ? ok({}, "e1") : endlessBody(init, 401, problemHeaders);
+    });
+    holder.c = c;
+    const a = watch(c.attempt("POST", "/clusters", {}, "{}"));
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(a.done).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(a.done).toBe(true);
+    expect(a.value).toMatchObject({ status: 201 });
+    expect(signals).toHaveLength(3);
+  });
+
   const base = { principal: "p1", route: "/machines", query: "" };
 
   // An answer whose body never ends, and whether the client cancelled it.
