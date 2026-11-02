@@ -170,14 +170,16 @@ net.createServer((c) => { const z = net.connect(8080, process.env.BW_IDP); c.pip
   c.on("error", () => z.destroy()); z.on("error", () => c.destroy()); }).listen(p, "127.0.0.1");' \
     >/dev/null || die "cannot start the issuer forwarder in $BW_A's network namespace"
   for _ in $(seq 20); do
-    if timeout 30 docker exec "$fwd" node -e "$discovery_get" 2>/dev/null; then return 0; fi
+    if timeout -k 5 30 docker exec "$fwd" node -e "$discovery_get" 2>/dev/null; then return 0; fi
     sleep 1
   done
   die "A's namespace does not reach Zitadel's discovery document through the forwarder (docker logs $fwd)"
 }
 # discovery_get: node code that exits 0 if Zitadel's discovery document answers 200 on 127.0.0.1 at
 # the port in BW_PORT, the forwarder's. Without an answer within 5 s it exits 1, so that a forwarder
-# that accepts and never answers cannot hold a cleanup. The docker call around it is bounded too.
+# that accepts and never answers cannot hold a cleanup. The docker call around it is bounded too:
+# timeout sends TERM, and KILL 5 s later, because a docker client that waits on a daemon that hangs
+# can outlive TERM, and a Ctrl-C does not reach a command that timeout runs.
 discovery_get='const p = Number(process.env.BW_PORT);
   setTimeout(() => process.exit(1), 5000);
   require("http").get({ host: "127.0.0.1", port: p,
@@ -187,7 +189,7 @@ discovery_get='const p = Number(process.env.BW_PORT);
 # started before A's last start is in A's old namespace and still answers from there, so this asks
 # from a new container in A's current namespace.
 idp_reached() {
-  timeout 60 docker run --rm --network "container:$BW_A" --user "$(id -u):$(id -g)" -e "BW_PORT=$BW_DEV_IDP_PORT" \
+  timeout -k 5 60 docker run --rm --network "container:$BW_A" --user "$(id -u):$(id -g)" -e "BW_PORT=$BW_DEV_IDP_PORT" \
     --entrypoint node "$ZITADEL_LOGIN_IMAGE" -e "$discovery_get" >/dev/null 2>&1
 }
 
