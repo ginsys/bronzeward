@@ -236,24 +236,29 @@ export class Client {
     const records = this.epochRecords;
     const res = await this.send(path, method, headers, body);
     if (res === NOT_SENT || res === undefined) return res;
-    const ending = await this.learnEpoch(res, records, end);
-    if (ending !== undefined) {
-      end.e = ending;
-      end.now?.(ending);
+    try {
+      const ending = await this.learnEpoch(res, records, end);
+      if (ending !== undefined) {
+        end.e = ending;
+        end.now?.(ending);
+      }
+      const route = API_BASE + path.split("?")[0];
+      if (res.headers.has("Deprecation") && !this.deprecated.has(route)) {
+        this.deprecated.add(route);
+        this.opts.onDeprecation?.(route);
+      }
+      const data = epochOnly ? await credentialProblem(res) : res.ok ? await readJson(res) : await readProblem(res);
+      // §8.4 items 2 and 8: a body cut off, by the network or the bound, is an answer that did not
+      // arrive, unless its headers carried a 4xx: the server refused that attempt, so the status
+      // stands and the answer is reported cut off. A read sent for its epoch has no such answer.
+      if (data === CUT) return !epochOnly && res.status >= 400 && res.status < 500 ? { status: res.status, headers: res.headers, data } : undefined;
+      const pre = preEntry(res.status, data);
+      if (pre !== undefined) end.pre ??= pre;
+      return { status: res.status, headers: res.headers, data };
+    } finally {
+      // A renewal that threw while the epoch was learned leaves the body unread.
+      endAttempt(res);
     }
-    const route = API_BASE + path.split("?")[0];
-    if (res.headers.has("Deprecation") && !this.deprecated.has(route)) {
-      this.deprecated.add(route);
-      this.opts.onDeprecation?.(route);
-    }
-    const data = epochOnly ? await credentialProblem(res) : res.ok ? await readJson(res) : await readProblem(res);
-    // §8.4 items 2 and 8: a body cut off, by the network or the bound, is an answer that did not
-    // arrive, unless its headers carried a 4xx: the server refused that attempt, so the status
-    // stands and the answer is reported cut off. A read sent for its epoch has no such answer.
-    if (data === CUT) return !epochOnly && res.status >= 400 && res.status < 500 ? { status: res.status, headers: res.headers, data } : undefined;
-    const pre = preEntry(res.status, data);
-    if (pre !== undefined) end.pre ??= pre;
-    return { status: res.status, headers: res.headers, data };
   }
 
   // §9.5 renewal, for a write's 401: true when the page holds a renewed token.
