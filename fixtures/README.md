@@ -157,7 +157,8 @@ the slot rule are in [CONTRIBUTING.md](../CONTRIBUTING.md#several-instances-on-o
   (`fixtures/participants/session`). A device code lives 5 minutes, because a person types it.
   The login policy offers no second-factor setup after the password. The device code page is
   Zitadel's own built-in page, and the web sign-in uses the login page.
-  The login page's cookie secret is random per start and is not written down.
+  The login page's cookie secret is random per start. No file holds it, but Docker keeps it in
+  the container's configuration until `dev-idp-down` removes the container.
 - **State.** `.dev/idp/` (gitignored) holds the provider's two machine-user tokens, the target's
   signing key, the target's static `oidc` binary, which its container runs read-only, and
   `idp.env`, the `BW_TEST_IDP_*` variables `go-idp` reads. The containers are

@@ -73,10 +73,11 @@ async function signIn() {
 
 // The CLI's environment, as session's client_env: its own configuration and state, its sign-in in
 // the lab context's token file in the participant home, and no desktop session bus, so that no
-// sign-in reaches the desktop's credential store.
+// sign-in reaches the desktop's credential store, and no inherited context name.
 const env = { ...process.env, XDG_CONFIG_HOME: join(part, "home/config"), XDG_STATE_HOME: join(part, "home/state") };
 delete env.DBUS_SESSION_BUS_ADDRESS;
 delete env.BRONZEWARD_TOKEN_FILE;
+delete env.BRONZEWARD_CONTEXT;
 const ctl = join(part, "bin/bronzewardctl");
 // ended <child>: its exit code, or the error that kept it from starting (a missing CLI), so that a
 // failed spawn goes through the catch and finally below instead of an uncaught exception.
