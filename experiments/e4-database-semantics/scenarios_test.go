@@ -88,24 +88,88 @@ func TestS1CompareAndSetKeepsEveryWrite(t *testing.T) {
 }
 
 // The control: without the revision predicate every writer "wins" and all but one write is lost.
-// The reader must see it.
+// The reader must see it. A writer that waits past the busy timeout for the write lock is retried
+// (RetryBusy): on a slow disk it would otherwise count as neither a win nor a conflict, and one
+// write in 60 went missing from the count (#529).
 func TestS1BlindWriteLosesUpdates(t *testing.T) {
 	db := migrated(t)
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
 	if err := SeedFragment(ctx, db, "f1"); err != nil {
 		t.Fatal(err)
 	}
-	st, err := RaceRevisions(ctx, db, RaceOptions{Fragment: "f1", Writers: 6, Rounds: 10, Actor: "t", Blind: true})
+	st, err := RaceRevisions(ctx, db, RaceOptions{Fragment: "f1", Writers: 6, Rounds: 10, Actor: "t", Blind: true, RetryBusy: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if st.Wins != 60 {
-		t.Fatalf("blind wins %d, want 60", st.Wins)
+		t.Fatalf("blind wins %d conflicts %d busy %d, want 60 wins", st.Wins, st.Conflicts, st.Busy)
 	}
 	r := read(t, db, "s1.sql")
 	want(t, r, "final_revision", "10")
 	want(t, r, "lost_updates", "50")
 	want(t, r, "duplicate_revisions", "10")
+}
+
+// A blind writer that waits longer than the busy timeout for the write lock gets SQLITE_BUSY, and
+// RaceRevisions counts that outcome as neither a win nor a conflict. That is how
+// TestS1BlindWriteLosesUpdates saw 59 wins on a slow CI disk (#529). This forces the outcome: the
+// test holds the write lock past a 50 ms timeout, so every writer is refused. It releases the lock
+// when RaceRevisions reports a busy outcome (OnBusy) or, without a retry, once every writer has
+// given up, so no timer decides what the writers meet. It then shows that RetryBusy waits the lock
+// out and every blind write commits.
+func TestRaceRevisionsBusyWriteIsNotAWinUnlessRetried(t *testing.T) {
+	if os.Getenv("E4_TEST_PG_DSN") != "" {
+		t.Skip("SQLite-only: a write lock held past the busy timeout")
+	}
+	const (
+		writers  = 6
+		busyWait = 50
+	)
+	for _, c := range []struct {
+		name     string
+		retry    bool
+		wantWins int
+		wantBusy func(int) bool
+		describe string
+	}{
+		{"without RetryBusy the refused writers are not wins", false, 0, func(n int) bool { return n == writers }, "= 6"},
+		{"with RetryBusy every blind write commits", true, writers, func(n int) bool { return n >= 1 }, ">= 1"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			db := testDBWaiting(t, busyWait)
+			ms, err := Migrations(db.D)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if _, err := Migrate(ctx, db, ms, MigrateOptions{Runner: "test"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := SeedFragment(ctx, db, "f1"); err != nil {
+				t.Fatal(err)
+			}
+			holder, err := db.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var release sync.Once
+			unlock := func() { release.Do(func() { _ = holder.Rollback() }) }
+			t.Cleanup(unlock)
+			opt := RaceOptions{Fragment: "f1", Writers: writers, Rounds: 1, Actor: "t", Blind: true, RetryBusy: c.retry}
+			if c.retry {
+				opt.OnBusy = unlock
+			}
+			st, err := RaceRevisions(ctx, db, opt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if st.Wins != c.wantWins || !c.wantBusy(st.Busy) {
+				t.Fatalf("wins=%d conflicts=%d busy=%d, want wins=%d busy %s", st.Wins, st.Conflicts, st.Busy, c.wantWins, c.describe)
+			}
+		})
+	}
 }
 
 func TestS2PublishIsAllOrNothing(t *testing.T) {

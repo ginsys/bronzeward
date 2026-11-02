@@ -505,9 +505,12 @@ evidence.
   - `e4_kill` (`run/lib.sh`) falls back to killing the `timeout` wrapper when `pgrep` finds no
     `e4db` child, and `pgrep` is not in the preflight. In all seven kill rows, the PID that got
     the SIGKILL is the one `e4db` reported for itself.
-  - `RaceRevisions` (`scenarios.go`) counts a busy outcome instead of retrying it. Both S1
-    compare-and-set rows assert `busy=0`, and `TestS1CompareAndSetKeepsEveryWrite` fails on any
-    busy outcome, so one could not pass silently.
+  - `RaceRevisions` (`scenarios.go`) counts a busy outcome instead of retrying it, unless the
+    caller sets `RetryBusy`. Both S1 compare-and-set rows assert `busy=0`, and
+    `TestS1CompareAndSetKeepsEveryWrite` fails on any busy outcome, so one could not pass
+    silently. Only the blind control's test sets `RetryBusy`: on a slow CI disk a blind writer
+    that waited past the busy timeout counted as neither a win nor a conflict, and the test saw
+    59 wins in 60 (#529). The measured rows never set it.
   - The tests' `read` helper (`scenarios_test.go`) does not check `rows.Err()`. The harness's
     readers are `psql` and `sqlite3`, not this helper. In the tests, a truncated read can only drop
     keys, and every key a test checks is compared with a non-empty value, so a dropped key fails.
