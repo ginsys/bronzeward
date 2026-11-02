@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -158,8 +159,9 @@ func TestImportReviewRefused(t *testing.T) {
 	}
 }
 
-// TestReviewText: only the document's own line feeds start a line of the review. A declared path,
-// kind or format is escaped whole, so a line feed in one cannot forge a declaration line.
+// TestReviewText: only the document's own line feeds start a line of the review. A line feed in a
+// declared path, kind or format stays inside its declaration's line, where the pager shows it as
+// \x0a, so it cannot forge a declaration line; and the pager's wrap never cuts that escape.
 func TestReviewText(t *testing.T) {
 	var rv apitypes.IngestionReviewBody
 	if err := json.Unmarshal([]byte(`{"ingestion":"ing_BWSYNTH","document":"a: 1\nb: 2\n","declarations":{
@@ -167,12 +169,20 @@ func TestReviewText(t *testing.T) {
 		"embedded":[{"path":"doc[0]/b\n#   y","format":"yaml\n# z"}]}}`), &rv); err != nil {
 		t.Fatal(err)
 	}
-	want := "a: 1\nb: 2\n\n# declared references: 1\n" +
-		`#   doc[0]/a\x0a# declared references: 0: secret\x0a#   x version 1` + "\n" +
-		"# declared embedded documents: 1\n" +
-		`#   doc[0]/b\x0a#   y: yaml\x0a# z` + "\n"
-	if got := reviewText(rv); got != want {
-		t.Errorf("reviewText gives\n%q\nwant\n%q", got, want)
+	want := []string{"a: 1", "b: 2", "", "# declared references: 1",
+		`#   doc[0]/a\x0a# declared references: 0: secret\x0a#   x version 1`,
+		"# declared embedded documents: 1",
+		`#   doc[0]/b\x0a#   y: yaml\x0a# z`}
+	if got := wrap(reviewText(rv), 200); !slices.Equal(got, want) {
+		t.Errorf("the review shows\n%q\nwant\n%q", got, want)
+	}
+	// At 20 columns the escape of the path's line feed does not fit after the 19 columns before it,
+	// so it starts the next screen line whole.
+	rv.Declarations.References = map[string]apitypes.Reference{"doc[0]/aaaaaaaa\nb": {Kind: "secret", Version: 1}}
+	rv.Declarations.Embedded = nil
+	want = []string{"a: 1", "b: 2", "", "# declared reference", "s: 1", "#   doc[0]/aaaaaaaa", `\x0ab: secret versio`, "n 1", "# declared embedded ", "documents: 0"}
+	if got := wrap(reviewText(rv), 20); !slices.Equal(got, want) {
+		t.Errorf("at 20 columns the review shows\n%q\nwant\n%q", got, want)
 	}
 }
 
@@ -194,7 +204,7 @@ func TestRawFile(t *testing.T) {
 // none cut off, and control characters shown, not sent.
 func TestPage(t *testing.T) {
 	var w bytes.Buffer
-	if err := page("one\ntwo\nthree\nfour\nfive\n", 3, 20, strings.NewReader("ffbq"), &w); err != nil {
+	if err := page([]string{"one", "two", "three", "four", "five"}, 3, 20, strings.NewReader("ffbq"), &w); err != nil {
 		t.Fatal(err)
 	}
 	frames := strings.Split(w.String(), clearScreen)[1:]
@@ -208,22 +218,22 @@ func TestPage(t *testing.T) {
 		}
 	}
 	w.Reset()
-	if err := page("x", 3, 20, strings.NewReader(""), &w); err != nil || strings.Count(w.String(), clearScreen) != 1 {
+	if err := page([]string{"x"}, 3, 20, strings.NewReader(""), &w); err != nil || strings.Count(w.String(), clearScreen) != 1 {
 		t.Errorf("the end of the keys does not quit: %v, %q", err, w.String())
 	}
 	// On a narrow terminal the key line is cut to the width, so it cannot wrap and scroll the page.
 	w.Reset()
-	if err := page("x", 3, 20, strings.NewReader("q"), &w); err != nil || !strings.HasSuffix(w.String(), "\r\n-- (end) -- space or") {
+	if err := page([]string{"x"}, 3, 20, strings.NewReader("q"), &w); err != nil || !strings.HasSuffix(w.String(), "\r\n-- (end) -- space or") {
 		t.Errorf("the key line is not cut to 20 columns: %v, %q", err, w.String())
 	}
 	// A wide character takes two cells, so ten of them fill a line of 20.
-	if got := wrap(strings.Repeat("界", 11), 20); len(got) != 2 || got[0] != strings.Repeat("界", 10) {
+	if got := wrap([]string{strings.Repeat("界", 11)}, 20); len(got) != 2 || got[0] != strings.Repeat("界", 10) {
 		t.Errorf("wrap counts a wide character as one cell: %q", got)
 	}
 
-	// Each line is escaped as all remote text is, the line feeds alone kept, and no escape is cut.
-	got := wrap("\x1b[31mred\rback\u009bcsi\tx\xe2\x80\xae\xff\n"+strings.Repeat("a", 45), 20)
-	if want := []string{`\x1b[31mred\x0dback`, `\x9bcsi\x09x\` + "u202e", `\xff`, strings.Repeat("a", 20), strings.Repeat("a", 20), "aaaaa"}; strings.Join(got, "|") != strings.Join(want, "|") {
+	// Each line is escaped as all remote text is, a line feed inside a line too, and no escape is cut.
+	got := wrap([]string{"\x1b[31mred\rback\u009bcsi\tx\xe2\x80\xae\xff\nz", strings.Repeat("a", 45)}, 20)
+	if want := []string{`\x1b[31mred\x0dback`, `\x9bcsi\x09x\` + "u202e", `\xff\x0az`, strings.Repeat("a", 20), strings.Repeat("a", 20), "aaaaa"}; strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Errorf("wrap gives %q, want %q", got, want)
 	}
 }

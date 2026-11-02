@@ -28,12 +28,16 @@ const (
 	clearScreen  = "\x1b[H\x1b[2J"
 )
 
-// page shows text one screen at a time on a terminal of rows by cols that is in raw mode, reading
+// The smallest terminal the pager takes: one row of text above the key line, and room on a row for
+// three of the longest escape (‮, six columns), so that no escape is wider than its row.
+const minRows, minCols = 2, 20
+
+// page shows lines one screen at a time on a terminal of rows by cols that is in raw mode, reading
 // keys from keys: space or f forward, b back, q, Ctrl-C or the end of keys quits (#256 T14). It
 // has no search, save or export. Every line is wrapped to cols, so none of it is cut off, and the
-// last row is the key line, cut to cols. It writes only to w.
-func page(text string, rows, cols int, keys io.Reader, w io.Writer) error {
-	rows, cols = max(rows, 2), max(cols, 20)
+// last row is the key line, cut to cols. It writes only to w. The caller gives at least minRows by
+// minCols, as screenSize makes sure of.
+func page(text []string, rows, cols int, keys io.Reader, w io.Writer) error {
 	lines := wrap(text, cols)
 	body := rows - 1
 	top := 0
@@ -78,14 +82,14 @@ func page(text string, rows, cols int, keys io.Reader, w io.Writer) error {
 	}
 }
 
-// wrap splits text into its lines, escapes each line as all remote text is escaped
-// (client-contracts.md §6 item 8), and cuts it into lines of at most cols runes. The line feeds
-// alone stay: a tab, a carriage return, any other control character, a byte that is not UTF-8 and
-// a bidirectional control show as their Go escape, never as themselves, and an escape is never cut.
-// A line holds at most cols terminal cells, a wide character counted as two.
-func wrap(text string, cols int) []string {
+// wrap escapes each of lines as all remote text is escaped (client-contracts.md §6 item 8) and cuts
+// it into screen lines of at most cols terminal cells, a wide character counted as two. Each line
+// starts a screen line: a line feed, a tab, a carriage return, any other control character, a byte
+// that is not UTF-8 and a bidirectional control inside a line show as their Go escape, never as
+// themselves, and an escape is never cut.
+func wrap(lines []string, cols int) []string {
 	var out []string
-	for _, l := range strings.Split(strings.TrimSuffix(text, "\n"), "\n") {
+	for _, l := range lines {
 		var b strings.Builder
 		n := 0
 		for i := 0; i < len(l); {
