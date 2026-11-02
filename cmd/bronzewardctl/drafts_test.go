@@ -374,34 +374,47 @@ func TestDraftEditing(t *testing.T) {
 }
 
 // TestProfileSetRefusesMixedPins: the pins of profile set come from the draft and, for a name the
-// draft does not propose, from GET /fragments. When the epoch moves between the two reads, the pins
-// are of two snapshots: nothing is sent, and the refusal says so (client-contracts.md section 8.5).
+// draft does not propose, from GET /fragments. The write then reads GET /server before it sends.
+// When the epoch moves after the draft was read, at any of these reads, the pins are of an earlier
+// snapshot: nothing is sent, and the refusal says so (client-contracts.md section 8.5).
 func TestProfileSetRefusesMixedPins(t *testing.T) {
-	f := &draftFake{rev: 1, state: "open"}
-	srv := httptest.NewServer(f)
-	defer srv.Close()
-	automationContext(t, srv.URL)
-	exec := func(args ...string) (int, string, string) {
-		t.Helper()
-		var o, e bytes.Buffer
-		code := run(args, &o, &e)
-		return code, o.String(), e.String()
-	}
-	if code, _, e := exec("draft", "show", "drf_BWSYNTH"); code != 0 {
-		t.Fatalf("draft show: exit %d, stderr %q", code, e)
-	}
-	f.took()
-	f.mu.Lock()
-	f.fragmentsEpoch, f.serverEpoch = "ep_BWSYNTH-2", "ep_BWSYNTH-2"
-	f.mu.Unlock()
-	// --if-match gives the write an ETag that the crossing did not drop, so only this check holds it back.
-	code, out, errText := exec("profile", "set", "workers", "--draft", "drf_BWSYNTH", "--fragments", "worker-sysctls", `--if-match="1-BWSYNTH"`)
-	want := "the epoch changed from 'ep_BWSYNTH-1' to 'ep_BWSYNTH-2' while draft drf_BWSYNTH and the fragment heads were read; nothing was sent. " +
-		"Read the draft again with: draft show 'drf_BWSYNTH', then run this command again"
-	if code != 1 || out != "" || !strings.Contains(errText, want) {
-		t.Errorf("exit %d, stdout %q, stderr %q; want 1, nothing and %q", code, out, errText, want)
-	}
-	if w := f.took(); len(w) != 0 {
-		t.Errorf("sent %q; want nothing", w)
+	for _, c := range []struct {
+		name     string
+		fragment string // the name to pin
+		move     func(*draftFake)
+	}{
+		{"the fragment list shows the new epoch", "worker-sysctls", func(f *draftFake) { f.fragmentsEpoch, f.serverEpoch = "ep_BWSYNTH-2", "ep_BWSYNTH-2" }},
+		{"only the write's server read shows it", "worker-sysctls", func(f *draftFake) { f.serverEpoch = "ep_BWSYNTH-2" }},
+		{"the draft proposes the pin, so no list is read", "worker-labels", func(f *draftFake) { f.serverEpoch = "ep_BWSYNTH-2" }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := &draftFake{rev: 1, state: "open"}
+			srv := httptest.NewServer(f)
+			defer srv.Close()
+			automationContext(t, srv.URL)
+			exec := func(args ...string) (int, string, string) {
+				t.Helper()
+				var o, e bytes.Buffer
+				code := run(args, &o, &e)
+				return code, o.String(), e.String()
+			}
+			if code, _, e := exec("draft", "show", "drf_BWSYNTH"); code != 0 {
+				t.Fatalf("draft show: exit %d, stderr %q", code, e)
+			}
+			f.took()
+			f.mu.Lock()
+			c.move(f)
+			f.mu.Unlock()
+			// --if-match gives the write an ETag that the crossing did not drop, so only this check holds it back.
+			code, out, errText := exec("profile", "set", "workers", "--draft", "drf_BWSYNTH", "--fragments", c.fragment, `--if-match="1-BWSYNTH"`)
+			want := "not sent: the epoch changed from 'ep_BWSYNTH-1' to 'ep_BWSYNTH-2' after the request was built from reads of the earlier one. Nothing was sent. " +
+				"Read again with: bronzewardctl --context 'lab' draft show 'drf_BWSYNTH', then run this command again"
+			if code != 1 || out != "" || !strings.Contains(errText, want) {
+				t.Errorf("exit %d, stdout %q, stderr %q; want 1, nothing and %q", code, out, errText, want)
+			}
+			if w := f.took(); len(w) != 0 {
+				t.Errorf("sent %q; want nothing", w)
+			}
+		})
 	}
 }

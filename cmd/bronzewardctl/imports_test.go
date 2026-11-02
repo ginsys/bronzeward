@@ -32,6 +32,14 @@ type importFake struct {
 	mode       string // the staging mode, encrypted when empty
 	cut        int    // the next stream ends after this many events, with no keep-alive
 	noStream   bool   // the server answers the event stream with the JSON pages
+	// moveAfterOp, when not 0, makes the epoch ep_BWSYNTH-2 for every answer from the read of the
+	// operation after that many such reads on: the installation was restored. opReads counts them.
+	// lag holds an event stream open that long after its last event, so a lease lapses meanwhile.
+	moveAfterOp, opReads int
+	lag                  time.Duration
+	ingReads             int // the reads of the claim
+	// leaseOnFirstRead, when not 0, makes the first read of the claim set its lease to that long from now.
+	leaseOnFirstRead time.Duration
 }
 
 const ingAccepted = `{"ingestion":"ing_BWSYNTH","operation":"op_BWSYNTH-ing"}`
@@ -55,7 +63,14 @@ func (f *importFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	route := r.Method + " " + path
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	w.Header().Set("Bronzeward-Epoch", "ep_BWSYNTH-1")
+	epoch := "ep_BWSYNTH-1"
+	if f.moveAfterOp > 0 && f.opReads >= f.moveAfterOp {
+		epoch = "ep_BWSYNTH-2"
+	}
+	if path == "/operations/op_BWSYNTH-ing" {
+		f.opReads++
+	}
+	w.Header().Set("Bronzeward-Epoch", epoch)
 	w.Header().Set("Content-Type", "application/json")
 	record := func() {
 		body, _ := io.ReadAll(r.Body)
@@ -90,6 +105,10 @@ func (f *importFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.claim = "abandoned"
 		fmt.Fprint(w, f.ingestion())
 	case route == "GET /ingestions/ing_BWSYNTH":
+		f.ingReads++
+		if f.ingReads == 1 && f.leaseOnFirstRead > 0 {
+			f.lease = time.Now().Add(f.leaseOnFirstRead)
+		}
 		fmt.Fprint(w, f.ingestion())
 	case route == "GET /ingestions":
 		fmt.Fprintf(w, `{"items":[%s]}`, f.ingestion())
@@ -100,10 +119,14 @@ func (f *importFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			events, f.cut = events[:f.cut], 0
 		}
 		for i, e := range events {
-			fmt.Fprintf(w, "id: ep_BWSYNTH-1:%d\nevent: %s\ndata: %s\n\n", i+1, e[0], e[1])
+			fmt.Fprintf(w, "id: %s:%d\nevent: %s\ndata: %s\n\n", epoch, i+1, e[0], e[1])
 		}
 		if !cut {
 			fmt.Fprint(w, ": keep-alive\n\n")
+		}
+		if f.lag > 0 {
+			w.(http.Flusher).Flush()
+			time.Sleep(f.lag)
 		}
 	case path == "/operations/op_BWSYNTH-ing/events" && f.pagesGone:
 		w.Header().Set("Content-Type", "application/problem+json")
@@ -112,12 +135,12 @@ func (f *importFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case path == "/operations/op_BWSYNTH-ing/events":
 		var items []string
 		for i, e := range f.events {
-			items = append(items, fmt.Sprintf(`{"id":"ep_BWSYNTH-1:%d","at":"2026-11-01T06:00:00Z","type":%q,"data":%s}`, i+1, e[0], e[1]))
+			items = append(items, fmt.Sprintf(`{"id":"%s:%d","at":"2026-11-01T06:00:00Z","type":%q,"data":%s}`, epoch, i+1, e[0], e[1]))
 		}
 		fmt.Fprintf(w, `{"items":[%s]}`, strings.Join(items, ","))
 	case path == "/operations/op_BWSYNTH-ing":
 		fmt.Fprintf(w, `{"id":"op_BWSYNTH-ing","kind":"ingest","state":%q,"subject":{"draft":"drf_BWSYNTH","draftRevision":1},`+
-			`"result":%s,"error":%s,"createdAt":"2026-11-01T06:00:00Z","epoch":"ep_BWSYNTH-1","lastEvent":%d}`, f.state, orNull(f.result), orNull(f.problem), len(f.events))
+			`"result":%s,"error":%s,"createdAt":"2026-11-01T06:00:00Z","epoch":%q,"lastEvent":%d}`, f.state, orNull(f.result), orNull(f.problem), epoch, len(f.events))
 	default:
 		f.draftFake.ServeHTTP(w, r)
 	}
@@ -137,6 +160,39 @@ func orNull(s string) string {
 		return "null"
 	}
 	return s
+}
+
+// TestImportWaitIgnoresReadsOfAnotherEpoch: once its stream ended, the watch reads the operation and
+// then asks whether the lapsed lease decides. That question reads the claim and the operation again.
+// When the epoch moved between the watch's read and these, they are of a restored installation, not
+// of the events shown: the lease does not decide until the events are shown again (client-contracts.md
+// section 8.5). The claim is read once more, so a decision that waited for the new epoch shows it.
+func TestImportWaitIgnoresReadsOfAnotherEpoch(t *testing.T) {
+	f := &importFake{draftFake: &draftFake{rev: 1, state: "open"}}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	leaseMargin = 0
+	t.Cleanup(func() { leaseMargin = 10 * time.Second })
+	f.set("held", 1, time.Hour, "running", "", "", ev("continued", `{"type":"continued","generation":2}`))
+	// The lease lapses while the stream is held open after its event and its keep-alive, so only the
+	// question asked after the watch's read of the operation finds it lapsed.
+	f.mu.Lock()
+	f.moveAfterOp, f.lag, f.leaseOnFirstRead = 1, 600*time.Millisecond, 300*time.Millisecond
+	f.mu.Unlock()
+	var o, e bytes.Buffer
+	code := run([]string{"import", "continue", "ing_BWSYNTH", "-o", "json"}, &o, &e)
+	f.mu.Lock()
+	reads := f.ingReads
+	f.mu.Unlock()
+	if code != 3 || o.Len() != 0 || !strings.Contains(e.String(), "the outcome is unknown") {
+		t.Errorf("exit %d, stdout %q, stderr %q; want 3, nothing and the unknown outcome", code, o.String(), e.String())
+	}
+	// The first read, the one of the question after the watch's read (moved), and the one after the
+	// events were shown again.
+	if reads < 3 {
+		t.Errorf("the claim was read %d times; want 3 or more: the first answer of the question rests on reads of the new epoch", reads)
+	}
 }
 
 // TestImportLifecycle checks import start, continue, takeover, abandon and status (T15 of #256):

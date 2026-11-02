@@ -359,9 +359,12 @@ func (e *env) follow(c *client.Client, a accepted, before int) (err error) {
 	// seen is the number of the last event shown; behind, the operation's newest event when a lapsed
 	// lease was read with events still unshown. The lease decides only once those are shown.
 	seen, behind := 0, 0
+	// shownEpoch is the epoch in the ID of the last event shown.
+	shownEpoch := ""
 	o, err := c.Watch(a.Operation, client.Watch{
 		Show: func(ev client.Event) {
-			_, n, _ := strings.Cut(ev.ID, ":")
+			var n string
+			shownEpoch, n, _ = strings.Cut(ev.ID, ":")
 			seen, _ = strconv.Atoi(n)
 			var d struct {
 				Generation int    `json:"generation"`
@@ -388,13 +391,13 @@ func (e *env) follow(c *client.Client, a accepted, before int) (err error) {
 		},
 		Clear: func() {
 			fmt.Fprintln(e.err, "  (the events above no longer hold)")
-			gen, ours, settled, seen, behind = before, before == 0, "", 0, 0
+			gen, ours, settled, seen, behind, shownEpoch = before, before == 0, "", 0, 0, ""
 		},
 		Until: func() (bool, error) {
 			if settled != "" || seen < behind || time.Now().Before(next) {
 				return settled != "", nil
 			}
-			nb, err := readIngestion(c, a.Ingestion)
+			nb, claimEpoch, err := readIngestionAt(c, a.Ingestion)
 			if err != nil {
 				return false, err
 			}
@@ -411,6 +414,13 @@ func (e *env) follow(c *client.Client, a accepted, before int) (err error) {
 			var op apitypes.OperationBody
 			if err := json.Unmarshal(r.Body, &op); err != nil {
 				return false, fmt.Errorf("GET /api/v1/operations/%s: %w", pr(a.Operation), err)
+			}
+			// Both reads must be of the epoch of the events shown: after a restore the operation can have
+			// fewer events, and its last event number would then read as shown (client-contracts.md
+			// section 8.5). The watch shows the events again from the start, and this is asked again.
+			if oe := r.Header.Get("Bronzeward-Epoch"); shownEpoch != "" && (claimEpoch != shownEpoch || oe != shownEpoch) {
+				next = time.Time{}
+				return false, nil
 			}
 			behind, next = op.LastEvent, time.Time{}
 			return seen >= op.LastEvent, nil
@@ -525,15 +535,21 @@ func later(a, b time.Time) time.Time {
 }
 
 func readIngestion(c *client.Client, ing string) (*apitypes.IngestionBody, error) {
+	b, _, err := readIngestionAt(c, ing)
+	return b, err
+}
+
+// readIngestionAt is readIngestion with the epoch of the answer.
+func readIngestionAt(c *client.Client, ing string) (*apitypes.IngestionBody, string, error) {
 	r, err := c.Get("/ingestions/" + url.PathEscape(ing))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	var b apitypes.IngestionBody
 	if err := json.Unmarshal(r.Body, &b); err != nil {
-		return nil, fmt.Errorf("GET /api/v1/ingestions/%s cannot be read: %w", url.PathEscape(ing), err)
+		return nil, "", fmt.Errorf("GET /api/v1/ingestions/%s cannot be read: %w", url.PathEscape(ing), err)
 	}
-	return &b, nil
+	return &b, r.Header.Get("Bronzeward-Epoch"), nil
 }
 
 // ingestionRead reads an ingestion after an unknown outcome and says what it shows.

@@ -38,8 +38,11 @@ type Write struct {
 	Ingests          bool
 	Wait             time.Duration
 	Repeat           *Repeat
-	Read             func(*Client) (string, error)
-	Check            string
+	// Reads is the epoch of the reads that built Body. A first send under another epoch is refused
+	// (§8.5): the preflight reads of Send can show a newer one than those reads.
+	Reads string
+	Read  func(*Client) (string, error)
+	Check string
 	// Input is the input a repeat gives where the command resolved what the operator typed, so the
 	// outcome-unknown block names it instead of "the same input".
 	Input string
@@ -210,6 +213,10 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 	if w.Repeat == nil && !w.Entry {
 		// The last epoch seen before the first send, the context-use read's included (§8.4 item 3).
 		ref = c.Context.LastEpoch
+		if w.Reads != "" && ref != "" && ref != w.Reads {
+			return nil, c.Context.fail(fmt.Errorf("%s not sent: the epoch changed from %s to %s after the request was built from reads of the earlier one. Nothing was sent. Read again with: bronzewardctl --context %s %s, then run this command again",
+				route, ShellWord(w.Reads), ShellWord(ref), ShellWord(c.Context.Name), w.Check))
+		}
 	}
 	if ref == "" && !w.Entry {
 		// A context that has seen no epoch takes it from GET /recovery (§8.4 item 3).
