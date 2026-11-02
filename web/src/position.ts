@@ -52,8 +52,10 @@ function tags(text: string): { index: number; tag: string; name: string }[] {
   const found: { index: number; tag: string; name: string }[] = [];
   // A plain scalar's words: no blank, flow indicator, or colon before a blank; blanks between words.
   const word = String.raw`(?:[^\s,[\]{}:]|:(?=[^\s,[\]{}]))+`;
-  // A block scalar's header ends its line: | or >, then its chomping and indentation indicators.
-  const header = String.raw`([|>][-+1-9]{0,2})(?=[ \t]*\n)`;
+  // A block scalar's header ends its line, a comment aside: | or >, then at most one chomping and
+  // one indentation indicator, in either order. The server also takes a # right after it as a
+  // comment, which the blanking above leaves.
+  const header = String.raw`([|>](?:[-+][1-9]?|[1-9][-+]?)?)(?=[ \t]*(?:#[^\n]*)?\r?\n)`;
   const key = /[ \t]*:(?:\s|$)/y;
   for (const m of masked.matchAll(new RegExp(String.raw`!bwref\s+(?:"((?:[^"\\]|\\[^])*)"|'((?:[^'\n]|'')*)'|${header}|(${word}(?:[ \t]+${word})*))`, "g"))) {
     let end = m.index + m[0].length;
@@ -129,30 +131,34 @@ function continues(masked: string, tag: number, end: number): boolean {
 // content too. The lines are read from the text: a # in them is no comment.
 // With an indentation indicator the content's indentation depends on the holding node's column,
 // which this scan does not read: such a scalar names nothing here, and the server still checks it.
+// A CRLF is one line break: a line's carriage return before its line feed is no text. A carriage
+// return alone also breaks a line for the server; this scan does not read it as one.
 const spaces = (line: string) => line.length - line.replace(/^ +/, "").length;
+const bare = (line: string) => (line.endsWith("\r") ? line.slice(0, -1) : line);
 function block(text: string, masked: string, tag: number, end: number, header: string): { name: string; end: number } | undefined {
   const eol = text.indexOf("\n", end);
   if (/\d/.test(header) || eol === -1) return undefined;
   const start = eol + 1;
-  const first = lineAt(text, start);
+  const line = lineAt(text, start);
+  const first = bare(line);
   const depth = spaces(first);
   if (first.trim() === "" || depth <= Math.max(holder(masked, tag), 0)) return undefined;
   if (!header.includes("-") && start + first.length < text.length) return undefined;
-  for (let at = start + first.length + 1; at < text.length; ) {
+  for (let at = start + line.length + 1; at < text.length; ) {
     const l = lineAt(text, at);
     if (l.trim() !== "") {
       if (spaces(l) >= depth && !MARKER.test(l)) return undefined;
       break;
     }
-    if (l.length > depth) return undefined;
+    if (bare(l).length > depth) return undefined;
     at += l.length + 1;
   }
   return { name: first.slice(depth), end: start + first.length };
 }
 
 // A double-quoted scalar's text with YAML's escapes decoded (YAML 1.2 §5.7); undefined for an
-// escape YAML does not have. An escaped line break and the next line's leading blanks are dropped;
-// an unescaped one folds into a blank or a line break, which no name holds.
+// escape YAML does not have. An escaped line break (LF or CRLF) and the next line's leading blanks
+// are dropped; an unescaped one folds into a blank or a line break, which no name holds.
 const ESCAPES: Record<string, string> = { "0": "\0", a: "\x07", b: "\b", t: "\t", "\t": "\t", n: "\n", v: "\v", f: "\f", r: "\r", e: "\x1b", " ": " ", '"': '"', "/": "/", "\\": "\\", N: "\x85", _: "\xa0", L: " ", P: " " };
 const HEX: Record<string, number> = { x: 2, u: 4, U: 8 };
 function decoded(body: string): string | undefined {
@@ -163,7 +169,8 @@ function decoded(body: string): string | undefined {
       continue;
     }
     const k = body[++i] ?? "";
-    if (k === "\n") {
+    if (k === "\r" && body[i + 1] === "\n") i++;
+    if (body[i] === "\n") {
       while (body[i + 1] === " " || body[i + 1] === "\t") i++;
       continue;
     }
