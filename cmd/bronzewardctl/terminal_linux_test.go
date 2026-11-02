@@ -57,6 +57,57 @@ func onPty(t *testing.T, rows, cols uint16) (*os.File, *os.File) {
 	return ctl, in
 }
 
+// TestTypedAheadLineOnTerminal checks #580 on a real terminal: keys typed while the pager had the
+// terminal raw stay queued untranslated, carriage returns included. The queued bytes hold a
+// carriage return and reach terminalLine with the mark after it, so the marks are refused, and
+// nothing waits for a further key.
+func TestTypedAheadLineOnTerminal(t *testing.T) {
+	ctl, tty := pty(t)
+	in, err := os.OpenFile(tty, os.O_RDWR|syscall.O_NOCTTY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { in.Close() })
+	termios := func(f *os.File, req uintptr, arg unsafe.Pointer) {
+		if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), req, uintptr(arg)); errno != 0 {
+			t.Fatalf("ioctl %#x: %v", req, errno)
+		}
+	}
+	var cooked syscall.Termios
+	termios(ctl, syscall.TCGETS, unsafe.Pointer(&cooked))
+	raw := cooked
+	raw.Lflag &^= syscall.ICANON
+	raw.Iflag &^= syscall.ICRNL
+	termios(ctl, syscall.TCSETS, unsafe.Pointer(&raw))
+	typed := "doc[0]/a\r" + strings.Repeat("k", terminalLine-len("doc[0]/a\r"))
+	if _, err := ctl.WriteString(typed); err != nil {
+		t.Fatal(err)
+	}
+	// Wait until the terminal has queued every byte, then give canonical mode back and type Enter,
+	// which ICRNL makes a line feed.
+	for queued, end := int32(0), time.Now().Add(5*time.Second); int(queued) < len(typed); {
+		if time.Now().After(end) {
+			t.Fatalf("%d of %d bytes queued", queued, len(typed))
+		}
+		time.Sleep(10 * time.Millisecond)
+		termios(in, syscall.TIOCINQ, unsafe.Pointer(&queued))
+	}
+	termios(ctl, syscall.TCSETS, unsafe.Pointer(&cooked))
+	if _, err := ctl.WriteString("\r"); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { _, err := scanMarks(in, true, nil); done <- err }()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "mark 2 is 4095 bytes or more, which a terminal can cut short") {
+			t.Errorf("scanMarks: %v; want mark 2 refused as cut short", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("scanMarks waited for a further key")
+	}
+}
+
 // TestImportReviewOnTerminal runs import review on a pseudo-terminal. A terminal smaller than 20
 // columns by 2 rows is refused before the review is read. On a mark whose outcome is unknown (exit
 // 3), the review holds back its standard output: the terminal shows the review and nothing of the
