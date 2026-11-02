@@ -495,20 +495,30 @@ t8() {
 }
 # t9_curl <file> <seconds> [last event ID]: the event stream of t9_op on A, read with the
 # automation token, which A accepts on either issuer. The token goes to curl on stdin, from the
-# shell's builtin printf. The body goes to <file>. Its status is curl's.
-t9_op='' t9_rc=0 t9_reader=''
+# shell's builtin printf. The body goes to <file>, and A's HTTP status and content type to stdout.
+# Its status is curl's.
+t9_op='' t9_reader=''
 t9_curl() {
   local resume=()
   [ -z "${3:-}" ] || resume=(--header "Last-Event-ID: $3")
   printf 'Authorization: Bearer %s\n' "$(<"$STATE/automation-token")" |
     command curl --disable --noproxy '*' --silent --no-buffer --max-time "$2" --output "$1" \
+      --write-out '%{http_code} %{content_type}' \
       --header @- --header 'Accept: text/event-stream' ${resume[@]+"${resume[@]}"} \
       "http://127.0.0.1:$SERVER_A_PORT/api/v1/operations/$t9_op/events"
 }
-# t9_stream <file> <seconds> [last event ID]: t9_curl, its exit status in t9_rc.
-t9_stream() {
-  t9_rc=0
-  t9_curl "$@" || t9_rc=$?
+# t9_read <what> <file> <seconds> [last event ID]: t9_curl, and the step fails unless curl ended by
+# itself and A answered 200 with an event stream. curl exits 0 on an HTTP error, so a refused
+# resumption would otherwise read as one with no new event (scripts/test/participant-session-test.sh).
+t9_read() {
+  local what=$1 rc=0 got
+  shift
+  got=$(t9_curl "$@") || rc=$?
+  [ "$rc" -eq 0 ] || die "$what did not end by itself (curl $rc)"
+  case $got in
+    '200 text/event-stream' | '200 text/event-stream;'*) ;;
+    *) die "$what was refused: HTTP ${got:-no answer}, not 200 with an event stream" ;;
+  esac
 }
 # t9_ids <file>...: the IDs of the complete events the streams sent, in order. An event is complete
 # at its blank line; one that the stop cut off is not counted, so its resumption must send it.
@@ -555,8 +565,8 @@ t9_disconnect() {
   # The pipeline itself in the background, not t9_curl, whose subshell would be $!: the last
   # command is curl, so $! is curl's, kill reaches it and wait returns its status.
   printf 'Authorization: Bearer %s\n' "$(<"$STATE/automation-token")" |
-    command curl --disable --noproxy '*' --silent --no-buffer --max-time 600 --output "$dir/before" \
-      --header @- --header 'Accept: text/event-stream' \
+    command curl --disable --noproxy '*' --silent --fail --no-buffer --max-time 600 --output "$dir/before" \
+      --header @---header 'Accept: text/event-stream' \
       "http://127.0.0.1:$SERVER_A_PORT/api/v1/operations/$t9_op/events" &
   t9_reader=$!
   for _ in $(seq 20); do
@@ -584,12 +594,10 @@ t9_disconnect() {
   restart_a >>"$log" 2>&1 || die "cannot start A again; its output is in $log"
   echo "A is started again: the participant's client can resume"
   last=$(t9_ids "$dir/before" | tail -n 1)
-  t9_stream "$dir/after" 300 "$last"
-  [ "$t9_rc" -eq 0 ] || die "the resumed stream did not end by itself (curl $t9_rc)"
+  t9_read "the resumed stream" "$dir/after" 300 "$last"
   state=$(sql "SELECT state FROM operation WHERE id = '$t9_op'")
   [ "$state" = completed ] || die "the apply did not complete after A's restart: $state (a product finding; keep $dir)"
-  t9_stream "$dir/full" 60
-  [ "$t9_rc" -eq 0 ] || die "the full replay did not end by itself (curl $t9_rc)"
+  t9_read "the full replay" "$dir/full" 60
   [ "$(t9_ids "$dir/before" "$dir/after")" = "$(t9_ids "$dir/full")" ] ||
     die "the resumed stream's events differ from the full replay: an event was lost or repeated (see $dir)"
   trap - EXIT INT TERM
