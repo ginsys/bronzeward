@@ -6,8 +6,9 @@
 
 import { type ReactNode, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { components } from "./api/v1";
-import { ProfilePane } from "./composition.tsx";
+import { AssignmentPane, ProfilePane } from "./composition.tsx";
 import { Form, field, Result, startsNew, Text, unsaved, useSend, useUnsaved, useWrites } from "./forms.tsx";
+import { LAYERS } from "./layers.ts";
 import { Id, type Load, Ref, Scroll, short, useItem, useList, useReads, usePending, useSettled } from "./list.tsx";
 import type { Cluster } from "./machines.tsx";
 import { references, type Spot, spotOfLine, spotOfPath, spotOfReference } from "./position.ts";
@@ -24,8 +25,7 @@ type Fragment = S["FragmentBody"];
 type Declared = S["FragmentDeclarations"]["references"];
 type Embedded = S["Embedded"];
 
-// Composition order, global first (#257 B17; persistence-api §9.3).
-export const LAYERS = ["global", "site", "cluster", "role", "workload", "override"] as const;
+export { LAYERS };
 export const KINDS = ["string", "integer", "boolean", "mapping"] as const;
 export const NOT_RENDERED = "Not rendered yet. A machine's configuration exists only after publication (gap G5).";
 export const NO_ETAG = "Not sent: this page has not read the draft under the current epoch. Read it again first.";
@@ -113,13 +113,13 @@ export function change(e: Source): string {
 // once a draft read shows it. The pane then reads that entry's revisions and conflicts
 // (ginsys/bronzeward#517 H1).
 export function paneEntry(sources: Source[], selected: string | undefined, claimed: string | undefined) {
-  const k = (selected === "fragment:" || selected === "profile:") && claimed !== undefined ? `${selected}${claimed}` : selected;
+  const k = (selected === "fragment:" || selected === "profile:" || selected === "assignment:") && claimed !== undefined ? `${selected}${claimed}` : selected;
   return sources.find((e) => keyOf(e) === k);
 }
 
 // Whether the draft already holds an entry of this kind and name, a removed one included: a PUT to
 // it would replace that entry unread (ginsys/bronzeward#517 H4).
-export const inUse = (draft: Pick<Draft, "entries">, name: string, kind: "fragment" | "profile" = "fragment") => draft.entries.some((e) => isSource(e) && e.kind === kind && nameOf(e) === name);
+export const inUse = (draft: Pick<Draft, "entries">, name: string, kind: "fragment" | "profile" | "assignment" = "fragment") => draft.entries.some((e) => isSource(e) && e.kind === kind && nameOf(e) === name);
 
 // The Changes page's drafts, every page read, filtered by cluster in the browser (#339 scope).
 export function Drafts() {
@@ -250,17 +250,20 @@ export function DraftItem({ id }: { id: string }) {
           <ul aria-label="Entries">
             {d.entries.map((e) => isSource(e) ? (
               <li key={keyOf(e)}>
-                {e.kind === "fragment" || e.kind === "profile" ? <button type="button" aria-pressed={current === keyOf(e)} onClick={() => pick(keyOf(e))}>{e.kind} {nameOf(e)}</button> : <>{e.kind} {short(nameOf(e))}</>}
+                <button type="button" aria-pressed={current === keyOf(e)} onClick={() => pick(keyOf(e))}>{e.kind} {e.kind === "assignment" ? short(nameOf(e)) : nameOf(e)}</button>
                 {" "}{change(e)}
               </li>
             ) : <li key={`import-base:${e.machine}`}>import base <Id id={e.machine} /> <Id id={e.revision} /></li>)}
           </ul>
-          {d.state === "open" && <p><Action label="Add fragment" needs={["author"]} onClick={() => pick("fragment:")} />{" "}<Action label="Add profile" needs={["author"]} onClick={() => pick("profile:")} /></p>}
+          {d.state === "open" && <p><Action label="Add fragment" needs={["author"]} onClick={() => pick("fragment:")} />{" "}<Action label="Add profile" needs={["author"]} onClick={() => pick("profile:")} />{" "}<Action label="Add assignment" needs={["author"]} onClick={() => pick("assignment:")} /></p>}
           {selected !== undefined && selected.startsWith("fragment:") && (
             <FragmentPane key={pane} draft={d} entry={entry} seeChange={seeChange} claim={claim} shown={!unshown} />
           )}
           {selected !== undefined && selected.startsWith("profile:") && (
             <ProfilePane key={pane} draft={d} entry={entry} seeChange={seeChange} claim={claim} shown={!unshown} />
+          )}
+          {selected !== undefined && selected.startsWith("assignment:") && (
+            <AssignmentPane key={pane} draft={d} entry={entry} seeChange={seeChange} claim={claim} shown={!unshown} />
           )}
           <Status testid="not-rendered">{NOT_RENDERED}</Status>
           {d.state === "open" && <DiscardDraft draft={d} written={written} seeChange={seeChange} />}

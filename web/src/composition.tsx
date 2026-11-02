@@ -3,12 +3,17 @@
 // names, so a later save of a fragment does not change it. The list lives in the fragment editor's
 // `Held` as one revision id per line, so `editor` gives it the same conflict rules (B14), unsaved
 // guard and unknown-outcome handling as a fragment's text, unchanged.
+//
+// The assignment entry (also #339) works the same way: its list lives in the editor's text as one
+// `<slot> <name>` line per member, where the slot is `profile` or one of the six layers.
 
 import { useEffect, useReducer, useRef, useState } from "react";
 import type { components } from "./api/v1";
-import { change, doneOnce, editor, EMPTY, type Held, holdsUnsaved, inUse, keptETag, NO_ETAG, sendRefusal, settledFragment, unread, WriteResult } from "./drafts.tsx";
+import { change, declaredOf, doneOnce, editor, EMPTY, type Held, holdsUnsaved, inUse, keptETag, NO_ETAG, rows, sendRefusal, settledFragment, unread, WriteResult } from "./drafts.tsx";
 import { startsNew, useSend, useUnsaved, useWrites } from "./forms.tsx";
+import { LAYERS } from "./layers.ts";
 import { short, useList, usePending, useSettled } from "./list.tsx";
+import { references } from "./position.ts";
 import { Action } from "./shell.tsx";
 import { Conflict, Status } from "./states.tsx";
 
@@ -16,6 +21,11 @@ type S = components["schemas"];
 type Draft = S["DraftBody"];
 type Source = S["SourceEntry"];
 type Fragment = S["FragmentBody"];
+type Profile = S["ProfileBody"];
+type Machine = S["MachineBody"];
+type Revision = S["FragmentRevisionBody"];
+type Declared = S["FragmentDeclarations"]["references"];
+const enc = encodeURIComponent;
 
 export const PINS_MAX = 256;
 export const PINS_STATEMENT = "A profile pins these fragment revisions. A later save of a fragment does not change the pin.";
@@ -54,6 +64,21 @@ export function choices(draft: { cluster: string; entries: Draft["entries"] }, f
   return [...own, ...base].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 export const isCurrent = (pin: string, options: Choice[]) => options.some((c) => c.revision === pin);
+
+// The pins whose name a read must still give. Nothing is asked while the cluster's fragment list
+// pages: before it ends, every base pin looks unknown (ginsys/bronzeward#563).
+export const unknownPins = (pins: string[], known: Map<string, string>, names: Record<string, string>, loading: boolean) =>
+  loading ? [] : pins.filter((r) => !known.has(r) && names[r] === undefined);
+
+// Whether the view is still shown: an answer that arrives later sets nothing.
+function useMounted() {
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => void (mounted.current = false);
+  }, []);
+  return mounted;
+}
 // The picker's selection, or none once a draft read took that revision away.
 export const stillOffered = (chosen: string, options: Choice[]) => (isCurrent(chosen, options) ? chosen : "");
 
@@ -86,15 +111,11 @@ export function ProfilePane({ draft, entry, seeChange, claim = () => {}, shown =
   const pins = pinsOf(held);
   const known = new Map(options.map((c) => [c.revision, c.name]));
   const label = (revision: string) => known.get(revision) ?? (names[revision] || short(revision));
-  const lookup = pins.filter((r) => !known.has(r) && names[r] === undefined).join(",");
+  const lookup = unknownPins(pins, known, names, fragments.kind === "loading").join(",");
   // Each uncached pin is asked for once, on its own: an answer changes `lookup` and restarts this
   // effect, which must not ask again for a pin whose read is still in flight.
   const asked = useRef(new Set<string>());
-  const mounted = useRef(true);
-  useEffect(() => {
-    mounted.current = true;
-    return () => void (mounted.current = false);
-  }, []);
+  const mounted = useMounted();
   useEffect(() => {
     for (const r of lookup === "" ? [] : lookup.split(",")) {
       if (asked.current.has(r)) continue;
@@ -268,6 +289,425 @@ export function ProfilePane({ draft, entry, seeChange, claim = () => {}, shown =
         const r = (data as Partial<S["SourceUpdate"]>).entry?.revision;
         return `Profile ${name} saved in draft ${short(draft.id)}${typeof r === "string" ? ` (revision ${short(r)})` : ""}.`;
       }} />
+    </section>
+  );
+}
+
+// ---- The assignment entry (W4) ----
+
+export const ASSIGNMENT_MAX = 256;
+export const ASSIGNMENT_STATEMENT = "An assignment selects profiles and fragments of a machine by name. A later save of one of them changes what the machine composes.";
+export const NOT_OFFERED = "not available in this draft";
+export const SLOTS = ["profile", ...LAYERS] as const;
+export type Slot = (typeof SLOTS)[number];
+export type Layer = (typeof LAYERS)[number];
+export type Lists = Record<Slot, string[]>;
+export const noLists = (): Lists => ({ profile: [], global: [], site: [], cluster: [], role: [], workload: [], override: [] });
+const isLayer = (x: string): x is Layer => (LAYERS as readonly string[]).includes(x);
+
+// The text the editor holds: one `<slot> <name>` line per member, profiles first, then the layers in
+// composition order. No member is no text.
+export function listsOf(h: Held): Lists {
+  const lists = noLists();
+  for (const line of h.document === "" ? [] : h.document.split("\n")) {
+    const i = line.indexOf(" ");
+    const slot = line.slice(0, i) as Slot;
+    if (i > 0 && SLOTS.includes(slot)) lists[slot].push(line.slice(i + 1));
+  }
+  return lists;
+}
+export const withLists = (base: Held, lists: Lists): Held => ({ ...base, document: SLOTS.flatMap((s) => lists[s].map((n) => `${s} ${n}`)).join("\n") });
+export function fromRevision(r: Pick<S["AssignmentRevisionBody"], "profiles" | "fragments">): Lists {
+  const lists = noLists();
+  lists.profile = [...r.profiles];
+  for (const l of LAYERS) lists[l] = Object.hasOwn(r.fragments, l) ? [...r.fragments[l]!] : [];
+  return lists;
+}
+
+const total = (l: Lists) => SLOTS.reduce((n, s) => n + l[s].length, 0);
+// An empty layer is left out: a layer that is sent lists at least one fragment.
+export const assignmentBody = (l: Lists) => ({
+  profiles: l.profile,
+  fragments: Object.fromEntries(LAYERS.filter((x) => l[x].length > 0).map((x) => [x, l[x]])),
+});
+
+// Why Save sends nothing for this list, if it does not (api: updateAssignment).
+export function assignmentRefusal(l: Lists): string | undefined {
+  const n = total(l);
+  if (n === 0) return "Not sent: an assignment selects at least one profile or fragment. Remove the entry to drop the assignment.";
+  if (n > ASSIGNMENT_MAX) return `Not sent: an assignment selects at most ${ASSIGNMENT_MAX} profiles and fragments in all.`;
+  const twice = (names: string[]) => names.find((x, i) => names.indexOf(x) !== i);
+  const p = twice(l.profile);
+  if (p !== undefined) return `Not sent: profile ${p} is selected twice.`;
+  const f = twice(LAYERS.flatMap((x) => l[x]));
+  return f === undefined ? undefined : `Not sent: fragment ${f} is selected twice.`;
+}
+
+// The profiles an assignment can name: the draft's own, and the cluster's with a head revision. A
+// profile the draft removes is not offered.
+export function profileOffers(draft: Pick<Draft, "cluster" | "entries">, profiles: Profile[]): string[] {
+  const held = draft.entries.filter((e): e is Source => e.kind === "profile");
+  const names = new Set(held.map((e) => e.name));
+  const own = held.flatMap((e) => (e.revision == null || e.name === undefined ? [] : [e.name]));
+  const base = profiles.flatMap((p) => (p.cluster !== draft.cluster || p.revision === null || names.has(p.name) ? [] : [p.name]));
+  return [...own, ...base].sort();
+}
+
+// The fragments a layer can name: only fragments of that layer. A fragment the draft holds has the
+// layer of its revision, `layers` by revision id; one whose layer is not read yet is left out.
+export function fragmentOffers(draft: Pick<Draft, "cluster" | "entries">, fragments: Fragment[], layers: Record<string, string>): Record<Layer, string[]> {
+  const out: Record<Layer, string[]> = { global: [], site: [], cluster: [], role: [], workload: [], override: [] };
+  const held = draft.entries.filter((e): e is Source => e.kind === "fragment");
+  const names = new Set(held.map((e) => e.name));
+  for (const e of held) {
+    const layer = e.revision == null || !Object.hasOwn(layers, e.revision) ? "" : layers[e.revision]!;
+    if (e.name !== undefined && isLayer(layer)) out[layer].push(e.name);
+  }
+  for (const f of fragments) if (f.cluster === draft.cluster && f.revision !== null && !names.has(f.name) && isLayer(f.layer)) out[f.layer].push(f.name);
+  for (const l of LAYERS) out[l].sort();
+  return out;
+}
+
+// The machines of the draft's cluster that the draft holds no assignment for.
+export const machineOffers = (draft: Pick<Draft, "cluster" | "entries">, machines: Machine[]) =>
+  machines.filter((m) => m.cluster === draft.cluster && !inUse(draft, m.id, "assignment"));
+
+// Composition order (operator-experience §5.4): layers from global to override; inside a layer the
+// profile pins first, in profile order, then the assignment's own fragments.
+export interface Composed { layer: Layer; name: string; revision: string; via: string | undefined }
+export function compose(profiles: { name: string; pins: { name: string; revision: string; layer: string }[] }[], own: { layer: Layer; name: string; revision: string }[]): Composed[] {
+  return LAYERS.flatMap((layer) => [
+    ...profiles.flatMap((p) => p.pins.filter((x) => x.layer === layer).map((x) => ({ layer, name: x.name, revision: x.revision, via: p.name }))),
+    ...own.filter((x) => x.layer === layer).map((x) => ({ layer, name: x.name, revision: x.revision, via: undefined })),
+  ]);
+}
+
+// What a fragment revision does with each reference: its name, its declaration, and the state.
+// Never a value, and never the document.
+export interface RefState { name: string; declared: Declared[string] | undefined; state: "declared" | "carried, not declared" | "declared, not in the document" }
+export function referenceStates(document: string, declared: Declared): RefState[] {
+  const used = references(document);
+  return rows(document, declared).map((name) => {
+    const d = declaredOf(declared, name);
+    return { name, declared: d, state: d === undefined ? "carried, not declared" : used.includes(name) ? "declared" : "declared, not in the document" };
+  });
+}
+
+export interface Composition { order: Composed[]; revisions: Record<string, Revision> }
+// Reads what the order needs, one read at a time: the revision of each profile, the fragment
+// revisions it pins, and the revision of each fragment the assignment selects. The text of a failure
+// when a read gives none.
+export async function readComposition(
+  draft: Pick<Draft, "cluster" | "entries">, lists: Lists, profiles: Profile[], fragments: Fragment[],
+  get: <T>(path: string) => Promise<T | undefined>,
+): Promise<Composition | string> {
+  const revisions: Record<string, Revision> = {};
+  const fragment = async (id: string) => {
+    if (!Object.hasOwn(revisions, id)) {
+      const r = await get<Revision>(`/fragment-revisions/${enc(id)}`);
+      if (r === undefined) return undefined;
+      revisions[id] = r;
+    }
+    return revisions[id];
+  };
+  // The draft's own revision of a name, else the head of the cluster's.
+  const revisionOf = (kind: "profile" | "fragment", name: string) => {
+    const own = draft.entries.find((e): e is Source => e.kind === kind && e.name === name);
+    return own !== undefined ? own.revision : (kind === "profile" ? profiles : fragments).find((x) => x.cluster === draft.cluster && x.name === name)?.revision;
+  };
+  const used: Parameters<typeof compose>[0] = [];
+  for (const name of lists.profile) {
+    const id = revisionOf("profile", name);
+    if (id == null) return `Profile ${name} has no revision to read.`;
+    const p = await get<S["ProfileRevisionBody"]>(`/profile-revisions/${enc(id)}`);
+    if (p === undefined) return `The revision of profile ${name} could not be read.`;
+    const pins: Parameters<typeof compose>[0][number]["pins"] = [];
+    for (const r of p.fragments) {
+      const f = await fragment(r);
+      if (f === undefined) return `A fragment revision that profile ${name} pins could not be read.`;
+      pins.push({ name: f.name, revision: f.id, layer: f.layer });
+    }
+    used.push({ name, pins });
+  }
+  const own: Parameters<typeof compose>[1] = [];
+  for (const layer of LAYERS) {
+    for (const name of lists[layer]) {
+      const id = revisionOf("fragment", name);
+      if (id == null) return `Fragment ${name} has no revision to read.`;
+      const f = await fragment(id);
+      if (f === undefined) return `The revision of fragment ${name} could not be read.`;
+      own.push({ layer, name, revision: f.id });
+    }
+  }
+  return { order: compose(used, own), revisions };
+}
+
+// One section of the list (the profiles, or one layer): rows with Move up, Move down and Remove, and
+// a picker for what the section can still take. After a move the focus stays on the moved row's
+// button, or on the other one at the end of the list.
+function Members({ slot, names, offers, ready, open, editable, change: set }: { slot: Slot; names: string[]; offers: string[]; ready: boolean; open: boolean; editable: boolean; change: (next: string[]) => void }) {
+  const title = slot === "profile" ? "Profiles" : `Layer ${slot}`;
+  const buttons = useRef(new Map<string, HTMLButtonElement>());
+  const focus = useRef<{ name: string; by: -1 | 1 }>(undefined);
+  useEffect(() => {
+    const f = focus.current;
+    if (f === undefined) return;
+    focus.current = undefined;
+    const mine = buttons.current.get(`${f.name}:${f.by}`);
+    (mine !== undefined && !mine.disabled ? mine : buttons.current.get(`${f.name}:${-f.by}`))?.focus();
+  });
+  const [chosen, setPick] = useState("");
+  const free = offers.filter((n) => !names.includes(n));
+  const pick = free.includes(chosen) ? chosen : "";
+  const ref = (n: string, by: -1 | 1) => (b: HTMLButtonElement | null) => void (b === null ? buttons.current.delete(`${n}:${by}`) : buttons.current.set(`${n}:${by}`, b));
+  return (
+    <>
+      <h4>{title}, in order</h4>
+      {names.length === 0 ? <p>None.</p> : (
+        <ol aria-label={title}>
+          {names.map((n, i) => (
+            <li key={n}>
+              {n}{ready && !offers.includes(n) && ` ${NOT_OFFERED}`}{" "}
+              <button type="button" ref={ref(n, -1)} aria-label={`Move up ${slot} ${n}`} disabled={!editable || i === 0} onClick={() => { focus.current = { name: n, by: -1 }; set(move(names, i, -1)); }}>Move up</button>{" "}
+              <button type="button" ref={ref(n, 1)} aria-label={`Move down ${slot} ${n}`} disabled={!editable || i === names.length - 1} onClick={() => { focus.current = { name: n, by: 1 }; set(move(names, i, 1)); }}>Move down</button>{" "}
+              <button type="button" aria-label={`Remove ${slot} ${n} from the list`} disabled={!editable} onClick={() => set(withoutPin(names, i))}>Remove from list</button>
+            </li>
+          ))}
+        </ol>
+      )}
+      {open && (
+        <p>
+          <label>{slot === "profile" ? "Profile:" : "Fragment:"}{" "}
+            <select aria-label={`Add to ${title}`} value={pick} onChange={(e) => setPick(e.target.value)} disabled={!editable}>
+              <option value="">choose</option>
+              {free.map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </label>{" "}
+          <button type="button" disabled={!editable || pick === ""} onClick={() => { set(withPin(names, pick)); setPick(""); }}>Add to {slot === "profile" ? "profiles" : `layer ${slot}`}</button>
+        </p>
+      )}
+    </>
+  );
+}
+
+// The assignment entry (W4): the machine, the profiles in order, the six layers' fragments in order,
+// and on request the composition order and the references. Save is PUT, Remove DELETE.
+export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, shown = true }: { draft: Draft; entry: Source | undefined; seeChange: () => void; claim?: (name: string) => void; shown?: boolean }) {
+  const writes = useWrites();
+  const read = useSettled();
+  const mounted = useMounted();
+  const [typed, setMachine] = useState("");
+  const machine = entry === undefined ? typed : (entry.machine ?? "");
+  const [attempt, retry] = useState(0);
+  const [{ held, saved, conflict, writes: done = 0, note }, act] = useReducer(editor, { held: EMPTY, saved: EMPTY });
+  const lists = listsOf(held);
+  const hold = (next: Lists) => act({ kind: "type", held: withLists(held, next) });
+  const setNote = (text?: string) => act({ kind: "note", ...(text !== undefined && { text }) });
+  const [w, send] = useSend();
+  const [loaded, setLoaded] = useState<string | undefined>();
+  const [failed, setFailed] = useState(false);
+  const waits = unread(entry?.revision, loaded);
+  const open = draft.state === "open";
+  const editable = open && !waits;
+  const unsavedList = holdsUnsaved(held, saved, conflict?.mine);
+  useUnsaved(`assignment ${machine === "" ? "(new)" : short(machine)} of draft ${short(draft.id)}`, unsavedList);
+  const drafted = useRef(draft.revision);
+
+  // What the lists can offer. A fragment the draft holds has the layer of its revision, read once.
+  const [profiles] = useList<Profile>("/profiles", "", true);
+  const [fragments] = useList<Fragment>("/fragments", "", true);
+  const [machines] = useList<Machine>("/machines", new URLSearchParams({ cluster: draft.cluster }).toString(), true);
+  const [layers, setLayers] = useState<Record<string, string>>({});
+  const asked = useRef(new Set<string>());
+  useEffect(() => {
+    for (const e of draft.entries) {
+      const r = e.kind === "fragment" ? e.revision : null;
+      if (r == null || asked.current.has(r)) continue;
+      asked.current.add(r);
+      void read<Revision>(`/fragment-revisions/${enc(r)}`, () => mounted.current).then((x) => {
+        if (mounted.current) setLayers((l) => ({ ...l, [r]: x?.kind === "ok" ? x.data.layer : "" }));
+      });
+    }
+  }, [read, draft.entries]);
+  const ready = profiles.kind === "ok" && fragments.kind === "ok" && draft.entries.every((e) => e.kind !== "fragment" || e.revision == null || layers[e.revision] !== undefined);
+  const profileList = profiles.kind === "ok" ? profiles.data.items : [];
+  const fragmentList = fragments.kind === "ok" ? fragments.data.items : [];
+  const forProfiles = profileOffers(draft, profileList);
+  const forLayers = fragmentOffers(draft, fragmentList, layers);
+
+  useEffect(() => {
+    const revision = entry?.revision;
+    if (revision == null) return;
+    let live = true;
+    setFailed(false);
+    act({ kind: "reading", on: true });
+    void read<S["AssignmentRevisionBody"]>(`/assignment-revisions/${enc(revision)}`, () => live).then((r) => {
+      if (!live) return;
+      if (r?.kind !== "ok") {
+        setFailed(true);
+        return setNote("The entry's revision could not be read.");
+      }
+      setLoaded(revision);
+      act({ kind: "read", text: withLists(EMPTY, fromRevision(r.data)), since: done, revision: drafted.current, id: revision });
+    });
+    return () => {
+      live = false;
+      act({ kind: "reading", on: false });
+    };
+  }, [read, entry?.revision, attempt]);
+
+  const readRevision = useRef(entry?.revision);
+  useEffect(() => {
+    const changed = entry?.revision != null && entry.revision !== readRevision.current;
+    readRevision.current = entry?.revision;
+    drafted.current = draft.revision;
+    act({ kind: "draft", revision: draft.revision, changed, ...(entry?.revision === null && { removed: true as const }) });
+    if (!changed && failed) retry((x) => x + 1);
+  }, [draft]);
+
+  const o = w?.outcome;
+  useEffect(() => {
+    const d = doneOnce(w);
+    const created = (d?.data as Partial<S["SourceUpdate"]> | null | undefined)?.entry?.revision;
+    if (d !== undefined) act({ kind: "done", ...(typeof created === "string" && { revision: created }) });
+    if (o?.kind === "refused" && o.status === 412) {
+      act({ kind: "refused" });
+      void read<Draft>(`/drafts/${enc(draft.id)}`).then((r) => r?.kind === "ok" && act({ kind: "at", revision: r.data.revision }));
+    } else if (o?.kind === "refused" || o?.kind === "not-done" || o?.kind === "set-aside") act({ kind: "failed" });
+  }, [o]);
+  const dismissed = o?.kind === "unknown" && writes?.open.includes(w!) !== true;
+  useEffect(() => {
+    if (dismissed) act({ kind: "failed" });
+  }, [dismissed]);
+
+  const path = `/drafts/${enc(draft.id)}/assignments/${enc(machine)}`;
+  const ifMatch = () => keptETag(draft.id, writes?.client?.currentEpoch);
+  const settled = settledFragment(draft.id, () => writes?.client?.currentEpoch);
+  const save = () => {
+    const m = ifMatch();
+    if (machine === "") return setNote("Not sent: choose the machine first.");
+    const refusal = sendRefusal(waits, conflict, shown);
+    if (refusal !== undefined) return setNote(refusal);
+    if (entry === undefined && inUse(draft, machine, "assignment")) return setNote("Not sent: this draft already holds an assignment for this machine. Open it from Entries to change it.");
+    const bad = assignmentRefusal(lists);
+    if (bad !== undefined) return setNote(bad);
+    if (m === undefined) return setNote(NO_ETAG);
+    setNote(undefined);
+    if (startsNew(writes!, w)) {
+      act({ kind: "send" });
+      if (entry === undefined) claim(machine);
+    }
+    send({ method: "PUT", path, ifMatch: m, resource: `/drafts/${draft.id}`, body: assignmentBody(lists), settled });
+  };
+  const remove = () => {
+    const m = ifMatch();
+    const refusal = sendRefusal(waits, conflict, shown);
+    if (refusal !== undefined) return setNote(refusal);
+    if (m === undefined) return setNote(NO_ETAG);
+    if (startsNew(writes!, w)) act({ kind: "send", removes: true });
+    send({ method: "DELETE", path, ifMatch: m, resource: `/drafts/${draft.id}`, body: undefined, settled });
+  };
+
+  // Show composition and references: on request, one read at a time. The result belongs to the list
+  // it was read for.
+  const [reads, setReads] = useState<number | undefined>();
+  const [result, setResult] = useState<{ key: string; value: Composition | string } | undefined>();
+  const show = () => {
+    const key = held.document;
+    setReads(0);
+    const get = async <T,>(p: string) => {
+      const r = await read<T>(p, () => mounted.current);
+      if (mounted.current) setReads((n) => (n ?? 0) + 1);
+      return r?.kind === "ok" ? r.data : undefined;
+    };
+    void readComposition(draft, lists, profileList, fragmentList, get).then((value) => {
+      if (!mounted.current) return;
+      setReads(undefined);
+      setResult({ key, value });
+    });
+  };
+  const composed = result?.key === held.document && typeof result.value !== "string" ? result.value : undefined;
+
+  const conflictView = conflict !== undefined && (
+    <>
+      <Conflict what="draft" revision={conflict.revision ?? draft.revision} onShow={() => {
+        if (conflict.awaits === true) retry((x) => x + 1);
+        act({ kind: "show" });
+        seeChange();
+      }} />
+      {conflict.revision === draft.revision && (
+        <div>
+          <h4>Your list</h4>
+          <ul aria-label="Your list">{SLOTS.flatMap((s) => listsOf(conflict.mine)[s].map((n) => <li key={`${s} ${n}`}>{s} {n}</li>))}</ul>
+        </div>
+      )}
+      <button type="button" onClick={() => act({ kind: "copy" })} disabled={conflict.phase !== "theirs" || conflict.awaits === true || waits || conflict.revision !== draft.revision}>
+        Copy my text into the new revision
+      </button>
+    </>
+  );
+  const pending = usePending(entry === undefined ? machines : profiles, entry === undefined ? "machines" : "profiles");
+  const chooseable = machineOffers(draft, machines.kind === "ok" ? machines.data.items : []);
+  return (
+    <section aria-label={`Assignment ${machine === "" ? "(new)" : short(machine)}`}>
+      <h3>
+        Assignment{" "}
+        {entry === undefined ? (
+          <label>machine{" "}
+            <select value={typed} onChange={(e) => setMachine(e.target.value)} required>
+              <option value="">choose</option>
+              {chooseable.map((m) => <option key={m.id} value={m.id}>{short(m.id)} {m.talosEndpoint}</option>)}
+            </select>
+          </label>
+        ) : short(machine)}
+      </h3>
+      <p>{entry === undefined ? "new" : change(entry)}{unsavedList && " -> unsaved"}</p>
+      <p>{ASSIGNMENT_STATEMENT}</p>
+      {entry?.revision === null && <Status>Removed in this draft.</Status>}
+      {waits && (failed
+        ? <p><button type="button" onClick={() => retry((x) => x + 1)}>Read the entry again</button></p>
+        : <Status>Reading the entry's text.</Status>)}
+      <Members slot="profile" names={lists.profile} offers={forProfiles} ready={ready} open={open} editable={editable} change={(next) => hold({ ...lists, profile: next })} />
+      {LAYERS.map((l) => (
+        <Members key={l} slot={l} names={lists[l]} offers={forLayers[l]} ready={ready} open={open} editable={editable} change={(next) => hold({ ...lists, [l]: next })} />
+      ))}
+      {open && pending}
+      {open && (
+        <p>
+          <Action label="Save" needs={["author"]} onClick={save} busy={w !== undefined && w.outcome === undefined} />{" "}
+          {entry !== undefined && entry.revision !== null && <Action label="Remove" needs={["author"]} onClick={remove} />}
+        </p>
+      )}
+      {note !== undefined && <Status testid="editor-note">{note}</Status>}
+      {!(o?.kind === "refused" && o.status === 412) && conflictView}
+      <WriteResult w={w} conflict={conflictView || undefined} done={(data) => {
+        if (w?.spec.method === "DELETE") return `Assignment of machine ${short(machine)} removed from draft ${short(draft.id)}.`;
+        const r = (data as Partial<S["SourceUpdate"]>).entry?.revision;
+        return `Assignment of machine ${short(machine)} saved in draft ${short(draft.id)}${typeof r === "string" ? ` (revision ${short(r)})` : ""}.`;
+      }} />
+      <h4>Composition and references</h4>
+      <p>
+        <button type="button" onClick={show} disabled={!ready || reads !== undefined || total(lists) === 0}>Show composition and references</button>
+        {reads !== undefined && ` Reads done: ${reads}.`}
+      </p>
+      {result !== undefined && result.key !== held.document && <Status>The list changed after this was read. Show it again.</Status>}
+      {result?.key === held.document && typeof result.value === "string" && <Status testid="composition-note">{result.value}</Status>}
+      {composed !== undefined && (
+        <>
+          <ol aria-label="Composition order">
+            {composed.order.map((c, i) => <li key={i}>{c.layer} {c.name} <code>{short(c.revision)}</code> {c.via === undefined ? "from this assignment" : `pinned by profile ${c.via}`}</li>)}
+          </ol>
+          <ul aria-label="Reference states">
+            {[...new Set(composed.order.map((c) => c.revision))].flatMap((id) => {
+              const f = composed.revisions[id]!;
+              const refs = referenceStates(f.document, f.declarations.references);
+              return refs.length === 0
+                ? [<li key={id}>{f.name}: no references</li>]
+                : refs.map((r) => <li key={`${id} ${r.name}`}>{f.name} {r.name}: {r.declared === undefined ? "no declaration" : `${r.declared.kind}, version ${r.declared.version}`}, {r.state}</li>);
+            })}
+          </ul>
+        </>
+      )}
     </section>
   );
 }

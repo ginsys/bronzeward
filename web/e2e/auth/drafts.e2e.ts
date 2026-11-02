@@ -1,8 +1,9 @@
 // The draft editor (ginsys/bronzeward#339) against the disposable deployment, whose provider is
 // mise run dev-bao's OpenBao (bao.ts): Create draft, a fragment saved and removed, Revert to base,
 // Discard draft, the unsaved guard, ETAG-01, AMB-02, AMB-06, a 422 with [Go to field], and the
-// fragment entry by keyboard only, and the profile entry (pins moved by keyboard, ETAG-01, a 422
-// at its path). A document never crosses WebDriver, whose log the artifact scan
+// fragment entry by keyboard only, the profile entry (pins moved by keyboard, ETAG-01, a 422
+// at its path) and the assignment entry (a layer's list moved by keyboard, ETAG-01, the composition
+// order). A document never crosses WebDriver, whose log the artifact scan
 // reads: the page fetches it from the synthetic provider inside a script, or the case writes it
 // through the API itself. Each document carries the run's canary (syntheticDocument), so the scan
 // finds one in any retained file; no case takes a screenshot or reads a document's text back. The
@@ -515,6 +516,125 @@ describe("the draft editor (#339)", () => {
     });
   };
   profileCases();
+
+  // The assignment entry's cases, registered here for the same reason as the profile cases.
+  const assignmentCases = () => {
+    const asg = (b: B = browser) => b.$('main section[aria-label^="Assignment"]');
+    // The names in a section of the assignment (Profiles or Layer role), in order: each row starts with its name.
+    const names = async (title: string) => {
+      const out: string[] = [];
+      for (const li of await asg().$$(`ol[aria-label="${title}"] li`)) out.push((await li.getText()).split(" ")[0]!);
+      return out;
+    };
+    // A machine of the case's cluster, recorded through the API.
+    const machine = async () => {
+      const m = await api("h-author", "POST", "/machines", { cluster: cluster.id, talosNodeId: `synthetic-node-${hex()}`, platform: "metal", talosEndpoint: `192.0.2.${1 + Math.floor(Math.random() * 250)}:50000` });
+      expect(m.status).toBe(201);
+      return m.body!["id"] as string;
+    };
+    const add = async (title: string, name: string, button: string) => {
+      const select = asg().$(`select[aria-label="Add to ${title}"]`);
+      await select.$(`option[value="${name}"]`).waitForExist({ timeout: 20_000 });
+      await select.selectByAttribute("value", name);
+      await asg().$(`button=${button}`).click();
+    };
+    const storedFragments = async (draft: string, m: string) => {
+      const entries = (await api("h-author", "GET", `/drafts/${draft}`)).body!["entries"] as { kind: string; machine?: string; revision: string | null }[];
+      const revision = entries.find((e) => e.kind === "assignment" && e.machine === m)?.revision;
+      expect(typeof revision).toBe("string");
+      return (await api("h-author", "GET", `/assignment-revisions/${revision}`)).body!["fragments"] as Record<string, string[]>;
+    };
+    const openAssignment = async (draft: string, count: number) => {
+      await openDraft(draft);
+      await $('main ul[aria-label="Entries"]').$("button*=assignment").click();
+      await browser.waitUntil(async () => (await names("Layer role")).length === count, { timeout: 20_000, timeoutMsg: "the editor did not load the assignment's list" });
+    };
+
+    it("an assignment lists two fragments of a layer, one is moved and saved by keyboard, and the order reads back", async () => {
+      const a = `aa-${hex()}`;
+      const b = `ab-${hex()}`;
+      const m = await machine();
+      const first = await seeded(a);
+      await putFragment(first.id, b, first.etag);
+      await openDraft(first.id);
+      await $("main").$("button=Add assignment").click();
+      await asg().$("label*=machine").$("select").$(`option[value="${m}"]`).waitForExist({ timeout: 20_000 });
+      await asg().$("label*=machine").$("select").selectByAttribute("value", m);
+      await add("Layer role", a, "Add to layer role");
+      await add("Layer role", b, "Add to layer role");
+      expect(await names("Layer role")).toEqual([a, b]);
+      await faults({ upstream: at });
+      const up = asg().$(`button[aria-label="Move up role ${b}"]`);
+      await browser.execute((e: HTMLElement) => e.focus(), up as unknown as HTMLElement);
+      await browser.keys("Enter");
+      expect(await names("Layer role")).toEqual([b, a]);
+      await asg().$("button=Save").click();
+      await expect(asg().$('[data-testid="write-result"]')).toHaveText(expect.stringContaining("saved in draft"), { wait: 30_000 });
+      await oneWrite(1);
+      expect(await storedFragments(first.id, m)).toEqual({ role: [b, a] });
+      await openAssignment(first.id, 2);
+      expect(await names("Layer role")).toEqual([b, a]);
+    });
+
+    it("ETAG-01 on an assignment: another author's API write moves the draft: 412, no resend, the list kept, then saved", async () => {
+      const a = `ae-${hex()}`;
+      const b = `af-${hex()}`;
+      const m = await machine();
+      const first = await seeded(a);
+      const second = await putFragment(first.id, b, first.etag);
+      const saved = await api("h-author", "PUT", `/drafts/${first.id}/assignments/${m}`, { profiles: [], fragments: { role: [a, b] } }, second.etag);
+      expect(saved.status).toBe(200);
+      await openAssignment(first.id, 2);
+      await asg().$(`button[aria-label="Move up role ${b}"]`).click();
+      expect(await names("Layer role")).toEqual([b, a]);
+      const other = await api("h-all", "PUT", `/drafts/${first.id}/assignments/${m}`, { profiles: [], fragments: { role: [b] } }, saved.etag);
+      expect(other.status).toBe(200);
+      const now = (await api("h-author", "GET", `/drafts/${first.id}`)).body!["revision"] as number;
+      await faults({ upstream: at });
+      await asg().$("button=Save").click();
+      await expect(asg().$('[data-testid="status"]')).toHaveText(expect.stringContaining("Someone changed this draft"), { wait: 20_000 });
+      await browser.pause(3_000);
+      await oneWrite(1);
+      expect(await names("Layer role")).toEqual([b, a]);
+      await asg().$("button=Show their change").click();
+      await expect($("main h2")).toHaveText(expect.stringContaining(`revision ${now}`), { wait: 20_000 });
+      await browser.waitUntil(async () => (await names("Layer role")).join(",") === b, { timeout: 20_000, timeoutMsg: "Show their change did not show the other author's list" });
+      await asg().$("button=Copy my text into the new revision").click();
+      expect(await names("Layer role")).toEqual([b, a]);
+      await asg().$("button=Save").click();
+      await expect(asg().$('[data-testid="write-result"]')).toHaveText(expect.stringContaining("saved in draft"), { wait: 30_000 });
+      expect(await storedFragments(first.id, m)).toEqual({ role: [b, a] });
+    });
+
+    it("Show composition and references lists a profile's pin before the assignment's fragment of its layer, and no document", async () => {
+      const a = `ac-${hex()}`;
+      const b = `ad-${hex()}`;
+      const p = `asgprof-${hex()}`;
+      const m = await machine();
+      const first = await seeded(a);
+      const profile = await api("h-author", "PUT", `/drafts/${first.id}/profiles/${p}`, { fragments: [first.revision] }, first.etag);
+      expect(profile.status).toBe(200);
+      const second = await putFragment(first.id, b, profile.etag);
+      const saved = await api("h-author", "PUT", `/drafts/${first.id}/assignments/${m}`, { profiles: [p], fragments: { role: [b] } }, second.etag);
+      expect(saved.status).toBe(200);
+      await openAssignment(first.id, 1);
+      const show = asg().$("button=Show composition and references");
+      await show.waitForEnabled({ timeout: 20_000, timeoutMsg: "the lists did not load" });
+      await show.click();
+      const rows = () => asg().$$('ol[aria-label="Composition order"] li');
+      await browser.waitUntil(async () => (await rows()).length === 2, { timeout: 30_000, timeoutMsg: "no composition order" });
+      const texts: string[] = [];
+      for (const li of await rows()) texts.push(await li.getText());
+      const [pin, own] = texts;
+      expect(pin!.startsWith(`role ${a} `)).toBe(true);
+      expect(pin).toContain(`pinned by profile ${p}`);
+      expect(own!.startsWith(`role ${b} `)).toBe(true);
+      expect(own).toContain("from this assignment");
+      // The documents are read for their references and never shown: the page holds no canary.
+      expect(await browser.execute(() => document.body.innerText.includes("-doc-"))).toBe(false);
+    });
+  };
+  assignmentCases();
 
   it("at 320 CSS pixels a wide row scrolls inside the Drafts and References tables, and the page does not", async () => {
     const wide = `w${"x".repeat(119)}`;

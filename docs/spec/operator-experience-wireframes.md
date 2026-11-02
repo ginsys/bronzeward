@@ -190,7 +190,23 @@ list. That list offers the draft's own revision of each fragment, and for a frag
 holds no entry for, its head revision in the cluster. A pin that is no longer one of these shows
 "pin is not current", and a Save that sends it gets a `422` that names its path, never a
 revision. A profile pins 1 to 256 revisions, each once. [Save] and [Remove] follow the same `412`
-rules as the fragment entry. Assignment entry: profile names in order and per-layer fragment names. On a `412`
+rules as the fragment entry.
+
+Assignment entry: the machine, the profile names in order, and the fragment names of each of the
+six layers in order, from global to override. Each list has the same [Move up], [Move down] and
+[Remove from list] buttons as the profile entry. [Add assignment] opens a new assignment and offers
+the machines of the draft's cluster that the draft holds no assignment for, each as its short ID
+and Talos endpoint. [Add to profiles] adds a profile that the draft holds or that the cluster
+has a head revision for. The picker of a layer offers only the fragments of that layer. An
+assignment selects 1 to 256 names in all, each profile once and each fragment once. A name that is
+no longer available shows "not available in this draft", and a Save that sends it gets a `422`
+that names its path. [Show composition and references] reads on demand, one read at a time, and
+counts the reads. It lists the composition order and the state of each reference of each
+fragment: declared, carried and not declared, or declared and not in the document. It shows names,
+kinds and versions, never a document or a value. [Save] and [Remove] follow the same `412` rules
+as the fragment entry.
+
+On a `412`
 the editor keeps the unsaved text, shows "Someone changed this draft (revision 7). Your text is
 not saved." and offers [Show their change] and [Copy my text into the new revision], never an
 automatic overwrite. [Copy my text into the new revision], [Save] and [Remove] wait until
