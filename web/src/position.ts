@@ -19,12 +19,13 @@ export async function spotOfPath(text: string, path: string): Promise<Spot | und
   const docs = parseAllDocuments(text);
   const doc = Array.isArray(docs) ? docs[Number(m[1])] : undefined;
   if (doc === undefined) return undefined;
-  // Each segment follows the node it steps into: a list's index, or a mapping's key as the server
-  // reads it, a string, whether the YAML spells it 8080, "8080" or 0.
+  // Each segment follows the node it steps into: a list's index, or a mapping's key by its text,
+  // unquoted, as the server compares it (internal/ingest/path.go): 8080 and "8080" match "8080",
+  // and 01 does not match "1".
   let node: unknown = doc.contents;
   for (const k of m[2] === "" ? [] : m[2]!.slice(1).split("/").map(segment)) {
     if (isSeq(node)) node = /^(0|[1-9]\d*)$/.test(k) ? node.items[Number(k)] : undefined;
-    else if (isMap(node)) node = node.items.find((p) => isScalar(p.key) && String(p.key.value) === k)?.value;
+    else if (isMap(node)) node = node.items.find((p) => isScalar(p.key) && (p.key.source ?? String(p.key.value)) === k)?.value;
     else node = undefined;
   }
   if (!isNode(node) || node.range == null) return undefined;
@@ -45,15 +46,18 @@ function tags(text: string): { index: number; tag: string; name: string }[] {
 }
 
 // Where a line's comment starts: a # at its start or after a blank, outside quotes; the line's
-// length if it has none.
+// length if it has none. A quote opens a scalar only where one starts (at the line's start, after
+// a blank or a flow indicator), so the apostrophe in `can't` opens none; '' inside a
+// single-quoted scalar is an apostrophe.
 function commentStart(line: string): number {
   let quote: string | undefined;
   for (let i = 0; i < line.length; i++) {
     const c = line[i]!;
     if (quote !== undefined) {
-      if (c === quote) quote = undefined;
+      if (c === "'" && quote === "'" && line[i + 1] === "'") i++;
+      else if (c === quote) quote = undefined;
       else if (c === "\\" && quote === '"') i++;
-    } else if (c === '"' || c === "'") quote = c;
+    } else if ((c === '"' || c === "'") && (i === 0 || " \t[{,".includes(line[i - 1]!))) quote = c;
     else if (c === "#" && (i === 0 || line[i - 1] === " " || line[i - 1] === "\t")) return i;
   }
   return line.length;
