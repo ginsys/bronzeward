@@ -46,10 +46,13 @@ type Client struct {
 // that builds one output from several reads compares it before and after them.
 func (c *Client) EpochMoves() int { return c.moves }
 
-// Response is a successful answer.
+// Response is a successful answer. Moves is EpochMoves as this answer left it: a later read, the
+// GET /server that a new epoch calls for included, can move the epoch before the caller sees the
+// answer, and a command that compares the count from this answer on sees that move too.
 type Response struct {
 	Header http.Header
 	Body   []byte
+	Moves  int
 }
 
 // Open prepares the client for x, reading its automation token or its stored sign-in, which it
@@ -212,7 +215,7 @@ func (c *Client) once(path string) (*Response, bool, error) {
 		if r.Header.Get("Bronzeward-Epoch") == "" {
 			fmt.Fprintf(c.Notices, "%s: %s answered without Bronzeward-Epoch, a server defect\n", c.Context.Where(), route)
 		}
-		return &Response{Header: r.Header, Body: body}, false, nil
+		return &Response{Header: r.Header, Body: body, Moves: c.moves}, false, nil
 	}
 	if p := c.problem(route, r, body); p != nil {
 		return nil, p.unavailable(), p
