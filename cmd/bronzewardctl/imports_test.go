@@ -178,11 +178,11 @@ func TestImportLifecycle(t *testing.T) {
 	f.set("held", 1, time.Hour, "running", "", "",
 		ev("paused", `{"type":"paused","generation":1}`), ev("continued", `{"type":"continued","generation":2}`), ev("resume-failed", `{"type":"resume-failed","code":"dependency-unavailable"}`))
 	step("resume-failed exits 1, offering takeover and abandon", []string{"import", "continue", "ing_BWSYNTH"}, 1, "",
-		"was not applied: its staged input could not be decrypted (resume-failed, dependency-unavailable)", `POST /ingestions/ing_BWSYNTH/continuations if-match= body={}`)
+		"or abandon it now:\n  bronzewardctl import takeover ing_BWSYNTH\n  bronzewardctl import abandon ing_BWSYNTH\n", `POST /ingestions/ing_BWSYNTH/continuations if-match= body={}`)
 
 	f.set("held", 2, -time.Minute, "running", "", "", ev("continued", `{"type":"continued","generation":2}`))
 	step("a lease lapsed with the operation running exits 3 (PROT-06)", []string{"import", "continue", "ing_BWSYNTH", "-o", "json"}, 3, ingAccepted,
-		"its claim is held and its lease lapsed", `POST /ingestions/ing_BWSYNTH/continuations if-match= body={}`)
+		"or abandon it:\n  bronzewardctl import status ing_BWSYNTH\n  bronzewardctl import takeover ing_BWSYNTH\n", `POST /ingestions/ing_BWSYNTH/continuations if-match= body={}`)
 	step("status of a lapsed claim offers takeover", []string{"import", "status", "ing_BWSYNTH"}, 0,
 		"Its run stopped renewing the lease. Take it over to resume, or abandon it:\n  bronzewardctl import takeover ing_BWSYNTH", "")
 	step("status lists with --state", []string{"import", "status", "--state", "held"}, 0, "ing_BWSYNTH  held   lapsed", "")

@@ -359,13 +359,22 @@ func (e *env) follow(c *client.Client, a accepted, before int) (err error) {
 		return e.say(fmt.Sprintf("Paused for review (generation %d, expires %s).", gen, when(b.ExpiresAt)),
 			"Continue it, or abandon it:", "  bronzewardctl import continue "+b.Id, "  bronzewardctl import abandon "+b.Id)
 	case settled == "resume-failed":
-		return fmt.Errorf("%s: import %s was not applied: its staged input could not be decrypted (resume-failed, %s). "+
-			"The claim stays held until its lease lapses at %s; then take it over, or abandon it now:\n  bronzewardctl import takeover %s\n  bronzewardctl import abandon %s",
-			c.Context.Where(), b.Id, or(&code, "no code"), when(b.LeaseUntil), b.Id, b.Id)
+		return &client.Blocked{Err: fmt.Errorf("%s: import %s was not applied: its staged input could not be decrypted (resume-failed, %s). "+
+			"The claim stays held until its lease lapses at %s; then take it over, or abandon it now:",
+			c.Context.Where(), b.Id, or(&code, "no code"), when(b.LeaseUntil)), More: remedies(b.Id, "takeover", "abandon")}
 	}
-	return outcomeUnknown{fmt.Errorf("%s: import %s: its claim is %s and its lease lapsed %s, while operation %s still runs: the outcome is unknown. "+
-		"Read it again later, take it over, or abandon it:\n  bronzewardctl import status %s\n  bronzewardctl import takeover %s\n  bronzewardctl import abandon %s",
-		c.Context.Where(), b.Id, b.State, ago(b.LeaseUntil), o.Id, b.Id, b.Id, b.Id)}
+	return &client.Blocked{Err: outcomeUnknown{fmt.Errorf("%s: import %s: its claim is %s and its lease lapsed %s, while operation %s still runs: the outcome is unknown. "+
+		"Read it again later, take it over, or abandon it:",
+		c.Context.Where(), b.Id, b.State, ago(b.LeaseUntil), o.Id)}, More: remedies(b.Id, "status", "takeover", "abandon")}
+}
+
+// remedies are the lines `bronzewardctl import <verb> <id>`, one per verb, of an error's remedy.
+func remedies(id string, verbs ...string) []string {
+	lines := make([]string, len(verbs))
+	for i, v := range verbs {
+		lines[i] = "  bronzewardctl import " + v + " " + id
+	}
+	return lines
 }
 
 // ended reports an import operation's terminal state: on success the draft it was released into,
@@ -378,13 +387,16 @@ func (e *env) ended(c *client.Client, b *apitypes.IngestionBody, o *apitypes.Ope
 		}
 		_ = json.Unmarshal([]byte(compact(o.Error)), &p)
 		why := fmt.Sprintf("Import %s (operation %s) %s: %s.", b.Id, o.Id, o.State, compact(o.Error))
+		var more []string
 		switch strings.TrimPrefix(p.Type, "urn:bronzeward:problem:") {
 		case "precondition-failed":
-			why += " The draft changed after this import started, so the import was not applied and its claim is abandoned. Import again against the draft's current revision:\n" + restart(b)
+			why += " The draft changed after this import started, so the import was not applied and its claim is abandoned. Import again against the draft's current revision:"
+			more = []string{restart(b)}
 		case "ingestion-abandoned":
-			why += " The ingestion was abandoned, so nothing of it reached the draft. Import again:\n" + restart(b)
+			why += " The ingestion was abandoned, so nothing of it reached the draft. Import again:"
+			more = []string{restart(b)}
 		}
-		return operationFailed{fmt.Errorf("%s: %s", c.Context.Where(), why)}
+		return &client.Blocked{Err: operationFailed{fmt.Errorf("%s: %s", c.Context.Where(), why)}, More: more}
 	}
 	var res apitypes.IngestResult
 	var err error
@@ -407,8 +419,9 @@ func (e *env) ended(c *client.Client, b *apitypes.IngestionBody, o *apitypes.Ope
 	}
 	if d.Revision != res.DraftRevision {
 		// ETAG-02: another write followed the import's, treated as a 412.
-		return fmt.Errorf("%s: draft %s is now revision %d: another write followed this import's revision %d. Its ETag is not kept. Review the change before writing again:\n  bronzewardctl --context %s draft show %s",
-			c.Context.Where(), res.Draft, d.Revision, res.DraftRevision, client.ShellWord(c.Context.Name), client.ShellWord(res.Draft))
+		return &client.Blocked{Err: fmt.Errorf("%s: draft %s is now revision %d: another write followed this import's revision %d. Its ETag is not kept. Review the change before writing again:",
+			c.Context.Where(), res.Draft, d.Revision, res.DraftRevision),
+			More: []string{"  bronzewardctl --context " + client.ShellWord(c.Context.Name) + " draft show " + client.ShellWord(res.Draft)}}
 	}
 	keep(e, c, res.Draft, r.Header.Get("ETag"))
 	return nil
