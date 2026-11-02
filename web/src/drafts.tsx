@@ -342,14 +342,16 @@ export const holdsUnsaved = (held: Held, saved: Held, mine: Held | undefined) =>
 // `sent.open`: the write may still commit, its answer not come yet. A read meanwhile may show that
 // write's own change, so it opens no such conflict; another author's change refuses the write with
 // a 412 instead (local review round 3). `sent.later`: such a read came, and the revision it named.
-// If the write then ends without a done answer or a 412, that read shows as theirs, the typed text
-// kept aside (round 4).
+// If the write's last answer is neither done nor a 412, that read shows as theirs, the typed text
+// kept aside (rounds 4 and 5).
 export interface Clash { mine: Held; phase: "refused" | "asked" | "theirs"; revision?: number; awaits?: true; again?: true }
 export interface Editor { held: Held; saved: Held; conflict?: Clash; sent?: { text: Held; whileTheirs: boolean; removes?: true; open?: true; later?: { revision?: number } }; writes?: number; note?: string | undefined; version?: number; reading?: true; own?: string }
 export type EditorEvent =
   | { kind: "type"; held: Held } // the operator's edit
   | { kind: "refused" } // a write's 412
-  | { kind: "failed" } // any other answer than done or a 412: the write committed nothing, or may have
+  // The write's last answer is neither done nor a 412: another refusal, nothing committed, or set
+  // aside. An unknown one is not last: [Repeat exactly] may still commit it, or answer 412.
+  | { kind: "failed" }
   | { kind: "at"; revision: number } // the 412's own draft read
   | { kind: "show" } // Show their change
   // The page's draft read. changed: this entry has a new revision to read; removed: the entry is a removal.
@@ -646,7 +648,7 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
       act({ kind: "refused" });
       // For the revision shown only: this read's ETag is not kept (§8.3).
       void read<Draft>(`/drafts/${enc(draft.id)}`).then((r) => r?.kind === "ok" && act({ kind: "at", revision: r.data.revision }));
-    } else if (o !== undefined && o.kind !== "done") act({ kind: "failed" });
+    } else if (o?.kind === "refused" || o?.kind === "not-done" || o?.kind === "set-aside") act({ kind: "failed" });
   }, [o]);
 
   const path = `/drafts/${enc(draft.id)}/fragments/${enc(name)}`;

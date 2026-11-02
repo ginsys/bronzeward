@@ -472,8 +472,9 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     // a failed one; without either the pane never edits, or stays waiting after Show.
     expect(src).toMatch(/setLoaded\(revision\);\n\s*act\(\{ kind: "read", text: fromRevision\(r\.data\), since: done, revision: draft\.revision, id: revision \}\);/);
     expect(src).toMatch(/act\(\{ kind: "draft", revision: draft\.revision, changed[^\n]*\n\s*if \(!changed && failed\) retry\(\(x\) => x \+ 1\);/);
-    // #534 round 4: every write outcome other than done or a 412 ends the open write, a set-aside one included.
-    expect(src).toMatch(/\} else if \(o !== undefined && o\.kind !== "done"\) act\(\{ kind: "failed" \}\);/);
+    // #534 rounds 4 and 5: a final outcome other than done or a 412 ends the open write, a set-aside
+    // one included. An unknown one does not: [Repeat exactly] may still commit it, or answer 412.
+    expect(src).toMatch(/\} else if \(o\?\.kind === "refused" \|\| o\?\.kind === "not-done" \|\| o\?\.kind === "set-aside"\) act\(\{ kind: "failed" \}\);/);
     // PR review: also when the page keeps the data it read before (a failed read with no answer).
     expect(src).toMatch(/\{unshown && item\.kind !== "loading" && <p><button [^>]*onClick=\{\(\) => reread\(\(x\) => x \+ 1\)\}>\{READ_DRAFT_AGAIN\}/);
     // PR review: Copy my text stays off while a repeated Show waits for its reads.
@@ -645,6 +646,14 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     const refusedRun = run(saving, [{ kind: "refused" }]);
     expect(refusedRun.conflict).toEqual({ mine: M, phase: "refused" });
     expect(refusedRun.sent?.later).toBeUndefined();
+    // Round 5: an unknown outcome dispatches nothing, so [Repeat exactly] finds the write still
+    // open. Its 412 keeps the typed text, and a read before its done keeps a Remove's text.
+    const repeated = run(saving, [{ kind: "refused" }, { kind: "show" }, { kind: "draft", revision: 8, changed: false }]);
+    expect(repeated.conflict?.mine).toBe(M);
+    expect(run(repeated, [{ kind: "copy" }]).held).toBe(M);
+    const removed = run({ held: A, saved: A }, [{ kind: "send", removes: true }, { kind: "draft", revision: 9, changed: false, removed: true }, { kind: "done" }]);
+    expect(removed.held).toBe(A);
+    expect(removed.conflict).toBeUndefined();
   });
 
   test("ginsys/bronzeward#534 N1: Show clicked again while asked holds Copy until its draft read answers, also when a revision read answers first", () => {
