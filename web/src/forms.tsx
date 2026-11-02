@@ -102,6 +102,13 @@ export function leaving(writes: Writes, to: string, notice = false, from = locat
   return confirm(`${lines.join("\n")}\nLeave this page?`);
 }
 
+// Sign-out ends the page and drops every editor's text, so it asks first while an editor holds
+// unsaved text (ginsys/bronzeward#517 H10).
+export function signingOut(): boolean {
+  if (unsaved.size === 0) return true;
+  return confirm(`${[...unsaved].map((what) => `Unsaved text in ${what}: signing out drops it.`).join("\n")}\nSign out?`);
+}
+
 // A reload or a tab close drops every pending write and unsaved text, so it is guarded by the
 // browser's own dialog. A notice's own [Show current state] exempts the writes for one unload only:
 // if the operator stops the navigation, the next reload or close asks again. Unsaved text still asks.

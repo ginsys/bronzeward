@@ -187,11 +187,23 @@ the editor keeps the unsaved text, shows "Someone changed this draft (revision 7
 not saved." and offers [Show their change] and [Copy my text into the new revision], never an
 automatic overwrite. [Copy my text into the new revision], [Save] and [Remove] wait until
 [Show their change] put their text in the editor. If the entry has a new revision, only the read
-of that revision puts their text there.
+of that revision puts their text there. If their change removed the entry, their text is empty.
+A second `412` after their text shows keeps the editor's text at that moment as the operator's
+text.
 
 [Add fragment] refuses a name that the draft already holds, a removed entry included, and points
 to that entry in the list. Once the new fragment is saved, the pane edits the entry that it
 created.
+
+Until the entry's revision is read, the pane shows "Reading the entry's text.", takes no edit and
+sends nothing. If that read fails, the pane offers [Read the entry again]. A draft read again also
+reads it again. After [Remove], the draft stores the removal: the text still in the editor is
+unsaved, and leaving or switching entries asks first.
+
+[Sign out] asks first while an editor holds unsaved text. When the installation's epoch changes,
+a page that holds unsaved text stays shown while the shell reads the server and the identity
+again. The ETags of the old epoch are gone, so that page sends nothing. The operator can copy the
+text out, then open the page again.
 
 [Revert to base] puts the base revision's text in the editor, not saved. Save then writes it as
 a new revision of the entry, and the entry stays in the draft. (2026-11-01, lead ruling: no route

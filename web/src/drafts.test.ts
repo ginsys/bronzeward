@@ -2,8 +2,8 @@ import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { components } from "./api/v1";
-import { change, type Clash, createdId, doneOnce, type Editor, type EditorEvent, editor, EMPTY, FragmentPane, forgetETag, type Held, holdsUnsaved, inUse, keepETag, keepOnDone, keptETag, LAYERS, lastGood, markLine, mayDrop, mayRevert, maySend, NOT_RENDERED, NOT_REVERTED, paneEntry, rows, settledFragment, where } from "./drafts.tsx";
-import { leaving, startsNew, unsaved, WritesProvider } from "./forms.tsx";
+import { change, type Clash, createdId, doneOnce, type Editor, type EditorEvent, editor, EMPTY, FragmentPane, forgetETag, type Held, holdsUnsaved, inUse, keepETag, keepOnDone, keptETag, LAYERS, lastGood, markLine, mayDrop, mayRevert, maySend, NOT_RENDERED, NOT_REVERTED, paneEntry, rows, settledFragment, unread, where } from "./drafts.tsx";
+import { leaving, signingOut, startsNew, unsaved, WritesProvider } from "./forms.tsx";
 import { type Load, type Reads, ReadsProvider } from "./list.tsx";
 import { references, spotOfLine, spotOfPath, spotOfReference } from "./position.ts";
 import { ShellContext } from "./shell.tsx";
@@ -147,6 +147,16 @@ describe("the unsaved-change guard (§11.4 item 3)", () => {
     expect(leaving(writes, "/machines", true)).toBe(false);
     expect(ask).toHaveBeenCalledTimes(2);
   });
+
+  test("ginsys/bronzeward#517 H10: Sign out asks while an editor holds unsaved text", () => {
+    const ask = vi.fn(() => false);
+    vi.stubGlobal("confirm", ask);
+    expect(signingOut()).toBe(true);
+    expect(ask).not.toHaveBeenCalled();
+    unsaved.add("fragment f of draft drf_1");
+    expect(signingOut()).toBe(false);
+    expect(ask).toHaveBeenCalledWith("Unsaved text in fragment f of draft drf_1: signing out drops it.\nSign out?");
+  });
 });
 
 describe("the editor's text is kept until the operator drops it (#339 round 1)", () => {
@@ -189,7 +199,8 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
   const table: [string, Editor, EditorEvent, Editor][] = [
     ["typing without a conflict changes only the text", { held: A, saved: A }, { kind: "type", held: M }, { held: M, saved: A }],
     ["a 412 opens a conflict holding the editor's text", { held: M, saved: A }, { kind: "refused" }, { held: M, saved: A, conflict: refused(M) }],
-    ["a second 412 keeps the open conflict", { held: T, saved: T, conflict: theirs(M) }, { kind: "refused" }, { held: T, saved: T, conflict: theirs(M) }],
+    ["a second 412 before their text shows keeps the open conflict", { held: M, saved: A, conflict: refused(M, 7) }, { kind: "refused" }, { held: M, saved: A, conflict: refused(M, 7) }],
+    ["H6: a 412 once their text shows opens a new conflict holding the editor's text, not the older one", { held: T2, saved: T, conflict: theirs(M), sent: sentOf(T2, true) }, { kind: "refused" }, { held: T2, saved: T, conflict: refused(T2), sent: sentOf(T2, true) }],
     ["the 412's own draft read records the revision refused at", { held: M, saved: A, conflict: refused(M) }, { kind: "at", revision: 7 }, { held: M, saved: A, conflict: refused(M, 7) }],
     ["a later draft read keeps the revision refused at", { held: M, saved: A, conflict: refused(M, 7) }, { kind: "at", revision: 8 }, { held: M, saved: A, conflict: refused(M, 7) }],
     ["R2-F2: text typed after the 412 is the operator's text", { held: M, saved: A, conflict: refused(M, 7) }, { kind: "type", held: M2 }, { held: M2, saved: A, conflict: refused(M2, 7) }],
@@ -200,6 +211,8 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     ["boundary, R4-1: text typed while the asked read is pending is the operator's text", { held: M, saved: A, conflict: asked(M) }, { kind: "type", held: M2 }, { held: M2, saved: A, conflict: asked(M2) }],
     ["boundary, R4-1: Show with no change to this fragment shows its stored text, the operator's aside", { held: M, saved: A, conflict: asked(M) }, { kind: "draft", revision: 8, changed: false }, { held: A, saved: A, conflict: theirs(M) }],
     ["Show with this fragment changed waits for its revision read", { held: M, saved: A, conflict: asked(M) }, { kind: "draft", revision: 8, changed: true }, { held: M, saved: A, conflict: awaiting(M) }],
+    ["H7: Show with this fragment removed shows the removal, the operator's text aside", { held: M, saved: A, conflict: asked(M) }, { kind: "draft", revision: 8, changed: false, removed: true }, { held: EMPTY, saved: EMPTY, conflict: theirs(M) }],
+    ["H7: a removal while a revision read is awaited shows the removal and ends the wait", { held: M, saved: A, conflict: awaiting(M) }, { kind: "draft", revision: 9, changed: false, removed: true }, { held: EMPTY, saved: EMPTY, conflict: theirs(M, 9) }],
     ["L1: a draft read with no change while a revision read is awaited keeps waiting", { held: A, saved: A, conflict: awaiting(A) }, { kind: "draft", revision: 8, changed: false }, { held: A, saved: A, conflict: awaiting(A) }],
     ["the asked revision read shows their text, the operator's aside", { held: M2, saved: A, conflict: asked(M2, 8) }, { kind: "read", text: T, since: 0 }, { held: T, saved: T, conflict: theirs(M2) }],
     ["the awaited revision read shows their text and ends the wait", { held: M2, saved: A, conflict: awaiting(M2) }, { kind: "read", text: T, since: 0 }, { held: T, saved: T, conflict: theirs(M2) }],
@@ -215,6 +228,8 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     ["a revision read replaces text nothing was typed into", { held: A, saved: A }, { kind: "read", text: T, since: 0 }, { held: T, saved: T }],
     // Save, sweep (a): the operator types while it is in flight.
     ["a Save records the text it sends, and whether their text shows", { held: M, saved: A, conflict: theirs(M2) }, { kind: "send" }, { held: M, saved: A, conflict: theirs(M2), sent: sentOf(M, true) }],
+    ["H8: a Remove records that it removes the text", { held: M, saved: A }, { kind: "send", removes: true }, { held: M, saved: A, sent: { text: M, whileTheirs: false, removes: true } }],
+    ["H8: a done Remove saves the removal, so the text still shown stays unsaved", { held: M, saved: A, sent: { text: M, whileTheirs: false, removes: true } }, { kind: "done" }, { held: M, saved: EMPTY, sent: { text: M, whileTheirs: false, removes: true }, writes: 1 }],
     ["R2-F1: a done write marks the text it sent saved, not the text typed since", { held: M2, saved: A, sent: sentOf(M) }, { kind: "done" }, { held: M2, saved: M, sent: sentOf(M), writes: 1 }],
     ["a Save sent while their text shows ends the conflict when done: the operator chose that text", { held: T2, saved: T, conflict: theirs(M), sent: sentOf(T2, true) }, { kind: "done" }, { held: T2, saved: T2, sent: sentOf(T2, true), writes: 1 }],
     ["a Save sent before their text shows ends the conflict when done, if it sent the kept text", { held: T, saved: T, conflict: theirs(M), sent: sentOf(M) }, { kind: "done" }, { held: T, saved: M, sent: sentOf(M), writes: 1 }],
@@ -312,6 +327,20 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     expect(maySend(asked(M))).toBe(false);
     expect(maySend(awaiting(M))).toBe(false);
     expect(maySend(theirs(M))).toBe(true);
+  });
+
+  test("H6: Copy my text after a second 412 puts back the text that 412 refused", () => {
+    const s = run({ held: M, saved: A }, [{ kind: "send" }, { kind: "refused" }, { kind: "at", revision: 7 }, { kind: "show" }, { kind: "draft", revision: 8, changed: true }, { kind: "read", text: T, since: 0 }, { kind: "type", held: T2 }, { kind: "send" }, { kind: "refused" }, { kind: "at", revision: 9 }, { kind: "show" }, { kind: "draft", revision: 10, changed: true }, { kind: "read", text: A, since: 0 }, { kind: "copy" }]);
+    expect(rest(s).held).toBe(T2);
+  });
+
+  test("H9: the pane takes no edit until the entry's revision is read, or a write of its own is done", () => {
+    expect(unread("frv_2", "pending", 0)).toBe(true);
+    expect(unread("frv_2", "failed", 0)).toBe(true);
+    expect(unread("frv_2", "ok", 0)).toBe(false);
+    expect(unread("frv_2", "failed", 1)).toBe(false);
+    expect(unread(null, "pending", 0)).toBe(false);
+    expect(unread(undefined, "pending", 0)).toBe(false);
   });
 
   test("R6-1: a Revert clicked before a 412, Show their change and Copy my text does not replace the copied text", () => {

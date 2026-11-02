@@ -1,7 +1,7 @@
 import { createElement as h, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
-import { Action, connection, Deprecations, deprecated, ending, Failure, type Identity, identityMain, incompatible, Kept, MIN_API_REVISION, observed, offlineSince, reading, regaining, ShellContext, type ShellEvents, ShellReads, moveFree, showCurrent } from "./shell.tsx";
+import { Action, connection, Deprecations, deprecated, ending, Failure, type Identity, identityMain, incompatible, keepsPage, Kept, MIN_API_REVISION, observed, offlineSince, reading, regaining, ShellContext, type ShellEvents, ShellReads, moveFree, showCurrent } from "./shell.tsx";
 import { Conflict, Disconnected, Empty, HUMAN_ONLY, Loading, NOT_ACCEPTED, NotAccepted, Offline, Refused, REPEATING, REPLAYED, Replayed, SET_ASIDE, SetAside, Unknown, UNKNOWN, Unread, Withheld, WITHHELD } from "./states.tsx";
 import { NO_EPOCH, SHELL_GONE, Write, Writes } from "./write.ts";
 import { type Attempt, type Client, TRANSPORT_FAILURE } from "./request.ts";
@@ -176,6 +176,19 @@ describe("the shell", () => {
 
   test("§7 item 3: the refusal of an older server names both revisions", () => {
     expect(incompatible(1)).toBe(`This server serves API revision 1; this client needs API revision ${MIN_API_REVISION} or later.`);
+  });
+
+  test("ginsys/bronzeward#517 H10: a page holding unsaved text stays shown while a new epoch's server and identity are read", () => {
+    const loading = { kind: "loading" } as const;
+    const server = (apiRevision: number) => ({ kind: "ok", data: { version: "v", apiRevision } }) as unknown as Parameters<typeof keepsPage>[1];
+    const identity = { kind: "ok", data: {} } as unknown as Parameters<typeof keepsPage>[2];
+    expect(keepsPage(true, loading, loading)).toBe(true);
+    expect(keepsPage(true, server(MIN_API_REVISION), loading)).toBe(true);
+    expect(keepsPage(false, loading, loading)).toBe(false);
+    expect(keepsPage(true, server(MIN_API_REVISION), identity)).toBe(false);
+    // An incompatible server reads no identity: the page goes.
+    expect(keepsPage(true, server(MIN_API_REVISION - 1), loading)).toBe(false);
+    expect(keepsPage(true, { kind: "refused", status: 409, problem: {} } as unknown as Parameters<typeof keepsPage>[1], loading)).toBe(false);
   });
 });
 
