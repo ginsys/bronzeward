@@ -124,6 +124,11 @@ describe("cursor pages", () => {
     valid = false;
     expect(await settledRead(reads({ kind: "ok", data: 2 }), "/drafts/drf_1")).toBeUndefined();
     expect(await settledRead(reads({ kind: "ok", data: 3 }), "/drafts/drf_1", () => false)).toBeUndefined();
+    // A view with no data of its own says so: the read it asks the shell to settle holds nothing.
+    valid = true;
+    seen.length = 0;
+    await settledRead(reads({ kind: "transport" } as ReadResult<unknown>), "/recovery", () => true, () => false);
+    expect(seen[0]![2]).toBe(false);
   });
 
   test("G23: identifiers shortened to the prefix and four characters at each end", () => {
