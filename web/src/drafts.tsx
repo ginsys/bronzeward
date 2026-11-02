@@ -255,9 +255,10 @@ export const holdsUnsaved = (held: Held, saved: Held, mine: Held | undefined) =>
 // it keeps the operator's text aside. `revision`: the draft revision refused at, once shown the
 // draft's revision as read. `sent`: the last Save's or Remove's text, and whether their text showed
 // then; `writes`: the done writes so far. Each event that answers an async request says when it
-// started, so an answer older than the operator's action changes nothing.
+// started, so an answer older than the operator's action changes nothing. `version` counts the
+// events that changed the editor's text or the conflict: Revert to base applies only at its click's.
 export interface Clash { mine: Held; phase: "refused" | "asked" | "theirs"; revision?: number }
-export interface Editor { held: Held; saved: Held; conflict?: Clash; sent?: { text: Held; whileTheirs: boolean }; writes?: number; note?: string | undefined }
+export interface Editor { held: Held; saved: Held; conflict?: Clash; sent?: { text: Held; whileTheirs: boolean }; writes?: number; note?: string | undefined; version?: number }
 export type EditorEvent =
   | { kind: "type"; held: Held } // the operator's edit
   | { kind: "refused" } // a write's 412
@@ -268,12 +269,18 @@ export type EditorEvent =
   | { kind: "copy" } // Copy my text into the new revision
   | { kind: "send" } // a Save or Remove sends the editor's text
   | { kind: "done" } // that write is done
-  | { kind: "revert"; from: Held; text: Held; note: string } // Revert to base's read answers; `from`: the text at the click
+  | { kind: "revert"; at: number; text: Held; note: string } // Revert to base's read answers; `at`: the version at the click
   | { kind: "note"; text?: string };
 
 export const NOT_REVERTED = "Not reverted: the text changed while the base text was read, or a conflict keeps your text. Show their change first.";
 
 export function editor(s: Editor, e: EditorEvent): Editor {
+  const n = step(s, e);
+  const moved = !same(s.held, n.held) || s.conflict?.phase !== n.conflict?.phase || (s.conflict !== undefined && n.conflict !== undefined && !same(s.conflict.mine, n.conflict.mine));
+  return moved ? { ...n, version: (s.version ?? 0) + 1 } : n;
+}
+
+function step(s: Editor, e: EditorEvent): Editor {
   const c = s.conflict;
   const at = (x: Partial<Clash>, held = s.held): Editor => ({ ...s, held, conflict: { ...c!, ...x } });
   const writes = s.writes ?? 0;
@@ -307,7 +314,7 @@ export function editor(s: Editor, e: EditorEvent): Editor {
       return { ...(ends ? ended : s), saved: sent, writes: writes + 1 };
     }
     case "revert":
-      return mayRevert(c) && same(s.held, e.from) ? { ...s, held: e.text, note: e.note } : { ...s, note: NOT_REVERTED };
+      return mayRevert(c) && e.at === (s.version ?? 0) ? { ...s, held: e.text, note: e.note } : { ...s, note: NOT_REVERTED };
     case "note":
       return { ...s, note: e.text };
   }
@@ -378,7 +385,7 @@ export function FragmentPane({ draft, entry, written, seeChange }: { draft: Draf
   // The saved text is EMPTY for a new entry or a removal.
   // Once the last Save or Remove is done, the text it sent is saved, also for an entry new in the
   // draft, whose pane reads no revision.
-  const [{ held, saved, conflict, sent, writes: done = 0, note }, act] = useReducer(editor, { held: EMPTY, saved: EMPTY });
+  const [{ held, saved, conflict, sent, writes: done = 0, note, version = 0 }, act] = useReducer(editor, { held: EMPTY, saved: EMPTY });
   const hold = (h: Held) => act({ kind: "type", held: h });
   const setNote = (text?: string) => act({ kind: "note", ...(text !== undefined && { text }) });
   const [w, send] = useSend();
@@ -442,9 +449,10 @@ export function FragmentPane({ draft, entry, written, seeChange }: { draft: Draf
     if (startsNew(writes!, w)) act({ kind: "send" });
     send({ method: "DELETE", path, ifMatch: m, resource: `/drafts/${draft.id}`, body: undefined, settled });
   };
-  // The reducer applies the base text only if the text is still the one at the click (sweep).
+  // The reducer applies the base text only if nothing changed the text or the conflict since the
+  // click (sweep).
   const revert = async () => {
-    const from = held;
+    const at = version;
     if (!mayRevert(conflict)) return setNote(NOT_REVERTED);
     if (entry?.head == null) return setNote("No base: this fragment is new in the draft.");
     const f = await client.read<Fragment>(`/fragments/${enc(entry.head)}`);
@@ -453,7 +461,7 @@ export function FragmentPane({ draft, entry, written, seeChange }: { draft: Draf
     if (f.data.headRevision !== entry.base) return setNote(`No base text to restore: the head moved since this entry's base (revision ${entry.base ?? "none"}, now ${f.data.headRevision}).`);
     const r = await client.read<Revision>(`/fragment-revisions/${enc(f.data.revision)}`);
     if (r.kind !== "ok") return setNote("The base revision could not be read.");
-    act({ kind: "revert", from, text: fromRevision(r.data), note: `The base text (revision ${short(f.data.revision)}) is in the editor, not saved. Save writes it as a new revision of this entry; the entry stays in the draft.` });
+    act({ kind: "revert", at, text: fromRevision(r.data), note: `The base text (revision ${short(f.data.revision)}) is in the editor, not saved. Save writes it as a new revision of this entry; the entry stays in the draft.` });
   };
   const goTo = async () => {
     const p = o?.kind === "refused" ? o.problem : null;
