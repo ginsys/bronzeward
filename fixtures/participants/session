@@ -242,9 +242,10 @@ passwords() {
 # The participant client's environment, for env: its own configuration and state, and no desktop
 # session bus, so that no sign-in reaches the desktop's credential store (Secret Service). The lab
 # context keeps its sign-in in a token file under the participant home (t1), which scan reads and
-# stop removes; an inherited BRONZEWARD_TOKEN_FILE would move that file elsewhere.
-client_env=(-u DBUS_SESSION_BUS_ADDRESS -u BRONZEWARD_TOKEN_FILE XDG_CONFIG_HOME="$part/home/config"
-  XDG_STATE_HOME="$part/home/state" PATH="$part/bin:$PATH")
+# stop removes; an inherited BRONZEWARD_TOKEN_FILE would move that file elsewhere. An inherited
+# BRONZEWARD_CONTEXT would name a context that the participant configuration does not have.
+client_env=(-u DBUS_SESSION_BUS_ADDRESS -u BRONZEWARD_TOKEN_FILE -u BRONZEWARD_CONTEXT
+  XDG_CONFIG_HOME="$part/home/config" XDG_STATE_HOME="$part/home/state" PATH="$part/bin:$PATH")
 
 # in_part <command>...: a command as the participant's client sees it.
 in_part() {
@@ -275,7 +276,10 @@ t1() {
   read_ok "the web host names Zitadel as the issuer" \
     sh -c "curl -sf --noproxy '*' --max-time 5 '$web/bronzeward-client.json' | jq -e --arg i '$(idp_var BW_TEST_IDP_ISSUER)' '.issuer == \$i'"
   read_ok "the client has the context lab" sh -c "env XDG_CONFIG_HOME='$part/home/config' '$part/bin/bronzewardctl' context list | grep -q lab"
-  read_ok "the client is not signed in" in_part sh -c '! bronzewardctl --no-input whoami'
+  # Only the client's own "not signed in" answer for the lab token file passes, not any failure.
+  # shellcheck disable=SC2016 # $out and $1 are the inner shell's
+  read_ok "the client is not signed in" in_part sh -c 'out=$(bronzewardctl --no-input whoami 2>&1) && exit 1
+    case $out in *"not signed in: nothing is stored in the token file $1;"*) ;; *) exit 1 ;; esac' sh "$part/home/lab-token"
 }
 
 # What this scan made: its planted controls, the copied logs and its error file. scan_clean removes

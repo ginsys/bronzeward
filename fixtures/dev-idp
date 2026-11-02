@@ -237,7 +237,8 @@ up() {
   [ -n "$ready" ] || die "Zitadel was not ready within 120s (docker logs $zitadel)"
   if [ -n "$participants" ]; then
     # The login page calls Zitadel's API as the login client, on this network, with the instance's
-    # host name in the Host header. The cookie secret is random per start and never written down.
+    # host name in the Host header. The cookie secret is random per start. No file holds it, but
+    # Docker keeps it in the container's configuration until dev-idp down removes the container.
     docker run -d --name "$login" --network "$net" -p "127.0.0.1:$loginport:3000" --user "$(id -u):$(id -g)" \
       -v "$state:/state:ro" -e ZITADEL_API_URL="http://$zitadel:8080" -e CUSTOM_REQUEST_HEADERS=Host:localhost \
       -e NEXT_PUBLIC_BASE_PATH=/ui/v2/login \

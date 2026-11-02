@@ -248,13 +248,14 @@ else bad "dangling link: rc=$rc controls=$(controls): $out"; fi
 mkdir -p "$repo/.dev/participants/bin"
 cat >"$repo/.dev/participants/bin/bronzewardctl" <<'EOF'
 #!/bin/sh
-echo "bus=[${DBUS_SESSION_BUS_ADDRESS-unset}] tokenfile=[${BRONZEWARD_TOKEN_FILE-unset}] config=[$XDG_CONFIG_HOME]"
+echo "bus=[${DBUS_SESSION_BUS_ADDRESS-unset}] tokenfile=[${BRONZEWARD_TOKEN_FILE-unset}] context=[${BRONZEWARD_CONTEXT-unset}] config=[$XDG_CONFIG_HOME]"
 EOF
 chmod +x "$repo/.dev/participants/bin/bronzewardctl"
-out=$(printf 'bronzewardctl\nexit\n' | DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent BRONZEWARD_TOKEN_FILE=$t/elsewhere run shell)
+out=$(printf 'bronzewardctl\nexit\n' | DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent BRONZEWARD_TOKEN_FILE=$t/elsewhere \
+  BRONZEWARD_CONTEXT=desk run shell)
 rm -rf "$repo/.dev/participants/bin"
-if [[ $out == *"bus=[unset] tokenfile=[unset] config=[$repo/.dev/participants/home/config]"* ]]; then
-  ok "the participant's shell gives its client no session bus and no inherited token file"
+if [[ $out == *"bus=[unset] tokenfile=[unset] context=[unset] config=[$repo/.dev/participants/home/config]"* ]]; then
+  ok "the participant's shell gives its client no session bus, inherited token file or context"
 else bad "shell environment: $out"; fi
 
 # A grep that hangs on the recursive read, so the scan is interrupted with its controls planted. The
