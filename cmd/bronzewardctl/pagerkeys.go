@@ -17,13 +17,16 @@ type liveKeys struct {
 	wake [2]int
 	done chan struct{} // closed when watch has seen every signal that was sent
 
+	abort     chan struct{} // closed when the first of SIGINT, SIGTERM and SIGHUP is seen
+	abortOnce sync.Once
+
 	mu      sync.Mutex
 	ended   os.Signal // the first of SIGINT, SIGTERM and SIGHUP
 	resized bool
 }
 
 func newLiveKeys(fd int) (*liveKeys, error) {
-	k := &liveKeys{fd: fd, done: make(chan struct{})}
+	k := &liveKeys{fd: fd, done: make(chan struct{}), abort: make(chan struct{})}
 	if err := unix.Pipe(k.wake[:]); err != nil {
 		return nil, err
 	}
@@ -58,6 +61,7 @@ func (k *liveKeys) watch(terms, winch <-chan os.Signal) {
 				k.ended = s
 			}
 			k.mu.Unlock()
+			k.abortOnce.Do(func() { close(k.abort) })
 		case _, ok := <-winch:
 			if !ok {
 				winch = nil

@@ -8,8 +8,11 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -30,8 +33,9 @@ func takesSignal(t *testing.T, sig syscall.Signal) {
 
 // screen collects what the pager writes to a pseudo-terminal, as a person's terminal would show it.
 type screen struct {
-	mu sync.Mutex
-	b  []byte
+	mu   sync.Mutex
+	b    []byte
+	hold atomic.Bool // while set, the collector reads nothing, as a terminal that has stopped draining
 }
 
 func watchScreen(ctl *os.File) *screen {
@@ -39,6 +43,9 @@ func watchScreen(ctl *os.File) *screen {
 	go func() {
 		buf := make([]byte, 4096)
 		for {
+			for s.hold.Load() {
+				time.Sleep(5 * time.Millisecond)
+			}
 			n, err := ctl.Read(buf)
 			s.mu.Lock()
 			s.b = append(s.b, buf[:n]...)
@@ -294,6 +301,9 @@ func init() { helperMain = pagerHelper }
 // pagerHelper is the process TestPagerEndsBySignal starts: the pager on its standard input and
 // output, then what main does with the result.
 func pagerHelper() {
+	if d, err := time.ParseDuration(os.Getenv("BW_PAGER_EXIT_WAIT")); err == nil {
+		exitWait = d
+	}
 	err := (&env{}).pager(os.Stdout, reviewLines(), 24, 80)
 	code := report(err, io.Discard, os.Stderr)
 	endByCause()
@@ -364,6 +374,110 @@ func TestPagerEndsBySignal(t *testing.T) {
 			checkLeft(t, ctl, s, sig.String())
 		})
 	}
+}
+
+// TestPagerBlockedWrite stops the terminal draining its output, pages until the pager's write
+// cannot complete, then sends a signal: the process still ends by it, with the terminal back in
+// line mode, instead of waiting for output to resume (#579).
+func TestPagerBlockedWrite(t *testing.T) {
+	for _, sig := range []syscall.Signal{syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP} {
+		t.Run(sig.String(), func(t *testing.T) { blockedWrite(t, sig, false) })
+	}
+	// Output that resumes within the pager's wait after the signal still gets the bytes that leave
+	// the alternate screen, after the page that was waiting.
+	t.Run("output resumes", func(t *testing.T) { blockedWrite(t, syscall.SIGTERM, true) })
+}
+
+func blockedWrite(t *testing.T, sig syscall.Signal, resume bool) {
+	takesSignal(t, sig)
+	if resume {
+		// The pager then waits for the terminal long after it restores line mode, so the test can
+		// resume output at that point: after the write the signal gave up on, before the exit.
+		t.Setenv("BW_PAGER_EXIT_WAIT", "10s")
+	}
+	ctl, s, cmd, exited := pagerProcess(t)
+	s.hold.Store(true)
+	t.Cleanup(func() { s.hold.Store(false) }) // runs before pagerProcess's cleanup, so the collector reads to the end
+	// Redraws of the page fill the terminal's output queue; the keys fill the input queue too,
+	// which does not matter: a full input queue only drops what the test types.
+	flood := make(chan struct{})
+	go func() {
+		defer close(flood)
+		for i := 0; i < 400; i++ {
+			if _, err := ctl.WriteString("fb"); err != nil {
+				return
+			}
+			select {
+			case <-exited:
+				return
+			default:
+			}
+		}
+	}()
+	<-flood
+	writeBlocked(t, cmd.Process.Pid)
+	select {
+	case <-exited:
+		t.Fatalf("the process ended before the signal: %v", cmd.ProcessState)
+	default:
+	}
+	if err := cmd.Process.Signal(sig); err != nil {
+		t.Fatal(err)
+	}
+	if resume {
+		// The pager restores line mode only after it gave up on the blocked write.
+		if !lineMode(t, ctl) {
+			t.Fatal("the terminal did not return to line mode while its output was blocked")
+		}
+		s.hold.Store(false)
+	}
+	select {
+	case <-exited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the process did not end on the signal while its output was blocked")
+	}
+	st, ok := cmd.ProcessState.Sys().(syscall.WaitStatus)
+	if !ok || !st.Signaled() || st.Signal() != sig {
+		t.Errorf("the process ended with %v; want it ended by %v", cmd.ProcessState, sig)
+	}
+	if !lineMode(t, ctl) {
+		t.Error("the terminal is still raw")
+	}
+	if resume && s.count(altScreenOff, 1) == 0 {
+		t.Error("output resumed within the wait and the alternate screen was not left")
+	}
+}
+
+// writeBlocked waits up to 10 s for proof that a write of process pid to its terminal is blocked:
+// a thread of pid shows the same write to its standard output, with the same buffer and length,
+// at two reads of /proc 100 ms apart.
+func writeBlocked(t *testing.T, pid int) {
+	t.Helper()
+	var prev map[string]string
+	var lastErr error
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		files, err := filepath.Glob(fmt.Sprintf("/proc/%d/task/*/syscall", pid))
+		if err != nil {
+			t.Fatal(err)
+		}
+		now := map[string]string{}
+		for _, f := range files {
+			b, err := os.ReadFile(f)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			// The file holds the number of the system call the thread waits in, then its arguments.
+			if fields := strings.Fields(string(b)); len(fields) > 1 && fields[0] == strconv.Itoa(syscall.SYS_WRITE) && fields[1] == "0x1" {
+				now[f] = string(b)
+				if prev[f] == now[f] {
+					return
+				}
+			}
+		}
+		prev = now
+	}
+	t.Fatalf("no write of process %d to its terminal stayed blocked (last read error: %v)", pid, lastErr)
 }
 
 // TestPagerKeepsIgnoredSignal: a signal the process inherited as ignored (nohup) stays ignored, so
