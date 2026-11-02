@@ -8,8 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,6 +16,7 @@ import (
 	"time"
 	"unsafe"
 
+	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 )
 
@@ -415,7 +414,7 @@ func blockedWrite(t *testing.T, sig syscall.Signal, resume bool) {
 		}
 	}()
 	<-flood
-	writeBlocked(t, cmd.Process.Pid)
+	outputFull(t, ctl)
 	select {
 	case <-exited:
 		t.Fatalf("the process ended before the signal: %v", cmd.ProcessState)
@@ -448,36 +447,26 @@ func blockedWrite(t *testing.T, sig syscall.Signal, resume bool) {
 	}
 }
 
-// writeBlocked waits up to 10 s for proof that a write of process pid to its terminal is blocked:
-// a thread of pid shows the same write to its standard output, with the same buffer and length,
-// at two reads of /proc 100 ms apart.
-func writeBlocked(t *testing.T, pid int) {
+// outputFull waits up to 10 s for the terminal of ctl to take no more output, so that every write
+// to it waits, the pager's as well. The proof is a write of one byte to the terminal that does not
+// wait: the kernel refuses it with EAGAIN once the terminal's output is full. Reading /proc for
+// the process's own write needs ptrace access, which a CI container does not give. A refused
+// byte is not written; one taken before the output is full is a NUL, which no check here counts.
+func outputFull(t *testing.T, ctl *os.File) {
 	t.Helper()
-	var prev map[string]string
-	var lastErr error
-	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
-		files, err := filepath.Glob(fmt.Sprintf("/proc/%d/task/*/syscall", pid))
-		if err != nil {
-			t.Fatal(err)
-		}
-		now := map[string]string{}
-		for _, f := range files {
-			b, err := os.ReadFile(f)
-			if err != nil {
-				lastErr = err
-				continue
-			}
-			// The file holds the number of the system call the thread waits in, then its arguments.
-			if fields := strings.Fields(string(b)); len(fields) > 1 && fields[0] == strconv.Itoa(syscall.SYS_WRITE) && fields[1] == "0x1" {
-				now[f] = string(b)
-				if prev[f] == now[f] {
-					return
-				}
-			}
-		}
-		prev = now
+	peer, _, errno := syscall.Syscall(syscall.SYS_IOCTL, ctl.Fd(), unix.TIOCGPTPEER, uintptr(unix.O_RDWR|unix.O_NOCTTY|unix.O_NONBLOCK|unix.O_CLOEXEC))
+	if errno != 0 {
+		t.Fatalf("opening the terminal: %v", errno)
 	}
-	t.Fatalf("no write of process %d to its terminal stayed blocked (last read error: %v)", pid, lastErr)
+	defer unix.Close(int(peer))
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if _, err := unix.Write(int(peer), []byte{0}); errors.Is(err, unix.EAGAIN) {
+			return
+		} else if err != nil {
+			t.Fatalf("writing to the terminal: %v", err)
+		}
+	}
+	t.Fatal("the terminal still took output after 10 s of pages it was not reading")
 }
 
 // TestPagerKeepsIgnoredSignal: a signal the process inherited as ignored (nohup) stays ignored, so
