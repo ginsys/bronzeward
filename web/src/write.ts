@@ -18,6 +18,9 @@ export interface WriteSpec {
   resource: string;
   // A fragment write, which ingests: a repeat's in-progress 409 waits for the first request.
   ingests?: boolean;
+  // Called with each outcome the write settles on, a [Repeat exactly]'s included, whether or not
+  // the view that sent it is still shown: a draft's ETag is kept from it (§8.3, #339).
+  settled?: (o: Outcome) => void;
 }
 
 export type Outcome =
@@ -121,7 +124,12 @@ export class Writes {
   private readonly listeners = new Set<() => void>();
   private version = 0;
 
-  constructor(private readonly principal: () => string | undefined, private readonly wait: (ms: number) => Promise<void> = sleep) {}
+  constructor(
+    private readonly principal: () => string | undefined,
+    private readonly wait: (ms: number) => Promise<void> = sleep,
+    // The clock the in-progress wait bound is measured on, in milliseconds.
+    private readonly now: () => number = () => performance.now(),
+  ) {}
 
   // The notices render again without [Repeat exactly] once the bound client's sign-in ends.
   get client(): Client | undefined {
@@ -211,6 +219,7 @@ export class Writes {
       w.doubt = undefined;
       w.running = undefined;
       w.ingesting = undefined;
+      w.spec.settled?.(o);
       // The one removal before a dismissal: a write no notice showed, which its form reports.
       if (!isOpen(w)) {
         if (shown) w.kept = true;
@@ -286,9 +295,12 @@ export class Writes {
       w.doubt = { kind: "unknown", why: last === undefined ? WRITE_TRANSPORT_FAILURE : `the server answered ${last}`, problem: lastProblem };
       this.changed();
     };
-    // The wait bound, read once at the first in-progress 409, and how long this run waited.
+    // The wait bound, read once at the first in-progress 409, when the run started waiting, and
+    // how long it waited. The time spent counts the repeats' requests, not only the waits.
     let bound: number | undefined;
+    let since = 0;
     let waited = 0;
+    const spent = () => Math.max(waited, this.now() - since);
     for (let n = 0; n <= BACKOFF.length; n++) {
       // A read sent to learn the last answer's epoch ended the sign-in: nothing is repeated.
       if (n > 0 && end.e !== undefined) return aside(SIGN_IN_REFUSED);
@@ -296,9 +308,11 @@ export class Writes {
       if (n > 0 && end.pre !== undefined) return aside(RECOVERY_START);
       if (w.ingesting !== undefined) {
         // Each wait doubles from 1 s up to 4 s and ends at the bound.
-        const step = Math.min(1000 << Math.min(Math.floor(waited / 1000), 2), bound! - waited);
-        await this.wait(step);
-        waited += step;
+        const step = Math.min(1000 << Math.min(Math.floor(waited / 1000), 2), bound! - spent());
+        if (step > 0) {
+          await this.wait(step);
+          waited += step;
+        }
       } else if (n > 0) await this.wait(BACKOFF[n - 1]!);
       if (n > 0 || again) {
         // Looked at again once run() resumes: a sign-out, an end of the shell or a set-aside can
@@ -382,8 +396,11 @@ export class Writes {
       // draft (published meanwhile), or a replayed one, is a recorded refusal, below.
       if (w.spec.ingests && a.status === 409 && code === "conflict" && p?.["ingestion"] !== undefined && p["draft"] === undefined && !replayed && (n > 0 || again)) {
         const ingestion = String(p["ingestion"]);
-        bound ??= await this.ingestBound(client);
-        if (waited >= bound) return unknown(`the first request with this key was still ingesting (ingestion ${ingestion}) after ${Math.round(waited / 1000)} s`);
+        if (bound === undefined) {
+          since = this.now();
+          bound = await this.ingestBound(client);
+        }
+        if (spent() >= bound) return unknown(`the first request with this key was still ingesting (ingestion ${ingestion}) after ${Math.round(spent() / 1000)} s`);
         w.ingesting = ingestion;
         this.changed();
         n--;

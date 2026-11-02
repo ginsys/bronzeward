@@ -63,6 +63,19 @@ describe("the key (§8.4 item 1)", () => {
   });
 });
 
+describe("the spec's settled hook (§8.3)", () => {
+  test("gets each outcome the write settles on, a [Repeat exactly]'s included", async () => {
+    const answers = [new TypeError("Failed to fetch"), ...BACKOFF.map(() => new TypeError("Failed to fetch")), created({ id: "c1" }, true)];
+    const { writes } = page(answers);
+    const seen: string[] = [];
+    const w = new Write({ method: "POST", path: "/clusters", body: { name: "lab" }, resource: "/clusters", settled: (o) => void seen.push(o.kind) });
+    expect((await writes.submit(w)).kind).toBe("unknown");
+    expect(seen).toEqual(["unknown"]);
+    expect((await writes.submit(w)).kind).toBe("done");
+    expect(seen).toEqual(["unknown", "done"]);
+  });
+});
+
 describe("each send (§8.4 item 3)", () => {
   test("carries the key, the reference epoch, JSON and If-Match where given; reads GET /recovery once when no epoch was seen", async () => {
     const { writes, sent } = page([created({ id: "c1" })]);
@@ -431,6 +444,19 @@ describe("a fragment write's in-progress 409 (§8.4 item 2, AMB-02)", () => {
     const o = await writes.submit(fragment());
     expect(o).toEqual({ kind: "unknown", why: "the first request with this key was still ingesting (ingestion ing_1) after 120 s", problem: inProgressProblem });
     expect(waits.slice(1).reduce((a, b) => a + b, 0)).toBe(INGEST_WAIT);
+  });
+
+  test("the bound counts the time the requests take, not only the waits", async () => {
+    // Each answer to the repeat takes 5 s; the waits alone would reach 120 s only after about 30 of them.
+    let clock = 0;
+    const slow = () => ((clock += 5000), inProgress());
+    const env = page([new TypeError("Failed to fetch"), slow, server(30), ...Array.from({ length: 40 }, () => slow)]);
+    const writes = new Writes(() => PRINCIPAL, async (ms) => void (clock += ms), () => clock);
+    writes.client = env.client;
+    const o = await writes.submit(fragment());
+    expect(o).toMatchObject({ kind: "unknown", problem: inProgressProblem });
+    expect((o as { why: string }).why).toMatch(/still ingesting \(ingestion ing_1\) after 12\d s$/);
+    expect(clock).toBeLessThan(INGEST_WAIT + 10_000);
   });
 
   test("a served claim lease longer than the wait raises the bound", async () => {
