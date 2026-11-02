@@ -21,7 +21,9 @@ async function open(start: "normal" | "recovery", human = "h-recovery"): Promise
   expect(started.status).toBe(200);
   const at = await started.text();
   const refuse = start === "normal" ? { processRefused: ["/server", "/identity", "/recovery"] } : {};
-  expect(await fixtureSignIn(human, {}, { upstream: at, ...refuse })).toBe(PRE_ENTRY);
+  // The form has a heading, so the page settles on its footer, not on the restriction's text.
+  expect(await fixtureSignIn(human, {}, { upstream: at, ...refuse })).toBe("Server unknown");
+  await expect($('[data-testid="status"]')).toHaveText(PRE_ENTRY);
   await expect($("main form[aria-label='Enter recovery']")).toBeExisting();
   return at;
 }
@@ -66,8 +68,12 @@ describe("the recovery entry (#364)", () => {
     // The page still shows the form it read before: it sends under its own key.
     await fill("REC-02 second");
     await $("main form").$("button=Enter recovery").click();
-    await expect(result()).toHaveText(expect.stringContaining(`An entry is already recorded on this server, in epoch ${epoch}, under another request.`), { wait: 20_000 });
-    expect(await result().getText()).not.toContain(NORMAL_START);
+    // The refusal carries the epoch, so §8.5 moves the page off the entry form to the recovery
+    // state at that epoch: read as a recovery start, never as a normal one.
+    await expect($('[data-testid="epoch"]')).toHaveText(`Epoch ${epoch}`, { wait: 20_000 });
+    await expect($('[data-testid="recovery"]')).toHaveText(expect.stringContaining(`epoch ${epoch}`), { wait: 20_000 });
+    expect(await $("body").getText()).not.toContain(NORMAL_START);
+    expect(await entered().isExisting()).toBe(false);
     const sent = await entries();
     expect(sent).toHaveLength(1);
     expect(sent[0]![3]).toBe("undefined");

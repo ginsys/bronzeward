@@ -279,7 +279,9 @@ describe("recovery", () => {
     expect(started.status).toBe(200);
     const at = await started.text();
     // Before the entry: GET /server refused as every request but the entry, so nothing else is read.
-    expect(await fixtureSignIn("h-viewer", {}, { upstream: at })).toBe(PRE_ENTRY);
+    // The entry form (#364) has a heading, so the page settles on its footer.
+    expect(await fixtureSignIn("h-viewer", {}, { upstream: at })).toBe("Server unknown");
+    await announced("status", PRE_ENTRY);
     expect(await testid("status").getAttribute("role")).toBe("status");
     // §8.2: the refusal's own title, detail and request ID stay shown under the restriction.
     expect(await testid("problem").getText()).toMatch(/^Not read: .+\. Request \S+\.$/);
