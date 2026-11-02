@@ -1,7 +1,7 @@
 import { createElement as h, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
-import { Action, connection, Deprecations, deprecated, ending, Failure, incompatible, MIN_API_REVISION, observed, offlineSince, regaining, ShellContext, type ShellEvents, ShellReads, moveFree, showCurrent } from "./shell.tsx";
+import { Action, connection, Deprecations, deprecated, ending, Failure, type Identity, identityMain, incompatible, Kept, MIN_API_REVISION, observed, offlineSince, reading, regaining, ShellContext, type ShellEvents, ShellReads, moveFree, showCurrent } from "./shell.tsx";
 import { Conflict, Disconnected, Empty, HUMAN_ONLY, Loading, NOT_ACCEPTED, NotAccepted, Offline, Refused, REPEATING, REPLAYED, Replayed, SET_ASIDE, SetAside, Unknown, UNKNOWN, Unread, Withheld, WITHHELD } from "./states.tsx";
 import { NO_EPOCH, SHELL_GONE, Write, Writes } from "./write.ts";
 import { type Attempt, type Client, TRANSPORT_FAILURE } from "./request.ts";
@@ -276,6 +276,112 @@ describe("the shell's reads", () => {
     release(problem(503, "dependency-unavailable", "e1")); // retried, but for the sign-out
     expect(await retrying).toEqual({ kind: "discarded" });
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+});
+
+// #513: an identity read that fails after a good one keeps the page mounted, with its unsaved text.
+describe("an identity read that fails after a good one", () => {
+  const identity: Identity = { kind: "human", issuer: "i", subject: "s", service: null, principal: "p", roles: ["author"], expiresAt: "2026-11-02T12:00:00Z", epoch: "e" };
+  const ok = { kind: "ok", data: identity } as const;
+  const unavailable = { kind: "unavailable", status: 503, problem: null } as const;
+  const reads = () => {
+    const events: ShellEvents = { onUnauthenticated: vi.fn(), onRevoked: vi.fn(), onEpochChange: vi.fn(), onPreEntry: vi.fn(), setMode: vi.fn(), observe: vi.fn() };
+    return { reads: new ShellReads({}, () => events), events };
+  };
+  const settled = (r: ShellReads, res: Parameters<ShellReads["settle"]>[0], what: "identity" | "server" = "identity") => {
+    const set = vi.fn();
+    const lost = r.settle(res, set, what, () => true, () => r.shown[what]);
+    return { set, lost };
+  };
+
+  test("the shell keeps the answer and is told the failure was kept", () => {
+    const { reads: r } = reads();
+    expect(settled(r, ok).set).toHaveBeenCalledWith(ok);
+    const { set } = settled(r, unavailable);
+    expect(set).toHaveBeenCalledWith(unavailable, true);
+    expect(r.shown.identity).toBe(true); // a later read without answer still keeps the data under the banner
+    expect(settled(r, { kind: "transport" })).toMatchObject({ lost: true });
+  });
+
+  test("a failure with no good read before it replaces the page as before", () => {
+    const { reads: r } = reads();
+    expect(settled(r, unavailable).set).toHaveBeenCalledWith(unavailable);
+    expect(r.shown.identity).toBe(false);
+  });
+
+  test("an answer after the failure shows the page again, with no failure above it", () => {
+    const { reads: r } = reads();
+    settled(r, ok);
+    settled(r, unavailable);
+    expect(settled(r, ok).set).toHaveBeenCalledWith(ok);
+    expect(reading({ load: ok, failed: unavailable }, ok, false)).toEqual({ load: ok });
+  });
+
+  test("the state keeps the last answer and the failure; without a kept answer the failure replaces it", () => {
+    expect(reading({ load: ok }, unavailable, true)).toEqual({ load: ok, failed: unavailable });
+    expect(reading({ load: ok, failed: unavailable }, { kind: "defect", message: "m" }, true)).toEqual({ load: ok, failed: { kind: "defect", message: "m" } });
+    expect(reading({ load: ok }, unavailable, false)).toEqual({ load: unavailable });
+    expect(reading({ load: { kind: "loading" } }, unavailable, true)).toEqual({ load: unavailable });
+  });
+
+  test("the page keeps its place under the failure, so it stays mounted with its unsaved text", () => {
+    const page = h("section", { id: "page" }, "editor");
+    const before = Kept({ failed: undefined, sub: "s", children: page }) as ReactElement<{ children: unknown[] }>;
+    const after = Kept({ failed: unavailable, sub: "s", children: page }) as ReactElement<{ children: unknown[] }>;
+    // Same element type, same slot: React updates the page in place instead of remounting it.
+    expect(before.type).toBe(after.type);
+    expect(before.props.children[1]).toBe(page);
+    expect(after.props.children[1]).toBe(page);
+    const markup = html(h(Kept, { failed: unavailable, sub: "s", children: page }));
+    expect(markup).toContain('<section id="page">editor</section>');
+    expect(markup.indexOf("503")).toBeGreaterThanOrEqual(0);
+    expect(markup.indexOf("503")).toBeLessThan(markup.indexOf('<section id="page">'));
+  });
+
+  test("the shell's identity branch hands the page the same type, key and slot before and after the failure", () => {
+    const page = h("section", { id: "page" }, "editor");
+    const slot = (identity: Parameters<typeof identityMain>[0]) => identityMain(identity, "s", page) as ReactElement<{ children: unknown; failed: unknown }>;
+    const good = slot({ load: ok });
+    const kept = slot(reading({ load: ok }, unavailable, true));
+    const again = slot(reading({ load: ok, failed: unavailable }, ok, false));
+    // React keeps a component mounted, with its state and unsaved guard, while its type, key and slot hold.
+    for (const el of [kept, again]) {
+      expect(el.type).toBe(good.type);
+      expect(el.key).toBe(good.key);
+      expect(el.props.children).toBe(page);
+    }
+    expect(kept.props.failed).toBe(unavailable);
+    expect(good.props.failed).toBeUndefined();
+    expect(again.props.failed).toBeUndefined();
+    // A first read that fails has no page to keep.
+    expect(slot({ load: unavailable }).type).not.toBe(good.type);
+  });
+
+  test("a refusal that ends the session still ends the page, and keeps nothing", () => {
+    const { reads: r, events } = reads();
+    settled(r, ok);
+    const unauthenticated = { kind: "unauthenticated", problem: null } as const;
+    const { set } = settled(r, unauthenticated);
+    expect(events.onUnauthenticated).toHaveBeenCalledWith(unauthenticated);
+    expect(set).not.toHaveBeenCalled();
+    const revoked = { kind: "revoked", problem: { type: "urn:bronzeward:problem:identity-revoked", title: "Identity revoked", status: 403 } } as const;
+    expect(settled(r, revoked).set).not.toHaveBeenCalled();
+    expect(events.onRevoked).toHaveBeenCalledWith(revoked);
+  });
+
+  test("the process's refusal after a good read shows the state before the entry, not the page", () => {
+    const { reads: r, events } = reads();
+    settled(r, ok);
+    const refusal = { kind: "refused", status: 409, problem: { type: "urn:bronzeward:problem:recovery-mode-active", title: "Recovery mode active", status: 409 } } as const;
+    expect(settled(r, refusal).set).not.toHaveBeenCalled();
+    expect(events.onPreEntry).toHaveBeenCalledWith(refusal);
+    expect(r.shown.identity).toBe(false);
+  });
+
+  test("GET /server is not kept: it is read again only while it has no data", () => {
+    const { reads: r } = reads();
+    settled(r, { kind: "ok", data: { version: "v" } }, "server");
+    expect(settled(r, unavailable, "server").set).toHaveBeenCalledWith(unavailable);
   });
 });
 
