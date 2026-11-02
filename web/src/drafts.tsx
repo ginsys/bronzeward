@@ -359,7 +359,7 @@ export const holdsUnsaved = (held: Held, saved: Held, mine: Held | undefined) =>
 // revision, or the answer or the read has no id to tell (ginsys/bronzeward#559).
 export interface Clash { mine: Held; phase: "refused" | "asked" | "theirs"; revision?: number; awaits?: true; again?: true; typed?: true }
 export interface Later { revision?: number; id?: string; text?: Held; removed?: true }
-export interface Editor { held: Held; saved: Held; conflict?: Clash; sent?: { text: Held; whileTheirs: boolean; removes?: true; open?: true; later?: Later }; writes?: number; note?: string | undefined; version?: number; reading?: true; own?: string }
+export interface Editor { held: Held; saved: Held; conflict?: Clash; sent?: { text: Held; whileTheirs: boolean; removes?: true; open?: true; later?: Later }; writes?: number; note?: string | undefined; version?: number; reading?: true; own?: string; gone?: number }
 export type EditorEvent =
   | { kind: "type"; held: Held } // the operator's edit
   | { kind: "refused" } // a write's 412
@@ -387,7 +387,12 @@ export const NOT_REVERTED = "Not reverted: the text changed while the base text 
 // later `failed` or done names the draft revision the conflict follows (ginsys/bronzeward#559).
 function noted(s: Editor, e: EditorEvent): Editor {
   const { conflict: c, sent } = s;
-  if (e.kind !== "draft" || c?.phase !== "theirs" || sent?.open !== true || e.revision < (c.revision ?? 0)) return s;
+  if (e.kind !== "draft" || sent?.open !== true) return s;
+  // Without a conflict, the pane's own done Remove saved EMPTY and `gone` is the removal revision its
+  // draft read showed. A removal at a newer revision, read while a Save is open, is another
+  // author's: it is held back as a removal read with text saved is (#559 hosted review).
+  if (c === undefined) return e.removed === true && same(s.saved, EMPTY) && s.gone !== undefined && e.revision > s.gone && sent.later?.removed !== true ? { ...s, sent: { ...sent, later: { revision: e.revision, removed: true } } } : s;
+  if (c.phase !== "theirs" || e.revision < (c.revision ?? 0)) return s;
   // A removal at a revision the conflict follows already, with the saved text empty, is taken as the
   // pane's own done Remove read again. A draft read names no author, so this is an assumption. It
   // fails when another author removes the entry again before the pane's read of its own Remove
@@ -446,6 +451,7 @@ function step(s: Editor, e: EditorEvent): Editor {
         if (s.sent?.open === true && s.sent.later !== undefined && !e.changed && e.removed !== true) return { ...s, sent: { ...s.sent, later: { ...s.sent.later, revision: e.revision } } };
         // A newer removal read moves the revision of a removal held back (#559).
         if (e.removed === true && s.sent?.open === true && s.sent.later?.removed === true && e.revision > (s.sent.later.revision ?? 0)) return { ...s, sent: { ...s.sent, later: { revision: e.revision, removed: true } } };
+        if (e.removed === true && same(s.saved, EMPTY) && s.sent?.open !== true) return e.revision > (s.gone ?? -1) ? { ...s, gone: e.revision } : s;
         if (e.removed !== true || same(s.saved, EMPTY)) return s;
         if (s.sent?.open === true) return { ...s, saved: EMPTY, sent: { ...s.sent, later: { revision: e.revision, removed: true } } };
         return { ...s, held: EMPTY, saved: EMPTY, ...(!same(s.held, s.saved) && { conflict: { mine: s.held, phase: "theirs" as const, revision: e.revision } }) };
@@ -533,7 +539,7 @@ function step(s: Editor, e: EditorEvent): Editor {
       const later = s.sent?.later;
       const other = s.sent?.removes === true || later === undefined ? undefined : later.removed === true ? EMPTY : later.id !== undefined && e.revision !== undefined && later.id !== e.revision ? later.text : undefined;
       if (later !== undefined && other !== undefined) {
-        const { own: _own, ...after } = s;
+        const { own: _own, gone: _gone, ...after } = s;
         return { ...after, ...closed(s), ...(e.revision !== undefined && { own: e.revision }), held: other, saved: other, writes: writes + 1,
           conflict: { mine: s.held, phase: "theirs", ...(later.revision !== undefined && { revision: later.revision }), ...(c?.awaits === true && { awaits: true as const }) } };
       }
@@ -541,7 +547,8 @@ function step(s: Editor, e: EditorEvent): Editor {
       // A Remove saves no text, so the operator's kept text stays for Copy my text (N2).
       const ends = c === undefined || (s.sent?.removes !== true && (s.sent?.whileTheirs === true || same(c.mine, sent)));
       // A done Remove saves the removal: the text still shown is not stored anywhere (H8).
-      const { own: _own, ...after } = ends ? ended : s;
+      // The removal revision `gone` follows ends with a done write: a new removal read names it again.
+      const { own: _own, gone: _gone, ...after } = ends ? ended : s;
       return { ...after, ...closed(s), ...(e.revision !== undefined && { own: e.revision }), saved: s.sent?.removes === true ? EMPTY : sent, writes: writes + 1 };
     }
     case "revert":
@@ -747,7 +754,12 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
     // The settled hook reads the draft again (H3).
     const d = doneOnce(w);
     const created = (d?.data as Partial<S["SourceUpdate"]> | null | undefined)?.entry?.revision;
-    if (d !== undefined) act({ kind: "done", ...(typeof created === "string" && { revision: created }) });
+    if (d !== undefined) {
+      // Counted at once: a revision read that answers before the next render must see this write
+      // as finished, since the editor drops its answer (ginsys/bronzeward#559 hosted review).
+      finished.current += 1;
+      act({ kind: "done", ...(typeof created === "string" && { revision: created }) });
+    }
     if (o?.kind === "refused" && o.status === 412) {
       act({ kind: "refused" });
       // For the revision shown only: this read's ETag is not kept (§8.3).

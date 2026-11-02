@@ -469,7 +469,7 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     ["a done Save records the revision it created", { held: M2, saved: A, sent: sentOf(M) }, { kind: "done", revision: "frv_9" }, { held: M2, saved: M, sent: sentOf(M), writes: 1, own: "frv_9" }],
     ["#534 C3: another author's removal empties a clean editor", { held: A, saved: A }, { kind: "draft", revision: 8, changed: false, removed: true }, { held: EMPTY, saved: EMPTY }],
     ["#534 C3: another author's removal keeps typed text aside", { held: M, saved: A }, { kind: "draft", revision: 8, changed: false, removed: true }, { held: EMPTY, saved: EMPTY, conflict: theirs(M) }],
-    ["H8: the pane's own done Remove keeps its text when the draft read shows the removal", { held: M, saved: EMPTY }, { kind: "draft", revision: 8, changed: false, removed: true }, { held: M, saved: EMPTY }],
+    ["H8: the pane's own done Remove keeps its text when the draft read shows the removal", { held: M, saved: EMPTY }, { kind: "draft", revision: 8, changed: false, removed: true }, { held: M, saved: EMPTY, gone: 8 }],
     ["a revision read replaces text nothing was typed into", { held: A, saved: A }, { kind: "read", text: T, since: 0 }, { held: T, saved: T }],
     // Save, sweep (a): the operator types while it is in flight.
     ["a Save records the text it sends, and whether their text shows", { held: M, saved: A, conflict: theirs(M2) }, { kind: "send" }, { held: M, saved: A, conflict: theirs(M2), sent: { ...sentOf(M, true), open: true } }],
@@ -925,6 +925,21 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     const src = readFileSync(new URL("./drafts.tsx", import.meta.url), "utf8");
     expect(src).toMatch(/finished\.current = done;/);
     expect(src).toMatch(/if \(finished\.current !== done\) return retry\(\(x\) => x \+ 1\);\n\s*setLoaded\(revision\);/);
+    // A read that answers after the done answer is dispatched and before the next render sees the write as finished (hosted review).
+    expect(src).toMatch(/finished\.current \+= 1;\n\s*act\(\{ kind: "done"/);
+  });
+
+  test("ginsys/bronzeward#559 hosted review: without a conflict, another author's removal at a newer revision than the pane's own done Remove shows when the restoring Save is done", () => {
+    const removed = [{ kind: "send", removes: true }, { kind: "done" }, gone(9), { kind: "send" }] as EditorEvent[];
+    const s = run({ held: T, saved: T }, [...removed, gone(11), { kind: "done", revision: "frv_10" }]);
+    expect(rest(s)).toEqual({ held: EMPTY, saved: EMPTY, conflict: theirs(T, 11), sent: sentOf(T), writes: 2, own: "frv_10" });
+    expect(editor(s, { kind: "copy" }).held).toBe(T);
+    // The read of the pane's own Remove, repeated while the Save is open, is not another author's.
+    const own = run({ held: T, saved: T }, [...removed, gone(9), { kind: "done", revision: "frv_10" }]);
+    expect(rest(own)).toEqual({ held: T, saved: T, sent: sentOf(T), writes: 2, own: "frv_10" });
+    // Before the pane's own removal was read, a removal cannot be told from it: the text stays.
+    const unread = run({ held: T, saved: T }, [{ kind: "send", removes: true }, { kind: "done" }, { kind: "send" }, gone(11), { kind: "done", revision: "frv_10" }]);
+    expect(rest(unread)).toEqual({ held: T, saved: T, sent: sentOf(T), writes: 2, own: "frv_10" });
   });
 
   test("ginsys/bronzeward#534 N1: Show clicked again while asked holds Copy until its draft read answers, also when a revision read answers first", () => {
