@@ -17,7 +17,7 @@ import (
 
 // cells is the terminal columns r takes: none for a non-spacing or enclosing mark, which sits on
 // the character before it, two for a wide or full-width character, else one. A spacing mark (Mc)
-// takes its own column, as wcwidth gives it.
+// takes its own column, as wcwidth gives it, or two when it is wide (U+302E and U+302F).
 func cells(r rune) int {
 	if unicode.In(r, unicode.Mn, unicode.Me) {
 		return 0

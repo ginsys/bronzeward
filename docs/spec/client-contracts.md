@@ -1445,7 +1445,8 @@ The review is served to any human `author`, not only the one who started the ing
    another width the text is wrapped again and the page starts at the same source line. A size
    below the smallest the pager takes shows a "Window too small" notice instead of the page,
    ignores every key but quit, and shows the page again once the size is usable. A nonspacing
-   or enclosing combining mark takes no column and a spacing mark takes one, and a wrap keeps
+   or enclosing combining mark takes no column. A spacing mark takes one, or two when it is
+   wide or full-width (U+302E and U+302F). A wrap keeps
    either with the character before it (the marks beyond what a row holds, up to the next character that is not a mark, show as their Go escape);
    full grapheme clusters, such as emoji joined by a
    zero-width joiner, are not kept whole.

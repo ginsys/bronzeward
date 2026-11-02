@@ -306,13 +306,17 @@ func TestWrapCombiningMark(t *testing.T) {
 	}
 }
 
-// TestWrapSpacingMark: a spacing mark (Mc) takes its own column, as wcwidth gives it, and a wrap
-// still never splits it from the character before it. At 20 columns, 19 letters and a Devanagari
-// syllable of two columns take 21, so the syllable moves whole to the next line.
+// TestWrapSpacingMark: a spacing mark (Mc) takes its own column, as wcwidth gives it, or two when
+// it is wide (U+302E), and a wrap still never splits it from the character before it. At 20
+// columns, 19 letters and a Devanagari syllable of two columns take 21, so the syllable moves whole
+// to the next line.
 func TestWrapSpacingMark(t *testing.T) {
 	ka := "का" // U+0915 and the spacing mark U+093E
 	if got, want := cells('ा'), 1; got != want {
 		t.Errorf("a spacing mark takes %d cells, want %d", got, want)
+	}
+	if got, want := cells('〮'), 2; got != want {
+		t.Errorf("a wide spacing mark takes %d cells, want %d", got, want)
 	}
 	if got := wrap([]string{strings.Repeat("a", 19) + ka}, 20); !slices.Equal(got, []string{strings.Repeat("a", 19), ka}) {
 		t.Errorf("wrap gives %q; want the syllable whole on the next line", got)
