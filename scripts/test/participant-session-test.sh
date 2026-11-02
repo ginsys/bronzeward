@@ -692,7 +692,8 @@ wait "$stub_a" 2>/dev/null
 # set_issuer, restart_a and forward_idp as their die does. INT_ON sends the shell a Ctrl-C (SIGINT)
 # during the inspect of that container, INT_PROBE during idp_reached, as a second Ctrl-C during the
 # cleanup does. Calls go to the log.
-sed -n -e '/^handback() {$/,/^}$/p' -e '/^t9_clean() {$/,/^}$/p' "$session" >"$t/clean.sh"
+sed -n -e '/^cleanup_stopped() {$/,/^}$/p' -e '/^handback() {$/,/^}$/p' -e '/^t9_clean() {$/,/^}$/p' \
+  "$session" >"$t/clean.sh"
 mkdir -p "$t/cbin"
 cat >"$t/cbin/inject" <<'EOF'
 #!/bin/sh
@@ -736,14 +737,15 @@ if [ "$(grep -cE '^(handback|t9_clean)\(\) \{' "$t/clean.sh")" = 2 ]; then
     [ "$calls" = "inject unpause A inject unpause C set_issuer zitadel restart_a " ]; then
     ok "handback reports an instance it cannot inspect, and unpauses the others"
   else bad "handback, B not inspected: $calls ($out)"; fi
+  # A second Ctrl-C ends a cleanup that hangs, for example on a Docker call, and says to recreate
+  # the fixture.
   out=$(PAUSED="a b c" INT_ON=a clean_case handback)
-  calls=$(tr '\n' ' ' <"$t/clean.log")
-  if [ "$calls" = "inject unpause A inject unpause B inject unpause C set_issuer zitadel restart_a " ]; then
-    ok "handback finishes after a second Ctrl-C"
-  else bad "handback, Ctrl-C during the cleanup: $calls ($out)"; fi
+  if [ ! -s "$t/clean.log" ] && [[ $out == *"the cleanup was interrupted; recreate the fixture"* ]]; then
+    ok "handback ends on a second Ctrl-C and says to recreate the fixture"
+  else bad "handback, Ctrl-C during the cleanup: $(tr '\n' ' ' <"$t/clean.log") ($out)"; fi
   out=$(NO_IDP=1 INT_PROBE=1 clean_case t9_clean)
-  if [ "$(cat "$t/clean.log")" = forward_idp ]; then
-    ok "t9_clean finishes after a second Ctrl-C"
+  if [ ! -s "$t/clean.log" ] && [[ $out == *"the cleanup was interrupted; recreate the fixture"* ]]; then
+    ok "t9_clean ends on a second Ctrl-C and says to recreate the fixture"
   else bad "t9_clean, Ctrl-C during the cleanup: $(cat "$t/clean.log") ($out)"; fi
   out=$(A_STOPPED=1 clean_case t9_clean)
   if [ "$(cat "$t/clean.log")" = restart_a ] && [[ $out == *"A is started again"* ]]; then
