@@ -359,6 +359,8 @@ export class Client {
       }
       const code = problem?.type.slice(PROBLEM_PREFIX.length);
       if (next.status === 401 && code === "unauthenticated") {
+        // The renewal is a request to the identity provider, which the attempt bound does not cover
+        // (§8.4 item 8; §9.3 item 3 keeps its own rule), so the write's bound does not cut this wait.
         if (renewed || !(await this.renew())) {
           this.endWrites();
           return { kind: "unauthenticated", problem };
