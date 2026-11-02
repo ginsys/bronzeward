@@ -475,7 +475,9 @@ t5() {
   fi
   setup t5
   echo "names: label bw-team, value red"
-  echo "next: fixtures/participants/session t5 collide, once the participant has saved the draft"
+  read_ok "the label draft is published, and no draft is open" \
+    test "$(sql "SELECT count(*) FROM draft WHERE title = 'participants labels' AND state = 'published'")/$(sql "SELECT count(*) FROM draft WHERE state = 'open'")" = 1/0
+  echo "next: fixtures/participants/session t5 collide, after the participant opens the draft and before they save the label"
 }
 t6() {
   setup t6
@@ -642,7 +644,7 @@ t9() {
   done
   case $op in
     '') die "no apply-config operation on the worker 30 s after the join: the apply did not start" ;;
-    completed | rejected | failed | cancelled) die "the apply ended ($op) before the participant could follow it" ;;
+    completed | rejected | failed | cancelled) die "the apply ended ($op) before the participant could follow it (ginsys/bronzeward#512)" ;;
   esac
   echo "read ok: the apply started on the worker ($op)"
   echo "names: none; the apply completes within 4 minutes"

@@ -1,7 +1,7 @@
-// T5's competing update (#367): while the participant edits node label bw-team in the web
-// interface, h-all saves another value of it into the participant's open draft, so that the
-// participant's next save is refused for a stale ETag. h-all signs in to Zitadel by the device
-// grant, approved in headless Chrome; its access token stays in this process's memory. Run by
+// T5's competing update (#367): after the participant opens a draft with the CLI and before they
+// save node label bw-team, h-all saves another value of it into that draft, so that the
+// participant's save is refused for a stale ETag (the CLI sends the ETag of its last show or
+// write). h-all signs in to Zitadel by the device grant, approved in headless Chrome; its access token stays in this process's memory. Run by
 // `fixtures/participants/session t5 collide`, through `session passwords --only h-all --exec`, so
 // that the password is in this process's environment only.
 //
@@ -134,7 +134,7 @@ async function collide(token) {
   const list = await fetch(`${api}/drafts?limit=500`, { headers: auth });
   if (!list.ok) throw new Error(`GET /drafts: ${list.status}`);
   const open = (await list.json()).items.filter((x) => x.state === "open");
-  if (open.length !== 1) throw new Error(`${open.length} open drafts, want 1: the participant has saved no draft yet, or another is open`);
+  if (open.length !== 1) throw new Error(`${open.length} open drafts, want 1: the participant has opened no draft yet, or another is open`);
   const draft = open[0].id;
   const got = await fetch(`${api}/drafts/${draft}`, { headers: auth });
   const etag = got.headers.get("etag");
