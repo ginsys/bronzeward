@@ -463,7 +463,9 @@ describe("the draft editor (#339)", () => {
       await openProfile(first.id, p, 2);
       await profilePane().$(`button[aria-label="Move up ${b}"]`).click();
       expect(await order()).toEqual([b, a]);
-      const other = await putFragment(first.id, `other-${hex()}`, saved.etag, "h-all");
+      // Another author pins one revision only, in the same profile: their list is not mine.
+      const other = await api("h-all", "PUT", `/drafts/${first.id}/profiles/${p}`, { fragments: [second.revision] }, saved.etag);
+      expect(other.status).toBe(200);
       expect(other.etag).not.toBe(saved.etag);
       const now = (await api("h-author", "GET", `/drafts/${first.id}`)).body!["revision"] as number;
       await faults({ upstream: at });
@@ -475,11 +477,23 @@ describe("the draft editor (#339)", () => {
       expect(await order()).toEqual([b, a]);
       await profilePane().$("button=Show their change").click();
       await expect($("main h2")).toHaveText(expect.stringContaining(`revision ${now}`), { wait: 20_000 });
+      // Their list shows, and mine waits aside until Copy puts it back.
+      await browser.waitUntil(async () => (await order()).join(",") === b, { timeout: 20_000, timeoutMsg: "Show their change did not show the other author's pins" });
       await profilePane().$("button=Copy my text into the new revision").click();
       expect(await order()).toEqual([b, a]);
       await profilePane().$("button=Save").click();
       await expect(profilePane().$('[data-testid="write-result"]')).toHaveText(expect.stringContaining(`Profile ${p} saved in draft`), { wait: 30_000 });
       expect(await profileRevisions(first.id, p)).toEqual([second.revision, first.revision]);
+    });
+
+    it("at 320 CSS pixels a long unbroken profile name wraps and the page does not scroll sideways", async () => {
+      const a = `pw-${hex()}`;
+      const long = `p${"x".repeat(60)}`;
+      const seed = await seeded(a);
+      const saved = await api("h-author", "PUT", `/drafts/${seed.id}/profiles/${long}`, { fragments: [seed.revision] }, seed.etag);
+      expect(saved.status).toBe(200);
+      await openProfile(seed.id, long, 1);
+      expect(await narrow('main section[aria-label^="Profile"]')).toEqual({ page: 0, region: false });
     });
 
     it("a pin that is not the fragment's current revision is marked, and its 422 names the path and no revision", async () => {

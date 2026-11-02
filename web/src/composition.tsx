@@ -87,17 +87,22 @@ export function ProfilePane({ draft, entry, seeChange, claim = () => {}, shown =
   const known = new Map(options.map((c) => [c.revision, c.name]));
   const label = (revision: string) => known.get(revision) ?? (names[revision] || short(revision));
   const lookup = pins.filter((r) => !known.has(r) && names[r] === undefined).join(",");
+  // Each uncached pin is asked for once, on its own: an answer changes `lookup` and restarts this
+  // effect, which must not ask again for a pin whose read is still in flight.
+  const asked = useRef(new Set<string>());
+  const mounted = useRef(true);
   useEffect(() => {
-    if (lookup === "") return;
-    let live = true;
-    void (async () => {
-      for (const r of lookup.split(",")) {
-        const x = await read<S["FragmentRevisionBody"]>(`/fragment-revisions/${encodeURIComponent(r)}`, () => live);
-        if (!live) return;
-        setNames((n) => ({ ...n, [r]: x?.kind === "ok" ? x.data.name : "" }));
-      }
-    })();
-    return () => void (live = false);
+    mounted.current = true;
+    return () => void (mounted.current = false);
+  }, []);
+  useEffect(() => {
+    for (const r of lookup === "" ? [] : lookup.split(",")) {
+      if (asked.current.has(r)) continue;
+      asked.current.add(r);
+      void read<S["FragmentRevisionBody"]>(`/fragment-revisions/${encodeURIComponent(r)}`, () => mounted.current).then((x) => {
+        if (mounted.current) setNames((n) => ({ ...n, [r]: x?.kind === "ok" ? x.data.name : "" }));
+      });
+    }
   }, [read, lookup]);
 
   useEffect(() => {
