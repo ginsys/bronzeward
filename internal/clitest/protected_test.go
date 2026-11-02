@@ -227,14 +227,15 @@ const (
 	keyLine      = "space or f forward, b back, q quit"
 )
 
-// review runs import review of ing on a terminal: it pages to the end, back once, quits with the
+// review runs import review -v of ing on a terminal: it pages to the end, back once, quits with the
 // key quit (q or Ctrl-C), and types marks at the prompt and then an empty line. It checks that the
 // terminal modes at the prompt are those before the pager, that the screen shows the notice before
-// the pager, the review in the alternate screen, the unmarked secret only when secret is set, and
-// each of want, and returns the exit code.
+// the pager, the review in the alternate screen, the unmarked secret only when secret is set and
+// never before or after the pager, where the -v lines are, and each of want, and returns the exit
+// code.
 func (e *importEnv) review(ing, quit string, secret bool, marks []string, want ...string) int {
 	e.t.Helper()
-	tm := e.onTerminal(nil, "import", "review", ing)
+	tm := e.onTerminal(nil, "-v", "import", "review", ing)
 	defer tm.wipe()
 	if !tm.shows("the notice", reviewNotice) || !tm.shows("the pager", keyLine) {
 		return tm.wait()
@@ -273,8 +274,11 @@ func (e *importEnv) review(ing, quit string, secret bool, marks []string, want .
 	if shown := on >= 0 && off > on && strings.Contains(s[on:off], unmarked); shown != secret {
 		e.t.Errorf("the review shows the unmarked secret: %v; want %v", shown, secret)
 	}
+	if on >= 0 && strings.Contains(s[:on], unmarked) {
+		e.t.Error("the unmarked secret is shown before the pager")
+	}
 	if off >= 0 && strings.Contains(s[off:], unmarked) {
-		e.t.Error("the unmarked secret is shown outside the pager")
+		e.t.Error("the unmarked secret is shown after the pager")
 	}
 	for _, w := range want {
 		if !strings.Contains(s, w) {
@@ -295,9 +299,9 @@ func (e *importEnv) reviews(ing string) int {
 	return n
 }
 
-// mark runs import mark of ing with marks on standard input.
+// mark runs import mark -v of ing with marks on standard input.
 func (e *importEnv) mark(ing string, marks ...string) result {
-	return e.ctl([]string{"TMPDIR=" + e.tmp}, strings.Join(marks, "\n")+"\n", "--context", "human", "import", "mark", ing)
+	return e.ctl([]string{"TMPDIR=" + e.tmp}, strings.Join(marks, "\n")+"\n", "--context", "human", "-v", "import", "mark", ing)
 }
 
 // lapse waits up to 30 s until import status shows the claim's lease lapsed.

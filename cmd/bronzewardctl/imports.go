@@ -476,8 +476,9 @@ func (e *env) follow(c *client.Client, a accepted, before int) (err error) {
 	}
 	switch {
 	case mark != 0:
-		// A mark's run has its own outcomes: a later succeeded is never the mark applied.
-		return e.markOutcome(c, a, b, o, s)
+		// A mark's run has its own outcomes: a later succeeded is never the mark applied, and its
+		// events not shown can hold the mark's pause.
+		return e.markOutcome(c, a, b, o, s, err != nil)
 	case client.Terminal(o.State):
 		return e.ended(c, b, o)
 	case s.how == "paused":

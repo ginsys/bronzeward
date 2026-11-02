@@ -26,6 +26,7 @@ type importFake struct {
 	result     string
 	problem    string
 	onIngested func() // runs when an import start is accepted
+	onMark     func() // runs when a mark is received
 	replayed   bool   // a continuation or takeover answers as a replay
 	pagesGone  bool   // the event pages are refused
 	others     int    // generations other clients take before a continuation or takeover lands
@@ -119,6 +120,9 @@ func (f *importFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		record()
+		if f.onMark != nil {
+			f.onMark()
+		}
 		if bytes.Contains(body, []byte("BWSYNTH-not-a-path")) {
 			w.Header().Set("Content-Type", "application/problem+json")
 			w.WriteHeader(http.StatusUnprocessableEntity)

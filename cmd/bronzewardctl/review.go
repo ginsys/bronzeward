@@ -8,9 +8,12 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
+	"syscall"
 
 	"golang.org/x/term"
 
@@ -27,7 +30,7 @@ const reviewNotice = "[ protected review: this client writes it nowhere but this
 // mark does (client-contracts.md §11.3, #256 T14). It is refused, with nothing read or written,
 // unless standard input and output are a terminal, and it has no -o json, yaml, save or export
 // form. The review is held in memory only.
-func (e *env) importReview(args []string) error {
+func (e *env) importReview(args []string) (err error) {
 	pos, err := e.parse("import review", args, 1, nil)
 	if err != nil {
 		return err
@@ -54,6 +57,11 @@ func (e *env) importReview(args []string) error {
 		return err
 	}
 	defer func() { err = errors.Join(err, c.Save()) }()
+	// GET /server checks the server's revision on the context's use (§7 item 3) before the review
+	// is read.
+	if _, _, err := c.Server(); err != nil {
+		return err
+	}
 	r, err := c.Get("/ingestions/" + url.PathEscape(ing) + "/review")
 	if err != nil {
 		return err
@@ -108,19 +116,41 @@ func screenSize(out *os.File) (rows, cols int, err error) {
 
 // pager shows lines on the terminal out, of rows by cols, in the alternate screen, with standard
 // input in raw mode for the keys, and restores both before it returns, so the review leaves the
-// screen.
+// screen. A signal that ends the process, sent by another process while the pager runs, restores
+// them first and then ends the process as the signal would have; Ctrl-C reaches the pager as a key.
 func (e *env) pager(out *os.File, lines []string, rows, cols int) error {
 	old, err := term.MakeRaw(int(stdin.Fd()))
 	if err != nil {
 		return fmt.Errorf("putting the terminal in raw mode for the review: %w; nothing was shown", err)
 	}
-	defer func() { _ = term.Restore(int(stdin.Fd()), old) }()
+	var once sync.Once
+	leave := func() {
+		once.Do(func() {
+			_ = term.Restore(int(stdin.Fd()), old)
+			_, _ = fmt.Fprint(out, clearScreen+altScreenOff)
+		})
+	}
+	sigs, done := make(chan os.Signal, 1), make(chan struct{})
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	go func() {
+		select {
+		case sig := <-sigs:
+			leave()
+			raise(sig)
+		case <-done:
+		}
+	}()
+	defer func() { signal.Stop(sigs); close(done); leave() }()
 	if _, err := fmt.Fprint(out, altScreenOn); err != nil {
 		return err
 	}
-	err = page(lines, rows, cols, stdin, out)
-	_, _ = fmt.Fprint(out, clearScreen+altScreenOff)
-	return err
+	return page(lines, rows, cols, stdin, out)
+}
+
+// raise ends the process by sig, as if no handler had caught it. A test replaces it.
+var raise = func(sig os.Signal) {
+	signal.Reset(sig)
+	_ = syscall.Kill(os.Getpid(), sig.(syscall.Signal))
 }
 
 // reviewText is the review as the pager shows it, as its lines: the staged document's lines, then
@@ -152,7 +182,7 @@ func reviewText(rv apitypes.IngestionReviewBody) []string {
 // /ingestions/{id}/marks, author, human only), the paths read from the prompt or standard input,
 // never from an argument or a file, and, unless --no-wait, follows the run the mark starts
 // (client-contracts.md §11.3 item 3, #256 T15).
-func (e *env) importMark(args []string) error {
+func (e *env) importMark(args []string) (err error) {
 	var noWait bool
 	var rf repeatFlags
 	pos, err := e.parse("import mark", args, 1, func(fs *flag.FlagSet) {
@@ -225,22 +255,44 @@ func paths(n int) string {
 // at the mark's generation is applied; a mark-refused event there, a resume-failed event or a
 // later takeover leaves it not applied, exit 1; a failed operation is exit 4; and a lease that
 // lapsed with none of these leaves it unknown, exit 3. Only the paused event applies it, so an
-// operation that succeeded without one is not applied either. An operation read terminal ends the
-// import whatever the run settled before: a failure is reported as ended reports it, exit 4, and
-// every end ends this client's record of the import (§8.3).
-func (e *env) markOutcome(c *client.Client, a accepted, b *apitypes.IngestionBody, o *apitypes.OperationBody, s settlement) error {
+// operation that succeeded without one is not applied either, unless its last events were not
+// shown (unshown): then the outcome is unknown, exit 3. An operation read terminal ends the import
+// whatever the run settled before: ended reports it, a failure exit 4, a success with the draft's
+// ETag kept as after any import this client started, and its record of the import ends (§8.3). A
+// mark not applied before a success is reported beside it, with the draft to read, not the
+// commands of a paused import.
+func (e *env) markOutcome(c *client.Client, a accepted, b *apitypes.IngestionBody, o *apitypes.OperationBody, s settlement, unshown bool) error {
 	what := "the mark on import " + b.Id
-	switch {
-	case client.Terminal(o.State) && o.State != "succeeded":
-		return e.ended(c, b, o)
-	case client.Terminal(o.State) && s.how == "paused":
-		// Applied at its pause, then continued and released since.
-		if err := e.say(sf("Marked %s; re-staged and paused at generation %d, and released since.", paths(a.marks), a.Generation)); err != nil {
-			return err
+	if client.Terminal(o.State) {
+		var why error
+		switch {
+		case o.State != "succeeded":
+			return e.ended(c, b, o)
+		case s.how == "paused":
+			// Applied at its pause, then continued and released since.
+			if err := e.say(sf("Marked %s; re-staged and paused at generation %d, and released since.", paths(a.marks), a.Generation)); err != nil {
+				return err
+			}
+			return e.ended(c, b, o)
+		case s.how == "mark-refused":
+			why = fmt.Errorf("%s: %s was not applied: it was refused (%s), and operation %s then released the import without it.",
+				c.Context.Where(), what, refusal(s.problem), o.Id)
+		case s.how == "resume-failed":
+			why = fmt.Errorf("%s: %s was not applied: its staged input could not be decrypted (resume-failed, %s), and operation %s then released the import without it.",
+				c.Context.Where(), what, pr(or(&s.code, "no code")), o.Id)
+		case s.how == "taken-over":
+			why = fmt.Errorf("%s: %s was not applied: a takeover at generation %d resumed the import without it, and operation %s released it.",
+				c.Context.Where(), what, s.gen, o.Id)
+		case unshown:
+			why = outcomeUnknown{fmt.Errorf("%s: %s: operation %s succeeded, but its last events were not shown, so whether the mark was applied before the release is unknown.",
+				c.Context.Where(), what, o.Id)}
+		default:
+			why = fmt.Errorf("%s: %s was not applied: operation %s succeeded without pausing at the mark's generation %d.",
+				c.Context.Where(), what, o.Id, a.Generation)
 		}
-		return e.ended(c, b, o)
-	case client.Terminal(o.State):
-		forget(e, c, b.Id)
+		blocked := &client.Blocked{Err: fmt.Errorf("%w Read the draft before marking again:", why),
+			More: []string{"  bronzewardctl draft show " + pr(client.ShellWord(b.Draft))}}
+		return errors.Join(blocked, e.ended(c, b, o))
 	}
 	switch {
 	case s.how == "paused":
@@ -255,9 +307,6 @@ func (e *env) markOutcome(c *client.Client, a accepted, b *apitypes.IngestionBod
 	case s.how == "taken-over":
 		return &client.Blocked{Err: fmt.Errorf("%s: %s was not applied: a takeover at generation %d resumed the import without it. Once the import pauses again, review it and mark again:",
 			c.Context.Where(), what, s.gen), More: remedies(b.Id, "status")}
-	case client.Terminal(o.State):
-		return &client.Blocked{Err: fmt.Errorf("%s: %s was not applied: operation %s succeeded without pausing at the mark's generation %d. Read the draft before marking again:",
-			c.Context.Where(), what, o.Id, a.Generation), More: []string{"  bronzewardctl draft show " + pr(client.ShellWord(b.Draft))}}
 	}
 	return lapsed(c, b, o, what)
 }
