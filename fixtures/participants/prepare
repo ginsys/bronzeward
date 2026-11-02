@@ -134,8 +134,11 @@ case $step in
     check "$ref" "the worker's Applied is its Desired, from an operation, within four minutes" within 240 applied_desired
     ;;
   drift-closed)
-    check "$ref" "T10's drift is closed: no open drift record on the worker" \
-      same "$(sql "SELECT count(*) FROM drift_record WHERE machine = '$machine_w' AND closed IS NULL")" 0
+    # A drift record is named by its machine and the revision that opened it, and a machine has at
+    # most one open (drift_record_open). A failure names the one T10 left open (README).
+    drift_open=$(sql "SELECT opened FROM drift_record WHERE machine = '$machine_w' AND closed IS NULL")
+    check "$ref" "T10's drift is closed: no open drift record on the worker${drift_open:+ (open: the record opened at revision $drift_open)}" \
+      same "$drift_open" ''
     if [ "$failed" -eq 0 ] && [ "$(sql "SELECT frozen FROM machine WHERE id = '$machine_w'")" = t ]; then
       fresh h-approver
       check "$ref" "the worker's scope, still frozen after T10, unfrozen by h-approver: 201" \

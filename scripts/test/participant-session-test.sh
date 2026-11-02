@@ -597,24 +597,34 @@ else bad "start, pid record fails: the copies with port $port are wrong, or the 
 kill "$foreign" 2>/dev/null
 wait "$foreign" 2>/dev/null
 
-# t9 disconnect's stream reads (t9_curl and t9_read, taken from the session) against a stub A:
-# a fresh request gets an event stream, a resumption with Last-Event-ID gets 404 with a JSON body,
-# and operation op-json gets 200 with a JSON body. curl exits 0 on both refusals, so only the
-# status and content type check fails the step on them.
+# T9's two HTTP call sites, t9_open (the reader before the stop) and t9_read (the resumption and
+# the full replay), taken from the session with their helpers and run against a stub A. Each must
+# pass on 200 with an event stream, and fail on 404 with a JSON body, on 201, on 200 text/plain and
+# on a token A refuses. curl exits 0 on each of these refusals; only t9_head_ok fails the step. The
+# pass cases also prove that each call site sends the token and the resumption its Last-Event-ID.
+# The operation ID in the path picks the stub's answer.
 cat >"$t/stub-a.py" <<'EOF'
-import http.server, sys
+import http.server, sys, time
 class H(http.server.BaseHTTPRequestHandler):
+    def answer(self, code, ctype, events, gap=0):
+        self.send_response(code); self.send_header("Content-Type", ctype); self.end_headers()
+        for i in range(events):
+            self.wfile.write(f"id: 1:{i + 1}\ndata: e\n\n".encode()); self.wfile.flush(); time.sleep(gap)
     def do_GET(self):
         if self.headers.get("Authorization") != "Bearer BWSYNTH-token-t9":
-            self.send_response(401); self.end_headers(); return
-        if self.headers.get("Last-Event-ID") or self.path.endswith("/op-json/events"):
-            code = 404 if self.headers.get("Last-Event-ID") else 200
-            self.send_response(code); self.send_header("Content-Type", "application/json"); self.end_headers()
-            self.wfile.write(b'{"error":"refused"}'); return
-        self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.end_headers()
-        self.wfile.write(b"id: 1:1\ndata: a\n\nid: 1:2\ndata: b\n\n")
+            return self.answer(401, "application/json", 0)
+        op = self.path.split("/")[-2]
+        if op == "op-404": self.answer(404, "application/json", 0); self.wfile.write(b'{"error":"refused"}')
+        elif op == "op-201": self.answer(201, "text/event-stream", 3)
+        elif op == "op-plain": self.answer(200, "text/plain", 3)
+        elif op == "op-live": self.answer(200, "text/event-stream", 40, 0.25)
+        elif op == "op-resume" and self.headers.get("Last-Event-ID") != "1:1": self.answer(400, "application/json", 0)
+        else: self.answer(200, "text/event-stream", 3)
     def log_message(self, *a): pass
-s = http.server.HTTPServer(("127.0.0.1", 0), H)
+class S(http.server.ThreadingHTTPServer):
+    # A reader that the test kills closes its stream: not an error.
+    def handle_error(self, request, client_address): pass
+s = S(("127.0.0.1", 0), H)
 open(sys.argv[1], "w").write(str(s.server_address[1]))
 s.serve_forever()
 EOF
@@ -623,37 +633,56 @@ stub_a=$!
 for _ in $(seq 50); do [ -s "$t/stub-a.port" ] && break; sleep 0.1; done
 mkdir -p "$t/t9-state"
 printf 'BWSYNTH-token-t9' >"$t/t9-state/automation-token"
-sed -n -e '/^t9_curl() {$/,/^}$/p' -e '/^t9_read() {$/,/^}$/p' "$session" >"$t/t9.sh"
-# t9_case <op> <command>...: the command in a shell with only the two functions, a die that exits
-# 1, and the stub A's port.
+printf 'BWSYNTH-token-other' >"$t/t9-state/other-token"
+sed -n -e '/^t9_auth() {.*}$/p' -e '/^t9_get() {$/,/^}$/p' -e '/^t9_head_ok() {$/,/^}$/p' \
+  -e '/^t9_read() {$/,/^}$/p' -e '/^t9_open() {$/,/^}$/p' -e '/^t9_ids() {$/,/^}$/p' "$session" >"$t/t9.sh"
+# t9_case <op> <shell text>: the text in a shell as strict as the session, with only the T9
+# functions, a die that exits 1, and the stub A's port. STUB_TOKEN=other sends a token A refuses.
 t9_case() {
-  local op=$1
-  shift
+  local tok=automation-token
+  [ "${STUB_TOKEN:-}" != other ] || tok='other-token'
+  mkdir -p "$t/t9-$tok"
+  cp "$t/t9-state/$tok" "$t/t9-$tok/automation-token"
   # shellcheck disable=SC2016 # the inner shell's own text
-  STATE=$t/t9-state SERVER_A_PORT=$(cat "$t/stub-a.port") t9_op=$op bash -c \
-    'die() { echo "die: $*"; exit 1; }; . "$0"; "$@"' "$t/t9.sh" "$@" 2>&1
+  STATE=$t/t9-$tok SERVER_A_PORT=$(cat "$t/stub-a.port") t9_op=$1 bash -c \
+    'set -euo pipefail; die() { echo "die: $*"; exit 1; }; . "$0"; eval "$1"' "$t/t9.sh" "$2" 2>&1
 }
-if [ "$(grep -cE '^t9_(curl|read)\(\) \{$' "$t/t9.sh")" = 2 ] && [ -s "$t/stub-a.port" ]; then
-  out=$(t9_case op-1 t9_read "the stream" "$t/t9-fresh" 10)
+# The reader that t9_open leaves running must be curl itself, so that t9_clean's kill reaches it.
+# shellcheck disable=SC2016 # the inner shell's own text
+open_ok='t9_open "$T/open"; echo "reader=$(ps -o comm= -p "$t9_reader")"; kill "$t9_reader"; wait "$t9_reader" || :; kill -0 "$t9_reader" 2>/dev/null || echo ended'
+export T=$t
+# shellcheck disable=SC2016 # each t9_case text is the inner shell's own
+if [ "$(grep -cE '^t9_(auth|get|head_ok|read|open|ids)\(\) \{' "$t/t9.sh")" = 6 ] && [ -s "$t/stub-a.port" ]; then
+  out=$(t9_case op-live "$open_ok")
   rc=$?
-  if [ "$rc" = 0 ] && [ "$(grep -c '^id:' "$t/t9-fresh")" = 2 ]; then
-    ok "t9_read accepts a 200 event stream"
+  if [ "$rc" = 0 ] && [[ $out == *"reader=curl"*ended* ]] && grep -q '^id:' "$t/open"; then
+    ok "t9_open accepts an open 200 event stream, and its reader is curl"
+  else bad "t9_open, event stream: rc=$rc: $out"; fi
+  out=$(t9_case op-resume 't9_read "the resumed stream" "$T/read" 10 1:1')
+  rc=$?
+  if [ "$rc" = 0 ] && [ "$(grep -c '^id:' "$t/read")" = 3 ]; then
+    ok "t9_read accepts a 200 event stream, and sends the token and the Last-Event-ID"
   else bad "t9_read, event stream: rc=$rc: $out"; fi
-  out=$(t9_case op-1 t9_curl "$t/t9-control" 10 1:2)
+  # The control: curl alone ends with status 0 on a refused read.
+  out=$(t9_case op-404 't9_auth | t9_get "$T/control" 10')
   rc=$?
-  out2=$(t9_case op-1 t9_read "the resumed stream" "$t/t9-resume" 10 1:2)
-  rc2=$?
-  # The control: curl alone ends with status 0 on the refused resumption, and writes no event.
-  if [ "$rc" = 0 ] && [ "$(grep -c '^id:' "$t/t9-control")" = 0 ] && [ "$rc2" != 0 ] &&
-    [[ $out2 == *"the resumed stream was refused: HTTP 404 application/json"* ]]; then
-    ok "a resumption refused with 404 and a JSON body fails t9_read, which curl's status alone passes"
-  else bad "t9_read, refused resumption: control rc=$rc ($out), rc=$rc2: $out2"; fi
-  out=$(t9_case op-json t9_read "the full replay" "$t/t9-json" 10)
-  rc=$?
-  if [ "$rc" != 0 ] && [[ $out == *"the full replay was refused: HTTP 200 application/json"* ]]; then
-    ok "a 200 answer that is not an event stream fails t9_read"
-  else bad "t9_read, JSON answer: rc=$rc: $out"; fi
-else bad "t9_read: the functions were not found in the session, or the stub A did not start"; fi
+  if [ "$rc" = 0 ] && [ "$(grep -c '^id:' "$t/control")" = 0 ]; then
+    ok "control: curl alone ends with status 0 on a 404 answer"
+  else bad "control, curl on 404: rc=$rc: $out"; fi
+  for c in "op-404:HTTP 404 application/json" "op-201:HTTP 201 text/event-stream" \
+    "op-plain:HTTP 200 text/plain" "other-token:HTTP 401 application/json"; do
+    op=${c%%:*} want=${c#*:} tok=''
+    if [ "$op" = other-token ]; then op=op-live tok=other; fi
+    out=$(STUB_TOKEN=$tok t9_case "$op" 't9_open "$T/open-bad"')
+    rc=$?
+    out2=$(STUB_TOKEN=$tok t9_case "$op" 't9_read "the full replay" "$T/read-bad" 10')
+    rc2=$?
+    if [ "$rc" != 0 ] && [[ $out == *"the stream on A was refused: $want,"* ]] && [ "$rc2" != 0 ] &&
+      [[ $out2 == *"the full replay was refused: $want,"* ]]; then
+      ok "t9_open and t9_read fail on ${c%%:*} ($want)"
+    else bad "${c%%:*}: t9_open rc=$rc ($out), t9_read rc=$rc2 ($out2)"; fi
+  done
+else bad "T9: the functions were not found in the session, or the stub A did not start"; fi
 kill "$stub_a" 2>/dev/null
 wait "$stub_a" 2>/dev/null
 
