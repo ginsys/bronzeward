@@ -201,10 +201,16 @@ func cases[T any](t *testing.T, file string, run map[string]T) []string {
 		t.Fatalf("%s holds %d records, %v; the test runs %d", file, len(records), err, len(run))
 	}
 	var ids []string
+	seen := map[string]bool{}
 	for _, r := range records {
 		if _, ok := run[r.ID]; !ok {
 			t.Fatalf("%s records %s, which the test does not run", file, r.ID)
 		}
+		if seen[r.ID] {
+			// With equal counts, a repeated ID would run one case twice and skip another.
+			t.Fatalf("%s records %s twice", file, r.ID)
+		}
+		seen[r.ID] = true
 		ids = append(ids, r.ID)
 	}
 	return ids
