@@ -43,7 +43,8 @@ Assignment saved (draft revision 4).
 $ bronzewardctl --context human publish {draft}
 Publishing draft drf_… revision 4 (operation op_…).
 Publication succeeded: release rel_… is now Desired for 1 machine. Nothing has been sent to any machine.
-  mch_… has no Applied release: hand it over with an adopt plan.
+  mch_… has no Applied release: hand it over with an adopt plan:
+    bronzewardctl plan create --release 'rel_…' --machine 'mch_…' --operation 'adopt'
 Review a machine's rendered configuration: bronzewardctl release review rel_… <machine>
   queued
   claimed
