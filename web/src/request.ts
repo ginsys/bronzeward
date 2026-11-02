@@ -103,6 +103,9 @@ export const ATTEMPT_BOUND = 60_000;
 // The way a response ends its attempt's timers, once its body is read, cancelled or dropped.
 const timers = new WeakMap<Response, () => void>();
 const endAttempt = (res: Response) => timers.get(res)?.();
+// The signal of a response's attempt. A write's epoch reads (learnEpoch) are sent within it, so the
+// write's bound ends them too and the write is not held past ATTEMPT_BOUND by its own confirmations.
+const signals = new WeakMap<Response, AbortSignal>();
 // A response whose body is not read: cancelled first, since its timers no longer bound a stalled transfer.
 const drop = (res: Response) => {
   void res.body?.cancel().catch(() => {});
@@ -288,12 +291,14 @@ export class Client {
 
   // The client's one network call, for every read, write and epoch read. NOT_SENT once the sign-in
   // ended, or when the page no longer holds its credential: no send leaves without it (§8.2, §9.6).
-  private async send(path: string, method = "GET", extra: Record<string, string> = {}, body?: string): Promise<Response | undefined | typeof NOT_SENT> {
+  private async send(path: string, method = "GET", extra: Record<string, string> = {}, body?: string, within?: AbortSignal): Promise<Response | undefined | typeof NOT_SENT> {
     const headers: Record<string, string> = { Accept: "application/json", ...extra };
     const token = this.opts.token?.();
     if (this.ended || (this.opts.token !== undefined && token === undefined)) return NOT_SENT;
     if (token !== undefined) headers["Authorization"] = `Bearer ${token}`;
     const bound = new AbortController();
+    if (within?.aborted === true) bound.abort();
+    else within?.addEventListener("abort", () => bound.abort(), { once: true });
     const header = setTimeout(() => bound.abort(), HEADERS_BOUND);
     const whole = setTimeout(() => bound.abort(), ATTEMPT_BOUND);
     const end = () => (clearTimeout(header), clearTimeout(whole));
@@ -309,6 +314,7 @@ export class Client {
       });
       clearTimeout(header);
       timers.set(res, end);
+      signals.set(res, bound.signal);
       return res;
     } catch {
       end();
@@ -325,6 +331,7 @@ export class Client {
   // stops the reads, the epoch unlearned.
   private async learnEpoch(res: Response, records: number, end: End): Promise<Ending | undefined> {
     let renewed = false;
+    const within = signals.get(res);
     for (let tries = 0; ; tries++) {
       const epoch = res.headers.get("Bronzeward-Epoch");
       if (epoch === null || epoch === this.epoch || records === this.epochRecords) {
@@ -333,7 +340,7 @@ export class Client {
       }
       if (tries + 1 >= MAX_TRIES) return undefined;
       const sent = this.epochRecords;
-      const next = await this.send("/recovery");
+      const next = await this.send("/recovery", "GET", {}, undefined, within);
       // Not sent, the sign-in ended: the epoch stays unlearned, and the answer still settles the write.
       if (next === undefined || next === NOT_SENT) return undefined;
       // Only a credential refusal's or a 409's body is read: any other answer names its epoch in its

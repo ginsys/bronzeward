@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { AddCluster, ClusterField, existing, guardsUnload, leaving, record, Result, WriteNotices, WritesProvider } from "./forms.tsx";
 import { type Failed, type Reads, ReadsProvider } from "./list.tsx";
-import type { Client, Problem } from "./request.ts";
+import { CUT, type Client, type Problem } from "./request.ts";
 import { Failure, ShellContext } from "./shell.tsx";
 import { CUT_OFF, REPEATING, REPLAYED, setAside, unknown, UNKNOWN } from "./states.tsx";
 import { EARLIER_EPOCH, EPOCH_CHANGED_ASIDE, NO_EPOCH, NO_EPOCH_HEADER, type Outcome, Write, Writes } from "./write.ts";
@@ -117,6 +117,14 @@ describe("the notice (B11)", () => {
     page = writes;
     expect(await writes.submit(w)).toMatchObject({ kind: "refused", status: 403 });
     expect(html(writes, h(WriteNotices, { go: () => {} }))).toContain("Not saved: the server answered 403. Needs author. forbidden: not allowed. Request req-1. Key");
+  });
+
+  test("§8.4 item 8: a kept notice settled by a cut-off refusal says the answer was cut off", async () => {
+    let page: Writes | undefined;
+    const [writes, w] = scripted(() => (page!.setAside(EPOCH_CHANGED_ASIDE), { status: 422, headers: new Headers(), data: CUT }));
+    page = writes;
+    expect(await writes.submit(w)).toMatchObject({ kind: "refused", status: 422, cut: true });
+    expect(html(writes, h(WriteNotices, { go: () => {} }))).toContain(`Not saved: the server answered 422. ${CUT_OFF}`);
   });
 
   test("a kept notice settled by a 409 conflict naming the cluster already recorded names it and opens it (§8.2 409 row)", async () => {
