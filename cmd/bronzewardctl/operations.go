@@ -55,6 +55,7 @@ func outcome(o *apitypes.OperationBody, last *lastEvent) ([]string, bool) {
 		var e struct {
 			Cause    string `json:"cause"`
 			Attempts *int   `json:"attempts"`
+			Title    string `json:"title"`
 			Detail   string `json:"detail"`
 		}
 		_ = remarshal(o.Error, &e)
@@ -64,7 +65,11 @@ func outcome(o *apitypes.OperationBody, last *lastEvent) ([]string, bool) {
 				e.Cause = s.Cause
 			}
 		}
+		// A failed publish or ingest operation records the problem that ended it: its title, then its detail.
 		cause := plain(e.Cause)
+		if cause == "" {
+			cause = plain(e.Title)
+		}
 		if cause == "" {
 			cause = plain(e.Detail)
 		}

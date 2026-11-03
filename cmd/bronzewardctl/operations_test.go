@@ -29,6 +29,7 @@ type opFake struct {
 	beat          time.Duration // when set, a held stream sends a keep-alive comment this often
 	lateFrom      int           // from this page request on (when set), the pages are latePages: events written after a restore
 	latePages     []string
+	pagesFail     bool // the JSON event pages answer 404: reading the events fails
 }
 
 func (f *opFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -86,8 +87,14 @@ func (f *opFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
 		f.pageReqs++
+		if f.pagesFail {
+			w.Header().Set("Content-Type", "application/problem+json")
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"type":"urn:bronzeward:problem:not-found","title":"Not found","status":404}`)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
 		if hang := f.pageHang; hang != nil && f.pageReqs >= f.pageHangFrom {
 			f.mu.Unlock()
 			select {
@@ -170,6 +177,10 @@ func TestOperationWatch(t *testing.T) {
 		{"apply-config", "rejected", "null", `{"cause":"invalid-configuration","attempts":1}`,
 			"Rejected at 2026-11-01 06:00:03 UTC (server): invalid-configuration, after 1 attempt.\n" +
 				"The node refused the configuration as invalid, so it applied nothing. Review the plan's release before a new plan: bronzewardctl plan show 'pln_BWSYNTH'"},
+		// A failed publish or ingest operation records the problem that ended it: no cause, a title.
+		{"apply-config", "failed", "null", `{"title":"Recovery-mode entry ended the job","status":409}`,
+			"Failed at 2026-11-01 06:00:03 UTC (server): Recovery-mode entry ended the job.\n" +
+				"Nothing more is sent for this plan. Read what the machine runs before a new plan: bronzewardctl machine show 'mch_a'"},
 		// A cancelled operation records neither result nor error: its cause is its last event's.
 		{"apply-config", "cancelled", "null", "null",
 			"Cancelled at 2026-11-01 06:00:03 UTC (server): resolution.\n" +

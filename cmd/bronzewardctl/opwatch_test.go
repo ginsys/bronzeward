@@ -178,6 +178,26 @@ func interruptTerminal(t *testing.T, state, result, failure, want string, code i
 	}
 }
 
+// TestOperationWatchDrainFails: an operation read twice as ended, with the reading of its events
+// failing, is still the outcome: the exit code, the outcome line and with -o json the resource come
+// from the operation, and the failed read of the events is reported beside, as publish and import do.
+func TestOperationWatchDrainFails(t *testing.T) {
+	f := &opFake{pagesFail: true, stream: []string{sse(1, "commitment", commitment)},
+		body: fmt.Sprintf(opJSON, "apply-config", "failed", "null", `{"cause":"verification-mismatch","attempts":2}`, "[]")}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	code, out, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "2s")
+	if code != 4 || !strings.Contains(out, "Failed: verification-mismatch, after 2 attempts.") || !strings.Contains(out, "The server's time of this end was not read.") ||
+		!strings.Contains(errOut, "the operation's last events were not shown") || !strings.Contains(errOut, "operation op_BWSYNTH ended failed") {
+		t.Errorf("exit %d, stdout\n%s\nstderr %q; want 4, the outcome line and the failed read reported", code, out, errOut)
+	}
+	code, out, errOut = runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "2s", "-o", "json")
+	if code != 4 || !strings.HasPrefix(out, `{"id":"op_BWSYNTH"`) || !strings.Contains(out, `"state":"failed"`) || !strings.Contains(errOut, "the operation's last events were not shown") {
+		t.Errorf("-o json: exit %d, stdout\n%s\nstderr %q; want 4 and the resource", code, out, errOut)
+	}
+}
+
 // TestOperationWatchOneSnapshot: with -o json the resource printed, the outcome line and the exit code
 // all come from the one operation read the watch returned, with the members of the server's answer as
 // they came, also when the operation changes after that read.
