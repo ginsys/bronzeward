@@ -115,7 +115,13 @@ func TestMachineTimeline(t *testing.T) {
 		t.Errorf("--follow: no clear line, notice or stop line:\n%s%s", out.String(), errb.String())
 	}
 	mu.Lock()
-	if got := strings.Join(seen, "|"); got != " |newest |oldest t3|oldest n4|oldest t5|newest |oldest t6" {
+	got := strings.Join(seen, "|")
+	// Ctrl-C comes with the answer of the idle read; when the loop's 10 ms wait ends before the
+	// signal is on its channel, that read repeats once more. The row is the sequence up to it.
+	for strings.HasSuffix(got, "|oldest t6|oldest t6") {
+		got = strings.TrimSuffix(got, "|oldest t6")
+	}
+	if got != " |newest |oldest t3|oldest n4|oldest t5|newest |oldest t6" {
 		t.Errorf("--follow read %q; want the list, then newest, oldest from each tail following next, newest again after the refusal", got)
 	}
 	mu.Unlock()
