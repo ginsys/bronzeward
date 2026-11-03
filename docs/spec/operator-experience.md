@@ -770,8 +770,10 @@ item 6). If the server refuses the cursor, because the installation was restored
 recovery mode, it says so on standard error, prints
 `(the entries above may no longer hold; the newest are shown again)` and starts again from the
 newest page. Ctrl-C ends it with exit 130. With `-o json`, each entry prints unchanged on its own
-line, and with `-o yaml` each entry is its own document. The client needs API revision 3, the
-first that serves `order` and `tail`.
+line, and with `-o yaml` each entry is its own document. `--follow` needs API revision 3, the
+first that serves `order` and `tail`: on an older server it sends no request and says which
+revision the server serves. The plain read sends neither and works on revision 2, like the rest of
+the client.
 
 ### 5.8 Drift: freeze, then adopt or revert
 

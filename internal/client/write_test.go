@@ -68,14 +68,14 @@ func (f *fake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if committed {
-			fmt.Fprint(w, cmp.Or(f.server, `{"version":"BWSYNTH","apiRevision":3,"startMode":"recovery","maxTokenLifetimeSeconds":300}`))
+			fmt.Fprint(w, cmp.Or(f.server, `{"version":"BWSYNTH","apiRevision":2,"startMode":"recovery","maxTokenLifetimeSeconds":300}`))
 			return
 		}
 		if f.beforeEntry {
 			problemAnswer(w, http.StatusConflict, "recovery-mode-active", "")
 			return
 		}
-		fmt.Fprint(w, cmp.Or(f.server, `{"version":"BWSYNTH","apiRevision":3,"startMode":"normal","maxTokenLifetimeSeconds":300}`))
+		fmt.Fprint(w, cmp.Or(f.server, `{"version":"BWSYNTH","apiRevision":2,"startMode":"normal","maxTokenLifetimeSeconds":300}`))
 	case "GET /api/v1/identity":
 		fmt.Fprint(w, `{"kind":"service","principal":"svc_BWSYNTH","service":"ci","roles":["author"],"epoch":"`+epoch+`"}`)
 	case "GET /api/v1/recovery":
@@ -890,7 +890,7 @@ func TestInProgress(t *testing.T) {
 				inProgress(w)
 			}},
 		{name: "the served lease raises the bound", wait: time.Second, posts: 4, waits: []time.Duration{time.Second, time.Second, time.Second},
-			server: `{"version":"BWSYNTH","apiRevision":3,"startMode":"normal","ingestionClaim":{"leaseSeconds":2,"absoluteExpirySeconds":600}}`,
+			server: `{"version":"BWSYNTH","apiRevision":2,"startMode":"normal","ingestionClaim":{"leaseSeconds":2,"absoluteExpirySeconds":600}}`,
 			says:   "after 2s",
 			answer: func(n int, w http.ResponseWriter) {
 				if n == 1 {

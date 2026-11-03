@@ -22,7 +22,7 @@ func TestDoubleQuoteInQuotedTextIsEscaped(t *testing.T) {
 		w.Header().Set("Bronzeward-Epoch", "ep_1")
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/api/v1/server" {
-			fmt.Fprint(w, `{"version":"v","apiRevision":3,"startMode":"normal"}`)
+			fmt.Fprint(w, `{"version":"v","apiRevision":2,"startMode":"normal"}`)
 			return
 		}
 		w.Write(draft)

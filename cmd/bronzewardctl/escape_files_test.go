@@ -79,7 +79,7 @@ func TestRemoteTextInProfileSet(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.URL.Path == "/api/v1/server":
-			fmt.Fprint(w, `{"version":"v","apiRevision":3,"startMode":"normal"}`)
+			fmt.Fprint(w, `{"version":"v","apiRevision":2,"startMode":"normal"}`)
 		case r.URL.Path == "/api/v1/identity":
 			fmt.Fprint(w, newFiller(false).answer(apitypes.IdentityBody{}))
 		case r.URL.Path == "/api/v1/fragments":
