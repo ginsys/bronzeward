@@ -78,9 +78,9 @@ func TestMachineTimeline(t *testing.T) {
 	}))
 	defer srv.Close()
 	automationContext(t, srv.URL)
-	local, every := time.Local, followEvery
-	time.Local, followEvery = time.UTC, 10*time.Millisecond
-	defer func() { time.Local, followEvery = local, every }()
+	every := followEvery
+	followEvery = 10 * time.Millisecond
+	defer func() { followEvery = every }()
 
 	var out, errb bytes.Buffer
 	if code := run([]string{"machine", "timeline", "mch_a"}, &out, &errb); code != 0 {
