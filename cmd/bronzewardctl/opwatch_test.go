@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http/httptest"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"syscall"
 	"testing"
 	"time"
+	"unicode"
 )
 
 // TestWatchOutAfterFinish: once the stop line is printed, a line the watch still shows prints
@@ -51,6 +53,32 @@ func TestOperationWatchInterrupt(t *testing.T) {
 	if code != 130 || !strings.HasSuffix(out, "Stopped watching at your request. Operation op_BWSYNTH goes on; the state it has now was not read.\n"+follow) ||
 		!strings.Contains(errOut, "stopped watching operation op_BWSYNTH") {
 		t.Errorf("exit %d, stdout\n%s\nstderr %q", code, out, errOut)
+	}
+}
+
+// TestOperationWatchEscapes: the kind, the state, the event types, their data and the failure cause
+// are the server's text; none reaches the terminal with a control character as itself, in an event
+// line or the outcome (client-contracts.md §6 item 8).
+func TestOperationWatchEscapes(t *testing.T) {
+	const bad = "x\x1b[31m\ty\r\u202ez"
+	js := func(s string) string { b, _ := json.Marshal(s); return string(b) }
+	f := &opFake{}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	f.body = fmt.Sprintf(`{"id":"op_BWSYNTH","kind":%s,"state":"failed","subject":{"plan":%s},"epoch":"ep_BWSYNTH-2",`+
+		`"createdAt":"2026-11-01T06:00:00Z","createdBy":null,"lastEvent":2,"result":null,"error":{"cause":%s,"attempts":1},"attempts":[]}`,
+		js(bad), js(bad), js(bad))
+	f.stream = []string{sse(1, strings.NewReplacer("\r", "", "\n", "").Replace(bad), `{"note":`+js(bad)+`}`)}
+	f.pages = []string{`{"id":"ep_BWSYNTH-2:1","type":` + js(bad) + `,"at":"2026-11-01T06:00:01Z","data":{"note":` + js(bad) + `}}`}
+	_, out, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "2s")
+	for name, text := range map[string]string{"stdout": out, "stderr": errOut} {
+		if i := strings.IndexFunc(strings.ReplaceAll(text, "\n", ""), func(r rune) bool { return unicode.IsControl(r) || r == '\u202e' }); i >= 0 {
+			t.Errorf("%s holds a control character at %d:\n%q", name, i, text)
+		}
+	}
+	if !strings.Contains(out, `x\x1b[31m\x09y\x0d\u202ez`) || !strings.Contains(out, `received `) || !strings.Contains(out, `x\x1b[31m\x09y\u202ez  {`) {
+		t.Errorf("the escaped server text is not shown:\n%q", out)
 	}
 }
 
