@@ -237,13 +237,15 @@ var operationCases = map[string]func(*testing.T, *watchEnv){
 			" records Applied from the node's own bytes. Nothing was sent to the machine.\n")
 		_, types := e.served(t, e.adoption)
 		got := shown(r.out)
-		// An adoption records two events: adoption and applied-change.
-		if len(types) < 2 || len(got) != 1 || !slices.Equal(got[0], types) || strings.Contains(r.out, "received ") {
-			t.Errorf("shown %q; want each of the %d events %q once, in order, at the server's time:\n%s", got, len(types), types, r.out)
+		// An adoption records two events: adoption and applied-change. Every event line is marked
+		// "received" with this client's time; only the completion line shows the server's.
+		if len(types) < 2 || len(got) != 1 || !slices.Equal(got[0], types) || strings.Count(r.out, "received ") != len(types) {
+			t.Errorf("shown %q; want each of the %d events %q once, in order, marked received:\n%s", got, len(types), types, r.out)
 		}
-		// The stream request, then one page per event.
-		if n := int(pages.Load()); n != len(types)+1 {
-			t.Errorf("%d events requests for %d events; want the stream's and one page per event", n, len(types))
+		// The stream request, one page per event, then one page per event again for the last event's
+		// server time (readLast).
+		if n := int(pages.Load()); n != 2*len(types)+1 {
+			t.Errorf("%d events requests for %d events; want the stream's, one page per event and one per event for the last event's time", n, len(types))
 		}
 	},
 
