@@ -83,7 +83,7 @@ func (f *draftFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if f.serverEpoch != "" {
 			w.Header().Set("Bronzeward-Epoch", f.serverEpoch)
 		}
-		fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":3,"startMode":"normal"}`)
+		fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":2,"startMode":"normal"}`)
 	case "GET /identity":
 		fmt.Fprint(w, `{"kind":"service","principal":"svc_BWSYNTH"}`)
 	case "GET /fragments":

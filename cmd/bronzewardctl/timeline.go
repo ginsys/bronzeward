@@ -23,6 +23,10 @@ import (
 // Tests shorten it.
 var followEvery = 5 * time.Second
 
+// followRevision is the lowest API revision whose timeline serves order and tail, which --follow
+// reads. The plain read sends neither and works on any revision the client does.
+const followRevision = 3
+
 // machineTimeline reads a machine's timeline (decision T24 of #258): one page, or with --all every
 // page, as every list does; with --follow the newest page, then each later entry as the server
 // records it, until Ctrl-C. Each entry's line says what it records, by its kind.
@@ -47,6 +51,15 @@ func (e *env) machineTimeline(args []string) error {
 	})
 }
 
+// needFollowRevision refuses a server below followRevision before any request that sends order or
+// reads tail (client-contracts.md §8.6 item 6; §7 item 1).
+func needFollowRevision(c *client.Client) error {
+	if c.Revision < followRevision {
+		return ef("the server serves API revision %d; machine timeline needs revision %d or later", c.Revision, followRevision)
+	}
+	return nil
+}
+
 // followTimeline is machine timeline --follow (client-contracts.md §8.6 item 6). It reads the newest page
 // with order=newest and keeps its tail, then every followEvery reads forward from tail in oldest
 // order, follows next while a page has one, and keeps the tail of the last page. A cursor the
@@ -56,6 +69,12 @@ func (e *env) followTimeline(c *client.Client, path string, limit int, machine s
 	// The cursor goes in the query, not to Page, which would read a refused one's list from its
 	// start instead of returning the refusal.
 	read := func(order, cursor string) (*client.Page, error) {
+		// A server below revision 3 refuses order and serves no tail (client-contracts.md §8.6 item
+		// 6), so no request is sent to it (§7 item 1). A page can show a new epoch and a server of
+		// another revision, so each request checks it again, as recovery status does.
+		if err := needFollowRevision(c); err != nil {
+			return nil, err
+		}
 		q := url.Values{"order": {order}}
 		if limit != 0 {
 			q.Set("limit", strconv.Itoa(limit))
@@ -64,6 +83,9 @@ func (e *env) followTimeline(c *client.Client, path string, limit int, machine s
 			q.Set("cursor", cursor)
 		}
 		return c.Page(path+"?"+q.Encode(), "")
+	}
+	if err := needFollowRevision(c); err != nil { // before the header: a refusal prints nothing
+		return err
 	}
 	if e.output == "table" {
 		tf(e.out, "%-8s  %-23s  %-20s  %s\n", "REVISION", "AT", "KIND", "ENTRY")

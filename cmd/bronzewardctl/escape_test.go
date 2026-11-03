@@ -134,7 +134,7 @@ func (f *filler) tree(t reflect.Type, field string) any {
 		}
 		return f.text()
 	case t.Kind() == reflect.Int || t.Kind() == reflect.Float32 || t.Kind() == reflect.Float64:
-		return 3 // GET /server's apiRevision must reach the client's minimum
+		return 2
 	case t.Kind() == reflect.Bool:
 		return f.yes
 	case t.Kind() == reflect.Pointer:
@@ -452,7 +452,7 @@ func TestRemoteTextInOwnErrors(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/api/v1/server":
-			fmt.Fprint(w, `{"version":"v","apiRevision":3,"startMode":"normal"}`)
+			fmt.Fprint(w, `{"version":"v","apiRevision":2,"startMode":"normal"}`)
 		case "/api/v1/fragments":
 			fmt.Fprint(w, `{"items":[]}`)
 		default:

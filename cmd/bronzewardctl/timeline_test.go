@@ -134,3 +134,87 @@ func TestMachineTimeline(t *testing.T) {
 		}
 	}
 }
+
+// TestMachineTimelineRevision2 checks VAL-2127-4: a server at API revision 2 refuses order and
+// serves no tail (client-contracts.md §8.6 item 6), so only the paths that send order or read tail
+// are gated (§7 item 1). The plain read works and sends neither; --follow refuses before its
+// header and before any request; a server that drops to revision 2 during --follow is refused on
+// the next poll, after the answer that showed its new epoch, with no further timeline request.
+func TestMachineTimelineRevision2(t *testing.T) {
+	const refusal = "the server serves API revision 2; machine timeline needs revision 3 or later"
+	var mu sync.Mutex
+	var queries []string // the raw query of each timeline request
+	revision, epoch, moveAt := 2, "ep_BWSYNTH-2", ""
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		w.Header().Set("Bronzeward-Epoch", epoch)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/server":
+			fmt.Fprintf(w, `{"version":"BWSYNTH","apiRevision":%d,"startMode":"normal"}`, revision)
+		case "/api/v1/machines/mch_a/timeline":
+			queries = append(queries, r.URL.RawQuery)
+			q := r.URL.Query()
+			if revision < 3 && (q.Has("order") || q.Has("tail")) {
+				w.Header().Set("Content-Type", "application/problem+json")
+				w.WriteHeader(http.StatusBadRequest)
+				fmt.Fprint(w, `{"type":"urn:bronzeward:problem:invalid-request","title":"order is not served at this revision","status":400}`)
+				return
+			}
+			switch q.Get("order") + " " + q.Get("cursor") {
+			case " ":
+				fmt.Fprintf(w, `{"items":[%s]}`, entry(1, "plan", `{"plan":"pln_1"}`))
+			case "newest ":
+				fmt.Fprintf(w, `{"items":[%s],"tail":"t1"}`, entry(1, "plan", `{"plan":"pln_1"}`))
+			case "oldest t1":
+				// The answer shows a new epoch of a server that now serves revision 2.
+				epoch, revision, moveAt = "ep_BWSYNTH-3", 2, "oldest t1"
+				w.Header().Set("Bronzeward-Epoch", epoch)
+				fmt.Fprint(w, `{"items":[],"tail":"t1"}`)
+			}
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	every := followEvery
+	followEvery = 10 * time.Millisecond
+	defer func() { followEvery = every }()
+	reset := func(rev int) {
+		mu.Lock()
+		defer mu.Unlock()
+		queries, revision, epoch, moveAt = nil, rev, "ep_BWSYNTH-2", ""
+	}
+	sent := func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		return strings.Join(queries, "|")
+	}
+
+	reset(2)
+	var out, errb bytes.Buffer
+	if code := run([]string{"machine", "timeline", "mch_a"}, &out, &errb); code != 0 || !strings.Contains(out.String(), "pln_1") || sent() != "" {
+		t.Errorf("plain read at revision 2: exit %d, requests %q; want 0, the entry and one request with no query:\n%s%s", code, sent(), out.String(), errb.String())
+	}
+
+	reset(2)
+	out.Reset()
+	errb.Reset()
+	if code := run([]string{"machine", "timeline", "mch_a", "--follow"}, &out, &errb); code == 0 || code == 130 ||
+		!strings.Contains(errb.String(), refusal) || out.Len() != 0 || sent() != "" {
+		t.Errorf("--follow at revision 2: exit %d, requests %q; want a refusal naming the revision, no stdout and no timeline request:\n%s%s", code, sent(), out.String(), errb.String())
+	}
+
+	reset(3)
+	out.Reset()
+	errb.Reset()
+	code := run([]string{"machine", "timeline", "mch_a", "--follow"}, &out, &errb)
+	mu.Lock()
+	moved := moveAt
+	mu.Unlock()
+	if code == 0 || code == 130 || !strings.Contains(errb.String(), refusal) || moved != "oldest t1" || sent() != "order=newest|cursor=t1&order=oldest" {
+		t.Errorf("--follow dropping to revision 2: exit %d, requests %q; want the refusal after the read that showed the new epoch, and no request after it:\n%s%s", code, sent(), out.String(), errb.String())
+	}
+}
