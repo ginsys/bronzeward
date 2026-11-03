@@ -709,7 +709,7 @@ Follow it again with: bronzewardctl operation watch 'op_q8r…t2na'
 ```
 
 A `failed`, `rejected` or `cancelled` operation ends the watch with exit 4. The outcome line names
-the cause and the attempt count, and the next line names the next safe step. A cancelled operation
+the cause (for a publish or ingest operation, the title of the problem that ended it) and the attempt count, and the next line names the next safe step. A cancelled operation
 records no cause, so the line takes it from the operation's last event. Ctrl-C ends the watch with
 exit 130 and stops only the watcher. The watch waits up to 3 seconds for the operation's state,
 then says that the operation goes on, and names the state if it read one. `operation show` prints the same outcome lines without the server's time. For a cancelled operation

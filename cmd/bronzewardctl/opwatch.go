@@ -180,8 +180,13 @@ func (e *env) operationWatch(args []string) (err error) {
 		out.finish(sf("Stopped watching at your request. Operation %s goes on; the state it has now was not read.", id), follow)
 		return interrupted{ef("stopped watching operation %s", id)}
 	}
-	if res.err != nil {
+	if res.o == nil {
 		return res.err
+	}
+	// The operation's end decides the outcome and the exit; a failed read of the events after it is
+	// reported beside, as publish and import do.
+	if res.err != nil {
+		fmt.Fprintf(e.err, "bronzewardctl: %s; the operation's last events were not shown\n", client.Shown(res.err))
 	}
 	o = res.o
 	var last *lastEvent
