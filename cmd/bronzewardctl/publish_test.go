@@ -105,7 +105,7 @@ func (f *publishFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			w.Header().Set("Bronzeward-Epoch", goneEpoch)
 		}
-		fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":2,"startMode":"normal"}`)
+		fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":3,"startMode":"normal"}`)
 	case path == "/machines/mch_b" && goneEpoch != "":
 		f.mu.Lock()
 		f.goneMoved = true // the epoch moved: GET /server shows it from here on

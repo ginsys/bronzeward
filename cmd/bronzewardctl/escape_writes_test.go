@@ -42,7 +42,7 @@ func TestRemoteTextInDraftDiscard(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.URL.Path == "/api/v1/server":
-			fmt.Fprint(w, `{"version":"v","apiRevision":2,"startMode":"normal"}`)
+			fmt.Fprint(w, `{"version":"v","apiRevision":3,"startMode":"normal"}`)
 		case r.URL.Path == "/api/v1/identity":
 			fmt.Fprint(w, newFiller(false).answer(apitypes.IdentityBody{}))
 		case r.Method == http.MethodPost:
@@ -95,7 +95,7 @@ func TestRemoteTextInDraftSourceWrites(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.URL.Path == "/api/v1/server":
-			fmt.Fprint(w, `{"version":"v","apiRevision":2,"startMode":"normal"}`)
+			fmt.Fprint(w, `{"version":"v","apiRevision":3,"startMode":"normal"}`)
 		case r.URL.Path == "/api/v1/identity":
 			fmt.Fprint(w, newFiller(false).answer(apitypes.IdentityBody{}))
 		case r.URL.Path == "/api/v1/drafts/d1" && r.Method == http.MethodGet && plain.Load():
@@ -201,7 +201,7 @@ func TestRemoteTextInDecodeError(t *testing.T) {
 		w.Header().Set("Bronzeward-Epoch", "ep_1")
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/api/v1/server" {
-			fmt.Fprint(w, `{"version":"v","apiRevision":2,"startMode":"normal"}`)
+			fmt.Fprint(w, `{"version":"v","apiRevision":3,"startMode":"normal"}`)
 			return
 		}
 		w.Write(b)
@@ -268,7 +268,7 @@ func TestRemoteTextInSignInClaims(t *testing.T) {
 		w.Header().Set("Bronzeward-Epoch", "ep_1")
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/api/v1/server" {
-			fmt.Fprint(w, `{"version":"v","apiRevision":2,"startMode":"normal"}`)
+			fmt.Fprint(w, `{"version":"v","apiRevision":3,"startMode":"normal"}`)
 			return
 		}
 		fmt.Fprint(w, newFiller(false).answer(apitypes.IdentityBody{}))
@@ -315,7 +315,7 @@ func TestRemoteTextInUnreadableAnswer(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.Method + " " + r.URL.Path {
 		case "GET /api/v1/server":
-			fmt.Fprint(w, `{"version":"v","apiRevision":2,"startMode":"normal"}`)
+			fmt.Fprint(w, `{"version":"v","apiRevision":3,"startMode":"normal"}`)
 		case "GET /api/v1/identity":
 			fmt.Fprint(w, `{"kind":"service","principal":"svc_1"}`)
 		case "POST /api/v1/clusters":
