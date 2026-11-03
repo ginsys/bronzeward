@@ -95,14 +95,17 @@
     - "POST /api/v1/operations/op_.../resolutions as h-recovery, by the test, once the stream sent the move to unresolved: 201, to cancelled"
   fault: none
   expect:
-    client: does not end at unresolved; reads on until the operation is cancelled
+    client: reads on to the cancellation that follows the move to unresolved
     server: the operation cancelled by the resolution; no attempt recorded
     shown: >-
       the move to unresolved, cause takeover, before the end; each of the operation's events once, in
       order; "Cancelled at <time> (server): resolution." and the next step, plan show pln_...;
       "operation op_... ended cancelled" on standard error; exit 4
     absent: [tokens and the stand-in's secrets in stdout, stderr, argv]
-  unit: the outcome lines of each terminal state are cmd/bronzewardctl TestOperationWatch's
+  unit: >-
+    the outcome lines of each terminal state are cmd/bronzewardctl TestOperationWatch's; that
+    unresolved alone does not end the watch is its unresolved case, which ends by --timeout, because
+    this case posts the resolution as soon as the move is shown
 
 - id: EVT-02
   setup: an apply-config operation whose apply the stand-in holds until the test ends

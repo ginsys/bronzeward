@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -159,7 +160,9 @@ func eventText(typ string, d map[string]any, raw json.RawMessage) string {
 		return join("from ", "from", "to ", "to", "source ", "source")
 	}
 	var v any
-	if json.Unmarshal(raw, &v) != nil {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber() // a number keeps its digits: float64 would round 9007199254740993
+	if dec.Decode(&v) != nil || dec.More() {
 		return plain(string(raw))
 	}
 	return compact(v) // JSON escapes every control character
