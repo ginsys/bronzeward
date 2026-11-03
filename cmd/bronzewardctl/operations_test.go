@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // opFake serves one operation, op_BWSYNTH: its body, its event stream, which sends stream and
@@ -23,6 +24,9 @@ type opFake struct {
 	pageReqs      int           // JSON event page requests so far
 	pageHang      chan struct{} // when set, a page request from number pageHangFrom on waits for this
 	pageHangFrom  int
+	swapFrom      int // from this operation read on (when set), the body is swapBody: the operation changed after a read
+	swapBody      string
+	beat          time.Duration // when set, a held stream sends a keep-alive comment this often
 }
 
 func (f *opFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -41,6 +45,10 @@ func (f *opFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":3,"startMode":"normal"}`)
 	case "/operations/op_BWSYNTH":
 		w.Header().Set("Content-Type", "application/json")
+		if f.swapFrom > 0 && f.reads >= f.swapFrom {
+			fmt.Fprint(w, f.swapBody)
+			return
+		}
 		fmt.Fprint(w, f.body)
 	case "/operations/op_BWSYNTH/events":
 		if r.Header.Get("Accept") == "text/event-stream" {
@@ -49,10 +57,24 @@ func (f *opFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if hang := f.hang; hang != nil {
 				w.WriteHeader(http.StatusOK)
 				w.(http.Flusher).Flush()
+				beat := f.beat
 				f.mu.Unlock()
-				select {
-				case <-hang:
-				case <-r.Context().Done():
+				var tick <-chan time.Time
+				if beat > 0 {
+					t := time.NewTicker(beat)
+					defer t.Stop()
+					tick = t.C
+				}
+				for held := true; held; {
+					select {
+					case <-hang:
+						held = false
+					case <-r.Context().Done():
+						held = false
+					case <-tick:
+						fmt.Fprint(w, ": keep-alive\n\n")
+						w.(http.Flusher).Flush()
+					}
 				}
 				f.mu.Lock()
 				return
@@ -158,20 +180,27 @@ func TestOperationWatch(t *testing.T) {
 			t.Errorf("%s: exit %d, want %d and %q:\n%s\nstderr %q", c.state, code, want, c.want, out, errOut)
 		}
 		wantShow := strings.ReplaceAll(c.want, " at 2026-11-01 06:00:03 UTC (server)", "")
-		if c.state == "cancelled" { // show reads no event
-			wantShow = strings.ReplaceAll(wantShow, "resolution", "no cause in the operation; its machine timeline holds the entry that ended it")
-		}
 		if code, show, _ := runCtl(t, "operation", "show", "op_BWSYNTH"); code != 0 || !strings.Contains(show, wantShow) {
 			t.Errorf("%s: operation show, exit %d:\n%s", c.state, code, show)
+		}
+		if c.state == "cancelled" { // show takes the cause of a cancellation from the last event, not its time
+			// An event of another epoch than the operation shown is not its event: the placeholder stays.
+			f.mu.Lock()
+			f.pages = []string{strings.ReplaceAll(pages[2], "ep_BWSYNTH-2", "ep_BWSYNTH-3")}
+			f.mu.Unlock()
+			placeholder := strings.ReplaceAll(wantShow, "resolution", "no cause in the operation; its machine timeline holds the entry that ended it")
+			if code, show, _ := runCtl(t, "operation", "show", "op_BWSYNTH"); code != 0 || !strings.Contains(show, placeholder) {
+				t.Errorf("%s: operation show with an event of another epoch, exit %d, want %q in\n%s", c.state, code, placeholder, show)
+			}
 		}
 	}
 
 	// Unresolved is not terminal: the watch goes on until --timeout, then names the state.
 	set("apply-config", "unresolved", "null", "null", `[{"id":"att_a","number":1,"accounting":null}]`,
-		[]string{sse(4, "operation-state", toState("sending", "unresolved", "transport-deadline")), sse(5, "BWSYNTH-new", "{\"x\":\"\\u001b[31m\"}")}, nil)
+		[]string{sse(4, "operation-state", toState("sending", "unresolved", "transport-deadline")), sse(5, "BWSYNTH-new", "{\"x\":\"\\u001b[31m\",\"n\":9007199254740993}")}, nil)
 	code, out, errOut = runCtl(t, watch...)
 	for _, w := range []string{"operation-state       from sending, to unresolved, cause transport-deadline\n",
-		`BWSYNTH-new           {"x":"\u001b[31m"}` + "\n",
+		`BWSYNTH-new           {"n":9007199254740993,"x":"\u001b[31m"}` + "\n",
 		"Still unresolved after --timeout 2s.\nUnresolved: completion and retry safety are unknown. A recovery administrator must account for attempt 1.",
 		"Follow it again with: bronzewardctl operation watch 'op_BWSYNTH'\n"} {
 		if !strings.Contains(out, w) {

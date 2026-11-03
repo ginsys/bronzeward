@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -95,33 +97,67 @@ func TestOperationWatchInterruptReturns(t *testing.T) {
 // time gets the operation's own answer, not exit 130: what the watch read is the outcome, so it exits 0
 // for a completed operation and prints no stop line.
 func TestOperationWatchInterruptTerminal(t *testing.T) {
-	f := &opFake{body: fmt.Sprintf(opJSON, "apply-config", "running", "null", "null", "[]"), hang: make(chan struct{})}
+	// The stream stays open and sends a keep-alive every 10 ms; the watch asks whether to stop at each
+	// one. Nothing but the Ctrl-C ends the stream, so the operation read that follows is made only
+	// after the Ctrl-C was taken, and it finds the operation completed.
+	f := &opFake{body: fmt.Sprintf(opJSON, "apply-config", "running", "null", "null", "[]"), hang: make(chan struct{}), beat: 10 * time.Millisecond}
 	srv := httptest.NewServer(f)
 	defer srv.Close()
 	automationContext(t, srv.URL)
 	grace := interruptGrace
 	interruptGrace = 5 * time.Second
 	defer func() { interruptGrace = grace }()
+	var stuck atomic.Bool
+	var release sync.Once
+	defer release.Do(func() { close(f.hang) })          // the server closes only once its streams end
+	watchdog := time.AfterFunc(10*time.Second, func() { // the Ctrl-C was not taken: release the stream and fail
+		stuck.Store(true)
+		release.Do(func() { close(f.hang) })
+	})
+	defer watchdog.Stop()
 	go func() {
 		for { // the stream request comes after the signal handler is set
 			f.mu.Lock()
 			n := f.streams
+			if n > 0 {
+				f.body = fmt.Sprintf(opJSON, "apply-config", "completed", `{"appliedRelease":"rel_BWSYNTH","observation":"obs_c"}`, "null", "[]")
+			}
 			f.mu.Unlock()
 			if n > 0 {
 				_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
-				time.Sleep(200 * time.Millisecond)
-				f.mu.Lock()
-				f.body = fmt.Sprintf(opJSON, "apply-config", "completed", `{"appliedRelease":"rel_BWSYNTH","observation":"obs_c"}`, "null", "[]")
-				f.mu.Unlock()
-				close(f.hang) // the stream ends: the watch reads the operation, which has ended
 				return
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
 	}()
 	code, out, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH")
+	if stuck.Load() {
+		t.Fatal("the stream was still open after 10 s: the Ctrl-C did not end the watch's wait")
+	}
 	if code != 0 || !strings.Contains(out, "applied rel_BWSYNTH") || strings.Contains(out, "Stopped watching") || strings.Contains(errOut, "stopped watching") {
 		t.Errorf("exit %d, stdout\n%s\nstderr %q; want 0, the outcome and no stop line", code, out, errOut)
+	}
+}
+
+// TestOperationWatchOneSnapshot: with -o json the resource printed, the outcome line and the exit code
+// all come from the one operation read the watch returned, with the members of the server's answer as
+// they came, also when the operation changes after that read.
+func TestOperationWatchOneSnapshot(t *testing.T) {
+	f := &opFake{}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	f.body = strings.Replace(fmt.Sprintf(opJSON, "apply-config", "completed", `{"appliedRelease":"rel_BWSYNTH","observation":"obs_c"}`, "null", "[]"),
+		`"lastEvent":3,`, `"lastEvent":3,"BWSYNTH-member":{"n":9007199254740993},`, 1)
+	f.pages = []string{evPage(1, "operation-state", toState("verifying", "completed", ""))}
+	// The reads are the command's own first, the watch's, the one for the event's time, and a fourth
+	// that no part of the command should make.
+	f.swapFrom = 4
+	f.swapBody = fmt.Sprintf(opJSON, "apply-config", "failed", "null", `{"cause":"verification-mismatch","attempts":2}`, "[]")
+	code, out, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH", "-o", "json", "--timeout", "2s")
+	if code != 0 || !strings.Contains(out, `"state":"completed"`) || !strings.Contains(out, `"BWSYNTH-member":{"n":9007199254740993}`) ||
+		!strings.Contains(errOut, "Completed at ") || strings.Contains(out, "failed") {
+		t.Errorf("exit %d, want 0 and the completed resource with the server's member, stdout\n%s\nstderr %q", code, out, errOut)
 	}
 }
 
@@ -221,6 +257,31 @@ func TestOperationWatchEscapes(t *testing.T) {
 	}
 }
 
+// TestOperationWatchEscapesCompleted: the applied release and the observation of a completed
+// operation are the server's text too, and reach the terminal escaped.
+func TestOperationWatchEscapesCompleted(t *testing.T) {
+	const bad = "x\x1b[31m\ty\r‮z\nFAKE LINE"
+	js := func(s string) string { b, _ := json.Marshal(s); return string(b) }
+	f := &opFake{}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	f.body = fmt.Sprintf(opJSON, "apply-config", "completed", `{"appliedRelease":`+js(bad)+`,"observation":`+js(bad)+`}`, "null", "[]")
+	f.pages = []string{evPage(1, "operation-state", toState("verifying", "completed", ""))}
+	code, out, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "2s")
+	if i := strings.IndexFunc(strings.ReplaceAll(out+errOut, "\n", ""), func(r rune) bool { return unicode.IsControl(r) || r == '‮' }); i >= 0 {
+		t.Errorf("a control character at %d in\n%q\n%q", i, out, errOut)
+	}
+	for _, l := range strings.Split(out, "\n") {
+		if strings.HasPrefix(l, "FAKE LINE") {
+			t.Errorf("a line of the server's making in\n%q", out)
+		}
+	}
+	if want := `x\x1b[31m\x09y\x0d\u202ez\x0aFAKE LINE`; code != 0 || !strings.Contains(out, "applied "+want+", confirmed by observation "+want+".") {
+		t.Errorf("exit %d; the escaped release is not shown in\n%q", code, out)
+	}
+}
+
 // TestReadLastKeepsOneOperation: the event time is read only when the operation read that follows the
 // watch is the state the watch returned, so a time never goes with the outcome of another operation.
 func TestReadLastKeepsOneOperation(t *testing.T) {
@@ -238,11 +299,14 @@ func TestReadLastKeepsOneOperation(t *testing.T) {
 	if _, _, err := c.Server(); err != nil {
 		t.Fatal(err)
 	}
-	if ev := readLast(c, "op_BWSYNTH", "cancelled"); ev == nil || ev.At == nil {
-		t.Errorf("the state the watch returned: readLast gave %v; want the last event with its time", ev)
+	if ev := readLast(c, "op_BWSYNTH", "cancelled", "ep_BWSYNTH-2"); ev == nil || ev.At == nil {
+		t.Errorf("the state and epoch the watch returned: readLast gave %v; want the last event with its time", ev)
 	}
-	if ev := readLast(c, "op_BWSYNTH", "completed"); ev != nil {
+	if ev := readLast(c, "op_BWSYNTH", "completed", "ep_BWSYNTH-2"); ev != nil {
 		t.Errorf("another state than the watch returned: readLast gave %v; want nil", ev)
+	}
+	if ev := readLast(c, "op_BWSYNTH", "cancelled", "ep_BWSYNTH-1"); ev != nil {
+		t.Errorf("another epoch than the watch returned: readLast gave %v; want nil", ev)
 	}
 }
 
@@ -256,16 +320,26 @@ func TestOperationWatchCompletionTime(t *testing.T) {
 	automationContext(t, srv.URL)
 	f.body = fmt.Sprintf(opJSON, "apply-config", "completed", `{"appliedRelease":"rel_BWSYNTH","observation":"obs_c"}`, "null", "[]")
 	f.pages = []string{evPage(1, "commitment", commitment), evPage(2, "operation-state", toState("verifying", "completed", ""))}
-	for _, c := range []struct{ late, want, not string }{
-		{"", "(server): applied rel_BWSYNTH", "was not read"},
-		{"ep_BWSYNTH-3", "The server's time of this end was not read.", "(server)"},
+	for _, c := range []struct {
+		name, late, want, not string
+		restored              bool // the pages hold the new epoch's events too, as after a restore before the page read
+	}{
+		{"no restore", "", "(server): applied rel_BWSYNTH", "was not read", false},
+		{"restored after the pages", "ep_BWSYNTH-3", "The server's time of this end was not read.", "(server)", false},
+		{"restored before the pages", "ep_BWSYNTH-3", "The server's time of this end was not read.", "(server)", true},
 	} {
 		f.mu.Lock()
 		f.late, f.reads = c.late, 0
+		f.pages = []string{evPage(1, "commitment", commitment), evPage(2, "operation-state", toState("verifying", "completed", ""))}
+		if c.restored {
+			for i := range f.pages {
+				f.pages[i] = strings.ReplaceAll(f.pages[i], "ep_BWSYNTH-2", "ep_BWSYNTH-3")
+			}
+		}
 		f.mu.Unlock()
 		code, out, _ := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "2s")
 		if code != 0 || !strings.Contains(out, c.want) || strings.Contains(out, c.not) {
-			t.Errorf("late epoch %q: exit %d, want %q and not %q in\n%s", c.late, code, c.want, c.not, out)
+			t.Errorf("%s: exit %d, want %q and not %q in\n%s", c.name, code, c.want, c.not, out)
 		}
 	}
 }

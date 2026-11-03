@@ -110,16 +110,17 @@ func (e *env) operationWatch(args []string) (err error) {
 
 	type result struct {
 		o   *apitypes.OperationBody
+		raw []byte // the operation read o comes from
 		err error
 	}
 	done := make(chan result, 1)
 	go func() {
-		o, err := c.Watch(id, client.Watch{
+		o, raw, err := c.WatchBody(id, client.Watch{
 			Show:  func(ev client.Event) { out.show(eventLine(ev, time.Now())) },
 			Clear: func() { out.show("(the events above no longer hold; they are shown again from the start)") },
 			Until: func() (bool, error) { return ended.Load() != 0, nil },
 		})
-		done <- result{o, err}
+		done <- result{o, raw, err}
 	}()
 
 	var res result
@@ -162,7 +163,7 @@ func (e *env) operationWatch(args []string) (err error) {
 	o = res.o
 	var last *lastEvent
 	if client.Terminal(o.State) {
-		last = readLast(c, id, o.State)
+		last = readLast(c, id, o.State, o.Epoch)
 	}
 	lines, ok := outcome(o, last)
 	if client.Terminal(o.State) && (last == nil || last.At == nil) {
@@ -177,12 +178,8 @@ func (e *env) operationWatch(args []string) (err error) {
 		lines = append(lines, follow)
 	}
 	out.finish(lines...)
-	if e.output != "table" {
-		r, err := c.Get("/operations/" + url.PathEscape(id))
-		if err != nil {
-			return err
-		}
-		if err := e.emit(r.Body, nil); err != nil {
+	if e.output != "table" { // the body the outcome and the exit code come from, not a second read
+		if err := e.emit(res.raw, nil); err != nil {
 			return err
 		}
 	}
@@ -206,9 +203,9 @@ type lastEvent struct {
 // readLast reads the operation's last event from the JSON pages. It is nil when the pages or the
 // operation cannot be read, or when the event is not of the epoch of the operation read that follows:
 // an installation restored meanwhile has other events, so the event's time is not the operation's. It
-// is also nil when that read shows another state than the one the watch returned (state), so the
-// outcome and the time printed together belong to one operation.
-func readLast(c *client.Client, id, state string) *lastEvent {
+// is also nil when that read shows another state or another epoch than the operation the watch
+// returned (state, watched), so the outcome and the time printed together belong to one operation.
+func readLast(c *client.Client, id, state, watched string) *lastEvent {
 	items, err := c.List("/operations/" + url.PathEscape(id) + "/events")
 	if err != nil || len(items) == 0 {
 		return nil
@@ -218,7 +215,7 @@ func readLast(c *client.Client, id, state string) *lastEvent {
 		return nil
 	}
 	o, epoch, err := c.OperationEpoch(id)
-	if err != nil || !client.Terminal(o.State) || o.State != state || epoch == "" || client.EpochOf(ev.ID) != epoch {
+	if err != nil || !client.Terminal(o.State) || o.State != state || epoch == "" || epoch != watched || client.EpochOf(ev.ID) != epoch {
 		return nil
 	}
 	return &ev
