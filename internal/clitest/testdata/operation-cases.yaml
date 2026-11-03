@@ -172,6 +172,8 @@
       TestOperationWatchInterruptReturns pins this form) or "Stopped watching at your request.
       Operation op_... goes on; the state it has now was not read." (it did not;
       TestOperationWatchInterrupt pins this form). This case asserts what both share: the prefix,
-      "goes on", the follow line and the unchanged state, and proves the row, not the form
+      "goes on", the follow line and the unchanged state, and proves the row, not the form. An
+      operation that ends within the grace time is not stopped: the watch prints its outcome and exits
+      0 or 4 (cmd/bronzewardctl TestOperationWatchInterruptTerminal pins this)
     absent: [tokens and the stand-in's secrets in stdout, stderr, argv]
   unit: an event ID of another epoch is internal/client TestWatch's case

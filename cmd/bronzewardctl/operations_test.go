@@ -20,6 +20,9 @@ type opFake struct {
 	late          string        // from the third operation read on, the epoch this answers instead
 	hang          chan struct{} // when set, a stream request sends its header and then waits for this
 	streams       int           // stream requests so far
+	pageReqs      int           // JSON event page requests so far
+	pageHang      chan struct{} // when set, a page request from number pageHangFrom on waits for this
+	pageHangFrom  int
 }
 
 func (f *opFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -60,6 +63,15 @@ func (f *opFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
+		f.pageReqs++
+		if hang := f.pageHang; hang != nil && f.pageReqs >= f.pageHangFrom {
+			f.mu.Unlock()
+			select {
+			case <-hang:
+			case <-r.Context().Done():
+			}
+			f.mu.Lock()
+		}
 		fmt.Fprintf(w, `{"items":[%s]}`, strings.Join(f.pages, ","))
 	default:
 		w.WriteHeader(http.StatusNotFound)
