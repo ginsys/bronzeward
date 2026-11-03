@@ -73,6 +73,13 @@ func Terminal(state string) bool {
 // sign-in about to expire (§9.5 item 4) and reconnects with Last-Event-ID. An attempt that showed
 // nothing is retried after 1 s, doubling to 30 s; JSON pages are read again at the same pace.
 func (c *Client) Watch(op string, w Watch) (*apitypes.OperationBody, error) {
+	o, _, err := c.WatchBody(op, w)
+	return o, err
+}
+
+// WatchBody is Watch that also returns the body of the operation read the result comes from, as the
+// server sent it, so a caller that prints the resource prints the one it decided the outcome from.
+func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, []byte, error) {
 	if w.sleep == nil {
 		w.sleep = time.Sleep
 	}
@@ -103,13 +110,13 @@ func (c *Client) Watch(op string, w Watch) (*apitypes.OperationBody, error) {
 			opened, pages, err = c.stream(op, &last, w)
 		}
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		// The attempt's own time: an operation read that is slow does not skip the backoff.
 		took := time.Since(began)
-		o, epoch, err := c.operation(op)
+		o, epoch, raw, err := c.operationRaw(op)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if Terminal(o.State) {
 			// A terminal state settles the watch, so the drain shows the last events, Until or not.
@@ -121,15 +128,15 @@ func (c *Client) Watch(op string, w Watch) (*apitypes.OperationBody, error) {
 			all.Until, all.halt = nil, &halt{}
 			derr := c.drain(op, &last, all)
 			if derr != nil {
-				again, now, err := c.operation(op)
+				again, now, againRaw, err := c.operationRaw(op)
 				switch {
 				case err != nil:
-					return nil, errors.Join(derr, err)
+					return nil, nil, errors.Join(derr, err)
 				case now == epoch && Terminal(again.State):
-					return again, derr
+					return again, againRaw, derr
 				}
 			} else if epoch == "" || last == "" || epochOf(last) == epoch {
-				return o, nil
+				return o, raw, nil
 			}
 			// The watch goes on after the delay, so a server whose events never match its operation
 			// read's epoch is not asked again without a pause.
@@ -147,10 +154,10 @@ func (c *Client) Watch(op string, w Watch) (*apitypes.OperationBody, error) {
 		}
 		if w.stop() {
 			if w.halt.err != nil {
-				return nil, w.halt.err
+				return nil, nil, w.halt.err
 			}
 			if epoch == "" || last == "" || epochOf(last) == epoch {
-				return o, nil
+				return o, raw, nil
 			}
 			// What Until answered rests on events of another epoch than the operation read's: they
 			// are cleared, which asks Until again, and the next stream shows the events from the start.
@@ -176,15 +183,21 @@ func (c *Client) Watch(op string, w Watch) (*apitypes.OperationBody, error) {
 
 // operation reads GET /operations/{op} and the epoch the read held.
 func (c *Client) operation(op string) (*apitypes.OperationBody, string, error) {
+	o, epoch, _, err := c.operationRaw(op)
+	return o, epoch, err
+}
+
+// operationRaw is operation with the body as the server sent it.
+func (c *Client) operationRaw(op string) (*apitypes.OperationBody, string, []byte, error) {
 	r, err := c.Get("/operations/" + url.PathEscape(op))
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	var o apitypes.OperationBody
 	if err := json.Unmarshal(r.Body, &o); err != nil {
-		return nil, "", c.Context.fail(fmt.Errorf("GET /api/v1/operations/%s: %w", printable(op), err))
+		return nil, "", nil, c.Context.fail(fmt.Errorf("GET /api/v1/operations/%s: %w", printable(op), err))
 	}
-	return &o, r.Header.Get("Bronzeward-Epoch"), nil
+	return &o, r.Header.Get("Bronzeward-Epoch"), r.Body, nil
 }
 
 // renewSoon renews a sign-in about to expire, so a long wait goes on (§9.5 item 4). A failure

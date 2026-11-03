@@ -397,7 +397,18 @@ func (e *env) operationCmd(args []string) error {
 			tf(w, "%s\t%s\t%s\t%s\t%s\n", o.Id, o.Kind, o.State, subject(o.Subject), when(o.CreatedAt))
 		})
 	}
-	return show(e, "/operations/"+url.PathEscape(pos[0]), func(w *tabwriter.Writer, o *apitypes.OperationBody) {
+	// A cancelled operation records no cause; its last event holds it. The event is read once and
+	// kept only when it is of the epoch of the operation shown; its time is not shown.
+	var cause *lastEvent
+	findCause := func(c *client.Client, _ *client.Response, o *apitypes.OperationBody) error {
+		if e.output == "table" && o.State == "cancelled" {
+			if cause = readLast(c, pos[0], o.State, o.Epoch); cause != nil {
+				cause.At = nil
+			}
+		}
+		return nil
+	}
+	return showThen(e, "/operations/"+url.PathEscape(pos[0]), findCause, func(w *tabwriter.Writer, o *apitypes.OperationBody) {
 		tf(w, "Operation %s\t%s\t%s\n", o.Id, o.Kind, o.State)
 		tf(w, "Subject\t%s\n", subject(o.Subject))
 		by := "the controller"
@@ -414,7 +425,7 @@ func (e *env) operationCmd(args []string) error {
 			}
 		}
 		if o.State == "unresolved" || client.Terminal(o.State) {
-			lines, _ := outcome(o, nil)
+			lines, _ := outcome(o, cause)
 			fmt.Fprintln(w, strings.Join(lines, "\n"))
 		}
 	})
