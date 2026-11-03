@@ -264,30 +264,76 @@ function decoded(body: string): string | undefined {
 // Where a line's comment starts: a # at its start or after a blank, outside quotes; the line's
 // length if it has none. A quote opens a scalar only where one starts, so the apostrophes in
 // `can't` and `dogs 'n cats` open none; '' inside a single-quoted scalar is an apostrophe.
+// A line is read on its own (ginsys/bronzeward#578): it counts the flow collections ([ {) it opens
+// itself, from depth 0 at its start, and a flow collection that goes on over several lines is not
+// followed. A [ or { opens one at the line's first column, after a key's colon and a blank (inside
+// a flow collection the blank is not needed), or inside one after a flow indicator; at an indented
+// line start or after a word it may continue a plain scalar, so it opens none. A ] or } closes one
+// only while one is open.
 function commentStart(line: string): number {
   let quote: string | undefined;
+  let closed = -1;
+  let flow = 0;
   for (let i = 0; i < line.length; i++) {
     const c = line[i]!;
     if (quote !== undefined) {
       if (c === "'" && quote === "'" && line[i + 1] === "'") i++;
-      else if (c === quote) quote = undefined;
+      else if (c === quote) [quote, closed] = [undefined, i];
       else if (c === "\\" && quote === '"') i++;
-    } else if ((c === '"' || c === "'") && startsScalar(line, i)) quote = c;
-    else if (c === "#" && (i === 0 || line[i - 1] === " " || line[i - 1] === "\t")) return i;
+    } else if ((c === '"' || c === "'") && startsScalar(line, i, flow > 0, closed)) quote = c;
+    else if (c === "#" && (i === 0 || blank(line[i - 1]))) return i;
+    else if ((c === "[" || c === "{") && opensFlow(line, i, flow > 0)) flow++;
+    else if ((c === "]" || c === "}") && flow > 0) flow--;
   }
   return line.length;
 }
 
+const blank = (c: string | undefined) => c === " " || c === "\t";
+// Whether the [ or { at `i` opens a flow collection (see commentStart).
+function opensFlow(line: string, i: number, flow: boolean): boolean {
+  if (i === 0) return true;
+  let j = i - 1;
+  while (j >= 0 && blank(line[j])) j--;
+  if (j < 0) return false;
+  if (flow && "[{,".includes(line[j]!)) return true;
+  return line[j] === ":" && (flow || j < i - 1);
+}
+
 // Whether a scalar starts at `i`: at the line's indentation, after a flow indicator ([ { ,), or
 // after a blank that follows a key's colon or an item's or a complex key's indicator (- ?).
-// Anything else before it is a plain scalar already started.
-function startsScalar(line: string, i: number): boolean {
-  let j = i - 1;
-  while (j >= 0 && (line[j] === " " || line[j] === "\t")) j--;
-  if (j < 0 || "[{,".includes(line[j]!)) return true;
-  if (j === i - 1) return false;
-  if (line[j] === ":") return true;
-  return (line[j] === "-" || line[j] === "?") && (j === 0 || line[j - 1] === " " || line[j - 1] === "\t");
+// Anything else before it is a plain scalar already started. Inside a flow collection, as
+// go-yaml reads it, an indicator right after a flow indicator counts, a complex key's ? needs no
+// blank after it, and a colon is a value's indicator, with no blank after it, where a token starts:
+// after a blank, a ] or }, or a quoted key (`closed` is where the last quote on the line closed).
+// Node properties (a tag, an anchor) and the blanks after them may stand between the indicator and
+// the scalar.
+function startsScalar(line: string, i: number, flow: boolean, closed: number): boolean {
+  if (!flow) {
+    let j = i - 1;
+    while (j >= 0 && blank(line[j])) j--;
+    if (j < 0 || "[{,".includes(line[j]!)) return true;
+    if (j === i - 1) return false;
+    if (line[j] === ":") return true;
+    return (line[j] === "-" || line[j] === "?") && (j === 0 || blank(line[j - 1]));
+  }
+  const opener = (c: string | undefined) => c !== undefined && "[{,".includes(c);
+  const indicator = (j: number) => j === 0 || blank(line[j - 1]) || opener(line[j - 1]);
+  const colon = (j: number) => line[j] === ":" && (j === 0 || blank(line[j - 1]) || closed === j - 1 || "]}".includes(line[j - 1]!) || opener(line[j - 1]));
+  for (let k = i; ; ) {
+    let j = k - 1;
+    while (j >= 0 && blank(line[j])) j--;
+    if (j < 0 || opener(line[j])) return true;
+    if (line[j] === "?" && indicator(j)) return true;
+    if (colon(j)) return true;
+    if (j === k - 1) return false;
+    if (line[j] === ":") return true;
+    if (line[j] === "-" && indicator(j)) return true;
+    let s = j;
+    while (s > 0 && !blank(line[s - 1]) && !opener(line[s - 1]) && !colon(s - 1)) s--;
+    if (line[s] === "?" && indicator(s)) s++;
+    if (line[s] !== "!" && line[s] !== "&") return false;
+    k = s;
+  }
 }
 
 // The tags of the text outside the declared embedded documents, and those documents. A declared

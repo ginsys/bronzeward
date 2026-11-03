@@ -1055,3 +1055,61 @@ describe("the fragment entry (W4, §11.4 item 2)", () => {
     expect(NOT_RENDERED).toBe("Not rendered yet. A machine's configuration exists only after publication (gap G5).");
   });
 });
+
+// ginsys/bronzeward#578: each expected result below was read from go-yaml v3.0.5 (go.mod's pin) by
+// decoding the same document. A flow collection allows `?` and `:` next to a quote without a blank, so
+// a `#` inside such a quote is not a comment.
+describe("ginsys/bronzeward#578: a quoted key or value in a flow collection hides its #", () => {
+  test("the two documents of the issue name the reference after the quote", () => {
+    expect(references('a: [? "x # y", !bwref x/foo]\n')).toEqual(["x/foo"]);
+    expect(references('{? "x # y": 1, b: !bwref x/foo}\n')).toEqual(["x/foo"]);
+  });
+
+  test("one-line flow forms: a tag or anchor between the indicator and the quote, adjacent colons", () => {
+    for (const one of [
+      'a: {? "x # y": 1, b: !bwref x/foo}\n',
+      'a: [?"x # y", !bwref x/foo]\n',
+      'a: {?!t "x # y", b: !bwref x/foo}\n',
+      'a: [!t "x # y", !bwref x/foo]\n',
+      'a: {"k":"x # y", r: !bwref x/foo}\n',
+      "a: [\"k\":'x # y', !bwref x/foo]\n",
+      'a: {"k":!t "x # y", r: !bwref x/foo}\n',
+      'a: {"k":&a "x # y", r: !bwref x/foo}\n',
+      'a: {"k" :"x # y", r: !bwref x/foo}\n',
+      'a: {[k]:"x # y", r: !bwref x/foo}\n',
+      '[? "x # y", !bwref x/foo]\n',
+      '--- ["a # b", !bwref x/foo]\n',
+      'a: [x,\n  b, "y # z", !bwref x/foo]\n',
+    ]) expect(references(one)).toEqual(["x/foo"]);
+  });
+
+  test("a collection opened right after a value colon is counted, so its closer does not end the outer one", () => {
+    for (const one of [
+      'a: {"k":[], ?"x # y": 1, r: !bwref x/foo}\n',
+      'a: {"k":{}, ?"x # y": 1, r: !bwref x/foo}\n',
+      'a: ["k":[a], ? "x # y", !bwref x/foo]\n',
+      '{"k":[],"x # y":1, r: !bwref x/foo}\n',
+      "a: {\"k\":[ ], '?x # y': 1, r: !bwref x/foo}\n",
+    ]) expect(references(one)).toEqual(["x/foo"]);
+  });
+
+  test("the five documents of the first review stay as on main: a comment's tag is not listed", () => {
+    for (const one of [
+      'a: |2\n    text\n  p: [x\nb: ?"y # !bwref ghost\nc: !bwref x/foo\n',
+      'a: |2\n    first\n  b: [x\nc: ?"y # !bwref ghost\nd: !bwref x/foo\n',
+      'a:\n  |\n  [x\nb: ?"y # !bwref ghost\nc: !bwref x/foo\n',
+      'a:\n    x\n  [y\nb: ?"z # !bwref ghost\nc: !bwref x/foo\n',
+      'a: |# comment: [x\n  text\nb: ?"y # !bwref ghost\nc: !bwref x/foo\n',
+    ]) expect(references(one)).toEqual(["x/foo"]);
+  });
+
+  test("places that open no flow collection or quote leave a # a comment", () => {
+    for (const one of [
+      'a: ?"x # !bwref ghost\nb: !bwref x/foo\n', // `?` outside a flow collection
+      'a: x[?"y # !bwref ghost\nb: !bwref x/foo\n', // a `[` inside a plain scalar
+      'a: x!t "y # !bwref ghost\nb: !bwref x/foo\n',
+      'a: x\n  [?"y # !bwref ghost\nb: !bwref x/foo\n', // an indented `[` at a line start
+      'a: |\n  [x\nb: ?"y # !bwref ghost\nc: !bwref x/foo\n',
+    ]) expect(references(one)).toEqual(["x/foo"]);
+  });
+});
