@@ -1,0 +1,18 @@
+{
+ "counts": {
+  "inputs": 21672,
+  "valid": 8344,
+  "equal": 8344,
+  "lost": 0,
+  "lostFit": 0,
+  "badNameDocs": 0,
+  "extra": 0,
+  "extraUnfit": 0,
+  "newLost": 0,
+  "newExtra": 0,
+  "refusedListed": 13328,
+  "failed": 0,
+  "msPer10k": 122
+ },
+ "rows": []
+}

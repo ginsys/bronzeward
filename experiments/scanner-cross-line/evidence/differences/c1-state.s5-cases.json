@@ -1,0 +1,55 @@
+{
+ "counts": {
+  "inputs": 34,
+  "valid": 33,
+  "equal": 30,
+  "lost": 0,
+  "lostFit": 0,
+  "badNameDocs": 0,
+  "extra": 3,
+  "extraUnfit": 3,
+  "newLost": 0,
+  "newExtra": 2,
+  "refusedListed": 1,
+  "failed": 0,
+  "msPer10k": 1319
+ },
+ "rows": [
+  {
+   "kind": "extra",
+   "doc": "a: |\n  [x\n  b: {\"k\":!t \"x # y\", r: !bwref x/foo}\n",
+   "candidate": [
+    "x/foo"
+   ],
+   "oracle": [],
+   "unfit": true,
+   "newVsMain": true
+  },
+  {
+   "kind": "extra",
+   "doc": "a: |\n  \"y # !bwref ghost\nb: !bwref x/foo\n",
+   "candidate": [
+    "ghost",
+    "x/foo"
+   ],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": true,
+   "newVsMain": false
+  },
+  {
+   "kind": "extra",
+   "doc": "a: |\n  b: ?\"z # !bwref ghost\nc: !bwref x/end\n",
+   "candidate": [
+    "ghost",
+    "x/end"
+   ],
+   "oracle": [
+    "x/end"
+   ],
+   "unfit": true,
+   "newVsMain": true
+  }
+ ]
+}

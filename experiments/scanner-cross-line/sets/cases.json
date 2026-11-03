@@ -1,0 +1,282 @@
+[
+ {
+  "name": "594-pipe",
+  "issue": "#594",
+  "doc": "a: x |\n  \"y # !bwref ghost\nb: !bwref x/foo\n",
+  "want": [
+   "x/foo"
+  ],
+  "note": "a plain scalar ending in a pipe; the next line continues it, so its # is a comment"
+ },
+ {
+  "name": "594-gt",
+  "issue": "#594",
+  "doc": "a: x >\n  \"y # !bwref ghost\nb: !bwref x/foo\n",
+  "want": [
+   "x/foo"
+  ],
+  "note": "the same with a greater-than sign"
+ },
+ {
+  "name": "594-continued-line",
+  "issue": "#594",
+  "doc": "a: x\n  y |\n  \"z # !bwref ghost\nb: !bwref x/foo\n",
+  "want": [
+   "x/foo"
+  ],
+  "note": "the pipe ends a continuation line"
+ },
+ {
+  "name": "594-own-line-pipe",
+  "issue": "#594",
+  "doc": "a: x\n  |\n  \"z # !bwref ghost\nb: !bwref x/foo\n",
+  "want": [
+   "x/foo"
+  ],
+  "note": "a pipe alone on a continuation line is plain text"
+ },
+ {
+  "name": "560-double",
+  "issue": "#560",
+  "doc": "a: [\"foo\n#bar\", !bwref x/foo]\n",
+  "want": [
+   "x/foo"
+  ],
+  "note": "a # at the start of a later line of a double-quoted scalar"
+ },
+ {
+  "name": "560-single",
+  "issue": "#560",
+  "doc": "a: ['foo\n#bar', !bwref x/foo]\n",
+  "want": [
+   "x/foo"
+  ],
+  "note": "the same, single-quoted"
+ },
+ {
+  "name": "592-flow",
+  "issue": "#592",
+  "doc": "a: [\"x\n  \", \"p # q\", !bwref x/foo]\n",
+  "want": [
+   "x/foo"
+  ],
+  "note": "a quote closes on a later line inside a flow collection"
+ },
+ {
+  "name": "593-dash-in-plain",
+  "issue": "#593",
+  "doc": "a: x - \"y # !bwref ghost\nb: !bwref x/foo\n",
+  "want": [
+   "x/foo"
+  ],
+  "note": "per-line defect, kept as a control (fixed separately)"
+ },
+ {
+  "name": "578-explicit-key",
+  "issue": "#578",
+  "doc": "a: [? \"x # y\", !bwref x/foo]\n",
+  "want": [
+   "x/foo"
+  ],
+  "note": "a # in a quoted explicit key in a flow collection"
+ },
+ {
+  "name": "596-indicator-digit",
+  "issue": "#596",
+  "doc": "a: |2\n    text\n  p: [x\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
+  "want": [
+   "x/foo"
+  ],
+  "note": "an indentation indicator; the first content line is deeper than the later ones"
+ },
+ {
+  "name": "596-indicator-digit-2",
+  "issue": "#596",
+  "doc": "a: |2\n    first\n  b: [x\nc: ?\"y # !bwref ghost\nd: !bwref x/foo\n",
+  "want": [
+   "x/foo"
+  ],
+  "note": "the same family with other keys"
+ },
+ {
+  "name": "596-own-line-header",
+  "issue": "#596",
+  "doc": "a:\n  |\n  [x\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
+  "want": [
+   "x/foo"
+  ],
+  "note": "the header alone on its line"
+ },
+ {
+  "name": "596-bare-then-shallower",
+  "issue": "#596",
+  "doc": "a:\n    x\n  [y\nb: ?\"z # !bwref ghost\nc: !bwref x/foo\n",
+  "want": [
+   "x/foo"
+  ],
+  "note": "a bare scalar line, then a shallower continuation"
+ },
+ {
+  "name": "596-header-comment-no-blank",
+  "issue": "#596",
+  "doc": "a: |# comment: [x\n  text\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
+  "want": [
+   "x/foo"
+  ],
+  "note": "a header comment with no blank before the #"
+ },
+ {
+  "name": "596-rejected-marker-mapping",
+  "issue": "#596",
+  "doc": "--- a: 1\n    \"b # c\": !bwref x/foo\n",
+  "want": null,
+  "note": "go-yaml refuses this document; no scanner result is required"
+ },
+ {
+  "name": "limit-block-text-flow",
+  "issue": "#598",
+  "doc": "a: |\n  [x\n  b: {\"k\":!t \"x # y\", r: !bwref x/foo}\n",
+  "want": [],
+  "note": "known limitation: a flow value inside block scalar text; a scanner that does not track block text lists x/foo"
+ },
+ {
+  "name": "limit-block-text-tag",
+  "issue": "#598",
+  "doc": "a: |\n  \"y # !bwref ghost\nb: !bwref x/foo\n",
+  "want": [
+   "x/foo"
+  ],
+  "note": "known limitation: a tag inside block scalar text; a scanner that does not track block text also lists ghost"
+ },
+ {
+  "name": "dash-after-plain-quote",
+  "issue": "593",
+  "doc": "a: x - \"y # !bwref ghost\nb: !bwref x/foo\n",
+  "want": [
+   "x/foo"
+  ],
+  "note": "a quote after a dash inside a plain scalar opens no quoted scalar, so the # is a comment"
+ },
+ {
+  "name": "question-after-plain-quote",
+  "issue": "593",
+  "doc": "a: x ? \"y # !bwref ghost\nb: !bwref x/foo\n",
+  "want": [
+   "x/foo"
+  ],
+  "note": "the same with a question mark"
+ },
+ {
+  "name": "tag-then-own-line-quote",
+  "issue": "593",
+  "doc": "a: x - !t\n  \"y # !bwref ghost\nb: !bwref x/foo\n",
+  "want": [
+   "x/foo"
+  ],
+  "note": "a plain scalar continued on a more indented line that starts with a quote"
+ },
+ {
+  "name": "two-quotes-after-dash",
+  "issue": "593",
+  "doc": "a: x - \"y, \"p # !bwref ghost\nb: !bwref x/foo\n",
+  "want": [
+   "x/foo"
+  ],
+  "note": "two quotes in a plain scalar continuation"
+ },
+ {
+  "name": "two-quotes-after-question",
+  "issue": "593",
+  "doc": "a: x ? \"y, \"p # !bwref ghost\nb: !bwref x/foo\n",
+  "want": [
+   "x/foo"
+  ],
+  "note": "the same with a question mark"
+ },
+ {
+  "name": "bom-at-stream-start",
+  "issue": "593",
+  "doc": "﻿ - \"p # q\": !bwref x/foo\n",
+  "want": [
+   "x/foo"
+  ],
+  "note": "a byte order mark at the start of the stream is dropped, so the line is a block sequence entry"
+ },
+ {
+  "name": "bom-after-marker",
+  "issue": "593",
+  "doc": "---\n﻿\"p # q\": !bwref x/foo\n",
+  "want": [],
+  "note": "a byte order mark after a document marker is not dropped; go-yaml lists no reference (observed, not derived)"
+ },
+ {
+  "name": "block-header-comment-with-flow-quote",
+  "issue": "599",
+  "doc": "a: |# comment: [?\"y # !bwref ghost, ignored\n  text\nb: !bwref x/foo\n",
+  "want": ["x/foo"],
+  "note": "a comment on a block scalar header holds a flow opener and a quote"
+ },
+ {
+  "name": "plain-colon-quote-in-flow",
+  "issue": "599",
+  "doc": "a: [x :\"y # !bwref ghost\n  , !bwref x/foo]\n",
+  "want": ["x/foo"],
+  "note": "a colon and a quote after a plain scalar in a flow sequence, the flow continued on the next line"
+ },
+ {
+  "name": "verbatim-comma-tag-in-flow",
+  "issue": "599",
+  "doc": "a: [!t,?'u v, 'y # z', !bwref x/foo]\n",
+  "want": ["x/foo"],
+  "note": "a tag is read up to a blank, so it takes the comma, the question mark and the quote that follow it"
+ },
+ {
+  "name": "question-in-flow-sequence-entry",
+  "issue": "599",
+  "doc": "- [? \"x # y\", !bwref x/foo]\n",
+  "want": ["x/foo"],
+  "note": "an explicit key in a flow sequence inside a block sequence entry"
+ },
+ {
+  "name": "question-in-flow-sequence-value",
+  "issue": "578",
+  "doc": "a: [? \"x # y\", !bwref x/foo]\n",
+  "want": ["x/foo"],
+  "note": "the first document of issue 578"
+ },
+ {
+  "name": "question-in-flow-mapping",
+  "issue": "578",
+  "doc": "{? \"x # y\": 1, b: !bwref x/foo}\n",
+  "want": ["x/foo"],
+  "note": "the second document of issue 578"
+ },
+ {
+  "name": "two-boms-before-dash",
+  "issue": "593",
+  "doc": "﻿﻿ - \"p # q\": !bwref x/foo\n",
+  "want": ["x/foo"],
+  "note": "the reader drops the first byte order mark and the scanner skips a second one at the start"
+ },
+ {
+  "name": "two-boms-before-flow",
+  "issue": "593",
+  "doc": "﻿﻿[x, ? \"p # q\": !bwref x/foo]\n",
+  "want": ["x/foo"],
+  "note": "the same before a flow sequence"
+ },
+ {
+  "name": "bom-before-marker",
+  "issue": "593",
+  "doc": "﻿---\n\"p # q\": !bwref x/foo\n",
+  "want": ["x/foo"],
+  "note": "the byte order mark takes no column, so the marker still starts at column 0"
+ },
+ {
+  "name": "quote-with-ghost-in-block-text",
+  "issue": "593",
+  "doc": "a: |\n  b: ?\"z # !bwref ghost\nc: !bwref x/end\n",
+  "want": ["x/end"],
+  "note": "block scalar text is text: go-yaml lists no name from it, and the server refuses the document for it"
+ }
+]

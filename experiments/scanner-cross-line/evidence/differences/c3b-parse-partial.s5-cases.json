@@ -1,0 +1,59 @@
+{
+ "counts": {
+  "inputs": 34,
+  "valid": 33,
+  "equal": 29,
+  "lost": 4,
+  "lostFit": 4,
+  "badNameDocs": 0,
+  "extra": 0,
+  "extraUnfit": 0,
+  "newLost": 2,
+  "newExtra": 0,
+  "refusedListed": 1,
+  "failed": 0,
+  "msPer10k": 6084
+ },
+ "rows": [
+  {
+   "kind": "lost",
+   "doc": "a: [\"foo\n#bar\", !bwref x/foo]\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "kind": "lost",
+   "doc": "a: ['foo\n#bar', !bwref x/foo]\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "kind": "lost",
+   "doc": "﻿﻿ - \"p # q\": !bwref x/foo\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": true
+  },
+  {
+   "kind": "lost",
+   "doc": "﻿﻿[x, ? \"p # q\": !bwref x/foo]\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": true
+  }
+ ]
+}

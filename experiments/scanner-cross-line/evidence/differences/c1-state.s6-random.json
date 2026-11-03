@@ -1,0 +1,219 @@
+{
+ "counts": {
+  "inputs": 99983,
+  "valid": 3756,
+  "equal": 2797,
+  "lost": 0,
+  "lostFit": 0,
+  "badNameDocs": 259,
+  "extra": 959,
+  "extraUnfit": 959,
+  "newLost": 0,
+  "newExtra": 121,
+  "refusedListed": 54499,
+  "failed": 0,
+  "msPer10k": 83
+ },
+ "rows": [
+  {
+   "kind": "extra",
+   "doc": "a: !t\n a: |2\n    ?\"y # !bwref ghost\nb: &a \"q # r\"\n",
+   "candidate": [
+    "ghost"
+   ],
+   "oracle": [],
+   "unfit": true,
+   "newVsMain": true
+  },
+  {
+   "kind": "extra",
+   "doc": " ? # !bwref ghost\n : !bwref x/foo\n  - - x y\n",
+   "candidate": [
+    "x/foo"
+   ],
+   "oracle": [],
+   "unfit": true,
+   "newVsMain": false
+  },
+  {
+   "kind": "extra",
+   "doc": "x !bwref x/foo\n- ? x,\n",
+   "candidate": [
+    "x/foo"
+   ],
+   "oracle": [],
+   "unfit": true,
+   "newVsMain": false
+  },
+  {
+   "kind": "extra",
+   "doc": "  ? >\n    ]\n    [\"k\": !bwref x/foo\n",
+   "candidate": [
+    "x/foo"
+   ],
+   "oracle": [],
+   "unfit": true,
+   "newVsMain": false
+  },
+  {
+   "kind": "extra",
+   "doc": "  x ,\n {\n !t !bwref x/foo\n",
+   "candidate": [
+    "x/foo"
+   ],
+   "oracle": [],
+   "unfit": true,
+   "newVsMain": false
+  },
+  {
+   "kind": "extra",
+   "doc": "? \"\"\nk: !bwref x/foo, \na: |1-\n",
+   "candidate": [
+    "x/foo"
+   ],
+   "oracle": [],
+   "unfit": true,
+   "newVsMain": false
+  },
+  {
+   "kind": "extra",
+   "doc": "- !bwref x/foo\n ? | # c\n",
+   "candidate": [
+    "x/foo"
+   ],
+   "oracle": [],
+   "unfit": true,
+   "newVsMain": false
+  },
+  {
+   "kind": "extra",
+   "doc": "  - |\n    b: [\"q # r\", !bwref x/foo]\n",
+   "candidate": [
+    "x/foo"
+   ],
+   "oracle": [],
+   "unfit": true,
+   "newVsMain": false
+  },
+  {
+   "kind": "extra",
+   "doc": "  &a !bwref x/foo\n? x}\n x # !bwref ghost\n",
+   "candidate": [
+    "x/foo"
+   ],
+   "oracle": [],
+   "unfit": true,
+   "newVsMain": false
+  },
+  {
+   "kind": "extra",
+   "doc": "&a !bwref x/foo\n- ? !t\n? --- \"q # r\"\n",
+   "candidate": [
+    "x/foo"
+   ],
+   "oracle": [],
+   "unfit": true,
+   "newVsMain": false
+  },
+  {
+   "kind": "extra",
+   "doc": " |2\n  q\" # r\n    ? [?\"y # !bwref ghost\n",
+   "candidate": [
+    "ghost"
+   ],
+   "oracle": [],
+   "unfit": true,
+   "newVsMain": true
+  },
+  {
+   "kind": "extra",
+   "doc": "\"k\": |-\n a: {\n  b: k: !bwref x/foo, \n  - a: q\" # r\n",
+   "candidate": [
+    "x/foo"
+   ],
+   "oracle": [],
+   "unfit": true,
+   "newVsMain": false
+  },
+  {
+   "kind": "extra",
+   "doc": "- --- |\n--- |\n    x # !bwref ghost\n",
+   "candidate": [
+    "ghost"
+   ],
+   "oracle": [],
+   "unfit": true,
+   "newVsMain": true
+  },
+  {
+   "kind": "extra",
+   "doc": "? |1-\n    x,\n  [a, !bwref \"x/foo\"\n !bwref \"x/foo\"\n",
+   "candidate": [
+    "x/foo"
+   ],
+   "oracle": [],
+   "unfit": true,
+   "newVsMain": false
+  },
+  {
+   "kind": "extra",
+   "doc": "  - |\n    {k: &a !bwref x/foo\n",
+   "candidate": [
+    "x/foo"
+   ],
+   "oracle": [],
+   "unfit": true,
+   "newVsMain": false
+  },
+  {
+   "kind": "extra",
+   "doc": "- a: >+\n    &a !bwref x/foo\n",
+   "candidate": [
+    "x/foo"
+   ],
+   "oracle": [],
+   "unfit": true,
+   "newVsMain": false
+  },
+  {
+   "kind": "extra",
+   "doc": "x !bwref \"x/foo\"\nx \"z\" # !bwref ghost\n",
+   "candidate": [
+    "x/foo"
+   ],
+   "oracle": [],
+   "unfit": true,
+   "newVsMain": false
+  },
+  {
+   "kind": "extra",
+   "doc": "  b: # !bwref ghost\n    x !bwref 'x/foo'\n",
+   "candidate": [
+    "x/foo"
+   ],
+   "oracle": [],
+   "unfit": true,
+   "newVsMain": false
+  },
+  {
+   "kind": "extra",
+   "doc": "    >+\n  - [\n    - [\"q # r\", !bwref x/foo]\n",
+   "candidate": [
+    "x/foo"
+   ],
+   "oracle": [],
+   "unfit": true,
+   "newVsMain": false
+  },
+  {
+   "kind": "extra",
+   "doc": "x,\n    [a, !t !bwref x/foo\n ?\"y # !bwref ghost\n",
+   "candidate": [
+    "x/foo"
+   ],
+   "oracle": [],
+   "unfit": true,
+   "newVsMain": false
+  }
+ ]
+}

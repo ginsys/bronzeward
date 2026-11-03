@@ -1,0 +1,70 @@
+s0-indicators: go-yaml accepts 2503, the yaml package refuses 120
+s1-explicit-key: go-yaml accepts 19600, the yaml package refuses 2832
+s2-context: go-yaml accepts 1271, the yaml package refuses 157
+s3-review: go-yaml accepts 65, the yaml package refuses 3
+s4-families: go-yaml accepts 4050, the yaml package refuses 2060
+s5-cases: go-yaml accepts 33, the yaml package refuses 5
+s6-random: go-yaml accepts 3756, the yaml package refuses 229
+s7-colon-flow: go-yaml accepts 8344, the yaml package refuses 1192
+
+BAD_INDENT: 2344 streams, in s1-explicit-key, s2-context, s3-review, s7-colon-flow
+  "a: [?\"x #\", !bwref x/foo]\n"
+    Flow sequence in block collection must be sufficiently indented and end with a ] at line 2, column 1:
+  "a: [?'x #', !bwref x/foo]\n"
+    Flow sequence in block collection must be sufficiently indented and end with a ] at line 2, column 1:
+MISSING_CHAR: 2237 streams, in s0-indicators, s1-explicit-key, s2-context, s3-review, s4-families, s5-cases, s6-random, s7-colon-flow
+  "  |# c\n {\n"
+    Comments must be separated from other tokens by white space characters at line 1, column 4:
+  "? |# c\n x]\n"
+    Comments must be separated from other tokens by white space characters at line 1, column 4:
+MISSING_CHAR+MULTILINE_IMPLICIT_KEY: 1213 streams, in s4-families, s6-random
+  "? \n|# c\n"
+    Implicit keys need to be on a single line at line 2, column 1:
+  "  'k': !t\n  |-\n"
+    Implicit keys need to be on a single line at line 2, column 3:
+BLOCK_IN_FLOW+MISSING_CHAR: 582 streams, in s0-indicators, s1-explicit-key
+  "a: {?\"x #\",\n  b: !bwref x/foo}\n"
+    Missing , or : between flow map items at line 2, column 3:
+  "a: {?'x #',\n  b: !bwref x/foo}\n"
+    Missing , or : between flow map items at line 2, column 3:
+BAD_INDENT+MISSING_CHAR: 104 streams, in s0-indicators, s1-explicit-key, s2-context, s5-cases, s6-random
+  "  b: {\n  x}\n"
+    Flow map in block collection must be sufficiently indented and end with a } at line 2, column 3:
+  "a: [[?\"x #\"],\n  !bwref x/foo]\n"
+    Missing , or : between flow sequence items at line 2, column 3:
+UNEXPECTED_TOKEN: 37 streams, in s0-indicators, s5-cases
+  "﻿ - \"p # q\": !bwref x/foo\n"
+    Unexpected double-quoted-scalar at node end at line 1, column 5:
+  "- !a]'bar\n- !bwref x/foo # c\n"
+    Unexpected flow-seq-end token in YAML stream: "]" at line 1, column 5:
+BAD_INDENT+MISSING_CHAR+MULTILINE_IMPLICIT_KEY: 28 streams, in s4-families
+  "a:\n|-\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n"
+    Implicit keys need to be on a single line at line 2, column 1:
+  "a:\n|+\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n"
+    Implicit keys need to be on a single line at line 2, column 1:
+BAD_SCALAR_START+MISSING_CHAR: 24 streams, in s0-indicators
+  "- !foo,'bar\n- !bwref x/foo # c\n"
+    Tags and anchors must be separated from the next token by white space at line 1, column 7:
+  "a: !foo,'bar\nb: !bwref x/foo # c\n"
+    Tags and anchors must be separated from the next token by white space at line 1, column 8:
+BAD_INDENT+UNEXPECTED_TOKEN: 15 streams, in s0-indicators, s6-random
+  "- [\nb: ]\n"
+    Flow sequence in block collection must be sufficiently indented and end with a ] at line 2, column 1:
+  "\"k\": [\na: ]\n"
+    Flow sequence in block collection must be sufficiently indented and end with a ] at line 2, column 1:
+BAD_INDENT+BLOCK_AS_IMPLICIT_KEY+MULTILINE_IMPLICIT_KEY+UNEXPECTED_TOKEN: 6 streams, in s0-indicators
+  "a: {!a] \"x # y\": 1,\n  b: !bwref x/foo # c\n}\n"
+    Flow map in block collection must be sufficiently indented and end with a } at line 1, column 7:
+  "a: {!a] 'x # y': 1,\n  b: !bwref x/foo # c\n}\n"
+    Flow map in block collection must be sufficiently indented and end with a } at line 1, column 7:
+MISSING_CHAR+UNEXPECTED_TOKEN: 6 streams, in s6-random
+  "    - a: \"q # r\n{q\" # r\n"
+    Missing closing "quote at line 1, column 16:
+  " - - \"q # r\n- a: *a\n    : x\n : *a\n  ? q\" # r\n"
+    Missing closing "quote at line 1, column 12:
+BAD_INDENT+BLOCK_AS_IMPLICIT_KEY+MISSING_CHAR+MULTILINE_IMPLICIT_KEY+UNEXPECTED_TOKEN: 1 streams, in s6-random
+  "  b: \"y # !bwref ghost\n  - a: # !bwref ghost\n  [x]\n  - {k: \nq\" # r\n"
+    Missing closing "quote at line 1, column 23:
+BAD_INDENT+MISSING_CHAR+UNEXPECTED_TOKEN: 1 streams, in s6-random
+  " - ? \"q # r\n  [a, {\n{...\n  : k: !bwref x/foo, \n  x q\" # r\n"
+    Missing closing "quote at line 1, column 12:

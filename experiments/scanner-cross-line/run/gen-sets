@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Writes the document sets of the experiment into <out dir> and checks them against sets/MANIFEST.
+#
+# Usage: run/gen-sets <out dir>
+#
+# The sets are not committed: six generators (sets/gen-*.ts) write them, and sets/MANIFEST records
+# the document count and the sha256 of every file. The curated sets (sets/cases.json and
+# sets/review.json) are copied as they are. Node must run TypeScript files (node 24 or later).
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+  echo "usage: run/gen-sets <out dir>" >&2
+  exit 2
+fi
+out=$1
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+mkdir -p "$out"
+
+node "$here/sets/gen-s0-indicators.ts" "$out/s0-indicators.json" >/dev/null
+node "$here/sets/gen-s1-explicit-key.ts" "$out/s1-explicit-key.json" >/dev/null
+node "$here/sets/gen-s2-context.ts" "$out/s2-context.json" >/dev/null
+node "$here/sets/gen-s4-families.ts" "$out/s4-families.json" >/dev/null
+node "$here/sets/gen-s6-random.ts" "$out/s6-random.json" >/dev/null
+node "$here/sets/gen-s7-colon-flow.ts" "$out/s7-colon-flow.json" >/dev/null
+cp "$here/sets/review.json" "$out/s3-review.json"
+cp "$here/sets/cases.json" "$out/s5-cases.json"
+
+# One line per set: name, number of documents, sha256 of the file.
+manifest=$(
+  cd "$out"
+  for f in s0-indicators s1-explicit-key s2-context s3-review s4-families s5-cases s6-random s7-colon-flow; do
+    n=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).length)' "$f.json")
+    sum=$(sha256sum "$f.json")
+    printf '%s %s %s\n' "$f.json" "$n" "${sum%% *}"
+  done
+)
+printf '%s\n' "$manifest" >"$out/MANIFEST"
+
+if diff -u "$here/sets/MANIFEST" "$out/MANIFEST"; then
+  echo "sets match sets/MANIFEST"
+else
+  echo "sets differ from sets/MANIFEST (a generator changed, or node differs)" >&2
+  exit 1
+fi
