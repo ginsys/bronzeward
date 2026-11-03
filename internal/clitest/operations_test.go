@@ -128,6 +128,24 @@ func (f *fixture) recovery(base, path, key, body string, status int) []byte {
 	return f.do(q, status)
 }
 
+// epochIs waits, at most 5 s, until the server answers with epoch in Bronzeward-Epoch: a committed
+// epoch is the server's answer only after the serve has read it, and a case that orders a client's
+// reads against it needs that moment.
+func (f *fixture) epochIs(t *testing.T, epoch string) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		q, _ := http.NewRequest(http.MethodGet, f.base+"/api/v1/server", nil)
+		q.Header.Set("Authorization", "Bearer "+f.mint("h-all", ""))
+		if a, err := http.DefaultClient.Do(q); err == nil {
+			a.Body.Close()
+			if a.Header.Get("Bronzeward-Epoch") == epoch {
+				return
+			}
+		}
+	}
+	t.Errorf("the server did not answer epoch %s within 5 s", epoch)
+}
+
 // relay passes the event stream request r to the server and its answer to w, event by event. After
 // each event it flushes and asks each, with the event's ID and data; it stops once each answers
 // false, or the server ends the stream.
@@ -411,44 +429,62 @@ var operationCases = map[string]func(*testing.T, *watchEnv){
 		}
 	},
 
+	// EVT-02 runs the restore of a watched operation in both orders a real client can meet, each
+	// made deterministic: the new epoch is committed, and the server answers it, either after the
+	// reader's operation read that follows the cut stream (the reconnect then carries the stale
+	// Last-Event-ID and takes the server's reset), or before it (the operation read shows the new
+	// epoch, and the reader clears and reopens with none).
 	"EVT-02": func(t *testing.T, e *watchEnv) {
 		op, release := e.held(t)
 		t.Cleanup(release)
 		e.sending = op
-		var mu sync.Mutex
-		var first, resumed string
-		var streams atomic.Int32
-		// The first stream is cut after its first event, and a new epoch committed, as a restore
-		// does, before the watch opens the stream again.
-		e.in.set(func(w http.ResponseWriter, r *http.Request) bool {
-			if r.Header.Get("Accept") != "text/event-stream" {
-				return false
-			}
-			if streams.Add(1) == 1 {
-				e.f.relay(t, w, r, func(id, _ string) bool {
-					mu.Lock()
-					first = id
-					mu.Unlock()
-					e.f.newEpoch()
+		for _, c := range []struct {
+			name     string
+			beforeOp bool // the new epoch is committed before the operation read, not at the reconnect
+		}{{"stale Last-Event-ID, the server's reset", false}, {"new epoch seen first, the reader's clear", true}} {
+			var mu sync.Mutex
+			var first, resumed string
+			var streams atomic.Int32
+			// The first stream is cut after its first event.
+			e.in.set(func(w http.ResponseWriter, r *http.Request) bool {
+				if r.Header.Get("Accept") != "text/event-stream" {
 					return false
-				})
-				return true
-			}
+				}
+				if streams.Add(1) == 1 {
+					e.f.relay(t, w, r, func(id, _ string) bool {
+						mu.Lock()
+						first = id
+						mu.Unlock()
+						if c.beforeOp {
+							e.f.epochIs(t, e.f.newEpoch())
+						}
+						return false
+					})
+					return true
+				}
+				mu.Lock()
+				if resumed == "" {
+					resumed = r.Header.Get("Last-Event-ID")
+				}
+				mu.Unlock()
+				if !c.beforeOp && streams.Load() == 2 {
+					e.f.epochIs(t, e.f.newEpoch())
+				}
+				return false
+			}, nil)
+			r := e.watch(op, "--timeout", "10s")
+			e.f.want(r, 5, clearedLine, "restored or entered recovery mode; the operation's events are shown again from the start",
+				"Still sending after --timeout 10s.\n", "Follow it again with: bronzewardctl operation watch '"+op+"'\n")
+			_, types := e.served(t, op)
 			mu.Lock()
-			if resumed == "" {
-				resumed = r.Header.Get("Last-Event-ID")
+			wantResumed := first // the reader sent the stale ID, or none when the operation read showed the new epoch
+			if c.beforeOp {
+				wantResumed = ""
+			}
+			if got := shown(r.out); first == "" || streams.Load() < 2 || resumed != wantResumed || len(got) != 2 || len(got[0]) != 1 || !slices.Equal(got[1], types) {
+				t.Errorf("%s: cut after %q, reopened with Last-Event-ID %q (want %q); shown %q, want one event, a clear, then %q", c.name, first, resumed, wantResumed, got, types)
 			}
 			mu.Unlock()
-			return false
-		}, nil)
-		r := e.watch(op, "--timeout", "10s")
-		e.f.want(r, 5, clearedLine, "restored or entered recovery mode; the operation's events are shown again from the start",
-			"Still sending after --timeout 10s.\n", "Follow it again with: bronzewardctl operation watch '"+op+"'\n")
-		_, types := e.served(t, op)
-		mu.Lock()
-		defer mu.Unlock()
-		if got := shown(r.out); first == "" || resumed != first || len(got) != 2 || len(got[0]) != 1 || !slices.Equal(got[1], types) {
-			t.Errorf("cut after %q, reopened with Last-Event-ID %q; shown %q, want one event, a clear, then %q", first, resumed, got, types)
 		}
 	},
 
