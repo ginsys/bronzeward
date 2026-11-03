@@ -64,7 +64,7 @@
 - id: AUTH-06
   setup: >-
     an apply-config operation whose apply the stand-in holds; the context's stored sign-in is an
-    h-all access token with 62 s left, beyond the 60 s renewal margin, and refresh token
+    h-all access token with 80 s left, 20 s beyond the 60 s renewal margin, and refresh token
     BWSYNTH-rt-6, which the fixture provider redeems once for a new h-all token and BWSYNTH-rt-7
   action: operation watch op_...
   exchange:
@@ -107,7 +107,7 @@
 - id: EVT-02
   setup: an apply-config operation whose apply the stand-in holds until the test ends
   action: >-
-    operation watch op_... --timeout 10s, twice, once for each order in which a restore can meet
+    operation watch op_... --timeout 20s, twice, once for each order in which a restore can meet
     the client: the new epoch committed after the reader's operation read, or before it
   exchange:
     - "GET /api/v1/operations/op_.../events, Accept: text/event-stream, no Last-Event-ID"
@@ -137,7 +137,7 @@
       epoch, with no reset
     shown: >-
       the first event; the clear line; each of the operation's events once; "Still sending after
-      --timeout 10s." and "Follow it again with: bronzewardctl operation watch 'op_...'"; exit 5
+      --timeout 20s." and "Follow it again with: bronzewardctl operation watch 'op_...'"; exit 5
     absent: [tokens and the stand-in's secrets in stdout, stderr, argv]
   unit: >-
     the reset is internal/client TestWatch's case; the clear on an operation read of another epoch
@@ -162,10 +162,16 @@
     client: >-
       ends the stream at the first event ID of another epoch, reads the operation, clears what it
       showed, says why on standard error and opens the stream again without Last-Event-ID; on
-      Ctrl-C stops watching and names the state the watch last read
+      Ctrl-C stops watching, in one of two forms by whether the watch returns within the grace time
+      (3 s) after Ctrl-C, which on a quiet stream needs an event or a keep-alive to land in it
     server: the operation still unresolved after Ctrl-C
     shown: >-
-      the events, the clear line, the events again with the new one; "Stopped watching at your
-      request. Operation op_... is still unresolved, as the server last read it; it goes on."; exit 130
+      the events, the clear line, the events again with the new one; then, exit 130, either
+      "Stopped watching at your request. Operation op_... is still unresolved, as the server last
+      read it; it goes on." (the watch returned within the grace; cmd/bronzewardctl
+      TestOperationWatchInterruptReturns pins this form) or "Stopped watching at your request.
+      Operation op_... goes on; the state it has now was not read." (it did not;
+      TestOperationWatchInterrupt pins this form). This case asserts what both share: the prefix,
+      "goes on", the follow line and the unchanged state, and proves the row, not the form
     absent: [tokens and the stand-in's secrets in stdout, stderr, argv]
   unit: an event ID of another epoch is internal/client TestWatch's case

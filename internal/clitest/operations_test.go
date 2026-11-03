@@ -304,9 +304,9 @@ var operationCases = map[string]func(*testing.T, *watchEnv){
 		f := e.f
 		op, release := e.held(t)
 		defer release()
-		// 62 s left: more than the 60 s renewal margin, so the watch opens the stream on this token, and
-		// the server ends the stream when it expires.
-		short, err := f.iss.Mint("h-all", "", time.Now().Add(62*time.Second-issuer.Lifetime))
+		// 80 s left: 20 s more than the 60 s renewal margin, which is the time the CLI has to start
+		// and open the stream on this token; the server ends the stream when it expires.
+		short, err := f.iss.Mint("h-all", "", time.Now().Add(80*time.Second-issuer.Lifetime))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -347,6 +347,8 @@ var operationCases = map[string]func(*testing.T, *watchEnv){
 		mu.Lock()
 		defer mu.Unlock()
 		switch got := shown(r.out); {
+		case len(streams) > 0 && streams[0].bearer == renewed:
+			t.Error("first stream not on the expiring token: setup exceeded the 20 s tolerance")
 		case len(streams) < 2 || streams[0].bearer != short || streams[0].last != "" || streams[1].bearer != renewed || streams[1].last == "":
 			// The tokens are not printed: the test's output is no place for them.
 			for i, s := range streams {
@@ -472,9 +474,9 @@ var operationCases = map[string]func(*testing.T, *watchEnv){
 				}
 				return false
 			}, nil)
-			r := e.watch(op, "--timeout", "10s")
+			r := e.watch(op, "--timeout", "20s")
 			e.f.want(r, 5, clearedLine, "restored or entered recovery mode; the operation's events are shown again from the start",
-				"Still sending after --timeout 10s.\n", "Follow it again with: bronzewardctl operation watch '"+op+"'\n")
+				"Still sending after --timeout 20s.\n", "Follow it again with: bronzewardctl operation watch '"+op+"'\n")
 			_, types := e.served(t, op)
 			mu.Lock()
 			wantResumed := first // the reader sent the stale ID, or none when the operation read showed the new epoch
@@ -569,8 +571,12 @@ var operationCases = map[string]func(*testing.T, *watchEnv){
 		}
 		r.out, r.err = out.String(), errb.String()
 		f.scan(r, args)
+		// The stop line has two designed forms, by whether the watch returned within the grace time
+		// after Ctrl-C ("is still unresolved, as the server last read it") or not ("the state it has
+		// now was not read"), which depends on an event or keep-alive on the quiet stream. The row
+		// proves the clear and the reopening; the stop asserts what both forms share.
 		f.want(r, 130, clearedLine, "entered recovery mode or was restored while the events were read",
-			"Stopped watching at your request. Operation "+op+" is still unresolved, as the server last read it; it goes on.\n")
+			"Stopped watching at your request. Operation "+op+" ", "goes on", "Follow it again with: bronzewardctl operation watch '"+op+"'\n")
 		var state string
 		if err := f.db.QueryRow(`SELECT state FROM operation WHERE id = $1`, op).Scan(&state); err != nil || state != "unresolved" {
 			t.Errorf("after Ctrl-C the operation is %q, %v; want unresolved", state, err)

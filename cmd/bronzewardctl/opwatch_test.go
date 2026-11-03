@@ -56,6 +56,38 @@ func TestOperationWatchInterrupt(t *testing.T) {
 	}
 }
 
+// TestOperationWatchInterruptReturns: the first Ctrl-C on a watch whose stream ends within the grace
+// time returns the operation the watch last read, so the stop line names its state and exits 130.
+func TestOperationWatchInterruptReturns(t *testing.T) {
+	f := &opFake{body: fmt.Sprintf(opJSON, "apply-config", "running", "null", "null", "[]"), hang: make(chan struct{})}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	grace := interruptGrace
+	interruptGrace = 5 * time.Second
+	defer func() { interruptGrace = grace }()
+	go func() {
+		for { // the stream request comes after the signal handler is set
+			f.mu.Lock()
+			n := f.streams
+			f.mu.Unlock()
+			if n > 0 {
+				_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
+				time.Sleep(200 * time.Millisecond)
+				close(f.hang) // the stream ends: the watch reads the operation and stops
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+	code, out, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH")
+	follow := "Follow it again with: bronzewardctl operation watch 'op_BWSYNTH'\n"
+	if code != 130 || !strings.HasSuffix(out, "Stopped watching at your request. Operation op_BWSYNTH is still running, as the server last read it; it goes on.\n"+follow) ||
+		!strings.Contains(errOut, "stopped watching operation op_BWSYNTH, which is still running") {
+		t.Errorf("exit %d, stdout\n%s\nstderr %q", code, out, errOut)
+	}
+}
+
 // TestOperationWatchEscapes: the kind, the state, the event types, their data and the failure cause
 // are the server's text; none reaches the terminal with a control character as itself, in an event
 // line or the outcome (client-contracts.md §6 item 8).
