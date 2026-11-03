@@ -255,6 +255,10 @@ func report(err error, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "bronzewardctl: %s\n\n%s\n", client.Shown(err), usage)
 		return 2
 	}
+	// operation watch printed its stop line and the line to follow it again; nothing follows them.
+	if errors.As(err, &stopped) {
+		return 130
+	}
 	// The sink of every error: client.Shown escapes all of it but the line breaks of the client's own
 	// multi-line errors, so no error from outside can start a line of its own.
 	fmt.Fprintln(stderr, "bronzewardctl:", client.Shown(err))
@@ -265,8 +269,6 @@ func report(err error, stdout, stderr io.Writer) int {
 		return 4
 	case errors.As(err, &waiting):
 		return 5
-	case errors.As(err, &stopped):
-		return 130
 	case errors.As(err, &refused), errors.As(err, &declined):
 		return 2
 	}
