@@ -49,8 +49,8 @@ count and sha256.
 | S1 explicit key | The explicit-key sweep of issue 578: `?` keys that hold a quoted scalar with a `#`, in block and flow context, on one line and on several | 19960 |
 | S2 context | The context sweep of issue 578: lines before a probe line, such as block scalars that hold a flow opener, then the probe at several indentations | 3000 |
 | S3 review | Documents written by hand during reviews and probes, including quoted text that holds a tag | 70 |
-| S4 families | The families sweep of issue 578: block scalar headers (indentation and chomping indicators, comments) and the lines around them | 14144 |
-| S5 cases | The curated cases: one file, with the result go-yaml gives for each (`want: null` means go-yaml must refuse the document). It holds the documents of issues 560, 578, 592, 593 and 594 and of the hosted review of pull request 599 | 34 |
+| S4 families | The families sweep of issue 578: block scalar headers (indentation and chomping indicators, comments, some with a digit) and the lines around them | 20624 |
+| S5 cases | The curated cases: one file, with the result go-yaml gives for each (`want: null` means go-yaml must refuse the document). It holds the documents of issues 560, 578, 592, 593 and 594, of the hosted review of pull request 599 and of the block scalar header (issue 598) | 39 |
 | S6 random | Held out. Random documents from a pool of line fragments, with a fixed seed (mulberry32, seed 598). No candidate was tuned on it | 99983 |
 | S7 colon flow | The colon-flow sweep from a review of issue 578: a flow collection opened right after a value colon, then a quote with a `#` and a reference | 21672 |
 

@@ -93,6 +93,13 @@ faults of the first C1, both fixed and both now in S5: a second byte order mark 
 the stream, and a `!bwref` in block scalar text after a quote and a `#` (162 documents that main
 gets right).
 
+The hosted review of this pull request found a third fault, in C1c: a digit in a block scalar
+header comment was read as an indentation indicator. The earlier result of `lost` = 0 held only
+because no set had a digit in a header comment. The fix reads the indicators only where go-yaml
+does (below). S4 now has three header comments with a digit (20624 documents) and S5 has five cases
+for the header (39). Before the fix, C1c lost 54 documents of the new S4 and 1 of S5, all of them
+documents that main gets right. After it, `lost` and `new lost` are 0 on every set again.
+
 ## Candidates
 
 | | Idea |
@@ -130,6 +137,12 @@ The rules that are not obvious:
   offsets move by one, so `BOM---` is still a marker) and read a second as a blank. A byte order
   mark anywhere else is text: go-yaml reads `---` then a line `BOM"p # q": !bwref x/foo` as a plain
   key and lists nothing.
+- **Block scalar header.** go-yaml reads the indicators only directly after `|` or `>`: a chomping
+  sign and then one digit 1-9, or the digit and then the sign (a digit 0 is an error), then blanks
+  and an optional comment (`yaml_parser_scan_block_scalar`, `scannerc.go` lines 2204 to 2274 of
+  go.yaml.in/yaml/v3 v3.0.5). A digit in the comment is no indentation indicator. The first C1c read
+  the first digit anywhere after the indicator, so `a: | # 4` with a quote on the next line ended
+  the block early and lost a reference.
 - **Block scalar text.** The lines of a block scalar are text. C1 passes them through unmasked, C1b
   masks them whole, and C1c ignores a tag in them.
 
@@ -139,7 +152,7 @@ tell where a scalar starts and where it ends. In `c1-state.ts` the `Carry` type,
 
 ## Observed
 
-Valid documents per set: S0 2503, S1 19600, S2 1271, S3 65, S4 4050, S5 33, S6 3756, S7 8344.
+Valid documents per set: S0 2503, S1 19600, S2 1271, S3 65, S4 5904, S5 38, S6 3756, S7 8344.
 
 **Lost** (the first part of the gate). Zero for C1, C1b and C1c on every set.
 
@@ -173,7 +186,7 @@ extra, 180 of them refused; S5: 9, 1 refused). `new lost` is 0 for C1, C1b and C
 - **Why plain C1 has new extras.** A `!bwref` in a block scalar's text after a quote and a `#`
   (`a: |` then a line `  b: ?"z # !bwref ghost`) is text, and the server refuses the document for
   it. Main hid the name only because it read that `#` as a comment. C1 passes block text
-  through unmasked, so it shows the name. C1b masks block text and clears 291 of the 294 new
+  through unmasked, so it shows the name. C1b masks block text and clears 293 of the 296 new
   extras. The 3 left (S3 2, S6 1) are a `!bwref` inside a quoted scalar in a flow collection, for
   example `a: [? "x # !bwref ghost , y"]`, where main again reads the `#` in the quote as a
   comment. C1c clears them because the name is not a node property.
@@ -182,11 +195,11 @@ extra, 180 of them refused; S5: 9, 1 refused). `new lost` is 0 for C1, C1b and C
   starts with `- `. All are in documents the server refuses. Recording that extent in the masker
   would close them; the gate does not need it.
 - **C2 and C3 fail for a reason of principle.** The `yaml` package refuses many documents go-yaml
-  accepts. In the sets it refuses 2832 of the 19600 valid S1 documents, 1192 of S7, 2060 of S4 and
+  accepts. In the sets it refuses 2832 of the 19600 valid S1 documents, 1192 of S7, 3090 of S4 and
   120 of S0 (`evidence/yaml-errors.txt` lists counts per error class, with the shortest examples).
   The classes: indentation of a flow collection in a block collection (2344 streams), a missing
-  character (2237 streams; a mixed class that holds comments not separated by a blank, missing
-  commas, missing closing delimiters and a missing quote), an implicit key spanning lines (1213), a
+  character (2649 streams; a mixed class that holds comments not separated by a blank, missing
+  commas, missing closing delimiters and a missing quote), an implicit key spanning lines (1817), a
   block entry in flow context (582), and a tag followed by a flow indicator without a blank. A fallback
   to line-by-line reading therefore falls back exactly where the lines are hardest. C3+C1 would
   meet the gate on S0 to S4, S6 and S7, but it loses the 2 documents of S5 with two leading
@@ -266,7 +279,7 @@ What the implementation changes in `web/src`:
    They pass on main and on C1c.
 
 The floor for the implementation is: all of `web/src/position.test.ts` (with the one change), the
-three tests above, the tests added by the fixes for #593 and #599, and the 34 cases of S5. All 33
+three tests above, the tests added by the fixes for #593 and #599, and the 39 cases of S5. All 38
 valid cases of S5 come out equal to go-yaml for C1c.
 
 ## Limitations

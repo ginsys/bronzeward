@@ -11,7 +11,8 @@ for (const h of ["|", ">"])
     for (const ch of ["", "-", "+"])
       for (const order of ind !== "" && ch !== "" ? [0, 1] : [0]) {
         const mods = order === 0 ? ind + ch : ch + ind;
-        for (const cm of ["", " # c", "# c", " # c: [?\"x", "# c: [x", " # c: [x"])
+        // The last three comments hold a digit: it is no indentation indicator (ginsys/bronzeward#601).
+        for (const cm of ["", " # c", "# c", " # c: [?\"x", "# c: [x", " # c: [x", " # 4", "# 2", " # c 1-"])
           for (const place of ["inline", "own", "own0"])
             for (const body of ["  text\n", "    text\n  [x\n", "  [x\n", "  {x\n", '  ?"y\n', "  p: [x\n", "    first\n  b: [x\n", "[x\n", "{x\n", ""]) {
               const head = place === "inline" ? `a: ${h}${mods}${cm}\n` : place === "own" ? `a:\n  ${h}${mods}${cm}\n` : `a:\n${h}${mods}${cm}\n`;

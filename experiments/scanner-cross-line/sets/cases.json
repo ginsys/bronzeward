@@ -278,5 +278,40 @@
   "doc": "a: |\n  b: ?\"z # !bwref ghost\nc: !bwref x/end\n",
   "want": ["x/end"],
   "note": "block scalar text is text: go-yaml lists no name from it, and the server refuses the document for it"
+ },
+ {
+  "name": "digit-in-header-comment",
+  "issue": "598",
+  "doc": "a: | # 4\n  \"y # z\nb: !bwref x/foo\n",
+  "want": ["x/foo"],
+  "note": "a digit in the header comment is no indentation indicator: the block ends at b, so the open quote is block text and carries over nothing"
+ },
+ {
+  "name": "header-comment-no-digit",
+  "issue": "598",
+  "doc": "a: | # x\n  \"y # z\nb: !bwref x/foo\n",
+  "want": ["x/foo"],
+  "note": "control for the digit-in-header-comment case: the same document with a letter in the comment"
+ },
+ {
+  "name": "header-digit-and-comment",
+  "issue": "598",
+  "doc": "a: |4 # x\n      \"y # z\nb: !bwref x/foo\n",
+  "want": ["x/foo"],
+  "note": "control: a real indentation indicator, then a comment; the text is indented 6, the block ends at b"
+ },
+ {
+  "name": "header-digit-then-chomp",
+  "issue": "598",
+  "doc": "a: |2-\n  \"y # z\nb: !bwref x/foo\n",
+  "want": ["x/foo"],
+  "note": "the indentation indicator before the chomping sign (scannerc.go 2230-2252)"
+ },
+ {
+  "name": "header-chomp-then-digit",
+  "issue": "598",
+  "doc": "a: |-2\n  \"y # z\nb: !bwref x/foo\n",
+  "want": ["x/foo"],
+  "note": "the chomping sign before the indentation indicator (scannerc.go 2204-2228)"
  }
 ]
