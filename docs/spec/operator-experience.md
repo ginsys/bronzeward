@@ -682,8 +682,8 @@ Completed at 2026-11-01 10:06:40 CET (server): applied rel_h7rt…2bd, confirmed
 ```
 
 Each event line names the event's type and what its data holds. An event of a type this client
-does not know prints its data as JSON. Text that the server chose is quoted when it holds a control
-character. An event carries no time on the stream, so its line shows when this client received it, marked
+does not know prints its data as JSON. Text that the server chose is escaped as [client-contracts.md §6 item 8](client-contracts.md#6-tls-trust)
+requires. An event carries no time on the stream, so its line shows when this client received it, marked
 `received`, whether the stream or the JSON event pages delivered it. After a terminal state the
 watch reads the last event from the JSON event pages once more, and the completion line shows that
 event's server time. If the installation was restored meanwhile, the last event is of another epoch
