@@ -94,7 +94,7 @@ func (e *env) operationWatch(args []string) (err error) {
 	if err != nil {
 		return err
 	}
-	out.show(fmt.Sprintf("%s  %s", o.Kind, subject(o.Subject)))
+	out.show(sf("%s  %s", o.Kind, subject(o.Subject)))
 	out.show("Times marked \"received\" are this client's clock when the event arrived; the completion line shows the server's time.")
 
 	var ended atomic.Int32 // 0 while it runs, then endInterrupt or endTimeout
@@ -143,11 +143,11 @@ func (e *env) operationWatch(args []string) (err error) {
 			interrupt()
 		}
 	}
-	follow := "Follow it again with: bronzewardctl operation watch " + client.ShellWord(id)
+	follow := sf("Follow it again with: bronzewardctl operation watch %s", client.ShellWord(id))
 	if gaveUp {
 		abandoned = true
-		out.finish(fmt.Sprintf("Stopped watching at your request. Operation %s goes on; the state it has now was not read.", id), follow)
-		return interrupted{fmt.Errorf("stopped watching operation %s", id)}
+		out.finish(sf("Stopped watching at your request. Operation %s goes on; the state it has now was not read.", id), follow)
+		return interrupted{ef("stopped watching operation %s", id)}
 	}
 	if res.err != nil {
 		return res.err
@@ -163,10 +163,10 @@ func (e *env) operationWatch(args []string) (err error) {
 	}
 	if !client.Terminal(o.State) {
 		if ended.Load() == endInterrupt {
-			out.finish(fmt.Sprintf("Stopped watching at your request. Operation %s is still %s, as the server last read it; it goes on.", id, o.State), follow)
-			return interrupted{fmt.Errorf("stopped watching operation %s, which is still %s", id, o.State)}
+			out.finish(sf("Stopped watching at your request. Operation %s is still %s, as the server last read it; it goes on.", id, o.State), follow)
+			return interrupted{ef("stopped watching operation %s, which is still %s", id, o.State)}
 		}
-		lines = append([]string{fmt.Sprintf("Still %s after --timeout %s.", o.State, timeout)}, lines...)
+		lines = append([]string{sf("Still %s after --timeout %s.", o.State, timeout)}, lines...)
 		lines = append(lines, follow)
 	}
 	out.finish(lines...)
@@ -181,9 +181,9 @@ func (e *env) operationWatch(args []string) (err error) {
 	}
 	switch {
 	case !client.Terminal(o.State):
-		return notTerminal{fmt.Errorf("operation %s is still %s after --timeout %s", id, o.State, timeout)}
+		return notTerminal{ef("operation %s is still %s after --timeout %s", id, o.State, timeout)}
 	case !ok:
-		return operationFailed{fmt.Errorf("operation %s ended %s", id, o.State)}
+		return operationFailed{ef("operation %s ended %s", id, o.State)}
 	}
 	return nil
 }

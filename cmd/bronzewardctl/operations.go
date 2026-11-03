@@ -3,11 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/ginsys/bronzeward/internal/client"
 	"github.com/ginsys/bronzeward/internal/client/apitypes"
@@ -45,14 +42,14 @@ func outcome(o *apitypes.OperationBody, last *lastEvent) ([]string, bool) {
 		_ = remarshal(o.Result, &r)
 		switch {
 		case r.AppliedRelease != "":
-			return []string{fmt.Sprintf("Completed%s: applied %s, confirmed by observation %s.", stamp, r.AppliedRelease, or(&r.Observation, "none"))}, true
+			return []string{sf("Completed%s: applied %s, confirmed by observation %s.", stamp, r.AppliedRelease, or(&r.Observation, "none"))}, true
 		case r.AdoptionRecord != "":
-			return []string{fmt.Sprintf("Completed%s: adopted; the adoption of plan %s records Applied from the node's own bytes. Nothing was sent to the machine.",
+			return []string{sf("Completed%s: adopted; the adoption of plan %s records Applied from the node's own bytes. Nothing was sent to the machine.",
 				stamp, plain(r.AdoptionRecord))}, true
 		}
-		return []string{fmt.Sprintf("Completed%s, with no applied release recorded: %s", stamp, compact(o.Result))}, true
+		return []string{sf("Completed%s, with no applied release recorded: %s", stamp, compact(o.Result))}, true
 	case "succeeded":
-		return []string{fmt.Sprintf("Succeeded%s: %s", stamp, compact(o.Result))}, true
+		return []string{sf("Succeeded%s: %s", stamp, compact(o.Result))}, true
 	case "failed", "rejected", "cancelled":
 		var e struct {
 			Cause    string `json:"cause"`
@@ -75,27 +72,27 @@ func outcome(o *apitypes.OperationBody, last *lastEvent) ([]string, bool) {
 		}
 		attempts := ""
 		if e.Attempts != nil {
-			attempts = fmt.Sprintf(", after %d attempt%s", *e.Attempts, map[bool]string{false: "s"}[*e.Attempts == 1])
+			attempts = sf(", after %d attempt%s", *e.Attempts, map[bool]string{false: "s"}[*e.Attempts == 1])
 		}
-		lines := []string{fmt.Sprintf("%s%s: %s%s.", state, stamp, cause, attempts)}
+		lines := []string{sf("%s%s: %s%s.", state, stamp, cause, attempts)}
 		return append(lines, endNextStep(o.State, o.Id, plan, machine)), false
 	case "unresolved":
 		return []string{unresolvedGuidance(o.Attempts)}, false
 	}
-	return []string{fmt.Sprintf("Operation %s is %s.", o.Id, o.State)}, false
+	return []string{sf("Operation %s is %s.", o.Id, o.State)}, false
 }
 
 // endNextStep is the next safe step after an operation that ended without success.
 func endNextStep(state, op, plan, machine string) string {
 	switch {
 	case plan == "":
-		return "Read it: bronzewardctl operation show " + client.ShellWord(op)
+		return sf("Read it: bronzewardctl operation show %s", client.ShellWord(op))
 	case state == "rejected":
-		return "The node refused the configuration as invalid, so it applied nothing. Review the plan's release before a new plan: bronzewardctl plan show " + client.ShellWord(plan)
+		return sf("The node refused the configuration as invalid, so it applied nothing. Review the plan's release before a new plan: bronzewardctl plan show %s", client.ShellWord(plan))
 	case state == "cancelled":
-		return "Nothing more is sent for this plan. The plan names the command for a new one: bronzewardctl plan show " + client.ShellWord(plan)
+		return sf("Nothing more is sent for this plan. The plan names the command for a new one: bronzewardctl plan show %s", client.ShellWord(plan))
 	}
-	return "Nothing more is sent for this plan. Read what the machine runs before a new plan: bronzewardctl machine show " + client.ShellWord(machine)
+	return sf("Nothing more is sent for this plan. Read what the machine runs before a new plan: bronzewardctl machine show %s", client.ShellWord(machine))
 }
 
 // remarshal decodes v, an API union held as a generated type, into out.
@@ -107,22 +104,18 @@ func remarshal(v, out any) error {
 	return json.Unmarshal(b, out)
 }
 
-// eventLine is one event's line: the time this client received it (now), marked as such, its type and what its data says. An unknown type prints its data raw.
+// eventLine is one event's line: the time this client received it (now), marked as such, its type
+// and what its data says. An unknown type prints its data raw.
 func eventLine(ev client.Event, now time.Time) string {
 	stamp := "received " + now.Format("15:04:05")
 	var d map[string]any
 	_ = json.Unmarshal(ev.Data, &d)
-	return fmt.Sprintf("%s  %-20s  %s", stamp, plain(ev.Type), eventText(ev.Type, d, ev.Data))
+	return sf("%s  %-20s  %s", stamp, plain(ev.Type), eventText(ev.Type, d, ev.Data))
 }
 
-// plain is text the server chose, quoted as Go does when it holds a control character or is not
-// UTF-8, so none reaches the terminal as itself (client-contracts.md §6 item 4).
-func plain(s string) string {
-	if utf8.ValidString(s) && !strings.ContainsFunc(s, unicode.IsControl) {
-		return s
-	}
-	return strconv.Quote(s)
-}
+// plain is text the server chose, escaped so that none reaches the terminal as itself
+// (client-contracts.md §6 item 8).
+func plain(s string) string { return client.Printable(s) }
 
 // eventText says what an event's data holds, by its type.
 func eventText(typ string, d map[string]any, raw json.RawMessage) string {
