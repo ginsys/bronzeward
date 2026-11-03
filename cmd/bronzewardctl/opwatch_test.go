@@ -48,33 +48,41 @@ func TestWatchOutGate(t *testing.T) {
 }
 
 // TestOperationWatchInterrupt: the first Ctrl-C on a watch whose stream stays silent waits for the
-// grace time, then prints the stop line and exits 130; the watch still running prints nothing more.
+// grace time, then prints the stop line and exits 130; the watch still running prints nothing more,
+// and nothing follows the follow line, on the stream the stop lines go to (standard output, or with
+// -o json standard error).
 func TestOperationWatchInterrupt(t *testing.T) {
-	f := &opFake{body: fmt.Sprintf(opJSON, "apply-config", "running", "null", "null", "[]"), hang: make(chan struct{})}
-	srv := httptest.NewServer(f)
-	defer srv.Close()
-	automationContext(t, srv.URL)
-	grace := interruptGrace
-	interruptGrace = 100 * time.Millisecond
-	defer func() { interruptGrace = grace }()
-	go func() {
-		for { // the stream request comes after the signal handler is set
-			f.mu.Lock()
-			n := f.streams
-			f.mu.Unlock()
-			if n > 0 {
-				_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
-				return
+	for _, extra := range [][]string{nil, {"-o", "json"}} {
+		f := &opFake{body: fmt.Sprintf(opJSON, "apply-config", "running", "null", "null", "[]"), hang: make(chan struct{})}
+		srv := httptest.NewServer(f)
+		automationContext(t, srv.URL)
+		grace := interruptGrace
+		interruptGrace = 100 * time.Millisecond
+		go func() {
+			for { // the stream request comes after the signal handler is set
+				f.mu.Lock()
+				n := f.streams
+				f.mu.Unlock()
+				if n > 0 {
+					_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
+					return
+				}
+				time.Sleep(10 * time.Millisecond)
 			}
-			time.Sleep(10 * time.Millisecond)
+		}()
+		code, out, errOut := runCtl(t, append([]string{"operation", "watch", "op_BWSYNTH"}, extra...)...)
+		close(f.hang)
+		srv.Close()
+		interruptGrace = grace
+		stop := "Stopped watching at your request. Operation op_BWSYNTH goes on; the state it has now was not read.\n"
+		follow := "Follow it again with: bronzewardctl operation watch 'op_BWSYNTH'\n"
+		stopLines, other := out, errOut // the stream the stop lines go to, and the other
+		if extra != nil {
+			stopLines, other = errOut, out
 		}
-	}()
-	code, out, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH")
-	close(f.hang)
-	follow := "Follow it again with: bronzewardctl operation watch 'op_BWSYNTH'\n"
-	if code != 130 || !strings.HasSuffix(out, "Stopped watching at your request. Operation op_BWSYNTH goes on; the state it has now was not read.\n"+follow) ||
-		!strings.Contains(errOut, "stopped watching operation op_BWSYNTH") {
-		t.Errorf("exit %d, stdout\n%s\nstderr %q", code, out, errOut)
+		if code != 130 || !strings.HasSuffix(stopLines, stop+follow) || strings.Contains(other, "stopped watching") {
+			t.Errorf("%v: exit %d, stdout\n%s\nstderr %q; want 130 and the stop lines last", extra, code, out, errOut)
+		}
 	}
 }
 
@@ -105,8 +113,8 @@ func TestOperationWatchInterruptReturns(t *testing.T) {
 	code, out, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH")
 	follow := "Follow it again with: bronzewardctl operation watch 'op_BWSYNTH'\n"
 	if code != 130 || !strings.HasSuffix(out, "Stopped watching at your request. Operation op_BWSYNTH is still running, as the server last read it; it goes on.\n"+follow) ||
-		!strings.Contains(errOut, "stopped watching operation op_BWSYNTH, which is still running") {
-		t.Errorf("exit %d, stdout\n%s\nstderr %q", code, out, errOut)
+		strings.Contains(errOut, "stopped watching") {
+		t.Errorf("exit %d, stdout\n%s\nstderr %q; want 130, the stop lines last and no diagnostic after them", code, out, errOut)
 	}
 }
 
@@ -114,9 +122,23 @@ func TestOperationWatchInterruptReturns(t *testing.T) {
 // time gets the operation's own answer, not exit 130: what the watch read is the outcome, so it exits 0
 // for a completed operation and prints no stop line.
 func TestOperationWatchInterruptTerminal(t *testing.T) {
+	for _, c := range []struct {
+		name, state, result, failure, want string
+		code                               int
+	}{
+		{"completed", "completed", `{"appliedRelease":"rel_BWSYNTH","observation":"obs_c"}`, "null", "applied rel_BWSYNTH", 0},
+		{"failed", "failed", "null", `{"cause":"verification-mismatch","attempts":2}`, "verification-mismatch", 4},
+	} {
+		t.Run(c.name, func(t *testing.T) { interruptTerminal(t, c.state, c.result, c.failure, c.want, c.code) })
+	}
+}
+
+// interruptTerminal is TestOperationWatchInterruptTerminal's run: the operation ends with state, result
+// and failure, and the command prints want and exits with code.
+func interruptTerminal(t *testing.T, state, result, failure, want string, code int) {
 	// The stream stays open and sends a keep-alive every 10 ms; the watch asks whether to stop at each
 	// one. Nothing but the Ctrl-C ends the stream, so the operation read that follows is made only
-	// after the Ctrl-C was taken, and it finds the operation completed.
+	// after the Ctrl-C was taken, and it finds the operation ended.
 	f := &opFake{body: fmt.Sprintf(opJSON, "apply-config", "running", "null", "null", "[]"), hang: make(chan struct{}), beat: 10 * time.Millisecond}
 	srv := httptest.NewServer(f)
 	defer srv.Close()
@@ -137,7 +159,7 @@ func TestOperationWatchInterruptTerminal(t *testing.T) {
 			f.mu.Lock()
 			n := f.streams
 			if n > 0 {
-				f.body = fmt.Sprintf(opJSON, "apply-config", "completed", `{"appliedRelease":"rel_BWSYNTH","observation":"obs_c"}`, "null", "[]")
+				f.body = fmt.Sprintf(opJSON, "apply-config", state, result, failure, "[]")
 			}
 			f.mu.Unlock()
 			if n > 0 {
@@ -147,12 +169,12 @@ func TestOperationWatchInterruptTerminal(t *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}()
-	code, out, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH")
+	got, out, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH")
 	if stuck.Load() {
 		t.Fatal("the stream was still open after 10 s: the Ctrl-C did not end the watch's wait")
 	}
-	if code != 0 || !strings.Contains(out, "applied rel_BWSYNTH") || strings.Contains(out, "Stopped watching") || strings.Contains(errOut, "stopped watching") {
-		t.Errorf("exit %d, stdout\n%s\nstderr %q; want 0, the outcome and no stop line", code, out, errOut)
+	if got != code || !strings.Contains(out, want) || strings.Contains(out, "Stopped watching") || strings.Contains(errOut, "stopped watching") {
+		t.Errorf("exit %d, stdout\n%s\nstderr %q; want %d, the outcome and no stop line", got, out, errOut, code)
 	}
 }
 
