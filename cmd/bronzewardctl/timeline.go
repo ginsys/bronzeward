@@ -36,7 +36,7 @@ func (e *env) machineTimeline(args []string) error {
 	path := "/machines/" + url.PathEscape(pos[0]) + "/timeline"
 	if !follow {
 		return list(e, l, path, url.Values{}, nil, "REVISION\tAT\tKIND\tENTRY", "", func(w *tabwriter.Writer, t *apitypes.TimelineEntry) {
-			fmt.Fprintf(w, "%d\t%s\t%s\t%s\n", t.Revision, when(t.At), plain(t.Kind), timelineText(t.Kind, t.Entry))
+			tf(w, "%d\t%s\t%s\t%s\n", t.Revision, when(t.At), t.Kind, timelineText(t.Kind, t.Entry))
 		})
 	}
 	if l.all || l.cursor != "" {
@@ -66,7 +66,7 @@ func (e *env) followTimeline(c *client.Client, path string, limit int, machine s
 		return c.Page(path+"?"+q.Encode(), "")
 	}
 	if e.output == "table" {
-		fmt.Fprintf(e.out, "%-8s  %-23s  %-20s  %s\n", "REVISION", "AT", "KIND", "ENTRY")
+		tf(e.out, "%-8s  %-23s  %-20s  %s\n", "REVISION", "AT", "KIND", "ENTRY")
 	}
 	newest := func() (string, error) {
 		pg, err := read("newest", "")
@@ -85,15 +85,15 @@ func (e *env) followTimeline(c *client.Client, path string, limit int, machine s
 		select {
 		case <-sig:
 			signal.Stop(sig) // a second Ctrl-C ends the client at once
-			fmt.Fprintf(e.err, "Stopped following the timeline of machine %s at your request.\n", machine)
-			return interrupted{fmt.Errorf("stopped following the timeline of machine %s", machine)}
+			tf(e.err, "Stopped following the timeline of machine %s at your request.\n", machine)
+			return interrupted{ef("stopped following the timeline of machine %s", machine)}
 		case <-time.After(followEvery):
 		}
 		for cursor := tail; ; {
 			var pg *client.Page
 			if pg, err = read("oldest", cursor); err != nil {
 				if p, ok := err.(*client.Problem); ok && p.Code() == "cursor-invalid" {
-					fmt.Fprintf(e.err, "%s: the timeline's cursor is no longer valid: the installation was restored or entered recovery mode; "+
+					tf(e.err, "%s: the timeline's cursor is no longer valid: the installation was restored or entered recovery mode; "+
 						"its newest entries are shown again\n", c.Context.Where())
 					if e.output == "table" {
 						fmt.Fprintln(e.out, "(the entries above may no longer hold; the newest are shown again)")
@@ -123,7 +123,7 @@ func (e *env) entries(c *client.Client, items []json.RawMessage) error {
 				return err
 			}
 			t := ts[0]
-			fmt.Fprintf(e.out, "%-8d  %-23s  %-20s  %s\n", t.Revision, when(t.At), plain(t.Kind), timelineText(t.Kind, t.Entry))
+			tf(e.out, "%-8d  %-23s  %-20s  %s\n", t.Revision, when(t.At), t.Kind, timelineText(t.Kind, t.Entry))
 		case "yaml":
 			fmt.Fprintln(e.out, "---")
 			fallthrough
