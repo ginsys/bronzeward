@@ -60,7 +60,11 @@ const (
 // pages. Unresolved is not terminal: the watch goes on past it. --timeout ends the watch with exit 5
 // and Ctrl-C with exit 130; neither stops the operation, which the watch names as it last read it.
 // The reader asks for the end only between its reads, so the timeout can pass by about 45 s, and the
-// first Ctrl-C waits for the reader no longer than interruptGrace.
+// first Ctrl-C waits for the reader no longer than interruptGrace. Exit 130 is only for "stopped
+// watching" an operation that is not terminal or was not read: what the reader returns within the
+// grace is reported as it is, so an operation that ended exits 0 or 4 as its own answer, and a reader
+// error keeps its own exit code. When the grace passes, the process returns at once and exits after
+// the stop line, so the abandoned reader prints nothing more in the CLI.
 func (e *env) operationWatch(args []string) (err error) {
 	timeout := 30 * time.Minute
 	pos, err := e.parse("operation watch", args, 1, func(fs *flag.FlagSet) { fs.DurationVar(&timeout, "timeout", timeout, "") })
@@ -143,6 +147,9 @@ func (e *env) operationWatch(args []string) (err error) {
 			interrupt()
 		}
 	}
+	// The reads below take no Ctrl-C: from here the default action ends the client at once, as a
+	// second Ctrl-C does, instead of a handler nobody reads swallowing it.
+	signal.Stop(sig)
 	follow := sf("Follow it again with: bronzewardctl operation watch %s", client.ShellWord(id))
 	if gaveUp {
 		abandoned = true
@@ -155,7 +162,7 @@ func (e *env) operationWatch(args []string) (err error) {
 	o = res.o
 	var last *lastEvent
 	if client.Terminal(o.State) {
-		last = readLast(c, id)
+		last = readLast(c, id, o.State)
 	}
 	lines, ok := outcome(o, last)
 	if client.Terminal(o.State) && (last == nil || last.At == nil) {
@@ -198,8 +205,10 @@ type lastEvent struct {
 
 // readLast reads the operation's last event from the JSON pages. It is nil when the pages or the
 // operation cannot be read, or when the event is not of the epoch of the operation read that follows:
-// an installation restored meanwhile has other events, so the event's time is not the operation's.
-func readLast(c *client.Client, id string) *lastEvent {
+// an installation restored meanwhile has other events, so the event's time is not the operation's. It
+// is also nil when that read shows another state than the one the watch returned (state), so the
+// outcome and the time printed together belong to one operation.
+func readLast(c *client.Client, id, state string) *lastEvent {
 	items, err := c.List("/operations/" + url.PathEscape(id) + "/events")
 	if err != nil || len(items) == 0 {
 		return nil
@@ -209,7 +218,7 @@ func readLast(c *client.Client, id string) *lastEvent {
 		return nil
 	}
 	o, epoch, err := c.OperationEpoch(id)
-	if err != nil || !client.Terminal(o.State) || epoch == "" || client.EpochOf(ev.ID) != epoch {
+	if err != nil || !client.Terminal(o.State) || o.State != state || epoch == "" || client.EpochOf(ev.ID) != epoch {
 		return nil
 	}
 	return &ev
