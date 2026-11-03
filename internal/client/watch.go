@@ -77,9 +77,18 @@ func (c *Client) Watch(op string, w Watch) (*apitypes.OperationBody, error) {
 	return o, err
 }
 
-// WatchBody is Watch that also returns the body of the operation read the result comes from, as the
-// server sent it, so a caller that prints the resource prints the one it decided the outcome from.
-func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, []byte, error) {
+// OperationRead is one read of an operation as the server answered it: the body as sent and the
+// Bronzeward-Epoch header the answer carried, which is the installation's epoch at the read, not
+// the epoch the operation was created in.
+type OperationRead struct {
+	Body  []byte
+	Epoch string
+}
+
+// WatchBody is Watch that also returns the operation read the result comes from, so a caller that
+// prints the resource prints the one it decided the outcome from, and compares the epoch of the
+// reads that follow with the one it was decided in.
+func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, OperationRead, error) {
 	if w.sleep == nil {
 		w.sleep = time.Sleep
 	}
@@ -110,13 +119,13 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, []byte,
 			opened, pages, err = c.stream(op, &last, w)
 		}
 		if err != nil {
-			return nil, nil, err
+			return nil, OperationRead{}, err
 		}
 		// The attempt's own time: an operation read that is slow does not skip the backoff.
 		took := time.Since(began)
 		o, epoch, raw, err := c.operationRaw(op)
 		if err != nil {
-			return nil, nil, err
+			return nil, OperationRead{}, err
 		}
 		if Terminal(o.State) {
 			// A terminal state settles the watch, so the drain shows the last events, Until or not.
@@ -131,12 +140,12 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, []byte,
 				again, now, againRaw, err := c.operationRaw(op)
 				switch {
 				case err != nil:
-					return nil, nil, errors.Join(derr, err)
+					return nil, OperationRead{}, errors.Join(derr, err)
 				case now == epoch && Terminal(again.State):
-					return again, againRaw, derr
+					return again, OperationRead{againRaw, now}, derr
 				}
 			} else if epoch == "" || last == "" || epochOf(last) == epoch {
-				return o, raw, nil
+				return o, OperationRead{raw, epoch}, nil
 			}
 			// The watch goes on after the delay, so a server whose events never match its operation
 			// read's epoch is not asked again without a pause.
@@ -154,10 +163,10 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, []byte,
 		}
 		if w.stop() {
 			if w.halt.err != nil {
-				return nil, nil, w.halt.err
+				return nil, OperationRead{}, w.halt.err
 			}
 			if epoch == "" || last == "" || epochOf(last) == epoch {
-				return o, raw, nil
+				return o, OperationRead{raw, epoch}, nil
 			}
 			// What Until answered rests on events of another epoch than the operation read's: they
 			// are cleared, which asks Until again, and the next stream shows the events from the start.
