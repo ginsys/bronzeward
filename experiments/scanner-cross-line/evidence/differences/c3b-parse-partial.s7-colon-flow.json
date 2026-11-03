@@ -1,0 +1,219 @@
+{
+ "counts": {
+  "inputs": 21672,
+  "valid": 8344,
+  "equal": 7152,
+  "lost": 1192,
+  "lostFit": 1192,
+  "badNameDocs": 0,
+  "extra": 0,
+  "extraUnfit": 0,
+  "newLost": 0,
+  "newExtra": 0,
+  "refusedListed": 11424,
+  "failed": 0,
+  "msPer10k": 1337
+ },
+ "rows": [
+  {
+   "kind": "lost",
+   "doc": "a: {\"k\":[], ?\"x # y\", !bwref x/foo}\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "kind": "lost",
+   "doc": "a: {\"k\":[],?\"x # y\", !bwref x/foo}\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "kind": "lost",
+   "doc": "a: [\"k\":[], ?\"x # y\", !bwref x/foo]\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "kind": "lost",
+   "doc": "a: [\"k\":[],?\"x # y\", !bwref x/foo]\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "kind": "lost",
+   "doc": "{\"k\":[], ?\"x # y\", !bwref x/foo}\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "kind": "lost",
+   "doc": "{\"k\":[],?\"x # y\", !bwref x/foo}\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "kind": "lost",
+   "doc": "[\"k\":[], ?\"x # y\", !bwref x/foo]\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "kind": "lost",
+   "doc": "[\"k\":[],?\"x # y\", !bwref x/foo]\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "kind": "lost",
+   "doc": "a: {z: 1, \"k\":[], ?\"x # y\", !bwref x/foo}\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "kind": "lost",
+   "doc": "a: {z: 1, \"k\":[],?\"x # y\", !bwref x/foo}\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "kind": "lost",
+   "doc": "a:\n  b: {\"k\":[], ?\"x # y\", !bwref x/foo}\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "kind": "lost",
+   "doc": "a:\n  b: {\"k\":[],?\"x # y\", !bwref x/foo}\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "kind": "lost",
+   "doc": "a: {\"k\":[], ?\"x # y\", r: !bwref x/foo}\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "kind": "lost",
+   "doc": "a: {\"k\":[],?\"x # y\", r: !bwref x/foo}\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "kind": "lost",
+   "doc": "a: [\"k\":[], ?\"x # y\", r: !bwref x/foo]\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "kind": "lost",
+   "doc": "a: [\"k\":[],?\"x # y\", r: !bwref x/foo]\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "kind": "lost",
+   "doc": "{\"k\":[], ?\"x # y\", r: !bwref x/foo}\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "kind": "lost",
+   "doc": "{\"k\":[],?\"x # y\", r: !bwref x/foo}\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "kind": "lost",
+   "doc": "[\"k\":[], ?\"x # y\", r: !bwref x/foo]\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "kind": "lost",
+   "doc": "[\"k\":[],?\"x # y\", r: !bwref x/foo]\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  }
+ ]
+}

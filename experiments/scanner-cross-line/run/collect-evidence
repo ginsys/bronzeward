@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Runs the experiment and writes its evidence into evidence/.
+#
+# Usage: run/collect-evidence <work dir>
+#
+# <work dir> takes the generated sets and the raw reports (bulk data, outside /tmp; the run needs a
+# few hundred MiB). evidence/ gets: table.md (every candidate over every set), differences/ (the
+# first documents each candidate gets wrong, per set), yaml-errors.txt (what the yaml package
+# refuses that go-yaml accepts), bench.txt (cost per call on a large draft) and web-tests.txt
+# (web's position tests against the C1 and C1c copies; the second run is expected to fail once, on
+# the undeclared folded block text).
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+  echo "usage: run/collect-evidence <work dir>" >&2
+  exit 2
+fi
+work=$1
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+evidence="$here/evidence"
+mkdir -p "$evidence/differences"
+
+"$here/run/all" "$work" >"$work/run-all.log"
+cp "$work/table.md" "$evidence/table.md"
+
+node "$here/yaml-errors.mjs" "$work" >"$evidence/yaml-errors.txt"
+
+(cd "$here" && node bench.mjs candidates/c0-main.mjs candidates/c1-state.ts candidates/c1c-state-nodestart.mjs candidates/c3-parse.mjs candidates/c3c1-parse-then-state.mjs) >"$evidence/bench.txt"
+
+# The reports list every document a candidate gets wrong: keep the first 20 per candidate and set.
+for r in "$work"/report/*.json; do
+  node -e '
+    const fs = require("fs");
+    const r = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    const out = { counts: r.counts, rows: r.rows.slice(0, 20) };
+    fs.writeFileSync(process.argv[2], JSON.stringify(out, null, 1) + "\n");
+  ' "$r" "$evidence/differences/$(basename "$r")"
+done
+
+{
+  echo "== C0 (c0-main.mjs) =="
+  "$here/run/web-tests" c0-main.mjs 2>&1 || true
+  echo
+  echo "== C1 (c1-state.ts) =="
+  "$here/run/web-tests" c1-state.ts 2>&1 || true
+  echo
+  echo "== C1c (c1c-full.ts) =="
+  "$here/run/web-tests" c1c-full.ts 2>&1 || true
+} >"$evidence/web-tests.txt"
+# The test runner prints absolute paths; the evidence is committed, so name the checkout instead.
+root=$(cd "$here/../.." && pwd)
+sed -i "s#$root#<checkout>#g" "$evidence/web-tests.txt"
+# The last test run ends with a blank line, which git refuses at the end of a file.
+sed -i '${/^$/d}' "$evidence/web-tests.txt"
+
+echo "evidence written to $evidence"

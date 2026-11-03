@@ -1,0 +1,29 @@
+{
+ "counts": {
+  "inputs": 70,
+  "valid": 65,
+  "equal": 64,
+  "lost": 1,
+  "lostFit": 1,
+  "badNameDocs": 0,
+  "extra": 0,
+  "extraUnfit": 0,
+  "newLost": 0,
+  "newExtra": 0,
+  "refusedListed": 4,
+  "failed": 0,
+  "msPer10k": 8271
+ },
+ "rows": [
+  {
+   "kind": "lost",
+   "doc": "a: [!t,u \"x # y\", !bwref x/foo]\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  }
+ ]
+}

@@ -1,0 +1,64 @@
+== C0 (c0-main.mjs) ==
+npm notice run npx
+npm notice run 'vitest' run --root <checkout>/experiments/scanner-cross-line/../../web src/zz-candidate-probe.test.ts src/zz-candidate-extra.test.ts
+
+ RUN  v5.0.5 <checkout>/web
+
+
+ Test Files  2 passed (2)
+      Tests  14 passed (14)
+   Start at  00:10:38
+   Duration  303ms (import 56%, tests 25%, transform 11%, worker 7%)
+
+
+== C1 (c1-state.ts) ==
+npm notice run npx
+npm notice run 'vitest' run --root <checkout>/experiments/scanner-cross-line/../../web src/zz-candidate-probe.test.ts src/zz-candidate-extra.test.ts
+
+ RUN  v5.0.5 <checkout>/web
+
+
+ Test Files  2 passed (2)
+      Tests  14 passed (14)
+   Start at  00:10:40
+   Duration  323ms (import 48%, transform 25%, tests 22%, worker 4%)
+
+
+== C1c (c1c-full.ts) ==
+npm notice run npx
+npm notice run 'vitest' run --root <checkout>/experiments/scanner-cross-line/../../web src/zz-candidate-probe.test.ts src/zz-candidate-extra.test.ts
+
+ RUN  v5.0.5 <checkout>/web
+
+ ❯ src/zz-candidate-probe.test.ts (11 tests | 1 failed) 54ms
+   ❯ the references of a declared embedded document (11)
+     × a declared embedded document's references come from its decoded text only 11ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/zz-candidate-probe.test.ts > the references of a declared embedded document > a declared embedded document's references come from its decoded text only
+AssertionError: expected [] to deeply equal [ 'x/hidden' ]
+
+- Expected
++ Received
+
+- [
+-   "x/hidden",
+- ]
++ []
+
+ ❯ src/zz-candidate-probe.test.ts:42:32
+     40|     expect(spotOfReference(folded, "x/hidden", at("doc[0]/cfg"))).toBe…
+     41|     // Undeclared, the text is scanned as it is written, as before.
+     42|     expect(references(folded)).toEqual(["x/hidden"]);
+       |                                ^
+     43|     expect(references("cfg: |\n  # note\n  a: !bwref x/lit\n", at("doc…
+     44|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 13 passed (14)
+   Start at  00:10:41
+   Duration  362ms (import 44%, transform 26%, tests 25%, worker 4%)

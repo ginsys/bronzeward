@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Runs web's own position tests (web/src/position.test.ts) and the extra tests of this experiment
+# (position-extra.test.ts) against a candidate copy of position.ts, to see which expectations the
+# candidate changes.
+#
+# Usage: run/web-tests <candidate module under candidates/, with all of position.ts's exports>
+#
+# Examples: run/web-tests c0-main.mjs, run/web-tests c1-state.ts, run/web-tests c1c-full.ts. The
+# test files are copied beside web's sources for the run, aimed at the candidate, and removed after
+# it. Needs web/node_modules (mise run web:install).
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+  echo "usage: run/web-tests <candidate file under candidates/>" >&2
+  exit 2
+fi
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+web="$here/../../web"
+probe="$web/src/zz-candidate-probe.test.ts"
+probe_extra="$web/src/zz-candidate-extra.test.ts"
+trap 'rm -f "$probe" "$probe_extra"' EXIT
+
+aim="s#\"./position.ts\"#\"../../experiments/scanner-cross-line/candidates/$1\"#"
+sed "$aim" "$web/src/position.test.ts" >"$probe"
+sed "$aim" "$here/position-extra.test.ts" >"$probe_extra"
+npm --prefix "$web" exec -- vitest run --root "$web" src/zz-candidate-probe.test.ts src/zz-candidate-extra.test.ts

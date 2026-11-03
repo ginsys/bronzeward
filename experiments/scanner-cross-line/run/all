@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# Runs the whole experiment: the sets, the go-yaml oracle over each, every candidate over each set.
+#
+# Usage: run/all <work dir> [candidate ...]
+#
+# <work dir> holds the generated sets, the oracle results and the reports (bulk data: keep it out
+# of /tmp). With no candidate named, every candidates/c*.mjs runs. It prints one line of counts per
+# candidate and set (see cmp.mjs for the meaning of the counts) and writes a table to
+# <work dir>/table.md. Needs node 24 or later, go, and web/node_modules (mise run web:install).
+set -euo pipefail
+
+if [[ $# -lt 1 ]]; then
+  echo "usage: run/all <work dir> [candidate ...]" >&2
+  exit 2
+fi
+work=$1
+shift
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+mkdir -p "$work/oracle" "$work/report"
+
+"$here/run/gen-sets" "$work/sets"
+
+(cd "$here" && go build -o "$work/oracle-bin" .)
+
+sets=(s0-indicators s1-explicit-key s2-context s3-review s4-families s5-cases s6-random s7-colon-flow)
+for s in "${sets[@]}"; do
+  "$work/oracle-bin" "$work/sets/$s.json" "$work/oracle/$s.json"
+done
+
+if [[ $# -gt 0 ]]; then
+  candidates=("$@")
+else
+  candidates=()
+  for f in "$here"/candidates/c*.mjs "$here"/candidates/c*.ts; do
+    base=$(basename "$f")
+    candidates+=("${base%.*}")
+  done
+fi
+
+# The file of a candidate: candidates/<name>.mjs or candidates/<name>.ts.
+candidate_file() {
+  local f
+  for f in "$here/candidates/$1.mjs" "$here/candidates/$1.ts"; do
+    if [[ -f $f ]]; then
+      echo "$f"
+      return 0
+    fi
+  done
+  echo "no candidate file for $1" >&2
+  return 1
+}
+
+table="$work/table.md"
+printf '| candidate | set | inputs | valid | equal | lost | lost, server-fit | bad-name docs | extra | extra, server-refused | new lost vs main | new extra vs main | refused-listed | failed | ms per 10k |\n' >"$table"
+printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n' >>"$table"
+for c in "${candidates[@]}"; do
+  for s in "${sets[@]}"; do
+    counts=$(node "$here/cmp.mjs" "$work/sets/$s.json" "$work/oracle/$s.json" "$(candidate_file "$c")" "$work/report/$c.$s.json")
+    echo "$c $s $counts"
+    # shellcheck disable=SC2016 # the template string belongs to node, not to the shell
+    node -e '
+      const [c, s, json] = process.argv.slice(1);
+      const k = JSON.parse(json);
+      console.log(`| ${c} | ${s} | ${k.inputs} | ${k.valid} | ${k.equal} | ${k.lost} | ${k.lostFit} | ${k.badNameDocs} | ${k.extra} | ${k.extraUnfit} | ${k.newLost} | ${k.newExtra} | ${k.refusedListed} | ${k.failed} | ${k.msPer10k} |`);
+    ' "$c" "$s" "$counts" >>"$table"
+  done
+done
+echo "table: $table"
