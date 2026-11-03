@@ -38,6 +38,29 @@ func (o *watchOut) show(line string) {
 	}
 }
 
+// gate wraps a writer the watch's client writes to (its notices, its -v output), so that once finish
+// ran it prints nothing either.
+func (o *watchOut) gate(w io.Writer) io.Writer {
+	if w == nil {
+		return nil
+	}
+	return gated{o, w}
+}
+
+type gated struct {
+	o *watchOut
+	w io.Writer
+}
+
+func (g gated) Write(p []byte) (int, error) {
+	g.o.mu.Lock()
+	defer g.o.mu.Unlock()
+	if g.o.stopped {
+		return len(p), nil
+	}
+	return g.w.Write(p)
+}
+
 func (o *watchOut) finish(lines ...string) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -80,7 +103,7 @@ func (e *env) operationWatch(args []string) (err error) {
 		w = e.err
 	}
 	out := &watchOut{w: w}
-	c, err := e.open()
+	c, err := e.openTo(out.gate(e.err), out.gate(e.verboseOut()))
 	if err != nil {
 		return err
 	}

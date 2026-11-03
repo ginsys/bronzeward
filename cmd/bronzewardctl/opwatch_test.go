@@ -30,6 +30,23 @@ func TestWatchOutAfterFinish(t *testing.T) {
 	}
 }
 
+// TestWatchOutGate: what the watch's client writes (notices, -v output) goes through the same stop
+// barrier, so it prints nothing after the stop line; a nil writer stays nil.
+func TestWatchOutGate(t *testing.T) {
+	var b, side strings.Builder
+	out := &watchOut{w: &b}
+	g := out.gate(&side)
+	fmt.Fprint(g, "notice before\n")
+	out.finish("stopped")
+	fmt.Fprint(g, "notice after\n")
+	if got, want := side.String(), "notice before\n"; got != want {
+		t.Errorf("client wrote %q, want %q", got, want)
+	}
+	if out.gate(nil) != nil {
+		t.Error("gate(nil) is not nil")
+	}
+}
+
 // TestOperationWatchInterrupt: the first Ctrl-C on a watch whose stream stays silent waits for the
 // grace time, then prints the stop line and exits 130; the watch still running prints nothing more.
 func TestOperationWatchInterrupt(t *testing.T) {

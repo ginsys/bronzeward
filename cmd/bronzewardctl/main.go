@@ -333,12 +333,16 @@ func flagError(err error) error {
 }
 
 // open selects the context and reads its token (client-contracts.md §5 item 1, §9.4).
-func (e *env) open() (*client.Client, error) {
+func (e *env) open() (*client.Client, error) { return e.openTo(e.err, e.verboseOut()) }
+
+// openTo is open with the writers of the client's notices and -v output given, for a command that
+// must stop them (operation watch).
+func (e *env) openTo(notices, verbose io.Writer) (*client.Client, error) {
 	x, err := e.selected()
 	if err != nil {
 		return nil, err
 	}
-	return client.Open(x, client.TokenInput{NoInput: e.noInput, File: e.tokenFile, Stdin: e.tokenStdin}, e.err, e.verboseOut())
+	return client.Open(x, client.TokenInput{NoInput: e.noInput, File: e.tokenFile, Stdin: e.tokenStdin}, notices, verbose)
 }
 
 // selected is the context §5 item 1 selects.
