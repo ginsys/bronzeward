@@ -230,8 +230,8 @@ Implement C1c. It meets the gate on every set, and a cross-check on independent 
 found no regression against main. It costs the same as main.
 
 **Decided by the lead, reversible by the owner: C1c, not C1b.** The options were C1c (no new lost
-or extra on any set) and C1b (3 new extras, all in documents the server refuses). Both blank the
-text of a block scalar, so both change the one assertion below: for the undeclared folded text,
+or extra on any set) and C1b (3 new extras, all in documents the server refuses). Both leave a
+reference in block-scalar text unlisted, so both change the one assertion below: for the undeclared folded text,
 C0 lists `x/hidden` and C1b and C1c list nothing. The reason for the change: the server refuses
 the reserved text `!bwref` in any string
 ([compilation §5.5](../../spec/compilation.md#55-reserved-text)), so a `!bwref` inside undeclared
