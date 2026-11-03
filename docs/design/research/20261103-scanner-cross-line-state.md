@@ -152,8 +152,10 @@ Valid documents per set: S0 2503, S1 19600, S2 1271, S3 65, S4 4050, S5 33, S6 3
 | C3b | 0 | **1488** | **53** | **1** | 0 | **4** | 0 | **1192** |
 | C3+C1 | 0 | 0 | 0 | 0 | 0 | **2** | 0 | 0 |
 
-**Extra** names, as *documents with an extra* (of which *new against main*). All are in documents
-the server refuses. `new lost` is 0 for C1, C1b and C1c on every set.
+**Extra** names, as *documents with an extra* (of which *new against main*). For C1, C1b and C1c,
+every extra is in a document the server refuses. C0 is different: some of its extras are in
+documents the server accepts, so they are false hints on a good draft (S2: 342 documents with an
+extra, 180 of them refused; S5: 9, 1 refused). `new lost` is 0 for C1, C1b and C1c on every set.
 
 | | S0 | S1 | S2 | S3 | S4 | S5 | S6 | S7 |
 |---|---|---|---|---|---|---|---|---|
@@ -182,9 +184,10 @@ the server refuses. `new lost` is 0 for C1, C1b and C1c on every set.
 - **C2 and C3 fail for a reason of principle.** The `yaml` package refuses many documents go-yaml
   accepts. In the sets it refuses 2832 of the 19600 valid S1 documents, 1192 of S7, 2060 of S4 and
   120 of S0 (`evidence/yaml-errors.txt` lists counts per error class, with the shortest examples).
-  The classes: indentation of a flow collection in a block collection (2344 streams), a comment
-  right after a block scalar indicator (2236), an implicit key spanning lines (1213), a block
-  entry in flow context (582), and a tag followed by a flow indicator without a blank. A fallback
+  The classes: indentation of a flow collection in a block collection (2344 streams), a missing
+  character (2237 streams; a mixed class that holds comments not separated by a blank, missing
+  commas, missing closing delimiters and a missing quote), an implicit key spanning lines (1213), a
+  block entry in flow context (582), and a tag followed by a flow indicator without a blank. A fallback
   to line-by-line reading therefore falls back exactly where the lines are hardest. C3+C1 would
   meet the gate on S0 to S4, S6 and S7, but it loses the 2 documents of S5 with two leading
   byte order marks (the package parses them and finds no tag, so no fallback happens), pays for the parse and still needs the whole masker.
@@ -227,11 +230,15 @@ Implement C1c. It meets the gate on every set, and a cross-check on independent 
 found no regression against main. It costs the same as main.
 
 **Decided by the lead, reversible by the owner: C1c, not C1b.** The options were C1c (no new lost
-or extra on any set; one test assertion changes) and C1b (3 new extras, all in documents the
-server refuses). The reason: the server refuses the reserved text `!bwref` in any string
-([compilation §5.5](../../spec/compilation.md#55-reserved-text)), so a `!bwref` inside undeclared block text is never a reference there, and the
-one assertion that pins the opposite records old scanner behavior, not a requirement. C1b is the
-measured fallback if the owner keeps that assertion.
+or extra on any set) and C1b (3 new extras, all in documents the server refuses). Both blank the
+text of a block scalar, so both change the one assertion below: for the undeclared folded text,
+C0 lists `x/hidden` and C1b and C1c list nothing. The reason for the change: the server refuses
+the reserved text `!bwref` in any string
+([compilation §5.5](../../spec/compilation.md#55-reserved-text)), so a `!bwref` inside undeclared
+block text is never a reference there, and the assertion that pins the opposite records old
+scanner behavior, not a requirement. C1b is the measured fallback if the owner prefers it and
+accepts its 3 extras. Plain C1 is the only variant that keeps the assertion, and it adds
+new extras (S2 162, S6 121).
 
 What the implementation changes in `web/src`:
 
@@ -274,5 +281,10 @@ valid cases of S5 come out equal to go-yaml for C1c.
   there in the same way (120 documents of the cross-check, none new).
 - The 108 block-text documents found by an earlier sweep (a `!bwref` in block scalar text, extra
   reference, none lost) are extras of plain C1. C1b and C1c close them.
+- Known C1c gap, found after the sets were frozen: an alias token right before a colon starts a
+  node as a key does. In `a: [&k key, *k:"x # y", !bwref x/foo]` go-yaml lists `x/foo`, because the
+  quote is a scalar and its `#` is not a comment. Main and C1c list nothing. The masker does not
+  yet treat an alias before `:` as a node start. The implementation issue
+  (ginsys/bronzeward#600) carries the fix and a test for this document.
 - Timings come from one machine and a few runs each.
 - Nothing here measures the editor itself: the experiment calls `references` and nothing else.

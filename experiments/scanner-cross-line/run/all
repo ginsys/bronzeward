@@ -13,10 +13,12 @@ if [[ $# -lt 1 ]]; then
   echo "usage: run/all <work dir> [candidate ...]" >&2
   exit 2
 fi
-work=$1
+given=$1
 shift
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-mkdir -p "$work/oracle" "$work/report"
+# The oracle build changes directory, so the work directory must be an absolute path first.
+mkdir -p "$given/oracle" "$given/report"
+work=$(cd "$given" && pwd)
 
 "$here/run/gen-sets" "$work/sets"
 
