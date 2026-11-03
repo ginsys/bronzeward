@@ -1,18 +1,18 @@
 {
  "counts": {
-  "inputs": 14144,
-  "valid": 4050,
-  "equal": 4004,
+  "inputs": 20624,
+  "valid": 5904,
+  "equal": 5844,
   "lost": 0,
   "lostFit": 0,
   "badNameDocs": 0,
-  "extra": 46,
+  "extra": 60,
   "extraUnfit": 18,
   "newLost": 0,
-  "newExtra": 37,
-  "refusedListed": 10094,
+  "newExtra": 51,
+  "refusedListed": 14720,
   "failed": 0,
-  "msPer10k": 1245
+  "msPer10k": 854
  },
  "rows": [
   {
@@ -31,6 +31,19 @@
   {
    "kind": "extra",
    "doc": "a:\n|# c: [x\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
+   "candidate": [
+    "ghost",
+    "x/foo"
+   ],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": true
+  },
+  {
+   "kind": "extra",
+   "doc": "a:\n|# 2\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
    "candidate": [
     "ghost",
     "x/foo"
@@ -121,6 +134,45 @@
   },
   {
    "kind": "extra",
+   "doc": "a:\n|- # 4\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
+   "candidate": [
+    "ghost",
+    "x/foo"
+   ],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": true
+  },
+  {
+   "kind": "extra",
+   "doc": "a:\n|-# 2\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
+   "candidate": [
+    "ghost",
+    "x/foo"
+   ],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": true
+  },
+  {
+   "kind": "extra",
+   "doc": "a:\n|- # c 1-\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
+   "candidate": [
+    "ghost",
+    "x/foo"
+   ],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": true
+  },
+  {
+   "kind": "extra",
    "doc": "a:\n|+\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
    "candidate": [
     "ghost",
@@ -199,7 +251,7 @@
   },
   {
    "kind": "extra",
-   "doc": "a:\n># c\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
+   "doc": "a:\n|+ # 4\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
    "candidate": [
     "ghost",
     "x/foo"
@@ -212,59 +264,7 @@
   },
   {
    "kind": "extra",
-   "doc": "a:\n># c: [x\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
-   "candidate": [
-    "ghost",
-    "x/foo"
-   ],
-   "oracle": [
-    "x/foo"
-   ],
-   "unfit": false,
-   "newVsMain": true
-  },
-  {
-   "kind": "extra",
-   "doc": "a:\n>-\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
-   "candidate": [
-    "ghost",
-    "x/foo"
-   ],
-   "oracle": [
-    "x/foo"
-   ],
-   "unfit": false,
-   "newVsMain": true
-  },
-  {
-   "kind": "extra",
-   "doc": "a:\n>- # c\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
-   "candidate": [
-    "ghost",
-    "x/foo"
-   ],
-   "oracle": [
-    "x/foo"
-   ],
-   "unfit": false,
-   "newVsMain": true
-  },
-  {
-   "kind": "extra",
-   "doc": "a:\n>-# c\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
-   "candidate": [
-    "ghost",
-    "x/foo"
-   ],
-   "oracle": [
-    "x/foo"
-   ],
-   "unfit": false,
-   "newVsMain": true
-  },
-  {
-   "kind": "extra",
-   "doc": "a:\n>- # c: [?\"x\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
+   "doc": "a:\n|+# 2\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
    "candidate": [
     "ghost",
     "x/foo"

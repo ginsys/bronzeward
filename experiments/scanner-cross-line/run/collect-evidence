@@ -18,7 +18,11 @@ fi
 work=$1
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 evidence="$here/evidence"
-mkdir -p "$evidence/differences"
+mkdir -p "$evidence/differences" "$work/report"
+
+# Reports and differences of an earlier run (a renamed or removed candidate, other sets) must not
+# reach the new evidence: clear them, then let run/all write them again.
+rm -f "$work"/report/*.json "$evidence"/differences/*.json
 
 "$here/run/all" "$work" >"$work/run-all.log"
 cp "$work/table.md" "$evidence/table.md"

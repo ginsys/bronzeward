@@ -291,8 +291,11 @@ interface Carry {
 const freshCarry = (): Carry => ({ stack: [], flow: 0, ns: true, open: "", holder: -1, block: undefined });
 const isWs = (c: string | undefined) => c === " " || c === "\t" || c === "\r";
 const FLOW = ",[]{}";
-// A block scalar header after its indicator: chomping and indentation indicator, a comment aside.
-const HEADER_REST = /^(?:[-+][1-9]?|[1-9][-+]?)?[ \t\r]*(?:#.*)?$/;
+// A block scalar header after its indicator. go-yaml reads the indicators only directly after `|` or
+// `>`: a chomping sign and then a digit 1-9, or the digit and then the sign (a digit 0 is an error),
+// then blanks and an optional comment (yaml_parser_scan_block_scalar, scannerc.go lines 2204-2274,
+// go.yaml.in/yaml/v3 v3.0.5). Group 1 holds the indicators, so a digit in the comment is not one.
+const HEADER_REST = /^((?:[-+][1-9]?|[1-9][-+]?)?)[ \t\r]*(?:#.*)?$/;
 
 // The index after the closing quote `q` at or after `from`, or -1 if the line ends first.
 function skipQuoted(line: string, from: number, q: string): number {
@@ -510,7 +513,7 @@ function scanLine(st: Carry, line: string, base: number, props: Set<number>): nu
         j++;
       } else if ((c === "|" || c === ">") && st.flow === 0 && HEADER_REST.test(line.slice(j + 1))) {
         const rest = line.slice(j + 1);
-        const digit = /[1-9]/.exec(rest);
+        const digit = /[1-9]/.exec((HEADER_REST.exec(rest) as RegExpExecArray)[1]);
         st.block = { holder: hold, digit: digit === null ? 0 : Number(digit[0]), indent: -1 };
         if (st.block.digit > 0) st.block.indent = hold >= 0 ? hold + st.block.digit : st.block.digit;
         const hash = rest.indexOf("#");

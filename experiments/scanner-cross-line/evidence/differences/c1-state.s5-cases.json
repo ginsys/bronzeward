@@ -1,8 +1,8 @@
 {
  "counts": {
-  "inputs": 34,
-  "valid": 33,
-  "equal": 30,
+  "inputs": 39,
+  "valid": 38,
+  "equal": 35,
   "lost": 0,
   "lostFit": 0,
   "badNameDocs": 0,
@@ -12,7 +12,7 @@
   "newExtra": 2,
   "refusedListed": 1,
   "failed": 0,
-  "msPer10k": 1319
+  "msPer10k": 881
  },
  "rows": [
   {
