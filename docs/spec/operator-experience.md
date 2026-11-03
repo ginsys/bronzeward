@@ -713,8 +713,9 @@ the cause and the attempt count, and the next line names the next safe step. A c
 records no cause, so the line takes it from the operation's last event. Ctrl-C ends the watch with
 exit 130 and stops only the watcher. The watch waits up to 3 seconds for the operation's state,
 then says that the operation goes on, and names the state if it read one. `operation show` prints the same outcome lines without the server's time. For a cancelled operation
-it reads the last event once to take the cause, and keeps it only when the event is of the epoch of
-the operation shown; otherwise the line says the machine timeline holds the entry that ended it.
+it reads the last event once to take the cause, and keeps it only when the event is of the
+installation epoch in which the operation was read (the answer's `Bronzeward-Epoch`, not the epoch the
+operation was created in); otherwise the line says the machine timeline holds the entry that ended it.
 With `-o json` or `-o yaml`, the event lines go to standard error and the operation resource to
 standard output: the one read that the outcome line and the exit code come from, as the server sent it.
 

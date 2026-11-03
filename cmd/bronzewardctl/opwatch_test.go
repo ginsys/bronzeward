@@ -322,18 +322,26 @@ func TestOperationWatchCompletionTime(t *testing.T) {
 	f.pages = []string{evPage(1, "commitment", commitment), evPage(2, "operation-state", toState("verifying", "completed", ""))}
 	for _, c := range []struct {
 		name, late, want, not string
-		restored              bool // the pages hold the new epoch's events too, as after a restore before the page read
+		created               string // the epoch member of the operation, which is the epoch it was created in
+		restored              bool   // the pages hold the new epoch's events too, as after a restore before the page read
 	}{
-		{"no restore", "", "(server): applied rel_BWSYNTH", "was not read", false},
-		{"restored after the pages", "ep_BWSYNTH-3", "The server's time of this end was not read.", "(server)", false},
-		{"restored before the pages", "ep_BWSYNTH-3", "The server's time of this end was not read.", "(server)", true},
+		{"no restore", "", "(server): applied rel_BWSYNTH", "was not read", "", false},
+		{"created before a recovery, read in the new epoch", "", "(server): applied rel_BWSYNTH", "was not read", "ep_BWSYNTH-1", false},
+		{"restored after the pages", "ep_BWSYNTH-3", "The server's time of this end was not read.", "(server)", "", false},
+		{"restored before the pages", "ep_BWSYNTH-3", "The server's time of this end was not read.", "(server)", "", true},
 	} {
 		f.mu.Lock()
 		f.late, f.reads = c.late, 0
+		f.body = fmt.Sprintf(opJSON, "apply-config", "completed", `{"appliedRelease":"rel_BWSYNTH","observation":"obs_c"}`, "null", "[]")
+		if c.created != "" {
+			f.body = strings.Replace(f.body, `"epoch":"ep_BWSYNTH-2"`, `"epoch":"`+c.created+`"`, 1)
+		}
 		f.pages = []string{evPage(1, "commitment", commitment), evPage(2, "operation-state", toState("verifying", "completed", ""))}
-		if c.restored {
-			for i := range f.pages {
-				f.pages[i] = strings.ReplaceAll(f.pages[i], "ep_BWSYNTH-2", "ep_BWSYNTH-3")
+		f.pageReqs, f.lateFrom, f.latePages = 0, 0, nil
+		if c.restored { // the watch's page read finds the old epoch's events, the read after it the new epoch's
+			f.lateFrom = 2
+			for _, p := range f.pages {
+				f.latePages = append(f.latePages, strings.ReplaceAll(p, "ep_BWSYNTH-2", "ep_BWSYNTH-3"))
 			}
 		}
 		f.mu.Unlock()
