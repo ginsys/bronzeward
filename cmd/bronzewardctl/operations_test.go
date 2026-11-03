@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 )
 
 // opFake serves one operation, op_BWSYNTH: its body, its event stream, which sends stream and
@@ -94,11 +93,6 @@ var (
 // page item, an unknown type printed raw and quoted, --timeout's exit 5, and -o json.
 func TestOperationWatch(t *testing.T) {
 	f := &opFake{}
-	// Set before the server starts and restored after it closes, so no server goroutine reads it
-	// while it changes.
-	local := time.Local
-	time.Local = time.UTC // the lines show times in the local zone
-	defer func() { time.Local = local }()
 	srv := httptest.NewServer(f)
 	defer srv.Close()
 	automationContext(t, srv.URL)

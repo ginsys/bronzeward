@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 )
 
 // hostileProxy is the proxy of this test binary: http.ProxyFromEnvironment reads the environment
@@ -52,6 +53,9 @@ func TestMain(m *testing.M) {
 	os.Setenv("HTTPS_PROXY", hostileProxy)
 	os.Unsetenv("NO_PROXY")
 	os.Unsetenv("no_proxy")
+	// The lines show times in the local zone. It is set once, before any test starts a server: a
+	// watch abandoned after Ctrl-C can still read it when its test has ended.
+	time.Local = time.UTC
 	code := m.Run()
 	proxy.Close()
 	tls.Close()
