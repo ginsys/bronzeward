@@ -109,18 +109,18 @@ func (e *env) operationWatch(args []string) (err error) {
 	defer timer.Stop()
 
 	type result struct {
-		o   *apitypes.OperationBody
-		raw []byte // the operation read o comes from
-		err error
+		o    *apitypes.OperationBody
+		read client.OperationRead // the operation read o comes from
+		err  error
 	}
 	done := make(chan result, 1)
 	go func() {
-		o, raw, err := c.WatchBody(id, client.Watch{
+		o, read, err := c.WatchBody(id, client.Watch{
 			Show:  func(ev client.Event) { out.show(eventLine(ev, time.Now())) },
 			Clear: func() { out.show("(the events above no longer hold; they are shown again from the start)") },
 			Until: func() (bool, error) { return ended.Load() != 0, nil },
 		})
-		done <- result{o, raw, err}
+		done <- result{o, read, err}
 	}()
 
 	var res result
@@ -163,7 +163,7 @@ func (e *env) operationWatch(args []string) (err error) {
 	o = res.o
 	var last *lastEvent
 	if client.Terminal(o.State) {
-		last = readLast(c, id, o.State, o.Epoch)
+		last = readLast(c, id, o.State, res.read.Epoch)
 	}
 	lines, ok := outcome(o, last)
 	if client.Terminal(o.State) && (last == nil || last.At == nil) {
@@ -179,7 +179,7 @@ func (e *env) operationWatch(args []string) (err error) {
 	}
 	out.finish(lines...)
 	if e.output != "table" { // the body the outcome and the exit code come from, not a second read
-		if err := e.emit(res.raw, nil); err != nil {
+		if err := e.emit(res.read.Body, nil); err != nil {
 			return err
 		}
 	}
@@ -203,8 +203,10 @@ type lastEvent struct {
 // readLast reads the operation's last event from the JSON pages. It is nil when the pages or the
 // operation cannot be read, or when the event is not of the epoch of the operation read that follows:
 // an installation restored meanwhile has other events, so the event's time is not the operation's. It
-// is also nil when that read shows another state or another epoch than the operation the watch
-// returned (state, watched), so the outcome and the time printed together belong to one operation.
+// is also nil when that read shows another state, or another Bronzeward-Epoch header, than the read
+// the watch returned (state, watched). The operation's own epoch member is the one it was created in
+// and does not change in a restore, so it is not the epoch to compare. The outcome and the time
+// printed together then belong to one operation.
 func readLast(c *client.Client, id, state, watched string) *lastEvent {
 	items, err := c.List("/operations/" + url.PathEscape(id) + "/events")
 	if err != nil || len(items) == 0 {

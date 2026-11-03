@@ -400,9 +400,9 @@ func (e *env) operationCmd(args []string) error {
 	// A cancelled operation records no cause; its last event holds it. The event is read once and
 	// kept only when it is of the epoch of the operation shown; its time is not shown.
 	var cause *lastEvent
-	findCause := func(c *client.Client, _ *client.Response, o *apitypes.OperationBody) error {
+	findCause := func(c *client.Client, r *client.Response, o *apitypes.OperationBody) error {
 		if e.output == "table" && o.State == "cancelled" {
-			if cause = readLast(c, pos[0], o.State, o.Epoch); cause != nil {
+			if cause = readLast(c, pos[0], o.State, r.Header.Get("Bronzeward-Epoch")); cause != nil {
 				cause.At = nil
 			}
 		}

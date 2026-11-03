@@ -27,6 +27,8 @@ type opFake struct {
 	swapFrom      int // from this operation read on (when set), the body is swapBody: the operation changed after a read
 	swapBody      string
 	beat          time.Duration // when set, a held stream sends a keep-alive comment this often
+	lateFrom      int           // from this page request on (when set), the pages are latePages: events written after a restore
+	latePages     []string
 }
 
 func (f *opFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -94,7 +96,11 @@ func (f *opFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			f.mu.Lock()
 		}
-		fmt.Fprintf(w, `{"items":[%s]}`, strings.Join(f.pages, ","))
+		pages := f.pages
+		if f.lateFrom > 0 && f.pageReqs >= f.lateFrom {
+			pages = f.latePages
+		}
+		fmt.Fprintf(w, `{"items":[%s]}`, strings.Join(pages, ","))
 	default:
 		w.WriteHeader(http.StatusNotFound)
 	}
@@ -184,6 +190,14 @@ func TestOperationWatch(t *testing.T) {
 			t.Errorf("%s: operation show, exit %d:\n%s", c.state, code, show)
 		}
 		if c.state == "cancelled" { // show takes the cause of a cancellation from the last event, not its time
+			// An operation created before a recovery has the epoch member it was created in, while the
+			// answer and its events carry the current one: the cause is still its own.
+			f.mu.Lock()
+			f.body = strings.Replace(f.body, `"epoch":"ep_BWSYNTH-2"`, `"epoch":"ep_BWSYNTH-1"`, 1)
+			f.mu.Unlock()
+			if code, show, _ := runCtl(t, "operation", "show", "op_BWSYNTH"); code != 0 || !strings.Contains(show, wantShow) {
+				t.Errorf("%s: operation show of an operation created in an earlier epoch, exit %d, want %q in\n%s", c.state, code, wantShow, show)
+			}
 			// An event of another epoch than the operation shown is not its event: the placeholder stays.
 			f.mu.Lock()
 			f.pages = []string{strings.ReplaceAll(pages[2], "ep_BWSYNTH-2", "ep_BWSYNTH-3")}
@@ -198,7 +212,11 @@ func TestOperationWatch(t *testing.T) {
 	// Unresolved is not terminal: the watch goes on until --timeout, then names the state.
 	set("apply-config", "unresolved", "null", "null", `[{"id":"att_a","number":1,"accounting":null}]`,
 		[]string{sse(4, "operation-state", toState("sending", "unresolved", "transport-deadline")), sse(5, "BWSYNTH-new", "{\"x\":\"\\u001b[31m\",\"n\":9007199254740993}")}, nil)
+	began := time.Now()
 	code, out, errOut = runCtl(t, watch...)
+	if took := time.Since(began); took < 2*time.Second { // the watch waits for the timer, not for the first read
+		t.Errorf("unresolved: the watch ended after %s, before --timeout 2s", took)
+	}
 	for _, w := range []string{"operation-state       from sending, to unresolved, cause transport-deadline\n",
 		`BWSYNTH-new           {"n":9007199254740993,"x":"\u001b[31m"}` + "\n",
 		"Still unresolved after --timeout 2s.\nUnresolved: completion and retry safety are unknown. A recovery administrator must account for attempt 1.",
