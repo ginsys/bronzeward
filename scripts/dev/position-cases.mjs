@@ -100,6 +100,9 @@ const own = [
   // (D) a comment starts right after any token that is not a plain scalar.
   ["ginsys/bronzeward#602", "edge-comment-after-bracket", 'a: [[]# , "\n  , !bwref x/foo]\n'],
   ["ginsys/bronzeward#602", "edge-comment-after-quote", 'a: ["q"# , "\n  , !bwref x/foo]\n'],
+  // (E) a comment line ends a plain key, so a `:` that starts the next line is the value indicator.
+  ["ginsys/bronzeward#602", "edge-colon-after-comment", "a: [? k\n  # c\n  :!bwref x/bar, !bwref x/foo]\n"],
+  ["ginsys/bronzeward#602", "edge-colon-after-tab-comment", "a: [? k\t# c\n  :!bwref x/bar, !bwref x/foo]\n"],
 ];
 
 function read(name) {

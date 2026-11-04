@@ -475,6 +475,24 @@
    ]
   },
   {
+   "name": "edge-colon-after-comment",
+   "source": "ginsys/bronzeward#602",
+   "doc": "a: [? k\n  # c\n  :!bwref x/bar, !bwref x/foo]\n",
+   "want": [
+    "x/bar",
+    "x/foo"
+   ]
+  },
+  {
+   "name": "edge-colon-after-tab-comment",
+   "source": "ginsys/bronzeward#602",
+   "doc": "a: [? k\t# c\n  :!bwref x/bar, !bwref x/foo]\n",
+   "want": [
+    "x/bar",
+    "x/foo"
+   ]
+  },
+  {
    "name": "594-pipe",
    "source": "experiments/scanner-cross-line/sets/cases.json (#594)",
    "doc": "a: x |\n  \"y # !bwref ghost\nb: !bwref x/foo\n",
