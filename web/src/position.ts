@@ -550,8 +550,10 @@ export function spotOfReference(text: string, name: string, embedded: readonly E
 // that has fewer ends the scalar in go-yaml: nothing is returned then.
 function literalSpot(text: string, e: { text: string; spot: Spot }, name: string): Spot | undefined {
   const blank = (l: string) => /^ *\r?$/.test(l);
-  const lines = text.slice(e.spot.start, e.spot.end).split("\n");
-  const src = lines.slice(1).find((l) => !blank(l));
+  // A lone carriage return, U+0085, U+2028 and U+2029 break a line in go-yaml (see BREAKS); each
+  // is read as a line feed here, with the same length, so the offsets stay the text's.
+  const lines = text.slice(e.spot.start, e.spot.end).replace(BREAKS, "\n").split("\n");
+  const src =lines.slice(1).find((l) => !blank(l));
   const dec = e.text.split("\n").find((l) => !blank(l));
   if (src === undefined || dec === undefined) return undefined;
   const cut = Math.max(spaces(src) - spaces(dec), 0);
