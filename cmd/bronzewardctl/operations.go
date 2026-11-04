@@ -103,7 +103,15 @@ func endNextStep(state, op, plan, machine string) string {
 	case state == "rejected":
 		return sf("The node refused the configuration as invalid, so it applied nothing. Review the plan's release before a new plan: bronzewardctl plan show %s", client.ShellWord(plan))
 	case state == "cancelled":
-		return sf("Nothing more is sent for this plan. The plan names the command for a new one: bronzewardctl plan show %s", client.ShellWord(plan))
+		// plan show is no way on: a plan whose operation was cancelled before any attempt stays committed,
+		// and plan show then points back at this operation. The operation holds the machine and neither the
+		// release nor the operation of a new plan, so those two stay bare placeholders. The machine is the
+		// server's text and stays one quoted word.
+		machineWord := "<machine>"
+		if machine != "" {
+			machineWord = client.ShellWord(machine)
+		}
+		return sf("Nothing more is sent for this plan. Create a new plan: %s", createWords("<release>", machineWord, "<operation>"))
 	}
 	return sf("Nothing more is sent for this plan. Read what the machine runs before a new plan: bronzewardctl machine show %s", client.ShellWord(machine))
 }

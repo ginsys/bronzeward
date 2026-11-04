@@ -213,8 +213,14 @@ func createRefusalNext(err error, release, machine string) string {
 // createLine is the plan create command for release, machine and operation; the client never
 // sends it by itself.
 func createLine(release, machine, operation string) string {
-	return "bronzewardctl plan create --release " + client.ShellWord(release) + " --machine " + client.ShellWord(machine) +
-		" --operation " + client.ShellWord(operation)
+	return createWords(client.ShellWord(release), client.ShellWord(machine), client.ShellWord(operation))
+}
+
+// createWords is the plan create command from three shell words that are already quoted. A caller that
+// has no value for a flag passes a bare placeholder such as <release>; a value the server chose is passed
+// through client.ShellWord, as createLine does.
+func createWords(release, machine, operation string) string {
+	return "bronzewardctl plan create --release " + release + " --machine " + machine + " --operation " + operation
 }
 
 // planView is T20's plan display: every PlanBody field, the machine and cluster reads, the
