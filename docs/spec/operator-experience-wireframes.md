@@ -301,6 +301,15 @@ to another tag, such as `!!bwref`, is not a reference. Option B, to accept the g
 Option C, the verbatim form alone, leaves the prefix split and the percent escape open, which is how
 the six separate fixes of #598 went.
 
+The editor accepts `%YAML 1.1` only, as the server's parser does. A document lists nothing when the
+parser refuses it. The parser refuses a directive line it cannot read, a `%YAML` line or a `%TAG`
+handle given twice, a directive line after the content of a document, and directives with no `---`
+after them. It also refuses content after `...` that has no `---`, a handle that the document does not declare, a bad percent escape, and a tag that
+a character outside the tag characters ends, such as `!bwref}`. The parser then refuses the whole
+stream. The editor blanks only the document with the fault, so the other documents of the stream
+still list. A line that starts with `%` inside a quoted scalar or a block scalar is text, not a
+directive.
+
 If the operator edited the marks after a refusal,
 [Go to field] finds the refused line where it is now. If that line is gone, it focuses the marks field and selects nothing.
 
