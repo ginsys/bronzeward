@@ -119,6 +119,14 @@ describe("the references of a declared embedded document", () => {
     const start = text.indexOf("!bwref");
     expect(spotOfReference(text, "x/foo", at("doc[0]/cfg"))).toEqual({ start, end: start + "!bwref x/foo".length });
   });
+  // The first content line is the document's first line, so a byte order mark at its start is the
+  // stream's and is dropped (ginsys/bronzeward#602).
+  test("a literal holder whose text starts with a byte order mark points at its tag", () => {
+    const text = "cfg: |\n  ﻿[!bwref x/foo]\n";
+    const start = text.indexOf("!bwref");
+    expect(references(text, at("doc[0]/cfg"))).toEqual(["x/foo"]);
+    expect(spotOfReference(text, "x/foo", at("doc[0]/cfg"))).toEqual({ start, end: start + "!bwref x/foo".length });
+  });
   test("a tag whose name is on the next line is placed across the removed indentation", () => {
     const text = "cfg: |\n  a: !bwref\n   x/next\n";
     const start = text.indexOf("!bwref");

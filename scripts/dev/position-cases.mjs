@@ -88,6 +88,18 @@ const own = [
   ["ginsys/bronzeward#601", "nbsp-only-last-line-in-block", `a: |\n  x\n  ${NBSP}\nb: !bwref x/foo\n`],
   ["ginsys/bronzeward#601", "tab-only-line-in-block", "a: |\n  x\n  \t\n  y\nb: !bwref x/foo\n"],
   ["ginsys/bronzeward#601", "nbsp-before-tag-in-block", `a: |\n  x\n  ${NBSP}!bwref x/ghost\nb: !bwref x/foo\n`],
+  // The hosted review of ginsys/bronzeward#602: the edges of the state, each with the sweep family
+  // (experiments/scanner-cross-line/sets/gen-s8-state-edges.ts) that holds more of its kind.
+  // (B) a colon after properties alone closes a key that starts at the first property.
+  ["ginsys/bronzeward#602", "edge-properties-only-key", '- &e: |\n   "x\n- !bwref x/foo\n'],
+  // (A) a blank line, or a comment-only line, closes no block entry.
+  ["ginsys/bronzeward#602", "edge-blank-before-header", "outer:\n  a:\n\n    |2\n    text\n  b: !bwref x/foo\n"],
+  ["ginsys/bronzeward#602", "edge-comment-before-header", "outer:\n  a:\n# c\n    |2\n    text\n  b: !bwref x/foo\n"],
+  // (C) a key that closed at the end of a line takes the colon that starts the next one.
+  ["ginsys/bronzeward#602", "edge-colon-on-next-line", 'a: {? "k"\n  :!bwref x/foo}\n'],
+  // (D) a comment starts right after any token that is not a plain scalar.
+  ["ginsys/bronzeward#602", "edge-comment-after-bracket", 'a: [[]# , "\n  , !bwref x/foo]\n'],
+  ["ginsys/bronzeward#602", "edge-comment-after-quote", 'a: ["q"# , "\n  , !bwref x/foo]\n'],
 ];
 
 function read(name) {

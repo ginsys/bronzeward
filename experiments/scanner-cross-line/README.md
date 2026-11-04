@@ -59,6 +59,7 @@ count and sha256.
 | S5 cases | The curated cases: one file, with the result go-yaml gives for each (`want: null` means go-yaml must refuse the document). It holds the documents of issues 560, 578, 592, 593 and 594, of the hosted review of pull request 599 and of the block scalar header (issue 598) | 39 |
 | S6 random | Held out. Random documents from a pool of line fragments, with a fixed seed (mulberry32, seed 598). No candidate was tuned on it | 99983 |
 | S7 colon flow | The colon-flow sweep from a review of issue 578: a flow collection opened right after a value colon, then a quote with a `#` and a reference | 21672 |
+| S8 state edges | Added for the hosted review of pull request 602: blank and comment lines around block scalar headers, properties on empty and explicit keys, a colon on the next line, a comment right after a token, a byte order mark, then every three lines of a pool of state-changing lines. Deterministic, no seed. Not run by `run/all` | 199188 |
 
 ## The gate
 
