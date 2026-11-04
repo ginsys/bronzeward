@@ -66,7 +66,8 @@ const wrapAll = (lines: string[]) => {
         wrapAll([`? ${p}`, `: ${v}`.trimEnd(), ...c, `b: ${TAG}`]);
         wrapAll([`? ${p} k`, `: ${v}`.trimEnd(), ...c, `b: ${TAG}`]);
         wrapAll([`? ${p}`, ...c, `b: ${TAG}`]);
-        docs.add(`a: {${p}: ${v}${v.startsWith("[") || v.startsWith("{") ? "]}" : ""}, ${TAG}}\n`);
+        // The closer matches the bracket the value opens: `[` closes with `]` and `{` with `}`.
+        docs.add(`a: {${p}: ${v}${v.startsWith("[") ? "]" : v.startsWith("{") ? "}" : ""}, ${TAG}}\n`);
         docs.add(`a: {? ${p}, ${TAG}}\n`);
         docs.add(`a: {? ${p}\n  : ${v}, r: ${TAG}}\n`);
       }
