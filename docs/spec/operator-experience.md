@@ -685,9 +685,14 @@ Each event line names the event's type and what its data holds. An event of a ty
 does not know prints its data as JSON. Text that the server chose is escaped as [client-contracts.md §6 item 8](client-contracts.md#6-tls-trust)
 requires. An event carries no time on the stream, so its line shows when this client received it, marked
 `received`, whether the stream or the JSON event pages delivered it. After a terminal state the
-watch reads the last event from the JSON event pages once more, and the completion line shows that
-event's server time. If the installation was restored meanwhile, the last event is of another epoch
-than the operation read, and the line says "The server's time of this end was not read." instead.
+watch reads the event that records the end from the JSON event pages once more, and the completion
+line shows that event's server time. For an apply-config operation that is the last `operation-state`
+event that moves it to the terminal state, for an adopt operation its `adoption` event, and for a
+publish or ingest operation the last event named after the state (`succeeded` or `failed`). An event
+recorded after the end, such as the delayed response of an attempt a takeover left
+behind, does not move the time. If no such event is found, or if the installation was restored
+meanwhile and the event is of another epoch than the operation read, the line says "The server's time
+of this end was not read." instead.
 
 Events stream as Server-Sent Events with `Last-Event-ID` `<epoch>:<number>`. A different epoch
 yields a `reset` event and a replay from the start. The stream ends at a terminal state or at the
@@ -709,11 +714,16 @@ Follow it again with: bronzewardctl operation watch 'op_q8r…t2na'
 ```
 
 A `failed`, `rejected` or `cancelled` operation ends the watch with exit 4. The outcome line names
-the cause (for a publish or ingest operation, the title of the problem that ended it) and the attempt count, and the next line names the next safe step. A cancelled operation
-records no cause, so the line takes it from the operation's last event. Ctrl-C ends the watch with
+the cause (for a publish or ingest operation, the problem that ended it: its title, its detail when present and its instance, each escaped; [client contracts §8.2](client-contracts.md#82-errors)) and the attempt count, and the next line names the next safe step. A cancelled operation
+records no cause, so the line takes it from the event that records its end. Ctrl-C ends the watch with
 exit 130 and stops only the watcher. The watch waits up to 3 seconds for the operation's state,
-then says that the operation goes on, and names the state if it read one. `operation show` prints the same outcome lines without the server's time. For a cancelled operation
-it reads the last event once to take the cause, and keeps it only when the event is of the
+then says that the operation goes on, and names the state if it read one. If a line of the table or
+event output cannot be written, a running watch stops reading and exits 1 with the write error and the
+command that follows the operation; after an end the write error, and the error of writing the
+resource with `-o json` or `-o yaml`, is printed beside the outcome and the exit code of the outcome
+stays (0 becomes 1). A failure to keep the client's state after Ctrl-C is printed before the stop
+lines, so the follow line stays last, and the exit is 130. `operation show` prints the same outcome lines without the server's time. For a cancelled operation
+it reads the event that records the end once to take the cause, and keeps it only when the event is of the
 installation epoch in which the operation was read (the answer's `Bronzeward-Epoch`, not the epoch the
 operation was created in); otherwise the line says the machine timeline holds the entry that ended it.
 With `-o json` or `-o yaml`, the event lines go to standard error and the operation resource to

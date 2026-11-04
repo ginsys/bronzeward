@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -133,6 +134,10 @@ func TestOperationWatchInterruptUnwritable(t *testing.T) {
 	}
 }
 
+// afterInterruptContext, when set, runs after interruptedWatch made its context: a test breaks the
+// configuration directory there.
+var afterInterruptContext func(*testing.T)
+
 // interruptedWatch runs operation watch against a stream that stays open, sends the first Ctrl-C, and
 // ends the stream within the grace time: the watch reads the still running operation and stops.
 func interruptedWatch(t *testing.T, stdout io.Writer, extra ...string) (int, string) {
@@ -141,6 +146,9 @@ func interruptedWatch(t *testing.T, stdout io.Writer, extra ...string) (int, str
 	srv := httptest.NewServer(f)
 	defer srv.Close()
 	automationContext(t, srv.URL)
+	if afterInterruptContext != nil {
+		afterInterruptContext(t)
+	}
 	grace := interruptGrace
 	interruptGrace = 5 * time.Second
 	defer func() { interruptGrace = grace }()
@@ -483,7 +491,9 @@ func TestReadLastKeepsOneOperation(t *testing.T) {
 	defer srv.Close()
 	automationContext(t, srv.URL)
 	f.body = fmt.Sprintf(opJSON, "apply-config", "cancelled", "null", "null", "[]")
-	f.pages = []string{evPage(1, "operation-state", toState("verifying", "cancelled", ""))}
+	// The pages hold an event that records a cancellation and one that records a completion; the operation
+	// read stays cancelled, so only the state check of readLast can refuse the completion event.
+	f.pages = []string{evPage(1, "operation-state", toState("verifying", "cancelled", "")), evPage(2, "operation-state", toState("verifying", "completed", ""))}
 	e := &env{output: "table", out: io.Discard, err: io.Discard}
 	c, err := e.open()
 	if err != nil {
@@ -541,6 +551,147 @@ func TestOperationWatchCompletionTime(t *testing.T) {
 		code, out, _ := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "2s")
 		if code != 0 || !strings.Contains(out, c.want) || strings.Contains(out, c.not) {
 			t.Errorf("%s: exit %d, want %q and not %q in\n%s", c.name, code, c.want, c.not, out)
+		}
+	}
+}
+
+// TestOperationWatchOutputFails: a table-mode watch whose output cannot be written says so and does
+// not exit 0. A completed operation exits 1 with the write error, a failed one keeps exit 4 and adds
+// it, and a running one stops watching at once instead of waiting for --timeout.
+func TestOperationWatchOutputFails(t *testing.T) {
+	f := &opFake{}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	done := []string{evPage(1, "commitment", commitment), evPage(2, "operation-state", toState("verifying", "completed", ""))}
+	for _, c := range []struct {
+		name, state, result, errBody string
+		stream                       []string
+		code                         int
+		not                          string
+	}{
+		{"completed", "completed", `{"appliedRelease":"rel_BWSYNTH","observation":"obs_c"}`, "null", []string{sse(1, "commitment", commitment)}, 1, ""},
+		{"failed", "failed", "null", `{"cause":"verification-mismatch","attempts":2}`, []string{sse(1, "commitment", commitment)}, 4, ""},
+		{"running", "running", "null", "null", []string{sse(1, "commitment", commitment)}, 1, "Still running"},
+	} {
+		f.mu.Lock()
+		f.body = fmt.Sprintf(opJSON, "apply-config", c.state, c.result, c.errBody, "[]")
+		f.stream, f.pages = c.stream, done
+		f.mu.Unlock()
+		var e bytes.Buffer
+		code := run([]string{"operation", "watch", "op_BWSYNTH", "--timeout", "2s"}, failingWriter{}, &e)
+		if code != c.code || !strings.Contains(e.String(), "write refused") || (c.not != "" && strings.Contains(e.String(), c.not)) {
+			t.Errorf("%s: exit %d, stderr %q; want exit %d, the write error named and not %q", c.name, code, e.String(), c.code, c.not)
+		}
+	}
+}
+
+// TestOperationWatchCompletionEvent: the completion time is the time of the event that records the
+// operation's end, not of the last event: a response recorded after the end (the delayed answer of an
+// attempt a takeover left behind) comes later and does not move it. A publish or ingest operation
+// records its end as an event of the state's own name.
+func TestOperationWatchCompletionEvent(t *testing.T) {
+	f := &opFake{}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	for _, c := range []struct {
+		name, kind, state, result, errBody string
+		pages                              []string
+		want                               string
+	}{
+		// apply-config: the state entry operation-state moves it to the state (internal/api/outcome.go:114,
+		// attempt.go:441, recovery_acts.go:300); the response of an attempt can be recorded after it.
+		{"apply-config completed, a late response", "apply-config", "completed", `{"appliedRelease":"rel_BWSYNTH","observation":"obs_c"}`, "null",
+			[]string{evPage(1, "commitment", commitment), evPage(2, "operation-state", toState("verifying", "completed", "")), evPage(3, "response", `{"attempt":"att_a"}`)},
+			"Completed at 2026-11-01 06:00:02 UTC (server)"},
+		{"apply-config failed, a late response", "apply-config", "failed", "null", `{"cause":"verification-mismatch","attempts":2}`,
+			[]string{evPage(1, "commitment", commitment), evPage(2, "operation-state", toState("verifying", "failed", "")), evPage(3, "response", `{"attempt":"att_a"}`)},
+			"Failed at 2026-11-01 06:00:02 UTC (server)"},
+		{"apply-config rejected", "apply-config", "rejected", "null", `{"cause":"invalid-configuration","attempts":1}`,
+			[]string{evPage(1, "commitment", commitment), evPage(2, "operation-state", toState("unresolved", "rejected", "")), evPage(3, "response", `{"attempt":"att_a"}`)},
+			"Rejected at 2026-11-01 06:00:02 UTC (server)"},
+		{"apply-config cancelled", "apply-config", "cancelled", "null", "null",
+			[]string{evPage(1, "commitment", commitment), evPage(2, "operation-state", toState("unresolved", "cancelled", "resolution")), evPage(3, "response", `{"attempt":"att_a"}`)},
+			"Cancelled at 2026-11-01 06:00:02 UTC (server)"},
+		// adopt: the operation is inserted completed with the adoption entry (internal/api/adoption.go:293),
+		// and the applied-change entry follows it (adoption.go:319).
+		{"adopt completed", "adopt", "completed", `{"adoptionRecord":"pln_BWSYNTH"}`, "null",
+			[]string{evPage(1, "adoption", `{"plan":"pln_BWSYNTH","operation":"op_BWSYNTH"}`), evPage(2, "applied-change", `{"source":"adoption"}`)},
+			"Completed at 2026-11-01 06:00:01 UTC (server): adopted"},
+		// publish and ingest: the event is named after the state (internal/api/publish.go:158, 328, 415,
+		// runner.go:445, 457, ingestions.go:428, recovery_entries.go:276).
+		{"publish succeeded, a later event", "publish", "succeeded", `{"release":"rel_BWSYNTH"}`, "null",
+			[]string{evPage(1, "queued", "{}"), evPage(2, "succeeded", `{"release":"rel_BWSYNTH"}`), evPage(3, "taken-over", `{"generation":2}`)},
+			"Succeeded at 2026-11-01 06:00:02 UTC (server)"},
+		{"publish failed", "publish", "failed", "null", `{"title":"Recovery-mode entry ended the job","status":409}`,
+			[]string{evPage(1, "queued", "{}"), evPage(2, "failed", `{"code":"recovery"}`), evPage(3, "taken-over", `{"generation":2}`)},
+			"Failed at 2026-11-01 06:00:02 UTC (server)"},
+		{"ingest succeeded", "ingest", "succeeded", `{"importBaseRevision":3}`, "null",
+			[]string{evPage(1, "started", "{}"), evPage(2, "succeeded", `{"importBaseRevision":3}`), evPage(3, "taken-over", `{"generation":2}`)},
+			"Succeeded at 2026-11-01 06:00:02 UTC (server)"},
+		{"ingest failed", "ingest", "failed", "null", `{"title":"The ingestion was abandoned","status":409}`,
+			[]string{evPage(1, "started", "{}"), evPage(2, "failed", `{"code":"ingestion-abandoned"}`), evPage(3, "taken-over", `{"generation":2}`)},
+			"Failed at 2026-11-01 06:00:02 UTC (server)"},
+		{"no event records the end", "apply-config", "completed", `{"appliedRelease":"rel_BWSYNTH","observation":"obs_c"}`, "null",
+			[]string{evPage(1, "commitment", commitment), evPage(2, "response", `{"attempt":"att_a"}`)},
+			"The server's time of this end was not read."},
+	} {
+		f.mu.Lock()
+		f.body = fmt.Sprintf(opJSON, c.kind, c.state, c.result, c.errBody, "[]")
+		f.stream, f.pages = nil, c.pages
+		f.mu.Unlock()
+		code, out, _ := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "2s")
+		wantCode := map[bool]int{true: 0, false: 4}[c.state == "completed" || c.state == "succeeded"]
+		if code != wantCode || !strings.Contains(out, c.want) {
+			t.Errorf("%s: exit %d, want %d and %q in\n%s", c.name, code, wantCode, c.want, out)
+		}
+	}
+}
+
+// TestOperationWatchInterruptSaveFails: the first Ctrl-C ends the watch with exit 130, and a failure
+// to keep the client's state on the way out is still printed, once, before that exit.
+func TestOperationWatchInterruptSaveFails(t *testing.T) {
+	afterInterruptContext = func(t *testing.T) {
+		dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "bronzeward") // the temporary file of the config is made here
+		if err := os.Chmod(dir, 0o500); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	}
+	defer func() { afterInterruptContext = nil }()
+	// With -o json the stop lines go to standard error as well: the order there is the contract.
+	code, errOut := interruptedWatch(t, io.Discard, "-o", "json")
+	follow := "Follow it again with: bronzewardctl operation watch 'op_BWSYNTH'\n"
+	save, stop := strings.Index(errOut, "keeping the epoch"), strings.Index(errOut, "Stopped watching")
+	if code != 130 || strings.Count(errOut, "keeping the epoch") != 1 || save < 0 || stop < 0 || save > stop || !strings.HasSuffix(errOut, follow) {
+		t.Errorf("exit %d, stderr %q; want 130, the save failure once and before the stop lines, the follow line last", code, errOut)
+	}
+}
+
+// TestOperationWatchResourceUnwritable: with -o json the resource goes to standard output after the
+// outcome lines. When it cannot be written, the write error is printed beside the outcome and the
+// exit code of the outcome stays: 4 for a failed operation, 5 for one still unresolved at --timeout.
+func TestOperationWatchResourceUnwritable(t *testing.T) {
+	f := &opFake{}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	for _, c := range []struct {
+		state, errBody string
+		code           int
+	}{
+		{"failed", `{"cause":"verification-mismatch","attempts":2}`, 4},
+		{"unresolved", "null", 5},
+	} {
+		f.mu.Lock()
+		f.body = fmt.Sprintf(opJSON, "apply-config", c.state, "null", c.errBody, "[]")
+		f.stream, f.pages = []string{sse(1, "commitment", commitment)}, []string{evPage(1, "commitment", commitment), evPage(2, "operation-state", toState("verifying", c.state, ""))}
+		f.mu.Unlock()
+		var e bytes.Buffer
+		code := run([]string{"operation", "watch", "op_BWSYNTH", "-o", "json", "--timeout", "2s"}, failingWriter{}, &e)
+		if code != c.code || !strings.Contains(e.String(), "write refused") {
+			t.Errorf("%s: exit %d, stderr %q; want exit %d and the write error named", c.state, code, e.String(), c.code)
 		}
 	}
 }

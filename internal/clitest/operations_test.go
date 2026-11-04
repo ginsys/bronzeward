@@ -379,10 +379,14 @@ var operationCases = map[string]func(*testing.T, *watchEnv){
 		if d := payloadsDiffer(r.out, data); d != "" {
 			t.Errorf("the lines do not carry the events' data: %s\n%s", d, r.out)
 		}
-		// The stream request, one page per event, then one page per event again for the last event's
-		// server time (readLast).
+		// The stream request, one page per event, then one page per event again for the server time of
+		// the event that records the end (readLast). An adoption's operation is inserted completed with
+		// its adoption event, so that event, the first of the two, ends it (recordsEnd).
+		if len(types) == 0 || types[0] != "adoption" {
+			t.Errorf("events %q; want the adoption event first, as the one that records the end", types)
+		}
 		if n := int(pages.Load()); n != 2*len(types)+1 {
-			t.Errorf("%d events requests for %d events; want the stream's, one page per event and one per event for the last event's time", n, len(types))
+			t.Errorf("%d events requests for %d events; want the stream's, one page per event and one per event for the end event's time", n, len(types))
 		}
 	},
 

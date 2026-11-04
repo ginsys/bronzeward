@@ -17,7 +17,7 @@
     - "GET /api/v1/operations/op_.../events, Accept: text/event-stream"
     - "GET /api/v1/operations/op_.../events, the JSON event pages, one request per page"
     - GET /api/v1/operations/op_..., the operation read
-    - "GET /api/v1/operations/op_.../events, the JSON event pages again, one request per page, for the last event's server time"
+    - "GET /api/v1/operations/op_.../events, the JSON event pages again, one request per page, for the server time of the event that records the end"
   fault: >-
     the injector answers the stream request with the JSON page, as a server without a stream does,
     and sets limit=1 on every events request, so the pages hold one event each
@@ -26,7 +26,8 @@
       takes the JSON answer as a server without a stream, reads the operation, sees its terminal
       state, and reads the pages from the start, following each page's next to the last page; then
       lists the pages once more, because a streamed or drained event carries no time, and takes the
-      last event's time for the completion line. That is the stream request, one page per event,
+      time of the event that records the end for the completion line (for an adoption, its adoption
+      event, the first of the two). That is the stream request, one page per event,
       and one page per event again: five requests for the two events
     server: no change; the adoption stays completed
     shown: >-
