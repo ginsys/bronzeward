@@ -54,6 +54,19 @@ expect("a scanner failure that stays passes", exitOf(report([crash(1), control],
 expect("a scanner failure that is gone passes", exitOf(report([crash(1), control], { failed: 1 }), report([control])), 0);
 expect("a failure in another document fails", exitOf(report([crash(1), control], { failed: 1 }), report([crash(3), control], { failed: 1 })), 1);
 
+// A scanner that threw lists no name, so on a valid document it lost every name the oracle lists.
+// A document it then recovers into a partial list has lost no name that is new
+// (ginsys/bronzeward#610). The reverse pair is a regression. A failed row of a refused document
+// has no accepted name, so it is no baseline of a loss.
+const crashOn = (id, oracle, err = "") => ({ id, kind: "failed", doc: "x", error: "boom", oracle, err });
+const both = ["x/foo", "y/foo"];
+const partial = lost(1, ["x/foo"], both);
+expect("a crash that recovers into a partial list passes", exitOf(report([crashOn(1, both), control], { failed: 1 }), report([partial, control])), 0);
+expect("a partial list that turns into a crash fails", exitOf(report([partial, control]), report([crashOn(1, both), control], { failed: 1 })), 1);
+expect("a crash that recovers into an empty list passes", exitOf(report([crashOn(1, both), control], { failed: 1 }), report([lost(1, [], both), control])), 0);
+expect("a crash that recovers into a list with an extra name fails", exitOf(report([crashOn(1, both), control], { failed: 1 }), report([extra(1, [...both, "z/foo"], both), control])), 1);
+expect("a crash on a refused document is no baseline of a loss", exitOf(report([crashOn(1, both, "yaml: bad"), control], { failed: 1 }), report([partial, control])), 1);
+
 // The counts above stand for what cmp.mjs writes. This case runs cmp.mjs itself on a set of one
 // document that the oracle accepts, once with a scanner that throws and once with one that works.
 // A crash must not change `valid`: if it did, the two reports would differ in a count and the tool
