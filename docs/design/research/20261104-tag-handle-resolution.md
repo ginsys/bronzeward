@@ -16,9 +16,10 @@ name that it uses.
 
 The server limits the damage. It accepts `!bwref` and the YAML core tags only (`refTag` at line 41
 and `coreTags` at line 45). It refuses every other tag (`RuleLocalTag`, lines 148 and 149). So a
-wrong hint can only appear in a document that the server refuses anyway. A hidden reference
-matters only in a document that the server accepts. The cases are therefore split by the verdict
-of the server.
+wrong hint is expected in documents that the server refuses anyway. A hidden reference matters
+in a document that the server accepts. The cases are therefore split by the verdict of the
+server. In every input of this record, the wrong hints fall on refused documents. This is a
+measured result, not a proof.
 
 Decision enabled: the owner chooses one of three options. The scanner resolves tags like go-yaml
 (A), the gap is documented as accepted (B), or the scanner recognises one more spelling (C).
@@ -35,8 +36,8 @@ Decision enabled: the owner chooses one of three options. The scanner resolves t
 | Sweep | set S8, 227,762 synthetic documents, 61,086 of them accepted by go-yaml |
 
 The server probe is a second Go module. It calls `ingest.Stored` with every name go-yaml reads
-declared. So a document is refused only for its text, never for an undeclared name. `Stored` hides
-the rule behind its verdict, so the probe reports accepted or refused and nothing finer.
+declared. So an undeclared name never causes a refusal in this record. `Stored` hides the rule
+behind its verdict, so the probe reports accepted or refused and nothing finer.
 
 ## Reproduction
 
@@ -51,7 +52,7 @@ run/tag-causes <work dir> 1cf21917
 
 The first command writes the case table (`evidence/tag-handles.md`). The second runs set S8
 through the oracle and both scanners and prints the grouped counts (`evidence/tag-causes.txt`).
-The sweep took about three minutes and wrote about 35 MiB. `mise run go` builds and tests the
+The sweep took under three minutes and wrote about 35 MiB. `mise run go` builds and tests the
 server probe.
 
 ## Case table
@@ -93,8 +94,8 @@ nothing to do with handles (see the separate finding). The single refused loss i
 
 ## Sweep of set S8
 
-Set S8 writes every spelling of the tag at every place a property can stand, with and without
-`%TAG` and `%YAML` directives. The oracle reads 61,086 of its 227,762 documents as valid. The
+Set S8 writes a list of tag spellings (plain, through a handle, verbatim) at many places where a
+property can stand, with and without `%TAG` and `%YAML` directives. The section after the facts says which spellings it leaves out. The oracle reads 61,086 of its 227,762 documents as valid. The
 table groups the differences of the scanner on main by the spelling of the tag.
 
 | Spelling | Directive | Lost, server accepts | Lost, server refuses | Extra, server accepts | Extra, server refuses |
@@ -114,8 +115,8 @@ gives 538 lost (341 accepted) and 16,318 extra (none accepted). So the scanner b
 
 Three facts follow.
 
-1. The directive causes no loss. The 1,680 documents of S8 that carry a directive lose 252
-   names, and every one is a verbatim spelling. A directive before a plain `!bwref` loses nothing.
+1. In S8, the directive causes no loss. The documents that carry a directive lose a name in 252
+   cases, and every one is a verbatim spelling. A directive before a plain `!bwref` loses nothing.
    Issue 603 says that 420 documents of S8 are affected by a directive. That number is the whole
    loss count of the scanner on main. A directive is present in 252 of those, and the verbatim
    spelling causes them.
@@ -129,12 +130,12 @@ Three facts follow.
 
 ## What the sweep does not reach
 
-The generator of S8 always writes the name as `!bwref`. It never writes a handle whose prefix
-holds part of the name, and it never writes a percent escape. The case table shows that these
-two shapes exist and that the server accepts them. They are tag resolution losses that no S8
-count includes. So the 288 verbatim documents are a floor for the accepted losses of tag
-resolution, not the whole number. The implementation must add these shapes to the generator
-before it claims a gate.
+The spellings of the S8 generator (`sets/gen-s8-state-edges.ts`, lines 230 and 262) keep the
+word `bwref` whole. None puts part of the name in a handle prefix, and none uses a percent
+escape. The case table shows that these two shapes exist and that the server accepts them. They
+are tag resolution losses that no S8 count includes. So the 288 verbatim documents are a floor
+for the accepted losses of tag resolution, not the whole number. The implementation must add
+these shapes to the generator before it claims a gate.
 
 ## Separate finding: a tag followed by an anchor
 
@@ -146,7 +147,8 @@ Cause, traced in `web/src/position.ts`: the pattern at line 121 matches `!bwref`
 then a plain scalar made of words. It reads `&e x/foo` as that scalar. The name check at line
 141 then rejects it, so nothing is recorded. The tag has no handle, so #603 does not own this
 case. The sweep found 12 such documents that the server accepts. The tagged key `!bwref x/foo: v`
-is also lost, but the server refuses it (`RuleTagPlacement`, line 113), so it hides nothing.
+is also lost, but the server refuses it (`RuleTagPlacement`, line 113), so the document is
+refused anyway.
 
 Draft issue body, for the owner to file:
 
@@ -170,20 +172,26 @@ Draft issue body, for the owner to file:
 
 **A. Resolve tags like go-yaml.** The scanner keeps a table of handles per document. The table
 starts with the defaults (`!` maps to `!` and `!!` maps to the core prefix). A `%TAG` directive
-changes one entry. The table resets at `---` and at `...`. The scanner also reads the verbatim
+changes one entry. The directives stand before the `---` of their document and last until that
+document ends. The next document starts with the defaults again. The scanner also reads the verbatim
 form and decodes percent escapes before it compares the result with `!bwref`.
-- Closes all 9 accepted tag resolution losses in the case table. It also removes the extra names
-  of the 8 refused cases where go-yaml parses the document and resolves the tag to another tag.
-  In the other 8 refused cases go-yaml fails to parse the document. Resolution removes the extra
-  name only if the cause is the tag, for example a handle that no directive declares. It does not
-  remove it where a directive is invalid, such as `%YAML 1.2` or `%FOO`. That needs directive
-  validation and no listing after a parse error. This record did not sort the 8 cases further.
+- Effect, by design and not measured: it would close the 9 accepted tag resolution losses in the
+  case table. It would also remove the extra names of the 8 refused cases where go-yaml parses
+  the document and resolves the tag to another tag. In the other 8 refused cases go-yaml fails
+  to parse the document. Resolution would remove the extra name there only if the cause is the
+  tag, for example a handle that no directive declares. It would not remove it where a directive
+  is invalid, such as `%YAML 1.2` or `%FOO`. That needs directive validation and no listing
+  after a parse error. This record did not sort the 8 cases further.
 - Cost: state for the directive area of a document. The scanner already carries state from line
   to line (`Carry`). It also needs the new S8 families above and a regression test per rule. The
   size is not measured, because no prototype exists. Today the scanner treats handles in one
   line (line 483). Directive validation, if wanted, is extra.
-- Risk: the directive area is easy to misread. The cases for a directive in a literal block, in a
-  comment and after `...` pass today and must keep passing.
+- Risk: the directive area is easy to misread. The case with a directive after `...`
+  (`directive-after-document-end`) agrees with go-yaml today and must keep agreeing. A
+  directive-like line in a literal block or in a comment declares nothing. In those two cases
+  (`directive-in-literal-text` and `directive-in-comment`) the handle stays undeclared and
+  go-yaml refuses the document. The scanner lists an extra name today, so they are existing gaps
+  that A would close. They are not regression controls.
 
 **B. Document the gap as accepted.** The scanner stays as it is. The editor specification and the
 scanner header say that a verbatim tag, a handle that holds part of the name, and a percent escape
@@ -194,7 +202,8 @@ are not recognised.
   and every spelling at issue is a deliberate choice.
 
 **C. Recognise the verbatim `!<!bwref>` only.** The scanner adds one spelling.
-- Closes 3 of the 9 accepted losses in the case table and all 288 that S8 generates.
+- Effect, by design and not measured: it would close 3 of the 9 accepted losses in the case
+  table. It would close all 288 that S8 generates, if the scanner reads exactly `!<!bwref>`.
 - Cost: a few lines and one S8 family.
 - Risk: it leaves the prefix split and the percent escape open. Closing one shape at a time is the
   pattern that [#598](https://github.com/ginsys/bronzeward/issues/598) ended: six separate fixes
@@ -203,15 +212,15 @@ are not recognised.
 ## Recommendation
 
 Choose A if the scanner is to match go-yaml on every tag spelling in a document that the server
-accepts. It is the only option that closes the three kinds of accepted tag loss, and it does so
-with one rule, the one go-yaml applies. Make it one change with its own commit, the new generator
+accepts. Of the three options, it is the only one designed to close the three kinds of accepted
+tag loss, and it does so with one rule, the one go-yaml applies. Make it one change with its own commit, the new generator
 families, and this gate: no loss that a tag spelling causes in a document go-yaml accepts, no new
 loss and no new extra name compared with main. The gate leaves out the tag-then-anchor gap. That
 gap is a separate fix. Until it lands, a sweep of whole documents still shows its 12 losses.
 
 Choose B if the owner prefers to keep the scanner as it is. The evidence supports that choice
-too: the spellings are deliberate, the server holds the line, and the hint is wrong only for a
-draft that is already unusual. Do not choose C alone. It looks cheap and leaves two known shapes.
+too: the spellings are deliberate and the server enforces its own check. Do not choose C alone.
+It looks cheap and leaves two known shapes.
 
 The family B fix in `gen-s8-state-edges.ts` is already done in this change (the closer now
 matches the opening bracket). The regenerated set S8 has the same 227,762 documents, and its
