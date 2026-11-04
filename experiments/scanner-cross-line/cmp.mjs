@@ -22,6 +22,7 @@
 // streams go-yaml refuses where the candidate still lists a reference. msPer10k = the candidate's
 // run time per 10000 documents (one run, wall clock; compare sizes, not digits).
 // Each row of the report carries `id`, the document's index in the set (counted from 0).
+// `refusedListedIds` holds the ids that refusedListed counts; cmp-reports.mjs compares two reports.
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -39,6 +40,7 @@ const main = await import(new URL("candidates/c0-main.mjs", import.meta.url).hre
 
 const counts = { inputs: set.length, valid: 0, equal: 0, lost: 0, lostFit: 0, badNameDocs: 0, extra: 0, extraUnfit: 0, newLost: 0, newExtra: 0, refusedListed: 0, failed: 0 };
 const rows = [];
+const refusedListedIds = [];
 const started = performance.now();
 const got = set.map((doc) => {
   try {
@@ -57,7 +59,10 @@ set.forEach((doc, i) => {
     return;
   }
   if (want.err !== "") {
-    if (have.tags.length > 0) counts.refusedListed++;
+    if (have.tags.length > 0) {
+      counts.refusedListed++;
+      refusedListedIds.push(i);
+    }
     return;
   }
   counts.valid++;
@@ -78,5 +83,5 @@ set.forEach((doc, i) => {
   if (lost || extra) rows.push({ id: i, kind: lost && extra ? "lost+extra" : lost ? "lost" : "extra", doc, candidate: have.tags, oracle: want.tags, unfit: want.unfit, newVsMain: newLost || newExtra });
 });
 counts.msPer10k = Math.round((ms / set.length) * 10000);
-writeFileSync(reportPath, JSON.stringify({ counts, rows }, null, 1) + "\n");
+writeFileSync(reportPath, JSON.stringify({ counts, rows, refusedListedIds }, null, 1) + "\n");
 console.log(JSON.stringify(counts));
