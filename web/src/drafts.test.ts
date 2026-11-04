@@ -1110,6 +1110,15 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     expect(rest(unknown)).toEqual({ held: stored.text, saved: A, sent: sentOf(A), writes: 1 });
   });
 
+  test("ginsys/bronzeward#613 local review: text typed after a read that showed at once goes aside when the Save or Remove is done", () => {
+    const save = run({ held: A, saved: A }, [{ kind: "send" }, theirs10, { kind: "type", held: M }, { kind: "done", revision: "frv_9" }]);
+    expect(rest(save)).toEqual({ held: T, saved: T, sent: sentOf(A), conflict: theirs(M, 10), writes: 1, own: "frv_9" });
+    expect(editor(save, { kind: "copy" }).held).toBe(M);
+    const remove = run({ held: A, saved: A }, [{ kind: "send", removes: true }, theirs10, { kind: "type", held: M }, { kind: "done" }]);
+    expect(rest(remove)).toEqual({ held: T, saved: T, sent: removes(A), conflict: theirs(M, 10), writes: 1 });
+    expect(editor(remove, { kind: "copy" }).held).toBe(M);
+  });
+
   test("ginsys/bronzeward#534 N1: Show clicked again while asked holds Copy until its draft read answers, also when a revision read answers first", () => {
     const asked8 = run({ held: A, saved: A }, [{ kind: "refused" }, { kind: "at", revision: 7 }, { kind: "show" }, { kind: "draft", revision: 8, changed: true }]);
     const early = run(asked8, [{ kind: "show" }, { kind: "reading", on: true }, { kind: "read", text: T, since: 0 }]);
