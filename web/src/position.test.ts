@@ -148,6 +148,12 @@ describe("the references of a declared embedded document", () => {
     const start = text.indexOf("!bwref");
     expect(spotOfReference(text, "x/foo", at("doc[0]/cfg"))).toEqual({ start, end: start + "!bwref x/foo".length });
   });
+  test("a tag spelled through a handle is read as main read it, by its !bwref", () => {
+    const text = "%TAG !r! !\n---\na: !r!bwref x/foo\n";
+    const start = text.indexOf("!bwref");
+    expect(references(text, [])).toEqual(["x/foo"]);
+    expect(spotOfReference(text, "x/foo", [])).toEqual({ start, end: start + "!bwref x/foo".length });
+  });
   test("a CRLF after a block scalar header's comment does not stop the header", () => {
     const text = 'a: | # c\r\n  [x\r\nb: ?"y # !bwref ghost\r\nc: !bwref x/foo\r\n';
     expect(references(text, [])).toEqual(["x/foo"]);

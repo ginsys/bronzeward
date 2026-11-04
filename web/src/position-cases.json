@@ -539,6 +539,14 @@
    ]
   },
   {
+   "name": "edge-handle-tag",
+   "source": "ginsys/bronzeward#602",
+   "doc": "%TAG !r! !\n---\na: !r!bwref x/foo\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
    "name": "edge-flow-key-holder",
    "source": "ginsys/bronzeward#602",
    "doc": "[a, b]: |\n  \"x\nfoo: !bwref x/foo\n",

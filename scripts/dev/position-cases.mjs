@@ -113,6 +113,8 @@ const own = [
   ["ginsys/bronzeward#602", "edge-crlf-marker", "---\r\n!bwref x/foo\r\n"],
   ["ginsys/bronzeward#602", "edge-crlf-marker-in-literal", "cfg: |\r\n  ---\r\n  !bwref x/foo\r\n"],
   ["ginsys/bronzeward#602", "edge-crlf-header-comment", 'a: | # c\r\n  [x\r\nb: ?"y # !bwref ghost\r\nc: !bwref x/foo\r\n'],
+  // (J) a tag spelled through a declared handle is read as main read it, by its `!bwref`.
+  ["ginsys/bronzeward#602", "edge-handle-tag", "%TAG !r! !\n---\na: !r!bwref x/foo\n"],
   // (H) a flow collection used as a block key keeps its first column across its members.
   ["ginsys/bronzeward#602", "edge-flow-key-holder", '[a, b]: |\n  "x\nfoo: !bwref x/foo\n'],
 ];
