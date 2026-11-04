@@ -268,6 +268,9 @@ it." and offers [Show their change]. While an editor holds unsaved text, that bu
 and asks the operator to save the text or switch entries first.
 
 The editor lists a reference whose name is quoted, or stands on the line after its `!bwref` tag.
+The editor also lists a name that follows one anchor (`!bwref &e x/foo`), but only where the scalar
+clearly ends; for any other shape with an anchor it lists nothing, and the server's check decides.
+The cases are listed in the comment above `anchoredContinues` in `web/src/position.ts`.
 It also lists a name in a block scalar on one content line, if strip chomping (`|-` or `>-`) drops
 the line break after it or that line ends the document. A double-quoted name that continues after
 an escaped line break is listed too. A CRLF, a carriage return alone, and U+0085, U+2028 and
