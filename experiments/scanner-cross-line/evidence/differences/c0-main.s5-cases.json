@@ -12,10 +12,11 @@
   "newExtra": 0,
   "refusedListed": 1,
   "failed": 0,
-  "msPer10k": 780
+  "msPer10k": 503
  },
  "rows": [
   {
+   "id": 0,
    "kind": "extra",
    "doc": "a: x |\n  \"y # !bwref ghost\nb: !bwref x/foo\n",
    "candidate": [
@@ -29,6 +30,7 @@
    "newVsMain": false
   },
   {
+   "id": 1,
    "kind": "extra",
    "doc": "a: x >\n  \"y # !bwref ghost\nb: !bwref x/foo\n",
    "candidate": [
@@ -42,6 +44,7 @@
    "newVsMain": false
   },
   {
+   "id": 2,
    "kind": "extra",
    "doc": "a: x\n  y |\n  \"z # !bwref ghost\nb: !bwref x/foo\n",
    "candidate": [
@@ -55,6 +58,7 @@
    "newVsMain": false
   },
   {
+   "id": 3,
    "kind": "extra",
    "doc": "a: x\n  |\n  \"z # !bwref ghost\nb: !bwref x/foo\n",
    "candidate": [
@@ -68,6 +72,7 @@
    "newVsMain": false
   },
   {
+   "id": 4,
    "kind": "lost",
    "doc": "a: [\"foo\n#bar\", !bwref x/foo]\n",
    "candidate": [],
@@ -78,6 +83,7 @@
    "newVsMain": false
   },
   {
+   "id": 5,
    "kind": "lost",
    "doc": "a: ['foo\n#bar', !bwref x/foo]\n",
    "candidate": [],
@@ -88,6 +94,7 @@
    "newVsMain": false
   },
   {
+   "id": 6,
    "kind": "lost",
    "doc": "a: [\"x\n  \", \"p # q\", !bwref x/foo]\n",
    "candidate": [],
@@ -98,6 +105,7 @@
    "newVsMain": false
   },
   {
+   "id": 7,
    "kind": "extra",
    "doc": "a: x - \"y # !bwref ghost\nb: !bwref x/foo\n",
    "candidate": [
@@ -111,6 +119,7 @@
    "newVsMain": false
   },
   {
+   "id": 8,
    "kind": "lost",
    "doc": "a: [? \"x # y\", !bwref x/foo]\n",
    "candidate": [],
@@ -121,6 +130,7 @@
    "newVsMain": false
   },
   {
+   "id": 16,
    "kind": "extra",
    "doc": "a: |\n  \"y # !bwref ghost\nb: !bwref x/foo\n",
    "candidate": [
@@ -134,6 +144,7 @@
    "newVsMain": false
   },
   {
+   "id": 17,
    "kind": "extra",
    "doc": "a: x - \"y # !bwref ghost\nb: !bwref x/foo\n",
    "candidate": [
@@ -147,6 +158,7 @@
    "newVsMain": false
   },
   {
+   "id": 18,
    "kind": "extra",
    "doc": "a: x ? \"y # !bwref ghost\nb: !bwref x/foo\n",
    "candidate": [
@@ -160,6 +172,7 @@
    "newVsMain": false
   },
   {
+   "id": 19,
    "kind": "extra",
    "doc": "a: x - !t\n  \"y # !bwref ghost\nb: !bwref x/foo\n",
    "candidate": [
@@ -173,6 +186,7 @@
    "newVsMain": false
   },
   {
+   "id": 27,
    "kind": "lost",
    "doc": "- [? \"x # y\", !bwref x/foo]\n",
    "candidate": [],
@@ -183,6 +197,7 @@
    "newVsMain": false
   },
   {
+   "id": 28,
    "kind": "lost",
    "doc": "a: [? \"x # y\", !bwref x/foo]\n",
    "candidate": [],
@@ -193,6 +208,7 @@
    "newVsMain": false
   },
   {
+   "id": 29,
    "kind": "lost",
    "doc": "{? \"x # y\": 1, b: !bwref x/foo}\n",
    "candidate": [],

@@ -21,6 +21,7 @@
 // refusedListed =
 // streams go-yaml refuses where the candidate still lists a reference. msPer10k = the candidate's
 // run time per 10000 documents (one run, wall clock; compare sizes, not digits).
+// Each row of the report carries `id`, the document's index in the set (counted from 0).
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -52,7 +53,7 @@ set.forEach((doc, i) => {
   const have = got[i];
   if (have.error !== undefined) {
     counts.failed++;
-    rows.push({ kind: "failed", doc, error: have.error, oracle: want.tags, err: want.err });
+    rows.push({ id: i, kind: "failed", doc, error: have.error, oracle: want.tags, err: want.err });
     return;
   }
   if (want.err !== "") {
@@ -74,7 +75,7 @@ set.forEach((doc, i) => {
   const newExtra = extra && !mainTags.some((t) => !want.tags.includes(t));
   if (newLost) counts.newLost++;
   if (newExtra) counts.newExtra++;
-  if (lost || extra) rows.push({ kind: lost && extra ? "lost+extra" : lost ? "lost" : "extra", doc, candidate: have.tags, oracle: want.tags, unfit: want.unfit, newVsMain: newLost || newExtra });
+  if (lost || extra) rows.push({ id: i, kind: lost && extra ? "lost+extra" : lost ? "lost" : "extra", doc, candidate: have.tags, oracle: want.tags, unfit: want.unfit, newVsMain: newLost || newExtra });
 });
 counts.msPer10k = Math.round((ms / set.length) * 10000);
 writeFileSync(reportPath, JSON.stringify({ counts, rows }, null, 1) + "\n");

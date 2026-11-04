@@ -12,10 +12,11 @@
   "newExtra": 51,
   "refusedListed": 14720,
   "failed": 0,
-  "msPer10k": 854
+  "msPer10k": 890
  },
  "rows": [
   {
+   "id": 178,
    "kind": "extra",
    "doc": "a:\n|# c\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
    "candidate": [
@@ -29,6 +30,7 @@
    "newVsMain": true
   },
   {
+   "id": 298,
    "kind": "extra",
    "doc": "a:\n|# c: [x\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
    "candidate": [
@@ -42,6 +44,7 @@
    "newVsMain": true
   },
   {
+   "id": 478,
    "kind": "extra",
    "doc": "a:\n|# 2\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
    "candidate": [
@@ -55,6 +58,7 @@
    "newVsMain": true
   },
   {
+   "id": 598,
    "kind": "extra",
    "doc": "a:\n|-\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
    "candidate": [
@@ -68,6 +72,7 @@
    "newVsMain": true
   },
   {
+   "id": 658,
    "kind": "extra",
    "doc": "a:\n|- # c\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
    "candidate": [
@@ -81,6 +86,7 @@
    "newVsMain": true
   },
   {
+   "id": 718,
    "kind": "extra",
    "doc": "a:\n|-# c\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
    "candidate": [
@@ -94,6 +100,7 @@
    "newVsMain": true
   },
   {
+   "id": 778,
    "kind": "extra",
    "doc": "a:\n|- # c: [?\"x\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
    "candidate": [
@@ -107,6 +114,7 @@
    "newVsMain": true
   },
   {
+   "id": 838,
    "kind": "extra",
    "doc": "a:\n|-# c: [x\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
    "candidate": [
@@ -120,6 +128,7 @@
    "newVsMain": true
   },
   {
+   "id": 898,
    "kind": "extra",
    "doc": "a:\n|- # c: [x\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
    "candidate": [
@@ -133,6 +142,7 @@
    "newVsMain": true
   },
   {
+   "id": 958,
    "kind": "extra",
    "doc": "a:\n|- # 4\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
    "candidate": [
@@ -146,6 +156,7 @@
    "newVsMain": true
   },
   {
+   "id": 1018,
    "kind": "extra",
    "doc": "a:\n|-# 2\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
    "candidate": [
@@ -159,6 +170,7 @@
    "newVsMain": true
   },
   {
+   "id": 1078,
    "kind": "extra",
    "doc": "a:\n|- # c 1-\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
    "candidate": [
@@ -172,6 +184,7 @@
    "newVsMain": true
   },
   {
+   "id": 1138,
    "kind": "extra",
    "doc": "a:\n|+\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
    "candidate": [
@@ -185,6 +198,7 @@
    "newVsMain": true
   },
   {
+   "id": 1198,
    "kind": "extra",
    "doc": "a:\n|+ # c\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
    "candidate": [
@@ -198,6 +212,7 @@
    "newVsMain": true
   },
   {
+   "id": 1258,
    "kind": "extra",
    "doc": "a:\n|+# c\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
    "candidate": [
@@ -211,6 +226,7 @@
    "newVsMain": true
   },
   {
+   "id": 1318,
    "kind": "extra",
    "doc": "a:\n|+ # c: [?\"x\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
    "candidate": [
@@ -224,6 +240,7 @@
    "newVsMain": true
   },
   {
+   "id": 1378,
    "kind": "extra",
    "doc": "a:\n|+# c: [x\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
    "candidate": [
@@ -237,6 +254,7 @@
    "newVsMain": true
   },
   {
+   "id": 1438,
    "kind": "extra",
    "doc": "a:\n|+ # c: [x\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
    "candidate": [
@@ -250,6 +268,7 @@
    "newVsMain": true
   },
   {
+   "id": 1498,
    "kind": "extra",
    "doc": "a:\n|+ # 4\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
    "candidate": [
@@ -263,6 +282,7 @@
    "newVsMain": true
   },
   {
+   "id": 1558,
    "kind": "extra",
    "doc": "a:\n|+# 2\nb: ?\"y # !bwref ghost\nc: !bwref x/foo\n",
    "candidate": [

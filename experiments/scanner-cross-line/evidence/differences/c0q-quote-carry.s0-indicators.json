@@ -1,0 +1,239 @@
+{
+ "counts": {
+  "inputs": 8316,
+  "valid": 2503,
+  "equal": 2354,
+  "lost": 149,
+  "lostFit": 149,
+  "badNameDocs": 0,
+  "extra": 0,
+  "extraUnfit": 0,
+  "newLost": 149,
+  "newExtra": 0,
+  "refusedListed": 4990,
+  "failed": 0,
+  "msPer10k": 69
+ },
+ "rows": [
+  {
+   "id": 60,
+   "kind": "lost",
+   "doc": "a: x, \"bar\nb: !bwref x/foo # c\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": true
+  },
+  {
+   "id": 61,
+   "kind": "lost",
+   "doc": "- x, \"bar\n- !bwref x/foo # c\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": true
+  },
+  {
+   "id": 62,
+   "kind": "lost",
+   "doc": "x:\n  a: x, \"bar\n  b: !bwref x/foo # c\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": true
+  },
+  {
+   "id": 74,
+   "kind": "lost",
+   "doc": "a: x, 'bar\nb: !bwref x/foo # c\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": true
+  },
+  {
+   "id": 75,
+   "kind": "lost",
+   "doc": "- x, 'bar\n- !bwref x/foo # c\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": true
+  },
+  {
+   "id": 76,
+   "kind": "lost",
+   "doc": "x:\n  a: x, 'bar\n  b: !bwref x/foo # c\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": true
+  },
+  {
+   "id": 228,
+   "kind": "lost",
+   "doc": "a: x,  \"bar\nb: !bwref x/foo # c\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": true
+  },
+  {
+   "id": 229,
+   "kind": "lost",
+   "doc": "- x,  \"bar\n- !bwref x/foo # c\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": true
+  },
+  {
+   "id": 230,
+   "kind": "lost",
+   "doc": "x:\n  a: x,  \"bar\n  b: !bwref x/foo # c\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": true
+  },
+  {
+   "id": 242,
+   "kind": "lost",
+   "doc": "a: x,  'bar\nb: !bwref x/foo # c\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": true
+  },
+  {
+   "id": 243,
+   "kind": "lost",
+   "doc": "- x,  'bar\n- !bwref x/foo # c\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": true
+  },
+  {
+   "id": 244,
+   "kind": "lost",
+   "doc": "x:\n  a: x,  'bar\n  b: !bwref x/foo # c\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": true
+  },
+  {
+   "id": 1977,
+   "kind": "lost",
+   "doc": "a: {!foo,'bar: 1,\n  b: !bwref x/foo # c\n}\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": true
+  },
+  {
+   "id": 1978,
+   "kind": "lost",
+   "doc": "a: !foo,'bar\nb: !bwref x/foo # c\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": true
+  },
+  {
+   "id": 1979,
+   "kind": "lost",
+   "doc": "- !foo,'bar\n- !bwref x/foo # c\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": true
+  },
+  {
+   "id": 1980,
+   "kind": "lost",
+   "doc": "x:\n  a: !foo,'bar\n  b: !bwref x/foo # c\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": true
+  },
+  {
+   "id": 1992,
+   "kind": "lost",
+   "doc": "a: foo !foo,\"bar\nb: !bwref x/foo # c\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": true
+  },
+  {
+   "id": 1993,
+   "kind": "lost",
+   "doc": "- foo !foo,\"bar\n- !bwref x/foo # c\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": true
+  },
+  {
+   "id": 1994,
+   "kind": "lost",
+   "doc": "x:\n  a: foo !foo,\"bar\n  b: !bwref x/foo # c\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": true
+  },
+  {
+   "id": 2006,
+   "kind": "lost",
+   "doc": "a: foo !foo,'bar\nb: !bwref x/foo # c\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": true
+  }
+ ]
+}

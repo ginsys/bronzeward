@@ -7,8 +7,8 @@ npm notice run 'vitest' run --root <checkout>/experiments/scanner-cross-line/../
 
  Test Files  2 passed (2)
       Tests  14 passed (14)
-   Start at  00:54:48
-   Duration  282ms (import 50%, tests 23%, transform 20%, worker 7%)
+   Start at  01:33:35
+   Duration  165ms (import 55%, tests 29%, transform 9%, worker 7%)
 
 
 == C1 (c1-state.ts) ==
@@ -20,8 +20,8 @@ npm notice run 'vitest' run --root <checkout>/experiments/scanner-cross-line/../
 
  Test Files  2 passed (2)
       Tests  14 passed (14)
-   Start at  00:54:49
-   Duration  650ms (transform 67%, tests 18%, import 13%, worker 1%)
+   Start at  01:33:36
+   Duration  171ms (import 52%, tests 29%, transform 11%, worker 7%)
 
 
 == C1c (c1c-full.ts) ==
@@ -30,9 +30,9 @@ npm notice run 'vitest' run --root <checkout>/experiments/scanner-cross-line/../
 
  RUN  v5.0.5 <checkout>/web
 
- ❯ src/zz-candidate-probe.test.ts (11 tests | 1 failed) 42ms
+ ❯ src/zz-candidate-probe.test.ts (11 tests | 1 failed) 27ms
    ❯ the references of a declared embedded document (11)
-     × a declared embedded document's references come from its decoded text only 11ms
+     × a declared embedded document's references come from its decoded text only 7ms
 
 ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
 
@@ -60,5 +60,5 @@ AssertionError: expected [] to deeply equal [ 'x/hidden' ]
 
  Test Files  1 failed | 1 passed (2)
       Tests  1 failed | 13 passed (14)
-   Start at  00:54:51
-   Duration  318ms (import 53%, tests 31%, transform 10%, worker 7%)
+   Start at  01:33:37
+   Duration  191ms (import 53%, tests 31%, transform 8%, worker 8%)

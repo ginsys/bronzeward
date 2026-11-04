@@ -12,10 +12,11 @@
   "newExtra": 2,
   "refusedListed": 1,
   "failed": 0,
-  "msPer10k": 881
+  "msPer10k": 609
  },
  "rows": [
   {
+   "id": 15,
    "kind": "extra",
    "doc": "a: |\n  [x\n  b: {\"k\":!t \"x # y\", r: !bwref x/foo}\n",
    "candidate": [
@@ -26,6 +27,7 @@
    "newVsMain": true
   },
   {
+   "id": 16,
    "kind": "extra",
    "doc": "a: |\n  \"y # !bwref ghost\nb: !bwref x/foo\n",
    "candidate": [
@@ -39,6 +41,7 @@
    "newVsMain": false
   },
   {
+   "id": 33,
    "kind": "extra",
    "doc": "a: |\n  b: ?\"z # !bwref ghost\nc: !bwref x/end\n",
    "candidate": [

@@ -5,7 +5,9 @@
 #
 # <work dir> takes the generated sets and the raw reports (bulk data, outside /tmp; the run needs a
 # few hundred MiB). evidence/ gets: table.md (every candidate over every set), differences/ (the
-# first documents each candidate gets wrong, per set), yaml-errors.txt (what the yaml package
+# first 20 documents each candidate gets wrong, per set: a summary), lists/ (every differing
+# document of a candidate that loses no name, by id), quote-carry-subset.txt (the failure cases of issue 592 and
+# every candidate's result on them), yaml-errors.txt (what the yaml package
 # refuses that go-yaml accepts), bench.txt (cost per call on a large draft) and web-tests.txt
 # (web's position tests against the C1 and C1c copies; the second run is expected to fail once, on
 # the undeclared folded block text).
@@ -18,16 +20,21 @@ fi
 work=$1
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 evidence="$here/evidence"
-mkdir -p "$evidence/differences" "$work/report"
+mkdir -p "$evidence/differences" "$evidence/lists" "$work/report"
 
 # Reports and differences of an earlier run (a renamed or removed candidate, other sets) must not
 # reach the new evidence: clear them, then let run/all write them again.
-rm -f "$work"/report/*.json "$evidence"/differences/*.json
+rm -f "$work"/report/*.json "$evidence"/differences/*.json "$evidence"/lists/*.tsv
 
 "$here/run/all" "$work" >"$work/run-all.log"
 cp "$work/table.md" "$evidence/table.md"
 
 node "$here/yaml-errors.mjs" "$work" >"$evidence/yaml-errors.txt"
+
+# The full list of differing documents of each candidate that loses no name (ids and names, no document text), and
+# the failure cases of issue 592.
+node "$here/difference-lists.mjs" "$work" "$evidence/lists" >/dev/null
+node "$here/quote-carry-subset.mjs" "$work" >"$evidence/quote-carry-subset.txt"
 
 (cd "$here" && node bench.mjs candidates/c0-main.mjs candidates/c1-state.ts candidates/c1c-state-nodestart.mjs candidates/c3-parse.mjs candidates/c3c1-parse-then-state.mjs) >"$evidence/bench.txt"
 

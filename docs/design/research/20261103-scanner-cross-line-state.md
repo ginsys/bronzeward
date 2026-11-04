@@ -48,8 +48,10 @@ experiments/scanner-cross-line/run/collect-evidence <work dir>
 ```
 
 `run/all` generates the sets, checks them against `MANIFEST`, runs the oracle, runs every candidate
-over every set and writes the table. `run/collect-evidence` copies the table, the first differences
-per candidate and set, the `yaml` package errors, the timings and the result of the web tests into
+over every set and writes the table. `run/collect-evidence` copies the table, the first 20
+differences per candidate and set (`differences/`, a summary), the full list of differing documents
+of each candidate that loses no name (`lists/`), the failure cases of #592 (`quote-carry-subset.txt`), the `yaml`
+package errors, the timings and the result of the web tests into
 `experiments/scanner-cross-line/evidence/`. A run needs a few hundred MiB in the work directory,
 which must be outside the checkout.
 
@@ -180,6 +182,17 @@ extra, 180 of them refused; S5: 9, 1 refused). `new lost` is 0 for C1, C1b and C
 
 (`evidence/table.md` has every column and every candidate, including C2, C3 and C3b.)
 
+**Every document where a candidate lists more than go-yaml** is in
+`evidence/lists/<candidate>.<set>.tsv`, one line per document, for each candidate that loses no
+name on any set (C1, C1b and C1c) and each set where it has a difference. The candidates that lose
+names (C0, C2, C3, C3b and C3+C1) have no list, because main alone loses 5232 documents of S1: the
+table counts theirs and `evidence/differences/` shows 20 of each. A line holds the document's index in the set (from 0; `sets/MANIFEST` pins the sets), `lost`,
+`extra`, `lost+extra` or `failed`, the names go-yaml lists, the names the candidate lists, and `new`
+when main gets the document right. A file holds no document text: regenerate the set and read the
+document at that index. The 20 rows per report in `evidence/differences/` are a summary with the
+document text, not the full list. The extras of C1c are in `lists/c1c-state-nodestart.s6-random.tsv`
+(164 documents), the only set where it has any.
+
 - **C1c meets the whole gate:** `lost` = 0, `new lost` = 0 and `new extra` = 0 on all eight sets,
   including the held-out S6. C1 meets only the first two parts. C1b leaves 3 new extras. C0, C2
   and C3 do not meet the first.
@@ -208,18 +221,51 @@ extra, 180 of them refused; S5: 9, 1 refused). `new lost` is 0 for C1, C1b and C
 
 ### Cost
 
-`bench.txt`, one scan of a synthetic draft on one machine. Earlier runs of this work gave
-3.2 to 6.4 ms for C0 and 4.6 to 5.3 ms for C1 at 9000 lines, so read the two as equal:
+`bench.txt`, one scan of a synthetic draft on one machine. These are the numbers of the committed
+run. A run varies: the run before it gave 3.4 ms for C0 and 6.2 ms for C1c at 9000 lines.
 
 | Lines | C0 | C1 | C1c | C3 | C3+C1 |
 |---|---|---|---|---|---|
-| 900 | 0.48 ms | 0.52 ms | 0.41 ms | 12.9 ms | 12.1 ms |
-| 9000 | 5.1 ms | 4.6 ms | 4.6 ms | 144 ms | 108 ms |
+| 900 | 0.33 ms | 0.39 ms | 0.31 ms | 11.6 ms | 7.8 ms |
+| 9000 | 2.9 ms | 3.6 ms | 3.5 ms | 84 ms | 92 ms |
 
-On 10000 small documents C0, C1 and C1c take 57 to 190 ms on the generated sets, C2 0.9 to 1.2 s,
-C3 1.1 to 1.6 s and C3+C1 1.3 to 2.2 s. The hand-written sets S3 and S5 have longer documents and take 0.5 to
-1.4 s for C0, C1 and C1c. The editor calls `references` on each change, so a 110 to 140 ms scan of
-a large draft is a visible delay, and 5 ms is not. C1 costs about the same as C0.
+At 9000 lines C1c took 1.2 times what C0 took in the committed run and 1.8 times in the run before
+it. That is 0.5 to 2.9 milliseconds more, and not a visible delay.
+
+On 10000 small documents C0, C1 and C1c take 53 to 125 ms on the generated sets, C2 0.7 to 1.0 s,
+C3 0.8 to 1.4 s and C3+C1 0.9 to 1.7 s (`table.md`, last column). The hand-written sets S3 and S5
+have longer documents and take 0.3 to 0.7 s for C0, C1 and C1c. The editor calls `references` on
+each change, so a scan of 84 to 92 ms for a large draft (C3, C3+C1) is a visible delay, and 3 to 6 ms
+is not.
+
+## Failure cases
+
+The issue asks the note to record two sets of failures.
+
+**The plain quote carry (#592).** The issue says that carrying an open quote from one line to the
+next broke 43 of the 2503 valid documents of the #560 set (S0). That attempt is not in the
+repository and I could not rebuild it. `candidates/c0q-quote-carry.ts` is a plain carry written for
+this work: the scanner on main, with the quote state kept from line to line and the rule that opens
+a quote left as it is. It gets 149 of the 2503 valid documents of S0 wrong, and main gets all 149
+right. That is more than three times the 43, so it is another carry with the same cause that the
+issue names: a quote opened by mistake, as in `a: foo ? "bar` and `{!foo,'bar: 1,`, now stays open
+on the next lines. The `# c` after the name in a later line is then no comment, the plain scalar
+reads `x/foo # c`, and that is no name. The 149 documents, with their go-yaml result, are in
+`evidence/quote-carry-subset.txt`, one line each: the index in S0, the document and its names.
+Over the same 149 documents, main, C1, C1b, C1c, C3, C3b and C3+C1 read the names go-yaml reads in
+all 149. C2 loses 3 of them. The plain carry loses all 149.
+
+**The five documents of the first attempt at #578.** Each is a case of S5 (`sets/cases.json`). Each
+ends with `b: ?"y # !bwref ghost` and `c: !bwref x/foo`, and go-yaml lists `x/foo` and no `ghost`
+for each. The table gives the state that the masker needs to read each as go-yaml does.
+
+| Case | Document (`/` is a line break) | State it needs |
+|---|---|---|
+| `596-indicator-digit` | `a: \|2` / `    text` / `  p: [x` | `block`: the header's digit. The content indent is the holder's column (0) plus 2, so `  p: [x` is block text and its `[` opens no flow. |
+| `596-indicator-digit-2` | `a: \|2` / `    first` / `  b: [x` | The same, with another key. |
+| `596-own-line-header` | `a:` / `  \|` / `  [x` | `holder`: the column of the key `a` (0), found by walking back from the header's line. The header's own column (2) would make `  [x` a flow opener. |
+| `596-bare-then-shallower` | `a:` / `    x` / `  [y` | `open` and `holder`: the bare `x` is a plain scalar of the key `a`, and `  [y` is deeper than that key, so it continues the scalar. The bare line gives no base column. |
+| `596-header-comment-no-blank` | `a: \|# comment: [x` / `  text` | `block`: the header ends in a comment, even with no blank before the `#`. The `[` in it is comment text and opens no flow. |
 
 ## Alternatives
 
@@ -240,7 +286,8 @@ on purpose (nothing it reads is re-encoded, stored or sent). I did not try it.
 ## Recommendation and decision
 
 Implement C1c. It meets the gate on every set, and a cross-check on independent sets (above)
-found no regression against main. It costs the same as main.
+found no regression against main. It costs a few milliseconds more than main on a large draft (Cost,
+above).
 
 **Decided by the lead, reversible by the owner: C1c, not C1b.** The options were C1c (no new lost
 or extra on any set) and C1b (3 new extras, all in documents the server refuses). Both leave a
