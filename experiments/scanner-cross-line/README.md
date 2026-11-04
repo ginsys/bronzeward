@@ -53,6 +53,13 @@ The same files back a second note, on [issue 603](https://github.com/ginsys/bron
   differences of set S8 by the spelling of the tag and by the server verdict. `tag-anchor.mjs`
   reads the report that `run/tag-causes` leaves for main. It splits the lost documents by the
   server verdict, the verbatim spelling and an anchor between the tag and its value.
+- `cmp-reports.mjs` — compares two reports of `cmp.mjs` for one set: one made with the scanner
+  before a change, one after it. It prints both counts and the ids that changed (lost and extra
+  names fixed or new, and the documents go-yaml refuses where the scanner lists a name). It
+  exits 1 when a document starts to lose or to list a name. The acceptance run of
+  [issue 605](https://github.com/ginsys/bronzeward/issues/605) used it on set S8: `node cmp.mjs
+  s8.json s8.oracle.json <scanner before> before.json`, the same with `candidates/c0-main.mjs`
+  for after.json, then `node cmp-reports.mjs before.json after.json`.
 - `evidence/` — the collected run: `table.md` (every candidate over every set), `differences/`
   (the first 20 documents each candidate gets wrong, per set: a summary), `lists/` (every
   differing document of a candidate that loses no name, by index in the set, one file per
