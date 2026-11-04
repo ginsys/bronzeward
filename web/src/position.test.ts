@@ -190,3 +190,222 @@ describe("the references of the documents the go-yaml oracle read", () => {
     expect(references("a: |\n  x\n  \u00a0\nb: !bwref x/foo\n")).toEqual(["x/foo"]);
   });
 });
+
+// ginsys/bronzeward#605: go-yaml reads one anchor between the tag and the value (`!bwref &e x/foo`).
+// Every document below was checked against go-yaml v3.0.5 (experiments/scanner-cross-line).
+describe("an anchor between the tag and the value", () => {
+  test("the value on the same line, plain", () => {
+    expect(references("a: !bwref &e x/foo\n")).toEqual(["x/foo"]);
+  });
+  test("the value on the next line", () => {
+    expect(references("a: !bwref &e\n  x/foo\n")).toEqual(["x/foo"]);
+  });
+  test("a double-quoted value", () => {
+    expect(references('a: !bwref &e "x/foo"\n')).toEqual(["x/foo"]);
+  });
+  test("a single-quoted value", () => {
+    expect(references("a: !bwref &e 'x/foo'\n")).toEqual(["x/foo"]);
+  });
+  test("the anchor on the line after the tag", () => {
+    expect(references("a: !bwref\n  &e x/foo\n")).toEqual(["x/foo"]);
+  });
+  test("a block scalar value", () => {
+    expect(references("a: !bwref &e |-\n  x/foo\n")).toEqual(["x/foo"]);
+  });
+  test("a sequence entry and a flow collection", () => {
+    expect(references("- !bwref &e x/foo\n")).toEqual(["x/foo"]);
+    expect(references("a: [!bwref &e x/foo]\n")).toEqual(["x/foo"]);
+    expect(references("{a: !bwref &e x/foo}\n")).toEqual(["x/foo"]);
+  });
+  test("a comment after the anchor, and a tab after it", () => {
+    expect(references("a: !bwref &e # c\n  x/foo\n")).toEqual(["x/foo"]);
+    expect(references("a: !bwref &e\tx/foo\n")).toEqual(["x/foo"]);
+  });
+  test("the anchor before the tag is the control and keeps working", () => {
+    expect(references("a: &e !bwref x/foo\n")).toEqual(["x/foo"]);
+  });
+
+  // go-yaml refuses each of these documents or reads no name from it, so the scanner lists none.
+  test("a second anchor, before or after the tag", () => {
+    expect(references("a: &a !bwref &b x/foo\n")).toEqual([]);
+    expect(references("a: !bwref &a &b x/foo\n")).toEqual([]);
+  });
+  test("a second tag is not read", () => {
+    expect(references("a: !bwref !x x/foo\n")).toEqual([]);
+    expect(references("a: !bwref &e !x x/foo\n")).toEqual([]);
+  });
+  test("an anchor name go-yaml does not accept, and an anchor with no value", () => {
+    expect(references("a: !bwref &e.1 x/foo\n")).toEqual([]);
+    expect(references("a: !bwref &e: x/foo\n")).toEqual([]);
+    expect(references("a: !bwref &e\nb: c\n")).toEqual([]);
+  });
+  test("a tagged key stays unlisted, with or without the anchor", () => {
+    expect(references("!bwref x/foo: v\n")).toEqual([]);
+    expect(references("!bwref &e x/foo: v\n")).toEqual([]);
+  });
+
+  // The guard against a second anchor looks back 4096 characters. Past that it misses the first
+  // anchor, so the scanner lists a name in a document that go-yaml refuses (a known limit; the
+  // same document with the anchor within reach lists none).
+  test("a first anchor beyond the look-back is missed", () => {
+    expect(references(`a: &a${"\n".repeat(4100)}  !bwref &b x/foo\n`)).toEqual(["x/foo"]);
+    expect(references("a: &a\n\n  !bwref &b x/foo\n")).toEqual([]);
+  });
+});
+
+// ginsys/bronzeward#605: where a plain value after an anchor ends. In block context a comma, bracket
+// or brace is text, so `x/foo,bar` is one scalar and no name. In flow context it ends the value. The
+// value is read as a reference only when the scalar clearly ends. A shape where a more indented line
+// can continue it names nothing, as on main. Each document that names a reference was checked
+// against go-yaml v3.0.5 (experiments/scanner-cross-line).
+describe("a plain value after an anchor, in block and in flow context", () => {
+  test.each([
+    ["a comma", "x/foo,bar"],
+    ["a comma and a blank", "x/foo, bar"],
+    ["a closing bracket", "x/foo]"],
+    ["a closing brace", "x/foo}"],
+    ["a colon and a comma", "x/foo:,y"],
+    ["a second word", "x/foo bar"],
+  ])("block context: %s makes one scalar, which is no name", (_what, value) => {
+    expect(references(`k: !bwref &e ${value}\n`)).toEqual([]);
+    expect(references(`- !bwref &e ${value}\n`)).toEqual([]);
+  });
+
+  test("block context: the value on the next line, and a continuation line", () => {
+    expect(references("k: !bwref &e\n  x/foo,bar\n")).toEqual([]);
+    expect(references("k: !bwref &e x/foo\n  bar\n")).toEqual([]);
+  });
+
+  test.each([
+    ["a comma", "  ,bar"],
+    ["a closing bracket", "  ]bar"],
+    ["a dash", "  - y"],
+    ["a question mark", "  ? y"],
+    ["a second word", "  bar"],
+    ["a no-break space", "  \u00a0bar"],
+    ["a no-break space and a colon", "  bar:\u00a0z"],
+    ["a no-break space alone", "  \u00a0"],
+  ])("block context: a more indented line that starts with %s continues the scalar", (_what, next) => {
+    expect(references(`k: !bwref &e x/foo\n${next}\n`)).toEqual([]);
+  });
+
+  test("block context: the scalar ends at the end of the text, a marker, a key or a less indented line", () => {
+    for (const doc of [
+      "k: !bwref &e x/foo",
+      "k: !bwref &e x/foo\n",
+      "k: !bwref &e x/foo\n---\n",
+      "k: !bwref &e x/foo\n...\n",
+      "k: !bwref &e x/foo\nj: v\n",
+      "k: !bwref &e x/foo\n\n# c\nj: v\n",
+      "a:\n  k: !bwref &e x/foo\nj: v\n",
+      "- !bwref &e x/foo\n- y\n",
+      "k:\n  - !bwref &e x/foo\n  - y\n",
+      "? !bwref &e x/foo\n: v\n",
+      "- k: !bwref &e x/foo\n  j: v\n",
+    ])
+      expect(references(doc), doc).toEqual(["x/foo"]);
+  });
+
+  // go-yaml lists x/foo for each of these, as for the same documents with the anchor before the tag.
+  // The scanner lists none: a more indented line can continue the scalar, and the compact column of
+  // `- - x` and `? - x` is not read here. The same documents lose the name on main.
+  test("block context: a compact collection names nothing", () => {
+    expect(references("- - !bwref &e x/foo\n  - y\n")).toEqual([]);
+    expect(references("? - !bwref &e x/foo\n  - bar\n: v\n")).toEqual([]);
+  });
+
+  test("block context: a value on the line of a document marker is the root scalar", () => {
+    expect(references("--- !bwref &e x/foo\nbar\n")).toEqual([]);
+    expect(references("--- !bwref &e x/foo\n")).toEqual(["x/foo"]);
+    expect(references("--- !bwref &e x/foo\n---\n")).toEqual(["x/foo"]);
+    expect(references("!bwref &e x/foo\nbar\n")).toEqual([]);
+  });
+
+  test("flow context: a continuation line needs no indentation, and a flow indicator ends the value", () => {
+    expect(references("k: [!bwref &e x/foo\nbar]\n")).toEqual([]);
+    expect(references("k: [!bwref &e x/foo\n  , bar]\n")).toEqual(["x/foo"]);
+    expect(references("k: [!bwref &e x/foo\n]\n")).toEqual(["x/foo"]);
+  });
+
+  test("flow context: a later entry does not hide the continuation of the scalar", () => {
+    expect(references("k: [!bwref &e x/foo\nbar, k: v]\n")).toEqual([]);
+    expect(references("k: [!bwref &e x/foo\n bar:]\n")).toEqual([]);
+  });
+
+  test("flow context: a no-break space is text, not a blank", () => {
+    expect(references("k: [!bwref &e x/foo\n  \u00a0\n  ]\n")).toEqual([]);
+  });
+
+  // A flow line that starts with the value indicator (a colon before a blank) ends the scalar, so the
+  // tagged scalar is an explicit key. A colon before a flow indicator is text for go-yaml v3.0.5.
+  test("flow context: an explicit key ends at the value indicator on the next line", () => {
+    expect(references("k: {? !bwref &e x/foo\n: v}\n")).toEqual(["x/foo"]);
+    expect(references("k: [? !bwref &e x/foo\n: v]\n")).toEqual(["x/foo"]);
+    expect(references("k: {? !bwref &e x/foo\n:]}\n")).toEqual([]);
+  });
+
+  test("flow context: a colon before a flow indicator stays in the value, which is no name", () => {
+    expect(references("k: [!bwref &e x/foo:]\n")).toEqual([]);
+    expect(references("k: {!bwref &e x/foo:, j: v}\n")).toEqual([]);
+  });
+
+  test.each([
+    ["a comma", "[!bwref &e x/foo, bar]"],
+    ["a comma with no blank", "[!bwref &e x/foo,bar]"],
+    ["a closing bracket", "[!bwref &e x/foo]"],
+    ["a closing brace", "{k: !bwref &e x/foo}"],
+    ["a flow map", "{k: !bwref &e x/foo, j: l}"],
+    ["a nested collection", "[[!bwref &e x/foo, y], z]"],
+    ["the value on the next line", "[!bwref &e\n  x/foo, y]"],
+  ])("flow context: %s ends the value", (_what, flow) => {
+    expect(references(`k: ${flow}\n`), flow).toEqual(["x/foo"]);
+  });
+
+  test("flow context: a second word and a continuation line make one scalar, which is no name", () => {
+    expect(references("k: [!bwref &e x/foo bar]\n")).toEqual([]);
+    expect(references("k: [!bwref &e x/foo\n  bar]\n")).toEqual([]);
+  });
+
+  test("block context after a closed flow collection", () => {
+    expect(references("a: [x]\nb: !bwref &e y/foo,z\n")).toEqual([]);
+  });
+
+  // `!!bwref` and `!r!bwref` are other tags, so go-yaml lists no name, but the scan records their
+  // `!bwref` tail. A value after an anchor is read only for a tag that starts at the tail.
+  test("a tag spelled through a handle names nothing after an anchor", () => {
+    expect(references("a: !!bwref &e x/foo\n")).toEqual([]);
+    expect(references("a: !r!bwref &e x/foo\n")).toEqual([]);
+    expect(references("a: !!bwref &e x/bar\nb: !bwref x/foo\n")).toEqual(["x/foo"]);
+    expect(references("k:\n  a: !!bwref &e x/foo\n")).toEqual([]);
+  });
+
+  // go-yaml v3.0.5 lists x/foo for a tag right after the colon of a quoted key. The scanner lists none,
+  // as on main: a remaining lost name, never an extra one. A plain key makes `a:!bwref` one scalar.
+  test("a tag right after a colon names nothing after an anchor", () => {
+    expect(references('{"a":!bwref &e x/foo}\n')).toEqual([]);
+    expect(references('{"a": !bwref &e x/foo}\n')).toEqual(["x/foo"]);
+    expect(references("{a:!bwref &e x/foo}\n")).toEqual([]);
+  });
+
+  // A key that starts with U+00A0 or a byte order mark has text at column 0, not indentation, so a
+  // line with one space continues the value (go-yaml lists none) and a key line ends it. Checked
+  // against go-yaml v3.0.5. Main lists none after an anchor, so none is the old result.
+  test.each([
+    ["no-break space", " "],
+    ["byte order mark", "﻿"],
+  ])("indentation after a %s at column 0 is counted in spaces", (_, lead) => {
+    expect(references(`${lead}k: !bwref &e x/foo\n bar\n`)).toEqual([]);
+    expect(references(`${lead}k: !bwref &e x/foo\n  bar\n`)).toEqual([]);
+    expect(references(`${lead}k: !bwref &e x/foo\n bar\nj: v\n`)).toEqual([]);
+    expect(references(`${lead}k: !bwref &e x/foo\nj: v\n`)).toEqual(["x/foo"]);
+    expect(references(`${lead}k: !bwref &e x/foo\n j: v\n`)).toEqual(["x/foo"]);
+    expect(references(`${lead}k: !bwref &e x/foo\n`)).toEqual(["x/foo"]);
+  });
+
+  // A value with no anchor after the tag is read as before: these two lists match main and go-yaml.
+  test("a value with no anchor after the tag is read as before", () => {
+    expect(references("- - !bwref x/foo\n  - y\n")).toEqual(["x/foo"]);
+    expect(references("? - !bwref x/foo\n  - bar\n: v\n")).toEqual(["x/foo"]);
+    expect(references("- - &e !bwref x/foo\n  - y\n")).toEqual(["x/foo"]);
+  });
+});
