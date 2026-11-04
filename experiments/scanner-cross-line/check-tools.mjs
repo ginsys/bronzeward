@@ -54,6 +54,36 @@ expect("a scanner failure that stays passes", exitOf(report([crash(1), control],
 expect("a scanner failure that is gone passes", exitOf(report([crash(1), control], { failed: 1 }), report([control])), 0);
 expect("a failure in another document fails", exitOf(report([crash(1), control], { failed: 1 }), report([crash(3), control], { failed: 1 })), 1);
 
+// The counts above stand for what cmp.mjs writes. This case runs cmp.mjs itself on a set of one
+// document that the oracle accepts, once with a scanner that throws and once with one that works.
+// A crash must not change `valid`: if it did, the two reports would differ in a count and the tool
+// would exit 2 for both pairs. The nested run skips this case, as the copy holds no cmp.mjs.
+if (process.env.CHECK_TOOLS_NESTED === undefined) {
+  const cmp = fileURLToPath(new URL("cmp.mjs", import.meta.url));
+  const files = { set: "set.json", oracle: "oracle.json", throws: "throws.mjs", works: "works.mjs" };
+  const path = (k) => join(dir, files[k]);
+  writeFileSync(path("set"), JSON.stringify(["a: 1\n"]));
+  writeFileSync(path("oracle"), JSON.stringify([{ tags: [], err: "", unfit: false, bad: [] }]));
+  writeFileSync(path("throws"), 'export const references = () => { throw new Error("boom"); };\n');
+  writeFileSync(path("works"), "export const references = () => [];\n");
+  const run = (k) => {
+    const out = join(dir, `e2e-${k}.json`);
+    execFileSync("node", [cmp, path("set"), path("oracle"), path(k), out], { stdio: "pipe" });
+    return out;
+  };
+  const exit2 = (before, after) => {
+    try {
+      execFileSync("node", [tool, before, after], { stdio: "pipe" });
+      return 0;
+    } catch (e) {
+      return e.status;
+    }
+  };
+  const [thrown, worked] = [run("throws"), run("works")];
+  expect("cmp.mjs: a scanner that starts to throw fails", exit2(worked, thrown), 1);
+  expect("cmp.mjs: a scanner that stops throwing passes", exit2(thrown, worked), 0);
+}
+
 // The checkout path can hold a space or a non-ASCII character. A copy of both tools in such a
 // directory must give the same results. The nested run skips this case.
 if (process.env.CHECK_TOOLS_NESTED === undefined) {
