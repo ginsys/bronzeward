@@ -746,7 +746,9 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
     void read<Revision>(`/fragment-revisions/${enc(revision)}`, () => live).then((r) => {
       if (!live) return;
       // A failed read leaves the revision unread: Show their change still waits for it (review).
+      // A reread of the revision already loaded ends here: `reading` goes off, or Copy my text stays ignored.
       if (r?.kind !== "ok") {
+        if (loaded === revision) act({ kind: "reading", on: false });
         setFailed(true);
         return setNote("The entry's revision could not be read.");
       }
@@ -754,7 +756,10 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
       // began before it, and it may name the revision from before the write, since the draft refresh
       // has not answered. It is not read again at once: it fails without a note, and the draft read
       // that names the new revision reads it again (ginsys/bronzeward#559 PR review).
-      if (staleRead(finished.current, done)) return setFailed(true);
+      if (staleRead(finished.current, done)) {
+        if (loaded === revision) act({ kind: "reading", on: false });
+        return setFailed(true);
+      }
       setLoaded(revision);
       // The draft revision shown when the read answers: one that changed only another entry while
       // it was pending still names this text, and Copy my text compares with it (PR review).

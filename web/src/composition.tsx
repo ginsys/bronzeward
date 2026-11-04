@@ -139,12 +139,16 @@ export function ProfilePane({ draft, entry, seeChange, claim = () => {}, shown =
     void read<S["ProfileRevisionBody"]>(`/profile-revisions/${encodeURIComponent(revision)}`, () => live).then((r) => {
       if (!live) return;
       if (r?.kind !== "ok") {
+        if (loaded === revision) act({ kind: "reading", on: false });
         setFailed(true);
         return setNote("The entry's revision could not be read.");
       }
       // A write finished while this read was pending: the editor drops its answer, so the revision stays unread
       // and the draft read that names the new revision reads it again (ginsys/bronzeward#559 review).
-      if (staleRead(finished.current, done)) return setFailed(true);
+      if (staleRead(finished.current, done)) {
+        if (loaded === revision) act({ kind: "reading", on: false });
+        return setFailed(true);
+      }
       setLoaded(revision);
       act({ kind: "read", text: pinned(EMPTY, r.data.fragments), since: done, revision: drafted.current, id: revision });
     });
@@ -598,10 +602,14 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
     void read<S["AssignmentRevisionBody"]>(`/assignment-revisions/${enc(revision)}`, () => live).then((r) => {
       if (!live) return;
       if (r?.kind !== "ok") {
+        if (loaded === revision) act({ kind: "reading", on: false });
         setFailed(true);
         return setNote("The entry's revision could not be read.");
       }
-      if (staleRead(finished.current, done)) return setFailed(true);
+      if (staleRead(finished.current, done)) {
+        if (loaded === revision) act({ kind: "reading", on: false });
+        return setFailed(true);
+      }
       setLoaded(revision);
       act({ kind: "read", text: withLists(EMPTY, fromRevision(r.data)), since: done, revision: drafted.current, id: revision });
     });
