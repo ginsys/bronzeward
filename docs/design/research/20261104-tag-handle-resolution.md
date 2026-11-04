@@ -14,12 +14,18 @@ name that the scanner lists and go-yaml does not read is a wrong hint. A name th
 and the scanner does not list is a hidden reference: the editor shows the draft as not using a
 name that it uses.
 
+This record uses two terms for a document that the server does not accept.
+
+- **go-yaml parse error:** go-yaml fails to parse the document. The server reads no reference in
+  it, so the server column of the tables says n/a.
+- **server-refused:** `internal/ingest` refuses a document that go-yaml parses.
+
 The server limits the damage. It accepts `!bwref` and the YAML core tags only (`refTag` at line 41
-and `coreTags` at line 45). It refuses every other tag (`RuleLocalTag`, lines 148 and 149). So a
-wrong hint is expected in documents that the server refuses anyway. A hidden reference matters
-in a document that the server accepts. The cases are therefore split by the verdict of the
-server. In every input of this record, the wrong hints fall on refused documents. This is a
-measured result, not a proof.
+and `coreTags` at line 45). A document with any other tag is server-refused (`RuleLocalTag`,
+lines 148 and 149). So a wrong hint is expected in server-refused documents and in go-yaml parse
+errors. A hidden reference matters in a document that the server accepts. The cases are therefore
+split by the verdict of the server. In every input of this record, the wrong hints fall on
+server-refused documents or on go-yaml parse errors. This is a measured result, not a proof.
 
 Decision enabled: the owner chooses one of three options. The scanner resolves tags like go-yaml
 (A), the gap is documented as accepted (B), or the scanner recognises one more spelling (C).
@@ -33,11 +39,12 @@ Decision enabled: the owner chooses one of three options. The scanner resolves t
 | Scanner, column "main" | `web/src/position.ts` at 3e00e342 |
 | Scanner, column "before" | `web/src/position.ts` at 1cf21917, the last commit before [#602](https://github.com/ginsys/bronzeward/pull/602) |
 | Case file | `sets/tag-handle-cases.json`, 47 cases, all synthetic |
-| Sweep | set S8, 227,762 synthetic documents, 61,086 of them accepted by go-yaml |
+| Sweep | set S8, 227,762 synthetic documents, 61,086 of them parsed by go-yaml |
 
 The server probe is a second Go module. It calls `ingest.Stored` with every name go-yaml reads
-declared. So an undeclared name never causes a refusal in this record. `Stored` hides the rule
-behind its verdict, so the probe reports accepted or refused and nothing finer.
+declared. So an undeclared name never makes a document server-refused in this record. `Stored`
+hides the rule behind its verdict, so the probe reports accepted or server-refused and nothing
+finer. The tables read its verdict only for documents that go-yaml parses.
 
 ## Reproduction
 
@@ -78,32 +85,36 @@ name that go-yaml does not. Main and the earlier commit give the same result on 
 | `%TAG !x! !`, then `a: !x!bw%72ef x/foo` | x/foo | accepts | lost |
 | `%TAG !x! !`, then `a: !x!bwref x/foo` (handle maps to the primary prefix) | x/foo | accepts | listed |
 | `%YAML 1.1` or `%TAG` before a plain `!bwref` (issue) | x/foo | accepts | listed |
-| `a: !!bwref x/foo` (issue) | none (parses) | refuses | extra x/foo |
-| `%TAG ! !x-`, then `a: !bwref x/foo` (issue) | none (parses) | refuses | extra x/foo |
-| `%TAG !r! tag:x,2000:`, then `a: !r!bwref x/foo` | none (parses) | refuses | extra x/foo |
-| Two documents, the second uses a handle that only the first declares | parse error | refuses | extra x/foo |
-| `%YAML 1.2` or `%FOO` before a plain `!bwref` | parse error | refuses | extra x/foo |
+| `a: !!bwref x/foo` (issue) | none (parses) | server-refused | extra x/foo |
+| `%TAG ! !x-`, then `a: !bwref x/foo` (issue) | none (parses) | server-refused | extra x/foo |
+| `%TAG !r! tag:x,2000:`, then `a: !r!bwref x/foo` | none (parses) | server-refused | extra x/foo |
+| Two documents, the second uses a handle that only the first declares | go-yaml parse error | n/a | extra x/foo |
+| `%YAML 1.2` or `%FOO` before a plain `!bwref` | go-yaml parse error | n/a | extra x/foo |
 | `a: !bwref &e x/foo` (found by the sweep, see below) | x/foo | accepts | lost |
-| `!bwref x/foo: v` (tagged key) | x/foo | refuses | lost |
+| `!bwref x/foo: v` (tagged key) | x/foo | server-refused | lost |
 
 Tally of the 47 cases, with the server verdict as the row and the scanner on main as the column.
 
 | Server | Scanner lists the same | Scanner loses a name | Scanner adds a name |
 |---|---|---|---|
-| Accepts (22 cases) | 10 | 12 | 0 |
-| Refuses (25 cases) | 8 | 1 | 16 |
+| Accepted (22 cases) | 10 | 12 | 0 |
+| Server-refused (14 cases) | 5 | 1 | 8 |
+| go-yaml parse error (11 cases) | 3 | 0 | 8 |
 
 Of the 12 accepted losses, 9 are about how a tag resolves: the verbatim form, a prefix that
 splits the name, and a percent escape. The other 3 are the tag-then-anchor shape, which has
-nothing to do with handles (see the separate finding). The single refused loss is the tagged key.
+nothing to do with handles (see the separate finding). The single server-refused loss is the
+tagged key. The 16 cases with an extra name are 8 server-refused and 8 go-yaml parse errors.
 
 ## Sweep of set S8
 
 Set S8 writes a list of tag spellings (plain, through a handle, verbatim) at many places where a
-property can stand, with and without `%TAG` and `%YAML` directives. The section after the facts says which spellings it leaves out. The oracle reads 61,086 of its 227,762 documents as valid. The
-table groups the differences of the scanner on main by the spelling of the tag.
+property can stand, with and without `%TAG` and `%YAML` directives. The section after the facts
+says which spellings it leaves out. Go-yaml parses 61,086 of its 227,762 documents. The table
+groups the differences of the scanner on main, for those 61,086 documents, by the spelling of the
+tag.
 
-| Spelling | Directive | Lost, server accepts | Lost, server refuses | Extra, server accepts | Extra, server refuses |
+| Spelling | Directive | Lost, server accepts | Lost, server-refused | Extra, server accepts | Extra, server-refused |
 |---|---|---|---|---|---|
 | plain `!bwref` | none | 12 | 12 | 0 | 1,141 |
 | plain `!bwref` | yes | 0 | 0 | 0 | 29 |
@@ -113,16 +124,18 @@ table groups the differences of the scanner on main by the spelling of the tag.
 | secondary handle `!!bwref` | yes | 0 | 0 | 0 | 222 |
 | named handle `!x!bwref` | yes | 0 | 0 | 0 | 61 |
 
-Totals on main: 420 documents lose a name (300 that the server accepts and 120 that it refuses)
+The columns "server refuses" in `evidence/tag-causes.txt` are the server-refused columns above.
+
+Totals on main: 420 documents lose a name (300 that the server accepts and 120 that are server-refused)
 and 1,573 documents list an extra name (none that the server accepts). The scanner before #602
 gives 538 lost (341 accepted) and 16,318 extra (none accepted). So the scanner before #602 loses
 118 more documents and lists extra names in 14,745 more.
 
 These totals cover the 61,086 documents that go-yaml parses. They do not count the documents that
-go-yaml refuses. In 85,552 of those, the scanner on main still lists a name, and in 165,870 the
-scanner before #602 does. Such a listing is an extra name by the definition above, but the server
-also refuses these documents, so the sweep does not count them. Only the case table counts a
-listing in a refused document (the 16 refused cases with an extra name).
+go-yaml fails to parse. In 85,552 of those, the scanner on main still lists a name, and in 165,870
+the scanner before #602 does. Such a listing is an extra name by the definition above. The sweep
+leaves it out because go-yaml reads no reference in such a document. The case table does include
+go-yaml parse errors: 8 of its 16 cases with an extra name.
 
 Three facts follow.
 
@@ -132,14 +145,15 @@ Three facts follow.
    loss count of the scanner on main. A directive is present in 252 of those, and the verbatim
    spelling causes them.
 2. No extra name falls on a document that the server accepts. The sweep found none in 1,573
-   documents, and the 16 extra cases of the case table are all refused. A likely reason is that
+   documents, and the 16 extra cases of the case table are all server-refused or go-yaml parse
+   errors. A likely reason is that
    the scanner lists a tag only if its text ends in `!bwref`. A handle that changes the meaning
    of that text then gives a tag that is neither `!bwref` nor a core tag. This reason is not
    proven in general.
 3. Of the 300 accepted losses on main, 288 are verbatim spellings and 12 are the plain
    tag-then-anchor shape. Of the 288, 12 also have an anchor after the tag (`a: !<!bwref> &e
    x/foo`), so two gaps cause them. In all, 24 accepted losses carry the anchor shape and 276
-   do not. The other 120 losses are in documents that the server refuses. The table above groups
+   do not. The other 120 losses are in server-refused documents. The table above groups
    a document by its tag spelling, so those 12 count as verbatim there. `evidence/tag-anchor.txt`
    holds the split: 12 plain with an anchor, 12 verbatim with an anchor, 276 verbatim without.
 
@@ -163,8 +177,7 @@ then a plain scalar made of words. It reads `&e x/foo` as that scalar. The name 
 141 then rejects it, so nothing is recorded. The tag has no handle, so #603 does not own this
 case. The sweep found 24 such documents that the server accepts: 12 with a plain tag and 12
 with a verbatim tag. The tagged key `!bwref x/foo: v`
-is also lost, but the server refuses it (`RuleTagPlacement`, line 113), so the document is
-refused anyway.
+is also lost, but the document is server-refused (`RuleTagPlacement`, line 113).
 
 Draft issue body, for the owner to file:
 
@@ -193,9 +206,9 @@ changes one entry. The directives stand before the `---` of their document and l
 document ends. The next document starts with the defaults again. The scanner also reads the verbatim
 form and decodes percent escapes before it compares the result with `!bwref`.
 - Effect, by design and not measured: it would close the 9 accepted tag resolution losses in the
-  case table. It would also remove the extra names of the 8 refused cases where go-yaml parses
-  the document and resolves the tag to another tag. In the other 8 refused cases go-yaml fails
-  to parse the document. Resolution would remove the extra name there only if the cause is the
+  case table. It would also remove the extra names of the 8 server-refused cases, where go-yaml
+  parses the document and resolves the tag to another tag. The other 8 cases with an extra name
+  are go-yaml parse errors. Resolution would remove the extra name there only if the cause is the
   tag, for example a handle that no directive declares. It would not remove it where a directive
   is invalid, such as `%YAML 1.2` or `%FOO`. That needs directive validation and no listing
   after a parse error. This record did not sort the 8 cases further.
@@ -207,7 +220,7 @@ form and decodes percent escapes before it compares the result with `!bwref`.
   (`directive-after-document-end`) agrees with go-yaml today and must keep agreeing. A
   directive-like line in a literal block or in a comment declares nothing. In those two cases
   (`directive-in-literal-text` and `directive-in-comment`) the handle stays undeclared and
-  go-yaml refuses the document. The scanner lists an extra name today, so they are existing gaps
+  the result is a go-yaml parse error. The scanner lists an extra name today, so they are existing gaps
   that A would close. They are not regression controls.
 
 **B. Document the gap as accepted.** The scanner stays as it is. The editor specification and the
@@ -232,7 +245,7 @@ are not recognised.
 Choose A if the scanner is to match go-yaml on every tag spelling in a document that the server
 accepts. Of the three options, it is the only one designed to close the three kinds of accepted
 tag loss, and it does so with one rule, the one go-yaml applies. Make it one change with its own commit, the new generator
-families, and this gate: no loss that a tag spelling causes in a document go-yaml accepts, no new
+families, and this gate: no loss that a tag spelling causes in a document that the server accepts, no new
 loss and no new extra name compared with main. The gate leaves out the tag-then-anchor gap. That
 gap is a separate fix. Until it lands, a sweep of whole documents still shows its 24 losses.
 
@@ -249,7 +262,7 @@ hash changed in `MANIFEST`.
 - The oracle is go-yaml v3.0.5, the version the server pins. Another version can read a corner
   case differently.
 - The server verdict comes from `ingest.Stored` with every name declared. It does not say which
-  rule refused a document.
+  rule made a document server-refused.
 - Set S8 reaches only the shapes its generator writes. The case file adds the shapes found by
   reading go-yaml. No random set was run for tags. A shape that nobody thought of can still exist.
 - The cost of A is an estimate. No prototype was written, because product code is out of scope.

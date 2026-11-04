@@ -48,16 +48,16 @@ const diff = (got, want) => {
   return lost && extra ? "lost+extra" : lost ? "lost" : extra ? "extra" : "=";
 };
 const rows = ["| case | source | go-yaml | server | main | before |", "|---|---|---|---|---|---|"];
-const tally = { accepted: { lost: 0, extra: 0, same: 0 }, refused: { lost: 0, extra: 0, same: 0 } };
+const tally = { accepted: { lost: 0, extra: 0, same: 0 }, "server-refused": { lost: 0, extra: 0, same: 0 }, "parse error": { lost: 0, extra: 0, same: 0 } };
 cases.forEach((c, i) => {
   const o = oracle[i];
-  const refused = o.err !== "";
+  const refused = o.err !== ""; // go-yaml parse error
   const want = o.tags;
   const m = main.references(c.doc);
   const b = old.references(c.doc);
   const cell = (got) => (refused ? (got.length > 0 ? `extra ${show(got)}` : "=") : `${show(got)} (${diff(got, want)})`);
-  rows.push(`| ${c.name} | ${c.source} | ${refused ? "refused" : show(want)} | ${server[i].accepted ? "accepted" : "refused"} | ${cell(m)} | ${cell(b)} |`);
-  const k = server[i].accepted ? "accepted" : "refused";
+  const k = refused ? "parse error" : server[i].accepted ? "accepted" : "server-refused";
+  rows.push(`| ${c.name} | ${c.source} | ${refused ? "parse error" : show(want)} | ${refused ? "n/a" : k} | ${cell(m)} | ${cell(b)} |`);
   const d = refused ? (m.length > 0 ? "extra" : "=") : diff(m, want);
   tally[k][d === "=" ? "same" : d.startsWith("lost") ? "lost" : "extra"]++;
 });
@@ -68,6 +68,8 @@ const header = [
   `oracle module: ${listed(here)}`,
   `server probe module: ${listed(join(here, "serverprobe"))}`,
   `main = web/src/position.ts, last changed at ${lastChange}. before = web/src/position.ts at ${before}.`,
+  "go-yaml parse error: go-yaml fails to parse the document. The server column is n/a, because the server reads no reference.",
+  "server-refused: internal/ingest refuses a document that go-yaml parses.",
   "",
 ];
 writeFileSync(tablePath, `${header.join("\n")}\n${rows.join("\n")}\n`);
