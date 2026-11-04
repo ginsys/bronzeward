@@ -235,7 +235,7 @@ func TestOperationWatch(t *testing.T) {
 		// A cancelled operation records neither result nor error: its cause is its last event's.
 		{"apply-config", "cancelled", "null", "null",
 			"Cancelled at 2026-11-01 06:00:03 UTC (server): resolution.\n" +
-				"Nothing more is sent for this plan. The plan names the command for a new one: bronzewardctl plan show 'pln_BWSYNTH'"},
+				"Nothing more is sent for this plan. Create a new plan: bronzewardctl plan create --release <release> --machine 'mch_a' --operation <operation>"},
 	} {
 		pages := all
 		if c.state == "cancelled" {
@@ -302,5 +302,34 @@ func TestOperationWatch(t *testing.T) {
 
 	if code, _, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "0s"); code != 2 || !strings.Contains(errOut, "--timeout: give a positive duration") {
 		t.Errorf("--timeout 0s: exit %d, %q", code, errOut)
+	}
+}
+
+// TestCancelledNextStep: the next step after a cancelled operation names the command that makes a new plan,
+// never plan show (a plan whose operation was cancelled before any attempt stays committed, and plan show
+// then points back at the operation). The operation holds the machine only: the release and the operation
+// of the new plan are placeholders, left bare. The machine is the server's text, so it stays one quoted
+// shell word, whatever it looks like, and an operation without one gets the placeholder.
+func TestCancelledNextStep(t *testing.T) {
+	f := &opFake{}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	f.pages = []string{evPage(3, "operation-state", toState("unresolved", "cancelled", "resolution"))}
+	for _, c := range []struct{ name, subject, machine string }{
+		{"a machine", `{"plan":"pln_BWSYNTH","machine":"mch_a"}`, `'mch_a'`},
+		{"no machine", `{"plan":"pln_BWSYNTH"}`, `<machine>`},
+		{"a machine named like a placeholder", `{"plan":"pln_BWSYNTH","machine":"<release>"}`, `'<release>'`},
+		{"a machine with a quote", `{"plan":"pln_BWSYNTH","machine":"mch'a"}`, `'mch'\''a'`},
+	} {
+		f.mu.Lock()
+		f.body = strings.Replace(fmt.Sprintf(opJSON, "apply-config", "cancelled", "null", "null", "[]"),
+			`{"plan":"pln_BWSYNTH","machine":"mch_a"}`, c.subject, 1)
+		f.mu.Unlock()
+		want := "Nothing more is sent for this plan. Create a new plan: bronzewardctl plan create --release <release> --machine " +
+			c.machine + " --operation <operation>\n"
+		if code, show, _ := runCtl(t, "operation", "show", "op_BWSYNTH"); code != 0 || !strings.Contains(show, want) || strings.Contains(show, "plan show") {
+			t.Errorf("%s: operation show, exit %d, want %q and no plan show in\n%s", c.name, code, want, show)
+		}
 	}
 }
