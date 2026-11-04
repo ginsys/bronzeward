@@ -244,33 +244,26 @@ function continues(masked: string, tag: number, end: number): boolean {
 // The Unicode spaces that `trim` and `\s` take (U+00A0, say) are text.
 const blank = (line: string) => !/[^ \t\r]/.test(line);
 
-// `holder` for a value after an anchor, with the indentation counted in YAML spaces (U+0020) only. A
-// line that starts with U+00A0 or a byte order mark has text at column 0 (ginsys/bronzeward#605),
-// where `holder` takes `trimStart` and counts that character as indentation.
-function anchoredHolder(masked: string, tag: number): number {
-  const start = masked.lastIndexOf("\n", tag) + 1;
-  const own = spaces(lineAt(masked, start));
-  if (!blank(masked.slice(start, tag))) return own;
-  for (let e = start - 1; e >= 0; ) {
-    const s = e === 0 ? 0 : masked.lastIndexOf("\n", e - 1) + 1;
-    const l = masked.slice(s, e);
-    if (!blank(l) && spaces(l) < own) return spaces(l);
-    e = s - 1;
-  }
-  return -1;
-}
+// The text before an anchored tag on its line, in block context: the indentation in YAML spaces
+// (U+0020) only, then one `- ` or a key (quoted, or plain with no `#`, and no colon before a blank)
+// and its colon, or a lone `- `. Only U+0020 counts as indentation, as in YAML: a line that starts
+// with U+00A0 has text at column 0 (ginsys/bronzeward#605).
+const ANCHORED_PARENT = /^(?: *(?:- +)?(?:"[^"\n]*"|'[^'\n]*'|[^ \t"'#:\-?[\]{},&*!|>%@`](?:[^#:\n]|:(?![ \t]))*): +| *- +)$/;
 
 // Whether a plain value after an anchor (`!bwref &e x/foo`) goes on to the next line
-// (ginsys/bronzeward#605). It is conservative: the value is read as a reference only when the scalar
-// clearly ends, and in every other case it names nothing (as on main, which reads none after an
-// anchor). It ends at the end of the text, at a document marker, and, in flow context, before a line
-// that starts with a flow indicator or a value indicator (a colon before a blank or the end; go-yaml
-// reads `:]` as text). In block context it ends before a line that is a key (a colon before a blank
-// or the end), and before a line that is no more indented than the node that holds the scalar. A
-// tag on the line of `---` has the document root as its node, where a line at column 0 continues
-// it, so only the end, a marker or a key ends it. Compact collections (`- - x`, `? - x`) and the
-// other shapes that a more indented line can continue name nothing.
+// (ginsys/bronzeward#605). It is conservative: the value is read as a reference only for a shape
+// that is certain, and in every other case it names nothing (as on main, which reads none after an
+// anchor). In block context the tag stands on the line of its parent, a key (`k: !bwref &e x/foo`,
+// also `- k: ...`) or a sequence entry (`- !bwref &e x/foo`). A tag that starts its line, a root
+// scalar (also on the line of `---`) and a compact collection (`- - x`, `? - x`) name nothing,
+// because the node that holds the scalar is then not known from its line. The scalar ends at the end
+// of the text, at a document marker, before a line that is a key (a colon before a blank or the
+// end) and before a line that is no more indented than the tag's line. In flow context it ends
+// before a line that starts with a flow indicator or a value indicator (a colon before a blank or
+// the end; go-yaml reads `:]` as text). Any other next line continues the scalar.
 function anchoredContinues(masked: string, tag: number, end: number, inFlow: boolean): boolean {
+  const start = masked.lastIndexOf("\n", tag) + 1;
+  if (!inFlow && !ANCHORED_PARENT.test(masked.slice(start, tag))) return true;
   const eol = masked.indexOf("\n", end);
   if (eol === -1 || !blank(masked.slice(end, eol))) return false;
   const next = nextLine(masked, eol + 1, blank);
@@ -278,8 +271,7 @@ function anchoredContinues(masked: string, tag: number, end: number, inFlow: boo
   const t = next.replace(/^[ \t]+|[ \t\r]+$/g, "");
   if (inFlow) return !/^(?:[,\]}]|:(?:[ \t]|$))/.test(t);
   if (/:(?:[ \t]|$)/.test(t)) return false;
-  if (MARKER.test(lineAt(masked, masked.lastIndexOf("\n", tag) + 1))) return true;
-  return spaces(next) > anchoredHolder(masked, tag);
+  return spaces(next) > spaces(lineAt(masked, start));
 }
 
 // A block scalar's name and where it ends (YAML 1.2 §8.1, ginsys/bronzeward#534 C7). It names a

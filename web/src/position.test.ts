@@ -248,8 +248,9 @@ describe("an anchor between the tag and the value", () => {
   // anchor, so the scanner lists a name in a document that go-yaml refuses (a known limit; the
   // same document with the anchor within reach lists none).
   test("a first anchor beyond the look-back is missed", () => {
-    expect(references(`a: &a${"\n".repeat(4100)}  !bwref &b x/foo\n`)).toEqual(["x/foo"]);
-    expect(references("a: &a\n\n  !bwref &b x/foo\n")).toEqual([]);
+    expect(references(`a: [&a${"\n".repeat(4100)}  !bwref &b x/foo]\n`)).toEqual(["x/foo"]);
+    expect(references("a: [&a\n\n  !bwref &b x/foo]\n")).toEqual([]);
+    expect(references(`a: &a${"\n".repeat(4100)}  !bwref &b x/foo\n`)).toEqual([]);
   });
 });
 
@@ -300,10 +301,11 @@ describe("a plain value after an anchor, in block and in flow context", () => {
       "a:\n  k: !bwref &e x/foo\nj: v\n",
       "- !bwref &e x/foo\n- y\n",
       "k:\n  - !bwref &e x/foo\n  - y\n",
-      "? !bwref &e x/foo\n: v\n",
       "- k: !bwref &e x/foo\n  j: v\n",
     ])
       expect(references(doc), doc).toEqual(["x/foo"]);
+    // go-yaml lists x/foo for an explicit key. The scanner lists none: no key or entry stands before it.
+    expect(references("? !bwref &e x/foo\n: v\n")).toEqual([]);
   });
 
   // go-yaml lists x/foo for each of these, as for the same documents with the anchor before the tag.
@@ -314,11 +316,66 @@ describe("a plain value after an anchor, in block and in flow context", () => {
     expect(references("? - !bwref &e x/foo\n  - bar\n: v\n")).toEqual([]);
   });
 
+  // go-yaml lists x/foo for the two root scalars that end at the end of the text or at a marker. The
+  // scanner lists none: a root scalar has no key or entry on its line (a lost name, as on main).
   test("block context: a value on the line of a document marker is the root scalar", () => {
     expect(references("--- !bwref &e x/foo\nbar\n")).toEqual([]);
-    expect(references("--- !bwref &e x/foo\n")).toEqual(["x/foo"]);
-    expect(references("--- !bwref &e x/foo\n---\n")).toEqual(["x/foo"]);
+    expect(references("--- !bwref &e x/foo\n")).toEqual([]);
+    expect(references("--- !bwref &e x/foo\n---\n")).toEqual([]);
     expect(references("!bwref &e x/foo\nbar\n")).toEqual([]);
+    expect(references("!bwref &e x/foo\n")).toEqual([]);
+  });
+
+  // The anchored path lists a name only for a tag on the line of a key (or of a sequence entry), where
+  // the scalar clearly ends. A root scalar and a tag that starts its line list nothing, whatever
+  // marker, comment or directive stands before it (ginsys/bronzeward#605, round 16). go-yaml v3.0.5
+  // reads each of these as one scalar `x/foo bar`, so it lists no name.
+  test.each([
+    ["after a marker, indented by two spaces", "---\n  !bwref &e x/foo\nbar\n"],
+    ["after a marker, indented by one space", "---\n !bwref &e x/foo\nbar\n"],
+    ["after a marker and a comment line", "---\n# c\n  !bwref &e x/foo\nbar\n"],
+    ["after a marker and an indented comment line", "---\n  # c\n !bwref &e x/foo\nbar\n"],
+    ["with no marker, indented by two spaces", "  !bwref &e x/foo\nbar\n"],
+    ["with no marker, indented by one space", " !bwref &e x/foo\nbar\n"],
+    ["after a directive and a marker", "%YAML 1.1\n---\n  !bwref &e x/foo\nbar\n"],
+    ["after a directive and a marker, at column 0", "%YAML 1.1\n---\n!bwref &e x/foo\nbar\n"],
+    ["after a document end marker and a marker", "a: 1\n...\n---\n  !bwref &e x/foo\nbar\n"],
+    ["in a second document", "a: 1\n---\n  !bwref &e x/foo\nbar\n"],
+    ["on the line of a marker", "--- !bwref &e x/foo\nbar\n"],
+  ])("a root scalar %s lists nothing", (_what, doc) => {
+    expect(references(doc), doc).toEqual([]);
+  });
+
+  // go-yaml lists x/foo for these, or refuses the document. The scanner lists none: a tag that starts
+  // its line has no key on its line, so the anchored path does not read it (a lost name, as on main).
+  test.each([
+    ["under a key, before a key", "k:\n  !bwref &e x/foo\nj: v\n"],
+    ["as a root scalar at the end of the text", "---\n  !bwref &e x/foo\n"],
+    ["as a root scalar before a marker", "---\n  !bwref &e x/foo\n---\n"],
+    ["after a document end marker, with no marker", "a: 1\n...\n  !bwref &e x/foo\nbar\n"],
+  ])("a tag that starts its line %s lists nothing", (_what, doc) => {
+    expect(references(doc), doc).toEqual([]);
+  });
+
+  // A sequence entry `- !bwref &e x/foo` is the same one-line form as a key. go-yaml v3.0.5: a more
+  // indented line continues the scalar (no name), a line at the dash's column ends the sequence (the
+  // document is refused when it is no entry), a second dash is a compact sequence (go-yaml lists the
+  // name, the scanner does not), and a line one column past the key of `- k:` continues the value.
+  test.each([
+    ["an entry, then a more indented line", "- !bwref &e x/foo\n  bar\n", []],
+    ["an entry, then a line at the dash's column", "- !bwref &e x/foo\nbar\n", ["x/foo"]],
+    ["an entry, then an entry", "- !bwref &e x/foo\n- bar\n", ["x/foo"]],
+    ["an entry, then the end", "- !bwref &e x/foo\n", ["x/foo"]],
+    ["a key under a key, then entries", "k:\n- !bwref &e x/foo\n- y\n", ["x/foo"]],
+    ["an indented entry, then an entry", "k:\n  - !bwref &e x/foo\n  - y\n", ["x/foo"]],
+    ["a second dash, then the end", "- - !bwref &e x/foo\n", []],
+    ["a second dash, then an entry", "- - !bwref &e x/foo\n- y\n", []],
+    ["a key in an entry, then a line past the key's column", "- k: !bwref &e x/foo\n   bar\n", []],
+    ["a key in an entry, then a line at the key's column", "- k: !bwref &e x/foo\n  bar\n", []],
+    ["a key in an entry, then a key", "- k: !bwref &e x/foo\n  j: v\n", ["x/foo"]],
+    ["a key after a marker, then a key", "---\nk: !bwref &e x/foo\nj: v\n", ["x/foo"]],
+  ])("a sequence entry: %s", (_what, doc, names) => {
+    expect(references(doc), doc).toEqual(names);
   });
 
   test("flow context: a continuation line needs no indentation, and a flow indicator ends the value", () => {
@@ -424,7 +481,7 @@ describe("a plain value after an anchor, in block and in flow context", () => {
       [" !bwref &e x/foo\nbar\n", []],
       ["\n !bwref &e x/foo\nbar\n", []],
       ["k: !bwref &e x/foo\n", ["x/foo"]],
-      ["--- !bwref &e x/foo\n", ["x/foo"]],
+      ["--- !bwref &e x/foo\n", []],
       [`a: 1\n...\n${bom}--- !bwref &e x/foo\nbar\n`, []],
       [`a: 1\n---\n${bom} !bwref &e x/foo\nbar\n`, []],
       [`a: 1\n---\n${bom}!bwref &e x/foo\n`, []],
