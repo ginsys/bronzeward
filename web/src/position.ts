@@ -478,7 +478,9 @@ function scanLine(st: Carry, line: string, base: number, props: Set<number>): nu
         if (c === "!" && next === "<" && line.indexOf(">", j) >= 0) e = line.indexOf(">", j) + 1;
         else if (c === "!") while (e < line.length && !isWs(line[e])) e++;
         else while (e < line.length && /[0-9A-Za-z_-]/.test(line[e]!)) e++;
-        if (line.slice(j, e) === "!bwref") props.add(base + j);
+        // A tag spelled through a handle (`!r!bwref`, `!!bwref`) is recorded at its `!bwref`, as main
+        // matched it: the handles a %TAG directive declares are not resolved here.
+        if (c === "!" && line.slice(j, e).endsWith("!bwref")) props.add(base + e - 6);
         j = e;
         lastPlain = false;
         if (c === "*") {

@@ -222,7 +222,56 @@ const firstOfG = docs.size;
     }
 }
 
-// (J) The line ends of (G), (H) and (I) as a CRLF, a lone carriage return, U+0085, U+2028 and U+2029.
+// (K) Main matches the text `!bwref` wherever a tag has it, so a tag spelled through a handle counts
+// there. Every spelling at every place a property can stand: where the scanner is stricter than main,
+// it must still list what main lists.
+{
+  const spells = ["!bwref", "!r!bwref", "!!bwref", "!x!y!bwref", "!bwrefx", "!bwref!", "!<!bwref>", "!<tag:x,2000:bwref>", "!a!bwref,", "!bwref:", "!bwref\u00a0"];
+  for (const s of spells) {
+    const at = [
+      `a: ${s} x/foo`,
+      `a: &e ${s} x/foo`,
+      `a: ${s} &e x/foo`,
+      `- ${s} x/foo`,
+      `? ${s} x/foo\n: v`,
+      `? k\n: ${s} x/foo`,
+      `a: [${s} x/foo]`,
+      `a: {k: ${s} x/foo}`,
+      `${s} x/foo`,
+      `a: ${s} "x/foo"`,
+      `a: ${s} 'x/foo'`,
+      `a: ${s} |\n  x/foo`,
+      `a: ${s}\n  x/foo`,
+      `${s} x/foo: v`,
+      `a: !!str ${s} x/foo`,
+    ];
+    for (const p of at) {
+      docs.add(`${p}\nb: ${TAG}\n`);
+      docs.add(`${p.replaceAll("x/foo", "x/bar")}\nb: ${TAG}\n`);
+      docs.add(`k:\n  ${p.replaceAll("\n", "\n  ")}\n`);
+    }
+  }
+}
+
+// (L) Directives: a %TAG handle that maps to `!`, a redefinition of `!` and `!!`, a directive after
+// `...`, and the verbatim form. No handle is resolved here: main did not, and a directive that
+// changes what a handle means is a follow-up. The scanner must list what main lists.
+{
+  const dirs = ["%TAG !r! !", "%TAG !! !", "%TAG ! !x-", "%TAG !r! tag:x,2000:", "%TAG !r! !x-", "%YAML 1.1", "%YAML 1.1\n%TAG !r! !", "%FOO bar"];
+  const spells = ["!r!bwref", "!!bwref", "!bwref", "!<!bwref>", "!r!bwref!"];
+  for (const d of dirs)
+    for (const s of spells) {
+      docs.add(`${d}\n---\na: ${s} x/foo\n`);
+      docs.add(`${d}\n---\n${s} x/foo\n`);
+      docs.add(`${d}\n---\na: ${s} ${PROBE}\nb: ${TAG}\n`);
+      docs.add(`a: 1\n...\n${d}\n---\na: ${s} x/foo\n`);
+      docs.add(`---\na: 1\n...\n${d}\n---\nb: ${s} x/foo\n`);
+      docs.add(`${d}\n---\na: 1\n---\nb: ${s} x/foo\n`);
+      docs.add(`${d}\n---\na: |\n  ${s} x/zzz\nb: ${s} x/foo\n`);
+    }
+}
+
+// (J) The line ends of (G), (H), (I), (K) and (L) as a CRLF, a lone carriage return, U+0085, U+2028 and U+2029.
 // go-yaml counts each as a line break, and a CRLF as one.
 for (const d of [...docs].slice(firstOfG)) for (const b of ["\r\n", "\r", "\u0085", " ", " "]) docs.add(d.replaceAll("\n", b));
 
