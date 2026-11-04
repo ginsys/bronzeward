@@ -476,6 +476,25 @@ func TestOperationWatchInterruptDuringStartReads(t *testing.T) {
 	}
 }
 
+// TestOperationWatchSlowStartTimeout: a server read that answers only after --timeout has run out ends the
+// watch as not terminal at the timeout (exit 5), and no event stream is opened for it: the stop is asked
+// before the first stream, not only after it.
+func TestOperationWatchSlowStartTimeout(t *testing.T) {
+	f := &opFake{body: fmt.Sprintf(opJSON, "apply-config", "running", "null", "null", "[]"), serverHang: make(chan struct{})}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	release := time.AfterFunc(1500*time.Millisecond, func() { close(f.serverHang) })
+	defer release.Stop()
+	code, _, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "1s")
+	f.mu.Lock()
+	streams := f.streams
+	f.mu.Unlock()
+	if code != 5 || !strings.Contains(errOut, "after --timeout") || streams != 0 {
+		t.Errorf("exit %d, stderr %q, %d streams opened; want 5, the timeout named and no stream", code, errOut, streams)
+	}
+}
+
 // TestOperationWatchEscapes: the kind, the state, the event types, their data and the failure cause
 // are the server's text; none reaches the terminal with a control character as itself, in an event
 // line or the outcome (client-contracts.md §6 item 8). The JSON fields also carry a line feed, which

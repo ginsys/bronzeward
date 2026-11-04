@@ -100,8 +100,11 @@
     server: the operation cancelled by the resolution; no attempt recorded
     shown: >-
       the move to unresolved, cause takeover, before the end; each of the operation's events once, in
-      order; "Cancelled at <time> (server): resolution." and the next step, plan show pln_...;
-      "operation op_... ended cancelled" on standard error; exit 4
+      order; "Cancelled at <time> (server): resolution." and the next step, the plan create command
+      with the operation's machine quoted and <release> and <operation> bare (not plan show, which
+      points back at the operation); "operation op_... ended cancelled" on standard error; exit 4.
+      This next step is proved by this case alone, in the clitest chain: the unit tests give the
+      same line only against a stand-in server
     absent: [tokens and the stand-in's secrets in stdout, stderr, argv]
   unit: >-
     the outcome lines of each terminal state are cmd/bronzewardctl TestOperationWatch's; that

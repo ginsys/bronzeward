@@ -109,13 +109,20 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 	}
 	var last string // the ID of the last event shown
 	pages, delay := false, time.Second
+	// Until is asked before the first stream: a caller whose time ran out during the reads before the
+	// watch has already ended it, and no stream is opened for that. The operation read below is the result.
+	first := true
 	for {
 		c.renewSoon()
 		before, began := steps, time.Now()
 		opened, err := false, error(nil)
-		if pages {
+		skip := first && w.stop()
+		first = false
+		switch {
+		case skip: // no stream and no drain
+		case pages:
 			opened, err = true, c.drain(op, &last, w)
-		} else {
+		default:
 			opened, pages, err = c.stream(op, &last, w)
 		}
 		if err != nil {

@@ -321,6 +321,9 @@ func TestCancelledNextStep(t *testing.T) {
 		{"no machine", `{"plan":"pln_BWSYNTH"}`, `<machine>`},
 		{"a machine named like a placeholder", `{"plan":"pln_BWSYNTH","machine":"<release>"}`, `'<release>'`},
 		{"a machine with a quote", `{"plan":"pln_BWSYNTH","machine":"mch'a"}`, `'mch'\''a'`},
+		{"a machine and no plan", `{"machine":"mch_a"}`, `'mch_a'`},
+		{"no subject", `null`, `<machine>`},
+		{"a subject with neither", `{}`, `<machine>`},
 	} {
 		f.mu.Lock()
 		f.body = strings.Replace(fmt.Sprintf(opJSON, "apply-config", "cancelled", "null", "null", "[]"),
@@ -328,7 +331,7 @@ func TestCancelledNextStep(t *testing.T) {
 		f.mu.Unlock()
 		want := "Nothing more is sent for this plan. Create a new plan: bronzewardctl plan create --release <release> --machine " +
 			c.machine + " --operation <operation>\n"
-		if code, show, _ := runCtl(t, "operation", "show", "op_BWSYNTH"); code != 0 || !strings.Contains(show, want) || strings.Contains(show, "plan show") {
+		if code, show, _ := runCtl(t, "operation", "show", "op_BWSYNTH"); code != 0 || !strings.Contains(show, want) || strings.Contains(show, "plan show") || strings.Contains(show, "Read it:") {
 			t.Errorf("%s: operation show, exit %d, want %q and no plan show in\n%s", c.name, code, want, show)
 		}
 	}
