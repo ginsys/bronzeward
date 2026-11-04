@@ -695,3 +695,113 @@ func TestOperationWatchResourceUnwritable(t *testing.T) {
 		}
 	}
 }
+
+// TestOperationWatchExitMatrix: the exit code and the message of a table-mode watch for every pair of
+// an output that works or refuses its writes and an operation read that follows the stream and is
+// terminal, not terminal, not JSON, a refusal the server named or a status with no problem document.
+// The operation read decides the exit; a write error is named beside it and never replaces it, and an
+// operation read that gave nothing leaves the state unknown (exit 3) even when the output failed.
+func TestOperationWatchExitMatrix(t *testing.T) {
+	done := []string{evPage(1, "commitment", commitment), evPage(2, "operation-state", toState("verifying", "completed", ""))}
+	failedPages := []string{evPage(1, "commitment", commitment), evPage(2, "operation-state", toState("verifying", "failed", ""))}
+	read := "bronzewardctl operation show 'op_BWSYNTH'"
+	for _, c := range []struct {
+		name  string
+		fake  func() *opFake
+		write []struct { // by output: whether its writes fail, the exit, and the parts of standard output and error
+			fails bool
+			code  int
+			has   []string
+			not   []string
+		}
+	}{
+		{"terminal, completed", func() *opFake {
+			return &opFake{stream: []string{sse(1, "commitment", commitment)}, pages: done,
+				body: fmt.Sprintf(opJSON, "apply-config", "completed", `{"appliedRelease":"rel_BWSYNTH","observation":"obs_c"}`, "null", "[]")}
+		}, []struct {
+			fails bool
+			code  int
+			has   []string
+			not   []string
+		}{{false, 0, []string{"Completed at"}, []string{"write refused"}}, {true, 1, []string{"write refused"}, nil}}},
+		{"terminal, failed", func() *opFake {
+			return &opFake{stream: []string{sse(1, "commitment", commitment)}, pages: failedPages,
+				body: fmt.Sprintf(opJSON, "apply-config", "failed", "null", `{"cause":"verification-mismatch","attempts":2}`, "[]")}
+		}, []struct {
+			fails bool
+			code  int
+			has   []string
+			not   []string
+		}{{false, 4, []string{"Failed at", "operation op_BWSYNTH ended failed"}, []string{"write refused"}},
+			{true, 4, []string{"operation op_BWSYNTH ended failed", "write refused"}, nil}}},
+		{"not terminal", func() *opFake {
+			return &opFake{stream: []string{sse(1, "commitment", commitment)}, pages: done,
+				body: fmt.Sprintf(opJSON, "apply-config", "running", "null", "null", "[]")}
+		}, []struct {
+			fails bool
+			code  int
+			has   []string
+			not   []string
+		}{{false, 5, []string{"Still running after --timeout", "Follow it again with: bronzewardctl operation watch 'op_BWSYNTH'"}, []string{"write refused"}},
+			{true, 1, []string{"write refused", "operation op_BWSYNTH goes on", "Follow it again with: bronzewardctl operation watch 'op_BWSYNTH'"}, []string{"was not read"}}}},
+		{"read is not JSON", func() *opFake {
+			return &opFake{stream: []string{sse(1, "commitment", commitment)}, badReadFrom: 2,
+				body: fmt.Sprintf(opJSON, "apply-config", "running", "null", "null", "[]")}
+		}, []struct {
+			fails bool
+			code  int
+			has   []string
+			not   []string
+		}{{false, 3, []string{"the state of operation op_BWSYNTH was not read", read}, []string{"write refused"}},
+			{true, 3, []string{"the state of operation op_BWSYNTH was not read", read, "write refused"}, []string{"goes on"}}}},
+		{"read refused with a problem", func() *opFake {
+			return &opFake{stream: []string{sse(1, "commitment", commitment)}, forbidFrom: 2,
+				body: fmt.Sprintf(opJSON, "apply-config", "running", "null", "null", "[]")}
+		}, []struct {
+			fails bool
+			code  int
+			has   []string
+			not   []string
+		}{{false, 1, []string{"403"}, []string{"was not read", "write refused"}},
+			{true, 1, []string{"403", "write refused"}, []string{"was not read", "goes on"}}}},
+		{"read cut off", func() *opFake {
+			return &opFake{stream: []string{sse(1, "commitment", commitment)}, cutFrom: 2,
+				body: fmt.Sprintf(opJSON, "apply-config", "running", "null", "null", "[]")}
+		}, []struct {
+			fails bool
+			code  int
+			has   []string
+			not   []string
+		}{{false, 3, []string{"reading the answer failed", read}, []string{"write refused"}},
+			{true, 3, []string{"reading the answer failed", read, "write refused"}, []string{"goes on"}}}},
+	} {
+		for _, w := range c.write {
+			srv := httptest.NewServer(c.fake())
+			automationContext(t, srv.URL)
+			var stdout io.Writer = &bytes.Buffer{}
+			if w.fails {
+				stdout = failingWriter{}
+			}
+			var e bytes.Buffer
+			code := run([]string{"operation", "watch", "op_BWSYNTH", "--timeout", "2s"}, stdout, &e)
+			srv.Close()
+			text := e.String()
+			if b, ok := stdout.(*bytes.Buffer); ok {
+				text = b.String() + text
+			}
+			if code != w.code {
+				t.Errorf("%s, output fails %v: exit %d, want %d:\n%s", c.name, w.fails, code, w.code, text)
+			}
+			for _, h := range w.has {
+				if !strings.Contains(text, h) {
+					t.Errorf("%s, output fails %v: %q missing in\n%s", c.name, w.fails, h, text)
+				}
+			}
+			for _, n := range w.not {
+				if strings.Contains(text, n) {
+					t.Errorf("%s, output fails %v: %q present in\n%s", c.name, w.fails, n, text)
+				}
+			}
+		}
+	}
+}

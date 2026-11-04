@@ -198,13 +198,15 @@ func (e *env) operationWatch(args []string) (err error) {
 		out.finish(sf("Stopped watching at your request. Operation %s goes on; the state it has now was not read.", id), follow)
 		return interrupted{ef("stopped watching operation %s", id)}
 	}
+	// No operation read: the state is unknown, whatever the output did. The write error, if any, stays
+	// beside it, and the error of the read decides the exit code.
+	if res.o == nil {
+		return errors.Join(unreadState(id, res.err), out.failure())
+	}
 	// The watch stopped because its output failed, with no end and no Ctrl-C or timeout: the operation
 	// goes on, and the watch says why it stopped instead of waiting on.
-	if werr := out.failure(); werr != nil && ended.Load() == 0 && (res.o == nil || !client.Terminal(res.o.State)) {
+	if werr := out.failure(); werr != nil && ended.Load() == 0 && !client.Terminal(res.o.State) {
 		return ef("the output of the watch cannot be written: %w; operation %s goes on. Follow it again with: bronzewardctl operation watch %s", werr, id, client.ShellWord(id))
-	}
-	if res.o == nil {
-		return unreadState(id, res.err)
 	}
 	// The operation's end decides the outcome and the exit; a failed read of the events after it is
 	// reported beside, as publish and import do.
