@@ -12,10 +12,11 @@
   "newExtra": 2,
   "refusedListed": 0,
   "failed": 0,
-  "msPer10k": 3156
+  "msPer10k": 3538
  },
  "rows": [
   {
+   "id": 4,
    "kind": "lost",
    "doc": "a: [\"foo\n#bar\", !bwref x/foo]\n",
    "candidate": [],
@@ -26,6 +27,7 @@
    "newVsMain": false
   },
   {
+   "id": 5,
    "kind": "lost",
    "doc": "a: ['foo\n#bar', !bwref x/foo]\n",
    "candidate": [],
@@ -36,6 +38,7 @@
    "newVsMain": false
   },
   {
+   "id": 15,
    "kind": "extra",
    "doc": "a: |\n  [x\n  b: {\"k\":!t \"x # y\", r: !bwref x/foo}\n",
    "candidate": [
@@ -46,6 +49,7 @@
    "newVsMain": true
   },
   {
+   "id": 16,
    "kind": "extra",
    "doc": "a: |\n  \"y # !bwref ghost\nb: !bwref x/foo\n",
    "candidate": [
@@ -59,6 +63,7 @@
    "newVsMain": false
   },
   {
+   "id": 30,
    "kind": "lost",
    "doc": "﻿﻿ - \"p # q\": !bwref x/foo\n",
    "candidate": [],
@@ -69,6 +74,7 @@
    "newVsMain": true
   },
   {
+   "id": 31,
    "kind": "lost",
    "doc": "﻿﻿[x, ? \"p # q\": !bwref x/foo]\n",
    "candidate": [],
@@ -79,6 +85,7 @@
    "newVsMain": true
   },
   {
+   "id": 33,
    "kind": "extra",
    "doc": "a: |\n  b: ?\"z # !bwref ghost\nc: !bwref x/end\n",
    "candidate": [

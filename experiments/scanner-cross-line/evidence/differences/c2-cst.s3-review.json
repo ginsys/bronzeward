@@ -12,10 +12,11 @@
   "newExtra": 2,
   "refusedListed": 3,
   "failed": 0,
-  "msPer10k": 2754
+  "msPer10k": 3234
  },
  "rows": [
   {
+   "id": 46,
    "kind": "lost",
    "doc": "a: [!t,u \"x # y\", !bwref x/foo]\n",
    "candidate": [],
@@ -26,6 +27,7 @@
    "newVsMain": false
   },
   {
+   "id": 55,
    "kind": "extra",
    "doc": "a: \"x !bwref ghost, y\"\nb: !bwref x/foo\n",
    "candidate": [
@@ -39,6 +41,7 @@
    "newVsMain": false
   },
   {
+   "id": 56,
    "kind": "extra",
    "doc": "a: [\"x !bwref ghost, y\"]\n",
    "candidate": [
@@ -49,6 +52,7 @@
    "newVsMain": false
   },
   {
+   "id": 57,
    "kind": "extra",
    "doc": "a: [\"x !bwref ghost , y\"]\n",
    "candidate": [
@@ -59,6 +63,7 @@
    "newVsMain": false
   },
   {
+   "id": 58,
    "kind": "extra",
    "doc": "a: [\"x # !bwref ghost, y\"]\n",
    "candidate": [
@@ -69,6 +74,7 @@
    "newVsMain": false
   },
   {
+   "id": 61,
    "kind": "extra",
    "doc": "a: {k: \"v !bwref ghost, y\"}\n",
    "candidate": [
@@ -79,6 +85,7 @@
    "newVsMain": false
   },
   {
+   "id": 62,
    "kind": "extra",
    "doc": "a: [\"k\": \"v !bwref ghost, y\"]\n",
    "candidate": [
@@ -89,6 +96,7 @@
    "newVsMain": false
   },
   {
+   "id": 63,
    "kind": "extra",
    "doc": "a: [? \"x !bwref ghost, y\"]\n",
    "candidate": [
@@ -99,6 +107,7 @@
    "newVsMain": false
   },
   {
+   "id": 67,
    "kind": "extra",
    "doc": "a: [? \"x # !bwref ghost , y\"]\n",
    "candidate": [
@@ -109,6 +118,7 @@
    "newVsMain": true
   },
   {
+   "id": 68,
    "kind": "extra",
    "doc": "a: [? 'x # !bwref ghost, y']\n",
    "candidate": [
@@ -119,6 +129,7 @@
    "newVsMain": true
   },
   {
+   "id": 69,
    "kind": "extra",
    "doc": "a: [? 'x !bwref ghost, y']\n",
    "candidate": [

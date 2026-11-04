@@ -24,19 +24,25 @@ It answers a feasibility question and selects nothing for production.
   the curated cases.
 - `candidates/` — the scanners under test. `c0-main.mjs` is the scanner on main. `c1-state.ts`
   is C1: the same file with a stateful masker in place of the line-by-line comment check. The
-  other files are the variants that the note compares with C1.
+  other files are the variants that the note compares with C1. `c0q-quote-carry.ts` is not a
+  candidate: it is the plain quote carry of issue 592, kept as a failure case.
 - `sets/` — the input sets (below) and `MANIFEST`, which lists the count and sha256 of each set.
 - `cmp.mjs` — runs a candidate over a set and compares it with the oracle. `yaml-errors.mjs`
   lists what the `yaml` package refuses that go-yaml accepts. `bench.mjs` measures the cost of
-  one scan of a large draft.
+  one scan of a large draft. `difference-lists.mjs` writes the full list of differing documents of
+  each candidate that loses no name. `quote-carry-subset.mjs` lists the documents that the plain quote carry gets wrong
+  and the result of every candidate on them.
 - `run/all` — the whole experiment. `run/gen-sets` — writes the generated sets and checks them
   against `MANIFEST`. `run/web-tests` — runs the tests of `web/src/position.test.ts` and
   `position-extra.test.ts` against a candidate. `run/collect-evidence` — runs everything and writes
   `evidence/`.
 - `position-extra.test.ts` — three tests for the implementation, beyond `web/src/position.test.ts`.
 - `evidence/` — the collected run: `table.md` (every candidate over every set), `differences/`
-  (the first 20 documents each candidate gets wrong, per set), `yaml-errors.txt`, `bench.txt`
-  and `web-tests.txt` (the web tests against main, C1 and C1c).
+  (the first 20 documents each candidate gets wrong, per set: a summary), `lists/` (every
+  differing document of a candidate that loses no name, by index in the set, one file per
+  candidate and set), `quote-carry-subset.txt`
+  (the failure cases of issue 592), `yaml-errors.txt`, `bench.txt` and `web-tests.txt` (the web
+  tests against main, C1 and C1c).
 
 ## The sets
 

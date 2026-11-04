@@ -1,0 +1,3 @@
+15	extra	[]	["x/foo"]	new
+16	extra	["x/foo"]	["ghost","x/foo"]	-
+33	extra	["x/end"]	["ghost","x/end"]	new

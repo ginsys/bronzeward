@@ -12,10 +12,11 @@
   "newExtra": 0,
   "refusedListed": 3927,
   "failed": 0,
-  "msPer10k": 579
+  "msPer10k": 1021
  },
  "rows": [
   {
+   "id": 1977,
    "kind": "lost",
    "doc": "a: {!foo,'bar: 1,\n  b: !bwref x/foo # c\n}\n",
    "candidate": [],
@@ -26,6 +27,7 @@
    "newVsMain": true
   },
   {
+   "id": 2033,
    "kind": "lost",
    "doc": "a: {x, !foo,'bar: 1,\n  b: !bwref x/foo # c\n}\n",
    "candidate": [],
@@ -36,6 +38,7 @@
    "newVsMain": true
   },
   {
+   "id": 2089,
    "kind": "lost",
    "doc": "a: {&a !foo,'bar: 1,\n  b: !bwref x/foo # c\n}\n",
    "candidate": [],
@@ -46,6 +49,7 @@
    "newVsMain": true
   },
   {
+   "id": 2313,
    "kind": "lost",
    "doc": "a: {!a]'bar: 1,\n  b: !bwref x/foo # c\n}\n",
    "candidate": [],
@@ -56,6 +60,7 @@
    "newVsMain": true
   },
   {
+   "id": 2314,
    "kind": "lost",
    "doc": "a: !a]'bar\nb: !bwref x/foo # c\n",
    "candidate": [],
@@ -66,6 +71,7 @@
    "newVsMain": true
   },
   {
+   "id": 2315,
    "kind": "lost",
    "doc": "- !a]'bar\n- !bwref x/foo # c\n",
    "candidate": [],
@@ -76,6 +82,7 @@
    "newVsMain": true
   },
   {
+   "id": 2316,
    "kind": "lost",
    "doc": "x:\n  a: !a]'bar\n  b: !bwref x/foo # c\n",
    "candidate": [],
@@ -86,6 +93,7 @@
    "newVsMain": true
   },
   {
+   "id": 2369,
    "kind": "lost",
    "doc": "a: {x, !a]'bar: 1,\n  b: !bwref x/foo # c\n}\n",
    "candidate": [],
@@ -96,6 +104,7 @@
    "newVsMain": true
   },
   {
+   "id": 2425,
    "kind": "lost",
    "doc": "a: {&a !a]'bar: 1,\n  b: !bwref x/foo # c\n}\n",
    "candidate": [],
@@ -106,6 +115,7 @@
    "newVsMain": true
   },
   {
+   "id": 2426,
    "kind": "lost",
    "doc": "a: &a !a]'bar\nb: !bwref x/foo # c\n",
    "candidate": [],
@@ -116,6 +126,7 @@
    "newVsMain": true
   },
   {
+   "id": 2427,
    "kind": "lost",
    "doc": "- &a !a]'bar\n- !bwref x/foo # c\n",
    "candidate": [],
@@ -126,6 +137,7 @@
    "newVsMain": true
   },
   {
+   "id": 2428,
    "kind": "lost",
    "doc": "x:\n  a: &a !a]'bar\n  b: !bwref x/foo # c\n",
    "candidate": [],

@@ -1,0 +1,266 @@
+{
+ "counts": {
+  "inputs": 70,
+  "valid": 65,
+  "equal": 41,
+  "lost": 8,
+  "lostFit": 8,
+  "badNameDocs": 0,
+  "extra": 16,
+  "extraUnfit": 8,
+  "newLost": 0,
+  "newExtra": 0,
+  "refusedListed": 4,
+  "failed": 0,
+  "msPer10k": 277
+ },
+ "rows": [
+  {
+   "id": 4,
+   "kind": "extra",
+   "doc": "a: x, \"y # !bwref ghost\nb: !bwref x/foo\n",
+   "candidate": [
+    "ghost",
+    "x/foo"
+   ],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "id": 13,
+   "kind": "lost",
+   "doc": "a: {\"k\":\"x # y\", r: !bwref x/foo}\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "id": 14,
+   "kind": "lost",
+   "doc": "a: [\"k\":'x # y', !bwref x/foo]\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "id": 22,
+   "kind": "lost",
+   "doc": "a: {\"k\":!t \"x # y\", r: !bwref x/foo}\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "id": 23,
+   "kind": "lost",
+   "doc": "a: {\"k\":&a \"x # y\", r: !bwref x/foo}\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "id": 24,
+   "kind": "lost",
+   "doc": "a: {\"k\" :\"x # y\", r: !bwref x/foo}\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "id": 25,
+   "kind": "lost",
+   "doc": "a: {[k]:\"x # y\", r: !bwref x/foo}\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "id": 31,
+   "kind": "extra",
+   "doc": "a:\n  - x\n    \"y # !bwref ghost\nb: !bwref x/foo\n",
+   "candidate": [
+    "ghost",
+    "x/foo"
+   ],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "id": 38,
+   "kind": "extra",
+   "doc": "a: x -\n  \"y # !bwref ghost\nb: !bwref x/foo\n",
+   "candidate": [
+    "ghost",
+    "x/foo"
+   ],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "id": 41,
+   "kind": "extra",
+   "doc": "a: x - !t\n  \"y # !bwref ghost\nb: !bwref x/foo\n",
+   "candidate": [
+    "ghost",
+    "x/foo"
+   ],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "id": 42,
+   "kind": "extra",
+   "doc": "a: x - \"y # !bwref ghost\nb: !bwref x/foo\n",
+   "candidate": [
+    "ghost",
+    "x/foo"
+   ],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "id": 43,
+   "kind": "extra",
+   "doc": "a: x ? \"y # !bwref ghost\nb: !bwref x/foo\n",
+   "candidate": [
+    "ghost",
+    "x/foo"
+   ],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "id": 44,
+   "kind": "extra",
+   "doc": "a: x |\n  \"y # !bwref ghost\nb: !bwref x/foo\n",
+   "candidate": [
+    "ghost",
+    "x/foo"
+   ],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "id": 45,
+   "kind": "extra",
+   "doc": "a: x >\n  \"y # !bwref ghost\nb: !bwref x/foo\n",
+   "candidate": [
+    "ghost",
+    "x/foo"
+   ],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "id": 46,
+   "kind": "lost",
+   "doc": "a: [!t,u \"x # y\", !bwref x/foo]\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "id": 47,
+   "kind": "lost",
+   "doc": "a: [!<tag:yaml.org,2002:str> \"x # y\", !bwref x/foo]\n",
+   "candidate": [],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": false,
+   "newVsMain": false
+  },
+  {
+   "id": 55,
+   "kind": "extra",
+   "doc": "a: \"x !bwref ghost, y\"\nb: !bwref x/foo\n",
+   "candidate": [
+    "ghost",
+    "x/foo"
+   ],
+   "oracle": [
+    "x/foo"
+   ],
+   "unfit": true,
+   "newVsMain": false
+  },
+  {
+   "id": 56,
+   "kind": "extra",
+   "doc": "a: [\"x !bwref ghost, y\"]\n",
+   "candidate": [
+    "ghost"
+   ],
+   "oracle": [],
+   "unfit": true,
+   "newVsMain": false
+  },
+  {
+   "id": 57,
+   "kind": "extra",
+   "doc": "a: [\"x !bwref ghost , y\"]\n",
+   "candidate": [
+    "ghost"
+   ],
+   "oracle": [],
+   "unfit": true,
+   "newVsMain": false
+  },
+  {
+   "id": 58,
+   "kind": "extra",
+   "doc": "a: [\"x # !bwref ghost, y\"]\n",
+   "candidate": [
+    "ghost"
+   ],
+   "oracle": [],
+   "unfit": true,
+   "newVsMain": false
+  }
+ ]
+}

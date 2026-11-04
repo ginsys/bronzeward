@@ -12,10 +12,11 @@
   "newExtra": 0,
   "refusedListed": 7048,
   "failed": 0,
-  "msPer10k": 84
+  "msPer10k": 73
  },
  "rows": [
   {
+   "id": 72,
    "kind": "lost",
    "doc": "a: {\"k\":[], ?\"x # y\", !bwref x/foo}\n",
    "candidate": [],
@@ -26,6 +27,7 @@
    "newVsMain": false
   },
   {
+   "id": 73,
    "kind": "lost",
    "doc": "a: {\"k\":[],?\"x # y\", !bwref x/foo}\n",
    "candidate": [],
@@ -36,6 +38,7 @@
    "newVsMain": false
   },
   {
+   "id": 75,
    "kind": "lost",
    "doc": "a: [\"k\":[], ?\"x # y\", !bwref x/foo]\n",
    "candidate": [],
@@ -46,6 +49,7 @@
    "newVsMain": false
   },
   {
+   "id": 76,
    "kind": "lost",
    "doc": "a: [\"k\":[],?\"x # y\", !bwref x/foo]\n",
    "candidate": [],
@@ -56,6 +60,7 @@
    "newVsMain": false
   },
   {
+   "id": 78,
    "kind": "lost",
    "doc": "{\"k\":[], ?\"x # y\", !bwref x/foo}\n",
    "candidate": [],
@@ -66,6 +71,7 @@
    "newVsMain": false
   },
   {
+   "id": 79,
    "kind": "lost",
    "doc": "{\"k\":[],?\"x # y\", !bwref x/foo}\n",
    "candidate": [],
@@ -76,6 +82,7 @@
    "newVsMain": false
   },
   {
+   "id": 81,
    "kind": "lost",
    "doc": "[\"k\":[], ?\"x # y\", !bwref x/foo]\n",
    "candidate": [],
@@ -86,6 +93,7 @@
    "newVsMain": false
   },
   {
+   "id": 82,
    "kind": "lost",
    "doc": "[\"k\":[],?\"x # y\", !bwref x/foo]\n",
    "candidate": [],
@@ -96,6 +104,7 @@
    "newVsMain": false
   },
   {
+   "id": 84,
    "kind": "lost",
    "doc": "a: {z: 1, \"k\":[], ?\"x # y\", !bwref x/foo}\n",
    "candidate": [],
@@ -106,6 +115,7 @@
    "newVsMain": false
   },
   {
+   "id": 85,
    "kind": "lost",
    "doc": "a: {z: 1, \"k\":[],?\"x # y\", !bwref x/foo}\n",
    "candidate": [],
@@ -116,6 +126,7 @@
    "newVsMain": false
   },
   {
+   "id": 87,
    "kind": "lost",
    "doc": "a:\n  b: {\"k\":[], ?\"x # y\", !bwref x/foo}\n",
    "candidate": [],
@@ -126,6 +137,7 @@
    "newVsMain": false
   },
   {
+   "id": 88,
    "kind": "lost",
    "doc": "a:\n  b: {\"k\":[],?\"x # y\", !bwref x/foo}\n",
    "candidate": [],
@@ -136,6 +148,7 @@
    "newVsMain": false
   },
   {
+   "id": 90,
    "kind": "lost",
    "doc": "a: {\"k\":[], ?\"x # y\", r: !bwref x/foo}\n",
    "candidate": [],
@@ -146,6 +159,7 @@
    "newVsMain": false
   },
   {
+   "id": 91,
    "kind": "lost",
    "doc": "a: {\"k\":[],?\"x # y\", r: !bwref x/foo}\n",
    "candidate": [],
@@ -156,6 +170,7 @@
    "newVsMain": false
   },
   {
+   "id": 93,
    "kind": "lost",
    "doc": "a: [\"k\":[], ?\"x # y\", r: !bwref x/foo]\n",
    "candidate": [],
@@ -166,6 +181,7 @@
    "newVsMain": false
   },
   {
+   "id": 94,
    "kind": "lost",
    "doc": "a: [\"k\":[],?\"x # y\", r: !bwref x/foo]\n",
    "candidate": [],
@@ -176,6 +192,7 @@
    "newVsMain": false
   },
   {
+   "id": 96,
    "kind": "lost",
    "doc": "{\"k\":[], ?\"x # y\", r: !bwref x/foo}\n",
    "candidate": [],
@@ -186,6 +203,7 @@
    "newVsMain": false
   },
   {
+   "id": 97,
    "kind": "lost",
    "doc": "{\"k\":[],?\"x # y\", r: !bwref x/foo}\n",
    "candidate": [],
@@ -196,6 +214,7 @@
    "newVsMain": false
   },
   {
+   "id": 99,
    "kind": "lost",
    "doc": "[\"k\":[], ?\"x # y\", r: !bwref x/foo]\n",
    "candidate": [],
@@ -206,6 +225,7 @@
    "newVsMain": false
   },
   {
+   "id": 100,
    "kind": "lost",
    "doc": "[\"k\":[],?\"x # y\", r: !bwref x/foo]\n",
    "candidate": [],
