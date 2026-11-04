@@ -358,7 +358,7 @@ export const holdsUnsaved = (held: Held, saved: Held, mine: Held | undefined) =>
 // kept aside (rounds 4 and 5). So does it once a Save is done, unless the read is the Save's own
 // revision, or the answer or the read has no id to tell (ginsys/bronzeward#559).
 export interface Clash { mine: Held; phase: "refused" | "asked" | "theirs"; revision?: number; awaits?: true; again?: true; typed?: true }
-export interface Later { revision?: number; id?: string; text?: Held; removed?: true }
+export interface Later { revision?: number; id?: string; text?: Held; removed?: true; aside?: true }
 export interface Editor { held: Held; saved: Held; conflict?: Clash; sent?: { text: Held; whileTheirs: boolean; removes?: true; open?: true; later?: Later }; writes?: number; note?: string | undefined; version?: number; reading?: true; own?: string; gone?: number }
 // The pane's first state. `gone` follows the revision of a removal: a number is the revision known
 // to be removed, -1 means nothing was removed yet, and unset means the pane's own done Remove saved
@@ -530,8 +530,9 @@ function step(s: Editor, e: EditorEvent): Editor {
       const another = (s.own === undefined || e.id !== s.own) && !same(e.text, s.saved);
       const keeps = c === undefined ? !same(s.held, s.saved) : c.phase === "theirs" && (c.typed === true || !same(s.held, s.saved));
       if (another && keeps) {
-        if (s.sent?.open === true) return { ...idle, saved: e.text, sent: { ...s.sent, later: { ...(e.revision !== undefined && { revision: e.revision }), ...(e.id !== undefined && { id: e.id }), text: e.text } } };
-        const revision = e.revision ?? c?.revision;
+        if (s.sent?.open === true) return { ...idle, saved: e.text, sent: { ...s.sent, later: { ...(e.revision !== undefined && { revision: e.revision }), ...(e.id !== undefined && { id: e.id }), text: e.text, aside: true } } };
+        // A conflict keeps the newer of the revision it follows and the one this read names (#609).
+        const revision = newest(e.revision, c?.revision);
         return { ...idle, saved: e.text, held: e.text, conflict: { ...(c === undefined ? { mine: s.held } : kept(c)), phase: "theirs", ...(revision !== undefined && { revision }) } };
       }
       // Once theirs shows, a read never ends a repeated Show's wait: only its draft read does. A newer
@@ -547,9 +548,11 @@ function step(s: Editor, e: EditorEvent): Editor {
       // Save that showed it is done, and also when its text is the one shown (#559 follow-up 2). The
       // pane's own revision is not theirs.
       const moved = c?.phase === "theirs" && e.revision !== undefined && e.revision > (c.revision ?? 0) && (e.id === undefined || e.id !== s.own) ? { ...shown, conflict: { ...c, revision: e.revision } } : shown;
-      if (!another || open === undefined || later === undefined) return moved;
-      const { later: _older, ...sent } = open;
-      return { ...moved, sent };
+      // While a write is open, a read of another author's text waits for that write's answer, also with
+      // nothing typed to keep aside: a done write must not record an older text as saved. A newer read
+      // replaces the older whole. Here the editor's text equals the saved text, so nothing is kept aside (#608, #613).
+      if (!another || open?.open !== true) return moved;
+      return { ...moved, sent: { ...open, later: { ...(e.revision !== undefined && { revision: e.revision }), ...(e.id !== undefined && { id: e.id }), text: e.text } } };
     }
     case "copy":
       // Only once their text shows and no read is pending: a pending one could replace the copied text.
@@ -563,12 +566,20 @@ function step(s: Editor, e: EditorEvent): Editor {
       // Save's own revision. With no id on the answer or the read, it cannot be told, and stays the
       // Save's own (ginsys/bronzeward#559). Their text or removal shows, the editor's text aside.
       const later = s.sent?.later;
-      const other = s.sent?.removes === true || later === undefined ? undefined : later.removed === true ? EMPTY : later.id !== undefined && e.revision !== undefined && later.id !== e.revision ? later.text : undefined;
+      // A Remove creates no text revision, so a text read while it was open is never its own: it shows
+      // with no id to compare (#608). A removal read meanwhile ends the entry removed either way.
+      const removes = s.sent?.removes === true;
+      const other = later === undefined ? undefined : later.removed === true ? (removes ? undefined : EMPTY)
+        : removes || (later.id !== undefined && e.revision !== undefined && later.id !== e.revision) ? later.text : undefined;
       if (later !== undefined && other !== undefined) {
         const revision = newest(later.revision, c?.revision);
-        const { own: _own, gone: _gone, ...after } = s;
-        return { ...after, ...closed(s), ...(e.revision !== undefined && { own: e.revision }), held: other, saved: other, writes: writes + 1,
-          conflict: { mine: s.held, phase: "theirs", ...(revision !== undefined && { revision }), ...(c?.awaits === true && { awaits: true as const }) } };
+        const { own: _own, gone: _gone, conflict: _conflict, ...after } = s;
+        // The operator's text goes aside when a removal or text typed since shows. A Remove saved no text,
+        // so a conflict that keeps the operator's text stays. Otherwise nothing of the operator's is lost:
+        // the text read is the entry's, and the pane records it as saved (#613).
+        const conflict: Clash | undefined = removes && c !== undefined ? { ...kept(c), phase: "theirs", ...(revision !== undefined && { revision }) }
+          : later.removed === true || later.aside === true ? { mine: s.held, phase: "theirs", ...(revision !== undefined && { revision }), ...(c?.awaits === true && { awaits: true as const }) } : undefined;
+        return { ...after, ...closed(s), ...(e.revision !== undefined && { own: e.revision }), held: other, saved: other, writes: writes + 1, ...(conflict !== undefined && { conflict }) };
       }
       // The text the operator chose is saved: a Save sent while theirs showed, or the kept text itself.
       // A Remove saves no text, so the operator's kept text stays for Copy my text (N2).
