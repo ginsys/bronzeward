@@ -1,0 +1,109 @@
+name: Safari
+
+# The browser cases in Safari (decision B6), outside the required checks (ginsys/bronzeward#612).
+# GitHub's macOS arm64 pool sometimes has no capacity, and a job that never gets a runner is
+# cancelled after 15 minutes. A failed or cancelled check that is not required still leaves a pull
+# request UNSTABLE, not CLEAN, so this workflow never runs on pull_request or merge_group. It runs
+# on main, once a day, and on request. A failed run opens one issue (or comments on the open one);
+# a run cancelled for want of a runner opens nothing. Safari 16 or later stays a tested target
+# (docs/spec/client-contracts.md).
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 5 * * *'  # daily, 05:17 UTC; GitHub stops a schedule after 60 days without repository activity
+  workflow_dispatch:
+    inputs:
+      simulate-failure:
+        description: Skip the Safari job and report as if it failed, into a separate "[test]" issue
+        type: boolean
+        default: false
+
+concurrency:
+  group: safari-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # The setting `mise run` honours (`mise help run`, --skip-tools); MISE_EXEC_AUTO_INSTALL does
+  # not stop a task run from installing. Tools come from jdx/mise-action's install step only.
+  MISE_TASK_RUN_AUTO_INSTALL: "false"
+
+jobs:
+  safari:
+    # The same cases in Safari, on a GitHub-hosted macOS runner (decision B6).
+    if: ${{ !inputs.simulate-failure }}
+    runs-on: macos-latest
+    timeout-minutes: 20
+    env:
+      BW_BROWSERS: safari
+      # node comes from actions/setup-node below; mise leaves it out, so its tasks run that one.
+      MISE_DISABLE_TOOLS: node
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # ginsys/bronzeward#415: mise fetches node from nodejs.org, which served this macOS runner at
+      # under 1 to 60 kB/s, so after a mise.toml change left the job without a cache every run
+      # timed out installing it. actions/setup-node fetches the same version from GitHub's
+      # actions/node-versions releases instead. mise.toml stays the one place naming it.
+      - id: node
+        run: |
+          v=$(sed -n 's/^node = "\(.*\)"$/\1/p' mise.toml)
+          [ -n "$v" ] || { echo "safari: no node = \"<version>\" line in mise.toml" >&2; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ steps.node.outputs.version }}
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
+          install_args: go
+      # The tasks below run under mise: it must find setup-node's node, at mise.toml's version.
+      # `mise exec` would otherwise install every missing tool of mise.toml first, which the
+      # workflow's MISE_TASK_RUN_AUTO_INSTALL does not stop.
+      - env:
+          MISE_EXEC_AUTO_INSTALL: "false"
+          WANT: ${{ steps.node.outputs.version }}
+        run: |
+          got=$(mise exec -- node --version)
+          [ "$got" = "v$WANT" ] || { echo "safari: mise runs node $got, not v$WANT" >&2; exit 1; }
+          mise exec -- npm --version
+      - run: sudo safaridriver --enable
+      - run: mise run browser
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: browser-safari
+          path: web/e2e/out
+          retention-days: 14
+
+  report:
+    # Runs after every Safari job, and decides in scripts/ci/report-safari.sh: only `failure`, or a
+    # simulated failure, reports. It is the only job here with a write permission.
+    needs: safari
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    # One report at a time, so two failed runs cannot both create the issue.
+    concurrency:
+      group: safari-report
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          sparse-checkout: scripts/ci
+      - name: Report a failed Safari run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RESULT: ${{ needs.safari.result }}
+          REF: ${{ github.ref }}
+          SIMULATED: ${{ inputs.simulate-failure }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EVENT: ${{ github.event_name }}
+          SHA: ${{ github.sha }}
+        run: scripts/ci/report-safari.sh
