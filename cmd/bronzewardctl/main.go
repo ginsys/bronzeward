@@ -109,10 +109,6 @@ commands:
               a revocation ends an uncommitted approval and undoes no commitment; an attempt
               already recorded is not stopped
   operation list [--plan <id>] [--machine <id>] [--state <s>] [--kind <k>] | show <operation>
-  operation watch <operation> [--timeout <d>]
-              one line per event until the operation ends, then its outcome; goes on past
-              unresolved; --timeout (30m) ends the watch, not the operation, with exit 5;
-              Ctrl-C stops only the watch, with exit 130
   act list    the audit record
   recovery status
               the epoch, recovery mode, the entry and exit, and each scope's next step
@@ -141,8 +137,7 @@ global flags, before or after the command:
 exit codes: 0 success; 1 refused or failed; 2 usage error, refused repeat or approval not
 confirmed; 3 outcome unknown, or
 an import's lease lapsed while its operation runs;
-4 a waited-for operation ended failed, rejected or cancelled; 5 operation watch's --timeout
-ended with the operation not ended; 130 operation watch stopped by Ctrl-C`
+4 a waited-for operation ended failed, rejected or cancelled`
 
 type usageError struct{ error }
 
@@ -240,8 +235,6 @@ func report(err error, stdout, stderr io.Writer) int {
 	var declined notConfirmed
 	var unknown *client.Unknown
 	var signalled endedBySignal
-	var waiting notTerminal
-	var stopped interrupted
 	switch {
 	case err == nil:
 		return 0
@@ -255,10 +248,6 @@ func report(err error, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "bronzewardctl: %s\n\n%s\n", client.Shown(err), usage)
 		return 2
 	}
-	// operation watch printed its stop line and the line to follow it again; nothing follows them.
-	if errors.As(err, &stopped) {
-		return 130
-	}
 	// The sink of every error: client.Shown escapes all of it but the line breaks of the client's own
 	// multi-line errors, so no error from outside can start a line of its own.
 	fmt.Fprintln(stderr, "bronzewardctl:", client.Shown(err))
@@ -267,8 +256,6 @@ func report(err error, stdout, stderr io.Writer) int {
 		return 3
 	case errors.As(err, &failed):
 		return 4
-	case errors.As(err, &waiting):
-		return 5
 	case errors.As(err, &refused), errors.As(err, &declined):
 		return 2
 	}
@@ -335,16 +322,12 @@ func flagError(err error) error {
 }
 
 // open selects the context and reads its token (client-contracts.md §5 item 1, §9.4).
-func (e *env) open() (*client.Client, error) { return e.openTo(e.err, e.verboseOut()) }
-
-// openTo is open with the writers of the client's notices and -v output given, for a command that
-// must stop them (operation watch).
-func (e *env) openTo(notices, verbose io.Writer) (*client.Client, error) {
+func (e *env) open() (*client.Client, error) {
 	x, err := e.selected()
 	if err != nil {
 		return nil, err
 	}
-	return client.Open(x, client.TokenInput{NoInput: e.noInput, File: e.tokenFile, Stdin: e.tokenStdin}, notices, verbose)
+	return client.Open(x, client.TokenInput{NoInput: e.noInput, File: e.tokenFile, Stdin: e.tokenStdin}, e.err, e.verboseOut())
 }
 
 // selected is the context §5 item 1 selects.

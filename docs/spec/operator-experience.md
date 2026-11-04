@@ -671,71 +671,43 @@ time: an open drift carries its revision and observations only
 
 ```text
 $ bronzewardctl operation watch op_q8r…t2na
-apply-config  plan pln_f645…cawy, machine mch_b3c…aa2q
-Times marked "received" are this client's clock when the event arrived; the completion line shows the server's time.
-received 10:06:02  commitment            plan pln_f645…cawy, approval apr_k2v…, observation obs_r4d…, controller ctl_b…, generation 3
-received 10:06:03  attempt               attempt 1, route 10.5.0.5:50000, transport deadline 2026-11-01T10:07:03Z, controller ctl_b…, generation 3
-received 10:06:04  response              attempt 1, class accepted
-received 10:06:40  classification        outcome completed, observation obs_x7m…, controller ctl_b…, generation 3
-received 10:06:40  operation-state       from verifying, to completed
-Completed at 2026-11-01 10:06:40 CET (server): applied rel_h7rt…2bd, confirmed by observation obs_x7m….
+apply-config  mch_b3c…aa2q  plan pln_f645…cawy
+10:06:02  committed            attempt 1 (controller ctl-b, generation 3)
+10:06:03  sending              route 10.5.0.5:50000
+10:06:04  response accepted
+10:06:31  verifying            observation obs_x7m…
+10:06:40  completed            applied rel_h7rt…2bd (operation)
+$ bronzewardctl operation watch op_q8r…t2na          # after a network drop
+Reconnected; resumed after event ep_bqek…ekgi:14.
 ```
 
-Each event line names the event's type and what its data holds. An event of a type this client
-does not know prints its data as JSON. Text that the server chose is escaped as [client-contracts.md §6 item 8](client-contracts.md#6-tls-trust)
-requires. An event carries no time on the stream, so its line shows when this client received it, marked
-`received`, whether the stream or the JSON event pages delivered it. After a terminal state the
-watch reads the event that records the end from the JSON event pages once more, and the completion
-line shows that event's server time. For an apply-config operation that is the last `operation-state`
-event that moves it to the terminal state, for an adopt operation its `adoption` event, and for a
-publish or ingest operation the last event named after the state (`succeeded` or `failed`). An event
-recorded after the end, such as the delayed response of an attempt a takeover left
-behind, does not move the time. If no such event is found, or if the installation was restored
-meanwhile and the event is of another epoch than the operation read, the line says "The server's time
-of this end was not read." instead.
-
-Events stream as Server-Sent Events with `Last-Event-ID` `<epoch>:<number>`. A different epoch
-yields a `reset` event and a replay from the start. The stream ends at a terminal state or at the
-expiry of the token that opened it (`internal/api/operations.go:231-266`). `watch` reconnects with
-the last event ID and a renewed token, and shows no event twice. On a `reset`, or on an event ID of
-another epoch, it says why on standard error, prints
-`(the events above no longer hold; they are shown again from the start)` and shows every event
-again.
-
-`unresolved` is not terminal (`internal/api/operations.go:144-151`), so the watch goes on past it.
-`--timeout` (default `30m`) ends the watch with exit 5 and names the state. The watch checks the
-timeout between its reads, so it can pass by about 45 seconds:
+Events stream as Server-Sent Events with `Last-Event-ID` `<epoch>:<number>`; a different epoch
+yields a `reset` event and a replay from the start; the stream ends at a terminal state or at the
+expiry of the token that opened it (`internal/api/operations.go:231-266`). `unresolved` is not
+terminal (`internal/api/operations.go:144-151`). **Proposed:** `watch` reconnects with the last
+event ID and a renewed token; on `reset` it prints "The installation was restored to an earlier
+state; replaying this operation's events from the start" and clears what it showed.
 
 ```text
-received 10:07:03  operation-state       from verifying, to unresolved, cause an attempt is not accounted for
-Still unresolved after --timeout 30m0s.
-Unresolved: completion and retry safety are unknown. A recovery administrator must account for attempt 1. No conflicting work on this machine proceeds until then.
-Follow it again with: bronzewardctl operation watch 'op_q8r…t2na'
+10:06:03  sending              route 10.5.0.5:50000
+10:07:03  transport deadline passed; no response recorded
+10:07:03  unresolved           completion and retry safety are unknown. A recovery
+                               administrator must account for attempt 1. No conflicting
+                               work on this machine proceeds until then.
+Still unresolved; exiting with 5.
 ```
 
-A `failed`, `rejected` or `cancelled` operation ends the watch with exit 4. The outcome line names
-the cause (for a publish or ingest operation, the problem that ended it: its title, its detail when present and its instance, each escaped; [client contracts §8.2](client-contracts.md#82-errors)) and the attempt count, and the next line names the next safe step. A cancelled operation
-records no cause, so the line takes it from the event that records its end. Ctrl-C ends the watch with
-exit 130 and stops only the watcher. The watch waits up to 3 seconds for the operation's state,
-then says that the operation goes on, and names the state if it read one. If a line of the table or
-event output cannot be written, a running watch stops reading and exits 1 with the write error and the
-command that follows the operation; if an operation read gave nothing (the first read included, and the server read before it), the state is
-unknown and the exit is the read's own (3 for an answer that cannot be read), with the write error beside it; after an end the write error, and the error of writing the
-resource with `-o json` or `-o yaml`, is printed beside the outcome and the exit code of the outcome
-stays (0 becomes 1). A failure to keep the client's state after Ctrl-C is printed before the stop
-lines, so the follow line stays last, and the exit is 130. `operation show` prints the same outcome lines without the server's time. For a cancelled operation
-it reads the event that records the end once to take the cause, and keeps it only when the event is of the
-installation epoch in which the operation was read (the answer's `Bronzeward-Epoch`, not the epoch the
-operation was created in); otherwise the line says the machine timeline holds the entry that ended it.
-With `-o json` or `-o yaml`, the event lines go to standard error and the operation resource to
-standard output: the one read that the outcome line and the exit code come from, as the server sent it.
-This holds for the resource of a Ctrl-C too, when the watch read one: it is printed before the exit.
-If the resource cannot be written after Ctrl-C, one note goes to standard error and the exit code stays 130.
-A closed standard output ends the program at once, as for every command.
-If a read of the watch gave nothing, because its answer cannot be read or the connection failed (the
-server read, the first operation read, or the read that follows a cut stream), the watch ends with no
-operation read, the state is unknown and the exit is 3: the message names `operation show` as the
-command that reads it. Only a problem document the server named keeps exit 1.
+`operation show` is implemented. For an unresolved or terminal operation it prints, after the
+record, the outcome lines: the cause (for a publish or ingest operation, the problem that ended it:
+its title, its detail when present and its instance, each escaped; [client contracts §8.2](client-contracts.md#82-errors))
+and the attempt count, and the next line names the next safe step. It shows no server time. A cancelled
+operation records no cause, so the line takes it from the event that records its end, read once from the
+JSON event pages. That event is, for an apply-config operation, the last `operation-state` event that
+moves it to the terminal state, for an adopt operation its `adoption` event, and for a publish or
+ingest operation the event named after the state (`succeeded` or `failed`). `show` keeps the cause only
+when the event is of the installation epoch in which the operation was read (the answer's
+`Bronzeward-Epoch`, not the epoch the operation was created in); otherwise the line says the machine
+timeline holds the entry that ended it. `operation watch`, shown above, is not implemented yet.
 
 ### 5.8 Drift: freeze, then adopt or revert
 

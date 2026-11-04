@@ -1,9 +1,8 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
-	"fmt"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -11,13 +10,6 @@ import (
 	"github.com/ginsys/bronzeward/internal/client"
 	"github.com/ginsys/bronzeward/internal/client/apitypes"
 )
-
-// notTerminal is an operation still not terminal when operation watch's --timeout ends: exit 5
-// (decision T23 of #258).
-type notTerminal struct{ error }
-
-// interrupted is operation watch stopped by Ctrl-C: exit 130. The operation goes on.
-type interrupted struct{ error }
 
 // outcome is an operation's outcome lines (T23) and whether it ended well: completed or succeeded.
 // last, the event that records the operation's end when read from the JSON pages, gives the server's time and a
@@ -117,65 +109,72 @@ func remarshal(v, out any) error {
 	return json.Unmarshal(b, out)
 }
 
-// eventLine is one event's line: the time this client received it (now), marked as such, its type
-// and what its data says. An unknown type prints its data raw.
-func eventLine(ev client.Event, now time.Time) string {
-	stamp := "received " + now.Format("15:04:05")
-	var d map[string]any
-	_ = json.Unmarshal(ev.Data, &d)
-	return sf("%s  %-20s  %s", stamp, plain(ev.Type), eventText(ev.Type, d, ev.Data))
-}
-
 // plain is text the server chose, escaped so that none reaches the terminal as itself
 // (client-contracts.md §6 item 8).
 func plain(s string) string { return client.Printable(s) }
 
-// eventText says what an event's data holds, by its type.
-func eventText(typ string, d map[string]any, raw json.RawMessage) string {
-	s := func(k string) string {
-		if v, ok := d[k]; ok && v != nil {
-			return plain(fmt.Sprint(v))
-		}
-		return ""
-	}
-	join := func(parts ...string) string {
-		var kept []string
-		for i := 0; i+1 < len(parts); i += 2 {
-			if v := s(parts[i+1]); v != "" {
-				kept = append(kept, parts[i]+v)
-			}
-		}
-		return strings.Join(kept, ", ")
-	}
-	switch typ {
-	case "commitment":
-		return join("plan ", "plan", "approval ", "approval", "observation ", "observation", "controller ", "controller", "generation ", "generation")
-	case "attempt":
-		return join("attempt ", "number", "route ", "route", "transport deadline ", "transportDeadline", "controller ", "controller", "generation ", "generation")
-	case "refusal":
-		return join("plan ", "plan", "comparison ", "comparison", "cause ", "cause", "observation ", "observation")
-	case "use-time-check":
-		return join("result ", "result", "plan ", "plan", "controller ", "controller")
-	case "response":
-		return join("attempt ", "number", "class ", "class", "code ", "code")
-	case "accounting":
-		return join("attempt ", "attempt", "basis ", "basis", "class ", "class", "decided by ", "decidedBy", "role ", "role")
-	case "classification":
-		return join("outcome ", "outcome", "observation ", "observation", "controller ", "controller", "generation ", "generation")
-	case "ownership-transition":
-		return join("from ", "from", "to ", "to", "generation ", "generation", "reason ", "reason", "requested by ", "requestedBy")
+// recordsEnd is whether ev records the operation's end in state, by the event types the server writes
+// for each kind of operation that ends:
+//   - apply-config: an operation-state event whose data.to is the state (internal/api/outcome.go:114,
+//     attempt.go:441, recovery_acts.go:300).
+//   - adopt: the operation is inserted completed together with its adoption event
+//     (internal/api/adoption.go:293 and :299); the applied-change event after it does not end it.
+//   - publish and ingest: an event named after the state, succeeded or failed (publish.go:158, :328,
+//     :415, runner.go:445, :457, ingestions.go:428, recovery_entries.go:276, staging/sweep.go:145).
+//
+// An event recorded after the end, such as the response of an attempt a takeover left behind
+// (outcome.go:292), records no end.
+func recordsEnd(ev lastEvent, state string) bool {
+	switch ev.Type {
 	case "operation-state":
-		return join("from ", "from", "to ", "to", "comparison ", "comparison", "cause ", "cause", "decided by ", "decidedBy")
+		var to struct {
+			To string `json:"to"`
+		}
+		return json.Unmarshal(ev.Data, &to) == nil && to.To == state
 	case "adoption":
-		return join("plan ", "plan", "approval ", "approval", "observation ", "observation", "controller ", "controller")
-	case "applied-change":
-		return join("from ", "from", "to ", "to", "source ", "source")
+		return state == "completed"
+	case "succeeded", "failed":
+		return ev.Type == state
 	}
-	var v any
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber() // a number keeps its digits: float64 would round 9007199254740993
-	if dec.Decode(&v) != nil || dec.More() {
-		return plain(string(raw))
+	return false
+}
+
+// lastEvent is the event that ends an operation as the JSON pages carry it, with the server's time.
+type lastEvent struct {
+	ID   string          `json:"id"`
+	Type string          `json:"type"`
+	At   *time.Time      `json:"at"`
+	Data json.RawMessage `json:"data"`
+}
+
+// readLast reads from the JSON pages the last event that records the operation's end in state
+// (recordsEnd). It is nil when the pages or the operation cannot be read, when no event records the
+// end, or when the event is not of the epoch of the operation read that follows:
+// an installation restored meanwhile has other events, so the event's time is not the operation's. It
+// is also nil when that read shows another state, or another Bronzeward-Epoch header, than the read
+// the caller read (state, watched). The operation's own epoch member is the one it was created in
+// and does not change in a restore, so it is not the epoch to compare. The outcome and the time
+// printed together then belong to one operation.
+func readLast(c *client.Client, id, state, watched string) *lastEvent {
+	items, err := c.List("/operations/" + url.PathEscape(id) + "/events")
+	if err != nil || len(items) == 0 {
+		return nil
 	}
-	return compact(v) // JSON escapes every control character
+	var ev lastEvent
+	found := false
+	for i := len(items) - 1; i >= 0 && !found; i-- {
+		var x lastEvent
+		found = json.Unmarshal(items[i], &x) == nil && recordsEnd(x, state)
+		if found {
+			ev = x
+		}
+	}
+	if !found {
+		return nil
+	}
+	o, epoch, err := c.OperationEpoch(id)
+	if err != nil || !client.Terminal(o.State) || o.State != state || epoch == "" || epoch != watched || client.EpochOf(ev.ID) != epoch {
+		return nil
+	}
+	return &ev
 }

@@ -382,9 +382,6 @@ func (e *env) releaseCmd(args []string) error {
 }
 
 func (e *env) operationCmd(args []string) error {
-	if a, err := e.parse("operation", args, -1, nil); err == nil && len(a) > 0 && a[0] == "watch" {
-		return e.operationWatch(a[1:])
-	}
 	var l listing
 	var plan, machine, state, kind string
 	f := map[string]*string{"plan": &plan, "machine": &machine, "state": &state, "kind": &kind}
