@@ -190,3 +190,65 @@ describe("the references of the documents the go-yaml oracle read", () => {
     expect(references("a: |\n  x\n  \u00a0\nb: !bwref x/foo\n")).toEqual(["x/foo"]);
   });
 });
+
+// ginsys/bronzeward#605: go-yaml reads one anchor between the tag and the value (`!bwref &e x/foo`).
+// Every document below was checked against go-yaml v3.0.5 (experiments/scanner-cross-line).
+describe("an anchor between the tag and the value", () => {
+  test("the value on the same line, plain", () => {
+    expect(references("a: !bwref &e x/foo\n")).toEqual(["x/foo"]);
+  });
+  test("the value on the next line", () => {
+    expect(references("a: !bwref &e\n  x/foo\n")).toEqual(["x/foo"]);
+  });
+  test("a double-quoted value", () => {
+    expect(references('a: !bwref &e "x/foo"\n')).toEqual(["x/foo"]);
+  });
+  test("a single-quoted value", () => {
+    expect(references("a: !bwref &e 'x/foo'\n")).toEqual(["x/foo"]);
+  });
+  test("the anchor on the line after the tag", () => {
+    expect(references("a: !bwref\n  &e x/foo\n")).toEqual(["x/foo"]);
+  });
+  test("a block scalar value", () => {
+    expect(references("a: !bwref &e |-\n  x/foo\n")).toEqual(["x/foo"]);
+  });
+  test("a sequence entry and a flow collection", () => {
+    expect(references("- !bwref &e x/foo\n")).toEqual(["x/foo"]);
+    expect(references("a: [!bwref &e x/foo]\n")).toEqual(["x/foo"]);
+    expect(references("{a: !bwref &e x/foo}\n")).toEqual(["x/foo"]);
+  });
+  test("a comment after the anchor, and a tab after it", () => {
+    expect(references("a: !bwref &e # c\n  x/foo\n")).toEqual(["x/foo"]);
+    expect(references("a: !bwref &e\tx/foo\n")).toEqual(["x/foo"]);
+  });
+  test("the anchor before the tag is the control and keeps working", () => {
+    expect(references("a: &e !bwref x/foo\n")).toEqual(["x/foo"]);
+  });
+
+  // go-yaml refuses each of these documents or reads no name from it, so the scanner lists none.
+  test("a second anchor, before or after the tag", () => {
+    expect(references("a: &a !bwref &b x/foo\n")).toEqual([]);
+    expect(references("a: !bwref &a &b x/foo\n")).toEqual([]);
+  });
+  test("a second tag is not read", () => {
+    expect(references("a: !bwref !x x/foo\n")).toEqual([]);
+    expect(references("a: !bwref &e !x x/foo\n")).toEqual([]);
+  });
+  test("an anchor name go-yaml does not accept, and an anchor with no value", () => {
+    expect(references("a: !bwref &e.1 x/foo\n")).toEqual([]);
+    expect(references("a: !bwref &e: x/foo\n")).toEqual([]);
+    expect(references("a: !bwref &e\nb: c\n")).toEqual([]);
+  });
+  test("a tagged key stays unlisted, with or without the anchor", () => {
+    expect(references("!bwref x/foo: v\n")).toEqual([]);
+    expect(references("!bwref &e x/foo: v\n")).toEqual([]);
+  });
+
+  // The guard against a second anchor looks back 4096 characters. Past that it misses the first
+  // anchor, so the scanner lists a name in a document that go-yaml refuses (a known limit; the
+  // same document with the anchor within reach lists none).
+  test("a first anchor beyond the look-back is missed", () => {
+    expect(references(`a: &a${"\n".repeat(4100)}  !bwref &b x/foo\n`)).toEqual(["x/foo"]);
+    expect(references("a: &a\n\n  !bwref &b x/foo\n")).toEqual([]);
+  });
+});

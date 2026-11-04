@@ -118,7 +118,10 @@ function tags(original: string): { index: number; tag: string; name: string }[] 
   // comment, which the blanking above leaves.
   const header = String.raw`([|>](?:[-+][1-9]?|[1-9][-+]?)?)(?=[ \t]*(?:#[^\n]*)?\r?\n)`;
   const key = /[ \t]*:(?:[ \t\r\n]|$)/y;
-  const tag = new RegExp(String.raw`!bwref[ \t\r\n]+(?:"((?:[^"\\]|\\[^])*)"|'((?:[^'\n]|'')*)'|${header}|(${word}(?:[ \t]+${word})*))`, "y");
+  // The value may follow one anchor (`!bwref &e x/foo`): go-yaml reads an anchor name with is_alpha
+  // only, as the scan above does, and needs a blank after it. A second tag is not read here, because
+  // go-yaml refuses a node with two (ginsys/bronzeward#605).
+  const tag = new RegExp(String.raw`!bwref[ \t\r\n]+(&[0-9A-Za-z_-]+[ \t\r\n]+)?(?:"((?:[^"\\]|\\[^])*)"|'((?:[^'\n]|'')*)'|${header}|(${word}(?:[ \t]+${word})*))`, "y");
   // A tag counts only where the scan read it as a node's property: never in a plain, quoted or block
   // scalar's text. So the pattern is matched at those offsets only: a match that starts in text could
   // run over a real tag.
@@ -126,18 +129,24 @@ function tags(original: string): { index: number; tag: string; name: string }[] 
     tag.lastIndex = at;
     const m = tag.exec(masked);
     if (m === null) continue;
+    // go-yaml refuses a second anchor on one node (`&a !bwref &b x/foo`). The look-back stops after
+    // 4096 characters, so the cost per anchored tag has a bound. Beyond it the guard misses the first
+    // anchor and the scanner lists the name, though go-yaml refuses the document: an extra name in a
+    // document that go-yaml fails to parse. The scanner already does that elsewhere: it lists the
+    // name of `a:\n  b: !bwref\n  x/foo`, which go-yaml refuses for its indentation.
+    if (m[1] !== undefined && /&[0-9A-Za-z_-]+\s*$/.test(masked.slice(Math.max(0, m.index - 4096), m.index))) continue;
     let end = m.index + m[0].length;
     key.lastIndex = end;
     if (key.test(masked)) continue;
     let name: string | undefined;
-    if (m[3] !== undefined) {
-      const b = block(text, masked, m.index, end, m[3]);
+    if (m[4] !== undefined) {
+      const b = block(text, masked, m.index, end, m[4]);
       if (b === undefined) continue;
       ({ name, end } = b);
-    } else if (m[4] !== undefined) {
+    } else if (m[5] !== undefined) {
       if (continues(masked, m.index, end)) continue;
-      name = m[4];
-    } else name = m[1] !== undefined ? decoded(m[1]) : m[2]!.replaceAll("''", "'");
+      name = m[5];
+    } else name = m[2] !== undefined ? decoded(m[2]) : m[3]!.replaceAll("''", "'");
     if (name !== undefined && NAME.test(name)) found.push({ index: m.index, tag: original.slice(m.index, end), name });
   }
   return found;
