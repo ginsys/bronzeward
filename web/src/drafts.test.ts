@@ -3,7 +3,7 @@ import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { components } from "./api/v1";
-import { change, type Clash, createdId, WriteResult, declaredOf, DiscardRefused, NOT_DISCARDED, doneOnce, type Editor, type EditorEvent, editor, EMPTY, FragmentPane, forgetETag, type Held, holdsUnsaved, inUse, keepETag, keepOnDone, keptETag, LAYERS, lastGood, markLine, mayDrop, mayRevert, maySend, NOT_RENDERED, NOT_REVERTED, NOT_SENT_CONFLICT, NOT_SENT_UNREAD, NOT_SENT_UNSHOWN, paneEntry, rows, selection, sendRefusal, settledFragment, spotOfMark, unread, watchWrites, where } from "./drafts.tsx";
+import { change, type Clash, createdId, WriteResult, declaredOf, DiscardRefused, NOT_DISCARDED, doneOnce, type Editor, type EditorEvent, editor, EMPTY, FRESH, FragmentPane, forgetETag, type Held, holdsUnsaved, inUse, keepETag, keepOnDone, keptETag, LAYERS, lastGood, markLine, mayDrop, mayRevert, maySend, NOT_RENDERED, NOT_REVERTED, NOT_SENT_CONFLICT, NOT_SENT_UNREAD, NOT_SENT_UNSHOWN, paneEntry, rows, selection, sendRefusal, settledFragment, spotOfMark, staleRead, unread, watchWrites, where } from "./drafts.tsx";
 import { leaving, signingOut, startsNew, unsaved, WritesProvider } from "./forms.tsx";
 import { type Load, type Reads, ReadsProvider } from "./list.tsx";
 import { references, spotOfLine, spotOfPath, spotOfReference } from "./position.ts";
@@ -924,9 +924,43 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     // ... so the pane reads again, as the effect hooks cannot run in this node environment (#534 PR review does the same).
     const src = readFileSync(new URL("./drafts.tsx", import.meta.url), "utf8");
     expect(src).toMatch(/finished\.current = done;/);
-    expect(src).toMatch(/if \(finished\.current !== done\) return retry\(\(x\) => x \+ 1\);\n\s*setLoaded\(revision\);/);
+    expect(src).toMatch(/if \(staleRead\(finished\.current, done\)\) return setFailed\(true\);\n\s*setLoaded\(revision\);/);
+    // The stale read is not read again at once: the pre-write revision could answer again (PR review).
+    expect(src).not.toMatch(/finished\.current !== done\) return retry/);
     // A read that answers after the done answer is dispatched and before the next render sees the write as finished (hosted review).
     expect(src).toMatch(/finished\.current \+= 1;\n\s*act\(\{ kind: "done"/);
+  });
+
+  test("ginsys/bronzeward#559 PR review: a revision read that began before a write finished is stale, and the pane shows it as failed", () => {
+    expect(staleRead(1, 0)).toBe(true);
+    expect(staleRead(2, 0)).toBe(true);
+    expect(staleRead(0, 0)).toBe(false);
+    expect(staleRead(3, 3)).toBe(false);
+    // The pane starts from FRESH, and a stale read sets `failed` with no note: the next draft read that names a new revision reads it again.
+    const src = readFileSync(new URL("./drafts.tsx", import.meta.url), "utf8");
+    expect(src).toMatch(/useReducer\(editor, FRESH\)/);
+    expect(src).toMatch(/if \(staleRead\(finished\.current, done\)\) return setFailed\(true\);/);
+    // The gap that stays: a stale answer that `live` drops after the refresh is not covered by a test.
+  });
+
+  test("ginsys/bronzeward#559 PR review: another author's removal of a new fragment, read while its first Save is open, shows when that Save is done", () => {
+    // The first Save committed, the removal came before its answer: the pane started from nothing removed.
+    expect(FRESH).toEqual({ held: EMPTY, saved: EMPTY, gone: -1 });
+    const s = run(FRESH, [{ kind: "type", held: M }, { kind: "send" }, gone(5), { kind: "done", revision: "frv_1" }]);
+    expect(rest(s)).toEqual({ held: EMPTY, saved: EMPTY, conflict: theirs(M, 5), sent: sentOf(M), writes: 1, own: "frv_1" });
+    expect(editor(s, { kind: "copy" }).held).toBe(M);
+    // A newer removal read while the Save is open moves the one held back.
+    const newer = run(FRESH, [{ kind: "type", held: M }, { kind: "send" }, gone(5), gone(7), { kind: "done", revision: "frv_1" }]);
+    expect(newer.conflict).toEqual(theirs(M, 7));
+    // A failed first Save shows the removal as well.
+    const failed = run(FRESH, [{ kind: "type", held: M }, { kind: "send" }, gone(5), { kind: "failed" }]);
+    expect(failed.held).toBe(EMPTY);
+    expect(failed.conflict).toEqual(theirs(M, 5));
+    // A removal read before the Save is the entry's own state: the Save restores it, and the same revision read again is not another author's.
+    const known = run(FRESH, [gone(5), { kind: "type", held: M }, { kind: "send" }, gone(5), { kind: "done", revision: "frv_1" }]);
+    expect(rest(known)).toEqual({ held: M, saved: M, sent: sentOf(M), writes: 1, own: "frv_1" });
+    // With no write open, a removal read is as before: it sets the revision gone.
+    expect(rest(run(FRESH, [gone(5)]))).toEqual({ held: EMPTY, saved: EMPTY, gone: 5 });
   });
 
   test("ginsys/bronzeward#559 hosted review: without a conflict, another author's removal at a newer revision than the pane's own done Remove shows when the restoring Save is done", () => {
