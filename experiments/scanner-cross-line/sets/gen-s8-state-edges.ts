@@ -255,8 +255,9 @@ const firstOfG = docs.size;
 }
 
 // (L) Directives: a %TAG handle that maps to `!`, a redefinition of `!` and `!!`, a directive after
-// `...`, and the verbatim form. No handle is resolved here: main did not, and a directive that
-// changes what a handle means is a follow-up. The scanner must list what main lists.
+// `...`, and the verbatim form. These spell `!bwref` through a handle that maps to `!`, which
+// resolves to the same tag, so the scanner must list what main lists (ginsys/bronzeward#615 added
+// (M), where a handle changes what the tag is).
 {
   const dirs = ["%TAG !r! !", "%TAG !! !", "%TAG ! !x-", "%TAG !r! tag:x,2000:", "%TAG !r! !x-", "%YAML 1.1", "%YAML 1.1\n%TAG !r! !", "%FOO bar"];
   const spells = ["!r!bwref", "!!bwref", "!bwref", "!<!bwref>", "!r!bwref!"];
@@ -272,7 +273,59 @@ const firstOfG = docs.size;
     }
 }
 
-// (J) The line ends of (G), (H), (I), (K) and (L) as a CRLF, a lone carriage return, U+0085, U+2028 and U+2029.
+// (M) ginsys/bronzeward#615: the tag that a spelling resolves to, as go-yaml resolves it. (M1) A
+// handle whose prefix holds part of the name (`%TAG !x! !bw`, then `!x!ref`) names `!bwref`, and a
+// handle whose prefix does not (`!x!bwref` over `!bw`) names another tag. (M2) A percent escape in a
+// tag, a verbatim tag or a prefix decodes to the character, and a bad one (not hex, cut short, a
+// byte that is no UTF-8 start or continuation) fails the stream. Each is placed where a property can
+// stand, and the documents around it show that the others still list.
+{
+  const decls = [
+    ["%TAG !x! !bw", ["!x!ref", "!x!bwref", "!x!r", "!x!"]],
+    ["%TAG !x! !b", ["!x!wref", "!x!ref"]],
+    ["%TAG !x! !bwr", ["!x!ef", "!x!ref"]],
+    ["%TAG ! !bw", ["!ref", "!bwref", "!"]],
+    ["%TAG !! !bw", ["!!ref", "!!bwref"]],
+    ["%TAG !x! !other", ["!x!bwref", "!x!ref"]],
+    ["%TAG !x! !bw%72", ["!x!ef", "!x!ref"]],
+    ["%TAG !x! !bw%7", ["!x!ef"]],
+    ["%TAG !x! !bw%ZZ", ["!x!ef"]],
+    ["%TAG !x! !bw%C3%A9", ["!x!ef"]],
+    ["%TAG !x! !bw%FF", ["!x!ef"]],
+    ["%TAG !x! !bw # note", ["!x!ref"]],
+    ["%TAG !x! !bw#note", ["!x!ref"]],
+    ["%TAG !x! !bw\n%TAG !y! !wref", ["!x!ref", "!y!wref", "!z!ref"]],
+    ["%YAML 1.2", ["!bwref"]],
+  ] as const;
+  const bare = ["!bw%72ef", "!bw%7ef", "!bw%ZZef", "!bwref%", "!bw%C3%A9ref", "!bw%FFref", "!<!bw%72ef>", "!<!bwref>", "!<!bwref", "!<>", "!<!bw%ZZef>", "!bwref}", "!bwref]", "!bwref,", "!bwref!", "!bw!ref", "!!bwref", "!x!bwref", "!bw ref"];
+  const place = (s: string) => [`a: ${s} x/foo`, `a: &e ${s} x/foo`, `a: ${s} &e x/foo`, `- ${s} x/foo`, `a: [${s} x/foo]`, `a: {k: ${s} x/foo}`, `a: ${s} "x/foo"`];
+  for (const [d, spells] of decls)
+    for (const s of spells)
+      for (const p of place(s)) {
+        docs.add(`${d}\n---\n${p}\nb: ${TAG}\n`);
+        docs.add(`${d}\n---\n${p}\n---\nb: ${TAG}\n`);
+        docs.add(`${d}\n---\na: 1\n---\n${p}\n`);
+      }
+  for (const s of bare)
+    for (const p of place(s)) {
+      docs.add(`${p}\nb: ${TAG}\n`);
+      docs.add(`${p}\n---\nb: ${TAG}\n`);
+      docs.add(`${p.replaceAll("x/foo", "x/bar")}\n...\n---\nb: ${TAG}\n`);
+    }
+  // A directive line where it is none, and one that stands in the wrong place.
+  for (const d of ["%TAG !x! !bw", "%YAML 1.1", "%TAG !x! !bw # note"]) {
+    docs.add(`a: |\n  ${d}\nb: !x!ref x/foo\n`);
+    docs.add(`a: "p\n${d}\n"\nb: !bwref x/foo\n`);
+    docs.add(`# ${d}\nb: !x!ref x/foo\n`);
+    docs.add(`a: 1\n${d}\n---\nb: !x!ref x/foo\n`);
+    docs.add(`a: x\n${d}\nb: ${TAG}\n`);
+    docs.add(`${d}\n${d}\n---\nb: !x!ref x/foo\n`);
+    docs.add(`a: 1\n...\n${d}\nb: ${TAG}\n`);
+    docs.add(`a: 1\n...\nb: ${TAG}\n`);
+  }
+}
+
+// (J) The line ends of (G), (H), (I), (K), (L) and (M) as a CRLF, a lone carriage return, U+0085, U+2028 and U+2029.
 // go-yaml counts each as a line break, and a CRLF as one.
 for (const d of [...docs].slice(firstOfG)) for (const b of ["\r\n", "\r", "\u0085", " ", " "]) docs.add(d.replaceAll("\n", b));
 
