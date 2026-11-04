@@ -252,3 +252,51 @@ describe("an anchor between the tag and the value", () => {
     expect(references("a: &a\n\n  !bwref &b x/foo\n")).toEqual([]);
   });
 });
+
+// ginsys/bronzeward#605: where a plain value ends depends on the context. In block context a comma,
+// bracket or brace is text, so `x/foo,bar` is one scalar and no name. In flow context it ends the
+// value. Each case below is checked against go-yaml v3.0.5, with no anchor, an anchor before the tag
+// and an anchor after it.
+describe("a plain value in block and in flow context", () => {
+  const withAnchors = (doc: (before: string, after: string) => string) => [doc("", ""), doc("&e ", ""), doc("", "&e ")];
+
+  test.each([
+    ["a comma", "x/foo,bar"],
+    ["a comma and a blank", "x/foo, bar"],
+    ["a closing bracket", "x/foo]"],
+    ["a closing brace", "x/foo}"],
+    ["a colon and a comma", "x/foo:,y"],
+    ["a second word", "x/foo bar"],
+  ])("block context: %s makes one scalar, which is no name", (_what, value) => {
+    for (const doc of withAnchors((b, a) => `k: ${b}!bwref ${a}${value}\n`)) expect(references(doc), doc).toEqual([]);
+    for (const doc of withAnchors((b, a) => `- ${b}!bwref ${a}${value}\n`)) expect(references(doc), doc).toEqual([]);
+  });
+
+  test("block context: the value on the next line, and a continuation line", () => {
+    for (const doc of withAnchors((b, a) => `k: ${b}!bwref ${a}\n  x/foo,bar\n`)) expect(references(doc), doc).toEqual([]);
+    for (const doc of withAnchors((b, a) => `k: ${b}!bwref ${a}x/foo\n  bar\n`)) expect(references(doc), doc).toEqual([]);
+  });
+
+  test("block context after a closed flow collection", () => {
+    expect(references("a: [x]\nb: !bwref y/foo,z\n")).toEqual([]);
+  });
+
+  test.each([
+    ["a comma", "[!bwref x/foo, bar]"],
+    ["a comma with no blank", "[!bwref x/foo,bar]"],
+    ["a closing bracket", "[!bwref x/foo]"],
+    ["a closing brace", "{k: !bwref x/foo}"],
+    ["a flow map", "{k: !bwref x/foo, j: l}"],
+    ["a nested collection", "[[!bwref x/foo, y], z]"],
+    ["the value on the next line", "[!bwref\n  x/foo, y]"],
+  ])("flow context: %s ends the value", (_what, flow) => {
+    expect(references(`k: ${flow}\n`), flow).toEqual(["x/foo"]);
+    expect(references(`k: ${flow.replace("!bwref", "&e !bwref")}\n`), flow).toEqual(["x/foo"]);
+    expect(references(`k: ${flow.replace("!bwref", "!bwref &e")}\n`), flow).toEqual(["x/foo"]);
+  });
+
+  test("flow context: a second word and a continuation line make one scalar, which is no name", () => {
+    expect(references("k: [!bwref x/foo bar]\n")).toEqual([]);
+    expect(references("k: [!bwref &e x/foo\n  bar]\n")).toEqual([]);
+  });
+});

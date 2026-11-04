@@ -111,8 +111,13 @@ function tags(original: string): { index: number; tag: string; name: string }[] 
     masked += `${line.slice(0, end)}${" ".repeat(line.length - end)}\n`;
   });
   const found: { index: number; tag: string; name: string }[] = [];
-  // A plain scalar's words: no blank, flow indicator, or colon before a blank; blanks between words.
+  // A plain scalar's words, with blanks between them. In flow context a word has no blank, flow
+  // indicator, or colon before a blank or a flow indicator. In block context a comma, bracket or brace
+  // is text (`a: !bwref x/foo,bar` is the scalar `x/foo,bar`, no name), so a word ends only at a blank
+  // or a colon before a blank; it still does not start with one, as go-yaml does not start a plain
+  // scalar there (ginsys/bronzeward#605).
   const word = String.raw`(?:[^ \t\r\n,[\]{}:]|:(?=[^ \t\r\n,[\]{}]))+`;
+  const blockWord = String.raw`(?:[^ \t\r\n,[\]{}:]|:(?=[^ \t\r\n,[\]{}]))(?:[^ \t\r\n:]|:(?=[^ \t\r\n]))*(?:[ \t]+(?:[^ \t\r\n:]|:(?=[^ \t\r\n]))+)*`;
   // A block scalar's header ends its line, a comment aside: | or >, then at most one chomping and
   // one indentation indicator, in either order. The server also takes a # right after it as a
   // comment, which the blanking above leaves.
@@ -121,11 +126,15 @@ function tags(original: string): { index: number; tag: string; name: string }[] 
   // The value may follow one anchor (`!bwref &e x/foo`): go-yaml reads an anchor name with is_alpha
   // only, as the scan above does, and needs a blank after it. A second tag is not read here, because
   // go-yaml refuses a node with two (ginsys/bronzeward#605).
-  const tag = new RegExp(String.raw`!bwref[ \t\r\n]+(&[0-9A-Za-z_-]+[ \t\r\n]+)?(?:"((?:[^"\\]|\\[^])*)"|'((?:[^'\n]|'')*)'|${header}|(${word}(?:[ \t]+${word})*))`, "y");
+  const pattern = (value: string) =>
+    new RegExp(String.raw`!bwref[ \t\r\n]+(&[0-9A-Za-z_-]+[ \t\r\n]+)?(?:"((?:[^"\\]|\\[^])*)"|'((?:[^'\n]|'')*)'|${header}|(${value}))`, "y");
+  const flowTag = pattern(String.raw`${word}(?:[ \t]+${word})*`);
+  const blockTag = pattern(blockWord);
   // A tag counts only where the scan read it as a node's property: never in a plain, quoted or block
   // scalar's text. So the pattern is matched at those offsets only: a match that starts in text could
   // run over a real tag.
-  for (const at of [...props].sort((a, b) => a - b)) {
+  for (const [at, inFlow] of [...props].sort((a, b) => a[0] - b[0])) {
+    const tag = inFlow ? flowTag : blockTag;
     tag.lastIndex = at;
     const m = tag.exec(masked);
     if (m === null) continue;
@@ -345,10 +354,11 @@ function pushEntry(stack: number[], col: number) {
   if (stack.length === 0 || stack[stack.length - 1]! < col) stack.push(col);
 }
 
-// The comment start of every line, and the offsets in the text of the !bwref properties read.
-function commentStarts(lines: readonly string[]): { starts: number[]; props: Set<number> } {
+// The comment start of every line, and the offsets in the text of the !bwref properties read, each
+// with whether it stands inside a flow collection (its value then ends at a flow indicator).
+function commentStarts(lines: readonly string[]): { starts: number[]; props: Map<number, boolean> } {
   const st = freshCarry();
-  const props = new Set<number>();
+  const props = new Map<number, boolean>();
   let base = 0;
   const starts = lines.map((full, n) => {
     // The carriage return of a CRLF is part of the line break, not of the line: the scan reads the
@@ -368,7 +378,7 @@ function commentStarts(lines: readonly string[]): { starts: number[]; props: Set
   return { starts, props };
 }
 
-function scanLine(st: Carry, line: string, base: number, props: Set<number>): number {
+function scanLine(st: Carry, line: string, base: number, props: Map<number, boolean>): number {
   // YAML indents with U+0020 only, and go-yaml ends an empty line at a line break after those spaces
   // (yaml_parser_scan_block_scalar_breaks, scannerc.go lines 2393-2410, go.yaml.in/yaml/v3 v3.0.5). A
   // tab or another Unicode space (U+00A0, say) is text, which `trim` would count as blank.
@@ -489,7 +499,7 @@ function scanLine(st: Carry, line: string, base: number, props: Set<number>): nu
         else while (e < line.length && /[0-9A-Za-z_-]/.test(line[e]!)) e++;
         // A tag spelled through a handle (`!r!bwref`, `!!bwref`) is recorded at its `!bwref`, as main
         // matched it: the handles a %TAG directive declares are not resolved here.
-        if (c === "!" && line.slice(j, e).endsWith("!bwref")) props.add(base + e - 6);
+        if (c === "!" && line.slice(j, e).endsWith("!bwref")) props.set(base + e - 6, st.flow > 0);
         j = e;
         lastPlain = false;
         if (c === "*") {
