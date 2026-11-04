@@ -101,6 +101,105 @@ const MARKER = /^(?:---|\.\.\.)(?:[ \t]|\r?$)/;
 // it replaces (each is one UTF-16 code unit, the unit the editor reports positions in), so the
 // positions found here are positions in the text given (ginsys/bronzeward#544).
 const BREAKS = /\r(?!\n)|[\u0085\u{2028}\u{2029}]/gu;
+
+// A tag as go-yaml resolves it (ginsys/bronzeward#615). Its scanner takes a tag as URI characters
+// (yaml_parser_scan_tag_uri, scannerc.go lines 2043-2145, go.yaml.in/yaml/v3 v3.0.5) and decodes a
+// `%XX` escape as one UTF-8 character. The parser then adds the prefix that the document's table
+// holds for the tag's handle (parserc.go lines 530-549). A character outside the set, a bad escape
+// and a handle with no entry fail the whole stream. `value` is a string of bytes, which is enough to
+// compare it with an ASCII tag.
+const URI_CHAR = /[0-9A-Za-z_\-;/?:@&=+$,.!~*'()[\]%]/;
+function readUri(s: string, from: number): { value: string; end: number } | undefined {
+  let value = "";
+  let i = from;
+  while (i < s.length && URI_CHAR.test(s[i]!)) {
+    if (s[i] !== "%") {
+      value += s[i++];
+      continue;
+    }
+    for (let w = 0; ; ) {
+      const hex = /^%([0-9A-Fa-f]{2})/.exec(s.slice(i, i + 3));
+      if (hex === null) return undefined;
+      const octet = parseInt(hex[1]!, 16);
+      if (w === 0) {
+        // The leading octet gives the length of the UTF-8 sequence; the others must continue it.
+        w = octet < 0x80 ? 1 : octet >= 0xf0 ? (octet < 0xf8 ? 4 : 0) : octet >= 0xe0 ? 3 : octet >= 0xc0 ? 2 : 0;
+        if (w === 0) return undefined;
+      } else if ((octet & 0xc0) !== 0x80) return undefined;
+      value += String.fromCharCode(octet);
+      i += 3;
+      if (--w === 0) break;
+    }
+  }
+  return { value, end: i };
+}
+const DEFAULT_HANDLES: readonly (readonly [string, string])[] = [
+  ["!", "!"],
+  ["!!", "tag:yaml.org,2002:"],
+];
+// The tag that `token` (from its `!` to the blank that ends it) names in a document with `table`, or
+// undefined where go-yaml refuses the stream. `after` is the character that follows the token.
+function resolveTag(token: string, after: string | undefined, table: ReadonlyMap<string, string>): string | undefined {
+  if (after !== undefined && !isWs(after)) return undefined;
+  if (token.startsWith("!<")) {
+    const u = readUri(token, 2);
+    return u === undefined || u.value === "" || token[u.end] !== ">" || u.end + 1 !== token.length ? undefined : u.value;
+  }
+  let h = 1;
+  while (h < token.length && /[0-9A-Za-z_-]/.test(token[h]!)) h++;
+  if (token[h] === "!") {
+    // A named handle (`!x!`), the secondary one (`!!`) or the primary one set to a tag by its suffix.
+    const prefix = table.get(token.slice(0, h + 1));
+    const u = readUri(token, h + 1);
+    return prefix === undefined || u === undefined || u.value === "" || u.end !== token.length ? undefined : prefix + u.value;
+  }
+  // The handle is `!`, and the letters read so far start the suffix; a bare `!` is the tag `!`.
+  const u = readUri(token, h);
+  if (u === undefined || u.end !== token.length) return undefined;
+  const suffix = token.slice(1, h) + u.value;
+  return suffix === "" ? "!" : table.get("!")! + suffix;
+}
+
+// A %YAML or %TAG directive line (scanner lines 1622-1957): the name is letters, digits, `_` and `-`
+// and a blank ends it; a %TAG value is a handle, a blank and a URI prefix that a blank or the line's
+// end follows; a comment can close the line. Another directive name, or any other text, fails the
+// stream. go-yaml accepts the version 1.1 only (parserc.go lines 1192-1200).
+function parseDirective(line: string): { handle: string; prefix: string } | { version: string } | undefined {
+  const name = /^%([0-9A-Za-z_-]+)(?=[ \t]|$)/.exec(line);
+  if (name === null) return undefined;
+  const rest = line.slice(name[0].length);
+  if (name[1] === "YAML") {
+    const v = /^[ \t]*(\d{1,2})\.(\d{1,2})[ \t]*(?:#.*)?$/.exec(rest);
+    return v === null ? undefined : { version: `${Number(v[1])}.${Number(v[2])}` };
+  }
+  if (name[1] !== "TAG") return undefined;
+  const t = /^[ \t]+(!(?:[0-9A-Za-z_-]*!)?)[ \t]+/.exec(rest);
+  if (t === null) return undefined;
+  const u = readUri(rest, t[0].length);
+  if (u === undefined || u.value === "" || !/^[ \t]*(?:#.*)?$/.test(rest.slice(u.end)) || /^#/.test(rest.slice(u.end))) return undefined;
+  return { handle: t[1]!, prefix: u.value };
+}
+// The handle table of a document from the directive lines before its `---`, or null where go-yaml
+// refuses them: a bad line, a second %YAML, a version but 1.1, or a handle declared twice.
+function directiveTable(lines: readonly string[]): Map<string, string> | null {
+  const table = new Map(DEFAULT_HANDLES);
+  const declared = new Set<string>();
+  let version = false;
+  for (const l of lines) {
+    const d = parseDirective(l);
+    if (d === undefined) return null;
+    if ("version" in d) {
+      if (version || d.version !== "1.1") return null;
+      version = true;
+    } else {
+      if (declared.has(d.handle)) return null;
+      declared.add(d.handle);
+      table.set(d.handle, d.prefix);
+    }
+  }
+  return table;
+}
+
 function tags(original: string): { index: number; tag: string; name: string }[] {
   const text = original.replace(BREAKS, "\n");
   let masked = "";
@@ -127,29 +226,30 @@ function tags(original: string): { index: number; tag: string; name: string }[] 
   // comment, which the blanking above leaves.
   const header = String.raw`([|>](?:[-+][1-9]?|[1-9][-+]?)?)(?=[ \t]*(?:#[^\n]*)?\r?\n)`;
   const key = /[ \t]*:(?:[ \t\r\n]|$)/y;
-  const tag = new RegExp(String.raw`!bwref[ \t\r\n]+(?:"((?:[^"\\]|\\[^])*)"|'((?:[^'\n]|'')*)'|${header}|(${word}(?:[ \t]+${word})*))`, "y");
+  const tag = new RegExp(String.raw`[ \t\r\n]+(?:"((?:[^"\\]|\\[^])*)"|'((?:[^'\n]|'')*)'|${header}|(${word}(?:[ \t]+${word})*))`, "y");
   // The value may follow one anchor (`!bwref &e x/foo`): go-yaml reads an anchor name with is_alpha
   // only, as the scan below does, and needs a blank after it. The groups are those of `tag`. A value
   // with no anchor between the tag and the value is read by `tag` alone, as before. A second tag is
   // not read, because go-yaml refuses a node with two.
   const anchored = (value: string) =>
-    new RegExp(String.raw`!bwref[ \t\r\n]+&[0-9A-Za-z_-]+[ \t\r\n]+(?:"((?:[^"\\]|\\[^])*)"|'((?:[^'\n]|'')*)'|${header}|(${value}))`, "y");
+    new RegExp(String.raw`[ \t\r\n]+&[0-9A-Za-z_-]+[ \t\r\n]+(?:"((?:[^"\\]|\\[^])*)"|'((?:[^'\n]|'')*)'|${header}|(${value}))`, "y");
   const flowAnchored = anchored(flowValue);
   const blockAnchored = anchored(blockValue);
   // go-yaml drops a byte order mark at the start of the stream before it reads any text, so it counts
   // as no column and no character there. The anchored path does not model that, and the scan reads
   // no value after an anchor in such a stream, as on main (ginsys/bronzeward#605).
   const bomStream = masked.charCodeAt(0) === 0xfeff;
-  // A tag counts only where the scan read it as a node's property: never in a plain, quoted or block
-  // scalar's text. So the pattern is matched at those offsets only: a match that starts in text could
-  // run over a real tag.
-  for (const [at, inFlow] of [...props].sort((a, b) => a[0] - b[0])) {
+  // A tag counts only where the scan read it as a node's property and resolved it to `!bwref`: never
+  // in a plain, quoted or block scalar's text. So the pattern is matched at the end of those tags
+  // only: a match that starts in text could run over a real tag. `start` is the first character of
+  // the tag as spelled (`!x!ref`, `!<!bwref>`).
+  for (const [start, { end: tagEnd, inFlow }] of [...props].sort((a, b) => a[0] - b[0])) {
     const withAnchor = inFlow ? flowAnchored : blockAnchored;
-    withAnchor.lastIndex = at;
+    withAnchor.lastIndex = tagEnd;
     let m = bomStream ? null : withAnchor.exec(masked);
     const hasAnchor = m !== null;
     if (m === null) {
-      tag.lastIndex = at;
+      tag.lastIndex = tagEnd;
       m = tag.exec(masked);
     }
     if (m === null) continue;
@@ -158,24 +258,23 @@ function tags(original: string): { index: number; tag: string; name: string }[] 
     // anchor and the scanner lists the name, though go-yaml refuses the document: an extra name in a
     // document that go-yaml fails to parse. The scanner already does that elsewhere: it lists the
     // name of `a:\n  b: !bwref\n  x/foo`, which go-yaml refuses for its indentation.
-    if (hasAnchor && /&[0-9A-Za-z_-]+\s*$/.test(masked.slice(Math.max(0, m.index - 4096), m.index))) continue;
-    // The scan records the `!bwref` tail of a tag spelled through a handle (`!!bwref`, `!r!bwref`),
-    // which is another tag. A value after an anchor is read only for a tag that starts at the tail:
-    // after a blank, the start of the text or a flow indicator that opens an entry.
-    if (hasAnchor && m.index > 0 && !/[ \t\r\n[{,]/.test(masked[m.index - 1]!)) continue;
+    if (hasAnchor && /&[0-9A-Za-z_-]+\s*$/.test(masked.slice(Math.max(0, start - 4096), start))) continue;
+    // A value after an anchor is read only for a tag that follows a blank, the start of the text or a
+    // flow indicator that opens an entry (go-yaml needs a blank after an anchor name).
+    if (hasAnchor && start > 0 && !/[ \t\r\n[{,]/.test(masked[start - 1]!)) continue;
     let end = m.index + m[0].length;
     key.lastIndex = end;
     if (key.test(masked)) continue;
     let name: string | undefined;
     if (m[3] !== undefined) {
-      const b = block(text, masked, m.index, end, m[3]);
+      const b = block(text, masked, start, end, m[3]);
       if (b === undefined) continue;
       ({ name, end } = b);
     } else if (m[4] !== undefined) {
-      if (hasAnchor ? anchoredContinues(masked, m.index, end, inFlow) : continues(masked, m.index, end)) continue;
+      if (hasAnchor ? anchoredContinues(masked, start, end, inFlow) : continues(masked, start, end)) continue;
       name = m[4];
     } else name = m[1] !== undefined ? decoded(m[1]) : m[2]!.replaceAll("''", "'");
-    if (name !== undefined && NAME.test(name)) found.push({ index: m.index, tag: original.slice(m.index, end), name });
+    if (name !== undefined && NAME.test(name)) found.push({ index: start, tag: original.slice(start, end), name });
   }
   return found;
 }
@@ -368,6 +467,63 @@ interface Carry {
   closed: boolean;
 }
 const freshCarry = (): Carry => ({ stack: [], flow: 0, ns: true, open: "", holder: -1, block: undefined, closed: false });
+
+// The document that is being read (ginsys/bronzeward#615). A tag spelled through a handle names what
+// the document's %TAG directives say, so a `!bwref` property counts only when its document is
+// known to be accepted: `props` takes the tags of a document at its end, unless go-yaml refuses it.
+interface Prop {
+  end: number;
+  inFlow: boolean;
+}
+interface Docs {
+  // "start": no content yet, directives can come; "body": content has begun; "ended": after `...`,
+  // where only directives and a `---` can come.
+  phase: "start" | "body" | "ended";
+  // The directive lines before the `---`, and the handle table they declare once it is read.
+  pending: string[];
+  table: ReadonlyMap<string, string>;
+  // The document holds what go-yaml fails to parse (a bad directive, a tag it cannot resolve).
+  refused: boolean;
+  // The `!bwref` properties of this document, by the offset of the tag.
+  cur: Map<number, Prop>;
+  props: Map<number, Prop>;
+}
+const freshDocs = (props: Map<number, Prop>): Docs => ({ phase: "start", pending: [], table: new Map(DEFAULT_HANDLES), refused: false, cur: new Map(), props });
+function endDocument(d: Docs, phase: "start" | "ended") {
+  if (!d.refused) for (const [k, v] of d.cur) d.props.set(k, v);
+  Object.assign(d, freshDocs(d.props), { phase });
+}
+// Read a line against the document state. A directive line (`%` in the first column, outside any
+// scalar) is consumed here and returns true. A `---` or `...` marker ends or starts a document, and
+// a line of content after directives with no `---`, or after `...`, refuses its document.
+function readDocumentLine(d: Docs, st: Carry, text: string): boolean {
+  if (st.open === '"' || st.open === "'") return false;
+  if (MARKER.test(text)) {
+    if (text.startsWith("...")) endDocument(d, "ended");
+    else {
+      if (d.phase === "body") endDocument(d, "start");
+      const table = directiveTable(d.pending);
+      if (table === null) d.refused = true;
+      else d.table = table;
+      d.pending = [];
+      d.phase = "body";
+    }
+    return false;
+  }
+  if (text.startsWith("%") && st.block === undefined && (st.open === "" || (st.open === "plain" && st.holder >= 0))) {
+    if (d.phase === "body") d.refused = true;
+    else {
+      d.pending.push(text);
+      d.phase = "start";
+    }
+    return true;
+  }
+  if (!/^[ \t]*(?:#.*)?$/.test(text) && d.phase !== "body") {
+    if (d.phase === "ended" || d.pending.length > 0) d.refused = true;
+    d.phase = "body";
+  }
+  return false;
+}
 const isWs = (c: string | undefined) => c === " " || c === "\t" || c === "\r";
 const FLOW = ",[]{}";
 // A block scalar header after its indicator. go-yaml reads the indicators only directly after `|` or
@@ -408,9 +564,10 @@ function pushEntry(stack: number[], col: number) {
 }
 
 // The comment start of every line, and the offsets in the text of the !bwref properties read.
-function commentStarts(lines: readonly string[]): { starts: number[]; props: Map<number, boolean> } {
+function commentStarts(lines: readonly string[]): { starts: number[]; props: Map<number, Prop> } {
   const st = freshCarry();
-  const props = new Map<number, boolean>();
+  const props = new Map<number, Prop>();
+  const docs = freshDocs(props);
   let base = 0;
   const starts = lines.map((full, n) => {
     // The carriage return of a CRLF is part of the line break, not of the line: the scan reads the
@@ -422,15 +579,18 @@ function commentStarts(lines: readonly string[]): { starts: number[]; props: Map
     // index 0). A byte order mark anywhere else is text.
     const lead = n === 0 && line.startsWith("﻿");
     const rest = lead ? line.slice(1) : line;
-    const at = scanLine(st, lead && rest.startsWith("﻿") ? ` ${rest.slice(1)}` : rest, base + (lead ? 1 : 0), props);
+    const text = lead && rest.startsWith("﻿") ? ` ${rest.slice(1)}` : rest;
+    // A directive line is no text to scan: the whole line is blanked.
+    const at = readDocumentLine(docs, st, text) ? 0 : scanLine(st, docs, text, base + (lead ? 1 : 0));
     base += full.length + 1;
     const end = lead ? at + 1 : at;
     return end >= line.length ? full.length : end;
   });
+  endDocument(docs, "start");
   return { starts, props };
 }
 
-function scanLine(st: Carry, line: string, base: number, props: Map<number, boolean>): number {
+function scanLine(st: Carry, docs: Docs, line: string, base: number): number {
   // YAML indents with U+0020 only, and go-yaml ends an empty line at a line break after those spaces
   // (yaml_parser_scan_block_scalar_breaks, scannerc.go lines 2393-2410, go.yaml.in/yaml/v3 v3.0.5). A
   // tab or another Unicode space (U+00A0, say) is text, which `trim` would count as blank.
@@ -549,9 +709,13 @@ function scanLine(st: Carry, line: string, base: number, props: Map<number, bool
         if (c === "!" && next === "<" && line.indexOf(">", j) >= 0) e = line.indexOf(">", j) + 1;
         else if (c === "!") while (e < line.length && !isWs(line[e])) e++;
         else while (e < line.length && /[0-9A-Za-z_-]/.test(line[e]!)) e++;
-        // A tag spelled through a handle (`!r!bwref`, `!!bwref`) is recorded at its `!bwref`, as main
-        // matched it: the handles a %TAG directive declares are not resolved here.
-        if (c === "!" && line.slice(j, e).endsWith("!bwref")) props.set(base + e - 6, st.flow > 0);
+        // A tag is resolved as go-yaml does: through the handles its document declares. One it cannot
+        // resolve fails the stream, so its document lists nothing (ginsys/bronzeward#615).
+        if (c === "!") {
+          const resolved = resolveTag(line.slice(j, e), line[e], docs.table);
+          if (resolved === undefined) docs.refused = true;
+          else if (resolved === "!bwref") docs.cur.set(base + j, { end: base + e, inFlow: st.flow > 0 });
+        }
         j = e;
         lastPlain = false;
         if (c === "*") {

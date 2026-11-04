@@ -148,11 +148,11 @@ describe("the references of a declared embedded document", () => {
     const start = text.indexOf("!bwref");
     expect(spotOfReference(text, "x/foo", at("doc[0]/cfg"))).toEqual({ start, end: start + "!bwref x/foo".length });
   });
-  test("a tag spelled through a handle is read as main read it, by its !bwref", () => {
+  test("a tag spelled through a handle that resolves to !bwref is read, from where it is spelled", () => {
     const text = "%TAG !r! !\n---\na: !r!bwref x/foo\n";
-    const start = text.indexOf("!bwref");
+    const start = text.indexOf("!r!bwref");
     expect(references(text, [])).toEqual(["x/foo"]);
-    expect(spotOfReference(text, "x/foo", [])).toEqual({ start, end: start + "!bwref x/foo".length });
+    expect(spotOfReference(text, "x/foo", [])).toEqual({ start, end: start + "!r!bwref x/foo".length });
   });
   test("a CRLF after a block scalar header's comment does not stop the header", () => {
     const text = 'a: | # c\r\n  [x\r\nb: ?"y # !bwref ghost\r\nc: !bwref x/foo\r\n';
@@ -495,5 +495,91 @@ describe("a plain value after an anchor, in block and in flow context", () => {
     expect(references("- - !bwref x/foo\n  - y\n")).toEqual(["x/foo"]);
     expect(references("? - !bwref x/foo\n  - bar\n: v\n")).toEqual(["x/foo"]);
     expect(references("- - &e !bwref x/foo\n  - y\n")).toEqual(["x/foo"]);
+  });
+});
+
+// ginsys/bronzeward#615: go-yaml resolves a tag through the %TAG directives of its document before it
+// compares it with !bwref. Every list below was read from go-yaml v3.0.5 (the oracle of
+// experiments/scanner-cross-line): a stream it refuses lists nothing, and a stream it accepts lists
+// the names shown. A directive stands before the `---` of its document and ends with it.
+describe("a tag is resolved the way go-yaml does", () => {
+  test.each([
+    ["verbatim, plain", "a: !<!bwref> x/foo\n"],
+    ["verbatim, in a flow mapping", "{a: !<!bwref> x/foo}\n"],
+    ["verbatim, in a flow sequence", "[!<!bwref> x/foo]\n"],
+    ["verbatim, after an anchor", "a: &e !<!bwref> x/foo\n"],
+    ["verbatim, before an anchor", "a: !<!bwref> &e x/foo\n"],
+    ["a primary handle that holds part of the name", "%TAG ! !bw\n---\na: !ref x/foo\n"],
+    ["a secondary handle that holds part of the name", "%TAG !! !bw\n---\na: !!ref x/foo\n"],
+    ["a named handle that holds part of the name", "%TAG !x! !bw\n---\na: !x!ref x/foo\n"],
+    ["a named handle, in a flow mapping", "%TAG !x! !bw\n---\n{a: !x!ref x/foo}\n"],
+    ["a percent escape in the tag", "a: !bw%72ef x/foo\n"],
+    ["a percent escape in a verbatim tag", "a: !<!bw%72ef> x/foo\n"],
+    ["a percent escape in a prefix", "%TAG !x! !bw%72\n---\na: !x!ef x/foo\n"],
+    ["a comment after the directive", "%TAG !x! !bw # note\n---\na: !x!ref x/foo\n"],
+    ["%YAML 1.1", "%YAML 1.1\n---\na: !bwref x/foo\n"],
+  ])("lists the name of %s", (_, text) => {
+    expect(references(text)).toEqual(["x/foo"]);
+  });
+
+  test.each([
+    ["a secondary handle", "a: !!bwref x/foo\n"],
+    ["a named handle that holds part of the name twice", "%TAG !x! !bw\n---\na: !x!bwref x/foo\n"],
+    ["a named handle that maps to another tag", "%TAG !x! !other\n---\na: !x!bwref x/foo\n"],
+    ["an undeclared named handle", "a: !x!bwref x/foo\n"],
+    ["%YAML 1.2", "%YAML 1.2\n---\na: !bwref x/foo\n"],
+    ["an unknown directive", "%FOO bar\n---\na: !bwref x/foo\n"],
+    ["a %TAG handle declared twice", "%TAG !x! !a\n%TAG !x! !b\n---\na: !bwref x/foo\n"],
+    ["a %YAML directive declared twice", "%YAML 1.1\n%YAML 1.1\n---\na: !bwref x/foo\n"],
+    ["directives with no document start", "%YAML 1.1\na: !bwref x/foo\n"],
+    ["a bad percent escape in a prefix", "%TAG !x! tag:a%ZZ\n---\na: !bwref x/foo\n"],
+  ])("lists nothing for %s", (_, text) => {
+    expect(references(text)).toEqual([]);
+  });
+
+  // A tag that go-yaml cannot read fails the whole stream, so an earlier name in the same document
+  // is not listed either.
+  test.each([
+    ["a bad percent escape in a tag", "a: !bwref x/foo\nb: !<!bw%ZZ> y\n"],
+    ["a bad percent escape that ends a tag", "a: !bwref x/foo\nb: !bw%ZZref y\n"],
+    ["an undeclared handle", "a: !bwref x/foo\nb: !q!z y\n"],
+    ["an undeclared handle after a directive", "%TAG !x! !bw\n---\na: !x!ref x/foo\nb: !y!bwref x/bar\n"],
+    ["a character that ends a tag before a blank", "a: !bwref x/foo\nb: {c: !bwref}\n"],
+    ["a character that ends a tag at the line end", "a: !bwref x/foo\nb: !bwref}\n"],
+  ])("lists nothing in a document with %s", (_, text) => {
+    expect(references(text)).toEqual([]);
+  });
+
+  test("the table starts again at every document", () => {
+    // The second document has the default handles: `!ref` is another tag there.
+    expect(references("%TAG ! !bw\n---\na: 1\n---\nb: !ref x/bar\n")).toEqual([]);
+    expect(references("%TAG !x! !bw\n---\na: !x!ref x/foo\n---\nb: !bwref x/bar\n")).toEqual(["x/foo", "x/bar"]);
+  });
+
+  test("a directive after the end of a document declares a table for the next one", () => {
+    expect(references("a: 1\n...\n%TAG ! !bw\n---\nb: !ref x/foo\n")).toEqual(["x/foo"]);
+    expect(references("a: 1\n...\n%TAG ! !bw\nb: !ref x/foo\n")).toEqual([]);
+  });
+
+  test("a line that looks like a directive in a block scalar or a comment declares nothing", () => {
+    expect(references("a: |\n  %TAG ! !bw\nb: !ref x/foo\n")).toEqual([]);
+    expect(references("# %TAG ! !bw\nb: !ref x/foo\n")).toEqual([]);
+  });
+
+  // go-yaml fails the whole stream for a refused document. The scanner blanks that document only (the
+  // owner's wording of ginsys/bronzeward#606), so an earlier document still lists its names. The
+  // comparison tool counts such a document apart, as one that go-yaml refuses.
+  test("a refused document blanks itself and no other", () => {
+    expect(references("a: !bwref x/foo\n---\nb: !q!z y\n")).toEqual(["x/foo"]);
+    expect(references("%YAML 1.2\n---\na: !bwref x/foo\n---\nb: !bwref x/bar\n")).toEqual(["x/bar"]);
+  });
+
+  // The spot of a reference runs from the first character of its tag, as it is spelled, to the end of
+  // its name.
+  test("the spot of a name starts at the tag as it is spelled", () => {
+    const text = "%TAG !x! !bw\n---\na: !x!ref x/foo\n";
+    expect(spotOfReference(text, "x/foo")).toEqual({ start: text.indexOf("!x!ref"), end: text.indexOf("x/foo") + 5 });
+    const verbatim = "a: !<!bwref> x/foo\n";
+    expect(spotOfReference(verbatim, "x/foo")).toEqual({ start: 3, end: verbatim.indexOf("\n") });
   });
 });
