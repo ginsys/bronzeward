@@ -28,10 +28,12 @@ permissions:
 # every candidate to a hosted runner is the only branch-independent rule. The org-level fork-PR
 # approval gate still applies on top. The Claude review job is a separate workflow whose reusable
 # skips forks and merge groups outright (the proxy is in-cluster only). The exceptions to this
-# rule always run GitHub-hosted: go-db and idp, whose containers need a Docker daemon, browser
-# and safari, which need browsers, and browser-auth, which needs both; the in-cluster runners have
-# neither. package, package-check and hosting run GitHub-hosted too: two separate machines build
-# the archives, and hosting needs Docker.
+# rule always run GitHub-hosted: go-db and idp, whose containers need a Docker daemon, browser,
+# which needs browsers, and browser-auth, which needs both; the in-cluster runners have neither.
+# package, package-check and hosting run GitHub-hosted too: two separate machines build the
+# archives, and hosting needs Docker. The Safari run is not here: it needs a macOS runner that
+# GitHub sometimes cannot give, so safari.yml runs it on main and on a schedule, outside the
+# required checks (ginsys/bronzeward#612).
 
 env:
   # The setting `mise run` honours (`mise help run`, --skip-tools); MISE_EXEC_AUTO_INSTALL does
@@ -148,50 +150,6 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: browser-linux
-          path: web/e2e/out
-          retention-days: 14
-
-  safari:
-    # The same cases in Safari, on a GitHub-hosted macOS runner (decision B6).
-    runs-on: macos-latest
-    timeout-minutes: 20
-    env:
-      BW_BROWSERS: safari
-      # node comes from actions/setup-node below; mise leaves it out, so its tasks run that one.
-      MISE_DISABLE_TOOLS: node
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      # ginsys/bronzeward#415: mise fetches node from nodejs.org, which served this macOS runner at
-      # under 1 to 60 kB/s, so after a mise.toml change left the job without a cache every run
-      # timed out installing it. actions/setup-node fetches the same version from GitHub's
-      # actions/node-versions releases instead. mise.toml stays the one place naming it.
-      - id: node
-        run: |
-          v=$(sed -n 's/^node = "\(.*\)"$/\1/p' mise.toml)
-          [ -n "$v" ] || { echo "safari: no node = \"<version>\" line in mise.toml" >&2; exit 1; }
-          echo "version=$v" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: ${{ steps.node.outputs.version }}
-      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
-        with:
-          cache_save: ${{ github.ref == 'refs/heads/main' }}
-          install_args: go
-      # The tasks below run under mise: it must find setup-node's node, at mise.toml's version.
-      # `mise exec` would otherwise install every missing tool of mise.toml first, which the
-      # workflow's MISE_TASK_RUN_AUTO_INSTALL does not stop.
-      - env:
-          MISE_EXEC_AUTO_INSTALL: "false"
-          WANT: ${{ steps.node.outputs.version }}
-        run: |
-          got=$(mise exec -- node --version)
-          [ "$got" = "v$WANT" ] || { echo "safari: mise runs node $got, not v$WANT" >&2; exit 1; }
-          mise exec -- npm --version
-      - run: sudo safaridriver --enable
-      - run: mise run browser
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: browser-safari
           path: web/e2e/out
           retention-days: 14
 
@@ -429,7 +387,7 @@ jobs:
     # outside pull requests, so `skipped` counts as success only for that job there. Any other
     # result fails, including `abandoned` (a job that never got a runner).
     if: always()
-    needs: [docs, site, actionlint, test, go, web, browser, safari, go-db, idp, browser-auth, commit-lint, action-pins, package-check, hosting]
+    needs: [docs, site, actionlint, test, go, web, browser, go-db, idp, browser-auth, commit-lint, action-pins, package-check, hosting]
     runs-on: ${{ (github.event_name == 'merge_group' || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'autops-kube-ginsys' }}
     timeout-minutes: 2
     steps:
