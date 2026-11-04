@@ -719,7 +719,8 @@ records no cause, so the line takes it from the event that records its end. Ctrl
 exit 130 and stops only the watcher. The watch waits up to 3 seconds for the operation's state,
 then says that the operation goes on, and names the state if it read one. If a line of the table or
 event output cannot be written, a running watch stops reading and exits 1 with the write error and the
-command that follows the operation; after an end the write error, and the error of writing the
+command that follows the operation; if the operation read that follows gave nothing, the state is
+unknown and the exit is the read's own (3 for an answer that cannot be read), with the write error beside it; after an end the write error, and the error of writing the
 resource with `-o json` or `-o yaml`, is printed beside the outcome and the exit code of the outcome
 stays (0 becomes 1). A failure to keep the client's state after Ctrl-C is printed before the stop
 lines, so the follow line stays last, and the exit is 130. `operation show` prints the same outcome lines without the server's time. For a cancelled operation
