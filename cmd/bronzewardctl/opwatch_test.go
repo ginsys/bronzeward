@@ -88,33 +88,73 @@ func TestOperationWatchInterrupt(t *testing.T) {
 
 // TestOperationWatchInterruptReturns: the first Ctrl-C on a watch whose stream ends within the grace
 // time returns the operation the watch last read, so the stop line names its state and exits 130.
+//
+// With -o json or -o yaml the operation it returned is also printed on standard output, as the
+// resource the stop line names (operator-experience.md section 5.7), and the stop lines stay last on
+// standard error.
 func TestOperationWatchInterruptReturns(t *testing.T) {
-	f := &opFake{body: fmt.Sprintf(opJSON, "apply-config", "running", "null", "null", "[]"), hang: make(chan struct{})}
+	for _, extra := range [][]string{nil, {"-o", "json"}, {"-o", "yaml"}} {
+		f := &opFake{body: fmt.Sprintf(opJSON, "apply-config", "running", "null", "null", "[]"), hang: make(chan struct{})}
+		srv := httptest.NewServer(f)
+		automationContext(t, srv.URL)
+		grace := interruptGrace
+		interruptGrace = 5 * time.Second
+		go func() {
+			for { // the stream request comes after the signal handler is set
+				f.mu.Lock()
+				n := f.streams
+				f.mu.Unlock()
+				if n > 0 {
+					_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
+					time.Sleep(200 * time.Millisecond)
+					close(f.hang) // the stream ends: the watch reads the operation and stops
+					return
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+		}()
+		code, out, errOut := runCtl(t, append([]string{"operation", "watch", "op_BWSYNTH"}, extra...)...)
+		srv.Close()
+		interruptGrace = grace
+		follow := "Follow it again with: bronzewardctl operation watch 'op_BWSYNTH'\n"
+		stop := "Stopped watching at your request. Operation op_BWSYNTH is still running, as the server last read it; it goes on.\n" + follow
+		stopLines, other := out, errOut // the stream the stop lines go to, and the other
+		if extra != nil {
+			stopLines, other = errOut, out
+		}
+		if code != 130 || !strings.HasSuffix(stopLines, stop) || strings.Contains(errOut, "stopped watching") {
+			t.Errorf("%v: exit %d, stdout\n%s\nstderr %q; want 130, the stop lines last and no diagnostic after them", extra, code, out, errOut)
+		}
+		if extra != nil && (!strings.Contains(other, "op_BWSYNTH") || !strings.Contains(other, "running")) {
+			t.Errorf("%v: standard output %q; want the operation resource, state running", extra, other)
+		}
+	}
+}
+
+// TestOperationWatchReadUnknown: when the stream ends and the operation read that follows is an
+// answer the client cannot read, the state of the operation is unknown, not refused: exit 3, and the
+// message names the command that reads it. A refusal the server named keeps exit 1.
+func TestOperationWatchReadUnknown(t *testing.T) {
+	for _, extra := range [][]string{nil, {"-o", "json"}} {
+		f := &opFake{stream: []string{sse(1, "commitment", commitment)}, badReadFrom: 2,
+			body: fmt.Sprintf(opJSON, "apply-config", "running", "null", "null", "[]")}
+		srv := httptest.NewServer(f)
+		automationContext(t, srv.URL)
+		code, out, errOut := runCtl(t, append([]string{"operation", "watch", "op_BWSYNTH", "--timeout", "5s"}, extra...)...)
+		srv.Close()
+		if code != 3 || !strings.Contains(errOut, "the state of operation op_BWSYNTH was not read") ||
+			!strings.Contains(errOut, "bronzewardctl operation show 'op_BWSYNTH'") || (extra != nil && out != "") {
+			t.Errorf("%v: exit %d, stdout\n%s\nstderr %q; want 3, the operation to read named and no resource", extra, code, out, errOut)
+		}
+	}
+	f := &opFake{stream: []string{sse(1, "commitment", commitment)}, forbidFrom: 2,
+		body: fmt.Sprintf(opJSON, "apply-config", "running", "null", "null", "[]")}
 	srv := httptest.NewServer(f)
 	defer srv.Close()
 	automationContext(t, srv.URL)
-	grace := interruptGrace
-	interruptGrace = 5 * time.Second
-	defer func() { interruptGrace = grace }()
-	go func() {
-		for { // the stream request comes after the signal handler is set
-			f.mu.Lock()
-			n := f.streams
-			f.mu.Unlock()
-			if n > 0 {
-				_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
-				time.Sleep(200 * time.Millisecond)
-				close(f.hang) // the stream ends: the watch reads the operation and stops
-				return
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-	}()
-	code, out, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH")
-	follow := "Follow it again with: bronzewardctl operation watch 'op_BWSYNTH'\n"
-	if code != 130 || !strings.HasSuffix(out, "Stopped watching at your request. Operation op_BWSYNTH is still running, as the server last read it; it goes on.\n"+follow) ||
-		strings.Contains(errOut, "stopped watching") {
-		t.Errorf("exit %d, stdout\n%s\nstderr %q; want 130, the stop lines last and no diagnostic after them", code, out, errOut)
+	code, _, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "5s")
+	if code != 1 || strings.Contains(errOut, "was not read") {
+		t.Errorf("a 403 on the read: exit %d, stderr %q; want 1 and no unknown-outcome text", code, errOut)
 	}
 }
 
