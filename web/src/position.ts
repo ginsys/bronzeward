@@ -285,8 +285,11 @@ interface Carry {
   holder: number;
   // An open block scalar: its content is more indented than the holder (YAML 1.2 8.1).
   block: { holder: number; digit: number; indent: number } | undefined;
+  // The last token was a quoted scalar, a flow collection or an alias, which takes an adjacent `:`
+  // in flow context.
+  closed: boolean;
 }
-const freshCarry = (): Carry => ({ stack: [], flow: 0, ns: true, open: "", holder: -1, block: undefined });
+const freshCarry = (): Carry => ({ stack: [], flow: 0, ns: true, open: "", holder: -1, block: undefined, closed: false });
 const isWs = (c: string | undefined) => c === " " || c === "\t" || c === "\r";
 const FLOW = ",[]{}";
 // A block scalar header after its indicator. go-yaml reads the indicators only directly after `|` or
@@ -366,7 +369,9 @@ function scanLine(st: Carry, line: string, base: number, props: Set<number>): nu
   let j = 0;
   let hold = st.stack.length > 0 ? st.stack[st.stack.length - 1]! : -1;
   let lastPlain = false;
-  let lastClosed = false;
+  // In block context a line starts a new node. In flow context a key that closed at the end of the
+  // previous line (`? "k"`) still takes a `:` that starts this one.
+  if (st.flow === 0) st.closed = false;
   let fresh = false;
   if (marker && st.open !== '"' && st.open !== "'") {
     Object.assign(st, freshCarry());
@@ -378,7 +383,7 @@ function scanLine(st: Carry, line: string, base: number, props: Set<number>): nu
     if (e < 0) return line.length;
     st.open = "";
     st.ns = false;
-    lastClosed = true;
+    st.closed = true;
     j = e;
   } else if (st.open === "plain") {
     if (blank) return line.length;
@@ -396,7 +401,8 @@ function scanLine(st: Carry, line: string, base: number, props: Set<number>): nu
     st.ns = true;
     fresh = true;
   }
-  if (fresh && st.flow === 0) {
+  // A blank line or a comment-only line closes no block entry, whatever its indentation.
+  if (fresh && st.flow === 0 && !blank && !/^ *#/.test(line)) {
     while (st.stack.length > 0 && st.stack[st.stack.length - 1]! > ind) st.stack.pop();
     hold = st.stack.length > 0 ? st.stack[st.stack.length - 1]! : -1;
   }
@@ -410,7 +416,8 @@ function scanLine(st: Carry, line: string, base: number, props: Set<number>): nu
       continue;
     }
     // go-yaml reads a # as a comment where a token starts, also right after a flow indicator.
-    if (c === "#" && (j === 0 || isWs(line[j - 1]) || st.ns)) return j;
+    // That is after any token but a plain scalar: a closing quote, bracket or alias, say.
+    if (c === "#" && (j === 0 || isWs(line[j - 1]) || st.ns || !lastPlain)) return j;
     if (st.ns) {
       if (c === '"' || c === "'") {
         if (nodeStart < 0) nodeStart = j;
@@ -422,7 +429,7 @@ function scanLine(st: Carry, line: string, base: number, props: Set<number>): nu
         j = e;
         st.ns = false;
         lastPlain = false;
-        lastClosed = true;
+        st.closed = true;
       } else if (c === "[" || c === "{") {
         if (nodeStart < 0) nodeStart = j;
         st.flow++;
@@ -437,7 +444,7 @@ function scanLine(st: Carry, line: string, base: number, props: Set<number>): nu
         st.flow--;
         st.ns = false;
         lastPlain = false;
-        lastClosed = true;
+        st.closed = true;
         j++;
       } else if (c === "!" || c === "&" || c === "*") {
         if (nodeStart < 0) nodeStart = j;
@@ -454,12 +461,14 @@ function scanLine(st: Carry, line: string, base: number, props: Set<number>): nu
         lastPlain = false;
         if (c === "*") {
           st.ns = false;
-          lastClosed = true;
+          st.closed = true;
         }
       } else if (((c === "?" || c === ":") && st.flow > 0) || ((c === "-" || c === "?" || c === ":") && (next === undefined || isWs(next)))) {
         if (st.flow === 0) {
-          pushEntry(st.stack, j);
-          hold = j;
+          // A colon that follows properties alone (`&e:`) closes a key that starts at the first one.
+          const col = c === ":" && nodeStart >= 0 ? nodeStart : j;
+          pushEntry(st.stack, col);
+          hold = col;
         }
         nodeStart = -1;
         lastPlain = false;
@@ -476,11 +485,11 @@ function scanLine(st: Carry, line: string, base: number, props: Set<number>): nu
         j = Math.max(plainEnd(line, j, st.flow), j + 1);
         st.ns = false;
         lastPlain = true;
-        lastClosed = false;
+        st.closed = false;
       }
       continue;
     }
-    if (c === ":" && (next === undefined || isWs(next) || (st.flow > 0 && (FLOW.includes(next) || lastClosed)))) {
+    if (c === ":" && (next === undefined || isWs(next) || (st.flow > 0 && (FLOW.includes(next) || st.closed)))) {
       if (st.flow === 0 && nodeStart >= 0) {
         pushEntry(st.stack, nodeStart);
         hold = nodeStart;
@@ -488,18 +497,18 @@ function scanLine(st: Carry, line: string, base: number, props: Set<number>): nu
       st.ns = true;
       nodeStart = -1;
       lastPlain = false;
-      lastClosed = false;
+      st.closed = false;
       j++;
     } else if (st.flow > 0 && c === ",") {
       st.ns = true;
       nodeStart = -1;
       lastPlain = false;
-      lastClosed = false;
+      st.closed = false;
       j++;
     } else if (st.flow > 0 && (c === "]" || c === "}")) {
       st.flow--;
       lastPlain = false;
-      lastClosed = true;
+      st.closed = true;
       j++;
     } else if (st.flow > 0 && (c === "[" || c === "{")) {
       st.flow++;
@@ -508,7 +517,7 @@ function scanLine(st: Carry, line: string, base: number, props: Set<number>): nu
     } else {
       j = Math.max(plainEnd(line, j, st.flow), j + 1);
       lastPlain = true;
-      lastClosed = false;
+      st.closed = false;
     }
   }
   if (st.flow === 0 && st.ns === false && lastPlain) {
@@ -553,13 +562,16 @@ function literalSpot(text: string, e: { text: string; spot: Spot }, name: string
   // A lone carriage return, U+0085, U+2028 and U+2029 break a line in go-yaml (see BREAKS); each
   // is read as a line feed here, with the same length, so the offsets stay the text's.
   const lines = text.slice(e.spot.start, e.spot.end).replace(BREAKS, "\n").split("\n");
-  const src =lines.slice(1).find((l) => !blank(l));
+  const body = lines.slice(1);
+  const src = body.find((l) => !blank(l));
   const dec = e.text.split("\n").find((l) => !blank(l));
   if (src === undefined || dec === undefined) return undefined;
   const cut = Math.max(spaces(src) - spaces(dec), 0);
-  const kept = [" ".repeat(lines[0]!.length)];
-  const removed = [0];
-  for (const l of lines.slice(1)) {
+  // The header line is left out, so the first content line is the first line of the document: a
+  // byte order mark at its start is the stream's.
+  const kept: string[] = [];
+  const removed: number[] = [];
+  for (const l of body) {
     const n = Math.min(cut, spaces(l));
     if (n < cut && !blank(l)) return undefined;
     kept.push(l.slice(n));
@@ -570,11 +582,11 @@ function literalSpot(text: string, e: { text: string; spot: Spot }, name: string
   // The offset in the text of the character at `i` in the scanned lines.
   const back = (i: number) => {
     let scanned = 0;
-    let source = 0;
+    let source = lines[0]!.length + 1;
     for (let k = 0; k < kept.length; k++) {
       if (i <= scanned + kept[k]!.length) return e.spot.start + source + removed[k]! + (i - scanned);
       scanned += kept[k]!.length + 1;
-      source += lines[k]!.length + 1;
+      source += body[k]!.length + 1;
     }
     return e.spot.end;
   };

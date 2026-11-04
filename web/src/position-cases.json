@@ -427,6 +427,54 @@
    ]
   },
   {
+   "name": "edge-properties-only-key",
+   "source": "ginsys/bronzeward#602",
+   "doc": "- &e: |\n   \"x\n- !bwref x/foo\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
+   "name": "edge-blank-before-header",
+   "source": "ginsys/bronzeward#602",
+   "doc": "outer:\n  a:\n\n    |2\n    text\n  b: !bwref x/foo\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
+   "name": "edge-comment-before-header",
+   "source": "ginsys/bronzeward#602",
+   "doc": "outer:\n  a:\n# c\n    |2\n    text\n  b: !bwref x/foo\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
+   "name": "edge-colon-on-next-line",
+   "source": "ginsys/bronzeward#602",
+   "doc": "a: {? \"k\"\n  :!bwref x/foo}\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
+   "name": "edge-comment-after-bracket",
+   "source": "ginsys/bronzeward#602",
+   "doc": "a: [[]# , \"\n  , !bwref x/foo]\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
+   "name": "edge-comment-after-quote",
+   "source": "ginsys/bronzeward#602",
+   "doc": "a: [\"q\"# , \"\n  , !bwref x/foo]\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
    "name": "594-pipe",
    "source": "experiments/scanner-cross-line/sets/cases.json (#594)",
    "doc": "a: x |\n  \"y # !bwref ghost\nb: !bwref x/foo\n",
