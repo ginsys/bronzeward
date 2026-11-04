@@ -33,6 +33,18 @@ main = web/src/position.ts, last changed at 3e00e342. before = web/src/position.
 | primary-to-core-uri | added | none | refused | x/foo (extra) | x/foo (extra) |
 | primary-redefined-then-reset | added | refused | refused | extra x/foo | extra x/foo |
 | secondary-core-redefined | added | x/bar | refused | x/bar (=) | x/bar (=) |
+| handle-prefix-splits-name | added | x/foo | accepted | none (lost) | none (lost) |
+| primary-prefix-splits-name | added | x/foo | accepted | none (lost) | none (lost) |
+| secondary-prefix-splits-name | added | x/foo | accepted | none (lost) | none (lost) |
+| handle-prefix-is-whole-name | added | refused | refused | = | = |
+| percent-escape-plain | added | x/foo | accepted | none (lost) | none (lost) |
+| percent-escape-verbatim | added | x/foo | accepted | none (lost) | none (lost) |
+| percent-escape-named-handle | added | x/foo | accepted | none (lost) | none (lost) |
+| tag-then-anchor | found by S8 | x/foo | accepted | none (lost) | none (lost) |
+| tag-then-anchor-next-line | found by S8 | x/foo | accepted | none (lost) | none (lost) |
+| tag-then-anchor-quoted | found by S8 | x/foo | accepted | none (lost) | none (lost) |
+| anchor-then-tag | control | x/foo | accepted | x/foo (=) | x/foo (=) |
+| tagged-key | found by S8 | x/foo | refused | none (lost) | none (lost) |
 | plain-reference | control | x/foo | accepted | x/foo (=) | x/foo (=) |
 | plain-reference-two-documents | control | x/foo, x/bar | accepted | x/foo, x/bar (=) | x/foo, x/bar (=) |
 | family-b-flow-seq-fixed | 603 comment, fixed | x/foo | refused | x/foo (=) | x/foo (=) |
