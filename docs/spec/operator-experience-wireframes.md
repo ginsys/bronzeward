@@ -230,9 +230,9 @@ revision]. A done Save does the same, unless that read shows the revision that t
 The answer to the Save names that revision. If the answer or the read names no revision, the read
 stays the Save's own. A done Remove shows any text that such a read named, because a Remove
 creates no text revision. When nothing was typed since the last read or save, a read of another
-author's text waits for the write's answer in the same way. A done write then shows that text as
-the entry's text, with no conflict and no unsaved text. An unknown outcome is not the last answer
-while [Repeat exactly] can still send the write.
+author's text shows at once. A done write keeps that text as the entry's text, with no conflict and
+no unsaved text. Text typed after that read is kept for [Copy my text into the new revision]. An
+unknown outcome is not the last answer while [Repeat exactly] can still send the write.
 
 The same rule applies after their text shows. If a later read shows another author's newer text,
 or their removal, the editor shows that change. Text typed since their text showed is kept for

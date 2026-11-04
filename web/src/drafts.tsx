@@ -548,9 +548,9 @@ function step(s: Editor, e: EditorEvent): Editor {
       // Save that showed it is done, and also when its text is the one shown (#559 follow-up 2). The
       // pane's own revision is not theirs.
       const moved = c?.phase === "theirs" && e.revision !== undefined && e.revision > (c.revision ?? 0) && (e.id === undefined || e.id !== s.own) ? { ...shown, conflict: { ...c, revision: e.revision } } : shown;
-      // While a write is open, a read of another author's text waits for that write's answer, also with
-      // nothing typed to keep aside: a done write must not record an older text as saved. A newer read
-      // replaces the older whole. Here the editor's text equals the saved text, so nothing is kept aside (#608, #613).
+      // While a write is open, a read of another author's text shows at once and is also held back for
+      // that write's answer, with nothing typed to keep aside: a done write must not record an older text
+      // as saved. A newer read replaces the older whole. Text typed after it is kept aside at done (#608, #613).
       if (!another || open?.open !== true) return moved;
       return { ...moved, sent: { ...open, later: { ...(e.revision !== undefined && { revision: e.revision }), ...(e.id !== undefined && { id: e.id }), text: e.text } } };
     }
@@ -574,11 +574,12 @@ function step(s: Editor, e: EditorEvent): Editor {
       if (later !== undefined && other !== undefined) {
         const revision = newest(later.revision, c?.revision);
         const { own: _own, gone: _gone, conflict: _conflict, ...after } = s;
-        // The operator's text goes aside when a removal or text typed since shows. A Remove saved no text,
+        // The operator's text goes aside when a removal shows, or when text was typed, before the read
+        // (`aside`) or since it (the editor's text differs from the saved text). A Remove saved no text,
         // so a conflict that keeps the operator's text stays. Otherwise nothing of the operator's is lost:
         // the text read is the entry's, and the pane records it as saved (#613).
         const conflict: Clash | undefined = removes && c !== undefined ? { ...kept(c), phase: "theirs", ...(revision !== undefined && { revision }) }
-          : later.removed === true || later.aside === true ? { mine: s.held, phase: "theirs", ...(revision !== undefined && { revision }), ...(c?.awaits === true && { awaits: true as const }) } : undefined;
+          : later.removed === true || later.aside === true || !same(s.held, s.saved) ? { mine: s.held, phase: "theirs", ...(revision !== undefined && { revision }), ...(c?.awaits === true && { awaits: true as const }) } : undefined;
         return { ...after, ...closed(s), ...(e.revision !== undefined && { own: e.revision }), held: other, saved: other, writes: writes + 1, ...(conflict !== undefined && { conflict }) };
       }
       // The text the operator chose is saved: a Save sent while theirs showed, or the kept text itself.
