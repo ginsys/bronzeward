@@ -601,6 +601,45 @@ describe("a tag is resolved the way go-yaml does", () => {
     expect(references(text)).toEqual([]);
   });
 
+  // A marker closes a document. Text on the `...` line is content with no `---`, and a marker inside an
+  // open flow collection is an error: go-yaml refuses both, so the document at fault lists nothing.
+  test.each([
+    ["text on the `...` line", "a: 1\n... !<!bwref> x/foo\n"],
+    ["text on the `...` line, a plain word", "a: 1\n... x\n"],
+    ["a tag on the `...` line of a document that lists a name", "--- !bwref x/foo\n... !bwref x/bar\n", ["x/foo"]],
+    ["a `---` in an open flow sequence", "a: [!<!bwref> x/foo,\n---\nb: 1\n"],
+    ["a `...` in an open flow sequence", "a: [!bwref x/foo,\n...\nb: 1\n"],
+  ] as [string, string, string[]?][])("%s lists %j", (_, text, names = []) => {
+    expect(references(text)).toEqual(names);
+  });
+
+  test.each([
+    ["a comment after `...`", "a: 1\n... # c\n---\nb: !bwref x/foo\n"],
+    ["a tab after `...`", "a: 1\n...\t\n---\nb: !bwref x/foo\n"],
+    ["a blank after `...`", "[a]\n... \n---\nb: !bwref x/foo\n"],
+  ])("%s ends the document and the next one lists", (_, text) => {
+    expect(references(text)).toEqual(["x/foo"]);
+  });
+
+  // The faulty document blanks itself and no other: the document after it lists its names, with its own
+  // handle table.
+  test.each([
+    ["text on the `...` line", "a: 1\n... !bwref x/foo\n---\nb: !bwref x/bar\n"],
+    ["a `---` in an open flow mapping", "a: {b: !bwref x/foo,\n---\nc: !bwref x/bar\n"],
+    ["a `---` in an open flow sequence", "a: [1,\n---\nb: !bwref x/bar\n"],
+    ["a `...` in an open flow sequence", "a: [1,\n...\n---\nb: !bwref x/bar\n"],
+    ["a directive in an open flow sequence", "a: [1,\n%YAML 1.1\n---\nb: !bwref x/bar\n"],
+  ])("%s refuses its document and the next one lists", (_, text) => {
+    expect(references(text)).toEqual(["x/bar"]);
+  });
+
+  // The directive line inside the open flow collection belongs to the faulty document: it declares no
+  // handle for the document after it, which then lists nothing for a name behind that handle.
+  test("a directive in an open flow sequence declares nothing for the next document", () => {
+    expect(references("a: [!bwref x/foo,\n%TAG !x! !bw\n---\nb: !x!ref x/bar\n")).toEqual([]);
+    expect(references("a: [!bwref x/foo,\n%TAG !x! !bw\n---\nb: !bwref x/bar\n")).toEqual(["x/bar"]);
+  });
+
   test("a line that looks like a directive in a block scalar or a comment declares nothing", () => {
     expect(references("a: |\n  %TAG ! !bw\nb: !ref x/foo\n")).toEqual([]);
     expect(references("# %TAG ! !bw\nb: !ref x/foo\n")).toEqual([]);

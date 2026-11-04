@@ -302,9 +302,10 @@ the six separate fixes of #598 went.
 
 The editor accepts `%YAML 1.1` only, as the server's parser does. A document lists nothing when the
 parser refuses it. The parser refuses a directive line it cannot read, a `%YAML` line or a `%TAG`
-handle given twice, a directive line inside an open flow collection, and directives with no `---`
-after them. A directive line in the first column after block content ends the document and opens
-the directives of the next one. The parser also refuses content after `...` that has no `---`, a handle that the document does not declare, a bad percent escape, and a tag that
+handle given twice, a directive line or a `---` or `...` marker inside an open flow collection, and
+directives with no `---` after them. A directive line in the first column after block content ends
+the document and opens the directives of the next one. The parser also refuses content after `...`
+that has no `---`, which includes text on the `...` line itself, a handle that the document does not declare, a bad percent escape, and a tag that
 a character outside the tag characters ends, such as `!bwref}`. The parser then refuses the whole
 stream. The editor blanks only the document with the fault, so the other documents of the stream
 still list. A line that starts with `%` inside a quoted scalar or a block scalar is text, not a

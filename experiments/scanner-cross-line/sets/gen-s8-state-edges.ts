@@ -338,6 +338,18 @@ const firstOfG = docs.size;
       docs.add(`${c}\n${d}\n...\nb: !x!ref x/foo\n`);
       docs.add(`${c}\n${d}\n---\nb: !x!ref x/foo\n%TAG !x! !other\n---\nc: !x!ref x/foo\nd: ${TAG}\n`);
     }
+  // A marker or a directive inside an open flow collection refuses the document that is open, and
+  // the document after it is read on its own. Text on the `...` line is content with no `---`.
+  const opens = ["a: [1,", "a: {b:", "a: [!<!bwref> x/foo,", "a: [!bwref x/foo,", "a: {b: !bwref x/foo,", "- [a,", "[a,\n b"];
+  const follows = ["---\nb: !bwref x/bar\n", "...\n---\nb: !bwref x/bar\n", "%YAML 1.1\n---\nb: !bwref x/bar\n", "%TAG !x! !bw\n---\nb: !x!ref x/bar\n", "---\nb: 1\n", "...\n"];
+  for (const o of opens) for (const f of follows) docs.add(`${o}\n${f}`);
+  const onMarker = ["!<!bwref> x/foo", "!bwref x/foo", "x", "# c", "", "\t", "!x!ref x/foo", "--- b"];
+  for (const c of ["a: 1", "a: |\n  x", "- a", "--- !bwref x/foo", "[a]"])
+    for (const t of onMarker) {
+      docs.add(`${c}\n... ${t}\n`);
+      docs.add(`${c}\n... ${t}\n---\nb: !bwref x/bar\n`);
+      docs.add(`${c}\n... ${t}\n%TAG !x! !bw\n---\nb: !x!ref x/foo\n`);
+    }
 }
 
 // (J) The line ends of (G), (H), (I), (K), (L) and (M) as a CRLF, a lone carriage return, U+0085, U+2028 and U+2029.
