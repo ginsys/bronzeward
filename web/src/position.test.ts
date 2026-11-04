@@ -127,6 +127,21 @@ describe("the references of a declared embedded document", () => {
     expect(references(text, at("doc[0]/cfg"))).toEqual(["x/foo"]);
     expect(spotOfReference(text, "x/foo", at("doc[0]/cfg"))).toEqual({ start, end: start + "!bwref x/foo".length });
   });
+  // Three losses the hosted reviews found against main (ginsys/bronzeward#602).
+  test("a flow collection as a block key keeps its first column, so the holder's quote is text", () => {
+    const text = '[a, b]: |\n  "x\nfoo: !bwref x/foo\n';
+    const start = text.indexOf("!bwref");
+    expect(references(text, [])).toEqual(["x/foo"]);
+    expect(spotOfReference(text, "x/foo", [])).toEqual({ start, end: start + "!bwref x/foo".length });
+  });
+  test("U+00A0 after a document marker is text: the line is no marker", () => {
+    const text = '--- a: |\n  "x\nb: !bwref x/foo\n';
+    expect(references(text, [])).toEqual(["x/foo"]);
+  });
+  test("tag-like text in a declared literal's comment does not hide the tag after it", () => {
+    const text = "cfg: |\n  # !bwref \"\n  a: 1\nb: !bwref x/foo\nc: '\"'\n";
+    expect(references(text, at("doc[0]/cfg"))).toEqual(["x/foo"]);
+  });
   test("a tag whose name is on the next line is placed across the removed indentation", () => {
     const text = "cfg: |\n  a: !bwref\n   x/next\n";
     const start = text.indexOf("!bwref");
