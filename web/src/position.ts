@@ -113,19 +113,52 @@ function tags(original: string): { index: number; tag: string; name: string }[] 
   const found: { index: number; tag: string; name: string }[] = [];
   // A plain scalar's words: no blank, flow indicator, or colon before a blank; blanks between words.
   const word = String.raw`(?:[^ \t\r\n,[\]{}:]|:(?=[^ \t\r\n,[\]{}]))+`;
+  // The words of a plain value after an anchor (ginsys/bronzeward#605). In flow context a word has
+  // no blank, flow indicator, or colon before a blank. A colon before a flow indicator stays in the
+  // word, as go-yaml keeps it (`[!bwref &e x/foo:]` is the scalar `x/foo:`, no name). In block context
+  // a comma, bracket or brace is text (`a: !bwref &e x/foo,bar` is the scalar `x/foo,bar`, no name),
+  // so a word ends only at a blank or a colon before a blank. It does not start with one, as go-yaml
+  // does not start a plain scalar there.
+  const flowWord = String.raw`(?:[^ \t\r\n,[\]{}:]|:(?=[^ \t\r\n]))+`;
+  const flowValue = String.raw`${flowWord}(?:[ \t]+${flowWord})*`;
+  const blockValue = String.raw`(?:[^ \t\r\n,[\]{}:]|:(?=[^ \t\r\n,[\]{}]))(?:[^ \t\r\n:]|:(?=[^ \t\r\n]))*(?:[ \t]+(?:[^ \t\r\n:]|:(?=[^ \t\r\n]))+)*`;
   // A block scalar's header ends its line, a comment aside: | or >, then at most one chomping and
   // one indentation indicator, in either order. The server also takes a # right after it as a
   // comment, which the blanking above leaves.
   const header = String.raw`([|>](?:[-+][1-9]?|[1-9][-+]?)?)(?=[ \t]*(?:#[^\n]*)?\r?\n)`;
   const key = /[ \t]*:(?:[ \t\r\n]|$)/y;
   const tag = new RegExp(String.raw`!bwref[ \t\r\n]+(?:"((?:[^"\\]|\\[^])*)"|'((?:[^'\n]|'')*)'|${header}|(${word}(?:[ \t]+${word})*))`, "y");
+  // The value may follow one anchor (`!bwref &e x/foo`): go-yaml reads an anchor name with is_alpha
+  // only, as the scan below does, and needs a blank after it. The groups are those of `tag`. A value
+  // with no anchor between the tag and the value is read by `tag` alone, as before. A second tag is
+  // not read, because go-yaml refuses a node with two.
+  const anchored = (value: string) =>
+    new RegExp(String.raw`!bwref[ \t\r\n]+&[0-9A-Za-z_-]+[ \t\r\n]+(?:"((?:[^"\\]|\\[^])*)"|'((?:[^'\n]|'')*)'|${header}|(${value}))`, "y");
+  const flowAnchored = anchored(flowValue);
+  const blockAnchored = anchored(blockValue);
   // A tag counts only where the scan read it as a node's property: never in a plain, quoted or block
   // scalar's text. So the pattern is matched at those offsets only: a match that starts in text could
   // run over a real tag.
-  for (const at of [...props].sort((a, b) => a - b)) {
-    tag.lastIndex = at;
-    const m = tag.exec(masked);
+  for (const [at, inFlow] of [...props].sort((a, b) => a[0] - b[0])) {
+    const withAnchor = inFlow ? flowAnchored : blockAnchored;
+    withAnchor.lastIndex = at;
+    let m = withAnchor.exec(masked);
+    const hasAnchor = m !== null;
+    if (m === null) {
+      tag.lastIndex = at;
+      m = tag.exec(masked);
+    }
     if (m === null) continue;
+    // go-yaml refuses a second anchor on one node (`&a !bwref &b x/foo`). The look-back stops after
+    // 4096 characters, so the cost per anchored tag has a bound. Beyond it the guard misses the first
+    // anchor and the scanner lists the name, though go-yaml refuses the document: an extra name in a
+    // document that go-yaml fails to parse. The scanner already does that elsewhere: it lists the
+    // name of `a:\n  b: !bwref\n  x/foo`, which go-yaml refuses for its indentation.
+    if (hasAnchor && /&[0-9A-Za-z_-]+\s*$/.test(masked.slice(Math.max(0, m.index - 4096), m.index))) continue;
+    // The scan records the `!bwref` tail of a tag spelled through a handle (`!!bwref`, `!r!bwref`),
+    // which is another tag. A value after an anchor is read only for a tag that starts at the tail:
+    // after a blank, the start of the text or a flow indicator that opens an entry.
+    if (hasAnchor && m.index > 0 && !/[ \t\r\n[{,]/.test(masked[m.index - 1]!)) continue;
     let end = m.index + m[0].length;
     key.lastIndex = end;
     if (key.test(masked)) continue;
@@ -135,7 +168,7 @@ function tags(original: string): { index: number; tag: string; name: string }[] 
       if (b === undefined) continue;
       ({ name, end } = b);
     } else if (m[4] !== undefined) {
-      if (continues(masked, m.index, end)) continue;
+      if (hasAnchor ? anchoredContinues(masked, m.index, end, inFlow) : continues(masked, m.index, end)) continue;
       name = m[4];
     } else name = m[1] !== undefined ? decoded(m[1]) : m[2]!.replaceAll("''", "'");
     if (name !== undefined && NAME.test(name)) found.push({ index: m.index, tag: original.slice(m.index, end), name });
@@ -151,10 +184,10 @@ function lineAt(s: string, start: number): string {
 }
 // The first line at or after `start` that holds text. Each scan stops there, so the scan per tag
 // does not read the rest of the document (ginsys/bronzeward#534 N3).
-function nextLine(s: string, start: number): string | undefined {
+function nextLine(s: string, start: number, isBlank = (l: string) => l.trim() === ""): string | undefined {
   for (let at = start; at < s.length; ) {
     const l = lineAt(s, at);
-    if (l.trim() !== "") return l;
+    if (!isBlank(l)) return l;
     at += l.length + 1;
   }
   return undefined;
@@ -201,6 +234,48 @@ function continues(masked: string, tag: number, end: number): boolean {
   if (next === undefined || indent(next) <= holder(masked, tag) || MARKER.test(next)) return false;
   const t = next.trim();
   return !/^(?:[,\]}]|[-?](?:\s|$))/.test(t) && !/:(?:\s|$)/.test(t);
+}
+
+// A line holds no text when it has YAML blanks only: U+0020, tab and the carriage return of a CRLF.
+// The Unicode spaces that `trim` and `\s` take (U+00A0, say) are text.
+const blank = (line: string) => !/[^ \t\r]/.test(line);
+
+// `holder` for a value after an anchor, with the indentation counted in YAML spaces (U+0020) only. A
+// line that starts with U+00A0 or a byte order mark has text at column 0 (ginsys/bronzeward#605),
+// where `holder` takes `trimStart` and counts that character as indentation.
+function anchoredHolder(masked: string, tag: number): number {
+  const start = masked.lastIndexOf("\n", tag) + 1;
+  const own = spaces(lineAt(masked, start));
+  if (!blank(masked.slice(start, tag))) return own;
+  for (let e = start - 1; e >= 0; ) {
+    const s = e === 0 ? 0 : masked.lastIndexOf("\n", e - 1) + 1;
+    const l = masked.slice(s, e);
+    if (!blank(l) && spaces(l) < own) return spaces(l);
+    e = s - 1;
+  }
+  return -1;
+}
+
+// Whether a plain value after an anchor (`!bwref &e x/foo`) goes on to the next line
+// (ginsys/bronzeward#605). It is conservative: the value is read as a reference only when the scalar
+// clearly ends, and in every other case it names nothing (as on main, which reads none after an
+// anchor). It ends at the end of the text, at a document marker, and, in flow context, before a line
+// that starts with a flow indicator or a value indicator (a colon before a blank or the end; go-yaml
+// reads `:]` as text). In block context it ends before a line that is a key (a colon before a blank
+// or the end), and before a line that is no more indented than the node that holds the scalar. A
+// tag on the line of `---` has the document root as its node, where a line at column 0 continues
+// it, so only the end, a marker or a key ends it. Compact collections (`- - x`, `? - x`) and the
+// other shapes that a more indented line can continue name nothing.
+function anchoredContinues(masked: string, tag: number, end: number, inFlow: boolean): boolean {
+  const eol = masked.indexOf("\n", end);
+  if (eol === -1 || !blank(masked.slice(end, eol))) return false;
+  const next = nextLine(masked, eol + 1, blank);
+  if (next === undefined || MARKER.test(next)) return false;
+  const t = next.replace(/^[ \t]+|[ \t\r]+$/g, "");
+  if (inFlow) return !/^(?:[,\]}]|:(?:[ \t]|$))/.test(t);
+  if (/:(?:[ \t]|$)/.test(t)) return false;
+  if (MARKER.test(lineAt(masked, masked.lastIndexOf("\n", tag) + 1))) return true;
+  return spaces(next) > anchoredHolder(masked, tag);
 }
 
 // A block scalar's name and where it ends (YAML 1.2 §8.1, ginsys/bronzeward#534 C7). It names a
@@ -337,9 +412,9 @@ function pushEntry(stack: number[], col: number) {
 }
 
 // The comment start of every line, and the offsets in the text of the !bwref properties read.
-function commentStarts(lines: readonly string[]): { starts: number[]; props: Set<number> } {
+function commentStarts(lines: readonly string[]): { starts: number[]; props: Map<number, boolean> } {
   const st = freshCarry();
-  const props = new Set<number>();
+  const props = new Map<number, boolean>();
   let base = 0;
   const starts = lines.map((full, n) => {
     // The carriage return of a CRLF is part of the line break, not of the line: the scan reads the
@@ -359,7 +434,7 @@ function commentStarts(lines: readonly string[]): { starts: number[]; props: Set
   return { starts, props };
 }
 
-function scanLine(st: Carry, line: string, base: number, props: Set<number>): number {
+function scanLine(st: Carry, line: string, base: number, props: Map<number, boolean>): number {
   // YAML indents with U+0020 only, and go-yaml ends an empty line at a line break after those spaces
   // (yaml_parser_scan_block_scalar_breaks, scannerc.go lines 2393-2410, go.yaml.in/yaml/v3 v3.0.5). A
   // tab or another Unicode space (U+00A0, say) is text, which `trim` would count as blank.
@@ -480,7 +555,7 @@ function scanLine(st: Carry, line: string, base: number, props: Set<number>): nu
         else while (e < line.length && /[0-9A-Za-z_-]/.test(line[e]!)) e++;
         // A tag spelled through a handle (`!r!bwref`, `!!bwref`) is recorded at its `!bwref`, as main
         // matched it: the handles a %TAG directive declares are not resolved here.
-        if (c === "!" && line.slice(j, e).endsWith("!bwref")) props.add(base + e - 6);
+        if (c === "!" && line.slice(j, e).endsWith("!bwref")) props.set(base + e - 6, st.flow > 0);
         j = e;
         lastPlain = false;
         if (c === "*") {
