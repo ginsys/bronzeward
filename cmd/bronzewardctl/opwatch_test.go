@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,8 @@ import (
 	"testing"
 	"time"
 	"unicode"
+
+	"github.com/ginsys/bronzeward/internal/client"
 )
 
 // TestWatchOutAfterFinish: once the stop line is printed, a line the watch still shows prints
@@ -94,28 +97,9 @@ func TestOperationWatchInterrupt(t *testing.T) {
 // standard error.
 func TestOperationWatchInterruptReturns(t *testing.T) {
 	for _, extra := range [][]string{nil, {"-o", "json"}, {"-o", "yaml"}} {
-		f := &opFake{body: fmt.Sprintf(opJSON, "apply-config", "running", "null", "null", "[]"), hang: make(chan struct{})}
-		srv := httptest.NewServer(f)
-		automationContext(t, srv.URL)
-		grace := interruptGrace
-		interruptGrace = 5 * time.Second
-		go func() {
-			for { // the stream request comes after the signal handler is set
-				f.mu.Lock()
-				n := f.streams
-				f.mu.Unlock()
-				if n > 0 {
-					_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
-					time.Sleep(200 * time.Millisecond)
-					close(f.hang) // the stream ends: the watch reads the operation and stops
-					return
-				}
-				time.Sleep(10 * time.Millisecond)
-			}
-		}()
-		code, out, errOut := runCtl(t, append([]string{"operation", "watch", "op_BWSYNTH"}, extra...)...)
-		srv.Close()
-		interruptGrace = grace
+		var o bytes.Buffer
+		code, errOut := interruptedWatch(t, &o, extra...)
+		out := o.String()
 		follow := "Follow it again with: bronzewardctl operation watch 'op_BWSYNTH'\n"
 		stop := "Stopped watching at your request. Operation op_BWSYNTH is still running, as the server last read it; it goes on.\n" + follow
 		stopLines, other := out, errOut // the stream the stop lines go to, and the other
@@ -129,6 +113,54 @@ func TestOperationWatchInterruptReturns(t *testing.T) {
 			t.Errorf("%v: standard output %q; want the operation resource, state running", extra, other)
 		}
 	}
+}
+
+// failingWriter is a standard output that refuses every write, as a closed pipe or /dev/full does.
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("write refused") }
+
+// TestOperationWatchInterruptUnwritable: when the resource cannot be written after the first Ctrl-C,
+// one note goes to standard error before the stop lines, the follow line stays last, and the exit is
+// still 130: the user ended the watch, and the operation goes on.
+func TestOperationWatchInterruptUnwritable(t *testing.T) {
+	code, errOut := interruptedWatch(t, failingWriter{}, "-o", "json")
+	follow := "Follow it again with: bronzewardctl operation watch 'op_BWSYNTH'\n"
+	note := "bronzewardctl: write refused; the operation was not printed\n"
+	if code != 130 || !strings.HasSuffix(errOut, follow) || strings.Count(errOut, note) != 1 ||
+		strings.Index(errOut, note) > strings.Index(errOut, "Stopped watching") {
+		t.Errorf("exit %d, stderr %q; want 130, one note before the stop lines and the follow line last", code, errOut)
+	}
+}
+
+// interruptedWatch runs operation watch against a stream that stays open, sends the first Ctrl-C, and
+// ends the stream within the grace time: the watch reads the still running operation and stops.
+func interruptedWatch(t *testing.T, stdout io.Writer, extra ...string) (int, string) {
+	t.Helper()
+	f := &opFake{body: fmt.Sprintf(opJSON, "apply-config", "running", "null", "null", "[]"), hang: make(chan struct{})}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	grace := interruptGrace
+	interruptGrace = 5 * time.Second
+	defer func() { interruptGrace = grace }()
+	go func() {
+		for { // the stream request comes after the signal handler is set
+			f.mu.Lock()
+			n := f.streams
+			f.mu.Unlock()
+			if n > 0 {
+				_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
+				time.Sleep(200 * time.Millisecond)
+				close(f.hang) // the stream ends: the watch reads the operation and stops
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+	var e bytes.Buffer
+	code := run(append([]string{"operation", "watch", "op_BWSYNTH"}, extra...), stdout, &e)
+	return code, e.String()
 }
 
 // TestOperationWatchReadUnknown: when the stream ends and the operation read that follows is an
@@ -155,6 +187,57 @@ func TestOperationWatchReadUnknown(t *testing.T) {
 	code, _, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "5s")
 	if code != 1 || strings.Contains(errOut, "was not read") {
 		t.Errorf("a 403 on the read: exit %d, stderr %q; want 1 and no unknown-outcome text", code, errOut)
+	}
+}
+
+// TestOperationWatchReadUnknownAfterEventsRefusal: when the events of a finished operation are
+// refused and the operation read that confirms it is then an answer the client cannot read, the
+// operation read decides: exit 3 with the command that reads the state, not exit 1 for the events.
+func TestOperationWatchReadUnknownAfterEventsRefusal(t *testing.T) {
+	f := &opFake{stream: []string{sse(1, "commitment", commitment)}, pagesFail: true, badReadFrom: 3,
+		body: fmt.Sprintf(opJSON, "apply-config", "completed", `{"appliedRelease":"rel_BWSYNTH","observation":"obs_c"}`, "null", "[]")}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	code, _, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "5s")
+	if code != 3 || !strings.Contains(errOut, "the state of operation op_BWSYNTH was not read") ||
+		!strings.Contains(errOut, "bronzewardctl operation show 'op_BWSYNTH'") {
+		t.Errorf("exit %d, stderr %q; want 3 and the operation to read named", code, errOut)
+	}
+}
+
+// TestUnreadState: the error of a watch that read no operation. Only what the server refused, or a
+// refused certificate, keeps its own exit code; the operation read, the last part of a joined error,
+// decides which.
+func TestUnreadState(t *testing.T) {
+	// The suite's proxy tunnels every https request to a server whose certificate nothing trusts.
+	refused := client.Live(&client.Context{Name: "lab", Server: "https://bronzeward.example.invalid", Credential: "automation"}, nil)
+	if !client.IsTrust(refused) {
+		t.Fatalf("%v: not a refused certificate", refused)
+	}
+	problem := &client.Problem{Status: 403}
+	garbled := errors.New("GET /api/v1/operations/op_x: the answer is not JSON")
+	for _, c := range []struct {
+		name    string
+		err     error
+		unknown bool // the exit is 3 (outcome unknown); otherwise the error stands as it is
+	}{
+		{"a refusal the server named", problem, false},
+		{"a refused certificate", refused, false},
+		{"a refused certificate in a wrapped error", fmt.Errorf("GET /x: %w", refused), false},
+		{"an unreadable answer", garbled, true},
+		{"events refused, then an unreadable operation read", errors.Join(problem, garbled), true},
+		{"events unreadable, then a refused operation read", errors.Join(garbled, problem), false},
+		{"events unreadable, then a refused certificate", errors.Join(garbled, refused), false},
+	} {
+		err := unreadState("op_x", c.err)
+		var u outcomeUnknown
+		if got := errors.As(err, &u); got != c.unknown {
+			t.Errorf("%s: outcome unknown is %v for %v; want %v", c.name, got, err, c.unknown)
+		}
+		if !c.unknown && err != c.err {
+			t.Errorf("%s: the error was changed to %v", c.name, err)
+		}
 	}
 }
 
