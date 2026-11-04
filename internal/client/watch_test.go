@@ -334,24 +334,24 @@ func TestWatchUntil(t *testing.T) {
 		name   string
 		frames []string
 		states []string
-		after  int // Until answers true from its after-th call (from 1)
+		after  int // Until answers true from its after-th call (from 1); call 1 is the one before the first stream
 		fail   bool
 		shown  []string
 		state  string
 	}{
-		{"at an event", []string{ev(e1+":1", "started"), ev(e1+":2", "paused"), ev(e1+":3", "continued")}, []string{"running"}, 2, false,
+		{"at an event", []string{ev(e1+":1", "started"), ev(e1+":2", "paused"), ev(e1+":3", "continued")}, []string{"running"}, 3, false,
 			[]string{e1 + ":1", e1 + ":2"}, "running"},
-		{"at a keep-alive", []string{ev(e1+":1", "started"), ": keep-alive\n\n", ev(e1+":2", "staged")}, []string{"running"}, 2, false,
+		{"at a keep-alive", []string{ev(e1+":1", "started"), ": keep-alive\n\n", ev(e1+":2", "staged")}, []string{"running"}, 3, false,
 			[]string{e1 + ":1"}, "running"},
-		{"a terminal state shows every event", []string{ev(e1+":1", "started")}, []string{"failed"}, 1, false,
+		{"a terminal state shows every event", []string{ev(e1+":1", "started")}, []string{"failed"}, 2, false,
 			[]string{e1 + ":1", e1 + ":2"}, "failed"},
-		{"its error", []string{ev(e1+":1", "started")}, []string{"running"}, 1, true, []string{e1 + ":1"}, ""},
+		{"its error", []string{ev(e1+":1", "started")}, []string{"running"}, 99, true, []string{e1 + ":1"}, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			calls := 0
 			until = func() (bool, error) {
 				calls++
-				if c.fail {
+				if c.fail && calls > 1 {
 					return false, fmt.Errorf("BWSYNTH until")
 				}
 				return calls >= c.after, nil
@@ -369,6 +369,27 @@ func TestWatchUntil(t *testing.T) {
 			}
 		})
 	}
+	t.Run("an Until that is true at once opens no stream and keeps the operation read", func(t *testing.T) {
+		// A --timeout that ran out during the reads before the watch answers true before any stream: the
+		// watch must not open one, and returns the operation read with its body and epoch.
+		o := &opServer{streams: []handler{sse(ev(e1+":1", "started"))}, states: []string{"running"}}
+		f := &fake{epoch: e1, post: func(_ int, w http.ResponseWriter, r *http.Request) { o.serve(w, r) }}
+		c, _, _ := writeClient(t, f, e1)
+		var shown []string
+		op, read, err := c.WatchBody("op_BWSYNTH", Watch{
+			Show:  func(e Event) { shown = append(shown, e.ID) },
+			Until: func() (bool, error) { return true, nil },
+			sleep: func(time.Duration) {},
+		})
+		switch {
+		case err != nil || op == nil || op.State != "running":
+			t.Fatalf("watch: %v, operation %v; want the running operation", err, op)
+		case len(o.opened) != 0 || len(shown) != 0:
+			t.Errorf("%d streams opened, shown %q; want none", len(o.opened), shown)
+		case len(read.Body) == 0 || read.Epoch != e1:
+			t.Errorf("read body %q epoch %q; want the operation read's body and %q", read.Body, read.Epoch, e1)
+		}
+	})
 	t.Run("holds again after a drain into another epoch where the operation goes on", func(t *testing.T) {
 		const e2 = "ep_BWSYNTH2"
 		// The terminal read is of e1; the drain finds e2's events, where the operation is running.
@@ -393,7 +414,7 @@ func TestWatchUntil(t *testing.T) {
 		o := &opServer{streams: []handler{sse(ev(e1+":1", "paused")), sse(ev(e2+":2", "continued"))}, epochs: []string{e1, e2},
 			states: []string{"failed", "running", "succeeded"}, pages: []string{item(e2+":1", "started"), item(e2+":2", "continued")}}
 		calls := 0
-		until = func() (bool, error) { calls++; return calls == 1, nil }
+		until = func() (bool, error) { calls++; return calls == 2, nil } // call 1 is before the first stream
 		t.Cleanup(func() { until = nil })
 		shown, _, state, _, err := watched(t, o, e1, nil)
 		if want := []string{e1 + ":1", "clear", e2 + ":1", e2 + ":2"}; err != nil || state != "succeeded" || !slices.Equal(shown, want) {
@@ -411,7 +432,7 @@ func TestWatchUntil(t *testing.T) {
 			o.mu.Unlock()
 		}, sse(ev(e2+":1", "started"), ev(e2+":2", "continued"))}
 		calls := 0
-		until = func() (bool, error) { calls++; return calls == 1, nil }
+		until = func() (bool, error) { calls++; return calls == 2, nil } // call 1 is before the first stream
 		t.Cleanup(func() { until = nil })
 		shown, _, state, _, err := watched(t, o, e1, nil)
 		if want := []string{e1 + ":1", "clear", e2 + ":1", e2 + ":2"}; err != nil || state != "succeeded" || !slices.Equal(shown, want) {

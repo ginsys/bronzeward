@@ -98,20 +98,21 @@ func outcome(o *apitypes.OperationBody, last *lastEvent) ([]string, bool) {
 // endNextStep is the next safe step after an operation that ended without success.
 func endNextStep(state, op, plan, machine string) string {
 	switch {
-	case plan == "":
-		return sf("Read it: bronzewardctl operation show %s", client.ShellWord(op))
-	case state == "rejected":
-		return sf("The node refused the configuration as invalid, so it applied nothing. Review the plan's release before a new plan: bronzewardctl plan show %s", client.ShellWord(plan))
 	case state == "cancelled":
 		// plan show is no way on: a plan whose operation was cancelled before any attempt stays committed,
 		// and plan show then points back at this operation. The operation holds the machine and neither the
 		// release nor the operation of a new plan, so those two stay bare placeholders. The machine is the
-		// server's text and stays one quoted word.
+		// server's text and stays one quoted word. This comes before the missing-plan fallback: the new
+		// plan needs no plan to name.
 		machineWord := "<machine>"
 		if machine != "" {
 			machineWord = client.ShellWord(machine)
 		}
 		return sf("Nothing more is sent for this plan. Create a new plan: %s", createWords("<release>", machineWord, "<operation>"))
+	case plan == "":
+		return sf("Read it: bronzewardctl operation show %s", client.ShellWord(op))
+	case state == "rejected":
+		return sf("The node refused the configuration as invalid, so it applied nothing. Review the plan's release before a new plan: bronzewardctl plan show %s", client.ShellWord(plan))
 	}
 	return sf("Nothing more is sent for this plan. Read what the machine runs before a new plan: bronzewardctl machine show %s", client.ShellWord(machine))
 }

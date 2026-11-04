@@ -567,7 +567,7 @@ var operationCases = map[string]func(*testing.T, *watchEnv){
 			t.Fatal("the watch did not end within two minutes of the resolution")
 		}
 		f.want(r, 4, "operation-state       from committed, to unresolved, cause takeover\n", "Cancelled at ", " (server): resolution.\n"+
-			"Nothing more is sent for this plan. The plan names the command for a new one: bronzewardctl plan show '"+p+"'\n",
+			"Nothing more is sent for this plan. Create a new plan: bronzewardctl plan create --release <release> --machine '"+e.s.machine+"' --operation <operation>\n",
 			"operation "+op+" ended cancelled")
 		_, types, data := e.served(t, op)
 		if got := shown(r.out); len(got) != 1 || !slices.Equal(got[0], types) || payloadsDiffer(r.out, data) != "" ||
