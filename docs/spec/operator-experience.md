@@ -703,8 +703,9 @@ another epoch, it says why on standard error, prints
 again.
 
 `unresolved` is not terminal (`internal/api/operations.go:144-151`), so the watch goes on past it.
-`--timeout` (default `30m`) ends the watch with exit 5 and names the state. The watch checks the
-timeout between its reads, so it can pass by about 45 seconds:
+`--timeout` (default `30m`) ends the watch with exit 5 and names the state. It counts from the start
+of the command, so the first read of the server and the first read of the operation are inside it.
+The watch checks the timeout between its reads, so it can pass by about 45 seconds:
 
 ```text
 received 10:07:03  operation-state       from verifying, to unresolved, cause an attempt is not accounted for

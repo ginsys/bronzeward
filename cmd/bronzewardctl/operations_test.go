@@ -29,11 +29,25 @@ type opFake struct {
 	beat          time.Duration // when set, a held stream sends a keep-alive comment this often
 	lateFrom      int           // from this page request on (when set), the pages are latePages: events written after a restore
 	latePages     []string
-	badServer     bool // the server read answers 200 with a body that is no JSON
-	pagesFail     bool // the JSON event pages answer 404: reading the events fails
-	badReadFrom   int  // from this operation read on (when set), the answer is 200 with a body that is no JSON: an ambiguous answer
-	forbidFrom    int  // from this operation read on (when set), the answer is a 403 problem: a refusal the server named
-	cutFrom       int  // from this operation read on (when set), the answer is a 403 whose body stops short: a status with no problem document
+	badServer     bool          // the server read answers 200 with a body that is no JSON
+	pagesFail     bool          // the JSON event pages answer 404: reading the events fails
+	badReadFrom   int           // from this operation read on (when set), the answer is 200 with a body that is no JSON: an ambiguous answer
+	forbidFrom    int           // from this operation read on (when set), the answer is a 403 problem: a refusal the server named
+	cutFrom       int           // from this operation read on (when set), the answer is a 403 whose body stops short: a status with no problem document
+	serverHang    chan struct{} // when set, the server read waits for this before it answers
+	serverReqs    int           // server reads so far
+	readHang      chan struct{} // when set, an operation read waits for this before it answers
+	readStalls    int           // operation reads that began to wait
+}
+
+// stall holds the request until release closes or the client gives up. The caller holds f.mu.
+func (f *opFake) stall(r *http.Request, release chan struct{}) {
+	f.mu.Unlock()
+	select {
+	case <-release:
+	case <-r.Context().Done():
+	}
+	f.mu.Lock()
 }
 
 func (f *opFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -49,6 +63,10 @@ func (f *opFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch strings.TrimPrefix(r.URL.Path, "/api/v1") {
 	case "/server":
 		w.Header().Set("Content-Type", "application/json")
+		f.serverReqs++
+		if f.serverHang != nil {
+			f.stall(r, f.serverHang)
+		}
 		if f.badServer {
 			fmt.Fprint(w, "not json")
 			return
@@ -56,6 +74,10 @@ func (f *opFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":3,"startMode":"normal"}`)
 	case "/operations/op_BWSYNTH":
 		w.Header().Set("Content-Type", "application/json")
+		if f.readHang != nil {
+			f.readStalls++
+			f.stall(r, f.readHang)
+		}
 		if f.forbidFrom > 0 && f.reads >= f.forbidFrom {
 			w.Header().Set("Content-Type", "application/problem+json")
 			w.WriteHeader(http.StatusForbidden)

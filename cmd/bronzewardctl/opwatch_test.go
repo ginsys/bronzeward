@@ -415,6 +415,67 @@ func TestOperationWatchCtrlCAfterTheWatch(t *testing.T) {
 	}
 }
 
+// TestOperationWatchInterruptDuringStartReads: a Ctrl-C while the server read or the first operation read
+// stalls is the first Ctrl-C of the watch: after the 3 s grace it prints the stop line and the follow line
+// last and exits 130, as for a stalled stream (docs/spec/operator-experience.md section 5.7). The command
+// runs in a process of its own, because without a handler the default action of SIGINT ends it.
+func TestOperationWatchInterruptDuringStartReads(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		stalled func(f *opFake) int // the requests that have begun to wait
+	}{
+		{"server read", func(f *opFake) int { return f.serverReqs }},
+		{"first operation read", func(f *opFake) int { return f.readStalls }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := &opFake{body: fmt.Sprintf(opJSON, "apply-config", "running", "null", "null", "[]")}
+			hang := make(chan struct{})
+			if c.name == "server read" {
+				f.serverHang = hang
+			} else {
+				f.readHang = hang
+			}
+			srv := httptest.NewServer(f)
+			defer srv.Close()
+			defer close(hang)
+			automationContext(t, srv.URL)
+			var stdout, stderr bytes.Buffer
+			cmd := exec.Command(os.Args[0])
+			cmd.Env = append(os.Environ(), "BW_WATCH_HELPER=1")
+			cmd.Stdout, cmd.Stderr = &stdout, &stderr
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			ended := make(chan error, 1)
+			go func() { ended <- cmd.Wait() }()
+			defer func() { _ = cmd.Process.Kill() }()
+			for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+				f.mu.Lock()
+				n := c.stalled(f)
+				f.mu.Unlock()
+				if n > 0 {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("the process did not reach the stalled read")
+				}
+			}
+			_ = cmd.Process.Signal(syscall.SIGINT)
+			select {
+			case err := <-ended:
+				stop := "Stopped watching at your request. Operation op_BWSYNTH goes on; the state it has now was not read.\n"
+				follow := "Follow it again with: bronzewardctl operation watch 'op_BWSYNTH'\n"
+				var x *exec.ExitError
+				if !errors.As(err, &x) || x.ExitCode() != 130 || !strings.HasSuffix(stdout.String(), stop+follow) {
+					t.Errorf("the process ended with %v, stdout\n%s\nstderr %q; want exit 130 and the stop lines last", err, stdout.String(), stderr.String())
+				}
+			case <-time.After(10 * time.Second):
+				t.Error("the first Ctrl-C during the stalled read did not end the watch within the grace")
+			}
+		})
+	}
+}
+
 // TestOperationWatchEscapes: the kind, the state, the event types, their data and the failure cause
 // are the server's text; none reaches the terminal with a control character as itself, in an event
 // line or the outcome (client-contracts.md §6 item 8). The JSON fields also carry a line feed, which
