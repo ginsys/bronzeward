@@ -370,6 +370,8 @@ function scanLine(st: Carry, line: string, base: number, props: Set<number>): nu
   let fresh = false;
   if (marker && st.open !== '"' && st.open !== "'") {
     Object.assign(st, freshCarry());
+    // A marker ends every node: the column of the entry above (`hold`) is no longer open.
+    hold = -1;
     j = 3;
   } else if (st.open === '"' || st.open === "'") {
     const e = skipQuoted(line, 0, st.open);
@@ -536,12 +538,45 @@ export function spotOfReference(text: string, name: string, embedded: readonly E
   if (t !== undefined) return { start: t.index, end: t.index + t.tag.length };
   const e = held.find((e) => tags(e.text).some((t) => t.name === name));
   if (e === undefined) return undefined;
-  // The block's own lines, scanned as the document they hold: the header line is blanked (same
-  // length), so the lines keep their offsets and are read as nodes, comments included.
-  const slice = text.slice(e.spot.start, e.spot.end);
-  const eol = Math.max(slice.indexOf("\n"), 0);
-  const shown = e.literal ? tags(" ".repeat(eol) + slice.slice(eol)).find((t) => t.name === name) : undefined;
-  return shown === undefined ? e.spot : { start: e.spot.start + shown.index, end: e.spot.start + shown.index + shown.tag.length };
+  return (e.literal ? literalSpot(text, e, name) : undefined) ?? e.spot;
+}
+
+// The place of the first tag `name` in a literal block's own lines, scanned as the document they
+// hold: the header line is blanked and every content line loses the block's indentation, so a
+// marker (---) or a flow collection inside it reads as at the top of a document. The scan maps its
+// offsets back to the text. The indentation is the leading spaces of the first line with text in
+// the source minus those of the decoded value's, so an indentation indicator (`|2`) and extra
+// spaces in the content count right. A blank line loses at most that many spaces. A line with text
+// that has fewer ends the scalar in go-yaml: nothing is returned then.
+function literalSpot(text: string, e: { text: string; spot: Spot }, name: string): Spot | undefined {
+  const blank = (l: string) => /^ *\r?$/.test(l);
+  const lines = text.slice(e.spot.start, e.spot.end).split("\n");
+  const src = lines.slice(1).find((l) => !blank(l));
+  const dec = e.text.split("\n").find((l) => !blank(l));
+  if (src === undefined || dec === undefined) return undefined;
+  const cut = Math.max(spaces(src) - spaces(dec), 0);
+  const kept = [" ".repeat(lines[0]!.length)];
+  const removed = [0];
+  for (const l of lines.slice(1)) {
+    const n = Math.min(cut, spaces(l));
+    if (n < cut && !blank(l)) return undefined;
+    kept.push(l.slice(n));
+    removed.push(n);
+  }
+  const shown = tags(kept.join("\n")).find((t) => t.name === name);
+  if (shown === undefined) return undefined;
+  // The offset in the text of the character at `i` in the scanned lines.
+  const back = (i: number) => {
+    let scanned = 0;
+    let source = 0;
+    for (let k = 0; k < kept.length; k++) {
+      if (i <= scanned + kept[k]!.length) return e.spot.start + source + removed[k]! + (i - scanned);
+      scanned += kept[k]!.length + 1;
+      source += lines[k]!.length + 1;
+    }
+    return e.spot.end;
+  };
+  return { start: back(shown.index), end: back(shown.index + shown.tag.length - 1) + 1 };
 }
 
 // The n-th line (from 0) of the marks field.
