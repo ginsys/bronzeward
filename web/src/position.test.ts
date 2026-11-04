@@ -311,6 +311,19 @@ describe("a plain value in block and in flow context", () => {
     for (const doc of withAnchors((b, a) => `k: ${b}!bwref ${a}x/foo\n  \u00a0bar\n`)) expect(references(doc), doc).toEqual([]);
   });
 
+  test("a line of no-break spaces alone is text, not a blank line", () => {
+    for (const doc of withAnchors((b, a) => `k: ${b}!bwref ${a}x/foo\n  \u00a0\n`)) expect(references(doc), doc).toEqual([]);
+    for (const doc of withAnchors((b, a) => `k: [${b}!bwref ${a}x/foo\n  \u00a0\n  ]\n`)) expect(references(doc), doc).toEqual([]);
+  });
+
+  // A flow line that starts with the value indicator (a colon before a blank) ends the scalar, so the
+  // tagged scalar is an explicit key. A colon before a flow indicator is text for go-yaml v3.0.5.
+  test("an explicit flow key ends at the value indicator on the next line", () => {
+    for (const doc of withAnchors((b, a) => `k: {? ${b}!bwref ${a}x/foo\n: v}\n`)) expect(references(doc), doc).toEqual(["x/foo"]);
+    for (const doc of withAnchors((b, a) => `k: [? ${b}!bwref ${a}x/foo\n: v]\n`)) expect(references(doc), doc).toEqual(["x/foo"]);
+    for (const doc of withAnchors((b, a) => `k: {? ${b}!bwref ${a}x/foo\n:]}\n`)) expect(references(doc), doc).toEqual([]);
+  });
+
   test("block context after a closed flow collection", () => {
     expect(references("a: [x]\nb: !bwref y/foo,z\n")).toEqual([]);
   });

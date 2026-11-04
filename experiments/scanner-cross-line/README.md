@@ -53,6 +53,11 @@ The same files back a second note, on [issue 603](https://github.com/ginsys/bron
   differences of set S8 by the spelling of the tag and by the server verdict. `tag-anchor.mjs`
   reads the report that `run/tag-causes` leaves for main. It splits the lost documents by the
   server verdict, the verbatim spelling and an anchor between the tag and its value.
+- `sets/gen-s9-continuation.ts` — set S9, the line after a plain `!bwref` value: 17 contexts, three
+  anchor positions, 33 next lines, four indents, with and without a blank line (13,464 documents,
+  7,092 of them parsed by go-yaml). It is not in `sets/MANIFEST` and `run/gen-sets` does not write
+  it: `node sets/gen-s9-continuation.ts s9.json` makes it, and the same input gives the same file.
+  Issue 605 used it with `cmp-reports.mjs` to check the continuation rules of the scanner.
 - `cmp-reports.mjs` — compares two reports of `cmp.mjs` for one set: one made with the scanner
   before a change, one after it. It prints both counts and the ids that changed (lost and extra
   names fixed or new, and the documents go-yaml refuses where the scanner lists a name). It
