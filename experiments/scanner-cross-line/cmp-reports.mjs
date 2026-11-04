@@ -12,9 +12,12 @@
 //   - refusedListed-new and refusedListed-fixed: ids that go-yaml refuses and the scanner lists a
 //     name in, after and not before, and the reverse. They are not an acceptance count; the
 //     acceptance is on valid documents.
-// An id can be lost before and after with a different set of names. The tool reports by id and
-// kind, which is the unit that run/tag-causes counts. It exits 1 when lost-new or extra-new is not
-// empty, 2 on a bad call or reports that do not match, and 0 otherwise.
+//   - lost-names-new and extra-names-new: (id, name) pairs that a report lists after and not before.
+//     An id can be lost or extra before and after with a different set of names; these lines show a
+//     name added to such a document.
+// The lines by id and kind are the unit that run/tag-causes counts. The tool exits 1 when lost-new,
+// extra-new, lost-names-new or extra-names-new is not empty, 2 on a bad call or reports that do not
+// match, and 0 otherwise.
 import { readFileSync } from "node:fs";
 
 const [beforePath, afterPath] = process.argv.slice(2);
@@ -61,4 +64,25 @@ for (const k of Object.keys(before.counts)) {
 for (const [name, list] of Object.entries(diffs)) {
   console.log(`${name}: ${list.length}${list.length > 0 ? ` ids ${list.join(",")}` : ""}`);
 }
-process.exit(diffs["lost-new"].length > 0 || diffs["extra-new"].length > 0 ? 1 : 0);
+
+// The (id, name) pairs a report holds: "L" for a name the oracle lists and the scanner lacks, "E"
+// for a name the scanner lists and the oracle does not. A row holds one document that differs.
+const pairs = (report) => {
+  const out = new Set();
+  for (const row of report.rows) {
+    if (!Array.isArray(row.oracle) || !Array.isArray(row.candidate)) continue;
+    for (const n of row.oracle) if (!row.candidate.includes(n)) out.add(`${row.id}\tL\t${n}`);
+    for (const n of row.candidate) if (!row.oracle.includes(n)) out.add(`${row.id}\tE\t${n}`);
+  }
+  return out;
+};
+const pairsBefore = pairs(before);
+const newPairs = [...pairs(after)].filter((p) => !pairsBefore.has(p));
+const names = {
+  "lost-names-new": newPairs.filter((p) => p.split("\t")[1] === "L").map((p) => p.replace(/\t.\t/, ":")),
+  "extra-names-new": newPairs.filter((p) => p.split("\t")[1] === "E").map((p) => p.replace(/\t.\t/, ":")),
+};
+for (const [name, list] of Object.entries(names)) {
+  console.log(`${name}: ${list.length}${list.length > 0 ? ` ${list.slice(0, 20).join(",")}` : ""}`);
+}
+process.exit(diffs["lost-new"].length > 0 || diffs["extra-new"].length > 0 || newPairs.length > 0 ? 1 : 0);

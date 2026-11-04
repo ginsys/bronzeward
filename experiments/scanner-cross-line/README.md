@@ -59,18 +59,17 @@ The same files back a second note, on [issue 603](https://github.com/ginsys/bron
   a blank line, and the flow collections that close on the line of the value (38,208 documents,
   13,707 of them parsed by go-yaml). It is not in `sets/MANIFEST` and `run/gen-sets` does not write
   it: `node sets/gen-s9-continuation.ts s9.json` makes it, and the same input gives the same file.
-  Issue 605 used it with `cmp-reports.mjs` and `same-lists.mjs` to check the reading of a value
-  after an anchor.
-- `same-lists.mjs` — checks that two scanners list the same references for every document with no
-  anchor between a `!bwref` tag and its value: `node same-lists.mjs s9.json <scanner before>
-  <scanner after>`. It exits 1 if one document differs.
+  Issue 605 used it with `cmp-reports.mjs` to check the reading of a value after an anchor.
 - `cmp-reports.mjs` — compares two reports of `cmp.mjs` for one set: one made with the scanner
   before a change, one after it. It prints both counts and the ids that changed (lost and extra
-  names fixed or new, and the documents go-yaml refuses where the scanner lists a name). It
-  exits 1 when a document starts to lose or to list a name. The acceptance run of
+  names fixed or new, new (id, name) pairs, and the documents go-yaml refuses where the scanner
+  lists a name). It exits 1 when a document starts to lose or to list a name, or when a document
+  that already differed gets one more name. The acceptance run of
   [issue 605](https://github.com/ginsys/bronzeward/issues/605) used it on set S8: `node cmp.mjs
   s8.json s8.oracle.json <scanner before> before.json`, the same with `candidates/c0-main.mjs`
   for after.json, then `node cmp-reports.mjs before.json after.json`.
+- `check-tools.mjs` — checks `cmp-reports.mjs` on small built-in reports: `node check-tools.mjs`.
+  It needs no oracle, no set and no build, and exits 1 on a wrong result.
 - `evidence/` — the collected run: `table.md` (every candidate over every set), `differences/`
   (the first 20 documents each candidate gets wrong, per set: a summary), `lists/` (every
   differing document of a candidate that loses no name, by index in the set, one file per
