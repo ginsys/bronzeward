@@ -165,7 +165,7 @@ func interruptedWatch(t *testing.T, stdout io.Writer, extra ...string) (int, str
 
 // TestOperationWatchReadUnknown: when the stream ends and the operation read that follows is an
 // answer the client cannot read, the state of the operation is unknown, not refused: exit 3, and the
-// message names the command that reads it. A refusal the server named keeps exit 1.
+// message names the command that reads it. Only a problem document the server named keeps exit 1.
 func TestOperationWatchReadUnknown(t *testing.T) {
 	for _, extra := range [][]string{nil, {"-o", "json"}} {
 		f := &opFake{stream: []string{sse(1, "commitment", commitment)}, badReadFrom: 2,
@@ -188,6 +188,18 @@ func TestOperationWatchReadUnknown(t *testing.T) {
 	if code != 1 || strings.Contains(errOut, "was not read") {
 		t.Errorf("a 403 on the read: exit %d, stderr %q; want 1 and no unknown-outcome text", code, errOut)
 	}
+	// A 403 whose body stops short names no problem: the status alone does not say what the server
+	// decided, so the state is unknown.
+	cut := &opFake{stream: []string{sse(1, "commitment", commitment)}, cutFrom: 2,
+		body: fmt.Sprintf(opJSON, "apply-config", "running", "null", "null", "[]")}
+	cutSrv := httptest.NewServer(cut)
+	defer cutSrv.Close()
+	automationContext(t, cutSrv.URL)
+	code, _, errOut = runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "5s")
+	if code != 3 || !strings.Contains(errOut, "answered 403") || !strings.Contains(errOut, "reading the answer failed") ||
+		!strings.Contains(errOut, "bronzewardctl operation show 'op_BWSYNTH'") {
+		t.Errorf("a cut-off 403 on the read: exit %d, stderr %q; want 3 and the operation to read named", code, errOut)
+	}
 }
 
 // TestOperationWatchReadUnknownAfterEventsRefusal: when the events of a finished operation are
@@ -206,13 +218,12 @@ func TestOperationWatchReadUnknownAfterEventsRefusal(t *testing.T) {
 	}
 }
 
-// TestUnreadState: the error of a watch that read no operation. Only what the server refused, or a
-// refused certificate, keeps its own exit code; the operation read, the last part of a joined error,
-// decides which.
+// TestUnreadState: the error of a watch that read no operation. Only a problem document the server
+// named keeps its own exit code; the operation read, the last part of a joined error, decides which.
 func TestUnreadState(t *testing.T) {
 	// The suite's proxy tunnels every https request to a server whose certificate nothing trusts.
 	refused := client.Live(&client.Context{Name: "lab", Server: "https://bronzeward.example.invalid", Credential: "automation"}, nil)
-	if !client.IsTrust(refused) {
+	if refused == nil || !strings.Contains(refused.Error(), "is not trusted by") {
 		t.Fatalf("%v: not a refused certificate", refused)
 	}
 	problem := &client.Problem{Status: 403}
@@ -223,12 +234,12 @@ func TestUnreadState(t *testing.T) {
 		unknown bool // the exit is 3 (outcome unknown); otherwise the error stands as it is
 	}{
 		{"a refusal the server named", problem, false},
-		{"a refused certificate", refused, false},
-		{"a refused certificate in a wrapped error", fmt.Errorf("GET /x: %w", refused), false},
+		{"a refused certificate", refused, true},
+		{"a refused certificate in a wrapped error", fmt.Errorf("GET /x: %w", refused), true},
 		{"an unreadable answer", garbled, true},
 		{"events refused, then an unreadable operation read", errors.Join(problem, garbled), true},
 		{"events unreadable, then a refused operation read", errors.Join(garbled, problem), false},
-		{"events unreadable, then a refused certificate", errors.Join(garbled, refused), false},
+		{"events refused, then a refused certificate", errors.Join(problem, refused), true},
 	} {
 		err := unreadState("op_x", c.err)
 		var u outcomeUnknown

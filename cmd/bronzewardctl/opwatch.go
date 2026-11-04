@@ -228,10 +228,11 @@ func (e *env) operationWatch(args []string) (err error) {
 	return nil
 }
 
-// unreadState is the error of a watch that ended with no operation read. A refusal the server named
-// (a problem document, a blocked sign-in) and a trust failure stand as they are: exit 1 says that
-// nothing was decided. Any other failure leaves the operation's state unknown, as it may be running
-// or ended: exit 3 (operator-experience.md section 4), with the command that reads it.
+// unreadState is the error of a watch that ended with no operation read. A problem document the
+// server named stands as it is: exit 1 says that nothing was decided. Any other failure, an answer
+// that cannot be read, a refused certificate or a connection that failed, leaves the operation's
+// state unknown, as it may be running or ended: exit 3 (operator-experience.md section 4), with the
+// command that reads it.
 //
 // A joined error (the events of the end, then the operation read) is classified by its last part, the
 // operation read: a refusal of the events says nothing of the state the read could not give. The text
@@ -247,11 +248,8 @@ func unreadState(id string, err error) error {
 		decisive = parts[len(parts)-1]
 	}
 	var problem *client.Problem
-	var blocked *client.Blocked
-	var unknown *client.Unknown
 	var settled outcomeUnknown
-	if errors.As(decisive, &problem) || errors.As(decisive, &blocked) || errors.As(decisive, &unknown) || errors.As(decisive, &settled) ||
-		client.IsTrust(decisive) {
+	if errors.As(decisive, &problem) || errors.As(decisive, &settled) {
 		return err
 	}
 	return outcomeUnknown{ef("%w; the state of operation %s was not read, so it may still be running or may have ended. Read it before deciding: bronzewardctl operation show %s",
