@@ -153,7 +153,7 @@ function tags(original: string): { index: number; tag: string; name: string }[] 
       if (b === undefined) continue;
       ({ name, end } = b);
     } else if (m[5] !== undefined) {
-      if (continues(masked, m.index, end)) continue;
+      if (continues(masked, m.index, end, inFlow)) continue;
       name = m[5];
     } else name = m[2] !== undefined ? decoded(m[2]) : m[3]!.replaceAll("''", "'");
     if (name !== undefined && NAME.test(name)) found.push({ index: m.index, tag: original.slice(m.index, end), name });
@@ -208,17 +208,20 @@ function holder(masked: string, tag: number, compact = false): number {
 }
 
 // Whether a plain scalar ending at `end` goes on to the next line: it ends its line, and the next
-// line with text is more indented than the node that holds the scalar and is no key, sequence
-// entry or flow indicator. A plain scalar holds no colon before a blank, so a line with one is a
-// key.
-function continues(masked: string, tag: number, end: number): boolean {
+// line with text is no key and, in block context, is more indented than the node that holds the
+// scalar. A plain scalar holds no colon before a blank, so a line with one is a key. In flow
+// context a continuation line needs no indentation, and a line that starts with a flow indicator
+// ends the scalar. In block context a comma, bracket, brace, dash or question mark at the start of
+// the line is text (ginsys/bronzeward#605; go-yaml v3.0.5 reads `x/foo` and `  - y` as one scalar).
+function continues(masked: string, tag: number, end: number, inFlow: boolean): boolean {
   const eol = masked.indexOf("\n", end);
   if (eol === -1 || masked.slice(end, eol).trim() !== "") return false;
   const next = nextLine(masked, eol + 1);
   // A document marker (--- or ...) ends every scalar, also a top-level one.
-  if (next === undefined || indent(next) <= holder(masked, tag) || MARKER.test(next)) return false;
+  if (next === undefined || MARKER.test(next)) return false;
+  if (!inFlow && indent(next) <= holder(masked, tag)) return false;
   const t = next.trim();
-  return !/^(?:[,\]}]|[-?](?:\s|$))/.test(t) && !/:(?:\s|$)/.test(t);
+  return !(inFlow && /^[,\]}]/.test(t)) && !/:(?:\s|$)/.test(t);
 }
 
 // A block scalar's name and where it ends (YAML 1.2 §8.1, ginsys/bronzeward#534 C7). It names a

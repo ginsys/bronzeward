@@ -277,6 +277,25 @@ describe("a plain value in block and in flow context", () => {
     for (const doc of withAnchors((b, a) => `k: ${b}!bwref ${a}x/foo\n  bar\n`)) expect(references(doc), doc).toEqual([]);
   });
 
+  // A line after the value continues it when go-yaml reads one scalar: in block context if it is more
+  // indented than the holding node, whatever it starts with except a key; in flow context also with
+  // no indentation, unless it starts with a flow indicator.
+  test.each([
+    ["a comma", "  ,bar"],
+    ["a closing bracket", "  ]bar"],
+    ["a dash", "  - y"],
+    ["a question mark", "  ? y"],
+    ["a second word", "  bar"],
+  ])("block context: a continuation line that starts with %s is text", (_what, next) => {
+    for (const doc of withAnchors((b, a) => `k: ${b}!bwref ${a}x/foo\n${next}\n`)) expect(references(doc), doc).toEqual([]);
+  });
+
+  test("flow context: a continuation line needs no indentation, and a flow indicator ends the value", () => {
+    for (const doc of withAnchors((b, a) => `k: [${b}!bwref ${a}x/foo\nbar]\n`)) expect(references(doc), doc).toEqual([]);
+    for (const doc of withAnchors((b, a) => `k: [${b}!bwref ${a}x/foo\n  , bar]\n`)) expect(references(doc), doc).toEqual(["x/foo"]);
+    for (const doc of withAnchors((b, a) => `k: [${b}!bwref ${a}x/foo\n]\n`)) expect(references(doc), doc).toEqual(["x/foo"]);
+  });
+
   test("block context after a closed flow collection", () => {
     expect(references("a: [x]\nb: !bwref y/foo,z\n")).toEqual([]);
   });
