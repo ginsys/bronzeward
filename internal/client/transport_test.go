@@ -9,7 +9,6 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
-	"fmt"
 	"io"
 	"math/big"
 	"net"
@@ -242,28 +241,5 @@ func TestRefusedCertificateIsEscaped(t *testing.T) {
 		if tr := (*trust)(nil); !errors.As(err, &tr) || !strings.Contains(err.Error(), `subject "CN=a\x09b"`) || printable(err.Error()) != err.Error() {
 			t.Errorf("%s: %v; want a trust refusal naming the subject as CN=a\\x09b", name, err)
 		}
-	}
-}
-
-// TestIsTrust: a refused server certificate, as the client's reads wrap it on their way out, is a
-// trust failure for a caller outside the package; no other error is.
-func TestIsTrust(t *testing.T) {
-	cert, _ := selfSignedAs(t, "bw.example")
-	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
-	srv.TLS = &tls.Config{Certificates: []tls.Certificate{cert}}
-	srv.StartTLS()
-	defer srv.Close()
-	hc, err := newHTTPClient(&Context{Name: "lab", Server: srv.URL, Credential: "automation"}, nil, func(*http.Request) (*url.URL, error) { return nil, nil }, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = hc.Get(srv.URL + "/livez")
-	x := &Context{Name: "lab"}
-	refused := x.fail(fmt.Errorf("GET /api/v1/operations/op_x: %w", transportError(x, strings.TrimPrefix(srv.URL, "https://"), err)))
-	if !IsTrust(refused) || !IsTrust(errors.Join(errors.New("events"), refused)) {
-		t.Errorf("%v: not a trust failure", refused)
-	}
-	if IsTrust(errors.New("connection refused")) || IsTrust(&Problem{Status: 403}) || IsTrust(nil) {
-		t.Error("an error that is not a refused certificate is a trust failure")
 	}
 }

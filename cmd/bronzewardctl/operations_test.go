@@ -32,6 +32,7 @@ type opFake struct {
 	pagesFail     bool // the JSON event pages answer 404: reading the events fails
 	badReadFrom   int  // from this operation read on (when set), the answer is 200 with a body that is no JSON: an ambiguous answer
 	forbidFrom    int  // from this operation read on (when set), the answer is a 403 problem: a refusal the server named
+	cutFrom       int  // from this operation read on (when set), the answer is a 403 whose body stops short: a status with no problem document
 }
 
 func (f *opFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -54,6 +55,13 @@ func (f *opFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/problem+json")
 			w.WriteHeader(http.StatusForbidden)
 			fmt.Fprint(w, `{"type":"urn:bronzeward:problem:forbidden","title":"Forbidden","status":403}`)
+			return
+		}
+		if f.cutFrom > 0 && f.reads >= f.cutFrom {
+			w.Header().Set("Content-Type", "application/problem+json")
+			w.Header().Set("Content-Length", "200")
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprint(w, `{"type":"urn:bronzeward:problem:forb`)
 			return
 		}
 		if f.badReadFrom > 0 && f.reads >= f.badReadFrom {

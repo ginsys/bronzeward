@@ -720,9 +720,10 @@ With `-o json` or `-o yaml`, the event lines go to standard error and the operat
 standard output: the one read that the outcome line and the exit code come from, as the server sent it.
 This holds for the resource of a Ctrl-C too, when the watch read one: it is printed before the exit.
 If the resource cannot be written after Ctrl-C, one note goes to standard error and the exit code stays 130.
+A closed standard output ends the program at once, as for every command.
 If the watch ends with no operation read, because the answer to the read that follows a cut stream
 cannot be read, the state is unknown and the exit is 3: the message names `operation show` as the
-command that reads it. A refusal the server named, or a trust failure, keeps exit 1.
+command that reads it. Only a problem document the server named keeps exit 1.
 
 ### 5.8 Drift: freeze, then adopt or revert
 
