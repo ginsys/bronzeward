@@ -63,13 +63,15 @@ The same files back a second note, on [issue 603](https://github.com/ginsys/bron
 - `cmp-reports.mjs` — compares two reports of `cmp.mjs` for one set: one made with the scanner
   before a change, one after it. It prints both counts and the ids that changed (lost and extra
   names fixed or new, new (id, name) pairs, and the documents go-yaml refuses where the scanner
-  lists a name). It exits 1 when a document starts to lose or to list a name, or when a document
-  that already differed gets one more name. The acceptance run of
+  lists a name). It exits 1 when a document starts to lose or to list a name, when a document
+  that already differed gets one more name, or when the scanner starts to throw on a document
+  (`failed-new`). The acceptance run of
   [issue 605](https://github.com/ginsys/bronzeward/issues/605) used it on set S8: `node cmp.mjs
   s8.json s8.oracle.json <scanner before> before.json`, the same with `candidates/c0-main.mjs`
   for after.json, then `node cmp-reports.mjs before.json after.json`.
 - `check-tools.mjs` — checks `cmp-reports.mjs` on small built-in reports: `node check-tools.mjs`.
-  It needs no oracle, no set and no build, and exits 1 on a wrong result.
+  It needs no oracle, no set and no build, and exits 1 on a wrong result. It also runs a copy of
+  both tools in a directory whose name holds a space.
 - `evidence/` — the collected run: `table.md` (every candidate over every set), `differences/`
   (the first 20 documents each candidate gets wrong, per set: a summary), `lists/` (every
   differing document of a candidate that loses no name, by index in the set, one file per
