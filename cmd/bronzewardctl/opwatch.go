@@ -131,12 +131,14 @@ func (e *env) operationWatch(args []string) (err error) {
 			err = errors.Join(err, c.Save())
 		}
 	}()
+	// Every read of the watch that gives nothing maps through unreadState: the server's own problem keeps
+	// its exit 1, anything else leaves the state unknown (exit 3, with the command that reads it).
 	if _, _, err := c.Server(); err != nil {
-		return err
+		return unreadState(id, err)
 	}
 	o, _, err := c.OperationEpoch(id)
 	if err != nil {
-		return err
+		return unreadState(id, err)
 	}
 	out.show(sf("%s  %s", o.Kind, subject(o.Subject)))
 	out.show("Times marked \"received\" are this client's clock when the event arrived; the completion line shows the server's time.")
