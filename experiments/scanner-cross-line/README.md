@@ -16,6 +16,11 @@ must carry from line to line to list the same names as go-yaml, the parser of th
 
 It answers a feasibility question and selects nothing for production.
 
+The same files back a second note, on [issue 603](https://github.com/ginsys/bronzeward/issues/603):
+[how the scanner reads a tag spelled through a handle](../../docs/design/research/20261104-tag-handle-resolution.md).
+`tag-handles.mjs`, `tag-causes.mjs`, `run/tag-causes`, `serverprobe/` and `sets/tag-handle-cases.json`
+belong to that note.
+
 ## What is here
 
 - `main.go`, `main_test.go` — the oracle. It reads a set and writes, for each document, the names
@@ -37,6 +42,15 @@ It answers a feasibility question and selects nothing for production.
   `position-extra.test.ts` against a candidate. `run/collect-evidence` — runs everything and writes
   `evidence/`.
 - `position-extra.test.ts` — three tests for the implementation, beyond `web/src/position.test.ts`.
+- `serverprobe/` — a second Go module that asks the server about a document. It calls
+  `ingest.Stored` of `internal/ingest` with every name go-yaml reads declared, and it prints
+  whether the server accepts the document. It is its own module on purpose. It builds with the
+  yaml version of the server, and the oracle keeps its own pin. `mise run go` builds it, which
+  compiles the root module's dependencies.
+- `tag-handles.mjs` — the case table of the tag handle note: for each case of
+  `sets/tag-handle-cases.json`, the go-yaml result, the server verdict and the result of the
+  scanner on main and at an earlier commit. `tag-causes.mjs` and `run/tag-causes` group the
+  differences of set S8 by the spelling of the tag and by the server verdict.
 - `evidence/` — the collected run: `table.md` (every candidate over every set), `differences/`
   (the first 20 documents each candidate gets wrong, per set: a summary), `lists/` (every
   differing document of a candidate that loses no name, by index in the set, one file per
