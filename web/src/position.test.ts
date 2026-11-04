@@ -387,12 +387,12 @@ describe("a plain value after an anchor, in block and in flow context", () => {
     expect(references("{a:!bwref &e x/foo}\n")).toEqual([]);
   });
 
-  // A key that starts with U+00A0 or a byte order mark has text at column 0, not indentation, so a
-  // line with one space continues the value (go-yaml lists none) and a key line ends it. Checked
-  // against go-yaml v3.0.5. Main lists none after an anchor, so none is the old result.
+  // A key that starts with U+00A0 has text at column 0, not indentation, so a line with one space
+  // continues the value (go-yaml lists none) and a key line ends it. Checked against go-yaml v3.0.5.
+  // Main lists none after an anchor, so none is the old result. A stream that starts with a byte order
+  // mark is below.
   test.each([
     ["no-break space", " "],
-    ["byte order mark", "﻿"],
   ])("indentation after a %s at column 0 is counted in spaces", (_, lead) => {
     expect(references(`${lead}k: !bwref &e x/foo\n bar\n`)).toEqual([]);
     expect(references(`${lead}k: !bwref &e x/foo\n  bar\n`)).toEqual([]);
@@ -400,6 +400,37 @@ describe("a plain value after an anchor, in block and in flow context", () => {
     expect(references(`${lead}k: !bwref &e x/foo\nj: v\n`)).toEqual(["x/foo"]);
     expect(references(`${lead}k: !bwref &e x/foo\n j: v\n`)).toEqual(["x/foo"]);
     expect(references(`${lead}k: !bwref &e x/foo\n`)).toEqual(["x/foo"]);
+  });
+
+  // go-yaml drops a byte order mark at the start of the stream before it reads any text. The anchored
+  // path does not model that: in such a stream it reads no value after an anchor, as on main. That
+  // closes every shape at once, such as a root value that goes on at column 0 (go-yaml reads `x/foo
+  // bar`) or an indented tag after an empty first line. A name that go-yaml lists in such a stream is
+  // lost, as on main. A byte order mark at the start of a later line is text: the anchored path is
+  // unchanged there (ginsys/bronzeward#605, hosted and local review).
+  describe("a byte order mark at the start of the stream", () => {
+    const bom = String.fromCharCode(0xfeff);
+    test.each([
+      [`${bom}--- !bwref &e x/foo\nbar\n`, []],
+      [`${bom} !bwref &e x/foo\nbar\n`, []],
+      [`${bom}\n !bwref &e x/foo\nbar\n`, []],
+      [`${bom}\n  !bwref &e x/foo\nbar\n`, []],
+      [`${bom}!bwref &e x/foo\nbar\n`, []],
+      [`${bom}k: !bwref &e x/foo\n`, []],
+      [`${bom}--- !bwref &e x/foo\n`, []],
+      [`${bom}a: !bwref x/foo\n`, ["x/foo"]],
+      [`${bom}--- !bwref x/foo\n`, ["x/foo"]],
+      ["--- !bwref &e x/foo\nbar\n", []],
+      [" !bwref &e x/foo\nbar\n", []],
+      ["\n !bwref &e x/foo\nbar\n", []],
+      ["k: !bwref &e x/foo\n", ["x/foo"]],
+      ["--- !bwref &e x/foo\n", ["x/foo"]],
+      [`a: 1\n...\n${bom}--- !bwref &e x/foo\nbar\n`, []],
+      [`a: 1\n---\n${bom} !bwref &e x/foo\nbar\n`, []],
+      [`a: 1\n---\n${bom}!bwref &e x/foo\n`, []],
+    ])("%j lists %j", (text, names) => {
+      expect(references(text)).toEqual(names);
+    });
   });
 
   // A value with no anchor after the tag is read as before: these two lists match main and go-yaml.

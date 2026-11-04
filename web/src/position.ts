@@ -136,13 +136,17 @@ function tags(original: string): { index: number; tag: string; name: string }[] 
     new RegExp(String.raw`!bwref[ \t\r\n]+&[0-9A-Za-z_-]+[ \t\r\n]+(?:"((?:[^"\\]|\\[^])*)"|'((?:[^'\n]|'')*)'|${header}|(${value}))`, "y");
   const flowAnchored = anchored(flowValue);
   const blockAnchored = anchored(blockValue);
+  // go-yaml drops a byte order mark at the start of the stream before it reads any text, so it counts
+  // as no column and no character there. The anchored path does not model that, and the scan reads
+  // no value after an anchor in such a stream, as on main (ginsys/bronzeward#605).
+  const bomStream = masked.charCodeAt(0) === 0xfeff;
   // A tag counts only where the scan read it as a node's property: never in a plain, quoted or block
   // scalar's text. So the pattern is matched at those offsets only: a match that starts in text could
   // run over a real tag.
   for (const [at, inFlow] of [...props].sort((a, b) => a[0] - b[0])) {
     const withAnchor = inFlow ? flowAnchored : blockAnchored;
     withAnchor.lastIndex = at;
-    let m = withAnchor.exec(masked);
+    let m = bomStream ? null : withAnchor.exec(masked);
     const hasAnchor = m !== null;
     if (m === null) {
       tag.lastIndex = at;
