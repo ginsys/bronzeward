@@ -360,6 +360,17 @@ export const holdsUnsaved = (held: Held, saved: Held, mine: Held | undefined) =>
 export interface Clash { mine: Held; phase: "refused" | "asked" | "theirs"; revision?: number; awaits?: true; again?: true; typed?: true }
 export interface Later { revision?: number; id?: string; text?: Held; removed?: true }
 export interface Editor { held: Held; saved: Held; conflict?: Clash; sent?: { text: Held; whileTheirs: boolean; removes?: true; open?: true; later?: Later }; writes?: number; note?: string | undefined; version?: number; reading?: true; own?: string; gone?: number }
+// The pane's first state. `gone` follows the revision of a removal: a number is the revision known
+// to be removed, -1 means nothing was removed yet, and unset means the pane's own done Remove saved
+// EMPTY and its draft read has not shown the removal. A new fragment starts with -1, so another
+// author's removal, read while its first Save is open, is held back for that Save's answer and shows
+// when it is done, not dropped as the pane's own Remove (ginsys/bronzeward#559 PR review).
+export const FRESH: Editor = { held: EMPTY, saved: EMPTY, gone: -1 };
+
+// A revision read that began before a write finished may name the revision from before that write,
+// since the draft refresh has not answered: it is not used (ginsys/bronzeward#559 PR review).
+export const staleRead = (finishedNow: number, startedAt: number): boolean => finishedNow !== startedAt;
+
 export type EditorEvent =
   | { kind: "type"; held: Held } // the operator's edit
   | { kind: "refused" } // a write's 412
@@ -699,7 +710,7 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
   // The saved text is EMPTY for a new entry or a removal.
   // Once the last Save or Remove is done, the text it sent is saved, also for an entry new in the
   // draft, whose pane reads no revision.
-  const [{ held, saved, conflict, sent, writes: done = 0, note, version = 0 }, act] = useReducer(editor, { held: EMPTY, saved: EMPTY });
+  const [{ held, saved, conflict, sent, writes: done = 0, note, version = 0 }, act] = useReducer(editor, FRESH);
   const hold = (h: Held) => act({ kind: "type", held: h });
   const setNote = (text?: string) => act({ kind: "note", ...(text !== undefined && { text }) });
   const [w, send] = useSend();
@@ -735,9 +746,10 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
         return setNote("The entry's revision could not be read.");
       }
       // A write finished while this read was pending: the editor drops the answer of a read that
-      // began before it, and no draft read names the revision again. Read it again, not as loaded
-      // (ginsys/bronzeward#559).
-      if (finished.current !== done) return retry((x) => x + 1);
+      // began before it, and it may name the revision from before the write, since the draft refresh
+      // has not answered. It is not read again at once: it fails without a note, and the draft read
+      // that names the new revision reads it again (ginsys/bronzeward#559 PR review).
+      if (staleRead(finished.current, done)) return setFailed(true);
       setLoaded(revision);
       // The draft revision shown when the read answers: one that changed only another entry while
       // it was pending still names this text, and Copy my text compares with it (PR review).
