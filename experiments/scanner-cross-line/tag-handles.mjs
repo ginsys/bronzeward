@@ -11,14 +11,14 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const [casesPath, workArg, before, tablePath] = process.argv.slice(2);
 if (tablePath === undefined) {
   console.error("usage: node tag-handles.mjs <cases.json> <work dir> <pre-602 commit> <table.md>");
   process.exit(2);
 }
-const here = new URL(".", import.meta.url).pathname;
+const here = fileURLToPath(new URL(".", import.meta.url));
 const work = resolve(workArg);
 const cases = JSON.parse(readFileSync(casesPath, "utf8"));
 
@@ -59,7 +59,7 @@ cases.forEach((c, i) => {
   const k = refused ? "parse error" : server[i].accepted ? "accepted" : "server-refused";
   rows.push(`| ${c.name} | ${c.source} | ${refused ? "parse error" : show(want)} | ${refused ? "n/a" : k} | ${cell(m)} | ${cell(b)} |`);
   const d = refused ? (m.length > 0 ? "extra" : "=") : diff(m, want);
-  tally[k][d === "=" ? "same" : d.startsWith("lost") ? "lost" : "extra"]++;
+  for (const key of d === "=" ? ["same"] : d.split("+")) tally[k][key]++; // a lost+extra case counts under both
 });
 // The yaml version each side runs, and the last commit that changed each scanner.
 const listed = (cwd) => execFileSync("go", ["list", "-m", "go.yaml.in/yaml/v3"], { cwd, encoding: "utf8" }).trim();

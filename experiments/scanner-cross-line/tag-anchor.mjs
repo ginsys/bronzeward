@@ -11,13 +11,14 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const [reportPath, workArg] = process.argv.slice(2);
 if (workArg === undefined) {
   console.error("usage: node tag-anchor.mjs <report.json> <work dir>");
   process.exit(2);
 }
-const here = new URL(".", import.meta.url).pathname;
+const here = fileURLToPath(new URL(".", import.meta.url));
 const work = resolve(workArg);
 const lost = JSON.parse(readFileSync(reportPath, "utf8")).rows.filter((r) => r.kind.includes("lost"));
 
