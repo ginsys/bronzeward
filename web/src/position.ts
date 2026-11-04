@@ -91,7 +91,9 @@ function embeddedTexts(text: string, embedded: readonly EmbeddedPath[]): { text:
 // escaped line break to nothing (ginsys/bronzeward#534 C7), and a line break YAML folds into a
 // blank names nothing. A plain one followed by a more indented line is skipped, never cut short.
 const NAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\/[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/;
-const MARKER = /^(?:---|\.\.\.)(?:\s|$)/;
+// A document marker is followed by a space, a tab or the end of the line: U+00A0 and the other
+// Unicode spaces are text (`--- a` is a key).
+const MARKER = /^(?:---|\.\.\.)(?:[ \t]|$)/;
 // go-yaml (the server's parser) breaks a line at a line feed, a carriage return alone, and U+0085,
 // U+2028 and U+2029, in comments and in every kind of scalar; a CRLF is one break. Each of these is
 // read as a line feed here, so no later step has to know them. A replacement has the length of what
@@ -109,16 +111,20 @@ function tags(original: string): { index: number; tag: string; name: string }[] 
   });
   const found: { index: number; tag: string; name: string }[] = [];
   // A plain scalar's words: no blank, flow indicator, or colon before a blank; blanks between words.
-  const word = String.raw`(?:[^\s,[\]{}:]|:(?=[^\s,[\]{}]))+`;
+  const word = String.raw`(?:[^ \t\r\n,[\]{}:]|:(?=[^ \t\r\n,[\]{}]))+`;
   // A block scalar's header ends its line, a comment aside: | or >, then at most one chomping and
   // one indentation indicator, in either order. The server also takes a # right after it as a
   // comment, which the blanking above leaves.
   const header = String.raw`([|>](?:[-+][1-9]?|[1-9][-+]?)?)(?=[ \t]*(?:#[^\n]*)?\r?\n)`;
-  const key = /[ \t]*:(?:\s|$)/y;
-  for (const m of masked.matchAll(new RegExp(String.raw`!bwref\s+(?:"((?:[^"\\]|\\[^])*)"|'((?:[^'\n]|'')*)'|${header}|(${word}(?:[ \t]+${word})*))`, "g"))) {
-    // A tag counts only where the scan read it as a node's property: never in a plain, quoted or
-    // block scalar's text.
-    if (!props.has(m.index)) continue;
+  const key = /[ \t]*:(?:[ \t\r\n]|$)/y;
+  const tag = new RegExp(String.raw`!bwref[ \t\r\n]+(?:"((?:[^"\\]|\\[^])*)"|'((?:[^'\n]|'')*)'|${header}|(${word}(?:[ \t]+${word})*))`, "y");
+  // A tag counts only where the scan read it as a node's property: never in a plain, quoted or block
+  // scalar's text. So the pattern is matched at those offsets only: a match that starts in text could
+  // run over a real tag.
+  for (const at of [...props].sort((a, b) => a - b)) {
+    tag.lastIndex = at;
+    const m = tag.exec(masked);
+    if (m === null) continue;
     let end = m.index + m[0].length;
     key.lastIndex = end;
     if (key.test(masked)) continue;
@@ -408,6 +414,9 @@ function scanLine(st: Carry, line: string, base: number, props: Set<number>): nu
   }
   // The column where the current node starts, with its properties: the column of a key.
   let nodeStart = -1;
+  // The start of the node whose flow collection opens on this line: the commas and the items inside
+  // do not move it, so `[a, b]: |` is a key that starts at the bracket (-2: none opens here).
+  let outerStart = -2;
   while (j < line.length) {
     const c = line[j]!;
     const next = line[j + 1];
@@ -438,6 +447,7 @@ function scanLine(st: Carry, line: string, base: number, props: Set<number>): nu
       } else if (c === "[" || c === "{") {
         if (nodeStart < 0) nodeStart = j;
         st.flow++;
+        if (st.flow === 1) outerStart = nodeStart;
         lastPlain = false;
         j++;
       } else if (st.flow > 0 && c === ",") {
@@ -447,6 +457,7 @@ function scanLine(st: Carry, line: string, base: number, props: Set<number>): nu
         j++;
       } else if (st.flow > 0 && (c === "]" || c === "}")) {
         st.flow--;
+        if (st.flow === 0 && outerStart !== -2) nodeStart = outerStart;
         st.ns = false;
         lastPlain = false;
         st.closed = true;
@@ -512,6 +523,7 @@ function scanLine(st: Carry, line: string, base: number, props: Set<number>): nu
       j++;
     } else if (st.flow > 0 && (c === "]" || c === "}")) {
       st.flow--;
+      if (st.flow === 0 && outerStart !== -2) nodeStart = outerStart;
       lastPlain = false;
       st.closed = true;
       j++;

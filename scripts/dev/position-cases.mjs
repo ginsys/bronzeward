@@ -103,6 +103,13 @@ const own = [
   // (E) a comment line ends a plain key, so a `:` that starts the next line is the value indicator.
   ["ginsys/bronzeward#602", "edge-colon-after-comment", "a: [? k\n  # c\n  :!bwref x/bar, !bwref x/foo]\n"],
   ["ginsys/bronzeward#602", "edge-colon-after-tab-comment", "a: [? k\t# c\n  :!bwref x/bar, !bwref x/foo]\n"],
+  // (F) a Unicode space after a document marker is text, not a blank.
+  ["ginsys/bronzeward#602", "edge-marker-nbsp", '--- a: |\n  "x\nb: !bwref x/foo\n'],
+  ["ginsys/bronzeward#602", "edge-dots-nbsp", '... a: |\n  "x\nb: !bwref x/foo\n'],
+  // (G) tag-like text in a declared literal's comment is no tag, and does not hide the real one after it.
+  ["ginsys/bronzeward#602", "edge-fake-tag-in-comment", "cfg: |\n  # !bwref \"\n  a: 1\nb: !bwref x/foo\nc: '\"'\n"],
+  // (H) a flow collection used as a block key keeps its first column across its members.
+  ["ginsys/bronzeward#602", "edge-flow-key-holder", '[a, b]: |\n  "x\nfoo: !bwref x/foo\n'],
 ];
 
 function read(name) {

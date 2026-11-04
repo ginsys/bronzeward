@@ -493,6 +493,38 @@
    ]
   },
   {
+   "name": "edge-marker-nbsp",
+   "source": "ginsys/bronzeward#602",
+   "doc": "--- a: |\n  \"x\nb: !bwref x/foo\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
+   "name": "edge-dots-nbsp",
+   "source": "ginsys/bronzeward#602",
+   "doc": "... a: |\n  \"x\nb: !bwref x/foo\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
+   "name": "edge-fake-tag-in-comment",
+   "source": "ginsys/bronzeward#602",
+   "doc": "cfg: |\n  # !bwref \"\n  a: 1\nb: !bwref x/foo\nc: '\"'\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
+   "name": "edge-flow-key-holder",
+   "source": "ginsys/bronzeward#602",
+   "doc": "[a, b]: |\n  \"x\nfoo: !bwref x/foo\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
    "name": "594-pipe",
    "source": "experiments/scanner-cross-line/sets/cases.json (#594)",
    "doc": "a: x |\n  \"y # !bwref ghost\nb: !bwref x/foo\n",

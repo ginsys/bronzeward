@@ -140,6 +140,82 @@ const wrapAll = (lines: string[]) => {
     }
 }
 
+// (G) What follows a document marker, an indicator or a tag: a space, a tab, a line end, U+00A0 and
+// other Unicode spaces. go-yaml counts only the first three as blank; the others are text.
+{
+  const seps = [" ", "\t", "\u00a0", "\u2003", "\u3000", "\ufeff", "\u200b", "\r", ""];
+  for (const s of seps) {
+    for (const m of ["---", "..."]) {
+      docs.add(`${m}${s}a: |\n  "x\nb: ${TAG}\n`);
+      docs.add(`${m}${s}${PROBE}\nb: ${TAG}\n`);
+      docs.add(`${m}${s}\nb: ${TAG}\n`);
+      docs.add(`a: |\n  "x\n${m}${s}b: ${TAG}\n`);
+      docs.add(`a: |\n  ${m}${s}b\nc: ${TAG}\n`);
+      docs.add(`a: "x\n${m}${s}b: ${TAG}\n`);
+      docs.add(`${m}${s}[a, b]: |\n  "x\nb: ${TAG}\n`);
+      wrapAll([`${m}${s}a: |`, `  "x`, `b: ${TAG}`]);
+    }
+    for (const ind of ["-", "?", ":"]) {
+      docs.add(`${ind}${s}a: |\n  "x\nb: ${TAG}\n`);
+      docs.add(`${ind}${s}"x\nb: ${TAG}\n`);
+      docs.add(`k:\n  ${ind}${s}a: |\n    "x\n  b: ${TAG}\n`);
+    }
+    docs.add(`a:${s}"x\nb: ${TAG}\n`);
+    docs.add(`a:${s}|\n  "x\nb: ${TAG}\n`);
+    docs.add(`a:${s}&e\n  "x\nb: ${TAG}\n`);
+    docs.add(`a: [b:${s}c, ${TAG}]\n`);
+    docs.add(`a: {b:${s}${PROBE}, c: ${TAG}}\n`);
+    docs.add(`a: !bwref${s}x/foo\n`);
+    docs.add(`a: !bwref${s}${PROBE}\nb: ${TAG}\n`);
+    docs.add(`a: !bwref ${PROBE}${s}y\nb: ${TAG}\n`);
+    docs.add(`a: !bwref ${PROBE}${s}\nb: ${TAG}\n`);
+    docs.add(`a: !bwref ${PROBE}${s}: v\nb: ${TAG}\n`);
+    docs.add(`!bwref ${PROBE}${s}: v\nb: ${TAG}\n`);
+    docs.add(`a: !bwref "${PROBE}"${s}: v\nb: ${TAG}\n`);
+    docs.add(`a: !bwref ${PROBE}:${s}v\nb: ${TAG}\n`);
+    docs.add(`a: ${s}!bwref ${PROBE}\nb: ${TAG}\n`);
+    docs.add(`${s}a: !bwref ${PROBE}\nb: ${TAG}\n`);
+    docs.add(`a: |\n${s}  "x\nb: ${TAG}\n`);
+    docs.add(`a:\n${s}  b: |\n    "x\n  c: ${TAG}\n`);
+  }
+}
+
+// (H) Text that looks like a tag before a real one: in a comment, a quote or a plain scalar of a
+// block, a flow collection or a block scalar; then a line that closes the quote it opened.
+{
+  const fakes = ['!bwref "', "!bwref '", "!bwref |", "!bwref >2", "!bwref x/zzz", '!bwref "a" "', "!bwref  ", "!bwref"];
+  const closers = ["c: '\"'", 'c: "\'"', 'c: "x"', "c: x", "- '\"'", "c: |", "c: >-"];
+  for (const f of fakes)
+    for (const cl of closers) {
+      for (const lead of [`# ${f}`, `a: x # ${f}`, `x # ${f}`, `a: "p" # ${f}`, `a: [x] # ${f}`]) {
+        docs.add(`${lead}\nb: ${TAG}\n${cl}\n`);
+        docs.add(`cfg: |\n  ${lead}\n  a: 1\nb: ${TAG}\n${cl}\n`);
+        docs.add(`cfg: |\n  ${lead}\nb: ${PROBE}\n${cl}\n`);
+        docs.add(`cfg: >\n  ${lead}\n  a: 1\nb: ${TAG}\n${cl}\n`);
+        docs.add(`k:\n  cfg: |-\n    ${lead}\n  b: ${TAG}\n  ${cl}\n`);
+      }
+      docs.add(`a: "${f}"\nb: ${TAG}\n${cl}\n`);
+      docs.add(`a: '${f.replaceAll("'", "''")}'\nb: ${TAG}\n${cl}\n`);
+      docs.add(`a: x ${f}\nb: ${TAG}\n${cl}\n`);
+      docs.add(`a: [x ${f}, ${TAG}]\n${cl}\n`);
+      docs.add(`a: |\n  ${f}\n  b: ${TAG}\n${cl}\n`);
+    }
+}
+
+// (I) A flow collection as a block key, then a block scalar holder or a value that opens a quote.
+{
+  const keys = ["[a, b]", "{a: 1, b: 2}", "[[a], b]", '["q", b]', "[*e, b]", "[a,\n b]", "&e [a, b]", "!t {a, b}", "[a, [b, c], d]", "{a, b}", "[a]", "[]", "{}"];
+  const vals = ["|", "|2", ">", "|-", '"x', "'x", "[a,", "x"];
+  for (const k of keys)
+    for (const v of vals) {
+      const body = v.startsWith('"') || v.startsWith("'") || v.startsWith("[") || v === "x" ? ["  y"] : ['  "x', "  'y"];
+      wrapAll([`${k}: ${v}`, ...body, `foo: ${TAG}`]);
+      docs.add(`? ${k}\n: ${v}\n${body.join("\n")}\nfoo: ${TAG}\n`);
+      docs.add(`${k}: ${v}\n${body.join("\n")}\nfoo: ${TAG}\n`);
+      docs.add(`- ${k}: ${v}\n${body.map((b) => `  ${b}`).join("\n")}\n- ${TAG}\n`);
+    }
+}
+
 // (F) Every three lines from a pool of lines that change the state, then a line with a tag. The pool
 // holds a key with each kind of value start, a header, a blank line, a comment and a continuation.
 {
