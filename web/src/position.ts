@@ -101,10 +101,12 @@ const BREAKS = /\r(?!\n)|[\u0085\u{2028}\u{2029}]/gu;
 function tags(original: string): { index: number; tag: string; name: string }[] {
   const text = original.replace(BREAKS, "\n");
   let masked = "";
-  for (const line of text.split("\n")) {
-    const end = commentStart(line);
+  const lines = text.split("\n");
+  const { starts, props } = commentStarts(lines);
+  lines.forEach((line, n) => {
+    const end = starts[n]!;
     masked += `${line.slice(0, end)}${" ".repeat(line.length - end)}\n`;
-  }
+  });
   const found: { index: number; tag: string; name: string }[] = [];
   // A plain scalar's words: no blank, flow indicator, or colon before a blank; blanks between words.
   const word = String.raw`(?:[^\s,[\]{}:]|:(?=[^\s,[\]{}]))+`;
@@ -114,6 +116,9 @@ function tags(original: string): { index: number; tag: string; name: string }[] 
   const header = String.raw`([|>](?:[-+][1-9]?|[1-9][-+]?)?)(?=[ \t]*(?:#[^\n]*)?\r?\n)`;
   const key = /[ \t]*:(?:\s|$)/y;
   for (const m of masked.matchAll(new RegExp(String.raw`!bwref\s+(?:"((?:[^"\\]|\\[^])*)"|'((?:[^'\n]|'')*)'|${header}|(${word}(?:[ \t]+${word})*))`, "g"))) {
+    // A tag counts only where the scan read it as a node's property: never in a plain, quoted or
+    // block scalar's text.
+    if (!props.has(m.index)) continue;
     let end = m.index + m[0].length;
     key.lastIndex = end;
     if (key.test(masked)) continue;
@@ -261,33 +266,254 @@ function decoded(body: string): string | undefined {
   return out;
 }
 
-// Where a line's comment starts: a # at its start or after a blank, outside quotes; the line's
-// length if it has none. A quote opens a scalar only where one starts, so the apostrophes in
-// `can't` and `dogs 'n cats` open none; '' inside a single-quoted scalar is an apostrophe.
-function commentStart(line: string): number {
-  let quote: string | undefined;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i]!;
-    if (quote !== undefined) {
-      if (c === "'" && quote === "'" && line[i + 1] === "'") i++;
-      else if (c === quote) quote = undefined;
-      else if (c === "\\" && quote === '"') i++;
-    } else if ((c === '"' || c === "'") && startsScalar(line, i)) quote = c;
-    else if (c === "#" && (i === 0 || line[i - 1] === " " || line[i - 1] === "\t")) return i;
+// Where each line's comment starts: a # at a place a comment can start, or the line's length if
+// the line has none. What a line is depends on the lines before it, so the lines are read in order
+// with the state in `Carry`. It is a reading of YAML's node structure, enough to tell where a
+// scalar starts and ends, and no more: it does not check that the document is valid.
+interface Carry {
+  // Columns of the open block entries: a key, or the indicator of a "- ", "? " or ": " entry.
+  stack: number[];
+  // Depth of the flow collections open ([ or {), across lines.
+  flow: number;
+  // A node starts at the next token (after an indicator, a property, a flow indicator or a line
+  // start); false inside a scalar or after one.
+  ns: boolean;
+  // A scalar that goes on in the next line: an open quote, or a plain scalar that a more indented
+  // line can continue (in block context; in flow context `ns` alone says it).
+  open: "" | '"' | "'" | "plain";
+  // The column the next line must exceed to continue the open plain scalar.
+  holder: number;
+  // An open block scalar: its content is more indented than the holder (YAML 1.2 8.1).
+  block: { holder: number; digit: number; indent: number } | undefined;
+}
+const freshCarry = (): Carry => ({ stack: [], flow: 0, ns: true, open: "", holder: -1, block: undefined });
+const isWs = (c: string | undefined) => c === " " || c === "\t" || c === "\r";
+const FLOW = ",[]{}";
+// A block scalar header after its indicator. go-yaml reads the indicators only directly after `|` or
+// `>`: a chomping sign and then a digit 1-9, or the digit and then the sign (a digit 0 is an error),
+// then blanks and an optional comment (yaml_parser_scan_block_scalar, scannerc.go lines 2204-2274,
+// go.yaml.in/yaml/v3 v3.0.5). Group 1 holds the indicators, so a digit in the comment is not one.
+const HEADER_REST = /^((?:[-+][1-9]?|[1-9][-+]?)?)[ \t\r]*(?:#.*)?$/;
+
+// The index after the closing quote `q` at or after `from`, or -1 if the line ends first.
+function skipQuoted(line: string, from: number, q: string): number {
+  for (let i = from; i < line.length; i++) {
+    const c = line[i];
+    if (q === '"' && c === "\\") i++;
+    else if (c === q) {
+      if (q === "'" && line[i + 1] === "'") i++;
+      else return i + 1;
+    }
   }
-  return line.length;
+  return -1;
 }
 
-// Whether a scalar starts at `i`: at the line's indentation, after a flow indicator ([ { ,), or
-// after a blank that follows a key's colon or an item's or a complex key's indicator (- ?).
-// Anything else before it is a plain scalar already started.
-function startsScalar(line: string, i: number): boolean {
-  let j = i - 1;
-  while (j >= 0 && (line[j] === " " || line[j] === "\t")) j--;
-  if (j < 0 || "[{,".includes(line[j]!)) return true;
-  if (j === i - 1) return false;
-  if (line[j] === ":") return true;
-  return (line[j] === "-" || line[j] === "?") && (j === 0 || line[j - 1] === " " || line[j - 1] === "\t");
+// The end of the plain scalar that starts at `from`: before a colon that makes it a key, before a
+// flow indicator in flow context, before a # that follows a blank.
+function plainEnd(line: string, from: number, flow: number): number {
+  let i = from;
+  for (; i < line.length; i++) {
+    const c = line[i]!;
+    if (c === ":" && (i + 1 >= line.length || isWs(line[i + 1]) || (flow > 0 && FLOW.includes(line[i + 1]!)))) break;
+    if (flow > 0 && FLOW.includes(c)) break;
+    if (c === "#" && i > from && isWs(line[i - 1])) break;
+  }
+  return i;
+}
+
+function pushEntry(stack: number[], col: number) {
+  while (stack.length > 0 && stack[stack.length - 1]! > col) stack.pop();
+  if (stack.length === 0 || stack[stack.length - 1]! < col) stack.push(col);
+}
+
+// The comment start of every line, and the offsets in the text of the !bwref properties read.
+function commentStarts(lines: readonly string[]): { starts: number[]; props: Set<number> } {
+  const st = freshCarry();
+  const props = new Set<number>();
+  let base = 0;
+  const starts = lines.map((line, n) => {
+    // go-yaml drops a byte order mark at the start of the stream without counting a column (the
+    // reader), and a second one right after it takes a column, like a blank (the scanner, at
+    // index 0). A byte order mark anywhere else is text.
+    const lead = n === 0 && line.startsWith("﻿");
+    const rest = lead ? line.slice(1) : line;
+    const at = scanLine(st, lead && rest.startsWith("﻿") ? ` ${rest.slice(1)}` : rest, base + (lead ? 1 : 0), props);
+    base += line.length + 1;
+    return lead ? at + 1 : at;
+  });
+  return { starts, props };
+}
+
+function scanLine(st: Carry, line: string, base: number, props: Set<number>): number {
+  // YAML indents with U+0020 only, and go-yaml ends an empty line at a line break after those spaces
+  // (yaml_parser_scan_block_scalar_breaks, scannerc.go lines 2393-2410, go.yaml.in/yaml/v3 v3.0.5). A
+  // tab or another Unicode space (U+00A0, say) is text, which `trim` would count as blank.
+  const blank = /^ *\r?$/.test(line);
+  const ind = spaces(line);
+  const marker = MARKER.test(line);
+  // A block scalar's content is no comment, however it looks, and no tag either: a !bwref in it is
+  // part of a string, never in `props`.
+  if (st.block !== undefined) {
+    if (blank) return line.length;
+    const b = st.block;
+    if (!marker && (b.indent < 0 ? ind > b.holder : ind >= b.indent)) {
+      if (b.indent < 0) b.indent = ind;
+      return line.length;
+    }
+    st.block = undefined;
+    st.ns = true;
+  }
+  let j = 0;
+  let hold = st.stack.length > 0 ? st.stack[st.stack.length - 1]! : -1;
+  let lastPlain = false;
+  let lastClosed = false;
+  let fresh = false;
+  if (marker && st.open !== '"' && st.open !== "'") {
+    Object.assign(st, freshCarry());
+    j = 3;
+  } else if (st.open === '"' || st.open === "'") {
+    const e = skipQuoted(line, 0, st.open);
+    if (e < 0) return line.length;
+    st.open = "";
+    st.ns = false;
+    lastClosed = true;
+    j = e;
+  } else if (st.open === "plain") {
+    if (blank) return line.length;
+    st.open = "";
+    if (ind > st.holder && !/^[ \t]*#/.test(line)) {
+      st.ns = false;
+      lastPlain = true;
+      hold = st.holder;
+      j = ind;
+    } else {
+      st.ns = true;
+      fresh = true;
+    }
+  } else if (st.flow === 0) {
+    st.ns = true;
+    fresh = true;
+  }
+  if (fresh && st.flow === 0) {
+    while (st.stack.length > 0 && st.stack[st.stack.length - 1]! > ind) st.stack.pop();
+    hold = st.stack.length > 0 ? st.stack[st.stack.length - 1]! : -1;
+  }
+  // The column where the current node starts, with its properties: the column of a key.
+  let nodeStart = -1;
+  while (j < line.length) {
+    const c = line[j]!;
+    const next = line[j + 1];
+    if (isWs(c)) {
+      j++;
+      continue;
+    }
+    // go-yaml reads a # as a comment where a token starts, also right after a flow indicator.
+    if (c === "#" && (j === 0 || isWs(line[j - 1]) || st.ns)) return j;
+    if (st.ns) {
+      if (c === '"' || c === "'") {
+        if (nodeStart < 0) nodeStart = j;
+        const e = skipQuoted(line, j + 1, c);
+        if (e < 0) {
+          st.open = c;
+          return line.length;
+        }
+        j = e;
+        st.ns = false;
+        lastPlain = false;
+        lastClosed = true;
+      } else if (c === "[" || c === "{") {
+        if (nodeStart < 0) nodeStart = j;
+        st.flow++;
+        lastPlain = false;
+        j++;
+      } else if (st.flow > 0 && c === ",") {
+        // An empty node (after a property or an indicator) ends here.
+        nodeStart = -1;
+        lastPlain = false;
+        j++;
+      } else if (st.flow > 0 && (c === "]" || c === "}")) {
+        st.flow--;
+        st.ns = false;
+        lastPlain = false;
+        lastClosed = true;
+        j++;
+      } else if (c === "!" || c === "&" || c === "*") {
+        if (nodeStart < 0) nodeStart = j;
+        // go-yaml reads a tag up to a blank (a verbatim tag, !<...>, up to its >), also in flow
+        // context. It reads an anchor or an alias name with is_alpha only: 0-9, A-Z, a-z, _ and -
+        // (yaml_parser_scan_anchor, scannerc.go line 1912; is_alpha, yamlprivateh.go line 48,
+        // go.yaml.in/yaml/v3 v3.0.5). So `*k:"x` ends the alias at the colon.
+        let e = j + 1;
+        if (c === "!" && next === "<" && line.indexOf(">", j) >= 0) e = line.indexOf(">", j) + 1;
+        else if (c === "!") while (e < line.length && !isWs(line[e])) e++;
+        else while (e < line.length && /[0-9A-Za-z_-]/.test(line[e]!)) e++;
+        if (line.slice(j, e) === "!bwref") props.add(base + j);
+        j = e;
+        lastPlain = false;
+        if (c === "*") {
+          st.ns = false;
+          lastClosed = true;
+        }
+      } else if (((c === "?" || c === ":") && st.flow > 0) || ((c === "-" || c === "?" || c === ":") && (next === undefined || isWs(next)))) {
+        if (st.flow === 0) {
+          pushEntry(st.stack, j);
+          hold = j;
+        }
+        nodeStart = -1;
+        lastPlain = false;
+        j++;
+      } else if ((c === "|" || c === ">") && st.flow === 0 && HEADER_REST.test(line.slice(j + 1))) {
+        const rest = line.slice(j + 1);
+        const digit = /[1-9]/.exec((HEADER_REST.exec(rest) as RegExpExecArray)[1]!);
+        st.block = { holder: hold, digit: digit === null ? 0 : Number(digit[0]), indent: -1 };
+        if (st.block.digit > 0) st.block.indent = hold >= 0 ? hold + st.block.digit : st.block.digit;
+        const hash = rest.indexOf("#");
+        return hash < 0 ? line.length : j + 1 + hash;
+      } else {
+        if (nodeStart < 0) nodeStart = j;
+        j = Math.max(plainEnd(line, j, st.flow), j + 1);
+        st.ns = false;
+        lastPlain = true;
+        lastClosed = false;
+      }
+      continue;
+    }
+    if (c === ":" && (next === undefined || isWs(next) || (st.flow > 0 && (FLOW.includes(next) || lastClosed)))) {
+      if (st.flow === 0 && nodeStart >= 0) {
+        pushEntry(st.stack, nodeStart);
+        hold = nodeStart;
+      }
+      st.ns = true;
+      nodeStart = -1;
+      lastPlain = false;
+      lastClosed = false;
+      j++;
+    } else if (st.flow > 0 && c === ",") {
+      st.ns = true;
+      nodeStart = -1;
+      lastPlain = false;
+      lastClosed = false;
+      j++;
+    } else if (st.flow > 0 && (c === "]" || c === "}")) {
+      st.flow--;
+      lastPlain = false;
+      lastClosed = true;
+      j++;
+    } else if (st.flow > 0 && (c === "[" || c === "{")) {
+      st.flow++;
+      st.ns = true;
+      j++;
+    } else {
+      j = Math.max(plainEnd(line, j, st.flow), j + 1);
+      lastPlain = true;
+      lastClosed = false;
+    }
+  }
+  if (st.flow === 0 && st.ns === false && lastPlain) {
+    st.open = "plain";
+    st.holder = hold;
+  }
+  return line.length;
 }
 
 // The tags of the text outside the declared embedded documents, and those documents. A declared
@@ -310,8 +536,12 @@ export function spotOfReference(text: string, name: string, embedded: readonly E
   if (t !== undefined) return { start: t.index, end: t.index + t.tag.length };
   const e = held.find((e) => tags(e.text).some((t) => t.name === name));
   if (e === undefined) return undefined;
-  const shown = e.literal ? tags(text).find((t) => t.name === name && t.index >= e.spot.start && t.index < e.spot.end) : undefined;
-  return shown === undefined ? e.spot : { start: shown.index, end: shown.index + shown.tag.length };
+  // The block's own lines, scanned as the document they hold: the header line is blanked (same
+  // length), so the lines keep their offsets and are read as nodes, comments included.
+  const slice = text.slice(e.spot.start, e.spot.end);
+  const eol = Math.max(slice.indexOf("\n"), 0);
+  const shown = e.literal ? tags(" ".repeat(eol) + slice.slice(eol)).find((t) => t.name === name) : undefined;
+  return shown === undefined ? e.spot : { start: e.spot.start + shown.index, end: e.spot.start + shown.index + shown.tag.length };
 }
 
 // The n-th line (from 0) of the marks field.

@@ -408,6 +408,10 @@ bin/bronzeward serve -config examples/bronzeward.yaml
 description = "Install web/'s locked dependencies into web/node_modules (gitignored) when the lockfile is newer"
 run = "[ web/node_modules/.package-lock.json -nt web/package-lock.json ] || npm --prefix web ci"
 
+[tasks."web:position-cases"]
+description = "Write web/src/position-cases.json: the documents of web/src/position.test.ts and the references the go-yaml oracle (experiments/scanner-cross-line) lists in each; needs go"
+run = "node scripts/dev/position-cases.mjs"
+
 [tasks.web]
 description = "Generate the API types from api/openapi.yaml, then type-check, unit-test and build web/ into web/dist"
 depends = ["web:install"]
