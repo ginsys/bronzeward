@@ -417,7 +417,12 @@ function scanLine(st: Carry, line: string, base: number, props: Set<number>): nu
     }
     // go-yaml reads a # as a comment where a token starts, also right after a flow indicator.
     // That is after any token but a plain scalar: a closing quote, bracket or alias, say.
-    if (c === "#" && (j === 0 || isWs(line[j - 1]) || st.ns || !lastPlain)) return j;
+    if (c === "#" && (j === 0 || isWs(line[j - 1]) || st.ns || !lastPlain)) {
+      // A comment ends the token before it, so in flow context a `:` that starts the next line is
+      // the value indicator, also after a plain key.
+      if (st.flow > 0) st.closed = true;
+      return j;
+    }
     if (st.ns) {
       if (c === '"' || c === "'") {
         if (nodeStart < 0) nodeStart = j;

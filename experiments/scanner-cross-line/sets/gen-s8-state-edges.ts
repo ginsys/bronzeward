@@ -11,7 +11,10 @@
 import { writeFileSync } from "node:fs";
 
 const docs = new Set<string>();
+// TAG is the tag a document ends with. PROBE is the tag at the place that a family probes, or in
+// block scalar text. The two names differ, so a loss at the probe is not hidden by the other tag.
 const TAG = "!bwref x/foo";
+const PROBE = "!bwref x/bar";
 const BOM = "﻿";
 
 // Wraps lines of a block mapping in depth 1-3 of `k:` parents, or in a sequence item.
@@ -35,7 +38,7 @@ const wrapAll = (lines: string[]) => {
   const gaps = [[], [""], ["# c"], ["  # c"], ["", "# c"], ["    "], ["", ""], ["# c", ""]];
   const headers = ["|", "|2", ">", ">1", "|-", "|2-", ">+", "|1 # h", "|-2"];
   const indents = ["  ", "    ", "      "];
-  const bodies = [["text"], ["text", "more"], [""], ["# not a comment"], [TAG]];
+  const bodies = [["text"], ["text", "more"], [""], ["# not a comment"], [PROBE]];
   for (const g1 of gaps)
     for (const h of headers)
       for (const ind of indents)
@@ -72,7 +75,7 @@ const wrapAll = (lines: string[]) => {
 // (C) A `:` on the line after a quoted, collection, alias or explicit key.
 {
   const keys = ['"k"', "'k'", "[k]", "{k: v}", "*e", "? k", '? "k"', "? [k]", "&e k", '!t "k"'];
-  const colons = [":!bwref x/foo", ": !bwref x/foo", " :!bwref x/foo", ":", ": x", ":[!bwref x/foo]", ':"x # y"'];
+  const colons = [`:${PROBE}`, `: ${PROBE}`, ` :${PROBE}`, ":", ": x", `:[${PROBE}]`, ':"x # y"'];
   for (const k of keys)
     for (const c of colons) {
       for (const tail of ["}", ", r: !bwref x/foo}"]) {
@@ -85,6 +88,23 @@ const wrapAll = (lines: string[]) => {
       wrapAll([`${k}`, `${c}`, `b: ${TAG}`]);
       wrapAll([`&e ${k}`, `  ${c}`, `b: ${TAG}`]);
     }
+}
+
+// (C2) The siblings of (C): a plain key, one or two lines long, then a gap of blank and comment
+// lines (a comment may follow a space or a tab), then a `:` line, in flow sequence and flow map.
+{
+  const keys = ["k", "k\n  more", "k # c", "k\t# c", "x, k", "? k", "? k\n  more", "&e k", "!t k"];
+  const gaps = [[], [""], ["", ""], ["# c"], ["  # c"], ["\t# c"], [" \t# c"], ["", "# c"], ["# c", ""], ["# c", "# d"]];
+  const colons = [`:${PROBE}`, `: ${PROBE}`, ` :${PROBE}`, `:\t${PROBE}`, ":", ": x", `:[${PROBE}]`, ':"x # y"'];
+  for (const k of keys)
+    for (const g of gaps)
+      for (const c of colons) {
+        const mid = [...g, `  ${c}`].join("\n");
+        docs.add(`a: [${k}\n${mid}, ${TAG}]\n`);
+        docs.add(`a: {${k}\n${mid}, r: ${TAG}}\n`);
+        docs.add(`a: {${k}\n${mid}}\nb: ${TAG}\n`);
+        docs.add(`a: [[${k}\n${mid}], ${TAG}]\n`);
+      }
 }
 
 // (D) A comment right after a token, with a quote or a comma in the comment.
@@ -105,7 +125,7 @@ const wrapAll = (lines: string[]) => {
 
 // (E) A byte order mark at the stream start, and at the start of a block scalar's line.
 {
-  const bodies = [`a: ${TAG}\n`, `a: [${TAG}]\n`, `"a": ${TAG}\n`, `${BOM}a: ${TAG}\n`, `a: |\n  ${TAG}\nb: ${TAG}\n`];
+  const bodies = [`a: ${TAG}\n`, `a: [${TAG}]\n`, `"a": ${TAG}\n`, `${BOM}a: ${TAG}\n`, `a: |\n  ${PROBE}\nb: ${TAG}\n`];
   for (const b of bodies) {
     docs.add(BOM + b);
     docs.add(`${BOM}${BOM}${b}`);
@@ -114,7 +134,7 @@ const wrapAll = (lines: string[]) => {
     docs.add(`# c\n${BOM}${b}`);
   }
   for (const h of ["|", ">", "|2"])
-    for (const line of [`${BOM}[${TAG}]`, `${BOM}${TAG}`, `${BOM}a: ${TAG}`, `  ${BOM}a: ${TAG}`]) {
+    for (const line of [`${BOM}[${PROBE}]`, `${BOM}${PROBE}`, `${BOM}a: ${PROBE}`, `  ${BOM}a: ${PROBE}`]) {
       docs.add(`cfg: ${h}\n  ${line}\nb: ${TAG}\n`);
       docs.add(`cfg: ${h}\n\n  ${line}\nb: ${TAG}\n`);
     }
@@ -124,7 +144,7 @@ const wrapAll = (lines: string[]) => {
 // holds a key with each kind of value start, a header, a blank line, a comment and a continuation.
 {
   const pool = [
-    "a:", "a: |", "a: >2", "- a:", "&e:", "? &e", "? k", ":", ": x", "  :!bwref x/foo", '  "k"', '"k":', "a: {? \"k\"",
+    "a:", "a: |", "a: >2", "- a:", "&e:", "? &e", "? k", ":", ": x", `  :${PROBE}`, '  "k"', '"k":', "a: {? \"k\"",
     "a: [[]# , \"", "a: [", "a: {", "  x]", "  }", ", y]", "", "  ", "# c", "  # c", "    t", "  t", "   \"x", "- \"x", "  'x",
     "- &e: |", "  - b: 1", "--- x", "...", "k: 'a", "  b' # c",
   ];
