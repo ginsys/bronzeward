@@ -114,6 +114,11 @@ describe("the references of a declared embedded document", () => {
     const start = text.indexOf("!bwref");
     expect(spotOfReference(text, "x/blank", at("doc[0]/cfg"))).toEqual({ start, end: start + "!bwref x/blank".length });
   });
+  test("a lone carriage return breaks a line before the indentation is cut", () => {
+    const text = "cfg: |\n  a: 1\r  ---\r  [!bwref x/foo]\n  ---\n  b: !bwref x/foo\n";
+    const start = text.indexOf("!bwref");
+    expect(spotOfReference(text, "x/foo", at("doc[0]/cfg"))).toEqual({ start, end: start + "!bwref x/foo".length });
+  });
   test("a tag whose name is on the next line is placed across the removed indentation", () => {
     const text = "cfg: |\n  a: !bwref\n   x/next\n";
     const start = text.indexOf("!bwref");
