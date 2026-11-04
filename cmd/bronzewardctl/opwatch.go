@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -181,7 +183,7 @@ func (e *env) operationWatch(args []string) (err error) {
 		return interrupted{ef("stopped watching operation %s", id)}
 	}
 	if res.o == nil {
-		return res.err
+		return unreadState(id, res.err)
 	}
 	// The operation's end decides the outcome and the exit; a failed read of the events after it is
 	// reported beside, as publish and import do.
@@ -200,6 +202,11 @@ func (e *env) operationWatch(args []string) (err error) {
 	if !client.Terminal(o.State) {
 		if ended.Load() == endInterrupt {
 			out.finish(sf("Stopped watching at your request. Operation %s is still %s, as the server last read it; it goes on.", id, o.State), follow)
+			if e.output != "table" { // the resource the stop line names, on standard output
+				if err := e.emit(res.read.Body, nil); err != nil {
+					return err
+				}
+			}
 			return interrupted{ef("stopped watching operation %s, which is still %s", id, o.State)}
 		}
 		lines = append([]string{sf("Still %s after --timeout %s.", o.State, timeout)}, lines...)
@@ -218,6 +225,25 @@ func (e *env) operationWatch(args []string) (err error) {
 		return operationFailed{ef("operation %s ended %s", id, o.State)}
 	}
 	return nil
+}
+
+// unreadState is the error of a watch that ended with no operation read. A refusal the server named
+// (a problem document, a blocked sign-in) and a trust failure stand as they are: exit 1 says that
+// nothing was decided. Any other failure leaves the operation's state unknown, as it may be running
+// or ended: exit 3 (operator-experience.md section 4), with the command that reads it.
+func unreadState(id string, err error) error {
+	var problem *client.Problem
+	var blocked *client.Blocked
+	var unknown *client.Unknown
+	var settled outcomeUnknown
+	var verify *tls.CertificateVerificationError
+	var authority x509.UnknownAuthorityError
+	if errors.As(err, &problem) || errors.As(err, &blocked) || errors.As(err, &unknown) || errors.As(err, &settled) ||
+		errors.As(err, &verify) || errors.As(err, &authority) {
+		return err
+	}
+	return outcomeUnknown{ef("%w; the state of operation %s was not read, so it may still be running or may have ended. Read it before deciding: bronzewardctl operation show %s",
+		err, id, client.ShellWord(id))}
 }
 
 // lastEvent is an operation's last event as the JSON pages carry it, with the server's time.

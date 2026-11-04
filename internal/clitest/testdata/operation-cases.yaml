@@ -70,7 +70,7 @@
   exchange:
     - "GET /api/v1/operations/op_.../events, Accept: text/event-stream, no Last-Event-ID, on the expiring token"
     - "the server ends the stream when the token expires"
-    - "GET /api/v1/operations/op_..., 401; POST <provider>/token, grant_type refresh_token; the read again, 200"
+    - "GET /api/v1/operations/op_..., 401 (sent by the test's proxy, which is what the server's verifier answers once the token is more than its 60 s skew past exp; a real server accepts the token inside the skew); POST <provider>/token, grant_type refresh_token; the read again, 200"
     - "GET /api/v1/operations/op_.../events, Accept: text/event-stream, Last-Event-ID, on the renewed token"
   fault: "none; the stand-in accepts the held apply once the stream is opened with Last-Event-ID"
   expect:

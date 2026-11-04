@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"net"
@@ -74,22 +75,98 @@ func (e *watchEnv) watch(op string, extra ...string) result {
 	return e.ctl(append([]string{"--context", "human", "operation", "watch", op}, extra...)...)
 }
 
-// served are the IDs and types of op's events, read from its JSON event pages as h-all.
-func (e *watchEnv) served(t *testing.T, op string) (ids, types []string) {
+// served are the IDs, types and data of op's events, read from its JSON event pages as h-all.
+func (e *watchEnv) served(t *testing.T, op string) (ids, types []string, data []map[string]any) {
 	t.Helper()
 	q, _ := http.NewRequest(http.MethodGet, e.f.base+"/api/v1/operations/"+op+"/events?limit=500", nil)
 	q.Header.Set("Authorization", "Bearer "+e.f.mint("h-all", ""))
 	var page struct {
-		Items []struct{ ID, Type string }
-		Next  string
+		Items []struct {
+			ID, Type string
+			Data     map[string]any
+		}
+		Next string
 	}
-	if err := json.Unmarshal(e.f.do(q, http.StatusOK), &page); err != nil || page.Next != "" {
+	dec := json.NewDecoder(bytes.NewReader(e.f.do(q, http.StatusOK)))
+	dec.UseNumber() // a number keeps its digits, as the CLI prints them
+	if err := dec.Decode(&page); err != nil || page.Next != "" {
 		t.Fatalf("the events of %s: %v, next %q", op, err, page.Next)
 	}
 	for _, ev := range page.Items {
-		ids, types = append(ids, ev.ID), append(types, ev.Type)
+		ids, types, data = append(ids, ev.ID), append(types, ev.Type), append(data, ev.Data)
 	}
-	return ids, types
+	return ids, types, data
+}
+
+// printedMembers are, by event type, the members of the event's data that operation watch prints in
+// its line (eventText in cmd/bronzewardctl); a type not listed prints its data as a whole.
+var printedMembers = map[string][]string{
+	"commitment":           {"plan", "approval", "observation", "controller", "generation"},
+	"attempt":              {"number", "route", "transportDeadline", "controller", "generation"},
+	"refusal":              {"plan", "comparison", "cause", "observation"},
+	"use-time-check":       {"result", "plan", "controller"},
+	"response":             {"number", "class", "code"},
+	"accounting":           {"attempt", "basis", "class", "decidedBy", "role"},
+	"classification":       {"outcome", "observation", "controller", "generation"},
+	"ownership-transition": {"from", "to", "generation", "reason", "requestedBy"},
+	"operation-state":      {"from", "to", "comparison", "cause", "decidedBy"},
+	"adoption":             {"plan", "approval", "observation", "controller"},
+	"applied-change":       {"from", "to", "source"},
+}
+
+// payloadsDiffer says how the last display of operation watch's output differs from the events the
+// server holds: the line of each event must carry the printed members of that event's data, so a line
+// that reuses another event's payload fails. It is "" when the lines carry the data.
+func payloadsDiffer(out string, data []map[string]any) string {
+	parts := strings.Split(out, clearedLine)
+	lines := eventText.FindAllStringSubmatch(parts[len(parts)-1], -1)
+	if len(lines) != len(data) {
+		return fmt.Sprintf("%d event lines for %d events", len(lines), len(data))
+	}
+	for i, d := range data {
+		typ, text := lines[i][1], lines[i][2]
+		for _, k := range printedMembers[typ] {
+			if v, ok := d[k]; ok && v != nil && !strings.Contains(text, fmt.Sprint(v)) {
+				return fmt.Sprintf("event %d (%s): member %s = %v is not in its line %q", i+1, typ, k, v, text)
+			}
+		}
+	}
+	return ""
+}
+
+// eventText is the type and the text of an event line of operation watch.
+var eventText = regexp.MustCompile(`(?m)^(?:received|server) +\d\d:\d\d:\d\d  (\S+) *(.*)$`)
+
+// TestPayloadsDifferFindsAReusedPayload is the check's positive control: lines with the right types
+// but the first operation-state payload twice, or a missing line, differ from the events served.
+func TestPayloadsDifferFindsAReusedPayload(t *testing.T) {
+	data := []map[string]any{
+		{"from": "committed", "to": "sending"},
+		{"from": "sending", "to": "completed", "cause": json.Number("7")},
+	}
+	line := func(typ, text string) string { return "received 10:00:00  " + typ + "  " + text + "\n" }
+	good := line("operation-state", "from committed, to sending") + line("operation-state", "from sending, to completed, cause 7")
+	reused := line("operation-state", "from committed, to sending") + line("operation-state", "from committed, to sending")
+	if d := payloadsDiffer(good, data); d != "" {
+		t.Errorf("the lines that carry the data differ: %s", d)
+	}
+	if payloadsDiffer(reused, data) == "" || payloadsDiffer(line("operation-state", "from committed, to sending"), data) == "" {
+		t.Error("a reused payload or a missing line is not found")
+	}
+	if payloadsDiffer("a\n"+clearedLine+"\n"+good, data) != "" {
+		t.Error("only the last display is compared")
+	}
+}
+
+// secretsIn fails the test if the stand-in's secrets are in the output or the arguments of a
+// command run outside e.ctl, as e.ctl itself checks every command it runs.
+func (e *watchEnv) secretsIn(t *testing.T, r result, args []string) {
+	t.Helper()
+	for _, where := range []string{strings.Join(args, " "), r.out, r.err} {
+		if l := e.st.leaks(where); len(l) > 0 {
+			t.Errorf("bronzewardctl %v: output or argv holds the stand-in's %v", args, l)
+		}
+	}
 }
 
 // operationOf is the operation plan is committed to, once it is.
@@ -253,12 +330,15 @@ var operationCases = map[string]func(*testing.T, *watchEnv){
 		r := e.watch(e.adoption)
 		e.f.want(r, 0, "Completed at ", " (server): adopted; the adoption of plan "+e.adopted+
 			" records Applied from the node's own bytes. Nothing was sent to the machine.\n")
-		_, types := e.served(t, e.adoption)
+		_, types, data := e.served(t, e.adoption)
 		got := shown(r.out)
 		// An adoption records two events: adoption and applied-change. Every event line is marked
 		// "received" with this client's time; only the completion line shows the server's.
 		if len(types) < 2 || len(got) != 1 || !slices.Equal(got[0], types) || strings.Count(r.out, "received ") != len(types) {
 			t.Errorf("shown %q; want each of the %d events %q once, in order, marked received:\n%s", got, len(types), types, r.out)
+		}
+		if d := payloadsDiffer(r.out, data); d != "" {
+			t.Errorf("the lines do not carry the events' data: %s\n%s", d, r.out)
 		}
 		// The stream request, one page per event, then one page per event again for the last event's
 		// server time (readLast).
@@ -292,11 +372,11 @@ var operationCases = map[string]func(*testing.T, *watchEnv){
 		}, nil)
 		r := e.watch(op)
 		e.f.want(r, 0, "Completed at ", " (server): applied "+e.rel+", confirmed by observation obs_")
-		_, types := e.served(t, op)
+		_, types, data := e.served(t, op)
 		mu.Lock()
 		defer mu.Unlock()
-		if got := shown(r.out); first == "" || len(resumed) == 0 || resumed[0] != first || len(got) != 1 || !slices.Equal(got[0], types) {
-			t.Errorf("cut after %q, reopened with Last-Event-ID %q; shown %q, want %q once each", first, resumed, got, types)
+		if got := shown(r.out); first == "" || len(resumed) == 0 || resumed[0] != first || len(got) != 1 || !slices.Equal(got[0], types) || payloadsDiffer(r.out, data) != "" {
+			t.Errorf("cut after %q, reopened with Last-Event-ID %q; shown %q, want %q once each with their data (%s)", first, resumed, got, types, payloadsDiffer(r.out, data))
 		}
 	},
 
@@ -330,20 +410,38 @@ var operationCases = map[string]func(*testing.T, *watchEnv){
 		type opened struct{ bearer, last string }
 		var mu sync.Mutex
 		var streams []opened
-		e.in.set(func(_ http.ResponseWriter, r *http.Request) bool {
+		var refused int
+		e.in.set(func(w http.ResponseWriter, r *http.Request) bool {
+			bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 			if r.Header.Get("Accept") == "text/event-stream" {
 				mu.Lock()
-				streams = append(streams, opened{strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), r.Header.Get("Last-Event-ID")})
+				streams = append(streams, opened{bearer, r.Header.Get("Last-Event-ID")})
 				mu.Unlock()
 				if r.Header.Get("Last-Event-ID") != "" {
 					release()
+				}
+			}
+			// The server's verifier accepts a token for 60 s after it expired (internal/auth skew), so
+			// an operation read right after the stream ended would be answered 200. The answer the
+			// record names, for a token past that time, is sent here; the read is not forwarded.
+			// The read before the stream is the watch's first and is answered as usual.
+			if bearer == short && r.Method == http.MethodGet && r.URL.Path == "/api/v1/operations/"+op {
+				mu.Lock()
+				after := len(streams) > 0
+				if after {
+					refused++
+				}
+				mu.Unlock()
+				if after {
+					problem(w, http.StatusUnauthorized, "unauthenticated", "")
+					return true
 				}
 			}
 			return false
 		}, nil)
 		r := e.watch(op)
 		e.f.want(r, 0, "Completed at ", " (server): applied "+e.rel)
-		_, types := e.served(t, op)
+		_, types, data := e.served(t, op)
 		mu.Lock()
 		defer mu.Unlock()
 		switch got := shown(r.out); {
@@ -355,12 +453,16 @@ var operationCases = map[string]func(*testing.T, *watchEnv){
 				t.Errorf("stream %d: the expiring token %v, the renewed one %v, Last-Event-ID %q", i, s.bearer == short, s.bearer == renewed, s.last)
 			}
 			t.Errorf("%d streams; want the first on the expiring token without Last-Event-ID, the next on the renewed one with it", len(streams))
+		case refused != 1:
+			t.Errorf("the operation read on the expiring token was answered 401 %d times; want once, then the read again on the renewed token", refused)
 		case f.idp.calls.Load() != calls+1:
 			t.Errorf("%d refresh redemptions; want 1", f.idp.calls.Load()-calls)
 		case f.stored(f.humanFile()).RefreshToken != "BWSYNTH-rt-7":
 			t.Error("the renewed sign-in was not stored")
 		case len(got) != 1 || !slices.Equal(got[0], types):
 			t.Errorf("shown %q; want %q once each", got, types)
+		case payloadsDiffer(r.out, data) != "":
+			t.Errorf("the lines do not carry the events' data: %s", payloadsDiffer(r.out, data))
 		}
 	},
 
@@ -424,10 +526,10 @@ var operationCases = map[string]func(*testing.T, *watchEnv){
 		f.want(r, 4, "operation-state       from committed, to unresolved, cause takeover\n", "Cancelled at ", " (server): resolution.\n"+
 			"Nothing more is sent for this plan. The plan names the command for a new one: bronzewardctl plan show '"+p+"'\n",
 			"operation "+op+" ended cancelled")
-		_, types := e.served(t, op)
-		if got := shown(r.out); len(got) != 1 || !slices.Equal(got[0], types) ||
+		_, types, data := e.served(t, op)
+		if got := shown(r.out); len(got) != 1 || !slices.Equal(got[0], types) || payloadsDiffer(r.out, data) != "" ||
 			strings.Index(r.out, "to unresolved") > strings.Index(r.out, "Cancelled at") {
-			t.Errorf("shown %q; want %q once each, unresolved before the end", got, types)
+			t.Errorf("shown %q; want %q once each with their data (%s), unresolved before the end", got, types, payloadsDiffer(r.out, data))
 		}
 	},
 
@@ -477,14 +579,14 @@ var operationCases = map[string]func(*testing.T, *watchEnv){
 			r := e.watch(op, "--timeout", "20s")
 			e.f.want(r, 5, clearedLine, "restored or entered recovery mode; the operation's events are shown again from the start",
 				"Still sending after --timeout 20s.\n", "Follow it again with: bronzewardctl operation watch '"+op+"'\n")
-			_, types := e.served(t, op)
+			_, types, data := e.served(t, op)
 			mu.Lock()
 			wantResumed := first // the reader sent the stale ID, or none when the operation read showed the new epoch
 			if c.beforeOp {
 				wantResumed = ""
 			}
-			if got := shown(r.out); first == "" || streams.Load() < 2 || resumed != wantResumed || len(got) != 2 || len(got[0]) != 1 || !slices.Equal(got[1], types) {
-				t.Errorf("%s: cut after %q, reopened with Last-Event-ID %q (want %q); shown %q, want one event, a clear, then %q", c.name, first, resumed, wantResumed, got, types)
+			if got := shown(r.out); first == "" || streams.Load() < 2 || resumed != wantResumed || len(got) != 2 || len(got[0]) != 1 || !slices.Equal(got[1], types) || payloadsDiffer(r.out, data) != "" {
+				t.Errorf("%s: cut after %q, reopened with Last-Event-ID %q (want %q); shown %q, want one event, a clear, then %q with their data (%s)", c.name, first, resumed, wantResumed, got, types, payloadsDiffer(r.out, data))
 			}
 			mu.Unlock()
 		}
@@ -571,6 +673,7 @@ var operationCases = map[string]func(*testing.T, *watchEnv){
 		}
 		r.out, r.err = out.String(), errb.String()
 		f.scan(r, args)
+		e.secretsIn(t, r, args) // this run bypasses e.ctl, which checks the stand-in's secrets
 		// The stop line has two designed forms, by whether the watch returned within the grace time
 		// after Ctrl-C ("is still unresolved, as the server last read it") or not ("the state it has
 		// now was not read"), which depends on an event or keep-alive on the quiet stream. The row
