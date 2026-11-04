@@ -399,9 +399,7 @@ func (e *env) operationCmd(args []string) error {
 	var cause *lastEvent
 	findCause := func(c *client.Client, r *client.Response, o *apitypes.OperationBody) error {
 		if e.output == "table" && o.State == "cancelled" {
-			if cause = readLast(c, pos[0], o.State, r.Header.Get("Bronzeward-Epoch")); cause != nil {
-				cause.At = nil
-			}
+			cause = readLast(c, pos[0], o.State, r.Header.Get("Bronzeward-Epoch"))
 		}
 		return nil
 	}
@@ -422,8 +420,7 @@ func (e *env) operationCmd(args []string) error {
 			}
 		}
 		if o.State == "unresolved" || client.Terminal(o.State) {
-			lines, _ := outcome(o, cause)
-			fmt.Fprintln(w, strings.Join(lines, "\n"))
+			fmt.Fprintln(w, strings.Join(outcome(o, cause), "\n"))
 		}
 	})
 }

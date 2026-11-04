@@ -87,8 +87,11 @@ func TestOperationShowOutcome(t *testing.T) {
 
 	// A cancelled operation records neither result nor error: show takes its cause from the event that
 	// records its end, and not the event's time.
+	// The next step names the command that makes a new plan and never sends the reader through plan show,
+	// which for a plan that is still committed points back at the operation. The operation holds the
+	// machine only; the release and the operation of the new plan stay placeholders, unquoted.
 	want := "Cancelled: resolution.\n" +
-		"Nothing more is sent for this plan. The plan names the command for a new one: bronzewardctl plan show 'pln_BWSYNTH'"
+		"Nothing more is sent for this plan. Create a new plan: bronzewardctl plan create --release <release> --machine 'mch_a' --operation <operation>"
 	f.mu.Lock()
 	f.body = fmt.Sprintf(opJSON, "apply-config", "cancelled", "null", "null", "[]")
 	f.pages = []string{evPage(1, "commitment", `{"plan":"pln_BWSYNTH"}`), evPage(3, "operation-state", toState("unresolved", "cancelled", "resolution"))}
@@ -104,11 +107,19 @@ func TestOperationShowOutcome(t *testing.T) {
 	if code, show, _ := runCtl(t, "operation", "show", "op_BWSYNTH"); code != 0 || !strings.Contains(show, want) {
 		t.Errorf("cancelled, created in an earlier epoch: operation show, exit %d, want %q in\n%s", code, want, show)
 	}
+	// An operation whose subject has no machine gets the placeholder for it too.
+	f.mu.Lock()
+	f.body = strings.Replace(f.body, `,"machine":"mch_a"`, "", 1)
+	f.mu.Unlock()
+	noMachine := strings.ReplaceAll(want, "'mch_a'", "<machine>")
+	if code, show, _ := runCtl(t, "operation", "show", "op_BWSYNTH"); code != 0 || !strings.Contains(show, noMachine) || strings.Contains(show, "plan show") {
+		t.Errorf("cancelled, no subject machine: operation show, exit %d, want %q and no plan show in\n%s", code, noMachine, show)
+	}
 	// An event of another epoch than the operation shown is not its event: the placeholder stays.
 	f.mu.Lock()
 	f.pages = []string{strings.ReplaceAll(f.pages[1], "ep_BWSYNTH-2", "ep_BWSYNTH-3")}
 	f.mu.Unlock()
-	placeholder := strings.ReplaceAll(want, "resolution", "no cause in the operation; its machine timeline holds the entry that ended it")
+	placeholder := strings.ReplaceAll(noMachine, "resolution", "no cause in the operation; its machine timeline holds the entry that ended it")
 	if code, show, _ := runCtl(t, "operation", "show", "op_BWSYNTH"); code != 0 || !strings.Contains(show, placeholder) {
 		t.Errorf("cancelled, an event of another epoch: operation show, exit %d, want %q in\n%s", code, placeholder, show)
 	}

@@ -11,16 +11,11 @@ import (
 	"github.com/ginsys/bronzeward/internal/client/apitypes"
 )
 
-// outcome is an operation's outcome lines (T23) and whether it ended well: completed or succeeded.
-// last, the event that records the operation's end when read from the JSON pages, gives the server's time and a
-// cancellation's cause, since a cancelled operation records neither result nor error. Only a
-// completed apply-config with an applied release is reported as applied, and only an adoption as
-// adopted.
-func outcome(o *apitypes.OperationBody, last *lastEvent) ([]string, bool) {
-	stamp := ""
-	if last != nil && last.At != nil {
-		stamp = " at " + when(last.At.Local()) + " (server)"
-	}
+// outcome is an operation's outcome lines (T23). last, the event that records the operation's end when
+// read from the JSON pages, gives a cancellation's cause, since a cancelled operation records neither
+// result nor error. No time is shown. Only a completed apply-config with an applied release is reported
+// as applied, and only an adoption as adopted.
+func outcome(o *apitypes.OperationBody, last *lastEvent) []string {
 	plan, machine := "", ""
 	if o.Subject != nil {
 		plan, machine = or(o.Subject.Plan, ""), or(o.Subject.Machine, "")
@@ -36,14 +31,14 @@ func outcome(o *apitypes.OperationBody, last *lastEvent) ([]string, bool) {
 		_ = remarshal(o.Result, &r)
 		switch {
 		case r.AppliedRelease != "":
-			return []string{sf("Completed%s: applied %s, confirmed by observation %s.", stamp, r.AppliedRelease, or(&r.Observation, "none"))}, true
+			return []string{sf("Completed: applied %s, confirmed by observation %s.", r.AppliedRelease, or(&r.Observation, "none"))}
 		case r.AdoptionRecord != "":
-			return []string{sf("Completed%s: adopted; the adoption of plan %s records Applied from the node's own bytes. Nothing was sent to the machine.",
-				stamp, plain(r.AdoptionRecord))}, true
+			return []string{sf("Completed: adopted; the adoption of plan %s records Applied from the node's own bytes. Nothing was sent to the machine.",
+				plain(r.AdoptionRecord))}
 		}
-		return []string{sf("Completed%s, with no applied release recorded: %s", stamp, compact(o.Result))}, true
+		return []string{sf("Completed, with no applied release recorded: %s", compact(o.Result))}
 	case "succeeded":
-		return []string{sf("Succeeded%s: %s", stamp, compact(o.Result))}, true
+		return []string{sf("Succeeded: %s", compact(o.Result))}
 	case "failed", "rejected", "cancelled":
 		var e struct {
 			Cause    string `json:"cause"`
@@ -79,13 +74,16 @@ func outcome(o *apitypes.OperationBody, last *lastEvent) ([]string, bool) {
 		if e.Attempts != nil {
 			attempts = sf(", after %d attempt%s", *e.Attempts, map[bool]string{false: "s"}[*e.Attempts == 1])
 		}
-		lines := []string{sf("%s%s: %s%s.", state, stamp, cause, attempts)}
-		return append(lines, endNextStep(o.State, o.Id, plan, machine)), false
+		lines := []string{sf("%s: %s%s.", state, cause, attempts)}
+		return append(lines, endNextStep(o.State, o.Id, plan, machine))
 	case "unresolved":
-		return []string{unresolvedGuidance(o.Attempts)}, false
+		return []string{unresolvedGuidance(o.Attempts)}
 	}
-	return []string{sf("Operation %s is %s.", o.Id, o.State)}, false
+	return []string{sf("Operation %s is %s.", o.Id, o.State)}
 }
+
+// unquotedPlaceholders takes the shell quotes createLine adds off the placeholders of a command line.
+var unquotedPlaceholders = strings.NewReplacer("'<release>'", "<release>", "'<machine>'", "<machine>", "'<operation>'", "<operation>")
 
 // endNextStep is the next safe step after an operation that ended without success.
 func endNextStep(state, op, plan, machine string) string {
@@ -95,7 +93,15 @@ func endNextStep(state, op, plan, machine string) string {
 	case state == "rejected":
 		return sf("The node refused the configuration as invalid, so it applied nothing. Review the plan's release before a new plan: bronzewardctl plan show %s", client.ShellWord(plan))
 	case state == "cancelled":
-		return sf("Nothing more is sent for this plan. The plan names the command for a new one: bronzewardctl plan show %s", client.ShellWord(plan))
+		// plan show is no way on: a plan whose operation was cancelled before any attempt stays committed, and
+		// plan show then points back at this operation. The operation holds the machine and neither the release
+		// nor the operation of a new plan, so those two stay placeholders. createLine spells the command, so the
+		// flags cannot drift from it; its quotes are taken off the placeholders only.
+		if machine == "" {
+			machine = "<machine>"
+		}
+		line := unquotedPlaceholders.Replace(createLine("<release>", machine, "<operation>"))
+		return sf("Nothing more is sent for this plan. Create a new plan: %s", line)
 	}
 	return sf("Nothing more is sent for this plan. Read what the machine runs before a new plan: bronzewardctl machine show %s", client.ShellWord(machine))
 }
@@ -153,7 +159,7 @@ type lastEvent struct {
 // an installation restored meanwhile has other events, so the event's time is not the operation's. It
 // is also nil when that read shows another state, or another Bronzeward-Epoch header, than the read
 // the caller read (state, watched). The operation's own epoch member is the one it was created in
-// and does not change in a restore, so it is not the epoch to compare. The outcome and the time
+// and does not change in a restore, so it is not the epoch to compare. The outcome and the cause
 // printed together then belong to one operation.
 func readLast(c *client.Client, id, state, watched string) *lastEvent {
 	items, err := c.List("/operations/" + url.PathEscape(id) + "/events")
