@@ -99,6 +99,14 @@ func newHTTPClient(x *Context, verbose io.Writer, from func(*http.Request) (*url
 // trust is a refused server certificate (§6 item 4).
 type trust struct{ error }
 
+// IsTrust reports whether err, or any error joined or wrapped in it, is a refused server
+// certificate. A caller outside the package uses it to keep a refusal apart from an answer that
+// could not be read.
+func IsTrust(err error) bool {
+	var t *trust
+	return errors.As(err, &t)
+}
+
 // transportError names the host, the presented certificate's subject and issuer and the trust
 // source when verification refused the server (§6 item 4); the request was not sent. Its text, and
 // any other transport error's, is printable.

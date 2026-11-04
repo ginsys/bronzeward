@@ -134,6 +134,22 @@ func payloadsDiffer(out string, data []map[string]any) string {
 	return ""
 }
 
+// replayDiffers says how the output of a watch that showed its events, cleared them and showed them
+// again differs from that: two displays, the second with every event the server holds (their types
+// and payloads) and more than the first. It is "" when the output is that.
+func replayDiffers(out string, types []string, data []map[string]any) string {
+	got := shown(out)
+	switch {
+	case len(got) != 2 || len(got[0]) == 0:
+		return fmt.Sprintf("%d displays; want events, a clear and the events again", len(got))
+	case !slices.Equal(got[1], types):
+		return fmt.Sprintf("the second display shows %q; the server holds %q", got[1], types)
+	case len(got[1]) <= len(got[0]):
+		return fmt.Sprintf("the second display (%d events) has no event the first (%d) lacked", len(got[1]), len(got[0]))
+	}
+	return payloadsDiffer(out, data)
+}
+
 // eventText is the type and the text of an event line of operation watch.
 var eventText = regexp.MustCompile(`(?m)^(?:received|server) +\d\d:\d\d:\d\d  (\S+) *(.*)$`)
 
@@ -155,6 +171,29 @@ func TestPayloadsDifferFindsAReusedPayload(t *testing.T) {
 	}
 	if payloadsDiffer("a\n"+clearedLine+"\n"+good, data) != "" {
 		t.Error("only the last display is compared")
+	}
+}
+
+// TestReplayDiffersFindsAWrongReplay is the check's positive control: a replay that shows an old event
+// twice instead of the new one, or one old payload for another, differs from the events served.
+func TestReplayDiffersFindsAWrongReplay(t *testing.T) {
+	types := []string{"operation-state", "operation-state", "attempt"}
+	data := []map[string]any{{"from": "committed", "to": "sending"}, {"from": "sending", "to": "unresolved"}, {"number": json.Number("1")}}
+	line := func(typ, text string) string { return "received 10:00:00  " + typ + "  " + text + "\n" }
+	first := line("operation-state", "from committed, to sending")
+	second := line("operation-state", "from sending, to unresolved") + line("attempt", "number 1")
+	good := first + clearedLine + "\n" + line("operation-state", "from committed, to sending") + second
+	if d := replayDiffers(good, types, data); d != "" {
+		t.Errorf("the replay differs: %s", d)
+	}
+	redo := first + clearedLine + "\n" + line("operation-state", "from committed, to sending")
+	reused := redo + line("operation-state", "from committed, to sending") + line("attempt", "number 1")
+	retyped := redo + line("operation-state", "from sending, to unresolved") + line("operation-state", "number 1")
+	shorter := first + clearedLine + "\n" + first
+	for name, out := range map[string]string{"an old payload twice": reused, "an old type twice": retyped, "no new event": shorter, "no clear": first + second} {
+		if replayDiffers(out, types, data) == "" {
+			t.Errorf("%s: not found", name)
+		}
 	}
 }
 
@@ -651,7 +690,8 @@ var operationCases = map[string]func(*testing.T, *watchEnv){
 		// The second stream's request comes before its events: Ctrl-C waits until the watch shows
 		// them again, with the new one.
 		for deadline := time.Now().Add(time.Minute); ; time.Sleep(100 * time.Millisecond) {
-			if got := shown(out.String()); len(got) == 2 && len(got[1]) > len(got[0]) {
+			_, types, data := e.served(t, op)
+			if replayDiffers(out.String(), types, data) == "" {
 				break
 			}
 			if time.Now().After(deadline) {
@@ -686,8 +726,9 @@ var operationCases = map[string]func(*testing.T, *watchEnv){
 		}
 		mu.Lock()
 		defer mu.Unlock()
-		if got := shown(r.out); len(lasts) < 2 || lasts[0] != "" || lasts[1] != "" || len(got) != 2 || len(got[0]) == 0 || len(got[1]) <= len(got[0]) {
-			t.Errorf("streams opened with Last-Event-ID %q; shown %q: want the events, a clear and the events again with the new one", lasts, got)
+		_, types, data := e.served(t, op)
+		if d := replayDiffers(r.out, types, data); len(lasts) < 2 || lasts[0] != "" || lasts[1] != "" || d != "" {
+			t.Errorf("streams opened with Last-Event-ID %q; the replay: %s; want the events, a clear and the events again, with the new one and the payloads served", lasts, d)
 		}
 	},
 }
