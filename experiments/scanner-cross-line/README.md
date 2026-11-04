@@ -70,8 +70,9 @@ The same files back a second note, on [issue 603](https://github.com/ginsys/bron
   s8.json s8.oracle.json <scanner before> before.json`, the same with `candidates/c0-main.mjs`
   for after.json, then `node cmp-reports.mjs before.json after.json`.
 - `check-tools.mjs` — checks `cmp-reports.mjs` on small built-in reports: `node check-tools.mjs`.
-  It needs no oracle, no set and no build, and exits 1 on a wrong result. It also runs a copy of
-  both tools in a directory whose name holds a space.
+  It needs no oracle, no set and no build, and exits 1 on a wrong result. It also runs `cmp.mjs` on
+  a set of one document with a scanner that throws and one that works, and a copy of both tools in
+  a directory whose name holds a space.
 - `evidence/` — the collected run: `table.md` (every candidate over every set), `differences/`
   (the first 20 documents each candidate gets wrong, per set: a summary), `lists/` (every
   differing document of a candidate that loses no name, by index in the set, one file per

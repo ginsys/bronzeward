@@ -7,7 +7,8 @@
 // `references(text)` as web/src/position.ts does. The report holds the counts and every
 // document where the candidate differs from go-yaml on a stream go-yaml accepts.
 //
-// Counts: valid = streams go-yaml accepts. equal = valid streams with the same references.
+// Counts: valid = streams go-yaml accepts (also those where the candidate throws; failed counts the
+// streams where it throws, valid or not). equal = valid streams with the same references.
 // lost = valid streams where the candidate lacks a reference go-yaml lists. extra = valid streams
 // where it lists one go-yaml does not. A stream can count as both lost and extra. lost counts the
 // references that are names (§5.1 grammar), which is all a scanner lists. lostFit is lost on the
@@ -54,6 +55,8 @@ set.forEach((doc, i) => {
   const want = oracle[i];
   const have = got[i];
   if (have.error !== undefined) {
+    // valid counts the oracle's streams, so a scanner that throws does not change it.
+    if (want.err === "") counts.valid++;
     counts.failed++;
     rows.push({ id: i, kind: "failed", doc, error: have.error, oracle: want.tags, err: want.err });
     return;
