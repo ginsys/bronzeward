@@ -719,7 +719,7 @@ records no cause, so the line takes it from the event that records its end. Ctrl
 exit 130 and stops only the watcher. The watch waits up to 3 seconds for the operation's state,
 then says that the operation goes on, and names the state if it read one. If a line of the table or
 event output cannot be written, a running watch stops reading and exits 1 with the write error and the
-command that follows the operation; if the operation read that follows gave nothing, the state is
+command that follows the operation; if an operation read gave nothing (the first read included, and the server read before it), the state is
 unknown and the exit is the read's own (3 for an answer that cannot be read), with the write error beside it; after an end the write error, and the error of writing the
 resource with `-o json` or `-o yaml`, is printed beside the outcome and the exit code of the outcome
 stays (0 becomes 1). A failure to keep the client's state after Ctrl-C is printed before the stop
@@ -732,8 +732,9 @@ standard output: the one read that the outcome line and the exit code come from,
 This holds for the resource of a Ctrl-C too, when the watch read one: it is printed before the exit.
 If the resource cannot be written after Ctrl-C, one note goes to standard error and the exit code stays 130.
 A closed standard output ends the program at once, as for every command.
-If the watch ends with no operation read, because the answer to the read that follows a cut stream
-cannot be read, the state is unknown and the exit is 3: the message names `operation show` as the
+If a read of the watch gave nothing, because its answer cannot be read or the connection failed (the
+server read, the first operation read, or the read that follows a cut stream), the watch ends with no
+operation read, the state is unknown and the exit is 3: the message names `operation show` as the
 command that reads it. Only a problem document the server named keeps exit 1.
 
 ### 5.8 Drift: freeze, then adopt or revert

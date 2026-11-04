@@ -805,3 +805,87 @@ func TestOperationWatchExitMatrix(t *testing.T) {
 		}
 	}
 }
+
+// TestOperationWatchExitMatrixByRead: the read-index column of the exit matrix. Every operation read of
+// the watch is the first, the one after the stream, or the one that confirms an end for its time, and
+// each can fail three ways: an answer that is not JSON, a 403 whose body stops short, a 403 problem
+// the server named. A read that gave nothing leaves the state unknown (exit 3, with the command that
+// reads it) unless the server named a problem (exit 1); the read that only confirms an end for its time
+// keeps the outcome and says the time was not read. The same holds when the output refuses its
+// writes, which adds the write error beside the exit.
+func TestOperationWatchExitMatrixByRead(t *testing.T) {
+	done := []string{evPage(1, "commitment", commitment), evPage(2, "operation-state", toState("verifying", "completed", ""))}
+	completed := fmt.Sprintf(opJSON, "apply-config", "completed", `{"appliedRelease":"rel_BWSYNTH","observation":"obs_c"}`, "null", "[]")
+	running := fmt.Sprintf(opJSON, "apply-config", "running", "null", "null", "[]")
+	read := "bronzewardctl operation show 'op_BWSYNTH'"
+	// The server read that comes before the first operation read answers with no JSON: nothing was read
+	// of the operation, so its state is unknown as well.
+	bad := &opFake{badServer: true, body: running}
+	badSrv := httptest.NewServer(bad)
+	automationContext(t, badSrv.URL)
+	if code, _, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "2s"); code != 3 ||
+		!strings.Contains(errOut, "the state of operation op_BWSYNTH was not read") || !strings.Contains(errOut, read) {
+		t.Errorf("the server read is not JSON: exit %d, stderr %q; want 3 and the operation to read named", code, errOut)
+	}
+	badSrv.Close()
+	for _, c := range []struct {
+		body  string // the state the operation reads as
+		index int    // the operation read, counted from 1, from which the fault applies
+	}{{running, 1}, {completed, 1}, {running, 2}, {completed, 2}, {completed, 3}} {
+		for _, fault := range []string{"not JSON", "cut off", "problem"} {
+			for _, fails := range []bool{false, true} {
+				f := &opFake{stream: []string{sse(1, "commitment", commitment)}, pages: done, body: c.body}
+				switch fault {
+				case "not JSON":
+					f.badReadFrom = c.index
+				case "cut off":
+					f.cutFrom = c.index
+				default:
+					f.forbidFrom = c.index
+				}
+				code, has, not := 3, []string{"the state of operation op_BWSYNTH was not read", read}, []string{"goes on"}
+				switch {
+				case c.index == 3: // the read that confirms the end: the outcome stays, only its time is missing
+					code, has, not = 0, []string{"Completed", "The server's time of this end was not read."}, []string{"the state of operation op_BWSYNTH was not read"}
+					if fails { // the outcome's exit 0 becomes 1 with the write error beside it
+						code, has = 1, []string{"write refused"}
+					}
+				case fault == "cut off":
+					has = []string{"reading the answer failed", read}
+				case fault == "problem":
+					code, has, not = 1, []string{"403"}, []string{"was not read", "goes on"}
+				}
+				if fails && c.index == 2 {
+					has = append(has, "write refused")
+				}
+				srv := httptest.NewServer(f)
+				automationContext(t, srv.URL)
+				var stdout io.Writer = &bytes.Buffer{}
+				if fails {
+					stdout = failingWriter{}
+				}
+				var e bytes.Buffer
+				got := run([]string{"operation", "watch", "op_BWSYNTH", "--timeout", "2s"}, stdout, &e)
+				srv.Close()
+				text := e.String()
+				if b, ok := stdout.(*bytes.Buffer); ok {
+					text = b.String() + text
+				}
+				name := fmt.Sprintf("read %d %s, output fails %v", c.index, fault, fails)
+				if got != code {
+					t.Errorf("%s: exit %d, want %d:\n%s", name, got, code, text)
+				}
+				for _, h := range has {
+					if !strings.Contains(text, h) {
+						t.Errorf("%s: %q missing in\n%s", name, h, text)
+					}
+				}
+				for _, n := range not {
+					if strings.Contains(text, n) {
+						t.Errorf("%s: %q present in\n%s", name, n, text)
+					}
+				}
+			}
+		}
+	}
+}
