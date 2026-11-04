@@ -1,0 +1,8 @@
+lost documents: 420
+| server | spelling | anchor | documents |
+|---|---|---|---|
+| server accepts | not verbatim | anchor after tag | 12 |
+| server accepts | verbatim | anchor after tag | 12 |
+| server accepts | verbatim | no anchor after tag | 276 |
+| server refuses | not verbatim | no anchor after tag | 12 |
+| server refuses | verbatim | no anchor after tag | 108 |

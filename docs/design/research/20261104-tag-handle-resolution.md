@@ -48,10 +48,14 @@ directory outside the checkout.
 cd experiments/scanner-cross-line
 node tag-handles.mjs sets/tag-handle-cases.json <work dir> 1cf21917 evidence/tag-handles.md
 run/tag-causes <work dir> 1cf21917
+node tag-anchor.mjs <work dir>/s8.main.report.json <work dir>
 ```
 
 The first command writes the case table (`evidence/tag-handles.md`). The second runs set S8
 through the oracle and both scanners and prints the grouped counts (`evidence/tag-causes.txt`).
+The third reads the report of the second for the scanner on main. It splits the 420 lost
+documents by server verdict, verbatim spelling and an anchor after the tag
+(`evidence/tag-anchor.txt`). It runs no sweep.
 The sweep took under three minutes and wrote about 35 MiB. `mise run go` builds and tests the
 server probe.
 
@@ -125,8 +129,12 @@ Three facts follow.
    the scanner lists a tag only if its text ends in `!bwref`. A handle that changes the meaning
    of that text then gives a tag that is neither `!bwref` nor a core tag. This reason is not
    proven in general.
-3. Of the 300 accepted losses on main, 288 are verbatim spellings and 12 are the tag-then-anchor
-   shape. The other 120 losses are in documents that the server refuses.
+3. Of the 300 accepted losses on main, 288 are verbatim spellings and 12 are the plain
+   tag-then-anchor shape. Of the 288, 12 also have an anchor after the tag (`a: !<!bwref> &e
+   x/foo`), so two gaps cause them. In all, 24 accepted losses carry the anchor shape and 276
+   do not. The other 120 losses are in documents that the server refuses. The table above groups
+   a document by its tag spelling, so those 12 count as verbatim there. `evidence/tag-anchor.txt`
+   holds the split: 12 plain with an anchor, 12 verbatim with an anchor, 276 verbatim without.
 
 ## What the sweep does not reach
 
@@ -146,7 +154,8 @@ and go-yaml reads x/foo. The anchor first (`a: &e !bwref x/foo`) works.
 Cause, traced in `web/src/position.ts`: the pattern at line 121 matches `!bwref`, a blank, and
 then a plain scalar made of words. It reads `&e x/foo` as that scalar. The name check at line
 141 then rejects it, so nothing is recorded. The tag has no handle, so #603 does not own this
-case. The sweep found 12 such documents that the server accepts. The tagged key `!bwref x/foo: v`
+case. The sweep found 24 such documents that the server accepts: 12 with a plain tag and 12
+with a verbatim tag. The tagged key `!bwref x/foo: v`
 is also lost, but the server refuses it (`RuleTagPlacement`, line 113), so the document is
 refused anyway.
 
@@ -157,9 +166,10 @@ Draft issue body, for the owner to file:
 > The editor then shows the draft as not using the name.
 >
 > **Repros.** `a: !bwref &e x/foo`, `a: !bwref &e` with `x/foo` on the next line, and
-> `a: !bwref &e "x/foo"`. The control `a: &e !bwref x/foo` works. Set S8 holds 12 such documents
-> that the server accepts. The case file has three of them, as `tag-then-anchor`,
-> `tag-then-anchor-next-line` and `tag-then-anchor-quoted`.
+> `a: !bwref &e "x/foo"`. The control `a: &e !bwref x/foo` works. Set S8 holds 24 documents with
+> the same-line form that the server accepts, 12 with a plain tag and 12 with a verbatim tag.
+> The case file has the same-line form as `tag-then-anchor`. It also has the next-line and quoted
+> variants, which S8 does not write, as `tag-then-anchor-next-line` and `tag-then-anchor-quoted`.
 >
 > **Cause.** The pattern after the tag reads `&e x/foo` as one plain scalar, and the name check
 > rejects it. The fix reads any properties (`&anchor`, a second tag) between the tag and the
@@ -203,7 +213,8 @@ are not recognised.
 
 **C. Recognise the verbatim `!<!bwref>` only.** The scanner adds one spelling.
 - Effect, by design and not measured: it would close 3 of the 9 accepted losses in the case
-  table. It would close all 288 that S8 generates, if the scanner reads exactly `!<!bwref>`.
+  table. It would close 276 of the 288 that S8 generates, if the scanner reads exactly
+  `!<!bwref>`. The other 12 also have an anchor after the tag and need the anchor fix too.
 - Cost: a few lines and one S8 family.
 - Risk: it leaves the prefix split and the percent escape open. Closing one shape at a time is the
   pattern that [#598](https://github.com/ginsys/bronzeward/issues/598) ended: six separate fixes
@@ -216,7 +227,7 @@ accepts. Of the three options, it is the only one designed to close the three ki
 tag loss, and it does so with one rule, the one go-yaml applies. Make it one change with its own commit, the new generator
 families, and this gate: no loss that a tag spelling causes in a document go-yaml accepts, no new
 loss and no new extra name compared with main. The gate leaves out the tag-then-anchor gap. That
-gap is a separate fix. Until it lands, a sweep of whole documents still shows its 12 losses.
+gap is a separate fix. Until it lands, a sweep of whole documents still shows its 24 losses.
 
 Choose B if the owner prefers to keep the scanner as it is. The evidence supports that choice
 too: the spellings are deliberate and the server enforces its own check. Do not choose C alone.

@@ -18,8 +18,8 @@ It answers a feasibility question and selects nothing for production.
 
 The same files back a second note, on [issue 603](https://github.com/ginsys/bronzeward/issues/603):
 [how the scanner reads a tag spelled through a handle](../../docs/design/research/20261104-tag-handle-resolution.md).
-`tag-handles.mjs`, `tag-causes.mjs`, `run/tag-causes`, `serverprobe/` and `sets/tag-handle-cases.json`
-belong to that note.
+`tag-handles.mjs`, `tag-causes.mjs`, `tag-anchor.mjs`, `run/tag-causes`, `serverprobe/` and
+`sets/tag-handle-cases.json` belong to that note.
 
 ## What is here
 
@@ -50,7 +50,9 @@ belong to that note.
 - `tag-handles.mjs` — the case table of the tag handle note: for each case of
   `sets/tag-handle-cases.json`, the go-yaml result, the server verdict and the result of the
   scanner on main and at an earlier commit. `tag-causes.mjs` and `run/tag-causes` group the
-  differences of set S8 by the spelling of the tag and by the server verdict.
+  differences of set S8 by the spelling of the tag and by the server verdict. `tag-anchor.mjs`
+  reads the report that `run/tag-causes` leaves for main. It splits the lost documents by the
+  server verdict, the verbatim spelling and an anchor between the tag and its value.
 - `evidence/` — the collected run: `table.md` (every candidate over every set), `differences/`
   (the first 20 documents each candidate gets wrong, per set: a summary), `lists/` (every
   differing document of a candidate that loses no name, by index in the set, one file per

@@ -41,8 +41,8 @@ main = web/src/position.ts, last changed at 3e00e342. before = web/src/position.
 | percent-escape-verbatim | added | x/foo | accepted | none (lost) | none (lost) |
 | percent-escape-named-handle | added | x/foo | accepted | none (lost) | none (lost) |
 | tag-then-anchor | found by S8 | x/foo | accepted | none (lost) | none (lost) |
-| tag-then-anchor-next-line | found by S8 | x/foo | accepted | none (lost) | none (lost) |
-| tag-then-anchor-quoted | found by S8 | x/foo | accepted | none (lost) | none (lost) |
+| tag-then-anchor-next-line | added | x/foo | accepted | none (lost) | none (lost) |
+| tag-then-anchor-quoted | added | x/foo | accepted | none (lost) | none (lost) |
 | anchor-then-tag | control | x/foo | accepted | x/foo (=) | x/foo (=) |
 | tagged-key | found by S8 | x/foo | refused | none (lost) | none (lost) |
 | plain-reference | control | x/foo | accepted | x/foo (=) | x/foo (=) |
