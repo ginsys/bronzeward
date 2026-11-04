@@ -892,10 +892,22 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     expect(other.conflict).toEqual(theirs(M2, 10));
   });
 
-  test("ginsys/bronzeward#559 failed Save: the conflict names the revision of the text held back, not a newer draft revision whose read is in flight", () => {
+  // This test first said the conflict names revision 10, the revision of the text held back. That moved the
+  // conflict back from the newer draft revision it already followed, which main never did (it named the
+  // larger of the two); the hosted advisory review and local review round 7 of #583 found it.
+  test("ginsys/bronzeward#559 failed Save: the conflict keeps the newer draft revision it follows, and Copy waits for the read in flight", () => {
     const s = run(typedSend(theirs(M, 8)), [{ ...theirs10, text: T2 }, { kind: "draft", revision: 11, changed: true }, { kind: "reading", on: true }, { kind: "failed" }]);
-    expect(s.conflict).toEqual(theirs(M2, 10));
+    expect(s.conflict).toEqual(theirs(M2, 11));
     expect(rest(editor(s, { kind: "copy" }))).toEqual(rest(s));
+  });
+
+  test("ginsys/bronzeward#559 round 7 finding 3: a done Save keeps the newer draft revision the conflict follows, and Copy waits for the read in flight", () => {
+    const s = run(typedSend(theirs(M, 8)), [{ ...theirs10, text: T2 }, { kind: "draft", revision: 11, changed: true }, { kind: "reading", on: true }, { kind: "done", revision: "frv_9" }]);
+    expect(s.conflict).toEqual(theirs(M2, 11));
+    expect(rest(editor(s, { kind: "copy" }))).toEqual(rest(s));
+    // Without a newer draft revision, the held-back revision names it, as before.
+    const same = run(typedSend(theirs(M, 8)), [{ ...theirs10, text: T2 }, { kind: "done", revision: "frv_9" }]);
+    expect(same.conflict).toEqual(theirs(M2, 10));
   });
 
   test("ginsys/bronzeward#559 local review 1: a draft read that repeats the pane's own done Remove while a Save is open opens no conflict for it", () => {
