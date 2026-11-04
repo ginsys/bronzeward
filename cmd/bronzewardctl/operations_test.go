@@ -30,6 +30,8 @@ type opFake struct {
 	lateFrom      int           // from this page request on (when set), the pages are latePages: events written after a restore
 	latePages     []string
 	pagesFail     bool // the JSON event pages answer 404: reading the events fails
+	badReadFrom   int  // from this operation read on (when set), the answer is 200 with a body that is no JSON: an ambiguous answer
+	forbidFrom    int  // from this operation read on (when set), the answer is a 403 problem: a refusal the server named
 }
 
 func (f *opFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -48,6 +50,16 @@ func (f *opFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":3,"startMode":"normal"}`)
 	case "/operations/op_BWSYNTH":
 		w.Header().Set("Content-Type", "application/json")
+		if f.forbidFrom > 0 && f.reads >= f.forbidFrom {
+			w.Header().Set("Content-Type", "application/problem+json")
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprint(w, `{"type":"urn:bronzeward:problem:forbidden","title":"Forbidden","status":403}`)
+			return
+		}
+		if f.badReadFrom > 0 && f.reads >= f.badReadFrom {
+			fmt.Fprint(w, "not json")
+			return
+		}
 		if f.swapFrom > 0 && f.reads >= f.swapFrom {
 			fmt.Fprint(w, f.swapBody)
 			return
