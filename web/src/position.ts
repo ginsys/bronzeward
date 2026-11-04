@@ -495,13 +495,22 @@ function endDocument(d: Docs, phase: "start" | "ended") {
 }
 // Read a line against the document state. A directive line (`%` in the first column, outside any
 // scalar) is consumed here and returns true. A `---` or `...` marker ends or starts a document, and
-// a line of content after directives with no `---`, or after `...`, refuses its document. A directive
-// after content ends the document, unless a flow collection is open: that refuses it.
+// a line of content after directives with no `---`, or after `...` (also the text on the `...` line),
+// refuses its document. A directive after content ends the document. A marker or a directive inside an
+// open flow collection refuses the document that is open.
 function readDocumentLine(d: Docs, st: Carry, text: string): boolean {
   if (st.open === '"' || st.open === "'") return false;
   if (MARKER.test(text)) {
-    if (text.startsWith("...")) endDocument(d, "ended");
-    else {
+    // A marker inside an open flow collection is an error: the document it ends lists nothing.
+    if (st.flow > 0) d.refused = true;
+    if (text.startsWith("...")) {
+      endDocument(d, "ended");
+      // Text after `...` that is no comment is content with no `---`: it refuses the next document.
+      if (!/^\.\.\.[ \t\r]*(?:#.*)?$/.test(text)) {
+        d.refused = true;
+        d.phase = "body";
+      }
+    } else {
       if (d.phase === "body") endDocument(d, "start");
       const table = directiveTable(d.pending);
       if (table === null) d.refused = true;
@@ -517,11 +526,13 @@ function readDocumentLine(d: Docs, st: Carry, text: string): boolean {
     // scalar ends there too, since its content is indented at least one column. Inside a flow
     // collection the directive is an error.
     if (d.phase === "body") {
-      if (st.flow > 0) d.refused = true;
-      else {
-        endDocument(d, "start");
-        Object.assign(st, freshCarry());
+      if (st.flow > 0) {
+        // The line is consumed and the document stays open, so the next marker ends it.
+        d.refused = true;
+        return true;
       }
+      endDocument(d, "start");
+      Object.assign(st, freshCarry());
     }
     d.pending.push(text);
     d.phase = "start";
