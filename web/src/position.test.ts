@@ -605,7 +605,7 @@ describe("a tag is resolved the way go-yaml does", () => {
   // open flow collection is an error: go-yaml refuses both, so the document at fault lists nothing.
   test.each([
     ["text on the `...` line", "a: 1\n... !<!bwref> x/foo\n"],
-    ["text on the `...` line, a plain word", "a: 1\n... x\n"],
+    ["a mapping on the `...` line", "a: 1\n... b: !bwref x/foo\n"],
     ["a tag on the `...` line of a document that lists a name", "--- !bwref x/foo\n... !bwref x/bar\n", ["x/foo"]],
     ["a `---` in an open flow sequence", "a: [!<!bwref> x/foo,\n---\nb: 1\n"],
     ["a `...` in an open flow sequence", "a: [!bwref x/foo,\n...\nb: 1\n"],
