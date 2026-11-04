@@ -53,7 +53,8 @@ node tag-anchor.mjs <work dir>/s8.main.report.json <work dir>
 
 The first command writes the case table (`evidence/tag-handles.md`). The second runs set S8
 through the oracle and both scanners and prints the grouped counts (`evidence/tag-causes.txt`).
-The third reads the report of the second for the scanner on main. It splits the 420 lost
+Run `run/tag-causes` first, then `tag-anchor.mjs` on the same work dir, because the third
+command reads the report of the second for the scanner on main. It splits the 420 lost
 documents by server verdict, verbatim spelling and an anchor after the tag
 (`evidence/tag-anchor.txt`). It runs no sweep.
 The sweep took under three minutes and wrote about 35 MiB. `mise run go` builds and tests the
@@ -116,6 +117,12 @@ Totals on main: 420 documents lose a name (300 that the server accepts and 120 t
 and 1,573 documents list an extra name (none that the server accepts). The scanner before #602
 gives 538 lost (341 accepted) and 16,318 extra (none accepted). So the scanner before #602 loses
 118 more documents and lists extra names in 14,745 more.
+
+These totals cover the 61,086 documents that go-yaml parses. They do not count the documents that
+go-yaml refuses. In 85,552 of those, the scanner on main still lists a name, and in 165,870 the
+scanner before #602 does. Such a listing is an extra name by the definition above, but the server
+also refuses these documents, so the sweep does not count them. Only the case table counts a
+listing in a refused document (the 16 refused cases with an extra name).
 
 Three facts follow.
 
