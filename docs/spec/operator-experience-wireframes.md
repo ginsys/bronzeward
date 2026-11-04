@@ -270,6 +270,7 @@ and asks the operator to save the text or switch entries first.
 The editor lists a reference whose name is quoted, or stands on the line after its `!bwref` tag.
 The editor also lists a name that follows one anchor (`!bwref &e x/foo`), but only where the scalar
 clearly ends; for any other shape with an anchor it lists nothing, and the server's check decides.
+A stream that starts with a byte order mark lists no value after an anchor.
 The cases are listed in the comment above `anchoredContinues` in `web/src/position.ts`.
 It also lists a name in a block scalar on one content line, if strip chomping (`|-` or `>-`) drops
 the line break after it or that line ends the document. A double-quoted name that continues after
@@ -278,7 +279,19 @@ U+2029 each count as one line break, as the server reads them. A block scalar is
 the server refuses the document: content that is not indented past its key (also after a sequence
 dash), or a blank line with a tab in or after the scalar. A block scalar with an indentation
 indicator is not listed either. The server still checks that reference. A key that follows the tag
-is not its name. If the operator edited the marks after a refusal,
+is not its name.
+
+The owner decided (BW-606-tag-handles-1, 4 November 2026) that the editor reads a tag the way the
+server's parser does. This is option A of the
+[tag handle record](../design/research/20261104-tag-handle-resolution.md). The editor resolves the
+tag through the `%TAG` directives of its document, and the directives end with that document. It
+lists a reference for every spelling that resolves to `!bwref`: the plain form, the verbatim form
+`!<!bwref>`, a handle prefix that holds part of the name, and a percent escape. A tag that resolves
+to another tag, such as `!!bwref`, is not a reference. Option B, to accept the gap, closes nothing.
+Option C, the verbatim form alone, leaves the prefix split and the percent escape open, which is how
+the six separate fixes of #598 went.
+
+If the operator edited the marks after a refusal,
 [Go to field] finds the refused line where it is now. If that line is gone, it focuses the marks field and selects nothing.
 
 ## W5. Protected import review
