@@ -296,6 +296,21 @@ describe("a plain value in block and in flow context", () => {
     for (const doc of withAnchors((b, a) => `k: [${b}!bwref ${a}x/foo\n]\n`)) expect(references(doc), doc).toEqual(["x/foo"]);
   });
 
+  test("a sibling entry of a nested sequence is no continuation", () => {
+    for (const doc of withAnchors((b, a) => `- - ${b}!bwref ${a}x/foo\n  - y\n`)) expect(references(doc), doc).toEqual(["x/foo"]);
+  });
+
+  test("a later entry of a flow collection does not hide the continuation of the scalar", () => {
+    for (const doc of withAnchors((b, a) => `k: [${b}!bwref ${a}x/foo\nbar, k: v]\n`)) expect(references(doc), doc).toEqual([]);
+    for (const doc of withAnchors((b, a) => `k: [${b}!bwref ${a}x/foo\n bar:]\n`)) expect(references(doc), doc).toEqual([]);
+  });
+
+  // U+00A0 is scalar text in YAML, not a blank: a line `bar:\u00a0z` is no key.
+  test("a no-break space is text, not a blank, in a continuation line", () => {
+    for (const doc of withAnchors((b, a) => `k: ${b}!bwref ${a}x/foo\n  bar:\u00a0z\n`)) expect(references(doc), doc).toEqual([]);
+    for (const doc of withAnchors((b, a) => `k: ${b}!bwref ${a}x/foo\n  \u00a0bar\n`)) expect(references(doc), doc).toEqual([]);
+  });
+
   test("block context after a closed flow collection", () => {
     expect(references("a: [x]\nb: !bwref y/foo,z\n")).toEqual([]);
   });
