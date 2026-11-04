@@ -548,12 +548,14 @@ describe("the draft editor (#339)", () => {
       await select.selectByAttribute("value", name);
       await asg().$(`button=${button}`).click();
     };
-    const storedFragments = async (draft: string, m: string) => {
+    // The assignment of `m` as the draft stores it: its revision id and its whole body.
+    const storedAssignment = async (draft: string, m: string) => {
       const entries = (await api("h-author", "GET", `/drafts/${draft}`)).body!["entries"] as { kind: string; machine?: string; revision: string | null }[];
       const revision = entries.find((e) => e.kind === "assignment" && e.machine === m)?.revision;
       expect(typeof revision).toBe("string");
-      return (await api("h-author", "GET", `/assignment-revisions/${revision}`)).body!["fragments"] as Record<string, string[]>;
+      return { revision: revision as string, body: (await api("h-author", "GET", `/assignment-revisions/${revision}`)).body! };
     };
+    const storedFragments = async (draft: string, m: string) => (await storedAssignment(draft, m)).body["fragments"] as Record<string, string[]>;
     const openAssignment = async (draft: string, count: number) => {
       await openDraft(draft);
       await $('main ul[aria-label="Entries"]').$("button*=assignment").click();
@@ -616,13 +618,18 @@ describe("the draft editor (#339)", () => {
       expect(await storedFragments(first.id, m)).toEqual({ role: [b, a] });
     });
 
+    // An id as the page shows it: the prefix and the first and last four characters (short in list.tsx).
+    const shortId = (id: string) => {
+      const i = id.indexOf("_") + 1;
+      return id.length - i > 10 ? `${id.slice(0, i + 4)}…${id.slice(-4)}` : id;
+    };
     // The assignment of `draft` for machine `m` names something the draft removed. Save is refused
-    // 422 at `where`: the text holds the rule and the path and no revision, and neither the draft nor
-    // the stored list moved.
-    const refusedAt = async (draft: string, m: string, where: string, revision: string) => {
+    // 422 at `where`: the text holds the rule and the path and none of `revisions` (nor the stored
+    // assignment's own), whole or shortened, and neither the draft nor the stored assignment moved.
+    const refusedAt = async (draft: string, m: string, where: string, revisions: string[]) => {
       const draftRevision = async () => (await api("h-author", "GET", `/drafts/${draft}`)).body!["revision"] as number;
       const before = await draftRevision();
-      const stored = await storedFragments(draft, m);
+      const stored = await storedAssignment(draft, m);
       await openAssignment(draft, 1);
       await faults({ upstream: at });
       await asg().$("button=Save").click();
@@ -631,9 +638,14 @@ describe("the draft editor (#339)", () => {
       // The rule the server states (updateAssignment), beside the path.
       await expect(refused).toHaveText(expect.stringContaining("a name must have a head or be proposed by this draft, not removed by it"));
       await expect(asg().$('[data-testid="write-where"]')).toHaveText(`At ${where}.`);
-      expect(await refused.getText()).not.toContain(revision);
+      const shown = await refused.getText();
+      for (const id of [...revisions, stored.revision]) {
+        expect(shown).not.toContain(id);
+        expect(shown).not.toContain(shortId(id));
+      }
       expect(await draftRevision()).toBe(before);
-      expect(await storedFragments(draft, m)).toEqual(stored);
+      // The same revision id and the same body: the profiles and the fragments both stay.
+      expect(await storedAssignment(draft, m)).toEqual(stored);
     };
 
     it("an assignment that names a fragment the draft removed is refused 422 at the field, and nothing stored moves", async () => {
@@ -643,7 +655,7 @@ describe("the draft editor (#339)", () => {
       const saved = await api("h-author", "PUT", `/drafts/${seed.id}/assignments/${m}`, { profiles: [], fragments: { role: [a] } }, seed.etag);
       expect(saved.status).toBe(200);
       expect((await api("h-author", "DELETE", `/drafts/${seed.id}/fragments/${a}`, undefined, saved.etag)).status).toBe(200);
-      await refusedAt(seed.id, m, "fragments.role[0]", seed.revision);
+      await refusedAt(seed.id, m, "fragments.role[0]", [seed.revision]);
     });
 
     it("an assignment that names a profile the draft removed is refused 422 at the field, and nothing stored moves", async () => {
@@ -656,7 +668,7 @@ describe("the draft editor (#339)", () => {
       const saved = await api("h-author", "PUT", `/drafts/${seed.id}/assignments/${m}`, { profiles: [p], fragments: { role: [a] } }, profile.etag);
       expect(saved.status).toBe(200);
       expect((await api("h-author", "DELETE", `/drafts/${seed.id}/profiles/${p}`, undefined, saved.etag)).status).toBe(200);
-      await refusedAt(seed.id, m, "profiles[0]", seed.revision);
+      await refusedAt(seed.id, m, "profiles[0]", [seed.revision, (profile.body!["entry"] as { revision: string }).revision]);
     });
 
     it("Show composition and references lists a profile's pin before the assignment's fragment of its layer, and no document", async () => {
