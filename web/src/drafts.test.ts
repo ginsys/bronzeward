@@ -617,10 +617,12 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     const src = readFileSync(new URL("./drafts.tsx", import.meta.url), "utf8");
     expect(src).toMatch(/<FragmentPane [^>]*shown=\{!unshown\}/);
     expect(src).toMatch(/const at = selection\(spot\);\n\s*into\.setSelectionRange\(at\.start, at\.end\);/);
-    // A failed revision read keeps `reading`: only the cleanup drops it.
-    const failure = /if \(r\?\.kind !== "ok"\) \{([^}]*)\}/.exec(src);
+    // A failed revision read of a revision never loaded keeps `reading`: only the cleanup drops it. A reread of the
+    // revision already loaded turns it off, or Copy my text stays ignored (ginsys/bronzeward#583 round 9).
+    const failure = /if \(r\?\.kind !== "ok"\) \{\n([\s\S]*?)\n      \}/.exec(src);
     expect(failure?.[1]).toMatch(/setFailed\(true\)/);
-    expect(failure?.[1]).not.toMatch(/reading/);
+    expect(failure?.[1]?.match(/reading/g)?.length).toBe(1);
+    expect(failure?.[1]).toMatch(/if \(loaded === revision\) act\(\{ kind: "reading", on: false \}\);/);
     expect(src).toMatch(/const waits = unread\(entry\?\.revision, loaded\);/);
     // #517 review round 3: a read with text records its revision, and a draft read again retries
     // a failed one; without either the pane never edits, or stays waiting after Show.
@@ -936,7 +938,7 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     // ... so the pane reads again, as the effect hooks cannot run in this node environment (#534 PR review does the same).
     const src = readFileSync(new URL("./drafts.tsx", import.meta.url), "utf8");
     expect(src).toMatch(/finished\.current = done;/);
-    expect(src).toMatch(/if \(staleRead\(finished\.current, done\)\) return setFailed\(true\);\n\s*setLoaded\(revision\);/);
+    expect(src).toMatch(/if \(staleRead\(finished\.current, done\)\) \{\n\s*if \(loaded === revision\) act\(\{ kind: "reading", on: false \}\);\n\s*return setFailed\(true\);\n\s*\}\n\s*setLoaded\(revision\);/);
     // The stale read is not read again at once: the pre-write revision could answer again (PR review).
     expect(src).not.toMatch(/finished\.current !== done\) return retry/);
     // A read that answers after the done answer is dispatched and before the next render sees the write as finished (hosted review).
@@ -951,8 +953,24 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     // The pane starts from FRESH, and a stale read sets `failed` with no note: the next draft read that names a new revision reads it again.
     const src = readFileSync(new URL("./drafts.tsx", import.meta.url), "utf8");
     expect(src).toMatch(/useReducer\(editor, FRESH\)/);
-    expect(src).toMatch(/if \(staleRead\(finished\.current, done\)\) return setFailed\(true\);/);
+    expect(src).toMatch(/if \(staleRead\(finished\.current, done\)\) \{/);
     // The gap that stays: a stale answer that `live` drops after the refresh is not covered by a test.
+  });
+
+  test("ginsys/bronzeward#559 PR review: a reread of an already loaded revision that ends in a stale or a failed read turns reading off, so Copy my text works again", () => {
+    // The dead end: Copy my text is ignored while `reading` is on, and nothing turns it off when the reread ends without an answer.
+    const theirsShown = run({ held: T, saved: T, conflict: theirs(M) }, [{ kind: "reading", on: true }]);
+    expect(editor(theirsShown, { kind: "copy" })).toBe(theirsShown);
+    const ended = run(theirsShown, [{ kind: "reading", on: false }]);
+    expect(editor(ended, { kind: "copy" }).held).toBe(M);
+    // The three panes turn `reading` off in both branches, only for a revision that is already loaded; a revision never loaded stays unread.
+    const fragment = readFileSync(new URL("./drafts.tsx", import.meta.url), "utf8");
+    const composition = readFileSync(new URL("./composition.tsx", import.meta.url), "utf8");
+    const off = /if \(loaded === revision\) act\(\{ kind: "reading", on: false \}\);/g;
+    expect(fragment.match(off)?.length).toBe(2);
+    expect(composition.match(off)?.length).toBe(4);
+    expect(fragment).toMatch(/if \(loaded === revision\) act\(\{ kind: "reading", on: false \}\);\n\s*setFailed\(true\);\n\s*return setNote\(/);
+    expect(composition.match(/if \(loaded === revision\) act\(\{ kind: "reading", on: false \}\);\n\s*setFailed\(true\);\n\s*return setNote\(/g)?.length).toBe(2);
   });
 
   test("ginsys/bronzeward#559 PR review: another author's removal of a new fragment, read while its first Save is open, shows when that Save is done", () => {

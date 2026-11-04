@@ -419,7 +419,7 @@ describe("ginsys/bronzeward#559 the composition panes take the fragment pane's f
   });
   test("each pane counts a finished write at once and fails a read that began before it, without a note", () => {
     expect(count(/const finished = useRef\(done\);\n\s*finished\.current = done;/g)).toBe(2);
-    expect(count(/if \(staleRead\(finished\.current, done\)\) return setFailed\(true\);\n\s*setLoaded\(revision\);/g)).toBe(2);
+    expect(count(/if \(staleRead\(finished\.current, done\)\) \{\n\s*if \(loaded === revision\) act\(\{ kind: "reading", on: false \}\);\n\s*return setFailed\(true\);\n\s*\}\n\s*setLoaded\(revision\);/g)).toBe(2);
     expect(count(/finished\.current \+= 1;\n\s*act\(\{ kind: "done"/g)).toBe(2);
     // Every `setLoaded(revision)` follows that check, so no read marks its revision loaded without it.
     expect(count(/setLoaded\(revision\)/g)).toBe(2);
