@@ -142,13 +142,19 @@ const wrapAll = (lines: string[]) => {
 
 // (G) What follows a document marker, an indicator or a tag: a space, a tab, a line end, U+00A0 and
 // other Unicode spaces. go-yaml counts only the first three as blank; the others are text.
+const firstOfG = docs.size;
 {
-  const seps = [" ", "\t", "\u00a0", "\u2003", "\u3000", "\ufeff", "\u200b", "\r", ""];
+  const seps = [" ", "\t", "\u00a0", "\u2003", "\u3000", "\ufeff", "\u200b", "\r", "\r\n", "\u0085", "\u2028", "\u2029", ""];
   for (const s of seps) {
     for (const m of ["---", "..."]) {
       docs.add(`${m}${s}a: |\n  "x\nb: ${TAG}\n`);
       docs.add(`${m}${s}${PROBE}\nb: ${TAG}\n`);
       docs.add(`${m}${s}\nb: ${TAG}\n`);
+      // A tag that starts the line after a marker: a plain scalar's text if the marker is no marker.
+      docs.add(`${m}${s}\n${TAG}\n`);
+      docs.add(`${m}${s}\n${PROBE}\nb: ${TAG}\n`);
+      docs.add(`a: x\n${m}${s}\n${TAG}\n`);
+      docs.add(`a: |\n  x\n${m}${s}\n${TAG}\n`);
       docs.add(`a: |\n  "x\n${m}${s}b: ${TAG}\n`);
       docs.add(`a: |\n  ${m}${s}b\nc: ${TAG}\n`);
       docs.add(`a: "x\n${m}${s}b: ${TAG}\n`);
@@ -215,6 +221,10 @@ const wrapAll = (lines: string[]) => {
       docs.add(`- ${k}: ${v}\n${body.map((b) => `  ${b}`).join("\n")}\n- ${TAG}\n`);
     }
 }
+
+// (J) The line ends of (G), (H) and (I) as a CRLF, a lone carriage return, U+0085, U+2028 and U+2029.
+// go-yaml counts each as a line break, and a CRLF as one.
+for (const d of [...docs].slice(firstOfG)) for (const b of ["\r\n", "\r", "\u0085", " ", " "]) docs.add(d.replaceAll("\n", b));
 
 // (F) Every three lines from a pool of lines that change the state, then a line with a tag. The pool
 // holds a key with each kind of value start, a header, a blank line, a comment and a continuation.

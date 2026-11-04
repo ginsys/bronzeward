@@ -517,6 +517,28 @@
    ]
   },
   {
+   "name": "edge-crlf-marker",
+   "source": "ginsys/bronzeward#602",
+   "doc": "---\r\n!bwref x/foo\r\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
+   "name": "edge-crlf-marker-in-literal",
+   "source": "ginsys/bronzeward#602",
+   "doc": "cfg: |\r\n  ---\r\n  !bwref x/foo\r\n",
+   "want": []
+  },
+  {
+   "name": "edge-crlf-header-comment",
+   "source": "ginsys/bronzeward#602",
+   "doc": "a: | # c\r\n  [x\r\nb: ?\"y # !bwref ghost\r\nc: !bwref x/foo\r\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
    "name": "edge-flow-key-holder",
    "source": "ginsys/bronzeward#602",
    "doc": "[a, b]: |\n  \"x\nfoo: !bwref x/foo\n",

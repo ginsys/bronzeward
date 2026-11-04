@@ -92,8 +92,9 @@ function embeddedTexts(text: string, embedded: readonly EmbeddedPath[]): { text:
 // blank names nothing. A plain one followed by a more indented line is skipped, never cut short.
 const NAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\/[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/;
 // A document marker is followed by a space, a tab or the end of the line: U+00A0 and the other
-// Unicode spaces are text (`--- a` is a key).
-const MARKER = /^(?:---|\.\.\.)(?:[ \t]|$)/;
+// Unicode spaces are text (`--- a` is a key). The end of a line is a line feed, or the carriage
+// return of a CRLF: a lone one is a line feed already (see BREAKS).
+const MARKER = /^(?:---|\.\.\.)(?:[ \t]|\r?$)/;
 // go-yaml (the server's parser) breaks a line at a line feed, a carriage return alone, and U+0085,
 // U+2028 and U+2029, in comments and in every kind of scalar; a CRLF is one break. Each of these is
 // read as a line feed here, so no later step has to know them. A replacement has the length of what
@@ -340,15 +341,20 @@ function commentStarts(lines: readonly string[]): { starts: number[]; props: Set
   const st = freshCarry();
   const props = new Set<number>();
   let base = 0;
-  const starts = lines.map((line, n) => {
+  const starts = lines.map((full, n) => {
+    // The carriage return of a CRLF is part of the line break, not of the line: the scan reads the
+    // line without it (so a `.` in a pattern, and a marker, see the line go-yaml sees), and a scan
+    // that reaches the end of the line ends at the line's full length again.
+    const line = full.endsWith("\r") ? full.slice(0, -1) : full;
     // go-yaml drops a byte order mark at the start of the stream without counting a column (the
     // reader), and a second one right after it takes a column, like a blank (the scanner, at
     // index 0). A byte order mark anywhere else is text.
     const lead = n === 0 && line.startsWith("﻿");
     const rest = lead ? line.slice(1) : line;
     const at = scanLine(st, lead && rest.startsWith("﻿") ? ` ${rest.slice(1)}` : rest, base + (lead ? 1 : 0), props);
-    base += line.length + 1;
-    return lead ? at + 1 : at;
+    base += full.length + 1;
+    const end = lead ? at + 1 : at;
+    return end >= line.length ? full.length : end;
   });
   return { starts, props };
 }

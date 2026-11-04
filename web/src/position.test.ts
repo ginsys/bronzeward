@@ -142,6 +142,16 @@ describe("the references of a declared embedded document", () => {
     const text = "cfg: |\n  # !bwref \"\n  a: 1\nb: !bwref x/foo\nc: '\"'\n";
     expect(references(text, at("doc[0]/cfg"))).toEqual(["x/foo"]);
   });
+  test("a CRLF marker ends the document, and a marker line in a literal holder keeps the tag's place", () => {
+    expect(references("---\r\n!bwref x/foo\r\n", [])).toEqual(["x/foo"]);
+    const text = "cfg: |\r\n  ---\r\n  !bwref x/foo\r\n";
+    const start = text.indexOf("!bwref");
+    expect(spotOfReference(text, "x/foo", at("doc[0]/cfg"))).toEqual({ start, end: start + "!bwref x/foo".length });
+  });
+  test("a CRLF after a block scalar header's comment does not stop the header", () => {
+    const text = 'a: | # c\r\n  [x\r\nb: ?"y # !bwref ghost\r\nc: !bwref x/foo\r\n';
+    expect(references(text, [])).toEqual(["x/foo"]);
+  });
   test("a tag whose name is on the next line is placed across the removed indentation", () => {
     const text = "cfg: |\n  a: !bwref\n   x/next\n";
     const start = text.indexOf("!bwref");

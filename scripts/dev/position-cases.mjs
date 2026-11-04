@@ -108,6 +108,11 @@ const own = [
   ["ginsys/bronzeward#602", "edge-dots-nbsp", '... a: |\n  "x\nb: !bwref x/foo\n'],
   // (G) tag-like text in a declared literal's comment is no tag, and does not hide the real one after it.
   ["ginsys/bronzeward#602", "edge-fake-tag-in-comment", "cfg: |\n  # !bwref \"\n  a: 1\nb: !bwref x/foo\nc: '\"'\n"],
+  // (I) the carriage return of a CRLF is part of the line break: a marker, a header's comment and a
+  // literal's text end at it.
+  ["ginsys/bronzeward#602", "edge-crlf-marker", "---\r\n!bwref x/foo\r\n"],
+  ["ginsys/bronzeward#602", "edge-crlf-marker-in-literal", "cfg: |\r\n  ---\r\n  !bwref x/foo\r\n"],
+  ["ginsys/bronzeward#602", "edge-crlf-header-comment", 'a: | # c\r\n  [x\r\nb: ?"y # !bwref ghost\r\nc: !bwref x/foo\r\n'],
   // (H) a flow collection used as a block key keeps its first column across its members.
   ["ginsys/bronzeward#602", "edge-flow-key-holder", '[a, b]: |\n  "x\nfoo: !bwref x/foo\n'],
 ];
