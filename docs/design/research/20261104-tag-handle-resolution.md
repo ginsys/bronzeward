@@ -72,11 +72,11 @@ name that go-yaml does not. Main and the earlier commit give the same result on 
 | `%TAG !x! !`, then `a: !x!bw%72ef x/foo` | x/foo | accepts | lost |
 | `%TAG !x! !`, then `a: !x!bwref x/foo` (handle maps to the primary prefix) | x/foo | accepts | listed |
 | `%YAML 1.1` or `%TAG` before a plain `!bwref` (issue) | x/foo | accepts | listed |
-| `a: !!bwref x/foo` (issue) | refused | refuses | extra x/foo |
-| `%TAG ! !x-`, then `a: !bwref x/foo` (issue) | refused | refuses | extra x/foo |
-| `%TAG !r! tag:x,2000:`, then `a: !r!bwref x/foo` | refused | refuses | extra x/foo |
-| Two documents, the second uses a handle that only the first declares | refused | refuses | extra x/foo |
-| `%YAML 1.2` or `%FOO` before a plain `!bwref` | refused | refuses | extra x/foo |
+| `a: !!bwref x/foo` (issue) | none (parses) | refuses | extra x/foo |
+| `%TAG ! !x-`, then `a: !bwref x/foo` (issue) | none (parses) | refuses | extra x/foo |
+| `%TAG !r! tag:x,2000:`, then `a: !r!bwref x/foo` | none (parses) | refuses | extra x/foo |
+| Two documents, the second uses a handle that only the first declares | parse error | refuses | extra x/foo |
+| `%YAML 1.2` or `%FOO` before a plain `!bwref` | parse error | refuses | extra x/foo |
 | `a: !bwref &e x/foo` (found by the sweep, see below) | x/foo | accepts | lost |
 | `!bwref x/foo: v` (tagged key) | x/foo | refuses | lost |
 
@@ -172,12 +172,16 @@ Draft issue body, for the owner to file:
 starts with the defaults (`!` maps to `!` and `!!` maps to the core prefix). A `%TAG` directive
 changes one entry. The table resets at `---` and at `...`. The scanner also reads the verbatim
 form and decodes percent escapes before it compares the result with `!bwref`.
-- Closes all 9 accepted tag resolution losses in the case table. As a side effect, it removes the
-  extra names of the 16 refused cases.
+- Closes all 9 accepted tag resolution losses in the case table. It also removes the extra names
+  of the 8 refused cases where go-yaml parses the document and resolves the tag to another tag.
+  In the other 8 refused cases go-yaml fails to parse the document. Resolution removes the extra
+  name only if the cause is the tag, for example a handle that no directive declares. It does not
+  remove it where a directive is invalid, such as `%YAML 1.2` or `%FOO`. That needs directive
+  validation and no listing after a parse error. This record did not sort the 8 cases further.
 - Cost: state for the directive area of a document. The scanner already carries state from line
   to line (`Carry`). It also needs the new S8 families above and a regression test per rule. The
   size is not measured, because no prototype exists. Today the scanner treats handles in one
-  line (line 483).
+  line (line 483). Directive validation, if wanted, is extra.
 - Risk: the directive area is easy to misread. The cases for a directive in a literal block, in a
   comment and after `...` pass today and must keep passing.
 
@@ -198,11 +202,12 @@ are not recognised.
 
 ## Recommendation
 
-Choose A if the scanner is to match go-yaml on every document that the server accepts. It is the
-only option that closes the three kinds of accepted loss, and it does so with one rule, the
-one go-yaml applies. Make it one change with its own commit, the new generator families, and the
-gate that the earlier work uses: no loss on a document go-yaml accepts, no new loss and no new
-extra name compared with main.
+Choose A if the scanner is to match go-yaml on every tag spelling in a document that the server
+accepts. It is the only option that closes the three kinds of accepted tag loss, and it does so
+with one rule, the one go-yaml applies. Make it one change with its own commit, the new generator
+families, and this gate: no loss that a tag spelling causes in a document go-yaml accepts, no new
+loss and no new extra name compared with main. The gate leaves out the tag-then-anchor gap. That
+gap is a separate fix. Until it lands, a sweep of whole documents still shows its 12 losses.
 
 Choose B if the owner prefers to keep the scanner as it is. The evidence supports that choice
 too: the spellings are deliberate, the server holds the line, and the hint is wrong only for a
