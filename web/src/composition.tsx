@@ -9,7 +9,7 @@
 
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { components } from "./api/v1";
-import { change, declaredOf, doneOnce, editor, EMPTY, type Held, holdsUnsaved, inUse, keptETag, NO_ETAG, rows, sendRefusal, settledFragment, unread, WriteResult } from "./drafts.tsx";
+import { change, declaredOf, doneOnce, editor, EMPTY, FRESH, type Held, holdsUnsaved, inUse, keptETag, NO_ETAG, rows, sendRefusal, settledFragment, staleRead, unread, WriteResult } from "./drafts.tsx";
 import { startsNew, useSend, useUnsaved, useWrites } from "./forms.tsx";
 import { LAYERS } from "./layers.ts";
 import { short, useList, usePending, useSettled } from "./list.tsx";
@@ -91,7 +91,7 @@ export function ProfilePane({ draft, entry, seeChange, claim = () => {}, shown =
   const [typed, setName] = useState("");
   const name = entry === undefined ? typed : (entry.name ?? "");
   const [attempt, retry] = useState(0);
-  const [{ held, saved, conflict, writes: done = 0, note }, act] = useReducer(editor, { held: EMPTY, saved: EMPTY });
+  const [{ held, saved, conflict, writes: done = 0, note }, act] = useReducer(editor, FRESH);
   const hold = (pins: string[]) => act({ kind: "type", held: pinned(held, pins) });
   const setNote = (text?: string) => act({ kind: "note", ...(text !== undefined && { text }) });
   const [w, send] = useSend();
@@ -103,6 +103,9 @@ export function ProfilePane({ draft, entry, seeChange, claim = () => {}, shown =
   const unsavedList = holdsUnsaved(held, saved, conflict?.mine);
   useUnsaved(`profile ${name || "(new)"} of draft ${short(draft.id)}`, unsavedList);
   const drafted = useRef(draft.revision);
+  // The done writes now, for a revision read that answers after one finished (as in the fragment pane).
+  const finished = useRef(done);
+  finished.current = done;
 
   // The pins the draft can name, and the names of the pins it cannot.
   const [fragments] = useList<Fragment>("/fragments", "", true);
@@ -139,6 +142,9 @@ export function ProfilePane({ draft, entry, seeChange, claim = () => {}, shown =
         setFailed(true);
         return setNote("The entry's revision could not be read.");
       }
+      // A write finished while this read was pending: the editor drops its answer, so the revision stays unread
+      // and the draft read that names the new revision reads it again (ginsys/bronzeward#559 review).
+      if (staleRead(finished.current, done)) return setFailed(true);
       setLoaded(revision);
       act({ kind: "read", text: pinned(EMPTY, r.data.fragments), since: done, revision: drafted.current, id: revision });
     });
@@ -161,7 +167,10 @@ export function ProfilePane({ draft, entry, seeChange, claim = () => {}, shown =
   useEffect(() => {
     const d = doneOnce(w);
     const created = (d?.data as Partial<S["SourceUpdate"]> | null | undefined)?.entry?.revision;
-    if (d !== undefined) act({ kind: "done", ...(typeof created === "string" && { revision: created }) });
+    if (d !== undefined) {
+      finished.current += 1;
+      act({ kind: "done", ...(typeof created === "string" && { revision: created }) });
+    }
     if (o?.kind === "refused" && o.status === 412) {
       act({ kind: "refused" });
       void read<Draft>(`/drafts/${encodeURIComponent(draft.id)}`).then((r) => r?.kind === "ok" && act({ kind: "at", revision: r.data.revision }));
@@ -532,7 +541,7 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
   const [typed, setMachine] = useState("");
   const machine = entry === undefined ? typed : (entry.machine ?? "");
   const [attempt, retry] = useState(0);
-  const [{ held, saved, conflict, writes: done = 0, note }, act] = useReducer(editor, { held: EMPTY, saved: EMPTY });
+  const [{ held, saved, conflict, writes: done = 0, note }, act] = useReducer(editor, FRESH);
   const lists = listsOf(held);
   const hold = (next: Lists) => act({ kind: "type", held: withLists(held, next) });
   const setNote = (text?: string) => act({ kind: "note", ...(text !== undefined && { text }) });
@@ -545,6 +554,8 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
   const unsavedList = holdsUnsaved(held, saved, conflict?.mine);
   useUnsaved(`assignment ${machine === "" ? "(new)" : short(machine)} of draft ${short(draft.id)}`, unsavedList);
   const drafted = useRef(draft.revision);
+  const finished = useRef(done);
+  finished.current = done;
 
   // What the lists can offer. A fragment the draft holds has the layer of its revision, read once.
   const [profiles] = useList<Profile>("/profiles", "", true);
@@ -590,6 +601,7 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
         setFailed(true);
         return setNote("The entry's revision could not be read.");
       }
+      if (staleRead(finished.current, done)) return setFailed(true);
       setLoaded(revision);
       act({ kind: "read", text: withLists(EMPTY, fromRevision(r.data)), since: done, revision: drafted.current, id: revision });
     });
@@ -612,7 +624,10 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
   useEffect(() => {
     const d = doneOnce(w);
     const created = (d?.data as Partial<S["SourceUpdate"]> | null | undefined)?.entry?.revision;
-    if (d !== undefined) act({ kind: "done", ...(typeof created === "string" && { revision: created }) });
+    if (d !== undefined) {
+      finished.current += 1;
+      act({ kind: "done", ...(typeof created === "string" && { revision: created }) });
+    }
     if (o?.kind === "refused" && o.status === 412) {
       act({ kind: "refused" });
       void read<Draft>(`/drafts/${enc(draft.id)}`).then((r) => r?.kind === "ok" && act({ kind: "at", revision: r.data.revision }));

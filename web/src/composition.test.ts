@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
@@ -6,7 +7,7 @@ import {
   ASSIGNMENT_STATEMENT, AssignmentPane, assignmentBody, assignmentRefusal, choices, compose, fragmentOffers, fromRevision, isCurrent, listsOf, machineOffers, move, noLists, PINS_MAX, PINS_STATEMENT,
   type Composition, pinned, pinRefusal, pinsOf, ProfilePane, profileBody, profileOffers, readComposition, referenceLines, referenceStates, showable, shownResult, sourceKey, stillOffered, unknownPins, withLists, withoutPin, withPin,
 } from "./composition.tsx";
-import { editor, EMPTY, holdsUnsaved, where } from "./drafts.tsx";
+import { editor, EMPTY, FRESH, holdsUnsaved, where } from "./drafts.tsx";
 import { WritesProvider } from "./forms.tsx";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import { ShellContext } from "./shell.tsx";
@@ -399,5 +400,28 @@ describe("the assignment entry (W4)", () => {
     const out = pane("discarded");
     expect(out).not.toContain(">Save</button>");
     expect(out).not.toContain("Add to profiles");
+  });
+});
+
+// The profile and assignment panes share the fragment pane's reducer, so they take its first state and its
+// stale-read handling (ginsys/bronzeward#583 hosted review and local review round 7, findings 1 and 4).
+describe("ginsys/bronzeward#559 the composition panes take the fragment pane's first state and stale-read handling", () => {
+  const src = readFileSync(new URL("./composition.tsx", import.meta.url), "utf8");
+  const count = (re: RegExp) => (src.match(re) ?? []).length;
+  test("each pane starts from FRESH, so a removal read during its first Save is held back", () => {
+    expect(count(/useReducer\(editor, FRESH\)/g)).toBe(2);
+    expect(src).not.toMatch(/useReducer\(editor, \{ held: EMPTY, saved: EMPTY \}\)/);
+    // The first state the panes now share: a removal read while the first Save is open shows when that Save is done.
+    const s = [{ kind: "type", held: pinned(EMPTY, ["frv_a"]) }, { kind: "send" }, { kind: "draft", revision: 5, changed: false, removed: true }, { kind: "done", revision: "frv_1" }] as const;
+    const done = s.reduce(editor, FRESH);
+    expect(done.conflict?.revision).toBe(5);
+    expect(done.held).toBe(EMPTY);
+  });
+  test("each pane counts a finished write at once and fails a read that began before it, without a note", () => {
+    expect(count(/const finished = useRef\(done\);\n\s*finished\.current = done;/g)).toBe(2);
+    expect(count(/if \(staleRead\(finished\.current, done\)\) return setFailed\(true\);\n\s*setLoaded\(revision\);/g)).toBe(2);
+    expect(count(/finished\.current \+= 1;\n\s*act\(\{ kind: "done"/g)).toBe(2);
+    // Every `setLoaded(revision)` follows that check, so no read marks its revision loaded without it.
+    expect(count(/setLoaded\(revision\)/g)).toBe(2);
   });
 });

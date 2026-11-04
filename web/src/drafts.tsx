@@ -371,6 +371,10 @@ export const FRESH: Editor = { held: EMPTY, saved: EMPTY, gone: -1 };
 // since the draft refresh has not answered: it is not used (ginsys/bronzeward#559 PR review).
 export const staleRead = (finishedNow: number, startedAt: number): boolean => finishedNow !== startedAt;
 
+// The newer of two draft revisions a conflict can name: the one it already follows, or the one of a text held
+// back while a write was open. A conflict never moves back to an older revision (ginsys/bronzeward#559 review).
+const newest = (a: number | undefined, b: number | undefined): number | undefined => (a === undefined ? b : b === undefined ? a : Math.max(a, b));
+
 export type EditorEvent =
   | { kind: "type"; held: Held } // the operator's edit
   | { kind: "refused" } // a write's 412
@@ -443,7 +447,7 @@ function step(s: Editor, e: EditorEvent): Editor {
       // conflict has followed every draft read since, so the newer revision names it (#551 item 2).
       const later = s.sent?.later;
       if (later === undefined || (c !== undefined && c.phase !== "theirs") || same(s.held, s.saved)) return { ...s, ...closed(s) };
-      const revision = later.revision;
+      const revision = newest(later.revision, c?.revision);
       return { ...s, ...closed(s), held: s.saved, conflict: { ...(c === undefined ? { mine: s.held } : kept(c)), phase: "theirs", ...(revision !== undefined && { revision }) } };
     }
     case "at":
@@ -561,9 +565,10 @@ function step(s: Editor, e: EditorEvent): Editor {
       const later = s.sent?.later;
       const other = s.sent?.removes === true || later === undefined ? undefined : later.removed === true ? EMPTY : later.id !== undefined && e.revision !== undefined && later.id !== e.revision ? later.text : undefined;
       if (later !== undefined && other !== undefined) {
+        const revision = newest(later.revision, c?.revision);
         const { own: _own, gone: _gone, ...after } = s;
         return { ...after, ...closed(s), ...(e.revision !== undefined && { own: e.revision }), held: other, saved: other, writes: writes + 1,
-          conflict: { mine: s.held, phase: "theirs", ...(later.revision !== undefined && { revision: later.revision }), ...(c?.awaits === true && { awaits: true as const }) } };
+          conflict: { mine: s.held, phase: "theirs", ...(revision !== undefined && { revision }), ...(c?.awaits === true && { awaits: true as const }) } };
       }
       // The text the operator chose is saved: a Save sent while theirs showed, or the kept text itself.
       // A Remove saves no text, so the operator's kept text stays for Copy my text (N2).
