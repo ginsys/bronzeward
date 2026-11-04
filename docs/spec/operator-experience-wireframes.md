@@ -228,15 +228,19 @@ write gets a `412`. If the write's last answer is neither done nor a `412`, the 
 showed goes into the editor as theirs, and the typed text is kept for [Copy my text into the new
 revision]. A done Save does the same, unless that read shows the revision that the Save created.
 The answer to the Save names that revision. If the answer or the read names no revision, the read
-stays the Save's own. An unknown outcome is not the last answer while [Repeat exactly] can still
-send the write.
+stays the Save's own. A done Remove shows any text that such a read named, because a Remove
+creates no text revision. When nothing was typed since the last read or save, a read of another
+author's text waits for the write's answer in the same way. A done write then shows that text as
+the entry's text, with no conflict and no unsaved text. An unknown outcome is not the last answer
+while [Repeat exactly] can still send the write.
 
 The same rule applies after their text shows. If a later read shows another author's newer text,
 or their removal, the editor shows that change. Text typed since their text showed is kept for
 [Copy my text into the new revision]. The pane's own Remove keeps its text, and a read of the
 pane's own Save opens nothing. A removal that such a read shows while the pane's own Save or
 Remove has no answer yet is held back in the same way. If that write fails, the editor shows the
-removal. A done Save shows it too.
+removal. A done Save shows it too. A done Remove shows a newer text of theirs, read while it had
+no answer, and keeps the operator's text for [Copy my text into the new revision].
 
 [Add fragment] refuses a name that the draft already holds, a removed entry included, and points
 to that entry in the list. Once the new fragment is saved, the pane edits the entry that it
