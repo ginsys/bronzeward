@@ -201,6 +201,10 @@ func TestOperationWatch(t *testing.T) {
 		{"apply-config", "failed", "null", `{"title":"Recovery-mode entry ended the job","status":409}`,
 			"Failed at 2026-11-01 06:00:03 UTC (server): Recovery-mode entry ended the job.\n" +
 				"Nothing more is sent for this plan. Read what the machine runs before a new plan: bronzewardctl machine show 'mch_a'"},
+		// The problem shows its title, its detail when present and its instance (client-contracts.md §8.2), each escaped.
+		{"apply-config", "failed", "null", `{"title":"Ingestion abandoned","status":409,"detail":"the staging claim passed its lease; ingest the input again\u001b[31m","instance":"op_BWSYNTH"}`,
+			"Failed at 2026-11-01 06:00:03 UTC (server): Ingestion abandoned: the staging claim passed its lease; ingest the input again\\x1b[31m (instance op_BWSYNTH).\n" +
+				"Nothing more is sent for this plan. Read what the machine runs before a new plan: bronzewardctl machine show 'mch_a'"},
 		// A cancelled operation records neither result nor error: its cause is its last event's.
 		{"apply-config", "cancelled", "null", "null",
 			"Cancelled at 2026-11-01 06:00:03 UTC (server): resolution.\n" +
@@ -209,6 +213,8 @@ func TestOperationWatch(t *testing.T) {
 		pages := all
 		if c.state == "cancelled" {
 			pages = []string{all[0], all[1], evPage(3, "operation-state", toState("unresolved", "cancelled", "resolution"))}
+		} else if c.state != "completed" { // the event that records the end names the state the operation read shows
+			pages = []string{all[0], all[1], evPage(3, "operation-state", toState("verifying", c.state, ""))}
 		}
 		set(c.kind, c.state, c.result, c.errBody, "[]", nil, pages)
 		code, out, errOut := runCtl(t, watch...)

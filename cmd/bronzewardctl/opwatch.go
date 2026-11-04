@@ -28,14 +28,30 @@ type watchOut struct {
 	mu      sync.Mutex
 	w       io.Writer
 	stopped bool
+	err     error // the first error writing a line, kept for the watch to report
 }
 
 func (o *watchOut) show(line string) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if !o.stopped {
-		fmt.Fprintln(o.w, line)
+		o.print(line)
 	}
+}
+
+// print writes one line and keeps the first failure: a watch whose output is lost must not end as if
+// it had shown the operation. The caller holds o.mu.
+func (o *watchOut) print(line string) {
+	if _, err := fmt.Fprintln(o.w, line); err != nil && o.err == nil {
+		o.err = err
+	}
+}
+
+// failure is the first error writing the watch's output, nil when every line was written.
+func (o *watchOut) failure() error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.err
 }
 
 // gate wraps a writer the watch's client writes to (its notices, its -v output), so that once finish
@@ -66,7 +82,7 @@ func (o *watchOut) finish(lines ...string) {
 	defer o.mu.Unlock()
 	o.stopped = true
 	for _, l := range lines {
-		fmt.Fprintln(o.w, l)
+		o.print(l)
 	}
 }
 
@@ -79,8 +95,8 @@ const (
 // operationWatch follows an operation until its state is terminal (decision T23 of #258, journeys
 // §5.7, client-contracts.md §8.6) through the progress reader, and prints one line per event and
 // then the outcome. A streamed event carries no time, so its line shows when this client received
-// it, marked as such; the completion line shows the server's time from the last event of the JSON
-// pages. Unresolved is not terminal: the watch goes on past it. --timeout ends the watch with exit 5
+// it, marked as such; the completion line shows the server's time of the event of the JSON pages
+// that records the end (recordsEnd), not of the last one. Unresolved is not terminal: the watch goes on past it. --timeout ends the watch with exit 5
 // and Ctrl-C with exit 130; neither stops the operation, which the watch names as it last read it.
 // The reader asks for the end only between its reads, so the timeout can pass by about 45 s, and the
 // first Ctrl-C waits for the reader no longer than interruptGrace. Exit 130 is only for "stopped
@@ -109,8 +125,9 @@ func (e *env) operationWatch(args []string) (err error) {
 	}
 	// A watch left running when the process stops waiting for it still uses c, so c is not saved then.
 	abandoned := false
+	saved := false // the stop path below saved before its stop lines, so the deferred save does not repeat it
 	defer func() {
-		if !abandoned {
+		if !abandoned && !saved {
 			err = errors.Join(err, c.Save())
 		}
 	}()
@@ -141,7 +158,8 @@ func (e *env) operationWatch(args []string) (err error) {
 		o, read, err := c.WatchBody(id, client.Watch{
 			Show:  func(ev client.Event) { out.show(eventLine(ev, time.Now())) },
 			Clear: func() { out.show("(the events above no longer hold; they are shown again from the start)") },
-			Until: func() (bool, error) { return ended.Load() != 0, nil },
+			// A watch whose output cannot be written has nothing left to show: it stops reading.
+			Until: func() (bool, error) { return ended.Load() != 0 || out.failure() != nil, nil },
 		})
 		done <- result{o, read, err}
 	}()
@@ -180,6 +198,11 @@ func (e *env) operationWatch(args []string) (err error) {
 		out.finish(sf("Stopped watching at your request. Operation %s goes on; the state it has now was not read.", id), follow)
 		return interrupted{ef("stopped watching operation %s", id)}
 	}
+	// The watch stopped because its output failed, with no end and no Ctrl-C or timeout: the operation
+	// goes on, and the watch says why it stopped instead of waiting on.
+	if werr := out.failure(); werr != nil && ended.Load() == 0 && (res.o == nil || !client.Terminal(res.o.State)) {
+		return ef("the output of the watch cannot be written: %w; operation %s goes on. Follow it again with: bronzewardctl operation watch %s", werr, id, client.ShellWord(id))
+	}
 	if res.o == nil {
 		return unreadState(id, res.err)
 	}
@@ -207,6 +230,12 @@ func (e *env) operationWatch(args []string) (err error) {
 					fmt.Fprintf(e.err, "bronzewardctl: %s; the operation was not printed\n", client.Shown(err))
 				}
 			}
+			// A failure to keep the client's state is printed before the stop lines, so the follow line
+			// stays last; report returns 130 for a stop and prints nothing itself.
+			saved = true
+			if serr := c.Save(); serr != nil {
+				fmt.Fprintf(e.err, "bronzewardctl: %s\n", client.Shown(serr))
+			}
 			out.finish(sf("Stopped watching at your request. Operation %s is still %s, as the server last read it; it goes on.", id, o.State), follow)
 			return interrupted{ef("stopped watching operation %s, which is still %s", id, o.State)}
 		}
@@ -214,18 +243,19 @@ func (e *env) operationWatch(args []string) (err error) {
 		lines = append(lines, follow)
 	}
 	out.finish(lines...)
+	var emitted error
 	if e.output != "table" { // the body the outcome and the exit code come from, not a second read
-		if err := e.emit(res.read.Body, nil); err != nil {
-			return err
-		}
+		emitted = e.emit(res.read.Body, nil)
 	}
+	var final error
 	switch {
 	case !client.Terminal(o.State):
-		return notTerminal{ef("operation %s is still %s after --timeout %s", id, o.State, timeout)}
+		final = notTerminal{ef("operation %s is still %s after --timeout %s", id, o.State, timeout)}
 	case !ok:
-		return operationFailed{ef("operation %s ended %s", id, o.State)}
+		final = operationFailed{ef("operation %s ended %s", id, o.State)}
 	}
-	return nil
+	// A line or the resource that was not written is an error beside the outcome, whose exit code stays.
+	return errors.Join(final, out.failure(), emitted)
 }
 
 // unreadState is the error of a watch that ended with no operation read. A problem document the
@@ -256,7 +286,33 @@ func unreadState(id string, err error) error {
 		err, id, client.ShellWord(id))}
 }
 
-// lastEvent is an operation's last event as the JSON pages carry it, with the server's time.
+// recordsEnd is whether ev records the operation's end in state, by the event types the server writes
+// for each kind of operation that ends:
+//   - apply-config: an operation-state event whose data.to is the state (internal/api/outcome.go:114,
+//     attempt.go:441, recovery_acts.go:300).
+//   - adopt: the operation is inserted completed together with its adoption event
+//     (internal/api/adoption.go:293 and :299); the applied-change event after it does not end it.
+//   - publish and ingest: an event named after the state, succeeded or failed (publish.go:158, :328,
+//     :415, runner.go:445, :457, ingestions.go:428, recovery_entries.go:276, staging/sweep.go:145).
+//
+// An event recorded after the end, such as the response of an attempt a takeover left behind
+// (outcome.go:292), records no end.
+func recordsEnd(ev lastEvent, state string) bool {
+	switch ev.Type {
+	case "operation-state":
+		var to struct {
+			To string `json:"to"`
+		}
+		return json.Unmarshal(ev.Data, &to) == nil && to.To == state
+	case "adoption":
+		return state == "completed"
+	case "succeeded", "failed":
+		return ev.Type == state
+	}
+	return false
+}
+
+// lastEvent is the event that ends an operation as the JSON pages carry it, with the server's time.
 type lastEvent struct {
 	ID   string          `json:"id"`
 	Type string          `json:"type"`
@@ -264,8 +320,9 @@ type lastEvent struct {
 	Data json.RawMessage `json:"data"`
 }
 
-// readLast reads the operation's last event from the JSON pages. It is nil when the pages or the
-// operation cannot be read, or when the event is not of the epoch of the operation read that follows:
+// readLast reads from the JSON pages the last event that records the operation's end in state
+// (recordsEnd). It is nil when the pages or the operation cannot be read, when no event records the
+// end, or when the event is not of the epoch of the operation read that follows:
 // an installation restored meanwhile has other events, so the event's time is not the operation's. It
 // is also nil when that read shows another state, or another Bronzeward-Epoch header, than the read
 // the watch returned (state, watched). The operation's own epoch member is the one it was created in
@@ -277,7 +334,15 @@ func readLast(c *client.Client, id, state, watched string) *lastEvent {
 		return nil
 	}
 	var ev lastEvent
-	if json.Unmarshal(items[len(items)-1], &ev) != nil {
+	found := false
+	for i := len(items) - 1; i >= 0 && !found; i-- {
+		var x lastEvent
+		found = json.Unmarshal(items[i], &x) == nil && recordsEnd(x, state)
+		if found {
+			ev = x
+		}
+	}
+	if !found {
 		return nil
 	}
 	o, epoch, err := c.OperationEpoch(id)

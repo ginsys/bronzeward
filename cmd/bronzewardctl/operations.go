@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -19,7 +20,7 @@ type notTerminal struct{ error }
 type interrupted struct{ error }
 
 // outcome is an operation's outcome lines (T23) and whether it ended well: completed or succeeded.
-// last, the operation's last event when read from the JSON pages, gives the server's time and a
+// last, the event that records the operation's end when read from the JSON pages, gives the server's time and a
 // cancellation's cause, since a cancelled operation records neither result nor error. Only a
 // completed apply-config with an applied release is reported as applied, and only an adoption as
 // adopted.
@@ -57,6 +58,7 @@ func outcome(o *apitypes.OperationBody, last *lastEvent) ([]string, bool) {
 			Attempts *int   `json:"attempts"`
 			Title    string `json:"title"`
 			Detail   string `json:"detail"`
+			Instance string `json:"instance"`
 		}
 		_ = remarshal(o.Error, &e)
 		if e.Cause == "" && last != nil && last.Type == "operation-state" {
@@ -65,16 +67,21 @@ func outcome(o *apitypes.OperationBody, last *lastEvent) ([]string, bool) {
 				e.Cause = s.Cause
 			}
 		}
-		// A failed publish or ingest operation records the problem that ended it: its title, then its detail.
-		cause := plain(e.Cause)
-		if cause == "" {
-			cause = plain(e.Title)
+		// A failed publish or ingest operation records the problem that ended it. The client shows its title,
+		// its detail when present and its instance (client-contracts.md §8.2), each escaped, and the cause
+		// of an apply-config first.
+		var parts []string
+		for _, p := range []string{e.Cause, e.Title, e.Detail} {
+			if p = plain(p); p != "" && !slices.Contains(parts, p) {
+				parts = append(parts, p)
+			}
 		}
-		if cause == "" {
-			cause = plain(e.Detail)
-		}
+		cause := strings.Join(parts, ": ")
 		if cause == "" {
 			cause = "no cause in the operation; its machine timeline holds the entry that ended it"
+		}
+		if e.Instance != "" {
+			cause += sf(" (instance %s)", e.Instance)
 		}
 		attempts := ""
 		if e.Attempts != nil {
