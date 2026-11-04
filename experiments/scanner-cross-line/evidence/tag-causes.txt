@@ -1,0 +1,22 @@
+== main
+{"inputs":227762,"valid":61086,"equal":59093,"lost":420,"lostFit":378,"badNameDocs":1177,"extra":1573,"extraUnfit":1195,"newLost":0,"newExtra":0,"refusedListed":85552,"failed":0,"msPer10k":58}
+| spelling | directive | lost, server accepts | lost, server refuses | extra, server accepts | extra, server refuses |
+|---|---|---|---|---|---|
+| named handle, !x!bwref | directive | 0 | 0 | 0 | 61 |
+| plain !bwref | directive | 0 | 0 | 0 | 29 |
+| plain !bwref | no directive | 12 | 12 | 0 | 1141 |
+| secondary handle, !!bwref | directive | 0 | 0 | 0 | 222 |
+| secondary handle, !!bwref | no directive | 0 | 0 | 0 | 120 |
+| verbatim, !<...> | directive | 168 | 84 | 0 | 0 |
+| verbatim, !<...> | no directive | 120 | 24 | 0 | 0 |
+== before
+{"inputs":227762,"valid":61086,"equal":44230,"lost":538,"lostFit":424,"badNameDocs":1177,"extra":16318,"extraUnfit":15940,"newLost":118,"newExtra":14745,"refusedListed":165870,"failed":0,"msPer10k":68}
+| spelling | directive | lost, server accepts | lost, server refuses | extra, server accepts | extra, server refuses |
+|---|---|---|---|---|---|
+| named handle, !x!bwref | directive | 0 | 0 | 0 | 73 |
+| plain !bwref | directive | 0 | 0 | 0 | 65 |
+| plain !bwref | no directive | 53 | 89 | 0 | 15832 |
+| secondary handle, !!bwref | directive | 0 | 0 | 0 | 228 |
+| secondary handle, !!bwref | no directive | 0 | 0 | 0 | 120 |
+| verbatim, !<...> | directive | 168 | 84 | 0 | 0 |
+| verbatim, !<...> | no directive | 120 | 24 | 0 | 0 |
