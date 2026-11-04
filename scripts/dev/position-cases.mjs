@@ -76,6 +76,9 @@ const own = [
   ["ginsys/bronzeward#601", "header-digit-then-sign", "a: |2-\n  t\nb: !bwref x/foo\n"],
   ["ginsys/bronzeward#601", "header-sign-then-digit", "a: |-2\n  t\nb: !bwref x/foo\n"],
   ["ginsys/bronzeward#601", "header-comment-digit-sign", "a: | # c 1-\n  t\nb: !bwref x/foo\n"],
+  // A document marker ends every node, also the column of the entry above (the local review of
+  // ginsys/bronzeward#600).
+  ["ginsys/bronzeward#600", "marker-resets-entry-column", 'a:\n  b: x\n--- text\n "x\n---\nb: !bwref x/foo\n'],
   // Indentation counts U+0020 only, and an empty line ends at a line break after spaces only.
   ["ginsys/bronzeward#601", "nbsp-key-after-block", `a: |\n x\n${NBSP}b: !bwref x/foo\n`],
   // go-yaml refuses a tab, or a line of U+00A0 alone, in the block's indentation column: the

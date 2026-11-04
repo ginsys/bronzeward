@@ -96,6 +96,29 @@ describe("the references of a declared embedded document", () => {
     const start = deep.indexOf("!bwref");
     expect(spotOfReference(deep, "x/deep", at("doc[0]/k/cfg"))).toEqual({ start, end: start + "!bwref x/deep".length });
   });
+  // The block's lines are scanned without the block's indentation, so a marker or a flow collection
+  // inside it reads as at the top of a document.
+  test("a literal holder whose text holds a document marker points at the tag after it", () => {
+    const text = "cfg: |\n  ---\n  [!bwref x/foo]\n";
+    const start = text.indexOf("!bwref");
+    expect(references(text, at("doc[0]/cfg"))).toEqual(["x/foo"]);
+    expect(spotOfReference(text, "x/foo", at("doc[0]/cfg"))).toEqual({ start, end: start + "!bwref x/foo".length });
+  });
+  test("an indentation indicator with a first line deeper than the indent cuts only the indent", () => {
+    const text = "k:\n  cfg: |2\n      a: 1\n      b: !bwref x/deep\n";
+    const start = text.indexOf("!bwref");
+    expect(spotOfReference(text, "x/deep", at("doc[0]/k/cfg"))).toEqual({ start, end: start + "!bwref x/deep".length });
+  });
+  test("a blank or shorter line inside the block loses at most the indent, spaces only", () => {
+    const text = "cfg: |\n  a: 1\n \n\n    \n  b: !bwref x/blank\n";
+    const start = text.indexOf("!bwref");
+    expect(spotOfReference(text, "x/blank", at("doc[0]/cfg"))).toEqual({ start, end: start + "!bwref x/blank".length });
+  });
+  test("a tag whose name is on the next line is placed across the removed indentation", () => {
+    const text = "cfg: |\n  a: !bwref\n   x/next\n";
+    const start = text.indexOf("!bwref");
+    expect(spotOfReference(text, "x/next", at("doc[0]/cfg"))).toEqual({ start, end: text.indexOf("x/next") + "x/next".length });
+  });
 });
 
 // The documents of position-cases.json and what go-yaml lists in each, written by `mise run

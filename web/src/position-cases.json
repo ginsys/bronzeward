@@ -379,6 +379,14 @@
    ]
   },
   {
+   "name": "marker-resets-entry-column",
+   "source": "ginsys/bronzeward#600",
+   "doc": "a:\n  b: x\n--- text\n \"x\n---\nb: !bwref x/foo\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
    "name": "nbsp-key-after-block",
    "source": "ginsys/bronzeward#601",
    "doc": "a: |\n x\n b: !bwref x/foo\n",
