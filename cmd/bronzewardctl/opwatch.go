@@ -98,6 +98,8 @@ const (
 // it, marked as such; the completion line shows the server's time of the event of the JSON pages
 // that records the end (recordsEnd), not of the last one. Unresolved is not terminal: the watch goes on past it. --timeout ends the watch with exit 5
 // and Ctrl-C with exit 130; neither stops the operation, which the watch names as it last read it.
+// Both count from the start of the command, so they reach the first read of the server and of the
+// operation too, which run in the reader's goroutine behind the handler.
 // The reader asks for the end only between its reads, so the timeout can pass by about 45 s, and the
 // first Ctrl-C waits for the reader no longer than interruptGrace. Exit 130 is only for "stopped
 // watching" an operation that is not terminal or was not read: what the reader returns within the
@@ -131,18 +133,8 @@ func (e *env) operationWatch(args []string) (err error) {
 			err = errors.Join(err, c.Save())
 		}
 	}()
-	// Every read of the watch that gives nothing maps through unreadState: the server's own problem keeps
-	// its exit 1, anything else leaves the state unknown (exit 3, with the command that reads it).
-	if _, _, err := c.Server(); err != nil {
-		return unreadState(id, err)
-	}
-	o, _, err := c.OperationEpoch(id)
-	if err != nil {
-		return unreadState(id, err)
-	}
-	out.show(sf("%s  %s", o.Kind, subject(o.Subject)))
-	out.show("Times marked \"received\" are this client's clock when the event arrived; the completion line shows the server's time.")
-
+	// The handler and the timeout come before the first read, so a Ctrl-C or the timeout during any read
+	// of the watch, the two first ones included, gets the grace and the stop lines.
 	var ended atomic.Int32 // 0 while it runs, then endInterrupt or endTimeout
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt)
@@ -157,6 +149,20 @@ func (e *env) operationWatch(args []string) (err error) {
 	}
 	done := make(chan result, 1)
 	go func() {
+		// Every read of the watch that gives nothing maps through unreadState: the server's own problem keeps
+		// its exit 1, anything else leaves the state unknown (exit 3, with the command that reads it). The
+		// two first reads give no operation, so they return through the same path as the watch's own.
+		if _, _, err := c.Server(); err != nil {
+			done <- result{err: err}
+			return
+		}
+		first, _, err := c.OperationEpoch(id)
+		if err != nil {
+			done <- result{err: err}
+			return
+		}
+		out.show(sf("%s  %s", first.Kind, subject(first.Subject)))
+		out.show("Times marked \"received\" are this client's clock when the event arrived; the completion line shows the server's time.")
 		o, read, err := c.WatchBody(id, client.Watch{
 			Show:  func(ev client.Event) { out.show(eventLine(ev, time.Now())) },
 			Clear: func() { out.show("(the events above no longer hold; they are shown again from the start)") },
@@ -215,7 +221,7 @@ func (e *env) operationWatch(args []string) (err error) {
 	if res.err != nil {
 		fmt.Fprintf(e.err, "bronzewardctl: %s; the operation's last events were not shown\n", client.Shown(res.err))
 	}
-	o = res.o
+	o := res.o
 	var last *lastEvent
 	if client.Terminal(o.State) {
 		last = readLast(c, id, o.State, res.read.Epoch)
