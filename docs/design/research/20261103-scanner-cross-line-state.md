@@ -234,7 +234,7 @@ it. That is 0.5 to 2.9 milliseconds more, and not a visible delay.
 
 On 10000 small documents C0, C1 and C1c take 53 to 125 ms on the generated sets, C2 0.7 to 1.0 s,
 C3 0.8 to 1.4 s and C3+C1 0.9 to 1.7 s (`table.md`, last column). The hand-written sets S3 and S5
-have longer documents and take 0.3 to 0.7 s for C0, C1 and C1c. The editor calls `references` on
+take 0.3 to 0.7 s for C0, C1 and C1c. The editor calls `references` on
 each change, so a scan of 84 to 92 ms for a large draft (C3, C3+C1) is a visible delay, and 3 to 6 ms
 is not.
 
@@ -256,14 +256,15 @@ Over the same 149 documents, main, C1, C1b, C1c, C3, C3b and C3+C1 read the name
 all 149. C2 loses 3 of them. The plain carry loses all 149.
 
 **The five documents of the first attempt at #578.** Each is a case of S5 (`sets/cases.json`). Each
-ends with `b: ?"y # !bwref ghost` and `c: !bwref x/foo`, and go-yaml lists `x/foo` and no `ghost`
-for each. The table gives the state that the masker needs to read each as go-yaml does.
+ends with a key that holds `?"y # !bwref ghost` (or `?"z` in one case) and a key that holds
+`!bwref x/foo`. These are `b` and `c` in four cases and `c` and `d` in `596-indicator-digit-2`.
+For each, go-yaml lists `x/foo` and no `ghost`. The table gives the state that the masker needs to read each as go-yaml does.
 
 | Case | Document (`/` is a line break) | State it needs |
 |---|---|---|
 | `596-indicator-digit` | `a: \|2` / `    text` / `  p: [x` | `block`: the header's digit. The content indent is the holder's column (0) plus 2, so `  p: [x` is block text and its `[` opens no flow. |
 | `596-indicator-digit-2` | `a: \|2` / `    first` / `  b: [x` | The same, with another key. |
-| `596-own-line-header` | `a:` / `  \|` / `  [x` | `holder`: the column of the key `a` (0), found by walking back from the header's line. The header's own column (2) would make `  [x` a flow opener. |
+| `596-own-line-header` | `a:` / `  \|` / `  [x` | `block`, with the holder taken from `stack`: the column of the key `a` (0), which the line before pushed. The header's own column (2) as holder would make `  [x` a flow opener. |
 | `596-bare-then-shallower` | `a:` / `    x` / `  [y` | `open` and `holder`: the bare `x` is a plain scalar of the key `a`, and `  [y` is deeper than that key, so it continues the scalar. The bare line gives no base column. |
 | `596-header-comment-no-blank` | `a: \|# comment: [x` / `  text` | `block`: the header ends in a comment, even with no blank before the `#`. The `[` in it is comment text and opens no flow. |
 
@@ -346,5 +347,13 @@ valid cases of S5 come out equal to go-yaml for C1c.
   quote is a scalar and its `#` is not a comment. Main and C1c list nothing. The masker does not
   yet treat an alias before `:` as a node start. The implementation issue
   (ginsys/bronzeward#600) carries the fix and a test for this document.
+- Deviations from the issue, for the owner to assess:
+  - The plain quote carry breaks 149 documents of S0, not the 43 that issue 592 names. The attempt
+    behind the 43 is not in the repository (Failure cases).
+  - The full difference lists exist only for the three candidates that lose no name (C1, C1b, C1c).
+    The review input has a ceiling of 600000 bytes, and the first version of the lists for every
+    candidate was 891023 bytes. The others have counts and the first 20 documents per set.
+  - The cost ratio of C1c to C0 at 9000 lines is 1.2 in the committed run and 1.8 in the run before
+    it. Both are in the Cost section. The ratio varies between runs.
 - Timings come from one machine and a few runs each.
 - Nothing here measures the editor itself: the experiment calls `references` and nothing else.
