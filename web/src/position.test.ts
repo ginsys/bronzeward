@@ -561,6 +561,46 @@ describe("a tag is resolved the way go-yaml does", () => {
     expect(references("a: 1\n...\n%TAG ! !bw\nb: !ref x/foo\n")).toEqual([]);
   });
 
+  // A directive in the first column after block content, outside a flow collection, ends the document
+  // and opens the next one (go-yaml v3.0.5 accepts these, and lists the name of the last document).
+  test.each([
+    ["a mapping", "a: 1\n%TAG !x! !bw\n---\nb: !x!ref x/foo\n"],
+    ["a mapping, CRLF", "a: 1\r\n%TAG !x! !bw\r\n---\r\nb: !x!ref x/foo\r\n"],
+    ["a mapping, CR", "a: 1\r%TAG !x! !bw\r---\rb: !x!ref x/foo\r"],
+    ["a mapping with a comment after the directive", "a: 1\n%TAG !x! !bw # note\n---\nb: !x!ref x/foo\n"],
+    ["a mapping, after a comment and a blank line", "a: 1\n# c\n\n%TAG !x! !bw\n---\nb: !x!ref x/foo\n"],
+    ["a nested mapping", "a:\n  b: 1\n%TAG !x! !bw\n---\nb: !x!ref x/foo\n"],
+    ["a sequence", "- a\n%TAG !x! !bw\n---\n- !x!ref x/foo\n"],
+    ["a closed flow sequence", "[a]\n%TAG !x! !bw\n---\n!x!ref x/foo\n"],
+    ["a quoted scalar", '"a"\n%TAG !x! !bw\n---\n!x!ref x/foo\n'],
+    ["a plain value", "a: x\n%TAG !x! !bw\n---\nb: !x!ref x/foo\n"],
+    ["a block scalar", "a: |\n  x\n%TAG !x! !bw\n---\nb: !x!ref x/foo\n"],
+    ["a block scalar after a document start", "--- |\n x\n%TAG !x! !bw\n---\nb: !x!ref x/foo\n"],
+    ["an explicit key", "? a\n%TAG !x! !bw\n---\nb: !x!ref x/foo\n"],
+    ["a %YAML directive", "a: 1\n%YAML 1.1\n---\nb: !bwref x/foo\n"],
+  ])("a directive after %s ends the document", (_, text) => {
+    expect(references(text)).toEqual(["x/foo"]);
+  });
+
+  test("the document that a directive ends keeps its own names, with its own table", () => {
+    expect(references("a: !bwref x/bar\n%TAG !x! !bw\n---\nb: !x!ref x/foo\n")).toEqual(["x/bar", "x/foo"]);
+    // The handle is declared after the first document, so the first document has no `!x!` handle.
+    expect(references("a: !x!ref x/bar\n%TAG !x! !bw\n---\nb: !x!ref x/foo\n")).toEqual(["x/foo"]);
+  });
+
+  // go-yaml refuses these streams: a plain scalar goes on over the directive line, a directive in an
+  // open flow collection is an error, and the directive needs its `---`.
+  test.each([
+    ["a plain scalar that goes on", "a\n%TAG !x! !bw\n---\n!x!ref x/foo\n"],
+    ["a plain scalar after a document start", "--- a\n%TAG !x! !bw\n---\n!x!ref x/foo\n"],
+    ["an open flow sequence", "a: [1,\n%TAG !x! !bw\n---\nb: !x!ref x/foo\n"],
+    ["a directive with no document start", "a: 1\n%TAG !x! !bw\nb: !x!ref x/foo\n"],
+    ["a directive and a document end with no start", "a: 1\n%TAG !x! !bw\n...\nb: !x!ref x/foo\n"],
+    ["%YAML 1.2", "a: 1\n%YAML 1.2\n---\nb: !bwref x/foo\n"],
+  ])("a directive after %s lists nothing", (_, text) => {
+    expect(references(text)).toEqual([]);
+  });
+
   test("a line that looks like a directive in a block scalar or a comment declares nothing", () => {
     expect(references("a: |\n  %TAG ! !bw\nb: !ref x/foo\n")).toEqual([]);
     expect(references("# %TAG ! !bw\nb: !ref x/foo\n")).toEqual([]);

@@ -323,6 +323,21 @@ const firstOfG = docs.size;
     docs.add(`a: 1\n...\n${d}\nb: ${TAG}\n`);
     docs.add(`a: 1\n...\nb: ${TAG}\n`);
   }
+  // A directive in the first column after content (it ends the document in go-yaml when no flow
+  // collection is open and no plain scalar goes on), and the spots where it is an error. The
+  // second document is read with the table the directive declares.
+  const ends = [
+    "a: 1", "a: x", "a:\n  b: 1", "a: |\n  x", "a: >\n  x", "- a", "- - a", "[a]", "{a: 1}", '"a"', "'a'", "? a", "? a\n: b",
+    "--- |\n x", "--- a: 1", "a: 1\n# c", "a: 1\n\n", "a: &e x", `a: ${TAG} x/bar`, "a: [1,", "a: {b:", "a: 'x", "a", "--- a", "a: 1\n  b", "- a\n  b",
+  ];
+  for (const d of ["%TAG !x! !bw", "%YAML 1.1", "%YAML 1.2", "%TAG !x! !bw\n%TAG !x! !b", "%FOO x"])
+    for (const c of ends) {
+      docs.add(`${c}\n${d}\n---\nb: !x!ref x/foo\n`);
+      docs.add(`${c}\n${d}\n---\nb: ${TAG}\n`);
+      docs.add(`${c}\n${d}\nb: !x!ref x/foo\n`);
+      docs.add(`${c}\n${d}\n...\nb: !x!ref x/foo\n`);
+      docs.add(`${c}\n${d}\n---\nb: !x!ref x/foo\n%TAG !x! !other\n---\nc: !x!ref x/foo\nd: ${TAG}\n`);
+    }
 }
 
 // (J) The line ends of (G), (H), (I), (K), (L) and (M) as a CRLF, a lone carriage return, U+0085, U+2028 and U+2029.

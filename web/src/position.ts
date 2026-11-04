@@ -495,7 +495,8 @@ function endDocument(d: Docs, phase: "start" | "ended") {
 }
 // Read a line against the document state. A directive line (`%` in the first column, outside any
 // scalar) is consumed here and returns true. A `---` or `...` marker ends or starts a document, and
-// a line of content after directives with no `---`, or after `...`, refuses its document.
+// a line of content after directives with no `---`, or after `...`, refuses its document. A directive
+// after content ends the document, unless a flow collection is open: that refuses it.
 function readDocumentLine(d: Docs, st: Carry, text: string): boolean {
   if (st.open === '"' || st.open === "'") return false;
   if (MARKER.test(text)) {
@@ -510,12 +511,20 @@ function readDocumentLine(d: Docs, st: Carry, text: string): boolean {
     }
     return false;
   }
-  if (text.startsWith("%") && st.block === undefined && (st.open === "" || (st.open === "plain" && st.holder >= 0))) {
-    if (d.phase === "body") d.refused = true;
-    else {
-      d.pending.push(text);
-      d.phase = "start";
+  if (text.startsWith("%") && (st.open === "" || (st.open === "plain" && st.holder >= 0))) {
+    // After content, a directive in the first column outside a flow collection ends the document
+    // (go-yaml reads the stream end implicitly) and opens the directives of the next one. A block
+    // scalar ends there too, since its content is indented at least one column. Inside a flow
+    // collection the directive is an error.
+    if (d.phase === "body") {
+      if (st.flow > 0) d.refused = true;
+      else {
+        endDocument(d, "start");
+        Object.assign(st, freshCarry());
+      }
     }
+    d.pending.push(text);
+    d.phase = "start";
     return true;
   }
   if (!/^[ \t]*(?:#.*)?$/.test(text) && d.phase !== "body") {
