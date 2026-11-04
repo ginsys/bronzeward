@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Runs set S8 through go-yaml and the web scanner, on main and at an earlier commit, and groups the
+# differences by the spelling of the tag and by the server's verdict (ginsys/bronzeward#603).
+#
+# Usage: run/tag-causes <work dir> <pre-602 commit>
+#
+# <work dir> is an empty directory outside the checkout (bulk data: keep it out of /tmp). The
+# scanner "main" is web/src/position.ts of this checkout. The scanner "before" is the same file at
+# <pre-602 commit>, copied beside web's sources for the run and removed after. Needs node 24 or
+# later, go, and web/node_modules (mise run web:install). It prints the counts of cmp.mjs and the
+# table of tag-causes.mjs for each scanner.
+set -euo pipefail
+
+if [[ $# -ne 2 ]]; then
+  echo "usage: run/tag-causes <work dir> <pre-602 commit>" >&2
+  exit 2
+fi
+mkdir -p "$1"
+work=$(cd "$1" && pwd)
+before=$2
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+copy="$here/../../web/src/zz-pre602-position.ts"
+trap 'rm -f "$copy"' EXIT
+
+node "$here/sets/gen-s8-state-edges.ts" "$work/s8.json" >/dev/null
+go -C "$here" run . "$work/s8.json" "$work/s8.oracle.json"
+git -C "$here" show "$before:web/src/position.ts" >"$copy"
+
+for which in main before; do
+  if [[ $which == main ]]; then
+    module="$here/candidates/c0-main.mjs"
+  else
+    module=$copy
+  fi
+  echo "== $which"
+  node "$here/cmp.mjs" "$work/s8.json" "$work/s8.oracle.json" "$module" "$work/s8.$which.report.json" >/dev/null
+  node "$here/tag-causes.mjs" "$work/s8.$which.report.json" "$work"
+done
