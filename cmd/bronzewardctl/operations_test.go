@@ -29,6 +29,7 @@ type opFake struct {
 	beat          time.Duration // when set, a held stream sends a keep-alive comment this often
 	lateFrom      int           // from this page request on (when set), the pages are latePages: events written after a restore
 	latePages     []string
+	badServer     bool // the server read answers 200 with a body that is no JSON
 	pagesFail     bool // the JSON event pages answer 404: reading the events fails
 	badReadFrom   int  // from this operation read on (when set), the answer is 200 with a body that is no JSON: an ambiguous answer
 	forbidFrom    int  // from this operation read on (when set), the answer is a 403 problem: a refusal the server named
@@ -48,6 +49,10 @@ func (f *opFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch strings.TrimPrefix(r.URL.Path, "/api/v1") {
 	case "/server":
 		w.Header().Set("Content-Type", "application/json")
+		if f.badServer {
+			fmt.Fprint(w, "not json")
+			return
+		}
 		fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":3,"startMode":"normal"}`)
 	case "/operations/op_BWSYNTH":
 		w.Header().Set("Content-Type", "application/json")
