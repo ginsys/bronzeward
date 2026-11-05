@@ -164,8 +164,18 @@ export function startInjector(upstream: string, port: number): Promise<Injector>
       const headers = Object.fromEntries(Object.entries(req.headers).filter(([k]) => k !== "host" && k !== "connection")) as Record<string, string>;
       const sent = req.method === "GET" || req.method === "HEAD" ? null : new Uint8Array(await body(req));
       const up = await fetch((f.upstream ?? upstream) + (req.url ?? "/"), { method: req.method ?? "GET", headers, body: sent, redirect: "manual" });
-      let out = Buffer.from(await up.arrayBuffer());
       const back = Object.fromEntries([...up.headers].filter(([k]) => !["content-length", "content-encoding", "transfer-encoding", "connection"].includes(k)));
+      // The import cases (#340): an operation's event stream passes on as it arrives, since the
+      // server ends it only at a terminal state; the page closing it cancels the server's.
+      if (up.ok && up.body !== null && (up.headers.get("content-type") ?? "").startsWith("text/event-stream")) {
+        const reader = up.body.getReader();
+        res.once("close", () => void reader.cancel().catch(() => {}));
+        res.writeHead(up.status, back);
+        for (let r = await reader.read().catch(() => undefined); r !== undefined && !r.done; r = await reader.read().catch(() => undefined)) res.write(r.value);
+        inj.answered.push(`${route}${search} ${up.status}`);
+        return void res.end();
+      }
+      let out = Buffer.from(await up.arrayBuffer());
       if (route === "/server" && f.revision !== undefined && up.ok) {
         out = Buffer.from(JSON.stringify({ ...JSON.parse(out.toString()), apiRevision: f.revision }));
       }
