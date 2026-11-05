@@ -3,6 +3,7 @@
 package client
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -22,10 +23,18 @@ import (
 const tempKeychainPassword = "BWSYNTH-keychain"
 
 // securityOut runs the security tool and returns its output, failing the test when it fails and
-// ok is false.
+// ok is false. It stops the tool after 20 seconds, so that a password dialog the tool waits on ends
+// the call and not the whole test run; the output then says so.
 func securityOut(t *testing.T, ok bool, args ...string) string {
 	t.Helper()
-	out, err := exec.Command("/usr/bin/security", args...).CombinedOutput()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "/usr/bin/security", args...)
+	cmd.WaitDelay = time.Second
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		out = append(out, "[no answer within 20 s: the tool may be waiting on a password dialog]"...)
+	}
 	if err != nil && ok {
 		t.Fatalf("security %s: %v: %s", strings.Join(args, " "), err, out)
 	}
@@ -125,6 +134,35 @@ func TestKeychainEntrySize(t *testing.T) {
 	t.Logf("the largest sign-in written in one command: %d bytes (limit %d bytes of command line)", largest, securityLine)
 	if largest < 2500 {
 		t.Errorf("the largest entry is %d bytes; want at least 2500", largest)
+	}
+}
+
+// TestKeychainSecondKeychainLocked checks that a locked keychain elsewhere in the search list is no
+// concern: every call names the default keychain, so none touches the locked one and none waits on
+// a dialog for it (client-contracts.md section 9.2 item 3).
+func TestKeychainSecondKeychainLocked(t *testing.T) {
+	path := temporaryKeychain(t)
+	second := filepath.Join(t.TempDir(), "bwsecond.keychain-db")
+	t.Cleanup(func() { securityOut(t, false, "delete-keychain", second) })
+	securityOut(t, true, "create-keychain", "-p", tempKeychainPassword, second)
+	securityOut(t, true, "list-keychains", "-d", "user", "-s", path, second)
+	securityOut(t, true, "lock-keychain", second)
+	const user = "BWSYNTH-second"
+	for name, call := range map[string]func() error{
+		"keyringSet":     func() error { return keyringSet(user, "BWSYNTH-v") },
+		"keyringGetHeld": func() error { _, _, err := keyringGetHeld(user); return err },
+		"keyringDelete":  func() error { return keyringDelete(user) },
+	} {
+		done := make(chan error, 1)
+		go func() { done <- call() }()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("%s with a locked second keychain: %v, want it to work", name, err)
+			}
+		case <-time.After(2 * securityHeldBound):
+			t.Fatalf("%s with a locked second keychain is still waiting after %v", name, 2*securityHeldBound)
+		}
 	}
 }
 

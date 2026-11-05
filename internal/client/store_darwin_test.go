@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -31,8 +32,12 @@ type toolCall struct {
 	args  []string
 }
 
-// fakeSecurity replaces securityRun with answer, which gets the call and the deadline's context. It
-// returns the calls made, in order.
+// testKeychain is the default keychain that fakeSecurity names.
+const testKeychain = "/Users/BWSYNTH/Library/Keychains/login.keychain-db"
+
+// fakeSecurity replaces securityRun with answer, which gets the call and the deadline's context. The
+// question about the default keychain is answered at once, with testKeychain, and left to answer
+// otherwise. It returns the calls made, in order.
 func fakeSecurity(t *testing.T, answer func(ctx context.Context, c toolCall) ([]byte, error)) func() []toolCall {
 	t.Helper()
 	run := securityRun
@@ -44,6 +49,9 @@ func fakeSecurity(t *testing.T, answer func(ctx context.Context, c toolCall) ([]
 		mu.Lock()
 		calls = append(calls, c)
 		mu.Unlock()
+		if args[0] == "default-keychain" {
+			return []byte("    \"" + testKeychain + "\"\n"), nil
+		}
 		return answer(ctx, c)
 	}
 	return func() []toolCall {
@@ -190,8 +198,14 @@ func TestSecurityReadsGoKeyringFormats(t *testing.T) {
 		if err != nil || !found || v != "BWSYNTH-v" {
 			t.Errorf("%s: %q, %v, %v; want BWSYNTH-v", name, v, found, err)
 		}
-		if c := calls()[0]; strings.Join(c.args, " ") != "find-generic-password -s bronzewardctl -a BWSYNTH-context -w" {
-			t.Errorf("%s: the read ran %v", name, c.args)
+		var read []string
+		for _, c := range calls() {
+			if c.args[0] == "find-generic-password" {
+				read = c.args
+			}
+		}
+		if strings.Join(read, " ") != "find-generic-password -s bronzewardctl -a BWSYNTH-context -w "+testKeychain {
+			t.Errorf("%s: the read ran %v, want it to name the default keychain", name, read)
 		}
 	}
 }
@@ -231,8 +245,155 @@ func TestSecurityLockedRefusedWithoutPrompt(t *testing.T) {
 		t.Errorf("a removal on a locked keychain: %v, want errStoreLocked", err)
 	}
 	for _, c := range calls() {
-		if c.args[0] != "show-keychain-info" {
-			t.Errorf("%v ran on a locked keychain; want only the question about it", c.args)
+		if c.args[0] != "show-keychain-info" && c.args[0] != "default-keychain" {
+			t.Errorf("%v ran on a locked keychain; want only the questions about it", c.args)
+		}
+	}
+}
+
+// TestSecurityNamesTheDefaultKeychain checks item 9 of the contract: the question about a locked
+// keychain and every call that reads, writes or removes name the same keychain, the default one, so
+// that a locked second keychain of the search list can show no dialog under the renewal lock.
+func TestSecurityNamesTheDefaultKeychain(t *testing.T) {
+	calls := fakeSecurity(t, func(ctx context.Context, c toolCall) ([]byte, error) { return nil, nil })
+	if _, _, err := keyringGetHeld("BWSYNTH-context"); err != nil {
+		t.Fatal(err)
+	}
+	if err := keyringSet("BWSYNTH-context", "{}"); err != nil {
+		t.Fatal(err)
+	}
+	if err := keyringDelete("BWSYNTH-context"); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, c := range calls() {
+		seen[c.args[0]] = true
+		switch c.args[0] {
+		case "default-keychain":
+		case "-i":
+			if !strings.HasSuffix(c.stdin, " '"+testKeychain+"'\n") {
+				t.Errorf("the write %q does not end with the default keychain", c.stdin)
+			}
+		default:
+			if last := c.args[len(c.args)-1]; last != testKeychain {
+				t.Errorf("%v does not end with the default keychain", c.args)
+			}
+		}
+	}
+	for _, verb := range []string{"show-keychain-info", "find-generic-password", "-i", "delete-generic-password"} {
+		if !seen[verb] {
+			t.Errorf("no %s call was made", verb)
+		}
+	}
+}
+
+// TestSecurityRefusesADefaultKeychainItCannotName checks that a path the security -i parser would
+// misread, or no path at all, is refused before any call that uses it.
+func TestSecurityRefusesADefaultKeychainItCannotName(t *testing.T) {
+	for _, path := range []string{"", "relative.keychain", "/Users/it's/login.keychain-db"} {
+		run := securityRun
+		t.Cleanup(func() { securityRun = run })
+		var used bool
+		securityRun = func(ctx context.Context, stdin string, args ...string) ([]byte, error) {
+			if args[0] == "default-keychain" {
+				return []byte("    \"" + path + "\"\n"), nil
+			}
+			used = true
+			return nil, nil
+		}
+		if err := keyringSet("BWSYNTH-context", "{}"); err == nil || !strings.Contains(err.Error(), "cannot name") {
+			t.Errorf("default keychain %q: %v, want it refused", path, err)
+		}
+		if used {
+			t.Errorf("default keychain %q: a call ran with it", path)
+		}
+	}
+}
+
+// TestSecurityOutcomeFollowsTheExitStatus checks that a tool which exited 0 is no timeout, although
+// Run returned the context's error, and that a killed tool is one.
+func TestSecurityOutcomeFollowsTheExitStatus(t *testing.T) {
+	done := exec.Command("true")
+	if err := done.Run(); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if out, err := securityOutcome(ctx, done.ProcessState, []byte("ok"), nil, context.Canceled); err != nil || string(out) != "ok" {
+		t.Errorf("a tool that exited 0 after the deadline: %q, %v, want its output and no error", out, err)
+	}
+	killed := exec.Command("sleep", "60")
+	if err := killed.Start(); err != nil {
+		t.Fatal(err)
+	}
+	_ = killed.Process.Kill()
+	_ = killed.Wait()
+	if _, err := securityOutcome(ctx, killed.ProcessState, nil, nil, errors.New("signal: killed")); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("a tool killed at the deadline: %v, want context.DeadlineExceeded", err)
+	}
+}
+
+// TestSecurityPreflightAndCallShareOneDeadline checks that a question which uses most of the time
+// leaves the call only what is left: together they end within securityBound, not after the sum.
+func TestSecurityPreflightAndCallShareOneDeadline(t *testing.T) {
+	bound, held := securityBound, securityHeldBound
+	t.Cleanup(func() { securityBound, securityHeldBound = bound, held })
+	securityBound, securityHeldBound = 500*time.Millisecond, time.Minute
+	fakeSecurity(t, func(ctx context.Context, c toolCall) ([]byte, error) {
+		if c.args[0] == "show-keychain-info" {
+			time.Sleep(350 * time.Millisecond)
+			return nil, nil
+		}
+		return hang(ctx, c)
+	})
+	start := time.Now()
+	if err := keyringSet("BWSYNTH-context", "{}"); err == nil || !strings.Contains(err.Error(), "may still be written") {
+		t.Errorf("a write that stalls after the question: %v, want it to say it may still be written", err)
+	}
+	if d := time.Since(start); d > 700*time.Millisecond {
+		t.Errorf("the write took %v, want it within the shared bound of 500 ms", d)
+	}
+}
+
+// TestRefusedNameAndUnreadableEntryDoNotBlockRemoval checks, with the real store, that logout and
+// context remove go past a name the Keychain refuses and past an entry it cannot read (the callers
+// of the store, store.go).
+func TestRefusedNameAndUnreadableEntryDoNotBlockRemoval(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", home)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
+	for _, c := range []struct {
+		name, entry string
+		removed     bool
+	}{
+		{"it's", "", false},
+		{"unreadable", prefixBase64 + "!!!BWSYNTH", true},
+	} {
+		var deleted bool
+		fakeSecurity(t, func(ctx context.Context, call toolCall) ([]byte, error) {
+			switch call.args[0] {
+			case "find-generic-password":
+				return []byte(c.entry + "\n"), nil
+			case "delete-generic-password":
+				deleted = true
+			}
+			return nil, nil
+		})
+		x := Context{Name: c.name, Server: "https://bw.example.invalid", Credential: "oidc",
+			OIDC: &OIDC{Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli"}}
+		if _, err := ClearStored(&x, true); err != nil {
+			t.Errorf("context remove of %q: %v, want it to go on", c.name, err)
+		}
+		if deleted != c.removed {
+			t.Errorf("context remove of %q: entry removed %v, want %v", c.name, deleted, c.removed)
+		}
+		deleted = false
+		if _, err := SignOut(&x, true); err != nil {
+			t.Errorf("logout of %q: %v, want it to go on", c.name, err)
+		}
+		if deleted != c.removed {
+			t.Errorf("logout of %q: entry removed %v, want %v", c.name, deleted, c.removed)
 		}
 	}
 }
@@ -335,12 +496,12 @@ func TestSecurityEntryThatDoesNotDecode(t *testing.T) {
 // the secret and then fails shows its standard error only.
 func TestSecurityErrorNeverCarriesStandardOutput(t *testing.T) {
 	fakeTool(t, "echo BWSYNTH-secret-on-stdout\necho 'tool broke' >&2\nexit 1\n")
-	_, err := securityFind(context.Background(), keyringService, "BWSYNTH-context")
+	_, err := securityFind(context.Background(), testKeychain, keyringService, "BWSYNTH-context")
 	if err == nil || strings.Contains(err.Error(), "BWSYNTH-secret-on-stdout") || !strings.Contains(err.Error(), "tool broke") {
 		t.Errorf("a failed read: %v, want the standard error and none of the standard output", err)
 	}
 	fakeTool(t, "echo BWSYNTH-secret-on-stdout\n")
-	if v, err := securityFind(context.Background(), keyringService, "BWSYNTH-context"); err != nil || v != "BWSYNTH-secret-on-stdout" {
+	if v, err := securityFind(context.Background(), testKeychain, keyringService, "BWSYNTH-context"); err != nil || v != "BWSYNTH-secret-on-stdout" {
 		t.Errorf("a read that worked: %q, %v, want the standard output", v, err)
 	}
 }
