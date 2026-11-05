@@ -65,3 +65,78 @@ s-…  1        ibr_…, doc[0]/cluster/serviceAccount/key         doc[0]/cluste
 s-…  1        ibr_…, doc[0]/cluster/etcd/ca/key                doc[0]/cluster/etcd/ca/key
 Provenance covers secret references only; other fields are not traced.
 [exit 0]
+
+$ bronzewardctl --context human plan create --release {release} --machine {machine} --operation adopt
+Plan pln_…  proposed                                         expires <local time> <local time>
+  Machine                            mch_…  127.0.0.1:<port>  cluster cl_… (lab-a), route 127.0.0.1:<port>
+  Operation                          adopt: records Applied from the node's own bytes and sends nothing to the machine
+  Release                            rel_…  machine Desired: rel_… at plan creation, rel_… now
+  Assignment                         asr_…  baseline revision none, drift record none
+  Limits                             transport -, verification -, observation age 300s, check validity 300s, attempts -, rollout 1
+  Created by                         idn_… (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision 4
+  Approval                           none                                        policy one-approver, committed operation none
+Evidence
+  Validation           passed at publication (contract v1.13, machinery v1.13.6, Kubernetes v1.36.2, container)
+  Dry run              not available: no dry run is available for this operation
+  Baseline             import base ibr_…, the node's own bytes
+  Pending convergence  yes: the release's compiled configuration differs from the node's, which the adoption records; a later apply-config plan withholds its diff
+It is not approved and nothing runs until an approver approves: bronzewardctl approve 'pln_…'
+[exit 0]
+
+$ bronzewardctl --context human approve {plan}
+Approved (apr_…). Recorded self-approval reasons: created-plan, published, authored-change.
+The controller records the adoption without sending anything; Applied becomes rel_… (adoption) once it does.
+Plan pln_…  proposed                                         expires <local time> <local time>
+  Machine                            mch_…  127.0.0.1:<port>  cluster cl_… (lab-a), route 127.0.0.1:<port>
+  Operation                          adopt: records Applied from the node's own bytes and sends nothing to the machine
+  Release                            rel_…  machine Desired: rel_… at plan creation, rel_… now
+  Assignment                         asr_…  baseline revision none, drift record none
+  Limits                             transport -, verification -, observation age 300s, check validity 300s, attempts -, rollout 1
+  Created by                         idn_… (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision 4
+  Approval                           none                                        policy one-approver, committed operation none
+Evidence
+  Validation           passed at publication (contract v1.13, machinery v1.13.6, Kubernetes v1.36.2, container)
+  Dry run              not available: no dry run is available for this operation
+  Baseline             import base ibr_…, the node's own bytes
+  Pending convergence  yes: the release's compiled configuration differs from the node's, which the adoption records; a later apply-config plan withholds its diff
+Self-approval  predicted: you created this plan and published this release, and authored a fragment, profile or assignment revision its draft introduced.
+               Import-base authorship and automation you own are not predicted. The approval records the actual reasons; self-approval is marked and allowed.
+Type the plan ID to send it, or press Enter to stop:
+[exit 0]
+
+$ bronzewardctl --context human plan show {plan}
+Plan pln_…  committed                                        expires <local time> <local time>
+  Machine                            mch_…  127.0.0.1:<port>  cluster cl_… (lab-a), route 127.0.0.1:<port>
+  Operation                          adopt: records Applied from the node's own bytes and sends nothing to the machine
+  Release                            rel_…  machine Desired: rel_… at plan creation, rel_… now
+  Assignment                         asr_…  baseline revision none, drift record none
+  Limits                             transport -, verification -, observation age 300s, check validity 300s, attempts -, rollout 1
+  Created by                         idn_… (publisher)  epoch ep_…, <local time>, plan revision 3, timeline revision 4
+  Approval                           apr_…              policy one-approver, committed operation op_…
+Evidence
+  Validation           passed at publication (contract v1.13, machinery v1.13.6, Kubernetes v1.36.2, container)
+  Dry run              not available: no dry run is available for this operation
+  Baseline             import base ibr_…, the node's own bytes
+  Pending convergence  yes: the release's compiled configuration differs from the node's, which the adoption records; a later apply-config plan withholds its diff
+Committed: operation op_…. Follow it with: bronzewardctl operation watch 'op_…'
+[exit 0]
+
+$ bronzewardctl --context human operation watch {operation}
+adopt  plan pln_…, machine mch_…
+Times marked "received" are this client's clock when the event arrived; the completion line shows the server's time.
+received <time>  adoption              plan pln_…, approval apr_…, observation obs_…, controller <controller>
+received <time>  applied-change        to rel_…, source adoption
+Completed at <local time> (server): adopted; the adoption of plan pln_… records Applied from the node's own bytes. Nothing was sent to the machine.
+[exit 0]
+
+$ bronzewardctl --context human machine show {machine}
+Machine   mch_…  cluster cl_…
+Endpoint  127.0.0.1:<port>                 platform container
+Hardware  node ID none                    SMBIOS UUID 0b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b
+Scope     normal
+The configuration read at <local time> is attributed to rel_…, which is the Applied release (by adoption).
+Adopted from the node's own bytes; the release's compiled configuration may differ. The adopt plan's pendingConvergence evidence shows whether it does; a later apply-config plan withholds its diff when it does.
+The read may match the adopted bytes or this release's compiled configuration; the API does not say which.
+Pending convergence: the configuration of the selected release rel_… for this machine differs from what Bronzeward applied.
+Health: not checked.
+[exit 0]

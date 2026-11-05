@@ -3,6 +3,7 @@ package clitest
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -43,16 +45,44 @@ func (e *planEnv) publishLabels(t *testing.T, title, labels string) string {
 // refused commitment's entry with its plan, comparison and cause, then the plan's cancellation
 // with its reason.
 func TestTimeline(t *testing.T) {
-	e := &watchEnv{planEnv: newPlanEnv(t)}
+	e := newWatchEnv(t)
 	f := e.f
 	h := []string{"--context", "human"}
-	e.in.set(nil, nil)
-	e.adopted = planID.FindString(e.ctl(e.create("adopt")...).out)
-	e.approve(t, e.adopted)
-	e.adoption = e.operationOf(t, e.adopted)
-	if state := f.ended(e.adoption); state != "completed" {
-		t.Fatalf("the adoption %s ended %s", e.adoption, state)
-	}
+	file := filepath.Join(f.home, "viewer.json")
+	f.store(file, f.mint("h-viewer", ""), "")
+	f.want(f.ctl(nil, "", "context", "add", "viewer", "--server", e.in.URL, "--certificate-authority", e.in.ca, "--issuer", f.iss.URL,
+		"--client-id", "BWSYNTH-cli", "--audience", "bronzeward", "--oidc-token-file", file), 0)
+
+	// T9 (operator-experience.md §13): the viewer follows the apply; the injector cuts the first
+	// stream after its first event, and the stand-in accepts the apply once the watch opened the
+	// stream again. Done when the completion is reported with its time. The server's own stop of
+	// 60 s is the fixture's run (fixtures/participants/session t9 disconnect).
+	t.Run("T9 journey", func(t *testing.T) {
+		op, release := e.held(t)
+		defer release()
+		var streams atomic.Int32
+		e.in.set(func(w http.ResponseWriter, r *http.Request) bool {
+			if r.Header.Get("Accept") != "text/event-stream" {
+				return false
+			}
+			if streams.Add(1) == 1 {
+				f.relay(t, w, r, func(string, string) bool { return false })
+				return true
+			}
+			release()
+			return false
+		}, nil)
+		args := []string{"--context", "viewer", "operation", "watch", op}
+		r := e.ctl(args...)
+		f.want(r, 0, "Completed at ", " (server): applied "+e.rel+", confirmed by observation obs_")
+		if streams.Load() < 2 {
+			t.Errorf("the watch opened %d streams; want the cut one and one more", streams.Load())
+		}
+		out := fmt.Sprintf("(the injector ends the first event stream after its first event)\n$ bronzewardctl %s\n%s%s[exit %d]\n",
+			strings.Join(args, " "), r.out, r.err, r.code)
+		out = localTimes.ReplaceAllString(eventTimes.ReplaceAllString(out, "$1 <time>  "), "<local time>")
+		keepJourney(t, "t9", controllerID.ReplaceAllString(out, "<controller>"), t.TempDir())
+	})
 
 	t.Run("T24 follow", func(t *testing.T) {
 		var mu sync.Mutex
