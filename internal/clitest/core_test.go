@@ -1,10 +1,13 @@
 package clitest
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -95,10 +98,15 @@ func TestContextsTokensAndOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer full.Close()
+	// A full disk is a failed write, not a closed pipe: exit 6 with the OS error on standard error, for
+	// a command that prints through the output like every other (operator-experience.md §4).
 	use := f.command(nil, "context", "use", "other")
 	use.Stdout = full
-	if err := use.Run(); err == nil {
-		t.Error("context use reported success when its output could not be written")
+	var useErr bytes.Buffer
+	use.Stderr = &useErr
+	var useExit *exec.ExitError
+	if err := use.Run(); !errors.As(err, &useExit) || useExit.ExitCode() != 6 || !strings.Contains(useErr.String(), "no space left on device") {
+		t.Errorf("context use with its output on /dev/full: %v, stderr %q; want exit 6 and the write error", err, useErr.String())
 	}
 
 	f.want(f.ctl(nil, "", "context", "remove", "other"), 0, `Context "other" removed. No context is current now.`)

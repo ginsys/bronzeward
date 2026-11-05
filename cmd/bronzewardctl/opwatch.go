@@ -41,8 +41,15 @@ func (o *watchOut) show(line string) {
 
 // print writes one line and keeps the first failure: a watch whose output is lost must not end as if
 // it had shown the operation. The caller holds o.mu.
+//
+// The error is tagged outputFailed (exit 6). Standard output tags its own failures already; in -o json
+// and yaml the lines go to standard error, and they are still the output of the command.
 func (o *watchOut) print(line string) {
 	if _, err := fmt.Fprintln(o.w, line); err != nil && o.err == nil {
+		var tagged outputFailed
+		if !errors.As(err, &tagged) {
+			err = outputFailed{err}
+		}
 		o.err = err
 	}
 }
@@ -83,6 +90,22 @@ func (o *watchOut) finish(lines ...string) {
 	o.stopped = true
 	for _, l := range lines {
 		o.print(l)
+	}
+}
+
+// stop is finish for the first Ctrl-C: the user ended the watch, so its lines are printed last and
+// the exit stays 130. When the output of the watch failed already, they go to alt (standard error)
+// instead of to the writer that refused the lines before, and a failure to print them changes nothing.
+func (o *watchOut) stop(alt io.Writer, lines ...string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.stopped = true
+	w := o.w
+	if o.err != nil {
+		w = alt
+	}
+	for _, l := range lines {
+		_, _ = fmt.Fprintln(w, l)
 	}
 }
 
@@ -213,7 +236,7 @@ func (e *env) operationWatch(args []string) (err error) {
 	follow := sf("Follow it again with: bronzewardctl operation watch %s", client.ShellWord(id))
 	if gaveUp {
 		abandoned = true
-		out.finish(sf("Stopped watching at your request. Operation %s goes on; the state it has now was not read.", id), follow)
+		out.stop(e.err, sf("Stopped watching at your request. Operation %s goes on; the state it has now was not read.", id), follow)
 		return interrupted{ef("stopped watching operation %s", id)}
 	}
 	c = res.c
@@ -262,7 +285,7 @@ func (e *env) operationWatch(args []string) (err error) {
 			if serr := c.Save(); serr != nil {
 				fmt.Fprintf(e.err, "bronzewardctl: %s\n", client.Shown(serr))
 			}
-			out.finish(sf("Stopped watching at your request. Operation %s is still %s, as the server last read it; it goes on.", id, o.State), follow)
+			out.stop(e.err, sf("Stopped watching at your request. Operation %s is still %s, as the server last read it; it goes on.", id, o.State), follow)
 			return interrupted{ef("stopped watching operation %s, which is still %s", id, o.State)}
 		}
 		lines = append([]string{sf("Still %s after --timeout %s.", o.State, timeout)}, lines...)

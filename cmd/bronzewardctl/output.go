@@ -62,8 +62,19 @@ func (e linesShown) Error() string { return client.Shown(e.err) }
 
 func (e linesShown) Unwrap() error { return e.err }
 
+// outputFailed is a failed write of the command's output, such as a full disk: exit 6
+// (operator-experience.md §4). A closed pipe is not one: Go ends the process by SIGPIPE before a
+// write returns. errors.Is and errors.As see through it.
+type outputFailed struct{ err error }
+
+func (e outputFailed) Error() string { return e.err.Error() }
+
+func (e outputFailed) Unwrap() error { return e.err }
+
 // tableGuard is standard output: guarded in -o table, as it is by the time of each write, since a
-// global flag can come after the command; json and yaml print the API resource unchanged.
+// global flag can come after the command; json and yaml print the API resource unchanged. It is the
+// one place that tags a failed write as outputFailed, so every command that prints through e.out
+// exits 6 with no code of its own.
 type tableGuard struct {
 	e       *env
 	raw     io.Writer
@@ -71,10 +82,15 @@ type tableGuard struct {
 }
 
 func (t tableGuard) Write(p []byte) (int, error) {
+	w := t.raw
 	if t.e.output == "table" {
-		return t.guarded.Write(p)
+		w = t.guarded
 	}
-	return t.raw.Write(p)
+	n, err := w.Write(p)
+	if err != nil {
+		return n, outputFailed{err}
+	}
+	return n, nil
 }
 
 // emit prints raw, a JSON document, as -o asks: json prints it unchanged; yaml prints the same
