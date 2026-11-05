@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -266,5 +267,99 @@ func TestMachineTimelineInterruptedRead(t *testing.T) {
 	if code := run([]string{"machine", "timeline", "mch_a", "--follow"}, &out, &errb); code != 130 ||
 		!strings.Contains(errb.String(), "Stopped following the timeline of machine mch_a") {
 		t.Errorf("--follow, Ctrl-C during a failing read: exit %d; want 130 and the stop line:\n%s%s", code, out.String(), errb.String())
+	}
+}
+
+// failWriter is an output that fails as a full disk does. With on set, it fails only the writes that
+// hold on and accepts every other one. Otherwise it accepts its first ok writes and then fails.
+type failWriter struct {
+	ok int
+	on string
+}
+
+func (w *failWriter) Write(p []byte) (int, error) {
+	if w.on != "" {
+		if !strings.Contains(string(p), w.on) {
+			return len(p), nil
+		}
+	} else if w.ok > 0 {
+		w.ok--
+		return len(p), nil
+	}
+	return 0, errors.New("no space left on device")
+}
+
+// TestMachineTimelineFollowWriteError checks that --follow ends with an error when its output cannot
+// be written, instead of polling on with nothing shown. Each case fails one write and no other, and
+// names the requests that may be sent before the follow ends: a failed header sends none, a failed
+// entry line or yaml separator sends no read after the newest page, and a failed notice after a
+// refused cursor sends no read after that one.
+func TestMachineTimelineFollowWriteError(t *testing.T) {
+	var mu sync.Mutex
+	var seen []string
+	reset := false // the server refuses the cursor of an oldest read
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		w.Header().Set("Bronzeward-Epoch", "ep_BWSYNTH-2")
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/server":
+			fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":3,"startMode":"normal"}`)
+		case "/api/v1/machines/mch_a/timeline":
+			q := r.URL.Query()
+			seen = append(seen, q.Get("order")+" "+q.Get("cursor"))
+			if reset && q.Get("order") == "oldest" {
+				w.Header().Set("Content-Type", "application/problem+json")
+				w.WriteHeader(http.StatusBadRequest)
+				fmt.Fprint(w, `{"type":"urn:bronzeward:problem:cursor-invalid","title":"The cursor is not valid here","status":400,"instance":"urn:bronzeward:request:BWSYNTH"}`)
+				return
+			}
+			fmt.Fprintf(w, `{"items":[%s],"tail":"t1"}`, entry(1, "plan", `{"plan":"pln_1"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	every := followEvery
+	followEvery = 10 * time.Millisecond
+	defer func() { followEvery = every }()
+
+	for _, c := range []struct {
+		name  string
+		out   failWriter // the output
+		reset bool       // the server refuses the cursor of the first oldest read
+		reads string     // the timeline requests that may be sent
+		flags []string   // output flags after --follow
+	}{
+		{"the header", failWriter{}, false, "", nil},
+		{"an entry line", failWriter{ok: 1}, false, "newest ", nil},
+		{"a yaml separator", failWriter{on: "---"}, false, "newest ", []string{"-o", "yaml"}},
+		{"a reset notice", failWriter{on: "may no longer hold"}, true, "newest |oldest t1", nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			mu.Lock()
+			seen = nil
+			reset = c.reset
+			mu.Unlock()
+			var errb bytes.Buffer
+			done := make(chan int, 1)
+			args := append([]string{"machine", "timeline", "mch_a", "--follow"}, c.flags...)
+			out := c.out
+			go func() { done <- run(args, &out, &errb) }()
+			var code int
+			select {
+			case code = <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatalf("--follow kept polling after a failed write of %s", c.name)
+			}
+			mu.Lock()
+			got := strings.Join(seen, "|")
+			mu.Unlock()
+			if code == 0 || code == 130 || !strings.Contains(errb.String(), "no space left on device") || got != c.reads {
+				t.Errorf("failed write of %s: exit %d, requests %q; want a write error and requests %q:\n%s", c.name, code, got, c.reads, errb.String())
+			}
+		})
 	}
 }
