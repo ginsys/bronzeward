@@ -766,11 +766,10 @@ var operationCases = map[string]func(*testing.T, *watchEnv){
 	},
 }
 
-// TestOperations runs operation watch (#354, decision T23 of #258) through the CLI against a
-// server with a provider and a Talos stand-in: the cases of testdata/operation-cases.yaml, in their
-// order, after the seeded machine's adoption.
-func TestOperations(t *testing.T) {
-	ids := cases(t, "testdata/operation-cases.yaml", operationCases)
+// newWatchEnv is newPlanEnv's server with the seeded machine adopted: an adopt plan of rel,
+// approved by h-approver, whose adoption completed.
+func newWatchEnv(t *testing.T) *watchEnv {
+	t.Helper()
 	e := &watchEnv{planEnv: newPlanEnv(t)}
 	e.in.set(nil, nil)
 	e.adopted = planID.FindString(e.ctl(e.create("adopt")...).out)
@@ -779,6 +778,15 @@ func TestOperations(t *testing.T) {
 	if state := e.f.ended(e.adoption); state != "completed" {
 		t.Fatalf("the adoption %s ended %s", e.adoption, state)
 	}
+	return e
+}
+
+// TestOperations runs operation watch (#354, decision T23 of #258) through the CLI against a
+// server with a provider and a Talos stand-in: the cases of testdata/operation-cases.yaml, in their
+// order, after the seeded machine's adoption.
+func TestOperations(t *testing.T) {
+	ids := cases(t, "testdata/operation-cases.yaml", operationCases)
+	e := newWatchEnv(t)
 	for _, id := range ids {
 		if !t.Run(id, func(t *testing.T) { operationCases[id](t, e) }) {
 			break // each case's operation must end for the next one's to start
