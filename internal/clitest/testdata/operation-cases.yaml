@@ -37,7 +37,8 @@
       docs/spec/execution-recovery.md §6.3 step 4 creates its operation directly in completed, and
       the record that sets Applied writes the applied-change entry, internal/api/adoption.go);
       "Completed at <time> (server): adopted; the adoption of plan pln_... records Applied from the
-      node's own bytes. Nothing was sent to the machine."; exit 0
+      node's own bytes. Nothing was sent to the machine."; <time> is the server's time of the
+      adoption event as the pages serve it, in the zone of the client (the case runs it with TZ=UTC); exit 0
     absent: [tokens and the stand-in's secrets in stdout, stderr, argv]
   unit: the JSON pages where no stream opens are internal/client TestWatch's case
 
