@@ -27,9 +27,11 @@ export const MAX_DOCUMENT = 512 << 10;
 // How long after the lease it last read the page reads the ingestion again, as the CLI does.
 export const LEASE_MARGIN = 10_000;
 
-// The imports this page started, each with its draft: only their success adopts the draft's ETag
-// (§8.3). In this page's memory only.
-export const started = new Map<string, string>();
+// The imports this page started, each with its draft and the epoch its write was sent under: only
+// their success under that same epoch adopts the draft's ETag (§8.3, §8.5). A revision can be issued
+// again with other content after a restore (persistence API, "do rewind with a restore"), so an
+// import of an earlier epoch is not matched by the draft's revision alone. In this page's memory only.
+export const started = new Map<string, { draft: string; epoch: string | undefined }>();
 
 export const againPath = (b: Pick<Ingestion, "machine" | "draft">) =>
   `/ingestions/new?${new URLSearchParams({ ...(b.machine === null ? {} : { machine: b.machine }), draft: b.draft })}`;
@@ -77,7 +79,9 @@ export async function ended(client: Pick<Client, "readWithEpoch">, b: Ingestion,
     const r = o.result as S["IngestResult"] | null;
     if (r === null || typeof r.draftRevision !== "number") return `Import operation ${short(o.id)} succeeded without naming its draft revision.`;
     const done = <>Import {short(b.id)} released into draft <Id id={r.draft} /> (revision {r.draftRevision}), import base {short(r.importBaseRevision)}.</>;
-    if (started.get(b.id) !== r.draft) return done;
+    const own = started.get(b.id);
+    if (own?.draft !== r.draft) return done;
+    if (own.epoch === undefined || own.epoch !== epoch) return <>{done} The installation entered recovery mode or was restored since this import started, so the draft's ETag is not kept. Open it before writing again.</>;
     const { result: d, epoch: read } = await client.readWithEpoch<Draft>(`/drafts/${enc(r.draft)}`);
     if (d.kind !== "ok" || d.etag === undefined) return <>{done} The draft could not be read again, so its ETag is not kept. Open it before writing again.</>;
     if (read !== epoch) return <>{done} The installation entered recovery mode or was restored while the draft was read again, so its ETag is not kept. Open it before writing again.</>;
@@ -261,10 +265,10 @@ export function sendStart(send: (spec: WriteSpec) => void, clear: () => void, i:
   clear();
   send({
     method: "POST", path: "/ingestions", resource: "/ingestions", ifMatch, body,
-    settled: (out) => {
+    settled: (out, w) => {
       releaseInput(body, out);
       const a = out.kind === "done" ? (out.data as { ingestion?: string } | null) : null;
-      if (typeof a?.ingestion === "string") started.set(a.ingestion, draft);
+      if (typeof a?.ingestion === "string") started.set(a.ingestion, { draft, epoch: w.epoch });
     },
   });
 }
