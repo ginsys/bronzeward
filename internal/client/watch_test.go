@@ -167,6 +167,7 @@ func TestWatch(t *testing.T) {
 		o: &opServer{streams: []handler{sse(ev(e1+":1", "queued"), ev(e2+":2", "started")), sse(ev(e2+":1", "queued"), ev(e2+":2", "succeeded"))},
 			epochs: []string{e1, e2}, states: []string{"running", "succeeded"}, pages: []string{item(e2+":1", "queued"), item(e2+":2", "succeeded")}},
 		shown: []string{e1 + ":1", "clear", e2 + ":1", e2 + ":2"}, lastEvents: []string{"", ""},
+		waits:  []time.Duration{time.Second}, // the first attempt showed one event and cleared it: not progress (#639)
 		notice: "entered recovery mode or was restored while the events were read",
 	}, {
 		name: "JSON pages where no stream opens, read again after 1 s",
@@ -180,6 +181,16 @@ func TestWatch(t *testing.T) {
 			pages:  []string{item(e1+":1", "succeeded")}},
 		shown: []string{e1 + ":1"}, lastEvents: []string{"", "", "", "", "", "", "", ""},
 		waits: []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 30 * time.Second, 30 * time.Second},
+	}, {
+		name: "an event shown and cleared in the same attempt is not progress: a stream that does it on every attempt backs off (#639)",
+		o: &opServer{streams: []handler{sse(ev(e1+":1", "queued"), ev(e2+":2", "started")), sse(ev(e1+":1", "queued"), ev(e2+":2", "started")),
+			sse(ev(e1+":1", "queued"), ev(e2+":2", "started")), sse(ev(e1+":1", "succeeded"))},
+			epochs: []string{e1}, states: []string{"running", "running", "running", "succeeded"},
+			pages: []string{item(e1+":1", "succeeded")}},
+		shown:      []string{e1 + ":1", "clear", e1 + ":1", "clear", e1 + ":1", "clear", e1 + ":1"},
+		lastEvents: []string{"", "", "", ""},
+		waits:      []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second},
+		notice:     "entered recovery mode or was restored while the events were read",
 	}} {
 		t.Run(c.name, func(t *testing.T) {
 			shown, waits, state, notices, err := watched(t, c.o, e1, nil)

@@ -93,13 +93,15 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 		w.sleep = time.Sleep
 	}
 	w.halt = &halt{}
-	// steps counts the events shown: an attempt that showed none is a failure. A clear is not
-	// counted, so a stream whose events never match its epoch, cleared on every attempt, backs off.
-	steps, shows, clears := 0, w.Show, w.Clear
-	w.Show = func(e Event) { steps++; shows(e) }
+	// shown counts the events shown in the attempt since it began or since the last clear: an attempt
+	// with none left is a failure. An event shown and then cleared is not progress, so a stream whose
+	// events never match its epoch, cleared on every attempt, backs off.
+	shown, shows, clears := 0, w.Show, w.Clear
+	w.Show = func(e Event) { shown++; shows(e) }
 	// What Until answered held for the events now cleared, the drain's own clears included: it is
 	// asked again. An error it returned stands.
 	w.Clear = func() {
+		shown = 0
 		if w.halt.err == nil {
 			w.halt.done = false
 		}
@@ -114,7 +116,8 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 	first := true
 	for {
 		c.renewSoon()
-		before, began := steps, time.Now()
+		shown = 0
+		began := time.Now()
 		opened, err := false, error(nil)
 		skip := first && w.stop()
 		first = false
@@ -163,10 +166,9 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 		// Events of another epoch than the operation read's are of a restored installation, and the
 		// operation can have no event to replace them: they are cleared even when Until does not stop,
 		// so what Until kept from them does not hold the watch (client-contracts.md section 8.5).
-		stale := false
 		if epoch != "" && last != "" && epochOf(last) != epoch {
 			c.cleared(w, "the installation was restored or entered recovery mode")
-			last, stale = "", true
+			last = ""
 		}
 		if w.stop() {
 			if w.halt.err != nil {
@@ -178,13 +180,14 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 			// What Until answered rests on events of another epoch than the operation read's: they
 			// are cleared, which asks Until again, and the next stream shows the events from the start.
 			c.cleared(w, "the installation was restored or entered recovery mode")
-			last, stale = "", true
+			last = ""
 		}
 		// An attempt that showed nothing waits the delay, which doubles until an attempt shows
 		// something or a stream stays open for 30 s. JSON pages are read again after the delay.
-		// Events cleared at once are not progress: a server that replays them on every attempt
-		// would otherwise be asked again with no delay.
-		progress := steps != before && !stale
+		// Events shown and then cleared in the attempt are not progress, however they were cleared
+		// (a reset, an event of another epoch, or the operation read above): a server that replays
+		// them on every attempt would otherwise be asked again with no delay.
+		progress := shown > 0
 		if progress || opened && !pages && took >= 30*time.Second {
 			delay = time.Second
 		}
