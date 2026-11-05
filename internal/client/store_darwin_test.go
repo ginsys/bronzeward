@@ -33,7 +33,7 @@ type toolCall struct {
 }
 
 // testKeychain is the default keychain that fakeSecurity names.
-const testKeychain = "/Users/BWSYNTH/Library/Keychains/login.keychain-db"
+const testKeychain = "/Users/tester/Library/Keychains/login.keychain-db"
 
 // fakeSecurity replaces securityRun with answer, which gets the call and the deadline's context. The
 // question about the default keychain is answered at once, with testKeychain, and left to answer
@@ -333,25 +333,53 @@ func TestSecurityOutcomeFollowsTheExitStatus(t *testing.T) {
 	}
 }
 
-// TestSecurityPreflightAndCallShareOneDeadline checks that a question which uses most of the time
-// leaves the call only what is left: together they end within securityBound, not after the sum.
+// TestSecurityPreflightAndCallShareOneDeadline checks that the question and the call after it run
+// under one deadline: the deadline of the write's context is the deadline of the question's, so a
+// slow question leaves the call only what is left, not a new securityBound. It compares the
+// deadlines and not elapsed time, so a slow runner cannot fail it.
 func TestSecurityPreflightAndCallShareOneDeadline(t *testing.T) {
 	bound, held := securityBound, securityHeldBound
 	t.Cleanup(func() { securityBound, securityHeldBound = bound, held })
-	securityBound, securityHeldBound = 500*time.Millisecond, time.Minute
+	securityBound, securityHeldBound = 200*time.Millisecond, time.Minute
+	deadlines := map[string]time.Time{}
+	var mu sync.Mutex
 	fakeSecurity(t, func(ctx context.Context, c toolCall) ([]byte, error) {
+		d, ok := ctx.Deadline()
+		if !ok {
+			t.Errorf("%s ran with no deadline", c.args[0])
+		}
+		mu.Lock()
+		deadlines[c.args[0]] = d
+		mu.Unlock()
 		if c.args[0] == "show-keychain-info" {
-			time.Sleep(350 * time.Millisecond)
 			return nil, nil
 		}
 		return hang(ctx, c)
 	})
-	start := time.Now()
 	if err := keyringSet("BWSYNTH-context", "{}"); err == nil || !strings.Contains(err.Error(), "may still be written") {
 		t.Errorf("a write that stalls after the question: %v, want it to say it may still be written", err)
 	}
-	if d := time.Since(start); d > 700*time.Millisecond {
-		t.Errorf("the write took %v, want it within the shared bound of 500 ms", d)
+	mu.Lock()
+	defer mu.Unlock()
+	if q, w := deadlines["show-keychain-info"], deadlines["-i"]; q.IsZero() || !q.Equal(w) {
+		t.Errorf("the question's deadline %v and the write's %v differ; want one deadline for both", q, w)
+	}
+}
+
+// TestSecurityKeychainPathKeepsItsBytes checks that only the line's own whitespace and its one pair
+// of quotes are removed from the path of the default keychain.
+func TestSecurityKeychainPathKeepsItsBytes(t *testing.T) {
+	for in, want := range map[string]string{
+		"    \"/Users/tester/Keychains/a b.keychain-db \"\n": "/Users/tester/Keychains/a b.keychain-db ",
+		"\"/Users/tester/Keychains/login.keychain-db\"\n":    "/Users/tester/Keychains/login.keychain-db",
+		"/Users/tester/Keychains/bare.keychain-db\n":         "/Users/tester/Keychains/bare.keychain-db",
+	} {
+		run := securityRun
+		t.Cleanup(func() { securityRun = run })
+		securityRun = func(ctx context.Context, stdin string, args ...string) ([]byte, error) { return []byte(in), nil }
+		if got, err := securityKeychain(context.Background()); err != nil || got != want {
+			t.Errorf("%q: %q, %v, want %q", in, got, err, want)
+		}
 	}
 }
 
@@ -368,6 +396,7 @@ func TestRefusedNameAndUnreadableEntryDoNotBlockRemoval(t *testing.T) {
 		removed     bool
 	}{
 		{"it's", "", false},
+		{"nul\x00name", "", false}, // checkName accepts it; a lock file name cannot hold it
 		{"unreadable", prefixBase64 + "!!!BWSYNTH", true},
 	} {
 		var deleted bool
@@ -395,6 +424,34 @@ func TestRefusedNameAndUnreadableEntryDoNotBlockRemoval(t *testing.T) {
 		if deleted != c.removed {
 			t.Errorf("logout of %q: entry removed %v, want %v", c.name, deleted, c.removed)
 		}
+	}
+}
+
+// TestMatchedClearKeepsWhatItCannotAttribute checks that a removal that applies only to one
+// identity (the revocation of an access token, credentials.go) leaves an entry it cannot read.
+func TestMatchedClearKeepsWhatItCannotAttribute(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", home)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
+	var deleted bool
+	fakeSecurity(t, func(ctx context.Context, call toolCall) ([]byte, error) {
+		switch call.args[0] {
+		case "find-generic-password":
+			return []byte(prefixBase64 + "!!!BWSYNTH\n"), nil
+		case "delete-generic-password":
+			deleted = true
+		}
+		return nil, nil
+	})
+	x := Context{Name: "unreadable", Server: "https://bw.example.invalid", Credential: "oidc",
+		OIDC: &OIDC{Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli"}}
+	s := openStore(&x, true)
+	if tk, err := s.clear(func(*Tokens) bool { return true }); tk != nil || err != nil || deleted {
+		t.Errorf("a matched clear of an entry it cannot read: %v, %v, removed %v; want nothing returned and the entry kept", tk, err, deleted)
+	}
+	if tk, err := s.clear(nil); tk != nil || err != nil || !deleted {
+		t.Errorf("an unmatched clear of the same entry: %v, %v, removed %v; want it removed", tk, err, deleted)
 	}
 }
 
