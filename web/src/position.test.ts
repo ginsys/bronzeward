@@ -664,6 +664,8 @@ describe("a tag is resolved the way go-yaml does", () => {
     ["a tag before the tag in a block sequence", "- !other !bwref x/foo\n"],
     ["a tag before the tag in a flow mapping", "{a: !other !bwref x/foo}\n"],
     ["a tag before the tag over a line break in a flow sequence", "[!other\n !bwref x/foo]\n"],
+    // go-yaml takes a comma as a tag character, so the first tag is `!other,` and no comma ends it.
+    ["a comma that the first tag holds, in a flow sequence", "[!other, !bwref x/foo]\n"],
   ])("two tags on one node: %s lists nothing", (_, text) => {
     expect(references(text)).toEqual([]);
   });
@@ -702,7 +704,6 @@ describe("a tag is resolved the way go-yaml does", () => {
   test.each([
     ["a tag on an empty value, then a key with its own tag", "a: !other\nb: !bwref x/foo\n"],
     ["a tag on an empty value, then a tagged key", "a: !other\n!u k: !bwref x/foo\n"],
-    ["a comma between two tags", "[!other, !bwref x/foo]\n"],
     ["a tagged key in a flow mapping", "{!other a: !bwref x/foo}\n"],
     ["a dash between two tags", "- !other\n- !bwref x/foo\n"],
     ["a tagged explicit key and value", "? !other a\n: !bwref x/foo\n"],
