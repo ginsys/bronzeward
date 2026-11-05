@@ -24,9 +24,17 @@ const op = (o: Partial<Operation>): Operation => ({
 } as Operation);
 const noReads: Reads = { client: { read: () => new Promise(() => {}) }, settle: () => true, undropped: () => () => true, view: "", again: 0, regained: 0, go: () => {}, failure: () => null };
 const text = (n: ReactNode) => renderToStaticMarkup(h(ReadsProvider, { value: noReads }, n)).replace(/<[^>]+>/g, "").replaceAll("&#x27;", "'");
-const reading = (res: ReadResult<unknown>) => {
+// A client whose reads answer `res` under `epoch`. `read` stays for the red run of the check, which
+// puts imports.tsx back to the source that read the draft with it.
+const reading = (res: ReadResult<unknown>, epoch: string | undefined = "e1") => {
   const paths: string[] = [];
-  return { paths, client: { read: async <T,>(p: string) => (paths.push(p), res as ReadResult<T>) } };
+  return {
+    paths,
+    client: {
+      read: async <T,>(p: string) => (paths.push(p), res as ReadResult<T>),
+      readWithEpoch: async <T,>(p: string) => (paths.push(p), { result: res as ReadResult<T>, epoch }),
+    },
+  };
 };
 const page = (query: string) =>
   renderToStaticMarkup(h(WritesProvider, { value: new Writes(() => "p") }, h(ShellContext, { value: { roles: ["author"], offline: false } },
@@ -74,6 +82,17 @@ describe("ETAG-02: after a released import the draft's ETag is adopted only at t
     const r = reading({ kind: "ok", data: { revision: 3 }, etag: '"3-c"' });
     const out = text(await ended(r.client, ing(), op({ state: "succeeded", result }), "succeeded", NOW, "e1"));
     expect(out).toContain("Draft drf_2rmp457a is now revision 3: another write followed this import's revision 2. Its ETag is not kept. Review the change before writing again.");
+    expect(keptETag("drf_2rmp457a", "e1")).toBe('"1-a"');
+  });
+  test("a draft read that answers under another epoch than the operation read keeps no ETag (§8.5)", async () => {
+    started.set("ing_6fdq2la", "drf_2rmp457a");
+    keepETag("drf_2rmp457a", '"1-a"', "e1");
+    const r = reading({ kind: "ok", data: { revision: 2 }, etag: '"2-b"' }, "e2");
+    const out = text(await ended(r.client, ing(), op({ state: "succeeded", result }), "succeeded", NOW, "e1"));
+    expect(out).toContain("The installation entered recovery mode or was restored while the draft was read again, so its ETag is not kept.");
+    expect(r.paths).toEqual(["/drafts/drf_2rmp457a"]);
+    // Neither epoch holds the new ETag; the earlier one is the one kept before.
+    expect(keptETag("drf_2rmp457a", "e2")).toBeUndefined();
     expect(keptETag("drf_2rmp457a", "e1")).toBe('"1-a"');
   });
   test("an import another page started reads no draft and keeps no ETag", async () => {

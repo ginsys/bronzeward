@@ -8,8 +8,9 @@ import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
 import type { components } from "./api/v1";
 import { keepETag, keptETag, NO_ASSIST } from "./drafts.tsx";
 import { Form, field, useSend, useUnsaved, useWrites } from "./forms.tsx";
-import { Id, type Reads, Ref, short, useItem, useList, usePending, useReads, useSettled } from "./list.tsx";
+import { Id, Ref, short, useItem, useList, usePending, useReads, useSettled } from "./list.tsx";
 import { eventLine, terminal, watch } from "./progress.ts";
+import type { Client } from "./request.ts";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
 import type { Outcome } from "./write.ts";
@@ -62,15 +63,18 @@ const code = (error: unknown) => {
 
 // What a watch's end says. A success of an import this page started adopts the draft's ETag only at
 // the import's own draft revision (ETAG-02): a higher one means another write followed, treated as a
-// 412.
-export async function ended(client: Reads["client"], b: Ingestion, o: Operation, last: string, now: number, epoch: string | undefined): Promise<ReactNode> {
+// 412. `epoch` is that of the operation read the watch ended on, and the ETag is kept only when the
+// draft's own read has the same epoch: an ETag read under another epoch is not kept (§8.5, "discards
+// every ... ETag", and the commands that read twice compare the epoch of the answers themselves).
+export async function ended(client: Pick<Client, "readWithEpoch">, b: Ingestion, o: Operation, last: string, now: number, epoch: string | undefined): Promise<ReactNode> {
   if (o.state === "succeeded") {
     const r = o.result as S["IngestResult"] | null;
     if (r === null || typeof r.draftRevision !== "number") return `Import operation ${short(o.id)} succeeded without naming its draft revision.`;
     const done = <>Import {short(b.id)} released into draft <Id id={r.draft} /> (revision {r.draftRevision}), import base {short(r.importBaseRevision)}.</>;
     if (started.get(b.id) !== r.draft) return done;
-    const d = await client.read<Draft>(`/drafts/${enc(r.draft)}`);
+    const { result: d, epoch: read } = await client.readWithEpoch<Draft>(`/drafts/${enc(r.draft)}`);
     if (d.kind !== "ok" || d.etag === undefined) return <>{done} The draft could not be read again, so its ETag is not kept. Open it before writing again.</>;
+    if (read !== epoch) return <>{done} The installation entered recovery mode or was restored while the draft was read again, so its ETag is not kept. Open it before writing again.</>;
     if (d.data.revision !== r.draftRevision) {
       return <>{done} Draft {short(r.draft)} is now revision {d.data.revision}: another write followed this import's revision {r.draftRevision}. Its ETag is not kept. <Ref to={`/drafts/${r.draft}`} id={r.draft}>Review the change</Ref> before writing again.</>;
     }
