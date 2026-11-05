@@ -3,7 +3,7 @@ import { createElement as h, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
 import { Action, connection, Deprecations, deprecated, ending, Failure, heldPage, type Identity, identityMain, incompatible, KEPT_PAGE, keepsPage, Kept, MIN_API_REVISION, observed, offlineSince, reading, regaining, ShellContext, type ShellEvents, ShellReads, moveFree, showCurrent } from "./shell.tsx";
-import { Conflict, Disconnected, Empty, HUMAN_ONLY, Loading, NOT_ACCEPTED, NotAccepted, Offline, Refused, REPEATING, REPLAYED, Replayed, SET_ASIDE, SetAside, Unknown, UNKNOWN, Unread, Withheld, WITHHELD } from "./states.tsx";
+import { Conflict, Disconnected, Empty, HUMAN_ONLY, Loading, NOT_ACCEPTED, NotAccepted, Offline, Refused, REPEATING, REPLAYED, Replayed, SCOPE_NO_MODE, SET_ASIDE, SetAside, Unknown, UNKNOWN, Unread, Withheld, WITHHELD } from "./states.tsx";
 import { NO_EPOCH, SHELL_GONE, Write, Writes } from "./write.ts";
 import { type Attempt, type Client, TRANSPORT_FAILURE } from "./request.ts";
 
@@ -41,6 +41,22 @@ describe("W11 state catalogue: every text a status message", () => {
     expect(status(h(Refused, { problem: forbidden({ humanOnly: true, roles: ["approver"] }), status: 403, verb: "saved" }))).toBe(`Not saved: forbidden. ${HUMAN_ONLY} Forbidden Request req-2.`);
     // The plan cancellation's creator check says it in its detail.
     expect(status(h(Refused, { problem: forbidden({ plan: "pln_1", roles: ["publisher"], detail: "only the creator" }), status: 403, verb: "saved" }))).toBe("Not saved: forbidden. Forbidden: only the creator Request req-2.");
+  });
+
+  test("a recovery-mode refusal with a scope names the scope and says nothing about the start mode (§8.5 item 1)", () => {
+    const refusal = (extra: Record<string, unknown>) => ({ type: "urn:bronzeward:problem:recovery-mode-active", title: "Recovery mode active", status: 409, detail: "injected", instance: "req-3", ...extra });
+    // A scope's refusal: the scope is named, and no word about a recovery start.
+    const scoped = status(h(Refused, { problem: refusal({ scope: "mch_a" }), status: 409, verb: "saved" }));
+    expect(scoped).toBe(`Not saved: recovery-mode-active. Scope mch_a refuses this request. ${SCOPE_NO_MODE} Recovery mode active: injected Request req-3.`);
+    expect(scoped).not.toMatch(/started for recovery|recovery start/i);
+    // The process's refusal has no scope member: its text is unchanged.
+    expect(status(h(Refused, { problem: refusal({}), status: 409, verb: "saved" }))).toBe("Not saved: recovery-mode-active. Recovery mode active: injected Request req-3.");
+    // A scope that is not text is not named: today's text stands.
+    expect(status(h(Refused, { problem: refusal({ scope: 7 }), status: 409, verb: "saved" }))).toBe("Not saved: recovery-mode-active. Recovery mode active: injected Request req-3.");
+    // Another code that carries a scope member is not a recovery refusal.
+    expect(status(h(Refused, { problem: { ...refusal({ scope: "mch_a" }), type: "urn:bronzeward:problem:scope-busy" }, status: 409, verb: "saved" }))).toBe("Not saved: scope-busy. Recovery mode active: injected Request req-3.");
+    // A read's refusal shows it the same way.
+    expect(status(h(Refused, { problem: refusal({ scope: "mch_a" }), status: 409, verb: "read" }))).toContain("Scope mch_a refuses this request.");
   });
 
   test("write states, exercised from #257 on", () => {

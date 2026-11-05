@@ -1,16 +1,17 @@
 // The first write views (ginsys/bronzeward#338) against a disposable deployment through the
-// injector: AMB-01, AMB-03, AMB-05, AMB-07, AMB-08, AMB-09, AMB-12, TLS-03's write and AUTH-07's
-// pending write (conformance/cases/), a second submit, the leave guards and each form sent by
+// injector: AMB-01, AMB-03, AMB-05, AMB-07, AMB-08, AMB-09, AMB-12, TLS-03's write, AUTH-07's
+// pending write and REC-01's scope variant (conformance/cases/), a second submit, the leave guards and each form sent by
 // keyboard only. Each faulted write is "Add cluster" as h-author, with a synthetic name and a
 // random cluster ID; machines get a synthetic node ID and a documentation-range address. The
 // injector's `steps` fault answers each send of the write in turn and lets the rest through; its
 // epoch commits a new epoch in the deployment's database, as a recovery entry does.
 import { randomBytes } from "node:crypto";
-import { $, browser, expect } from "@wdio/globals";
+import { $, $$, browser, expect } from "@wdio/globals";
 import { PRINCIPAL_CHANGED } from "../../src/app.tsx";
-import { REPEATING, REPLAYED, SET_ASIDE, UNKNOWN, unknown } from "../../src/states.tsx";
+import { PRE_ENTRY, RECOVERY_START } from "../../src/recovery.tsx";
+import { REPEATING, REPLAYED, SCOPE_NO_MODE, SET_ASIDE, UNKNOWN, unknown } from "../../src/states.tsx";
 import { CONTROL } from "../auth.conf.ts";
-import { type Faults, REDIRECTED, type Step } from "../injector.ts";
+import { type Faults, INJECTED_SCOPE, REDIRECTED, type Step } from "../injector.ts";
 import { answers, faults, fixtureSignIn, holding, release, storageEmpty } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
@@ -225,6 +226,33 @@ describe("the write views (#338)", () => {
     await oneWrite(2);
     expect(await seen()).toEqual(["failed", "412"]);
     expect(await writeAnswers()).toEqual(["/clusters 412"]);
+  });
+
+  it("REC-01 (scope): a write refused 409 recovery-mode-active with a scope names that scope and says nothing about the start mode; sent once", async () => {
+    await add(["scope-refused"]);
+    await expect(result()).toHaveText(expect.stringContaining(`Scope ${INJECTED_SCOPE} refuses this request. ${SCOPE_NO_MODE}`), { wait: 20_000 });
+    const text = await result().getText();
+    expect(text).toMatch(/^Not saved: recovery-mode-active\./);
+    expect(text).not.toMatch(/started for recovery|recovery start/i);
+    // One send, never repeated: a definite refusal, so no notice either. It reached no server.
+    await oneWrite(1);
+    expect(await seen()).toEqual(["409"]);
+    expect(await writeAnswers()).toEqual([]);
+    expect(await notice().isExisting()).toBe(false);
+    // The scope's refusal showed the page no recovery start: no banner, no start-mode text.
+    expect(await $('[data-testid="recovery"]').isExisting()).toBe(false);
+    const body = await $("body").getText();
+    expect(body).not.toContain(RECOVERY_START);
+    expect(body).not.toContain(PRE_ENTRY);
+    // Positive control: the process's refusal of the same write, without a scope member, does show
+    // the start mode. This server started normally, so the banner never shows; the shell shows its
+    // pre-entry view in place of the page (§8.5 item 1).
+    await faults({ upstream: at, processRefused: ["/clusters"] });
+    await $("main form").$("button=Add cluster").click();
+    await browser.waitUntil(async () => {
+      for (const el of await $$('[data-testid="status"]')) if ((await el.getText().catch(() => "")).includes(PRE_ENTRY)) return true;
+      return false;
+    }, { timeout: 20_000, timeoutMsg: "the process's refusal did not show the pre-entry view" });
   });
 
   it("AUTH-07: a renewal for another subject while the write is pending sets it aside", async function () {
