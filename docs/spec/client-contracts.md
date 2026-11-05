@@ -1050,13 +1050,23 @@ current token expires
    (`org.freedesktop.secrets`) and none can be started for it; a store that answers and then
    fails refuses `login` before the sign-in starts, so nothing is issued that cannot be kept. A
    named bus that cannot be asked, for example a stale address, counts as a store that fails. On
-   macOS the store is the default keychain, reached through the system's `security` tool: no store
-   is available when that tool is missing. The tool gets the secret on its standard input, never
+   macOS the store is the user's keychains, reached through the system's `security` tool: no store
+   is available when that tool is missing. A write goes to the default keychain, but the tool
+   updates a matching entry anywhere in the keychain search list, and a read or removal searches
+   the list, as go-keyring does. The tool gets the secret on its standard input, never
    in an argument, and takes at most 4096 bytes of command line, so a sign-in over about 2.9 KB
-   is refused with that limit named and nothing written. Under the lock the keychain is asked
-   whether it is locked before each call, and a locked one, or one that gives no answer within
+   is refused with that limit named and nothing written. The tool reads a backslash, a quote
+   and a control character in a name as syntax. A context whose name holds one, which
+   `context add` accepts, is refused by the Keychain store, before the sign-in starts, with
+   `the macOS Keychain store cannot keep the sign-in of the context "<name>": its name holds a
+   backslash, a quote or a control character, which the security tool reads as syntax. Remove the
+   context and add it again under a name without them`, and nothing is written. The user renames
+   the context by removing it and adding it again. A removal of such a context succeeds, since no
+   sign-in was kept under it. Under the lock the keychain is asked whether it is locked before each
+   call, including a write and a removal, and a locked one, or one that gives no answer within
    15 seconds, refuses the command as a locked store does. The same bound of a minute applies to
-   each write, and the tool is stopped when it passes. A sign-in
+   each call after that question, and the tool is stopped when it passes. An error of the tool
+   never carries its standard output, which holds the secret on a read. A sign-in
    whose context was removed or changed while it ran is not kept, and its refresh token
    is revoked. Removing a context removes its stored sign-in under the renewal lock, with a
    bounded read first, and leaves an entry alone when a context of that name was added again

@@ -6,9 +6,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -269,6 +272,124 @@ func TestSecurityDeadlines(t *testing.T) {
 	}
 	if _, _, err := keyringGet("BWSYNTH-context"); !errors.Is(err, errStoreSlow) {
 		t.Errorf("a read with no answer: %v, want errStoreSlow", err)
+	}
+}
+
+// fakeTool makes securityTool a shell script with the given body, so that the real runner starts a
+// real process.
+func fakeTool(t *testing.T, body string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "security")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tool := securityTool
+	t.Cleanup(func() { securityTool = tool })
+	securityTool = path
+}
+
+// TestSecurityRefusesNamesItWouldMisread checks that a context name the security -i parser reads as
+// syntax is refused before the tool runs, by a read and a write alike, that a removal of it succeeds
+// since nothing was kept, and that other punctuation is kept.
+func TestSecurityRefusesNamesItWouldMisread(t *testing.T) {
+	calls := fakeSecurity(t, unlocked)
+	for _, name := range []string{`team\prod`, "it's", `say"hi"`, "tab\tname", "line\nfeed", "nul\x00name"} {
+		if _, _, err := keyringGet(name); err == nil || !strings.Contains(err.Error(), "Remove the context and add it again") {
+			t.Errorf("a read of %q: %v, want the refusal with the way out", name, err)
+		}
+		if err := keyringSet(name, "{}"); err == nil || !strings.Contains(err.Error(), "Remove the context and add it again") {
+			t.Errorf("a write of %q: %v, want the refusal with the way out", name, err)
+		}
+		if err := keyringDelete(name); err != nil {
+			t.Errorf("a removal of %q: %v, want none", name, err)
+		}
+	}
+	if n := len(calls()); n != 0 {
+		t.Errorf("the tool ran %d times for names it cannot take; want none", n)
+	}
+	for _, name := range []string{"team-prod", "prod.example:8443", "ünï"} {
+		if err := keyringSet(name, "{}"); err != nil {
+			t.Errorf("a write of %q: %v, want it kept", name, err)
+		}
+	}
+}
+
+// TestSecurityEntryThatDoesNotDecode checks that an entry with a go-keyring prefix that does not
+// decode is refused without a byte of it in the error.
+func TestSecurityEntryThatDoesNotDecode(t *testing.T) {
+	for _, out := range []string{prefixHex + "zzBWSYNTH", prefixBase64 + "!!!BWSYNTH"} {
+		fakeSecurity(t, func(ctx context.Context, c toolCall) ([]byte, error) {
+			if c.args[0] == "find-generic-password" {
+				return []byte(out + "\n"), nil
+			}
+			return nil, nil
+		})
+		_, _, err := keyringGet("BWSYNTH-context")
+		if !errors.Is(err, errEntryUnreadable) || strings.Contains(err.Error(), "BWSYNTH") || strings.Contains(err.Error(), "U+") {
+			t.Errorf("%q: %v, want errEntryUnreadable with none of the entry", out, err)
+		}
+	}
+}
+
+// TestSecurityErrorNeverCarriesStandardOutput checks, with the real runner, that a tool which prints
+// the secret and then fails shows its standard error only.
+func TestSecurityErrorNeverCarriesStandardOutput(t *testing.T) {
+	fakeTool(t, "echo BWSYNTH-secret-on-stdout\necho 'tool broke' >&2\nexit 1\n")
+	_, err := securityFind(context.Background(), keyringService, "BWSYNTH-context")
+	if err == nil || strings.Contains(err.Error(), "BWSYNTH-secret-on-stdout") || !strings.Contains(err.Error(), "tool broke") {
+		t.Errorf("a failed read: %v, want the standard error and none of the standard output", err)
+	}
+	fakeTool(t, "echo BWSYNTH-secret-on-stdout\n")
+	if v, err := securityFind(context.Background(), keyringService, "BWSYNTH-context"); err != nil || v != "BWSYNTH-secret-on-stdout" {
+		t.Errorf("a read that worked: %q, %v, want the standard output", v, err)
+	}
+}
+
+// TestSecurityStopsTheToolAtTheDeadline checks, with the real runner and a real process, that the
+// tool is killed and reaped when the deadline passes, and that the call returns by then: a runner
+// that did not kill it, or did not wait, fails here.
+func TestSecurityStopsTheToolAtTheDeadline(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "pid")
+	fakeTool(t, "echo $$ > '"+pidFile+"'\nexec sleep 60\n")
+	bound := securityBound
+	t.Cleanup(func() { securityBound = bound })
+	securityBound = time.Second
+	start := time.Now()
+	if _, err := securityGet(keyringService, "BWSYNTH-context"); !errors.Is(err, errStoreSlow) {
+		t.Errorf("a read with no answer: %v, want errStoreSlow", err)
+	}
+	if time.Since(start) > 10*time.Second {
+		t.Errorf("the call took %v, want it stopped at its deadline", time.Since(start))
+	}
+	b, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatalf("the tool never started: %v", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
+		t.Errorf("the tool (pid %d) is still there after the call: %v", pid, err)
+	}
+}
+
+// TestSecurityPreflightHasItsOwnBound checks that a write and a removal refuse a keychain that gives
+// no answer to the question within securityHeldBound, not after securityBound.
+func TestSecurityPreflightHasItsOwnBound(t *testing.T) {
+	bound, held := securityBound, securityHeldBound
+	t.Cleanup(func() { securityBound, securityHeldBound = bound, held })
+	securityBound, securityHeldBound = time.Minute, 100*time.Millisecond
+	fakeSecurity(t, hang)
+	start := time.Now()
+	if err := keyringSet("BWSYNTH-context", "{}"); !errors.Is(err, errStoreLocked) {
+		t.Errorf("a write whose question gets no answer: %v, want errStoreLocked", err)
+	}
+	if err := keyringDelete("BWSYNTH-context"); !errors.Is(err, errStoreLocked) {
+		t.Errorf("a removal whose question gets no answer: %v, want errStoreLocked", err)
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Errorf("the calls took %v, want the question stopped at securityHeldBound", time.Since(start))
 	}
 }
 
