@@ -148,5 +148,21 @@ func TestRecovery(t *testing.T) {
 	f.want(ctl("", "recovery", "status"), 0, "Recovery mode", "on", "BWSYNTH drill",
 		s.machine, "pre-restore-unaccounted", "recovery scope-account '"+s.machine+"'")
 	f.want(ctl("", "recovery", "exit"), 1, "409", "The first scope not released: machine '"+s.machine+"', 'pre-restore-unaccounted'.")
+	// A token without recovery-admin: the three commands that send a recovery write show the 403
+	// and the role they need (client-contracts.md §9.6). Typed confirmations are given, so the
+	// refusal is the server's. The accountings read observations first; a seeded machine has none,
+	// so they stop at the client and their 403 is not run here.
+	f.store(f.humanFile(), f.mint("h-viewer", ""), "")
+	in.set(nil, nil)
+	for _, c := range []struct {
+		typed string
+		args  []string
+	}{
+		{"enter\n", enter},
+		{"", []string{"recovery", "exit"}},
+		{"h-recovery\n", []string{"identity", "revoke", "--iss", f.iss.URL, "--sub", "h-recovery", "--reason", "BWSYNTH left"}},
+	} {
+		f.want(ctl(c.typed, c.args...), 1, "403", "Needs one of the roles", "recovery-admin")
+	}
 	f.scanFiles()
 }

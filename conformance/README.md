@@ -13,11 +13,13 @@ A client change adds the records of the cases it runs, and extends a record when
 part of the case. A case without a record has not run.
 
 The table lists the web client's records. The records of the cases that `bronzewardctl` runs are in
-two files, in §12's record format:
-[`internal/clitest/testdata/cases.yaml`](../internal/clitest/testdata/cases.yaml) for the read and
-sign-in cases, and
-[`internal/clitest/testdata/write-cases.yaml`](../internal/clitest/testdata/write-cases.yaml) for
-the write cases. Its tests run exactly the cases recorded there.
+the `*-cases.yaml` files and `cases.yaml` in
+[`internal/clitest/testdata`](../internal/clitest/testdata), in §12's record format: `cases.yaml`
+for the read and sign-in cases, and one file per command family for the others, such as
+`write-cases.yaml` and `recovery-cases.yaml`. Each test runs exactly the cases recorded in its file.
+The unit tests of `recovery scope-account` and `recovery account` in `cmd/bronzewardctl` run the
+epoch-change refusal before the send only. The injector cases AMB-05, AMB-07 and AMB-12 have no
+record for those two commands yet, so they have not run.
 
 | Record | Runs |
 | --- | --- |

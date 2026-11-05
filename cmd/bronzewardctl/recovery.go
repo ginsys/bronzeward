@@ -16,14 +16,15 @@ import (
 	"github.com/ginsys/bronzeward/internal/client/apitypes"
 )
 
-// recoveryCmd is recovery status, enter and exit (#361; operator-experience.md §5.9, §10). The
-// accounting, takeover, resolution, mark and release are #362's.
+// recoveryCmd is recovery status, enter, exit, scope-account and account (#361, #362;
+// operator-experience.md §5.9, §10). The takeover, resolution, mark and release are #362's, later.
 func (e *env) recoveryCmd(args []string) error {
-	v, rest, err := e.verb("recovery", args, "status", "enter", "exit")
+	v, rest, err := e.verb("recovery", args, "status", "enter", "exit", "scope-account", "account")
 	if err != nil {
 		return err
 	}
-	return map[string]func([]string) error{"status": e.recoveryStatus, "enter": e.recoveryEnter, "exit": e.recoveryExit}[v](rest)
+	return map[string]func([]string) error{"status": e.recoveryStatus, "enter": e.recoveryEnter, "exit": e.recoveryExit,
+		"scope-account": e.recoveryScopeAccount, "account": e.recoveryAccount}[v](rest)
 }
 
 // recoveryStatus is T31: GET /recovery with the start mode GET /server showed, and one row per scope
