@@ -73,7 +73,7 @@ func (e *env) importReview(args []string) (err error) {
 		return fmt.Errorf("GET /api/v1/ingestions/%s/review cannot be read: %w", url.PathEscape(ing), err)
 	}
 	if _, err := fmt.Fprintln(out, reviewNotice); err != nil {
-		return err
+		return outputFailed{err} // the raw file is beneath the table guard, which would have tagged it
 	}
 	if err := e.pager(out, reviewText(rv), rows, cols); err != nil {
 		return err
