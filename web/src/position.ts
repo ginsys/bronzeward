@@ -726,6 +726,9 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number): number {
   // The start of the node whose flow collection opens on this line: the commas and the items inside
   // do not move it, so `[a, b]: |` is a key that starts at the bracket (-2: none opens here).
   let outerStart = -2;
+  // Text came after a closed token (a quote, a bracket, an alias) in this node at depth 0: `"k" x:`.
+  // A colon after it closes no key that starts at the node, so it cannot take a split tag (see `split`).
+  let stray = false;
   while (j < line.length) {
     const c = line[j]!;
     const next = line[j + 1];
@@ -812,6 +815,7 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number): number {
           if (c === ":") st.split = false;
         }
         nodeStart = -1;
+        stray = false;
         lastPlain = false;
         j++;
       } else if ((c === "|" || c === ">") && st.flow === 0 && HEADER_REST.test(line.slice(j + 1))) {
@@ -837,11 +841,13 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number): number {
       if (st.flow === 0 && nodeStart >= 0) {
         pushEntry(st.stack, nodeStart);
         hold = nodeStart;
-        // The tag stands before this key, so it is the key's own tag.
-        st.split = false;
+        // The tag stands before this key, so it is the key's own tag, unless text came after a closed
+        // token before the colon: that is no key (ginsys/bronzeward#620).
+        if (!stray) st.split = false;
       }
       st.ns = true;
       nodeStart = -1;
+      stray = false;
       lastPlain = false;
       st.closed = false;
       j++;
@@ -865,6 +871,7 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number): number {
       // After a quote, a bracket or an alias nothing but a `:`, a flow indicator or a comment can
       // come, so a `%` starts no token there (ginsys/bronzeward#620). After a plain scalar it is text.
       if (c === "%" && st.closed) docs.refused = true;
+      if (st.closed && st.flow === 0) stray = true;
       j = Math.max(plainEnd(line, j, st.flow), j + 1);
       lastPlain = true;
       st.closed = false;

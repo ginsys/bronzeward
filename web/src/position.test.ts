@@ -684,6 +684,11 @@ describe("a tag is resolved the way go-yaml does", () => {
     ["a tag, then a tag and a flow sequence that does not close", "a: !other\n  !u [!bwref x/foo,\n  y]\n"],
     ["a tag, then a tag and a flow value with a colon in a comment", "a: !other\n  !u [!bwref x/foo, # ]: x\n    y]\n"],
     ["a tag, then a tag and a tag-only line", "a: !other\n  !u\n  b: !bwref x/foo\n"],
+    // The colon follows text after a closed token, so it closes no key that the tag could belong to.
+    ["a tag, then a quoted value, text and a colon", 'a: !other\n  !bwref "x/foo" junk: x\n'],
+    ["a tag, then a single quoted value, text and a colon", "a: !other\n  !bwref 'x/foo' junk: x\n"],
+    ["a tag, then a quoted value, text and a colon, in a block sequence", '- !other\n  !bwref "x/foo" junk: x\n'],
+    ["a tag, then an alias, text and a colon", "a: !other\n  !u *k junk: !bwref x/foo\n"],
   ])("two tags over a block line break: %s lists nothing", (_, text) => {
     expect(references(text)).toEqual([]);
   });
@@ -703,6 +708,8 @@ describe("a tag is resolved the way go-yaml does", () => {
     ["a tagged flow mapping key", "a: !other\n  !u {k: v}: !bwref x/foo\n"],
     ["a tagged flow key with an apostrophe in a plain scalar", "a: !other\n  !u [it's]: !bwref 'x/foo'\n"],
     ["a tagged flow key with a bracket in a tag", "a: !other\n  !u [!t[ x]: !bwref x/foo\n"],
+    ["a tagged quoted key with a space before the colon", 'a: !other\n  !u "b" : !bwref x/foo\n'],
+    ["a tagged key of two plain words", "a: !other\n  !u b c: !bwref x/foo\n"],
   ])("one tag per node over a block line break: %s still lists the name", (_, text) => {
     expect(references(text)).toEqual(["x/foo"]);
   });
