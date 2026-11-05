@@ -834,14 +834,19 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     expect(editor(s, { kind: "copy" }).held).toBe(M);
   });
 
-  test("ginsys/bronzeward#559 case 1: a read that is the Save's own, or cannot be told from it, opens no conflict", () => {
+  test("ginsys/bronzeward#559 case 1: a read that is the Save's own opens no conflict, and one that cannot be told by id is told by its text (#631)", () => {
     const own = run(sending({ kind: "read", text: T, since: 0, revision: 9, id: "frv_9" }), [{ kind: "done", revision: "frv_9" }]);
     expect(rest(own)).toEqual({ held: M, saved: M, sent: sentOf(M), writes: 1, own: "frv_9" });
-    // The answer without the created revision's id, and a read without its id.
+    // The answer without the created revision's id, and a read without its id: other text is another author's.
     const noAnswerId = run(sending(theirs10), [{ kind: "done" }]);
-    expect(rest(noAnswerId)).toEqual({ held: M, saved: M, sent: sentOf(M), writes: 1 });
+    expect(rest(noAnswerId)).toEqual({ held: T, saved: T, sent: sentOf(M), conflict: theirs(M, 10), writes: 1 });
     const noReadId = run(sending({ kind: "read", text: T, since: 0, revision: 10 }), [{ kind: "done", revision: "frv_9" }]);
-    expect(rest(noReadId)).toEqual({ held: M, saved: M, sent: sentOf(M), writes: 1, own: "frv_9" });
+    expect(rest(noReadId)).toEqual({ held: T, saved: T, sent: sentOf(M), conflict: theirs(M, 10), writes: 1, own: "frv_9" });
+    // With the sent text, the same two cases stay the Save's own.
+    const sentNoAnswerId = run(sending({ ...theirs10, text: M }), [{ kind: "done" }]);
+    expect(rest(sentNoAnswerId)).toEqual({ held: M, saved: M, sent: sentOf(M), writes: 1 });
+    const sentNoReadId = run(sending({ kind: "read", text: M, since: 0, revision: 10 }), [{ kind: "done", revision: "frv_9" }]);
+    expect(rest(sentNoReadId)).toEqual({ held: M, saved: M, sent: sentOf(M), writes: 1, own: "frv_9" });
   });
 
   test("ginsys/bronzeward#559 case 2: the conflict names the newest draft revision, also from a read that changed only another entry", () => {
@@ -1138,8 +1143,32 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     expect(typed.conflict).toBeUndefined();
   });
 
-  test("ginsys/bronzeward#624: an answer that names no revision cannot tell the read from the Save's own", () => {
-    expect(rest(run(sending(sameText), [{ kind: "done" }]))).toEqual({ held: M, saved: M, sent: sentOf(M), writes: 1 });
+  test("ginsys/bronzeward#631: an answer that names no revision shows a read with other text than the Save sent, the operator's text aside", () => {
+    // The read has the saved text A, the Save sent M: it is another author's, as with a named revision (#624).
+    const s = run(sending(sameText), [{ kind: "done" }]);
+    expect(rest(s)).toEqual({ held: A, saved: A, sent: sentOf(M), conflict: theirs(M, 10), writes: 1 });
+    expect(editor(s, { kind: "copy" }).held).toBe(M);
+  });
+
+  test("ginsys/bronzeward#631: an answer that names no revision keeps a read with the sent text as the Save's own", () => {
+    const s = run(sending({ ...sameText, text: M }), [{ kind: "done" }]);
+    expect(rest(s)).toEqual({ held: M, saved: M, sent: sentOf(M), writes: 1 });
+  });
+
+  test("ginsys/bronzeward#631: with no id on either side and nothing typed after the Save, a read with other text ends as saved and shown, the operator's text aside", () => {
+    const s = run(sending({ kind: "read", text: T, since: 0, revision: 10 }), [{ kind: "done" }]);
+    expect(rest(s)).toEqual({ held: T, saved: T, sent: sentOf(M), conflict: theirs(M, 10), writes: 1 });
+    expect(editor(s, { kind: "copy" }).held).toBe(M);
+  });
+
+  test("ginsys/bronzeward#631: with nothing typed after the Save, another author's text read later does not replace the operator's text unseen", () => {
+    // Before the fix the done Save dropped the read and recorded M as saved; the later read then replaced M.
+    const done = run(sending(sameText), [{ kind: "done" }]);
+    expect(done.held).toBe(A);
+    expect(done.conflict?.mine).toBe(M);
+    const later = editor(done, { kind: "read", text: T, since: 1, revision: 11, id: "frv_11" });
+    expect(later.conflict?.mine).toBe(M);
+    expect(editor(later, { kind: "copy" }).held).toBe(M);
   });
 
   test("ginsys/bronzeward#624: a read again of the loaded revision, and a read before the Save was sent, stay dropped", () => {
@@ -1188,8 +1217,10 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     const stored = { kind: "read", text: { ...A, document: "a: stored\n" }, since: 0, revision: 9, id: "frv_9" } as const;
     const own = run({ held: A, saved: A }, [{ kind: "send" }, stored, { kind: "done", revision: "frv_9" }]);
     expect(rest(own)).toEqual({ held: stored.text, saved: A, sent: sentOf(A), writes: 1, own: "frv_9" });
+    // An answer without the id: the read has other text than the Save sent, so it is another author's (#631).
     const unknown = run({ held: A, saved: A }, [{ kind: "send" }, stored, { kind: "done" }]);
-    expect(rest(unknown)).toEqual({ held: stored.text, saved: A, sent: sentOf(A), writes: 1 });
+    expect(rest(unknown)).toEqual({ held: stored.text, saved: stored.text, sent: sentOf(A), writes: 1 });
+    expect(holdsUnsaved(unknown.held, unknown.saved, unknown.conflict?.mine)).toBe(false);
   });
 
   test("ginsys/bronzeward#613 local review: text typed after a read that showed at once goes aside when the Save or Remove is done", () => {

@@ -530,7 +530,8 @@ function step(s: Editor, e: EditorEvent): Editor {
       // While the pane's own Save or Remove is open, a read of a revision the pane has not read before
       // is held back until the answer, also when its text equals the saved text: a restore brings back
       // the text removed, and another author can store the saved text again. A done Remove shows it.
-      // A done Save drops it only when it is the Save's own revision, which only the answer names. The
+      // A done Save drops it only when it is the Save's own revision, which only the answer names, or
+      // when neither side names one and the read has the text the Save sent (#631). The
       // Remove sends the draft's ETag as If-Match, so a revision stored before it gets a 412, not a
       // done. If the Remove is done, a new revision read now came after it; a write that fails shows
       // the text read in any case. `reread` is the revision the pane loaded already, read again; it
@@ -572,14 +573,15 @@ function step(s: Editor, e: EditorEvent): Editor {
     case "done": {
       const sent = s.sent?.text ?? s.held;
       // A Save's done: a read held back while it was open is another author's unless it is the
-      // Save's own revision. With no id on the answer or the read, it cannot be told, and stays the
-      // Save's own (ginsys/bronzeward#559). Their text or removal shows, the editor's text aside.
+      // Save's own revision. With no id on the answer or the read, the texts tell: a read with the
+      // text the Save sent is the Save's own, any other text is another author's (#559, #631).
+      // Their text or removal shows, the editor's text aside.
       const later = s.sent?.later;
       // A Remove creates no text revision, so a text read while it was open is never its own: it shows
       // with no id to compare (#608). A removal read meanwhile ends the entry removed either way.
       const removes = s.sent?.removes === true;
       const other = later === undefined ? undefined : later.removed === true ? (removes ? undefined : EMPTY)
-        : removes || (later.id !== undefined && e.revision !== undefined && later.id !== e.revision) ? later.text : undefined;
+        : removes || (later.id === undefined || e.revision === undefined ? later.text !== undefined && !same(later.text, sent) : later.id !== e.revision) ? later.text : undefined;
       if (later !== undefined && other !== undefined) {
         const revision = newest(later.revision, c?.revision);
         const { own: _own, gone: _gone, conflict: _conflict, ...after } = s;
