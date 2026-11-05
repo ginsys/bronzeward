@@ -89,7 +89,9 @@ func (e *env) followTimeline(c *client.Client, path string, limit int, machine s
 		return err
 	}
 	if e.output == "table" {
-		tf(e.out, "%-8s  %-23s  %-20s  %s\n", "REVISION", "AT", "KIND", "ENTRY")
+		if err := tf(e.out, "%-8s  %-23s  %-20s  %s\n", "REVISION", "AT", "KIND", "ENTRY"); err != nil {
+			return err // output that cannot be written ends the follow
+		}
 	}
 	newest := func() (string, error) {
 		pg, err := read("newest", "")
@@ -133,13 +135,16 @@ func (e *env) followTimeline(c *client.Client, path string, limit int, machine s
 				if p, ok := err.(*client.Problem); ok && p.Code() == "cursor-invalid" {
 					tf(e.err, "%s: the timeline's cursor is no longer valid: the installation was restored or entered recovery mode; "+
 						"its newest entries are shown again\n", c.Context.Where())
+					err = nil // the refusal is handled; what ends the follow now is a write or a read
 					if e.output == "table" {
-						fmt.Fprintln(e.out, "(the entries above may no longer hold; the newest are shown again)")
+						_, err = fmt.Fprintln(e.out, "(the entries above may no longer hold; the newest are shown again)")
 					}
-					if err = pause(); err != nil { // the newest page is a read too
-						return err
+					if err == nil { // output that cannot be written ends the follow
+						if err = pause(); err != nil { // the newest page is a read too
+							return err
+						}
+						tail, err = newest()
 					}
-					tail, err = newest()
 				}
 				break
 			}
@@ -172,9 +177,13 @@ func (e *env) entries(c *client.Client, items []json.RawMessage) error {
 				return err
 			}
 			t := ts[0]
-			tf(e.out, "%-8d  %-23s  %-20s  %s\n", t.Revision, when(t.At), t.Kind, timelineText(t.Kind, t.Entry))
+			if err := tf(e.out, "%-8d  %-23s  %-20s  %s\n", t.Revision, when(t.At), t.Kind, timelineText(t.Kind, t.Entry)); err != nil {
+				return err
+			}
 		case "yaml":
-			fmt.Fprintln(e.out, "---")
+			if _, err := fmt.Fprintln(e.out, "---"); err != nil {
+				return err
+			}
 			fallthrough
 		default:
 			if err := e.emit(raw, nil); err != nil {
