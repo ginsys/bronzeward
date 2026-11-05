@@ -122,8 +122,13 @@ func (s *store) lock() (func(), error) {
 			get = keyringGetHeld
 		}
 		// A refused name or an unreadable entry does not stop the lock: login, logout and context remove
-		// must go on past them, and every read that needs the entry reports them itself.
-		if _, _, err := get(s.x.Name); err != nil && !errors.Is(err, errNameRefused) && !errors.Is(err, errEntryUnreadable) {
+		// must go on past them, and every read that needs the entry reports them itself. Nothing is
+		// kept under a refused name, so nothing needs its lock, whose file name the name could break.
+		_, _, err := get(s.x.Name)
+		switch {
+		case errors.Is(err, errNameRefused):
+			return func() {}, nil
+		case err != nil && !errors.Is(err, errEntryUnreadable):
 			return nil, err
 		}
 	}
@@ -189,7 +194,11 @@ func (s *store) clear(match func(*Tokens) bool) (*Tokens, error) {
 	case errors.Is(err, errNameRefused):
 		return nil, nil // no sign-in was ever kept under such a name
 	case errors.Is(err, errEntryUnreadable):
-		// Nothing to revoke; the entry goes, so that login can keep a new one.
+		// Nothing to revoke. Without a match the entry goes, so that login can keep a new one. With
+		// one, the entry cannot be attributed to the identity that asked, so it stays.
+		if match != nil {
+			return nil, nil
+		}
 		return nil, keyringDelete(s.x.Name)
 	}
 	if err != nil && !errors.Is(err, ErrNotTokenFile) || t == nil {

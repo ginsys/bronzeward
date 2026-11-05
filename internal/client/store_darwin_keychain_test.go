@@ -138,31 +138,51 @@ func TestKeychainEntrySize(t *testing.T) {
 }
 
 // TestKeychainSecondKeychainLocked checks that a locked keychain elsewhere in the search list is no
-// concern: every call names the default keychain, so none touches the locked one and none waits on
-// a dialog for it (client-contracts.md section 9.2 item 3).
+// concern, even when it holds an entry of the same service and account: every call names the
+// default keychain, so none reads, changes or waits on the locked one (client-contracts.md section
+// 9.2 item 3). The steps run in a fixed order, and each result is checked.
 func TestKeychainSecondKeychainLocked(t *testing.T) {
 	path := temporaryKeychain(t)
 	second := filepath.Join(t.TempDir(), "bwsecond.keychain-db")
 	t.Cleanup(func() { securityOut(t, false, "delete-keychain", second) })
+	const user = "BWSYNTH-second"
 	securityOut(t, true, "create-keychain", "-p", tempKeychainPassword, second)
+	securityOut(t, true, "unlock-keychain", "-p", tempKeychainPassword, second)
+	securityOut(t, true, "add-generic-password", "-s", keyringService, "-a", user, "-w", "BWSYNTH-in-second", second)
 	securityOut(t, true, "list-keychains", "-d", "user", "-s", path, second)
 	securityOut(t, true, "lock-keychain", second)
-	const user = "BWSYNTH-second"
-	for name, call := range map[string]func() error{
-		"keyringSet":     func() error { return keyringSet(user, "BWSYNTH-v") },
-		"keyringGetHeld": func() error { _, _, err := keyringGetHeld(user); return err },
-		"keyringDelete":  func() error { return keyringDelete(user) },
-	} {
+
+	// step runs one call and fails the test when it is still waiting after twice the held bound.
+	step := func(name string, call func() error) {
+		t.Helper()
 		done := make(chan error, 1)
 		go func() { done <- call() }()
 		select {
 		case err := <-done:
 			if err != nil {
-				t.Errorf("%s with a locked second keychain: %v, want it to work", name, err)
+				t.Fatalf("%s with a locked second keychain: %v, want it to work", name, err)
 			}
 		case <-time.After(2 * securityHeldBound):
 			t.Fatalf("%s with a locked second keychain is still waiting after %v", name, 2*securityHeldBound)
 		}
+	}
+	read := func(want string, wantFound bool) func() error {
+		return func() error {
+			v, found, err := keyringGetHeld(user)
+			if err == nil && (found != wantFound || v != want) {
+				t.Errorf("read: %q, %v; want %q, %v", v, found, want, wantFound)
+			}
+			return err
+		}
+	}
+	step("read of the entry that only the second keychain holds", read("", false))
+	step("write", func() error { return keyringSet(user, "BWSYNTH-in-default") })
+	step("read after the write", read("BWSYNTH-in-default", true))
+	step("removal", func() error { return keyringDelete(user) })
+	step("read after the removal", read("", false))
+	securityOut(t, true, "unlock-keychain", "-p", tempKeychainPassword, second)
+	if got := strings.TrimSpace(securityOut(t, true, "find-generic-password", "-s", keyringService, "-a", user, "-w", second)); got != "BWSYNTH-in-second" {
+		t.Errorf("the entry of the second keychain reads %q after the calls; want it untouched", got)
 	}
 }
 

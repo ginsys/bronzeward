@@ -177,9 +177,13 @@ func securityKeychain(ctx context.Context) (string, error) {
 	} else if err != nil {
 		return "", err
 	}
-	// The tool prints the path in double quotes. The path goes into a security -i line, so the
-	// characters that the tool reads as syntax are refused, as in a context name.
-	path := strings.TrimSpace(strings.Trim(strings.TrimSpace(string(out)), `"`))
+	// The tool prints the path in double quotes. Only the line's own whitespace and that one pair of
+	// quotes go: the path keeps every byte, a space at its end included. The path goes into a
+	// security -i line, so the characters that the tool reads as syntax are refused, as in a name.
+	path := strings.TrimSpace(string(out))
+	if len(path) >= 2 && path[0] == '"' && path[len(path)-1] == '"' {
+		path = path[1 : len(path)-1]
+	}
 	if !filepath.IsAbs(path) || strings.ContainsAny(path, `\'"`) || strings.IndexFunc(path, unicode.IsControl) >= 0 {
 		return "", fmt.Errorf("the macOS security tool gave a default keychain this program cannot name: %s", printable(path))
 	}

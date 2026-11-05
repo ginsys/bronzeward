@@ -1063,8 +1063,10 @@ current token expires
    backslash, a quote or a control character, which the security tool reads as syntax. Remove the
    context and add it again under a name without them`, and nothing is written. The user renames
    the context by removing it and adding it again. Logout and the removal of such a context
-   succeed, since no sign-in was kept under it. A stored entry that the program cannot decode is
-   replaced by the next login and removed by logout and by the removal of its context. Under the
+   succeed, since no sign-in was kept under it. A stored entry whose go-keyring encoding is
+   malformed is replaced by the next login and removed by logout and by the removal of its
+   context. A removal that applies only to one revoked sign-in leaves such an entry alone, because it
+   cannot tell whose it is. Under the
    lock the keychain is asked whether it is locked before each call, including a write and a
    removal, and a locked one, or one that gives no answer within 15 seconds, refuses the command as
    a locked store does. The question and the call after it share one bound of a minute, and the
