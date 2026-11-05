@@ -28,6 +28,9 @@ func TestMain(m *testing.M) {
 		helperMain() // a process the pager's signal test starts; it does not return
 	}
 	if os.Getenv("BW_WATCH_HELPER") != "" { // a process the operation watch's signal test starts; it does not return
+		if os.Getenv("BW_WATCH_MARK") != "" { // tell the test that the first Ctrl-C was taken
+			onInterrupt = func() { _, _ = os.Stderr.WriteString("first interrupt taken\n") }
+		}
 		os.Exit(run([]string{"operation", "watch", "op_BWSYNTH", "--timeout", "1m"}, os.Stdout, os.Stderr))
 	}
 	if args := os.Getenv("BW_PIPE_HELPER"); args != "" { // a process the closed-pipe test starts; it does not return

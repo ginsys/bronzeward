@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -49,13 +51,40 @@ func TestOperationWatchSecondCtrlCEndsBlockedWatch(t *testing.T) {
 	defer close(f.hang)
 	automationContext(t, srv.URL)
 	_, w := fullPipe(t)
-	var stderr bytes.Buffer
+	// The helper writes a line on its standard error when it has taken the first Ctrl-C, so the test
+	// sends the second one only after that.
+	er, ew, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer er.Close()
 	cmd := exec.Command(os.Args[0])
-	cmd.Env = append(os.Environ(), "BW_WATCH_HELPER=1")
-	cmd.Stdout, cmd.Stderr = w, &stderr
+	cmd.Env = append(os.Environ(), "BW_WATCH_HELPER=1", "BW_WATCH_MARK=1")
+	cmd.Stdout, cmd.Stderr = w, ew
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+	ew.Close()
+	var mu sync.Mutex
+	var stderr strings.Builder
+	taken := make(chan struct{})
+	go func() {
+		var once sync.Once
+		buf := make([]byte, 512)
+		for {
+			n, err := er.Read(buf)
+			mu.Lock()
+			stderr.Write(buf[:n])
+			if strings.Contains(stderr.String(), "first interrupt taken") {
+				once.Do(func() { close(taken) })
+			}
+			mu.Unlock()
+			if err != nil {
+				return
+			}
+		}
+	}()
+	seen := func() string { mu.Lock(); defer mu.Unlock(); return stderr.String() }
 	ended := make(chan error, 1)
 	go func() { ended <- cmd.Wait() }()
 	defer func() { _ = cmd.Process.Kill() }()
@@ -72,27 +101,29 @@ func TestOperationWatchSecondCtrlCEndsBlockedWatch(t *testing.T) {
 			t.Fatal("the watch read no operation within 10 s")
 		}
 	}
-	// Repeated Ctrl-C: the first one stops the handler of the watch, so a later one takes the default
-	// action. A watch that kept its handler would swallow all of them and hang on the blocked output.
-	tick := time.NewTicker(200 * time.Millisecond)
-	defer tick.Stop()
-	timeout := time.After(2 * time.Second) // under the 3 s grace: a watch that kept its handler swallows the second Ctrl-C until the grace ends
-	for {
-		_ = cmd.Process.Signal(syscall.SIGINT)
-		select {
-		case err := <-ended:
-			var x *exec.ExitError
-			if !errors.As(err, &x) {
-				t.Fatalf("the process ended with %v, stderr %q; want death by SIGINT", err, stderr.String())
-			}
-			st, ok := x.Sys().(syscall.WaitStatus)
-			if !ok || !st.Signaled() || st.Signal() != syscall.SIGINT {
-				t.Errorf("the process ended with %v, stderr %q; want death by SIGINT", err, stderr.String())
-			}
-			return
-		case <-timeout:
-			t.Fatalf("the process did not end within 2 s of repeated Ctrl-C, stderr %q: the second Ctrl-C does not end a blocked watch at once", stderr.String())
-		case <-tick.C:
+	// The first Ctrl-C: the watch takes it, stops its handler and waits for the grace on the blocked output.
+	_ = cmd.Process.Signal(syscall.SIGINT)
+	select {
+	case <-taken:
+	case err := <-ended:
+		t.Fatalf("the process ended with %v on the first Ctrl-C, stderr %q; want it to wait for the stop lines", err, seen())
+	case <-time.After(5 * time.Second):
+		t.Fatalf("the watch did not take the first Ctrl-C within 5 s, stderr %q", seen())
+	}
+	// Exactly one more Ctrl-C, now under the default action. A watch that kept its handler would swallow
+	// it and stay on the blocked output until the 3 s grace ended: the 2 s bound is under that grace.
+	_ = cmd.Process.Signal(syscall.SIGINT)
+	select {
+	case err := <-ended:
+		var x *exec.ExitError
+		if !errors.As(err, &x) {
+			t.Fatalf("the process ended with %v, stderr %q; want death by SIGINT", err, seen())
 		}
+		st, ok := x.Sys().(syscall.WaitStatus)
+		if !ok || !st.Signaled() || st.Signal() != syscall.SIGINT {
+			t.Errorf("the process ended with %v, stderr %q; want death by SIGINT", err, seen())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("the process did not end within 2 s of the second Ctrl-C, stderr %q: the second Ctrl-C does not end a blocked watch at once", seen())
 	}
 }

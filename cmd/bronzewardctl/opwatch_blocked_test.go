@@ -93,8 +93,8 @@ func TestOperationWatchInterruptSaveNoteStderrBlocked(t *testing.T) {
 		t.Fatal("the command did not return within 15 s: the stop lines wait on the blocked standard error")
 	}
 	select {
-	case <-errW.entered:
-	default:
+	case <-errW.entered: // the note goroutine may run after the watch returned: wait for it, bounded
+	case <-time.After(5 * time.Second):
 		t.Error("nothing was written to standard error: the save failure was not noted, so the test proves nothing")
 	}
 	stop := "Stopped watching at your request. Operation op_BWSYNTH is still running, as the server last read it; it goes on.\n" +
