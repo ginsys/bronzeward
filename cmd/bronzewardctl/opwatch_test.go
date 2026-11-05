@@ -673,6 +673,45 @@ func TestOperationWatchEscapes(t *testing.T) {
 	}
 }
 
+// TestOperationWatchEscapesProblemFields: the failure of a publish or ingest operation is a problem
+// document, and its cause, title, detail and instance are each the server's text. A hostile string with a
+// line feed in only one of them reaches the terminal escaped and starts no line of its own, in the outcome
+// on standard output and in the note on standard error. One case per field names the field that fails.
+func TestOperationWatchEscapesProblemFields(t *testing.T) {
+	const bad = "x\x1b[31m\ty\r\u202ez\nFAKE LINE"
+	const shown = `x\x1b[31m\x09y\x0d\u202ez\x0aFAKE LINE`
+	js := func(s string) string { b, _ := json.Marshal(s); return string(b) }
+	f := &opFake{}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	for _, c := range []struct{ field, errBody string }{
+		{"cause", `{"cause":` + js(bad) + `}`},
+		{"title", `{"title":` + js(bad) + `,"status":409}`},
+		{"detail", `{"title":"The job ended","detail":` + js(bad) + `,"status":409}`},
+		{"instance", `{"title":"The job ended","instance":` + js(bad) + `,"status":409}`},
+	} {
+		f.mu.Lock()
+		f.body = fmt.Sprintf(opJSONNoPlan, "publish", "failed", publishSubject, "null", c.errBody)
+		f.stream, f.pages = nil, []string{evPage(1, "queued", "{}"), evPage(2, "failed", `{"code":"recovery"}`)}
+		f.mu.Unlock()
+		code, out, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "2s")
+		for name, text := range map[string]string{"stdout": out, "stderr": errOut} {
+			if i := strings.IndexFunc(strings.ReplaceAll(text, "\n", ""), func(r rune) bool { return unicode.IsControl(r) || r == '\u202e' }); i >= 0 {
+				t.Errorf("%s: %s holds a control character at %d:\n%q", c.field, name, i, text)
+			}
+			for _, l := range strings.Split(text, "\n") {
+				if strings.HasPrefix(l, "FAKE LINE") {
+					t.Errorf("%s: %s has a line of the server's making:\n%q", c.field, name, text)
+				}
+			}
+		}
+		if code != 4 || !strings.Contains(out, shown) {
+			t.Errorf("%s: exit %d (want 4); the escaped server text %q is not in\n%q", c.field, code, shown, out)
+		}
+	}
+}
+
 // TestOperationWatchEscapesCompleted: the applied release and the observation of a completed
 // operation are the server's text too, and reach the terminal escaped.
 func TestOperationWatchEscapesCompleted(t *testing.T) {
@@ -926,12 +965,22 @@ func TestOperationWatchCompletionEvent(t *testing.T) {
 	} {
 		f.mu.Lock()
 		f.body = fmt.Sprintf(opJSON, c.kind, c.state, c.result, c.errBody, "[]")
+		// A publish or ingest operation is the server's own shape: a draft for its subject, no plan.
+		switch c.kind {
+		case "publish":
+			f.body = fmt.Sprintf(opJSONNoPlan, c.kind, c.state, publishSubject, c.result, c.errBody)
+		case "ingest":
+			f.body = fmt.Sprintf(opJSONNoPlan, c.kind, c.state, ingestSubject, c.result, c.errBody)
+		}
 		f.stream, f.pages = nil, c.pages
 		f.mu.Unlock()
 		code, out, _ := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "2s")
 		wantCode := map[bool]int{true: 0, false: 4}[c.state == "completed" || c.state == "succeeded"]
 		if code != wantCode || !strings.Contains(out, c.want) {
 			t.Errorf("%s: exit %d, want %d and %q in\n%s", c.name, code, wantCode, c.want, out)
+		}
+		if noPlan := c.kind == "publish" || c.kind == "ingest"; noPlan && c.state == "failed" && !strings.Contains(out, "Read it: bronzewardctl operation show 'op_BWSYNTH'\n") {
+			t.Errorf("%s: no plan, so the next step is to read the operation; want it in\n%s", c.name, out)
 		}
 	}
 }

@@ -165,6 +165,17 @@ func (f *opFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 const opJSON = `{"id":"op_BWSYNTH","kind":%q,"state":%q,"subject":{"plan":"pln_BWSYNTH","machine":"mch_a"},"epoch":"ep_BWSYNTH-2",` +
 	`"createdAt":"2026-11-01T06:00:00Z","createdBy":null,"lastEvent":3,"result":%s,"error":%s,"attempts":%s}`
 
+// opJSONNoPlan is the operation of a publish or ingest job as the server writes it (internal/api/reads.go
+// operationBody): the subject is a draft and its revision (and an ingestion), never a plan or a machine,
+// and an empty attempts list is left out. The subject is given whole.
+const opJSONNoPlan = `{"id":"op_BWSYNTH","kind":%q,"state":%q,"subject":%s,"epoch":"ep_BWSYNTH-2",` +
+	`"createdAt":"2026-11-01T06:00:00Z","createdBy":null,"lastEvent":3,"result":%s,"error":%s}`
+
+const (
+	publishSubject = `{"draft":"drf_BWSYNTH","draftRevision":3}`
+	ingestSubject  = `{"draft":"drf_BWSYNTH","draftRevision":3,"ingestion":"ing_BWSYNTH"}`
+)
+
 // sse is one streamed event.
 func sse(n int, typ, data string) string {
 	return fmt.Sprintf("id: ep_BWSYNTH-2:%d\nevent: %s\ndata: %s\n\n", n, typ, data)
@@ -185,8 +196,9 @@ var (
 )
 
 // TestOperationWatch checks T23 against a fake server: each outcome's line and exit code, the
-// receipt-marked event lines, streamed or drained, the completion line's server time from the last
-// page item, an unknown type printed raw and quoted, --timeout's exit 5, and -o json.
+// receipt-marked event lines, streamed or drained, the completion line's server time from the event
+// that records the end (TestOperationWatchCompletionEvent holds the late-event cases), an unknown type
+// printed raw and quoted, --timeout's exit 5, and -o json.
 func TestOperationWatch(t *testing.T) {
 	f := &opFake{}
 	srv := httptest.NewServer(f)
@@ -226,10 +238,6 @@ func TestOperationWatch(t *testing.T) {
 		{"apply-config", "rejected", "null", `{"cause":"invalid-configuration","attempts":1}`,
 			"Rejected at 2026-11-01 06:00:03 UTC (server): invalid-configuration, after 1 attempt.\n" +
 				"The node refused the configuration as invalid, so it applied nothing. Review the plan's release before a new plan: bronzewardctl plan show 'pln_BWSYNTH'"},
-		// A failed publish or ingest operation records the problem that ended it: no cause, a title.
-		{"apply-config", "failed", "null", `{"title":"Recovery-mode entry ended the job","status":409}`,
-			"Failed at 2026-11-01 06:00:03 UTC (server): Recovery-mode entry ended the job.\n" +
-				"Nothing more is sent for this plan. Read what the machine runs before a new plan: bronzewardctl machine show 'mch_a'"},
 		// The problem shows its title, its detail when present and its instance (client-contracts.md §8.2), each escaped.
 		{"apply-config", "failed", "null", `{"title":"Ingestion abandoned","status":409,"detail":"the staging claim passed its lease; ingest the input again\u001b[31m","instance":"op_BWSYNTH"}`,
 			"Failed at 2026-11-01 06:00:03 UTC (server): Ingestion abandoned: the staging claim passed its lease; ingest the input again\\x1b[31m (instance op_BWSYNTH).\n" +
@@ -272,6 +280,34 @@ func TestOperationWatch(t *testing.T) {
 			if code, show, _ := runCtl(t, "operation", "show", "op_BWSYNTH"); code != 0 || !strings.Contains(show, placeholder) {
 				t.Errorf("%s: operation show with an event of another epoch, exit %d, want %q in\n%s", c.state, code, placeholder, show)
 			}
+		}
+	}
+
+	// A publish or ingest operation has a draft for its subject and no plan, machine or attempts member. It records
+	// the problem that ended it (a title, no cause). With no plan the next step is to read the operation: no
+	// command names a plan or a machine (the missing-plan case of endNextStep).
+	for _, c := range []struct{ name, kind, subject, header, errBody, want string }{
+		{"publish failed", "publish", publishSubject, "publish  draft drf_BWSYNTH, draft revision 3",
+			`{"title":"Recovery-mode entry ended the job","status":409}`,
+			"Failed at 2026-11-01 06:00:02 UTC (server): Recovery-mode entry ended the job.\n" +
+				"Read it: bronzewardctl operation show 'op_BWSYNTH'"},
+		{"ingest failed", "ingest", ingestSubject, "ingest  draft drf_BWSYNTH, ingestion ing_BWSYNTH, draft revision 3",
+			`{"title":"The ingestion was abandoned","status":409,"detail":"the staging claim passed its lease","instance":"op_BWSYNTH"}`,
+			"Failed at 2026-11-01 06:00:02 UTC (server): The ingestion was abandoned: the staging claim passed its lease (instance op_BWSYNTH).\n" +
+				"Read it: bronzewardctl operation show 'op_BWSYNTH'"},
+	} {
+		f.mu.Lock()
+		f.body = fmt.Sprintf(opJSONNoPlan, c.kind, "failed", c.subject, "null", c.errBody)
+		f.stream, f.pages = nil, []string{evPage(1, "started", "{}"), evPage(2, "failed", `{"code":"abandoned"}`)}
+		f.mu.Unlock()
+		code, out, errOut := runCtl(t, watch...)
+		if code != 4 || !strings.Contains(out, c.header+"\n") || !strings.Contains(out, c.want+"\n") || strings.Contains(out, "this plan") ||
+			!strings.Contains(errOut, "operation op_BWSYNTH ended failed") {
+			t.Errorf("%s: exit %d, want 4, the header %q and %q (and no plan) in:\n%s\nstderr %q", c.name, code, c.header, c.want, out, errOut)
+		}
+		wantShow := strings.ReplaceAll(c.want, " at 2026-11-01 06:00:02 UTC (server)", "")
+		if code, show, _ := runCtl(t, "operation", "show", "op_BWSYNTH"); code != 0 || !strings.Contains(show, wantShow) {
+			t.Errorf("%s: operation show, exit %d, want %q in:\n%s", c.name, code, wantShow, show)
 		}
 	}
 
