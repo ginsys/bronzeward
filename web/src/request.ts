@@ -169,6 +169,20 @@ export class Client {
   }
 
   async read<T>(path: string): Promise<ReadResult<T>> {
+    return this.readFrom<T>(path, { epoch: undefined });
+  }
+
+  // `read` that also returns the Bronzeward-Epoch header of the response its result comes from,
+  // taken in the same step as the result, not the client's epoch at a later time (§8.5): another
+  // response can record a new epoch before the caller resumes. Undefined when the read gave no
+  // response that was used, or the response named no epoch.
+  async readWithEpoch<T>(path: string): Promise<{ result: ReadResult<T>; epoch: string | undefined }> {
+    const seen: { epoch: string | undefined } = { epoch: undefined };
+    const result = await this.readFrom<T>(path, seen);
+    return { result, epoch: seen.epoch };
+  }
+
+  private async readFrom<T>(path: string, seen: { epoch: string | undefined }): Promise<ReadResult<T>> {
     const sent = this.generation;
     const drops = this.drops;
     const principal = this.view.principal;
@@ -192,6 +206,7 @@ export class Client {
         if (attempt + 1 >= MAX_TRIES || drops !== this.drops) return { kind: "discarded" };
         continue;
       }
+      seen.epoch = epoch ?? undefined;
       // A 403 is read before a stale answer is dropped: identity-revoked of the sign-in still current
       // clears its credential at once (§8.2), even when the view moved on; its data stays dropped.
       const stale = guarded(res, () => this.observeEpoch(res)) || sent !== this.generation;

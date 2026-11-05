@@ -66,14 +66,16 @@ export const terminal = (state: string) => ["succeeded", "failed", "completed", 
 const epochOf = (id: string) => id.split(":", 1)[0]!;
 const numberOf = (id: string) => Number(id.slice(id.indexOf(":") + 1));
 
-type Reader = Pick<Client, "read" | "open" | "currentEpoch" | "writesEnded">;
+type Reader = Pick<Client, "read" | "readWithEpoch" | "open" | "writesEnded">;
 
 // What one watch shares between its stream, its pages and its loop.
 class Run {
   last = ""; // the ID of the last event shown
-  // What the watch showed: an attempt that showed nothing is a failure. A clear is not counted, so a
-  // stream whose events never match its epoch, cleared on every attempt, backs off (the CLI's watch.go).
-  steps = 0;
+  // The events shown since the attempt began or the last clear: an attempt with none is a failure. A
+  // clear is not counted, and it takes back the events shown before it, so a stream whose events
+  // never match its epoch backs off even when it shows one event first (the CLI's watch.go counts
+  // the events shown, and excludes the clear of an epoch change at the operation read).
+  fresh = 0;
   halted = false;
   constructor(readonly w: Watch) {}
 
@@ -86,7 +88,7 @@ class Run {
   // can both carry.
   show(e: OpEvent): void {
     if (this.last !== "" && epochOf(e.id) === epochOf(this.last) && numberOf(e.id) <= numberOf(this.last)) return;
-    this.steps++;
+    this.fresh++;
     this.w.show(e);
     this.last = e.id;
   }
@@ -94,14 +96,16 @@ class Run {
   // What `until` answered held for the events now cleared: it is asked again.
   clear(why: string): void {
     this.halted = false;
+    this.fresh = 0;
     this.last = "";
     this.w.clear(why);
   }
 }
 
-// Follows the operation `op` until its state is terminal and every event before it was shown. A
-// stream that failed to open, or ended within a second having shown nothing, is retried after 1 s,
-// doubling to 30 s; JSON pages are read again at the same pace. Renewal is the page's renewer's: the
+// Follows the operation `op` until its state is terminal and every event before it was shown. An
+// attempt that showed nothing (a stream that failed to open, or ended with no event, or only events
+// that were cleared at once) is retried after 1 s, doubling to 30 s, which starts again at 1 s once an
+// attempt shows something or a stream stayed open for 30 s; JSON pages are read again at the same pace. Renewal is the page's renewer's: the
 // reads renew a refused token, and each stream is opened with the token current at that moment.
 export async function watch(client: Reader, op: string, w: Watch, pace: Pace = PACE): Promise<Watched> {
   const run = new Run(w);
@@ -111,7 +115,7 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
   for (;;) {
     // The sign-in ended: nothing more is sent. The JSON pages never reach the stream's check for it.
     if (w.signal.aborted || client.writesEnded) return { kind: "stopped" };
-    const before = run.steps;
+    run.fresh = 0;
     const began = pace.now();
     const s: Streamed = pages ? "pages" : await stream(client, path, run, pace);
     // The sign-in ended: nothing more is sent, and the page that asked is ending too.
@@ -128,10 +132,12 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
     // The attempt's own time: a slow operation read does not skip the backoff.
     const took = pace.now() - began;
     if (w.signal.aborted) return { kind: "stopped" };
-    const res = await client.read<Operation>(path);
+    // The epoch comes from the response the result comes from: the client's epoch can be a newer one
+    // by the time this continues.
+    const { result: res, epoch } = await client.readWithEpoch<Operation>(path);
+    // Events cleared at once, because the operation read names another epoch, are not progress.
+    let stale = false;
     if (res.kind === "ok" && terminal(res.data.state)) {
-      // The epoch this read held, taken before the drain reads anything.
-      const epoch = client.currentEpoch;
       // A terminal state settles the watch, so the last events are all shown, until or not.
       run.halted = false;
       const drained = await drain(client, path, run, false);
@@ -147,16 +153,24 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
       }
       if (drained !== "discarded") return { kind: "failed", res: drained };
     } else if (res.kind === "ok") {
+      // Events of another epoch than the operation read's are of a restored installation, and the
+      // operation can have no event to replace them: they are cleared even when `until` does not
+      // stop, so what `until` kept from them does not hold the watch (§8.5; the CLI's watch.go).
+      if (epoch !== undefined && run.last !== "" && epochOf(run.last) !== epoch) {
+        run.clear(RESTORED);
+        stale = true;
+      }
       if (run.stop()) return { kind: "ended", operation: res.data };
     } else if (res.kind !== "discarded" && res.kind !== "transport" && res.kind !== "unavailable") {
       return { kind: "failed", res };
     }
     // A read discarded for a new epoch, or with no answer, is read again: the stream that follows
-    // starts from the reset. JSON pages are read again after the delay, which starts again at 1 s
-    // once they show something new.
-    const progress = run.steps !== before;
-    if (progress) delay = 1000;
-    if (pages || res.kind !== "ok" || (!progress && (!opened || took < 1000))) {
+    // starts from the reset. An attempt that showed nothing waits the delay, which doubles until an
+    // attempt shows something or a stream stays open for 30 s. JSON pages are read again after the
+    // delay (the CLI's watch.go).
+    const progress = run.fresh > 0 && !stale;
+    if (progress || (opened && !pages && took >= 30_000)) delay = 1000;
+    if (pages || res.kind !== "ok" || !progress) {
       await pace.sleep(delay, w.signal);
       if (!progress) delay = Math.min(2 * delay, 30_000);
     }
@@ -170,6 +184,8 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
 async function drain(client: Reader, path: string, run: Run, stoppable: boolean): Promise<"read" | "discarded" | Failed> {
   const read = await readPages<OpEvent>(client, `${path}/events`, "", { items: [], next: undefined, restarted: false }, true, () => !run.w.signal.aborted);
   const res = read.kind === "dropped" ? read.failed : read;
+  // The page that was pending when the watch ended is not delivered.
+  if (run.w.signal.aborted) return "discarded";
   if (res.kind === "discarded" || res.kind === "transport" || res.kind === "unavailable") return "discarded";
   if (res.kind !== "ok") return res;
   for (const [i, e] of res.data.items.entries()) {
