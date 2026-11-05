@@ -838,14 +838,25 @@ This scenario happens before the publications of §5.3 and §5.5, while every co
 
 ```text
 $ bronzewardctl drift show mch_w4ze…n3fa
-Drift opened 09:41 by observation obs_k3d…, last seen 09:46. Late landing: no.
+Drift opened by observation obs_k3d… at 2026-11-01 09:41:07 UTC, last seen in observation obs_m1q… at 2026-11-01 09:46:12 UTC. Late landing: no.
 A configuration read differed from what Bronzeward last verified: Applied rel_fgqv…j6m.
 Bronzeward cannot show what changed until it is imported for adoption.          # G7
-Choose: freeze while you decide; adopt it into a release; or revert to Desired.
+Choose: freeze while you decide; adopt it into a release; or revert to Desired (rel_fgqv…j6m).
 $ bronzewardctl machine freeze mch_w4ze…n3fa --reason "incident 4711"
 Frozen. No new commitment or attempt for this machine until an approver unfreezes it.
-An attempt already recorded is not stopped; an adoption can still be recorded.
+An attempt already recorded is not stopped, and an adoption can still be recorded.
+Recorded by usr_h4c… (approver): machine mch_w4ze…n3fa, timeline revision 41, act act_p2d…
 ```
+
+The API serves no drift opening time, so `drift show` gives the time of the observation that opened
+the record and of the one that last saw it, read from the machine's observations. When an
+observation is not among those read, it gives the observation and says its time was not read.
+With no open drift it says so and why: only a configuration read that differs from `Applied`
+opens a drift record, so a read that matches it, or one that could not be read, opens none.
+An unfreeze that recovery mode refuses says why and what to do next. A scope that is still
+pre-restore unaccounted holds it, and `recovery status` names the scope's next step. A server
+started for recovery refuses it even after its recovery entry, and a restart without the flag
+serves it while recovery mode continues.
 
 Drift compares the observed digest with `Applied`; an observation equal to `Desired` or to an
 older release is still drift

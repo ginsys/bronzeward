@@ -52,6 +52,14 @@ commands:
   machine add --cluster <id> (--talos-node-id <id> | --smbios-uuid <uuid>) [--serial <s>]
               --platform metal|container|cloud --talos-endpoint <ip>[:<port>]
   machine set-endpoint <id> --talos-endpoint <ip>[:<port>]
+  machine freeze | unfreeze <id> --reason <text>
+              a freeze stops new commitments and attempts, not an attempt already recorded, and
+              an adoption can still be recorded; freeze takes author, publisher, approver or
+              recovery-admin, unfreeze only an approver; a server started for recovery, or a scope
+              still pre-restore unaccounted, refuses an unfreeze
+  drift show <machine>
+              the open drift: its observations, late landing and the choices; the time shown is
+              that of the observation, the API serves no opening time; there is no ignore command
               writes, by a person signed in as author, repeat a write whose outcome was unknown
               exactly with --idempotency-key, --expect-epoch and --expect-principal as printed
   fragment | profile | assignment show <head or revision ID> | history <head ID>
@@ -243,7 +251,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		"fragment": e.fragmentCmd, "profile": e.profileCmd, "assignment": e.assignmentCmd,
 		"draft": e.draftCmd, "import": e.importCmd, "publish": e.publish, "release": e.releaseCmd, "plan": e.planCmd,
 		"approve": e.approve, "approval": e.approvalCmd, "operation": e.operationCmd, "act": e.actCmd,
-		"recovery": e.recoveryCmd, "identity": e.identityCmd}
+		"drift": e.driftCmd, "recovery": e.recoveryCmd, "identity": e.identityCmd}
 	pos, err := e.parse("bronzewardctl", args, -1, nil)
 	if err == nil && len(pos) == 0 {
 		err = usageError{errors.New("no command")}
