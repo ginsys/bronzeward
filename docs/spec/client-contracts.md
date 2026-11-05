@@ -898,7 +898,15 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
    first: it reads the JSON event pages to their end and shows every event after the last one it
    showed, then ends the watch. Any other state, `unresolved` included, means the stream ended because the token expired or the
    connection dropped: the client renews if needed and reconnects with `Last-Event-ID` and the
-   renewed token, with backoff from 1 s to 30 s on repeated failures.
+   renewed token, with backoff from 1 s to 30 s on repeated failures. An attempt that showed
+   nothing is a failure. The delay starts again at 1 s after an attempt that showed an event, or
+   after a stream that stayed open for 30 s. Only the events shown since the attempt began or
+   since the last clear count: an event shown and then cleared in the same attempt, by a `reset`,
+   by an event of another epoch, or by an operation read that names another epoch, is not
+   progress. A client that gets one event and then an event of another epoch on every attempt
+   therefore waits between attempts. The web reader counts this way. The CLI counts every event
+   it showed, so it reconnects with no wait in that case
+   ([#639](https://github.com/ginsys/bronzeward/issues/639)).
 3. A `reset` event clears what the watch showed, prints that the installation was restored or
    entered recovery mode, and shows the replay from the start. The epoch change is handled as in
    [§8.5](#85-epoch-changes). The server sends `reset` only when a stream opens
