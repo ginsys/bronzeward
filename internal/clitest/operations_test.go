@@ -78,24 +78,42 @@ func (e *watchEnv) watch(op string, extra ...string) result {
 // served are the IDs, types and data of op's events, read from its JSON event pages as h-all.
 func (e *watchEnv) served(t *testing.T, op string) (ids, types []string, data []map[string]any) {
 	t.Helper()
+	for _, ev := range e.servedEvents(t, op) {
+		ids, types, data = append(ids, ev.ID), append(types, ev.Type), append(data, ev.Data)
+	}
+	return ids, types, data
+}
+
+// servedAt are the server's times of op's events, in the order served reads them.
+func (e *watchEnv) servedAt(t *testing.T, op string) (at []time.Time) {
+	t.Helper()
+	for _, ev := range e.servedEvents(t, op) {
+		at = append(at, ev.At)
+	}
+	return at
+}
+
+// servedEvent is one event of op's JSON event page.
+type servedEvent struct {
+	ID, Type string
+	At       time.Time
+	Data     map[string]any
+}
+
+func (e *watchEnv) servedEvents(t *testing.T, op string) []servedEvent {
+	t.Helper()
 	q, _ := http.NewRequest(http.MethodGet, e.f.base+"/api/v1/operations/"+op+"/events?limit=500", nil)
 	q.Header.Set("Authorization", "Bearer "+e.f.mint("h-all", ""))
 	var page struct {
-		Items []struct {
-			ID, Type string
-			Data     map[string]any
-		}
-		Next string
+		Items []servedEvent
+		Next  string
 	}
 	dec := json.NewDecoder(bytes.NewReader(e.f.do(q, http.StatusOK)))
 	dec.UseNumber() // a number keeps its digits, as the CLI prints them
 	if err := dec.Decode(&page); err != nil || page.Next != "" {
 		t.Fatalf("the events of %s: %v, next %q", op, err, page.Next)
 	}
-	for _, ev := range page.Items {
-		ids, types, data = append(ids, ev.ID), append(types, ev.Type), append(data, ev.Data)
-	}
-	return ids, types, data
+	return page.Items
 }
 
 // printedMembers are, by event type, the members of the event's data that operation watch prints in
@@ -366,10 +384,21 @@ var operationCases = map[string]func(*testing.T, *watchEnv){
 			}
 			return false
 		}, nil)
-		r := e.watch(e.adoption)
-		e.f.want(r, 0, "Completed at ", " (server): adopted; the adoption of plan "+e.adopted+
-			" records Applied from the node's own bytes. Nothing was sent to the machine.\n")
+		// The CLI shows the server's time in its own local zone, and the fixture's CLI gets no TZ: this
+		// run pins UTC so that the expected text does not depend on the host.
+		args := []string{"--context", "human", "operation", "watch", e.adoption}
+		r := e.f.scan(e.f.exec([]string{"TZ=UTC"}, "", args...), args)
+		e.secretsIn(t, r, args)
 		_, types, data := e.served(t, e.adoption)
+		// The time on the completion line is the server's time of the event that records the end: the
+		// adoption event, the first. Two events of one adoption can share a time. Then this proves the value
+		// and the type order above proves the choice.
+		at := e.servedAt(t, e.adoption)
+		if len(at) < 2 {
+			t.Fatalf("%d event times; want the adoption and applied-change events", len(at))
+		}
+		e.f.want(r, 0, "Completed at "+at[0].UTC().Format("2006-01-02 15:04:05 MST")+" (server): adopted; the adoption of plan "+e.adopted+
+			" records Applied from the node's own bytes. Nothing was sent to the machine.\n")
 		got := shown(r.out)
 		// An adoption records two events: adoption and applied-change. Every event line is marked
 		// "received" with this client's time; only the completion line shows the server's.
