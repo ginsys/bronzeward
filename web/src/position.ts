@@ -232,7 +232,8 @@ function readTags(original: string): { found: { index: number; tag: string; name
   // The value may follow one anchor (`!bwref &e x/foo`): go-yaml reads an anchor name with is_alpha
   // only, as the scan below does, and needs a blank after it. The groups are those of `tag`. A value
   // with no anchor between the tag and the value is read by `tag` alone, as before. A second tag is
-  // not read, because go-yaml refuses a node with two.
+  // not read here. The scan refuses the document of a node with two tags (ginsys/bronzeward#620), so
+  // the tags of that document never reach this loop.
   const anchored = (value: string) =>
     new RegExp(String.raw`[ \t\r\n]+&[0-9A-Za-z_-]+[ \t\r\n]+(?:"((?:[^"\\]|\\[^])*)"|'((?:[^'\n]|'')*)'|${header}|(${value}))`, "y");
   const flowAnchored = anchored(flowValue);
@@ -467,8 +468,12 @@ interface Carry {
   // The last token was a quoted scalar, a flow collection or an alias, which takes an adjacent `:`
   // in flow context.
   closed: boolean;
+  // The node that starts at the next token already has a tag. A second tag on it fails go-yaml's
+  // parser (ginsys/bronzeward#620). An anchor does not count, and any other token ends the node.
+  // A flow line keeps it; a block line starts a new node and clears it.
+  tagged: boolean;
 }
-const freshCarry = (): Carry => ({ stack: [], flow: 0, ns: true, open: "", holder: -1, block: undefined, closed: false });
+const freshCarry = (): Carry => ({ stack: [], flow: 0, ns: true, open: "", holder: -1, block: undefined, closed: false, tagged: false });
 
 // The document that is being read (ginsys/bronzeward#615). A tag spelled through a handle names what
 // the document's %TAG directives say, so a `!bwref` property counts only when its document is
@@ -514,9 +519,13 @@ function endDocument(d: Docs, phase: "start" | "ended", at: number) {
 // scalar) is consumed here and returns true. A `---` or `...` marker ends or starts a document, and
 // a line of content after directives with no `---`, or after `...` (also the text on the `...` line),
 // refuses its document. A directive after content ends the document. A marker or a directive inside an
-// open flow collection refuses the document that is open.
+// open flow collection refuses the document that is open. So does a marker inside an open quote: the
+// line is still read as quoted text, but go-yaml refuses the stream (ginsys/bronzeward#620).
 function readDocumentLine(d: Docs, st: Carry, text: string, at: number): boolean {
-  if (st.open === '"' || st.open === "'") return false;
+  if (st.open === '"' || st.open === "'") {
+    if (MARKER.test(text)) d.refused = true;
+    return false;
+  }
   if (MARKER.test(text)) {
     // A marker inside an open flow collection is an error: the document it ends lists nothing.
     if (st.flow > 0) d.refused = true;
@@ -658,7 +667,10 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number): number {
   let lastPlain = false;
   // In block context a line starts a new node. In flow context a key that closed at the end of the
   // previous line (`? "k"`) still takes a `:` that starts this one.
-  if (st.flow === 0) st.closed = false;
+  if (st.flow === 0) {
+    st.closed = false;
+    st.tagged = false;
+  }
   let fresh = false;
   if (marker && st.open !== '"' && st.open !== "'") {
     Object.assign(st, freshCarry());
@@ -714,6 +726,8 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number): number {
       return j;
     }
     if (st.ns) {
+      // A property keeps the node open, any other token starts its content or ends it.
+      if (c !== "!" && c !== "&") st.tagged = false;
       if (c === '"' || c === "'") {
         if (nodeStart < 0) nodeStart = j;
         const e = skipQuoted(line, j + 1, c);
@@ -754,8 +768,11 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number): number {
         else if (c === "!") while (e < line.length && !isWs(line[e])) e++;
         else while (e < line.length && /[0-9A-Za-z_-]/.test(line[e]!)) e++;
         // A tag is resolved as go-yaml does: through the handles its document declares. One it cannot
-        // resolve fails the stream, so its document lists nothing (ginsys/bronzeward#615).
+        // resolve fails the stream, so its document lists nothing (ginsys/bronzeward#615). So does a
+        // second tag on one node (ginsys/bronzeward#620).
         if (c === "!") {
+          if (st.tagged) docs.refused = true;
+          st.tagged = true;
           const resolved = resolveTag(line.slice(j, e), line[e], docs.table);
           if (resolved === undefined) docs.refused = true;
           else if (resolved === "!bwref") docs.cur.set(base + j, { end: base + e, inFlow: st.flow > 0 });
@@ -784,6 +801,9 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number): number {
         const hash = rest.indexOf("#");
         return hash < 0 ? line.length : j + 1 + hash;
       } else {
+        // A plain scalar cannot start with `%`. In the first column the line is a directive and
+        // never reaches here, so this one is indented or follows a token (ginsys/bronzeward#620).
+        if (c === "%") docs.refused = true;
         if (nodeStart < 0) nodeStart = j;
         j = Math.max(plainEnd(line, j, st.flow), j + 1);
         st.ns = false;

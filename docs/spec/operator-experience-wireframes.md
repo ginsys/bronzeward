@@ -302,21 +302,23 @@ Option C, the verbatim form alone, leaves the prefix split and the percent escap
 the six separate fixes of #598 went.
 
 The editor accepts `%YAML 1.1` only, as the server's parser does. A document lists nothing when the
-parser refuses it, except in the shapes that #620 and #632 track. In the shapes of #620 the editor
-still lists a name: a node with two tags, an indented `%` line after a quoted scalar, and a `---` or
-`...` marker inside a quoted scalar. In the first shape of #632, a directive line that ends a valid
-document before an indented continuation line, the editor loses a name of that document. In the
-second, a flow plain scalar that ends at `?`, it lists a name. The
+parser refuses it, except in the shapes that #632 tracks. In the first shape of #632, a directive
+line that ends a valid document before an indented continuation line, the editor loses a name of
+that document. In the second, a flow plain scalar that ends at `?`, it lists a name. The
 parser refuses a directive line it cannot read, a `%YAML` line or a `%TAG` handle given twice, a directive line or a `---` or `...` marker inside an open flow collection, and
 directives with no `---` after them. A directive line in the first column after block content ends
 the document and opens the directives of the next one. The parser also refuses content after `...`
 that has no `---`, which includes text on the `...` line itself, a handle that the document does not declare, a bad percent escape, and a tag that
-a character outside the tag characters ends, such as `!bwref}`. The parser then refuses the whole
-stream. The editor blanks only the document with the fault, so the other documents of the stream
-still list. A line that starts with `%` inside a quoted scalar or a block scalar is text, not a
-directive. It is text too when a plain scalar goes on over the line break inside a flow collection,
-as in `[a` followed by a `%YAML 1.2` line, because the parser ends that scalar at a marker or a
-comment only. A comment, a quote, a comma or a tag before the line makes it a directive again.
+a character outside the tag characters ends, such as `!bwref}`. It also refuses a node with two
+tags, with an anchor between them or not. It refuses a `%` where a token starts, such as an indented
+`%` line after a quoted scalar. It refuses a `---` or `...` marker in the first column of a quoted
+scalar. The parser then refuses the whole stream. The editor blanks only the document with the
+fault, so the other documents of the stream still list. A line that starts with `%` inside a quoted
+scalar or a block scalar is text, not a directive. It is text too when a plain scalar goes on over
+the line break inside a flow collection, as in `[a` followed by a `%YAML 1.2` line, because the
+parser ends that scalar at a marker or a comment only. A comment, a quote, a comma or a tag before
+the line makes it a directive again. A marker in the first column of a quoted scalar is not text:
+the document that holds it lists nothing, and the editor still reads the line as quoted text.
 
 If the operator edited the marks after a refusal,
 [Go to field] finds the refused line where it is now. If that line is gone, it focuses the marks field and selects nothing.
