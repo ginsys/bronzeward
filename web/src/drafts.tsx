@@ -387,8 +387,8 @@ export type EditorEvent =
   | { kind: "draft"; revision: number; changed: boolean; removed?: true }
   | { kind: "reading"; on: boolean } // the entry's revision read starts, or is dropped for another
   // The entry's revision read, started after `since` done writes, for the draft revision that named it.
-  // `id`: the revision read.
-  | { kind: "read"; text: Held; since: number; revision?: number; id?: string }
+  // `id`: the revision read. `reread`: it is the revision the pane had loaded already, read again.
+  | { kind: "read"; text: Held; since: number; revision?: number; id?: string; reread?: true }
   | { kind: "copy" } // Copy my text into the new revision
   | { kind: "send"; removes?: true } // a Save or Remove sends the editor's text
   | { kind: "done"; revision?: string } // that write is done; a Save's answer names the revision it created
@@ -527,7 +527,13 @@ function step(s: Editor, e: EditorEvent): Editor {
       // and a read while a write is open waits for that write's answer. Once their text shows with
       // nothing to keep aside, the read replaces the text, as below: held back, a done write would
       // drop it (#551 local review).
-      const another = (s.own === undefined || e.id !== s.own) && !same(e.text, s.saved);
+      // While the pane's own Remove is open, a read of a revision the pane has not read before is
+      // another author's, also when its text equals the saved text: a restore brings back the text
+      // removed. The Remove sends the draft's ETag as If-Match, so a revision stored before it got a
+      // 412, not a done: a new revision read now came after the Remove. `reread` is the revision the
+      // pane loaded already, read again; it stays dropped (ginsys/bronzeward#623 review).
+      const restored = e.reread !== true && s.sent?.open === true && s.sent.removes === true;
+      const another = (s.own === undefined || e.id !== s.own) && (!same(e.text, s.saved) || restored);
       const keeps = c === undefined ? !same(s.held, s.saved) : c.phase === "theirs" && (c.typed === true || !same(s.held, s.saved));
       if (another && keeps) {
         if (s.sent?.open === true) return { ...idle, saved: e.text, sent: { ...s.sent, later: { ...(e.revision !== undefined && { revision: e.revision }), ...(e.id !== undefined && { id: e.id }), text: e.text, aside: true } } };
@@ -775,7 +781,7 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
       setLoaded(revision);
       // The draft revision shown when the read answers: one that changed only another entry while
       // it was pending still names this text, and Copy my text compares with it (PR review).
-      act({ kind: "read", text: fromRevision(r.data), since: done, revision: drafted.current, id: revision });
+      act({ kind: "read", text: fromRevision(r.data), since: done, revision: drafted.current, id: revision, ...(loaded === revision && { reread: true as const }) });
     });
     return () => {
       live = false;
