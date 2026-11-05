@@ -529,9 +529,10 @@ function step(s: Editor, e: EditorEvent): Editor {
       // drop it (#551 local review).
       // While the pane's own Remove is open, a read of a revision the pane has not read before is
       // another author's, also when its text equals the saved text: a restore brings back the text
-      // removed. The Remove sends the draft's ETag as If-Match, so a revision stored before it got a
-      // 412, not a done: a new revision read now came after the Remove. `reread` is the revision the
-      // pane loaded already, read again; it stays dropped (ginsys/bronzeward#623 review).
+      // removed. The Remove sends the draft's ETag as If-Match, so a revision stored before it gets a
+      // 412, not a done. If the Remove is done, a new revision read now came after it; a Remove that
+      // fails shows the text read in any case. `reread` is the revision the pane loaded already, read
+      // again; it stays dropped (ginsys/bronzeward#623 review).
       const restored = e.reread !== true && s.sent?.open === true && s.sent.removes === true;
       const another = (s.own === undefined || e.id !== s.own) && (!same(e.text, s.saved) || restored);
       const keeps = c === undefined ? !same(s.held, s.saved) : c.phase === "theirs" && (c.typed === true || !same(s.held, s.saved));

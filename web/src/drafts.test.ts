@@ -1116,6 +1116,11 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     expect(rest(save)).toEqual({ held: M, saved: M, sent: sentOf(M), writes: 1, own: "frv_9" });
   });
 
+  test("ginsys/bronzeward#623: both composition panes mark a read of the revision they loaded already", () => {
+    const src = readFileSync(new URL("./composition.tsx", import.meta.url), "utf8");
+    expect(src.match(/act\(\{ kind: "read", [^\n]*id: revision, \.\.\.\(loaded === revision && \{ reread: true as const \}\) \}\);/g)?.length).toBe(2);
+  });
+
   test("ginsys/bronzeward#608: a failed Remove shows the text restored while it was open, the operator's text aside", () => {
     expect(rest(run(removing(theirs10), [{ kind: "failed" }]))).toEqual({ held: T, saved: T, sent: removes(M), conflict: theirs(M, 10) });
   });
