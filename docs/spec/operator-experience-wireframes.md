@@ -291,6 +291,14 @@ dash), or a blank line with a tab in or after the scalar. A block scalar with an
 indicator is not listed either. The server still checks that reference. A key that follows the tag
 is not its name.
 
+A plain `!bwref` value can go on to the next line. The editor reads that line as part of the value,
+and lists nothing, in these cases. In block context the line must be indented past its parent. Then
+a line that starts with `,`, `]` or `}` is text. A line that starts with `- `, `? ` or holds a key
+(`k: v`) is text where the parent line shows a key, a dash or a plain scalar, and it ends the value
+under a compact parent such as `- - `. A line of Unicode spaces is text, not blank. In flow context
+the indent does not count. The next line is text unless it starts with `,`, `]`, `}` or `: `. The
+editor skips blank lines between. A `---` or `...` marker and a directive line each end the value.
+
 The owner decided (BW-606-tag-handles-1, 4 November 2026) that the editor reads a tag the way the
 server's parser does. This is option A of the
 [tag handle record](../design/research/20261104-tag-handle-resolution.md). The editor resolves the
