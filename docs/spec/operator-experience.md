@@ -944,6 +944,23 @@ Client rules for the two accountings, where the answer or the read lacks what th
 - `recovery account` takes an operation and an attempt. The client reads the machine from the operation's subject and asks for that machine ID.
 - The client refuses before sending, with exit 2, an end that is not a `recovery` observation, an observation without a resource version and a moved version without an explanation.
 
+Client rules for the four acts that follow (`recovery takeover`, `resolve`, `mark` and `release`),
+where the contract names no step:
+
+- The operation body carries no owner generation. The takeover sends the highest `generation` among
+  the operation's events and attempts, and 1 when they show none. The server refuses a generation that
+  is not current, so a wrong read sends nothing harmful. That refusal carries no new generation, so the
+  client points at `operation show`.
+- None of the four asks for a typed answer. The contract names none, and the reason or the facts are
+  the record.
+- A mark shows each `missing` item with its meaning: `observation`, `identity`, `access` and
+  `artifact`.
+- A release of a scope that is not `ready`, or whose Desired release moved after the mark, is refused
+  with code `conflict`. The shared text has no case for it, so the client adds the next step per
+  command. A release says it is not an approval.
+- A resolution says it records no remote outcome. The client refuses it before sending when the
+  operation is not `unresolved` or has an attempt.
+
 Scope accounting is step 1's decision: it accounts every unaccounted attempt on the machine at
 once, and is refused on a scope that is not pre-restore unaccounted. The scope then becomes
 `unresolved` if a restored operation still holds it, and otherwise `blocked` until it is marked

@@ -16,10 +16,9 @@ The table lists the web client's records. The records of the cases that `bronzew
 the `*-cases.yaml` files and `cases.yaml` in
 [`internal/clitest/testdata`](../internal/clitest/testdata), in §12's record format: `cases.yaml`
 for the read and sign-in cases, and one file per command family for the others, such as
-`write-cases.yaml` and `recovery-cases.yaml`. Each test runs exactly the cases recorded in its file.
-The unit tests of `recovery scope-account` and `recovery account` in `cmd/bronzewardctl` run the
-epoch-change refusal before the send only. The injector cases AMB-05, AMB-07 and AMB-12 have no
-record for those two commands yet, so they have not run.
+`write-cases.yaml`, `recovery-cases.yaml` and `recovery-scope-cases.yaml`. Each test runs exactly the
+cases recorded in its file. `recovery-scope-cases.yaml` holds AMB-05, AMB-07 and AMB-12 with
+`recovery scope-account` as the dropped write.
 
 | Record | Runs |
 | --- | --- |
