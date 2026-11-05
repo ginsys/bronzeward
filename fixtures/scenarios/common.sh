@@ -713,3 +713,49 @@ observation_stale() {
     JOIN machine_event e ON e.machine = s.machine AND e.revision = s.revision
     WHERE s.plan = '$1' AND s.purpose = 'evidence' ORDER BY o.basis LIMIT 1")" = t ]
 }
+
+# The CLI's runs (ginsys/bronzeward#354): bronzewardctl, built from this checkout, runs on the host
+# against A. Each human's context is in the run directory, with a token file that holds a token
+# minted just before each command. The context names a loopback stand-in issuer: the fixture's
+# issuer is on the Compose network only, and no command here reads the issuer. The caller's
+# configuration and credential store are never read: XDG directories are the run directory's and
+# the session bus is disabled. A scenario that runs the CLI calls cli_prepare once, then ctl.
+cli_dir='' ctl_bin=''
+# cli_prepare <reference> <human>...: builds the CLI and adds a context for each human, as checks
+# of the reference.
+cli_prepare() {
+  local ref=$1 who
+  shift
+  cli_dir=$STATE/cli
+  ctl_bin=$cli_dir/bronzewardctl
+  mkdir -p -- "$cli_dir/config" "$cli_dir/state" "$cli_dir/cache"
+  check "$ref" 'bronzewardctl built from this checkout' go -C "$here/../.." build -o "$ctl_bin" ./cmd/bronzewardctl
+  # The client ID is not BWSYNTH-: that prefix is a leak-scan pattern, and commands.tsv keeps it.
+  for who in "$@"; do
+    : >"$cli_dir/$who.json"
+    chmod 600 -- "$cli_dir/$who.json"
+    check "$ref" "a context for $who with its token file" ctl_env context add "$who" --server "http://127.0.0.1:$SERVER_A_PORT" \
+      --issuer http://127.0.0.1:5556 --client-id fixture-cli --oidc-token-file "$cli_dir/$who.json"
+  done
+}
+# ctl_env <args>...: bronzewardctl with the run directory's configuration and no session bus.
+ctl_env() {
+  XDG_CONFIG_HOME=$cli_dir/config XDG_STATE_HOME=$cli_dir/state XDG_CACHE_HOME=$cli_dir/cache \
+    DBUS_SESSION_BUS_ADDRESS=disabled: "$ctl_bin" "$@"
+}
+# ctl <name> <human> <args>...: bronzewardctl as the human, with a token minted now (printf is a
+# builtin: the token is on no command line); standard input passes through. The output and the
+# exit status are kept as cli-<name>.txt; the status is ctl's.
+ctl() {
+  local name=$1 who=$2 tok rc=0
+  shift 2
+  tok=$(mint "$who") || return 1
+  keep_secret "$tok"
+  printf '{"accessToken":"%s"}' "$tok" >"$cli_dir/$who.json"
+  ctl_env --context "$who" "$@" >"$EV/cli-$name.txt" 2>&1 || rc=$?
+  printf '[%s, exit %d]\n' "bronzewardctl --context $who $*" "$rc" >>"$EV/cli-$name.txt"
+  return "$rc"
+}
+# cli_kept <name> <ERE>: the kept output of cli-<name>.txt has a line matching the ERE (kept, above,
+# reads a kept array instead).
+cli_kept() { grep --quiet --extended-regexp -- "$2" "$EV/cli-$1.txt"; }
