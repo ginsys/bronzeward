@@ -22,6 +22,16 @@ func fullPipe(t *testing.T) (r, w *os.File) {
 	if err := syscall.Pipe2(p[:], syscall.O_NONBLOCK|syscall.O_CLOEXEC); err != nil {
 		t.Fatal(err)
 	}
+	// The raw descriptors are closed by a cleanup registered before anything can fail. They are wrapped in
+	// os.File only at the end, in blocking mode (a wrapper made while they are non-blocking would use the
+	// poller), and the wrappers then own them.
+	wrapped := false
+	t.Cleanup(func() {
+		if !wrapped {
+			_ = syscall.Close(p[0])
+			_ = syscall.Close(p[1])
+		}
+	})
 	chunk := bytes.Repeat([]byte("x"), 4096)
 	for {
 		if _, err := syscall.Write(p[1], chunk); err != nil {
@@ -35,6 +45,7 @@ func fullPipe(t *testing.T) (r, w *os.File) {
 		t.Fatal(err)
 	}
 	r, w = os.NewFile(uintptr(p[0]), "pipe-read"), os.NewFile(uintptr(p[1]), "pipe-write")
+	wrapped = true
 	t.Cleanup(func() { _ = r.Close(); _ = w.Close() })
 	return r, w
 }
