@@ -919,9 +919,12 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
    comment included, starts the 45 s again, and the first wait starts when the request is sent,
    so an answer that never sends its headers ends the same way. The CLI's `watch` and the web
    reader use this value (`internal/client/watch.go:55-57`, `web/src/progress.ts`).
-   A refused stream (any status below 500 except 200) is read as a JSON page of the same
-   events, whose read renews a refused token (item 2); the contract does not say that a stream
-   answered `401` renews the token itself, and the web reader relies on the page read for it.
+   The web reader reads a refused stream (any status below 500 except 200) as a JSON page of
+   the same events. That read renews a refused token (item 2) and reports any other refusal by
+   its status. This is the behavior of the web reader, not a rule for every client. The CLI
+   renews an eligible `401` of the stream itself and opens the stream again, reports another
+   client refusal as the server sent it, and rejects a redirect ([§9.5](#95-renewal),
+   `internal/client/watch.go:268-289`).
 6. The machine timeline has no stream (G9). A client reads its newest page with `order=newest`
    and keeps that answer's `tail`; "Load older" follows `next` with `order=newest`. While the
    timeline is on screen the client polls forward from `tail` (from the start while there is
