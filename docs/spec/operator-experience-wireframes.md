@@ -227,8 +227,9 @@ conflict and keeps the editor's text. If another author changed the entry before
 write gets a `412`. If the write's last answer is neither done nor a `412`, the change that read
 showed goes into the editor as theirs, and the typed text is kept for [Copy my text into the new
 revision]. A done Save does the same, unless that read shows the revision that the Save created.
-The answer to the Save names that revision. If the answer or the read names no revision, the read
-stays the Save's own. A done Remove shows any text that such a read named, because a Remove
+The answer to the Save names that revision. If the answer or the read names no revision, the text
+tells: a read with the text that the Save sent stays the Save's own, and a read with other text
+shows as theirs. A done Remove shows any text that such a read named, because a Remove
 creates no text revision. While the pane's own Save or Remove has no answer, a read of a revision
 that the pane has not read before counts as another author's change, also when its text equals the
 saved text. A read again of the revision that the pane already shows does not. When nothing was typed
