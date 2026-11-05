@@ -864,7 +864,10 @@ func TestOperationWatchEventLinesUnwritableJSON(t *testing.T) {
 // interruptThenFail is a standard output that takes the first two lines of a watch, then sends the
 // first Ctrl-C on the third and refuses it and every line after: the output fails while the watch is
 // ending by Ctrl-C.
-type interruptThenFail struct{ n int }
+type interruptThenFail struct {
+	n     int
+	taken chan struct{} // closed by onInterrupt when the watch has taken the first Ctrl-C
+}
 
 func (w *interruptThenFail) Write(p []byte) (int, error) {
 	w.n++
@@ -872,16 +875,11 @@ func (w *interruptThenFail) Write(p []byte) (int, error) {
 		return len(p), nil
 	}
 	if w.n == 3 {
-		// Wait until the signal has reached the watch's channel, with no sleep. The runtime hands pending
-		// signals to the program one at a time and the lowest number first (SIGINT is 2, SIGUSR1 is 10),
-		// so when the probe receives SIGUSR1 the watch's channel already holds the SIGINT.
-		probe := make(chan os.Signal, 1)
-		signal.Notify(probe, syscall.SIGUSR1)
-		defer signal.Stop(probe)
+		// The write fails only after the watch took the interrupt, so that the end of the output cannot
+		// reach the watch before the Ctrl-C does. No sleep: onInterrupt tells it.
 		_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
-		_ = syscall.Kill(os.Getpid(), syscall.SIGUSR1)
 		select {
-		case <-probe:
+		case <-w.taken:
 		case <-time.After(5 * time.Second):
 		}
 	}
@@ -898,7 +896,10 @@ func TestOperationWatchInterruptOutputFails(t *testing.T) {
 	defer srv.Close()
 	automationContext(t, srv.URL)
 	var e bytes.Buffer
-	out := &interruptThenFail{}
+	out := &interruptThenFail{taken: make(chan struct{})}
+	var taken sync.Once
+	onInterrupt = func() { taken.Do(func() { close(out.taken) }) }
+	defer func() { onInterrupt = nil }()
 	code := run([]string{"operation", "watch", "op_BWSYNTH", "--timeout", "30s"}, out, &e)
 	stop := "Stopped watching at your request. Operation op_BWSYNTH is still running, as the server last read it; it goes on.\n"
 	follow := "Follow it again with: bronzewardctl operation watch 'op_BWSYNTH'\n"

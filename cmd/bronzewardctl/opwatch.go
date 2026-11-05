@@ -133,6 +133,10 @@ func (o *watchOut) stop(alt *sink, lines ...string) {
 // stream cannot hold the stop lines of another. A variable, so that a test can shorten it.
 var noteWait = 500 * time.Millisecond
 
+// onInterrupt, when set, runs once the watch has taken its first Ctrl-C and before it waits for the grace
+// time. A test sets it to know that the watch took the interrupt, instead of guessing from the time.
+var onInterrupt func()
+
 // note prints one line on s before the stop lines, under the lock of s, so that it keeps its place
 // among the writes of that sink. When s is the main sink, the stop lines wait on it too and note waits
 // for the line, which keeps the order. When s is another stream and does not take the line within
@@ -267,6 +271,9 @@ func (e *env) operationWatch(args []string) (err error) {
 	interrupt := func() { // the first Ctrl-C: the watch gets interruptGrace to return
 		ended.Store(endInterrupt)
 		signal.Stop(sig) // a second Ctrl-C ends the client at once
+		if onInterrupt != nil {
+			onInterrupt()
+		}
 		grace := time.NewTimer(interruptGrace)
 		defer grace.Stop()
 		select {
