@@ -151,6 +151,14 @@ commands:
               and the risk, and is sent only when the machine ID is typed back
   recovery account <operation> <attempt> --start <observation> --end <observation> [--explanation <text>]
               accounts one attempt whose response was lost; the same window, risk and typed ID
+  recovery takeover <operation> --reason <text>
+              makes the serving controller the owner of a non-terminal operation; sends nothing to the node
+  recovery resolve <operation> --reason <text>
+              ends an unresolved operation with no attempt as cancelled; records no remote outcome
+  recovery mark <machine> [--fact name=value]...
+              records the state the evidence supports: ready, blocked or unresolved
+  recovery release <machine> [--fact name=value]...
+              releases a ready scope; a release is not an approval
   identity revoke (--identity <id> | --iss <iss> --sub <sub>) --reason <text>
               permanent; sent only when the identity (or the subject) is typed back
               these writes need a person signed in as recovery-admin; times are RFC 3339

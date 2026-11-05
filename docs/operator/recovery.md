@@ -106,6 +106,13 @@ gen=$(set -o pipefail; items "/machines/$machine_w/timeline" "$viewer" | jq -es 
 A stale generation, or an operation already `completed`, `failed`, `rejected` or `cancelled`, gets
 `409 conflict`.
 
+With `bronzewardctl`, a person signed in as `recovery-admin` runs
+`recovery takeover <operation> --reason <text>`. The operation body has no owner generation. The
+command reads the operation and its events, and sends the highest `generation` that either shows,
+or 1 if they show none. The server refuses a generation that is not current, so a wrong read sends
+nothing harmful. In that case the command names `operation show` as the next step. The command
+sends nothing to the node. It asks for no typed answer, because the reason is the record.
+
 ### Account for an attempt with no response
 
 An attempt is recorded before its request is sent. With no response, nobody knows whether the
@@ -153,6 +160,11 @@ call POST /operations/$op/resolutions "$recovery" '{"to": "cancelled", "reason":
 ```
 
 Only `cancelled` is accepted, only from `unresolved`, and only when the operation has no attempt.
+
+`bronzewardctl recovery resolve <operation> --reason <text>` sends the same request. It reads the
+operation first. It exits 1 and sends nothing if the operation is not `unresolved` or has an
+attempt. The output states that the resolution records no remote outcome. The command asks for no
+typed answer.
 
 ## Restoring from a backup
 
@@ -303,11 +315,34 @@ Each machine goes `pre-restore-unaccounted`, then `unresolved` or `blocked`, the
    If the node's configuration digest is not what the restored Applied explains, the mark opens a
    drift record, even when it matches a restored release's artifact. Handle it once the scope is
    released, as in [S5](walkthrough.md#s5-drift-adopted-or-reverted).
+
+   `bronzewardctl recovery mark <machine> [--fact name=value]` sends the same request. The state
+   is the server's, not yours. The output shows each item of `missing` with its meaning:
+
+   | Item | Meaning |
+   | --- | --- |
+   | `observation` | The restoration observation does not support the scope. It read no identity, it does not follow the accounting, an operation changed after it, or it used another access version. |
+   | `identity` | The identity that the node showed is not the one the machine record binds, or a later observation showed another. |
+   | `access` | The cluster's Talos access failed the dependency check. |
+   | `artifact` | The Desired release's artifact could not be decrypted for the machine. A newly published release replaces a lost key version. |
+
+   Mark the scope again after you fix what is missing. A scope that is still
+   `pre-restore-unaccounted` is refused, and the command names `recovery scope-account` as the next
+   step.
 4. **Release.** Only a `ready` scope whose dependencies you checked; anything else is `409 conflict`.
 
    ```sh
    call POST /recovery/scopes/$machine_w/releases "$recovery" '{"facts": {}}' recovery-release-worker | jq .state
    ```
+
+   `bronzewardctl recovery release <machine> [--fact name=value]` sends the same request. A release
+   is not an approval. It approves no plan and sends nothing to the node. A plan still needs its own
+   approval. The server refuses a scope that is not `ready` with `409 conflict`, and also one whose
+   Desired release moved after the mark. The command names `recovery mark` as the next step in both
+   cases. Neither command asks for a typed answer.
+
+   The client has no retry, no "mark successful" and no batch form. Any other verb under
+   `recovery` is unknown, and a second machine argument is a usage error.
 
 ### 6. Exit recovery mode
 

@@ -16,15 +16,17 @@ import (
 	"github.com/ginsys/bronzeward/internal/client/apitypes"
 )
 
-// recoveryCmd is recovery status, enter, exit, scope-account and account (#361, #362;
-// operator-experience.md §5.9, §10). The takeover, resolution, mark and release are #362's, later.
+// recoveryCmd is recovery status, enter, exit, scope-account, account, takeover, resolve, mark and
+// release (#361, #362; operator-experience.md §5.9, §10). There is no retry, no "mark successful"
+// and no batch form (T37): any other verb is unknown.
 func (e *env) recoveryCmd(args []string) error {
-	v, rest, err := e.verb("recovery", args, "status", "enter", "exit", "scope-account", "account")
+	v, rest, err := e.verb("recovery", args, "status", "enter", "exit", "scope-account", "account", "takeover", "resolve", "mark", "release")
 	if err != nil {
 		return err
 	}
 	return map[string]func([]string) error{"status": e.recoveryStatus, "enter": e.recoveryEnter, "exit": e.recoveryExit,
-		"scope-account": e.recoveryScopeAccount, "account": e.recoveryAccount}[v](rest)
+		"scope-account": e.recoveryScopeAccount, "account": e.recoveryAccount, "takeover": e.recoveryTakeover,
+		"resolve": e.recoveryResolve, "mark": e.recoveryMark, "release": e.recoveryRelease}[v](rest)
 }
 
 // recoveryStatus is T31: GET /recovery with the start mode GET /server showed, and one row per scope

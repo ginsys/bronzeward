@@ -1,0 +1,56 @@
+# Shared conformance case records (docs/spec/client-contracts.md §12) of bronzewardctl's recovery
+# scope-account as the dropped write (decision T33 of #256, ginsys/bronzeward#362), run by
+# recovery_scope_test.go TestRecoveryScopeAmbiguity: exactly the cases recorded here, in this order,
+# each on a server of its own, behind the in-process TLS injector.
+# Each server runs with -recovery-start and holds the entry of h-recovery, who holds recovery-admin,
+# one seeded cluster and machine, and two seeded observations of that machine: a routine read as the
+# start and a recovery observation as the end, both at resource version 7 and both long enough ago for
+# the settle. The synthetic server has no Talos stand-in, so the observations are rows in the database.
+# Data is synthetic. A second recovery entry needs a configured provider, so the cases that need a new
+# epoch commit it in the database as the entry does: a recovery_epoch row and installation_state.epoch.
+# The server reads the epoch from the database on every request. Human tokens stay valid across it.
+# Each sends recovery scope-account <machine> --start <start> --end <end>, with the machine ID typed back.
+
+- id: AMB-05
+  setup: serve started with -recovery-start, entry committed, two observations seeded
+  action: recovery scope-account <machine> --start <start> --end <end>
+  exchange:
+    - POST /api/v1/recovery/accountings, committed, its answer dropped
+    - GET /api/v1/recovery, the confirming read, under the new epoch
+    - GET /api/v1/machines/<machine>/timeline, newest first, the resource read
+  fault: the injector drops the POST's connection after the server answered it, then commits a new epoch
+  expect:
+    client: does not repeat; sets the write aside and reads the machine's newest timeline entry
+    server: receives one POST; one act
+    shown: '"set aside, not repeated: the epoch is now ep_..., not the reference epoch", the newest timeline entry of the machine, the repeat flags; standard output empty; exit 3'
+    absent: [token in stdout, stderr, argv, state directory]
+
+- id: AMB-07
+  setup: as AMB-05, signed in as a human principal
+  action: recovery scope-account <machine> --start <start> --end <end>
+  exchange:
+    - POST /api/v1/recovery/accountings, committed, its answer dropped
+    - GET /api/v1/recovery, the confirming read, under the first epoch
+    - POST /api/v1/recovery/accountings, the same key, after the injector commits a new epoch
+    - GET /api/v1/machines/<machine>/timeline, newest first, the resource read
+  fault: as AMB-05, but the new epoch is committed after the confirming read, when the repeat arrives
+  expect:
+    client: repeats once; reads the 409 conflict as the key's record from an earlier epoch; sets the write aside and reads the machine's newest timeline entry
+    server: receives two POSTs; one act
+    shown: '"repeat 1 of 3", "set aside, not repeated: the key''s record is from an earlier epoch", the newest timeline entry of the machine; standard output empty; exit 3'
+    absent: [token in stdout, stderr, argv, state directory]
+
+- id: AMB-12
+  setup: as AMB-07
+  action: recovery scope-account <machine> --start <start> --end <end>
+  exchange:
+    - POST /api/v1/recovery/accountings, its connection dropped before the server read it
+    - GET /api/v1/recovery, the confirming read, under the first epoch
+    - POST /api/v1/recovery/accountings, the same key, after the injector commits a new epoch
+    - GET /api/v1/machines/<machine>/timeline, newest first, the resource read
+  fault: the injector drops the first POST without sending it on, then commits a new epoch when the repeat arrives
+  expect:
+    client: repeats once with the first attempt's epoch; reads the 412 epoch-mismatch; sets the write aside and reads the machine's newest timeline entry
+    server: refuses the repeat 412 epoch-mismatch naming the current epoch; no act and no idempotency record
+    shown: '"set aside, not repeated: the epoch is now ep_..., and this send committed nothing", the newest timeline entry of the machine; standard output empty; exit 3'
+    absent: [token in stdout, stderr, argv, state directory]
