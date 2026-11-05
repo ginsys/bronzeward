@@ -310,7 +310,9 @@ that has no `---`, which includes text on the `...` line itself, a handle that t
 a character outside the tag characters ends, such as `!bwref}`. The parser then refuses the whole
 stream. The editor blanks only the document with the fault, so the other documents of the stream
 still list. A line that starts with `%` inside a quoted scalar or a block scalar is text, not a
-directive.
+directive. It is text too when a plain scalar goes on over the line break inside a flow collection,
+as in `[a` followed by a `%YAML 1.2` line, because the parser ends that scalar at a marker or a
+comment only. A comment, a quote, a comma or a tag before the line makes it a directive again.
 
 If the operator edited the marks after a refusal,
 [Go to field] finds the refused line where it is now. If that line is gone, it focuses the marks field and selects nothing.

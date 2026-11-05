@@ -626,9 +626,9 @@ describe("a tag is resolved the way go-yaml does", () => {
   test.each([
     ["text on the `...` line", "a: 1\n... !bwref x/foo\n---\nb: !bwref x/bar\n"],
     ["a `---` in an open flow mapping", "a: {b: !bwref x/foo,\n---\nc: !bwref x/bar\n"],
-    ["a `---` in an open flow sequence", "a: [1,\n---\nb: !bwref x/bar\n"],
-    ["a `...` in an open flow sequence", "a: [1,\n...\n---\nb: !bwref x/bar\n"],
-    ["a directive in an open flow sequence", "a: [1,\n%YAML 1.1\n---\nb: !bwref x/bar\n"],
+    ["a `---` in an open flow sequence", "a: [!bwref x/foo,\n---\nb: !bwref x/bar\n"],
+    ["a `...` in an open flow sequence", "a: [!bwref x/foo,\n...\n---\nb: !bwref x/bar\n"],
+    ["a directive in an open flow sequence", "a: [!bwref x/foo,\n%YAML 1.1\n---\nb: !bwref x/bar\n"],
   ])("%s refuses its document and the next one lists", (_, text) => {
     expect(references(text)).toEqual(["x/bar"]);
   });
@@ -638,6 +638,36 @@ describe("a tag is resolved the way go-yaml does", () => {
   test("a directive in an open flow sequence declares nothing for the next document", () => {
     expect(references("a: [!bwref x/foo,\n%TAG !x! !bw\n---\nb: !x!ref x/bar\n")).toEqual([]);
     expect(references("a: [!bwref x/foo,\n%TAG !x! !bw\n---\nb: !bwref x/bar\n")).toEqual(["x/bar"]);
+  });
+
+  // In a flow collection a plain scalar goes on over the line break, and go-yaml ends it at a marker
+  // or a comment only (yaml_parser_scan_plain_scalar). A `%` in the first column is then text of the
+  // scalar, not a directive: go-yaml reads these streams as one document, so the name behind lists.
+  test.each([
+    ["a plain scalar", "a: [plain\n%YAML 1.2\n]\nb: !bwref x/foo\n"],
+    ["a plain scalar after a comma", "a: [x, plain\n%YAML 1.2\n]\nb: !bwref x/foo\n"],
+    ["a plain scalar in a flow mapping", "a: {k: plain\n%YAML 1.2\n}\nb: !bwref x/foo\n"],
+    ["a plain scalar and a %TAG line", "a: [plain\n%TAG !x! !bw\n]\nb: !bwref x/foo\n"],
+    ["a plain scalar, CRLF", "a: [plain\r\n%YAML 1.2\r\n]\r\nb: !bwref x/foo\r\n"],
+  ])("a directive-like line after %s in a flow sequence is text", (_, text) => {
+    expect(references(text)).toEqual(["x/foo"]);
+  });
+
+  // The text line declares no handle, so a name behind it is still refused: only the line is text.
+  test("a directive-like line that is flow text declares no handle", () => {
+    expect(references("a: [plain\n%TAG !x! !bw\n]\nb: !x!ref x/foo\n")).toEqual([]);
+  });
+
+  // Any other token before the line makes the `%` start a token, and go-yaml reads a directive token
+  // inside the flow collection as an error: the document lists nothing.
+  test.each([
+    ["a comment", "a: [plain # c\n%YAML 1.2\n]\nb: !bwref x/foo\n"],
+    ["a quoted scalar", 'a: ["q"\n%YAML 1.2\n]\nb: !bwref x/foo\n'],
+    ["a comma", "a: [plain,\n%YAML 1.2\n]\nb: !bwref x/foo\n"],
+    ["a tag", "a: [!bwref\n%YAML 1.2\n]\nb: !bwref x/foo\n"],
+    ["an opening bracket", "a: [\n%YAML 1.2\n]\nb: !bwref x/foo\n"],
+  ])("a directive line after %s in a flow sequence refuses the document", (_, text) => {
+    expect(references(text)).toEqual([]);
   });
 
   test("a line that looks like a directive in a block scalar or a comment declares nothing", () => {

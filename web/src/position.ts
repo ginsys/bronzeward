@@ -520,11 +520,17 @@ function readDocumentLine(d: Docs, st: Carry, text: string): boolean {
     }
     return false;
   }
-  if (text.startsWith("%") && (st.open === "" || (st.open === "plain" && st.holder >= 0))) {
+  // In a flow collection a plain scalar goes on over the line breaks. go-yaml ends it at a marker or a
+  // comment only (yaml_parser_scan_plain_scalar, scannerc.go lines 2703-2722 and 2815, go.yaml.in/yaml/v3
+  // v3.0.5), so a `%` in the first column is text of that scalar. Only a plain scalar leaves `ns` and
+  // `closed` both false: a comma, a colon or a property leaves `ns` true, and a quote, a bracket, an
+  // alias and a comment set `closed`.
+  const flowPlain = st.flow > 0 && !st.ns && !st.closed;
+  if (text.startsWith("%") && ((st.open === "" && !flowPlain) || (st.open === "plain" && st.holder >= 0))) {
     // After content, a directive in the first column outside a flow collection ends the document
     // (go-yaml reads the stream end implicitly) and opens the directives of the next one. A block
     // scalar ends there too, since its content is indented at least one column. Inside a flow
-    // collection the directive is an error.
+    // collection the directive is an error, unless an open plain scalar takes the line as text.
     if (d.phase === "body") {
       if (st.flow > 0) {
         // The line is consumed and the document stays open, so the next marker ends it.

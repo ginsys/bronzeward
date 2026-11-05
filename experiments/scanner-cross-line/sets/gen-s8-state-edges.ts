@@ -343,6 +343,20 @@ const firstOfG = docs.size;
   const opens = ["a: [1,", "a: {b:", "a: [!<!bwref> x/foo,", "a: [!bwref x/foo,", "a: {b: !bwref x/foo,", "- [a,", "[a,\n b"];
   const follows = ["---\nb: !bwref x/bar\n", "...\n---\nb: !bwref x/bar\n", "%YAML 1.1\n---\nb: !bwref x/bar\n", "%TAG !x! !bw\n---\nb: !x!ref x/bar\n", "---\nb: 1\n", "...\n"];
   for (const o of opens) for (const f of follows) docs.add(`${o}\n${f}`);
+  // A `%` line in the first column inside an open flow collection. After an open plain scalar it is
+  // text of that scalar, since go-yaml ends the scalar at a marker or a comment only, so the stream is
+  // one valid document. After a comment, a quote, a comma, a tag or an opening bracket it is a
+  // directive token, which is an error.
+  const flowHeads = [
+    ["a: [plain", "]"], ["a: [x, plain", "]"], ["a: {k: plain", "}"], ["a: [plain # c", "]"], ['a: ["q"', "]"],
+    ["a: [plain,", "]"], ["a: [!bwref", "]"], ["a: [!bwref x/foo", "]"], ["a: [", "]"], ["a: [plain x/foo", "]"],
+  ] as const;
+  for (const [h, closer] of flowHeads)
+    for (const t of ["%YAML 1.2", "%YAML 1.1", "%TAG !x! !bw", "%FOO x"]) {
+      docs.add(`${h}\n${t}\n${closer}\nb: !bwref x/foo\n`);
+      docs.add(`${h}\n${t}\n${closer}\n---\nb: !bwref x/foo\n`);
+      docs.add(`${h}\n${t}\n${closer}\nb: !x!ref x/foo\n`);
+    }
   const onMarker = ["!<!bwref> x/foo", "!bwref x/foo", "x", "# c", "", "\t", "!x!ref x/foo", "--- b"];
   for (const c of ["a: 1", "a: |\n  x", "- a", "--- !bwref x/foo", "[a]"])
     for (const t of onMarker) {
