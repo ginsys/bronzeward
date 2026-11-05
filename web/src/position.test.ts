@@ -649,6 +649,84 @@ describe("a tag is resolved the way go-yaml does", () => {
     expect(references(text)).toEqual(["x/bar"]);
   });
 
+  // ginsys/bronzeward#620: go-yaml refuses a stream in three more shapes, and the document at fault
+  // lists nothing. A node takes one tag, so a second tag is an error (parserc.go, `did not find
+  // expected key` in a block mapping). A `%` where a token starts cannot start a plain scalar
+  // (`found character that cannot start any token`). A quoted scalar refuses a `---` or `...` in
+  // the first column (`found unexpected document indicator`).
+  test.each([
+    ["a tag before a verbatim tag", "a: !other !<!bwref> x/foo\n"],
+    ["the same tag twice", "a: !bwref !bwref x/foo\n"],
+    ["a tag before the tag", "a: !other !bwref x/foo\n"],
+    ["a tag and an anchor before the tag", "a: &e !other !bwref x/foo\n"],
+    ["a tag, an anchor, then the tag", "a: !other &e !bwref x/foo\n"],
+    ["a tag before the tag in a flow sequence", "[!other !bwref x/foo]\n"],
+    ["a tag before the tag in a block sequence", "- !other !bwref x/foo\n"],
+    ["a tag before the tag in a flow mapping", "{a: !other !bwref x/foo}\n"],
+    ["a tag before the tag over a line break in a flow sequence", "[!other\n !bwref x/foo]\n"],
+  ])("two tags on one node: %s lists nothing", (_, text) => {
+    expect(references(text)).toEqual([]);
+  });
+
+  test.each([
+    ["%YAML after a quoted value", 'a: !<!bwref> "x/foo"\n %YAML 1.1\n'],
+    ["%TAG after a quoted value", 'a: !bwref "x/foo"\n  %TAG !x! !bw\n'],
+    ["%x in a block sequence", "- !bwref x/foo\n- %x\n"],
+    ["%b in a flow sequence", "[!bwref x/foo,\n %b]\n"],
+    ["a tab, then %x", 'a: !bwref "x/foo"\n\t%x\n'],
+  ])("an indented percent line: %s lists nothing", (_, text) => {
+    expect(references(text)).toEqual([]);
+  });
+
+  test.each([
+    ["a double quote", 'a: !bwref x/foo\nb: "x\n---\ny"\n'],
+    ["a single quote", "a: !bwref x/foo\nb: 'x\n---\ny'\n"],
+    ["a `...` marker", 'a: !bwref x/foo\nb: "x\n...\ny"\n'],
+    ["a `--- c` marker", 'a: !bwref x/foo\nb: "x\n--- c\ny"\n'],
+    ["a `---` and a tab", 'a: !bwref x/foo\nb: "x\n---\t\ny"\n'],
+  ])("a marker in a quoted scalar: %s lists nothing", (_, text) => {
+    expect(references(text)).toEqual([]);
+  });
+
+  test.each([
+    ["a `---` in a double quote", 'a: [!bwref x/foo, "x\n---\ny"]\n---\nb: !bwref x/bar\n'],
+    ["a `...` in a double quote", 'a: [!bwref x/foo, "x\n...\ny"]\n---\nb: !bwref x/bar\n'],
+    ["a `---` in a double quote after a plain value", 'a: !bwref x/foo\nb: "x\n---\ny"\n---\nc: !bwref x/bar\n'],
+    ["a `---` in a single quote", "a: !bwref x/foo\nb: 'x\n---\ny'\n---\nc: !bwref x/bar\n"],
+  ])("a marker in a quoted scalar refuses its document and the next one lists: %s", (_, text) => {
+    expect(references(text)).toEqual(["x/bar"]);
+  });
+
+  // Each of these is a valid stream with one tag on the node, a percent that is text, or a marker that
+  // is no marker.
+  test.each([
+    ["a tag on an empty value, then a key with its own tag", "a: !other\nb: !bwref x/foo\n"],
+    ["a tag on an empty value, then a tagged key", "a: !other\n!u k: !bwref x/foo\n"],
+    ["a comma between two tags", "[!other, !bwref x/foo]\n"],
+    ["a tagged key in a flow mapping", "{!other a: !bwref x/foo}\n"],
+    ["a dash between two tags", "- !other\n- !bwref x/foo\n"],
+    ["a tagged explicit key and value", "? !other a\n: !bwref x/foo\n"],
+    ["a percent that a plain scalar goes on over", "a: x\n %y\nb: !bwref x/foo\n"],
+    ["a percent that a plain scalar goes on over in a flow sequence", "[a\n %b, !bwref x/foo]\n"],
+    ["a percent in a block scalar", "a: |\n  %x\nb: !bwref x/foo\n"],
+    ["a percent in a quoted scalar", 'a: "q\n %x"\nb: !bwref x/foo\n'],
+    ["an indented marker in a quoted scalar", 'a: !bwref x/foo\nb: "x\n ---\ny"\n'],
+    ["a marker with text on it in a quoted scalar", 'a: !bwref x/foo\nb: "x\n---x\ny"\n'],
+    ["a tag in a comment", "a: !bwref x/foo # !other\n"],
+    ["a quoted name", 'a: !bwref "x/foo"\nb: 1\n'],
+  ])("one tag on a node: %s still lists the name", (_, text) => {
+    expect(references(text)).toEqual(["x/foo"]);
+  });
+
+  test("a faulty tag, percent line or quote marker blanks its document and no other", () => {
+    expect(references("a: !other !bwref x/foo\n---\nb: !bwref x/bar\n")).toEqual(["x/bar"]);
+    expect(references("a: !bwref x/foo\n---\nb: !other !bwref y/bar\n")).toEqual(["x/foo"]);
+    expect(references('a: !bwref "x/foo"\n  %x\n---\nb: !bwref x/bar\n')).toEqual(["x/bar"]);
+    expect(references('a: !bwref x/foo\n---\nb: !bwref "y/bar"\n  %x\n')).toEqual(["x/foo"]);
+    expect(references('a: !bwref x/foo\nb: "x\n---\ny"\n---\nc: !bwref x/bar\n')).toEqual(["x/bar"]);
+    expect(references('a: !bwref x/foo\n---\nb: !bwref y/bar\nc: "x\n---\ny"\n')).toEqual(["x/foo"]);
+  });
+
   // The directive line inside the open flow collection belongs to the faulty document: it declares no
   // handle for the document after it, which then lists nothing for a name behind that handle.
   test("a directive in an open flow sequence declares nothing for the next document", () => {
