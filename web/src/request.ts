@@ -247,12 +247,20 @@ export class Client {
   // HEADERS_BOUND or ATTEMPT_BOUND applies: only `signal` ends the request, and the reader's idle
   // timer fires it. The response's epoch and Deprecation header are observed as a read's are, but
   // the response is returned even under a new epoch: the stream's own `reset` replays it, and
-  // onEpochChange ends the page that watches. The body is the caller's to read or cancel.
-  // Undefined when no answer arrived (a cancel through `signal` included), NOT_SENT when the
-  // sign-in ended: the watch stops, with nothing sent.
+  // onEpochChange ends the page that watches. An answer that names another epoch than one
+  // recorded after its send may be older or newer (§8.5), as for a read: it is dropped, its epoch
+  // unobserved, and reported as no answer, so a delayed answer never rolls the epoch back. The
+  // body is the caller's to read or cancel. Undefined when no answer arrived (a cancel through
+  // `signal` included), NOT_SENT when the sign-in ended: the watch stops, with nothing sent.
   async open(path: string, headers: Record<string, string>, signal: AbortSignal): Promise<Response | undefined | typeof NOT_SENT> {
+    const records = this.epochRecords;
     const res = await this.send(path, "GET", headers, undefined, signal, false);
     if (res === NOT_SENT || res === undefined) return res;
+    const epoch = res.headers.get("Bronzeward-Epoch");
+    if (epoch !== null && epoch !== this.epoch && records !== this.epochRecords) {
+      drop(res);
+      return undefined;
+    }
     const route = API_BASE + path.split("?")[0];
     if (res.headers.has("Deprecation") && !this.deprecated.has(route)) {
       this.deprecated.add(route);

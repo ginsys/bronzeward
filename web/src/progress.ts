@@ -66,12 +66,14 @@ export const terminal = (state: string) => ["succeeded", "failed", "completed", 
 const epochOf = (id: string) => id.split(":", 1)[0]!;
 const numberOf = (id: string) => Number(id.slice(id.indexOf(":") + 1));
 
-type Reader = Pick<Client, "read" | "open">;
+type Reader = Pick<Client, "read" | "open" | "currentEpoch" | "writesEnded">;
 
 // What one watch shares between its stream, its pages and its loop.
 class Run {
   last = ""; // the ID of the last event shown
-  steps = 0; // what the watch showed or cleared: an attempt that changed nothing is a failure
+  // What the watch showed: an attempt that showed nothing is a failure. A clear is not counted, so a
+  // stream whose events never match its epoch, cleared on every attempt, backs off (the CLI's watch.go).
+  steps = 0;
   halted = false;
   constructor(readonly w: Watch) {}
 
@@ -89,8 +91,9 @@ class Run {
     this.last = e.id;
   }
 
+  // What `until` answered held for the events now cleared: it is asked again.
   clear(why: string): void {
-    this.steps++;
+    this.halted = false;
     this.last = "";
     this.w.clear(why);
   }
@@ -106,7 +109,8 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
   let pages = false;
   let delay = 1000;
   for (;;) {
-    if (w.signal.aborted) return { kind: "stopped" };
+    // The sign-in ended: nothing more is sent. The JSON pages never reach the stream's check for it.
+    if (w.signal.aborted || client.writesEnded) return { kind: "stopped" };
     const before = run.steps;
     const began = pace.now();
     const s: Streamed = pages ? "pages" : await stream(client, path, run, pace);
@@ -121,13 +125,26 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
       const drained = await drain(client, path, run, true);
       if (typeof drained === "object") return { kind: "failed", res: drained };
     }
+    // The attempt's own time: a slow operation read does not skip the backoff.
+    const took = pace.now() - began;
     if (w.signal.aborted) return { kind: "stopped" };
     const res = await client.read<Operation>(path);
     if (res.kind === "ok" && terminal(res.data.state)) {
+      // The epoch this read held, taken before the drain reads anything.
+      const epoch = client.currentEpoch;
       // A terminal state settles the watch, so the last events are all shown, until or not.
       run.halted = false;
       const drained = await drain(client, path, run, false);
-      if (drained === "read") return w.signal.aborted ? { kind: "stopped" } : { kind: "ended", operation: res.data };
+      if (drained === "read") {
+        if (w.signal.aborted) return { kind: "stopped" };
+        if (epoch === undefined || run.last === "" || epochOf(run.last) === epoch) return { kind: "ended", operation: res.data };
+        // Events of another epoch than the operation read's are of a restored installation, where the
+        // operation can be in another state: it is read again, after the delay so a server whose
+        // events never match is not asked again without a pause (the CLI's watch.go).
+        await pace.sleep(delay, w.signal);
+        delay = Math.min(2 * delay, 30_000);
+        continue;
+      }
       if (drained !== "discarded") return { kind: "failed", res: drained };
     } else if (res.kind === "ok") {
       if (run.stop()) return { kind: "ended", operation: res.data };
@@ -139,7 +156,7 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
     // once they show something new.
     const progress = run.steps !== before;
     if (progress) delay = 1000;
-    if (pages || res.kind !== "ok" || (!progress && (!opened || pace.now() - began < 1000))) {
+    if (pages || res.kind !== "ok" || (!progress && (!opened || took < 1000))) {
       await pace.sleep(delay, w.signal);
       if (!progress) delay = Math.min(2 * delay, 30_000);
     }
@@ -190,11 +207,12 @@ async function stream(client: Reader, path: string, run: Run, pace: Pace): Promi
       // A cut connection, the idle cut or leaving the page rejects the read.
       const chunk = await reader.read().catch(() => undefined);
       if (chunk === undefined || chunk.done) return "ended";
-      const value = chunk.value;
-      clearTimeout(idle);
-      idle = setTimeout(leave, pace.idle);
-      buf += value;
+      buf += chunk.value;
       for (let i = buf.indexOf("\n"); i >= 0; i = buf.indexOf("\n")) {
+        // Every complete line starts the wait again, and bytes of a line still open do not: a
+        // connection that trickles bytes with no line feed is cut as a silent one is (§8.6 item 5).
+        clearTimeout(idle);
+        idle = setTimeout(leave, pace.idle);
         const line = buf.slice(0, i).replace(/\r$/, "");
         buf = buf.slice(i + 1);
         if (line.startsWith(":")) {

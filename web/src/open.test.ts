@@ -78,6 +78,21 @@ describe("the event stream through open()", () => {
     expect(changes).toEqual([["e2", false]]);
   });
 
+  test("R1-3: a stream answer held back past a read that recorded a new epoch is dropped and does not roll the epoch back", async () => {
+    const changes: [string, boolean][] = [];
+    let release!: (r: Response) => void;
+    const held = new Promise<Response>((done) => { release = done; });
+    const read = new Response("{}", { status: 200, headers: { "Content-Type": "application/json", "Bronzeward-Epoch": "e2" } });
+    const { c } = client([held as unknown as Response, read], { onEpochChange: (e, r) => void changes.push([e, r]) });
+    const opening = c.open(EVENTS, { Accept: "text/event-stream" }, new AbortController().signal);
+    await c.read("/server");
+    expect(c.currentEpoch).toBe("e2");
+    release(stream("e1"));
+    expect(await opening).toBeUndefined();
+    expect(c.currentEpoch).toBe("e2");
+    expect(changes).toEqual([]);
+  });
+
   test("the token is sent as Authorization, Accept and Last-Event-ID as given, and the URL carries no token", async () => {
     const { c, fetchMock } = client([stream()], { token: () => "SYNTH-token" });
     await c.open(`${EVENTS}?x=1`, { Accept: "text/event-stream", "Last-Event-ID": "e1:2" }, new AbortController().signal);

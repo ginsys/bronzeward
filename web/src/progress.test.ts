@@ -11,7 +11,8 @@ const frame = (e: { id: string; type: string; data: unknown }) => `id: ${e.id}\n
 
 // A stream answer: its chunks, then the end of the body unless `open`, which holds it open until
 // the request is cut. `hang` never sends its headers.
-interface Stream { chunks: string[]; epoch?: string | null; open?: boolean; status?: number; type?: string; hang?: boolean }
+// `trickle` sends those bytes every 5 ms, with no line feed, until the request is cut.
+interface Stream { chunks: string[]; epoch?: string | null; open?: boolean; status?: number; type?: string; hang?: boolean; trickle?: string }
 
 function json(body: unknown, epoch = "e1", status = 200): Response {
   const headers = { "Content-Type": status === 200 ? "application/json" : "application/problem+json", "Bronzeward-Epoch": epoch };
@@ -20,8 +21,12 @@ function json(body: unknown, epoch = "e1", status = 200): Response {
 
 // A fake server. Each stream request takes the next of `streams` (an Error is a transport
 // failure); each operation read the next of `states`, the last repeated; each JSON events read
-// answers `pages`, or the next of `pageRefusals`.
-function server(o: { streams: (Stream | Error)[]; states: string[]; pages?: OpEvent[]; pageRefusals?: number[]; epoch?: string }) {
+// answers `pages`, or the next of `pageRefusals`. A state `x@e2` is read under the epoch e2, and
+// the pages are read under `pagesEpoch`. Each operation read takes `readTime` ms of the `clock`.
+function server(o: {
+  streams: (Stream | Error)[]; states: string[]; pages?: OpEvent[]; pageRefusals?: number[]; epoch?: string;
+  pagesEpoch?: string; clock?: { t: number }; readTime?: number;
+}) {
   const opened: Record<string, string>[] = [];
   const urls: string[] = [];
   const fetch = async (url: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
@@ -34,12 +39,16 @@ function server(o: { streams: (Stream | Error)[]; states: string[]; pages?: OpEv
       if (s === undefined) throw new Error("no stream left");
       if (s instanceof Error) throw s;
       if (s.hang === true) return noHeaders(init);
+      let drip: ReturnType<typeof setInterval> | undefined;
       const body = new ReadableStream<Uint8Array>({
         start(c) {
           for (const chunk of s.chunks) c.enqueue(new TextEncoder().encode(chunk));
-          if (s.open === true) init?.signal?.addEventListener("abort", () => c.error(new DOMException("aborted", "AbortError")));
-          else c.close();
+          if (s.trickle !== undefined) drip = setInterval(() => c.enqueue(new TextEncoder().encode(s.trickle!)), 5);
+          if (s.open === true || s.trickle !== undefined) {
+            init?.signal?.addEventListener("abort", () => { clearInterval(drip); c.error(new DOMException("aborted", "AbortError")); });
+          } else c.close();
         },
+        cancel() { clearInterval(drip); },
       });
       const h: Record<string, string> = { "Content-Type": s.type ?? "text/event-stream" };
       if (s.epoch !== null) h["Bronzeward-Epoch"] = s.epoch ?? o.epoch ?? "e1";
@@ -48,26 +57,28 @@ function server(o: { streams: (Stream | Error)[]; states: string[]; pages?: OpEv
     if (u.startsWith(EVENTS)) {
       const refusal = o.pageRefusals?.shift();
       if (refusal !== undefined) return json({ type: "urn:bronzeward:problem:forbidden", title: "forbidden", status: refusal }, o.epoch, refusal);
-      return json({ items: (o.pages ?? []).map((e) => ({ ...e, at: "2026-11-01T06:00:00Z" })) }, o.epoch);
+      return json({ items: (o.pages ?? []).map((e) => ({ ...e, at: "2026-11-01T06:00:00Z" })) }, o.pagesEpoch ?? o.epoch);
     }
     if (u === `${API_BASE}/operations/${OP}`) {
-      const state = o.states.length > 1 ? o.states.shift()! : o.states[0]!;
-      return json({ id: OP, kind: "ingest", state }, o.epoch);
+      const [state, epoch] = (o.states.length > 1 ? o.states.shift()! : o.states[0]!).split("@");
+      if (o.clock !== undefined) o.clock.t += o.readTime ?? 0;
+      return json({ id: OP, kind: "ingest", state }, epoch ?? o.epoch);
     }
+    if (u === `${API_BASE}/probe`) return json({}, o.pagesEpoch ?? o.epoch);
     throw new Error(`unexpected ${u}`);
   };
   const client = new Client({ fetch: fetch as typeof globalThis.fetch, token: () => "SYNTH-token", sleep: async () => {} });
   return { client, opened, urls };
 }
 
-function recorder(until?: (shown: OpEvent[]) => boolean) {
+function recorder(until?: (shown: OpEvent[]) => boolean, clock = { t: 0 }) {
   const shown: OpEvent[] = [];
   const log: string[] = [];
   const sleeps: number[] = [];
   const abort = new AbortController();
-  const pace: Pace = { sleep: async (ms) => { sleeps.push(ms); }, now: () => 0, idle: 20 };
+  const pace: Pace = { sleep: async (ms) => { sleeps.push(ms); }, now: () => clock.t, idle: 20 };
   return {
-    shown, log, sleeps, abort, pace,
+    shown, log, sleeps, abort, pace, clock,
     w: {
       show: (e: OpEvent) => { shown.push(e); log.push(`show ${e.id}`); },
       clear: (why: string) => { shown.length = 0; log.push(`clear: ${why}`); },
@@ -271,6 +282,108 @@ describe("the operation progress reader (§8.6)", () => {
     expect(await watch(s.client, OP, r.w, r.pace)).toEqual({ kind: "stopped" });
     expect(s.opened).toHaveLength(1);
     expect(r.shown.map((e) => e.id)).toEqual(["e1:1"]);
+  });
+
+  // Findings of the first review of the reader (R1-n).
+
+  test("R1-1: a terminal read whose drain shows the events of a restored installation does not end the watch", async () => {
+    const s = server({
+      streams: [{ chunks: [frame(ev("e1:1"))] }, { chunks: [], epoch: "e2" }],
+      states: ["failed@e1", "succeeded@e2"],
+      pages: [ev("e2:1"), ev("e2:2", "staged"), ev("e2:3", "succeeded")],
+      pagesEpoch: "e2",
+    });
+    // Another response records the restore after the operation read and before the drain's read.
+    let restored = false;
+    const reader = {
+      read: (async (path: string) => {
+        if (path.endsWith("/events") && !restored) {
+          restored = true;
+          await s.client.read("/probe");
+        }
+        return s.client.read(path);
+      }) as typeof s.client.read,
+      open: (...a: Parameters<typeof s.client.open>) => s.client.open(...a),
+      get currentEpoch() { return s.client.currentEpoch; },
+      get writesEnded() { return s.client.writesEnded; },
+    };
+    const r = recorder();
+    const out = await watch(reader, OP, r.w, r.pace);
+    expect(out).toMatchObject({ kind: "ended", operation: { state: "succeeded" } });
+    expect(r.log).toEqual(["show e1:1", `clear: ${RESTORED}`, "show e2:1", "show e2:2", "show e2:3"]);
+    expect(r.sleeps).toEqual([1000]);
+  });
+
+  test("R1-2: a clear asks until again: the replay of a restored installation is shown past its first event", async () => {
+    const s = server({
+      streams: [
+        { chunks: [frame(ev("e1:1")), frame(ev("e1:2", "paused"))], epoch: "e1" },
+        { chunks: ["event: reset\ndata: {}\n\n", frame(ev("e2:1")), frame(ev("e2:2", "staged")), frame(ev("e2:3", "paused"))], epoch: "e2" },
+      ],
+      states: ["running@e2", "running@e2"],
+      epoch: "e2",
+    });
+    // The old paused event stops the watch; after the clear only the replay's own paused event does.
+    const r = recorder((shown) => shown.some((e) => e.type === "paused"));
+    const out = await watch(s.client, OP, r.w, r.pace);
+    expect(out).toMatchObject({ kind: "ended", operation: { state: "running" } });
+    expect(r.log).toEqual(["show e1:1", "show e1:2", `clear: ${RESTORED}`, "show e2:1", "show e2:2", "show e2:3"]);
+  });
+
+  test("R1-4: the JSON pages stop the watch once the sign-in ended, and no further read is sent", async () => {
+    const s = server({ streams: [{ chunks: ["{}"], type: "application/json" }], states: ["running"], pages: [ev("e1:1")] });
+    const r = recorder();
+    // A sleep that lets the timers run, and ends a watch that never stops by itself.
+    r.pace.sleep = async (ms) => {
+      r.sleeps.push(ms);
+      await new Promise((done) => setTimeout(done, 0));
+      if (r.sleeps.length >= 20) r.abort.abort();
+    };
+    const show = r.w.show;
+    r.w.show = (e) => { show(e); s.client.endWrites(); };
+    expect(await watch(s.client, OP, r.w, r.pace)).toEqual({ kind: "stopped" });
+    expect(r.abort.signal.aborted).toBe(false);
+    expect(r.sleeps.length).toBeLessThanOrEqual(1);
+  });
+
+  test("R1-5: events cleared on every attempt are not progress: the watch backs off", async () => {
+    const mismatched = () => ({ chunks: [frame(ev("e2:1"))], epoch: "e1" });
+    const s = server({
+      streams: [mismatched(), mismatched(), mismatched(), mismatched(), { chunks: [frame(ev("e1:1", "succeeded"))] }],
+      states: ["running", "running", "running", "running", "succeeded"],
+      pages: [ev("e1:1", "succeeded")],
+    });
+    const r = recorder();
+    expect((await watch(s.client, OP, r.w, r.pace)).kind).toBe("ended");
+    // The mismatched event is cleared, never shown, so no attempt before the last made progress.
+    expect(r.sleeps).toEqual([1000, 2000, 4000, 8000]);
+  });
+
+  test("R1-6: a slow operation read does not skip the backoff of a stream that ended at once", async () => {
+    const clock = { t: 0 };
+    const s = server({
+      streams: [{ chunks: [] }, { chunks: [] }, { chunks: [] }, { chunks: [frame(ev("e1:1", "succeeded"))] }],
+      states: ["running", "running", "running", "succeeded"],
+      pages: [ev("e1:1", "succeeded")],
+      clock,
+      readTime: 1500,
+    });
+    const r = recorder(undefined, clock);
+    expect((await watch(s.client, OP, r.w, r.pace)).kind).toBe("ended");
+    expect(r.sleeps).toEqual([1000, 2000, 4000]);
+  });
+
+  test("R1-7: bytes that never make a line do not keep the idle timer alive: the stream is cut and reopened", async () => {
+    const s = server({
+      streams: [{ chunks: [], trickle: "x" }, { chunks: [frame(ev("e1:1", "succeeded"))] }],
+      states: ["running", "succeeded"],
+      pages: [ev("e1:1", "succeeded")],
+    });
+    const r = recorder();
+    const out = await Promise.race([watch(s.client, OP, r.w, r.pace), new Promise((done) => setTimeout(() => done("still open"), 300))]);
+    r.abort.abort();
+    expect(out).toMatchObject({ kind: "ended" });
+    expect(s.opened).toHaveLength(2);
   });
 
   test("eventLine names the type, the generation and the code, and nothing else of the data", () => {
