@@ -1,5 +1,5 @@
-import { describe, expect, test } from "vitest";
-import { eventLine, type OpEvent, type Pace, RESTORED, RESTORED_WHILE_READ, terminal, watch } from "./progress.ts";
+import { describe, expect, test, vi } from "vitest";
+import { eventLine, type OpEvent, type Pace, RESTORED, RESTORED_WHILE_READ, sleep, terminal, watch } from "./progress.ts";
 import { API_BASE, Client } from "./request.ts";
 import { noHeaders } from "./test-stalls.ts";
 
@@ -605,6 +605,51 @@ describe("the operation progress reader (§8.6)", () => {
     const out = await watch(w, OP, r.w, r.pace);
     expect(w.currentEpoch).toBe("e2");
     expect(out).toEqual({ kind: "ended", operation: { id: OP, kind: "ingest", state: "running" }, epoch: "e1" });
+  });
+
+  // Findings of the hosted review (R5-n): leaving the page ends a wait at once and sends nothing more.
+
+  test("R5-1: a wait on a signal that was already aborted ends at once, and a wait that ended normally leaves no listener", async () => {
+    const gone = new AbortController();
+    gone.abort();
+    const out = await Promise.race([sleep(60_000, gone.signal).then(() => "ended"), new Promise((done) => setTimeout(() => done("still waiting"), 300))]);
+    expect(out).toBe("ended");
+    const live = new AbortController();
+    const added = vi.spyOn(live.signal, "addEventListener");
+    const removed = vi.spyOn(live.signal, "removeEventListener");
+    await sleep(5, live.signal);
+    expect(added).toHaveBeenCalledTimes(1);
+    expect(removed).toHaveBeenCalledTimes(1);
+  });
+
+  // The page leaves while the stream opens: the answer arrives after the abort.
+  const leavingAtOpen = (s: ReturnType<typeof server>, abort: AbortController) => ({
+    read: ((path: string) => s.client.read(path)) as typeof s.client.read,
+    readWithEpoch: ((path: string) => s.client.readWithEpoch(path)) as typeof s.client.readWithEpoch,
+    open: (async (...a: Parameters<typeof s.client.open>) => {
+      const out = await s.client.open(...a);
+      abort.abort();
+      return out;
+    }) as typeof s.client.open,
+    get currentEpoch() { return s.client.currentEpoch; },
+    get writesEnded() { return s.client.writesEnded; },
+  });
+
+  test("R5-2: a stream answered with JSON after the watch was aborted sends no events read", async () => {
+    const s = server({ streams: [{ chunks: [], type: "application/json" }], states: ["running"], pages: [ev("e1:1")] });
+    const r = recorder();
+    expect(await watch(leavingAtOpen(s, r.abort), OP, r.w, r.pace)).toEqual({ kind: "stopped" });
+    // The stream's own request is the only one to the events path.
+    expect(s.urls.filter((u) => u.startsWith(EVENTS))).toEqual([EVENTS]);
+    expect(r.log).toEqual([]);
+  });
+
+  test("R5-2b: a refused stream after the watch was aborted sends no events read", async () => {
+    const s = server({ streams: [{ chunks: [], status: 403 }], states: ["running"], pages: [ev("e1:1")] });
+    const r = recorder();
+    expect(await watch(leavingAtOpen(s, r.abort), OP, r.w, r.pace)).toEqual({ kind: "stopped" });
+    expect(s.urls.filter((u) => u.startsWith(EVENTS))).toEqual([EVENTS]);
+    expect(r.log).toEqual([]);
   });
 
   test("eventLine names the type, the generation and the code, and nothing else of the data", () => {

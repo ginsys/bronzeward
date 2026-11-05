@@ -53,11 +53,20 @@ export interface Pace {
   idle: number;
 }
 
+// Waits `ms`, or ends at once when `signal` is aborted, also when it was aborted before the call
+// (an abort event does not fire again). Both ends clear the timer and remove the listener, so the
+// waits of a long watch do not pile up listeners on its signal.
+export function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((done) => {
+    if (signal.aborted) return done();
+    const end = () => { clearTimeout(t); signal.removeEventListener("abort", end); done(); };
+    const t = setTimeout(end, ms);
+    signal.addEventListener("abort", end, { once: true });
+  });
+}
+
 const PACE: Pace = {
-  sleep: (ms, signal) => new Promise((done) => {
-    const t = setTimeout(done, ms);
-    signal.addEventListener("abort", () => { clearTimeout(t); done(); }, { once: true });
-  }),
+  sleep,
   now: () => Date.now(),
   idle: 45_000,
 };
@@ -123,6 +132,9 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
     run.fresh = 0;
     const began = pace.now();
     const s: Streamed = pages ? "pages" : await stream(client, path, run, pace);
+    // The page left while the stream was opening or read: its answer is not acted on, and the JSON
+    // fallback below sends nothing.
+    if (w.signal.aborted) return { kind: "stopped" };
     // The sign-in ended: nothing more is sent, and the page that asked is ending too.
     if (s === "signed-out") return { kind: "stopped" };
     if (typeof s === "object") return { kind: "failed", res: s };
