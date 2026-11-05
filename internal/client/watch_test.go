@@ -30,6 +30,10 @@ type opServer struct {
 	opened      []*http.Request
 	reads       int
 	slow        time.Duration
+
+	// restoreAtPages, when set, moves the installation to this epoch at the first request for the JSON
+	// pages: that answer and every later one carries it, as after a restore between two reads.
+	restoreAtPages string
 }
 
 func (o *opServer) serve(w http.ResponseWriter, r *http.Request) {
@@ -46,6 +50,9 @@ func (o *opServer) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer o.mu.Unlock()
+	if r.URL.Path == "/api/v1/operations/op_BWSYNTH/events" && o.restoreAtPages != "" {
+		o.epoch, o.restoreAtPages = o.restoreAtPages, ""
+	}
 	o.answerLocked(w)
 	if o.opEpoch != "" && r.URL.Path == "/api/v1/operations/op_BWSYNTH" {
 		w.Header().Set("Bronzeward-Epoch", o.opEpoch)
@@ -191,6 +198,14 @@ func TestWatch(t *testing.T) {
 		lastEvents: []string{"", "", "", ""},
 		waits:      []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second},
 		notice:     "entered recovery mode or was restored while the events were read",
+	}, {
+		name: "a terminal read under e1, then an empty page list under e2, does not end the watch (#640)",
+		o: &opServer{streams: []handler{sse(ev(e1+":1", "queued")), sse(ev(e2+":1", "queued"), ev(e2+":2", "succeeded"))},
+			epochs: []string{e1}, restoreAtPages: e2, states: []string{"succeeded", "succeeded"}},
+		shown:      []string{e1 + ":1", "clear", e2 + ":1", e2 + ":2"},
+		lastEvents: []string{"", ""},
+		waits:      []time.Duration{time.Second},
+		notice:     "restored or entered recovery mode; the operation's events are shown again from the start",
 	}} {
 		t.Run(c.name, func(t *testing.T) {
 			shown, waits, state, notices, err := watched(t, c.o, e1, nil)

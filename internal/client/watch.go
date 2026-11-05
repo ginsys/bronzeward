@@ -124,7 +124,8 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 		switch {
 		case skip: // no stream and no drain
 		case pages:
-			opened, err = true, c.drain(op, &last, w)
+			opened = true
+			_, err = c.drain(op, &last, w)
 		default:
 			opened, pages, err = c.stream(op, &last, w)
 		}
@@ -145,7 +146,7 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 			// again, and its state stands only if the epoch held.
 			all := w
 			all.Until, all.halt = nil, &halt{}
-			derr := c.drain(op, &last, all)
+			pageEpoch, derr := c.drain(op, &last, all)
 			if derr != nil {
 				again, now, againRaw, err := c.operationRaw(op)
 				switch {
@@ -154,8 +155,17 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 				case now == epoch && Terminal(again.State):
 					return again, OperationRead{againRaw, now}, derr
 				}
-			} else if epoch == "" || last == "" || epochOf(last) == epoch {
-				return o, OperationRead{raw, epoch}, nil
+			} else {
+				held := pageEpoch == "" || pageEpoch == epoch
+				if epoch == "" || held && (last == "" || epochOf(last) == epoch) {
+					return o, OperationRead{raw, epoch}, nil
+				}
+				// Pages of another epoch than the operation read's, an empty list included, are of a
+				// restored installation: what was shown from the earlier one no longer holds.
+				if !held && last != "" && epochOf(last) != pageEpoch {
+					c.cleared(w, "the installation was restored or entered recovery mode")
+					last = ""
+				}
 			}
 			// The watch goes on after the delay, so a server whose events never match its operation
 			// read's epoch is not asked again without a pause.
@@ -355,16 +365,17 @@ func (c *Client) stream(op string, last *string, w Watch) (opened, pages bool, e
 
 // drain reads the JSON event pages to their end and shows every event after *last (§8.6 item 2).
 // Events of another epoch than the last one shown are read after a restore or a recovery entry:
-// what was shown is cleared and every event shown again.
-func (c *Client) drain(op string, last *string, w Watch) error {
-	items, err := c.List("/operations/" + url.PathEscape(op) + "/events")
+// what was shown is cleared and every event shown again. It answers the Bronzeward-Epoch of the
+// pages, empty when they had none or the read failed: a list with no event still names an epoch.
+func (c *Client) drain(op string, last *string, w Watch) (string, error) {
+	items, epoch, err := c.ListAt("/operations/" + url.PathEscape(op) + "/events")
 	if err != nil {
-		return err
+		return "", err
 	}
 	for i, raw := range items {
 		var ev Event
 		if err := json.Unmarshal(raw, &ev); err != nil {
-			return c.Context.fail(fmt.Errorf("GET /api/v1/operations/%s/events: an event does not decode: %w", printable(op), err))
+			return "", c.Context.fail(fmt.Errorf("GET /api/v1/operations/%s/events: an event does not decode: %w", printable(op), err))
 		}
 		if i == 0 && *last != "" && epochOf(ev.ID) != epochOf(*last) {
 			c.cleared(w, "the installation was restored or entered recovery mode")
@@ -372,10 +383,10 @@ func (c *Client) drain(op string, last *string, w Watch) error {
 		}
 		show(w, ev, last)
 		if w.stop() {
-			return nil
+			return epoch, nil
 		}
 	}
-	return nil
+	return epoch, nil
 }
 
 // cleared says why what the watch showed no longer holds, then clears it.
