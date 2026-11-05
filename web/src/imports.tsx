@@ -254,16 +254,17 @@ export function releaseInput(body: Record<string, unknown>, o: Outcome): void {
 }
 // The start's write: the draft's ETag as If-Match, and a done answer's ingestion remembered for the
 // draft, so that only this page's own import adopts the draft's ETag later (ETAG-02), also when the
-// page left.
+// page left. The callback keeps the draft's id only, so the kept request does not reach the input.
 export function sendStart(send: (spec: WriteSpec) => void, clear: () => void, i: StartInput, ifMatch: string): void {
   const body = startBody(i);
+  const draft = i.draft;
   clear();
   send({
     method: "POST", path: "/ingestions", resource: "/ingestions", ifMatch, body,
     settled: (out) => {
       releaseInput(body, out);
       const a = out.kind === "done" ? (out.data as { ingestion?: string } | null) : null;
-      if (typeof a?.ingestion === "string") started.set(a.ingestion, i.draft);
+      if (typeof a?.ingestion === "string") started.set(a.ingestion, draft);
     },
   });
 }
