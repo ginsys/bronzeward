@@ -4,7 +4,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import type { components } from "./api/v1";
 import { forgetETag, keepETag, keptETag } from "./drafts.tsx";
 import { WritesProvider } from "./forms.tsx";
-import { againPath, allowed, documentRefusal, ended, type Ingestion, MAX_DOCUMENT, onEvent, releaseInput, sendStart, StartImport, startBody, startETag, startParams, startRun, started, stopsWatch, unsent } from "./imports.tsx";
+import { againPath, allowed, documentRefusal, ended, type Ingestion, MAX_DOCUMENT, onEvent, releaseInput, sendStart, StartImport, type StartInput, startBody, startETag, startParams, startRun, started, stopsWatch, unsent } from "./imports.tsx";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import { eventLine } from "./progress.ts";
 import type { ReadResult } from "./request.ts";
@@ -208,6 +208,20 @@ describe("the start's body and its protected input (G5, §11.2)", () => {
     const { spec } = start();
     spec.settled!({ kind: "done", data: { ingestion: "ing_new" } } as never, {} as never);
     expect(started.get("ing_new")).toBe("drf_2rmp457a");
+  });
+  test("the kept request does not reach the typed input once the send has returned", () => {
+    let returned = false;
+    const input = new Proxy<StartInput>({ ...full }, {
+      get: (t, k, r) => {
+        if (returned) throw new Error(`the input was read after the send: ${String(k)}`);
+        return Reflect.get(t, k, r);
+      },
+    });
+    const got: { spec?: WriteSpec } = {};
+    sendStart((s) => { got.spec = s; }, () => {}, input, '"1-a"');
+    returned = true;
+    expect(() => got.spec!.settled!({ kind: "done", data: { ingestion: "ing_kept" } } as never, {} as never)).not.toThrow();
+    expect(started.get("ing_kept")).toBe("drf_2rmp457a");
   });
 });
 
