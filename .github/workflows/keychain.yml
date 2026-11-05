@@ -53,7 +53,7 @@ jobs:
         # bash with pipefail, so a failing go test is not hidden by tee.
         shell: bash
         run: |
-          go test -count=1 -v -run '^Test(Keychain|Security|SignInRefused|NoInputNeverPrompts|ClearStored|KeyringWritesNotAbandoned|KeyringLockedRefused|KeyringErrorWithLineFeedIsShownEscaped)' ./internal/client 2>&1 | tee keychain-test.log
+          go test -count=1 -v -run '^Test(Keychain|Security|SignInRefused|NoInputNeverPrompts|ClearStored|KeyringWritesNotAbandoned|KeyringLockedRefused|KeyringErrorWithLineFeedIsShownEscaped|RefusedNameAndUnreadableEntryDoNotBlockRemoval|MatchedClearKeepsWhatItCannotAttribute|MatchedClearOfARefusedNameIsKeptToo)' ./internal/client 2>&1 | tee keychain-test.log
       # The entry-size limit and the tool's answers about a locked keychain, for the pull request.
       - name: Record the limit and the lock answers
         if: ${{ !cancelled() }}
