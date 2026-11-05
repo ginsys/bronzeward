@@ -246,8 +246,9 @@ describe("the write views (#338)", () => {
     expect(body).not.toContain(PRE_ENTRY);
     // Positive control: the process's refusal of the same write, without a scope member, does show
     // the start mode. This server started normally, so the banner never shows; the shell shows its
-    // pre-entry view in place of the page (§8.5 item 1).
-    await faults({ upstream: at, processRefused: ["/clusters"] });
+    // pre-entry view in place of the page (§8.5 item 1). The shell reads /server again as soon as
+    // that view replaces it, so /server is refused too, or the answer would end the view at once.
+    await faults({ upstream: at, processRefused: ["/clusters", "/server"] });
     await $("main form").$("button=Add cluster").click();
     await browser.waitUntil(async () => {
       for (const el of await $$('[data-testid="status"]')) if ((await el.getText().catch(() => "")).includes(PRE_ENTRY)) return true;
