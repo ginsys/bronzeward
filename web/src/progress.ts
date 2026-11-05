@@ -27,7 +27,8 @@ export const RESTORED_WHILE_READ =
 // shown no longer holds, before the events are shown again from the start. `until`, when set, ends
 // the watch before the operation is terminal: it is asked after each event shown, at each
 // keep-alive and after each read of the operation, and once it answers true it stays true.
-// `signal` ends the watch when the page leaves.
+// `signal` ends the watch when the page leaves. A callback must not abort its own watch
+// synchronously: the reader still runs what follows in the same pass (ginsys/bronzeward#644).
 export interface Watch {
   show: (e: OpEvent) => void;
   clear: (why: string) => void;
@@ -256,6 +257,8 @@ async function stream(client: Reader, path: string, run: Run, pace: Pace): Promi
       // A cut connection, the idle cut or leaving the page rejects the read.
       const chunk = await reader.read().catch(() => undefined);
       if (chunk === undefined || chunk.done) return "ended";
+      // A read that was fulfilled before the page left cannot be taken back: nothing of it is shown.
+      if (run.w.signal.aborted) return "ended";
       buf += chunk.value;
       for (let i = buf.indexOf("\n"); i >= 0; i = buf.indexOf("\n")) {
         // Every complete line starts the wait again, and bytes of a line still open do not: a

@@ -652,6 +652,22 @@ describe("the operation progress reader (§8.6)", () => {
     expect(r.log).toEqual([]);
   });
 
+  // The page leaves after a chunk was read: the abort fires at the open, the body's chunk is already queued.
+  test("R6-1: an event in a chunk read before the watch was aborted is not shown", async () => {
+    const s = server({ streams: [{ chunks: [frame(ev("e1:1", "paused"))] }], states: ["running"] });
+    const r = recorder();
+    expect(await watch(leavingAtOpen(s, r.abort), OP, r.w, r.pace)).toEqual({ kind: "stopped" });
+    expect(r.log).toEqual([]);
+  });
+
+  test("R6-1b: a keep-alive in a chunk read before the watch was aborted does not ask the caller whether to stop", async () => {
+    const s = server({ streams: [{ chunks: [": keep-alive\n\n"] }], states: ["running"] });
+    let asked = 0;
+    const r = recorder(() => { asked++; return false; });
+    expect(await watch(leavingAtOpen(s, r.abort), OP, r.w, r.pace)).toEqual({ kind: "stopped" });
+    expect(asked).toBe(0);
+  });
+
   test("eventLine names the type, the generation and the code, and nothing else of the data", () => {
     expect(eventLine(ev("e1:1", "attempt", { generation: 3, code: "precondition-failed", secret: "SYNTH-do-not-show" }))).toBe("attempt (generation 3): precondition-failed");
     expect(eventLine(ev("e1:2", "paused"))).toBe("paused");
