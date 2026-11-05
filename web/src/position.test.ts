@@ -689,6 +689,9 @@ describe("a tag is resolved the way go-yaml does", () => {
     ["a tag, then a single quoted value, text and a colon", "a: !other\n  !bwref 'x/foo' junk: x\n"],
     ["a tag, then a quoted value, text and a colon, in a block sequence", '- !other\n  !bwref "x/foo" junk: x\n'],
     ["a tag, then an alias, text and a colon", "a: !other\n  !u *k junk: !bwref x/foo\n"],
+    ["a tag, then a quoted value, text and two colons", 'a: !other\n  !bwref "x/foo" junk: k: x\n'],
+    ["a tag, then a quoted value, text, a colon and a second colon", 'a: !other\n  !bwref "x/foo" junk: : x\n'],
+    ["a tag, then a quoted value that ends its line, then a key in the next line", 'a: !other\n  !bwref "x/foo"\nb: c\n'],
   ])("two tags over a block line break: %s lists nothing", (_, text) => {
     expect(references(text)).toEqual([]);
   });
@@ -710,6 +713,7 @@ describe("a tag is resolved the way go-yaml does", () => {
     ["a tagged flow key with a bracket in a tag", "a: !other\n  !u [!t[ x]: !bwref x/foo\n"],
     ["a tagged quoted key with a space before the colon", 'a: !other\n  !u "b" : !bwref x/foo\n'],
     ["a tagged key of two plain words", "a: !other\n  !u b c: !bwref x/foo\n"],
+    ["a tagged empty key", "a: !other\n  !u : !bwref x/foo\n"],
   ])("one tag per node over a block line break: %s still lists the name", (_, text) => {
     expect(references(text)).toEqual(["x/foo"]);
   });
