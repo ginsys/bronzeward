@@ -276,7 +276,7 @@ function readTags(original: string): { found: { index: number; tag: string; name
       if (b === undefined) continue;
       ({ name, end } = b);
     } else if (m[4] !== undefined) {
-      if (hasAnchor ? anchoredContinues(masked, start, end, inFlow, cuts) : continues(masked, start, end, cuts)) continue;
+      if (hasAnchor ? anchoredContinues(masked, start, end, inFlow, cuts) : continues(masked, start, end, inFlow, cuts)) continue;
       name = m[4];
     } else name = m[1] !== undefined ? decoded(m[1]) : m[2]!.replaceAll("''", "'");
     if (name !== undefined && NAME.test(name)) found.push({ index: start, tag: original.slice(start, end), name });
@@ -333,23 +333,40 @@ function holder(masked: string, tag: number, compact = false): number {
   return -1;
 }
 
-// Whether a plain scalar ending at `end` goes on to the next line: it ends its line, and the next
-// line with text is more indented than the node that holds the scalar and is no key, sequence
-// entry or flow indicator. A plain scalar holds no colon before a blank, so a line with one is a
-// key. A directive line in the first column ends the scalar, so no line after it continues it.
-function continues(masked: string, tag: number, end: number, cuts: ReadonlySet<number>): boolean {
-  const eol = masked.indexOf("\n", end);
-  if (eol === -1 || masked.slice(end, eol).trim() !== "") return false;
-  const next = nextLine(masked, eol + 1, cuts);
-  // A document marker (--- or ...) ends every scalar, also a top-level one.
-  if (next === undefined || indent(next) <= holder(masked, tag) || MARKER.test(next)) return false;
-  const t = next.trim();
-  return !/^(?:[,\]}]|[-?](?:\s|$))/.test(t) && !/:(?:\s|$)/.test(t);
-}
-
 // A line holds no text when it has YAML blanks only: U+0020, tab and the carriage return of a CRLF.
 // The Unicode spaces that `trim` and `\s` take (U+00A0, say) are text.
 const blank = (line: string) => !/[^ \t\r]/.test(line);
+
+// The text before a tag on its line when the node that holds the scalar is known from that line, so
+// that the indentation of `holder` is the column go-yaml measures against: nothing, a key (quoted, or
+// plain with no `#`, and no colon before a blank) and its colon, or a lone `- `. A compact collection
+// (`- k:`, `- - x`, `? - x`) and a property before the tag (`&e !bwref`) are not in it
+// (ginsys/bronzeward#616).
+const PLAIN_PARENT = /^(?: *(?:"[^"\n]*"|'[^'\n]*'|[^ \t"'#:\-?[\]{},&*!|>%@`](?:[^#:\n]|:(?![ \t]))*): +| *- +| *)$/;
+
+// Whether a plain scalar ending at `end` goes on to the next line (ginsys/bronzeward#616). It ends
+// its line, and the next line with text goes on or ends it as go-yaml reads it
+// (yaml_parser_scan_plain_scalar, scannerc.go lines 2693-2818). A directive line in the first column
+// ends the scalar, so no line after it continues it, and so does a document marker.
+// In flow context the indent test is off: only a line that starts with a flow indicator or a value
+// indicator ends the scalar, as `anchoredContinues` reads it. In block context the next line must be
+// more indented than the node that holds the scalar, and then it is text. That holds for a comma,
+// a bracket or a brace at its start, and, under a parent known from its line (`PLAIN_PARENT`), for
+// `- `, `? ` and a line with a colon before a blank, which go-yaml refuses as a key. Under a compact
+// parent such a line can belong to the collection that holds the scalar, so it still ends the scalar.
+// A line of Unicode spaces only is text, and go-yaml counts its column in U+0020 only.
+function continues(masked: string, tag: number, end: number, inFlow: boolean, cuts: ReadonlySet<number>): boolean {
+  const eol = masked.indexOf("\n", end);
+  if (eol === -1 || masked.slice(end, eol).trim() !== "") return false;
+  const next = nextLine(masked, eol + 1, cuts, blank);
+  // A document marker (--- or ...) ends every scalar, also a top-level one.
+  if (next === undefined || MARKER.test(next)) return false;
+  const t = next.replace(/^[ \t]+|[ \t\r]+$/g, "");
+  if (inFlow) return !/^(?:[,\]}]|:(?:[ \t]|$))/.test(t);
+  if ((next.trim() === "" ? spaces(next) : indent(next)) <= holder(masked, tag)) return false;
+  if (/^[,\]}]/.test(t) || PLAIN_PARENT.test(masked.slice(masked.lastIndexOf("\n", tag) + 1, tag))) return true;
+  return !/^[-?](?:\s|$)/.test(t) && !/:(?:\s|$)/.test(t);
+}
 
 // The text before an anchored tag on its line, in block context: the indentation in YAML spaces
 // (U+0020) only, then one `- ` or a key (quoted, or plain with no `#`, and no colon before a blank)
