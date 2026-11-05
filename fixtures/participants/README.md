@@ -195,12 +195,12 @@ facilitator only. Setup `tN` means `fixtures/participants/session tN`.
 - `t9 disconnect` stops A for 60 s and starts it again, so that the participant's event stream
   ends and the client must resume it. Then it ends the hold, and the apply completes. Its own
   reader checks that a stream resumed with `Last-Event-ID` follows the apply to completion, with
-  no event lost or repeated. That check covers the server only. No client follows an apply's
-  events yet. The CLI's progress reader resumes a stream only for `publish`, the CLI has no
-  `operation watch`, and the web interface has no operation timeline. That half waits for
-  ginsys/bronzeward#354 (CLI watch) and ginsys/bronzeward#359 (web timeline). Until then, a
-  participant can follow the apply only with repeated `operation show`, and T9's measures do not
-  cover a resumed stream.
+  no event lost or repeated. Beside it, the CLI's `operation watch` follows the same apply through
+  the same 60 s stop with no help: it waits for A, resumes the stream, and ends with exit 0 and the
+  completion line. The step fails if it does not. The web interface has no operation timeline
+  yet; that half waits for ginsys/bronzeward#359 (web timeline), and T9's measures do not cover a
+  resumed stream there. A participant on the CLI runs `operation watch <operation>` and sees one
+  retry notice per read while A is down.
 - When A starts again, it takes the apply over from C. It observes the worker again and applies
   from that observation, so the age of the evidence that the commitment used does not limit the
   hold. C's own attempt after the release is refused, because C no longer owns the apply. That
