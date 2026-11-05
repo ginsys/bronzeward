@@ -371,7 +371,60 @@ const firstOfG = docs.size;
     }
 }
 
-// (J) The line ends of (G), (H), (I), (K), (L) and (M) as a CRLF, a lone carriage return, U+0085, U+2028 and U+2029.
+// (N) ginsys/bronzeward#620: shapes that go-yaml refuses and the scanner blanks with their document.
+// (N1) A second tag on one node, with an anchor or a verbatim spelling between or around the two,
+// in each place a property can stand. (N2) A `%` where a token starts, in the middle of a document
+// (an indented line, after an indicator, in a flow collection); a `%` that continues a scalar or sits
+// in a scalar's text is the control. (N3) A `---` or `...` marker in the first column of a quoted
+// scalar, in block and flow context; an indented marker or text after the dashes is the control. Each
+// shape sits alone, before a `---`, and after one, so that the documents around it show that the
+// others still list.
+{
+  // The shape names x/foo and the document after it names x/bar, so a list tells them apart.
+  const around = (p: string) => [`${p}\nb: ${PROBE}\n`, `${p}\n---\nb: ${PROBE}\n`, `a: 1\n---\n${p}\n---\nb: ${PROBE}\n`];
+  // (N1) The split form is in flow context only: a tag on one block line and another on the next is
+  // a gap that the scanner documents.
+  const twoTags = ["!other !bwref", "!bwref !bwref", "!<!bwref> !other", "!other !<!bwref>", "!x !y !bwref", "&e !other !bwref", "!other &e !bwref", "!other !bwref &e"];
+  const tagPlaces = (s: string) => [`a: ${s} x/foo`, `- ${s} x/foo`, `[${s} x/foo]`, `{a: ${s} x/foo}`, `a: [${s} x/foo]`, `? ${s} x/foo\n: 1`, `${s} x/foo`];
+  for (const s of twoTags) for (const p of tagPlaces(s)) for (const d of around(p)) docs.add(d);
+  for (const p of ["[!other\n !bwref x/foo]", "{a: !other\n !bwref x/foo}", "a: [!other\n !bwref x/foo]", "[!other, !bwref x/foo]", "{!other a: !bwref x/foo}"])
+    for (const d of around(p)) docs.add(d);
+  // (N1) Controls: one tag per node, and tags on different nodes.
+  for (const p of ["a: !other\nb: !bwref x/foo", "a: !other\n!u k: !bwref x/foo", "- !other\n- !bwref x/foo", "? !other a\n: !bwref x/foo", "a: &e !bwref x/foo", "a: !bwref &e x/foo", "!u k: !bwref x/foo"])
+    for (const d of around(p)) docs.add(d);
+  // (N2) A `%` where a token starts.
+  const percent = [
+    'a: !bwref "x/foo"\n  %YAML 1.1',
+    'a: !bwref "x/foo"\n %TAG !x! !bw',
+    "- !bwref x/foo\n- %x",
+    "[!bwref x/foo,\n %b]",
+    'a: !bwref "x/foo"\n\t%x',
+    "a: !bwref x/foo\nb: %x",
+    "a: [!bwref x/foo, %x]",
+    "a: {b: !bwref x/foo, c: %x}",
+    "a: !bwref x/foo\n? %x\n: 1",
+    // Controls: a `%` that continues a plain scalar, sits in a scalar's text or follows a comment.
+    "a: x\n %y\nb: !bwref x/foo",
+    "[a\n %b, !bwref x/foo]",
+    "a: |\n  %x\nb: !bwref x/foo",
+    'a: "q\n %x"\nb: !bwref x/foo',
+    "a: !bwref x/foo # %x",
+    "a: x%y\nb: !bwref x/foo",
+  ];
+  for (const p of percent) for (const d of around(p)) docs.add(d);
+  // (N3) A marker in a quoted scalar.
+  for (const q of ['"', "'"]) {
+    for (const m of ["---", "...", "--- c", "---\t", "... c", "...\t"]) {
+      for (const p of [`a: !bwref x/foo\nb: ${q}x\n${m}\ny${q}`, `a: [!bwref x/foo, ${q}x\n${m}\ny${q}]`, `a: !bwref x/foo\nb: ${q}${m}\ny${q}`, `a: ${q}x\n${m}\ny${q}\nb: !bwref x/foo`])
+        for (const d of around(p)) docs.add(d);
+    }
+    // Controls: an indented marker, text after the dashes and a short run of them.
+    for (const m of [" ---", "  ...", "---x", "...x", "--", "-- -"])
+      for (const d of around(`a: !bwref x/foo\nb: ${q}x\n${m}\ny${q}`)) docs.add(d);
+  }
+}
+
+// (J) The line ends of (G), (H), (I), (K), (L), (M) and (N) as a CRLF, a lone carriage return, U+0085, U+2028 and U+2029.
 // go-yaml counts each as a line break, and a CRLF as one.
 for (const d of [...docs].slice(firstOfG)) for (const b of ["\r\n", "\r", "\u0085", " ", " "]) docs.add(d.replaceAll("\n", b));
 
