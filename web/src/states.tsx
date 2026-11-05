@@ -72,6 +72,15 @@ export const earlierRecord = (p: Problem) =>
 // route accepts (a 403's), then its fields. Nothing when no answer carried one.
 export const problemTail = (p: Problem | null) => (p === null ? "" : `${needs(p.status, p)} ${problemLine(p)}${earlierRecord(p)}`);
 
+// A `409 recovery-mode-active` with a `scope` member is that scope's refusal. It says nothing about
+// the process's start mode (client contracts §8.5 item 1, §8.2 409 row). Any other problem, and a
+// `scope` that is not text, add nothing. The process's own refusal has no `scope` member.
+export const SCOPE_NO_MODE = "This answer says nothing about the start mode.";
+export function scopeRefusal(code: string, problem: Problem): string {
+  const scope = problem["scope"];
+  return code === "recovery-mode-active" && typeof scope === "string" ? ` Scope ${scope} refuses this request. ${SCOPE_NO_MODE}` : "";
+}
+
 export function Refused({ problem, status, verb, testid, replayed = false, cut = false }: { problem: Problem | null; status: number; verb: "read" | "saved"; testid?: string; replayed?: boolean; cut?: boolean }) {
   const earlier = replayed && `${REPLAYED} `;
   if (problem === null) return <Status testid={testid}>{earlier}Not {verb}: the server answered {status}.{cut && ` ${CUT_OFF}`}</Status>;
@@ -79,7 +88,7 @@ export function Refused({ problem, status, verb, testid, replayed = false, cut =
   const rule = typeof problem["rule"] === "string" ? ` (rule ${problem["rule"]})` : "";
   return (
     <Status testid={testid}>
-      {earlier}Not {verb}: {code}{rule}.{needs(status, problem)} {problem.title}{problem.detail !== undefined && `: ${problem.detail}`}
+      {earlier}Not {verb}: {code}{rule}.{needs(status, problem)}{scopeRefusal(code, problem)} {problem.title}{problem.detail !== undefined && `: ${problem.detail}`}
       {problem.instance !== undefined && ` Request ${problem.instance}.`}
     </Status>
   );

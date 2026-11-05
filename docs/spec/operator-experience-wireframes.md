@@ -494,6 +494,8 @@ Withheld:   Configuration not shown: it could not be redacted.
 Unread:     Observed: not read at 09:46 — node unreachable; provider access denied.
 Refused:    Not saved: validation-failed (rule unknown-reference). "registry/x" has no
             declaration. [Go to field]
+            A `409 recovery-mode-active` with a `scope` member adds "Scope mch_a refuses this
+            request. This answer says nothing about the start mode."
 Conflict:   Someone changed this draft (revision 7). Your text is not saved. [Show their change]
 Unknown:    Unknown whether this was saved: the connection dropped. [Repeat exactly]
             (same request, same key; offered only while this page holds the request,

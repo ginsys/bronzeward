@@ -16,6 +16,6 @@ expect:
   absent: [token in the harness log, retained artifacts or browser storage]
 runs:
   web:
-    check: web/e2e/auth/shell.e2e.ts, mise run browser-auth; the banner's texts and the start mode in web/src/recovery.test.ts, mise run web
+    check: web/e2e/auth/shell.e2e.ts and, for a write's scope refusal, web/e2e/auth/writes.e2e.ts, mise run browser-auth; the banner's texts and the start mode in web/src/recovery.test.ts, the scope refusal's text in web/src/shell.test.ts, mise run web
     browsers: [chrome, edge, firefox, firefox-esr]
-    covers: the banner and the process's refusal before the entry, on a fresh page and, injected under the same epoch, on an open page's next read (on GET /identity or GET /recovery first, nothing read before left shown); the reads it drops at once, their answers and retries, in web/src/request.test.ts; a scope's refusal comes with the first write view (#257) and the recovery console (#261)
+    covers: the banner and the process's refusal before the entry, on a fresh page and, injected under the same epoch, on an open page's next read (on GET /identity or GET /recovery first, nothing read before left shown); the reads it drops at once, their answers and retries, in web/src/request.test.ts; a write refused 409 recovery-mode-active with a scope member (injected on Add cluster, ginsys/bronzeward#627), which the write view shows as that scope's refusal, naming the scope and saying nothing about the start mode, sent once and with no banner, against the process's refusal of the same write as a positive control, which replaces the page with the pre-entry view; the recovery console (#261) shows a scope's state

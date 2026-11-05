@@ -44,8 +44,12 @@ export interface Faults {
 // committed, then forwarded; commit-drop-epoch: as commit-drop, then a new epoch. For the draft
 // cases (#339): pass-drop: forwarded, and the client's connection closed at once while the server
 // runs on (AMB-02); commit-drop-retire: as commit-drop, then the digest key's versions retired
-// (AMB-06).
-export type Step = "drop" | "commit-drop" | "commit-500" | "503" | "redirect" | "epoch" | "commit-drop-epoch" | "pass-drop" | "commit-drop-retire";
+// (AMB-06). For REC-01's scope variant (#627): scope-refused: answered 409 recovery-mode-active with
+// a `scope` member, nothing forwarded.
+export type Step = "drop" | "commit-drop" | "commit-500" | "503" | "redirect" | "epoch" | "commit-drop-epoch" | "pass-drop" | "commit-drop-retire" | "scope-refused";
+
+// The scope the injected scope refusal names: a synthetic ID, no machine of any deployment.
+export const INJECTED_SCOPE = "mch_synthetic_scope_627";
 
 export interface Injector {
   server: Server;
@@ -113,6 +117,10 @@ export function startInjector(upstream: string, port: number): Promise<Injector>
       const sent = new Uint8Array(await body(req));
       if (step === "drop") return req.socket.destroy();
       if (step === "503") return problem(503, "dependency-unavailable");
+      if (step === "scope-refused") {
+        return res.writeHead(409, { "Content-Type": "application/problem+json" })
+          .end(JSON.stringify({ type: "urn:bronzeward:problem:recovery-mode-active", title: "Recovery mode active", status: 409, detail: "injected", instance: "req-injected", scope: INJECTED_SCOPE }));
+      }
       if (step === "redirect") return res.writeHead(302, { Location: REDIRECTED }).end();
       if (step === "epoch") inj.epoch();
       if (step === "pass-drop") {
