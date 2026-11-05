@@ -424,7 +424,31 @@ const firstOfG = docs.size;
   }
 }
 
-// (J) The line ends of (G), (H), (I), (K), (L), (M) and (N) as a CRLF, a lone carriage return, U+0085, U+2028 and U+2029.
+// (O) ginsys/bronzeward#632: two shapes of the review of #615. (O1) A directive line between a plain
+// value and an indented line: the directive ends the value, so the first document lists its name.
+// A comment line and an indented `%` line are the controls, which go on the value. (O2) A `?` in a
+// flow collection ends a plain scalar and is a key token. A key token right after a scalar, a quoted
+// scalar, an alias or a closed collection is a parser error, with or without a `%` line after it. A
+// block plain scalar with a `?` in it is the control. Each shape sits alone, before a `---`, and
+// after one.
+{
+  const around = (p: string) => [`${p}\nb: ${PROBE}\n`, `${p}\n---\nb: ${PROBE}\n`, `a: 1\n---\n${p}\n---\nb: ${PROBE}\n`];
+  const values = ["!bwref x/foo", "!bwref &e x/foo", "&e !bwref x/foo", "!<!bwref> x/foo"];
+  const gaps = ["%YAML 1.1", "%TAG !x! !bw", "%FOO x", "%YAML 1.1\n%TAG !x! !bw", "# c", "  %not", ""];
+  for (const v of values)
+    for (const g of gaps)
+      for (const next of ["  continuation", "  - y", "  y: 1", "\ty"]) for (const d of around(`a: ${v}\n${g}\n${next}`)) docs.add(d);
+  for (const v of ["- !bwref x/foo", "k: !bwref x/foo"])
+    for (const g of ["%YAML 1.1", "# c"]) for (const d of around(`${v}\n${g}\n  continuation`)) docs.add(d);
+  const heads = ["a: [plain?", "a: [x, plain?", "a: {k: plain?", "a: [pl?ain", 'a: ["q"?', "a: ['q'?", "a: [[x]?", "a: [*e?", "a: [!bwref x/foo?", "a: [plain ?x"];
+  const tails = ["]", "]\nb: !bwref x/foo", " !bwref x/foo]", "\n%YAML 1.2\n]", "\n%TAG !x! !bw\n]", "\n%YAML 1.2\n]\nb: !bwref x/foo", "\n  more]"];
+  for (const h of heads) for (const t of tails) for (const d of around(`${h}${t}`)) docs.add(d);
+  // Controls: a `?` in block context, a `?` that opens a key, and a `?` after a comma or a colon.
+  for (const p of ["a: plain?\n  more\nb: !bwref x/foo", "a: [x, ? y]", "a: [? y: !bwref x/foo]", "a: {? k: !bwref x/foo}", "a: [x, ?]", "a: {k: ?}", "- plain?x\n- !bwref x/foo"])
+    for (const d of around(p)) docs.add(d);
+}
+
+// (J) The line ends of (G), (H), (I), (K), (L), (M), (N) and (O) as a CRLF, a lone carriage return, U+0085, U+2028 and U+2029.
 // go-yaml counts each as a line break, and a CRLF as one.
 for (const d of [...docs].slice(firstOfG)) for (const b of ["\r\n", "\r", "\u0085", " ", " "]) docs.add(d.replaceAll("\n", b));
 
