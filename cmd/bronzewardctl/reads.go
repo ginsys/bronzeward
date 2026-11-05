@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -70,10 +71,14 @@ func more(w *tabwriter.Writer, next string) {
 	}
 }
 
+// decode reads each raw item as a T. A number in an untyped member keeps its digits, as a
+// json.Number: float64 would round 9007199254740993.
 func decode[T any](c *client.Client, raw ...json.RawMessage) ([]T, error) {
 	out := make([]T, len(raw))
 	for i, r := range raw {
-		if err := json.Unmarshal(r, &out[i]); err != nil {
+		dec := json.NewDecoder(bytes.NewReader(r))
+		dec.UseNumber()
+		if err := dec.Decode(&out[i]); err != nil {
 			return nil, ef("%s: %w", c.Context.Where(), err)
 		}
 	}

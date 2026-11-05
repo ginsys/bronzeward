@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -55,7 +56,7 @@ func (e *env) machineTimeline(args []string) error {
 // reads tail (client-contracts.md §8.6 item 6; §7 item 1).
 func needFollowRevision(c *client.Client) error {
 	if c.Revision < followRevision {
-		return ef("the server serves API revision %d; machine timeline needs revision %d or later", c.Revision, followRevision)
+		return ef("the server serves API revision %d; machine timeline --follow needs revision %d or later", c.Revision, followRevision)
 	}
 	return nil
 }
@@ -102,16 +103,31 @@ func (e *env) followTimeline(c *client.Client, path string, limit int, machine s
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt)
 	defer signal.Stop(sig)
-	tail, err := newest()
-	for err == nil {
+	stopped := func() error {
+		signal.Stop(sig) // a second Ctrl-C ends the client at once
+		tf(e.err, "Stopped following the timeline of machine %s at your request.\n", machine)
+		return interrupted{ef("stopped following the timeline of machine %s", machine)}
+	}
+	// pause waits followEvery before the next read, and ends on Ctrl-C.
+	pause := func() error {
 		select {
 		case <-sig:
-			signal.Stop(sig) // a second Ctrl-C ends the client at once
-			tf(e.err, "Stopped following the timeline of machine %s at your request.\n", machine)
-			return interrupted{ef("stopped following the timeline of machine %s", machine)}
+			return stopped()
 		case <-time.After(followEvery):
+			return nil
 		}
-		for cursor := tail; ; {
+	}
+	tail, err := newest()
+	for err == nil {
+		if err = pause(); err != nil {
+			return err
+		}
+		for cursor, again := tail, false; ; again = true {
+			if again { // a next page waits as the first read of the cycle did
+				if err = pause(); err != nil {
+					return err
+				}
+			}
 			var pg *client.Page
 			if pg, err = read("oldest", cursor); err != nil {
 				if p, ok := err.(*client.Problem); ok && p.Code() == "cursor-invalid" {
@@ -119,6 +135,9 @@ func (e *env) followTimeline(c *client.Client, path string, limit int, machine s
 						"its newest entries are shown again\n", c.Context.Where())
 					if e.output == "table" {
 						fmt.Fprintln(e.out, "(the entries above may no longer hold; the newest are shown again)")
+					}
+					if err = pause(); err != nil { // the newest page is a read too
+						return err
 					}
 					tail, err = newest()
 				}
@@ -130,6 +149,12 @@ func (e *env) followTimeline(c *client.Client, path string, limit int, machine s
 			}
 			cursor = pg.Next
 		}
+	}
+	// A read that fails while Ctrl-C is pending still ends with exit 130, as a stop does.
+	select {
+	case <-sig:
+		return stopped()
+	default:
 	}
 	return err
 }
@@ -164,7 +189,9 @@ func (e *env) entries(c *client.Client, items []json.RawMessage) error {
 func timelineText(kind string, entry any) string {
 	raw, _ := json.Marshal(entry)
 	var d map[string]any
-	_ = json.Unmarshal(raw, &d)
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber() // a number keeps its digits: float64 would round 9007199254740993
+	_ = dec.Decode(&d)
 	by := ""
 	if p := field(d, "principal"); p != "" {
 		by = "by " + p + " (" + field(d, "role") + ")"
