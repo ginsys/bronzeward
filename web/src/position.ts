@@ -614,8 +614,8 @@ function plainEnd(line: string, from: number, flow: number): number {
 }
 
 // Whether the node after the properties that end at `from` is a key of this line: a quoted or plain
-// scalar followed by `:` and a blank. A tag before such a key belongs to the key, not to the node
-// above it. A flow collection is not read, and counts as a key so that no document is refused for it.
+// scalar or a flow collection that closes on the line, followed by `:` and a blank. A tag before such a
+// key belongs to the key, not to the node above it.
 function keyFollows(line: string, from: number): boolean {
   let i = from;
   for (;;) {
@@ -625,8 +625,22 @@ function keyFollows(line: string, from: number): boolean {
   }
   const c = line[i];
   if (c === undefined) return false;
-  if (c === "[" || c === "{") return true;
-  if (c === '"' || c === "'") {
+  if (c === "[" || c === "{") {
+    // A simple key sits on one line, so a collection that does not close on it is no key. A quote
+    // that does not close is text (`[it's]`).
+    let depth = 0;
+    for (; i < line.length; i++) {
+      const d = line[i]!;
+      if (d === '"' || d === "'") {
+        const e = skipQuoted(line, i + 1, d);
+        if (e >= 0) i = e - 1;
+      } else if (d === "[" || d === "{") depth++;
+      else if ((d === "]" || d === "}") && --depth === 0) break;
+    }
+    if (depth !== 0) return false;
+    i++;
+    while (i < line.length && isWs(line[i])) i++;
+  } else if (c === '"' || c === "'") {
     i = skipQuoted(line, i + 1, c);
     if (i < 0) return false;
     while (i < line.length && isWs(line[i])) i++;
