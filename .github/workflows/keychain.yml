@@ -1,0 +1,58 @@
+name: Keychain
+
+# The CLI's macOS Keychain store against the real security tool, on a keychain of its own
+# (decision T3 of ginsys/bronzeward#254; ginsys/bronzeward#628). Not a required check, for the reason
+# safari.yml gives (ginsys/bronzeward#612): GitHub's macOS arm64 pool sometimes has no capacity, and
+# a cancelled job that is not required leaves a pull request UNSTABLE. So it runs on a pull request
+# only when the pull request changes the store or what it builds on, and on main for the same paths.
+# A pull request that changes none of them never starts it. The Linux `go` job cross-builds and
+# vets the client for darwin on every pull request.
+
+on:
+  pull_request:
+    paths:
+      - internal/client/store*
+      - internal/client/credentials.go
+      - go.mod
+      - go.sum
+      - .github/workflows/keychain.yml
+  push:
+    branches: [main]
+    paths:
+      - internal/client/store*
+      - internal/client/credentials.go
+      - go.mod
+      - go.sum
+      - .github/workflows/keychain.yml
+  workflow_dispatch:
+
+concurrency:
+  group: keychain-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  keychain:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    env:
+      # The real-Keychain tests run only with this; they make a keychain of their own the default one.
+      BW_REQUIRE_KEYCHAIN: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
+          install_args: go
+      - name: Build without cgo
+        run: CGO_ENABLED=0 go build -o /dev/null ./cmd/bronzewardctl
+      # The store tests that use the seam run here too, so the same cases pass on both systems.
+      - name: Test the store
+        run: |
+          go test -count=1 -v -run '^Test(Keychain|Security|SignInRefused|NoInputNeverPrompts|ClearStored|KeyringWritesNotAbandoned|KeyringLockedRefused|KeyringErrorWithLineFeedIsShownEscaped)' ./internal/client 2>&1 | tee keychain-test.log
+      # The entry-size limit and the tool's answers about a locked keychain, for the pull request.
+      - name: Record the limit and the lock answers
+        if: ${{ !cancelled() }}
+        run: grep -E 'largest sign-in|show-keychain-info' keychain-test.log >> "$GITHUB_STEP_SUMMARY" || true
