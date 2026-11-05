@@ -97,7 +97,8 @@ const backoff = (attempt: number) => Math.min(1000 * 2 ** attempt, 30_000);
 // body. The headers must come within HEADERS_BOUND of the send, and the whole attempt within
 // ATTEMPT_BOUND. A browser's fetch rejects when the signal fires before the headers, and errors the
 // body stream when it fires after them: the first is a connection that failed, the second a body
-// the network cut off (readJson's CUT). The event stream is not sent through here.
+// the network cut off (readJson's CUT). The event stream is sent through send() too, by open(), but
+// without these bounds (§8.4 item 8 exempts it): its reader cuts it after an idle period instead.
 export const HEADERS_BOUND = 30_000;
 export const ATTEMPT_BOUND = 60_000;
 // The way a response ends its attempt's timers, once its body is read, cancelled or dropped.
@@ -241,6 +242,26 @@ export class Client {
     }
   }
 
+  // One streamed read for the progress reader (progress.ts, §8.6 items 4 and 5): the reader's
+  // `Accept` and `Last-Event-ID` in `headers`, the token as Authorization and never in the URL. No
+  // HEADERS_BOUND or ATTEMPT_BOUND applies: only `signal` ends the request, and the reader's idle
+  // timer fires it. The response's epoch and Deprecation header are observed as a read's are, but
+  // the response is returned even under a new epoch: the stream's own `reset` replays it, and
+  // onEpochChange ends the page that watches. The body is the caller's to read or cancel.
+  // Undefined when no answer arrived (a cancel through `signal` included), NOT_SENT when the
+  // sign-in ended: the watch stops, with nothing sent.
+  async open(path: string, headers: Record<string, string>, signal: AbortSignal): Promise<Response | undefined | typeof NOT_SENT> {
+    const res = await this.send(path, "GET", headers, undefined, signal, false);
+    if (res === NOT_SENT || res === undefined) return res;
+    const route = API_BASE + path.split("?")[0];
+    if (res.headers.has("Deprecation") && !this.deprecated.has(route)) {
+      this.deprecated.add(route);
+      guarded(res, () => this.opts.onDeprecation?.(route));
+    }
+    guarded(res, () => this.observeEpoch(res));
+    return res;
+  }
+
   // One send of a write, or of its confirming read, for the write layer (write.ts): never repeated
   // here and never discarded as stale. Its epoch is observed as a read's is, so a new one sets every
   // pending write aside through onEpochChange. Undefined when no complete answer arrived, a redirect
@@ -294,7 +315,7 @@ export class Client {
 
   // The client's one network call, for every read, write and epoch read. NOT_SENT once the sign-in
   // ended, or when the page no longer holds its credential: no send leaves without it (§8.2, §9.6).
-  private async send(path: string, method = "GET", extra: Record<string, string> = {}, body?: string, within?: AbortSignal): Promise<Response | undefined | typeof NOT_SENT> {
+  private async send(path: string, method = "GET", extra: Record<string, string> = {}, body?: string, within?: AbortSignal, bounded = true): Promise<Response | undefined | typeof NOT_SENT> {
     const headers: Record<string, string> = { Accept: "application/json", ...extra };
     const token = this.opts.token?.();
     if (this.ended || (this.opts.token !== undefined && token === undefined)) return NOT_SENT;
@@ -303,8 +324,8 @@ export class Client {
     const onWithin = () => bound.abort();
     if (within?.aborted === true) bound.abort();
     else within?.addEventListener("abort", onWithin, { once: true });
-    const header = setTimeout(() => bound.abort(), HEADERS_BOUND);
-    const whole = setTimeout(() => bound.abort(), ATTEMPT_BOUND);
+    const header = bounded ? setTimeout(() => bound.abort(), HEADERS_BOUND) : undefined;
+    const whole = bounded ? setTimeout(() => bound.abort(), ATTEMPT_BOUND) : undefined;
     // A finished attempt is never aborted later, not by its own timers and not by the write it was sent within.
     const end = () => (clearTimeout(header), clearTimeout(whole), within?.removeEventListener("abort", onWithin));
     try {
