@@ -27,7 +27,7 @@ function json(body: unknown, epoch = "e1", status = 200): Response {
 // answered when `pagesGate` is open.
 function server(o: {
   streams: (Stream | Error)[]; states: string[]; pages?: OpEvent[]; pageRefusals?: number[]; epoch?: string;
-  pagesEpoch?: string; clock?: { t: number }; readTime?: number; streamTime?: number; pagesGate?: Promise<void>;
+  pagesEpoch?: string; probeEpoch?: string; clock?: { t: number }; readTime?: number; streamTime?: number; pagesGate?: Promise<void>;
 }) {
   const opened: Record<string, string>[] = [];
   const urls: string[] = [];
@@ -68,7 +68,7 @@ function server(o: {
       if (o.clock !== undefined) o.clock.t += o.readTime ?? 0;
       return json({ id: OP, kind: "ingest", state }, epoch ?? o.epoch);
     }
-    if (u === `${API_BASE}/probe`) return json({}, o.pagesEpoch ?? o.epoch);
+    if (u === `${API_BASE}/probe`) return json({}, o.probeEpoch ?? o.pagesEpoch ?? o.epoch);
     throw new Error(`unexpected ${u}`);
   };
   const client = new Client({ fetch: fetch as typeof globalThis.fetch, token: () => "SYNTH-token", sleep: async () => {} });
@@ -581,6 +581,30 @@ describe("the operation progress reader (§8.6)", () => {
     // The stream's own request is the only one to the events path.
     expect(s.urls.filter((u) => u.startsWith(EVENTS))).toEqual([EVENTS]);
     expect(r.log).toEqual([]);
+  });
+
+  // Findings of the fourth round (R4-n): what the caller keeps from the operation it was given is kept
+  // under the epoch of that read, which the client's epoch can have left by the time the caller looks.
+
+  test("R4-1: a terminal end carries the epoch of the operation read, not the client's epoch after the drain", async () => {
+    const all = [ev("e1:1"), ev("e1:2", "succeeded")];
+    const s = server({ streams: [{ chunks: [all.map(frame).join("")] }], states: ["succeeded"], pages: all, probeEpoch: "e2" });
+    const r = recorder();
+    // Another response records the epoch e2 after the last events page was used, before the watch returns.
+    const w = reader(s, eventsPath, "after");
+    const out = await watch(w, OP, r.w, r.pace);
+    expect(w.currentEpoch).toBe("e2");
+    expect(out).toEqual({ kind: "ended", operation: { id: OP, kind: "ingest", state: "succeeded" }, epoch: "e1" });
+  });
+
+  test("R4-1b: an end on until carries the epoch of the operation read, not the client's epoch after it", async () => {
+    const s = server({ streams: [{ chunks: [frame(ev("e1:1", "paused"))] }], states: ["running"], probeEpoch: "e2" });
+    const r = recorder((shown) => shown.some((e) => e.type === "paused"));
+    // Another response records the epoch e2 after the operation response was used, before the watch resumes.
+    const w = reader(s, operationPath, "after");
+    const out = await watch(w, OP, r.w, r.pace);
+    expect(w.currentEpoch).toBe("e2");
+    expect(out).toEqual({ kind: "ended", operation: { id: OP, kind: "ingest", state: "running" }, epoch: "e1" });
   });
 
   test("eventLine names the type, the generation and the code, and nothing else of the data", () => {
