@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -102,6 +103,10 @@ func setServerFacts(t *testing.T, revision int, epochByPath map[string]string) {
 	recoveryEpochByPath, recoveryRevision = epochByPath, revision
 }
 
+// recoveryPosted holds the body of every POST recoveryServer saw, in order; a test that reads it
+// resets it before the server starts.
+var recoveryPosted []string
+
 // recoveryServer is a fake server for the recovery commands, answering reads from answers by
 // method and path, and every POST 201 with post's body. It lists the requests it saw.
 func recoveryServer(t *testing.T, answers map[string]string, post string) func() []string {
@@ -111,6 +116,10 @@ func recoveryServer(t *testing.T, answers map[string]string, post string) func()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		seen = append(seen, r.Method+" "+r.URL.Path)
+		if r.Method == http.MethodPost {
+			b, _ := io.ReadAll(r.Body)
+			recoveryPosted = append(recoveryPosted, string(b))
+		}
 		mu.Unlock()
 		// Once a path in recoveryEpochByPath is read, the epoch moved: every later answer carries it.
 		mu.Lock()
@@ -146,7 +155,7 @@ func recoveryServer(t *testing.T, answers map[string]string, post string) func()
 		}
 		switch a, ok := answers[key]; {
 		case r.URL.Path == "/api/v1/server":
-			fmt.Fprintf(w, `{"version":"BWSYNTH","apiRevision":%d,"startMode":"recovery"}`, revision)
+			fmt.Fprintf(w, `{"version":"BWSYNTH","apiRevision":%d,"startMode":"recovery","settleFloorSeconds":30,"maxTransportDeadlineSeconds":120}`, revision)
 		case r.URL.Path == "/api/v1/identity":
 			fmt.Fprint(w, `{"kind":"service","principal":"svc_BWSYNTH"}`)
 		case ok:

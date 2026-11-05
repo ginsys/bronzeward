@@ -129,6 +129,11 @@ commands:
               of an unknown outcome takes --idempotency-key and --expect-principal, no epoch
   recovery exit [--fact name=value]...
               once every scope is released
+  recovery scope-account <machine> --start <observation> --end <observation> [--explanation <text>]
+              after a restore: accounts every unaccounted attempt on the machine; shows the window
+              and the risk, and is sent only when the machine ID is typed back
+  recovery account <operation> <attempt> --start <observation> --end <observation> [--explanation <text>]
+              accounts one attempt whose response was lost; the same window, risk and typed ID
   identity revoke (--identity <id> | --iss <iss> --sub <sub>) --reason <text>
               permanent; sent only when the identity (or the subject) is typed back
               these writes need a person signed in as recovery-admin; times are RFC 3339

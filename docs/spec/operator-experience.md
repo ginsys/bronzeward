@@ -888,6 +888,14 @@ Type the machine ID to record this accounting: mch_k2p…7xqa
 Recorded. Scope mch_k2p…7xqa is now blocked until it is marked.
 ```
 
+Client rules for the two accountings, where the answer or the read lacks what this section asks for:
+
+- The answer carries neither `facts.settleFloor` nor `facts.anchor`. The client reads the timeline entry at the answered revision, newest first, and prints both. Without API revision 3 it names the timeline instead.
+- The refusal of a start that is not the first read names no observation and no anchor. The client points at `machine observations`.
+- The window shows purpose, start time, recorded time and resource version for both observations at the typed answer. The observation table keeps its columns.
+- `recovery account` takes an operation and an attempt. The client reads the machine from the operation's subject and asks for that machine ID.
+- The client refuses before sending, with exit 2, an end that is not a `recovery` observation, an observation without a resource version and a moved version without an explanation.
+
 Scope accounting is step 1's decision: it accounts every unaccounted attempt on the machine at
 once, and is refused on a scope that is not pre-restore unaccounted. The scope then becomes
 `unresolved` if a restored operation still holds it, and otherwise `blocked` until it is marked

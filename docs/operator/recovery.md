@@ -135,6 +135,15 @@ late landing came 26 to 28 s after its send, and no upper bound was adopted
 still is found as drift only if it leaves the node's configuration different from Applied; one that
 reapplies what Applied already records leaves no trace.
 
+With `bronzewardctl`, a person signed in as `recovery-admin` records the same decision with
+`recovery account <operation> <attempt> --start <observation> --end <observation>`. The command
+reads the operation, the observations of its machine, and the settle floor from `GET /server`. It
+exits 2 and sends nothing in four cases: the end is not a `recovery` observation, the start has no
+resource version, the end has none, or the version moved and `--explanation` is missing. Then it
+shows the window, the settle floor and the risk. It sends the decision only after you type the
+machine ID. Each named refusal of the server gets one next step. The answer shows the settle floor
+and the anchor that the server recorded, read from the timeline.
+
 ### Cancel it
 
 When the outcome cannot be read and no attempt was made, cancel the operation:
@@ -261,6 +270,13 @@ Each machine goes `pre-restore-unaccounted`, then `unresolved` or `blocked`, the
    call POST /recovery/accountings "$recovery" "$(jq -nc --arg m "$machine_w" --arg s "$start" --arg e "$end" \
      '{scopes: [{machine: $m, start: $s, end: $e}], facts: {}}')" recovery-accounting-scopes | jq .scopes
    ```
+
+   `bronzewardctl recovery scope-account <machine> --start <observation> --end <observation>`
+   records the decision for one machine. It shows the time the restore stopped, the settle floor and
+   the maximum transport deadline. It also shows the risk: the decision is your judgment, a request
+   sent before the restore can already have landed, and a late request can overwrite work after the
+   release. The command sends the decision only after you type the machine ID. Run it again for each
+   further machine.
 
    A scope a restored operation still holds is `unresolved`; otherwise `blocked` until marked. A
    restored operation with no attempt is then cancelled by the server, sending nothing. One with an
