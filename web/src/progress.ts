@@ -188,7 +188,7 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
       // A `clear` or an `until` that aborted the watch ends it as stopped, not as ended.
       if (w.signal.aborted) return { kind: "stopped" };
       if (run.stop()) return w.signal.aborted ? { kind: "stopped" } : { kind: "ended", operation: res.data, epoch };
-    } else if (res.kind !== "discarded" && res.kind !== "transport" && res.kind !== "unavailable") {
+    } else if (res.kind !== "discarded" && res.kind !== "transport") {
       return { kind: "failed", res };
     }
     // A read discarded for a new epoch, or with no answer, is read again: the stream that follows
@@ -223,7 +223,7 @@ async function drain(client: Reader, path: string, run: Run, stoppable: boolean)
   const res = read.kind === "dropped" ? read.failed : read;
   // The page that was pending when the watch ended is not delivered.
   if (run.w.signal.aborted) return "discarded";
-  if (res.kind === "discarded" || res.kind === "transport" || res.kind === "unavailable") return "discarded";
+  if (res.kind === "discarded" || res.kind === "transport") return "discarded";
   if (res.kind !== "ok") return res;
   // An empty list under another epoch has no event to show the change: the events shown are cleared.
   if (res.data.items.length === 0 && run.last !== "" && run.pagesEpoch !== undefined && run.pagesEpoch !== epochOf(run.last)) run.clear(RESTORED);
