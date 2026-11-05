@@ -166,5 +166,41 @@ func TestRecovery(t *testing.T) {
 	} {
 		f.want(ctl(c.typed, c.args...), 1, "403", "Needs one of the roles", "recovery-admin")
 	}
+
+	// REC-01's unfreeze variants (#360): a freeze is accepted on any scope, and an unfreeze is
+	// refused twice over. A server started for recovery refuses it with no scope member, even after
+	// the entry; a normal start of the same database refuses it for the machine's scope.
+	f.store(f.humanFile(), f.mint("h-all", ""), "")
+	freeze := []string{"machine", "freeze", s.machine, "--reason", "BWSYNTH drill freeze"}
+	unfreeze := []string{"machine", "unfreeze", s.machine, "--reason", "BWSYNTH drill unfreeze"}
+	frozen := func() bool {
+		var v bool
+		if err := f.db.QueryRow(`SELECT frozen FROM machine WHERE id = $1`, s.machine).Scan(&v); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	in.set(nil, nil)
+	f.want(ctl("", freeze...), 0, "Frozen. No new commitment or attempt for this machine until an approver unfreezes it.")
+	acts := f.actCount()
+	process := []string{"Recovery mode: the server was started for recovery: it refuses plan creation and approval",
+		"Why: a server started for recovery refuses unfreezing, plan creation and approval, even after its recovery entry.",
+		"Next: restart the server without the recovery flag. Recovery mode continues. Then repeat this command."}
+	f.want(ctl("", unfreeze...), 1, append([]string{"409"}, process...)...)
+	f.restart()
+	scope := []string{"Recovery mode: the scope of machine " + s.machine + " is pre-restore-unaccounted.",
+		"Why: a restore can erase the record of a request sent to this machine, and a request sent before the restore may still land. " +
+			"Until a recovery administrator accounts for the scope and releases it, unfreezing is refused.",
+		"Next: recovery status names the next step of each scope."}
+	r = ctl("", unfreeze...)
+	f.want(r, 1, append([]string{"409"}, scope...)...)
+	for _, absent := range []string{"started for recovery", "restart the server"} {
+		if strings.Contains(r.err, absent) {
+			t.Errorf("the scope's refusal holds %q:\n%s", absent, r.err)
+		}
+	}
+	if n := f.actCount(); n != acts || !frozen() {
+		t.Errorf("refused unfreezes recorded %d acts, frozen %v; want none and still frozen", n-acts, frozen())
+	}
 	f.scanFiles()
 }
