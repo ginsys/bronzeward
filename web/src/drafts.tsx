@@ -527,14 +527,16 @@ function step(s: Editor, e: EditorEvent): Editor {
       // and a read while a write is open waits for that write's answer. Once their text shows with
       // nothing to keep aside, the read replaces the text, as below: held back, a done write would
       // drop it (#551 local review).
-      // While the pane's own Remove is open, a read of a revision the pane has not read before is
-      // another author's, also when its text equals the saved text: a restore brings back the text
-      // removed. The Remove sends the draft's ETag as If-Match, so a revision stored before it gets a
-      // 412, not a done. If the Remove is done, a new revision read now came after it; a Remove that
-      // fails shows the text read in any case. `reread` is the revision the pane loaded already, read
-      // again; it stays dropped (ginsys/bronzeward#623 review).
-      const restored = e.reread !== true && s.sent?.open === true && s.sent.removes === true;
-      const another = (s.own === undefined || e.id !== s.own) && (!same(e.text, s.saved) || restored);
+      // While the pane's own Save or Remove is open, a read of a revision the pane has not read before
+      // is held back until the answer, also when its text equals the saved text: a restore brings back
+      // the text removed, and another author can store the saved text again. A done Remove shows it.
+      // A done Save drops it only when it is the Save's own revision, which only the answer names. The
+      // Remove sends the draft's ETag as If-Match, so a revision stored before it gets a 412, not a
+      // done. If the Remove is done, a new revision read now came after it; a write that fails shows
+      // the text read in any case. `reread` is the revision the pane loaded already, read again; it
+      // stays dropped (ginsys/bronzeward#623 review, #624).
+      const unseen = e.reread !== true && s.sent?.open === true;
+      const another = (s.own === undefined || e.id !== s.own) && (!same(e.text, s.saved) || unseen);
       const keeps = c === undefined ? !same(s.held, s.saved) : c.phase === "theirs" && (c.typed === true || !same(s.held, s.saved));
       if (another && keeps) {
         if (s.sent?.open === true) return { ...idle, saved: e.text, sent: { ...s.sent, later: { ...(e.revision !== undefined && { revision: e.revision }), ...(e.id !== undefined && { id: e.id }), text: e.text, aside: true } } };

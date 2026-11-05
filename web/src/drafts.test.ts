@@ -1088,8 +1088,8 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
 
   // Review of ginsys/bronzeward#623: a restore that brings back the saved text names a revision the pane
   // has not read. While a Remove is open it is another author's change; a read again of the loaded
-  // revision (`reread`) is not. A Save open keeps the earlier rule (the Save's own revision is only
-  // known at done).
+  // revision (`reread`) is not. A Save open holds such a read too, and its done drops the read only
+  // when it is the Save's own revision (#624, below).
   const sameText: EditorEvent = { kind: "read", text: A, since: 0, revision: 10, id: "frv_10" };
 
   test("ginsys/bronzeward#623: a done Remove shows a restore that has the saved text, the operator's text aside", () => {
@@ -1109,11 +1109,49 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     expect(rest(s)).toEqual({ held: M, saved: EMPTY, sent: removes(M), writes: 1 });
   });
 
-  test("ginsys/bronzeward#623: a read again of the loaded revision, or a Save's read of the same text, stays dropped", () => {
+  test("ginsys/bronzeward#623: a read again of the loaded revision stays dropped while a Remove is open", () => {
     const reread = run(removing({ ...sameText, reread: true }), [{ kind: "done" }]);
     expect(rest(reread)).toEqual({ held: M, saved: EMPTY, sent: removes(M), writes: 1 });
-    const save = run(sending(sameText), [{ kind: "done", revision: "frv_9" }]);
-    expect(rest(save)).toEqual({ held: M, saved: M, sent: sentOf(M), writes: 1, own: "frv_9" });
+  });
+
+  // ginsys/bronzeward#624: the same rule for a Save. A read of a revision the pane has not read before,
+  // while a Save has no answer, is held back also when its text equals the saved text. The answer names
+  // the Save's own revision: the read of that revision is dropped, any other one shows.
+  test("ginsys/bronzeward#624: a done Save shows another author's revision that has the saved text, the operator's text aside", () => {
+    const s = run(sending(sameText), [{ kind: "done", revision: "frv_9" }]);
+    expect(rest(s)).toEqual({ held: A, saved: A, sent: sentOf(M), conflict: theirs(M, 10), writes: 1, own: "frv_9" });
+    expect(editor(s, { kind: "copy" }).held).toBe(M);
+  });
+
+  test("ginsys/bronzeward#624: a newer read replaces the Save's own revision that was read first", () => {
+    const own: EditorEvent = { kind: "read", text: T, since: 0, revision: 8, id: "frv_9" };
+    const s = run(sending(own, sameText), [{ kind: "done", revision: "frv_9" }]);
+    expect(rest(s)).toEqual({ held: A, saved: A, sent: sentOf(M), conflict: theirs(M, 10), writes: 1, own: "frv_9" });
+  });
+
+  test("ginsys/bronzeward#624: the Save's own revision with the saved text stays dropped", () => {
+    const own: EditorEvent = { kind: "read", text: A, since: 0, revision: 9, id: "frv_9" };
+    const s = run({ held: A, saved: A }, [{ kind: "send" }, own, { kind: "done", revision: "frv_9" }]);
+    expect(rest(s)).toEqual({ held: A, saved: A, sent: sentOf(A), writes: 1, own: "frv_9" });
+    // Typed text is kept, and its own revision opens no conflict.
+    const typed = run(sending(own), [{ kind: "done", revision: "frv_9" }]);
+    expect(typed.conflict).toBeUndefined();
+  });
+
+  test("ginsys/bronzeward#624: an answer that names no revision cannot tell the read from the Save's own", () => {
+    expect(rest(run(sending(sameText), [{ kind: "done" }]))).toEqual({ held: M, saved: M, sent: sentOf(M), writes: 1 });
+  });
+
+  test("ginsys/bronzeward#624: a read again of the loaded revision, and a read before the Save was sent, stay dropped", () => {
+    const reread = run(sending({ ...sameText, reread: true }), [{ kind: "done", revision: "frv_9" }]);
+    expect(rest(reread)).toEqual({ held: M, saved: M, sent: sentOf(M), writes: 1, own: "frv_9" });
+    const before = run({ held: M, saved: A }, [sameText, { kind: "send" }, { kind: "done", revision: "frv_9" }]);
+    expect(rest(before)).toEqual({ held: M, saved: M, sent: sentOf(M), writes: 1, own: "frv_9" });
+  });
+
+  test("ginsys/bronzeward#624: a read of the pane's own revision after its Save is done opens no conflict", () => {
+    const s = run(sending(), [{ kind: "done", revision: "frv_9" }, { kind: "read", text: A, since: 0, revision: 9, id: "frv_9" }]);
+    expect(s.conflict).toBeUndefined();
   });
 
   test("ginsys/bronzeward#623: both composition panes mark a read of the revision they loaded already", () => {
