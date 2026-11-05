@@ -8,12 +8,12 @@ import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
 import type { components } from "./api/v1";
 import { keepETag, keptETag, NO_ASSIST } from "./drafts.tsx";
 import { Form, field, useSend, useUnsaved, useWrites } from "./forms.tsx";
-import { Id, Ref, short, useItem, useList, usePending, useReads, useSettled } from "./list.tsx";
+import { Id, type Load, Ref, short, useItem, useList, usePending, useReads, useSettled } from "./list.tsx";
 import { eventLine, terminal, watch } from "./progress.ts";
 import type { Client } from "./request.ts";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
-import type { Outcome } from "./write.ts";
+import type { Outcome, WriteSpec } from "./write.ts";
 
 type S = components["schemas"];
 export type Ingestion = S["IngestionBody"];
@@ -47,6 +47,12 @@ export function allowed(b: Ingestion, now: number): ReactNode {
       return "Paused for review. Continue it, or abandon it.";
     case "held":
     case "resumed":
+      // Only encrypted staging can be taken over; a transient one is abandoned and imported again (the CLI's import status).
+      if (b.mode === "transient") {
+        return lapsed(b, now)
+          ? "Its run stopped renewing the lease. Transient staging cannot be taken over: abandon it and import again."
+          : "Its run holds the claim. Transient staging cannot be taken over; it can be abandoned now.";
+      }
       return lapsed(b, now)
         ? "Its run stopped renewing the lease. Take it over to resume, or abandon it."
         : "Its run holds the claim. Once the lease lapses it can be taken over. It can be abandoned now.";
@@ -91,7 +97,10 @@ export async function ended(client: Pick<Client, "readWithEpoch">, b: Ingestion,
   }
   if (last === "paused") return `Paused for review (expires ${when(b.expiresAt)}).`;
   if (last === "resume-failed") return `Import ${short(b.id)} was not applied: its staged input could not be decrypted (resume-failed). The claim stays held until its lease lapses at ${when(b.leaseUntil)}; then take it over, or abandon it now.`;
-  if (lapsed(b, now)) return `Its claim is ${b.state} and its lease lapsed at ${when(b.leaseUntil)}, while operation ${short(o.id)} still runs: the outcome is unknown. Read it again later, take it over, or abandon it.`;
+  if (lapsed(b, now)) {
+    const next = b.mode === "transient" ? "or abandon it (transient staging cannot be taken over)" : "take it over, or abandon it";
+    return `Its claim is ${b.state} and its lease lapsed at ${when(b.leaseUntil)}, while operation ${short(o.id)} still runs: the outcome is unknown. Read it again later, ${next}.`;
+  }
   return undefined;
 }
 
@@ -126,6 +135,26 @@ export function IngestionItem({ id }: { id: string }) {
   );
 }
 
+// The events of the run that holds the claim now (the CLI's follow, imports.go): the operation's
+// events are shown from its start, so a pause or resume-failed of an earlier run settles nothing.
+// `gen` is the last generation a run started at; the first run (generation 1) is ours from the start.
+export interface RunState { ours: boolean; gen: number; settled?: "paused" | "resume-failed" }
+export const startRun = (ownerGeneration: number): RunState => ({ ours: ownerGeneration <= 1, gen: ownerGeneration - 1 });
+export function onEvent(s: RunState, type: string, data: unknown): RunState {
+  const g = (data as { generation?: unknown } | null)?.generation;
+  const gen = typeof g === "number" ? g : 0;
+  if (["continued", "taken-over", "marked"].includes(type) && gen > s.gen) return { ours: true, gen };
+  if (!s.ours) return s;
+  if (type === "paused" && gen >= s.gen) return { ours: true, gen, settled: "paused" };
+  if (type === "resume-failed") return { ...s, settled: "resume-failed" };
+  return s;
+}
+// The watch ends on a settled run, or on a read of the ingestion made once the lease it showed had
+// passed LEASE_MARGIN ago that still shows the claim lapsed (§11.3, PROT-06): a read made earlier
+// can predate a renewal, so an event before the refresh settles nothing.
+export const stopsWatch = (settled: RunState["settled"], read: { b: Ingestion; at: number }, now: number) =>
+  settled !== undefined || (read.at > Date.parse(read.b.leaseUntil) + LEASE_MARGIN && lapsed(read.b, now));
+
 // The import's operation followed to its end (§8.6), or until the claim pauses, its run records
 // resume-failed, or a read made once the lease passed shows it lapsed (§11.3, as the CLI follows).
 function Progress({ b, again }: { b: Ingestion; again: () => void }) {
@@ -135,8 +164,8 @@ function Progress({ b, again }: { b: Ingestion; again: () => void }) {
   const [cleared, setCleared] = useState<string>();
   const [end, setEnd] = useState<ReactNode>();
   // The latest read of the ingestion and the page's failure view, for the watch begun before them.
-  const latest = useRef(b);
-  latest.current = b;
+  const latest = useRef({ b, at: Date.now() });
+  if (latest.current.b !== b) latest.current = { b, at: Date.now() };
   const shown = useRef(failure);
   shown.current = failure;
   useEffect(() => {
@@ -149,19 +178,20 @@ function Progress({ b, again }: { b: Ingestion; again: () => void }) {
   useEffect(() => {
     if (client === undefined || op === null) return;
     const abort = new AbortController();
-    let last = "";
+    const generation = latest.current.b.ownerGeneration;
+    let run = startRun(generation);
     setLines([]);
     setEnd(undefined);
     void watch(client, op, {
-      show: (e) => { last = e.type; setLines((l) => [...l, eventLine(e)]); },
-      clear: (why) => { last = ""; setCleared(why); setLines([]); },
-      until: () => last === "paused" || last === "resume-failed" || lapsed(latest.current, Date.now()),
+      show: (e) => { run = onEvent(run, e.type, e.data); setLines((l) => [...l, eventLine(e)]); },
+      clear: (why) => { run = startRun(generation); setCleared(why); setLines([]); },
+      until: () => stopsWatch(run.settled, latest.current, Date.now()),
       signal: abort.signal,
     }).then(async (r) => {
       if (r.kind === "stopped" || abort.signal.aborted) return;
       // The ETag is kept under the epoch of the operation read the watch ended on, not under the client's
       // epoch now, which another response can have moved since (§8.5).
-      const text = r.kind === "failed" ? shown.current(r.res) : await ended(client, latest.current, r.operation, last, Date.now(), r.epoch);
+      const text = r.kind === "failed" ? shown.current(r.res) : await ended(client, latest.current.b, r.operation, run.settled ?? "", Date.now(), r.epoch);
       if (!abort.signal.aborted) {
         setEnd(text);
         again();
@@ -214,11 +244,48 @@ export function startBody(i: StartInput): Record<string, unknown> {
   };
 }
 
-// Protected input is held no longer than its request needs (§11.2 item 6): once the write has any
-// outcome, a refusal that ended it included, the fields are empty.
-export const heldInput = (input: { doc: string; marks: string }, o: Outcome | undefined) => (o === undefined ? input : { doc: "", marks: "" });
+// Protected input is held no longer than its request needs (§11.2 item 6): the fields are emptied
+// when the request is sent, and the request drops the document and marks from its body once its
+// outcome is final. Until then the body stays for [Repeat exactly], which sends it again.
+export function releaseInput(body: Record<string, unknown>, o: Outcome): void {
+  if (o.kind === "unknown" || (o.kind === "set-aside" && o.ambiguous)) return;
+  delete body["document"];
+  delete body["marks"];
+}
+// The start's write: the draft's ETag as If-Match, and a done answer's ingestion remembered for the
+// draft, so that only this page's own import adopts the draft's ETag later (ETAG-02), also when the
+// page left.
+export function sendStart(send: (spec: WriteSpec) => void, clear: () => void, i: StartInput, ifMatch: string): void {
+  const body = startBody(i);
+  clear();
+  send({
+    method: "POST", path: "/ingestions", resource: "/ingestions", ifMatch, body,
+    settled: (out) => {
+      releaseInput(body, out);
+      const a = out.kind === "done" ? (out.data as { ingestion?: string } | null) : null;
+      if (typeof a?.ingestion === "string") started.set(a.ingestion, i.draft);
+    },
+  });
+}
+// The start's If-Match is the draft's ETag (§8.3): the kept one, else the draft read again. The write
+// is sent under the client's epoch at its send, so nothing is sent when that epoch is not the one the
+// ETag was read under (§8.5): `send` runs in the same turn as the check. Returns why nothing was sent.
+export async function startETag(read: (path: string) => Promise<Load<Draft> | undefined>, current: () => string | undefined, draft: string, send: (ifMatch: string) => void): Promise<string | undefined> {
+  const epoch = current();
+  const kept = keptETag(draft, epoch);
+  if (kept !== undefined) {
+    send(kept);
+    return undefined;
+  }
+  const r = await read(`/drafts/${enc(draft)}`);
+  if (r === undefined || r.kind !== "ok" || r.etag === undefined) return "Not sent: the draft could not be read for its ETag. Try again.";
+  if (current() !== epoch) return "Not sent: the installation entered recovery mode or was restored while the draft was read. Try again.";
+  keepETag(draft, r.etag, epoch);
+  send(r.etag);
+  return undefined;
+}
 // The leave guard asks while typed input is not yet sent.
-export const unsent = (input: { doc: string; marks: string }, o: Outcome | undefined) => o === undefined && (input.doc !== "" || input.marks !== "");
+export const unsent = (input: { doc: string; marks: string }) => input.doc !== "" || input.marks !== "";
 
 // The import wizard (B15) on one page: machine, draft, source, staging and review, optional marks.
 export function StartImport({ query }: { query: string }) {
@@ -240,12 +307,10 @@ export function StartImport({ query }: { query: string }) {
   const m = machines.kind === "ok" ? machines.data.items.find((x) => x.id === machine) : undefined;
   const open = drafts.kind === "ok" && m !== undefined ? drafts.data.items.filter((d) => d.cluster === m.cluster && d.state === "open") : [];
   const o = w?.outcome;
-  const { doc, marks } = heldInput(typed, o);
-  useUnsaved("the import's document or marks", unsent(typed, o));
+  const { doc, marks } = typed;
+  useUnsaved("the import's document or marks", unsent(typed));
   useEffect(() => {
-    if (o === undefined) return;
-    setTyped({ doc: "", marks: "" });
-    if (o.kind !== "done") return;
+    if (o?.kind !== "done") return;
     const a = o.data as { ingestion?: string } | null;
     if (typeof a?.ingestion === "string") go(`/ingestions/${a.ingestion}`);
   }, [o, go]);
@@ -255,26 +320,14 @@ export function StartImport({ query }: { query: string }) {
     const draft = field(d, "draft");
     const refusal = params.refusal ?? documentRefusal(source, doc);
     if (refusal !== undefined) return setNote(refusal);
-    const epoch = writes?.client?.currentEpoch;
-    let ifMatch = keptETag(draft, epoch);
-    if (ifMatch === undefined) {
-      // The start's If-Match is the draft's ETag (§8.3): read the draft for it when none is kept.
-      reading.current = true;
-      const r = await read<Draft>(`/drafts/${enc(draft)}`);
+    reading.current = true;
+    try {
+      const why = await startETag(read<Draft>, () => writes?.client?.currentEpoch, draft,
+        (ifMatch) => sendStart(send, () => setTyped({ doc: "", marks: "" }), { kind: params.kind, machine, draft, source, staging, review, doc, marks }, ifMatch));
+      if (why !== undefined) setNote(why);
+    } finally {
       reading.current = false;
-      if (r === undefined || r.kind !== "ok" || r.etag === undefined) return setNote("Not sent: the draft could not be read for its ETag. Try again.");
-      keepETag(draft, r.etag, epoch);
-      ifMatch = r.etag;
     }
-    send({
-      method: "POST", path: "/ingestions", resource: "/ingestions", ifMatch,
-      body: startBody({ kind: params.kind, machine, draft, source, staging, review, doc, marks }),
-      // Only this page's own import adopts the draft's ETag later (ETAG-02), also when the page left.
-      settled: (out) => {
-        const a = out.kind === "done" ? (out.data as { ingestion?: string } | null) : null;
-        if (typeof a?.ingestion === "string") started.set(a.ingestion, draft);
-      },
-    });
   };
   const choose = (f: File | undefined) => void f?.text().then((t) => setTyped((x) => ({ ...x, doc: t })), () => setNote("The file could not be read."));
   const label = params.kind === "drift-adoption" ? "Start drift adoption" : "Start import";
