@@ -327,6 +327,31 @@ the document that holds it lists nothing, and the editor still reads the line as
 If the operator edited the marks after a refusal,
 [Go to field] finds the refused line where it is now. If that line is gone, it focuses the marks field and selects nothing.
 
+## W5a. Import start and import page
+
+Decision B15 gives these two pages no layout, and this note records the one that was built. This
+wireframes document stays authoritative for the review in W5.
+
+```text
+Start import                              Import ing_6fd…q2la: paused
+Machine  [mch_b3c… (192.0.2.7)  v]        State, kind, staging, machine, draft, operation,
+Draft    [Fix the NTP servers   v] [Create draft]   review, owner generation, lease, expiry
+Source   (o) Read from the machine        What this state allows (one line)
+         ( ) A document, pasted or from a file
+         Document (YAML) [ ... ]          Progress of operation op_zcf…fw5m
+Staging  (o) Encrypted  ( ) Transient     1. started
+[x] Pause for review before the draft     2. paused (generation 1)
+    changes (encrypted staging only)      Paused for review (expires 14:52).
+Marks, one path per line [ ... ]
+[Start import]
+```
+
+The start page sends the draft's ETag as `If-Match`, read once when the page holds none. The text
+of a document and the marks live in the page's memory only and are emptied when the start has any
+outcome. The import page follows the operation as the progress reader of client contracts §8.6
+does. It stops at a terminal state, a pause, a `resume-failed` event, or a lease that has lapsed.
+Controls to continue, take over or abandon belong to W5 and to the pages that follow it.
+
 ## W5. Protected import review
 
 ```text

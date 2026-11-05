@@ -959,7 +959,7 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
 }
 
 // §11.4 item 2: browser spelling and fill services get nothing of a document or marks.
-const NO_ASSIST = { autoComplete: "off", spellCheck: false, autoCorrect: "off", autoCapitalize: "off" } as const;
+export const NO_ASSIST = { autoComplete: "off", spellCheck: false, autoCorrect: "off", autoCapitalize: "off" } as const;
 
 function ReferenceRow({ name, declared, used, set, open }: { name: string; declared: Declared[string] | undefined; used: boolean; set: (r: Declared[string] | undefined) => void; open: boolean }) {
   const kind = declared?.kind ?? "string";

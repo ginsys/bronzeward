@@ -41,6 +41,7 @@ the write cases. Its tests run exactly the cases recorded there.
 | [COMP-01](cases/COMP-01.yaml) | web: `mise run browser-auth` |
 | [COMP-02](cases/COMP-02.yaml) | web: `mise run browser-auth` |
 | [ETAG-01](cases/ETAG-01.yaml) | web, a fragment entry: `mise run browser-auth` |
+| [ETAG-02](cases/ETAG-02.yaml) | web, an import's draft: `mise run browser-auth` |
 | [PAGE-01](cases/PAGE-01.yaml) | web, the machine list: `mise run browser-auth` |
 | [PAGE-02](cases/PAGE-02.yaml) | web, the machine list: `mise run browser-auth` |
 | [REC-01](cases/REC-01.yaml) | web, the banner, the process's refusal and a write's scope refusal: `mise run browser-auth` |
