@@ -266,13 +266,8 @@ safe_apply() {
   check "$ref" "the worker's observation records, as served" keep observations "/api/v1/machines/$machine_w/observations?limit=500"
 }
 
-# The CLI's safe apply (mode cli, ginsys/bronzeward#354): bronzewardctl, built from this checkout,
-# runs on the host against A. Each human's context is in the run directory, with a token file that
-# holds a token minted just before each command. The context names a loopback stand-in issuer: the
-# fixture's issuer is on the Compose network only, and no command here reads the issuer. The
-# caller's configuration and credential store are never read: XDG directories are the run
-# directory's and the session bus is disabled.
-cli_dir='' ctl_bin=''
+# The CLI's safe apply (mode cli, ginsys/bronzeward#354): the helpers that run bronzewardctl are
+# common.sh's (cli_prepare, ctl, cli_kept).
 cli_preconditions() {
   local ref='S4 CLI precondition'
   machines
@@ -285,39 +280,8 @@ cli_preconditions() {
     same "$(sql "SELECT (SELECT count(*) FROM plan WHERE kind = 'apply-config') + (SELECT count(*) FROM operation WHERE kind = 'apply-config')")" 0
   check "$ref" 'no link to the worker is recorded cut' worker_joined
   check "$ref" 'A answers /livez' answers 204 - GET /livez ''
-  cli_dir=$STATE/cli
-  ctl_bin=$cli_dir/bronzewardctl
-  mkdir -p -- "$cli_dir/config" "$cli_dir/state" "$cli_dir/cache"
-  check "$ref" 'bronzewardctl built from this checkout' go -C "$here/../.." build -o "$ctl_bin" ./cmd/bronzewardctl
-  local who
-  # The client ID is not BWSYNTH-: that prefix is a leak-scan pattern, and commands.tsv keeps it.
-  for who in h-publisher h-approver h-viewer; do
-    : >"$cli_dir/$who.json"
-    chmod 600 -- "$cli_dir/$who.json"
-    check "$ref" "a context for $who with its token file" ctl_env context add "$who" --server "http://127.0.0.1:$SERVER_A_PORT" \
-      --issuer http://127.0.0.1:5556 --client-id fixture-cli --oidc-token-file "$cli_dir/$who.json"
-  done
+  cli_prepare "$ref" h-publisher h-approver h-viewer
 }
-# ctl_env <args>...: bronzewardctl with the run directory's configuration and no session bus.
-ctl_env() {
-  XDG_CONFIG_HOME=$cli_dir/config XDG_STATE_HOME=$cli_dir/state XDG_CACHE_HOME=$cli_dir/cache \
-    DBUS_SESSION_BUS_ADDRESS=disabled: "$ctl_bin" "$@"
-}
-# ctl <name> <human> <args>...: bronzewardctl as the human, with a token minted now (printf is a
-# builtin: the token is on no command line); standard input passes through. The output and the
-# exit status are kept as cli-<name>.txt; the status is ctl's.
-ctl() {
-  local name=$1 who=$2 tok rc=0
-  shift 2
-  tok=$(mint "$who") || return 1
-  keep_secret "$tok"
-  printf '{"accessToken":"%s"}' "$tok" >"$cli_dir/$who.json"
-  ctl_env --context "$who" "$@" >"$EV/cli-$name.txt" 2>&1 || rc=$?
-  printf '[%s, exit %d]\n' "bronzewardctl --context $who $*" "$rc" >>"$EV/cli-$name.txt"
-  return "$rc"
-}
-# kept <name> <ERE>: the kept output of cli-<name>.txt has a line matching the ERE.
-kept() { grep --quiet --extended-regexp -- "$2" "$EV/cli-$1.txt"; }
 # one_approval: one approval of the plan, and one approval act naming it.
 one_approval() {
   [ "$(sql "SELECT (SELECT count(*) FROM approval WHERE plan = '$plan') || ' ' ||
@@ -342,7 +306,7 @@ cli_apply() {
   check "$ref" "operation watch as h-viewer ends 0 with the completion line naming the release" \
     ctl watch h-viewer operation watch "$op" --timeout 3m
   check "$ref" "the watch's completion line carries the server's time and names the release" \
-    kept watch "^Completed at .* \(server\): applied $rel, "
+    cli_kept watch "^Completed at .* \(server\): applied $rel, "
   check "$ref" "the plan's operation completed" completed
   ref='S4 CLI pass'
   check "$ref" 'one approval of the plan, recorded with one approval act' one_approval
@@ -351,10 +315,10 @@ cli_apply() {
   check "$ref" 'on the timeline, in order: the commitment, the attempt, the response, the states to completed, the Applied change' states_in_order
   check "$ref" "Applied the release from source operation, the baseline revision one more, one Applied change entry" applied_moved
   check "$ref" "machine timeline as h-viewer shows the plan's entry and the approval" ctl timeline h-viewer machine timeline "$machine_w" --all
-  check "$ref" "the timeline's plan line names the plan and the release" kept timeline "  plan +plan $plan, operation apply-config, release $rel, by "
-  check "$ref" "the timeline's approval line names the plan" kept timeline "  approval +approval apr_[a-z2-7]{26}, plan $plan, by h-approver "
+  check "$ref" "the timeline's plan line names the plan and the release" cli_kept timeline "  plan +plan $plan, operation apply-config, release $rel, by "
+  check "$ref" "the timeline's approval line names the plan" cli_kept timeline "  approval +approval apr_[a-z2-7]{26}, plan $plan, by h-approver "
   check "$ref" 'operation show as h-viewer prints the same completion' ctl show h-viewer operation show "$op"
-  check "$ref" "operation show's completion line names the release, without the server's time" kept show "^Completed: applied $rel, "
+  check "$ref" "operation show's completion line names the release, without the server's time" cli_kept show "^Completed: applied $rel, "
   rm -f -- "$cli_dir"/h-*.json
   evidence_to post || die "no post-state: bin/evidence failed"
   check "$ref" 'the post-state bundle: complete, no fixture secret but the scan control' scan_clean post
