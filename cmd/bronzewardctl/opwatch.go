@@ -98,8 +98,11 @@ const (
 // it, marked as such; the completion line shows the server's time of the event of the JSON pages
 // that records the end (recordsEnd), not of the last one. Unresolved is not terminal: the watch goes on past it. --timeout ends the watch with exit 5
 // and Ctrl-C with exit 130; neither stops the operation, which the watch names as it last read it.
-// Both count from the start of the command, so they reach the first read of the server and of the
-// operation too, which run in the reader's goroutine behind the handler.
+// Both count from the start of the command, so they reach the opening of the client (a wait on the
+// token file's lock for a renewal, or an interactive sign-in) and the first read of the server and of
+// the operation too, which run in the reader's goroutine behind the handler. A Ctrl-C at a sign-in
+// prompt therefore gets the grace and exit 130, not the default kill. An error of the opening is
+// returned as it is, as no request was sent.
 // The reader asks for the end only between its reads, so the timeout can pass by about 45 s, and the
 // first Ctrl-C waits for the reader no longer than interruptGrace. Exit 130 is only for "stopped
 // watching" an operation that is not terminal or was not read: what the reader returns within the
@@ -121,20 +124,20 @@ func (e *env) operationWatch(args []string) (err error) {
 		w = e.err
 	}
 	out := &watchOut{w: w}
-	c, err := e.openTo(out.gate(e.err), out.gate(e.verboseOut()))
-	if err != nil {
-		return err
-	}
-	// A watch left running when the process stops waiting for it still uses c, so c is not saved then.
+	// c is set from the reader's result, and stays nil when the client was not opened (its opening failed
+	// or was abandoned). A watch left running when the process stops waiting for it still uses c, so c is
+	// not saved then.
+	var c *client.Client
 	abandoned := false
 	saved := false // the stop path below saved before its stop lines, so the deferred save does not repeat it
 	defer func() {
-		if !abandoned && !saved {
+		if c != nil && !abandoned && !saved {
 			err = errors.Join(err, c.Save())
 		}
 	}()
-	// The handler and the timeout come before the first read, so a Ctrl-C or the timeout during any read
-	// of the watch, the two first ones included, gets the grace and the stop lines.
+	// The handler and the timeout come before the opening of the client and the first read, so a Ctrl-C or
+	// the timeout during any of them gets the grace and the stop lines. The opening can wait on the lock of
+	// the token file for its renewal, and an interactive sign-in can wait on the terminal.
 	var ended atomic.Int32 // 0 while it runs, then endInterrupt or endTimeout
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt)
@@ -143,33 +146,40 @@ func (e *env) operationWatch(args []string) (err error) {
 	defer timer.Stop()
 
 	type result struct {
-		o    *apitypes.OperationBody
-		read client.OperationRead // the operation read o comes from
-		err  error
+		c       *client.Client // the opened client; nil when the opening failed
+		openErr error          // the error of the opening, returned as it is: no request was sent
+		o       *apitypes.OperationBody
+		read    client.OperationRead // the operation read o comes from
+		err     error
 	}
 	done := make(chan result, 1)
 	go func() {
+		oc, err := e.openTo(out.gate(e.err), out.gate(e.verboseOut()))
+		if err != nil {
+			done <- result{openErr: err}
+			return
+		}
 		// Every read of the watch that gives nothing maps through unreadState: the server's own problem keeps
 		// its exit 1, anything else leaves the state unknown (exit 3, with the command that reads it). The
 		// two first reads give no operation, so they return through the same path as the watch's own.
-		if _, _, err := c.Server(); err != nil {
-			done <- result{err: err}
+		if _, _, err := oc.Server(); err != nil {
+			done <- result{c: oc, err: err}
 			return
 		}
-		first, _, err := c.OperationEpoch(id)
+		first, _, err := oc.OperationEpoch(id)
 		if err != nil {
-			done <- result{err: err}
+			done <- result{c: oc, err: err}
 			return
 		}
 		out.show(sf("%s  %s", first.Kind, subject(first.Subject)))
 		out.show("Times marked \"received\" are this client's clock when the event arrived; the completion line shows the server's time.")
-		o, read, err := c.WatchBody(id, client.Watch{
+		o, read, err := oc.WatchBody(id, client.Watch{
 			Show:  func(ev client.Event) { out.show(eventLine(ev, time.Now())) },
 			Clear: func() { out.show("(the events above no longer hold; they are shown again from the start)") },
 			// A watch whose output cannot be written has nothing left to show: it stops reading.
 			Until: func() (bool, error) { return ended.Load() != 0 || out.failure() != nil, nil },
 		})
-		done <- result{o, read, err}
+		done <- result{c: oc, o: o, read: read, err: err}
 	}()
 
 	var res result
@@ -205,6 +215,12 @@ func (e *env) operationWatch(args []string) (err error) {
 		abandoned = true
 		out.finish(sf("Stopped watching at your request. Operation %s goes on; the state it has now was not read.", id), follow)
 		return interrupted{ef("stopped watching operation %s", id)}
+	}
+	c = res.c
+	// The client was not opened: no request was sent, so the operation's state is not in question and the
+	// error of the opening stands as it is, with its own exit code.
+	if res.openErr != nil {
+		return res.openErr
 	}
 	// No operation read: the state is unknown, whatever the output did. The write error, if any, stays
 	// beside it, and the error of the read decides the exit code.

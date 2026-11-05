@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/ginsys/bronzeward/internal/client"
 )
 
 // opFake serves one operation, op_BWSYNTH: its body, its event stream, which sends stream and
@@ -333,6 +335,36 @@ func TestCancelledNextStep(t *testing.T) {
 			c.machine + " --operation <operation>\n"
 		if code, show, _ := runCtl(t, "operation", "show", "op_BWSYNTH"); code != 0 || !strings.Contains(show, want) || strings.Contains(show, "plan show") || strings.Contains(show, "Read it:") {
 			t.Errorf("%s: operation show, exit %d, want %q and no plan show in\n%s", c.name, code, want, show)
+		}
+	}
+}
+
+// TestEventLineKeepsLargeNumbers: a number in the data of a known event keeps its digits. A float64
+// would print 9.007199254740992e+15 for 9007199254740993.
+func TestEventLineKeepsLargeNumbers(t *testing.T) {
+	now := time.Date(2026, 11, 5, 1, 0, 0, 0, time.UTC)
+	for _, c := range []struct{ typ, data, want string }{
+		{"commitment", `{"plan":"pln_BWSYNTH","generation":9007199254740993}`, "generation 9007199254740993"},
+		{"attempt", `{"number":9007199254740993}`, "attempt 9007199254740993"},
+	} {
+		line := eventLine(client.Event{Type: c.typ, Data: []byte(c.data)}, now)
+		if !strings.Contains(line, c.want) || strings.Contains(line, "e+") {
+			t.Errorf("%s: line %q, want it to hold %q and no exponent", c.typ, line, c.want)
+		}
+	}
+}
+
+// TestFailedNextStepWithoutMachine: a failed operation whose subject has a plan and no machine reads
+// the operation; it never prints machine show with an empty word. With a machine it keeps machine show.
+func TestFailedNextStepWithoutMachine(t *testing.T) {
+	for _, c := range []struct{ name, state, plan, machine, want string }{
+		{"failed, plan, no machine", "failed", "pln_BWSYNTH", "", "Read it: bronzewardctl operation show 'op_BWSYNTH'"},
+		{"failed, plan and machine", "failed", "pln_BWSYNTH", "mch_a", "bronzewardctl machine show 'mch_a'"},
+		{"rejected, plan, no machine", "rejected", "pln_BWSYNTH", "", "bronzewardctl plan show 'pln_BWSYNTH'"},
+	} {
+		got := endNextStep(c.state, "op_BWSYNTH", c.plan, c.machine)
+		if !strings.Contains(got, c.want) || strings.Contains(got, "show ''") {
+			t.Errorf("%s: next step %q, want it to hold %q and no empty word", c.name, got, c.want)
 		}
 	}
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -492,6 +494,139 @@ func TestOperationWatchSlowStartTimeout(t *testing.T) {
 	f.mu.Unlock()
 	if code != 5 || !strings.Contains(errOut, "after --timeout") || streams != 0 {
 		t.Errorf("exit %d, stderr %q, %d streams opened; want 5, the timeout named and no stream", code, errOut, streams)
+	}
+}
+
+// oidcRenewalContext records the oidc context "lab" on srv with a token file whose access token is about
+// to expire, so opening the client renews it under the token file's lock, and takes that lock. The lock
+// is held until the returned release runs (or the test ends). The renewal itself fails fast at the
+// identity provider's .invalid name and only shows a notice.
+func oidcRenewalContext(t *testing.T, srv string) (lock string, release func()) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", home)
+	t.Setenv("XDG_STATE_HOME", home)
+	t.Setenv("BRONZEWARD_TOKEN_FILE", "")
+	tok := filepath.Join(home, "tokens")
+	exp := strconv.FormatInt(time.Now().Add(10*time.Second).Unix(), 10)
+	jwt := "e30." + base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"https://idp.example.invalid","sub":"h-viewer","exp":`+exp+`}`)) + ".BWSYNTH-sig"
+	if err := client.WriteTokens(tok, &client.Tokens{AccessToken: jwt, RefreshToken: "BWSYNTH-rt"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.UpdateConfig(func(c *client.Config) error {
+		c.Current = "lab"
+		c.Contexts = []client.Context{{Name: "lab", Server: srv, Credential: "oidc",
+			OIDC: &client.OIDC{Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli", TokenFile: tok}}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	lock = tok + ".lock"
+	held, err := os.OpenFile(lock, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Flock(int(held.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	var once sync.Once
+	release = func() { once.Do(func() { _ = held.Close() }) }
+	t.Cleanup(release)
+	return lock, release
+}
+
+// blockedOn returns once a process is blocked on the flock of path, as /proc/locks lists it, within 10 s.
+// A process blocked there has opened the client, so it is past its signal handler: no sleep decides it.
+func blockedOn(t *testing.T, path string) {
+	t.Helper()
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ino := ":" + strconv.FormatUint(fi.Sys().(*syscall.Stat_t).Ino, 10) + " "
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		b, err := os.ReadFile("/proc/locks")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, l := range strings.Split(string(b), "\n") {
+			if strings.Contains(l, "-> FLOCK") && strings.Contains(l, ino) {
+				return
+			}
+		}
+	}
+	t.Fatalf("no process blocked on %s within 10 s", path)
+}
+
+// TestOperationWatchInterruptDuringOpen: the first Ctrl-C while opening the client waits for the renewal
+// lock of the token file gets the grace, the stop line and the follow line last, and exit 130, as for any
+// stalled read of the watch. No operation was read, so the stop line says so. The command runs in a
+// process of its own, because without a handler the default action of SIGINT ends it. Bound: the process
+// ends within 10 s of the signal (the grace is 3 s).
+func TestOperationWatchInterruptDuringOpen(t *testing.T) {
+	f := &opFake{body: fmt.Sprintf(opJSON, "apply-config", "running", "null", "null", "[]")}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	lock, _ := oidcRenewalContext(t, srv.URL)
+	var stdout, stderr bytes.Buffer
+	cmd := exec.Command(os.Args[0])
+	cmd.Env = append(os.Environ(), "BW_WATCH_HELPER=1")
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	ended := make(chan error, 1)
+	go func() { ended <- cmd.Wait() }()
+	defer func() { _ = cmd.Process.Kill() }()
+	blockedOn(t, lock)
+	_ = cmd.Process.Signal(syscall.SIGINT)
+	select {
+	case err := <-ended:
+		stop := "Stopped watching at your request. Operation op_BWSYNTH goes on; the state it has now was not read.\n"
+		follow := "Follow it again with: bronzewardctl operation watch 'op_BWSYNTH'\n"
+		var x *exec.ExitError
+		if !errors.As(err, &x) || x.ExitCode() != 130 || !strings.HasSuffix(stdout.String(), stop+follow) {
+			t.Errorf("the process ended with %v, stdout\n%s\nstderr %q; want exit 130 and the stop lines last", err, stdout.String(), stderr.String())
+		}
+	case <-time.After(10 * time.Second):
+		t.Error("the first Ctrl-C during the opening of the client did not end the watch within the grace")
+	}
+}
+
+// TestOperationWatchTimeoutDuringOpen: --timeout counts the opening of the client. The renewal lock is held
+// for 3 s with --timeout 1s, so the timeout runs out 2 s before the opening returns (a margin over 1.5 s
+// for a loaded host). The watch then ends as not terminal at the timeout (exit 5) and opens no event stream.
+func TestOperationWatchTimeoutDuringOpen(t *testing.T) {
+	f := &opFake{body: fmt.Sprintf(opJSON, "apply-config", "running", "null", "null", "[]")}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	_, release := oidcRenewalContext(t, srv.URL)
+	freed := time.AfterFunc(3*time.Second, release)
+	defer freed.Stop()
+	code, _, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "1s")
+	f.mu.Lock()
+	streams := f.streams
+	f.mu.Unlock()
+	if code != 5 || !strings.Contains(errOut, "after --timeout") || streams != 0 {
+		t.Errorf("exit %d, stderr %q, %d streams opened; want 5, the timeout named and no stream", code, errOut, streams)
+	}
+}
+
+// TestOperationWatchOpenError: a client that cannot be opened returns its own error with its own exit code,
+// as operation show does for the same context, and neither panics on the missing client nor reads the
+// state of the operation as unknown (exit 3): no request was sent.
+func TestOperationWatchOpenError(t *testing.T) {
+	f := &opFake{body: fmt.Sprintf(opJSON, "apply-config", "running", "null", "null", "[]")}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	if err := os.Remove(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "token")); err != nil {
+		t.Fatal(err)
+	}
+	showCode, _, _ := runCtl(t, "operation", "show", "op_BWSYNTH")
+	code, _, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "1m")
+	if showCode == 0 || code != showCode || code == 3 || strings.Contains(errOut, "panic") {
+		t.Errorf("watch exit %d, stderr %q; operation show exit %d; want the same non-zero code, not 3", code, errOut, showCode)
 	}
 }
 
