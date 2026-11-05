@@ -58,6 +58,7 @@ func TestOperationWatchSecondCtrlCEndsBlockedWatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer er.Close()
+	defer ew.Close() // closes it if Start fails; the explicit close below makes the reader see the end
 	cmd := exec.Command(os.Args[0])
 	cmd.Env = append(os.Environ(), "BW_WATCH_HELPER=1", "BW_WATCH_MARK=1")
 	cmd.Stdout, cmd.Stderr = w, ew
