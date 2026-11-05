@@ -171,12 +171,14 @@ func (e *env) clusterCmd(args []string) error {
 }
 
 func (e *env) machineCmd(args []string) error {
-	if v, rest, err := e.verb("machine", args, "list", "show", "timeline", "observations", "add", "set-endpoint"); err != nil {
+	if v, rest, err := e.verb("machine", args, "list", "show", "timeline", "observations", "add", "set-endpoint", "freeze", "unfreeze"); err != nil {
 		return err
 	} else if v == "timeline" {
 		return e.machineTimeline(rest)
 	} else if v == "observations" {
 		return e.machineObservations(rest)
+	} else if v == "freeze" || v == "unfreeze" {
+		return e.machineFreeze(v, rest)
 	} else if v == "add" {
 		return e.machineAdd(rest)
 	} else if v == "set-endpoint" {
@@ -364,7 +366,7 @@ func sentences(m apitypes.MachineBody, obs []apitypes.ObservationBody) []string 
 		add("The latest read at %s could not read: %s.", at(latest.At), strings.Join(causes, "; "))
 	}
 	if m.Frozen {
-		add("Frozen: no new commitment or attempt until an approver unfreezes; an attempt already recorded is not stopped, and an adoption can still be recorded.")
+		add(freezeSentence)
 	}
 	return append(s, "Health: not checked.")
 }
