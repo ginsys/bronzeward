@@ -28,11 +28,12 @@ func TestMachineTimeline(t *testing.T) {
 		entry(3, "approval-revocation", `{"approval":"apr_a","plan":"pln_a","principal":"h-approver","role":"approver","reason":"wrong release"}`),
 		entry(4, "plan-cancellation", `{"plan":"pln_a","principal":"h-all","role":"publisher","reason":"superseded"}`),
 		entry(5, "refusal", `{"transaction":"T6","comparison":"6","plan":"pln_b","operation":"op_b","cause":"the machine's Desired moved","controller":"ctl_b","generation":1}`),
-		entry(6, "commitment", `{"plan":"pln_c","operation":"op_c","approval":"apr_c","observation":"obs_c","controller":"ctl_b","generation":1}`),
+		entry(6, "commitment", `{"plan":"pln_c","operation":"op_c","approval":"apr_c","observation":"obs_c","controller":"ctl_b","generation":9007199254740993}`),
 		entry(7, "drift", `{"observation":"obs_d","digest":"BWSYNTH"}`),
 	}
 	var mu sync.Mutex
 	var seen []string
+	var times []time.Time // when each timeline request arrived, in step with seen
 	refused := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
@@ -50,12 +51,14 @@ func TestMachineTimeline(t *testing.T) {
 			return
 		}
 		seen = append(seen, q.Get("order")+" "+q.Get("cursor"))
+		times = append(times, time.Now())
 		switch q.Get("order") + " " + q.Get("cursor") {
 		case " ":
 			fmt.Fprintf(w, `{"items":[%s]}`, strings.Join(kinds, ","))
 		case "newest ":
 			if !refused {
-				fmt.Fprintf(w, `{"items":[%s,%s],"next":"older","tail":"t3"}`, entry(3, "plan", `{"plan":"pln_3"}`), entry(2, "plan", `{"plan":"pln_2"}`))
+				fmt.Fprintf(w, `{"items":[%s,%s],"next":"older","tail":"t3"}`, entry(3, "plan", `{"plan":"pln_3"}`),
+					entry(2, "commitment", `{"plan":"pln_2","generation":9007199254740993}`))
 			} else {
 				fmt.Fprintf(w, `{"items":[%s,%s],"tail":"t6"}`, entry(6, "plan", `{"plan":"pln_6"}`), entry(5, "plan", `{"plan":"pln_5"}`))
 			}
@@ -79,7 +82,7 @@ func TestMachineTimeline(t *testing.T) {
 	defer srv.Close()
 	automationContext(t, srv.URL)
 	every := followEvery
-	followEvery = 10 * time.Millisecond
+	followEvery = 40 * time.Millisecond // long enough that a read sent with no wait shows in the spacing check
 	defer func() { followEvery = every }()
 
 	var out, errb bytes.Buffer
@@ -92,7 +95,7 @@ func TestMachineTimeline(t *testing.T) {
 		"approval-revocation  approval apr_a, plan pln_a, by h-approver (approver), reason wrong release",
 		"plan-cancellation    plan pln_a, by h-all (publisher), reason superseded",
 		"refusal              operation op_b, plan pln_b, comparison 6, cause the machine's Desired moved",
-		"commitment           operation op_c, plan pln_c, approval apr_c, observation obs_c, controller ctl_b, generation 1",
+		"commitment           operation op_c, plan pln_c, approval apr_c, observation obs_c, controller ctl_b, generation 9007199254740993",
 		`drift                {"digest":"BWSYNTH","observation":"obs_d"}`,
 	} {
 		if !strings.Contains(out.String(), want) {
@@ -110,6 +113,9 @@ func TestMachineTimeline(t *testing.T) {
 	if got := strings.Join(revs, " "); code != 130 || got != "2 3 4 5 (the 5 6" {
 		t.Errorf("--follow: exit %d, revisions %q; want 130 and 2 3 4 5, the clear line, 5 6:\n%s%s", code, got, out.String(), errb.String())
 	}
+	if !strings.Contains(out.String(), "plan pln_2, generation 9007199254740993") {
+		t.Errorf("--follow: the generation lost its digits:\n%s", out.String())
+	}
 	if !strings.Contains(out.String(), "(the entries above may no longer hold; the newest are shown again)") ||
 		!strings.Contains(errb.String(), "the timeline's cursor is no longer valid") || !strings.Contains(errb.String(), "Stopped following the timeline of machine mch_a") {
 		t.Errorf("--follow: no clear line, notice or stop line:\n%s%s", out.String(), errb.String())
@@ -123,6 +129,13 @@ func TestMachineTimeline(t *testing.T) {
 	}
 	if got != " |newest |oldest t3|oldest n4|oldest t5|newest |oldest t6" {
 		t.Errorf("--follow read %q; want the list, then newest, oldest from each tail following next, newest again after the refusal", got)
+	}
+	// Every read after the newest page waits followEvery: the first of a cycle, the next page of a
+	// two-page backlog (oldest n4) and the newest page after the refused cursor.
+	for i, n := 2, len(strings.Split(got, "|")); i < n; i++ {
+		if gap := times[i].Sub(times[i-1]); gap < followEvery {
+			t.Errorf("--follow sent %q %v after %q; want at least %v", strings.Split(got, "|")[i], gap, strings.Split(got, "|")[i-1], followEvery)
+		}
 	}
 	mu.Unlock()
 
@@ -141,7 +154,7 @@ func TestMachineTimeline(t *testing.T) {
 // header and before any request; a server that drops to revision 2 during --follow is refused on
 // the next poll, after the answer that showed its new epoch, with no further timeline request.
 func TestMachineTimelineRevision2(t *testing.T) {
-	const refusal = "the server serves API revision 2; machine timeline needs revision 3 or later"
+	const refusal = "the server serves API revision 2; machine timeline --follow needs revision 3 or later"
 	var mu sync.Mutex
 	var queries []string // the raw query of each timeline request
 	revision, epoch, moveAt := 2, "ep_BWSYNTH-2", ""
@@ -216,5 +229,42 @@ func TestMachineTimelineRevision2(t *testing.T) {
 	mu.Unlock()
 	if code == 0 || code == 130 || !strings.Contains(errb.String(), refusal) || moved != "oldest t1" || sent() != "order=newest|cursor=t1&order=oldest" {
 		t.Errorf("--follow dropping to revision 2: exit %d, requests %q; want the refusal after the read that showed the new epoch, and no request after it:\n%s%s", code, sent(), out.String(), errb.String())
+	}
+}
+
+// TestMachineTimelineInterruptedRead checks that Ctrl-C ends --follow with exit 130 even when the
+// read that is in flight fails: the failure does not turn the stop into exit 1.
+func TestMachineTimelineInterruptedRead(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Bronzeward-Epoch", "ep_BWSYNTH-2")
+		w.Header().Set("Content-Type", "application/json")
+		q := r.URL.Query()
+		switch r.URL.Path {
+		case "/api/v1/server":
+			fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":3,"startMode":"normal"}`)
+		case "/api/v1/machines/mch_a/timeline":
+			if q.Get("order") == "newest" {
+				fmt.Fprintf(w, `{"items":[%s],"tail":"t1"}`, entry(1, "plan", `{"plan":"pln_1"}`))
+				return
+			}
+			syscall.Kill(syscall.Getpid(), syscall.SIGINT) // Ctrl-C while this read is in flight
+			time.Sleep(50 * time.Millisecond)              // the signal is on the channel before the failure is
+			w.Header().Set("Content-Type", "application/problem+json")
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, `{"type":"urn:bronzeward:problem:invalid-request","title":"unexpected","status":400}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	every := followEvery
+	followEvery = 10 * time.Millisecond
+	defer func() { followEvery = every }()
+
+	var out, errb bytes.Buffer
+	if code := run([]string{"machine", "timeline", "mch_a", "--follow"}, &out, &errb); code != 130 ||
+		!strings.Contains(errb.String(), "Stopped following the timeline of machine mch_a") {
+		t.Errorf("--follow, Ctrl-C during a failing read: exit %d; want 130 and the stop line:\n%s%s", code, out.String(), errb.String())
 	}
 }
