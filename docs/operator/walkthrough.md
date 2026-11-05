@@ -120,6 +120,25 @@ same way, with `machine_w`, `marks: ["doc[0]/machine/files/0/content"]` and its 
 Bronzeward never writes to a node during an import. S1 shows this by comparing each node's
 configuration digest and apid log before and after.
 
+**The same import in the web page.** Sign in as an author. Open Changes, then Imports, then
+Start import. A machine page also links to "Import this machine". Take these steps:
+
+1. Choose the machine, then an open draft of its cluster. The page needs a draft, and it can
+   create one for you.
+2. Choose the source. "Read from the machine" is the default. For "A document", paste the text or
+   choose a file. The page keeps the text in its memory only, sends it once, and empties it when
+   the request ends.
+3. Choose the staging. Encrypted staging is the default and can pause for review. Transient
+   staging cannot, so the review box is off for it.
+4. Optionally, write marks, one path per line, such as `doc[0]/machine/files/0/content`.
+5. Select Start import. The page opens the import and shows its progress until the import is
+   released, fails, pauses for review, or its lease lapses. A reload shows the state again.
+
+The page adopts the draft's new ETag after a released import only when the draft is still at the
+import's revision. If another write came first, the page says so and links to the change. Opening
+the start page with `kind=drift-adoption` starts a drift adoption instead, always from the
+machine. The review, continue, takeover and abandon controls are on a later page.
+
 *On your deployment:* `platform` and the endpoints are your machines'; write your own talosconfig
 with `bao kv put -mount=secret access/talos/<cluster id> talosconfig=@<file>`.
 
