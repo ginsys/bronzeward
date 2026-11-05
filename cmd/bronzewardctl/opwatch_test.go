@@ -556,12 +556,12 @@ func oidcRenewalContext(t *testing.T, srv string) (lock string, release func()) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	var once sync.Once
+	release = func() { once.Do(func() { _ = held.Close() }) }
+	t.Cleanup(release) // before the Flock: a fatal exit of it must not leave the file open
 	if err := syscall.Flock(int(held.Fd()), syscall.LOCK_EX); err != nil {
 		t.Fatal(err)
 	}
-	var once sync.Once
-	release = func() { once.Do(func() { _ = held.Close() }) }
-	t.Cleanup(release)
 	return lock, release
 }
 
@@ -619,6 +619,7 @@ func TestOperationWatchEscapes(t *testing.T) {
 	} {
 		f := &opFake{}
 		srv := httptest.NewServer(f)
+		t.Cleanup(srv.Close) // at once, so that a fatal exit of automationContext leaves no listener
 		automationContext(t, srv.URL)
 		state := js(c.state)
 		f.body = fmt.Sprintf(`{"id":"op_BWSYNTH","kind":%s,"state":%s,"subject":{"plan":%s},"epoch":"ep_BWSYNTH-2",`+
@@ -1115,6 +1116,7 @@ func TestOperationWatchExitMatrix(t *testing.T) {
 	} {
 		for _, w := range c.write {
 			srv := httptest.NewServer(c.fake())
+			t.Cleanup(srv.Close) // at once, so that a fatal exit of automationContext leaves no listener
 			automationContext(t, srv.URL)
 			var stdout io.Writer = &bytes.Buffer{}
 			if w.fails {
@@ -1160,6 +1162,7 @@ func TestOperationWatchExitMatrixByRead(t *testing.T) {
 	// of the operation, so its state is unknown as well.
 	bad := &opFake{badServer: true, body: running}
 	badSrv := httptest.NewServer(bad)
+	t.Cleanup(badSrv.Close) // at once, so that a fatal exit of automationContext leaves no listener
 	automationContext(t, badSrv.URL)
 	if code, _, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "2s"); code != 3 ||
 		!strings.Contains(errOut, "the state of operation op_BWSYNTH was not read") || !strings.Contains(errOut, read) {
@@ -1197,6 +1200,7 @@ func TestOperationWatchExitMatrixByRead(t *testing.T) {
 					has = append(has, "write refused")
 				}
 				srv := httptest.NewServer(f)
+				t.Cleanup(srv.Close) // at once, so that a fatal exit of automationContext leaves no listener
 				automationContext(t, srv.URL)
 				var stdout io.Writer = &bytes.Buffer{}
 				if fails {
