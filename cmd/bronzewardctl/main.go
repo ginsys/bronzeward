@@ -256,7 +256,11 @@ func report(err error, stdout, stderr io.Writer) int {
 		endedBy = signalled.sig
 		return 128 + int(signalled.sig)
 	case errors.Is(err, flag.ErrHelp):
-		fmt.Fprintln(stdout, usage)
+		// Help is output like any other: when it cannot be written, code 6 takes the place of 0.
+		if _, werr := fmt.Fprintln(stdout, usage); werr != nil {
+			fmt.Fprintln(stderr, "bronzewardctl:", client.Shown(werr))
+			return 6
+		}
 		return 0
 	case errors.As(err, &u):
 		fmt.Fprintf(stderr, "bronzewardctl: %s\n\n%s\n", client.Shown(err), usage)

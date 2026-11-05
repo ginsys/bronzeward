@@ -106,9 +106,43 @@ func (e *env) emit(raw []byte, table func(*tabwriter.Writer)) error {
 		_, err = e.out.Write(b)
 		return err
 	}
-	w := tabwriter.NewWriter(e.out, 0, 0, 2, ' ', 0)
+	w, flush := e.newTable()
 	table(w)
-	return w.Flush()
+	return flush()
+}
+
+// stickyWriter passes writes to w until one fails, then refuses every later write with that error,
+// so a sink that failed once receives nothing more.
+type stickyWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (s *stickyWriter) Write(p []byte) (int, error) {
+	if s.err != nil {
+		return 0, s.err
+	}
+	n, err := s.w.Write(p)
+	if err != nil {
+		s.err = err
+	}
+	return n, err
+}
+
+// newTable is a table on standard output and the function that ends it. The tabwriter flushes by
+// itself while the rows are written, and a row's callback does not read the error of those writes.
+// The sticky writer keeps the first one and stops the writes after it, so the final flush cannot
+// retry the buffered text and print its accepted part twice; flush returns that first error.
+func (e *env) newTable() (*tabwriter.Writer, func() error) {
+	s := &stickyWriter{w: e.out}
+	w := tabwriter.NewWriter(s, 0, 0, 2, ' ', 0)
+	return w, func() error {
+		ferr := w.Flush()
+		if s.err != nil {
+			return s.err
+		}
+		return ferr
+	}
 }
 
 // render is what emit prints for -o json or yaml, built in memory so that a conversion failure

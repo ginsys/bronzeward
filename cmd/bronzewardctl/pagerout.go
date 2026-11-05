@@ -78,6 +78,9 @@ func (o *pageOut) write(p []byte, limit <-chan time.Time, abort <-chan struct{})
 	done := make(chan written, 1)
 	go func() {
 		n, err := o.w.Write(p)
+		if err != nil {
+			err = outputFailed{err} // a write the terminal refused is a failed output: exit 6
+		}
 		close(fin) // before done: a caller that has the result must not find the write still in flight
 		done <- written{n, err}
 	}()

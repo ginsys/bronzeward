@@ -129,6 +129,35 @@ func (o *watchOut) stop(alt *sink, lines ...string) {
 	}
 }
 
+// noteWait is how long note waits for a sink that does not take the line, so that a note on one
+// stream cannot hold the stop lines of another. A variable, so that a test can shorten it.
+var noteWait = 500 * time.Millisecond
+
+// note prints one line on s before the stop lines, under the lock of s, so that it keeps its place
+// among the writes of that sink. When s is the main sink, the stop lines wait on it too and note waits
+// for the line, which keeps the order. When s is another stream and does not take the line within
+// noteWait, note returns and the stop lines print without it: a blocked standard error must not
+// hold the stop lines that go to a healthy standard output.
+func (o *watchOut) note(s *sink, line string) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		_, _ = fmt.Fprintln(s.w, line)
+	}()
+	if s == o.main {
+		<-done
+		return
+	}
+	t := time.NewTimer(noteWait)
+	defer t.Stop()
+	select {
+	case <-done:
+	case <-t.C:
+	}
+}
+
 // What ended the watch, held in operationWatch's ended.
 const (
 	endInterrupt = 1
@@ -308,10 +337,11 @@ func (e *env) operationWatch(args []string) (err error) {
 				}
 			}
 			// A failure to keep the client's state is printed before the stop lines, so the follow line
-			// stays last; report returns 130 for a stop and prints nothing itself.
+			// stays last; report returns 130 for a stop and prints nothing itself. The note goes through
+			// the sink of standard error, which waits no longer than noteWait for a blocked stream.
 			saved = true
 			if serr := c.Save(); serr != nil {
-				fmt.Fprintf(e.err, "bronzewardctl: %s\n", client.Shown(serr))
+				out.note(errSink, "bronzewardctl: "+client.Shown(serr))
 			}
 			out.stop(errSink, sf("Stopped watching at your request. Operation %s is still %s, as the server last read it; it goes on.", id, o.State), follow)
 			return interrupted{ef("stopped watching operation %s, which is still %s", id, o.State)}

@@ -74,8 +74,10 @@ func (e *env) contextCmd(args []string) error {
 				msg += " " + note + "."
 			}
 			if err != nil {
-				fmt.Fprintln(e.out, msg)
-				return err
+				// The local cleanup failed, and the context is removed. The line that says so is output: when
+				// it cannot be written, the write error stands beside the cleanup's (exit 6, not 1).
+				_, werr := fmt.Fprintln(e.out, msg)
+				return errors.Join(err, werr)
 			}
 		}
 		_, err = fmt.Fprintln(e.out, msg)

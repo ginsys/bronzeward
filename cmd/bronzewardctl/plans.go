@@ -181,9 +181,9 @@ func (e *env) planCreate(args []string) error {
 		return err
 	}
 	// The plan was created: its view shows even when saving the context failed after the answer.
-	w := tabwriter.NewWriter(e.out, 0, 0, 2, ' ', 0)
+	w, flush := e.newTable()
 	printLines(w, view)
-	return errors.Join(w.Flush(), err)
+	return errors.Join(flush(), err)
 }
 
 // createRefusalNext is the next step T19 names for plan creation's conflicts (internal/api/plans.go):

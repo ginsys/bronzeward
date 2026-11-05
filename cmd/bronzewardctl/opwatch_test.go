@@ -168,6 +168,14 @@ var afterInterruptContext func(*testing.T)
 // ends the stream within the grace time: the watch reads the still running operation and stops.
 func interruptedWatch(t *testing.T, stdout io.Writer, extra ...string) (int, string) {
 	t.Helper()
+	var e bytes.Buffer
+	code := interruptedWatchTo(t, stdout, &e, extra...)
+	return code, e.String()
+}
+
+// interruptedWatchTo is interruptedWatch with the standard error of the caller.
+func interruptedWatchTo(t *testing.T, stdout, stderr io.Writer, extra ...string) int {
+	t.Helper()
 	f := &opFake{body: fmt.Sprintf(opJSON, "apply-config", "running", "null", "null", "[]"), hang: make(chan struct{})}
 	srv := httptest.NewServer(f)
 	defer srv.Close()
@@ -192,9 +200,7 @@ func interruptedWatch(t *testing.T, stdout io.Writer, extra ...string) (int, str
 			time.Sleep(10 * time.Millisecond)
 		}
 	}()
-	var e bytes.Buffer
-	code := run(append([]string{"operation", "watch", "op_BWSYNTH"}, extra...), stdout, &e)
-	return code, e.String()
+	return run(append([]string{"operation", "watch", "op_BWSYNTH"}, extra...), stdout, stderr)
 }
 
 // TestOperationWatchReadUnknown: when the stream ends and the operation read that follows is an
@@ -641,8 +647,10 @@ func TestOperationWatchEscapes(t *testing.T) {
 
 // TestOperationWatchEscapesProblemFields: the failure of a publish or ingest operation is a problem
 // document, and its cause, title, detail and instance are each the server's text. A hostile string with a
-// line feed in only one of them reaches the terminal escaped and starts no line of its own, in the outcome
-// on standard output and in the note on standard error. One case per field names the field that fails.
+// line feed in only one of them reaches the terminal escaped and starts no line of its own. In -o table the
+// outcome is on standard output; in -o json it is on standard error (standard output holds the resource,
+// which is JSON and escapes by its own rules), so the case runs in both and reads the stream that holds the
+// outcome. One case per field and mode names the one that fails.
 func TestOperationWatchEscapesProblemFields(t *testing.T) {
 	const bad = "x\x1b[31m\ty\r\u202ez\nFAKE LINE"
 	const shown = `x\x1b[31m\x09y\x0d\u202ez\x0aFAKE LINE`
@@ -657,23 +665,34 @@ func TestOperationWatchEscapesProblemFields(t *testing.T) {
 		{"detail", `{"title":"The job ended","detail":` + js(bad) + `,"status":409}`},
 		{"instance", `{"title":"The job ended","instance":` + js(bad) + `,"status":409}`},
 	} {
-		f.mu.Lock()
-		f.body = fmt.Sprintf(opJSONNoPlan, "publish", "failed", publishSubject, "null", c.errBody)
-		f.stream, f.pages = nil, []string{evPage(1, "queued", "{}"), evPage(2, "failed", `{"code":"recovery"}`)}
-		f.mu.Unlock()
-		code, out, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "2s")
-		for name, text := range map[string]string{"stdout": out, "stderr": errOut} {
-			if i := strings.IndexFunc(strings.ReplaceAll(text, "\n", ""), func(r rune) bool { return unicode.IsControl(r) || r == '\u202e' }); i >= 0 {
-				t.Errorf("%s: %s holds a control character at %d:\n%q", c.field, name, i, text)
+		for _, mode := range []struct {
+			name  string
+			extra []string
+		}{{"table", nil}, {"json", []string{"-o", "json"}}} {
+			f.mu.Lock()
+			f.body = fmt.Sprintf(opJSONNoPlan, "publish", "failed", publishSubject, "null", c.errBody)
+			f.stream, f.pages = nil, []string{evPage(1, "queued", "{}"), evPage(2, "failed", `{"code":"recovery"}`)}
+			f.mu.Unlock()
+			code, out, errOut := runCtl(t, append([]string{"operation", "watch", "op_BWSYNTH", "--timeout", "2s"}, mode.extra...)...)
+			// The streams that carry the client's own text: both in table mode, standard error alone in json.
+			streams := map[string]string{"stdout": out, "stderr": errOut}
+			outcomeText := out
+			if mode.name == "json" {
+				streams, outcomeText = map[string]string{"stderr": errOut}, errOut
 			}
-			for _, l := range strings.Split(text, "\n") {
-				if strings.HasPrefix(l, "FAKE LINE") {
-					t.Errorf("%s: %s has a line of the server's making:\n%q", c.field, name, text)
+			for name, text := range streams {
+				if i := strings.IndexFunc(strings.ReplaceAll(text, "\n", ""), func(r rune) bool { return unicode.IsControl(r) || r == '\u202e' }); i >= 0 {
+					t.Errorf("%s -o %s: %s holds a control character at %d:\n%q", c.field, mode.name, name, i, text)
+				}
+				for _, l := range strings.Split(text, "\n") {
+					if strings.HasPrefix(l, "FAKE LINE") {
+						t.Errorf("%s -o %s: %s has a line of the server's making:\n%q", c.field, mode.name, name, text)
+					}
 				}
 			}
-		}
-		if code != 4 || !strings.Contains(out, shown) {
-			t.Errorf("%s: exit %d (want 4); the escaped server text %q is not in\n%q", c.field, code, shown, out)
+			if code != 4 || !strings.Contains(outcomeText, shown) {
+				t.Errorf("%s -o %s: exit %d (want 4); the escaped server text %q is not in\n%q", c.field, mode.name, code, shown, outcomeText)
+			}
 		}
 	}
 }
@@ -853,8 +872,18 @@ func (w *interruptThenFail) Write(p []byte) (int, error) {
 		return len(p), nil
 	}
 	if w.n == 3 {
+		// Wait until the signal has reached the watch's channel, with no sleep. The runtime hands pending
+		// signals to the program one at a time and the lowest number first (SIGINT is 2, SIGUSR1 is 10),
+		// so when the probe receives SIGUSR1 the watch's channel already holds the SIGINT.
+		probe := make(chan os.Signal, 1)
+		signal.Notify(probe, syscall.SIGUSR1)
+		defer signal.Stop(probe)
 		_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
-		time.Sleep(200 * time.Millisecond) // the signal reaches the watch before this line fails
+		_ = syscall.Kill(os.Getpid(), syscall.SIGUSR1)
+		select {
+		case <-probe:
+		case <-time.After(5 * time.Second):
+		}
 	}
 	return 0, errors.New("write refused")
 }
@@ -951,16 +980,21 @@ func TestOperationWatchCompletionEvent(t *testing.T) {
 	}
 }
 
+// breakConfigDir makes the configuration directory read-only, so that the client cannot keep its state
+// (the temporary file of the config is made there).
+func breakConfigDir(t *testing.T) {
+	t.Helper()
+	dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "bronzeward")
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+}
+
 // TestOperationWatchInterruptSaveFails: the first Ctrl-C ends the watch with exit 130, and a failure
 // to keep the client's state on the way out is still printed, once, before that exit.
 func TestOperationWatchInterruptSaveFails(t *testing.T) {
-	afterInterruptContext = func(t *testing.T) {
-		dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "bronzeward") // the temporary file of the config is made here
-		if err := os.Chmod(dir, 0o500); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
-	}
+	afterInterruptContext = breakConfigDir
 	defer func() { afterInterruptContext = nil }()
 	// With -o json the stop lines go to standard error as well: the order there is the contract.
 	code, errOut := interruptedWatch(t, io.Discard, "-o", "json")
