@@ -200,11 +200,13 @@ function directiveTable(lines: readonly string[]): Map<string, string> | null {
   return table;
 }
 
-function tags(original: string): { index: number; tag: string; name: string }[] {
+const tags = (original: string) => readTags(original).found;
+// The tags of the text, and the spans of the documents that go-yaml refuses (ginsys/bronzeward#633).
+function readTags(original: string): { found: { index: number; tag: string; name: string }[]; refused: Spot[] } {
   const text = original.replace(BREAKS, "\n");
   let masked = "";
   const lines = text.split("\n");
-  const { starts, props } = commentStarts(lines);
+  const { starts, props, refused } = commentStarts(lines);
   lines.forEach((line, n) => {
     const end = starts[n]!;
     masked += `${line.slice(0, end)}${" ".repeat(line.length - end)}\n`;
@@ -276,7 +278,7 @@ function tags(original: string): { index: number; tag: string; name: string }[] 
     } else name = m[1] !== undefined ? decoded(m[1]) : m[2]!.replaceAll("''", "'");
     if (name !== undefined && NAME.test(name)) found.push({ index: start, tag: original.slice(start, end), name });
   }
-  return found;
+  return { found, refused };
 }
 
 const indent = (line: string) => line.length - line.trimStart().length;
@@ -487,31 +489,46 @@ interface Docs {
   // The `!bwref` properties of this document, by the offset of the tag.
   cur: Map<number, Prop>;
   props: Map<number, Prop>;
+  // Where this document starts, and the spans of the refused documents before it: an embedded
+  // document inside such a span lists nothing either (ginsys/bronzeward#633).
+  from: number;
+  spans: Spot[];
 }
-const freshDocs = (props: Map<number, Prop>): Docs => ({ phase: "start", pending: [], table: new Map(DEFAULT_HANDLES), refused: false, cur: new Map(), props });
-function endDocument(d: Docs, phase: "start" | "ended") {
-  if (!d.refused) for (const [k, v] of d.cur) d.props.set(k, v);
-  Object.assign(d, freshDocs(d.props), { phase });
+const freshDocs = (props: Map<number, Prop>, spans: Spot[], from: number): Docs => ({
+  phase: "start",
+  pending: [],
+  table: new Map(DEFAULT_HANDLES),
+  refused: false,
+  cur: new Map(),
+  props,
+  from,
+  spans,
+});
+// End the document at the offset `at`: the start of the line that ends it, or the end of a `...` line.
+function endDocument(d: Docs, phase: "start" | "ended", at: number) {
+  if (d.refused) d.spans.push({ start: d.from, end: at });
+  else for (const [k, v] of d.cur) d.props.set(k, v);
+  Object.assign(d, freshDocs(d.props, d.spans, at), { phase });
 }
 // Read a line against the document state. A directive line (`%` in the first column, outside any
 // scalar) is consumed here and returns true. A `---` or `...` marker ends or starts a document, and
 // a line of content after directives with no `---`, or after `...` (also the text on the `...` line),
 // refuses its document. A directive after content ends the document. A marker or a directive inside an
 // open flow collection refuses the document that is open.
-function readDocumentLine(d: Docs, st: Carry, text: string): boolean {
+function readDocumentLine(d: Docs, st: Carry, text: string, at: number): boolean {
   if (st.open === '"' || st.open === "'") return false;
   if (MARKER.test(text)) {
     // A marker inside an open flow collection is an error: the document it ends lists nothing.
     if (st.flow > 0) d.refused = true;
     if (text.startsWith("...")) {
-      endDocument(d, "ended");
+      endDocument(d, "ended", at + text.length);
       // Text after `...` that is no comment is content with no `---`: it refuses the next document.
       if (!/^\.\.\.[ \t\r]*(?:#.*)?$/.test(text)) {
         d.refused = true;
         d.phase = "body";
       }
     } else {
-      if (d.phase === "body") endDocument(d, "start");
+      if (d.phase === "body") endDocument(d, "start", at);
       const table = directiveTable(d.pending);
       if (table === null) d.refused = true;
       else d.table = table;
@@ -537,7 +554,7 @@ function readDocumentLine(d: Docs, st: Carry, text: string): boolean {
         d.refused = true;
         return true;
       }
-      endDocument(d, "start");
+      endDocument(d, "start", at);
       Object.assign(st, freshCarry());
     }
     d.pending.push(text);
@@ -590,10 +607,11 @@ function pushEntry(stack: number[], col: number) {
 }
 
 // The comment start of every line, and the offsets in the text of the !bwref properties read.
-function commentStarts(lines: readonly string[]): { starts: number[]; props: Map<number, Prop> } {
+function commentStarts(lines: readonly string[]): { starts: number[]; props: Map<number, Prop>; refused: Spot[] } {
   const st = freshCarry();
   const props = new Map<number, Prop>();
-  const docs = freshDocs(props);
+  const refused: Spot[] = [];
+  const docs = freshDocs(props, refused, 0);
   let base = 0;
   const starts = lines.map((full, n) => {
     // The carriage return of a CRLF is part of the line break, not of the line: the scan reads the
@@ -607,13 +625,13 @@ function commentStarts(lines: readonly string[]): { starts: number[]; props: Map
     const rest = lead ? line.slice(1) : line;
     const text = lead && rest.startsWith("﻿") ? ` ${rest.slice(1)}` : rest;
     // A directive line is no text to scan: the whole line is blanked.
-    const at = readDocumentLine(docs, st, text) ? 0 : scanLine(st, docs, text, base + (lead ? 1 : 0));
+    const at = readDocumentLine(docs, st, text, base) ? 0 : scanLine(st, docs, text, base + (lead ? 1 : 0));
     base += full.length + 1;
     const end = lead ? at + 1 : at;
     return end >= line.length ? full.length : end;
   });
-  endDocument(docs, "start");
-  return { starts, props };
+  endDocument(docs, "start", base);
+  return { starts, props, refused };
 }
 
 function scanLine(st: Carry, docs: Docs, line: string, base: number): number {
@@ -818,8 +836,11 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number): number {
 // text shows can be in a comment once the document is decoded, for example a folded line after a
 // comment line.
 function scan(text: string, embedded: readonly EmbeddedPath[]) {
-  const held = embeddedTexts(text, embedded);
-  const outer = tags(text).filter((t) => !held.some((e) => t.index >= e.spot.start && t.index < e.spot.end));
+  const { found, refused } = readTags(text);
+  // A document that go-yaml refuses lists nothing, and that includes the embedded documents it holds
+  // (ginsys/bronzeward#633). A held document is in a refused one if its scalar starts inside the span.
+  const held = embeddedTexts(text, embedded).filter((e) => !refused.some((r) => e.spot.start >= r.start && e.spot.start < r.end));
+  const outer = found.filter((t) => !held.some((e) => t.index >= e.spot.start && t.index < e.spot.end));
   return { outer, held };
 }
 
