@@ -647,8 +647,9 @@ func TestSecurityPreflightHasItsOwnBound(t *testing.T) {
 }
 
 // TestSignInRefusedWhenKeychainFailsAfterAnswering checks the path of a store that answers the
-// availability test and then fails: the sign-in is refused before the browser opens, naming the
-// locked keychain (login.go reads the store before the sign-in).
+// availability test and then fails: the explicit sign-in (SignIn, as bronzewardctl login calls it)
+// is refused before the browser opens, naming the locked keychain. The issuer of the context does
+// not exist, so a sign-in that started would fail with another error.
 func TestSignInRefusedWhenKeychainFailsAfterAnswering(t *testing.T) {
 	calls := fakeSecurity(t, func(ctx context.Context, c toolCall) ([]byte, error) {
 		return []byte("User interaction is not allowed.\n"), errors.New("exit status 36")
@@ -659,8 +660,16 @@ func TestSignInRefusedWhenKeychainFailsAfterAnswering(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
 	x := Context{Name: "store", Server: "https://bw.example.invalid", Credential: "oidc",
 		OIDC: &OIDC{Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli"}}
-	if _, err := openSignIn(&x, true, io.Discard); err == nil || !strings.Contains(err.Error(), "the system credential store is locked") {
-		t.Errorf("a command on a locked keychain: %v, want it refused, naming the locked store", err)
+	var prompts strings.Builder
+	tokens, _, err := SignIn(&x, false, &prompts)
+	if err == nil || !strings.Contains(err.Error(), "the system credential store is locked") {
+		t.Errorf("a sign-in on a locked keychain: %v, want it refused, naming the locked store", err)
+	}
+	if tokens != nil {
+		t.Error("a sign-in on a locked keychain returned tokens, want none")
+	}
+	if prompts.Len() != 0 {
+		t.Errorf("the sign-in started and printed %q, want it refused before it starts", prompts.String())
 	}
 	if n := len(calls()); n == 0 {
 		t.Error("the keychain was never asked")
