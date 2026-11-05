@@ -190,15 +190,16 @@ func (s *store) clear(match func(*Tokens) bool) (*Tokens, error) {
 	}
 	defer unlock()
 	t, err := s.readHeld()
+	refused, unreadable := errors.Is(err, errNameRefused), errors.Is(err, errEntryUnreadable)
 	switch {
-	case errors.Is(err, errNameRefused):
+	case (refused || unreadable) && match != nil:
+		// An entry that cannot be read cannot be attributed to the identity that asked, so it stays,
+		// and the caller is told so, with no readable identity (a name refused holds none either).
+		return &Tokens{}, ErrOtherSignIn
+	case refused:
 		return nil, nil // no sign-in was ever kept under such a name
-	case errors.Is(err, errEntryUnreadable):
-		// Nothing to revoke. Without a match the entry goes, so that login can keep a new one. With
-		// one, the entry cannot be attributed to the identity that asked, so it stays.
-		if match != nil {
-			return nil, nil
-		}
+	case unreadable:
+		// Nothing to revoke. The entry goes, so that login can keep a new one.
 		return nil, keyringDelete(s.x.Name)
 	}
 	if err != nil && !errors.Is(err, ErrNotTokenFile) || t == nil {

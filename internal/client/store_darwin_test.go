@@ -428,8 +428,13 @@ func TestRefusedNameAndUnreadableEntryDoNotBlockRemoval(t *testing.T) {
 }
 
 // TestMatchedClearKeepsWhatItCannotAttribute checks that a removal that applies only to one
-// identity (the revocation of an access token, credentials.go) leaves an entry it cannot read.
+// identity (the revocation of an access token, credentials.go) leaves an entry it cannot read, and
+// that the answer to the operator says the entry is kept, not cleared. It also checks that the
+// claims of an empty token read as no identity, which the message relies on.
 func TestMatchedClearKeepsWhatItCannotAttribute(t *testing.T) {
+	if ReadClaims("") != nil {
+		t.Fatal("ReadClaims of an empty token is not nil; the kept-entry message needs it to be")
+	}
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", home)
@@ -447,11 +452,41 @@ func TestMatchedClearKeepsWhatItCannotAttribute(t *testing.T) {
 	x := Context{Name: "unreadable", Server: "https://bw.example.invalid", Credential: "oidc",
 		OIDC: &OIDC{Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli"}}
 	s := openStore(&x, true)
-	if tk, err := s.clear(func(*Tokens) bool { return true }); tk != nil || err != nil || deleted {
-		t.Errorf("a matched clear of an entry it cannot read: %v, %v, removed %v; want nothing returned and the entry kept", tk, err, deleted)
+	if _, err := s.clear(func(*Tokens) bool { return true }); !errors.Is(err, ErrOtherSignIn) || deleted {
+		t.Errorf("a matched clear of an entry it cannot read: %v, removed %v; want ErrOtherSignIn and the entry kept", err, deleted)
+	}
+	// An identity-revoked answer, as the client meets it while that entry is unreadable.
+	c := &Client{Context: &x, Notices: io.Discard, token: "BWSYNTH-at", signIn: &signIn{store: s}}
+	p := &Problem{Status: 403, Doc: map[string]any{"type": problemPrefix + "identity-revoked"}}
+	c.signedIn(p)
+	if !strings.Contains(p.Cleared, "is kept") || strings.Contains(p.Cleared, "was cleared") || deleted {
+		t.Errorf("the answer for a kept entry: %q, removed %v; want it to say the sign-in is kept", p.Cleared, deleted)
 	}
 	if tk, err := s.clear(nil); tk != nil || err != nil || !deleted {
 		t.Errorf("an unmatched clear of the same entry: %v, %v, removed %v; want it removed", tk, err, deleted)
+	}
+}
+
+// TestMatchedClearOfARefusedNameIsKeptToo checks the same answer for a name the store refuses:
+// nothing is deleted and the operator is not told that a sign-in was cleared.
+func TestMatchedClearOfARefusedNameIsKeptToo(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", home)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
+	calls := fakeSecurity(t, unlocked)
+	x := Context{Name: "it's", Server: "https://bw.example.invalid", Credential: "oidc",
+		OIDC: &OIDC{Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli"}}
+	c := &Client{Context: &x, Notices: io.Discard, token: "BWSYNTH-at", signIn: &signIn{store: openStore(&x, true)}}
+	p := &Problem{Status: 403, Doc: map[string]any{"type": problemPrefix + "identity-revoked"}}
+	c.signedIn(p)
+	if !strings.Contains(p.Cleared, "is kept") || strings.Contains(p.Cleared, "was cleared") {
+		t.Errorf("the answer for a refused name: %q; want it to say the sign-in is kept", p.Cleared)
+	}
+	for _, call := range calls() {
+		if call.args[0] == "delete-generic-password" {
+			t.Errorf("a delete ran for a refused name: %v", call.args)
+		}
 	}
 }
 
