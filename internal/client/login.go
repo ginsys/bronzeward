@@ -325,7 +325,8 @@ func SignIn(x *Context, device bool, prompts io.Writer) (*Tokens, string, error)
 			return nil, "", x.fail(err)
 		}
 	case s.none == "":
-		if _, err := s.read(); err != nil && !errors.Is(err, ErrNotTokenFile) {
+		// An entry that cannot be read is no reason to refuse: the sign-in replaces it.
+		if _, err := s.read(); err != nil && !errors.Is(err, ErrNotTokenFile) && !errors.Is(err, errEntryUnreadable) {
 			return nil, "", x.fail(fmt.Errorf("the system credential store failed, so a sign-in could not be kept there: %w", err))
 		}
 	}

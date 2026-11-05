@@ -121,7 +121,9 @@ func (s *store) lock() (func(), error) {
 		if s.noPrompt {
 			get = keyringGetHeld
 		}
-		if _, _, err := get(s.x.Name); err != nil {
+		// A refused name or an unreadable entry does not stop the lock: login, logout and context remove
+		// must go on past them, and every read that needs the entry reports them itself.
+		if _, _, err := get(s.x.Name); err != nil && !errors.Is(err, errNameRefused) && !errors.Is(err, errEntryUnreadable) {
 			return nil, err
 		}
 	}
@@ -144,6 +146,14 @@ func stateDir() (string, error) {
 
 // errStoreLocked: the credential store is locked, and is not unlocked under the renewal lock.
 var errStoreLocked = errors.New("the system credential store is locked; unlock it, then run the command again")
+
+// The two refusals a platform store raises for one entry. A name refused never had a sign-in kept
+// under it, and an entry that is unreadable is a sign-in to replace or remove, not to read: login,
+// logout and context remove go on past both (the Keychain store raises them, store_darwin.go).
+var (
+	errNameRefused     = errors.New("the credential store refuses the context's name")
+	errEntryUnreadable = errors.New("the credential store holds an entry this program cannot read")
+)
 
 func (s *store) save(t *Tokens) error {
 	switch {
@@ -175,6 +185,13 @@ func (s *store) clear(match func(*Tokens) bool) (*Tokens, error) {
 	}
 	defer unlock()
 	t, err := s.readHeld()
+	switch {
+	case errors.Is(err, errNameRefused):
+		return nil, nil // no sign-in was ever kept under such a name
+	case errors.Is(err, errEntryUnreadable):
+		// Nothing to revoke; the entry goes, so that login can keep a new one.
+		return nil, keyringDelete(s.x.Name)
+	}
 	if err != nil && !errors.Is(err, ErrNotTokenFile) || t == nil {
 		return nil, err
 	}
@@ -268,7 +285,14 @@ func ClearStored(x *Context, noInput bool) (string, error) {
 	}
 	// lock read the store before taking the lock, bounded and, unless noInput, with its unlock
 	// prompt; this read under the lock refuses a store locked again since, without a prompt.
-	if _, found, err := keyringGetHeld(x.Name); err != nil || !found {
+	_, found, err := keyringGetHeld(x.Name)
+	switch {
+	case errors.Is(err, errNameRefused):
+		return "", nil // no sign-in was ever kept under such a name
+	case errors.Is(err, errEntryUnreadable):
+		found, err = true, nil // it cannot be read, but it is removed
+	}
+	if err != nil || !found {
 		if err != nil {
 			err = failed(err)
 		}

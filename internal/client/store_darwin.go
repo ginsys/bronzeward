@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode"
@@ -50,8 +51,19 @@ var (
 // errStoreSlow: the security tool did not answer within securityBound, before any write was sent.
 var errStoreSlow = errors.New("the system credential store did not answer within a minute; nothing was written or removed")
 
-// errEntryUnreadable: the stored entry carries a go-keyring prefix and does not decode.
-var errEntryUnreadable = errors.New("the sign-in kept in the macOS Keychain is not in a form this program reads; run login again")
+// kindError is an error with its own text that errors.Is also matches to its kind (store.go).
+type kindError struct {
+	error
+	kind error
+}
+
+func (r kindError) Is(target error) bool { return target == r.kind }
+
+func (r kindError) Unwrap() error { return r.error }
+
+// errEntryUnreadableText is the error for a stored entry that carries a go-keyring prefix and does
+// not decode. It matches errEntryUnreadable (store.go), so login and logout replace or remove it.
+var errEntryUnreadableText = kindError{errors.New("the sign-in kept in the macOS Keychain is not in a form this program reads; run login again"), errEntryUnreadable}
 
 // errEntryTooBig: the sign-in does not fit one security -i command.
 var errEntryTooBig = fmt.Errorf("the sign-in is larger than the macOS security tool takes in one command (%d bytes, about 2.9 KB of sign-in); nothing was written", securityLine)
@@ -121,13 +133,20 @@ var securityRun = func(ctx context.Context, stdin string, args ...string) ([]byt
 	var out, errOut bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errOut
 	err := cmd.Run()
-	if err == nil {
-		return append(out.Bytes(), errOut.Bytes()...), nil
+	return securityOutcome(ctx, cmd.ProcessState, out.Bytes(), errOut.Bytes(), err)
+}
+
+// securityOutcome is the result of one run, given the state of the tool's process. The exit status
+// of the tool decides: Run returns the context's error even for a tool that exited 0, when the
+// deadline came while the tool was being reaped, and a write that was carried out is no timeout.
+func securityOutcome(ctx context.Context, state *os.ProcessState, out, errOut []byte, err error) ([]byte, error) {
+	switch {
+	case state != nil && state.Success():
+		return append(out, errOut...), nil
+	case ctx.Err() != nil:
+		return errOut, context.DeadlineExceeded
 	}
-	if ctx.Err() != nil {
-		return errOut.Bytes(), context.DeadlineExceeded
-	}
-	return errOut.Bytes(), err
+	return errOut, err
 }
 
 // securityFailed maps a failed call to the store's errors: the tool's own words decide a missing
@@ -147,50 +166,88 @@ func securityFailed(out []byte, err error) error {
 	return fmt.Errorf("the macOS security tool failed: %v: %s", err, printable(text))
 }
 
-// securityUnlocked refuses a locked default keychain without showing its password dialog, by
-// asking the tool about the keychain before the call that would prompt (client-contracts.md
-// section 9.2 item 3). A call that gets no answer is read as a locked keychain.
-func securityUnlocked(ctx context.Context) error {
-	out, err := securityRun(ctx, "", "show-keychain-info")
+// securityKeychain is the path of the user's default keychain. Every call that reads or changes
+// an entry names this keychain, and the question about a locked keychain asks about it: the
+// keychain asked about is the one the call touches, so no other keychain of the search list can
+// show a password dialog under the renewal lock (client-contracts.md section 9.2 item 3).
+func securityKeychain(ctx context.Context) (string, error) {
+	out, err := securityRun(ctx, "", "default-keychain", "-d", "user")
+	if err = securityFailed(out, err); errors.Is(err, keyring.ErrNotFound) {
+		return "", fmt.Errorf("the macOS security tool found no default keychain: %s", printable(strings.TrimSpace(string(out))))
+	} else if err != nil {
+		return "", err
+	}
+	// The tool prints the path in double quotes. The path goes into a security -i line, so the
+	// characters that the tool reads as syntax are refused, as in a context name.
+	path := strings.TrimSpace(strings.Trim(strings.TrimSpace(string(out)), `"`))
+	if !filepath.IsAbs(path) || strings.ContainsAny(path, `\'"`) || strings.IndexFunc(path, unicode.IsControl) >= 0 {
+		return "", fmt.Errorf("the macOS security tool gave a default keychain this program cannot name: %s", printable(path))
+	}
+	return path, nil
+}
+
+// securityUnlocked refuses a locked keychain without showing its password dialog, by asking the
+// tool about that keychain before the call that would prompt. A call that gets no answer is read
+// as a locked keychain.
+func securityUnlocked(ctx context.Context, keychain string) error {
+	out, err := securityRun(ctx, "", "show-keychain-info", keychain)
 	if err = securityFailed(out, err); errors.Is(err, errStoreSlow) {
 		return errStoreLocked
 	} else if errors.Is(err, keyring.ErrNotFound) {
-		return fmt.Errorf("the macOS security tool found no default keychain: %s", printable(strings.TrimSpace(string(out))))
+		return fmt.Errorf("the macOS security tool found no keychain %s: %s", printable(keychain), printable(strings.TrimSpace(string(out))))
 	}
 	return err
 }
 
-// securityPreflight is securityUnlocked on a deadline of its own, securityHeldBound, so that a write
+// securityReady is the question about the default keychain: its path and a refusal when it is locked
+// or gives no answer. It has the deadline of ctx.
+func securityReady(ctx context.Context) (string, error) {
+	keychain, err := securityKeychain(ctx)
+	if errors.Is(err, errStoreSlow) {
+		return "", errStoreLocked
+	} else if err != nil {
+		return "", err
+	}
+	return keychain, securityUnlocked(ctx, keychain)
+}
+
+// securityPreflight is securityReady on a deadline of its own, securityHeldBound, inside ctx: a write
 // or a removal refuses a keychain that gives no answer after 15 seconds, not after securityBound.
-func securityPreflight() error {
-	ctx, cancel := context.WithTimeout(context.Background(), securityHeldBound)
+// The call that follows has what is left of ctx, so both together end within securityBound.
+func securityPreflight(ctx context.Context) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, securityHeldBound)
 	defer cancel()
-	return securityUnlocked(ctx)
+	return securityReady(ctx)
 }
 
 // securityGet reads through the tool with the password dialog allowed, bounded by securityBound.
 func securityGet(service, user string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), securityBound)
 	defer cancel()
-	return securityFind(ctx, service, user)
+	keychain, err := securityKeychain(ctx)
+	if err != nil {
+		return "", err
+	}
+	return securityFind(ctx, keychain, service, user)
 }
 
 // securityGetHeld is securityGet under the renewal lock: a locked keychain is refused.
 func securityGetHeld(service, user string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), securityHeldBound)
 	defer cancel()
-	if err := securityUnlocked(ctx); err != nil {
+	keychain, err := securityReady(ctx)
+	if err != nil {
 		return "", err
 	}
-	v, err := securityFind(ctx, service, user)
+	v, err := securityFind(ctx, keychain, service, user)
 	if errors.Is(err, errStoreSlow) {
 		return "", errStoreLocked
 	}
 	return v, err
 }
 
-func securityFind(ctx context.Context, service, user string) (string, error) {
-	out, err := securityRun(ctx, "", "find-generic-password", "-s", service, "-a", user, "-w")
+func securityFind(ctx context.Context, keychain, service, user string) (string, error) {
+	out, err := securityRun(ctx, "", "find-generic-password", "-s", service, "-a", user, "-w", keychain)
 	if err = securityFailed(out, err); err != nil {
 		return "", err
 	}
@@ -201,13 +258,13 @@ func securityFind(ctx context.Context, service, user string) (string, error) {
 	case strings.HasPrefix(text, prefixBase64):
 		b, err := base64.StdEncoding.DecodeString(text[len(prefixBase64):])
 		if err != nil {
-			return "", errEntryUnreadable
+			return "", errEntryUnreadableText
 		}
 		return string(b), nil
 	case strings.HasPrefix(text, prefixHex):
 		b, err := hex.DecodeString(text[len(prefixHex):])
 		if err != nil {
-			return "", errEntryUnreadable
+			return "", errEntryUnreadableText
 		}
 		return string(b), nil
 	}
@@ -223,18 +280,23 @@ func securityQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'
 // read refuses too, so that login stops before its browser opens and not after.
 func nameRefused(user string) error {
 	if strings.ContainsAny(user, `\'"`) || strings.IndexFunc(user, unicode.IsControl) >= 0 {
-		return fmt.Errorf("the macOS Keychain store cannot keep the sign-in of the context \"%s\": its name holds a backslash, a quote or a control character, which the security tool reads as syntax. Remove the context and add it again under a name without them", quoted(user))
+		return kindError{fmt.Errorf("the macOS Keychain store cannot keep the sign-in of the context \"%s\": its name holds a backslash, a quote or a control character, which the security tool reads as syntax. Remove the context and add it again under a name without them", quoted(user)), errNameRefused}
 	}
 	return nil
 }
 
-// securityCommand is the add-generic-password line for security -i, or errEntryTooBig.
-func securityCommand(service, user, secret string) (string, error) {
+// securityCommand is the add-generic-password line for security -i, naming the keychain (none when
+// keychain is empty), or errEntryTooBig.
+func securityCommand(service, user, secret, keychain string) (string, error) {
 	if err := nameRefused(user); err != nil {
 		return "", err
 	}
-	line := fmt.Sprintf("add-generic-password -U -s %s -a %s -w %s\n", securityQuote(service), securityQuote(user),
+	line := fmt.Sprintf("add-generic-password -U -s %s -a %s -w %s", securityQuote(service), securityQuote(user),
 		securityQuote(prefixBase64+base64.StdEncoding.EncodeToString([]byte(secret))))
+	if keychain != "" {
+		line += " " + securityQuote(keychain)
+	}
+	line += "\n"
 	if len(line) > securityLine {
 		return "", errEntryTooBig
 	}
@@ -242,15 +304,20 @@ func securityCommand(service, user, secret string) (string, error) {
 }
 
 func securitySet(service, user, secret string) error {
-	line, err := securityCommand(service, user, secret)
-	if err != nil {
-		return err
-	}
-	if err := securityPreflight(); err != nil {
+	// A name or an entry the tool cannot take is refused before the tool runs at all.
+	if _, err := securityCommand(service, user, secret, ""); err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), securityBound)
 	defer cancel()
+	keychain, err := securityPreflight(ctx)
+	if err != nil {
+		return err
+	}
+	line, err := securityCommand(service, user, secret, keychain)
+	if err != nil {
+		return err
+	}
 	out, err := securityRun(ctx, line, "-i")
 	if err == nil && bytes.Contains(out, []byte("security:")) {
 		// security -i reports a failed command on its output and may still exit 0.
@@ -260,12 +327,13 @@ func securitySet(service, user, secret string) error {
 }
 
 func securityDelete(service, user string) error {
-	if err := securityPreflight(); err != nil {
-		return err
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), securityBound)
 	defer cancel()
-	out, err := securityRun(ctx, "", "delete-generic-password", "-s", service, "-a", user)
+	keychain, err := securityPreflight(ctx)
+	if err != nil {
+		return err
+	}
+	out, err := securityRun(ctx, "", "delete-generic-password", "-s", service, "-a", user, keychain)
 	return unsettled(securityFailed(out, err), "removed")
 }
 
