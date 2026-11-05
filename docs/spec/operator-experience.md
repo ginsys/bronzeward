@@ -742,6 +742,7 @@ This holds for the resource of a Ctrl-C too, when the watch read one: it is prin
 If the resource cannot be written after Ctrl-C, one note goes to standard error and the exit code stays 130.
 If the lines of the watch could not be written before Ctrl-C, the stop lines and the follow line go to
 standard error, last, and the exit code stays 130.
+A stream that takes no write blocks only its own lines. If standard error is blocked and the stop lines go to standard output, the stop lines print and the exit is 130 after the grace. If the stream of the stop lines is the blocked one, the stop lines wait on it. That includes standard error with `-o json` or `-o yaml`, where the lines and the notices share one stream. A second Ctrl-C ends the command at once.
 A closed standard output ends the program by SIGPIPE, which Go raises for a write to a closed pipe on
 standard output. This holds for every command, in table and in `-o json` mode, and it gives no note and
 no exit code. Any other failed write to standard output exits 6.

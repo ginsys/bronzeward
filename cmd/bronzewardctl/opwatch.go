@@ -21,91 +21,111 @@ import (
 // read before the process stops waiting; tests shorten it.
 var interruptGrace = 3 * time.Second
 
+// sink is one output stream of the watch and the lock that keeps the lines written to it whole and in
+// order. A write that waits on a terminal holds only its own sink.
+type sink struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
 // watchOut is what operation watch prints: a line from the watch goes through show, and finish prints
-// the last lines. Once finish ran, show prints nothing, so a watch still running when the process
-// stops waiting for it adds no line after the stop line.
+// the last lines, both on the main sink. Once finish ran, show prints nothing, so a watch still running
+// when the process stops waiting for it adds no line after the stop line.
+//
+// The stop barrier is the flag stopped, which no lock guards: finish sets it before it takes the
+// main sink, so a write that takes a sink afterwards prints nothing, and a write that took it before
+// is finished first, on that sink only. A write blocked on another sink (standard error blocked while
+// the stop lines go to standard output) neither holds up finish nor the check of the watch's failure.
 type watchOut struct {
-	mu      sync.Mutex
-	w       io.Writer
-	stopped bool
-	err     error // the first error writing a line, kept for the watch to report
+	main    *sink
+	stopped atomic.Bool
+	emu     sync.Mutex // guards err, and is never held across a write
+	err     error      // the first error writing a line, kept for the watch to report
 }
 
 func (o *watchOut) show(line string) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if !o.stopped {
-		o.print(line)
+	o.main.mu.Lock()
+	defer o.main.mu.Unlock()
+	if !o.stopped.Load() {
+		o.print(o.main, line)
 	}
 }
 
-// print writes one line and keeps the first failure: a watch whose output is lost must not end as if
-// it had shown the operation. The caller holds o.mu.
+// print writes one line to s and keeps the first failure: a watch whose output is lost must not end
+// as if it had shown the operation. The caller holds s.mu.
 //
 // The error is tagged outputFailed (exit 6). Standard output tags its own failures already; in -o json
 // and yaml the lines go to standard error, and they are still the output of the command.
-func (o *watchOut) print(line string) {
-	if _, err := fmt.Fprintln(o.w, line); err != nil && o.err == nil {
-		var tagged outputFailed
-		if !errors.As(err, &tagged) {
-			err = outputFailed{err}
+func (o *watchOut) print(s *sink, line string) {
+	if _, err := fmt.Fprintln(s.w, line); err != nil {
+		o.emu.Lock()
+		defer o.emu.Unlock()
+		if o.err == nil {
+			var tagged outputFailed
+			if !errors.As(err, &tagged) {
+				err = outputFailed{err}
+			}
+			o.err = err
 		}
-		o.err = err
 	}
 }
 
-// failure is the first error writing the watch's output, nil when every line was written.
+// failure is the first error writing the watch's output, nil when every line was written. It takes no
+// sink, so it returns while a write waits on a blocked terminal.
 func (o *watchOut) failure() error {
-	o.mu.Lock()
-	defer o.mu.Unlock()
+	o.emu.Lock()
+	defer o.emu.Unlock()
 	return o.err
 }
 
-// gate wraps a writer the watch's client writes to (its notices, its -v output), so that once finish
-// ran it prints nothing either.
-func (o *watchOut) gate(w io.Writer) io.Writer {
-	if w == nil {
+// gate wraps the sink a writer of the watch's client uses (its notices, its -v output), so that once
+// finish ran it prints nothing either. A nil sink stays a nil writer.
+func (o *watchOut) gate(s *sink) io.Writer {
+	if s == nil {
 		return nil
 	}
-	return gated{o, w}
+	return gated{o, s}
 }
 
 type gated struct {
 	o *watchOut
-	w io.Writer
+	s *sink
 }
 
 func (g gated) Write(p []byte) (int, error) {
-	g.o.mu.Lock()
-	defer g.o.mu.Unlock()
-	if g.o.stopped {
+	g.s.mu.Lock()
+	defer g.s.mu.Unlock()
+	if g.o.stopped.Load() {
 		return len(p), nil
 	}
-	return g.w.Write(p)
+	return g.s.w.Write(p)
 }
 
+// finish prints the last lines on the main sink. When that stream is blocked, finish waits on it: the
+// stop lines and the outcome are the command's output, and no timeout drops them. A second Ctrl-C ends
+// the command at once (operator-experience.md section 5.7).
 func (o *watchOut) finish(lines ...string) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.stopped = true
+	o.stopped.Store(true)
+	o.main.mu.Lock()
+	defer o.main.mu.Unlock()
 	for _, l := range lines {
-		o.print(l)
+		o.print(o.main, l)
 	}
 }
 
 // stop is finish for the first Ctrl-C: the user ended the watch, so its lines are printed last and
 // the exit stays 130. When the output of the watch failed already, they go to alt (standard error)
-// instead of to the writer that refused the lines before, and a failure to print them changes nothing.
-func (o *watchOut) stop(alt io.Writer, lines ...string) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.stopped = true
-	w := o.w
-	if o.err != nil {
-		w = alt
+// instead of to the sink that refused the lines before, and a failure to print them changes nothing.
+func (o *watchOut) stop(alt *sink, lines ...string) {
+	o.stopped.Store(true)
+	s := o.main
+	if o.failure() != nil {
+		s = alt
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for _, l := range lines {
-		_, _ = fmt.Fprintln(w, l)
+		_, _ = fmt.Fprintln(s.w, l)
 	}
 }
 
@@ -142,11 +162,19 @@ func (e *env) operationWatch(args []string) (err error) {
 		return usageError{errors.New("--timeout: give a positive duration, such as 30m")}
 	}
 	id := pos[0]
-	w := e.out // -o json and yaml keep standard output for the operation resource
-	if e.output != "table" {
-		w = e.err
+	// One sink for standard error, which the client's notices and -v output use, and in -o json and yaml
+	// the lines of the watch too, so that lines and notices never interleave. In table mode the lines and
+	// the stop lines go to a sink of standard output, so a blocked standard error cannot hold them.
+	errSink := &sink{w: e.err}
+	mainSink := errSink // -o json and yaml keep standard output for the operation resource
+	if e.output == "table" {
+		mainSink = &sink{w: e.out}
 	}
-	out := &watchOut{w: w}
+	var verbose *sink
+	if e.verboseOut() != nil {
+		verbose = errSink
+	}
+	out := &watchOut{main: mainSink}
 	// c is set from the reader's result, and stays nil when the client was not opened (its opening failed
 	// or was abandoned). A watch left running when the process stops waiting for it still uses c, so c is
 	// not saved then.
@@ -177,7 +205,7 @@ func (e *env) operationWatch(args []string) (err error) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		oc, err := e.openTo(out.gate(e.err), out.gate(e.verboseOut()))
+		oc, err := e.openTo(out.gate(errSink), out.gate(verbose))
 		if err != nil {
 			done <- result{openErr: err}
 			return
@@ -236,7 +264,7 @@ func (e *env) operationWatch(args []string) (err error) {
 	follow := sf("Follow it again with: bronzewardctl operation watch %s", client.ShellWord(id))
 	if gaveUp {
 		abandoned = true
-		out.stop(e.err, sf("Stopped watching at your request. Operation %s goes on; the state it has now was not read.", id), follow)
+		out.stop(errSink, sf("Stopped watching at your request. Operation %s goes on; the state it has now was not read.", id), follow)
 		return interrupted{ef("stopped watching operation %s", id)}
 	}
 	c = res.c
@@ -285,7 +313,7 @@ func (e *env) operationWatch(args []string) (err error) {
 			if serr := c.Save(); serr != nil {
 				fmt.Fprintf(e.err, "bronzewardctl: %s\n", client.Shown(serr))
 			}
-			out.stop(e.err, sf("Stopped watching at your request. Operation %s is still %s, as the server last read it; it goes on.", id, o.State), follow)
+			out.stop(errSink, sf("Stopped watching at your request. Operation %s is still %s, as the server last read it; it goes on.", id, o.State), follow)
 			return interrupted{ef("stopped watching operation %s, which is still %s", id, o.State)}
 		}
 		lines = append([]string{sf("Still %s after --timeout %s.", o.State, timeout)}, lines...)
