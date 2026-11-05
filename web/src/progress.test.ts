@@ -521,6 +521,68 @@ describe("the operation progress reader (§8.6)", () => {
     expect(r.log).toEqual([]);
   });
 
+  // Findings of the third review of the reader (R3-n).
+
+  test("R3-1: an empty drain under another epoch than the terminal read clears what was shown and does not end the watch", async () => {
+    const s = server({
+      streams: [{ chunks: [frame(ev("e1:1"))] }, { chunks: [], epoch: "e2" }],
+      states: ["failed@e1", "succeeded@e2"],
+      pages: [],
+      pagesEpoch: "e2",
+    });
+    const r = recorder();
+    // Another response records the restore after the operation read and before the drain's read, and the drain's list is empty.
+    const out = await watch(reader(s, eventsPath, "before"), OP, r.w, r.pace);
+    expect(out).toMatchObject({ kind: "ended", operation: { state: "succeeded" } });
+    expect(r.log).toEqual(["show e1:1", `clear: ${RESTORED}`]);
+    expect(r.sleeps).toEqual([1000]);
+  });
+
+  test("R3-1b: an empty drain under another epoch than the terminal read does not end the watch when nothing was shown", async () => {
+    const s = server({
+      streams: [{ chunks: [] }, { chunks: [], epoch: "e2" }],
+      states: ["failed@e1", "succeeded@e2"],
+      pages: [],
+      pagesEpoch: "e2",
+    });
+    const r = recorder();
+    const out = await watch(reader(s, eventsPath, "before"), OP, r.w, r.pace);
+    expect(out).toMatchObject({ kind: "ended", operation: { state: "succeeded" } });
+    expect(r.log).toEqual([]);
+    expect(r.sleeps).toEqual([1000]);
+  });
+
+  // The page leaves while the operation read is pending: the reader's read resolves after the abort.
+  const leavingAtRead = (s: ReturnType<typeof server>, abort: AbortController) => ({
+    read: ((path: string) => s.client.read(path)) as typeof s.client.read,
+    readWithEpoch: (async (path: string) => {
+      const out = await s.client.readWithEpoch(path);
+      if (operationPath(path)) abort.abort();
+      return out;
+    }) as typeof s.client.readWithEpoch,
+    open: (...a: Parameters<typeof s.client.open>) => s.client.open(...a),
+    get currentEpoch() { return s.client.currentEpoch; },
+    get writesEnded() { return s.client.writesEnded; },
+  });
+
+  test("R3-2: a running operation read that resolves after the watch was aborted does not ask until or end the watch", async () => {
+    const s = server({ streams: [{ chunks: [] }], states: ["running"] });
+    let asked = 0;
+    const r = recorder(() => { asked++; return true; });
+    expect(await watch(leavingAtRead(s, r.abort), OP, r.w, r.pace)).toEqual({ kind: "stopped" });
+    expect(asked).toBe(0);
+    expect(r.log).toEqual([]);
+  });
+
+  test("R3-2b: a terminal operation read that resolves after the watch was aborted sends no events request", async () => {
+    const s = server({ streams: [{ chunks: [] }], states: ["succeeded"], pages: [ev("e1:1", "succeeded")] });
+    const r = recorder();
+    expect(await watch(leavingAtRead(s, r.abort), OP, r.w, r.pace)).toEqual({ kind: "stopped" });
+    // The stream's own request is the only one to the events path.
+    expect(s.urls.filter((u) => u.startsWith(EVENTS))).toEqual([EVENTS]);
+    expect(r.log).toEqual([]);
+  });
+
   test("eventLine names the type, the generation and the code, and nothing else of the data", () => {
     expect(eventLine(ev("e1:1", "attempt", { generation: 3, code: "precondition-failed", secret: "SYNTH-do-not-show" }))).toBe("attempt (generation 3): precondition-failed");
     expect(eventLine(ev("e1:2", "paused"))).toBe("paused");

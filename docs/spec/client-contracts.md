@@ -896,7 +896,11 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
    once they are written, `internal/api/operations.go:233-234`,
    `internal/api/operations.go:270`). So on a terminal state the client drains the backlog
    first: it reads the JSON event pages to their end and shows every event after the last one it
-   showed, then ends the watch. Any other state, `unresolved` included, means the stream ended because the token expired or the
+   showed, then ends the watch. A drain whose pages name another epoch than the operation read,
+   an empty list included, clears what was shown and does not end the watch; the operation is
+   read again after the backoff. The web reader does this. The CLI compares only the epoch of the
+   last event shown, so it ends the watch on an empty list under another epoch
+   ([#640](https://github.com/ginsys/bronzeward/issues/640)). Any other state, `unresolved` included, means the stream ended because the token expired or the
    connection dropped: the client renews if needed and reconnects with `Last-Event-ID` and the
    renewed token, with backoff from 1 s to 30 s on repeated failures. An attempt that showed
    nothing is a failure. The delay starts again at 1 s after an attempt that showed an event, or
