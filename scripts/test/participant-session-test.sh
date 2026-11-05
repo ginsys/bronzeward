@@ -807,7 +807,7 @@ clean_case() {
   : >"$t/clean.log"
   # shellcheck disable=SC2016 # the inner shell's own text
   bash -c 'set -uo pipefail
-    log=$T/clean.log task=t4 bin=$T/cbin here=$T/cbin part=$T/part t9_reader="" t9_op="" BW_A=a BW_B=b BW_C=c
+    log=$T/clean.log task=t4 bin=$T/cbin here=$T/cbin part=$T/part t9_reader="" t9_watcher="" t9_op="" BW_A=a BW_B=b BW_C=c
     die() { echo "die: $*" >&2; exit 1; }
     setup() { :; }
     sql() { [ -z "${SQL_FAIL:-}" ]; }
