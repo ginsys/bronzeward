@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -23,33 +24,56 @@ import (
 	"github.com/ginsys/bronzeward/internal/client"
 )
 
-// TestWatchOutAfterFinish: once the stop line is printed, a line the watch still shows prints
-// nothing, so nothing follows the stop line.
-func TestWatchOutAfterFinish(t *testing.T) {
-	var b strings.Builder
-	out := &watchOut{w: &b}
-	out.show("one")
-	out.finish("stopped", "follow")
-	out.show("late")
-	if got, want := b.String(), "one\nstopped\nfollow\n"; got != want {
-		t.Errorf("printed %q, want %q", got, want)
-	}
+// blockedWriter is a terminal that does not take a write: the first write signals entered and waits
+// until release is closed.
+type blockedWriter struct {
+	entered, release chan struct{}
+	once             sync.Once
 }
 
-// TestWatchOutGate: what the watch's client writes (notices, -v output) goes through the same stop
-// barrier, so it prints nothing after the stop line; a nil writer stays nil.
-func TestWatchOutGate(t *testing.T) {
-	var b, side strings.Builder
-	out := &watchOut{w: &b}
-	g := out.gate(&side)
-	fmt.Fprint(g, "notice before\n")
-	out.finish("stopped")
-	fmt.Fprint(g, "notice after\n")
-	if got, want := side.String(), "notice before\n"; got != want {
-		t.Errorf("client wrote %q, want %q", got, want)
+func newBlockedWriter() *blockedWriter {
+	return &blockedWriter{entered: make(chan struct{}), release: make(chan struct{})}
+}
+
+func (w *blockedWriter) Write(p []byte) (int, error) {
+	w.once.Do(func() { close(w.entered) })
+	<-w.release
+	return len(p), nil
+}
+
+// TestOperationWatchInterruptStderrBlocked: standard error does not take a write (a terminal stopped
+// by flow control, a pipe nobody reads). The watch's client wrote a -v line to it and waits there.
+// The first Ctrl-C still prints the stop lines on standard output and exits 130 after the grace: a
+// blocked write on one stream does not hold the stop lines of the other. The server name is not
+// loopback, so the client names its proxy with -v in its first request (see TestVerboseProxyIsEscaped).
+func TestOperationWatchInterruptStderrBlocked(t *testing.T) {
+	automationContext(t, "https://bw.example.invalid")
+	guard := make(chan os.Signal, 1)
+	signal.Notify(guard, os.Interrupt) // a Ctrl-C sent too early cannot end the test binary
+	defer signal.Stop(guard)
+	grace := interruptGrace
+	interruptGrace = 100 * time.Millisecond
+	defer func() { interruptGrace = grace }()
+	errW := newBlockedWriter()
+	defer close(errW.release) // the abandoned watch ends with the test, whatever the outcome
+	var stdout bytes.Buffer
+	done := make(chan int, 1)
+	go func() { done <- run([]string{"-v", "operation", "watch", "op_BWSYNTH"}, &stdout, errW) }()
+	select {
+	case <-errW.entered: // the signal handler is set before the client opens
+	case <-time.After(5 * time.Second):
+		t.Fatal("no write to standard error within 5 s: the client wrote no -v line in its first request (assumption A1)")
 	}
-	if out.gate(nil) != nil {
-		t.Error("gate(nil) is not nil")
+	_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
+	select {
+	case code := <-done:
+		stop := "Stopped watching at your request. Operation op_BWSYNTH goes on; the state it has now was not read.\n"
+		follow := "Follow it again with: bronzewardctl operation watch 'op_BWSYNTH'\n"
+		if code != 130 || !strings.HasSuffix(stdout.String(), stop+follow) {
+			t.Errorf("exit %d, stdout %q; want 130 and the stop lines last on standard output", code, stdout.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the command did not return within 5 s of the first Ctrl-C: the stop lines wait on the blocked standard error")
 	}
 }
 
