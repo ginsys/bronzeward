@@ -61,12 +61,12 @@ func (w failsWith) Write([]byte) (int, error) { return 0, w.err }
 // binary starts itself as bronzewardctl (see TestMain), with standard output on a pipe nobody reads.
 func TestClosedPipeEndsBySIGPIPE(t *testing.T) {
 	for _, args := range []string{"context list", "context list -o json"} {
+		home := t.TempDir() // before the pipe: a fatal exit of TempDir must not leave the pipe open
 		pr, pw, err := os.Pipe()
 		if err != nil {
 			t.Fatal(err)
 		}
 		pr.Close() // the reader stopped reading
-		home := t.TempDir()
 		cmd := exec.Command(os.Args[0])
 		cmd.Env = []string{"BW_PIPE_HELPER=" + args, "HOME=" + home, "XDG_CONFIG_HOME=" + home, "PATH=" + os.Getenv("PATH")}
 		cmd.Stdout = pw // an *os.File is the process's descriptor 1, with no copy between
