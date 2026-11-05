@@ -302,8 +302,11 @@ Option C, the verbatim form alone, leaves the prefix split and the percent escap
 the six separate fixes of #598 went.
 
 The editor accepts `%YAML 1.1` only, as the server's parser does. A document lists nothing when the
-parser refuses it. The parser refuses a directive line it cannot read, a `%YAML` line or a `%TAG`
-handle given twice, a directive line or a `---` or `...` marker inside an open flow collection, and
+parser refuses it, except in the shapes that #620 and #632 track. In the shapes of #620 the editor
+still lists a name: a node with two tags, an indented `%` line after a quoted scalar, and a `---` or
+`...` marker inside a quoted scalar. In the shapes of #632 it lists a name when a directive line ends
+a document before an indented continuation line, and when a flow plain scalar ends at `?`. The
+parser refuses a directive line it cannot read, a `%YAML` line or a `%TAG` handle given twice, a directive line or a `---` or `...` marker inside an open flow collection, and
 directives with no `---` after them. A directive line in the first column after block content ends
 the document and opens the directives of the next one. The parser also refuses content after `...`
 that has no `---`, which includes text on the `...` line itself, a handle that the document does not declare, a bad percent escape, and a tag that
