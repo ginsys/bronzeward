@@ -155,7 +155,9 @@ function Progress({ b, again }: { b: Ingestion; again: () => void }) {
       signal: abort.signal,
     }).then(async (r) => {
       if (r.kind === "stopped" || abort.signal.aborted) return;
-      const text = r.kind === "failed" ? shown.current(r.res) : await ended(client, latest.current, r.operation, last, Date.now(), client.currentEpoch);
+      // The ETag is kept under the epoch of the operation read the watch ended on, not under the client's
+      // epoch now, which another response can have moved since (§8.5).
+      const text = r.kind === "failed" ? shown.current(r.res) : await ended(client, latest.current, r.operation, last, Date.now(), r.epoch);
       if (!abort.signal.aborted) {
         setEnd(text);
         again();
