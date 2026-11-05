@@ -146,7 +146,8 @@ exit codes: 0 success; 1 refused or failed; 2 usage error, refused repeat or app
 confirmed; 3 outcome unknown, or
 an import's lease lapsed while its operation runs;
 4 a waited-for operation ended failed, rejected or cancelled; 5 operation watch's --timeout
-ended with the operation not ended; 130 operation watch stopped by Ctrl-C`
+ended with the operation not ended; 6 the output cannot be written (a full disk, say), unless
+a code above applies or the server refused the request (1); 130 operation watch stopped by Ctrl-C`
 
 type usageError struct{ error }
 
@@ -246,6 +247,8 @@ func report(err error, stdout, stderr io.Writer) int {
 	var signalled endedBySignal
 	var waiting notTerminal
 	var stopped interrupted
+	var problem *client.Problem
+	var lost outputFailed
 	switch {
 	case err == nil:
 		return 0
@@ -275,6 +278,11 @@ func report(err error, stdout, stderr io.Writer) int {
 		return 5
 	case errors.As(err, &refused), errors.As(err, &declined):
 		return 2
+	// The server's own answer says more than a lost report, so a refusal keeps 1 beside a failed write.
+	case errors.As(err, &problem):
+		return 1
+	case errors.As(err, &lost):
+		return 6
 	}
 	return 1
 }

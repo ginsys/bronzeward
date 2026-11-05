@@ -323,7 +323,11 @@ Global: --context, -o table|json|yaml, --no-input, --no-wait, --idempotency-key,
   unknown (ambiguous response; the command prints its idempotency key and what to read before
   deciding, [§8](#8-states-every-view-must-handle));
   4 a waited-for operation ended `failed`, `rejected` or `cancelled`; 5 a waited-for operation
-  not terminal at the end of the wait (`--timeout`); 130 `operation watch` stopped by Ctrl-C.
+  not terminal at the end of the wait (`--timeout`); 6 the output of the command cannot be written (a
+  full disk, say); 130 `operation watch` stopped by Ctrl-C. Code 6 takes the place of 0 and of the
+  plain 1 that a failed write gave. A more specific code wins: 2, 3, 4, 5 and 130 stay, and so does the
+  1 of a refusal by the server. The write error is printed beside them. A closed pipe has no code
+  (see [§5.7](#57-operation-tracking)).
 - `-o json` prints the API resource with the same members and values, so scripts never depend on
   table layout. DEL, C1 and bidirectional control characters are written as `\uNNNN`
   ([client contracts §6](client-contracts.md#6-tls-trust) item 8). The
@@ -722,11 +726,12 @@ the cause (for a publish or ingest operation, the problem that ended it: its tit
 records no cause, so the line takes it from the event that records its end. Ctrl-C ends the watch with
 exit 130 and stops only the watcher. The watch waits up to 3 seconds for the operation's state,
 then says that the operation goes on, and names the state if it read one. If a line of the table or
-event output cannot be written, a running watch stops reading and exits 1 with the write error and the
+event output cannot be written, a running watch stops reading and exits 6 with the write error and the
 command that follows the operation; if an operation read gave nothing (the first read included, and the server read before it), the state is
 unknown and the exit is the read's own (3 for an answer that cannot be read), with the write error beside it; after an end the write error, and the error of writing the
 resource with `-o json` or `-o yaml`, is printed beside the outcome and the exit code of the outcome
-stays (0 becomes 1). A failure to keep the client's state after Ctrl-C is printed before the stop
+stays (0 becomes 6). If the server refused a request of the watch, its exit 1 stays with the write error
+beside it. A failure to keep the client's state after Ctrl-C is printed before the stop
 lines, so the follow line stays last, and the exit is 130. `operation show` prints the same outcome lines without the server's time. For a cancelled operation
 it reads the event that records the end once to take the cause, and keeps it only when the event is of the
 installation epoch in which the operation was read (the answer's `Bronzeward-Epoch`, not the epoch the
@@ -735,7 +740,11 @@ With `-o json` or `-o yaml`, the event lines go to standard error and the operat
 standard output: the one read that the outcome line and the exit code come from, as the server sent it.
 This holds for the resource of a Ctrl-C too, when the watch read one: it is printed before the exit.
 If the resource cannot be written after Ctrl-C, one note goes to standard error and the exit code stays 130.
-A closed standard output ends the program at once, as for every command.
+If the lines of the watch could not be written before Ctrl-C, the stop lines and the follow line go to
+standard error, last, and the exit code stays 130.
+A closed standard output ends the program by SIGPIPE, which Go raises for a write to a closed pipe on
+standard output. This holds for every command, in table and in `-o json` mode, and it gives no note and
+no exit code. Any other failed write to standard output exits 6.
 If a read of the watch gave nothing, because its answer cannot be read or the connection failed (the
 server read, the first operation read, or the read that follows a cut stream), the watch ends with no
 operation read, the state is unknown and the exit is 3: the message names `operation show` as the

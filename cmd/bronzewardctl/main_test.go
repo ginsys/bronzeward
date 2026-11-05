@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -28,6 +29,9 @@ func TestMain(m *testing.M) {
 	}
 	if os.Getenv("BW_WATCH_HELPER") != "" { // a process the operation watch's signal test starts; it does not return
 		os.Exit(run([]string{"operation", "watch", "op_BWSYNTH", "--timeout", "1m"}, os.Stdout, os.Stderr))
+	}
+	if args := os.Getenv("BW_PIPE_HELPER"); args != "" { // a process the closed-pipe test starts; it does not return
+		os.Exit(run(strings.Fields(args), os.Stdout, os.Stderr))
 	}
 	tls := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	tls.Config.ErrorLog = log.New(io.Discard, "", 0) // the handshakes of a client that refuses its certificate

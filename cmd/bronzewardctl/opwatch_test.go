@@ -771,8 +771,8 @@ func TestOperationWatchCompletionTime(t *testing.T) {
 }
 
 // TestOperationWatchOutputFails: a table-mode watch whose output cannot be written says so and does
-// not exit 0. A completed operation exits 1 with the write error, a failed one keeps exit 4 and adds
-// it, and a running one stops watching at once instead of waiting for --timeout.
+// not exit 0. A completed operation exits 6 with the write error, a failed one keeps exit 4 and adds
+// it, and a running one exits 6 and stops watching at once instead of waiting for --timeout.
 func TestOperationWatchOutputFails(t *testing.T) {
 	f := &opFake{}
 	srv := httptest.NewServer(f)
@@ -785,9 +785,9 @@ func TestOperationWatchOutputFails(t *testing.T) {
 		code                         int
 		not                          string
 	}{
-		{"completed", "completed", `{"appliedRelease":"rel_BWSYNTH","observation":"obs_c"}`, "null", []string{sse(1, "commitment", commitment)}, 1, ""},
+		{"completed", "completed", `{"appliedRelease":"rel_BWSYNTH","observation":"obs_c"}`, "null", []string{sse(1, "commitment", commitment)}, 6, ""},
 		{"failed", "failed", "null", `{"cause":"verification-mismatch","attempts":2}`, []string{sse(1, "commitment", commitment)}, 4, ""},
-		{"running", "running", "null", "null", []string{sse(1, "commitment", commitment)}, 1, "Still running"},
+		{"running", "running", "null", "null", []string{sse(1, "commitment", commitment)}, 6, "Still running"},
 	} {
 		f.mu.Lock()
 		f.body = fmt.Sprintf(opJSON, "apply-config", c.state, c.result, c.errBody, "[]")
@@ -798,6 +798,78 @@ func TestOperationWatchOutputFails(t *testing.T) {
 		if code != c.code || !strings.Contains(e.String(), "write refused") || (c.not != "" && strings.Contains(e.String(), c.not)) {
 			t.Errorf("%s: exit %d, stderr %q; want exit %d, the write error named and not %q", c.name, code, e.String(), c.code, c.not)
 		}
+	}
+}
+
+// TestOperationWatchDevFull: with standard output on /dev/full, where every write fails with ENOSPC,
+// a completed watch exits 6, not 0, and names the OS error on standard error (operator-experience.md §4).
+func TestOperationWatchDevFull(t *testing.T) {
+	f := &opFake{stream: []string{sse(1, "commitment", commitment)},
+		pages: []string{evPage(1, "commitment", commitment), evPage(2, "operation-state", toState("verifying", "completed", ""))},
+		body:  fmt.Sprintf(opJSON, "apply-config", "completed", `{"appliedRelease":"rel_BWSYNTH","observation":"obs_c"}`, "null", "[]")}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	full, err := os.OpenFile("/dev/full", os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer full.Close()
+	var e bytes.Buffer
+	if code := run([]string{"operation", "watch", "op_BWSYNTH", "--timeout", "2s"}, full, &e); code != 6 || !strings.Contains(e.String(), "no space left on device") {
+		t.Errorf("exit %d, stderr %q; want 6 and the write error named", code, e.String())
+	}
+}
+
+// TestOperationWatchEventLinesUnwritableJSON: with -o json the event lines go to standard error. They
+// are still the output of the command, so a standard error that refuses them gives exit 6 too, not 0,
+// while the resource reaches standard output.
+func TestOperationWatchEventLinesUnwritableJSON(t *testing.T) {
+	f := &opFake{stream: []string{sse(1, "commitment", commitment)},
+		pages: []string{evPage(1, "commitment", commitment), evPage(2, "operation-state", toState("verifying", "completed", ""))},
+		body:  fmt.Sprintf(opJSON, "apply-config", "completed", `{"appliedRelease":"rel_BWSYNTH","observation":"obs_c"}`, "null", "[]")}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	var o bytes.Buffer
+	if code := run([]string{"operation", "watch", "op_BWSYNTH", "-o", "json", "--timeout", "2s"}, &o, failingWriter{}); code != 6 || !strings.Contains(o.String(), "op_BWSYNTH") {
+		t.Errorf("exit %d, stdout %q; want 6 and the operation resource on standard output", code, o.String())
+	}
+}
+
+// interruptThenFail is a standard output that takes the first two lines of a watch, then sends the
+// first Ctrl-C on the third and refuses it and every line after: the output fails while the watch is
+// ending by Ctrl-C.
+type interruptThenFail struct{ n int }
+
+func (w *interruptThenFail) Write(p []byte) (int, error) {
+	w.n++
+	if w.n <= 2 {
+		return len(p), nil
+	}
+	if w.n == 3 {
+		_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
+		time.Sleep(200 * time.Millisecond) // the signal reaches the watch before this line fails
+	}
+	return 0, errors.New("write refused")
+}
+
+// TestOperationWatchInterruptOutputFails: when the output of a watch failed before its first Ctrl-C was
+// handled, the stop line and the follow line go to standard error, last, and the exit is 130: the user
+// ended the watch, so the lost output does not change the exit.
+func TestOperationWatchInterruptOutputFails(t *testing.T) {
+	f := &opFake{stream: []string{sse(1, "commitment", commitment)},
+		body: fmt.Sprintf(opJSON, "apply-config", "running", "null", "null", "[]")}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	var e bytes.Buffer
+	out := &interruptThenFail{}
+	code := run([]string{"operation", "watch", "op_BWSYNTH", "--timeout", "30s"}, out, &e)
+	stop := "Stopped watching at your request. Operation op_BWSYNTH is still running, as the server last read it; it goes on.\n"
+	follow := "Follow it again with: bronzewardctl operation watch 'op_BWSYNTH'\n"
+	if code != 130 || !strings.HasSuffix(e.String(), stop+follow) || out.n < 3 {
+		t.Errorf("exit %d after %d writes, stderr %q; want 130 and the stop lines last on standard error", code, out.n, e.String())
 	}
 }
 
@@ -938,7 +1010,7 @@ func TestOperationWatchExitMatrix(t *testing.T) {
 			code  int
 			has   []string
 			not   []string
-		}{{false, 0, []string{"Completed at"}, []string{"write refused"}}, {true, 1, []string{"write refused"}, nil}}},
+		}{{false, 0, []string{"Completed at"}, []string{"write refused"}}, {true, 6, []string{"write refused"}, nil}}},
 		{"terminal, failed", func() *opFake {
 			return &opFake{stream: []string{sse(1, "commitment", commitment)}, pages: failedPages,
 				body: fmt.Sprintf(opJSON, "apply-config", "failed", "null", `{"cause":"verification-mismatch","attempts":2}`, "[]")}
@@ -958,7 +1030,7 @@ func TestOperationWatchExitMatrix(t *testing.T) {
 			has   []string
 			not   []string
 		}{{false, 5, []string{"Still running after --timeout", "Follow it again with: bronzewardctl operation watch 'op_BWSYNTH'"}, []string{"write refused"}},
-			{true, 1, []string{"write refused", "operation op_BWSYNTH goes on", "Follow it again with: bronzewardctl operation watch 'op_BWSYNTH'"}, []string{"was not read"}}}},
+			{true, 6, []string{"write refused", "operation op_BWSYNTH goes on", "Follow it again with: bronzewardctl operation watch 'op_BWSYNTH'"}, []string{"was not read"}}}},
 		{"read is not JSON", func() *opFake {
 			return &opFake{stream: []string{sse(1, "commitment", commitment)}, badReadFrom: 2,
 				body: fmt.Sprintf(opJSON, "apply-config", "running", "null", "null", "[]")}
@@ -978,6 +1050,7 @@ func TestOperationWatchExitMatrix(t *testing.T) {
 			has   []string
 			not   []string
 		}{{false, 1, []string{"403"}, []string{"was not read", "write refused"}},
+			// The server's own refusal keeps exit 1 over a failed write (precedence: report in main.go).
 			{true, 1, []string{"403", "write refused"}, []string{"was not read", "goes on"}}}},
 		{"read cut off", func() *opFake {
 			return &opFake{stream: []string{sse(1, "commitment", commitment)}, cutFrom: 2,
@@ -1062,8 +1135,8 @@ func TestOperationWatchExitMatrixByRead(t *testing.T) {
 				switch {
 				case c.index == 3: // the read that confirms the end: the outcome stays, only its time is missing
 					code, has, not = 0, []string{"Completed", "The server's time of this end was not read."}, []string{"the state of operation op_BWSYNTH was not read"}
-					if fails { // the outcome's exit 0 becomes 1 with the write error beside it
-						code, has = 1, []string{"write refused"}
+					if fails { // the outcome's exit 0 becomes 6 with the write error beside it
+						code, has = 6, []string{"write refused"}
 					}
 				case fault == "cut off":
 					has = []string{"reading the answer failed", read}
