@@ -132,6 +132,10 @@ go mod verify
 go mod tidy -diff
 go build -o /dev/null ./...
 go vet ./...
+# The client for macOS: its Keychain store is darwin-only code, which the host's build never
+# compiles (ginsys/bronzeward#628). No cgo, as the release builds. vet also type-checks its tests.
+GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -o /dev/null ./cmd/bronzewardctl
+GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go vet ./internal/client ./cmd/bronzewardctl
 go test ./...
 # The client's dependency-closure test reads the closure through a child go list, which go test's
 # cache does not track, so a cached pass could hide a new forbidden import: it runs uncached.

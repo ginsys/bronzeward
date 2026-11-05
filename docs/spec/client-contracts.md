@@ -1025,8 +1025,15 @@ current token expires
    D-Bus session bus is named, or when no program on it owns the Secret Service name
    (`org.freedesktop.secrets`) and none can be started for it; a store that answers and then
    fails refuses `login` before the sign-in starts, so nothing is issued that cannot be kept. A
-   named bus that cannot be asked, for example a stale address, counts as a store that fails. A
-   sign-in whose context was removed or changed while it ran is not kept, and its refresh token
+   named bus that cannot be asked, for example a stale address, counts as a store that fails. On
+   macOS the store is the default keychain, reached through the system's `security` tool: no store
+   is available when that tool is missing. The tool gets the secret on its standard input, never
+   in an argument, and takes at most 4096 bytes of command line, so a sign-in over about 2.9 KB
+   is refused with that limit named and nothing written. Under the lock the keychain is asked
+   whether it is locked before each call, and a locked one, or one that gives no answer within
+   15 seconds, refuses the command as a locked store does. The same bound of a minute applies to
+   each write, and the tool is stopped when it passes. A sign-in
+   whose context was removed or changed while it ran is not kept, and its refresh token
    is revoked. Removing a context removes its stored sign-in under the renewal lock, with a
    bounded read first, and leaves an entry alone when a context of that name was added again
    meanwhile. An explicit per-context opt-in keeps them

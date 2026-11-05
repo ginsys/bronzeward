@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -243,6 +244,11 @@ func forget(t *testing.T, env []string, name string) {
 // TestLogin checks bronzewardctl login and the stores it keeps a sign-in in (§9.2, decisions
 // T3-T5 and D2 of #254) against the fixture provider.
 func TestLogin(t *testing.T) {
+	// Its stores are the D-Bus Secret Service ones; on macOS a sign-in would reach the Keychain of
+	// whoever runs it (ginsys/bronzeward#628).
+	if runtime.GOOS != "linux" {
+		t.Skip("TestLogin drives the Linux Secret Service")
+	}
 	f := start(t, "viewer")
 	file := filepath.Join(f.home, "login.json")
 	add := func(env []string, name string, extra ...string) {
