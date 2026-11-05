@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"maps"
 	"net/url"
 	"slices"
@@ -78,7 +79,15 @@ func decode[T any](c *client.Client, raw ...json.RawMessage) ([]T, error) {
 	for i, r := range raw {
 		dec := json.NewDecoder(bytes.NewReader(r))
 		dec.UseNumber()
-		if err := dec.Decode(&out[i]); err != nil {
+		err := dec.Decode(&out[i])
+		if err == nil { // as json.Unmarshal does, refuse anything but space after the value
+			if _, err = dec.Token(); err == io.EOF {
+				err = nil
+			} else if err == nil {
+				err = errors.New("unexpected data after the JSON value")
+			}
+		}
+		if err != nil {
 			return nil, ef("%s: %w", c.Context.Where(), err)
 		}
 	}

@@ -150,7 +150,9 @@ func (e *env) followTimeline(c *client.Client, path string, limit int, machine s
 			cursor = pg.Next
 		}
 	}
-	// A read that fails while Ctrl-C is pending still ends with exit 130, as a stop does.
+	// A read that fails while Ctrl-C is pending still ends with exit 130, as a stop does. Stop waits
+	// for a delivery in flight, so the signal is on sig, which holds one, before the check.
+	signal.Stop(sig)
 	select {
 	case <-sig:
 		return stopped()
