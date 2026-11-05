@@ -670,12 +670,46 @@ describe("a tag is resolved the way go-yaml does", () => {
     expect(references(text)).toEqual([]);
   });
 
+  // The first tag can stand alone in its line: the next more indented line goes on with the node.
+  test.each([
+    ["a tag, then the tag in the next block line", "a: !other\n  !bwref x/foo\n"],
+    ["a tag, then an anchor and the tag in the next line", "a: !other\n  &e !bwref x/foo\n"],
+    ["a tag, then the anchor and the tag in two lines", "a: !other\n  &e\n  !bwref x/foo\n"],
+    ["a tag, a blank line, then the tag", "a: !other\n\n  !bwref x/foo\n"],
+    ["a tag, a comment line, then the tag", "a: !other\n  # c\n  !bwref x/foo\n"],
+    ["a tag in a block sequence entry, then the tag", "- !other\n  !bwref x/foo\n"],
+    ["a tag at the root, then the tag", "!other\n!bwref x/foo\n"],
+  ])("two tags over a block line break: %s lists nothing", (_, text) => {
+    expect(references(text)).toEqual([]);
+  });
+
+  test("two tags over a block line break blank their document and no other", () => {
+    expect(references("a: !other\n  !bwref x/foo\n---\nb: !bwref x/bar\n")).toEqual(["x/bar"]);
+    expect(references("a: !other\n  &e !bwref x/foo\n---\nb: !bwref x/bar\n")).toEqual(["x/bar"]);
+  });
+
+  // A tag before a key of the next line belongs to the key, so the node above has one tag.
+  test.each([
+    ["a tagged key in the next line", "a: !other\n  !u b: !bwref x/foo\n"],
+    ["a tagged quoted key in the next line", 'a: !other\n  !u "b": !bwref x/foo\n'],
+    ["a tagged key in a block sequence entry", "- !other\n  !u b: !bwref x/foo\n"],
+    ["a sequence after the tag", "a: !other\n  - !bwref x/foo\n"],
+  ])("one tag per node over a block line break: %s still lists the name", (_, text) => {
+    expect(references(text)).toEqual(["x/foo"]);
+  });
+
   test.each([
     ["%YAML after a quoted value", 'a: !<!bwref> "x/foo"\n %YAML 1.1\n'],
     ["%TAG after a quoted value", 'a: !bwref "x/foo"\n  %TAG !x! !bw\n'],
     ["%x in a block sequence", "- !bwref x/foo\n- %x\n"],
     ["%b in a flow sequence", "[!bwref x/foo,\n %b]\n"],
     ["a tab, then %x", 'a: !bwref "x/foo"\n\t%x\n'],
+    ["%x after a quoted value on the same line", 'a: !bwref "x/foo" %x\n'],
+    ["%x after a single quoted value on the same line", "a: !bwref 'x/foo' %x\n"],
+    ["%x after an alias", "a: !bwref x/foo\nb: &c y\nd: *c %x\n"],
+    ["%x after a flow sequence", "a: !bwref x/foo\nb: [c] %x\n"],
+    ["%x after a quote across a flow line break", '[!bwref "x/foo"\n %x]\n'],
+    ["%x after a quote that a line break closes", 'a: !bwref "x/foo\n  y" %x\n'],
   ])("an indented percent line: %s lists nothing", (_, text) => {
     expect(references(text)).toEqual([]);
   });
@@ -724,6 +758,8 @@ describe("a tag is resolved the way go-yaml does", () => {
     expect(references("a: !bwref x/foo\n---\nb: !other !bwref y/bar\n")).toEqual(["x/foo"]);
     expect(references('a: !bwref "x/foo"\n  %x\n---\nb: !bwref x/bar\n')).toEqual(["x/bar"]);
     expect(references('a: !bwref x/foo\n---\nb: !bwref "y/bar"\n  %x\n')).toEqual(["x/foo"]);
+    expect(references('a: !bwref "x/foo" %x\n---\nb: !bwref x/bar\n')).toEqual(["x/bar"]);
+    expect(references('[!bwref "x/foo"\n %x]\n---\nb: !bwref x/bar\n')).toEqual(["x/bar"]);
     expect(references('a: !bwref x/foo\nb: "x\n---\ny"\n---\nc: !bwref x/bar\n')).toEqual(["x/bar"]);
     expect(references('a: !bwref x/foo\n---\nb: !bwref y/bar\nc: "x\n---\ny"\n')).toEqual(["x/foo"]);
   });

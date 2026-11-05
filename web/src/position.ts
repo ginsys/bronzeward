@@ -470,10 +470,13 @@ interface Carry {
   closed: boolean;
   // The node that starts at the next token already has a tag. A second tag on it fails go-yaml's
   // parser (ginsys/bronzeward#620). An anchor does not count, and any other token ends the node.
-  // A flow line keeps it; a block line starts a new node and clears it.
+  // A flow line keeps it. A block line keeps it only when the node has no content yet and the line
+  // goes on with it (see `scanLine`); any other block line starts a new node and clears it.
   tagged: boolean;
+  // The tag of `tagged` stands in an earlier line than the token that is read now.
+  earlier: boolean;
 }
-const freshCarry = (): Carry => ({ stack: [], flow: 0, ns: true, open: "", holder: -1, block: undefined, closed: false, tagged: false });
+const freshCarry = (): Carry => ({ stack: [], flow: 0, ns: true, open: "", holder: -1, block: undefined, closed: false, tagged: false, earlier: false });
 
 // The document that is being read (ginsys/bronzeward#615). A tag spelled through a handle names what
 // the document's %TAG directives say, so a `!bwref` property counts only when its document is
@@ -610,6 +613,29 @@ function plainEnd(line: string, from: number, flow: number): number {
   return i;
 }
 
+// Whether the node after the properties that end at `from` is a key of this line: a quoted or plain
+// scalar followed by `:` and a blank. A tag before such a key belongs to the key, not to the node
+// above it. A flow collection is not read, and counts as a key so that no document is refused for it.
+function keyFollows(line: string, from: number): boolean {
+  let i = from;
+  for (;;) {
+    while (i < line.length && isWs(line[i])) i++;
+    if (line[i] !== "!" && line[i] !== "&") break;
+    while (i < line.length && !isWs(line[i])) i++;
+  }
+  const c = line[i];
+  if (c === undefined) return false;
+  if (c === "[" || c === "{") return true;
+  if (c === '"' || c === "'") {
+    i = skipQuoted(line, i + 1, c);
+    if (i < 0) return false;
+    while (i < line.length && isWs(line[i])) i++;
+  } else {
+    i = plainEnd(line, i, 0);
+  }
+  return line[i] === ":" && (i + 1 >= line.length || isWs(line[i + 1]));
+}
+
 function pushEntry(stack: number[], col: number) {
   while (stack.length > 0 && stack[stack.length - 1]! > col) stack.pop();
   if (stack.length === 0 || stack[stack.length - 1]! < col) stack.push(col);
@@ -669,7 +695,12 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number): number {
   // previous line (`? "k"`) still takes a `:` that starts this one.
   if (st.flow === 0) {
     st.closed = false;
-    st.tagged = false;
+    // A node that holds a tag and no content yet goes on in a blank line, a comment line and a line
+    // more indented than its holder, so a second tag there is a second tag on one node. A key on that
+    // line can take its own tag (`a: !t` then `  !u b: x`): see `keyFollows`.
+    const goOn = st.tagged && st.ns && st.open === "" && (blank || /^ *#/.test(line) || ind > hold);
+    st.tagged = goOn;
+    st.earlier = goOn;
   }
   let fresh = false;
   if (marker && st.open !== '"' && st.open !== "'") {
@@ -771,7 +802,8 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number): number {
         // resolve fails the stream, so its document lists nothing (ginsys/bronzeward#615). So does a
         // second tag on one node (ginsys/bronzeward#620).
         if (c === "!") {
-          if (st.tagged) docs.refused = true;
+          if (st.tagged && !(st.earlier && keyFollows(line, e))) docs.refused = true;
+          st.earlier = false;
           st.tagged = true;
           const resolved = resolveTag(line.slice(j, e), line[e], docs.table);
           if (resolved === undefined) docs.refused = true;
@@ -839,6 +871,9 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number): number {
       st.ns = true;
       j++;
     } else {
+      // After a quote, a bracket or an alias nothing but a `:`, a flow indicator or a comment can
+      // come, so a `%` starts no token there (ginsys/bronzeward#620). After a plain scalar it is text.
+      if (c === "%" && st.closed) docs.refused = true;
       j = Math.max(plainEnd(line, j, st.flow), j + 1);
       lastPlain = true;
       st.closed = false;

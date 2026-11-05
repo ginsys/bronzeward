@@ -310,8 +310,12 @@ directives with no `---` after them. A directive line in the first column after 
 the document and opens the directives of the next one. The parser also refuses content after `...`
 that has no `---`, which includes text on the `...` line itself, a handle that the document does not declare, a bad percent escape, and a tag that
 a character outside the tag characters ends, such as `!bwref}`. It also refuses a node with two
-tags, with an anchor between them or not. It refuses a `%` where a token starts, such as an indented
-`%` line after a quoted scalar. It refuses a `---` or `...` marker in the first column of a quoted
+tags, with an anchor between them or not. The two tags can stand in two block lines: the first line
+holds a tag and no content, and the next line with text is more indented. Blank lines and comment
+lines between them do not matter. A tag before a key in that next line belongs to the key, so the
+document stays valid. It refuses a `%` where a token
+starts, such as an indented `%` line after a quoted scalar or a `%` after a closing quote, bracket or
+alias. It refuses a `---` or `...` marker in the first column of a quoted
 scalar. The parser then refuses the whole stream. The editor blanks only the document with the
 fault, so the other documents of the stream still list. A line that starts with `%` inside a quoted
 scalar or a block scalar is text, not a directive. It is text too when a plain scalar goes on over
