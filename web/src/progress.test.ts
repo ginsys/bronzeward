@@ -22,10 +22,12 @@ function json(body: unknown, epoch = "e1", status = 200): Response {
 // A fake server. Each stream request takes the next of `streams` (an Error is a transport
 // failure); each operation read the next of `states`, the last repeated; each JSON events read
 // answers `pages`, or the next of `pageRefusals`. A state `x@e2` is read under the epoch e2, and
-// the pages are read under `pagesEpoch`. Each operation read takes `readTime` ms of the `clock`.
+// the pages are read under `pagesEpoch`, and a read of `/probe` is answered under it too. Each operation
+// read takes `readTime` ms of the `clock`, and each stream request `streamTime` ms. The pages are
+// answered when `pagesGate` is open.
 function server(o: {
   streams: (Stream | Error)[]; states: string[]; pages?: OpEvent[]; pageRefusals?: number[]; epoch?: string;
-  pagesEpoch?: string; clock?: { t: number }; readTime?: number;
+  pagesEpoch?: string; clock?: { t: number }; readTime?: number; streamTime?: number; pagesGate?: Promise<void>;
 }) {
   const opened: Record<string, string>[] = [];
   const urls: string[] = [];
@@ -38,6 +40,7 @@ function server(o: {
       const s = o.streams.shift();
       if (s === undefined) throw new Error("no stream left");
       if (s instanceof Error) throw s;
+      if (o.clock !== undefined) o.clock.t += o.streamTime ?? 0;
       if (s.hang === true) return noHeaders(init);
       let drip: ReturnType<typeof setInterval> | undefined;
       const body = new ReadableStream<Uint8Array>({
@@ -55,6 +58,7 @@ function server(o: {
       return new Response(body, { status: s.status ?? 200, headers: h });
     }
     if (u.startsWith(EVENTS)) {
+      await o.pagesGate;
       const refusal = o.pageRefusals?.shift();
       if (refusal !== undefined) return json({ type: "urn:bronzeward:problem:forbidden", title: "forbidden", status: refusal }, o.epoch, refusal);
       return json({ items: (o.pages ?? []).map((e) => ({ ...e, at: "2026-11-01T06:00:00Z" })) }, o.pagesEpoch ?? o.epoch);
@@ -87,6 +91,37 @@ function recorder(until?: (shown: OpEvent[]) => boolean, clock = { t: 0 }) {
     },
   };
 }
+
+// A reader over the fake server's client in which another response records the epoch that `/probe`
+// names, once, around the first read of a path `where` accepts: `before` that read is sent, or `after`
+// its response was used and before the watch resumes.
+function reader(s: ReturnType<typeof server>, where: (path: string) => boolean, when: "before" | "after") {
+  let done = false;
+  const probe = async (path: string) => {
+    if (done || !where(path)) return;
+    done = true;
+    await s.client.read("/probe");
+  };
+  return {
+    read: (async (path: string) => {
+      if (when === "before") await probe(path);
+      const result = await s.client.read(path);
+      if (when === "after") await probe(path);
+      return result;
+    }) as typeof s.client.read,
+    readWithEpoch: (async (path: string) => {
+      if (when === "before") await probe(path);
+      const result = await s.client.readWithEpoch(path);
+      if (when === "after") await probe(path);
+      return result;
+    }) as typeof s.client.readWithEpoch,
+    open: (...a: Parameters<typeof s.client.open>) => s.client.open(...a),
+    get currentEpoch() { return s.client.currentEpoch; },
+    get writesEnded() { return s.client.writesEnded; },
+  };
+}
+const eventsPath = (path: string) => path.endsWith("/events");
+const operationPath = (path: string) => path === `/operations/${OP}`;
 
 describe("the operation progress reader (§8.6)", () => {
   test("a stream's events are shown once and the watch ends on a terminal state with nothing left to drain", async () => {
@@ -294,21 +329,8 @@ describe("the operation progress reader (§8.6)", () => {
       pagesEpoch: "e2",
     });
     // Another response records the restore after the operation read and before the drain's read.
-    let restored = false;
-    const reader = {
-      read: (async (path: string) => {
-        if (path.endsWith("/events") && !restored) {
-          restored = true;
-          await s.client.read("/probe");
-        }
-        return s.client.read(path);
-      }) as typeof s.client.read,
-      open: (...a: Parameters<typeof s.client.open>) => s.client.open(...a),
-      get currentEpoch() { return s.client.currentEpoch; },
-      get writesEnded() { return s.client.writesEnded; },
-    };
     const r = recorder();
-    const out = await watch(reader, OP, r.w, r.pace);
+    const out = await watch(reader(s, eventsPath, "before"), OP, r.w, r.pace);
     expect(out).toMatchObject({ kind: "ended", operation: { state: "succeeded" } });
     expect(r.log).toEqual(["show e1:1", `clear: ${RESTORED}`, "show e2:1", "show e2:2", "show e2:3"]);
     expect(r.sleeps).toEqual([1000]);
@@ -384,6 +406,119 @@ describe("the operation progress reader (§8.6)", () => {
     r.abort.abort();
     expect(out).toMatchObject({ kind: "ended" });
     expect(s.opened).toHaveLength(2);
+  });
+
+  // Findings of the second review of the reader (R2-n).
+
+  test("R2-1: the epoch of a terminal read is that of its response, not the client's epoch when the watch resumes", async () => {
+    const s = server({
+      streams: [{ chunks: [frame(ev("e1:1"))] }, { chunks: [], epoch: "e2" }],
+      states: ["failed@e1", "succeeded@e2"],
+      pages: [ev("e2:1"), ev("e2:2", "staged"), ev("e2:3", "succeeded")],
+      pagesEpoch: "e2",
+    });
+    const r = recorder();
+    // Another response records the restore after the operation response was used and before the watch resumes.
+    const out = await watch(reader(s, operationPath, "after"), OP, r.w, r.pace);
+    expect(out).toMatchObject({ kind: "ended", operation: { state: "succeeded" } });
+    expect(r.log).toEqual(["show e1:1", `clear: ${RESTORED}`, "show e2:1", "show e2:2", "show e2:3"]);
+  });
+
+  test("R2-2: a running read under another epoch than the last event clears before until is asked", async () => {
+    const s = server({
+      streams: [
+        { chunks: [frame(ev("e1:1")), frame(ev("e1:2", "paused"))] },
+        { chunks: [frame(ev("e2:1")), frame(ev("e2:2", "paused"))], epoch: "e2" },
+      ],
+      states: ["running@e2"],
+      pagesEpoch: "e2",
+    });
+    // The old paused event stops the stream; the read that follows is under e2, so it must not stop the watch.
+    const r = recorder((shown) => shown.some((e) => e.type === "paused"));
+    const out = await watch(reader(s, operationPath, "before"), OP, r.w, r.pace);
+    expect(out).toMatchObject({ kind: "ended", operation: { state: "running" } });
+    expect(r.log).toEqual(["show e1:1", "show e1:2", `clear: ${RESTORED}`, "show e2:1", "show e2:2"]);
+  });
+
+  test("R2-3: events shown and then cleared in one attempt are not progress: the watch backs off", async () => {
+    const shownThenMismatched = () => ({ chunks: [frame(ev("e1:1")), frame(ev("e2:2"))], epoch: "e1" });
+    const s = server({
+      streams: [shownThenMismatched(), shownThenMismatched(), shownThenMismatched(), { chunks: [frame(ev("e1:1", "succeeded"))] }],
+      states: ["running", "running", "running", "succeeded"],
+      pages: [ev("e1:1", "succeeded")],
+    });
+    const r = recorder();
+    expect((await watch(s.client, OP, r.w, r.pace)).kind).toBe("ended");
+    expect(r.sleeps).toEqual([1000, 2000, 4000]);
+  });
+
+  test("R2-3b: events cleared at once because the operation read names another epoch are not progress", async () => {
+    const s = server({
+      streams: [{ chunks: [frame(ev("e1:1")), frame(ev("e1:2"))] }, { chunks: [frame(ev("e2:1", "succeeded"))], epoch: "e2" }],
+      states: ["running@e2", "succeeded@e2"],
+      pages: [ev("e2:1", "succeeded")],
+      pagesEpoch: "e2",
+    });
+    const r = recorder();
+    expect((await watch(reader(s, operationPath, "before"), OP, r.w, r.pace)).kind).toBe("ended");
+    expect(r.log).toEqual(["show e1:1", "show e1:2", `clear: ${RESTORED}`, "show e2:1"]);
+    expect(r.sleeps).toEqual([1000]);
+  });
+
+  test("R2-3c: a reset in the stream followed by its replay is progress: no wait before the next attempt", async () => {
+    const s = server({
+      streams: [
+        { chunks: [frame(ev("e1:1")), "event: reset\ndata: {}\n\n", frame(ev("e1:2"))] },
+        { chunks: [frame(ev("e1:3", "succeeded"))] },
+      ],
+      states: ["running", "succeeded"],
+      pages: [ev("e1:2"), ev("e1:3", "succeeded")],
+    });
+    const r = recorder();
+    expect((await watch(s.client, OP, r.w, r.pace)).kind).toBe("ended");
+    expect(r.log).toEqual(["show e1:1", `clear: ${RESTORED}`, "show e1:2", "show e1:3"]);
+    expect(r.sleeps).toEqual([]);
+  });
+
+  test("R2-4: a stream that stayed open for a second or more and showed nothing still backs off", async () => {
+    const clock = { t: 0 };
+    const s = server({
+      streams: [{ chunks: [] }, { chunks: [] }, { chunks: [] }, { chunks: [frame(ev("e1:1", "succeeded"))] }],
+      states: ["running", "running", "running", "succeeded"],
+      pages: [ev("e1:1", "succeeded")],
+      clock,
+      streamTime: 1100,
+    });
+    const r = recorder(undefined, clock);
+    expect((await watch(s.client, OP, r.w, r.pace)).kind).toBe("ended");
+    expect(r.sleeps).toEqual([1000, 2000, 4000]);
+  });
+
+  test("R2-4b: a stream that stayed open for 30 s without an event starts the delay again at 1 s", async () => {
+    const clock = { t: 0 };
+    const s = server({
+      streams: [{ chunks: [] }, { chunks: [] }, { chunks: [] }, { chunks: [frame(ev("e1:1", "succeeded"))] }],
+      states: ["running", "running", "running", "succeeded"],
+      pages: [ev("e1:1", "succeeded")],
+      clock,
+      streamTime: 31_000,
+    });
+    const r = recorder(undefined, clock);
+    expect((await watch(s.client, OP, r.w, r.pace)).kind).toBe("ended");
+    expect(r.sleeps).toEqual([1000, 1000, 1000]);
+  });
+
+  test("R2-5: a final page that arrives after the watch ended is not delivered", async () => {
+    let open!: () => void;
+    const gate = new Promise<void>((done) => { open = done; });
+    const s = server({ streams: [{ chunks: [] }], states: ["succeeded"], pages: [ev("e1:1"), ev("e1:2", "succeeded")], pagesGate: gate });
+    const r = recorder();
+    const out = watch(s.client, OP, r.w, r.pace);
+    await new Promise((done) => setTimeout(done, 10));
+    r.abort.abort();
+    open();
+    expect(await out).toEqual({ kind: "stopped" });
+    expect(r.log).toEqual([]);
   });
 
   test("eventLine names the type, the generation and the code, and nothing else of the data", () => {
