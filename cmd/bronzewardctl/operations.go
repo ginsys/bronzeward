@@ -109,7 +109,9 @@ func endNextStep(state, op, plan, machine string) string {
 			machineWord = client.ShellWord(machine)
 		}
 		return sf("Nothing more is sent for this plan. Create a new plan: %s", createWords("<release>", machineWord, "<operation>"))
-	case plan == "":
+	case plan == "", machine == "" && state != "rejected":
+		// Without a plan, or without the machine the last case names, there is no command to give; the
+		// operation is the one thing to read (machine show '' would be no command).
 		return sf("Read it: bronzewardctl operation show %s", client.ShellWord(op))
 	case state == "rejected":
 		return sf("The node refused the configuration as invalid, so it applied nothing. Review the plan's release before a new plan: bronzewardctl plan show %s", client.ShellWord(plan))
@@ -131,7 +133,9 @@ func remarshal(v, out any) error {
 func eventLine(ev client.Event, now time.Time) string {
 	stamp := "received " + now.Format("15:04:05")
 	var d map[string]any
-	_ = json.Unmarshal(ev.Data, &d)
+	dec := json.NewDecoder(bytes.NewReader(ev.Data))
+	dec.UseNumber() // a number keeps its digits: float64 would round 9007199254740993
+	_ = dec.Decode(&d)
 	return sf("%s  %-20s  %s", stamp, plain(ev.Type), eventText(ev.Type, d, ev.Data))
 }
 

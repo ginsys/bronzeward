@@ -704,7 +704,10 @@ again.
 
 `unresolved` is not terminal (`internal/api/operations.go:144-151`), so the watch goes on past it.
 `--timeout` (default `30m`) ends the watch with exit 5 and names the state. It counts from the start
-of the command, so the first read of the server and the first read of the operation are inside it.
+of the command, so the opening of the client (a wait to renew the stored sign-in, or an interactive
+sign-in) and the first read of the server and of the operation are inside it. A Ctrl-C during that
+opening gets the grace and exit 130 like any other. An error of the opening itself is reported as
+it is, with its own exit code, because no request was sent.
 The watch checks the timeout between its reads, so it can pass by about 45 seconds:
 
 ```text
