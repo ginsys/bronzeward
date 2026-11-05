@@ -208,7 +208,7 @@ function readTags(original: string): { found: { index: number; tag: string; name
   const lines = text.split("\n");
   // Whether the break that ends each line is U+0085, U+2028 or U+2029 (see `commentStarts`).
   const odd = [...original.matchAll(/\r\n|\r|\n|([\u0085\u{2028}\u{2029}])/gu)].map((m) => m[1] !== undefined);
-  const { starts, props, refused } = commentStarts(lines, odd);
+  const { starts, props, refused, cuts } = commentStarts(lines, odd);
   lines.forEach((line, n) => {
     const end = starts[n]!;
     masked += `${line.slice(0, end)}${" ".repeat(line.length - end)}\n`;
@@ -276,7 +276,7 @@ function readTags(original: string): { found: { index: number; tag: string; name
       if (b === undefined) continue;
       ({ name, end } = b);
     } else if (m[4] !== undefined) {
-      if (hasAnchor ? anchoredContinues(masked, start, end, inFlow) : continues(masked, start, end)) continue;
+      if (hasAnchor ? anchoredContinues(masked, start, end, inFlow, cuts) : continues(masked, start, end, cuts)) continue;
       name = m[4];
     } else name = m[1] !== undefined ? decoded(m[1]) : m[2]!.replaceAll("''", "'");
     if (name !== undefined && NAME.test(name)) found.push({ index: start, tag: original.slice(start, end), name });
@@ -291,9 +291,12 @@ function lineAt(s: string, start: number): string {
   return s.slice(start, end === -1 ? undefined : end);
 }
 // The first line at or after `start` that holds text. Each scan stops there, so the scan per tag
-// does not read the rest of the document (ginsys/bronzeward#534 N3).
-function nextLine(s: string, start: number, isBlank = (l: string) => l.trim() === ""): string | undefined {
+// does not read the rest of the document (ginsys/bronzeward#534 N3). A line whose offset is in `cuts`
+// is a directive line, blanked in `s`: go-yaml ends a plain value there, so the scan ends with no
+// next line (ginsys/bronzeward#632).
+function nextLine(s: string, start: number, cuts: ReadonlySet<number>, isBlank = (l: string) => l.trim() === ""): string | undefined {
   for (let at = start; at < s.length; ) {
+    if (cuts.has(at)) return undefined;
     const l = lineAt(s, at);
     if (!isBlank(l)) return l;
     at += l.length + 1;
@@ -333,11 +336,11 @@ function holder(masked: string, tag: number, compact = false): number {
 // Whether a plain scalar ending at `end` goes on to the next line: it ends its line, and the next
 // line with text is more indented than the node that holds the scalar and is no key, sequence
 // entry or flow indicator. A plain scalar holds no colon before a blank, so a line with one is a
-// key.
-function continues(masked: string, tag: number, end: number): boolean {
+// key. A directive line in the first column ends the scalar, so no line after it continues it.
+function continues(masked: string, tag: number, end: number, cuts: ReadonlySet<number>): boolean {
   const eol = masked.indexOf("\n", end);
   if (eol === -1 || masked.slice(end, eol).trim() !== "") return false;
-  const next = nextLine(masked, eol + 1);
+  const next = nextLine(masked, eol + 1, cuts);
   // A document marker (--- or ...) ends every scalar, also a top-level one.
   if (next === undefined || indent(next) <= holder(masked, tag) || MARKER.test(next)) return false;
   const t = next.trim();
@@ -365,12 +368,12 @@ const ANCHORED_PARENT = /^(?: *(?:- +)?(?:"[^"\n]*"|'[^'\n]*'|[^ \t"'#:\-?[\]{},
 // end) and before a line that is no more indented than the tag's line. In flow context it ends
 // before a line that starts with a flow indicator or a value indicator (a colon before a blank or
 // the end; go-yaml reads `:]` as text). Any other next line continues the scalar.
-function anchoredContinues(masked: string, tag: number, end: number, inFlow: boolean): boolean {
+function anchoredContinues(masked: string, tag: number, end: number, inFlow: boolean, cuts: ReadonlySet<number>): boolean {
   const start = masked.lastIndexOf("\n", tag) + 1;
   if (!inFlow && !ANCHORED_PARENT.test(masked.slice(start, tag))) return true;
   const eol = masked.indexOf("\n", end);
   if (eol === -1 || !blank(masked.slice(end, eol))) return false;
-  const next = nextLine(masked, eol + 1, blank);
+  const next = nextLine(masked, eol + 1, cuts, blank);
   if (next === undefined || MARKER.test(next)) return false;
   const t = next.replace(/^[ \t]+|[ \t\r]+$/g, "");
   if (inFlow) return !/^(?:[,\]}]|:(?:[ \t]|$))/.test(t);
@@ -627,13 +630,13 @@ function skipQuoted(line: string, from: number, q: string): number {
 }
 
 // The end of the plain scalar that starts at `from`: before a colon that makes it a key, before a
-// flow indicator in flow context, before a # that follows a blank.
+// flow indicator or a `?` in flow context, before a # that follows a blank.
 function plainEnd(line: string, from: number, flow: number): number {
   let i = from;
   for (; i < line.length; i++) {
     const c = line[i]!;
     if (c === ":" && (i + 1 >= line.length || isWs(line[i + 1]) || (flow > 0 && FLOW.includes(line[i + 1]!)))) break;
-    if (flow > 0 && FLOW.includes(c)) break;
+    if (flow > 0 && (FLOW.includes(c) || c === "?")) break;
     if (c === "#" && i > from && isWs(line[i - 1])) break;
   }
   return i;
@@ -644,11 +647,17 @@ function pushEntry(stack: number[], col: number) {
   if (stack.length === 0 || stack[stack.length - 1]! < col) stack.push(col);
 }
 
-// The comment start of every line, and the offsets in the text of the !bwref properties read.
-function commentStarts(lines: readonly string[], odd: readonly boolean[]): { starts: number[]; props: Map<number, Prop>; refused: Spot[] } {
+// The comment start of every line, the offsets in the text of the !bwref properties read, the spans of
+// the documents that go-yaml refuses, and the offset of every directive line that was consumed
+// (ginsys/bronzeward#632).
+function commentStarts(
+  lines: readonly string[],
+  odd: readonly boolean[],
+): { starts: number[]; props: Map<number, Prop>; refused: Spot[]; cuts: Set<number> } {
   const st = freshCarry();
   const props = new Map<number, Prop>();
   const refused: Spot[] = [];
+  const cuts = new Set<number>();
   const docs = freshDocs(props, refused, 0);
   let base = 0;
   // For each line: the bytes from its start to the `#` of the first line from it that is not blank, if
@@ -673,9 +682,11 @@ function commentStarts(lines: readonly string[], odd: readonly boolean[]): { sta
     const lead = n === 0 && line.startsWith("﻿");
     const rest = lead ? line.slice(1) : line;
     const text = lead && rest.startsWith("﻿") ? ` ${rest.slice(1)}` : rest;
-    // A directive line is no text to scan: the whole line is blanked.
+    // A directive line is no text to scan: the whole line is blanked. It still ends a plain value
+    // that comes before it, so its offset goes in `cuts`.
     let at = 0;
     if (readDocumentLine(docs, st, text, base)) {
+      cuts.add(base);
       st.chain = false;
       st.afterDirective = true;
     } else at = scanLine(st, docs, text, base + (lead ? 1 : 0), reach[n]!, full.length - line.length + 1, odd[n]!);
@@ -688,7 +699,7 @@ function commentStarts(lines: readonly string[], odd: readonly boolean[]): { sta
     return end >= line.length ? full.length : end;
   });
   endDocument(docs, "start", base);
-  return { starts, props, refused };
+  return { starts, props, refused, cuts };
 }
 
 // `reach`: see `commentStarts`. `brk`: the length in bytes of the line break that ends the line. `odd`: that
@@ -955,6 +966,17 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: numb
     } else if (st.flow > 0 && (c === "[" || c === "{")) {
       st.flow++;
       st.ns = true;
+      j++;
+    } else if (st.flow > 0 && c === "?") {
+      // A `?` ends a plain scalar in a flow collection and is a key indicator there
+      // (scannerc.go lines 2729-2733 and 796, go.yaml.in/yaml/v3 v3.0.5). Right after a scalar, a
+      // quoted scalar, an alias or a closed collection, with no comma, it is a parser error: the
+      // document lists nothing (ginsys/bronzeward#632).
+      docs.refused = true;
+      st.ns = true;
+      nodeStart = -1;
+      lastPlain = false;
+      st.closed = false;
       j++;
     } else {
       // After a quote, a bracket or an alias nothing but a `:`, a flow indicator or a comment can
