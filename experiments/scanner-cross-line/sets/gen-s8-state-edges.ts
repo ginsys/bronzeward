@@ -296,6 +296,11 @@ const firstOfG = docs.size;
     ["%TAG !x! !bw#note", ["!x!ref"]],
     ["%TAG !x! !bw\n%TAG !y! !wref", ["!x!ref", "!y!wref", "!z!ref"]],
     ["%YAML 1.2", ["!bwref"]],
+    // ginsys/bronzeward#633: a comment after the version with no blank, one blank and a tab.
+    ["%YAML 1.1#note", ["!bwref"]],
+    ["%YAML 1.1 #note", ["!bwref"]],
+    ["%YAML 1.1\t#note", ["!bwref"]],
+    ["%YAML 1.1x", ["!bwref"]],
   ] as const;
   const bare = ["!bw%72ef", "!bw%7ef", "!bw%ZZef", "!bwref%", "!bw%C3%A9ref", "!bw%FFref", "!<!bw%72ef>", "!<!bwref>", "!<!bwref", "!<>", "!<!bw%ZZef>", "!bwref}", "!bwref]", "!bwref,", "!bwref!", "!bw!ref", "!!bwref", "!x!bwref", "!bw ref"];
   const place = (s: string) => [`a: ${s} x/foo`, `a: &e ${s} x/foo`, `a: ${s} &e x/foo`, `- ${s} x/foo`, `a: [${s} x/foo]`, `a: {k: ${s} x/foo}`, `a: ${s} "x/foo"`];

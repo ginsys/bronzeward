@@ -91,6 +91,22 @@ describe("the references of a declared embedded document", () => {
     expect(references(only, at("doc[0]/cfg"))).toEqual([]);
     expect(spotOfReference(only, "x/gone", at("doc[0]/cfg"))).toBeUndefined();
   });
+  // ginsys/bronzeward#633: a document that go-yaml refuses lists nothing, and that includes the
+  // embedded documents it holds. A refused document blanks itself and no other, so the documents
+  // around it keep their names, held ones too.
+  test("an embedded document in a refused document lists nothing, and one in another document does", () => {
+    const refusedFirst = "%YAML 1.2\n---\ncfg: 'a: !bwref x/foo'\n---\ncfg: 'b: !bwref x/bar'\n";
+    const both = [{ path: "doc[0]/cfg" }, { path: "doc[1]/cfg" }];
+    expect(references(refusedFirst, at("doc[0]/cfg"))).toEqual([]);
+    expect(spotOfReference(refusedFirst, "x/foo", at("doc[0]/cfg"))).toBeUndefined();
+    expect(references(refusedFirst, both)).toEqual(["x/bar"]);
+    const refusedLast = "cfg: 'a: !bwref x/foo'\n%YAML 1.2\n---\ncfg: 'b: !bwref x/bar'\n";
+    expect(references(refusedLast, both)).toEqual(["x/foo"]);
+    expect(spotOfReference(refusedLast, "x/bar", at("doc[1]/cfg"))).toBeUndefined();
+  });
+  test("a literal holder in a refused document lists nothing", () => {
+    expect(references("%YAML 1.2\n---\ncfg: |\n  a: !bwref x/foo\n", at("doc[0]/cfg"))).toEqual([]);
+  });
   test("a literal holder with an indentation indicator and a header comment points at its tag", () => {
     const deep = "k:\n  cfg: |2 # h\n      a: !bwref x/deep\n";
     const start = deep.indexOf("!bwref");
@@ -673,6 +689,18 @@ describe("a tag is resolved the way go-yaml does", () => {
   test("a line that looks like a directive in a block scalar or a comment declares nothing", () => {
     expect(references("a: |\n  %TAG ! !bw\nb: !ref x/foo\n")).toEqual([]);
     expect(references("# %TAG ! !bw\nb: !ref x/foo\n")).toEqual([]);
+  });
+
+  // ginsys/bronzeward#633: two shapes that go-yaml accepts, which the review of #633 called faults.
+  // go-yaml skips the blanks after a directive's value, and there can be none, then reads a `#` as a
+  // comment (yaml_parser_scan_directive, scannerc.go lines 1676-1699, go.yaml.in/yaml/v3 v3.0.5). It
+  // reads `,`, `[` and `]` as URI characters in every tag form (yaml_parser_scan_tag_uri, lines
+  // 2105-2121), so a shorthand tag that holds one is another tag, never a refusal. The oracle batch
+  // of the comparison tool shows both with go-yaml itself (S8 rows).
+  test("a directive comment without a blank, and a flow indicator in a shorthand tag, are no faults", () => {
+    expect(references("%YAML 1.1#comment\n---\na: !bwref x/foo\n")).toEqual(["x/foo"]);
+    expect(references("a: !bwref] x/foo\nb: !bwref x/bar\n")).toEqual(["x/bar"]);
+    expect(references("a: [!bwref, x/foo]\nb: !bwref x/bar\n")).toEqual(["x/bar"]);
   });
 
   // go-yaml fails the whole stream for a refused document. The scanner blanks that document only (the
