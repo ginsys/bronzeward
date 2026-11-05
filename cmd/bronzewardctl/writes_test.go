@@ -92,8 +92,8 @@ func TestUnreadableAnswers(t *testing.T) {
 		}
 		// Standard output failing part way: the answer is written once and the failure is the exit.
 		short := &shortWriter{}
-		if code := run([]string{"-o", o, "cluster", "add", "--name", "lab-a"}, short, io.Discard); o != "table" && (code != 1 || short.calls != 1) {
-			t.Errorf("-o %s with standard output failing: exit %d after %d writes; want 1 after 1", o, code, short.calls)
+		if code := run([]string{"-o", o, "cluster", "add", "--name", "lab-a"}, short, io.Discard); o != "table" && (code != 6 || short.calls != 1) {
+			t.Errorf("-o %s with standard output failing: exit %d after %d writes; want 6 after 1", o, code, short.calls)
 		}
 	}
 	unknown.Store(true)
