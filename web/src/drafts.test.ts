@@ -1150,8 +1150,17 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
   });
 
   test("ginsys/bronzeward#624: a read of the pane's own revision after its Save is done opens no conflict", () => {
-    const s = run(sending(), [{ kind: "done", revision: "frv_9" }, { kind: "read", text: A, since: 0, revision: 9, id: "frv_9" }]);
+    // The Save is done, so `writes` is 1: the read must start after it (`since: 1`), or the reducer drops it as
+    // stale before it reaches the revision. Text typed since the Save makes a read of another author's revision
+    // open a conflict (`keeps`), so no conflict here shows that the read is taken as the pane's own.
+    const done = run(sending(), [{ kind: "done", revision: "frv_9" }, { kind: "type", held: M2 }]);
+    const s = editor(done, { kind: "read", text: A, since: 1, revision: 9, id: "frv_9" });
     expect(s.conflict).toBeUndefined();
+    expect(s.saved).toEqual(A);
+    expect(s.held).toEqual(M2);
+    // The same read naming another revision is another author's: it opens a conflict that keeps the typed text.
+    const theirs = editor(done, { kind: "read", text: A, since: 1, revision: 10, id: "frv_10" });
+    expect(theirs.conflict).toEqual({ mine: M2, phase: "theirs", revision: 10 });
   });
 
   test("ginsys/bronzeward#623: both composition panes mark a read of the revision they loaded already", () => {
