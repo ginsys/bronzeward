@@ -1154,3 +1154,48 @@ describe("a tag is resolved the way go-yaml does", () => {
     expect(spotOfReference(verbatim, "x/foo")).toEqual({ start: 3, end: verbatim.indexOf("\n") });
   });
 });
+
+// A plain value that goes on to the next line (ginsys/bronzeward#616). go-yaml ends a plain scalar at
+// a document marker, a comment, a colon before a blank, and, in flow context, at a flow indicator
+// (scannerc.go lines 2693-2818). In block context a line that is more indented than the parent is
+// text, and in flow context the indent test is off (line 2815).
+describe("a plain !bwref value that goes on to the next line", () => {
+  // The next line is text of the scalar (or an error for a key), so the value is longer than the name.
+  test.each([
+    ["a comma", "k: !bwref x/foo\n  ,bar\n"],
+    ["a closing bracket", "k: !bwref x/foo\n  ]\n"],
+    ["a closing brace", "k: !bwref x/foo\n  }\n"],
+    ["a dash and a blank", "k: !bwref x/foo\n  - y\n"],
+    ["a question mark and a blank", "k: !bwref x/foo\n  ? y\n"],
+    ["a key", "k: !bwref x/foo\n  j: v\n"],
+    ["a line of no-break spaces", "k: !bwref x/foo\n   \n"],
+    ["a dash in a sequence entry", "- !bwref x/foo\n  - y\n"],
+  ])("a more indented line with %s in block context lists nothing", (_, text) => {
+    expect(references(text)).toEqual([]);
+  });
+
+  // In flow context go-yaml does not compare the indentation of the next line.
+  test.each([
+    ["a word at column 0", "[!bwref x/foo\nbar]\n"],
+    ["a word and a comma", "[!bwref x/foo\nbar, k: v]\n"],
+    ["a word and a colon", "[!bwref x/foo\nbar: z]\n"],
+  ])("%s in flow context lists nothing", (_, text) => {
+    expect(references(text)).toEqual([]);
+  });
+
+  // The scalar ends, and the name lists.
+  test.each([
+    ["a key at the parent's column", "k: !bwref x/foo\nj: v\n"],
+    ["a document marker", "k: !bwref x/foo\n---\n"],
+    ["a key in a compact entry", "- k: !bwref x/foo\n  j: v\n"],
+    ["a closing bracket in flow context", "[!bwref x/foo\n]\n"],
+    ["a comma in flow context", "[!bwref x/foo\n, y]\n"],
+  ])("%s ends the value, which lists", (_, text) => {
+    expect(references(text)).toEqual(["x/foo"]);
+  });
+
+  // A directive line in the first column ends the scalar before the text rules read the next line.
+  test("a directive line before a comma line ends the value, which lists", () => {
+    expect(references("k: !bwref x/foo\n%YAML 1.1\n  ,bar\n")).toEqual(["x/foo"]);
+  });
+});
