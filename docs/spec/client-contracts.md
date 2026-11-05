@@ -909,10 +909,19 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
    what the watch showed and reopens the stream without `Last-Event-ID` (EVT-05).
 4. The browser cannot send `Authorization` with `EventSource`, so the web client reads the stream
    with `fetch` and a streamed response body, sending `Authorization`, `Accept` and
-   `Last-Event-ID` itself (assumption S1). No token is ever put in a URL.
+   `Last-Event-ID` itself (assumption S1). No token is ever put in a URL. The stream request has
+   neither the headers bound nor the attempt bound of [§8.4](#84-idempotency-and-ambiguous-responses) item 8. A
+   client whose sign-in ended ([§9.6](#96-failure-cases)) sends no stream request and stops the watch.
 5. The keep-alive comment keeps an intermediary with an idle timeout above 15 s from cutting a
    quiet stream; a client ignores comment lines and keeps its last event ID. A connection still
-   cut without the operation having ended is covered by item 2.
+   cut without the operation having ended is covered by item 2. A client takes a stream that
+   sent nothing for 45 s, not even a keep-alive comment, as cut. Every line it receives, a
+   comment included, starts the 45 s again, and the first wait starts when the request is sent,
+   so an answer that never sends its headers ends the same way. The CLI's `watch` and the web
+   reader use this value (`internal/client/watch.go:55-57`, `web/src/progress.ts`).
+   A refused stream (any status below 500 except 200) is read as a JSON page of the same
+   events, whose read renews a refused token (item 2); the contract does not say that a stream
+   answered `401` renews the token itself, and the web reader relies on the page read for it.
 6. The machine timeline has no stream (G9). A client reads its newest page with `order=newest`
    and keeps that answer's `tail`; "Load older" follows `next` with `order=newest`. While the
    timeline is on screen the client polls forward from `tail` (from the start while there is
