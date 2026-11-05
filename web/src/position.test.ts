@@ -682,6 +682,8 @@ describe("a tag is resolved the way go-yaml does", () => {
     ["a tag, then a tag and a flow sequence value", "a: !other\n  !u [!bwref x/foo]\n"],
     ["a tag, then a tag and a flow mapping value", "a: !other\n  !u {k: !bwref x/foo}\n"],
     ["a tag, then a tag and a flow sequence that does not close", "a: !other\n  !u [!bwref x/foo,\n  y]\n"],
+    ["a tag, then a tag and a flow value with a colon in a comment", "a: !other\n  !u [!bwref x/foo, # ]: x\n    y]\n"],
+    ["a tag, then a tag and a tag-only line", "a: !other\n  !u\n  b: !bwref x/foo\n"],
   ])("two tags over a block line break: %s lists nothing", (_, text) => {
     expect(references(text)).toEqual([]);
   });
@@ -699,6 +701,8 @@ describe("a tag is resolved the way go-yaml does", () => {
     ["a sequence after the tag", "a: !other\n  - !bwref x/foo\n"],
     ["a tagged flow sequence key", "a: !other\n  !u [k]: !bwref x/foo\n"],
     ["a tagged flow mapping key", "a: !other\n  !u {k: v}: !bwref x/foo\n"],
+    ["a tagged flow key with an apostrophe in a plain scalar", "a: !other\n  !u [it's]: !bwref 'x/foo'\n"],
+    ["a tagged flow key with a bracket in a tag", "a: !other\n  !u [!t[ x]: !bwref x/foo\n"],
   ])("one tag per node over a block line break: %s still lists the name", (_, text) => {
     expect(references(text)).toEqual(["x/foo"]);
   });

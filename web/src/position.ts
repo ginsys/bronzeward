@@ -475,8 +475,12 @@ interface Carry {
   tagged: boolean;
   // The tag of `tagged` stands in an earlier line than the token that is read now.
   earlier: boolean;
+  // A second tag in this line, after a tag of an earlier line, is the tag of a key of this line, or
+  // else a second tag on one node. It waits for the value colon of a key at flow depth 0 in this
+  // line; `commentStarts` refuses the document if the line ends without one.
+  split: boolean;
 }
-const freshCarry = (): Carry => ({ stack: [], flow: 0, ns: true, open: "", holder: -1, block: undefined, closed: false, tagged: false, earlier: false });
+const freshCarry = (): Carry => ({ stack: [], flow: 0, ns: true, open: "", holder: -1, block: undefined, closed: false, tagged: false, earlier: false, split: false });
 
 // The document that is being read (ginsys/bronzeward#615). A tag spelled through a handle names what
 // the document's %TAG directives say, so a `!bwref` property counts only when its document is
@@ -613,43 +617,6 @@ function plainEnd(line: string, from: number, flow: number): number {
   return i;
 }
 
-// Whether the node after the properties that end at `from` is a key of this line: a quoted or plain
-// scalar or a flow collection that closes on the line, followed by `:` and a blank. A tag before such a
-// key belongs to the key, not to the node above it.
-function keyFollows(line: string, from: number): boolean {
-  let i = from;
-  for (;;) {
-    while (i < line.length && isWs(line[i])) i++;
-    if (line[i] !== "!" && line[i] !== "&") break;
-    while (i < line.length && !isWs(line[i])) i++;
-  }
-  const c = line[i];
-  if (c === undefined) return false;
-  if (c === "[" || c === "{") {
-    // A simple key sits on one line, so a collection that does not close on it is no key. A quote
-    // that does not close is text (`[it's]`).
-    let depth = 0;
-    for (; i < line.length; i++) {
-      const d = line[i]!;
-      if (d === '"' || d === "'") {
-        const e = skipQuoted(line, i + 1, d);
-        if (e >= 0) i = e - 1;
-      } else if (d === "[" || d === "{") depth++;
-      else if ((d === "]" || d === "}") && --depth === 0) break;
-    }
-    if (depth !== 0) return false;
-    i++;
-    while (i < line.length && isWs(line[i])) i++;
-  } else if (c === '"' || c === "'") {
-    i = skipQuoted(line, i + 1, c);
-    if (i < 0) return false;
-    while (i < line.length && isWs(line[i])) i++;
-  } else {
-    i = plainEnd(line, i, 0);
-  }
-  return line[i] === ":" && (i + 1 >= line.length || isWs(line[i + 1]));
-}
-
 function pushEntry(stack: number[], col: number) {
   while (stack.length > 0 && stack[stack.length - 1]! > col) stack.pop();
   if (stack.length === 0 || stack[stack.length - 1]! < col) stack.push(col);
@@ -675,6 +642,10 @@ function commentStarts(lines: readonly string[]): { starts: number[]; props: Map
     const text = lead && rest.startsWith("﻿") ? ` ${rest.slice(1)}` : rest;
     // A directive line is no text to scan: the whole line is blanked.
     const at = readDocumentLine(docs, st, text, base) ? 0 : scanLine(st, docs, text, base + (lead ? 1 : 0));
+    // A simple key sits on one line: a pending second tag that no key colon of the line took is
+    // a second tag on one node (ginsys/bronzeward#620).
+    if (st.split) docs.refused = true;
+    st.split = false;
     base += full.length + 1;
     const end = lead ? at + 1 : at;
     return end >= line.length ? full.length : end;
@@ -711,7 +682,7 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number): number {
     st.closed = false;
     // A node that holds a tag and no content yet goes on in a blank line, a comment line and a line
     // more indented than its holder, so a second tag there is a second tag on one node. A key on that
-    // line can take its own tag (`a: !t` then `  !u b: x`): see `keyFollows`.
+    // line can take its own tag (`a: !t` then `  !u b: x`): see `split`.
     const goOn = st.tagged && st.ns && st.open === "" && (blank || /^ *#/.test(line) || ind > hold);
     st.tagged = goOn;
     st.earlier = goOn;
@@ -816,7 +787,10 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number): number {
         // resolve fails the stream, so its document lists nothing (ginsys/bronzeward#615). So does a
         // second tag on one node (ginsys/bronzeward#620).
         if (c === "!") {
-          if (st.tagged && !(st.earlier && keyFollows(line, e))) docs.refused = true;
+          if (st.tagged) {
+            if (st.earlier) st.split = true;
+            else docs.refused = true;
+          }
           st.earlier = false;
           st.tagged = true;
           const resolved = resolveTag(line.slice(j, e), line[e], docs.table);
@@ -835,6 +809,7 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number): number {
           const col = c === ":" && nodeStart >= 0 ? nodeStart : j;
           pushEntry(st.stack, col);
           hold = col;
+          if (c === ":") st.split = false;
         }
         nodeStart = -1;
         lastPlain = false;
@@ -862,6 +837,8 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number): number {
       if (st.flow === 0 && nodeStart >= 0) {
         pushEntry(st.stack, nodeStart);
         hold = nodeStart;
+        // The tag stands before this key, so it is the key's own tag.
+        st.split = false;
       }
       st.ns = true;
       nodeStart = -1;
