@@ -36,8 +36,10 @@ export interface Watch {
 }
 
 export type Watched =
-  // The operation as last read: terminal with every event shown, or `until` answered true.
-  | { kind: "ended"; operation: Operation }
+  // The operation as last read: terminal with every event shown, or `until` answered true. `epoch` is
+  // the epoch of that read's own response (undefined when it named none), not the client's epoch at
+  // the time the caller looks: the caller keeps what it derives from the operation under it.
+  | { kind: "ended"; operation: Operation; epoch: string | undefined }
   | { kind: "stopped" }
   // A refusal or a defect of the operation's read, its events' read or its stream.
   | { kind: "failed"; res: Failed };
@@ -150,7 +152,7 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
         if (w.signal.aborted) return { kind: "stopped" };
         const events = run.last === "" || epochOf(run.last) === epoch;
         const drainedUnder = run.pagesEpoch === undefined || run.pagesEpoch === epoch;
-        if (epoch === undefined || (events && drainedUnder)) return { kind: "ended", operation: res.data };
+        if (epoch === undefined || (events && drainedUnder)) return { kind: "ended", operation: res.data, epoch };
         // Events, or pages with none, of another epoch than the operation read's are of a restored
         // installation, where the operation can be in another state: it is read again, after the delay
         // so a server whose events never match is not asked again without a pause (the CLI's watch.go).
@@ -167,7 +169,7 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
         run.clear(RESTORED);
         stale = true;
       }
-      if (run.stop()) return { kind: "ended", operation: res.data };
+      if (run.stop()) return { kind: "ended", operation: res.data, epoch };
     } else if (res.kind !== "discarded" && res.kind !== "transport" && res.kind !== "unavailable") {
       return { kind: "failed", res };
     }
