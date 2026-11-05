@@ -620,10 +620,12 @@ describe("a tag is resolved the way go-yaml does", () => {
   // A marker closes a document. Text on the `...` line is content with no `---`, and a marker inside an
   // open flow collection is an error: go-yaml refuses both, so the document at fault lists nothing.
   test.each([
-    ["text on the `...` line", "a: 1\n... !<!bwref> x/foo\n"],
+    ["text on the `...` line", "a: 1\n... !bwref x/foo\n"],
+    ["a verbatim tag on the `...` line", "a: 1\n... !<!bwref> x/foo\n"],
     ["a mapping on the `...` line", "a: 1\n... b: !bwref x/foo\n"],
     ["a tag on the `...` line of a document that lists a name", "--- !bwref x/foo\n... !bwref x/bar\n", ["x/foo"]],
-    ["a `---` in an open flow sequence", "a: [!<!bwref> x/foo,\n---\nb: 1\n"],
+    ["a `---` in an open flow sequence", "a: [!bwref x/foo,\n---\nb: 1\n"],
+    ["a `---` in an open flow sequence, verbatim tag", "a: [!<!bwref> x/foo,\n---\nb: 1\n"],
     ["a `...` in an open flow sequence", "a: [!bwref x/foo,\n...\nb: 1\n"],
   ] as [string, string, string[]?][])("%s lists %j", (_, text, names = []) => {
     expect(references(text)).toEqual(names);
@@ -967,6 +969,49 @@ describe("a tag is resolved the way go-yaml does", () => {
     ["an opening bracket", "a: [\n%YAML 1.2\n]\nb: !bwref x/foo\n"],
   ])("a directive line after %s in a flow sequence refuses the document", (_, text) => {
     expect(references(text)).toEqual([]);
+  });
+
+  // A directive line in the first column ends a plain value: go-yaml ends the scalar at a line less
+  // indented than its parent (scannerc.go line 2815) and reads the `%` as a directive token (line 726).
+  // The first document is valid and lists its name. An indented line after the directive is content
+  // with no `---`, and it refuses the document it opens (ginsys/bronzeward#632).
+  test.each([
+    ["%YAML 1.1", "a: !bwref x/foo\n%YAML 1.1\n  continuation\n"],
+    ["%YAML 1.1 after an anchor", "a: !bwref &e x/foo\n%YAML 1.1\n  continuation\n"],
+    ["%TAG", "a: !bwref x/foo\n%TAG !x! !bw\n  continuation\n"],
+  ])("a %s line before an indented line ends the value, which lists", (_, text) => {
+    expect(references(text)).toEqual(["x/foo"]);
+  });
+
+  // A comment line and an indented `%` line are no directive: go-yaml joins them to the scalar.
+  test.each([
+    ["a comment line", "a: !bwref x/foo\n# c\n  continuation\n"],
+    ["an indented % line", "a: !bwref x/foo\n  %not\n  continuation\n"],
+  ])("%s before an indented line continues the value, which lists nothing", (_, text) => {
+    expect(references(text)).toEqual([]);
+  });
+
+  // go-yaml ends a plain scalar in a flow collection at `?` (scannerc.go line 2731), and `?` is a key
+  // token there (line 796). A key token right after a scalar, with no comma, is a parser error, and a
+  // `%` line after it is a directive token, so the document lists nothing (ginsys/bronzeward#632).
+  test.each([
+    ["a plain scalar", "a: [plain?\n%YAML 1.2\n]\nb: !bwref x/foo\n"],
+    ["a plain scalar after a comma", "a: [x, plain?\n%TAG !x! !bw\n]\nb: !bwref x/foo\n"],
+    ["a plain scalar in a flow mapping", "a: {k: plain?\n%YAML 1.2\n}\nb: !bwref x/foo\n"],
+    ["a plain scalar with a question mark inside", "a: [pl?ain\n%YAML 1.2\n]\nb: !bwref x/foo\n"],
+    ["a plain scalar and a tag", "a: [q? !bwref x/foo]\n"],
+    ["a quoted scalar", 'a: ["q"?]\nb: !bwref x/foo\n'],
+  ])("a question mark after %s in a flow collection refuses the document", (_, text) => {
+    expect(references(text)).toEqual([]);
+  });
+
+  test("a question mark after a scalar in a flow collection refuses its document only", () => {
+    expect(references("a: [plain?]\n---\nb: !bwref x/bar\n")).toEqual(["x/bar"]);
+  });
+
+  // In block context a `?` inside a plain scalar is text.
+  test("a question mark in a block plain scalar is text", () => {
+    expect(references("a: plain?\n  more\nb: !bwref x/foo\n")).toEqual(["x/foo"]);
   });
 
   test("a line that looks like a directive in a block scalar or a comment declares nothing", () => {
