@@ -1046,7 +1046,9 @@ current token expires
    lock the keychain is asked whether it is locked before each call, including a write and a
    removal, and a locked one, or one that gives no answer within 15 seconds, refuses the command as
    a locked store does. The question and the call after it share one bound of a minute, and the
-   tool is stopped when it passes. An error of the tool
+   tool is stopped when it passes. A keychain can lock between the question and the call. The call
+   can then show its password dialog under the renewal lock, for at most that shared minute, and
+   the tool is then stopped. An error of the tool
    never carries its standard output, which holds the secret on a read. A sign-in
    whose context was removed or changed while it ran is not kept, and its refresh token
    is revoked. Removing a context removes its stored sign-in under the renewal lock, with a
