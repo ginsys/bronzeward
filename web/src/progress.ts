@@ -77,6 +77,9 @@ class Run {
   // the events shown, and excludes the clear of an epoch change at the operation read).
   fresh = 0;
   halted = false;
+  // The epoch the last drain's pages came under, from their own responses: undefined when a page named
+  // none, or before a drain read.
+  pagesEpoch: string | undefined = undefined;
   constructor(readonly w: Watch) {}
 
   stop(): boolean {
@@ -135,6 +138,8 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
     // The epoch comes from the response the result comes from: the client's epoch can be a newer one
     // by the time this continues.
     const { result: res, epoch } = await client.readWithEpoch<Operation>(path);
+    // The page left while the read was pending: its answer is not acted on, and nothing more is sent.
+    if (w.signal.aborted) return { kind: "stopped" };
     // Events cleared at once, because the operation read names another epoch, are not progress.
     let stale = false;
     if (res.kind === "ok" && terminal(res.data.state)) {
@@ -143,10 +148,12 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
       const drained = await drain(client, path, run, false);
       if (drained === "read") {
         if (w.signal.aborted) return { kind: "stopped" };
-        if (epoch === undefined || run.last === "" || epochOf(run.last) === epoch) return { kind: "ended", operation: res.data };
-        // Events of another epoch than the operation read's are of a restored installation, where the
-        // operation can be in another state: it is read again, after the delay so a server whose
-        // events never match is not asked again without a pause (the CLI's watch.go).
+        const events = run.last === "" || epochOf(run.last) === epoch;
+        const drainedUnder = run.pagesEpoch === undefined || run.pagesEpoch === epoch;
+        if (epoch === undefined || (events && drainedUnder)) return { kind: "ended", operation: res.data };
+        // Events, or pages with none, of another epoch than the operation read's are of a restored
+        // installation, where the operation can be in another state: it is read again, after the delay
+        // so a server whose events never match is not asked again without a pause (the CLI's watch.go).
         await pace.sleep(delay, w.signal);
         delay = Math.min(2 * delay, 30_000);
         continue;
@@ -179,15 +186,27 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
 
 // Reads the JSON event pages to their end and shows every event after the last one shown (§8.6
 // item 2). Events of another epoch than the last one shown are read after a restore or a recovery
-// entry: what was shown is cleared and every event shown again. A read discarded for a new epoch,
+// entry: what was shown is cleared and every event shown again, and so are the events shown before
+// an empty list that came under another epoch. The epoch of the pages is that of their own
+// responses (`run.pagesEpoch`), not the client's at a later time. A read discarded for a new epoch,
 // or with no answer, shows nothing: the loop reads again.
 async function drain(client: Reader, path: string, run: Run, stoppable: boolean): Promise<"read" | "discarded" | Failed> {
-  const read = await readPages<OpEvent>(client, `${path}/events`, "", { items: [], next: undefined, restarted: false }, true, () => !run.w.signal.aborted);
+  run.pagesEpoch = undefined;
+  const pageReads: Pick<Client, "read"> = {
+    read: async <T>(p: string) => {
+      const { result, epoch } = await client.readWithEpoch<T>(p);
+      if (epoch !== undefined) run.pagesEpoch = epoch;
+      return result;
+    },
+  };
+  const read = await readPages<OpEvent>(pageReads, `${path}/events`, "", { items: [], next: undefined, restarted: false }, true, () => !run.w.signal.aborted);
   const res = read.kind === "dropped" ? read.failed : read;
   // The page that was pending when the watch ended is not delivered.
   if (run.w.signal.aborted) return "discarded";
   if (res.kind === "discarded" || res.kind === "transport" || res.kind === "unavailable") return "discarded";
   if (res.kind !== "ok") return res;
+  // An empty list under another epoch has no event to show the change: the events shown are cleared.
+  if (res.data.items.length === 0 && run.last !== "" && run.pagesEpoch !== undefined && run.pagesEpoch !== epochOf(run.last)) run.clear(RESTORED);
   for (const [i, e] of res.data.items.entries()) {
     if (i === 0 && run.last !== "" && epochOf(e.id) !== epochOf(run.last)) run.clear(RESTORED);
     run.show({ id: e.id, type: e.type, data: e.data });
