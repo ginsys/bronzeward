@@ -74,10 +74,18 @@ test("an event line names its type, generation and code, and nothing else of its
   expect(eventLine({ id: "e1:3", type: "resume-failed", data: { code: "dependency-unavailable", extra: "x" } })).toBe("resume-failed: dependency-unavailable");
 });
 
+// An import started by this page: sendStart's write settles as done under the epoch it was sent under.
+const begun = (ingestion: string, draft: string, epoch: string) => {
+  const got: { spec?: WriteSpec } = {};
+  const i: StartInput = { kind: "import", machine: "mch_b3caa2q", draft, source: "document", staging: "encrypted", review: true, doc: "x: 1", marks: "" };
+  sendStart((s) => { got.spec = s; }, () => {}, i, '"1-a"');
+  got.spec!.settled!({ kind: "done", data: { ingestion } } as never, { epoch } as never);
+};
+
 describe("ETAG-02: after a released import the draft's ETag is adopted only at the import's draft revision", () => {
   const result = { draft: "drf_2rmp457a", draftRevision: 2, importBaseRevision: "ibr_1" };
   test("an import this page started, with the draft at its revision, adopts the re-read ETag", async () => {
-    started.set("ing_6fdq2la", "drf_2rmp457a");
+    begun("ing_6fdq2la", "drf_2rmp457a", "e1");
     keepETag("drf_2rmp457a", '"1-a"', "e1");
     const r = reading({ kind: "ok", data: { revision: 2 }, etag: '"2-b"' });
     const out = text(await ended(r.client, ing(), op({ state: "succeeded", result }), "succeeded", NOW, "e1"));
@@ -86,7 +94,7 @@ describe("ETAG-02: after a released import the draft's ETag is adopted only at t
     expect(keptETag("drf_2rmp457a", "e1")).toBe('"2-b"');
   });
   test("a higher revision is treated as a 412: the ETag is not adopted and the change is to be reviewed", async () => {
-    started.set("ing_6fdq2la", "drf_2rmp457a");
+    begun("ing_6fdq2la", "drf_2rmp457a", "e1");
     keepETag("drf_2rmp457a", '"1-a"', "e1");
     const r = reading({ kind: "ok", data: { revision: 3 }, etag: '"3-c"' });
     const out = text(await ended(r.client, ing(), op({ state: "succeeded", result }), "succeeded", NOW, "e1"));
@@ -94,7 +102,7 @@ describe("ETAG-02: after a released import the draft's ETag is adopted only at t
     expect(keptETag("drf_2rmp457a", "e1")).toBe('"1-a"');
   });
   test("a draft read that answers under another epoch than the operation read keeps no ETag (§8.5)", async () => {
-    started.set("ing_6fdq2la", "drf_2rmp457a");
+    begun("ing_6fdq2la", "drf_2rmp457a", "e1");
     keepETag("drf_2rmp457a", '"1-a"', "e1");
     const r = reading({ kind: "ok", data: { revision: 2 }, etag: '"2-b"' }, "e2");
     const out = text(await ended(r.client, ing(), op({ state: "succeeded", result }), "succeeded", NOW, "e1"));
@@ -103,6 +111,16 @@ describe("ETAG-02: after a released import the draft's ETag is adopted only at t
     // Neither epoch holds the new ETag; the earlier one is the one kept before.
     expect(keptETag("drf_2rmp457a", "e2")).toBeUndefined();
     expect(keptETag("drf_2rmp457a", "e1")).toBe('"1-a"');
+  });
+  test("an import started under an earlier epoch keeps no ETag, though both reads answer under the new one and the revision matches", async () => {
+    // Revisions rewind with a restore and can be issued again with other content: revision 2 under e2
+    // is not the revision 2 this import produced under e1.
+    begun("ing_6fdq2la", "drf_2rmp457a", "e1");
+    keepETag("drf_2rmp457a", '"1-a"', "e1");
+    const r = reading({ kind: "ok", data: { revision: 2 }, etag: '"2-other"' }, "e2");
+    const out = text(await ended(r.client, ing(), op({ state: "succeeded", result }), "succeeded", NOW, "e2"));
+    expect(out).toContain("The installation entered recovery mode or was restored since this import started, so the draft's ETag is not kept.");
+    expect(keptETag("drf_2rmp457a", "e2")).toBeUndefined();
   });
   test("an import another page started reads no draft and keeps no ETag", async () => {
     const r = reading({ kind: "ok", data: { revision: 2 }, etag: '"2-b"' });
@@ -206,8 +224,8 @@ describe("the start's body and its protected input (G5, §11.2)", () => {
     releaseInput(b, { kind: "done", data: null } as never);
     expect(b).toEqual({});
     const { spec } = start();
-    spec.settled!({ kind: "done", data: { ingestion: "ing_new" } } as never, {} as never);
-    expect(started.get("ing_new")).toBe("drf_2rmp457a");
+    spec.settled!({ kind: "done", data: { ingestion: "ing_new" } } as never, { epoch: "e1" } as never);
+    expect(started.get("ing_new")).toEqual({ draft: "drf_2rmp457a", epoch: "e1" });
   });
   test("the kept request does not reach the typed input once the send has returned", () => {
     let returned = false;
@@ -220,8 +238,8 @@ describe("the start's body and its protected input (G5, §11.2)", () => {
     const got: { spec?: WriteSpec } = {};
     sendStart((s) => { got.spec = s; }, () => {}, input, '"1-a"');
     returned = true;
-    expect(() => got.spec!.settled!({ kind: "done", data: { ingestion: "ing_kept" } } as never, {} as never)).not.toThrow();
-    expect(started.get("ing_kept")).toBe("drf_2rmp457a");
+    expect(() => got.spec!.settled!({ kind: "done", data: { ingestion: "ing_kept" } } as never, { epoch: "e1" } as never)).not.toThrow();
+    expect(started.get("ing_kept")).toEqual({ draft: "drf_2rmp457a", epoch: "e1" });
   });
 });
 
