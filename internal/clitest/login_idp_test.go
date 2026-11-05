@@ -223,7 +223,7 @@ func TestLoginIdentityProvider(t *testing.T) {
 		f.want(ctl(f, "context", "list", "-o", "json"), 0, `"name":"idp"`, `"lastEpoch":"`)
 	}
 
-	// AUTH-06's renewal half; its stream half needs operation watch.
+	// AUTH-06's renewal half; its stream half is TestOperations' case AUTH-06 (operation watch).
 	run["AUTH-06"] = func(t *testing.T, f *fixture) {
 		if testing.Short() {
 			t.Skip("waits out a 5-minute access token")
