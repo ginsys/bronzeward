@@ -150,7 +150,7 @@ export function ProfilePane({ draft, entry, seeChange, claim = () => {}, shown =
         return setFailed(true);
       }
       setLoaded(revision);
-      act({ kind: "read", text: pinned(EMPTY, r.data.fragments), since: done, revision: drafted.current, id: revision });
+      act({ kind: "read", text: pinned(EMPTY, r.data.fragments), since: done, revision: drafted.current, id: revision, ...(loaded === revision && { reread: true as const }) });
     });
     return () => {
       live = false;
@@ -611,7 +611,7 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
         return setFailed(true);
       }
       setLoaded(revision);
-      act({ kind: "read", text: withLists(EMPTY, fromRevision(r.data)), since: done, revision: drafted.current, id: revision });
+      act({ kind: "read", text: withLists(EMPTY, fromRevision(r.data)), since: done, revision: drafted.current, id: revision, ...(loaded === revision && { reread: true as const }) });
     });
     return () => {
       live = false;

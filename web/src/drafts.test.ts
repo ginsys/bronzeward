@@ -634,7 +634,7 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     expect(src).toMatch(/const waits = unread\(entry\?\.revision, loaded\);/);
     // #517 review round 3: a read with text records its revision, and a draft read again retries
     // a failed one; without either the pane never edits, or stays waiting after Show.
-    expect(src).toMatch(/setLoaded\(revision\);\n(?:\s*\/\/[^\n]*\n)*\s*act\(\{ kind: "read", text: fromRevision\(r\.data\), since: done, revision: drafted\.current, id: revision \}\);/);
+    expect(src).toMatch(/setLoaded\(revision\);\n(?:\s*\/\/[^\n]*\n)*\s*act\(\{ kind: "read", text: fromRevision\(r\.data\), since: done, revision: drafted\.current, id: revision, \.\.\.\(loaded === revision && \{ reread: true as const \}\) \}\);/);
     expect(src).toMatch(/act\(\{ kind: "draft", revision: draft\.revision, changed[^\n]*\n\s*if \(!changed && failed\) retry\(\(x\) => x \+ 1\);/);
     // #534 rounds 4 and 5: a final outcome other than done or a 412 ends the open write, a set-aside
     // one included. An unknown one does not: [Repeat exactly] may still commit it, or answer 412.
@@ -1084,6 +1084,36 @@ describe("the editor's text and a 412's conflict, one transition per row", () =>
     expect(rest(own)).toEqual({ held: M, saved: EMPTY, sent: removes(M), writes: 1 });
     const removed = run(removing(theirs10, gone(11)), [{ kind: "done" }]);
     expect(rest(removed)).toEqual({ held: M, saved: EMPTY, sent: removes(M), writes: 1 });
+  });
+
+  // Review of ginsys/bronzeward#623: a restore that brings back the saved text names a revision the pane
+  // has not read. While a Remove is open it is another author's change; a read again of the loaded
+  // revision (`reread`) is not. A Save open keeps the earlier rule (the Save's own revision is only
+  // known at done).
+  const sameText: EditorEvent = { kind: "read", text: A, since: 0, revision: 10, id: "frv_10" };
+
+  test("ginsys/bronzeward#623: a done Remove shows a restore that has the saved text, the operator's text aside", () => {
+    const s = run(removing(sameText), [{ kind: "done" }]);
+    expect(rest(s)).toEqual({ held: A, saved: A, sent: removes(M), conflict: theirs(M, 10), writes: 1 });
+    expect(editor(s, { kind: "copy" }).held).toBe(M);
+  });
+
+  test("ginsys/bronzeward#623: with nothing typed, a done Remove shows a restore that has the saved text and opens no conflict", () => {
+    const s = run({ held: A, saved: A }, [{ kind: "send", removes: true }, sameText, { kind: "done" }]);
+    expect(rest(s)).toEqual({ held: A, saved: A, sent: removes(A), writes: 1 });
+    expect(holdsUnsaved(s.held, s.saved, s.conflict?.mine)).toBe(false);
+  });
+
+  test("ginsys/bronzeward#623: a removal read after such a restore ends the entry removed", () => {
+    const s = run(removing(sameText, gone(11)), [{ kind: "done" }]);
+    expect(rest(s)).toEqual({ held: M, saved: EMPTY, sent: removes(M), writes: 1 });
+  });
+
+  test("ginsys/bronzeward#623: a read again of the loaded revision, or a Save's read of the same text, stays dropped", () => {
+    const reread = run(removing({ ...sameText, reread: true }), [{ kind: "done" }]);
+    expect(rest(reread)).toEqual({ held: M, saved: EMPTY, sent: removes(M), writes: 1 });
+    const save = run(sending(sameText), [{ kind: "done", revision: "frv_9" }]);
+    expect(rest(save)).toEqual({ held: M, saved: M, sent: sentOf(M), writes: 1, own: "frv_9" });
   });
 
   test("ginsys/bronzeward#608: a failed Remove shows the text restored while it was open, the operator's text aside", () => {
