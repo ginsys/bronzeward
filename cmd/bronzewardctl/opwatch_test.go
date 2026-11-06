@@ -570,6 +570,21 @@ func TestOperationWatchOutage(t *testing.T) {
 			t.Errorf("exit %d, stdout %q, stderr %q; want 3, the state named as not read and no completion line", code, out, errOut)
 		}
 	})
+	t.Run("the timeout during an outage that began after the first read, when the events are of another epoch: exit 3", func(t *testing.T) {
+		// The first read shows the operation succeeded in epoch 1. The stream answers epoch 2, and every read of
+		// the operation after the first is out of reach until the timeout. The watch made no read of its own, and
+		// the first read is of the installation before the restore, so the state is unknown.
+		f := &opFake{stream: []string{sse(1, "commitment", commitment)}, pages: []string{evPage(1, "commitment", commitment)},
+			opEpoch: "ep_BWSYNTH-1", outageFrom: 2, outageReads: 1000,
+			body: fmt.Sprintf(opJSON, "apply-config", "succeeded", "null", "null", "[]")}
+		srv := httptest.NewServer(f)
+		t.Cleanup(srv.Close)
+		automationContext(t, srv.URL)
+		code, out, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "2500ms")
+		if code != 3 || !strings.Contains(errOut, "was not read") || strings.Contains(out, "Succeeded") {
+			t.Errorf("exit %d, stdout %q, stderr %q; want 3, the state named as not read and no completion line", code, out, errOut)
+		}
+	})
 	t.Run("Ctrl-C during a wait: exit 130 at once", func(t *testing.T) {
 		f := newOutage(t)
 		grace := interruptGrace

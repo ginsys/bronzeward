@@ -87,6 +87,7 @@ func (f *opFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			f.stall(r, f.readHang)
 		}
 		if f.outageFrom > 0 && f.reads >= f.outageFrom && f.reads < f.outageFrom+f.outageReads {
+			w.Header().Del("Bronzeward-Epoch") // a server that is down shows no epoch
 			w.WriteHeader(http.StatusBadGateway)
 			return
 		}

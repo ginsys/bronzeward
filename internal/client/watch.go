@@ -85,6 +85,13 @@ type OperationRead struct {
 	Epoch string
 }
 
+// EpochHolds is whether read is of the installation as the last answer of the server showed it. An
+// answer of another epoch, one that failed included, shows a restore since the read, and the read does
+// not stand as the state. A read or an answer with no epoch cannot show that, so it holds.
+func (c *Client) EpochHolds(read OperationRead) bool {
+	return read.Epoch == "" || c.Context.LastEpoch == "" || read.Epoch == c.Context.LastEpoch
+}
+
 // WatchBody is Watch that also returns the operation read the result comes from, so a caller that
 // prints the resource prints the one it decided the outcome from, and compares the epoch of the
 // reads that follow with the one it was decided in.
@@ -169,8 +176,13 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 				switch {
 				case errors.Is(err, ErrWatchEnded):
 					// The watch ended before the second read: the terminal read stands, and the failed drain is reported.
+					// But the failed drain can carry another epoch, which shows the installation restored since the
+					// read: no read stands then.
 					if w.halt.err != nil { // Until failed: its error stands too, as at the stop below
 						return nil, OperationRead{}, errors.Join(derr, w.halt.err)
+					}
+					if !c.EpochHolds(OperationRead{raw, epoch}) {
+						return nil, OperationRead{}, errors.Join(derr, err, ErrWatchRestored)
 					}
 					return o, OperationRead{raw, epoch}, derr
 				case err != nil:
