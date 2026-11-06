@@ -730,6 +730,34 @@ describe("a callback that aborts its own watch", () => {
     expect(r.log).toEqual(["show e1:1"]);
   });
 
+  test("a clear for another epoch in the JSON pages stops the watch before the page is shown", async () => {
+    const s = server({
+      streams: [{ chunks: [frame(ev("e1:1"))], epoch: "e1" }, { chunks: ["{}"], type: "application/json" }],
+      states: ["running", "running", "running"],
+      pages: [ev("e2:1"), ev("e2:2")],
+      epoch: "e2",
+    });
+    const r = recorder();
+    const clear = r.w.clear;
+    r.w.clear = (why) => { clear(why); r.abort.abort(); };
+    expect(await watch(s.client, OP, r.w, r.pace)).toEqual({ kind: "stopped" });
+    expect(r.log).toEqual(["show e1:1", `clear: ${RESTORED}`]);
+  });
+
+  test("a clear for another epoch in the drain of a terminal state stops the watch before the page is shown", async () => {
+    const s = server({
+      streams: [{ chunks: [frame(ev("e1:1")), frame(ev("e1:2", "staged"))], epoch: "e1" }, new TypeError("Failed to fetch")],
+      states: ["running", "succeeded"],
+      pages: [ev("e2:1"), ev("e2:2", "succeeded")],
+      epoch: "e2",
+    });
+    const r = recorder();
+    const clear = r.w.clear;
+    r.w.clear = (why) => { clear(why); r.abort.abort(); };
+    expect(await watch(s.client, OP, r.w, r.pace)).toEqual({ kind: "stopped" });
+    expect(r.log).toEqual(["show e1:1", "show e1:2", `clear: ${RESTORED}`]);
+  });
+
   test("a clear for the epoch of the operation read stops the watch without asking until", async () => {
     const s = server({ streams: [{ chunks: [frame(ev("e1:1"))] }], states: ["running@e2"] });
     let cleared = false;
