@@ -16,7 +16,8 @@ import (
 
 // TestReportOutputFailed: a failed write of the output exits 6 when nothing more specific applies,
 // and every more specific code stays when the same error is joined with it. The order of the cases in
-// report is the precedence: 130, usage 2, 3, 4, 5, 2, then the server's refusal (1), then 6.
+// report is the precedence: usage 2, the stop 130, 3, the stop of a read (130, unless an unknown
+// outcome joined it), 4, 5, 2, then the server's refusal (1), then 6.
 func TestReportOutputFailed(t *testing.T) {
 	write := outputFailed{fmt.Errorf("write /dev/stdout: %w", syscall.ENOSPC)}
 	refusal := &client.Problem{Status: 403, Doc: map[string]any{"title": "Forbidden"}, Route: "GET /x", Where: "reading x"}

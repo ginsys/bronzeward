@@ -324,7 +324,7 @@ Global: --context, -o table|json|yaml, --no-input, --no-wait, --idempotency-key,
   deciding, [§8](#8-states-every-view-must-handle));
   4 a waited-for operation ended `failed`, `rejected` or `cancelled`; 5 a waited-for operation
   not terminal at the end of the wait (`--timeout`); 6 the output of the command cannot be written (a
-  full disk, say); 130 a read command or `operation watch` stopped by Ctrl-C. Code 6 takes the place of 0 and of the
+  full disk, say); 130 a read command or `operation watch` stopped by Ctrl-C (3 stays when an unknown outcome is reported beside the stop). Code 6 takes the place of 0 and of the
   plain 1 that a failed write gave. A more specific code wins: 2, 3, 4, 5 and 130 stay, and so does the
   1 of a refusal by the server. The write error is printed beside them. A closed pipe has no code
   (see [§5.7](#57-operation-tracking)).
@@ -743,7 +743,7 @@ If the resource cannot be written after Ctrl-C, one note goes to standard error 
 If the lines of the watch could not be written before Ctrl-C, the stop lines and the follow line go to
 standard error, last, and the exit code stays 130.
 A stream that takes no write blocks only its own lines. If standard error is blocked and the stop lines go to standard output, the stop lines print and the exit is 130 after the grace. If the stream of the stop lines is the blocked one, the stop lines wait on it. That includes standard error with `-o json` or `-o yaml`, where the lines and the notices share one stream. A second Ctrl-C ends the command at once.
-Every other read command takes a Ctrl-C too, for the read it makes: it ends a request in flight and a wait before a retry, prints `Stopped at your request while reading GET /api/v1/<path>.` and exits 130. `machine timeline --follow` keeps its own stop line, `Stopped following the timeline of machine <id> at your request.` A second Ctrl-C ends the client at once. After the first Ctrl-C the command sends no more reads, and it exits 130 with that stop line even when a lookup beside its result had dropped the error. A write in flight does not take the Ctrl-C, and a write not yet started is not sent ([client contracts §8.2](client-contracts.md#82-errors)).
+Every other read command takes a Ctrl-C too, for the read it makes: it ends a request in flight and a wait before a retry, prints `Stopped at your request while reading GET /api/v1/<path>.` and exits 130. `machine timeline --follow` keeps its own stop line, `Stopped following the timeline of machine <id> at your request.` A second Ctrl-C ends the client at once. After the first Ctrl-C the command sends no more reads, and it exits 130 with that stop line even when a lookup beside its result had dropped the error. An error that the command also returns prints before the stop line, and an unknown outcome keeps exit 3 with its text. A write in flight does not take the Ctrl-C, and a write not yet started is not sent ([client contracts §8.2](client-contracts.md#82-errors)).
 A closed standard output ends the program by SIGPIPE, which Go raises for a write to a closed pipe on
 standard output. This holds for every command, in table and in `-o json` mode, and it gives no note and
 no exit code. Any other failed write to standard output exits 6.

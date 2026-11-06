@@ -231,6 +231,39 @@ func TestAfterCutKeepsOtherFailuresAndWriteOutcomes(t *testing.T) {
 	}
 }
 
+// TestReportKeepsWhatIsJoinedWithACut: report keeps every error that a command joined with the Ctrl-C
+// of a read. An unknown outcome keeps exit 3 and its text. Any other error is printed before the stop
+// line, which ends the output, and the exit stays 130.
+func TestReportKeepsWhatIsJoinedWithACut(t *testing.T) {
+	cut := &client.Interrupted{Route: "GET /api/v1/clusters"}
+	stop := "Stopped at your request while reading GET /api/v1/clusters.\n"
+	for _, tc := range []struct {
+		name string
+		err  error
+		want int
+		seen string // text that must show on standard error
+	}{
+		{"a cut alone", cut, 130, ""},
+		{"a wrapped cut alone", fmt.Errorf("reading the plan: %w", cut), 130, ""},
+		{"an unknown write outcome", errors.Join(&client.Unknown{}, cut), 3, "stopped at your request"},
+		{"an unknown outcome of an operation", errors.Join(outcomeUnknown{errors.New("the mark may be applied")}, cut), 3, "the mark may be applied"},
+		{"a blocked mark and a failed draft read", errors.Join(&client.Blocked{Err: errors.New("the mark was not applied")}, cut), 130, "the mark was not applied"},
+		{"a failed state save", errors.Join(cut, errors.New("saving the state failed")), 130, "saving the state failed"},
+		{"a failed output write", errors.Join(cut, outputFailed{errors.New("write /dev/stdout: no space left on device")}), 130, "no space left on device"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			code := report(tc.err, &out, &errOut)
+			if code != tc.want || !strings.Contains(errOut.String(), tc.seen) {
+				t.Errorf("exit %d, stderr %q; want exit %d showing %q", code, errOut.String(), tc.want, tc.seen)
+			}
+			if tc.want == 130 && (!strings.HasSuffix(errOut.String(), stop) || strings.Count(errOut.String(), "Stopped at your request") != 1) {
+				t.Errorf("stderr %q; want one stop line, at the end", errOut.String())
+			}
+		})
+	}
+}
+
 // TestArmAfterACutEndsAtOnce: after a read recorded its Ctrl-C, a later read gets a context that has
 // ended and a disarm that says so, and the first cut stays the one the run reports.
 func TestArmAfterACutEndsAtOnce(t *testing.T) {
