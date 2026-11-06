@@ -302,7 +302,8 @@ Option C, the verbatim form alone, leaves the prefix split and the percent escap
 the six separate fixes of #598 went.
 
 The editor accepts `%YAML 1.1` only, as the server's parser does. A document lists nothing when the
-parser refuses it. The parser refuses a directive line it cannot read, a `%YAML` line or a `%TAG` handle given twice, a directive line or a `---` or `...` marker inside an open flow collection, and
+parser refuses it in one of the shapes named here. The last paragraph of this section states what
+remains open. The parser refuses a directive line it cannot read, a `%YAML` line or a `%TAG` handle given twice, a directive line or a `---` or `...` marker inside an open flow collection, and
 directives with no `---` after them. A directive line in the first column after block content ends
 the document and opens the directives of the next one. That line also ends a plain value, so an
 indented line after it does not continue the value. The parser also refuses content after `...`
@@ -322,6 +323,13 @@ the line break inside a flow collection, as in `[a` followed by a `%YAML 1.2` li
 parser ends that scalar at a marker or a comment only. A comment, a quote, a comma or a tag before
 the line makes it a directive again. A marker in the first column of a quoted scalar is not text:
 the document that holds it lists nothing, and the editor still reads the line as quoted text.
+
+This list of refused shapes is not complete. The editor can still list a name in a document that the
+parser refuses, in shapes that this specification does not name. The server's check decides such a
+document. The [tag handle record](../design/research/20261104-tag-handle-resolution.md), section
+"Sweep of set S8", counts 85,552 documents of that kind in set S8, in which the scanner on main still
+listed a name when the record was written. It gives no later count. This specification does not
+decide whether to close the gap in code.
 
 If the operator edited the marks after a refusal,
 [Go to field] finds the refused line where it is now. If that line is gone, it focuses the marks field and selects nothing.
