@@ -499,14 +499,10 @@ interface Carry {
   // (ginsys/bronzeward#654). A line break, `- `, `? ` and an explicit key's colon set it again.
   noKey: boolean;
   // The last token was the colon of an explicit key (`? a` then `:`), whatever lines and comments lie
-  // between, and the key was one plain or quoted scalar, or properties alone. A flow key of only `?`
-  // items right after it is no parse error then (see `qKey`). After any other key go-yaml refuses it.
+  // between. A flow key of only `?` items right after it is no parse error (see `qKey`).
   afterValue: boolean;
-  // What the content of an explicit key holds so far, from its `?` to its `:`: -1 none is tracked, 0
-  // nothing, 1 properties alone, 2 one plain or quoted scalar, 3 anything else.
-  ek: number;
 }
-const freshCarry = (): Carry => ({ stack: [], flow: 0, ns: true, open: "", holder: -1, block: undefined, closed: false, tagged: false, earlier: false, split: false, chain: false, gap: 0, clean: true, afterDirective: false, noKey: false, afterValue: false, ek: -1 });
+const freshCarry = (): Carry => ({ stack: [], flow: 0, ns: true, open: "", holder: -1, block: undefined, closed: false, tagged: false, earlier: false, split: false, chain: false, gap: 0, clean: true, afterDirective: false, noKey: false, afterValue: false });
 
 // The document that is being read (ginsys/bronzeward#615). A tag spelled through a handle names what
 // the document's %TAG directives say, so a `!bwref` property counts only when its document is
@@ -847,14 +843,6 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: numb
       // `? a\n: &x\n  [? b]: V` is valid.
       const viaValue = st.afterValue;
       if (c !== "!" && c !== "&") st.afterValue = false;
-      // The content of an explicit key: properties alone and then one scalar, or one scalar alone, keep
-      // the exception. A flow collection, an alias, a block scalar or a second node do not.
-      const inKey = st.flow === 0 && st.ek >= 0;
-      if (inKey && !((c === "?" || c === ":") && (next === undefined || isWs(next)))) {
-        if (c === "!" || c === "&") st.ek = st.ek === 0 ? 1 : 3;
-        else if (c === "[" || c === "{" || c === "*" || c === "|" || c === ">" || (c === "-" && (next === undefined || isWs(next)))) st.ek = 3;
-        else st.ek = st.ek === 0 ? 2 : 3;
-      }
       if (st.flow === 1 && entry) {
         if (c === "?") anyQ = true;
         else if (c !== "," && c !== "]" && c !== "}") allQ = false;
@@ -945,11 +933,7 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: numb
           if (c === ":") {
             st.split = false;
             if (nodeStart >= 0) st.noKey = true;
-            else st.afterValue = st.ek === 1 || st.ek === 2;
-            st.ek = -1;
-          } else if (c === "?") {
-            // The content of an explicit key starts here, or, inside one, a second `?` is not one scalar.
-            st.ek = inKey && j !== ind ? 3 : 0;
+            else st.afterValue = true;
           }
         }
         nodeStart = -1;
@@ -982,7 +966,6 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: numb
         pushEntry(st.stack, nodeStart);
         hold = nodeStart;
         st.noKey = true;
-        st.ek = -1;
         // The tag stands before this key, so it is the key's own tag.
         st.split = false;
       }
