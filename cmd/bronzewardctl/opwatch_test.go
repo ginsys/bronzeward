@@ -942,17 +942,30 @@ func TestOperationWatchInterruptPendingWriteFails(t *testing.T) {
 	var taken sync.Once
 	onInterrupt = func() { taken.Do(func() { close(out.taken) }) }
 	defer func() { onInterrupt = nil }()
+	seen := make(chan bool, 1) // whether the stop lines showed in the stack before the budget ended
 	go func() {
 		defer close(out.release)
+		// The budget starts when the watch took the Ctrl-C, not when the command started.
+		select {
+		case <-out.taken:
+		case <-time.After(5 * time.Second):
+			seen <- false
+			return
+		}
 		buf := make([]byte, 1<<20)
 		for deadline := time.Now().Add(4 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
 			if bytes.Contains(buf[:runtime.Stack(buf, true)], []byte("(*watchOut).stop")) {
 				time.Sleep(50 * time.Millisecond)
+				seen <- true
 				return
 			}
 		}
+		seen <- false
 	}()
 	code := run([]string{"operation", "watch", "op_BWSYNTH", "--timeout", "30s"}, out, &e)
+	if !<-seen {
+		t.Fatal("the stop lines never showed in the stack after the Ctrl-C: the test did not reach its interleaving")
+	}
 	stop := "Stopped watching at your request. Operation op_BWSYNTH goes on; the state it has now was not read.\n"
 	follow := "Follow it again with: bronzewardctl operation watch 'op_BWSYNTH'\n"
 	if code != 130 || !strings.HasSuffix(e.String(), stop+follow) || out.n < 3 {
