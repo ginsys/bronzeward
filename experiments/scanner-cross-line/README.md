@@ -145,7 +145,9 @@ server refuses the document anyway. The table counts:
 - `unfit` — the oracle's mark for a document the server refuses for its `!bwref` text: a tagged
   value that is no name, a scalar whose text holds the tag, or a tag on a mapping key (explicit or
   implicit, or an alias key of such a key). The oracle lists no name for a tagged key, so a
-  scanner that lists none there is equal to it.
+  scanner that lists none there is equal to it. The S9 documents with a tag on an implicit key are
+  server-refused. They count as equal, not as lost, and no count of them is an acceptance number
+  (ginsys/bronzeward#629).
 - `valid` — documents go-yaml accepts. A document go-yaml refuses reads no reference on the server.
 - `lost` — valid documents where the candidate lacks a name go-yaml lists. `lost, server-fit` is
   the same count on documents the server does not refuse for their `!bwref` text.
