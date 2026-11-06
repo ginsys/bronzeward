@@ -172,6 +172,9 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 				case now == epoch && Terminal(again.State):
 					return again, OperationRead{againRaw, now}, derr
 				}
+				// The watch goes on: the reread is now the last read, so an outage that ends the watch does not
+				// return the terminal read it replaced.
+				lastOp, lastRead = again, OperationRead{againRaw, now}
 			} else {
 				held := pageEpoch == "" || pageEpoch == epoch
 				if epoch == "" || held && (last == "" || epochOf(last) == epoch) {

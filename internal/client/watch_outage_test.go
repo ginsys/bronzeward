@@ -126,6 +126,43 @@ func TestWatchOutage(t *testing.T) {
 			t.Errorf("watch: %v; want Until's error", err)
 		}
 	})
+	t.Run("a reread after a refused drain that shows a running operation is the last read when an outage ends the watch", func(t *testing.T) {
+		reads = nil
+		ended(2 * time.Second)
+		// The first read is terminal and its drain is refused. The reread shows the operation running, so the
+		// watch goes on. The next read is out of reach until the watch ends: the terminal read is stale.
+		o := &opServer{streams: []handler{sse(ev(e1+":1", "queued"))}, epochs: []string{e1}, states: []string{"failed", "running"},
+			pagesStatus: http.StatusForbidden, outage: 99, outageAfter: 2, outageKind: "502"}
+		_, _, state, _, err := watched(t, o, e1, nil)
+		if err != nil || state != "running" {
+			t.Errorf("watch: state %q, error %v; want running (the reread), no error", state, err)
+		}
+	})
+	t.Run("the watch ending in an outage skips the epoch refresh a new epoch asks for", func(t *testing.T) {
+		reads = nil
+		ended(2 * time.Second)
+		// The second stream moves the installation to another epoch, then the operation read is out of reach.
+		const e2 = "ep_BWSYNTH2"
+		o := &opServer{streams: []handler{sse(ev(e1+":1", "queued")), sse(ev(e2+":1", "queued"))}, epochs: []string{"", e2},
+			states: []string{"running"}, outage: 99, outageAfter: 1, outageKind: "502"}
+		serverReads := 0
+		count := func(c *Client) {
+			base := c.hc.Transport
+			if base == nil {
+				base = http.DefaultTransport
+			}
+			c.hc.Transport = roundTrip(func(r *http.Request) (*http.Response, error) {
+				if r.URL.Path == "/api/v1/server" {
+					serverReads++
+				}
+				return base.RoundTrip(r)
+			})
+		}
+		_, _, state, _, err := watched(t, o, e1, count)
+		if serverReads != 0 || err != nil || state != "running" {
+			t.Errorf("watch: state %q, error %v, %d reads of GET /server; want running, no error and no read of GET /server", state, err, serverReads)
+		}
+	})
 	t.Run("a read refused outside the retryable set is not repeated", func(t *testing.T) {
 		reads = nil
 		o := &opServer{streams: []handler{sse(ev(e1+":1", "queued"))}, states: []string{"running"}, gone: 1}
