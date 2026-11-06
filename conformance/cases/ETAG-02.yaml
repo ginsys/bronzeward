@@ -1,0 +1,27 @@
+id: ETAG-02
+setup: a disposable deployment with mise run dev-bao's OpenBao as its provider; a cluster, a machine and an open draft, written through the API as h-author; the browser signed in as h-author on the import wizard, with a synthetic document and transient staging
+action: first case, the page starts an import from a pasted document, follows it to released, and a second import from a file follows; second case, the answer to the page's re-read of the draft after released is held, another author's write moves the draft, and the answer is released
+exchange:
+  - request: POST /api/v1/ingestions
+    headers: ["Authorization: Bearer <token>", "Content-Type: application/json", "Idempotency-Key: <key>", "Bronzeward-Expected-Epoch: <epoch>", "If-Match: <the draft's ETag, read for this start or kept after the last import>"]
+  - request: GET /api/v1/operations/<operation>/events, Accept text/event-stream, until the operation succeeded
+  - request: GET /api/v1/drafts/<draft>, the re-read after the success
+fault: >-
+  second case: the injector holds the answer to the re-read, and another write to the draft moves
+  its revision past the import's before the answer goes on
+expect:
+  server: first case, both imports released and the draft at the import's revision; second case, the import released, then another fragment written
+  client: >-
+    first case, the re-read's revision equals the operation's result.draftRevision, its ETag is
+    kept, and the second import's start sends it with no draft read before it; second case, the
+    revision is higher, treated as 412, the ETag not kept
+  shown: >-
+    first case, "Import <id> released into draft <id> (revision N), import base <id>."; second
+    case, "Draft <id> is now revision N+1: another write followed this import's revision N. Its
+    ETag is not kept. Review the change before writing again.", and Review the change opens the
+    draft at revision N+1
+  absent: [token or document in the harness log, retained artifacts or browser storage]
+runs:
+  web:
+    check: web/e2e/auth/imports.e2e.ts, mise run browser-auth
+    browsers: [chrome, edge, firefox, firefox-esr]

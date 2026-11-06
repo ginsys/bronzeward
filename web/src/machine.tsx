@@ -427,7 +427,9 @@ export function MachineShown({ id, m, obs, km, ko, tl, kt, older, busy, changed 
       </dl>
       <p>
         <Ref to={`/plans?machine=${d.id}`} id={d.id}>Plans for this machine</Ref>{" · "}
-        <Ref to={`/operations?machine=${d.id}`} id={d.id}>Operations on this machine</Ref>
+        <Ref to={`/operations?machine=${d.id}`} id={d.id}>Operations on this machine</Ref>{" · "}
+        <Ref to={`/ingestions?machine=${d.id}`} id={d.id}>Imports of this machine</Ref>{" · "}
+        <Ref to={`/ingestions/new?machine=${d.id}`} id={d.id}>Import this machine</Ref>
       </p>
       {read !== undefined && <><h3>Observations</h3><Observations read={{ ...read, restarted: ko.restarted }} /></>}
       <h3>Timeline (newest first)</h3>

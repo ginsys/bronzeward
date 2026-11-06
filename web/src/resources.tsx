@@ -7,10 +7,12 @@ import { Fragment as Group, type ReactNode, useRef } from "react";
 import type { components } from "./api/v1";
 import { CreateDraft, DraftItem, Drafts } from "./drafts.tsx";
 import { AddCluster, RecordMachine } from "./forms.tsx";
+import { IngestionItem, StartImport } from "./imports.tsx";
 import { EmptyList, Head, Id, type Listed, More, Ref, Scroll, short, useItem, useList, usePending } from "./list.tsx";
 import { MachineItem } from "./machine.tsx";
 import { ClusterItem, Clusters, Filter, Machines } from "./machines.tsx";
 import { RecoveryConsole } from "./recovery.tsx";
+import { Action } from "./shell.tsx";
 import { when } from "./states.tsx";
 
 type S = components["schemas"];
@@ -20,6 +22,7 @@ type Col<T> = readonly [string, (t: T) => ReactNode];
 export const PLAN_STATES = ["proposed", "approved", "committed", "revoked", "cancelled", "expired"];
 export const OPERATION_STATES = ["queued", "running", "succeeded", "failed", "committed", "sending", "verifying", "completed", "rejected", "cancelled", "unresolved"];
 export const OPERATION_KINDS = ["publish", "ingest", "apply-config", "adopt"];
+export const INGESTION_STATES = ["held", "paused", "resumed", "released", "abandoned"];
 export const DEPENDENCY_CLASSES = ["retained", "unknown", "blocked", "lost"];
 const choices = (values: string[]) => values.map((v) => [v, v] as const);
 
@@ -219,13 +222,36 @@ const RELEASES: readonly Col<S["ReleaseBody"]>[] = [
   ["Sources", (r) => r.sources.length], ["Machines", (r) => r.machines.length],
 ];
 
-// The Changes page: drafts (#339), then releases.
+// The imports (#340): GET /ingestions filtered by state finds paused and lapsed imports (G10), and
+// by machine, as a machine's page links them.
+const INGESTIONS: readonly Col<S["IngestionBody"]>[] = [
+  ["Import", (b) => <Id id={b.id} />], ["State", (b) => b.state], ["Machine", (b) => <Id id={b.machine} />], ["Draft", (b) => <Id id={b.draft} />],
+  ["Staging", (b) => b.mode], ["Lease until", (b) => (b.state === "held" || b.state === "resumed" ? when(b.leaseUntil) : "none")],
+  ["Expires", (b) => when(b.expiresAt)], CREATED,
+];
+
+export function Imports({ query, go }: { query: string; go: (to: string) => void }) {
+  const { q, set, sent } = useFilters("/ingestions", query, go);
+  return (
+    <>
+      <h2>Imports</h2>
+      <p><Action label="Start import" needs={["author"]} onClick={() => go(q.has("machine") ? `/ingestions/new?machine=${q.get("machine")}` : "/ingestions/new")} /></p>
+      <Pinned label="Machine" id={q.get("machine")} clear={() => set("machine", "")} />
+      <Filter label="State:" value={q.get("state") ?? ""} options={choices(INGESTION_STATES)} onChange={(v) => set("state", v)} />
+      <ListOf label="Imports" path="/ingestions" query={sent(["state", "machine"])} cols={INGESTIONS}
+        empty={q.size === 0 ? "No imports recorded yet." : "No import matches this filter."} />
+    </>
+  );
+}
+
+// The Changes page: drafts (#339) and the imports into them, then releases.
 export function Changes() {
   return (
     <>
       <h2>Changes</h2>
       <h3>Drafts</h3>
       <Drafts />
+      <p><Ref to="/ingestions" id="ingestions">Imports</Ref>, of every machine.</p>
       <h3>Releases</h3>
       <ListOf label="Releases" path="/releases" cols={RELEASES} empty="No releases published yet." />
     </>
@@ -415,11 +441,13 @@ export function view(path: string, query: string, go: (to: string) => void): Rea
   if (id === "new" && kind === "clusters") return <AddCluster />;
   if (id === "new" && kind === "machines") return <RecordMachine query={query} />;
   if (id === "new" && kind === "drafts") return <CreateDraft />;
+  if (id === "new" && kind === "ingestions") return <StartImport query={query} />;
   if (id === undefined) {
     const pages: Record<string, () => ReactNode> = {
       machines: () => <Machines query={query} go={go} />, clusters: () => <Clusters />, changes: () => <Changes />,
       plans: () => <Plans query={query} go={go} />, operations: () => <Operations query={query} go={go} />,
       sources: () => <Sources query={query} go={go} />, audit: () => <Audit />, recovery: () => <RecoveryConsole />,
+      ingestions: () => <Imports query={query} go={go} />,
     };
     return kind !== undefined && Object.hasOwn(pages, kind) ? pages[kind]!() : undefined;
   }
@@ -430,6 +458,7 @@ export function view(path: string, query: string, go: (to: string) => void): Rea
   const items: Record<string, () => ReactNode> = {
     machines: () => <MachineItem id={id} />, clusters: () => <ClusterItem id={id} />, releases: () => <ReleaseItem id={id} />, drafts: () => <DraftItem key={id} id={id} />,
     plans: () => <PlanItem id={id} />, operations: () => <OperationItem id={id} />, dependencies: () => <DependencyItem id={id} />,
+    ingestions: () => <IngestionItem id={id} />,
   };
   return kind !== undefined && Object.hasOwn(items, kind) ? items[kind]!() : undefined;
 }

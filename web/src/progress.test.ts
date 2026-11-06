@@ -6,6 +6,9 @@ import { noHeaders } from "./test-stalls.ts";
 const OP = "op_1";
 const EVENTS = `${API_BASE}/operations/${OP}/events`;
 
+// A 503 the client reads again, so that it is `unavailable` once its tries ran out.
+const DEPENDENCY_UNAVAILABLE = { type: "urn:bronzeward:problem:dependency-unavailable", title: "unavailable", status: 503 };
+
 const ev = (id: string, type = "started", data: unknown = {}) => ({ id, type, data });
 const frame = (e: { id: string; type: string; data: unknown }) => `id: ${e.id}\nevent: ${e.type}\ndata: ${JSON.stringify(e.data)}\n\n`;
 
@@ -28,6 +31,7 @@ function json(body: unknown, epoch = "e1", status = 200): Response {
 function server(o: {
   streams: (Stream | Error)[]; states: string[]; pages?: OpEvent[]; pageRefusals?: number[]; epoch?: string;
   pagesEpoch?: string; probeEpoch?: string; clock?: { t: number }; readTime?: number; streamTime?: number; pagesGate?: Promise<void>;
+  opUnavailable?: boolean; pagesUnavailable?: boolean;
 }) {
   const opened: Record<string, string>[] = [];
   const urls: string[] = [];
@@ -59,11 +63,13 @@ function server(o: {
     }
     if (u.startsWith(EVENTS)) {
       await o.pagesGate;
+      if (o.pagesUnavailable === true) return json(DEPENDENCY_UNAVAILABLE, o.epoch, 503);
       const refusal = o.pageRefusals?.shift();
       if (refusal !== undefined) return json({ type: "urn:bronzeward:problem:forbidden", title: "forbidden", status: refusal }, o.epoch, refusal);
       return json({ items: (o.pages ?? []).map((e) => ({ ...e, at: "2026-11-01T06:00:00Z" })) }, o.pagesEpoch ?? o.epoch);
     }
     if (u === `${API_BASE}/operations/${OP}`) {
+      if (o.opUnavailable === true) return json(DEPENDENCY_UNAVAILABLE, o.epoch, 503);
       const [state, epoch] = (o.states.length > 1 ? o.states.shift()! : o.states[0]!).split("@");
       if (o.clock !== undefined) o.clock.t += o.readTime ?? 0;
       return json({ id: OP, kind: "ingest", state }, epoch ?? o.epoch);
@@ -261,6 +267,39 @@ describe("the operation progress reader (§8.6)", () => {
     const r = recorder();
     const out = await watch(s.client, OP, r.w, r.pace);
     expect(out).toMatchObject({ kind: "failed", res: { kind: "refused", status: 403 } });
+  });
+
+  // A read that stays unavailable once the client's tries ran out is reported, as the CLI's watch
+  // does, and never read again for ever. The fake pace ends a watch that does repeat, so that a
+  // regression fails the assertion and does not hang the run.
+  const bounded = (r: ReturnType<typeof recorder>): Pace => ({
+    ...r.pace,
+    sleep: async (ms) => {
+      r.sleeps.push(ms);
+      if (r.sleeps.length >= 3) r.abort.abort();
+    },
+  });
+
+  test("an operation read that stays unavailable fails the watch", async () => {
+    const s = server({ streams: [{ chunks: [frame(ev("e1:1"))] }, { chunks: [] }, { chunks: [] }, { chunks: [] }], states: ["running"], opUnavailable: true });
+    const r = recorder();
+    const out = await watch(s.client, OP, r.w, bounded(r));
+    expect(out).toMatchObject({ kind: "failed", res: { kind: "unavailable", status: 503 } });
+  });
+
+  test("event pages that stay unavailable fail the watch", async () => {
+    const s = server({ streams: [{ chunks: ["{}"], type: "application/json" }], states: ["running"], pagesUnavailable: true });
+    const r = recorder();
+    const out = await watch(s.client, OP, r.w, bounded(r));
+    expect(out).toMatchObject({ kind: "failed", res: { kind: "unavailable", status: 503 } });
+    expect(r.shown).toEqual([]);
+  });
+
+  test("event pages that stay unavailable after a terminal state fail the watch", async () => {
+    const s = server({ streams: [{ chunks: [frame(ev("e1:1", "succeeded"))] }, { chunks: [] }, { chunks: [] }, { chunks: [] }], states: ["succeeded"], pagesUnavailable: true });
+    const r = recorder();
+    const out = await watch(s.client, OP, r.w, bounded(r));
+    expect(out).toMatchObject({ kind: "failed", res: { kind: "unavailable", status: 503 } });
   });
 
   test("a stream without Bronzeward-Epoch is a defect", async () => {
