@@ -983,11 +983,14 @@ describe("a tag is resolved the way go-yaml does", () => {
     expect(references(text)).toEqual(["x/foo"]);
   });
 
-  // A comment line and an indented `%` line are no directive: go-yaml joins them to the scalar.
+  // Controls, no directive line. An indented `%` line is text: go-yaml joins it to the scalar, so the
+  // value is `x/foo %not continuation`, which names nothing. A comment line ends the scalar, and
+  // go-yaml refuses the indented line after it ("did not find expected key"), so the document lists
+  // nothing too. The scanner gives `[]` in both cases.
   test.each([
     ["a comment line", "a: !bwref x/foo\n# c\n  continuation\n"],
     ["an indented % line", "a: !bwref x/foo\n  %not\n  continuation\n"],
-  ])("%s before an indented line continues the value, which lists nothing", (_, text) => {
+  ])("%s before an indented line lists nothing", (_, text) => {
     expect(references(text)).toEqual([]);
   });
 

@@ -426,7 +426,8 @@ const firstOfG = docs.size;
 
 // (O) ginsys/bronzeward#632: two shapes of the review of #615. (O1) A directive line between a plain
 // value and an indented line: the directive ends the value, so the first document lists its name.
-// A comment line and an indented `%` line are the controls, which go on the value. (O2) A `?` in a
+// A comment line and an indented `%` line are the controls, which list nothing: go-yaml refuses the
+// indented line after a comment line, and joins an indented `%` line to the value. (O2) A `?` in a
 // flow collection ends a plain scalar and is a key token. A key token right after a scalar, a quoted
 // scalar, an alias or a closed collection is a parser error, with or without a `%` line after it. A
 // block plain scalar with a `?` in it is the control. Each shape sits alone, before a `---`, and
