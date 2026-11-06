@@ -917,9 +917,8 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
    first: it reads the JSON event pages to their end and shows every event after the last one it
    showed, then ends the watch. A drain whose pages name another epoch than the operation read,
    an empty list included, clears what was shown and does not end the watch; the operation is
-   read again after the backoff. The web reader does this. The CLI compares only the epoch of the
-   last event shown, so it ends the watch on an empty list under another epoch
-   ([#640](https://github.com/ginsys/bronzeward/issues/640)). Any other state, `unresolved` included, means the stream ended because the token expired or the
+   read again after the backoff. The CLI and the web reader both do this. Any other state,
+   `unresolved` included, means the stream ended because the token expired or the
    connection dropped: the client renews if needed and reconnects with `Last-Event-ID` and the
    renewed token, with backoff from 1 s to 30 s on repeated failures. An attempt that showed
    nothing is a failure. The delay starts again at 1 s after an attempt that showed an event, or
@@ -927,9 +926,7 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
    since the last clear count: an event shown and then cleared in the same attempt, by a `reset`,
    by an event of another epoch, or by an operation read that names another epoch, is not
    progress. A client that gets one event and then an event of another epoch on every attempt
-   therefore waits between attempts. The web reader counts this way. The CLI counts every event
-   it showed, so it reconnects with no wait in that case
-   ([#639](https://github.com/ginsys/bronzeward/issues/639)).
+   therefore waits between attempts. The CLI and the web reader both count this way.
 3. A `reset` event clears what the watch showed, prints that the installation was restored or
    entered recovery mode, and shows the replay from the start. The epoch change is handled as in
    [§8.5](#85-epoch-changes). The server sends `reset` only when a stream opens
