@@ -555,6 +555,21 @@ func TestOperationWatchOutage(t *testing.T) {
 			t.Errorf("exit %d after %v with %d reads, stderr %q; want 5, the timeout named and no unread state", code, time.Since(began), reads, errOut)
 		}
 	})
+	t.Run("the timeout during an outage after the events showed another epoch than the terminal read: exit 3, the first read does not stand", func(t *testing.T) {
+		// Both the first read and the watch's read show the operation succeeded in epoch 1. The events are of
+		// epoch 2: the installation was restored since, so the watch goes on. Then the server is out of reach
+		// until the timeout. No read of this watch settled the state, so it is unknown (client-contracts.md section 8.6 item 2).
+		f := &opFake{stream: []string{sse(1, "commitment", commitment)}, pages: []string{evPage(1, "commitment", commitment)},
+			opEpoch: "ep_BWSYNTH-1", outageFrom: 3, outageReads: 1000,
+			body: fmt.Sprintf(opJSON, "apply-config", "succeeded", "null", "null", "[]")}
+		srv := httptest.NewServer(f)
+		t.Cleanup(srv.Close)
+		automationContext(t, srv.URL)
+		code, out, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "2500ms")
+		if code != 3 || !strings.Contains(errOut, "was not read") || strings.Contains(out, "Succeeded") {
+			t.Errorf("exit %d, stdout %q, stderr %q; want 3, the state named as not read and no completion line", code, out, errOut)
+		}
+	})
 	t.Run("Ctrl-C during a wait: exit 130 at once", func(t *testing.T) {
 		f := newOutage(t)
 		grace := interruptGrace

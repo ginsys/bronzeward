@@ -927,7 +927,10 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
    Bronzeward problem, or a transport failure) a restart takes longer than five tries wait, so the
    read is repeated with the same backoff until the watch ends, by its timeout or its caller, and
    the watch then resumes with `Last-Event-ID`. A wait ends within 250 ms of the watch ending, and a
-   watch that ends in an outage reports the operation as its last read showed it. A read that fails
+   watch that ends in an outage reports the operation as its last read showed it. A terminal read is
+   not that last read once the events or a later read showed another epoch: it is of the installation
+   before the restore. A watch that ends in an outage after that has no read that settled the state,
+   and the CLI reports the state as unknown (exit 3). A read that fails
    with anything else is not repeated, and every other read keeps the bound of §8.2. An attempt that showed
    nothing is a failure. The delay starts again at 1 s after an attempt that showed an event, or
    after a stream that stayed open for 30 s. Only the events shown since the attempt began or

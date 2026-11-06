@@ -199,6 +199,10 @@ const watchStep = 250 * time.Millisecond
 // ended first (its --timeout, or whatever its Until answers): the read gave nothing.
 var ErrWatchEnded = errors.New("the watch ended before the server answered")
 
+// ErrWatchRestored joins ErrWatchEnded when a watch ended with no read that settled the state: the
+// reads it made were of an installation that events or a later read showed restored since.
+var ErrWatchRestored = errors.New("the installation was restored while the watch waited, so no earlier read of the operation stands")
+
 // retryUntil is retry. A watch's operation read passes stop: the read is then repeated with no cap of
 // tries until stop answers true, which returns the last error joined with ErrWatchEnded (§8.6 item 2).
 func (c *Client) retryUntil(path string, stop func() bool) (*Response, error) {

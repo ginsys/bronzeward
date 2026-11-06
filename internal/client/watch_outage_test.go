@@ -138,6 +138,34 @@ func TestWatchOutage(t *testing.T) {
 			t.Errorf("watch: state %q, error %v; want running (the reread), no error", state, err)
 		}
 	})
+	t.Run("a terminal read stays no result when the drain shows another epoch and an outage ends the watch", func(t *testing.T) {
+		reads = nil
+		ended(2 * time.Second)
+		// The first read is terminal in epoch 1. The installation is restored at the drain, whose pages answer epoch 2,
+		// so the watch goes on. The next read is out of reach until the watch ends: the terminal read is of the
+		// installation that was restored, and it is not the result.
+		const e2 = "ep_BWSYNTH2"
+		o := &opServer{streams: []handler{sse(ev(e1+":1", "queued"))}, epochs: []string{e1}, states: []string{"succeeded"},
+			pages: []string{item(e1+":1", "queued")}, restoreAtPages: e2, outage: 99, outageAfter: 1, outageKind: "502"}
+		_, _, state, _, err := watched(t, o, e1, nil)
+		if state != "" || !errors.Is(err, ErrWatchEnded) || !errors.Is(err, ErrWatchRestored) {
+			t.Errorf("watch: state %q, error %v; want no state and an error that is ErrWatchEnded and ErrWatchRestored", state, err)
+		}
+	})
+	t.Run("a terminal reread of another epoch after a refused drain stays no result when an outage ends the watch", func(t *testing.T) {
+		reads = nil
+		ended(2 * time.Second)
+		// The first read is terminal in epoch 1 and its drain is refused, and that request moves the installation to
+		// epoch 2. The reread is terminal in epoch 2, which is not the epoch of the first read, so the watch goes on.
+		// The next read is out of reach until the watch ends: no read settled the state.
+		const e2 = "ep_BWSYNTH2"
+		o := &opServer{streams: []handler{sse(ev(e1+":1", "queued"))}, epochs: []string{e1}, states: []string{"failed"},
+			pagesStatus: http.StatusForbidden, restoreAtPages: e2, outage: 99, outageAfter: 2, outageKind: "502"}
+		_, _, state, _, err := watched(t, o, e1, nil)
+		if state != "" || !errors.Is(err, ErrWatchEnded) || !errors.Is(err, ErrWatchRestored) {
+			t.Errorf("watch: state %q, error %v; want no state and an error that is ErrWatchEnded and ErrWatchRestored", state, err)
+		}
+	})
 	t.Run("the watch ending in an outage skips the epoch refresh a new epoch asks for", func(t *testing.T) {
 		reads = nil
 		ended(2 * time.Second)
