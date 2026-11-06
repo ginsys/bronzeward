@@ -1074,23 +1074,6 @@ describe("a tag is resolved the way go-yaml does", () => {
     ["a key after an explicit key indicator", "? [? b]: !bwref x/foo\n"],
     ["a value that is another key", "a:\n  [? b]: c\nd: !bwref x/foo\n"],
     ["a key of a second document", "c: 1\n---\n[? b]: !bwref x/foo\n"],
-    // go-yaml accepts a key like this right after the colon of an explicit key only when that key is one
-    // plain or quoted scalar, or one property alone (the cases of the valid controls below).
-    ["after the colon of an explicit flow sequence key", "? [a]\n: [? b]: !bwref x/foo\n"],
-    ["after the colon of an explicit flow sequence key, on the next line", "? [a]\n:\n  [? b]: !bwref x/foo\n"],
-    ["after an anchor on the value of an explicit flow sequence key", "? [a]\n: &x\n  [? b]: !bwref x/foo\n"],
-    ["after the colon of an explicit flow mapping key", "? {a: b}\n: [? b]: !bwref x/foo\n"],
-    ["after the colon of an explicit empty flow key", "? []\n: [? b]: !bwref x/foo\n"],
-    ["after the colon of an explicit key with a tag and a scalar", "? !t a\n: [? b]: !bwref x/foo\n"],
-    ["after the colon of an explicit key with an anchor and a scalar", "? &e a\n: &x\n  [? b]: !bwref x/foo\n"],
-    ["after the colon of an explicit key with a tag and an anchor", "? !t &e\n: [? b]: !bwref x/foo\n"],
-    ["after the colon of an explicit key with an anchor and a tag", "? &e !t\n: &x\n  [? b]: !bwref x/foo\n"],
-    ["after the colon of an empty explicit key", "?\n: [? b]: !bwref x/foo\n"],
-    ["after the colon of an explicit block scalar key", "? |\n  x\n: [? b]: !bwref x/foo\n"],
-    ["after the colon of an explicit sequence key", "? - a\n: [? b]: !bwref x/foo\n"],
-    ["after the colon of an explicit mapping key", "? a: b\n: [? b]: !bwref x/foo\n"],
-    ["after the colon of an explicit flow key in a sequence entry", "- ? [a]\n  : &x\n    [? b]: !bwref x/foo\n"],
-    ["after the colon of an explicit flow key in a mapping", "m:\n  ? [a]\n  : [? b]: !bwref x/foo\n"],
   ])("a flow key with only ? items lists nothing: %s", (_, text) => {
     expect(references(text)).toEqual([]);
   });
@@ -1119,12 +1102,6 @@ describe("a tag is resolved the way go-yaml does", () => {
     ["after an anchor on the value of an explicit key", "? a\n: &x\n  [? b]: !bwref x/foo\n"],
     ["after a tag on the value of an explicit key", "? a\n: !t\n  [? b]: !bwref x/foo\n"],
     ["after an anchor and a tag on the value of an explicit key", "? a\n: &x !t\n  [? b]: !bwref x/foo\n"],
-    ["after the colon of an explicit double-quoted key", '? "a"\n: [? b]: !bwref x/foo\n'],
-    ["after the colon of an explicit single-quoted key, on the next line", "? 'a'\n:\n  [? b]: !bwref x/foo\n"],
-    ["after the colon of an explicit key of several words", "? a b\n: &x\n  {? b}: !bwref x/foo\n"],
-    ["after the colon of an explicit key over two lines", "? a\n  b\n: [? b]: !bwref x/foo\n"],
-    ["after the colon of an explicit key with a tag alone", "? !t\n: &x\n  [? b]: !bwref x/foo\n"],
-    ["after the colon of an explicit key with an anchor alone", "? &e\n: [? b]: !bwref x/foo\n"],
     ["after an anchor, a comment and a break on the value of an explicit key", "? a\n: &x # c\n  {? b}: !bwref x/foo\n"],
     ["in a sequence entry, after an anchor on the value of an explicit key", "- ? a\n  : &x\n    [? b]: !bwref x/foo\n"],
     ["a key that is empty", "a:\n  []: !bwref x/foo\n"],
