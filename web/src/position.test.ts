@@ -1187,6 +1187,10 @@ describe("a plain !bwref value that goes on to the next line", () => {
     ["a word at column 0 after a marker line", "---\n!bwref x/foo\nbar\n"],
     ["a word at column 0 after a comment line", "# c\n!bwref x/foo\nbar\n"],
     ["a word at column 0 in the second document", "a: 1\n---\n!bwref x/foo\nbar\n"],
+    // go-yaml ends the scalar at a comment line, so the text after it is a document it refuses. The scanner
+    // skips the comment line (it is masked), reads the text as the next line and lists nothing too.
+    ["a comment line, then a word at column 0", "!bwref x/foo\n# c\nbar\n"],
+    ["a comment line, then a dash, after a marker", "--- !bwref x/foo\n# c\n- y\n"],
   ])("%s under a root scalar lists nothing", (_, text) => {
     expect(references(text)).toEqual([]);
   });
