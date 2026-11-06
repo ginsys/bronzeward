@@ -396,7 +396,11 @@ func (e *env) operationCmd(args []string) error {
 	var cause *lastEvent
 	findCause := func(c *client.Client, r *client.Response, o *apitypes.OperationBody) error {
 		if e.output == "table" && o.State == "cancelled" {
-			if cause = readLast(c, pos[0], o.State, r.Header.Get("Bronzeward-Epoch")); cause != nil {
+			var err error
+			if cause, err = readLastOrStop(c, pos[0], o.State, r.Header.Get("Bronzeward-Epoch")); err != nil {
+				return err // a Ctrl-C taken by the event read ends the command
+			}
+			if cause != nil {
 				cause.At = nil
 			}
 		}

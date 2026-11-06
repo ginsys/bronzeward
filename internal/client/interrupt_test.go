@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -105,16 +106,57 @@ func TestStalledReadEndsOnInterrupt(t *testing.T) {
 	}
 }
 
-// TestInterruptAfterTheAnswerStillStops: a Ctrl-C taken while the answer came in is not lost. The read
-// that finished with it reports the stop, as the timeline follow does.
+// TestInterruptAfterTheAnswerStillStops: a Ctrl-C taken as the answer comes in is not lost. The server
+// answers 200, and the disarm then reports the Ctrl-C that the handler took meanwhile, though the
+// context of the request was never cancelled. The read that succeeded reports the stop, as the
+// timeline follow does.
 func TestInterruptAfterTheAnswerStillStops(t *testing.T) {
 	c, _, _ := writeClient(t, &fake{epoch: "ep_BWSYNTH-1"}, "ep_BWSYNTH-1")
+	proxyAsTheProxyTestNamesIt(t)
+	c.Arm = func() (context.Context, func() bool) {
+		return context.Background(), func() bool { return true }
+	}
+	r, err := c.Get("/clusters")
+	if !errors.As(err, new(*Interrupted)) || r != nil {
+		t.Errorf("answer %v, error %v; want the read stopped by the Ctrl-C taken as it ended", r, err)
+	}
+}
+
+// TestInterruptedReadRefreshesNothing: the answer to a read showed a new epoch, which makes Get read
+// GET /server again. A Ctrl-C taken during the wait before a retry ends the command at once: the
+// refresh sends no request, so it arms no new handler and the second Ctrl-C keeps its default action.
+func TestInterruptedReadRefreshesNothing(t *testing.T) {
+	var paths []string
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		paths = append(paths, r.URL.Path)
+		mu.Unlock()
+		w.Header().Set("Bronzeward-Epoch", "ep_BWSYNTH-2") // another epoch than the client knows
+		problemAnswer(w, http.StatusServiceUnavailable, "dependency-unavailable", "")
+	}))
+	defer srv.Close()
+	c, _, _ := writeClient(t, &fake{epoch: "ep_BWSYNTH-1"}, "ep_BWSYNTH-1")
+	c.Context.Server = srv.URL
 	a := newArmed(t)
-	a.cancel()
 	c.Arm = a.hook
+	waitFor = func(ctx context.Context, d time.Duration) error {
+		a.cancel() // the Ctrl-C comes while the client waits
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	t.Cleanup(func() { waitFor = defaultWait })
+	before := a.calls.Load()
 	_, err := c.Get("/clusters")
-	if !errors.As(err, new(*Interrupted)) {
-		t.Errorf("error %v; want the read stopped by the Ctrl-C taken before it ended", err)
+	mu.Lock()
+	defer mu.Unlock()
+	switch {
+	case !errors.As(err, new(*Interrupted)):
+		t.Errorf("error %v; want the read stopped by Ctrl-C", err)
+	case len(paths) != 1 || paths[0] != "/api/v1/clusters":
+		t.Errorf("requests %v; want the one read and no GET /server after the Ctrl-C", paths)
+	case a.calls.Load()-before != 1:
+		t.Errorf("%d arms for the command; want 1", a.calls.Load()-before)
 	}
 }
 

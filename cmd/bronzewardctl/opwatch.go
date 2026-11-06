@@ -444,9 +444,25 @@ type lastEvent struct {
 // and does not change in a restore, so it is not the epoch to compare. The outcome and the time
 // printed together then belong to one operation.
 func readLast(c *client.Client, id, state, watched string) *lastEvent {
+	ev, _ := readLastOrStop(c, id, state, watched)
+	return ev
+}
+
+// readLastOrStop is readLast that also returns a Ctrl-C taken by one of its reads, so that a command
+// which arms Ctrl-C for its reads (operation show) ends instead of printing on. Any other failure
+// still gives no event and no error.
+func readLastOrStop(c *client.Client, id, state, watched string) (*lastEvent, error) {
+	ev, err := readLastEvent(c, id, state, watched)
+	if cut := (*client.Interrupted)(nil); errors.As(err, &cut) {
+		return nil, err
+	}
+	return ev, nil
+}
+
+func readLastEvent(c *client.Client, id, state, watched string) (*lastEvent, error) {
 	items, err := c.List("/operations/" + url.PathEscape(id) + "/events")
 	if err != nil || len(items) == 0 {
-		return nil
+		return nil, err
 	}
 	var ev lastEvent
 	found := false
@@ -458,11 +474,11 @@ func readLast(c *client.Client, id, state, watched string) *lastEvent {
 		}
 	}
 	if !found {
-		return nil
+		return nil, nil
 	}
 	o, epoch, err := c.OperationEpoch(id)
 	if err != nil || !client.Terminal(o.State) || o.State != state || epoch == "" || epoch != watched || client.EpochOf(ev.ID) != epoch {
-		return nil
+		return nil, err
 	}
-	return &ev
+	return &ev, nil
 }
