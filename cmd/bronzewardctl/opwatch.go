@@ -116,6 +116,9 @@ func (o *watchOut) finish(lines ...string) {
 // stop is finish for the first Ctrl-C: the user ended the watch, so its lines are printed last and
 // the exit stays 130. When the output of the watch failed already, they go to alt (standard error)
 // instead of to the sink that refused the lines before, and a failure to print them changes nothing.
+// A write that was pending on the main sink can fail while the lines wait for its lock, so the failure
+// is read again once the lock is held: the lines then go to alt, and the two locks are never held
+// together.
 func (o *watchOut) stop(alt *sink, lines ...string) {
 	o.stopped.Store(true)
 	s := o.main
@@ -123,6 +126,11 @@ func (o *watchOut) stop(alt *sink, lines ...string) {
 		s = alt
 	}
 	s.mu.Lock()
+	if s == o.main && alt != nil && o.failure() != nil {
+		s.mu.Unlock()
+		s = alt
+		s.mu.Lock()
+	}
 	defer s.mu.Unlock()
 	for _, l := range lines {
 		_, _ = fmt.Fprintln(s.w, l)
