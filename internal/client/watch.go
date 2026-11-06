@@ -348,12 +348,16 @@ func (c *Client) streamIn(armed context.Context, op string, last *string, w Watc
 		sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
 		var ev Event
 		data := false // ev has a data line
+		// Until can read (the import follow reads its claim), and a read that starts after a Ctrl-C took
+		// the stream would arm a context that Ctrl-C already passed. stream records the Ctrl-C only when
+		// this attempt returns, so the loop looks at armed itself before it asks Until.
+		quit := func() bool { return armed.Err() != nil || w.stop() }
 		for sc.Scan() {
 			idle.Reset(streamIdle)
 			line := sc.Text()
 			if strings.HasPrefix(line, ":") {
 				// A comment: the keep-alive (§8.6 item 5).
-				if w.stop() {
+				if quit() {
 					return true, false, nil
 				}
 				continue
@@ -388,7 +392,7 @@ func (c *Client) streamIn(armed context.Context, op string, last *string, w Watc
 				return true, false, nil
 			default:
 				show(w, ev, last)
-				if w.stop() {
+				if quit() {
 					return true, false, nil
 				}
 			}

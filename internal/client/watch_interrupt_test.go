@@ -145,6 +145,32 @@ func TestStreamBackoffEndsOnInterrupt(t *testing.T) {
 	}
 }
 
+// TestStreamAsksUntilNotAfterACtrlC: the Ctrl-C comes while an event is shown. The stream records it
+// only when it returns, so Until, which may read (the import follow reads the claim), must not run
+// in between: it would arm a read that the Ctrl-C already passed. The two events are in one frame
+// batch, so the second would be shown and Until asked again if the loop went on.
+func TestStreamAsksUntilNotAfterACtrlC(t *testing.T) {
+	s := newStreamStall(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, ev("ep_BWSYNTH-1:1", "queued")+": keep-alive\n\n"+ev("ep_BWSYNTH-1:2", "started"))
+	})
+	c, _, _ := writeClient(t, &fake{epoch: "ep_BWSYNTH-1"}, "ep_BWSYNTH-1")
+	c.Context.Server = s.srv.URL
+	a := newArmed(t)
+	c.Arm = a.hook
+	var shown, asked int
+	err := ended(t, c, Watch{
+		Show:  func(Event) { shown++; a.cancel() }, // the Ctrl-C comes as the first event is shown
+		Until: func() (bool, error) { asked++; return false, nil },
+	})
+	if !errors.As(err, new(*Interrupted)) {
+		t.Errorf("error %v; want the watch stopped by Ctrl-C", err)
+	}
+	if shown != 1 || asked != 1 {
+		t.Errorf("%d events shown, Until asked %d times; want 1 and 1 (the ask before the stream): nothing runs after the Ctrl-C", shown, asked)
+	}
+}
+
 // TestStreamArmsNothingWithoutAHook: a client with no Arm keeps the default action of Ctrl-C, and
 // the watch still shows its events and ends on Until.
 func TestStreamArmsNothingWithoutAHook(t *testing.T) {
