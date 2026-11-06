@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -55,6 +56,17 @@ func TestWatchOutage(t *testing.T) {
 			}
 		})
 	}
+	t.Run("the read after a failed drain of a terminal state is waited out too", func(t *testing.T) {
+		reads = nil
+		// The terminal read answers, the drain is refused, and the server is then out of reach for
+		// 7 reads: the watch is not left to the five tries of a plain read.
+		o := &opServer{streams: []handler{sse(ev(e1+":1", "queued"))}, epochs: []string{e1}, states: []string{"failed"},
+			pagesStatus: http.StatusForbidden, outage: 7, outageAfter: 1, outageKind: "502"}
+		_, _, state, _, err := watched(t, o, e1, nil)
+		if state != "failed" || err == nil || !strings.Contains(err.Error(), "403") || total(reads) != 91*time.Second {
+			t.Errorf("watch: state %q, error %v after %v of waits; want failed with the 403 after 91s", state, err, total(reads))
+		}
+	})
 	// ended makes Until true once the operation read has waited d in all (the recorded waits).
 	ended := func(d time.Duration) {
 		until = func() (bool, error) { return total(reads) >= d, nil }
