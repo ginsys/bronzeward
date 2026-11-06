@@ -34,6 +34,14 @@ type opServer struct {
 	// restoreAtPages, when set, moves the installation to this epoch at the first request for the JSON
 	// pages: that answer and every later one carries it, as after a restore between two reads.
 	restoreAtPages string
+
+	// The first outage operation reads fail as a server that is down does: outageKind "502" answers
+	// a 502 that is no Bronzeward problem, "503" a dependency-unavailable problem, "drop" closes the
+	// connection without an answer (a transport failure, as a refused connect is).
+	outage      int
+	outageAfter int // the outage starts once this many operation reads have answered
+	outageKind  string
+	outages     int // the operation reads that failed so far
 }
 
 func (o *opServer) serve(w http.ResponseWriter, r *http.Request) {
@@ -62,6 +70,16 @@ func (o *opServer) serve(w http.ResponseWriter, r *http.Request) {
 		problemAnswer(w, o.pagesStatus, "forbidden", "")
 	case r.URL.Path == "/api/v1/operations/op_BWSYNTH/events":
 		fmt.Fprintf(w, `{"items":[%s]}`, strings.Join(o.pages, ","))
+	case r.URL.Path == "/api/v1/operations/op_BWSYNTH" && o.reads >= o.outageAfter && o.outages < o.outage:
+		o.outages++
+		switch o.outageKind {
+		case "503":
+			problemAnswer(w, http.StatusServiceUnavailable, "dependency-unavailable", "")
+		case "drop":
+			drop(w)
+		default:
+			w.WriteHeader(http.StatusBadGateway)
+		}
 	case r.URL.Path == "/api/v1/operations/op_BWSYNTH" && o.gone > 0 && o.reads+1 >= o.gone:
 		o.reads++
 		problemAnswer(w, http.StatusNotFound, "not-found", "")

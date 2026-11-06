@@ -529,6 +529,64 @@ func TestOperationWatchSlowStartTimeout(t *testing.T) {
 	}
 }
 
+// TestOperationWatchOutage: when the operation read after a cut stream meets a server that stays out of
+// reach, the watch repeats it until its own end instead of after five tries (client-contracts.md
+// section 8.6 item 2; #354's T9). The timeout ends it with exit 5 and the operation as the first read
+// showed it, and the first Ctrl-C ends it at once with exit 130, not after the delay of the retry.
+func TestOperationWatchOutage(t *testing.T) {
+	newOutage := func(t *testing.T) *opFake {
+		t.Helper()
+		f := &opFake{stream: []string{sse(1, "commitment", commitment)}, outageFrom: 2, outageReads: 1000,
+			body: fmt.Sprintf(opJSON, "apply-config", "running", "null", "null", "[]")}
+		srv := httptest.NewServer(f)
+		t.Cleanup(srv.Close)
+		automationContext(t, srv.URL)
+		return f
+	}
+	t.Run("the timeout during the outage: exit 5, the operation as last read", func(t *testing.T) {
+		f := newOutage(t)
+		began := time.Now()
+		code, _, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "1500ms")
+		f.mu.Lock()
+		reads := f.reads
+		f.mu.Unlock()
+		// The waits of 1 s and 2 s mean two failed tries by 1.5 s, and the third read is the stop's.
+		if code != 5 || !strings.Contains(errOut, "after --timeout") || strings.Contains(errOut, "was not read") || reads < 3 {
+			t.Errorf("exit %d after %v with %d reads, stderr %q; want 5, the timeout named and no unread state", code, time.Since(began), reads, errOut)
+		}
+	})
+	t.Run("Ctrl-C during a wait: exit 130 at once", func(t *testing.T) {
+		f := newOutage(t)
+		grace := interruptGrace
+		interruptGrace = 5 * time.Second
+		defer func() { interruptGrace = grace }()
+		sentAt := make(chan time.Time, 1)
+		go func() {
+			for { // the second failed read is the one whose retry waits 2 s
+				f.mu.Lock()
+				n := f.reads
+				f.mu.Unlock()
+				if n >= 3 {
+					sentAt <- time.Now()
+					_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
+					return
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+		}()
+		code, out, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "30s")
+		var sent time.Time
+		select {
+		case sent = <-sentAt:
+		default:
+			t.Fatal("no interrupt was sent")
+		}
+		if took := time.Since(sent); code != 130 || took > time.Second || !strings.Contains(out, "Stopped watching at your request") {
+			t.Errorf("exit %d %v after the interrupt, stdout %q, stderr %q; want 130 within a second (the retry waits 2 s) and the stop line", code, took, out, errOut)
+		}
+	})
+}
+
 // oidcRenewalContext records the oidc context "lab" on srv with a token file whose access token is about
 // to expire, so opening the client renews it under the token file's lock, and takes that lock. The lock
 // is held until the returned release runs (or the test ends). The renewal itself fails fast at the
