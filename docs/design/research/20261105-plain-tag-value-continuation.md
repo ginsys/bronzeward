@@ -18,7 +18,7 @@ Out of scope, as the issue says: a tagged key, a verbatim tag and `%TAG` handles
 - A `#` at the start of a word (`2720`).
 - A colon followed by a blank (`2728`).
 - In flow context only: `,` `?` `[` `]` `{` `}` (`2729-2733`).
-- A line less indented than the parent plus one, in block context only (`2815`).
+- A line less indented than the parent plus one, in block context only (`2815`). A root scalar has no parent: its continuation lines are measured against column -1, so every next line with text goes on.
 
 A blank is a space or a tab (`yamlprivateh.go:118-121`). A no-break space (U+00A0) is text. In block context a comma, a bracket, a brace, `- ` and `? ` are text at the start of a continuation line. In flow context the indent test is off.
 
@@ -52,6 +52,10 @@ The counts come from sweep run `w616-s1`, which compared the scanner on main (bf
 | Block, the same with `- ` or `? ` | Text, scalar goes on | Ends the scalar, lists the name | Read wrongly: extra |
 | Block, a more indented line of Unicode spaces only | Text, scalar goes on | Skips the line, lists the name | Read wrongly: extra |
 | Block, a more indented line with a colon and a blank | Document refused | Ends the scalar, lists the name | Read wrongly: extra |
+| Block, the next line starts with a no-break space at column 0 (` j: v`) | A key of its own at column 0, scalar ends | Ends the scalar, lists the name | Read, agrees. Pinned by a unit test: S8 and S9 hold no such line |
+| Block, the tag starts its line under a compact parent (`- k:` then `    !bwref x/foo`, then `  j: v`) | Scalar ends at the sibling key | Ends the scalar, lists the name | Read, agrees. Pinned by two unit tests: S8 and S9 hold no such shape |
+| Root scalar (the tag on the line of `---`, or the first text of a document, anchors only before it), next line with text at any column | Measured against column -1: the scalar goes on, `- ` and `? ` are text | Reads the column against the holder 0 or the line above, ends the scalar at column 0 | Read wrongly: extra. Fixed by `isRoot()` |
+| Root scalar, next line is a key (`y: v`) | Document refused | Ends the scalar, lists the name | Refused, lists none after the change |
 | Flow, next line at any indent, such as `bar]` at column 0 | Scalar goes on, indent test is off | Compares the indent, lists the name | Read wrongly: extra |
 | Flow, next line starts with a flow indicator | Scalar ends | Lists the name | Read, agrees |
 | Anchor after the tag (`!bwref &e x/foo`), any next line | Lists the name after a scalar that ends | Lists none for a parent shape it cannot read | Unread by decision |
@@ -64,6 +68,7 @@ On main, S9 held 2248 extra documents. The change fixes 1620 of them and leaves 
 - The anchor after the tag. ginsys/bronzeward#607 made the rule conservative on purpose (`anchoredContinues()`). The acceptance of #616 asks for no newly lost and no newly extra document against main. It does not ask for a lost count.
 - The tag on an implicit key. ginsys/bronzeward#615 says the server refuses it. The editor lists nothing, and the oracle lists the name. ginsys/bronzeward#629 holds the decision.
 - A parent key that is quoted with a doubled or an escaped quote inside (`'a''b': !bwref x/foo`, then `  - y`). `PLAIN_PARENT` does not read it as a known parent. A next line that starts with `- `, `? ` or holds a colon before a blank then ends the value, so the editor lists the name and go-yaml lists none. Main reads it the same way, so the change adds no extra pair. Reading such a key is a follow-up that needs new scanner scope.
+- A root scalar where the anchor comes after the tag (`!bwref &e x/foo`) stays with the anchor rule above, ginsys/bronzeward#607. A key parent with an anchor-tag (`k: &e !bwref x/foo`) is read the same as on main. Both groups are named "same on main" in the root-scalar sweep (section 6).
 - A tab in a continuation line (`scannerc.go:2783`) is not covered by this note.
 - A comment line between the value and the next text is not covered by this note.
 
@@ -71,9 +76,25 @@ On main, S9 held 2248 extra documents. The change fixes 1620 of them and leaves 
 
 - The reasons in section 4 are read from name lists and from the go-yaml source. No oracle run isolated each shape. The code phase reads the oracle row of each shape before it writes the expected list.
 - The report groups the next lines by kind, anchor place and context. It does not split by indent or by a blank line before.
+- The sets S8 and S9 hold no line that starts with a no-break space at column 0, no tag on its own line under a compact parent, and no root scalar with a next line at column 0. The review of the pull request found these shapes as regressions. The "no newly lost" claim for them rests on the oracle rows, the unit tests of `web/src/position.test.ts`, and the generated root-scalar set S10 (section 8).
 - The counts are those of run `w616-s1` at main bffb30ed. The counting rules of the sweep changed since the issue was written, so they differ from the counts in the issue.
 - The report does not split the 628 extra documents of S9 or the 1158 of S8 by shape. This note does not claim which shapes remain.
 
 ## 7. Decision enabled
 
 The scanner change has two rules, tested one at a time on S9: the block text rules, and the flow case with no indent test. Each lands with no newly lost and no newly extra pair on S8 and S9, read with `cmp-reports.mjs`. The shapes of section 5 stay unread and are named here.
+
+## 8. The root scalar set S10
+
+The reviews of the pull request found, in four rounds, four shapes of a root scalar that the scanner read wrongly. Each fix of one shape left a sibling shape wrong, because the cases covered only the shapes that a reviewer named. The set S10 (`experiments/scanner-cross-line/sets/gen-s10-root-scalar.ts`) holds the whole cross product: 12 contexts, three property orders, a space or a tab, six next lines and three texts. It has 1152 documents, and 666 of them are parsed by go-yaml v3.0.5. `node sets/gen-s10-root-scalar.ts s10.json` writes it, with sha256 `bc8293d2d0af073629e840731c7f0d31b7cba94fa4053ccdbf083f24cceedd5b`. `judge-s10.mjs` counts extra and lost names beside the oracle.
+
+go-yaml measures the continuation lines of a root scalar against column -1. In each of the nine root contexts that go-yaml parses (the line of `---`, the first text of a stream, after a marker line, after a comment, after a `%YAML` directive with the marker on its own line or on the tag's line, and in a second document after `...` with a marker or after `---`), the tag only and the anchor before the tag give the same result: every next line with text goes on, at column 0 and at column 1 too, also a line that starts with U+00A0, `- ` or `? `. A key line makes go-yaml refuse the document. A second document after `...` with no `---` is refused whole.
+
+| Scanner | Extra | Lost | Newly extra | Newly lost |
+|---|---|---|---|---|
+| Main | 242 | 26 | | |
+| At the change | 6 | 26 | 0 | 0 |
+
+The counts cover the 666 documents that go-yaml parses. A refused document counts as no extra name. The scanner lists a name for 244 of the 486 refused documents on main and 66 at the change. The change fixes 236 extra documents and starts none. What is left is outside this issue, and the scanner on main reads each of these documents the same way. The 6 extra documents have a key parent and an anchor before the tag: 2 with `k: &e !bwref x/foo` and 4 with the key on the line above. The 26 lost documents have an anchor after the tag (`!bwref &e x/foo`), the decision of ginsys/bronzeward#607.
+
+Two limits of the set. go-yaml v3.0.5 refuses `%YAML 1.2`, so the two directive contexts use `%YAML 1.1`. A first run with 1.2 refused both contexts whole and showed nothing about them. The context of a second document after `...` with no `---` is refused whole too, so it gives no evidence about the continuation of a root scalar.
