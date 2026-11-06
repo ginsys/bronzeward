@@ -347,6 +347,19 @@ valid cases of S5 come out equal to go-yaml for C1c.
   quote is a scalar and its `#` is not a comment. Main and C1c list nothing. The masker does not
   yet treat an alias before `:` as a node start. The implementation issue
   (ginsys/bronzeward#600) carries the fix and a test for this document.
+- Known gap, a tag on an implicit key (ginsys/bronzeward#629): in `- !bwref x/foo:` followed by a
+  more indented line, go-yaml reads a tagged key and lists `x/foo`. The scanner lists nothing, on
+  purpose. The server refuses a `!bwref` tag on any mapping key (`tag-placement`,
+  `internal/ingest/declare.go`). The row "tag on an implicit key" of `TestValidateAuthoring` in
+  `internal/ingest/declare_test.go` shows the refusal for this shape. The
+  [tag handle report](20261104-tag-handle-resolution.md) records the same-line key
+  `!bwref x/foo: v` as server-refused (row "tagged key" of its case table). So the editor lists
+  nothing for a document that the server never accepts. The 1201 documents of set S9 with this
+  shape (the value `x/foo:`) are therefore a known gap, and their lost count is no acceptance
+  number. A further 7 same-line documents have the same value. These counts come from the S9
+  sweep of main after ginsys/bronzeward#607. They are read from the name lists, and no oracle run
+  isolated the cause. The oracle change of ginsys/bronzeward#637 reads a tag on a key the way the
+  server does, so it is expected to move these counts. Read them again after that change lands.
 - Deviations from the issue, for the owner to assess:
   - The plain quote carry breaks 149 documents of S0, not the 43 that issue 592 names. The attempt
     behind the 43 is not in the repository (Failure cases).
