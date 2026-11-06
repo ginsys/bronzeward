@@ -718,6 +718,40 @@ describe("a tag is resolved the way go-yaml does", () => {
     expect(references(text)).toEqual(["x/foo"]);
   });
 
+  // A tag or an anchor ends the places where a block entry can start, so a `-` or `?` indicator after
+  // one in its line is an error whatever the line is and however many properties come (ginsys/bronzeward#650;
+  // go-yaml v3.0.5: "block sequence entries are not allowed in this context", "mapping keys are not
+  // allowed in this context"). The first four are the shapes of the issue and its one-tag controls.
+  test.each([
+    ["two tags and a block sequence entry", "a: !other\n  !u - k: !bwref x/foo\n"],
+    ["two tags and an explicit key", "a: !other\n  !u ? b: !bwref x/foo\n"],
+    ["one tag and a block sequence entry", "a:\n  !u - k: !bwref x/foo\n"],
+    ["one tag and an explicit key", "a:\n  !u ? b: !bwref x/foo\n"],
+    ["a tag and a block sequence entry in the first line", "!u - k: !bwref x/foo\n"],
+    ["a tag and an explicit key after a key", "a: !u ? b: !bwref x/foo\n"],
+    ["a tag after a sequence entry indicator", "- !u - k: !bwref x/foo\n"],
+    ["an anchor and a block sequence entry", "&x - k: !bwref x/foo\n"],
+    ["an anchor and an explicit key in a continuation line", "a:\n  &x ? b: !bwref x/foo\n"],
+    ["a tag, an anchor and a block sequence entry", "a:\n  !u &x - k: !bwref x/foo\n"],
+    ["an anchor, a tag and an explicit key over a line break", "a: !other\n  &x !u ? b: !bwref x/foo\n"],
+  ])("an indicator after a property: %s lists nothing", (_, text) => {
+    expect(references(text)).toEqual([]);
+  });
+
+  // The same indicators with the property alone in its line, or a key whose text only starts with the
+  // indicator character, are valid.
+  test.each([
+    ["a tag alone, then a block sequence", "a:\n  !u\n  - k: !bwref x/foo\n"],
+    ["a tag alone, then an explicit key", "a:\n  !u\n  ? b: !bwref x/foo\n"],
+    ["a tag and a key that starts with a hyphen", "a:\n  !u -k: !bwref x/foo\n"],
+    ["a tag and a key that starts with a question mark", "a:\n  !u ?k: !bwref x/foo\n"],
+    ["a sequence entry, then a tagged value", "a:\n  - !bwref x/foo\n"],
+    ["a sequence entry, then an explicit key", "a:\n  - ? !bwref x/foo\n"],
+    ["a tagged key in a continuation line", "a: !other\n  !u b: !bwref x/foo\n"],
+  ])("an indicator after a property: the valid control %s still lists the name", (_, text) => {
+    expect(references(text)).toEqual(["x/foo"]);
+  });
+
   test.each([
     ["%YAML after a quoted value", 'a: !<!bwref> "x/foo"\n %YAML 1.1\n'],
     ["%TAG after a quoted value", 'a: !bwref "x/foo"\n  %TAG !x! !bw\n'],

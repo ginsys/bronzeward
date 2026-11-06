@@ -805,6 +805,10 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number): number {
         }
       } else if (((c === "?" || c === ":") && st.flow > 0) || ((c === "-" || c === "?" || c === ":") && (next === undefined || isWs(next)))) {
         if (st.flow === 0) {
+          // A block `-` or `?` cannot follow a property in its line: a tag or an anchor ends the places
+          // where a block entry can start (simple_key_allowed), so go-yaml refuses `!u - k: x` and
+          // `!u ? k: x`, with one tag or two, in this line or a continuation line (ginsys/bronzeward#650).
+          if ((c === "-" || c === "?") && nodeStart >= 0) docs.refused = true;
           // A colon that follows properties alone (`&e:`) closes a key that starts at the first one.
           const col = c === ":" && nodeStart >= 0 ? nodeStart : j;
           pushEntry(st.stack, col);
