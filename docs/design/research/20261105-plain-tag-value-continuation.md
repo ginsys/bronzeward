@@ -121,6 +121,7 @@ The local review of the change found two more places where the same rules were n
 
 - The scan back to the last marker in `isRoot()` did not drop the stream-start BOM and did not take a marker line that ends in a CRLF as a marker. `"\ufeff---\n !bwref x/foo\n\u00a0bar\n"` and `"---\r\n !bwref x/foo\r\n\u00a0bar\r\n"` then read the marker as the holder at column 0, and the scanner listed `x/foo` where go-yaml lists none. The scan now uses `MARKER` and drops the BOM, and a line of Unicode spaces only counts as text in it.
 - A line that holds only an anchor (`k:\n &e\n  !bwref x/foo\n \u00a0bar\n`) was taken as the parent of the tag, at column 1. The key above it is the parent, at column 0. `plainHolder()` and `parentLine()` skip a line of node properties only (`propertiesOnly()`).
+- The same line above a root scalar (`"&e\n!bwref x/foo\n- y\n"`) was text for `isRoot()`, so the tag was not a root scalar and the `- y` line ended the value. go-yaml reads the scalar `x/foo - y` and lists none. Main lists `x/foo` too. The review of the repaired change found it, and `isRoot()` now skips a line of node properties only as well.
 
 S12 (`experiments/scanner-cross-line/sets/gen-s12-marker-and-property-lines.ts`) covers both places, each with spaces, U+00A0 and a tab in the next line. It holds 3240 documents, and go-yaml parses 1828 of them. Its sha256 is `7e8bfc05676d128233b9eb23fd4adc79dcd9bd06c71e9ff5d9f3f24d18eddbc2`. At the commit before the repair (f2934894) a light run of S12 against main showed 32 new extra documents: 12 in the "marker" family (a BOM, a CRLF, and a property on the marker line) and 20 in the "pprop" family (a key or a dash, with an anchor-only line). With the repair, S12 has 0 new lost and 0 new extra documents, and the extra count falls from 1024 on main to 0.
 
@@ -129,7 +130,7 @@ Known effect, class B. The change does not start any extra or lost name. It does
 Counts of the sweep `w616-r2` at commit 58ba0408 against main c32920f9, on the sets S5, S8, S9, S10, S11 and S12. The check below shows that no refused-listed row is in a document that go-yaml accepts. Run it from the root of the repository, with the directory of a sweep as the argument. That directory holds `reports-<set>.log`, the output of `cmp-reports.mjs`, and `<set>.oracle.json`, the output of the oracle on the pinned set.
 
 ```sh
-node experiments/scanner-cross-line/check-refused-split.mjs <sweep dir>
+node experiments/scanner-cross-line/check-refused-split.mjs <sweep dir> s5 s8 s9 s10 s11 s12
 ```
 
 It reads the ids on the `refusedListed-new` line of each report and looks each one up in the oracle output. The result for the sweep `w616-r2` is 0 documents in an accepted document, for 0 of 0 on S5, 0 of 0 on S8, 0 of 48 on S9, 0 of 6 on S10, 0 of 56 on S11 and 0 of 16 on S12. The oracle refuses all 126 documents. The exit code is 1 if one id is in an accepted document or a file is missing.

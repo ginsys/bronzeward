@@ -1313,4 +1313,16 @@ describe("a plain !bwref value that goes on to the next line", () => {
   ])("an anchor on a line of its own under %s, then a more indented no-break space line, lists nothing", (_, text) => {
     expect(references(text)).toEqual([]);
   });
+
+  // The same line above a root scalar: it is no text, so the tag is on a root scalar and a `- ` line goes on
+  // (review of this change; go-yaml reads `x/foo - y`). The row without the anchor is the control.
+  test.each([
+    ["no line of properties", "!bwref x/foo\n- y\n"],
+    ["an anchor on a line of its own", "&e\n!bwref x/foo\n- y\n"],
+    ["an anchor and a blank line", "&e\n\n!bwref x/foo\n- y\n"],
+    ["an anchor after a marker", "---\n&e\n!bwref x/foo\n- y\n"],
+    ["an anchor and an indented tag line", "&e\n  !bwref x/foo\n- y\n"],
+  ])("a root scalar after %s goes on to a dash line and lists nothing", (_, text) => {
+    expect(references(text)).toEqual([]);
+  });
 });

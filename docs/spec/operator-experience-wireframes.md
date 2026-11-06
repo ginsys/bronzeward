@@ -304,7 +304,7 @@ parent such as `- k:` a next line that can be a sibling key or a sequence entry 
 an ordinary indented line goes on. A line that holds only an anchor is no parent: the key above it is. An anchor before the tag on its own line (`&e !bwref x/foo`) is no text: the
 parent is the line above, as for the tag alone. A byte order mark at the start of the stream is no text
 and no column. A root scalar is a tag on the line of `---`, or the first text of a
-document, with only anchors and blanks before it. It goes on at every next line with text, also at column 0, and a
+document, with only anchors and blanks before it, also when an anchor stands on a line of its own. It goes on at every next line with text, also at column 0, and a
 line that starts with `- ` or `? ` is text there. A key line after it makes the server refuse the document. In flow context
 the indent does not count. The next line is text unless it starts with `,`, `]`, `}` or `: `. The
 editor skips blank lines between. A `---` or `...` marker and a directive line each end the value.

@@ -14,7 +14,7 @@ if (!dir) {
   console.error("usage: node check-refused-split.mjs <run dir> [set ...]");
   process.exit(2);
 }
-const sets = rest.length ? rest : ["s5", "s8", "s9", "s10", "s11"];
+const sets = rest.length ? rest : ["s5", "s8", "s9", "s10", "s11", "s12"];
 let bad = 0;
 for (const s of sets) {
   let log, oracle;
