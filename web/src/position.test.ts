@@ -410,10 +410,11 @@ describe("a plain value after an anchor, in block and in flow context", () => {
   });
 
   // A flow line that starts with the value indicator (a colon before a blank) ends the scalar, so the
-  // tagged scalar is an explicit key. A colon before a flow indicator is text for go-yaml v3.0.5.
+  // tagged scalar is an explicit key, which lists no name (ginsys/bronzeward#637). A colon before a
+  // flow indicator is text for go-yaml v3.0.5.
   test("flow context: an explicit key ends at the value indicator on the next line", () => {
-    expect(references("k: {? !bwref &e x/foo\n: v}\n")).toEqual(["x/foo"]);
-    expect(references("k: [? !bwref &e x/foo\n: v]\n")).toEqual(["x/foo"]);
+    expect(references("k: {? !bwref &e x/foo\n: v}\n")).toEqual([]);
+    expect(references("k: [? !bwref &e x/foo\n: v]\n")).toEqual([]);
     expect(references("k: {? !bwref &e x/foo\n:]}\n")).toEqual([]);
   });
 
@@ -748,7 +749,6 @@ describe("a tag is resolved the way go-yaml does", () => {
     ["a tag and a key that starts with a hyphen", "a:\n  !u -k: !bwref x/foo\n"],
     ["a tag and a key that starts with a question mark", "a:\n  !u ?k: !bwref x/foo\n"],
     ["a sequence entry, then a tagged value", "a:\n  - !bwref x/foo\n"],
-    ["a sequence entry, then an explicit key", "a:\n  - ? !bwref x/foo\n"],
     ["a tagged key in a continuation line", "a: !other\n  !u b: !bwref x/foo\n"],
   ])("an indicator after a property: the valid control %s still lists the name", (_, text) => {
     expect(references(text)).toEqual(["x/foo"]);
@@ -1532,5 +1532,45 @@ describe("a plain !bwref value that goes on to the next line", () => {
     ])("a long input stays linear: %s", (_, text) => {
       bounded(text);
     });
+  });
+});
+
+// ginsys/bronzeward#637: the server refuses a `!bwref` tag on a key (tag-placement,
+// internal/ingest/declare.go), so the editor lists nothing for a tag on an explicit key or an alias key.
+describe("a tag on an explicit key or an alias key", () => {
+  test.each([
+    ["an explicit key", "? !bwref x/foo\n: v\n"],
+    ["an explicit key under a mapping", "a:\n  ? !bwref x/foo\n  : v\n"],
+    ["an explicit key with an anchor", "? &e !bwref x/foo\n: v\n"],
+    ["an alias key of a tagged explicit key", "? &k !bwref x/foo\n: v\n*k : w\n"],
+    ["an explicit key after a sequence dash", "- ? !bwref x/foo\n  : v\n"],
+    ["an explicit key after a sequence entry", "a:\n  - ? !bwref x/foo\n"],
+    ["an explicit key with the tag on the next line", "?\n  !bwref x/foo\n: v\n"],
+    ["an explicit key after other entries", "a: b\n? !bwref x/foo\n: v\n"],
+    ["an explicit key with a quoted name", '? !bwref "x/foo"\n: v\n'],
+    ["an explicit key in a flow mapping", "{? !bwref x/foo : v}\n"],
+    ["an explicit key in a flow sequence", "[? !bwref x/foo]\n"],
+    ["an explicit key after a flow entry", "a: {b: c, ? !bwref x/foo : v}\n"],
+  ])("lists nothing for %s", (_, text) => {
+    expect(references(text)).toEqual([]);
+  });
+  test.each([
+    ["a sequence entry", "- !bwref x/foo\n"],
+    ["a mapping value", "a: !bwref x/foo\n"],
+    ["the value of an explicit key", "? a\n: !bwref x/foo\n"],
+    ["the value of an explicit key, after an anchor", "? a\n: &e !bwref x/foo\n"],
+    ["the value of an explicit key that has another tag", "? !t a\n: !bwref x/foo\n"],
+    ["a sequence entry under an explicit key", "? a\n: - !bwref x/foo\n"],
+    ["a value in a flow mapping with an explicit key", "{? a : !bwref x/foo}\n"],
+  ])("still lists the name of %s", (_, text) => {
+    expect(references(text)).toEqual(["x/foo"]);
+  });
+
+  // A known gap: the tag of a value that a later alias key repeats. The server refuses the document
+  // at the alias use (tag-placement, the alias branch of internal/ingest/declare.go). The value's own
+  // tag is listed where it stands, as before. Listing nothing needs a scan ahead for the alias key,
+  // which is a document-level scope that these line rules do not cover.
+  test("a tagged value that an alias key repeats is listed where it stands", () => {
+    expect(references("a: &k !bwref x/foo\n*k : v\n")).toEqual(["x/foo"]);
   });
 });

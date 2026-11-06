@@ -262,6 +262,9 @@ function readTags(original: string): { found: { index: number; tag: string; name
       m = tag.exec(masked);
     }
     if (m === null) continue;
+    // The server refuses a tag on a key (tag-placement, ginsys/bronzeward#637), so an explicit key's
+    // tag lists no name, as the tag on an implicit key lists none.
+    if (explicitKeyTag(masked, start)) continue;
     // go-yaml refuses a second anchor on one node (`&a !bwref &b x/foo`). The look-back stops after
     // 4096 characters, so the cost per anchored tag has a bound. Beyond it the guard misses the first
     // anchor and the scanner lists the name, though go-yaml refuses the document: an extra name in a
@@ -286,6 +289,26 @@ function readTags(original: string): { found: { index: number; tag: string; name
     if (name !== undefined && NAME.test(name)) found.push({ index: start, tag: original.slice(start, end), name });
   }
   return { found, refused };
+}
+
+// Whether the tag at `tag` is a property of an explicit key: the `?` indicator comes right before it,
+// on its line (`? !bwref x/foo`, also after sequence dashes, a flow opener or comma, and after one
+// anchor), or alone at the end of the nearest line above (`?` then the tag on the next line, more
+// indented). Only a key that is a scalar counts: the entry of a collection that is a key
+// (`? - !bwref x/foo`) is no explicit key's own tag.
+const EXPLICIT_KEY = /(?:^|[[{,])[ \t]*(?:-[ \t]+)*\?[ \t]+(?:&[0-9A-Za-z_-]+[ \t]+)*$/;
+const KEY_INDICATOR_LINE = /^[ \t]*(?:-[ \t]+)*\?[ \t]*$/;
+function explicitKeyTag(masked: string, tag: number): boolean {
+  const start = masked.lastIndexOf("\n", tag - 1) + 1;
+  const before = masked.slice(start, tag);
+  if (before.trim() !== "") return EXPLICIT_KEY.test(before);
+  for (let e = start - 1; e >= 0; ) {
+    const s = e === 0 ? 0 : masked.lastIndexOf("\n", e - 1) + 1;
+    const l = masked.slice(s, e);
+    if (l.trim() !== "") return KEY_INDICATOR_LINE.test(l) && indent(l) < indent(lineAt(masked, start));
+    e = s - 1;
+  }
+  return false;
 }
 
 const indent = (line: string) => line.length - line.trimStart().length;
