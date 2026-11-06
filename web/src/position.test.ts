@@ -994,6 +994,115 @@ describe("a tag is resolved the way go-yaml does", () => {
     expect(references("%YAML 1.2\n---\na: !bwref x/foo\n---\nb: !bwref x/bar\n")).toEqual(["x/bar"]);
   });
 
+  // ginsys/bronzeward#654: go-yaml allows a simple key only where simple_key_allowed is set. A key's
+  // colon sets it to false, so no key, `- ` or `? ` can follow a value on its line (scannerc.go
+  // yaml_parser_fetch_value, fetch_block_entry, fetch_key, go.yaml.in/yaml/v3 v3.0.5). A document marker
+  // clears it too. A new line, `- `, `? ` and the colon of an explicit key set it again.
+  test.each([
+    ["a plain key after a plain value", "a: b: !bwref x/foo\n"],
+    ["a plain key after a value of several words", "a: b c: !bwref x/foo\n"],
+    ["a flow sequence key after a tag", "a: !u [? b]: !bwref x/foo\n"],
+    ["a flow sequence key with two items after a tag", "a: !u [b, c]: !bwref x/foo\n"],
+    ["a flow sequence key", "a: [b]: !bwref x/foo\n"],
+    ["a flow mapping key", "a: {b: c}: !bwref x/foo\n"],
+    ["a double-quoted key", 'a: "b": !bwref x/foo\n'],
+    ["a single-quoted key", "a: 'b': !bwref x/foo\n"],
+    ["an alias key", "a: *x : !bwref x/foo\n"],
+    ["a key after an anchor", "a: &x b: !bwref x/foo\n"],
+    ["a key after a tag", "a: !t b: !bwref x/foo\n"],
+    ["a key after a tab", "a:\tb: !bwref x/foo\n"],
+    ["a key after several blanks", "a:   b: !bwref x/foo\n"],
+    ["a key in a nested mapping", "a:\n  b: c: !bwref x/foo\n"],
+    ["a key in a sequence entry", "- a: b: !bwref x/foo\n"],
+    ["a key in a nested sequence entry", "- - a: b: !bwref x/foo\n"],
+    ["a key after a value in an explicit key", "? a: b: !bwref x/foo\n"],
+    ["a block entry", "a: - b: !bwref x/foo\n"],
+    ["an explicit key", "a: ? b: !bwref x/foo\n"],
+    ["an explicit value indicator", "a: : !bwref x/foo\n"],
+    ["a block entry after a flow sequence", "a: [k] - b\nk: !bwref x/foo\n"],
+    ["a block entry after a quoted value", 'a: "q" - b\nk: !bwref x/foo\n'],
+    ["an explicit key after a flow mapping", "a: {k: v} ? b\nk: !bwref x/foo\n"],
+    ["a key on the line of a document marker", "--- a: !bwref x/foo\n"],
+    ["a key in a second document, on its marker line", "c: 1\n--- a: !bwref x/foo\n"],
+  ])("a key, entry or value indicator after a value on its line lists nothing: %s", (_, text) => {
+    expect(references(text)).toEqual([]);
+  });
+
+  test.each([
+    ["a key on its own line", "a:\n  b: !bwref x/foo\n"],
+    ["a key after a sequence dash", "- a: !bwref x/foo\n"],
+    ["a key after two dashes", "- - a: !bwref x/foo\n"],
+    ["a key after an explicit key indicator", "? a: !bwref x/foo\n"],
+    ["a key after the colon of an explicit key", "? a\n: b: !bwref x/foo\n"],
+    ["a key after an explicit key and its colon, nested", "a:\n  ? b\n  : c: !bwref x/foo\n"],
+    ["a sequence after the colon of an explicit key", "? a\n: - b: !bwref x/foo\n"],
+    ["a key after a value on the line above", "a: b\nc: !bwref x/foo\n"],
+    ["a colon with no blank after it", "a: http://x\nb: !bwref x/foo\n"],
+    ["a flow collection value", "a: {b: c}\nd: !bwref x/foo\n"],
+    ["a flow sequence value", "a: [b, c]\nd: !bwref x/foo\n"],
+    ["a flow collection across two lines", "a: {b: c,\n  d: e}\nf: !bwref x/foo\n"],
+    ["a quoted colon", 'a: "x: y"\nb: !bwref x/foo\n'],
+    ["a colon in a comment", "a: b # c: d\ne: !bwref x/foo\n"],
+    ["a block scalar value", "a: |\n  b: c\nd: !bwref x/foo\n"],
+    ["a quoted key", '"a b": !bwref x/foo\n'],
+    ["a key after a tag", "!t a: !bwref x/foo\n"],
+    ["a key after a tag on the key", "a:\n  !t b: !bwref x/foo\n"],
+    ["a marker with a comment", "--- # c\na: !bwref x/foo\n"],
+    ["a marker with a tag on its line", "--- !t\na: !bwref x/foo\n"],
+    ["a scalar on the line of a marker", "--- a\n---\nb: !bwref x/foo\n"],
+    ["a key in a second document", "c: 1\n---\na: !bwref x/foo\n"],
+  ])("a key, entry or value indicator after a value on its line: the valid control %s still lists the name", (_, text) => {
+    expect(references(text)).toEqual(["x/foo"]);
+  });
+
+  // ginsys/bronzeward#654: when a flow collection is a simple key that starts at its bracket, go-yaml
+  // refuses it if every item of the collection is an explicit `?` item (`[? b]`, `{? b: c}`, `[? b,]`).
+  // One item that starts with anything else, an item before a `?` item or after it, makes the key
+  // valid. A tag or an anchor before the bracket, or a bracket nested in another, is valid too. The
+  // refusal is a parse error, "did not find expected key" (go.yaml.in/yaml/v3 v3.0.5).
+  test.each([
+    ["a flow sequence", "a:\n  [? b]: !bwref x/foo\n"],
+    ["a flow mapping", "a:\n  {? b}: !bwref x/foo\n"],
+    ["a flow sequence with a trailing comma", "a:\n  [? b,]: !bwref x/foo\n"],
+    ["a flow sequence of two ? items", "a:\n  [? b, ? c]: !bwref x/foo\n"],
+    ["a flow sequence whose item is a sequence", "a:\n  [? [x]]: !bwref x/foo\n"],
+    ["a flow mapping with a pair", "a:\n  {? b: c}: !bwref x/foo\n"],
+    ["a blank after the bracket", "a:\n  [ ? b ]: !bwref x/foo\n"],
+    ["blanks before the colon", "a:\n  [? b]  : !bwref x/foo\n"],
+    ["a key at the top of the document", "[? b]: !bwref x/foo\n"],
+    ["a key after a dash", "- [? b]: !bwref x/foo\n"],
+    ["a key after an explicit key indicator", "? [? b]: !bwref x/foo\n"],
+    ["a value that is another key", "a:\n  [? b]: c\nd: !bwref x/foo\n"],
+    ["a key of a second document", "c: 1\n---\n[? b]: !bwref x/foo\n"],
+  ])("a flow key with only ? items lists nothing: %s", (_, text) => {
+    expect(references(text)).toEqual([]);
+  });
+
+  test.each([
+    ["a plain item", "a:\n  [b]: !bwref x/foo\n"],
+    ["a plain item after a ? item", "a:\n  [? b, c]: !bwref x/foo\n"],
+    ["a plain item before a ? item", "a:\n  [b, ? c]: !bwref x/foo\n"],
+    ["a plain item before and after a ? item", "a:\n  [b, ? c, d]: !bwref x/foo\n"],
+    ["a plain item after a ? item in a mapping", "a:\n  {? b, c}: !bwref x/foo\n"],
+    ["a pair after a ? pair", "a:\n  {? b: c, d: e}: !bwref x/foo\n"],
+    ["a plain item after a ? pair", "a:\n  [? b: c, d]: !bwref x/foo\n"],
+    ["a mapping item before a ? item", "a:\n  {a, ? b}: !bwref x/foo\n"],
+    ["a tag before the bracket", "a:\n  !t [? b]: !bwref x/foo\n"],
+    ["an anchor before the bracket", "a:\n  &a [? b]: !bwref x/foo\n"],
+    ["a sequence in a sequence", "a:\n  [[? b]]: !bwref x/foo\n"],
+    ["a mapping in a sequence", "a:\n  [{? b}]: !bwref x/foo\n"],
+    ["a quoted item", 'a:\n  ["? b"]: !bwref x/foo\n'],
+    ["a key inside a flow mapping", "{[? b]: !bwref x/foo}\n"],
+    ["a key inside a flow sequence", "[[? b]: !bwref x/foo]\n"],
+    ["a collection that is no key", "a: [? b]\nc: !bwref x/foo\n"],
+    ["a collection that is a value", "a:\n  - [? b]\n  - !bwref x/foo\n"],
+    ["an explicit key", "a:\n  ? [? b]\n  : !bwref x/foo\n"],
+    ["a key that is empty", "a:\n  []: !bwref x/foo\n"],
+    ["a mapping key that is empty", "a:\n  {}: !bwref x/foo\n"],
+  ])("a flow key with another item still lists the name: %s", (_, text) => {
+    expect(references(text)).toEqual(["x/foo"]);
+  });
+
   // The spot of a reference runs from the first character of its tag, as it is spelled, to the end of
   // its name.
   test("the spot of a name starts at the tag as it is spelled", () => {
