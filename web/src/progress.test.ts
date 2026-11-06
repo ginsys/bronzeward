@@ -674,3 +674,86 @@ describe("the operation progress reader (§8.6)", () => {
     expect(eventLine(ev("e1:3", "x", null))).toBe("x");
   });
 });
+
+// ginsys/bronzeward#644 item A: a callback that aborts the watch's own signal synchronously. The
+// reader runs no callback after the one that aborted and returns `stopped`. Each test names one site.
+describe("a callback that aborts its own watch", () => {
+  test("a clear in a stream's reset stops the watch before the events buffered behind it", async () => {
+    const s = server({ streams: [{ chunks: ["event: reset\ndata: {}\n\n" + frame(ev("e1:1")) + frame(ev("e1:2"))] }], states: ["running"] });
+    const r = recorder();
+    const clear = r.w.clear;
+    r.w.clear = (why) => { clear(why); r.abort.abort(); };
+    expect(await watch(s.client, OP, r.w, r.pace)).toEqual({ kind: "stopped" });
+    expect(r.log).toEqual([`clear: ${RESTORED}`]);
+  });
+
+  test("a show in a stream stops the watch without asking until, and shows no event behind it", async () => {
+    const s = server({ streams: [{ chunks: [frame(ev("e1:1")) + frame(ev("e1:2"))] }], states: ["running"] });
+    let asked = 0;
+    const r = recorder(() => { asked++; return false; });
+    const show = r.w.show;
+    r.w.show = (e) => { show(e); r.abort.abort(); };
+    expect(await watch(s.client, OP, r.w, r.pace)).toEqual({ kind: "stopped" });
+    expect(r.log).toEqual(["show e1:1"]);
+    expect(asked).toBe(0);
+  });
+
+  test("an until in a stream that aborts and answers false stops the watch before the events behind it", async () => {
+    const s = server({ streams: [{ chunks: [frame(ev("e1:1")) + frame(ev("e1:2"))] }], states: ["running"] });
+    const r = recorder(() => { r.abort.abort(); return false; });
+    expect(await watch(s.client, OP, r.w, r.pace)).toEqual({ kind: "stopped" });
+    expect(r.log).toEqual(["show e1:1"]);
+  });
+
+  test("an until at a keep-alive that aborts and answers false stops the watch before the events behind it", async () => {
+    const s = server({ streams: [{ chunks: [": keep-alive\n\n" + frame(ev("e1:1"))] }], states: ["running"] });
+    const r = recorder(() => { r.abort.abort(); return false; });
+    expect(await watch(s.client, OP, r.w, r.pace)).toEqual({ kind: "stopped" });
+    expect(r.log).toEqual([]);
+  });
+
+  test("a show in the JSON pages stops the watch before the rest of the batch", async () => {
+    const s = server({ streams: [{ chunks: ["{}"], type: "application/json" }], states: ["running"], pages: [ev("e1:1"), ev("e1:2"), ev("e1:3")] });
+    const r = recorder();
+    const show = r.w.show;
+    r.w.show = (e) => { show(e); r.abort.abort(); };
+    expect(await watch(s.client, OP, r.w, r.pace)).toEqual({ kind: "stopped" });
+    expect(r.log).toEqual(["show e1:1"]);
+  });
+
+  test("a show in the drain of a terminal state stops the watch before the rest of the batch", async () => {
+    const s = server({ streams: [{ chunks: [] }], states: ["succeeded"], pages: [ev("e1:1"), ev("e1:2", "succeeded")] });
+    const r = recorder();
+    const show = r.w.show;
+    r.w.show = (e) => { show(e); r.abort.abort(); };
+    expect(await watch(s.client, OP, r.w, r.pace)).toEqual({ kind: "stopped" });
+    expect(r.log).toEqual(["show e1:1"]);
+  });
+
+  test("a clear for the epoch of the operation read stops the watch without asking until", async () => {
+    const s = server({ streams: [{ chunks: [frame(ev("e1:1"))] }], states: ["running@e2"] });
+    let cleared = false;
+    let askedAfterClear = 0;
+    const r = recorder(() => { if (cleared) askedAfterClear++; return cleared; });
+    const clear = r.w.clear;
+    r.w.clear = (why) => { clear(why); cleared = true; r.abort.abort(); };
+    expect(await watch(s.client, OP, r.w, r.pace)).toEqual({ kind: "stopped" });
+    expect(r.log).toEqual(["show e1:1", `clear: ${RESTORED}`]);
+    expect(askedAfterClear).toBe(0);
+    // The first operation read is discarded for the new epoch and waits once. The clear that follows
+    // aborts, and the watch does not wait again.
+    expect(r.sleeps).toEqual([1000]);
+  });
+
+  test("an until at the operation read that aborts and answers true stops the watch, not ends it", async () => {
+    const s = server({ streams: [{ chunks: [frame(ev("e1:1"))] }], states: ["running"] });
+    let reads = 0;
+    const r = recorder(() => {
+      // False after the first event, so the stream goes on to the operation read, which asks again.
+      if (++reads < 2) return false;
+      r.abort.abort();
+      return true;
+    });
+    expect(await watch(s.client, OP, r.w, r.pace)).toEqual({ kind: "stopped" });
+  });
+});
