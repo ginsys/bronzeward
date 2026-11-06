@@ -871,9 +871,34 @@ func TestOperationWatchEventLinesUnwritableJSON(t *testing.T) {
 // first Ctrl-C on the third and refuses it and every line after: the output fails while the watch is
 // ending by Ctrl-C.
 type interruptThenFail struct {
-	n       int
-	taken   chan struct{} // closed by onInterrupt when the watch has taken the first Ctrl-C
-	release chan struct{} // when set, the third write stays pending after the Ctrl-C until this is closed
+	n        int
+	taken    chan struct{} // closed by onInterrupt when the watch has taken the first Ctrl-C
+	pending  chan struct{} // closed by the third write when it starts to wait for release
+	release  chan struct{} // when set, the third write stays pending after the Ctrl-C until this is closed
+	abort    chan struct{} // closed by the overall deadline of the test: no wait of the write outlasts it
+	timedOut atomic.Bool   // set by the overall deadline: the test has failed, whatever else it sees
+}
+
+// interruptTestDeadline is the one overall deadline of a test that uses interruptThenFail. It is the
+// only timer of the write and of the observer of a test: no wait in them has a timer of its own.
+const interruptTestDeadline = 60 * time.Second
+
+// newInterruptThenFail returns the output of a test and starts the overall deadline of that test. When
+// the deadline passes, it marks the test as failed and then ends every wait of the write, so that run
+// returns and the test does not hang. A release after the deadline never gives a pass: the test reads
+// timedOut first. pendingWrite makes the third write stay pending until release is closed.
+func newInterruptThenFail(t *testing.T, pendingWrite bool) *interruptThenFail {
+	t.Helper()
+	w := &interruptThenFail{taken: make(chan struct{}), pending: make(chan struct{}), abort: make(chan struct{})}
+	if pendingWrite {
+		w.release = make(chan struct{})
+	}
+	deadline := time.AfterFunc(interruptTestDeadline, func() {
+		w.timedOut.Store(true)
+		close(w.abort)
+	})
+	t.Cleanup(func() { deadline.Stop() })
+	return w
 }
 
 func (w *interruptThenFail) Write(p []byte) (int, error) {
@@ -883,20 +908,38 @@ func (w *interruptThenFail) Write(p []byte) (int, error) {
 	}
 	if w.n == 3 {
 		// The write fails only after the watch took the interrupt, so that the end of the output cannot
-		// reach the watch before the Ctrl-C does. No sleep: onInterrupt tells it.
+		// reach the watch before the Ctrl-C does. No sleep and no timer: onInterrupt tells it.
 		_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
 		select {
 		case <-w.taken:
-		case <-time.After(5 * time.Second):
+		case <-w.abort:
 		}
+		// From here the write is pending. It tells the observer, then waits for the observer's answer.
+		close(w.pending)
 		if w.release != nil {
 			select {
 			case <-w.release:
-			case <-time.After(5 * time.Second):
+			case <-w.abort:
 			}
 		}
 	}
 	return 0, errors.New("write refused")
+}
+
+// stopWaitsOnSink reports whether a goroutine of the process is blocked on a mutex inside
+// (*watchOut).stop. In TestOperationWatchInterruptPendingWriteFails the pending write holds the lock of
+// the main sink, so a stop in that wait has already chosen its sink. The match reads the header and a frame
+// of the goroutine dump of the Go runtime. If a later Go prints another header, it never matches and the
+// test fails at its deadline, so it cannot pass without the stop lines waiting.
+func stopWaitsOnSink() bool {
+	buf := make([]byte, 1<<20)
+	for _, block := range strings.Split(string(buf[:runtime.Stack(buf, true)]), "\n\n") {
+		header, _, _ := strings.Cut(block, "\n")
+		if strings.Contains(header, "[sync.Mutex.Lock") && strings.Contains(block, "(*watchOut).stop") {
+			return true
+		}
+	}
+	return false
 }
 
 // TestOperationWatchInterruptOutputFails: when the output of a watch failed before its first Ctrl-C was
@@ -909,11 +952,14 @@ func TestOperationWatchInterruptOutputFails(t *testing.T) {
 	defer srv.Close()
 	automationContext(t, srv.URL)
 	var e bytes.Buffer
-	out := &interruptThenFail{taken: make(chan struct{})}
+	out := newInterruptThenFail(t, false)
 	var taken sync.Once
 	onInterrupt = func() { taken.Do(func() { close(out.taken) }) }
 	defer func() { onInterrupt = nil }()
 	code := run([]string{"operation", "watch", "op_BWSYNTH", "--timeout", "30s"}, out, &e)
+	if out.timedOut.Load() {
+		t.Fatalf("the test passed its overall deadline of %s: the watch did not take the Ctrl-C", interruptTestDeadline)
+	}
 	stop := "Stopped watching at your request. Operation op_BWSYNTH is still running, as the server last read it; it goes on.\n"
 	follow := "Follow it again with: bronzewardctl operation watch 'op_BWSYNTH'\n"
 	if code != 130 || !strings.HasSuffix(e.String(), stop+follow) || out.n < 3 {
@@ -925,9 +971,10 @@ func TestOperationWatchInterruptOutputFails(t *testing.T) {
 // of the first Ctrl-C ends, and it fails after the stop lines started to wait for that sink. The output
 // had not failed when the stop lines picked their sink, so they would go to the failed standard output
 // and be lost. They go to standard error instead, last, and the exit is 130 (ginsys/bronzeward#648).
-// The write stays pending until the test sees the stop lines in the stack of the process, so no elapsed
-// time decides the order. A short pause after that lets them reach the lock of the sink. A machine that
-// is too slow for the pause can only make the test pass without the fix, never fail with it.
+// The write tells the test when it starts to wait. The write then stays pending until the test sees a
+// goroutine blocked on a mutex inside the stop lines, which means that they have chosen their sink and
+// wait for its lock. No elapsed time decides the order, and a slow machine only delays the match. The
+// test has one overall deadline and it fails at that deadline (ginsys/bronzeward#673).
 func TestOperationWatchInterruptPendingWriteFails(t *testing.T) {
 	f := &opFake{stream: []string{sse(1, "commitment", commitment)},
 		body: fmt.Sprintf(opJSON, "apply-config", "running", "null", "null", "[]")}
@@ -938,33 +985,31 @@ func TestOperationWatchInterruptPendingWriteFails(t *testing.T) {
 	interruptGrace = 100 * time.Millisecond
 	defer func() { interruptGrace = grace }()
 	var e bytes.Buffer
-	out := &interruptThenFail{taken: make(chan struct{}), release: make(chan struct{})}
+	out := newInterruptThenFail(t, true)
 	var taken sync.Once
 	onInterrupt = func() { taken.Do(func() { close(out.taken) }) }
 	defer func() { onInterrupt = nil }()
-	seen := make(chan bool, 1) // whether the stop lines showed in the stack before the budget ended
 	go func() {
 		defer close(out.release)
-		// The budget starts when the watch took the Ctrl-C, not when the command started.
+		// The observer starts its wait when the write says that it waits. It has no timer of its own.
 		select {
-		case <-out.taken:
-		case <-time.After(5 * time.Second):
-			seen <- false
+		case <-out.pending:
+		case <-out.abort:
 			return
 		}
-		buf := make([]byte, 1<<20)
-		for deadline := time.Now().Add(4 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
-			if bytes.Contains(buf[:runtime.Stack(buf, true)], []byte("(*watchOut).stop")) {
-				time.Sleep(50 * time.Millisecond)
-				seen <- true
+		tick := time.NewTicker(5 * time.Millisecond)
+		defer tick.Stop()
+		for !stopWaitsOnSink() {
+			select {
+			case <-tick.C:
+			case <-out.abort:
 				return
 			}
 		}
-		seen <- false
 	}()
 	code := run([]string{"operation", "watch", "op_BWSYNTH", "--timeout", "30s"}, out, &e)
-	if !<-seen {
-		t.Fatal("the stop lines never showed in the stack after the Ctrl-C: the test did not reach its interleaving")
+	if out.timedOut.Load() {
+		t.Fatalf("the stop lines never waited on the sink within the overall deadline of %s: the test did not reach its interleaving", interruptTestDeadline)
 	}
 	stop := "Stopped watching at your request. Operation op_BWSYNTH goes on; the state it has now was not read.\n"
 	follow := "Follow it again with: bronzewardctl operation watch 'op_BWSYNTH'\n"
