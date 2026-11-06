@@ -192,6 +192,12 @@ export class Writes {
     this.client = undefined;
     this.changed();
   }
+  // The sign-in ended with no client to say so, for example another tab signed out: no unknown write
+  // is repeated, so each releases its body (§11.2 item 6, #653).
+  signInEnded(): void {
+    for (const w of this.all) if (w.outcome?.kind === "unknown") this.release(w);
+    this.changed();
+  }
   // The page was hidden (§10.3 item 3): its writes go with it. A page restored from the
   // back-forward cache reloads, and that reload asks nothing for a write no notice shows any more.
   forget(): void {
@@ -258,8 +264,9 @@ export class Writes {
       w.running = undefined;
       w.ingesting = undefined;
       w.spec.settled?.(o, w);
-      // Only an unknown outcome is repeated, and not once its client ended its writes meanwhile.
-      if (o.kind !== "unknown" || w.sentThrough?.writesEnded === true) this.release(w);
+      // Only an unknown outcome is repeated, and not once its client ended its writes or its sign-in
+      // ended meanwhile.
+      if (o.kind !== "unknown" || w.sentThrough?.writesEnded === true || this.principal() !== w.principal) this.release(w);
       // The one removal before a dismissal: a write no notice showed, which its form reports.
       if (!isOpen(w)) {
         if (shown) w.kept = true;
@@ -534,7 +541,9 @@ export class Writes {
   // through it. Looked at after every wait, since any of them can land while a read is answered.
   private gone(w: Write, client: Client): string | undefined {
     if (this.principal() !== w.principal) return SIGN_IN_CHANGED;
-    return this.client === client && client.writesEnded !== true ? undefined : SHELL_GONE;
+    if (this.client !== client || client.writesEnded === true) return SHELL_GONE;
+    // The client of the first send ended its writes: the sign-in ended, whichever client repeats.
+    return w.sentThrough?.writesEnded === true ? SIGN_IN_CHANGED : undefined;
   }
 
   // The epoch one GET /recovery shows (§8.4 item 3).
