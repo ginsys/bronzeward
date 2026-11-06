@@ -294,8 +294,10 @@ is not its name.
 A plain `!bwref` value can go on to the next line. The editor reads that line as part of the value,
 and lists nothing, in these cases. In block context the line must be indented past its parent. Then
 a line that starts with `,`, `]` or `}` is text. A line that starts with `- `, `? ` or holds a key
-(`k: v`) is text where the parent line shows a key, a dash or a plain scalar, and it ends the value
-under a compact parent such as `- - `. A line of Unicode spaces is text, not blank. In flow context
+(`k: v`) is text where the parent line shows a plain key, a quoted key with no quote character inside,
+a dash or a plain scalar. It ends the value under a compact parent such as `- - `. A quoted key
+with a doubled or escaped quote (`'a''b': !bwref x/foo`) is not read as a parent, so such a line still
+ends the value and the editor lists a name where the server lists none. A line of Unicode spaces is text, not blank. In flow context
 the indent does not count. The next line is text unless it starts with `,`, `]`, `}` or `: `. The
 editor skips blank lines between. A `---` or `...` marker and a directive line each end the value.
 
