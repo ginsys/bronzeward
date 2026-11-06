@@ -479,8 +479,12 @@ interface Carry {
   // else a second tag on one node. It waits for the value colon of a key at flow depth 0 in this
   // line; `commentStarts` refuses the document if the line ends without one.
   split: boolean;
+  // The lines since the last line with content are all blank or comment lines, and one of them is a
+  // comment line that starts a line. go-yaml reads such a run of comment lines as one, tabs included
+  // (yaml_parser_scan_comments); see `scanLine`.
+  chain: boolean;
 }
-const freshCarry = (): Carry => ({ stack: [], flow: 0, ns: true, open: "", holder: -1, block: undefined, closed: false, tagged: false, earlier: false, split: false });
+const freshCarry = (): Carry => ({ stack: [], flow: 0, ns: true, open: "", holder: -1, block: undefined, closed: false, tagged: false, earlier: false, split: false, chain: false });
 
 // The document that is being read (ginsys/bronzeward#615). A tag spelled through a handle names what
 // the document's %TAG directives say, so a `!bwref` property counts only when its document is
@@ -629,6 +633,12 @@ function commentStarts(lines: readonly string[]): { starts: number[]; props: Map
   const refused: Spot[] = [];
   const docs = freshDocs(props, refused, 0);
   let base = 0;
+  // For each line: is the first line after it that is not blank a comment line?
+  const commentAhead: boolean[] = new Array<boolean>(lines.length).fill(false);
+  for (let n = lines.length - 2; n >= 0; n--) {
+    const next = lines[n + 1]!;
+    commentAhead[n] = /^[ \t\r]*$/.test(next) ? commentAhead[n + 1]! : /^[ \t]*#/.test(next);
+  }
   const starts = lines.map((full, n) => {
     // The carriage return of a CRLF is part of the line break, not of the line: the scan reads the
     // line without it (so a `.` in a pattern, and a marker, see the line go-yaml sees), and a scan
@@ -641,7 +651,9 @@ function commentStarts(lines: readonly string[]): { starts: number[]; props: Map
     const rest = lead ? line.slice(1) : line;
     const text = lead && rest.startsWith("﻿") ? ` ${rest.slice(1)}` : rest;
     // A directive line is no text to scan: the whole line is blanked.
-    const at = readDocumentLine(docs, st, text, base) ? 0 : scanLine(st, docs, text, base + (lead ? 1 : 0));
+    let at = 0;
+    if (readDocumentLine(docs, st, text, base)) st.chain = false;
+    else at = scanLine(st, docs, text, base + (lead ? 1 : 0), commentAhead[n]!);
     // A simple key sits on one line: a pending second tag that no key colon of the line took is
     // a second tag on one node (ginsys/bronzeward#620).
     if (st.split) docs.refused = true;
@@ -654,11 +666,15 @@ function commentStarts(lines: readonly string[]): { starts: number[]; props: Map
   return { starts, props, refused };
 }
 
-function scanLine(st: Carry, docs: Docs, line: string, base: number): number {
+// `commentAhead`: the first line after this one that is not blank (spaces or tabs only) is a comment
+// line. The file ends otherwise.
+function scanLine(st: Carry, docs: Docs, line: string, base: number, commentAhead: boolean): number {
   // YAML indents with U+0020 only, and go-yaml ends an empty line at a line break after those spaces
   // (yaml_parser_scan_block_scalar_breaks, scannerc.go lines 2393-2410, go.yaml.in/yaml/v3 v3.0.5). A
   // tab or another Unicode space (U+00A0, say) is text, which `trim` would count as blank.
   const blank = /^ *\r?$/.test(line);
+  // A line with nothing but blanks, or a comment: a tab counts as a blank here.
+  const quiet = /^[ \t]*(?:#|$)/.test(line);
   const ind = spaces(line);
   const marker = MARKER.test(line);
   // A block scalar's content is no comment, however it looks, and no tag either: a !bwref in it is
@@ -666,6 +682,9 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number): number {
   if (st.block !== undefined) {
     if (blank) return line.length;
     const b = st.block;
+    // Until the content indent is known, a tab after the spaces is an error (scan_block_scalar_breaks,
+    // scannerc.go, go.yaml.in/yaml/v3 v3.0.5), also on a line with nothing else (ginsys/bronzeward#651).
+    if (b.indent < 0 && /^ *\t/.test(line)) docs.refused = true;
     if (!marker && (b.indent < 0 ? ind > b.holder : ind >= b.indent)) {
       if (b.indent < 0) b.indent = ind;
       return line.length;
@@ -673,6 +692,20 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number): number {
     st.block = undefined;
     st.ns = true;
   }
+  // A block line that starts with a tab, after any spaces, fails go-yaml: it skips a tab as a blank
+  // only in flow context or where no simple key can start (yaml_parser_scan_to_next_token,
+  // scannerc.go), and after a line break in block context one can. Inside a quote or a flow collection
+  // the tab is text or a blank. A tab-led comment line is read as part of the run of comment lines
+  // before it, and a tab-only line there too, when a comment line follows (ginsys/bronzeward#651).
+  if (st.flow === 0 && st.open !== '"' && st.open !== "'") {
+    const comment = /^[ \t]*#/.test(line);
+    // An open plain scalar takes the blanks of a line break, tabs too, up to its indent: a tab at a
+    // column past its holder is not an error (yaml_parser_scan_plain_scalar, scannerc.go).
+    const plainBlanks = st.open === "plain" && ind > st.holder;
+    if (/^ *\t/.test(line) && !plainBlanks && !(st.chain && (comment || (quiet && commentAhead)))) docs.refused = true;
+    if (comment) st.chain = true;
+    else if (!quiet) st.chain = false;
+  } else st.chain = false;
   let j = 0;
   let hold = st.stack.length > 0 ? st.stack[st.stack.length - 1]! : -1;
   let lastPlain = false;
@@ -683,7 +716,7 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number): number {
     // A node that holds a tag and no content yet goes on in a blank line, a comment line and a line
     // more indented than its holder, so a second tag there is a second tag on one node. A key on that
     // line can take its own tag (`a: !t` then `  !u b: x`): see `split`.
-    const goOn = st.tagged && st.ns && st.open === "" && (blank || /^ *#/.test(line) || ind > hold);
+    const goOn = st.tagged && st.ns && st.open === "" && (blank || quiet || ind > hold);
     st.tagged = goOn;
     st.earlier = goOn;
   }
@@ -717,7 +750,7 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number): number {
     fresh = true;
   }
   // A blank line or a comment-only line closes no block entry, whatever its indentation.
-  if (fresh && st.flow === 0 && !blank && !/^ *#/.test(line)) {
+  if (fresh && st.flow === 0 && !blank && !quiet) {
     while (st.stack.length > 0 && st.stack[st.stack.length - 1]! > ind) st.stack.pop();
     hold = st.stack.length > 0 ? st.stack[st.stack.length - 1]! : -1;
   }
