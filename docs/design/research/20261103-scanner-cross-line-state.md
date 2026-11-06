@@ -354,12 +354,14 @@ valid cases of S5 come out equal to go-yaml for C1c.
   `internal/ingest/declare_test.go` shows the refusal for this shape. The
   [tag handle report](20261104-tag-handle-resolution.md) records the same-line key
   `!bwref x/foo: v` as server-refused (row "tagged key" of its case table). So the editor lists
-  nothing for a document that the server never accepts. The 1201 documents of set S9 with this
+  nothing for a document that the server never accepts. The 3603 documents of set S9 with this
   shape (the value `x/foo:`) are therefore a known gap, and their lost count is no acceptance
-  number. A further 7 same-line documents have the same value. These counts come from the S9
-  sweep of main after ginsys/bronzeward#607. They are read from the name lists, and no oracle run
-  isolated the cause. The oracle change of ginsys/bronzeward#637 reads a tag on a key the way the
-  server does, so it is expected to move these counts. Read them again after that change lands.
+  number. There are 1201 for each anchor position: no anchor, an anchor before the tag and an
+  anchor after the tag. The count is a recount of the stored S9 report of the sweep of main after
+  ginsys/bronzeward#607. A server probe of these documents is recorded in a comment on
+  ginsys/bronzeward#629, and the server accepted none of them. The oracle change of
+  ginsys/bronzeward#637 reads a tag on a key the way the server does, so it is expected to move
+  the count. Read it again after that change lands.
 - Deviations from the issue, for the owner to assess:
   - The plain quote carry breaks 149 documents of S0, not the 43 that issue 592 names. The attempt
     behind the 43 is not in the repository (Failure cases).
