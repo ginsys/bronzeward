@@ -313,5 +313,26 @@
   "doc": "a: |-2\n  \"y # z\nb: !bwref x/foo\n",
   "want": ["x/foo"],
   "note": "the chomping sign before the indentation indicator (scannerc.go 2204-2228)"
+ },
+ {
+  "name": "616-nbsp-key-column-0",
+  "issue": "616",
+  "doc": "k: !bwref x/foo\n\u00a0j: v\n",
+  "want": ["x/foo"],
+  "note": "a line that starts with U+00A0 has text at column 0: it is a key of its own, so the plain value ends"
+ },
+ {
+  "name": "616-own-line-under-compact-key",
+  "issue": "616",
+  "doc": "- k:\n    !bwref x/foo\n  j: v\n",
+  "want": ["x/foo"],
+  "note": "a tag on its own line under a compact key: the sibling key stands at column 2, so the value ends"
+ },
+ {
+  "name": "616-own-line-under-compact-dash",
+  "issue": "616",
+  "doc": "- -\n    !bwref x/foo\n  - y\n",
+  "want": ["x/foo"],
+  "note": "a tag on its own line under a compact dash: the next entry stands at column 2, so the value ends"
  }
 ]
