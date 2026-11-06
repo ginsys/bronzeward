@@ -86,7 +86,7 @@ class Run {
   // The events shown since the attempt began or the last clear: an attempt with none is a failure. A
   // clear is not counted, and it takes back the events shown before it, so a stream whose events
   // never match its epoch backs off even when it shows one event first (the CLI's watch.go counts
-  // the events shown, and excludes the clear of an epoch change at the operation read).
+  // the same way).
   fresh = 0;
   halted = false;
   // The epoch the last drain's pages came under, from their own responses: undefined when a page named
