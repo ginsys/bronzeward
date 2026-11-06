@@ -241,7 +241,9 @@ export interface StartInput {
 }
 // The start's body. A review needs encrypted staging (G5), so a transient staging never asks for one.
 export function startBody(i: StartInput): Record<string, unknown> {
-  const marks = i.marks.split("\n").map((s) => s.trim()).filter((s) => s !== "");
+  // Each nonempty line is one RFC 6901 path, sent as typed: whitespace is part of a token, and a
+  // trimmed path would address another node (compilation.md §2.2).
+  const marks = i.marks.split("\n").filter((s) => s !== "");
   return {
     kind: i.kind, machine: i.machine, draft: i.draft, source: i.source, staging: i.staging, review: i.staging === "encrypted" && i.review,
     ...(marks.length > 0 && { marks }), ...(i.source === "document" && { document: i.doc }),
@@ -249,10 +251,13 @@ export function startBody(i: StartInput): Record<string, unknown> {
 }
 
 // Protected input is held no longer than its request needs (§11.2 item 6): the fields are emptied
-// when the request is sent, and the request drops the document and marks from its body once its
-// outcome is final. Until then the body stays for [Repeat exactly], which sends it again.
+// when the request is sent, and the request drops the document and marks from its body on every
+// outcome except unknown, a write set aside included: `Writes.repeatable` offers only an unknown
+// outcome, so nothing sends a set-aside body again. Until then the body stays for [Repeat exactly],
+// which sends it again. An unknown write that can no longer be repeated (set aside by an epoch change
+// or another sign-in, or its client ended by a sign-out) is told to `unrepeatable`, which releases it.
 export function releaseInput(body: Record<string, unknown>, o: Outcome): void {
-  if (o.kind === "unknown" || (o.kind === "set-aside" && o.ambiguous)) return;
+  if (o.kind === "unknown") return;
   delete body["document"];
   delete body["marks"];
 }
@@ -265,6 +270,7 @@ export function sendStart(send: (spec: WriteSpec) => void, clear: () => void, i:
   clear();
   send({
     method: "POST", path: "/ingestions", resource: "/ingestions", ifMatch, body,
+    unrepeatable: () => releaseInput(body, { kind: "set-aside" } as Outcome),
     settled: (out, w) => {
       releaseInput(body, out);
       const a = out.kind === "done" ? (out.data as { ingestion?: string } | null) : null;

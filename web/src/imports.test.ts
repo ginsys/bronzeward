@@ -177,8 +177,14 @@ describe("the start's body and its protected input (G5, §11.2)", () => {
     expect(startBody({ ...base, staging: "transient" })["review"]).toBe(false);
     expect(startBody({ ...base, review: false })["review"]).toBe(false);
   });
-  test("marks are trimmed and blank lines dropped; a document is sent only for a document source", () => {
-    expect(startBody({ ...base, marks: " doc[0]/a \n\n doc[0]/b\n", doc: "x: 1" })["marks"]).toEqual(["doc[0]/a", "doc[0]/b"]);
+  test("marks are sent verbatim and empty lines dropped; a document is sent only for a document source", () => {
+    expect(startBody({ ...base, marks: " doc[0]/a \n\n doc[0]/b\n", doc: "x: 1" })["marks"]).toEqual([" doc[0]/a ", " doc[0]/b"]);
+    // A key with trailing whitespace and its sibling without it are two nodes: the body names each exactly.
+    expect(startBody({ ...base, marks: "doc[0]/env/KEY\ndoc[0]/env/KEY \n" })).toEqual({
+      kind: "import", machine: "mch_b3caa2q", draft: "drf_2rmp457a", source: "machine", staging: "encrypted", review: true, marks: ["doc[0]/env/KEY", "doc[0]/env/KEY "],
+    });
+    // A line of only spaces is sent as typed, and the server refuses it.
+    expect(startBody({ ...base, marks: "  \ndoc[0]/a" })["marks"]).toEqual(["  ", "doc[0]/a"]);
     expect(startBody({ ...base, doc: "x: 1" })).not.toHaveProperty("document");
     expect(startBody({ ...base, source: "document", doc: "x: 1" })["document"]).toBe("x: 1");
     expect(startBody(base)).not.toHaveProperty("marks");
@@ -206,20 +212,24 @@ describe("the start's body and its protected input (G5, §11.2)", () => {
     expect(calls).toEqual(["clear", "send"]);
     expect(spec).toMatchObject({ method: "POST", path: "/ingestions", ifMatch: '"1-a"', body: { document: "secret: x", marks: ["doc[0]/a"] } });
   });
-  test("the request drops the document and marks once its outcome is final, and keeps them while it can be repeated", () => {
+  test("the request drops the document and marks on every outcome but unknown, a set-aside one included, and keeps them while it can be repeated", () => {
     const body = (s: WriteSpec) => s.body as Record<string, unknown>;
-    for (const out of [{ kind: "refused" }, { kind: "not-done" }, { kind: "set-aside", ambiguous: false }, { kind: "done", data: null }]) {
+    for (const out of [{ kind: "refused" }, { kind: "not-done" }, { kind: "set-aside", ambiguous: false }, { kind: "set-aside", ambiguous: true }, { kind: "done", data: null }]) {
       const { spec } = start();
       spec.settled!(out as never, {} as never);
       expect(body(spec)).not.toHaveProperty("document");
       expect(body(spec)).not.toHaveProperty("marks");
       expect(body(spec)["machine"]).toBe("mch_b3caa2q");
     }
-    for (const out of [{ kind: "unknown" }, { kind: "set-aside", ambiguous: true }]) {
-      const { spec } = start();
-      spec.settled!(out as never, {} as never);
-      expect(body(spec)["document"]).toBe("secret: x");
-    }
+    const { spec: open } = start();
+    open.settled!({ kind: "unknown" } as never, {} as never);
+    expect(body(open)["document"]).toBe("secret: x");
+    expect(body(open)["marks"]).toEqual(["doc[0]/a"]);
+    // An unknown write that can no longer be repeated (set aside, or its client ended) releases them too.
+    open.unrepeatable!({} as never);
+    expect(body(open)).not.toHaveProperty("document");
+    expect(body(open)).not.toHaveProperty("marks");
+    expect(body(open)["machine"]).toBe("mch_b3caa2q");
     const b = { document: "x", marks: ["m"] };
     releaseInput(b, { kind: "done", data: null } as never);
     expect(b).toEqual({});
