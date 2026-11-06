@@ -839,8 +839,10 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: numb
     if (st.ns) {
       // A property keeps the node open, any other token starts its content or ends it.
       if (c !== "!" && c !== "&") st.tagged = false;
+      // The mark outlives the properties of an explicit key's value, as go-yaml's timing does:
+      // `? a\n: &x\n  [? b]: V` is valid.
       const viaValue = st.afterValue;
-      st.afterValue = false;
+      if (c !== "!" && c !== "&") st.afterValue = false;
       if (st.flow === 1 && entry) {
         if (c === "?") anyQ = true;
         else if (c !== "," && c !== "]" && c !== "}") allQ = false;
