@@ -67,6 +67,18 @@ func TestWatchOutage(t *testing.T) {
 			t.Errorf("watch: state %q, error %v after %v of waits; want failed with the 403 after 91s", state, err, total(reads))
 		}
 	})
+	t.Run("an Until that fails during the read after a refused drain ends it with its own error", func(t *testing.T) {
+		reads = nil
+		boom := errors.New("BWSYNTH until failed")
+		until = func() (bool, error) { return total(reads) >= time.Second, boom }
+		t.Cleanup(func() { until = nil })
+		o := &opServer{streams: []handler{sse(ev(e1+":1", "queued"))}, epochs: []string{e1}, states: []string{"failed"},
+			pagesStatus: http.StatusForbidden, outage: 99, outageAfter: 1, outageKind: "502"}
+		_, _, _, _, err := watched(t, o, e1, nil)
+		if !errors.Is(err, boom) || !strings.Contains(err.Error(), "403") {
+			t.Errorf("watch: %v; want Until's error joined with the refused drain's 403", err)
+		}
+	})
 	// ended makes Until true once the operation read has waited d in all (the recorded waits).
 	ended := func(d time.Duration) {
 		until = func() (bool, error) { return total(reads) >= d, nil }
