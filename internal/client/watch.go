@@ -163,6 +163,9 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 				switch {
 				case errors.Is(err, ErrWatchEnded):
 					// The watch ended before the second read: the terminal read stands, and the failed drain is reported.
+					if w.halt.err != nil { // Until failed: its error stands too, as at the stop below
+						return nil, OperationRead{}, errors.Join(derr, w.halt.err)
+					}
 					return o, OperationRead{raw, epoch}, derr
 				case err != nil:
 					return nil, OperationRead{}, errors.Join(derr, err)
