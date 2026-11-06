@@ -166,6 +166,20 @@ func TestWatchOutage(t *testing.T) {
 			t.Errorf("watch: state %q, error %v; want no state and an error that is ErrWatchEnded and ErrWatchRestored", state, err)
 		}
 	})
+	t.Run("a terminal read stays no result when the refused drain showed another epoch and an outage ends the watch", func(t *testing.T) {
+		reads = nil
+		ended(2 * time.Second)
+		// The first read is terminal in epoch 1 and its drain is refused. That answer carries epoch 2, so the
+		// installation was restored. The read after it is out of reach until the watch ends: the terminal read
+		// is of the installation before the restore, and the refused drain is reported beside that.
+		const e2 = "ep_BWSYNTH2"
+		o := &opServer{streams: []handler{sse(ev(e1+":1", "queued"))}, epochs: []string{e1}, states: []string{"failed"},
+			pagesStatus: http.StatusForbidden, restoreAtPages: e2, outage: 99, outageAfter: 1, outageKind: "502"}
+		_, _, state, _, err := watched(t, o, e1, nil)
+		if state != "" || !errors.Is(err, ErrWatchEnded) || !errors.Is(err, ErrWatchRestored) || !strings.Contains(err.Error(), "403") {
+			t.Errorf("watch: state %q, error %v; want no state and an error that is ErrWatchEnded and ErrWatchRestored, with the 403", state, err)
+		}
+	})
 	t.Run("the watch ending in an outage skips the epoch refresh a new epoch asks for", func(t *testing.T) {
 		reads = nil
 		ended(2 * time.Second)
