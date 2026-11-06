@@ -1330,8 +1330,9 @@ describe("a plain !bwref value that goes on to the next line", () => {
   // (review of this change). Each check has a generous bound and ends on its own with the earlier code, so
   // a regression fails the test and does not hang it: a test timeout cannot stop a synchronous scan.
   describe("cost", () => {
-    // Reads a draft and fails if the scan takes a second or more. The bound leaves a wide margin: the fixed
-    // scan takes under 50 ms on each input below, and the check ends on its own with the earlier code.
+    // Reads a draft and fails if the scan takes a second or more. The fixed scan takes under 50 ms on each
+    // input below except the draft of 30,000 tags, which takes 100 to 300 ms (the bound still leaves a wide
+    // margin there). With the earlier code each check ends on its own and fails the bound.
     const bounded = (text: string) => {
       const start = performance.now();
       const found = references(text);
@@ -1374,10 +1375,11 @@ describe("a plain !bwref value that goes on to the next line", () => {
     });
 
     // Many tags under one long key: the line of the key is the parent of each of them, and it is matched once
-    // (`known` of the line), not once per tag. The key has 200,000 characters and the 3,000 tags took 1.6 s
-    // when each tag matched it again.
-    test("3,000 tags among sibling keys under one key of 200,000 characters are scanned in near linear time", () => {
-      bounded(`${"a".repeat(200000)}:\n${Array.from({ length: 3000 }, (_, i) => `  j${i}: v\n  !bwref x/foo${i}\n`).join("")}`);
+    // (`known` of the line), not once per tag. The key has 300,000 characters and the 4,000 tags took 2.1 to
+    // 2.8 s in six runs when each tag matched it again (a key of 200,000 characters and 3,000 tags took 0.9
+    // to 1.6 s, too close to the bound to fail it every time). The fixed scan takes about 25 ms.
+    test("4,000 tags among sibling keys under one key of 300,000 characters are scanned in near linear time", () => {
+      bounded(`${"a".repeat(300000)}:\n${Array.from({ length: 4000 }, (_, i) => `  j${i}: v\n  !bwref x/foo${i}\n`).join("")}`);
     });
 
     // A continuation line with a long run of blanks between two words: trimming it must not try every
@@ -1407,11 +1409,12 @@ describe("a plain !bwref value that goes on to the next line", () => {
       bounded(`${keys}${" ".repeat(1000)}!bwref x/foo\n${" ".repeat(1000)}bar\n`);
     });
 
-    // A key of 100,000 characters before the tag on its own line, with and without the colon that makes it a
-    // parent (`PLAIN_PARENT`): the pattern must not try every split of a long key.
+    // A key of 100,000 characters before the tag on its own line (`PLAIN_PARENT`): the pattern must not try
+    // every split of a long key. Both inputs reach it. The first one matches. The second one has an anchor
+    // after the colon, so the pattern reads the whole key and rejects it.
     test.each([
-      ["with its colon", `${"a".repeat(100000)}: !bwref x/foo\n  bar\n`],
-      ["without a colon", `${"a".repeat(100000)} !bwref x/foo\n  bar\n`],
+      ["a match", `${"a".repeat(100000)}: !bwref x/foo\n  bar\n`],
+      ["a rejection", `${"a".repeat(100000)}: &e !bwref x/foo\n  bar\n`],
     ])("a key of 100,000 characters before the tag is matched in linear time (%s)", (_, text) => {
       bounded(text);
     });
@@ -1421,7 +1424,9 @@ describe("a plain !bwref value that goes on to the next line", () => {
     test.each([
       ["5,000 properties before the tag", `k:\n  ${"!a ".repeat(5000)}!bwref x/foo\n  bar\n`],
       ["a line of 5,000 properties above the tag", `k:\n ${"!a ".repeat(5000)}\n  !bwref x/foo\n  bar\n`],
-      ["a key of 100,000 characters above the tag", `${"a".repeat(100000)}:\n  !bwref x/foo\n  bar\n`],
+      ["5,000 anchors before the tag", `k:\n  ${"&e ".repeat(5000)}!bwref x/foo\n  bar\n`],
+      ["a line of 5,000 anchors above the tag", `k:\n ${"&e ".repeat(5000)}\n  !bwref x/foo\n  bar\n`],
+      ["a key of 100,000 characters above the tag",`${"a".repeat(100000)}:\n  !bwref x/foo\n  bar\n`],
       ["3,000 lines of an anchor and a blank line above a root scalar", `${"&e\n\n".repeat(3000)}!bwref x/foo\n- y\n`],
       ["a marker line with 40,000 blanks before a dash", `--- ${" ".repeat(40000)}- !bwref x/foo\n  bar\n`],
     ])("a long input stays linear: %s", (_, text) => {
