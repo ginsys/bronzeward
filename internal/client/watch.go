@@ -353,6 +353,10 @@ func (c *Client) streamIn(armed context.Context, op string, last *string, w Watc
 		// this attempt returns, so the loop looks at armed itself before it asks Until.
 		quit := func() bool { return armed.Err() != nil || w.stop() }
 		for sc.Scan() {
+			// The scanner delivers lines it buffered before the Ctrl-C: no callback runs for them.
+			if armed.Err() != nil {
+				return true, false, nil
+			}
 			idle.Reset(streamIdle)
 			line := sc.Text()
 			if strings.HasPrefix(line, ":") {

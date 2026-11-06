@@ -171,6 +171,28 @@ func TestStreamAsksUntilNotAfterACtrlC(t *testing.T) {
 	}
 }
 
+// TestStreamShowsNothingAfterACtrlCInClear: a reset and an event come in one batch, and the Ctrl-C
+// comes while the reset clears what was shown. The event is already buffered, but the stream ends
+// before it is shown.
+func TestStreamShowsNothingAfterACtrlCInClear(t *testing.T) {
+	s := newStreamStall(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "event: reset\ndata: {}\n\n"+ev("ep_BWSYNTH-1:1", "queued"))
+	})
+	c, _, _ := writeClient(t, &fake{epoch: "ep_BWSYNTH-1"}, "ep_BWSYNTH-1")
+	c.Context.Server = s.srv.URL
+	a := newArmed(t)
+	c.Arm = a.hook
+	var shown int
+	err := ended(t, c, Watch{
+		Show:  func(Event) { shown++ },
+		Clear: func() { a.cancel() }, // the Ctrl-C comes as the reset clears
+	})
+	if !errors.As(err, new(*Interrupted)) || shown != 0 {
+		t.Errorf("error %v, %d events shown; want the watch stopped by Ctrl-C and no event shown after it", err, shown)
+	}
+}
+
 // TestStreamArmsNothingWithoutAHook: a client with no Arm keeps the default action of Ctrl-C, and
 // the watch still shows its events and ends on Until.
 func TestStreamArmsNothingWithoutAHook(t *testing.T) {
