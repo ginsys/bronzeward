@@ -1174,6 +1174,23 @@ describe("a plain !bwref value that goes on to the next line", () => {
     expect(references(text)).toEqual([]);
   });
 
+  // A root scalar has no parent: go-yaml measures its continuation lines against column -1, so any line
+  // with text goes on, at column 0 and with a no-break space as well. The rows are from the root sweep
+  // of experiments/scanner-cross-line/sets/gen-s10-root-scalar.mjs, judged against go-yaml v3.0.5.
+  test.each([
+    ["a word at column 0 after a marker", "--- !bwref x/foo\nbar\n"],
+    ["a no-break space after a marker", "--- !bwref x/foo\n bar\n"],
+    ["a no-break space after a marker and an anchor", "--- &e !bwref x/foo\n bar\n"],
+    ["a no-break space with no marker, after an anchor", "&e !bwref x/foo\n bar\n"],
+    ["a dash at column 0", "!bwref x/foo\n- y\n"],
+    ["a dash at column 1", "!bwref x/foo\n - y\n"],
+    ["a word at column 0 after a marker line", "---\n!bwref x/foo\nbar\n"],
+    ["a word at column 0 after a comment line", "# c\n!bwref x/foo\nbar\n"],
+    ["a word at column 0 in the second document", "a: 1\n---\n!bwref x/foo\nbar\n"],
+  ])("%s under a root scalar lists nothing", (_, text) => {
+    expect(references(text)).toEqual([]);
+  });
+
   // In flow context go-yaml does not compare the indentation of the next line.
   test.each([
     ["a word at column 0", "[!bwref x/foo\nbar]\n"],
