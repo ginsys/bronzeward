@@ -80,6 +80,8 @@ export function App() {
     const end = () => {
       page.to("ended");
       forget();
+      // The sign-in ended here, also when another tab signed out: no write is repeated (§11.2 item 6).
+      writes.signInEnded();
     };
     // §10.3 items 3-4: cleared on pagehide, the writes too; a page restored from the back-forward
     // cache starts over.

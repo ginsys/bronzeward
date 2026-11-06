@@ -1266,6 +1266,33 @@ describe("release of the body of a write that can no longer be repeated (#653)",
     expect(reaches(i.w, DOCUMENT)).toBe(true);
   });
 
+  test("an earlier client that ends its writes while a repeat through a later client reads the epoch stops that repeat and releases the body", async () => {
+    const epochs: (() => Response)[] = [];
+    const p = page(drops(), epochs);
+    const i = await unknownInput(p);
+    bound(p);
+    epochs.push(() => (p.client.endWrites(), recovery()));
+    const before = p.writesSent().length;
+    expect(await p.writes.submit(i.w)).toMatchObject({ kind: "set-aside", why: SIGN_IN_CHANGED });
+    expect(p.writesSent()).toHaveLength(before);
+    await expectReleased(p, i);
+  });
+
+  test("a write that settles unknown after the sign-in ended without a client to say so releases its body", async () => {
+    const p = page([...drops().slice(0, 3), () => (p.signIn(undefined), new TypeError("Failed to fetch"))]);
+    const i = input();
+    expect((await p.writes.submit(i.w)).kind).toBe("unknown");
+    await expectReleased(p, i);
+  });
+
+  test("signInEnded releases the unknown writes", async () => {
+    const p = page(drops());
+    const i = await unknownInput(p);
+    p.signIn(undefined);
+    p.writes.signInEnded();
+    await expectReleased(p, i);
+  });
+
   test("a disconnect alone releases nothing and a rebind keeps the repeat", async () => {
     const p = page(drops());
     const i = await unknownInput(p);
