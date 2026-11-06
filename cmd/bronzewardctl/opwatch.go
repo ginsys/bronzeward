@@ -195,6 +195,7 @@ func (e *env) operationWatch(args []string) (err error) {
 		return usageError{errors.New("--timeout: give a positive duration, such as 30m")}
 	}
 	id := pos[0]
+	e.ownsCtrlC = true // its own handler and grace time stay; its reads arm none (interrupt.go)
 	// One sink for standard error, which the client's notices and -v output use, and in -o json and yaml
 	// the lines of the watch too, so that lines and notices never interleave. In table mode the lines and
 	// the stop lines go to a sink of standard output, so a blocked standard error cannot hold them.

@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -147,7 +148,7 @@ confirmed; 3 outcome unknown, or
 an import's lease lapsed while its operation runs;
 4 a waited-for operation ended failed, rejected or cancelled; 5 operation watch's --timeout
 ended with the operation not ended; 6 the output cannot be written (a full disk, say), unless
-a code above applies or the server refused the request (1); 130 operation watch stopped by Ctrl-C`
+a code above applies or the server refused the request (1); 130 a read command or operation watch stopped by Ctrl-C`
 
 type usageError struct{ error }
 
@@ -159,6 +160,11 @@ type env struct {
 	context, output, tokenFile   string
 	tokenStdin, noInput, verbose bool
 	out, err                     io.Writer
+
+	// heldCtrlC is the Ctrl-C context of a command that arms for its whole run (hold); ownsCtrlC: the
+	// command has a handler of its own, so its reads arm none (interrupt.go).
+	heldCtrlC context.Context
+	ownsCtrlC bool
 }
 
 func main() {
@@ -270,6 +276,13 @@ func report(err error, stdout, stderr io.Writer) int {
 	if errors.As(err, &stopped) {
 		return 130
 	}
+	// A Ctrl-C ended a read or its wait before a retry (#643). It says nothing of what an earlier step of
+	// the command wrote: a command may write and then read.
+	var cut *client.Interrupted
+	if errors.As(err, &cut) {
+		fmt.Fprintf(stderr, "Stopped at your request while reading %s.\n", client.Printable(cut.Route))
+		return 130
+	}
 	// The sink of every error: client.Shown escapes all of it but the line breaks of the client's own
 	// multi-line errors, so no error from outside can start a line of its own.
 	fmt.Fprintln(stderr, "bronzewardctl:", client.Shown(err))
@@ -360,7 +373,11 @@ func (e *env) openTo(notices, verbose io.Writer) (*client.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return client.Open(x, client.TokenInput{NoInput: e.noInput, File: e.tokenFile, Stdin: e.tokenStdin}, notices, verbose)
+	c, err := client.Open(x, client.TokenInput{NoInput: e.noInput, File: e.tokenFile, Stdin: e.tokenStdin}, notices, verbose)
+	if c != nil {
+		c.Arm = e.arm
+	}
+	return c, err
 }
 
 // selected is the context §5 item 1 selects.
