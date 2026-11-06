@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -836,6 +837,9 @@ func TestOperationWatchDevFull(t *testing.T) {
 	defer srv.Close()
 	automationContext(t, srv.URL)
 	full, err := os.OpenFile("/dev/full", os.O_WRONLY, 0)
+	if errors.Is(err, fs.ErrNotExist) {
+		t.Skip("this system has no /dev/full (macOS, for one)")
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -868,6 +872,7 @@ func TestOperationWatchEventLinesUnwritableJSON(t *testing.T) {
 type interruptThenFail struct {
 	n     int
 	taken chan struct{} // closed by onInterrupt when the watch has taken the first Ctrl-C
+	hold  time.Duration // how long the third write stays pending after the watch took the Ctrl-C
 }
 
 func (w *interruptThenFail) Write(p []byte) (int, error) {
@@ -883,6 +888,7 @@ func (w *interruptThenFail) Write(p []byte) (int, error) {
 		case <-w.taken:
 		case <-time.After(5 * time.Second):
 		}
+		time.Sleep(w.hold)
 	}
 	return 0, errors.New("write refused")
 }
@@ -903,6 +909,34 @@ func TestOperationWatchInterruptOutputFails(t *testing.T) {
 	defer func() { onInterrupt = nil }()
 	code := run([]string{"operation", "watch", "op_BWSYNTH", "--timeout", "30s"}, out, &e)
 	stop := "Stopped watching at your request. Operation op_BWSYNTH is still running, as the server last read it; it goes on.\n"
+	follow := "Follow it again with: bronzewardctl operation watch 'op_BWSYNTH'\n"
+	if code != 130 || !strings.HasSuffix(e.String(), stop+follow) || out.n < 3 {
+		t.Errorf("exit %d after %d writes, stderr %q; want 130 and the stop lines last on standard error", code, out.n, e.String())
+	}
+}
+
+// TestOperationWatchInterruptPendingWriteFails: a write to standard output is still pending when the grace
+// of the first Ctrl-C ends, and it fails after the stop lines started to wait for that sink. The output
+// had not failed when the stop lines picked their sink, so they would go to the failed standard output
+// and be lost. They go to standard error instead, last, and the exit is 130 (ginsys/bronzeward#648).
+// The write stays pending for 600 ms, six times the grace: the stop lines wait on the sink by then. A
+// slow machine can only make the test pass without the fix, never fail with it.
+func TestOperationWatchInterruptPendingWriteFails(t *testing.T) {
+	f := &opFake{stream: []string{sse(1, "commitment", commitment)},
+		body: fmt.Sprintf(opJSON, "apply-config", "running", "null", "null", "[]")}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	grace := interruptGrace
+	interruptGrace = 100 * time.Millisecond
+	defer func() { interruptGrace = grace }()
+	var e bytes.Buffer
+	out := &interruptThenFail{taken: make(chan struct{}), hold: 600 * time.Millisecond}
+	var taken sync.Once
+	onInterrupt = func() { taken.Do(func() { close(out.taken) }) }
+	defer func() { onInterrupt = nil }()
+	code := run([]string{"operation", "watch", "op_BWSYNTH", "--timeout", "30s"}, out, &e)
+	stop := "Stopped watching at your request. Operation op_BWSYNTH goes on; the state it has now was not read.\n"
 	follow := "Follow it again with: bronzewardctl operation watch 'op_BWSYNTH'\n"
 	if code != 130 || !strings.HasSuffix(e.String(), stop+follow) || out.n < 3 {
 		t.Errorf("exit %d after %d writes, stderr %q; want 130 and the stop lines last on standard error", code, out.n, e.String())
