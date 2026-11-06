@@ -494,8 +494,15 @@ interface Carry {
   // The line is the first one after a directive line: no simple key can start there yet, so go-yaml
   // skips a tab at its start as a blank.
   afterDirective: boolean;
+  // No key, `- ` or `? ` can start here: the line has a key's colon or a `---` before this token and no
+  // line break since. This is go-yaml's simple_key_allowed set to false, at flow depth 0
+  // (ginsys/bronzeward#654). A line break, `- `, `? ` and an explicit key's colon set it again.
+  noKey: boolean;
+  // The last token was the colon of an explicit key (`? a` then `:`), whatever lines and comments lie
+  // between. A flow key of only `?` items right after it is no parse error (see `qKey`).
+  afterValue: boolean;
 }
-const freshCarry = (): Carry => ({ stack: [], flow: 0, ns: true, open: "", holder: -1, block: undefined, closed: false, tagged: false, earlier: false, split: false, chain: false, gap: 0, clean: true, afterDirective: false });
+const freshCarry = (): Carry => ({ stack: [], flow: 0, ns: true, open: "", holder: -1, block: undefined, closed: false, tagged: false, earlier: false, split: false, chain: false, gap: 0, clean: true, afterDirective: false, noKey: false, afterValue: false });
 
 // The document that is being read (ginsys/bronzeward#615). A tag spelled through a handle names what
 // the document's %TAG directives say, so a `!bwref` property counts only when its document is
@@ -767,6 +774,8 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: numb
     // A marker ends every node: the column of the entry above (`hold`) is no longer open.
     hold = -1;
     j = 3;
+    // The rest of a `---` line starts no key (go-yaml's document start clears simple_key_allowed).
+    st.noKey = line.startsWith("---");
   } else if (st.open === '"' || st.open === "'") {
     const e = skipQuoted(line, 0, st.open);
     if (e < 0) return line.length;
@@ -790,6 +799,8 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: numb
     st.ns = true;
     fresh = true;
   }
+  // A line break in block context lets a key start again.
+  if (fresh) st.noKey = false;
   // A blank line or a comment-only line closes no block entry, whatever its indentation.
   if (fresh && st.flow === 0 && !blank && !quiet) {
     while (st.stack.length > 0 && st.stack[st.stack.length - 1]! > ind) st.stack.pop();
@@ -800,6 +811,16 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: numb
   // The start of the node whose flow collection opens on this line: the commas and the items inside
   // do not move it, so `[a, b]: |` is a key that starts at the bracket (-2: none opens here).
   let outerStart = -2;
+  // The flow collection that opens at `outerStart` is a key that starts at its bracket, and its items
+  // so far all begin with `?` (`allQ`), at least one of them (`anyQ`). `entry`: the next token in the
+  // collection starts an item. A key like that is a parse error in go-yaml (ginsys/bronzeward#654); see
+  // `qKey`. A tag or an anchor before the bracket, or one item of another kind, makes the key valid.
+  let startsAtBracket = false;
+  let entry = false;
+  let anyQ = false;
+  let allQ = true;
+  // The flow collection that just closed is a key of only `?` items: a `:` after it refuses the document.
+  let qKey = false;
   while (j < line.length) {
     const c = line[j]!;
     const next = line[j + 1];
@@ -818,6 +839,13 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: numb
     if (st.ns) {
       // A property keeps the node open, any other token starts its content or ends it.
       if (c !== "!" && c !== "&") st.tagged = false;
+      const viaValue = st.afterValue;
+      st.afterValue = false;
+      if (st.flow === 1 && entry) {
+        if (c === "?") anyQ = true;
+        else if (c !== "," && c !== "]" && c !== "}") allQ = false;
+        entry = false;
+      }
       if (c === '"' || c === "'") {
         if (nodeStart < 0) nodeStart = j;
         const e = skipQuoted(line, j + 1, c);
@@ -832,17 +860,27 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: numb
       } else if (c === "[" || c === "{") {
         if (nodeStart < 0) nodeStart = j;
         st.flow++;
-        if (st.flow === 1) outerStart = nodeStart;
+        if (st.flow === 1) {
+          outerStart = nodeStart;
+          startsAtBracket = nodeStart === j && !viaValue;
+          entry = true;
+          anyQ = false;
+          allQ = true;
+        }
         lastPlain = false;
         j++;
       } else if (st.flow > 0 && c === ",") {
         // An empty node (after a property or an indicator) ends here.
         nodeStart = -1;
+        if (st.flow === 1) entry = true;
         lastPlain = false;
         j++;
       } else if (st.flow > 0 && (c === "]" || c === "}")) {
         st.flow--;
-        if (st.flow === 0 && outerStart !== -2) nodeStart = outerStart;
+        if (st.flow === 0 && outerStart !== -2) {
+          nodeStart = outerStart;
+          qKey = startsAtBracket && anyQ && allQ;
+        }
         st.ns = false;
         lastPlain = false;
         st.closed = true;
@@ -883,11 +921,18 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: numb
           // where a block entry can start (simple_key_allowed), so go-yaml refuses `!u - k: x` and
           // `!u ? k: x`, with one tag or two, in this line or a continuation line (ginsys/bronzeward#650).
           if ((c === "-" || c === "?") && nodeStart >= 0) docs.refused = true;
+          // Nor can an indicator follow a value on its line, or start a `---` line: a key's colon (or the
+          // document start) cleared simple_key_allowed (ginsys/bronzeward#654).
+          if (st.noKey) docs.refused = true;
           // A colon that follows properties alone (`&e:`) closes a key that starts at the first one.
           const col = c === ":" && nodeStart >= 0 ? nodeStart : j;
           pushEntry(st.stack, col);
           hold = col;
-          if (c === ":") st.split = false;
+          if (c === ":") {
+            st.split = false;
+            if (nodeStart >= 0) st.noKey = true;
+            else st.afterValue = true;
+          }
         }
         nodeStart = -1;
         lastPlain = false;
@@ -913,17 +958,23 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: numb
     }
     if (c === ":" && (next === undefined || isWs(next) || (st.flow > 0 && (FLOW.includes(next) || st.closed)))) {
       if (st.flow === 0 && nodeStart >= 0) {
+        // A key cannot start after a value on its line, and a flow key of only `?` items is a parse
+        // error (ginsys/bronzeward#654).
+        if (st.noKey || qKey) docs.refused = true;
         pushEntry(st.stack, nodeStart);
         hold = nodeStart;
+        st.noKey = true;
         // The tag stands before this key, so it is the key's own tag.
         st.split = false;
       }
+      qKey = false;
       st.ns = true;
       nodeStart = -1;
       lastPlain = false;
       st.closed = false;
       j++;
     } else if (st.flow > 0 && c === ",") {
+      if (st.flow === 1) entry = true;
       st.ns = true;
       nodeStart = -1;
       lastPlain = false;
@@ -931,7 +982,10 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: numb
       j++;
     } else if (st.flow > 0 && (c === "]" || c === "}")) {
       st.flow--;
-      if (st.flow === 0 && outerStart !== -2) nodeStart = outerStart;
+      if (st.flow === 0 && outerStart !== -2) {
+        nodeStart = outerStart;
+        qKey = startsAtBracket && anyQ && allQ;
+      }
       lastPlain = false;
       st.closed = true;
       j++;
@@ -943,6 +997,9 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: numb
       // After a quote, a bracket or an alias nothing but a `:`, a flow indicator or a comment can
       // come, so a `%` starts no token there (ginsys/bronzeward#620). After a plain scalar it is text.
       if (c === "%" && st.closed) docs.refused = true;
+      // A block entry or an explicit key cannot follow a closed value on its line either: `a: [k] - b`
+      // (ginsys/bronzeward#654).
+      if (st.closed && st.flow === 0 && (c === "-" || c === "?") && (next === undefined || isWs(next))) docs.refused = true;
       // Text after a closed token, while a second tag waits for its key, closes no key: go-yaml refuses
       // `!u "k" x: y` whatever follows, so the document is refused at once and no later colon can take
       // the tag (ginsys/bronzeward#620).
