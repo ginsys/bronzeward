@@ -1068,8 +1068,10 @@ current token expires
    context. A removal that applies only to one revoked sign-in leaves such an entry alone, because it
    cannot tell whose it is. Under the
    lock the keychain is asked whether it is locked before each call, including a write and a
-   removal, and a locked one, or one that gives no answer within 15 seconds, refuses the command as
-   a locked store does. The question and the call after it share one bound of a minute, and the
+   removal. A locked keychain gives no answer, and no answer counts as locked. Each call is then
+   refused within about 15 seconds (`securityHeldBound`, `internal/client/store_darwin.go:48`), as
+   a locked store refuses a command, and nothing is written or removed. On a desktop, the tool can
+   show its unlock dialog during that wait. The question and the call after it share one bound of a minute, and the
    tool is stopped when it passes. A keychain can lock between the question and the call. The call
    can then show its password dialog under the renewal lock, for at most that shared minute, and
    the tool is then stopped. An error of the tool
