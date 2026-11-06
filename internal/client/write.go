@@ -161,6 +161,8 @@ var (
 func (c *Client) Send(w *Write) (r *Response, err error) {
 	route := w.Method + " /api/v1" + w.Path
 	defer c.banner()
+	c.sending = true // no read inside a write takes the Ctrl-C (interrupt.go)
+	defer func() { c.sending = false }()
 	if w.HumanOnly && c.signIn == nil {
 		fmt.Fprintf(c.Notices, "%s: %s is for a person signed in, not an automation token: the server refuses it.\n", c.Context.Where(), route)
 	}
@@ -492,7 +494,7 @@ func (c *Client) principal(rp *Repeat) (string, error) {
 
 // confirm is the epoch one GET /recovery shows, with what it showed when it shows none.
 func (c *Client) confirm() (string, string) {
-	r, _, err := c.once("/recovery")
+	r, _, err := c.once(context.Background(), "/recovery") // inside a write: never cancelled
 	if err != nil {
 		return "", "the confirming read GET /api/v1/recovery failed: " + printable(err.Error())
 	}

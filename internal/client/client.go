@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,6 +30,10 @@ type Client struct {
 	signIn  *signIn // an OIDC context's; nil for automation
 	service string  // the automation principal GET /identity served, once read
 	warned  map[string]bool
+
+	// Arm, when set, takes the Ctrl-C for each read (interrupt.go). sending: a write is in flight.
+	Arm     func() (context.Context, func() bool)
+	sending bool
 
 	// Revision is the API revision the latest GET /server showed: a read can refresh it after a new
 	// epoch, so a caller that gates on it reads it where it needs it (§7 item 1).
@@ -96,13 +101,23 @@ func (x *Context) fail(err error) error { return fmt.Errorf("%s: %w", x.Where(),
 
 // Live checks a new context's server: GET /livez must answer 204 (§5 item 5). It sends no
 // credential and shows only that something answers.
-func Live(x *Context, verbose io.Writer) error {
+func Live(x *Context, verbose io.Writer) error { return LiveContext(context.Background(), x, verbose) }
+
+// LiveContext is Live ended by ctx: a cancelled ctx returns *Interrupted.
+func LiveContext(ctx context.Context, x *Context, verbose io.Writer) error {
 	hc, err := httpClient(x, verbose)
 	if err != nil {
 		return x.fail(err)
 	}
-	r, err := hc.Get(strings.TrimSuffix(x.Server, "/") + "/livez")
+	q, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(x.Server, "/")+"/livez", nil)
 	if err != nil {
+		return x.fail(err)
+	}
+	r, err := hc.Do(q)
+	if err != nil {
+		if ctx.Err() != nil {
+			return x.fail(&Interrupted{Route: "GET /livez"})
+		}
 		return x.fail(transportError(x, x.Host(), err))
 	}
 	r.Body.Close()
@@ -163,9 +178,23 @@ func (c *Client) Get(path string) (*Response, error) {
 // transport failure after 1 s, doubling to at most 30 s, at most 5 tries (§8.2). A sign-in the
 // server answers 401 to is renewed once and the request sent once more (§9.5 item 1).
 func (c *Client) retry(path string) (*Response, error) {
+	ctx, disarm := c.arm()
+	r, err := c.retryIn(ctx, path)
+	if disarm() { // a Ctrl-C taken while the read ended still stops the command
+		return nil, &Interrupted{Route: "GET /api/v1" + path}
+	}
+	return r, err
+}
+
+// retryIn is retry with the Ctrl-C of ctx: it ends the request in flight and the wait before a retry.
+// renew is not cancelled: a refresh the identity provider already answered must be kept (§9.5).
+func (c *Client) retryIn(ctx context.Context, path string) (*Response, error) {
 	delay, renewed := time.Second, false
 	for try := 1; ; try++ {
-		r, retry, err := c.once(path)
+		r, retry, err := c.once(ctx, path)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		var p *Problem
 		if c.signIn != nil && !renewed && !c.signIn.failed && errors.As(err, &p) && p.Status == http.StatusUnauthorized && c.signIn.tokens.RefreshToken != "" {
 			renewed = true
@@ -180,14 +209,16 @@ func (c *Client) retry(path string) (*Response, error) {
 			return r, err
 		}
 		fmt.Fprintf(c.Notices, "%s: %s; try %d of 5 in %s\n", c.Context.Where(), Shown(err), try+1, delay)
-		time.Sleep(delay)
+		if err := waitFor(ctx, delay); err != nil {
+			return nil, err
+		}
 		delay = min(2*delay, 30*time.Second)
 	}
 }
 
-func (c *Client) once(path string) (*Response, bool, error) {
+func (c *Client) once(ctx context.Context, path string) (*Response, bool, error) {
 	route := "GET /api/v1" + path
-	q, err := http.NewRequest(http.MethodGet, strings.TrimSuffix(c.Context.Server, "/")+"/api/v1"+path, nil)
+	q, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(c.Context.Server, "/")+"/api/v1"+path, nil)
 	if err != nil {
 		return nil, false, c.Context.fail(err)
 	}

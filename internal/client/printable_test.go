@@ -2,6 +2,7 @@ package client
 
 import (
 	"bufio"
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -289,7 +290,7 @@ func TestServerTextIsPrintable(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := &Client{Context: x, Notices: io.Discard, hc: hc, warned: map[string]bool{}, token: "BWSYNTH-token"}
-	once := func(path string) error { _, _, err := c.once(path); return err }
+	once := func(path string) error { _, _, err := c.once(context.Background(), path); return err }
 	// The client-configuration host's reason phrase is not shown at all (remote.go).
 	if _, err := FetchClientConfig(x, srv, nil); err == nil || strings.Contains(err.Error(), "BWSYNTH") || !strings.Contains(err.Error(), "answered 404 Not Found") {
 		t.Errorf("client configuration: %q; want the status alone", err)

@@ -539,6 +539,11 @@ client always shows `title`, `detail` when present, and `instance`, each escaped
 | an unknown code | treat by status class: 4xx as a refusal, 5xx as an unknown outcome for a write |
 | a 5xx that is not a Bronzeward problem | an answer that is not `application/problem+json`, or whose `type` does not start `urn:bronzeward:problem:`, for example a `502`, `503` or `504` from the component in front of the server, may come after the server committed: for a write it is an ambiguous outcome as in [§8.4](#84-idempotency-and-ambiguous-responses) item 2, never **not done**; reads retry as for the `503` row |
 
+A Ctrl-C ends a read at once: a request in flight and a wait before a retry stop, the command prints
+one line that names the request and exits 130. It does not change the retry rules above. The Ctrl-C
+is taken for each read only. A write, and a read made inside a write, does not take it. The renewal
+of a stored sign-in is not cut short: it runs to its end, and the stop follows.
+
 The `503` row applies only to a Bronzeward problem with one of its four codes. The write `503`s
 say that the attempt they answer committed nothing of its own transaction (what a route committed
 before it stays, as the row says); for example authentication's

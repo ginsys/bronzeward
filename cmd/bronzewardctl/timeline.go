@@ -7,8 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"net/url"
-	"os"
-	"os/signal"
 	"slices"
 	"strconv"
 	"strings"
@@ -102,18 +100,17 @@ func (e *env) followTimeline(c *client.Client, path string, limit int, machine s
 		return pg.Tail, e.entries(c, pg.Items)
 	}
 
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt)
-	defer signal.Stop(sig)
+	// One Ctrl-C context for the whole follow: it ends a read in flight, a retry wait and a pause alike.
+	ctx, release := e.hold()
+	defer release()
 	stopped := func() error {
-		signal.Stop(sig) // a second Ctrl-C ends the client at once
 		tf(e.err, "Stopped following the timeline of machine %s at your request.\n", machine)
 		return interrupted{ef("stopped following the timeline of machine %s", machine)}
 	}
 	// pause waits followEvery before the next read, and ends on Ctrl-C.
 	pause := func() error {
 		select {
-		case <-sig:
+		case <-ctx.Done():
 			return stopped()
 		case <-time.After(followEvery):
 			return nil
@@ -155,13 +152,10 @@ func (e *env) followTimeline(c *client.Client, path string, limit int, machine s
 			cursor = pg.Next
 		}
 	}
-	// A read that fails while Ctrl-C is pending still ends with exit 130, as a stop does. Stop waits
-	// for a delivery in flight, so the signal is on sig, which holds one, before the check.
-	signal.Stop(sig)
-	select {
-	case <-sig:
+	// A read that fails while Ctrl-C is pending still ends with exit 130, as a stop does. The release
+	// takes a Ctrl-C still in flight, so it is counted here. It cancels ctx, so ctx is not read after it.
+	if release() {
 		return stopped()
-	default:
 	}
 	return err
 }

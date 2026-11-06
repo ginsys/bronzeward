@@ -156,7 +156,10 @@ func (e *env) contextAdd(args []string) error {
 	if err := x.Check(); err != nil {
 		return usageError{err}
 	}
-	if err := client.Live(&x, e.verboseOut()); err != nil {
+	ctx, disarm := e.arm()
+	err = client.LiveContext(ctx, &x, e.verboseOut())
+	disarm()
+	if err != nil {
 		return err
 	}
 	var current string
