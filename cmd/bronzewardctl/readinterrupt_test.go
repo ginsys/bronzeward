@@ -323,6 +323,9 @@ func TestReportListsEachErrorBesideACutOnce(t *testing.T) {
 		{"a nil member alone with the cut", listedErrors{cut, nil}, map[string]int{"listed errors": 0}},
 		{"one error twice", errors.Join(cut, save, save), map[string]int{"saving the state failed": 1}},
 		{"one error twice in a nested join", errors.Join(save, errors.Join(cut, save)), map[string]int{"saving the state failed": 1}},
+		// The type is comparable, but its interface field holds a slice: == on the value panics. It is
+		// never taken for a repeat, so it shows each time it was joined, and the stop line still comes.
+		{"a value that cannot be compared", errors.Join(cut, outputFailed{listedErrors{save}}, outputFailed{listedErrors{save}}), map[string]int{"saving the state failed": 2}},
 		{"two different errors keep both", errors.Join(readErr, cut, save), map[string]int{"answered 503": 1, "saving the state failed": 1}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
