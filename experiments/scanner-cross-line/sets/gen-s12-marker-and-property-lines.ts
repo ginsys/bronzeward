@@ -10,7 +10,7 @@
 //           the next line); the tag line starts with 0, 1 or 2 spaces;
 //   properties: the tag, or an anchor and then the tag;
 //   next line : at column 0, 1 or 2, made of spaces, of spaces then U+00A0 or of spaces then a tab (column 0 with
-//           spaces only is an empty line and is left out), directly after ("adj") or after a blank line ("gap");
+//           spaces only is the text itself at column 0), directly after ("adj") or after a blank line ("gap");
 //   text  : "bar", "- y", "y: v".
 // Family B, "pprop": a parent line, then a line that holds only a node property (an anchor), then the tag.
 //   shape : the parent: "key" (`k:`), "dash" (`-`) or "compact" (`- k:`);
@@ -42,7 +42,6 @@ for (const [bn, bom] of [["nobom", ""], ["bom", "﻿"]] as const)
         for (const [pn, p] of [["tag", "!bwref "], ["anchor-tag", "&f !bwref "]] as const)
           for (const nc of [0, 1, 2])
             for (const [kn, kf] of kinds) {
-              if (nc === 0 && kn === "sp") continue;
               for (const [gn, gap] of gaps)
                 for (const [tn, t] of texts) {
                   // m1 puts an anchor on the marker line; the tag line may not carry a second anchor

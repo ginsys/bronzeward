@@ -4,12 +4,15 @@
 // An oracle row "lists" the names in `tags`. A row where go-yaml reads the tagged value as a longer
 // scalar has `bad` set and no tag, and a refused document has `err` set; both list nothing.
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const [setFile, oracleFile, mainDir, headDir, flag] = process.argv.slice(2);
 const docs = JSON.parse(readFileSync(setFile, "utf8"));
 const want = JSON.parse(readFileSync(oracleFile, "utf8"));
 const names = async (dir) => {
-  const m = await import(`${dir}/position.ts`);
+  // A directory argument is relative to the working directory, not to this module.
+  const m = await import(pathToFileURL(resolve(dir, "position.ts")).href);
   return (doc) => m.references(doc).map((r) => r.name ?? r);
 };
 const main = await names(mainDir);

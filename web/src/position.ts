@@ -359,11 +359,15 @@ const lineFrom = (masked: string, start: number) => lineAt(masked, start).slice(
 // Whether the text before a tag on its line is only blanks and node properties (anchors and tags, which
 // belong to the node, not to the line): then the tag's node starts the line as far as its holder goes, so
 // `k:\n  &e !bwref x/foo` is the value of `k`, as `k:\n  !bwref x/foo` is (ginsys/bronzeward#616).
-const startsLine = (before: string) => /^(?:[ \t]*(?:&[A-Za-z0-9_-]+|![^ \t]*)[ \t]+)*[ \t]*$/.test(before);
+// A blank follows each property, so a run of blanks has one reading and the match stays linear in the line.
+const startsLine = (before: string) => /^[ \t]*(?:(?:&[A-Za-z0-9_-]+|![^ \t]*)[ \t]+)*$/.test(before);
 
 // A line that holds node properties only (`&e`, `!t`): they belong to the node on the lines below, so
-// the line is no parent of the tag (`k:\n &e\n  !bwref x/foo` is the value of `k`, not of `&e`).
-const propertiesOnly = (line: string) => /^[ \t]*(?:(?:&[A-Za-z0-9_-]+|![^ \t]*)[ \t]*)+\r?$/.test(line);
+// the line is no parent of the tag (`k:\n &e\n  !bwref x/foo` is the value of `k`, not of `&e`). A blank
+// or the end of the line follows each property, as go-yaml reads it (`!t&e` is one tag, `&e!t` is refused),
+// so a line of many `!` has one reading and the match stays linear in the line.
+const propertiesOnly = (line: string) =>
+  /^[ \t]*(?:(?:&[A-Za-z0-9_-]+|![^ \t]*)(?:[ \t]+|(?=\r?$)))+\r?$/.test(line);
 
 // The nearest line above the tag's line that is less indented than it, as `plainHolder` finds it; undefined
 // if none is above. A line of node properties only is skipped.
@@ -408,15 +412,18 @@ function plainHolder(masked: string, tag: number): number {
 // back to the last marker takes the stream-start byte order mark as no text and a marker line that ends
 // in a CRLF as a marker (`MARKER`); a line of Unicode spaces only is text, so it is not a root. A line of
 // node properties only (`propertiesOnly`) is no text either: `&e\n!bwref x/foo\n- y` is a root scalar.
+// The scan walks back by line offsets and stops at the first line with text or at a marker, as
+// `parentLine` does, so its cost is the lines it reads, not the text before the tag.
 function isRoot(masked: string, tag: number, before: string): boolean {
   if (!/^(?:---[ \t]+)?[ \t]*(?:&[A-Za-z0-9_-]+[ \t]+)*$/.test(before)) return false;
   if (before.startsWith("---")) return true;
-  const lines = masked.slice(0, masked.lastIndexOf("\n", tag) + 1).split("\n");
-  for (let i = lines.length - 1; i >= 0; i--) {
+  for (let e = masked.lastIndexOf("\n", tag); e >= 0; ) {
+    const s = e === 0 ? 0 : masked.lastIndexOf("\n", e - 1) + 1;
     // The stream-start byte order mark is no text, and a marker line may end in a CRLF (`MARKER`).
-    const l = i === 0 ? lines[i]!.slice(bom(masked, 0)) : lines[i]!;
+    const l = masked.slice(s + bom(masked, s), e);
     if (MARKER.test(l)) break;
     if (!blank(l) && !propertiesOnly(l)) return false;
+    e = s - 1;
   }
   return true;
 }

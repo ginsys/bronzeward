@@ -1325,4 +1325,30 @@ describe("a plain !bwref value that goes on to the next line", () => {
   ])("a root scalar after %s goes on to a dash line and lists nothing", (_, text) => {
     expect(references(text)).toEqual([]);
   });
+
+  // The editor reads a draft while the user types, so the cost of the scan must stay near linear
+  // (review of this change). Each check has a generous bound: it passes inside the default test timeout
+  // and fails only when the cost grows without limit.
+  describe("cost", () => {
+    // A draft of 30,000 entries with a tag alone on its line: the scan back from the tag stops at the key
+    // line above it, so it must not read the text before that line. Reading it took 3.3 s for 10,000 entries
+    // and grows with the square of the size; the walk by lines takes 0.1 s for 10,000.
+    test("a draft with 30,000 tags on their own lines lists every one", () => {
+      const text = Array.from({ length: 30000 }, (_, i) => `k${i}:\n  !bwref x/foo${i}\n`).join("");
+      expect(references(text)).toHaveLength(30000);
+    });
+
+    // A line of many bangs and a word: a tag on a line of its own below it is not on a root scalar, and
+    // the line of bangs is no line of properties only. Matching the line must not try every split of it.
+    test("a long line of bangs and a word above a tag ends the scan at once", () => {
+      const line = (n: number) => `${"!".repeat(n)} text:\n!bwref x/foo\n- y\n`;
+      expect(references(line(200))).toEqual(references(line(30)));
+    });
+
+    // The same for the text before a tag on its own line: many tags with blanks between them, then a word.
+    test("many tags with blanks between them and a word before a tag end the scan at once", () => {
+      const line = (n: number) => `k:\n  ${"!a  ".repeat(n)}z !bwref x/foo\n  bar\n`;
+      expect(references(line(200))).toEqual(references(line(2)));
+    });
+  });
 });
