@@ -107,6 +107,8 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 		}
 	}
 	var last string // the ID of the last event shown
+	var lastOp *apitypes.OperationBody
+	var lastRead OperationRead // the last read of the operation in this loop
 	pages, delay := false, time.Second
 	// Until is asked before the first stream: a caller whose time ran out during the reads before the
 	// watch has already ended it, and no stream is opened for that. The operation read below is the result.
@@ -131,10 +133,22 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 		}
 		// The attempt's own time: an operation read that is slow does not skip the backoff.
 		took := time.Since(began)
-		o, epoch, raw, err := c.operationRaw(op)
+		// The read is repeated through an outage of the server until the watch ends (§8.6 item 2).
+		o, epoch, raw, err := c.operationRawUntil(op, w.stop)
 		if err != nil {
+			// The watch ended while the server was out of reach: the operation as the last read showed
+			// it, which is not terminal, or the error when no read in this loop gave one.
+			if errors.Is(err, ErrWatchEnded) {
+				if w.halt.err != nil { // Until failed: its error stands, as at the stop below
+					return nil, OperationRead{}, w.halt.err
+				}
+				if lastOp != nil {
+					return lastOp, lastRead, nil
+				}
+			}
 			return nil, OperationRead{}, err
 		}
+		lastOp, lastRead = o, OperationRead{raw, epoch}
 		if Terminal(o.State) {
 			// A terminal state settles the watch, so the drain shows the last events, Until or not.
 			// Events of another epoch than the operation read's are of a restored installation, where
@@ -145,8 +159,11 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 			all.Until, all.halt = nil, &halt{}
 			pageEpoch, derr := c.drain(op, &last, all)
 			if derr != nil {
-				again, now, againRaw, err := c.operationRaw(op)
+				again, now, againRaw, err := c.operationRawUntil(op, w.stop)
 				switch {
+				case errors.Is(err, ErrWatchEnded):
+					// The watch ended before the second read: the terminal read stands, and the failed drain is reported.
+					return o, OperationRead{raw, epoch}, derr
 				case err != nil:
 					return nil, OperationRead{}, errors.Join(derr, err)
 				case now == epoch && Terminal(again.State):
@@ -219,7 +236,13 @@ func (c *Client) operation(op string) (*apitypes.OperationBody, string, error) {
 
 // operationRaw is operation with the body as the server sent it.
 func (c *Client) operationRaw(op string) (*apitypes.OperationBody, string, []byte, error) {
-	r, err := c.Get("/operations/" + url.PathEscape(op))
+	return c.operationRawUntil(op, nil)
+}
+
+// operationRawUntil is operationRaw whose retries go on until stop answers true (retryUntil). A nil
+// stop is operationRaw's five tries.
+func (c *Client) operationRawUntil(op string, stop func() bool) (*apitypes.OperationBody, string, []byte, error) {
+	r, err := c.get("/operations/"+url.PathEscape(op), stop)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -515,6 +538,13 @@ func epochOf(id string) string { e, _, _ := strings.Cut(id, ":"); return e }
 // EpochOf is the epoch of an event ID, which has the form <epoch>:<number>: the part a caller
 // compares with the Bronzeward-Epoch header of an answer, as the watch does.
 func EpochOf(id string) string { return epochOf(id) }
+
+// OperationBody reads GET /operations/{op} once, as OperationEpoch does, and returns the read with the
+// body as the server sent it.
+func (c *Client) OperationBody(op string) (*apitypes.OperationBody, OperationRead, error) {
+	o, epoch, raw, err := c.operationRaw(op)
+	return o, OperationRead{raw, epoch}, err
+}
 
 // OperationEpoch reads GET /operations/{op} once and returns the operation and the epoch of that
 // answer, as the watch reads it.

@@ -535,7 +535,7 @@ client always shows `title`, `detail` when present, and `instance`, each escaped
 | 428 `precondition-required`, `idempotency-key-required` | a client defect; show and stop |
 | 500 `internal-error` | the outcome may be unknown: repeat the identical request with the same key ([§8.4](#84-idempotency-and-ambiguous-responses)) |
 | 501 `not-implemented` | not served by this server; no route answers it today |
-| 503 `dependency-unavailable`, `talos-access-unavailable`, `transient-conflict`, `epoch-superseded` | reads: retry with backoff (1 s doubling to 30 s, at most 5 tries, then stop). Writes: repeat with the same key at most 3 times. If every attempt of the write was answered `503`, report **not done**: each such `503` states that its attempt's own transaction committed nothing, so no act or idempotency record exists for it; a fragment write's claim, a scope mark's observation or its start, or a principal row, taken before it stays ([persistence and API §9.4](persistence-api.md#94-errors)). If any earlier attempt was ambiguous ([§8.4](#84-idempotency-and-ambiguous-responses) item 2), a `503` to the repeat says nothing about that attempt: report the outcome as unknown, as in [§8.4](#84-idempotency-and-ambiguous-responses) item 4. `epoch-superseded` is not repeated against the same server process: it started before the current epoch and cannot succeed until restarted. The server sends no `Retry-After` (G20) |
+| 503 `dependency-unavailable`, `talos-access-unavailable`, `transient-conflict`, `epoch-superseded` | reads: retry with backoff (1 s doubling to 30 s, at most 5 tries, then stop; the one exception is the operation read of a watch after a stream that ended, [§8.6](#86-event-resumption) item 2, and every other read keeps the bound). Writes: repeat with the same key at most 3 times. If every attempt of the write was answered `503`, report **not done**: each such `503` states that its attempt's own transaction committed nothing, so no act or idempotency record exists for it; a fragment write's claim, a scope mark's observation or its start, or a principal row, taken before it stays ([persistence and API §9.4](persistence-api.md#94-errors)). If any earlier attempt was ambiguous ([§8.4](#84-idempotency-and-ambiguous-responses) item 2), a `503` to the repeat says nothing about that attempt: report the outcome as unknown, as in [§8.4](#84-idempotency-and-ambiguous-responses) item 4. `epoch-superseded` is not repeated against the same server process: it started before the current epoch and cannot succeed until restarted. The server sends no `Retry-After` (G20) |
 | an unknown code | treat by status class: 4xx as a refusal, 5xx as an unknown outcome for a write |
 | a 5xx that is not a Bronzeward problem | an answer that is not `application/problem+json`, or whose `type` does not start `urn:bronzeward:problem:`, for example a `502`, `503` or `504` from the component in front of the server, may come after the server committed: for a write it is an ambiguous outcome as in [§8.4](#84-idempotency-and-ambiguous-responses) item 2, never **not done**; reads retry as for the `503` row |
 
@@ -920,7 +920,14 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
    read again after the backoff. The CLI and the web reader both do this. Any other state,
    `unresolved` included, means the stream ended because the token expired or the
    connection dropped: the client renews if needed and reconnects with `Last-Event-ID` and the
-   renewed token, with backoff from 1 s to 30 s on repeated failures. An attempt that showed
+   renewed token, with backoff from 1 s to 30 s on repeated failures. The read of the operation
+   that follows a stream that ended is the one read that does not stop at the five tries of
+   [§8.2](#82-errors): when the server is out of reach (a retryable `503`, a 5xx that is not a
+   Bronzeward problem, or a transport failure) a restart takes longer than five tries wait, so the
+   read is repeated with the same backoff until the watch ends, by its timeout or its caller, and
+   the watch then resumes with `Last-Event-ID`. A wait ends within 250 ms of the watch ending, and a
+   watch that ends in an outage reports the operation as its last read showed it. A read that fails
+   with anything else is not repeated, and every other read keeps the bound of §8.2. An attempt that showed
    nothing is a failure. The delay starts again at 1 s after an attempt that showed an event, or
    after a stream that stayed open for 30 s. Only the events shown since the attempt began or
    since the last clear count: an event shown and then cleared in the same attempt, by a `reset`,
