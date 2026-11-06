@@ -2,7 +2,7 @@
 
 Date: 5 November 2026. Issue: ginsys/bronzeward#616. Status: design note for the scanner change. No code in this note.
 
-Line numbers for `web/src/position.ts` are those of commit 28a9c367 on main. Line numbers for `scannerc.go` are those of go-yaml v3.0.5, the parser of the server.
+The scanner is named by function, because its line numbers move. Section 3 describes `web/src/position.ts` on main at commit bffb30ed, before the change. Line numbers for `scannerc.go` are those of go-yaml v3.0.5, the parser of the server. The counts in sections 4 and 7 come from the sweep named in section 4.
 
 ## 1. Question
 
@@ -24,21 +24,26 @@ A blank is a space or a tab (`yamlprivateh.go:118-121`). A no-break space (U+00A
 
 When a colon followed by a blank ends the scalar on a continuation line, the colon is a value indicator with no valid simple key. The parser refuses it with "mapping values are not allowed in this context" (`scannerc.go:1409-1411`). The oracle lists no name for these documents.
 
-## 3. How the scanner reads it
+## 3. How the scanner reads it on main
 
-- `tags()` (`position.ts:104-181`) reads the value of each `!bwref` property with a pattern. The word of a plain value excludes `, [ ] { }` and a colon before a blank (`:115`, `:130`).
-- A colon after the value makes it a key, and the scanner skips the tag (`:129`, `:168`).
-- A value with no anchor goes to `continues()`. A value after an anchor goes to `anchoredContinues()` (`:175`).
-- `continues()` (`:233-241`) ends the scalar at the end of the text and at a marker. It ends it at a line no more indented than the holding node (`:235-238`).
-- It also ends the scalar at a line that starts with a comma, a closing bracket or a closing brace. The same holds for `-` or `?` followed by a blank, and for a line with a colon and a blank (`:239-240`).
-- It has no flow case. It skips lines that hold only Unicode spaces, because it trims with `trim()` (`:191`, `:235`, `:239`).
-- `anchoredContinues()` (`:264-275`) is conservative on purpose. For a parent shape it cannot read, it says "continues" and nothing is listed (`:266`). It reads blanks as YAML does (`:245`).
+- `readTags()` reads the value of each `!bwref` property with a pattern. The word of a plain value excludes `, [ ] { }` and a colon before a blank.
+- A colon after the value makes it a key, and the scanner skips the tag.
+- A value with no anchor goes to `continues()`. A value after an anchor goes to `anchoredContinues()`.
+- `continues()` ends the scalar at the end of the text and at a marker. It ends it at a line no more indented than the holding node.
+- It also ends the scalar at a line that starts with a comma, a closing bracket or a closing brace. The same holds for `-` or `?` followed by a blank, and for a line with a colon and a blank.
+- It has no flow case. It skips lines that hold only Unicode spaces, because it trims with `trim()`.
+- `anchoredContinues()` is conservative on purpose. For a parent shape it cannot read, it says "continues" and nothing is listed. It reads blanks as YAML does.
 
 ## 4. Shapes
 
-The counts come from the S9 report of the sweep on main, read by kind and next-line shape: 38208 inputs, 13707 parsed by go-yaml, 3865 lost, 2248 extra. They are an input to the design. The code phase counts again at its own base.
+The counts come from sweep run `w616-s1`, which compared the scanner on main (bffb30ed) with the scanner at the change on the sets S8 and S9 of `experiments/scanner-cross-line`. The command was `bash sweep-616.sh w616-s1`, a script that builds the go-yaml oracle, generates both sets and checks them against the manifest, runs `cmp.mjs` before and after, and then runs `cmp-reports.mjs` for each set. The run ended with `VERDICT 0`.
 
-| Shape | go-yaml | Scanner today | Class |
+| Set | Inputs | Parsed by go-yaml | Lost, before and after | Extra before | Extra after |
+|---|---|---|---|---|---|
+| S8 | 245696 | 66336 | 24 and 24 | 1195 | 1158 |
+| S9 | 38208 | 13707 | 3865 and 3865 | 2248 | 628 |
+
+| Shape | go-yaml | Scanner on main | Class |
 |---|---|---|---|
 | Value at the end of the text, or before a marker | Scalar ends | Lists the name | Read, agrees |
 | Next line less or equally indented than the holding node | Scalar ends | Lists the name | Read, agrees |
@@ -49,14 +54,14 @@ The counts come from the S9 report of the sweep on main, read by kind and next-l
 | Block, a more indented line with a colon and a blank | Document refused | Ends the scalar, lists the name | Read wrongly: extra |
 | Flow, next line at any indent, such as `bar]` at column 0 | Scalar goes on, indent test is off | Compares the indent, lists the name | Read wrongly: extra |
 | Flow, next line starts with a flow indicator | Scalar ends | Lists the name | Read, agrees |
-| Anchor after the tag (`!bwref &e x/foo`), any next line | Lists the name after a scalar that ends | Lists none for a parent shape it cannot read | Unread by decision: 1463 lost |
-| Tag on an implicit key (`!bwref x/foo:`) | Tagged key, oracle lists the name | Lists none | Unread by decision: 1201 lost, ginsys/bronzeward#629 |
+| Anchor after the tag (`!bwref &e x/foo`), any next line | Lists the name after a scalar that ends | Lists none for a parent shape it cannot read | Unread by decision |
+| Tag on an implicit key (`!bwref x/foo:`) | Tagged key, oracle lists the name | Lists none | Unread by decision, ginsys/bronzeward#629 |
 
-Extra rows by the report: 1124 documents with no anchor and 1124 with the anchor before the tag. Both use the same path (`position.ts:175`). 1100 of the 1124 have the value `x/foo`. The other 24 have `x/foo:` on the same line.
+On main, S9 held 2248 extra documents. The change fixes 1620 of them and leaves 628. It lists no new extra name and loses no document. On S8 it fixes 37 extra documents and leaves 1158. The 467 documents of S8 and the 908 of S9 that the oracle refuses stop listing a name, and no refused document starts listing one. The remaining extra documents are outside this issue, as sections 5 and 7 say.
 
 ## 5. Shapes left unread, and why
 
-- The anchor after the tag. #607 made the rule conservative on purpose (`position.ts:253-263`). The acceptance of #616 asks for no newly lost and no newly extra document against main. It does not ask for a lost count.
+- The anchor after the tag. ginsys/bronzeward#607 made the rule conservative on purpose (`anchoredContinues()`). The acceptance of #616 asks for no newly lost and no newly extra document against main. It does not ask for a lost count.
 - The tag on an implicit key. ginsys/bronzeward#615 says the server refuses it. The editor lists nothing, and the oracle lists the name. ginsys/bronzeward#629 holds the decision.
 - A tab in a continuation line (`scannerc.go:2783`) is not covered by this note.
 - A comment line between the value and the next text is not covered by this note.
@@ -65,7 +70,8 @@ Extra rows by the report: 1124 documents with no anchor and 1124 with the anchor
 
 - The reasons in section 4 are read from name lists and from the go-yaml source. No oracle run isolated each shape. The code phase reads the oracle row of each shape before it writes the expected list.
 - The report groups the next lines by kind, anchor place and context. It does not split by indent or by a blank line before.
-- The counts are those of main at the time of the sweep. The counting rules of the sweep changed since the issue was written.
+- The counts are those of run `w616-s1` at main bffb30ed. The counting rules of the sweep changed since the issue was written, so they differ from the counts in the issue.
+- The report does not split the 628 extra documents of S9 or the 1158 of S8 by shape. This note does not claim which shapes remain.
 
 ## 7. Decision enabled
 
