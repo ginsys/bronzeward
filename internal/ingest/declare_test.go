@@ -48,6 +48,7 @@ func TestValidateAuthoring(t *testing.T) {
 		{"other local tag", "a: !secret " + secretText + "\n", Declarations{}, RuleLocalTag},
 		{"python tag", "a: !!python/str " + secretText + "\n", Declarations{}, RuleLocalTag},
 		{"tag on a key", "? !bwref s-one\n: " + secretText + "\n", refs("s-one"), RuleTagPlacement},
+		{"tag on an implicit key", "- !bwref s-one:\n    " + secretText + "\n", refs("s-one"), RuleTagPlacement},
 		{"tag on a sequence", "a: !bwref [" + secretText + "]\n", refs("s-one"), RuleTagPlacement},
 		{"tag on a mapping", "a: !bwref {k: " + secretText + "}\n", refs("s-one"), RuleTagPlacement},
 		{"alias of a reference as a key", "a: &t !bwref s-one\n? *t\n: " + secretText + "\n", refs("s-one"), RuleTagPlacement},
