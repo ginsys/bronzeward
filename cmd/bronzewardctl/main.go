@@ -373,9 +373,10 @@ func besideCutAll(err error) []error {
 }
 
 // listedAlready reports whether err is the same error value as one in listed. A value whose type cannot
-// be compared (a slice type, say) is never taken for a repeat: == on it would panic.
+// be compared is never taken for a repeat: == on it would panic. That holds for a slice type, and for a
+// struct whose interface field holds one, which only the value can tell.
 func listedAlready(listed []error, err error) bool {
-	if !reflect.TypeOf(err).Comparable() {
+	if !reflect.ValueOf(err).Comparable() {
 		return false
 	}
 	for _, have := range listed {
