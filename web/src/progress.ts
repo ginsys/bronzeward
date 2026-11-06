@@ -230,7 +230,10 @@ async function drain(client: Reader, path: string, run: Run, stoppable: boolean)
   for (const [i, e] of res.data.items.entries()) {
     // A callback aborted the watch: the rest of the batch is not shown, also in a terminal drain.
     if (run.w.signal.aborted) break;
-    if (i === 0 && run.last !== "" && epochOf(e.id) !== epochOf(run.last)) run.clear(RESTORED);
+    if (i === 0 && run.last !== "" && epochOf(e.id) !== epochOf(run.last)) {
+      run.clear(RESTORED);
+      if (run.w.signal.aborted) break;
+    }
     run.show({ id: e.id, type: e.type, data: e.data });
     if (stoppable && run.stop()) break;
   }
