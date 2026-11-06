@@ -42,6 +42,9 @@ type opServer struct {
 	outageAfter int // the outage starts once this many operation reads have answered
 	outageKind  string
 	outages     int // the operation reads that failed so far
+	// recoveryOnOutage adds Bronzeward-Recovery-Mode: true to the failed operation reads only, so the
+	// recovery banner has not been shown before them.
+	recoveryOnOutage bool
 }
 
 func (o *opServer) serve(w http.ResponseWriter, r *http.Request) {
@@ -72,6 +75,9 @@ func (o *opServer) serve(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, `{"items":[%s]}`, strings.Join(o.pages, ","))
 	case r.URL.Path == "/api/v1/operations/op_BWSYNTH" && o.reads >= o.outageAfter && o.outages < o.outage:
 		o.outages++
+		if o.recoveryOnOutage {
+			w.Header().Set("Bronzeward-Recovery-Mode", "true")
+		}
 		switch o.outageKind {
 		case "503":
 			problemAnswer(w, http.StatusServiceUnavailable, "dependency-unavailable", "")

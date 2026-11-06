@@ -163,6 +163,17 @@ func TestWatchOutage(t *testing.T) {
 			t.Errorf("watch: state %q, error %v, %d reads of GET /server; want running, no error and no read of GET /server", state, err, serverReads)
 		}
 	})
+	t.Run("the watch ending in an outage shows the recovery banner the outage answers carried", func(t *testing.T) {
+		reads = nil
+		ended(2 * time.Second)
+		// Only the failed reads say that the installation is in recovery mode, so no read has shown the banner yet.
+		o := &opServer{streams: []handler{sse(ev(e1+":1", "queued"))}, states: []string{"running"},
+			outage: 99, outageAfter: 1, outageKind: "502", recoveryOnOutage: true}
+		_, _, state, notices, err := watched(t, o, e1, nil)
+		if err != nil || state != "running" || !strings.Contains(notices, "RECOVERY MODE is on") {
+			t.Errorf("watch: state %q, error %v, notices %q; want running, no error and the recovery banner", state, err, notices)
+		}
+	})
 	t.Run("a read refused outside the retryable set is not repeated", func(t *testing.T) {
 		reads = nil
 		o := &opServer{streams: []handler{sse(ev(e1+":1", "queued"))}, states: []string{"running"}, gone: 1}

@@ -170,8 +170,12 @@ func (c *Client) Get(path string) (*Response, error) { return c.get(path, nil) }
 // get is Get with the retry policy of retryIn: with a stop, the read is repeated until stop answers true.
 func (c *Client) get(path string, stop func() bool) (*Response, error) {
 	r, err := c.retryUntil(path, stop)
-	// A Ctrl-C ends the read, and so does the end of a watch: no refresh arms another request that no stop can cut.
-	if errors.As(err, new(*Interrupted)) || errors.Is(err, ErrWatchEnded) {
+	if errors.As(err, new(*Interrupted)) { // a Ctrl-C ends the read: no refresh arms another request
+		return nil, err
+	}
+	// The end of a watch also ends the read with no refresh, which no stop can cut, but the banner is shown.
+	if errors.Is(err, ErrWatchEnded) {
+		c.banner()
 		return nil, err
 	}
 	if c.newEpoch {
