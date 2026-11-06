@@ -1190,6 +1190,11 @@ describe("a plain !bwref value that goes on to the next line", () => {
     ["a key in a compact entry", "- k: !bwref x/foo\n  j: v\n"],
     ["a closing bracket in flow context", "[!bwref x/foo\n]\n"],
     ["a comma in flow context", "[!bwref x/foo\n, y]\n"],
+    // U+00A0 is no indentation: the line has text at column 0, a key of its own (go-yaml reads it so).
+    ["a key that starts with a no-break space", "k: !bwref x/foo\n\u00a0j: v\n"],
+    // A tag on its own line under a compact key: the key stands at column 2, not at the line's column 0.
+    ["a sibling key of a compact key", "- k:\n    !bwref x/foo\n  j: v\n"],
+    ["a sibling entry of a compact dash", "- -\n    !bwref x/foo\n  - y\n"],
   ])("%s ends the value, which lists", (_, text) => {
     expect(references(text)).toEqual(["x/foo"]);
   });
