@@ -1330,12 +1330,21 @@ describe("a plain !bwref value that goes on to the next line", () => {
   // (review of this change). Each check has a generous bound and ends on its own with the earlier code, so
   // a regression fails the test and does not hang it: a test timeout cannot stop a synchronous scan.
   describe("cost", () => {
+    // Reads a draft and fails if the scan takes a second or more. The bound leaves a wide margin: the fixed
+    // scan takes under 50 ms on each input below, and the check ends on its own with the earlier code.
+    const bounded = (text: string) => {
+      const start = performance.now();
+      const found = references(text);
+      expect(performance.now() - start).toBeLessThan(1000);
+      return found;
+    };
+
     // A draft of 30,000 entries with a tag alone on its line: the scan back from the tag stops at the key
     // line above it, so it must not read the text before that line. Reading it took 3.3 s for 10,000 entries
     // and grows with the square of the size; the walk by lines takes 0.1 s for 10,000.
     test("a draft with 30,000 tags on their own lines lists every one", () => {
       const text = Array.from({ length: 30000 }, (_, i) => `k${i}:\n  !bwref x/foo${i}\n`).join("");
-      expect(references(text)).toHaveLength(30000);
+      expect(bounded(text)).toHaveLength(30000);
     });
 
     // A line of many bangs and a word: a tag on a line of its own below it is not on a root scalar, and
@@ -1352,11 +1361,6 @@ describe("a plain !bwref value that goes on to the next line", () => {
     // It must not read every line above when none is, or when the lines between are all as indented as the
     // tag: that cost grows with the square of the size. The checks below take 3 to 6 s on the earlier code
     // and under 50 ms now; the bound leaves a wide margin and the check still ends on its own.
-    const bounded = (text: string) => {
-      const start = performance.now();
-      references(text);
-      expect(performance.now() - start).toBeLessThan(1000);
-    };
 
     // A tag at column 0 that is no root scalar: no line is less indented than column 0.
     test("3,000 tags at column 0 under a key are scanned in near linear time", () => {
@@ -1369,13 +1373,47 @@ describe("a plain !bwref value that goes on to the next line", () => {
       bounded(`k:\n${Array.from({ length: 2000 }, (_, i) => `  j${i}: v\n  !bwref x/foo${i}\n`).join("")}`);
     });
 
+    // Many tags under one long key: the line of the key is the parent of each of them, and it is matched once
+    // (`known` of the line), not once per tag. The key has 200,000 characters and the 3,000 tags took 1.6 s
+    // when each tag matched it again.
+    test("3,000 tags among sibling keys under one key of 200,000 characters are scanned in near linear time", () => {
+      bounded(`${"a".repeat(200000)}:\n${Array.from({ length: 3000 }, (_, i) => `  j${i}: v\n  !bwref x/foo${i}\n`).join("")}`);
+    });
+
     // A continuation line with a long run of blanks between two words: trimming it must not try every
-    // start of the run. The anchored path (`&e` before the tag) trims the same way.
-    test.each([
+    // start of the run. Three paths trim a continuation line: a plain tag, a tag after an anchor (both
+    // `continues`) and an anchor after the tag (`anchoredContinues`, whose old pattern was on main).
+    const trimHeads = [
       ["a plain tag", "k: !bwref a\n"],
       ["a tag after an anchor", "k: &e !bwref a\n"],
-    ])("a continuation line with 60,000 blanks inside it is trimmed in linear time (%s)", (_, head) => {
+      ["an anchor after the tag", "k: !bwref &e a\n"],
+    ];
+    test.each(trimHeads)("a continuation line with 60,000 blanks inside it is trimmed in linear time (%s)", (_, head) => {
       bounded(`${head}  bar${" ".repeat(60000)}baz\n`);
+    });
+
+    // The same walks with the long run at the start of the line, and at its end.
+    test.each(trimHeads)("a continuation line with 60,000 blanks at its start is trimmed in linear time (%s)", (_, head) => {
+      bounded(`${head}${" ".repeat(60000)}bar\n`);
+    });
+    test.each(trimHeads)("a continuation line with 60,000 blanks at its end is trimmed in linear time (%s)", (_, head) => {
+      bounded(`${head}  bar${" ".repeat(60000)}\n`);
+    });
+
+    // The search for the parent line of a tag runs a binary search over the stack of open lines, and the stack
+    // is as deep as the indentation rises: 1,000 keys, each one column deeper than the one above.
+    test("a tag below 1,000 keys of rising indentation is scanned in near linear time", () => {
+      const keys = Array.from({ length: 1000 }, (_, i) => `${" ".repeat(i)}k${i}:\n`).join("");
+      bounded(`${keys}${" ".repeat(1000)}!bwref x/foo\n${" ".repeat(1000)}bar\n`);
+    });
+
+    // A key of 100,000 characters before the tag on its own line, with and without the colon that makes it a
+    // parent (`PLAIN_PARENT`): the pattern must not try every split of a long key.
+    test.each([
+      ["with its colon", `${"a".repeat(100000)}: !bwref x/foo\n  bar\n`],
+      ["without a colon", `${"a".repeat(100000)} !bwref x/foo\n  bar\n`],
+    ])("a key of 100,000 characters before the tag is matched in linear time (%s)", (_, text) => {
+      bounded(text);
     });
 
     // Every other loop and pattern that the scan of a plain tag value runs, on a long input of its kind.

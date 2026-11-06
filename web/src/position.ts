@@ -373,8 +373,10 @@ const startsLine = (before: string) => /^[ \t]*(?:(?:&[A-Za-z0-9_-]+|![^ \t]*)[ 
 const propertiesOnly = (line: string) =>
   /^[ \t]*(?:(?:&[A-Za-z0-9_-]+|![^ \t]*)(?:[ \t]+|(?=\r?$)))+\r?$/.test(line);
 
-// A line with text and the column of its first character in YAML blanks (`column`).
-type Above = { column: number; line: string };
+// A line with text and the column of its first character in YAML blanks (`column`). `known` keeps whether
+// the line is a parent that `PLAIN_PARENT_LINE` knows, set by the first tag that asks: many tags under one
+// long key would otherwise match the same line again for each of them (review of this change).
+type Above = { column: number; line: string; known?: boolean };
 
 // For each line with text, the nearest line above it that is less indented, as `plainHolder` and the parent
 // of a tag that starts its line need it; none if no line above is less indented. A line of node properties
@@ -503,8 +505,8 @@ function continues(
   if (isRoot(masked, tag, before)) return true;
   if ((next.trim() === "" ? spaces(next) : column(next)) <= plainHolder(masked, tag, above)) return false;
   if (/^[,\]}]/.test(t)) return true;
-  const parent = startsLine(before) ? above(lineStart)?.line : undefined;
-  const known = parent === undefined ? PLAIN_PARENT.test(before) : PLAIN_PARENT_LINE.test(parent);
+  const parent = startsLine(before) ? above(lineStart) : undefined;
+  const known = parent === undefined ? PLAIN_PARENT.test(before) : (parent.known ??= PLAIN_PARENT_LINE.test(parent.line));
   if (known) return true;
   return !/^[-?](?:\s|$)/.test(t) && !/:(?:\s|$)/.test(t);
 }
