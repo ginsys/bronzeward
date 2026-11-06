@@ -585,6 +585,22 @@ func TestOperationWatchOutage(t *testing.T) {
 			t.Errorf("exit %d, stdout %q, stderr %q; want 3, the state named as not read and no completion line", code, out, errOut)
 		}
 	})
+	t.Run("the timeout during an outage after an event of another epoch came in the open stream: exit 3", func(t *testing.T) {
+		// The first read and the stream's header show epoch 2. An event in the stream is of epoch 3: the installation
+		// entered recovery mode while the stream stayed open (client-contracts.md section 8.6 item 3). Every read of the
+		// operation after the first is then out of reach until the timeout, and none shows the new epoch. The first
+		// read is of the installation before, so the state is unknown.
+		f := &opFake{stream: []string{"id: ep_BWSYNTH-3:1\nevent: commitment\ndata: " + commitment + "\n\n"}, pages: []string{evPage(1, "commitment", commitment)},
+			outageFrom: 2, outageReads: 1000,
+			body: fmt.Sprintf(opJSON, "apply-config", "succeeded", "null", "null", "[]")}
+		srv := httptest.NewServer(f)
+		t.Cleanup(srv.Close)
+		automationContext(t, srv.URL)
+		code, out, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "2500ms")
+		if code != 3 || !strings.Contains(errOut, "was not read") || strings.Contains(out, "Succeeded") {
+			t.Errorf("exit %d, stdout %q, stderr %q; want 3, the state named as not read and no completion line", code, out, errOut)
+		}
+	})
 	t.Run("Ctrl-C during a wait: exit 130 at once", func(t *testing.T) {
 		f := newOutage(t)
 		grace := interruptGrace

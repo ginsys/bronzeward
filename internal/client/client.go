@@ -47,6 +47,11 @@ type Client struct {
 	// moves counts the answers that showed another epoch than the one before, a failed answer
 	// included, so a change that a later answer set back is still seen (§8.5).
 	moves int
+
+	// streamEpoch is the epoch that an event in an open stream carried while the stream's header showed
+	// another: the installation moved in mid-stream (§8.6 item 3). Any answer with an epoch header is
+	// newer and clears it. EpochHolds reads it.
+	streamEpoch string
 }
 
 // EpochMoves is the number of times an answer showed another epoch than the one before. A command
@@ -329,6 +334,9 @@ func (p *Problem) unavailable() bool {
 // query, so the pages of one list warn once.
 func (c *Client) observe(route string, r *http.Response) {
 	route, _, _ = strings.Cut(route, "?")
+	if r.Header.Get("Bronzeward-Epoch") != "" {
+		c.streamEpoch = ""
+	}
 	if e := r.Header.Get("Bronzeward-Epoch"); e != "" && e != c.Context.LastEpoch {
 		if c.Context.LastEpoch != "" {
 			fmt.Fprintf(c.Notices, "%s: The installation entered recovery mode or was restored; what was read before may no longer hold.\n", c.Context.Where())

@@ -85,11 +85,18 @@ type OperationRead struct {
 	Epoch string
 }
 
-// EpochHolds is whether read is of the installation as the last answer of the server showed it. An
-// answer of another epoch, one that failed included, shows a restore since the read, and the read does
-// not stand as the state. A read or an answer with no epoch cannot show that, so it holds.
+// EpochHolds is whether read is of the installation as the server last showed it. An answer of
+// another epoch, one that failed included, or an event of another epoch in an open stream, shows a
+// restore since the read, and the read does not stand as the state. A read with no epoch cannot be
+// judged, so it holds.
 func (c *Client) EpochHolds(read OperationRead) bool {
-	return read.Epoch == "" || c.Context.LastEpoch == "" || read.Epoch == c.Context.LastEpoch
+	switch {
+	case read.Epoch == "":
+		return true
+	case c.streamEpoch != "" && c.streamEpoch != read.Epoch:
+		return false
+	}
+	return c.Context.LastEpoch == "" || read.Epoch == c.Context.LastEpoch
 }
 
 // WatchBody is Watch that also returns the operation read the result comes from, so a caller that
@@ -505,6 +512,7 @@ func (c *Client) streamIn(armed context.Context, op string, last *string, w Watc
 				// the operation read that follows applies §8.5, and the stream reopens from the start.
 				c.cleared(w, "the installation entered recovery mode or was restored while the events were read")
 				*last = ""
+				c.streamEpoch = epochOf(ev.ID)
 				return true, false, nil
 			default:
 				show(w, ev, last)
