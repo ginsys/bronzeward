@@ -42,6 +42,9 @@ type importFake struct {
 	ingReads             int  // the reads of the claim
 	streams              int  // the event streams opened
 	reviews              int  // review reads answered
+	// stall, when set, makes the event stream stall (see stallStream) under the epoch stallEpoch.
+	stall      chan struct{}
+	stallEpoch string
 }
 
 const ingAccepted = `{"ingestion":"ing_BWSYNTH","operation":"op_BWSYNTH-ing"}`
@@ -144,6 +147,10 @@ func (f *importFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case route == "GET /ingestions":
 		fmt.Fprintf(w, `{"items":[%s]}`, f.ingestion())
 	case path == "/operations/op_BWSYNTH-ing/events" && r.Header.Get("Accept") == "text/event-stream" && !f.noStream:
+		if f.stall != nil {
+			stallStream(w, r, f.stall, f.stallEpoch)
+			return
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		f.streams++
 		events, cut := f.shownEvents(epoch), f.cut > 0

@@ -549,6 +549,12 @@ yet started is not sent. An error that the command returns beside the stop, such
 of the state, prints first, and the stop line ends the output. An unknown outcome keeps exit 3 and
 its text.
 
+The event stream of `publish` and of the import follow opens after their write completed. It is a
+read, not a read made inside a write, so it takes the Ctrl-C. The wait before the next attempt to
+open it takes the Ctrl-C too. The stop line names the stream request, and the command saves its
+state before it exits 130. The stream still has no attempt bound ([§8.4](#84-idempotency-and-ambiguous-responses)
+item 8). `operation watch` keeps its own handler of the Ctrl-C and does not use this one.
+
 The `503` row applies only to a Bronzeward problem with one of its four codes. The write `503`s
 say that the attempt they answer committed nothing of its own transaction (what a route committed
 before it stays, as the row says); for example authentication's
