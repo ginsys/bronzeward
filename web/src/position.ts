@@ -406,7 +406,8 @@ function plainHolder(masked: string, tag: number): number {
 // the continuation of such a scalar against column -1, so a line at column 0 goes on, and so do `- `
 // and `? ` lines, which are text there. A key line is a refused document (ginsys/bronzeward#616). The scan
 // back to the last marker takes the stream-start byte order mark as no text and a marker line that ends
-// in a CRLF as a marker (`MARKER`); a line of Unicode spaces only is text, so it is not a root.
+// in a CRLF as a marker (`MARKER`); a line of Unicode spaces only is text, so it is not a root. A line of
+// node properties only (`propertiesOnly`) is no text either: `&e\n!bwref x/foo\n- y` is a root scalar.
 function isRoot(masked: string, tag: number, before: string): boolean {
   if (!/^(?:---[ \t]+)?[ \t]*(?:&[A-Za-z0-9_-]+[ \t]+)*$/.test(before)) return false;
   if (before.startsWith("---")) return true;
@@ -415,7 +416,7 @@ function isRoot(masked: string, tag: number, before: string): boolean {
     // The stream-start byte order mark is no text, and a marker line may end in a CRLF (`MARKER`).
     const l = i === 0 ? lines[i]!.slice(bom(masked, 0)) : lines[i]!;
     if (MARKER.test(l)) break;
-    if (!blank(l)) return false;
+    if (!blank(l) && !propertiesOnly(l)) return false;
   }
   return true;
 }

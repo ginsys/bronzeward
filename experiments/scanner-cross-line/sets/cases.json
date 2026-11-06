@@ -355,5 +355,12 @@
   "doc": "k:\n &e\n  !bwref x/foo\n \u00a0bar\n",
   "want": [],
   "note": "a line that holds only an anchor is no parent: the value belongs to k at column 0, and the next line at column 1 goes on (review of the 616 change)"
+ },
+ {
+  "name": "616-root-anchor-only-line-then-dash",
+  "issue": "616",
+  "doc": "&e\n!bwref x/foo\n- y\n",
+  "want": [],
+  "note": "a line that holds only an anchor above a root scalar is no text: the tag is a root scalar and a dash line goes on, as without the anchor (review of the 616 change)"
  }
 ]
