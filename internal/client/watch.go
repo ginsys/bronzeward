@@ -270,11 +270,62 @@ func (c *Client) pause(op string, w Watch, d time.Duration) error {
 // attempt, the open stream included, with *Interrupted and no notice.
 func (c *Client) stream(op string, last *string, w Watch) (opened, pages bool, err error) {
 	armed, disarm := c.arm()
-	opened, pages, err = c.streamIn(armed, op, last, w)
+	opened, pages, err = c.quietIn(armed, op, last, w)
 	if disarm() {
 		return opened, pages, c.cut(&Interrupted{Route: eventsRoute(op)})
 	}
 	return opened, pages, err
+}
+
+// cutWriter drops what is written once cut says that a Ctrl-C was taken.
+type cutWriter struct {
+	to  io.Writer
+	cut func() bool
+}
+
+func (w cutWriter) Write(p []byte) (int, error) {
+	if w.cut() {
+		return len(p), nil
+	}
+	return w.to.Write(p)
+}
+
+// quietIn is streamIn under one rule: once armed is done, the attempt writes no notice and runs no
+// callback of w. A write that already started is not cut short. The notices go through cutWriter
+// and the callbacks through guards, so no sink in the attempt (observe, renew and cleared included)
+// needs a check of its own. The writer is restored before this returns, so stream, its cut and the
+// rest of the command see the writer the client was given.
+func (c *Client) quietIn(armed context.Context, op string, last *string, w Watch) (opened, pages bool, err error) {
+	if armed.Done() == nil { // nothing can end it: no Arm, or a command that holds Ctrl-C itself
+		return c.streamIn(armed, op, last, w)
+	}
+	cut := func() bool { return armed.Err() != nil }
+	given := c.Notices
+	c.Notices = cutWriter{given, cut}
+	defer func() { c.Notices = given }()
+	showEvent, clearAll, until := w.Show, w.Clear, w.Until
+	w.Show = func(e Event) {
+		if !cut() {
+			showEvent(e)
+		}
+	}
+	if clearAll != nil {
+		w.Clear = func() {
+			if !cut() {
+				clearAll()
+			}
+		}
+	}
+	if until != nil {
+		// false, not true: true would set halt.done and end the watch as satisfied (stop).
+		w.Until = func() (bool, error) {
+			if cut() {
+				return false, nil
+			}
+			return until()
+		}
+	}
+	return c.streamIn(armed, op, last, w)
 }
 
 // streamIn is stream with the context a Ctrl-C cancels.
@@ -306,9 +357,7 @@ func (c *Client) streamIn(armed context.Context, op string, last *string, w Watc
 			if errors.As(err, &t) {
 				return false, false, c.Context.fail(fmt.Errorf("%s: %w", route, err))
 			}
-			if armed.Err() == nil { // a Ctrl-C ended the request: stream reports that, not a notice
-				fmt.Fprintf(c.Notices, "%s: %s: %v\n", c.Context.Where(), route, err)
-			}
+			fmt.Fprintf(c.Notices, "%s: %s: %v\n", c.Context.Where(), route, err)
 			return false, false, nil
 		}
 		defer r.Body.Close()
@@ -319,10 +368,20 @@ func (c *Client) streamIn(armed context.Context, op string, last *string, w Watc
 		}
 		if r.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+			// A Ctrl-C ends this read with the bytes it had. renew is no sink and takes no context, so
+			// only a check here keeps an answer built from those bytes from starting a renewal.
+			if armed.Err() != nil {
+				return false, false, nil
+			}
 			p := c.problem(route, r, body)
 			switch {
 			case p != nil && p.Status == http.StatusUnauthorized && !renewed && c.signIn != nil && !c.signIn.failed && c.signIn.tokens.RefreshToken != "":
-				if rerr := c.renew(); rerr != nil {
+				rerr := c.renew()
+				// renew cannot be cut short. The check keeps `continue` from sending a new request after it.
+				if armed.Err() != nil {
+					return false, false, nil
+				}
+				if rerr != nil {
 					fmt.Fprintf(c.Notices, "%s: %v.\n", c.Context.Where(), rerr)
 					return false, false, p
 				}
@@ -349,11 +408,12 @@ func (c *Client) streamIn(armed context.Context, op string, last *string, w Watc
 		var ev Event
 		data := false // ev has a data line
 		// Until can read (the import follow reads its claim), and a read that starts after a Ctrl-C took
-		// the stream would arm a context that Ctrl-C already passed. stream records the Ctrl-C only when
-		// this attempt returns, so the loop looks at armed itself before it asks Until.
-		quit := func() bool { return armed.Err() != nil || w.stop() }
+		// the stream would arm a context that Ctrl-C already passed. quietIn guards Until, so it is not
+		// asked after the Ctrl-C.
+		quit := w.stop
 		for sc.Scan() {
-			// The scanner delivers lines it buffered before the Ctrl-C: no callback runs for them.
+			// The scanner delivers lines it buffered before the Ctrl-C. The callbacks are guarded, but
+			// *last and ev must not move for lines that nothing shows, so the loop ends here.
 			if armed.Err() != nil {
 				return true, false, nil
 			}
