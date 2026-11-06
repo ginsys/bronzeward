@@ -39,7 +39,11 @@ func newStreamStall(t *testing.T, stream func(w http.ResponseWriter, r *http.Req
 			problemAnswer(w, http.StatusNotFound, "not-found", "")
 		}
 	}))
+	// Cleanups run last in, first out. The order here is: release hang, close the client connections,
+	// then close the server. A handler that waits on its request context ends when the connection
+	// closes, so Close cannot block on it if the stream cancellation regresses.
 	t.Cleanup(s.srv.Close)
+	t.Cleanup(s.srv.CloseClientConnections)
 	t.Cleanup(func() { close(s.hang) })
 	return s
 }
