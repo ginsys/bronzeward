@@ -753,11 +753,13 @@ contracts §8.6](client-contracts.md#86-event-resumption) item 2). Each repeat p
 The timeout then ends the watch with exit 5 and Ctrl-C with exit 130, as at any other time, both
 within a quarter of a second of a wait, and the stop lines name the operation as the last read showed
 it.
-If a read of the watch gave nothing, because its answer cannot be read or the connection failed (the
-server read and the first operation read, after their five tries, or the read that follows a cut
-stream, only when its answer cannot be read, because a failed connection is repeated), the watch ends
-with no operation read, the state is unknown and the exit is 3: the message names `operation show` as
-the command that reads it. Only a problem document the server named keeps exit 1.
+If a read of the watch gave nothing, the watch ends with no operation read. The state is unknown and
+the exit is 3: the message names `operation show` as the command that reads it. This holds for the
+server read and the first operation read after their five tries. It holds for the read that follows
+a cut stream only for a failure that a repeat does not cure: an answer that is not a readable
+operation, a redirect, or a 4xx answer that is cut off or is no problem document. That read repeats
+after a failed connection, after a cut-off 2xx or 5xx answer and after a 5xx answer that is no problem
+document. Only a problem document the server named keeps exit 1.
 
 The machine timeline shows what happened to the plans of one machine, including the ones that
 never ran:
