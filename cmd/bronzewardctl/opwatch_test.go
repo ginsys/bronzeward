@@ -875,9 +875,13 @@ type interruptThenFail struct {
 	taken    chan struct{} // closed by onInterrupt when the watch has taken the first Ctrl-C
 	pending  chan struct{} // closed by the third write when it starts to wait for release
 	release  chan struct{} // when set, the third write stays pending after the Ctrl-C until this is closed
-	abort    chan struct{} // closed by the overall deadline of the test: no wait of the write outlasts it
+	abort    chan struct{} // closed by the overall deadline or by the cleanup of the test: no wait outlasts it
+	endOnce  sync.Once     // closes abort once, whichever of the deadline and the cleanup comes first
 	timedOut atomic.Bool   // set by the overall deadline: the test has failed, whatever else it sees
 }
+
+// end ends every wait of the write and of the observer.
+func (w *interruptThenFail) end() { w.endOnce.Do(func() { close(w.abort) }) }
 
 // interruptTestDeadline is the one overall deadline of a test that uses interruptThenFail. It is the
 // only timer of the write and of the observer of a test: no wait in them has a timer of its own.
@@ -895,9 +899,14 @@ func newInterruptThenFail(t *testing.T, pendingWrite bool) *interruptThenFail {
 	}
 	deadline := time.AfterFunc(interruptTestDeadline, func() {
 		w.timedOut.Store(true)
-		close(w.abort)
+		w.end()
 	})
-	t.Cleanup(func() { deadline.Stop() })
+	// A test that ends early, for example when run returns before the third write, must not leave the
+	// observer blocked: the cleanup ends its waits too.
+	t.Cleanup(func() {
+		deadline.Stop()
+		w.end()
+	})
 	return w
 }
 
