@@ -300,7 +300,8 @@ with a doubled or escaped quote (`'a''b': !bwref x/foo`) is not read as a parent
 ends the value and the editor lists a name where the server lists none. A line of Unicode spaces is text, not blank. A line that
 starts with a no-break space has text at column 0, so it is no indentation. A tag that starts its own line is read against the
 line above only where that line is a plain or quoted key with nothing after its colon, or a lone dash. Under a compact
-parent such as `- k:` the next line ends the value. An anchor before the tag on its own line (`&e !bwref x/foo`) is no text: the
+parent such as `- k:` a next line that can be a sibling key or a sequence entry (`- y`, `y: v`) ends the value, and
+an ordinary indented line goes on. A line that holds only an anchor is no parent: the key above it is. An anchor before the tag on its own line (`&e !bwref x/foo`) is no text: the
 parent is the line above, as for the tag alone. A byte order mark at the start of the stream is no text
 and no column. A root scalar is a tag on the line of `---`, or the first text of a
 document, with only anchors and blanks before it. It goes on at every next line with text, also at column 0, and a

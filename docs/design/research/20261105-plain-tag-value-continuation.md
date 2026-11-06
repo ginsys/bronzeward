@@ -111,11 +111,18 @@ The first sweep of the change on S9 found new extra names against main. Two caus
 Two more shapes came out of the set S11 and are in the change.
 
 - An indented root scalar (`  !bwref x/foo`, then any line with text) is a root scalar, measured against column -1. `isRoot()` accepts leading blanks.
-- A BOM at the start of the stream is dropped by go-yaml (no text, no column). The scanner drops a BOM at offset 0 only, in `parentLine()`, `column()` calls on the first line and in `continues()`. A BOM elsewhere stays text.
+- A BOM at the start of the stream is dropped by go-yaml (no text, no column). The scanner drops a BOM at offset 0 only, in `parentLine()`, `plainHolder()`, `continues()` and in the scan back to the last marker of `isRoot()`. A BOM elsewhere stays text.
 
 A second tag before `!bwref` makes go-yaml refuse the document: a node takes one tag. The oracle (go-yaml v3.0.5) refuses `"k:\n  !t !bwref x/foo\n  bar\n"`, `"k: !t !bwref x/foo\n"` and, with the tags the other way round, `"k:\n  !bwref !t x/foo\n  bar\n"`, each with "did not find expected key". It lists no name for them, and the scanner lists none either (it blanks a document with a second tag on one node, ginsys/bronzeward#620). No pair can come from this shape.
 
 S11 (`experiments/scanner-cross-line/sets/gen-s11-indent-offsets.ts`) holds 3888 documents, and go-yaml parses 1696 of them. Its sha256 is `f462167f9e28366ef5cc58c36c388d4f63fc8297e251ee4c2f20677c02d50fa0`. It varies the column of the node and the column of the next line together, with spaces, U+00A0 or a tab, so that a mix of the two measures cannot hide.
+
+The local review of the change found two more places where the same rules were not applied, and S11 did not reach either of them.
+
+- The scan back to the last marker in `isRoot()` did not drop the stream-start BOM and did not take a marker line that ends in a CRLF as a marker. `"\ufeff---\n !bwref x/foo\n\u00a0bar\n"` and `"---\r\n !bwref x/foo\r\n\u00a0bar\r\n"` then read the marker as the holder at column 0, and the scanner listed `x/foo` where go-yaml lists none. The scan now uses `MARKER` and drops the BOM, and a line of Unicode spaces only counts as text in it.
+- A line that holds only an anchor (`k:\n &e\n  !bwref x/foo\n \u00a0bar\n`) was taken as the parent of the tag, at column 1. The key above it is the parent, at column 0. `plainHolder()` and `parentLine()` skip a line of node properties only (`propertiesOnly()`).
+
+S12 (`experiments/scanner-cross-line/sets/gen-s12-marker-and-property-lines.ts`) covers both places, each with spaces, U+00A0 and a tab in the next line. It holds 3240 documents, and go-yaml parses 1828 of them. Its sha256 is `7e8bfc05676d128233b9eb23fd4adc79dcd9bd06c71e9ff5d9f3f24d18eddbc2`. At the commit before the repair (f2934894) a light run of S12 against main showed 32 new extra documents: 12 in the "marker" family (a BOM, a CRLF, and a property on the marker line) and 20 in the "pprop" family (a key or a dash, with an anchor-only line). With the repair, S12 has 0 new lost and 0 new extra documents, and the extra count falls from 1024 on main to 0.
 
 Known effect, class B. The change does not start any extra or lost name. It does list a name for documents that go-yaml refuses: 48 on S9, 6 on S10 and 56 on S11. In every one of these documents a line that starts with U+00A0 stands at the column of the node, right after the value (`"k: !bwref x/foo\n bar\n"`). go-yaml ends the scalar at that line, because U+00A0 is text at column 0, and then refuses the document ("could not find expected ':'"). The scanner now ends the scalar there too and lists the name. Main skipped the line and listed none. Main already lists the name for the same document with an ASCII `bar` at column 0. A refused document lists nothing on the server, so these rows are not errors. The gate of the issue (no new lost, no new extra) does not count them.
 

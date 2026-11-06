@@ -334,5 +334,26 @@
   "doc": "- -\n    !bwref x/foo\n  - y\n",
   "want": ["x/foo"],
   "note": "a tag on its own line under a compact dash: the next entry stands at column 2, so the value ends"
+ },
+ {
+  "name": "616-root-bom-before-marker",
+  "issue": "616",
+  "doc": "\ufeff---\n !bwref x/foo\n\u00a0bar\n",
+  "want": [],
+  "note": "the stream-start byte order mark is no text: the marker is the first line, the tag is a root scalar and goes on (review of the 616 change)"
+ },
+ {
+  "name": "616-root-crlf-marker",
+  "issue": "616",
+  "doc": "---\r\n !bwref x/foo\r\n\u00a0bar\r\n",
+  "want": [],
+  "note": "a marker line that ends in a CRLF is a marker: the tag is a root scalar and goes on (review of the 616 change)"
+ },
+ {
+  "name": "616-anchor-only-line-is-no-parent",
+  "issue": "616",
+  "doc": "k:\n &e\n  !bwref x/foo\n \u00a0bar\n",
+  "want": [],
+  "note": "a line that holds only an anchor is no parent: the value belongs to k at column 0, and the next line at column 1 goes on (review of the 616 change)"
  }
 ]
