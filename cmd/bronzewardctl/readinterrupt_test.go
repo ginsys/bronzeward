@@ -296,3 +296,103 @@ func TestCtrlCIsNotHeldBetweenReads(t *testing.T) {
 		}
 	}
 }
+
+// listedErrors is a custom join: Unwrap returns its members, a nil one included. errors.Join never
+// keeps a nil member, so only a type like this one can carry it.
+type listedErrors []error
+
+func (l listedErrors) Error() string   { return "listed errors" }
+func (l listedErrors) Unwrap() []error { return l }
+
+// TestReportListsEachErrorBesideACutOnce (ginsys/bronzeward#670): whatever shape holds the Ctrl-C of a
+// read, each other error shows once, before the one stop line, and the exit stays 130. The shapes are a
+// join under a wrapper that is not itself a join, a nil member of a custom join, and one error joined
+// twice, at the top or in a nested join.
+func TestReportListsEachErrorBesideACutOnce(t *testing.T) {
+	cut := &client.Interrupted{Route: "GET /api/v1/clusters"}
+	stop := "Stopped at your request while reading GET /api/v1/clusters.\n"
+	readErr, save := errors.New("GET /server answered 503"), errors.New("saving the state failed")
+	for _, tc := range []struct {
+		name string
+		err  error
+		seen map[string]int // text on standard error and how often it shows
+	}{
+		{"a join under a wrapper", fmt.Errorf("reading the review: %w", errors.Join(readErr, cut)), map[string]int{"answered 503": 1}},
+		{"a join under two wrappers", fmt.Errorf("outer: %w", fmt.Errorf("inner: %w", errors.Join(cut, readErr))), map[string]int{"answered 503": 1}},
+		{"a nil member", listedErrors{nil, cut, save}, map[string]int{"saving the state failed": 1}},
+		{"a nil member alone with the cut", listedErrors{cut, nil}, map[string]int{"listed errors": 0}},
+		{"one error twice", errors.Join(cut, save, save), map[string]int{"saving the state failed": 1}},
+		{"one error twice in a nested join", errors.Join(save, errors.Join(cut, save)), map[string]int{"saving the state failed": 1}},
+		{"two different errors keep both", errors.Join(readErr, cut, save), map[string]int{"answered 503": 1, "saving the state failed": 1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			code := report(tc.err, &out, &errOut)
+			got := errOut.String()
+			if code != 130 || strings.Count(got, "Stopped at your request") != 1 || !strings.HasSuffix(got, stop) {
+				t.Errorf("exit %d, stderr %q; want 130 and the one stop line last", code, got)
+			}
+			for text, n := range tc.seen {
+				if c := strings.Count(got, text); c != n {
+					t.Errorf("stderr %q shows %q %d times; want %d", got, text, c, n)
+				}
+			}
+		})
+	}
+}
+
+// TestFailedSaveAfterACtrlCOfAReadIsPrinted (ginsys/bronzeward#647, item 2): the first read of the
+// run showed the epoch, so the second read's answer shows a new one and the client has state to keep.
+// The configuration directory becomes read-only, the second read stalls, and the Ctrl-C ends it. The
+// command exits 130, prints the failed save once, and ends with the one stop line.
+func TestFailedSaveAfterACtrlCOfAReadIsPrinted(t *testing.T) {
+	var stall atomic.Bool
+	arrived, hang := make(chan struct{}, 1), make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/server") {
+			w.Header().Set("Bronzeward-Epoch", "ep_BWSYNTH-1")
+			fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":2,"startMode":"normal"}`)
+			return
+		}
+		if !stall.Load() {
+			w.Header().Set("Bronzeward-Epoch", "ep_BWSYNTH-1")
+			fmt.Fprint(w, `{"items":[]}`)
+			return
+		}
+		w.Header().Set("Bronzeward-Epoch", "ep_BWSYNTH-2")
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		arrived <- struct{}{}
+		select {
+		case <-hang:
+		case <-r.Context().Done():
+		}
+	}))
+	t.Cleanup(func() { close(hang); srv.Close() })
+	automationContext(t, srv.URL)
+	if code, _, errOut := runCtl(t, "cluster", "list"); code != 0 {
+		t.Fatalf("first read: exit %d, stderr %q", code, errOut)
+	}
+	stall.Store(true)
+	var out, errOut lockedBuffer
+	go func() {
+		<-arrived
+		// The notice of the new epoch shows once the client has read the headers, which is when it has
+		// state to keep.
+		for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline) && !strings.Contains(errOut.String(), "entered recovery mode"); time.Sleep(time.Millisecond) {
+		}
+		if err := os.Chmod(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "bronzeward"), 0o500); err != nil {
+			t.Errorf("the configuration directory stays writable: %v", err)
+		}
+		_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
+	}()
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "bronzeward"), 0o700) })
+	code := run([]string{"cluster", "list"}, &out, &errOut)
+	got := errOut.String()
+	const stop = "Stopped at your request while reading GET /api/v1/clusters"
+	if code != 130 || strings.Count(got, "keeping the epoch") != 1 || strings.Count(got, "Stopped at your request") != 1 ||
+		strings.Index(got, "keeping the epoch") > strings.Index(got, "Stopped at your request") || !strings.Contains(got, stop) {
+		t.Errorf("exit %d, stderr %q; want 130, the failed save once, and the one stop line after it", code, got)
+	}
+}

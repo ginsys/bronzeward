@@ -12,6 +12,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"reflect"
 	"regexp"
 	"runtime/debug"
 	"slices"
@@ -335,19 +336,54 @@ func report(err error, stdout, stderr io.Writer) int {
 }
 
 // besideCut lists the errors that a command joined with the Ctrl-C of a read, in the order it joined
-// them. An error that wraps the Ctrl-C itself is not one of them: the stop line says it.
+// them. An error that wraps the Ctrl-C itself is not one of them: the stop line says it. It goes down a
+// join, and down a wrapper that holds the Ctrl-C (#670), so a join under a wrapper still lists its other
+// members. It skips a nil member and lists one error value once.
 func besideCut(err error) []error {
-	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+	var listed []error
+	for _, other := range besideCutAll(err) {
+		if !listedAlready(listed, other) {
+			listed = append(listed, other)
+		}
+	}
+	return listed
+}
+
+func besideCutAll(err error) []error {
+	switch wrapped := err.(type) {
+	case nil:
+		return nil
+	case interface{ Unwrap() []error }:
 		var others []error
-		for _, member := range joined.Unwrap() {
-			others = append(others, besideCut(member)...)
+		for _, member := range wrapped.Unwrap() {
+			others = append(others, besideCutAll(member)...)
 		}
 		return others
+	case interface{ Unwrap() error }:
+		// A wrapper that holds the Ctrl-C says only what it adds to it: what it wraps tells the rest. One
+		// that does not hold it is an error of its own, listed as it is.
+		if errors.As(err, new(*client.Interrupted)) {
+			return besideCutAll(wrapped.Unwrap())
+		}
 	}
 	if errors.As(err, new(*client.Interrupted)) {
 		return nil
 	}
 	return []error{err}
+}
+
+// listedAlready reports whether err is the same error value as one in listed. A value whose type cannot
+// be compared (a slice type, say) is never taken for a repeat: == on it would panic.
+func listedAlready(listed []error, err error) bool {
+	if !reflect.TypeOf(err).Comparable() {
+		return false
+	}
+	for _, have := range listed {
+		if reflect.TypeOf(have) == reflect.TypeOf(err) && have == err {
+			return true
+		}
+	}
+	return false
 }
 
 // anyArgs asks parse for every positional argument, however many.
