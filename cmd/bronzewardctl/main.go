@@ -302,9 +302,14 @@ func report(err error, stdout, stderr io.Writer) int {
 		return 130
 	}
 	// A Ctrl-C ended a read or its wait before a retry (#643). It says nothing of what an earlier step of
-	// the command wrote: a command may write and then read.
+	// the command wrote: a command may write and then read. An error that the command joined with it is
+	// printed first, so that the stop line ends the output, and an unknown outcome keeps its exit 3 and its
+	// text: the sink below prints them with the stop of the read.
 	var cut *client.Interrupted
-	if errors.As(err, &cut) {
+	if errors.As(err, &cut) && !errors.As(err, &unknown) && !errors.As(err, &settled) {
+		for _, other := range besideCut(err) {
+			fmt.Fprintln(stderr, "bronzewardctl:", client.Shown(other))
+		}
 		fmt.Fprintf(stderr, "Stopped at your request while reading %s.\n", client.Printable(cut.Route))
 		return 130
 	}
@@ -327,6 +332,22 @@ func report(err error, stdout, stderr io.Writer) int {
 		return 6
 	}
 	return 1
+}
+
+// besideCut lists the errors that a command joined with the Ctrl-C of a read, in the order it joined
+// them. An error that wraps the Ctrl-C itself is not one of them: the stop line says it.
+func besideCut(err error) []error {
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		var others []error
+		for _, member := range joined.Unwrap() {
+			others = append(others, besideCut(member)...)
+		}
+		return others
+	}
+	if errors.As(err, new(*client.Interrupted)) {
+		return nil
+	}
+	return []error{err}
 }
 
 // anyArgs asks parse for every positional argument, however many.

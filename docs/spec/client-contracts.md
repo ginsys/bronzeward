@@ -545,7 +545,9 @@ is taken for each read only. A write, and a read made inside a write, does not t
 of a stored sign-in is not cut short: it runs to its end, and the stop follows. After the first Ctrl-C
 the client sends no further read. A command that reads again after it, for a lookup that does not
 decide its result, still exits 130 with the stop line of the first Ctrl-C. A write that was not
-yet started is not sent.
+yet started is not sent. An error that the command returns beside the stop, such as a failed save
+of the state, prints first, and the stop line ends the output. An unknown outcome keeps exit 3 and
+its text.
 
 The `503` row applies only to a Bronzeward problem with one of its four codes. The write `503`s
 say that the attempt they answer committed nothing of its own transaction (what a route committed
