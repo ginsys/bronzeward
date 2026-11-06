@@ -69,6 +69,14 @@ The same files back a second note, on [issue 603](https://github.com/ginsys/bron
   the oracle output and two scanners: `node judge-s10.mjs s10.json s10.oracle.json <dir of the scanner
   before> <dir of the scanner after> [--rows]`, each dir holding a `position.ts`. It counts extra and
   lost names over the documents go-yaml accepts and lists a refused document on its own.
+- `sets/gen-s11-indent-offsets.ts` — set S11, the line after a plain `!bwref` value with the column of
+  the node and the column of that line varied together: six shapes (a key, a key on the line above, a
+  dash, a compact `- k:`, a root scalar, a `---` line), six leads (0 to 3 spaces, U+00A0, a byte order
+  mark), the tag alone or after an anchor, the next line at the node column -1 to +2 made of spaces,
+  of spaces and U+00A0 or of spaces and a tab, with and without a blank line, and three texts
+  (3,888 documents, 1,696 of them parsed by go-yaml). It is not in `sets/MANIFEST` and `run/gen-sets`
+  does not write it: `node sets/gen-s11-indent-offsets.ts s11.json` makes it. `judge-s10.mjs` reads it
+  in the same way, since the document names have the same five parts.
 - `cmp-reports.mjs` — compares two reports of `cmp.mjs` for one set: one made with the scanner
   before a change, one after it. It prints both counts and the ids that changed (lost and extra
   names fixed or new, new (id, name) pairs, and the documents go-yaml refuses where the scanner
