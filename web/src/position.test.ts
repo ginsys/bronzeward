@@ -1347,5 +1347,47 @@ describe("a plain !bwref value that goes on to the next line", () => {
       references(`${"!".repeat(25)} text:\n!bwref x/foo\n- y\n`);
       expect(performance.now() - start).toBeLessThan(1000);
     });
+
+    // The scan back from a tag that starts its line looks for the nearest line above that is less indented.
+    // It must not read every line above when none is, or when the lines between are all as indented as the
+    // tag: that cost grows with the square of the size. The checks below take 3 to 6 s on the earlier code
+    // and under 50 ms now; the bound leaves a wide margin and the check still ends on its own.
+    const bounded = (text: string) => {
+      const start = performance.now();
+      references(text);
+      expect(performance.now() - start).toBeLessThan(1000);
+    };
+
+    // A tag at column 0 that is no root scalar: no line is less indented than column 0.
+    test("3,000 tags at column 0 under a key are scanned in near linear time", () => {
+      bounded(Array.from({ length: 3000 }, (_, i) => `k:\n!bwref x/foo${i}\nbar\n`).join(""));
+    });
+
+    // Tags on lines of their own under one key, each below a sibling key at the same indent: the line
+    // that holds the key is far above every tag but the first.
+    test("2,000 tags among sibling keys under one key are scanned in near linear time", () => {
+      bounded(`k:\n${Array.from({ length: 2000 }, (_, i) => `  j${i}: v\n  !bwref x/foo${i}\n`).join("")}`);
+    });
+
+    // A continuation line with a long run of blanks between two words: trimming it must not try every
+    // start of the run. The anchored path (`&e` before the tag) trims the same way.
+    test.each([
+      ["a plain tag", "k: !bwref a\n"],
+      ["a tag after an anchor", "k: &e !bwref a\n"],
+    ])("a continuation line with 60,000 blanks inside it is trimmed in linear time (%s)", (_, head) => {
+      bounded(`${head}  bar${" ".repeat(60000)}baz\n`);
+    });
+
+    // Every other loop and pattern that the scan of a plain tag value runs, on a long input of its kind.
+    // None was slow on the earlier code; each check keeps it so.
+    test.each([
+      ["5,000 properties before the tag", `k:\n  ${"!a ".repeat(5000)}!bwref x/foo\n  bar\n`],
+      ["a line of 5,000 properties above the tag", `k:\n ${"!a ".repeat(5000)}\n  !bwref x/foo\n  bar\n`],
+      ["a key of 100,000 characters above the tag", `${"a".repeat(100000)}:\n  !bwref x/foo\n  bar\n`],
+      ["3,000 lines of an anchor and a blank line above a root scalar", `${"&e\n\n".repeat(3000)}!bwref x/foo\n- y\n`],
+      ["a marker line with 40,000 blanks before a dash", `--- ${" ".repeat(40000)}- !bwref x/foo\n  bar\n`],
+    ])("a long input stays linear: %s", (_, text) => {
+      bounded(text);
+    });
   });
 });
