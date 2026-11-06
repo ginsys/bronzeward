@@ -67,6 +67,18 @@ func TestTaggedKey(t *testing.T) {
 		{"explicit key with an anchor", "? &e !bwref x/foo\n: v\n", []string{}, true},
 		{"flow explicit key", "{? !bwref x/foo : v}\n", []string{}, true},
 		{"alias key of a tagged key", "? &k !bwref x/foo\n: v\n*k : w\n", []string{}, true},
+		// The implicit key rows of ginsys/bronzeward#629 that go-yaml accepts. The numbers are those of
+		// the oracle batch in the refinement comment of that issue. Rows 50 and 51 are refused by
+		// go-yaml, so the oracle has no reading for them.
+		{"row 46: sequence entry key", "- !bwref x/foo:\n", []string{}, true},
+		{"row 47: sequence entry key, continuation line", "- !bwref x/foo:\n    bar\n", []string{}, true},
+		{"row 48: colon that ends a flow sequence, a bad name", "[!bwref x/foo:]\n", []string{}, true},
+		{"row 49: key in a flow sequence value", "k: [!bwref x/foo:\nbar]\n", []string{}, true},
+		{"row 55: flow mapping key", "{!bwref x/foo: v}\n", []string{}, true},
+		{"row 56: flow sequence key", "[!bwref x/foo: v]\n", []string{}, true},
+		{"row 57: anchor after the tag", "- !bwref &e x/foo:\n    bar\n", []string{}, true},
+		{"row 58: anchor before the tag", "- &e !bwref x/foo:\n    bar\n", []string{}, true},
+		{"nested key", "k:\n  !bwref x/foo: v\n", []string{}, true},
 		{"value control", "a: !bwref x/foo\n", []string{"x/foo"}, false},
 		{"sequence entry control", "- !bwref x/foo\n", []string{"x/foo"}, false},
 		{"value of an explicit key control", "? a\n: !bwref x/foo\n", []string{"x/foo"}, false},

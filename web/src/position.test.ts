@@ -1574,3 +1574,37 @@ describe("a tag on an explicit key or an alias key", () => {
     expect(references("a: &k !bwref x/foo\n*k : v\n")).toEqual(["x/foo"]);
   });
 });
+
+// ginsys/bronzeward#629: the same server rule (tag-placement, internal/ingest/declare.go) covers a tag
+// on an implicit key, that is, a `!bwref` value followed by a colon and a blank or a line end. go-yaml
+// reads such a tagged key, but the server refuses the document, so the editor lists nothing. The row
+// numbers are those of the oracle batch in the refinement comment of #629. The control is the
+// sequence entry `- !bwref x/foo`, which the block above already pins as listed. Each row fails when
+// the line that skips a tag with a colon after its value is removed, except rows 50 and 51. go-yaml
+// refuses those two documents, and they pass without that line too, so another rule holds them.
+describe("a tag on an implicit key", () => {
+  test.each([
+    ["46: a sequence entry key", "- !bwref x/foo:\n"],
+    ["47: the same, then a continuation line", "- !bwref x/foo:\n    bar\n"],
+    ["57: an anchor after the tag", "- !bwref &e x/foo:\n    bar\n"],
+    ["58: an anchor before the tag", "- &e !bwref x/foo:\n    bar\n"],
+    ["49: a key in a flow sequence value", "k: [!bwref x/foo:\nbar]\n"],
+    ["55: a key in a flow mapping", "{!bwref x/foo: v}\n"],
+    ["56: a key in a flow sequence", "[!bwref x/foo: v]\n"],
+    ["50: after a value colon (go-yaml refuses)", "k: !bwref x/foo:\n"],
+    ["51: after a value colon, then a value (go-yaml refuses)", "k: !bwref x/foo: v\n"],
+    ["the nested key", "k:\n  !bwref x/foo: v\n"],
+  ])("lists nothing for row %s", (_, text) => {
+    expect(references(text)).toEqual([]);
+  });
+
+  // Row 48 is a known gap (ginsys/bronzeward#685), found by the first run of these rows. go-yaml reads the scalar `x/foo:`
+  // (a colon before a flow indicator stays in the word), which is no name, and the server refuses
+  // the document as a bad name. The word pattern of a tag with no anchor stops before that colon,
+  // so the scanner lists `x/foo`, as the scanner on main does. The word pattern of a tag after an
+  // anchor keeps the colon, and `k: [!bwref &e x/foo:]` lists nothing.
+  test("row 48: a colon that ends a flow sequence is a known gap, the name is listed", () => {
+    expect(references("[!bwref x/foo:]\n")).toEqual(["x/foo"]);
+    expect(references("k: [!bwref &e x/foo:]\n")).toEqual([]);
+  });
+});
