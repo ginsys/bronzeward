@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -870,9 +871,9 @@ func TestOperationWatchEventLinesUnwritableJSON(t *testing.T) {
 // first Ctrl-C on the third and refuses it and every line after: the output fails while the watch is
 // ending by Ctrl-C.
 type interruptThenFail struct {
-	n     int
-	taken chan struct{} // closed by onInterrupt when the watch has taken the first Ctrl-C
-	hold  time.Duration // how long the third write stays pending after the watch took the Ctrl-C
+	n       int
+	taken   chan struct{} // closed by onInterrupt when the watch has taken the first Ctrl-C
+	release chan struct{} // when set, the third write stays pending after the Ctrl-C until this is closed
 }
 
 func (w *interruptThenFail) Write(p []byte) (int, error) {
@@ -888,7 +889,12 @@ func (w *interruptThenFail) Write(p []byte) (int, error) {
 		case <-w.taken:
 		case <-time.After(5 * time.Second):
 		}
-		time.Sleep(w.hold)
+		if w.release != nil {
+			select {
+			case <-w.release:
+			case <-time.After(5 * time.Second):
+			}
+		}
 	}
 	return 0, errors.New("write refused")
 }
@@ -919,8 +925,9 @@ func TestOperationWatchInterruptOutputFails(t *testing.T) {
 // of the first Ctrl-C ends, and it fails after the stop lines started to wait for that sink. The output
 // had not failed when the stop lines picked their sink, so they would go to the failed standard output
 // and be lost. They go to standard error instead, last, and the exit is 130 (ginsys/bronzeward#648).
-// The write stays pending for 600 ms, six times the grace: the stop lines wait on the sink by then. A
-// slow machine can only make the test pass without the fix, never fail with it.
+// The write stays pending until the test sees the stop lines in the stack of the process, so no elapsed
+// time decides the order. A short pause after that lets them reach the lock of the sink. A machine that
+// is too slow for the pause can only make the test pass without the fix, never fail with it.
 func TestOperationWatchInterruptPendingWriteFails(t *testing.T) {
 	f := &opFake{stream: []string{sse(1, "commitment", commitment)},
 		body: fmt.Sprintf(opJSON, "apply-config", "running", "null", "null", "[]")}
@@ -931,10 +938,20 @@ func TestOperationWatchInterruptPendingWriteFails(t *testing.T) {
 	interruptGrace = 100 * time.Millisecond
 	defer func() { interruptGrace = grace }()
 	var e bytes.Buffer
-	out := &interruptThenFail{taken: make(chan struct{}), hold: 600 * time.Millisecond}
+	out := &interruptThenFail{taken: make(chan struct{}), release: make(chan struct{})}
 	var taken sync.Once
 	onInterrupt = func() { taken.Do(func() { close(out.taken) }) }
 	defer func() { onInterrupt = nil }()
+	go func() {
+		defer close(out.release)
+		buf := make([]byte, 1<<20)
+		for deadline := time.Now().Add(4 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+			if bytes.Contains(buf[:runtime.Stack(buf, true)], []byte("(*watchOut).stop")) {
+				time.Sleep(50 * time.Millisecond)
+				return
+			}
+		}
+	}()
 	code := run([]string{"operation", "watch", "op_BWSYNTH", "--timeout", "30s"}, out, &e)
 	stop := "Stopped watching at your request. Operation op_BWSYNTH goes on; the state it has now was not read.\n"
 	follow := "Follow it again with: bronzewardctl operation watch 'op_BWSYNTH'\n"
