@@ -732,7 +732,10 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: numb
     const plainBlanks = st.open === "plain" && ind > st.holder;
     const inRun = st.chain && st.clean && st.gap + reach <= 511;
     if (/^ *\t/.test(line) && !plainBlanks && !afterDirective && !inRun) docs.refused = true;
-    if (comment || (st.open !== "plain" && DASH_COMMENT.test(line))) {
+    // The dashes of a line that continues an open plain scalar are text. A marker, or an entry at or
+    // below the holder's indent, ends the scalar, so a comment after it starts a run.
+    const continues = plainBlanks && !marker;
+    if (comment || (!continues && DASH_COMMENT.test(line))) {
       st.chain = true;
       st.gap = brk;
       st.clean = !odd;

@@ -780,7 +780,9 @@ describe("a tag is resolved the way go-yaml does", () => {
     ["two tab-only lines after a directive", "%YAML 1.1\n\t\n\t\n---\na: !bwref x/foo\n"],
     ["a tab-led comment after a marker, past the look-ahead of 512 bytes", `--- # c\n${" ".repeat(510)}\t# d\na: !bwref x/foo\n`],
     ["a tab-led comment past the look-ahead of 512 bytes", `a: 1\n# c\n${" ".repeat(510)}\t# d\nb: !bwref x/foo\n`],
-    ["a tab-only line and a comment, past the look-ahead of 512 bytes", `a: 1\n# c\n${" ".repeat(255)}\t\n${" ".repeat(255)}\t# d\nb: !bwref x/foo\n`],
+    ["a tab-led comment after dashes inside a plain continuation", "a: x\n  - # c\n\t# d\n  b: !bwref x/foo\n"],
+    ["a tab-led comment after dashes inside a nested plain continuation", "a:\n  b: x\n    - # c\n\t# d\n  c: !bwref x/foo\n"],
+    ["a tab-only line and a comment, past the look-ahead of 512 bytes",`a: 1\n# c\n${" ".repeat(255)}\t\n${" ".repeat(255)}\t# d\nb: !bwref x/foo\n`],
   ])("a tab-led block line: %s lists nothing", (_, text) => {
     expect(references(text)).toEqual([]);
   });
@@ -849,7 +851,13 @@ describe("a tag is resolved the way go-yaml does", () => {
     ["a tab-led comment after a comment on a marker", "--- # c\n\t# d\na: !bwref x/foo\n"],
     ["a tab-led comment after a comment on a block entry", "- # c\n\t# d\n  a: !bwref x/foo\n"],
     ["a tab-led comment after a comment on two block entries", "- - # c\n\t# d\n    a: !bwref x/foo\n"],
-    ["a tab-led comment right after a directive", "%YAML 1.1\n\t# c\n---\na: !bwref x/foo\n"],
+    ["a tab-led comment after a comment on a marker that follows a plain value", "a: 1\n--- # c\n\t# d\nb: !bwref x/foo\n"],
+    ["a tab-led comment after a comment on a marker that follows a top-level plain scalar", "foo\n--- # c\n\t# d\nb: !bwref x/foo\n"],
+    ["a tab-led comment after a comment on a marker that follows a nested plain value", "a:\n  b: 1\n--- # c\n\t# d\nc: !bwref x/foo\n"],
+    ["a tab-led comment after a comment on a marker that follows a dedented plain continuation", "a: x\n  y\n--- # c\n\t# d\nb: !bwref x/foo\n"],
+    ["a tab-led comment after a comment on a block entry that follows a plain entry", "- 1\n- # c\n\t# d\n  b: !bwref x/foo\n"],
+    ["a tab-led comment after a comment on a block entry that follows a nested plain entry", "k:\n  - 1\n  - # c\n\t# d\n    b: !bwref x/foo\n"],
+    ["a tab-led comment right after a directive","%YAML 1.1\n\t# c\n---\na: !bwref x/foo\n"],
     ["a tab-only line right after a directive", "%YAML 1.1\n\t\n---\na: !bwref x/foo\n"],
     ["a tab-led comment right after a second directive", "%YAML 1.1\n%TAG !a! tag:x\n\t# c\n---\na: !bwref x/foo\n"],
     ["a tab-led comment at the end of the look-ahead of 512 bytes", `a: 1\n# c\n${" ".repeat(509)}\t# d\nb: !bwref x/foo\n`],
