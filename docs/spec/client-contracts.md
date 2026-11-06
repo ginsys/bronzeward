@@ -1448,8 +1448,14 @@ The review is served to any human `author`, not only the one who started the ing
 5. **Core dumps.** The CLI disables core dumps for its own process before it reads protected input
    (on Linux, `RLIMIT_CORE` 0 and not dumpable). A panic handler prints a fixed message and no
    stack values.
-6. **Memory.** Protected input is held no longer than the request needs. A garbage-collected
-   runtime cannot guarantee erasure; this is a stated limit, not a guarantee.
+6. **Memory.** Protected input is held no longer than the request needs. A write keeps its body
+   only while it can be repeated. When it can no longer be repeated, the page releases the body
+   and anything its owner holds for it, and offers no repeat of it, also under a later sign-in of
+   the same principal and epoch. The page releases it when the operator dismisses the write, when
+   an epoch change or another sign-in sets it aside, when the sign-in it was sent under ends
+   (sign-out, refusal or revocation, also after the page disconnected the client), and when the
+   page is hidden. A garbage-collected runtime cannot guarantee erasure; this is a stated limit,
+   not a guarantee.
 7. **Clipboard and export.** No copy, download, save, print or share action on the review, on a
    document being submitted, or on marks.
 

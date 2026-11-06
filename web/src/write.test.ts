@@ -1132,3 +1132,172 @@ describe("the attempt bound on a write (§8.4 item 8)", () => {
     expect(r.outcome).toEqual({ kind: "done", status: 201, data: { id: "c1" }, replayed: false });
   });
 });
+
+// ginsys/bronzeward#653: protected input is released when a write can no longer be repeated
+// (client contracts §11.2 item 6).
+describe("release of the body of a write that can no longer be repeated (#653)", () => {
+  const DOCUMENT = "SYNTH-document-text-653";
+  const drops = () => [0, 1, 2, 3].map(() => new TypeError("Failed to fetch"));
+  const SECOND = "https://idp.invalid SYNTH-sub-2";
+  const observeEpoch = (c: Client) => (c as unknown as { observeEpoch(r: Response): boolean }).observeEpoch(recovery(EPOCH));
+  const bound = (p: ReturnType<typeof page>) => {
+    const c = new Client({ token: () => "SYNTH-token", fetch: p.fetch });
+    observeEpoch(c);
+    p.writes.client = c;
+    return c;
+  };
+
+  // Whether `needle` is reachable from `root` through own properties, not through closures.
+  function reaches(root: unknown, needle: unknown, seen = new Set<unknown>()): boolean {
+    if (root === needle) return true;
+    if (typeof root !== "object" || root === null || seen.has(root)) return false;
+    seen.add(root);
+    return Reflect.ownKeys(root).some((k) => reaches((root as Record<PropertyKey, unknown>)[k], needle, seen));
+  }
+
+  function input() {
+    const marks = [{ line: 2, kind: "SYNTH-mark" }];
+    const released = vi.fn();
+    const w = new Write({ method: "POST", path: "/imports", body: { document: DOCUMENT, marks }, resource: "/imports", released } as ConstructorParameters<typeof Write>[0]);
+    return { w, marks, released };
+  }
+
+  async function unknownInput(p: ReturnType<typeof page>) {
+    const i = input();
+    expect((await p.writes.submit(i.w)).kind).toBe("unknown");
+    expect(p.writes.repeatable(i.w)).toBe(true);
+    return i;
+  }
+
+  // What "not reachable" means: no reference from the write, no repeat, no request, one call to its owner.
+  async function expectReleased(p: ReturnType<typeof page>, i: ReturnType<typeof input>) {
+    expect((i.w as unknown as { released: boolean }).released).toBe(true);
+    expect(i.w.spec.body).toBeUndefined();
+    expect(reaches(i.w, DOCUMENT)).toBe(false);
+    expect(reaches(i.w, i.marks)).toBe(false);
+    expect(p.writes.repeatable(i.w)).toBe(false);
+    const before = p.sent.length;
+    await p.writes.submit(i.w);
+    expect(p.sent).toHaveLength(before);
+    expect(i.released).toHaveBeenCalledTimes(1);
+  }
+
+  test("an unknown write that is still repeatable keeps its body and repeats with the full input", async () => {
+    const p = page([...drops(), created({ id: "i1" }, true)]);
+    const i = await unknownInput(p);
+    expect(reaches(i.w, DOCUMENT)).toBe(true);
+    expect(i.released).not.toHaveBeenCalled();
+    expect(await p.writes.submit(i.w)).toMatchObject({ kind: "done", replayed: true });
+    expect(JSON.parse(String(p.writesSent().at(-1)!.body))).toEqual({ document: DOCUMENT, marks: i.marks });
+  });
+
+  test("dismissing an unknown write releases its body and offers no repeat", async () => {
+    const p = page(drops());
+    const i = await unknownInput(p);
+    p.writes.dismiss(i.w);
+    await expectReleased(p, i);
+  });
+
+  test("an epoch change sets an unknown write aside and releases its body", async () => {
+    const p = page(drops());
+    const i = await unknownInput(p);
+    p.writes.setAside(EPOCH_CHANGED_ASIDE);
+    expect(i.w.outcome).toMatchObject({ kind: "set-aside" });
+    await expectReleased(p, i);
+  });
+
+  test("another sign-in sets an unknown write aside and releases its body", async () => {
+    const p = page(drops());
+    const i = await unknownInput(p);
+    p.signIn(SECOND);
+    p.writes.setAside(SIGN_IN_CHANGED);
+    await expectReleased(p, i);
+  });
+
+  test("a write set aside while in flight releases its body when it settles", async () => {
+    const p = page([...drops().slice(0, 3), () => (p.writes.setAside(EPOCH_CHANGED_ASIDE), new TypeError("Failed to fetch"))]);
+    const i = input();
+    expect(await p.writes.submit(i.w)).toMatchObject({ kind: "set-aside", why: EPOCH_CHANGED_ASIDE });
+    await expectReleased(p, i);
+  });
+
+  test("the end of the sign-in releases an unknown write, and a client bound later under the same principal and epoch does not repeat it", async () => {
+    const p = page(drops());
+    const i = await unknownInput(p);
+    p.client.endWrites();
+    bound(p);
+    await expectReleased(p, i);
+  });
+
+  test("signing out ends the writes of the client and releases an unknown write", async () => {
+    const p = page(drops());
+    const reads = new ShellReads({ token: () => "SYNTH-token", fetch: p.fetch }, () => ({}) as ShellEvents);
+    p.writes.client = reads.client;
+    const i = await unknownInput(p);
+    reads.signOut(() => {});
+    await expectReleased(p, i);
+  });
+
+  test("a client that ends its writes after the page disconnected it still releases an unknown write", async () => {
+    const p = page(drops());
+    const i = await unknownInput(p);
+    p.writes.disconnect(p.client);
+    expect(i.released).not.toHaveBeenCalled();
+    p.client.endWrites();
+    await expectReleased(p, i);
+  });
+
+  test("a write whose client ended its writes while it was in flight releases its body when it settles unknown", async () => {
+    const p = page([...drops().slice(0, 3), () => (p.client.endWrites(), new TypeError("Failed to fetch"))]);
+    const i = input();
+    expect((await p.writes.submit(i.w)).kind).toBe("unknown");
+    await expectReleased(p, i);
+  });
+
+  test("an earlier client that ends its writes leaves an unknown write sent through the current client repeatable", async () => {
+    const p = page(drops());
+    const earlier = bound(p);
+    const current = bound(p);
+    const i = await unknownInput(p);
+    earlier.endWrites();
+    expect(current.writesEnded).toBe(false);
+    expect(i.released).not.toHaveBeenCalled();
+    expect(p.writes.repeatable(i.w)).toBe(true);
+    expect(reaches(i.w, DOCUMENT)).toBe(true);
+  });
+
+  test("a disconnect alone releases nothing and a rebind keeps the repeat", async () => {
+    const p = page(drops());
+    const i = await unknownInput(p);
+    p.writes.disconnect(p.client);
+    p.writes.client = p.client;
+    expect(i.released).not.toHaveBeenCalled();
+    expect(p.writes.repeatable(i.w)).toBe(true);
+  });
+
+  test("hiding the page releases the writes it clears", async () => {
+    const p = page(drops());
+    const i = await unknownInput(p);
+    p.writes.forget();
+    await expectReleased(p, i);
+  });
+
+  test("a settled outcome other than unknown releases the body", async () => {
+    for (const answer of [created({ id: "i1" }), problem(422, "invalid-input")]) {
+      const p = page([answer]);
+      const i = input();
+      expect((await p.writes.submit(i.w)).kind).not.toBe("unknown");
+      await expectReleased(p, i);
+    }
+  });
+
+  test("the owner's released callback runs once, however many triggers fire", async () => {
+    const p = page(drops());
+    const i = await unknownInput(p);
+    p.writes.setAside(EPOCH_CHANGED_ASIDE);
+    p.writes.dismiss(i.w);
+    p.client.endWrites();
+    p.writes.forget();
+    expect(i.released).toHaveBeenCalledTimes(1);
+  });
+});

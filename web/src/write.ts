@@ -25,6 +25,9 @@ export interface WriteSpec {
   // Called with each outcome the write settles on, a [Repeat exactly]'s included, whether or not
   // the view that sent it is still shown: a draft's ETag is kept from it (§8.3, #339).
   settled?: (o: Outcome, w: Write) => void;
+  // Called once, when the write can no longer be repeated and the layer has dropped its body
+  // (§11.2 item 6, #653): an owner that kept its own copy of the protected input drops it here.
+  released?: (w: Write) => void;
 }
 
 export type Outcome =
@@ -88,6 +91,10 @@ export class Write {
   epoch: string | undefined;
   // Some attempt may have committed.
   ambiguous = false;
+  // The client of the first send: when it ends its writes, this write can no longer be repeated.
+  sentThrough: Client | undefined;
+  // The body is gone and the write is never repeated (Writes.release, §11.2 item 6).
+  released = false;
   // While the automatic repeats run after an attempt that may have committed: why the outcome is
   // unknown, with the answer's problem, so the notice shows at once (B11), before the run settles.
   doubt: Extract<Outcome, { kind: "unknown" }> | undefined;
@@ -117,7 +124,6 @@ const problemOf = (d: unknown): Problem | null =>
 // sign-in's issuer and subject.
 export class Writes {
   private bound: Client | undefined;
-  private unbind: (() => void) | undefined;
   // The page is being left by a notice's own [Show current state]: the next unload guard does not
   // ask, and clears it.
   unloading = false;
@@ -133,6 +139,8 @@ export class Writes {
   lease: number | undefined;
   private readonly all = new Set<Write>();
   private readonly listeners = new Set<() => void>();
+  // The clients bound so far that have not ended their writes.
+  private readonly watched = new Set<Client>();
   private version = 0;
 
   constructor(
@@ -148,9 +156,27 @@ export class Writes {
   }
   set client(c: Client | undefined) {
     if (c === this.bound) return;
-    this.unbind?.();
     this.bound = c;
-    this.unbind = c?.onWritesEnded?.(() => this.changed());
+    if (c !== undefined) this.watch(c);
+  }
+  // A client is watched until it ends its writes, also after the page left it: its end releases the
+  // unknown writes sent through it and no others (§11.2 item 6, #653), and renders the notices again.
+  private watch(c: Client): void {
+    if (this.watched.has(c)) return;
+    this.watched.add(c);
+    c.onWritesEnded?.(() => {
+      this.watched.delete(c);
+      for (const w of this.all) if (w.sentThrough === c && w.outcome?.kind === "unknown") this.release(w);
+      this.changed();
+    });
+  }
+  // The one place a write stops holding its body: it can no longer be repeated, so its owner is told
+  // once and nothing in the layer refers to the protected input any more.
+  private release(w: Write): void {
+    if (w.released) return;
+    w.released = true;
+    w.spec.body = undefined;
+    w.spec.released?.(w);
   }
 
   // useSyncExternalStore's pair.
@@ -169,6 +195,7 @@ export class Writes {
   // The page was hidden (§10.3 item 3): its writes go with it. A page restored from the
   // back-forward cache reloads, and that reload asks nothing for a write no notice shows any more.
   forget(): void {
+    for (const w of this.all) this.release(w);
     this.all.clear();
     this.changed();
   }
@@ -231,6 +258,8 @@ export class Writes {
       w.running = undefined;
       w.ingesting = undefined;
       w.spec.settled?.(o, w);
+      // Only an unknown outcome is repeated, and not once its client ended its writes meanwhile.
+      if (o.kind !== "unknown" || w.sentThrough?.writesEnded === true) this.release(w);
       // The one removal before a dismissal: a write no notice showed, which its form reports.
       if (!isOpen(w)) {
         if (shown) w.kept = true;
@@ -249,7 +278,7 @@ export class Writes {
   repeatable(w: Write): boolean {
     // A page with no client (after a disconnect) has nothing to send with: the entry's exception to the
     // epoch check does not offer a repeat that would end as not done and drop the unknown outcome.
-    return w.outcome?.kind === "unknown" && this.principal() === w.principal && this.client !== undefined && this.client.writesEnded !== true && (w.spec.entry === true || this.client.currentEpoch === w.epoch);
+    return !w.released && w.outcome?.kind === "unknown" && this.principal() === w.principal && this.client !== undefined && this.client.writesEnded !== true && (w.spec.entry === true || this.client.currentEpoch === w.epoch);
   }
 
   // §8.5 item 2 and journeys §8: a new epoch or another sign-in sets every open write aside. One in
@@ -260,7 +289,10 @@ export class Writes {
       // sign-in still sets it aside.
       if (w.spec.entry === true && why === EPOCH_CHANGED_ASIDE) continue;
       if (w.outcome === undefined) w.aside ??= why;
-      else if (w.outcome.kind === "unknown") w.outcome = { kind: "set-aside", why, ambiguous: true, problem: w.outcome.problem };
+      else if (w.outcome.kind === "unknown") {
+        w.outcome = { kind: "set-aside", why, ambiguous: true, problem: w.outcome.problem };
+        this.release(w);
+      }
     }
     this.changed();
   }
@@ -268,6 +300,7 @@ export class Writes {
   dismiss(w: Write): void {
     if (w.outcome === undefined) return;
     this.all.delete(w);
+    this.release(w);
     this.changed();
   }
 
@@ -284,6 +317,7 @@ export class Writes {
     const again = entry ? w.principal !== "" : w.epoch !== undefined;
     if (!again) {
       w.principal = who;
+      w.sentThrough = client;
       if (!entry) {
         // The last epoch seen before the first send, else one GET /recovery (§8.4 item 3).
         w.epoch = client.currentEpoch ?? (await this.confirm(client, end));
