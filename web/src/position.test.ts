@@ -1097,6 +1097,13 @@ describe("a tag is resolved the way go-yaml does", () => {
     ["a collection that is no key", "a: [? b]\nc: !bwref x/foo\n"],
     ["a collection that is a value", "a:\n  - [? b]\n  - !bwref x/foo\n"],
     ["an explicit key", "a:\n  ? [? b]\n  : !bwref x/foo\n"],
+    ["after the colon of an explicit key", "? a\n: [? b]: !bwref x/foo\n"],
+    ["after the colon of an explicit key on the next line", "? a\n:\n  [? b]: !bwref x/foo\n"],
+    ["after an anchor on the value of an explicit key", "? a\n: &x\n  [? b]: !bwref x/foo\n"],
+    ["after a tag on the value of an explicit key", "? a\n: !t\n  [? b]: !bwref x/foo\n"],
+    ["after an anchor and a tag on the value of an explicit key", "? a\n: &x !t\n  [? b]: !bwref x/foo\n"],
+    ["after an anchor, a comment and a break on the value of an explicit key", "? a\n: &x # c\n  {? b}: !bwref x/foo\n"],
+    ["in a sequence entry, after an anchor on the value of an explicit key", "- ? a\n  : &x\n    [? b]: !bwref x/foo\n"],
     ["a key that is empty", "a:\n  []: !bwref x/foo\n"],
     ["a mapping key that is empty", "a:\n  {}: !bwref x/foo\n"],
   ])("a flow key with another item still lists the name: %s", (_, text) => {
