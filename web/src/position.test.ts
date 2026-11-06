@@ -1224,4 +1224,64 @@ describe("a plain !bwref value that goes on to the next line", () => {
   test("a directive line before a comma line ends the value, which lists", () => {
     expect(references("k: !bwref x/foo\n%YAML 1.1\n  ,bar\n")).toEqual(["x/foo"]);
   });
+
+  // The indentation is counted in YAML blanks (U+0020 and tab) on both sides of the comparison: a line that
+  // starts with U+00A0 or a byte order mark has text at column 0, so a key that starts with it stands at
+  // column 0, and a next line of a space and U+00A0 is more indented than that key and goes on. The rows
+  // are from the sweeps S9 and S11 (experiments/scanner-cross-line), judged against go-yaml v3.0.5.
+  test.each([
+    ["a key that starts with a no-break space", "\u00a0k: !bwref x/foo\n \u00a0bar\n"],
+    ["a key that starts with a no-break space, after a blank line", "\u00a0k: !bwref x/foo\n\n \u00a0bar\n"],
+    ["a key that starts with a no-break space and an anchor", "\u00a0k: &e !bwref x/foo\n \u00a0bar\n"],
+    ["a key that starts with a byte order mark", "\ufeffk: !bwref x/foo\n \u00a0bar\n"],
+    ["a nested key that starts with a no-break space", "k:\n\u00a0j: !bwref x/foo\n \u00a0bar\n"],
+  ])("a more indented line under %s lists nothing", (_, text) => {
+    expect(references(text)).toEqual([]);
+  });
+
+  // go-yaml reads a tag that starts its node on a line of its own as the value of the key above it, also
+  // after an anchor: `&e !bwref x/foo` under `k:` goes on at the column of the tag, as `!bwref x/foo` does.
+  // The holder is the key, not the tag's line. A second tag before !bwref is no node property: go-yaml refuses
+  // the document (`k:\n  !x !bwref x/foo`), so no row lists it. The scalar goes on in each form of the line.
+  test.each([
+    ["spaces", "k:\n  &e !bwref x/foo\n  bar\n"],
+    ["a space and a no-break space", "k:\n  &e !bwref x/foo\n  \u00a0bar\n"],
+    ["a space and a tab", "k:\n  &e !bwref x/foo\n  \tbar\n"],
+    ["a blank line and spaces", "k:\n  &e !bwref x/foo\n\n  bar\n"],
+    ["spaces, under a compact key", "- k:\n    &e !bwref x/foo\n    bar\n"],
+    ["spaces, under a dash", "-\n  &e !bwref x/foo\n  bar\n"],
+    ["a no-break space, under a key at column 1", " k:\n   &e !bwref x/foo\n   \u00a0bar\n"],
+    ["a no-break space, under a key that starts with a no-break space", "\u00a0k:\n  &e !bwref x/foo\n  \u00a0bar\n"],
+  ])("an anchor before the tag on its own line, then %s, lists nothing", (_, text) => {
+    expect(references(text)).toEqual([]);
+  });
+
+  // go-yaml measures a root scalar against column -1 also when the tag is indented: a root has no key
+  // above, so the first line of the stream may start at any column.
+  test.each([
+    ["an anchor", "  &e !bwref x/foo\n  \u00a0bar\n"],
+    ["no anchor", "  !bwref x/foo\n  \u00a0bar\n"],
+    ["no anchor, a word at column 0", " !bwref x/foo\nbar\n"],
+  ])("an indented root scalar with %s goes on and lists nothing", (_, text) => {
+    expect(references(text)).toEqual([]);
+  });
+
+  // go-yaml drops a byte order mark at the start of the stream: it is no text and no column there. A root
+  // scalar after it is a root scalar, and a compact key after it has the dash at column 0.
+  test("a byte order mark at the start of the stream is no text before a root scalar", () => {
+    expect(references("\ufeff!bwref x/foo\nbar\n")).toEqual([]);
+  });
+  test("a byte order mark at the start of the stream is no column before a compact key", () => {
+    expect(references("\ufeff- k: !bwref x/foo\n  y: v\n")).toEqual(["x/foo"]);
+  });
+
+  // go-yaml refuses these documents (a line of text at column 0 under a key at column 0, which starts with a
+  // no-break space): the line ends the value as a line of ASCII text does, and the name lists. The server
+  // lists no reference for a refused document, so this only pins the reading of the scanner.
+  test.each([
+    ["a word", "k: !bwref x/foo\n\u00a0bar\n"],
+    ["a word after an anchor", "k: &e !bwref x/foo\n\u00a0bar\n"],
+  ])("a line that starts with a no-break space at the key column (%s) ends the value of a refused document", (_, text) => {
+    expect(references(text)).toEqual(["x/foo"]);
+  });
 });
