@@ -77,6 +77,11 @@ The same files back a second note, on [issue 603](https://github.com/ginsys/bron
   (3,888 documents, 1,696 of them parsed by go-yaml). It is not in `sets/MANIFEST` and `run/gen-sets`
   does not write it: `node sets/gen-s11-indent-offsets.ts s11.json` makes it. `judge-s10.mjs` reads it
   in the same way, since the document names have the same five parts.
+- `check-refused-split.mjs` — reads the `refusedListed-new` line of each `cmp-reports.mjs` report of a
+  sweep and checks every id against the oracle output of the set: each must be a document go-yaml
+  refuses. `node check-refused-split.mjs <sweep dir> [set ...]`, where the directory holds
+  `reports-<set>.log` and `<set>.oracle.json`. It exits 1 on an id in an accepted document or on a
+  missing file. The research note of issue 616 quotes its result.
 - `cmp-reports.mjs` — compares two reports of `cmp.mjs` for one set: one made with the scanner
   before a change, one after it. It prints both counts and the ids that changed (lost and extra
   names fixed or new, new (id, name) pairs, and the documents go-yaml refuses where the scanner

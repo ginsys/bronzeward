@@ -113,18 +113,24 @@ Two more shapes came out of the set S11 and are in the change.
 - An indented root scalar (`  !bwref x/foo`, then any line with text) is a root scalar, measured against column -1. `isRoot()` accepts leading blanks.
 - A BOM at the start of the stream is dropped by go-yaml (no text, no column). The scanner drops a BOM at offset 0 only, in `parentLine()`, `column()` calls on the first line and in `continues()`. A BOM elsewhere stays text.
 
-A second tag before `!bwref` (`!t !bwref x/foo`) makes go-yaml refuse the document: a node takes one tag. The oracle lists no name for it, so no pair can come from this shape.
+A second tag before `!bwref` makes go-yaml refuse the document: a node takes one tag. The oracle (go-yaml v3.0.5) refuses `"k:\n  !t !bwref x/foo\n  bar\n"`, `"k: !t !bwref x/foo\n"` and, with the tags the other way round, `"k:\n  !bwref !t x/foo\n  bar\n"`, each with "did not find expected key". It lists no name for them, and the scanner lists none either (it blanks a document with a second tag on one node, ginsys/bronzeward#620). No pair can come from this shape.
 
 S11 (`experiments/scanner-cross-line/sets/gen-s11-indent-offsets.ts`) holds 3888 documents, and go-yaml parses 1696 of them. Its sha256 is `f462167f9e28366ef5cc58c36c388d4f63fc8297e251ee4c2f20677c02d50fa0`. It varies the column of the node and the column of the next line together, with spaces, U+00A0 or a tab, so that a mix of the two measures cannot hide.
 
-Known effect, class B. The change does not start any extra or lost name. It does list a name for documents that go-yaml refuses: 48 on S9, 6 on S10 and 56 on S11 (light runs). In these documents a line at a node's own column follows the value, as in the "bar at column 0" case of a refused document on main. They are not errors: a refused document lists nothing on the server. The gate of the issue (no new lost, no new extra) does not count them.
+Known effect, class B. The change does not start any extra or lost name. It does list a name for documents that go-yaml refuses: 48 on S9, 6 on S10 and 56 on S11. In every one of these documents a line that starts with U+00A0 stands at the column of the node, right after the value (`"k: !bwref x/foo\n bar\n"`). go-yaml ends the scalar at that line, because U+00A0 is text at column 0, and then refuses the document ("could not find expected ':'"). The scanner now ends the scalar there too and lists the name. Main skipped the line and listed none. Main already lists the name for the same document with an ASCII `bar` at column 0. A refused document lists nothing on the server, so these rows are not errors. The gate of the issue (no new lost, no new extra) does not count them.
 
-Counts of the light scratch runs, before the full sweep. They will be replaced by the numbers of the full sweep.
+Counts of the sweep `w616-r1b` at commit a772262a against main 3718d353. The check below shows that no refused-listed row is in a document that go-yaml accepts. Run it from the root of the repository, with the directory of a sweep as the argument. That directory holds `reports-<set>.log`, the output of `cmp-reports.mjs`, and `<set>.oracle.json`, the output of the oracle on the pinned set.
+
+```sh
+node experiments/scanner-cross-line/check-refused-split.mjs <sweep dir>
+```
+
+It reads the ids on the `refusedListed-new` line of each report and looks each one up in the oracle output. The result for the sweep `w616-r1b` is 0 documents in an accepted document, for 0 of 0 on S5, 0 of 0 on S8, 0 of 48 on S9, 0 of 6 on S10 and 0 of 56 on S11. The oracle refuses all 110 documents. The exit code is 1 if one id is in an accepted document or a file is missing.
 
 | Set | Newly lost | Extra on main | Extra at the change | Newly extra | Refused, listed, new |
 |---|---|---|---|---|---|
 | S5 | 0 | 0 | 0 | 0 | 0 |
-| S8 | 0 | 1195 | 1158 | 0 | not counted |
+| S8 | 0 | 1195 | 1158 | 0 | 0 |
 | S9 | 0 | 2248 | 270 | 0 | 48 |
 | S10 | 0 | 242 | 2 | 0 | 6 |
 | S11 | 0 | 790 | 96 | 0 | 56 |
