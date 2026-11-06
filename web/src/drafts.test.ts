@@ -134,9 +134,10 @@ describe("[Go to field] positions (B13)", () => {
     expect(references("!bwref x/one\n---\n!bwref x/two\n")).toEqual(["x/one", "x/two"]);
     expect(references("!bwref x/one\n...\n")).toEqual(["x/one"]);
     expect(references("!bwref x/one\n--- # next\n")).toEqual(["x/one"]);
-    // A more indented key or sequence entry is no continuation.
-    expect(references("a: !bwref x/one\n  b: c\n")).toEqual(["x/one"]);
-    expect(references("- !bwref x/one\n  - c\n")).toEqual(["x/one"]);
+    // A more indented key or sequence entry is text of the scalar, as go-yaml reads it: the first is a
+    // refused document, the second the scalar `x/one - c` (ginsys/bronzeward#616).
+    expect(references("a: !bwref x/one\n  b: c\n")).toEqual([]);
+    expect(references("- !bwref x/one\n  - c\n")).toEqual([]);
     for (const bad of ["x/foo-", "x//foo", "-x", "x/", "X/foo"]) expect(references(`a: !bwref ${bad}\n`)).toEqual([]);
     // A flow list closed on the next line still ends its name at the bracket.
     expect(references("a: [!bwref x/one,\n   !bwref x/two\n   ]\n")).toEqual(["x/one", "x/two"]);
