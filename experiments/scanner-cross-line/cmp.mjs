@@ -15,8 +15,8 @@
 // streams the server does not refuse for its !bwref text. badNameDocs counts the valid streams
 // where go-yaml also reads a tagged value that is no name (the raw references no scanner lists;
 // the server refuses these streams as a bad name). extraUnfit =
-// the extra streams (with nothing lost) that the server refuses anyway for a bad name or for
-// reserved text (the oracle's "unfit"), so the extra reference shows in a document that never
+// the extra streams (with nothing lost) that the server refuses anyway for a bad name, for
+// reserved text or for a tag on a key (the oracle's "unfit"), so the extra reference shows in a document that never
 // gets in. newLost and newExtra count the valid streams where the candidate loses or lists a
 // reference that go-yaml does not and the scanner on main gets right (a regression against main).
 // refusedListed =

@@ -25,8 +25,11 @@ The same files back a second note, on [issue 603](https://github.com/ginsys/bron
 
 - `main.go`, `main_test.go` — the oracle. It reads a set and writes, for each document, the names
   go-yaml v3.0.5 reads as `!bwref` references. It applies the grammar of the server's name check
-  and marks a document the server refuses for its `!bwref` text. `main_test.go` checks it against
-  the curated cases.
+  and marks a document the server refuses for its `!bwref` text. A `!bwref` scalar in key position
+  (explicit or implicit), and an alias key whose anchor is such a key, lists no name and marks the
+  document: the server refuses it (`tag-placement` in `internal/ingest/declare.go`) and the editor
+  lists nothing there (ginsys/bronzeward#629 and #637). `main_test.go` checks it against the
+  curated cases and the tagged-key rule.
 - `candidates/` — the scanners under test. `c0-main.mjs` is the scanner on main. `c1-state.ts`
   is C1: the same file with a stateful masker in place of the line-by-line comment check. The
   other files are the variants that the note compares with C1. `c0q-quote-carry.ts` is not a
@@ -139,6 +142,10 @@ reference (`lost = 0`). It must also add no loss and no extra name to a document
 main gets right (`new lost = 0`, `new extra = 0`). Extra names are otherwise allowed only where the
 server refuses the document anyway. The table counts:
 
+- `unfit` — the oracle's mark for a document the server refuses for its `!bwref` text: a tagged
+  value that is no name, a scalar whose text holds the tag, or a tag on a mapping key (explicit or
+  implicit, or an alias key of such a key). The oracle lists no name for a tagged key, so a
+  scanner that lists none there is equal to it.
 - `valid` — documents go-yaml accepts. A document go-yaml refuses reads no reference on the server.
 - `lost` — valid documents where the candidate lacks a name go-yaml lists. `lost, server-fit` is
   the same count on documents the server does not refuse for their `!bwref` text.
@@ -170,4 +177,9 @@ experiments/scanner-cross-line/run/collect-evidence <work dir>
   case differently.
 - The sets reach only the shapes their generators write. S6 is the check against a shape nobody
   thought of, and it is random, not exhaustive.
+- Known gap, ginsys/bronzeward#637: the alias key of a tagged value (`a: &k !bwref x/foo`, then
+  `*k : v`). The server refuses the document at the alias use (`tag-placement`, the alias branch
+  in `internal/ingest/declare.go`). Neither the scanner nor the oracle models it: both list the
+  value's name where it stands. A scanner would need a scan ahead for the alias key. A unit row in
+  `web/src/position.test.ts` pins the current result.
 - Timing is one machine and one run. Read it as an order of magnitude.

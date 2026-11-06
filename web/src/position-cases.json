@@ -555,6 +555,84 @@
    ]
   },
   {
+   "name": "tagged-explicit-key",
+   "source": "ginsys/bronzeward#637",
+   "doc": "? !bwref x/foo\n: v\n",
+   "want": []
+  },
+  {
+   "name": "tagged-explicit-key-nested",
+   "source": "ginsys/bronzeward#637",
+   "doc": "a:\n  ? !bwref x/foo\n  : v\n",
+   "want": []
+  },
+  {
+   "name": "tagged-explicit-key-anchor",
+   "source": "ginsys/bronzeward#637",
+   "doc": "? &e !bwref x/foo\n: v\n",
+   "want": []
+  },
+  {
+   "name": "tagged-explicit-key-next-line",
+   "source": "ginsys/bronzeward#637",
+   "doc": "?\n  !bwref x/foo\n: v\n",
+   "want": []
+  },
+  {
+   "name": "tagged-explicit-key-in-sequence",
+   "source": "ginsys/bronzeward#637",
+   "doc": "- ? !bwref x/foo\n  : v\n",
+   "want": []
+  },
+  {
+   "name": "tagged-explicit-key-flow",
+   "source": "ginsys/bronzeward#637",
+   "doc": "{? !bwref x/foo : v}\n",
+   "want": []
+  },
+  {
+   "name": "tagged-explicit-key-flow-sequence",
+   "source": "ginsys/bronzeward#637",
+   "doc": "[? !bwref x/foo]\n",
+   "want": []
+  },
+  {
+   "name": "tagged-implicit-key",
+   "source": "ginsys/bronzeward#637",
+   "doc": "!bwref x/foo: v\n",
+   "want": []
+  },
+  {
+   "name": "tagged-alias-key-of-tagged-key",
+   "source": "ginsys/bronzeward#637",
+   "doc": "? &k !bwref x/foo\n: v\n*k : w\n",
+   "want": []
+  },
+  {
+   "name": "tagged-alias-key-of-tagged-value",
+   "source": "ginsys/bronzeward#637",
+   "doc": "a: &k !bwref x/foo\n*k : v\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
+   "name": "explicit-key-value-control",
+   "source": "ginsys/bronzeward#637",
+   "doc": "? a\n: !bwref x/foo\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
+   "name": "sequence-entry-control",
+   "source": "ginsys/bronzeward#637",
+   "doc": "- !bwref x/foo\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
    "name": "594-pipe",
    "source": "experiments/scanner-cross-line/sets/cases.json (#594)",
    "doc": "a: x |\n  \"y # !bwref ghost\nb: !bwref x/foo\n",

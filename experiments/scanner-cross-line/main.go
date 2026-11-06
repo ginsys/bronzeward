@@ -32,9 +32,9 @@ type Result struct {
 	Err  string   `json:"err"`
 	Tags []string `json:"tags"`
 	// Unfit is true when the server would refuse the stream for what it reads about !bwref
-	// (internal/ingest/declare.go): a tagged value that is no name (bad name), or a scalar whose
-	// text holds the tag (reserved text). The web scanner can show a reference there that the
-	// server never accepts.
+	// (internal/ingest/declare.go): a tagged value that is no name (bad name), a scalar whose
+	// text holds the tag (reserved text), or a tag on a mapping key (tag-placement). The web
+	// scanner can show a reference there that the server never accepts.
 	Unfit bool `json:"unfit"`
 	// Bad holds the tagged values that are no name. With Tags it is every value go-yaml reads
 	// under the tag (the raw references); a scanner that lists names only never lists these.
@@ -77,11 +77,31 @@ var nameSyntax = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(/[a-z0-9]([a
 
 // walk visits every node once. An alias is not followed: the anchored node was visited where it
 // stands.
+//
+// A scalar that carries the tag in key position, explicit or implicit, lists no name and marks the
+// document unfit. The server refuses it (tag-placement, internal/ingest/declare.go: the test
+// `key || n.Kind != yaml.ScalarNode || parent == nil`), and the decision of
+// ginsys/bronzeward#629 (option A) is that the editor lists no name there. An alias key whose anchor
+// is such a key is refused too (the alias branch of the same function). The oracle reads it the
+// same way, so a scanner that lists nothing for these keys is equal to it
+// (ginsys/bronzeward#637).
 func walk(n *yaml.Node, unfit *bool, bad *[]string, f func(string)) {
+	walkNode(n, false, map[*yaml.Node]bool{}, unfit, bad, f)
+}
+
+// walkNode is walk for one node. key is true for a mapping key. taggedKeys holds the tagged key
+// scalars seen so far in the document, for the alias keys that stand for them.
+func walkNode(n *yaml.Node, key bool, taggedKeys map[*yaml.Node]bool, unfit *bool, bad *[]string, f func(string)) {
 	if n.Kind == yaml.AliasNode {
+		if key && taggedKeys[n.Alias] {
+			*unfit = true
+		}
 		return
 	}
 	switch {
+	case key && n.Kind == yaml.ScalarNode && n.Tag == refTag:
+		taggedKeys[n] = true
+		*unfit = true
 	case n.Tag == refTag && nameSyntax.MatchString(n.Value):
 		f(n.Value)
 	case n.Tag == refTag:
@@ -90,8 +110,8 @@ func walk(n *yaml.Node, unfit *bool, bad *[]string, f func(string)) {
 	case n.Kind == yaml.ScalarNode && strings.Contains(n.Value, refTag):
 		*unfit = true
 	}
-	for _, c := range n.Content {
-		walk(c, unfit, bad, f)
+	for i, c := range n.Content {
+		walkNode(c, n.Kind == yaml.MappingNode && i%2 == 0, taggedKeys, unfit, bad, f)
 	}
 }
 

@@ -117,6 +117,23 @@ const own = [
   ["ginsys/bronzeward#602", "edge-handle-tag", "%TAG !r! !\n---\na: !r!bwref x/foo\n"],
   // (H) a flow collection used as a block key keeps its first column across its members.
   ["ginsys/bronzeward#602", "edge-flow-key-holder", '[a, b]: |\n  "x\nfoo: !bwref x/foo\n'],
+  // ginsys/bronzeward#637: the server refuses a tag on a key (tag-placement), so the oracle lists no
+  // name for an explicit key, an implicit key or an alias key of a tagged key. The controls list the
+  // name. The alias key of a tagged value is a known gap: the oracle lists the value's name.
+  ...[
+    ["tagged-explicit-key", "? !bwref x/foo\n: v\n"],
+    ["tagged-explicit-key-nested", "a:\n  ? !bwref x/foo\n  : v\n"],
+    ["tagged-explicit-key-anchor", "? &e !bwref x/foo\n: v\n"],
+    ["tagged-explicit-key-next-line", "?\n  !bwref x/foo\n: v\n"],
+    ["tagged-explicit-key-in-sequence", "- ? !bwref x/foo\n  : v\n"],
+    ["tagged-explicit-key-flow", "{? !bwref x/foo : v}\n"],
+    ["tagged-explicit-key-flow-sequence", "[? !bwref x/foo]\n"],
+    ["tagged-implicit-key", "!bwref x/foo: v\n"],
+    ["tagged-alias-key-of-tagged-key", "? &k !bwref x/foo\n: v\n*k : w\n"],
+    ["tagged-alias-key-of-tagged-value", "a: &k !bwref x/foo\n*k : v\n"],
+    ["explicit-key-value-control", "? a\n: !bwref x/foo\n"],
+    ["sequence-entry-control", "- !bwref x/foo\n"],
+  ].map(([name, doc]) => ["ginsys/bronzeward#637", name, doc]),
 ];
 
 function read(name) {
