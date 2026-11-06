@@ -32,6 +32,9 @@ type publishFake struct {
 	goneMoved bool
 	// goneBack makes GET /server answer the first epoch again after that 404: the refresh sets the epoch back.
 	goneBack bool
+	// stall, when set, makes the event stream stall (see stallStream) under the epoch stallEpoch.
+	stall      chan struct{}
+	stallEpoch string
 }
 
 const (
@@ -83,7 +86,12 @@ func (f *publishFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case path == "/operations/op_BWSYNTH-pub/events" && r.Header.Get("Accept") == "text/event-stream":
 		f.mu.Lock()
 		f.streams++
+		stall, stallEpoch := f.stall, f.stallEpoch
 		f.mu.Unlock()
+		if stall != nil {
+			stallStream(w, r, stall, stallEpoch)
+			return
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprint(w, "id: ep_BWSYNTH-1:1\nevent: "+first+"\ndata: {}\n\n: keep-alive\n\nid: ep_BWSYNTH-1:2\nevent: "+state+"\ndata: {}\n\n")
 	case path == "/operations/op_BWSYNTH-pub/events" && pagesRefused:
