@@ -42,6 +42,7 @@ type opFake struct {
 	serverReqs    int           // server reads so far
 	readHang      chan struct{} // when set, an operation read waits for this before it answers
 	readStalls    int           // operation reads that began to wait
+	opEpoch       string        // when set, every operation read answers this epoch; the streams and pages keep their own
 }
 
 // stall holds the request until release closes or the client gives up. The caller holds f.mu.
@@ -62,6 +63,9 @@ func (f *opFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.reads++
 		if f.late != "" && f.reads >= 3 {
 			w.Header().Set("Bronzeward-Epoch", f.late)
+		}
+		if f.opEpoch != "" {
+			w.Header().Set("Bronzeward-Epoch", f.opEpoch)
 		}
 	}
 	switch strings.TrimPrefix(r.URL.Path, "/api/v1") {

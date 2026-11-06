@@ -109,6 +109,7 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 	var last string // the ID of the last event shown
 	var lastOp *apitypes.OperationBody
 	var lastRead OperationRead // the last read of the operation in this loop
+	voided := false            // the terminal read that was the last read is of an installation restored since
 	pages, delay := false, time.Second
 	// Until is asked before the first stream: a caller whose time ran out during the reads before the
 	// watch has already ended it, and no stream is opened for that. The operation read below is the result.
@@ -137,7 +138,9 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 		o, epoch, raw, err := c.operationRawUntil(op, w.stop)
 		if err != nil {
 			// The watch ended while the server was out of reach: the operation as the last read showed
-			// it, which is not terminal, or the error when no read in this loop gave one.
+			// it, which is not terminal, or the error when no read in this loop gave one. A terminal read
+			// that the events or a later read showed to be of a restored installation is no last read: the
+			// error then says that no read stands.
 			if errors.Is(err, ErrWatchEnded) {
 				if w.halt.err != nil { // Until failed: its error stands, as at the stop below
 					return nil, OperationRead{}, w.halt.err
@@ -145,10 +148,13 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 				if lastOp != nil {
 					return lastOp, lastRead, nil
 				}
+				if voided {
+					return nil, OperationRead{}, errors.Join(err, ErrWatchRestored)
+				}
 			}
 			return nil, OperationRead{}, err
 		}
-		lastOp, lastRead = o, OperationRead{raw, epoch}
+		lastOp, lastRead, voided = o, OperationRead{raw, epoch}, false
 		if Terminal(o.State) {
 			// A terminal state settles the watch, so the drain shows the last events, Until or not.
 			// Events of another epoch than the operation read's are of a restored installation, where
@@ -186,6 +192,11 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 					c.cleared(w, "the installation was restored or entered recovery mode")
 					last = ""
 				}
+			}
+			// A terminal read does not settle a watch that goes on: it is of the installation as it was
+			// before the epoch change, so an outage that ends the watch does not return it.
+			if Terminal(lastOp.State) {
+				lastOp, lastRead, voided = nil, OperationRead{}, true
 			}
 			// The watch goes on after the delay, so a server whose events never match its operation
 			// read's epoch is not asked again without a pause.

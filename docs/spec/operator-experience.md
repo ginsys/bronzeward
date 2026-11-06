@@ -752,7 +752,9 @@ doubling to 30 s, for as long as the watch runs, so a restart of 60 s does not e
 contracts §8.6](client-contracts.md#86-event-resumption) item 2). Each repeat prints one notice line.
 The timeout then ends the watch with exit 5 and Ctrl-C with exit 130, as at any other time, both
 within a quarter of a second of a wait, and the stop lines name the operation as the last read showed
-it.
+it. A terminal read is not that last read once the events or a later read showed another epoch, which
+means the installation was restored after the read. The watch then ends with no read that settled the
+state, and the exit is 3, as below.
 If a read of the watch gave nothing, the watch ends with no operation read. The state is unknown and
 the exit is 3: the message names `operation show` as the command that reads it. This holds for the
 server read and the first operation read after their five tries. It holds for the read that follows

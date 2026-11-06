@@ -274,7 +274,8 @@ func (e *env) operationWatch(args []string) (err error) {
 		})
 		// The watch ended (--timeout, or a Ctrl-C taken by Until) while its read of the operation waited
 		// for a server out of reach: the state is the first read's, which the stop lines name as the last read.
-		if o == nil && errors.Is(err, client.ErrWatchEnded) {
+		// Not when the watch found the installation restored since: that read is of the one before, so the state is unknown.
+		if o == nil && errors.Is(err, client.ErrWatchEnded) && !errors.Is(err, client.ErrWatchRestored) {
 			o, read, err = first, firstRead, nil
 		}
 		done <- result{c: oc, o: o, read: read, err: err}
