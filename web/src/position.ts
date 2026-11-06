@@ -213,6 +213,10 @@ function readTags(original: string): { found: { index: number; tag: string; name
     const end = starts[n]!;
     masked += `${line.slice(0, end)}${" ".repeat(line.length - end)}\n`;
   });
+  // go-yaml drops the byte order mark at the start of the stream and reads a second one, at column 0, as one
+  // blank column, so it is a blank in the text that the scans below read. A third is text. The offsets stay.
+  if (masked.startsWith("﻿﻿")) masked = `﻿ ${masked.slice(2)}`;
+  const above = aboveLines(masked);
   const found: { index: number; tag: string; name: string }[] = [];
   // A plain scalar's words: no blank, flow indicator, or colon before a blank; blanks between words.
   const word = String.raw`(?:[^ \t\r\n,[\]{}:]|:(?=[^ \t\r\n,[\]{}]))+`;
@@ -276,7 +280,7 @@ function readTags(original: string): { found: { index: number; tag: string; name
       if (b === undefined) continue;
       ({ name, end } = b);
     } else if (m[4] !== undefined) {
-      if (hasAnchor ? anchoredContinues(masked, start, end, inFlow, cuts) : continues(masked, start, end, inFlow, cuts)) continue;
+      if (hasAnchor ? anchoredContinues(masked, start, end, inFlow, cuts) : continues(masked, start, end, inFlow, cuts, above)) continue;
       name = m[4];
     } else name = m[1] !== undefined ? decoded(m[1]) : m[2]!.replaceAll("''", "'");
     if (name !== undefined && NAME.test(name)) found.push({ index: start, tag: original.slice(start, end), name });
@@ -369,39 +373,72 @@ const startsLine = (before: string) => /^[ \t]*(?:(?:&[A-Za-z0-9_-]+|![^ \t]*)[ 
 const propertiesOnly = (line: string) =>
   /^[ \t]*(?:(?:&[A-Za-z0-9_-]+|![^ \t]*)(?:[ \t]+|(?=\r?$)))+\r?$/.test(line);
 
-// The nearest line above the tag's line that is less indented than it, as `plainHolder` finds it; undefined
-// if none is above. A line of node properties only is skipped.
-function parentLine(masked: string, tag: number): string | undefined {
-  const start = masked.lastIndexOf("\n", tag) + 1;
-  const own = column(lineFrom(masked, start));
-  for (let e = start - 1; e >= 0; ) {
-    const s = e === 0 ? 0 : masked.lastIndexOf("\n", e - 1) + 1;
-    const l = masked.slice(s + bom(masked, s), e);
-    if (!blank(l) && !propertiesOnly(l) && column(l) < own) return l;
-    e = s - 1;
-  }
-  return undefined;
+// A line with text and the column of its first character in YAML blanks (`column`).
+type Above = { column: number; line: string };
+
+// For each line with text, the nearest line above it that is less indented, as `plainHolder` and the parent
+// of a tag that starts its line need it; none if no line above is less indented. A line of node properties
+// only (`propertiesOnly`) is never that line, as it belongs to the node below. The answer comes from one
+// pass over the text on the first call, with a stack of the lines still open (their columns rise from the
+// bottom). Walking back from each tag instead read every line between the tag and its parent: all lines
+// above a tag at column 0, and all siblings above a tag among many, so the cost grew with the square of the
+// text (review of this change).
+function aboveLines(masked: string): (lineStart: number) => Above | undefined {
+  let found: Map<number, Above | undefined> | undefined;
+  return (lineStart) => {
+    if (found === undefined) {
+      found = new Map();
+      const open: Above[] = [];
+      for (let s = 0; s < masked.length; ) {
+        const nl = masked.indexOf("\n", s);
+        const e = nl === -1 ? masked.length : nl;
+        const l = masked.slice(s + bom(masked, s), e);
+        if (!blank(l)) {
+          const c = column(l);
+          // The first open line that is not less indented than this one: those below it are.
+          let lo = 0;
+          for (let hi = open.length; lo < hi; ) {
+            const mid = (lo + hi) >> 1;
+            if (open[mid]!.column < c) lo = mid + 1;
+            else hi = mid;
+          }
+          found.set(s, lo > 0 ? open[lo - 1] : undefined);
+          if (!propertiesOnly(l)) {
+            open.length = lo;
+            open.push({ column: c, line: l });
+          }
+        }
+        s = e + 1;
+      }
+    }
+    return found.get(lineStart);
+  };
 }
 
 // The column of a line in YAML blanks (U+0020 and tab): go-yaml counts each as one column, and any
 // other Unicode space, U+00A0 included, is text at that column.
 const column = (line: string) => line.length - line.replace(/^[ \t]+/, "").length;
 
+// The text without the YAML blanks at its start and without the blanks and carriage returns at its end. Two
+// walks by index, not `replace(/^[ \t]+|[ \t\r]+$/g, "")`: that pattern starts again at every blank of a
+// long run inside the text, so its time grows with the square of the run (review of this change).
+function trimBlanks(text: string): string {
+  let from = 0;
+  let to = text.length;
+  while (from < to && (text[from] === " " || text[from] === "\t")) from++;
+  while (to > from && (text[to - 1] === " " || text[to - 1] === "\t" || text[to - 1] === "\r")) to--;
+  return text.slice(from, to);
+}
+
 // `holder` for a plain scalar, measured as `column` measures the next line: in YAML blanks (U+0020
 // and tab). A line that starts with U+00A0 or a byte order mark has text at column 0, so its key
 // stands at column 0, not at the width of the leading Unicode spaces that `indent` counts. A line of node
-// properties only (`propertiesOnly`) is skipped in the search, as in `parentLine`.
-function plainHolder(masked: string, tag: number): number {
+// properties only (`propertiesOnly`) is skipped in the search (`aboveLines`).
+function plainHolder(masked: string, tag: number, above: (lineStart: number) => Above | undefined): number {
   const start = masked.lastIndexOf("\n", tag) + 1;
   const own = column(lineFrom(masked, start));
   if (!startsLine(masked.slice(start + bom(masked, start), tag))) return own;
-  for (let e = start - 1; e >= 0; ) {
-    const s = e === 0 ? 0 : masked.lastIndexOf("\n", e - 1) + 1;
-    const l = masked.slice(s + bom(masked, s), e);
-    if (!blank(l) && !propertiesOnly(l) && column(l) < own) return column(l);
-    e = s - 1;
-  }
-  return -1;
+  return above(start)?.column ?? -1;
 }
 
 // Whether the tag is on a root scalar: the tag stands on the line of a `---` marker, or on a line with
@@ -412,8 +449,8 @@ function plainHolder(masked: string, tag: number): number {
 // back to the last marker takes the stream-start byte order mark as no text and a marker line that ends
 // in a CRLF as a marker (`MARKER`); a line of Unicode spaces only is text, so it is not a root. A line of
 // node properties only (`propertiesOnly`) is no text either: `&e\n!bwref x/foo\n- y` is a root scalar.
-// The scan walks back by line offsets and stops at the first line with text or at a marker, as
-// `parentLine` does, so its cost is the lines it reads, not the text before the tag.
+// The scan walks back by line offsets and stops at the first line with text or at a marker, so its cost
+// is the lines it reads, not the text before the tag, and the next tag stops at this tag's line.
 function isRoot(masked: string, tag: number, before: string): boolean {
   if (!/^(?:---[ \t]+)?[ \t]*(?:&[A-Za-z0-9_-]+[ \t]+)*$/.test(before)) return false;
   if (before.startsWith("---")) return true;
@@ -446,20 +483,27 @@ function isRoot(masked: string, tag: number, before: string): boolean {
 // The holder (`plainHolder`) is measured in the same blanks as the next line, so a key that starts with
 // U+00A0 stands at column 0. An anchor or a tag before the tag belongs to the node, not to the line (`startsLine`).
 // A byte order mark at the start of the stream is no text and no column (`bom`).
-function continues(masked: string, tag: number, end: number, inFlow: boolean, cuts: ReadonlySet<number>): boolean {
+function continues(
+  masked: string,
+  tag: number,
+  end: number,
+  inFlow: boolean,
+  cuts: ReadonlySet<number>,
+  above: (lineStart: number) => Above | undefined,
+): boolean {
   const eol = masked.indexOf("\n", end);
   if (eol === -1 || masked.slice(end, eol).trim() !== "") return false;
   const next = nextLine(masked, eol + 1, cuts, blank);
   // A document marker (--- or ...) ends every scalar, also a top-level one.
   if (next === undefined || MARKER.test(next)) return false;
-  const t = next.replace(/^[ \t]+|[ \t\r]+$/g, "");
+  const t = trimBlanks(next);
   if (inFlow) return !/^(?:[,\]}]|:(?:[ \t]|$))/.test(t);
   const lineStart = masked.lastIndexOf("\n", tag) + 1;
   const before = masked.slice(lineStart + bom(masked, lineStart), tag);
   if (isRoot(masked, tag, before)) return true;
-  if ((next.trim() === "" ? spaces(next) : column(next)) <= plainHolder(masked, tag)) return false;
+  if ((next.trim() === "" ? spaces(next) : column(next)) <= plainHolder(masked, tag, above)) return false;
   if (/^[,\]}]/.test(t)) return true;
-  const parent = startsLine(before) ? parentLine(masked, tag) : undefined;
+  const parent = startsLine(before) ? above(lineStart)?.line : undefined;
   const known = parent === undefined ? PLAIN_PARENT.test(before) : PLAIN_PARENT_LINE.test(parent);
   if (known) return true;
   return !/^[-?](?:\s|$)/.test(t) && !/:(?:\s|$)/.test(t);
@@ -489,7 +533,7 @@ function anchoredContinues(masked: string, tag: number, end: number, inFlow: boo
   if (eol === -1 || !blank(masked.slice(end, eol))) return false;
   const next = nextLine(masked, eol + 1, cuts, blank);
   if (next === undefined || MARKER.test(next)) return false;
-  const t = next.replace(/^[ \t]+|[ \t\r]+$/g, "");
+  const t = trimBlanks(next);
   if (inFlow) return !/^(?:[,\]}]|:(?:[ \t]|$))/.test(t);
   if (/:(?:[ \t]|$)/.test(t)) return false;
   return spaces(next) > spaces(lineAt(masked, start));

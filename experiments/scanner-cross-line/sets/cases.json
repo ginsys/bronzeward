@@ -362,5 +362,21 @@
   "doc": "&e\n!bwref x/foo\n- y\n",
   "want": [],
   "note": "a line that holds only an anchor above a root scalar is no text: the tag is a root scalar and a dash line goes on, as without the anchor (review of the 616 change)"
+ },
+ {
+  "name": "616-two-boms-root",
+  "issue": "616",
+  "doc": "﻿﻿!bwref x/foo\nbar\n",
+  "want": [],
+  "note": "go-yaml drops the byte order mark at the start of the stream and reads a second one at column 0 as one blank column, so the tag is a root scalar and the next line goes on (hosted review of the 616 change)"
+ },
+ {
+  "name": "616-two-boms-key",
+  "issue": "616",
+  "doc": "﻿﻿k: !bwref x/foo\n j: v\n",
+  "want": [
+   "x/foo"
+  ],
+  "note": "the second byte order mark is one blank column, so k stands at column 1 and the next line at column 1 is a sibling key, not a continuation of the value (hosted review of the 616 change)"
  }
 ]
