@@ -63,6 +63,7 @@ On main, S9 held 2248 extra documents. The change fixes 1620 of them and leaves 
 
 - The anchor after the tag. ginsys/bronzeward#607 made the rule conservative on purpose (`anchoredContinues()`). The acceptance of #616 asks for no newly lost and no newly extra document against main. It does not ask for a lost count.
 - The tag on an implicit key. ginsys/bronzeward#615 says the server refuses it. The editor lists nothing, and the oracle lists the name. ginsys/bronzeward#629 holds the decision.
+- A parent key that is quoted with a doubled or an escaped quote inside (`'a''b': !bwref x/foo`, then `  - y`). `PLAIN_PARENT` does not read it as a known parent. A next line that starts with `- `, `? ` or holds a colon before a blank then ends the value, so the editor lists the name and go-yaml lists none. Main reads it the same way, so the change adds no extra pair. Reading such a key is a follow-up that needs new scanner scope.
 - A tab in a continuation line (`scannerc.go:2783`) is not covered by this note.
 - A comment line between the value and the next text is not covered by this note.
 
