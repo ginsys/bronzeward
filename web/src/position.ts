@@ -483,8 +483,14 @@ interface Carry {
   // comment line that starts a line. go-yaml reads such a run of comment lines as one, tabs included
   // (yaml_parser_scan_comments); see `scanLine`.
   chain: boolean;
+  // The bytes from the end of the last comment line's text to the start of the line that is read now.
+  // go-yaml looks ahead 512 bytes only for the next comment of a run.
+  gap: number;
+  // The line is the first one after a directive line: no simple key can start there yet, so go-yaml
+  // skips a tab at its start as a blank.
+  afterDirective: boolean;
 }
-const freshCarry = (): Carry => ({ stack: [], flow: 0, ns: true, open: "", holder: -1, block: undefined, closed: false, tagged: false, earlier: false, split: false, chain: false });
+const freshCarry = (): Carry => ({ stack: [], flow: 0, ns: true, open: "", holder: -1, block: undefined, closed: false, tagged: false, earlier: false, split: false, chain: false, gap: 0, afterDirective: false });
 
 // The document that is being read (ginsys/bronzeward#615). A tag spelled through a handle names what
 // the document's %TAG directives say, so a `!bwref` property counts only when its document is
@@ -593,7 +599,10 @@ const FLOW = ",[]{}";
 // `>`: a chomping sign and then a digit 1-9, or the digit and then the sign (a digit 0 is an error),
 // then blanks and an optional comment (yaml_parser_scan_block_scalar, scannerc.go lines 2204-2274,
 // go.yaml.in/yaml/v3 v3.0.5). Group 1 holds the indicators, so a digit in the comment is not one.
-const HEADER_REST = /^((?:[-+][1-9]?|[1-9][-+]?)?)[ \t\r]*(?:#.*)?$/;
+// A comment after a `---` marker, or after block entry dashes alone (`- - # c`): go-yaml reads the
+// comment lines that follow it as one run, as it does after a comment line (ginsys/bronzeward#651).
+const DASH_COMMENT = /^(?:---|(?: *-(?=[ \t]))+)[ \t]+#/;
+const HEADER_REST =/^((?:[-+][1-9]?|[1-9][-+]?)?)[ \t\r]*(?:#.*)?$/;
 
 // The index after the closing quote `q` at or after `from`, or -1 if the line ends first.
 function skipQuoted(line: string, from: number, q: string): number {
@@ -633,11 +642,15 @@ function commentStarts(lines: readonly string[]): { starts: number[]; props: Map
   const refused: Spot[] = [];
   const docs = freshDocs(props, refused, 0);
   let base = 0;
-  // For each line: is the first line after it that is not blank a comment line?
-  const commentAhead: boolean[] = new Array<boolean>(lines.length).fill(false);
-  for (let n = lines.length - 2; n >= 0; n--) {
-    const next = lines[n + 1]!;
-    commentAhead[n] = /^[ \t\r]*$/.test(next) ? commentAhead[n + 1]! : /^[ \t]*#/.test(next);
+  // For each line: the bytes from its start to the `#` of the first line from it that is not blank, if
+  // that line is a comment line (a blank line counts with its line break). Infinity if it is not, or
+  // the file ends first.
+  const reach: number[] = new Array<number>(lines.length + 1).fill(Infinity);
+  for (let n = lines.length - 1; n >= 0; n--) {
+    const full = lines[n]!;
+    const text = bare(full);
+    if (/^[ \t]*$/.test(text)) reach[n] = full.length + 1 + reach[n + 1]!;
+    else if (text.startsWith("#") || /^[ \t]+#/.test(text)) reach[n] = text.length - text.replace(/^[ \t]+/, "").length;
   }
   const starts = lines.map((full, n) => {
     // The carriage return of a CRLF is part of the line break, not of the line: the scan reads the
@@ -652,8 +665,10 @@ function commentStarts(lines: readonly string[]): { starts: number[]; props: Map
     const text = lead && rest.startsWith("﻿") ? ` ${rest.slice(1)}` : rest;
     // A directive line is no text to scan: the whole line is blanked.
     let at = 0;
-    if (readDocumentLine(docs, st, text, base)) st.chain = false;
-    else at = scanLine(st, docs, text, base + (lead ? 1 : 0), commentAhead[n]!);
+    if (readDocumentLine(docs, st, text, base)) {
+      st.chain = false;
+      st.afterDirective = true;
+    } else at = scanLine(st, docs, text, base + (lead ? 1 : 0), reach[n]!, full.length - line.length + 1);
     // A simple key sits on one line: a pending second tag that no key colon of the line took is
     // a second tag on one node (ginsys/bronzeward#620).
     if (st.split) docs.refused = true;
@@ -666,9 +681,10 @@ function commentStarts(lines: readonly string[]): { starts: number[]; props: Map
   return { starts, props, refused };
 }
 
-// `commentAhead`: the first line after this one that is not blank (spaces or tabs only) is a comment
-// line. The file ends otherwise.
-function scanLine(st: Carry, docs: Docs, line: string, base: number, commentAhead: boolean): number {
+// `reach`: see `commentStarts`. `brk`: the length in bytes of the line break that ends the line.
+function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: number, brk: number): number {
+  const afterDirective = st.afterDirective;
+  st.afterDirective = false;
   // YAML indents with U+0020 only, and go-yaml ends an empty line at a line break after those spaces
   // (yaml_parser_scan_block_scalar_breaks, scannerc.go lines 2393-2410, go.yaml.in/yaml/v3 v3.0.5). A
   // tab or another Unicode space (U+00A0, say) is text, which `trim` would count as blank.
@@ -695,17 +711,28 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, commentAhea
   // A block line that starts with a tab, after any spaces, fails go-yaml: it skips a tab as a blank
   // only in flow context or where no simple key can start (yaml_parser_scan_to_next_token,
   // scannerc.go), and after a line break in block context one can. Inside a quote or a flow collection
-  // the tab is text or a blank. A tab-led comment line is read as part of the run of comment lines
-  // before it, and a tab-only line there too, when a comment line follows (ginsys/bronzeward#651).
+  // the tab is text or a blank. Three places read it as a blank:
+  // - An open plain scalar takes the blanks of a line break, tabs too, up to its indent: a tab at a
+  //   column past its holder is not an error (yaml_parser_scan_plain_scalar, scannerc.go).
+  // - The line after a directive line: no simple key can start there yet.
+  // - A run of comment lines, which go-yaml reads as one (yaml_parser_scan_comments): a tab-led
+  //   comment line in it, and a tab-only line when a comment line follows. A run starts at a comment
+  //   line, or at a comment after a `---` marker or after block entry dashes alone. After the last
+  //   comment it looks ahead 512 bytes only; `gap` and `reach` count them.
+  // (ginsys/bronzeward#651)
   if (st.flow === 0 && st.open !== '"' && st.open !== "'") {
     const comment = /^[ \t]*#/.test(line);
-    // An open plain scalar takes the blanks of a line break, tabs too, up to its indent: a tab at a
-    // column past its holder is not an error (yaml_parser_scan_plain_scalar, scannerc.go).
     const plainBlanks = st.open === "plain" && ind > st.holder;
-    if (/^ *\t/.test(line) && !plainBlanks && !(st.chain && (comment || (quiet && commentAhead)))) docs.refused = true;
-    if (comment) st.chain = true;
-    else if (!quiet) st.chain = false;
+    const inRun = st.chain && st.gap + reach <= 511;
+    if (/^ *\t/.test(line) && !plainBlanks && !afterDirective && !inRun) docs.refused = true;
+    if (comment || (st.open !== "plain" && DASH_COMMENT.test(line))) {
+      st.chain = true;
+      st.gap = brk;
+    } else if (quiet) {
+      if (st.chain) st.gap += line.length + brk;
+    } else st.chain = false;
   } else st.chain = false;
+  const run = { chain: st.chain, gap: st.gap };
   let j = 0;
   let hold = st.stack.length > 0 ? st.stack[st.stack.length - 1]! : -1;
   let lastPlain = false;
@@ -722,7 +749,7 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, commentAhea
   }
   let fresh = false;
   if (marker && st.open !== '"' && st.open !== "'") {
-    Object.assign(st, freshCarry());
+    Object.assign(st, freshCarry(), run);
     // A marker ends every node: the column of the entry above (`hold`) is no longer open.
     hold = -1;
     j = 3;
