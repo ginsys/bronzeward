@@ -751,6 +751,30 @@
    ]
   },
   {
+   "name": "616-nbsp-key-column-0",
+   "source": "experiments/scanner-cross-line/sets/cases.json (616)",
+   "doc": "k: !bwref x/foo\n j: v\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
+   "name": "616-own-line-under-compact-key",
+   "source": "experiments/scanner-cross-line/sets/cases.json (616)",
+   "doc": "- k:\n    !bwref x/foo\n  j: v\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
+   "name": "616-own-line-under-compact-dash",
+   "source": "experiments/scanner-cross-line/sets/cases.json (616)",
+   "doc": "- -\n    !bwref x/foo\n  - y\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
    "name": "review-1",
    "source": "experiments/scanner-cross-line/sets/review.json",
    "doc": "x,- \"p: [\"q # r\", !bwref x/foo]\n",

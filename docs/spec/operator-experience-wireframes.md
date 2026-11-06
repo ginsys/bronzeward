@@ -294,10 +294,15 @@ is not its name.
 A plain `!bwref` value can go on to the next line. The editor reads that line as part of the value,
 and lists nothing, in these cases. In block context the line must be indented past its parent. Then
 a line that starts with `,`, `]` or `}` is text. A line that starts with `- `, `? ` or holds a key
-(`k: v`) is text where the parent line shows a plain key, a quoted key with no quote character inside,
-a dash or a plain scalar. It ends the value under a compact parent such as `- - `. A quoted key
+(`k: v`) is text where the parent line shows a plain key, a quoted key with no quote character inside
+or a dash. It ends the value under a compact parent such as `- - `. A quoted key
 with a doubled or escaped quote (`'a''b': !bwref x/foo`) is not read as a parent, so such a line still
-ends the value and the editor lists a name where the server lists none. A line of Unicode spaces is text, not blank. In flow context
+ends the value and the editor lists a name where the server lists none. A line of Unicode spaces is text, not blank. A line that
+starts with a no-break space has text at column 0, so it is no indentation. A tag that starts its own line is read against the
+line above only where that line is a plain or quoted key with nothing after its colon, or a lone dash. Under a compact
+parent such as `- k:` the next line ends the value. A root scalar is a tag on the line of `---`, or the first text of a
+document, with only anchors before it. It goes on at every next line with text, also at column 0, and a
+line that starts with `- ` or `? ` is text there. A key line after it makes the server refuse the document. In flow context
 the indent does not count. The next line is text unless it starts with `,`, `]`, `}` or `: `. The
 editor skips blank lines between. A `---` or `...` marker and a directive line each end the value.
 
