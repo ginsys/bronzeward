@@ -5,7 +5,7 @@
 //   node check-refused-split.mjs <run dir> [set ...]
 //
 // <run dir> holds, for each set, reports-<set>.log (the output of cmp-reports.mjs) and <set>.oracle.json
-// (the output of the oracle on the set). Sets default to s5 s8 s9 s10 s11. It prints one line per set and
+// (the output of the oracle on the set). Sets default to s5 s8 s9 s10 s11 s12. It prints one line per set and
 // exits 1 if any listed document is one that go-yaml accepts, or if a report or oracle output is missing.
 import { readFileSync } from "node:fs";
 

@@ -64,7 +64,7 @@ The same files back a second note, on [issue 603](https://github.com/ginsys/bron
   12 contexts (the line of `---`, the first text of a stream, after a marker line, a comment or a
   directive, in a second document, and two key controls), three property orders, a space or a tab, six
   next lines (none, blank, column 0, column 1, U+00A0, tab) and three texts (a word, `- y`, `y: v`)
-  (1,152 documents, 534 of them parsed by go-yaml). It is not in `sets/MANIFEST` and `run/gen-sets` does
+  (1,152 documents, 666 of them parsed by go-yaml). It is not in `sets/MANIFEST` and `run/gen-sets` does
   not write it: `node sets/gen-s10-root-scalar.ts s10.json` makes it. `judge-s10.mjs` reads it beside
   the oracle output and two scanners: `node judge-s10.mjs s10.json s10.oracle.json <dir of the scanner
   before> <dir of the scanner after> [--rows]`, each dir holding a `position.ts`. It counts extra and
@@ -83,7 +83,7 @@ The same files back a second note, on [issue 603](https://github.com/ginsys/bron
   line, the tag line at column 0 to 2, the tag alone or after an anchor, and a next line at column 0 to 2
   of spaces, of spaces and U+00A0 or of spaces and a tab. Family "pprop": a parent (a key, a dash, a
   compact `- k:`), then a line that holds only an anchor, then the tag, then the next line in the same
-  three forms (3,240 documents, 1,828 of them parsed by go-yaml). It is not in `sets/MANIFEST` and
+  three forms (3,456 documents, 1,972 of them parsed by go-yaml). It is not in `sets/MANIFEST` and
   `run/gen-sets` does not write it: `node sets/gen-s12-marker-and-property-lines.ts s12.json` makes it.
   `judge-s10.mjs` reads it in the same way as S10 and S11.
 - `check-refused-split.mjs` — reads the `refusedListed-new` line of each `cmp-reports.mjs` report of a
