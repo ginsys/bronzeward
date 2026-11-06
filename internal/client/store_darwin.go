@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -121,32 +120,11 @@ func keyringDelete(user string) error {
 	return nil
 }
 
-// securityRun runs the security tool with stdin and returns its output. At the deadline it kills
-// the tool and returns context.DeadlineExceeded; a tool that exited 0 is no failure, whatever the
-// clock says. A run that failed returns the tool's standard error only: a read prints the secret on
-// standard output, and no error text may carry it. A run that succeeded returns both streams. The
-// tool writes its errors to standard error, where securityFailed looks for them. Replaced in tests.
+// securityRun runs the security tool with stdin and returns its output (runTool, store_security.go):
+// standard output alone from a run that succeeded, standard error from one that failed. The tool
+// writes its errors to standard error, where securityFailed looks for them. Replaced in tests.
 var securityRun = func(ctx context.Context, stdin string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, securityTool, args...)
-	cmd.Stdin = strings.NewReader(stdin)
-	cmd.WaitDelay = time.Second
-	var out, errOut bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &errOut
-	err := cmd.Run()
-	return securityOutcome(ctx, cmd.ProcessState, out.Bytes(), errOut.Bytes(), err)
-}
-
-// securityOutcome is the result of one run, given the state of the tool's process. The exit status
-// of the tool decides: Run returns the context's error even for a tool that exited 0, when the
-// deadline came while the tool was being reaped, and a write that was carried out is no timeout.
-func securityOutcome(ctx context.Context, state *os.ProcessState, out, errOut []byte, err error) ([]byte, error) {
-	switch {
-	case state != nil && state.Success():
-		return append(out, errOut...), nil
-	case ctx.Err() != nil:
-		return errOut, context.DeadlineExceeded
-	}
-	return errOut, err
+	return runTool(ctx, securityTool, stdin, securityReportsInBand(args), args...)
 }
 
 // securityFailed maps a failed call to the store's errors: the tool's own words decide a missing
@@ -324,7 +302,8 @@ func securitySet(service, user, secret string) error {
 	}
 	out, err := securityRun(ctx, line, "-i")
 	if err == nil && bytes.Contains(out, []byte("security:")) {
-		// security -i reports a failed command on its output and may still exit 0.
+		// security -i reports a failed command in-band and may still exit 0, so securityRun keeps both
+		// streams for this call (securityReportsInBand).
 		err = errors.New("the tool reported an error")
 	}
 	return unsettled(securityFailed(out, err), "written")

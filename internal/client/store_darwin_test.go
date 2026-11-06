@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -307,29 +306,6 @@ func TestSecurityRefusesADefaultKeychainItCannotName(t *testing.T) {
 		if used {
 			t.Errorf("default keychain %q: a call ran with it", path)
 		}
-	}
-}
-
-// TestSecurityOutcomeFollowsTheExitStatus checks that a tool which exited 0 is no timeout, although
-// Run returned the context's error, and that a killed tool is one.
-func TestSecurityOutcomeFollowsTheExitStatus(t *testing.T) {
-	done := exec.Command("true")
-	if err := done.Run(); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if out, err := securityOutcome(ctx, done.ProcessState, []byte("ok"), nil, context.Canceled); err != nil || string(out) != "ok" {
-		t.Errorf("a tool that exited 0 after the deadline: %q, %v, want its output and no error", out, err)
-	}
-	killed := exec.Command("sleep", "60")
-	if err := killed.Start(); err != nil {
-		t.Fatal(err)
-	}
-	_ = killed.Process.Kill()
-	_ = killed.Wait()
-	if _, err := securityOutcome(ctx, killed.ProcessState, nil, nil, errors.New("signal: killed")); !errors.Is(err, context.DeadlineExceeded) {
-		t.Errorf("a tool killed at the deadline: %v, want context.DeadlineExceeded", err)
 	}
 }
 
@@ -673,5 +649,50 @@ func TestSignInRefusedWhenKeychainFailsAfterAnswering(t *testing.T) {
 	}
 	if n := len(calls()); n == 0 {
 		t.Error("the keychain was never asked")
+	}
+}
+
+// warningTool makes securityTool a script that exits 0 for every call and writes a warning to
+// standard error besides its answer, with synthetic text only (ginsys/bronzeward#662). find is what
+// a read of an entry prints on standard output.
+func warningTool(t *testing.T, find string) {
+	t.Helper()
+	fakeTool(t, `
+case "$1" in
+default-keychain) echo '"/tmp/BWSYNTH-keychain.keychain-db"'; echo 'BWSYNTH-warning' >&2 ;;
+show-keychain-info) echo 'BWSYNTH-warning' >&2 ;;
+find-generic-password) echo '`+find+`'; echo 'BWSYNTH-warning' >&2 ;;
+-i) cat >/dev/null; echo 'security: BWSYNTH-failed' >&2 ;;
+esac
+exit 0
+`)
+}
+
+// TestSecurityReadIgnoresStandardErrorWarning checks that a warning on standard error from a call
+// that exited 0 reaches no value: not the keychain path, and not the entry, whether it has
+// go-keyring's prefix or not.
+func TestSecurityReadIgnoresStandardErrorWarning(t *testing.T) {
+	ctx := context.Background()
+	for name, c := range map[string]struct{ find, want string }{
+		"prefixed":   {prefixBase64 + base64.StdEncoding.EncodeToString([]byte("BWSYNTH-secret")), "BWSYNTH-secret"},
+		"unprefixed": {"BWSYNTH-plain", "BWSYNTH-plain"},
+	} {
+		warningTool(t, c.find)
+		kc, err := securityKeychain(ctx)
+		if err != nil || kc != "/tmp/BWSYNTH-keychain.keychain-db" {
+			t.Errorf("%s: keychain %q, %v, want the path alone", name, kc, err)
+		}
+		if got, err := securityFind(ctx, kc, "BWSYNTH-service", "BWSYNTH-user"); err != nil || got != c.want {
+			t.Errorf("%s: entry %q, %v, want %q", name, got, err, c.want)
+		}
+	}
+}
+
+// TestSecurityWriteStillFailsOnInBandError checks that a security -i call which exited 0 with an
+// error text still fails the write.
+func TestSecurityWriteStillFailsOnInBandError(t *testing.T) {
+	warningTool(t, "unused")
+	if err := securitySet("BWSYNTH-service", "BWSYNTH-user", "{}"); err == nil {
+		t.Error("a write whose command failed in-band: no error, want one")
 	}
 }
