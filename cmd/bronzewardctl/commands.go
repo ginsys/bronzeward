@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -144,7 +145,11 @@ func (e *env) contextAdd(args []string) error {
 		x.OIDC = o
 	}
 	if from != "" {
-		cc, err := client.FetchClientConfig(&x, from, e.verboseOut())
+		var cc *client.ClientConfig
+		err := e.cancellable("GET /bronzeward-client.json", func(ctx context.Context) (ferr error) {
+			cc, ferr = client.FetchClientConfigContext(ctx, &x, from, e.verboseOut())
+			return ferr
+		})
 		if err != nil {
 			return ef("%s: %w", x.Where(), err)
 		}
@@ -156,11 +161,9 @@ func (e *env) contextAdd(args []string) error {
 	if err := x.Check(); err != nil {
 		return usageError{err}
 	}
-	ctx, disarm := e.arm()
-	err = client.LiveContext(ctx, &x, e.verboseOut())
-	if disarm() && !errors.As(err, new(*client.Interrupted)) { // a Ctrl-C taken as the probe ended stops the command, whatever the probe answered
-		err = ef("%s: %w", x.Where(), &client.Interrupted{Route: "GET /livez"})
-	}
+	err = e.cancellable("GET /livez", func(ctx context.Context) error {
+		return client.LiveContext(ctx, &x, e.verboseOut())
+	})
 	if err != nil {
 		return err
 	}

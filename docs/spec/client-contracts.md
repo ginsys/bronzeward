@@ -542,7 +542,10 @@ client always shows `title`, `detail` when present, and `instance`, each escaped
 A Ctrl-C ends a read at once: a request in flight and a wait before a retry stop, the command prints
 one line that names the request and exits 130. It does not change the retry rules above. The Ctrl-C
 is taken for each read only. A write, and a read made inside a write, does not take it. The renewal
-of a stored sign-in is not cut short: it runs to its end, and the stop follows.
+of a stored sign-in is not cut short: it runs to its end, and the stop follows. After the first Ctrl-C
+the client sends no further read. A command that reads again after it, for a lookup that does not
+decide its result, still exits 130 with the stop line of the first Ctrl-C. A write that was not
+yet started is not sent.
 
 The `503` row applies only to a Bronzeward problem with one of its four codes. The write `503`s
 say that the attempt they answer committed nothing of its own transaction (what a route committed

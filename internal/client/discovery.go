@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -60,6 +61,12 @@ func checkScopes(s string) string {
 // FetchClientConfig reads bronzeward-client.json at the web root of from, with x's TLS trust
 // (§6), sending no credential and following no redirect.
 func FetchClientConfig(x *Context, from string, verbose io.Writer) (*ClientConfig, error) {
+	return FetchClientConfigContext(context.Background(), x, from, verbose)
+}
+
+// FetchClientConfigContext is FetchClientConfig that a Ctrl-C can end: ctx ends the request, and the
+// read returns *Interrupted (#643).
+func FetchClientConfigContext(ctx context.Context, x *Context, from string, verbose io.Writer) (*ClientConfig, error) {
 	if err := endpoint(from, "--from"); err != nil {
 		return nil, err
 	}
@@ -70,8 +77,15 @@ func FetchClientConfig(x *Context, from string, verbose io.Writer) (*ClientConfi
 	u, _ := url.Parse(from)
 	u.Path, u.RawPath = "/bronzeward-client.json", ""
 	// Nothing the host sent is shown but its status code (remote.go); u is the URL bronzewardctl formed.
-	r, err := hc.Get(u.String())
+	q, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
+		return nil, err
+	}
+	r, err := hc.Do(q)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, &Interrupted{Route: "GET /bronzeward-client.json"}
+		}
 		if t := refusedTrust(x, u.Host, err); t != nil {
 			return nil, t
 		}

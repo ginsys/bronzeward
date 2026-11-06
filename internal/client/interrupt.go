@@ -26,6 +26,15 @@ func (c *Client) arm() (context.Context, func() bool) {
 	return c.Arm()
 }
 
+// cut records e, the Ctrl-C a read took, and returns the first one the run took: a later read, and a
+// caller that dropped an earlier error, still end the command with that one. A nil e only asks.
+func (c *Client) cut(e *Interrupted) *Interrupted {
+	if c.Cut == nil {
+		return e
+	}
+	return c.Cut(e)
+}
+
 // waitFor waits d before a retry and returns early, with the error of ctx, when ctx ends. A variable,
 // so that a test waits for none of it.
 var waitFor = defaultWait

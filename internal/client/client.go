@@ -31,8 +31,10 @@ type Client struct {
 	service string  // the automation principal GET /identity served, once read
 	warned  map[string]bool
 
-	// Arm, when set, takes the Ctrl-C for each read (interrupt.go). sending: a write is in flight.
+	// Arm, when set, takes the Ctrl-C for each read (interrupt.go). Cut records the Ctrl-C a read took
+	// and answers the first one the run took (nil asks without recording). sending: a write is in flight.
 	Arm     func() (context.Context, func() bool)
+	Cut     func(*Interrupted) *Interrupted
 	sending bool
 
 	// Revision is the API revision the latest GET /server showed: a read can refresh it after a new
@@ -184,7 +186,7 @@ func (c *Client) retry(path string) (*Response, error) {
 	ctx, disarm := c.arm()
 	r, err := c.retryIn(ctx, path)
 	if disarm() { // a Ctrl-C taken while the read ended still stops the command
-		return nil, &Interrupted{Route: "GET /api/v1" + path}
+		return nil, c.cut(&Interrupted{Route: "GET /api/v1" + path})
 	}
 	return r, err
 }

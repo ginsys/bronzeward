@@ -160,6 +160,11 @@ var (
 // (§8.5 item 1, 2).
 func (c *Client) Send(w *Write) (r *Response, err error) {
 	route := w.Method + " /api/v1" + w.Path
+	if c.Cut != nil { // a Ctrl-C the user already gave starts no new write; one in flight keeps its outcome
+		if e := c.Cut(nil); e != nil {
+			return nil, e
+		}
+	}
 	defer c.banner()
 	c.sending = true // no read inside a write takes the Ctrl-C (interrupt.go)
 	defer func() { c.sending = false }()

@@ -187,6 +187,53 @@ func TestSendTakesNoCtrlC(t *testing.T) {
 	}
 }
 
+// TestNothingIsSentAfterATakenCtrlC: the first read is stalled and the Ctrl-C ends it. A caller that
+// drops that error and reads on gets the first Interrupted back, and so does a write: the server sees
+// the one stalled request and no other. A write already in flight keeps its Ctrl-C-free outcome
+// (TestSendTakesNoCtrlC).
+func TestNothingIsSentAfterATakenCtrlC(t *testing.T) {
+	arrived, hang := make(chan struct{}, 1), make(chan struct{})
+	var asked atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if asked.Add(1) == 1 {
+			arrived <- struct{}{}
+		}
+		select {
+		case <-hang:
+		case <-r.Context().Done():
+		}
+	}))
+	defer srv.Close()
+	defer close(hang)
+	c, _, _ := writeClient(t, &fake{epoch: "ep_BWSYNTH-1"}, "ep_BWSYNTH-1")
+	c.Context.Server = srv.URL
+	a := newArmed(t)
+	c.Arm = a.hook
+	var first *Interrupted
+	c.Cut = func(e *Interrupted) *Interrupted {
+		if first == nil {
+			first = e
+		}
+		return first
+	}
+	go func() {
+		<-arrived
+		a.cancel()
+	}()
+	_, err := c.Get("/clusters")
+	if !errors.As(err, new(*Interrupted)) || first == nil || first.Route != "GET /api/v1/clusters" {
+		t.Fatalf("error %v, first cut %v; want the stalled read stopped by Ctrl-C", err, first)
+	}
+	_, later := c.Get("/machines")
+	_, wrote := c.Send(clusterWrite())
+	if later != error(first) || wrote != error(first) {
+		t.Errorf("later read %v, write %v; want the first Interrupted from both", later, wrote)
+	}
+	if n := asked.Load(); n != 1 {
+		t.Errorf("the server saw %d requests; want the 1 stalled read and nothing after the Ctrl-C", n)
+	}
+}
+
 // TestLiveEndsOnCancel: the probe of a new context's server ends when its context does.
 func TestLiveEndsOnCancel(t *testing.T) {
 	proxyAsTheProxyTestNamesIt(t) // this test may send the first request of the process
