@@ -27,8 +27,8 @@ export const RESTORED_WHILE_READ =
 // shown no longer holds, before the events are shown again from the start. `until`, when set, ends
 // the watch before the operation is terminal: it is asked after each event shown, at each
 // keep-alive and after each read of the operation, and once it answers true it stays true.
-// `signal` ends the watch when the page leaves. A callback must not abort its own watch
-// synchronously: the reader still runs what follows in the same pass (ginsys/bronzeward#644).
+// `signal` ends the watch when the page leaves. A callback can abort it: the reader runs no callback
+// after the one that aborted, and the watch returns `stopped` (ginsys/bronzeward#644).
 export interface Watch {
   show: (e: OpEvent) => void;
   clear: (why: string) => void;
@@ -94,7 +94,10 @@ class Run {
   pagesEpoch: string | undefined = undefined;
   constructor(readonly w: Watch) {}
 
+  // After the watch was aborted `until` is not asked: a callback that aborts its own watch ends the
+  // callbacks (ginsys/bronzeward#644). The callers below stop before `show` and `clear` run again.
   stop(): boolean {
+    if (this.w.signal.aborted) return this.halted;
     this.halted ||= this.w.until?.() === true;
     return this.halted;
   }
@@ -182,7 +185,9 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
         run.clear(RESTORED);
         stale = true;
       }
-      if (run.stop()) return { kind: "ended", operation: res.data, epoch };
+      // A `clear` or an `until` that aborted the watch ends it as stopped, not as ended.
+      if (w.signal.aborted) return { kind: "stopped" };
+      if (run.stop()) return w.signal.aborted ? { kind: "stopped" } : { kind: "ended", operation: res.data, epoch };
     } else if (res.kind !== "discarded" && res.kind !== "transport" && res.kind !== "unavailable") {
       return { kind: "failed", res };
     }
@@ -223,6 +228,8 @@ async function drain(client: Reader, path: string, run: Run, stoppable: boolean)
   // An empty list under another epoch has no event to show the change: the events shown are cleared.
   if (res.data.items.length === 0 && run.last !== "" && run.pagesEpoch !== undefined && run.pagesEpoch !== epochOf(run.last)) run.clear(RESTORED);
   for (const [i, e] of res.data.items.entries()) {
+    // A callback aborted the watch: the rest of the batch is not shown, also in a terminal drain.
+    if (run.w.signal.aborted) break;
     if (i === 0 && run.last !== "" && epochOf(e.id) !== epochOf(run.last)) run.clear(RESTORED);
     run.show({ id: e.id, type: e.type, data: e.data });
     if (stoppable && run.stop()) break;
@@ -269,7 +276,7 @@ async function stream(client: Reader, path: string, run: Run, pace: Pace): Promi
         buf = buf.slice(i + 1);
         if (line.startsWith(":")) {
           // A comment: the keep-alive (§8.6 item 5).
-          if (run.stop()) return "ended";
+          if (run.stop() || run.w.signal.aborted) return "ended";
           continue;
         }
         if (line !== "") {
@@ -282,6 +289,7 @@ async function stream(client: Reader, path: string, run: Run, pace: Pace): Promi
         }
         if (ev.type === "reset") {
           run.clear(RESTORED);
+          if (run.w.signal.aborted) return "ended";
         } else if (ev.id !== "" && epochOf(ev.id) !== epoch) {
           // The installation entered recovery mode while the stream stayed open (§8.6 item 3): the
           // operation read that follows applies §8.5, and the stream reopens from the start.
@@ -295,7 +303,7 @@ async function stream(client: Reader, path: string, run: Run, pace: Pace): Promi
             return { kind: "defect", message: "an event's data is not JSON" };
           }
           run.show({ id: ev.id, type: ev.type, data });
-          if (run.stop()) return "ended";
+          if (run.stop() || run.w.signal.aborted) return "ended";
         }
         ev = { id: "", type: "", data: [] };
       }
