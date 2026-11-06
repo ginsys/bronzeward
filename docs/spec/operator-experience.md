@@ -747,10 +747,17 @@ Every other read command takes a Ctrl-C too, for the read it makes: it ends a re
 A closed standard output ends the program by SIGPIPE, which Go raises for a write to a closed pipe on
 standard output. This holds for every command, in table and in `-o json` mode, and it gives no note and
 no exit code. Any other failed write to standard output exits 6.
+If a server that is out of reach cuts the stream, the watch reads the operation again after 1 s,
+doubling to 30 s, for as long as the watch runs, so a restart of 60 s does not end it ([client
+contracts §8.6](client-contracts.md#86-event-resumption) item 2). Each repeat prints one notice line.
+The timeout then ends the watch with exit 5 and Ctrl-C with exit 130, as at any other time, both
+within a quarter of a second of a wait, and the stop lines name the operation as the last read showed
+it.
 If a read of the watch gave nothing, because its answer cannot be read or the connection failed (the
-server read, the first operation read, or the read that follows a cut stream), the watch ends with no
-operation read, the state is unknown and the exit is 3: the message names `operation show` as the
-command that reads it. Only a problem document the server named keeps exit 1.
+server read and the first operation read, after their five tries, or the read that follows a cut
+stream, only when its answer cannot be read, because a failed connection is repeated), the watch ends
+with no operation read, the state is unknown and the exit is 3: the message names `operation show` as
+the command that reads it. Only a problem document the server named keeps exit 1.
 
 The machine timeline shows what happened to the plans of one machine, including the ones that
 never ran:
