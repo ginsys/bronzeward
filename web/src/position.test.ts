@@ -785,6 +785,46 @@ describe("a tag is resolved the way go-yaml does", () => {
     expect(references(text)).toEqual([]);
   });
 
+  // go-yaml looks ahead for the next comment of a run byte by byte, and stops inside U+0085, U+2028
+  // and U+2029: a tab-led line behind one of them is no part of the run. A lone carriage return and
+  // a CRLF do not stop it (ginsys/bronzeward#651).
+  const unicodeBreaks: [string, string][] = [
+    ["U+0085", "\u0085"],
+    ["U+2028", " "],
+    ["U+2029", " "],
+  ];
+  const runShapes: [string, (b: string) => string][] = [
+    ["a comment on a marker, then a tab-led comment", (b) => `--- # c${b}\t# d\nb: !bwref x/foo\n`],
+    ["a comment with a trailing blank on a marker, then a tab-led comment", (b) => `--- # c ${b}\t# d\nb: !bwref x/foo\n`],
+    ["a comment, then a tab-led comment", (b) => `a: 1\n# c${b}\t# d\nb: !bwref x/foo\n`],
+    ["a comment with a trailing blank, then a tab-led comment", (b) => `a: 1\n# c ${b}\t# d\nb: !bwref x/foo\n`],
+    ["a comment on a block entry, then a tab-led comment", (b) => `- # c${b}\t# d\n  a: !bwref x/foo\n`],
+    ["a comment, an empty line, then a tab-led comment", (b) => `a: 1\n# c\n${b}\t# d\nb: !bwref x/foo\n`],
+    ["a comment, a tab-only line, then a comment", (b) => `a: 1\n# c\n\t${b}# d\nb: !bwref x/foo\n`],
+    ["two tab-led comments", (b) => `a: 1\n# c\n\t# d${b}\t# e\nb: !bwref x/foo\n`],
+  ];
+  test.each(unicodeBreaks.flatMap(([bn, b]) => runShapes.map(([sn, f]) => [`${sn} across ${bn}`, f(b)] as const)))(
+    "a tab-led block line: %s lists nothing",
+    (_, text) => {
+      expect(references(text)).toEqual([]);
+    },
+  );
+
+  // The same shapes with a lone carriage return or a CRLF are valid, as with a line feed. A directive
+  // line ends at any break, and a break before the first comment of a run is no part of the look-ahead.
+  test.each([
+    ...[
+      ["a lone carriage return", "\r"],
+      ["a CRLF", "\r\n"],
+    ].flatMap(([bn, b]) => runShapes.map(([sn, f]) => [`${sn} across ${bn}`, f(b!)] as const)),
+    ...unicodeBreaks.flatMap(([bn, b]) => [
+      [`a tab-led comment after a directive line that ends at ${bn}`, `%YAML 1.1${b}\t# c\n---\na: !bwref x/foo\n`] as const,
+      [`a tab-led comment after a comment that follows ${bn}`, `a: 1${b}# c\n\t# d\nb: !bwref x/foo\n`] as const,
+    ]),
+  ])("a tab-led block line: the valid control %s still lists the name", (_, text) => {
+    expect(references(text)).toEqual(["x/foo"]);
+  });
+
   test("a tab-led block line refuses its document and the next one lists", () => {
     expect(references("a: !other\n\t# c\n  !bwref x/foo\n---\nb: !bwref x/bar\n")).toEqual(["x/bar"]);
   });

@@ -206,7 +206,9 @@ function readTags(original: string): { found: { index: number; tag: string; name
   const text = original.replace(BREAKS, "\n");
   let masked = "";
   const lines = text.split("\n");
-  const { starts, props, refused } = commentStarts(lines);
+  // Whether the break that ends each line is U+0085, U+2028 or U+2029 (see `commentStarts`).
+  const odd = [...original.matchAll(/\r\n|\r|\n|([\u0085\u{2028}\u{2029}])/gu)].map((m) => m[1] !== undefined);
+  const { starts, props, refused } = commentStarts(lines, odd);
   lines.forEach((line, n) => {
     const end = starts[n]!;
     masked += `${line.slice(0, end)}${" ".repeat(line.length - end)}\n`;
@@ -486,11 +488,14 @@ interface Carry {
   // The bytes from the end of the last comment line's text to the start of the line that is read now.
   // go-yaml looks ahead 512 bytes only for the next comment of a run.
   gap: number;
+  // None of the line breaks in that gap is U+0085, U+2028 or U+2029. go-yaml's look-ahead steps by byte
+  // and stops inside such a break (three bytes or two), so a tab-led line behind one is no part of the run.
+  clean: boolean;
   // The line is the first one after a directive line: no simple key can start there yet, so go-yaml
   // skips a tab at its start as a blank.
   afterDirective: boolean;
 }
-const freshCarry = (): Carry => ({ stack: [], flow: 0, ns: true, open: "", holder: -1, block: undefined, closed: false, tagged: false, earlier: false, split: false, chain: false, gap: 0, afterDirective: false });
+const freshCarry = (): Carry => ({ stack: [], flow: 0, ns: true, open: "", holder: -1, block: undefined, closed: false, tagged: false, earlier: false, split: false, chain: false, gap: 0, clean: true, afterDirective: false });
 
 // The document that is being read (ginsys/bronzeward#615). A tag spelled through a handle names what
 // the document's %TAG directives say, so a `!bwref` property counts only when its document is
@@ -636,7 +641,7 @@ function pushEntry(stack: number[], col: number) {
 }
 
 // The comment start of every line, and the offsets in the text of the !bwref properties read.
-function commentStarts(lines: readonly string[]): { starts: number[]; props: Map<number, Prop>; refused: Spot[] } {
+function commentStarts(lines: readonly string[], odd: readonly boolean[]): { starts: number[]; props: Map<number, Prop>; refused: Spot[] } {
   const st = freshCarry();
   const props = new Map<number, Prop>();
   const refused: Spot[] = [];
@@ -644,12 +649,13 @@ function commentStarts(lines: readonly string[]): { starts: number[]; props: Map
   let base = 0;
   // For each line: the bytes from its start to the `#` of the first line from it that is not blank, if
   // that line is a comment line (a blank line counts with its line break). Infinity if it is not, or
-  // the file ends first.
+  // the file ends first. A blank line whose break is U+0085, U+2028 or U+2029 stops the look-ahead:
+  // Infinity.
   const reach: number[] = new Array<number>(lines.length + 1).fill(Infinity);
   for (let n = lines.length - 1; n >= 0; n--) {
     const full = lines[n]!;
     const text = bare(full);
-    if (/^[ \t]*$/.test(text)) reach[n] = full.length + 1 + reach[n + 1]!;
+    if (/^[ \t]*$/.test(text)) reach[n] = odd[n] ? Infinity : full.length + 1 + reach[n + 1]!;
     else if (text.startsWith("#") || /^[ \t]+#/.test(text)) reach[n] = text.length - text.replace(/^[ \t]+/, "").length;
   }
   const starts = lines.map((full, n) => {
@@ -668,7 +674,7 @@ function commentStarts(lines: readonly string[]): { starts: number[]; props: Map
     if (readDocumentLine(docs, st, text, base)) {
       st.chain = false;
       st.afterDirective = true;
-    } else at = scanLine(st, docs, text, base + (lead ? 1 : 0), reach[n]!, full.length - line.length + 1);
+    } else at = scanLine(st, docs, text, base + (lead ? 1 : 0), reach[n]!, full.length - line.length + 1, odd[n]!);
     // A simple key sits on one line: a pending second tag that no key colon of the line took is
     // a second tag on one node (ginsys/bronzeward#620).
     if (st.split) docs.refused = true;
@@ -681,8 +687,9 @@ function commentStarts(lines: readonly string[]): { starts: number[]; props: Map
   return { starts, props, refused };
 }
 
-// `reach`: see `commentStarts`. `brk`: the length in bytes of the line break that ends the line.
-function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: number, brk: number): number {
+// `reach`: see `commentStarts`. `brk`: the length in bytes of the line break that ends the line. `odd`: that
+// break is U+0085, U+2028 or U+2029.
+function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: number, brk: number, odd: boolean): number {
   const afterDirective = st.afterDirective;
   st.afterDirective = false;
   // YAML indents with U+0020 only, and go-yaml ends an empty line at a line break after those spaces
@@ -723,16 +730,20 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: numb
   if (st.flow === 0 && st.open !== '"' && st.open !== "'") {
     const comment = /^[ \t]*#/.test(line);
     const plainBlanks = st.open === "plain" && ind > st.holder;
-    const inRun = st.chain && st.gap + reach <= 511;
+    const inRun = st.chain && st.clean && st.gap + reach <= 511;
     if (/^ *\t/.test(line) && !plainBlanks && !afterDirective && !inRun) docs.refused = true;
     if (comment || (st.open !== "plain" && DASH_COMMENT.test(line))) {
       st.chain = true;
       st.gap = brk;
+      st.clean = !odd;
     } else if (quiet) {
-      if (st.chain) st.gap += line.length + brk;
+      if (st.chain) {
+        st.gap += line.length + brk;
+        st.clean = st.clean && !odd;
+      }
     } else st.chain = false;
   } else st.chain = false;
-  const run = { chain: st.chain, gap: st.gap };
+  const run = { chain: st.chain, gap: st.gap, clean: st.clean };
   let j = 0;
   let hold = st.stack.length > 0 ? st.stack[st.stack.length - 1]! : -1;
   let lastPlain = false;
