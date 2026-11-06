@@ -165,6 +165,9 @@ func (c *Client) setStartMode(m string) {
 // for the start mode (§8.5) before the recovery banner is shown; a failed re-read fails the read.
 func (c *Client) Get(path string) (*Response, error) {
 	r, err := c.retry(path)
+	if errors.As(err, new(*Interrupted)) { // a Ctrl-C ends the read: no refresh arms another request
+		return nil, err
+	}
 	if c.newEpoch {
 		if _, _, serr := c.Server(); serr != nil {
 			r, err = nil, errors.Join(err, serr)

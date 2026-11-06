@@ -158,7 +158,9 @@ func (e *env) contextAdd(args []string) error {
 	}
 	ctx, disarm := e.arm()
 	err = client.LiveContext(ctx, &x, e.verboseOut())
-	disarm()
+	if disarm() && err == nil { // a Ctrl-C taken as the probe ended still stops the command
+		err = ef("%s: %w", x.Where(), &client.Interrupted{Route: "GET /livez"})
+	}
 	if err != nil {
 		return err
 	}
