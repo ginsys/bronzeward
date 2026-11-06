@@ -33,7 +33,7 @@ type Watch struct {
 	Show  func(Event)
 	Clear func()
 	Until func() (bool, error)
-	sleep func(time.Duration) // time.Sleep; tests replace it
+	sleep func(time.Duration) // when set, replaces the wait between attempts; tests set it
 	halt  *halt
 }
 
@@ -89,9 +89,6 @@ type OperationRead struct {
 // prints the resource prints the one it decided the outcome from, and compares the epoch of the
 // reads that follow with the one it was decided in.
 func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, OperationRead, error) {
-	if w.sleep == nil {
-		w.sleep = time.Sleep
-	}
 	w.halt = &halt{}
 	// shown counts the events shown in the attempt since it began or since the last clear: an attempt
 	// with none left is a failure. An event shown and then cleared is not progress, so a stream whose
@@ -169,7 +166,9 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 			}
 			// The watch goes on after the delay, so a server whose events never match its operation
 			// read's epoch is not asked again without a pause.
-			w.sleep(delay)
+			if err := c.pause(op, w, delay); err != nil {
+				return nil, OperationRead{}, err
+			}
 			delay = min(2*delay, 30*time.Second)
 			continue
 		}
@@ -202,7 +201,9 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 			delay = time.Second
 		}
 		if pages || !progress {
-			w.sleep(delay)
+			if err := c.pause(op, w, delay); err != nil {
+				return nil, OperationRead{}, err
+			}
 			if !progress {
 				delay = min(2*delay, 30*time.Second)
 			}
@@ -241,15 +242,47 @@ func (c *Client) renewSoon() {
 	}
 }
 
+// eventsRoute is the route of an operation's event stream, as a stop line names it.
+func eventsRoute(op string) string {
+	return "GET /api/v1/operations/" + url.PathEscape(op) + "/events"
+}
+
+// pause waits d before the watch's next attempt. A Ctrl-C ends the wait and the watch, as it ends the
+// stream, with the route of the stream (client-contracts.md §8.2). A Watch with a sleep of its own
+// waits with that, and takes no Ctrl-C.
+func (c *Client) pause(op string, w Watch, d time.Duration) error {
+	if w.sleep != nil {
+		w.sleep(d)
+		return nil
+	}
+	ctx, disarm := c.arm()
+	_ = waitFor(ctx, d) // a taken Ctrl-C is what disarm reports
+	if disarm() {
+		return c.cut(&Interrupted{Route: eventsRoute(op)})
+	}
+	return nil
+}
+
 // stream reads the operation's event stream once, showing each event after *last. It reports
 // pages when the server answers without a stream. A transport failure, a 5xx, an unavailable
 // dependency or a cut connection end it without an error: the watch reads the operation next. A
-// 401 on a sign-in is renewed once and the stream opened again (§9.5 item 1).
+// 401 on a sign-in is renewed once and the stream opened again (§9.5 item 1). A Ctrl-C ends the
+// attempt, the open stream included, with *Interrupted and no notice.
 func (c *Client) stream(op string, last *string, w Watch) (opened, pages bool, err error) {
+	armed, disarm := c.arm()
+	opened, pages, err = c.streamIn(armed, op, last, w)
+	if disarm() {
+		return opened, pages, c.cut(&Interrupted{Route: eventsRoute(op)})
+	}
+	return opened, pages, err
+}
+
+// streamIn is stream with the context a Ctrl-C cancels.
+func (c *Client) streamIn(armed context.Context, op string, last *string, w Watch) (opened, pages bool, err error) {
 	path := "/api/v1/operations/" + url.PathEscape(op) + "/events"
 	route := "GET " + path
 	for renewed := false; ; renewed = true {
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(armed)
 		defer cancel()
 		q, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(c.Context.Server, "/")+path, nil)
 		if err != nil {
@@ -273,7 +306,9 @@ func (c *Client) stream(op string, last *string, w Watch) (opened, pages bool, e
 			if errors.As(err, &t) {
 				return false, false, c.Context.fail(fmt.Errorf("%s: %w", route, err))
 			}
-			fmt.Fprintf(c.Notices, "%s: %s: %v\n", c.Context.Where(), route, err)
+			if armed.Err() == nil { // a Ctrl-C ended the request: stream reports that, not a notice
+				fmt.Fprintf(c.Notices, "%s: %s: %v\n", c.Context.Where(), route, err)
+			}
 			return false, false, nil
 		}
 		defer r.Body.Close()
