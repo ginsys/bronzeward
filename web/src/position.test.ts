@@ -752,6 +752,57 @@ describe("a tag is resolved the way go-yaml does", () => {
     expect(references(text)).toEqual(["x/foo"]);
   });
 
+  // A block line that starts with a tab, after any spaces, is an error in go-yaml v3.0.5: it skips a
+  // tab as a blank only in flow context or where no simple key can start, and after a line break a
+  // simple key can (ginsys/bronzeward#651; "found character that cannot start any token", "found a
+  // tab character that violates indentation", "found a tab character where an indentation space is
+  // expected"). The first three are the shapes of the issue.
+  test.each([
+    ["a tag and a tab-led comment", "a: !other\n\t# c\n  !bwref x/foo\n"],
+    ["a tag and a tab-only line", "a: !other\n\t\n  !bwref x/foo\n"],
+    ["a key and a tab-led comment", "a: 1\n\t# c\nb: !bwref x/foo\n"],
+    ["a tab-led key", "a: 1\n\tb: !bwref x/foo\n"],
+    ["a tab-led key under a nested key", "a:\n  b: 1\n \tc: !bwref x/foo\n"],
+    ["a tab-only line under a nested key", "a:\n  b: !bwref x/foo\n \t\n"],
+    ["a tab-led comment under a nested key", "a:\n  b: 1\n \t# c\nc: !bwref x/foo\n"],
+    ["a tab-led sequence entry", "a:\n  - 1\n\t- !bwref x/foo\n"],
+    ["a tab at the start of the document", "\ta: !bwref x/foo\n"],
+    ["a tab-led plain continuation", "a: x\n\ty\nb: !bwref x/foo\n"],
+    ["a tab-led line after a block scalar header", "a: |\n\tx\nb: !bwref x/foo\n"],
+    ["a tab after spaces, as the first line of a block scalar", "a: |\n  \tx\nb: !bwref x/foo\n"],
+    ["a tab-led comment after a block scalar's content", "a: |\n  x\n\t# c\nb: !bwref x/foo\n"],
+    ["a tab-led comment after a comment on a content line", "a: 1 # c\n\t# d\nb: !bwref x/foo\n"],
+    ["a tab-only line after a comment, then a key", "a: 1\n# c\n\t\nb: !bwref x/foo\n"],
+    ["a tab-only line after a comment, at the end", "a: !bwref x/foo\n# c\n\t\n"],
+  ])("a tab-led block line: %s lists nothing", (_, text) => {
+    expect(references(text)).toEqual([]);
+  });
+
+  test("a tab-led block line refuses its document and the next one lists", () => {
+    expect(references("a: !other\n\t# c\n  !bwref x/foo\n---\nb: !bwref x/bar\n")).toEqual(["x/bar"]);
+  });
+
+  // A tab that is no block line start, a tab line in a flow collection, a quote or a block scalar's
+  // content, and a tab-led comment in a run of comment lines are valid.
+  test.each([
+    ["a tab in a flow sequence", "a: [1,\n\t2]\nb: !bwref x/foo\n"],
+    ["a tab in a flow mapping", "a: {b: 1,\n\tc: 2}\nb: !bwref x/foo\n"],
+    ["a tab inside a line", "a:\t1\nb: !bwref x/foo\n"],
+    ["a tab in a quoted scalar", 'a: "x\n\ty"\nb: !bwref x/foo\n'],
+    ["a tab after spaces in a block scalar's content", "a: |\n  x\n  \ty\nb: !bwref x/foo\n"],
+    ["a tab at the content indent of a block scalar", "a: |2\n  \tx\nb: !bwref x/foo\n"],
+    ["a tab-led comment after a comment", "a: 1\n# c\n\t# d\nb: !bwref x/foo\n"],
+    ["a tab-led comment after a comment at the document start", "# c\n\t# d\na: !bwref x/foo\n"],
+    ["a tab-only line between two comments", "a: 1\n# c\n\t\n# d\nb: !bwref x/foo\n"],
+    ["a tab-led comment between a tag and its node", "a: !other\n# c\n\t# d\n  !u b: !bwref x/foo\n"],
+    ["an indented comment line", "a: 1\n  # c\nb: !bwref x/foo\n"],
+    ["a tab-only line after a plain value, past its holder", "k: !bwref x/foo\n \t\n"],
+    ["a tab-led comment after a plain value, past its holder", "k: !bwref x/foo\n \t# c\nb: 1\n"],
+    ["a tab-only line after a nested plain value", "k:\n  j: !bwref x/foo\n    \t\n"],
+  ])("a tab-led block line: the valid control %s still lists the name", (_, text) => {
+    expect(references(text)).toEqual(["x/foo"]);
+  });
+
   test.each([
     ["%YAML after a quoted value", 'a: !<!bwref> "x/foo"\n %YAML 1.1\n'],
     ["%TAG after a quoted value", 'a: !bwref "x/foo"\n  %TAG !x! !bw\n'],
