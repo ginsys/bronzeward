@@ -225,11 +225,6 @@ describe("the start's body and its protected input (G5, §11.2)", () => {
     open.settled!({ kind: "unknown" } as never, {} as never);
     expect(body(open)["document"]).toBe("secret: x");
     expect(body(open)["marks"]).toEqual(["doc[0]/a"]);
-    // An unknown write that can no longer be repeated (set aside, or its client ended) releases them too.
-    open.unrepeatable!({} as never);
-    expect(body(open)).not.toHaveProperty("document");
-    expect(body(open)).not.toHaveProperty("marks");
-    expect(body(open)["machine"]).toBe("mch_b3caa2q");
     const b = { document: "x", marks: ["m"] };
     releaseInput(b, { kind: "done", data: null } as never);
     expect(b).toEqual({});

@@ -254,8 +254,8 @@ export function startBody(i: StartInput): Record<string, unknown> {
 // when the request is sent, and the request drops the document and marks from its body on every
 // outcome except unknown, a write set aside included: `Writes.repeatable` offers only an unknown
 // outcome, so nothing sends a set-aside body again. Until then the body stays for [Repeat exactly],
-// which sends it again. An unknown write that can no longer be repeated (set aside by an epoch change
-// or another sign-in, or its client ended by a sign-out) is told to `unrepeatable`, which releases it.
+// which sends it again. Known gap: an unknown write that is set aside, or dismissed, after it settled
+// keeps them, because nothing tells the start; the release lifecycle is a follow-up.
 export function releaseInput(body: Record<string, unknown>, o: Outcome): void {
   if (o.kind === "unknown") return;
   delete body["document"];
@@ -270,7 +270,6 @@ export function sendStart(send: (spec: WriteSpec) => void, clear: () => void, i:
   clear();
   send({
     method: "POST", path: "/ingestions", resource: "/ingestions", ifMatch, body,
-    unrepeatable: () => releaseInput(body, { kind: "set-aside" } as Outcome),
     settled: (out, w) => {
       releaseInput(body, out);
       const a = out.kind === "done" ? (out.data as { ingestion?: string } | null) : null;
