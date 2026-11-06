@@ -187,8 +187,10 @@ func TestKeychainSecondKeychainLocked(t *testing.T) {
 }
 
 // TestKeychainLockedRefused locks the keychain and checks that every call under the renewal lock
-// is refused at once with nothing written or removed, and that the entry reads again once the
-// keychain is unlocked. It logs what show-keychain-info answers for each state.
+// is refused within about 15 seconds (securityHeldBound) with nothing written or removed, and that
+// the entry reads again once the keychain is unlocked. A locked keychain gives show-keychain-info
+// no answer, so each call waits for its bound, and on a desktop the security tool can show its
+// unlock dialog during that wait. The test logs what show-keychain-info answers for each state.
 func TestKeychainLockedRefused(t *testing.T) {
 	path := temporaryKeychain(t)
 	const user = "BWSYNTH-locked"
