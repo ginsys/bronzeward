@@ -774,6 +774,13 @@ describe("a tag is resolved the way go-yaml does", () => {
     ["a tab-led comment after a comment on a content line", "a: 1 # c\n\t# d\nb: !bwref x/foo\n"],
     ["a tab-only line after a comment, then a key", "a: 1\n# c\n\t\nb: !bwref x/foo\n"],
     ["a tab-only line after a comment, at the end", "a: !bwref x/foo\n# c\n\t\n"],
+    ["a tab-led comment after a comment on a key", "a: # c\n\t# d\n  b: !bwref x/foo\n"],
+    ["a tab-led comment after a comment on an explicit key indicator", "? # c\n\t# d\n  a: !bwref x/foo\n"],
+    ["a tab-led comment after a directive and an empty line", "%YAML 1.1\n\n\t# c\n---\na: !bwref x/foo\n"],
+    ["two tab-only lines after a directive", "%YAML 1.1\n\t\n\t\n---\na: !bwref x/foo\n"],
+    ["a tab-led comment after a marker, past the look-ahead of 512 bytes", `--- # c\n${" ".repeat(510)}\t# d\na: !bwref x/foo\n`],
+    ["a tab-led comment past the look-ahead of 512 bytes", `a: 1\n# c\n${" ".repeat(510)}\t# d\nb: !bwref x/foo\n`],
+    ["a tab-only line and a comment, past the look-ahead of 512 bytes", `a: 1\n# c\n${" ".repeat(255)}\t\n${" ".repeat(255)}\t# d\nb: !bwref x/foo\n`],
   ])("a tab-led block line: %s lists nothing", (_, text) => {
     expect(references(text)).toEqual([]);
   });
@@ -799,6 +806,14 @@ describe("a tag is resolved the way go-yaml does", () => {
     ["a tab-only line after a plain value, past its holder", "k: !bwref x/foo\n \t\n"],
     ["a tab-led comment after a plain value, past its holder", "k: !bwref x/foo\n \t# c\nb: 1\n"],
     ["a tab-only line after a nested plain value", "k:\n  j: !bwref x/foo\n    \t\n"],
+    ["a tab-led comment after a comment on a marker", "--- # c\n\t# d\na: !bwref x/foo\n"],
+    ["a tab-led comment after a comment on a block entry", "- # c\n\t# d\n  a: !bwref x/foo\n"],
+    ["a tab-led comment after a comment on two block entries", "- - # c\n\t# d\n    a: !bwref x/foo\n"],
+    ["a tab-led comment right after a directive", "%YAML 1.1\n\t# c\n---\na: !bwref x/foo\n"],
+    ["a tab-only line right after a directive", "%YAML 1.1\n\t\n---\na: !bwref x/foo\n"],
+    ["a tab-led comment right after a second directive", "%YAML 1.1\n%TAG !a! tag:x\n\t# c\n---\na: !bwref x/foo\n"],
+    ["a tab-led comment at the end of the look-ahead of 512 bytes", `a: 1\n# c\n${" ".repeat(509)}\t# d\nb: !bwref x/foo\n`],
+    ["a tab-only line and a comment, within the look-ahead of 512 bytes", `a: 1\n# c\n${" ".repeat(250)}\t\n${" ".repeat(250)}\t# d\nb: !bwref x/foo\n`],
   ])("a tab-led block line: the valid control %s still lists the name", (_, text) => {
     expect(references(text)).toEqual(["x/foo"]);
   });
