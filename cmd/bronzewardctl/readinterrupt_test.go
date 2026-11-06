@@ -32,35 +32,40 @@ func (l lateCtrlC) Err() error {
 	return nil
 }
 
-// TestContextAddStopsOnACtrlCTakenAsTheProbeEnds: /livez answers 204 and the Ctrl-C comes as the answer
-// does. The command stops with exit 130 and records no context.
+// TestContextAddStopsOnACtrlCTakenAsTheProbeEnds: /livez answers and the Ctrl-C comes as the answer
+// does. The probe may answer 204 or a refusal: the command stops with the Ctrl-C either way, and
+// records no context.
 func TestContextAddStopsOnACtrlCTakenAsTheProbeEnds(t *testing.T) {
-	var taken atomic.Bool
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		taken.Store(true) // the Ctrl-C is taken before the answer reaches the client
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer srv.Close()
-	home := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", home)
-	t.Setenv("XDG_STATE_HOME", home)
-	tok := filepath.Join(home, "token")
-	if err := os.WriteFile(tok, []byte("bwt_BWSYNTH.BWSYNTH-secret\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	var out, errOut bytes.Buffer
-	e := &env{output: "table", out: &out, err: &errOut, heldCtrlC: lateCtrlC{context.Background(), &taken}}
-	err := e.contextAdd([]string{"--server", srv.URL, "--automation-token-file", tok, "late"})
-	var cut *client.Interrupted
-	if !errors.As(err, &cut) || cut.Route != "GET /livez" {
-		t.Errorf("error %v; want the probe stopped by the Ctrl-C taken as it ended", err)
-	}
-	cfg, lerr := client.LoadConfig()
-	if lerr != nil || cfg.Find("late") != nil {
-		t.Errorf("config %v, error %v; want no context \"late\" recorded", cfg, lerr)
-	}
-	if out.Len() != 0 {
-		t.Errorf("stdout %q; want nothing", out.String())
+	for _, status := range []int{http.StatusNoContent, http.StatusServiceUnavailable} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			var taken atomic.Bool
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				taken.Store(true) // the Ctrl-C is taken before the answer reaches the client
+				w.WriteHeader(status)
+			}))
+			defer srv.Close()
+			home := t.TempDir()
+			t.Setenv("XDG_CONFIG_HOME", home)
+			t.Setenv("XDG_STATE_HOME", home)
+			tok := filepath.Join(home, "token")
+			if err := os.WriteFile(tok, []byte("bwt_BWSYNTH.BWSYNTH-secret\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var out, errOut bytes.Buffer
+			e := &env{output: "table", out: &out, err: &errOut, heldCtrlC: lateCtrlC{context.Background(), &taken}}
+			err := e.contextAdd([]string{"--server", srv.URL, "--automation-token-file", tok, "late"})
+			var cut *client.Interrupted
+			if !errors.As(err, &cut) || cut.Route != "GET /livez" {
+				t.Errorf("error %v; want the probe stopped by the Ctrl-C taken as it ended", err)
+			}
+			cfg, lerr := client.LoadConfig()
+			if lerr != nil || cfg.Find("late") != nil {
+				t.Errorf("config %v, error %v; want no context \"late\" recorded", cfg, lerr)
+			}
+			if out.Len() != 0 {
+				t.Errorf("stdout %q; want nothing", out.String())
+			}
+		})
 	}
 }
 
