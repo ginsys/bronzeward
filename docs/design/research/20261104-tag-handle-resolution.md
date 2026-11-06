@@ -106,6 +106,14 @@ splits the name, and a percent escape. The other 3 are the tag-then-anchor shape
 nothing to do with handles (see the separate finding). The single server-refused loss is the
 tagged key. The 16 cases with an extra name are 8 server-refused and 8 go-yaml parse errors.
 
+Update, ginsys/bronzeward#637: the tally above is the oracle as it was on 4 November 2026. That
+oracle listed the name of a tagged key. The oracle now reads a `!bwref` scalar in key position as
+the server does (`tag-placement` in `internal/ingest/declare.go`). It lists no name and marks the
+document as refused by the server. So `!bwref x/foo: v` is now equal on main, not lost, and the
+single server-refused loss in the tally no longer exists. An alias key whose anchor is such a key
+reads the same way. The alias key of a tagged value (`a: &k !bwref x/foo`, then `*k : v`) is a known
+gap. The server refuses it at the alias use, and the oracle still lists the name of the value.
+
 ## Sweep of set S8
 
 Set S8 writes a list of tag spellings (plain, through a handle, verbatim) at many places where a
@@ -177,7 +185,8 @@ then a plain scalar made of words. It reads `&e x/foo` as that scalar. The name 
 141 then rejects it, so nothing is recorded. The tag has no handle, so #603 does not own this
 case. The sweep found 24 such documents that the server accepts: 12 with a plain tag and 12
 with a verbatim tag. The tagged key `!bwref x/foo: v`
-is also lost, but the document is server-refused (`RuleTagPlacement`, line 113).
+was also lost then, but the document is server-refused (`RuleTagPlacement`, line 113). The oracle
+now reads it as refused (see the update in the tally above).
 
 Draft issue body, for the owner to file:
 

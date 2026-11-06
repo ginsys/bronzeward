@@ -49,3 +49,37 @@ func TestCases(t *testing.T) {
 		})
 	}
 }
+
+// TestTaggedKey holds the oracle to the server's rule for a tag on a key (tag-placement in
+// internal/ingest/declare.go): a scalar key with the tag lists no name and marks the document unfit,
+// and so does an alias key whose anchor is such a key. A tag on a value is read as before, also the
+// value of an alias key's anchor (the server refuses that document at the alias use, a known gap of
+// ginsys/bronzeward#637 that the oracle does not model).
+func TestTaggedKey(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		doc   string
+		tags  []string
+		unfit bool
+	}{
+		{"implicit key", "!bwref x/foo: v\n", []string{}, true},
+		{"explicit key", "? !bwref x/foo\n: v\n", []string{}, true},
+		{"explicit key with an anchor", "? &e !bwref x/foo\n: v\n", []string{}, true},
+		{"flow explicit key", "{? !bwref x/foo : v}\n", []string{}, true},
+		{"alias key of a tagged key", "? &k !bwref x/foo\n: v\n*k : w\n", []string{}, true},
+		{"value control", "a: !bwref x/foo\n", []string{"x/foo"}, false},
+		{"sequence entry control", "- !bwref x/foo\n", []string{"x/foo"}, false},
+		{"value of an explicit key control", "? a\n: !bwref x/foo\n", []string{"x/foo"}, false},
+		{"alias key of a tagged value", "a: &k !bwref x/foo\n*k : v\n", []string{"x/foo"}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got := References(c.doc)
+			if got.Err != "" {
+				t.Fatalf("go-yaml refused the stream: %s", got.Err)
+			}
+			if !slices.Equal(got.Tags, c.tags) || got.Unfit != c.unfit {
+				t.Fatalf("got names %v, unfit %v; want %v, %v", got.Tags, got.Unfit, c.tags, c.unfit)
+			}
+		})
+	}
+}
