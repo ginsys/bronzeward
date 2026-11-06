@@ -93,10 +93,40 @@ go-yaml measures the continuation lines of a root scalar against column -1. In e
 | Scanner | Extra | Lost | Newly extra | Newly lost |
 |---|---|---|---|---|
 | Main | 242 | 26 | | |
-| At the change | 6 | 26 | 0 | 0 |
+| At the change | 2 | 26 | 0 | 0 |
 
-The counts cover the 666 documents that go-yaml parses. A refused document counts as no extra name. The scanner lists a name for 244 of the 486 refused documents on main and 66 at the change. The change fixes 236 extra documents and starts none. What is left is outside this issue, and the scanner on main reads each of these documents the same way. The 6 extra documents have a key parent and an anchor before the tag: 2 with `k: &e !bwref x/foo` and 4 with the key on the line above. The 26 lost documents have an anchor after the tag (`!bwref &e x/foo`), the decision of ginsys/bronzeward#607.
+The counts cover the 666 documents that go-yaml parses. A refused document counts as no extra name. The scanner lists a name for 244 of the 486 refused documents on main and 64 at the change. The change fixes 240 extra documents and starts none. What is left is outside this issue, and the scanner on main reads each of these documents the same way. The 2 extra documents have a key parent and an anchor before the tag on the line of the key (`k: &e !bwref x/foo`). The 26 lost documents have an anchor after the tag (`!bwref &e x/foo`), the decision of ginsys/bronzeward#607. Section 9 explains why the count fell from 6 to 2: the 4 documents with the key on the line above were the main defect of section 9.
 
 Two limits of the set. go-yaml v3.0.5 refuses `%YAML 1.2`, so the two directive contexts use `%YAML 1.1`. A first run with 1.2 refused both contexts whole and showed nothing about them. The context of a second document after `...` with no `---` is refused whole too, so it gives no evidence about the continuation of a root scalar.
 
 A comment line after a root scalar ends it in go-yaml (`!bwref x/foo`, then `# c`, then `bar`). The text after the comment is then a document that go-yaml refuses, so the oracle lists no name. The scanner skips the comment line, because it is masked, reads `bar` as the next line and lists no name either. No pair can come from this case. S10 holds no comment as a next line. Two unit tests pin it (`web/src/position.test.ts`), and the oracle rows of seven probes agree: a comment at column 0 and at column 1, after the line of `---`, followed by a word, a dash or an indented word, and a comment after the value on the same line. The only probe that lists a name has a comment and then the end of the text, where the scalar ends and both list the name.
+
+## 9. The indent offset set S11, and the failure that it found
+
+The first sweep of the change on S9 found new extra names against main. Two causes explain them.
+
+- `continues()` measured the next line with `column()`, which counts YAML blanks (a space or a tab). The holder came from `holder()`, which counts with `indent()`, a measure that skips Unicode spaces. A line that starts with U+00A0 or a byte order mark (BOM) then compared against the wrong column. A U+00A0 or a BOM is text in go-yaml, not indentation. The change now measures the holder with `plainHolder()`, which uses `column()`. `holder()` stays for block scalars.
+- An anchor or a tag before the tag (`&e !bwref x/foo` on its own line) hid the parent key from the scanner, so the tag line's own indent became the holder. This is a defect of main for plain ASCII too. For `"k:\n  &e !bwref x/foo\n  bar"` go-yaml reads `bar` as part of the value of `k`, so the value goes on and go-yaml lists no name. Main lists `x/foo`. The change lists none. The holder and `parentLine()` now skip node properties that stand before the tag. `anchoredContinues()` is byte-identical to main.
+
+Two more shapes came out of the set S11 and are in the change.
+
+- An indented root scalar (`  !bwref x/foo`, then any line with text) is a root scalar, measured against column -1. `isRoot()` accepts leading blanks.
+- A BOM at the start of the stream is dropped by go-yaml (no text, no column). The scanner drops a BOM at offset 0 only, in `parentLine()`, `column()` calls on the first line and in `continues()`. A BOM elsewhere stays text.
+
+A second tag before `!bwref` (`!t !bwref x/foo`) makes go-yaml refuse the document: a node takes one tag. The oracle lists no name for it, so no pair can come from this shape.
+
+S11 (`experiments/scanner-cross-line/sets/gen-s11-indent-offsets.ts`) holds 3888 documents, and go-yaml parses 1696 of them. Its sha256 is `f462167f9e28366ef5cc58c36c388d4f63fc8297e251ee4c2f20677c02d50fa0`. It varies the column of the node and the column of the next line together, with spaces, U+00A0 or a tab, so that a mix of the two measures cannot hide.
+
+Known effect, class B. The change does not start any extra or lost name. It does list a name for documents that go-yaml refuses: 48 on S9, 6 on S10 and 56 on S11 (light runs). In these documents a line at a node's own column follows the value, as in the "bar at column 0" case of a refused document on main. They are not errors: a refused document lists nothing on the server. The gate of the issue (no new lost, no new extra) does not count them.
+
+Counts of the light scratch runs, before the full sweep. They will be replaced by the numbers of the full sweep.
+
+| Set | Newly lost | Extra on main | Extra at the change | Newly extra | Refused, listed, new |
+|---|---|---|---|---|---|
+| S5 | 0 | 0 | 0 | 0 | 0 |
+| S8 | 0 | 1195 | 1158 | 0 | not counted |
+| S9 | 0 | 2248 | 270 | 0 | 48 |
+| S10 | 0 | 242 | 2 | 0 | 6 |
+| S11 | 0 | 790 | 96 | 0 | 56 |
+
+The S9 count of section 4 (628 extra after) is from the first sweep and is out of date. The 270 above supersedes it.
