@@ -124,15 +124,15 @@ The local review of the change found two more places where the same rules were n
 
 S12 (`experiments/scanner-cross-line/sets/gen-s12-marker-and-property-lines.ts`) covers both places, each with spaces, U+00A0 and a tab in the next line. It holds 3240 documents, and go-yaml parses 1828 of them. Its sha256 is `7e8bfc05676d128233b9eb23fd4adc79dcd9bd06c71e9ff5d9f3f24d18eddbc2`. At the commit before the repair (f2934894) a light run of S12 against main showed 32 new extra documents: 12 in the "marker" family (a BOM, a CRLF, and a property on the marker line) and 20 in the "pprop" family (a key or a dash, with an anchor-only line). With the repair, S12 has 0 new lost and 0 new extra documents, and the extra count falls from 1024 on main to 0.
 
-Known effect, class B. The change does not start any extra or lost name. It does list a name for documents that go-yaml refuses: 48 on S9, 6 on S10 and 56 on S11. In every one of these documents a line that starts with U+00A0 stands at the column of the node, right after the value (`"k: !bwref x/foo\n bar\n"`). go-yaml ends the scalar at that line, because U+00A0 is text at column 0, and then refuses the document ("could not find expected ':'"). The scanner now ends the scalar there too and lists the name. Main skipped the line and listed none. Main already lists the name for the same document with an ASCII `bar` at column 0. A refused document lists nothing on the server, so these rows are not errors. The gate of the issue (no new lost, no new extra) does not count them.
+Known effect, class B. The change does not start any extra or lost name. It does list a name for documents that go-yaml refuses: 48 on S9, 6 on S10, 56 on S11 and 16 on S12. In every one of the documents of S9, S10 and S11 a line that starts with U+00A0 stands at the column of the node, right after the value (`"k: !bwref x/foo\n bar\n"`). go-yaml ends the scalar at that line, because U+00A0 is text at column 0, and then refuses the document ("could not find expected ':'"). The scanner now ends the scalar there too and lists the name. Main skipped the line and listed none. Main already lists the name for the same document with an ASCII `bar` at column 0. A refused document lists nothing on the server, so these rows are not errors. The gate of the issue (no new lost, no new extra) does not count them.
 
-Counts of the sweep `w616-r1b` at commit a772262a against main 3718d353. The check below shows that no refused-listed row is in a document that go-yaml accepts. Run it from the root of the repository, with the directory of a sweep as the argument. That directory holds `reports-<set>.log`, the output of `cmp-reports.mjs`, and `<set>.oracle.json`, the output of the oracle on the pinned set.
+Counts of the sweep `w616-r2` at commit 58ba0408 against main c32920f9, on the sets S5, S8, S9, S10, S11 and S12. The check below shows that no refused-listed row is in a document that go-yaml accepts. Run it from the root of the repository, with the directory of a sweep as the argument. That directory holds `reports-<set>.log`, the output of `cmp-reports.mjs`, and `<set>.oracle.json`, the output of the oracle on the pinned set.
 
 ```sh
 node experiments/scanner-cross-line/check-refused-split.mjs <sweep dir>
 ```
 
-It reads the ids on the `refusedListed-new` line of each report and looks each one up in the oracle output. The result for the sweep `w616-r1b` is 0 documents in an accepted document, for 0 of 0 on S5, 0 of 0 on S8, 0 of 48 on S9, 0 of 6 on S10 and 0 of 56 on S11. The oracle refuses all 110 documents. The exit code is 1 if one id is in an accepted document or a file is missing.
+It reads the ids on the `refusedListed-new` line of each report and looks each one up in the oracle output. The result for the sweep `w616-r2` is 0 documents in an accepted document, for 0 of 0 on S5, 0 of 0 on S8, 0 of 48 on S9, 0 of 6 on S10, 0 of 56 on S11 and 0 of 16 on S12. The oracle refuses all 126 documents. The exit code is 1 if one id is in an accepted document or a file is missing.
 
 | Set | Newly lost | Extra on main | Extra at the change | Newly extra | Refused, listed, new |
 |---|---|---|---|---|---|
@@ -141,5 +141,6 @@ It reads the ids on the `refusedListed-new` line of each report and looks each o
 | S9 | 0 | 2248 | 270 | 0 | 48 |
 | S10 | 0 | 242 | 2 | 0 | 6 |
 | S11 | 0 | 790 | 96 | 0 | 56 |
+| S12 | 0 | 1024 | 0 | 0 | 16 |
 
 The S9 count of section 4 (628 extra after) is from the first sweep and is out of date. The 270 above supersedes it.
