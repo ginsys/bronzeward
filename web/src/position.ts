@@ -342,7 +342,47 @@ const blank = (line: string) => !/[^ \t\r]/.test(line);
 // plain with no `#`, and no colon before a blank) and its colon, or a lone `- `. A compact collection
 // (`- k:`, `- - x`, `? - x`) and a property before the tag (`&e !bwref`) are not in it
 // (ginsys/bronzeward#616).
-const PLAIN_PARENT = /^(?: *(?:"[^"\n]*"|'[^'\n]*'|[^ \t"'#:\-?[\]{},&*!|>%@`](?:[^#:\n]|:(?![ \t]))*): +| *- +| *)$/;
+const PLAIN_PARENT = /^(?: *(?:"[^"\n]*"|'[^'\n]*'|[^ \t"'#:\-?[\]{},&*!|>%@`](?:[^#:\n]|:(?![ \t]))*): +| *- +)$/;
+
+// The same parents when the tag starts its line: the nearest line above that is less indented holds the
+// scalar, and it is known only if it is a key with nothing after its colon or a lone dash, and not a
+// compact collection (`- k:`, `- -`), whose keys or entries stand at a column its line does not show
+// (ginsys/bronzeward#616).
+const PLAIN_PARENT_LINE = /^(?: *(?:"[^"\n]*"|'[^'\n]*'|[^ \t"'#:\-?[\]{},&*!|>%@`](?:[^#:\n]|:(?![ \t]))*):| *-)[ \r]*$/;
+
+// The nearest line above the tag's line that is less indented than it, as `holder` finds it; undefined
+// if none is above.
+function parentLine(masked: string, tag: number): string | undefined {
+  const start = masked.lastIndexOf("\n", tag) + 1;
+  const own = indent(lineAt(masked, start));
+  for (let e = start - 1; e >= 0; ) {
+    const s = e === 0 ? 0 : masked.lastIndexOf("\n", e - 1) + 1;
+    const l = masked.slice(s, e);
+    if (l.trim() !== "" && indent(l) < own) return l;
+    e = s - 1;
+  }
+  return undefined;
+}
+
+// The column of a line in YAML blanks (U+0020 and tab): go-yaml counts each as one column, and any
+// other Unicode space, U+00A0 included, is text at that column.
+const column = (line: string) => line.length - line.replace(/^[ \t]+/, "").length;
+
+// Whether the tag is on a root scalar: the tag stands on the line of a `---` marker, or on a line with
+// no text above it since the last document marker, and only anchors come before it. go-yaml measures
+// the continuation of such a scalar against column -1, so a line at column 0 goes on, and so do `- `
+// and `? ` lines, which are text there. A key line is a refused document (ginsys/bronzeward#616).
+function isRoot(masked: string, tag: number, before: string): boolean {
+  if (!/^(?:---[ \t]+)?(?:&[A-Za-z0-9_-]+[ \t]+)*$/.test(before)) return false;
+  if (before.startsWith("---")) return true;
+  const lines = masked.slice(0, masked.lastIndexOf("\n", tag) + 1).split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const l = lines[i]!;
+    if (/^(?:---|\.\.\.)(?:[ \t]|$)/.test(l)) break;
+    if (l.trim() !== "") return false;
+  }
+  return true;
+}
 
 // Whether a plain scalar ending at `end` goes on to the next line (ginsys/bronzeward#616). It ends
 // its line, and the next line with text goes on or ends it as go-yaml reads it
@@ -354,7 +394,11 @@ const PLAIN_PARENT = /^(?: *(?:"[^"\n]*"|'[^'\n]*'|[^ \t"'#:\-?[\]{},&*!|>%@`](?
 // a bracket or a brace at its start, and, under a parent known from its line (`PLAIN_PARENT`), for
 // `- `, `? ` and a line with a colon before a blank, which go-yaml refuses as a key. Under a compact
 // parent such a line can belong to the collection that holds the scalar, so it still ends the scalar.
-// A line of Unicode spaces only is text, and go-yaml counts its column in U+0020 only.
+// A tag that starts its line has its parent on the line above, known only for a key with nothing after its
+// colon or a lone dash (`PLAIN_PARENT_LINE`), not for a compact one (`- k:`).
+// A line of Unicode spaces only is text, and go-yaml counts its column in U+0020 only. The column of any
+// other line counts YAML blanks (U+0020 and tab), so a line that starts with U+00A0 has text at column 0.
+// A root scalar (`isRoot`) is measured against column -1: every next line with text goes on.
 function continues(masked: string, tag: number, end: number, inFlow: boolean, cuts: ReadonlySet<number>): boolean {
   const eol = masked.indexOf("\n", end);
   if (eol === -1 || masked.slice(end, eol).trim() !== "") return false;
@@ -363,8 +407,13 @@ function continues(masked: string, tag: number, end: number, inFlow: boolean, cu
   if (next === undefined || MARKER.test(next)) return false;
   const t = next.replace(/^[ \t]+|[ \t\r]+$/g, "");
   if (inFlow) return !/^(?:[,\]}]|:(?:[ \t]|$))/.test(t);
-  if ((next.trim() === "" ? spaces(next) : indent(next)) <= holder(masked, tag)) return false;
-  if (/^[,\]}]/.test(t) || PLAIN_PARENT.test(masked.slice(masked.lastIndexOf("\n", tag) + 1, tag))) return true;
+  const before = masked.slice(masked.lastIndexOf("\n", tag) + 1, tag);
+  if (isRoot(masked, tag, before)) return true;
+  if ((next.trim() === "" ? spaces(next) : column(next)) <= holder(masked, tag)) return false;
+  if (/^[,\]}]/.test(t)) return true;
+  const parent = before.trim() === "" ? parentLine(masked, tag) : undefined;
+  const known = parent === undefined ? PLAIN_PARENT.test(before) : PLAIN_PARENT_LINE.test(parent);
+  if (known) return true;
   return !/^[-?](?:\s|$)/.test(t) && !/:(?:\s|$)/.test(t);
 }
 
