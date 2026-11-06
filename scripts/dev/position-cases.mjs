@@ -129,6 +129,17 @@ const own = [
     ["tagged-explicit-key-flow", "{? !bwref x/foo : v}\n"],
     ["tagged-explicit-key-flow-sequence", "[? !bwref x/foo]\n"],
     ["tagged-implicit-key", "!bwref x/foo: v\n"],
+    // ginsys/bronzeward#629, the implicit key rows that go-yaml accepts. go-yaml refuses rows 50 and 51.
+    // Row 48 (`[!bwref x/foo:]`) is left out: the scanner lists `x/foo` there, a known gap pinned in
+    // web/src/position.test.ts, so a case here would fail.
+    ["tagged-implicit-key-row-46", "- !bwref x/foo:\n"],
+    ["tagged-implicit-key-row-47", "- !bwref x/foo:\n    bar\n"],
+    ["tagged-implicit-key-row-49", "k: [!bwref x/foo:\nbar]\n"],
+    ["tagged-implicit-key-row-55", "{!bwref x/foo: v}\n"],
+    ["tagged-implicit-key-row-56", "[!bwref x/foo: v]\n"],
+    ["tagged-implicit-key-row-57", "- !bwref &e x/foo:\n    bar\n"],
+    ["tagged-implicit-key-row-58", "- &e !bwref x/foo:\n    bar\n"],
+    ["tagged-implicit-key-nested", "k:\n  !bwref x/foo: v\n"],
     ["tagged-alias-key-of-tagged-key", "? &k !bwref x/foo\n: v\n*k : w\n"],
     ["tagged-alias-key-of-tagged-value", "a: &k !bwref x/foo\n*k : v\n"],
     ["explicit-key-value-control", "? a\n: !bwref x/foo\n"],

@@ -603,6 +603,54 @@
    "want": []
   },
   {
+   "name": "tagged-implicit-key-row-46",
+   "source": "ginsys/bronzeward#637",
+   "doc": "- !bwref x/foo:\n",
+   "want": []
+  },
+  {
+   "name": "tagged-implicit-key-row-47",
+   "source": "ginsys/bronzeward#637",
+   "doc": "- !bwref x/foo:\n    bar\n",
+   "want": []
+  },
+  {
+   "name": "tagged-implicit-key-row-49",
+   "source": "ginsys/bronzeward#637",
+   "doc": "k: [!bwref x/foo:\nbar]\n",
+   "want": []
+  },
+  {
+   "name": "tagged-implicit-key-row-55",
+   "source": "ginsys/bronzeward#637",
+   "doc": "{!bwref x/foo: v}\n",
+   "want": []
+  },
+  {
+   "name": "tagged-implicit-key-row-56",
+   "source": "ginsys/bronzeward#637",
+   "doc": "[!bwref x/foo: v]\n",
+   "want": []
+  },
+  {
+   "name": "tagged-implicit-key-row-57",
+   "source": "ginsys/bronzeward#637",
+   "doc": "- !bwref &e x/foo:\n    bar\n",
+   "want": []
+  },
+  {
+   "name": "tagged-implicit-key-row-58",
+   "source": "ginsys/bronzeward#637",
+   "doc": "- &e !bwref x/foo:\n    bar\n",
+   "want": []
+  },
+  {
+   "name": "tagged-implicit-key-nested",
+   "source": "ginsys/bronzeward#637",
+   "doc": "k:\n  !bwref x/foo: v\n",
+   "want": []
+  },
+  {
    "name": "tagged-alias-key-of-tagged-key",
    "source": "ginsys/bronzeward#637",
    "doc": "? &k !bwref x/foo\n: v\n*k : w\n",
