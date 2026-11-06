@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -206,5 +207,48 @@ func TestStreamArmsNothingWithoutAHook(t *testing.T) {
 	_, err := c.Watch("op_BWSYNTH", Watch{Show: func(e Event) { shown = append(shown, e.ID) }, Until: func() (bool, error) { return len(shown) == 2, nil }, sleep: func(time.Duration) {}})
 	if err != nil || len(shown) != 2 {
 		t.Errorf("shown %v, error %v; want both events and no stop", shown, err)
+	}
+}
+
+// TestStreamRefusalBodyStalledEndsOnInterrupt: the stream answers 401 with a whole problem document
+// and then stalls before the body ends. The Ctrl-C ends the body read, and the bytes it returned must
+// not start a renewal: renew takes no context, so it would run on after the Ctrl-C. The stored sign-in
+// differs from the one in use, so a renewal that ran would adopt it, and the token would change.
+func TestStreamRefusalBodyStalledEndsOnInterrupt(t *testing.T) {
+	s := newStreamStall(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/problem+json")
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"type":"urn:bronzeward:problem:unauthenticated","title":"BWSYNTH","status":401,"instance":"req_BWSYNTH"}`)
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	})
+	c, notices, _ := writeClient(t, &fake{epoch: "ep_BWSYNTH-1"}, "ep_BWSYNTH-1")
+	c.Context.Server = s.srv.URL
+	tokens := filepath.Join(t.TempDir(), "tokens")
+	if err := WriteTokens(tokens, &Tokens{AccessToken: "BWSYNTH-stored", RefreshToken: "BWSYNTH-rt2"}); err != nil {
+		t.Fatal(err)
+	}
+	c.Context.Credential = "oidc"
+	c.Context.OIDC = &OIDC{Issuer: "https://idp.example.invalid", TokenFile: tokens}
+	c.signIn = &signIn{store: openStore(c.Context, true), tokens: &Tokens{AccessToken: "BWSYNTH-old", RefreshToken: "BWSYNTH-rt"}}
+	c.token = "BWSYNTH-old"
+	a := newArmed(t)
+	c.Arm = a.hook
+	go func() {
+		<-s.arrived
+		time.Sleep(200 * time.Millisecond) // the whole document reaches the client, and the body stays open
+		a.cancel()
+	}()
+	err := ended(t, c, Watch{})
+	var cut *Interrupted
+	switch {
+	case !errors.As(err, &cut) || cut.Route != streamRoute:
+		t.Errorf("error %v; want the watch stopped by Ctrl-C, naming %s", err, streamRoute)
+	case c.token != "BWSYNTH-old":
+		t.Errorf("token %q; want the one in use: a renewal ran after the Ctrl-C", c.token)
+	case notices.Len() != 0:
+		t.Errorf("notices %q; want none", notices)
+	case s.streams.Load() != 1:
+		t.Errorf("%d stream requests; want 1", s.streams.Load())
 	}
 }
