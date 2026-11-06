@@ -1055,58 +1055,35 @@ describe("a tag is resolved the way go-yaml does", () => {
     expect(references(text)).toEqual(["x/foo"]);
   });
 
-  // ginsys/bronzeward#654: when a flow collection is a simple key that starts at its bracket, go-yaml
-  // refuses it if every item of the collection is an explicit `?` item (`[? b]`, `{? b: c}`, `[? b,]`).
-  // One item that starts with anything else, an item before a `?` item or after it, makes the key
-  // valid. A tag or an anchor before the bracket, or a bracket nested in another, is valid too. The
-  // refusal is a parse error, "did not find expected key" (go.yaml.in/yaml/v3 v3.0.5).
+  // ginsys/bronzeward#654 leaves a flow key of only `?` items unrefused. go-yaml refuses some of these
+  // documents ("did not find expected key") and accepts others by token timing. The scanner lists them
+  // all, as it did before. The rule moved to ginsys/bronzeward#657. Each document here is one go-yaml
+  // accepts, and a refusal rule for this key must not blank it.
   test.each([
-    ["a flow sequence", "a:\n  [? b]: !bwref x/foo\n"],
-    ["a flow mapping", "a:\n  {? b}: !bwref x/foo\n"],
-    ["a flow sequence with a trailing comma", "a:\n  [? b,]: !bwref x/foo\n"],
-    ["a flow sequence of two ? items", "a:\n  [? b, ? c]: !bwref x/foo\n"],
-    ["a flow sequence whose item is a sequence", "a:\n  [? [x]]: !bwref x/foo\n"],
-    ["a flow mapping with a pair", "a:\n  {? b: c}: !bwref x/foo\n"],
-    ["a blank after the bracket", "a:\n  [ ? b ]: !bwref x/foo\n"],
-    ["blanks before the colon", "a:\n  [? b]  : !bwref x/foo\n"],
-    ["a key at the top of the document", "[? b]: !bwref x/foo\n"],
-    ["a key after a dash", "- [? b]: !bwref x/foo\n"],
-    ["a key after an explicit key indicator", "? [? b]: !bwref x/foo\n"],
-    ["a value that is another key", "a:\n  [? b]: c\nd: !bwref x/foo\n"],
-    ["a key of a second document", "c: 1\n---\n[? b]: !bwref x/foo\n"],
-  ])("a flow key with only ? items lists nothing: %s", (_, text) => {
-    expect(references(text)).toEqual([]);
+    ["a sibling key after an explicit entry", "? a\n: b\n[? c]: !bwref x/foo\n"],
+    ["a sibling key after a blank line", "? a\n: b\n\n[? c]: !bwref x/foo\n"],
+    ["a sibling key after a flow sequence value", "? a\n: [b]\n[? c]: !bwref x/foo\n"],
+    ["a sibling key after an anchored value", "? a\n: &x b\n[? c]: !bwref x/foo\n"],
+    ["a sibling key in a mapping", "x:\n  ? a\n  : b\n  [? c]: !bwref x/foo\n"],
+    ["a sibling flow mapping key", "? a\n: b\n{? c}: !bwref x/foo\n"],
+    ["a key after the colon of an explicit key", "? a\n: [? b]: !bwref x/foo\n"],
+    ["a key after an anchor on the value of an explicit key", "? a\n: &x\n  [? b]: !bwref x/foo\n"],
+    ["a key after a tag on the value of an explicit key", "? a\n: !t\n  [? b]: !bwref x/foo\n"],
+    ["a key with another item", "a:\n  [? b, c]: !bwref x/foo\n"],
+    ["a key under a tag", "a:\n  !t [? b]: !bwref x/foo\n"],
+  ])("a flow key with ? items lists the name as before: %s", (_, text) => {
+    expect(references(text)).toEqual(["x/foo"]);
   });
 
+  // The two shapes of the issue that stay unrefused. go-yaml refuses both, and the scanner lists them
+  // as it did before ginsys/bronzeward#657 settles the rule.
   test.each([
-    ["a plain item", "a:\n  [b]: !bwref x/foo\n"],
-    ["a plain item after a ? item", "a:\n  [? b, c]: !bwref x/foo\n"],
-    ["a plain item before a ? item", "a:\n  [b, ? c]: !bwref x/foo\n"],
-    ["a plain item before and after a ? item", "a:\n  [b, ? c, d]: !bwref x/foo\n"],
-    ["a plain item after a ? item in a mapping", "a:\n  {? b, c}: !bwref x/foo\n"],
-    ["a pair after a ? pair", "a:\n  {? b: c, d: e}: !bwref x/foo\n"],
-    ["a plain item after a ? pair", "a:\n  [? b: c, d]: !bwref x/foo\n"],
-    ["a mapping item before a ? item", "a:\n  {a, ? b}: !bwref x/foo\n"],
-    ["a tag before the bracket", "a:\n  !t [? b]: !bwref x/foo\n"],
-    ["an anchor before the bracket", "a:\n  &a [? b]: !bwref x/foo\n"],
-    ["a sequence in a sequence", "a:\n  [[? b]]: !bwref x/foo\n"],
-    ["a mapping in a sequence", "a:\n  [{? b}]: !bwref x/foo\n"],
-    ["a quoted item", 'a:\n  ["? b"]: !bwref x/foo\n'],
-    ["a key inside a flow mapping", "{[? b]: !bwref x/foo}\n"],
-    ["a key inside a flow sequence", "[[? b]: !bwref x/foo]\n"],
-    ["a collection that is no key", "a: [? b]\nc: !bwref x/foo\n"],
-    ["a collection that is a value", "a:\n  - [? b]\n  - !bwref x/foo\n"],
-    ["an explicit key", "a:\n  ? [? b]\n  : !bwref x/foo\n"],
-    ["after the colon of an explicit key", "? a\n: [? b]: !bwref x/foo\n"],
-    ["after the colon of an explicit key on the next line", "? a\n:\n  [? b]: !bwref x/foo\n"],
-    ["after an anchor on the value of an explicit key", "? a\n: &x\n  [? b]: !bwref x/foo\n"],
-    ["after a tag on the value of an explicit key", "? a\n: !t\n  [? b]: !bwref x/foo\n"],
-    ["after an anchor and a tag on the value of an explicit key", "? a\n: &x !t\n  [? b]: !bwref x/foo\n"],
-    ["after an anchor, a comment and a break on the value of an explicit key", "? a\n: &x # c\n  {? b}: !bwref x/foo\n"],
-    ["in a sequence entry, after an anchor on the value of an explicit key", "- ? a\n  : &x\n    [? b]: !bwref x/foo\n"],
-    ["a key that is empty", "a:\n  []: !bwref x/foo\n"],
-    ["a mapping key that is empty", "a:\n  {}: !bwref x/foo\n"],
-  ])("a flow key with another item still lists the name: %s", (_, text) => {
+    ["a flow sequence key", "a:\n  [? b]: !bwref x/foo\n"],
+    ["a flow mapping key", "a:\n  {? b}: !bwref x/foo\n"],
+    ["a sibling key after an implicit entry", "a: b\n[? c]: !bwref x/foo\n"],
+    ["a sibling key after two entries", "? a\n: b\nd: e\n[? c]: !bwref x/foo\n"],
+    ["a key after a sequence entry", "- ? a\n  : b\n- [? c]: !bwref x/foo\n"],
+  ])("a flow key of only ? items that go-yaml refuses is not refused yet: %s", (_, text) => {
     expect(references(text)).toEqual(["x/foo"]);
   });
 
