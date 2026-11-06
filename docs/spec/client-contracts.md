@@ -542,8 +542,10 @@ client always shows `title`, `detail` when present, and `instance`, each escaped
 A Ctrl-C ends a read at once: a request in flight and a wait before a retry stop, the command prints
 one line that names the request and exits 130. It does not change the retry rules above. The Ctrl-C
 is taken for each read only. A write, and a read made inside a write, does not take it. The renewal
-of a stored sign-in is not cut short: it runs to its end, and the stop follows. After the first Ctrl-C
-the client sends no further read. A command that reads again after it, for a lookup that does not
+of a stored sign-in is not cut short: it runs to its end, and the stop follows. After the first Ctrl-C,
+the read writes no further notice and runs no callback of its caller, such as showing or clearing an
+event or asking whether to stop; a write that has already started is not cut short. After the first
+Ctrl-C the client sends no further read. A command that reads again after it, for a lookup that does not
 decide its result, still exits 130 with the stop line of the first Ctrl-C. A write that was not
 yet started is not sent. An error that the command returns beside the stop, such as a failed save
 of the state, prints first, and the stop line ends the output. An unknown outcome keeps exit 3 and
