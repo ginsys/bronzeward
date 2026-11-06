@@ -1009,6 +1009,16 @@ describe("a tag is resolved the way go-yaml does", () => {
     expect(references("a: [plain?]\n---\nb: !bwref x/bar\n")).toEqual(["x/bar"]);
   });
 
+  // Controls: a `?` that opens a key, at the start of a flow item, is an explicit-key indicator and
+  // leaves the document valid; go-yaml v3.0.5 parses each of these and reads the tag.
+  test.each([
+    ["after a comma in a sequence", "a: [x, ? y]\nb: !bwref x/foo\n"],
+    ["first in a sequence", "a: [? y: !bwref x/foo]\n"],
+    ["first in a mapping", "a: {? k: !bwref x/foo}\n"],
+  ])("a question mark that opens a key %s leaves the document valid", (_, text) => {
+    expect(references(text)).toEqual(["x/foo"]);
+  });
+
   // In block context a `?` inside a plain scalar is text.
   test("a question mark in a block plain scalar is text", () => {
     expect(references("a: plain?\n  more\nb: !bwref x/foo\n")).toEqual(["x/foo"]);
