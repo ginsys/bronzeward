@@ -31,11 +31,13 @@ type opFake struct {
 	beat          time.Duration // when set, a held stream sends a keep-alive comment this often
 	lateFrom      int           // from this page request on (when set), the pages are latePages: events written after a restore
 	latePages     []string
-	badServer     bool          // the server read answers 200 with a body that is no JSON
-	pagesFail     bool          // the JSON event pages answer 404: reading the events fails
-	badReadFrom   int           // from this operation read on (when set), the answer is 200 with a body that is no JSON: an ambiguous answer
-	forbidFrom    int           // from this operation read on (when set), the answer is a 403 problem: a refusal the server named
-	cutFrom       int           // from this operation read on (when set), the answer is a 403 whose body stops short: a status with no problem document
+	badServer     bool // the server read answers 200 with a body that is no JSON
+	pagesFail     bool // the JSON event pages answer 404: reading the events fails
+	badReadFrom   int  // from this operation read on (when set), the answer is 200 with a body that is no JSON: an ambiguous answer
+	forbidFrom    int  // from this operation read on (when set), the answer is a 403 problem: a refusal the server named
+	cutFrom       int  // from this operation read on (when set), the answer is a 403 whose body stops short: a status with no problem document
+	outageFrom    int  // from this operation read on (when set), outageReads reads are answered 502: a server that is down
+	outageReads   int
 	serverHang    chan struct{} // when set, the server read waits for this before it answers
 	serverReqs    int           // server reads so far
 	readHang      chan struct{} // when set, an operation read waits for this before it answers
@@ -79,6 +81,10 @@ func (f *opFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if f.readHang != nil {
 			f.readStalls++
 			f.stall(r, f.readHang)
+		}
+		if f.outageFrom > 0 && f.reads >= f.outageFrom && f.reads < f.outageFrom+f.outageReads {
+			w.WriteHeader(http.StatusBadGateway)
+			return
 		}
 		if f.forbidFrom > 0 && f.reads >= f.forbidFrom {
 			w.Header().Set("Content-Type", "application/problem+json")

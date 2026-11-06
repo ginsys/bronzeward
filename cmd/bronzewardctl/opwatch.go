@@ -259,7 +259,7 @@ func (e *env) operationWatch(args []string) (err error) {
 			done <- result{c: oc, err: err}
 			return
 		}
-		first, _, err := oc.OperationEpoch(id)
+		first, firstRead, err := oc.OperationBody(id)
 		if err != nil {
 			done <- result{c: oc, err: err}
 			return
@@ -272,6 +272,11 @@ func (e *env) operationWatch(args []string) (err error) {
 			// A watch whose output cannot be written has nothing left to show: it stops reading.
 			Until: func() (bool, error) { return ended.Load() != 0 || out.failure() != nil, nil },
 		})
+		// The watch ended (--timeout, or a Ctrl-C taken by Until) while its read of the operation waited
+		// for a server out of reach: the state is the first read's, which the stop lines name as the last read.
+		if o == nil && errors.Is(err, client.ErrWatchEnded) {
+			o, read, err = first, firstRead, nil
+		}
 		done <- result{c: oc, o: o, read: read, err: err}
 	}()
 
