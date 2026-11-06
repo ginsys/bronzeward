@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -165,6 +166,11 @@ type env struct {
 	// command has a handler of its own, so its reads arm none (interrupt.go).
 	heldCtrlC context.Context
 	ownsCtrlC bool
+
+	// cut is the first Ctrl-C a read took in this run (cutNow): it ends the command with exit 130,
+	// also when a caller dropped the error of that read.
+	cutMu sync.Mutex
+	cut   *client.Interrupted
 }
 
 func main() {
@@ -239,7 +245,26 @@ func run(args []string, stdout, stderr io.Writer) int {
 	} else if err == nil {
 		err = commands[pos[0]](pos[1:])
 	}
-	return report(err, stdout, stderr)
+	return report(e.afterCut(err, stderr), stdout, stderr)
+}
+
+// afterCut makes a Ctrl-C that a read took end the command, also when a caller dropped the error of
+// that read (a best-effort lookup, say): the stop line and exit 130 win. An error the command also
+// returned keeps its own line, printed first, because a failure is never hidden. The outcome of a
+// write that is unknown keeps its exit 3, the line to follow an operation its own.
+func (e *env) afterCut(err error, stderr io.Writer) error {
+	cut := e.cutNow(nil)
+	var stopped interrupted
+	var unknown *client.Unknown
+	var settled outcomeUnknown
+	var signalled endedBySignal
+	if cut == nil || errors.As(err, new(*client.Interrupted)) || errors.As(err, &stopped) || errors.As(err, &unknown) || errors.As(err, &settled) || errors.As(err, &signalled) {
+		return err
+	}
+	if err != nil {
+		fmt.Fprintln(stderr, "bronzewardctl:", client.Shown(err))
+	}
+	return cut
 }
 
 // report prints the error of a command, the one place that does, and returns the exit code.
@@ -375,7 +400,7 @@ func (e *env) openTo(notices, verbose io.Writer) (*client.Client, error) {
 	}
 	c, err := client.Open(x, client.TokenInput{NoInput: e.noInput, File: e.tokenFile, Stdin: e.tokenStdin}, notices, verbose)
 	if c != nil {
-		c.Arm = e.arm
+		c.Arm, c.Cut = e.arm, e.cutNow
 	}
 	return c, err
 }

@@ -136,8 +136,118 @@ func TestReadCtrlCExits130WithOneStopLine(t *testing.T) {
 	}
 }
 
-// TestCtrlCIsNotHeldBetweenReads: after a read ended with its Ctrl-C taken, nothing holds the signal
-// any more. A new read arms again and takes its own, so a command that reads twice stops on either.
+// TestContextAddFetchEndsOnCtrlC: context add --from reads bronzeward-client.json before the probe,
+// and that file never comes. The Ctrl-C ends the command with exit 130 and the one stop line, not
+// with the default action of SIGINT (a reviewer's finding on the first publication of #643).
+func TestContextAddFetchEndsOnCtrlC(t *testing.T) {
+	srv, arrived := stalledServer(t)
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", home)
+	t.Setenv("XDG_STATE_HOME", home)
+	tok := filepath.Join(home, "token")
+	if err := os.WriteFile(tok, []byte("bwt_BWSYNTH.BWSYNTH-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		<-arrived // the handler is armed before the request is sent
+		_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
+	}()
+	code, out, errOut := runCtl(t, "context", "add", "--server", srv.URL, "--from", srv.URL, "--automation-token-file", tok, "lab")
+	const stop = "Stopped at your request while reading GET /bronzeward-client.json.\n"
+	if code != 130 || out != "" || errOut != stop {
+		t.Errorf("exit %d, stdout %q, stderr %q; want 130, no output and %q", code, out, errOut, stop)
+	}
+	if cfg, err := client.LoadConfig(); err != nil || cfg.Find("lab") != nil {
+		t.Errorf("config %v, error %v; want no context \"lab\" recorded", cfg, err)
+	}
+}
+
+// TestRecoveryStatusStopsOnCtrlCInTheHolderLookup: recovery status looks up the operation that holds an
+// unresolved scope, as a best effort that turns any failure into advice. The lookup never answers and
+// the Ctrl-C ends it. The command exits 130 with the stop line, not 0 (the helper dropped the error).
+func TestRecoveryStatusStopsOnCtrlCInTheHolderLookup(t *testing.T) {
+	arrived, hang := make(chan struct{}, 16), make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Bronzeward-Epoch", "ep_BWSYNTH-1")
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/server":
+			fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":3,"startMode":"recovery"}`)
+		case "/api/v1/identity":
+			fmt.Fprint(w, `{"kind":"service","principal":"svc_BWSYNTH"}`)
+		case "/api/v1/recovery":
+			fmt.Fprint(w, `{"epoch":"ep_BWSYNTH-1","recoveryMode":true,"scopes":[{"machine":"mch_b","state":"unresolved"}]}`)
+		case "/api/v1/operations":
+			arrived <- struct{}{}
+			select {
+			case <-hang:
+			case <-r.Context().Done():
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	defer close(hang)
+	automationContext(t, srv.URL)
+	go func() {
+		<-arrived
+		_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
+	}()
+	code, _, errOut := runCtl(t, "recovery", "status")
+	const stop = "Stopped at your request while reading GET /api/v1/operations"
+	if code != 130 || !strings.HasPrefix(errOut, stop) || strings.Count(errOut, "\n") != 1 {
+		t.Errorf("exit %d, stderr %q; want 130 and the one stop line %q...", code, errOut, stop)
+	}
+}
+
+// TestAfterCutKeepsOtherFailuresAndWriteOutcomes: a Ctrl-C taken by a read wins the exit code, but an
+// error the command also returned is printed first, and an unknown write outcome keeps its exit 3.
+func TestAfterCutKeepsOtherFailuresAndWriteOutcomes(t *testing.T) {
+	first := &client.Interrupted{Route: "GET /api/v1/clusters"}
+	for _, tc := range []struct {
+		name string
+		err  error
+		want int
+		line string
+	}{
+		{"no error", nil, 130, ""},
+		{"an ordinary error", errors.New("the lookup failed"), 130, "bronzewardctl: the lookup failed\n"},
+		{"an unknown write outcome", &client.Unknown{}, 3, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := &env{}
+			e.cutNow(first)
+			var out, errOut bytes.Buffer
+			err := e.afterCut(tc.err, &errOut)
+			code := report(err, &out, &errOut)
+			if code != tc.want || !strings.HasPrefix(errOut.String(), tc.line) {
+				t.Errorf("exit %d, stderr %q; want exit %d after %q", code, errOut.String(), tc.want, tc.line)
+			}
+			if tc.want == 130 && !strings.HasSuffix(errOut.String(), "Stopped at your request while reading GET /api/v1/clusters.\n") {
+				t.Errorf("stderr %q; want it to end with the stop line of the first Ctrl-C", errOut.String())
+			}
+		})
+	}
+}
+
+// TestArmAfterACutEndsAtOnce: after a read recorded its Ctrl-C, a later read gets a context that has
+// ended and a disarm that says so, and the first cut stays the one the run reports.
+func TestArmAfterACutEndsAtOnce(t *testing.T) {
+	e := &env{}
+	e.cutNow(&client.Interrupted{Route: "GET /api/v1/clusters"})
+	ctx, disarm := e.arm()
+	if ctx.Err() == nil || !disarm() {
+		t.Errorf("context error %v, disarm false; want an ended context and a taken Ctrl-C", ctx.Err())
+	}
+	e.cutNow(&client.Interrupted{Route: "GET /api/v1/machines"})
+	if got := e.cutNow(nil).Route; got != "GET /api/v1/clusters" {
+		t.Errorf("cut %q; want the first, GET /api/v1/clusters", got)
+	}
+}
+
+// TestCtrlCIsNotHeldBetweenReads: until a read has recorded its Ctrl-C (cutNow), arm hands out a
+// handler for each read. Once it did, every later read ends at once (TestArmAfterACutEndsAtOnce).
 func TestCtrlCIsNotHeldBetweenReads(t *testing.T) {
 	e := &env{}
 	for i := 0; i < 2; i++ {

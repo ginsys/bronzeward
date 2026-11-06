@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
+
+	"github.com/ginsys/bronzeward/internal/client"
 )
 
 // arm takes the first Ctrl-C of one read (decision of #643). It returns the context that the Ctrl-C
@@ -18,6 +21,11 @@ import (
 // and grace time), or when SIGINT was inherited as ignored (nohup, a background job): it stays
 // ignored, as the review pager has it.
 func (e *env) arm() (context.Context, func() bool) {
+	if e.cutNow(nil) != nil { // a Ctrl-C was taken: no read goes on, and no handler comes back
+		done, stop := context.WithCancel(context.Background())
+		stop()
+		return done, func() bool { return true }
+	}
 	if held := e.heldCtrlC; held != nil { // a command that holds Ctrl-C for its whole run: its reads share the context
 		return held, func() bool { return held.Err() != nil }
 	}
@@ -54,6 +62,33 @@ func (e *env) arm() (context.Context, func() bool) {
 		})
 		return taken
 	}
+}
+
+// cutNow records e, the Ctrl-C a read took, when it is the first, and returns the first one of the
+// run. A nil e only asks. Reads in goroutines (operation watch, the timeline) call it too.
+func (e *env) cutNow(c *client.Interrupted) *client.Interrupted {
+	e.cutMu.Lock()
+	defer e.cutMu.Unlock()
+	if e.cut == nil {
+		e.cut = c
+	}
+	return e.cut
+}
+
+// cancellable runs one read that has no client of its own yet (context add) with the Ctrl-C of arm.
+// A Ctrl-C taken as the read ends stops the command, whatever the read answered.
+func (e *env) cancellable(route string, read func(context.Context) error) error {
+	ctx, disarm := e.arm()
+	err := read(ctx)
+	var cut *client.Interrupted
+	if disarm() && !errors.As(err, &cut) {
+		cut = &client.Interrupted{Route: route}
+		err = cut
+	}
+	if cut != nil {
+		e.cutNow(cut)
+	}
+	return err
 }
 
 // hold arms Ctrl-C for the whole run of a command that reads and waits in turns (machine timeline
