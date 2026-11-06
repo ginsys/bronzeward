@@ -308,8 +308,9 @@ function nextLine(s: string, start: number, cuts: ReadonlySet<number>, isBlank =
 // line. With `compact`, after sequence dashes (`- - a: !bwref`) that is the column of the key, or of
 // the last dash when the tag follows it directly, also after an anchor (`- &e !bwref |-`), which
 // belongs to the entry: a compact mapping's keys sit at the column after the dash
-// (ginsys/bronzeward#544). Only a block scalar's content is bound by that column. A plain
-// scalar's next line is read against the line's own indentation, as before, so that a form go-yaml
+// (ginsys/bronzeward#544). Only a block scalar's content is bound by that column. It counts the
+// indentation with `indent`, as before. A plain scalar's next line is read by `plainHolder`, in YAML
+// blanks, against the line's own indentation, so that a form go-yaml
 // refuses (`- a: !bwref x/foo` then `  y`) still names nothing. A tag that starts its line is the
 // value of the nearest line above that is less indented, so the next line may continue it at the
 // tag's own indentation; -1 if no line is above.
@@ -350,15 +351,25 @@ const PLAIN_PARENT = /^(?: *(?:"[^"\n]*"|'[^'\n]*'|[^ \t"'#:\-?[\]{},&*!|>%@`](?
 // (ginsys/bronzeward#616).
 const PLAIN_PARENT_LINE = /^(?: *(?:"[^"\n]*"|'[^'\n]*'|[^ \t"'#:\-?[\]{},&*!|>%@`](?:[^#:\n]|:(?![ \t]))*):| *-)[ \r]*$/;
 
-// The nearest line above the tag's line that is less indented than it, as `holder` finds it; undefined
+// go-yaml drops a byte order mark at the start of the stream before it reads any text, so it is no
+// column and no text there; it is dropped from the first line only (ginsys/bronzeward#616).
+const bom = (masked: string, at: number) => (at === 0 && masked.charCodeAt(0) === 0xfeff ? 1 : 0);
+const lineFrom = (masked: string, start: number) => lineAt(masked, start).slice(bom(masked, start));
+
+// Whether the text before a tag on its line is only blanks and node properties (anchors and tags, which
+// belong to the node, not to the line): then the tag's node starts the line as far as its holder goes, so
+// `k:\n  &e !bwref x/foo` is the value of `k`, as `k:\n  !bwref x/foo` is (ginsys/bronzeward#616).
+const startsLine = (before: string) => /^(?:[ \t]*(?:&[A-Za-z0-9_-]+|![^ \t]*)[ \t]+)*[ \t]*$/.test(before);
+
+// The nearest line above the tag's line that is less indented than it, as `plainHolder` finds it; undefined
 // if none is above.
 function parentLine(masked: string, tag: number): string | undefined {
   const start = masked.lastIndexOf("\n", tag) + 1;
-  const own = indent(lineAt(masked, start));
+  const own = column(lineFrom(masked, start));
   for (let e = start - 1; e >= 0; ) {
     const s = e === 0 ? 0 : masked.lastIndexOf("\n", e - 1) + 1;
-    const l = masked.slice(s, e);
-    if (l.trim() !== "" && indent(l) < own) return l;
+    const l = masked.slice(s + bom(masked, s), e);
+    if (!blank(l) && column(l) < own) return l;
     e = s - 1;
   }
   return undefined;
@@ -368,12 +379,29 @@ function parentLine(masked: string, tag: number): string | undefined {
 // other Unicode space, U+00A0 included, is text at that column.
 const column = (line: string) => line.length - line.replace(/^[ \t]+/, "").length;
 
+// `holder` for a plain scalar, measured as `column` measures the next line: in YAML blanks (U+0020
+// and tab). A line that starts with U+00A0 or a byte order mark has text at column 0, so its key
+// stands at column 0, not at the width of the leading Unicode spaces that `indent` counts.
+function plainHolder(masked: string, tag: number): number {
+  const start = masked.lastIndexOf("\n", tag) + 1;
+  const own = column(lineFrom(masked, start));
+  if (!startsLine(masked.slice(start + bom(masked, start), tag))) return own;
+  for (let e = start - 1; e >= 0; ) {
+    const s = e === 0 ? 0 : masked.lastIndexOf("\n", e - 1) + 1;
+    const l = masked.slice(s + bom(masked, s), e);
+    if (!blank(l) && column(l) < own) return column(l);
+    e = s - 1;
+  }
+  return -1;
+}
+
 // Whether the tag is on a root scalar: the tag stands on the line of a `---` marker, or on a line with
-// no text above it since the last document marker, and only anchors come before it. go-yaml measures
+// no text above it since the last document marker, and only blanks and anchors come before it (a root
+// scalar may be indented, as the first line of a stream may start at any column). go-yaml measures
 // the continuation of such a scalar against column -1, so a line at column 0 goes on, and so do `- `
 // and `? ` lines, which are text there. A key line is a refused document (ginsys/bronzeward#616).
 function isRoot(masked: string, tag: number, before: string): boolean {
-  if (!/^(?:---[ \t]+)?(?:&[A-Za-z0-9_-]+[ \t]+)*$/.test(before)) return false;
+  if (!/^(?:---[ \t]+)?[ \t]*(?:&[A-Za-z0-9_-]+[ \t]+)*$/.test(before)) return false;
   if (before.startsWith("---")) return true;
   const lines = masked.slice(0, masked.lastIndexOf("\n", tag) + 1).split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -399,6 +427,9 @@ function isRoot(masked: string, tag: number, before: string): boolean {
 // A line of Unicode spaces only is text, and go-yaml counts its column in U+0020 only. The column of any
 // other line counts YAML blanks (U+0020 and tab), so a line that starts with U+00A0 has text at column 0.
 // A root scalar (`isRoot`) is measured against column -1: every next line with text goes on.
+// The holder (`plainHolder`) is measured in the same blanks as the next line, so a key that starts with
+// U+00A0 stands at column 0. An anchor or a tag before the tag belongs to the node, not to the line (`startsLine`).
+// A byte order mark at the start of the stream is no text and no column (`bom`).
 function continues(masked: string, tag: number, end: number, inFlow: boolean, cuts: ReadonlySet<number>): boolean {
   const eol = masked.indexOf("\n", end);
   if (eol === -1 || masked.slice(end, eol).trim() !== "") return false;
@@ -407,11 +438,12 @@ function continues(masked: string, tag: number, end: number, inFlow: boolean, cu
   if (next === undefined || MARKER.test(next)) return false;
   const t = next.replace(/^[ \t]+|[ \t\r]+$/g, "");
   if (inFlow) return !/^(?:[,\]}]|:(?:[ \t]|$))/.test(t);
-  const before = masked.slice(masked.lastIndexOf("\n", tag) + 1, tag);
+  const lineStart = masked.lastIndexOf("\n", tag) + 1;
+  const before = masked.slice(lineStart + bom(masked, lineStart), tag);
   if (isRoot(masked, tag, before)) return true;
-  if ((next.trim() === "" ? spaces(next) : column(next)) <= holder(masked, tag)) return false;
+  if ((next.trim() === "" ? spaces(next) : column(next)) <= plainHolder(masked, tag)) return false;
   if (/^[,\]}]/.test(t)) return true;
-  const parent = before.trim() === "" ? parentLine(masked, tag) : undefined;
+  const parent = startsLine(before) ? parentLine(masked, tag) : undefined;
   const known = parent === undefined ? PLAIN_PARENT.test(before) : PLAIN_PARENT_LINE.test(parent);
   if (known) return true;
   return !/^[-?](?:\s|$)/.test(t) && !/:(?:\s|$)/.test(t);
