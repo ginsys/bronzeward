@@ -77,6 +77,15 @@ The same files back a second note, on [issue 603](https://github.com/ginsys/bron
   (3,888 documents, 1,696 of them parsed by go-yaml). It is not in `sets/MANIFEST` and `run/gen-sets`
   does not write it: `node sets/gen-s11-indent-offsets.ts s11.json` makes it. `judge-s10.mjs` reads it
   in the same way, since the document names have the same five parts.
+- `sets/gen-s12-marker-and-property-lines.ts` — set S12, the lines before a plain `!bwref` value that
+  fix its holder, and the line after it. Family "marker": a root scalar after a `---` line, with and
+  without a byte order mark at the start of the stream, LF or CRLF line ends, a property on the marker
+  line, the tag line at column 0 to 2, the tag alone or after an anchor, and a next line at column 0 to 2
+  of spaces, of spaces and U+00A0 or of spaces and a tab. Family "pprop": a parent (a key, a dash, a
+  compact `- k:`), then a line that holds only an anchor, then the tag, then the next line in the same
+  three forms (3,240 documents, 1,828 of them parsed by go-yaml). It is not in `sets/MANIFEST` and
+  `run/gen-sets` does not write it: `node sets/gen-s12-marker-and-property-lines.ts s12.json` makes it.
+  `judge-s10.mjs` reads it in the same way as S10 and S11.
 - `check-refused-split.mjs` — reads the `refusedListed-new` line of each `cmp-reports.mjs` report of a
   sweep and checks every id against the oracle output of the set: each must be a document go-yaml
   refuses. `node check-refused-split.mjs <sweep dir> [set ...]`, where the directory holds
@@ -114,7 +123,7 @@ count and sha256.
 | S2 context | The context sweep of issue 578: lines before a probe line, such as block scalars that hold a flow opener, then the probe at several indentations | 3000 |
 | S3 review | Documents written by hand during reviews and probes, including quoted text that holds a tag | 70 |
 | S4 families | The families sweep of issue 578: block scalar headers (indentation and chomping indicators, comments, some with a digit) and the lines around them | 20624 |
-| S5 cases | The curated cases: one file, with the result go-yaml gives for each (`want: null` means go-yaml must refuse the document). It holds the documents of issues 560, 578, 592, 593 and 594, of the hosted review of pull request 599, of the block scalar header (issue 598) and of the hosted review of the change for issue 616 (a no-break space at column 0, a tag on its own line under a compact key or dash) | 42 |
+| S5 cases | The curated cases: one file, with the result go-yaml gives for each (`want: null` means go-yaml must refuse the document). It holds the documents of issues 560, 578, 592, 593 and 594, of the hosted review of pull request 599, of the block scalar header (issue 598) and of the hosted review of the change for issue 616 (a no-break space at column 0, a tag on its own line under a compact key or dash) and of the local review of that change (a byte order mark or a CRLF before a marker, a line of an anchor only) | 45 |
 | S6 random | Held out. Random documents from a pool of line fragments, with a fixed seed (mulberry32, seed 598). No candidate was tuned on it | 99983 |
 | S7 colon flow | The colon-flow sweep from a review of issue 578: a flow collection opened right after a value colon, then a quote with a `#` and a reference | 21672 |
 | S8 state edges | Added for the hosted review of pull request 602: blank and comment lines around block scalar headers, properties on empty and explicit keys, a colon on the next line, a comment right after a token, a byte order mark, what follows a document marker or an indicator (space, tab, carriage return, U+00A0 and other Unicode spaces), tag-like text in comments and quotes before a real tag, flow collections as block keys, every spelling of the tag (through a handle, verbatim) at every place a property stands, `%TAG` and `%YAML` directives, the tag that a handle or a percent escape resolves to (a prefix that holds part of the name, a bad escape), a directive in the first column after each kind of content, a marker or a directive inside an open flow collection, text on the `...` line, the shapes that go-yaml refuses and the scanner blanks with their document (issue 620: a second tag on one node, a `%` where a token starts, a `---` or `...` marker in the first column of a quoted scalar, each with controls that must still list), a directive line between a plain value and an indented line and a `?` in a flow collection (issue 632, with controls: a comment line, an indented `%` line, a `?` that opens a key, a `?` in block context), the line ends of those families as a CRLF, a lone carriage return, U+0085, U+2028 and U+2029, then every three lines of a pool of state-changing lines. Deterministic, no seed. Not run by `run/all` | 245696 |

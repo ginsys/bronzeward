@@ -1284,4 +1284,33 @@ describe("a plain !bwref value that goes on to the next line", () => {
   ])("a line that starts with a no-break space at the key column (%s) ends the value of a refused document", (_, text) => {
     expect(references(text)).toEqual(["x/foo"]);
   });
+
+  // A root scalar after a marker line: the stream-start byte order mark is no text before the marker, a
+  // CRLF after the marker is no text, and a property on the marker line (`--- &e`) belongs to the node. In
+  // each form the scalar is a root scalar, measured against column -1, so a line of a no-break space and
+  // text at column 0 goes on. The rows are from the review of this change and the set S12
+  // (experiments/scanner-cross-line), judged against go-yaml v3.0.5.
+  test.each([
+    ["a byte order mark before the marker", "\ufeff---\n !bwref x/foo\n\u00a0bar\n"],
+    ["a byte order mark before the marker, a word at column 0", "\ufeff---\n !bwref x/foo\nbar\n"],
+    ["a CRLF marker line", "---\r\n !bwref x/foo\r\n\u00a0bar\r\n"],
+    ["a CRLF marker line, indented by two", "---\r\n  !bwref x/foo\r\n\u00a0bar\r\n"],
+    ["a byte order mark and a property on the marker line", "\ufeff--- &e\n !bwref x/foo\n\u00a0bar\n"],
+    ["a byte order mark, a CRLF and a property on the marker line", "\ufeff--- &e\r\n !bwref x/foo\r\n\u00a0bar\r\n"],
+  ])("a root scalar after %s goes on and lists nothing", (_, text) => {
+    expect(references(text)).toEqual([]);
+  });
+
+  // A line that holds only a node property (`&e`) is no parent: the key above it holds the value, as when
+  // the anchor stands on the line of the tag. A line of a space and U+00A0 under a key at column 0 is more
+  // indented than the key and goes on. The same holds for a dash and for a key at column 1.
+  test.each([
+    ["a key", "k:\n &e\n  !bwref x/foo\n \u00a0bar\n"],
+    ["a key at column 1", " k:\n  &e\n   !bwref x/foo\n  \u00a0bar\n"],
+    ["a key that starts with a no-break space", "\u00a0k:\n &e\n  !bwref x/foo\n \u00a0bar\n"],
+    ["a dash", "-\n &e\n  !bwref x/foo\n \u00a0bar\n"],
+    ["a key, the tag at the column of the anchor line", "k:\n &e\n !bwref x/foo\n \u00a0bar\n"],
+  ])("an anchor on a line of its own under %s, then a more indented no-break space line, lists nothing", (_, text) => {
+    expect(references(text)).toEqual([]);
+  });
 });

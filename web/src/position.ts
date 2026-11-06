@@ -361,15 +361,19 @@ const lineFrom = (masked: string, start: number) => lineAt(masked, start).slice(
 // `k:\n  &e !bwref x/foo` is the value of `k`, as `k:\n  !bwref x/foo` is (ginsys/bronzeward#616).
 const startsLine = (before: string) => /^(?:[ \t]*(?:&[A-Za-z0-9_-]+|![^ \t]*)[ \t]+)*[ \t]*$/.test(before);
 
+// A line that holds node properties only (`&e`, `!t`): they belong to the node on the lines below, so
+// the line is no parent of the tag (`k:\n &e\n  !bwref x/foo` is the value of `k`, not of `&e`).
+const propertiesOnly = (line: string) => /^[ \t]*(?:(?:&[A-Za-z0-9_-]+|![^ \t]*)[ \t]*)+\r?$/.test(line);
+
 // The nearest line above the tag's line that is less indented than it, as `plainHolder` finds it; undefined
-// if none is above.
+// if none is above. A line of node properties only is skipped.
 function parentLine(masked: string, tag: number): string | undefined {
   const start = masked.lastIndexOf("\n", tag) + 1;
   const own = column(lineFrom(masked, start));
   for (let e = start - 1; e >= 0; ) {
     const s = e === 0 ? 0 : masked.lastIndexOf("\n", e - 1) + 1;
     const l = masked.slice(s + bom(masked, s), e);
-    if (!blank(l) && column(l) < own) return l;
+    if (!blank(l) && !propertiesOnly(l) && column(l) < own) return l;
     e = s - 1;
   }
   return undefined;
@@ -381,7 +385,8 @@ const column = (line: string) => line.length - line.replace(/^[ \t]+/, "").lengt
 
 // `holder` for a plain scalar, measured as `column` measures the next line: in YAML blanks (U+0020
 // and tab). A line that starts with U+00A0 or a byte order mark has text at column 0, so its key
-// stands at column 0, not at the width of the leading Unicode spaces that `indent` counts.
+// stands at column 0, not at the width of the leading Unicode spaces that `indent` counts. A line of node
+// properties only (`propertiesOnly`) is skipped in the search, as in `parentLine`.
 function plainHolder(masked: string, tag: number): number {
   const start = masked.lastIndexOf("\n", tag) + 1;
   const own = column(lineFrom(masked, start));
@@ -389,7 +394,7 @@ function plainHolder(masked: string, tag: number): number {
   for (let e = start - 1; e >= 0; ) {
     const s = e === 0 ? 0 : masked.lastIndexOf("\n", e - 1) + 1;
     const l = masked.slice(s + bom(masked, s), e);
-    if (!blank(l) && column(l) < own) return column(l);
+    if (!blank(l) && !propertiesOnly(l) && column(l) < own) return column(l);
     e = s - 1;
   }
   return -1;
@@ -399,15 +404,18 @@ function plainHolder(masked: string, tag: number): number {
 // no text above it since the last document marker, and only blanks and anchors come before it (a root
 // scalar may be indented, as the first line of a stream may start at any column). go-yaml measures
 // the continuation of such a scalar against column -1, so a line at column 0 goes on, and so do `- `
-// and `? ` lines, which are text there. A key line is a refused document (ginsys/bronzeward#616).
+// and `? ` lines, which are text there. A key line is a refused document (ginsys/bronzeward#616). The scan
+// back to the last marker takes the stream-start byte order mark as no text and a marker line that ends
+// in a CRLF as a marker (`MARKER`); a line of Unicode spaces only is text, so it is not a root.
 function isRoot(masked: string, tag: number, before: string): boolean {
   if (!/^(?:---[ \t]+)?[ \t]*(?:&[A-Za-z0-9_-]+[ \t]+)*$/.test(before)) return false;
   if (before.startsWith("---")) return true;
   const lines = masked.slice(0, masked.lastIndexOf("\n", tag) + 1).split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
-    const l = lines[i]!;
-    if (/^(?:---|\.\.\.)(?:[ \t]|$)/.test(l)) break;
-    if (l.trim() !== "") return false;
+    // The stream-start byte order mark is no text, and a marker line may end in a CRLF (`MARKER`).
+    const l = i === 0 ? lines[i]!.slice(bom(masked, 0)) : lines[i]!;
+    if (MARKER.test(l)) break;
+    if (!blank(l)) return false;
   }
   return true;
 }
