@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -36,19 +38,27 @@ func stalledConfig(t *testing.T) (url string, flushed <-chan struct{}) {
 func TestFetchClientConfigEndsOnCtrlCDuringTheDecode(t *testing.T) {
 	proxyAsTheProxyTestNamesIt(t)
 	srv, flushed := stalledConfig(t)
-	ctx, cancel := context.WithCancel(context.Background())
+	// The client reads the first byte of the answer: that event, not the server's flush, tells the test
+	// that the headers are on their way to the decode. The client gives no hook after hc.Do returns, so a
+	// stall in header parsing longer than the wait below would still reach the request-error branch.
+	gotFirstByte := make(chan struct{})
+	var once sync.Once
+	trace := &httptrace.ClientTrace{GotFirstResponseByte: func() { once.Do(func() { close(gotFirstByte) }) }}
+	ctx, cancel := context.WithCancel(httptrace.WithClientTrace(context.Background(), trace))
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
 		_, err := FetchClientConfigContext(ctx, &Context{Name: "lab", Server: srv, Credential: "automation"}, srv, nil)
 		done <- err
 	}()
-	select {
-	case <-flushed:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the request did not reach the server")
+	for _, wait := range []<-chan struct{}{flushed, gotFirstByte} { // the server flushed, then the client read it
+		select {
+		case <-wait:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the answer did not reach the client")
+		}
 	}
-	time.Sleep(200 * time.Millisecond) // the headers and the start of the body reach the client, which waits for the rest
+	time.Sleep(200 * time.Millisecond) // the client parses the headers and waits in the decode for the rest
 	cancel()
 	select {
 	case err := <-done:
