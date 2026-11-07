@@ -34,11 +34,11 @@ check "empty set" nonzero '[]' '[]' '[]'
 check "count mismatch between the set and an oracle" nonzero "$keyed" '[]' "$accepted"
 check "planted false refusal: the model reports a scanner error and go-yaml accepts" nonzero '["@"]' "$accepted" "$accepted"
 
-# Pin: a document that starts with two byte order marks (the JSON escape ﻿ twice) gets the verdict
+# Pin: a document that starts with two byte order marks (two U+FEFF characters, written as JSON escapes) gets the verdict
 # "unsupported" (the model throws Unsupported("two BOMs at the start")), and the comparison counts it as not
 # compared and does not fail. The same document under the bug would count as missed, so the edge set carries
 # none (see the report).
-check "pin: a document that starts with two marks is unsupported and not a failure" zero '["﻿﻿[? b]: !bwref x/foo\n"]' "$accepted" "$accepted"
+check "pin: a document that starts with two marks is unsupported and not a failure" zero '["\ufeff\ufeff[? b]: !bwref x/foo\n"]' "$accepted" "$accepted"
 if head -n 1 "$tmp/out" | rg -q '"model:unsupported":1'; then
   echo "selftest: pin: the verdict of a two-mark document is unsupported ok"
 else
