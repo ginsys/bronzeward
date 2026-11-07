@@ -933,9 +933,10 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
    the one its answer left. Counting, not comparing the last epoch, means that a later answer of the
    read's own epoch does not undo it. The signs are an answer of another epoch (a failed one
    included), and an event of another epoch than its stream in an open stream, with or without a
-   `Bronzeward-Epoch` header on the stream. The same holds for a terminal first read of the CLI, and
-   for a terminal read that the watch kept after the read of its events failed: the CLI checks the
-   count after it reads the pages of the end. A read whose answer has no `Bronzeward-Epoch` header
+   `Bronzeward-Epoch` header on the stream. The same holds for every terminal read of the CLI: the
+   first read, a read that the watch kept after the read of its events failed, and the read of a
+   watch that read its events to the end. The CLI checks the count after it reads the pages of the
+   end. A read whose answer has no `Bronzeward-Epoch` header
    is judged by the count in the same way. A watch that ends in an outage after that has
    no read that settled the state, and the CLI reports the state as unknown (exit 3). A read that fails
    with anything else is not repeated, and every other read keeps the bound of §8.2. An attempt that showed
