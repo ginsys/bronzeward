@@ -1649,11 +1649,15 @@ describe("a plain !bwref value that goes on to the next line", () => {
   describe("cost", () => {
     // The check does not compare a time with a fixed bound, because the speed of a CI runner varies by
     // a factor of nine (ginsys/bronzeward#703: 160 ms locally, 1,468 ms on one runner), more than any
-    // bound that still fails a slow scan. It reads the same draft built at 1/64 of its size and at its
-    // full size, in the same process, and compares the time per character. A linear scan costs the same
-    // per character at both sizes (a ratio near 1), and a quadratic one costs 64 times as much (a ratio
-    // of 40 to 64 where it was measured, 51 on e354c61c). The limit is 12. A runner that is slow by a
-    // constant factor changes both times and not the ratio.
+    // bound that still fails a slow scan. It builds the same draft from a size argument 64 times smaller
+    // and from the full size argument, reads both in the same process, and compares the time per
+    // character of the two drafts. Where the length of a draft is in proportion to its size argument, a
+    // linear scan costs the same per character at both sizes (a ratio near 1), and a quadratic one costs
+    // 64 times as much (a ratio of 40 to 64 where it was measured, 51 on e354c61c). The limit is 12. A
+    // runner that is slow by a constant factor changes both times and not the ratio. Two builders keep
+    // no such proportion: the rising indentation has a length that grows with the square of its size
+    // argument, and the line of 25 bangs is a case of exponential cost. For them the check asks only
+    // that the time per character does not grow by more than 12 times.
     //
     // The gap and the limit come from runs of this file at gaps of 4, 16 and 64 (20, 20 and 45 runs).
     // At a gap of 4 the limit was 2.5, and one run of the 20,000-tag flow line read 2.87, because that
@@ -1667,9 +1671,10 @@ describe("a plain !bwref value that goes on to the next line", () => {
     // `floorMs` (100 ms) passes without a ratio, because the timer cannot tell a ratio at that speed
     // from noise, and a quadratic scan does not read these drafts that fast: it takes seconds on each.
     //
-    // KNOWN LIMIT: a scan that is slower by a constant factor, 10 times for example, is not found. No
-    // check of the speed of one run can find it and also pass a runner that is 9 times slower. The
-    // cost that grows with the size of the draft is what this describes and finds. A small term that
+    // KNOWN LIMIT: a scan that is slower by a constant factor, 10 times for example, is not found. It
+    // differs by only 1.1 times from a runner that is 9 times slower, which is less than the difference
+    // between two runners, so a check of the speed of one run cannot tell the two apart. The cost that
+    // grows with the size of the draft is what this describes and finds. A small term that
     // grows with the square of a line is not found either, as long as the ratio stays under 12.
     const GROWTH_LIMIT = 12;
     const GROWTH_GAP = 64;
@@ -1691,7 +1696,7 @@ describe("a plain !bwref value that goes on to the next line", () => {
       for (let i = 0; i < 3; i++) smallMs = Math.min(smallMs, timed(small).ms);
       const first = timed(big);
       let bigMs = first.ms;
-      const ratio = (ms: number) => ms / big.length / (Math.max(smallMs, 0.01) / small.length);
+      const ratio = (ms: number) => ms / big.length / (smallMs / small.length);
       for (let again = 1; again < 3 && bigMs >= floorMs && ratio(bigMs) >= GROWTH_LIMIT; again++) {
         bigMs = Math.min(bigMs, timed(big).ms);
       }
@@ -1704,16 +1709,17 @@ describe("a plain !bwref value that goes on to the next line", () => {
       return first.found;
     };
     const bounded = (size: number, build: (size: number) => string) => growth(references, size, build);
-    // Builders of a draft at a given size: `rep` repeats a text n times and `lines` joins n lines.
+    // Builders of a draft at a given size: `rep` repeats a text n times and `lines` joins n pieces of
+    // text, each of which can hold more than one line.
     const rep = (text: string, n: number) => text.repeat(Math.max(1, Math.round(n)));
     const lines = (n: number, line: (i: number) => string) =>
       Array.from({ length: Math.max(1, Math.round(n)) }, (_, i) => line(i)).join("");
 
     // The check against stand-ins for the scan. A stand-in does not spend time: it adds the work it would
     // do to a counter, and the counter is the clock of the check. So the result does not depend on the
-    // speed or the load of the machine that runs the test. The floor is 0 so that they are read at their
-    // size. A scan that reads the draft once for each character is quadratic and fails the check. A
-    // linear scan does not, even when it is 10 times slower than the scan of this file.
+    // speed or the load of the machine that runs the test. The floor is 0 so that the ratio is always
+    // checked. A scan that reads the draft once for each character is quadratic and fails the check. A
+    // linear scan does not, even when it does 10 times the work of another linear scan.
     const standIn = (work: (length: number) => number) => {
       let ticks = 0;
       return {
@@ -1728,6 +1734,12 @@ describe("a plain !bwref value that goes on to the next line", () => {
       expect(() => growth(quadratic.scan, 20000, (n) => "x".repeat(n), 0, quadratic.now)).toThrow(
         /ms for 20000 characters/,
       );
+    });
+    // The small draft of this stand-in takes 0.0002 ticks, far under any floor that a timer needs: a
+    // time that small is still divided as it is, and does not hide the growth.
+    test("the check fails a quadratic stand-in whose small draft takes almost no time", () => {
+      const tiny = standIn((length) => (length / 20000) ** 2);
+      expect(() => growth(tiny.scan, 20000, (n) => "x".repeat(n), 0, tiny.now)).toThrow(/ms for 20000 characters/);
     });
     test("the check passes a linear stand-in, also one that is 10 times slower", () => {
       const linear = standIn((length) => length);
