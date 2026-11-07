@@ -136,7 +136,30 @@ const own = [
     ["tagged-explicit-key-after-flow-entry", "a: {b: c, ? !bwref x/foo : v}\n"],
     ["tagged-explicit-key-after-dashes", "- - ? !bwref x/foo\n    : v\n"],
     ["explicit-key-flow-entry-control", "[? a, !bwref x/foo]\n"],
-    ["tagged-implicit-key", "!bwref x/foo: v\n"],
+    // The tag after the `?` across line breaks: CRLF, an anchor on either side of the break, blank lines
+    // and a comment between, and the flow forms that need no indentation. The oracle reads each as unfit.
+    // The controls are a value after blank lines and a CRLF break. go-yaml refuses a `?` that is text in a
+    // flow word (`[a?` then the tag), so the unit test pins that one alone.
+    ["tagged-explicit-key-crlf", "?\r\n  !bwref x/foo\r\n: v\r\n"],
+    ["tagged-explicit-key-crlf-in-sequence", "- ?\r\n    !bwref x/foo\r\n  : v\r\n"],
+    ["tagged-explicit-key-anchor-before-break", "? &k\n  !bwref x/foo\n: v\n*k : w\n"],
+    ["tagged-explicit-key-anchor-after-break", "?\n  &k !bwref x/foo\n: v\n"],
+    ["tagged-explicit-key-anchor-break-in-sequence", "- ? &k\n    !bwref x/foo\n  : v\n"],
+    ["tagged-explicit-key-anchor-blank-lines", "? &k\n\n\n  !bwref x/foo\n: v\n"],
+    ["tagged-explicit-key-blank-lines", "?\n\n\n  !bwref x/foo\n: v\n"],
+    ["tagged-explicit-key-comment", "? # c\n  !bwref x/foo\n: v\n"],
+    ["tagged-flow-sequence-key-next-line", "[?\n !bwref x/foo]\n"],
+    ["tagged-flow-sequence-key-next-line-column-0", "[?\n!bwref x/foo]\n"],
+    ["tagged-flow-mapping-key-first-next-line", "{?\n !bwref x/foo\n: v}\n"],
+    ["tagged-flow-mapping-key-after-entry-next-line", "{a: b, ?\n !bwref x/foo\n: v}\n"],
+    ["tagged-flow-mapping-key-after-entry-column-0", "{a: b, ?\n!bwref x/foo\n: v}\n"],
+    ["tagged-flow-sequence-key-after-comma-next-line", "[a, ?\n !bwref x/foo]\n"],
+    ["tagged-flow-key-anchor-before-break", "[? &k\n !bwref x/foo]\n"],
+    ["tagged-flow-key-under-block-key", "k: [?\n  !bwref x/foo]\n"],
+    ["tagged-flow-key-under-nested-block-key", "k:\n  m: [?\n !bwref x/foo]\n"],
+    ["value-after-blank-lines-control", "a:\n\n\n  !bwref x/foo\n"],
+    ["value-after-crlf-control", "a:\r\n  !bwref x/foo\r\n"],
+    ["tagged-implicit-key","!bwref x/foo: v\n"],
     // ginsys/bronzeward#629, the implicit key rows that go-yaml accepts. go-yaml refuses rows 50 and 51.
     // Row 48 (`[!bwref x/foo:]`) is left out: the scanner lists `x/foo` there, a known gap pinned in
     // web/src/position.test.ts, so a case here would fail.
