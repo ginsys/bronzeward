@@ -76,7 +76,9 @@ for (const e of ["0", "a", "b", "t", "\t", "n", "v", "f", "r", "e", " ", '"', "'
 // An escaped line break in a double-quoted scalar (scannerc.go 2486-2494) ends the run of non-blank characters, so a
 // document indicator at column 0 of the next line is refused, as after a plain line break. The first four are the documents
 // 0-3 of the w701 probe (go-yaml refuses them with this message; the model of 289531b5 accepted them); the rest are controls
-// that go-yaml accepts, or refuses with the same message, and that the fix leaves alone.
+// that the fix leaves alone. go-yaml gives them two different answers. The three that end in the flow key (the indented
+// marker, ---x and an escaped break then text) are refused with "did not find expected key", the refusal that the defect of
+// the report causes, so the model says "misplaced". The two plain breaks are refused with the message above.
 const indicator = "found unexpected document indicator";
 verdictOf("break: escaped break then ---", `k: "a\\\n---\nb"\n`, "error", indicator);
 verdictOf("break: escaped break then ...", `k: "a\\\n...\nb"\n`, "error", indicator);
