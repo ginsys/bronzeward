@@ -32,6 +32,8 @@ const URI = /[0-9A-Za-z_\-;/?:@&=+$,.!~*'()[\]%]/;
 // is_break in yamlprivateh.go (124-130): CR, LF, NEL (U+0085), LS (U+2028) and PS (U+2029).
 const BREAKS = new Set(["\n", "\r", ...[0x85, 0x2028, 0x2029].map((c) => String.fromCodePoint(c))]);
 const BOM = String.fromCodePoint(0xfeff);
+// The one-character escapes of a double-quoted scalar (scannerc.go 2502-2541). A tab after the backslash counts too.
+const ESCAPES = new Set([..."0abtnvfre \"'\\N_LP", "\t"]);
 const isBreak = (c) => BREAKS.has(c);
 const isZ = (c) => c === "\0";
 const isBlank = (c) => c === " " || c === "\t";
@@ -222,11 +224,21 @@ export function model(doc, opts = {}) {
           skip();
           skipLine();
         } else if (!single && at() === "\\") {
+          // yaml_parser_scan_flow_scalar (scannerc.go 2496-2579): the escape characters below, or x, u and U with
+          // 2, 4 and 8 hexadecimal digits. Any other character is an error, and so is a code in the surrogate range
+          // or above U+10FFFF.
           const e = at(1);
-          skip();
-          skip();
           const w = e === "x" ? 2 : e === "u" ? 4 : e === "U" ? 8 : 0;
-          for (let i = 0; i < w; i++) skip();
+          if (w === 0 && !ESCAPES.has(e)) fail("found unknown escape character");
+          skip();
+          skip();
+          let value = 0;
+          for (let i = 0; i < w; i++) {
+            if (!/^[0-9A-Fa-f]$/.test(at())) fail("did not find expected hexdecimal number");
+            value = value * 16 + parseInt(at(), 16);
+            skip();
+          }
+          if ((value >= 0xd800 && value <= 0xdfff) || value > 0x10ffff) fail("found invalid Unicode character escape code");
         } else skip();
       }
       if (at() === q) break;
