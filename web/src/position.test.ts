@@ -1551,6 +1551,13 @@ describe("a tag on an explicit key or an alias key", () => {
     ["an explicit key in a flow mapping", "{? !bwref x/foo : v}\n"],
     ["an explicit key in a flow sequence", "[? !bwref x/foo]\n"],
     ["an explicit key after a flow entry", "a: {b: c, ? !bwref x/foo : v}\n"],
+    // go-yaml drops a byte order mark at the start of the stream, so the `?` is at the line start. A second
+    // mark is text, and go-yaml refuses the stream (did not find expected key). The oracle reads the first
+    // two as unfit and the last two as refused.
+    ["an explicit key after a byte order mark", "\ufeff? !bwref x/foo\n: v\n"],
+    ["an explicit key with the tag on the next line, after a byte order mark", "\ufeff?\n  !bwref x/foo\n: v\n"],
+    ["an explicit key after two byte order marks (go-yaml refuses)", "\ufeff\ufeff? !bwref x/foo\n: v\n"],
+    ["an explicit key with the tag on the next line, after two byte order marks (go-yaml refuses)", "\ufeff\ufeff?\n  !bwref x/foo\n: v\n"],
   ])("lists nothing for %s", (_, text) => {
     expect(references(text)).toEqual([]);
   });
