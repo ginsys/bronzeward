@@ -221,8 +221,11 @@ export function model(doc, opts = {}) {
           skip();
         } else if (at() === q) break;
         else if (!single && at() === "\\" && isBreak(at(1))) {
+          // scannerc.go 2486-2494: an escaped line break ends the run of non-blank characters, so the next line starts
+          // at the top of the loop, where the check for a document indicator at column 0 runs.
           skip();
           skipLine();
+          break;
         } else if (!single && at() === "\\") {
           // yaml_parser_scan_flow_scalar (scannerc.go 2496-2579): the escape characters below, or x, u and U with
           // 2, 4 and 8 hexadecimal digits. Any other character is an error, and so is a code in the surrogate range

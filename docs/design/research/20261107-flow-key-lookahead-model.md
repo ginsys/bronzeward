@@ -118,7 +118,7 @@ hold go-yaml v3.0.5.
 ```sh
 cd experiments/flow-key-lookahead
 ./selftest.sh                                 # compare.mjs must fail on planted failures
-node pins.mjs                                 # the unit cases of the model (82 checks)
+node pins.mjs                                 # the unit cases of the model (97 checks)
 ./build-oracles.sh <work>                     # the three oracles, from go-yaml in the module cache
 node gen-small-sets.mjs <work>                # matrix, probes, hyp, small and edge .json
 ./run-compare.sh <work> <work>/matrix.json    # likewise the other small sets
@@ -212,11 +212,11 @@ guard-exhausted counts.
   - `a:`, then `  b: [x`, then ` y`, a tab and `z]`, each on its own line. No flow key is involved, so
     the bug decides nothing. go-yaml accepts the document. The model before this repair reported a
     scanner error, "found a tab character that violates indentation", which is a false refusal.
-    The model set its leading-break flag at the first line break (`model.mjs:290`) and never
+    The model set its leading-break flag at the first line break (`model.mjs:318`) and never
     cleared it, so it checked the tab after `y`. go-yaml clears the flag when it reads the next
     character (`scannerc.go:2738-2753`), so it does not check that tab. The repair clears the flag
-    at the same place (`model.mjs:281`). The same flag also sets the simple-key flag at the end of
-    the scalar (`model.mjs:296`, `scannerc.go:2830`). That is why the repair moves counts in S9
+    at the same place (`model.mjs:309`). The same flag also sets the simple-key flag at the end of
+    the scalar (`model.mjs:324`, `scannerc.go:2830`). That is why the repair moves counts in S9
     and S8 (see the notes below).
   - A line break, then a byte order mark, then `[? b]: !bwref x/foo`. Both oracles accept it and
     name `x/foo`. The model before this repair skipped a mark at column 0 of every line, so it
@@ -273,16 +273,16 @@ guard-exhausted counts.
   410 documents with a mark after the first character (the 5 included; run w688-bom at 1aa97028), and the deletion of the
   skip alone changes no verdict among them. The 5 move because of the new "unsupported" rule.
 - S8, the counters: 3806 documents are 2902 plus 904. These are the documents with the key
-  `instr hit:true` and a model verdict that is not "misplaced" (`compare.mjs:65`). A hit means that
-  the counter `consumed` is above 0 (`compare.mjs:64`): go-yaml consumed a head token while a
+  `instr hit:true` and a model verdict that is not "misplaced" (`compare.mjs:78`). A hit means that
+  the counter `consumed` is above 0 (`compare.mjs:77`): go-yaml consumed a head token while a
   simple key stood on it. In 2902 of them the model says "ok". In 904 it reports a scanner error.
   The repair of 9941e4b8 moved one of these documents from "ok" to a scanner error (2903 and 903
   before, in the run w688-l3 at 77eff0e0).
   None is a miss, for three reasons:
-  - The count of a misplaced insert that the model does not predict (`compare.mjs:66`, the key
+  - The count of a misplaced insert that the model does not predict (`compare.mjs:79`, the key
     `instr misplaced but model not`) is 0. The key is absent from the count line. The `instr` keys
     add up to 245696, so the counters read every document.
-  - The count of a hit where go-yaml accepts the document (`compare.mjs:67`, the key `instr hit,
+  - The count of a hit where go-yaml accepts the document (`compare.mjs:80`, the key `instr hit,
     real accepts`) is 0. The key is absent too.
   - Both oracles refuse all 3806 documents. The bug decides none of them, because the patched
     oracle refuses them too.
@@ -312,6 +312,15 @@ guard-exhausted counts.
   indicators of one kind, as go-yaml does (go-yaml v3.0.5 `scannerc.go` 2496-2579 and 2192-2281).
   Before 4d9b7345 it did not. No count of the eight sets moved (run w688-new). That run compares
   counts, not single documents, so it does not show that no set holds either shape.
+- The model refuses a document indicator at column 0 after an escaped line break in a double-quoted
+  scalar, as go-yaml does (`scannerc.go` 2486-2494: the escaped break ends the run of characters,
+  and the check for an indicator runs at the start of the next line). Before this repair the scan went
+  on past the break and never checked that line. The review of #701 found it. For `k: "a\`, a line
+  break, `---`, a line break and `b"`, go-yaml refuses the stream with "found unexpected document
+  indicator", and the model accepted it (probe w701-probe-b at 289531b5: 4 documents of that shape,
+  with `...`, with a flow key after the scalar and with two escaped breaks; 6 controls did not move).
+  No count of the eight sets was measured again for this repair. The pins carry the 4 documents and
+  the controls.
 - The sets come from the families in #657 and #654. The review of this record found two gaps
   outside them: the line breaks U+0085, U+2028 and U+2029, and keys of astral characters. The
   edge set covers them now. Another shape outside the families is not tested.
@@ -322,7 +331,7 @@ guard-exhausted counts.
 - A document that starts with two byte order marks is a residual limit. go-yaml tests the start of its
   buffer, not the current offset, so a second mark right behind the first one makes its test true at
   every column-0 pass. The model does not port that, so it declares the shape "unsupported". If the bug
-  decided such a document, `compare.mjs:49` would count it as missed, because the model predicts
+  decided such a document, `compare.mjs:60` would count it as missed, because the model predicts
   nothing. The edge set had such a document as its 14th (`${BOM}${BOM}[? b]: ...`). The bug decides it
   (go-yaml refuses it, the guarded build accepts it) and the model leaves it unsupported, so the
   comparison counted it as missed and exited 1 (run w688-gbom at 8878180d). The edge set dropped it
@@ -336,8 +345,8 @@ guard-exhausted counts.
   only and 410 with a mark after the first character), counted by the run w688-bom at 1aa97028.
 - The self-test does not plant a guard-on misplaced document, because a plant needs a broken
   model. Only a reading of `compare.mjs` shows the "no misplaced insert with the guard on" leg.
-- At 65f6a473 the model has 485 lines. The experiment as a whole adds 1130 lines under `experiments`, of which
-  64 are patch files, 73 are the self-test and 98 are the unit cases of the model (`pins.mjs`). This is more than the 600-line budget. The
+- At the last commit of this record the model has 488 lines. The experiment as a whole adds 1148 lines under `experiments`, of which
+  64 are patch files, 73 are the self-test and 113 are the unit cases of the model (`pins.mjs`). This is more than the 600-line budget. The
   generators and the Go oracles are the reproduction that an investigation must land, so they
   stay.
 
