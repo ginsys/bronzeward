@@ -1479,6 +1479,128 @@ describe("a plain !bwref value that goes on to the next line", () => {
     expect(references(text), text).toEqual(["x/foo"]);
   });
 
+  // A compact parent (`- k:`, `- - `) holds the scalar at the column of its key or indicator, not at the
+  // column of its line. A tag that is itself an explicit key lists no name, whatever follows it
+  // (ginsys/bronzeward#637), so its rows are not here. go-yaml reads a `- ` or `? ` line that is more indented
+  // than that column as more of the scalar (`x/foo - y`, `x/foo ? y`), so the scanner lists no name
+  // (ginsys/bronzeward#706). Before the change that line ended the scalar and the name listed. The rows are
+  // the documents of probe w706-probe1 where `references()` listed `x/foo` on 63f37307 and go-yaml reads a
+  // longer scalar, 10 of the 19 (the 9 on an explicit key list nothing since ginsys/bronzeward#637). The 10
+  // documents that go-yaml refuses stay out: a dash line at the column of the key under `- k:` (with or
+  // without an anchor, also nested), and a key line more indented than the collection under `- k:`. The
+  // refused documents on an explicit key stay out too.
+  test.each([
+    ["a compact key, then a dash line", "- k: !bwref x/foo\n    - y\n"],
+    ["a compact key, then a question mark line", "- k: !bwref x/foo\n    ? y\n"],
+    ["a compact key, then a dash line one column past the key", "- k: !bwref x/foo\n   - y\n"],
+    ["a compact key, then two dash lines", "- k: !bwref x/foo\n    - y\n    - z\n"],
+    ["a compact key and an anchor", "- k: &e !bwref x/foo\n    - y\n"],
+    ["a compact key, a tab and an anchor", "- k:\t&e\t!bwref x/foo\n    - y\n"],
+    ["a compact key under a key", "a:\n  - k: !bwref x/foo\n      - y\n"],
+    ["a compact quoted key", '- "k": !bwref x/foo\n    - y\n'],
+    ["a compact sequence in a sequence", "- - !bwref x/foo\n    - y\n"],
+    ["a compact sequence in a sequence, with an anchor", "- - &e !bwref x/foo\n    - y\n"],
+  ])("a more indented line that goes on with the scalar under a compact parent lists nothing (%s)", (_, text) => {
+    expect(references(text), text).toEqual([]);
+  });
+
+  // The same parents where the next line belongs to the collection or ends the scalar: go-yaml reads
+  // `x/foo`. These rows listed the name before the change and pin that the fix does not take it away.
+  test.each([
+    ["a compact key, then the next entry", "- k: !bwref x/foo\n- y\n"],
+    ["a compact key, then a question mark line at the column of the key", "- k: !bwref x/foo\n  ? y\n"],
+    ["a compact key under a key, then a dash line at the column of the entry", "a:\n  - k: !bwref x/foo\n  - y\n"],
+    ["a compact sequence in a sequence, then a dash line at the column of the inner sequence", "- - !bwref x/foo\n  - y\n"],
+  ])("a compact parent, then a line that ends the scalar, lists the name (%s)", (_, text) => {
+    expect(references(text), text).toEqual(["x/foo"]);
+  });
+
+  // A plain line goes on with the scalar in every reading, so these rows listed nothing before the change.
+  // They pass on 63f37307 too and discriminate nothing there: they pin that the fix keeps it so.
+  test.each([
+    ["a compact key, then a word", "- k: !bwref x/foo\n    plain\n"],
+    ["a compact key, then a word and a sibling key", "- k: !bwref x/foo\n    plain\n  z: 1\n"],
+    ["a compact sequence in a sequence, then a word", "- - !bwref x/foo\n    plain\n"],
+  ])("a compact parent, then a plain line, lists nothing (%s)", (_, text) => {
+    expect(references(text), text).toEqual([]);
+  });
+
+  // The tag starts its own line under a compact parent, so the parent is the line above (probe w706-probe2,
+  // 25 documents at 63f37307, 3 refused by go-yaml, the rest are these rows, except the 3 on an explicit key,
+  // which list nothing since ginsys/bronzeward#637). The column of the compact collection counts as for a tag on
+  // the line of the key: `- k:` holds it at the column of `k`, `- -` at the column of the inner dash.
+  // go-yaml reads `x/foo - y` or `x/foo ? y` for each of these rows, and the name listed before the change.
+  test.each([
+    ["a compact key, a deeper dash line", "- k:\n    !bwref x/foo\n      - y\n"],
+    ["a compact key, a dash line at the column of the tag", "- k:\n    !bwref x/foo\n    - y\n"],
+    ["a compact key, a deeper question mark line", "- k:\n    !bwref x/foo\n      ? y\n"],
+    ["an anchor on the parent line, a deeper dash line", "- k: &e\n    !bwref x/foo\n      - y\n"],
+    ["an anchor on the parent line, a dash line at the column of the tag", "- k: &e\n    !bwref x/foo\n    - y\n"],
+    ["an anchor before the tag, a deeper dash line", "- k:\n    &e !bwref x/foo\n      - y\n"],
+    ["a tab after the colon, a deeper dash line", "- k:\t\n    !bwref x/foo\n      - y\n"],
+    ["a compact dash, a deeper dash line", "- -\n    !bwref x/foo\n      - y\n"],
+    ["a compact dash, a dash line at the column of the tag", "- -\n    !bwref x/foo\n    - y\n"],
+    ["a nested compact key, a deeper dash line", "a:\n  - k:\n      !bwref x/foo\n        - y\n"],
+    ["a nested compact key, a dash line at the column of the tag", "a:\n  - k:\n      !bwref x/foo\n      - y\n"],
+    ["a quoted compact key, a deeper dash line", '- "k":\n    !bwref x/foo\n      - y\n'],
+  ])("a tag on its own line, then a more indented line that goes on with the scalar, lists nothing (%s)", (_, text) => {
+    expect(references(text), text).toEqual([]);
+  });
+
+  // The same shapes where the next line belongs to the collection or is its value: go-yaml reads `x/foo`.
+  test.each([
+    ["a compact key, a question mark line at the column of the key", "- k:\n    !bwref x/foo\n  ? y\n"],
+    ["a compact key, the next entry", "- k:\n    !bwref x/foo\n- y\n"],
+    ["a compact key, a sibling key", "- k:\n    !bwref x/foo\n  z: 1\n"],
+    ["a compact dash, a dash line at the column of the inner dash", "- -\n    !bwref x/foo\n  - y\n"],
+    ["a nested compact key, a dash line at the column of the entry", "a:\n  - k:\n      !bwref x/foo\n  - y\n"],
+  ])("a tag on its own line, then a line that ends the scalar, lists the name (%s)", (_, text) => {
+    expect(references(text), text).toEqual(["x/foo"]);
+  });
+
+  // A plain line goes on, and so does a dash line under a key the scanner knows. These pass on 63f37307
+  // too and discriminate nothing there.
+  test.each([
+    ["a compact key, a deeper word", "- k:\n    !bwref x/foo\n    plain\n"],
+    ["a known key, a dash line", "k:\n  !bwref x/foo\n  - y\n"],
+  ])("a tag on its own line, then a plain or known line, lists nothing (%s)", (_, text) => {
+    expect(references(text), text).toEqual([]);
+  });
+
+  // An explicit key that holds a collection (`? - `, `? k:`) is a compact parent too: the tag is the entry or
+  // the value of that collection, not an explicit key's own tag, so it lists a name unless the scalar goes on
+  // (probe w706-probe3, 15 documents on origin/main 2b260fa4, 3 refused by go-yaml, 7 listed `x/foo` where
+  // go-yaml reads a longer scalar, 5 agree). The column is that of the last indicator (`? - ` gives 2) or of the key
+  // (`? k:` gives 2). The 3 refused documents stay out: a dash line at column 0 or at the key column, and a
+  // question mark line at the entry column.
+  test.each([
+    ["a sequence in an explicit key, a deeper dash line", "? - !bwref x/foo\n    - y\n"],
+    ["a sequence in an explicit key, a deeper question mark line", "? - !bwref x/foo\n    ? y\n"],
+    ["a mapping in an explicit key, a deeper dash line", "? k: !bwref x/foo\n    - y\n"],
+    ["two sequences in an explicit key, a deeper dash line", "? - - !bwref x/foo\n      - y\n"],
+    ["a sequence in an explicit key in a sequence entry, a deeper dash line", "- ? - !bwref x/foo\n      - y\n"],
+    ["a sequence in an explicit key, the tag on its own line, a deeper dash line", "? -\n    !bwref x/foo\n      - y\n"],
+    ["a sequence in an explicit key, an anchor, a deeper dash line", "? - &e !bwref x/foo\n    - y\n"],
+  ])("an explicit key that holds a collection, then a more indented line that goes on with the scalar, lists nothing (%s)", (_, text) => {
+    expect(references(text), text).toEqual([]);
+  });
+
+  // The same shapes where the next line belongs to the collection or is the value of the key: go-yaml reads
+  // `x/foo`. These rows list the name on origin/main too and pin that the fix keeps it.
+  test.each([
+    ["a sequence in an explicit key, a dash line at the entry column", "? - !bwref x/foo\n  - y\n"],
+    ["a sequence in an explicit key, its value", "? - !bwref x/foo\n: v\n"],
+    ["a mapping in an explicit key, its value", "? k: !bwref x/foo\n: v\n"],
+    ["two sequences in an explicit key, a dash line at the inner entry column", "? - - !bwref x/foo\n    - y\n"],
+  ])("an explicit key that holds a collection, then a line that ends the scalar, lists the name (%s)", (_, text) => {
+    expect(references(text), text).toEqual(["x/foo"]);
+  });
+
+  // A plain line goes on: this row lists nothing on origin/main too and discriminates nothing there.
+  test("an explicit key that holds a sequence, then a deeper word, lists nothing", () => {
+    expect(references("? - !bwref x/foo\n    plain\n")).toEqual([]);
+  });
+
   // The editor reads a draft while the user types, so the cost of the scan must stay near linear
   // (review of this change). A check that takes too long on the earlier code ends on its own and fails
   // the bound, and does not hang: a test timeout cannot stop a synchronous scan.
@@ -1627,6 +1749,23 @@ describe("a plain !bwref value that goes on to the next line", () => {
       ["a marker line with 40,000 blanks before a dash", `--- ${" ".repeat(40000)}- !bwref x/foo\n  bar\n`],
     ])("a long input stays linear: %s", (_, text) => {
       bounded(text);
+    });
+
+    // The column of a compact collection (`compactColumn`, ginsys/bronzeward#706) is read by index from the text
+    // before the tag, or from the parent line once for all the tags under it (`compact` of the line). These
+    // rows pass on 63f37307 too (they discriminate nothing there) and pin the bound of the new code.
+    test.each([
+      ["50,000 dash indicators before the tag", `${"- ".repeat(50000)}!bwref x/foo\n    - y\n`],
+      ["100,000 blanks after the dash", `-${" ".repeat(100000)}k: !bwref x/foo\n    - y\n`],
+      ["100,000 blanks after the dash, a tag with properties", `-${" ".repeat(100000)}&e !bwref x/foo\n    - y\n`],
+      ["a compact key of 100,000 characters, the tag on its own line", `- ${"a".repeat(100000)}:\n    !bwref x/foo\n      - y\n`],
+    ])("a compact column is read in linear time (%s)", (_, text) => {
+      bounded(text);
+    });
+
+    // Many tags under one long compact parent line: the line is read once (`compact` of the line).
+    test("4,000 tags among sibling keys under one compact key line of 300,000 characters are scanned in near linear time", () => {
+      bounded(`- ${"a".repeat(300000)}:\n${Array.from({ length: 4000 }, (_, i) => `    j${i}: v\n    !bwref x/foo${i}\n      - y\n`).join("")}`);
     });
   });
 });

@@ -444,10 +444,34 @@ const startsLine = (before: string) => /^[ \t]*(?:(?:&[A-Za-z0-9_-]+|![^ \t]*)[ 
 const propertiesOnly = (line: string) =>
   /^[ \t]*(?:(?:&[A-Za-z0-9_-]+|![^ \t]*)(?:[ \t]+|(?=\r?$)))+\r?$/.test(line);
 
+// The column of the compact collection that holds the scalar, read from the text before the tag, or from its
+// parent line, when that text opens with `- ` or `? ` (ginsys/bronzeward#706). It is the column of the key
+// after the indicators (`- k:` gives 2), or the column of the last indicator when nothing but properties
+// follows it (`- - !bwref x/foo` gives 2, `? - !bwref x/foo` gives 2; a tag that is an explicit key itself
+// never gets here, `explicitKeyTag` lists no name for it). go-yaml measures a next line against that
+// column, not against the column of the line, so a `- ` or `? ` line is more of the scalar only when it is
+// more indented than that. None if the text opens with no indicator, or with a tab after one: go-yaml refuses
+// that document and the scanner keeps its reading. Only spaces are indentation and only a space or the end
+// of the line follows an indicator, as for go-yaml (a lone `-` line holds the entry below it). The walk is by
+// index, so its cost is the length of the text.
+function compactColumn(text: string): number | undefined {
+  let i = 0;
+  while (text[i] === " ") i++;
+  let last = -1;
+  while ((text[i] === "-" || text[i] === "?") && (text[i + 1] === " " || text[i + 1] === "\r" || i + 1 === text.length)) {
+    last = i;
+    i += 2;
+    while (text[i] === " ") i++;
+  }
+  if (last < 0 || text[i] === "\t") return undefined;
+  return startsLine(text.slice(i)) ? last : i;
+}
+
 // A line with text and the column of its first character in YAML blanks (`column`). `known` keeps whether
-// the line is a parent that `PLAIN_PARENT_LINE` knows, set by the first tag that asks: many tags under one
-// long key would otherwise match the same line again for each of them (review of this change).
-type Above = { column: number; line: string; known?: boolean };
+// the line is a parent that `PLAIN_PARENT_LINE` knows, and `compact` the column that `compactColumn` reads
+// from it (null for none), each set by the first tag that asks: many tags under one long key would
+// otherwise match the same line again for each of them (review of this change).
+type Above = { column: number; line: string; known?: boolean; compact?: number | null };
 
 // For each line with text, the nearest line above it that is less indented, as `plainHolder` and the parent
 // of a tag that starts its line need it; none if no line above is less indented. A line of node properties
@@ -547,7 +571,9 @@ function isRoot(masked: string, tag: number, before: string): boolean {
 // more indented than the node that holds the scalar, and then it is text. That holds for a comma,
 // a bracket or a brace at its start, and, under a parent known from its line (`PLAIN_PARENT`), for
 // `- `, `? ` and a line with a colon before a blank, which go-yaml refuses as a key. Under a compact
-// parent such a line can belong to the collection that holds the scalar, so it still ends the scalar.
+// parent such a line can belong to the collection that holds the scalar: a `- ` or `? ` line ends the scalar
+// at the column of that collection or left of it, and is more of the scalar when more indented
+// (`compactColumn`, ginsys/bronzeward#706).
 // A tag that starts its line has its parent on the line above, known only for a key with nothing after its
 // colon or a lone dash (`PLAIN_PARENT_LINE`), not for a compact one (`- k:`). One anchor between the
 // parent and the tag, or after the colon or dash of the parent line, changes nothing (ginsys/bronzeward#699).
@@ -580,7 +606,14 @@ function continues(
   const parent = startsLine(before) ? above(lineStart) : undefined;
   const known = parent === undefined ? PLAIN_PARENT.test(before) : (parent.known ??= PLAIN_PARENT_LINE.test(parent.line));
   if (known) return true;
-  return !/^[-?](?:\s|$)/.test(t) && !/:(?:\s|$)/.test(t);
+  // A `- ` or `? ` line is more of the scalar when it is more indented than the compact collection that holds
+  // it, as for go-yaml (ginsys/bronzeward#706). At that column or less it belongs to the collection.
+  if (/^[-?](?:\s|$)/.test(t)) {
+    if (parent !== undefined && parent.compact === undefined) parent.compact = compactColumn(parent.line) ?? null;
+    const holder = parent === undefined ? compactColumn(before) : parent.compact;
+    return holder !== undefined && holder !== null && column(next) > holder;
+  }
+  return !/:(?:\s|$)/.test(t);
 }
 
 // The text before an anchored tag on its line, in block context: the indentation in YAML spaces
