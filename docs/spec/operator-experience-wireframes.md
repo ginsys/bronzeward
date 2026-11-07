@@ -306,7 +306,9 @@ parent is the line above, as for the tag alone. A byte order mark at the start o
 and no column. A root scalar is a tag on the line of `---`, or the first text of a
 document, with only anchors and blanks before it, also when an anchor stands on a line of its own. It goes on at every next line with text, also at column 0, and a
 line that starts with `- ` or `? ` is text there. A key line after it makes the server refuse the document. In flow context
-the indent does not count. The next line is text unless it starts with `,`, `]`, `}` or `: `. The
+the indent does not count. The next line is text unless it starts with `,`, `]`, `}` or `: `. A line that
+starts with `?`, `[` or `{` also ends the scalar for go-yaml, which then refuses the document. The editor
+reads such a line as text, so it goes on and lists nothing, as for a refused document. The
 editor skips blank lines between. A `---` or `...` marker and a directive line each end the value.
 
 The owner decided (BW-606-tag-handles-1, 4 November 2026) that the editor reads a tag the way the

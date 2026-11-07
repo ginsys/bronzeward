@@ -47,6 +47,10 @@ The same files back a second note, on [issue 603](https://github.com/ginsys/bron
   whether the server accepts the document. It is its own module on purpose. It builds with the
   yaml version of the server, and the oracle keeps its own pin. `mise run go` builds it, which
   compiles the root module's dependencies.
+- `flowprobe/` — a program in the oracle's module. It asks go-yaml v3.0.5 to parse ten flow
+  documents where the next line after a `!bwref` value starts with `?`, `[` or `{`, and four
+  controls that parse. It prints the error text or the value of each. Run `go run ./flowprobe`
+  here. `evidence/flow-refusal.txt` holds its output.
 - `tag-handles.mjs` — the case table of the tag handle note: for each case of
   `sets/tag-handle-cases.json`, the go-yaml result, the server verdict and the result of the
   scanner on main and at an earlier commit. `tag-causes.mjs` and `run/tag-causes` group the
