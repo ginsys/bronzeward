@@ -432,7 +432,7 @@ They are held apart **(choice §17.29)**.
   dependency monitor and the normal API cannot read it.
 - **What it can do.** Reading a node's machine configuration needs the
   `os:admin` Talos role, as observed on the fixture (`internal/talos`
-  `TestLiveRoleProbe`, Talos v1.13.6, recorded in the fixture README and rerun on v1.14 in ginsys/bronzeward#713:
+  `TestLiveRoleProbe`, Talos v1.13.6, recorded in the fixture README; the rerun on v1.14 is scheduled in ginsys/bronzeward#713:
   `os:reader` and `os:operator` read the version but are refused the
   `MachineConfig` resource with `PermissionDenied`). The probe reports those denials but
   asserts only that `os:admin` reads, so the claim rests on that observation
@@ -4158,7 +4158,7 @@ design and evidence do not settle the question. Each is marked in place as
 | §1 scope, interfaces | §7.2, §11, §13.7 | [FR §10](../design/research/20260925-feasibility-evidence-review.md#10-recommendations) (Persistence) |
 | §2 identifiers | §4.4, §7.7 | [DB §4.7](../design/research/20260924-database-semantics.md#47-s7-restored-state) row 027; [DB §9](../design/research/20260924-database-semantics.md#9-hand-off) |
 | §3 entities, immutability | §4.4, §6.2, §7.2, §7.8, §11.2 | none: choices §17.3, §17.5, §17.28, §17.31, §17.32 |
-| §3.3 Talos access | §7.1, §13.1, §13.2 | `os:admin` needed to read the machine configuration: the fixture's `internal/talos` `TestLiveRoleProbe` (Talos v1.13.6, rerun in ginsys/bronzeward#713); the provider read grant on `secret/data/access/talos/*` not measured (choice §17.29) |
+| §3.3 Talos access | §7.1, §13.1, §13.2 | `os:admin` needed to read the machine configuration: the fixture's `internal/talos` `TestLiveRoleProbe` (Talos v1.13.6; the v1.14 rerun is scheduled in ginsys/bronzeward#713); the provider read grant on `secret/data/access/talos/*` not measured (choice §17.29) |
 | §4 revisions, ETags | §7.2, §11.1 | [DB §4.1](../design/research/20260924-database-semantics.md#41-s1-stale-revision-rejection) rows 001–003; DB §4.7; bodies and bindings: choice §17.35 |
 | §4.2 stale input | §7.4 step 4 | [DB §4.2](../design/research/20260924-database-semantics.md#42-s2-all-or-nothing-publication) rows 010, 011 |
 | §5 transactions | §7.2, §7.4 | DB §4.2 rows 059, 061; [DB §6.3](../design/research/20260924-database-semantics.md#63-criterion-3-backend-specific-limitations-and-costs); [DB §7](../design/research/20260924-database-semantics.md#7-limits); [DS §7](../design/research/20260925-dispatch-safety.md#7-limits) |

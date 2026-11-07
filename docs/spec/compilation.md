@@ -23,7 +23,7 @@ The evidence it rests on, abbreviated below:
 | KL | [Key loss and restoration](../design/research/20260924-key-loss-restoration.md) |
 | PC | [Provider capability comparison](../design/research/20260924-provider-capability-comparison.md) |
 
-Every result in those reports holds for one Talos version (v1.13.6; the fixture move to v1.14 in ginsys/bronzeward#713 reruns or voids each), container
+Every result in those reports holds for one Talos version (v1.13.6; the fixture move to v1.14 in ginsys/bronzeward#713 is to rerun or void each), container
 nodes with one control plane and one worker, and exact-copy leak scanning
 ([FR §2](../design/research/20260925-feasibility-evidence-review.md#2-what-binds-every-conclusion-here)),
 and the composition results for strategic merge patches only
