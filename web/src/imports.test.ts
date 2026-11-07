@@ -4,12 +4,12 @@ import { afterEach, describe, expect, test } from "vitest";
 import type { components } from "./api/v1";
 import { forgetETag, keepETag, keptETag } from "./drafts.tsx";
 import { WritesProvider } from "./forms.tsx";
-import { againPath, allowed, documentRefusal, ended, type Ingestion, MAX_DOCUMENT, onEvent, releaseInput, sendStart, StartImport, type StartInput, startBody, startETag, startParams, startRun, started, stopsWatch, unsent } from "./imports.tsx";
+import { againPath, allowed, documentRefusal, ended, type Ingestion, MAX_DOCUMENT, onEvent, sendStart, StartImport, type StartInput, startBody, startETag, startParams, startRun, started, stopsWatch, unsent } from "./imports.tsx";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import { eventLine } from "./progress.ts";
-import type { ReadResult } from "./request.ts";
+import { Client, type ReadResult } from "./request.ts";
 import { ShellContext } from "./shell.tsx";
-import { Writes, type WriteSpec } from "./write.ts";
+import { EPOCH_CHANGED_ASIDE, Write, Writes, type WriteSpec } from "./write.ts";
 
 type Operation = components["schemas"]["OperationBody"];
 
@@ -212,25 +212,101 @@ describe("the start's body and its protected input (G5, §11.2)", () => {
     expect(calls).toEqual(["clear", "send"]);
     expect(spec).toMatchObject({ method: "POST", path: "/ingestions", ifMatch: '"1-a"', body: { document: "secret: x", marks: ["doc[0]/a"] } });
   });
-  test("the request drops the document and marks on every outcome but unknown, a set-aside one included, and keeps them while it can be repeated", () => {
-    const body = (s: WriteSpec) => s.body as Record<string, unknown>;
-    for (const out of [{ kind: "refused" }, { kind: "not-done" }, { kind: "set-aside", ambiguous: false }, { kind: "set-aside", ambiguous: true }, { kind: "done", data: null }]) {
-      const { spec } = start();
-      spec.settled!(out as never, {} as never);
-      expect(body(spec)).not.toHaveProperty("document");
-      expect(body(spec)).not.toHaveProperty("marks");
-      expect(body(spec)["machine"]).toBe("mch_b3caa2q");
-    }
-    const { spec: open } = start();
-    open.settled!({ kind: "unknown" } as never, {} as never);
-    expect(body(open)["document"]).toBe("secret: x");
-    expect(body(open)["marks"]).toEqual(["doc[0]/a"]);
-    const b = { document: "x", marks: ["m"] };
-    releaseInput(b, { kind: "done", data: null } as never);
-    expect(b).toEqual({});
+  test("the start asks the write layer to tell it when the write can no longer be repeated", () => {
     const { spec } = start();
-    spec.settled!({ kind: "done", data: { ingestion: "ing_new" } } as never, { epoch: "e1" } as never);
+    expect(spec.released).toBeTypeOf("function");
+  });
+  // The tests below send the start through a real `Writes` and read the page's own body object, which
+  // `Writes.release` cannot clear: only the start's `released` callback can (ginsys/bronzeward#663).
+  const SIGNED = "https://idp.invalid SYNTH-sub-1";
+  const drop = () => new TypeError("Failed to fetch");
+  const epochAnswer = () => new Response(JSON.stringify({ mode: "normal" }), { status: 200, headers: { "Content-Type": "application/json", "Bronzeward-Epoch": "e1" } });
+  const answered = (data: unknown) => new Response(JSON.stringify(data), { status: 201, headers: { "Content-Type": "application/json", "Bronzeward-Epoch": "e1" } });
+  function sending(answers: (Response | Error)[]) {
+    const queue = [...answers];
+    const fetchMock = (async (url: RequestInfo | URL) => {
+      if (String(url).endsWith("/recovery")) return epochAnswer();
+      const next = queue.shift();
+      if (next === undefined) throw new Error("no answer left");
+      if (next instanceof Error) throw next;
+      return next;
+    }) as unknown as typeof fetch;
+    const client = new Client({ token: () => "SYNTH-token", fetch: fetchMock });
+    const writes = new Writes(() => SIGNED, async () => {});
+    writes.client = client;
+    return { client, writes, fetch: fetchMock };
+  }
+  // Sends the start; `body` is the page's own object, read after the layer let go of its spec.
+  async function beginStart(p: ReturnType<typeof sending>) {
+    const got: { w?: Write } = {};
+    sendStart((s) => { got.w = new Write(s); }, () => {}, full, '"1-a"');
+    const w = got.w!;
+    const body = w.spec.body as Record<string, unknown>;
+    const out = await p.writes.submit(w);
+    return { w, body, out };
+  }
+  const held = (b: Record<string, unknown>) => ({ document: b["document"], marks: b["marks"] });
+  const emptied = { document: undefined, marks: undefined };
+  const unknownStart = async (p: ReturnType<typeof sending>) => {
+    const s = await beginStart(p);
+    expect(s.out.kind).toBe("unknown");
+    expect(p.writes.repeatable(s.w)).toBe(true);
+    return s;
+  };
+  const four = () => [drop(), drop(), drop(), drop()];
+  test("an unknown start that is set aside drops the document and marks (T1, HX2 and HC6)", async () => {
+    const p = sending(four());
+    const s = await unknownStart(p);
+    expect(held(s.body)).toEqual({ document: "secret: x", marks: ["doc[0]/a"] });
+    p.writes.setAside(EPOCH_CHANGED_ASIDE);
+    expect(held(s.body)).toEqual(emptied);
+    expect(s.body["machine"]).toBe("mch_b3caa2q");
+    expect(p.writes.repeatable(s.w)).toBe(false);
+  });
+  test("an unknown start that is dismissed drops the document and marks (T2, R7-1)", async () => {
+    const p = sending(four());
+    const s = await unknownStart(p);
+    p.writes.dismiss(s.w);
+    expect(held(s.body)).toEqual(emptied);
+  });
+  test("an unknown start whose client ends its writes after a disconnect drops the document and marks (T3, R6-2)", async () => {
+    const p = sending(four());
+    const s = await unknownStart(p);
+    p.writes.disconnect(p.client);
+    expect(held(s.body).document).toBe("secret: x");
+    p.client.endWrites();
+    expect(held(s.body)).toEqual(emptied);
+  });
+  test("a client bound after the sign-in ended does not repeat an unknown start, and the input is gone (T4, R6-1)", async () => {
+    const p = sending(four());
+    const s = await unknownStart(p);
+    p.client.endWrites();
+    const later = new Client({ token: () => "SYNTH-token", fetch: p.fetch });
+    (later as unknown as { observeEpoch(r: Response): boolean }).observeEpoch(epochAnswer());
+    p.writes.client = later;
+    expect(p.writes.repeatable(s.w)).toBe(false);
+    expect(held(s.body)).toEqual(emptied);
+  });
+  test("control: an unknown start keeps the document and marks, and stays repeatable, until one of the above happens (T5)", async () => {
+    const p = sending(four());
+    const s = await unknownStart(p);
+    expect(held(s.body)).toEqual({ document: "secret: x", marks: ["doc[0]/a"] });
+    expect(p.writes.repeatable(s.w)).toBe(true);
+  });
+  test("control: a done start drops the document and marks, and remembers its ingestion for the draft (T6)", async () => {
+    const p = sending([answered({ ingestion: "ing_new" })]);
+    const s = await beginStart(p);
+    expect(s.out.kind).toBe("done");
+    expect(held(s.body)).toEqual(emptied);
+    expect(s.body["machine"]).toBe("mch_b3caa2q");
     expect(started.get("ing_new")).toEqual({ draft: "drf_2rmp457a", epoch: "e1" });
+  });
+  test("a refused start drops the document and marks too", async () => {
+    const refusal = new Response(JSON.stringify({ type: "urn:bronzeward:problem:invalid-input", title: "x", status: 422 }), { status: 422, headers: { "Content-Type": "application/problem+json", "Bronzeward-Epoch": "e1" } });
+    const p = sending([refusal]);
+    const s = await beginStart(p);
+    expect(s.out.kind).toBe("refused");
+    expect(held(s.body)).toEqual(emptied);
   });
   test("the kept request does not reach the typed input once the send has returned", () => {
     let returned = false;
