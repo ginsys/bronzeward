@@ -13,10 +13,31 @@ export type Operation = components["schemas"]["OperationBody"];
 // §8.3). `data` is the event's own data; the JSON pages' `at` is not kept.
 export interface OpEvent { id: string; type: string; data: unknown }
 
+// A mark-refused event's problem as the page keeps it (compilation §3.6 item 4): its code, its rule
+// and the mark's position in the request, never a path. Only a short server token and a whole number
+// are kept, so a defective server cannot make this line echo text the operator typed.
+export interface Refusal { code?: string; rule?: string; position?: number }
+const TOKEN = /^[A-Za-z0-9_-]{1,64}$/;
+export function refusalOf(data: unknown): Refusal {
+  const p = (data as { problem?: Record<string, unknown> | null } | null)?.problem;
+  if (typeof p !== "object" || p === null) return {};
+  const code = typeof p["type"] === "string" ? p["type"].replace(/^urn:bronzeward:problem:/, "") : undefined;
+  const { rule, position } = p;
+  return {
+    ...(code !== undefined && TOKEN.test(code) && { code }),
+    ...(typeof rule === "string" && TOKEN.test(rule) && { rule }),
+    ...(typeof position === "number" && Number.isSafeInteger(position) && position >= 0 && { position }),
+  };
+}
+// The refusal in words, as the CLI says it: the first mark is at position 0.
+export const refusalText = (r: Refusal) =>
+  [r.code, r.rule === undefined ? undefined : `rule ${r.rule}`, r.position === undefined ? undefined : `the mark at position ${r.position} (the first is 0)`].filter((s) => s !== undefined).join(", ") || "no problem named";
+
 // An event as the CLI's watch prints it: its type, generation and code. No event carries input text.
 export function eventLine(e: OpEvent): string {
   const d = (typeof e.data === "object" && e.data !== null ? e.data : {}) as { generation?: number; code?: string };
-  return `${e.type}${d.generation === undefined ? "" : ` (generation ${d.generation})`}${d.code === undefined ? "" : `: ${d.code}`}`;
+  const refused = e.type === "mark-refused" ? `: ${refusalText(refusalOf(e.data))}` : "";
+  return `${e.type}${d.generation === undefined ? "" : ` (generation ${d.generation})`}${d.code === undefined ? "" : `: ${d.code}`}${refused}`;
 }
 
 export const RESTORED ="The installation was restored or entered recovery mode, so the operation's events are shown again from the start.";

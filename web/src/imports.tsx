@@ -10,7 +10,8 @@ import { Claim } from "./claim.tsx";
 import { keepETag, keptETag, NO_ASSIST } from "./drafts.tsx";
 import { Form, field, useSend, useUnsaved, useWrites } from "./forms.tsx";
 import { Id, type Load, Ref, short, useItem, useList, usePending, useReads, useSettled } from "./list.tsx";
-import { eventLine, terminal, watch } from "./progress.ts";
+import { markLines } from "./marks.tsx";
+import { eventLine, type Refusal, refusalOf, refusalText, terminal, watch } from "./progress.ts";
 import type { Client } from "./request.ts";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
@@ -75,7 +76,7 @@ const code = (error: unknown) => {
 // 412. `epoch` is that of the operation read the watch ended on, and the ETag is kept only when the
 // draft's own read has the same epoch: an ETag read under another epoch is not kept (§8.5, "discards
 // every ... ETag", and the commands that read twice compare the epoch of the answers themselves).
-export async function ended(client: Pick<Client, "readWithEpoch">, b: Ingestion, o: Operation, last: string, now: number, epoch: string | undefined): Promise<ReactNode> {
+export async function ended(client: Pick<Client, "readWithEpoch">, b: Ingestion, o: Operation, last: string, now: number, epoch: string | undefined, run?: Pick<RunState, "marked" | "refused">): Promise<ReactNode> {
   if (o.state === "succeeded") {
     const r = o.result as S["IngestResult"] | null;
     if (r === null || typeof r.draftRevision !== "number") return `Import operation ${short(o.id)} succeeded without naming its draft revision.`;
@@ -102,6 +103,10 @@ export async function ended(client: Pick<Client, "readWithEpoch">, b: Ingestion,
   }
   // An abandoned claim whose operation has no recorded end: the pause the events replay is not current.
   if (b.state === "abandoned") return `Import ${short(b.id)} is abandoned, but operation ${short(o.id)} has no recorded end yet: its outcome is unknown. Read it again later.`;
+  if (last === "paused" && run?.refused !== undefined) {
+    return `The mark was not applied: it was refused (${refusalText(run.refused)}). The import is paused again (expires ${when(b.expiresAt)}). Review it again and mark again, continue it, or abandon it.`;
+  }
+  if (last === "paused" && run?.marked) return `The marks were applied: re-staged and paused again (expires ${when(b.expiresAt)}). Review again, continue or abandon it.`;
   if (last === "paused") return `Paused for review (expires ${when(b.expiresAt)}).`;
   if (last === "resume-failed") return `Import ${short(b.id)} was not applied: its staged input could not be decrypted (resume-failed). The claim stays held until its lease lapses at ${when(b.leaseUntil)}; then take it over, or abandon it now.`;
   if (lapsed(b, now)) {
@@ -146,14 +151,17 @@ export function IngestionItem({ id }: { id: string }) {
 // The events of the run that holds the claim now (the CLI's follow, imports.go): the operation's
 // events are shown from its start, so a pause or resume-failed of an earlier run settles nothing.
 // `gen` is the last generation a run started at; the first run (generation 1) is ours from the start.
-export interface RunState { ours: boolean; gen: number; settled?: "paused" | "resume-failed" }
+// A mark's run also keeps that it took the claim (`marked`) and, when compilation refused it, why
+// (`refused`: the rule and position, never a path). Only a pause at the mark's generation applies it.
+export interface RunState { ours: boolean; gen: number; settled?: "paused" | "resume-failed"; marked?: true; refused?: Refusal }
 export const startRun = (ownerGeneration: number): RunState => ({ ours: ownerGeneration <= 1, gen: ownerGeneration - 1 });
 export function onEvent(s: RunState, type: string, data: unknown): RunState {
   const g = (data as { generation?: unknown } | null)?.generation;
   const gen = typeof g === "number" ? g : 0;
-  if (["continued", "taken-over", "marked"].includes(type) && gen > s.gen) return { ours: true, gen };
+  if (["continued", "taken-over", "marked"].includes(type) && gen > s.gen) return { ours: true, gen, ...(type === "marked" && { marked: true as const }) };
   if (!s.ours) return s;
-  if (type === "paused" && gen >= s.gen) return { ours: true, gen, settled: "paused" };
+  if (type === "mark-refused" && gen >= s.gen) return { ...s, gen, refused: refusalOf(data) };
+  if (type === "paused" && gen >= s.gen) return { ...s, ours: true, gen, settled: "paused" };
   if (type === "resume-failed") return { ...s, settled: "resume-failed" };
   return s;
 }
@@ -221,7 +229,7 @@ function Progress({ b, again }: { b: Ingestion; again: () => void }) {
       if (r.kind === "stopped" || abort.signal.aborted) return;
       // The ETag is kept under the epoch of the operation read the watch ended on, not under the client's
       // epoch now, which another response can have moved since (§8.5).
-      const text = r.kind === "failed" ? shown.current(r.res) : await ended(client, latest.current.b, r.operation, run.settled ?? "", Date.now(), r.epoch);
+      const text = r.kind === "failed" ? shown.current(r.res) : await ended(client, latest.current.b, r.operation, run.settled ?? "", Date.now(), r.epoch, run);
       if (!abort.signal.aborted) {
         setEnd(text);
         again();
@@ -267,9 +275,7 @@ export interface StartInput {
 }
 // The start's body. A review needs encrypted staging (G5), so a transient staging never asks for one.
 export function startBody(i: StartInput): Record<string, unknown> {
-  // Each nonempty line is one RFC 6901 path, sent as typed: whitespace is part of a token, and a
-  // trimmed path would address another node (compilation.md §2.2).
-  const marks = i.marks.split("\n").filter((s) => s !== "");
+  const marks = markLines(i.marks);
   return {
     kind: i.kind, machine: i.machine, draft: i.draft, source: i.source, staging: i.staging, review: i.staging === "encrypted" && i.review,
     ...(marks.length > 0 && { marks }), ...(i.source === "document" && { document: i.doc }),
