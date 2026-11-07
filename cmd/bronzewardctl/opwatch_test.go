@@ -585,6 +585,45 @@ func TestOperationWatchOutage(t *testing.T) {
 			t.Errorf("exit %d, stdout %q, stderr %q; want 3, the state named as not read and no completion line", code, out, errOut)
 		}
 	})
+	// A terminal read, a drain of its events that fails, then a reread that ends in an outage: the watch
+	// returns the terminal read with the failed drain (WatchBody, the failed-drain branch that ends the watch).
+	// The pages that readLast then reads can be the first to show a restore.
+	failedDrain := func(t *testing.T, pagesEpoch string) (int, string, string) {
+		t.Helper()
+		f := &opFake{stream: []string{sse(1, "commitment", commitment)}, pages: []string{evPage(1, "commitment", commitment)},
+			pagesFailFor: 1, pagesEpoch: pagesEpoch, outageFrom: 3, outageReads: 1000,
+			body: fmt.Sprintf(opJSON, "apply-config", "succeeded", "null", "null", "[]")}
+		srv := httptest.NewServer(f)
+		t.Cleanup(srv.Close)
+		automationContext(t, srv.URL)
+		return runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "2500ms")
+	}
+	t.Run("the timeout after a failed drain and an outage, the pages of the end of its own epoch: the terminal read stands (control)", func(t *testing.T) {
+		code, out, errOut := failedDrain(t, "")
+		if code != 0 || !strings.Contains(out, "Succeeded") || !strings.Contains(errOut, "the operation's last events were not shown") {
+			t.Errorf("exit %d, stdout %q, stderr %q; want 0, the completion line and the failed drain reported", code, out, errOut)
+		}
+	})
+	t.Run("the timeout after a failed drain and an outage, when the pages that read the end show another epoch: exit 3", func(t *testing.T) {
+		code, out, errOut := failedDrain(t, "ep_BWSYNTH-3")
+		if code != 3 || !strings.Contains(errOut, "bronzewardctl operation show 'op_BWSYNTH'") || strings.Contains(out, "Succeeded") {
+			t.Errorf("exit %d, stdout %q, stderr %q; want 3, the operation to read named and no completion line", code, out, errOut)
+		}
+	})
+	t.Run("the timeout during an outage after the events showed another epoch than a non-terminal first read: exit 5, the first read as last read", func(t *testing.T) {
+		// Same shape as the case above, but the first read shows the operation running. Only a terminal read is
+		// invalidated by a move (client-contracts.md section 8.6 item 2), so the stop reports the running state.
+		f := &opFake{stream: []string{sse(1, "commitment", commitment)}, pages: []string{evPage(1, "commitment", commitment)},
+			opEpoch: "ep_BWSYNTH-1", outageFrom: 2, outageReads: 1000,
+			body: fmt.Sprintf(opJSON, "apply-config", "running", "null", "null", "[]")}
+		srv := httptest.NewServer(f)
+		t.Cleanup(srv.Close)
+		automationContext(t, srv.URL)
+		code, _, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "2500ms")
+		if code != 5 || !strings.Contains(errOut, "after --timeout") || strings.Contains(errOut, "was not read") {
+			t.Errorf("exit %d, stderr %q; want 5, the timeout named and no unread state", code, errOut)
+		}
+	})
 	t.Run("the timeout during an outage after an event of another epoch came in the open stream: exit 3", func(t *testing.T) {
 		// The first read and the stream's header show epoch 2. An event in the stream is of epoch 3: the installation
 		// entered recovery mode while the stream stayed open (client-contracts.md section 8.6 item 3). Every read of the

@@ -276,10 +276,11 @@ func (e *env) operationWatch(args []string) (err error) {
 		// The watch ended (--timeout, or a Ctrl-C taken by Until) while its read of the operation waited
 		// for a server out of reach: the state is the first read's, which the stop lines name as the last read.
 		// Not when the installation was restored since that read, shown by the watch or by an answer of another
-		// epoch: that read is of the one before, so the state is unknown.
+		// epoch: that read is of the one before, so the state is unknown. Only a terminal read is of that kind:
+		// a read that shows the operation still running is reported across a move (client-contracts.md §8.6 item 2).
 		fell := false
 		if o == nil && errors.Is(err, client.ErrWatchEnded) && !errors.Is(err, client.ErrWatchRestored) {
-			if oc.EpochHolds(firstRead) {
+			if !client.Terminal(first.State) || oc.EpochHolds(firstRead) {
 				o, read, err, fell = first, firstRead, nil, true
 			} else {
 				err = errors.Join(err, client.ErrWatchRestored)
@@ -351,8 +352,11 @@ func (e *env) operationWatch(args []string) (err error) {
 	if client.Terminal(o.State) {
 		last = readLast(c, id, o.State, res.read.Epoch)
 		// The first read stands only for as long as no answer shows another epoch: the pages and the read
-		// that readLast made can be the first to show the restore, and then the state is not known.
-		if res.first && !c.EpochHolds(res.read) {
+		// that readLast made can be the first to show the restore, and then the state is not known. The same
+		// holds for a terminal read that the watch kept after the drain of its events failed (res.err is that
+		// failure): the outage that ended the watch left it as the only read. A watch that drained its events
+		// to the end is not checked here (ginsys/bronzeward#690).
+		if (res.first || res.err != nil) && !c.EpochHolds(res.read) {
 			return errors.Join(unreadState(id, errors.Join(client.ErrWatchEnded, client.ErrWatchRestored)), out.failure())
 		}
 	}
