@@ -2,7 +2,7 @@
 # Checks that compare.mjs fails closed. It feeds the comparison six hand-written oracle outputs and
 # requires the exit status to match: 0 for a pass, and nonzero for two false refusals (a "misplaced"
 # prediction and a scanner error), a missed document, an empty set and a count mismatch. It needs no go
-# and no oracle.
+# and no oracle. It also pins one model verdict: a document that starts with two byte order marks is "unsupported".
 # Usage: selftest.sh
 set -uo pipefail
 
@@ -33,4 +33,14 @@ check "planted miss: the bug decides a document and the model predicts nothing" 
 check "empty set" nonzero '[]' '[]' '[]'
 check "count mismatch between the set and an oracle" nonzero "$keyed" '[]' "$accepted"
 check "planted false refusal: the model reports a scanner error and go-yaml accepts" nonzero '["@"]' "$accepted" "$accepted"
+
+# Pin: a document that starts with two byte order marks gets the verdict "unsupported" (the model throws
+# Unsupported("two BOMs at the start")), and the comparison counts it as not compared and does not fail.
+# The same document under the bug would count as missed, so the edge set carries none (see the report).
+check "pin: a document that starts with two marks is unsupported and not a failure" zero '["﻿﻿[? b]: !bwref x/foo\n"]' "$accepted" "$accepted"
+if head -n 1 "$tmp/out" | rg -q '"model:unsupported":1'; then
+  echo "selftest: pin: the verdict of a two-mark document is unsupported ok"
+else
+  echo "selftest: FAIL pin: the verdict of a two-mark document is not unsupported: $(head -n 1 "$tmp/out")" >&2; bad=1
+fi
 exit "$bad"
