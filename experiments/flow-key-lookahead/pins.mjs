@@ -27,5 +27,34 @@ const bugged = "[? b]: !bwref x/foo\n";
 expect("bound: a reached bound hides no misplaced verdict", model(bugged, { maxSteps: 2 }).verdict, "guard-exhausted");
 expect("bound: the document is misplaced under the default bound", model(bugged).verdict, "misplaced");
 
+// Escapes in a double-quoted scalar (scannerc.go 2496-2579). K is a flow key that the bug refuses: a document that the
+// scan reaches the end of gives "misplaced", and a document with a bad escape gives "error" with go-yaml's own message.
+// The first four are the w688-adv documents 0-3 (go-yaml and the guarded go-yaml gave the same answer on 0-2; 3 is the control).
+const K = "[? b]: !bwref x/foo\n";
+function verdictOf(name, doc, want, message) {
+  const m = model(doc);
+  expect(name, m.verdict, want);
+  if (message !== undefined) expect(`${name} (message)`, m.error, message);
+}
+verdictOf("escape: unknown escape \\q", `k: "\\q"\n${K}`, "error", "found unknown escape character");
+verdictOf("escape: non-hex digits in \\u", `k: "\\uZZZZ"\n${K}`, "error", "did not find expected hexdecimal number");
+verdictOf("escape: \\x with no digits", `k: "\\x"\n${K}`, "error", "did not find expected hexdecimal number");
+verdictOf("escape: control, \\x41 is complete", `k: "\\x41"\n${K}`, "misplaced");
+verdictOf("escape: \\u with 3 digits then the quote", `k: "\\u123"\n${K}`, "error", "did not find expected hexdecimal number");
+verdictOf("escape: \\U with 7 digits then the quote", `k: "\\U0000004"\n${K}`, "error", "did not find expected hexdecimal number");
+verdictOf("escape: \\xG1", `k: "\\xG1"\n${K}`, "error", "did not find expected hexdecimal number");
+verdictOf("escape: a surrogate, \\uD800", `k: "\\uD800"\n${K}`, "error", "found invalid Unicode character escape code");
+verdictOf("escape: the last surrogate, \\uDFFF", `k: "\\uDFFF"\n${K}`, "error", "found invalid Unicode character escape code");
+verdictOf("escape: control, \\uD7FF is below the surrogates", `k: "\\uD7FF"\n${K}`, "misplaced");
+verdictOf("escape: control, \\uE000 is above the surrogates", `k: "\\uE000"\n${K}`, "misplaced");
+verdictOf("escape: above the range, \\U00110000", `k: "\\U00110000"\n${K}`, "error", "found invalid Unicode character escape code");
+verdictOf("escape: control, \\U0010FFFF is the last code", `k: "\\U0010FFFF"\n${K}`, "misplaced");
+verdictOf("escape: \\/ is not an escape of go-yaml v3.0.5", `k: "\\/"\n${K}`, "error", "found unknown escape character");
+verdictOf("escape: a backslash at the end of the stream", 'k: "\\', "error", "found unknown escape character");
+verdictOf("escape: a single-quoted scalar has no escapes", `k: '\\q'\n${K}`, "misplaced");
+for (const e of ["0", "a", "b", "t", "\t", "n", "v", "f", "r", "e", " ", '"', "'", "\\", "N", "_", "L", "P"]) {
+  verdictOf(`escape: control, one-character escape ${JSON.stringify(e)}`, `k: "\\${e}"\n${K}`, "misplaced");
+}
+
 console.log(`pins: ${total - bad} of ${total} ok`);
 process.exit(bad > 0 ? 1 : 0);
