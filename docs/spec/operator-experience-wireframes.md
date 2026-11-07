@@ -295,12 +295,12 @@ A plain `!bwref` value can go on to the next line. The editor reads that line as
 and lists nothing, in these cases. In block context the line must be indented past its parent. Then
 a line that starts with `,`, `]` or `}` is text. A line that starts with `- `, `? ` or holds a key
 (`k: v`) is text where the parent line shows a plain key, a quoted key with no quote character inside
-or a dash. It ends the value under a compact parent such as `- - `. A quoted key
+or a dash. Under a compact parent such as `- - ` or `- k:` a `- ` or `? ` line is text only when it is more indented than the compact collection, whose column is that of the key after the indicators (`- k:` gives 2), or of the last indicator when only properties follow. At that column or left of it, the line ends the value. A quoted key
 with a doubled or escaped quote (`'a''b': !bwref x/foo`) is not read as a parent, so such a line still
 ends the value and the editor lists a name where the server lists none. A tab after the colon is a blank like a space. A tab after a dash is not: the server refuses the document. One anchor between the parent and the tag (`k: &e !bwref x/foo`, `- &e !bwref x/foo`) or after the colon or dash of the parent line (`k: &e`, then the tag on the next line) changes nothing: the parent is still the key or the dash. A space or a tab may follow that anchor on a key line and on a dash line. Two anchors make the server refuse the document. A line of Unicode spaces is text, not blank. A line that
 starts with a no-break space has text at column 0, so it is no indentation. A tag that starts its own line is read against the
 line above only where that line is a plain or quoted key with nothing after its colon, or a lone dash. Under a compact
-parent such as `- k:` a next line that can be a sibling key or a sequence entry (`- y`, `y: v`) ends the value, and
+parent such as `- k:` a next line that is a sibling key (`y: v`), or a sequence entry at the column of the collection or left of it, ends the value, and
 an ordinary indented line goes on. A line that holds only an anchor is no parent: the key above it is. An anchor before the tag on its own line (`&e !bwref x/foo`) is no text: the
 parent is the line above, as for the tag alone. A byte order mark at the start of the stream is no text
 and no column. A root scalar is a tag on the line of `---`, or the first text of a
