@@ -43,8 +43,8 @@ operator reads it (S8).
 
 **Fixture.** The disposable environment in [`fixtures/`](../../fixtures/README.md) at the pins of
 `fixtures/versions.env`
-([Fx §3](../design/research/20260919-investigation-fixtures.md#3-what-was-built)): Talos v1.13.6
-with one control plane and one worker in Docker, PostgreSQL 17 and a single-node OpenBao 2.6.1 with
+([Fx §3](../design/research/20260919-investigation-fixtures.md#3-what-was-built)): Talos v1.14.5
+(the pin after ginsys/bronzeward#713; v1.13.6 until it lands) with one control plane and one worker in Docker, PostgreSQL 17 and a single-node OpenBao 2.6.1 with
 KV v2 and Transit. `bin/up` creates it; `bin/inject` kills, pauses and partitions the database,
 OpenBao and either node, snapshots and restores the database and OpenBao under a name, soft-deletes and destroys KV versions and deletes
 Transit keys; `bin/evidence` records digests and scans for synthetic secrets with a positive
@@ -690,7 +690,7 @@ Closing run: **the bound on when an abandoned request can no longer land**
 The proxied route is not a PoC dispatch route (ER §10.9): its landings are measured with the E4
 harness, not through the executor, and its result is the input to any amendment re-admitting it.
 
-1. From the Talos v1.13.6 source, establish how the control plane's API proxy forwards and cancels
+1. From the Talos v1.14.5 source, establish how the control plane's API proxy forwards and cancels
    a proxied request, and state what that predicts.
 2. Measure landings through the proxy across partition lengths, pauses of each side and connection
    reuse, with enough captures per cell to state a distribution, the resource version serving as
