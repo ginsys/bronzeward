@@ -1649,15 +1649,15 @@ describe("a plain !bwref value that goes on to the next line", () => {
   describe("cost", () => {
     // The check does not compare a time with a fixed bound, because the speed of a CI runner varies by
     // a factor of nine (ginsys/bronzeward#703: 160 ms locally, 1,468 ms on one runner), more than any
-    // bound that still fails a slow scan. It builds the same draft from a size argument 64 times smaller
-    // and from the full size argument, reads both in the same process, and compares the time per
-    // character of the two drafts. Where the length of a draft is in proportion to its size argument, a
+    // bound that still fails a slow scan. It builds the same draft from a size argument about 64 times
+    // smaller (rounded, and at least 1) and from the full size argument, reads both in the same process,
+    // and compares the time per character of the two drafts. Where the length of a draft is in proportion to its size argument, a
     // linear scan costs the same per character at both sizes (a ratio near 1), and a quadratic one costs
     // 64 times as much (a ratio of 40 to 64 where it was measured, 51 on e354c61c). The limit is 12. A
     // runner that is slow by a constant factor changes both times and not the ratio. Two builders keep
     // no such proportion: the rising indentation has a length that grows with the square of its size
     // argument, and the line of 25 bangs is a case of exponential cost. For them the check asks only
-    // that the time per character does not grow by more than 12 times.
+    // that the time per character grows by less than 12 times (a ratio of 12 or more fails).
     //
     // The gap and the limit come from runs of this file at gaps of 4, 16 and 64 (20, 20 and 45 runs).
     // At a gap of 4 the limit was 2.5, and one run of the 20,000-tag flow line read 2.87, because that
@@ -1671,9 +1671,10 @@ describe("a plain !bwref value that goes on to the next line", () => {
     // `floorMs` (100 ms) passes without a ratio, because the timer cannot tell a ratio at that speed
     // from noise, and a quadratic scan does not read these drafts that fast: it takes seconds on each.
     //
-    // KNOWN LIMIT: a scan that is slower by a constant factor, 10 times for example, is not found. It
-    // differs by only 1.1 times from a runner that is 9 times slower, which is less than the difference
-    // between two runners, so a check of the speed of one run cannot tell the two apart. The cost that
+    // KNOWN LIMIT: a scan that is slower by a constant factor, 10 times for example, is not found. Its
+    // time differs by only 1.1 times from that of a runner that is 9 times slower, which is less than
+    // the difference between two runners, so a check of the speed of one run cannot reliably tell the
+    // two apart. The cost that
     // grows with the size of the draft is what this describes and finds. A small term that
     // grows with the square of a line is not found either, as long as the ratio stays under 12.
     const GROWTH_LIMIT = 12;
