@@ -28,7 +28,7 @@ The evidence it rests on, abbreviated below:
 
 "DS row 005" is row 005 of the dispatch-safety capture (DS §3). Every dispatch
 result holds for one `apply-config --mode=no-reboot` on one container worker
-running Talos v1.13.6 (ginsys/bronzeward#713 reruns it on v1.14), at one assignment revision, against one PostgreSQL 17.11
+running Talos v1.13.6 (the v1.14 rerun is scheduled in ginsys/bronzeward#713), at one assignment revision, against one PostgreSQL 17.11
 server at its default isolation, with a rollout limit of one
 ([DS §7](../design/research/20260925-dispatch-safety.md#7-limits)). This
 contract inherits those limits; §9 lists them with the gaps.
@@ -67,7 +67,7 @@ published, encrypted per-machine artifact to an existing **worker** with Talos
 `apply-config` in `no-reboot` mode, over direct Talos access (DS §2.1, §6.3).
 The artifact's contract minor is the node's running minor (compilation
 contract §10.2); a v1.14 worker running v1.14.5 is the target, and the evidence so far is on a
-v1.13 worker running v1.13.6, rerun in ginsys/bronzeward#713
+v1.13 worker running v1.13.6; the v1.14 rerun is scheduled in ginsys/bronzeward#713
 ([E3 §4.3](../design/research/20260925-talos-compatibility.md#43-operationrpc-compatibility-against-v1136)).
 Publication, observation, adoption and recovery are separate capabilities that
 send nothing to a machine.
