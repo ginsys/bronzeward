@@ -1601,6 +1601,45 @@ describe("a plain !bwref value that goes on to the next line", () => {
     expect(references("? - !bwref x/foo\n    plain\n")).toEqual([]);
   });
 
+  // The parent line of a compact parent can end with an anchor, or with a carriage return after the indicators
+  // (`- - &e`, `? - &e`, `- - ` in CRLF), and the tag starts the next line. Only properties follow the last
+  // indicator then, so the compact collection is at that indicator, as for `- - !bwref x/foo` (review round 2 of
+  // ginsys/bronzeward#699, probe w699-probe-e1: 16 documents at e1d0d1f3, 7 listed `x/foo` where go-yaml reads
+  // `x/foo - y` or `x/foo ? y`, 9 agree, none lost a name). go-yaml refuses the documents with the next line at
+  // the collection column when the tag is the entry, so no row of that shape is here.
+  test.each([
+    ["two dashes, an anchor at the end of the line, a deeper dash line", "- - &e\n    !bwref x/foo\n    - y\n"],
+    ["an explicit key and a dash, an anchor at the end of the line, a deeper dash line", "? - &e\n    !bwref x/foo\n    - y\n"],
+    ["two dashes, a carriage return after the blank, a deeper dash line", "- - \r\n    !bwref x/foo\r\n    - y\r\n"],
+    ["two dashes, an anchor at the end of the line, CRLF, a deeper dash line", "- - &e\r\n    !bwref x/foo\r\n    - y\r\n"],
+    ["two dashes, an anchor at the end of the line, a deeper question mark line", "- - &e\n    !bwref x/foo\n    ? y\n"],
+    ["a nested sequence in a sequence, an anchor at the end of the line, a deeper dash line", "a:\n  - - &e\n      !bwref x/foo\n      - y\n"],
+    ["an explicit key and a dash, an anchor at the end of the line, CRLF", "? - &e\r\n    !bwref x/foo\r\n    - y\r\n"],
+  ])("a compact parent whose line ends with an anchor or a carriage return, then a more indented line that goes on with the scalar, lists nothing (%s)", (_, text) => {
+    expect(references(text), text).toEqual([]);
+  });
+
+  // The same shapes where the next line belongs to the collection: go-yaml reads `x/foo`. These rows list the
+  // name on e1d0d1f3 too and pin that the fix keeps it.
+  test.each([
+    ["two dashes, a dash line at the column of the collection", "- - &e\n    !bwref x/foo\n  - y\n"],
+    ["two dashes, a dash line at column 0", "- - &e\n    !bwref x/foo\n- y\n"],
+    ["two dashes, CRLF, a dash line at the column of the collection", "- - &e\r\n    !bwref x/foo\r\n  - y\r\n"],
+    ["an explicit key and a dash, a dash line at the entry column", "? - &e\n    !bwref x/foo\n  - y\n"],
+    ["two dashes, a carriage return after the blank, a dash line at the column of the collection", "- - \r\n    !bwref x/foo\r\n  - y\r\n"],
+  ])("a compact parent whose line ends with an anchor or a carriage return, then a line that ends the scalar, lists the name (%s)", (_, text) => {
+    expect(references(text), text).toEqual(["x/foo"]);
+  });
+
+  // These two shapes list nothing on e1d0d1f3 already, as go-yaml does (probe w699-probe-e1, rows R6 and R9), so
+  // they pass on both sides and discriminate nothing there. They pin that the fix keeps that.
+  test.each([
+    ["two dashes, a tab after the anchor at the end of the line", "- - &e\t\n    !bwref x/foo\n    - y\n"],
+    ["a dash and an explicit key, an anchor at the end of the line", "- ? &e\n    !bwref x/foo\n    - y\n"],
+  ])("a compact parent whose line ends with a tab after an anchor or with an explicit key entry, lists nothing (%s)", (_, text) => {
+    expect(references(text), text).toEqual([]);
+  });
+
   // The editor reads a draft while the user types, so the cost of the scan must stay near linear
   // (review of this change). A check that takes too long on the earlier code ends on its own and fails
   // the bound, and does not hang: a test timeout cannot stop a synchronous scan.

@@ -447,8 +447,9 @@ const propertiesOnly = (line: string) =>
 // The column of the compact collection that holds the scalar, read from the text before the tag, or from its
 // parent line, when that text opens with `- ` or `? ` (ginsys/bronzeward#706). It is the column of the key
 // after the indicators (`- k:` gives 2), or the column of the last indicator when nothing but properties
-// follows it (`- - !bwref x/foo` gives 2, `? - !bwref x/foo` gives 2; a tag that is an explicit key itself
-// never gets here, `explicitKeyTag` lists no name for it). go-yaml measures a next line against that
+// follows it (`- - !bwref x/foo` gives 2, `? - !bwref x/foo` gives 2, and so does a parent line that ends there
+// with an anchor or a carriage return, `- - &e`, as the tag then starts the next line; a tag that is an
+// explicit key itself never gets here, `explicitKeyTag` lists no name for it). go-yaml measures a next line against that
 // column, not against the column of the line, so a `- ` or `? ` line is more of the scalar only when it is
 // more indented than that. None if the text opens with no indicator, or with a tab after one: go-yaml refuses
 // that document and the scanner keeps its reading. Only spaces are indentation and only a space or the end
@@ -464,7 +465,8 @@ function compactColumn(text: string): number | undefined {
     while (text[i] === " ") i++;
   }
   if (last < 0 || text[i] === "\t") return undefined;
-  return startsLine(text.slice(i)) ? last : i;
+  const rest = text.slice(i);
+  return startsLine(rest) || propertiesOnly(rest) || rest === "\r" ? last : i;
 }
 
 // A line with text and the column of its first character in YAML blanks (`column`). `known` keeps whether
