@@ -96,6 +96,10 @@ func TestWatchOutage(t *testing.T) {
 		if !errors.Is(err, boom) || !strings.Contains(err.Error(), "403") {
 			t.Errorf("watch: %v; want Until's error joined with the refused drain's 403", err)
 		}
+		// Until fails at the first step of 250 ms that reaches 1 s: the error arose during the first wait.
+		if total(reads) != time.Second {
+			t.Errorf("the read waited %v in all; want 1s, the wait in which Until failed", total(reads))
+		}
 	})
 	t.Run("the watch ending in an outage returns the operation as the last read showed it", func(t *testing.T) {
 		reads = nil
@@ -136,6 +140,11 @@ func TestWatchOutage(t *testing.T) {
 		_, _, _, _, err := watched(t, o, e1, nil)
 		if !errors.Is(err, boom) {
 			t.Errorf("watch: %v; want Until's error", err)
+		}
+		// Until fails at the first step of 250 ms that reaches 1 s: the error arose during the first wait, not
+		// after the outage of 99 reads ended.
+		if total(reads) != time.Second {
+			t.Errorf("the read waited %v in all; want 1s, the wait in which Until failed", total(reads))
 		}
 	})
 	t.Run("a reread after a refused drain that shows a running operation is the last read when an outage ends the watch", func(t *testing.T) {
