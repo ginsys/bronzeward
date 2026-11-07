@@ -1576,7 +1576,12 @@ describe("a tag on an explicit key or an alias key", () => {
     ["the same, not indented", "{a: b, ?\n!bwref x/foo\n: v}\n"],
     ["a flow sequence key after a comma with the tag on the next line", "[a, ?\n !bwref x/foo]\n"],
     ["a flow key with an anchor before the line break", "[? &k\n !bwref x/foo]\n"],
-    ["a flow key under a block key with the tag on the next line", "k: [?\n  !bwref x/foo]\n"],
+    // The `?` starts its own line inside the flow collection: the block indentation rule does not apply.
+    ["a flow sequence key whose question mark starts a line", "[\n?\n!bwref x/foo]\n"],
+    ["a flow mapping key whose question mark starts a line", "{\n?\n!bwref x/foo\n: v}\n"],
+    ["a flow key after a comma whose question mark starts a line", "[a,\n?\n!bwref x/foo]\n"],
+    ["a flow key whose question mark starts an indented line", "k: [\n  ?\n  !bwref x/foo]\n"],
+    ["a flow key under a block key with the tag on the next line","k: [?\n  !bwref x/foo]\n"],
     ["a flow key under a nested block key with a less indented tag line", "k:\n  m: [?\n !bwref x/foo]\n"],
   ])("lists nothing for %s", (_, text) => {
     expect(references(text)).toEqual([]);

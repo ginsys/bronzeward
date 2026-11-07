@@ -264,7 +264,7 @@ function readTags(original: string): { found: { index: number; tag: string; name
     if (m === null) continue;
     // The server refuses a tag on a key (tag-placement, ginsys/bronzeward#637), so an explicit key's
     // tag lists no name, as the tag on an implicit key lists none.
-    if (explicitKeyTag(masked, start)) continue;
+    if (explicitKeyTag(masked, start, inFlow)) continue;
     // go-yaml refuses a second anchor on one node (`&a !bwref &b x/foo`). The look-back stops after
     // 4096 characters, so the cost per anchored tag has a bound. Beyond it the guard misses the first
     // anchor and the scanner lists the name, though go-yaml refuses the document: an extra name in a
@@ -295,8 +295,9 @@ function readTags(original: string): { found: { index: number; tag: string; name
 // blanks, line breaks (LF or CRLF), comments (blanked in `masked`) and anchors between (`? !bwref x/foo`,
 // `?` then the tag on the next line, `? &k` then the tag on the next line). The `?` stands at the start of
 // its line, after sequence dashes (`- ?`), or after a flow opener or comma (`[?`, `{a: b, ?`). In a block
-// the tag on a later line must be more indented than the `?` line. In a flow collection go-yaml needs no
-// indentation. Only a key that is a scalar counts: the entry of a collection that is a key
+// the tag on a later line must be more indented than the `?` line. In a flow collection (`inFlow`, the
+// tag's own flow state) go-yaml needs no indentation, also when the `?` starts a line of the collection
+// (`[` then `?` then the tag, each on its own line). Only a key that is a scalar counts: the entry of a collection that is a key
 // (`? - !bwref x/foo`) is no explicit key's own tag.
 //
 // The text before the tag is read backward from the tag and stops at the nearest token that is no
@@ -311,7 +312,7 @@ function leading(masked: string, at: number): number {
   while (isBlank(masked[at + n])) n++;
   return n;
 }
-function explicitKeyTag(masked: string, tag: number): boolean {
+function explicitKeyTag(masked: string, tag: number, inFlow: boolean): boolean {
   // go-yaml drops the byte order mark at the start of the stream, so it stands before the line start.
   const floor = bom(masked, 0);
   let i = tag;
@@ -341,7 +342,7 @@ function explicitKeyTag(masked: string, tag: number): boolean {
     }
     if (c === "[" || c === "{" || c === ",") return true;
     if (c !== "\n") return false;
-    return !broke || leading(masked, p) < leading(masked, masked.lastIndexOf("\n", tag - 1) + 1);
+    return inFlow || !broke || leading(masked, p) < leading(masked, masked.lastIndexOf("\n", tag - 1) + 1);
   }
 }
 
