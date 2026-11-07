@@ -252,7 +252,7 @@ Notes on the rows:
   refusals (see the S9 note). The test existed and its failure was ignored, because the old
   comparator did not count a scanner error as a false refusal. The repair fixes the comparator and
   the model.
-- Only S9 (3456 documents) and S8 (2486 documents) hold tab characters. The flow-key families hold
+- Only the edge set (1 document), S9 (3456 documents) and S8 (2486 documents) hold tab characters. The flow-key families hold
   none. S9 holds 1584 documents with a byte order mark and S8 holds 420.
 - The self-test does not plant a guard-on misplaced document, because a plant needs a broken
   model. Only a reading of `compare.mjs` shows the "no misplaced insert with the guard on" leg.
