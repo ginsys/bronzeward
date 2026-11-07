@@ -159,6 +159,30 @@ describe("how the run of a mark ends (§11.3, PROT-03, PROT-05, PROT-06)", () =>
     expect(noPosition).toContain("it was refused (dependency-unavailable)");
     expect(await ended(unused, ing(), op(), "paused", NOW, "e1")).toMatch(/^Paused for review/);
   });
+  describe("a takeover after a mark that nothing ended fences it off (§11.3: the takeover resumes without it)", () => {
+    // The watch restarts at the takeover's generation and reads the events from the start.
+    test("a marked event with no pause or refusal at its generation, then a takeover, is a mark not applied", () => {
+      const s = events(3, [["marked", { generation: 2 }], ["taken-over", { generation: 3 }], ["paused", { generation: 3 }]]);
+      expect([s.settled, s.replacedBy]).toEqual(["paused", 3]);
+    });
+    test("a mark that was paused or refused at its generation is not fenced off by a later takeover", () => {
+      expect(events(3, [["marked", { generation: 2 }], ["paused", { generation: 2 }], ["taken-over", { generation: 3 }]]).replacedBy).toBeUndefined();
+      expect(events(3, [["marked", { generation: 2 }], ["mark-refused", { generation: 2 }], ["paused", { generation: 2 }], ["taken-over", { generation: 3 }]]).replacedBy).toBeUndefined();
+      expect(events(2, [["taken-over", { generation: 2 }], ["paused", { generation: 2 }]]).replacedBy).toBeUndefined();
+    });
+    test("a mark sent after the takeover is a new run: the earlier one no longer counts", () => {
+      const s = events(3, [["marked", { generation: 2 }], ["taken-over", { generation: 3 }], ["marked", { generation: 4 }]]);
+      expect([s.replacedBy, s.marked]).toEqual([undefined, true]);
+    });
+    test("the page says the earlier mark was not applied, and that the import pauses again or was released", async () => {
+      const paused = await ended(unused, ing(), op(), "paused", NOW, "e1", { replacedBy: 3 });
+      expect(paused).toMatch(/^The earlier mark was not applied: a takeover at generation 3 resumed the import without it\. The import is paused again \(expires /);
+      const flat = (n: ReactNode) => renderToStaticMarkup(h(ReadsProvider, { value: noReads }, n)).replace(/<[^>]+>/g, "");
+      const done = op({ state: "succeeded", result: { draft: "drf_2rmp457a", draftRevision: 5, importBaseRevision: "rev_1" } });
+      expect(flat(await ended(unused, ing({ state: "released" }), done, "paused", NOW, "e1", { replacedBy: 3 }))).toMatch(
+        /^The mark was not applied: a takeover at generation 3 resumed the import without it, and operation op_zcfw5mcm then released it\. Import ing_6fdq2la released/);
+    });
+  });
   describe("an operation that ended after a mark that no pause applied (the CLI's markOutcome)", () => {
     const done = op({ state: "succeeded", result: { draft: "drf_2rmp457a", draftRevision: 5, importBaseRevision: "rev_1" } });
     const flat = (n: ReactNode) => renderToStaticMarkup(h(ReadsProvider, { value: noReads }, n)).replace(/<[^>]+>/g, "").replaceAll("&#x27;", "'");

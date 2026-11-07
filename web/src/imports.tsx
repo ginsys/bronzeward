@@ -73,8 +73,9 @@ const code = (error: unknown) => {
 
 // Why a mark was not applied although its operation succeeded: refused at its pause, its staged input
 // not decryptable, or no pause at its generation at all.
-const notApplied = (last: string, run: Pick<RunState, "refused">, o: Operation) =>
-  run.refused !== undefined ? `it was refused (${refusalText(run.refused)}), and operation ${short(o.id)} then released the import without it.`
+const notApplied = (last: string, run: Pick<RunState, "refused" | "replacedBy">, o: Operation) =>
+  run.replacedBy !== undefined ? `a takeover at generation ${run.replacedBy} resumed the import without it, and operation ${short(o.id)} then released it.`
+  : run.refused !== undefined ? `it was refused (${refusalText(run.refused)}), and operation ${short(o.id)} then released the import without it.`
   : last === "resume-failed" ? `its staged input could not be decrypted (resume-failed), and operation ${short(o.id)} then released the import without it.`
   : `operation ${short(o.id)} succeeded without pausing at the mark's generation.`;
 
@@ -83,12 +84,12 @@ const notApplied = (last: string, run: Pick<RunState, "refused">, o: Operation) 
 // 412. `epoch` is that of the operation read the watch ended on, and the ETag is kept only when the
 // draft's own read has the same epoch: an ETag read under another epoch is not kept (§8.5, "discards
 // every ... ETag", and the commands that read twice compare the epoch of the answers themselves).
-export async function ended(client: Pick<Client, "readWithEpoch">, b: Ingestion, o: Operation, last: string, now: number, epoch: string | undefined, run?: Pick<RunState, "marked" | "refused">): Promise<ReactNode> {
+export async function ended(client: Pick<Client, "readWithEpoch">, b: Ingestion, o: Operation, last: string, now: number, epoch: string | undefined, run?: Pick<RunState, "marked" | "refused" | "replacedBy">): Promise<ReactNode> {
   if (o.state === "succeeded") {
     const r = o.result as S["IngestResult"] | null;
     if (r === null || typeof r.draftRevision !== "number") return `Import operation ${short(o.id)} succeeded without naming its draft revision.`;
     // A mark that no pause applied is not applied, whatever released the import after it (the CLI's markOutcome).
-    const lost = run?.marked && (last !== "paused" || run.refused !== undefined) ? `The mark was not applied: ${notApplied(last, run, o)} ` : "";
+    const lost = run !== undefined && ((run.marked && (last !== "paused" || run.refused !== undefined)) || run.replacedBy !== undefined) ? `The mark was not applied: ${notApplied(last, run, o)} ` : "";
     const done = <>{lost}Import {short(b.id)} released into draft <Id id={r.draft} /> (revision {r.draftRevision}), import base {short(r.importBaseRevision)}.</>;
     const own = started.get(b.id);
     if (own?.draft !== r.draft) return done;
@@ -114,6 +115,9 @@ export async function ended(client: Pick<Client, "readWithEpoch">, b: Ingestion,
   if (b.state === "abandoned") return `Import ${short(b.id)} is abandoned, but operation ${short(o.id)} has no recorded end yet: its outcome is unknown. Read it again later.`;
   if (last === "paused" && run?.refused !== undefined) {
     return `The mark was not applied: it was refused (${refusalText(run.refused)}). The import is paused again (expires ${when(b.expiresAt)}). Review it again and mark again, continue it, or abandon it.`;
+  }
+  if (last === "paused" && run?.replacedBy !== undefined) {
+    return `The earlier mark was not applied: a takeover at generation ${run.replacedBy} resumed the import without it. The import is paused again (expires ${when(b.expiresAt)}). Review it again and mark again, continue it, or abandon it.`;
   }
   if (last === "paused" && run?.marked) return `The marks were applied: re-staged and paused again (expires ${when(b.expiresAt)}). Review again, continue or abandon it.`;
   if (last === "paused") return `Paused for review (expires ${when(b.expiresAt)}).`;
@@ -162,17 +166,25 @@ export function IngestionItem({ id }: { id: string }) {
 // `gen` is the last generation a run started at; the first run (generation 1) is ours from the start.
 // A mark's run also keeps that it took the claim (`marked`) and, when compilation refused it, why
 // (`refused`: the rule and position, never a path). Only a pause at the mark's generation applies it.
-export interface RunState { ours: boolean; gen: number; settled?: "paused" | "resume-failed"; marked?: true; refused?: Refusal }
+// A takeover resumes without a mark that no pause or refusal at its generation had ended (`open`, the
+// generation of that mark), so the mark is not applied (`replacedBy`: the takeover's generation, §11.3).
+// `open` follows every event, ours or not: the watch restarts at the takeover and reads from the start.
+export interface RunState { ours: boolean; gen: number; settled?: "paused" | "resume-failed"; marked?: true; refused?: Refusal; open?: number | undefined; replacedBy?: number | undefined }
 export const startRun = (ownerGeneration: number): RunState => ({ ours: ownerGeneration <= 1, gen: ownerGeneration - 1 });
 export function onEvent(s: RunState, type: string, data: unknown): RunState {
   const g = (data as { generation?: unknown } | null)?.generation;
   const gen = typeof g === "number" ? g : 0;
-  if (["continued", "taken-over", "marked"].includes(type) && gen > s.gen) return { ours: true, gen, ...(type === "marked" && { marked: true as const }) };
-  if (!s.ours) return s;
-  if (type === "mark-refused" && gen >= s.gen) return { ...s, gen, refused: refusalOf(data) };
-  if (type === "paused" && gen >= s.gen) return { ...s, ours: true, gen, settled: "paused" };
-  if (type === "resume-failed") return { ...s, settled: "resume-failed" };
-  return s;
+  const open = type === "marked" ? gen : (type === "paused" || type === "mark-refused") && gen === s.open ? undefined : s.open;
+  const t = open === s.open ? s : { ...s, open };
+  if (["continued", "taken-over", "marked"].includes(type) && gen > t.gen) {
+    if (type === "taken-over") return { ours: true, gen, replacedBy: open === undefined ? t.replacedBy : gen };
+    return { ours: true, gen, open, ...(type === "marked" && { marked: true as const }) };
+  }
+  if (!t.ours) return t;
+  if (type === "mark-refused" && gen >= t.gen) return { ...t, gen, refused: refusalOf(data) };
+  if (type === "paused" && gen >= t.gen) return { ...t, ours: true, gen, settled: "paused" };
+  if (type === "resume-failed") return { ...t, settled: "resume-failed" };
+  return t;
 }
 // The watch ends on a settled run, or on a read of the ingestion made once the lease it showed had
 // passed LEASE_MARGIN ago that still shows the claim lapsed (§11.3, PROT-06): a read made earlier
