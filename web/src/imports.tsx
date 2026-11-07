@@ -2,10 +2,11 @@
 // (B16, progress.ts) and the draft's ETag after a released import (client contracts §8.3, ETAG-02).
 // They follow the CLI's import start and status (cmd/bronzewardctl/imports.go). A document or marks
 // are protected input (§11.1-§11.4): held in this page's memory only, sent once, and dropped once
-// the start is answered. The review, continue, takeover and abandon controls are W5's (#341).
+// the start is answered. The review, continue, takeover and abandon controls are W5's (claim.tsx).
 
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import type { components } from "./api/v1";
+import { Claim } from "./claim.tsx";
 import { keepETag, keptETag, NO_ASSIST } from "./drafts.tsx";
 import { Form, field, useSend, useUnsaved, useWrites } from "./forms.tsx";
 import { Id, type Load, Ref, short, useItem, useList, usePending, useReads, useSettled } from "./list.tsx";
@@ -132,6 +133,7 @@ export function IngestionItem({ id }: { id: string }) {
             <dt>Expires</dt><dd>{when(b.expiresAt)}</dd>
           </dl>
           <Status testid="allowed">{allowed(b, now)}</Status>
+          <Claim b={b} again={again} now={now} />
           <Progress b={b} again={again} />
         </>
       )}
