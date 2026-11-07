@@ -27,6 +27,16 @@ import (
 
 var update = flag.Bool("update", false, "rewrite testdata/journeys from this run")
 
+// The journey normalizers live here, in a file with no build constraint, because the Linux-only
+// protected_test.go and the untagged timeline_test.go both use them.
+var (
+	// controllerID is a controller's identifier in the CLI's output: its instance, process and a
+	// random part, which differ on every run.
+	controllerID = regexp.MustCompile(`[^,\s]+/\d+/[A-Z2-7]{26}`)
+	// eventTimes are operation watch's event times, the time this client received each event.
+	eventTimes = regexp.MustCompile(`(?m)^(received) \d\d:\d\d:\d\d  `)
+)
+
 // slowBao is a proxy to the test's OpenBao that holds each KV write for delay: an ingestion
 // writes the values it extracts there (internal/provider/paths.go kvDataPath), so a draft update
 // it holds is still ingesting, its claim live.
