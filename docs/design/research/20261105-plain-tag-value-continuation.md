@@ -57,7 +57,8 @@ The counts come from sweep run `w616-s1`, which compared the scanner on main (bf
 | Root scalar (the tag on the line of `---`, or the first text of a document, anchors only before it), next line with text at any column | Measured against column -1: the scalar goes on, `- ` and `? ` are text | Reads the column against the holder 0 or the line above, ends the scalar at column 0 | Read wrongly: extra. Fixed by `isRoot()` |
 | Root scalar, next line is a key (`y: v`) | Document refused | Ends the scalar, lists the name | Refused, lists none after the change |
 | Flow, next line at any indent, such as `bar]` at column 0 | Scalar goes on, indent test is off | Compares the indent, lists the name | Read wrongly: extra |
-| Flow, next line starts with a flow indicator | Scalar ends | Lists the name | Read, agrees |
+| Flow, next line starts with `,`, `]`, `}` or a colon and a blank | Scalar ends | Lists the name | Read, agrees |
+| Flow, next line starts with `?`, `[` or `{` | Scalar ends, document refused: go-yaml v3.0.5 gives "did not find expected ',' or ']'" (or '}') for all ten documents of `experiments/scanner-cross-line/flowprobe`, and the four controls parse (`experiments/scanner-cross-line/evidence/flow-refusal.txt`) | Reads the line as text, goes on, lists none | Refused, lists none, agrees. Ending the value here would list a name for a refused document. Pinned by 11 unit tests |
 | Anchor after the tag (`!bwref &e x/foo`), any next line | Lists the name after a scalar that ends | Lists none for a parent shape it cannot read | Unread by decision |
 | Tag on an implicit key (`!bwref x/foo:`) | Tagged key, oracle lists the name | Lists none | Unread by decision, ginsys/bronzeward#629 |
 

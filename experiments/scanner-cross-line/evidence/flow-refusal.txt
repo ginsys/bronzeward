@@ -1,0 +1,16 @@
+go version go1.27.1 linux/amd64
+go.yaml.in/yaml/v3 v3.0.5
+1 seq anchor, ? start              ERROR "yaml: line 1: did not find expected ',' or ']'"
+2 seq anchor, [ start              ERROR "yaml: line 1: did not find expected ',' or ']'"
+3 seq anchor, { start              ERROR "yaml: line 1: did not find expected ',' or ']'"
+4 map anchor, ? start              ERROR "yaml: line 1: did not find expected ',' or '}'"
+5 map anchor, [ start              ERROR "yaml: line 1: did not find expected ',' or '}'"
+6 map anchor, { start              ERROR "yaml: line 1: did not find expected ',' or '}'"
+7 seq explicit key, ? start        ERROR "yaml: line 1: did not find expected ',' or ']'"
+8 map explicit key, ? start        ERROR "yaml: line 1: did not find expected ',' or '}'"
+9 seq no anchor, [ start           ERROR "yaml: line 1: did not find expected ',' or ']'"
+10 map no anchor, { start          ERROR "yaml: line 1: did not find expected ',' or '}'"
+C1 control: seq, comma start       OK    map[string]interface {}{"k":[]interface {}{"x/foo", "y"}}
+C2 control: seq, plain word start  OK    map[string]interface {}{"k":[]interface {}{"x/foo bar"}}
+C3 control: map, colon start       OK    map[string]interface {}{"k":map[interface {}]interface {}{"x/foo":"v"}}
+C4 control: seq, close start       OK    map[string]interface {}{"k":[]interface {}{"x/foo"}}
