@@ -719,6 +719,30 @@
    "want": []
   },
   {
+   "name": "tagged-flow-sequence-key-question-mark-starts-line",
+   "source": "ginsys/bronzeward#637",
+   "doc": "[\n?\n!bwref x/foo]\n",
+   "want": []
+  },
+  {
+   "name": "tagged-flow-mapping-key-question-mark-starts-line",
+   "source": "ginsys/bronzeward#637",
+   "doc": "{\n?\n!bwref x/foo\n: v}\n",
+   "want": []
+  },
+  {
+   "name": "tagged-flow-key-after-comma-question-mark-starts-line",
+   "source": "ginsys/bronzeward#637",
+   "doc": "[a,\n?\n!bwref x/foo]\n",
+   "want": []
+  },
+  {
+   "name": "tagged-flow-key-question-mark-starts-indented-line",
+   "source": "ginsys/bronzeward#637",
+   "doc": "k: [\n  ?\n  !bwref x/foo]\n",
+   "want": []
+  },
+  {
    "name": "tagged-flow-key-under-block-key",
    "source": "ginsys/bronzeward#637",
    "doc": "k: [?\n  !bwref x/foo]\n",
