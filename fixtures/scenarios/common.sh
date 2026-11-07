@@ -742,7 +742,7 @@ cli_prepare() {
 # BRONZEWARD_TOKEN_FILE and BRONZEWARD_CONTEXT are removed: the first takes precedence over each context's
 # token file and would send the caller's own credentials to the fixture.
 ctl_env() {
-  env -u BRONZEWARD_TOKEN_FILE -u BRONZEWARD_CONTEXT XDG_CONFIG_HOME=$cli_dir/config XDG_STATE_HOME=$cli_dir/state XDG_CACHE_HOME=$cli_dir/cache \
+  env -u BRONZEWARD_TOKEN_FILE -u BRONZEWARD_CONTEXT XDG_CONFIG_HOME="$cli_dir/config" XDG_STATE_HOME="$cli_dir/state" XDG_CACHE_HOME="$cli_dir/cache" \
     DBUS_SESSION_BUS_ADDRESS=disabled: "$ctl_bin" "$@"
 }
 # ctl <name> <human> <args>...: bronzewardctl as the human, with a token minted now (printf is a

@@ -21,7 +21,7 @@ chmod 0755 "$t/bronzewardctl"
 # common.sh reads A's port, the state directory and the scenario's name when it is sourced; none is used here.
 export SERVER_A_PORT=1 STATE=$t/state
 export scenario=ctl-env-test
-# shellcheck source=../../fixtures/scenarios/common.sh
+# shellcheck source=/dev/null
 . "$repo_src/fixtures/scenarios/common.sh"
 # ctl_env reads cli_dir and ctl_bin.
 # shellcheck disable=SC2034
