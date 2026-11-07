@@ -39,7 +39,8 @@ const isBreakz = (c) => isBreak(c) || isZ(c);
 export function model(doc, opts = {}) {
   const guardDelete = opts.guardDelete === true;
   // go-yaml counts characters (mark.index, mark.column), not UTF-16 units: work on code points. An initial
-  // byte order mark is dropped by yaml_parser_determine_encoding (readerc.go 47-73) before any mark moves.
+  // byte order mark is dropped by yaml_parser_determine_encoding (readerc.go 47-73) before any mark moves. A mark
+  // after that one stays in the text: the scanner's is_bom tests the buffer start, not the offset.
   const chars = Array.from(doc);
   let idx = chars[0] === BOM ? 1 : 0;
   let line = 0;
@@ -139,7 +140,6 @@ export function model(doc, opts = {}) {
     // follows a comment in the same stretch (yaml_parser_scan_to_next_token, scannerc.go 1538).
     let sawComment = false;
     for (;;) {
-      if (col === 0 && at() === BOM) skip();
       while (at() === " " || ((flow > 0 || !allowed) && at() === "\t")) skip();
       if (sawComment && at() === "\t") throw new Unsupported("a tab after a comment line");
       if (at() === "#") {
@@ -434,6 +434,10 @@ export function model(doc, opts = {}) {
   }
 
   try {
+    // go-yaml drops the first mark at the stream start and then tests the start of its buffer, not the current
+    // offset (is_bom ignores its argument, yamlprivateh.go:103). A second mark right behind the first one makes
+    // that test true at every column-0 pass, and the model does not port it: it makes no claim.
+    if (idx === 1 && chars[1] === BOM) throw new Unsupported("two BOMs at the start");
     for (let guard = 0; guard < 4 * chars.length + 64; guard++) {
       fetchMoreTokens();
       const tok = tokens[head++];
