@@ -1413,7 +1413,7 @@ describe("a plain !bwref value that goes on to the next line", () => {
     });
 
     // A key of 100,000 characters before the tag on its own line (`PLAIN_PARENT`): the pattern must not try
-    // every split of a long key. The first input matches. The second one has an anchor after the colon, so
+    // every split of a long key. The first one matches. The second one has an anchor after the colon, so
     // the pattern reads the whole key and rejects it.
     test.each([
       ["a match", `${"a".repeat(100000)}: !bwref x/foo\n  bar\n`],
