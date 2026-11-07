@@ -28,7 +28,7 @@ gap. Section "Recommendation" gives the advice.
 | Oracle "real" | the oracle of `experiments/scanner-cross-line`, on unmodified go-yaml |
 | Oracle "patched" | the same oracle on go-yaml with one guarded delete (`go-yaml-guard.patch`) |
 | Oracle "counters" | `instr-oracle` on go-yaml with two counters (`go-yaml-instrument.patch`) |
-| Run head | 9941e4b8, with a clean checkout. The oracle outputs of s13, S9 and S8 come from the run with stamp w688-l3 at 77eff0e0. The oracles and the sets did not change after it. The model compare of those three sets is the run with stamp w688-m4, on the saved outputs. The five small sets went through the three oracles again in the run with stamp w688-green, with the model file of 9941e4b8. The commit after it changes this record only. |
+| Run head | 32e7bc5e, with a clean checkout. The oracle outputs of s13, S9 and S8 come from the run with stamp w688-l3 at 77eff0e0. The oracles and the sets did not change after it. The model compare of those three sets is the run with stamp w688-gbom2, on the saved outputs, with the model file of 8878180d. It is also the run that measured the five small sets through the three oracles again, edge set included (13 documents, exit 0). The run with stamp w688-m4 holds the earlier model compare at 9941e4b8, which the S8 notes use as the baseline. The commit after 32e7bc5e changes this record only. |
 
 All sets are synthetic. The small sets come from `gen-small-sets.mjs`. The flow-key set comes from
 `gen-flow-key-set.mjs`, which is the generator in the body of #657 (named S12 there). The scanner
