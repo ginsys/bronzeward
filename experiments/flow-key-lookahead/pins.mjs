@@ -73,6 +73,21 @@ for (const e of ["0", "a", "b", "t", "\t", "n", "v", "f", "r", "e", " ", '"', "'
   verdictOf(`escape: control, one-character escape ${JSON.stringify(e)}`, `k: "\\${e}"\n${K}`, "misplaced");
 }
 
+// An escaped line break in a double-quoted scalar (scannerc.go 2486-2494) ends the run of non-blank characters, so a
+// document indicator at column 0 of the next line is refused, as after a plain line break. The first four are the documents
+// 0-3 of the w701 probe (go-yaml refuses them with this message; the model of 289531b5 accepted them); the rest are controls
+// that go-yaml accepts, or refuses with the same message, and that the fix leaves alone.
+const indicator = "found unexpected document indicator";
+verdictOf("break: escaped break then ---", `k: "a\\\n---\nb"\n`, "error", indicator);
+verdictOf("break: escaped break then ...", `k: "a\\\n...\nb"\n`, "error", indicator);
+verdictOf("break: escaped break then --- before a flow key", `k: "a\\\n---\nb"\n${K}`, "error", indicator);
+verdictOf("break: two escaped breaks then ---", `k: "a\\\n\\\n---\nb"\n`, "error", indicator);
+verdictOf("break: control, the indicator is indented", `k: "a\\\n  ---\nb"\n${K}`, "misplaced");
+verdictOf("break: control, ---x is no indicator", `k: "a\\\n---x\nb"\n${K}`, "misplaced");
+verdictOf("break: control, an escaped break then text", `k: "a\\\nb"\n${K}`, "misplaced");
+verdictOf("break: control, a plain break then --- (double quotes)", `k: "a\n---\nb"\n`, "error", indicator);
+verdictOf("break: control, a plain break then --- (single quotes)", `k: 'a\n---\nb'\n`, "error", indicator);
+
 // Block scalar headers (scannerc.go 2192-2281): one chomping indicator and one digit, in either order, and nothing
 // else before the comment or the line break. The first four are the w688-adv documents 4-7 (4 and 5 are refused by
 // go-yaml and the guarded go-yaml alike; 6 and 7 are the controls).
