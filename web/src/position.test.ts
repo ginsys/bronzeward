@@ -1583,6 +1583,20 @@ describe("a tag on an explicit key or an alias key", () => {
     ["a flow key whose question mark starts an indented line", "k: [\n  ?\n  !bwref x/foo]\n"],
     ["a flow key under a block key with the tag on the next line","k: [?\n  !bwref x/foo]\n"],
     ["a flow key under a nested block key with a less indented tag line", "k:\n  m: [?\n !bwref x/foo]\n"],
+    // A `?`, a `-` or a `:` with a blank after it can start a compact collection, so the `?` of the key
+    // that holds the tag can follow another entry indicator on its line. The oracle reads the first seven
+    // as unfit. It refuses the last four, which stay as pinned best effort.
+    ["an explicit key inside an explicit key", "? ? !bwref x/foo\n  : v\n: w\n"],
+    ["an explicit key inside an explicit key after a dash", "- ? ? !bwref x/foo\n    : v\n  : w\n"],
+    ["an explicit key inside two explicit keys", "? ? ? !bwref x/foo\n    : v\n  : z\n: w\n"],
+    ["an explicit key inside an explicit key, with an anchor", "? ? &a !bwref x/foo\n  : v\n: w\n"],
+    ["an explicit key inside an explicit key, with the tag on the next line", "? ?\n    !bwref x/foo\n  : v\n: w\n"],
+    ["an explicit key after a dash inside an explicit key", "? - ? !bwref x/foo\n    : v\n"],
+    ["an explicit key inside the value of an explicit key", "? a\n: ? !bwref x/foo\n  : v\n"],
+    ["an explicit key inside an explicit key, with the tag on the next line and the value after it (go-yaml refuses)", "? ?\n  !bwref x/foo\n: w\n"],
+    ["an explicit key inside an explicit key in a flow mapping (go-yaml refuses)", "{? ? !bwref x/foo}\n"],
+    ["an explicit key inside an explicit key in a flow sequence (go-yaml refuses)", "[? ? !bwref x/foo]\n"],
+    ["an explicit key in the value of a key on one line (go-yaml refuses)", "a: ? !bwref x/foo\n    : v\n"],
   ])("lists nothing for %s", (_, text) => {
     expect(references(text)).toEqual([]);
   });
@@ -1596,6 +1610,7 @@ describe("a tag on an explicit key or an alias key", () => {
     ["the value of an explicit key that has another tag", "? !t a\n: !bwref x/foo\n"],
     ["a sequence entry under an explicit key", "? a\n: - !bwref x/foo\n"],
     ["a value in a flow mapping with an explicit key", "{? a : !bwref x/foo}\n"],
+    ["the value of an explicit key that holds an explicit key", "? ? a\n  : v\n: !bwref x/foo\n"],
   ])("still lists the name of %s", (_, text) => {
     expect(references(text)).toEqual(["x/foo"]);
   });

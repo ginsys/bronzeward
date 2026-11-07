@@ -294,7 +294,8 @@ function readTags(original: string): { found: { index: number; tag: string; name
 // Whether the tag at `tag` is a property of an explicit key: the `?` indicator comes before it with only
 // blanks, line breaks (LF or CRLF), comments (blanked in `masked`) and anchors between (`? !bwref x/foo`,
 // `?` then the tag on the next line, `? &k` then the tag on the next line). The `?` stands at the start of
-// its line, after sequence dashes (`- ?`), or after a flow opener or comma (`[?`, `{a: b, ?`). In a block
+// its line, after entry indicators that each need a blank after them (a sequence dash, `- ?`, an outer
+// `?`, `? ?`, `? - ?`, or a value colon, `: ?`), or after a flow opener or comma (`[?`, `{a: b, ?`). In a block
 // the tag on a later line must be more indented than the `?` line. In a flow collection (`inFlow`, the
 // tag's own flow state) go-yaml needs no indentation, also when the `?` starts a line of the collection
 // (`[` then `?` then the tag, each on its own line). Only a key that is a scalar counts: the entry of a collection that is a key
@@ -335,7 +336,7 @@ function explicitKeyTag(masked: string, tag: number, inFlow: boolean): boolean {
     const end = p;
     while (p > floor && isBlank(masked[p - 1])) p--;
     const c = p > floor ? masked[p - 1] : "\n";
-    if (c === "-") {
+    if (c === "-" || c === "?" || c === ":") {
       if (p === end) return false;
       p--;
       continue;
