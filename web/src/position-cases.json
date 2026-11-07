@@ -743,6 +743,56 @@
    "want": []
   },
   {
+   "name": "tagged-explicit-key-inside-explicit-key",
+   "source": "ginsys/bronzeward#637",
+   "doc": "? ? !bwref x/foo\n  : v\n: w\n",
+   "want": []
+  },
+  {
+   "name": "tagged-explicit-key-inside-explicit-key-after-dash",
+   "source": "ginsys/bronzeward#637",
+   "doc": "- ? ? !bwref x/foo\n    : v\n  : w\n",
+   "want": []
+  },
+  {
+   "name": "tagged-explicit-key-inside-two-explicit-keys",
+   "source": "ginsys/bronzeward#637",
+   "doc": "? ? ? !bwref x/foo\n    : v\n  : z\n: w\n",
+   "want": []
+  },
+  {
+   "name": "tagged-explicit-key-inside-explicit-key-anchor",
+   "source": "ginsys/bronzeward#637",
+   "doc": "? ? &a !bwref x/foo\n  : v\n: w\n",
+   "want": []
+  },
+  {
+   "name": "tagged-explicit-key-inside-explicit-key-next-line",
+   "source": "ginsys/bronzeward#637",
+   "doc": "? ?\n    !bwref x/foo\n  : v\n: w\n",
+   "want": []
+  },
+  {
+   "name": "tagged-explicit-key-dash-inside-explicit-key",
+   "source": "ginsys/bronzeward#637",
+   "doc": "? - ? !bwref x/foo\n    : v\n",
+   "want": []
+  },
+  {
+   "name": "tagged-explicit-key-inside-explicit-key-value",
+   "source": "ginsys/bronzeward#637",
+   "doc": "? a\n: ? !bwref x/foo\n  : v\n",
+   "want": []
+  },
+  {
+   "name": "explicit-key-inside-explicit-key-value-control",
+   "source": "ginsys/bronzeward#637",
+   "doc": "? ? a\n  : v\n: !bwref x/foo\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
    "name": "tagged-flow-key-under-block-key",
    "source": "ginsys/bronzeward#637",
    "doc": "k: [?\n  !bwref x/foo]\n",
