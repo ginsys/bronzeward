@@ -374,6 +374,37 @@ func TestOperationWatchDrainFails(t *testing.T) {
 	}
 }
 
+// TestOperationWatchFailedDrainReread: the drain of the events of a finished operation fails and the
+// operation read that follows it answers, with a terminal state of the same epoch (WatchBody returns that
+// reread with the failed drain). No outage is involved. The pages that readLast then reads can be the first
+// to show a restore: the events were never read, so the state is then not known (exit 3), and with pages of
+// the read's own epoch the outcome stands (client-contracts.md section 8.6 item 2).
+func TestOperationWatchFailedDrainReread(t *testing.T) {
+	run := func(t *testing.T, pagesEpoch string) (int, string, string) {
+		t.Helper()
+		f := &opFake{stream: []string{sse(1, "commitment", commitment)}, pages: []string{evPage(1, "commitment", commitment)},
+			pagesFailFor: 1, pagesEpoch: pagesEpoch,
+			body: fmt.Sprintf(opJSON, "apply-config", "succeeded", "null", "null", "[]")}
+		srv := httptest.NewServer(f)
+		t.Cleanup(srv.Close)
+		automationContext(t, srv.URL)
+		return runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "5s")
+	}
+	t.Run("the pages of the end show the read's own epoch: the outcome stands (control)", func(t *testing.T) {
+		code, out, errOut := run(t, "")
+		if code != 0 || !strings.Contains(out, "Succeeded") || !strings.Contains(errOut, "the operation's last events were not shown") ||
+			!strings.Contains(errOut, "events answered 404") || strings.Contains(errOut, "502") {
+			t.Errorf("exit %d, stdout %q, stderr %q; want 0, the completion line, the failed drain reported and no outage", code, out, errOut)
+		}
+	})
+	t.Run("the pages of the end show another epoch: exit 3", func(t *testing.T) {
+		code, out, errOut := run(t, "ep_BWSYNTH-3")
+		if code != 3 || !strings.Contains(errOut, "bronzewardctl operation show 'op_BWSYNTH'") || strings.Contains(out, "Succeeded") {
+			t.Errorf("exit %d, stdout %q, stderr %q; want 3, the operation to read named and no completion line", code, out, errOut)
+		}
+	})
+}
+
 // TestOperationWatchOneSnapshot: with -o json the resource printed, the outcome line and the exit code
 // all come from the one operation read the watch returned, with the members of the server's answer as
 // they came, also when the operation changes after that read.
