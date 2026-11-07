@@ -1330,10 +1330,8 @@ describe("a plain !bwref value that goes on to the next line", () => {
   // (review of this change). A check that takes too long on the earlier code ends on its own and fails
   // the bound, and does not hang: a test timeout cannot stop a synchronous scan.
   //
-  // These checks failed on the earlier code, each in the comment above it: the draft of 30,000 tags, the
-  // line of bangs, the tags at column 0, the tags among sibling keys, the tags under one long key, and the
-  // anchored trim (only with the old pattern put back in `anchoredContinues()`). The other checks passed
-  // on the earlier code in the runs made for this change. They keep input that was already fast.
+  // The comment of a check gives the time of the earlier code where it was measured, with the commit. A
+  // check with no such figure is not shown to fail first.
   describe("cost", () => {
     // Reads a draft and fails if the scan takes a second or more. The fixed scan takes under 50 ms on each
     // input below except the draft of 30,000 tags, which takes 100 to 300 ms.
@@ -1345,8 +1343,7 @@ describe("a plain !bwref value that goes on to the next line", () => {
     };
 
     // A draft of 30,000 entries with a tag alone on its line: the scan back from the tag stops at the key
-    // line above it, so it must not read the text before that line. Reading it took 3.3 s for 10,000 entries
-    // and grows with the square of the size; the walk by lines takes 0.1 s for 10,000.
+    // line above it, so it must not read the text before that line. This draft took 27,987 ms on e354c61c.
     test("a draft with 30,000 tags on their own lines lists every one", () => {
       const text = Array.from({ length: 30000 }, (_, i) => `k${i}:\n  !bwref x/foo${i}\n`).join("");
       expect(bounded(text)).toHaveLength(30000);
@@ -1354,8 +1351,7 @@ describe("a plain !bwref value that goes on to the next line", () => {
 
     // A line of many bangs and a word: a tag on a line of its own below it is not on a root scalar, and
     // the line of bangs is no line of properties only. Matching the line must not try every split of it.
-    // With the earlier pattern each extra bang doubled the time: 25 bangs took seconds on a loaded host, so
-    // the test ends on its own and fails the bound. The scan takes under 1 ms.
+    // This line of 25 bangs took 1,177 ms on e354c61c. The scan takes under 1 ms now.
     test("a long line of bangs and a word above a tag ends the scan at once", () => {
       const start = performance.now();
       references(`${"!".repeat(25)} text:\n!bwref x/foo\n- y\n`);
@@ -1364,8 +1360,8 @@ describe("a plain !bwref value that goes on to the next line", () => {
 
     // The scan back from a tag that starts its line looks for the nearest line above that is less indented.
     // It must not read every line above when none is, or when the lines between are all as indented as the
-    // tag: that cost grows with the square of the size. The checks below take 3 to 6 s on the earlier code
-    // and under 50 ms now; the bound leaves a wide margin and the check still ends on its own.
+    // tag. The 3,000 tags at column 0 took 4,329 ms and the 2,000 tags among sibling keys took 1,328 ms on
+    // 79806121. Both take under 50 ms now.
 
     // A tag at column 0 that is no root scalar: no line is less indented than column 0.
     test("3,000 tags at column 0 under a key are scanned in near linear time", () => {
@@ -1380,8 +1376,9 @@ describe("a plain !bwref value that goes on to the next line", () => {
 
     // Many tags under one long key: the line of the key is the parent of each of them, and it is matched once
     // (`known` of the line), not once per tag. The key has 300,000 characters and the 4,000 tags took 2.1 to
-    // 2.8 s in six runs when each tag matched it again (a key of 200,000 characters and 3,000 tags took 0.9
-    // to 1.6 s, too close to the bound to fail it every time). The fixed scan takes about 25 ms.
+    // 2.8 s in six runs on 86c93ac4, where each tag matched it again (a key of 200,000 characters and 3,000
+    // tags took 0.9 to 1.6 s there, too close to the bound to fail it every time). The fixed scan takes
+    // about 25 ms.
     test("4,000 tags among sibling keys under one key of 300,000 characters are scanned in near linear time", () => {
       bounded(`${"a".repeat(300000)}:\n${Array.from({ length: 4000 }, (_, i) => `  j${i}: v\n  !bwref x/foo${i}\n`).join("")}`);
     });
@@ -1389,6 +1386,10 @@ describe("a plain !bwref value that goes on to the next line", () => {
     // A continuation line with a long run of blanks between two words: trimming it must not try every
     // start of the run. Three paths trim a continuation line: a plain tag, a tag after an anchor (both
     // `continues`) and an anchor after the tag (`anchoredContinues`, whose old pattern was on main).
+    // With the run of 60,000 blanks inside the line, the three paths took 3,631 ms, 3,224 ms and 3,288 ms
+    // on 79806121, in that order. On 86c93ac4 the anchored path already calls `trimBlanks()`, so its check
+    // fails there only with the old pattern put back in `anchoredContinues()` (2,999 ms in one run). With
+    // the run at the start of the line, the plain tag took 4.03, 1.52 and 1.35 ms in three runs on 79806121.
     const trimHeads = [
       ["a plain tag", "k: !bwref a\n"],
       ["a tag after an anchor", "k: &e !bwref a\n"],
@@ -1424,7 +1425,7 @@ describe("a plain !bwref value that goes on to the next line", () => {
     });
 
     // Every other loop and pattern that the scan of a plain tag value runs, on a long input of its kind.
-    // None was slow on the earlier code; each check keeps it so. The two rows of repeated tags (`!a`) made
+    // The two rows of repeated tags (`!a`) made
     // zero calls to `startsLine()` and `propertiesOnly()` in a call count. The two rows of repeated anchors
     // (`&e`) reach them, on 15,002 and 15,001 characters.
     test.each([
