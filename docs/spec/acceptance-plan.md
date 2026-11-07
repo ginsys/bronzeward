@@ -690,7 +690,8 @@ Closing run: **the bound on when an abandoned request can no longer land**
 The proxied route is not a PoC dispatch route (ER §10.9): its landings are measured with the E4
 harness, not through the executor, and its result is the input to any amendment re-admitting it.
 
-1. From the Talos v1.14.5 source, establish how the control plane's API proxy forwards and cancels
+1. From the source of the Talos version the fixture pins when the run happens (v1.14.5 after
+   ginsys/bronzeward#713), establish how the control plane's API proxy forwards and cancels
    a proxied request, and state what that predicts.
 2. Measure landings through the proxy across partition lengths, pauses of each side and connection
    reuse, with enough captures per cell to state a distribution, the resource version serving as
