@@ -2,7 +2,8 @@
 # Checks that compare.mjs fails closed. It feeds the comparison six hand-written oracle outputs and
 # requires the exit status to match: 0 for a pass, and nonzero for two false refusals (a "misplaced"
 # prediction and a scanner error), a missed document, an empty set and a count mismatch. It needs no go
-# and no oracle. It also pins one model verdict: a document that starts with two byte order marks is "unsupported".
+# and no oracle, and it uses only bash and node. It also pins two model results: a document that starts with two
+# byte order marks is "unsupported", and a scan loop that hits its bound fails the run with its own count. At the end it runs pins.mjs, the unit cases of the model.
 # Usage: selftest.sh
 set -uo pipefail
 
@@ -40,11 +41,10 @@ check "planted false refusal: the model reports a scanner error and go-yaml acce
 # compared and does not fail. The same document under the bug would count as missed, so the edge set carries
 # none (see the report).
 check "pin: a document that starts with two marks is unsupported and not a failure" zero '["\ufeff\ufeff[? b]: !bwref x/foo\n"]' "$accepted" "$accepted"
-if head -n 1 "$tmp/out" | rg -q '"model:unsupported":1'; then
-  echo "selftest: pin: the verdict of a two-mark document is unsupported ok"
-else
-  echo "selftest: FAIL pin: the verdict of a two-mark document is not unsupported: $(head -n 1 "$tmp/out")" >&2; bad=1
-fi
+case "$(head -n 1 "$tmp/out")" in
+  *'"model:unsupported":1'*) echo "selftest: pin: the verdict of a two-mark document is unsupported ok" ;;
+  *) echo "selftest: FAIL pin: the verdict of a two-mark document is not unsupported: $(head -n 1 "$tmp/out")" >&2; bad=1 ;;
+esac
 
 # Pin: a scan loop that hits its bound fails the run, and the count has its own bucket, for both model calls (guard off and on).
 # --max-steps 1 is the test hook that makes the bound reachable; "a: b" needs more than one step.
