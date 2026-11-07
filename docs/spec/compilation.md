@@ -1368,8 +1368,10 @@ read, configuration read, no-reboot dry run and a label-patch apply) against one
 live v1.13.6 node, in containers, with one control plane and one worker (E3 §7).
 Not evidenced: any other live version, reboot-mode applies, a JSON6902 patch,
 composition on renderers other than v1.13.6, worker configurations in SR and
-SP, and every upgrade path. Nothing is evidenced on v1.14 until the fixture
-move (ginsys/bronzeward#713) and the composition rerun.
+SP, and every upgrade path. Generation and validation are evidenced on v1.14.1
+(E3 §4.1 and §4.2). A live v1.14 node and composition on a v1.14 renderer are
+not evidenced until the fixture move (ginsys/bronzeward#713) and the
+composition rerun.
 
 Unsupported, with the observed reason (E3 §6.3): a contract newer than the
 renderer (silently clamped); v1.14+ output on a pre-v1.14 validator or node
