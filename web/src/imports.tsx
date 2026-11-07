@@ -13,7 +13,7 @@ import { eventLine, terminal, watch } from "./progress.ts";
 import type { Client } from "./request.ts";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
-import type { Outcome, WriteSpec } from "./write.ts";
+import type { WriteSpec } from "./write.ts";
 
 type S = components["schemas"];
 export type Ingestion = S["IngestionBody"];
@@ -251,16 +251,11 @@ export function startBody(i: StartInput): Record<string, unknown> {
 }
 
 // Protected input is held no longer than its request needs (§11.2 item 6): the fields are emptied
-// when the request is sent, and the request drops the document and marks from its body on every
-// outcome except unknown, a write set aside included: `Writes.repeatable` offers only an unknown
-// outcome, so nothing sends a set-aside body again. Until then the body stays for [Repeat exactly],
-// which sends it again. Known gap: an unknown write that is set aside, or dismissed, after it settled
-// keeps them, because nothing tells the start; the release lifecycle is a follow-up.
-export function releaseInput(body: Record<string, unknown>, o: Outcome): void {
-  if (o.kind === "unknown") return;
-  delete body["document"];
-  delete body["marks"];
-}
+// when the request is sent, and the write layer tells the start through `released` when the write can
+// no longer be repeated: a settled outcome other than unknown, a set-aside or dismissed write, or the
+// end of its client's writes. Until then the body stays for [Repeat exactly], which sends it again.
+// The layer drops its own reference to the body; `released` drops the page's copy of it.
+//
 // The start's write: the draft's ETag as If-Match, and a done answer's ingestion remembered for the
 // draft, so that only this page's own import adopts the draft's ETag later (ETAG-02), also when the
 // page left. The callback keeps the draft's id only, so the kept request does not reach the input.
@@ -270,8 +265,11 @@ export function sendStart(send: (spec: WriteSpec) => void, clear: () => void, i:
   clear();
   send({
     method: "POST", path: "/ingestions", resource: "/ingestions", ifMatch, body,
+    released: () => {
+      delete body["document"];
+      delete body["marks"];
+    },
     settled: (out, w) => {
-      releaseInput(body, out);
       const a = out.kind === "done" ? (out.data as { ingestion?: string } | null) : null;
       if (typeof a?.ingestion === "string") started.set(a.ingestion, { draft, epoch: w.epoch });
     },
