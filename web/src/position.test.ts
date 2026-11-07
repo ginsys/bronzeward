@@ -1409,8 +1409,7 @@ describe("a plain !bwref value that goes on to the next line", () => {
     // `continues`) and an anchor after the tag (`anchoredContinues`, whose old pattern was on main).
     // With the run of 60,000 blanks inside the line, the three paths took 3,631 ms, 3,224 ms and 3,288 ms
     // on 79806121, in that order. On 86c93ac4 the anchored path already calls `trimBlanks()`, so its check
-    // fails there only with the old pattern put back in `anchoredContinues()` (2,999 ms in one run). With
-    // the run at the start of the line, the plain tag took 4.03, 1.52 and 1.35 ms in three runs on 79806121.
+    // fails there only with the old pattern put back in `anchoredContinues()` (2,999 ms in one run).
     const trimHeads = [
       ["a plain tag", "k: !bwref a\n"],
       ["a tag after an anchor", "k: &e !bwref a\n"],
