@@ -1,0 +1,14 @@
+(the injector ends the first event stream after its first event)
+$ bronzewardctl --context viewer operation watch op_…
+apply-config  plan pln_…, machine mch_…
+Times marked "received" are this client's clock when the event arrived; the completion line shows the server's time.
+received <time>  commitment            plan pln_…, approval apr_…, observation obs_…, controller <controller>, generation 1
+received <time>  attempt               attempt 1, route 127.0.0.1:<port>, transport deadline <time>, controller <controller>, generation 1
+received <time>  response              attempt 1, class accepted, code 0
+received <time>  accounting            attempt att_…, basis response, class accepted
+received <time>  operation-state       from sending, to verifying, cause the node accepted the configuration, decided by <controller>
+received <time>  classification        outcome completed, observation obs_…, controller <controller>, generation 1
+received <time>  operation-state       from verifying, to completed, cause the observation establishes the bound postconditions, decided by <controller>
+received <time>  applied-change        from rel_…, to rel_…, source operation
+Completed at <local time> (server): applied rel_…, confirmed by observation obs_….
+[exit 0]

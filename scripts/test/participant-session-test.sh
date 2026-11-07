@@ -778,6 +778,48 @@ else bad "T9: the functions were not found in the session, or the stub A did not
 kill "$stub_a" 2>/dev/null
 wait "$stub_a" 2>/dev/null
 
+# The CLI watch beside T9's reader (ginsys/bronzeward#354): t9_watch_ready and t9_watch_end, run with
+# stub watchers. A is stopped only while the watch runs and has printed an event, and the watch must
+# end within the limit counted from the moment the apply was seen completed, not from the end of the
+# reads that follow. Each failing case has a control that passes, so that a helper that fails
+# everything does not pass the test.
+mkdir -p "$t/watch"
+printf 'received 10:00:00  commitment  plan pln_a\n' >"$t/watch/watch.txt"
+sed -n -e '/^t9_watch_ready() {$/,/^}$/p' -e '/^t9_watch_end() {$/,/^}$/p' "$session" >"$t/watchfn.sh"
+# watch_case <shell text>: the text in a shell as strict as the session, with the two functions and a
+# die that exits 1.
+watch_case() {
+  # shellcheck disable=SC2016 # the inner shell's own text
+  t9_watcher='' t9_watch_rc=0 bash -c 'set -euo pipefail; die() { echo "die: $*"; exit 1; }; . "$0"; eval "$1"' "$t/watchfn.sh" "$1" 2>&1
+}
+if [ "$(grep -cE '^t9_watch_(ready|end)\(\) \{' "$t/watchfn.sh")" = 2 ]; then
+  # shellcheck disable=SC2016 # each watch_case text is the inner shell's own
+  out=$(watch_case 'sleep 5 & t9_watcher=$!; t9_watch_ready "$T/watch"; echo ready; kill "$t9_watcher"')
+  rc=$?
+  if [ "$rc" = 0 ] && [[ $out == *ready* ]]; then ok "t9_watch_ready accepts a running watch that printed an event"
+  else bad "t9_watch_ready, running watch: rc=$rc ($out)"; fi
+  # The watch prints its event and ends before the check: no reader is left for the stop to cut.
+  # shellcheck disable=SC2016
+  out=$(watch_case 'true & t9_watcher=$!; sleep 0.5; t9_watch_ready "$T/watch"; echo ready')
+  rc=$?
+  if [ "$rc" != 0 ] && [[ $out == *"die: operation watch printed no event within 30 s, or ended, before the stop"* ]] && [[ $out != *ready* ]]; then
+    ok "t9_watch_ready fails when the watch printed an event and has ended"
+  else bad "t9_watch_ready, ended watch: rc=$rc ($out)"; fi
+  # shellcheck disable=SC2016
+  out=$(watch_case 'sleep 0.3 & t9_watcher=$!; t9_watch_end "$T/watch" 4 "$SECONDS"; echo "rc=$t9_watch_rc"')
+  rc=$?
+  if [ "$rc" = 0 ] && [[ $out == *"rc=0"* ]]; then ok "t9_watch_end accepts a watch that ends within the limit, and keeps its status"
+  else bad "t9_watch_end, early watch: rc=$rc ($out)"; fi
+  # The apply completed 3 s ago and the limit is 4 s: the watch that ends after 3 s more ends 6 s after
+  # completion. A limit counted from the call (the reads in between) would accept it.
+  # shellcheck disable=SC2016
+  out=$(watch_case 'sleep 3 & t9_watcher=$!; t9_watch_end "$T/watch" 4 "$((SECONDS - 3))"; echo "rc=$t9_watch_rc"')
+  rc=$?
+  if [ "$rc" != 0 ] && [[ $out == *"die: operation watch did not end within 4 s after the apply completed"* ]]; then
+    ok "t9_watch_end counts its limit from the completion, not from the call"
+  else bad "t9_watch_end, late watch: rc=$rc ($out)"; fi
+else bad "t9_watch_ready and t9_watch_end were not found in the session"; fi
+
 # handback and t9_clean (ginsys/bronzeward#509), taken out of the session with stubs around them.
 # PAUSED names the paused containers, INSPECT_FAIL one whose inspect fails, A_STOPPED stops A,
 # NO_IDP makes A's namespace miss Zitadel, and ISSUER_FAIL, RESTART_FAIL and FWD_FAIL end
@@ -807,7 +849,7 @@ clean_case() {
   : >"$t/clean.log"
   # shellcheck disable=SC2016 # the inner shell's own text
   bash -c 'set -uo pipefail
-    log=$T/clean.log task=t4 bin=$T/cbin here=$T/cbin part=$T/part t9_reader="" t9_op="" BW_A=a BW_B=b BW_C=c
+    log=$T/clean.log task=t4 bin=$T/cbin here=$T/cbin part=$T/part t9_reader="" t9_watcher="" t9_op="" BW_A=a BW_B=b BW_C=c
     die() { echo "die: $*" >&2; exit 1; }
     setup() { :; }
     sql() { [ -z "${SQL_FAIL:-}" ]; }

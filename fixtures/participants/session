@@ -533,7 +533,7 @@ t8() {
 # Every HTTP read of T9 is t9_auth | t9_get, and every answer passes t9_head_ok. curl exits 0 on an
 # HTTP error, so only the answer's status line and content type tell a refused or wrong read from
 # an event stream. scripts/test/participant-session-test.sh runs t9_open and t9_read against a stub.
-t9_op='' t9_reader=''
+t9_op='' t9_reader='' t9_watcher='' t9_watch_rc=0
 # t9_auth: the automation token's header line, which A accepts on either issuer, for curl's stdin.
 # The builtin printf keeps the token off every command line.
 t9_auth() { printf 'Authorization: Bearer %s\n' "$(<"$STATE/automation-token")"; }
@@ -600,6 +600,52 @@ t9_ids() {
     tr -d '\r' <"$f" | awk '/^id:/ { sub(/^id: */, ""); id = $0 } /^$/ { if (id != "") print id; id = "" }'
   done
 }
+# t9_watch_start <dir>: operation watch of t9_op as a second reader, in the background as t9_watcher:
+# the CLI the participant uses (ginsys/bronzeward#354), which must follow the apply through A's 60 s
+# stop by itself. It signs in with the automation token that A accepts, from the file and never from
+# a command line, in a configuration of its own under <dir>. Its output goes to <dir>/watch.txt.
+t9_watch_start() {
+  local cfg=$1/watch-home
+  mkdir -p -- "$cfg"
+  env "${client_env[@]}" XDG_CONFIG_HOME="$cfg/config" XDG_STATE_HOME="$cfg/state" \
+    bronzewardctl context add t9 --server "http://127.0.0.1:$SERVER_A_PORT" --automation-token-file "$STATE/automation-token" \
+    >>"$log" 2>&1 || die "cannot add the watch's context; its output is in $log"
+  env "${client_env[@]}" XDG_CONFIG_HOME="$cfg/config" XDG_STATE_HOME="$cfg/state" \
+    bronzewardctl --context t9 --no-input operation watch "$t9_op" --timeout 10m >"$1/watch.txt" 2>&1 &
+  t9_watcher=$!
+}
+# t9_watch_ready <dir>: the step fails unless the watch is running and has printed an event line
+# ("received ..." starts only a printed event) within 30 s. That line shows its initial reads are done and
+# its stream is open and delivering, so the stop of A cuts a stream the watch holds. A watch that printed
+# an event and has ended by then is no reader to cut, so the event line counts only while the watch runs.
+t9_watch_ready() {
+  for _ in $(seq 30); do
+    if grep -q '^received ' "$1/watch.txt" 2>/dev/null; then
+      kill -0 "$t9_watcher" 2>/dev/null && return 0
+      break
+    fi
+    kill -0 "$t9_watcher" 2>/dev/null || break
+    sleep 1
+  done
+  die "operation watch printed no event within 30 s, or ended, before the stop; see $1/watch.txt"
+}
+# t9_watch_end <dir> <seconds> <since>: the watch ends by itself within <seconds> of <since>, a value of
+# SECONDS (the moment the apply was seen completed), so the reads between do not extend the limit. A watch
+# that is still running at the limit is stopped and the step fails. On return $t9_watch_rc is its exit status.
+t9_watch_end() {
+  while kill -0 "$t9_watcher" 2>/dev/null && [ "$SECONDS" -lt $(($3 + $2)) ]; do
+    sleep 1
+  done
+  if kill -0 "$t9_watcher" 2>/dev/null; then
+    kill "$t9_watcher" 2>/dev/null || true
+    wait "$t9_watcher" 2>/dev/null || true
+    t9_watcher=''
+    die "operation watch did not end within $2 s after the apply completed; see $1/watch.txt"
+  fi
+  t9_watch_rc=0
+  wait "$t9_watcher" || t9_watch_rc=$?
+  t9_watcher=''
+}
 # t9_clean: on any exit of t9 disconnect, the reader ends and A runs again with its forwarder to
 # Zitadel, so that the participant's server is never left stopped or unable to sign anyone in. A
 # start of A that failed or was interrupted can leave A running with no forwarder in its namespace.
@@ -612,6 +658,11 @@ t9_clean() {
     kill "$t9_reader" 2>/dev/null || true
     wait "$t9_reader" 2>/dev/null || true
     t9_reader=''
+  fi
+  if [ -n "$t9_watcher" ]; then
+    kill "$t9_watcher" 2>/dev/null || true
+    wait "$t9_watcher" 2>/dev/null || true
+    t9_watcher=''
   fi
   if ! running "$BW_A"; then
     echo "t9 disconnect: A is started again" >&2
@@ -631,14 +682,15 @@ t9_release() {
 
 # t9_disconnect: A stopped for 60 s and started again while the participant follows T9's apply,
 # so that the participant's event stream ends and must be resumed (journeys §5.7). The clients do
-# not follow an operation yet (ginsys/bronzeward#354 and #359), so this step proves the server half
-# with its own reader: a stream opened before the stop and resumed with Last-Event-ID after the
-# start follows the apply to its end, and its event IDs equal those of a full replay, none lost
-# and none repeated. The apply is held on C until A runs again, so it is still going on at the stop
+# not follow an operation in the web interface yet (ginsys/bronzeward#359), so this step proves the
+# server half with its own reader: a stream opened before the stop and resumed with Last-Event-ID
+# after the start follows the apply to its end, and its event IDs equal those of a full replay, none
+# lost and none repeated. Beside it, the CLI's operation watch (ginsys/bronzeward#354) runs through
+# the same stop with no help: it waits for A, resumes, and ends with exit 0 and the completion line. The apply is held on C until A runs again, so it is still going on at the stop
 # and at the start. A takes it over when it starts, and then the hold is released. If the apply does
 # not survive A's restart, the step fails.
 t9_disconnect() {
-  local dir=$part/t9-disconnect rc last state cause
+  local dir=$part/t9-disconnect rc last state cause done_at=0
   # The cleanup first: any exit from here on, a failed read included, releases T9's hold.
   trap t9_clean EXIT
   trap 'exit 130' INT TERM
@@ -651,6 +703,8 @@ t9_disconnect() {
   rm -rf -- "$dir"
   mkdir -p -- "$dir"
   t9_open "$dir/before"
+  t9_watch_start "$dir"
+  t9_watch_ready "$dir"
   "$bin/inject" kill A >>"$log" 2>&1 || die "cannot stop A; its output is in $log"
   rc=0
   wait "$t9_reader" || rc=$?
@@ -673,7 +727,7 @@ t9_disconnect() {
   t9_read "the resumed stream" "$dir/after" 300 "$last"
   state=$(sql "SELECT state FROM operation WHERE id = '$t9_op'")
   case $state in
-    completed) ;;
+    completed) done_at=$SECONDS ;;
     cancelled)
       # A hold past the plan's expiry: the owner cancels the apply before any attempt.
       cause=$(sql "SELECT entry->>'cause' FROM machine_event WHERE kind = 'operation-state'
@@ -684,7 +738,13 @@ t9_disconnect() {
   t9_read "the full replay" "$dir/full" 60
   [ "$(t9_ids "$dir/before" "$dir/after")" = "$(t9_ids "$dir/full")" ] ||
     die "the resumed stream's events differ from the full replay: an event was lost or repeated (see $dir)"
+  # The CLI's watch has ended with the apply. It must have met the outage and followed it out.
+  t9_watch_end "$dir" 120 "$done_at"
+  [ "$t9_watch_rc" -eq 0 ] || die "operation watch ended with exit $t9_watch_rc through A's stop; its output is $dir/watch.txt (a product finding)"
+  grep -q 'until the watch ends' "$dir/watch.txt" || die "operation watch did not meet the outage; see $dir/watch.txt"
+  grep -q '^Completed at ' "$dir/watch.txt" || die "operation watch did not report the completion; see $dir/watch.txt"
   trap - EXIT INT TERM
+  read_ok "the CLI's operation watch followed the apply through A's stop and reported its completion" true
   read_ok "the stream resumed with Last-Event-ID after A's restart: $(t9_ids "$dir/full" | wc -l) events, none lost or repeated, the apply completed" true
 }
 t9() {

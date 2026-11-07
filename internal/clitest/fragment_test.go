@@ -510,8 +510,32 @@ func (f *fixture) protectedFiles(dir string) []string {
 	return leaked
 }
 
-// journeyIDs are the generated identifiers, times and ports a journey's kept output replaces.
-var journeyIDs = regexp.MustCompile(`\b(drf|frv|frg|prv|prf|asr|asg|ing|req|cl|mch|ep|act|op|rel|ibr|pln|apr|idn)_[a-z2-7]{26}\b|\d{4}-\d\d-\d\dT[0-9:.]+Z|127\.0\.0\.1:\d+`)
+// journeyIDs are the generated identifiers, times and ports a journey's kept output replaces. A
+// time ends in Z or in a numeric offset, as an attempt's transport deadline does.
+var journeyIDs = regexp.MustCompile(`\b(drf|frv|frg|prv|prf|asr|asg|ing|req|cl|mch|ep|act|op|rel|ibr|pln|apr|idn|obs|att)_[a-z2-7]{26}\b|\d{4}-\d\d-\d\dT[0-9:.]+(?:Z|[+-]\d\d:\d\d)|127\.0\.0\.1:\d+`)
+
+// TestJourneyIDs checks that an observation ID, an attempt ID and a time with a numeric offset are
+// replaced in a journey's kept output, and that a time ending in Z still is.
+func TestJourneyIDs(t *testing.T) {
+	const id = "abcdefghijklmnopqrstuvwxyz"
+	for in, want := range map[string]string{
+		"observation obs_" + id + ",":               "observation <id>,",
+		"attempt att_" + id + ",":                   "attempt <id>,",
+		"deadline 2026-11-07T08:41:00.714945+00:00": "deadline <t>",
+		"deadline 2026-11-07T08:41:00Z":             "deadline <t>",
+		"obs_short":                                 "obs_short",
+	} {
+		got := journeyIDs.ReplaceAllStringFunc(in, func(m string) string {
+			if strings.Contains(m, ":") {
+				return "<t>"
+			}
+			return "<id>"
+		})
+		if got != want {
+			t.Errorf("%q became %q; want %q", in, got, want)
+		}
+	}
+}
 
 // generatedBase64 is a run of base64 of 40 characters or more, as a certificate or ID the test
 // generates is written in a rendered configuration: standard, or URL-safe and padded, as the

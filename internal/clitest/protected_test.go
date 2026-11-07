@@ -540,15 +540,17 @@ func (e *importEnv) leakFiles(dir string) []string {
 // expiresAt is the claim's expiry a pause prints, which differs on every run.
 var expiresAt = regexp.MustCompile(`expires \d{4}-\d\d-\d\d \d\d:\d\d:\d\d \S+?\)`)
 
-// journey runs the journey task T3's import part (operator-experience.md §13) as a script through
-// the CLI: a draft, an import with review, the review on a terminal marking the unmarked secret,
-// the continuation, the machine's assignment and the publication. The import leaves nothing to
-// assign (the draft holds the import base only), so a fragment is saved for the assignment to name;
-// the adopt plan and approval follow with the plan commands (#258). Its probe "Is the secret in the
-// draft?" is answered by the release's provenance, which names the marked path as a reference. The
-// output is kept in testdata/journeys/t3.txt, except the review's, which stays in memory.
+// journey runs the journey task T3 (operator-experience.md §13) as a script through the CLI: a
+// draft, an import with review, the review on a terminal marking the unmarked secret, the
+// continuation, the machine's assignment and the publication, then the handover (#354): the adopt
+// plan, its approval by the plan ID typed back, the adoption's operation followed to its end, and
+// the machine read, whose Applied is the release, set by the adoption. The import leaves nothing to
+// assign (the draft holds the import base only), so a fragment is saved for the assignment to name.
+// Its probe "Is the secret in the draft?" is answered by the release's provenance, which names the
+// marked path as a reference. The output is kept in testdata/journeys/t3.txt, except the review's,
+// which stays in memory.
 func (e *importEnv) journey(t *testing.T) {
-	var draft, ing, rel string
+	var draft, ing, rel, plan, op, show string
 	var out strings.Builder
 	labels := filepath.Join(e.dir, "worker-labels.yaml")
 	if err := os.WriteFile(labels, []byte("machine:\n  nodeLabels:\n    tier: workers\n"), 0o600); err != nil {
@@ -563,10 +565,16 @@ func (e *importEnv) journey(t *testing.T) {
 		{"assignment", "set", "{machine}", "--draft", "{draft}", "--fragment", "role=worker-labels"},
 		{"publish", "{draft}"},
 		{"release", "provenance", "{release}", "{machine}"},
+		{"plan", "create", "--release", "{release}", "--machine", "{machine}", "--operation", "adopt"},
+		{"approve", "{plan}"},
+		{"plan", "show", "{plan}"},
+		{"operation", "watch", "{operation}"},
+		{"machine", "show", "{machine}"},
 	} {
 		args := slices.Clone(step)
 		for i, a := range args {
-			args[i] = strings.NewReplacer("worker-labels.yaml", labels, "{draft}", draft, "{ingestion}", ing, "{release}", rel, "{machine}", e.s.machine, "{cluster}", e.s.cluster).Replace(a)
+			args[i] = strings.NewReplacer("worker-labels.yaml", labels, "{draft}", draft, "{ingestion}", ing, "{release}", rel, "{machine}", e.s.machine, "{cluster}", e.s.cluster,
+				"{plan}", plan, "{operation}", op).Replace(a)
 		}
 		fmt.Fprintf(&out, "$ bronzewardctl --context human %s\n", strings.Join(step, " "))
 		if step[1] == "review" {
@@ -574,14 +582,30 @@ func (e *importEnv) journey(t *testing.T) {
 			fmt.Fprintf(&out, "(the protected review, on a terminal: matched in memory, not kept)\n[exit %d]\n\n", code)
 			continue
 		}
-		r := e.run(args...)
+		var r result
+		if step[0] == "approve" {
+			r = e.ctl(nil, plan+"\n", append([]string{"--context", "human"}, args...)...)
+		} else {
+			r = e.run(args...)
+		}
 		switch {
-		case step[1] == "create":
+		case step[1] == "create" && step[0] == "draft":
 			draft = regexp.MustCompile(`drf_[a-z2-7]{26}`).FindString(r.out)
 		case step[1] == "start":
 			ing = ingID.FindString(r.out)
 		case step[0] == "publish":
 			rel = regexp.MustCompile(`rel_[a-z2-7]{26}`).FindString(r.out)
+		case step[1] == "create":
+			plan = planID.FindString(r.out)
+		case step[0] == "approve":
+			e.committed(plan)
+		case step[1] == "show" && step[0] == "plan":
+			op = opID.FindString(r.out)
+		case step[1] == "show" && step[0] == "machine":
+			show = r.out
+		}
+		if r.code != 0 {
+			t.Errorf("bronzewardctl %v: exit %d\n%s%s", args, r.code, r.out, r.err)
 		}
 		fmt.Fprintf(&out, "%s%s[exit %d]\n\n", r.out, r.err, r.code)
 	}
@@ -592,5 +616,36 @@ func (e *importEnv) journey(t *testing.T) {
 	if !strings.Contains(out.String(), ", "+unmarkedPath+" ") {
 		t.Errorf("the provenance does not name %s as a reference", unmarkedPath)
 	}
-	keepJourney(t, "t3", expiresAt.ReplaceAllString(out.String(), "expires <time>)"), e.dir)
+	if want := "adopted; the adoption of plan " + plan; !strings.Contains(out.String(), want) {
+		t.Errorf("the handover shows no %q", want)
+	}
+	// The approve step prints the same release as a prediction, so only the machine read proves it.
+	if want := "attributed to " + rel + ", which is the Applied release (by adoption)"; !strings.Contains(show, want) {
+		t.Errorf("the machine read shows no %q:\n%s", want, show)
+	}
+	kept := expiresAt.ReplaceAllString(out.String(), "expires <time>)")
+	kept = localTimes.ReplaceAllString(eventTimes.ReplaceAllString(kept, "$1 <time>  "), "<local time>")
+	kept = controllerID.ReplaceAllString(kept, "<controller>")
+	// approve's prompt ends in a space, which the repository's whitespace check refuses in a kept file.
+	keepJourney(t, "t3", regexp.MustCompile(`(?m)[ \t]+$`).ReplaceAllString(kept, ""), e.dir)
+}
+
+var (
+	// controllerID is a controller's identifier in the CLI's output: its instance, process and a
+	// random part, which differ on every run.
+	controllerID = regexp.MustCompile(`[^,\s]+/\d+/[A-Z2-7]{26}`)
+	// eventTimes are operation watch's event times, the time this client received each event.
+	eventTimes = regexp.MustCompile(`(?m)^(received) \d\d:\d\d:\d\d  `)
+)
+
+// committed waits until plan is committed, as the controller commits an approved adopt plan.
+func (e *importEnv) committed(plan string) {
+	e.t.Helper()
+	var state string
+	for deadline := time.Now().Add(2 * time.Minute); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		if err := e.f.db.QueryRow(`SELECT state FROM plan_state WHERE plan = $1`, plan).Scan(&state); err == nil && state == "committed" {
+			return
+		}
+	}
+	e.t.Fatalf("plan %s is %q after two minutes; want committed", plan, state)
 }
