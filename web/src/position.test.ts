@@ -1408,16 +1408,55 @@ describe("a plain !bwref value that goes on to the next line", () => {
     expect(references(text), text).toEqual(["x/foo"]);
   });
 
-  // KNOWN LIMIT, not correct behavior (ginsys/bronzeward#699). A property before the tag (`&e !bwref
-  // x/foo`) is no known parent (`PLAIN_PARENT`), so a `- ` line ends the scalar and the name lists, though
-  // go-yaml reads `x/foo - y`. That is the same with a space as with a tab, so the tab is not its cause and
-  // this change leaves it as it was (probe w698-tab and the red run w698-red1: both rows listed `x/foo` on
-  // 4200c858). The fix of #699 changes these rows to `[]`.
+  // An anchor before the tag (`&e !bwref x/foo`) is a property of the value, so the parent of the value is
+  // still the key or the dash before it (ginsys/bronzeward#699). The next line then goes on with the scalar
+  // as go-yaml reads it (`x/foo - y`, `x/foo ? y`), and the scanner lists no name. Before the change the
+  // anchor made the parent unknown (`PLAIN_PARENT`), so a `- ` or `? ` line ended the scalar and the name
+  // listed. The rows are the documents of probe w699-probe and w699-probe2 where `references()` listed
+  // `x/foo` on 0b3a42da and go-yaml reads a longer scalar. The twins with no anchor of the first row, of
+  // the nested key and of the sequence entry listed nothing there (probe rows B2, L4 and Q2).
   test.each([
-    ["a tab", "k:\t&e !bwref x/foo\n  - y\n"],
-    ["a space (control)", "k: &e !bwref x/foo\n  - y\n"],
-  ])("known limit, ginsys/bronzeward#699: an anchor before the tag, then a dash line, lists the name (%s)", (_, text) => {
+    ["a key, then a dash line", "k: &e !bwref x/foo\n  - y\n"],
+    ["a tab after the colon", "k:\t&e !bwref x/foo\n  - y\n"],
+    ["a key, then a question mark line", "k: &e !bwref x/foo\n  ? y\n"],
+    ["a nested key", "a:\n  k: &e !bwref x/foo\n    - y\n"],
+    ["a double quoted key", '"k": &e !bwref x/foo\n  - y\n'],
+    ["a single quoted key", "'k': &e !bwref x/foo\n  - y\n"],
+    ["a tab between the anchor and the tag", "k: &e\t!bwref x/foo\n  - y\n"],
+    ["two blanks around the anchor", "k:  &e  !bwref x/foo\n  - y\n"],
+    ["a sequence entry, then a dash line", "- &e !bwref x/foo\n  - y\n"],
+    ["a sequence entry, then a question mark line", "- &e !bwref x/foo\n  ? y\n"],
+    ["the second entry of a sequence", "- a\n- &e !bwref x/foo\n  - y\n"],
+    ["the anchor on the key line, the tag on the next line", "k: &e\n  !bwref x/foo\n  - y\n"],
+    ["the anchor on the dash line, the tag on the next line", "- &e\n  !bwref x/foo\n  - y\n"],
+  ])("an anchor before the tag, then a line that goes on with the scalar, lists nothing (%s)", (_, text) => {
+    expect(references(text), text).toEqual([]);
+  });
+
+  // The same documents where the anchor changes nothing: a sibling key or a line that is not more of the
+  // scalar ends it, and go-yaml reads `x/foo`. These rows listed the name before the change and pin that
+  // the fix does not take it away.
+  test.each([
+    ["a sibling key", "k: &e !bwref x/foo\nj: v\n"],
+    ["a sibling key of a compact key", "- k: &e !bwref x/foo\n  j: v\n"],
+    ["the next entry of a sequence", "- &e !bwref x/foo\n- y\n"],
+  ])("an anchor before the tag, then a line that ends the scalar, lists the name (%s)", (_, text) => {
     expect(references(text), text).toEqual(["x/foo"]);
+  });
+
+  // A plain line goes on with the scalar in every reading, so these rows listed nothing before the change
+  // and pin that the fix keeps it so (go-yaml reads `x/foo y`, `x/foo a:b`, `x/foo , y`).
+  test.each([
+    ["a word", "k: &e !bwref x/foo\n  y\n"],
+    ["a colon inside a word", "k: &e !bwref x/foo\n  a:b\n"],
+    ["a dash inside a word", "k: &e !bwref x/foo\n  -y\n"],
+    ["a question mark inside a word", "k: &e !bwref x/foo\n  ?y\n"],
+    ["a comma", "k: &e !bwref x/foo\n  , y\n"],
+    ["a closing bracket", "k: &e !bwref x/foo\n  ] y\n"],
+    ["the anchor on the key line, a word on the next line", "k: &e\n  !bwref x/foo\n  y\n"],
+    ["a sequence entry, a word", "- &e !bwref x/foo\n  y\n"],
+  ])("an anchor before the tag, then a plain line, lists nothing (%s)", (_, text) => {
+    expect(references(text), text).toEqual([]);
   });
 
   // A dash followed by a tab is refused by go-yaml ("found character that cannot start any token"). The
@@ -1517,11 +1556,13 @@ describe("a plain !bwref value that goes on to the next line", () => {
     });
 
     // A key of 100,000 characters before the tag on its own line (`PLAIN_PARENT`): the pattern must not try
-    // every split of a long key. The first one matches. The second one has an anchor after the colon, so
-    // the pattern reads the whole key and rejects it.
+    // every split of a long key. The first two match (the second one has one anchor after the colon,
+    // ginsys/bronzeward#699). The third one has two anchors after the colon, which go-yaml refuses, so the
+    // pattern reads the whole key and rejects it.
     test.each([
       ["a match", `${"a".repeat(100000)}: !bwref x/foo\n  bar\n`],
-      ["a rejection", `${"a".repeat(100000)}: &e !bwref x/foo\n  bar\n`],
+      ["a match with an anchor", `${"a".repeat(100000)}: &e !bwref x/foo\n  bar\n`],
+      ["a rejection", `${"a".repeat(100000)}: &e &f !bwref x/foo\n  bar\n`],
     ])("a key of 100,000 characters before the tag is matched in linear time (%s)", (_, text) => {
       bounded(text);
     });
@@ -1540,6 +1581,27 @@ describe("a plain !bwref value that goes on to the next line", () => {
       ["2,000 keys with a tab, the tag on its own line", Array.from({ length: 2000 }, (_, i) => `k${i}:\t\n  !bwref x/foo${i}\n  - y\n`).join("")],
     ])("a tab after the colon is matched in linear time (%s)", (_, text) => {
       bounded(text);
+    });
+
+    // An anchor before the tag (ginsys/bronzeward#699): the two parent patterns take one anchor and its
+    // blanks after the colon or the dash. Long keys, long runs of blanks and many anchors must not try
+    // every split. These rows pass on 0b3a42da too (they discriminate nothing there) and pin the bound of
+    // the new patterns.
+    test.each([
+      ["a key of 100,000 characters, the anchor on the key line", `${"a".repeat(100000)}: &e\n  !bwref x/foo\n  - y\n`],
+      ["5,000 anchors after the colon", `k: ${"&e ".repeat(5000)}!bwref x/foo\n  - y\n`],
+      ["5,000 anchors after the dash", `- ${"&e ".repeat(5000)}!bwref x/foo\n  - y\n`],
+      ["100,000 tabs between the anchor and the tag", `k: &e${"\t".repeat(100000)}!bwref x/foo\n  - y\n`],
+      ["50,000 pairs of a space and a tab around the anchor", `k:${" \t".repeat(50000)}&e${" \t".repeat(50000)}!bwref x/foo\n  - y\n`],
+      ["100,000 blanks after the anchor on the key line", `k: &e${" ".repeat(100000)}\n  !bwref x/foo\n  - y\n`],
+      ["2,000 key lines with an anchor, the tag on its own line", Array.from({ length: 2000 }, (_, i) => `k${i}: &e\n  !bwref x/foo${i}\n  - y\n`).join("")],
+    ])("an anchor before the tag is matched in linear time (%s)", (_, text) => {
+      bounded(text);
+    });
+
+    // Many tags under one long key line with an anchor: the line is matched once (`known` of the line).
+    test("4,000 tags among sibling keys under one key line of 300,000 characters with an anchor are scanned in near linear time", () => {
+      bounded(`${"a".repeat(300000)}: &e\n${Array.from({ length: 4000 }, (_, i) => `  j${i}: v\n  !bwref x/foo${i}\n`).join("")}`);
     });
 
     // Every other loop and pattern that the scan of a plain tag value runs, on a long input of its kind.
