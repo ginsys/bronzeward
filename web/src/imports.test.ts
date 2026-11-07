@@ -380,6 +380,9 @@ describe("the progress watch follows the claim generation (Codex and Copilot thr
     expect(watchDeps(client, ing({ operation: "op1", ownerGeneration: 1 }), again)).toEqual(first);
     expect(watchDeps(client, ing({ operation: "op1", ownerGeneration: 2 }), again)).not.toEqual(first);
     expect(watchDeps(client, ing({ operation: "op2", ownerGeneration: 1 }), again)).not.toEqual(first);
+    // An abandonment keeps the operation and the generation: the watch stopped at the pause restarts and reads the failure.
+    const paused = watchDeps(client, ing({ operation: "op1", ownerGeneration: 1, state: "paused" }), again);
+    expect(watchDeps(client, ing({ operation: "op1", ownerGeneration: 1, state: "abandoned" }), again)).not.toEqual(paused);
     // The restarted watch begins at the new generation: it settles on that run's pause, not on the earlier run's.
     const events: [string, unknown][] = [["paused", { generation: 1 }], ["continued", { generation: 2 }], ["paused", { generation: 2 }]];
     expect(events.reduce((s, [t, d]) => onEvent(s, t, d), startRun(2)).settled).toBe("paused");
