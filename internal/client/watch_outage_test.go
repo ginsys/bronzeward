@@ -27,6 +27,25 @@ func TestWatchOutage(t *testing.T) {
 		}
 		return sum
 	}
+	// ended makes Until true once the operation read has waited d in all (the recorded waits). The cleanup
+	// belongs to the subtest that calls it, so Until does not carry into the subtests after it.
+	ended := func(t *testing.T, d time.Duration) {
+		t.Helper()
+		until = func() (bool, error) { return total(reads) >= d, nil }
+		t.Cleanup(func() { until = nil })
+	}
+	// failsAfter makes Until fail with err only once the operation read has waited d in all: its first
+	// answers are (false, nil), so the error first arises during a retry wait and not before the read.
+	failsAfter := func(t *testing.T, d time.Duration, err error) {
+		t.Helper()
+		until = func() (bool, error) {
+			if total(reads) >= d {
+				return true, err
+			}
+			return false, nil
+		}
+		t.Cleanup(func() { until = nil })
+	}
 	for _, kind := range []string{"502", "503", "drop"} {
 		t.Run("an outage of seven reads ("+kind+") is waited out, and the stream resumes with Last-Event-ID", func(t *testing.T) {
 			reads = nil
@@ -70,8 +89,7 @@ func TestWatchOutage(t *testing.T) {
 	t.Run("an Until that fails during the read after a refused drain ends it with its own error", func(t *testing.T) {
 		reads = nil
 		boom := errors.New("BWSYNTH until failed")
-		until = func() (bool, error) { return total(reads) >= time.Second, boom }
-		t.Cleanup(func() { until = nil })
+		failsAfter(t, time.Second, boom)
 		o := &opServer{streams: []handler{sse(ev(e1+":1", "queued"))}, epochs: []string{e1}, states: []string{"failed"},
 			pagesStatus: http.StatusForbidden, outage: 99, outageAfter: 1, outageKind: "502"}
 		_, _, _, _, err := watched(t, o, e1, nil)
@@ -79,14 +97,9 @@ func TestWatchOutage(t *testing.T) {
 			t.Errorf("watch: %v; want Until's error joined with the refused drain's 403", err)
 		}
 	})
-	// ended makes Until true once the operation read has waited d in all (the recorded waits).
-	ended := func(d time.Duration) {
-		until = func() (bool, error) { return total(reads) >= d, nil }
-		t.Cleanup(func() { until = nil })
-	}
 	t.Run("the watch ending in an outage returns the operation as the last read showed it", func(t *testing.T) {
 		reads = nil
-		ended(3 * time.Second)
+		ended(t, 3*time.Second)
 		o := &opServer{streams: []handler{sse(ev(e1+":1", "queued"))}, states: []string{"running"},
 			outage: 99, outageAfter: 1, outageKind: "502"}
 		_, _, state, _, err := watched(t, o, e1, nil)
@@ -97,7 +110,7 @@ func TestWatchOutage(t *testing.T) {
 	})
 	t.Run("the watch ending inside a wait of 30 s ends it within one step of 250 ms", func(t *testing.T) {
 		reads = nil
-		ended(31*time.Second + 400*time.Millisecond) // the waits 1+2+4+8+16 = 31 s, then 30 s of the next
+		ended(t, 31*time.Second+400*time.Millisecond) // the waits 1+2+4+8+16 = 31 s, then 30 s of the next
 		o := &opServer{streams: []handler{sse(ev(e1+":1", "queued"))}, states: []string{"running"},
 			outage: 99, outageAfter: 1, outageKind: "502"}
 		_, _, state, _, err := watched(t, o, e1, nil)
@@ -107,7 +120,7 @@ func TestWatchOutage(t *testing.T) {
 	})
 	t.Run("the watch ending in an outage with no read of the operation reports that it ended", func(t *testing.T) {
 		reads = nil
-		ended(2 * time.Second)
+		ended(t, 2*time.Second)
 		o := &opServer{streams: []handler{sse(ev(e1+":1", "queued"))}, states: []string{"running"}, outage: 99, outageKind: "503"}
 		_, _, state, _, err := watched(t, o, e1, nil)
 		if !errors.Is(err, ErrWatchEnded) || state != "" {
@@ -117,8 +130,7 @@ func TestWatchOutage(t *testing.T) {
 	t.Run("an Until that fails ends the outage with its own error", func(t *testing.T) {
 		reads = nil
 		boom := errors.New("BWSYNTH until failed")
-		until = func() (bool, error) { return total(reads) >= time.Second, boom }
-		t.Cleanup(func() { until = nil })
+		failsAfter(t, time.Second, boom)
 		o := &opServer{streams: []handler{sse(ev(e1+":1", "queued"))}, states: []string{"running"},
 			outage: 99, outageAfter: 1, outageKind: "502"}
 		_, _, _, _, err := watched(t, o, e1, nil)
@@ -128,7 +140,7 @@ func TestWatchOutage(t *testing.T) {
 	})
 	t.Run("a reread after a refused drain that shows a running operation is the last read when an outage ends the watch", func(t *testing.T) {
 		reads = nil
-		ended(2 * time.Second)
+		ended(t, 2*time.Second)
 		// The first read is terminal and its drain is refused. The reread shows the operation running, so the
 		// watch goes on. The next read is out of reach until the watch ends: the terminal read is stale.
 		o := &opServer{streams: []handler{sse(ev(e1+":1", "queued"))}, epochs: []string{e1}, states: []string{"failed", "running"},
@@ -140,7 +152,7 @@ func TestWatchOutage(t *testing.T) {
 	})
 	t.Run("a terminal read stays no result when the drain shows another epoch and an outage ends the watch", func(t *testing.T) {
 		reads = nil
-		ended(2 * time.Second)
+		ended(t, 2*time.Second)
 		// The first read is terminal in epoch 1. The installation is restored at the drain, whose pages answer epoch 2,
 		// so the watch goes on. The next read is out of reach until the watch ends: the terminal read is of the
 		// installation that was restored, and it is not the result.
@@ -154,7 +166,7 @@ func TestWatchOutage(t *testing.T) {
 	})
 	t.Run("a terminal reread of another epoch after a refused drain stays no result when an outage ends the watch", func(t *testing.T) {
 		reads = nil
-		ended(2 * time.Second)
+		ended(t, 2*time.Second)
 		// The first read is terminal in epoch 1 and its drain is refused, and that request moves the installation to
 		// epoch 2. The reread is terminal in epoch 2, which is not the epoch of the first read, so the watch goes on.
 		// The next read is out of reach until the watch ends: no read settled the state.
@@ -168,7 +180,7 @@ func TestWatchOutage(t *testing.T) {
 	})
 	t.Run("a terminal read stays no result when the refused drain showed another epoch and an outage ends the watch", func(t *testing.T) {
 		reads = nil
-		ended(2 * time.Second)
+		ended(t, 2*time.Second)
 		// The first read is terminal in epoch 1 and its drain is refused. That answer carries epoch 2, so the
 		// installation was restored. The read after it is out of reach until the watch ends: the terminal read
 		// is of the installation before the restore, and the refused drain is reported beside that.
@@ -182,7 +194,7 @@ func TestWatchOutage(t *testing.T) {
 	})
 	t.Run("the watch ending in an outage skips the epoch refresh a new epoch asks for", func(t *testing.T) {
 		reads = nil
-		ended(2 * time.Second)
+		ended(t, 2*time.Second)
 		// The second stream moves the installation to another epoch, then the operation read is out of reach.
 		const e2 = "ep_BWSYNTH2"
 		o := &opServer{streams: []handler{sse(ev(e1+":1", "queued")), sse(ev(e2+":1", "queued"))}, epochs: []string{"", e2},
@@ -207,7 +219,7 @@ func TestWatchOutage(t *testing.T) {
 	})
 	t.Run("the watch ending in an outage shows the recovery banner the outage answers carried", func(t *testing.T) {
 		reads = nil
-		ended(2 * time.Second)
+		ended(t, 2*time.Second)
 		// Only the failed reads say that the installation is in recovery mode, so no read has shown the banner yet.
 		o := &opServer{streams: []handler{sse(ev(e1+":1", "queued"))}, states: []string{"running"},
 			outage: 99, outageAfter: 1, outageKind: "502", recoveryOnOutage: true}
