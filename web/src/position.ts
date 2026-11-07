@@ -299,7 +299,8 @@ function readTags(original: string): { found: { index: number; tag: string; name
 // the tag on a later line must be more indented than the `?` line. In a flow collection (`inFlow`, the
 // tag's own flow state) go-yaml needs no indentation, also when the `?` starts a line of the collection
 // (`[` then `?` then the tag, each on its own line). Only a key that is a scalar counts: the entry of a collection that is a key
-// (`? - !bwref x/foo`) is no explicit key's own tag.
+// (`? - !bwref x/foo`) is no explicit key's own tag. In a flow collection the `?` needs no blank after it
+// (`[?!bwref x/foo]`, `{?!bwref x/foo}`, `[?&k !bwref x/foo]`), as go-yaml reads it (ginsys/bronzeward#710).
 //
 // The text before the tag is read backward from the tag and stops at the nearest token that is no
 // anchor. The cost per tag is the run of blanks, line breaks and anchors right before it. Runs of two
@@ -324,8 +325,13 @@ function explicitKeyTag(masked: string, tag: number, inFlow: boolean): boolean {
       if (masked[i - 1] === "\n") broke = true;
       i--;
     }
-    if (i === end || i === floor) return false;
-    if (masked[i - 1] === "?") break;
+    if (i === floor) return false;
+    // A `?` directly before the tag or the anchor is a key indicator only in a flow collection (`[?!bwref x]`,
+    // `[?&k !bwref x]`): go-yaml needs no blank after it there. In a block `?!bwref x` is a plain scalar.
+    // A `?` directly before the tag or the anchor is a key indicator only in a flow collection (`[?!bwref x]`,
+    // `[?&k !bwref x]`): go-yaml needs no blank after it there. In a block `?!bwref x` is a plain scalar.
+    if (masked[i - 1] === "?" && (i !== end || inFlow)) break;
+    if (i === end) return false;
     let j = i;
     while (isName(masked[j - 1])) j--;
     if (j === i || masked[j - 1] !== "&") return false;
