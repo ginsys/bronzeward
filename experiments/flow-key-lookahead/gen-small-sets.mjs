@@ -4,8 +4,9 @@
 //   probes.json   22 documents: probe 5 and probe 6 of #657, plus the root and "a:" shapes
 //   hyp.json     126 documents: 21 flow keys x 6 contexts
 //   small.json    45 documents: 15 small flow keys of only ? and : items x 3 contexts
-//   edge.json     12 documents: a byte order mark, three Unicode line breaks, an astral key, a tab after a comment,
-//                 two shorthand tags and a tab in a plain scalar continuation
+//   edge.json     14 documents: a byte order mark, three Unicode line breaks, an astral key, a tab after a comment,
+//                 two shorthand tags, a tab in a plain scalar continuation, a byte order mark after the first
+//                 line and two byte order marks at the start
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -81,6 +82,14 @@ const edge = [
   // A plain scalar that continues on the next line, with a tab inside the continuation (no flow key, so no bug
   // decides it): go-yaml folds the line break first and then accepts the tab, so the model must accept it too.
   `a:\n  b: [x\n y\tz]\n`,
+  // A byte order mark after the first line: go-yaml tests the start of its buffer (is_bom ignores the offset,
+  // yamlprivateh.go:103), so a mark at column 0 of a later line stays in the plain scalar and both oracles accept
+  // this document. The model must accept it too.
+  `\n${BOM}[? b]: ${V}`,
+  // Two marks at the start: go-yaml drops the first one at the stream start, then its buffer-start test finds the
+  // second one and skips at column 0. It refuses this document by the bug, and it refuses longer documents of this
+  // shape for other reasons (set S8 holds some). The model makes no claim ("unsupported").
+  `${BOM}${BOM}[? b]: ${V}`,
 ];
 
 // Small flow keys of only `?` and `:` items, in three contexts.
