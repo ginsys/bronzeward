@@ -1413,8 +1413,8 @@ describe("a plain !bwref value that goes on to the next line", () => {
     });
 
     // A key of 100,000 characters before the tag on its own line (`PLAIN_PARENT`): the pattern must not try
-    // every split of a long key. Both inputs reach it. The first one matches. The second one has an anchor
-    // after the colon, so the pattern reads the whole key and rejects it.
+    // every split of a long key. The first input matches. The second one has an anchor after the colon, so
+    // the pattern reads the whole key and rejects it.
     test.each([
       ["a match", `${"a".repeat(100000)}: !bwref x/foo\n  bar\n`],
       ["a rejection", `${"a".repeat(100000)}: &e !bwref x/foo\n  bar\n`],
@@ -1423,9 +1423,6 @@ describe("a plain !bwref value that goes on to the next line", () => {
     });
 
     // Every other loop and pattern that the scan of a plain tag value runs, on a long input of its kind.
-    // The two rows of repeated tags (`!a`) made
-    // zero calls to `startsLine()` and `propertiesOnly()` in a call count. The two rows of repeated anchors
-    // (`&e`) reach them, on 15,002 and 15,001 characters.
     test.each([
       ["5,000 properties before the tag", `k:\n  ${"!a ".repeat(5000)}!bwref x/foo\n  bar\n`],
       ["a line of 5,000 properties above the tag", `k:\n ${"!a ".repeat(5000)}\n  !bwref x/foo\n  bar\n`],
