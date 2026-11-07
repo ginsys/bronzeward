@@ -405,6 +405,39 @@ func TestOperationWatchFailedDrainReread(t *testing.T) {
 	})
 }
 
+// TestOperationWatchCleanDrainEpoch (ginsys/bronzeward#690): the watch drains the events of a finished
+// operation to the end, with no failed read and no outage. The pages that readLast then reads can be the
+// first answers to show a restore: the terminal read is then not known to hold (exit 3), and with pages of
+// the read's own epoch the outcome stands (client-contracts.md section 8.6 item 2).
+func TestOperationWatchCleanDrainEpoch(t *testing.T) {
+	run := func(t *testing.T, pagesEpoch string) (int, string, string) {
+		t.Helper()
+		// The stream ends before the last event (lastEvent 3 in the operation read), so the watch drains the
+		// pages to the end (page request 1, of the read's own epoch). The pages that readLast reads after it
+		// (request 2) are the first to answer another epoch: a restore between the drain and that read.
+		f := &opFake{stream: []string{sse(1, "commitment", commitment), sse(2, "attempt", attempt)},
+			pages:      []string{evPage(1, "commitment", commitment), evPage(2, "attempt", attempt), evPage(3, "operation-state", toState("verifying", "succeeded", ""))},
+			pagesEpoch: pagesEpoch, pagesEpochAt: 2,
+			body: fmt.Sprintf(opJSON, "apply-config", "succeeded", "null", "null", "[]")}
+		srv := httptest.NewServer(f)
+		t.Cleanup(srv.Close)
+		automationContext(t, srv.URL)
+		return runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "5s")
+	}
+	t.Run("the pages of the end show the read's own epoch: the outcome stands (control)", func(t *testing.T) {
+		code, out, errOut := run(t, "")
+		if code != 0 || !strings.Contains(out, "Succeeded") || strings.Contains(errOut, "not shown") {
+			t.Errorf("exit %d, stdout %q, stderr %q; want 0 and the completion line", code, out, errOut)
+		}
+	})
+	t.Run("the pages of the end show another epoch: exit 3", func(t *testing.T) {
+		code, out, errOut := run(t, "ep_BWSYNTH-3")
+		if code != 3 || !strings.Contains(errOut, "bronzewardctl operation show 'op_BWSYNTH'") || strings.Contains(out, "Succeeded") {
+			t.Errorf("exit %d, stdout %q, stderr %q; want 3, the operation to read named and no completion line", code, out, errOut)
+		}
+	})
+}
+
 // TestOperationWatchOneSnapshot: with -o json the resource printed, the outcome line and the exit code
 // all come from the one operation read the watch returned, with the members of the server's answer as
 // they came, also when the operation changes after that read.
@@ -1001,8 +1034,9 @@ func TestReadLastKeepsOneOperation(t *testing.T) {
 }
 
 // TestOperationWatchCompletionTime: the completion line shows the server's time only when the last
-// page item is of the epoch of the operation read that follows the watch; after a restore it says
-// the time was not read.
+// page item is of the epoch of the operation read that follows the watch. After a restore that the
+// pages are the first to show, the terminal read is not known to hold: no completion line, exit 3
+// (ginsys/bronzeward#690; the same holds for the first read and for a failed drain).
 func TestOperationWatchCompletionTime(t *testing.T) {
 	f := &opFake{}
 	srv := httptest.NewServer(f)
@@ -1017,8 +1051,8 @@ func TestOperationWatchCompletionTime(t *testing.T) {
 	}{
 		{"no restore", "", "(server): applied rel_BWSYNTH", "was not read", "", false},
 		{"created before a recovery, read in the new epoch", "", "(server): applied rel_BWSYNTH", "was not read", "ep_BWSYNTH-1", false},
-		{"restored after the pages", "ep_BWSYNTH-3", "The server's time of this end was not read.", "(server)", "", false},
-		{"restored before the pages", "ep_BWSYNTH-3", "The server's time of this end was not read.", "(server)", "", true},
+		{"restored after the pages", "ep_BWSYNTH-3", "bronzewardctl operation show 'op_BWSYNTH'", "Completed at", "", false},
+		{"restored before the pages", "ep_BWSYNTH-3", "bronzewardctl operation show 'op_BWSYNTH'", "Completed at", "", true},
 	} {
 		f.mu.Lock()
 		f.late, f.reads = c.late, 0
@@ -1035,9 +1069,13 @@ func TestOperationWatchCompletionTime(t *testing.T) {
 			}
 		}
 		f.mu.Unlock()
-		code, out, _ := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "2s")
-		if code != 0 || !strings.Contains(out, c.want) || strings.Contains(out, c.not) {
-			t.Errorf("%s: exit %d, want %q and not %q in\n%s", c.name, code, c.want, c.not, out)
+		code, out, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "2s")
+		wantCode := 0
+		if c.late != "" {
+			wantCode = 3
+		}
+		if code != wantCode || !strings.Contains(out+errOut, c.want) || strings.Contains(out, c.not) {
+			t.Errorf("%s: exit %d, want %d, %q and not %q in\n%s\nstderr %q", c.name, code, wantCode, c.want, c.not, out, errOut)
 		}
 	}
 }

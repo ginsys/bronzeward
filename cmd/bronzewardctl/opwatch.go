@@ -351,12 +351,11 @@ func (e *env) operationWatch(args []string) (err error) {
 	var last *lastEvent
 	if client.Terminal(o.State) {
 		last = readLast(c, id, o.State, res.read.Epoch)
-		// The first read stands only for as long as no answer shows another epoch: the pages and the read
-		// that readLast made can be the first to show the restore, and then the state is not known. The same
-		// holds for a terminal read that the watch kept after the drain of its events failed (res.err is that
-		// failure): the outage that ended the watch left it as the only read. A watch that drained its events
-		// to the end is not checked here (ginsys/bronzeward#690).
-		if (res.first || res.err != nil) && !c.EpochHolds(res.read) {
+		// A terminal read stands only for as long as no answer shows another epoch: the pages and the read
+		// that readLast made can be the first to show the restore, and then the state is not known. This
+		// holds for every terminal read: the first read, a read kept after the drain of its events failed,
+		// and the read of a watch that drained its events to the end.
+		if !c.EpochHolds(res.read) {
 			return errors.Join(unreadState(id, errors.Join(client.ErrWatchEnded, client.ErrWatchRestored)), out.failure())
 		}
 	}
