@@ -597,6 +597,38 @@
    "want": []
   },
   {
+   "name": "tagged-explicit-key-two-in-flow",
+   "source": "ginsys/bronzeward#637",
+   "doc": "[? !bwref x/a, ? !bwref x/b]\n",
+   "want": []
+  },
+  {
+   "name": "tagged-explicit-key-anchor-flow",
+   "source": "ginsys/bronzeward#637",
+   "doc": "{? &e !bwref x/foo : v}\n",
+   "want": []
+  },
+  {
+   "name": "tagged-explicit-key-after-flow-entry",
+   "source": "ginsys/bronzeward#637",
+   "doc": "a: {b: c, ? !bwref x/foo : v}\n",
+   "want": []
+  },
+  {
+   "name": "tagged-explicit-key-after-dashes",
+   "source": "ginsys/bronzeward#637",
+   "doc": "- - ? !bwref x/foo\n    : v\n",
+   "want": []
+  },
+  {
+   "name": "explicit-key-flow-entry-control",
+   "source": "ginsys/bronzeward#637",
+   "doc": "[? a, !bwref x/foo]\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
    "name": "tagged-implicit-key",
    "source": "ginsys/bronzeward#637",
    "doc": "!bwref x/foo: v\n",
