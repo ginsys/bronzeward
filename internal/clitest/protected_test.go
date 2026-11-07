@@ -630,14 +630,6 @@ func (e *importEnv) journey(t *testing.T) {
 	keepJourney(t, "t3", regexp.MustCompile(`(?m)[ \t]+$`).ReplaceAllString(kept, ""), e.dir)
 }
 
-var (
-	// controllerID is a controller's identifier in the CLI's output: its instance, process and a
-	// random part, which differ on every run.
-	controllerID = regexp.MustCompile(`[^,\s]+/\d+/[A-Z2-7]{26}`)
-	// eventTimes are operation watch's event times, the time this client received each event.
-	eventTimes = regexp.MustCompile(`(?m)^(received) \d\d:\d\d:\d\d  `)
-)
-
 // committed waits until plan is committed, as the controller commits an approved adopt plan.
 func (e *importEnv) committed(plan string) {
 	e.t.Helper()
