@@ -1429,6 +1429,15 @@ describe("a plain !bwref value that goes on to the next line", () => {
     ["the second entry of a sequence", "- a\n- &e !bwref x/foo\n  - y\n"],
     ["the anchor on the key line, the tag on the next line", "k: &e\n  !bwref x/foo\n  - y\n"],
     ["the anchor on the dash line, the tag on the next line", "- &e\n  !bwref x/foo\n  - y\n"],
+    // A blank after the anchor on the dash line is a space or a tab, as it is on the key line (probe w699-probe3).
+    ["a tab after the anchor on the dash line", "- &e\t\n  !bwref x/foo\n  - y\n"],
+    ["a tab and a carriage return after the anchor on the dash line", "- &e\t\r\n  !bwref x/foo\r\n  - y\r\n"],
+    ["two tabs after the anchor on the dash line", "- &e\t\t\n  !bwref x/foo\n  - y\n"],
+    ["a tab and a space after the anchor on the dash line", "- &e\t \n  !bwref x/foo\n  - y\n"],
+    ["a space and a tab after the anchor on the dash line", "- &e \t\n  !bwref x/foo\n  - y\n"],
+    ["a tab and a comment after the anchor on the dash line", "- &e\t# c\n  !bwref x/foo\n  - y\n"],
+    ["a tab after the anchor on the dash line, then a question mark line", "- &e\t\n  !bwref x/foo\n  ? y\n"],
+    ["a tab after the anchor on a nested dash line", "a:\n  - &e\t\n    !bwref x/foo\n    - y\n"],
   ])("an anchor before the tag, then a line that goes on with the scalar, lists nothing (%s)", (_, text) => {
     expect(references(text), text).toEqual([]);
   });
@@ -1594,6 +1603,9 @@ describe("a plain !bwref value that goes on to the next line", () => {
       ["100,000 tabs between the anchor and the tag", `k: &e${"\t".repeat(100000)}!bwref x/foo\n  - y\n`],
       ["50,000 pairs of a space and a tab around the anchor", `k:${" \t".repeat(50000)}&e${" \t".repeat(50000)}!bwref x/foo\n  - y\n`],
       ["100,000 blanks after the anchor on the key line", `k: &e${" ".repeat(100000)}\n  !bwref x/foo\n  - y\n`],
+      ["100,000 tabs after the anchor on the dash line", `- &e${"\t".repeat(100000)}\n  !bwref x/foo\n  - y\n`],
+      ["50,000 pairs of a space and a tab after the anchor on the dash line", `- &e${" \t".repeat(50000)}\n  !bwref x/foo\n  - y\n`],
+      ["100,000 tabs after an anchor on the dash line, then a character that ends the match", `- &e${"\t".repeat(100000)}x\n  !bwref x/foo\n  - y\n`],
       ["2,000 key lines with an anchor, the tag on its own line", Array.from({ length: 2000 }, (_, i) => `k${i}: &e\n  !bwref x/foo${i}\n  - y\n`).join("")],
     ])("an anchor before the tag is matched in linear time (%s)", (_, text) => {
       bounded(text);

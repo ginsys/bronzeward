@@ -422,8 +422,9 @@ const PLAIN_PARENT = /^(?: *(?:"[^"\n]*"|'[^'\n]*'|[^ \t"'#:\-?[\]{},&*!|>%@`](?
 // compact collection (`- k:`, `- -`), whose keys or entries stand at a column its line does not show
 // (ginsys/bronzeward#616). Blanks may follow the colon in spaces and tabs, and the dash in spaces only
 // (ginsys/bronzeward#698). One anchor may follow the colon or the dash (`k: &e`, `- &e`): it belongs to
-// the node on the lines below, which is the value of the key or the entry (ginsys/bronzeward#699).
-const PLAIN_PARENT_LINE = /^(?: *(?:"[^"\n]*"|'[^'\n]*'|[^ \t"'#:\-?[\]{},&*!|>%@`](?:[^#:\n]|:(?![ \t]))*):(?:[ \t]+&[A-Za-z0-9_-]+)?[ \t\r]*| *-(?: +&[A-Za-z0-9_-]+)?[ \r]*)$/;
+// the node on the lines below, which is the value of the key or the entry (ginsys/bronzeward#699). A tab may
+// follow that anchor, on a dash line as on a key line, but not follow the dash itself.
+const PLAIN_PARENT_LINE = /^(?: *(?:"[^"\n]*"|'[^'\n]*'|[^ \t"'#:\-?[\]{},&*!|>%@`](?:[^#:\n]|:(?![ \t]))*):(?:[ \t]+&[A-Za-z0-9_-]+)?[ \t\r]*| *-(?: +&[A-Za-z0-9_-]+[ \t\r]*|[ \r]*))$/;
 
 // go-yaml drops a byte order mark at the start of the stream before it reads any text, so it is no
 // column and no text there; it is dropped from the first line only (ginsys/bronzeward#616).
