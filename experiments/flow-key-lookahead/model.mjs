@@ -252,13 +252,22 @@ export function model(doc, opts = {}) {
   function scanBlockScalar() {
     skip();
     let increment = 0;
-    for (let i = 0; i < 2; i++) {
-      if (at() === "+" || at() === "-") skip();
-      else if (/[1-9]/.test(at())) {
+    // yaml_parser_scan_block_scalar (scannerc.go 2214-2251): one chomping indicator and then at most one digit, or one
+    // digit and then at most one chomping indicator. A second indicator of the same kind is left in the text, and
+    // the check for a comment or a line break below refuses it.
+    const digit = () => {
+      if (at() === "0") fail("found an indentation indicator equal to 0");
+      if (/[1-9]/.test(at())) {
         increment = Number(at());
         skip();
-      } else if (at() === "0") fail("found an indentation indicator equal to 0");
-    }
+        return true;
+      }
+      return false;
+    };
+    if (at() === "+" || at() === "-") {
+      skip();
+      digit();
+    } else if (digit() && (at() === "+" || at() === "-")) skip();
     while (isBlank(at())) skip();
     if (at() === "#") while (!isBreakz(at())) skip();
     if (!isBreakz(at())) fail("did not find expected comment or line break");
