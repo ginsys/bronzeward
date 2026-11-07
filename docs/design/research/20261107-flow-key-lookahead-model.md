@@ -28,7 +28,7 @@ gap. Section "Recommendation" gives the advice.
 | Oracle "real" | the oracle of `experiments/scanner-cross-line`, on unmodified go-yaml |
 | Oracle "patched" | the same oracle on go-yaml with one guarded delete (`go-yaml-guard.patch`) |
 | Oracle "counters" | `instr-oracle` on go-yaml with two counters (`go-yaml-instrument.patch`) |
-| Run head | 77eff0e0. The run of s13, S9 and S8 (stamp w688-l3) used this head with a clean checkout. The five small sets were compared again at this head on their saved oracle outputs. The commit after it changes this record only. |
+| Run head | 14162ed0, with a clean checkout. The oracle outputs of s13, S9 and S8 come from the run with stamp w688-l3 at 77eff0e0. The oracles and the sets did not change after it. The model compare of those three sets is the run with stamp w688-m3, on the saved outputs. The five small sets went through the three oracles again in the run with stamp w688-c1. The commit after it changes this record only. |
 
 All sets are synthetic. The small sets come from `gen-small-sets.mjs`. The flow-key set comes from
 `gen-flow-key-set.mjs`, which is the generator in the body of #657 (named S12 there). The scanner
@@ -88,7 +88,8 @@ it scans to the end of the stream.
 
 The verdict "misplaced" means that a KEY or BLOCK-MAPPING-START was inserted at a negative
 position. The verdict "error" means a scanner error. The verdict "ok" means neither. The verdict
-"unsupported" means a directive, which the model does not port.
+"unsupported" means that the model does not port the input. This covers a directive, and a tab
+that follows a comment line in the same run of comments.
 
 ### Why the context decides
 
@@ -155,9 +156,9 @@ compared. "Control" is the count of documents that go-yaml accepts with a name, 
 the run reads names at all. "Agree" is the count of compared documents on which the model and
 go-yaml agree. "Not compared" is the count of documents where the model makes no claim. These are
 documents that both oracles refuse for another reason and that the model calls "ok", and
-documents with a directive that the model calls "unsupported". In each row, Agree plus the last two
-columns equals Documents. The lane prints the same counts for s13, S9 and S8. The five small sets
-were not part of the lane run.
+documents that the model calls "unsupported": a directive, or a tab after a comment line. In each
+row, Agree plus the last two columns equals Documents. The runs print the same counts for the five
+small sets and for s13, S9 and S8.
 
 | Set | Documents | Control | Decided by the bug | Model "misplaced" | Agree | Not compared: both refuse, model "ok" | Not compared: model "unsupported" |
 |---|---|---|---|---|---|---|---|
@@ -165,10 +166,10 @@ were not part of the lane run.
 | Probe 5 and 6 of #657, plus root and `a:` shapes | 22 | 13 | 9 | 9 | 22 | 0 | 0 |
 | Hypothesis set (21 flow keys x 6 contexts) | 126 | 90 | 18 | 21 | 113 | 13 | 0 |
 | Small keys of `?` and `:` (below) | 45 | 0 | 15 | 45 | 45 | 0 | 0 |
-| Edge set: BOM, Unicode line breaks, astral key | 8 | 1 | 6 | 6 | 8 | 0 | 0 |
+| Edge set: BOM, Unicode line breaks, astral key, tab after a comment, shorthand tags | 11 | 2 | 7 | 7 | 9 | 1 | 1 |
 | s13, the flow-key set of #657 | 23247 | 15099 | 8085 | 8085 | 23184 | 63 | 0 |
 | S9 | 38208 | 5955 | 0 | 0 | 26277 | 11931 | 0 |
-| S8 | 245696 | 53570 | 0 | 0 | 118886 | 115662 | 11148 |
+| S8 | 245696 | 53570 | 0 | 0 | 118814 | 115662 | 11220 |
 
 Notes on the rows:
 
@@ -182,12 +183,20 @@ Notes on the rows:
   reason, such as `[?]` and `[:b]`. The model reports "misplaced" for all 45 and the real run
   refuses all 45. `gen-small-sets.mjs` writes the set with the contexts `K: V`, `a:\n  K: V` and
   `a: b\nK: V`, where `V` is `!bwref x/foo\n`.
-- Edge set: 8 documents with an initial byte order mark, the line breaks U+0085, U+2028 and
-  U+2029, and a key of 511 astral characters with an ASCII twin. 6 are decided by the bug and 2
-  are accepted. Before the repair, the model missed 4 of the 6 and refused 2 accepted documents.
-  One has a byte order mark before `? a`, then `: b`, then `[? b]: !bwref x/foo` (verdict
-  "misplaced"). The other has a byte order mark before `k: !bwref x/foo` and ` bar` on the next
-  line (verdict "error").
+- Edge set: 11 documents. 8 have an initial byte order mark, the line breaks U+0085, U+2028 and
+  U+2029, and a key of 511 astral characters with an ASCII twin. 6 of these 8 are decided by the
+  bug and 2 are accepted. Before the first repair, the model missed 4 of the 6 and refused 2
+  accepted documents. One has a byte order mark before `? a`, then `: b`, then `[? b]: !bwref
+  x/foo` (verdict "misplaced"). The other has a byte order mark before `k: !bwref x/foo` and ` bar`
+  on the next line (verdict "error"). The 3 other documents come from the hosted review:
+  - `a: 1`, `# c`, a tab and `# d`, then `b: !bwref x/foo`. go-yaml accepts it. The model calls it
+    "unsupported", so it is not compared. The model before this repair reported a scanner error,
+    which is a false refusal.
+  - `[? !t]: !bwref x/foo`. A shorthand tag swallows the `]` in go-yaml, so the parser refuses the
+    document for a reason that is not the bug. Both oracles refuse it and the model says "ok". It
+    is one "not compared" document.
+  - `[? !t, x]: !bwref x/foo`. A shorthand tag swallows the `,` too, and the bug decides the
+    document. The model says "misplaced", so it is the 7th document that the bug decides.
 - s13: the count of 8085 equals the 8085 names that the scanner on main lists in documents that
   go-yaml refuses (#657). The counters saw the event in all 8085. 63 documents refuse in both runs
   for another reason, and the model says "ok" for them. They are outside the class and are the 63
@@ -202,10 +211,10 @@ Notes on the rows:
   comparator did not count a scanner error as a false refusal, so it hid all 120. The repaired
   model gives 0 on the same set.
 - S8: no document is decided by the bug and the model reports "misplaced" for none. The model
-  reports a scanner error for 56252 documents, and go-yaml refuses all of them. The model reports
-  "unsupported" for 11148 documents with a directive. go-yaml refuses 7446 of them and accepts
-  3702. These 11148 and 115662 documents that both oracles refuse for another reason are the
-  126810 "not compared" documents.
+  reports a scanner error for 56180 documents, and go-yaml refuses all of them. The model reports
+  "unsupported" for 11220 documents: 11148 with a directive and 72 with a tab after a comment
+  line. go-yaml refuses 7518 of them and accepts 3702. These 11220 and 115662 documents that both
+  oracles refuse for another reason are the 126882 "not compared" documents.
 - S8, the counters: 3806 documents are 2903 plus 903. These are the documents with the key
   `instr hit:true` and a model verdict that is not "misplaced" (`compare.mjs:65`). A hit means that
   the counter `consumed` is above 0 (`compare.mjs:64`): go-yaml consumed a head token while a
@@ -225,9 +234,15 @@ Notes on the rows:
   would refuse documents that the server accepts, and it would lose names.
 - The model scans the whole stream, so it predicts that the defect fires. It does not predict the
   parser error that comes first in some documents.
-- The model does not port directives. S8 holds 11148 documents that the model calls unsupported.
-  go-yaml refuses 7446 of them and accepts 3702. None is decided by the bug, but the model proves
-  nothing for them.
+- The model does not port directives. S8 holds 11148 documents with a directive that the model
+  calls unsupported. go-yaml refuses 7446 of them and accepts 3702. None is decided by the bug,
+  but the model proves nothing for them.
+- The model does not port a tab that follows a comment line. go-yaml reads a run of comment lines
+  in one step (`yaml_parser_scan_comments`) and accepts a tab inside the run. The model skips one
+  comment at a time, so it reported a scanner error for a document that go-yaml accepts (the edge
+  document `a: 1`, `# c`, a tab and `# d`, then `b: V`). The model now calls such a document
+  "unsupported". S8 holds 72 of them, and go-yaml refuses all 72 for another reason. s13 and S9
+  hold none. The model makes no claim for a tab inside a run of comments.
 - The model does not check the characters that the go-yaml reader refuses, such as control
   characters, and it does not read UTF-16 input. The oracle receives UTF-8.
 - The sets come from the families in #657 and #654. The review of this record found two gaps
@@ -241,7 +256,7 @@ Notes on the rows:
   none. S9 holds 1584 documents with a byte order mark and S8 holds 420.
 - The self-test does not plant a guard-on misplaced document, because a plant needs a broken
   model. Only a reading of `compare.mjs` shows the "no misplaced insert with the guard on" leg.
-- The model has 437 lines. The experiment as a whole adds 910 lines under `experiments`, of which
+- The model has 446 lines. The experiment as a whole adds 927 lines under `experiments`, of which
   64 are patch files and 36 are the self-test. This is more than the 600-line budget. The
   generators and the Go oracles are the reproduction that an investigation must land, so they
   stay.
@@ -262,10 +277,13 @@ says nothing about the documents that were never compared:
 
 - s13: 63 of 23247 documents were never compared.
 - S9: 11931 of 38208 documents were never compared.
-- S8: 126810 of 245696 documents were never compared. This is more than half of S8 (52%). A
-  result of 0 and 0 over the other 118886 documents is no evidence for the whole set. Of the
-  126810, 11148 have a directive that the model does not port. The other 115662 are documents that
-  both oracles refuse for another reason, and the model says "ok" for them.
+- S8: 126882 of 245696 documents were never compared. This is more than half of S8 (51.64%). A
+  result of 0 and 0 over the other 118814 documents is no evidence for the whole set. Of the
+  126882, 11220 are documents that the model does not port: 11148 have a directive and 72 have a
+  tab after a comment line. The other 115662 are documents that both oracles refuse for another
+  reason, and the model says "ok" for them.
+- The edge set: 2 of 11 documents were never compared. One has a tab after a comment line, which
+  the model does not port. In the other, both oracles refuse a shorthand tag that swallows `]`.
 
 The result is not a proof for every document, and the review found two gaps that the sets did not
 cover. S9 and S8 hold no document that the bug decides, so they test one thing: that the model
