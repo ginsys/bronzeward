@@ -118,6 +118,7 @@ hold go-yaml v3.0.5.
 ```sh
 cd experiments/flow-key-lookahead
 ./selftest.sh                                 # compare.mjs must fail on planted failures
+node pins.mjs                                 # the unit cases of the model (79 checks)
 ./build-oracles.sh <work>                     # the three oracles, from go-yaml in the module cache
 node gen-small-sets.mjs <work>                # matrix, probes, hyp, small and edge .json
 ./run-compare.sh <work> <work>/matrix.json    # likewise the other small sets
@@ -130,18 +131,21 @@ MiB of free memory and passed with 20206 MiB. The lowest free memory during that
 
 `compare.mjs` prints one line of counts and then the differing documents. The bug decides a
 document when the real oracle refuses it and the patched oracle accepts it. The model passes a set
-when it meets three conditions:
+when it meets four conditions:
 
 - It reports "misplaced" for every document that the bug decides (none missed).
 - It predicts a refusal, by "misplaced" or by "error", only for documents that the real oracle
   refuses (no false refusal).
 - A model run with the guard switched on reports "misplaced" for no document.
+- The scan loop of the model reaches the end of the stream for every document. A document where it
+  hits its bound has the verdict "guard-exhausted". It has its own count and it fails the run.
 
 The exit status is the pass rule. `compare.mjs` exits 1 when a condition fails, and it stops with
 an error on an empty set or when an oracle file has a different length. `selftest.sh` plants two
 false refusals (one by a "misplaced" prediction, one by a scanner error), a missed document, an
 empty set and a length mismatch. It requires a nonzero exit for each, and exit 0 for a passing
-case.
+case. It also plants a loop bound that the scan reaches (`--max-steps 1`). It requires a nonzero
+exit and a count of 1 in both guard-exhausted counts, and it runs `pins.mjs`.
 
 The patched oracle can refuse a document for another reason, such as `[,]`. The model can report "misplaced" there, because the bug fires there too.
 
@@ -174,7 +178,9 @@ small sets and for s13, S9 and S8.
 | S8 | 245696 | 53570 | 0 | 0 | 139874 | 94597 | 11225 |
 
 Notes on the rows. The counts of the table and of the notes on the five small sets, s13, S9 and S8
-come from the run with stamp w688-gbom2 at 32e7bc5e, unless a note names another commit.
+come from the run with stamp w688-gbom2 at 32e7bc5e, unless a note names another commit. The run
+w688-new at 4d9b7345 prints the same counts for all eight sets, with 0 documents in the two
+guard-exhausted counts.
 
 - Matrix: the other 10 documents use the key `*e`. Both refuse them, with "unknown anchor". That
   is [#689](https://github.com/ginsys/bronzeward/issues/689), not this defect.
@@ -298,6 +304,10 @@ come from the run with stamp w688-gbom2 at 32e7bc5e, unless a note names another
   tab in another shape is tested only by what S9, S8 and the edge set hold.
 - The model does not check the characters that the go-yaml reader refuses, such as control
   characters, and it does not read UTF-16 input. The oracle receives UTF-8.
+- The model refuses a bad escape in a double-quoted scalar and a block scalar header with two
+  indicators of one kind, as go-yaml does (go-yaml v3.0.5 `scannerc.go` 2496-2579 and 2192-2281).
+  Before 4d9b7345 it did not. No count of the eight sets moved (run w688-new). That run compares
+  counts, not single documents, so it does not show that no set holds either shape.
 - The sets come from the families in #657 and #654. The review of this record found two gaps
   outside them: the line breaks U+0085, U+2028 and U+2029, and keys of astral characters. The
   edge set covers them now. Another shape outside the families is not tested.
@@ -322,8 +332,8 @@ come from the run with stamp w688-gbom2 at 32e7bc5e, unless a note names another
   only and 410 with a mark after the first character), counted by the run w688-bom at 1aa97028.
 - The self-test does not plant a guard-on misplaced document, because a plant needs a broken
   model. Only a reading of `compare.mjs` shows the "no misplaced insert with the guard on" leg.
-- At 32e7bc5e the model has 453 lines. The experiment as a whole adds 952 lines under `experiments`, of which
-  64 are patch files and 47 are the self-test. This is more than the 600-line budget. The
+- At 4d9b7345 the model has 485 lines. The experiment as a whole adds 1110 lines under `experiments`, of which
+  64 are patch files, 66 are the self-test and 81 are the unit cases of the model (`pins.mjs`). This is more than the 600-line budget. The
   generators and the Go oracles are the reproduction that an investigation must land, so they
   stay.
 
