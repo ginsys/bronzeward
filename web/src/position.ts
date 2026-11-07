@@ -346,14 +346,16 @@ const blank = (line: string) => !/[^ \t\r]/.test(line);
 // that the indentation of `holder` is the column go-yaml measures against: nothing, a key (quoted, or
 // plain with no `#`, and no colon before a blank) and its colon, or a lone `- `. A compact collection
 // (`- k:`, `- - x`, `? - x`) and a property before the tag (`&e !bwref`) are not in it
-// (ginsys/bronzeward#616).
-const PLAIN_PARENT = /^(?: *(?:"[^"\n]*"|'[^'\n]*'|[^ \t"'#:\-?[\]{},&*!|>%@`](?:[^#:\n]|:(?![ \t]))*): +| *- +)$/;
+// (ginsys/bronzeward#616). A blank after the colon is a space or a tab, as for go-yaml; after a dash only a
+// space is one (go-yaml refuses a dash and a tab, ginsys/bronzeward#698).
+const PLAIN_PARENT = /^(?: *(?:"[^"\n]*"|'[^'\n]*'|[^ \t"'#:\-?[\]{},&*!|>%@`](?:[^#:\n]|:(?![ \t]))*):[ \t]+| *- +)$/;
 
 // The same parents when the tag starts its line: the nearest line above that is less indented holds the
 // scalar, and it is known only if it is a key with nothing after its colon or a lone dash, and not a
 // compact collection (`- k:`, `- -`), whose keys or entries stand at a column its line does not show
-// (ginsys/bronzeward#616).
-const PLAIN_PARENT_LINE = /^(?: *(?:"[^"\n]*"|'[^'\n]*'|[^ \t"'#:\-?[\]{},&*!|>%@`](?:[^#:\n]|:(?![ \t]))*):| *-)[ \r]*$/;
+// (ginsys/bronzeward#616). Blanks may follow the colon in spaces and tabs, and the dash in spaces only
+// (ginsys/bronzeward#698).
+const PLAIN_PARENT_LINE = /^(?: *(?:"[^"\n]*"|'[^'\n]*'|[^ \t"'#:\-?[\]{},&*!|>%@`](?:[^#:\n]|:(?![ \t]))*):[ \t\r]*| *-[ \r]*)$/;
 
 // go-yaml drops a byte order mark at the start of the stream before it reads any text, so it is no
 // column and no text there; it is dropped from the first line only (ginsys/bronzeward#616).
@@ -514,8 +516,9 @@ function continues(
 // The text before an anchored tag on its line, in block context: the indentation in YAML spaces
 // (U+0020) only, then one `- ` or a key (quoted, or plain with no `#`, and no colon before a blank)
 // and its colon, or a lone `- `. Only U+0020 counts as indentation, as in YAML: a line that starts
-// with U+00A0 has text at column 0 (ginsys/bronzeward#605).
-const ANCHORED_PARENT = /^(?: *(?:- +)?(?:"[^"\n]*"|'[^'\n]*'|[^ \t"'#:\-?[\]{},&*!|>%@`](?:[^#:\n]|:(?![ \t]))*): +| *- +)$/;
+// with U+00A0 has text at column 0 (ginsys/bronzeward#605). After the colon a space or a tab is a blank, as
+// for go-yaml; after a dash only a space is one (ginsys/bronzeward#698).
+const ANCHORED_PARENT = /^(?: *(?:- +)?(?:"[^"\n]*"|'[^'\n]*'|[^ \t"'#:\-?[\]{},&*!|>%@`](?:[^#:\n]|:(?![ \t]))*):[ \t]+| *- +)$/;
 
 // Whether a plain value after an anchor (`!bwref &e x/foo`) goes on to the next line
 // (ginsys/bronzeward#605). It is conservative: the value is read as a reference only for a shape
