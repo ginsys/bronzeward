@@ -13,6 +13,10 @@
 // counts inserts at a negative queue position. A document with consumed > 0 is one the bug hit,
 // whether or not go-yaml refuses it for another reason first.
 //
+// A document where the model makes no claim is not a pass: the counts "not compared: model unsupported" (a
+// directive) and "not compared: refused by both oracles for another reason, model ok" list them, and
+// "agree" counts only the documents that were compared.
+//
 // Output: one JSON line of counts, then up to N differing documents (default 10).
 import { readFileSync } from "node:fs";
 import { model } from "./model.mjs";
@@ -46,8 +50,12 @@ docs.forEach((doc, i) => {
   // A refusal that the model predicts, by a misplaced token or by a scanner error, and that go-yaml does not make.
   const falseRefusal = (predicted || m.verdict === "error") && r === "ACC";
   if (predicted && r === "REF" && p === "REF") bump("misplaced, other cause refuses too");
-  if (!missed && !falseRefusal) bump("agree");
-  else {
+  if (!missed && !falseRefusal) {
+    // A document where the model makes no claim is counted as not compared, never as a pass.
+    if (m.verdict === "unsupported") bump("not compared: model unsupported");
+    else if (m.verdict === "ok" && r === "REF" && p === "REF") bump("not compared: refused by both oracles for another reason, model ok");
+    else bump("agree");
+  } else {
     bump("differ");
     bump(missed ? "missed" : "false refusal");
     differ.push({ i, doc, real: real[i].err, patched: patched[i].err, model: m });
