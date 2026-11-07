@@ -125,9 +125,10 @@ node gen-flow-key-set.mjs <work>/s13.json     # then run-compare.sh on it
 ```
 
 `lane.sh` runs s13, S9 and S8 one after the other, on sets that you made first. The run of this
-record took 22 seconds. The host check before the run required 16384 MiB of free memory and passed
-with 20206 MiB. The lowest free memory during the run was 19.4 GiB. Earlier measurements on 25200 documents gave
-about 120 MB for the model comparison and under 20 MB for each oracle.
+record (stamp w688-l3 at 77eff0e0) took 22 seconds. The host check before that run required 16384
+MiB of free memory and passed with 20206 MiB. The lowest free memory during that run was 19.4 GiB.
+Earlier measurements on 25200 documents gave about 120 MB for the model comparison and under 20 MB
+for each oracle.
 
 `compare.mjs` prints one line of counts and then the differing documents. The bug decides a
 document when the real oracle refuses it and the patched oracle accepts it. The model passes a set
@@ -174,7 +175,8 @@ small sets and for s13, S9 and S8.
 | S9 | 38208 | 5955 | 0 | 0 | 27021 | 11187 | 0 |
 | S8 | 245696 | 53570 | 0 | 0 | 139874 | 94597 | 11225 |
 
-Notes on the rows:
+Notes on the rows. The counts of the table and of the notes on the five small sets, s13 and S9
+come from the run with stamp w688-gbom2 at 32e7bc5e, unless a note names another commit.
 
 - Matrix: the other 10 documents use the key `*e`. Both refuse them, with "unknown anchor". That
   is [#689](https://github.com/ginsys/bronzeward/issues/689), not this defect.
@@ -222,7 +224,8 @@ Notes on the rows:
   and go-yaml refuses all of them. The model says "ok" for the other 24894 documents. go-yaml
   accepts 13707 of them and refuses 11187 for a reason that the model does not port. The 11187
   are the "not compared" documents. (Counts: `model:error` 13314 and `model:ok` 24894 in the first
-  line of the w688-m4 output for S9, and 13707 + 11187 = 24894.)
+  line of the w688-m4 output for S9 at 9941e4b8, and 13707 + 11187 = 24894. The run w688-gbom2
+  at 32e7bc5e prints the same counts.)
 - S9 before the repair: the model at 749194e7 reported a scanner error for 12606 documents. go-yaml
   accepted 120 of them, so the model gave 120 false refusals, with document 33458 among them. That
   document is `k: !bwref x/foo` and ` bar` on the next line, after a byte order mark. The old
@@ -245,7 +248,7 @@ Notes on the rows:
   the next line, then `b: !bwref x/foo`. The change is 12570 + 744 =
   13314 scanner errors in S9 and 56180 + 21064 = 77244 in S8, and 744 and 21064 fewer "not
   compared" documents. No document is a false refusal or a miss.
-- S8, the error text: the repair also changes the text of the scanner error for 3253 documents
+- S8, the error text: the repair of 9941e4b8 also changes the text of the scanner error for 3253 documents
   (S9: none), with the verdict "error" before and after. The old text was "found unexpected end of
   stream" for 2436 of them, "could not find expected ':'" for 481, "found character that cannot
   start any token" for 288 and "found unexpected document indicator" for 48. All 3253 now read
@@ -266,7 +269,8 @@ Notes on the rows:
   `instr hit:true` and a model verdict that is not "misplaced" (`compare.mjs:65`). A hit means that
   the counter `consumed` is above 0 (`compare.mjs:64`): go-yaml consumed a head token while a
   simple key stood on it. In 2902 of them the model says "ok". In 904 it reports a scanner error.
-  The repair moved one of these documents from "ok" to a scanner error (2903 and 903 before).
+  The repair of 9941e4b8 moved one of these documents from "ok" to a scanner error (2903 and 903
+  before, in the run w688-l3 at 77eff0e0).
   None is a miss, for three reasons:
   - The count of a misplaced insert that the model does not predict (`compare.mjs:66`, the key
     `instr misplaced but model not`) is 0. The key is absent from the count line. The `instr` keys
@@ -283,14 +287,14 @@ Notes on the rows:
 - The model scans the whole stream, so it predicts that the defect fires. It does not predict the
   parser error that comes first in some documents.
 - The model does not port directives. S8 holds 11148 documents with a directive that the model
-  calls unsupported. go-yaml refuses 7446 of them and accepts 3702. None is decided by the bug,
-  but the model proves nothing for them.
+  calls unsupported. go-yaml refuses 7446 of them and accepts 3702 (run w688-l3 at 77eff0e0). None is
+  decided by the bug, but the model proves nothing for them.
 - The model does not port a tab that follows a comment line. go-yaml reads a run of comment lines
   in one step (`yaml_parser_scan_comments`) and accepts a tab inside the run. The model skips one
   comment at a time, so it reported a scanner error for a document that go-yaml accepts (the edge
   document `a: 1`, `# c`, a tab and `# d`, then `b: V`). The model now calls such a document
-  "unsupported". S8 holds 72 of them, and go-yaml refuses all 72 for another reason. s13 and S9
-  hold none. The model makes no claim for a tab inside a run of comments.
+  "unsupported". S8 holds 72 of them, and go-yaml refuses all 72 for another reason (run w688-m4
+  at 9941e4b8). s13 and S9 hold none. The model makes no claim for a tab inside a run of comments.
 - A tab inside the continuation of a plain scalar is ported. The model before the repair refused
   it (the edge document `a:`, `  b: [x`, ` y`, a tab and `z]`), and no document of S9 or S8 showed
   that as a false refusal, so the sets alone did not catch it. The edge document pins it now. A
@@ -310,15 +314,16 @@ Notes on the rows:
   decided such a document, `compare.mjs:49` would count it as missed, because the model predicts
   nothing. The edge set had such a document as its 14th (`${BOM}${BOM}[? b]: ...`). The bug decides it
   (go-yaml refuses it, the guarded build accepts it) and the model leaves it unsupported, so the
-  comparison counted it as missed and exited 1. The edge set dropped it (7eba3c8f). The verdict
-  "unsupported" for a two-mark document is pinned in the self-test instead. S8 holds 5 such documents
-  and none is decided by the bug (4 accepted by both oracles, 1 refused by both). S9 and s13 hold 0.
+  comparison counted it as missed and exited 1 (run w688-gbom at 8878180d). The edge set dropped it
+  (7eba3c8f). The verdict "unsupported" for a two-mark document is pinned in the self-test
+  instead. S8 holds 5 such documents and none is decided by the bug (4 accepted by both oracles, 1
+  refused by both). S9 and s13 hold 0 (run w688-gbom2 at 32e7bc5e).
 - Only the edge set (2 documents), S9 (3456 documents) and S8 (2486 documents) hold tab characters. The flow-key families hold
   none. S9 holds 1584 documents with a byte order mark and S8 holds 420 (10 with the mark at the start
-  only and 410 with a mark after the first character).
+  only and 410 with a mark after the first character), counted by the run w688-bom at 1aa97028.
 - The self-test does not plant a guard-on misplaced document, because a plant needs a broken
   model. Only a reading of `compare.mjs` shows the "no misplaced insert with the guard on" leg.
-- The model has 453 lines. The experiment as a whole adds 952 lines under `experiments`, of which
+- At 32e7bc5e the model has 453 lines. The experiment as a whole adds 952 lines under `experiments`, of which
   64 are patch files and 47 are the self-test. This is more than the 600-line budget. The
   generators and the Go oracles are the reproduction that an investigation must land, so they
   stay.
@@ -329,7 +334,7 @@ Notes on the rows:
   decision depends on the registration state and on the queue, so no rule on the text decides it.
 - A fix in go-yaml. It is outside this project. The guarded delete in `go-yaml-guard.patch` makes
   80 of the 90 refused matrix cells accepted, so it is a candidate for an upstream report.
-- The known gap: keep the 5 pinned rows in `position.test.ts` and record the evidence.
+- The known gap: keep the 5 pinned rows in `position.test.ts` (at 3c207865) and record the evidence.
 
 ## Recommendation
 
