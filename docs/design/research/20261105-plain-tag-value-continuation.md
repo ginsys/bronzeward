@@ -79,7 +79,7 @@ In run `w616-s1`, S9 held 2248 extra documents on main. At 05b7a6ef the change f
 - The report groups the next lines by kind, anchor place and context. It does not split by indent or by a blank line before.
 - The sets S8 and S9 hold no line that starts with a no-break space at column 0, no tag on its own line under a compact parent, and no root scalar with a next line at column 0. The "no newly lost" claim for them rests on the oracle rows, the unit tests of `web/src/position.test.ts`, and the generated root-scalar set S10 (section 8).
 - The counts are those of run `w616-s1`: at 05b7a6ef against main bffb30ed. The counting rules of the sweep changed since the issue was written, so they differ from the counts in the issue.
-- The report does not split the 628 extra documents of S9 or the 1158 of S8 by shape. This note does not claim which shapes remain.
+- The report of run `w616-s1` does not split the 628 extra documents of S9 or the 1158 of S8 at 05b7a6ef by shape. This note does not claim which shapes remain.
 
 ## 7. Decision enabled
 
