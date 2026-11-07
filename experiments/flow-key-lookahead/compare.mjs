@@ -17,6 +17,10 @@
 // directive) and "not compared: refused by both oracles for another reason, model ok" list them, and
 // "agree" counts only the documents that were compared.
 //
+// A document where the scan loop of the model hit its bound has the verdict "guard-exhausted". It has its own counts
+// "not compared: model guard-exhausted" and "not compared: patched model guard-exhausted", it is never a miss or an
+// agreement, and any such document makes the exit status 1.
+//
 // Output: one JSON line of counts, then up to N differing documents (default 10).
 import { readFileSync } from "node:fs";
 import { model } from "./model.mjs";
@@ -24,7 +28,10 @@ import { model } from "./model.mjs";
 const args = process.argv.slice(2);
 const showAt = args.indexOf("--show");
 const show = showAt >= 0 ? Number(args[showAt + 1]) : 10;
-const [docsFile, realFile, patchedFile, instrFile] = args.filter((a, i) => !a.startsWith("--") && args[i - 1] !== "--show");
+// --max-steps N is a test hook: it sets the loop bound of the model so that a test can reach it. The default is the model's own.
+const stepsAt = args.indexOf("--max-steps");
+const maxSteps = stepsAt >= 0 ? Number(args[stepsAt + 1]) : undefined;
+const [docsFile, realFile, patchedFile, instrFile] = args.filter((a, i) => !a.startsWith("--") && args[i - 1] !== "--show" && args[i - 1] !== "--max-steps");
 const instr = instrFile ? JSON.parse(readFileSync(instrFile, "utf8")) : null;
 const docs = JSON.parse(readFileSync(docsFile, "utf8")).map((d) => (typeof d === "string" ? d : d.doc));
 const real = JSON.parse(readFileSync(realFile, "utf8"));
@@ -36,23 +43,32 @@ const count = {};
 const bump = (k) => (count[k] = (count[k] ?? 0) + 1);
 const differ = [];
 const guardBad = [];
+let holes = 0;
 docs.forEach((doc, i) => {
   const r = real[i].err ? "REF" : "ACC";
   const p = patched[i].err ? "REF" : "ACC";
   const bug = r === "REF" && p === "ACC";
-  const m = model(doc);
+  const m = model(doc, { maxSteps });
   bump(`real:${r} patched:${p}`);
   if (r === "ACC" && real[i].tags.length > 0) bump("control: accepted with a name");
   bump(`model:${m.verdict}`);
   const predicted = m.verdict === "misplaced";
   if (bug) bump("bug-decided");
-  const missed = bug && !predicted;
+  // A document where the scan loop hit its bound is a hole in the model: its own bucket, never a miss or a pass.
+  const exhausted = m.verdict === "guard-exhausted";
+  if (exhausted) {
+    bump("not compared: model guard-exhausted");
+    holes++;
+  }
+  const missed = bug && !predicted && !exhausted;
   // A refusal that the model predicts, by a misplaced token or by a scanner error, and that go-yaml does not make.
   const falseRefusal = (predicted || m.verdict === "error") && r === "ACC";
   if (predicted && r === "REF" && p === "REF") bump("misplaced, other cause refuses too");
   if (!missed && !falseRefusal) {
     // A document where the model makes no claim is counted as not compared, never as a pass.
-    if (m.verdict === "unsupported") bump("not compared: model unsupported");
+    if (exhausted) {
+      // counted above
+    } else if (m.verdict === "unsupported") bump("not compared: model unsupported");
     else if (m.verdict === "ok" && r === "REF" && p === "REF") bump("not compared: refused by both oracles for another reason, model ok");
     else bump("agree");
   } else {
@@ -66,7 +82,12 @@ docs.forEach((doc, i) => {
     if (instr[i].misplaced > 0 && !predicted) bump("instr misplaced but model not");
     if (hit && !predicted && r === "ACC") bump("instr hit, real accepts");
   }
-  if (model(doc, { guardDelete: true }).verdict === "misplaced") guardBad.push(i);
+  const g = model(doc, { guardDelete: true, maxSteps }).verdict;
+  if (g === "misplaced") guardBad.push(i);
+  if (g === "guard-exhausted") {
+    bump("not compared: patched model guard-exhausted");
+    holes++;
+  }
   // Refused for another reason in both oracles: the model's claim does not cover them.
   if (r === "REF" && p === "REF") bump(`other-refusal, model:${m.verdict}`);
 });
@@ -76,5 +97,10 @@ for (const d of differ.slice(0, show)) console.log(JSON.stringify(d));
 // The exit status is the pass rule: no missed document, no false refusal, and no misplaced insert with the guard on.
 if (differ.length > 0 || guardBad.length > 0) {
   console.error(`compare: FAIL, ${differ.length} documents differ and ${guardBad.length} documents are misplaced with the guard on`);
+  process.exit(1);
+}
+// A scan loop that hit its bound is a hole in the model, so it fails the run even when nothing differs.
+if (holes > 0) {
+  console.error(`compare: FAIL, the scan loop of the model hit its bound on ${holes} documents`);
   process.exit(1);
 }

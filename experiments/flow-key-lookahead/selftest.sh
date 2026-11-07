@@ -11,12 +11,13 @@ tmp=$(mktemp -d "${TMPDIR:-/tmp}/flow-key-selftest.XXXXXX") || exit 2
 trap 'rm -rf "$tmp"' EXIT
 
 bad=0
+extra=()
 # check <name> <want: zero|nonzero> <docs json> <real json> <patched json>
 check() {
   printf '%s' "$3" > "$tmp/docs.json"
   printf '%s' "$4" > "$tmp/real.json"
   printf '%s' "$5" > "$tmp/patched.json"
-  node "$here/compare.mjs" "$tmp/docs.json" "$tmp/real.json" "$tmp/patched.json" --show 0 > "$tmp/out" 2> "$tmp/err"
+  node "$here/compare.mjs" "$tmp/docs.json" "$tmp/real.json" "$tmp/patched.json" --show 0 "${extra[@]}" > "$tmp/out" 2> "$tmp/err"
   local rc=$?
   local ok=1
   if [ "$2" = zero ] && [ "$rc" -ne 0 ]; then ok=0; fi
@@ -43,5 +44,23 @@ if head -n 1 "$tmp/out" | rg -q '"model:unsupported":1'; then
   echo "selftest: pin: the verdict of a two-mark document is unsupported ok"
 else
   echo "selftest: FAIL pin: the verdict of a two-mark document is not unsupported: $(head -n 1 "$tmp/out")" >&2; bad=1
+fi
+
+# Pin: a scan loop that hits its bound fails the run, and the count has its own bucket, for both model calls (guard off and on).
+# --max-steps 1 is the test hook that makes the bound reachable; "a: b" needs more than one step.
+extra=(--max-steps 1)
+check "pin: a reached loop bound fails the run" nonzero '["a: b\n"]' '[{"err":"","tags":[]}]' '[{"err":"","tags":[]}]'
+extra=()
+case "$(head -n 1 "$tmp/out")" in
+  *'"not compared: model guard-exhausted":1'*'"not compared: patched model guard-exhausted":1'*)
+    echo "selftest: pin: a reached loop bound is counted in both buckets ok" ;;
+  *) echo "selftest: FAIL pin: a reached loop bound is not counted in both buckets: $(head -n 1 "$tmp/out")" >&2; bad=1 ;;
+esac
+
+# The unit cases of the model.
+if node "$here/pins.mjs" > "$tmp/pins.out" 2>&1; then
+  echo "selftest: pins.mjs $(tail -n 1 "$tmp/pins.out") ok"
+else
+  echo "selftest: FAIL pins.mjs" >&2; cat "$tmp/pins.out" >&2; bad=1
 fi
 exit "$bad"

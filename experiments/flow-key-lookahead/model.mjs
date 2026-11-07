@@ -9,6 +9,8 @@
 //   verdict "ok":        no misplaced insert and no scanner error.
 //   verdict "unsupported": the document uses a construct the model does not port (directives, and a tab
 //                        after a comment line).
+//   verdict "guard-exhausted": the scan loop reached its bound (4 * characters + 64 steps, or opts.maxSteps)
+//                        before the end of the stream. The model makes no claim, and a comparison counts it apart.
 // The model scans the whole stream. It does not model the parser, so a refusal by the parser for a
 // reason that is not a misplaced token (for example "[,]") is "ok" here.
 //
@@ -43,6 +45,8 @@ export function model(doc, opts = {}) {
   // after that one stays in the text: the scanner's is_bom tests the buffer start, not the offset.
   const chars = Array.from(doc);
   let idx = chars[0] === BOM ? 1 : 0;
+  // The bound of the scan loop. opts.maxSteps is a test hook that lets a test reach the bound; callers leave it unset.
+  const maxSteps = opts.maxSteps ?? 4 * chars.length + 64;
   let line = 0;
   let col = 0;
   const at = (k = 0) => (idx + k < chars.length ? chars[idx + k] : "\0");
@@ -438,12 +442,19 @@ export function model(doc, opts = {}) {
     // offset (is_bom ignores its argument, yamlprivateh.go:103). A second mark right behind the first one makes
     // that test true at every column-0 pass, and the model does not port it: it makes no claim.
     if (idx === 1 && chars[1] === BOM) throw new Unsupported("two BOMs at the start");
-    for (let guard = 0; guard < 4 * chars.length + 64; guard++) {
+    let reached = false;
+    for (let guard = 0; guard < maxSteps; guard++) {
       fetchMoreTokens();
       const tok = tokens[head++];
       parsed++;
-      if (tok.typ === "STREAM-END") break;
+      if (tok.typ === "STREAM-END") {
+        reached = true;
+        break;
+      }
     }
+    // The loop bound is a guard against a model that does not advance. Leaving the loop without the end of the
+    // stream is no result: it is a hole in the model, and it must never read as "ok" or "misplaced".
+    if (!reached) return { verdict: "guard-exhausted", events, error: `the scan loop ended after ${maxSteps} steps without the end of the stream` };
   } catch (e) {
     if (e instanceof Unsupported) return { verdict: "unsupported", events, error: e.message };
     if (e instanceof ScanError) return { verdict: "error", events, error: e.message };
