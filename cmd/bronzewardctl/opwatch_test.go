@@ -641,6 +641,20 @@ func TestOperationWatchOutage(t *testing.T) {
 			t.Errorf("exit %d, stdout %q, stderr %q; want 3, the operation to read named and no completion line", code, out, errOut)
 		}
 	})
+	t.Run("the timeout after a failed drain and an outage, when the terminal read has no epoch header and the pages that read the end show another epoch: exit 3", func(t *testing.T) {
+		// The server shows epoch 2 on GET /server and the events, and none on the operation reads. A read with no
+		// epoch is judged by the count of moves like any other: the pages of epoch 3 are a move since that read.
+		f := &opFake{stream: []string{sse(1, "commitment", commitment)}, pages: []string{evPage(1, "commitment", commitment)},
+			pagesFailFor: 1, pagesEpoch: "ep_BWSYNTH-3", readBare: true, outageFrom: 3, outageReads: 1000,
+			body: fmt.Sprintf(opJSON, "apply-config", "succeeded", "null", "null", "[]")}
+		srv := httptest.NewServer(f)
+		t.Cleanup(srv.Close)
+		automationContext(t, srv.URL)
+		code, out, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "2500ms")
+		if code != 3 || !strings.Contains(errOut, "bronzewardctl operation show 'op_BWSYNTH'") || strings.Contains(out, "Succeeded") {
+			t.Errorf("exit %d, stdout %q, stderr %q; want 3, the operation to read named and no completion line", code, out, errOut)
+		}
+	})
 	t.Run("the timeout during an outage after the events showed another epoch than a non-terminal first read: exit 5, the first read as last read", func(t *testing.T) {
 		// Same shape as the case above, but the first read shows the operation running. Only a terminal read is
 		// invalidated by a move (client-contracts.md section 8.6 item 2), so the stop reports the running state.

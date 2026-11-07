@@ -47,6 +47,7 @@ type opFake struct {
 	outageEpoch   bool          // a failed read of the outage keeps its epoch header, as a proxy or a half-restarted server can send it
 	pagesEpoch    string        // when set, the JSON event pages answer this epoch; the streams and operation reads keep their own
 	pagesFailFor  int           // the first n requests for JSON event pages answer 404 with no epoch header
+	readBare      bool          // every operation read answers with no Bronzeward-Epoch header: a server defect
 	streamBare    bool          // the event streams answer without a Bronzeward-Epoch header
 }
 
@@ -74,6 +75,9 @@ func (f *opFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(f.readEpochs) > 0 {
 			w.Header().Set("Bronzeward-Epoch", f.readEpochs[min(f.reads, len(f.readEpochs))-1])
+		}
+		if f.readBare {
+			w.Header().Del("Bronzeward-Epoch")
 		}
 	}
 	switch strings.TrimPrefix(r.URL.Path, "/api/v1") {

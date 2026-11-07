@@ -90,9 +90,9 @@ type OperationRead struct {
 // count of moves, not the last epoch, so an answer that shows the read's epoch again does not undo
 // a move: an answer of another epoch, one that failed included, or an event of another epoch in an
 // open stream, shows a restore since the read, and the read does not stand as the state. A read
-// with no epoch cannot be judged, so it holds.
+// with no epoch header is judged the same way: the count says whether a later sign showed a move.
 func (c *Client) EpochHolds(read OperationRead) bool {
-	return read.Epoch == "" || read.Moves == c.moves
+	return read.Moves == c.moves
 }
 
 // WatchBody is Watch that also returns the operation read the result comes from, so a caller that
