@@ -23,7 +23,7 @@ The evidence it rests on, abbreviated below:
 | KL | [Key loss and restoration](../design/research/20260924-key-loss-restoration.md) |
 | PC | [Provider capability comparison](../design/research/20260924-provider-capability-comparison.md) |
 
-Every result in those reports holds for one Talos version (v1.13.6), container
+Every result in those reports holds for one Talos version (v1.13.6; the fixture move to v1.14 in ginsys/bronzeward#713 reruns or voids each), container
 nodes with one control plane and one worker, and exact-copy leak scanning
 ([FR §2](../design/research/20260925-feasibility-evidence-review.md#2-what-binds-every-conclusion-here)),
 and the composition results for strategic merge patches only
@@ -881,7 +881,7 @@ For each machine:
    strategic-merge semantics: last writer wins, and `$patch: delete` removes.
    The compiler performs no merge of its own (design §6.9). JSON6902 patches
    are refused: they were not tested and are refused for the v1.13
-   multi-document configuration (SR §8).
+   multi-document configuration (SR §8; not rerun on v1.14).
 6. **Trace** the composition for provenance (§8.1).
 7. **Check the output**: no string scalar holds reserved text (§5.5), and no
    resolved `string` value's stored or placed form of six bytes or more (each
@@ -1329,9 +1329,9 @@ outcomes through both implementations (E3 §4.3); the choice belongs to
   (E3 §4.1, §6.3 item 1).
 - **Refuse a Kubernetes version outside the pinned machinery's `SupportedWith`
   window** for the target. Neither generation nor validation refuses it
-  (E3 §4.2). For Talos 1.13 the machinery accepts Kubernetes 1.31 to 1.36, which
-  equals the documented range (E3 §4.4); the machinery's windows are wider than
-  the documented tested path elsewhere, and a stricter support policy is a
+  (E3 §4.2). For Talos 1.14 the machinery accepts Kubernetes 1.32 to 1.37, while the
+  documented range is 1.33 to 1.37 (E3 §4.4); the machinery's windows are wider than
+  the documented tested path, and a stricter support policy is a
   separate decision (E3 §8). The version is the kubelet image tag of the
   validated configuration, the machinery's default image when none is set, and
   every machine a release covers must name the same one **(choice §16.32)**.
@@ -1368,13 +1368,14 @@ read, configuration read, no-reboot dry run and a label-patch apply) against one
 live v1.13.6 node, in containers, with one control plane and one worker (E3 §7).
 Not evidenced: any other live version, reboot-mode applies, a JSON6902 patch,
 composition on renderers other than v1.13.6, worker configurations in SR and
-SP, and every upgrade path.
+SP, and every upgrade path. Nothing is evidenced on v1.14 until the fixture
+move (ginsys/bronzeward#713) and the composition rerun.
 
 Unsupported, with the observed reason (E3 §6.3): a contract newer than the
 renderer (silently clamped); v1.14+ output on a pre-v1.14 validator or node
 (`DiscoveryServiceConfig` not registered); v1.10/v1.11 contracts on a v1.13 node
 in no-reboot mode (refused in immediate mode; that the mode is the cause is
-inferred); an unparseable version string; Kubernetes outside the window; targets
+inferred; not tested on v1.14); an unparseable version string; Kubernetes outside the window; targets
 the machinery predates; and the v1.15.0-alpha.0 prerelease as a v1.15 renderer.
 `--strict` validation refused nothing in E3 (E3 §4.2).
 
@@ -1869,8 +1870,8 @@ in place as
     reopening this choice; only a failure of the fallback too returns it to
     the owner.
 25. **Compile only the node's running contract minor** (§10.2). v1.12 would
-    also be accepted by a v1.13 node; one contract keeps paths and validation
-    single.
+    also be accepted by a v1.13 node (not tested on v1.14); one contract keeps
+    paths and validation single.
 26. **Record the unkeyed configuration digest of each baseline and each
     artifact's plaintext** (§2.3 step 8, §4.1, §11). Added for
     [execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values),

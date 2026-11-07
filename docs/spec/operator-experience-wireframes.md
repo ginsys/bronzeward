@@ -383,7 +383,7 @@ import started; the import was not applied and is abandoned" when the draft move
 
 ```text
 Release rel_h7rt…2bd   cluster cl_9fd… (lab-a)   published 10:02 by ops-ben (publisher)
-Renderer: contract v1.13 · machinery v1.13.6 · Kubernetes v1.34.1
+Renderer: contract v1.14 · machinery v1.14.5 · Kubernetes v1.34.1
 +-------------------------------------------------------------------------------------------+
 | Source revisions this release was built from (these are not configuration)               |
 |   fragment    cluster-base    frv_5cz…h1ma  ▸                                             |
@@ -433,7 +433,7 @@ Plan pln_f645…cawy   (•) Proposed — not approved, nothing will run   expir
 | Created by  ops-ben (publisher)                                                           |
 +-------------------------------------------------------------------------------------------+
 | Evidence                                                                                  |
-|  Validation  passed at publication (contract v1.13)                                       |
+|  Validation  passed at publication (contract v1.14)                                       |
 |  Dry run     not available (the PoC has none)                                             |
 |  Change      whole redacted configuration, applied rel_9vbn… -> rel_h7rt…                 |
 |              machine.nodeLabels.team: (absent) -> storage                                 |

@@ -4,9 +4,9 @@
 
 | **Document status**    | Working architecture concept - not yet an implementation specification                                                               |
 |------------------------|--------------------------------------------------------------------------------------------------------------------------------------|
-| **Revision**           | 0.5                                                                                                                                  |
-| **Date**               | 6 September 2026                                                                                                                        |
-| **Technical baseline** | Talos Linux 1.13 (v1.13.6); Omni 1.9 (v1.9.3); OpenBao 2.6 (v2.6.1) documentation                                                  |
+| **Revision**           | 0.6                                                                                                                                  |
+| **Date**               | 7 November 2026                                                                                                                         |
+| **Technical baseline** | Talos Linux 1.14 (v1.14.5); Omni 1.9 (v1.9.3); OpenBao 2.6 (v2.6.1) documentation                                                  |
 | **Scope**              | Talos configuration, secrets and machine lifecycle as an open alternative control plane, without CAPI or infrastructure provisioning |
 
 > **Purpose:** This document consolidates the full design discussion so far: the problem being solved, the architecture and lifecycle workflows, the backend and security model, the comparison with Omni, and the design alternatives that remain open.
@@ -18,8 +18,9 @@
 | 0.3          | External technical review: version baseline updated (Omni 1.7 -> 1.9.3, OpenBao 2.6.1, Talos v1.13.6); corrected SideroLink endpoint/port wording, Talos apply-mode list and reset-wipe defaults; citation and reference-URL fixes; added installer-image sourcing, etcd backups, multi-version renderer, implementation language and project licence considerations; Omni comparison refreshed for 1.8/1.9. |
 | 0.4          | Decisions recorded from the 0.3 review Q&A: build gate evaluated (three hard differentiators confirmed); Go decided as implementation language; version 1 scale target ~100 machines; scheduled etcd snapshots moved into version 1 scope (SnapshotEtcd); installer images via public Image Factory with a per-site platform proxy reserved for later; normative site egress requirement added (10.10); figure corrections identified (Figures 2-4). |
 | 0.5 | Existing-cluster configuration control first; secret extraction before persistence; structural references; provider and database investigations; dependency retention; application approval boundary; evidence-based operation recovery; explicit restoration recovery mode; native Talos compatibility. |
+| 0.6 | The Talos baseline moves from v1.13.6 to v1.14.5 on the owner's decision of 7 November 2026, typed as "full v1.14": the machinery and the fixture move to v1.14, and apply is supported under the v1.14 activation rules (§12.2, Plan before apply). Rejected: v1.14 read-only with v1.13 writes (one machinery minor would render two contracts), and v1.13 only (the owner's office cluster could not be imported). Omni and OpenBao stay at the 3 August snapshot. |
 
-Revision 0.5 reconciles the [September discussion and peer review](research/20260906-design-discussion-and-peer-review.md). The [0.4 to 0.5 transition review](Design_Review_v0.4_to_v0.5.md) records the changes and remaining investigations. This is a design, not evidence of implemented guarantees or passing experiments. The technical baseline and Omni comparison remain the 3 August snapshot; this revision does not claim a fresh product or licensing comparison.
+Revision 0.5 reconciles the [September discussion and peer review](research/20260906-design-discussion-and-peer-review.md). The [0.4 to 0.5 transition review](Design_Review_v0.4_to_v0.5.md) records the changes and remaining investigations. This is a design, not evidence of implemented guarantees or passing experiments. In revision 0.5 the technical baseline and Omni comparison remained the 3 August snapshot, and it claimed no fresh product or licensing comparison. Revision 0.6 moves only the Talos baseline, to v1.14.5; the Omni and OpenBao snapshot and the absence of a fresh comparison stand.
 
 ## Contents
 
@@ -290,7 +291,7 @@ A future importer could accept an existing Talhelper project and translate it in
 
 A release records target Talos and Kubernetes versions, configuration contract, exact renderer build, installer image/schematic, extensions and source revisions. Distinguish the observed running version, desired image, generation contract and renderer version. Applying a retained release uses its exact encrypted artifact; the manager must not silently regenerate it with a newer renderer.
 
-Compatibility mirrors native talosctl capabilities. A pinned machinery version may generate several older contracts; one binary per target contract is not required. The machinery minor being at least the target contract minor is a prerequisite, not a sufficient compatibility test. Backward-generation constants, upstream release-support policy and working machine operations are separate axes. The pinned v1.13.6 contract code includes older contracts through v1.0; this is not a promise to support every historical fleet or RPC. [T16]
+Compatibility mirrors native talosctl capabilities. A pinned machinery version may generate several older contracts; one binary per target contract is not required. The machinery minor being at least the target contract minor is a prerequisite, not a sufficient compatibility test. Backward-generation constants, upstream release-support policy and working machine operations are separate axes. The pinned v1.14.5 contract code includes older contracts through v1.0; this is not a promise to support every historical fleet or RPC. [T16]
 
 The compatibility investigation must cover rendered output, validation, patch/prerelease boundaries and operation/RPC combinations for the intended fleet. The [renderer research](research/20260826-talhelper-internals-and-topf-successor.md) already records the version-gated legacy Upgrade versus LifecycleClient path around v1.13. The [compatibility evidence](research/20260925-talos-compatibility.md#8-recommendation) found subprocess and Go machinery equivalent within its matrix; the [compilation contract §10](../spec/compilation.md#10-renderer-selection-and-compatibility-limits) selects the Go machinery in process for the PoC, conditional on re-measuring composition parity through it; if that re-run fails, the pinned `talosctl` subprocess is used after passing its own re-run and leak scan. The owner decided this on #20 ([§16](../spec/compilation.md#16-choices-for-owner-review) choice 24). Upgrade/LifecycleClient execution is deferred to the machine-lifecycle phase (§18.3) and design E3 has not passed.
 
@@ -841,9 +842,9 @@ The applied release has one other source: an explicitly approved baseline that t
 
 Plan from a published artifact rather than re-rendering at dispatch. Bind the release/artifact identity, secret and crypto references, target machines and assignment revisions, operation **and mode**, parameters, relevant observed preconditions, rollout limits, expiry and approval policy. Include a redacted diff, upstream validation and available dry-run evidence; distinguish these from checks performed against live state at execution.
 
-Talos v1.13.6, the version used by the PoC fixture, provides `auto`, `no-reboot`, `reboot`, `staged` and `try`. `try` is an automatic revert timer (one minute by default unless configured), not a separate human-confirmation transaction; another config update is needed to prevent the timed revert. `staged` does not immediately replace the running config. Record mode-specific evidence for acceptance, activation and observed convergence; RPC success alone is not completion. The first milestone uses a safe `no-reboot` worker change. Other modes require their own recovery tests before support. [T5]
+Talos v1.14, the version of the PoC baseline, provides `auto`, `no-reboot`, `staged` and `try`; the v1.14 documentation states that `--mode=reboot` was removed in 1.14. Talos v1.13.6 also provided `reboot`. `try` is an automatic revert timer (one minute by default unless configured), not a separate human-confirmation transaction; another config update is needed to prevent the timed revert. `staged` does not immediately replace the running config. Record mode-specific evidence for acceptance, activation and observed convergence; RPC success alone is not completion. The first milestone uses a safe `no-reboot` worker change. Other modes require their own recovery tests before support. [T5]
 
-Talos v1.14 removes reboot-mode apply and automatic reboot on configuration changes. Stored or reported configuration can therefore differ from settings active in a running service. Later support must bind version-specific activation requirements and the observations that prove them; a configuration digest alone is insufficient. Explicit staging, service restart and reboot are distinct actions requiring their own authority and recovery evidence. The [upgrade investigation](research/20261019-upgrade-workflow-design.md#6-configuration-activation-under-talos-114) records the official documentation, its non-exhaustive impact examples and the untested limits. This does not extend the PoC's supported profile.
+Talos v1.14 has no reboot-mode apply and no automatic reboot on configuration changes. Stored or reported configuration can therefore differ from settings active in a running service. Later support must bind version-specific activation requirements and the observations that prove them; a configuration digest alone is insufficient. Explicit staging, service restart and reboot are distinct actions requiring their own authority and recovery evidence. The [upgrade investigation](research/20261019-upgrade-workflow-design.md#6-configuration-activation-under-talos-114) records the official documentation, its non-exhaustive impact examples and the untested limits. The PoC supports v1.14 under these rules: apply uses `no-reboot` for the first milestone's worker change, and the evidence for activation is the scope of ginsys/bronzeward#714.
 
 ### 12.3 Rollout policy
 
@@ -934,12 +935,12 @@ Talos access credentials are per cluster and provider-held: each cluster's talos
 
 The rest of this decision, up to the paragraph on OpenBao policies, is *derived*, as in §13.7: the recorder's account of the current model, the rationale of the recommendation the owner accepted as presented, and what issuance would need. It is not the owner's words.
 
-Rotating the provider-held talosconfig is writing a new provider version. A dispatch in flight keeps the version its evidence read; a retry reads the new version with its fresh evidence, and an attempt whose version moved since its evidence is refused and observed again ([execution and recovery §3.2](../spec/execution-recovery.md#32-the-commitment-transaction) comparison 3). Writing a new version does not make Talos refuse the certificate it replaces: a superseded credential may still be accepted ([persistence and API §3.3](../spec/persistence-api.md#33-talos-access), on provider restore). Because it carries `os:admin`, the old certificate can mint another of any positive lifetime at Talos v1.13.6 before it expires ([Talos OIDC investigation](research/20261021-talosctl-oidc.md), source findings and administrator reminting), so its expiry does not bound a holder who uses it before then. Only a rotation of the cluster's Talos certificate authority that removes the old authority stops new connections under it (derived: no per-certificate revocation is evidenced; its effect on a held connection is untested), and a held connection may outlive its certificate.
+Rotating the provider-held talosconfig is writing a new provider version. A dispatch in flight keeps the version its evidence read; a retry reads the new version with its fresh evidence, and an attempt whose version moved since its evidence is refused and observed again ([execution and recovery §3.2](../spec/execution-recovery.md#32-the-commitment-transaction) comparison 3). Writing a new version does not make Talos refuse the certificate it replaces: a superseded credential may still be accepted ([persistence and API §3.3](../spec/persistence-api.md#33-talos-access), on provider restore). Because it carries `os:admin`, the old certificate can mint another of any positive lifetime at Talos v1.13.6 and v1.14.5 before it expires ([Talos OIDC investigation](research/20261021-talosctl-oidc.md), source findings and administrator reminting), so its expiry does not bound a holder who uses it before then. Only a rotation of the cluster's Talos certificate authority that removes the old authority stops new connections under it (derived: no per-certificate revocation is evidenced; its effect on a held connection is untested), and a held connection may outlive its certificate.
 
 Rationale: the current model is specified in the PoC persistence and execution contracts (persistence and API §3.3; execution and recovery §3.1-§3.5). It leaves the talosconfig's custody, certificate lifetime and rotation an operator duty. Issuance could bound routine exposure by a short certificate lifetime, but the [Talos OIDC investigation](research/20261021-talosctl-oidc.md#executor-compatibility) shows it moves the powerful credential rather than removing it, and that a short lifetime does not bound administrative authority:
 
 - The issuer needs a privileged (`os:admin`) talosconfig of its own to sign certificates.
-- At Talos v1.13.6 the signing call accepts any positive requested lifetime, with no maximum (source reading).
+- At Talos v1.13.6 and v1.14.5 the signing call accepts any positive requested lifetime, with no maximum (source reading, re-read at the v1.14.5 tag).
 - In single samples on one disposable fixture, an administrator certificate minted a longer-lived one, and an authenticated connection outlived its certificate.
 
 The investigation ran the upstream issuer live but compared it with the executor contracts by source and design analysis only; no Bronzeward issuer, OpenBao or executor integration was built or tested. An operator login or a successful issuance does not establish executor compatibility. The upstream `talosctl-oidc` CLI is not an executor credential source: its keyring and file custody conflicts with memory-only executor handling.
@@ -1138,6 +1139,7 @@ Alternatives considered: a reader-first companion with an operator-run identity 
   - Its CLI caches tokens in the OS keyring, falling back to a mode-0600 file, and always writes certificates and keys to the workstation talosconfig.
   - Its token validator does not require a non-empty `sub`, check `iat` or bound `exp - iat`, so it does not meet [persistence and API §10.1](../spec/persistence-api.md#101-humans-oidc).
   - Talos v1.13.6 imposes no maximum lifetime on a requested certificate, so the issuer's lifetime does not bound administrative authority.
+- **Source, re-read at the Talos v1.14.5 tag on 7 November 2026 (not part of the investigation):** the signing call needs `os:admin` and accepts any positive lifetime with no maximum, and the role injector reads the roles of the client certificate without a per-request expiry check. The three claims hold unchanged from v1.13.6. The live run above and the `talosctl-oidc` readings are not rerun.
 - **Untested, or open:**
   - Not tested: account deletion, session logout, signing-key rotation, production TLS and ingress, high availability, other identity providers, device flow, OS keyrings, offline tokens, natural token refresh, durable audit under storage failure.
   - Upstream's scan of the pinned source, built with Go 1.26.8, reported eleven reachable Go standard-library findings, fixed in Go 1.26.9. It neither applies as-is to nor clears the local Go 1.27.1 build, and no local scan was run.
@@ -1359,7 +1361,7 @@ This milestone requires the selected database/provider behavior (§7.7), scoped 
 
 - Kubernetes observer for readiness, drain and PDB failures.
 
-- Upgrade-transition acceptance, deferred from E3 (§18.1): on VMs or hardware, an upgrade through the legacy `MachineService.Upgrade` and through `LifecycleClient.Upgrade`, the version gate that chooses between them, an upgrade across the v1.13 boundary, a later configuration contract applied after an upgrade, v1.13 reboot-mode apply, v1.14 explicit activation and the upstream upgrade windows. Talos upgrades are not supported until it passes.
+- Upgrade-transition acceptance, deferred from E3 (§18.1): on VMs or hardware, an upgrade through the legacy `MachineService.Upgrade` and through `LifecycleClient.Upgrade`, the version gate that chooses between them, an upgrade across the v1.13 boundary, a later configuration contract applied after an upgrade, v1.13 reboot-mode apply (history only, because the PoC baseline is v1.14) and the upstream upgrade windows. Explicit activation under v1.14 is the scope of ginsys/bronzeward#714. Talos upgrades are not supported until it passes.
 
 The [upgrade safeguards and recovery investigation](research/20261019-upgrade-workflow-design.md) maps the operator procedure to proposed plan, execution and observation contracts, including partial installation/drain/cordon outcomes and Kubernetes manifest ownership. Its source fixture establishes call paths only; specification, implementation and VM/hardware qualification remain separately tracked. It does not supply lifecycle acceptance or adopt an upstream executor.
 
@@ -1649,8 +1651,8 @@ release: rel_42
 cluster: production
 renderer:
   implementation: talosctl
-  version: v1.13.6
-  contract: v1.13
+  version: v1.14.5
+  contract: v1.14
 secretGeneration: secgen_07
 # Illustrative metadata, not a finalized provider/reference schema.
 # For the PoC the compilation contract supersedes two fields: the renderer is
@@ -1708,7 +1710,7 @@ This catalogue includes later lifecycle work. Coordination identifies competing 
 
 ## Appendix C. References
 
-The original technical behaviour statements in this document were checked against official Talos/Sidero, Omni and OpenBao documentation available on 3 August 2026, and re-verified (including all reference URLs below) during the 0.3 review on the same date. Design recommendations and architectural conclusions remain proposals rather than vendor guarantees.
+The original technical behaviour statements in this document were checked against official Talos/Sidero, Omni and OpenBao documentation available on 3 August 2026, and re-verified (including all reference URLs below) during the 0.3 review on the same date. Revision 0.6 replaced references T5 and T16 with their Talos v1.14 versions, read on 7 November 2026; the 3 August check does not cover them. Design recommendations and architectural conclusions remain proposals rather than vendor guarantees.
 
 > **[T1]** [Talos 1.13 - SideroLink](https://docs.siderolabs.com/talos/v1.13/networking/siderolink). Point-to-point management overlay, gRPC tunnel and maintenance-mode behaviour.
 >
@@ -1718,7 +1720,7 @@ The original technical behaviour statements in this document were checked agains
 >
 > **[T4]** [Talos 1.13 - Configuration Patches](https://docs.siderolabs.com/talos/v1.13/configure-your-talos-cluster/system-configuration/patching). Strategic merge, JSON patch and multi-document patching.
 >
-> **[T5]** [Talos 1.13 - Editing Machine Configuration](https://docs.siderolabs.com/talos/v1.13/configure-your-talos-cluster/system-configuration/editing-machine-configuration). Live application and apply modes (auto, no-reboot, reboot, staged, try).
+> **[T5]** [Talos 1.14 - Editing Machine Configuration](https://docs.siderolabs.com/talos/v1.14/configure-your-talos-cluster/system-configuration/editing-machine-configuration). Live application and apply modes (auto, no-reboot, staged, try; reboot removed in 1.14).
 >
 > **[T6]** [Talos 1.13 - The insecure flag](https://docs.siderolabs.com/talos/v1.13/configure-your-talos-cluster/system-configuration/insecure). Maintenance-mode TLS and restricted API access.
 >
@@ -1778,7 +1780,7 @@ The original technical behaviour statements in this document were checked agains
 
 Revision 0.5 additionally consulted the following primary sources on 6 September 2026 for the reviewed topics; the provider API documentation is versioned independently of the historical baseline above.
 
-[T16] [Talos v1.13.6 generation contracts](https://github.com/siderolabs/talos/blob/v1.13.6/pkg/machinery/config/contract.go). Native generation capabilities, separate from fleet support policy.
+[T16] [Talos v1.14.5 generation contracts](https://github.com/siderolabs/talos/blob/v1.14.5/pkg/machinery/config/contract.go). Native generation capabilities, separate from fleet support policy. Replaced in revision 0.6; read on 7 November 2026, not on 6 September.
 
 [O7] [OpenBao KV v2 API](https://openbao.org/docs/api/secret/kv/kv-v2/). Version limits, metadata, soft deletion, destruction and metadata-path access.
 

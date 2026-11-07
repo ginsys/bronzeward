@@ -584,7 +584,7 @@ Next (mch_b3c…aa2q has an Applied, so apply-config; a machine with none is han
   bronzewardctl plan create --release rel_h7rt…2bd --machine mch_b3c…aa2q --operation apply-config
 $ bronzewardctl release show rel_h7rt…2bd
 Release rel_h7rt…2bd  cluster cl_9fd… (lab-a)  published by ops-ben (publisher) 10:02
-Renderer   contract v1.13, machinery v1.13.6, Kubernetes v1.34.1
+Renderer   contract v1.14, machinery v1.14.5, Kubernetes v1.34.1
 Built from (source revisions, not configuration):
   fragment     cluster-base    frv_5cz…h1ma
   fragment     worker-labels   frv_3jn…k4ma
@@ -621,7 +621,7 @@ Plan pln_f645…cawy  proposed  expires 2026-10-22 10:05 (in 23h59m)
   Deadlines     transport 1m, verification 10m, observation age 5m, attempts 3
   Created by    ops-ben (publisher)   epoch ep_bqek…ekgi
 Evidence
-  Validation    passed at publication (contract v1.13, machinery v1.13.6)
+  Validation    passed at publication (contract v1.14, machinery v1.14.5)
   Dry run       not available: the PoC has none
   Diff          whole redacted configuration, applied rel_9vbn…c1ta -> rel_h7rt…2bd
     @@ machine.nodeLabels @@
