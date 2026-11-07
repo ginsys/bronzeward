@@ -39,8 +39,10 @@ func TestFetchClientConfigEndsOnCtrlCDuringTheDecode(t *testing.T) {
 	proxyAsTheProxyTestNamesIt(t)
 	srv, flushed := stalledConfig(t)
 	// The client reads the first byte of the answer: that event, not the server's flush, tells the test
-	// that the headers are on their way to the decode. The client gives no hook after hc.Do returns, so a
-	// stall in header parsing longer than the wait below would still reach the request-error branch.
+	// that the headers are on their way to the decode. The client gives no hook after hc.Do returns, so two
+	// windows stay open inside the 200 ms wait below: the parse of the headers, and the handoff of the
+	// response to roundTrip. A stall in either that outlasts the wait reaches the request-error branch, which
+	// also returns *Interrupted, so the test then passes without the fix. The 100/100 probe does not exclude it.
 	gotFirstByte := make(chan struct{})
 	var once sync.Once
 	trace := &httptrace.ClientTrace{GotFirstResponseByte: func() { once.Do(func() { close(gotFirstByte) }) }}
