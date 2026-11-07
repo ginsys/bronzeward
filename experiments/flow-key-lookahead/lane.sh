@@ -12,7 +12,11 @@ here=$(cd "$(dirname "$0")" && pwd)
 work=$(cd "$work" && pwd)
 
 "$here/build-oracles.sh" "$work"
+# compare.mjs exits 1 when a set fails the pass rule. Every set still runs and keeps its file, and the
+# script exits 1 at the end if any set failed.
+rc=0
 for name in s13 s9 s8; do
-  "$here/run-compare.sh" "$work" "$work/$name.json" --show 20 > "$work/lane-$name.out"
+  "$here/run-compare.sh" "$work" "$work/$name.json" --show 20 > "$work/lane-$name.out" || { echo "lane: $name FAILED" >&2; rc=1; }
   head -c 2000 "$work/lane-$name.out"
 done
+exit "$rc"

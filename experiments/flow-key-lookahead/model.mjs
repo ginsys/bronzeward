@@ -17,13 +17,19 @@
 // The driver follows the parser: before it consumes a token it runs yaml_parser_fetch_more_tokens
 // once (peek_token), then skips the head token (skip_token). Comments only attach to tokens in
 // go-yaml, so the model skips a comment to the end of its line.
+//
+// Not ported: directives ("unsupported"), and the characters that the go-yaml reader refuses
+// (control characters, readerc.go) or that are not valid UTF-8. The model does not check them.
 
 class ScanError extends Error {}
 class Unsupported extends Error {}
 
 const ALPHA = /[0-9A-Za-z_-]/;
 const URI = /[0-9A-Za-z_\-;/?:@&=+$,.!~*'()[\]%]/;
-const isBreak = (c) => c === "\n" || c === "\r";
+// is_break in yamlprivateh.go (124-130): CR, LF, NEL (U+0085), LS (U+2028) and PS (U+2029).
+const BREAKS = new Set(["\n", "\r", ...[0x85, 0x2028, 0x2029].map((c) => String.fromCodePoint(c))]);
+const BOM = String.fromCodePoint(0xfeff);
+const isBreak = (c) => BREAKS.has(c);
 const isZ = (c) => c === "\0";
 const isBlank = (c) => c === " " || c === "\t";
 const isBlankz = (c) => isBlank(c) || isBreak(c) || isZ(c);
@@ -31,10 +37,13 @@ const isBreakz = (c) => isBreak(c) || isZ(c);
 
 export function model(doc, opts = {}) {
   const guardDelete = opts.guardDelete === true;
-  let idx = 0;
+  // go-yaml counts characters (mark.index, mark.column), not UTF-16 units: work on code points. An initial
+  // byte order mark is dropped by yaml_parser_determine_encoding (readerc.go 47-73) before any mark moves.
+  const chars = Array.from(doc);
+  let idx = chars[0] === BOM ? 1 : 0;
   let line = 0;
   let col = 0;
-  const at = (k = 0) => (idx + k < doc.length ? doc[idx + k] : "\0");
+  const at = (k = 0) => (idx + k < chars.length ? chars[idx + k] : "\0");
   const mark = () => ({ index: idx, line, col });
   const skip = () => {
     idx++;
@@ -125,7 +134,7 @@ export function model(doc, opts = {}) {
 
   function scanToNextToken() {
     for (;;) {
-      if (col === 0 && at() === "﻿") skip();
+      if (col === 0 && at() === BOM) skip();
       while (at() === " " || ((flow > 0 || !allowed) && at() === "\t")) skip();
       if (at() === "#") while (!isBreakz(at())) skip();
       if (isBreak(at())) {
@@ -413,7 +422,7 @@ export function model(doc, opts = {}) {
   }
 
   try {
-    for (let guard = 0; guard < 4 * doc.length + 64; guard++) {
+    for (let guard = 0; guard < 4 * chars.length + 64; guard++) {
       fetchMoreTokens();
       const tok = tokens[head++];
       parsed++;

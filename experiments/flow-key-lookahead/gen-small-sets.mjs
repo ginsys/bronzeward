@@ -1,8 +1,10 @@
 // Usage: node gen-small-sets.mjs <outdir>
-// Writes the three small sets of the investigation (ginsys/bronzeward#688) to <outdir>:
+// Writes the five small sets of the investigation (ginsys/bronzeward#688) to <outdir>:
 //   matrix.json  180 documents: the matrix of ginsys/bronzeward#657 (18 keys x 10 values)
 //   probes.json   22 documents: probe 5 and probe 6 of #657, plus the root and "a:" shapes
 //   hyp.json     126 documents: 21 flow keys x 6 contexts
+//   small.json    45 documents: 15 small flow keys of only ? and : items x 3 contexts
+//   edge.json      8 documents: a byte order mark, three Unicode line breaks and an astral key
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -55,7 +57,28 @@ const ctx = [
 const hyp = [];
 for (const c of ctx) for (const f of flows) hyp.push(c(f));
 
-for (const [name, docs] of [["matrix", matrix], ["probes", probes], ["hyp", hyp]]) {
+// Characters whose width or meaning differs between a JavaScript string and go-yaml: an initial byte order
+// mark (go-yaml drops it before it counts a column), the line breaks U+0085, U+2028 and U+2029, and a key of
+// astral characters (go-yaml counts characters, a JavaScript string counts UTF-16 units).
+const [BOM, NEL, LS, PS, EMOJI] = [0xfeff, 0x85, 0x2028, 0x2029, 0x1f600].map((c) => String.fromCodePoint(c));
+const edge = [
+  `${BOM}? a\n: b\n[? b]: ${V}`,
+  `${BOM}a: b\n[? c]: ${V}`,
+  `${BOM}k: ${V} bar\n`,
+  `a: b${NEL}[? c]: ${V}`,
+  `a: b${LS}[? c]: ${V}`,
+  `a: b${PS}[? c]: ${V}`,
+  `[? ${EMOJI.repeat(511)}]: ${V}`,
+  `[? ${"x".repeat(511)}]: ${V}`,
+];
+
+// Small flow keys of only `?` and `:` items, in three contexts.
+const small = [];
+for (const k of ["[?]", "[:]", "{?}", "{:}", "[? ]", "[:b]", "{:b}", "[: b]", "[?,]", "[,?]", "[? b]", "[?b]", "[:,]", "[?:]", "[? ? b]"]) {
+  for (const c of [`${k}: ${V}`, `a:\n  ${k}: ${V}`, `a: b\n${k}: ${V}`]) small.push(c);
+}
+
+for (const [name, docs] of [["matrix", matrix], ["probes", probes], ["hyp", hyp], ["small", small], ["edge", edge]]) {
   writeFileSync(join(outDir, `${name}.json`), JSON.stringify(docs));
   console.log(name, docs.length);
 }

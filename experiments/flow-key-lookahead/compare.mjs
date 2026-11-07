@@ -2,9 +2,11 @@
 // Compares model.mjs with go-yaml v3.0.5 (real) and with the same go-yaml with the guarded delete
 // (patched). The documents that the bug decides are those that real refuses and patched accepts.
 // The model passes when both hold: it reports "misplaced" for every such document (none missed),
-// and it reports "misplaced" only for documents that real refuses (no false refusal). A document
-// that the patched go-yaml also refuses for another reason (for example "[,]") may be "misplaced":
-// the bug fires there too, and the real run refuses it either way.
+// and it predicts a refusal ("misplaced" or "error") only for documents that real refuses (no false
+// refusal). A document that the patched go-yaml also refuses for another reason (for example "[,]")
+// may be "misplaced": the bug fires there too, and the real run refuses it either way.
+// The exit status is the pass rule: 1 for any missed document, any false refusal or any "misplaced"
+// verdict of the guarded model, and for an empty set or a length mismatch (an error).
 //
 // The optional instrumented run (unpatched go-yaml with counters) gives the event itself: "consumed"
 // counts head tokens that go-yaml consumed while a simple key still stood on them, "misplaced"
@@ -23,7 +25,8 @@ const instr = instrFile ? JSON.parse(readFileSync(instrFile, "utf8")) : null;
 const docs = JSON.parse(readFileSync(docsFile, "utf8")).map((d) => (typeof d === "string" ? d : d.doc));
 const real = JSON.parse(readFileSync(realFile, "utf8"));
 const patched = JSON.parse(readFileSync(patchedFile, "utf8"));
-if (real.length !== docs.length || patched.length !== docs.length) throw new Error("length mismatch");
+if (docs.length === 0) throw new Error("empty set: nothing was compared");
+if (real.length !== docs.length || patched.length !== docs.length || (instr && instr.length !== docs.length)) throw new Error("length mismatch");
 
 const count = {};
 const bump = (k) => (count[k] = (count[k] ?? 0) + 1);
@@ -40,7 +43,8 @@ docs.forEach((doc, i) => {
   const predicted = m.verdict === "misplaced";
   if (bug) bump("bug-decided");
   const missed = bug && !predicted;
-  const falseRefusal = predicted && r === "ACC";
+  // A refusal that the model predicts, by a misplaced token or by a scanner error, and that go-yaml does not make.
+  const falseRefusal = (predicted || m.verdict === "error") && r === "ACC";
   if (predicted && r === "REF" && p === "REF") bump("misplaced, other cause refuses too");
   if (!missed && !falseRefusal) bump("agree");
   else {
@@ -61,3 +65,8 @@ docs.forEach((doc, i) => {
 count["patched model misplaced"] = guardBad.length;
 console.log(JSON.stringify({ total: docs.length, ...count }));
 for (const d of differ.slice(0, show)) console.log(JSON.stringify(d));
+// The exit status is the pass rule: no missed document, no false refusal, and no misplaced insert with the guard on.
+if (differ.length > 0 || guardBad.length > 0) {
+  console.error(`compare: FAIL, ${differ.length} documents differ and ${guardBad.length} documents are misplaced with the guard on`);
+  process.exit(1);
+}
