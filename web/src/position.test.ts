@@ -1576,6 +1576,16 @@ describe("a tag on an explicit key or an alias key", () => {
     expect(found).toHaveLength(20000);
   });
 
+  // The same line with a `?` before each tag: every tag is an explicit key's, so none is listed, and
+  // the backward read stops at the `?` of its own entry, not at the start of the line.
+  test("a flow line of 10,000 explicit keys is scanned in near linear time and lists nothing", () => {
+    const text = `[${Array.from({ length: 10000 }, (_, i) => `? !bwref x/foo${i}`).join(", ")}]\n`;
+    const start = performance.now();
+    const found = references(text);
+    expect(performance.now() - start).toBeLessThan(1000);
+    expect(found).toEqual([]);
+  });
+
   // A known gap: the tag of a value that a later alias key repeats. The server refuses the document
   // at the alias use (tag-placement, the alias branch of internal/ingest/declare.go). The value's own
   // tag is listed where it stands, as before. Listing nothing needs a scan ahead for the alias key,

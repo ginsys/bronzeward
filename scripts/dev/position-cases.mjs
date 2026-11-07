@@ -128,6 +128,14 @@ const own = [
     ["tagged-explicit-key-in-sequence", "- ? !bwref x/foo\n  : v\n"],
     ["tagged-explicit-key-flow", "{? !bwref x/foo : v}\n"],
     ["tagged-explicit-key-flow-sequence", "[? !bwref x/foo]\n"],
+    // The forms that the pattern for a `?` before the tag accepts beyond the first one on a line: two
+    // explicit keys on one flow line, an anchor between the `?` and the tag, a `?` after a flow entry or
+    // after several dashes, and a flow entry with no `?` before its tag as the control.
+    ["tagged-explicit-key-two-in-flow", "[? !bwref x/a, ? !bwref x/b]\n"],
+    ["tagged-explicit-key-anchor-flow", "{? &e !bwref x/foo : v}\n"],
+    ["tagged-explicit-key-after-flow-entry", "a: {b: c, ? !bwref x/foo : v}\n"],
+    ["tagged-explicit-key-after-dashes", "- - ? !bwref x/foo\n    : v\n"],
+    ["explicit-key-flow-entry-control", "[? a, !bwref x/foo]\n"],
     ["tagged-implicit-key", "!bwref x/foo: v\n"],
     // ginsys/bronzeward#629, the implicit key rows that go-yaml accepts. go-yaml refuses rows 50 and 51.
     // Row 48 (`[!bwref x/foo:]`) is left out: the scanner lists `x/foo` there, a known gap pinned in
