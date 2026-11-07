@@ -296,12 +296,50 @@ function readTags(original: string): { found: { index: number; tag: string; name
 // anchor), or alone at the end of the nearest line above (`?` then the tag on the next line, more
 // indented). Only a key that is a scalar counts: the entry of a collection that is a key
 // (`? - !bwref x/foo`) is no explicit key's own tag.
-const EXPLICIT_KEY = /(?:^|[[{,])[ \t]*(?:-[ \t]+)*\?[ \t]+(?:&[0-9A-Za-z_-]+[ \t]+)*$/;
+//
+// The text before the tag on its line is read backward from the tag and stops at the nearest token, not
+// at the start of the line. The pattern it stands for is
+// `(?:^|[[{,])[ \t]*(?:-[ \t]+)*\?[ \t]+(?:&[0-9A-Za-z_-]+[ \t]+)*$` on that text, and a text of blanks only
+// goes to the line above. The cost per tag is the run of blanks and anchors right before it. Runs of
+// two tags on one line do not overlap, so a flow line of 20,000 tags is read in time linear in the line.
 const KEY_INDICATOR_LINE = /^[ \t]*(?:-[ \t]+)*\?[ \t]*$/;
+const isBlank = (c: string | undefined) => c === " " || c === "\t";
+const isName = (c: string | undefined) => c !== undefined && /[0-9A-Za-z_-]/.test(c);
+// Whether the text before `tag` on its line ends in `? ` and anchors, and the `?` comes after the line
+// start or a `[`, `{` or `,`, with only blanks and `- ` entries between.
+function questionBefore(masked: string, tag: number): boolean {
+  let i = tag;
+  let question = -1;
+  while (question < 0) {
+    const end = i;
+    while (i > 0 && isBlank(masked[i - 1])) i--;
+    if (i === end || i === 0) return false;
+    if (masked[i - 1] === "?") {
+      question = i - 1;
+      break;
+    }
+    let j = i;
+    while (isName(masked[j - 1])) j--;
+    if (j === i || j === 0 || masked[j - 1] !== "&") return false;
+    i = j - 1;
+  }
+  let p = question;
+  for (;;) {
+    const end = p;
+    while (p > 0 && isBlank(masked[p - 1])) p--;
+    const c = p > 0 ? masked[p - 1] : "\n";
+    if (c === "-") {
+      if (p === end) return false;
+      p--;
+      continue;
+    }
+    return c === "\n" || c === "[" || c === "{" || c === ",";
+  }
+}
 function explicitKeyTag(masked: string, tag: number): boolean {
-  const start = masked.lastIndexOf("\n", tag - 1) + 1;
-  const before = masked.slice(start, tag);
-  if (before.trim() !== "") return EXPLICIT_KEY.test(before);
+  let start = tag;
+  while (start > 0 && masked[start - 1] !== "\n" && /\s/.test(masked[start - 1]!)) start--;
+  if (start > 0 && masked[start - 1] !== "\n") return questionBefore(masked, tag);
   for (let e = start - 1; e >= 0; ) {
     const s = e === 0 ? 0 : masked.lastIndexOf("\n", e - 1) + 1;
     const l = masked.slice(s, e);
