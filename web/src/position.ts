@@ -327,7 +327,8 @@ function questionBefore(masked: string, tag: number): boolean {
   for (;;) {
     const end = p;
     while (p > 0 && isBlank(masked[p - 1])) p--;
-    const c = p > 0 ? masked[p - 1] : "\n";
+    // go-yaml drops the byte order mark at the start of the stream, so it stands before the line start.
+    const c = p > bom(masked, 0) ? masked[p - 1] : "\n";
     if (c === "-") {
       if (p === end) return false;
       p--;
@@ -342,7 +343,7 @@ function explicitKeyTag(masked: string, tag: number): boolean {
   if (start > 0 && masked[start - 1] !== "\n") return questionBefore(masked, tag);
   for (let e = start - 1; e >= 0; ) {
     const s = e === 0 ? 0 : masked.lastIndexOf("\n", e - 1) + 1;
-    const l = masked.slice(s, e);
+    const l = masked.slice(s + bom(masked, s), e);
     if (l.trim() !== "") return KEY_INDICATOR_LINE.test(l) && indent(l) < indent(lineAt(masked, start));
     e = s - 1;
   }
