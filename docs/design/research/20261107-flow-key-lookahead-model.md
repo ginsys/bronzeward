@@ -28,7 +28,7 @@ gap. Section "Recommendation" gives the advice.
 | Oracle "real" | the oracle of `experiments/scanner-cross-line`, on unmodified go-yaml |
 | Oracle "patched" | the same oracle on go-yaml with one guarded delete (`go-yaml-guard.patch`) |
 | Oracle "counters" | `instr-oracle` on go-yaml with two counters (`go-yaml-instrument.patch`) |
-| Run head | 8cb8d066, one commit on 3c207865. The runs of s13, S9 and S8 used this head with a clean checkout. |
+| Run head | faa548a9. The runs of s13, S9 and S8 used this head with a clean checkout. The commit after it changes this record only. |
 
 All sets are synthetic. The small sets come from `gen-small-sets.mjs`. The flow-key set comes from
 `gen-flow-key-set.mjs`, which is the generator in the body of #657 (named S12 there). The scanner
@@ -54,11 +54,13 @@ These lines of `scannerc.go` in go-yaml v3.0.5 decide the outcome.
   deletes the registration of the outer key, and that key is still possible.
 
 After the delete, go-yaml can consume the `[` before it reads the `:`. Then
-`yaml_parser_fetch_value` inserts the KEY token at `token_number - tokens_parsed`. That position
-is negative. The insert function appends a token at a negative position, so the KEY lands after
-the VALUE token. `yaml_parser_roll_indent` does the same for BLOCK-MAPPING-START (1018-1021). The
-parser then reports "did not find expected key". At the document root it reports "did not find
-expected <document start>".
+`yaml_parser_fetch_value` inserts the KEY token at `token_number - tokens_parsed` (1386). That
+position is negative. `yaml_insert_token` (`apic.go` 40-43) appends a token at the end of the
+queue when the position is negative. So the KEY lands after the closing bracket of the key.
+`yaml_parser_roll_indent` does the same for BLOCK-MAPPING-START (1018-1021). The VALUE token is
+appended last. The queue then reads KEY, BLOCK-MAPPING-START, VALUE after the key. The parser
+reports "did not find expected key". At the document root it reports "did not find expected
+<document start>".
 
 One more path gives the same result. In `a: b\n[? c]: V` the parser looks at the head token `[`
 before the scanner reads `:`. It finds no KEY and refuses at once. The counters see no negative
@@ -75,6 +77,10 @@ consumes `[` while its key is still possible, and then the `:` resolves that key
 
 It ports the scan of scalars, anchors, aliases, tags and comments only as far as they move the
 position and set `simple_key_allowed`. It does not model values.
+
+The model reads characters, as go-yaml does, and not UTF-16 units. It drops an initial byte order
+mark before it counts a column (`readerc.go` 47-73). It treats CR, LF, U+0085, U+2028 and U+2029
+as line breaks (`yamlprivateh.go` 124-130).
 
 The driver follows the parser. Before the parser consumes a token, it runs
 `yaml_parser_fetch_more_tokens` once. Then it removes the head token. The model does the same, and
@@ -107,30 +113,42 @@ hold go-yaml v3.0.5.
 
 ```sh
 cd experiments/flow-key-lookahead
+./selftest.sh                                 # compare.mjs must fail on planted failures
 ./build-oracles.sh <work>                     # the three oracles, from go-yaml in the module cache
-node gen-small-sets.mjs <work>                # matrix.json, probes.json, hyp.json
-./run-compare.sh <work> <work>/matrix.json    # likewise probes.json and hyp.json
+node gen-small-sets.mjs <work>                # matrix, probes, hyp, small and edge .json
+./run-compare.sh <work> <work>/matrix.json    # likewise the other small sets
 node gen-flow-key-set.mjs <work>/s13.json     # then run-compare.sh on it
 ```
 
 `lane.sh` runs s13, S9 and S8 one after the other, on sets that you made first. The run of this
-record took 15 seconds. The model comparison used about 120 MB on 25200 documents, and each oracle
-used under 20 MB. The host check before the run required a flat 16384 MiB of free memory and
-passed.
+record took 21 seconds. The host check before the run required 4096 MiB of free memory and passed.
+The lowest free memory during the run was 20.2 GiB. Earlier measurements on 25200 documents gave
+about 120 MB for the model comparison and under 20 MB for each oracle.
 
 `compare.mjs` prints one line of counts and then the differing documents. The bug decides a
-document when the real oracle refuses it and the patched oracle accepts it. The model passes when
-it meets two conditions. It reports "misplaced" for every such document (none missed). It reports
-"misplaced" only for documents that the real oracle refuses (no false refusal). The patched oracle
-can refuse a document for another reason, such as `[,]`. The model can report "misplaced" there,
-because the bug fires there too. A model run with the guard switched on must report "misplaced"
-for no document.
+document when the real oracle refuses it and the patched oracle accepts it. The model passes a set
+when it meets three conditions:
+
+- It reports "misplaced" for every document that the bug decides (none missed).
+- It predicts a refusal, by "misplaced" or by "error", only for documents that the real oracle
+  refuses (no false refusal).
+- A model run with the guard switched on reports "misplaced" for no document.
+
+The exit status is the pass rule. `compare.mjs` exits 1 when a condition fails, and it stops with
+an error on an empty set or when an oracle file has a different length. `selftest.sh` plants a
+false refusal, a missed document, an empty set and a length mismatch. It requires a nonzero exit
+for each, and exit 0 for a passing case. The patched oracle can refuse a document for another
+reason, such as `[,]`. The model can report "misplaced" there, because the bug fires there too.
+
+An earlier version of `compare.mjs` always exited 0, and it counted only "misplaced" as a
+prediction. A review of this record found both defects. All numbers below come from the fixed
+version.
 
 ## Results
 
-The model needed no rework. Every row below has 0 missed and 0 false refusals, and the guarded
-model reports "misplaced" for 0 documents. "Control" is the count of documents that go-yaml
-accepts with a name, which shows that the run reads names at all.
+The model matches go-yaml on every set below. Each row has 0 missed documents and 0 false
+refusals, and the guarded model reports "misplaced" for 0 documents. "Control" is the count of
+documents that go-yaml accepts with a name, which shows that the run reads names at all.
 
 | Set | Documents | Control | Decided by the bug | Model "misplaced" |
 |---|---|---|---|---|
@@ -138,9 +156,10 @@ accepts with a name, which shows that the run reads names at all.
 | Probe 5 and 6 of #657, plus root and `a:` shapes | 22 | 13 | 9 | 9 |
 | Hypothesis set (21 flow keys x 6 contexts) | 126 | 90 | 18 | 21 |
 | Small keys of `?` and `:` (below) | 45 | 0 | 15 | 45 |
+| Edge set: BOM, Unicode line breaks, astral key | 8 | 1 | 6 | 6 |
 | s13, the flow-key set of #657 | 23247 | 15099 | 8085 | 8085 |
 | S9 | 38208 | 5955 | 0 | 0 |
-| S8 | 245696 | 53570 | 0 | 6 |
+| S8 | 245696 | 53570 | 0 | 0 |
 
 Notes on the rows:
 
@@ -149,19 +168,24 @@ Notes on the rows:
 - Hypothesis set: the 3 extra documents have the key `[,]`. go-yaml refuses them in both runs. The
   model says the defect fires, and the counters agree for 2 of them. In the third, the parser
   refuses first.
-- Small keys: 15 keys of `?` and `:` in 3 contexts. Of 45 documents, 15 are decided by the bug (`{?}`,
-  `[?,]`, `[? b]`, `[?b]` and `[?:]`). The other 30 refuse in both runs for another reason,
-  such as `[?]` and `[:b]`. The model reports "misplaced" for all 45 and the real run refuses all
-  45. The set is a one-line generator:
-  `for k of ["[?]","[:]","{?}","{:}","[? ]","[:b]","{:b}","[: b]","[?,]","[,?]","[? b]","[?b]","[:,]","[?:]","[? ? b]"]`
-  with the contexts `K: V`, `a:\n  K: V` and `a: b\nK: V`, where `V` is `!bwref x/foo\n`.
+- Small keys: 15 keys of `?` and `:` in 3 contexts. Of 45 documents, 15 are decided by the bug
+  (`{?}`, `[?,]`, `[? b]`, `[?b]` and `[?:]`). The other 30 refuse in both runs for another
+  reason, such as `[?]` and `[:b]`. The model reports "misplaced" for all 45 and the real run
+  refuses all 45. `gen-small-sets.mjs` writes the set with the contexts `K: V`, `a:\n  K: V` and
+  `a: b\nK: V`, where `V` is `!bwref x/foo\n`.
+- Edge set: 8 documents with an initial byte order mark, the line breaks U+0085, U+2028 and
+  U+2029, and a key of 511 astral characters with an ASCII twin. 6 are decided by the bug and 2
+  are accepted. Before the repair, the model missed 4 of the 6 and refused one accepted document.
 - s13: the count of 8085 equals the 8085 names that the scanner on main lists in documents that
   go-yaml refuses (#657). The counters saw the event in all 8085. 63 documents refuse in both runs
   for another reason, and the model says "ok" for them. They are outside the class.
-- S9: no document is decided by the bug. 12606 documents have a scanner error in the model. go-yaml
-  refuses all of them too.
-- S8: no document is decided by the bug. 6 documents are "misplaced" and go-yaml refuses them in
-  both runs for another reason.
+- S9: no document is decided by the bug. The model reports a scanner error for 12570 documents,
+  and go-yaml refuses all of them. The model says "ok" for the other 25638 documents. go-yaml
+  accepts 13707 of them and refuses 11931 for a reason that the model does not port.
+- S8: no document is decided by the bug and the model reports "misplaced" for none. The model
+  reports a scanner error for 56252 documents, and go-yaml refuses all of them. The model reports
+  "unsupported" for 11148 documents with a directive. go-yaml refuses 7446 of them and accepts
+  3702.
 
 ## Limits
 
@@ -169,14 +193,21 @@ Notes on the rows:
   would refuse documents that the server accepts, and it would lose names.
 - The model scans the whole stream, so it predicts that the defect fires. It does not predict the
   parser error that comes first in some documents.
-- The model does not port directives. S8 holds 8136 documents with a directive. In 4896 of them
-  go-yaml refuses the document, and in 3240 it accepts the document. None is decided by the bug,
-  but the model proves nothing for them.
-- The sets are built from the families in #657 and #654. A shape outside them is not tested. The
-  sets hold no tab characters.
-- The model has about 430 lines. The experiment as a whole is about 770 non-test lines. This is
-  more than the 600-line budget. The generators and the Go oracles are the reproduction that an
-  investigation must land, so they stay.
+- The model does not port directives. S8 holds 11148 documents that the model calls unsupported.
+  go-yaml refuses 7446 of them and accepts 3702. None is decided by the bug, but the model proves
+  nothing for them.
+- The model does not check the characters that the go-yaml reader refuses, such as control
+  characters, and it does not read UTF-16 input. The oracle receives UTF-8.
+- The sets come from the families in #657 and #654. The review of this record found three gaps
+  outside them: an initial byte order mark, the line breaks U+0085, U+2028 and U+2029, and keys of
+  astral characters. The sets did not find these gaps. The edge set covers them now. Another
+  shape outside the families is not tested.
+- Only S9 (3456 documents) and S8 (2486 documents) hold tab characters. The flow-key families hold
+  none. S9 holds 1584 documents with a byte order mark and S8 holds 420.
+- The model has 437 lines. The experiment as a whole adds 900 lines under `experiments`, of which
+  64 are patch files and 34 are the self-test. This is more than the 600-line budget. The
+  generators and the Go oracles are the reproduction that an investigation must land, so they
+  stay.
 
 ## Alternatives
 
@@ -188,11 +219,15 @@ Notes on the rows:
 
 ## Recommendation
 
-The model meets the pass rule of #688. It differs from go-yaml on 0 documents of every set, with no
-rework. So #657 can port it. The port needs the token queue, the simple-key stack and the indent
-stack inside the scanner, about the size of `model.mjs`. It must tie the rule to the go-yaml pin
-and keep the oracle sets in CI, because an upgrade of go-yaml that fixes the defect makes the port
-refuse documents that go-yaml accepts.
+On every set above, the model predicts the go-yaml refusals of this class exactly, with 0 missed
+documents and 0 false refusals. That result holds for these sets and for the 8 edge documents. It
+is not a proof for every document, and the review found three gaps that the sets did not cover.
+So #657 can port the model only with a differential check in CI. The check runs the model and the
+oracles on the sets above and on a generator with Unicode input, and it fails on any difference.
+
+The port needs the token queue, the simple-key stack and the indent stack inside the scanner,
+about the size of `model.mjs`. It must tie the rule to the go-yaml pin. An upgrade of go-yaml that
+fixes the defect makes the port refuse documents that go-yaml accepts.
 
 If the owner finds the size of the port too high for a hint in an editor, the known gap is a safe
 choice. The scanner lists a name in a document that go-yaml refuses, and the server reads no
