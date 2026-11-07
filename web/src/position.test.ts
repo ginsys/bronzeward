@@ -1349,6 +1349,66 @@ describe("a plain !bwref value that goes on to the next line", () => {
     expect(references(text)).toEqual([]);
   });
 
+  // A tab after a mapping colon is a blank like a space (ginsys/bronzeward#698): go-yaml v3.0.5 reads the
+  // value after it as it reads the value after a space. Every row below was read with go-yaml v3.0.5
+  // (probe w698-tab on 4200c858): the rows of the first list give the scalar `x/foo - y`, `x/foo ? y` or
+  // refuse the document (the key row); before the change the scanner listed `x/foo` for each of them,
+  // and the space controls already listed nothing.
+  test.each([
+    ["a tab, then the tag", "k:\t!bwref x/foo\n  - y\n"],
+    ["a tab, then the tag on its own line", "k:\t\n  !bwref x/foo\n  - y\n"],
+    ["a space and a tab", "k: \t!bwref x/foo\n  - y\n"],
+    ["a tab, a space and a tab", "k:\t \t!bwref x/foo\n  - y\n"],
+    ["two tabs", "k:\t\t!bwref x/foo\n  - y\n"],
+    ["a quoted key", '"k":\t!bwref x/foo\n  - y\n'],
+    ["a single quoted key", "'k':\t!bwref x/foo\n  - y\n"],
+    ["a question mark line", "k:\t!bwref x/foo\n  ? y\n"],
+    ["a key line, which go-yaml refuses", "k:\t!bwref x/foo\n  j: v\n"],
+    ["a CRLF line break after the tab", "k:\t\r\n  !bwref x/foo\r\n  - y\r\n"],
+    ["a nested key, the tag on its own line", "a:\n  k:\t\n    !bwref x/foo\n    - y\n"],
+    // The space controls: these listed nothing before the change.
+    ["the space control of a question mark line", "k: !bwref x/foo\n  ? y\n"],
+    ["the space control of a CRLF line break", "k:\r\n  !bwref x/foo\r\n  - y\r\n"],
+    // A plain word and an anchor after the tag listed nothing before the change and pin the same reading.
+    ["a plain word line", "k:\t!bwref x/foo\n  bar\n"],
+    ["an anchor after the tag", "k:\t!bwref &e x/foo\n  - y\n"],
+  ])("a more indented line after a tab and a tag lists nothing (%s)", (_, text) => {
+    expect(references(text), text).toEqual([]);
+  });
+
+  // The scalar ends at a sibling key, so the name lists, after a tab as after a space. Before the change
+  // the pattern for an anchor after the tag (`ANCHORED_PARENT`) did not take the tab, so the scanner read
+  // the scalar as longer and listed nothing: a lost name (go-yaml reads `x/foo`).
+  test.each([
+    ["a tab", "a:\n  k:\t!bwref &e x/foo\n  j: v\n"],
+    ["a space (control)", "a:\n  k: !bwref &e x/foo\n  j: v\n"],
+  ])("an anchor after the tag, then a sibling key, lists the name (%s)", (_, text) => {
+    expect(references(text), text).toEqual(["x/foo"]);
+  });
+
+  // KNOWN LIMIT, not correct behavior (ginsys/bronzeward#699). A property before the tag (`&e !bwref
+  // x/foo`) is no known parent (`PLAIN_PARENT`), so a `- ` line ends the scalar and the name lists, though
+  // go-yaml reads `x/foo - y`. That is the same with a space as with a tab, so the tab is not its cause and
+  // this change leaves it as it was (probe w698-tab and the red run w698-red1: both rows listed `x/foo` on
+  // 4200c858). The fix of #699 changes these rows to `[]`.
+  test.each([
+    ["a tab", "k:\t&e !bwref x/foo\n  - y\n"],
+    ["a space (control)", "k: &e !bwref x/foo\n  - y\n"],
+  ])("known limit, ginsys/bronzeward#699: an anchor before the tag, then a dash line, lists the name (%s)", (_, text) => {
+    expect(references(text), text).toEqual(["x/foo"]);
+  });
+
+  // A dash followed by a tab is refused by go-yaml ("found character that cannot start any token"). The
+  // dash patterns stay space-only, so the scanner reads these as before and lists the name of a refused
+  // document, which the server does not list. The rows pin that the change leaves them as they were.
+  test.each([
+    ["a dash and a tab", "-\t!bwref x/foo\n  - y\n"],
+    ["a dash, a space and a tab", "- \t!bwref x/foo\n  - y\n"],
+    ["a dash and a tab, the tag on its own line", "k:\n  -\t\n    !bwref x/foo\n    - y\n"],
+  ])("%s: go-yaml refuses the document, and the reading of the scanner is unchanged", (_, text) => {
+    expect(references(text), text).toEqual(["x/foo"]);
+  });
+
   // The editor reads a draft while the user types, so the cost of the scan must stay near linear
   // (review of this change). A check that takes too long on the earlier code ends on its own and fails
   // the bound, and does not hang: a test timeout cannot stop a synchronous scan.
@@ -1441,6 +1501,22 @@ describe("a plain !bwref value that goes on to the next line", () => {
       ["a match", `${"a".repeat(100000)}: !bwref x/foo\n  bar\n`],
       ["a rejection", `${"a".repeat(100000)}: &e !bwref x/foo\n  bar\n`],
     ])("a key of 100,000 characters before the tag is matched in linear time (%s)", (_, text) => {
+      bounded(text);
+    });
+
+    // A tab after the colon (ginsys/bronzeward#698): the three parent patterns take `[ \t]+` there. Runs of tabs
+    // and a long key must not try every split. These rows pass on 4200c858 too, in 0.5 to 8.5 ms in the probe
+    // (node, one run each): they discriminate nothing there, and pin the bound for the new pattern.
+    test.each([
+      ["a key of 100,000 characters, a match", `${"a".repeat(100000)}:\t!bwref x/foo\n  bar\n`],
+      ["a key of 100,000 characters, a rejection", `${"a".repeat(100000)}:\t&e !bwref x/foo\n  bar\n`],
+      ["100,000 tabs after the colon", `k:${"\t".repeat(100000)}!bwref x/foo\n  - y\n`],
+      ["100,000 tabs after the colon, an anchor after the tag", `k:${"\t".repeat(100000)}!bwref &e x/foo\n  j: v\n`],
+      ["50,000 pairs of a space and a tab after the colon", `k:${" \t".repeat(50000)}!bwref x/foo\n  - y\n`],
+      ["100,000 tabs inside a plain key", `k${"\t".repeat(100000)}j:\t!bwref x/foo\n  - y\n`],
+      ["100,000 tabs after the key, the tag on its own line", `k:${"\t".repeat(100000)}\n  !bwref x/foo\n  - y\n`],
+      ["2,000 keys with a tab, the tag on its own line", Array.from({ length: 2000 }, (_, i) => `k${i}:\t\n  !bwref x/foo${i}\n  - y\n`).join("")],
+    ])("a tab after the colon is matched in linear time (%s)", (_, text) => {
       bounded(text);
     });
 

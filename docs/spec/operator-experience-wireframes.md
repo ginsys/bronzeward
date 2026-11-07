@@ -297,7 +297,7 @@ a line that starts with `,`, `]` or `}` is text. A line that starts with `- `, `
 (`k: v`) is text where the parent line shows a plain key, a quoted key with no quote character inside
 or a dash. It ends the value under a compact parent such as `- - `. A quoted key
 with a doubled or escaped quote (`'a''b': !bwref x/foo`) is not read as a parent, so such a line still
-ends the value and the editor lists a name where the server lists none. A line of Unicode spaces is text, not blank. A line that
+ends the value and the editor lists a name where the server lists none. A tab after the colon is a blank like a space. A tab after a dash is not: the server refuses the document. A line of Unicode spaces is text, not blank. A line that
 starts with a no-break space has text at column 0, so it is no indentation. A tag that starts its own line is read against the
 line above only where that line is a plain or quoted key with nothing after its colon, or a lone dash. Under a compact
 parent such as `- k:` a next line that can be a sibling key or a sequence entry (`- y`, `y: v`) ends the value, and
