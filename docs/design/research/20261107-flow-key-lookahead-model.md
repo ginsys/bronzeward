@@ -127,8 +127,6 @@ node gen-flow-key-set.mjs <work>/s13.json     # then run-compare.sh on it
 `lane.sh` runs s13, S9 and S8 one after the other, on sets that you made first. The run of this
 record (stamp w688-l3 at 77eff0e0) took 22 seconds. The host check before that run required 16384
 MiB of free memory and passed with 20206 MiB. The lowest free memory during that run was 19.4 GiB.
-Earlier measurements on 25200 documents gave about 120 MB for the model comparison and under 20 MB
-for each oracle.
 
 `compare.mjs` prints one line of counts and then the differing documents. The bug decides a
 document when the real oracle refuses it and the patched oracle accepts it. The model passes a set
@@ -190,8 +188,7 @@ come from the run with stamp w688-gbom2 at 32e7bc5e, unless a note names another
   `a: b\nK: V`, where `V` is `!bwref x/foo\n`.
 - Edge set: 13 documents. 8 have an initial byte order mark, the line breaks U+0085, U+2028 and
   U+2029, and a key of 511 astral characters with an ASCII twin. 6 of these 8 are decided by the
-  bug and 2 are accepted. Before the first repair, the model missed 4 of the 6 and refused 2
-  accepted documents. One has a byte order mark before `? a`, then `: b`, then `[? b]: !bwref
+  bug and 2 are accepted. One has a byte order mark before `? a`, then `: b`, then `[? b]: !bwref
   x/foo` (verdict "misplaced"). The other has a byte order mark before `k: !bwref x/foo` and ` bar`
   on the next line (verdict "error"). The 5 other documents come from the hosted and local reviews:
   - `a: 1`, `# c`, a tab and `# d`, then `b: !bwref x/foo`. go-yaml accepts it. The model calls it
@@ -318,7 +315,7 @@ come from the run with stamp w688-gbom2 at 32e7bc5e, unless a note names another
   (7eba3c8f). The verdict "unsupported" for a two-mark document is pinned in the self-test
   instead. S8 holds 5 such documents and none is decided by the bug (4 accepted by both oracles, 1
   refused by both). S9 and s13 hold 0 (run w688-gbom2 at 32e7bc5e).
-- Only the edge set (2 documents), S9 (3456 documents) and S8 (2486 documents) hold tab characters. The flow-key families hold
+- Only the edge set, S9 and S8 hold tab characters. The flow-key families hold
   none. S9 holds 1584 documents with a byte order mark and S8 holds 420 (10 with the mark at the start
   only and 410 with a mark after the first character), counted by the run w688-bom at 1aa97028.
 - The self-test does not plant a guard-on misplaced document, because a plant needs a broken
