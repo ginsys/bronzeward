@@ -935,7 +935,8 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
    included), and an event of another epoch than its stream in an open stream, with or without a
    `Bronzeward-Epoch` header on the stream. The same holds for a terminal first read of the CLI, and
    for a terminal read that the watch kept after the read of its events failed: the CLI checks the
-   count again after it reads the pages of the end. A watch that ends in an outage after that has
+   count after it reads the pages of the end. A read whose answer has no `Bronzeward-Epoch` header
+   is judged by the count in the same way. A watch that ends in an outage after that has
    no read that settled the state, and the CLI reports the state as unknown (exit 3). A read that fails
    with anything else is not repeated, and every other read keeps the bound of §8.2. An attempt that showed
    nothing is a failure. The delay starts again at 1 s after an attempt that showed an event, or

@@ -225,3 +225,34 @@ func TestWatchOutage(t *testing.T) {
 		}
 	})
 }
+
+// TestEpochHoldsHeaderless: a read whose answer has no Bronzeward-Epoch header is judged by the count of
+// moves like any other (client-contracts.md §8.6 item 2). The count still advances when an answer of another
+// epoch follows it, so that read no longer stands.
+func TestEpochHoldsHeaderless(t *testing.T) {
+	const e1, e2 = "ep_BWSYNTH1", "ep_BWSYNTH2"
+	reads := 0
+	f := &fake{epoch: e1, post: func(_ int, w http.ResponseWriter, r *http.Request) {
+		reads++
+		w.Header().Del("Bronzeward-Epoch") // the first read is a server defect: no header
+		if reads > 1 {
+			w.Header().Set("Bronzeward-Epoch", e2) // the second answers after a restore
+		}
+		_, _ = w.Write([]byte(`{"id":"op_BWSYNTH","kind":"publish","state":"succeeded"}`))
+	}}
+	c, _, _ := writeClient(t, f, e1)
+	_, first, err := c.OperationBody("op_BWSYNTH")
+	if err != nil || first.Epoch != "" {
+		t.Fatalf("first read: epoch %q, error %v; want no header and no error", first.Epoch, err)
+	}
+	if !c.EpochHolds(first) {
+		t.Fatal("the headerless read does not stand with no move since it")
+	}
+	_, second, err := c.OperationBody("op_BWSYNTH")
+	if err != nil || second.Epoch != e2 {
+		t.Fatalf("second read: epoch %q, error %v; want %s", second.Epoch, err, e2)
+	}
+	if c.EpochHolds(first) || c.EpochMoves() <= first.Moves {
+		t.Errorf("the headerless read stands after an answer of another epoch (moves %d, read at %d); want the count to have advanced", c.EpochMoves(), first.Moves)
+	}
+}
