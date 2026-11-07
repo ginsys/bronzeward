@@ -399,8 +399,8 @@ Controls to continue, take over or abandon belong to W5 and to the pages that fo
 ```
 
 No copy, download, print styling or browser history entry for this view; it is fetched on
-demand and cleared on leaving the page. A refused mark says "Mark 1 was refused: rule
-`mark-kind`" and never echoes the path. "Continue" ends with "The draft changed after this
+demand and cleared on leaving the page. A refused mark says "The mark was not applied: it was
+refused (validation-failed, rule mark-kind, the mark at position 0 (the first is 0))" and never echoes the path. "Continue" ends with "The draft changed after this
 import started; the import was not applied and is abandoned" when the draft moved, and offers
 [Import again] against the draft's current revision; the claim is already abandoned.
 

@@ -159,6 +159,24 @@ describe("how the run of a mark ends (§11.3, PROT-03, PROT-05, PROT-06)", () =>
     expect(noPosition).toContain("it was refused (dependency-unavailable)");
     expect(await ended(unused, ing(), op(), "paused", NOW, "e1")).toMatch(/^Paused for review/);
   });
+  describe("an operation that ended after a mark that no pause applied (the CLI's markOutcome)", () => {
+    const done = op({ state: "succeeded", result: { draft: "drf_2rmp457a", draftRevision: 5, importBaseRevision: "rev_1" } });
+    const flat = (n: ReactNode) => renderToStaticMarkup(h(ReadsProvider, { value: noReads }, n)).replace(/<[^>]+>/g, "").replaceAll("&#x27;", "'");
+    const text = async (run: Parameters<typeof ended>[6], last = "paused") => flat(await ended(unused, ing({ state: "released" }), done, last, NOW, "e1", run));
+    test("a success with no pause at the mark's generation says the mark was not applied", async () => {
+      expect(await text({ marked: true }, "")).toMatch(/^The mark was not applied: operation op_zcfw5mcm succeeded without pausing at the mark's generation\. Import ing_6fdq2la released/);
+    });
+    test("a refusal or a resume-failed before the release is named, and the mark is not applied", async () => {
+      expect(await text({ marked: true, refused: { code: "validation-failed", rule: "mark-kind", position: 0 } })).toMatch(
+        /^The mark was not applied: it was refused \(validation-failed, rule mark-kind, the mark at position 0 \(the first is 0\)\), and operation op_zcfw5mcm then released the import without it\./);
+      expect(await text({ marked: true }, "resume-failed")).toMatch(
+        /^The mark was not applied: its staged input could not be decrypted \(resume-failed\), and operation op_zcfw5mcm then released the import without it\./);
+    });
+    test("a mark applied at its pause, then continued, and an import with no mark, add no such line", async () => {
+      expect(await text({ marked: true })).not.toContain("not applied");
+      expect(await text(undefined)).not.toContain("not applied");
+    });
+  });
   test("a lease that lapsed with none of these leaves the outcome unknown, never not applied", async () => {
     const out = await ended(unused, ing({ state: "held" }), op(), "", Date.parse("2026-11-01T07:06:00Z"), "e1", { marked: true });
     expect(String(out)).toContain("the outcome is unknown");
