@@ -276,6 +276,9 @@ export function model(doc, opts = {}) {
       while (!isBlankz(at())) {
         const c = at();
         if ((c === ":" && isBlankz(at(1))) || (flow > 0 && ",?[]{}".includes(c))) break;
+        // go-yaml folds the line break when it reads the first character after it and clears leading_blanks there
+        // (scannerc.go:2738-2753). The tab check and the final simple-key flag read the cleared value.
+        leading = false;
         skip();
       }
       if (!(isBlank(at()) || isBreak(at()))) break;
