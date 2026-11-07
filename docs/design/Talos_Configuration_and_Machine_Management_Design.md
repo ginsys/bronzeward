@@ -1361,7 +1361,7 @@ This milestone requires the selected database/provider behavior (§7.7), scoped 
 
 - Kubernetes observer for readiness, drain and PDB failures.
 
-- Upgrade-transition acceptance, deferred from E3 (§18.1): on VMs or hardware, an upgrade through the legacy `MachineService.Upgrade` and through `LifecycleClient.Upgrade`, the version gate that chooses between them, an upgrade across the v1.13 boundary, a later configuration contract applied after an upgrade, v1.13 reboot-mode apply (history only, because the PoC baseline is v1.14) and the upstream upgrade windows. Explicit activation under v1.14 is the scope of ginsys/bronzeward#714. Talos upgrades are not supported until it passes.
+- Upgrade-transition acceptance, deferred from E3 (§18.1): on VMs or hardware, an upgrade through the legacy `MachineService.Upgrade` and through `LifecycleClient.Upgrade`, the version gate that chooses between them, an upgrade across the v1.13 boundary, a later configuration contract applied after an upgrade, v1.13 reboot-mode apply, for an upgrade that starts from v1.13, and the upstream upgrade windows. Explicit activation under v1.14 is the scope of ginsys/bronzeward#714. Talos upgrades are not supported until it passes.
 
 The [upgrade safeguards and recovery investigation](research/20261019-upgrade-workflow-design.md) maps the operator procedure to proposed plan, execution and observation contracts, including partial installation/drain/cordon outcomes and Kubernetes manifest ownership. Its source fixture establishes call paths only; specification, implementation and VM/hardware qualification remain separately tracked. It does not supply lifecycle acceptance or adopt an upstream executor.
 
