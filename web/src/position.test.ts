@@ -1327,12 +1327,16 @@ describe("a plain !bwref value that goes on to the next line", () => {
   });
 
   // The editor reads a draft while the user types, so the cost of the scan must stay near linear
-  // (review of this change). Each check has a generous bound and ends on its own with the earlier code, so
-  // a regression fails the test and does not hang it: a test timeout cannot stop a synchronous scan.
+  // (review of this change). A check that takes too long on the earlier code ends on its own and fails
+  // the bound, and does not hang: a test timeout cannot stop a synchronous scan.
+  //
+  // These checks failed on the earlier code, each in the comment above it: the draft of 30,000 tags, the
+  // line of bangs, the tags at column 0, the tags among sibling keys, the tags under one long key, and the
+  // anchored trim (only with the old pattern put back in `anchoredContinues()`). The other checks passed
+  // on the earlier code in the runs made for this change. They keep input that was already fast.
   describe("cost", () => {
     // Reads a draft and fails if the scan takes a second or more. The fixed scan takes under 50 ms on each
-    // input below except the draft of 30,000 tags, which takes 100 to 300 ms (the bound still leaves a wide
-    // margin there). With the earlier code each check ends on its own and fails the bound.
+    // input below except the draft of 30,000 tags, which takes 100 to 300 ms.
     const bounded = (text: string) => {
       const start = performance.now();
       const found = references(text);
@@ -1420,7 +1424,9 @@ describe("a plain !bwref value that goes on to the next line", () => {
     });
 
     // Every other loop and pattern that the scan of a plain tag value runs, on a long input of its kind.
-    // None was slow on the earlier code; each check keeps it so.
+    // None was slow on the earlier code; each check keeps it so. The two rows of repeated tags (`!a`) made
+    // zero calls to `startsLine()` and `propertiesOnly()` in a call count. The two rows of repeated anchors
+    // (`&e`) reach them, on 15,002 and 15,001 characters.
     test.each([
       ["5,000 properties before the tag", `k:\n  ${"!a ".repeat(5000)}!bwref x/foo\n  bar\n`],
       ["a line of 5,000 properties above the tag", `k:\n ${"!a ".repeat(5000)}\n  !bwref x/foo\n  bar\n`],
