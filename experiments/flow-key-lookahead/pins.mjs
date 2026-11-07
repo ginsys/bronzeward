@@ -24,8 +24,25 @@ expect("bound: a bound of 1 step is reached (guard off)", model(small, { maxStep
 expect("bound: a bound of 1 step is reached (guard on)", model(small, { guardDelete: true, maxSteps: 1 }).verdict, "guard-exhausted");
 expect("bound: a bound of 1000 steps is not reached", model(small, { maxSteps: 1000 }).verdict, "ok");
 const bugged = "[? b]: !bwref x/foo\n";
-expect("bound: a reached bound hides no misplaced verdict", model(bugged, { maxSteps: 2 }).verdict, "guard-exhausted");
 expect("bound: the document is misplaced under the default bound", model(bugged).verdict, "misplaced");
+// A reached bound hides no misplaced verdict at any bound. Find the smallest bound that reaches the end of the stream, then
+// check every bound below it. The control: some of those bounds already hold events when the loop stops, so a check that
+// only looks at an empty event list would pass on the early bounds and fail on these. A run with no such bound fails.
+let needed = 0;
+for (let n = 1; n < 1000 && needed === 0; n++) if (model(bugged, { maxSteps: n }).verdict !== "guard-exhausted") needed = n;
+expect("bound: some bound reaches the end of the stream", needed > 1, true);
+expect("bound: the smallest such bound gives misplaced", model(bugged, { maxSteps: needed }).verdict, "misplaced");
+let belowExhausted = 0;
+let belowWithEvents = 0;
+for (let n = 1; n < needed; n++) {
+  const m = model(bugged, { maxSteps: n });
+  if (m.verdict === "guard-exhausted") belowExhausted++;
+  else console.error(`pins: bound ${n} gave ${m.verdict}`);
+  if (m.events.length > 0) belowWithEvents++;
+}
+console.log(`pins: bound: ${needed - 1} bounds below ${needed} steps, ${belowExhausted} guard-exhausted, ${belowWithEvents} already hold events`);
+expect("bound: every bound below the smallest one is guard-exhausted", belowExhausted, needed - 1);
+expect("bound: at least one of those bounds already holds events", belowWithEvents > 0, true);
 
 // Escapes in a double-quoted scalar (scannerc.go 2496-2579). K is a flow key that the bug refuses: a document that the
 // scan reaches the end of gives "misplaced", and a document with a bad escape gives "error" with go-yaml's own message.

@@ -56,10 +56,7 @@ docs.forEach((doc, i) => {
   if (bug) bump("bug-decided");
   // A document where the scan loop hit its bound is a hole in the model: its own bucket, never a miss or a pass.
   const exhausted = m.verdict === "guard-exhausted";
-  if (exhausted) {
-    bump("not compared: model guard-exhausted");
-    holes++;
-  }
+  if (exhausted) bump("not compared: model guard-exhausted");
   const missed = bug && !predicted && !exhausted;
   // A refusal that the model predicts, by a misplaced token or by a scanner error, and that go-yaml does not make.
   const falseRefusal = (predicted || m.verdict === "error") && r === "ACC";
@@ -84,10 +81,9 @@ docs.forEach((doc, i) => {
   }
   const g = model(doc, { guardDelete: true, maxSteps }).verdict;
   if (g === "misplaced") guardBad.push(i);
-  if (g === "guard-exhausted") {
-    bump("not compared: patched model guard-exhausted");
-    holes++;
-  }
+  if (g === "guard-exhausted") bump("not compared: patched model guard-exhausted");
+  // One document counts once, whichever of the two model calls hit the bound.
+  if (exhausted || g === "guard-exhausted") holes++;
   // Refused for another reason in both oracles: the model's claim does not cover them.
   if (r === "REF" && p === "REF") bump(`other-refusal, model:${m.verdict}`);
 });
@@ -99,7 +95,7 @@ if (differ.length > 0 || guardBad.length > 0) {
   console.error(`compare: FAIL, ${differ.length} documents differ and ${guardBad.length} documents are misplaced with the guard on`);
   process.exit(1);
 }
-// A scan loop that hit its bound is a hole in the model, so it fails the run even when nothing differs.
+// A scan loop that hit its bound (in either model call) is a hole in the model, so it fails the run even when nothing differs.
 if (holes > 0) {
   console.error(`compare: FAIL, the scan loop of the model hit its bound on ${holes} documents`);
   process.exit(1);
