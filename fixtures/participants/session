@@ -533,7 +533,7 @@ t8() {
 # Every HTTP read of T9 is t9_auth | t9_get, and every answer passes t9_head_ok. curl exits 0 on an
 # HTTP error, so only the answer's status line and content type tell a refused or wrong read from
 # an event stream. scripts/test/participant-session-test.sh runs t9_open and t9_read against a stub.
-t9_op='' t9_reader='' t9_watcher=''
+t9_op='' t9_reader='' t9_watcher='' t9_watch_rc=0
 # t9_auth: the automation token's header line, which A accepts on either issuer, for curl's stdin.
 # The builtin printf keeps the token off every command line.
 t9_auth() { printf 'Authorization: Bearer %s\n' "$(<"$STATE/automation-token")"; }
@@ -614,6 +614,35 @@ t9_watch_start() {
     bronzewardctl --context t9 --no-input operation watch "$t9_op" --timeout 10m >"$1/watch.txt" 2>&1 &
   t9_watcher=$!
 }
+# t9_watch_ready <dir>: the step fails unless the watch is running and has printed an event line
+# ("received ..." starts only a printed event) within 30 s. That line shows its initial reads are done and
+# its stream is open and delivering, so the stop of A cuts a stream the watch holds.
+t9_watch_ready() {
+  for _ in $(seq 30); do
+    grep -q '^received ' "$1/watch.txt" 2>/dev/null && return 0
+    kill -0 "$t9_watcher" 2>/dev/null || break
+    sleep 1
+  done
+  die "operation watch printed no event within 30 s, or ended, before the stop; see $1/watch.txt"
+}
+# t9_watch_end <dir> <seconds>: the watch ends by itself within <seconds>. A watch that is still running
+# then is stopped and the step fails. On return $t9_watch_rc is its exit status.
+t9_watch_end() {
+  local s
+  for ((s = 0; s < $2; s++)); do
+    kill -0 "$t9_watcher" 2>/dev/null || break
+    sleep 1
+  done
+  if kill -0 "$t9_watcher" 2>/dev/null; then
+    kill "$t9_watcher" 2>/dev/null || true
+    wait "$t9_watcher" 2>/dev/null || true
+    t9_watcher=''
+    die "operation watch did not end within $2 s after the apply completed; see $1/watch.txt"
+  fi
+  t9_watch_rc=0
+  wait "$t9_watcher" || t9_watch_rc=$?
+  t9_watcher=''
+}
 # t9_clean: on any exit of t9 disconnect, the reader ends and A runs again with its forwarder to
 # Zitadel, so that the participant's server is never left stopped or unable to sign anyone in. A
 # start of A that failed or was interrupted can leave A running with no forwarder in its namespace.
@@ -672,6 +701,7 @@ t9_disconnect() {
   mkdir -p -- "$dir"
   t9_open "$dir/before"
   t9_watch_start "$dir"
+  t9_watch_ready "$dir"
   "$bin/inject" kill A >>"$log" 2>&1 || die "cannot stop A; its output is in $log"
   rc=0
   wait "$t9_reader" || rc=$?
@@ -706,10 +736,8 @@ t9_disconnect() {
   [ "$(t9_ids "$dir/before" "$dir/after")" = "$(t9_ids "$dir/full")" ] ||
     die "the resumed stream's events differ from the full replay: an event was lost or repeated (see $dir)"
   # The CLI's watch has ended with the apply. It must have met the outage and followed it out.
-  rc=0
-  wait "$t9_watcher" || rc=$?
-  t9_watcher=''
-  [ "$rc" -eq 0 ] || die "operation watch ended with exit $rc through A's stop; its output is $dir/watch.txt (a product finding)"
+  t9_watch_end "$dir" 120
+  [ "$t9_watch_rc" -eq 0 ] || die "operation watch ended with exit $t9_watch_rc through A's stop; its output is $dir/watch.txt (a product finding)"
   grep -q 'until the watch ends' "$dir/watch.txt" || die "operation watch did not meet the outage; see $dir/watch.txt"
   grep -q '^Completed at ' "$dir/watch.txt" || die "operation watch did not report the completion; see $dir/watch.txt"
   trap - EXIT INT TERM

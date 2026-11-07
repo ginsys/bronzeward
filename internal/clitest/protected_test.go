@@ -550,7 +550,7 @@ var expiresAt = regexp.MustCompile(`expires \d{4}-\d\d-\d\d \d\d:\d\d:\d\d \S+?\
 // marked path as a reference. The output is kept in testdata/journeys/t3.txt, except the review's,
 // which stays in memory.
 func (e *importEnv) journey(t *testing.T) {
-	var draft, ing, rel, plan, op string
+	var draft, ing, rel, plan, op, show string
 	var out strings.Builder
 	labels := filepath.Join(e.dir, "worker-labels.yaml")
 	if err := os.WriteFile(labels, []byte("machine:\n  nodeLabels:\n    tier: workers\n"), 0o600); err != nil {
@@ -601,6 +601,8 @@ func (e *importEnv) journey(t *testing.T) {
 			e.committed(plan)
 		case step[1] == "show" && step[0] == "plan":
 			op = opID.FindString(r.out)
+		case step[1] == "show" && step[0] == "machine":
+			show = r.out
 		}
 		if r.code != 0 {
 			t.Errorf("bronzewardctl %v: exit %d\n%s%s", args, r.code, r.out, r.err)
@@ -614,10 +616,12 @@ func (e *importEnv) journey(t *testing.T) {
 	if !strings.Contains(out.String(), ", "+unmarkedPath+" ") {
 		t.Errorf("the provenance does not name %s as a reference", unmarkedPath)
 	}
-	for _, want := range []string{"adopted; the adoption of plan " + plan, rel + " (adoption)"} {
-		if !strings.Contains(out.String(), want) {
-			t.Errorf("the handover shows no %q", want)
-		}
+	if want := "adopted; the adoption of plan " + plan; !strings.Contains(out.String(), want) {
+		t.Errorf("the handover shows no %q", want)
+	}
+	// The approve step prints the same release as a prediction, so only the machine read proves it.
+	if want := "attributed to " + rel + ", which is the Applied release (by adoption)"; !strings.Contains(show, want) {
+		t.Errorf("the machine read shows no %q:\n%s", want, show)
 	}
 	kept := expiresAt.ReplaceAllString(out.String(), "expires <time>)")
 	kept = localTimes.ReplaceAllString(eventTimes.ReplaceAllString(kept, "$1 <time>  "), "<local time>")
