@@ -318,8 +318,8 @@ Notes on the rows:
   only and 410 with a mark after the first character).
 - The self-test does not plant a guard-on misplaced document, because a plant needs a broken
   model. Only a reading of `compare.mjs` shows the "no misplaced insert with the guard on" leg.
-- The model has 453 lines. The experiment as a whole adds 951 lines under `experiments`, of which
-  64 are patch files and 36 are the self-test. This is more than the 600-line budget. The
+- The model has 453 lines. The experiment as a whole adds 952 lines under `experiments`, of which
+  64 are patch files and 47 are the self-test. This is more than the 600-line budget. The
   generators and the Go oracles are the reproduction that an investigation must land, so they
   stay.
 
