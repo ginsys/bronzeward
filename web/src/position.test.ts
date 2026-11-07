@@ -1642,33 +1642,111 @@ describe("a plain !bwref value that goes on to the next line", () => {
 
   // The editor reads a draft while the user types, so the cost of the scan must stay near linear
   // (review of this change). A check that takes too long on the earlier code ends on its own and fails
-  // the bound, and does not hang: a test timeout cannot stop a synchronous scan.
+  // the check, and does not hang: a test timeout cannot stop a synchronous scan.
   //
   // The comment of a check gives the time of the earlier code where it was measured, with the commit. A
   // check with no such figure is not shown to fail first.
   describe("cost", () => {
-    // Reads a draft and fails if the scan takes a second or more.
-    const bounded = (text: string) => {
-      const start = performance.now();
-      const found = references(text);
-      expect(performance.now() - start).toBeLessThan(1000);
-      return found;
+    // The check does not compare a time with a fixed bound, because the speed of a CI runner varies by
+    // a factor of nine (ginsys/bronzeward#703: 160 ms locally, 1,468 ms on one runner), more than any
+    // bound that still fails a slow scan. It reads the same draft built at 1/64 of its size and at its
+    // full size, in the same process, and compares the time per character. A linear scan costs the same
+    // per character at both sizes (a ratio near 1), and a quadratic one costs 64 times as much (a ratio
+    // of 40 to 64 where it was measured, 51 on e354c61c). The limit is 12. A runner that is slow by a
+    // constant factor changes both times and not the ratio.
+    //
+    // The gap and the limit come from runs of this file at gaps of 4, 16 and 64 (20, 20 and 45 runs).
+    // At a gap of 4 the limit was 2.5, and one run of the 20,000-tag flow line read 2.87, because that
+    // scan has a small term that grows with the square of the line (see below). At a gap of 64 the
+    // highest ratio of any check was 3.15 (that flow line), and the next highest was 1.49. So the
+    // limit sits about 4 times above the highest linear ratio and 3 to 5 times below a quadratic one.
+    //
+    // Three things keep the ratio steady on a noisy runner. The small draft is read first, three times,
+    // and its best time counts, which also warms the code. A slow reading of the full draft is read
+    // again, up to three times in all, and its best time counts. A full draft that takes less than
+    // `floorMs` (100 ms) passes without a ratio, because the timer cannot tell a ratio at that speed
+    // from noise, and a quadratic scan does not read these drafts that fast: it takes seconds on each.
+    //
+    // KNOWN LIMIT: a scan that is slower by a constant factor, 10 times for example, is not found. No
+    // check of the speed of one run can find it and also pass a runner that is 9 times slower. The
+    // cost that grows with the size of the draft is what this describes and finds. A small term that
+    // grows with the square of a line is not found either, as long as the ratio stays under 12.
+    const GROWTH_LIMIT = 12;
+    const GROWTH_GAP = 64;
+    const growth = (
+      scan: (text: string) => unknown,
+      size: number,
+      build: (size: number) => string,
+      floorMs = 100,
+      now: () => number = () => performance.now(),
+    ) => {
+      const timed = (text: string) => {
+        const start = now();
+        const found = scan(text);
+        return { found, ms: now() - start };
+      };
+      const small = build(Math.max(1, Math.round(size / GROWTH_GAP)));
+      const big = build(size);
+      let smallMs = Infinity;
+      for (let i = 0; i < 3; i++) smallMs = Math.min(smallMs, timed(small).ms);
+      const first = timed(big);
+      let bigMs = first.ms;
+      const ratio = (ms: number) => ms / big.length / (Math.max(smallMs, 0.01) / small.length);
+      for (let again = 1; again < 3 && bigMs >= floorMs && ratio(bigMs) >= GROWTH_LIMIT; again++) {
+        bigMs = Math.min(bigMs, timed(big).ms);
+      }
+      if (bigMs >= floorMs) {
+        expect(
+          ratio(bigMs),
+          `${bigMs.toFixed(1)} ms for ${big.length} characters against ${smallMs.toFixed(1)} ms for ${small.length}`,
+        ).toBeLessThan(GROWTH_LIMIT);
+      }
+      return first.found;
     };
+    const bounded = (size: number, build: (size: number) => string) => growth(references, size, build);
+    // Builders of a draft at a given size: `rep` repeats a text n times and `lines` joins n lines.
+    const rep = (text: string, n: number) => text.repeat(Math.max(1, Math.round(n)));
+    const lines = (n: number, line: (i: number) => string) =>
+      Array.from({ length: Math.max(1, Math.round(n)) }, (_, i) => line(i)).join("");
+
+    // The check against stand-ins for the scan. A stand-in does not spend time: it adds the work it would
+    // do to a counter, and the counter is the clock of the check. So the result does not depend on the
+    // speed or the load of the machine that runs the test. The floor is 0 so that they are read at their
+    // size. A scan that reads the draft once for each character is quadratic and fails the check. A
+    // linear scan does not, even when it is 10 times slower than the scan of this file.
+    const standIn = (work: (length: number) => number) => {
+      let ticks = 0;
+      return {
+        now: () => ticks,
+        scan: (text: string) => {
+          ticks += work(text.length);
+        },
+      };
+    };
+    test("the check fails a quadratic stand-in for the scan", () => {
+      const quadratic = standIn((length) => length * length);
+      expect(() => growth(quadratic.scan, 20000, (n) => "x".repeat(n), 0, quadratic.now)).toThrow(
+        /ms for 20000 characters/,
+      );
+    });
+    test("the check passes a linear stand-in, also one that is 10 times slower", () => {
+      const linear = standIn((length) => length);
+      const slow = standIn((length) => 10 * length);
+      expect(() => growth(linear.scan, 20000, (n) => "x".repeat(n), 0, linear.now)).not.toThrow();
+      expect(() => growth(slow.scan, 20000, (n) => "x".repeat(n), 0, slow.now)).not.toThrow();
+    });
 
     // A draft of 30,000 entries with a tag alone on its line: the scan back from the tag stops at the key
     // line above it, so it must not read the text before that line. This draft took 27,987 ms on e354c61c.
     test("a draft with 30,000 tags on their own lines lists every one", () => {
-      const text = Array.from({ length: 30000 }, (_, i) => `k${i}:\n  !bwref x/foo${i}\n`).join("");
-      expect(bounded(text)).toHaveLength(30000);
+      expect(bounded(30000, (n) => lines(n, (i) => `k${i}:\n  !bwref x/foo${i}\n`))).toHaveLength(30000);
     });
 
     // A line of many bangs and a word: a tag on a line of its own below it is not on a root scalar, and
     // the line of bangs is no line of properties only. Matching the line must not try every split of it.
     // This line of 25 bangs took 1,177 ms on e354c61c.
     test("a long line of bangs and a word above a tag ends the scan at once", () => {
-      const start = performance.now();
-      references(`${"!".repeat(25)} text:\n!bwref x/foo\n- y\n`);
-      expect(performance.now() - start).toBeLessThan(1000);
+      bounded(25, (n) => `${rep("!", n)} text:\n!bwref x/foo\n- y\n`);
     });
 
     // The scan back from a tag that starts its line looks for the nearest line above that is less indented.
@@ -1678,21 +1756,21 @@ describe("a plain !bwref value that goes on to the next line", () => {
 
     // A tag at column 0 that is no root scalar: no line is less indented than column 0.
     test("3,000 tags at column 0 under a key are scanned in near linear time", () => {
-      bounded(Array.from({ length: 3000 }, (_, i) => `k:\n!bwref x/foo${i}\nbar\n`).join(""));
+      bounded(3000, (n) => lines(n, (i) => `k:\n!bwref x/foo${i}\nbar\n`));
     });
 
     // Tags on lines of their own under one key, each below a sibling key at the same indent: the line
     // that holds the key is far above every tag but the first.
     test("2,000 tags among sibling keys under one key are scanned in near linear time", () => {
-      bounded(`k:\n${Array.from({ length: 2000 }, (_, i) => `  j${i}: v\n  !bwref x/foo${i}\n`).join("")}`);
+      bounded(2000, (n) => `k:\n${lines(n, (i) => `  j${i}: v\n  !bwref x/foo${i}\n`)}`);
     });
 
     // Many tags under one long key: the line of the key is the parent of each of them, and it is matched once
     // (`known` of the line), not once per tag. The key has 300,000 characters and the 4,000 tags took 2.1 to
     // 2.8 s in six runs on 86c93ac4, where each tag matched it again (a key of 200,000 characters and 3,000
-    // tags took 0.9 to 1.6 s there, too close to the bound to fail it every time).
+    // tags took 0.9 to 1.6 s there, too close to the old bound of 1,000 ms to fail it every time).
     test("4,000 tags among sibling keys under one key of 300,000 characters are scanned in near linear time", () => {
-      bounded(`${"a".repeat(300000)}:\n${Array.from({ length: 4000 }, (_, i) => `  j${i}: v\n  !bwref x/foo${i}\n`).join("")}`);
+      bounded(4000, (n) => `${rep("a", 75 * n)}:\n${lines(n, (i) => `  j${i}: v\n  !bwref x/foo${i}\n`)}`);
     });
 
     // A continuation line with a long run of blanks between two words: trimming it must not try every
@@ -1707,22 +1785,25 @@ describe("a plain !bwref value that goes on to the next line", () => {
       ["an anchor after the tag", "k: !bwref &e a\n"],
     ];
     test.each(trimHeads)("a continuation line with 60,000 blanks inside it is trimmed in linear time (%s)", (_, head) => {
-      bounded(`${head}  bar${" ".repeat(60000)}baz\n`);
+      bounded(60000, (n) => `${head}  bar${rep(" ", n)}baz\n`);
     });
 
     // The same walks with the long run at the start of the line, and at its end.
     test.each(trimHeads)("a continuation line with 60,000 blanks at its start is trimmed in linear time (%s)", (_, head) => {
-      bounded(`${head}${" ".repeat(60000)}bar\n`);
+      bounded(60000, (n) => `${head}${rep(" ", n)}bar\n`);
     });
     test.each(trimHeads)("a continuation line with 60,000 blanks at its end is trimmed in linear time (%s)", (_, head) => {
-      bounded(`${head}  bar${" ".repeat(60000)}\n`);
+      bounded(60000, (n) => `${head}  bar${rep(" ", n)}\n`);
     });
 
     // The search for the parent line of a tag runs a binary search over the stack of open lines, and the stack
-    // is as deep as the indentation rises: 1,000 keys, each one column deeper than the one above.
+    // is as deep as the indentation rises: 1,000 keys, each one column deeper than the one above. The draft
+    // holds about n squared characters of indentation, so the time per character is what the check compares.
     test("a tag below 1,000 keys of rising indentation is scanned in near linear time", () => {
-      const keys = Array.from({ length: 1000 }, (_, i) => `${" ".repeat(i)}k${i}:\n`).join("");
-      bounded(`${keys}${" ".repeat(1000)}!bwref x/foo\n${" ".repeat(1000)}bar\n`);
+      bounded(1000, (n) => {
+        const keys = lines(n, (i) => `${" ".repeat(i)}k${i}:\n`);
+        return `${keys}${rep(" ", n)}!bwref x/foo\n${rep(" ", n)}bar\n`;
+      });
     });
 
     // A key of 100,000 characters before the tag on its own line (`PLAIN_PARENT`): the pattern must not try
@@ -1730,27 +1811,27 @@ describe("a plain !bwref value that goes on to the next line", () => {
     // ginsys/bronzeward#699). The third one has two anchors after the colon, which go-yaml refuses, so the
     // pattern reads the whole key and rejects it.
     test.each([
-      ["a match", `${"a".repeat(100000)}: !bwref x/foo\n  bar\n`],
-      ["a match with an anchor", `${"a".repeat(100000)}: &e !bwref x/foo\n  bar\n`],
-      ["a rejection", `${"a".repeat(100000)}: &e &f !bwref x/foo\n  bar\n`],
-    ])("a key of 100,000 characters before the tag is matched in linear time (%s)", (_, text) => {
-      bounded(text);
+      ["a match", (n: number) => `${rep("a", n)}: !bwref x/foo\n  bar\n`],
+      ["a match with an anchor", (n: number) => `${rep("a", n)}: &e !bwref x/foo\n  bar\n`],
+      ["a rejection", (n: number) => `${rep("a", n)}: &e &f !bwref x/foo\n  bar\n`],
+    ])("a key of 100,000 characters before the tag is matched in linear time (%s)", (_, build) => {
+      bounded(100000, build);
     });
 
     // A tab after the colon (ginsys/bronzeward#698): the three parent patterns take `[ \t]+` there. Runs of tabs
     // and a long key must not try every split. These rows pass on 4200c858 too, in 0.5 to 8.5 ms in the probe
-    // (node, one run each): they discriminate nothing there, and pin the bound for the new pattern.
+    // (node, one run each): they discriminate nothing there, and pin the growth for the new pattern.
     test.each([
-      ["a key of 100,000 characters, a match", `${"a".repeat(100000)}:\t!bwref x/foo\n  bar\n`],
-      ["a key of 100,000 characters, a rejection", `${"a".repeat(100000)}:\t&e !bwref x/foo\n  bar\n`],
-      ["100,000 tabs after the colon", `k:${"\t".repeat(100000)}!bwref x/foo\n  - y\n`],
-      ["100,000 tabs after the colon, an anchor after the tag", `k:${"\t".repeat(100000)}!bwref &e x/foo\n  j: v\n`],
-      ["50,000 pairs of a space and a tab after the colon", `k:${" \t".repeat(50000)}!bwref x/foo\n  - y\n`],
-      ["100,000 tabs inside a plain key", `k${"\t".repeat(100000)}j:\t!bwref x/foo\n  - y\n`],
-      ["100,000 tabs after the key, the tag on its own line", `k:${"\t".repeat(100000)}\n  !bwref x/foo\n  - y\n`],
-      ["2,000 keys with a tab, the tag on its own line", Array.from({ length: 2000 }, (_, i) => `k${i}:\t\n  !bwref x/foo${i}\n  - y\n`).join("")],
-    ])("a tab after the colon is matched in linear time (%s)", (_, text) => {
-      bounded(text);
+      ["a key of 100,000 characters, a match", 100000, (n: number) => `${rep("a", n)}:\t!bwref x/foo\n  bar\n`],
+      ["a key of 100,000 characters, a rejection", 100000, (n: number) => `${rep("a", n)}:\t&e !bwref x/foo\n  bar\n`],
+      ["100,000 tabs after the colon", 100000, (n: number) => `k:${rep("\t", n)}!bwref x/foo\n  - y\n`],
+      ["100,000 tabs after the colon, an anchor after the tag", 100000, (n: number) => `k:${rep("\t", n)}!bwref &e x/foo\n  j: v\n`],
+      ["50,000 pairs of a space and a tab after the colon", 50000, (n: number) => `k:${rep(" \t", n)}!bwref x/foo\n  - y\n`],
+      ["100,000 tabs inside a plain key", 100000, (n: number) => `k${rep("\t", n)}j:\t!bwref x/foo\n  - y\n`],
+      ["100,000 tabs after the key, the tag on its own line", 100000, (n: number) => `k:${rep("\t", n)}\n  !bwref x/foo\n  - y\n`],
+      ["2,000 keys with a tab, the tag on its own line", 2000, (n: number) => lines(n, (i) => `k${i}:\t\n  !bwref x/foo${i}\n  - y\n`)],
+    ])("a tab after the colon is matched in linear time (%s)", (_, size, build) => {
+      bounded(size, build);
     });
 
     // An anchor before the tag (ginsys/bronzeward#699): the two parent patterns take one anchor and its
@@ -1758,53 +1839,80 @@ describe("a plain !bwref value that goes on to the next line", () => {
     // every split. These rows pass on 0b3a42da too (they discriminate nothing there) and pin the bound of
     // the new patterns.
     test.each([
-      ["a key of 100,000 characters, the anchor on the key line", `${"a".repeat(100000)}: &e\n  !bwref x/foo\n  - y\n`],
-      ["5,000 anchors after the colon", `k: ${"&e ".repeat(5000)}!bwref x/foo\n  - y\n`],
-      ["5,000 anchors after the dash", `- ${"&e ".repeat(5000)}!bwref x/foo\n  - y\n`],
-      ["100,000 tabs between the anchor and the tag", `k: &e${"\t".repeat(100000)}!bwref x/foo\n  - y\n`],
-      ["50,000 pairs of a space and a tab around the anchor", `k:${" \t".repeat(50000)}&e${" \t".repeat(50000)}!bwref x/foo\n  - y\n`],
-      ["100,000 blanks after the anchor on the key line", `k: &e${" ".repeat(100000)}\n  !bwref x/foo\n  - y\n`],
-      ["100,000 tabs after the anchor on the dash line", `- &e${"\t".repeat(100000)}\n  !bwref x/foo\n  - y\n`],
-      ["50,000 pairs of a space and a tab after the anchor on the dash line", `- &e${" \t".repeat(50000)}\n  !bwref x/foo\n  - y\n`],
-      ["100,000 tabs after an anchor on the dash line, then a character that ends the match", `- &e${"\t".repeat(100000)}x\n  !bwref x/foo\n  - y\n`],
-      ["2,000 key lines with an anchor, the tag on its own line", Array.from({ length: 2000 }, (_, i) => `k${i}: &e\n  !bwref x/foo${i}\n  - y\n`).join("")],
-    ])("an anchor before the tag is matched in linear time (%s)", (_, text) => {
-      bounded(text);
+      ["a key of 100,000 characters, the anchor on the key line", 100000, (n: number) => `${rep("a", n)}: &e\n  !bwref x/foo\n  - y\n`],
+      ["5,000 anchors after the colon", 5000, (n: number) => `k: ${rep("&e ", n)}!bwref x/foo\n  - y\n`],
+      ["5,000 anchors after the dash", 5000, (n: number) => `- ${rep("&e ", n)}!bwref x/foo\n  - y\n`],
+      ["100,000 tabs between the anchor and the tag", 100000, (n: number) => `k: &e${rep("\t", n)}!bwref x/foo\n  - y\n`],
+      ["50,000 pairs of a space and a tab around the anchor", 50000, (n: number) => `k:${rep(" \t", n)}&e${rep(" \t", n)}!bwref x/foo\n  - y\n`],
+      ["100,000 blanks after the anchor on the key line", 100000, (n: number) => `k: &e${rep(" ", n)}\n  !bwref x/foo\n  - y\n`],
+      ["100,000 tabs after the anchor on the dash line", 100000, (n: number) => `- &e${rep("\t", n)}\n  !bwref x/foo\n  - y\n`],
+      ["50,000 pairs of a space and a tab after the anchor on the dash line", 50000, (n: number) => `- &e${rep(" \t", n)}\n  !bwref x/foo\n  - y\n`],
+      ["100,000 tabs after an anchor on the dash line, then a character that ends the match", 100000, (n: number) => `- &e${rep("\t", n)}x\n  !bwref x/foo\n  - y\n`],
+      ["2,000 key lines with an anchor, the tag on its own line", 2000, (n: number) => lines(n, (i) => `k${i}: &e\n  !bwref x/foo${i}\n  - y\n`)],
+    ])("an anchor before the tag is matched in linear time (%s)", (_, size, build) => {
+      bounded(size, build);
     });
 
-    // Many tags under one long key line with an anchor: the line is matched once (`known` of the line).
+    // Many tags under one long key line with an anchor: the line is matched once (`known` of the line). The
+    // key (75 characters per tag) and the number of tags grow together with the size argument.
     test("4,000 tags among sibling keys under one key line of 300,000 characters with an anchor are scanned in near linear time", () => {
-      bounded(`${"a".repeat(300000)}: &e\n${Array.from({ length: 4000 }, (_, i) => `  j${i}: v\n  !bwref x/foo${i}\n`).join("")}`);
+      bounded(4000, (n) => `${rep("a", n * 75)}: &e\n${lines(n, (i) => `  j${i}: v\n  !bwref x/foo${i}\n`)}`);
     });
 
     // Every other loop and pattern that the scan of a plain tag value runs, on a long input of its kind.
     test.each([
-      ["5,000 properties before the tag", `k:\n  ${"!a ".repeat(5000)}!bwref x/foo\n  bar\n`],
-      ["a line of 5,000 properties above the tag", `k:\n ${"!a ".repeat(5000)}\n  !bwref x/foo\n  bar\n`],
-      ["5,000 anchors before the tag", `k:\n  ${"&e ".repeat(5000)}!bwref x/foo\n  bar\n`],
-      ["a line of 5,000 anchors above the tag", `k:\n ${"&e ".repeat(5000)}\n  !bwref x/foo\n  bar\n`],
-      ["a key of 100,000 characters above the tag",`${"a".repeat(100000)}:\n  !bwref x/foo\n  bar\n`],
-      ["3,000 lines of an anchor and a blank line above a root scalar", `${"&e\n\n".repeat(3000)}!bwref x/foo\n- y\n`],
-      ["a marker line with 40,000 blanks before a dash", `--- ${" ".repeat(40000)}- !bwref x/foo\n  bar\n`],
-    ])("a long input stays linear: %s", (_, text) => {
-      bounded(text);
+      ["5,000 properties before the tag", 5000, (n: number) => `k:\n  ${rep("!a ", n)}!bwref x/foo\n  bar\n`],
+      ["a line of 5,000 properties above the tag", 5000, (n: number) => `k:\n ${rep("!a ", n)}\n  !bwref x/foo\n  bar\n`],
+      ["5,000 anchors before the tag", 5000, (n: number) => `k:\n  ${rep("&e ", n)}!bwref x/foo\n  bar\n`],
+      ["a line of 5,000 anchors above the tag", 5000, (n: number) => `k:\n ${rep("&e ", n)}\n  !bwref x/foo\n  bar\n`],
+      ["a key of 100,000 characters above the tag", 100000, (n: number) => `${rep("a", n)}:\n  !bwref x/foo\n  bar\n`],
+      ["3,000 lines of an anchor and a blank line above a root scalar", 3000, (n: number) => `${rep("&e\n\n", n)}!bwref x/foo\n- y\n`],
+      ["a marker line with 40,000 blanks before a dash", 40000, (n: number) => `--- ${rep(" ", n)}- !bwref x/foo\n  bar\n`],
+    ])("a long input stays linear: %s", (_, size, build) => {
+      bounded(size, build);
+    });
+
+    // The test for an explicit key reads the text before the tag on its line, once per tag. A flow line
+    // that holds many tags is the shape where that cost could grow with the square of the line. It does,
+    // by a small term: the time per character rose 1.0 to 5.9 times from 625 to 40,000 tags in a probe
+    // (58 ns to 341 ns per character), and this check read 2.2 to 3.1 over 20 runs at 20,000 tags. A
+    // limit of 2.5 failed it once in 20 runs, so the limit is 12. The cause is not traced here.
+    test("a flow line of 20,000 tags is scanned in near linear time and lists every name", () => {
+      const found = bounded(20000, (n) => `[${lines(n, (i) => `${i ? ", " : ""}!bwref x/foo${i}`)}]\n`);
+      expect(found).toHaveLength(20000);
+    });
+
+    // The same line with a `?` before each tag: every tag is an explicit key's, so none is listed, and
+    // the backward read stops at the `?` of its own entry, not at the start of the line.
+    test("a flow line of 10,000 explicit keys is scanned in near linear time and lists nothing", () => {
+      const found = bounded(10000, (n) => `[${lines(n, (i) => `${i ? ", " : ""}? !bwref x/foo${i}`)}]\n`);
+      expect(found).toEqual([]);
+    });
+
+    // The walk crosses line breaks, so the cost per tag grows with the lines between a tag and the token
+    // before it. Those runs do not overlap either: 10,000 tags, each on a line after an anchor line of
+    // its own `? &k`, are read in time linear in the text.
+    test("10,000 explicit keys with the anchor and the tag on separate lines list nothing in near linear time", () => {
+      const found = bounded(10000, (n) => lines(n, (i) => `? &k${i}\n\n  !bwref x/foo${i}\n: v\n`));
+      expect(found).toEqual([]);
     });
 
     // The column of a compact collection (`compactColumn`, ginsys/bronzeward#706) is read by index from the text
     // before the tag, or from the parent line once for all the tags under it (`compact` of the line). These
     // rows pass on 63f37307 too (they discriminate nothing there) and pin the bound of the new code.
     test.each([
-      ["50,000 dash indicators before the tag", `${"- ".repeat(50000)}!bwref x/foo\n    - y\n`],
-      ["100,000 blanks after the dash", `-${" ".repeat(100000)}k: !bwref x/foo\n    - y\n`],
-      ["100,000 blanks after the dash, a tag with properties", `-${" ".repeat(100000)}&e !bwref x/foo\n    - y\n`],
-      ["a compact key of 100,000 characters, the tag on its own line", `- ${"a".repeat(100000)}:\n    !bwref x/foo\n      - y\n`],
-    ])("a compact column is read in linear time (%s)", (_, text) => {
-      bounded(text);
+      ["50,000 dash indicators before the tag", 50000, (n: number) => `${rep("- ", n)}!bwref x/foo\n    - y\n`],
+      ["100,000 blanks after the dash", 100000, (n: number) => `-${rep(" ", n)}k: !bwref x/foo\n    - y\n`],
+      ["100,000 blanks after the dash, a tag with properties", 100000, (n: number) => `-${rep(" ", n)}&e !bwref x/foo\n    - y\n`],
+      ["a compact key of 100,000 characters, the tag on its own line", 100000, (n: number) => `- ${rep("a", n)}:\n    !bwref x/foo\n      - y\n`],
+    ])("a compact column is read in linear time (%s)", (_, size, build) => {
+      bounded(size, build);
     });
 
-    // Many tags under one long compact parent line: the line is read once (`compact` of the line).
+    // Many tags under one long compact parent line: the line is read once (`compact` of the line). The key
+    // (75 characters per tag) and the number of tags grow together with the size argument.
     test("4,000 tags among sibling keys under one compact key line of 300,000 characters are scanned in near linear time", () => {
-      bounded(`- ${"a".repeat(300000)}:\n${Array.from({ length: 4000 }, (_, i) => `    j${i}: v\n    !bwref x/foo${i}\n      - y\n`).join("")}`);
+      bounded(4000, (n) => `- ${rep("a", n * 75)}:\n${lines(n, (i) => `    j${i}: v\n    !bwref x/foo${i}\n      - y\n`)}`);
     });
   });
 });
@@ -1887,37 +1995,6 @@ describe("a tag on an explicit key or an alias key", () => {
     ["the value of an explicit key that holds an explicit key", "? ? a\n  : v\n: !bwref x/foo\n"],
   ])("still lists the name of %s", (_, text) => {
     expect(references(text)).toEqual(["x/foo"]);
-  });
-
-  // The test for an explicit key reads the text before the tag on its line, once per tag. A flow line
-  // that holds many tags is the shape where that cost could grow with the square of the line.
-  test("a flow line of 20,000 tags is scanned in near linear time and lists every name", () => {
-    const text = `[${Array.from({ length: 20000 }, (_, i) => `!bwref x/foo${i}`).join(", ")}]\n`;
-    const start = performance.now();
-    const found = references(text);
-    expect(performance.now() - start).toBeLessThan(1000);
-    expect(found).toHaveLength(20000);
-  });
-
-  // The same line with a `?` before each tag: every tag is an explicit key's, so none is listed, and
-  // the backward read stops at the `?` of its own entry, not at the start of the line.
-  test("a flow line of 10,000 explicit keys is scanned in near linear time and lists nothing", () => {
-    const text = `[${Array.from({ length: 10000 }, (_, i) => `? !bwref x/foo${i}`).join(", ")}]\n`;
-    const start = performance.now();
-    const found = references(text);
-    expect(performance.now() - start).toBeLessThan(1000);
-    expect(found).toEqual([]);
-  });
-
-  // The walk crosses line breaks, so the cost per tag grows with the lines between a tag and the token
-  // before it. Those runs do not overlap either: 10,000 tags, each on a line after an anchor line of
-  // its own `? &k`, are read in time linear in the text.
-  test("10,000 explicit keys with the anchor and the tag on separate lines list nothing in near linear time", () => {
-    const text = Array.from({ length: 10000 }, (_, i) => `? &k${i}\n\n  !bwref x/foo${i}\n: v\n`).join("");
-    const start = performance.now();
-    const found = references(text);
-    expect(performance.now() - start).toBeLessThan(1000);
-    expect(found).toEqual([]);
   });
 
   // Two documents that go-yaml refuses, so the oracle has no answer for them. They pin the reading
