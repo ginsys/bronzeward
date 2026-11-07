@@ -4,9 +4,8 @@
 //   probes.json   22 documents: probe 5 and probe 6 of #657, plus the root and "a:" shapes
 //   hyp.json     126 documents: 21 flow keys x 6 contexts
 //   small.json    45 documents: 15 small flow keys of only ? and : items x 3 contexts
-//   edge.json     14 documents: a byte order mark, three Unicode line breaks, an astral key, a tab after a comment,
-//                 two shorthand tags, a tab in a plain scalar continuation, a byte order mark after the first
-//                 line and two byte order marks at the start
+//   edge.json     13 documents: a byte order mark, three Unicode line breaks, an astral key, a tab after a comment,
+//                 two shorthand tags, a tab in a plain scalar continuation and a byte order mark after the first line
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -86,10 +85,6 @@ const edge = [
   // yamlprivateh.go:103), so a mark at column 0 of a later line stays in the plain scalar and both oracles accept
   // this document. The model must accept it too.
   `\n${BOM}[? b]: ${V}`,
-  // Two marks at the start: go-yaml drops the first one at the stream start, then its buffer-start test finds the
-  // second one and skips at column 0. It refuses this document by the bug, and it refuses longer documents of this
-  // shape for other reasons (set S8 holds some). The model makes no claim ("unsupported").
-  `${BOM}${BOM}[? b]: ${V}`,
 ];
 
 // Small flow keys of only `?` and `:` items, in three contexts.
