@@ -159,6 +159,10 @@ export function onEvent(s: RunState, type: string, data: unknown): RunState {
 export const stopsWatch = (settled: RunState["settled"], read: { b: Ingestion; at: number }, now: number) =>
   settled !== undefined || (read.at > Date.parse(read.b.leaseUntil) + LEASE_MARGIN && lapsed(read.b, now));
 
+// What the watch of an import's operation depends on. A continuation or takeover advances the claim
+// generation and keeps the operation id, so the generation is part of the key: the watch restarts at it.
+export const watchDeps = (client: Client | undefined, b: Ingestion, again: () => void) => [client, b.operation, b.ownerGeneration, again] as const;
+
 // The import's operation followed to its end (§8.6), or until the claim pauses, its run records
 // resume-failed, or a read made once the lease passed shows it lapsed (§11.3, as the CLI follows).
 function Progress({ b, again }: { b: Ingestion; again: () => void }) {
@@ -179,10 +183,10 @@ function Progress({ b, again }: { b: Ingestion; again: () => void }) {
     return () => clearTimeout(t);
   }, [b, again]);
   const op = b.operation;
+  const generation = b.ownerGeneration;
   useEffect(() => {
     if (client === undefined || op === null) return;
     const abort = new AbortController();
-    const generation = latest.current.b.ownerGeneration;
     let run = startRun(generation);
     setLines([]);
     setEnd(undefined);
@@ -202,7 +206,7 @@ function Progress({ b, again }: { b: Ingestion; again: () => void }) {
       }
     });
     return () => abort.abort();
-  }, [client, op, again]);
+  }, watchDeps(client, b, again));
   if (op === null) return null;
   return (
     <section aria-label="Progress">
@@ -295,6 +299,16 @@ export async function startETag(read: (path: string) => Promise<Load<Draft> | un
 // The leave guard asks while typed input is not yet sent.
 export const unsent = (input: { doc: string; marks: string }) => input.doc !== "" || input.marks !== "";
 
+// Reads a chosen file into the document field. Only the newest choice counts: a read of an earlier file
+// that finishes later neither replaces the newer text nor reports a failure.
+export function fileReader(set: (text: string) => void, note: (why: string) => void) {
+  let latest = 0;
+  return (f: { text: () => Promise<string> } | undefined) => {
+    const mine = ++latest;
+    void f?.text().then((t) => { if (mine === latest) set(t); }, () => { if (mine === latest) note("The file could not be read."); });
+  };
+}
+
 // The import wizard (B15) on one page: machine, draft, source, staging and review, optional marks.
 export function StartImport({ query }: { query: string }) {
   const q = new URLSearchParams(query);
@@ -337,7 +351,7 @@ export function StartImport({ query }: { query: string }) {
       reading.current = false;
     }
   };
-  const choose = (f: File | undefined) => void f?.text().then((t) => setTyped((x) => ({ ...x, doc: t })), () => setNote("The file could not be read."));
+  const choose = useRef(fileReader((t) => setTyped((x) => ({ ...x, doc: t })), setNote)).current;
   const label = params.kind === "drift-adoption" ? "Start drift adoption" : "Start import";
   return (
     <>

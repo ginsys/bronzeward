@@ -4,7 +4,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import type { components } from "./api/v1";
 import { forgetETag, keepETag, keptETag } from "./drafts.tsx";
 import { WritesProvider } from "./forms.tsx";
-import { againPath, allowed, documentRefusal, ended, type Ingestion, MAX_DOCUMENT, onEvent, sendStart, StartImport, type StartInput, startBody, startETag, startParams, startRun, started, stopsWatch, unsent } from "./imports.tsx";
+import { againPath, allowed, documentRefusal, ended, fileReader, type Ingestion, MAX_DOCUMENT, onEvent, sendStart, StartImport, type StartInput, startBody, startETag, startParams, startRun, started, stopsWatch, unsent, watchDeps } from "./imports.tsx";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import { eventLine } from "./progress.ts";
 import { Client, type ReadResult } from "./request.ts";
@@ -369,6 +369,59 @@ describe("what ends the watch of an import's operation (§11.3, the CLI's follow
     // A read made then that shows a renewed lease does not.
     expect(stopsWatch(undefined, { b: ing({ leaseUntil: "2026-11-01T07:10:00Z" }), at: at("07:05:11") }, at("07:05:12"))).toBe(false);
     expect(stopsWatch("paused", { b: ing(), at: 0 }, 0)).toBe(true);
+  });
+});
+
+describe("the progress watch follows the claim generation (Codex and Copilot threads on web/src/imports.tsx:205)", () => {
+  test("the same operation at a new claim generation restarts the watch, and the new run's pause ends it", () => {
+    const client = new Client();
+    const again = () => {};
+    const first = watchDeps(client, ing({ operation: "op1", ownerGeneration: 1 }), again);
+    expect(watchDeps(client, ing({ operation: "op1", ownerGeneration: 1 }), again)).toEqual(first);
+    expect(watchDeps(client, ing({ operation: "op1", ownerGeneration: 2 }), again)).not.toEqual(first);
+    expect(watchDeps(client, ing({ operation: "op2", ownerGeneration: 1 }), again)).not.toEqual(first);
+    // The restarted watch begins at the new generation: it settles on that run's pause, not on the earlier run's.
+    const events: [string, unknown][] = [["paused", { generation: 1 }], ["continued", { generation: 2 }], ["paused", { generation: 2 }]];
+    expect(events.reduce((s, [t, d]) => onEvent(s, t, d), startRun(2)).settled).toBe("paused");
+  });
+});
+
+describe("a file chosen while an earlier one is still being read (Copilot thread on web/src/imports.tsx:340)", () => {
+  const deferred = () => {
+    let done: (t: string) => void = () => {};
+    let fail: () => void = () => {};
+    const text = new Promise<string>((res, rej) => { done = res; fail = () => rej(new Error("x")); });
+    return { file: { text: () => text }, done, fail };
+  };
+  const settle = async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); };
+  test("when the first read finishes last, the second file's text is kept", async () => {
+    const got: string[] = [];
+    const notes: string[] = [];
+    const choose = fileReader((t) => got.push(t), (n) => notes.push(n));
+    const a = deferred();
+    const b = deferred();
+    choose(a.file);
+    choose(b.file);
+    b.done("second");
+    await settle();
+    a.done("first");
+    await settle();
+    expect(got).toEqual(["second"]);
+    expect(notes).toEqual([]);
+  });
+  test("a failed read of a superseded file says nothing, and a failed read of the newest does", async () => {
+    const notes: string[] = [];
+    const choose = fileReader(() => {}, (n) => notes.push(n));
+    const a = deferred();
+    const b = deferred();
+    choose(a.file);
+    choose(b.file);
+    a.fail();
+    await settle();
+    expect(notes).toEqual([]);
+    b.fail();
+    await settle();
+    expect(notes).toEqual(["The file could not be read."]);
   });
 });
 
