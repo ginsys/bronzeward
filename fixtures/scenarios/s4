@@ -315,8 +315,10 @@ cli_apply() {
   check "$ref" 'on the timeline, in order: the commitment, the attempt, the response, the states to completed, the Applied change' states_in_order
   check "$ref" "Applied the release from source operation, the baseline revision one more, one Applied change entry" applied_moved
   check "$ref" "machine timeline as h-viewer shows the plan's entry and the approval" ctl timeline h-viewer machine timeline "$machine_w" --all
-  check "$ref" "the timeline's plan line names the plan and the release" cli_kept timeline "  plan +plan $plan, operation apply-config, release $rel, by "
-  check "$ref" "the timeline's approval line names the plan" cli_kept timeline "  approval +approval apr_[a-z2-7]{26}, plan $plan, by h-approver "
+  check "$ref" "the timeline's plan line names the plan and the release" cli_kept timeline "  plan +plan $plan, operation apply-config, release $rel, by idn_[a-z2-7]{26} \(publisher\)"
+  # The timeline names the acting principal by its ID and role (docs/spec/operator-experience.md:774), never
+  # by the issuer's subject.
+  check "$ref" "the timeline's approval line names the plan and the approver's principal" cli_kept timeline "  approval +approval apr_[a-z2-7]{26}, plan $plan, by idn_[a-z2-7]{26} \(approver\)"
   check "$ref" 'operation show as h-viewer prints the same completion' ctl show h-viewer operation show "$op"
   check "$ref" "operation show's completion line names the release, without the server's time" cli_kept show "^Completed: applied $rel, "
   rm -f -- "$cli_dir"/h-*.json

@@ -738,9 +738,11 @@ cli_prepare() {
       --issuer http://127.0.0.1:5556 --client-id fixture-cli --oidc-token-file "$cli_dir/$who.json"
   done
 }
-# ctl_env <args>...: bronzewardctl with the run directory's configuration and no session bus.
+# ctl_env <args>...: bronzewardctl with the run directory's configuration and no session bus. The caller's
+# BRONZEWARD_TOKEN_FILE and BRONZEWARD_CONTEXT are removed: the first takes precedence over each context's
+# token file and would send the caller's own credentials to the fixture.
 ctl_env() {
-  XDG_CONFIG_HOME=$cli_dir/config XDG_STATE_HOME=$cli_dir/state XDG_CACHE_HOME=$cli_dir/cache \
+  env -u BRONZEWARD_TOKEN_FILE -u BRONZEWARD_CONTEXT XDG_CONFIG_HOME=$cli_dir/config XDG_STATE_HOME=$cli_dir/state XDG_CACHE_HOME=$cli_dir/cache \
     DBUS_SESSION_BUS_ADDRESS=disabled: "$ctl_bin" "$@"
 }
 # ctl <name> <human> <args>...: bronzewardctl as the human, with a token minted now (printf is a

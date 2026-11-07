@@ -197,7 +197,8 @@ facilitator only. Setup `tN` means `fixtures/participants/session tN`.
   reader checks that a stream resumed with `Last-Event-ID` follows the apply to completion, with
   no event lost or repeated. Beside it, the CLI's `operation watch` follows the same apply through
   the same 60 s stop with no help: it waits for A, resumes the stream, and ends with exit 0 and the
-  completion line. The step fails if it does not. The web interface has no operation timeline
+  completion line. A is stopped only after the watch has printed its first event, and the watch must end
+  within 120 s of the apply's completion. The step fails if it does not. The web interface has no operation timeline
   yet; that half waits for ginsys/bronzeward#359 (web timeline), and T9's measures do not cover a
   resumed stream there. A participant on the CLI runs `operation watch <operation>` and sees one
   retry notice per read while A is down.
