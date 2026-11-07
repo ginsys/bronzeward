@@ -118,7 +118,7 @@ hold go-yaml v3.0.5.
 ```sh
 cd experiments/flow-key-lookahead
 ./selftest.sh                                 # compare.mjs must fail on planted failures
-node pins.mjs                                 # the unit cases of the model (79 checks)
+node pins.mjs                                 # the unit cases of the model (82 checks)
 ./build-oracles.sh <work>                     # the three oracles, from go-yaml in the module cache
 node gen-small-sets.mjs <work>                # matrix, probes, hyp, small and edge .json
 ./run-compare.sh <work> <work>/matrix.json    # likewise the other small sets
@@ -137,15 +137,19 @@ when it meets four conditions:
 - It predicts a refusal, by "misplaced" or by "error", only for documents that the real oracle
   refuses (no false refusal).
 - A model run with the guard switched on reports "misplaced" for no document.
-- The scan loop of the model reaches the end of the stream for every document. A document where it
-  hits its bound has the verdict "guard-exhausted". It has its own count and it fails the run.
+- The scan loop of the model never hits its bound, in either model call. A document where it does
+  has the verdict "guard-exhausted", its own count, and it fails the run. A scan that ends early on a
+  scanner error is not a hit.
 
 The exit status is the pass rule. `compare.mjs` exits 1 when a condition fails, and it stops with
 an error on an empty set or when an oracle file has a different length. `selftest.sh` plants two
 false refusals (one by a "misplaced" prediction, one by a scanner error), a missed document, an
 empty set and a length mismatch. It requires a nonzero exit for each, and exit 0 for a passing
 case. It also plants a loop bound that the scan reaches (`--max-steps 1`). It requires a nonzero
-exit and a count of 1 in both guard-exhausted counts, and it runs `pins.mjs`.
+exit, a count of 1 in both guard-exhausted counts and a message that names one document, and it
+runs `pins.mjs`. The pins try every loop bound below the smallest one that reaches the end of the
+stream for a bugged document. They require "guard-exhausted" at each, and they require that some of
+those bounds already hold events.
 
 The patched oracle can refuse a document for another reason, such as `[,]`. The model can report "misplaced" there, because the bug fires there too.
 
@@ -332,8 +336,8 @@ guard-exhausted counts.
   only and 410 with a mark after the first character), counted by the run w688-bom at 1aa97028.
 - The self-test does not plant a guard-on misplaced document, because a plant needs a broken
   model. Only a reading of `compare.mjs` shows the "no misplaced insert with the guard on" leg.
-- At 4d9b7345 the model has 485 lines. The experiment as a whole adds 1110 lines under `experiments`, of which
-  64 are patch files, 66 are the self-test and 81 are the unit cases of the model (`pins.mjs`). This is more than the 600-line budget. The
+- At 65f6a473 the model has 485 lines. The experiment as a whole adds 1130 lines under `experiments`, of which
+  64 are patch files, 73 are the self-test and 98 are the unit cases of the model (`pins.mjs`). This is more than the 600-line budget. The
   generators and the Go oracles are the reproduction that an investigation must land, so they
   stay.
 
