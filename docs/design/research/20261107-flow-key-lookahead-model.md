@@ -189,8 +189,8 @@ come from the run with stamp w688-gbom2 at 32e7bc5e, unless a note names another
 - Edge set: 13 documents. 8 have an initial byte order mark, the line breaks U+0085, U+2028 and
   U+2029, and a key of 511 astral characters with an ASCII twin. 6 of these 8 are decided by the
   bug and 2 are accepted. One has a byte order mark before `? a`, then `: b`, then `[? b]: !bwref
-  x/foo` (verdict "misplaced"). The other has a byte order mark before `k: !bwref x/foo` and ` bar`
-  on the next line (verdict "error"). The 5 other documents come from the hosted and local reviews:
+  x/foo`. The other has a byte order mark before `k: !bwref x/foo` and ` bar`
+  on the next line. The 5 other documents come from the hosted and local reviews:
   - `a: 1`, `# c`, a tab and `# d`, then `b: !bwref x/foo`. go-yaml accepts it. The model calls it
     "unsupported", so it is not compared. The model before this repair reported a scanner error,
     which is a false refusal.
@@ -314,7 +314,10 @@ come from the run with stamp w688-gbom2 at 32e7bc5e, unless a note names another
   comparison counted it as missed and exited 1 (run w688-gbom at 8878180d). The edge set dropped it
   (7eba3c8f). The verdict "unsupported" for a two-mark document is pinned in the self-test
   instead. S8 holds 5 such documents and none is decided by the bug (4 accepted by both oracles, 1
-  refused by both). S9 and s13 hold 0 (run w688-gbom2 at 32e7bc5e).
+  refused by both). S9 and s13 hold 0 (run w688-gbom2 at 32e7bc5e). The same test also skips a mark at
+  column 0 that a refill of the input buffer (`readerc.go:146-153`) moves to the buffer start, and the
+  model does not port the refill, so in a long document its verdict can differ from go-yaml in either
+  direction (run w688-f1 at 5c1602f8).
 - S9 holds 1584 documents with a byte order mark and S8 holds 420 (10 with the mark at the start
   only and 410 with a mark after the first character), counted by the run w688-bom at 1aa97028.
 - The self-test does not plant a guard-on misplaced document, because a plant needs a broken
