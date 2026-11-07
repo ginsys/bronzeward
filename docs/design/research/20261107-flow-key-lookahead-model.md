@@ -28,7 +28,7 @@ gap. Section "Recommendation" gives the advice.
 | Oracle "real" | the oracle of `experiments/scanner-cross-line`, on unmodified go-yaml |
 | Oracle "patched" | the same oracle on go-yaml with one guarded delete (`go-yaml-guard.patch`) |
 | Oracle "counters" | `instr-oracle` on go-yaml with two counters (`go-yaml-instrument.patch`) |
-| Run head | 14162ed0, with a clean checkout. The oracle outputs of s13, S9 and S8 come from the run with stamp w688-l3 at 77eff0e0. The oracles and the sets did not change after it. The model compare of those three sets is the run with stamp w688-m3, on the saved outputs. The five small sets went through the three oracles again in the run with stamp w688-c1. The commit after it changes this record only. |
+| Run head | 9941e4b8, with a clean checkout. The oracle outputs of s13, S9 and S8 come from the run with stamp w688-l3 at 77eff0e0. The oracles and the sets did not change after it. The model compare of those three sets is the run with stamp w688-m4, on the saved outputs. The five small sets went through the three oracles again in the run with stamp w688-green, with the model file of 9941e4b8. The commit after it changes this record only. |
 
 All sets are synthetic. The small sets come from `gen-small-sets.mjs`. The flow-key set comes from
 `gen-flow-key-set.mjs`, which is the generator in the body of #657 (named S12 there). The scanner
@@ -166,10 +166,10 @@ small sets and for s13, S9 and S8.
 | Probe 5 and 6 of #657, plus root and `a:` shapes | 22 | 13 | 9 | 9 | 22 | 0 | 0 |
 | Hypothesis set (21 flow keys x 6 contexts) | 126 | 90 | 18 | 21 | 113 | 13 | 0 |
 | Small keys of `?` and `:` (below) | 45 | 0 | 15 | 45 | 45 | 0 | 0 |
-| Edge set: BOM, Unicode line breaks, astral key, tab after a comment, shorthand tags | 11 | 2 | 7 | 7 | 9 | 1 | 1 |
+| Edge set: BOM, Unicode line breaks, astral key, tab after a comment, shorthand tags, tab in a plain scalar continuation | 12 | 2 | 7 | 7 | 10 | 1 | 1 |
 | s13, the flow-key set of #657 | 23247 | 15099 | 8085 | 8085 | 23184 | 63 | 0 |
-| S9 | 38208 | 5955 | 0 | 0 | 26277 | 11931 | 0 |
-| S8 | 245696 | 53570 | 0 | 0 | 118814 | 115662 | 11220 |
+| S9 | 38208 | 5955 | 0 | 0 | 27021 | 11187 | 0 |
+| S8 | 245696 | 53570 | 0 | 0 | 139878 | 94598 | 11220 |
 
 Notes on the rows:
 
@@ -183,12 +183,12 @@ Notes on the rows:
   reason, such as `[?]` and `[:b]`. The model reports "misplaced" for all 45 and the real run
   refuses all 45. `gen-small-sets.mjs` writes the set with the contexts `K: V`, `a:\n  K: V` and
   `a: b\nK: V`, where `V` is `!bwref x/foo\n`.
-- Edge set: 11 documents. 8 have an initial byte order mark, the line breaks U+0085, U+2028 and
+- Edge set: 12 documents. 8 have an initial byte order mark, the line breaks U+0085, U+2028 and
   U+2029, and a key of 511 astral characters with an ASCII twin. 6 of these 8 are decided by the
   bug and 2 are accepted. Before the first repair, the model missed 4 of the 6 and refused 2
   accepted documents. One has a byte order mark before `? a`, then `: b`, then `[? b]: !bwref
   x/foo` (verdict "misplaced"). The other has a byte order mark before `k: !bwref x/foo` and ` bar`
-  on the next line (verdict "error"). The 3 other documents come from the hosted review:
+  on the next line (verdict "error"). The 4 other documents come from the hosted reviews:
   - `a: 1`, `# c`, a tab and `# d`, then `b: !bwref x/foo`. go-yaml accepts it. The model calls it
     "unsupported", so it is not compared. The model before this repair reported a scanner error,
     which is a false refusal.
@@ -197,28 +197,58 @@ Notes on the rows:
     is one "not compared" document.
   - `[? !t, x]: !bwref x/foo`. A shorthand tag swallows the `,` too, and the bug decides the
     document. The model says "misplaced", so it is the 7th document that the bug decides.
+  - `a:`, then `  b: [x`, then ` y`, a tab and `z]`, each on its own line. No flow key is involved, so
+    the bug decides nothing. go-yaml accepts the document. The model before this repair reported a
+    scanner error, "found a tab character that violates indentation", which is a false refusal.
+    The model set its leading-break flag at the first line break (`model.mjs:290`) and never
+    cleared it, so it checked the tab after `y`. go-yaml clears the flag when it reads the next
+    character (`scannerc.go:2738-2753`), so it does not check that tab. The repair clears the flag
+    at the same place (`model.mjs:281`). The same flag also sets the simple-key flag at the end of
+    the scalar (`model.mjs:296`, `scannerc.go:2830`). That is why the repair moves counts in S9
+    and S8 (see the notes below).
 - s13: the count of 8085 equals the 8085 names that the scanner on main lists in documents that
   go-yaml refuses (#657). The counters saw the event in all 8085. 63 documents refuse in both runs
   for another reason, and the model says "ok" for them. They are outside the class and are the 63
   "not compared" documents.
-- S9: no document is decided by the bug. The model reports a scanner error for 12570 documents,
-  and go-yaml refuses all of them. The model says "ok" for the other 25638 documents. go-yaml
-  accepts 13707 of them and refuses 11931 for a reason that the model does not port. The 11931
-  are the "not compared" documents.
+- S9: no document is decided by the bug. The model reports a scanner error for 13314 documents,
+  and go-yaml refuses all of them. The model says "ok" for the other 24894 documents. go-yaml
+  accepts 13707 of them and refuses 11187 for a reason that the model does not port. The 11187
+  are the "not compared" documents. (Counts: `model:error` 13314 and `model:ok` 24894 in the first
+  line of the w688-m4 output for S9, and 13707 + 11187 = 24894.)
 - S9 before the repair: the model at 749194e7 reported a scanner error for 12606 documents. go-yaml
   accepted 120 of them, so the model gave 120 false refusals, with document 33458 among them. That
   document is `k: !bwref x/foo` and ` bar` on the next line, after a byte order mark. The old
   comparator did not count a scanner error as a false refusal, so it hid all 120. The repaired
   model gives 0 on the same set.
 - S8: no document is decided by the bug and the model reports "misplaced" for none. The model
-  reports a scanner error for 56180 documents, and go-yaml refuses all of them. The model reports
+  reports a scanner error for 77244 documents, and go-yaml refuses all of them. The model reports
   "unsupported" for 11220 documents: 11148 with a directive and 72 with a tab after a comment
-  line. go-yaml refuses 7518 of them and accepts 3702. These 11220 and 115662 documents that both
-  oracles refuse for another reason are the 126882 "not compared" documents.
-- S8, the counters: 3806 documents are 2903 plus 903. These are the documents with the key
+  line. go-yaml refuses 7518 of them and accepts 3702. These 11220 and 94598 documents that both
+  oracles refuse for another reason are the 105818 "not compared" documents. That is 43.07% of
+  S8. (Counts: `model:error` 77244 and `not compared` 94598 in the first line of the w688-m4
+  output for S8, and 11220 + 94598 = 105818.)
+- The repair of the leading-break flag (9941e4b8) moves 744 documents of S9 and 21064 documents
+  of S8 from the verdict "ok" to a scanner error. These are the only verdict changes in the two
+  sets, and go-yaml and the patched oracle refuse all of them. In the ten samples that the
+  comparison printed (the first five of each set), the model's new error is the go-yaml reason
+  "mapping values are not allowed in this context". The S9 samples are `k: !bwref x/foo` with a
+  continuation line `bar, k: v]`. The S8 samples are a quoted key `"k"`, then `:!bwref x/bar` on
+  the next line, then `b: !bwref x/foo`. The change is 12570 + 744 =
+  13314 scanner errors in S9 and 56180 + 21064 = 77244 in S8, and 744 and 21064 fewer "not
+  compared" documents. No document is a false refusal or a miss.
+- S8, the error text: the repair also changes the text of the scanner error for 3253 documents
+  (S9: none), with the verdict "error" before and after. The old text was "found unexpected end of
+  stream" for 2436 of them, "could not find expected ':'" for 481, "found character that cannot
+  start any token" for 288 and "found unexpected document indicator" for 48. All 3253 now read
+  "mapping values are not allowed in this context". go-yaml and the patched oracle refuse all of
+  them. The new text equals the go-yaml reason in 3218 of them (2408 + 474 + 288 + 48). In the
+  other 35, go-yaml refuses for another reason, and the old text matched it in none. No count of
+  this record uses the text of an error.
+- S8, the counters: 3806 documents are 2902 plus 904. These are the documents with the key
   `instr hit:true` and a model verdict that is not "misplaced" (`compare.mjs:65`). A hit means that
   the counter `consumed` is above 0 (`compare.mjs:64`): go-yaml consumed a head token while a
-  simple key stood on it. In 2903 of them the model says "ok". In 903 it reports a scanner error.
+  simple key stood on it. In 2902 of them the model says "ok". In 904 it reports a scanner error.
+  The repair moved one of these documents from "ok" to a scanner error (2903 and 903 before).
   None is a miss, for three reasons:
   - The count of a misplaced insert that the model does not predict (`compare.mjs:66`, the key
     `instr misplaced but model not`) is 0. The key is absent from the count line. The `instr` keys
@@ -243,6 +273,10 @@ Notes on the rows:
   document `a: 1`, `# c`, a tab and `# d`, then `b: V`). The model now calls such a document
   "unsupported". S8 holds 72 of them, and go-yaml refuses all 72 for another reason. s13 and S9
   hold none. The model makes no claim for a tab inside a run of comments.
+- A tab inside the continuation of a plain scalar is ported. The model before the repair refused
+  it (the edge document `a:`, `  b: [x`, ` y`, a tab and `z]`), and no document of S9 or S8 showed
+  that as a false refusal, so the sets alone did not catch it. The edge document pins it now. A
+  tab in another shape is tested only by what S9, S8 and the edge set hold.
 - The model does not check the characters that the go-yaml reader refuses, such as control
   characters, and it does not read UTF-16 input. The oracle receives UTF-8.
 - The sets come from the families in #657 and #654. The review of this record found two gaps
@@ -252,11 +286,11 @@ Notes on the rows:
   refusals (see the S9 note). The test existed and its failure was ignored, because the old
   comparator did not count a scanner error as a false refusal. The repair fixes the comparator and
   the model.
-- Only the edge set (1 document), S9 (3456 documents) and S8 (2486 documents) hold tab characters. The flow-key families hold
+- Only the edge set (2 documents), S9 (3456 documents) and S8 (2486 documents) hold tab characters. The flow-key families hold
   none. S9 holds 1584 documents with a byte order mark and S8 holds 420.
 - The self-test does not plant a guard-on misplaced document, because a plant needs a broken
   model. Only a reading of `compare.mjs` shows the "no misplaced insert with the guard on" leg.
-- The model has 446 lines. The experiment as a whole adds 927 lines under `experiments`, of which
+- The model has 449 lines. The experiment as a whole adds 933 lines under `experiments`, of which
   64 are patch files and 36 are the self-test. This is more than the 600-line budget. The
   generators and the Go oracles are the reproduction that an investigation must land, so they
   stay.
@@ -276,13 +310,13 @@ with 0 missed documents and 0 false refusals. The result covers the compared doc
 says nothing about the documents that were never compared:
 
 - s13: 63 of 23247 documents were never compared.
-- S9: 11931 of 38208 documents were never compared.
-- S8: 126882 of 245696 documents were never compared. This is more than half of S8 (51.64%). A
-  result of 0 and 0 over the other 118814 documents is no evidence for the whole set. Of the
-  126882, 11220 are documents that the model does not port: 11148 have a directive and 72 have a
-  tab after a comment line. The other 115662 are documents that both oracles refuse for another
-  reason, and the model says "ok" for them.
-- The edge set: 2 of 11 documents were never compared. One has a tab after a comment line, which
+- S9: 11187 of 38208 documents were never compared.
+- S8: 105818 of 245696 documents were never compared. This is 43.07% of S8. A result of 0 and 0
+  over the other 139878 documents is no evidence for the whole set. Of the 105818, 11220 are
+  documents that the model does not port: 11148 have a directive and 72 have a tab after a
+  comment line. The other 94598 are documents that both oracles refuse for another reason, and
+  the model says "ok" for them.
+- The edge set: 2 of 12 documents were never compared. One has a tab after a comment line, which
   the model does not port. In the other, both oracles refuse a shorthand tag that swallows `]`.
 
 The result is not a proof for every document, and the review found two gaps that the sets did not
