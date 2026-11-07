@@ -309,6 +309,12 @@ export function fileReader(set: (text: string) => void, note: (why: string) => v
   };
 }
 
+// Text typed or pasted into the document field ends a file read that is still pending, so the read cannot
+// replace the newer text when it finishes (choose(undefined) moves the reader's counter and reads nothing).
+export function typedDocument(cancelRead: (f: undefined) => void, set: (text: string) => void) {
+  return (text: string) => { cancelRead(undefined); set(text); };
+}
+
 // The import wizard (B15) on one page: machine, draft, source, staging and review, optional marks.
 export function StartImport({ query }: { query: string }) {
   const q = new URLSearchParams(query);
@@ -352,6 +358,7 @@ export function StartImport({ query }: { query: string }) {
     }
   };
   const choose = useRef(fileReader((t) => setTyped((x) => ({ ...x, doc: t })), setNote)).current;
+  const typeDocument = typedDocument(choose, (t) => setTyped((x) => ({ ...x, doc: t })));
   const label = params.kind === "drift-adoption" ? "Start drift adoption" : "Start import";
   return (
     <>
@@ -382,7 +389,7 @@ export function StartImport({ query }: { query: string }) {
         </fieldset>
         {source === "document" && (
           <>
-            <p><label>Document (YAML):<br /><textarea rows={16} cols={80} value={doc} onChange={(e) => setTyped((x) => ({ ...x, doc: e.target.value }))} {...NO_ASSIST} /></label></p>
+            <p><label>Document (YAML):<br /><textarea rows={16} cols={80} value={doc} onChange={(e) => typeDocument(e.target.value)} {...NO_ASSIST} /></label></p>
             <p><label>Or read it from a file:{" "}<input type="file" accept=".yaml,.yml" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; choose(f); }} /></label></p>
           </>
         )}
