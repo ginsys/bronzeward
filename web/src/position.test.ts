@@ -1566,6 +1566,16 @@ describe("a tag on an explicit key or an alias key", () => {
     expect(references(text)).toEqual(["x/foo"]);
   });
 
+  // The test for an explicit key reads the text before the tag on its line, once per tag. A flow line
+  // that holds many tags is the shape where that cost could grow with the square of the line.
+  test("a flow line of 20,000 tags is scanned in near linear time and lists every name", () => {
+    const text = `[${Array.from({ length: 20000 }, (_, i) => `!bwref x/foo${i}`).join(", ")}]\n`;
+    const start = performance.now();
+    const found = references(text);
+    expect(performance.now() - start).toBeLessThan(1000);
+    expect(found).toHaveLength(20000);
+  });
+
   // A known gap: the tag of a value that a later alias key repeats. The server refuses the document
   // at the alias use (tag-placement, the alias branch of internal/ingest/declare.go). The value's own
   // tag is listed where it stands, as before. Listing nothing needs a scan ahead for the alias key,
