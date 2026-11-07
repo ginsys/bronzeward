@@ -1,0 +1,91 @@
+// Command instr-oracle decodes each YAML document with an instrumented go-yaml v3.0.5 and writes,
+// for each, the decoder's error and the two counters that go-yaml-instrument.patch adds:
+//
+//   - misplaced: KEY or BLOCK-MAPPING-START inserts at a negative queue position, the token it
+//     belongs before having been consumed already;
+//   - consumed: head tokens the parser consumed while a simple key still stood on them.
+//
+// It builds only with the replace line that build-oracles.sh adds to
+// go.mod, because the counters exist only in the patched copy of go-yaml.
+//
+// Usage: go run . <set.json> <result.json>
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+
+	"go.yaml.in/yaml/v3"
+)
+
+type result struct {
+	Err       string `json:"err"`
+	Misplaced int    `json:"misplaced"`
+	Consumed  int    `json:"consumed"`
+}
+
+func decode(doc string) result {
+	yaml.MisplacedInserts = 0
+	yaml.ConsumedPossible = 0
+	var r result
+	dec := yaml.NewDecoder(bytes.NewReader([]byte(doc)))
+	for {
+		var n yaml.Node
+		err := dec.Decode(&n)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			r.Err = err.Error()
+			break
+		}
+	}
+	r.Misplaced = yaml.MisplacedInserts
+	r.Consumed = yaml.ConsumedPossible
+	return r
+}
+
+func main() {
+	if len(os.Args) != 3 {
+		fmt.Fprintln(os.Stderr, "usage: go run . <set.json> <result.json>")
+		os.Exit(2)
+	}
+	raw, err := os.ReadFile(os.Args[1])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	var elems []json.RawMessage
+	if err := json.Unmarshal(raw, &elems); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	out := make([]result, len(elems))
+	for i, e := range elems {
+		var doc string
+		if json.Unmarshal(e, &doc) != nil {
+			var obj struct {
+				Doc string `json:"doc"`
+			}
+			if err := json.Unmarshal(e, &obj); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			doc = obj.Doc
+		}
+		out[i] = decode(doc)
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if err := os.WriteFile(os.Args[2], b, 0o644); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
