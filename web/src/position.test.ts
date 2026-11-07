@@ -1558,12 +1558,34 @@ describe("a tag on an explicit key or an alias key", () => {
     ["an explicit key with the tag on the next line, after a byte order mark", "\ufeff?\n  !bwref x/foo\n: v\n"],
     ["an explicit key after two byte order marks (go-yaml refuses)", "\ufeff\ufeff? !bwref x/foo\n: v\n"],
     ["an explicit key with the tag on the next line, after two byte order marks (go-yaml refuses)", "\ufeff\ufeff?\n  !bwref x/foo\n: v\n"],
+    // The tag can follow the `?` across line breaks, as CRLF or LF, blank lines and anchors. In a block
+    // the tag line is more indented than the `?` line. In a flow collection go-yaml needs no
+    // indentation. The oracle reads each of these as unfit.
+    ["an explicit key with CRLF line breaks", "?\r\n  !bwref x/foo\r\n: v\r\n"],
+    ["an explicit key after a sequence dash with CRLF line breaks", "- ?\r\n    !bwref x/foo\r\n  : v\r\n"],
+    ["an explicit key with an anchor before the line break", "? &k\n  !bwref x/foo\n: v\n*k : w\n"],
+    ["an explicit key with an anchor after the line break", "?\n  &k !bwref x/foo\n: v\n"],
+    ["an explicit key with an anchor before a line break after a dash", "- ? &k\n    !bwref x/foo\n  : v\n"],
+    ["an explicit key with an anchor and blank lines before the tag", "? &k\n\n\n  !bwref x/foo\n: v\n"],
+    ["an explicit key with blank lines before the tag", "?\n\n\n  !bwref x/foo\n: v\n"],
+    ["an explicit key with a comment before the tag", "? # c\n  !bwref x/foo\n: v\n"],
+    ["a flow sequence key with the tag on the next line", "[?\n !bwref x/foo]\n"],
+    ["a flow sequence key with the tag on the next line, not indented", "[?\n!bwref x/foo]\n"],
+    ["the first flow mapping key with the tag on the next line", "{?\n !bwref x/foo\n: v}\n"],
+    ["a flow mapping key after an entry with the tag on the next line", "{a: b, ?\n !bwref x/foo\n: v}\n"],
+    ["the same, not indented", "{a: b, ?\n!bwref x/foo\n: v}\n"],
+    ["a flow sequence key after a comma with the tag on the next line", "[a, ?\n !bwref x/foo]\n"],
+    ["a flow key with an anchor before the line break", "[? &k\n !bwref x/foo]\n"],
+    ["a flow key under a block key with the tag on the next line", "k: [?\n  !bwref x/foo]\n"],
+    ["a flow key under a nested block key with a less indented tag line", "k:\n  m: [?\n !bwref x/foo]\n"],
   ])("lists nothing for %s", (_, text) => {
     expect(references(text)).toEqual([]);
   });
   test.each([
     ["a sequence entry", "- !bwref x/foo\n"],
     ["a mapping value", "a: !bwref x/foo\n"],
+    ["a value after blank lines", "a:\n\n\n  !bwref x/foo\n"],
+    ["a value after a CRLF line break", "a:\r\n  !bwref x/foo\r\n"],
     ["the value of an explicit key", "? a\n: !bwref x/foo\n"],
     ["the value of an explicit key, after an anchor", "? a\n: &e !bwref x/foo\n"],
     ["the value of an explicit key that has another tag", "? !t a\n: !bwref x/foo\n"],
@@ -1591,6 +1613,25 @@ describe("a tag on an explicit key or an alias key", () => {
     const found = references(text);
     expect(performance.now() - start).toBeLessThan(1000);
     expect(found).toEqual([]);
+  });
+
+  // The walk crosses line breaks, so the cost per tag grows with the lines between a tag and the token
+  // before it. Those runs do not overlap either: 10,000 tags, each on a line after an anchor line of
+  // its own `? &k`, are read in time linear in the text.
+  test("10,000 explicit keys with the anchor and the tag on separate lines list nothing in near linear time", () => {
+    const text = Array.from({ length: 10000 }, (_, i) => `? &k${i}\n\n  !bwref x/foo${i}\n: v\n`).join("");
+    const start = performance.now();
+    const found = references(text);
+    expect(performance.now() - start).toBeLessThan(1000);
+    expect(found).toEqual([]);
+  });
+
+  // Two documents that go-yaml refuses, so the oracle has no answer for them. They pin the reading
+  // of the scanner and no go-yaml behavior. A tag line as indented as its `?` line is no key of that
+  // `?`, so the name is listed. Two anchors across the line break are skipped as one, so nothing is listed.
+  test("the same indentation as the question mark is listed, two anchors across the break are not (go-yaml refuses both)", () => {
+    expect(references("?\n!bwref x/foo\n: v\n")).toEqual(["x/foo"]);
+    expect(references("? &a\n  &b !bwref x/foo\n: v\n")).toEqual([]);
   });
 
   // A known gap: the tag of a value that a later alias key repeats. The server refuses the document

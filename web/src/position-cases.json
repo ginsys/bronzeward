@@ -629,6 +629,124 @@
    ]
   },
   {
+   "name": "tagged-explicit-key-crlf",
+   "source": "ginsys/bronzeward#637",
+   "doc": "?\r\n  !bwref x/foo\r\n: v\r\n",
+   "want": []
+  },
+  {
+   "name": "tagged-explicit-key-crlf-in-sequence",
+   "source": "ginsys/bronzeward#637",
+   "doc": "- ?\r\n    !bwref x/foo\r\n  : v\r\n",
+   "want": []
+  },
+  {
+   "name": "tagged-explicit-key-anchor-before-break",
+   "source": "ginsys/bronzeward#637",
+   "doc": "? &k\n  !bwref x/foo\n: v\n*k : w\n",
+   "want": []
+  },
+  {
+   "name": "tagged-explicit-key-anchor-after-break",
+   "source": "ginsys/bronzeward#637",
+   "doc": "?\n  &k !bwref x/foo\n: v\n",
+   "want": []
+  },
+  {
+   "name": "tagged-explicit-key-anchor-break-in-sequence",
+   "source": "ginsys/bronzeward#637",
+   "doc": "- ? &k\n    !bwref x/foo\n  : v\n",
+   "want": []
+  },
+  {
+   "name": "tagged-explicit-key-anchor-blank-lines",
+   "source": "ginsys/bronzeward#637",
+   "doc": "? &k\n\n\n  !bwref x/foo\n: v\n",
+   "want": []
+  },
+  {
+   "name": "tagged-explicit-key-blank-lines",
+   "source": "ginsys/bronzeward#637",
+   "doc": "?\n\n\n  !bwref x/foo\n: v\n",
+   "want": []
+  },
+  {
+   "name": "tagged-explicit-key-comment",
+   "source": "ginsys/bronzeward#637",
+   "doc": "? # c\n  !bwref x/foo\n: v\n",
+   "want": []
+  },
+  {
+   "name": "tagged-flow-sequence-key-next-line",
+   "source": "ginsys/bronzeward#637",
+   "doc": "[?\n !bwref x/foo]\n",
+   "want": []
+  },
+  {
+   "name": "tagged-flow-sequence-key-next-line-column-0",
+   "source": "ginsys/bronzeward#637",
+   "doc": "[?\n!bwref x/foo]\n",
+   "want": []
+  },
+  {
+   "name": "tagged-flow-mapping-key-first-next-line",
+   "source": "ginsys/bronzeward#637",
+   "doc": "{?\n !bwref x/foo\n: v}\n",
+   "want": []
+  },
+  {
+   "name": "tagged-flow-mapping-key-after-entry-next-line",
+   "source": "ginsys/bronzeward#637",
+   "doc": "{a: b, ?\n !bwref x/foo\n: v}\n",
+   "want": []
+  },
+  {
+   "name": "tagged-flow-mapping-key-after-entry-column-0",
+   "source": "ginsys/bronzeward#637",
+   "doc": "{a: b, ?\n!bwref x/foo\n: v}\n",
+   "want": []
+  },
+  {
+   "name": "tagged-flow-sequence-key-after-comma-next-line",
+   "source": "ginsys/bronzeward#637",
+   "doc": "[a, ?\n !bwref x/foo]\n",
+   "want": []
+  },
+  {
+   "name": "tagged-flow-key-anchor-before-break",
+   "source": "ginsys/bronzeward#637",
+   "doc": "[? &k\n !bwref x/foo]\n",
+   "want": []
+  },
+  {
+   "name": "tagged-flow-key-under-block-key",
+   "source": "ginsys/bronzeward#637",
+   "doc": "k: [?\n  !bwref x/foo]\n",
+   "want": []
+  },
+  {
+   "name": "tagged-flow-key-under-nested-block-key",
+   "source": "ginsys/bronzeward#637",
+   "doc": "k:\n  m: [?\n !bwref x/foo]\n",
+   "want": []
+  },
+  {
+   "name": "value-after-blank-lines-control",
+   "source": "ginsys/bronzeward#637",
+   "doc": "a:\n\n\n  !bwref x/foo\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
+   "name": "value-after-crlf-control",
+   "source": "ginsys/bronzeward#637",
+   "doc": "a:\r\n  !bwref x/foo\r\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
    "name": "tagged-implicit-key",
    "source": "ginsys/bronzeward#637",
    "doc": "!bwref x/foo: v\n",

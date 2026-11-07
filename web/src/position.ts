@@ -291,63 +291,58 @@ function readTags(original: string): { found: { index: number; tag: string; name
   return { found, refused };
 }
 
-// Whether the tag at `tag` is a property of an explicit key: the `?` indicator comes right before it,
-// on its line (`? !bwref x/foo`, also after sequence dashes, a flow opener or comma, and after one
-// anchor), or alone at the end of the nearest line above (`?` then the tag on the next line, more
-// indented). Only a key that is a scalar counts: the entry of a collection that is a key
+// Whether the tag at `tag` is a property of an explicit key: the `?` indicator comes before it with only
+// blanks, line breaks (LF or CRLF), comments (blanked in `masked`) and anchors between (`? !bwref x/foo`,
+// `?` then the tag on the next line, `? &k` then the tag on the next line). The `?` stands at the start of
+// its line, after sequence dashes (`- ?`), or after a flow opener or comma (`[?`, `{a: b, ?`). In a block
+// the tag on a later line must be more indented than the `?` line. In a flow collection go-yaml needs no
+// indentation. Only a key that is a scalar counts: the entry of a collection that is a key
 // (`? - !bwref x/foo`) is no explicit key's own tag.
 //
-// The text before the tag on its line is read backward from the tag and stops at the nearest token, not
-// at the start of the line. The pattern it stands for is
-// `(?:^|[[{,])[ \t]*(?:-[ \t]+)*\?[ \t]+(?:&[0-9A-Za-z_-]+[ \t]+)*$` on that text, and a text of blanks only
-// goes to the line above. The cost per tag is the run of blanks and anchors right before it. Runs of
-// two tags on one line do not overlap, so a flow line of 20,000 tags is read in time linear in the line.
-const KEY_INDICATOR_LINE = /^[ \t]*(?:-[ \t]+)*\?[ \t]*$/;
+// The text before the tag is read backward from the tag and stops at the nearest token that is no
+// anchor. The cost per tag is the run of blanks, line breaks and anchors right before it. Runs of two
+// tags do not overlap, so a flow line of 20,000 tags is read in time linear in the line.
 const isBlank = (c: string | undefined) => c === " " || c === "\t";
+const isSpace = (c: string | undefined) => isBlank(c) || c === "\r" || c === "\n";
 const isName = (c: string | undefined) => c !== undefined && /[0-9A-Za-z_-]/.test(c);
-// Whether the text before `tag` on its line ends in `? ` and anchors, and the `?` comes after the line
-// start or a `[`, `{` or `,`, with only blanks and `- ` entries between.
-function questionBefore(masked: string, tag: number): boolean {
+// The number of blanks at `at`, the column of the first character of a line that starts there.
+function leading(masked: string, at: number): number {
+  let n = 0;
+  while (isBlank(masked[at + n])) n++;
+  return n;
+}
+function explicitKeyTag(masked: string, tag: number): boolean {
+  // go-yaml drops the byte order mark at the start of the stream, so it stands before the line start.
+  const floor = bom(masked, 0);
   let i = tag;
-  let question = -1;
-  while (question < 0) {
+  let broke = false;
+  for (;;) {
     const end = i;
-    while (i > 0 && isBlank(masked[i - 1])) i--;
-    if (i === end || i === 0) return false;
-    if (masked[i - 1] === "?") {
-      question = i - 1;
-      break;
+    while (i > floor && isSpace(masked[i - 1])) {
+      if (masked[i - 1] === "\n") broke = true;
+      i--;
     }
+    if (i === end || i === floor) return false;
+    if (masked[i - 1] === "?") break;
     let j = i;
     while (isName(masked[j - 1])) j--;
-    if (j === i || j === 0 || masked[j - 1] !== "&") return false;
+    if (j === i || masked[j - 1] !== "&") return false;
     i = j - 1;
   }
-  let p = question;
+  let p = i - 1;
   for (;;) {
     const end = p;
-    while (p > 0 && isBlank(masked[p - 1])) p--;
-    // go-yaml drops the byte order mark at the start of the stream, so it stands before the line start.
-    const c = p > bom(masked, 0) ? masked[p - 1] : "\n";
+    while (p > floor && isBlank(masked[p - 1])) p--;
+    const c = p > floor ? masked[p - 1] : "\n";
     if (c === "-") {
       if (p === end) return false;
       p--;
       continue;
     }
-    return c === "\n" || c === "[" || c === "{" || c === ",";
+    if (c === "[" || c === "{" || c === ",") return true;
+    if (c !== "\n") return false;
+    return !broke || leading(masked, p) < leading(masked, masked.lastIndexOf("\n", tag - 1) + 1);
   }
-}
-function explicitKeyTag(masked: string, tag: number): boolean {
-  let start = tag;
-  while (start > 0 && masked[start - 1] !== "\n" && /\s/.test(masked[start - 1]!)) start--;
-  if (start > 0 && masked[start - 1] !== "\n") return questionBefore(masked, tag);
-  for (let e = start - 1; e >= 0; ) {
-    const s = e === 0 ? 0 : masked.lastIndexOf("\n", e - 1) + 1;
-    const l = masked.slice(s + bom(masked, s), e);
-    if (l.trim() !== "") return KEY_INDICATOR_LINE.test(l) && indent(l) < indent(lineAt(masked, start));
-    e = s - 1;
-  }
-  return false;
 }
 
 const indent = (line: string) => line.length - line.trimStart().length;
