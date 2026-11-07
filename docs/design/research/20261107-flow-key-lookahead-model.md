@@ -315,8 +315,7 @@ come from the run with stamp w688-gbom2 at 32e7bc5e, unless a note names another
   (7eba3c8f). The verdict "unsupported" for a two-mark document is pinned in the self-test
   instead. S8 holds 5 such documents and none is decided by the bug (4 accepted by both oracles, 1
   refused by both). S9 and s13 hold 0 (run w688-gbom2 at 32e7bc5e).
-- Only the edge set, S9 and S8 hold tab characters. The flow-key families hold
-  none. S9 holds 1584 documents with a byte order mark and S8 holds 420 (10 with the mark at the start
+- S9 holds 1584 documents with a byte order mark and S8 holds 420 (10 with the mark at the start
   only and 410 with a mark after the first character), counted by the run w688-bom at 1aa97028.
 - The self-test does not plant a guard-on misplaced document, because a plant needs a broken
   model. Only a reading of `compare.mjs` shows the "no misplaced insert with the guard on" leg.
