@@ -616,21 +616,24 @@ t9_watch_start() {
 }
 # t9_watch_ready <dir>: the step fails unless the watch is running and has printed an event line
 # ("received ..." starts only a printed event) within 30 s. That line shows its initial reads are done and
-# its stream is open and delivering, so the stop of A cuts a stream the watch holds.
+# its stream is open and delivering, so the stop of A cuts a stream the watch holds. A watch that printed
+# an event and has ended by then is no reader to cut, so the event line counts only while the watch runs.
 t9_watch_ready() {
   for _ in $(seq 30); do
-    grep -q '^received ' "$1/watch.txt" 2>/dev/null && return 0
+    if grep -q '^received ' "$1/watch.txt" 2>/dev/null; then
+      kill -0 "$t9_watcher" 2>/dev/null && return 0
+      break
+    fi
     kill -0 "$t9_watcher" 2>/dev/null || break
     sleep 1
   done
   die "operation watch printed no event within 30 s, or ended, before the stop; see $1/watch.txt"
 }
-# t9_watch_end <dir> <seconds>: the watch ends by itself within <seconds>. A watch that is still running
-# then is stopped and the step fails. On return $t9_watch_rc is its exit status.
+# t9_watch_end <dir> <seconds> <since>: the watch ends by itself within <seconds> of <since>, a value of
+# SECONDS (the moment the apply was seen completed), so the reads between do not extend the limit. A watch
+# that is still running at the limit is stopped and the step fails. On return $t9_watch_rc is its exit status.
 t9_watch_end() {
-  local s
-  for ((s = 0; s < $2; s++)); do
-    kill -0 "$t9_watcher" 2>/dev/null || break
+  while kill -0 "$t9_watcher" 2>/dev/null && [ "$SECONDS" -lt $(($3 + $2)) ]; do
     sleep 1
   done
   if kill -0 "$t9_watcher" 2>/dev/null; then
@@ -687,7 +690,7 @@ t9_release() {
 # and at the start. A takes it over when it starts, and then the hold is released. If the apply does
 # not survive A's restart, the step fails.
 t9_disconnect() {
-  local dir=$part/t9-disconnect rc last state cause
+  local dir=$part/t9-disconnect rc last state cause done_at=0
   # The cleanup first: any exit from here on, a failed read included, releases T9's hold.
   trap t9_clean EXIT
   trap 'exit 130' INT TERM
@@ -724,7 +727,7 @@ t9_disconnect() {
   t9_read "the resumed stream" "$dir/after" 300 "$last"
   state=$(sql "SELECT state FROM operation WHERE id = '$t9_op'")
   case $state in
-    completed) ;;
+    completed) done_at=$SECONDS ;;
     cancelled)
       # A hold past the plan's expiry: the owner cancels the apply before any attempt.
       cause=$(sql "SELECT entry->>'cause' FROM machine_event WHERE kind = 'operation-state'
@@ -736,7 +739,7 @@ t9_disconnect() {
   [ "$(t9_ids "$dir/before" "$dir/after")" = "$(t9_ids "$dir/full")" ] ||
     die "the resumed stream's events differ from the full replay: an event was lost or repeated (see $dir)"
   # The CLI's watch has ended with the apply. It must have met the outage and followed it out.
-  t9_watch_end "$dir" 120
+  t9_watch_end "$dir" 120 "$done_at"
   [ "$t9_watch_rc" -eq 0 ] || die "operation watch ended with exit $t9_watch_rc through A's stop; its output is $dir/watch.txt (a product finding)"
   grep -q 'until the watch ends' "$dir/watch.txt" || die "operation watch did not meet the outage; see $dir/watch.txt"
   grep -q '^Completed at ' "$dir/watch.txt" || die "operation watch did not report the completion; see $dir/watch.txt"
