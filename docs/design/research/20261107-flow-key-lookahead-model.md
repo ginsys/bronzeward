@@ -175,7 +175,7 @@ small sets and for s13, S9 and S8.
 | S9 | 38208 | 5955 | 0 | 0 | 27021 | 11187 | 0 |
 | S8 | 245696 | 53570 | 0 | 0 | 139874 | 94597 | 11225 |
 
-Notes on the rows. The counts of the table and of the notes on the five small sets, s13 and S9
+Notes on the rows. The counts of the table and of the notes on the five small sets, s13, S9 and S8
 come from the run with stamp w688-gbom2 at 32e7bc5e, unless a note names another commit.
 
 - Matrix: the other 10 documents use the key `*e`. Both refuse them, with "unknown anchor". That
@@ -263,7 +263,7 @@ come from the run with stamp w688-gbom2 at 32e7bc5e, unless a note names another
   94597. The 5 documents that move are the S8 documents that start with two marks. For go-yaml,
   4 of them are accepted by both oracles and 1 is refused by both, and none is decided by the
   bug. S9 and s13 hold none, and no count of s13, S9 or the four other small sets moves. S8 holds
-  410 documents with a mark after the first character (the 5 included), and the deletion of the
+  410 documents with a mark after the first character (the 5 included; run w688-bom at 1aa97028), and the deletion of the
   skip alone changes no verdict among them. The 5 move because of the new "unsupported" rule.
 - S8, the counters: 3806 documents are 2902 plus 904. These are the documents with the key
   `instr hit:true` and a model verdict that is not "misplaced" (`compare.mjs:65`). A hit means that
@@ -333,14 +333,16 @@ come from the run with stamp w688-gbom2 at 32e7bc5e, unless a note names another
 - A character-level rule on the text of the key. Three attempts in #654 failed on a new edge. The
   decision depends on the registration state and on the queue, so no rule on the text decides it.
 - A fix in go-yaml. It is outside this project. The guarded delete in `go-yaml-guard.patch` makes
-  80 of the 90 refused matrix cells accepted, so it is a candidate for an upstream report.
+  80 of the 90 refused matrix cells accepted (matrix row, run w688-gbom2 at 32e7bc5e), so it is a
+  candidate for an upstream report.
 - The known gap: keep the 5 pinned rows in `position.test.ts` (at 3c207865) and record the evidence.
 
 ## Recommendation
 
 On the documents that it compares, the model predicts the go-yaml refusals of this class exactly,
 with 0 missed documents and 0 false refusals. The result covers the compared documents only. It
-says nothing about the documents that were never compared:
+says nothing about the documents that were never compared. The counts below are those of the
+table (run w688-gbom2 at 32e7bc5e):
 
 - s13: 63 of 23247 documents were never compared.
 - S9: 11187 of 38208 documents were never compared.
@@ -354,8 +356,8 @@ says nothing about the documents that were never compared:
 
 The result is not a proof for every document, and the review found two gaps that the sets did not
 cover. S9 and S8 hold no document that the bug decides, so they test one thing: that the model
-refuses no document that go-yaml accepts. The model before the repair failed that test on S9 with
-120 false refusals, and the comparison did not report it. This is why the result stands on the
+refuses no document that go-yaml accepts. The model before the repair (749194e7) failed that test
+on S9 with 120 false refusals, and the comparison did not report it. This is why the result stands on the
 repaired comparison and not on the first run. It also shows that a port needs a check that can
 fail. So #657 can port the model only with a differential check in CI. The check runs the model
 and the oracles on the sets above and on a generator with Unicode input, and it fails on any
