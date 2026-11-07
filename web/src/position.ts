@@ -410,17 +410,20 @@ const blank = (line: string) => !/[^ \t\r]/.test(line);
 // The text before a tag on its line when the node that holds the scalar is known from that line, so
 // that the indentation of `holder` is the column go-yaml measures against: nothing, a key (quoted, or
 // plain with no `#`, and no colon before a blank) and its colon, or a lone `- `. A compact collection
-// (`- k:`, `- - x`, `? - x`) and a property before the tag (`&e !bwref`) are not in it
-// (ginsys/bronzeward#616). A blank after the colon is a space or a tab, as for go-yaml; after a dash only a
-// space is one (go-yaml refuses a dash and a tab, ginsys/bronzeward#698).
-const PLAIN_PARENT = /^(?: *(?:"[^"\n]*"|'[^'\n]*'|[^ \t"'#:\-?[\]{},&*!|>%@`](?:[^#:\n]|:(?![ \t]))*):[ \t]+| *- +)$/;
+// (`- k:`, `- - x`, `? - x`) is not in it (ginsys/bronzeward#616). One anchor may stand between that parent
+// and the tag (`k: &e !bwref x/foo`): it is a property of the value, so the parent is the same
+// (ginsys/bronzeward#699). Two anchors are not in it, as go-yaml refuses them. A blank after the colon is a
+// space or a tab, as for go-yaml; after a dash only a space is one (go-yaml refuses a dash and a tab,
+// ginsys/bronzeward#698). A space or a tab follows the anchor.
+const PLAIN_PARENT = /^(?: *(?:"[^"\n]*"|'[^'\n]*'|[^ \t"'#:\-?[\]{},&*!|>%@`](?:[^#:\n]|:(?![ \t]))*):[ \t]+| *- +)(?:&[A-Za-z0-9_-]+[ \t]+)?$/;
 
 // The same parents when the tag starts its line: the nearest line above that is less indented holds the
 // scalar, and it is known only if it is a key with nothing after its colon or a lone dash, and not a
 // compact collection (`- k:`, `- -`), whose keys or entries stand at a column its line does not show
 // (ginsys/bronzeward#616). Blanks may follow the colon in spaces and tabs, and the dash in spaces only
-// (ginsys/bronzeward#698).
-const PLAIN_PARENT_LINE = /^(?: *(?:"[^"\n]*"|'[^'\n]*'|[^ \t"'#:\-?[\]{},&*!|>%@`](?:[^#:\n]|:(?![ \t]))*):[ \t\r]*| *-[ \r]*)$/;
+// (ginsys/bronzeward#698). One anchor may follow the colon or the dash (`k: &e`, `- &e`): it belongs to
+// the node on the lines below, which is the value of the key or the entry (ginsys/bronzeward#699).
+const PLAIN_PARENT_LINE = /^(?: *(?:"[^"\n]*"|'[^'\n]*'|[^ \t"'#:\-?[\]{},&*!|>%@`](?:[^#:\n]|:(?![ \t]))*):(?:[ \t]+&[A-Za-z0-9_-]+)?[ \t\r]*| *-(?: +&[A-Za-z0-9_-]+)?[ \r]*)$/;
 
 // go-yaml drops a byte order mark at the start of the stream before it reads any text, so it is no
 // column and no text there; it is dropped from the first line only (ginsys/bronzeward#616).
@@ -545,7 +548,8 @@ function isRoot(masked: string, tag: number, before: string): boolean {
 // `- `, `? ` and a line with a colon before a blank, which go-yaml refuses as a key. Under a compact
 // parent such a line can belong to the collection that holds the scalar, so it still ends the scalar.
 // A tag that starts its line has its parent on the line above, known only for a key with nothing after its
-// colon or a lone dash (`PLAIN_PARENT_LINE`), not for a compact one (`- k:`).
+// colon or a lone dash (`PLAIN_PARENT_LINE`), not for a compact one (`- k:`). One anchor between the
+// parent and the tag, or after the colon or dash of the parent line, changes nothing (ginsys/bronzeward#699).
 // A line of Unicode spaces only is text, and go-yaml counts its column in U+0020 only. The column of any
 // other line counts YAML blanks (U+0020 and tab), so a line that starts with U+00A0 has text at column 0.
 // A root scalar (`isRoot`) is measured against column -1: every next line with text goes on.
