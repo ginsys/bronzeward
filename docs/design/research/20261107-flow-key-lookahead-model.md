@@ -205,9 +205,19 @@ Notes on the rows:
   reports a scanner error for 56252 documents, and go-yaml refuses all of them. The model reports
   "unsupported" for 11148 documents with a directive. go-yaml refuses 7446 of them and accepts
   3702. These 11148 and 115662 documents that both oracles refuse for another reason are the
-  126810 "not compared" documents. The counters saw the event in 3806 documents that both oracles
-  refuse for another reason (2903 where the model says "ok", 903 where it reports a scanner
-  error). The bug decides none of them, so the pass rule does not cover them.
+  126810 "not compared" documents.
+- S8, the counters: 3806 documents are 2903 plus 903. These are the documents with the key
+  `instr hit:true` and a model verdict that is not "misplaced" (`compare.mjs:65`). A hit means that
+  the counter `consumed` is above 0 (`compare.mjs:64`): go-yaml consumed a head token while a
+  simple key stood on it. In 2903 of them the model says "ok". In 903 it reports a scanner error.
+  None is a miss, for three reasons:
+  - The count of a misplaced insert that the model does not predict (`compare.mjs:66`, the key
+    `instr misplaced but model not`) is 0. The key is absent from the count line. The `instr` keys
+    add up to 245696, so the counters read every document.
+  - The count of a hit where go-yaml accepts the document (`compare.mjs:67`, the key `instr hit,
+    real accepts`) is 0. The key is absent too.
+  - Both oracles refuse all 3806 documents. The bug decides none of them, because the patched
+    oracle refuses them too.
 
 ## Limits
 
