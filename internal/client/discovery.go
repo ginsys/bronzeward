@@ -64,8 +64,8 @@ func FetchClientConfig(x *Context, from string, verbose io.Writer) (*ClientConfi
 	return FetchClientConfigContext(context.Background(), x, from, verbose)
 }
 
-// FetchClientConfigContext is FetchClientConfig that a Ctrl-C can end: ctx ends the request, and the
-// read returns *Interrupted (#643).
+// FetchClientConfigContext is FetchClientConfig that a Ctrl-C can end: ctx ends the request and the
+// read of the body, and the read returns *Interrupted (#643).
 func FetchClientConfigContext(ctx context.Context, x *Context, from string, verbose io.Writer) (*ClientConfig, error) {
 	if err := endpoint(from, "--from"); err != nil {
 		return nil, err
@@ -97,6 +97,9 @@ func FetchClientConfigContext(ctx context.Context, x *Context, from string, verb
 	}
 	var cc ClientConfig
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&cc); err != nil {
+		if ctx.Err() != nil { // the Ctrl-C ended the read of the body, as it ends the request
+			return nil, &Interrupted{Route: "GET /bronzeward-client.json"}
+		}
 		return nil, fmt.Errorf("GET %s: its answer could not be read as a client configuration file", u)
 	}
 	if cc.Issuer == "" || cc.CLIClientID == "" {
