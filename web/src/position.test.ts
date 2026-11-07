@@ -1204,6 +1204,30 @@ describe("a plain !bwref value that goes on to the next line", () => {
     expect(references(text)).toEqual([]);
   });
 
+  // go-yaml ends a flow plain scalar at a line that starts with `?`, `[` or `{`, and then refuses the
+  // document: after an entry the parser needs `,` or the closing bracket (yaml_parser_parse_flow_sequence_entry
+  // and yaml_parser_parse_flow_mapping_key, parserc.go). Observed on go.yaml.in/yaml/v3 v3.0.5: all of these
+  // rows give "did not find expected ',' or ']'" (or '}'), and the controls with a comma, a word or a colon
+  // start parse. The scanner reads such a line as text, goes on and lists nothing, as for a refused
+  // document. Ending the value at these starts would list a name for a refused document. This test passes
+  // with the scanner as it is, and with the spec text changed: it pins the outcome and kills no mutant of
+  // the docs change.
+  test.each([
+    ["a sequence, `?` start", "k: [!bwref x/foo\n? y]\n"],
+    ["a sequence, `[` start", "k: [!bwref x/foo\n[y]]\n"],
+    ["a sequence, `{` start", "k: [!bwref x/foo\n{y}]\n"],
+    ["a mapping, `{` start", "k: {a: !bwref x/foo\n{y}}\n"],
+    ["an anchor in a sequence, `?` start", "k: [!bwref &e x/foo\n? y]\n"],
+    ["an anchor in a sequence, `[` start", "k: [!bwref &e x/foo\n[y]]\n"],
+    ["an anchor in a sequence, `{` start", "k: [!bwref &e x/foo\n{y}]\n"],
+    ["an anchor in a mapping, `?` start", "k: {a: !bwref &e x/foo\n? y}\n"],
+    ["an anchor in a mapping, `[` start", "k: {a: !bwref &e x/foo\n[y]}\n"],
+    ["an anchor in a mapping, `{` start", "k: {a: !bwref &e x/foo\n{y}}\n"],
+    ["an anchor and an explicit key, `?` start", "k: [? !bwref &e x/foo\n? y]\n"],
+  ])("%s: go-yaml refuses the document, so it lists nothing", (_, text) => {
+    expect(references(text), text).toEqual([]);
+  });
+
   // The scalar ends, and the name lists.
   test.each([
     ["a key at the parent's column", "k: !bwref x/foo\nj: v\n"],
