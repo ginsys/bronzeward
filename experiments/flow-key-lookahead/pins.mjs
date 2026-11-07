@@ -56,5 +56,26 @@ for (const e of ["0", "a", "b", "t", "\t", "n", "v", "f", "r", "e", " ", '"', "'
   verdictOf(`escape: control, one-character escape ${JSON.stringify(e)}`, `k: "\\${e}"\n${K}`, "misplaced");
 }
 
+// Block scalar headers (scannerc.go 2192-2281): one chomping indicator and one digit, in either order, and nothing
+// else before the comment or the line break. The first four are the w688-adv documents 4-7 (4 and 5 are refused by
+// go-yaml and the guarded go-yaml alike; 6 and 7 are the controls).
+const refusedHeader = "did not find expected comment or line break";
+verdictOf("header: two plus signs", `k: |++\n  x\n${K}`, "error", refusedHeader);
+verdictOf("header: two digits", `k: |12\n  x\n${K}`, "error", refusedHeader);
+verdictOf("header: control, a digit alone", `k: |2\n  x\n${K}`, "misplaced");
+verdictOf("header: control, a sign and then a digit", `k: |+2\n  x\n${K}`, "misplaced");
+verdictOf("header: control, a digit and then a sign", `k: |2+\n  x\n${K}`, "misplaced");
+verdictOf("header: control, a sign alone", `k: |-\n  x\n${K}`, "misplaced");
+verdictOf("header: control, folded style with a sign and a digit", `k: >-1\n  x\n${K}`, "misplaced");
+verdictOf("header: two minus signs", `k: |--\n  x\n${K}`, "error", refusedHeader);
+verdictOf("header: a sign and then the other sign", `k: |+-\n  x\n${K}`, "error", refusedHeader);
+verdictOf("header: a sign, a digit and a second sign", `k: |+2-\n  x\n${K}`, "error", refusedHeader);
+verdictOf("header: a sign, a digit and a second digit", `k: |-12\n  x\n${K}`, "error", refusedHeader);
+verdictOf("header: a digit, a sign and a second digit", `k: |2-3\n  x\n${K}`, "error", refusedHeader);
+verdictOf("header: a digit, a sign and a second sign", `k: |2+-\n  x\n${K}`, "error", refusedHeader);
+verdictOf("header: folded style with two signs", `k: >++\n  x\n${K}`, "error", refusedHeader);
+verdictOf("header: a zero digit alone", `k: |0\n  x\n${K}`, "error", "found an indentation indicator equal to 0");
+verdictOf("header: a sign and then a zero digit", `k: |+0\n  x\n${K}`, "error", "found an indentation indicator equal to 0");
+
 console.log(`pins: ${total - bad} of ${total} ok`);
 process.exit(bad > 0 ? 1 : 0);
