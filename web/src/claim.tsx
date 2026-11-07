@@ -77,6 +77,13 @@ export function reviewed(res: Load<components["schemas"]["IngestionReviewBody"]>
   return res.kind === "ok" ? { text: res.data.document } : { why: res };
 }
 
+// Which read may still set the review: the newest one, and none after a drop. A response that was
+// superseded, or that arrives after the review was closed, is dropped unread.
+export function newest(): { start: () => number; drop: () => void; live: (n: number) => boolean } {
+  let n = 0;
+  return { start: () => ++n, drop: () => void ++n, live: (k) => k === n };
+}
+
 // The review view (W5): read on request, `no-store`, shown read-only as served, with no copy, download
 // or print action. A failed or dropped read keeps nothing, and the review is read again on request.
 function Review({ b }: { b: Ingestion }) {
@@ -84,29 +91,48 @@ function Review({ b }: { b: Ingestion }) {
   const { failure } = useReads();
   const [text, setText] = useState<string>();
   const [why, setWhy] = useState<ReactNode>();
-  useEffect(() => discardOn(window, () => setText(undefined)), []);
+  const [reading, setReading] = useState(false);
+  const [reads] = useState(newest);
+  // Every drop of the text also drops a read in flight.
+  const drop = useCallback(() => {
+    reads.drop();
+    setReading(false);
+    setText(undefined);
+  }, [reads]);
+  useEffect(() => discardOn(window, drop), [drop]);
   // Its state moved on (continued, abandoned, expired): the review goes with it.
   useEffect(() => {
-    if (b.state !== "paused") setText(undefined);
-  }, [b.state]);
+    if (b.state !== "paused") drop();
+  }, [b.state, drop]);
   const open = useCallback(async () => {
+    const mine = reads.start();
     setWhy(undefined);
+    setText(undefined);
+    setReading(true);
     const r = reviewed(await read<components["schemas"]["IngestionReviewBody"]>(`/ingestions/${enc(b.id)}/review`));
+    if (!reads.live(mine)) return;
+    setReading(false);
     if (r === undefined) return;
     if ("text" in r) setText(r.text);
     else setWhy(failure(r.why));
-  }, [read, failure, b.id]);
+  }, [reads, read, failure, b.id]);
   return (
     <section aria-label="Protected review">
-      {text === undefined ? <Action label="Review import" needs={["author"]} onClick={() => void open()} /> : (
-        <>
-          <Status testid="review-notice">PROTECTED REVIEW. This may contain secrets nothing has recognised yet. This page stores none of it. Screen capture and copying by hand are outside its control, and browser extensions can read this page.</Status>
-          <p><label>Review of import {short(b.id)}<br /><textarea readOnly data-testid="review-text" value={text} rows={24} cols={100} {...NO_ASSIST} /></label></p>
-          <p><Action label="Close review" needs={[]} onClick={() => setText(undefined)} /></p>
-        </>
-      )}
+      {text === undefined ? <Action label="Review import" needs={["author"]} onClick={() => void open()} busy={reading} /> : <Shown id={b.id} text={text} close={drop} />}
       {why}
     </section>
+  );
+}
+
+// The open review: the notice, the read-only text and the close button. Closing is a plain button, not a
+// gated action: it only drops what the page holds, so no role, connection or epoch state may disable it.
+export function Shown({ id, text, close }: { id: string; text: string; close: () => void }) {
+  return (
+    <>
+      <Status testid="review-notice">PROTECTED REVIEW. This may contain secrets nothing has recognised yet. This page stores none of it. Screen capture and copying by hand are outside its control, and browser extensions can read this page.</Status>
+      <p><label>Review of import {short(id)}<br /><textarea readOnly data-testid="review-text" value={text} rows={24} cols={100} {...NO_ASSIST} /></label></p>
+      <p><button type="button" onClick={close}>Close review</button></p>
+    </>
   );
 }
 

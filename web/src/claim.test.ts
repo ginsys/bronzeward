@@ -2,7 +2,7 @@ import { createElement as h, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import type { components } from "./api/v1";
-import { Claim, claimSpec, discardOn, expiry, offers, reviewed } from "./claim.tsx";
+import { Claim, claimSpec, discardOn, expiry, newest, offers, reviewed, Shown } from "./claim.tsx";
 import { WritesProvider } from "./forms.tsx";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import { ShellContext } from "./shell.tsx";
@@ -79,6 +79,28 @@ describe("the review is held in memory only and dropped on leaving (§11.4 item 
     expect(reviewed({ kind: "discarded" } as never)).toBeUndefined();
     expect(reviewed({ kind: "loading" })).toBeUndefined();
     expect(reviewed(undefined)).toBeUndefined();
+  });
+});
+
+describe("the review is closed and superseded reads are dropped (local review of 362ca7a3)", () => {
+  test("Close review stays enabled for every role, offline and with a kept page", () => {
+    const shell = (value: { roles: string[]; offline: boolean; kept?: boolean }) =>
+      renderToStaticMarkup(h(ShellContext, { value: value as never }, h(Shown, { id: "ing_6fdq2la", text: "x = 1", close: () => {} })));
+    for (const value of [{ roles: [], offline: false }, { roles: ["author"], offline: true }, { roles: ["author"], offline: false, kept: true }]) {
+      const html = shell(value);
+      expect(html).toContain("Close review");
+      expect(html).not.toMatch(/<button[^>]*disabled[^>]*>Close review/);
+    }
+  });
+  test("only the newest read may set the review, and a drop ends every read in flight", () => {
+    const reads = newest();
+    const first = reads.start();
+    const second = reads.start();
+    expect(reads.live(first)).toBe(false);
+    expect(reads.live(second)).toBe(true);
+    reads.drop();
+    expect(reads.live(second)).toBe(false);
+    expect(reads.live(reads.start())).toBe(true);
   });
 });
 

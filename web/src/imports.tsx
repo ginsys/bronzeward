@@ -163,7 +163,9 @@ export const stopsWatch = (settled: RunState["settled"], read: { b: Ingestion; a
 
 // What the watch of an import's operation depends on. A continuation or takeover advances the claim
 // generation and keeps the operation id, so the generation is part of the key: the watch restarts at it.
-export const watchDeps = (client: Client | undefined, b: Ingestion, again: () => void) => [client, b.operation, b.ownerGeneration, again] as const;
+// An abandonment keeps both and fails the operation, so the abandoned state is part of the key too: a
+// watch stopped at the pause reads the failure event.
+export const watchDeps = (client: Client | undefined, b: Ingestion, again: () => void) => [client, b.operation, b.ownerGeneration, b.state === "abandoned", again] as const;
 
 // The import's operation followed to its end (§8.6), or until the claim pauses, its run records
 // resume-failed, or a read made once the lease passed shows it lapsed (§11.3, as the CLI follows).
