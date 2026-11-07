@@ -4,7 +4,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import type { components } from "./api/v1";
 import { forgetETag, keepETag, keptETag } from "./drafts.tsx";
 import { WritesProvider } from "./forms.tsx";
-import { againPath, allowed, documentRefusal, ended, fileReader, type Ingestion, MAX_DOCUMENT, onEvent, sendStart, StartImport, type StartInput, startBody, startETag, startParams, startRun, started, stopsWatch, unsent, watchDeps } from "./imports.tsx";
+import { againPath, allowed, documentRefusal, ended, fileReader, type Ingestion, MAX_DOCUMENT, onEvent, sendStart, StartImport, type StartInput, startBody, startETag, startParams, startRun, started, stopsWatch, typedDocument, unsent, watchDeps } from "./imports.tsx";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import { eventLine } from "./progress.ts";
 import { Client, type ReadResult } from "./request.ts";
@@ -422,6 +422,25 @@ describe("a file chosen while an earlier one is still being read (Copilot thread
     b.fail();
     await settle();
     expect(notes).toEqual(["The file could not be read."]);
+  });
+  test("a document typed before the file read finishes is kept, and a failed read then says nothing", async () => {
+    const got: string[] = [];
+    const notes: string[] = [];
+    const choose = fileReader((t) => got.push(t), (n) => notes.push(n));
+    const type = typedDocument(choose, (t) => got.push(t));
+    const a = deferred();
+    choose(a.file);
+    type("typed");
+    a.done("from the file");
+    await settle();
+    expect(got).toEqual(["typed"]);
+    const b = deferred();
+    choose(b.file);
+    type("typed again");
+    b.fail();
+    await settle();
+    expect(got).toEqual(["typed", "typed again"]);
+    expect(notes).toEqual([]);
   });
 });
 
