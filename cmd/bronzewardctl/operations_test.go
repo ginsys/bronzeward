@@ -43,6 +43,10 @@ type opFake struct {
 	readHang      chan struct{} // when set, an operation read waits for this before it answers
 	readStalls    int           // operation reads that began to wait
 	opEpoch       string        // when set, every operation read answers this epoch; the streams and pages keep their own
+	readEpochs    []string      // when set, operation read n answers readEpochs[n-1] (the last one after that), a failed read included
+	outageEpoch   bool          // a failed read of the outage keeps its epoch header, as a proxy or a half-restarted server can send it
+	pagesEpoch    string        // when set, the JSON event pages answer this epoch; the streams and operation reads keep their own
+	streamBare    bool          // the event streams answer without a Bronzeward-Epoch header
 }
 
 // stall holds the request until release closes or the client gives up. The caller holds f.mu.
@@ -67,6 +71,9 @@ func (f *opFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if f.opEpoch != "" {
 			w.Header().Set("Bronzeward-Epoch", f.opEpoch)
 		}
+		if len(f.readEpochs) > 0 {
+			w.Header().Set("Bronzeward-Epoch", f.readEpochs[min(f.reads, len(f.readEpochs))-1])
+		}
 	}
 	switch strings.TrimPrefix(r.URL.Path, "/api/v1") {
 	case "/server":
@@ -87,7 +94,9 @@ func (f *opFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			f.stall(r, f.readHang)
 		}
 		if f.outageFrom > 0 && f.reads >= f.outageFrom && f.reads < f.outageFrom+f.outageReads {
-			w.Header().Del("Bronzeward-Epoch") // a server that is down shows no epoch
+			if !f.outageEpoch {
+				w.Header().Del("Bronzeward-Epoch") // a server that is down shows no epoch
+			}
 			w.WriteHeader(http.StatusBadGateway)
 			return
 		}
@@ -116,6 +125,9 @@ func (f *opFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/operations/op_BWSYNTH/events":
 		if r.Header.Get("Accept") == "text/event-stream" {
 			w.Header().Set("Content-Type", "text/event-stream")
+			if f.streamBare {
+				w.Header().Del("Bronzeward-Epoch")
+			}
 			f.streams++
 			if hang := f.hang; hang != nil {
 				w.WriteHeader(http.StatusOK)
@@ -148,6 +160,9 @@ func (f *opFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		f.pageReqs++
+		if f.pagesEpoch != "" {
+			w.Header().Set("Bronzeward-Epoch", f.pagesEpoch)
+		}
 		if f.pagesFail {
 			w.Header().Set("Content-Type", "application/problem+json")
 			w.WriteHeader(http.StatusNotFound)
