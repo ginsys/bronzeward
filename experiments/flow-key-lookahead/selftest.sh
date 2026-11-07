@@ -2,7 +2,7 @@
 # Checks that compare.mjs fails closed. It feeds the comparison six hand-written oracle outputs and
 # requires the exit status to match: 0 for a pass, and nonzero for two false refusals (a "misplaced"
 # prediction and a scanner error), a missed document, an empty set and a count mismatch. It needs no go
-# and no oracle, and it uses only bash and node. It also pins two model results: a document that starts with two
+# and no oracle. It needs bash, node and the coreutils dirname, mktemp, rm, head, tail and cat. It also pins two model results: a document that starts with two
 # byte order marks is "unsupported", and a scan loop that hits its bound fails the run with its own count. At the end it runs pins.mjs, the unit cases of the model.
 # Usage: selftest.sh
 set -uo pipefail
@@ -56,6 +56,13 @@ case "$(head -n 1 "$tmp/out")" in
     echo "selftest: pin: a reached loop bound is counted in both buckets ok" ;;
   *) echo "selftest: FAIL pin: a reached loop bound is not counted in both buckets: $(head -n 1 "$tmp/out")" >&2; bad=1 ;;
 esac
+# One document that hits the bound in both model calls counts once: total 1, so the message says 1.
+want="compare: FAIL, the scan loop of the model hit its bound on 1 documents"
+if [ "$(cat "$tmp/err")" = "$want" ]; then
+  echo "selftest: pin: the message counts the document once ok"
+else
+  echo "selftest: FAIL pin: the message is not '$want': $(cat "$tmp/err")" >&2; bad=1
+fi
 
 # The unit cases of the model.
 if node "$here/pins.mjs" > "$tmp/pins.out" 2>&1; then
