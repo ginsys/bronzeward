@@ -1333,8 +1333,7 @@ describe("a plain !bwref value that goes on to the next line", () => {
   // The comment of a check gives the time of the earlier code where it was measured, with the commit. A
   // check with no such figure is not shown to fail first.
   describe("cost", () => {
-    // Reads a draft and fails if the scan takes a second or more. The fixed scan takes under 50 ms on each
-    // input below except the draft of 30,000 tags, which takes 100 to 300 ms.
+    // Reads a draft and fails if the scan takes a second or more.
     const bounded = (text: string) => {
       const start = performance.now();
       const found = references(text);
@@ -1351,7 +1350,7 @@ describe("a plain !bwref value that goes on to the next line", () => {
 
     // A line of many bangs and a word: a tag on a line of its own below it is not on a root scalar, and
     // the line of bangs is no line of properties only. Matching the line must not try every split of it.
-    // This line of 25 bangs took 1,177 ms on e354c61c. The scan takes under 1 ms now.
+    // This line of 25 bangs took 1,177 ms on e354c61c.
     test("a long line of bangs and a word above a tag ends the scan at once", () => {
       const start = performance.now();
       references(`${"!".repeat(25)} text:\n!bwref x/foo\n- y\n`);
@@ -1361,7 +1360,7 @@ describe("a plain !bwref value that goes on to the next line", () => {
     // The scan back from a tag that starts its line looks for the nearest line above that is less indented.
     // It must not read every line above when none is, or when the lines between are all as indented as the
     // tag. The 3,000 tags at column 0 took 4,329 ms and the 2,000 tags among sibling keys took 1,328 ms on
-    // 79806121. Both take under 50 ms now.
+    // 79806121.
 
     // A tag at column 0 that is no root scalar: no line is less indented than column 0.
     test("3,000 tags at column 0 under a key are scanned in near linear time", () => {
@@ -1377,8 +1376,7 @@ describe("a plain !bwref value that goes on to the next line", () => {
     // Many tags under one long key: the line of the key is the parent of each of them, and it is matched once
     // (`known` of the line), not once per tag. The key has 300,000 characters and the 4,000 tags took 2.1 to
     // 2.8 s in six runs on 86c93ac4, where each tag matched it again (a key of 200,000 characters and 3,000
-    // tags took 0.9 to 1.6 s there, too close to the bound to fail it every time). The fixed scan takes
-    // about 25 ms.
+    // tags took 0.9 to 1.6 s there, too close to the bound to fail it every time).
     test("4,000 tags among sibling keys under one key of 300,000 characters are scanned in near linear time", () => {
       bounded(`${"a".repeat(300000)}:\n${Array.from({ length: 4000 }, (_, i) => `  j${i}: v\n  !bwref x/foo${i}\n`).join("")}`);
     });
