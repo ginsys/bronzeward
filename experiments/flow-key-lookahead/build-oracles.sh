@@ -6,11 +6,12 @@
 # Usage: build-oracles.sh <workdir>
 set -euo pipefail
 
-work=${1:?usage: build-oracles.sh <workdir>}
 here=$(cd "$(dirname "$0")" && pwd)
 src=$here/../scanner-cross-line
 mod=$(cd "$src" && go list -m -f '{{.Dir}}' go.yaml.in/yaml/v3)
-mkdir -p "$work"
+# An absolute path: go resolves a replace directive relative to the oracle directory, not to this shell.
+mkdir -p "${1:?usage: build-oracles.sh <workdir>}"
+work=$(cd "$1" && pwd)
 
 for variant in guard instrument; do
   rm -rf "$work/yaml-$variant"
