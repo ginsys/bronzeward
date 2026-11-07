@@ -4,7 +4,8 @@
 //   probes.json   22 documents: probe 5 and probe 6 of #657, plus the root and "a:" shapes
 //   hyp.json     126 documents: 21 flow keys x 6 contexts
 //   small.json    45 documents: 15 small flow keys of only ? and : items x 3 contexts
-//   edge.json      8 documents: a byte order mark, three Unicode line breaks and an astral key
+//   edge.json     11 documents: a byte order mark, three Unicode line breaks, an astral key, a tab after a comment
+//                 and two shorthand tags
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -70,6 +71,13 @@ const edge = [
   `a: b${PS}[? c]: ${V}`,
   `[? ${EMOJI.repeat(511)}]: ${V}`,
   `[? ${"x".repeat(511)}]: ${V}`,
+  // A tab after a comment line: go-yaml reads the run of comments in one step and accepts it, the model makes
+  // no claim ("unsupported"). Two shorthand tags that swallow "]" and "," as go-yaml does (the URI set of
+  // yaml_parser_scan_tag_uri has no verbatim condition): the first is refused by the parser for a reason that
+  // is not a misplaced token (model "ok"), the second is refused by the bug (model "misplaced").
+  `a: 1\n# c\n\t# d\nb: ${V}`,
+  `[? !t]: ${V}`,
+  `[? !t, x]: ${V}`,
 ];
 
 // Small flow keys of only `?` and `:` items, in three contexts.
