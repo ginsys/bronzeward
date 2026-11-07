@@ -7,7 +7,8 @@
 //                        appends it at the queue end, and its parser refuses the document.
 //   verdict "error":     the scanner raised an error (the same error in the patched go-yaml).
 //   verdict "ok":        no misplaced insert and no scanner error.
-//   verdict "unsupported": the document uses a construct the model does not port (directives).
+//   verdict "unsupported": the document uses a construct the model does not port (directives, and a tab
+//                        after a comment line).
 // The model scans the whole stream. It does not model the parser, so a refusal by the parser for a
 // reason that is not a misplaced token (for example "[,]") is "ok" here.
 //
@@ -18,7 +19,7 @@
 // once (peek_token), then skips the head token (skip_token). Comments only attach to tokens in
 // go-yaml, so the model skips a comment to the end of its line.
 //
-// Not ported: directives ("unsupported"), and the characters that the go-yaml reader refuses
+// Not ported: directives and a tab after a comment line ("unsupported"), and the characters that the go-yaml reader refuses
 // (control characters, readerc.go) or that are not valid UTF-8. The model does not check them.
 
 class ScanError extends Error {}
@@ -133,10 +134,18 @@ export function model(doc, opts = {}) {
   }
 
   function scanToNextToken() {
+    // go-yaml reads a run of comment lines in one step (yaml_parser_scan_comments) and accepts a tab inside the
+    // run. The model skips one comment at a time, so it does not port the run: it makes no claim for a tab that
+    // follows a comment in the same stretch (yaml_parser_scan_to_next_token, scannerc.go 1538).
+    let sawComment = false;
     for (;;) {
       if (col === 0 && at() === BOM) skip();
       while (at() === " " || ((flow > 0 || !allowed) && at() === "\t")) skip();
-      if (at() === "#") while (!isBreakz(at())) skip();
+      if (sawComment && at() === "\t") throw new Unsupported("a tab after a comment line");
+      if (at() === "#") {
+        sawComment = true;
+        while (!isBreakz(at())) skip();
+      }
       if (isBreak(at())) {
         skipLine();
         if (flow === 0) allowed = true;
