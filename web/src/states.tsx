@@ -81,14 +81,22 @@ export function scopeRefusal(code: string, problem: Problem): string {
   return code === "recovery-mode-active" && typeof scope === "string" ? ` Scope ${scope} refuses this request. ${SCOPE_NO_MODE}` : "";
 }
 
+// A problem's `position` member when it is a whole number (a mark refused by its index).
+const positionOf = (p: Problem): number | undefined => {
+  const n = p["position"];
+  return typeof n === "number" && Number.isSafeInteger(n) && n >= 0 ? n : undefined;
+};
+
 export function Refused({ problem, status, verb, testid, replayed = false, cut = false }: { problem: Problem | null; status: number; verb: "read" | "saved"; testid?: string; replayed?: boolean; cut?: boolean }) {
   const earlier = replayed && `${REPLAYED} `;
   if (problem === null) return <Status testid={testid}>{earlier}Not {verb}: the server answered {status}.{cut && ` ${CUT_OFF}`}</Status>;
   const code = problem.type.slice("urn:bronzeward:problem:".length);
   const rule = typeof problem["rule"] === "string" ? ` (rule ${problem["rule"]})` : "";
+  // A refused mark is named by its position in the request, never its path (§8.2 422 row).
+  const at = problem.status === 422 && positionOf(problem) !== undefined ? ` The mark at position ${positionOf(problem)} (the first is 0) is refused.` : "";
   return (
     <Status testid={testid}>
-      {earlier}Not {verb}: {code}{rule}.{needs(status, problem)}{scopeRefusal(code, problem)} {problem.title}{problem.detail !== undefined && `: ${problem.detail}`}
+      {earlier}Not {verb}: {code}{rule}.{at}{needs(status, problem)}{scopeRefusal(code, problem)} {problem.title}{problem.detail !== undefined && `: ${problem.detail}`}
       {problem.instance !== undefined && ` Request ${problem.instance}.`}
     </Status>
   );

@@ -1,0 +1,167 @@
+import { createElement as h, type ReactNode } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, test } from "vitest";
+import type { components } from "./api/v1";
+import { WritesProvider } from "./forms.tsx";
+import { ended, type Ingestion, onEvent, startBody, startRun } from "./imports.tsx";
+import { type Reads, ReadsProvider } from "./list.tsx";
+import { candidates, markLines, markRefusal, markSent, MarksPanel, markSpec, MAX_CANDIDATES, MAX_MARKS, withMark } from "./marks.tsx";
+import { eventLine, refusalOf, refusalText } from "./progress.ts";
+import { ShellContext } from "./shell.tsx";
+import { Refused } from "./states.tsx";
+import { Writes } from "./write.ts";
+
+type Operation = components["schemas"]["OperationBody"];
+const SENTINEL = "BWSYNTH-sentinel";
+const NOW = Date.parse("2026-11-01T07:00:00Z");
+const ing = (o: Partial<Ingestion> = {}): Ingestion => ({
+  id: "ing_6fdq2la", kind: "import", mode: "encrypted", state: "paused", machine: "mch_b3caa2q", draft: "drf_2rmp457a", operation: "op_zcfw5mcm",
+  review: "pending", ownerGeneration: 2, leaseUntil: "2026-11-01T07:05:00Z", expiresAt: "2026-11-01T08:00:00Z", createdAt: "2026-11-01T06:55:00Z", ...o,
+});
+const op = (o: Partial<Operation> = {}): Operation => ({
+  id: "op_zcfw5mcm", kind: "ingest", state: "running", epoch: "e1", lastEvent: 3, subject: null, createdBy: null, createdAt: "2026-11-01T06:55:00Z", result: null, error: null, ...o,
+} as Operation);
+const noReads: Reads = { client: { read: () => new Promise(() => {}) }, settle: () => true, undropped: () => () => true, view: "", again: 0, regained: 0, go: () => {}, failure: () => null };
+const page = (n: ReactNode) =>
+  renderToStaticMarkup(h(WritesProvider, { value: new Writes(() => "p") }, h(ShellContext, { value: { roles: ["author"], offline: false } }, h(ReadsProvider, { value: noReads }, n))));
+const unused = { readWithEpoch: async () => { throw new Error("unused"); } } as never;
+const problem = (o: Record<string, unknown>) => ({ type: "urn:bronzeward:problem:validation-failed", title: "Validation failed", status: 422, ...o });
+
+describe("the marks a request carries (§11.2, compilation §2.2)", () => {
+  test("each nonempty line is one path, sent as typed with its whitespace", () => {
+    expect(markLines("doc[0]/a\n\n doc[0]/b \n")).toEqual(["doc[0]/a", " doc[0]/b "]);
+    expect(startBody({ kind: "import", machine: "m", draft: "d", source: "machine", staging: "encrypted", review: true, doc: "", marks: "doc[0]/a\n" })["marks"]).toEqual(["doc[0]/a"]);
+  });
+  test("no mark, or more than the server's 1024, is not sent", () => {
+    expect(markRefusal([])).toMatch(/^Not sent: type at least one path/);
+    expect(markRefusal(Array(MAX_MARKS).fill("x"))).toBeUndefined();
+    expect(markRefusal(Array(MAX_MARKS + 1).fill("x"))).toMatch(/at most 1024/);
+  });
+  test("the write posts the marks to the ingestion, which is the resource to read, and drops them when released", () => {
+    const s = markSpec("ing_6fdq2la", ["doc[0]/a"]);
+    expect([s.method, s.path, s.resource, s.body]).toEqual(["POST", "/ingestions/ing_6fdq2la/marks", "/ingestions/ing_6fdq2la", { marks: ["doc[0]/a"] }]);
+    s.released?.({} as never);
+    expect(s.body).toEqual({});
+  });
+  test("an accepted send names its operation and generation and never a path", () => {
+    expect(markSent({ operation: "op_zcfw5mcm", generation: 3, ingestion: "ing_6fdq2la" })).toBe("The marks were accepted in operation op_zcfw5mcm at generation 3. How the run ended shows under Progress.");
+    expect(markSent(null)).toContain("generation ?");
+  });
+  test("choosing a value adds its path once, on its own line", () => {
+    expect(withMark("", "doc[0]/a")).toBe("doc[0]/a\n");
+    expect(withMark("doc[0]/a\n", "doc[0]/b")).toBe("doc[0]/a\ndoc[0]/b\n");
+    expect(withMark("doc[0]/a", "doc[0]/b")).toBe("doc[0]/a\ndoc[0]/b\n");
+    expect(withMark("doc[0]/a\n", "doc[0]/a")).toBe("doc[0]/a\n");
+  });
+});
+
+describe("the values a review offers to mark (compilation §2.2 paths)", () => {
+  const review = [
+    "machine:", "  install:", "    disk: /dev/sda", "  files:", `    - content: "token = ${SENTINEL}"`, "  nodeLabels:", "    example.test/role: worker",
+    "  ca:", "    key: !bwref example/ca-key", "  \"a|b\": hidden", "  port: 8080", "  empty: \"\"", "---", `second: ${SENTINEL}-2`,
+  ].join("\n");
+  test("string values are listed as doc[n] and a JSON Pointer, with ~ and / escaped", () => {
+    expect(candidates(review).paths).toEqual([
+      "doc[0]/machine/install/disk", "doc[0]/machine/files/0/content", "doc[0]/machine/nodeLabels/example.test~1role", "doc[1]/second",
+    ]);
+    expect(candidates("a~b: x").paths).toEqual(["doc[0]/a~0b"]);
+  });
+  test("an extracted value, a key holding a pipe, a number and an empty string are not offered", () => {
+    const paths = candidates(review).paths.join("\n");
+    for (const left of ["ca/key", "a|b", "port", "empty"]) expect(paths).not.toContain(left);
+  });
+  test("an alias is not followed", () => {
+    expect(candidates("a: &x one\nb: *x").paths).toEqual(["doc[0]/a"]);
+  });
+  test("past the cap the rest is counted, not listed", () => {
+    const text = Array.from({ length: MAX_CANDIDATES + 5 }, (_, i) => `k${i}: v`).join("\n");
+    const c = candidates(text);
+    expect([c.paths.length, c.more]).toEqual([MAX_CANDIDATES, 5]);
+  });
+  test("text that is not a document offers nothing and does not throw", () => {
+    expect(candidates("").paths).toEqual([]);
+    expect(candidates(": : :\n\t- [").paths).toBeInstanceOf(Array);
+  });
+});
+
+describe("the marks panel", () => {
+  const html = page(h(MarksPanel, { text: review(), send: () => {}, busy: false }));
+  function review() {
+    return `machine:\n  files:\n    - content: "token = ${SENTINEL}"\n`;
+  }
+  test("lists each value with its own button, a marks field that offers no assist, and Send marks", () => {
+    expect(html).toContain("doc[0]/machine/files/0/content");
+    expect(html).toContain("Mark as secret</button>");
+    expect(html).toContain("Send marks");
+    for (const a of ['autoComplete="off"', 'spellCheck="false"', 'autoCorrect="off"', 'autoCapitalize="off"']) expect(html).toContain(a);
+  });
+  test("shows the path of a value, never the value", () => {
+    expect(html).not.toContain(SENTINEL);
+  });
+});
+
+describe("a refused mark is named by rule and position, never a path (§11.3, PROT-03)", () => {
+  test("the rule and position are kept, a path is not", () => {
+    const r = refusalOf({ generation: 2, problem: problem({ rule: "mark-kind", position: 1, path: `doc[0]/${SENTINEL}`, detail: SENTINEL }) });
+    expect(r).toEqual({ code: "validation-failed", rule: "mark-kind", position: 1 });
+    expect(JSON.stringify(r)).not.toContain("BWSYNTH");
+    expect(refusalText(r)).toBe("validation-failed, rule mark-kind, the mark at position 1 (the first is 0)");
+  });
+  test("a rule, code or position that is not a short token or a whole number is dropped, so nothing typed can come back", () => {
+    const r = refusalOf({ problem: problem({ type: `urn:bronzeward:problem:${SENTINEL} x`, rule: `${SENTINEL} doc[0]/a`, position: "doc[0]/a" }) });
+    expect(r).toEqual({});
+    expect(refusalOf({ problem: problem({ position: -1 }) }).position).toBeUndefined();
+    expect(refusalOf({ problem: problem({ position: 1.5 }) }).position).toBeUndefined();
+    expect(refusalText({})).toBe("no problem named");
+    expect(refusalOf(null)).toEqual({});
+  });
+  test("a problem without a position is named by its code alone", () => {
+    expect(refusalText(refusalOf({ problem: { type: "urn:bronzeward:problem:dependency-unavailable", title: "x", status: 503 } }))).toBe("dependency-unavailable");
+  });
+  test("the event line carries them, and a mark-refused line never a path", () => {
+    const line = eventLine({ id: "e1:5", type: "mark-refused", data: { generation: 2, problem: problem({ rule: "mark-kind", position: 0, path: SENTINEL }) } });
+    expect(line).toBe("mark-refused (generation 2): validation-failed, rule mark-kind, the mark at position 0 (the first is 0)");
+    expect(eventLine({ id: "e1:4", type: "marked", data: { generation: 2, paths: 1 } })).toBe("marked (generation 2)");
+  });
+  test("the 422 answer to a send shows the position and no path", () => {
+    const out = renderToStaticMarkup(h(Refused, { problem: problem({ position: 2, path: SENTINEL, instance: "req_1" }), status: 422, verb: "saved" }));
+    expect(out).toContain("The mark at position 2 (the first is 0) is refused.");
+    expect(out).not.toContain("BWSYNTH");
+    expect(renderToStaticMarkup(h(Refused, { problem: problem({ status: 409, position: 2 }), status: 409, verb: "saved" }))).not.toContain("position");
+  });
+});
+
+describe("how the run of a mark ends (§11.3, PROT-03, PROT-05, PROT-06)", () => {
+  const events = (gen: number, list: [string, unknown][]) => list.reduce((s, [type, data]) => onEvent(s, type, data), startRun(gen));
+  const refusal = { generation: 2, problem: problem({ rule: "mark-kind", position: 0 }) };
+  test("a pause after the marked event of this generation applies the mark", () => {
+    const s = events(2, [["paused", { generation: 1 }], ["marked", { generation: 2, paths: 1 }], ["paused", { generation: 2 }]]);
+    expect([s.settled, s.marked, s.refused]).toEqual(["paused", true, undefined]);
+  });
+  test("a mark-refused event then the pause settles it as refused, by rule and position", () => {
+    const s = events(2, [["marked", { generation: 2 }], ["mark-refused", refusal], ["paused", { generation: 2 }]]);
+    expect([s.settled, s.refused]).toEqual(["paused", { code: "validation-failed", rule: "mark-kind", position: 0 }]);
+  });
+  test("a refusal or a pause of an earlier run settles nothing", () => {
+    const s = events(2, [["mark-refused", { generation: 1, problem: problem({ rule: "old", position: 0 }) }], ["paused", { generation: 1 }]]);
+    expect([s.settled, s.refused, s.marked]).toEqual([undefined, undefined, undefined]);
+  });
+  test("a resume-failed after the marked event is not an applied mark", () => {
+    const s = events(2, [["marked", { generation: 2 }], ["resume-failed", { code: "dependency-unavailable" }]]);
+    expect([s.settled, s.marked]).toEqual(["resume-failed", true]);
+  });
+  test("the page says applied, refused by position and rule, or not applied by code, and never names a path", async () => {
+    const applied = await ended(unused, ing(), op(), "paused", NOW, "e1", { marked: true });
+    expect(applied).toMatch(/^The marks were applied: re-staged and paused again \(expires /);
+    const refused = await ended(unused, ing(), op(), "paused", NOW, "e1", { marked: true, refused: { code: "validation-failed", rule: "mark-kind", position: 0 } });
+    expect(refused).toMatch(/^The mark was not applied: it was refused \(validation-failed, rule mark-kind, the mark at position 0 \(the first is 0\)\)\. The import is paused again/);
+    const noPosition = await ended(unused, ing(), op(), "paused", NOW, "e1", { marked: true, refused: { code: "dependency-unavailable" } });
+    expect(noPosition).toContain("it was refused (dependency-unavailable)");
+    expect(await ended(unused, ing(), op(), "paused", NOW, "e1")).toMatch(/^Paused for review/);
+  });
+  test("a lease that lapsed with none of these leaves the outcome unknown, never not applied", async () => {
+    const out = await ended(unused, ing({ state: "held" }), op(), "", Date.parse("2026-11-01T07:06:00Z"), "e1", { marked: true });
+    expect(String(out)).toContain("the outcome is unknown");
+    expect(String(out)).not.toContain("not applied");
+  });
+});

@@ -1,12 +1,13 @@
 // The protected import review and the claim's actions (W5, ginsys/bronzeward#341; client contracts
 // §11.3 and §11.4): the review fetched on demand and held in this page's memory only, and Continue,
-// Take over and Abandon as writes on the ingestion. The marks are the next change's.
+// Take over and Abandon as writes on the ingestion, and the marks (marks.tsx) sent from the review.
 
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import type { components } from "./api/v1";
 import { NO_ASSIST } from "./drafts.tsx";
 import { useSend, useWrites, Result } from "./forms.tsx";
 import { type Load, short, useReads, useSettled } from "./list.tsx";
+import { markSent, MarksPanel, markSpec } from "./marks.tsx";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
 import type { Outcome, Write, WriteSpec } from "./write.ts";
@@ -136,7 +137,7 @@ export const readReview = (read: <T>(path: string, live?: () => boolean) => Prom
 
 // The review view (W5): read on request, `no-store`, shown read-only as served, with no copy, download
 // or print action. A failed or dropped read keeps nothing, and the review is read again on request.
-function Review({ b }: { b: Ingestion }) {
+function Review({ b, marking }: { b: Ingestion; marking: { send: (marks: string[]) => void; busy: boolean } }) {
   const read = useSettled();
   const { failure } = useReads();
   const [text, setText] = useState<string>();
@@ -168,7 +169,7 @@ function Review({ b }: { b: Ingestion }) {
   }, [reads, read, failure, b.id]);
   return (
     <section aria-label="Protected review">
-      {text === undefined ? <Action label="Review import" needs={["author"]} onClick={() => void open()} busy={reading} /> : <Shown id={b.id} text={text} close={drop} />}
+      {text === undefined ? <Action label="Review import" needs={["author"]} onClick={() => void open()} busy={reading} /> : <Shown id={b.id} text={text} close={drop} marking={marking} />}
       {why}
     </section>
   );
@@ -176,20 +177,26 @@ function Review({ b }: { b: Ingestion }) {
 
 // The open review: the notice, the read-only text and the close button. Closing is a plain button, not a
 // gated action: it only drops what the page holds, so no role, connection or epoch state may disable it.
-export function Shown({ id, text, close }: { id: string; text: string; close: () => void }) {
+export function Shown({ id, text, close, marking }: { id: string; text: string; close: () => void; marking?: { send: (marks: string[]) => void; busy: boolean } }) {
   return (
     <>
       <Status testid="review-notice">PROTECTED REVIEW. This may contain secrets nothing has recognised yet. This page stores none of it. Screen capture and copying by hand are outside its control, and browser extensions can read this page.</Status>
       <p><label>Review of import {short(id)}<br /><textarea readOnly data-testid="review-text" value={text} rows={24} cols={100} {...NO_ASSIST} /></label></p>
+      {marking && <MarksPanel text={text} send={marking.send} busy={marking.busy} />}
       <p><button type="button" onClick={close}>Close review</button></p>
     </>
   );
 }
 
 // The claim's actions under the import page's state line (W5).
-export function Claim({ b, again, now }: { b: Ingestion; again: () => void; now: number }) {
+export function Claim(p: { b: Ingestion; again: () => void; now: number }) {
+  return useWrites() === undefined ? null : <ClaimSection {...p} />;
+}
+
+// The marks are one write of the claim, not of the review: a done send moves the claim out of `paused`,
+// which closes the review, and the send's notice stays (an unknown outcome is never hidden by that).
+function ClaimSection({ b, again, now }: { b: Ingestion; again: () => void; now: number }) {
   const o = offers(b, now);
-  const writes = useWrites();
   const watching = watchesExpiry(b, now);
   const { expiresAt } = b;
   useEffect(() => (watching ? watchExpiry(expiresAt, again) : undefined), [watching, expiresAt, again]);
@@ -198,11 +205,17 @@ export function Claim({ b, again, now }: { b: Ingestion; again: () => void; now:
   const [sent, setSent] = useState<Verb[]>([]);
   const sentVerb = useCallback((v: Verb) => setSent((s) => (s.includes(v) ? s : [...s, v])), []);
   const shown = shownVerbs(o.verbs, sent);
-  if (writes === undefined || (!o.review && shown.length === 0)) return null;
+  const [mw, msend] = useSend();
+  const done = mw?.outcome?.kind === "done";
+  useEffect(() => {
+    if (done) again();
+  }, [done, again]);
+  if (!o.review && shown.length === 0 && mw === undefined) return null;
   return (
     <section aria-label="Claim">
       <p>{b.state === "paused" ? expiry(b.expiresAt, now) : null}</p>
-      {o.review && <Review b={b} />}
+      {o.review && <Review b={b} marking={{ send: (marks) => msend(markSpec(b.id, marks)), busy: mw !== undefined && mw.outcome === undefined }} />}
+      <Result w={mw} done={markSent} />
       {shown.map((v) => <ClaimAction key={v} id={b.id} verb={v} offered={o.verbs.includes(v)} again={again} sent={sentVerb} />)}
     </section>
   );
