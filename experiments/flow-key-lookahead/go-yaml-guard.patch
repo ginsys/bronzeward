@@ -1,0 +1,14 @@
+--- a/scannerc.go
++++ b/scannerc.go
+@@ -980,7 +980,10 @@
+ 	if parser.flow_level > 0 {
+ 		parser.flow_level--
+ 		last := len(parser.simple_keys) - 1
+-		delete(parser.simple_keys_by_tok, parser.simple_keys[last].token_number)
++		// EXPERIMENT (bww2-657): delete the lookahead entry only when it belongs to this level.
++		if idx, ok := parser.simple_keys_by_tok[parser.simple_keys[last].token_number]; ok && idx == last {
++			delete(parser.simple_keys_by_tok, parser.simple_keys[last].token_number)
++		}
+ 		parser.simple_keys = parser.simple_keys[:last]
+ 	}
+ 	return true

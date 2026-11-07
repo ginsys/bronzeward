@@ -1,0 +1,2 @@
+# The patches carry go-yaml's tab-indented source as context lines (a space, then a tab).
+*.patch -whitespace

@@ -1,0 +1,50 @@
+--- a/scannerc.go
++++ b/scannerc.go
+@@ -1017,6 +1017,9 @@
+ 		}
+ 		if number > -1 {
+ 			number -= parser.tokens_parsed
++			if number < 0 {
++				MisplacedInserts++
++			}
+ 		}
+ 		yaml_insert_token(parser, number, &token)
+ 	}
+@@ -1383,6 +1386,9 @@
+ 			start_mark: simple_key.mark,
+ 			end_mark:   simple_key.mark,
+ 		}
++		if simple_key.token_number-parser.tokens_parsed < 0 {
++			MisplacedInserts++
++		}
+ 		yaml_insert_token(parser, simple_key.token_number-parser.tokens_parsed, &token)
+ 
+ 		// In the block context, we may need to add the BLOCK-MAPPING-START token.
+@@ -3038,3 +3044,6 @@
+ 	}
+ 	return true
+ }
++
++// MisplacedInserts counts KEY and BLOCK-MAPPING-START inserts at a negative queue position (instrumentation, bww2-688).
++var MisplacedInserts int
+--- a/parserc.go
++++ b/parserc.go
+@@ -109,6 +109,11 @@
+ 
+ // Remove the next token from the queue (must be called after peek_token).
+ func skip_token(parser *yaml_parser_t) {
++	for _, k := range parser.simple_keys {
++		if k.possible && k.token_number == parser.tokens_parsed {
++			ConsumedPossible++
++		}
++	}
+ 	parser.token_available = false
+ 	parser.tokens_parsed++
+ 	parser.stream_end_produced = parser.tokens[parser.tokens_head].typ == yaml_STREAM_END_TOKEN
+@@ -1258,3 +1263,6 @@
+ 	parser.tag_directives = append(parser.tag_directives, value_copy)
+ 	return true
+ }
++
++// ConsumedPossible counts head tokens consumed while a simple key still stands on them (instrumentation, bww2-688).
++var ConsumedPossible int
