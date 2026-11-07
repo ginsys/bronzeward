@@ -71,6 +71,13 @@ const code = (error: unknown) => {
   return t.replace(/^urn:bronzeward:problem:/, "");
 };
 
+// Why a mark was not applied although its operation succeeded: refused at its pause, its staged input
+// not decryptable, or no pause at its generation at all.
+const notApplied = (last: string, run: Pick<RunState, "refused">, o: Operation) =>
+  run.refused !== undefined ? `it was refused (${refusalText(run.refused)}), and operation ${short(o.id)} then released the import without it.`
+  : last === "resume-failed" ? `its staged input could not be decrypted (resume-failed), and operation ${short(o.id)} then released the import without it.`
+  : `operation ${short(o.id)} succeeded without pausing at the mark's generation.`;
+
 // What a watch's end says. A success of an import this page started adopts the draft's ETag only at
 // the import's own draft revision (ETAG-02): a higher one means another write followed, treated as a
 // 412. `epoch` is that of the operation read the watch ended on, and the ETag is kept only when the
@@ -80,7 +87,9 @@ export async function ended(client: Pick<Client, "readWithEpoch">, b: Ingestion,
   if (o.state === "succeeded") {
     const r = o.result as S["IngestResult"] | null;
     if (r === null || typeof r.draftRevision !== "number") return `Import operation ${short(o.id)} succeeded without naming its draft revision.`;
-    const done = <>Import {short(b.id)} released into draft <Id id={r.draft} /> (revision {r.draftRevision}), import base {short(r.importBaseRevision)}.</>;
+    // A mark that no pause applied is not applied, whatever released the import after it (the CLI's markOutcome).
+    const lost = run?.marked && (last !== "paused" || run.refused !== undefined) ? `The mark was not applied: ${notApplied(last, run, o)} ` : "";
+    const done = <>{lost}Import {short(b.id)} released into draft <Id id={r.draft} /> (revision {r.draftRevision}), import base {short(r.importBaseRevision)}.</>;
     const own = started.get(b.id);
     if (own?.draft !== r.draft) return done;
     if (own.epoch === undefined || own.epoch !== epoch) return <>{done} The installation entered recovery mode or was restored since this import started, so the draft's ETag is not kept. Open it before writing again.</>;
