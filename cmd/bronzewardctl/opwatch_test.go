@@ -601,6 +601,63 @@ func TestOperationWatchOutage(t *testing.T) {
 			t.Errorf("exit %d, stdout %q, stderr %q; want 3, the state named as not read and no completion line", code, out, errOut)
 		}
 	})
+	t.Run("the timeout during an outage whose failed answers carry the first read's epoch after an event of another epoch: exit 3", func(t *testing.T) {
+		// As the test above, but every failed read shows epoch 2 again. An answer that shows the epoch of the
+		// first read does not undo the event of epoch 3: the epoch moved and the first read is of the one before.
+		f := &opFake{stream: []string{"id: ep_BWSYNTH-3:1\nevent: commitment\ndata: " + commitment + "\n\n"}, pages: []string{evPage(1, "commitment", commitment)},
+			outageFrom: 2, outageReads: 1000, outageEpoch: true,
+			body: fmt.Sprintf(opJSON, "apply-config", "succeeded", "null", "null", "[]")}
+		srv := httptest.NewServer(f)
+		t.Cleanup(srv.Close)
+		automationContext(t, srv.URL)
+		code, out, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "2500ms")
+		if code != 3 || !strings.Contains(errOut, "was not read") || strings.Contains(out, "Succeeded") {
+			t.Errorf("exit %d, stdout %q, stderr %q; want 3, the state named as not read and no completion line", code, out, errOut)
+		}
+	})
+	t.Run("the timeout during an outage whose failed answers show epoch 3 and then epoch 2 again: exit 3", func(t *testing.T) {
+		// The first read shows epoch 2. The failed reads show epoch 3, then epoch 2: the last epoch is the first
+		// read's again, but the installation moved twice, so the first read does not stand.
+		f := &opFake{stream: []string{sse(1, "commitment", commitment)}, pages: []string{evPage(1, "commitment", commitment)},
+			outageFrom: 2, outageReads: 1000, outageEpoch: true,
+			readEpochs: []string{"ep_BWSYNTH-2", "ep_BWSYNTH-3", "ep_BWSYNTH-2"},
+			body:       fmt.Sprintf(opJSON, "apply-config", "succeeded", "null", "null", "[]")}
+		srv := httptest.NewServer(f)
+		t.Cleanup(srv.Close)
+		automationContext(t, srv.URL)
+		code, out, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "2500ms")
+		if code != 3 || !strings.Contains(errOut, "was not read") || strings.Contains(out, "Succeeded") {
+			t.Errorf("exit %d, stdout %q, stderr %q; want 3, the state named as not read and no completion line", code, out, errOut)
+		}
+	})
+	t.Run("the timeout during an outage after an event of another epoch came in a stream with no epoch header: exit 3", func(t *testing.T) {
+		// The stream answers without Bronzeward-Epoch, a server defect, and carries an event of epoch 3 while the
+		// last epoch shown is 2: the event shows the move on its own.
+		f := &opFake{stream: []string{"id: ep_BWSYNTH-3:1\nevent: commitment\ndata: " + commitment + "\n\n"}, pages: []string{evPage(1, "commitment", commitment)},
+			outageFrom: 2, outageReads: 1000, streamBare: true,
+			body: fmt.Sprintf(opJSON, "apply-config", "succeeded", "null", "null", "[]")}
+		srv := httptest.NewServer(f)
+		t.Cleanup(srv.Close)
+		automationContext(t, srv.URL)
+		code, out, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "2500ms")
+		if code != 3 || !strings.Contains(errOut, "was not read") || strings.Contains(out, "Succeeded") {
+			t.Errorf("exit %d, stdout %q, stderr %q; want 3, the state named as not read and no completion line", code, out, errOut)
+		}
+	})
+	t.Run("the timeout during an outage, when the pages that read the end show another epoch than the first read: exit 3", func(t *testing.T) {
+		// The first read stands for the watch, the outage being out of reach. The pages that the end is read
+		// from then answer epoch 3: the installation moved after the first read, so its state is not printed.
+		f := &opFake{stream: []string{sse(1, "commitment", commitment)}, pages: []string{evPage(1, "commitment", commitment)},
+			outageFrom: 2, outageReads: 1000, pagesEpoch: "ep_BWSYNTH-3",
+			body: fmt.Sprintf(opJSON, "apply-config", "succeeded", "null", "null", "[]")}
+		srv := httptest.NewServer(f)
+		t.Cleanup(srv.Close)
+		automationContext(t, srv.URL)
+		code, out, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "2500ms")
+		if code != 3 || !strings.Contains(errOut, "was not read") || strings.Contains(out, "Succeeded") {
+			t.Errorf("exit %d, stdout %q, stderr %q; want 3, the state named as not read and no completion line", code, out, errOut)
+		}
+	})
 	t.Run("Ctrl-C during a wait: exit 130 at once", func(t *testing.T) {
 		f := newOutage(t)
 		grace := interruptGrace

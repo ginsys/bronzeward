@@ -928,9 +928,14 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
    read is repeated with the same backoff until the watch ends, by its timeout or its caller, and
    the watch then resumes with `Last-Event-ID`. A wait ends within 250 ms of the watch ending, and a
    watch that ends in an outage reports the operation as its last read showed it. A terminal read is
-   not that last read once the events, a refused drain or a later read showed another epoch: it is of
-   the installation before the restore. The same holds for the first read of the CLI. A watch that ends in an outage after that has no read that settled the state,
-   and the CLI reports the state as unknown (exit 3). A read that fails
+   not that last read once any later answer or event showed another epoch: it is of the installation
+   before the restore. The client counts each such sign, and a read stands only while the count is
+   the one its answer left. Counting, not comparing the last epoch, means that a later answer of the
+   read's own epoch does not undo it. The signs are an answer of another epoch (a failed one
+   included), and an event of another epoch than its stream in an open stream, with or without a
+   `Bronzeward-Epoch` header on the stream. The same holds for the first read of the CLI, which also
+   checks the count after it reads the pages of the end. A watch that ends in an outage after that has
+   no read that settled the state, and the CLI reports the state as unknown (exit 3). A read that fails
    with anything else is not repeated, and every other read keeps the bound of §8.2. An attempt that showed
    nothing is a failure. The delay starts again at 1 s after an attempt that showed an event, or
    after a stream that stayed open for 30 s. Only the events shown since the attempt began or

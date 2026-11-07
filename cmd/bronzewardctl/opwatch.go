@@ -243,6 +243,7 @@ func (e *env) operationWatch(args []string) (err error) {
 		openErr error          // the error of the opening, returned as it is: no request was sent
 		o       *apitypes.OperationBody
 		read    client.OperationRead // the operation read o comes from
+		first   bool                 // o is the first read, kept because the watch ended in an outage
 		err     error
 	}
 	done := make(chan result, 1)
@@ -276,14 +277,15 @@ func (e *env) operationWatch(args []string) (err error) {
 		// for a server out of reach: the state is the first read's, which the stop lines name as the last read.
 		// Not when the installation was restored since that read, shown by the watch or by an answer of another
 		// epoch: that read is of the one before, so the state is unknown.
+		fell := false
 		if o == nil && errors.Is(err, client.ErrWatchEnded) && !errors.Is(err, client.ErrWatchRestored) {
 			if oc.EpochHolds(firstRead) {
-				o, read, err = first, firstRead, nil
+				o, read, err, fell = first, firstRead, nil, true
 			} else {
 				err = errors.Join(err, client.ErrWatchRestored)
 			}
 		}
-		done <- result{c: oc, o: o, read: read, err: err}
+		done <- result{c: oc, o: o, read: read, first: fell, err: err}
 	}()
 
 	var res result
@@ -348,6 +350,11 @@ func (e *env) operationWatch(args []string) (err error) {
 	var last *lastEvent
 	if client.Terminal(o.State) {
 		last = readLast(c, id, o.State, res.read.Epoch)
+		// The first read stands only for as long as no answer shows another epoch: the pages and the read
+		// that readLast made can be the first to show the restore, and then the state is not known.
+		if res.first && !c.EpochHolds(res.read) {
+			return errors.Join(unreadState(id, errors.Join(client.ErrWatchEnded, client.ErrWatchRestored)), out.failure())
+		}
 	}
 	lines, ok := outcome(o, last)
 	if client.Terminal(o.State) && (last == nil || last.At == nil) {
