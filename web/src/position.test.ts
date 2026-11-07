@@ -418,6 +418,28 @@ describe("a plain value after an anchor, in block and in flow context", () => {
     expect(references("k: {? !bwref &e x/foo\n:]}\n")).toEqual([]);
   });
 
+  // go-yaml v3.0.5 reads a `?` in a flow collection as a key indicator with no blank after it (the probe of
+  // ginsys/bronzeward#710 shows the key node tagged `!bwref` for each of these), so the tag is an explicit
+  // key's own and lists no name. A `?` before a blank is the control that the scanner already handled.
+  test.each([
+    ["a flow sequence, a blank after the question mark (control)", "[? !bwref x/foo]\n"],
+    ["a flow sequence, no blank", "[?!bwref x/foo]\n"],
+    ["a flow sequence, an anchor and no blank", "[?&k !bwref x/foo]\n"],
+    ["a flow sequence, an anchor after a blank", "[? &k !bwref x/foo]\n"],
+    ["a flow mapping, no blank", "{?!bwref x/foo}\n"],
+    ["a flow mapping, a blank (control)", "{? !bwref x/foo}\n"],
+    ["after a flow entry, no blank", "[a, ?!bwref x/foo]\n"],
+    ["nested in a block value, no blank", "k: [?!bwref x/foo]\n"],
+  ])("flow context: an explicit key, %s, lists no name", (_what, doc) => {
+    expect(references(doc)).toEqual([]);
+  });
+
+  test("block context: a question mark with no blank after it is a plain scalar, so the change stays in flow", () => {
+    expect(references("?!bwref x/foo\n")).toEqual([]);
+    expect(references("a:\n  ?foo: !bwref x/foo\n")).toEqual(["x/foo"]);
+    expect(references("?foo: !bwref x/foo\n")).toEqual(["x/foo"]);
+  });
+
   test("flow context: a colon before a flow indicator stays in the value, which is no name", () => {
     expect(references("k: [!bwref &e x/foo:]\n")).toEqual([]);
     expect(references("k: {!bwref &e x/foo:, j: v}\n")).toEqual([]);
