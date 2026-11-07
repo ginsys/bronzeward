@@ -28,7 +28,7 @@ gap. Section "Recommendation" gives the advice.
 | Oracle "real" | the oracle of `experiments/scanner-cross-line`, on unmodified go-yaml |
 | Oracle "patched" | the same oracle on go-yaml with one guarded delete (`go-yaml-guard.patch`) |
 | Oracle "counters" | `instr-oracle` on go-yaml with two counters (`go-yaml-instrument.patch`) |
-| Run head | faa548a9. The runs of s13, S9 and S8 used this head with a clean checkout. The commit after it changes this record only. |
+| Run head | 77eff0e0. The run of s13, S9 and S8 (stamp w688-l3) used this head with a clean checkout. The five small sets were compared again at this head on their saved oracle outputs. The commit after it changes this record only. |
 
 All sets are synthetic. The small sets come from `gen-small-sets.mjs`. The flow-key set comes from
 `gen-flow-key-set.mjs`, which is the generator in the body of #657 (named S12 there). The scanner
@@ -121,8 +121,8 @@ node gen-flow-key-set.mjs <work>/s13.json     # then run-compare.sh on it
 ```
 
 `lane.sh` runs s13, S9 and S8 one after the other, on sets that you made first. The run of this
-record took 21 seconds. The host check before the run required 4096 MiB of free memory and passed.
-The lowest free memory during the run was 20.2 GiB. Earlier measurements on 25200 documents gave
+record took 22 seconds. The host check before the run required 16384 MiB of free memory and passed
+with 20206 MiB. The lowest free memory during the run was 19.4 GiB. Earlier measurements on 25200 documents gave
 about 120 MB for the model comparison and under 20 MB for each oracle.
 
 `compare.mjs` prints one line of counts and then the differing documents. The bug decides a
@@ -138,8 +138,9 @@ The exit status is the pass rule. `compare.mjs` exits 1 when a condition fails, 
 an error on an empty set or when an oracle file has a different length. `selftest.sh` plants two
 false refusals (one by a "misplaced" prediction, one by a scanner error), a missed document, an
 empty set and a length mismatch. It requires a nonzero exit for each, and exit 0 for a passing
-case. The patched oracle can refuse a document for another
-reason, such as `[,]`. The model can report "misplaced" there, because the bug fires there too.
+case.
+
+The patched oracle can refuse a document for another reason, such as `[,]`. The model can report "misplaced" there, because the bug fires there too.
 
 An earlier version of `compare.mjs` always exited 0, and it counted only "misplaced" as a
 prediction. A review of this record found both defects. All numbers below come from the fixed
@@ -147,24 +148,27 @@ version.
 
 ## Results
 
-The model matches go-yaml on every set below. Each row has 0 missed documents and 0 false
-refusals, and the guarded model reports "misplaced" for 0 documents. "Control" is the count of
-documents that go-yaml accepts with a name, which shows that the run reads names at all. "Not
-compared" is the count of documents where the model makes no claim, so they are not a pass. The
-comparison lists them apart from "agree". They are documents that both oracles refuse for another
-reason and that the model calls "ok", and documents with a directive that the model calls
-"unsupported".
+On the documents that it compares, the model matches go-yaml in every set below. Each row has 0
+missed documents and 0 false refusals, and the guarded model reports "misplaced" for 0 documents.
+That result covers the "agree" column only. The documents in the last two columns were not
+compared. "Control" is the count of documents that go-yaml accepts with a name, which shows that
+the run reads names at all. "Agree" is the count of compared documents on which the model and
+go-yaml agree. "Not compared" is the count of documents where the model makes no claim. These are
+documents that both oracles refuse for another reason and that the model calls "ok", and
+documents with a directive that the model calls "unsupported". In each row, Agree plus the last two
+columns equals Documents. The lane prints the same counts for s13, S9 and S8. The five small sets
+were not part of the lane run.
 
-| Set | Documents | Control | Decided by the bug | Model "misplaced" | Not compared |
-|---|---|---|---|---|---|
-| Matrix of #657 (18 keys x 10 values) | 180 | 90 | 80 | 80 | 10 |
-| Probe 5 and 6 of #657, plus root and `a:` shapes | 22 | 13 | 9 | 9 | 0 |
-| Hypothesis set (21 flow keys x 6 contexts) | 126 | 90 | 18 | 21 | 13 |
-| Small keys of `?` and `:` (below) | 45 | 0 | 15 | 45 | 0 |
-| Edge set: BOM, Unicode line breaks, astral key | 8 | 1 | 6 | 6 | 0 |
-| s13, the flow-key set of #657 | 23247 | 15099 | 8085 | 8085 | 63 |
-| S9 | 38208 | 5955 | 0 | 0 | 11931 |
-| S8 | 245696 | 53570 | 0 | 0 | 126810 |
+| Set | Documents | Control | Decided by the bug | Model "misplaced" | Agree | Not compared: both refuse, model "ok" | Not compared: model "unsupported" |
+|---|---|---|---|---|---|---|---|
+| Matrix of #657 (18 keys x 10 values) | 180 | 90 | 80 | 80 | 170 | 10 | 0 |
+| Probe 5 and 6 of #657, plus root and `a:` shapes | 22 | 13 | 9 | 9 | 22 | 0 | 0 |
+| Hypothesis set (21 flow keys x 6 contexts) | 126 | 90 | 18 | 21 | 113 | 13 | 0 |
+| Small keys of `?` and `:` (below) | 45 | 0 | 15 | 45 | 45 | 0 | 0 |
+| Edge set: BOM, Unicode line breaks, astral key | 8 | 1 | 6 | 6 | 8 | 0 | 0 |
+| s13, the flow-key set of #657 | 23247 | 15099 | 8085 | 8085 | 23184 | 63 | 0 |
+| S9 | 38208 | 5955 | 0 | 0 | 26277 | 11931 | 0 |
+| S8 | 245696 | 53570 | 0 | 0 | 118886 | 115662 | 11148 |
 
 Notes on the rows:
 
@@ -242,15 +246,25 @@ Notes on the rows:
 
 ## Recommendation
 
-On every set above, the model predicts the go-yaml refusals of this class exactly, with 0 missed
-documents and 0 false refusals. That result holds for these sets and for the 8 edge documents. It
-is not a proof for every document, and the review found two gaps that the sets did not cover.
-S9 and S8 hold no document that the bug decides, so they test one thing: that the model refuses
-no document that go-yaml accepts. The model before the repair failed that test on S9 with 120
-false refusals, and the comparison did not report it. This is why the result stands on the
+On the documents that it compares, the model predicts the go-yaml refusals of this class exactly,
+with 0 missed documents and 0 false refusals. The result covers the compared documents only. It
+says nothing about the documents that were never compared:
+
+- s13: 63 of 23247 documents were never compared.
+- S9: 11931 of 38208 documents were never compared.
+- S8: 126810 of 245696 documents were never compared. This is more than half of S8 (52%). A
+  result of 0 and 0 over the other 118886 documents is no evidence for the whole set. Of the
+  126810, 11148 have a directive that the model does not port. The other 115662 are documents that
+  both oracles refuse for another reason, and the model says "ok" for them.
+
+The result is not a proof for every document, and the review found two gaps that the sets did not
+cover. S9 and S8 hold no document that the bug decides, so they test one thing: that the model
+refuses no document that go-yaml accepts. The model before the repair failed that test on S9 with
+120 false refusals, and the comparison did not report it. This is why the result stands on the
 repaired comparison and not on the first run. It also shows that a port needs a check that can
-fail. So #657 can port the model only with a differential check in CI. The check runs the model and the
-oracles on the sets above and on a generator with Unicode input, and it fails on any difference.
+fail. So #657 can port the model only with a differential check in CI. The check runs the model
+and the oracles on the sets above and on a generator with Unicode input, and it fails on any
+difference. It also prints the count of documents that it did not compare.
 
 The port needs the token queue, the simple-key stack and the indent stack inside the scanner,
 about the size of `model.mjs`. It must tie the rule to the go-yaml pin. An upgrade of go-yaml that
