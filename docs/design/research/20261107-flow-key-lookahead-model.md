@@ -135,9 +135,10 @@ when it meets three conditions:
 - A model run with the guard switched on reports "misplaced" for no document.
 
 The exit status is the pass rule. `compare.mjs` exits 1 when a condition fails, and it stops with
-an error on an empty set or when an oracle file has a different length. `selftest.sh` plants a
-false refusal, a missed document, an empty set and a length mismatch. It requires a nonzero exit
-for each, and exit 0 for a passing case. The patched oracle can refuse a document for another
+an error on an empty set or when an oracle file has a different length. `selftest.sh` plants two
+false refusals (one by a "misplaced" prediction, one by a scanner error), a missed document, an
+empty set and a length mismatch. It requires a nonzero exit for each, and exit 0 for a passing
+case. The patched oracle can refuse a document for another
 reason, such as `[,]`. The model can report "misplaced" there, because the bug fires there too.
 
 An earlier version of `compare.mjs` always exited 0, and it counted only "misplaced" as a
@@ -148,18 +149,22 @@ version.
 
 The model matches go-yaml on every set below. Each row has 0 missed documents and 0 false
 refusals, and the guarded model reports "misplaced" for 0 documents. "Control" is the count of
-documents that go-yaml accepts with a name, which shows that the run reads names at all.
+documents that go-yaml accepts with a name, which shows that the run reads names at all. "Not
+compared" is the count of documents where the model makes no claim, so they are not a pass. The
+comparison lists them apart from "agree". They are documents that both oracles refuse for another
+reason and that the model calls "ok", and documents with a directive that the model calls
+"unsupported".
 
-| Set | Documents | Control | Decided by the bug | Model "misplaced" |
-|---|---|---|---|---|
-| Matrix of #657 (18 keys x 10 values) | 180 | 90 | 80 | 80 |
-| Probe 5 and 6 of #657, plus root and `a:` shapes | 22 | 13 | 9 | 9 |
-| Hypothesis set (21 flow keys x 6 contexts) | 126 | 90 | 18 | 21 |
-| Small keys of `?` and `:` (below) | 45 | 0 | 15 | 45 |
-| Edge set: BOM, Unicode line breaks, astral key | 8 | 1 | 6 | 6 |
-| s13, the flow-key set of #657 | 23247 | 15099 | 8085 | 8085 |
-| S9 | 38208 | 5955 | 0 | 0 |
-| S8 | 245696 | 53570 | 0 | 0 |
+| Set | Documents | Control | Decided by the bug | Model "misplaced" | Not compared |
+|---|---|---|---|---|---|
+| Matrix of #657 (18 keys x 10 values) | 180 | 90 | 80 | 80 | 10 |
+| Probe 5 and 6 of #657, plus root and `a:` shapes | 22 | 13 | 9 | 9 | 0 |
+| Hypothesis set (21 flow keys x 6 contexts) | 126 | 90 | 18 | 21 | 13 |
+| Small keys of `?` and `:` (below) | 45 | 0 | 15 | 45 | 0 |
+| Edge set: BOM, Unicode line breaks, astral key | 8 | 1 | 6 | 6 | 0 |
+| s13, the flow-key set of #657 | 23247 | 15099 | 8085 | 8085 | 63 |
+| S9 | 38208 | 5955 | 0 | 0 | 11931 |
+| S8 | 245696 | 53570 | 0 | 0 | 126810 |
 
 Notes on the rows:
 
@@ -175,17 +180,30 @@ Notes on the rows:
   `a: b\nK: V`, where `V` is `!bwref x/foo\n`.
 - Edge set: 8 documents with an initial byte order mark, the line breaks U+0085, U+2028 and
   U+2029, and a key of 511 astral characters with an ASCII twin. 6 are decided by the bug and 2
-  are accepted. Before the repair, the model missed 4 of the 6 and refused one accepted document.
+  are accepted. Before the repair, the model missed 4 of the 6 and refused 2 accepted documents.
+  One has a byte order mark before `? a`, then `: b`, then `[? b]: !bwref x/foo` (verdict
+  "misplaced"). The other has a byte order mark before `k: !bwref x/foo` and ` bar` on the next
+  line (verdict "error").
 - s13: the count of 8085 equals the 8085 names that the scanner on main lists in documents that
   go-yaml refuses (#657). The counters saw the event in all 8085. 63 documents refuse in both runs
-  for another reason, and the model says "ok" for them. They are outside the class.
+  for another reason, and the model says "ok" for them. They are outside the class and are the 63
+  "not compared" documents.
 - S9: no document is decided by the bug. The model reports a scanner error for 12570 documents,
   and go-yaml refuses all of them. The model says "ok" for the other 25638 documents. go-yaml
-  accepts 13707 of them and refuses 11931 for a reason that the model does not port.
+  accepts 13707 of them and refuses 11931 for a reason that the model does not port. The 11931
+  are the "not compared" documents.
+- S9 before the repair: the model at 749194e7 reported a scanner error for 12606 documents. go-yaml
+  accepted 120 of them, so the model gave 120 false refusals, with document 33458 among them. That
+  document is `k: !bwref x/foo` and ` bar` on the next line, after a byte order mark. The old
+  comparator did not count a scanner error as a false refusal, so it hid all 120. The repaired
+  model gives 0 on the same set.
 - S8: no document is decided by the bug and the model reports "misplaced" for none. The model
   reports a scanner error for 56252 documents, and go-yaml refuses all of them. The model reports
   "unsupported" for 11148 documents with a directive. go-yaml refuses 7446 of them and accepts
-  3702.
+  3702. These 11148 and 115662 documents that both oracles refuse for another reason are the
+  126810 "not compared" documents. The counters saw the event in 3806 documents that both oracles
+  refuse for another reason (2903 where the model says "ok", 903 where it reports a scanner
+  error). The bug decides none of them, so the pass rule does not cover them.
 
 ## Limits
 
@@ -198,16 +216,19 @@ Notes on the rows:
   nothing for them.
 - The model does not check the characters that the go-yaml reader refuses, such as control
   characters, and it does not read UTF-16 input. The oracle receives UTF-8.
-- The sets come from the families in #657 and #654. The review of this record found three gaps
-  outside them: an initial byte order mark, the line breaks U+0085, U+2028 and U+2029, and keys of
-  astral characters. The sets did not find these gaps. The edge set covers them now. Another
-  shape outside the families is not tested.
+- The sets come from the families in #657 and #654. The review of this record found two gaps
+  outside them: the line breaks U+0085, U+2028 and U+2029, and keys of astral characters. The
+  edge set covers them now. Another shape outside the families is not tested.
+- The byte order mark was not a gap in the sets. S9 held it, and the model failed on it: 120 false
+  refusals (see the S9 note). The test existed and its failure was ignored, because the old
+  comparator did not count a scanner error as a false refusal. The repair fixes the comparator and
+  the model.
 - Only S9 (3456 documents) and S8 (2486 documents) hold tab characters. The flow-key families hold
   none. S9 holds 1584 documents with a byte order mark and S8 holds 420.
 - The self-test does not plant a guard-on misplaced document, because a plant needs a broken
   model. Only a reading of `compare.mjs` shows the "no misplaced insert with the guard on" leg.
-- The model has 437 lines. The experiment as a whole adds 900 lines under `experiments`, of which
-  64 are patch files and 34 are the self-test. This is more than the 600-line budget. The
+- The model has 437 lines. The experiment as a whole adds 910 lines under `experiments`, of which
+  64 are patch files and 36 are the self-test. This is more than the 600-line budget. The
   generators and the Go oracles are the reproduction that an investigation must land, so they
   stay.
 
@@ -223,8 +244,12 @@ Notes on the rows:
 
 On every set above, the model predicts the go-yaml refusals of this class exactly, with 0 missed
 documents and 0 false refusals. That result holds for these sets and for the 8 edge documents. It
-is not a proof for every document, and the review found three gaps that the sets did not cover.
-So #657 can port the model only with a differential check in CI. The check runs the model and the
+is not a proof for every document, and the review found two gaps that the sets did not cover.
+S9 and S8 hold no document that the bug decides, so they test one thing: that the model refuses
+no document that go-yaml accepts. The model before the repair failed that test on S9 with 120
+false refusals, and the comparison did not report it. This is why the result stands on the
+repaired comparison and not on the first run. It also shows that a port needs a check that can
+fail. So #657 can port the model only with a differential check in CI. The check runs the model and the
 oracles on the sets above and on a generator with Unicode input, and it fails on any difference.
 
 The port needs the token queue, the simple-key stack and the indent stack inside the scanner,

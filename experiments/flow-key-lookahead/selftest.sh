@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Checks that compare.mjs fails closed. It feeds the comparison five hand-written oracle outputs and
-# requires the exit status to match: 0 for a pass, and nonzero for a false refusal, a missed document,
-# an empty set and a count mismatch. It needs no go and no oracle.
+# Checks that compare.mjs fails closed. It feeds the comparison six hand-written oracle outputs and
+# requires the exit status to match: 0 for a pass, and nonzero for two false refusals (a "misplaced"
+# prediction and a scanner error), a missed document, an empty set and a count mismatch. It needs no go
+# and no oracle.
 # Usage: selftest.sh
 set -uo pipefail
 
@@ -31,4 +32,5 @@ check "planted false refusal: the model predicts a refusal and go-yaml accepts" 
 check "planted miss: the bug decides a document and the model predicts nothing" nonzero '["a: 1\n"]' "$refused" "$accepted"
 check "empty set" nonzero '[]' '[]' '[]'
 check "count mismatch between the set and an oracle" nonzero "$keyed" '[]' "$accepted"
+check "planted false refusal: the model reports a scanner error and go-yaml accepts" nonzero '["@"]' "$accepted" "$accepted"
 exit "$bad"
