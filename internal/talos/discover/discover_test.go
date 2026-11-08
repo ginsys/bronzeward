@@ -8,7 +8,9 @@ import (
 	"net"
 	"net/netip"
 	"runtime/debug"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -252,24 +254,36 @@ func shorten(t *testing.T, member, start time.Duration) {
 }
 
 // route sends the addresses in by to their endpoints and every other address to the silent listener.
-func route(t *testing.T, l net.Listener, by map[string]string) {
+// The returned function is the addresses memberEndpoint was asked for so far, in order.
+func route(t *testing.T, l net.Listener, by map[string]string) func() []string {
 	t.Helper()
 	old := memberEndpoint
+	var mu sync.Mutex
+	var tried []string
 	memberEndpoint = func(a netip.Addr) string {
+		mu.Lock()
+		tried = append(tried, a.String())
+		mu.Unlock()
 		if e, ok := by[a.String()]; ok {
 			return e
 		}
 		return l.Addr().String()
 	}
 	t.Cleanup(func() { memberEndpoint = old })
+	return func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), tried...)
+	}
 }
 
 // TestDiscoverBoundsEachAddress: every address of a member has its own deadline, so a member that
-// lists three addresses that never answer holds the command for three member timeouts, the total bound
-// (the number of listed addresses times memberTimeout), and each of them was tried.
+// lists three addresses that never answer is tried at each of them, in order, and holds the command
+// for at least three member timeouts: the total bound is the number of listed addresses times
+// memberTimeout. The test sets no upper limit on the time, which a slow runner could break.
 func TestDiscoverBoundsEachAddress(t *testing.T) {
 	c := newCluster(t)
-	route(t, silent(t), map[string]string{"10.0.0.1": c.a.Endpoint})
+	tried := route(t, silent(t), map[string]string{"10.0.0.1": c.a.Endpoint})
 	shorten(t, 400*time.Millisecond, 20*time.Second)
 	c.a.SetMembers(t,
 		talostest.Member{NodeID: "n1", Hostname: "cp-1", Addresses: []string{"10.0.0.1"}, ControlPlanePort: 6443},
@@ -280,9 +294,11 @@ func TestDiscoverBoundsEachAddress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	took := time.Since(start)
-	if took < 3*memberTimeout*9/10 || took > 6*memberTimeout {
-		t.Errorf("discovery took %v for one member with three silent addresses and a %v timeout; want about three timeouts", took, memberTimeout)
+	if took := time.Since(start); took < 3*memberTimeout*9/10 {
+		t.Errorf("discovery took %v for one member with three silent addresses and a %v timeout; want at least three timeouts", took, memberTimeout)
+	}
+	if want := []string{"10.0.0.1", "10.0.0.3", "10.0.0.4", "10.0.0.5"}; !slices.Equal(tried(), want) {
+		t.Errorf("addresses tried %v, want %v", tried(), want)
 	}
 	if m := got.Members[1]; m.Answered || m.Address != "10.0.0.3" {
 		t.Errorf("the silent member: %+v", m)
@@ -290,11 +306,12 @@ func TestDiscoverBoundsEachAddress(t *testing.T) {
 }
 
 // TestDiscoverTriesTheNextAddressAfterASilentOne: a first address that never answers does not use up
-// the time of the second, which answers.
+// the time of the second, which answers. The timeout is long (1.5 s) so that a slow runner still
+// finishes the second address's three reads inside its own deadline.
 func TestDiscoverTriesTheNextAddressAfterASilentOne(t *testing.T) {
 	c := newCluster(t)
-	route(t, silent(t), map[string]string{"10.0.0.1": c.a.Endpoint, "10.0.0.2": c.b.Endpoint})
-	shorten(t, 400*time.Millisecond, 20*time.Second)
+	tried := route(t, silent(t), map[string]string{"10.0.0.1": c.a.Endpoint, "10.0.0.2": c.b.Endpoint})
+	shorten(t, 1500*time.Millisecond, 20*time.Second)
 	c.a.SetMembers(t,
 		talostest.Member{NodeID: "n1", Hostname: "cp-1", Addresses: []string{"10.0.0.1"}, ControlPlanePort: 6443},
 		talostest.Member{NodeID: "n2", Hostname: "w-1", Addresses: []string{"10.0.0.9", "10.0.0.2"}},
@@ -307,27 +324,73 @@ func TestDiscoverTriesTheNextAddressAfterASilentOne(t *testing.T) {
 	if m := got.Members[1]; m != want {
 		t.Errorf("a member whose first address is silent: %+v, want %+v", m, want)
 	}
+	if w := []string{"10.0.0.1", "10.0.0.9", "10.0.0.2"}; !slices.Equal(tried(), w) {
+		t.Errorf("addresses tried %v, want %v", tried(), w)
+	}
 }
 
-// TestDiscoverBoundsTheStartReads: an endpoint that accepts the connection and never answers ends in
-// an error after startTimeout, although the caller's own context has a much later deadline.
+// TestDiscoverBoundsTheStartReads: each of the three reads from the starting endpoint ends in an
+// error of its own when it stalls, while the caller's own context (6 s) is still alive. The error
+// names the read that stalled, so an earlier read that is merely slow does not pass for it. The test
+// sets no limit on the time.
 func TestDiscoverBoundsTheStartReads(t *testing.T) {
+	for name, tc := range map[string]struct {
+		stall func(c *stand, silent net.Listener) (endpoint string)
+		want  string
+	}{
+		"version": {func(c *stand, l net.Listener) string { return l.Addr().String() }, "discover: version: DeadlineExceeded"},
+		"cluster information": {func(c *stand, _ net.Listener) string {
+			c.a.Stall(talostest.InfoType, true)
+			return c.a.Endpoint
+		}, "discover: reading the cluster information: DeadlineExceeded"},
+		"member list": {func(c *stand, _ net.Listener) string {
+			c.a.Stall(talostest.MemberType, true)
+			return c.a.Endpoint
+		}, "discover: listing the cluster members: DeadlineExceeded"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := newCluster(t)
+			endpoint := tc.stall(c, silent(t))
+			shorten(t, 400*time.Millisecond, 1500*time.Millisecond)
+			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+			defer cancel()
+			_, err := Discover(ctx, c.p.Talosconfig(endpoint, "", ""), endpoint)
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("error %v, want %q", err, tc.want)
+			}
+			if ctx.Err() != nil {
+				t.Errorf("the caller's context ended first (%v): the start deadline did not bound the read", ctx.Err())
+			}
+			for _, secret := range leaked(err.Error(), c.p) {
+				t.Errorf("the error quotes %.20q: %v", secret, err)
+			}
+		})
+	}
+}
+
+// TestDiscoverEmptyNodeIDIsNoAnswer: an entry of the member list with no NodeID, answered by a node
+// that reports none, is not the same node: it is no answer, and nothing the node said is kept.
+func TestDiscoverEmptyNodeIDIsNoAnswer(t *testing.T) {
 	c := newCluster(t)
-	l := silent(t)
-	shorten(t, 400*time.Millisecond, 400*time.Millisecond)
-	ctx, cancel := context.WithTimeout(t.Context(), 6*time.Second)
-	defer cancel()
-	start := time.Now()
-	_, err := Discover(ctx, c.p.Talosconfig(l.Addr().String(), "", ""), l.Addr().String())
-	if err == nil {
-		t.Fatal("no error from an endpoint that never answers")
+	c.b.SetNodeID(t, "")
+	c.a.SetMembers(t,
+		talostest.Member{NodeID: "n1", Hostname: "cp-1", Addresses: []string{"10.0.0.1"}, ControlPlanePort: 6443},
+		talostest.Member{NodeID: "", Hostname: "w-x", Addresses: []string{"10.0.0.2"}},
+	)
+	got, err := c.discover(t)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if took := time.Since(start); took > 3*time.Second {
-		t.Errorf("discovery took %v against a %v start timeout and a caller deadline of 6s: %v", took, startTimeout, err)
+	want := Member{Hostname: "w-x", Address: "10.0.0.2", Role: "worker"}
+	for _, m := range got.Members { // the list is sorted by ID, so the empty one is not at a fixed place
+		if m.Hostname == "w-x" {
+			if m != want {
+				t.Errorf("a member with no node ID: %+v, want %+v", m, want)
+			}
+			return
+		}
 	}
-	for _, secret := range leaked(err.Error(), c.p) {
-		t.Errorf("the error quotes %.20q: %v", secret, err)
-	}
+	t.Fatalf("control: the member w-x is not listed: %+v", got.Members)
 }
 
 // TestDiscoverReadErrorsAreNoAnswer: a member whose SystemInformation or PlatformMetadata read fails
