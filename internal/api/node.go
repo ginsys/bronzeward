@@ -89,11 +89,16 @@ func (a *API) readNode(ctx context.Context, j job) (ingest.Unresolved, *refusal,
 
 // configReadCause is the cause of a failed machine configuration read. A node that stopped
 // answering gives the identity read's own cause, node-unreachable, as the observation loop does
-// (observe.go). Any other failure is machine-config: a credential Talos accepts for the identity
-// but refuses for the configuration (a role without os:admin), for one.
+// (observe.go). A node that answered with a configuration the client's machinery cannot decode
+// (a document kind newer than the machinery) gives machine-config-undecodable; retrying does not
+// help, and the machinery has to move. Any other failure is machine-config: a credential Talos
+// accepts for the identity but refuses for the configuration (a role without os:admin), for one.
 func configReadCause(err error) string {
-	if unanswered(err) {
+	switch {
+	case unanswered(err):
 		return "node-unreachable"
+	case errors.Is(err, talos.ErrUndecodable):
+		return "machine-config-undecodable"
 	}
 	return "machine-config"
 }

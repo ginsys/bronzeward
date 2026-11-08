@@ -358,6 +358,12 @@ func TestMachineAccessUnavailable(t *testing.T) {
 			me.node.Fail(talostest.MachineConfigType, codes.Unavailable)
 			return []string{runToken}
 		}, "node-unreachable", "machine", true},
+		// The node answered with a configuration the client's machinery cannot decode; the
+		// decoder quotes the rejected document, which is a secret, and no byte of it may leave.
+		"a configuration the client cannot decode": {func(t *testing.T, me *machineEnv) []string {
+			me.node.SetUndecodableMachineConfig(t, []byte("version: v1alpha1\nmachine:\n  unknownField: UPSTRM\n"))
+			return []string{"UPSTRM", "unknownField"}
+		}, "machine-config-undecodable", "machine", true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			me := newMachineEnv(t)
@@ -398,6 +404,48 @@ func TestMachineAccessErrorTextControl(t *testing.T) {
 			}
 		})
 	}
+	// ginsys/bronzeward#715: a node that answers with a configuration the client cannot decode is
+	// reported by its cause alone. Through the real reader, no part of the document or of the
+	// decoder's text is in the record, the responses or the log, even under quoteErrors, which logs
+	// the error text. The control: a reader whose error does quote the canary is caught by the same
+	// scan under quoteErrors and by nothing without it, so the scan can fail.
+	canaries := []string{"UPSTRM", "unknownField"}
+	undecodable := []byte("version: v1alpha1\nmachine:\n  unknownField: UPSTRM\n")
+	for name, quotes := range map[string]bool{"the real reader": false, "a reader that quotes the document": true} {
+		for _, quote := range []bool{false, true} {
+			t.Run(fmt.Sprint("undecodable/", name, "/quoteErrors=", quote), func(t *testing.T) {
+				me := newMachineEnv(t)
+				me.node.SetUndecodableMachineConfig(t, undecodable)
+				o := options{quoteErrors: quote, nodeTimeout: 500 * time.Millisecond}
+				if quotes {
+					o.dial = func(ctx context.Context, tc []byte, endpoint string) (talos.Reader, error) {
+						r, err := talos.Dial(ctx, tc, endpoint)
+						if err != nil {
+							return nil, err
+						}
+						return quotingReader{r}, nil
+					}
+				}
+				op, j := me.startJob(t, map[string]any{"source": "machine", "document": nil})
+				me.runWith(t, o, j)
+				evs := events(t, me.db, op)
+				if r := readOp(t, me.db, op); r.state != "failed" || evs[len(evs)-1]["cause"] != "machine-config-undecodable" {
+					t.Fatalf("operation %+v, events %v; want failed with machine-config-undecodable", r, evs)
+				}
+				if got := me.leaked(t, op, canaries...); got != (quotes && quote) {
+					t.Fatalf("leaked %v with quoteErrors %v and reader quoting %v", got, quote, quotes)
+				}
+			})
+		}
+	}
+}
+
+// quotingReader is a reader whose configuration read fails as the machinery's decoder does: with
+// the rejected document in the error text.
+type quotingReader struct{ talos.Reader }
+
+func (quotingReader) MachineConfig(context.Context) (talos.Config, error) {
+	return talos.Config{}, fmt.Errorf("%w: unknownField: UPSTRM", talos.ErrUndecodable)
 }
 
 // §5.1: the access event commits under the claim's full fence, so a run whose claim lapsed (its

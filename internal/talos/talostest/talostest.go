@@ -28,11 +28,13 @@ import (
 
 	"github.com/cosi-project/runtime/api/v1alpha1"
 	"github.com/cosi-project/runtime/pkg/resource"
+	"github.com/cosi-project/runtime/pkg/resource/protobuf"
 	"github.com/cosi-project/runtime/pkg/state"
 	"github.com/cosi-project/runtime/pkg/state/impl/inmem"
 	"github.com/cosi-project/runtime/pkg/state/impl/namespaced"
 	"github.com/cosi-project/runtime/pkg/state/protobuf/server"
 	"github.com/siderolabs/talos/pkg/machinery/api/machine"
+	configpb "github.com/siderolabs/talos/pkg/machinery/api/resource/config"
 	"github.com/siderolabs/talos/pkg/machinery/config/configloader"
 	machinecfg "github.com/siderolabs/talos/pkg/machinery/config/machine"
 	"github.com/siderolabs/talos/pkg/machinery/resources/cluster"
@@ -447,6 +449,37 @@ func (n *Node) SetPlatform(t testing.TB, name string) {
 	r := runtime.NewPlatformMetadataSpec(runtime.NamespaceName, runtime.PlatformMetadataID)
 	r.TypedSpec().Platform = name
 	n.set(t, r)
+}
+
+// SetUndecodableMachineConfig makes the node's active machine configuration a resource whose
+// spec carries yaml as it is, for a document the client's machinery cannot decode (a kind it does
+// not register, for one). SetMachineConfig cannot do this: it loads the document and fails the
+// test when that load fails.
+func (n *Node) SetUndecodableMachineConfig(t testing.TB, yaml []byte) {
+	t.Helper()
+	n.set(t, &undecodableConfig{
+		md:   resource.NewMetadata(cfgres.NamespaceName, cfgres.MachineConfigType, cfgres.ActiveID, resource.VersionUndefined),
+		yaml: yaml,
+	})
+}
+
+// undecodableConfig is a MachineConfig resource that marshals any bytes as the configuration.
+type undecodableConfig struct {
+	md   resource.Metadata
+	yaml []byte
+}
+
+func (u *undecodableConfig) Metadata() *resource.Metadata { return &u.md }
+func (u *undecodableConfig) Spec() any                    { return rawConfigSpec(u.yaml) }
+func (u *undecodableConfig) DeepCopy() resource.Resource {
+	return &undecodableConfig{md: u.md, yaml: append([]byte(nil), u.yaml...)}
+}
+
+type rawConfigSpec []byte
+
+// MarshalProto implements protobuf.ProtoMarshaler, as the machinery's own spec does.
+func (s rawConfigSpec) MarshalProto() ([]byte, error) {
+	return protobuf.ProtoMarshal(&configpb.MachineConfigSpec{YamlMarshalled: s})
 }
 
 // SetMachineConfig makes the node's active machine configuration the document doc.
