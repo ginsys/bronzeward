@@ -97,6 +97,8 @@ Not chosen here: treating a headerless terminal read as an error. Section 8.5 ca
 
 Whether to file a remediation issue, and for which of the alternatives. The test stays as the evidence if the observed result is red.
 
+Outcome: ginsys/bronzeward#728 took alternative 3. The headerless clean branch of `WatchBody` now tests the count of epoch moves, and `Watch` returns the `OperationRead`, which `publish` and `import` check with `EpochHolds`. The three tests run with no skip.
+
 ## 6. Limits
 
 - Severity premise: the shape needs a non-conforming server or proxy. No such server is known. The specification still defines the client's reading for it.
