@@ -27,6 +27,7 @@ type planFake struct {
 	approval, approvalEpoch   string
 	desired, assignment, open string
 	drift                     string // the plan's drift record, "" for none
+	noApplied                 bool   // the machine has no Applied configuration
 	expiresIn                 time.Duration
 	now                       time.Time // the expiry's clock when set, so two renders are equal
 	raw, fail                 map[string]string
@@ -131,7 +132,11 @@ func (f *planFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if f.open != "" {
 			drift = `{"revision":` + f.open + `,"observation":"obs_BWSYNTH","lastObservation":"obs_BWSYNTH"}`
 		}
-		fmt.Fprintf(w, `{"id":"mch_a","cluster":"cl_BWSYNTH","talosEndpoint":"10.5.0.5:50000","desired":%q,"openDrift":%s}`, f.desired, drift)
+		applied := `{"release":"rel_BWSYNTH-old","source":"apply"}`
+		if f.noApplied {
+			applied = "null"
+		}
+		fmt.Fprintf(w, `{"id":"mch_a","cluster":"cl_BWSYNTH","talosEndpoint":"10.5.0.5:50000","desired":%q,"applied":%s,"openDrift":%s}`, f.desired, applied, drift)
 	case "/clusters/cl_BWSYNTH":
 		fmt.Fprint(w, `{"id":"cl_BWSYNTH","name":"lab-a"}`)
 	case "/approvals/apr_BWSYNTH":

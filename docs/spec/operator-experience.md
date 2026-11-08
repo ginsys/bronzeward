@@ -309,7 +309,7 @@ bronzewardctl
   act list                            the audit record
   drift show <machine>
   drift adopt <machine>               composite: drift-adoption import, publish, then plan create
-  drift revert <machine>              composite: plan create (apply-config) for desired
+  drift revert <machine>              composite: read the machine, then plan create (apply-config) for desired
 
   recovery status | enter | exit
   recovery takeover | account | resolve | scope-account | mark | release
@@ -902,6 +902,15 @@ The machine is frozen: the plan cannot commit until an approver approves it and,
 
 The plan names the drift record by its number, not by an opening time: the API serves none
 (`api/openapi.yaml` `OpenDriftBody`).
+
+The command reads the machine's Desired release before it sends. That read and the plan write
+share one client, so the write refuses a first send if the server's epoch moved between them.
+The command takes no repeat flag, because it reads the Desired release again on every run and
+that release can change. After an unknown outcome, the command prints the `plan create` command
+with the release it used. Repeat the write with that command and its flags.
+
+A machine with no Applied configuration has no drift to revert. The command sends nothing and
+prints the `plan create` command for an adopt plan.
 
 A revert is an `apply-config` plan of the machine's `Desired` while drift is open, approved with
 `unseenOverwrite: true`; a freeze must be lifted by an `approver` before it can commit

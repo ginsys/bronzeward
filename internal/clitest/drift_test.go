@@ -312,11 +312,17 @@ func TestDrift(t *testing.T) {
 		t.Errorf("the adoption closed drift record %d as %q, want adopted", opened, got)
 	}
 
-	// The composite also states, without running a step, what a caller without the roles still has to do.
-	viewer := e.as(t, "viewer")
-	f.want(e.ctl(with(viewer, "drift", "adopt", m, "--draft", draft)...), 0, "Not run: step 1 needs an author signed in as a person. The steps:")
 	if n := f.actCount(); n <= before {
 		t.Errorf("%d acts recorded by the adoption, want some", n-before)
+	}
+
+	// The composite also states, without running a step, what a caller without the roles still has to do.
+	// The count is read right before it, so the check is on its own acts and not on the adoption's.
+	viewer := e.as(t, "viewer")
+	beforeViewer := f.actCount()
+	f.want(e.ctl(with(viewer, "drift", "adopt", m, "--draft", draft)...), 0, "Not run: step 1 needs an author signed in as a person. The steps:")
+	if n := f.actCount(); n != beforeViewer {
+		t.Errorf("%d acts recorded by a viewer's drift adopt, want none", n-beforeViewer)
 	}
 
 	// The prompt ends in a space, which the repository's whitespace check refuses in a kept file.
