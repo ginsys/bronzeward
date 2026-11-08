@@ -48,6 +48,8 @@ func References(doc string) Result {
 	unfit := false
 	bad := []string{}
 	seen := map[string]bool{}
+	aliased := map[*yaml.Node]bool{}
+	var listed []*yaml.Node
 	for {
 		var n yaml.Node
 		err := dec.Decode(&n)
@@ -57,12 +59,17 @@ func References(doc string) Result {
 		if err != nil {
 			return Result{Err: err.Error(), Tags: []string{}}
 		}
-		walk(&n, &unfit, &bad, func(v string) {
-			if !seen[v] {
-				seen[v] = true
-				found = append(found, v)
-			}
-		})
+		walk(&n, &unfit, &bad, aliased, &listed)
+	}
+	// An alias key that repeats the anchor of a tagged node makes the server refuse the stream
+	// (tag-placement), so the editor lists no name for that node. The alias may stand in a later
+	// document than the node, so the filter runs once the whole stream is read
+	// (ginsys/bronzeward#672).
+	for _, n := range listed {
+		if !aliased[n] && !seen[n.Value] {
+			seen[n.Value] = true
+			found = append(found, n.Value)
+		}
 	}
 	if found == nil {
 		found = []string{}
@@ -85,25 +92,29 @@ var nameSyntax = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(/[a-z0-9]([a
 // is such a key is refused too (the alias branch of the same function). The oracle reads it the
 // same way, so a scanner that lists nothing for these keys is equal to it
 // (ginsys/bronzeward#637).
-func walk(n *yaml.Node, unfit *bool, bad *[]string, f func(string)) {
-	walkNode(n, false, map[*yaml.Node]bool{}, unfit, bad, f)
+//
+// The alias branch refuses any alias key whose anchored node carries the tag, whether that node is a
+// key or a value (`a: &k !bwref x/foo`, then `*k : v`). The oracle marks the stream unfit and puts
+// the anchored node in aliased, so the caller lists no name for it (ginsys/bronzeward#672). The
+// nodes that carry a listable name go in listed, in stream order, for that filter.
+func walk(n *yaml.Node, unfit *bool, bad *[]string, aliased map[*yaml.Node]bool, listed *[]*yaml.Node) {
+	walkNode(n, false, unfit, bad, aliased, listed)
 }
 
-// walkNode is walk for one node. key is true for a mapping key. taggedKeys holds the tagged key
-// scalars seen so far in the document, for the alias keys that stand for them.
-func walkNode(n *yaml.Node, key bool, taggedKeys map[*yaml.Node]bool, unfit *bool, bad *[]string, f func(string)) {
+// walkNode is walk for one node. key is true for a mapping key.
+func walkNode(n *yaml.Node, key bool, unfit *bool, bad *[]string, aliased map[*yaml.Node]bool, listed *[]*yaml.Node) {
 	if n.Kind == yaml.AliasNode {
-		if key && taggedKeys[n.Alias] {
+		if key && n.Alias != nil && n.Alias.Tag == refTag {
+			aliased[n.Alias] = true
 			*unfit = true
 		}
 		return
 	}
 	switch {
 	case key && n.Kind == yaml.ScalarNode && n.Tag == refTag:
-		taggedKeys[n] = true
 		*unfit = true
 	case n.Tag == refTag && nameSyntax.MatchString(n.Value):
-		f(n.Value)
+		*listed = append(*listed, n)
 	case n.Tag == refTag:
 		*unfit = true
 		*bad = append(*bad, n.Value)
@@ -111,7 +122,7 @@ func walkNode(n *yaml.Node, key bool, taggedKeys map[*yaml.Node]bool, unfit *boo
 		*unfit = true
 	}
 	for i, c := range n.Content {
-		walkNode(c, n.Kind == yaml.MappingNode && i%2 == 0, taggedKeys, unfit, bad, f)
+		walkNode(c, n.Kind == yaml.MappingNode && i%2 == 0, unfit, bad, aliased, listed)
 	}
 }
 

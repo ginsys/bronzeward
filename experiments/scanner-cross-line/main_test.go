@@ -52,9 +52,9 @@ func TestCases(t *testing.T) {
 
 // TestTaggedKey holds the oracle to the server's rule for a tag on a key (tag-placement in
 // internal/ingest/declare.go): a scalar key with the tag lists no name and marks the document unfit,
-// and so does an alias key whose anchor is such a key. A tag on a value is read as before, also the
-// value of an alias key's anchor (the server refuses that document at the alias use, a known gap of
-// ginsys/bronzeward#637 that the oracle does not model).
+// and so does an alias key whose anchor is such a key. An alias key whose anchored node is a tagged
+// value lists no name for that value either (ginsys/bronzeward#672). A tag on a value that no alias
+// key repeats is read as before.
 func TestTaggedKey(t *testing.T) {
 	for _, c := range []struct {
 		name  string
@@ -82,7 +82,20 @@ func TestTaggedKey(t *testing.T) {
 		{"value control", "a: !bwref x/foo\n", []string{"x/foo"}, false},
 		{"sequence entry control", "- !bwref x/foo\n", []string{"x/foo"}, false},
 		{"value of an explicit key control", "? a\n: !bwref x/foo\n", []string{"x/foo"}, false},
-		{"alias key of a tagged value", "a: &k !bwref x/foo\n*k : v\n", []string{"x/foo"}, false},
+		// An alias key whose anchored node carries the tag is refused whatever the node is, so the
+		// oracle lists no name for the node (ginsys/bronzeward#672).
+		{"alias key of a tagged value", "a: &k !bwref x/foo\n*k : v\n", []string{}, true},
+		{"alias key of a tagged value, the anchor after the tag", "a: !bwref &k x/foo\n*k : v\n", []string{}, true},
+		{"alias key of a tagged value, no blank before the colon", "a: &k !bwref x/foo\n*k: v\n", []string{}, true},
+		{"alias key of a tagged value, an explicit key", "a: &k !bwref x/foo\n? *k\n: v\n", []string{}, true},
+		{"alias key of a tagged value in a flow mapping", "{a: &k !bwref x/foo, *k : v}\n", []string{}, true},
+		{"alias key in a later document", "a: &k !bwref x/foo\n---\n*k : v\n", []string{}, true},
+		{"alias key of the latest anchor, tagged", "a: &k 1\nb: &k !bwref x/foo\n*k : v\n", []string{}, true},
+		{"alias key of the latest anchor, not tagged", "a: &k !bwref x/foo\nb: &k 1\n*k : v\n", []string{"x/foo"}, false},
+		{"another tagged value stays listed", "a: &k !bwref x/foo\nc: !bwref x/bar\n*k : v\n", []string{"x/bar"}, true},
+		{"alias as a value control", "a: &k !bwref x/foo\nb: *k\n", []string{"x/foo"}, false},
+		{"alias in a sequence control", "- &k !bwref x/foo\n- *k\n", []string{"x/foo"}, false},
+		{"quoted text that looks like an alias key control", "a: &k !bwref x/foo\n\"*k\": v\n", []string{"x/foo"}, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			got := References(c.doc)

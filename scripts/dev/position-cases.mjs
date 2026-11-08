@@ -174,9 +174,9 @@ const own = [
     ["value-after-crlf-control", "a:\r\n  !bwref x/foo\r\n"],
     ["tagged-implicit-key","!bwref x/foo: v\n"],
     // ginsys/bronzeward#629, the implicit key rows that go-yaml accepts. go-yaml refuses rows 50 and 51.
-    // Row 48 (`[!bwref x/foo:]`) is left out: the scanner lists `x/foo` there, a known gap pinned in
-    // web/src/position.test.ts, so a case here would fail.
+    // Row 48 (`[!bwref x/foo:]`) is a case since ginsys/bronzeward#672: the flow word keeps the colon.
     ["tagged-implicit-key-row-46", "- !bwref x/foo:\n"],
+    ["tagged-implicit-key-row-48", "[!bwref x/foo:]\n"],
     ["tagged-implicit-key-row-47", "- !bwref x/foo:\n    bar\n"],
     ["tagged-implicit-key-row-49", "k: [!bwref x/foo:\nbar]\n"],
     ["tagged-implicit-key-row-55", "{!bwref x/foo: v}\n"],
@@ -189,6 +189,25 @@ const own = [
     ["explicit-key-value-control", "? a\n: !bwref x/foo\n"],
     ["sequence-entry-control", "- !bwref x/foo\n"],
   ].map(([name, doc]) => ["ginsys/bronzeward#637", name, doc]),
+  // ginsys/bronzeward#672: an alias key that repeats the anchor of a tagged value, and the controls that
+  // stay listed. go-yaml accepts every one; the server refuses the first ten.
+  ...[
+    ["alias-key-tag-after-anchor", "a: !bwref &k x/foo\n*k : v\n"],
+    ["alias-key-no-blank", "a: &k !bwref x/foo\n*k: v\n"],
+    ["alias-key-explicit", "a: &k !bwref x/foo\n? *k\n: v\n"],
+    ["alias-key-flow-mapping", "{a: &k !bwref x/foo, *k : v}\n"],
+    ["alias-key-flow-sequence", "[&k !bwref x/foo, *k : v]\n"],
+    ["alias-key-later-document", "a: &k !bwref x/foo\n---\n*k : v\n"],
+    ["alias-key-tag-on-next-line", "a: &k\n  !bwref x/foo\n*k : v\n"],
+    ["alias-key-latest-anchor-tagged", "a: &k 1\nb: &k !bwref x/foo\n*k : v\n"],
+    ["alias-key-and-other-tag", "a: &k !bwref x/foo\nc: !bwref x/bar\n*k : v\n"],
+    ["alias-key-in-sequence-entry", "a: &k !bwref x/foo\nb:\n  - *k : v\n"],
+    ["alias-value-control", "a: &k !bwref x/foo\nb: *k\n"],
+    ["alias-sequence-control", "- &k !bwref x/foo\n- *k\n"],
+    ["alias-key-latest-anchor-untagged", "a: &k !bwref x/foo\nb: &k 1\n*k : v\n"],
+    ["alias-key-quoted-control", 'a: &k !bwref x/foo\n"*k": v\n'],
+    ["alias-key-anchor-on-next-node", "a: &k\nb: !bwref x/foo\n*k : v\n"],
+  ].map(([name, doc]) => ["ginsys/bronzeward#672", name, doc]),
 ];
 
 function read(name) {
