@@ -72,9 +72,14 @@ func machineryContract(bi *debug.BuildInfo) string {
 	return ""
 }
 
-// memberTimeout bounds the dials and reads of one member, over all its addresses, so that a member
-// that does not answer does not hold the command.
+// memberTimeout bounds the dial and the reads at one address of a member (readMemberAt gives the total
+// bound for a member), so that an address that does not answer does not hold the command.
 var memberTimeout = 10 * time.Second
+
+// startTimeout bounds the dial and the version, cluster-information and member-list reads of the
+// endpoint that Discover starts from, so that an endpoint that accepts a connection and never
+// answers does not hold the command until the caller cancels it.
+var startTimeout = 15 * time.Second
 
 // ErrNoEndpoint is Discover's refusal when it is given no endpoint and the talosconfig names none.
 var ErrNoEndpoint = errors.New("discover: the talosconfig names no endpoint")
@@ -97,25 +102,30 @@ func Discover(ctx context.Context, talosconfig []byte, endpoint string) (Result,
 	if err != nil {
 		return Result{}, err
 	}
-	n, err := dial(ctx, creds, ep)
+	// The reads from the endpoint have their own deadline; the members are read under the caller's
+	// context, each address under its own.
+	startCtx, stop := context.WithTimeout(ctx, startTimeout)
+	defer stop()
+	n, err := dial(startCtx, creds, ep)
 	if err != nil {
 		return Result{}, err
 	}
 	defer n.close()
 	var res Result
-	if res.Version, err = version(ctx, n); err != nil {
+	if res.Version, err = version(startCtx, n); err != nil {
 		return Result{}, err
 	}
-	info, err := safe.StateGetByID[*cluster.Info](ctx, n.api.COSI, cluster.InfoID)
+	info, err := safe.StateGetByID[*cluster.Info](startCtx, n.api.COSI, cluster.InfoID)
 	if err != nil {
 		return Result{}, failed("reading the cluster information", err)
 	}
 	res.ClusterID, res.Contract = info.TypedSpec().ClusterID, contractOf(res.Version)
 	res.Supported = res.Contract != "" && res.Contract == supportedMinor()
-	list, err := safe.StateListAll[*cluster.Member](ctx, n.api.COSI)
+	list, err := safe.StateListAll[*cluster.Member](startCtx, n.api.COSI)
 	if err != nil {
 		return Result{}, failed("listing the cluster members", err)
 	}
+	stop()
 	for ms := range list.All() {
 		s := ms.TypedSpec()
 		m := Member{NodeID: s.NodeID, Hostname: s.Hostname, Role: "worker"}
@@ -144,43 +154,51 @@ func version(ctx context.Context, n *node) (string, error) {
 	return msgs[0].GetVersion().GetTag(), nil
 }
 
-// readMemberAt fills m from the first of addrs that answers. One deadline bounds the whole member,
-// however many addresses it lists. Address is the one that answered, or the first listed.
+// readMemberAt fills m from the first of addrs that answers as m. Every address has its own deadline
+// of memberTimeout, so a silent address does not use up the time of the next one. The total bound for
+// a member is therefore the number of its listed addresses times memberTimeout. Address is the one
+// that answered, or the first listed when none did, and a member that did not answer keeps the
+// NodeID of its list entry and nothing else from any address.
 func readMemberAt(ctx context.Context, creds *clientconfig.Context, addrs []netip.Addr, m *Member) {
-	ctx, cancel := context.WithTimeout(ctx, memberTimeout)
-	defer cancel()
 	for _, a := range addrs {
 		if m.Address == "" {
 			m.Address = a.String()
 		}
-		if readMember(ctx, creds, a, m) {
+		if read, ok := readMember(ctx, creds, a, m.NodeID); ok {
+			m.Address, m.SMBIOSUUID, m.Platform, m.Answered = a.String(), read.SMBIOSUUID, read.Platform, true
 			return
 		}
 	}
 }
 
-// readMember fills m from the member at address a and reports whether it answered. Only the
+// readMember reads the member at address a under memberTimeout and reports what it said, and whether
+// it answered as nodeID, the member of the list. An address that answers as another node, or whose
+// identity, SystemInformation or PlatformMetadata read fails, is no answer. Only the
 // SystemInformation and PlatformMetadata resources may be missing: a container node has no SMBIOS
-// information, and an old node may report no platform.
-func readMember(ctx context.Context, creds *clientconfig.Context, a netip.Addr, m *Member) bool {
+// information, and an old node may report no platform. Nothing is returned for an address that did
+// not answer in full.
+func readMember(ctx context.Context, creds *clientconfig.Context, a netip.Addr, nodeID string) (Member, bool) {
+	ctx, cancel := context.WithTimeout(ctx, memberTimeout)
+	defer cancel()
 	n, err := dial(ctx, creds, memberEndpoint(a))
 	if err != nil {
-		return false
+		return Member{}, false
 	}
 	defer n.close()
 	id, err := safe.StateGetByID[*cluster.Identity](ctx, n.api.COSI, cluster.LocalIdentity)
-	if err != nil {
-		return false
+	if err != nil || id.TypedSpec().NodeID != nodeID {
+		return Member{}, false
 	}
-	m.NodeID, m.Address, m.Answered = id.TypedSpec().NodeID, a.String(), true
+	var read Member
 	if si, err := safe.StateGetByID[*hardware.SystemInformation](ctx, n.api.COSI, hardware.SystemInformationID); err == nil {
-		m.SMBIOSUUID = si.TypedSpec().UUID
+		read.SMBIOSUUID = si.TypedSpec().UUID
 	} else if !state.IsNotFoundError(err) {
-		m.Answered, m.SMBIOSUUID = false, ""
-		return false
+		return Member{}, false
 	}
 	if pm, err := safe.StateGetByID[*runtime.PlatformMetadata](ctx, n.api.COSI, runtime.PlatformMetadataID); err == nil {
-		m.Platform = platform(pm.TypedSpec().Platform)
+		read.Platform = platform(pm.TypedSpec().Platform)
+	} else if !state.IsNotFoundError(err) {
+		return Member{}, false
 	}
-	return true
+	return read, true
 }

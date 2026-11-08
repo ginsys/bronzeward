@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cosi-project/runtime/pkg/resource"
 	"github.com/ginsys/bronzeward/internal/talos/talostest"
 	"google.golang.org/grpc/codes"
 )
@@ -221,16 +222,16 @@ func callErr(ctx context.Context, tc []byte, c *stand) error {
 	return err
 }
 
-// TestDiscoverBoundsAMemberNotEachAddress: a member that lists several addresses that never answer
-// holds the command for one member timeout, not one per address.
-func TestDiscoverBoundsAMemberNotEachAddress(t *testing.T) {
-	c := newCluster(t)
+// silent is a listener that accepts connections and says nothing: a TLS handshake with it waits for
+// the caller's deadline.
+func silent(t *testing.T) net.Listener {
+	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { l.Close() })
-	go func() { // accepts and says nothing: the TLS handshake waits for the deadline
+	go func() {
 		for {
 			conn, err := l.Accept()
 			if err != nil {
@@ -239,15 +240,37 @@ func TestDiscoverBoundsAMemberNotEachAddress(t *testing.T) {
 			t.Cleanup(func() { conn.Close() })
 		}
 	}()
-	old, oldTimeout := memberEndpoint, memberTimeout
+	return l
+}
+
+// shorten sets the member and start timeouts for the test.
+func shorten(t *testing.T, member, start time.Duration) {
+	t.Helper()
+	oldMember, oldStart := memberTimeout, startTimeout
+	memberTimeout, startTimeout = member, start
+	t.Cleanup(func() { memberTimeout, startTimeout = oldMember, oldStart })
+}
+
+// route sends the addresses in by to their endpoints and every other address to the silent listener.
+func route(t *testing.T, l net.Listener, by map[string]string) {
+	t.Helper()
+	old := memberEndpoint
 	memberEndpoint = func(a netip.Addr) string {
-		if a.String() == "10.0.0.1" {
-			return c.a.Endpoint
+		if e, ok := by[a.String()]; ok {
+			return e
 		}
 		return l.Addr().String()
 	}
-	memberTimeout = 400 * time.Millisecond
-	t.Cleanup(func() { memberEndpoint, memberTimeout = old, oldTimeout })
+	t.Cleanup(func() { memberEndpoint = old })
+}
+
+// TestDiscoverBoundsEachAddress: every address of a member has its own deadline, so a member that
+// lists three addresses that never answer holds the command for three member timeouts, the total bound
+// (the number of listed addresses times memberTimeout), and each of them was tried.
+func TestDiscoverBoundsEachAddress(t *testing.T) {
+	c := newCluster(t)
+	route(t, silent(t), map[string]string{"10.0.0.1": c.a.Endpoint})
+	shorten(t, 400*time.Millisecond, 20*time.Second)
 	c.a.SetMembers(t,
 		talostest.Member{NodeID: "n1", Hostname: "cp-1", Addresses: []string{"10.0.0.1"}, ControlPlanePort: 6443},
 		talostest.Member{NodeID: "n3", Hostname: "w-2", Addresses: []string{"10.0.0.3", "10.0.0.4", "10.0.0.5"}},
@@ -257,11 +280,126 @@ func TestDiscoverBoundsAMemberNotEachAddress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if took := time.Since(start); took > 2*memberTimeout {
-		t.Errorf("discovery took %v for members with a %v timeout and one member with three silent addresses", took, memberTimeout)
+	took := time.Since(start)
+	if took < 3*memberTimeout*9/10 || took > 6*memberTimeout {
+		t.Errorf("discovery took %v for one member with three silent addresses and a %v timeout; want about three timeouts", took, memberTimeout)
 	}
 	if m := got.Members[1]; m.Answered || m.Address != "10.0.0.3" {
 		t.Errorf("the silent member: %+v", m)
+	}
+}
+
+// TestDiscoverTriesTheNextAddressAfterASilentOne: a first address that never answers does not use up
+// the time of the second, which answers.
+func TestDiscoverTriesTheNextAddressAfterASilentOne(t *testing.T) {
+	c := newCluster(t)
+	route(t, silent(t), map[string]string{"10.0.0.1": c.a.Endpoint, "10.0.0.2": c.b.Endpoint})
+	shorten(t, 400*time.Millisecond, 20*time.Second)
+	c.a.SetMembers(t,
+		talostest.Member{NodeID: "n1", Hostname: "cp-1", Addresses: []string{"10.0.0.1"}, ControlPlanePort: 6443},
+		talostest.Member{NodeID: "n2", Hostname: "w-1", Addresses: []string{"10.0.0.9", "10.0.0.2"}},
+	)
+	got, err := c.discover(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Member{NodeID: "n2", Hostname: "w-1", Address: "10.0.0.2", Role: "worker", Platform: "container", Answered: true}
+	if m := got.Members[1]; m != want {
+		t.Errorf("a member whose first address is silent: %+v, want %+v", m, want)
+	}
+}
+
+// TestDiscoverBoundsTheStartReads: an endpoint that accepts the connection and never answers ends in
+// an error after startTimeout, although the caller's own context has a much later deadline.
+func TestDiscoverBoundsTheStartReads(t *testing.T) {
+	c := newCluster(t)
+	l := silent(t)
+	shorten(t, 400*time.Millisecond, 400*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 6*time.Second)
+	defer cancel()
+	start := time.Now()
+	_, err := Discover(ctx, c.p.Talosconfig(l.Addr().String(), "", ""), l.Addr().String())
+	if err == nil {
+		t.Fatal("no error from an endpoint that never answers")
+	}
+	if took := time.Since(start); took > 3*time.Second {
+		t.Errorf("discovery took %v against a %v start timeout and a caller deadline of 6s: %v", took, startTimeout, err)
+	}
+	for _, secret := range leaked(err.Error(), c.p) {
+		t.Errorf("the error quotes %.20q: %v", secret, err)
+	}
+}
+
+// TestDiscoverReadErrorsAreNoAnswer: a member whose SystemInformation or PlatformMetadata read fails
+// with anything but a missing resource did not answer, and nothing it said is kept. A missing
+// PlatformMetadata is the old node that reports no platform: it answered (the control).
+func TestDiscoverReadErrorsAreNoAnswer(t *testing.T) {
+	for name, tc := range map[string]struct {
+		typ      resource.Type
+		code     codes.Code
+		answered bool
+		platform string
+		uuid     string
+	}{
+		"platform unavailable":       {talostest.PlatformMetadataType, codes.Unavailable, false, "", ""},
+		"platform permission denied": {talostest.PlatformMetadataType, codes.PermissionDenied, false, "", ""},
+		"system information failed":  {talostest.SystemInformationType, codes.Unavailable, false, "", ""},
+		"platform missing (control)": {talostest.PlatformMetadataType, codes.NotFound, true, "", "11111111-2222-3333-4444-555555555555"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := newCluster(t)
+			c.a.Fail(tc.typ, tc.code)
+			got, err := c.discover(t)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := Member{NodeID: "n1", Hostname: "cp-1", Address: "10.0.0.1", Role: "controlplane", SMBIOSUUID: tc.uuid, Platform: tc.platform, Answered: tc.answered}
+			if m := got.Members[0]; m != want {
+				t.Errorf("%+v, want %+v", m, want)
+			}
+		})
+	}
+}
+
+// TestDiscoverRejectsAnotherNodesAnswer: an address that now answers as another node (it was reused)
+// is no answer for the listed member: the listed NodeID stays, and the next address is tried.
+func TestDiscoverRejectsAnotherNodesAnswer(t *testing.T) {
+	c := newCluster(t)
+	c.a.SetMembers(t,
+		talostest.Member{NodeID: "n1", Hostname: "cp-1", Addresses: []string{"10.0.0.1"}, ControlPlanePort: 6443},
+		talostest.Member{NodeID: "n2", Hostname: "w-1", Addresses: []string{"10.0.0.1", "10.0.0.2"}},
+		talostest.Member{NodeID: "n9", Hostname: "w-9", Addresses: []string{"10.0.0.1"}},
+	)
+	got, err := c.discover(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []Member{
+		{NodeID: "n1", Hostname: "cp-1", Address: "10.0.0.1", Role: "controlplane", SMBIOSUUID: "11111111-2222-3333-4444-555555555555", Platform: "metal", Answered: true},
+		{NodeID: "n2", Hostname: "w-1", Address: "10.0.0.2", Role: "worker", Platform: "container", Answered: true},
+		{NodeID: "n9", Hostname: "w-9", Address: "10.0.0.1", Role: "worker"},
+	} {
+		if got.Members[i] != want {
+			t.Errorf("member %d: %+v, want %+v", i, got.Members[i], want)
+		}
+	}
+}
+
+// TestDiscoverFillsAMemberOnlyAfterEveryRead: an address that answers the identity and then fails a
+// later read leaves nothing of it in the member: Address is still the first listed.
+func TestDiscoverFillsAMemberOnlyAfterEveryRead(t *testing.T) {
+	c := newCluster(t)
+	c.a.Fail(talostest.SystemInformationType, codes.Unavailable)
+	c.a.SetMembers(t,
+		talostest.Member{NodeID: "n1", Hostname: "cp-1", Addresses: []string{"10.0.0.3", "10.0.0.1"}, ControlPlanePort: 6443},
+	)
+	got, err := c.discover(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Member{NodeID: "n1", Hostname: "cp-1", Address: "10.0.0.3", Role: "controlplane"}
+	if m := got.Members[0]; m != want {
+		t.Errorf("%+v, want %+v", m, want)
 	}
 }
 
