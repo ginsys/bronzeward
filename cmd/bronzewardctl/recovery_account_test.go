@@ -69,21 +69,22 @@ func TestAccountRefusals(t *testing.T) {
 	for _, c := range []struct {
 		name, want string
 		args       []string
+		usage      bool // a missing flag is a usage error: the usage text follows it, and it does not say "nothing was sent"
 	}{
-		{"no start", "give --start and --end", []string{"recovery", "scope-account", "mch_a", "--end", "obs_e"}},
-		{"no end", "give --start and --end", []string{"recovery", "account", "op_1", "att_1", "--start", "obs_s"}},
-		{"end is not a recovery observation", "its purpose is routine, not recovery", []string{"recovery", "scope-account", "mch_a", "--start", "obs_s", "--end", "obs_n"}},
-		{"same observation", "are the same observation", []string{"recovery", "scope-account", "mch_a", "--start", "obs_e", "--end", "obs_e"}},
-		{"unknown start", "no such observation of machine mch_a", []string{"recovery", "account", "op_1", "att_1", "--start", "obs_x", "--end", "obs_e"}},
-		{"moved without explanation", "moved from 7 to 8", []string{"recovery", "scope-account", "mch_a", "--start", "obs_s", "--end", "obs_m"}},
-		{"explanation too long", "at most 1024 bytes", append(slices.Clone(scopeArgs), "--explanation", strings.Repeat("x", 1025))},
+		{"no start", "give --start and --end", []string{"recovery", "scope-account", "mch_a", "--end", "obs_e"}, true},
+		{"no end", "give --start and --end", []string{"recovery", "account", "op_1", "att_1", "--start", "obs_s"}, true},
+		{"end is not a recovery observation", "its purpose is routine, not recovery", []string{"recovery", "scope-account", "mch_a", "--start", "obs_s", "--end", "obs_n"}, false},
+		{"same observation", "are the same observation", []string{"recovery", "scope-account", "mch_a", "--start", "obs_e", "--end", "obs_e"}, false},
+		{"unknown start", "no such observation of machine mch_a", []string{"recovery", "account", "op_1", "att_1", "--start", "obs_x", "--end", "obs_e"}, false},
+		{"moved without explanation", "moved from 7 to 8", []string{"recovery", "scope-account", "mch_a", "--start", "obs_s", "--end", "obs_m"}, false},
+		{"explanation too long", "at most 1024 bytes", append(slices.Clone(scopeArgs), "--explanation", strings.Repeat("x", 1025)), false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			recoveryPosted = nil
 			seen := recoveryServer(t, accAnswers(accScopeAnswer), accScopeAnswer)
 			code, out, errb := account(t, "mch_a\n", c.args...)
-			if code != 2 || out != "" || !strings.Contains(errb, c.want) || !strings.Contains(errb, "nothing was sent") {
-				t.Errorf("exit %d, stdout %q, stderr:\n%s\nwant exit 2, nothing on stdout, %q and \"nothing was sent\"", code, out, errb, c.want)
+			if code != 2 || out != "" || !strings.Contains(errb, c.want) || (!c.usage && !strings.Contains(errb, "nothing was sent")) {
+				t.Errorf("exit %d, stdout %q, stderr:\n%s\nwant exit 2, nothing on stdout, %q and, unless a usage error, \"nothing was sent\"", code, out, errb, c.want)
 			}
 			if slices.Contains(seen(), accScope) || slices.Contains(seen(), accAttempt) || len(recoveryPosted) != 0 {
 				t.Errorf("a POST was sent: %v", seen())
@@ -113,14 +114,15 @@ func TestAccountTyped(t *testing.T) {
 					t.Errorf("typed %q: exit %d, sent %v; want 2 and no POST\n%s", typed, code, seen(), errb)
 				}
 			}
+			code, _, errb = account(t, "mch_a\n", c.args...)
+			if code != 0 || !slices.Contains(seen(), c.route) {
+				t.Errorf("typed back: exit %d, sent %v\n%s", code, seen(), errb)
+			}
+			// The window is shown to the run that asks for the typed ID; --no-input refuses before it.
 			for _, want := range []string{"obs_s, purpose routine", "obs_e, purpose recovery", "resource version 7", "Settle floor 30s", "can still land on this machine", "not a proven bound"} {
 				if !strings.Contains(errb, want) {
 					t.Errorf("the window lacks %q:\n%s", want, errb)
 				}
-			}
-			code, _, errb = account(t, "mch_a\n", c.args...)
-			if code != 0 || !slices.Contains(seen(), c.route) {
-				t.Errorf("typed back: exit %d, sent %v\n%s", code, seen(), errb)
 			}
 		})
 	}
@@ -139,7 +141,7 @@ func TestAccountRequestAndAnswer(t *testing.T) {
 	}{
 		{"scope-account", append(slices.Clone(scopeArgs), "--explanation", "the node was cut off"), accScopeAnswer,
 			`{"scopes":[{"end":"obs_e","machine":"mch_a","start":"obs_s"}],"facts":{"explanation":"the node was cut off"}}`,
-			[]string{"Recorded. Scope mch_a is now blocked until it is marked.", "Attempts accounted: att_1.", "Settle floor 30s, counted from 2026-11-01T08:51:00Z.", "Next: recovery mark 'mch_a'."}},
+			[]string{"Recorded. Scope mch_a is now blocked until it is marked.", "Attempts accounted: 1: att_1.", "Settle floor 30s, counted from 2026-11-01T08:51:00Z.", "Next: recovery mark 'mch_a'."}},
 		{"account", attemptArgs, accAttemptAnswer,
 			`{"end":"obs_e","start":"obs_s"}`,
 			[]string{"Recorded. Attempt att_1 of operation op_1 is accounted for by decision.", "changes no state", "Settle floor 30s, counted from 2026-11-01T08:50:00Z.", "Next: operation show 'op_1'."}},
@@ -198,18 +200,29 @@ func TestAccountSettleCauses(t *testing.T) {
 	}
 }
 
-// TestAccountEpochChange: a new epoch after the reads is shown at the send. At most one POST goes
-// out, the write is set aside and nothing is repeated (AMB-05, AMB-07, AMB-12).
+// TestAccountEpochChange: a new epoch after the reads is shown at the send. No POST goes out and
+// nothing is repeated: a decision typed under the earlier epoch is set aside (client contracts §8.5
+// item 2; AMB-05, AMB-07, AMB-12 with this write as the dropped one).
+//
+// The window is built from reads under ep_BWSYNTH-1. The send's own principal read, the first
+// read after them, shows ep_BWSYNTH-2. Both commands are covered, since each takes the epoch of
+// its reads.
 func TestAccountEpochChange(t *testing.T) {
-	recoveryPosted = nil
-	recoveryEpochByPath = map[string]string{"/api/v1/machines/mch_a/observations": "ep_BWSYNTH-2"}
-	t.Cleanup(func() { recoveryEpochByPath = nil })
-	seen := recoveryServer(t, accAnswers(accScopeAnswer), accScopeAnswer)
-	code, out, errb := account(t, "mch_a\n", scopeArgs...)
-	if code == 0 || out != "" || len(recoveryPosted) > 1 || strings.Count(strings.Join(seen(), "\n"), accScope) > 1 {
-		t.Errorf("exit %d, stdout %q, %d POSTs; want a refusal and at most one POST\n%s", code, out, len(recoveryPosted), errb)
-	}
-	if !strings.Contains(errb, "epoch") {
-		t.Errorf("the epoch change is not named:\n%s", errb)
+	for _, c := range []struct {
+		name, route, post string
+		args              []string
+	}{{"scope-account", accScope, accScopeAnswer, scopeArgs}, {"account", accAttempt, accAttemptAnswer, attemptArgs}} {
+		t.Run(c.name, func(t *testing.T) {
+			recoveryPosted = nil
+			setServerFacts(t, 3, map[string]string{"/api/v1/identity": "ep_BWSYNTH-2"})
+			seen := recoveryServer(t, accAnswers(c.post), c.post)
+			code, out, errb := account(t, "mch_a\n", c.args...)
+			if code == 0 || out != "" || len(recoveryPosted) != 0 || slices.Contains(seen(), c.route) {
+				t.Errorf("exit %d, stdout %q, %d POSTs; want a refusal and no POST\n%s", code, out, len(recoveryPosted), errb)
+			}
+			if !strings.Contains(errb, "the epoch changed from 'ep_BWSYNTH-1' to 'ep_BWSYNTH-2'") || !strings.Contains(errb, "Nothing was sent") {
+				t.Errorf("the epoch change is not named, or the refusal does not say nothing was sent:\n%s", errb)
+			}
+		})
 	}
 }

@@ -226,8 +226,6 @@ func (e *env) recoveryScopeAccount(args []string) error {
 	w := &client.Write{Method: http.MethodPost, Path: "/recovery/accountings", HumanOnly: true, Repeat: rp,
 		Check: "machine timeline " + client.ShellWord(machine), Read: newestEntry(machine)}
 	prep := func(c *client.Client) error {
-		// The decision is built from reads under this epoch; Send refuses it if a later read shows another.
-		reads := c.Context.LastEpoch
 		r, err := c.Get("/server")
 		if err != nil {
 			return err
@@ -265,7 +263,9 @@ func (e *env) recoveryScopeAccount(args []string) error {
 		tf(e.err, "  Explanation: %s\n", orNone(explanation))
 		tf(e.err, accountRisk+"\n", "any request sent before the restore, from any attempt the restored journal shows or one it lost,")
 		body, _ := json.Marshal(apitypes.ScopeAccountingRequest{Scopes: []apitypes.ScopeSettle{{Machine: machine, Start: start, End: end}}, Facts: factsOf(explanation)})
-		w.Body, w.Reads = body, reads
+		// The decision is sent only under the epoch of the reads the operator saw (§8.5): Send refuses
+		// a first send once its own preflight read shows another.
+		w.Body, w.Reads = body, c.Context.LastEpoch
 		return e.confirmTyped("the machine ID", machine)
 	}
 	err = e.writeAfter(prep, w, func(c *client.Client, resp *client.Response) ([]string, error) {
@@ -316,7 +316,6 @@ func (e *env) recoveryAccount(args []string) error {
 	w := &client.Write{Method: http.MethodPost, Path: "/operations/" + url.PathEscape(operation) + "/attempts/" + url.PathEscape(attempt) + "/accountings",
 		HumanOnly: true, Repeat: rp, Check: "operation show " + client.ShellWord(operation)}
 	prep := func(c *client.Client) error {
-		reads := c.Context.LastEpoch
 		r, err := c.Get("/operations/" + url.PathEscape(operation))
 		if err != nil {
 			return err
@@ -365,7 +364,8 @@ func (e *env) recoveryAccount(args []string) error {
 		tf(e.err, "  Explanation: %s\n", orNone(explanation))
 		tf(e.err, accountRisk+"\n", "the request this attempt sent, whose response was lost,")
 		body, _ := json.Marshal(apitypes.AccountingRequest{Start: start, End: end, Facts: factsOf(explanation)})
-		w.Body, w.Reads = body, reads
+		// Sent only under the epoch of the reads the operator saw (§8.5), as for the scope accounting.
+		w.Body, w.Reads = body, c.Context.LastEpoch
 		w.Read = newestEntry(machine)
 		return e.confirmTyped("the machine ID", machine)
 	}
