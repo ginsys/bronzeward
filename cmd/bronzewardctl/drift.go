@@ -67,7 +67,14 @@ func (e *env) driftShow(args []string) error {
 			if obs, err = decode[apitypes.ObservationBody](c, items...); err != nil {
 				return err
 			}
-			if now := c.Context.LastEpoch; first != "" && now != first {
+			// The count of moves tells a move that came back from none: the epoch of the last answer
+			// cannot (client-contracts.md §8.5).
+			if c.EpochMoves() != r.Moves {
+				now := c.Context.LastEpoch
+				if now == first {
+					return fmt.Errorf("the epoch moved and came back to %s while the drift was read; nothing is shown. Read it again with: drift show %s",
+						client.ShellWord(first), client.ShellWord(id))
+				}
 				return fmt.Errorf("the epoch changed from %s to %s while the drift was read; nothing is shown. Read it again with: drift show %s",
 					client.ShellWord(first), client.ShellWord(now), client.ShellWord(id))
 			}
@@ -160,14 +167,14 @@ func (e *env) machineFreeze(verb string, args []string) error {
 				return nil, err
 			}
 			lines := []string{"Unfrozen. The freeze no longer stops a commitment or an attempt for this machine.",
-				"Unfreezing approves and commits nothing."}
+				"Unfreezing approves and commits nothing. An attempt already recorded was not stopped by the freeze, and an adoption could still be recorded."}
 			if x.Frozen {
 				// "An attempt ..." is freezeLimits with its capital.
 				lines = []string{"Frozen. No new commitment or attempt for this machine until an approver unfreezes it.", "An" + freezeLimits[2:] + "."}
 			}
 			return append(lines, sf("Recorded by %s (%s): machine %s, timeline revision %d, act %s.", x.Principal, x.Role, x.Machine, x.Revision, x.Act)), nil
 		})
-	return whyBlocked(err, map[string]string{"freeze": "freezing", "unfreeze": "unfreezing"}[verb])
+	return whyBlocked(err, verb)
 }
 
 // freezeRead is the read that tells, after a freeze whose outcome is unknown, whether it landed.
@@ -197,23 +204,29 @@ func freezeRead(m string) func(*client.Client) (string, error) {
 }
 
 // whyBlocked adds to a refusal by recovery mode the reason and the next step (row 1 of #260: say
-// why held scopes block changes). change names what was refused, such as "unfreezing". The same
-// code carries the scope's refusal, which has a scope member, and the process's, which has none
-// (client-contracts.md §8.2); problem.go prints which one it is, and this adds why. Any other
-// error is returned as it is.
-func whyBlocked(err error, change string) error {
+// why held scopes block changes). verb is "freeze" or "unfreeze". The same code carries the scope's
+// refusal, which has a scope member, and the process's, which has none (client-contracts.md §8.2);
+// problem.go prints which one it is, and this adds why. Any other error is returned as it is.
+//
+// The server refuses a freeze for no scope, and an unfreeze only while the scope is
+// pre-restore-unaccounted (internal/api/freeze.go:72), so that is the one scope with a reason of
+// the client's own. The process's refusal is the same code before and after the recovery entry, so
+// its text covers both: a normal restart is allowed only once the entry has committed
+// (execution-recovery.md §7.2).
+func whyBlocked(err error, verb string) error {
 	var p *client.Problem
 	if err == nil || !errors.As(err, &p) || p.Code() != "recovery-mode-active" {
 		return err
 	}
 	if scope, _ := p.Doc["scope"].(string); scope != "" {
-		why := sf("Why: the scope is %s, not released in this epoch, so %s is refused until a recovery administrator releases it.", scope, change)
-		if scope == "pre-restore-unaccounted" {
-			why = sf("Why: a restore can erase the record of a request sent to this machine, and a request sent before the restore may still land. Until a recovery administrator accounts for the scope and releases it, %s is refused.", change)
+		more := []string{"Next: recovery status names the next step of each scope."}
+		if verb == "unfreeze" && scope == "pre-restore-unaccounted" {
+			more = append([]string{"Why: a restore can erase the record of a request sent to this machine, and a request sent before the restore may still land. " +
+				"Until a recovery administrator accounts for the scope, unfreezing is refused."}, more...)
 		}
-		return &client.Blocked{Err: err, More: []string{why, "Next: recovery status names the next step of each scope."}}
+		return &client.Blocked{Err: err, More: more}
 	}
 	return &client.Blocked{Err: err, More: []string{
-		"Why: a server started for recovery refuses unfreezing, plan creation and approval, even after its recovery entry.",
-		"Next: restart the server without the recovery flag. Recovery mode continues. Then repeat this command."}}
+		"Why: a server started for recovery refuses every request but the recovery entry until the entry is recorded. After the entry it still refuses unfreezing, plan creation and approval.",
+		"Next: if the recovery entry is not recorded yet, record it with recovery enter. Then restart the server without the recovery flag and repeat this command."}}
 }

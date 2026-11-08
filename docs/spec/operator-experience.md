@@ -845,7 +845,7 @@ Choose: freeze while you decide; adopt it into a release; or revert to Desired (
 $ bronzewardctl machine freeze mch_w4ze…n3fa --reason "incident 4711"
 Frozen. No new commitment or attempt for this machine until an approver unfreezes it.
 An attempt already recorded is not stopped, and an adoption can still be recorded.
-Recorded by usr_h4c… (approver): machine mch_w4ze…n3fa, timeline revision 41, act act_p2d…
+Recorded by idn_h4c… (approver): machine mch_w4ze…n3fa, timeline revision 41, act act_p2d….
 ```
 
 The API serves no drift opening time, so `drift show` gives the time of the observation that opened
@@ -854,9 +854,13 @@ observation is not among those read, it gives the observation and says its time 
 With no open drift it says so and why: only a configuration read that differs from `Applied`
 opens a drift record, so a read that matches it, or one that could not be read, opens none.
 An unfreeze that recovery mode refuses says why and what to do next. A scope that is still
-pre-restore unaccounted holds it, and `recovery status` names the scope's next step. A server
-started for recovery refuses it even after its recovery entry, and a restart without the flag
-serves it while recovery mode continues.
+pre-restore unaccounted holds it until a recovery administrator accounts for the scope, and
+`recovery status` names the scope's next step. A freeze is never refused for a scope. A server
+started for recovery has no scope in its refusal, and the text covers the two cases it cannot
+tell apart. Before the recovery entry, it refuses every request but the entry, a freeze included.
+After the entry, it still refuses unfreeze. The text says to record the entry first. A normal
+restart is allowed only after the entry has committed, and a restart without the flag then serves
+the unfreeze while recovery mode continues.
 
 Drift compares the observed digest with `Applied`; an observation equal to `Desired` or to an
 older release is still drift
