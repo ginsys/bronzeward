@@ -152,8 +152,9 @@ describe("a refused mark is named by rule and position, never a path (§11.3, PR
     expect(eventLine({ id: "e1:4", type: "marked", data: { generation: 2, paths: 1 } })).toBe("marked (generation 2)");
   });
   test("the 422 answer to a send shows the position and no path", () => {
-    const out = renderToStaticMarkup(h(Refused, { problem: problem({ position: 2, path: SENTINEL, instance: "req_1" }), status: 422, verb: "saved" }));
+    const out = renderToStaticMarkup(h(Refused, { problem: problem({ position: 2, path: SENTINEL, detail: `doc[0]/${SENTINEL}`, instance: "req_1" }), status: 422, verb: "saved" }));
     expect(out).toContain("The mark at position 2 (the first is 0) is refused.");
+    expect(out).toContain("Request req_1.");
     expect(out).not.toContain("BWSYNTH");
     expect(renderToStaticMarkup(h(Refused, { problem: problem({ status: 409, position: 2 }), status: 409, verb: "saved" }))).not.toContain("position");
   });
