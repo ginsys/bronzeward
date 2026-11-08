@@ -55,13 +55,20 @@ function ClaimAction({ id, verb, again }: { id: string; verb: Verb; again: () =>
   );
 }
 
-// When the page reads a paused ingestion again: just after its review time ends. The progress watch
-// stops at the pause and has no timer for it, so nothing else would show the expiry on an idle page.
-const EXPIRY_MARGIN = 1000;
-export function expiryWait(b: Pick<Ingestion, "state" | "expiresAt">, now: number): number | undefined {
-  if (b.state !== "paused") return undefined;
-  const wait = Date.parse(b.expiresAt) - now + EXPIRY_MARGIN;
-  return wait > 0 ? Math.min(wait, 2 ** 31 - 1) : undefined;
+// The page reads a paused ingestion again once its review time has ended. The progress watch stops at
+// the pause and has no timer for it, so nothing else would show the expiry on an idle page. The check
+// is a short interval against the clock, not one timeout for the whole wait: it follows a clock
+// change and has no cap on the wait. Only a paused claim before its end runs one.
+export const EXPIRY_TICK = 5000;
+export const watchesExpiry = (b: Pick<Ingestion, "state" | "expiresAt">, now: number): boolean => b.state === "paused" && now <= Date.parse(b.expiresAt);
+export function watchExpiry(expiresAt: string, again: () => void): () => void {
+  const end = Date.parse(expiresAt);
+  const t = setInterval(() => {
+    if (Date.now() <= end) return;
+    clearInterval(t);
+    again();
+  }, EXPIRY_TICK);
+  return () => clearInterval(t);
 }
 
 // How long a review has left, as W5 words it.
@@ -156,12 +163,9 @@ export function Shown({ id, text, close }: { id: string; text: string; close: ()
 export function Claim({ b, again, now }: { b: Ingestion; again: () => void; now: number }) {
   const o = offers(b, now);
   const writes = useWrites();
-  const wait = expiryWait(b, now);
-  useEffect(() => {
-    if (wait === undefined) return;
-    const t = setTimeout(again, wait);
-    return () => clearTimeout(t);
-  }, [wait, again]);
+  const watching = watchesExpiry(b, now);
+  const { expiresAt } = b;
+  useEffect(() => (watching ? watchExpiry(expiresAt, again) : undefined), [watching, expiresAt, again]);
   if (writes === undefined || (!o.review && o.verbs.length === 0)) return null;
   return (
     <section aria-label="Claim">

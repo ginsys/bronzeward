@@ -1,8 +1,8 @@
 import { createElement as h, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { components } from "./api/v1";
-import { Claim, claimSpec, discardOn, expiry, expiryWait, newest, offers, readReview, reviewed, Shown } from "./claim.tsx";
+import { Claim, claimSpec, discardOn, EXPIRY_TICK, expiry, newest, offers, readReview, reviewed, Shown, watchesExpiry, watchExpiry } from "./claim.tsx";
 import { WritesProvider } from "./forms.tsx";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import { ShellContext } from "./shell.tsx";
@@ -105,12 +105,52 @@ describe("the review is closed and superseded reads are dropped (local review of
 });
 
 describe("an idle paused page and a late review read (Copilot threads on web/src/claim.tsx)", () => {
-  test("a paused claim is read again just after its review time ends, and no other state is", () => {
+  test("only a paused claim before its review time ends is watched for its expiry", () => {
     const paused = ing({ state: "paused" });
-    expect(expiryWait(paused, NOW)).toBe(38 * 60_000 + 1000);
-    expect(expiryWait(paused, Date.parse("2026-11-01T07:38:00Z"))).toBe(1000);
-    expect(expiryWait(paused, Date.parse("2026-11-01T07:38:01Z"))).toBeUndefined();
-    for (const state of ["held", "resumed", "released", "abandoned"]) expect(expiryWait(ing({ state }), NOW)).toBeUndefined();
+    expect(watchesExpiry(paused, NOW)).toBe(true);
+    expect(watchesExpiry(paused, Date.parse("2026-11-01T07:38:00Z"))).toBe(true);
+    expect(watchesExpiry(paused, Date.parse("2026-11-01T07:38:01Z"))).toBe(false);
+    for (const state of ["held", "resumed", "released", "abandoned", "something-new"]) expect(watchesExpiry(ing({ state }), NOW)).toBe(false);
+  });
+  describe("the expiry check follows the clock", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(NOW);
+    });
+    afterEach(() => vi.useRealTimers());
+    const END = "2026-11-01T07:38:00Z";
+    test("it reads again once, on the first tick after the end, and not before", () => {
+      const again = vi.fn();
+      watchExpiry(END, again);
+      vi.advanceTimersByTime(37 * 60_000);
+      expect(again).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(60_000 + EXPIRY_TICK);
+      expect(again).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(10 * 60_000);
+      expect(again).toHaveBeenCalledTimes(1);
+    });
+    test("a clock set forward past the end is noticed within one tick, not at the first wait", () => {
+      const again = vi.fn();
+      watchExpiry(END, again);
+      vi.setSystemTime(Date.parse("2026-11-01T07:39:00Z"));
+      vi.advanceTimersByTime(EXPIRY_TICK);
+      expect(again).toHaveBeenCalledTimes(1);
+    });
+    test("an expiry far away still fires, with no cap on the wait", () => {
+      const again = vi.fn();
+      watchExpiry("2026-12-31T07:00:00Z", again);
+      vi.setSystemTime(Date.parse("2026-12-31T07:00:01Z"));
+      vi.advanceTimersByTime(EXPIRY_TICK);
+      expect(again).toHaveBeenCalledTimes(1);
+    });
+    test("leaving the page ends the check", () => {
+      const again = vi.fn();
+      const stop = watchExpiry(END, again);
+      stop();
+      vi.setSystemTime(Date.parse("2026-11-01T08:00:00Z"));
+      vi.advanceTimersByTime(60_000);
+      expect(again).not.toHaveBeenCalled();
+    });
   });
   test("a paused claim past its review time offers no review, continue and abandon stay for the server to judge", () => {
     expect(offers(ing({ state: "paused" }), Date.parse("2026-11-01T07:38:01Z"))).toEqual({ review: false, verbs: ["continue", "abandon"] });
