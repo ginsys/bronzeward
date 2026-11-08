@@ -167,7 +167,7 @@ func (e *env) machineFreeze(verb string, args []string) error {
 			}
 			return append(lines, sf("Recorded by %s (%s): machine %s, timeline revision %d, act %s.", x.Principal, x.Role, x.Machine, x.Revision, x.Act)), nil
 		})
-	return whyBlocked(err, verb+"ing")
+	return whyBlocked(err, map[string]string{"freeze": "freezing", "unfreeze": "unfreezing"}[verb])
 }
 
 // freezeRead is the read that tells, after a freeze whose outcome is unknown, whether it landed.
