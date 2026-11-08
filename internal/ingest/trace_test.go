@@ -380,3 +380,44 @@ func TestTracerHolderHidesKeyAndPath(t *testing.T) {
 		}
 	}
 }
+
+// TraceKeeping restores a reference's value only where the reference holds a schema secret. For a
+// mapping reference each member is tested on its own path: a secret member keeps its value and a
+// member beside it keeps its stand-in, as a marked certificate must (compilation.md §8.1). A secret
+// field that is the mapping itself restores every member.
+func TestTraceKeepingTestsEachMemberOfAMapping(t *testing.T) {
+	text := "machine:\n  nodeLabels: !bwref app/map\n"
+	decl := Declarations{References: map[string]Reference{"app/map": {Kind: provider.KindMapping, Version: 4}}}
+	values := map[string]provider.Value{
+		"app/map": value(t, provider.KindMapping, map[string]any{"cert": "cert-" + resolveSecret, "key": "key-" + resolveSecret}),
+	}
+	for _, c := range []struct {
+		name    string
+		secret  []string
+		kept    []string
+		standIn []string
+	}{
+		{"one secret member", []string{"machine", "nodeLabels", "key"}, []string{"key"}, []string{"cert"}},
+		{"the mapping is the secret", []string{"machine", "nodeLabels"}, []string{"cert", "key"}, nil},
+		{"no secret", []string{"machine", "token"}, nil, []string{"cert", "key"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			leaves := SecretLeaves{paths: []Path{{Doc: 0, Pointer: c.secret}}}
+			r, _, _, err := TraceKeeping(sanitizedOf(t, text, decl), values, 0, -1, leaves)
+			if err != nil {
+				t.Fatal(err)
+			}
+			labels := decodeStream(t, string(r.bytes()))[0]["machine"].(map[string]any)["nodeLabels"].(map[string]any)
+			for _, k := range c.kept {
+				if labels[k] != k+"-"+resolveSecret {
+					t.Errorf("member %s = %v, want the real value", k, labels[k])
+				}
+			}
+			for _, k := range c.standIn {
+				if labels[k] == k+"-"+resolveSecret {
+					t.Errorf("member %s holds the real value, want a stand-in", k)
+				}
+			}
+		})
+	}
+}
