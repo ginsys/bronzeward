@@ -231,3 +231,62 @@ func TestUsageKeepsSetEndpointContinuation(t *testing.T) {
 		t.Errorf("the line after machine set-endpoint is %q", strings.SplitN(after, "\n", 2)[0])
 	}
 }
+
+// TestDriftRevertRefusesBeforeSending: drift revert reads the machine first and sends nothing for a
+// machine with no Desired release or no open drift record; it exits 2 and names plan create (T30).
+func TestDriftRevertRefusesBeforeSending(t *testing.T) {
+	const noDesired = `{"id":"mch_a","cluster":"cls_a","applied":{"release":"rel_a","source":"apply"},` +
+		`"openDrift":{"observation":"obs_open","lastObservation":"obs_open","revision":7},"frozen":false,"scopeState":"normal"}`
+	for _, c := range []struct{ name, machine, want string }{
+		{"no Desired", noDesired,
+			"machine mch_a has no Desired release to revert to; nothing was sent. Publish a release that covers it, then: bronzewardctl plan create --release <release> --machine 'mch_a' --operation 'apply-config'"},
+		{"no open drift", noDriftMachine,
+			"machine mch_a has no open drift record; nothing was sent. To apply its Desired release without a revert: bronzewardctl plan create --release 'rel_b' --machine 'mch_a' --operation 'apply-config'"},
+	} {
+		seen := recoveryServer(t, map[string]string{"GET /api/v1/machines/mch_a": c.machine}, "")
+		if code, out, errOut := runDrift(t, "drift", "revert", "mch_a"); code != 2 || out != "" || !strings.Contains(errOut, c.want) {
+			t.Errorf("%s: exit %d, stdout %q, stderr %q; want exit 2 and %q", c.name, code, out, errOut, c.want)
+		}
+		for _, r := range seen() {
+			if strings.HasPrefix(r, "POST ") {
+				t.Errorf("%s: sent %s", c.name, r)
+			}
+		}
+	}
+}
+
+// TestDriftRevertCreatesTheMachinesDesiredPlan: with an open drift record, drift revert creates the
+// plan of the machine's Desired release, after reading the machine.
+func TestDriftRevertCreatesTheMachinesDesiredPlan(t *testing.T) {
+	seen := recoveryServer(t, map[string]string{"GET /api/v1/machines/mch_a": driftJSON("null", "false")}, "{}")
+	runDrift(t, "drift", "revert", "mch_a")
+	got := seen()
+	if i := slices.Index(got, "GET /api/v1/machines/mch_a"); i < 0 || !slices.Contains(got[i:], "POST /api/v1/plans") {
+		t.Errorf("requests %v: want the machine read, then POST /api/v1/plans", got)
+	}
+}
+
+// TestDriftAdoptNeedsAnAuthorAndADraft: drift adopt without --draft is a usage error. Signed in as a
+// service (the fake server's identity), it runs no step and prints the three, each with its role.
+func TestDriftAdoptNeedsAnAuthorAndADraft(t *testing.T) {
+	seen := recoveryServer(t, nil, "")
+	if code, out, errOut := runDrift(t, "drift", "adopt", "mch_a"); code != 2 || out != "" || !strings.Contains(errOut, "drift adopt needs --draft") {
+		t.Errorf("no draft: exit %d, stdout %q, stderr %q", code, out, errOut)
+	}
+	const want = "Not run: step 1 needs an author signed in as a person. The steps:\n" +
+		"Step 1/3  import (drift-adoption): an author, signed in as a person.\n" +
+		"          bronzewardctl drift adopt 'mch_a' --draft 'drf_a' --review\n" +
+		"Step 2/3  publish, which publishes the whole draft: a publisher.\n" +
+		"          bronzewardctl publish 'drf_a'\n" +
+		"Step 3/3  plan an adoption: a publisher, then an approver.\n" +
+		"          bronzewardctl plan create --release <release> --machine 'mch_a' --operation 'adopt'\n" +
+		"          bronzewardctl approve <plan>\n"
+	if code, out, errOut := runDrift(t, "drift", "adopt", "mch_a", "--draft", "drf_a"); code != 0 || out != want {
+		t.Errorf("a service: exit %d, stdout %q, stderr %q; want %q", code, out, errOut, want)
+	}
+	for _, r := range seen() {
+		if strings.HasPrefix(r, "POST ") {
+			t.Errorf("sent %s", r)
+		}
+	}
+}
