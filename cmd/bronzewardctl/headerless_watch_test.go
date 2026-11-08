@@ -146,3 +146,44 @@ func TestImportWatchHeaderlessTerminalRestored(t *testing.T) {
 			code, o.String(), e.String())
 	}
 }
+
+// TestPublishRestoredMalformedRetry: after the restore the watch reads the operation again, and the
+// answer is not JSON. No operation was read, so publish owes the unknown-state error (exit 3, with the
+// command that reads the operation), not the raw decode error.
+func TestPublishRestoredMalformedRetry(t *testing.T) {
+	f := &publishFake{draftFake: &draftFake{rev: 1, state: "open"}, state: "succeeded"}
+	h := &headerlessRestore{next: f, op: "op_BWSYNTH-pub",
+		succeed: fmt.Sprintf(publishOp, "succeeded", `{"release":"rel_BWSYNTH"}`, `null`),
+		failed:  `{"id":"op_BWSYNTH-pub",`}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	var o, e bytes.Buffer
+	if code := run([]string{"draft", "show", "drf_BWSYNTH"}, &o, &e); code != 0 {
+		t.Fatalf("draft show: exit %d, stdout %q, stderr %q; want 0", code, o.String(), e.String())
+	}
+	o.Reset()
+	e.Reset()
+	code := run([]string{"publish", "drf_BWSYNTH"}, &o, &e)
+	if code != 3 || !strings.Contains(e.String(), "operation show 'op_BWSYNTH-pub'") || strings.Contains(o.String(), "Publication succeeded") {
+		t.Errorf("exit %d, stdout %q, stderr %q; want exit 3, the command that reads the operation, and no success printed", code, o.String(), e.String())
+	}
+}
+
+// TestImportWatchRestoredMalformedRetry is the same for the import watch: no operation was read, so
+// the outcome is unknown and the buffered acceptance output is not printed.
+func TestImportWatchRestoredMalformedRetry(t *testing.T) {
+	f := &importFake{draftFake: &draftFake{rev: 1, state: "open"}}
+	f.set("released", 1, time.Hour, "succeeded", `{"draft":"drf_BWSYNTH","draftRevision":2,"importBaseRevision":"ibr_BWSYNTH"}`, "")
+	succeed := fmt.Sprintf(`{"id":"op_BWSYNTH-ing","kind":"ingest","state":"succeeded","subject":{"draft":"drf_BWSYNTH","draftRevision":1},`+
+		`"result":{"draft":"drf_BWSYNTH","draftRevision":2,"importBaseRevision":"ibr_BWSYNTH"},"error":null,"createdAt":"2026-11-01T06:00:00Z","epoch":%q,"lastEvent":1}`, restoreE1)
+	h := &headerlessRestore{next: f, op: "op_BWSYNTH-ing", succeed: succeed, failed: `{"id":"op_BWSYNTH-ing",`}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	var o, e bytes.Buffer
+	code := run([]string{"import", "continue", "ing_BWSYNTH"}, &o, &e)
+	if code != 3 || !strings.Contains(e.String(), "operation show 'op_BWSYNTH-ing'") || o.Len() != 0 {
+		t.Errorf("exit %d, stdout %q, stderr %q; want exit 3, the command that reads the operation, and nothing on stdout", code, o.String(), e.String())
+	}
+}

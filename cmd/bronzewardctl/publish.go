@@ -68,8 +68,9 @@ func (e *env) publish(args []string) (err error) {
 		Show:  func(ev client.Event) { fmt.Fprintf(e.err, "  %s\n", pr(ev.Type)) },
 		Clear: func() { fmt.Fprintln(e.err, "  (the events above no longer hold)") },
 	})
+	// No operation was read, so the state is not known: the error says so and names the read.
 	if o == nil {
-		return err
+		return noOperation(op.Id, err)
 	}
 	// The operation's end decides the exit; a failed read of the events after it is reported beside.
 	if err != nil {

@@ -467,8 +467,9 @@ func (e *env) follow(c *client.Client, a accepted, before int) (err error) {
 			return seen >= op.LastEvent, nil
 		},
 	})
+	// No operation was read, so the state is not known: the error says so and names the read.
 	if o == nil {
-		return err
+		return noOperation(a.Operation, err)
 	}
 	// A terminal operation decides the exit; a failed read of the events after it is reported beside.
 	if err != nil {
