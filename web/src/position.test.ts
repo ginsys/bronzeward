@@ -1697,6 +1697,7 @@ describe("a plain !bwref value that goes on to the next line", () => {
     ["a dash at the column of its key, a key line at the column of the key", "a:\n- k: !bwref &e x/foo\n  j: v\n"],
     ["a lone dash, the next entry", "a:\n  - !bwref &e x/foo\n  - j: v\n"],
     ["a lone dash at column 0, the next entry", "- !bwref &e x/foo\n- j: v\n"],
+    ["a lone dash at the column of its key, a key line of the enclosing mapping", "a:\n- !bwref &e x/foo\nj: v\n"],
     ["no anchor, a key, a sibling key line", "a:\n  k: !bwref x/foo\n  j: v\n"],
     ["no anchor, a dash and a key, a key line at the column of the key", "- k: !bwref x/foo\n  j: v\n"],
     ["no anchor, a nested dash and a key, a key line at the column of the key", "a:\n  - k: !bwref x/foo\n    j: v\n"],
