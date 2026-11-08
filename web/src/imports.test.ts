@@ -4,9 +4,9 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { components } from "./api/v1";
 import { forgetETag, keepETag, keptETag } from "./drafts.tsx";
 import { WritesProvider } from "./forms.tsx";
-import { ABANDONED_SETTLE, abandonedSince, againPath, allowed, documentRefusal, ended, fileReader, type Ingestion, MAX_DOCUMENT, onEvent, sendStart, StartImport, type StartInput, startBody, startETag, startParams, startRun, started, stopsWatch, typedDocument, unsent, watchDeps, watchView } from "./imports.tsx";
+import { ABANDONED_SETTLE, abandonedSince, againPath, allowed, caughtUp, documentRefusal, ended, fileReader, followRun, type Ingestion, MAX_DOCUMENT, onEvent, sendStart, StartImport, type StartInput, startBody, startETag, startParams, startRun, started, stopsWatch, typedDocument, unsent, watchDeps, watchView } from "./imports.tsx";
 import { type Reads, ReadsProvider, short } from "./list.tsx";
-import { eventLine } from "./progress.ts";
+import { eventLine, watch } from "./progress.ts";
 import { Client, type ReadResult } from "./request.ts";
 import { ShellContext } from "./shell.tsx";
 import { EPOCH_CHANGED_ASIDE, Write, Writes, type WriteSpec } from "./write.ts";
@@ -364,8 +364,10 @@ describe("what ends the watch of an import's operation (§11.3, the CLI's follow
     const at = (s: string) => Date.parse(`2026-11-01T${s}Z`);
     // The lease ran to 07:05:00; the page read it at 07:04:00, and an event arrives at 07:05:05.
     expect(stopsWatch(undefined, { b: ing(), at: at("07:04:00") }, at("07:05:05"))).toBe(false);
-    // A read made after the lease and the margin passed that still shows it held and lapsed stops the watch.
-    expect(stopsWatch(undefined, { b: ing(), at: at("07:05:11") }, at("07:05:12"))).toBe(true);
+    // A read made after the lease and the margin passed that still shows it held and lapsed stops the
+    // watch once the operation's newest event was shown (item F), and not before.
+    expect(stopsWatch(undefined, { b: ing(), at: at("07:05:11") }, at("07:05:12"), undefined, true)).toBe(true);
+    expect(stopsWatch(undefined, { b: ing(), at: at("07:05:11") }, at("07:05:12"))).toBe(false);
     // A read made then that shows a renewed lease does not.
     expect(stopsWatch(undefined, { b: ing({ leaseUntil: "2026-11-01T07:10:00Z" }), at: at("07:05:11") }, at("07:05:12"))).toBe(false);
     expect(stopsWatch("paused", { b: ing(), at: 0 }, 0)).toBe(true);
@@ -536,5 +538,51 @@ describe("the progress view across watches (ginsys/bronzeward#644 item E)", () =
     v = watchView(v, { type: "show", line: "new" });
     v = watchView(v, { type: "end", text: "done" });
     expect(v).toEqual({ lines: ["new"], cleared: "cleared", end: "done" });
+  });
+});
+
+describe("a lapsed lease decides only after the operation's newest event was shown (ginsys/bronzeward#644 item F, the CLI's Until)", () => {
+  const at = (s: string) => Date.parse(`2026-11-01T${s}Z`);
+  const OPID = "op_zcfw5mcm";
+  const backlog: [string, unknown][] = [["started", {}], ["paused", { generation: 1 }], ["continued", { generation: 2 }], ["resume-failed", { code: "decrypt-failed" }]];
+  // A client over a server whose events come as JSON pages and whose operation still runs.
+  const serving = (lastEvent: number) => {
+    const answer = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json", "Bronzeward-Epoch": "e1" } });
+    const fetch = async (url: RequestInfo | URL): Promise<Response> => {
+      const u = String(url);
+      if (u.includes(`/operations/${OPID}/events`)) return answer({ items: backlog.map(([type, data], i) => ({ id: `e1:${i + 1}`, type, data, at: "2026-11-01T06:56:00Z" })) });
+      if (u.endsWith(`/operations/${OPID}`)) return answer(op({ lastEvent }));
+      if (u.endsWith("/ingestions/ing_6fdq2la")) return answer(ing({ ownerGeneration: 2 }));
+      throw new Error(`unexpected ${u}`);
+    };
+    return new Client({ fetch: fetch as typeof globalThis.fetch, token: () => "SYNTH-token", sleep: async () => {} });
+  };
+  test("a lease lapsed when read does not cut the replay of started, paused, continued, resume-failed after the first event", async () => {
+    const b = ing({ ownerGeneration: 2 });
+    const client = serving(4);
+    const lines: string[] = [];
+    const f = followRun({
+      client, ingestion: b.id, op: OPID, generation: 2, signal: new AbortController().signal,
+      latest: () => ({ b, at: at("07:05:15") }), abandonedAt: () => undefined, now: () => at("07:05:20"),
+      view: (a) => { if (a.type === "show") lines.push(a.line); },
+    });
+    const r = await watch(client, OPID, f.w, { sleep: async () => {}, now: () => 0, idle: 20 });
+    expect(lines).toEqual(["started", "paused (generation 1)", "continued (generation 2)", "resume-failed: decrypt-failed"]);
+    expect(f.settled()).toBe("resume-failed");
+    if (r.kind !== "ended") throw new Error(`the watch did not end: ${r.kind}`);
+    expect(text(await ended(client, b, r.operation, f.settled() ?? "", at("07:05:20"), r.epoch))).toContain("could not be decrypted (resume-failed)");
+  });
+  test("caughtUp: the last shown event number must reach the operation's lastEvent, and an epoch that differs decides nothing", () => {
+    const shown = (n: number) => ({ epoch: "e1", n });
+    expect(caughtUp(shown(3), "e1", "e1", 4)).toBe(false);
+    expect(caughtUp(shown(4), "e1", "e1", 4)).toBe(true);
+    expect(caughtUp(shown(5), "e1", "e1", 4)).toBe(true);
+    expect(caughtUp(undefined, "e1", "e1", 0)).toBe(true);
+    expect(caughtUp(undefined, "e1", "e1", 2)).toBe(false);
+    // After a restore the operation can have fewer events, so its last number would read as shown.
+    expect(caughtUp(shown(4), "e1", "e2", 2)).toBe("reset");
+    expect(caughtUp(shown(4), "e2", "e1", 2)).toBe("reset");
+    // A read that named no epoch is not a mismatch, as in the CLI.
+    expect(caughtUp(shown(4), undefined, undefined, 4)).toBe(true);
   });
 });

@@ -11,7 +11,7 @@ import { keepETag, keptETag, NO_ASSIST } from "./drafts.tsx";
 import { Form, field, useSend, useUnsaved, useWrites } from "./forms.tsx";
 import { Id, type Load, Ref, short, useItem, useList, usePending, useReads, useSettled } from "./list.tsx";
 import { markLines } from "./marks.tsx";
-import { eventLine, type Refusal, refusalOf, refusalText, terminal, watch } from "./progress.ts";
+import { eventLine, type Refusal, refusalOf, refusalText, terminal, type Watch, watch } from "./progress.ts";
 import type { Client } from "./request.ts";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
@@ -196,10 +196,78 @@ export function onEvent(s: RunState, type: string, data: unknown): RunState {
 // left to settle: the expiry can read abandoned before the sweep fails the operation, and the restarted
 // watch replays the old pause, so the replayed events settle nothing. It ends at the operation's
 // terminal event, or when ABANDONED_SETTLE has passed since the page first read the claim abandoned.
-export const stopsWatch = (settled: RunState["settled"], read: { b: Ingestion; at: number }, now: number, abandonedAt?: number) =>
+// A lapsed lease decides only once `caught` says the operation's newest event was shown, because the
+// events not yet shown can hold the run's outcome (the CLI's Until, imports.go).
+export const lapsedRead = (read: { b: Ingestion; at: number }, now: number) =>
+  read.b.state !== "abandoned" && read.at > Date.parse(read.b.leaseUntil) + LEASE_MARGIN && lapsed(read.b, now);
+export const stopsWatch = (settled: RunState["settled"], read: { b: Ingestion; at: number }, now: number, abandonedAt?: number, caught = false) =>
   read.b.state === "abandoned"
     ? abandonedAt !== undefined && now - abandonedAt >= ABANDONED_SETTLE
-    : settled !== undefined || (read.at > Date.parse(read.b.leaseUntil) + LEASE_MARGIN && lapsed(read.b, now));
+    : settled !== undefined || (caught && lapsedRead(read, now));
+
+// The epoch and number in an event's ID, `<epoch>:<number>`.
+export interface Seen { epoch: string; n: number }
+const seenOf = (id: string): Seen => ({ epoch: id.split(":", 1)[0]!, n: Number(id.slice(id.indexOf(":") + 1)) });
+// Whether the events shown reach the operation's newest one. Both reads must be of the epoch of the
+// events shown: after a restore the operation can have fewer events, and its last number would then
+// read as shown, so a differing epoch decides nothing (§8.5; the CLI compares the same way). A read
+// that named no epoch is not a mismatch.
+export function caughtUp(shown: Seen | undefined, claimEpoch: string | undefined, opEpoch: string | undefined, lastEvent: number): boolean | "reset" {
+  if (shown !== undefined && (claimEpoch !== undefined && claimEpoch !== shown.epoch || opEpoch !== undefined && opEpoch !== shown.epoch)) return "reset";
+  return (shown?.n ?? 0) >= lastEvent;
+}
+
+export interface FollowOptions {
+  client: Pick<Client, "readWithEpoch">;
+  ingestion: string; op: string; generation: number; signal: AbortSignal;
+  latest: () => { b: Ingestion; at: number };
+  abandonedAt: () => number | undefined;
+  now: () => number;
+  view: (a: WatchAct) => void;
+}
+// The callbacks of one watch of an import's operation, and the run it settled. A lapsed lease read
+// starts one check: the claim and the operation are read again, and the lease decides only when the
+// last event number shown reaches the operation's `lastEvent` (the CLI's Until). The check's answer is
+// used at the next ask, which the watch makes after each event, keep-alive and operation read.
+export function followRun(o: FollowOptions): { w: Watch; settled: () => RunState["settled"]; state: () => RunState } {
+  let run = startRun(o.generation);
+  let shown: Seen | undefined;
+  let caught = false, busy = false, behind: number | undefined, epoch = 0;
+  const check = async () => {
+    busy = true;
+    const mine = epoch;
+    try {
+      const claim = await o.client.readWithEpoch<Ingestion>(`/ingestions/${enc(o.ingestion)}`);
+      const operation = await o.client.readWithEpoch<Operation>(`/operations/${enc(o.op)}`);
+      // A clear since the check began took back the events it compared with.
+      if (o.signal.aborted || mine !== epoch || claim.result.kind !== "ok" || operation.result.kind !== "ok") return;
+      const last = operation.result.data.lastEvent;
+      const v = caughtUp(shown, claim.epoch, operation.epoch, last);
+      if (v === "reset") return;
+      behind = last;
+      caught = v;
+    } finally {
+      busy = false;
+    }
+  };
+  const ask = () => {
+    if (!caught && !busy && (behind === undefined || (shown?.n ?? 0) >= behind)) void check();
+    return caught;
+  };
+  return {
+    settled: () => run.settled,
+    state: () => run,
+    w: {
+      show: (e) => { shown = seenOf(e.id); run = onEvent(run, e.type, e.data); o.view({ type: "show", line: eventLine(e) }); },
+      clear: (why) => { run = startRun(o.generation); shown = undefined; caught = false; behind = undefined; epoch++; o.view({ type: "clear", why }); },
+      until: () => {
+        const read = o.latest();
+        return stopsWatch(run.settled, read, o.now(), o.abandonedAt(), run.settled === undefined && lapsedRead(read, o.now()) && ask());
+      },
+      signal: o.signal,
+    },
+  };
+}
 
 // How long the page follows an abandoned claim's operation for its terminal event. This is a client
 // bound, not the server's configured sweep interval: the sweep runs every `ingestion.sweep`, or every
@@ -251,21 +319,20 @@ function Progress({ b, again }: { b: Ingestion; again: () => void }) {
   }, [b, again]);
   const op = b.operation;
   const generation = b.ownerGeneration;
+  const ingestionId = b.id;
   useEffect(() => {
     if (client === undefined || op === null) return;
     const abort = new AbortController();
-    let run = startRun(generation);
     show({ type: "start" });
-    void watch(client, op, {
-      show: (e) => { run = onEvent(run, e.type, e.data); show({ type: "show", line: eventLine(e) }); },
-      clear: (why) => { run = startRun(generation); show({ type: "clear", why }); },
-      until: () => stopsWatch(run.settled, latest.current, Date.now(), abandonedAt.current),
-      signal: abort.signal,
-    }).then(async (r) => {
+    const run = followRun({
+      client, ingestion: ingestionId, op, generation, signal: abort.signal,
+      latest: () => latest.current, abandonedAt: () => abandonedAt.current, now: () => Date.now(), view: show,
+    });
+    void watch(client, op, run.w).then(async (r) => {
       if (r.kind === "stopped" || abort.signal.aborted) return;
       // The ETag is kept under the epoch of the operation read the watch ended on, not under the client's
       // epoch now, which another response can have moved since (§8.5).
-      const text = r.kind === "failed" ? shown.current(r.res) : await ended(client, latest.current.b, r.operation, run.settled ?? "", Date.now(), r.epoch, run);
+      const text = r.kind === "failed" ? shown.current(r.res) : await ended(client, latest.current.b, r.operation, run.state().settled ?? "", Date.now(), r.epoch, run.state());
       if (!abort.signal.aborted) {
         show({ type: "end", text });
         again();
