@@ -396,6 +396,10 @@ func TestDriftAdoptNeedsAnAuthorAndADraft(t *testing.T) {
 	if code, out, errOut := runDrift(t, "drift", "adopt", "mch_a", "--draft", "drf_a"); code != 0 || out != want {
 		t.Errorf("a service: exit %d, stdout %q, stderr %q; want %q", code, out, errOut, want)
 	}
+	// An invalid repeat flag is refused before the role guidance, not skipped by it.
+	if code, out, errOut := runDrift(t, "drift", "adopt", "mch_a", "--draft", "drf_a", "--idempotency-key="); code != 2 || out != "" {
+		t.Errorf("an empty key: exit %d, stdout %q, stderr %q; want exit 2 and no guidance", code, out, errOut)
+	}
 	for _, r := range seen() {
 		if strings.HasPrefix(r, "POST ") {
 			t.Errorf("sent %s", r)
