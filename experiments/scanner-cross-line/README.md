@@ -26,7 +26,8 @@ The same files back a second note, on [issue 603](https://github.com/ginsys/bron
 - `main.go`, `main_test.go` — the oracle. It reads a set and writes, for each document, the names
   go-yaml v3.0.5 reads as `!bwref` references. It applies the grammar of the server's name check
   and marks a document the server refuses for its `!bwref` text. A `!bwref` scalar in key position
-  (explicit or implicit), and an alias key whose anchor is such a key, lists no name and marks the
+  (explicit or implicit), and an alias key whose anchor is such a key or a tagged value, lists no
+  name and marks the
   document: the server refuses it (`tag-placement` in `internal/ingest/declare.go`) and the editor
   lists nothing there (ginsys/bronzeward#629 and #637). `main_test.go` checks it against the
   curated cases and the tagged-key rule.
@@ -179,9 +180,11 @@ experiments/scanner-cross-line/run/collect-evidence <work dir>
   case differently.
 - The sets reach only the shapes their generators write. S6 is the check against a shape nobody
   thought of, and it is random, not exhaustive.
-- Known gap, ginsys/bronzeward#637: the alias key of a tagged value (`a: &k !bwref x/foo`, then
-  `*k : v`). The server refuses the document at the alias use (`tag-placement`, the alias branch
-  in `internal/ingest/declare.go`). Neither the scanner nor the oracle models it: both list the
-  value's name where it stands. A scanner would need a scan ahead for the alias key. A unit row in
-  `web/src/position.test.ts` pins the current result.
+- The alias key of a tagged value (`a: &k !bwref x/foo`, then `*k : v`) lists no name in the oracle
+  and in the scanner (ginsys/bronzeward#672). The server refuses the document at the alias use
+  (`tag-placement`, the alias branch in `internal/ingest/declare.go`). The scanner finds the alias
+  key on the line of the alias, and drops the tag of the anchor that it names. Three shapes stay
+  open, and `evidence/alias-key-of-tagged-value.md` lists them: an alias inside a key collection
+  (`? - *k`), a multi-line flow key, and a bare `*k` that go-yaml refuses. The scanner lists a name
+  in each, and a unit row in `web/src/position.test.ts` pins the `? - *k` result.
 - Timing is one machine and one run. Read it as an order of magnitude.

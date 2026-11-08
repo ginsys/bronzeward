@@ -2130,12 +2130,51 @@ describe("a tag on an explicit key or an alias key", () => {
     expect(references("? &a\n  &b !bwref x/foo\n: v\n")).toEqual([]);
   });
 
-  // A known gap: the tag of a value that a later alias key repeats. The server refuses the document
-  // at the alias use (tag-placement, the alias branch of internal/ingest/declare.go). The value's own
-  // tag is listed where it stands, as before. Listing nothing needs a scan ahead for the alias key,
-  // which is a document-level scope that these line rules do not cover.
-  test("a tagged value that an alias key repeats is listed where it stands", () => {
-    expect(references("a: &k !bwref x/foo\n*k : v\n")).toEqual(["x/foo"]);
+  // The tag of a value that an alias key repeats (ginsys/bronzeward#672). The server refuses the
+  // document at the alias use (tag-placement, the alias branch of internal/ingest/declare.go), so the
+  // editor lists no name for that tag, as it lists none for the tag of a key. The anchor and the tag
+  // stand on one node, in either order. The latest anchor of the name counts, as go-yaml dereferences
+  // it. Another tag of the document stays listed, as for the tag of a key. Each row holds the verdict
+  // of probe `w672s1-oracle` and of the server probe (24 documents).
+  test.each([
+    ["the anchor before the tag", "a: &k !bwref x/foo\n*k : v\n"],
+    ["the anchor after the tag", "a: !bwref &k x/foo\n*k : v\n"],
+    ["no blank before the colon", "a: &k !bwref x/foo\n*k: v\n"],
+    ["an explicit key", "a: &k !bwref x/foo\n? *k\n: v\n"],
+    ["an explicit key with no value", "a: &k !bwref x/foo\n? *k\n"],
+    ["a flow mapping", "{a: &k !bwref x/foo, *k : v}\n"],
+    ["a flow sequence", "[&k !bwref x/foo, *k : v]\n"],
+    ["a key with a mapping value", "a: &k !bwref x/foo\n*k :\n  w: 1\n"],
+    ["a later document", "a: &k !bwref x/foo\n---\n*k : v\n"],
+    ["an earlier document, the tag on a root scalar", "&k !bwref x/foo\n---\n*k : v\n"],
+    ["the tag on the line after the anchor", "a: &k\n  !bwref x/foo\n*k : v\n"],
+    ["the latest anchor of the name carries the tag", "a: &k 1\nb: &k !bwref x/foo\n*k : v\n"],
+    ["the alias is also used as a value", "a: &k !bwref x/foo\nb: *k\n*k : v\n"],
+    ["the alias key is in a sequence entry", "a: &k !bwref x/foo\nb:\n  - *k : v\n"],
+    ["two alias keys", "a: &k !bwref x/foo\n*k : v\n*k : w\n"],
+  ])("a tagged value that an alias key repeats lists nothing (%s)", (_, text) => {
+    expect(references(text), text).toEqual([]);
+  });
+
+  test("another tag of the document stays listed", () => {
+    expect(references("a: &k !bwref x/foo\nc: !bwref x/bar\n*k : v\n")).toEqual(["x/bar"]);
+  });
+
+  test.each([
+    ["an alias used as a value", "a: &k !bwref x/foo\nb: *k\n"],
+    ["an alias in a sequence", "- &k !bwref x/foo\n- *k\n"],
+    ["a later anchor of the name carries no tag", "a: &k !bwref x/foo\nb: &k 1\n*k : v\n"],
+    ["a quoted key that looks like an alias", 'a: &k !bwref x/foo\n"*k": v\n'],
+    ["an anchor on the next node, not on the tagged one", "a: &k\nb: !bwref x/foo\n*k : v\n"],
+  ])("a tagged value that no alias key repeats stays listed (%s)", (_, text) => {
+    expect(references(text), text).toEqual(["x/foo"]);
+  });
+
+  // A known limit: an alias key inside a collection that is a key (`? - *k`). The server refuses the
+  // document, go-yaml accepts it, and the scanner lists the name. Only an alias that is the key itself
+  // is read.
+  test("an alias key inside a collection that is a key is a known limit, the name is listed", () => {
+    expect(references("a: &k !bwref x/foo\n? - *k\n: v\n")).toEqual(["x/foo"]);
   });
 });
 

@@ -201,6 +201,27 @@ function directiveTable(lines: readonly string[]): Map<string, string> | null {
 }
 
 const tags = (original: string) => readTags(original).found;
+// The `!bwref` tags that share a node with an anchor that an alias key repeats (ginsys/bronzeward#672).
+// `keyed` holds the span of each such anchor. The tag stands next to it, with blanks and line breaks
+// between (`&k !bwref x/foo`, `!bwref &k x/foo`, or the tag on the next line); anything else between
+// them belongs to another node. The walks go over the blanks next to each anchor, once per anchor.
+function keyedTags(masked: string, props: ReadonlyMap<number, Prop>, keyed: ReadonlyMap<number, number>): Set<number> {
+  const out = new Set<number>();
+  if (keyed.size === 0) return out;
+  const byEnd = new Map<number, number>();
+  for (const [start, { end }] of props) byEnd.set(end, start);
+  const blank = (c: string | undefined) => c === " " || c === "\t" || c === "\r" || c === "\n";
+  for (const [start, end] of keyed) {
+    let after = end;
+    while (blank(masked[after])) after++;
+    if (props.has(after)) out.add(after);
+    let before = start;
+    while (before > 0 && blank(masked[before - 1])) before--;
+    const tag = byEnd.get(before);
+    if (tag !== undefined) out.add(tag);
+  }
+  return out;
+}
 // The tags of the text, and the spans of the documents that go-yaml refuses (ginsys/bronzeward#633).
 function readTags(original: string): { found: { index: number; tag: string; name: string }[]; refused: Spot[] } {
   const text = original.replace(BREAKS, "\n");
@@ -208,7 +229,7 @@ function readTags(original: string): { found: { index: number; tag: string; name
   const lines = text.split("\n");
   // Whether the break that ends each line is U+0085, U+2028 or U+2029 (see `commentStarts`).
   const odd = [...original.matchAll(/\r\n|\r|\n|([\u0085\u{2028}\u{2029}])/gu)].map((m) => m[1] !== undefined);
-  const { starts, props, refused, cuts } = commentStarts(lines, odd);
+  const { starts, props, refused, cuts, keyed } = commentStarts(lines, odd);
   lines.forEach((line, n) => {
     const end = starts[n]!;
     masked += `${line.slice(0, end)}${" ".repeat(line.length - end)}\n`;
@@ -217,6 +238,7 @@ function readTags(original: string): { found: { index: number; tag: string; name
   // blank column, so it is a blank in the text that the scans below read. A third is text. The offsets stay.
   if (masked.startsWith("﻿﻿")) masked = `﻿ ${masked.slice(2)}`;
   const above = aboveLines(masked);
+  const unlisted = keyedTags(masked, props, keyed);
   const found: { index: number; tag: string; name: string }[] = [];
   // A plain scalar's words: no blank, flow indicator, or colon before a blank; blanks between words.
   const word = String.raw`(?:[^ \t\r\n,[\]{}:]|:(?=[^ \t\r\n,[\]{}]))+`;
@@ -272,6 +294,9 @@ function readTags(original: string): { found: { index: number; tag: string; name
     // The server refuses a tag on a key (tag-placement, ginsys/bronzeward#637), so an explicit key's
     // tag lists no name, as the tag on an implicit key lists none.
     if (explicitKeyTag(masked, start, inFlow)) continue;
+    // The server refuses an alias key that repeats the anchor of this node (tag-placement,
+    // ginsys/bronzeward#672), so this tag lists no name, as the tag of a key lists none.
+    if (unlisted.has(start)) continue;
     // go-yaml refuses a second anchor on one node (`&a !bwref &b x/foo`). The look-back stops after
     // 4096 characters, so the cost per anchored tag has a bound. Beyond it the guard misses the first
     // anchor and the scanner lists the name, though go-yaml refuses the document: an extra name in a
@@ -823,12 +848,15 @@ interface Docs {
   // document inside such a span lists nothing either (ginsys/bronzeward#633).
   from: number;
   spans: Spot[];
-  // The names of the anchors read so far in the stream. go-yaml keeps them across `---` and `...`
-  // (a re-defined anchor is fine), so an alias whose name is not here is undefined and refuses
-  // its document (ginsys/bronzeward#672).
-  anchors: Set<string>;
+  // The anchors read so far in the stream, by name, with the span of the latest one. go-yaml keeps
+  // them across `---` and `...` (a re-defined anchor is fine), so an alias whose name is not here is
+  // undefined and refuses its document (ginsys/bronzeward#672).
+  anchors: Map<string, Spot>;
+  // The anchors that an alias in key position repeats, by the offset where the anchor starts. The
+  // server refuses such an alias when the anchored node carries `!bwref` (tag-placement).
+  keyed: Map<number, number>;
 }
-const freshDocs = (props: Map<number, Prop>, spans: Spot[], from: number, anchors: Set<string>): Docs => ({
+const freshDocs = (props: Map<number, Prop>, spans: Spot[], from: number, anchors: Map<string, Spot>, keyed: Map<number, number>): Docs => ({
   phase: "start",
   pending: [],
   table: new Map(DEFAULT_HANDLES),
@@ -838,12 +866,13 @@ const freshDocs = (props: Map<number, Prop>, spans: Spot[], from: number, anchor
   from,
   spans,
   anchors,
+  keyed,
 });
 // End the document at the offset `at`: the start of the line that ends it, or the end of a `...` line.
 function endDocument(d: Docs, phase: "start" | "ended", at: number) {
   if (d.refused) d.spans.push({ start: d.from, end: at });
   else for (const [k, v] of d.cur) d.props.set(k, v);
-  Object.assign(d, freshDocs(d.props, d.spans, at, d.anchors), { phase });
+  Object.assign(d, freshDocs(d.props, d.spans, at, d.anchors, d.keyed), { phase });
 }
 // Read a line against the document state. A directive line (`%` in the first column, outside any
 // scalar) is consumed here and returns true. A `---` or `...` marker ends or starts a document, and
@@ -907,6 +936,19 @@ function readDocumentLine(d: Docs, st: Carry, text: string, at: number): boolean
   return false;
 }
 const isWs = (c: string | undefined) => c === " " || c === "\t" || c === "\r";
+// Whether the alias that spans `line[from, to)` is a mapping key: a value indicator follows it on its
+// line (`*k : v`, `*k: v`), or it follows a `?` indicator (`? *k`). The server refuses an alias key
+// whose anchored node carries `!bwref` (ginsys/bronzeward#672). A key that spreads over two lines in a
+// flow collection, and an alias inside a collection that is a key, are not read here. The walks go over
+// the blanks next to the alias only.
+function aliasIsKey(line: string, from: number, to: number): boolean {
+  let after = to;
+  while (isWs(line[after])) after++;
+  if (line[after] === ":" && (after + 1 >= line.length || isWs(line[after + 1]))) return true;
+  let before = from;
+  while (before > 0 && isWs(line[before - 1])) before--;
+  return before < from && line[before - 1] === "?" && (before === 1 || isWs(line[before - 2]));
+}
 const FLOW = ",[]{}";
 // A block scalar header after its indicator. go-yaml reads the indicators only directly after `|` or
 // `>`: a chomping sign and then a digit 1-9, or the digit and then the sign (a digit 0 is an error),
@@ -954,12 +996,13 @@ function pushEntry(stack: number[], col: number) {
 function commentStarts(
   lines: readonly string[],
   odd: readonly boolean[],
-): { starts: number[]; props: Map<number, Prop>; refused: Spot[]; cuts: Set<number> } {
+): { starts: number[]; props: Map<number, Prop>; refused: Spot[]; cuts: Set<number>; keyed: Map<number, number> } {
   const st = freshCarry();
   const props = new Map<number, Prop>();
   const refused: Spot[] = [];
   const cuts = new Set<number>();
-  const docs = freshDocs(props, refused, 0, new Set());
+  const keyed = new Map<number, number>();
+  const docs = freshDocs(props, refused, 0, new Map(), keyed);
   let base = 0;
   // For each line: the bytes from its start to the `#` of the first line from it that is not blank, if
   // that line is a comment line (a blank line counts with its line break). Infinity if it is not, or
@@ -1000,7 +1043,7 @@ function commentStarts(
     return end >= line.length ? full.length : end;
   });
   endDocument(docs, "start", base);
-  return { starts, props, refused, cuts };
+  return { starts, props, refused, cuts, keyed };
 }
 
 // `reach`: see `commentStarts`. `brk`: the length in bytes of the line break that ends the line. `odd`: that
@@ -1193,8 +1236,12 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: numb
         }
         // An anchor defines its name. An alias whose name no anchor defined before it refuses the
         // document (`unknown anchor`), so the document lists nothing (ginsys/bronzeward#672).
-        if (c === "&") docs.anchors.add(line.slice(j + 1, e));
-        else if (c === "*" && !docs.anchors.has(line.slice(j + 1, e))) docs.refused = true;
+        if (c === "&") docs.anchors.set(line.slice(j + 1, e), { start: base + j, end: base + e });
+        else if (c === "*") {
+          const def = docs.anchors.get(line.slice(j + 1, e));
+          if (def === undefined) docs.refused = true;
+          else if (aliasIsKey(line, j, e)) docs.keyed.set(def.start, def.end);
+        }
         j = e;
         lastPlain = false;
         if (c === "*") {

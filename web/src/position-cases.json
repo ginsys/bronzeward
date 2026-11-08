@@ -833,6 +833,12 @@
    "want": []
   },
   {
+   "name": "tagged-implicit-key-row-48",
+   "source": "ginsys/bronzeward#637",
+   "doc": "[!bwref x/foo:]\n",
+   "want": []
+  },
+  {
    "name": "tagged-implicit-key-row-47",
    "source": "ginsys/bronzeward#637",
    "doc": "- !bwref x/foo:\n    bar\n",
@@ -884,9 +890,7 @@
    "name": "tagged-alias-key-of-tagged-value",
    "source": "ginsys/bronzeward#637",
    "doc": "a: &k !bwref x/foo\n*k : v\n",
-   "want": [
-    "x/foo"
-   ]
+   "want": []
   },
   {
    "name": "explicit-key-value-control",
@@ -900,6 +904,108 @@
    "name": "sequence-entry-control",
    "source": "ginsys/bronzeward#637",
    "doc": "- !bwref x/foo\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
+   "name": "alias-key-tag-after-anchor",
+   "source": "ginsys/bronzeward#672",
+   "doc": "a: !bwref &k x/foo\n*k : v\n",
+   "want": []
+  },
+  {
+   "name": "alias-key-no-blank",
+   "source": "ginsys/bronzeward#672",
+   "doc": "a: &k !bwref x/foo\n*k: v\n",
+   "want": []
+  },
+  {
+   "name": "alias-key-explicit",
+   "source": "ginsys/bronzeward#672",
+   "doc": "a: &k !bwref x/foo\n? *k\n: v\n",
+   "want": []
+  },
+  {
+   "name": "alias-key-flow-mapping",
+   "source": "ginsys/bronzeward#672",
+   "doc": "{a: &k !bwref x/foo, *k : v}\n",
+   "want": []
+  },
+  {
+   "name": "alias-key-flow-sequence",
+   "source": "ginsys/bronzeward#672",
+   "doc": "[&k !bwref x/foo, *k : v]\n",
+   "want": []
+  },
+  {
+   "name": "alias-key-later-document",
+   "source": "ginsys/bronzeward#672",
+   "doc": "a: &k !bwref x/foo\n---\n*k : v\n",
+   "want": []
+  },
+  {
+   "name": "alias-key-tag-on-next-line",
+   "source": "ginsys/bronzeward#672",
+   "doc": "a: &k\n  !bwref x/foo\n*k : v\n",
+   "want": []
+  },
+  {
+   "name": "alias-key-latest-anchor-tagged",
+   "source": "ginsys/bronzeward#672",
+   "doc": "a: &k 1\nb: &k !bwref x/foo\n*k : v\n",
+   "want": []
+  },
+  {
+   "name": "alias-key-and-other-tag",
+   "source": "ginsys/bronzeward#672",
+   "doc": "a: &k !bwref x/foo\nc: !bwref x/bar\n*k : v\n",
+   "want": [
+    "x/bar"
+   ]
+  },
+  {
+   "name": "alias-key-in-sequence-entry",
+   "source": "ginsys/bronzeward#672",
+   "doc": "a: &k !bwref x/foo\nb:\n  - *k : v\n",
+   "want": []
+  },
+  {
+   "name": "alias-value-control",
+   "source": "ginsys/bronzeward#672",
+   "doc": "a: &k !bwref x/foo\nb: *k\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
+   "name": "alias-sequence-control",
+   "source": "ginsys/bronzeward#672",
+   "doc": "- &k !bwref x/foo\n- *k\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
+   "name": "alias-key-latest-anchor-untagged",
+   "source": "ginsys/bronzeward#672",
+   "doc": "a: &k !bwref x/foo\nb: &k 1\n*k : v\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
+   "name": "alias-key-quoted-control",
+   "source": "ginsys/bronzeward#672",
+   "doc": "a: &k !bwref x/foo\n\"*k\": v\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
+   "name": "alias-key-anchor-on-next-node",
+   "source": "ginsys/bronzeward#672",
+   "doc": "a: &k\nb: !bwref x/foo\n*k : v\n",
    "want": [
     "x/foo"
    ]
