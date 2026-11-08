@@ -159,6 +159,17 @@ func TestUnfreezeWhyBlocked(t *testing.T) {
 	}
 }
 
+// TestFreezeWhyBlockedSaysFreezing: a freeze that a held scope refuses names the act as "freezing",
+// not "freezeing", beside the unfreeze's "unfreezing".
+func TestFreezeWhyBlockedSaysFreezing(t *testing.T) {
+	recoveryServer(t, map[string]string{"POST /api/v1/machines/mch_a/freezes": "409 " + problemHead + `recovery-mode-active","title":"Recovery mode active","status":409,` +
+		`"machine":"mch_a","scope":"blocked"` + problemTail}, "")
+	_, _, errOut := runDrift(t, "machine", "freeze", "mch_a", "--reason", "decided")
+	if !strings.Contains(errOut, "so freezing is refused until a recovery administrator releases it.\n") || strings.Contains(errOut, "freezeing") {
+		t.Errorf("a blocked scope on a freeze: stderr %q", errOut)
+	}
+}
+
 // TestUnfreezeRoleRefused: the 403 names the roles the server named; nothing else is added.
 func TestUnfreezeRoleRefused(t *testing.T) {
 	recoveryServer(t, map[string]string{"POST /api/v1/machines/mch_a/unfreezes": "403 " + problemHead + `forbidden","title":"Forbidden","status":403,"roles":["approver"]` + problemTail}, "")
