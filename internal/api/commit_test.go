@@ -40,6 +40,14 @@ func (ce *commitEnv) key() string {
 	return "k-commitment-" + string(rune('a'+ce.keys)) + "-0123456789"
 }
 
+// expireIn moves the plan's expiry to d from now, by the database's clock, and reads it back into
+// ce.expires. A case sets the plan up with the default expiry and calls this after its setup, so
+// that no setup step races a short expiry.
+func (ce *commitEnv) expireIn(t *testing.T, d time.Duration) {
+	t.Helper()
+	ce.expires = ce.expirePlan(t, ce.pid, d)
+}
+
 // approveIt approves the plan through T5a.
 func (ce *commitEnv) approveIt(t *testing.T) {
 	t.Helper()
@@ -306,10 +314,10 @@ func TestCommitmentRefusals(t *testing.T) {
 			ready(t, ce)
 			revokeApprover(t, ce)
 		}},
-		{name: "expired", extra: `,"expiresInSeconds":1`, comparison: "1", cause: "the plan has expired",
+		{name: "expired", comparison: "1", cause: "the plan has expired",
 			setup: func(t *testing.T, ce *commitEnv) {
 				ready(t, ce)
-				time.Sleep(time.Until(ce.expires.Add(100 * time.Millisecond)))
+				ce.expireIn(t, 0)
 			}},
 		{name: "assignment changed", comparison: "2", cause: "the machine's assignment revision changed",
 			setup: func(t *testing.T, ce *commitEnv) {
@@ -685,8 +693,9 @@ func TestCommitmentHoldsItsReads(t *testing.T) {
 // transaction began.
 func TestCommitmentTimeFollowsLocks(t *testing.T) {
 	t.Parallel()
-	ce := newCommitEnv(t, `,"expiresInSeconds":4`)
+	ce := newCommitEnv(t, "")
 	ce.ready(t)
+	ce.expireIn(t, 4*time.Second) // counted from the end of the setup, so the setup cannot outlast it
 	stand, err := ce.db.Begin()
 	if err != nil {
 		t.Fatal(err)
@@ -829,7 +838,7 @@ func TestCommitmentRolloutRace(t *testing.T) {
 // is refused as expired, not committed at the time before the wait.
 func TestCommitmentRolloutWaitPrecedesTime(t *testing.T) {
 	t.Parallel()
-	ce := newCommitEnv(t, `,"expiresInSeconds":4`)
+	ce := newCommitEnv(t, "")
 	ce.ready(t)
 	ce.second(t)
 	done := make(chan error, 1)
@@ -849,6 +858,7 @@ func TestCommitmentRolloutWaitPrecedesTime(t *testing.T) {
 		return errors.New("rolled back")
 	}})
 	ce.evidence(t, ce.plan2, func(s *evSeed) { s.controller = first.d.owner.ID })
+	ce.expireIn(t, 4*time.Second) // counted from the end of the setup, so the setup cannot outlast it
 	if _, err := first.commitPlan(context.Background(), ce.plan2); err == nil {
 		t.Fatal("the stand-in commitment committed")
 	}
@@ -915,7 +925,7 @@ func TestCommitmentReadLockControls(t *testing.T) {
 // machine's commitment, and commits a plan that expired during that wait.
 func TestCommitmentRolloutLockControl(t *testing.T) {
 	t.Parallel()
-	ce := newCommitEnv(t, `,"expiresInSeconds":4`)
+	ce := newCommitEnv(t, "")
 	ce.ready(t)
 	ce.second(t)
 	ce.a = observer(t, ce.env, &fakeExecutor{}, options{noReadLock: "rollout"})
@@ -934,6 +944,7 @@ func TestCommitmentRolloutLockControl(t *testing.T) {
 		return errors.New("rolled back")
 	}})
 	ce.evidence(t, ce.plan2, func(s *evSeed) { s.controller = first.d.owner.ID })
+	ce.expireIn(t, 4*time.Second) // counted from the end of the setup, so the setup cannot outlast it
 	if _, err := first.commitPlan(context.Background(), ce.plan2); err == nil {
 		t.Fatal("the stand-in commitment committed")
 	}

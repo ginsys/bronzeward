@@ -293,9 +293,9 @@ func TestAdopterSkips(t *testing.T) {
 		apply       bool                                          // an approved apply-config plan of the machine
 		setup       func(t *testing.T, le *loopEnv, other string) // after the plans, before the loop starts
 	}{
-		{"expired", `,"expiresInSeconds":1`, false, func(t *testing.T, le *loopEnv, _ string) {
+		{"expired", "", false, func(t *testing.T, le *loopEnv, _ string) {
 			le.approveIt(t)
-			time.Sleep(time.Until(le.expires.Add(100 * time.Millisecond)))
+			le.expireIn(t, 0)
 		}},
 		{"approver revoked", "", false, func(t *testing.T, le *loopEnv, _ string) {
 			le.approveIt(t)
