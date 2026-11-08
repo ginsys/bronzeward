@@ -203,7 +203,8 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 			} else {
 				held := pageEpoch == "" || pageEpoch == epoch
 				// A read with no epoch header stands while no answer showed another epoch since it. The count
-				// says so: pages of another epoch (held false) moved it (section 8.6 item 2).
+				// says so, and held does not: pages of the epoch the client already knew leave held false
+				// and the count unchanged (section 8.6 item 2).
 				if epoch == "" && c.EpochHolds(rd) || epoch != "" && held && (last == "" || epochOf(last) == epoch) {
 					return o, rd, nil
 				}
