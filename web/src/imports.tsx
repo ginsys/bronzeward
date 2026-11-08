@@ -180,7 +180,9 @@ export function onEvent(s: RunState, type: string, data: unknown): RunState {
   const t = open === s.open ? s : { ...s, open };
   if (["continued", "taken-over", "marked"].includes(type) && gen > t.gen) {
     if (type === "taken-over") return { ours: true, gen, replacedBy: open === undefined ? t.replacedBy : gen };
-    return { ours: true, gen, open, ...(type === "marked" && { marked: true as const }) };
+    if (type === "marked") return { ours: true, gen, open, marked: true as const };
+    // A continuation after the pause keeps what is known of the earlier mark: its refusal, or the takeover that discarded it.
+    return { ours: true, gen, open, ...(t.refused !== undefined && { marked: true as const, refused: t.refused }), ...(t.replacedBy !== undefined && { replacedBy: t.replacedBy }) };
   }
   if (!t.ours) return t;
   if (type === "mark-refused" && gen >= t.gen) return { ...t, gen, refused: refusalOf(data) };

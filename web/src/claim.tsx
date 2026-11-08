@@ -5,7 +5,7 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import type { components } from "./api/v1";
 import { NO_ASSIST } from "./drafts.tsx";
-import { useSend, useWrites, Result } from "./forms.tsx";
+import { startsNew, useSend, useWrites, Result } from "./forms.tsx";
 import { type Load, short, useReads, useSettled } from "./list.tsx";
 import { markSent, MarksPanel, markSpec } from "./marks.tsx";
 import { Action } from "./shell.tsx";
@@ -209,6 +209,10 @@ function ClaimSection({ b, again, now }: { b: Ingestion; again: () => void; now:
   const sentVerb = useCallback((v: Verb) => setSent((s) => (s.includes(v) ? s : [...s, v])), []);
   const shown = shownVerbs(o.verbs, sent);
   const [mw, msend] = useSend();
+  // Send marks waits while the write is in flight or its outcome is unknown: the layer refuses a new
+  // write then, and the panel would empty its typed list for nothing.
+  const writes = useWrites()!;
+  const marking = !startsNew(writes, mw);
   // A done send moves the claim on, and a 409 means another operator did: both read the import once.
   const readMarks = useRef<Write>(undefined);
   const markSettled = rereads(mw?.outcome);
@@ -219,7 +223,7 @@ function ClaimSection({ b, again, now }: { b: Ingestion; again: () => void; now:
   return (
     <section aria-label="Claim">
       <p>{b.state === "paused" ? expiry(b.expiresAt, now) : null}</p>
-      {o.review && <Review b={b} marking={{ send: (marks) => msend(markSpec(b.id, marks)), busy: mw !== undefined && mw.outcome === undefined }} />}
+      {o.review && <Review b={b} marking={{ send: (marks) => msend(markSpec(b.id, marks)), busy: marking }} />}
       <Result w={mw} done={markSent} />
       {shown.map((v) => <ClaimAction key={v} id={b.id} verb={v} offered={o.verbs.includes(v)} again={again} sent={sentVerb} />)}
     </section>

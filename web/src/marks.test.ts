@@ -178,6 +178,26 @@ describe("how the run of a mark ends (§11.3, PROT-03, PROT-05, PROT-06)", () =>
     const s = events(2, [["marked", { generation: 2 }], ["resume-failed", { code: "dependency-unavailable" }]]);
     expect([s.settled, s.marked]).toEqual(["resume-failed", true]);
   });
+  describe("a continuation after the pause keeps what is known of the mark (the terminal drain reads the whole backlog)", () => {
+    test("a refused mark stays refused after the continued event", () => {
+      const s = events(2, [["marked", { generation: 2 }], ["mark-refused", refusal], ["paused", { generation: 2 }], ["continued", { generation: 3 }]]);
+      expect([s.gen, s.settled, s.marked, s.refused]).toEqual([3, undefined, true, { code: "validation-failed", rule: "mark-kind", position: 0 }]);
+    });
+    test("a mark discarded by a takeover stays discarded after the continued event", () => {
+      const s = events(3, [["marked", { generation: 2 }], ["taken-over", { generation: 3 }], ["paused", { generation: 3 }], ["continued", { generation: 4 }]]);
+      expect([s.gen, s.replacedBy]).toEqual([4, 3]);
+    });
+    test("an applied mark, or no mark, adds nothing after the continued event", () => {
+      const s = events(2, [["marked", { generation: 2 }], ["paused", { generation: 2 }], ["continued", { generation: 3 }]]);
+      expect([s.marked, s.refused, s.replacedBy]).toEqual([undefined, undefined, undefined]);
+    });
+    test("the page still says the mark was refused when the import is released after the continuation", async () => {
+      const s = events(2, [["marked", { generation: 2 }], ["mark-refused", refusal], ["paused", { generation: 2 }], ["continued", { generation: 3 }]]);
+      const done = op({ state: "succeeded", result: { draft: "drf_2rmp457a", draftRevision: 5, importBaseRevision: "rev_1" } });
+      const out = renderToStaticMarkup(h(ReadsProvider, { value: noReads }, await ended(unused, ing({ state: "released" }), done, "", NOW, "e1", s))).replace(/<[^>]+>/g, "");
+      expect(out).toMatch(/^The mark was not applied: it was refused \(validation-failed, rule mark-kind/);
+    });
+  });
   test("the page says applied, refused by position and rule, or not applied by code, and never names a path", async () => {
     const applied = await ended(unused, ing(), op(), "paused", NOW, "e1", { marked: true });
     expect(applied).toMatch(/^The marks were applied: re-staged and paused again \(expires /);
