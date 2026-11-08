@@ -69,22 +69,21 @@ func TestAccountRefusals(t *testing.T) {
 	for _, c := range []struct {
 		name, want string
 		args       []string
-		usage      bool // a missing flag is a usage error: the usage text follows it, and it does not say "nothing was sent"
 	}{
-		{"no start", "give --start and --end", []string{"recovery", "scope-account", "mch_a", "--end", "obs_e"}, true},
-		{"no end", "give --start and --end", []string{"recovery", "account", "op_1", "att_1", "--start", "obs_s"}, true},
-		{"end is not a recovery observation", "its purpose is routine, not recovery", []string{"recovery", "scope-account", "mch_a", "--start", "obs_s", "--end", "obs_n"}, false},
-		{"same observation", "are the same observation", []string{"recovery", "scope-account", "mch_a", "--start", "obs_e", "--end", "obs_e"}, false},
-		{"unknown start", "no such observation of machine mch_a", []string{"recovery", "account", "op_1", "att_1", "--start", "obs_x", "--end", "obs_e"}, false},
-		{"moved without explanation", "moved from 7 to 8", []string{"recovery", "scope-account", "mch_a", "--start", "obs_s", "--end", "obs_m"}, false},
-		{"explanation too long", "at most 1024 bytes", append(slices.Clone(scopeArgs), "--explanation", strings.Repeat("x", 1025)), false},
+		{"no start", "give --start and --end", []string{"recovery", "scope-account", "mch_a", "--end", "obs_e"}},
+		{"no end", "give --start and --end", []string{"recovery", "account", "op_1", "att_1", "--start", "obs_s"}},
+		{"end is not a recovery observation", "its purpose is routine, not recovery", []string{"recovery", "scope-account", "mch_a", "--start", "obs_s", "--end", "obs_n"}},
+		{"same observation", "are the same observation", []string{"recovery", "scope-account", "mch_a", "--start", "obs_e", "--end", "obs_e"}},
+		{"unknown start", "no such observation of machine mch_a", []string{"recovery", "account", "op_1", "att_1", "--start", "obs_x", "--end", "obs_e"}},
+		{"moved without explanation", "moved from 7 to 8", []string{"recovery", "scope-account", "mch_a", "--start", "obs_s", "--end", "obs_m"}},
+		{"explanation too long", "at most 1024 bytes", append(slices.Clone(scopeArgs), "--explanation", strings.Repeat("x", 1025))},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			recoveryPosted = nil
 			seen := recoveryServer(t, accAnswers(accScopeAnswer), accScopeAnswer)
 			code, out, errb := account(t, "mch_a\n", c.args...)
-			if code != 2 || out != "" || !strings.Contains(errb, c.want) || (!c.usage && !strings.Contains(errb, "nothing was sent")) {
-				t.Errorf("exit %d, stdout %q, stderr:\n%s\nwant exit 2, nothing on stdout, %q and, unless a usage error, \"nothing was sent\"", code, out, errb, c.want)
+			if code != 2 || out != "" || !strings.Contains(errb, c.want) || !strings.Contains(errb, "nothing was sent") {
+				t.Errorf("exit %d, stdout %q, stderr:\n%s\nwant exit 2, nothing on stdout, %q and \"nothing was sent\"", code, out, errb, c.want)
 			}
 			if slices.Contains(seen(), accScope) || slices.Contains(seen(), accAttempt) || len(recoveryPosted) != 0 {
 				t.Errorf("a POST was sent: %v", seen())
@@ -119,7 +118,7 @@ func TestAccountTyped(t *testing.T) {
 				t.Errorf("typed back: exit %d, sent %v\n%s", code, seen(), errb)
 			}
 			// The window is shown to the run that asks for the typed ID; --no-input refuses before it.
-			for _, want := range []string{"obs_s, purpose routine", "obs_e, purpose recovery", "resource version 7", "Settle floor 30s", "can still land on this machine", "not a proven bound"} {
+			for _, want := range []string{"obs_s, purpose routine", "obs_e, purpose recovery", "resource version 7", "Settle floor 30s", "judgment that no ", "not a proven bound"} {
 				if !strings.Contains(errb, want) {
 					t.Errorf("the window lacks %q:\n%s", want, errb)
 				}
@@ -205,22 +204,28 @@ func TestAccountSettleCauses(t *testing.T) {
 // item 2; AMB-05, AMB-07, AMB-12 with this write as the dropped one).
 //
 // The window is built from reads under ep_BWSYNTH-1. The send's own principal read, the first
-// read after them, shows ep_BWSYNTH-2. Both commands are covered, since each takes the epoch of
-// its reads.
+// read after them, shows ep_BWSYNTH-2. A second case moves the epoch inside the window's own reads,
+// at the observations page, so the earlier results shown beside it belong to another snapshot. Both
+// commands are covered in both cases, since each takes the epoch of its reads.
 func TestAccountEpochChange(t *testing.T) {
 	for _, c := range []struct {
-		name, route, post string
-		args              []string
-	}{{"scope-account", accScope, accScopeAnswer, scopeArgs}, {"account", accAttempt, accAttemptAnswer, attemptArgs}} {
+		name, route, post, moves, said string
+		args                           []string
+	}{
+		{"scope-account after the reads", accScope, accScopeAnswer, "/api/v1/identity", "after the request was built", scopeArgs},
+		{"account after the reads", accAttempt, accAttemptAnswer, "/api/v1/identity", "after the request was built", attemptArgs},
+		{"scope-account during the reads", accScope, accScopeAnswer, "/api/v1/machines/mch_a/observations", "while the window was read", scopeArgs},
+		{"account during the reads", accAttempt, accAttemptAnswer, "/api/v1/machines/mch_a/observations", "while the window was read", attemptArgs},
+	} {
 		t.Run(c.name, func(t *testing.T) {
 			recoveryPosted = nil
-			setServerFacts(t, 3, map[string]string{"/api/v1/identity": "ep_BWSYNTH-2"})
+			setServerFacts(t, 3, map[string]string{c.moves: "ep_BWSYNTH-2"})
 			seen := recoveryServer(t, accAnswers(c.post), c.post)
 			code, out, errb := account(t, "mch_a\n", c.args...)
 			if code == 0 || out != "" || len(recoveryPosted) != 0 || slices.Contains(seen(), c.route) {
 				t.Errorf("exit %d, stdout %q, %d POSTs; want a refusal and no POST\n%s", code, out, len(recoveryPosted), errb)
 			}
-			if !strings.Contains(errb, "the epoch changed from 'ep_BWSYNTH-1' to 'ep_BWSYNTH-2'") || !strings.Contains(errb, "Nothing was sent") {
+			if !strings.Contains(errb, "the epoch changed from 'ep_BWSYNTH-1' to 'ep_BWSYNTH-2'") || !strings.Contains(errb, c.said) || !strings.Contains(strings.ToLower(errb), "nothing was sent") {
 				t.Errorf("the epoch change is not named, or the refusal does not say nothing was sent:\n%s", errb)
 			}
 		})
