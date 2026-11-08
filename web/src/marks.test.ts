@@ -2,6 +2,7 @@ import { createElement as h, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import type { components } from "./api/v1";
+import { Shown } from "./claim.tsx";
 import { WritesProvider } from "./forms.tsx";
 import { ended, type Ingestion, onEvent, startBody, startRun } from "./imports.tsx";
 import { type Reads, ReadsProvider } from "./list.tsx";
@@ -97,6 +98,24 @@ describe("the marks panel", () => {
   });
   test("shows the path of a value, never the value", () => {
     expect(html).not.toContain(SENTINEL);
+  });
+});
+
+describe("the marks panel inside the open review (the seam with the review view)", () => {
+  const text = `machine:\n  files:\n    - content: "token = ${SENTINEL}"\n`;
+  const shown = (marking?: { send: (marks: string[]) => void; busy: boolean }) => page(h(Shown, { id: "ing_6fdq2la", text, close: () => {}, ...(marking === undefined ? {} : { marking }) }));
+  test("the review carries the panel when marking is passed, and Close review stays after it", () => {
+    const html = shown({ send: () => {}, busy: false });
+    expect(html).toContain("Send marks");
+    expect(html.indexOf("Send marks")).toBeLessThan(html.indexOf("Close review"));
+  });
+  test("without marking the review shows the text and Close review and no panel", () => {
+    const html = shown();
+    expect(html).not.toContain("Send marks");
+    expect(html).toContain("Close review");
+  });
+  test("Close review is a plain button, so a busy send does not disable it", () => {
+    expect(shown({ send: () => {}, busy: true })).not.toMatch(/<button[^>]*disabled[^>]*>Close review/);
   });
 });
 
