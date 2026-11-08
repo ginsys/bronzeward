@@ -343,6 +343,11 @@ func (e *env) driftAdopt(args []string) (err error) {
 	if draft == "" {
 		return usageError{errors.New("drift adopt needs --draft")}
 	}
+	// The repeat flags are checked before any role guidance, as for every command that takes them.
+	// The repeat flags are checked before any role guidance, as for every command that takes them.
+	if _, err := rf.repeat(true); err != nil {
+		return err
+	}
 	m := pos[0]
 	var id apitypes.IdentityBody
 	if err := e.session(func(c *client.Client, _ *client.Response, _ *apitypes.ServerBody) error {
