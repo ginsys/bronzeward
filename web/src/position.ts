@@ -98,6 +98,9 @@ const MARKER = /^(?:---|\.\.\.)(?:[ \t]|\r?$)/;
 // Blanks up to a line break, read at `lastIndex` only (sticky). `[^\S\n]` is every character that `trim()` removes
 // except the line break, so a tag followed by those and a line break ends its line.
 const BLANKS_TO_EOL = /[^\S\n]*\n/y;
+// The same for an anchored value (`anchoredContinues`), whose blanks are the ones `blank` tests: a space, a tab and a
+// carriage return, the YAML blanks, and not what `trim()` removes.
+const ANCHORED_BLANKS_TO_EOL = /[ \t\r]*\n/y;
 // go-yaml (the server's parser) breaks a line at a line feed, a carriage return alone, and U+0085,
 // U+2028 and U+2029, in comments and in every kind of scalar; a CRLF is one break. Each of these is
 // read as a line feed here, so no later step has to know them. A replacement has the length of what
@@ -681,11 +684,15 @@ const ANCHORED_PARENT = /^(?: *(?:- +)?(?:"[^"\n]*"|'[^'\n]*'|[^ \t"'#:\-?[\]{},
 // document names nothing (ginsys/bronzeward#699, section 3). A line that holds no key is measured against the
 // indentation of the tag's line, as before.
 function anchoredContinues(masked: string, tag: number, end: number, inFlow: boolean, cuts: ReadonlySet<number>): boolean {
-  const start = masked.lastIndexOf("\n", tag) + 1;
-  const parent = masked.slice(start, tag);
+  // The line start and the text before the tag are read in block context only, the one place that uses them: in flow
+  // context they would cost the length of the line for every tag on it.
+  const start = inFlow ? 0 : masked.lastIndexOf("\n", tag) + 1;
+  const parent = inFlow ? "" : masked.slice(start, tag);
   if (!inFlow && !ANCHORED_PARENT.test(parent)) return true;
-  const eol = masked.indexOf("\n", end);
-  if (eol === -1 || !blank(masked.slice(end, eol))) return false;
+  // The line ends after the tag when only blanks and a line break follow, read at `end` and no further.
+  ANCHORED_BLANKS_TO_EOL.lastIndex = end;
+  if (!ANCHORED_BLANKS_TO_EOL.test(masked)) return false;
+  const eol = ANCHORED_BLANKS_TO_EOL.lastIndex - 1;
   const next = nextLine(masked, eol + 1, cuts, blank);
   if (next === undefined || MARKER.test(next)) return false;
   const t = trimBlanks(next);
