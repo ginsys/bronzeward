@@ -2,11 +2,12 @@ import { createElement as h, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { components } from "./api/v1";
-import { Claim, claimSpec, discardOn, EXPIRY_TICK, expiry, newest, offers, readReview, reviewed, Shown, watchesExpiry, watchExpiry } from "./claim.tsx";
+import { Claim, ClaimView, claimSpec, discardOn, EXPIRY_TICK, expiry, newest, offers, readReview, rereadOnce, rereads, reviewed, Shown, shownVerbs, watchesExpiry, watchExpiry } from "./claim.tsx";
 import { WritesProvider } from "./forms.tsx";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import { ShellContext } from "./shell.tsx";
-import { Writes } from "./write.ts";
+import { Client } from "./request.ts";
+import { type Outcome, Write, Writes } from "./write.ts";
 
 type Ingestion = components["schemas"]["IngestionBody"];
 
@@ -162,6 +163,65 @@ describe("an idle paused page and a late review read (Copilot threads on web/src
     await readReview(async (path, l) => { seen.path = path; seen.live = l; return undefined; }, "ing_6fdq2la", live);
     expect(seen.path).toBe("/ingestions/ing_6fdq2la/review");
     expect(seen.live).toBe(live);
+  });
+});
+
+describe("the outcome of a sent action stays after its verb leaves the offered list (advisory and Copilot findings on web/src/claim.tsx)", () => {
+  const done = (data: unknown): Outcome => ({ kind: "done", status: 200, data, replayed: false });
+  const refused = (status: number): Outcome => ({ kind: "refused", status, problem: null, replayed: false });
+  const sent = (verb: Parameters<typeof claimSpec>[1], outcome?: Outcome) => {
+    const w = new Write(claimSpec("ing_6fdq2la", verb));
+    if (outcome !== undefined) w.outcome = outcome;
+    return w;
+  };
+  const view = (verb: Parameters<typeof claimSpec>[1], offered: boolean, w: Write | undefined) => page(h(ClaimView, { verb, offered, w, send: () => {} }));
+
+  test("Abandon: no verb is left, the section stays, and the confirmation stays", () => {
+    expect(offers(ing({ state: "abandoned" }), NOW).verbs).toEqual([]);
+    expect(shownVerbs([], ["abandon"])).toEqual(["abandon"]);
+    const html = view("abandon", false, sent("abandon", done({ operation: "op_zcfw5mcm" })));
+    expect(html).toContain("The import was abandoned. Its staged input is discarded.");
+    expect(html).not.toContain("Abandon import");
+  });
+  test("Continue: the verb set changes, and the confirmation stays beside the verbs still offered", () => {
+    expect(offers(ing({ state: "resumed" }), NOW).verbs).toEqual(["abandon"]);
+    expect(shownVerbs(["abandon"], ["continue"])).toEqual(["continue", "abandon"]);
+    expect(shownVerbs(["continue", "abandon"], [])).toEqual(["continue", "abandon"]);
+    expect(shownVerbs(["takeover", "abandon"], ["takeover", "abandon"])).toEqual(["takeover", "abandon"]);
+    const html = view("continue", false, sent("continue", done({ operation: "op_zcfw5mcm" })));
+    expect(html).toContain("The import continues in operation");
+    expect(html).not.toContain("Continue import");
+    // While the verb is offered, its button shows with the line.
+    expect(view("continue", true, sent("continue", done({ operation: "op_zcfw5mcm" })))).toContain("Continue import");
+  });
+  test("a running action stays too: the line says it is saving until the answer", () => {
+    expect(view("abandon", false, sent("abandon"))).toContain("Saving");
+  });
+  test("Continue refused with 409: the ingestion is read again once, and the write is never sent again", async () => {
+    expect(rereads(done({}))).toBe(true);
+    expect(rereads(refused(409))).toBe(true);
+    for (const o of [refused(412), refused(422), refused(500), { kind: "not-done", why: "x", problem: null }, { kind: "unknown", why: "x", problem: null }, undefined] as (Outcome | undefined)[]) expect(rereads(o)).toBe(false);
+    const posts: string[] = [];
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(url).replace("/api/v1", "");
+      if (path === "/recovery") return new Response(JSON.stringify({ mode: "normal" }), { status: 200, headers: { "Content-Type": "application/json", "Bronzeward-Epoch": "e1" } });
+      posts.push(`${init?.method ?? "GET"} ${path}`);
+      return new Response(JSON.stringify({ type: "urn:bronzeward:problem:conflict", title: "conflict", status: 409 }), { status: 409, headers: { "Content-Type": "application/problem+json", "Bronzeward-Epoch": "e1" } });
+    });
+    const writes = new Writes(() => "https://idp.invalid SYNTH-sub-1", async () => {});
+    writes.client = new Client({ token: () => "SYNTH-token", fetch: fetchMock as unknown as typeof fetch });
+    const w = sent("continue");
+    await writes.submit(w);
+    expect(w.outcome).toMatchObject({ kind: "refused", status: 409 });
+    const again = vi.fn();
+    let last = rereadOnce(w, undefined, again);
+    last = rereadOnce(w, last, again);
+    expect(again).toHaveBeenCalledTimes(1);
+    expect(posts).toEqual(["POST /ingestions/ing_6fdq2la/continuations"]);
+    // A later write that ends the same way is read for as well.
+    const next = sent("continue", refused(409));
+    expect(rereadOnce(next, last, again)).toBe(next);
+    expect(again).toHaveBeenCalledTimes(2);
   });
 });
 
