@@ -1126,6 +1126,9 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: numb
   let j = 0;
   let hold = st.stack.length > 0 ? st.stack[st.stack.length - 1]! : -1;
   let lastPlain = false;
+  // The first index from which no `>` follows in this line. A verbatim tag that finds none leaves it,
+  // so the next one does not read the rest of the line again (ginsys/bronzeward#744).
+  let noGtFrom = Infinity;
   // In block context a line starts a new node. In flow context a key that closed at the end of the
   // previous line (`? "k"`) still takes a `:` that starts this one.
   if (st.flow === 0) {
@@ -1236,7 +1239,9 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: numb
         // (yaml_parser_scan_anchor, scannerc.go line 1912; is_alpha, yamlprivateh.go line 48,
         // go.yaml.in/yaml/v3 v3.0.5). So `*k:"x` ends the alias at the colon.
         let e = j + 1;
-        if (c === "!" && next === "<" && line.indexOf(">", j) >= 0) e = line.indexOf(">", j) + 1;
+        const gt = c === "!" && next === "<" && j < noGtFrom ? line.indexOf(">", j) : -1;
+        if (c === "!" && next === "<" && gt < 0) noGtFrom = Math.min(noGtFrom, j);
+        if (gt >= 0) e = gt + 1;
         else if (c === "!") while (e < line.length && !isWs(line[e])) e++;
         else while (e < line.length && /[0-9A-Za-z_-]/.test(line[e]!)) e++;
         // A tag is resolved as go-yaml does: through the handles its document declares. One it cannot
