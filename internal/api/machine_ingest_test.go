@@ -210,6 +210,40 @@ func TestMachineIngestion(t *testing.T) {
 	}
 }
 
+// ginsys/bronzeward#708: a Talos v1.14 node serves document kinds that the machinery of v1.13
+// does not register, and that server answered such a node with talos-access-unavailable, cause
+// machine-config. The stand-in serves a configuration with two of those kinds beside the v1alpha1
+// document; the ingestion reads it through nodeRead and ingest.FromTalos like any other and
+// succeeds, and the import base keeps both kinds with the schema secret replaced by a reference.
+func TestMachineIngestionV114Documents(t *testing.T) {
+	me := newMachineEnv(t)
+	me.node.SetMachineConfig(t, []byte(standInConfig+
+		"---\napiVersion: v1alpha1\nkind: KubeNodeConfig\nlabels:\n  node.example.test/pool: workers\n"+
+		"---\napiVersion: v1alpha1\nkind: UnattendedInstallConfig\ninstaller: {}\nprovisioning:\n  diskSelector:\n    match: disk.dev_path == \"/dev/vda\"\n  wipe: false\n"))
+	op, j := me.run(t, me.machine, options{})
+	if r := readOp(t, me.db, op); r.state != "succeeded" {
+		t.Fatalf("operation %+v, error %v", r, r.error)
+	}
+	if evs := events(t, me.db, op); !slices.Equal(eventTypes(evs), []string{"started", "talos-access", "succeeded"}) {
+		t.Fatalf("events %v", evs)
+	}
+	var doc string
+	if err := me.db.QueryRow(`SELECT document FROM import_base_revision WHERE machine = $1`, me.machine).Scan(&doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"kind: KubeNodeConfig", "kind: UnattendedInstallConfig"} {
+		if !strings.Contains(doc, kind) {
+			t.Errorf("the import base lacks %q: %q", kind, doc)
+		}
+	}
+	if strings.Contains(doc, runToken) || !strings.Contains(doc, "!bwref") {
+		t.Fatalf("import base document %q", doc)
+	}
+	if st, _, _ := claimRow(t, me.db, j.claim.ID); st != "released" {
+		t.Fatalf("claim %s", st)
+	}
+}
+
 // §3.3 controls: a machine recorded by Talos node ID whose node has no SystemInformation
 // resource is accepted, and a machine recorded by SMBIOS UUID whose node reports a matching UUID
 // and cluster ID but another node ID is accepted (the node ID is not its key).
