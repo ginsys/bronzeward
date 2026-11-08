@@ -60,7 +60,14 @@ func (c *stand) discover(t *testing.T) (Result, error) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
-	return Discover(ctx, c.p.Talosconfig(c.a.Endpoint, "", ""), c.a.Endpoint)
+	res, err := Discover(ctx, c.p.Talosconfig(c.a.Endpoint, "", ""), c.a.Endpoint)
+	// A read that has lost its own deadline waits for the caller's, and the reads after it then run on
+	// a context that has ended. The result can look right, so the test asks whether the caller's context
+	// is still alive.
+	if ctx.Err() != nil {
+		t.Errorf("the caller's context ended (%v) before discovery returned: a read has no deadline of its own", ctx.Err())
+	}
+	return res, err
 }
 
 func TestDiscoverTwoMembers(t *testing.T) {
