@@ -467,6 +467,19 @@ func TestMachineShowRefusesAMixedSnapshot(t *testing.T) {
 			t.Errorf("rc %d, out %q, err %q; want a refusal that shows no table", rc, out.String(), errb.String())
 		}
 	})
+	t.Run("the epoch moves with an observation page and the refresh moves it back", func(t *testing.T) {
+		// The observations answer epoch 2 and the refresh of GET /server answers epoch 1 again: the
+		// epoch of the last answer equals the first, and only the count of moves tells (§8.5, §8.6 item 3).
+		setServerFacts(t, 3, map[string]string{"/api/v1/machines/mch_a/observations": "ep_BWSYNTH-2"})
+		recoveryRefreshEpoch = "ep_BWSYNTH-1"
+		recoveryServer(t, answers, "")
+		var out, errb bytes.Buffer
+		rc := run([]string{"machine", "show", "mch_a"}, &out, &errb)
+		if rc == 0 || out.Len() != 0 || !strings.Contains(errb.String(), "the epoch moved and came back to 'ep_BWSYNTH-1'") ||
+			!strings.Contains(errb.String(), "Read it again with: machine show 'mch_a'") {
+			t.Errorf("rc %d, out %q, err %q; want a refusal that shows no table", rc, out.String(), errb.String())
+		}
+	})
 	t.Run("the epoch holds", func(t *testing.T) {
 		recoveryServer(t, answers, "")
 		var out, errb bytes.Buffer
@@ -507,6 +520,19 @@ func TestStatusRefusesAStaleSnapshot(t *testing.T) {
 				var out, errb bytes.Buffer
 				rc := run(form, &out, &errb)
 				if rc == 0 || out.Len() != 0 || !strings.Contains(errb.String(), "the epoch changed from 'ep_BWSYNTH-1' to 'ep_BWSYNTH-2'") ||
+					!strings.Contains(errb.String(), "Read it again with: status") {
+					t.Errorf("rc %d, out %q, err %q; want a refusal that shows no snapshot", rc, out.String(), errb.String())
+				}
+			})
+			t.Run(strings.Join(form, " ")+" "+moves+" moves and the refresh moves it back", func(t *testing.T) {
+				// A later read answers epoch 2 and the refresh of GET /server answers epoch 1 again: the
+				// epoch of the last answer equals the first, and only the count of moves tells (§8.5, §8.6 item 3).
+				setServerFacts(t, 3, map[string]string{moves: "ep_BWSYNTH-2"})
+				recoveryRefreshEpoch = "ep_BWSYNTH-1"
+				recoveryServer(t, answers, "")
+				var out, errb bytes.Buffer
+				rc := run(form, &out, &errb)
+				if rc == 0 || out.Len() != 0 || !strings.Contains(errb.String(), "the epoch moved and came back to 'ep_BWSYNTH-1'") ||
 					!strings.Contains(errb.String(), "Read it again with: status") {
 					t.Errorf("rc %d, out %q, err %q; want a refusal that shows no snapshot", rc, out.String(), errb.String())
 				}
