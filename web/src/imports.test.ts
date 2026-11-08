@@ -372,6 +372,30 @@ describe("what ends the watch of an import's operation (§11.3, the CLI's follow
   });
 });
 
+describe("an abandoned claim is followed to its operation's terminal event (Copilot review of 919d185f on web/src/imports.tsx:168)", () => {
+  const at = Date.parse("2026-11-01T07:01:00Z");
+  test("the old pause settles nothing for an abandoned claim, and the terminal failure ends the watch", async () => {
+    // The expiry made the ingestion read abandoned before the sweep failed the operation; the restarted
+    // watch replays the old pause first.
+    const replayed = onEvent(startRun(1), "paused", { generation: 1 });
+    expect(replayed.settled).toBe("paused");
+    expect(stopsWatch(replayed.settled, { b: ing({ state: "abandoned" }), at }, at)).toBe(false);
+    expect(stopsWatch("resume-failed", { b: ing({ state: "abandoned" }), at }, at)).toBe(false);
+    // The failure event is the watch's end: the page says the ingestion was abandoned, not that it is paused.
+    const failed = op({ state: "failed", error: { type: "urn:bronzeward:problem:ingestion-abandoned", title: "ingestion abandoned", status: 409, instance: "req_1" } });
+    const out = text(await ended(reading({ kind: "transport" }).client, ing({ state: "abandoned" }), failed, replayed.settled ?? "", at, "e1"));
+    expect(out).toContain("The ingestion was abandoned, so nothing of it reached the draft.");
+    expect(out).not.toContain("Paused for review");
+  });
+  test("every other state keeps the generation rule: a pause or resume-failed of the run ends the watch", () => {
+    for (const state of ["paused", "held", "resumed"]) {
+      expect(stopsWatch("paused", { b: ing({ state }), at }, at)).toBe(true);
+      expect(stopsWatch("resume-failed", { b: ing({ state }), at }, at)).toBe(true);
+    }
+    expect(stopsWatch(undefined, { b: ing({ state: "paused" }), at }, at)).toBe(false);
+  });
+});
+
 describe("the progress watch follows the claim generation (Codex and Copilot threads on web/src/imports.tsx:205)", () => {
   test("the same operation at a new claim generation restarts the watch, and the new run's pause ends it", () => {
     const client = new Client();

@@ -133,7 +133,7 @@ export function IngestionItem({ id }: { id: string }) {
             <dt>Expires</dt><dd>{when(b.expiresAt)}</dd>
           </dl>
           <Status testid="allowed">{allowed(b, now)}</Status>
-          <Claim b={b} again={again} now={now} />
+          <Claim key={b.id} b={b} again={again} now={now} />
           <Progress b={b} again={again} />
         </>
       )}
@@ -157,9 +157,11 @@ export function onEvent(s: RunState, type: string, data: unknown): RunState {
 }
 // The watch ends on a settled run, or on a read of the ingestion made once the lease it showed had
 // passed LEASE_MARGIN ago that still shows the claim lapsed (§11.3, PROT-06): a read made earlier
-// can predate a renewal, so an event before the refresh settles nothing.
+// can predate a renewal, so an event before the refresh settles nothing. An abandoned claim has no run
+// left to settle: the expiry can read abandoned before the sweep fails the operation, and the restarted
+// watch replays the old pause, so it ends at the operation's terminal event only.
 export const stopsWatch = (settled: RunState["settled"], read: { b: Ingestion; at: number }, now: number) =>
-  settled !== undefined || (read.at > Date.parse(read.b.leaseUntil) + LEASE_MARGIN && lapsed(read.b, now));
+  read.b.state !== "abandoned" && (settled !== undefined || (read.at > Date.parse(read.b.leaseUntil) + LEASE_MARGIN && lapsed(read.b, now)));
 
 // What the watch of an import's operation depends on. A continuation or takeover advances the claim
 // generation and keeps the operation id, so the generation is part of the key: the watch restarts at it.

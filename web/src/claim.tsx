@@ -2,14 +2,14 @@
 // §11.3 and §11.4): the review fetched on demand and held in this page's memory only, and Continue,
 // Take over and Abandon as writes on the ingestion. The marks are the next change's.
 
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import type { components } from "./api/v1";
 import { NO_ASSIST } from "./drafts.tsx";
 import { useSend, useWrites, Result } from "./forms.tsx";
 import { type Load, short, useReads, useSettled } from "./list.tsx";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
-import type { WriteSpec } from "./write.ts";
+import type { Outcome, Write, WriteSpec } from "./write.ts";
 
 type Ingestion = components["schemas"]["IngestionBody"];
 type Verb = "continue" | "takeover" | "abandon";
@@ -39,20 +39,47 @@ const WHAT: Record<Verb, (d: { operation?: string }) => ReactNode> = {
   abandon: () => "The import was abandoned. Its staged input is discarded.",
 };
 
-// One action: a second click while it runs, or while its outcome is unknown, sends nothing new (B10).
-// Once it is done the ingestion is read again, and the progress watch follows the new claim generation.
-function ClaimAction({ id, verb, again }: { id: string; verb: Verb; again: () => void }) {
-  const [w, send] = useSend();
-  const done = w?.outcome?.kind === "done";
-  useEffect(() => {
-    if (done) again();
-  }, [done, again]);
+const ORDER: Verb[] = ["continue", "takeover", "abandon"];
+
+// The verbs the section shows: those offered now, and those this page sent. The read that follows an
+// action moves the claim on and drops its verb from the offered ones, and the outcome of what was sent
+// must stay on the page after that, also when no verb is left (Abandon).
+export const shownVerbs = (offered: Verb[], sent: Verb[]): Verb[] => ORDER.filter((v) => offered.includes(v) || sent.includes(v));
+
+// When an action's answer sends the page to read the ingestion again: its success, and a 409, which
+// says the claim moved on under another operator (Continue after another Continue or an Abandon). A
+// 409 is read for and never sent again.
+export const rereads = (o: Outcome | undefined): boolean => o?.kind === "done" || (o?.kind === "refused" && o.status === 409);
+
+// One read per write that ended so. `last` is the write already read for; the write to read for next
+// is returned. This sends nothing.
+export function rereadOnce(w: Write | undefined, last: Write | undefined, again: () => void): Write | undefined {
+  if (w === undefined || w === last || !rereads(w.outcome)) return last;
+  again();
+  return w;
+}
+
+// An action's button, when its verb is offered, and its outcome line, as long as the page shows it.
+export function ClaimView({ verb, offered, w, send }: { verb: Verb; offered: boolean; w: Write | undefined; send: () => void }) {
   return (
     <>
-      <Action label={LABEL[verb]} needs={["author"]} onClick={() => send(claimSpec(id, verb))} busy={w !== undefined && w.outcome === undefined} />
+      {offered && <Action label={LABEL[verb]} needs={["author"]} onClick={send} busy={w !== undefined && w.outcome === undefined} />}
       <Result w={w} done={(d) => WHAT[verb](d as { operation?: string })} />
     </>
   );
+}
+
+// One action: a second click while it runs, or while its outcome is unknown, sends nothing new (B10).
+// Once it is done, or refused with a 409, the ingestion is read again, and the progress watch follows
+// the new claim generation. `sent` tells the section this verb was sent, so that its outcome stays.
+function ClaimAction({ id, verb, offered, again, sent }: { id: string; verb: Verb; offered: boolean; again: () => void; sent: (v: Verb) => void }) {
+  const [w, send] = useSend();
+  const read = useRef<Write>(undefined);
+  const settled = rereads(w?.outcome);
+  useEffect(() => {
+    read.current = rereadOnce(w, read.current, again);
+  }, [w, settled, again]);
+  return <ClaimView verb={verb} offered={offered} w={w} send={() => { sent(verb); send(claimSpec(id, verb)); }} />;
 }
 
 // The page reads a paused ingestion again once its review time has ended. The progress watch stops at
@@ -166,12 +193,17 @@ export function Claim({ b, again, now }: { b: Ingestion; again: () => void; now:
   const watching = watchesExpiry(b, now);
   const { expiresAt } = b;
   useEffect(() => (watching ? watchExpiry(expiresAt, again) : undefined), [watching, expiresAt, again]);
-  if (writes === undefined || (!o.review && o.verbs.length === 0)) return null;
+  // The verbs this page sent stay shown with their outcome, also once the read that follows has moved
+  // the claim on and no verb is offered.
+  const [sent, setSent] = useState<Verb[]>([]);
+  const sentVerb = useCallback((v: Verb) => setSent((s) => (s.includes(v) ? s : [...s, v])), []);
+  const shown = shownVerbs(o.verbs, sent);
+  if (writes === undefined || (!o.review && shown.length === 0)) return null;
   return (
     <section aria-label="Claim">
       <p>{b.state === "paused" ? expiry(b.expiresAt, now) : null}</p>
       {o.review && <Review b={b} />}
-      {o.verbs.map((v) => <ClaimAction key={v} id={b.id} verb={v} again={again} />)}
+      {shown.map((v) => <ClaimAction key={v} id={b.id} verb={v} offered={o.verbs.includes(v)} again={again} sent={sentVerb} />)}
     </section>
   );
 }
