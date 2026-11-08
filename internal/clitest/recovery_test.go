@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -151,8 +152,9 @@ func TestRecovery(t *testing.T) {
 	// A token without recovery-admin: the three commands that send a recovery write show the 403
 	// and the role they need (client-contracts.md §9.6). Typed confirmations are given, so the
 	// refusal is the server's. The accountings read observations first; a seeded machine has none,
-	// so they stop at the client and their 403 is not run here.
-	f.store(f.humanFile(), f.mint("h-viewer", ""), "")
+	// so they stop at the client and their 403 is not run here. h-viewer is revoked above, and a
+	// revoked subject answers 403 identity-revoked (§9.6), so another viewer signs in.
+	f.store(f.humanFile(), f.viewerToken("h-viewer-2", 0, 5*time.Minute), "")
 	in.set(nil, nil)
 	for _, c := range []struct {
 		typed string
