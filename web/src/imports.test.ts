@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { components } from "./api/v1";
 import { forgetETag, keepETag, keptETag } from "./drafts.tsx";
 import { WritesProvider } from "./forms.tsx";
-import { ABANDONED_SETTLE, abandonedSince, againPath, allowed, caughtUp, documentRefusal, ended, fileReader, followRun, forgetRefused, type Ingestion, keepTyped, MAX_DOCUMENT, onEvent, REFRESH_FAILED, type ReadStamp, refreshDelay, refreshRetry, reviewFirst, sendStart, StartImport, type StartInput, startBody, startETag, startParams, settledReads, stampRead, startRun, started, stopsWatch, typedDocument, unsent, watchDeps, watchView } from "./imports.tsx";
+import { ABANDONED_SETTLE, abandonedSince, againPath, allowed, caughtUp, documentRefusal, ended, fileReader, followRun, forgetRefused, type Ingestion, keepTyped, lapsedRead, MAX_DOCUMENT, onEvent, REFRESH_FAILED, type ReadStamp, refreshDelay, refreshRetry, reviewFirst, sendStart, StartImport, type StartInput, startBody, startETag, startParams, settledReads, stampRead, startRun, started, stopsWatch, typedDocument, unsent, watchDeps, watchView } from "./imports.tsx";
 import { type Load, type Reads, ReadsProvider, short } from "./list.tsx";
 import { eventLine, watch } from "./progress.ts";
 import { Client, type ReadResult } from "./request.ts";
@@ -602,6 +602,22 @@ describe("the reads of the watch and of its end go through the page's settle (gi
     expect(text(await ended(client, b, done, "", NOW, "e1"))).toContain("could not be read again");
     expect(settled.map((s) => s.kind)).toEqual(["unauthenticated"]);
   });
+  test("an answer the shell invalidated, or one that came after the watch left, is discarded and never reaches the watch", async () => {
+    let held = true;
+    let live = true;
+    const reads = { settle: ((_r: unknown, _s: unknown, l: () => boolean) => l()) as Reads["settle"], undropped: () => () => held };
+    const wrapped = settledReads(scripted(() => ({ kind: "ok", data: { lastEvent: 1 } })), reads, () => live);
+    expect((await wrapped.read("/x")).kind).toBe("ok");
+    expect((await wrapped.readWithEpoch("/x")).result.kind).toBe("ok");
+    held = false;
+    expect((await wrapped.read("/x")).kind).toBe("discarded");
+    const got = await wrapped.readWithEpoch("/x");
+    expect(got.result.kind).toBe("discarded");
+    expect(got.epoch).toBe("e1");
+    held = true;
+    live = false;
+    expect((await wrapped.read("/x")).kind).toBe("discarded");
+  });
   test("a read made after the watch left is not rendered, and open and writesEnded pass through", async () => {
     const { reads } = settling();
     let live = true;
@@ -622,13 +638,13 @@ describe("a lapsed lease decides only after the operation's newest event was sho
   const OPID = "op_zcfw5mcm";
   const backlog: [string, unknown][] = [["started", {}], ["paused", { generation: 1 }], ["continued", { generation: 2 }], ["resume-failed", { code: "decrypt-failed" }]];
   // A client over a server whose events come as JSON pages and whose operation still runs.
-  const serving = (lastEvent: number) => {
+  const serving = (lastEvent: number, claim: Ingestion = ing({ ownerGeneration: 2 })) => {
     const answer = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json", "Bronzeward-Epoch": "e1" } });
     const fetch = async (url: RequestInfo | URL): Promise<Response> => {
       const u = String(url);
       if (u.includes(`/operations/${OPID}/events`)) return answer({ items: backlog.map(([type, data], i) => ({ id: `e1:${i + 1}`, type, data, at: "2026-11-01T06:56:00Z" })) });
       if (u.endsWith(`/operations/${OPID}`)) return answer(op({ lastEvent }));
-      if (u.endsWith("/ingestions/ing_6fdq2la")) return answer(ing({ ownerGeneration: 2 }));
+      if (u.endsWith("/ingestions/ing_6fdq2la")) return answer(claim);
       throw new Error(`unexpected ${u}`);
     };
     return new Client({ fetch: fetch as typeof globalThis.fetch, token: () => "SYNTH-token", sleep: async () => {} });
@@ -647,6 +663,24 @@ describe("a lapsed lease decides only after the operation's newest event was sho
     expect(f.settled()).toBe("resume-failed");
     if (r.kind !== "ended") throw new Error(`the watch did not end: ${r.kind}`);
     expect(text(await ended(client, b, r.operation, f.settled() ?? "", at("07:05:20"), r.epoch))).toContain("could not be decrypted (resume-failed)");
+  });
+  test("the check reads the claim again: a lease renewed since the page's read keeps the watch, and a claim still lapsed stops it", async () => {
+    const b = ing({ ownerGeneration: 2 });
+    const settleTick = () => new Promise<void>((r) => setTimeout(r, 0));
+    const follow = async (claim: Ingestion) => {
+      const f = followRun({
+        client: serving(1, claim), ingestion: b.id, op: OPID, generation: 2, signal: new AbortController().signal,
+        latest: () => ({ b, at: at("07:05:15") }), abandonedAt: () => undefined, now: () => at("07:05:20"), view: () => {},
+      });
+      f.w.show({ id: "e1:1", type: "started", data: {}, at: "2026-11-01T06:56:00Z" } as never);
+      expect(f.w.until!()).toBe(false);
+      await settleTick();
+      return f.w.until!();
+    };
+    // The same lease, read again: nothing renewed it, and the newest event was shown.
+    expect(await follow(ing({ ownerGeneration: 2 }))).toBe(true);
+    // Renewed until 07:10:00 after the page's read: the watch goes on.
+    expect(await follow(ing({ ownerGeneration: 2, leaseUntil: "2026-11-01T07:10:00Z" }))).toBe(false);
   });
   test("caughtUp: the last shown event number must reach the operation's lastEvent, and an epoch that differs decides nothing", () => {
     const shown = (n: number) => ({ epoch: "e1", n });
@@ -690,10 +724,10 @@ describe("the start while its draft's ETag is read (ginsys/bronzeward#644 item G
 
 describe("a 412 on the start leads to the draft, and the same ETag is not sent again (ginsys/bronzeward#644 item H)", () => {
   const input: StartInput = { kind: "import", machine: "mch_b3caa2q", draft: "drf_2rmp457a", source: "machine", staging: "encrypted", review: true, doc: "", marks: "" };
-  const refusedOn = (etag: string) => {
+  const refusedOn = (etag: string, epoch = "e1") => {
     let spec: WriteSpec | undefined;
     sendStart((s) => { spec = s; }, () => {}, input, etag);
-    spec!.settled!({ kind: "refused", status: 412, problem: null, replayed: false }, { epoch: "e1" } as unknown as Write);
+    spec!.settled!({ kind: "refused", status: 412, problem: null, replayed: false }, { epoch } as unknown as Write);
   };
   const attempt = async () => {
     const sent: string[] = [];
@@ -723,6 +757,15 @@ describe("a 412 on the start leads to the draft, and the same ETag is not sent a
     expect(open.why).toBeUndefined();
     expect(open.sent).toEqual(['"new"']);
   });
+  test("a refusal under one epoch stops nothing under another: the draft restored at the same ETag text starts", async () => {
+    keepETag(input.draft, '"old"', "e1");
+    refusedOn('"old"', "e1");
+    // A restore: the epoch is e2, and the draft's page kept the same ETag text under it after the operator reviewed it.
+    keepETag(input.draft, '"old"', "e2");
+    const sent: string[] = [];
+    expect(await startETag(async () => undefined, () => "e2", input.draft, (m) => void sent.push(m))).toBeUndefined();
+    expect(sent).toEqual(['"old"']);
+  });
   test("a 412 on one draft does not stop the start of another that holds the same ETag text", async () => {
     refusedOn('"old"');
     keepETag("drf_other", '"old"', "e1");
@@ -744,6 +787,11 @@ describe("the lease stop compares the time a read began, not the time it was del
     expect(s.read).toEqual({ b, at: at("07:04:59") });
     // The renewal came after the snapshot was taken, so the snapshot still shows the old lease.
     expect(stopsWatch(undefined, s.read!, at("07:05:12"), undefined, true)).toBe(false);
+  });
+  test("a read begun exactly at the lease plus the margin counts as after it, as the refresh timer's own deadline", () => {
+    const b = ing();
+    expect(lapsedRead({ b, at: at("07:05:10") }, at("07:05:12"))).toBe(true);
+    expect(lapsedRead({ b, at: at("07:05:10") - 1 }, at("07:05:12"))).toBe(false);
   });
   test("a read begun after the lease and the margin stops it, and a delivery in the render of a new trigger keeps the older start", () => {
     const b1 = ing();
@@ -782,10 +830,15 @@ describe("the lease refresh is read again after a failure (ginsys/bronzeward#644
     const again = vi.fn();
     const failed = vi.fn();
     const r = refreshRetry(again, failed);
+    let calls = 0;
     for (const wait of [1000, 2000, 4000, 8000]) {
       r.lost(true);
       expect(failed).not.toHaveBeenCalled();
-      vi.advanceTimersByTime(wait);
+      // Nothing is read just before the deadline, and exactly one read is made at it.
+      vi.advanceTimersByTime(wait - 1);
+      expect(again).toHaveBeenCalledTimes(calls);
+      vi.advanceTimersByTime(1);
+      expect(again).toHaveBeenCalledTimes(++calls);
     }
     expect(again).toHaveBeenCalledTimes(4);
     r.lost(true);
