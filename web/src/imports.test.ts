@@ -777,7 +777,7 @@ describe("a renewed lease reaches the page, and a confirmation belongs to the sn
   const lease = (s: string, ownerGeneration = 2) => ing({ ownerGeneration, leaseUntil: `2026-11-01T${s}Z` });
   // A watch of generation 2 over a server that serves the claim `serve` sets, with the page's snapshot `page` sets.
   // A snapshot is read 15 s after its lease and the check runs 5 s later.
-  const rig = (first: Ingestion, served?: () => Promise<Ingestion>) => {
+  const rig = (first: Ingestion, served?: () => Promise<Ingestion>, refusal?: Promise<void>) => {
     let claim = first;
     const paths: string[] = [];
     const acts: string[] = [];
@@ -787,6 +787,11 @@ describe("a renewed lease reaches the page, and a confirmation belongs to the sn
     const client = {
       readWithEpoch: async <T,>(p: string) => {
         paths.push(p);
+        // With a `refusal`, the claim read ends in a refusal for good once the promise is released.
+        if (refusal && p.startsWith("/ingestions/")) {
+          await refusal;
+          return { result: { kind: "refused", status: 403, problem: null } as unknown as ReadResult<T>, epoch: "e1" };
+        }
         const data = p.startsWith("/ingestions/") ? await (served ?? (async () => claim))() : op({ lastEvent: 1 });
         return { result: { kind: "ok", data } as unknown as ReadResult<T>, epoch: "e1" };
       },
@@ -865,12 +870,35 @@ describe("a renewed lease reaches the page, and a confirmation belongs to the sn
     release();
     await tick();
     expect(r.renewed()).toBe(0);
-    expect(r.paths).toHaveLength(2);
+    // The overtaken check read no further than its claim.
+    expect(r.paths).toHaveLength(1);
     // The newer snapshot gets its own check, which decides.
     expect(r.f.w.until!()).toBe(false);
     await tick();
-    expect(r.paths).toHaveLength(4);
+    expect(r.paths).toHaveLength(3);
     expect(r.f.w.until!()).toBe(true);
+  });
+  test("a refusal that reaches a check after a newer snapshot took its place is discarded: it does not stop the watch", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((res) => { release = res; });
+    const r = rig(lease("07:05:00"), undefined, gate);
+    r.f.w.until!();
+    // The page reads the renewal while the check waits for its claim read, which then ends in a refusal.
+    r.page(lease("07:10:00"));
+    release();
+    await tick();
+    expect(r.f.failure()).toBeUndefined();
+    expect(r.f.w.until!()).toBe(false);
+    expect(r.f.settled()).toBeUndefined();
+  });
+  test("a refusal for the snapshot the page still shows ends the watch", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((res) => { release = res; });
+    const r = rig(lease("07:05:00"), undefined, gate);
+    r.f.w.until!();
+    release();
+    await tick();
+    expect(r.f.failure()).toMatchObject({ kind: "refused", status: 403 });
   });
 });
 

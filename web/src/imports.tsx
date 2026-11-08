@@ -288,8 +288,9 @@ export function followRun(o: FollowOptions): { w: Watch; settled: () => RunState
     busy = true;
     const mine = epoch;
     const began = o.now();
-    // A clear since the check began took back the events it compared with; a watch that left reads no more.
-    const gone = () => o.signal.aborted || mine !== epoch;
+    // A clear since the check began took back the events it compared with; a watch that left reads no more; a page
+    // snapshot newer than the one this check ran for took its place, so nothing of the check is kept, a refusal included.
+    const gone = () => o.signal.aborted || mine !== epoch || o.latest().b !== snap;
     // A read the server refused for good ends the check and the watch, which shows the refusal. A read with
     // no answer stays pending, as the lease refresh's own reads do until they are tried again.
     const lost = (res: ReadResult<unknown>) => { if (!gone() && final(res)) failure = res; };
@@ -301,8 +302,6 @@ export function followRun(o: FollowOptions): { w: Watch; settled: () => RunState
       const last = operation.result.data.lastEvent;
       const v = caughtUp(shown, claim.epoch, operation.epoch, last);
       if (v === "reset") return;
-      // A page snapshot newer than the one this check ran for took its place: nothing of this check is kept.
-      if (o.latest().b !== snap) return;
       behind = last;
       const read = claim.result.data;
       // A strictly later lease under the watch's own generation is a renewal the page does not show yet. Another
