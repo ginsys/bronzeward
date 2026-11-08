@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { components } from "./api/v1";
 import { forgetETag, keepETag, keptETag } from "./drafts.tsx";
 import { WritesProvider } from "./forms.tsx";
-import { ABANDONED_SETTLE, abandonedSince, againPath, allowed, caughtUp, documentRefusal, ended, fileReader, followRun, forgetRefused, type Ingestion, keepTyped, MAX_DOCUMENT, onEvent, reviewFirst, sendStart, StartImport, type StartInput, startBody, startETag, startParams, settledReads, startRun, started, stopsWatch, typedDocument, unsent, watchDeps, watchView } from "./imports.tsx";
+import { ABANDONED_SETTLE, abandonedSince, againPath, allowed, caughtUp, documentRefusal, ended, fileReader, followRun, forgetRefused, type Ingestion, keepTyped, MAX_DOCUMENT, onEvent, REFRESH_FAILED, type ReadStamp, refreshDelay, refreshRetry, reviewFirst, sendStart, StartImport, type StartInput, startBody, startETag, startParams, settledReads, stampRead, startRun, started, stopsWatch, typedDocument, unsent, watchDeps, watchView } from "./imports.tsx";
 import { type Load, type Reads, ReadsProvider, short } from "./list.tsx";
 import { eventLine, watch } from "./progress.ts";
 import { Client, type ReadResult } from "./request.ts";
@@ -730,5 +730,78 @@ describe("a 412 on the start leads to the draft, and the same ETag is not sent a
     expect(await startETag(async () => undefined, () => "e1", "drf_other", (m) => void sent.push(m))).toBeUndefined();
     expect(sent).toEqual(['"old"']);
     forgetETag("drf_other");
+  });
+});
+
+describe("the lease stop compares the time a read began, not the time it was delivered (ginsys/bronzeward#644 item C)", () => {
+  const at = (s: string) => Date.parse(`2026-11-01T${s}Z`);
+  const keys = (n: number) => [n, 0, "v"];
+  test("a read begun at 07:04:59 on a lease ending 07:05:00 and delivered at 07:05:12 does not stop the watch", () => {
+    const b = ing();
+    let s: ReadStamp = { keys: [], began: at("07:04:00"), read: undefined };
+    s = stampRead(s, undefined, keys(1), at("07:04:59"));
+    s = stampRead(s, b, keys(1), at("07:05:12"));
+    expect(s.read).toEqual({ b, at: at("07:04:59") });
+    // The renewal came after the snapshot was taken, so the snapshot still shows the old lease.
+    expect(stopsWatch(undefined, s.read!, at("07:05:12"), undefined, true)).toBe(false);
+  });
+  test("a read begun after the lease and the margin stops it, and a delivery in the render of a new trigger keeps the older start", () => {
+    const b1 = ing();
+    const b2 = ing();
+    let s: ReadStamp = { keys: [], began: at("07:04:00"), read: undefined };
+    s = stampRead(s, undefined, keys(1), at("07:05:11"));
+    s = stampRead(s, b1, keys(1), at("07:05:12"));
+    expect(stopsWatch(undefined, s.read!, at("07:05:12"), undefined, true)).toBe(true);
+    // A new read is triggered in the same render that delivers the answer of the earlier one: the answer is
+    // stamped with the start of the earlier read.
+    s = stampRead(s, b2, keys(2), at("07:06:00"));
+    expect(s.read).toEqual({ b: b2, at: at("07:05:11") });
+    expect(s.began).toBe(at("07:06:00"));
+  });
+});
+
+describe("the lease refresh is read again after a failure (ginsys/bronzeward#644 item J, client contracts §8.2)", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+  test("one failure and then an answer: the read is made again after 1 s, and the count starts over", () => {
+    const again = vi.fn();
+    const failed = vi.fn();
+    const r = refreshRetry(again, failed);
+    r.lost(true);
+    vi.advanceTimersByTime(999);
+    expect(again).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(again).toHaveBeenCalledTimes(1);
+    r.lost(false);
+    expect(failed).toHaveBeenLastCalledWith(false);
+    r.lost(true);
+    vi.advanceTimersByTime(1000);
+    expect(again).toHaveBeenCalledTimes(2);
+  });
+  test("every try failing: 1, 2, 4 and 8 s apart, then an explicit failure and no more reads", () => {
+    const again = vi.fn();
+    const failed = vi.fn();
+    const r = refreshRetry(again, failed);
+    for (const wait of [1000, 2000, 4000, 8000]) {
+      r.lost(true);
+      expect(failed).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(wait);
+    }
+    expect(again).toHaveBeenCalledTimes(4);
+    r.lost(true);
+    expect(failed).toHaveBeenLastCalledWith(true);
+    vi.advanceTimersByTime(120_000);
+    expect(again).toHaveBeenCalledTimes(4);
+    expect(REFRESH_FAILED).toContain("5 tries");
+  });
+  test("stop ends a pending retry, and the delay is capped at 30 s", () => {
+    const again = vi.fn();
+    const r = refreshRetry(again, () => {});
+    r.lost(true);
+    r.stop();
+    vi.advanceTimersByTime(60_000);
+    expect(again).not.toHaveBeenCalled();
+    expect(refreshDelay(5)).toBe(16_000);
+    expect(refreshDelay(7)).toBe(30_000);
   });
 });
