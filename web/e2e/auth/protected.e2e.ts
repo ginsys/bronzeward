@@ -143,6 +143,8 @@ async function typeMarks(paths: string[]) {
     return area.value === text;
   }, paths.join("\n"));
   expect(ok).toBe(true);
+  // The positive control of the later absence checks: while the paths sit in the field, pageShows sees them.
+  for (const p of paths) expect(await pageShows(p)).toBe(true);
 }
 
 // Chooses a value from the review's list, which puts its path in the marks field.
@@ -154,8 +156,13 @@ async function choose(path: string) {
 
 const sendMarks = () => $("section[aria-label=Marks]").$("button=Send marks").click();
 
-// Whether the page shows `text` anywhere, answered in the page so that the text never leaves it.
-const pageShows = (text: string) => browser.execute((t: string) => document.body.innerText.includes(t), text);
+// Whether the page shows `text` anywhere, in its text or in the value of a field, answered in the page so
+// that the text never leaves it. A field's typed value is not part of the body's text.
+const pageShows = (text: string) =>
+  browser.execute(
+    (t: string) => document.body.innerText.includes(t) || [...document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("textarea, input")].some((f) => f.value.includes(t)),
+    text,
+  );
 
 // The read of the import after the serving process was killed and started again: the watch ends once
 // the lease passed, with the outcome unknown and never as not applied (PROT-06).
@@ -283,7 +290,9 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     await sendMarks();
     await expect(claim()).toHaveText(holds("The marks were accepted in operation"), { wait: 30_000 });
     await expect(events()).toHaveText(holds("resume-failed: dependency-unavailable"), { wait: 60_000 });
-    await expect(ended()).toHaveText(holds("its staged input could not be decrypted (resume-failed)"), { wait: 20_000 });
+    // The mark is reported as not applied and the claim stays held (client contracts, row PROT-05).
+    await expect(ended()).toHaveText(holds("was not applied: its staged input could not be decrypted (resume-failed)"), { wait: 20_000 });
+    await expect(ended()).toHaveText(holds("The claim stays held until its lease lapses at"));
     expect(await $("button=Abandon import").isExisting()).toBe(true);
     await post("/bao/fault?mode=none");
     // After the lease lapsed a reload offers the takeover; there is no wait without an end.
