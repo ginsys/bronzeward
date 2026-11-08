@@ -64,7 +64,7 @@ func TestObservationsRead(t *testing.T) {
 	}
 	is := func(p *string, v string) bool { return p != nil && *p == v }
 	if !is(r.SMBIOSUUID, uuidA) || !is(r.TalosNodeID, nodeA) || !is(r.TalosClusterID, oe.clusterID) ||
-		!is(r.AssignmentEvidence, oe.head) || !is(r.RunningVersion, "v1.13.6") || r.ResourceVersion == nil || *r.ResourceVersion == "" ||
+		!is(r.AssignmentEvidence, oe.head) || !is(r.RunningVersion, "v1.14.5") || r.ResourceVersion == nil || *r.ResourceVersion == "" ||
 		nonNull(r.Health) {
 		t.Fatalf("values %+v", r)
 	}

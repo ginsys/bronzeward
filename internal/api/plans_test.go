@@ -133,8 +133,8 @@ func TestPlanCreation(t *testing.T) {
 	if d := b.Evidence.Diff; d == nil || d.From != p.applied.rel || d.To != p.target.rel || d.Withheld || d.Unified != wantDiff {
 		t.Fatalf("diff %+v", b.Evidence.Diff)
 	}
-	if v := b.Evidence.Validation; v != (planValidation{Result: "passed", At: "publication", Contract: "v1.13",
-		KubernetesVersion: "v1.36.0", MachineryVersion: "v1.13.6", PlatformMode: "container"}) || b.Evidence.Baseline != nil ||
+	if v := b.Evidence.Validation; v != (planValidation{Result: "passed", At: "publication", Contract: "v1.14",
+		KubernetesVersion: "v1.36.0", MachineryVersion: "v1.14.5", PlatformMode: "container"}) || b.Evidence.Baseline != nil ||
 		b.Evidence.DryRun.Available || b.Evidence.DryRun.Reason == "" {
 		t.Fatalf("evidence %+v", b.Evidence)
 	}
