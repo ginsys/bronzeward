@@ -262,6 +262,9 @@ export interface FollowOptions {
   abandonedAt: () => number | undefined;
   now: () => number;
   view: (a: WatchAct) => void;
+  // Called when a check reads the claim with the watch's owner generation and a strictly later lease than the
+  // page's snapshot: the page reads the ingestion again to show it (ginsys/bronzeward#734). The watch goes on.
+  renewed?: () => void;
 }
 // The callbacks of one watch of an import's operation, and the run it settled. A lapsed lease read
 // starts one check: the claim and the operation are read again, and the lease decides only when the
@@ -277,9 +280,11 @@ export const catchUpLoss = (settled: RunState["settled"], r: Watched, failure: R
 export function followRun(o: FollowOptions): { w: Watch; settled: () => RunState["settled"]; state: () => RunState; failure: () => Refused | undefined } {
   let run = startRun(o.generation);
   let shown: Seen | undefined;
-  let caught = false, busy = false, behind: number | undefined, epoch = 0;
+  // `caught` holds for the page snapshot the check ran for (`caughtFor`) and for no other: a newer snapshot
+  // can show a renewed lease, and the events and the claim are read again for the one that lapses next.
+  let caught = false, caughtFor: Ingestion | undefined, renewedFor: Ingestion | undefined, busy = false, behind: number | undefined, epoch = 0;
   let failure: Refused | undefined;
-  const check = async () => {
+  const check = async (snap: Ingestion) => {
     busy = true;
     const mine = epoch;
     const began = o.now();
@@ -296,16 +301,28 @@ export function followRun(o: FollowOptions): { w: Watch; settled: () => RunState
       const last = operation.result.data.lastEvent;
       const v = caughtUp(shown, claim.epoch, operation.epoch, last);
       if (v === "reset") return;
+      // A page snapshot newer than the one this check ran for took its place: nothing of this check is kept.
+      if (o.latest().b !== snap) return;
       behind = last;
+      const read = claim.result.data;
+      // A strictly later lease under the watch's own generation is a renewal the page does not show yet. Another
+      // generation is a takeover, which the watch's restart handles.
+      // The page is asked once per snapshot: the checks that follow, before its new read arrives, do not ask again.
+      if (renewedFor !== snap && read.ownerGeneration === o.generation && Date.parse(read.leaseUntil) > Date.parse(snap.leaseUntil)) {
+        renewedFor = snap;
+        o.renewed?.();
+      }
       // The claim read now decides, as in the CLI: a lease renewed since the page's read keeps the watch.
-      caught = v && lapsedRead({ b: claim.result.data, at: began }, o.now());
+      caught = v && lapsedRead({ b: read, at: began }, o.now());
+      caughtFor = snap;
     } finally {
       busy = false;
     }
   };
-  const ask = () => {
-    if (!caught && !busy && (behind === undefined || (shown?.n ?? 0) >= behind)) void check();
-    return caught;
+  const ask = (snap: Ingestion) => {
+    const held = caught && caughtFor === snap;
+    if (!held && !busy && (behind === undefined || (shown?.n ?? 0) >= behind)) void check(snap);
+    return held;
   };
   return {
     settled: () => run.settled,
@@ -313,10 +330,10 @@ export function followRun(o: FollowOptions): { w: Watch; settled: () => RunState
     failure: () => failure,
     w: {
       show: (e) => { shown = seenOf(e.id); run = onEvent(run, e.type, e.data); o.view({ type: "show", line: eventLine(e) }); },
-      clear: (why) => { run = startRun(o.generation); shown = undefined; caught = false; behind = undefined; failure = undefined; epoch++; o.view({ type: "clear", why }); },
+      clear: (why) => { run = startRun(o.generation); shown = undefined; caught = false; caughtFor = undefined; renewedFor = undefined; behind = undefined; failure = undefined; epoch++; o.view({ type: "clear", why }); },
       until: () => {
         const read = o.latest();
-        return failure !== undefined || stopsWatch(run.settled, read, o.now(), o.abandonedAt(), run.settled === undefined && lapsedRead(read, o.now()) && ask());
+        return failure !== undefined || stopsWatch(run.settled, read, o.now(), o.abandonedAt(), run.settled === undefined && lapsedRead(read, o.now()) && ask(read.b));
       },
       signal: o.signal,
     },
@@ -433,7 +450,7 @@ function Progress({ b, readAt, again }: { b: Ingestion; readAt: number; again: (
     const reading = settledReads(client, { settle, undropped }, () => !abort.signal.aborted);
     const run = followRun({
       client: reading, ingestion: ingestionId, op, generation, signal: abort.signal,
-      latest: () => latest.current, abandonedAt: () => abandonedAt.current, now: () => Date.now(), view: show,
+      latest: () => latest.current, abandonedAt: () => abandonedAt.current, now: () => Date.now(), view: show, renewed: again,
     });
     void watch(reading, op, run.w).then(async (r) => {
       if (r.kind === "stopped" || abort.signal.aborted) return;
