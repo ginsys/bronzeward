@@ -3,8 +3,11 @@ package clitest
 import (
 	"bytes"
 	"database/sql"
+	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -171,5 +174,155 @@ func TestDriftFreeze(t *testing.T) {
 	if n := f.actCount(); n != before+2 {
 		t.Errorf("%d acts recorded by a freeze and an unfreeze, want 2", n-before)
 	}
+	f.scanFiles()
+}
+
+// as is a context named who, signed in as h-who, on the injector's address.
+func (e *planEnv) as(t *testing.T, who string) []string {
+	t.Helper()
+	file := filepath.Join(e.f.home, who+".json")
+	e.f.store(file, e.f.mint("h-"+who, ""), "")
+	e.f.want(e.f.ctl(nil, "", "context", "add", who, "--server", e.in.URL, "--certificate-authority", e.in.ca, "--issuer", e.f.iss.URL,
+		"--client-id", "BWSYNTH-cli", "--audience", "bronzeward", "--oidc-token-file", file), 0)
+	return []string{"--context", who}
+}
+
+// openDrift waits up to a minute for the controller's drift observation to open a record on the
+// machine, and answers the record's number, the revision of its opening entry.
+func (e *planEnv) openDrift(t *testing.T) int64 {
+	t.Helper()
+	var opened int64
+	for deadline := time.Now().Add(time.Minute); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
+		if err := e.f.db.QueryRow(`SELECT opened FROM drift_record WHERE machine = $1 AND closed IS NULL`, e.s.machine).Scan(&opened); err == nil {
+			return opened
+		}
+	}
+	t.Fatalf("no drift record opened on %s within a minute", e.s.machine)
+	return 0
+}
+
+// closedAs waits up to two minutes for the drift record opened at revision to close, and answers how.
+func (e *planEnv) closedAs(t *testing.T, opened int64) string {
+	t.Helper()
+	var resolution string
+	for deadline := time.Now().Add(2 * time.Minute); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
+		if err := e.f.db.QueryRow(`SELECT resolution FROM drift_record WHERE machine = $1 AND opened = $2 AND closed IS NOT NULL`,
+			e.s.machine, opened).Scan(&resolution); err == nil {
+			return resolution
+		}
+	}
+	t.Fatalf("drift record %d of %s did not close within two minutes", opened, e.s.machine)
+	return ""
+}
+
+// driftRecordNumber and driftRevision are the numbers a journey's kept output replaces: they count
+// the machine's timeline, which the controller's drift passes advance at a pace of their own.
+var (
+	driftRecordNumber = regexp.MustCompile(`drift record \d+`)
+	driftRevision     = regexp.MustCompile(`timeline revision \d+`)
+)
+
+// TestDrift runs drift revert and drift adopt (#360) through the CLI against a server with a
+// provider and a Talos stand-in whose drift loop passes every second, and journey task T10
+// (operator-experience.md §13): a machine that is adopted, drifts because its node's
+// configuration is changed by hand, is frozen, and is reverted; then drifts again and is adopted.
+// The output is kept in testdata/journeys/t10.txt.
+func TestDrift(t *testing.T) {
+	e := newPlanEnvExec(t, ", driftInterval: 1s")
+	f, in := e.f, e.in
+	h := []string{"--context", "human"}
+	publisher, approver := e.as(t, "publisher"), e.as(t, "approver")
+	m := e.s.machine
+	in.set(nil, nil)
+	e.st.node.AcceptApply(t)
+
+	// The adoption that gives the machine its Applied release (the T21 adopt plan of TestApprovals).
+	p := planID.FindString(e.ctl(e.create("adopt")...).out)
+	f.want(e.approveTyped("human", p), 0, "Applied becomes "+e.rel+" (adoption) once it does.")
+	e.until(t, "committed", `SELECT state FROM plan_state WHERE plan = $1`, p)
+
+	// With no open drift record there is nothing to revert: nothing is sent, and the refusal names plan create.
+	before := f.actCount()
+	f.want(e.ctl(append(publisher, "drift", "revert", m)...), 2, "machine "+m+" has no open drift record; nothing was sent.",
+		"bronzewardctl plan create --release '"+e.rel+"' --machine '"+m+"' --operation 'apply-config'")
+	if n := f.actCount(); n != before {
+		t.Errorf("%d acts recorded by a refused revert", n-before)
+	}
+
+	var out strings.Builder
+	step := func(stdin string, args ...string) result {
+		r := e.ctlIn(stdin, args...)
+		fmt.Fprintf(&out, "$ bronzewardctl %s\n%s%s[exit %d]\n\n", strings.Join(args, " "), r.err, r.out, r.code)
+		return r
+	}
+	with := func(ctx []string, args ...string) []string { return append(slices.Clone(ctx), args...) }
+
+	// T10, the revert: the node's configuration changes, the drift loop opens a record, the machine
+	// is frozen while the operator decides, the revert plan is made and approved after an approver
+	// lifts the freeze.
+	e.st.drift(t, 1)
+	opened := e.openDrift(t)
+	f.want(step("", with(h, "drift", "show", m)...), 0, "Drift opened by observation", "Choose: freeze while you decide; adopt it into a release; or revert to Desired ("+e.rel+").")
+	f.want(step("", with(publisher, "machine", "freeze", m, "--reason", "BWSYNTH: decide first")...), 0, "Frozen.")
+	f.want(step("", with(h, "drift", "show", m)...), 0, "Frozen: no new commitment or attempt")
+	r := step("", with(publisher, "drift", "revert", m)...)
+	revert := planID.FindString(r.out)
+	f.want(r, 0, "Plan "+revert, fmt.Sprintf("Revert of drift record %d to Desired %s.", opened, e.rel),
+		"Approving it approves an unseen overwrite", "The machine is frozen: the plan cannot commit until an approver approves it and, separately, unfreezes the machine: bronzewardctl machine unfreeze '"+m+"' --reason <text>")
+	var bound int64
+	var operation string
+	if err := f.db.QueryRow(`SELECT drift_record, kind FROM plan WHERE id = $1`, revert).Scan(&bound, &operation); err != nil || bound != opened || operation != "apply-config" {
+		t.Errorf("the revert plan binds drift record %d with operation %q, %v; want %d and apply-config", bound, operation, err, opened)
+	}
+	f.want(step("", with(approver, "machine", "unfreeze", m, "--reason", "BWSYNTH: decided to revert")...), 0, "Unfrozen.")
+	f.want(step(revert+"\n", with(approver, "approve", revert)...), 0, "unseen")
+	e.until(t, "committed", `SELECT state FROM plan_state WHERE plan = $1`, revert)
+	if got := e.closedAs(t, opened); got != "reverted" {
+		t.Errorf("the revert closed drift record %d as %q, want reverted", opened, got)
+	}
+
+	// T10, the adoption: the node drifts again, and the drift is adopted into a release. The draft
+	// carries the assignment that makes the release the machine's Desired; the composite imports
+	// the node over the draft's base, publishes the draft and creates the adopt plan, and an approver approves it.
+	e.st.drift(t, 2)
+	opened = e.openDrift(t)
+	labels := filepath.Join(t.TempDir(), "labels.yaml")
+	if err := os.WriteFile(labels, []byte("machine:\n  nodeLabels:\n    node.example.test/pool: workers\n    node.example.test/tier: adopted\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	draft := regexp.MustCompile(`drf_[a-z2-7]{26}`).FindString(e.ctl(append(h, "draft", "create", "--cluster", e.s.cluster, "--title", "adopt drift")...).out)
+	f.importMachine(t, m, draft)
+	for _, s := range [][]string{{"draft", "show", draft}, {"fragment", "set", "labels", "--draft", draft, "--layer", "role", "--file", labels},
+		{"profile", "set", "workers", "--draft", draft, "--fragments", "labels"}, {"assignment", "set", m, "--draft", draft, "--profiles", "workers"}} {
+		f.want(e.ctl(append(h, s...)...), 0)
+	}
+	f.want(step("", with(h, "drift", "show", m)...), 0, "Drift opened by observation")
+	before = f.actCount()
+	r = step("", with(h, "drift", "adopt", m, "--draft", draft)...)
+	adopt := planID.FindString(r.out)
+	f.want(r, 0, "Step 1/3  import (drift-adoption) of machine "+m+" into draft "+draft, "Step 2/3  publish draft "+draft,
+		"Step 3/3  plan an adoption of release rel_", fmt.Sprintf("This plan binds drift record %d.", opened),
+		"drift adopt never approves: an approver runs bronzewardctl approve "+adopt)
+	if state, approval := e.planState(t, adopt); state != "proposed" || approval != "" {
+		t.Errorf("the adopt plan is %s with approval %q after drift adopt, want proposed with none", state, approval)
+	}
+	f.want(step(adopt+"\n", with(approver, "approve", adopt)...), 0)
+	e.until(t, "committed", `SELECT state FROM plan_state WHERE plan = $1`, adopt)
+	if got := e.closedAs(t, opened); got != "adopted" {
+		t.Errorf("the adoption closed drift record %d as %q, want adopted", opened, got)
+	}
+
+	// The composite also states, without running a step, what a caller without the roles still has to do.
+	viewer := e.as(t, "viewer")
+	f.want(e.ctl(with(viewer, "drift", "adopt", m, "--draft", draft)...), 0, "Not run: step 1 needs an author signed in as a person. The steps:")
+	if n := f.actCount(); n <= before {
+		t.Errorf("%d acts recorded by the adoption, want some", n-before)
+	}
+
+	// The prompt ends in a space, which the repository's whitespace check refuses in a kept file.
+	kept := localTimes.ReplaceAllString(out.String(), "<local time>")
+	kept = driftRevision.ReplaceAllString(driftRecordNumber.ReplaceAllString(kept, "drift record <n>"), "timeline revision <n>")
+	kept = regexp.MustCompile(`(?m)[ \t]+$`).ReplaceAllString(kept, "")
+	keepJourney(t, "t10", kept, f.home)
 	f.scanFiles()
 }

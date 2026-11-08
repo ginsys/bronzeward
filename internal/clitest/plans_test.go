@@ -220,8 +220,11 @@ func cases[T any](t *testing.T, file string, run map[string]T) []string {
 // context "human" signed in as h-all, and publishes the seeded machine twice: rel0 from the seeded
 // draft with its import base only, so without an assignment, then rel with one, which is the
 // machine's Desired.
-func newPlanEnv(t *testing.T) *planEnv {
-	f, bao := startProvider(t, "viewer")
+func newPlanEnv(t *testing.T) *planEnv { return newPlanEnvExec(t, "") }
+
+// newPlanEnvExec is newPlanEnv with execution, as startConfigExec takes it.
+func newPlanEnvExec(t *testing.T, execution string) *planEnv {
+	f, bao := startTimersExec(t, "viewer", "{instance: a, heartbeat: 5s, lease: 15s, absoluteExpiry: 10m, sweep: 15s}", execution)
 	in := newInjector(t, f.base)
 	in.writing = true
 	f.want(f.ctl(nil, "", "context", "add", "human", "--server", in.URL, "--certificate-authority", in.ca,
