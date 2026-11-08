@@ -302,7 +302,7 @@ func TestDrift(t *testing.T) {
 	adopt := planID.FindString(r.out)
 	f.want(r, 0, "Step 1/3  import (drift-adoption) of machine "+m+" into draft "+draft, "Step 2/3  publish draft "+draft,
 		"Step 3/3  plan an adoption of release rel_", fmt.Sprintf("This plan binds drift record %d.", opened),
-		"drift adopt never approves: an approver runs bronzewardctl approve "+adopt)
+		"drift adopt never approves: an approver runs bronzewardctl approve '"+adopt+"'")
 	if state, approval := e.planState(t, adopt); state != "proposed" || approval != "" {
 		t.Errorf("the adopt plan is %s with approval %q after drift adopt, want proposed with none", state, approval)
 	}

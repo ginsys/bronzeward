@@ -262,9 +262,14 @@ func (e *env) driftRevert(args []string) (err error) {
 	if _, _, err := c.Server(); err != nil {
 		return err
 	}
-	var x apitypes.MachineBody
-	if err := getJSON(c, "/machines/"+url.PathEscape(m), &x); err != nil {
+	path := "/machines/" + url.PathEscape(m)
+	r, err := c.Get(path)
+	if err != nil {
 		return err
+	}
+	var x apitypes.MachineBody
+	if err := json.Unmarshal(r.Body, &x); err != nil {
+		return fmt.Errorf("GET /api/v1%s cannot be read: %w", path, err)
 	}
 	// Without an Applied configuration the server refuses an apply-config plan (internal/api/plans.go),
 	// so the machine is handed over with an adopt plan first.
@@ -283,9 +288,14 @@ func (e *env) driftRevert(args []string) (err error) {
 		return notSent{fmt.Errorf("machine %s has no open drift record; nothing was sent. To apply its Desired release without a revert: %s",
 			m, createLine(*x.Desired, m, "apply-config"))}
 	}
-	return e.planCreateOn(c, "drift revert", []string{"--release", *x.Desired, "--machine", m, "--operation", "apply-config"},
-		planOpts{extra: revertLines, reads: true,
-			input: "the command " + createLine(*x.Desired, m, "apply-config") + " in place of drift revert"})
+	req, err := e.planParse("drift revert", []string{"--release", *x.Desired, "--machine", m, "--operation", "apply-config"})
+	if err != nil {
+		return err
+	}
+	// The write is bound to this machine answer's own epoch and move count, not to the client's last
+	// ones: a refresh inside the read can have moved them past it (§8.5).
+	return e.planCreateOn(c, req, planOpts{extra: revertLines, bind: boundTo(c, r),
+		input: "the command " + createLine(*x.Desired, m, "apply-config") + " in place of drift revert"})
 }
 
 // revertLines say what the created revert binds and what it needs before it can commit.
@@ -368,9 +378,14 @@ func (e *env) driftAdopt(args []string) (err error) {
 	// The read can show another epoch, which this client keeps, as ingest saved its own before it; a
 	// failed read leaves the steps unrun, so they are printed.
 	b, err := readIngestion(c, a.Ingestion)
-	if err = errors.Join(err, c.Save()); err != nil {
-		return errors.Join(err, e.say(append([]string{"The import was accepted, but its state is not known. Read it with: bronzewardctl import status " + pr(a.Ingestion),
-			"The later steps, once it is released into the draft:"}, from(2, "")...)...))
+	saved := c.Save()
+	if err != nil || saved != nil {
+		// A failed read leaves the state unknown; a read that worked and a save that did not leaves it known.
+		head := "The import was accepted, but its state is not known. Read it with: bronzewardctl import status " + pr(a.Ingestion)
+		if err == nil {
+			head = "The import was accepted and is " + pr(b.State) + ", but the context could not be saved, so no later step ran. Read it with: bronzewardctl import status " + pr(a.Ingestion)
+		}
+		return errors.Join(err, saved, e.say(append([]string{head, "The later steps, once it is released into the draft:"}, from(2, "")...)...))
 	}
 	if b.State != "released" {
 		return e.say(append([]string{"Mark values while it is paused: bronzewardctl import mark " + b.Id,
@@ -392,7 +407,13 @@ func (e *env) driftAdopt(args []string) (err error) {
 	if err := e.say("Step 3/3  plan an adoption of release " + release); err != nil {
 		return err
 	}
-	err = e.planCreateWith("drift adopt", []string{"--release", release, "--machine", m, "--operation", "adopt"}, adoptLines)
+	// The plan is created on the publication's client, bound to the epoch and move count the publication
+	// left it at: its terminal read stood (restoredRead), and the release comes from that read (§8.5).
+	// One client is also saved once, at the end, so no earlier client writes an older epoch over it.
+	req, err := e.planParse("drift adopt", []string{"--release", release, "--machine", m, "--operation", "adopt"})
+	if err == nil {
+		err = e.planCreateOn(pc, req, planOpts{extra: adoptLines, bind: &epochBind{epoch: pc.Context.LastEpoch, moves: pc.EpochMoves()}})
+	}
 	if err != nil {
 		return errors.Join(err, e.say(append([]string{"Step 3 again:"}, from(3, release)...)...))
 	}
