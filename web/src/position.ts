@@ -823,12 +823,12 @@ interface Carry {
   // (ginsys/bronzeward#654). A line break, `- `, `? ` and an explicit key's colon set it again.
   noKey: boolean;
   // The brackets of the open flow collections, the innermost last: `{` for a mapping, `[` for a sequence.
-  kinds: string;
+  kinds: string[];
   // The last token with content was a `?` that ends its line (or is followed by a comment): a node on
   // a later line is its key (ginsys/bronzeward#672). A blank or comment line keeps it.
   afterQ: boolean;
 }
-const freshCarry = (): Carry => ({ kinds: "", afterQ: false, stack: [], flow: 0, ns: true, open: "", holder: -1, block: undefined, closed: false, tagged: false, earlier: false, split: false, chain: false, gap: 0, clean: true, afterDirective: false, noKey: false });
+const freshCarry = (): Carry => ({ kinds: [], afterQ: false, stack: [], flow: 0, ns: true, open: "", holder: -1, block: undefined, closed: false, tagged: false, earlier: false, split: false, chain: false, gap: 0, clean: true, afterDirective: false, noKey: false });
 
 // The document that is being read (ginsys/bronzeward#615). A tag spelled through a handle names what
 // the document's %TAG directives say, so a `!bwref` property counts only when its document is
@@ -961,7 +961,7 @@ function aliasIsKey(line: string, from: number, to: number, opener: string, afte
   if (p === undefined) return afterQ;
   if (opener === "{" && (p === "{" || p === ",")) return true;
   const q = line[before - 2];
-  return p === "?" && before < from && (q === undefined || isWs(q) || (opener !== "" && "{[,".includes(q)));
+  return p === "?" && (before < from || opener !== "") && (q === undefined || isWs(q) || (opener !== "" && "{[,".includes(q)));
 }
 const FLOW = ",[]{}";
 // A block scalar header after its indicator. go-yaml reads the indicators only directly after `|` or
@@ -1212,7 +1212,7 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: numb
       } else if (c === "[" || c === "{") {
         if (nodeStart < 0) nodeStart = j;
         st.flow++;
-        st.kinds += c;
+        st.kinds.push(c);
         if (st.flow === 1) outerStart = nodeStart;
         lastPlain = false;
         j++;
@@ -1223,7 +1223,7 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: numb
         j++;
       } else if (st.flow > 0 && (c === "]" || c === "}")) {
         st.flow--;
-        st.kinds = st.kinds.slice(0, -1);
+        st.kinds.pop();
         if (st.flow === 0 && outerStart !== -2) nodeStart = outerStart;
         st.ns = false;
         lastPlain = false;
@@ -1259,7 +1259,7 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: numb
         else if (c === "*") {
           const def = docs.anchors.get(line.slice(j + 1, e));
           if (def === undefined) docs.refused = true;
-          else if (aliasIsKey(line, j, e, st.flow > 0 ? st.kinds.slice(-1) : "", afterQ)) docs.keyed.set(def.start, def.end);
+          else if (aliasIsKey(line, j, e, st.flow > 0 ? (st.kinds[st.kinds.length - 1] ?? "") : "", afterQ)) docs.keyed.set(def.start, def.end);
         }
         j = e;
         lastPlain = false;
@@ -1331,14 +1331,14 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: numb
       j++;
     } else if (st.flow > 0 && (c === "]" || c === "}")) {
       st.flow--;
-      st.kinds = st.kinds.slice(0, -1);
+      st.kinds.pop();
       if (st.flow === 0 && outerStart !== -2) nodeStart = outerStart;
       lastPlain = false;
       st.closed = true;
       j++;
     } else if (st.flow > 0 && (c === "[" || c === "{")) {
       st.flow++;
-      st.kinds += c;
+      st.kinds.push(c);
       st.ns = true;
       j++;
     } else if (st.flow > 0 && c === "?") {

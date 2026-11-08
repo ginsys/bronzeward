@@ -45,7 +45,8 @@ document below is refused by the server and read as unfit by the oracle.
 
 - In flow context the alias name ends at the colon. The scanner now reads a colon after the alias as a
   value indicator whatever follows it, an entry of a flow mapping that starts with the alias (after `{`
-  or `,`) as a key with or without a value, and a `?` after a flow bracket or comma as the key indicator.
+  or `,`) as a key with or without a value, and a `?` after a flow bracket or comma as the key indicator,
+  with or without a blank after it (`{?*k}`, `[?*k]`, `{a: 1, ?*k}`).
   Documents: `b: {? *k}`, `b: {*k:}`, `b: {*k :}`, `b: {*k:"v"}`, `b: {*k, c: d}`,
   `b: {a: [*k, d], *k}`, `b: {a: 1, *k:v}`, `b: [*k:]`, `b: [*k:"v"]`, `b: [a, *k:]`, `b: [a, *k :x]` and
   `b: [? *k]`, each after `a: &k !bwref x/foo`.
