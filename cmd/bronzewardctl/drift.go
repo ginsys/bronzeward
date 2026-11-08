@@ -344,7 +344,6 @@ func (e *env) driftAdopt(args []string) (err error) {
 		return usageError{errors.New("drift adopt needs --draft")}
 	}
 	// The repeat flags are checked before any role guidance, as for every command that takes them.
-	// The repeat flags are checked before any role guidance, as for every command that takes them.
 	if _, err := rf.repeat(true); err != nil {
 		return err
 	}
@@ -402,7 +401,9 @@ func (e *env) driftAdopt(args []string) (err error) {
 	if err := e.say("Step 2/3  publish draft " + draft + ": it publishes the whole draft"); err != nil {
 		return err
 	}
-	pc, release, err := e.publishDraft(draft, nil, "", false)
+	// An unknown outcome of this write names the publish command, never drift adopt: the repeat flags it
+	// prints are this publication's, and drift adopt would give them to the import of step 1.
+	pc, release, err := e.publishDraft(draft, nil, "", "the command bronzewardctl publish "+client.ShellWord(draft)+" in place of drift adopt", false)
 	if pc != nil {
 		defer func() { err = errors.Join(err, pc.Save()) }()
 	}
@@ -417,7 +418,8 @@ func (e *env) driftAdopt(args []string) (err error) {
 	// One client is also saved once, at the end, so no earlier client writes an older epoch over it.
 	req, err := e.planParse("drift adopt", []string{"--release", release, "--machine", m, "--operation", "adopt"})
 	if err == nil {
-		err = e.planCreateOn(pc, req, planOpts{extra: adoptLines, bind: &epochBind{epoch: pc.Context.LastEpoch, moves: pc.EpochMoves()}})
+		err = e.planCreateOn(pc, req, planOpts{extra: adoptLines, bind: &epochBind{epoch: pc.Context.LastEpoch, moves: pc.EpochMoves()},
+			input: "the command " + createLine(release, m, "adopt") + " in place of drift adopt"})
 	}
 	if err != nil {
 		return errors.Join(err, e.say(append([]string{"Step 3 again:"}, from(3, release)...)...))

@@ -33,7 +33,7 @@ func (e *env) publish(args []string) (err error) {
 	if err != nil {
 		return err
 	}
-	c, release, err := e.publishDraft(pos[0], rp, rf.ifMatch.v, noWait)
+	c, release, err := e.publishDraft(pos[0], rp, rf.ifMatch.v, "", noWait)
 	if c != nil {
 		defer func() { err = errors.Join(err, c.Save()) }()
 	}
@@ -49,12 +49,13 @@ func (e *env) publish(args []string) (err error) {
 }
 
 // publishDraft is publish's write and wait for draft d. It answers the client, which the caller
-// saves, and the release, "" with --no-wait.
-func (e *env) publishDraft(d string, rp *client.Repeat, ifMatch string, noWait bool) (*client.Client, string, error) {
+// saves, and the release, "" with --no-wait. A caller that is not publish itself gives input, the
+// words that name the command to repeat this write with, as the outcome-unknown block prints it.
+func (e *env) publishDraft(d string, rp *client.Repeat, ifMatch, input string, noWait bool) (*client.Client, string, error) {
 	var c *client.Client
 	var op apitypes.OperationBody
 	err := e.writeAfter(func(cl *client.Client) error { c = cl; return nil }, &client.Write{Method: http.MethodPost,
-		Path: "/drafts/" + url.PathEscape(d) + "/publications", Body: []byte("{}"), Draft: d, IfMatch: ifMatch, Repeat: rp,
+		Path: "/drafts/" + url.PathEscape(d) + "/publications", Body: []byte("{}"), Draft: d, IfMatch: ifMatch, Repeat: rp, Input: input,
 		Check: "operation list --kind publish", Read: entryRead(d, "", "")}, func(_ *client.Client, r *client.Response) ([]string, error) {
 		if err := json.Unmarshal(r.Body, &op); err != nil {
 			return nil, err
