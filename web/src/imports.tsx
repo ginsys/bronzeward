@@ -9,10 +9,10 @@ import type { components } from "./api/v1";
 import { Claim } from "./claim.tsx";
 import { keepETag, keptETag, NO_ASSIST } from "./drafts.tsx";
 import { Form, field, useSend, useUnsaved, useWrites } from "./forms.tsx";
-import { Id, type Load, Ref, short, useItem, useList, usePending, useReads, useSettled } from "./list.tsx";
+import { Id, type Load, type Reads, Ref, short, useItem, useList, usePending, useReads, useSettled } from "./list.tsx";
 import { markLines } from "./marks.tsx";
 import { eventLine, type Refusal, refusalOf, refusalText, terminal, type Watch, watch } from "./progress.ts";
-import type { Client } from "./request.ts";
+import type { Client, ReadResult } from "./request.ts";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
 import type { WriteSpec } from "./write.ts";
@@ -217,6 +217,30 @@ export function caughtUp(shown: Seen | undefined, claimEpoch: string | undefined
   return (shown?.n ?? 0) >= lastEvent;
 }
 
+// The client the watch and its end read through. Each read's answer goes to the page's `settle` as
+// the list and item reads' answers do, so an unresolved 401 or a revocation reaches the shell (sign-in,
+// revocation) and a transport failure its offline banner, and nothing is rendered once the watch left.
+// `undropped` is taken per read: the shell can invalidate reads in flight between two of them.
+export function settledReads(client: Pick<Client, "read" | "readWithEpoch" | "open" | "writesEnded">, reads: Pick<Reads, "settle" | "undropped">, live: () => boolean): Pick<Client, "read" | "readWithEpoch" | "open" | "writesEnded"> {
+  const settle = <T,>(res: ReadResult<T>, ok: () => boolean) => void reads.settle(res, () => {}, () => live() && ok(), () => true);
+  return {
+    read: async <T,>(path: string) => {
+      const ok = reads.undropped();
+      const res = await client.read<T>(path);
+      settle(res, ok);
+      return res;
+    },
+    readWithEpoch: async <T,>(path: string) => {
+      const ok = reads.undropped();
+      const got = await client.readWithEpoch<T>(path);
+      settle(got.result, ok);
+      return got;
+    },
+    open: (path, headers, signal) => client.open(path, headers, signal),
+    get writesEnded() { return client.writesEnded; },
+  };
+}
+
 export interface FollowOptions {
   client: Pick<Client, "readWithEpoch">;
   ingestion: string; op: string; generation: number; signal: AbortSignal;
@@ -302,7 +326,7 @@ export function watchView(v: WatchView, a: WatchAct): WatchView {
 // resume-failed, or a read made once the lease passed shows it lapsed (§11.3, as the CLI follows).
 function Progress({ b, again }: { b: Ingestion; again: () => void }) {
   const client = useWrites()?.client;
-  const { failure } = useReads();
+  const { failure, settle, undropped } = useReads();
   const [{ lines, cleared, end }, show] = useReducer(watchView, { lines: [] });
   // The latest read of the ingestion and the page's failure view, for the watch begun before them.
   const latest = useRef({ b, at: Date.now() });
@@ -324,15 +348,17 @@ function Progress({ b, again }: { b: Ingestion; again: () => void }) {
     if (client === undefined || op === null) return;
     const abort = new AbortController();
     show({ type: "start" });
+    // The watch's reads and its end's go through the page's settle, as the page's own reads do.
+    const reading = settledReads(client, { settle, undropped }, () => !abort.signal.aborted);
     const run = followRun({
-      client, ingestion: ingestionId, op, generation, signal: abort.signal,
+      client: reading, ingestion: ingestionId, op, generation, signal: abort.signal,
       latest: () => latest.current, abandonedAt: () => abandonedAt.current, now: () => Date.now(), view: show,
     });
-    void watch(client, op, run.w).then(async (r) => {
+    void watch(reading, op, run.w).then(async (r) => {
       if (r.kind === "stopped" || abort.signal.aborted) return;
       // The ETag is kept under the epoch of the operation read the watch ended on, not under the client's
       // epoch now, which another response can have moved since (§8.5).
-      const text = r.kind === "failed" ? shown.current(r.res) : await ended(client, latest.current.b, r.operation, run.state().settled ?? "", Date.now(), r.epoch, run.state());
+      const text = r.kind === "failed" ? shown.current(r.res) : await ended(reading, latest.current.b, r.operation, run.state().settled ?? "", Date.now(), r.epoch, run.state());
       if (!abort.signal.aborted) {
         show({ type: "end", text });
         again();

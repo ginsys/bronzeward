@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { components } from "./api/v1";
 import { forgetETag, keepETag, keptETag } from "./drafts.tsx";
 import { WritesProvider } from "./forms.tsx";
-import { ABANDONED_SETTLE, abandonedSince, againPath, allowed, caughtUp, documentRefusal, ended, fileReader, followRun, type Ingestion, MAX_DOCUMENT, onEvent, sendStart, StartImport, type StartInput, startBody, startETag, startParams, startRun, started, stopsWatch, typedDocument, unsent, watchDeps, watchView } from "./imports.tsx";
+import { ABANDONED_SETTLE, abandonedSince, againPath, allowed, caughtUp, documentRefusal, ended, fileReader, followRun, type Ingestion, MAX_DOCUMENT, onEvent, sendStart, StartImport, type StartInput, startBody, startETag, startParams, settledReads, startRun, started, stopsWatch, typedDocument, unsent, watchDeps, watchView } from "./imports.tsx";
 import { type Reads, ReadsProvider, short } from "./list.tsx";
 import { eventLine, watch } from "./progress.ts";
 import { Client, type ReadResult } from "./request.ts";
@@ -538,6 +538,62 @@ describe("the progress view across watches (ginsys/bronzeward#644 item E)", () =
     v = watchView(v, { type: "show", line: "new" });
     v = watchView(v, { type: "end", text: "done" });
     expect(v).toEqual({ lines: ["new"], cleared: "cleared", end: "done" });
+  });
+});
+
+describe("the reads of the watch and of its end go through the page's settle (ginsys/bronzeward#644 item I)", () => {
+  const OPID = "op_zcfw5mcm";
+  const answer = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json", "Bronzeward-Epoch": "e1" } });
+  const unauthenticated: ReadResult<never> = { kind: "unauthenticated", problem: null };
+  // A reader whose reads answer from `by`; `open` answers JSON, so the watch reads the pages.
+  const scripted = (by: (path: string) => ReadResult<unknown>) => ({
+    read: async <T,>(p: string) => by(p) as ReadResult<T>,
+    readWithEpoch: async <T,>(p: string) => ({ result: by(p) as ReadResult<T>, epoch: "e1" }),
+    open: async () => answer({}),
+    writesEnded: false,
+  });
+  const settling = () => {
+    const settled: ReadResult<unknown>[] = [];
+    const reads = { settle: ((res: ReadResult<unknown>, _set: unknown, live: () => boolean) => (settled.push(res), live())) as Reads["settle"], undropped: () => () => true };
+    return { settled, reads };
+  };
+  const watched = async (by: (path: string) => ReadResult<unknown>) => {
+    const { settled, reads } = settling();
+    const client = settledReads(scripted(by), reads, () => true);
+    const r = await watch(client, OPID, { show: () => {}, clear: () => {}, signal: new AbortController().signal }, { sleep: async () => {}, now: () => 0, idle: 20 });
+    return { r, settled };
+  };
+  test("an unresolved 401 on the operation read reaches the shell", async () => {
+    const { r, settled } = await watched((p) => (p.endsWith("/events") ? { kind: "ok", data: { items: [] } } : unauthenticated));
+    expect(r.kind).toBe("failed");
+    expect(settled.filter((s) => s.kind === "unauthenticated")).toHaveLength(1);
+  });
+  test("an unresolved 401 on the events page read reaches the shell", async () => {
+    const { r, settled } = await watched((p) => (p.includes("/events") ? unauthenticated : { kind: "ok", data: op({}) }));
+    expect(r.kind).toBe("failed");
+    expect(settled.filter((s) => s.kind === "unauthenticated")).toHaveLength(1);
+  });
+  test("an unresolved 401 on the final draft read reaches the shell", async () => {
+    const b = ing();
+    started.set(b.id, { draft: b.draft, epoch: "e1" });
+    const { settled, reads } = settling();
+    const client = settledReads(scripted(() => unauthenticated), reads, () => true);
+    const done = op({ state: "succeeded", result: { draft: b.draft, draftRevision: 2, importBaseRevision: "rev_base" } });
+    expect(text(await ended(client, b, done, "", NOW, "e1"))).toContain("could not be read again");
+    expect(settled.map((s) => s.kind)).toEqual(["unauthenticated"]);
+  });
+  test("a read made after the watch left is not rendered, and open and writesEnded pass through", async () => {
+    const { reads } = settling();
+    let live = true;
+    const calls: boolean[] = [];
+    const wrapped = settledReads(scripted(() => ({ kind: "ok", data: {} })), { ...reads, settle: ((_r: unknown, _s: unknown, l: () => boolean) => (calls.push(l()), true)) as Reads["settle"] }, () => live);
+    await wrapped.read("/x");
+    live = false;
+    await wrapped.readWithEpoch("/x");
+    expect(calls).toEqual([true, false]);
+    expect(wrapped.writesEnded).toBe(false);
+    const opened = await wrapped.open("/x", {}, new AbortController().signal);
+    expect(opened instanceof Response && opened.status).toBe(200);
   });
 });
 
