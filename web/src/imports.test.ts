@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { components } from "./api/v1";
 import { forgetETag, keepETag, keptETag } from "./drafts.tsx";
 import { WritesProvider } from "./forms.tsx";
-import { ABANDONED_SETTLE, abandonedSince, againPath, allowed, caughtUp, documentRefusal, ended, fileReader, followRun, forgetRefused, type Ingestion, keepTyped, lapsedRead, MAX_DOCUMENT, onEvent, REFRESH_FAILED, type ReadStamp, refreshDelay, refreshRetry, refreshWait, REVIEW_FIRST, reviewFirst, sendStart, StartImport, type StartInput, startBody, startETag, startParams, settledReads, stampRead, startRun, started, stopsWatch, typedDocument, unsent, watchDeps, watchView } from "./imports.tsx";
+import { ABANDONED_SETTLE, abandonedSince, againPath, allowed, catchUpLoss, caughtUp, documentRefusal, ended, fileReader, followRun, forgetRefused, type Ingestion, keepTyped, lapsedRead, MAX_DOCUMENT, onEvent, REFRESH_FAILED, type ReadStamp, refreshDelay, refreshRetry, refreshWait, REVIEW_FIRST, reviewFirst, sendStart, StartImport, type StartInput, startBody, startETag, startParams, settledReads, stampRead, startRun, started, stopsWatch, typedDocument, unsent, watchDeps, watchView } from "./imports.tsx";
 import { type Load, type Reads, ReadsProvider, short } from "./list.tsx";
 import { eventLine, watch } from "./progress.ts";
 import { Client, type ReadResult } from "./request.ts";
@@ -389,7 +389,7 @@ describe("what ends the watch of an import's operation (§11.3, the CLI's follow
     expect(stopsWatch(undefined, { b: ing(), at: at("07:05:11") }, at("07:05:12"), undefined, true)).toBe(true);
     expect(stopsWatch(undefined, { b: ing(), at: at("07:05:11") }, at("07:05:12"))).toBe(false);
     // A read made then that shows a renewed lease does not.
-    expect(stopsWatch(undefined, { b: ing({ leaseUntil: "2026-11-01T07:10:00Z" }), at: at("07:05:11") }, at("07:05:12"))).toBe(false);
+    expect(stopsWatch(undefined, { b: ing({ leaseUntil: "2026-11-01T07:10:00Z" }), at: at("07:05:11") }, at("07:05:12"), undefined, true)).toBe(false);
     expect(stopsWatch("paused", { b: ing(), at: 0 }, 0)).toBe(true);
   });
 });
@@ -735,6 +735,18 @@ describe("a lapsed lease decides only after the operation's newest event was sho
       f.w.clear("restored");
       expect(f.failure()).toBeUndefined();
       expect(f.w.until!()).toBe(false);
+    });
+    test("a refusal recorded by a catch-up read is shown only while the operation read last is not terminal (Copilot review of 3f52f6c6 on web/src/imports.tsx:439)", () => {
+      const ended = (state: Operation["state"]) => ({ kind: "ended", operation: op({ state }), epoch: "e1" }) as const;
+      expect(catchUpLoss(undefined, ended("running"), refused)).toBe(refused);
+      // The operation finished while the check was refused: its result is the one to show, whichever it is.
+      for (const state of ["succeeded", "failed", "completed", "rejected", "cancelled"] as const) {
+        expect(catchUpLoss(undefined, ended(state), refused)).toBeUndefined();
+      }
+      // A settled run, a failed watch and no refusal show nothing from the check.
+      expect(catchUpLoss("paused", ended("running"), refused)).toBeUndefined();
+      expect(catchUpLoss(undefined, { kind: "failed", res: refused }, refused)).toBeUndefined();
+      expect(catchUpLoss(undefined, ended("running"), undefined)).toBeUndefined();
     });
     test("a read with no answer or one for a new epoch is not a failure: the watch stays pending", async () => {
       expect(await check({ kind: "transport" }, okOp)).toMatchObject({ stops: false, failure: undefined });

@@ -11,7 +11,7 @@ import { keepETag, keptETag, NO_ASSIST } from "./drafts.tsx";
 import { Form, field, useSend, useUnsaved, useWrites } from "./forms.tsx";
 import { Id, type Load, type Reads, Ref, short, useItem, useList, usePending, useReads, useSettled } from "./list.tsx";
 import { markLines } from "./marks.tsx";
-import { eventLine, type Refusal, refusalOf, refusalText, terminal, type Watch, watch } from "./progress.ts";
+import { eventLine, type Refusal, refusalOf, refusalText, terminal, type Watch, type Watched, watch } from "./progress.ts";
 import type { Client, ReadResult } from "./request.ts";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
@@ -270,6 +270,10 @@ export interface FollowOptions {
 export type Refused = Extract<ReadResult<unknown>, { kind: "refused" }>;
 // An answer that will not change on a new try: a refusal other than 408 and 429.
 const final = (res: ReadResult<unknown>): res is Refused => res.kind === "refused" && res.status !== 408 && res.status !== 429;
+// A catch-up read refused for good ends the watch with that refusal, unless the run had settled or the
+// operation read last is terminal: that operation's result is the definitive one.
+export const catchUpLoss = (settled: RunState["settled"], r: Watched, failure: Refused | undefined): Refused | undefined =>
+  settled === undefined && r.kind === "ended" && !terminal(r.operation.state) ? failure : undefined;
 export function followRun(o: FollowOptions): { w: Watch; settled: () => RunState["settled"]; state: () => RunState; failure: () => Refused | undefined } {
   let run = startRun(o.generation);
   let shown: Seen | undefined;
@@ -435,8 +439,7 @@ function Progress({ b, readAt, again }: { b: Ingestion; readAt: number; again: (
       if (r.kind === "stopped" || abort.signal.aborted) return;
       // The ETag is kept under the epoch of the operation read the watch ended on, not under the client's
       // epoch now, which another response can have moved since (§8.5).
-      // A catch-up read refused for good ends the watch with that refusal, unless the run had settled.
-      const lost = run.state().settled === undefined ? run.failure() : undefined;
+      const lost = catchUpLoss(run.state().settled, r, run.failure());
       const text = r.kind === "failed" ? shown.current(r.res) : lost !== undefined ? shown.current(lost) : await ended(reading, latest.current.b, r.operation, run.state().settled ?? "", Date.now(), r.epoch, run.state());
       if (!abort.signal.aborted) {
         show({ type: "end", text });
