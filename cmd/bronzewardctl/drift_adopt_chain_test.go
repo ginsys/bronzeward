@@ -60,6 +60,7 @@ func adoptChainServer(t *testing.T) *adoptChain {
 	d := &draftFake{rev: 1, state: "open"}
 	f := &adoptChain{imp: &importFake{draftFake: d}, pub: &publishFake{draftFake: d, state: "succeeded"},
 		plan: &planFake{state: "proposed", op: "adopt", evidence: adoptEvidence, desired: "rel_BWSYNTH", assignment: "asr_BWSYNTH-1"}}
+	f.plan.epochFor = func(string) string { return "ep_BWSYNTH-1" }
 	f.plan.post = func(w http.ResponseWriter, _ string) {
 		w.WriteHeader(http.StatusCreated)
 		f.plan.mu.Unlock()
@@ -107,8 +108,14 @@ func TestDriftAdoptBindsItsPlanToThePublication(t *testing.T) {
 // same chain sends the one adopt plan.
 func TestDriftAdoptSendsItsPlanWhenTheEpochHolds(t *testing.T) {
 	f := adoptChainServer(t)
-	_, out, errOut := runDrift(t, "drift", "adopt", "mch_BWSYNTH", "--draft", "drf_BWSYNTH")
-	if got := f.plan.took(); len(got) != 1 || !strings.Contains(got[0], `"operation":"adopt"`) || !strings.Contains(got[0], `"releaseId":"rel_BWSYNTH"`) {
-		t.Errorf("plan sent %q, stdout %q, stderr %q; want one adopt plan of rel_BWSYNTH", got, out, errOut)
+	code, out, errOut := runDrift(t, "drift", "adopt", "mch_BWSYNTH", "--draft", "drf_BWSYNTH")
+	if got := f.plan.took(); code != 0 || len(got) != 1 || !strings.Contains(got[0], `"operation":"adopt"`) || !strings.Contains(got[0], `"releaseId":"rel_BWSYNTH"`) {
+		t.Errorf("exit %d, plan sent %q, stdout %q, stderr %q; want exit 0 and one adopt plan of rel_BWSYNTH", code, got, out, errOut)
+	}
+	if !strings.Contains(out, "drift adopt never approves: an approver runs bronzewardctl approve 'pln_BWSYNTH'") {
+		t.Errorf("stdout %q does not give the adoption guidance", out)
+	}
+	if got := savedEpoch(t); got != "ep_BWSYNTH-1" {
+		t.Errorf("saved epoch %q; want ep_BWSYNTH-1, which never moved", got)
 	}
 }

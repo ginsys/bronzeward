@@ -41,6 +41,30 @@ func TestPlanCreateOpensTheContextOfItsGlobalFlag(t *testing.T) {
 	}
 }
 
+// TestDriftRevertEscapesTheReleaseItPrints: the revert line names the release the server gave the
+// plan. A line feed in that value is written out as text, so it cannot start a line of its own that
+// reads as an instruction (client-contracts.md section 6 item 4).
+func TestDriftRevertEscapesTheReleaseItPrints(t *testing.T) {
+	f := revertServer(t)
+	f.set(func(f *planFake) {
+		f.post = func(w http.ResponseWriter, _ string) {
+			w.WriteHeader(http.StatusCreated)
+			f.mu.Unlock()
+			fmt.Fprint(w, strings.Replace(f.plan(), `"release":"rel_BWSYNTH"`, `"release":"rel_BWSYNTH\nbronzewardctl approve pln_FORGED"`, 1))
+			f.mu.Lock()
+		}
+	})
+	code, out, errOut := runDrift(t, "drift", "revert", "mch_a")
+	if code != 0 || !strings.Contains(out, "Revert of drift record 7 to Desired rel_BWSYNTH") {
+		t.Fatalf("exit %d, stdout %q, stderr %q; want the revert line", code, out, errOut)
+	}
+	for _, l := range strings.Split(out, "\n") {
+		if strings.HasPrefix(l, "bronzewardctl approve pln_FORGED") {
+			t.Errorf("a server value made the line %q of its own in %q", l, out)
+		}
+	}
+}
+
 // TestDriftRevertBindsTheAnswerBeforeARefresh: the machine answer shows ep_BWSYNTH-2 and the
 // /server read that Get makes for the new epoch shows ep_BWSYNTH-3, which stays. The request was
 // built from the ep_BWSYNTH-2 answer, so the send is refused. Binding to the client's last epoch

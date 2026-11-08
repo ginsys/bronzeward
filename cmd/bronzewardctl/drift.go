@@ -304,13 +304,13 @@ func revertLines(c *client.Client, p *apitypes.PlanBody) []string {
 		return []string{"This plan binds no drift record: the drift closed before it was created, so it is an ordinary apply-config, not a revert."}
 	}
 	lines := []string{
-		fmt.Sprintf("Revert of drift record %d to Desired %s. The plan expects the drifted digest before dispatch: if the machine drifts again first, it fails and must be made again.",
+		sf("Revert of drift record %d to Desired %s. The plan expects the drifted digest before dispatch: if the machine drifts again first, it fails and must be made again.",
 			*p.DriftRecord, p.Release),
 		"Approving it approves an unseen overwrite: it replaces the drifted configuration, which no reviewer has seen.",
 	}
 	var m apitypes.MachineBody
 	if err := getJSON(c, "/machines/"+url.PathEscape(p.Machine), &m); err != nil {
-		return append(lines, "Whether the machine is frozen cannot be read: "+err.Error())
+		return append(lines, "Whether the machine is frozen cannot be read: "+pr(err.Error()))
 	}
 	if m.Frozen {
 		lines = append(lines, "The machine is frozen: the plan cannot commit until an approver approves it and, separately, unfreezes the machine: bronzewardctl machine unfreeze "+
@@ -388,7 +388,7 @@ func (e *env) driftAdopt(args []string) (err error) {
 		return errors.Join(err, saved, e.say(append([]string{head, "The later steps, once it is released into the draft:"}, from(2, "")...)...))
 	}
 	if b.State != "released" {
-		return e.say(append([]string{"Mark values while it is paused: bronzewardctl import mark " + b.Id,
+		return e.say(append([]string{"Mark values while it is paused: bronzewardctl import mark " + client.ShellWord(b.Id),
 			"Once the import is continued and released into the draft, the later steps:"}, from(2, "")...)...)
 	}
 	if !has("publisher") {
@@ -404,7 +404,7 @@ func (e *env) driftAdopt(args []string) (err error) {
 	if err != nil {
 		return errors.Join(err, e.say(append([]string{"The later step:"}, from(3, "")...)...))
 	}
-	if err := e.say("Step 3/3  plan an adoption of release " + release); err != nil {
+	if err := e.say("Step 3/3  plan an adoption of release " + pr(release)); err != nil {
 		return err
 	}
 	// The plan is created on the publication's client, bound to the epoch and move count the publication
