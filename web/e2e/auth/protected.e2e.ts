@@ -6,8 +6,10 @@
 // case asks the page only whether it holds one. A document never crosses WebDriver, whose log the
 // artifact scan reads: the page fetches it from the synthetic provider (putDocument). The marks are
 // paths without the canary. No case takes a screenshot or a trace (retention.test.ts checks this
-// source). After each case the storage check finds nothing in storage, IndexedDB or caches, and after
-// the first journey the HTTP cache check finds no answer of the review. The cases sign in as h-author.
+// source). Opening a review asks the page, as a boolean, whether its review text holds the document's
+// tier label, which carries the canary: the later checks then find absence of something that was there.
+// After each case the storage check finds nothing in storage, IndexedDB or caches, and the HTTP cache
+// check finds no answer of that case's review. The cases sign in as h-author.
 import { randomBytes } from "node:crypto";
 import { $, browser, expect } from "@wdio/globals";
 import { short } from "../../src/list.tsx";
@@ -20,6 +22,9 @@ const TIER = "doc[0]/machine/nodeLabels/example.test~1tier";
 let at = "";
 let cluster = "";
 let machine = "";
+// The case's import and the name of the document it staged, set by pausedImport and cleared after the case.
+let importId = "";
+let docName = "";
 
 const hex = () => randomBytes(4).toString("hex");
 const post = async (path: string) => expect((await fetch(`${CONTROL}${path}`, { method: "POST" })).ok).toBe(true);
@@ -69,6 +74,7 @@ async function pausedImport(): Promise<string> {
   const d = await api("h-author", "POST", "/drafts", { cluster, title: `synthetic ${hex()}` });
   expect(d.status).toBe(201);
   const draft = d.body!["id"] as string;
+  docName = `protected-${hex()}`;
   expect(await fixtureSignIn("h-author", {}, { upstream: at })).toMatch(SERVER);
   await $('nav[aria-label="Main"]').$("a=Changes").click();
   await $("main").$("a=Imports").click();
@@ -88,23 +94,42 @@ async function pausedImport(): Promise<string> {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(area, text);
     area.dispatchEvent(new Event("input", { bubbles: true }));
     return area.value === text;
-  }, FIXTURE_ISSUER, `protected-${hex()}`);
+  }, FIXTURE_ISSUER, docName);
   expect(ok).toBe(true);
   expect(await $('input[name="staging"][value="encrypted"]').isSelected()).toBe(true);
   expect(await $('input[name="review"]').isSelected()).toBe(true);
   await $("main form").$("button=Start import").click();
   await browser.waitUntil(async () => /^\/ingestions\/ing_/.test(await browser.execute(() => location.pathname)), { timeout: 20_000, timeoutMsg: "the wizard did not open the import page" });
   const id = (await browser.execute(() => location.pathname)).split("/").pop()!;
+  importId = id;
   await expect(events()).toHaveText(holds("paused (generation 1)"), { wait: 60_000 });
   await expect(allowed()).toHaveText("Paused for review. Continue it, or abandon it.", { wait: 20_000 });
   return id;
 }
 
-// Opens the review. The page is asked only whether it holds text, never for the text.
+// Opens the review. The page is asked only a boolean, never for the text: whether the review text holds the
+// tier label of the document the case staged. The page reads that label from the synthetic provider, as it
+// did when it put the document in the form, so neither the label nor the canary in it crosses WebDriver.
+// The label is no secret, so the review shows it. This is what the later storage and cache checks, and the
+// artifact scan, are measured against: they find absence of something that was on the page.
 async function openReview() {
   await $('section[aria-label="Protected review"]').$("button=Review import").click();
   await $('[data-testid="review-text"]').waitForExist({ timeout: 20_000 });
-  expect(await browser.execute(() => (document.querySelector<HTMLTextAreaElement>('[data-testid="review-text"]')?.value.length ?? 0) > 0)).toBe(true);
+  const held = await browser.execute(async (issuer: string, n: string) => {
+    const text = document.querySelector<HTMLTextAreaElement>('[data-testid="review-text"]')?.value ?? "";
+    const r = await fetch(`${issuer}/synthetic-document?name=${n}`).catch(() => undefined);
+    const label = r?.ok === true ? /example\.test\/tier: (\S+)/.exec(await r.text())?.[1] : undefined;
+    return label !== undefined && label.length > 0 && text.includes(label);
+  }, FIXTURE_ISSUER, docName);
+  expect(held).toBe(true);
+}
+
+// What every protected journey leaves behind: nothing in storage, IndexedDB or caches, and no answer of
+// the case's review in the HTTP cache. The cache probe of cacheControl is its positive control.
+async function leavesNothing() {
+  await storageEmpty();
+  if (importId !== "") expect(await cacheHolds(`/api/v1/ingestions/${importId}/review`)).toBe(false);
+  importId = "";
 }
 
 // Puts paths in the marks field as typing would. They are paths of the synthetic document and hold
@@ -157,7 +182,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     // A fault or a hold a case left must not reach the next case.
     await post("/bao/fault?mode=none").catch(() => {});
     await post("/bao/decrypt-hold?ms=0").catch(() => {});
-    await storageEmpty();
+    await leavesNothing();
   });
 
   it("controls: the storage check and the HTTP cache check each find what is planted", async function () {
@@ -182,8 +207,8 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     expect(await browser.execute(() => document.querySelector('[data-testid="review-text"]') !== null)).toBe(false);
     await $("button=Continue import").click();
     await expect(ended()).toHaveText(holds(`Import ${short(id)} released into draft`), { wait: 60_000 });
-    await storageEmpty();
-    expect(await cacheHolds(`/api/v1/ingestions/${id}/review`)).toBe(false);
+    // The storage and cache checks of this journey run in afterEach, with the probe of the controls case as
+    // their positive control. The probe is run again here, in the page the journey ended in.
     await cacheControl(at);
   });
 
@@ -314,7 +339,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
 
 describe("an expired claim (ginsys/bronzeward#341)", () => {
   before(() => deployment("start=normal&expiry=short"));
-  afterEach(storageEmpty);
+  afterEach(leavesNothing);
 
   it("a paused import passes its absolute expiry: the page ends in the state the server left, offering no review and no continuation", async function () {
     this.timeout(240_000);

@@ -48,9 +48,11 @@ const state = `${root}.dev/browser-auth`;
 // wdio.conf.ts has checked it.
 const canary = process.env["BW_WEB_CANARY"]!;
 
-// A draft case's fragment document (#339): its machine token carries the run's canary, so the
-// artifact scan finds the document in any retained file. Never typed or read over WebDriver.
-export const syntheticDocument = (name: string) => `machine:\n  token: ${canary}-doc-${name}\n  nodeLabels:\n    example.test/tier: ${name}\n`;
+// A draft case's fragment document (#339): its machine token and its tier label carry the run's canary,
+// so the artifact scan finds the document in any retained file. A review shows sanitized documents and
+// can replace the token by a reference. The label is no secret, so protected.e2e.ts asks the page, as a
+// boolean, whether its review text holds the label. Never typed or read over WebDriver.
+export const syntheticDocument = (name: string) => `machine:\n  token: ${canary}-doc-${name}\n  nodeLabels:\n    example.test/tier: ${canary}-tier-${name}\n`;
 
 // The test provider's variables, as mise run dev-idp writes them.
 export function idpEnv(): Record<string, string> {
