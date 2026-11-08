@@ -1795,8 +1795,8 @@ describe("a plain !bwref value that goes on to the next line", () => {
 
     // A key line after a plain value is measured against the holder column (ginsys/bronzeward#699, section 3):
     // `anchoredHolder` walks the spaces and dashes before the tag, and `compactColumn` the same for a plain value.
-    // No figure from earlier code: these rows list the same on f52d5579 and are not shown to fail there, they
-    // pin the bound for the new reading.
+    // No figure from earlier code: these rows pass on f52d5579 too, where only their timing check runs, and are
+    // not shown to fail there. They pin the bound for the new reading.
     test.each([
       ["an indentation of 100,000 spaces before an anchored value", `${" ".repeat(100000)}k: !bwref &e x/foo\n${" ".repeat(100002)}j: v\n`],
       ["4,000 anchored values, each followed by a deeper key line", Array.from({ length: 4000 }, (_, i) => `k${i}: !bwref &e x/foo${i}\n  j: v\n`).join("")],
