@@ -100,13 +100,75 @@ export async function idpSignIn(human: string): Promise<string> {
 
 export const userId = (human: string) => Object.fromEntries(idpEnv()["BW_TEST_IDP_USERS"]!.split(",").map((p) => p.split("=")))[human] as string;
 
-// Client contracts §11.5 item 3: no browser storage holds a value outside a redirect.
-export async function storageEmpty() {
-  const storage = await browser.execute(async () => ({
+// What the page's storage holds, read the way client contracts §11.5 item 3 lists it.
+const storageState = () =>
+  browser.execute(async () => ({
     local: Object.entries(localStorage),
     session: Object.entries(sessionStorage),
     indexedDB: "databases" in indexedDB ? (await indexedDB.databases()).map((d) => d.name ?? "") : ["unreadable"],
     caches: "caches" in self ? await caches.keys() : ["unreadable"],
   }));
-  expect(storage).toEqual({ local: [], session: [], indexedDB: [], caches: [] });
+
+// Client contracts §11.5 item 3: no browser storage holds a value outside a redirect.
+export async function storageEmpty() {
+  expect(await storageState()).toEqual({ local: [], session: [], indexedDB: [], caches: [] });
+}
+
+// The positive control of storageEmpty (ginsys/bronzeward#341, client contracts §11.5): plants a
+// harmless marker in each of the four stores and expects the same read to see every one, then removes
+// them. The marker is not the run's canary, which never crosses WebDriver.
+export async function storageControl() {
+  try {
+    await browser.execute(async () => {
+      localStorage.setItem("bw-control", "marker");
+      sessionStorage.setItem("bw-control", "marker");
+      await new Promise<void>((ok, bad) => {
+        const r = indexedDB.open("bw-control");
+        r.onsuccess = () => (r.result.close(), ok());
+        r.onerror = () => bad(r.error);
+      });
+      await caches.open("bw-control");
+    });
+    const s = await storageState();
+    expect(s.local).toEqual([["bw-control", "marker"]]);
+    expect(s.session).toEqual([["bw-control", "marker"]]);
+    expect(s.indexedDB).toContain("bw-control");
+    expect(s.caches).toContain("bw-control");
+  } finally {
+    await browser.execute(async () => {
+      localStorage.removeItem("bw-control");
+      sessionStorage.removeItem("bw-control");
+      await new Promise<void>((ok) => {
+        const r = indexedDB.deleteDatabase("bw-control");
+        r.onsuccess = r.onerror = r.onblocked = () => ok();
+      });
+      await caches.delete("bw-control");
+    });
+  }
+  await storageEmpty();
+}
+
+// Whether the browser's HTTP cache answers a same-origin GET of `path` with no request: a hit is an
+// ok answer, a miss is a refused or failed one (a network error in Chrome and Edge, 504 in Firefox).
+export const cacheHolds = (path: string) =>
+  browser.execute(async (p: string) => {
+    try {
+      return (await fetch(p, { cache: "only-if-cached", mode: "same-origin" })).ok;
+    } catch {
+      return false;
+    }
+  }, path);
+
+// The positive control of cacheHolds (ginsys/bronzeward#341): the injector answers one path with a
+// cacheable response (every real answer says no-store), the page reads it once, and cacheHolds must
+// then see it. Without this the check would pass in a browser whose probe never finds anything.
+export async function cacheControl(upstream: string) {
+  const path = "/api/v1/__cache-probe";
+  await faults({ upstream, cacheable: "/__cache-probe" });
+  try {
+    expect(await browser.execute(async (p: string) => (await fetch(p)).ok, path)).toBe(true);
+    expect(await cacheHolds(path)).toBe(true);
+  } finally {
+    await faults({ upstream });
+  }
 }

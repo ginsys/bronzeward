@@ -129,7 +129,17 @@ function host(listen: string, clientConfig: object, issuer: string, api: string)
 // /bao/hold?ms= holds each KV write of that deployment's provider this long (AMB-02), and POST
 // /bao/retire retires the versions of its digest key (AMB-06); both answer 500 unless the faults'
 // upstream is that deployment, and the next sign-in ends the hold.
-function control(provider: Provider, next: { grant: Grant }, injector: Injector, disposable: (recovery: boolean, keep: boolean) => Promise<string>, kv: (ms: number) => void): Server {
+// The protected import cases (ginsys/bronzeward#341) add three routes, all for this run's disposable
+// deployment only: POST /bao/fault?mode=none|kv|decrypt makes its OpenBao proxy answer 503 to the KV
+// writes of a generation or to the Transit decrypt of the staged envelope, POST /bao/decrypt-hold?ms=
+// holds each such decrypt, and POST /disposable/kill ends its process at once with no restart; POST
+// /disposable?expiry=short starts it with an absolute expiry of 45 s, for an expired claim.
+export interface Chaos {
+  fault: (mode: string) => void;
+  decryptHold: (ms: number) => void;
+  kill: () => Promise<void>;
+}
+function control(provider: Provider, next: { grant: Grant }, injector: Injector, disposable: (recovery: boolean, keep: boolean, short: boolean) => Promise<string>, kv: (ms: number) => void, chaos: Chaos): Server {
   let go: string | undefined;
   return createServer((req, res) => {
     const url = new URL(req.url ?? "/", CONTROL);
@@ -155,10 +165,27 @@ function control(provider: Provider, next: { grant: Grant }, injector: Injector,
       }
       return res.end();
     }
+    if (url.pathname === "/bao/fault" && req.method === "POST") {
+      try {
+        chaos.fault(url.searchParams.get("mode") ?? "");
+      } catch (e) {
+        return res.writeHead(500).end(String(e));
+      }
+      return res.end();
+    }
+    if (url.pathname === "/bao/decrypt-hold" && req.method === "POST") {
+      try {
+        chaos.decryptHold(Number(url.searchParams.get("ms") ?? 0));
+      } catch (e) {
+        return res.writeHead(500).end(String(e));
+      }
+      return res.end();
+    }
+    if (url.pathname === "/disposable/kill" && req.method === "POST") return void chaos.kill().then(() => res.end(), (e: unknown) => res.writeHead(500).end(String(e)));
     if (url.pathname === "/bao/retire" && req.method === "POST") return void injector.retire().then(() => res.end(), (e: unknown) => res.writeHead(500).end(String(e)));
     if (url.pathname === "/release" && req.method === "POST") return void injector.release().then(() => res.end());
     if (url.pathname === "/disposable" && req.method === "POST") {
-      const started = disposable(url.searchParams.get("start") === "recovery", url.searchParams.has("keep"));
+      const started = disposable(url.searchParams.get("start") === "recovery", url.searchParams.has("keep"), url.searchParams.get("expiry") === "short");
       return void started.then((at) => res.end(at), (e: unknown) => res.writeHead(500).end(String(e)));
     }
     if (req.method === "POST" && (url.pathname === "/go" || url.pathname === "/faults")) {
@@ -202,7 +229,7 @@ function control(provider: Provider, next: { grant: Grant }, injector: Injector,
       injector.answered.length = 0;
       injector.writes.length = 0;
       injector.redirected = 0;
-      if (bao !== undefined) bao.hold = 0;
+      if (bao !== undefined) (bao.hold = 0), (bao.fail = "none"), (bao.decryptHold = 0);
       res.end();
     });
   });
@@ -244,11 +271,15 @@ async function prepare() {
   // dev-bao's OpenBao, through this run's proxy, with this run's own digest key and tokens (bao.ts).
   bao = await startBao(root, state, Number(BAO_PROXY.split(":")[1]));
   servers.push(bao.server);
-  const disposableDeployment = [
+  // The short variant is for the expired claim of ginsys/bronzeward#341: a claim passes its absolute
+  // expiry 45 s after it starts, the lease being shorter than that as the server requires.
+  const providerBlock = bao.block;
+  const deploymentWith = (expiry: string) => [
     fixtureDenied,
-    bao.block,
-    "ingestion: {instance: rec-01, heartbeat: 5s, lease: 15s, absoluteExpiry: 10m, sweep: 15s}",
+    providerBlock,
+    `ingestion: {instance: rec-01, heartbeat: 5s, lease: 15s, absoluteExpiry: ${expiry}, sweep: 15s}`,
   ].join("\n");
+  const disposableDeployment = deploymentWith("10m");
   let disposable: { db: string; p: ChildProcess } | undefined;
   // Only the deployment this run started on a database it created, with the faults' upstream on it:
   // the epoch, the KV hold and the key retirement act on nothing else.
@@ -264,12 +295,35 @@ async function prepare() {
     if (!Number.isInteger(ms) || ms < 0 || ms > 60_000) throw new Error(`a KV hold of ${ms} ms: give 0 to 60000`);
     bao!.hold = ms;
   };
-  const ctl = control(provider, next, injector, async (recovery, keep) => {
+  const chaos: Chaos = {
+    fault: (mode) => {
+      owned("an OpenBao fault is set");
+      if (mode !== "none" && mode !== "kv" && mode !== "decrypt") throw new Error(`an OpenBao fault of mode ${mode}: give none, kv or decrypt`);
+      bao!.fail = mode;
+    },
+    decryptHold: (ms) => {
+      owned("a decrypt is held");
+      if (!Number.isInteger(ms) || ms < 0 || ms > 120_000) throw new Error(`a decrypt hold of ${ms} ms: give 0 to 120000`);
+      bao!.decryptHold = ms;
+    },
+    // The process ends by SIGKILL, as a crash does, so nothing it held is released; the database stays,
+    // and POST /disposable?keep starts the deployment again on it.
+    kill: async () => {
+      owned("the process is killed");
+      const p = disposable!.p;
+      if (p.exitCode !== null || p.signalCode !== null) return;
+      await new Promise<void>((resolve) => {
+        p.once("exit", () => resolve());
+        p.kill("SIGKILL");
+      });
+    },
+  };
+  const ctl = control(provider, next, injector, async (recovery, keep, short) => {
     if (disposable !== undefined) await stop(disposable.p);
-    disposable = server("disposable", DISPOSABLE_API.slice(7), fixtureOidc, disposableDeployment, recovery ? ["-recovery-start"] : [], keep ? disposable?.db : undefined);
+    disposable = server("disposable", DISPOSABLE_API.slice(7), fixtureOidc, short ? deploymentWith("45s") : disposableDeployment, recovery ? ["-recovery-start"] : [], keep ? disposable?.db : undefined);
     await ready(`${DISPOSABLE_API}/livez`, disposable.p);
     return DISPOSABLE_API;
-  }, kv);
+  }, kv, chaos);
   await new Promise<void>((resolve, reject) => {
     ctl.once("error", reject);
     ctl.listen(Number(new URL(CONTROL).port), "127.0.0.1", resolve);

@@ -26,6 +26,10 @@ export interface Faults {
   missing?: string;
   // A 403 identity-revoked problem for this path, instead of the server's answer.
   revoked?: string;
+  // The protected import cases (ginsys/bronzeward#341): a harmless 200 answer for this path that the
+  // browser may cache for ten minutes, instead of the server's answer. Every real answer says no-store,
+  // so this is the one cacheable response, the positive control of the HTTP cache check (helpers.ts).
+  cacheable?: string;
   // A 409 recovery-mode-active problem without a scope member for these paths, instead of the
   // server's answer: a process restarted for recovery under the same epoch, its entry not yet made.
   processRefused?: string[];
@@ -153,6 +157,7 @@ export function startInjector(upstream: string, port: number): Promise<Injector>
         const problem = { type: "urn:bronzeward:problem:not-found", title: "Not found", status: 404, detail: "injected", instance: "req-injected" };
         return void res.writeHead(404, { "Content-Type": "application/problem+json" }).end(JSON.stringify(problem));
       }
+      if (f.cacheable === route) return void res.writeHead(200, { "Content-Type": "text/plain", "Cache-Control": "max-age=600" }).end("a cache probe, nothing else");
       if (f.revoked === route) {
         const problem = { type: "urn:bronzeward:problem:identity-revoked", title: "Identity revoked", status: 403, detail: "injected", instance: "req-injected" };
         return void res.writeHead(403, { "Content-Type": "application/problem+json" }).end(JSON.stringify(problem));
