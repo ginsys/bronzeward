@@ -311,10 +311,10 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     await expect(ended()).toHaveText(holds("The claim stays held until its lease lapses at"));
     expect(await $("button=Abandon import").isExisting()).toBe(true);
     await post("/bao/fault?mode=none");
-    // After the lease lapsed a reload offers the takeover; there is no wait without an end.
-    await browser.pause(20_000);
-    await browser.refresh();
-    await expect(allowed()).toHaveText("Its run stopped renewing the lease. Take it over to resume, or abandon it.", { wait: 30_000 });
+    // No reload: the page itself reads the import again after the lease lapsed, and then offers the takeover.
+    // The lease is 15 s and the page reads again 10 s after it (LEASE_MARGIN), so 60 s is a margin of more than
+    // twice the longest wait. A page that never reads again keeps its text and fails here.
+    await expect(allowed()).toHaveText("Its run stopped renewing the lease. Take it over to resume, or abandon it.", { wait: 60_000 });
     expect(await $("button=Take over import").isExisting()).toBe(true);
     await abandon();
   });
@@ -369,7 +369,20 @@ describe("an expired claim (ginsys/bronzeward#341)", () => {
   it("a paused import passes its absolute expiry: the page ends in the state the server left, offering no review and no continuation", async function () {
     this.timeout(240_000);
     const id = await pausedImport();
-    // The claim expires 45 s after it started and the sweep runs every 15 s; the page reads again at its own tick.
+    // No reload: the claim expires at most 45 s after it started and the page reads again within 5 s of that
+    // (EXPIRY_TICK), so 100 s is a margin of about twice the longest wait. The read shows either "Review expired"
+    // (the sweep, which runs every 15 s, has not ended the import yet) or the state the sweep left. A page that
+    // never reads again keeps "Review expires" and fails here.
+    await browser.waitUntil(
+      () =>
+        browser.execute(() => {
+          const claim = document.querySelector('section[aria-label="Claim"]')?.textContent ?? "";
+          const heading = document.querySelector("main h2")?.textContent ?? "";
+          return claim.includes("Review expired") || (heading.length > 0 && !heading.endsWith(": paused"));
+        }),
+      { timeout: 100_000, interval: 1_000, timeoutMsg: "the page did not read the import again after its absolute expiry" },
+    );
+    // The page can offer a continuation until it reads the state the sweep left, so the state is read by reload.
     await browser.waitUntil(async () => {
       await browser.refresh();
       return (await $("main h2").getText()).startsWith(`Import ${short(id)}: `) && !(await $("main h2").getText()).endsWith(": paused");
