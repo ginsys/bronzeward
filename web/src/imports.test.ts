@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { components } from "./api/v1";
 import { forgetETag, keepETag, keptETag } from "./drafts.tsx";
 import { WritesProvider } from "./forms.tsx";
-import { ABANDONED_SETTLE, abandonedSince, againPath, allowed, documentRefusal, ended, fileReader, type Ingestion, MAX_DOCUMENT, onEvent, sendStart, StartImport, type StartInput, startBody, startETag, startParams, startRun, started, stopsWatch, typedDocument, unsent, watchDeps } from "./imports.tsx";
+import { ABANDONED_SETTLE, abandonedSince, againPath, allowed, documentRefusal, ended, fileReader, type Ingestion, MAX_DOCUMENT, onEvent, sendStart, StartImport, type StartInput, startBody, startETag, startParams, startRun, started, stopsWatch, typedDocument, unsent, watchDeps, watchView } from "./imports.tsx";
 import { type Reads, ReadsProvider, short } from "./list.tsx";
 import { eventLine } from "./progress.ts";
 import { Client, type ReadResult } from "./request.ts";
@@ -518,4 +518,23 @@ test("§11.4 item 2: the marks field gets no browser spelling, fill or correctio
   // Encrypted staging with review is the default (B15, G5).
   expect(out).toContain('name="staging" checked="" value="encrypted"');
   expect(out.match(/<input[^>]*name="review"[^>]*>/)?.[0]).toContain('checked=""');
+});
+
+describe("the progress view across watches (ginsys/bronzeward#644 item E)", () => {
+  test("the cleared note of an earlier operation is gone when the watch starts again", () => {
+    let v = watchView({ lines: [] }, { type: "start" });
+    v = watchView(v, { type: "show", line: "started" });
+    v = watchView(v, { type: "clear", why: "The events were cleared: a new epoch." });
+    expect(v).toEqual({ lines: [], cleared: "The events were cleared: a new epoch." });
+    v = watchView(v, { type: "start" });
+    expect(v.cleared).toBeUndefined();
+    expect(v.lines).toEqual([]);
+    expect(v.end).toBeUndefined();
+  });
+  test("an event after a clear keeps the note, and the end text is kept beside the lines", () => {
+    let v = watchView({ lines: ["old"] }, { type: "clear", why: "cleared" });
+    v = watchView(v, { type: "show", line: "new" });
+    v = watchView(v, { type: "end", text: "done" });
+    expect(v).toEqual({ lines: ["new"], cleared: "cleared", end: "done" });
+  });
 });
