@@ -92,11 +92,12 @@ export function Refused({ problem, status, verb, testid, replayed = false, cut =
   if (problem === null) return <Status testid={testid}>{earlier}Not {verb}: the server answered {status}.{cut && ` ${CUT_OFF}`}</Status>;
   const code = problem.type.slice("urn:bronzeward:problem:".length);
   const rule = typeof problem["rule"] === "string" ? ` (rule ${problem["rule"]})` : "";
-  // A refused mark is named by its position in the request, never its path (§8.2 422 row).
+  // A refused mark is named by its position in the request, never its path (§8.2 422 row): its detail
+  // is left out too, because the server's text may name the path.
   const at = problem.status === 422 && positionOf(problem) !== undefined ? ` The mark at position ${positionOf(problem)} (the first is 0) is refused.` : "";
   return (
     <Status testid={testid}>
-      {earlier}Not {verb}: {code}{rule}.{at}{needs(status, problem)}{scopeRefusal(code, problem)} {problem.title}{problem.detail !== undefined && `: ${problem.detail}`}
+      {earlier}Not {verb}: {code}{rule}.{at}{needs(status, problem)}{scopeRefusal(code, problem)} {problem.title}{problem.detail !== undefined && at === "" && `: ${problem.detail}`}
       {problem.instance !== undefined && ` Request ${problem.instance}.`}
     </Status>
   );
