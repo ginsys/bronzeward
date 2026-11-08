@@ -63,9 +63,9 @@ func (c *stand) discover(t *testing.T) (Result, error) {
 	res, err := Discover(ctx, c.p.Talosconfig(c.a.Endpoint, "", ""), c.a.Endpoint)
 	// A read that has lost its own deadline waits for the caller's, and the reads after it then run on
 	// a context that has ended. The result can look right, so the test asks whether the caller's context
-	// is still alive.
+	// is still alive. A very slow runner can also use up the 20 s, so the message names that cause too.
 	if ctx.Err() != nil {
-		t.Errorf("the caller's context ended (%v) before discovery returned: a read has no deadline of its own", ctx.Err())
+		t.Errorf("the caller's context ended (%v) before discovery returned: a read may have no deadline of its own, or the runner used up the whole %v", ctx.Err(), 20*time.Second)
 	}
 	return res, err
 }
@@ -287,7 +287,8 @@ func route(t *testing.T, l net.Listener, by map[string]string) func() []string {
 // TestDiscoverBoundsEachAddress: every address of a member has its own deadline, so a member that
 // lists three addresses that never answer is tried at each of them, in order, and holds the command
 // for at least three member timeouts: the total bound is the number of listed addresses times
-// memberTimeout. The test sets no upper limit on the time, which a slow runner could break.
+// memberTimeout. The test sets no limit of its own on the time. The helper's 20 s caller budget is the
+// only upper limit, and a very slow runner could use it up.
 func TestDiscoverBoundsEachAddress(t *testing.T) {
 	c := newCluster(t)
 	tried := route(t, silent(t), map[string]string{"10.0.0.1": c.a.Endpoint})
