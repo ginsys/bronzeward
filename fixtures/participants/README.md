@@ -197,7 +197,7 @@ facilitator only. Setup `tN` means `fixtures/participants/session tN`.
   reader checks that a stream resumed with `Last-Event-ID` follows the apply to completion, with
   no event lost or repeated. Beside it, the CLI's `operation watch` follows the same apply through
   the same 60 s stop with no help: it waits for A, retries, and ends with exit 0 and the
-  completion line. A is stopped only while the watch runs and has printed its first event. The stop is
+  completion line. Before it stops A, the step checks that the watch runs and printed its first event. The stop is
   not synchronised with the watch, so this does not prove that the stop cut the CLI's own stream. The
   proof is the end of the step: the watch must exit 0 within 120 s of the apply's completion, print
   the outage notice and print the completion line. The step fails if it does not. The web interface has no operation timeline
