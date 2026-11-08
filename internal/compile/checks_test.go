@@ -85,7 +85,7 @@ func TestCompileRefusesABaseOverride(t *testing.T) {
 		values           map[string]provider.Value
 	}{
 		{"literal", "machine:\n  token: abcdef.0123456789abcdef\n", "doc[0]/machine/token", ingest.Declarations{}, nil},
-		{"delete", "cluster:\n  secretboxEncryptionSecret:\n    $patch: delete\n", "doc[0]/cluster/secretboxEncryptionSecret", ingest.Declarations{}, nil},
+		{"delete", "cluster:\n  token:\n    $patch: delete\n", "doc[0]/cluster/token", ingest.Declarations{}, nil},
 		// the check precedes validation: this fragment also makes the configuration invalid
 		{"literal in an invalid configuration", "machine:\n  token: abcdef.0123456789abcdef\ncluster:\n  network:\n    dnsDomain: not a domain\n",
 			"doc[0]/machine/token", ingest.Declarations{}, nil},

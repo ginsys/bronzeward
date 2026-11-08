@@ -291,6 +291,51 @@ func canonicalBase64(s string) (string, bool) {
 // also gives each identified embedded document as written. A refusal is Resolve's, or
 // trace-indistinct, by path.
 func Trace(s Sanitized, values map[string]provider.Value, first, flip int) (Resolved, []Tracer, []Host, error) {
+	return TraceKeeping(s, values, first, flip, SecretLeaves{})
+}
+
+// SecretLeaves is the places of one source that hold a field the pinned machinery redacts: the
+// same fields identification extracts without a mark. It holds no value.
+type SecretLeaves struct{ paths []Path }
+
+// SchemaSecretLeaves is the places of s, with its values resolved, that hold a secret field of the
+// pinned machinery. A value is read only to ask the machinery which fields it redacts.
+func SchemaSecretLeaves(s Sanitized, values map[string]provider.Value) (SecretLeaves, error) {
+	r, err := Resolve(s, values)
+	if err != nil {
+		return SecretLeaves{}, err
+	}
+	docs, err := parseStream(r.bytes())
+	if err != nil {
+		return SecretLeaves{}, errors.New("ingest: a resolved stream does not parse")
+	}
+	var out SecretLeaves
+	for i, d := range docs {
+		pointers, err := schemaPointers(d, i, nil)
+		if err != nil {
+			return SecretLeaves{}, err
+		}
+		for _, sp := range pointers {
+			out.paths = append(out.paths, Path{Doc: i, Pointer: sp.pointer})
+		}
+	}
+	return out, nil
+}
+
+// holds is whether the reference placed at p holds a secret field: p names the field or a mapping
+// that holds it. A reference inside an embedded document holds none, since the machinery does not
+// read embedded text.
+func (l SecretLeaves) holds(p Path) bool {
+	return p.Format == "" && slices.ContainsFunc(l.paths, func(q Path) bool {
+		return q.Doc == p.Doc && len(q.Pointer) >= len(p.Pointer) && slices.Equal(q.Pointer[:len(p.Pointer)], p.Pointer)
+	})
+}
+
+// TraceKeeping is Trace, except that a reference that holds a field in secret keeps its value
+// where a trace pass would put a stand-in. The tracers and their ids are those of Trace, but the
+// text holds a real secret: it is for the validation of a pass only, in memory, and no text of it
+// may leave the compiler (compilation.md §8.1).
+func TraceKeeping(s Sanitized, values map[string]provider.Value, first, flip int, secret SecretLeaves) (Resolved, []Tracer, []Host, error) {
 	next := first
 	flipped := false
 	var ts []Tracer
@@ -350,6 +395,12 @@ func Trace(s Sanitized, values map[string]provider.Value, first, flip int) (Reso
 			}
 			if t.kind != TraceBoolean && x.value == leaf.Value {
 				return nil, refuse(RuleTraceIndistinct, p.String())
+			}
+			if t.kind != TraceBoolean && secret.holds(p) {
+				x.value, x.raw = leaf.Value, ""
+				if plain, err := base64.StdEncoding.DecodeString(leaf.Value); err == nil && t.kind == TraceBytes {
+					x.raw = string(plain)
+				}
 			}
 			leaf.Value, t.text = x.value, x
 			ts = append(ts, Tracer{t})

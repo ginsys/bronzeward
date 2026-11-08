@@ -115,8 +115,11 @@ machine:
         auth:
           username: ci-pull
           password: !bwref registry/example-pass
-  nodeLabels:
-    team: ""
+---
+apiVersion: v1alpha1
+kind: KubeNodeConfig
+labels:
+  team: ""
 ```
 
 with the declaration `registry/example-pass: {kind: string, version: 1}`. The rendered review of
@@ -131,8 +134,11 @@ machine:
         auth:
           username: ci-pull
           password: <redacted:registry/example-pass@1>
-  nodeLabels:
-    team: ""
+---
+apiVersion: v1alpha1
+kind: KubeNodeConfig
+labels:
+  team: ""
 ```
 
 | Seen | Meaning | Source |
@@ -661,7 +667,7 @@ Evidence
   Validation    passed at publication (contract v1.14, machinery v1.14.5)
   Dry run       not available: the PoC has none
   Diff          whole redacted configuration, applied rel_9vbn…c1ta -> rel_h7rt…2bd
-    @@ machine.nodeLabels @@
+    @@ KubeNodeConfig labels @@
     +  team: storage
 Self-approval   predicted: you created this plan and published this release, and authored no
                 fragment, profile or assignment revision in it. Import-base authorship and

@@ -132,7 +132,6 @@ func compile(in Input, sources []Source) (Compiled, error) {
 	if err != nil {
 		return Compiled{}, fidelity()
 	}
-	passes := []Materialized{tm}
 	for _, t := range ts {
 		if t.Kind() != ingest.TraceBoolean {
 			continue
@@ -149,7 +148,6 @@ func compile(in Input, sources []Source) (Compiled, error) {
 		if attrs[t.ID()], err = flipped(traceLeaves, fm.bytes(), hosts); err != nil {
 			return Compiled{}, err
 		}
-		passes = append(passes, fm)
 	}
 	pre := prefixes{sources: sources, real: real, trace: trace, first: first, hosts: hs}
 	outcomes := make([]outcome, len(ts))
@@ -182,10 +180,16 @@ func compile(in Input, sources []Source) (Compiled, error) {
 	if err := checkOutput(realLeaves, realKeys, sources, outcomes); err != nil {
 		return Compiled{}, err
 	}
-	if cause, err := m.validate(in.Mode); err != nil {
-		return Compiled{}, explain("validation", err, cause, sources, ts, nil, func() (string, error) { return tm.validate(in.Mode) })
+	checked, rts, err := validationPasses(sources, first, ts)
+	if err != nil {
+		return Compiled{}, err
 	}
-	for _, p := range passes {
+	if cause, err := m.validate(in.Mode); err != nil {
+		// The message of the restored trace pass is the template: only its text redacts the
+		// real message, and its own text never leaves (compilation.md §8.3).
+		return Compiled{}, explain("validation", err, cause, sources, rts, nil, func() (string, error) { return checked[0].validate(in.Mode) })
+	}
+	for _, p := range checked {
 		if err := p.Validate(in.Mode); err != nil {
 			return Compiled{}, fidelity()
 		}
@@ -238,6 +242,67 @@ func traceAll(sources []Source) ([]ingest.Resolved, []int, []traced, []ingest.Ho
 		}
 	}
 	return trace, first, ts, hs, nil
+}
+
+// validationPasses is the trace pass and each boolean's flip pass, composed again with the value of
+// every schema-secret reference restored in memory: the machinery's content checks (a PEM block,
+// a key) reject a stand-in of a secret field, which the real composition passes. A reference the
+// operator marked outside those fields keeps its stand-in. The compositions are validated and
+// dropped. A refusal of them is the bare fidelity refusal, and no message of theirs is used,
+// since it could quote a secret (compilation.md §8.1).
+//
+// The first composition is the trace pass restored, and its tracers are the second result. They
+// redact the message of an invalid real composition, as the stand-in pass's tracers redact the
+// message of any other step: the real composition and this pass differ only where a stand-in
+// stands, and a restored value is quoted by its tracer like any other.
+func validationPasses(sources []Source, first []int, ts []traced) ([]Materialized, []traced, error) {
+	secrets := make([]ingest.SecretLeaves, len(sources))
+	for i, s := range sources {
+		var err error
+		if secrets[i], err = ingest.SchemaSecretLeaves(s.Text, s.Values); err != nil {
+			return nil, nil, fidelity()
+		}
+	}
+	var rts []traced
+	pass := func(flip int, at int) (Materialized, error) {
+		in := make([]ingest.Resolved, len(sources))
+		for i, s := range sources {
+			f := -1
+			if i == at {
+				f = flip
+			}
+			r, xs, _, err := ingest.TraceKeeping(s.Text, s.Values, first[i], f, secrets[i])
+			if err != nil {
+				return Materialized{}, fidelity()
+			}
+			in[i] = r
+			if flip < 0 {
+				for _, x := range xs {
+					rts = append(rts, traced{x, i})
+				}
+			}
+		}
+		m, err := Compose(in[0], in[1:])
+		if err != nil {
+			return Materialized{}, fidelity()
+		}
+		return m, nil
+	}
+	m, err := pass(-1, -1)
+	if err != nil {
+		return nil, nil, err
+	}
+	out := []Materialized{m}
+	for _, t := range ts {
+		if t.Kind() != ingest.TraceBoolean {
+			continue
+		}
+		if m, err = pass(t.ID(), t.source); err != nil {
+			return nil, nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rts, nil
 }
 
 // explain sets the message of a real rejection or invalid verdict as compilation.md §8.3 shows

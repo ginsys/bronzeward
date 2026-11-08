@@ -359,6 +359,10 @@ func TestBuildReleaseRefuses(t *testing.T) {
 		{"contract not the renderer's", func(b *buildEnv) {
 			mustExec(b.t, b.db, `UPDATE cluster SET contract = 'v1.12' WHERE id = $1`, b.cluster)
 		}, "contract", false, ""},
+		// A cluster registered before the move to v1.14 keeps its row, and only publish refuses it.
+		{"contract of the previous minor", func(b *buildEnv) {
+			mustExec(b.t, b.db, `UPDATE cluster SET contract = 'v1.13' WHERE id = $1`, b.cluster)
+		}, "contract", false, ""},
 		{"machines disagree on Kubernetes", func(b *buildEnv) {
 			b.secondMachine(minimum)
 		}, "kubernetes", true, ""},

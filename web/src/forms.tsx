@@ -249,7 +249,7 @@ export function AddCluster() {
       <Form label="Add cluster" onSubmit={submit} w={w} done={done}>
         <Text label="Name:" name="name" />
         <Text label="Kubernetes endpoint:" name="endpoint" hint="https://host or https://host:port" />
-        <Text label="Talos contract:" name="contract" hint="a minor version, as v1.13" />
+        <Text label="Talos contract:" name="contract" hint="a minor version, as v1.14" />
         <Text label="Talos cluster ID:" name="talosClusterId" hint="as talosctl get info prints it" />
       </Form>
     </>

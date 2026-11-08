@@ -962,7 +962,7 @@ type ClusterBody struct {
 
 // ClusterInput defines model for ClusterInput.
 type ClusterInput struct {
-	// Contract A Talos contract minor, as v1.13.
+	// Contract A Talos contract minor, as v1.14.
 	Contract string `json:"contract"`
 
 	// Endpoint https://<host>[:<port>], with no path, query, fragment or user information.

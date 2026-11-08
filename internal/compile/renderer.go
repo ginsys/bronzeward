@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/siderolabs/talos/pkg/machinery/compatibility/talos113"
+	"github.com/siderolabs/talos/pkg/machinery/compatibility/talos114"
 	"github.com/siderolabs/talos/pkg/machinery/config/configloader"
 	"github.com/siderolabs/talos/pkg/machinery/constants"
 	"go.yaml.in/yaml/v3"
@@ -64,15 +64,36 @@ func machinery(bi *debug.BuildInfo, ok bool) (string, string, error) {
 // machinery renders a newer contract silently as its own.
 func CheckContract(machinery, contract string) error {
 	refuse := &Error{Rule: RuleContract, Message: "the cluster's contract is not the renderer's minor"}
-	if !moduleVersion.MatchString(machinery) || !contractRe.MatchString(contract) {
-		return refuse
-	}
-	major, rest, _ := strings.Cut(strings.TrimPrefix(machinery, "v"), ".")
-	minor, _, _ := strings.Cut(rest, ".")
-	if contract != "v"+major+"."+minor {
+	want, ok := contractOf(machinery)
+	if !ok || !contractRe.MatchString(contract) || contract != want {
 		return refuse
 	}
 	return nil
+}
+
+// SupportedContract is the one cluster contract this build renders: the minor of the machinery
+// version it records. It reads the minor the way CheckContract does, so a cluster that is
+// registered with it is never refused at publish for its contract.
+func SupportedContract() (string, error) {
+	version, _, err := Machinery()
+	if err != nil {
+		return "", err
+	}
+	contract, ok := contractOf(version)
+	if !ok {
+		return "", errMachinery
+	}
+	return contract, nil
+}
+
+// contractOf is the Talos contract minor of a machinery module version, as "v1.14" for "v1.14.5".
+func contractOf(machinery string) (string, bool) {
+	if !moduleVersion.MatchString(machinery) {
+		return "", false
+	}
+	major, rest, _ := strings.Cut(strings.TrimPrefix(machinery, "v"), ".")
+	minor, _, _ := strings.Cut(rest, ".")
+	return "v" + major + "." + minor, true
 }
 
 // KubernetesVersion is the Kubernetes version the compiled configuration runs (compilation.md
@@ -88,10 +109,10 @@ func (c Compiled) KubernetesVersion(machinery string) (string, error) {
 		return "", refuse("no compiled configuration")
 	}
 	cfg, err := configloader.NewFromBytes(c.m.bytes())
-	if err != nil || cfg.Machine() == nil {
+	if err != nil || cfg.Machine() == nil || cfg.K8sKubeletConfig() == nil {
 		return "", refuse("the configuration has no machine document")
 	}
-	composed := cfg.Machine().Kubelet().Image()
+	composed := cfg.K8sKubeletConfig().Image()
 	redacted, err := c.Redacted()
 	if err != nil {
 		return "", refuse("the kubelet image cannot be shown")
@@ -139,9 +160,9 @@ func (c Compiled) KubernetesVersion(machinery string) (string, error) {
 // machine API's version message, which only internal/talos imports, so the window is read from
 // the minor's own constants; a machinery of any other minor has none and refuses.
 var kubernetesWindows = map[[2]uint64][2][3]uint64{
-	talos113.MajorMinor: {
-		{talos113.MinimumKubernetesVersion.Major, talos113.MinimumKubernetesVersion.Minor, talos113.MinimumKubernetesVersion.Patch},
-		{talos113.MaximumKubernetesVersion.Major, talos113.MaximumKubernetesVersion.Minor, talos113.MaximumKubernetesVersion.Patch},
+	talos114.MajorMinor: {
+		{talos114.MinimumKubernetesVersion.Major, talos114.MinimumKubernetesVersion.Minor, talos114.MinimumKubernetesVersion.Patch},
+		{talos114.MaximumKubernetesVersion.Major, talos114.MaximumKubernetesVersion.Minor, talos114.MaximumKubernetesVersion.Patch},
 	},
 }
 
@@ -180,7 +201,16 @@ func shownImage(redacted string) (string, error) {
 			continue
 		}
 		node := n.Content[0]
-		for _, key := range []string{"machine", "kubelet", "image"} {
+		// v1.14 keeps the image in the KubeletConfig document, and in machine.kubelet of v1alpha1.
+		path := []string{"machine", "kubelet", "image"}
+		if node.Kind == yaml.MappingNode {
+			for i := 0; i+1 < len(node.Content); i += 2 {
+				if node.Content[i].Value == "kind" && node.Content[i+1].Value == "KubeletConfig" {
+					path = []string{"image"}
+				}
+			}
+		}
+		for _, key := range path {
 			if node.Kind != yaml.MappingNode {
 				return "", errHidden
 			}
