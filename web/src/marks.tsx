@@ -34,16 +34,20 @@ export function markSpec(id: string, marks: string[]): WriteSpec {
   return { method: "POST", path: `/ingestions/${enc(id)}/marks`, resource: `/ingestions/${enc(id)}`, body, released: () => { delete body["marks"]; } };
 }
 
+const LINE_BREAK = /[\r\n]/;
+
 // A path segment, escaped as RFC 6901: "~" is "~0" and "/" is "~1".
 const token = (s: string) => s.replace(/~/g, "~0").replace(/\//g, "~1");
 
 // The string values of a review's documents as compilation §2.2 paths: doc[<n>], then a JSON Pointer.
 // A value already extracted (a tagged scalar), an alias and a key holding "|" (it cannot be addressed)
 // are left out. The `yaml` package only reads the text: nothing is re-encoded, stored or sent.
-export function candidates(text: string): { paths: string[]; more: number } {
+export function candidates(text: string): { paths: string[]; more: number; unaddressable: number } {
   const paths: string[] = [];
   let more = 0;
-  const add = (p: string) => (paths.length < MAX_CANDIDATES ? paths.push(p) : more++);
+  let unaddressable = 0;
+  // A path with a line break cannot be one line of the typed list: choosing it would mark another node.
+  const add = (p: string) => (LINE_BREAK.test(p) ? unaddressable++ : paths.length < MAX_CANDIDATES ? paths.push(p) : more++);
   const walk = (node: unknown, at: string): void => {
     if (isAlias(node)) return;
     if (isScalar(node)) {
@@ -60,7 +64,7 @@ export function candidates(text: string): { paths: string[]; more: number } {
     }
   };
   parseAllDocuments(text).forEach((d, i) => walk(d.contents, `doc[${i}]`));
-  return { paths, more };
+  return { paths, more, unaddressable };
 }
 
 // The typed marks with one more path on its own line, once.
@@ -80,7 +84,7 @@ export function MarksPanel({ text, send, busy }: { text: string; send: (marks: s
   const [marks, setMarks] = useState("");
   const [refusal, setRefusal] = useState<string>();
   useUnsaved("the marks", marks !== "");
-  const { paths, more } = candidates(text);
+  const { paths, more, unaddressable } = candidates(text);
   const go = () => {
     const lines = markLines(marks);
     const why = markRefusal(lines);
@@ -96,6 +100,7 @@ export function MarksPanel({ text, send, busy }: { text: string; send: (marks: s
         {paths.map((p) => <li key={p}><code>{p}</code> <Action label="Mark as secret" needs={["author"]} onClick={() => setMarks((m) => withMark(m, p))} /></li>)}
       </ul>
       {more > 0 && <p>{more} more values are not listed. Type their paths below.</p>}
+      {unaddressable > 0 && <p data-testid="unaddressable">{`Values under a key with a line break cannot be marked here: ${unaddressable}.`}</p>}
       <p><label>Marks, one path per line:<br /><textarea rows={4} cols={80} value={marks} onChange={(e) => setMarks(e.target.value)} data-testid="marks" {...NO_ASSIST} /></label></p>
       <Action label="Send marks" needs={["author"]} onClick={go} busy={busy} />
       {refusal !== undefined && <p data-testid="not-sent">{refusal}</p>}

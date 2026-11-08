@@ -124,7 +124,9 @@ export async function ended(client: Pick<Client, "readWithEpoch">, b: Ingestion,
   if (last === "resume-failed") return `Import ${short(b.id)} was not applied: its staged input could not be decrypted (resume-failed). The claim stays held until its lease lapses at ${when(b.leaseUntil)}; then take it over, or abandon it now.`;
   if (lapsed(b, now)) {
     const next = b.mode === "transient" ? "or abandon it (transient staging cannot be taken over)" : "take it over, or abandon it";
-    return `Its claim is ${b.state} and its lease lapsed at ${when(b.leaseUntil)}, while operation ${short(o.id)} still runs: the outcome is unknown. Read it again later, ${next}.`;
+    // A takeover discarded the mark whatever the takeover's own run does next, so that part is known.
+    const lost = run?.replacedBy !== undefined ? `The earlier mark was not applied: a takeover at generation ${run.replacedBy} resumed the import without it. ` : "";
+    return `${lost}Its claim is ${b.state} and its lease lapsed at ${when(b.leaseUntil)}, while operation ${short(o.id)} still runs: the outcome is unknown. Read it again later, ${next}.`;
   }
   return undefined;
 }
