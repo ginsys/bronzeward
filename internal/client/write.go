@@ -59,7 +59,13 @@ type Write struct {
 // ReadsFrom binds the send to the epoch and the move count of the reads c made so far, so that a
 // caller cannot set Reads without the count (§8.5, §8.6 item 3).
 func (w *Write) ReadsFrom(c *Client) {
-	w.Reads, w.readMoves, w.counted = c.Context.LastEpoch, c.moves, true
+	w.ReadsAt(c.Context.LastEpoch, c.moves)
+}
+
+// ReadsAt binds the send to a read that is not the last one: epoch is the epoch that read showed
+// and moves is c.EpochMoves() as that answer left it.
+func (w *Write) ReadsAt(epoch string, moves int) {
+	w.Reads, w.readMoves, w.counted = epoch, moves, true
 }
 
 // CheckRepeat runs a T10 repeat's checks, the principal and the confirming GET /recovery, for the

@@ -39,6 +39,8 @@ type draftFake struct {
 	// GET /fragments.
 	serverEpoch    string
 	fragmentsEpoch string
+	// identityEpoch does the same for GET /identity, which a write reads before and after GET /server.
+	identityEpoch string
 }
 
 func (f *draftFake) etag() string { return fmt.Sprintf(`"%d-BWSYNTH"`, f.rev) }
@@ -85,6 +87,9 @@ func (f *draftFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":2,"startMode":"normal"}`)
 	case "GET /identity":
+		if f.identityEpoch != "" {
+			w.Header().Set("Bronzeward-Epoch", f.identityEpoch)
+		}
 		fmt.Fprint(w, `{"kind":"service","principal":"svc_BWSYNTH"}`)
 	case "GET /fragments":
 		if f.fragmentsEpoch != "" {
@@ -371,6 +376,61 @@ func TestDraftEditing(t *testing.T) {
 	step("discard forgot the ETag", []string{"profile", "rm", "workers", "--draft", "drf_BWSYNTH"}, 1, "", "Read the draft first")
 	step("draft show of a closed draft keeps none", []string{"draft", "show", "drf_BWSYNTH"}, 0, "drf_BWSYNTH", "")
 	step("so a write still needs a read", []string{"profile", "rm", "workers", "--draft", "drf_BWSYNTH"}, 1, "", "Read the draft first")
+}
+
+// TestProfileSetRefusesEpochBack: the draft, and for a listed name the fragment list, answer
+// ep_BWSYNTH-1. The write's own principal read then shows ep_BWSYNTH-2, and its GET /server shows
+// ep_BWSYNTH-1 again, so the last epoch equals the epoch of the pins. A change that a later answer
+// set back is still a change (client-contracts.md section 8.6 item 3): nothing is sent. A control
+// moves the epoch before the draft is read, and that send goes out.
+func TestProfileSetRefusesEpochBack(t *testing.T) {
+	const want = "the epoch changed after the request was built from reads of 'ep_BWSYNTH-1'"
+	for _, c := range []struct {
+		name     string
+		fragment string // the name to pin
+		move     func(*draftFake)
+		refused  bool
+	}{
+		{"the draft proposes the pin", "worker-labels", func(f *draftFake) { f.identityEpoch = "ep_BWSYNTH-2" }, true},
+		{"the pin is read from the fragment list", "worker-sysctls", func(f *draftFake) { f.identityEpoch = "ep_BWSYNTH-2" }, true},
+		// Every answer of the write shows ep_BWSYNTH-2, so the move came before the draft was read.
+		{"control: the move comes before the draft read", "worker-labels", func(f *draftFake) { f.epoch = "ep_BWSYNTH-2" }, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := &draftFake{rev: 1, state: "open"}
+			srv := httptest.NewServer(f)
+			defer srv.Close()
+			automationContext(t, srv.URL)
+			exec := func(args ...string) (int, string, string) {
+				t.Helper()
+				var o, e bytes.Buffer
+				code := run(args, &o, &e)
+				return code, o.String(), e.String()
+			}
+			if code, _, e := exec("draft", "show", "drf_BWSYNTH"); code != 0 {
+				t.Fatalf("draft show: exit %d, stderr %q", code, e)
+			}
+			f.took()
+			f.mu.Lock()
+			c.move(f)
+			f.mu.Unlock()
+			// --if-match gives the write an ETag that a crossing did not drop, so only the epoch check can hold it back.
+			code, out, errText := exec("profile", "set", "workers", "--draft", "drf_BWSYNTH", "--fragments", c.fragment, `--if-match="1-BWSYNTH"`)
+			w := f.took()
+			if c.refused {
+				if code != 1 || out != "" || !strings.Contains(errText, want) || !strings.Contains(errText, "Nothing was sent") {
+					t.Errorf("exit %d, stdout %q, stderr %q; want 1, nothing and %q", code, out, errText, want)
+				}
+				if len(w) != 0 {
+					t.Errorf("sent %q; want nothing", w)
+				}
+				return
+			}
+			if code != 0 || len(w) != 1 {
+				t.Errorf("exit %d, stderr %q, writes %q; want 0 and one PUT", code, errText, w)
+			}
+		})
+	}
 }
 
 // TestProfileSetRefusesMixedPins: the pins of profile set come from the draft and, for a name the
