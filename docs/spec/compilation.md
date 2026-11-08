@@ -1029,7 +1029,10 @@ The implementation settles eight points SP left open:
   memory only, into every leaf that holds a schema secret (a field the
   machinery's redaction changes, §6). A leaf the operator marked keeps its
   stand-in, so a marked leaf whose stand-in the machinery rejects is still
-  refused as a fidelity failure. Only validation uses the restored copies.
+  refused as a fidelity failure. Each place is tested on its own: a member of a
+  mapping value and an alias of a reference are restored only where the schema
+  holds a secret, and keep the stand-in elsewhere. Only validation uses the
+  restored copies.
   Attribution, the tree-shape comparison and the prefixes read the stand-in
   passes, as before. A restored pass that fails validation gives the bare
   fidelity refusal. The first restored pass also supplies the template for the

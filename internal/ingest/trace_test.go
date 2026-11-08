@@ -421,3 +421,46 @@ func TestTraceKeepingTestsEachMemberOfAMapping(t *testing.T) {
 		})
 	}
 }
+
+// An alias of a reference is another place that holds its value, and the machinery tests that place
+// on its own. TraceKeeping restores the value at a place the schema holds as a secret and nowhere
+// else: an alias in another field keeps the stand-in, so validation shows whether that field takes
+// it (compilation.md §8.1). An alias in a secret place of its own is restored too.
+func TestTraceKeepingTestsEachAliasOfAReference(t *testing.T) {
+	text := "machine:\n  nodeLabels:\n    secret: &s !bwref app/str\n    again: *s\n" +
+		"  nodeAnnotations: &m !bwref app/map\n  nodeTaints: *m\ncluster:\n  etcd:\n    advertisedSubnets: [*s]\n"
+	decl := Declarations{References: map[string]Reference{
+		"app/str": str(provider.KindString), "app/map": {Kind: provider.KindMapping, Version: 4},
+	}}
+	values := map[string]provider.Value{
+		"app/str": value(t, provider.KindString, resolveSecret),
+		"app/map": value(t, provider.KindMapping, map[string]any{"cert": "cert-" + resolveSecret, "key": "key-" + resolveSecret}),
+	}
+	leaves := SecretLeaves{paths: []Path{
+		{Doc: 0, Pointer: []string{"machine", "nodeLabels", "secret"}},
+		{Doc: 0, Pointer: []string{"machine", "nodeLabels", "again"}},
+		{Doc: 0, Pointer: []string{"machine", "nodeAnnotations", "key"}},
+	}}
+	r, _, _, err := TraceKeeping(sanitizedOf(t, text, decl), values, 0, -1, leaves)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := decodeStream(t, string(r.bytes()))[0]
+	machine := doc["machine"].(map[string]any)
+	labels := machine["nodeLabels"].(map[string]any)
+	cluster := doc["cluster"].(map[string]any)
+	subnets := cluster["etcd"].(map[string]any)["advertisedSubnets"].([]any)
+	members, others := machine["nodeAnnotations"].(map[string]any), machine["nodeTaints"].(map[string]any)
+	for name, c := range map[string][2]any{"the secret place": {labels["secret"], resolveSecret},
+		"its alias in a secret place": {labels["again"], resolveSecret}, "the secret member": {members["key"], "key-" + resolveSecret}} {
+		if c[0] != c[1] {
+			t.Errorf("%s = %v, want the real value", name, c[0])
+		}
+	}
+	for name, got := range map[string]any{"the alias in a field that is no secret": subnets[0],
+		"the member beside the secret one": members["cert"], "an alias member that is no secret": others["key"]} {
+		if s, _ := got.(string); strings.Contains(s, resolveSecret) {
+			t.Errorf("%s holds the real value, want a stand-in", name)
+		}
+	}
+}
