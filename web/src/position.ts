@@ -823,8 +823,12 @@ interface Docs {
   // document inside such a span lists nothing either (ginsys/bronzeward#633).
   from: number;
   spans: Spot[];
+  // The names of the anchors read so far in the stream. go-yaml keeps them across `---` and `...`
+  // (a re-defined anchor is fine), so an alias whose name is not here is undefined and refuses
+  // its document (ginsys/bronzeward#672).
+  anchors: Set<string>;
 }
-const freshDocs = (props: Map<number, Prop>, spans: Spot[], from: number): Docs => ({
+const freshDocs = (props: Map<number, Prop>, spans: Spot[], from: number, anchors: Set<string>): Docs => ({
   phase: "start",
   pending: [],
   table: new Map(DEFAULT_HANDLES),
@@ -833,12 +837,13 @@ const freshDocs = (props: Map<number, Prop>, spans: Spot[], from: number): Docs 
   props,
   from,
   spans,
+  anchors,
 });
 // End the document at the offset `at`: the start of the line that ends it, or the end of a `...` line.
 function endDocument(d: Docs, phase: "start" | "ended", at: number) {
   if (d.refused) d.spans.push({ start: d.from, end: at });
   else for (const [k, v] of d.cur) d.props.set(k, v);
-  Object.assign(d, freshDocs(d.props, d.spans, at), { phase });
+  Object.assign(d, freshDocs(d.props, d.spans, at, d.anchors), { phase });
 }
 // Read a line against the document state. A directive line (`%` in the first column, outside any
 // scalar) is consumed here and returns true. A `---` or `...` marker ends or starts a document, and
@@ -954,7 +959,7 @@ function commentStarts(
   const props = new Map<number, Prop>();
   const refused: Spot[] = [];
   const cuts = new Set<number>();
-  const docs = freshDocs(props, refused, 0);
+  const docs = freshDocs(props, refused, 0, new Set());
   let base = 0;
   // For each line: the bytes from its start to the `#` of the first line from it that is not blank, if
   // that line is a comment line (a blank line counts with its line break). Infinity if it is not, or
@@ -1186,6 +1191,10 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: numb
           if (resolved === undefined) docs.refused = true;
           else if (resolved === "!bwref") docs.cur.set(base + j, { end: base + e, inFlow: st.flow > 0 });
         }
+        // An anchor defines its name. An alias whose name no anchor defined before it refuses the
+        // document (`unknown anchor`), so the document lists nothing (ginsys/bronzeward#672).
+        if (c === "&") docs.anchors.add(line.slice(j + 1, e));
+        else if (c === "*" && !docs.anchors.has(line.slice(j + 1, e))) docs.refused = true;
         j = e;
         lastPlain = false;
         if (c === "*") {
