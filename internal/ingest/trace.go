@@ -363,10 +363,10 @@ func TraceKeeping(s Sanitized, values map[string]provider.Value, first, flip int
 	flipped := false
 	var ts []Tracer
 	var hosts []Host
-	// anchored gives, for the node of a restored reference that carries an anchor, the node an alias
-	// of it at a path holds: an alias is a place of its own, restored only where the schema holds a
-	// secret.
-	anchored := map[*yaml.Node]func(Path) *yaml.Node{}
+	// sites gives, for the node of a restored reference and for an alias already replaced, the node it
+	// holds at a path q: an alias is a place of its own, restored only where the schema holds a
+	// secret. An alias of a container is a copy of it, made from these.
+	sites := map[*yaml.Node]func(Path) *yaml.Node{}
 	r, err := resolveWith(s, func(name string, ref Reference, p Path, site *yaml.Node) (*yaml.Node, error) {
 		n, rule := placed(name, ref, values)
 		if rule != "" {
@@ -444,8 +444,8 @@ func TraceKeeping(s Sanitized, values map[string]provider.Value, first, flip int
 			ts = append(ts, Tracer{t})
 			next++
 		}
-		if site.Anchor != "" && len(secret.paths) > 0 {
-			anchored[site] = func(q Path) *yaml.Node {
+		if len(secret.paths) > 0 {
+			sites[site] = func(q Path) *yaml.Node {
 				c := *n
 				c.Anchor = ""
 				if n.Kind != yaml.MappingNode {
@@ -465,8 +465,14 @@ func TraceKeeping(s Sanitized, values map[string]provider.Value, first, flip int
 	}, func(format, text string) {
 		hosts = append(hosts, Host{&host{format: format, text: &text}})
 	}, func(a *yaml.Node, q Path) {
-		if f := anchored[a.Alias]; f != nil {
+		target := a.Alias
+		f := sites[target]
+		if f == nil && holdsSite(target, sites) {
+			f = func(q Path) *yaml.Node { return copyAt(target, q, sites) }
+		}
+		if f != nil {
 			*a = *f(q)
+			sites[a] = f
 		}
 	})
 	if err != nil {
@@ -497,6 +503,43 @@ func pickKept(secret SecretLeaves, p Path, kept [2]string, x *standInText) strin
 		return kept[0]
 	}
 	return kept[1]
+}
+
+// holdsSite is whether n is, or holds below it, a node of sites: a container that an alias must copy.
+func holdsSite(n *yaml.Node, sites map[*yaml.Node]func(Path) *yaml.Node) bool {
+	return sites[n] != nil || slices.ContainsFunc(n.Content, func(c *yaml.Node) bool { return holdsSite(c, sites) })
+}
+
+// copyAt is a copy of n as it stands at q, an alias of a container: a node of sites gives its own
+// node at q, so a restored value stays only where the schema holds a secret at the new path. The
+// copy shares no node with n and has no anchor. Every alias in n, a mapping key included, is replaced
+// by a copy of its target: the copy is written and read again, and an alias left as a name would
+// bind to the nearest earlier anchor of that name, which can be a restored secret. The parse stage
+// refuses an alias that names a node containing it (cyclicAlias), so the copy ends.
+func copyAt(n *yaml.Node, q Path, sites map[*yaml.Node]func(Path) *yaml.Node) *yaml.Node {
+	if f := sites[n]; f != nil {
+		return f(q)
+	}
+	if n.Kind == yaml.AliasNode {
+		return copyAt(n.Alias, q, sites)
+	}
+	c := *n
+	c.Anchor = ""
+	if n.Kind != yaml.MappingNode && n.Kind != yaml.SequenceNode {
+		return &c
+	}
+	c.Content = slices.Clone(n.Content)
+	for i, child := range n.Content {
+		switch {
+		case n.Kind == yaml.MappingNode && i%2 == 0:
+			c.Content[i] = copyAt(child, q, sites)
+		case n.Kind == yaml.MappingNode:
+			c.Content[i] = copyAt(child, q.child(keyToken(n.Content[i-1])), sites)
+		default:
+			c.Content[i] = copyAt(child, q.child(strconv.Itoa(i)), sites)
+		}
+	}
+	return &c
 }
 
 // standIn is SP's shape stand-in (compilation.md §8.1, choice §16.22): each letter becomes x or
