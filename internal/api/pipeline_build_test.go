@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/siderolabs/talos/pkg/machinery/compatibility/talos113"
+	"github.com/siderolabs/talos/pkg/machinery/compatibility/talos114"
 	"github.com/siderolabs/talos/pkg/machinery/config/encoder"
 	"github.com/siderolabs/talos/pkg/machinery/config/generate"
 	"github.com/siderolabs/talos/pkg/machinery/config/machine"
@@ -324,8 +324,12 @@ func TestBuildReleaseCommits(t *testing.T) {
 // A refused compilation fails the publication 422 naming the machine and rule (ruling R33), and
 // names no value.
 func TestBuildReleaseRefuses(t *testing.T) {
-	minimum := fmt.Sprintf("%d.%d.%d", talos113.MinimumKubernetesVersion.Major, talos113.MinimumKubernetesVersion.Minor,
-		talos113.MinimumKubernetesVersion.Patch)
+	// The lowest Kubernetes version of the window of the machinery this build holds (talos114). The
+	// second machine of "machines disagree" runs it, so the case fails for the disagreement with the
+	// first machine, which runs the default version. A version below the window fails for the
+	// window, with the same rule.
+	minimum := fmt.Sprintf("%d.%d.%d", talos114.MinimumKubernetesVersion.Major, talos114.MinimumKubernetesVersion.Minor,
+		talos114.MinimumKubernetesVersion.Patch)
 	cases := []struct {
 		name    string
 		prepare func(b *buildEnv)
@@ -356,7 +360,9 @@ func TestBuildReleaseRefuses(t *testing.T) {
 			}
 		}, "kind-mismatch", true, "fragment[1]"},
 		{"Kubernetes outside the window", func(b *buildEnv) {
-			b.fragment("network", "site", "machine:\n  kubelet:\n    image: ghcr.io/siderolabs/kubelet:v1.20.0\n")
+			// The image is set in the KubeletConfig document. The v1.14.5 base holds that document, and
+			// validation refuses the v1alpha1 field machine.kubelet beside it, with rule "invalid".
+			b.fragment("network", "site", "apiVersion: v1alpha1\nkind: KubeletConfig\nimage: ghcr.io/siderolabs/kubelet:v1.20.0\n")
 		}, "kubernetes", true, ""},
 		{"contract not the renderer's", func(b *buildEnv) {
 			mustExec(b.t, b.db, `UPDATE cluster SET contract = 'v1.12' WHERE id = $1`, b.cluster)
