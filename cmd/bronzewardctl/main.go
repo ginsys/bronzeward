@@ -51,6 +51,8 @@ commands:
   machine add --cluster <id> (--talos-node-id <id> | --smbios-uuid <uuid>) [--serial <s>]
               --platform metal|container|cloud --talos-endpoint <ip>[:<port>]
   machine set-endpoint <id> --talos-endpoint <ip>[:<port>]
+              writes, by a person signed in as author, repeat a write whose outcome was unknown
+              exactly with --idempotency-key, --expect-epoch and --expect-principal as printed
   machine freeze | unfreeze <id> --reason <text>
               a freeze stops new commitments and attempts, not an attempt already recorded, and
               an adoption can still be recorded; freeze takes author, publisher, approver or
@@ -59,8 +61,6 @@ commands:
   drift show <machine>
               the open drift: its observations, late landing and the choices; the time shown is
               that of the observation, the API serves no opening time; there is no ignore command
-              writes, by a person signed in as author, repeat a write whose outcome was unknown
-              exactly with --idempotency-key, --expect-epoch and --expect-principal as printed
   fragment | profile | assignment show <head or revision ID> | history <head ID>
   draft list [--cluster <id>] | show <draft>
   draft create --cluster <id> --title <title>
