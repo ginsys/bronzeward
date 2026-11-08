@@ -1867,6 +1867,16 @@ describe("a plain !bwref value that goes on to the next line", () => {
       );
     });
 
+    // The same line with an anchor on every tag: `anchoredContinues` had the same search of the rest of the line
+    // for each tag, and a search back to the start of the line (ginsys/bronzeward#719). On the code before the
+    // repair this draft took 13,421 ms, 23.5 times the time per character of a line of 625 tags. It costs more per
+    // tag than the plain line, so 40,000 tags fail as clearly as 320,000 plain ones.
+    test("a flow line of 40,000 anchored tags lists every one", () => {
+      expect(bounded(40000, (n) => `[${lines(n, (i) => `${i ? ", " : ""}!bwref &a${i} x/foo${i}`)}]\n`)).toHaveLength(
+        40000,
+      );
+    });
+
     // A line of many bangs and a word: a tag on a line of its own below it is not on a root scalar, and
     // the line of bangs is no line of properties only. Matching the line must not try every split of it.
     // This line of 25 bangs took 1,177 ms on e354c61c.
