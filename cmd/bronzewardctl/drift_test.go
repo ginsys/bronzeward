@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 	"testing"
@@ -242,6 +244,12 @@ func TestDriftRevertRefusesBeforeSending(t *testing.T) {
 			"machine mch_a has no Desired release to revert to; nothing was sent. Publish a release that covers it, then: bronzewardctl plan create --release <release> --machine 'mch_a' --operation 'apply-config'"},
 		{"no open drift", noDriftMachine,
 			"machine mch_a has no open drift record; nothing was sent. To apply its Desired release without a revert: bronzewardctl plan create --release 'rel_b' --machine 'mch_a' --operation 'apply-config'"},
+		// The server refuses an apply-config plan for a machine with no Applied configuration
+		// (internal/api/plans.go), so the guidance is an adopt plan.
+		{"no Applied", `{"id":"mch_a","cluster":"cls_a","desired":"rel_b","applied":null,"openDrift":null,"frozen":false,"scopeState":"normal"}`,
+			"machine mch_a has no Applied configuration, so it has no drift to revert; nothing was sent. Hand it over with an adopt plan: bronzewardctl plan create --release 'rel_b' --machine 'mch_a' --operation 'adopt'"},
+		{"no Applied and no Desired", `{"id":"mch_a","cluster":"cls_a","desired":null,"applied":null,"openDrift":null,"frozen":false,"scopeState":"normal"}`,
+			"machine mch_a has no Desired release to revert to; nothing was sent. Publish a release that covers it, then: bronzewardctl plan create --release <release> --machine 'mch_a' --operation 'adopt'"},
 	} {
 		seen := recoveryServer(t, map[string]string{"GET /api/v1/machines/mch_a": c.machine}, "")
 		if code, out, errOut := runDrift(t, "drift", "revert", "mch_a"); code != 2 || out != "" || !strings.Contains(errOut, c.want) {
@@ -255,14 +263,118 @@ func TestDriftRevertRefusesBeforeSending(t *testing.T) {
 	}
 }
 
+// revertServer is a plan server whose machine mch_a has Desired rel_BWSYNTH, an Applied
+// configuration and an open drift record 7; POST /plans creates the plan that binds that record.
+func revertServer(t *testing.T) *planFake {
+	f := planServer(t)
+	f.set(func(f *planFake) {
+		f.open, f.drift = "7", "7"
+		f.post = func(w http.ResponseWriter, _ string) {
+			w.WriteHeader(http.StatusCreated)
+			f.mu.Unlock()
+			fmt.Fprint(w, f.plan())
+			f.mu.Lock()
+		}
+	})
+	return f
+}
+
 // TestDriftRevertCreatesTheMachinesDesiredPlan: with an open drift record, drift revert creates the
-// plan of the machine's Desired release, after reading the machine.
+// apply-config plan of the machine's Desired release, says what it binds and exits 0.
 func TestDriftRevertCreatesTheMachinesDesiredPlan(t *testing.T) {
-	seen := recoveryServer(t, map[string]string{"GET /api/v1/machines/mch_a": driftJSON("null", "false")}, "{}")
-	runDrift(t, "drift", "revert", "mch_a")
-	got := seen()
-	if i := slices.Index(got, "GET /api/v1/machines/mch_a"); i < 0 || !slices.Contains(got[i:], "POST /api/v1/plans") {
-		t.Errorf("requests %v: want the machine read, then POST /api/v1/plans", got)
+	f := revertServer(t)
+	code, out, errOut := runDrift(t, "drift", "revert", "mch_a")
+	const want = `/plans {"machine":"mch_a","mode":"no-reboot","operation":"apply-config","releaseId":"rel_BWSYNTH"}`
+	if got := f.took(); code != 0 || len(got) != 1 || got[0] != want {
+		t.Errorf("exit %d, sent %q, stderr %q; want exit 0 and %q", code, got, errOut, want)
+	}
+	if !strings.Contains(out, "Revert of drift record 7 to Desired rel_BWSYNTH.") {
+		t.Errorf("stdout %q does not say what the plan binds", out)
+	}
+}
+
+// TestDriftRevertBindsTheMachineRead: the machine is read and the plan created on one client, so
+// the write is bound to the epoch of that read (client-contracts.md §8.5, §8.6 item 3). When the
+// preflight reads of the send show another epoch, even one that is set back, nothing is sent.
+func TestDriftRevertBindsTheMachineRead(t *testing.T) {
+	for _, c := range []struct{ name, want string }{
+		{"the preflight moves it", "the epoch changed from 'ep_BWSYNTH-2' to 'ep_BWSYNTH-3' after the request was built"},
+		{"the preflight moves it and back", "the epoch changed after the request was built from reads of 'ep_BWSYNTH-2', though the last read shows 'ep_BWSYNTH-2' as at those reads"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := revertServer(t)
+			back := strings.HasSuffix(c.name, "and back")
+			read, identity := false, 0
+			f.set(func(f *planFake) {
+				f.epochFor = func(path string) string {
+					// The machine is read at ep_BWSYNTH-2. Send then reads the principal, GET /server and
+					// the principal again: the first read shows ep_BWSYNTH-3 and the others stay there, or
+					// with back they show ep_BWSYNTH-2 again.
+					switch {
+					case path == "/machines/mch_a":
+						read = true
+					case !read:
+					case path == "/identity" && identity == 0:
+						identity++
+						return "ep_BWSYNTH-3"
+					case !back:
+						return "ep_BWSYNTH-3"
+					}
+					return "ep_BWSYNTH-2"
+				}
+			})
+			code, out, errOut := runDrift(t, "drift", "revert", "mch_a")
+			if got := f.took(); code == 0 || out != "" || len(got) != 0 || !strings.Contains(errOut, c.want) || !strings.Contains(errOut, "Nothing was sent") {
+				t.Errorf("exit %d, stdout %q, sent %q, stderr %q; want a refusal that sent nothing and says %q", code, out, got, errOut, c.want)
+			}
+		})
+	}
+}
+
+// TestDriftRevertCannotRepeat: a repeat would read Desired again, which may have changed, so drift
+// revert takes no repeat flags; it reads and sends nothing and names plan create. The outcome-unknown
+// block of a revert names plan create with the release it read, so the repeat is the identical request.
+func TestDriftRevertCannotRepeat(t *testing.T) {
+	f := revertServer(t)
+	code, out, errOut := runDrift(t, "drift", "revert", "mch_a", "--idempotency-key", "BWSYNTH-aaaaaaaaaaaaaaa", "--expect-epoch", "ep_BWSYNTH-2", "--expect-principal", "svc_BWSYNTH")
+	if got := f.took(); code != 2 || out != "" || len(got) != 0 || !strings.Contains(errOut, "so it cannot repeat a write; nothing was sent. Repeat through plan create") {
+		t.Errorf("exit %d, stdout %q, sent %q, stderr %q; want a usage error that sent nothing", code, out, got, errOut)
+	}
+	f.set(func(f *planFake) {
+		f.post = func(w http.ResponseWriter, _ string) {
+			w.Header().Set("Location", "/elsewhere")
+			w.WriteHeader(http.StatusTemporaryRedirect) // an answer the client cannot read: the outcome is unknown
+		}
+	})
+	code, _, errOut = runDrift(t, "drift", "revert", "mch_a")
+	const want = "give the same input, with the command bronzewardctl plan create --release 'rel_BWSYNTH' --machine 'mch_a' --operation 'apply-config' in place of drift revert, and: --idempotency-key "
+	if code != 3 || !strings.Contains(errOut, want) {
+		t.Errorf("exit %d, stderr %q; want exit 3 and %q", code, errOut, want)
+	}
+}
+
+// TestDriftRevertViewIsOneSnapshot: the lines that say whether the machine is frozen come from a
+// further read of the machine. When that read shows another epoch the plan stands, and the view is
+// not shown, as for any plan view.
+func TestDriftRevertViewIsOneSnapshot(t *testing.T) {
+	f := revertServer(t)
+	machineReads := 0
+	f.set(func(f *planFake) {
+		f.epochFor = func(path string) string {
+			if path == "/machines/mch_a" {
+				machineReads++
+				// The reads are drift revert's own, planView's and the one revertLines makes for the frozen state.
+				if machineReads > 2 {
+					return "ep_BWSYNTH-3"
+				}
+			}
+			return "ep_BWSYNTH-2"
+		}
+	})
+	code, out, errOut := runDrift(t, "drift", "revert", "mch_a")
+	const want = "Plan pln_BWSYNTH was created for machine mch_a, operation apply-config."
+	if code != 0 || !strings.Contains(out, want) || strings.Contains(out, "Revert of drift record") || !strings.Contains(out, "while the plan was read, so it is not shown") {
+		t.Errorf("exit %d, stdout %q, stderr %q; want the plan named and no view of it", code, out, errOut)
 	}
 }
 

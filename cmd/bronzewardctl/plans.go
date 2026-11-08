@@ -103,9 +103,30 @@ func (s *seconds) Set(v string) error {
 // take.
 func (e *env) planCreate(args []string) error { return e.planCreateWith("plan create", args, nil) }
 
+// planOpts is what a composite adds to plan create: the lines extra gives for the created plan, the
+// input a repeat gives where the composite resolved what the operator typed, and reads, which binds
+// the write to the epoch of the reads the composite made on the client it passes (§8.5).
+type planOpts struct {
+	extra func(*client.Client, *apitypes.PlanBody) []string
+	input string
+	reads bool
+}
+
 // planCreateWith is plan create, its table followed by the lines extra gives for the created plan;
-// drift adopt and drift revert add theirs.
-func (e *env) planCreateWith(name string, args []string, extra func(*client.Client, *apitypes.PlanBody) []string) error {
+// drift adopt adds its own.
+func (e *env) planCreateWith(name string, args []string, extra func(*client.Client, *apitypes.PlanBody) []string) (err error) {
+	c, err := e.open()
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, c.Save()) }()
+	return e.planCreateOn(c, name, args, planOpts{extra: extra})
+}
+
+// planCreateOn is planCreateWith on a client already open, which the caller saves. drift revert reads
+// the machine on it, and the write is then bound to that read's epoch.
+func (e *env) planCreateOn(c *client.Client, name string, args []string, opts planOpts) error {
+	extra := opts.extra
 	var in apitypes.PlanInput
 	var operation string
 	var expires, age, validity, transport, verification seconds
@@ -158,25 +179,34 @@ func (e *env) planCreateWith(name string, args []string, extra func(*client.Clie
 	// The write layer escapes each line of its answer whole, tabs included, so the plan view, whose
 	// cells planView escaped, is printed here, after the write, in its columns.
 	var view []string
-	err = e.write(&client.Write{Method: http.MethodPost, Path: "/plans", Body: body, Repeat: rp,
+	send := &client.Write{Method: http.MethodPost, Path: "/plans", Body: body, Repeat: rp, Input: opts.input,
 		Check: "plan list --machine " + client.ShellWord(in.Machine),
 		Read: func(c *client.Client) (string, error) {
 			return find(c, "/plans?"+url.Values{"machine": {in.Machine}}.Encode(), "proposed plan for this release and operation", func(p apitypes.PlanBody) string {
 				same := p.Release == in.ReleaseId && p.Operation == operation && p.State == "proposed"
 				return map[bool]string{true: "the proposed plan " + p.Id + " for this release and operation"}[same]
 			})
-		}}, func(c *client.Client, r *client.Response) ([]string, error) {
+		}}
+	if opts.reads {
+		send.ReadsFrom(c)
+	}
+	err = e.writeWith(c, nil, send, func(c *client.Client, r *client.Response) ([]string, error) {
 		var p apitypes.PlanBody
 		if err := json.Unmarshal(r.Body, &p); err != nil || e.output != "table" {
 			return nil, err
 		}
 		var change string
-		if view, change = planSnapshot(c, r, &p); change != "" {
+		// The extra lines read further, so they belong to the snapshot the epoch checks cover.
+		if view, change = snapshot(c, r, func() []string {
+			v := planView(c, &p)
+			if extra != nil {
+				v = append(v, extra(c, &p)...)
+			}
+			return v
+		}); change != "" {
 			// The plan was created, which stands; only the view of it is not shown.
 			view = []string{sf("Plan %s was created for machine %s, operation %s.", p.Id, p.Machine, p.Operation),
 				sf("  %s while the plan was read, so it is not shown. Read it again with: plan show ", change) + client.ShellWord(p.Id)}
-		} else if extra != nil {
-			view = append(view, extra(c, &p)...)
 		}
 		return nil, nil
 	})

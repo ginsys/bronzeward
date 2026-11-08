@@ -67,7 +67,9 @@ commands:
               --operation adopt (publisher); stops at a missing role or a pause and prints the
               rest; never approves; its repeat flags repeat the import
   drift revert <machine>
-              publisher; plan create of Desired as apply-config, bound to the open drift record
+              publisher; plan create of Desired as apply-config, bound to the open drift record;
+              it reads the machine first and takes no repeat flag; a machine with no Applied
+              configuration is pointed at an adopt plan, and nothing is sent
   fragment | profile | assignment show <head or revision ID> | history <head ID>
   draft list [--cluster <id>] | show <draft>
   draft create --cluster <id> --title <title>

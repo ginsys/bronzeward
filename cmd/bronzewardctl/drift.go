@@ -238,31 +238,54 @@ func whyBlocked(err error, verb string) error {
 }
 
 // driftRevert is T30: T19's plan create of the machine's Desired as apply-config, which binds the
-// open drift record and expects its drifted digest before dispatch (internal/api/plans.go). With
-// no open drift record or no Desired it refuses before sending, naming plan create. Its repeat
-// flags are plan create's.
-func (e *env) driftRevert(args []string) error {
+// open drift record and expects its drifted digest before dispatch (internal/api/plans.go). It
+// reads the machine and sends the plan create on one client, so the write is bound to the epoch of
+// that read (§8.5). With no open drift record, no Desired or no Applied it refuses before sending,
+// naming the plan create that fits. It takes no repeat flags: a repeat would read Desired again,
+// which may have changed, so the outcome-unknown block names plan create with the release read.
+func (e *env) driftRevert(args []string) (err error) {
 	var rf repeatFlags
 	pos, err := e.parse("drift revert", args, 1, rf.flags)
 	if err != nil {
 		return err
 	}
+	if len(rf.args()) > 0 {
+		return usageError{errors.New("drift revert reads the machine's Desired release again, and it may have changed, so it cannot repeat a write; nothing was sent. " +
+			"Repeat through plan create, with the release and the flags the outcome-unknown block printed")}
+	}
 	m := pos[0]
-	var x apitypes.MachineBody
-	if err := e.session(func(c *client.Client, _ *client.Response, _ *apitypes.ServerBody) error {
-		return getJSON(c, "/machines/"+url.PathEscape(m), &x)
-	}); err != nil {
+	c, err := e.open()
+	if err != nil {
 		return err
 	}
+	defer func() { err = errors.Join(err, c.Save()) }()
+	if _, _, err := c.Server(); err != nil {
+		return err
+	}
+	var x apitypes.MachineBody
+	if err := getJSON(c, "/machines/"+url.PathEscape(m), &x); err != nil {
+		return err
+	}
+	// Without an Applied configuration the server refuses an apply-config plan (internal/api/plans.go),
+	// so the machine is handed over with an adopt plan first.
 	switch {
 	case x.Desired == nil:
+		op := "apply-config"
+		if x.Applied == nil {
+			op = "adopt"
+		}
 		return notSent{fmt.Errorf("machine %s has no Desired release to revert to; nothing was sent. Publish a release that covers it, then: %s",
-			m, createWords("<release>", client.ShellWord(m), client.ShellWord("apply-config")))}
+			m, createWords("<release>", client.ShellWord(m), client.ShellWord(op)))}
+	case x.Applied == nil:
+		return notSent{fmt.Errorf("machine %s has no Applied configuration, so it has no drift to revert; nothing was sent. Hand it over with an adopt plan: %s",
+			m, createLine(*x.Desired, m, "adopt"))}
 	case x.OpenDrift == nil:
 		return notSent{fmt.Errorf("machine %s has no open drift record; nothing was sent. To apply its Desired release without a revert: %s",
 			m, createLine(*x.Desired, m, "apply-config"))}
 	}
-	return e.planCreateWith("drift revert", append([]string{"--release", *x.Desired, "--machine", m, "--operation", "apply-config"}, rf.args()...), revertLines)
+	return e.planCreateOn(c, "drift revert", []string{"--release", *x.Desired, "--machine", m, "--operation", "apply-config"},
+		planOpts{extra: revertLines, reads: true,
+			input: "the command " + createLine(*x.Desired, m, "apply-config") + " in place of drift revert"})
 }
 
 // revertLines say what the created revert binds and what it needs before it can commit.
@@ -342,9 +365,12 @@ func (e *env) driftAdopt(args []string) (err error) {
 	if err != nil {
 		return errors.Join(err, e.say(append([]string{"The later steps:"}, from(2, "")...)...))
 	}
+	// The read can show another epoch, which this client keeps, as ingest saved its own before it; a
+	// failed read leaves the steps unrun, so they are printed.
 	b, err := readIngestion(c, a.Ingestion)
-	if err != nil {
-		return err
+	if err = errors.Join(err, c.Save()); err != nil {
+		return errors.Join(err, e.say(append([]string{"The import was accepted, but its state is not known. Read it with: bronzewardctl import status " + pr(a.Ingestion),
+			"The later steps, once it is released into the draft:"}, from(2, "")...)...))
 	}
 	if b.State != "released" {
 		return e.say(append([]string{"Mark values while it is paused: bronzewardctl import mark " + b.Id,
