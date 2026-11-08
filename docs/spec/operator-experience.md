@@ -286,6 +286,7 @@ bronzewardctl
   status                              installation epoch, recovery mode, open drift, unresolved ops
 
   cluster list | show | add
+  cluster discover                    --talosconfig required; reads Talos, prints commands, writes nothing
   machine list | show | add | set-endpoint
   machine timeline | observations    paged; --follow polls (G9)
   machine freeze | unfreeze           --reason required
@@ -402,6 +403,34 @@ means it equals neither `Applied` nor `Desired`, and "drifted" comes from the op
 
 `GET /machines` filters by `cluster` (`internal/api/reads.go:199-218`), so `machine list --cluster`
 passes it to the server ([§11](#11-api-gap-audit), G9).
+
+`cluster discover` reads that identity for a whole cluster with the operator's own talosconfig and
+prints the commands that record it. It calls no Bronzeward route, writes nothing and runs none of
+the commands. The flag is required, and no default file is looked up:
+
+```text
+$ bronzewardctl cluster discover --talosconfig ./talosconfig
+Talos cluster ID 7c1…, Talos v1.13.6, contract v1.13.
+Kubernetes endpoint https://10.5.0.2:6443, proposed from the first control-plane member: replace it if a VIP or a DNS name fronts the API server.
+
+Members:
+  9Zs…=  cp-1  controlplane  10.5.0.2  metal, SMBIOS UUID 4c4c…
+  Qk2…=  w-1   worker        10.5.0.5  metal, SMBIOS UUID 5d1d…
+
+Record it with these commands, in this order. The cluster ID is the one cluster add prints:
+
+  bronzewardctl cluster add --name <name> --endpoint 'https://10.5.0.2:6443' --contract 'v1.13' --talos-cluster-id '7c1…'
+  bronzewardctl machine add --cluster <cluster id> --smbios-uuid '4c4c…' --platform 'metal' --talos-endpoint '10.5.0.2'
+  bronzewardctl machine add --cluster <cluster id> --smbios-uuid '5d1d…' --platform 'metal' --talos-endpoint '10.5.0.5'
+  bao kv put -mount=secret access/talos/<cluster id> 'talosconfig=@./talosconfig'
+
+Nothing was sent to the server and no secret was written. Until the bao command has run, the first source: machine import fails with talos-access-unavailable.
+```
+
+A member that does not answer, or reports no platform, gets no command and a "Not recorded" line.
+A cluster whose contract is not the one this client's machinery supports gets none for the
+cluster either, because the server refuses it. The proposed contract is the minor of the Talos
+version and the proposed Kubernetes endpoint is a guess for the operator to replace.
 
 Recording a machine is a human `author` act, with the node's Talos identity read beforehand
 ([acceptance plan S1](acceptance-plan.md#s1-adoption-of-the-existing-cluster)):
@@ -1129,6 +1158,7 @@ Routes are under `/api/v1` (`internal/api/routes.go:62-136`).
 | reads (`list`, `show`, `history`, `timeline`, `observations`, `act list`, `operation show`) | `GET` resource routes | any | no | no |
 | `operation watch` | `GET /operations/{id}/events` (SSE) | any | no | no |
 | `cluster add` | `POST /clusters` | author | yes | no |
+| `cluster discover` | none: reads Talos nodes with the operator's talosconfig | none | no | no |
 | `machine add` | `POST /machines` | author | yes | no |
 | `machine set-endpoint` | `POST /machines/{id}/talos-endpoints` | author | yes | no |
 | `import start` | `POST /ingestions` | author | yes | draft's |

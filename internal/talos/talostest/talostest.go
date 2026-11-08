@@ -21,6 +21,7 @@ import (
 	"encoding/pem"
 	"math/big"
 	"net"
+	"net/netip"
 	"sync"
 	"testing"
 	"time"
@@ -33,9 +34,11 @@ import (
 	"github.com/cosi-project/runtime/pkg/state/protobuf/server"
 	"github.com/siderolabs/talos/pkg/machinery/api/machine"
 	"github.com/siderolabs/talos/pkg/machinery/config/configloader"
+	machinecfg "github.com/siderolabs/talos/pkg/machinery/config/machine"
 	"github.com/siderolabs/talos/pkg/machinery/resources/cluster"
 	cfgres "github.com/siderolabs/talos/pkg/machinery/resources/config"
 	"github.com/siderolabs/talos/pkg/machinery/resources/hardware"
+	"github.com/siderolabs/talos/pkg/machinery/resources/runtime"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -51,6 +54,8 @@ const (
 	IdentityType          = cluster.IdentityType
 	InfoType              = cluster.InfoType
 	MachineConfigType     = cfgres.MachineConfigType
+	MemberType            = cluster.MemberType
+	PlatformMetadataType  = runtime.PlatformMetadataType
 )
 
 // PKI is a certificate authority with a server certificate for 127.0.0.1 and a client certificate
@@ -367,6 +372,49 @@ func (n *Node) SetClusterID(t testing.TB, id string) {
 	r := cluster.NewInfo()
 	r.TypedSpec().ClusterID = id
 	r.TypedSpec().ClusterName = "stand-in"
+	n.set(t, r)
+}
+
+// Member is one cluster member as a node lists it. ControlPlanePort is the Kubernetes API server
+// port of a control-plane member; a worker has 0.
+type Member struct {
+	NodeID, Hostname string
+	Addresses        []string
+	ControlPlanePort int
+}
+
+// SetMembers makes the node list exactly these cluster members.
+func (n *Node) SetMembers(t testing.TB, ms ...Member) {
+	t.Helper()
+	ctx := context.Background()
+	old, err := n.st.List(ctx, resource.NewMetadata(cluster.NamespaceName, cluster.MemberType, "", resource.VersionUndefined))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range old.Items {
+		if err := n.st.Destroy(ctx, o.Metadata()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, m := range ms {
+		r := cluster.NewMember(cluster.NamespaceName, m.NodeID)
+		s := r.TypedSpec()
+		s.NodeID, s.Hostname, s.MachineType = m.NodeID, m.Hostname, machinecfg.TypeWorker
+		for _, a := range m.Addresses {
+			s.Addresses = append(s.Addresses, netip.MustParseAddr(a))
+		}
+		if m.ControlPlanePort != 0 {
+			s.MachineType, s.ControlPlane = machinecfg.TypeControlPlane, &cluster.ControlPlane{APIServerPort: m.ControlPlanePort}
+		}
+		n.set(t, r)
+	}
+}
+
+// SetPlatform makes the node report name as its Talos platform ("metal", "container", "aws" ...).
+func (n *Node) SetPlatform(t testing.TB, name string) {
+	t.Helper()
+	r := runtime.NewPlatformMetadataSpec(runtime.NamespaceName, runtime.PlatformMetadataID)
+	r.TypedSpec().Platform = name
 	n.set(t, r)
 }
 
