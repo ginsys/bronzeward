@@ -891,10 +891,17 @@ Revert:
 
 ```text
 $ bronzewardctl drift revert mch_w4ze…n3fa                     # role: publisher
-Plan pln_c9x… proposed: apply-config of Desired rel_fgqv…j6m, bound to drift opened 09:41.
+Plan pln_c9x… proposed: apply-config of Desired rel_fgqv…j6m.
+Revert of drift record 7 to Desired rel_fgqv…j6m. The plan expects the drifted digest before
+  dispatch: if the machine drifts again first, it fails and must be made again.
+Approving it approves an unseen overwrite: it replaces the drifted configuration, which no
+  reviewer has seen.
 The machine is frozen: the plan cannot commit until an approver approves it and, separately,
-unfreezes the machine.
+  unfreezes the machine: bronzewardctl machine unfreeze mch_w4ze…n3fa --reason <text>
 ```
+
+The plan names the drift record by its number, not by an opening time: the API serves none
+(`api/openapi.yaml` `OpenDriftBody`).
 
 A revert is an `apply-config` plan of the machine's `Desired` while drift is open, approved with
 `unseenOverwrite: true`; a freeze must be lifted by an `approver` before it can commit
