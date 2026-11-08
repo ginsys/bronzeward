@@ -413,6 +413,16 @@ func restoredRead(c *client.Client, id string, o *apitypes.OperationBody, read c
 	return unreadState(id, errors.Join(client.ErrWatchEnded, client.ErrWatchRestored))
 }
 
+// noOperation is the error for a watch that read no operation: the state is unknown, and the error
+// says so and names the read. A Ctrl-C stands as it is, because the command ends on it with its own
+// exit code and stop line.
+func noOperation(id string, err error) error {
+	if errors.As(err, new(*client.Interrupted)) {
+		return err
+	}
+	return unreadState(id, err)
+}
+
 // unreadState is the error of a watch that ended with no operation read. A problem document the
 // server named stands as it is: exit 1 says that nothing was decided. Any other failure, an answer
 // that cannot be read, a refused certificate or a connection that failed, leaves the operation's
