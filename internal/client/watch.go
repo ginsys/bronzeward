@@ -97,9 +97,10 @@ func (c *Client) EpochHolds(read OperationRead) bool {
 	return read.Moves == c.moves
 }
 
-// WatchBody is Watch that also returns the operation read the result comes from, so a caller that
-// prints the resource prints the one it decided the outcome from, and compares the epoch of the
-// reads that follow with the one it was decided in.
+// WatchBody is the implementation behind Watch, and the two return the same values: the operation
+// and the operation read the result comes from. A caller that prints the resource prints the one it
+// decided the outcome from, and compares the epoch of the reads that follow with the one it was
+// decided in.
 func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, OperationRead, error) {
 	w.halt = &halt{}
 	// shown counts the events shown in the attempt since it began or since the last clear: an attempt
