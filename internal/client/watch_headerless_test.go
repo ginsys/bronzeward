@@ -13,7 +13,6 @@ import (
 // read then does not stand: section 8.6 item 2 judges a headerless read by the count of epoch moves.
 // WatchBody must not return it as the result with no error.
 func TestWatchBodyHeaderlessTerminalRestored(t *testing.T) {
-	t.Skip("ginsys/bronzeward#728: WatchBody returns a headerless terminal read after a restore; remove this skip with the fix")
 	const e1, e2 = "ep_BWSYNTH1", "ep_BWSYNTH2"
 	var opReads atomic.Int32
 	var f *fake
