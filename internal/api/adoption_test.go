@@ -77,6 +77,33 @@ func (ae *adoptEnv) approveIt(t *testing.T) {
 	ae.approval = decode[approvalBody](t, ae.approve(ae.human("h-approver"), ae.key(), ae.pid), http.StatusCreated).ID
 }
 
+// expireIn moves the adopt plan's expiry to d from now, by the database's clock, and reads it back
+// into ae.expires. A case sets the plan up with the default expiry and calls this after its setup,
+// so that no setup step races a short expiry.
+func (ae *adoptEnv) expireIn(t *testing.T, d time.Duration) {
+	t.Helper()
+	ae.expires = ae.expirePlan(t, ae.pid, d)
+}
+
+// expirePlan moves the plan's expiry to d from now, by the database's clock, and returns it. A d of
+// zero or less puts the expiry in the past, and the creation time an hour before it, as the plan
+// list test does.
+func (p *planEnv) expirePlan(t *testing.T, plan string, d time.Duration) time.Time {
+	t.Helper()
+	mustExec(t, p.db, `ALTER TABLE plan DISABLE TRIGGER immutable_rows`)
+	q := `UPDATE plan SET expires_at = clock_timestamp() + $2 * interval '1 microsecond' WHERE id = $1 RETURNING expires_at`
+	if d <= 0 {
+		q = `UPDATE plan SET created_at = clock_timestamp() + $2 * interval '1 microsecond' - interval '1 hour',
+			expires_at = clock_timestamp() + $2 * interval '1 microsecond' WHERE id = $1 RETURNING expires_at`
+	}
+	var at time.Time
+	if err := p.db.QueryRow(q, plan, d.Microseconds()).Scan(&at); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, p.db, `ALTER TABLE plan ENABLE TRIGGER immutable_rows`)
+	return at
+}
+
 // obsSeed is one observation of the machine as an observer records it: its start entry, begun age
 // ago, and unless startOnly its observation entry, showing these values.
 type obsSeed struct {
@@ -243,9 +270,10 @@ func TestAdoptionNodeIdentity(t *testing.T) {
 // the plan's expiry when it resumes.
 func TestAdoptionWaitsForMachineState(t *testing.T) {
 	t.Parallel()
-	ae := newAdoptEnv(t, `,"expiresInSeconds":3`)
+	ae := newAdoptEnv(t, "")
 	ae.approveIt(t)
 	ae.observed(t, nil)
+	ae.expireIn(t, 3*time.Second) // counted from the end of the setup, so the setup cannot outlast it
 	tx, err := ae.db.Begin()
 	if err != nil {
 		t.Fatal(err)
@@ -326,24 +354,25 @@ func TestAdoptionRefusals(t *testing.T) {
 			revocationOf(t, revoke(ae.env, ae.human("h-recovery"), ae.key(),
 				`{"identity":"`+ae.principalOf("h-approver")+`","reason":"left"}`))
 		}},
-		{"expired", `,"expiresInSeconds":1`, "4.2", "the plan has expired", func(t *testing.T, ae *adoptEnv) {
+		{"expired", "", "4.2", "the plan has expired", func(t *testing.T, ae *adoptEnv) {
 			ready(t, ae)
-			time.Sleep(time.Until(ae.expires.Add(100 * time.Millisecond)))
+			ae.expireIn(t, 0)
 		}},
-		{"expired unapproved", `,"expiresInSeconds":1`, "4.2", "the plan has expired", func(t *testing.T, ae *adoptEnv) {
+		{"expired unapproved", "", "4.2", "the plan has expired", func(t *testing.T, ae *adoptEnv) {
 			ae.observed(t, nil)
-			time.Sleep(time.Until(ae.expires.Add(100 * time.Millisecond)))
+			ae.expireIn(t, 0)
 		}},
-		{"approver revoked before expiry", `,"expiresInSeconds":2`, "4.2", "the approver's identity is revoked",
+		// The expiry is set after the revocation, by the database's clock, so the revocation is the earlier cause.
+		{"approver revoked before expiry", "", "4.2", "the approver's identity is revoked",
 			func(t *testing.T, ae *adoptEnv) {
 				ready(t, ae)
 				revocationOf(t, revoke(ae.env, ae.human("h-recovery"), ae.key(),
 					`{"identity":"`+ae.principalOf("h-approver")+`","reason":"left"}`))
-				time.Sleep(time.Until(ae.expires.Add(100 * time.Millisecond)))
+				ae.expireIn(t, 0)
 			}},
-		{"approver revoked after expiry", `,"expiresInSeconds":1`, "4.2", "the plan has expired", func(t *testing.T, ae *adoptEnv) {
+		{"approver revoked after expiry", "", "4.2", "the plan has expired", func(t *testing.T, ae *adoptEnv) {
 			ready(t, ae)
-			time.Sleep(time.Until(ae.expires.Add(100 * time.Millisecond)))
+			ae.expireIn(t, 0)
 			revocationOf(t, revoke(ae.env, ae.human("h-recovery"), ae.key(),
 				`{"identity":"`+ae.principalOf("h-approver")+`","reason":"left"}`))
 		}},

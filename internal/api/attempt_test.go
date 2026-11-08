@@ -226,9 +226,9 @@ func TestAttemptRefusals(t *testing.T) {
 		setup                          func(*testing.T, *attemptEnv) string
 		states                         []settled
 	}{
-		{name: "expired", extra: `,"expiresInSeconds":3`, comparison: "1", cause: "the plan has expired",
+		{name: "expired", comparison: "1", cause: "the plan has expired",
 			setup: func(t *testing.T, ae *attemptEnv) string {
-				time.Sleep(time.Until(ae.expires.Add(100 * time.Millisecond)))
+				ae.expireIn(t, 0)
 				return ""
 			}, states: cancelled("the plan has expired")},
 		{name: "cancelled", comparison: "1", cause: "the plan is cancelled", setup: func(t *testing.T, ae *attemptEnv) string {
@@ -247,10 +247,10 @@ func TestAttemptRefusals(t *testing.T) {
 					`{"identity":"`+ae.principalOf("h-approver")+`","reason":"left"}`))
 				return ""
 			}, states: cancelled("the approver's identity is revoked")},
-		{name: "expired with an attempt", extra: `,"expiresInSeconds":3,"maxAttempts":2`, comparison: "1",
+		{name: "expired with an attempt", extra: `,"maxAttempts":2`, comparison: "1",
 			cause: "the plan has expired", setup: func(t *testing.T, ae *attemptEnv) string {
 				ae.seedAttempt(t) // an operation with an attempt is never cancelled
-				time.Sleep(time.Until(ae.expires.Add(100 * time.Millisecond)))
+				ae.expireIn(t, 0)
 				return ""
 			}, states: unresolved("1", "the plan has expired")},
 		{name: "assignment changed", comparison: "2", cause: "the machine's assignment revision changed",
@@ -608,7 +608,8 @@ func TestAttemptRevocationsWait(t *testing.T) {
 // waits for the approval's lock is refused as expired, not admitted at the time it began.
 func TestAttemptTimeFollowsLocks(t *testing.T) {
 	t.Parallel()
-	ae := newAttemptEnv(t, `,"expiresInSeconds":4`)
+	ae := newAttemptEnv(t, "")
+	ae.expireIn(t, 4*time.Second) // counted from the end of the setup, so the setup cannot outlast it
 	stand, err := ae.db.Begin()
 	if err != nil {
 		t.Fatal(err)
@@ -636,7 +637,8 @@ func TestAttemptTimeFollowsLocks(t *testing.T) {
 // the plan expires, whose settle waits for the operation past expiry, cancels the operation.
 func TestAttemptSettleTimeFollowsLocks(t *testing.T) {
 	t.Parallel()
-	ae := newAttemptEnv(t, `,"expiresInSeconds":4`)
+	ae := newAttemptEnv(t, "")
+	ae.expireIn(t, 4*time.Second) // counted from the end of the setup, so the setup cannot outlast it
 	stand, err := ae.db.Begin()
 	if err != nil {
 		t.Fatal(err)
