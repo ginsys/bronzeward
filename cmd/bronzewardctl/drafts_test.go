@@ -41,6 +41,9 @@ type draftFake struct {
 	fragmentsEpoch string
 	// identityEpoch does the same for GET /identity, which a write reads before and after GET /server.
 	identityEpoch string
+	// flapEpoch makes the first GET /server answer a retryable 503 that shows this epoch, then clears
+	// itself: the read's own refresh sees a move that its retry sets back.
+	flapEpoch string
 }
 
 func (f *draftFake) etag() string { return fmt.Sprintf(`"%d-BWSYNTH"`, f.rev) }
@@ -82,6 +85,14 @@ func (f *draftFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		fmt.Fprint(w, `{}`)
 	case "GET /server":
+		if f.flapEpoch != "" {
+			w.Header().Set("Bronzeward-Epoch", f.flapEpoch)
+			w.Header().Set("Content-Type", "application/problem+json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprint(w, `{"type":"urn:bronzeward:problem:dependency-unavailable","title":"BWSYNTH","status":503,"instance":"req_BWSYNTH"}`)
+			f.flapEpoch = ""
+			return
+		}
 		if f.serverEpoch != "" {
 			w.Header().Set("Bronzeward-Epoch", f.serverEpoch)
 		}
@@ -382,19 +393,24 @@ func TestDraftEditing(t *testing.T) {
 // ep_BWSYNTH-1. The write's own principal read then shows ep_BWSYNTH-2, and its GET /server shows
 // ep_BWSYNTH-1 again, so the last epoch equals the epoch of the pins. A change that a later answer
 // set back is still a change (client-contracts.md section 8.6 item 3): nothing is sent. A control
-// moves the epoch before the draft is read, and that send goes out.
+// moves the epoch before the draft is read, and that send goes out. One more case moves the epoch
+// inside the draft read's own GET /server refresh and sets it back by that refresh's retry: the move
+// count is the one the draft answer left, not the one Get returned with.
 func TestProfileSetRefusesEpochBack(t *testing.T) {
-	const want = "the epoch changed after the request was built from reads of 'ep_BWSYNTH-1'"
+	const want = "the epoch changed after the request was built from reads of '"
 	for _, c := range []struct {
 		name     string
 		fragment string // the name to pin
 		move     func(*draftFake)
+		read     string // the epoch of the draft answer, which the refusal names
 		refused  bool
 	}{
-		{"the draft proposes the pin", "worker-labels", func(f *draftFake) { f.identityEpoch = "ep_BWSYNTH-2" }, true},
-		{"the pin is read from the fragment list", "worker-sysctls", func(f *draftFake) { f.identityEpoch = "ep_BWSYNTH-2" }, true},
+		{"the draft proposes the pin", "worker-labels", func(f *draftFake) { f.identityEpoch = "ep_BWSYNTH-2" }, "ep_BWSYNTH-1", true},
+		{"the pin is read from the fragment list", "worker-sysctls", func(f *draftFake) { f.identityEpoch = "ep_BWSYNTH-2" }, "ep_BWSYNTH-1", true},
+		// The draft answer shows ep_BWSYNTH-2, which GET /server's first try shows as ep_BWSYNTH-3 and its retry as ep_BWSYNTH-2 again.
+		{"the move and its return are inside the draft read's refresh", "worker-labels", func(f *draftFake) { f.epoch, f.flapEpoch = "ep_BWSYNTH-2", "ep_BWSYNTH-3" }, "ep_BWSYNTH-2", true},
 		// Every answer of the write shows ep_BWSYNTH-2, so the move came before the draft was read.
-		{"control: the move comes before the draft read", "worker-labels", func(f *draftFake) { f.epoch = "ep_BWSYNTH-2" }, false},
+		{"control: the move comes before the draft read", "worker-labels", func(f *draftFake) { f.epoch = "ep_BWSYNTH-2" }, "ep_BWSYNTH-2", false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			f := &draftFake{rev: 1, state: "open"}
@@ -418,8 +434,9 @@ func TestProfileSetRefusesEpochBack(t *testing.T) {
 			code, out, errText := exec("profile", "set", "workers", "--draft", "drf_BWSYNTH", "--fragments", c.fragment, `--if-match="1-BWSYNTH"`)
 			w := f.took()
 			if c.refused {
-				if code != 1 || out != "" || !strings.Contains(errText, want) || !strings.Contains(errText, "Nothing was sent") {
-					t.Errorf("exit %d, stdout %q, stderr %q; want 1, nothing and %q", code, out, errText, want)
+				named := want + c.read + "'"
+				if code != 1 || out != "" || !strings.Contains(errText, named) || !strings.Contains(errText, "Nothing was sent") {
+					t.Errorf("exit %d, stdout %q, stderr %q; want 1, nothing and %q", code, out, errText, named)
 				}
 				if len(w) != 0 {
 					t.Errorf("sent %q; want nothing", w)
