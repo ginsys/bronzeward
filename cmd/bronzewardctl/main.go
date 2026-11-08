@@ -144,9 +144,11 @@ commands:
   recovery account <operation> <attempt> --start <observation> --end <observation> [--explanation <text>]
               accounts one attempt whose response was lost; the same window, risk and typed ID
   recovery takeover <operation> --reason <text>
-              makes the serving controller the owner of a non-terminal operation; sends nothing to the node
+              makes the serving controller the owner of a non-terminal operation; sends nothing to the node;
+              a repeat of an unknown outcome also takes --generation as printed
   recovery resolve <operation> --reason <text>
-              ends an unresolved operation with no attempt as cancelled; records no remote outcome
+              ends an unresolved operation with no attempt as cancelled; records no remote outcome;
+              a repeat of an unknown outcome sends the same body without the state checks
   recovery mark <machine> [--fact name=value]...
               records the state the evidence supports: ready, blocked or unresolved
   recovery release <machine> [--fact name=value]...

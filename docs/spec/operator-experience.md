@@ -950,7 +950,10 @@ where the contract names no step:
 - The operation body carries no owner generation. The takeover sends the highest `generation` among
   the operation's events and attempts, and 1 when they show none. The server refuses a generation that
   is not current, so a wrong read sends nothing harmful. That refusal carries no new generation, so the
-  client points at `operation show`.
+  client points at `operation show`. The outcome-unknown block of a takeover names the generation it
+  sent. A repeat gives it with `--generation` and sends it again, because a takeover that committed
+  shows its own transition at a higher generation, and a new read then breaks the identical request.
+  A repeat reads no operation.
 - None of the four asks for a typed answer. The contract names none, and the reason or the facts are
   the record.
 - A mark shows each `missing` item with its meaning: `observation`, `identity`, `access` and
@@ -959,7 +962,9 @@ where the contract names no step:
   with code `conflict`. The shared text has no case for it, so the client adds the next step per
   command. A release says it is not an approval.
 - A resolution says it records no remote outcome. The client refuses it before sending when the
-  operation is not `unresolved` or has an attempt.
+  operation is not `unresolved` or has an attempt. A repeat skips these checks. A resolution that
+  committed leaves the operation `cancelled`, so the checks would stop the repeat before the key
+  reaches the server. The repeat sends the unchanged body, and the server replays or refuses it.
 
 Scope accounting is step 1's decision: it accounts every unaccounted attempt on the machine at
 once, and is refused on a scope that is not pre-restore unaccounted. The scope then becomes
