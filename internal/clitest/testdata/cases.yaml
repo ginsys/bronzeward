@@ -102,7 +102,7 @@
   expect:
     client: shows the recovery banner and the scopes; names the scope, or the process restriction when there is none; an unfreeze says why it is refused, and the scope's reason never follows the process''s refusal
     server: answers the status reads; the injector refuses the machine reads
-    shown: '"RECOVERY MODE is on in trusted", "Scopes: 1: <machine> ready", exit 0; then "the scope of machine <machine> is pre-restore-unaccounted" and "the server was started for recovery", "A restriction of the process, not of one scope", exit 1; variants: the freeze answers "Frozen." and exit 0; the unfreeze on a recovery start shows "Why: a server started for recovery refuses unfreezing" and "Next: restart the server without the recovery flag", on a normal start "Why: a restore can erase the record of a request" and "Next: recovery status names the next step of each scope", exit 1 each, no act, the machine still frozen'
+    shown: '"RECOVERY MODE is on in trusted", "Scopes: 1: <machine> ready", exit 0; then "the scope of machine <machine> is pre-restore-unaccounted" and "the server was started for recovery", "A restriction of the process, not of one scope", exit 1; variants: the freeze answers "Frozen." and exit 0; the unfreeze on a recovery start shows "Why: a server started for recovery refuses every request but the recovery entry" and "Next: if the recovery entry is not recorded yet, record it with recovery enter", on a normal start "Why: a restore can erase the record of a request" and "Next: recovery status names the next step of each scope", exit 1 each, no act, the machine still frozen'
     absent: [token in stdout, stderr, argv]
 
 - id: AUTH-02

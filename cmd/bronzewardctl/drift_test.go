@@ -63,6 +63,48 @@ func TestDriftShow(t *testing.T) {
 	}
 }
 
+// TestDriftShowEpoch: a drift show prints nothing when the epoch moved after the machine answer,
+// even when it moved back before the check (client-contracts.md §8.5). The count of moves tells the
+// two apart; the epoch of the last answer cannot. A move that comes with the machine answer is
+// not a move after it.
+func TestDriftShowEpoch(t *testing.T) {
+	answers := map[string]string{
+		"GET /api/v1/machines/mch_a":              driftJSON("null", "false"),
+		"GET /api/v1/machines/mch_a/observations": driftObservations,
+	}
+	again := "Read it again with: drift show 'mch_a'"
+	for _, c := range []struct {
+		name    string
+		moves   map[string]string
+		refresh string
+		want    string // "" means the table is shown
+	}{
+		{"the observations move it and the refresh moves it back", map[string]string{"/api/v1/machines/mch_a/observations": "ep_BWSYNTH-2"}, "ep_BWSYNTH-1",
+			"the epoch moved and came back to 'ep_BWSYNTH-1' while the drift was read; nothing is shown. " + again},
+		{"the observations move it", map[string]string{"/api/v1/machines/mch_a/observations": "ep_BWSYNTH-2"}, "",
+			"the epoch changed from 'ep_BWSYNTH-1' to 'ep_BWSYNTH-2' while the drift was read; nothing is shown. " + again},
+		{"the machine answer moves it again before the refresh", map[string]string{"/api/v1/machines/mch_a": "ep_BWSYNTH-2"}, "ep_BWSYNTH-3",
+			"the epoch changed from 'ep_BWSYNTH-2' to 'ep_BWSYNTH-3' while the drift was read; nothing is shown. " + again},
+		{"the move comes with the machine answer", map[string]string{"/api/v1/machines/mch_a": "ep_BWSYNTH-2"}, "", ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			setServerFacts(t, 3, c.moves)
+			recoveryRefreshEpoch = c.refresh
+			recoveryServer(t, answers, "")
+			code, out, errOut := runDrift(t, "drift", "show", "mch_a")
+			if c.want == "" {
+				if code != 0 || !strings.Contains(out, "Drift opened by observation obs_open") {
+					t.Errorf("exit %d, stdout %q, stderr %q; want the table", code, out, errOut)
+				}
+				return
+			}
+			if code == 0 || out != "" || !strings.Contains(errOut, c.want) {
+				t.Errorf("exit %d, stdout %q, stderr %q; want no table and %q", code, out, errOut, c.want)
+			}
+		})
+	}
+}
+
 // TestDriftHasNoIgnore: drift offers show, and no verb that ends a drift without an adoption or a
 // revert (#260 row 1: no ignore policy).
 func TestDriftHasNoIgnore(t *testing.T) {
@@ -100,7 +142,7 @@ func TestMachineFreeze(t *testing.T) {
 	seen = recoveryServer(t, nil, strings.Replace(freezeAnswer, "%s", "false", 1))
 	code, out, errOut = runDrift(t, "machine", "unfreeze", "mch_a", "--reason", "decided")
 	want = "Unfrozen. The freeze no longer stops a commitment or an attempt for this machine.\n" +
-		"Unfreezing approves and commits nothing.\n" +
+		"Unfreezing approves and commits nothing. An attempt already recorded was not stopped by the freeze, and an adoption could still be recorded.\n" +
 		"Recorded by svc_BWSYNTH (approver): machine mch_a, timeline revision 41, act act_BWSYNTH.\n"
 	if code != 0 || out != want || !slices.Contains(seen(), "POST /api/v1/machines/mch_a/unfreezes") {
 		t.Errorf("unfreeze: exit %d, stdout %q, stderr %q, sent %v; want %q", code, out, errOut, seen(), want)
@@ -126,10 +168,11 @@ func TestMachineFreezeSentenceMatchesShow(t *testing.T) {
 func TestUnfreezeWhyBlocked(t *testing.T) {
 	const (
 		scopeWhy = "Why: a restore can erase the record of a request sent to this machine, and a request sent before the restore may still land. " +
-			"Until a recovery administrator accounts for the scope and releases it, unfreezing is refused.\n" +
+			"Until a recovery administrator accounts for the scope, unfreezing is refused.\n" +
 			"Next: recovery status names the next step of each scope."
-		processWhy = "Why: a server started for recovery refuses unfreezing, plan creation and approval, even after its recovery entry.\n" +
-			"Next: restart the server without the recovery flag. Recovery mode continues. Then repeat this command."
+		// The scope-less refusal is the same before and after the recovery entry, so the text covers both.
+		processWhy = "Why: a server started for recovery refuses every request but the recovery entry until the entry is recorded. After the entry it still refuses unfreezing, plan creation and approval.\n" +
+			"Next: if the recovery entry is not recorded yet, record it with recovery enter. Then restart the server without the recovery flag and repeat this command."
 	)
 	unfreeze := []string{"machine", "unfreeze", "mch_a", "--reason", "decided"}
 	route := "POST /api/v1/machines/mch_a/unfreezes"
@@ -151,22 +194,23 @@ func TestUnfreezeWhyBlocked(t *testing.T) {
 		t.Errorf("the process's refusal: exit %d, stdout %q, stderr %q", code, out, errOut)
 	}
 
-	// Another scope state names itself.
-	recoveryServer(t, map[string]string{route: "409 " + problemHead + `recovery-mode-active","title":"Recovery mode active","status":409,` +
-		`"machine":"mch_a","scope":"blocked"` + problemTail}, "")
-	if _, _, errOut = runDrift(t, unfreeze...); !strings.Contains(errOut, "Why: the scope is blocked, not released in this epoch, so unfreezing is refused until a recovery administrator releases it.\n") {
-		t.Errorf("a blocked scope: stderr %q", errOut)
+	// The server refuses an unfreeze only on pre-restore-unaccounted (internal/api/freeze.go:72), and
+	// never refuses a freeze for a scope. A scope member the server names otherwise gets no reason of
+	// the client's own: only the next step.
+	for _, c := range []struct{ verb, scope string }{{"unfreeze", "blocked"}, {"freeze", "pre-restore-unaccounted"}} {
+		recoveryServer(t, map[string]string{"POST /api/v1/machines/mch_a/" + c.verb + "s": "409 " + problemHead + `recovery-mode-active","title":"Recovery mode active","status":409,` +
+			`"machine":"mch_a","scope":"` + c.scope + `"` + problemTail}, "")
+		_, _, errOut = runDrift(t, "machine", c.verb, "mch_a", "--reason", "decided")
+		if strings.Contains(errOut, "Why:") || !strings.Contains(errOut, "Next: recovery status names the next step of each scope.\n") {
+			t.Errorf("%s on a %s scope: stderr %q; want the next step and no reason of the client's own", c.verb, c.scope, errOut)
+		}
 	}
-}
 
-// TestFreezeWhyBlockedSaysFreezing: a freeze that a held scope refuses names the act as "freezing",
-// not "freezeing", beside the unfreeze's "unfreezing".
-func TestFreezeWhyBlockedSaysFreezing(t *testing.T) {
+	// A freeze that a server started for recovery refuses before its entry gets the process's text.
 	recoveryServer(t, map[string]string{"POST /api/v1/machines/mch_a/freezes": "409 " + problemHead + `recovery-mode-active","title":"Recovery mode active","status":409,` +
-		`"machine":"mch_a","scope":"blocked"` + problemTail}, "")
-	_, _, errOut := runDrift(t, "machine", "freeze", "mch_a", "--reason", "decided")
-	if !strings.Contains(errOut, "so freezing is refused until a recovery administrator releases it.\n") || strings.Contains(errOut, "freezeing") {
-		t.Errorf("a blocked scope on a freeze: stderr %q", errOut)
+		`"detail":"this process started with the recovery-start flag; only the entry is served"` + problemTail}, "")
+	if _, _, errOut = runDrift(t, "machine", "freeze", "mch_a", "--reason", "decided"); !strings.Contains(errOut, processWhy+"\n") {
+		t.Errorf("a freeze before the entry: stderr %q; want %q", errOut, processWhy)
 	}
 }
 

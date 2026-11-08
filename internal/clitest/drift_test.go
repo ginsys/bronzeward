@@ -160,7 +160,7 @@ func TestDriftFreeze(t *testing.T) {
 	}
 	f.want(e.ctl(append(h, "machine", "show", e.s.machine)...), 0, stopsWords)
 	r = e.ctl(append(roles["approver"], unfreeze...)...)
-	if r.code != 0 || !strings.HasPrefix(r.out, unfrozenWords+"Unfreezing approves and commits nothing.\n") ||
+	if r.code != 0 || !strings.HasPrefix(r.out, unfrozenWords+"Unfreezing approves and commits nothing. An attempt already recorded was not stopped by the freeze, and an adoption could still be recorded.\n") ||
 		!strings.Contains(r.out, "(approver): machine "+e.s.machine+", timeline revision ") {
 		t.Errorf("unfreeze: exit %d, stdout %q, stderr %q", r.code, r.out, r.err)
 	}

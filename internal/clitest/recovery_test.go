@@ -184,13 +184,13 @@ func TestRecovery(t *testing.T) {
 	f.want(ctl("", freeze...), 0, "Frozen. No new commitment or attempt for this machine until an approver unfreezes it.")
 	acts := f.actCount()
 	process := []string{"Recovery mode: the server was started for recovery: it refuses plan creation, approval and unfreeze",
-		"Why: a server started for recovery refuses unfreezing, plan creation and approval, even after its recovery entry.",
-		"Next: restart the server without the recovery flag. Recovery mode continues. Then repeat this command."}
+		"Why: a server started for recovery refuses every request but the recovery entry until the entry is recorded. After the entry it still refuses unfreezing, plan creation and approval.",
+		"Next: if the recovery entry is not recorded yet, record it with recovery enter. Then restart the server without the recovery flag and repeat this command."}
 	f.want(ctl("", unfreeze...), 1, append([]string{"409"}, process...)...)
 	f.restart()
 	scope := []string{"Recovery mode: the scope of machine " + s.machine + " is pre-restore-unaccounted.",
 		"Why: a restore can erase the record of a request sent to this machine, and a request sent before the restore may still land. " +
-			"Until a recovery administrator accounts for the scope and releases it, unfreezing is refused.",
+			"Until a recovery administrator accounts for the scope, unfreezing is refused.",
 		"Next: recovery status names the next step of each scope."}
 	r = ctl("", unfreeze...)
 	f.want(r, 1, append([]string{"409"}, scope...)...)
