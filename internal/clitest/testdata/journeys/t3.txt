@@ -52,17 +52,17 @@ Review a machine's rendered configuration: bronzewardctl release review rel_… 
 [exit 0]
 
 $ bronzewardctl --context human release provenance {release} {machine}
-REFERENCE                     VERSION  FROM (REVISION, PATH)                                                     RENDERED AT
-s-…  1        ibr_…, doc[0]/machine/token                      doc[0]/machine/token
-s-…  1        ibr_…, doc[0]/machine/ca/key                     doc[0]/machine/ca/key
-s-…  1        ibr_…, doc[0]/machine/files/0/content            doc[0]/machine/files/0/content
-s-…  1        ibr_…, doc[0]/cluster/secret                     doc[0]/cluster/secret
-s-…  1        ibr_…, doc[0]/cluster/token                      doc[0]/cluster/token
-s-…  1        ibr_…, doc[0]/cluster/secretboxEncryptionSecret  doc[0]/cluster/secretboxEncryptionSecret
-s-…  1        ibr_…, doc[0]/cluster/ca/key                     doc[0]/cluster/ca/key
-s-…  1        ibr_…, doc[0]/cluster/aggregatorCA/key           doc[0]/cluster/aggregatorCA/key
-s-…  1        ibr_…, doc[0]/cluster/serviceAccount/key         doc[0]/cluster/serviceAccount/key
-s-…  1        ibr_…, doc[0]/cluster/etcd/ca/key                doc[0]/cluster/etcd/ca/key
+REFERENCE                     VERSION  FROM (REVISION, PATH)                                                                           RENDERED AT
+s-…  1        ibr_…, doc[0]/machine/token                                            doc[0]/machine/token
+s-…  1        ibr_…, doc[0]/machine/ca/key                                           doc[0]/machine/ca/key
+s-…  1        ibr_…, doc[0]/machine/files/0/content                                  doc[0]/machine/files/0/content
+s-…  1        ibr_…, doc[0]/cluster/token                                            doc[0]/cluster/token
+s-…  1        ibr_…, doc[0]/cluster/etcd/ca/key                                      doc[0]/cluster/etcd/ca/key
+s-…  1        ibr_…, doc[2]/clusterSecret                                            doc[2]/clusterSecret
+s-…  1        ibr_…, doc[13]/issuingCA/key                                           doc[13]/issuingCA/key
+s-…  1        ibr_…, doc[15]/issuingCA/key                                           doc[15]/issuingCA/key
+s-…  1        ibr_…, doc[21]/config/resources/0/providers/0/secretbox/keys/0/secret  doc[21]/config/resources/0/providers/0/secretbox/keys/0/secret
+s-…  1        ibr_…, doc[22]/issuer/privateKey                                       doc[22]/issuer/privateKey
 Provenance covers secret references only; other fields are not traced.
 [exit 0]
 
@@ -76,7 +76,7 @@ Plan pln_…  proposed                                         expires <local ti
   Created by                         idn_… (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision 4
   Approval                           none                                        policy one-approver, committed operation none
 Evidence
-  Validation           passed at publication (contract v1.13, machinery v1.13.6, Kubernetes v1.36.2, container)
+  Validation           passed at publication (contract v1.14, machinery v1.14.5, Kubernetes v1.37.1, container)
   Dry run              not available: no dry run is available for this operation
   Baseline             import base ibr_…, the node's own bytes
   Pending convergence  yes: the release's compiled configuration differs from the node's, which the adoption records; a later apply-config plan withholds its diff
@@ -95,7 +95,7 @@ Plan pln_…  proposed                                         expires <local ti
   Created by                         idn_… (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision 4
   Approval                           none                                        policy one-approver, committed operation none
 Evidence
-  Validation           passed at publication (contract v1.13, machinery v1.13.6, Kubernetes v1.36.2, container)
+  Validation           passed at publication (contract v1.14, machinery v1.14.5, Kubernetes v1.37.1, container)
   Dry run              not available: no dry run is available for this operation
   Baseline             import base ibr_…, the node's own bytes
   Pending convergence  yes: the release's compiled configuration differs from the node's, which the adoption records; a later apply-config plan withholds its diff
@@ -114,7 +114,7 @@ Plan pln_…  committed                                        expires <local ti
   Created by                         idn_… (publisher)  epoch ep_…, <local time>, plan revision 3, timeline revision 4
   Approval                           apr_…              policy one-approver, committed operation op_…
 Evidence
-  Validation           passed at publication (contract v1.13, machinery v1.13.6, Kubernetes v1.36.2, container)
+  Validation           passed at publication (contract v1.14, machinery v1.14.5, Kubernetes v1.37.1, container)
   Dry run              not available: no dry run is available for this operation
   Baseline             import base ibr_…, the node's own bytes
   Pending convergence  yes: the release's compiled configuration differs from the node's, which the adoption records; a later apply-config plan withholds its diff
