@@ -822,8 +822,13 @@ interface Carry {
   // line break since. This is go-yaml's simple_key_allowed set to false, at flow depth 0
   // (ginsys/bronzeward#654). A line break, `- `, `? ` and an explicit key's colon set it again.
   noKey: boolean;
+  // The brackets of the open flow collections, the innermost last: `{` for a mapping, `[` for a sequence.
+  kinds: string;
+  // The last token with content was a `?` that ends its line (or is followed by a comment): a node on
+  // a later line is its key (ginsys/bronzeward#672). A blank or comment line keeps it.
+  afterQ: boolean;
 }
-const freshCarry = (): Carry => ({ stack: [], flow: 0, ns: true, open: "", holder: -1, block: undefined, closed: false, tagged: false, earlier: false, split: false, chain: false, gap: 0, clean: true, afterDirective: false, noKey: false });
+const freshCarry = (): Carry => ({ kinds: "", afterQ: false, stack: [], flow: 0, ns: true, open: "", holder: -1, block: undefined, closed: false, tagged: false, earlier: false, split: false, chain: false, gap: 0, clean: true, afterDirective: false, noKey: false });
 
 // The document that is being read (ginsys/bronzeward#615). A tag spelled through a handle names what
 // the document's %TAG directives say, so a `!bwref` property counts only when its document is
@@ -938,16 +943,25 @@ function readDocumentLine(d: Docs, st: Carry, text: string, at: number): boolean
 const isWs = (c: string | undefined) => c === " " || c === "\t" || c === "\r";
 // Whether the alias that spans `line[from, to)` is a mapping key: a value indicator follows it on its
 // line (`*k : v`, `*k: v`), or it follows a `?` indicator (`? *k`). The server refuses an alias key
-// whose anchored node carries `!bwref` (ginsys/bronzeward#672). A key that spreads over two lines in a
-// flow collection, and an alias inside a collection that is a key, are not read here. The walks go over
-// the blanks next to the alias only.
-function aliasIsKey(line: string, from: number, to: number): boolean {
+// whose anchored node carries `!bwref` (ginsys/bronzeward#672). `opener` is the innermost open flow
+// bracket ("" in block context). In flow context the alias name ends at the colon and a colon after
+// the alias is a value indicator, whatever follows it, and an entry of a flow mapping that starts with
+// the alias is a key, with or without a value. `afterQ` is true when a `?` ended an earlier line and this alias is
+// the first node of its line. A key that spreads over two lines in a flow collection, and an alias
+// inside a collection that is a key, are not read here. The walks go over the blanks next to the alias
+// only.
+function aliasIsKey(line: string, from: number, to: number, opener: string, afterQ: boolean): boolean {
   let after = to;
   while (isWs(line[after])) after++;
-  if (line[after] === ":" && (after + 1 >= line.length || isWs(line[after + 1]))) return true;
+  const n = line[after + 1];
+  if (line[after] === ":" && (opener !== "" || n === undefined || isWs(n))) return true;
   let before = from;
   while (before > 0 && isWs(line[before - 1])) before--;
-  return before < from && line[before - 1] === "?" && (before === 1 || isWs(line[before - 2]));
+  const p = line[before - 1];
+  if (p === undefined) return afterQ;
+  if (opener === "{" && (p === "{" || p === ",")) return true;
+  const q = line[before - 2];
+  return p === "?" && before < from && (q === undefined || isWs(q) || (opener !== "" && "{[,".includes(q)));
 }
 const FLOW = ",[]{}";
 // A block scalar header after its indicator. go-yaml reads the indicators only directly after `|` or
@@ -1057,6 +1071,9 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: numb
   const blank = /^ *\r?$/.test(line);
   // A line with nothing but blanks, or a comment: a tab counts as a blank here.
   const quiet = /^[ \t]*(?:#|$)/.test(line);
+  // A `?` that ended an earlier line makes the first node of this line its key; any line with content clears it.
+  const afterQ = st.afterQ;
+  if (!quiet) st.afterQ = false;
   const ind = spaces(line);
   const marker = MARKER.test(line);
   // A block scalar's content is no comment, however it looks, and no tag either: a !bwref in it is
@@ -1195,6 +1212,7 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: numb
       } else if (c === "[" || c === "{") {
         if (nodeStart < 0) nodeStart = j;
         st.flow++;
+        st.kinds += c;
         if (st.flow === 1) outerStart = nodeStart;
         lastPlain = false;
         j++;
@@ -1205,6 +1223,7 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: numb
         j++;
       } else if (st.flow > 0 && (c === "]" || c === "}")) {
         st.flow--;
+        st.kinds = st.kinds.slice(0, -1);
         if (st.flow === 0 && outerStart !== -2) nodeStart = outerStart;
         st.ns = false;
         lastPlain = false;
@@ -1240,7 +1259,7 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: numb
         else if (c === "*") {
           const def = docs.anchors.get(line.slice(j + 1, e));
           if (def === undefined) docs.refused = true;
-          else if (aliasIsKey(line, j, e)) docs.keyed.set(def.start, def.end);
+          else if (aliasIsKey(line, j, e, st.flow > 0 ? st.kinds.slice(-1) : "", afterQ)) docs.keyed.set(def.start, def.end);
         }
         j = e;
         lastPlain = false;
@@ -1261,6 +1280,7 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: numb
           const col = c === ":" && nodeStart >= 0 ? nodeStart : j;
           pushEntry(st.stack, col);
           hold = col;
+          if (c === "?") st.afterQ = /^[ \t\r]*(?:#.*)?$/.test(line.slice(j + 1));
           if (c === ":") {
             st.split = false;
             if (nodeStart >= 0) st.noKey = true;
@@ -1311,12 +1331,14 @@ function scanLine(st: Carry, docs: Docs, line: string, base: number, reach: numb
       j++;
     } else if (st.flow > 0 && (c === "]" || c === "}")) {
       st.flow--;
+      st.kinds = st.kinds.slice(0, -1);
       if (st.flow === 0 && outerStart !== -2) nodeStart = outerStart;
       lastPlain = false;
       st.closed = true;
       j++;
     } else if (st.flow > 0 && (c === "[" || c === "{")) {
       st.flow++;
+      st.kinds += c;
       st.ns = true;
       j++;
     } else if (st.flow > 0 && c === "?") {

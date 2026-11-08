@@ -1011,6 +1011,90 @@
    ]
   },
   {
+   "name": "alias-key-flow-question-mark",
+   "source": "ginsys/bronzeward#672",
+   "doc": "a: &k !bwref x/foo\nb: {? *k}\n",
+   "want": []
+  },
+  {
+   "name": "alias-key-flow-colon-no-value",
+   "source": "ginsys/bronzeward#672",
+   "doc": "a: &k !bwref x/foo\nb: {*k:}\n",
+   "want": []
+  },
+  {
+   "name": "alias-key-flow-colon-quoted-value",
+   "source": "ginsys/bronzeward#672",
+   "doc": "a: &k !bwref x/foo\nb: {*k:\"v\"}\n",
+   "want": []
+  },
+  {
+   "name": "alias-key-flow-entry-no-value",
+   "source": "ginsys/bronzeward#672",
+   "doc": "a: &k !bwref x/foo\nb: {*k, c: d}\n",
+   "want": []
+  },
+  {
+   "name": "alias-key-flow-sequence-colon",
+   "source": "ginsys/bronzeward#672",
+   "doc": "a: &k !bwref x/foo\nb: [*k:]\n",
+   "want": []
+  },
+  {
+   "name": "alias-key-flow-sequence-question-mark",
+   "source": "ginsys/bronzeward#672",
+   "doc": "a: &k !bwref x/foo\nb: [? *k]\n",
+   "want": []
+  },
+  {
+   "name": "alias-key-flow-sequence-blank-colon",
+   "source": "ginsys/bronzeward#672",
+   "doc": "a: &k !bwref x/foo\nb: [a, *k :x]\n",
+   "want": []
+  },
+  {
+   "name": "alias-key-explicit-next-line",
+   "source": "ginsys/bronzeward#672",
+   "doc": "a: &k !bwref x/foo\n?\n  *k\n: v\n",
+   "want": []
+  },
+  {
+   "name": "alias-key-explicit-next-line-no-value",
+   "source": "ginsys/bronzeward#672",
+   "doc": "a: &k !bwref x/foo\n?\n  *k\n",
+   "want": []
+  },
+  {
+   "name": "alias-key-explicit-after-comment",
+   "source": "ginsys/bronzeward#672",
+   "doc": "a: &k !bwref x/foo\n? # c\n  *k\n: v\n",
+   "want": []
+  },
+  {
+   "name": "alias-flow-mapping-value-control",
+   "source": "ginsys/bronzeward#672",
+   "doc": "a: &k !bwref x/foo\nb: {a: *k, c: d}\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
+   "name": "alias-flow-sequence-control",
+   "source": "ginsys/bronzeward#672",
+   "doc": "a: &k !bwref x/foo\nb: [*k, c]\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
+   "name": "alias-explicit-line-then-key-control",
+   "source": "ginsys/bronzeward#672",
+   "doc": "a: &k !bwref x/foo\n?\nb: *k\n",
+   "want": [
+    "x/foo"
+   ]
+  },
+  {
    "name": "594-pipe",
    "source": "experiments/scanner-cross-line/sets/cases.json (#594)",
    "doc": "a: x |\n  \"y # !bwref ghost\nb: !bwref x/foo\n",

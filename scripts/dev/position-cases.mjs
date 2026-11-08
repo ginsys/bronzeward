@@ -190,7 +190,7 @@ const own = [
     ["sequence-entry-control", "- !bwref x/foo\n"],
   ].map(([name, doc]) => ["ginsys/bronzeward#637", name, doc]),
   // ginsys/bronzeward#672: an alias key that repeats the anchor of a tagged value, and the controls that
-  // stay listed. go-yaml accepts every one; the server refuses the first ten.
+  // stay listed. go-yaml accepts every one; the server refuses every one that is not a control, and the controls are listed.
   ...[
     ["alias-key-tag-after-anchor", "a: !bwref &k x/foo\n*k : v\n"],
     ["alias-key-no-blank", "a: &k !bwref x/foo\n*k: v\n"],
@@ -207,6 +207,19 @@ const own = [
     ["alias-key-latest-anchor-untagged", "a: &k !bwref x/foo\nb: &k 1\n*k : v\n"],
     ["alias-key-quoted-control", 'a: &k !bwref x/foo\n"*k": v\n'],
     ["alias-key-anchor-on-next-node", "a: &k\nb: !bwref x/foo\n*k : v\n"],
+    ["alias-key-flow-question-mark", "a: &k !bwref x/foo\nb: {? *k}\n"],
+    ["alias-key-flow-colon-no-value", "a: &k !bwref x/foo\nb: {*k:}\n"],
+    ["alias-key-flow-colon-quoted-value", 'a: &k !bwref x/foo\nb: {*k:"v"}\n'],
+    ["alias-key-flow-entry-no-value", "a: &k !bwref x/foo\nb: {*k, c: d}\n"],
+    ["alias-key-flow-sequence-colon", "a: &k !bwref x/foo\nb: [*k:]\n"],
+    ["alias-key-flow-sequence-question-mark", "a: &k !bwref x/foo\nb: [? *k]\n"],
+    ["alias-key-flow-sequence-blank-colon", "a: &k !bwref x/foo\nb: [a, *k :x]\n"],
+    ["alias-key-explicit-next-line", "a: &k !bwref x/foo\n?\n  *k\n: v\n"],
+    ["alias-key-explicit-next-line-no-value", "a: &k !bwref x/foo\n?\n  *k\n"],
+    ["alias-key-explicit-after-comment", "a: &k !bwref x/foo\n? # c\n  *k\n: v\n"],
+    ["alias-flow-mapping-value-control", "a: &k !bwref x/foo\nb: {a: *k, c: d}\n"],
+    ["alias-flow-sequence-control", "a: &k !bwref x/foo\nb: [*k, c]\n"],
+    ["alias-explicit-line-then-key-control", "a: &k !bwref x/foo\n?\nb: *k\n"],
   ].map(([name, doc]) => ["ginsys/bronzeward#672", name, doc]),
 ];
 
