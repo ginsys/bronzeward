@@ -139,13 +139,19 @@ func checkSettle(machine string, by map[string]apitypes.ObservationBody, start, 
 	return nil
 }
 
-// epochHeld refuses, sending nothing, a window whose reads span two epochs (§8.5): first is the
-// epoch of the window's first read, and any later read that showed another leaves the earlier
-// results shown beside answers of a snapshot they do not belong to.
-func epochHeld(c *client.Client, first string) error {
-	if now := c.Context.LastEpoch; first != "" && now != first {
+// epochHeld refuses, sending nothing, a window whose reads span two epochs (§8.5, §8.6 item 3):
+// first is the epoch of the window's first read and moves is EpochMoves as that answer left it. Any
+// later read that showed another epoch leaves the earlier results shown beside answers of a snapshot
+// they do not belong to, and a change that a later answer set back is still counted.
+func epochHeld(c *client.Client, first string, moves int) error {
+	now := c.Context.LastEpoch
+	switch {
+	case first != "" && now != first:
 		return ef("the epoch changed from %s to %s while the window was read; nothing was sent. Run this command again",
 			client.ShellWord(first), client.ShellWord(now))
+	case c.EpochMoves() != moves:
+		return ef("the epoch changed while the window was read, though the last read shows %s as at the first; nothing was sent. Run this command again",
+			client.ShellWord(now))
 	}
 	return nil
 }
@@ -160,8 +166,10 @@ func observationLine(label string, o apitypes.ObservationBody) string {
 }
 
 // settleFacts is the line for the facts a settle recorded, `settleFloor` and `anchor`. The answer
-// of the write carries neither, so they are read from the timeline entry at the answered revision.
-func settleFacts(c *client.Client, machine, kind string, revision int) string {
+// of the write carries neither, so they are read from the timeline entry at the answered revision,
+// and only an entry of the answer's own epoch: another epoch's entry of the same kind and revision
+// is another snapshot's record.
+func settleFacts(c *client.Client, machine, kind string, revision int, epoch string) string {
 	const none = "The settle floor and its anchor are on the machine's timeline: machine timeline %s."
 	if c.Revision < 3 {
 		return sf(none, client.ShellWord(machine))
@@ -177,7 +185,7 @@ func settleFacts(c *client.Client, machine, kind string, revision int) string {
 	for _, t := range entries {
 		x, _ := t.Entry.(map[string]any)
 		facts, _ := x["facts"].(map[string]any)
-		if t.Kind != kind || t.Revision != revision || facts == nil {
+		if t.Kind != kind || t.Revision != revision || t.Epoch != epoch || facts == nil {
 			continue
 		}
 		return sf("Settle floor %v, counted from %v.", facts["settleFloor"], facts["anchor"])
@@ -241,7 +249,7 @@ func (e *env) recoveryScopeAccount(args []string) error {
 		if err != nil {
 			return err
 		}
-		first := r.Header.Get("Bronzeward-Epoch")
+		first, moves := r.Header.Get("Bronzeward-Epoch"), r.Moves
 		srvs, err := decode[apitypes.ServerBody](c, r.Body)
 		if err != nil {
 			return err
@@ -261,7 +269,7 @@ func (e *env) recoveryScopeAccount(args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := epochHeld(c, first); err != nil {
+		if err := epochHeld(c, first, moves); err != nil {
 			return err
 		}
 		if err := checkSettle(machine, by, start, end, explanation); err != nil {
@@ -299,7 +307,7 @@ func (e *env) recoveryScopeAccount(args []string) error {
 		if e.output != "table" {
 			return lines, nil
 		}
-		return append(lines, settleFacts(c, machine, "scope-state", s.Revision), sf("Recorded by %s (%s): act %s.", x.DecidedBy, x.Role, x.Act), next), nil
+		return append(lines, settleFacts(c, machine, "scope-state", s.Revision, x.Epoch), sf("Recorded by %s (%s): act %s.", x.DecidedBy, x.Role, x.Act), next), nil
 	})
 	return settleNext(err, machine, "")
 }
@@ -335,7 +343,7 @@ func (e *env) recoveryAccount(args []string) error {
 		if err != nil {
 			return err
 		}
-		first := r.Header.Get("Bronzeward-Epoch")
+		first, moves := r.Header.Get("Bronzeward-Epoch"), r.Moves
 		ops, err := decode[apitypes.OperationBody](c, r.Body)
 		if err != nil {
 			return err
@@ -367,7 +375,7 @@ func (e *env) recoveryAccount(args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := epochHeld(c, first); err != nil {
+		if err := epochHeld(c, first, moves); err != nil {
 			return err
 		}
 		if err := checkSettle(machine, by, start, end, explanation); err != nil {
@@ -396,7 +404,7 @@ func (e *env) recoveryAccount(args []string) error {
 		if e.output != "table" {
 			return lines, err
 		}
-		return append(lines, settleFacts(c, machine, "accounting", x.Revision), sf("Recorded by %s (%s): act %s.", x.DecidedBy, x.Role, x.Act),
+		return append(lines, settleFacts(c, machine, "accounting", x.Revision, x.Epoch), sf("Recorded by %s (%s): act %s.", x.DecidedBy, x.Role, x.Act),
 			"Next: operation show "+client.ShellWord(operation)+"."), err
 	})
 	return settleNext(err, machine, operation)

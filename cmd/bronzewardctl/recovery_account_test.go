@@ -30,8 +30,8 @@ func accAnswers(post string) map[string]string {
 			`{"id":"obs_n","purpose":"routine","resourceVersion":"7","startedAt":"2026-11-01T09:01:00Z","at":"2026-11-01T09:01:02Z"}]}`,
 		"GET /api/v1/operations/op_1": `{"id":"op_1","kind":"apply-config","state":"unresolved","subject":{"machine":"mch_a"},` +
 			`"attempts":[{"id":"att_1","number":1,"generation":2,"transportDeadline":"2026-11-01T08:50:00Z"}]}`,
-		"GET /api/v1/machines/mch_a/timeline?order=newest": `{"items":[{"kind":"scope-state","revision":9,"entry":{"to":"blocked",` +
-			`"facts":{"settleFloor":"30s","anchor":"2026-11-01T08:51:00Z"}}},{"kind":"accounting","revision":4,"entry":{"facts":{"settleFloor":"30s","anchor":"2026-11-01T08:50:00Z"}}}]}`,
+		"GET /api/v1/machines/mch_a/timeline?order=newest": `{"items":[{"kind":"scope-state","revision":9,"epoch":"ep_BWSYNTH-1","entry":{"to":"blocked",` +
+			`"facts":{"settleFloor":"30s","anchor":"2026-11-01T08:51:00Z"}}},{"kind":"accounting","revision":4,"epoch":"ep_BWSYNTH-1","entry":{"facts":{"settleFloor":"30s","anchor":"2026-11-01T08:50:00Z"}}}]}`,
 	}
 	if post != "" {
 		a[accScope] = post
@@ -209,24 +209,55 @@ func TestAccountSettleCauses(t *testing.T) {
 // commands are covered in both cases, since each takes the epoch of its reads.
 func TestAccountEpochChange(t *testing.T) {
 	for _, c := range []struct {
-		name, route, post, moves, said string
-		args                           []string
+		name, route, post, moves, refresh, said string
+		args                                    []string
 	}{
-		{"scope-account after the reads", accScope, accScopeAnswer, "/api/v1/identity", "after the request was built", scopeArgs},
-		{"account after the reads", accAttempt, accAttemptAnswer, "/api/v1/identity", "after the request was built", attemptArgs},
-		{"scope-account during the reads", accScope, accScopeAnswer, "/api/v1/machines/mch_a/observations", "while the window was read", scopeArgs},
-		{"account during the reads", accAttempt, accAttemptAnswer, "/api/v1/machines/mch_a/observations", "while the window was read", attemptArgs},
+		{"scope-account after the reads", accScope, accScopeAnswer, "/api/v1/identity", "", "after the request was built", scopeArgs},
+		{"account after the reads", accAttempt, accAttemptAnswer, "/api/v1/identity", "", "after the request was built", attemptArgs},
+		{"scope-account during the reads", accScope, accScopeAnswer, "/api/v1/machines/mch_a/observations", "", "while the window was read", scopeArgs},
+		{"account during the reads", accAttempt, accAttemptAnswer, "/api/v1/machines/mch_a/observations", "", "while the window was read", attemptArgs},
+		// The observations answer shows ep_BWSYNTH-2 and the GET /server it calls for shows ep_BWSYNTH-1
+		// again: the last epoch equals the first, and the count of moves is what shows the change.
+		{"scope-account and back", accScope, accScopeAnswer, "/api/v1/machines/mch_a/observations", "ep_BWSYNTH-1", "though the last read shows 'ep_BWSYNTH-1' as at the first", scopeArgs},
+		{"account and back", accAttempt, accAttemptAnswer, "/api/v1/machines/mch_a/observations", "ep_BWSYNTH-1", "though the last read shows 'ep_BWSYNTH-1' as at the first", attemptArgs},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			recoveryPosted = nil
 			setServerFacts(t, 3, map[string]string{c.moves: "ep_BWSYNTH-2"})
+			recoveryRefreshEpoch = c.refresh
 			seen := recoveryServer(t, accAnswers(c.post), c.post)
 			code, out, errb := account(t, "mch_a\n", c.args...)
 			if code == 0 || out != "" || len(recoveryPosted) != 0 || slices.Contains(seen(), c.route) {
 				t.Errorf("exit %d, stdout %q, %d POSTs; want a refusal and no POST\n%s", code, out, len(recoveryPosted), errb)
 			}
-			if !strings.Contains(errb, "the epoch changed from 'ep_BWSYNTH-1' to 'ep_BWSYNTH-2'") || !strings.Contains(errb, c.said) || !strings.Contains(strings.ToLower(errb), "nothing was sent") {
+			want := "the epoch changed from 'ep_BWSYNTH-1' to 'ep_BWSYNTH-2'"
+			if c.refresh != "" {
+				want = "the epoch changed while the window was read"
+			}
+			if !strings.Contains(errb, want) || !strings.Contains(errb, c.said) || !strings.Contains(strings.ToLower(errb), "nothing was sent") {
 				t.Errorf("the epoch change is not named, or the refusal does not say nothing was sent:\n%s", errb)
+			}
+		})
+	}
+}
+
+// TestAccountSettleFactsEpoch: the timeline entry at the answered revision is shown only when it
+// carries the epoch of the answer. An entry of another epoch has the same kind and revision but
+// belongs to another snapshot, so the line names the timeline instead of printing its facts.
+func TestAccountSettleFactsEpoch(t *testing.T) {
+	for _, c := range []struct {
+		name, post string
+		args       []string
+	}{{"scope-account", accScopeAnswer, scopeArgs}, {"account", accAttemptAnswer, attemptArgs}} {
+		t.Run(c.name, func(t *testing.T) {
+			recoveryPosted = nil
+			a := accAnswers(c.post)
+			a["GET /api/v1/machines/mch_a/timeline?order=newest"] = strings.ReplaceAll(a["GET /api/v1/machines/mch_a/timeline?order=newest"], `"epoch":"ep_BWSYNTH-1"`, `"epoch":"ep_BWSYNTH-0"`)
+			recoveryServer(t, a, c.post)
+			code, out, errb := account(t, "mch_a\n", c.args...)
+			flat := strings.Join(strings.Fields(out), " ")
+			if code != 0 || strings.Contains(flat, "Settle floor 30s, counted from") || !strings.Contains(flat, "The settle floor and its anchor are on the machine's timeline: machine timeline 'mch_a'.") {
+				t.Errorf("exit %d; want the timeline named and no facts of another epoch\n%s\n%s", code, out, errb)
 			}
 		})
 	}
