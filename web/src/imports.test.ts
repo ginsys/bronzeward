@@ -360,6 +360,25 @@ describe("what ends the watch of an import's operation (§11.3, the CLI's follow
     expect(events(2, [["resume-failed", { code: "x" }], ["continued", { generation: 2 }]]).settled).toBeUndefined();
     expect(events(2, [["continued", { generation: 2 }], ["resume-failed", { code: "x" }]]).settled).toBe("resume-failed");
   });
+  // Item D of ginsys/bronzeward#644: the state after each event, so that removing the `ours` guard of
+  // onEvent fails here. Without it an earlier run's pause or resume-failed settles the watch.
+  test("the run's state after each event: an earlier run's events settle nothing, whichever event begins the run", () => {
+    const after = (gen: number, list: [string, unknown][]) => {
+      let s = startRun(gen);
+      return list.map(([type, data]) => ((s = onEvent(s, type, data)), s.settled));
+    };
+    // Generation 2 starts not ours: the pause and the failure of the run before it settle nothing.
+    expect(after(2, [["paused", { generation: 1 }], ["resume-failed", { code: "x" }], ["staged", {}]])).toEqual([undefined, undefined, undefined]);
+    // A continuation, a takeover or a mark at the claim's generation begins our run, and only then do they settle.
+    for (const begins of ["continued", "taken-over", "marked"]) {
+      expect(after(2, [["paused", { generation: 1 }], [begins, { generation: 2 }], ["paused", { generation: 2 }]])).toEqual([undefined, undefined, "paused"]);
+      expect(after(2, [["resume-failed", { code: "x" }], [begins, { generation: 2 }], ["resume-failed", { code: "x" }]])).toEqual([undefined, undefined, "resume-failed"]);
+    }
+    // A begin at an earlier generation than the claim's is not ours either.
+    expect(after(3, [["continued", { generation: 2 }], ["paused", { generation: 2 }]])).toEqual([undefined, undefined]);
+    // The first run is ours from the start.
+    expect(after(1, [["staged", {}], ["paused", { generation: 1 }]])).toEqual([undefined, "paused"]);
+  });
   test("an event before the refresh does not stop a healthy watch on a lease that only looked lapsed", () => {
     const at = (s: string) => Date.parse(`2026-11-01T${s}Z`);
     // The lease ran to 07:05:00; the page read it at 07:04:00, and an event arrives at 07:05:05.
