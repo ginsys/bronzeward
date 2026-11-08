@@ -72,9 +72,11 @@ func Terminal(state string) bool {
 // state it drains the pages of what the stream did not send; on any other state it renews a
 // sign-in about to expire (§9.5 item 4) and reconnects with Last-Event-ID. An attempt that showed
 // nothing is retried after 1 s, doubling to 30 s; JSON pages are read again at the same pace.
-func (c *Client) Watch(op string, w Watch) (*apitypes.OperationBody, error) {
-	o, _, err := c.WatchBody(op, w)
-	return o, err
+//
+// It returns the operation read the result comes from. A caller that prints the state of a terminal
+// operation checks EpochHolds on that read first, as WatchBody's callers do.
+func (c *Client) Watch(op string, w Watch) (*apitypes.OperationBody, OperationRead, error) {
+	return c.WatchBody(op, w)
 }
 
 // OperationRead is one read of an operation as the server answered it: the body as sent and the
@@ -199,7 +201,9 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 				lastOp, lastRead = again, rdAgain
 			} else {
 				held := pageEpoch == "" || pageEpoch == epoch
-				if epoch == "" || held && (last == "" || epochOf(last) == epoch) {
+				// A read with no epoch header stands while no answer showed another epoch since it. The count
+				// says so: pages of another epoch (held false) moved it (section 8.6 item 2).
+				if epoch == "" && c.EpochHolds(rd) || epoch != "" && held && (last == "" || epochOf(last) == epoch) {
 					return o, rd, nil
 				}
 				// Pages of another epoch than the operation read's, an empty list included, are of a

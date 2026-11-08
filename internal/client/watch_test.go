@@ -142,7 +142,7 @@ func watched(t *testing.T, o *opServer, epoch string, prep func(*Client)) ([]str
 	}
 	var shown []string
 	var waits []time.Duration
-	op, err := c.Watch("op_BWSYNTH", Watch{
+	op, _, err := c.Watch("op_BWSYNTH", Watch{
 		Show: func(e Event) {
 			shown = append(shown, e.ID)
 			if onShow != nil {
@@ -343,7 +343,7 @@ func TestWatch(t *testing.T) {
 		f := &fake{epoch: e1, post: func(_ int, w http.ResponseWriter, r *http.Request) { o.serve(w, r) }}
 		c, _, _ := writeClient(t, f, e1)
 		var data []string
-		_, err := c.Watch("op_BWSYNTH", Watch{Show: func(e Event) { data = append(data, string(e.Data)) }, sleep: func(time.Duration) {}})
+		_, _, err := c.Watch("op_BWSYNTH", Watch{Show: func(e Event) { data = append(data, string(e.Data)) }, sleep: func(time.Duration) {}})
 		if want := []string{"{\"a\":\n1}"}; err != nil || !slices.Equal(data, want) {
 			t.Errorf("watch: %v, data %q; want %q", err, data, want)
 		}

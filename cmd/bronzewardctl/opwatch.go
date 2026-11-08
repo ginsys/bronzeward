@@ -402,6 +402,17 @@ func (e *env) operationWatch(args []string) (err error) {
 	return errors.Join(final, out.failure(), emitted)
 }
 
+// restoredRead is the error for a terminal operation whose read no longer stands: an answer or an event
+// showed another epoch after it (client-contracts.md section 8.6 item 2), a read with no epoch header
+// included. It is nil when the read stands or the operation is not terminal. A command that prints the
+// state of a watched operation checks it first.
+func restoredRead(c *client.Client, id string, o *apitypes.OperationBody, read client.OperationRead) error {
+	if o == nil || !client.Terminal(o.State) || c.EpochHolds(read) {
+		return nil
+	}
+	return unreadState(id, errors.Join(client.ErrWatchEnded, client.ErrWatchRestored))
+}
+
 // unreadState is the error of a watch that ended with no operation read. A problem document the
 // server named stands as it is: exit 1 says that nothing was decided. Any other failure, an answer
 // that cannot be read, a refused certificate or a connection that failed, leaves the operation's

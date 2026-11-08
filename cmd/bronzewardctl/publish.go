@@ -64,7 +64,7 @@ func (e *env) publish(args []string) (err error) {
 		return nil
 	}
 	defer func() { err = errors.Join(err, c.Save()) }()
-	o, err := c.Watch(op.Id, client.Watch{
+	o, read, err := c.Watch(op.Id, client.Watch{
 		Show:  func(ev client.Event) { fmt.Fprintf(e.err, "  %s\n", pr(ev.Type)) },
 		Clear: func() { fmt.Fprintln(e.err, "  (the events above no longer hold)") },
 	})
@@ -74,6 +74,10 @@ func (e *env) publish(args []string) (err error) {
 	// The operation's end decides the exit; a failed read of the events after it is reported beside.
 	if err != nil {
 		fmt.Fprintf(e.err, "bronzewardctl: %v; the operation's last events were not shown\n", err)
+	}
+	// A terminal read that an epoch change since overtook decides nothing: the state is not known.
+	if rerr := restoredRead(c, op.Id, o, read); rerr != nil {
+		return rerr
 	}
 	if o.State != "succeeded" {
 		return operationFailed{fmt.Errorf("%s: publication operation %s %s: %s; nothing was sent to any machine", c.Context.Where(), pr(o.Id), pr(o.State), pr(compact(o.Error)))}

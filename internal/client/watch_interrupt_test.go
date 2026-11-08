@@ -52,7 +52,7 @@ func newStreamStall(t *testing.T, stream func(w http.ResponseWriter, r *http.Req
 func ended(t *testing.T, c *Client, w Watch) error {
 	t.Helper()
 	done := make(chan error, 1)
-	go func() { _, err := c.Watch("op_BWSYNTH", w); done <- err }()
+	go func() { _, _, err := c.Watch("op_BWSYNTH", w); done <- err }()
 	select {
 	case err := <-done:
 		return err
@@ -208,7 +208,7 @@ func TestStreamArmsNothingWithoutAHook(t *testing.T) {
 	c, _, _ := writeClient(t, &fake{epoch: "ep_BWSYNTH-1"}, "ep_BWSYNTH-1")
 	c.Context.Server = s.srv.URL
 	var shown []string
-	_, err := c.Watch("op_BWSYNTH", Watch{Show: func(e Event) { shown = append(shown, e.ID) }, Until: func() (bool, error) { return len(shown) == 2, nil }, sleep: func(time.Duration) {}})
+	_, _, err := c.Watch("op_BWSYNTH", Watch{Show: func(e Event) { shown = append(shown, e.ID) }, Until: func() (bool, error) { return len(shown) == 2, nil }, sleep: func(time.Duration) {}})
 	if err != nil || len(shown) != 2 {
 		t.Errorf("shown %v, error %v; want both events and no stop", shown, err)
 	}

@@ -384,7 +384,7 @@ func (e *env) follow(c *client.Client, a accepted, before int) (err error) {
 	seen, behind := 0, 0
 	// shownEpoch is the epoch in the ID of the last event shown.
 	shownEpoch := ""
-	o, err := c.Watch(a.Operation, client.Watch{
+	o, read, err := c.Watch(a.Operation, client.Watch{
 		Show: func(ev client.Event) {
 			var n string
 			shownEpoch, n, _ = strings.Cut(ev.ID, ":")
@@ -473,6 +473,10 @@ func (e *env) follow(c *client.Client, a accepted, before int) (err error) {
 	// A terminal operation decides the exit; a failed read of the events after it is reported beside.
 	if err != nil {
 		fmt.Fprintf(e.err, "bronzewardctl: %s; the operation's last events were not shown\n", client.Shown(err))
+	}
+	// A terminal read that an epoch change since overtook decides nothing: the state is not known.
+	if rerr := restoredRead(c, a.Operation, o, read); rerr != nil {
+		return rerr
 	}
 	switch {
 	case mark != 0:
