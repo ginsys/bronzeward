@@ -41,14 +41,25 @@ type Write struct {
 	// Reads is the epoch of the reads that built Body. A first send under another epoch is refused
 	// (§8.5): the preflight reads of Send can show a newer one than those reads.
 	Reads string
-	Read  func(*Client) (string, error)
-	Check string
+	// readMoves is c.EpochMoves() as the reads that built Body left it, set only by ReadsFrom. Send
+	// refuses a first send when the preflight moved the epoch and it came back to Reads, which the
+	// comparison of the two epochs cannot show (§8.5, §8.6 item 3).
+	readMoves int
+	counted   bool
+	Read      func(*Client) (string, error)
+	Check     string
 	// Input is the input a repeat gives where the command resolved what the operator typed, so the
 	// outcome-unknown block names it instead of "the same input".
 	Input string
 	// checked is the client whose CheckRepeat passed for the next Send of this write; that Send
 	// consumes it.
 	checked *Client
+}
+
+// ReadsFrom binds the send to the epoch and the move count of the reads c made so far, so that a
+// caller cannot set Reads without the count (§8.5, §8.6 item 3).
+func (w *Write) ReadsFrom(c *Client) {
+	w.Reads, w.readMoves, w.counted = c.Context.LastEpoch, c.moves, true
 }
 
 // CheckRepeat runs a T10 repeat's checks, the principal and the confirming GET /recovery, for the
@@ -222,6 +233,10 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 		ref = c.Context.LastEpoch
 		if w.Reads != "" && ref != "" && ref != w.Reads {
 			return nil, c.Context.fail(fmt.Errorf("%s not sent: the epoch changed from %s to %s after the request was built from reads of the earlier one. Nothing was sent. Read again with: bronzewardctl --context %s %s, then run this command again",
+				route, ShellWord(w.Reads), ShellWord(ref), ShellWord(c.Context.Name), w.Check))
+		}
+		if w.counted && c.moves != w.readMoves {
+			return nil, c.Context.fail(fmt.Errorf("%s not sent: the epoch changed after the request was built from reads of %s, though the last read shows %s as at those reads. Nothing was sent. Read again with: bronzewardctl --context %s %s, then run this command again",
 				route, ShellWord(w.Reads), ShellWord(ref), ShellWord(c.Context.Name), w.Check))
 		}
 	}

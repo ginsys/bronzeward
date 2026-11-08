@@ -104,8 +104,24 @@ func setServerFacts(t *testing.T, revision int, epochByPath map[string]string) {
 }
 
 // recoveryPosted holds the body of every POST recoveryServer saw, in order; a test that reads it
-// resets it before the server starts.
-var recoveryPosted []string
+// resets it before the server starts. The handler runs in the server's goroutines, so every access
+// goes through recoveryPostedMu: posted and resetPosted for a test, the handler's own append.
+var (
+	recoveryPosted   []string
+	recoveryPostedMu sync.Mutex
+)
+
+func posted() []string {
+	recoveryPostedMu.Lock()
+	defer recoveryPostedMu.Unlock()
+	return slices.Clone(recoveryPosted)
+}
+
+func resetPosted() {
+	recoveryPostedMu.Lock()
+	defer recoveryPostedMu.Unlock()
+	recoveryPosted = nil
+}
 
 // recoveryServer is a fake server for the recovery commands, answering reads from answers by
 // method and path, and every POST 201 with post's body. It lists the requests it saw.
@@ -118,7 +134,9 @@ func recoveryServer(t *testing.T, answers map[string]string, post string) func()
 		seen = append(seen, r.Method+" "+r.URL.Path)
 		if r.Method == http.MethodPost {
 			b, _ := io.ReadAll(r.Body)
+			recoveryPostedMu.Lock()
 			recoveryPosted = append(recoveryPosted, string(b))
+			recoveryPostedMu.Unlock()
 		}
 		mu.Unlock()
 		// Once a path in recoveryEpochByPath is read, the epoch moved: every later answer carries it.
