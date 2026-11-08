@@ -234,7 +234,13 @@ function readTags(original: string): { found: { index: number; tag: string; name
   // comment, which the blanking above leaves.
   const header = String.raw`([|>](?:[-+][1-9]?|[1-9][-+]?)?)(?=[ \t]*(?:#[^\n]*)?\r?\n)`;
   const key = /[ \t]*:(?:[ \t\r\n]|$)/y;
-  const tag = new RegExp(String.raw`[ \t\r\n]+(?:"((?:[^"\\]|\\[^])*)"|'((?:[^'\n]|'')*)'|${header}|(${word}(?:[ \t]+${word})*))`, "y");
+  const tagOf = (words: string) =>
+    new RegExp(String.raw`[ \t\r\n]+(?:"((?:[^"\\]|\\[^])*)"|'((?:[^'\n]|'')*)'|${header}|(${words}(?:[ \t]+${words})*))`, "y");
+  const tag = tagOf(word);
+  // In flow context a tag with no anchor reads its value as a tag after an anchor does: a colon before
+  // a flow indicator stays in the word (`[!bwref x/foo:]` is the scalar `x/foo:`, no name;
+  // ginsys/bronzeward#672).
+  const flowTag = tagOf(flowWord);
   // The value may follow one anchor (`!bwref &e x/foo`): go-yaml reads an anchor name with is_alpha
   // only, as the scan below does, and needs a blank after it. The groups are those of `tag`. A value
   // with no anchor between the tag and the value is read by `tag` alone, as before. A second tag is
@@ -258,8 +264,9 @@ function readTags(original: string): { found: { index: number; tag: string; name
     let m = bomStream ? null : withAnchor.exec(masked);
     const hasAnchor = m !== null;
     if (m === null) {
-      tag.lastIndex = tagEnd;
-      m = tag.exec(masked);
+      const plain = inFlow ? flowTag : tag;
+      plain.lastIndex = tagEnd;
+      m = plain.exec(masked);
     }
     if (m === null) continue;
     // The server refuses a tag on a key (tag-placement, ginsys/bronzeward#637), so an explicit key's
