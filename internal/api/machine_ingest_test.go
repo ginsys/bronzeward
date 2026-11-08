@@ -352,6 +352,12 @@ func TestMachineAccessUnavailable(t *testing.T) {
 			me.node.Fail(talostest.MachineConfigType, codes.PermissionDenied)
 			return []string{runToken}
 		}, "machine-config", "machine", true},
+		// The identity read answered, then the node stopped answering: the identity read's own
+		// cause, as the observation loop gives it (observe.go).
+		"a configuration read the node does not answer": {func(_ *testing.T, me *machineEnv) []string {
+			me.node.Fail(talostest.MachineConfigType, codes.Unavailable)
+			return []string{runToken}
+		}, "node-unreachable", "machine", true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			me := newMachineEnv(t)
