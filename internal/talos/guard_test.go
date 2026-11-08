@@ -40,9 +40,12 @@ const (
 )
 
 // parsePackage parses this package's non-test files.
-func parsePackage(t *testing.T) map[string][]byte {
+func parsePackage(t *testing.T) map[string][]byte { return parseDir(t, ".") }
+
+// parseDir parses the non-test files of the package in dir.
+func parseDir(t *testing.T, dir string) map[string][]byte {
 	t.Helper()
-	names, err := filepath.Glob("*.go")
+	names, err := filepath.Glob(filepath.Join(dir, "*.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +58,7 @@ func parsePackage(t *testing.T) map[string][]byte {
 		if err != nil {
 			t.Fatal(err)
 		}
-		files[n] = src
+		files[filepath.Base(n)] = src
 	}
 	if len(files) == 0 {
 		t.Fatal("no source files")
@@ -207,14 +210,39 @@ type policy struct {
 	members   []string
 	holder    string
 	exempt    []string
+	// readers are the safe functions the COSI client may be passed to.
+	readers []string
 }
 
-var readerPolicy = policy{selectors: allowedSelectors, members: clientMembers, holder: "reader"}
+var readerPolicy = policy{selectors: allowedSelectors, members: clientMembers, holder: "reader", readers: []string{"StateGetByID"}}
 
 const (
 	machineryMachine = "github.com/siderolabs/talos/pkg/machinery/api/machine"
+	machineryRuntime = "github.com/siderolabs/talos/pkg/machinery/resources/runtime"
 	applyFile        = "apply.go"
+	discoverDir      = "discover"
+	discoverPackage  = thisPackage + "/" + discoverDir
 )
+
+// discoverPolicy is internal/talos/discover's, the package the CLI links (decision T2's one
+// exception). The client is constructed and held as Reader's is, and the package may list COSI
+// resources, which Reader may not: of the cluster package it may also name Member, and of the
+// runtime package PlatformMetadata, the platform's name. Nothing else of either package, no
+// request that changes a node, and no node routing metadata.
+var discoverPolicy = policy{
+	selectors: map[string][]string{
+		machineryClient:  {"Client", "New", "WithConfigContext", "WithEndpoints"},
+		clientConfig:     {"Context", "FromBytes"},
+		cosiSafe:         {"StateGetByID", "StateListAll"},
+		cosiState:        {"IsNotFoundError"},
+		machineryHW:      {"SystemInformation", "SystemInformationID"},
+		machineryCl:      {"Identity", "Info", "InfoID", "LocalIdentity", "Member"},
+		machineryRuntime: {"PlatformMetadata", "PlatformMetadataID"},
+	},
+	members: clientMembers,
+	holder:  "node",
+	readers: []string{"StateGetByID", "StateListAll"},
+}
 
 // applierMembers are the only members of the Applier's stored client.
 var applierMembers = []string{"ApplyConfiguration", "Close"}
@@ -356,7 +384,7 @@ func policyViolations(t *testing.T, name string, src []byte, pol policy) []strin
 			}
 			if n.Sel.Name == "COSI" {
 				call, ok := parents[n].(*ast.CallExpr)
-				if !ok || !slices.Contains(call.Args, ast.Expr(n)) || !isStateGetByID(call.Fun, local) {
+				if !ok || !slices.Contains(call.Args, ast.Expr(n)) || !isSafeRead(call.Fun, local, pol.readers) {
 					flag(n, "COSI is used other than as an argument to safe.StateGetByID")
 				}
 			}
@@ -398,14 +426,16 @@ func isPkgSel(e ast.Expr, local map[string]string, path, name string) bool {
 	return ok && local[x.Name] == path && s.Sel.Name == name
 }
 
-func isStateGetByID(fun ast.Expr, local map[string]string) bool {
+// isSafeRead reports whether fun is one of the named functions of COSI's safe package, with or
+// without type arguments.
+func isSafeRead(fun ast.Expr, local map[string]string, names []string) bool {
 	switch f := fun.(type) {
 	case *ast.IndexExpr:
-		return isPkgSel(f.X, local, cosiSafe, "StateGetByID")
+		fun = f.X
 	case *ast.IndexListExpr:
-		return isPkgSel(f.X, local, cosiSafe, "StateGetByID")
+		fun = f.X
 	}
-	return isPkgSel(fun, local, cosiSafe, "StateGetByID")
+	return slices.ContainsFunc(names, func(n string) bool { return isPkgSel(fun, local, cosiSafe, n) })
 }
 
 // The type-checked guards follow a method to its declaration, whatever spelling reaches it: an
@@ -527,9 +557,14 @@ var memberAllowlist = map[string][]string{
 // typedMachineryViolations reports every selection of a machinery client or COSI state member
 // outside memberAllowlist, by the member's declaration.
 func typedMachineryViolations(t *testing.T, srcs map[string][]byte) []string {
+	return typedViolationsIn(t, srcs, thisPackage)
+}
+
+// typedViolationsIn is typedMachineryViolations for the package at path.
+func typedViolationsIn(t *testing.T, srcs map[string][]byte, path string) []string {
 	t.Helper()
 	fset := token.NewFileSet()
-	_, info := typeCheck(t, fset, thisPackage, parseSources(t, fset, srcs), listedExports(t), nil, nil)
+	_, info := typeCheck(t, fset, path, parseSources(t, fset, srcs), listedExports(t), nil, nil)
 	var out []string
 	for sel, s := range info.Selections {
 		obj := s.Obj()
@@ -779,6 +814,68 @@ func TestMachineryCallsAllowlisted(t *testing.T) {
 	// Control for the controls: the head alone, which uses only allowlisted names, is clean.
 	if got := machineryViolations(t, "control.go", []byte(head)); len(got) != 0 {
 		t.Errorf("the clean control head is flagged: %q", got)
+	}
+}
+
+var discoverSurface = []string{
+	"Discover", "ErrNoEndpoint", "Member", "Member.Address", "Member.Answered", "Member.Hostname", "Member.NodeID",
+	"Member.Platform", "Member.Role", "Member.SMBIOSUUID", "Result", "Result.ClusterID", "Result.Contract",
+	"Result.KubernetesEndpoint", "Result.Members", "Result.Supported", "Result.Version", "node.close",
+}
+
+// TestDiscoverCallsAllowlisted holds internal/talos/discover, which the CLI links, to
+// discoverPolicy: the same shape as Reader's guard, with the list reads and the two resource
+// types the discovery needs and nothing that changes a node. It also holds the package to its
+// exported surface.
+func TestDiscoverCallsAllowlisted(t *testing.T) {
+	srcs := parseDir(t, discoverDir)
+	for name, src := range srcs {
+		for _, v := range policyViolations(t, name, src, discoverPolicy) {
+			t.Error(v)
+		}
+	}
+	for _, v := range typedViolationsIn(t, srcs, discoverPackage) {
+		t.Error(v)
+	}
+	if got := exportedSurface(t, srcs); !slices.Equal(got, discoverSurface) {
+		t.Errorf("surface\n got %q\nwant %q", got, discoverSurface)
+	}
+
+	// Controls. The head uses every name the policy adds; it is clean under discoverPolicy and
+	// flagged under Reader's, so the additions are what loosens the guard and nothing else.
+	head := "package discover\nimport (\n\t\"context\"\n\t\"github.com/cosi-project/runtime/pkg/safe\"\n\t\"github.com/siderolabs/talos/pkg/machinery/client\"\n" +
+		"\t\"github.com/siderolabs/talos/pkg/machinery/resources/cluster\"\n\t\"github.com/siderolabs/talos/pkg/machinery/resources/runtime\"\n)\n" +
+		"var _ = context.Background\nvar _ = safe.StateListAll[*cluster.Member]\nvar _ *runtime.PlatformMetadata\ntype node struct{ api *client.Client }\n"
+	if got := policyViolations(t, "control.go", []byte(head), discoverPolicy); len(got) != 0 {
+		t.Errorf("the clean discover control is flagged: %q", got)
+	}
+	under := strings.Join(policyViolations(t, "control.go", []byte(head), readerPolicy), "\n")
+	for _, want := range []string{"safe.StateListAll is not allowlisted", "cluster.Member is not allowlisted", "runtime is not allowlisted"} {
+		if !strings.Contains(under, want) {
+			t.Errorf("Reader's policy does not flag %q in the discover control:\n%s", want, under)
+		}
+	}
+	for name, c := range map[string]struct{ body, want string }{
+		"another safe call":     {"var _ = safe.StateList[*cluster.Member]\n", "safe.StateList is not allowlisted"},
+		"another runtime type":  {"var _ = runtime.NewKmsgLogConfig\n", "runtime.NewKmsgLogConfig is not allowlisted"},
+		"another cluster type":  {"var _ = cluster.NewAffiliate\n", "cluster.NewAffiliate is not allowlisted"},
+		"an apply":              {"func (n *node) f(ctx context.Context) { n.api.ApplyConfiguration(ctx, nil) }\n", "ApplyConfiguration is denied"},
+		"a COSI destroy":        {"func (n *node) f(ctx context.Context) { n.api.COSI.Destroy(ctx, nil) }\n", "Destroy is denied"},
+		"a COSI create":         {"func (n *node) f(ctx context.Context) { n.api.COSI.Create(ctx, nil) }\n", "Create is denied"},
+		"node metadata":         {"func f(ctx context.Context) { _ = client.WithNode(ctx, \"n\") }\n", "client.WithNode is not allowlisted"},
+		"COSI in a variable":    {"func (n *node) f() { s := n.api.COSI; _ = s }\n", "COSI is used other than"},
+		"the client handed out": {"func (n *node) f() any { return n.api }\n", "the api field is used bare"},
+	} {
+		got := strings.Join(policyViolations(t, "control.go", []byte(head+c.body), discoverPolicy), "\n")
+		if !strings.Contains(got, c.want) {
+			t.Errorf("discover control %s: no violation %q in:\n%s", name, c.want, got)
+		}
+	}
+	// The type-checked guard reaches a member outside the allowlist by a spelling the syntactic
+	// check does not follow.
+	typed := "package discover\nimport (\n\t\"context\"\n\t\"github.com/siderolabs/talos/pkg/machinery/client\"\n)\nfunc f(ctx context.Context, c *client.Client) { c.RebootWithResponse(ctx) }\n"
+	if got := typedViolationsIn(t, map[string][]byte{"control.go": []byte(typed)}, discoverPackage); len(got) != 1 {
+		t.Errorf("typed control in the discover package: %q, want one violation", got)
 	}
 }
 

@@ -10,7 +10,10 @@ import (
 
 // The client's packages, whose dependency closure must hold none of the server's packages
 // listed in forbidden (decision T2 of the client's ticket), so bronzewardctl never links the
-// server's API, database, provider or Talos packages, or the PostgreSQL driver.
+// server's API, database, provider or Talos packages, or the PostgreSQL driver. T2 has one
+// exception: internal/talos/discover, the read-only package behind `cluster discover`, which has
+// its own dial and does not import internal/talos (this test proves that, since the parent stays
+// excluded).
 var clientPatterns = []string{
 	"github.com/ginsys/bronzeward/cmd/bronzewardctl/...",
 	"github.com/ginsys/bronzeward/internal/client/...",
@@ -18,6 +21,9 @@ var clientPatterns = []string{
 
 // forbidden reports whether a package in a client's closure is one T2 excludes.
 func forbidden(pkg string) bool {
+	if pkg == discover {
+		return false
+	}
 	for _, prefix := range []string{
 		"github.com/ginsys/bronzeward/internal/api",
 		"github.com/ginsys/bronzeward/internal/database",
@@ -66,6 +72,39 @@ func TestClientClosureExcludesServerPackages(t *testing.T) {
 	}
 	for _, p := range pkgs {
 		if forbidden(p) {
+			t.Errorf("the client's closure holds %s", p)
+		}
+	}
+}
+
+const discover = "github.com/ginsys/bronzeward/internal/talos/discover"
+
+// T2's one exception: internal/talos/discover is allowed, and nothing else under internal/talos is
+// (its parent, the reader of whole machine configurations; the stand-in node; any new package).
+func TestForbiddenExemptsDiscoverOnly(t *testing.T) {
+	for pkg, want := range map[string]bool{
+		"github.com/ginsys/bronzeward/internal/talos":           true,
+		"github.com/ginsys/bronzeward/internal/talos/talostest": true,
+		"github.com/ginsys/bronzeward/internal/talos/dial":      true,
+		discover:               false,
+		discover + "/internal": true,
+		"github.com/ginsys/bronzeward/internal/talosx": false,
+	} {
+		if got := forbidden(pkg); got != want {
+			t.Errorf("forbidden(%s) = %v, want %v", pkg, got, want)
+		}
+	}
+}
+
+// The CLI links the discovery package and no other Talos package of the module: the closure holds
+// it, so the exception cannot be lost silently, and holds nothing else under internal/talos.
+func TestClientClosureIncludesDiscoverOnly(t *testing.T) {
+	pkgs := closure(t, clientPatterns...)
+	if !slices.Contains(pkgs, discover) {
+		t.Errorf("go list -deps %v: %s missing from the closure", clientPatterns, discover)
+	}
+	for _, p := range pkgs {
+		if strings.HasPrefix(p, "github.com/ginsys/bronzeward/internal/talos") && p != discover {
 			t.Errorf("the client's closure holds %s", p)
 		}
 	}

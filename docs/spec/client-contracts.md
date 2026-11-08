@@ -81,7 +81,9 @@ Kept unchanged, as the issue requires:
   administration.
 
 Excluded: a server session or backend-for-frontend, direct provider or Talos access from a
-client, a new credential policy, the decisions of
+client (the one exception is `cluster discover`, [§3.3](#33-client-actions-with-no-route): it reads
+a cluster with the operator's own talosconfig and the client links only its own read-only package,
+`internal/talos/discover`, never the server's Talos packages), a new credential policy, the decisions of
 [#265](https://github.com/ginsys/bronzeward/issues/265) and
 [#266](https://github.com/ginsys/bronzeward/issues/266), and any client implementation.
 [#162](https://github.com/ginsys/bronzeward/issues/162) concerns Talos access and does not supply
@@ -200,6 +202,7 @@ ETag (`internal/api/ingestions.go:153-154`).
 | --- | --- | --- |
 | `login`, `logout` | identity-provider and client concerns; the server keeps no session | [§9](#9-authentication) |
 | `context` | client configuration | [§5](#5-endpoint-discovery-and-context-selection) |
+| `cluster discover` | reads a cluster's nodes with the operator's own talosconfig and calls no Bronzeward route; prints the `cluster add`, `machine add` and `bao kv put` commands that record it and runs none of them | `--talosconfig <file>` is required and nothing else is searched (not `$TALOSCONFIG`, not Talos's default file, not the current directory); table output only; the file is read with a size limit and never copied, logged or printed; errors give the node's gRPC code and never its text |
 | automation token issue, rotate, list | server-side command only | not offered by either client |
 | dispatch, apply | the controller dispatches approved plans ([design §12.7](../design/Talos_Configuration_and_Machine_Management_Design.md#127-application-approval-and-dispatch-boundary); [§13.7](../design/Talos_Configuration_and_Machine_Management_Design.md#137-poc-identity-and-approval-policy) item 2) | not offered |
 
@@ -1480,6 +1483,7 @@ Plaintext can pass through a client in these places only:
 | Marks | `POST /ingestions/{id}/marks`, `POST /ingestions` `marks`, `PUT /drafts/{id}/fragments/{name}` `marks` | a path can spell a secret mapping key | on the mark route `marks` is the keyed member (`internal/api/marks.go:67-68`); on the start route and the fragment write the keyed member is `document`, and `marks` stays in the canonical body that the same keyed fingerprint covers (`internal/api/ingestions.go:24-26`, `internal/api/fragments.go:37`, `internal/api/fragments.go:51-57`, `internal/api/body.go:170-172`); [compilation §3.6](compilation.md#36-operator-review) item 4 |
 | The protected review | `GET /ingestions/{id}/review` | can hold a value nobody marked yet | `internal/api/review.go:24-31`; [compilation §3.6](compilation.md#36-operator-review) |
 | Tokens | every request | credentials | [§9](#9-authentication) |
+| The talosconfig file of `cluster discover` | none: it is read from a file the operator names and goes to Talos nodes only | holds the cluster's client key | [§3.3](#33-client-actions-with-no-route) |
 
 Not protected: rendered release reviews, plan diffs and provenance are redacted by the server
 ([compilation §8.3](compilation.md#83-redaction)) and are handled as ordinary reads.
