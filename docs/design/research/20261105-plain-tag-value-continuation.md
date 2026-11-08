@@ -32,7 +32,7 @@ When a colon followed by a blank ends the scalar on a continuation line, the col
 - `continues()` ends the scalar at the end of the text and at a marker. It ends it at a line no more indented than the holding node.
 - It also ends the scalar at a line that starts with a comma, a closing bracket or a closing brace. The same holds for `-` or `?` followed by a blank, and for a line with a colon and a blank.
 - It has no flow case. It skips lines that hold only Unicode spaces, because it trims with `trim()`.
-- `anchoredContinues()` is conservative on purpose. For a parent shape it cannot read, it says "continues" and nothing is listed. It reads blanks as YAML does. A key line ends the scalar only at the column of the holder or left of it, in both functions (ginsys/bronzeward#699, section 3). A more indented key line is text to go-yaml, which refuses its colon, so nothing is listed.
+- `anchoredContinues()` is conservative on purpose. For a parent shape it cannot read, it says "continues" and nothing is listed. It reads blanks as YAML does.
 
 ## 4. Shapes
 
