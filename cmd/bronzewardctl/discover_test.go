@@ -188,3 +188,17 @@ func TestClusterDiscoverRefusesAFileNameItCannotQuote(t *testing.T) {
 		t.Errorf("exit %d, stdout %q, stderr %q, %d discoveries", code, out, errOut, len(c.given))
 	}
 }
+
+// TestClusterDiscoverRefusesAFileNameThatIsNotUTF8: a name with an invalid byte prints as another
+// name in the bao command, so it is refused like a name with a control character.
+func TestClusterDiscoverRefusesAFileNameThatIsNotUTF8(t *testing.T) {
+	c := discoverFixture(t, twoMembers, nil)
+	odd := filepath.Join(filepath.Dir(c.file), "talos\xffconfig")
+	if err := os.Rename(c.file, odd); err != nil {
+		t.Skipf("the file system takes no such name: %v", err)
+	}
+	code, out, errOut := runCtl(t, "cluster", "discover", "--talosconfig", odd)
+	if code != 2 || out != "" || !strings.Contains(errOut, "--talosconfig") || len(c.given) != 0 {
+		t.Errorf("exit %d, stdout %q, stderr %q, %d discoveries", code, out, errOut, len(c.given))
+	}
+}

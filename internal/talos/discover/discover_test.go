@@ -3,9 +3,11 @@ package discover
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"net"
 	"net/netip"
+	"runtime/debug"
 	"strings"
 	"testing"
 	"time"
@@ -205,10 +207,8 @@ func TestDiscoverErrorsDoNotQuoteUpstream(t *testing.T) {
 			t.Errorf("%s: no error", name)
 			continue
 		}
-		for _, secret := range []string{string(c.p.KeyPEM), "stand-in", "not an endpoint"} {
-			if strings.Contains(err.Error(), secret) {
-				t.Errorf("%s: the error quotes %.20q: %v", name, secret, err)
-			}
+		for _, secret := range leaked(err.Error(), c.p) {
+			t.Errorf("%s: the error quotes %.20q: %v", name, secret, err)
 		}
 	}
 	if !strings.Contains(callErr(ctx, tc, c).Error(), "PermissionDenied") {
@@ -262,5 +262,57 @@ func TestDiscoverBoundsAMemberNotEachAddress(t *testing.T) {
 	}
 	if m := got.Members[1]; m.Answered || m.Address != "10.0.0.3" {
 		t.Errorf("the silent member: %+v", m)
+	}
+}
+
+// leaked is the secrets and upstream words that msg quotes. The key is looked for as the PEM and
+// as the base64 text that a talosconfig holds, because a talosconfig quoted whole carries only the
+// second.
+func leaked(msg string, p talostest.PKI) []string {
+	var out []string
+	for _, secret := range []string{string(p.KeyPEM), base64.StdEncoding.EncodeToString(p.KeyPEM), "stand-in", "not an endpoint"} {
+		if strings.Contains(msg, secret) {
+			out = append(out, secret)
+		}
+	}
+	return out
+}
+
+// TestLeakCheckSeesTheEncodedKey is the control for TestDiscoverErrorsDoNotQuoteUpstream: an error
+// that quotes the whole talosconfig, or only its encoded key, must be reported.
+func TestLeakCheckSeesTheEncodedKey(t *testing.T) {
+	p := talostest.NewPKI(t)
+	whole := "not a talosconfig: " + string(p.Talosconfig("10.0.0.1:50000", "", ""))
+	if len(leaked(whole, p)) == 0 {
+		t.Error("an error that quotes the whole talosconfig is not reported")
+	}
+	if len(leaked("key "+base64.StdEncoding.EncodeToString(p.KeyPEM), p)) == 0 {
+		t.Error("an error that quotes the encoded key is not reported")
+	}
+	if got := leaked("discover: version: Unavailable", p); len(got) != 0 {
+		t.Errorf("a clean error is reported: %q", got)
+	}
+}
+
+// TestMachineryContract: the supported contract is the linked machinery module's minor. A module
+// replacement hides the linked version in Replace, so nothing is supported then (the server's
+// renderer refuses a replacement the same way).
+func TestMachineryContract(t *testing.T) {
+	const path = "github.com/siderolabs/talos/pkg/machinery"
+	for name, tc := range map[string]struct {
+		deps []*debug.Module
+		want string
+	}{
+		"plain":       {[]*debug.Module{{Path: path, Version: "v1.13.6"}}, "v1.13"},
+		"replaced":    {[]*debug.Module{{Path: path, Version: "v1.13.6", Replace: &debug.Module{Path: "../machinery", Version: "v1.14.2"}}}, ""},
+		"absent":      {[]*debug.Module{{Path: "example.org/other", Version: "v1.13.6"}}, ""},
+		"no build id": {nil, ""},
+	} {
+		if got := machineryContract(&debug.BuildInfo{Deps: tc.deps}); got != tc.want {
+			t.Errorf("%s: machineryContract = %q, want %q", name, got, tc.want)
+		}
+	}
+	if got := machineryContract(nil); got != "" {
+		t.Errorf("no build information: %q", got)
 	}
 }

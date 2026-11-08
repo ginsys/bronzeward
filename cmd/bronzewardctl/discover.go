@@ -10,6 +10,7 @@ import (
 	"strings"
 	"text/tabwriter"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/ginsys/bronzeward/internal/client"
 	"github.com/ginsys/bronzeward/internal/talos/discover"
@@ -40,8 +41,8 @@ func (e *env) clusterDiscover(args []string) error {
 	if e.output != "table" {
 		return usageError{errors.New("cluster discover prints commands as text: use -o table")}
 	}
-	if strings.IndexFunc(file, func(r rune) bool { return !unicode.IsPrint(r) }) >= 0 {
-		return usageError{errors.New("--talosconfig names a file whose name holds a character that cannot be printed back in the bao command: rename the file")}
+	if !utf8.ValidString(file) || strings.IndexFunc(file, func(r rune) bool { return !unicode.IsPrint(r) }) >= 0 {
+		return usageError{errors.New("--talosconfig names a file whose name holds a byte or character that cannot be printed back in the bao command: rename the file")}
 	}
 	f, err := os.Open(file)
 	if err != nil {

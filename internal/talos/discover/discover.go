@@ -50,11 +50,23 @@ var memberEndpoint = func(a netip.Addr) string { return netip.AddrPortFrom(a, 50
 
 // supportedMinor is the contract minor of the linked machinery; a test replaces it.
 var supportedMinor = func() string {
-	if bi, ok := debug.ReadBuildInfo(); ok {
-		for _, d := range bi.Deps {
-			if d.Path == "github.com/siderolabs/talos/pkg/machinery" {
-				return contractOf(d.Version)
+	bi, _ := debug.ReadBuildInfo()
+	return machineryContract(bi)
+}
+
+// machineryContract is the minor of the machinery module bi records, "" when there is none or a
+// replacement stands in for it: the linked version is then in Replace, and the server's renderer
+// refuses a replacement the same way.
+func machineryContract(bi *debug.BuildInfo) string {
+	if bi == nil {
+		return ""
+	}
+	for _, d := range bi.Deps {
+		if d.Path == "github.com/siderolabs/talos/pkg/machinery" {
+			if d.Replace != nil {
+				return ""
 			}
+			return contractOf(d.Version)
 		}
 	}
 	return ""
