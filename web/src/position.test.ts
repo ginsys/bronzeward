@@ -2152,6 +2152,35 @@ describe("a tag on an explicit key or an alias key", () => {
     ["the alias is also used as a value", "a: &k !bwref x/foo\nb: *k\n*k : v\n"],
     ["the alias key is in a sequence entry", "a: &k !bwref x/foo\nb:\n  - *k : v\n"],
     ["two alias keys", "a: &k !bwref x/foo\n*k : v\n*k : w\n"],
+    // The alias key in flow context. The alias name ends at the colon, so a value indicator follows with
+    // or without a blank, and a mapping entry that starts with the alias is a key with or without a value.
+    // A row marked guard passed before the fix too: it pins a shape that the first reading of the key
+    // already dropped.
+    ["a flow mapping question mark", "a: &k !bwref x/foo\nb: {? *k}\n"],
+    ["a flow mapping colon with no value", "a: &k !bwref x/foo\nb: {*k:}\n"],
+    ["a flow mapping blank and colon with no value", "a: &k !bwref x/foo\nb: {*k :}\n"],
+    ["a flow mapping colon and a quoted value", 'a: &k !bwref x/foo\nb: {*k:"v"}\n'],
+    ["a flow mapping entry with no value", "a: &k !bwref x/foo\nb: {*k, c: d}\n"],
+    ["a flow mapping entry with no value, after an entry", "a: &k !bwref x/foo\nb: {a: [*k, d], *k}\n"],
+    ["a flow mapping colon and a plain value", "a: &k !bwref x/foo\nb: {a: 1, *k:v}\n"],
+    ["a flow sequence pair with no value", "a: &k !bwref x/foo\nb: [*k:]\n"],
+    ["a flow sequence pair with a quoted value", 'a: &k !bwref x/foo\nb: [*k:"v"]\n'],
+    ["a flow sequence pair after an entry", "a: &k !bwref x/foo\nb: [a, *k:]\n"],
+    ["a flow sequence pair, a blank before the colon and a plain value after it", "a: &k !bwref x/foo\nb: [a, *k :x]\n"],
+    ["a flow sequence question mark", "a: &k !bwref x/foo\nb: [? *k]\n"],
+    ["a flow mapping colon and a value (guard)", "a: &k !bwref x/foo\nb: {*k: v}\n"],
+    ["a flow sequence pair (guard)", "a: &k !bwref x/foo\nb: [*k: v]\n"],
+    ["a flow mapping question mark and a value (guard)", "a: &k !bwref x/foo\nb: {? *k : v}\n"],
+    ["a flow mapping question mark after an entry (guard)", "a: &k !bwref x/foo\nb: {a: 1, ? *k}\n"],
+    ["a flow sequence question mark after an entry (guard)", "a: &k !bwref x/foo\nb: [a, ? *k]\n"],
+    // The alias is the first node after a `?` that ends its line, in a later line. A blank line or a
+    // comment line between them changes nothing.
+    ["an explicit key in the next line", "a: &k !bwref x/foo\n?\n  *k\n: v\n"],
+    ["an explicit key in the next line, with no value", "a: &k !bwref x/foo\n?\n  *k\n"],
+    ["an explicit key in the next line, after a comment", "a: &k !bwref x/foo\n? # c\n  *k\n: v\n"],
+    ["an explicit key in the next line, after a blank line", "a: &k !bwref x/foo\n?\n\n  *k\n: v\n"],
+    ["an explicit key in the next line, after a comment line", "a: &k !bwref x/foo\n?\n# c\n  *k\n: v\n"],
+    ["an explicit key after blanks on its line (guard)", "a: &k !bwref x/foo\n?   *k\n: v\n"],
   ])("a tagged value that an alias key repeats lists nothing (%s)", (_, text) => {
     expect(references(text), text).toEqual([]);
   });
@@ -2166,6 +2195,16 @@ describe("a tag on an explicit key or an alias key", () => {
     ["a later anchor of the name carries no tag", "a: &k !bwref x/foo\nb: &k 1\n*k : v\n"],
     ["a quoted key that looks like an alias", 'a: &k !bwref x/foo\n"*k": v\n'],
     ["an anchor on the next node, not on the tagged one", "a: &k\nb: !bwref x/foo\n*k : v\n"],
+    // The near misses of the flow and explicit key readings: an alias that is a value, a question mark
+    // that is text, and a `?` line that a key follows. The server accepts each of these.
+    ["a flow mapping value", "a: &k !bwref x/foo\nb: {a: *k}\n"],
+    ["a flow mapping value, then an entry", "a: &k !bwref x/foo\nb: {a: *k, c: d}\n"],
+    ["a flow sequence entry", "a: &k !bwref x/foo\nb: [*k]\n"],
+    ["a flow sequence entry, then another", "a: &k !bwref x/foo\nb: [*k, c]\n"],
+    ["a flow sequence in a flow mapping value", "a: &k !bwref x/foo\nb: {a: [*k], c: d}\n"],
+    ["a question mark in a quoted key", 'a: &k !bwref x/foo\n? "?"\n: *k\n'],
+    ["a question mark in a quoted value", "a: &k !bwref x/foo\nb: '? '\nc: *k\n"],
+    ["a question mark line followed by a key", "a: &k !bwref x/foo\n?\nb: *k\n"],
   ])("a tagged value that no alias key repeats stays listed (%s)", (_, text) => {
     expect(references(text), text).toEqual(["x/foo"]);
   });

@@ -37,6 +37,28 @@ same name for each, so none of them is a new loss or a new extra name.
   server refuses it. A unit row in `web/src/position.test.ts` pins the result.
 - Document 23, a bare `*k` as a block entry. go-yaml refuses it.
 
+## Flow and explicit-key spellings (review of the first head)
+
+The local review of the first head found two spellings that the first reading missed. A second probe
+(14 documents, then 22 and 17 more for the near misses) confirmed both against go-yaml and the server. Every
+document below is refused by the server and read as unfit by the oracle.
+
+- In flow context the alias name ends at the colon. The scanner now reads a colon after the alias as a
+  value indicator whatever follows it, an entry of a flow mapping that starts with the alias (after `{`
+  or `,`) as a key with or without a value, and a `?` after a flow bracket or comma as the key indicator.
+  Documents: `b: {? *k}`, `b: {*k:}`, `b: {*k :}`, `b: {*k:"v"}`, `b: {*k, c: d}`,
+  `b: {a: [*k, d], *k}`, `b: {a: 1, *k:v}`, `b: [*k:]`, `b: [*k:"v"]`, `b: [a, *k:]`, `b: [a, *k :x]` and
+  `b: [? *k]`, each after `a: &k !bwref x/foo`.
+- An explicit key whose node starts on a later line. The scanner now carries "the last token with content
+  was a `?` that ends its line" across blank and comment lines. Documents: `?` then `  *k` then `: v`,
+  the same with no value, with a comment after the `?`, with a blank line and with a comment line before
+  the alias.
+- Near misses that the server accepts and the scanner still lists: an alias as a flow mapping value
+  (`{a: *k}`, `{a: *k, c: d}`, `{a: [*k], c: d}`), an alias in a flow sequence (`[*k]`, `[*k, c]`), a `?`
+  in a quoted key or value, and a `?` line followed by a key (`?` then `b: *k`).
+- Still a limit: an alias that is the first node of a line inside a flow collection (`{a: 1,` then
+  ` *k}`). The server refuses it and go-yaml accepts it, like document 19.
+
 ## Table
 
 | # | document | go-yaml | server | scanner |
