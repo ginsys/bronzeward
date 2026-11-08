@@ -65,8 +65,24 @@ const restart = async () => {
 const ended = () => $('[data-testid="ended"]');
 const allowed = () => $('[data-testid="allowed"]');
 const events = () => $('[data-testid="events"]');
-const claim = () => $('section[aria-label="Claim"]');
 const holds = (text: string) => expect.stringContaining(text);
+
+// Waits until the Claim section shows `text`, answered in the page as a boolean. The section holds the open
+// review, so reading its text through WebDriver would carry the review text, and the canary in it, into
+// the retained driver log while the review is open. The page leaves the review's field out of what it
+// compares, and only true or false crosses.
+async function claimShows(text: string, timeout: number) {
+  await browser.waitUntil(
+    () =>
+      browser.execute((t: string) => {
+        const section = document.querySelector('section[aria-label="Claim"]')?.cloneNode(true) as HTMLElement | undefined;
+        if (section === undefined) return false;
+        section.querySelectorAll('[data-testid="review-text"]').forEach((f) => f.remove());
+        return (section.textContent ?? "").includes(t);
+      }, text),
+    { timeout, interval: 250, timeoutMsg: `the Claim section did not show: ${text}` },
+  );
+}
 
 // The wizard from the Changes page with the case's machine and a new draft chosen and the document
 // source selected, then the import started: encrypted staging with review is the default (B15, G5).
@@ -206,7 +222,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     await expect($('[data-testid="review-notice"]')).toHaveText(holds("PROTECTED REVIEW"));
     await choose(TIER);
     await sendMarks();
-    await expect(claim()).toHaveText(holds("The marks were accepted in operation"), { wait: 30_000 });
+    await claimShows("The marks were accepted in operation", 30_000);
     await expect(ended()).toHaveText(holds("The marks were applied: re-staged and paused again"), { wait: 60_000 });
     // The marked value's path is not shown anywhere once it was sent.
     expect(await pageShows(TIER)).toBe(false);
@@ -225,7 +241,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     await openReview();
     await typeMarks(["not a path"]);
     await sendMarks();
-    await expect(claim()).toHaveText(holds("The mark at position 0 (the first is 0) is refused."), { wait: 30_000 });
+    await claimShows("The mark at position 0 (the first is 0) is refused.", 30_000);
     expect(await pageShows("not a path")).toBe(false);
     await expect(allowed()).toHaveText("Paused for review. Continue it, or abandon it.");
     await abandon();
@@ -238,7 +254,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     // A mapping that holds a mapping has no kind: compilation refuses it after the 202 (mark-kind).
     await typeMarks(["doc[0]/machine"]);
     await sendMarks();
-    await expect(claim()).toHaveText(holds("The marks were accepted in operation"), { wait: 30_000 });
+    await claimShows("The marks were accepted in operation", 30_000);
     await expect(ended()).toHaveText(holds("The mark was not applied: it was refused ("), { wait: 60_000 });
     await expect(ended()).toHaveText(holds("the mark at position 0 (the first is 0)"));
     await expect(ended()).toHaveText(holds("The import is paused again"));
@@ -253,7 +269,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     await choose(TIER);
     await post("/bao/fault?mode=kv");
     await sendMarks();
-    await expect(claim()).toHaveText(holds("The marks were accepted in operation"), { wait: 30_000 });
+    await claimShows("The marks were accepted in operation", 30_000);
     await expect(ended()).toHaveText(holds("The mark was not applied: it was refused (dependency-unavailable"), { wait: 60_000 });
     await expect(ended()).toHaveText(holds("The import is paused again"));
     expect(await pageShows(TIER)).toBe(false);
@@ -288,7 +304,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     await choose(TIER);
     await post("/bao/fault?mode=decrypt");
     await sendMarks();
-    await expect(claim()).toHaveText(holds("The marks were accepted in operation"), { wait: 30_000 });
+    await claimShows("The marks were accepted in operation", 30_000);
     await expect(events()).toHaveText(holds("resume-failed: dependency-unavailable"), { wait: 60_000 });
     // The mark is reported as not applied and the claim stays held (client contracts, row PROT-05).
     await expect(ended()).toHaveText(holds("was not applied: its staged input could not be decrypted (resume-failed)"), { wait: 20_000 });
@@ -311,7 +327,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     // The run waits for the staged envelope's decrypt, so the process is killed before it writes an event.
     await post("/bao/decrypt-hold?ms=120000");
     await sendMarks();
-    await expect(claim()).toHaveText(holds("The marks were accepted in operation"), { wait: 30_000 });
+    await claimShows("The marks were accepted in operation", 30_000);
     // The generation the mark's run took the claim at, read in the page: only the number crosses WebDriver.
     const read = await browser.execute(() => /The marks were accepted in operation \S+ at generation (\d+)\./.exec(document.querySelector('section[aria-label="Claim"]')?.textContent ?? "")?.[1] ?? null);
     const markGeneration = Number(read);
@@ -323,7 +339,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     // The takeover, killed the same way.
     await post("/bao/decrypt-hold?ms=120000");
     await $("button=Take over import").click();
-    await expect(claim()).toHaveText(holds("The import was taken over and resumes in operation"), { wait: 30_000 });
+    await claimShows("The import was taken over and resumes in operation", 30_000);
     await post("/disposable/kill");
     await post("/bao/decrypt-hold?ms=0");
     await restart();
@@ -337,7 +353,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     await pausedImport();
     await post("/bao/decrypt-hold?ms=120000");
     await $("button=Continue import").click();
-    await expect(claim()).toHaveText(holds("The import continues in operation"), { wait: 30_000 });
+    await claimShows("The import continues in operation", 30_000);
     await post("/disposable/kill");
     await post("/bao/decrypt-hold?ms=0");
     await restart();
@@ -367,5 +383,5 @@ describe("an expired claim (ginsys/bronzeward#341)", () => {
 // Abandons through the page, which also shows its outcome.
 async function abandon() {
   await $("button=Abandon import").click();
-  await expect(claim()).toHaveText(holds("The import was abandoned. Its staged input is discarded."), { wait: 30_000 });
+  await claimShows("The import was abandoned. Its staged input is discarded.", 30_000);
 }
