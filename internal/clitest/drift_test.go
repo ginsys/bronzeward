@@ -275,7 +275,7 @@ func TestDrift(t *testing.T) {
 		t.Errorf("the revert plan binds drift record %d with operation %q, %v; want %d and apply-config", bound, operation, err, opened)
 	}
 	f.want(step("", with(approver, "machine", "unfreeze", m, "--reason", "BWSYNTH: decided to revert")...), 0, "Unfrozen.")
-	f.want(step(revert+"\n", with(approver, "approve", revert)...), 0, "unseen")
+	f.want(step(revert+"\n", with(approver, "approve", revert)...), 0, "which no reviewer has seen")
 	e.until(t, "committed", `SELECT state FROM plan_state WHERE plan = $1`, revert)
 	if got := e.closedAs(t, opened); got != "reverted" {
 		t.Errorf("the revert closed drift record %d as %q, want reverted", opened, got)
