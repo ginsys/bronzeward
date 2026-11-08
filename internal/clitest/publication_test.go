@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	coreconfig "github.com/siderolabs/talos/pkg/machinery/config"
 	"github.com/siderolabs/talos/pkg/machinery/config/encoder"
 	"github.com/siderolabs/talos/pkg/machinery/config/generate"
 	"github.com/siderolabs/talos/pkg/machinery/config/machine"
@@ -40,6 +41,7 @@ const standInNodeID = "7x1SuC8Ege5BGXdAfTEff5iQnlWZLfv9h1LGMxA2pYkC"
 type standIn struct {
 	node    *talostest.Node
 	secrets []string
+	cfg     coreconfig.Provider // the configuration the node serves until drift changes it
 }
 
 // configSecret is a secret-bearing line of a generated configuration: a token, a secret or a key.
@@ -75,7 +77,7 @@ func (f *fixture) newStandIn(t *testing.T, b *baotest.Bao, s seeded, ctl func(..
 		t.Fatal(err)
 	}
 	node.SetMachineConfig(t, doc)
-	st := &standIn{node: node, secrets: append([]string{base64.StdEncoding.EncodeToString(pki.KeyPEM)}, unmarked...)}
+	st := &standIn{node: node, cfg: cfg, secrets: append([]string{base64.StdEncoding.EncodeToString(pki.KeyPEM)}, unmarked...)}
 	for _, m := range configSecret.FindAllStringSubmatch(string(doc), -1) {
 		st.secrets = append(st.secrets, m[1])
 	}
@@ -90,6 +92,22 @@ func (f *fixture) newStandIn(t *testing.T, b *baotest.Bao, s seeded, ctl func(..
 	t.Cleanup(func() { b.Do(b.Admin(), http.MethodDelete, "/v1/secret/metadata/access/talos/"+s.cluster, nil) })
 	f.want(ctl("--context", "human", "machine", "set-endpoint", s.machine, "--talos-endpoint", node.Endpoint), 0)
 	return st
+}
+
+// drift changes the configuration the node serves by one file, which no release holds: the next
+// drift observation reads a digest other than Applied's. Each n gives another file, so a second
+// drift differs from the first. It answers the file's path.
+func (st *standIn) drift(t *testing.T, n int) string {
+	t.Helper()
+	file := fmt.Sprintf("/var/etc/bwsynth-drift-%d.conf", n)
+	mc := st.cfg.RawV1Alpha1().MachineConfig
+	mc.MachineFiles = append(mc.MachineFiles, &v1alpha1.MachineFile{FileContent: "changed by hand\n", FilePermissions: 0o644, FilePath: file, FileOp: "create"})
+	doc, err := st.cfg.EncodeBytes(encoder.WithComments(encoder.CommentsDisabled))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.node.SetMachineConfig(t, doc)
+	return file
 }
 
 // leaks names the stand-in's secrets s holds.

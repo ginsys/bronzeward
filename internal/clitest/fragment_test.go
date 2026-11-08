@@ -108,6 +108,12 @@ func startProvider(t *testing.T, roles string) (*fixture, *slowBao) {
 // startTimers is startProvider with the server's ingestion claim timers, a YAML flow mapping.
 func startTimers(t *testing.T, roles, timers string) (*fixture, *slowBao) {
 	t.Helper()
+	return startTimersExec(t, roles, timers, "")
+}
+
+// startTimersExec is startTimers with execution, as startConfigExec takes it.
+func startTimersExec(t *testing.T, roles, timers, execution string) (*fixture, *slowBao) {
+	t.Helper()
 	b := baotest.New(t)
 	digest := b.Name("digest")
 	if status, body, err := b.Do(b.Admin(), http.MethodPost, "/v1/transit/keys/"+digest, map[string]any{}); err != nil || status/100 != 2 {
@@ -160,7 +166,7 @@ func startTimers(t *testing.T, roles, timers string) (*fixture, *slowBao) {
 		cfg += "  " + p + "TokenFile: " + file + "\n"
 	}
 	cfg += "ingestion: " + timers + "\n"
-	return startConfig(t, roles, "", "bronzeward", cfg), sb
+	return startConfigExec(t, roles, "", "bronzeward", execution, cfg), sb
 }
 
 // Synthetic sentinels a fragment document and its marks carry: none may reach argv, standard
