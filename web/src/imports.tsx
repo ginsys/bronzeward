@@ -4,7 +4,7 @@
 // are protected input (§11.1-§11.4): held in this page's memory only, sent once, and dropped once
 // the start is answered. The review, continue, takeover and abandon controls are W5's (claim.tsx).
 
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { components } from "./api/v1";
 import { Claim } from "./claim.tsx";
 import { keepETag, keptETag, NO_ASSIST } from "./drafts.tsx";
@@ -216,14 +216,26 @@ export const abandonedSince = (b: Pick<Ingestion, "state">, since: number | unde
 // watch stopped at the pause reads the failure event.
 export const watchDeps = (client: Client | undefined, b: Ingestion, again: () => void) => [client, b.operation, b.ownerGeneration, b.state === "abandoned", again] as const;
 
+// What the Progress section shows: the event lines, the note that they were cleared (a restore or a
+// new epoch) and the end text. A watch starting resets all three, so a note or end of an earlier
+// operation never shows beside the next one's events.
+export interface WatchView { lines: string[]; cleared?: string; end?: ReactNode }
+export type WatchAct = { type: "start" } | { type: "show"; line: string } | { type: "clear"; why: string } | { type: "end"; text: ReactNode };
+export function watchView(v: WatchView, a: WatchAct): WatchView {
+  switch (a.type) {
+    case "start": return { lines: [] };
+    case "show": return { ...v, lines: [...v.lines, a.line] };
+    case "clear": return { ...v, lines: [], cleared: a.why };
+    case "end": return { ...v, end: a.text };
+  }
+}
+
 // The import's operation followed to its end (§8.6), or until the claim pauses, its run records
 // resume-failed, or a read made once the lease passed shows it lapsed (§11.3, as the CLI follows).
 function Progress({ b, again }: { b: Ingestion; again: () => void }) {
   const client = useWrites()?.client;
   const { failure } = useReads();
-  const [lines, setLines] = useState<string[]>([]);
-  const [cleared, setCleared] = useState<string>();
-  const [end, setEnd] = useState<ReactNode>();
+  const [{ lines, cleared, end }, show] = useReducer(watchView, { lines: [] });
   // The latest read of the ingestion and the page's failure view, for the watch begun before them.
   const latest = useRef({ b, at: Date.now() });
   const abandonedAt = useRef<number>(undefined);
@@ -243,11 +255,10 @@ function Progress({ b, again }: { b: Ingestion; again: () => void }) {
     if (client === undefined || op === null) return;
     const abort = new AbortController();
     let run = startRun(generation);
-    setLines([]);
-    setEnd(undefined);
+    show({ type: "start" });
     void watch(client, op, {
-      show: (e) => { run = onEvent(run, e.type, e.data); setLines((l) => [...l, eventLine(e)]); },
-      clear: (why) => { run = startRun(generation); setCleared(why); setLines([]); },
+      show: (e) => { run = onEvent(run, e.type, e.data); show({ type: "show", line: eventLine(e) }); },
+      clear: (why) => { run = startRun(generation); show({ type: "clear", why }); },
       until: () => stopsWatch(run.settled, latest.current, Date.now(), abandonedAt.current),
       signal: abort.signal,
     }).then(async (r) => {
@@ -256,7 +267,7 @@ function Progress({ b, again }: { b: Ingestion; again: () => void }) {
       // epoch now, which another response can have moved since (§8.5).
       const text = r.kind === "failed" ? shown.current(r.res) : await ended(client, latest.current.b, r.operation, run.settled ?? "", Date.now(), r.epoch, run);
       if (!abort.signal.aborted) {
-        setEnd(text);
+        show({ type: "end", text });
         again();
       }
     });
