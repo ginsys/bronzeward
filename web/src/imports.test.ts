@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { components } from "./api/v1";
 import { forgetETag, keepETag, keptETag } from "./drafts.tsx";
 import { WritesProvider } from "./forms.tsx";
-import { ABANDONED_SETTLE, abandonedSince, againPath, allowed, caughtUp, documentRefusal, ended, fileReader, followRun, forgetRefused, type Ingestion, keepTyped, lapsedRead, MAX_DOCUMENT, onEvent, REFRESH_FAILED, type ReadStamp, refreshDelay, refreshRetry, reviewFirst, sendStart, StartImport, type StartInput, startBody, startETag, startParams, settledReads, stampRead, startRun, started, stopsWatch, typedDocument, unsent, watchDeps, watchView } from "./imports.tsx";
+import { ABANDONED_SETTLE, abandonedSince, againPath, allowed, caughtUp, documentRefusal, ended, fileReader, followRun, forgetRefused, type Ingestion, keepTyped, lapsedRead, MAX_DOCUMENT, onEvent, REFRESH_FAILED, type ReadStamp, refreshDelay, refreshRetry, refreshWait, REVIEW_FIRST, reviewFirst, sendStart, StartImport, type StartInput, startBody, startETag, startParams, settledReads, stampRead, startRun, started, stopsWatch, typedDocument, unsent, watchDeps, watchView } from "./imports.tsx";
 import { type Load, type Reads, ReadsProvider, short } from "./list.tsx";
 import { eventLine, watch } from "./progress.ts";
 import { Client, type ReadResult } from "./request.ts";
@@ -682,6 +682,54 @@ describe("a lapsed lease decides only after the operation's newest event was sho
     // Renewed until 07:10:00 after the page's read: the watch goes on.
     expect(await follow(ing({ ownerGeneration: 2, leaseUntil: "2026-11-01T07:10:00Z" }))).toBe(false);
   });
+  describe("the check's reads (Copilot threads on web/src/imports.tsx:280 and :282)", () => {
+    const b = ing({ ownerGeneration: 2 });
+    const tick = () => new Promise<void>((r) => setTimeout(r, 0));
+    const okClaim = { kind: "ok", data: ing({ ownerGeneration: 2 }) } as const;
+    const okOp = { kind: "ok", data: op({ lastEvent: 1 }) } as const;
+    const refused = { kind: "refused", status: 403, problem: null } as const;
+    // A check started after the first event, over a client that answers the claim and the operation as given.
+    const check = async (claim: ReadResult<unknown>, operation: ReadResult<unknown>, leave = false) => {
+      const paths: string[] = [];
+      const abort = new AbortController();
+      const client = {
+        readWithEpoch: async <T,>(p: string) => {
+          paths.push(p);
+          if (leave) abort.abort();
+          return { result: (p.startsWith("/ingestions/") ? claim : operation) as ReadResult<T>, epoch: "e1" };
+        },
+      };
+      const f = followRun({
+        client, ingestion: b.id, op: OPID, generation: 2, signal: abort.signal,
+        latest: () => ({ b, at: at("07:05:15") }), abandonedAt: () => undefined, now: () => at("07:05:20"), view: () => {},
+      });
+      f.w.show({ id: "e1:1", type: "started", data: {}, at: "2026-11-01T06:56:00Z" } as never);
+      f.w.until!();
+      await tick();
+      // The reads of the first check; the ask that follows can start another where the first found no answer.
+      const first = [...paths];
+      return { paths: first, stops: f.w.until!(), failure: f.failure(), reads: first.length };
+    };
+    test("a watch that left during the claim's read sends no read of the operation, and a claim with no answer sends none either", async () => {
+      expect((await check(okClaim, okOp, true)).paths).toEqual([`/ingestions/${b.id}`]);
+      expect((await check({ kind: "transport" }, okOp)).paths).toEqual([`/ingestions/${b.id}`]);
+      // A refusal that arrives after the watch left is not shown.
+      expect((await check(refused, okOp, true)).failure).toBeUndefined();
+    });
+    test("a read refused for good (403) ends the check, the watch stops with the failure to show, and no further check is made", async () => {
+      const claim = await check(refused, okOp);
+      expect(claim).toMatchObject({ stops: true, failure: refused, reads: 1 });
+      const operation = await check(okClaim, refused);
+      expect(operation).toMatchObject({ stops: true, failure: refused, reads: 2 });
+    });
+    test("a read with no answer or one for a new epoch is not a failure: the watch stays pending", async () => {
+      expect(await check({ kind: "transport" }, okOp)).toMatchObject({ stops: false, failure: undefined });
+      expect(await check(okClaim, { kind: "discarded" })).toMatchObject({ stops: false, failure: undefined });
+      // 408 and 429 are asked again, not final.
+      expect(await check({ kind: "refused", status: 429, problem: null }, okOp)).toMatchObject({ stops: false, failure: undefined });
+      expect(await check(okClaim, { kind: "refused", status: 408, problem: null })).toMatchObject({ stops: false, failure: undefined });
+    });
+  });
   test("caughtUp: the last shown event number must reach the operation's lastEvent, and an epoch that differs decides nothing", () => {
     const shown = (n: number) => ({ epoch: "e1", n });
     expect(caughtUp(shown(3), "e1", "e1", 4)).toBe(false);
@@ -766,7 +814,18 @@ describe("a 412 on the start leads to the draft, and the same ETag is not sent a
     expect(await startETag(async () => undefined, () => "e2", input.draft, (m) => void sent.push(m))).toBeUndefined();
     expect(sent).toEqual(['"old"']);
   });
+  test("a delayed 412 of an older epoch does not replace the refusal recorded under the current one (Copilot thread on web/src/imports.tsx:494)", async () => {
+    keepETag(input.draft, '"b"', "e2");
+    refusedOn('"b"', "e2");
+    // The write set aside by the epoch change settles late, with the tag it carried under e1.
+    refusedOn('"a"', "e1");
+    const sent: string[] = [];
+    const why = await startETag(async () => undefined, () => "e2", input.draft, (m) => void sent.push(m));
+    expect(why).toBe(REVIEW_FIRST);
+    expect(sent).toEqual([]);
+  });
   test("a 412 on one draft does not stop the start of another that holds the same ETag text", async () => {
+    keepETag(input.draft, '"old"', "e1");
     refusedOn('"old"');
     keepETag("drf_other", '"old"', "e1");
     const sent: string[] = [];
@@ -792,6 +851,16 @@ describe("the lease stop compares the time a read began, not the time it was del
     const b = ing();
     expect(lapsedRead({ b, at: at("07:05:10") }, at("07:05:12"))).toBe(true);
     expect(lapsedRead({ b, at: at("07:05:10") - 1 }, at("07:05:12"))).toBe(false);
+  });
+  test("a read begun before the lease plus the margin and delivered after it is refreshed at once (Codex thread on web/src/imports.tsx:305, Copilot :392)", () => {
+    const b = ing();
+    // Due at 07:05:10. Before it, the refresh waits for it.
+    expect(refreshWait(b, at("07:04:00"), at("07:04:00"))).toBe(70_000);
+    // Delivered at 07:05:12, begun at 07:04:59: it predates the deadline, so nothing else would read again.
+    expect(refreshWait(b, at("07:04:59"), at("07:05:12"))).toBe(0);
+    // A read begun at the deadline or after it already decides, and a run that is not running needs no read.
+    expect(refreshWait(b, at("07:05:10"), at("07:05:12"))).toBeUndefined();
+    expect(refreshWait(ing({ state: "paused" }), at("07:04:59"), at("07:05:12"))).toBeUndefined();
   });
   test("a read begun after the lease and the margin stops it, and a delivery in the render of a new trigger keeps the older start", () => {
     const b1 = ing();
