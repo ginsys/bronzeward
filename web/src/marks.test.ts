@@ -79,6 +79,11 @@ describe("the values a review offers to mark (compilation §2.2 paths)", () => {
     const c = candidates(text);
     expect([c.paths.length, c.more]).toEqual([MAX_CANDIDATES, 5]);
   });
+  test("a value under a key with a line break is counted, not offered, so choosing never marks a sibling (local review)", () => {
+    const c = candidates('"a\\n": one\na: two\n"b\\r": three');
+    expect([c.paths, c.unaddressable]).toEqual([["doc[0]/a"], 2]);
+    expect(withMark("", c.paths[0] ?? "")).toBe("doc[0]/a\n");
+  });
   test("text that is not a document offers nothing and does not throw", () => {
     expect(candidates("").paths).toEqual([]);
     expect(candidates(": : :\n\t- [").paths).toBeInstanceOf(Array);
@@ -98,6 +103,10 @@ describe("the marks panel", () => {
   });
   test("shows the path of a value, never the value", () => {
     expect(html).not.toContain(SENTINEL);
+  });
+  test("says how many values it cannot mark, and says nothing when there are none", () => {
+    expect(html).not.toContain("line break");
+    expect(page(h(MarksPanel, { text: '"a\\n": one\na: two', send: () => {}, busy: false }))).toContain("Values under a key with a line break cannot be marked here: 1.");
   });
 });
 
@@ -200,6 +209,11 @@ describe("how the run of a mark ends (§11.3, PROT-03, PROT-05, PROT-06)", () =>
       const done = op({ state: "succeeded", result: { draft: "drf_2rmp457a", draftRevision: 5, importBaseRevision: "rev_1" } });
       expect(flat(await ended(unused, ing({ state: "released" }), done, "paused", NOW, "e1", { replacedBy: 3 }))).toMatch(
         /^The mark was not applied: a takeover at generation 3 resumed the import without it, and operation op_zcfw5mcm then released it\. Import ing_6fdq2la released/);
+    });
+    test("a takeover run that stalls and lapses is unknown, and the earlier mark is still said not applied (local review)", async () => {
+      const out = String(await ended(unused, ing({ state: "held" }), op(), "", Date.parse("2026-11-01T07:06:00Z"), "e1", { replacedBy: 3 }));
+      expect(out).toMatch(/^The earlier mark was not applied: a takeover at generation 3 resumed the import without it\. Its claim is held/);
+      expect(out).toContain("the outcome is unknown");
     });
   });
   describe("an operation that ended after a mark that no pause applied (the CLI's markOutcome)", () => {

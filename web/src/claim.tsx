@@ -155,6 +155,9 @@ function Review({ b, marking }: { b: Ingestion; marking: { send: (marks: string[
   useEffect(() => {
     if (b.state !== "paused") drop();
   }, [b.state, drop]);
+  // A new claim generation is another run: the text and the marks chosen from it belong to the old one.
+  const generation = b.ownerGeneration;
+  useEffect(() => drop, [generation, drop]);
   const open = useCallback(async () => {
     const mine = reads.start();
     setWhy(undefined);
@@ -206,10 +209,12 @@ function ClaimSection({ b, again, now }: { b: Ingestion; again: () => void; now:
   const sentVerb = useCallback((v: Verb) => setSent((s) => (s.includes(v) ? s : [...s, v])), []);
   const shown = shownVerbs(o.verbs, sent);
   const [mw, msend] = useSend();
-  const done = mw?.outcome?.kind === "done";
+  // A done send moves the claim on, and a 409 means another operator did: both read the import once.
+  const readMarks = useRef<Write>(undefined);
+  const markSettled = rereads(mw?.outcome);
   useEffect(() => {
-    if (done) again();
-  }, [done, again]);
+    readMarks.current = rereadOnce(mw, readMarks.current, again);
+  }, [mw, markSettled, again]);
   if (!o.review && shown.length === 0 && mw === undefined) return null;
   return (
     <section aria-label="Claim">
