@@ -36,7 +36,7 @@ func (*publicationReader) Close() error { return nil }
 
 func (b *buildEnv) publicationReader() (*fakeExecutor, *publicationReader) {
 	b.t.Helper()
-	r := &publicationReader{version: "v1.13.6"}
+	r := &publicationReader{version: "v1.14.5"}
 	if err := b.db.QueryRow(`SELECT coalesce(m.smbios_uuid::text, ''), coalesce(m.talos_node_id, 'fixture-node'), c.talos_cluster_id
   FROM machine m JOIN cluster c ON c.id = m.cluster WHERE m.id = $1`, b.machine).Scan(&r.identity.SMBIOSUUID, &r.identity.NodeID, &r.identity.ClusterID); err != nil {
 		b.t.Fatal(err)
@@ -52,7 +52,7 @@ func TestPublicationRunningMinor(t *testing.T) {
 		name, version string
 		status        int
 	}{
-		{"same minor", "v1.13.6", 0}, {"different minor", "v1.12.4", 422},
+		{"same minor", "v1.14.5", 0}, {"different minor", "v1.12.4", 422},
 		{"missing version", "", 503}, {"malformed version", "provider-secret-canary", 503},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -97,7 +97,7 @@ func (b *buildEnv) defaultPublicationReader(a *API) {
 	a.d.exe = &fakeExecutor{access: provider.NewTalosAccess(provider.TalosAccessVersion{Path: "access/talos/" + b.cluster,
 		Version: 3, CreatedTime: accessCreated}, []byte("publication-access-canary"))}
 	a.o.dial = func(ctx context.Context, _ []byte, endpoint string) (talos.Reader, error) {
-		r := &publicationReader{version: "v1.13.6"}
+		r := &publicationReader{version: "v1.14.5"}
 		err := b.db.QueryRowContext(ctx, `SELECT coalesce(m.smbios_uuid::text, ''), coalesce(m.talos_node_id, 'fixture-node'), c.talos_cluster_id
    FROM machine m JOIN cluster c ON c.id = m.cluster WHERE m.talos_endpoint = $1 AND m.cluster = $2 ORDER BY m.id LIMIT 1`,
 			endpoint, b.cluster).Scan(&r.identity.SMBIOSUUID, &r.identity.NodeID, &r.identity.ClusterID)
