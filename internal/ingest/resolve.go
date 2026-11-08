@@ -61,19 +61,20 @@ func (r Resolved) Patch() (configpatcher.Patch, error) {
 // written back whole (§5.4). Every reference resolves or nothing does; a refusal names paths
 // only. The caller supplies exactly the pinned versions; Resolve selects none.
 func Resolve(s Sanitized, values map[string]provider.Value) (Resolved, error) {
-	return resolveWith(s, func(name string, r Reference, p Path) (*yaml.Node, error) {
+	return resolveWith(s, func(name string, r Reference, p Path, _ *yaml.Node) (*yaml.Node, error) {
 		v, rule := placed(name, r, values)
 		if rule != "" {
 			return nil, refuse(rule, p.String())
 		}
 		return v, nil
-	}, nil)
+	}, nil, nil)
 }
 
 // resolveWith replaces each reference of s, in walk order, by the node value gives for its name,
 // declaration and path, keeping its anchor, and writes each identified embedded document back,
-// telling hosted (if set) the document's format and written text.
-func resolveWith(s Sanitized, value func(name string, r Reference, p Path) (*yaml.Node, error), hosted func(format, text string)) (Resolved, error) {
+// telling hosted (if set) the document's format and written text. It gives aliased (if set) each
+// alias outside a key, with its path, to replace.
+func resolveWith(s Sanitized, value func(name string, r Reference, p Path, site *yaml.Node) (*yaml.Node, error), hosted func(format, text string), aliased func(a *yaml.Node, p Path)) (Resolved, error) {
 	if err := s.Check(); err != nil {
 		return Resolved{}, err
 	}
@@ -88,10 +89,13 @@ func resolveWith(s Sanitized, value func(name string, r Reference, p Path) (*yam
 	var place visit
 	place = func(n *yaml.Node, p Path, key bool, _ *yaml.Node) error {
 		if n.Kind == yaml.AliasNode {
+			if aliased != nil && !key {
+				aliased(n, p)
+			}
 			return nil
 		}
 		if n.Tag == refTag {
-			v, err := value(n.Value, s.decl.References[n.Value], p)
+			v, err := value(n.Value, s.decl.References[n.Value], p, n)
 			if err != nil {
 				return err
 			}

@@ -341,7 +341,11 @@ func TraceKeeping(s Sanitized, values map[string]provider.Value, first, flip int
 	flipped := false
 	var ts []Tracer
 	var hosts []Host
-	r, err := resolveWith(s, func(name string, ref Reference, p Path) (*yaml.Node, error) {
+	// anchored gives, for the node of a restored reference that carries an anchor, the node an alias
+	// of it at a path holds: an alias is a place of its own, restored only where the schema holds a
+	// secret.
+	anchored := map[*yaml.Node]func(Path) *yaml.Node{}
+	r, err := resolveWith(s, func(name string, ref Reference, p Path, site *yaml.Node) (*yaml.Node, error) {
 		n, rule := placed(name, ref, values)
 		if rule != "" {
 			return nil, refuse(rule, p.String())
@@ -359,6 +363,7 @@ func TraceKeeping(s Sanitized, values map[string]provider.Value, first, flip int
 				leaves = append(leaves, n.Content[i+1])
 			}
 		}
+		kept := make([][2]string, len(leaves))
 		for i, leaf := range leaves {
 			if next > maxTracerID {
 				return nil, refuse(RuleTraceIndistinct, p.String())
@@ -397,12 +402,11 @@ func TraceKeeping(s Sanitized, values map[string]provider.Value, first, flip int
 			if t.kind != TraceBoolean && x.value == leaf.Value {
 				return nil, refuse(RuleTraceIndistinct, p.String())
 			}
-			at := p
-			if n.Kind == yaml.MappingNode {
-				// each member is a field of its own: a secret member must not restore the one beside it
-				at.Pointer = append(slices.Clone(p.Pointer), keys[i])
+			kept[i] = [2]string{leaf.Value, x.value}
+			if t.kind == TraceBoolean {
+				kept[i][0] = x.value
 			}
-			if t.kind != TraceBoolean && secret.holds(at) {
+			if t.kind != TraceBoolean && secret.holds(memberPath(p, n, keys[i])) {
 				x.value, x.raw = leaf.Value, ""
 				if plain, err := base64.StdEncoding.DecodeString(leaf.Value); err == nil && t.kind == TraceBytes {
 					x.raw = string(plain)
@@ -412,9 +416,30 @@ func TraceKeeping(s Sanitized, values map[string]provider.Value, first, flip int
 			ts = append(ts, Tracer{t})
 			next++
 		}
+		if site.Anchor != "" && len(secret.paths) > 0 {
+			anchored[site] = func(q Path) *yaml.Node {
+				c := *n
+				c.Anchor = ""
+				if n.Kind != yaml.MappingNode {
+					c.Value = pickKept(secret, q, kept[0])
+					return &c
+				}
+				c.Content = slices.Clone(n.Content)
+				for i, k := range keys {
+					m := *n.Content[2*i+1]
+					m.Value = pickKept(secret, memberPath(q, n, k), kept[i])
+					c.Content[2*i+1] = &m
+				}
+				return &c
+			}
+		}
 		return n, nil
 	}, func(format, text string) {
 		hosts = append(hosts, Host{&host{format: format, text: &text}})
+	}, func(a *yaml.Node, q Path) {
+		if f := anchored[a.Alias]; f != nil {
+			*a = *f(q)
+		}
 	})
 	if err != nil {
 		return Resolved{}, nil, nil, err
@@ -423,6 +448,25 @@ func TraceKeeping(s Sanitized, values map[string]provider.Value, first, flip int
 		return Resolved{}, nil, nil, errors.New("ingest: the flip pass names no boolean tracer of the stream")
 	}
 	return r, ts, hosts, nil
+}
+
+// memberPath is the path of the member key of a value placed at p, when the value is a mapping, and
+// p itself otherwise: each member is a field of its own, so a secret member must not restore the
+// one beside it.
+func memberPath(p Path, v *yaml.Node, key string) Path {
+	if v.Kind == yaml.MappingNode {
+		p.Pointer = append(slices.Clone(p.Pointer), key)
+	}
+	return p
+}
+
+// pickKept is the real value of a leaf at p when the schema holds a secret there, and its stand-in
+// otherwise.
+func pickKept(secret SecretLeaves, p Path, kept [2]string) string {
+	if kept[0] != kept[1] && secret.holds(p) {
+		return kept[0]
+	}
+	return kept[1]
 }
 
 // standIn is SP's shape stand-in (compilation.md §8.1, choice §16.22): each letter becomes x or
