@@ -18,8 +18,9 @@ const enc = encodeURIComponent;
 // What an ingestion's claim lets the operator do now: the server's refusal stays authoritative, so
 // this only keeps a button from offering what its state never allows (compilation §3.6, journeys §8).
 // A takeover waits for the lease to lapse and is encrypted staging only (the CLI's import status).
-export function offers(b: Pick<Ingestion, "state" | "mode" | "leaseUntil">, now: number): { review: boolean; verbs: Verb[] } {
-  if (b.state === "paused") return { review: true, verbs: ["continue", "abandon"] };
+export function offers(b: Pick<Ingestion, "state" | "mode" | "leaseUntil" | "expiresAt">, now: number): { review: boolean; verbs: Verb[] } {
+  // A paused claim whose review time passed offers no review: the server may already have abandoned it.
+  if (b.state === "paused") return { review: now <= Date.parse(b.expiresAt), verbs: ["continue", "abandon"] };
   if (b.state !== "held" && b.state !== "resumed") return { review: false, verbs: [] };
   const lapsed = now > Date.parse(b.leaseUntil);
   return { review: false, verbs: lapsed && b.mode !== "transient" ? ["takeover", "abandon"] : ["abandon"] };
@@ -54,6 +55,15 @@ function ClaimAction({ id, verb, again }: { id: string; verb: Verb; again: () =>
   );
 }
 
+// When the page reads a paused ingestion again: just after its review time ends. The progress watch
+// stops at the pause and has no timer for it, so nothing else would show the expiry on an idle page.
+const EXPIRY_MARGIN = 1000;
+export function expiryWait(b: Pick<Ingestion, "state" | "expiresAt">, now: number): number | undefined {
+  if (b.state !== "paused") return undefined;
+  const wait = Date.parse(b.expiresAt) - now + EXPIRY_MARGIN;
+  return wait > 0 ? Math.min(wait, 2 ** 31 - 1) : undefined;
+}
+
 // How long a review has left, as W5 words it.
 export function expiry(expiresAt: string, now: number): string {
   const left = Date.parse(expiresAt) - now;
@@ -84,6 +94,12 @@ export function newest(): { start: () => number; drop: () => void; live: (n: num
   return { start: () => ++n, drop: () => void ++n, live: (k) => k === n };
 }
 
+// The review's read. `live` goes to the shell's settle, so the result of a superseded or dropped read
+// changes nothing there: its late failure shows no Offline banner and disables no action.
+type ReviewBody = components["schemas"]["IngestionReviewBody"];
+export const readReview = (read: <T>(path: string, live?: () => boolean) => Promise<Load<T> | undefined>, id: string, live: () => boolean) =>
+  read<ReviewBody>(`/ingestions/${enc(id)}/review`, live);
+
 // The review view (W5): read on request, `no-store`, shown read-only as served, with no copy, download
 // or print action. A failed or dropped read keeps nothing, and the review is read again on request.
 function Review({ b }: { b: Ingestion }) {
@@ -109,7 +125,7 @@ function Review({ b }: { b: Ingestion }) {
     setWhy(undefined);
     setText(undefined);
     setReading(true);
-    const r = reviewed(await read<components["schemas"]["IngestionReviewBody"]>(`/ingestions/${enc(b.id)}/review`));
+    const r = reviewed(await readReview(read, b.id, () => reads.live(mine)));
     if (!reads.live(mine)) return;
     setReading(false);
     if (r === undefined) return;
@@ -140,6 +156,12 @@ export function Shown({ id, text, close }: { id: string; text: string; close: ()
 export function Claim({ b, again, now }: { b: Ingestion; again: () => void; now: number }) {
   const o = offers(b, now);
   const writes = useWrites();
+  const wait = expiryWait(b, now);
+  useEffect(() => {
+    if (wait === undefined) return;
+    const t = setTimeout(again, wait);
+    return () => clearTimeout(t);
+  }, [wait, again]);
   if (writes === undefined || (!o.review && o.verbs.length === 0)) return null;
   return (
     <section aria-label="Claim">

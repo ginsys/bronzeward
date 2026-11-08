@@ -2,7 +2,7 @@ import { createElement as h, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import type { components } from "./api/v1";
-import { Claim, claimSpec, discardOn, expiry, newest, offers, reviewed, Shown } from "./claim.tsx";
+import { Claim, claimSpec, discardOn, expiry, expiryWait, newest, offers, readReview, reviewed, Shown } from "./claim.tsx";
 import { WritesProvider } from "./forms.tsx";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import { ShellContext } from "./shell.tsx";
@@ -101,6 +101,27 @@ describe("the review is closed and superseded reads are dropped (local review of
     reads.drop();
     expect(reads.live(second)).toBe(false);
     expect(reads.live(reads.start())).toBe(true);
+  });
+});
+
+describe("an idle paused page and a late review read (Copilot threads on web/src/claim.tsx)", () => {
+  test("a paused claim is read again just after its review time ends, and no other state is", () => {
+    const paused = ing({ state: "paused" });
+    expect(expiryWait(paused, NOW)).toBe(38 * 60_000 + 1000);
+    expect(expiryWait(paused, Date.parse("2026-11-01T07:38:00Z"))).toBe(1000);
+    expect(expiryWait(paused, Date.parse("2026-11-01T07:38:01Z"))).toBeUndefined();
+    for (const state of ["held", "resumed", "released", "abandoned"]) expect(expiryWait(ing({ state }), NOW)).toBeUndefined();
+  });
+  test("a paused claim past its review time offers no review, continue and abandon stay for the server to judge", () => {
+    expect(offers(ing({ state: "paused" }), Date.parse("2026-11-01T07:38:01Z"))).toEqual({ review: false, verbs: ["continue", "abandon"] });
+    expect(page(h(Claim, { b: ing({ state: "paused" }), again: () => {}, now: Date.parse("2026-11-01T07:39:00Z") }))).not.toContain("Review import");
+  });
+  test("the review read hands its liveness check to the shell settle", async () => {
+    const seen: { path?: string; live?: (() => boolean) | undefined } = {};
+    const live = () => false;
+    await readReview(async (path, l) => { seen.path = path; seen.live = l; return undefined; }, "ing_6fdq2la", live);
+    expect(seen.path).toBe("/ingestions/ing_6fdq2la/review");
+    expect(seen.live).toBe(live);
   });
 });
 
