@@ -553,6 +553,67 @@ func TestJourneyIDs(t *testing.T) {
 // comes after its 40th character is replaced whole, not up to that character.
 var generatedBase64 = regexp.MustCompile(`[A-Za-z0-9+/_-]{40,}={0,2}`)
 
+var (
+	// pemBlock is a PEM block of a rendered configuration: the BEGIN line, the indentation of the
+	// body, the body, and the END line. A certificate is wrapped in 64-character lines and its
+	// last line is shorter, so the base64 mask alone leaves that line, which differs on every run.
+	pemBlock = regexp.MustCompile(`(?s)(-----BEGIN [A-Z ]+-----\n)([ \t]*).*?(\n[ \t]*-----END [A-Z ]+-----)`)
+	// pemTail is the last line of a PEM body, found by the END line after it, for a hunk of a diff
+	// that shows no BEGIN line. A hunk marker + or - may start the line, or the END line, and is
+	// kept. Base64 may start with + too, so the marker is the one followed by blanks.
+	pemTail = regexp.MustCompile(`(?m)^([ \t]*(?:[+-][ \t]+)?)[A-Za-z0-9+/_-]+={0,2}(\n[ \t]*(?:[+-][ \t]+)?-----END [A-Z ]+-----)`)
+	// docPathRun is a base64 run, or a path that follows a document index, such as doc[21]/a/b/c.
+	docPathRun = regexp.MustCompile(`(doc\[[0-9]+\])?` + generatedBase64.String())
+)
+
+// maskGenerated replaces what a run generates and a kept journey must not hold: a PEM body whole,
+// then each base64 run, except a path after a document index, which stays readable.
+func maskGenerated(s string) string {
+	s = pemBlock.ReplaceAllString(s, "${1}${2}<pem>${3}")
+	s = pemTail.ReplaceAllString(s, "${1}<pem>${2}")
+	return docPathRun.ReplaceAllStringFunc(s, func(m string) string {
+		if strings.HasPrefix(m, "doc[") {
+			return m
+		}
+		return "<base64>"
+	})
+}
+
+// TestMaskGeneratedPEM checks that a certificate's body goes whole, its short last line included,
+// and that a long path after a document index stays readable.
+func TestMaskGeneratedPEM(t *testing.T) {
+	long := strings.Repeat("A", 64)
+	for name, c := range map[string]struct{ in, want string }{
+		"tail line": {
+			"cert: |\n    -----BEGIN CERTIFICATE-----\n    " + long + "\n    m1Rkt7R3CaUMuIn0EA==\n    -----END CERTIFICATE-----\nkey: x\n",
+			"cert: |\n    -----BEGIN CERTIFICATE-----\n    <pem>\n    -----END CERTIFICATE-----\nkey: x\n",
+		},
+		"two blocks": {
+			"-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----\n-----BEGIN CERTIFICATE-----\ndef\n-----END CERTIFICATE-----\n",
+			"-----BEGIN CERTIFICATE-----\n<pem>\n-----END CERTIFICATE-----\n-----BEGIN CERTIFICATE-----\n<pem>\n-----END CERTIFICATE-----\n",
+		},
+		"path": {
+			"doc[21]/config/resources/0/providers/0/secretbox/keys/0/secret\n",
+			"doc[21]/config/resources/0/providers/0/secretbox/keys/0/secret\n",
+		},
+		"id": {"id: " + long + "\n", "id: <base64>\n"},
+		// A review's diff shows a hunk of a certificate with no BEGIN line, so its last line has
+		// to go by the END line that follows it. That line may start with + as base64 does.
+		"hunk tail": {
+			"    @@ -1 +1 @@\n         " + long + "\n         +D/JXaiva7wm5rRFa0k=\n         -----END CERTIFICATE-----\n  key: x\n",
+			"    @@ -1 +1 @@\n         <base64>\n         <pem>\n         -----END CERTIFICATE-----\n  key: x\n",
+		},
+		"hunk tail with marker": {
+			"    -    TEaJE2HdPcnITCgAYsAn7rOAOQ==\n    -    -----END CERTIFICATE-----\n",
+			"    -    <pem>\n    -    -----END CERTIFICATE-----\n",
+		},
+	} {
+		if got := maskGenerated(c.in); got != c.want {
+			t.Errorf("%s: got %q; want %q", name, got, c.want)
+		}
+	}
+}
+
 // TestGeneratedBase64 checks that each generated form is replaced whole, a URL-safe one whose
 // first - or _ comes late included, and that text shorter than 40 characters stays.
 func TestGeneratedBase64(t *testing.T) {
@@ -590,7 +651,7 @@ func keepJourney(t *testing.T, name, out, dir string) {
 	// A generated certificate or ID differs on every run.
 	// The run's directory goes first: its path is a run of base64 characters too.
 	kept = strings.ReplaceAll(kept, dir+string(filepath.Separator), "")
-	kept = generatedBase64.ReplaceAllString(kept, "<base64>")
+	kept = maskGenerated(kept)
 	kept = secretRefs.ReplaceAllString(kept, "s-…")
 	path := filepath.Join("testdata", "journeys", name+".txt")
 	if *update {

@@ -251,7 +251,7 @@ func newPlanEnv(t *testing.T) *planEnv {
 	e.rel0 = release.FindString(e.ctl(append(h, "publish", e.s.draft)...).out)
 	// rel: a draft with an assignment, published after rel0, so it is the machine's Desired.
 	labels := filepath.Join(t.TempDir(), "labels.yaml")
-	if err := os.WriteFile(labels, []byte("machine:\n  nodeLabels:\n    node.example.test/pool: workers\n"), 0o600); err != nil {
+	if err := os.WriteFile(labels, []byte("apiVersion: v1alpha1\nkind: KubeNodeConfig\nlabels:\n  node.example.test/pool: workers\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	draft := regexp.MustCompile(`drf_[a-z2-7]{26}`).FindString(e.ctl(append(h, "draft", "create", "--cluster", e.s.cluster, "--title", "plans")...).out)

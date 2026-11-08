@@ -16,6 +16,7 @@ import (
 	"github.com/siderolabs/talos/pkg/machinery/api/inspect"
 	"github.com/siderolabs/talos/pkg/machinery/api/machine"
 	"github.com/siderolabs/talos/pkg/machinery/api/security"
+	"github.com/siderolabs/talos/pkg/machinery/api/signer"
 	"github.com/siderolabs/talos/pkg/machinery/api/storage"
 	timeapi "github.com/siderolabs/talos/pkg/machinery/api/time"
 	"google.golang.org/grpc"
@@ -29,7 +30,8 @@ const methodsFile = "../../fixtures/talos-api-methods.tsv"
 var apiServices = []*grpc.ServiceDesc{
 	&cluster.ClusterService_ServiceDesc, &cosiapi.State_ServiceDesc, &inspect.InspectService_ServiceDesc,
 	&machine.DebugService_ServiceDesc, &machine.ImageService_ServiceDesc, &machine.LifecycleService_ServiceDesc,
-	&machine.MachineService_ServiceDesc, &security.SecurityService_ServiceDesc,
+	&machine.LVMService_ServiceDesc, &machine.MachineService_ServiceDesc, &machine.MDService_ServiceDesc,
+	&security.SecurityService_ServiceDesc, &signer.SignerService_ServiceDesc,
 	&storage.StorageService_ServiceDesc, &timeapi.TimeService_ServiceDesc,
 }
 

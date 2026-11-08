@@ -185,7 +185,7 @@ type machineServer struct {
 }
 
 func (machineServer) Version(context.Context, *emptypb.Empty) (*machine.VersionResponse, error) {
-	return &machine.VersionResponse{Messages: []*machine.Version{{Version: &machine.VersionInfo{Tag: "v1.13.6"}}}}, nil
+	return &machine.VersionResponse{Messages: []*machine.Version{{Version: &machine.VersionInfo{Tag: "v1.14.5"}}}}, nil
 }
 
 func (s machineServer) ApplyConfiguration(ctx context.Context, req *machine.ApplyConfigurationRequest) (*machine.ApplyConfigurationResponse, error) {

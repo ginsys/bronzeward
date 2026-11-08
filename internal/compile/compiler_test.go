@@ -58,7 +58,7 @@ func TestCompileAttributesTheGeneratedBase(t *testing.T) {
 		}
 		all = append(all, o.shown...)
 	}
-	for _, p := range []string{"doc[0]/cluster/ca/key", "doc[0]/cluster/aggregatorCA/key", "doc[0]/cluster/etcd/ca/key"} {
+	for _, p := range []string{"doc[0]/machine/ca/key", "doc[0]/cluster/etcd/ca/key", "doc[10]/issuingCA/key", "doc[11]/issuingCA/key", "doc[18]/issuer/privateKey"} {
 		if !slices.Contains(all, p) {
 			t.Errorf("%s is not attributed; attributed: %v", p, all)
 		}
@@ -311,10 +311,10 @@ func TestFidelityFailsOnAnInjectedChange(t *testing.T) {
 			l.Content[1] = &yaml.Node{Kind: yaml.SequenceNode, Content: []*yaml.Node{l.Content[1]}}
 		},
 		"a tag changed": func(m *yaml.Node) {
-			p := child(child(child(m, "features"), "kubePrism"), "port")
+			p := child(child(m, "features"), "diskQuotaSupport")
 			p.Tag, p.Style = "!!str", yaml.DoubleQuotedStyle
 		},
-		"an untraced leaf changed": func(m *yaml.Node) { child(m, "install").Content[1].Value = "/dev/injected" },
+		"an untraced leaf changed": func(m *yaml.Node) { child(m, "type").Value = "injected" },
 	} {
 		_, _, err := attribute(real, mutate(t, trace, change), ts, nil)
 		var e *Error
@@ -332,7 +332,7 @@ func TestFidelityFailsOnAnInjectedChange(t *testing.T) {
 	if !team.Carried(standIn) {
 		t.Fatal("control: the computed stand-in is not the tracer's")
 	}
-	planted := func(m *yaml.Node) { child(m, "install").Content[1].Value = standIn }
+	planted := func(m *yaml.Node) { child(m, "type").Value = standIn }
 	var fe *Error
 	if _, _, err := attribute(mutate(t, real, planted), mutate(t, trace, planted), ts, nil); !errors.As(err, &fe) || fe.Rule != RuleFidelity {
 		t.Errorf("a tracer in an unchanged leaf: got %v, want a fidelity refusal", err)

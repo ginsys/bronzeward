@@ -777,8 +777,8 @@ func TestParamErrorsReportMissingRequired(t *testing.T) {
 func TestExchangeErrorsReportEachMismatch(t *testing.T) {
 	t.Parallel()
 	doc := description(t)
-	cluster := `{"id":"cl_x","name":"n","endpoint":"https://e.example.test","contract":"v1.13","talosClusterId":"BWSYNTH-id"}`
-	input := `{"name":"n","endpoint":"https://e.example.test","contract":"v1.13","talosClusterId":"BWSYNTH-id"}`
+	cluster := `{"id":"cl_x","name":"n","endpoint":"https://e.example.test","contract":"v1.14","talosClusterId":"BWSYNTH-id"}`
+	input := `{"name":"n","endpoint":"https://e.example.test","contract":"v1.14","talosClusterId":"BWSYNTH-id"}`
 	answer := func(status int, ctype, body string, headers ...string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
 		if ctype != "" {

@@ -553,7 +553,7 @@ func (e *importEnv) journey(t *testing.T) {
 	var draft, ing, rel, plan, op, show string
 	var out strings.Builder
 	labels := filepath.Join(e.dir, "worker-labels.yaml")
-	if err := os.WriteFile(labels, []byte("machine:\n  nodeLabels:\n    tier: workers\n"), 0o600); err != nil {
+	if err := os.WriteFile(labels, []byte("apiVersion: v1alpha1\nkind: KubeNodeConfig\nlabels:\n  tier: workers\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	for _, step := range [][]string{

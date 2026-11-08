@@ -192,8 +192,9 @@ func holdsReserved(n *yaml.Node) bool {
 }
 
 // Validate performs compilation.md §6 step 8: the configuration as it would be published is
-// loaded again and validated in the node's mode, as talosctl validate --strict validates it
-// (local, warnings as errors). Warnings that strict mode leaves as warnings are not reported.
+// loaded again and validated in the node's mode with the local checks. It is not strict: a
+// warning, such as a deprecation the node still accepts, does not refuse a publication, and no
+// warning is reported.
 func (m Materialized) Validate(mode Mode) error {
 	_, err := m.validate(mode)
 	return err
@@ -212,7 +213,7 @@ func (m Materialized) validate(mode Mode) (string, error) {
 	if err != nil {
 		return err.Error(), &Error{Rule: RuleInvalid}
 	}
-	if _, err := cfg.Validate(mode, validation.WithLocal(), validation.WithStrict()); err != nil {
+	if _, err := cfg.Validate(mode, validation.WithLocal()); err != nil {
 		return err.Error(), &Error{Rule: RuleInvalid}
 	}
 	return "", nil

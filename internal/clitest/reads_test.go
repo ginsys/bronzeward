@@ -292,7 +292,7 @@ func TestReads(t *testing.T) {
 	f.want(f.ctl(nil, "", "context", "use", "lab"), 0)
 	before := f.acts()
 
-	f.want(f.ctl(nil, "", "cluster", "list"), 0, s.cluster, "lab-a", "https://cp.example.test:6443", "v1.13")
+	f.want(f.ctl(nil, "", "cluster", "list"), 0, s.cluster, "lab-a", "https://cp.example.test:6443", "v1.14")
 	f.want(f.ctl(nil, "", "cluster", "show", s.cluster), 0, s.cluster, "lab-a")
 	f.want(f.ctl(nil, "", "cluster", "show", "cl_BWSYNTH-absent"), 1, "404")
 	f.want(f.ctl(nil, "", "cluster"), 2, "cluster needs list or show")

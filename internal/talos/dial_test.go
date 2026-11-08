@@ -43,7 +43,7 @@ func TestDialUsesOnlyTheChosenEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Version through the chosen endpoint: %v", err)
 	}
-	if v != "v1.13.6" {
+	if v != "v1.14.5" {
 		t.Fatalf("Version %q", v)
 	}
 	seen := n.Seen()

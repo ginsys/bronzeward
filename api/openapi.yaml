@@ -2677,7 +2677,7 @@ components:
         endpoint:
           type: string
           description: https://<host>[:<port>], with no path, query, fragment or user information.
-        contract: {type: string, description: 'A Talos contract minor, as v1.13.'}
+        contract: {type: string, description: 'A Talos contract minor, as v1.14.'}
         talosClusterId:
           type: string
           description: 'The cluster ID `talosctl get info` prints: 32 bytes in URL-safe base64.'

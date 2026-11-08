@@ -150,3 +150,23 @@ func TestMachineConfigThroughStandIn(t *testing.T) {
 		t.Fatalf("configuration %q at version %q", c.Bytes(), c.ResourceVersion())
 	}
 }
+
+// A Talos v1.14 node serves document kinds that the machinery of v1.13 does not register. The stand-in
+// serves a configuration with two of them, and MachineConfig reads it whole. On v1.13.6 the stand-in
+// cannot hold it ("not registered"), so a server on that library cannot import such a node.
+func TestMachineConfigWithV114Documents(t *testing.T) {
+	n, r, ctx := dialStandIn(t)
+	doc := "version: v1alpha1\nmachine:\n  type: worker\n  token: synthetic.token\ncluster:\n  controlPlane:\n    endpoint: https://cp.example.test:6443\n" +
+		"---\napiVersion: v1alpha1\nkind: UnattendedInstallConfig\ninstaller: {}\nprovisioning:\n  diskSelector:\n    match: disk.dev_path == \"/dev/vda\"\n  wipe: false\n" +
+		"---\napiVersion: v1alpha1\nkind: KubeletConfig\nimage: ghcr.io/siderolabs/kubelet:v1.37.1\nconfig: {}\n"
+	n.SetMachineConfig(t, []byte(doc))
+	c, err := r.MachineConfig(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"kind: UnattendedInstallConfig", "kind: KubeletConfig"} {
+		if !strings.Contains(string(c.Bytes()), kind) {
+			t.Errorf("the configuration read lacks %q: %q", kind, c.Bytes())
+		}
+	}
+}

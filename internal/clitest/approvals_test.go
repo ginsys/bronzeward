@@ -266,7 +266,7 @@ func (e *planEnv) t8(t *testing.T) {
 	e.in.set(nil, nil)
 	dir := t.TempDir()
 	labels := filepath.Join(dir, "worker-labels.yaml")
-	if err := os.WriteFile(labels, []byte("machine:\n  nodeLabels:\n    node.example.test/pool: workers\n    node.example.test/tier: b\n"), 0o600); err != nil {
+	if err := os.WriteFile(labels, []byte("apiVersion: v1alpha1\nkind: KubeNodeConfig\nlabels:\n  node.example.test/pool: workers\n  node.example.test/tier: b\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	h := []string{"--context", "human"}

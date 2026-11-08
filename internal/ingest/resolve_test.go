@@ -231,14 +231,20 @@ func TestResolvedPatchAndInput(t *testing.T) {
 	if !ok {
 		t.Fatalf("Patch is a %T, want a strategic merge patch", p)
 	}
-	if got := smp.Provider().Machine().NodeLabels()["s"]; got != resolveSecret {
-		t.Errorf("the patch's label is %q", got)
+	// The patch no longer exposes its provider (machinery v1.14), and a patch holding only the
+	// v1alpha1 label is not a node configuration: read the label back from the patch's own bytes.
+	patchBytes, err := smp.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(patchBytes), "s: "+resolveSecret) {
+		t.Errorf("the patch does not hold the resolved label")
 	}
 	cfg, err := r.Input().Config()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.Machine().NodeLabels()["s"]; got != resolveSecret {
+	if got := cfg.K8sNodeConfig().Labels()["s"]; got != resolveSecret {
 		t.Errorf("the input's label is %q", got)
 	}
 }

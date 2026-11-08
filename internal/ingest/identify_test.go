@@ -142,8 +142,9 @@ func TestIdentifySchemaSetOfGeneratedConfig(t *testing.T) {
 	}
 	want := containerSchemaSet(t, stream)
 	for _, p := range []string{
-		"doc[0]/machine/ca/key", "doc[0]/cluster/secretboxEncryptionSecret", "doc[0]/machine/token",
-		"doc[2]/privateKey", "doc[2]/peers/0/presharedKey",
+		"doc[0]/machine/ca/key", "doc[0]/machine/token",
+		"doc[20]/config/resources/0/providers/0/secretbox/keys/0/secret", "doc[21]/issuer/privateKey",
+		"doc[28]/privateKey", "doc[28]/peers/0/presharedKey",
 	} {
 		if !want[p] {
 			t.Errorf("control: the machinery does not redact %s", p)

@@ -17,6 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/ginsys/bronzeward/internal/compile"
 	"github.com/ginsys/bronzeward/internal/id"
 	"github.com/ginsys/bronzeward/internal/talos"
 )
@@ -87,7 +88,14 @@ func (in *clusterInput) check(*API) error {
 		return errors.New("endpoint must be https://<host>[:<port>], with no path, query, fragment or user information")
 	}
 	if !contractShape.MatchString(in.Contract) {
-		return errors.New("contract must be a Talos contract minor, as v1.13")
+		return errors.New("contract must be a Talos contract minor, as v1.14")
+	}
+	supported, err := compile.SupportedContract()
+	if err != nil {
+		return fmt.Errorf("the supported contract is not known: %w", err)
+	}
+	if in.Contract != supported {
+		return fmt.Errorf("contract %s is not supported: this server renders only %s", in.Contract, supported)
 	}
 	if !validClusterID(in.TalosClusterID) {
 		return errors.New("talosClusterId must be the cluster ID `talosctl get info` prints: 32 bytes in URL-safe base64 (persistence-api.md §7.3)")

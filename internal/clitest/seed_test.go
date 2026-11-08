@@ -71,7 +71,7 @@ func (f *fixture) seed() seeded {
 	}
 	var s seeded
 	s.cluster = create("/clusters", "k-seed-cluster-0123456",
-		`{"name":"lab-a","endpoint":"https://cp.example.test:6443","contract":"v1.13","talosClusterId":"`+seedClusterID+`"}`)
+		`{"name":"lab-a","endpoint":"https://cp.example.test:6443","contract":"v1.14","talosClusterId":"`+seedClusterID+`"}`)
 	s.machine = create("/machines", "k-seed-machine-0123456",
 		`{"cluster":"`+s.cluster+`","smbiosUuid":"`+seedUUID+`","serial":"SN-1","platform":"container","talosEndpoint":"10.55.0.3"}`)
 	s.draft = create("/drafts", "k-seed-draft-00123456", `{"cluster":"`+s.cluster+`","title":"worker labels"}`)

@@ -1,5 +1,5 @@
-# Every gRPC method of the Talos API services in the pinned modules (talos machinery v1.13.6, cosi
-# runtime v1.14.1), as apid logs it, and its class: mutating when it changes a node, its
+# Every gRPC method of the Talos API services in the pinned modules (talos machinery v1.14.5, cosi
+# runtime v1.16.3), as apid logs it, and its class: mutating when it changes a node, its
 # workloads or its etcd member, issues a credential (HealthCheck mints an admin certificate on the
 # node for its own checks), or the read-only guard denies it (a packet capture); read otherwise. scenarios/s1 counts the
 # mutating ones in a node's apid log. internal/talos's TestTalosAPIMethods holds this file to the
@@ -10,6 +10,8 @@ cosi.resource.State/Create	mutating
 cosi.resource.State/Destroy	mutating
 cosi.resource.State/Get	read
 cosi.resource.State/List	read
+cosi.resource.State/Teardown	mutating
+cosi.resource.State/TeardownAndDestroy	mutating
 cosi.resource.State/Update	mutating
 cosi.resource.State/Watch	read
 inspect.InspectService/ControllerRuntimeDependencies	read
@@ -21,6 +23,9 @@ machine.ImageService/Remove	mutating
 machine.ImageService/Verify	read
 machine.LifecycleService/Install	mutating
 machine.LifecycleService/Upgrade	mutating
+machine.LVMService/LogicalVolumeRemove	mutating
+machine.LVMService/PhysicalVolumeRemove	mutating
+machine.LVMService/VolumeGroupRemove	mutating
 machine.MachineService/ApplyConfiguration	mutating
 machine.MachineService/Bootstrap	mutating
 machine.MachineService/CPUFreqStats	read
@@ -75,7 +80,11 @@ machine.MachineService/Stats	read
 machine.MachineService/SystemStat	read
 machine.MachineService/Upgrade	mutating
 machine.MachineService/Version	read
+machine.MDService/Destroy	mutating
 securityapi.SecurityService/Certificate	mutating
+signerapi.SignerService/GetCertificate	read
+signerapi.SignerService/GetPublicKey	read
+signerapi.SignerService/Sign	mutating
 storage.StorageService/BlockDeviceWipe	mutating
 storage.StorageService/Disks	read
 time.TimeService/Time	read
