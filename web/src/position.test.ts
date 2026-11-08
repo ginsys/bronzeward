@@ -2178,3 +2178,46 @@ describe("a tag on an implicit key", () => {
     expect(references("{k: !bwref x/foo}\n")).toEqual(["x/foo"]);
   });
 });
+
+// ginsys/bronzeward#672, section 3: an alias that names no anchor. go-yaml v3.0.5 refuses the stream
+// (`unknown anchor 'e' referenced`) and the server reads no reference from it. An anchor defines its
+// name for the rest of the stream, across `---` and `...`, and a re-defined anchor is fine. Text that
+// only looks like an anchor (a comment, a quoted, plain or block scalar) defines nothing. Every row
+// holds the verdict of probe `w672s3-oracle` (go.yaml.in/yaml/v3 v3.0.5, 33 documents).
+describe("an alias that names no anchor", () => {
+  test.each([
+    ["an alias before any anchor", "a: *e\nb: !bwref x/foo\n"],
+    ["an alias as a root key", "*e: !bwref x/foo\n"],
+    ["an anchor that stands after the alias", "a: *e\nb: &e 1\nc: !bwref x/foo\n"],
+    ["an alias as a flow key", "[*e]: !bwref x/foo\n"],
+    ["an alias in a flow sequence", "a: [*e]\nb: !bwref x/foo\n"],
+    ["an alias as an explicit key", "? *e\n: !bwref x/foo\n"],
+    ["a name that stands before the alias", "a: !bwref x/foo\nb: *e\n"],
+    ["an anchor in a comment", "# &e\na: *e\nb: !bwref x/foo\n"],
+    ["an anchor in a quoted scalar", 'a: "&e"\nb: *e\nc: !bwref x/foo\n'],
+    ["an anchor in a plain scalar", "a: x &e\nb: *e\nc: !bwref x/foo\n"],
+    ["an anchor in a block scalar", "a: |\n  &e x\nb: *e\nc: !bwref x/foo\n"],
+    ["an alias before its anchor in one flow sequence", "a: [*e, &e 1]\nc: !bwref x/foo\n"],
+  ])("lists nothing for %s", (_, text) => {
+    expect(references(text), text).toEqual([]);
+  });
+
+  test.each([
+    ["an anchor before the alias", "a: &e 1\nb: *e\nc: !bwref x/foo\n"],
+    ["an anchor on the tagged value", "a: &e !bwref x/foo\nb: *e\n"],
+    ["an anchor of an earlier document", "a: &e 1\n---\nb: *e\nc: !bwref x/foo\n"],
+    ["an anchor before a document end marker", "a: &e 1\n...\n---\nb: *e\nc: !bwref x/foo\n"],
+    ["an anchor re-defined in the same document", "a: &e 1\nb: &e 2\nc: *e\nd: !bwref x/foo\n"],
+    ["an anchor re-defined in a later document", "a: &e 1\n---\nb: &e 2\n---\nc: *e\nd: !bwref x/foo\n"],
+    ["a second anchor of another name", "a: &e 1\n---\nb: &f 2\n---\nc: *f\nd: !bwref x/foo\n"],
+    ["an alias as the root of a document", "a: &e 1\n--- *e\n---\nc: !bwref x/foo\n"],
+    ["an anchor on a key", "&e k: 1\nb: *e\nc: !bwref x/foo\n"],
+    ["an anchor in a flow sequence", "- !bwref x/foo\n- [&e a, *e]\n"],
+    ["an anchor before a flow alias", "- &e a\n- [*e]\n- !bwref x/foo\n"],
+    ["an anchor, then a tag directive", "a: &e 1\n%TAG !u! tag:example.com,2000:\n---\nb: *e\nc: !bwref x/foo\n"],
+    ["a tagged value in a flow sequence after the alias", "a: &e 1\nb: [*e, !bwref x/foo]\n"],
+    ["an anchor of the first document, an alias in the second, the tag in the third", "a: &e 1\n---\nb: *e\n---\nc: !bwref x/foo\n"],
+  ])("still lists the name for %s", (_, text) => {
+    expect(references(text), text).toEqual(["x/foo"]);
+  });
+});
