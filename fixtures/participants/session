@@ -616,8 +616,10 @@ t9_watch_start() {
 }
 # t9_watch_ready <dir>: the step fails unless the watch is running and has printed an event line
 # ("received ..." starts only a printed event) within 30 s. That line shows its initial reads are done and
-# its stream is open and delivering, so the stop of A cuts a stream the watch holds. A watch that printed
-# an event and has ended by then is no reader to cut, so the event line counts only while the watch runs.
+# it received an event, so it is following the operation just before the stop. An event line counts only
+# while the watch runs. This is a check at one moment, not a lock: the watch can still end, or lose its
+# stream, before A is stopped. The checks after the stop decide the outcome: the watch must exit 0, print
+# the notice that it retries until the watch ends (the outage) and print the completion line.
 t9_watch_ready() {
   for _ in $(seq 30); do
     if grep -q '^received ' "$1/watch.txt" 2>/dev/null; then
