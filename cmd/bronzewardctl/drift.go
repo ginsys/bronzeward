@@ -24,13 +24,19 @@ const (
 )
 
 // driftCmd is the drift noun (operator-experience.md §5.8): drift show reads one machine's open
-// drift. It offers no ignore, retry or mark-successful verb: a drift ends by adoption or revert.
+// drift, adopt and revert end it. It offers no ignore, retry or mark-successful verb.
 func (e *env) driftCmd(args []string) error {
-	_, rest, err := e.verb("drift", args, "show")
+	v, rest, err := e.verb("drift", args, "show", "adopt", "revert")
 	if err != nil {
 		return err
 	}
-	return e.driftShow(rest)
+	switch v {
+	case "show":
+		return e.driftShow(rest)
+	case "adopt":
+		return e.driftAdopt(rest)
+	}
+	return e.driftRevert(rest)
 }
 
 // driftShow prints a machine's open drift: its opening and last observation with their times, the
@@ -229,4 +235,171 @@ func whyBlocked(err error, verb string) error {
 	return &client.Blocked{Err: err, More: []string{
 		"Why: a server started for recovery refuses every request but the recovery entry until the entry is recorded. After the entry it still refuses unfreezing, plan creation and approval.",
 		"Next: if the recovery entry is not recorded yet, record it with recovery enter. Then restart the server without the recovery flag and repeat this command."}}
+}
+
+// driftRevert is T30: T19's plan create of the machine's Desired as apply-config, which binds the
+// open drift record and expects its drifted digest before dispatch (internal/api/plans.go). With
+// no open drift record or no Desired it refuses before sending, naming plan create. Its repeat
+// flags are plan create's.
+func (e *env) driftRevert(args []string) error {
+	var rf repeatFlags
+	pos, err := e.parse("drift revert", args, 1, rf.flags)
+	if err != nil {
+		return err
+	}
+	m := pos[0]
+	var x apitypes.MachineBody
+	if err := e.session(func(c *client.Client, _ *client.Response, _ *apitypes.ServerBody) error {
+		return getJSON(c, "/machines/"+url.PathEscape(m), &x)
+	}); err != nil {
+		return err
+	}
+	switch {
+	case x.Desired == nil:
+		return notSent{fmt.Errorf("machine %s has no Desired release to revert to; nothing was sent. Publish a release that covers it, then: %s",
+			m, createWords("<release>", client.ShellWord(m), client.ShellWord("apply-config")))}
+	case x.OpenDrift == nil:
+		return notSent{fmt.Errorf("machine %s has no open drift record; nothing was sent. To apply its Desired release without a revert: %s",
+			m, createLine(*x.Desired, m, "apply-config"))}
+	}
+	return e.planCreateWith("drift revert", append([]string{"--release", *x.Desired, "--machine", m, "--operation", "apply-config"}, rf.args()...), revertLines)
+}
+
+// revertLines say what the created revert binds and what it needs before it can commit.
+func revertLines(c *client.Client, p *apitypes.PlanBody) []string {
+	if p.DriftRecord == nil {
+		return []string{"This plan binds no drift record: the drift closed before it was created, so it is an ordinary apply-config, not a revert."}
+	}
+	lines := []string{
+		fmt.Sprintf("Revert of drift record %d to Desired %s. The plan expects the drifted digest before dispatch: if the machine drifts again first, it fails and must be made again.",
+			*p.DriftRecord, p.Release),
+		"Approving it approves an unseen overwrite: it replaces the drifted configuration, which no reviewer has seen.",
+	}
+	var m apitypes.MachineBody
+	if err := getJSON(c, "/machines/"+url.PathEscape(p.Machine), &m); err != nil {
+		return append(lines, "Whether the machine is frozen cannot be read: "+err.Error())
+	}
+	if m.Frozen {
+		lines = append(lines, "The machine is frozen: the plan cannot commit until an approver approves it and, separately, unfreezes the machine: bronzewardctl machine unfreeze "+
+			client.ShellWord(p.Machine)+" --reason <text>")
+	}
+	return lines
+}
+
+// driftAdopt is T29's composite over existing routes, its steps numbered as journeys §5.8: 1 the
+// import of #349 as a drift-adoption (author, a person), 2 publish (publisher), 3 the adopt plan
+// create (publisher), which binds the open drift record, then the approval (approver), which it
+// never runs. It runs each step while the roles GET /identity serves hold that step's and the step
+// before it succeeded. It stops at the first it cannot run, a missing role, an import paused for
+// review or a step not succeeding, and prints that step and each later one as its command with its
+// role. Its repeat flags repeat step 1; a later step is repeated by its own command.
+func (e *env) driftAdopt(args []string) (err error) {
+	var draft, staging string
+	var review, marks bool
+	var rf repeatFlags
+	pos, err := e.parse("drift adopt", args, 1, func(fs *flag.FlagSet) {
+		fs.StringVar(&draft, "draft", "", "")
+		fs.StringVar(&staging, "staging", "encrypted", "")
+		fs.BoolVar(&review, "review", false, "")
+		fs.BoolVar(&marks, "marks", false, "")
+		rf.flags(fs)
+	})
+	if err != nil {
+		return err
+	}
+	if draft == "" {
+		return usageError{errors.New("drift adopt needs --draft")}
+	}
+	m := pos[0]
+	var id apitypes.IdentityBody
+	if err := e.session(func(c *client.Client, _ *client.Response, _ *apitypes.ServerBody) error {
+		return getJSON(c, "/identity", &id)
+	}); err != nil {
+		return err
+	}
+	has := func(role string) bool { return slices.Contains(id.Roles, apitypes.IdentityBodyRoles(role)) }
+	from := func(n int, release string) []string {
+		var l []string
+		for i := n; i <= 3; i++ {
+			l = append(l, adoptStep(i, m, draft, release)...)
+		}
+		return l
+	}
+	if !has("author") || id.Kind != "human" {
+		return e.say(append([]string{"Not run: step 1 needs an author signed in as a person. The steps:"}, from(1, "")...)...)
+	}
+	importArgs := append([]string{"--machine", m, "--draft", draft, "--staging", staging}, rf.args()...)
+	if review {
+		importArgs = append(importArgs, "--review")
+	}
+	if marks {
+		importArgs = append(importArgs, "--marks")
+	}
+	if err := e.say(fmt.Sprintf("Step 1/3  import (drift-adoption) of machine %s into draft %s", m, draft)); err != nil {
+		return err
+	}
+	c, a, err := e.ingest("drift adopt", "drift-adoption", importArgs)
+	if err != nil {
+		return errors.Join(err, e.say(append([]string{"The later steps:"}, from(2, "")...)...))
+	}
+	b, err := readIngestion(c, a.Ingestion)
+	if err != nil {
+		return err
+	}
+	if b.State != "released" {
+		return e.say(append([]string{"Mark values while it is paused: bronzewardctl import mark " + b.Id,
+			"Once the import is continued and released into the draft, the later steps:"}, from(2, "")...)...)
+	}
+	if !has("publisher") {
+		return e.say(append([]string{"Not run: step 2 needs a publisher. The later steps:"}, from(2, "")...)...)
+	}
+	if err := e.say("Step 2/3  publish draft " + draft + ": it publishes the whole draft"); err != nil {
+		return err
+	}
+	pc, release, err := e.publishDraft(draft, nil, "", false)
+	if pc != nil {
+		defer func() { err = errors.Join(err, pc.Save()) }()
+	}
+	if err != nil {
+		return errors.Join(err, e.say(append([]string{"The later step:"}, from(3, "")...)...))
+	}
+	if err := e.say("Step 3/3  plan an adoption of release " + release); err != nil {
+		return err
+	}
+	err = e.planCreateWith("drift adopt", []string{"--release", release, "--machine", m, "--operation", "adopt"}, adoptLines)
+	if err != nil {
+		return errors.Join(err, e.say(append([]string{"Step 3 again:"}, from(3, release)...)...))
+	}
+	return nil
+}
+
+// adoptStep is drift adopt's step n as its commands, each with the role it needs; release is ""
+// until step 2 names it.
+func adoptStep(n int, m, draft, release string) []string {
+	// A release not yet named is a bare placeholder, which the reader replaces; a named one is quoted.
+	word := "<release>"
+	if release != "" {
+		word = client.ShellWord(release)
+	}
+	switch n {
+	case 1:
+		return []string{"Step 1/3  import (drift-adoption): an author, signed in as a person.",
+			"          bronzewardctl drift adopt " + client.ShellWord(m) + " --draft " + client.ShellWord(draft) + " --review"}
+	case 2:
+		return []string{"Step 2/3  publish, which publishes the whole draft: a publisher.", "          bronzewardctl publish " + client.ShellWord(draft)}
+	}
+	return []string{"Step 3/3  plan an adoption: a publisher, then an approver.", "          " + createWords(word, client.ShellWord(m), client.ShellWord("adopt")),
+		"          bronzewardctl approve <plan>"}
+}
+
+// adoptLines say what the created adopt plan binds and what its approval leads to; the approval
+// itself is always left to an approver.
+func adoptLines(_ *client.Client, p *apitypes.PlanBody) []string {
+	bound := "This plan binds no drift record."
+	if p.DriftRecord != nil {
+		bound = fmt.Sprintf("This plan binds drift record %d.", *p.DriftRecord)
+	}
+	return []string{bound + " drift adopt never approves: an approver runs bronzewardctl approve " + client.ShellWord(p.Id),
+		"Approval leads the controller to record the adoption without sending anything, even while the machine is frozen.",
+		"The adopted base holds each marked value as a reference: a fragment that overrides such a value refuses publication, so stop selecting it."}
 }

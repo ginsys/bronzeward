@@ -36,6 +36,21 @@ func (r *repeatFlags) flags(fs *flag.FlagSet) {
 	fs.Var(&r.ifMatch, "if-match", "")
 }
 
+// args are the flags given, as arguments for the command a composite runs; an empty value stays
+// given, so that command refuses it.
+func (r *repeatFlags) args() []string {
+	var a []string
+	for _, f := range []struct {
+		name string
+		g    given
+	}{{"idempotency-key", r.key}, {"expect-epoch", r.epoch}, {"expect-principal", r.principal}, {"if-match", r.ifMatch}} {
+		if f.g.set {
+			a = append(a, "--"+f.name+"="+f.g.v)
+		}
+	}
+	return a
+}
+
 // repeat is the repeat the flags give, nil for a first send. It refuses, sending nothing, when one
 // is missing or given empty, as a script's unset variable gives it (client-contracts.md §8.4 item
 // 4); a route without If-Match takes no --if-match.

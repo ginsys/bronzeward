@@ -33,11 +33,28 @@ func (e *env) publish(args []string) (err error) {
 	if err != nil {
 		return err
 	}
-	d := pos[0]
+	c, release, err := e.publishDraft(pos[0], rp, rf.ifMatch.v, noWait)
+	if c != nil {
+		defer func() { err = errors.Join(err, c.Save()) }()
+	}
+	if err != nil || release == "" {
+		return err
+	}
+	lines, err := nextSteps(c, release)
+	if err != nil || e.output != "table" {
+		return err
+	}
+	_, err = fmt.Fprintln(e.out, strings.Join(lines, "\n"))
+	return err
+}
+
+// publishDraft is publish's write and wait for draft d. It answers the client, which the caller
+// saves, and the release, "" with --no-wait.
+func (e *env) publishDraft(d string, rp *client.Repeat, ifMatch string, noWait bool) (*client.Client, string, error) {
 	var c *client.Client
 	var op apitypes.OperationBody
-	err = e.writeAfter(func(cl *client.Client) error { c = cl; return nil }, &client.Write{Method: http.MethodPost,
-		Path: "/drafts/" + url.PathEscape(d) + "/publications", Body: []byte("{}"), Draft: d, IfMatch: rf.ifMatch.v, Repeat: rp,
+	err := e.writeAfter(func(cl *client.Client) error { c = cl; return nil }, &client.Write{Method: http.MethodPost,
+		Path: "/drafts/" + url.PathEscape(d) + "/publications", Body: []byte("{}"), Draft: d, IfMatch: ifMatch, Repeat: rp,
 		Check: "operation list --kind publish", Read: entryRead(d, "", "")}, func(_ *client.Client, r *client.Response) ([]string, error) {
 		if err := json.Unmarshal(r.Body, &op); err != nil {
 			return nil, err
@@ -57,20 +74,19 @@ func (e *env) publish(args []string) (err error) {
 	})
 	switch {
 	case err != nil:
-		return err
+		return c, "", err
 	case op.Id == "":
-		return fmt.Errorf("%s: the publication was accepted without naming its operation; find it with: bronzewardctl operation list --kind publish", c.Context.Where())
+		return c, "", fmt.Errorf("%s: the publication was accepted without naming its operation; find it with: bronzewardctl operation list --kind publish", c.Context.Where())
 	case noWait:
-		return nil
+		return c, "", nil
 	}
-	defer func() { err = errors.Join(err, c.Save()) }()
 	o, read, err := c.Watch(op.Id, client.Watch{
 		Show:  func(ev client.Event) { fmt.Fprintf(e.err, "  %s\n", pr(ev.Type)) },
 		Clear: func() { fmt.Fprintln(e.err, "  (the events above no longer hold)") },
 	})
 	// No operation was read, so the state is not known: the error says so and names the read.
 	if o == nil {
-		return noOperation(op.Id, err)
+		return c, "", noOperation(op.Id, err)
 	}
 	// The operation's end decides the exit; a failed read of the events after it is reported beside.
 	if err != nil {
@@ -78,10 +94,10 @@ func (e *env) publish(args []string) (err error) {
 	}
 	// A terminal read that an epoch change since overtook decides nothing: the state is not known.
 	if rerr := restoredRead(c, op.Id, o, read); rerr != nil {
-		return rerr
+		return c, "", rerr
 	}
 	if o.State != "succeeded" {
-		return operationFailed{fmt.Errorf("%s: publication operation %s %s: %s; nothing was sent to any machine", c.Context.Where(), pr(o.Id), pr(o.State), pr(compact(o.Error)))}
+		return c, "", operationFailed{fmt.Errorf("%s: publication operation %s %s: %s; nothing was sent to any machine", c.Context.Where(), pr(o.Id), pr(o.State), pr(compact(o.Error)))}
 	}
 	keep(e, c, d, "")
 	var res apitypes.PublishResult
@@ -89,14 +105,9 @@ func (e *env) publish(args []string) (err error) {
 		res, err = o.Result.AsPublishResult()
 	}
 	if o.Result == nil || err != nil || res.Release == "" {
-		return fmt.Errorf("%s: publication operation %s succeeded without naming its release: %s", c.Context.Where(), pr(o.Id), pr(compact(o.Result)))
+		return c, "", fmt.Errorf("%s: publication operation %s succeeded without naming its release: %s", c.Context.Where(), pr(o.Id), pr(compact(o.Result)))
 	}
-	lines, err := nextSteps(c, res.Release)
-	if err != nil || e.output != "table" {
-		return err
-	}
-	_, err = fmt.Fprintln(e.out, strings.Join(lines, "\n"))
-	return err
+	return c, res.Release, nil
 }
 
 // pr escapes the control characters of text the server chose (client-contracts.md §6 item 4).
