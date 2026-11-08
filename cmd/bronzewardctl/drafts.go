@@ -133,13 +133,14 @@ func (e *env) profileSet(args []string) error {
 // proposes for that fragment, refused when the draft removes it, or else the fragment head's
 // revision in the draft's cluster. The server stays authoritative and refuses a pin it does not
 // accept. It binds w to the epoch of the draft answer and to the count of moves as that answer left
-// it, which the write checks before it sends: a change that a later answer set back is still seen.
+// it (not the count after Get's own GET /server), which the write checks before it sends: a change
+// that a later answer set back is still seen.
 func pins(c *client.Client, w *client.Write, draft string, names []string) ([]string, error) {
-	d, first, err := readDraft(c, draft)
+	d, first, moves, err := readDraft(c, draft)
 	if err != nil {
 		return nil, err
 	}
-	w.ReadsAt(first, c.EpochMoves())
+	w.ReadsAt(first, moves)
 	proposed := map[string]*string{}
 	for _, item := range d.Entries {
 		// An entry that cannot be read may be the draft's fragment proposal or removal, so a pin
@@ -286,7 +287,7 @@ func (e *env) sourceRm(kind apitypes.SourceEntryKind, args []string) error {
 // name, or of the draft itself when kind is "".
 func entryRead(draft string, kind apitypes.SourceEntryKind, name string) func(*client.Client) (string, error) {
 	return func(c *client.Client) (string, error) {
-		d, _, err := readDraft(c, draft)
+		d, _, _, err := readDraft(c, draft)
 		if err != nil {
 			return "", err
 		}
@@ -307,17 +308,19 @@ func entryRead(draft string, kind apitypes.SourceEntryKind, name string) func(*c
 	}
 }
 
-// readDraft reads a draft and returns it with the epoch its answer carried.
-func readDraft(c *client.Client, draft string) (*apitypes.DraftBody, string, error) {
+// readDraft reads a draft and returns it with the epoch its answer carried and the count of moves as
+// that answer left it. Get may read GET /server after the answer, so the client's own count can be
+// higher by the time readDraft returns.
+func readDraft(c *client.Client, draft string) (*apitypes.DraftBody, string, int, error) {
 	r, err := c.Get("/drafts/" + url.PathEscape(draft))
 	if err != nil {
-		return nil, "", err
+		return nil, "", 0, err
 	}
 	var d apitypes.DraftBody
 	if err := json.Unmarshal(r.Body, &d); err != nil {
-		return nil, "", ef("GET /api/v1/drafts/%s cannot be read: %w", url.PathEscape(draft), err)
+		return nil, "", 0, ef("GET /api/v1/drafts/%s cannot be read: %w", url.PathEscape(draft), err)
 	}
-	return &d, r.Header.Get("Bronzeward-Epoch"), nil
+	return &d, r.Header.Get("Bronzeward-Epoch"), r.Moves, nil
 }
 
 // keep keeps etag as the draft's last-seen ETag, "" forgetting it (T11). A failure is shown: the
