@@ -268,7 +268,7 @@ func TestBuildReleaseCommits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r := u.renderer; r.Contract != "v1.13" || r.MachineryVersion != version || r.MachineryChecksum != checksum ||
+	if r := u.renderer; r.Contract != "v1.14" || r.MachineryVersion != version || r.MachineryChecksum != checksum ||
 		r.KubernetesVersion != "v"+constants.DefaultKubernetesVersion {
 		t.Fatalf("renderer %+v", r)
 	}
