@@ -1,0 +1,21 @@
+id: PROT-01
+setup: a disposable deployment with mise run dev-bao's OpenBao as its provider, behind the harness proxy; a machine in a cluster; signed in as h-author; a protected import (encrypted staging, review on) of a synthetic document started from the wizard and paused at generation 1
+action: open the review, choose one value from its list, send the mark, then continue the import
+exchange:
+  - request: GET /api/v1/ingestions/<ingestion>/review
+    headers: ["Authorization: Bearer <token>"]
+  - request: POST /api/v1/ingestions/<ingestion>/marks
+    headers: ["Authorization: Bearer <token>", "Content-Type: application/json", "Idempotency-Key: <key>", "Bronzeward-Expected-Epoch: <epoch>"]
+  - request: POST /api/v1/ingestions/<ingestion>/continuations
+    headers: ["Authorization: Bearer <token>", "Content-Type: application/json", "Idempotency-Key: <key>", "Bronzeward-Expected-Epoch: <epoch>"]
+fault: none
+expect:
+  server: the review read answered with no-store; the mark accepted with 202 and applied; the continuation released the import into its draft
+  client: the review text held only in the page's memory and dropped when the mark was sent; the path of the marked value not shown after it was sent
+  shown: the protected review notice, the mark accepted in its operation, the marks applied and the import paused again, then the import released into its draft
+  absent: [synthetic value or token in the harness log, retained artifacts, browser storage, IndexedDB, Cache API or the HTTP cache after the journey]
+runs:
+  web:
+    check: web/e2e/auth/protected.e2e.ts, mise run browser-auth with BW_SPECS=protected; the storage and HTTP cache checks each have a positive control in the same file; web/e2e/retention.test.ts, mise run web, checks that the spec makes no screenshot, recording, trace or HAR
+    browsers: [chrome, edge, firefox, firefox-esr]
+    covers: 'the browser journey. Safari and the previous major versions of each browser are not run (ginsys/bronzeward#255, B6)'

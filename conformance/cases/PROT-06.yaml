@@ -1,0 +1,21 @@
+id: PROT-06
+setup: as PROT-01, with the serving process able to be killed and started again on the same database; the lease is 15 s
+action: (1) send a mark; (2) continue the import; (3) take the import over; in each, the harness holds the provider's decrypt route so the run writes no event, kills the serving process, releases the hold and starts the process again
+exchange:
+  - request: POST /api/v1/ingestions/<ingestion>/marks
+    headers: ["Authorization: Bearer <token>", "Content-Type: application/json", "Idempotency-Key: <key>", "Bronzeward-Expected-Epoch: <epoch>"]
+  - request: POST /api/v1/ingestions/<ingestion>/continuations
+    headers: ["Authorization: Bearer <token>", "Content-Type: application/json", "Idempotency-Key: <key>", "Bronzeward-Expected-Epoch: <epoch>"]
+  - request: POST /api/v1/ingestions/<ingestion>/takeovers
+    headers: ["Authorization: Bearer <token>", "Content-Type: application/json", "Idempotency-Key: <key>", "Bronzeward-Expected-Epoch: <epoch>"]
+fault: the serving process killed with SIGKILL after the 202 and before the run's first event
+expect:
+  server: the lease lapses; the operation stays running until a takeover or an abandon
+  client: the watch ends once the lease passed, with the operation still running
+  shown: the outcome is unknown and never not applied; takeover and abandon offered; no wait until the claim's absolute expiry
+  absent: [synthetic value or token in the harness log, retained artifacts or browser storage]
+runs:
+  web:
+    check: web/e2e/auth/protected.e2e.ts, mise run browser-auth with BW_SPECS=protected
+    browsers: [chrome, edge, firefox, firefox-esr]
+    covers: 'cases 1 to 3. Case 4, the run releasing the claim before its lease lapses with its draft transaction delayed, waits for the server-side fault hook of ginsys/bronzeward#263'

@@ -45,6 +45,11 @@ cases recorded in its file. `recovery-scope-cases.yaml` holds AMB-05, AMB-07 and
 | [ETAG-02](cases/ETAG-02.yaml) | web, an import's draft: `mise run browser-auth` |
 | [PAGE-01](cases/PAGE-01.yaml) | web, the machine list: `mise run browser-auth` |
 | [PAGE-02](cases/PAGE-02.yaml) | web, the machine list: `mise run browser-auth` |
+| [PROT-01](cases/PROT-01.yaml) | web, the browser journey: `mise run browser-auth` with `BW_SPECS=protected` |
+| [PROT-03](cases/PROT-03.yaml) | web, the three refusals: `mise run browser-auth` with `BW_SPECS=protected` |
+| [PROT-04](cases/PROT-04.yaml) | web: `mise run browser-auth` with `BW_SPECS=protected` |
+| [PROT-05](cases/PROT-05.yaml) | web: `mise run browser-auth` with `BW_SPECS=protected` |
+| [PROT-06](cases/PROT-06.yaml) | web, cases 1 to 3; case 4 waits for the server's fault hook (ginsys/bronzeward#263): `mise run browser-auth` with `BW_SPECS=protected` |
 | [REC-01](cases/REC-01.yaml) | web, the banner, the process's refusal and a write's scope refusal: `mise run browser-auth` |
 | [REC-02](cases/REC-02.yaml) | web, both refusals of the entry: `mise run browser-auth` |
 | [REC-04](cases/REC-04.yaml) | web, (a) the dropped `201` only; (b) waits for the server's COMMIT fault hook (#263): `mise run browser-auth` |

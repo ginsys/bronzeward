@@ -1,0 +1,16 @@
+id: PROT-04
+setup: as PROT-01, a protected import paused at generation 1
+action: open the review
+exchange:
+  - request: GET /api/v1/ingestions/<ingestion>/review
+    headers: ["Authorization: Bearer <token>"]
+fault: the injector answers the review read with a redirect the page refuses, which the page sees as a transport failure; then the fault is removed
+expect:
+  server: nothing written
+  client: no review text held; the read repeated only on request
+  shown: the failed read ends, the review button is offered again, and the second read opens the review
+  absent: [synthetic value or token in the harness log, retained artifacts, browser storage or a cached answer of the review]
+runs:
+  web:
+    check: web/e2e/auth/protected.e2e.ts, mise run browser-auth with BW_SPECS=protected
+    browsers: [chrome, edge, firefox, firefox-esr]

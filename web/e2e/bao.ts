@@ -20,6 +20,12 @@ export interface Bao {
   block: string;
   // How long each KV write is held, in milliseconds.
   hold: number;
+  // The protected import cases (ginsys/bronzeward#341): which requests the proxy answers 503 without
+  // forwarding them, "kv" for the KV writes that create a generation (PROT-03) and "decrypt" for the
+  // Transit decrypt of the staged envelope (PROT-05), and how long each such decrypt is held, in
+  // milliseconds, so a case ends the serving process while a run waits for it (PROT-06).
+  fail: "none" | "kv" | "decrypt";
+  decryptHold: number;
   // Makes the digest key's current versions uncomputable (AMB-06).
   retire: () => Promise<void>;
   cleanup: () => Promise<void>;
@@ -131,8 +137,17 @@ export async function startBao(root: string, state: string, port: number): Promi
       digest,
       block: lines.join("\n"),
       hold: 0,
+      fail: "none",
+      decryptHold: 0,
       server: createServer((req, res) => {
-        const held = req.method !== "GET" && (req.url ?? "").startsWith("/v1/secret/data/") ? bao.hold : 0;
+        const path = req.url ?? "";
+        const kvWrite = req.method !== "GET" && path.startsWith("/v1/secret/data/");
+        const decrypt = path.startsWith("/v1/transit/decrypt/");
+        if ((bao.fail === "kv" && kvWrite) || (bao.fail === "decrypt" && decrypt)) {
+          req.resume();
+          return void res.writeHead(503, { "Content-Type": "application/json" }).end('{"errors":["a synthetic fault"]}');
+        }
+        const held = kvWrite ? bao.hold : decrypt ? bao.decryptHold : 0;
         setTimeout(() => {
           const up = request({ host: target.hostname, port: target.port, path: req.url, method: req.method, headers: req.headers }, (r) => {
             res.writeHead(r.statusCode ?? 502, r.headers);

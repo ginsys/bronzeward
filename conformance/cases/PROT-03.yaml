@@ -1,0 +1,16 @@
+id: PROT-03
+setup: as PROT-01, a protected import paused at generation 1 with its review open
+action: (a) send a mark that is not a path; (b) send a mark of a mapping, which compilation refuses; (c) choose a value and send it while the provider refuses writes
+exchange:
+  - request: POST /api/v1/ingestions/<ingestion>/marks
+    headers: ["Authorization: Bearer <token>", "Content-Type: application/json", "Idempotency-Key: <key>", "Bronzeward-Expected-Epoch: <epoch>"]
+fault: (c) the harness proxy answers 503 to writes to the provider's key-value store
+expect:
+  server: (a) 422 with position; (b) 202, then a mark-refused event with 422 and position, the ingestion paused again; (c) 202, then a mark-refused event with 503
+  client: none of the marks reported as accepted; no mark path shown
+  shown: (a) the mark at its position is refused and the import stays paused for review; (b) and (c) the mark was not applied, the cause named, and the import paused again
+  absent: [synthetic value or token in the harness log, retained artifacts or browser storage]
+runs:
+  web:
+    check: web/e2e/auth/protected.e2e.ts, mise run browser-auth with BW_SPECS=protected
+    browsers: [chrome, edge, firefox, firefox-esr]

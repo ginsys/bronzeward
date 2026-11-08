@@ -1,0 +1,16 @@
+id: PROT-05
+setup: as PROT-01, a protected import paused at generation 1 with its review open and one value chosen
+action: send the mark while the provider refuses decryption
+exchange:
+  - request: POST /api/v1/ingestions/<ingestion>/marks
+    headers: ["Authorization: Bearer <token>", "Content-Type: application/json", "Idempotency-Key: <key>", "Bronzeward-Expected-Epoch: <epoch>"]
+fault: the harness proxy answers 503 to the provider's transit decrypt route; it is removed after the event
+expect:
+  server: 202; the run writes a resume-failed event with dependency-unavailable and stops, the operation still running
+  client: the watch ends on the event; the mark not reported as applied
+  shown: the staged input could not be decrypted and the mark was not applied; abandon offered at once; after the lease lapsed and a reload, takeover and abandon offered; no wait without end
+  absent: [synthetic value or token in the harness log, retained artifacts or browser storage]
+runs:
+  web:
+    check: web/e2e/auth/protected.e2e.ts, mise run browser-auth with BW_SPECS=protected
+    browsers: [chrome, edge, firefox, firefox-esr]
