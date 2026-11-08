@@ -1605,8 +1605,9 @@ describe("a plain !bwref value that goes on to the next line", () => {
   // (`- - &e`, `? - &e`, `- - ` in CRLF), and the tag starts the next line. Only properties follow the last
   // indicator then, so the compact collection is at that indicator, as for `- - !bwref x/foo` (review round 2 of
   // ginsys/bronzeward#699, probe w699-probe-e1: 16 documents at e1d0d1f3, 7 listed `x/foo` where go-yaml reads
-  // `x/foo - y` or `x/foo ? y`, 9 agree, none lost a name). go-yaml refuses the documents with the next line at
-  // the collection column when the tag is the entry, so no row of that shape is here.
+  // `x/foo - y` or `x/foo ? y`, 9 agree, none lost a name). go-yaml refuses a document whose tag is the entry at
+  // column 2, with the next dash line at column 2 or 0. The cause is the indentation of the tag and not the column
+  // of the dash line, so no row of that shape is here.
   test.each([
     ["two dashes, an anchor at the end of the line, a deeper dash line", "- - &e\n    !bwref x/foo\n    - y\n"],
     ["an explicit key and a dash, an anchor at the end of the line, a deeper dash line", "? - &e\n    !bwref x/foo\n    - y\n"],
@@ -1638,6 +1639,103 @@ describe("a plain !bwref value that goes on to the next line", () => {
     ["a dash and an explicit key, an anchor at the end of the line", "- ? &e\n    !bwref x/foo\n    - y\n"],
   ])("a compact parent whose line ends with a tab after an anchor or with an explicit key entry, lists nothing (%s)", (_, text) => {
     expect(references(text), text).toEqual([]);
+  });
+
+  // A key line after a plain value ends the scalar only at the column of the holder of the value or left of it
+  // (ginsys/bronzeward#699, section 3, was ginsys/bronzeward#705). The holder is the key, at the column after
+  // the dash for `- k:`, or the dash itself for a lone `- `. A key line more indented than that is text of the
+  // scalar to go-yaml, which then refuses the colon ("mapping values are not allowed in this context"), so the
+  // document lists nothing. Probe w699s3-probe-p1: 53 documents at f52d5579 against go-yaml v3.0.5, 28 agree,
+  // 25 listed a name where go-yaml refuses. 23 are the rows below: 21 with an anchor, 2 without one in a compact
+  // parent. The other 2 are the limits at the end of this group.
+  test.each([
+    ["a key, a key line two columns deeper", "a:\n  k: !bwref &e x/foo\n    j: v\n"],
+    ["a key, a tab after the colon, a key line two columns deeper", "a:\n  k:\t!bwref &e x/foo\n    j: v\n"],
+    ["a key, a key line one column deeper", "a:\n  k: !bwref &e x/foo\n   j: v\n"],
+    ["a key, a deeper key line with a colon at its end", "a:\n  k: !bwref &e x/foo\n    j:\n"],
+    ["a key, a deeper key line with a quoted key", "a:\n  k: !bwref &e x/foo\n    \"j\": v\n"],
+    ["a key, a deeper key line with an anchor on the key", "a:\n  k: !bwref &e x/foo\n    &a j: v\n"],
+    ["a key, a deeper line that is a value indicator", "a:\n  k: !bwref &e x/foo\n    : v\n"],
+    ["a key, a comment line, a deeper key line", "a:\n  k: !bwref &e x/foo\n    # c\n    j: v\n"],
+    ["a key, a blank line, a deeper key line", "a:\n  k: !bwref &e x/foo\n\n    j: v\n"],
+    ["a key, CRLF, a deeper key line", "a:\r\n  k: !bwref &e x/foo\r\n    j: v\r\n"],
+    ["a key, a deeper key line with a tab after the spaces", "a:\n  k: !bwref &e x/foo\n    \tj: v\n"],
+    ["a quoted key, a deeper key line", "a:\n  \"k\": !bwref &e x/foo\n    j: v\n"],
+    ["a key at column 0, a key line two columns deeper", "k: !bwref &e x/foo\n  j: v\n"],
+    ["a dash and a key, a key line two columns deeper than the key","- k: !bwref &e x/foo\n    j: v\n"],
+    ["a dash and a key, a key line one column deeper than the key", "- k: !bwref &e x/foo\n   j: v\n"],
+    ["a nested dash and a key, a key line two columns deeper than the key", "a:\n  - k: !bwref &e x/foo\n      j: v\n"],
+    ["a nested dash and a key, a key line one column deeper than the key", "a:\n  - k: !bwref &e x/foo\n     j: v\n"],
+    ["a dash at the column of its key, a key line two columns deeper than the key", "a:\n- k: !bwref &e x/foo\n    j: v\n"],
+    ["a lone dash, a key line two columns deeper", "a:\n  - !bwref &e x/foo\n    j: v\n"],
+    ["a lone dash, a key line one column deeper", "a:\n  - !bwref &e x/foo\n   j: v\n"],
+    ["a lone dash at column 0, a key line two columns deeper", "- !bwref &e x/foo\n  j: v\n"],
+  ])("an anchored plain value, then a key line more indented than its holder, lists nothing (%s)", (_, text) => {
+    expect(references(text), text).toEqual([]);
+  });
+
+  // The same rule without an anchor, in a compact parent: `continues` read the key line as the end of the scalar
+  // whatever its column. A key or a lone dash as the parent already lists nothing there.
+  test.each([
+    ["a dash and a key, a key line two columns deeper", "- k: !bwref x/foo\n    j: v\n"],
+    ["a nested dash and a key, a key line two columns deeper than the key", "a:\n  - k: !bwref x/foo\n      j: v\n"],
+  ])("a plain value with no anchor in a compact parent, then a key line more indented than its holder, lists nothing (%s)", (_, text) => {
+    expect(references(text), text).toEqual([]);
+  });
+
+  // A key line at the holder's column or left of it ends the scalar: go-yaml reads `x/foo` and accepts these. They
+  // list the name on f52d5579 too and pin that the fix keeps it.
+  test.each([
+    ["a key, a sibling key line", "a:\n  k: !bwref &e x/foo\n  j: v\n"],
+    ["a key, a key line at column 0", "a:\n  k: !bwref &e x/foo\nj: v\n"],
+    ["a key at column 0, a sibling key line", "k: !bwref &e x/foo\nj: v\n"],
+    ["a quoted key, a sibling key line", "a:\n  \"k\": !bwref &e x/foo\n  j: v\n"],
+    ["a dash and a key, a key line at the column of the key", "- k: !bwref &e x/foo\n  j: v\n"],
+    ["a dash and a key, the next entry", "- k: !bwref &e x/foo\n- j: v\n"],
+    ["a nested dash and a key, a key line at the column of the key", "a:\n  - k: !bwref &e x/foo\n    j: v\n"],
+    ["a nested dash and a key, the next entry", "a:\n  - k: !bwref &e x/foo\n  - j: v\n"],
+    ["a dash at the column of its key, a key line at the column of the key", "a:\n- k: !bwref &e x/foo\n  j: v\n"],
+    ["a lone dash, the next entry", "a:\n  - !bwref &e x/foo\n  - j: v\n"],
+    ["a lone dash at column 0, the next entry", "- !bwref &e x/foo\n- j: v\n"],
+    ["no anchor, a key, a sibling key line", "a:\n  k: !bwref x/foo\n  j: v\n"],
+    ["no anchor, a dash and a key, a key line at the column of the key", "- k: !bwref x/foo\n  j: v\n"],
+    ["no anchor, a nested dash and a key, a key line at the column of the key", "a:\n  - k: !bwref x/foo\n    j: v\n"],
+    ["a flow mapping, the next line starts with a comma", "a: {k: !bwref &e x/foo\n  , j: v}\n"],
+    ["a flow sequence, the next line starts with a comma", "a: [!bwref &e x/foo\n  , j]\n"],
+  ])("a plain value, then a key line at or left of its holder, lists the name (%s)", (_, text) => {
+    expect(references(text), text).toEqual(["x/foo"]);
+  });
+
+  // These list nothing on f52d5579 already, as go-yaml reads them (the value goes on over several lines, or the
+  // document is refused), so they pass on both sides and discriminate nothing there. They pin that the fix keeps it.
+  test.each([
+    ["a deeper dash line", "a:\n  k: !bwref &e x/foo\n    - j\n"],
+    ["a deeper word", "a:\n  k: !bwref &e x/foo\n    word\n"],
+    ["a deeper word with a colon that no blank follows", "a:\n  k: !bwref &e x/foo\n    http://x\n"],
+    ["a deeper key line with no blank after its colon", "a:\n  k: !bwref &e x/foo\n    j:v\n"],
+    ["a deeper explicit key line", "a:\n  k: !bwref &e x/foo\n    ? j\n    : v\n"],
+    ["no anchor, a key, a deeper key line", "a:\n  k: !bwref x/foo\n    j: v\n"],
+    ["no anchor, a lone dash, a deeper key line", "a:\n  - !bwref x/foo\n    j: v\n"],
+    ["no anchor, a lone dash at column 0, a deeper key line", "- !bwref x/foo\n  j: v\n"],
+    ["a flow mapping, a key line on the next line", "a: {k: !bwref &e x/foo\n    j: v}\n"],
+    ["a flow sequence, a key line on the next line", "a: [!bwref &e x/foo\n  j: v]\n"],
+    ["a flow sequence with a pair, a key line on the next line", "a: [k: !bwref &e x/foo\n  j: v]\n"],
+    ["a flow mapping after a dash, a key line on the next line", "- {k: !bwref &e x/foo\n    j: v}\n"],
+  ])("a plain value that goes on over a deeper line, or a refused document, lists nothing (%s)", (_, text) => {
+    expect(references(text), text).toEqual([]);
+  });
+
+  // Two limits of the scalar scan that the key line rule does not touch. go-yaml refuses both documents and the
+  // scan lists the name (probe w699s3-probe-p1, rows D-same2 and F-map-valueind). In the first, the key line stands at
+  // the column of the dash, where go-yaml wants another dash. A line to the left of the dash may belong to an
+  // ancestor, so the scan cannot tell the two apart from the line alone. In the second, the scalar ends where
+  // go-yaml ends it, at the value indicator, and the refusal comes after it. These rows pin the reading as a
+  // limit, not as the right answer.
+  test.each([
+    ["a key line at the column of the dash", "a:\n  - !bwref &e x/foo\n  j: v\n"],
+    ["a value indicator line in a flow mapping", "a: {k: !bwref &e x/foo\n  : v}\n"],
+  ])("a document that go-yaml refuses for a reason outside the key line rule still lists the name (known limit: %s)", (_, text) => {
+    expect(references(text), text).toEqual(["x/foo"]);
   });
 
   // The editor reads a draft while the user types, so the cost of the scan must stay near linear
@@ -1784,6 +1882,19 @@ describe("a plain !bwref value that goes on to the next line", () => {
     // tags took 0.9 to 1.6 s there, too close to the old bound of 1,000 ms to fail it every time).
     test("4,000 tags among sibling keys under one key of 300,000 characters are scanned in near linear time", () => {
       bounded(4000, (n) => `${rep("a", 75 * n)}:\n${lines(n, (i) => `  j${i}: v\n  !bwref x/foo${i}\n`)}`);
+    });
+
+    // A key line after a plain value is measured against the holder column (ginsys/bronzeward#699, section 3):
+    // `anchoredHolder` walks the spaces and dashes before the tag, and `compactColumn` the same for a plain value.
+    // No figure from earlier code: these rows list the same on f52d5579 and are not shown to fail there, they
+    // pin the bound for the new reading.
+    test.each([
+      ["an indentation of 100,000 spaces before an anchored value", `${" ".repeat(100000)}k: !bwref &e x/foo\n${" ".repeat(100002)}j: v\n`],
+      ["4,000 anchored values, each followed by a deeper key line", Array.from({ length: 4000 }, (_, i) => `k${i}: !bwref &e x/foo${i}\n  j: v\n`).join("")],
+      ["4,000 plain values in a compact parent, each followed by a deeper key line", Array.from({ length: 4000 }, (_, i) => `- k${i}: !bwref x/foo${i}\n    j: v\n`).join("")],
+      ["a key of 300,000 characters before an anchored value in a compact parent", `- ${"a".repeat(300000)}: !bwref &e x/foo\n    j: v\n`],
+    ])("a deeper key line after a plain value is scanned in near linear time (%s)", (_, text) => {
+      bounded(text);
     });
 
     // A continuation line with a long run of blanks between two words: trimming it must not try every

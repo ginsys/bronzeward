@@ -573,9 +573,9 @@ function isRoot(masked: string, tag: number, before: string): boolean {
 // more indented than the node that holds the scalar, and then it is text. That holds for a comma,
 // a bracket or a brace at its start, and, under a parent known from its line (`PLAIN_PARENT`), for
 // `- `, `? ` and a line with a colon before a blank, which go-yaml refuses as a key. Under a compact
-// parent such a line can belong to the collection that holds the scalar: a `- ` or `? ` line ends the scalar
+// parent such a line can belong to the collection that holds the scalar: a `- `, `? ` or key line ends the scalar
 // at the column of that collection or left of it, and is more of the scalar when more indented
-// (`compactColumn`, ginsys/bronzeward#706).
+// (`compactColumn`, ginsys/bronzeward#706 and ginsys/bronzeward#699).
 // A tag that starts its line has its parent on the line above, known only for a key with nothing after its
 // colon or a lone dash (`PLAIN_PARENT_LINE`), not for a compact one (`- k:`). One anchor between the
 // parent and the tag, or after the colon or dash of the parent line, changes nothing (ginsys/bronzeward#699).
@@ -609,13 +609,15 @@ function continues(
   const known = parent === undefined ? PLAIN_PARENT.test(before) : (parent.known ??= PLAIN_PARENT_LINE.test(parent.line));
   if (known) return true;
   // A `- ` or `? ` line is more of the scalar when it is more indented than the compact collection that holds
-  // it, as for go-yaml (ginsys/bronzeward#706). At that column or less it belongs to the collection.
-  if (/^[-?](?:\s|$)/.test(t)) {
+  // it, as for go-yaml (ginsys/bronzeward#706). At that column or less it belongs to the collection. A key line
+  // is read the same way (ginsys/bronzeward#699): more indented than that collection, it is text of the scalar,
+  // and go-yaml refuses its colon, so the document lists nothing; at that column or less it ends the scalar.
+  if (/^[-?](?:\s|$)/.test(t) || /:(?:\s|$)/.test(t)) {
     if (parent !== undefined && parent.compact === undefined) parent.compact = compactColumn(parent.line) ?? null;
     const holder = parent === undefined ? compactColumn(before) : parent.compact;
     return holder !== undefined && holder !== null && column(next) > holder;
   }
-  return !/:(?:\s|$)/.test(t);
+  return true;
 }
 
 // The text before an anchored tag on its line, in block context: the indentation in YAML spaces
@@ -632,21 +634,40 @@ const ANCHORED_PARENT = /^(?: *(?:- +)?(?:"[^"\n]*"|'[^'\n]*'|[^ \t"'#:\-?[\]{},
 // also `- k: ...`) or a sequence entry (`- !bwref &e x/foo`). A tag that starts its line, a root
 // scalar (also on the line of `---`) and a compact collection (`- - x`, `? - x`) name nothing,
 // because the node that holds the scalar is then not known from its line. The scalar ends at the end
-// of the text, at a document marker, before a line that is a key (a colon before a blank or the
-// end) and before a line that is no more indented than the tag's line. In flow context it ends
+// of the text, at a document marker, before a key line (a colon before a blank or the
+// end) that is no more indented than the holder, and before another line that is no more indented than the tag's line. In flow context it ends
 // before a line that starts with a flow indicator or a value indicator (a colon before a blank or
 // the end; go-yaml reads `:]` as text). Any other next line continues the scalar.
+// In block context a key line ends the scalar only at the column of the holder or left of it (`anchoredHolder`).
+// More indented, it is text of the scalar to go-yaml, which then refuses the colon, so the scalar goes on and the
+// document names nothing (ginsys/bronzeward#699, section 3). A line that holds no key is measured against the
+// indentation of the tag's line, as before.
 function anchoredContinues(masked: string, tag: number, end: number, inFlow: boolean, cuts: ReadonlySet<number>): boolean {
   const start = masked.lastIndexOf("\n", tag) + 1;
-  if (!inFlow && !ANCHORED_PARENT.test(masked.slice(start, tag))) return true;
+  const parent = masked.slice(start, tag);
+  if (!inFlow && !ANCHORED_PARENT.test(parent)) return true;
   const eol = masked.indexOf("\n", end);
   if (eol === -1 || !blank(masked.slice(end, eol))) return false;
   const next = nextLine(masked, eol + 1, cuts, blank);
   if (next === undefined || MARKER.test(next)) return false;
   const t = trimBlanks(next);
   if (inFlow) return !/^(?:[,\]}]|:(?:[ \t]|$))/.test(t);
-  if (/:(?:[ \t]|$)/.test(t)) return false;
+  if (/:(?:[ \t]|$)/.test(t)) return column(next) > anchoredHolder(parent);
   return spaces(next) > spaces(lineAt(masked, start));
+}
+
+// The column of the node that holds an anchored value, read from the text before its tag (`ANCHORED_PARENT`): the
+// key, which stands after the dash of a compact parent (`- k:` gives 2), or the dash itself for a lone `- `, as go-yaml
+// measures the next line against the indentation of the collection that holds the entry. Only spaces count. The
+// walk is by index over the spaces and dashes of the text, so its cost is the length of the text.
+function anchoredHolder(parent: string): number {
+  let i = 0;
+  while (parent[i] === " ") i++;
+  const dash = i;
+  if (parent[i] !== "-") return dash;
+  i++;
+  while (parent[i] === " ") i++;
+  return i === parent.length ? dash : i;
 }
 
 // A block scalar's name and where it ends (YAML 1.2 §8.1, ginsys/bronzeward#534 C7). It names a
