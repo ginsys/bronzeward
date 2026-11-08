@@ -1,11 +1,11 @@
 import { createElement as h, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { components } from "./api/v1";
 import { forgetETag, keepETag, keptETag } from "./drafts.tsx";
 import { WritesProvider } from "./forms.tsx";
-import { againPath, allowed, documentRefusal, ended, fileReader, type Ingestion, MAX_DOCUMENT, onEvent, sendStart, StartImport, type StartInput, startBody, startETag, startParams, startRun, started, stopsWatch, typedDocument, unsent, watchDeps } from "./imports.tsx";
-import { type Reads, ReadsProvider } from "./list.tsx";
+import { ABANDONED_SETTLE, abandonedSince, againPath, allowed, documentRefusal, ended, fileReader, type Ingestion, MAX_DOCUMENT, onEvent, sendStart, StartImport, type StartInput, startBody, startETag, startParams, startRun, started, stopsWatch, typedDocument, unsent, watchDeps } from "./imports.tsx";
+import { type Reads, ReadsProvider, short } from "./list.tsx";
 import { eventLine } from "./progress.ts";
 import { Client, type ReadResult } from "./request.ts";
 import { ShellContext } from "./shell.tsx";
@@ -386,6 +386,45 @@ describe("an abandoned claim is followed to its operation's terminal event (Copi
     const out = text(await ended(reading({ kind: "transport" }).client, ing({ state: "abandoned" }), failed, replayed.settled ?? "", at, "e1"));
     expect(out).toContain("The ingestion was abandoned, so nothing of it reached the draft.");
     expect(out).not.toContain("Paused for review");
+  });
+  describe("and the follow has a bound, so a sweep that never ends the operation does not hold it open (round 5 of the local review)", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(NOW);
+    });
+    afterEach(() => vi.useRealTimers());
+    const abandoned = ing({ state: "abandoned" });
+    const stops = (since: number | undefined, settled: "paused" | undefined = "paused") => stopsWatch(settled, { b: abandoned, at: Date.now() }, Date.now(), since);
+    test("with only the old pause and no terminal event, the watch ends at the bound and says the outcome is unknown", async () => {
+      const since = abandonedSince(abandoned, undefined, Date.now());
+      expect(since).toBe(NOW);
+      vi.advanceTimersByTime(ABANDONED_SETTLE - 1);
+      expect(stops(since)).toBe(false);
+      vi.advanceTimersByTime(1);
+      expect(stops(since)).toBe(true);
+      const out = text(await ended(reading({ kind: "transport" }).client, abandoned, op({ state: "running" }), "paused", Date.now(), "e1"));
+      expect(out).toBe(`Import ${short(abandoned.id)} is abandoned, but operation ${short("op_zcfw5mcm")} has no recorded end yet: its outcome is unknown. Read it again later.`);
+      expect(out).not.toContain("Paused for review");
+    });
+    test("a terminal event before the bound ends the watch with the real failure", async () => {
+      const since = abandonedSince(abandoned, undefined, Date.now());
+      vi.advanceTimersByTime(ABANDONED_SETTLE / 2);
+      expect(stops(since)).toBe(false);
+      const failed = op({ state: "failed", error: { type: "urn:bronzeward:problem:ingestion-abandoned", title: "ingestion abandoned", status: 409, instance: "req_1" } });
+      expect(text(await ended(reading({ kind: "transport" }).client, abandoned, failed, "paused", Date.now(), "e1"))).toContain("The ingestion was abandoned, so nothing of it reached the draft.");
+    });
+    test("a reread or a reconnect keeps the first deadline, and leaving the abandoned state drops it", () => {
+      const since = abandonedSince(abandoned, undefined, Date.now());
+      vi.advanceTimersByTime(90_000);
+      expect(abandonedSince(ing({ state: "abandoned" }), since, Date.now())).toBe(since);
+      vi.advanceTimersByTime(ABANDONED_SETTLE - 90_000);
+      expect(stops(abandonedSince(ing({ state: "abandoned" }), since, Date.now()))).toBe(true);
+      expect(abandonedSince(ing({ state: "held" }), since, Date.now())).toBeUndefined();
+    });
+    test("an abandoned claim with no first instant known is not stopped by the bound", () => {
+      vi.advanceTimersByTime(ABANDONED_SETTLE * 10);
+      expect(stops(undefined)).toBe(false);
+    });
   });
   test("every other state keeps the generation rule: a pause or resume-failed of the run ends the watch", () => {
     for (const state of ["paused", "held", "resumed"]) {

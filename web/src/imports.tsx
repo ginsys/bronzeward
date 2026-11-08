@@ -100,6 +100,8 @@ export async function ended(client: Pick<Client, "readWithEpoch">, b: Ingestion,
     const why = reasons[code(o.error)] ?? "";
     return <>Import {short(b.id)} (operation {short(o.id)}) {o.state}: {code(o.error) || "no code"}.{why} <ImportAgain b={b} /></>;
   }
+  // An abandoned claim whose operation has no recorded end: the pause the events replay is not current.
+  if (b.state === "abandoned") return `Import ${short(b.id)} is abandoned, but operation ${short(o.id)} has no recorded end yet: its outcome is unknown. Read it again later.`;
   if (last === "paused") return `Paused for review (expires ${when(b.expiresAt)}).`;
   if (last === "resume-failed") return `Import ${short(b.id)} was not applied: its staged input could not be decrypted (resume-failed). The claim stays held until its lease lapses at ${when(b.leaseUntil)}; then take it over, or abandon it now.`;
   if (lapsed(b, now)) {
@@ -159,9 +161,21 @@ export function onEvent(s: RunState, type: string, data: unknown): RunState {
 // passed LEASE_MARGIN ago that still shows the claim lapsed (§11.3, PROT-06): a read made earlier
 // can predate a renewal, so an event before the refresh settles nothing. An abandoned claim has no run
 // left to settle: the expiry can read abandoned before the sweep fails the operation, and the restarted
-// watch replays the old pause, so it ends at the operation's terminal event only.
-export const stopsWatch = (settled: RunState["settled"], read: { b: Ingestion; at: number }, now: number) =>
-  read.b.state !== "abandoned" && (settled !== undefined || (read.at > Date.parse(read.b.leaseUntil) + LEASE_MARGIN && lapsed(read.b, now)));
+// watch replays the old pause, so the replayed events settle nothing. It ends at the operation's
+// terminal event, or when ABANDONED_SETTLE has passed since the page first read the claim abandoned.
+export const stopsWatch = (settled: RunState["settled"], read: { b: Ingestion; at: number }, now: number, abandonedAt?: number) =>
+  read.b.state === "abandoned"
+    ? abandonedAt !== undefined && now - abandonedAt >= ABANDONED_SETTLE
+    : settled !== undefined || (read.at > Date.parse(read.b.leaseUntil) + LEASE_MARGIN && lapsed(read.b, now));
+
+// How long the page follows an abandoned claim's operation for its terminal event. This is a client
+// bound, not the server's configured sweep interval: the sweep runs every `ingestion.sweep`, or every
+// minute without that setting, so 120 s is two default intervals and a working sweep ends the
+// operation first. The count starts at the first read that showed the claim abandoned.
+export const ABANDONED_SETTLE = 120_000;
+// The instant of that first read: a later read of the same abandoned claim, or a reconnect of the
+// watch, keeps it, so rereads cannot extend the bound. A claim that is not abandoned has none.
+export const abandonedSince = (b: Pick<Ingestion, "state">, since: number | undefined, now: number): number | undefined => (b.state === "abandoned" ? (since ?? now) : undefined);
 
 // What the watch of an import's operation depends on. A continuation or takeover advances the claim
 // generation and keeps the operation id, so the generation is part of the key: the watch restarts at it.
@@ -179,7 +193,9 @@ function Progress({ b, again }: { b: Ingestion; again: () => void }) {
   const [end, setEnd] = useState<ReactNode>();
   // The latest read of the ingestion and the page's failure view, for the watch begun before them.
   const latest = useRef({ b, at: Date.now() });
+  const abandonedAt = useRef<number>(undefined);
   if (latest.current.b !== b) latest.current = { b, at: Date.now() };
+  abandonedAt.current = abandonedSince(b, abandonedAt.current, latest.current.at);
   const shown = useRef(failure);
   shown.current = failure;
   useEffect(() => {
@@ -199,7 +215,7 @@ function Progress({ b, again }: { b: Ingestion; again: () => void }) {
     void watch(client, op, {
       show: (e) => { run = onEvent(run, e.type, e.data); setLines((l) => [...l, eventLine(e)]); },
       clear: (why) => { run = startRun(generation); setCleared(why); setLines([]); },
-      until: () => stopsWatch(run.settled, latest.current, Date.now()),
+      until: () => stopsWatch(run.settled, latest.current, Date.now(), abandonedAt.current),
       signal: abort.signal,
     }).then(async (r) => {
       if (r.kind === "stopped" || abort.signal.aborted) return;
