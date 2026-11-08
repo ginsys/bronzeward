@@ -165,6 +165,11 @@ describe("a refused mark is named by rule and position, never a path (§11.3, PR
     expect(unknown).not.toContain("BWSYNTH");
     expect(problemTail(p)).not.toContain("BWSYNTH");
     expect(problemTail(problem({ status: 409, detail: "kept" }))).toContain("kept");
+    // A 422 of another rule is not a mark refusal, even with a position member: it keeps its detail.
+    const other = problem({ type: "urn:bronzeward:problem:idempotency-key-reused", position: 2, detail: "kept" });
+    expect(problemTail(other)).toContain("kept");
+    expect(problemTail(other)).not.toContain("The mark at position");
+    expect(renderToStaticMarkup(h(Refused, { problem: other, status: 422, verb: "saved" }))).toContain("kept");
   });
 });
 
