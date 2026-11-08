@@ -160,3 +160,31 @@ func TestClusterDiscoverWritesNothing(t *testing.T) {
 		t.Errorf("-o json: exit %d, stderr %q", code, errOut)
 	}
 }
+
+// TestClusterDiscoverBracketsAnIPv6Endpoint: the server's endpoint grammar takes an IPv6 literal
+// only in brackets, so the printed machine add names the member's address that way.
+func TestClusterDiscoverBracketsAnIPv6Endpoint(t *testing.T) {
+	res := twoMembers
+	res.Members = []discover.Member{
+		{NodeID: "n1", Hostname: "cp-1", Address: "fd00::1", Role: "controlplane", Platform: "metal", Answered: true},
+	}
+	c := discoverFixture(t, res, nil)
+	_, out, _ := runCtl(t, "cluster", "discover", "--talosconfig", c.file)
+	if want := "--talos-endpoint '[fd00::1]'"; !strings.Contains(out, want) {
+		t.Errorf("no %q in:\n%s", want, out)
+	}
+}
+
+// TestClusterDiscoverRefusesAFileNameItCannotQuote: a name with a control character would print as
+// a different file in the bao command, so the command refuses it before it reads anything.
+func TestClusterDiscoverRefusesAFileNameItCannotQuote(t *testing.T) {
+	c := discoverFixture(t, twoMembers, nil)
+	odd := filepath.Join(filepath.Dir(c.file), "talos\tconfig")
+	if err := os.Rename(c.file, odd); err != nil {
+		t.Skipf("the file system takes no such name: %v", err)
+	}
+	code, out, errOut := runCtl(t, "cluster", "discover", "--talosconfig", odd)
+	if code != 2 || out != "" || !strings.Contains(errOut, "--talosconfig") || len(c.given) != 0 {
+		t.Errorf("exit %d, stdout %q, stderr %q, %d discoveries", code, out, errOut, len(c.given))
+	}
+}

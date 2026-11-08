@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"text/tabwriter"
+	"unicode"
 
 	"github.com/ginsys/bronzeward/internal/client"
 	"github.com/ginsys/bronzeward/internal/talos/discover"
@@ -39,6 +40,9 @@ func (e *env) clusterDiscover(args []string) error {
 	if e.output != "table" {
 		return usageError{errors.New("cluster discover prints commands as text: use -o table")}
 	}
+	if strings.IndexFunc(file, func(r rune) bool { return !unicode.IsPrint(r) }) >= 0 {
+		return usageError{errors.New("--talosconfig names a file whose name holds a character that cannot be printed back in the bao command: rename the file")}
+	}
 	f, err := os.Open(file)
 	if err != nil {
 		return fmt.Errorf("reading the talosconfig: %w", unwrapPath(err))
@@ -58,6 +62,14 @@ func (e *env) clusterDiscover(args []string) error {
 		return err
 	}
 	return e.say(discoverLines(res, file)...)
+}
+
+// endpointArg is address as the server's endpoint grammar takes it: an IPv6 literal in brackets.
+func endpointArg(address string) string {
+	if strings.Contains(address, ":") {
+		return "[" + address + "]"
+	}
+	return address
 }
 
 // unwrapPath is err without the file path's directory noise: the operating system's own text.
@@ -117,7 +129,7 @@ func discoverLines(res discover.Result, file string) []string {
 		case m.Platform == "":
 			notRecorded = append(notRecorded, sf("%s (%s) answered but reported no platform.", m.NodeID, m.Hostname))
 		default:
-			out = append(out, "  bronzewardctl machine add --cluster <cluster id> "+key+" --platform "+client.ShellWord(m.Platform)+" --talos-endpoint "+client.ShellWord(m.Address))
+			out = append(out, "  bronzewardctl machine add --cluster <cluster id> "+key+" --platform "+client.ShellWord(m.Platform)+" --talos-endpoint "+client.ShellWord(endpointArg(m.Address)))
 		}
 	}
 	out = append(out, "  bao kv put -mount=secret access/talos/<cluster id> "+client.ShellWord("talosconfig=@"+file))

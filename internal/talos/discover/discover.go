@@ -60,9 +60,9 @@ var supportedMinor = func() string {
 	return ""
 }
 
-// memberTimeout bounds the dial and reads of one member, so that a member that does not answer
-// does not hold the command.
-const memberTimeout = 10 * time.Second
+// memberTimeout bounds the dials and reads of one member, over all its addresses, so that a member
+// that does not answer does not hold the command.
+var memberTimeout = 10 * time.Second
 
 // ErrNoEndpoint is Discover's refusal when it is given no endpoint and the talosconfig names none.
 var ErrNoEndpoint = errors.New("discover: the talosconfig names no endpoint")
@@ -110,14 +110,7 @@ func Discover(ctx context.Context, talosconfig []byte, endpoint string) (Result,
 		if s.MachineType.IsControlPlane() {
 			m.Role = "controlplane"
 		}
-		for _, a := range s.Addresses {
-			if m.Address == "" {
-				m.Address = a.String()
-			}
-			if ok := readMember(ctx, creds, a, &m); ok {
-				break
-			}
-		}
+		readMemberAt(ctx, creds, s.Addresses, &m)
 		if m.Role == "controlplane" && s.ControlPlane != nil && res.KubernetesEndpoint == "" && m.Address != "" {
 			res.KubernetesEndpoint = "https://" + net.JoinHostPort(m.Address, strconv.Itoa(s.ControlPlane.APIServerPort))
 		}
@@ -139,12 +132,25 @@ func version(ctx context.Context, n *node) (string, error) {
 	return msgs[0].GetVersion().GetTag(), nil
 }
 
+// readMemberAt fills m from the first of addrs that answers. One deadline bounds the whole member,
+// however many addresses it lists. Address is the one that answered, or the first listed.
+func readMemberAt(ctx context.Context, creds *clientconfig.Context, addrs []netip.Addr, m *Member) {
+	ctx, cancel := context.WithTimeout(ctx, memberTimeout)
+	defer cancel()
+	for _, a := range addrs {
+		if m.Address == "" {
+			m.Address = a.String()
+		}
+		if readMember(ctx, creds, a, m) {
+			return
+		}
+	}
+}
+
 // readMember fills m from the member at address a and reports whether it answered. Only the
 // SystemInformation and PlatformMetadata resources may be missing: a container node has no SMBIOS
 // information, and an old node may report no platform.
 func readMember(ctx context.Context, creds *clientconfig.Context, a netip.Addr, m *Member) bool {
-	ctx, cancel := context.WithTimeout(ctx, memberTimeout)
-	defer cancel()
 	n, err := dial(ctx, creds, memberEndpoint(a))
 	if err != nil {
 		return false

@@ -220,3 +220,47 @@ func callErr(ctx context.Context, tc []byte, c *stand) error {
 	_, err := Discover(ctx, tc, c.a.Endpoint)
 	return err
 }
+
+// TestDiscoverBoundsAMemberNotEachAddress: a member that lists several addresses that never answer
+// holds the command for one member timeout, not one per address.
+func TestDiscoverBoundsAMemberNotEachAddress(t *testing.T) {
+	c := newCluster(t)
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
+	go func() { // accepts and says nothing: the TLS handshake waits for the deadline
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				return
+			}
+			t.Cleanup(func() { conn.Close() })
+		}
+	}()
+	old, oldTimeout := memberEndpoint, memberTimeout
+	memberEndpoint = func(a netip.Addr) string {
+		if a.String() == "10.0.0.1" {
+			return c.a.Endpoint
+		}
+		return l.Addr().String()
+	}
+	memberTimeout = 400 * time.Millisecond
+	t.Cleanup(func() { memberEndpoint, memberTimeout = old, oldTimeout })
+	c.a.SetMembers(t,
+		talostest.Member{NodeID: "n1", Hostname: "cp-1", Addresses: []string{"10.0.0.1"}, ControlPlanePort: 6443},
+		talostest.Member{NodeID: "n3", Hostname: "w-2", Addresses: []string{"10.0.0.3", "10.0.0.4", "10.0.0.5"}},
+	)
+	start := time.Now()
+	got, err := c.discover(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(start); took > 2*memberTimeout {
+		t.Errorf("discovery took %v for members with a %v timeout and one member with three silent addresses", took, memberTimeout)
+	}
+	if m := got.Members[1]; m.Answered || m.Address != "10.0.0.3" {
+		t.Errorf("the silent member: %+v", m)
+	}
+}
