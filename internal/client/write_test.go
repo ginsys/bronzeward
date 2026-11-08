@@ -29,8 +29,10 @@ type fake struct {
 	recovery func(n int) string // the epoch the nth GET /recovery shows; nil: epoch
 	post     func(n int, w http.ResponseWriter, r *http.Request)
 	server   string // GET /server's answer; "" for the default
-	seen     []*http.Request
-	posts    int
+	// pathEpoch names the epoch a path's answers show, in place of epoch.
+	pathEpoch map[string]string
+	seen      []*http.Request
+	posts     int
 	// beforeEntry refuses GET /server as a recovery start does before its entry.
 	beforeEntry bool
 	// entered, once a POST arrived, makes GET /server answer as a recovery start that took its entry:
@@ -47,6 +49,9 @@ func (f *fake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	committed := f.entered != "" && f.posts > 0
 	if committed && r.URL.Path == "/api/v1/server" {
 		epoch = f.entered
+	}
+	if e, ok := f.pathEpoch[r.URL.Path]; ok {
+		epoch = e
 	}
 	if r.Method == http.MethodGet && r.URL.Path == "/api/v1/recovery" {
 		n = len(slices.DeleteFunc(slices.Clone(f.seen), func(q *http.Request) bool { return q.URL.Path != "/api/v1/recovery" }))
@@ -541,6 +546,47 @@ func TestFirstSendEpoch(t *testing.T) {
 	if got := f.requests(); !slices.Equal(got, []string{"GET /api/v1/server", "POST /api/v1/clusters"}) {
 		t.Errorf("requests %v", got)
 	}
+}
+
+// TestReadsFromCountsMoves: a send bound with ReadsFrom is refused when its preflight showed another
+// epoch and then the first one again, which the two epochs alone cannot show (§8.5, §8.6 item 3). A
+// move that came before the reads built the request is not a change after it, and a plain Reads
+// keeps judging the epochs only.
+func TestReadsFromCountsMoves(t *testing.T) {
+	const first, other = "ep_BWSYNTH-1", "ep_BWSYNTH-2"
+	t.Run("moved and back in the preflight", func(t *testing.T) {
+		// The identity read shows other and the GET /server after it first again.
+		f := &fake{epoch: first, pathEpoch: map[string]string{"/api/v1/identity": other}, post: func(_ int, w http.ResponseWriter, _ *http.Request) { created(w) }}
+		c, _, _ := writeClient(t, f, first)
+		w := clusterWrite()
+		w.ReadsFrom(c)
+		_, err := c.Send(w)
+		if err == nil || !strings.Contains(err.Error(), "the epoch changed after the request was built from reads of 'ep_BWSYNTH-1', though the last read shows 'ep_BWSYNTH-1' as at those reads") ||
+			!strings.Contains(err.Error(), "Nothing was sent") || len(f.postsSeen()) != 0 {
+			t.Errorf("err %v, requests %v; want a refusal and no POST", err, f.requests())
+		}
+	})
+	t.Run("plain Reads sees only the epochs", func(t *testing.T) {
+		f := &fake{epoch: first, pathEpoch: map[string]string{"/api/v1/identity": other}, post: func(_ int, w http.ResponseWriter, _ *http.Request) { created(w) }}
+		c, _, _ := writeClient(t, f, first)
+		w := clusterWrite()
+		w.Reads = first
+		if _, err := c.Send(w); err != nil || len(f.postsSeen()) != 1 {
+			t.Errorf("err %v, requests %v; want one POST", err, f.requests())
+		}
+	})
+	t.Run("a move before the reads is not a change after them", func(t *testing.T) {
+		f := &fake{epoch: other, post: func(_ int, w http.ResponseWriter, _ *http.Request) { created(w) }}
+		c, _, _ := writeClient(t, f, first)
+		if _, _, err := c.Server(); err != nil || c.EpochMoves() != 1 {
+			t.Fatalf("server read: err %v, moves %d; want the one move from %s to %s", err, c.EpochMoves(), first, other)
+		}
+		w := clusterWrite()
+		w.ReadsFrom(c)
+		if _, err := c.Send(w); err != nil || len(f.postsSeen()) != 1 {
+			t.Errorf("err %v, requests %v; want one POST", err, f.requests())
+		}
+	})
 }
 
 // TestRepeatRefusals: a T10 repeat under another principal sends no write and nothing after the

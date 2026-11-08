@@ -288,7 +288,8 @@ func (e *env) recoveryScopeAccount(args []string) error {
 		body, _ := json.Marshal(apitypes.ScopeAccountingRequest{Scopes: []apitypes.ScopeSettle{{Machine: machine, Start: start, End: end}}, Facts: factsOf(explanation)})
 		// The decision is sent only under the epoch of the reads the operator saw (§8.5): Send refuses
 		// a first send once its own preflight read shows another.
-		w.Body, w.Reads = body, c.Context.LastEpoch
+		w.Body = body
+		w.ReadsFrom(c)
 		return e.confirmTyped("the machine ID", machine)
 	}
 	err = e.writeAfter(prep, w, func(c *client.Client, resp *client.Response) ([]string, error) {
@@ -392,7 +393,8 @@ func (e *env) recoveryAccount(args []string) error {
 		tf(e.err, accountRisk+"\n", "no copy of the request this attempt sent, whose response was lost,")
 		body, _ := json.Marshal(apitypes.AccountingRequest{Start: start, End: end, Facts: factsOf(explanation)})
 		// Sent only under the epoch of the reads the operator saw (§8.5), as for the scope accounting.
-		w.Body, w.Reads = body, c.Context.LastEpoch
+		w.Body = body
+		w.ReadsFrom(c)
 		w.Read = newestEntry(machine)
 		return e.confirmTyped("the machine ID", machine)
 	}

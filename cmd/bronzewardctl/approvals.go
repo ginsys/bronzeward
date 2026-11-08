@@ -84,7 +84,7 @@ func (e *env) approve(args []string) error {
 		}
 		// The approval is sent only under the epoch the operator saw (§8.5): Send refuses a first send
 		// once its own preflight read shows another.
-		w.Reads = c.Context.LastEpoch
+		w.ReadsFrom(c)
 		return e.confirmTyped("the plan ID", p.Id)
 	}
 	return e.writeAfter(confirm, w, func(_ *client.Client, r *client.Response) ([]string, error) {

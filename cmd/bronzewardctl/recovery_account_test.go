@@ -79,13 +79,13 @@ func TestAccountRefusals(t *testing.T) {
 		{"explanation too long", "at most 1024 bytes", append(slices.Clone(scopeArgs), "--explanation", strings.Repeat("x", 1025))},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			recoveryPosted = nil
+			resetPosted()
 			seen := recoveryServer(t, accAnswers(accScopeAnswer), accScopeAnswer)
 			code, out, errb := account(t, "mch_a\n", c.args...)
 			if code != 2 || out != "" || !strings.Contains(errb, c.want) || !strings.Contains(errb, "nothing was sent") {
 				t.Errorf("exit %d, stdout %q, stderr:\n%s\nwant exit 2, nothing on stdout, %q and \"nothing was sent\"", code, out, errb, c.want)
 			}
-			if slices.Contains(seen(), accScope) || slices.Contains(seen(), accAttempt) || len(recoveryPosted) != 0 {
+			if slices.Contains(seen(), accScope) || slices.Contains(seen(), accAttempt) || len(posted()) != 0 {
 				t.Errorf("a POST was sent: %v", seen())
 			}
 		})
@@ -102,7 +102,7 @@ func TestAccountTyped(t *testing.T) {
 		post  string
 	}{{"scope-account", scopeArgs, accScope, accScopeAnswer}, {"account", attemptArgs, accAttempt, accAttemptAnswer}} {
 		t.Run(c.name, func(t *testing.T) {
-			recoveryPosted = nil
+			resetPosted()
 			seen := recoveryServer(t, accAnswers(c.post), c.post)
 			code, _, errb := account(t, "", append(slices.Clone(c.args), "--no-input")...)
 			if code != 2 || slices.Contains(seen(), c.route) {
@@ -146,15 +146,15 @@ func TestAccountRequestAndAnswer(t *testing.T) {
 			[]string{"Recorded. Attempt att_1 of operation op_1 is accounted for by decision.", "changes no state", "Settle floor 30s, counted from 2026-11-01T08:50:00Z.", "Next: operation show 'op_1'."}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			recoveryPosted = nil
+			resetPosted()
 			recoveryServer(t, accAnswers(c.post), c.post)
 			code, out, errb := account(t, "mch_a\n", c.args...)
-			if code != 0 || len(recoveryPosted) != 1 {
-				t.Fatalf("exit %d, %d POSTs\n%s", code, len(recoveryPosted), errb)
+			if code != 0 || len(posted()) != 1 {
+				t.Fatalf("exit %d, %d POSTs\n%s", code, len(posted()), errb)
 			}
 			var got, want map[string]any
-			if err := json.Unmarshal([]byte(recoveryPosted[0]), &got); err != nil || json.Unmarshal([]byte(c.body), &want) != nil || !reflect.DeepEqual(got, want) {
-				t.Errorf("body %s; want %s", recoveryPosted[0], c.body)
+			if err := json.Unmarshal([]byte(posted()[0]), &got); err != nil || json.Unmarshal([]byte(c.body), &want) != nil || !reflect.DeepEqual(got, want) {
+				t.Errorf("body %s; want %s", posted()[0], c.body)
 			}
 			flat := strings.Join(strings.Fields(out), " ")
 			for _, s := range c.shows {
@@ -184,7 +184,7 @@ func TestAccountSettleCauses(t *testing.T) {
 			if strings.Contains(c.next, "takeover") && args[1] == "scope-account" {
 				continue
 			}
-			recoveryPosted = nil
+			resetPosted()
 			recoveryServer(t, accAnswers(conflict(c.detail)), "")
 			code, out, errb := account(t, "mch_a\n", args...)
 			if code != 1 || out != "" || !strings.Contains(errb, c.detail) || !strings.Contains(errb, c.next) {
@@ -222,19 +222,46 @@ func TestAccountEpochChange(t *testing.T) {
 		{"account and back", accAttempt, accAttemptAnswer, "/api/v1/machines/mch_a/observations", "ep_BWSYNTH-1", "though the last read shows 'ep_BWSYNTH-1' as at the first", attemptArgs},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			recoveryPosted = nil
+			resetPosted()
 			setServerFacts(t, 3, map[string]string{c.moves: "ep_BWSYNTH-2"})
 			recoveryRefreshEpoch = c.refresh
 			seen := recoveryServer(t, accAnswers(c.post), c.post)
 			code, out, errb := account(t, "mch_a\n", c.args...)
-			if code == 0 || out != "" || len(recoveryPosted) != 0 || slices.Contains(seen(), c.route) {
-				t.Errorf("exit %d, stdout %q, %d POSTs; want a refusal and no POST\n%s", code, out, len(recoveryPosted), errb)
+			if code == 0 || out != "" || len(posted()) != 0 || slices.Contains(seen(), c.route) {
+				t.Errorf("exit %d, stdout %q, %d POSTs; want a refusal and no POST\n%s", code, out, len(posted()), errb)
 			}
 			want := "the epoch changed from 'ep_BWSYNTH-1' to 'ep_BWSYNTH-2'"
 			if c.refresh != "" {
 				want = "the epoch changed while the window was read"
 			}
 			if !strings.Contains(errb, want) || !strings.Contains(errb, c.said) || !strings.Contains(strings.ToLower(errb), "nothing was sent") {
+				t.Errorf("the epoch change is not named, or the refusal does not say nothing was sent:\n%s", errb)
+			}
+		})
+	}
+}
+
+// TestAccountPreflightEpochBack: the preflight reads of Send (the identity, then GET /server) show
+// ep_BWSYNTH-2 and then ep_BWSYNTH-1 again. The last epoch equals the epoch of the reads, so only the
+// count of moves shows that the epoch changed in between (§8.5, §8.6 item 3). Nothing is sent.
+func TestAccountPreflightEpochBack(t *testing.T) {
+	for _, c := range []struct {
+		name, route, post string
+		args              []string
+	}{
+		{"scope-account", accScope, accScopeAnswer, scopeArgs},
+		{"account", accAttempt, accAttemptAnswer, attemptArgs},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			resetPosted()
+			setServerFacts(t, 3, map[string]string{"/api/v1/identity": "ep_BWSYNTH-2"})
+			recoveryRefreshEpoch = "ep_BWSYNTH-1"
+			seen := recoveryServer(t, accAnswers(c.post), c.post)
+			code, out, errb := account(t, "mch_a\n", c.args...)
+			if code == 0 || out != "" || len(posted()) != 0 || slices.Contains(seen(), c.route) {
+				t.Errorf("exit %d, stdout %q, %d POSTs; want a refusal and no POST\n%s", code, out, len(posted()), errb)
+			}
+			if !strings.Contains(errb, "the epoch changed after the request was built from reads of 'ep_BWSYNTH-1', though the last read shows 'ep_BWSYNTH-1' as at those reads") || !strings.Contains(strings.ToLower(errb), "nothing was sent") {
 				t.Errorf("the epoch change is not named, or the refusal does not say nothing was sent:\n%s", errb)
 			}
 		})
@@ -250,7 +277,7 @@ func TestAccountSettleFactsEpoch(t *testing.T) {
 		args       []string
 	}{{"scope-account", accScopeAnswer, scopeArgs}, {"account", accAttemptAnswer, attemptArgs}} {
 		t.Run(c.name, func(t *testing.T) {
-			recoveryPosted = nil
+			resetPosted()
 			a := accAnswers(c.post)
 			a["GET /api/v1/machines/mch_a/timeline?order=newest"] = strings.ReplaceAll(a["GET /api/v1/machines/mch_a/timeline?order=newest"], `"epoch":"ep_BWSYNTH-1"`, `"epoch":"ep_BWSYNTH-0"`)
 			recoveryServer(t, a, c.post)
