@@ -183,7 +183,7 @@ func TestRecovery(t *testing.T) {
 	in.set(nil, nil)
 	f.want(ctl("", freeze...), 0, "Frozen. No new commitment or attempt for this machine until an approver unfreezes it.")
 	acts := f.actCount()
-	process := []string{"Recovery mode: the server was started for recovery: it refuses plan creation and approval",
+	process := []string{"Recovery mode: the server was started for recovery: it refuses plan creation, approval and unfreeze",
 		"Why: a server started for recovery refuses unfreezing, plan creation and approval, even after its recovery entry.",
 		"Next: restart the server without the recovery flag. Recovery mode continues. Then repeat this command."}
 	f.want(ctl("", unfreeze...), 1, append([]string{"409"}, process...)...)
