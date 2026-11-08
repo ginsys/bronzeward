@@ -1944,6 +1944,15 @@ describe("a plain !bwref value that goes on to the next line", () => {
       bounded(60000, (n) => `${head}  bar${rep(" ", n)}\n`);
     });
 
+    // A flow line of verbatim tags with no closing `>` (ginsys/bronzeward#744): the search for the `>` must
+    // not read the rest of the line again for each tag. The line has no plain scalar, so no other search
+    // on it grows with its length. Each tag follows a quoted string of 300 characters. The scan reads
+    // that string at a low cost per character, while the search for the `>` is cheaper still, so the
+    // ratio of the old code rises above the limit at 16,000 tags.
+    test("a flow line of 16,000 verbatim tags with no closing > is scanned in near linear time", () => {
+      bounded(16000, (n) => `[${lines(n, (i) => `${i ? ", " : ""}"${"a".repeat(300)}", !<`)}]\n`);
+    });
+
     // The search for the parent line of a tag runs a binary search over the stack of open lines, and the stack
     // is as deep as the indentation rises: 1,000 keys, each one column deeper than the one above. The draft
     // holds about n squared characters of indentation, so the time per character is what the check compares.
