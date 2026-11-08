@@ -61,7 +61,11 @@ func (h *headerlessRestore) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.mu.Unlock()
 	switch {
 	case path == "/operations/"+h.op+"/events" && r.Header.Get("Accept") == "text/event-stream":
-		w.Header().Set("Bronzeward-Epoch", restoreE1)
+		epoch := restoreE1
+		if restored {
+			epoch = restoreE2 // a watch that goes on after the restore sees only the new epoch
+		}
+		w.Header().Set("Bronzeward-Epoch", epoch)
 		w.Header().Set("Content-Type", "text/event-stream") // a stream that ends with no event
 	case path == "/operations/"+h.op+"/events":
 		h.mu.Lock()

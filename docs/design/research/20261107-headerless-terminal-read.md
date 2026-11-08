@@ -1,6 +1,6 @@
 # A terminal operation read with no epoch header, then pages of another epoch
 
-Date: 7 November 2026. Issue: ginsys/bronzeward#695. Status: investigation draft. The client test ran twice with `-race`, and the finding reproduces on the second run. The two command tests print the stale success. A third run with `-race` ran all three tests together, and all three failed (section 3). The tests land with a `t.Skip` on their first line, so the shas in section 3 are those of the files as they ran, without the skip.
+Date: 7 November 2026. Issue: ginsys/bronzeward#695. Status: investigation draft. The client test ran twice with `-race`, and the finding reproduces on the second run. The two command tests print the stale success. A third run with `-race` ran all three tests together, and all three failed (section 3). The tests land with a `t.Skip` on their first line, so the shas in section 3 are those of the files as they ran, without the skip. One later change touches `headerless_watch_test.go`: after the pages, the fake stream also answers in the new epoch, as the rest of the fake does. A run without `-race`, with the skips removed through a build overlay (stamp w695-c2), printed the same two failures.
 
 Pinned version: main at commit 877013a2. The reading and the run use that commit with no change to tracked files. The reading began at commit 0b3a42da. No file under `internal/client` or `cmd/bronzewardctl` differs between the two commits. The same holds for `internal/api/api.go`, `docs/spec/client-contracts.md`, `go.mod` and `go.sum`. So the line numbers below hold at 877013a2.
 
@@ -16,7 +16,7 @@ Out of scope: a fix. Any remediation is a separate issue.
 - `EpochHolds` compares the count of epoch moves, not the epoch, so it also judges a headerless read (`watch.go:89-96`). The count rises in `observe` when an answer shows another epoch (`client.go:334-341`).
 - After a terminal read the watch drains the pages (`watch.go:177`). The clean branch is `epoch == "" || held && (...)` (`watch.go:201-203`). With `epoch == ""` it returns the read at once. The value `held` is not read, although it is false when the pages show another epoch.
 - `publish` and `import` call `Watch` and use `o.State` with no count check (`cmd/bronzewardctl/publish.go:67`, `cmd/bronzewardctl/imports.go:387`). `operation watch` calls `WatchBody` and checks `EpochHolds` (`cmd/bronzewardctl/opwatch.go:358`).
-- A real server sets the header on every authenticated answer (`internal/api/api.go:331-332`). The shape needs a server or proxy that breaks section 8.5. This is the premise for the severity of the finding. It does not dismiss the finding, because section 8.6 item 2 tells the client to judge such a read by the count.
+- A real server sets the header on every authenticated success (`internal/api/api.go:331-332`). An authenticated request can still get a 503 with no header, when the database read at `internal/api/api.go:279-283` fails. That answer is an error, not a terminal operation read. The shape needs a server or proxy that breaks section 8.5. This is the premise for the severity of the finding. It does not dismiss the finding, because section 8.6 item 2 tells the client to judge such a read by the count.
 
 ## 3. Reproduction
 
