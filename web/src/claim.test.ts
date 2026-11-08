@@ -106,12 +106,40 @@ describe("the review is closed and superseded reads are dropped (local review of
 });
 
 describe("an idle paused page and a late review read (Copilot threads on web/src/claim.tsx)", () => {
-  test("only a paused claim before its review time ends is watched for its expiry", () => {
+  test("a paused claim before its review time ends is watched for its expiry", () => {
     const paused = ing({ state: "paused" });
     expect(watchesExpiry(paused, NOW)).toBe(true);
     expect(watchesExpiry(paused, Date.parse("2026-11-01T07:38:00Z"))).toBe(true);
     expect(watchesExpiry(paused, Date.parse("2026-11-01T07:38:01Z"))).toBe(false);
-    for (const state of ["held", "resumed", "released", "abandoned", "something-new"]) expect(watchesExpiry(ing({ state }), NOW)).toBe(false);
+  });
+  test("a claim that is no longer live is not watched, nor is a state this page does not know", () => {
+    for (const state of ["released", "abandoned", "something-new"]) expect(watchesExpiry(ing({ state }), NOW)).toBe(false);
+  });
+  // ginsys/bronzeward#724: an interrupted continuation or takeover ends the progress watch and the lease
+  // refresh while the claim is still held or resumed, and the API treats it as abandoned at expiresAt.
+  describe.each(["held", "resumed"])("a %s claim is watched for its expiry", (state) => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(NOW);
+    });
+    afterEach(() => vi.useRealTimers());
+    test("it is watched before its end, up to the end itself, and not after", () => {
+      const b = ing({ state });
+      expect(watchesExpiry(b, NOW)).toBe(true);
+      expect(watchesExpiry(b, Date.parse(b.expiresAt))).toBe(true);
+      expect(watchesExpiry(b, Date.parse(b.expiresAt) + 1)).toBe(false);
+    });
+    test("the page reads the import again once, on the first tick after its expiry", () => {
+      const b = ing({ state });
+      const again = vi.fn();
+      if (watchesExpiry(b, Date.now())) watchExpiry(b.expiresAt, again);
+      vi.advanceTimersByTime(37 * 60_000);
+      expect(again).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(60_000 + EXPIRY_TICK);
+      expect(again).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(10 * 60_000);
+      expect(again).toHaveBeenCalledTimes(1);
+    });
   });
   describe("the expiry check follows the clock", () => {
     beforeEach(() => {

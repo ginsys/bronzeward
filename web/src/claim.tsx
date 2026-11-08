@@ -83,12 +83,14 @@ function ClaimAction({ id, verb, offered, again, sent }: { id: string; verb: Ver
   return <ClaimView verb={verb} offered={offered} w={w} send={() => { sent(verb); send(claimSpec(id, verb)); }} />;
 }
 
-// The page reads a paused ingestion again once its review time has ended. The progress watch stops at
-// the pause and has no timer for it, so nothing else would show the expiry on an idle page. The check
-// is a short interval against the clock, not one timeout for the whole wait: it follows a clock
-// change and has no cap on the wait. Only a paused claim before its end runs one.
+// The page reads an ingestion again once its expiry has passed. The progress watch stops at a pause, and
+// ends with an interrupted continuation or takeover that leaves the claim held or resumed, so nothing
+// else would show the expiry on an idle page. The check is a short interval against the clock, not one
+// timeout for the whole wait: it follows a clock change and has no cap on the wait. Only a live claim
+// (paused, held or resumed) before its end runs one.
 export const EXPIRY_TICK = 5000;
-export const watchesExpiry = (b: Pick<Ingestion, "state" | "expiresAt">, now: number): boolean => b.state === "paused" && now <= Date.parse(b.expiresAt);
+export const watchesExpiry = (b: Pick<Ingestion, "state" | "expiresAt">, now: number): boolean =>
+  (b.state === "paused" || b.state === "held" || b.state === "resumed") && now <= Date.parse(b.expiresAt);
 export function watchExpiry(expiresAt: string, again: () => void): () => void {
   const end = Date.parse(expiresAt);
   const t = setInterval(() => {
