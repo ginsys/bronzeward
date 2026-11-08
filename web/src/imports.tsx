@@ -210,7 +210,7 @@ export function onEvent(s: RunState, type: string, data: unknown): RunState {
 // A lapsed lease decides only once `caught` says the operation's newest event was shown, because the
 // events not yet shown can hold the run's outcome (the CLI's Until, imports.go).
 export const lapsedRead = (read: { b: Ingestion; at: number }, now: number) =>
-  read.b.state !== "abandoned" && read.at > Date.parse(read.b.leaseUntil) + LEASE_MARGIN && lapsed(read.b, now);
+  read.b.state !== "abandoned" && read.at >= Date.parse(read.b.leaseUntil) + LEASE_MARGIN && lapsed(read.b, now);
 export const stopsWatch = (settled: RunState["settled"], read: { b: Ingestion; at: number }, now: number, abandonedAt?: number, caught = false) =>
   read.b.state === "abandoned"
     ? abandonedAt !== undefined && now - abandonedAt >= ABANDONED_SETTLE
@@ -233,19 +233,22 @@ export function caughtUp(shown: Seen | undefined, claimEpoch: string | undefined
 // revocation) and a transport failure its offline banner, and nothing is rendered once the watch left.
 // `undropped` is taken per read: the shell can invalidate reads in flight between two of them.
 export function settledReads(client: Pick<Client, "read" | "readWithEpoch" | "open" | "writesEnded">, reads: Pick<Reads, "settle" | "undropped">, live: () => boolean): Pick<Client, "read" | "readWithEpoch" | "open" | "writesEnded"> {
-  const settle = <T,>(res: ReadResult<T>, ok: () => boolean) => void reads.settle(res, () => {}, () => live() && ok(), () => true);
+  // The answer is settled, and handed on only while it is still current: one the shell invalidated, or
+  // read after the watch left, is discarded and never reaches the watch.
+  const settle = <T,>(res: ReadResult<T>, ok: () => boolean): ReadResult<T> => {
+    const current = () => live() && ok();
+    reads.settle(res, () => {}, current, () => true);
+    return current() ? res : { kind: "discarded" };
+  };
   return {
     read: async <T,>(path: string) => {
       const ok = reads.undropped();
-      const res = await client.read<T>(path);
-      settle(res, ok);
-      return res;
+      return settle(await client.read<T>(path), ok);
     },
     readWithEpoch: async <T,>(path: string) => {
       const ok = reads.undropped();
       const got = await client.readWithEpoch<T>(path);
-      settle(got.result, ok);
-      return got;
+      return { ...got, result: settle(got.result, ok) };
     },
     open: (path, headers, signal) => client.open(path, headers, signal),
     get writesEnded() { return client.writesEnded; },
@@ -271,6 +274,7 @@ export function followRun(o: FollowOptions): { w: Watch; settled: () => RunState
   const check = async () => {
     busy = true;
     const mine = epoch;
+    const began = o.now();
     try {
       const claim = await o.client.readWithEpoch<Ingestion>(`/ingestions/${enc(o.ingestion)}`);
       const operation = await o.client.readWithEpoch<Operation>(`/operations/${enc(o.op)}`);
@@ -280,7 +284,8 @@ export function followRun(o: FollowOptions): { w: Watch; settled: () => RunState
       const v = caughtUp(shown, claim.epoch, operation.epoch, last);
       if (v === "reset") return;
       behind = last;
-      caught = v;
+      // The claim read now decides, as in the CLI: a lease renewed since the page's read keeps the watch.
+      caught = v && lapsedRead({ b: claim.result.data, at: began }, o.now());
     } finally {
       busy = false;
     }
@@ -486,14 +491,15 @@ export function sendStart(send: (spec: WriteSpec) => void, clear: () => void, i:
     settled: (out, w) => {
       const a = out.kind === "done" ? (out.data as { ingestion?: string } | null) : null;
       if (typeof a?.ingestion === "string") started.set(a.ingestion, { draft, epoch: w.epoch });
-      if (out.kind === "refused" && out.status === 412) refusedTags.set(draft, ifMatch);
+      if (out.kind === "refused" && out.status === 412) refusedTags.set(draft, { tag: ifMatch, epoch: w.epoch });
     },
   });
 }
 // The ETag of each draft whose start the server refused with a 412 (ginsys/bronzeward#644 item H):
 // sending the same ETag again is refused again, so nothing is sent until the draft's page, which the
-// 412 links to, has read the draft and kept another. In this page's memory only.
-const refusedTags = new Map<string, string>();
+// 412 links to, has read the draft and kept another. The refusal holds under the epoch of its write only,
+// as a kept ETag does (§8.5). In this page's memory only.
+const refusedTags = new Map<string, { tag: string; epoch: string | undefined }>();
 export const forgetRefused = (draft: string) => void refusedTags.delete(draft);
 export const REVIEW_FIRST = "Not sent: the draft changed since this ETag was read. Review the draft first; its page reads the ETag again.";
 // What a refused start offers: the draft the 412 is about, to read before starting again.
@@ -515,7 +521,8 @@ export async function startETag(read: (path: string) => Promise<Load<Draft> | un
   const epoch = current();
   const kept = keptETag(draft, epoch);
   if (kept !== undefined) {
-    if (refusedTags.get(draft) === kept) return REVIEW_FIRST;
+    const refused = refusedTags.get(draft);
+    if (refused?.tag === kept && refused.epoch === epoch) return REVIEW_FIRST;
     forgetRefused(draft);
     send(kept);
     return undefined;
