@@ -267,19 +267,28 @@ export interface FollowOptions {
 // starts one check: the claim and the operation are read again, and the lease decides only when the
 // last event number shown reaches the operation's `lastEvent` (the CLI's Until). The check's answer is
 // used at the next ask, which the watch makes after each event, keep-alive and operation read.
-export function followRun(o: FollowOptions): { w: Watch; settled: () => RunState["settled"]; state: () => RunState } {
+export type Refused = Extract<ReadResult<unknown>, { kind: "refused" }>;
+// An answer that will not change on a new try: a refusal other than 408 and 429.
+const final = (res: ReadResult<unknown>): res is Refused => res.kind === "refused" && res.status !== 408 && res.status !== 429;
+export function followRun(o: FollowOptions): { w: Watch; settled: () => RunState["settled"]; state: () => RunState; failure: () => Refused | undefined } {
   let run = startRun(o.generation);
   let shown: Seen | undefined;
   let caught = false, busy = false, behind: number | undefined, epoch = 0;
+  let failure: Refused | undefined;
   const check = async () => {
     busy = true;
     const mine = epoch;
     const began = o.now();
+    // A clear since the check began took back the events it compared with; a watch that left reads no more.
+    const gone = () => o.signal.aborted || mine !== epoch;
+    // A read the server refused for good ends the check and the watch, which shows the refusal. A read with
+    // no answer stays pending, as the lease refresh's own reads do until they are tried again.
+    const lost = (res: ReadResult<unknown>) => { if (!gone() && final(res)) failure = res; };
     try {
       const claim = await o.client.readWithEpoch<Ingestion>(`/ingestions/${enc(o.ingestion)}`);
+      if (gone() || claim.result.kind !== "ok") return lost(claim.result);
       const operation = await o.client.readWithEpoch<Operation>(`/operations/${enc(o.op)}`);
-      // A clear since the check began took back the events it compared with.
-      if (o.signal.aborted || mine !== epoch || claim.result.kind !== "ok" || operation.result.kind !== "ok") return;
+      if (gone() || operation.result.kind !== "ok") return lost(operation.result);
       const last = operation.result.data.lastEvent;
       const v = caughtUp(shown, claim.epoch, operation.epoch, last);
       if (v === "reset") return;
@@ -297,12 +306,13 @@ export function followRun(o: FollowOptions): { w: Watch; settled: () => RunState
   return {
     settled: () => run.settled,
     state: () => run,
+    failure: () => failure,
     w: {
       show: (e) => { shown = seenOf(e.id); run = onEvent(run, e.type, e.data); o.view({ type: "show", line: eventLine(e) }); },
       clear: (why) => { run = startRun(o.generation); shown = undefined; caught = false; behind = undefined; epoch++; o.view({ type: "clear", why }); },
       until: () => {
         const read = o.latest();
-        return stopsWatch(run.settled, read, o.now(), o.abandonedAt(), run.settled === undefined && lapsedRead(read, o.now()) && ask());
+        return failure !== undefined || stopsWatch(run.settled, read, o.now(), o.abandonedAt(), run.settled === undefined && lapsedRead(read, o.now()) && ask());
       },
       signal: o.signal,
     },
@@ -337,6 +347,15 @@ export function stampRead(s: ReadStamp, b: Ingestion | undefined, keys: readonly
   const same = keys.length === s.keys.length && keys.every((k, i) => k === s.keys[i]);
   return { keys, began: same ? s.began : now, read };
 }
+
+// When the page reads the ingestion again for its lease: at the lease plus the margin, or at once when
+// that has passed and the read shown began before it. Such a read cannot stop the watch (item C), and
+// nothing else would read again, so the watch of a run that stopped without an event would stay pending.
+// A read begun at or after the deadline decides on its own. Undefined where the run is not running.
+export const refreshWait = (b: Ingestion, at: number, now: number): number | undefined => {
+  const due = Date.parse(b.leaseUntil) + LEASE_MARGIN;
+  return !running(b) ? undefined : due > now ? due - now : at < due ? 0 : undefined;
+};
 
 // A refresh of the ingestion that found no answer is tried again, 1 s apart doubling to 30 s, and at
 // most 5 tries in all (client contracts §8.2, the reads' retry rule), so a lapsed lease is not
@@ -394,8 +413,8 @@ function Progress({ b, readAt, again }: { b: Ingestion; readAt: number; again: (
   const shown = useRef(failure);
   shown.current = failure;
   useEffect(() => {
-    const wait = Date.parse(b.leaseUntil) + LEASE_MARGIN - Date.now();
-    if (!running(b) || wait <= 0) return;
+    const wait = refreshWait(b, latest.current.at, Date.now());
+    if (wait === undefined) return;
     const t = setTimeout(again, wait);
     return () => clearTimeout(t);
   }, [b, again]);
@@ -416,7 +435,9 @@ function Progress({ b, readAt, again }: { b: Ingestion; readAt: number; again: (
       if (r.kind === "stopped" || abort.signal.aborted) return;
       // The ETag is kept under the epoch of the operation read the watch ended on, not under the client's
       // epoch now, which another response can have moved since (§8.5).
-      const text = r.kind === "failed" ? shown.current(r.res) : await ended(reading, latest.current.b, r.operation, run.state().settled ?? "", Date.now(), r.epoch, run.state());
+      // A catch-up read refused for good ends the watch with that refusal, unless the run had settled.
+      const lost = run.state().settled === undefined ? run.failure() : undefined;
+      const text = r.kind === "failed" ? shown.current(r.res) : lost !== undefined ? shown.current(lost) : await ended(reading, latest.current.b, r.operation, run.state().settled ?? "", Date.now(), r.epoch, run.state());
       if (!abort.signal.aborted) {
         show({ type: "end", text });
         again();
@@ -491,7 +512,8 @@ export function sendStart(send: (spec: WriteSpec) => void, clear: () => void, i:
     settled: (out, w) => {
       const a = out.kind === "done" ? (out.data as { ingestion?: string } | null) : null;
       if (typeof a?.ingestion === "string") started.set(a.ingestion, { draft, epoch: w.epoch });
-      if (out.kind === "refused" && out.status === 412) refusedTags.set(draft, { tag: ifMatch, epoch: w.epoch });
+      // A write set aside by an epoch change settles late: its refusal counts only while its tag is still the kept one.
+      if (out.kind === "refused" && out.status === 412 && keptETag(draft, w.epoch) === ifMatch) refusedTags.set(draft, { tag: ifMatch, epoch: w.epoch });
     },
   });
 }
