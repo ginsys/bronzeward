@@ -918,7 +918,9 @@ For each machine:
    base reference and invalidates the configuration is refused as an override.
 8. **Validate** the complete materialized configuration with the pinned renderer
    in the node's platform mode, the one its machine records (persistence-api
-   §3, choice §17.32 there) (§7 stage 3).
+   §3, choice §17.32 there) (§7 stage 3). Validation runs in the target's mode with
+   the local checks and is not strict. A warning of the machinery, such as a
+   deprecation the node still accepts, does not refuse a publication.
 
 The compiler's only transformations of native YAML are step 4's replacement of
 tagged nodes and re-serialization of identified embedded documents. Everything
@@ -971,7 +973,7 @@ directive, without a merge engine
 ([SP §6.1](../design/research/20260925-sensitivity-provenance.md#61-criterion-1-sensitivity-through-each-transformation)).
 The cost is one extra composition per boolean and per fragment prefix (SP §9).
 
-The implementation settles seven points SP left open:
+The implementation settles eight points SP left open:
 
 - **Canonical base64.** The machinery decodes the byte fields it holds as
   base64, such as `cluster.ca.key`, and writes them again in canonical
@@ -1019,6 +1021,25 @@ The implementation settles seven points SP left open:
   the one that overrode it; SP left that outcome unknown, which §8.2's
   "exactly one" outcome does not allow. The prefixes are not validated: a
   prefix may be legitimately incomplete.
+- **Schema secrets restored for validation.** The machinery at v1.14.5 checks
+  the content of a secret field, so a stand-in where a PEM block or a key
+  stands is invalid, and a generated control-plane base failed the trace pass
+  while it passed the real one. Validation therefore runs on a restored copy of
+  the trace pass and of each flip pass, in which the real value is put back, in
+  memory only, into every leaf that holds a schema secret (a field the
+  machinery's redaction changes, §6). A leaf the operator marked keeps its
+  stand-in, so a marked leaf whose stand-in the machinery rejects is still
+  refused as a fidelity failure. Only validation uses the restored copies.
+  Attribution, the tree-shape comparison and the prefixes read the stand-in
+  passes, as before. A restored pass that fails validation gives the bare
+  fidelity refusal. The first restored pass also supplies the template for the
+  machinery's validation messages, and those go through the message redaction
+  of §8.3 like the real composition's, so no text from a restored pass leaves
+  unredacted. The exposure does not grow: the real composition already holds the
+  same values in memory. Rejected: validating the real composition only, which
+  drops the control that one pass must not validate where the other does not;
+  and keeping the stand-ins, which refuses every base that holds a PEM block or
+  a key.
 
 The trace and flip compositions carry each value's length and character
 classes, so they are handled like the real composition: never persisted, logged
@@ -1027,7 +1048,7 @@ or shown.
 **Fidelity fails closed.** Publication is refused when any resolved real
 fragment lacks its trace or flip counterpart, when the real and trace
 compositions differ in tree shape, or when one pass composes or validates and
-the other does not. SP's prototype skipped a fragment whose trace was missing,
+the other does not (a pass validates on its restored copy, above). SP's prototype skipped a fragment whose trace was missing,
 which would have shown its references unredacted while reporting the run
 complete ([SP §8](../design/research/20260925-sensitivity-provenance.md#8-limits)).
 SP's control for the fidelity check was a one-mutation smoke test that never
@@ -1347,7 +1368,10 @@ outcomes through both implementations (E3 §4.3); the choice belongs to
   v1alpha1 paths into separate documents (E3 §4.1), so marks, declarations and
   embedded identifications hold for the contract their fragment revision was
   written for. A contract change is a new fragment revision that passes stage 1
-  again; paths are never translated automatically.
+  again; paths are never translated automatically. A fragment that sets a
+  v1alpha1 field that a v1.14 document in the composition now owns is refused
+  by validation, and so is a v1alpha1 document that holds a WireGuard
+  interface the v1.14 schema no longer loads.
 
 Publication establishes the running minor using a fresh read-only executor
 observation for every covered machine, before resolving compiler inputs. The
@@ -1751,7 +1775,11 @@ acceptance.
 - **Tracer limits no case reached**: a string line under five bytes carries no
   id, an integer stand-in can equal a literal integer, and a validation rule can
   judge a stand-in differently from its value (SP §8); the last is refused under
-  §8.1. A short stand-in that equals an unchanged literal is refused as a
+  §8.1, and since v1.14.5 checks the content of a PEM block or a key it
+  is met for every schema secret, which §8.1 settles by restoring those values
+  in the validation passes. A marked leaf outside the schema secrets still keeps
+  its stand-in there, so a rule that judges that stand-in differently still
+  blocks the publication. A short stand-in that equals an unchanged literal is refused as a
   fidelity failure (§8.1), so a short value can block a publication that would
   otherwise be correct; no case measured how often.
 - **Embedded formatting**: an author's formatting is not preserved (§5.4).

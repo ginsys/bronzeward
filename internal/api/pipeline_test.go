@@ -106,7 +106,7 @@ func TestSnapshotComposition(t *testing.T) {
 	if !reflect.DeepEqual(s.machines, want) {
 		t.Fatalf("machines %+v, want %+v", s.machines, want)
 	}
-	if s.contract != "v1.13" {
+	if s.contract != "v1.14" {
 		t.Fatalf("contract %q", s.contract)
 	}
 	if got, want := sortedHeads(s.unchanged), sortedHeads(p.unit.unchanged); !reflect.DeepEqual(got, want) {

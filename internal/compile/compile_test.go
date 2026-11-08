@@ -12,7 +12,10 @@ import (
 	"strings"
 	"testing"
 
+	coreconfig "github.com/siderolabs/talos/pkg/machinery/config"
+	"github.com/siderolabs/talos/pkg/machinery/config/config"
 	"github.com/siderolabs/talos/pkg/machinery/config/configpatcher"
+	"github.com/siderolabs/talos/pkg/machinery/config/container"
 	"github.com/siderolabs/talos/pkg/machinery/config/encoder"
 	"github.com/siderolabs/talos/pkg/machinery/config/generate"
 	"github.com/siderolabs/talos/pkg/machinery/config/generate/secrets"
@@ -34,9 +37,8 @@ func shows(rendered, s string) bool {
 		strings.Contains(rendered, strings.Trim(fmt.Sprint([]byte(s)), "[]"))
 }
 
-// generatedBase is a freshly generated controlplane configuration, as the operator would import
-// it, with the install disk talosctl gen config sets by default.
-func generatedBase(t *testing.T) []byte {
+// generatedConfig is the machinery's own controlplane configuration for a fresh cluster.
+func generatedConfig(t *testing.T) coreconfig.Provider {
 	t.Helper()
 	bundle, err := secrets.NewBundle(secrets.NewClock(), nil)
 	if err != nil {
@@ -54,7 +56,42 @@ func generatedBase(t *testing.T) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := cfg.EncodeBytes(encoder.WithComments(encoder.CommentsAll))
+	return cfg
+}
+
+// generatedStream is the whole generated controlplane stream, every document the machinery wrote.
+func generatedStream(t *testing.T) []byte {
+	t.Helper()
+	b, err := generatedConfig(t).EncodeBytes(encoder.WithComments(encoder.CommentsAll))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// generatedBase is a freshly generated controlplane configuration, as the operator would import
+// it, with the install disk talosctl gen config sets by default.
+func generatedBase(t *testing.T) []byte {
+	t.Helper()
+	cfg := generatedConfig(t)
+	// v1.14 moved the node labels, the KubePrism port, the cluster network, the Flannel settings and
+	// the host DNS resolver into documents of their own, and validation refuses a v1alpha1 field a
+	// present document owns. The fragments of these tests set those v1alpha1 fields, so the base
+	// leaves those documents out (a v1.14 operator fragment that sets such a field beside its
+	// document is refused by validation: the PR's stated limitation).
+	var keep []config.Document
+	for _, d := range cfg.Documents() {
+		switch d.Kind() {
+		case "KubeNodeConfig", "KubePrismConfig", "KubeNetworkConfig", "KubeFlannelCNIConfig", "ResolverConfig":
+		default:
+			keep = append(keep, d)
+		}
+	}
+	trimmed, err := container.New(keep...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := trimmed.EncodeBytes(encoder.WithComments(encoder.CommentsAll))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,14 +304,16 @@ func TestValidate(t *testing.T) {
 	if s := fmt.Sprintf("%#v", err); strings.Contains(s, "7a3c") {
 		t.Fatalf("the verdict renders the machinery's message: %s", s)
 	}
-	// A warning is a refusal, as talosctl validate --strict makes it.
+	// Validation is not strict: a warning, here the deprecation of machine.files (new in machinery
+	// v1.14.5), does not refuse a publication (ginsys/bronzeward#712).
 	warned, err := Compose(b, []ingest.Resolved{resolved(t,
-		"machine:\n  install:\n    extensions:\n      - image: ghcr.io/example/compile-test:1\n", ingest.Declarations{}, nil)})
+		"machine:\n  files:\n    - content: compile test file\n      permissions: 0o644\n      path: /var/etc/compile-test.conf\n      op: create\n",
+		ingest.Declarations{}, nil)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := warned.Validate(ModeMetal); !errors.As(err, &e) || e.Rule != RuleInvalid {
-		t.Fatalf("a warning: got %v, want an invalid verdict", err)
+	if err := warned.Validate(ModeMetal); err != nil {
+		t.Fatalf("a deprecation warning refused the publication: %v", err)
 	}
 	// The node's mode decides: container mode requires kube DNS forwarded to the host.
 	unforwarded, err := Compose(b, []ingest.Resolved{resolved(t,

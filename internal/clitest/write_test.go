@@ -26,7 +26,7 @@ import (
 func clusterAdd(name string, extra ...string) []string {
 	sum := sha256.Sum256([]byte(name))
 	return append([]string{"--context", "human", "cluster", "add", "--name", name, "--endpoint", "https://" + name + ".example.test:6443",
-		"--contract", "v1.13", "--talos-cluster-id", base64.URLEncoding.EncodeToString(sum[:])}, extra...)
+		"--contract", "v1.14", "--talos-cluster-id", base64.URLEncoding.EncodeToString(sum[:])}, extra...)
 }
 
 // sent records the key and the expected epoch of each write the injector received.
@@ -510,7 +510,7 @@ func TestWrites(t *testing.T) {
 	}
 	f.store(f.humanFile(), f.mint("h-all", ""), "")
 	in.set(nil, nil)
-	f.want(ctl(append([]string{"--context", "human"}, routes["POST /api/v1/clusters"]...)...), 0, "Cluster cl_", "recorded: lab-w, endpoint https://lab-w.example.test:6443, contract v1.13")
+	f.want(ctl(append([]string{"--context", "human"}, routes["POST /api/v1/clusters"]...)...), 0, "Cluster cl_", "recorded: lab-w, endpoint https://lab-w.example.test:6443, contract v1.14")
 	r := ctl(append([]string{"--context", "human", "-o", "json"}, routes["POST /api/v1/machines"]...)...)
 	var m struct{ ID, TalosEndpoint string }
 	if err := json.Unmarshal([]byte(r.out), &m); r.code != 0 || err != nil || !strings.HasPrefix(m.ID, "mch_") || m.TalosEndpoint != "10.55.0.9:50000" {

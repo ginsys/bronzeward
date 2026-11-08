@@ -50,6 +50,11 @@ func identify(docs []*yaml.Node, marks []Path) ([]*target, error) {
 		}
 		for _, sp := range pointers {
 			n, ok := resolve(docs, i, sp.pointer)
+			// A node already tagged !bwref loads as a null, which some documents still redact
+			// (the etcd encryption secret, machinery v1.14.5): it holds no secret, so it is skipped.
+			if ok && n.Tag == refTag {
+				continue
+			}
 			// The input node must be the leaf the machinery encoded, as written: a merge key,
 			// a multi-line or !!binary base64 or any other indirection would leave the secret
 			// where substitution cannot reach it.

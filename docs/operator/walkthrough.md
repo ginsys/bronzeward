@@ -151,7 +151,7 @@ the node. It needs a published release covering the machine and an assignment se
 
 ```sh
 call PUT /drafts/$draft/fragments/s3-handover "$author" \
-  "$(jq -nc '{layer: "cluster", document: "machine:\n  nodeLabels:\n    bw-s3-handover: \"yes\"\n", marks: []}')" \
+  "$(jq -nc '{layer: "cluster", document: "apiVersion: v1alpha1\nkind: KubeNodeConfig\nlabels:\n  bw-s3-handover: \"yes\"\n", marks: []}')" \
   walkthrough-fragment-handover "$etag"; etag=$(etag)
 for m in "$machine_cp" "$machine_w"; do
   call PUT /drafts/$draft/assignments/$m "$author" '{"profiles": [], "fragments": {"cluster": ["s3-handover"]}}' \
@@ -206,7 +206,7 @@ ver=$(jq -r '.provenance[] | select(.source.path == "doc[0]/machine/files/0/cont
 
 draft=$(call POST /drafts "$author" "$(jq -nc --arg c "$cluster" '{cluster: $c, title: "S2 change"}')" walkthrough-draft-s2 | jq -r .id)
 etag=$(etag)
-frv=$(call PUT /drafts/$draft/fragments/s2-labels "$author" "$(printf 'machine:\n  nodeLabels:\n    bw-s2: !bwref %s\n' "$ref" |
+frv=$(call PUT /drafts/$draft/fragments/s2-labels "$author" "$(printf 'apiVersion: v1alpha1\nkind: KubeNodeConfig\nlabels:\n  bw-s2: !bwref %s\n' "$ref" |
   jq -Rsc --arg n "$ref" --argjson v "$ver" '{layer: "role", document: ., marks: [],
     declarations: {references: {($n): {kind: "string", version: $v}}}}')" walkthrough-fragment-s2 "$etag" | jq -r .entry.revision)
 etag=$(etag)
@@ -316,7 +316,7 @@ draft=$(call POST /drafts "$author" "$(jq -nc --arg c "$cluster" '{cluster: $c, 
 etag=$(etag)
 call POST /ingestions "$author" "$(jq -nc --arg m "$machine_w" --arg d "$draft" '{kind: "drift-adoption", source: "machine",
   staging: "transient", machine: $m, draft: $d, marks: ["doc[0]/machine/files/0/content",
-  "doc[0]/machine/nodeLabels/bw-s2", "doc[0]/machine/registries/config/registry.s5.invalid/auth/password"]}')" walkthrough-adopt-drift "$etag"
+  "doc[10]/labels/bw-s2", "doc[0]/machine/registries/config/registry.s5.invalid/auth/password"]}')" walkthrough-adopt-drift "$etag"
 ```
 
 Wait for it as in S1 and refresh `etag`. The adopted base now holds S2's label as a reference, and
