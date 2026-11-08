@@ -235,6 +235,66 @@ func TestOperationActEpochChange(t *testing.T) {
 	}
 }
 
+// repeatFlagsOf are the flags an outcome-unknown block prints for a repeat of a write.
+func repeatAnswers() map[string]string {
+	a := scAnswers()
+	a["GET /api/v1/recovery"] = `{"epoch":"ep_BWSYNTH-1","recoveryMode":true,"scopes":[]}`
+	return a
+}
+
+func repeatFlagsOf() []string {
+	return []string{"--idempotency-key", "BWSYNTH-aaaaaaaaaaaaaaa", "--expect-epoch", "ep_BWSYNTH-1", "--expect-principal", "svc_BWSYNTH"}
+}
+
+// TestTakeoverRepeatSendsTheOriginalGeneration: a takeover that committed with every response lost shows
+// its own transition at generation 4. The repeat sends the generation the block printed, 3, and not
+// the one the events now show, which the server refuses under the same key (§8.4 item 4).
+func TestTakeoverRepeatSendsTheOriginalGeneration(t *testing.T) {
+	a := repeatAnswers()
+	a["GET /api/v1/operations/op_1/events"] = `{"items":[{"id":"ep_BWSYNTH-1:7","type":"ownership-transition","data":{"generation":4,"fromGeneration":3}}]}`
+	args := append([]string{"recovery", "takeover", "op_1", "--reason", "BWSYNTH", "--generation", "3"}, repeatFlagsOf()...)
+	code, out, errb := scRun(t, a, scTakeAnswer, args...)
+	var got map[string]any
+	if code != 0 || len(recoveryPosted) != 1 || json.Unmarshal([]byte(recoveryPosted[0]), &got) != nil || got["generation"] != float64(3) {
+		t.Fatalf("exit %d, body %v; want 0 and generation 3\nstdout %s\n%s", code, recoveryPosted, out, errb)
+	}
+	// A repeat needs the generation, and a first send takes none; nothing is sent.
+	for name, args := range map[string][]string{
+		"repeat without it":  append([]string{"recovery", "takeover", "op_1", "--reason", "BWSYNTH"}, repeatFlagsOf()...),
+		"repeat with a zero": append([]string{"recovery", "takeover", "op_1", "--reason", "BWSYNTH", "--generation", "0"}, repeatFlagsOf()...),
+		"first send":         {"recovery", "takeover", "op_1", "--reason", "BWSYNTH", "--generation", "3"},
+	} {
+		if code, _, errb := scRun(t, repeatAnswers(), scTakeAnswer, args...); code != 2 || len(recoveryPosted) != 0 || !strings.Contains(errb, "--generation") {
+			t.Errorf("%s: exit %d, %d POSTs; want 2, no POST and a mention of --generation\n%s", name, code, len(recoveryPosted), errb)
+		}
+	}
+}
+
+// TestTakeoverBlockNamesTheGeneration: the block of an unknown outcome gives the generation that was
+// sent, so that the repeat can send it again.
+func TestTakeoverBlockNamesTheGeneration(t *testing.T) {
+	a := repeatAnswers()
+	a[scTake] = problem("503", "unavailable", "BWSYNTH", "")
+	code, _, errb := scRun(t, a, "", "recovery", "takeover", "op_1", "--reason", "BWSYNTH")
+	if code != 3 || !strings.Contains(errb, "the same input, with --generation 3, and: --idempotency-key ") {
+		t.Errorf("exit %d; want 3 and the generation in the repeat line\n%s", code, errb)
+	}
+}
+
+// TestResolveRepeatAfterTheCommit: a resolution that committed with every response lost leaves the
+// operation cancelled. The repeat sends the unchanged body and does not stop at the state check, so
+// the server replays its answer (§8.4 item 4).
+func TestResolveRepeatAfterTheCommit(t *testing.T) {
+	a := repeatAnswers()
+	a["GET /api/v1/operations/op_2"] = `{"id":"op_2","kind":"apply-config","state":"cancelled","subject":{"machine":"mch_a"}}`
+	args := append([]string{"recovery", "resolve", "op_2", "--reason", "BWSYNTH"}, repeatFlagsOf()...)
+	code, out, errb := scRun(t, a, scResolveAnswer, args...)
+	var got map[string]any
+	if code != 0 || len(recoveryPosted) != 1 || json.Unmarshal([]byte(recoveryPosted[0]), &got) != nil || got["to"] != "cancelled" {
+		t.Errorf("exit %d, body %v; want 0 and one POST to cancelled\nstdout %s\n%s", code, recoveryPosted, out, errb)
+	}
+}
+
 // TestResolveBindsToTheOperationAnswer: the epoch moves with the operation answer and moves again before
 // the client refreshes its server facts, so the client's last epoch is past the answer's own. The send
 // stays bound to the answer that the checks read, and nothing is sent (§8.5, §8.6 item 3).

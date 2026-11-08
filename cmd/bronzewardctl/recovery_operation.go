@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/ginsys/bronzeward/internal/client"
@@ -89,8 +90,10 @@ func operationState(operation string) func(*client.Client) (string, error) {
 func (e *env) recoveryTakeover(args []string) error {
 	var reason string
 	var rf repeatFlags
+	var generation given
 	pos, err := e.parse("recovery takeover", args, 1, func(fs *flag.FlagSet) {
 		fs.StringVar(&reason, "reason", "", "")
+		fs.Var(&generation, "generation", "")
 		rf.flags(fs)
 	})
 	if err != nil {
@@ -104,9 +107,24 @@ func (e *env) recoveryTakeover(args []string) error {
 	if err != nil {
 		return err
 	}
+	// The body carries the generation read at the first send. A repeat sends the same request under the
+	// same key, so it gives that generation as the block printed it and reads nothing (§8.4 item 4).
+	repeatGen, genErr := strconv.Atoi(generation.v)
+	switch {
+	case rp == nil && generation.set:
+		return usageError{errors.New("--generation is given only with a repeat, as the outcome-unknown block printed it; nothing was sent")}
+	case rp != nil && (!generation.set || genErr != nil || repeatGen < 1):
+		return usageError{errors.New("a repeat needs --generation, a whole number from 1, as the outcome-unknown block printed it; nothing was sent")}
+	}
 	w := &client.Write{Method: http.MethodPost, Path: "/operations/" + url.PathEscape(operation) + "/takeovers", HumanOnly: true, Repeat: rp,
 		Check: "operation show " + client.ShellWord(operation), Read: operationState(operation)}
 	prep := func(c *client.Client) error {
+		if rp != nil {
+			w.Body, _ = json.Marshal(apitypes.TakeoverRequest{Generation: repeatGen, Reason: reason})
+			w.Input = "--generation " + strconv.Itoa(repeatGen)
+			tf(e.err, "Repeat of the takeover of operation %s in %s, at owner generation %d\n  reason: %s\n", operation, c.Context.Where(), repeatGen, client.Printable(reason))
+			return nil
+		}
 		op, epoch, moves, err := readOperation(c, operation)
 		if err != nil {
 			return err
@@ -120,6 +138,7 @@ func (e *env) recoveryTakeover(args []string) error {
 		}
 		body, _ := json.Marshal(apitypes.TakeoverRequest{Generation: gen, Reason: reason})
 		w.Body = body
+		w.Input = "--generation " + strconv.Itoa(gen)
 		// The body is built from the operation answer and the events that follow it. The send is bound to the
 		// epoch and move count of the first answer, so an epoch that moved during the later reads, even
 		// one that came back, refuses it (§8.5, §8.6 item 3).
@@ -163,6 +182,12 @@ func (e *env) recoveryResolve(args []string) error {
 	w := &client.Write{Method: http.MethodPost, Path: "/operations/" + url.PathEscape(operation) + "/resolutions", Body: body, HumanOnly: true,
 		Repeat: rp, Check: "operation show " + client.ShellWord(operation), Read: operationState(operation)}
 	prep := func(c *client.Client) error {
+		if rp != nil {
+			// A resolution that committed leaves the operation cancelled, so the state checks below are for a
+			// first send. A repeat sends the unchanged body under its key, and the server replays or refuses it (§8.4 item 4).
+			tf(e.err, "Repeat of the resolution of operation %s in %s\n  reason: %s\n", operation, c.Context.Where(), client.Printable(reason))
+			return nil
+		}
 		op, epoch, moves, err := readOperation(c, operation)
 		if err != nil {
 			return err

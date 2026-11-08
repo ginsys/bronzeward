@@ -110,7 +110,9 @@ With `bronzewardctl`, a person signed in as `recovery-admin` runs
 `recovery takeover <operation> --reason <text>`. The operation body has no owner generation. The
 command reads the operation and its events, and sends the highest `generation` that either shows,
 or 1 if they show none. The server refuses a generation that is not current, so a wrong read sends
-nothing harmful. In that case the command names `operation show` as the next step. The command
+nothing harmful. In that case the command names `operation show` as the next step. If the answer
+is lost, the command prints the generation it sent. You repeat it with that value as
+`--generation`, together with the other repeat flags it printed. The command
 sends nothing to the node. It asks for no typed answer, because the reason is the record.
 
 ### Account for an attempt with no response
