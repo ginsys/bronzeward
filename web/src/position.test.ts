@@ -2162,13 +2162,19 @@ describe("a tag on an implicit key", () => {
     expect(references(text)).toEqual([]);
   });
 
-  // Row 48 is a known gap (ginsys/bronzeward#685), found by the first run of these rows. go-yaml reads the scalar `x/foo:`
-  // (a colon before a flow indicator stays in the word), which is no name, and the server refuses
-  // the document as a bad name. The word pattern of a tag with no anchor stops before that colon,
-  // so the scanner lists `x/foo`, as the scanner on main does. The word pattern of a tag after an
-  // anchor keeps the colon, and `k: [!bwref &e x/foo:]` lists nothing.
-  test("row 48: a colon that ends a flow sequence is a known gap, the name is listed", () => {
-    expect(references("[!bwref x/foo:]\n")).toEqual(["x/foo"]);
+  // Row 48 (ginsys/bronzeward#685, ginsys/bronzeward#672): go-yaml reads the scalar `x/foo:` (a colon
+  // before a flow indicator stays in the word), which is no name, and the server refuses the document
+  // as a bad name. In flow context a tag with no anchor reads its value with the same word pattern
+  // as a tag after an anchor, so both lists are empty.
+  test("row 48: a colon that ends a flow sequence keeps the colon in the value, no name is listed", () => {
+    expect(references("[!bwref x/foo:]\n")).toEqual([]);
     expect(references("k: [!bwref &e x/foo:]\n")).toEqual([]);
+  });
+
+  test("a flow value with a real name still lists it, with or without an anchor", () => {
+    expect(references("[!bwref x/foo]\n")).toEqual(["x/foo"]);
+    expect(references("k: [!bwref x/foo, y]\n")).toEqual(["x/foo"]);
+    expect(references("k: [!bwref &e x/foo]\n")).toEqual(["x/foo"]);
+    expect(references("{k: !bwref x/foo}\n")).toEqual(["x/foo"]);
   });
 });
