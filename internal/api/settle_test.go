@@ -37,7 +37,7 @@ type cobs struct {
 // observed records o's observation and answers its id.
 func (ae *attemptEnv) observed(t *testing.T, change func(*cobs)) string {
 	t.Helper()
-	s := cobs{purpose: "completion", operation: ae.op, version: "v1.13.6", resource: "rv1", unread: "{}"}
+	s := cobs{purpose: "completion", operation: ae.op, version: "v1.14.5", resource: "rv1", unread: "{}"}
 	if change != nil {
 		change(&s)
 	}

@@ -78,7 +78,7 @@ func (d *draftEnv) release(draft string, revision int, provenance string) releas
 	}
 	mustExec(t, tx, `INSERT INTO release (id, cluster, draft, draft_revision, digest, contract, machinery_version, machinery_checksum,
 			kubernetes_version, operation, published_by, published_role, epoch, published_at)
-		SELECT $1, $2, $3, $4, $5, 'v1.13', 'v1.13.6', 'h1:2rBcdYQ4m1u3oPmvbMQw3F9dZb8i0EwQnJ6y5Kx8sJ0=', 'v1.36.0', $6, $7,
+		SELECT $1, $2, $3, $4, $5, 'v1.14', 'v1.14.5', 'h1:2rBcdYQ4m1u3oPmvbMQw3F9dZb8i0EwQnJ6y5Kx8sJ0=', 'v1.36.0', $6, $7,
 			'publisher', epoch, '2026-09-26T09:14:05Z' FROM installation_state`, s.rel, d.cluster, draft, revision, make([]byte, 32), s.op, publisher)
 	var redacted any = "machine:\n  type: worker\n  token: <redacted:schema>\n"
 	switch d.redacted {
@@ -160,7 +160,7 @@ func TestReleaseReads(t *testing.T) {
 	if r.ID != s.rel || r.Cluster != d.cluster || r.Draft != d.draft || r.DraftRevision != 1 || r.Operation != s.op ||
 		r.PublishedBy != (createdBy{Principal: d.seed, Role: "publisher"}) ||
 		r.PublishedAt.Format("2006-01-02T15:04:05Z07:00") != "2026-09-26T09:14:05Z" ||
-		r.Renderer != (rendererBody{Contract: "v1.13", MachineryVersion: "v1.13.6",
+		r.Renderer != (rendererBody{Contract: "v1.14", MachineryVersion: "v1.14.5",
 			MachineryChecksum: "h1:2rBcdYQ4m1u3oPmvbMQw3F9dZb8i0EwQnJ6y5Kx8sJ0=", KubernetesVersion: "v1.36.0"}) {
 		t.Fatalf("release %+v", r)
 	}

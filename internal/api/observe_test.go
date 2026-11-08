@@ -252,7 +252,7 @@ func TestObserveDrift(t *testing.T) {
 		t.Fatalf("access %v %v %v", r.accessPath, r.accessVersion, r.accessCreated)
 	}
 	if r.smbios.String != uuidA || r.nodeID.String != nodeA || r.clusterID.String != oe.clusterID || r.assignment.String != oe.head ||
-		r.runningVersion.String != "v1.13.6" || string(r.digest) != string(want[:]) || r.resourceVersion.String == "" || r.health.Valid {
+		r.runningVersion.String != "v1.14.5" || string(r.digest) != string(want[:]) || r.resourceVersion.String == "" || r.health.Valid {
 		t.Fatalf("values %+v", r)
 	}
 	if fmt.Sprint(r.unread) != fmt.Sprint(map[string]map[string]string{"health": {"cause": "none-bound"}}) {
