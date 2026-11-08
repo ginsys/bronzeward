@@ -2279,6 +2279,15 @@ describe("an alias that names no anchor", () => {
     ["an anchor in a plain scalar", "a: x &e\nb: *e\nc: !bwref x/foo\n"],
     ["an anchor in a block scalar", "a: |\n  &e x\nb: *e\nc: !bwref x/foo\n"],
     ["an alias before its anchor in one flow sequence", "a: [*e, &e 1]\nc: !bwref x/foo\n"],
+    // The four rows below are probes 12, 27, 28 and 32 of experiments/scanner-cross-line/evidence/alias-anchor-scope.md.
+    // Probe 12: directives between two documents.
+    ["a name defined before a document end marker and directives, then an alias", "%YAML 1.2\n---\na: &e 1\n...\n%YAML 1.2\n---\nb: *e\nc: !bwref x/foo\n"],
+    // Probe 27: a document end marker with no `---` after it.
+    ["a name defined before a document end marker with no start marker, then an alias", "a: &e 1\n...\nb: *e\nc: !bwref x/foo\n"],
+    // Probe 28: an alias whose name starts with a non-ASCII letter. The server and go-yaml refuse the stream.
+    ["an alias whose name holds a non-ASCII letter", "a: *é\nb: !bwref x/foo\n"],
+    // Probe 32: an alias before its anchor, and no tag anywhere in the document. It records the oracle verdict.
+    ["an alias before its anchor with no tag on the anchored value", "a: *e\nb: &e 1\n"],
   ])("lists nothing for %s", (_, text) => {
     expect(references(text), text).toEqual([]);
   });
