@@ -95,6 +95,9 @@ const NAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\/[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/
 // Unicode spaces are text (`--- a` is a key). The end of a line is a line feed, or the carriage
 // return of a CRLF: a lone one is a line feed already (see BREAKS).
 const MARKER = /^(?:---|\.\.\.)(?:[ \t]|\r?$)/;
+// Blanks up to a line break, read at `lastIndex` only (sticky). `[^\S\n]` is every character that `trim()` removes
+// except the line break, so a tag followed by those and a line break ends its line.
+const BLANKS_TO_EOL = /[^\S\n]*\n/y;
 // go-yaml (the server's parser) breaks a line at a line feed, a carriage return alone, and U+0085,
 // U+2028 and U+2029, in comments and in every kind of scalar; a CRLF is one break. Each of these is
 // read as a line feed here, so no later step has to know them. A replacement has the length of what
@@ -625,8 +628,11 @@ function continues(
   cuts: ReadonlySet<number>,
   above: (lineStart: number) => Above | undefined,
 ): boolean {
-  const eol = masked.indexOf("\n", end);
-  if (eol === -1 || masked.slice(end, eol).trim() !== "") return false;
+  // The tag must be the last text of its line. Read only the blanks after it: a search for the next
+  // line break reads the rest of a long flow line for every tag, which is quadratic (ginsys/bronzeward#719).
+  BLANKS_TO_EOL.lastIndex = end;
+  if (!BLANKS_TO_EOL.test(masked)) return false;
+  const eol = BLANKS_TO_EOL.lastIndex - 1;
   const next = nextLine(masked, eol + 1, cuts, blank);
   // A document marker (--- or ...) ends every scalar, also a top-level one.
   if (next === undefined || MARKER.test(next)) return false;

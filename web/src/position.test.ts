@@ -1760,7 +1760,8 @@ describe("a plain !bwref value that goes on to the next line", () => {
     //
     // The gap and the limit come from runs of this file at gaps of 4, 16 and 64 (20, 20 and 45 runs).
     // At a gap of 4 the limit was 2.5, and one run of the 20,000-tag flow line read 2.87, because that
-    // scan has a small term that grows with the square of the line (see below). At a gap of 64 the
+    // scan had a small term that grew with the square of the line (repaired in ginsys/bronzeward#719, see
+    // the check of 320,000 tags below). At a gap of 64 the
     // highest ratio of any check was 3.15 (that flow line), and the next highest was 1.49. So the
     // limit sits about 4 times above the highest linear ratio and 3 to 5 times below a quadratic one.
     //
@@ -1852,6 +1853,18 @@ describe("a plain !bwref value that goes on to the next line", () => {
     // line above it, so it must not read the text before that line. This draft took 27,987 ms on e354c61c.
     test("a draft with 30,000 tags on their own lines lists every one", () => {
       expect(bounded(30000, (n) => lines(n, (i) => `k${i}:\n  !bwref x/foo${i}\n`))).toHaveLength(30000);
+    });
+
+    // One flow line of 320,000 tags: each plain scalar asks whether the next line continues it, and that
+    // must read only the blanks after the tag, not the rest of the line up to the next line break. The
+    // time per character grew with the length of the line (ginsys/bronzeward#719): this draft took
+    // 24,752 ms on e735dc3a, 27.9 times the time per character of a line of 5,000 tags. Half the size
+    // (160,000 tags) read 14 against the limit of 12, too close to fail every run. The line of 20,000
+    // tags that read 2.87 at a gap of 4 had the same cause.
+    test("a flow line of 320,000 tags lists every one", () => {
+      expect(bounded(320000, (n) => `[${lines(n, (i) => `${i ? ", " : ""}!bwref x/foo${i}`)}]\n`)).toHaveLength(
+        320000,
+      );
     });
 
     // A line of many bangs and a word: a tag on a line of its own below it is not on a root scalar, and
