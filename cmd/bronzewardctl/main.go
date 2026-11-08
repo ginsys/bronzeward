@@ -62,6 +62,12 @@ commands:
   drift show <machine>
               the open drift: its observations, late landing and the choices; the time shown is
               that of the observation, the API serves no opening time; there is no ignore command
+  drift adopt <machine> --draft <draft> [--review] [--staging encrypted|transient] [--marks]
+              import as a drift-adoption (author, a person), publish (publisher), then plan create
+              --operation adopt (publisher); stops at a missing role or a pause and prints the
+              rest; never approves; its repeat flags repeat the import
+  drift revert <machine>
+              publisher; plan create of Desired as apply-config, bound to the open drift record
   fragment | profile | assignment show <head or revision ID> | history <head ID>
   draft list [--cluster <id>] | show <draft>
   draft create --cluster <id> --title <title>
@@ -171,6 +177,9 @@ type usageError struct{ error }
 // operationFailed is a waited-for operation that ended failed, rejected or cancelled: exit 4
 // (operator-experience.md §4).
 type operationFailed struct{ error }
+
+// notSent is a write the client refuses before sending, from what it read: exit 2.
+type notSent struct{ error }
 
 type env struct {
 	context, output, tokenFile   string
@@ -295,6 +304,7 @@ func report(err error, stdout, stderr io.Writer) int {
 	var stopped interrupted
 	var problem *client.Problem
 	var lost outputFailed
+	var refusedHere notSent
 	switch {
 	case err == nil:
 		return 0
@@ -338,7 +348,7 @@ func report(err error, stdout, stderr io.Writer) int {
 		return 4
 	case errors.As(err, &waiting):
 		return 5
-	case errors.As(err, &refused), errors.As(err, &declined):
+	case errors.As(err, &refused), errors.As(err, &declined), errors.As(err, &refusedHere):
 		return 2
 	// The server's own answer says more than a lost report, so a refusal keeps 1 beside a failed write.
 	case errors.As(err, &problem):

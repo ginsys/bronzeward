@@ -99,11 +99,20 @@ func (e *env) importCmd(args []string) error {
 // the draft's kept ETag or --if-match (client-contracts.md §8.3) and, unless --no-wait, waits
 // until the ingestion pauses for review or ends.
 func (e *env) importStart(args []string) error {
+	_, _, err := e.ingest("import start", "import", args)
+	return err
+}
+
+// ingest is import start's body for an ingestion of kind; drift adopt starts a drift-adoption. It
+// answers the client and the accepted ingestion, empty when the start was not accepted.
+func (e *env) ingest(name, kind string, args []string) (*client.Client, accepted, error) {
+	var c *client.Client
+	var a accepted
 	var machine, draft, file string
 	staging := "encrypted"
 	var review, marks, noWait bool
 	var rf repeatFlags
-	if _, err := e.parse("import start", args, 0, func(fs *flag.FlagSet) {
+	if _, err := e.parse(name, args, 0, func(fs *flag.FlagSet) {
 		fs.StringVar(&machine, "machine", "", "")
 		fs.StringVar(&draft, "draft", "", "")
 		fs.Func("file", "", func(s string) error {
@@ -119,37 +128,36 @@ func (e *env) importStart(args []string) error {
 		fs.BoolVar(&noWait, "no-wait", false, "")
 		rf.flags(fs)
 	}); err != nil {
-		return err
+		return c, a, err
 	}
 	switch {
 	case machine == "" || draft == "":
-		return usageError{errors.New("import start needs --machine and --draft")}
+		return c, a, usageError{errors.New(name + " needs --machine and --draft")}
 	case staging != "encrypted" && staging != "transient":
-		return usageError{fmt.Errorf("--staging %q: give encrypted or transient", staging)}
+		return c, a, usageError{fmt.Errorf("--staging %q: give encrypted or transient", staging)}
 	case review && staging != "encrypted":
-		return usageError{errors.New("--review needs encrypted staging, which keeps the input until the review is continued; nothing was sent")}
+		return c, a, usageError{errors.New("--review needs encrypted staging, which keeps the input until the review is continued; nothing was sent")}
 	}
 	if u := stdinUsers(file, "", e.tokenStdin); len(u) > 1 {
-		return usageError{fmt.Errorf("%s read standard input, which only one of them can: give the token with --token-file", strings.Join(u, " and "))}
+		return c, a, usageError{fmt.Errorf("%s read standard input, which only one of them can: give the token with --token-file", strings.Join(u, " and "))}
 	}
 	rp, err := rf.repeat(true)
 	if err != nil {
-		return err
+		return c, a, err
 	}
 	if file != "" || marks {
 		if err := protectedOn(runtime.GOOS); err != nil {
-			return err
+			return c, a, err
 		}
 	}
-	in := apitypes.IngestionInput{Kind: "import", Machine: machine, Draft: draft, Source: "machine", Staging: apitypes.IngestionInputStaging(staging)}
+	in := apitypes.IngestionInput{Kind: apitypes.IngestionInputKind(kind), Machine: machine, Draft: draft, Source: "machine",
+		Staging: apitypes.IngestionInputStaging(staging)}
 	if review {
 		in.Review = &review
 	}
-	var c *client.Client
-	var a accepted
 	w := &client.Write{Method: http.MethodPost, Path: "/ingestions", Draft: draft, IfMatch: rf.ifMatch.v, Repeat: rp, HumanOnly: true,
 		Check: "import status --machine " + client.ShellWord(machine), Read: ingestionsRead(machine, draft)}
-	return e.held(func() error {
+	err = e.held(func() error {
 		err := e.writeAfter(func(cl *client.Client) error {
 			c = cl
 			if file != "" {
@@ -188,6 +196,7 @@ func (e *env) importStart(args []string) error {
 		}
 		return e.follow(c, a, 0)
 	})
+	return c, a, err
 }
 
 // importResume continues an import paused for review, or takes over a claim whose lease lapsed

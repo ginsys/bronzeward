@@ -101,13 +101,17 @@ func (s *seconds) Set(v string) error {
 // apply-config plan. An adopt plan given a mode, a deadline or an attempt limit is refused before
 // sending. The answer is shown through planView. A refusal names its next step, which it does not
 // take.
-func (e *env) planCreate(args []string) error {
+func (e *env) planCreate(args []string) error { return e.planCreateWith("plan create", args, nil) }
+
+// planCreateWith is plan create, its table followed by the lines extra gives for the created plan;
+// drift adopt and drift revert add theirs.
+func (e *env) planCreateWith(name string, args []string, extra func(*client.Client, *apitypes.PlanBody) []string) error {
 	var in apitypes.PlanInput
 	var operation string
 	var expires, age, validity, transport, verification seconds
 	var mode, attempts given
 	var rf repeatFlags
-	if _, err := e.parse("plan create", args, 0, func(fs *flag.FlagSet) {
+	if _, err := e.parse(name, args, 0, func(fs *flag.FlagSet) {
 		fs.StringVar(&in.ReleaseId, "release", "", "")
 		fs.StringVar(&in.Machine, "machine", "", "")
 		fs.StringVar(&operation, "operation", "", "")
@@ -171,6 +175,8 @@ func (e *env) planCreate(args []string) error {
 			// The plan was created, which stands; only the view of it is not shown.
 			view = []string{sf("Plan %s was created for machine %s, operation %s.", p.Id, p.Machine, p.Operation),
 				sf("  %s while the plan was read, so it is not shown. Read it again with: plan show ", change) + client.ShellWord(p.Id)}
+		} else if extra != nil {
+			view = append(view, extra(c, &p)...)
 		}
 		return nil, nil
 	})
