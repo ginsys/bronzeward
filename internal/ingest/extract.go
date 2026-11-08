@@ -496,17 +496,37 @@ func encodeStream(docs []*yaml.Node) ([]byte, error) {
 // inside a run of comments when it writes a parsed document (talosctl writes such runs), so its
 // first output is not always what it writes for that output's own parse; a staged document must
 // be, since a mark re-encodes it and refuses any other change (compilation.md §3.6 item 3).
+//
+// The encoder lets go of a tail of comments one blank-line-separated run per write, so the number
+// of writes grows with the blank lines in the text and a fixed count refused a configuration that
+// had several such tails (a generated Talos v1.14 configuration has four). The bound is therefore
+// the number of blank lines in the first output plus two. That each write consumes at least one
+// blank line is an observation, not a proof. The bound is safe if it is wrong: the loop accepts
+// only a fixed point, so a bound that is too small can only refuse a stream, never accept one
+// that is not stable.
 func encodeStable(docs []*yaml.Node) ([]byte, []*yaml.Node, error) {
-	out, err := encodeStream(docs)
+	return encodeStableWith(docs, encodeStream)
+}
+
+// encodeStableWith is encodeStable with the encoder given, so that a test can give one that never
+// settles.
+func encodeStableWith(docs []*yaml.Node, encode func([]*yaml.Node) ([]byte, error)) ([]byte, []*yaml.Node, error) {
+	out, err := encode(docs)
 	if err != nil {
 		return nil, nil, err
 	}
-	for range 3 {
+	rounds := 2
+	for _, line := range bytes.Split(out, []byte("\n")) {
+		if len(bytes.TrimSpace(line)) == 0 {
+			rounds++
+		}
+	}
+	for range rounds {
 		back, err := parseStream(out)
 		if err != nil {
 			return nil, nil, errors.New("ingest: the sanitized stream does not parse back")
 		}
-		again, err := encodeStream(back)
+		again, err := encode(back)
 		if err != nil {
 			return nil, nil, err
 		}
