@@ -84,7 +84,7 @@ func servedSeconds(s float32) time.Duration { return time.Duration(float64(s) * 
 func settleFlags(start, end, explanation string, noInput bool, typed string) error {
 	switch {
 	case start == "" || end == "":
-		return usageError{errors.New("give --start and --end, the observation IDs the settle runs between")}
+		return usageError{errors.New("give --start and --end, the observation IDs the settle runs between; nothing was sent")}
 	case len(explanation) > maxExplanation:
 		return usageError{fmt.Errorf("--explanation: give at most %d bytes; nothing was sent", maxExplanation)}
 	case noInput:
@@ -135,6 +135,17 @@ func checkSettle(machine string, by map[string]apitypes.ObservationBody, start, 
 		return refuse("--end %s: it read no machine-configuration resource version, so it is unusable at either end", end)
 	case *s.ResourceVersion != *e.ResourceVersion && strings.TrimSpace(explanation) == "":
 		return refuse("the resource version moved from %s to %s between the two observations: give --explanation <text> that says why", *s.ResourceVersion, *e.ResourceVersion)
+	}
+	return nil
+}
+
+// epochHeld refuses, sending nothing, a window whose reads span two epochs (§8.5): first is the
+// epoch of the window's first read, and any later read that showed another leaves the earlier
+// results shown beside answers of a snapshot they do not belong to.
+func epochHeld(c *client.Client, first string) error {
+	if now := c.Context.LastEpoch; first != "" && now != first {
+		return ef("the epoch changed from %s to %s while the window was read; nothing was sent. Run this command again",
+			client.ShellWord(first), client.ShellWord(now))
 	}
 	return nil
 }
@@ -230,6 +241,7 @@ func (e *env) recoveryScopeAccount(args []string) error {
 		if err != nil {
 			return err
 		}
+		first := r.Header.Get("Bronzeward-Epoch")
 		srvs, err := decode[apitypes.ServerBody](c, r.Body)
 		if err != nil {
 			return err
@@ -249,6 +261,9 @@ func (e *env) recoveryScopeAccount(args []string) error {
 		if err != nil {
 			return err
 		}
+		if err := epochHeld(c, first); err != nil {
+			return err
+		}
 		if err := checkSettle(machine, by, start, end, explanation); err != nil {
 			return err
 		}
@@ -261,7 +276,7 @@ func (e *env) recoveryScopeAccount(args []string) error {
 		fmt.Fprintln(e.err, observationLine("start", by[start]))
 		fmt.Fprintln(e.err, observationLine("end", by[end]))
 		tf(e.err, "  Explanation: %s\n", orNone(explanation))
-		tf(e.err, accountRisk+"\n", "any request sent before the restore, from any attempt the restored journal shows or one it lost,")
+		tf(e.err, accountRisk+"\n", "no request sent before the restore, from any attempt the restored journal shows or one it lost,")
 		body, _ := json.Marshal(apitypes.ScopeAccountingRequest{Scopes: []apitypes.ScopeSettle{{Machine: machine, Start: start, End: end}}, Facts: factsOf(explanation)})
 		// The decision is sent only under the epoch of the reads the operator saw (§8.5): Send refuses
 		// a first send once its own preflight read shows another.
@@ -320,6 +335,7 @@ func (e *env) recoveryAccount(args []string) error {
 		if err != nil {
 			return err
 		}
+		first := r.Header.Get("Bronzeward-Epoch")
 		ops, err := decode[apitypes.OperationBody](c, r.Body)
 		if err != nil {
 			return err
@@ -351,6 +367,9 @@ func (e *env) recoveryAccount(args []string) error {
 		if err != nil {
 			return err
 		}
+		if err := epochHeld(c, first); err != nil {
+			return err
+		}
 		if err := checkSettle(machine, by, start, end, explanation); err != nil {
 			return err
 		}
@@ -362,7 +381,7 @@ func (e *env) recoveryAccount(args []string) error {
 		fmt.Fprintln(e.err, observationLine("start", by[start]))
 		fmt.Fprintln(e.err, observationLine("end", by[end]))
 		tf(e.err, "  Explanation: %s\n", orNone(explanation))
-		tf(e.err, accountRisk+"\n", "the request this attempt sent, whose response was lost,")
+		tf(e.err, accountRisk+"\n", "no copy of the request this attempt sent, whose response was lost,")
 		body, _ := json.Marshal(apitypes.AccountingRequest{Start: start, End: end, Facts: factsOf(explanation)})
 		// Sent only under the epoch of the reads the operator saw (§8.5), as for the scope accounting.
 		w.Body, w.Reads = body, c.Context.LastEpoch
