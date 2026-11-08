@@ -78,7 +78,7 @@ func (p *Problem) Error() string {
 			s += fmt.Sprintf("\nRecovery mode: the scope of machine %s is %s.", p.str("machine"), scope)
 		} else {
 			s += "\nRecovery mode: the server was started for recovery: it refuses plan creation, approval and unfreeze, and before its recovery entry " +
-				"every request but the entry. A restriction of the process, not of one scope: it ends when the server is restarted without the flag."
+				"every request but the entry. A restriction of the process, not of one scope: record the recovery entry first, then restart the server without the flag to end it."
 		}
 	}
 	return s
