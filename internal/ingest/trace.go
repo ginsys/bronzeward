@@ -322,12 +322,13 @@ func SchemaSecretLeaves(s Sanitized, values map[string]provider.Value) (SecretLe
 	return out, nil
 }
 
-// holds is whether the reference placed at p holds a secret field: p names the field or a mapping
-// that holds it. A reference inside an embedded document holds none, since the machinery does not
-// read embedded text.
+// holds is whether the value placed at p is, or holds, a secret field: p names the field, a mapping
+// that holds it, or a place inside it. A reference inside an embedded document holds none, since the
+// machinery does not read embedded text.
 func (l SecretLeaves) holds(p Path) bool {
+	within := func(a, b []string) bool { return len(a) >= len(b) && slices.Equal(a[:len(b)], b) }
 	return p.Format == "" && slices.ContainsFunc(l.paths, func(q Path) bool {
-		return q.Doc == p.Doc && len(q.Pointer) >= len(p.Pointer) && slices.Equal(q.Pointer[:len(p.Pointer)], p.Pointer)
+		return q.Doc == p.Doc && (within(q.Pointer, p.Pointer) || within(p.Pointer, q.Pointer))
 	})
 }
 
@@ -396,7 +397,12 @@ func TraceKeeping(s Sanitized, values map[string]provider.Value, first, flip int
 			if t.kind != TraceBoolean && x.value == leaf.Value {
 				return nil, refuse(RuleTraceIndistinct, p.String())
 			}
-			if t.kind != TraceBoolean && secret.holds(p) {
+			at := p
+			if n.Kind == yaml.MappingNode {
+				// each member is a field of its own: a secret member must not restore the one beside it
+				at.Pointer = append(slices.Clone(p.Pointer), keys[i])
+			}
+			if t.kind != TraceBoolean && secret.holds(at) {
 				x.value, x.raw = leaf.Value, ""
 				if plain, err := base64.StdEncoding.DecodeString(leaf.Value); err == nil && t.kind == TraceBytes {
 					x.raw = string(plain)
