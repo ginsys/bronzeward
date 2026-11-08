@@ -100,7 +100,6 @@ func (h *headerlessRestore) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // TestPublishHeaderlessTerminalRestored reproduces ginsys/bronzeward#695 through publish. The watch
 // returns the headerless succeeded read made before the restore, and publish prints it as the result.
 func TestPublishHeaderlessTerminalRestored(t *testing.T) {
-	t.Skip("ginsys/bronzeward#728: publish prints the state of a headerless terminal read after a restore; remove this skip with the fix")
 	f := &publishFake{draftFake: &draftFake{rev: 1, state: "open"}, state: "succeeded"}
 	h := &headerlessRestore{next: f, op: "op_BWSYNTH-pub",
 		succeed: fmt.Sprintf(publishOp, "succeeded", `{"release":"rel_BWSYNTH"}`, `null`),
@@ -127,7 +126,6 @@ func TestPublishHeaderlessTerminalRestored(t *testing.T) {
 // (import continue). The same scenario as for publish: the claim and the operation are of the first
 // epoch, and the pages show the restored one.
 func TestImportWatchHeaderlessTerminalRestored(t *testing.T) {
-	t.Skip("ginsys/bronzeward#728: the import watch prints the state of a headerless terminal read after a restore; remove this skip with the fix")
 	f := &importFake{draftFake: &draftFake{rev: 1, state: "open"}}
 	f.set("released", 1, time.Hour, "succeeded", `{"draft":"drf_BWSYNTH","draftRevision":2,"importBaseRevision":"ibr_BWSYNTH"}`, "")
 	op := func(state, result, problem, epoch string) string {
