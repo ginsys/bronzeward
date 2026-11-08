@@ -309,7 +309,7 @@ export function followRun(o: FollowOptions): { w: Watch; settled: () => RunState
     failure: () => failure,
     w: {
       show: (e) => { shown = seenOf(e.id); run = onEvent(run, e.type, e.data); o.view({ type: "show", line: eventLine(e) }); },
-      clear: (why) => { run = startRun(o.generation); shown = undefined; caught = false; behind = undefined; epoch++; o.view({ type: "clear", why }); },
+      clear: (why) => { run = startRun(o.generation); shown = undefined; caught = false; behind = undefined; failure = undefined; epoch++; o.view({ type: "clear", why }); },
       until: () => {
         const read = o.latest();
         return failure !== undefined || stopsWatch(run.settled, read, o.now(), o.abandonedAt(), run.settled === undefined && lapsedRead(read, o.now()) && ask());

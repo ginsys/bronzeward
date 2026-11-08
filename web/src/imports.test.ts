@@ -722,6 +722,20 @@ describe("a lapsed lease decides only after the operation's newest event was sho
       const operation = await check(okClaim, refused);
       expect(operation).toMatchObject({ stops: true, failure: refused, reads: 2 });
     });
+    test("a clear takes back a refusal recorded before it: the reset watch is not ended by it", async () => {
+      const client = { readWithEpoch: async <T,>(p: string) => ({ result: (p.startsWith("/ingestions/") ? refused : okOp) as ReadResult<T>, epoch: "e1" }) };
+      const f = followRun({
+        client, ingestion: b.id, op: OPID, generation: 2, signal: new AbortController().signal,
+        latest: () => ({ b, at: at("07:05:15") }), abandonedAt: () => undefined, now: () => at("07:05:20"), view: () => {},
+      });
+      f.w.show({ id: "e1:1", type: "started", data: {}, at: "2026-11-01T06:56:00Z" } as never);
+      f.w.until!();
+      await tick();
+      expect(f.failure()).toBe(refused);
+      f.w.clear("restored");
+      expect(f.failure()).toBeUndefined();
+      expect(f.w.until!()).toBe(false);
+    });
     test("a read with no answer or one for a new epoch is not a failure: the watch stays pending", async () => {
       expect(await check({ kind: "transport" }, okOp)).toMatchObject({ stops: false, failure: undefined });
       expect(await check(okClaim, { kind: "discarded" })).toMatchObject({ stops: false, failure: undefined });
