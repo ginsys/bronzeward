@@ -176,7 +176,7 @@ func (f *planFake) took() []string {
 }
 
 const (
-	validation = `"validation":{"result":"passed","at":"publication","contract":"v1.13","machineryVersion":"v1.13.6","kubernetesVersion":"v1.34.1","platformMode":"metal"},` +
+	validation = `"validation":{"result":"passed","at":"publication","contract":"v1.14","machineryVersion":"v1.14.5","kubernetesVersion":"v1.34.1","platformMode":"metal"},` +
 		`"dryRun":{"available":false,"reason":"no dry run is available for this operation"}`
 	diffEvidence     = `{"diff":{"from":"rel_BWSYNTH-old","to":"rel_BWSYNTH","withheld":false,"unified":"@@ -1 +1 @@\n-team: a\n+team: b\n"},` + validation + `}`
 	withheldEvidence = `{"diff":{"from":"rel_BWSYNTH-old","to":"rel_BWSYNTH","withheld":true,"unified":""},` + validation + `}`
@@ -219,7 +219,7 @@ func TestPlanView(t *testing.T) {
 			"transport 60s, verification 600s, observation age 300s, check validity 60s, attempts 3, rollout 1",
 			"svc_BWSYNTH (publisher)", "epoch ep_BWSYNTH-1", "plan revision 2, timeline revision 7",
 			"policy one-approver, committed operation none",
-			"passed at publication (contract v1.13, machinery v1.13.6, Kubernetes v1.34.1, metal)",
+			"passed at publication (contract v1.14, machinery v1.14.5, Kubernetes v1.34.1, metal)",
 			"Dry run     not available: no dry run is available for this operation",
 			"Changes shown below: the whole redacted configuration, rel_BWSYNTH-old -> rel_BWSYNTH\n    @@ -1 +1 @@\n    -team: a\n    +team: b\n",
 			"It is not approved and nothing runs until an approver approves: bronzewardctl approve 'pln_BWSYNTH'",

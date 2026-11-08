@@ -122,7 +122,7 @@ func publishFixture(t *testing.T, d *draftEnv) *publishEnv {
 
 	redacted := "machine:\n  type: worker\n"
 	p.unit = releaseUnit{
-		renderer: rendererBody{Contract: "v1.13", MachineryVersion: "v1.13.6",
+		renderer: rendererBody{Contract: "v1.14", MachineryVersion: "v1.14.5",
 			MachineryChecksum: "h1:2rBcdYQ4m1u3oPmvbMQw3F9dZb8i0EwQnJ6y5Kx8sJ0=", KubernetesVersion: "v1.36.0"},
 		unchanged: []usedHead{{kind: "fragment", head: p.base, revision: p.baseRev, headRevision: 1},
 			{kind: "profile", head: p.prf, revision: p.prv, headRevision: 1}},

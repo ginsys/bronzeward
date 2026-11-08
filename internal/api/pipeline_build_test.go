@@ -26,14 +26,16 @@ import (
 	"github.com/ginsys/bronzeward/internal/provider"
 )
 
-// buildHeld is the synthetic AES-CBC encryption secret the network fragment adds at a path the
-// base does not set (a fragment overriding a base reference is refused, choice §16.20); no record,
-// refusal or log line may quote it.
+// buildHeld is the synthetic registry password, a schema secret, that the network fragment adds at
+// a path the base does not set (a fragment overriding a base reference is refused, choice §16.20);
+// no record, refusal or log line may quote it. The generated v1.14 base holds the etcd encryption
+// secret in its own document, so a v1alpha1 etcd encryption secret is refused there.
 const buildHeld = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
 
-// buildFragment is the network fragment's text, with extra appended to its cluster section.
+// buildFragment is the network fragment's text, with extra, indented lines of the machine
+// section, appended after the registry password.
 func buildFragment(extra string) string {
-	return "cluster:\n  aescbcEncryptionSecret: &secret " + buildHeld + "\n" + extra
+	return "machine:\n  registries:\n    config:\n      reg.example.test:\n        auth:\n          password: &secret " + buildHeld + "\n" + extra
 }
 
 // heldValues is a stand-in provider holding the values ingestion extracted, by generation path:
@@ -209,7 +211,7 @@ func newBuildEnv(t *testing.T) *buildEnv {
 	b.ibr = b.importBase(b.machine, generatedConfig(t, constants.DefaultKubernetesVersion))
 	b.defaultPublicationReader(b.a)
 	// The alias places the one reference at two outputs: one effective dependency, not two.
-	b.network = b.fragment("network", "site", buildFragment("machine:\n  nodeAnnotations:\n    example.test/copy: *secret\n"))
+	b.network = b.fragment("network", "site", buildFragment("  env:\n    BW_COPY: *secret\n"))
 	return b
 }
 
@@ -332,11 +334,11 @@ func TestBuildReleaseRefuses(t *testing.T) {
 		input   string // the input named, when the case checks one
 	}{
 		{"invalid configuration", func(b *buildEnv) {
-			b.fragment("network", "site", buildFragment("machine:\n  type: bogus\n"))
+			b.fragment("network", "site", buildFragment("  type: bogus\n"))
 		}, "invalid", true, ""},
 		// The machinery's own message quotes the held value; only §8.3's redaction keeps it out.
 		{"invalid configuration quoting a value", func(b *buildEnv) {
-			b.fragment("network", "site", buildFragment("machine:\n  type: *secret\n"))
+			b.fragment("network", "site", buildFragment("  type: *secret\n"))
 		}, "", true, ""},
 		// Ingestion's rules applied while composing name the input they refused (PA §6.1): the
 		// network fragment, after the publish fixture's base-layer fragment.

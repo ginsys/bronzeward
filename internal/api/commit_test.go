@@ -77,7 +77,7 @@ type evSeed struct {
 func (ce *commitEnv) evidence(t *testing.T, plan string, change func(*evSeed)) string {
 	t.Helper()
 	var machine, route string
-	s := evSeed{purpose: "evidence", controller: ce.a.d.owner.ID, plan: plan, version: "v1.13.6", unread: "{}"}
+	s := evSeed{purpose: "evidence", controller: ce.a.d.owner.ID, plan: plan, version: "v1.14.5", unread: "{}"}
 	var uuid, nodeID sql.NullString
 	if err := ce.db.QueryRow(`SELECT p.machine, p.route::text, m.smbios_uuid::text, m.talos_node_id, c.talos_cluster_id,
 			p.expected_digest
@@ -359,7 +359,7 @@ func TestCommitmentRefusals(t *testing.T) {
 		{name: "a newer observation shows another minor", comparison: "3", cause: "a newer observation contradicts the evidence",
 			named: func(t *testing.T, ce *commitEnv) string {
 				ce.ready(t)
-				return ce.evidence(t, ce.pid, func(s *evSeed) { s.purpose, s.controller, s.version = "drift", "another", "v1.14.0" })
+				return ce.evidence(t, ce.pid, func(s *evSeed) { s.purpose, s.controller, s.version = "drift", "another", "v1.13.6" })
 			}},
 		{name: "scope held", comparison: "4", cause: "an operation holds the machine scope", setup: func(t *testing.T, ce *commitEnv) {
 			other := decode[planBody](t, ce.plan(ce.robot, "k-apply-other-0123456", applyBody(ce.target.rel, ce.machine, "")),

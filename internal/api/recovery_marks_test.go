@@ -20,7 +20,7 @@ import (
 type nodeReader struct{ identity talos.Identity }
 
 func (r nodeReader) Identity(context.Context) (talos.Identity, error) { return r.identity, nil }
-func (r nodeReader) Version(context.Context) (string, error)          { return "v1.13.6", nil }
+func (r nodeReader) Version(context.Context) (string, error)          { return "v1.14.5", nil }
 func (r nodeReader) MachineConfig(context.Context) (talos.Config, error) {
 	return talos.Config{}, errors.New("no configuration in this test")
 }
