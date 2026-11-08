@@ -170,6 +170,10 @@ describe("a refused mark is named by rule and position, never a path (§11.3, PR
     expect(problemTail(other)).toContain("kept");
     expect(problemTail(other)).not.toContain("The mark at position");
     expect(renderToStaticMarkup(h(Refused, { problem: other, status: 422, verb: "saved" }))).toContain("kept");
+    // The whole type counts: a longer type that ends in validation-failed is another problem.
+    const longer = problem({ type: "urn:bronzeward:problem:other:validation-failed", position: 2, detail: "kept" });
+    expect(problemTail(longer)).toContain("kept");
+    expect(problemTail(longer)).not.toContain("The mark at position");
   });
 });
 

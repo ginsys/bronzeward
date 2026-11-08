@@ -69,7 +69,8 @@ const positionOf = (p: Problem): number | undefined => {
 };
 // A refused mark is named by its position in the request, never its path (§8.2 422 row): its detail
 // is left out of every notice too, because the server's text may name the path.
-const refusedAt = (p: Problem) => (p.status === 422 && p.type.endsWith(":validation-failed") && positionOf(p) !== undefined ? ` The mark at position ${positionOf(p)} (the first is 0) is refused.` : "");
+const VALIDATION_FAILED = "urn:bronzeward:problem:validation-failed";
+const refusedAt = (p: Problem) => (p.status === 422 && p.type === VALIDATION_FAILED && positionOf(p) !== undefined ? ` The mark at position ${positionOf(p)} (the first is 0) is refused.` : "");
 
 // A problem's title, its detail when present and its instance (§8.2), as one sentence or two.
 export const problemLine = (p: Problem) => `${p.title}${p.detail !== undefined && refusedAt(p) === "" ? `: ${p.detail}` : ""}.${p.instance !== undefined ? ` Request ${p.instance}.` : ""}`;
