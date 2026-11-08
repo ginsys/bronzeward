@@ -149,6 +149,7 @@ type Node struct {
 	mu       sync.Mutex
 	metadata []metadata.MD
 	failures map[resource.Type]codes.Code
+	stalls   map[resource.Type]bool
 	applied  []Applied
 	onApply  func(context.Context, *machine.ApplyConfigurationRequest) (*machine.ApplyConfigurationResponse, error)
 }
@@ -161,7 +162,7 @@ func Serve(t testing.TB, p PKI) *Node {
 	if err != nil {
 		t.Fatal(err)
 	}
-	n := &Node{Endpoint: l.Addr().String(), st: namespaced.NewState(inmem.Build), failures: map[resource.Type]codes.Code{}}
+	n := &Node{Endpoint: l.Addr().String(), st: namespaced.NewState(inmem.Build), failures: map[resource.Type]codes.Code{}, stalls: map[resource.Type]bool{}}
 	srv := grpc.NewServer(grpc.Creds(credentials.NewTLS(&tls.Config{
 		Certificates: []tls.Certificate{p.Server}, ClientCAs: p.Pool, ClientAuth: tls.RequireAndVerifyClientCert, MinVersion: tls.VersionTLS12,
 	})),
@@ -268,7 +269,22 @@ func (f failing) failure(typ resource.Type) error {
 	return nil
 }
 
+// stall waits for the request to end when reads of typ are stalled, and answers its error.
+func (f failing) stall(ctx context.Context, typ resource.Type) error {
+	f.n.mu.Lock()
+	stalled := f.n.stalls[typ]
+	f.n.mu.Unlock()
+	if !stalled {
+		return nil
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
 func (f failing) Get(ctx context.Context, p resource.Pointer, opts ...state.GetOption) (resource.Resource, error) {
+	if err := f.stall(ctx, p.Type()); err != nil {
+		return nil, err
+	}
 	if err := f.failure(p.Type()); err != nil {
 		return nil, err
 	}
@@ -276,6 +292,9 @@ func (f failing) Get(ctx context.Context, p resource.Pointer, opts ...state.GetO
 }
 
 func (f failing) List(ctx context.Context, k resource.Kind, opts ...state.ListOption) (resource.List, error) {
+	if err := f.stall(ctx, k.Type()); err != nil {
+		return resource.List{}, err
+	}
 	if err := f.failure(k.Type()); err != nil {
 		return resource.List{}, err
 	}
@@ -329,6 +348,18 @@ func (n *Node) Fail(typ resource.Type, code codes.Code) {
 		return
 	}
 	n.failures[typ] = code
+}
+
+// Stall makes every read of resources of type typ wait until the request ends, then answer the
+// request's error; on false clears it. The TLS handshake and the other types are not affected.
+func (n *Node) Stall(typ resource.Type, on bool) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if on {
+		n.stalls[typ] = true
+		return
+	}
+	delete(n.stalls, typ)
 }
 
 // set replaces the resource at r's pointer with r.

@@ -172,8 +172,9 @@ func readMemberAt(ctx context.Context, creds *clientconfig.Context, addrs []neti
 }
 
 // readMember reads the member at address a under memberTimeout and reports what it said, and whether
-// it answered as nodeID, the member of the list. An address that answers as another node, or whose
-// identity, SystemInformation or PlatformMetadata read fails, is no answer. Only the
+// it answered as nodeID, the member of the list. These are no answer: a member with no ID, an address
+// that answers as another node or with no ID, and an address whose identity, SystemInformation or
+// PlatformMetadata read fails. Only the
 // SystemInformation and PlatformMetadata resources may be missing: a container node has no SMBIOS
 // information, and an old node may report no platform. Nothing is returned for an address that did
 // not answer in full.
@@ -186,7 +187,7 @@ func readMember(ctx context.Context, creds *clientconfig.Context, a netip.Addr, 
 	}
 	defer n.close()
 	id, err := safe.StateGetByID[*cluster.Identity](ctx, n.api.COSI, cluster.LocalIdentity)
-	if err != nil || id.TypedSpec().NodeID != nodeID {
+	if err != nil || nodeID == "" || id.TypedSpec().NodeID != nodeID { // an empty ID names no node, on either side
 		return Member{}, false
 	}
 	var read Member
