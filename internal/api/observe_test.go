@@ -194,11 +194,11 @@ func (oe *obsEnv) stored(t *testing.T) []string {
 	return append(out, oe.logs...)
 }
 
-// leaks reports whether any of the talosconfig's key, or the configuration's schema secret, is in
-// the database's observation records or the log.
-func (oe *obsEnv) leaks(t *testing.T) bool {
+// leaks reports whether any of the talosconfig's key, the configuration's schema secret or an extra
+// canary is in the database's observation records or the log.
+func (oe *obsEnv) leaks(t *testing.T, extra ...string) bool {
 	t.Helper()
-	canaries := append(oe.keyCanaries(), runToken)
+	canaries := append(append(oe.keyCanaries(), runToken), extra...)
 	for _, s := range oe.stored(t) {
 		for _, c := range canaries {
 			if strings.Contains(s, c) {
@@ -370,6 +370,9 @@ func TestObserveNodeReadFails(t *testing.T) {
 		"configuration read refused": {func(_ *testing.T, oe *obsEnv) {
 			oe.node.Fail(talostest.MachineConfigType, codes.PermissionDenied)
 		}, "machine-config", []string{"configuration"}},
+		"configuration the client cannot decode": {func(t *testing.T, oe *obsEnv) {
+			oe.node.SetUndecodableMachineConfig(t, undecodableConfig)
+		}, "machine-config-undecodable", []string{"configuration"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -397,7 +400,7 @@ func TestObserveNodeReadFails(t *testing.T) {
 					t.Fatalf("%s read %v, unread %v", n, ok, isUnread)
 				}
 			}
-			if oe.leaks(t) {
+			if oe.leaks(t, undecodableCanaries...) {
 				t.Fatal("the talosconfig's key or the configuration is stored or logged")
 			}
 		})
@@ -440,7 +443,42 @@ func TestObserveErrorTextControl(t *testing.T) {
 			}
 		})
 	}
+	// ginsys/bronzeward#715: the same control for a configuration the client cannot decode. The real
+	// reader keeps none of the document, so nothing leaks even when the log quotes errors; a reader
+	// that quotes it is caught under quoteErrors and by nothing without it.
+	for name, quotes := range map[string]bool{"the real reader": false, "a reader that quotes the document": true} {
+		for _, quote := range []bool{false, true} {
+			t.Run(fmt.Sprint("undecodable/", name, "/quoteErrors=", quote), func(t *testing.T) {
+				t.Parallel()
+				oe := newObsEnv(t)
+				oe.node.SetUndecodableMachineConfig(t, undecodableConfig)
+				o := options{quoteErrors: quote}
+				if quotes {
+					o.dial = func(ctx context.Context, tc []byte, endpoint string) (talos.Reader, error) {
+						r, err := talos.Dial(ctx, tc, endpoint)
+						if err != nil {
+							return nil, err
+						}
+						return quotingReader{r}, nil
+					}
+				}
+				if _, err := observer(t, oe.env, oe.x, o).observe(t.Context(), oe.machine, observeFor{purpose: "drift"}); err != nil {
+					t.Fatal(err)
+				}
+				if got := oe.leaks(t, undecodableCanaries...); got != (quotes && quote) {
+					t.Fatalf("leaked %v with quoteErrors %v and reader quoting %v", got, quote, quotes)
+				}
+			})
+		}
+	}
 }
+
+// undecodableConfig is a configuration the client's machinery cannot decode, and the parts of it
+// that no output may hold.
+var (
+	undecodableConfig   = []byte("version: v1alpha1\nmachine:\n  unknownField: UPSTRM\n")
+	undecodableCanaries = []string{"UPSTRM", "unknownField"}
+)
 
 // PA §5.1: a process whose epoch is no longer the installation's, or that owns as no controller,
 // records nothing and reads nothing.

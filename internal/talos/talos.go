@@ -116,6 +116,27 @@ type requestError struct {
 	what string
 	code codes.Code
 	ctx  error
+	// undecodable is a read whose answer reached the client and could not be decoded there.
+	undecodable bool
+}
+
+// ErrUndecodable is what errors.Is finds in a MachineConfig error when the node answered and the
+// client's machinery could not decode the answer: a configuration with a document kind it does not
+// register, for one. It is a mark, not a message: the machinery's text is not kept (requestError).
+var ErrUndecodable = errors.New("talos: the machine configuration could not be decoded")
+
+func (e *requestError) Is(target error) bool { return target == ErrUndecodable && e.undecodable }
+
+// decodeFailed is err, a failed read of one resource, being the client's own decode failure. COSI's
+// client answers a transport failure with a gRPC status and a missing resource with its not-found
+// error. For a body it cannot decode it returns the decoder's plain error, which is neither.
+func decodeFailed(ctx context.Context, err error) bool {
+	if ctx.Err() != nil || state.IsNotFoundError(err) ||
+		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	_, isStatus := status.FromError(err)
+	return !isStatus
 }
 
 func newRequestError(ctx context.Context, what string, err error) error {
@@ -140,7 +161,9 @@ func (e *requestError) Unwrap() error              { return e.ctx }
 func (r *reader) MachineConfig(ctx context.Context) (Config, error) {
 	mc, err := safe.StateGetByID[*cfgres.MachineConfig](direct(ctx), r.api.COSI, cfgres.ActiveID)
 	if err != nil {
-		return Config{}, newRequestError(ctx, "reading the machine configuration", err)
+		re := newRequestError(ctx, "reading the machine configuration", err).(*requestError)
+		re.undecodable = decodeFailed(ctx, err)
+		return Config{}, re
 	}
 	b, err := mc.Provider().Bytes()
 	if err != nil {

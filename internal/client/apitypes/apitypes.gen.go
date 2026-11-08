@@ -1971,6 +1971,7 @@ type TimelineEntry struct {
 
 // UnreadValue defines model for UnreadValue.
 type UnreadValue struct {
+	// Cause Why the value was not read. machine-config-undecodable means the node answered with a machine configuration that this server cannot decode, for example a document kind newer than its Talos machinery. Retrying does not help: update the machinery module of the server, or fix the configuration on the node.
 	Cause string  `json:"cause"`
 	Code  *string `json:"code,omitempty"`
 }

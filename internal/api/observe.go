@@ -179,8 +179,12 @@ func (a *API) observe(ctx context.Context, machine string, f observeFor) (observ
 			}
 			return o, a.recordObservation(ctx, machine, f, &o)
 		}
-		a.quoteObservation(o.ID, rd.cause, err)
-		o.unreadAll(rd.cause, rd.name)
+		cause := rd.cause
+		if rd.name == "configuration" {
+			cause = configReadCause(err) // unanswered is handled above; this tells an undecodable answer apart
+		}
+		a.quoteObservation(o.ID, cause, err)
+		o.unreadAll(cause, rd.name)
 	}
 	return o, a.recordObservation(ctx, machine, f, &o)
 }

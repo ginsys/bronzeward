@@ -146,14 +146,14 @@ var surface = []string{
 	"ClassInvalidArgument", "ClassRejected", "ClassTransport", "ClassUnrecognised",
 	"Config", "Config.Bytes", "Config.Digest", "Config.Format", "Config.GoString", "Config.MarshalJSON",
 	"Config.MarshalText", "Config.MarshalYAML", "Config.ResourceVersion", "Config.String",
-	"ConfigurationDigest", "Dial", "DialApplier", "ErrNoDeadline", "Identity", "Identity.ClusterID",
-	"Identity.NodeID", "Identity.SMBIOSUUID",
+	"ConfigurationDigest", "Dial", "DialApplier", "ErrNoDeadline", "ErrUndecodable", "Identity",
+	"Identity.ClusterID", "Identity.NodeID", "Identity.SMBIOSUUID",
 	"ParseEndpoint",
 	"Reader", "Reader.Close", "Reader.Identity", "Reader.MachineConfig", "Reader.Version",
 	"Response", "Response.Accounts", "Response.Class", "Response.Code", "Response.Text", "TransportFailure",
 	"applier.ApplyNoReboot", "applier.Close",
 	"reader.Close", "reader.Identity", "reader.MachineConfig", "reader.Version",
-	"requestError.Error", "requestError.GRPCStatus", "requestError.Unwrap",
+	"requestError.Error", "requestError.GRPCStatus", "requestError.Is", "requestError.Unwrap",
 }
 
 func TestExportedSurface(t *testing.T) {

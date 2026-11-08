@@ -196,3 +196,58 @@ func TestConfigDigest(t *testing.T) {
 		t.Fatal("two configurations share a digest")
 	}
 }
+
+// ginsys/bronzeward#715: a node that answers with a configuration the client's machinery cannot
+// decode gives an error that errors.Is finds ErrUndecodable in, with the code Unknown and none of
+// the document or the decoder's text in it. A refusal, a missing configuration, a node that did not
+// answer and a cancelled request are not that.
+func TestMachineConfigUndecodable(t *testing.T) {
+	const mark = "UPSTRM" // short: the YAML decoder quotes 7 characters of a value, then "..."
+	doc := []byte("version: v1alpha1\nmachine:\n  unknownField: " + mark + "\n")
+	if _, err := configloader.NewFromBytes(doc); err == nil || !strings.Contains(err.Error(), mark) {
+		t.Fatalf("control: machinery's decode error does not quote its input, so this test proves nothing: %v", err)
+	}
+	t.Run("through the stand-in node", func(t *testing.T) {
+		n, r, ctx := dialStandIn(t)
+		n.SetUndecodableMachineConfig(t, doc)
+		_, err := r.MachineConfig(ctx)
+		if !errors.Is(err, ErrUndecodable) {
+			t.Fatalf("error %v: want ErrUndecodable", err)
+		}
+		if strings.Contains(err.Error(), mark) || status.Code(err) != codes.Unknown {
+			t.Fatalf("error %q with code %s: the document or the decoder's text is in it, or the code is not Unknown", err, status.Code(err))
+		}
+	})
+	t.Run("through the stand-in node with no configuration", func(t *testing.T) {
+		_, r, ctx := dialStandIn(t)
+		if _, err := r.MachineConfig(ctx); errors.Is(err, ErrUndecodable) || status.Code(err) != codes.NotFound {
+			t.Fatalf("error %v: want NotFound and not ErrUndecodable", err)
+		}
+	})
+	canceled, cancel := context.WithCancel(t.Context())
+	cancel()
+	for name, c := range map[string]struct {
+		ctx context.Context
+		err error
+	}{
+		"permission denied": {t.Context(), status.Error(codes.PermissionDenied, mark)},
+		"unavailable":       {t.Context(), status.Error(codes.Unavailable, mark)},
+		"a wrapped status":  {t.Context(), fmt.Errorf("%s: %w", mark, status.Error(codes.Unavailable, "x"))},
+		"cancelled":         {canceled, fmt.Errorf("%s: %w", mark, context.Canceled)},
+		"deadline":          {t.Context(), fmt.Errorf("%s: %w", mark, context.DeadlineExceeded)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := &reader{api: &client.Client{COSI: failingState{err: c.err}}}
+			if _, err := r.MachineConfig(c.ctx); err == nil || errors.Is(err, ErrUndecodable) {
+				t.Fatalf("error %v: want an error that is not ErrUndecodable", err)
+			}
+		})
+	}
+	t.Run("a decoder error", func(t *testing.T) {
+		_, decodeErr := configloader.NewFromBytes(doc)
+		r := &reader{api: &client.Client{COSI: failingState{err: decodeErr}}}
+		if _, err := r.MachineConfig(t.Context()); !errors.Is(err, ErrUndecodable) || strings.Contains(err.Error(), mark) {
+			t.Fatalf("error %v: want ErrUndecodable without the decoder's text", err)
+		}
+	})
+}
