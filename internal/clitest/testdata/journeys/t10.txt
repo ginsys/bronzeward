@@ -1,0 +1,129 @@
+$ bronzewardctl --context human drift show mch_…
+Drift opened by observation obs_… at <local time>, last seen in observation obs_… at <local time>. Late landing: no.
+A configuration read differed from what Bronzeward last verified: Applied rel_….
+Bronzeward cannot show what changed until it is imported for adoption.
+Choose: freeze while you decide; adopt it into a release; or revert to Desired (rel_…).
+[exit 0]
+
+$ bronzewardctl --context publisher machine freeze mch_… --reason BWSYNTH: decide first
+Frozen. No new commitment or attempt for this machine until an approver unfreezes it.
+An attempt already recorded is not stopped, and an adoption can still be recorded.
+Recorded by idn_… (publisher): machine mch_…, timeline revision <n>, act act_….
+[exit 0]
+
+$ bronzewardctl --context human drift show mch_…
+Drift opened by observation obs_… at <local time>, last seen in observation obs_… at <local time>. Late landing: no.
+A configuration read differed from what Bronzeward last verified: Applied rel_….
+Bronzeward cannot show what changed until it is imported for adoption.
+Choose: freeze while you decide; adopt it into a release; or revert to Desired (rel_…).
+Frozen: no new commitment or attempt until an approver unfreezes; an attempt already recorded is not stopped, and an adoption can still be recorded.
+[exit 0]
+
+$ bronzewardctl --context publisher drift revert mch_…
+Plan pln_…  proposed                                         expires <local time> <local time>
+  Machine                            mch_…  127.0.0.1:<port>  cluster cl_… (lab-a), route 127.0.0.1:<port>
+  Operation                          apply-config, mode no-reboot
+  Release                            rel_…  machine Desired: rel_… at plan creation, rel_… now
+  Assignment                         asr_…  baseline revision 1, drift record <n>
+  Limits                             transport 60s, verification 600s, observation age 300s, check validity 300s, attempts 3, rollout 1
+  Created by                         idn_… (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision <n>
+  Approval                           none                                        policy one-approver, committed operation none
+Evidence
+  Validation  passed at publication (contract v1.13, machinery v1.13.6, Kubernetes v1.36.2, container)
+  Dry run     not available: no dry run is available for this operation
+  Diff        Diff withheld: the change cannot be shown (rel_… -> rel_…)
+It is not approved and nothing runs until an approver approves: bronzewardctl approve 'pln_…'
+Revert of drift record <n> to Desired rel_…. The plan expects the drifted digest before dispatch: if the machine drifts again first, it fails and must be made again.
+Approving it approves an unseen overwrite: it replaces the drifted configuration, which no reviewer has seen.
+The machine is frozen: the plan cannot commit until an approver approves it and, separately, unfreezes the machine: bronzewardctl machine unfreeze 'mch_…' --reason <text>
+[exit 0]
+
+$ bronzewardctl --context approver machine unfreeze mch_… --reason BWSYNTH: decided to revert
+Unfrozen. The freeze no longer stops a commitment or an attempt for this machine.
+Unfreezing approves and commits nothing. An attempt already recorded was not stopped by the freeze, and an adoption could still be recorded.
+Recorded by idn_… (approver): machine mch_…, timeline revision <n>, act act_….
+[exit 0]
+
+$ bronzewardctl --context approver approve pln_…
+Plan pln_…  proposed                                         expires <local time> <local time>
+  Machine                            mch_…  127.0.0.1:<port>  cluster cl_… (lab-a), route 127.0.0.1:<port>
+  Operation                          apply-config, mode no-reboot
+  Release                            rel_…  machine Desired: rel_… at plan creation, rel_… now
+  Assignment                         asr_…  baseline revision 1, drift record <n>
+  Limits                             transport 60s, verification 600s, observation age 300s, check validity 300s, attempts 3, rollout 1
+  Created by                         idn_… (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision <n>
+  Approval                           none                                        policy one-approver, committed operation none
+Evidence
+  Validation  passed at publication (contract v1.13, machinery v1.13.6, Kubernetes v1.36.2, container)
+  Dry run     not available: no dry run is available for this operation
+  Diff        Diff withheld: the change cannot be shown (rel_… -> rel_…)
+Self-approval  predicted: you did not create this plan or publish this release, and authored no fragment, profile or assignment revision in it.
+               Import-base authorship and automation you own are not predicted. The approval records the actual reasons; self-approval is marked and allowed.
+Overwrites     the drifted configuration of drift record <n>, which no reviewer has seen.
+               Approving records that you approve overwriting it.
+Type the plan ID to send it, or press Enter to stop:
+Approved (apr_…). Recorded self-approval reasons: none.
+It overwrites the drifted configuration, which no reviewer has seen: this approval records that you approve overwriting it.
+The controller re-checks the plan at use time; it applies it only if every check passes.
+[exit 0]
+
+$ bronzewardctl --context human drift show mch_…
+Drift opened by observation obs_… at <local time>, last seen in observation obs_… at <local time>. Late landing: no.
+A configuration read differed from what Bronzeward last verified: Applied rel_….
+Bronzeward cannot show what changed until it is imported for adoption.
+Choose: freeze while you decide; adopt it into a release; or revert to Desired (rel_…).
+[exit 0]
+
+$ bronzewardctl --context human drift adopt mch_… --draft drf_…
+  started
+  talos-access
+  staged
+  succeeded
+  queued
+  claimed
+  succeeded
+Step 1/3  import (drift-adoption) of machine mch_… into draft drf_…
+Import ing_… started (operation op_…). Staging: encrypted. Review: not requested.
+Import ing_… released into draft drf_… (revision 6), import base ibr_….
+Step 2/3  publish draft drf_…: it publishes the whole draft
+Publishing draft drf_… revision 6 (operation op_…).
+Step 3/3  plan an adoption of release rel_…
+Plan pln_…  proposed                                         expires <local time> <local time>
+  Machine                            mch_…  127.0.0.1:<port>  cluster cl_… (lab-a), route 127.0.0.1:<port>
+  Operation                          adopt: records Applied from the node's own bytes and sends nothing to the machine
+  Release                            rel_…  machine Desired: rel_… at plan creation, rel_… now
+  Assignment                         asr_…  baseline revision 2, drift record <n>
+  Limits                             transport -, verification -, observation age 300s, check validity 300s, attempts -, rollout 1
+  Created by                         idn_… (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision <n>
+  Approval                           none                                        policy one-approver, committed operation none
+Evidence
+  Validation           passed at publication (contract v1.13, machinery v1.13.6, Kubernetes v1.36.2, container)
+  Dry run              not available: no dry run is available for this operation
+  Baseline             import base ibr_…, the node's own bytes
+  Pending convergence  yes: the release's compiled configuration differs from the node's, which the adoption records; a later apply-config plan withholds its diff
+It is not approved and nothing runs until an approver approves: bronzewardctl approve 'pln_…'
+This plan binds drift record <n>. drift adopt never approves: an approver runs bronzewardctl approve 'pln_…'
+Approval leads the controller to record the adoption without sending anything, even while the machine is frozen.
+The adopted base holds each marked value as a reference: a fragment that overrides such a value refuses publication, so stop selecting it.
+[exit 0]
+
+$ bronzewardctl --context approver approve pln_…
+Plan pln_…  proposed                                         expires <local time> <local time>
+  Machine                            mch_…  127.0.0.1:<port>  cluster cl_… (lab-a), route 127.0.0.1:<port>
+  Operation                          adopt: records Applied from the node's own bytes and sends nothing to the machine
+  Release                            rel_…  machine Desired: rel_… at plan creation, rel_… now
+  Assignment                         asr_…  baseline revision 2, drift record <n>
+  Limits                             transport -, verification -, observation age 300s, check validity 300s, attempts -, rollout 1
+  Created by                         idn_… (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision <n>
+  Approval                           none                                        policy one-approver, committed operation none
+Evidence
+  Validation           passed at publication (contract v1.13, machinery v1.13.6, Kubernetes v1.36.2, container)
+  Dry run              not available: no dry run is available for this operation
+  Baseline             import base ibr_…, the node's own bytes
+  Pending convergence  yes: the release's compiled configuration differs from the node's, which the adoption records; a later apply-config plan withholds its diff
+Self-approval  predicted: you did not create this plan or publish this release, and authored no fragment, profile or assignment revision in it.
+               Import-base authorship and automation you own are not predicted. The approval records the actual reasons; self-approval is marked and allowed.
+Type the plan ID to send it, or press Enter to stop:
+Approved (apr_…). Recorded self-approval reasons: none.
+The controller records the adoption without sending anything; Applied becomes rel_… (adoption) once it does.
+[exit 0]
