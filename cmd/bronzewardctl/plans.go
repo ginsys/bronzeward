@@ -104,29 +104,56 @@ func (s *seconds) Set(v string) error {
 func (e *env) planCreate(args []string) error { return e.planCreateWith("plan create", args, nil) }
 
 // planOpts is what a composite adds to plan create: the lines extra gives for the created plan, the
-// input a repeat gives where the composite resolved what the operator typed, and reads, which binds
-// the write to the epoch of the reads the composite made on the client it passes (§8.5).
+// input a repeat gives where the composite resolved what the operator typed, and the epoch of the
+// reads that built the request, which the write is bound to (§8.5). A nil bind leaves the write
+// unbound, as plan create is.
 type planOpts struct {
 	extra func(*client.Client, *apitypes.PlanBody) []string
 	input string
-	reads bool
+	bind  *epochBind
+}
+
+// epochBind is the epoch a read showed and the client's move count as that answer left it.
+type epochBind struct {
+	epoch string
+	moves int
+}
+
+// boundTo is the bind of the answer r: its own epoch header, as a refresh can have moved the
+// client's last epoch past it already, and its move count.
+func boundTo(c *client.Client, r *client.Response) *epochBind {
+	epoch := r.Header.Get("Bronzeward-Epoch")
+	if epoch == "" {
+		epoch = c.Context.LastEpoch
+	}
+	return &epochBind{epoch: epoch, moves: r.Moves}
+}
+
+// planRequest is a parsed and checked plan create: nothing has been read or sent for it.
+type planRequest struct {
+	in        apitypes.PlanInput
+	operation string
+	rp        *client.Repeat
 }
 
 // planCreateWith is plan create, its table followed by the lines extra gives for the created plan;
-// drift adopt adds its own.
+// drift adopt adds its own. The flags are parsed before the client opens, as they can name the
+// context.
 func (e *env) planCreateWith(name string, args []string, extra func(*client.Client, *apitypes.PlanBody) []string) (err error) {
+	req, err := e.planParse(name, args)
+	if err != nil {
+		return err
+	}
 	c, err := e.open()
 	if err != nil {
 		return err
 	}
 	defer func() { err = errors.Join(err, c.Save()) }()
-	return e.planCreateOn(c, name, args, planOpts{extra: extra})
+	return e.planCreateOn(c, req, planOpts{extra: extra})
 }
 
-// planCreateOn is planCreateWith on a client already open, which the caller saves. drift revert reads
-// the machine on it, and the write is then bound to that read's epoch.
-func (e *env) planCreateOn(c *client.Client, name string, args []string, opts planOpts) error {
-	extra := opts.extra
+// planParse reads and checks plan create's flags.
+func (e *env) planParse(name string, args []string) (*planRequest, error) {
 	var in apitypes.PlanInput
 	var operation string
 	var expires, age, validity, transport, verification seconds
@@ -145,27 +172,27 @@ func (e *env) planCreateOn(c *client.Client, name string, args []string, opts pl
 		fs.Var(&attempts, "max-attempts", "")
 		rf.flags(fs)
 	}); err != nil {
-		return err
+		return nil, err
 	}
 	in.Operation = apitypes.PlanInputOperation(operation)
 	switch {
 	case in.ReleaseId == "" || in.Machine == "":
-		return usageError{errors.New("plan create needs --release and --machine")}
+		return nil, usageError{errors.New("plan create needs --release and --machine")}
 	case !in.Operation.Valid():
-		return usageError{errors.New("--operation: give apply-config or adopt")}
+		return nil, usageError{errors.New("--operation: give apply-config or adopt")}
 	case in.Operation == apitypes.PlanInputOperationAdopt && (mode.set || transport.n != nil || verification.n != nil || attempts.set):
-		return usageError{errors.New("an adopt plan takes no --mode, --transport-deadline, --verification-deadline or --max-attempts; nothing was sent")}
+		return nil, usageError{errors.New("an adopt plan takes no --mode, --transport-deadline, --verification-deadline or --max-attempts; nothing was sent")}
 	case in.Operation == apitypes.PlanInputOperationApplyConfig:
 		m := apitypes.PlanInputModeNoReboot
 		if mode.set && apitypes.PlanInputMode(mode.v) != m {
-			return usageError{errors.New("--mode: an apply-config plan takes no-reboot, its only mode")}
+			return nil, usageError{errors.New("--mode: an apply-config plan takes no-reboot, its only mode")}
 		}
 		in.Mode = &m
 	}
 	if attempts.set {
 		n, err := strconv.Atoi(attempts.v)
 		if err != nil || n < 1 {
-			return usageError{errors.New("--max-attempts: give a whole number, at least 1")}
+			return nil, usageError{errors.New("--max-attempts: give a whole number, at least 1")}
 		}
 		in.MaxAttempts = &n
 	}
@@ -173,13 +200,20 @@ func (e *env) planCreateOn(c *client.Client, name string, args []string, opts pl
 	in.TransportDeadlineSeconds, in.VerificationDeadlineSeconds = transport.n, verification.n
 	rp, err := rf.repeat(false)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	return &planRequest{in: in, operation: operation, rp: rp}, nil
+}
+
+// planCreateOn sends a parsed plan create on a client already open, which the caller saves. A
+// composite that read on the client passes the bind of the read the request was built from.
+func (e *env) planCreateOn(c *client.Client, req *planRequest, opts planOpts) error {
+	extra, in, operation := opts.extra, req.in, req.operation
 	body, _ := json.Marshal(in)
 	// The write layer escapes each line of its answer whole, tabs included, so the plan view, whose
 	// cells planView escaped, is printed here, after the write, in its columns.
 	var view []string
-	send := &client.Write{Method: http.MethodPost, Path: "/plans", Body: body, Repeat: rp, Input: opts.input,
+	send := &client.Write{Method: http.MethodPost, Path: "/plans", Body: body, Repeat: req.rp, Input: opts.input,
 		Check: "plan list --machine " + client.ShellWord(in.Machine),
 		Read: func(c *client.Client) (string, error) {
 			return find(c, "/plans?"+url.Values{"machine": {in.Machine}}.Encode(), "proposed plan for this release and operation", func(p apitypes.PlanBody) string {
@@ -187,10 +221,10 @@ func (e *env) planCreateOn(c *client.Client, name string, args []string, opts pl
 				return map[bool]string{true: "the proposed plan " + p.Id + " for this release and operation"}[same]
 			})
 		}}
-	if opts.reads {
-		send.ReadsFrom(c)
+	if opts.bind != nil {
+		send.ReadsAt(opts.bind.epoch, opts.bind.moves)
 	}
-	err = e.writeWith(c, nil, send, func(c *client.Client, r *client.Response) ([]string, error) {
+	err := e.writeWith(c, nil, send, func(c *client.Client, r *client.Response) ([]string, error) {
 		var p apitypes.PlanBody
 		if err := json.Unmarshal(r.Body, &p); err != nil || e.output != "table" {
 			return nil, err
