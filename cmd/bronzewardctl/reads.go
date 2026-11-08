@@ -283,9 +283,16 @@ func (e *env) machineShow(c *client.Client, id string) error {
 	if err != nil {
 		return err
 	}
-	if now := c.Context.LastEpoch; first != "" && now != first {
-		// An observation page showed a new epoch: the machine above and the observations come from
-		// different snapshots, and the sentences could describe a state that never existed (§8.5).
+	// The count of moves tells a move that came back from none: the epoch of the last answer cannot.
+	// A move that came with the machine answer is not counted after it (§8.5, §8.6 item 3).
+	if c.EpochMoves() != r.Moves {
+		// A later answer showed a new epoch: the machine above and the observations come from
+		// different snapshots, and the sentences could describe a state that never existed.
+		now := c.Context.LastEpoch
+		if now == first {
+			return fmt.Errorf("the epoch moved and came back to %s while the machine was read; nothing is shown. Read it again with: machine show %s",
+				client.ShellWord(first), client.ShellWord(id))
+		}
 		return fmt.Errorf("the epoch changed from %s to %s while the machine was read; nothing is shown. Read it again with: machine show %s",
 			client.ShellWord(first), client.ShellWord(now), client.ShellWord(id))
 	}
@@ -381,7 +388,7 @@ func (e *env) statusCmd(args []string) error {
 		return err
 	}
 	return e.session(func(c *client.Client, sr *client.Response, srv *apitypes.ServerBody) error {
-		first := c.Context.LastEpoch // the epoch of the GET /server above
+		first, moves := c.Context.LastEpoch, c.EpochMoves() // the epoch of the GET /server above, and the moves so far
 		r, err := c.Get("/recovery")
 		if err != nil {
 			return err
@@ -412,9 +419,15 @@ func (e *env) statusCmd(args []string) error {
 		if err != nil {
 			return err
 		}
-		if now := c.Context.LastEpoch; first != "" && now != first {
+		// The count of moves tells a move that came back from none: the epoch of the last answer cannot (§8.5, §8.6 item 3).
+		if c.EpochMoves() != moves {
 			// A later read showed a new epoch: the server answer above, with its revision and start mode,
-			// is stale, and so is every other part of this snapshot (§8.5).
+			// is stale, and so is every other part of this snapshot.
+			now := c.Context.LastEpoch
+			if now == first {
+				return fmt.Errorf("the epoch moved and came back to %s while the status was read; nothing is shown. Read it again with: status",
+					client.ShellWord(first))
+			}
 			return fmt.Errorf("the epoch changed from %s to %s while the status was read; nothing is shown. Read it again with: status",
 				client.ShellWord(first), client.ShellWord(now))
 		}
