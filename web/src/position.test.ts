@@ -1889,12 +1889,12 @@ describe("a plain !bwref value that goes on to the next line", () => {
     // No figure from earlier code: these rows pass on f52d5579 too, where only their timing check runs, and are
     // not shown to fail there. They pin the bound for the new reading.
     test.each([
-      ["an indentation of 100,000 spaces before an anchored value", `${" ".repeat(100000)}k: !bwref &e x/foo\n${" ".repeat(100002)}j: v\n`],
-      ["4,000 anchored values, each followed by a deeper key line", Array.from({ length: 4000 }, (_, i) => `k${i}: !bwref &e x/foo${i}\n  j: v\n`).join("")],
-      ["4,000 plain values in a compact parent, each followed by a deeper key line", Array.from({ length: 4000 }, (_, i) => `- k${i}: !bwref x/foo${i}\n    j: v\n`).join("")],
-      ["a key of 300,000 characters before an anchored value in a compact parent", `- ${"a".repeat(300000)}: !bwref &e x/foo\n    j: v\n`],
-    ])("a deeper key line after a plain value is scanned in near linear time (%s)", (_, text) => {
-      bounded(text);
+      ["an indentation of 100,000 spaces before an anchored value", 100000, (n: number) => `${rep(" ", n)}k: !bwref &e x/foo\n${rep(" ", n + 2)}j: v\n`],
+      ["4,000 anchored values, each followed by a deeper key line", 4000, (n: number) => lines(n, (i) => `k${i}: !bwref &e x/foo${i}\n  j: v\n`)],
+      ["4,000 plain values in a compact parent, each followed by a deeper key line", 4000, (n: number) => lines(n, (i) => `- k${i}: !bwref x/foo${i}\n    j: v\n`)],
+      ["a key of 300,000 characters before an anchored value in a compact parent", 300000, (n: number) => `- ${rep("a", n)}: !bwref &e x/foo\n    j: v\n`],
+    ])("a deeper key line after a plain value is scanned in near linear time (%s)", (_, size, build) => {
+      bounded(size, build);
     });
 
     // A continuation line with a long run of blanks between two words: trimming it must not try every
