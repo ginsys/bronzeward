@@ -8,10 +8,10 @@ Plan pln_…  proposed                                         expires <local ti
   Created by                         idn_… (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision 41
   Approval                           none                                        policy one-approver, committed operation none
 Evidence
-  Validation  passed at publication (contract v1.13, machinery v1.13.6, Kubernetes v1.36.2, container)
+  Validation  passed at publication (contract v1.14, machinery v1.14.5, Kubernetes v1.37.1, container)
   Dry run     not available: no dry run is available for this operation
   Diff        Changes shown below: the whole redacted configuration, rel_… -> rel_…
-    @@ -3,10 +3,10 @@
+    @@ -3,19 +3,19 @@
      persist: true
      machine:
        type: controlplane
@@ -22,44 +22,11 @@ Evidence
     -    key: <redacted:s-…@1>
     +    key: <redacted:s-…@1>
        certSANs: []
-       kubelet:
-         image: ghcr.io/siderolabs/kubelet:v1.36.2
-    @@ -26,10 +26,11 @@
-           forwardKubeDNSToHost: true
-       nodeLabels:
-         node.example.test/pool: workers
-    +    node.example.test/tier: b
-         node.kubernetes.io/exclude-from-external-load-balancers: ""
+       features:
+         diskQuotaSupport: true
      cluster:
-       id: <base64>
-    -  secret: <redacted:s-…@1>
-    +  secret: <redacted:s-…@1>
-       controlPlane:
-         endpoint: https://cp.example.test:6443
-       clusterName: bwsynth
-    @@ -39,16 +40,16 @@
-           - 10.244.0.0/16
-         serviceSubnets:
-           - 10.96.0.0/12
     -  token: <redacted:s-…@1>
-    -  secretboxEncryptionSecret: <redacted:s-…@1>
     +  token: <redacted:s-…@1>
-    +  secretboxEncryptionSecret: <redacted:s-…@1>
-       ca:
-         crt: <base64>
-    -    key: <redacted:s-…@1>
-    +    key: <redacted:s-…@1>
-       aggregatorCA:
-         crt: <base64>
-    -    key: <redacted:s-…@1>
-    +    key: <redacted:s-…@1>
-       serviceAccount:
-    -    key: <redacted:s-…@1>
-    +    key: <redacted:s-…@1>
-       apiServer:
-         image: registry.k8s.io/kube-apiserver:v1.36.2
-         admissionControl:
-    @@ -88,7 +89,7 @@
        etcd:
          ca:
            crt: <base64>
@@ -67,7 +34,59 @@ Evidence
     +      key: <redacted:s-…@1>
      ---
      apiVersion: v1alpha1
-     kind: HostnameConfig
+     kind: DiscoveryServiceConfig
+    @@ -25,7 +25,7 @@
+     apiVersion: v1alpha1
+     kind: DiscoveryIdentityConfig
+     clusterID: <base64>
+    -clusterSecret: <redacted:s-…@1>
+    +clusterSecret: <redacted:s-…@1>
+     ---
+     apiVersion: v1alpha1
+     kind: UnattendedInstallConfig
+    @@ -70,6 +70,7 @@
+     labels:
+       node-role.kubernetes.io/control-plane: ""
+       node.example.test/pool: workers
+    +  node.example.test/tier: b
+       node.kubernetes.io/exclude-from-external-load-balancers: ""
+     taints:
+       node-role.kubernetes.io/control-plane: NoSchedule
+    @@ -103,7 +104,7 @@
+         <base64>
+         <pem>
+         -----END CERTIFICATE-----
+    -  key: <redacted:s-…@1>
+    +  key: <redacted:s-…@1>
+     ---
+     apiVersion: v1alpha1
+     kind: KubePrismConfig
+    @@ -123,7 +124,7 @@
+         <base64>
+         <pem>
+         -----END CERTIFICATE-----
+    -  key: <redacted:s-…@1>
+    +  key: <redacted:s-…@1>
+     ---
+     apiVersion: v1alpha1
+     kind: KubeAdmissionControlConfig
+    @@ -181,14 +182,14 @@
+             - secretbox:
+                 keys:
+                   - name: key2
+    -                secret: <redacted:s-…@1>
+    +                secret: <redacted:s-…@1>
+           resources:
+             - secrets
+     ---
+     apiVersion: v1alpha1
+     kind: KubeServiceAccountConfig
+     issuer:
+    -  privateKey: <redacted:s-…@1>
+    +  privateKey: <redacted:s-…@1>
+       issuerURL: https://cp.example.test:6443
+     ---
+     apiVersion: v1alpha1
 It is not approved and nothing runs until an approver approves: bronzewardctl approve 'pln_…'
 [exit 0]
 
@@ -81,10 +100,10 @@ Plan pln_…  proposed                                         expires <local ti
   Created by                         idn_… (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision 41
   Approval                           none                                        policy one-approver, committed operation none
 Evidence
-  Validation  passed at publication (contract v1.13, machinery v1.13.6, Kubernetes v1.36.2, container)
+  Validation  passed at publication (contract v1.14, machinery v1.14.5, Kubernetes v1.37.1, container)
   Dry run     not available: no dry run is available for this operation
   Diff        Changes shown below: the whole redacted configuration, rel_… -> rel_…
-    @@ -3,10 +3,10 @@
+    @@ -3,19 +3,19 @@
      persist: true
      machine:
        type: controlplane
@@ -95,44 +114,11 @@ Evidence
     -    key: <redacted:s-…@1>
     +    key: <redacted:s-…@1>
        certSANs: []
-       kubelet:
-         image: ghcr.io/siderolabs/kubelet:v1.36.2
-    @@ -26,10 +26,11 @@
-           forwardKubeDNSToHost: true
-       nodeLabels:
-         node.example.test/pool: workers
-    +    node.example.test/tier: b
-         node.kubernetes.io/exclude-from-external-load-balancers: ""
+       features:
+         diskQuotaSupport: true
      cluster:
-       id: <base64>
-    -  secret: <redacted:s-…@1>
-    +  secret: <redacted:s-…@1>
-       controlPlane:
-         endpoint: https://cp.example.test:6443
-       clusterName: bwsynth
-    @@ -39,16 +40,16 @@
-           - 10.244.0.0/16
-         serviceSubnets:
-           - 10.96.0.0/12
     -  token: <redacted:s-…@1>
-    -  secretboxEncryptionSecret: <redacted:s-…@1>
     +  token: <redacted:s-…@1>
-    +  secretboxEncryptionSecret: <redacted:s-…@1>
-       ca:
-         crt: <base64>
-    -    key: <redacted:s-…@1>
-    +    key: <redacted:s-…@1>
-       aggregatorCA:
-         crt: <base64>
-    -    key: <redacted:s-…@1>
-    +    key: <redacted:s-…@1>
-       serviceAccount:
-    -    key: <redacted:s-…@1>
-    +    key: <redacted:s-…@1>
-       apiServer:
-         image: registry.k8s.io/kube-apiserver:v1.36.2
-         admissionControl:
-    @@ -88,7 +89,7 @@
        etcd:
          ca:
            crt: <base64>
@@ -140,7 +126,59 @@ Evidence
     +      key: <redacted:s-…@1>
      ---
      apiVersion: v1alpha1
-     kind: HostnameConfig
+     kind: DiscoveryServiceConfig
+    @@ -25,7 +25,7 @@
+     apiVersion: v1alpha1
+     kind: DiscoveryIdentityConfig
+     clusterID: <base64>
+    -clusterSecret: <redacted:s-…@1>
+    +clusterSecret: <redacted:s-…@1>
+     ---
+     apiVersion: v1alpha1
+     kind: UnattendedInstallConfig
+    @@ -70,6 +70,7 @@
+     labels:
+       node-role.kubernetes.io/control-plane: ""
+       node.example.test/pool: workers
+    +  node.example.test/tier: b
+       node.kubernetes.io/exclude-from-external-load-balancers: ""
+     taints:
+       node-role.kubernetes.io/control-plane: NoSchedule
+    @@ -103,7 +104,7 @@
+         <base64>
+         <pem>
+         -----END CERTIFICATE-----
+    -  key: <redacted:s-…@1>
+    +  key: <redacted:s-…@1>
+     ---
+     apiVersion: v1alpha1
+     kind: KubePrismConfig
+    @@ -123,7 +124,7 @@
+         <base64>
+         <pem>
+         -----END CERTIFICATE-----
+    -  key: <redacted:s-…@1>
+    +  key: <redacted:s-…@1>
+     ---
+     apiVersion: v1alpha1
+     kind: KubeAdmissionControlConfig
+    @@ -181,14 +182,14 @@
+             - secretbox:
+                 keys:
+                   - name: key2
+    -                secret: <redacted:s-…@1>
+    +                secret: <redacted:s-…@1>
+           resources:
+             - secrets
+     ---
+     apiVersion: v1alpha1
+     kind: KubeServiceAccountConfig
+     issuer:
+    -  privateKey: <redacted:s-…@1>
+    +  privateKey: <redacted:s-…@1>
+       issuerURL: https://cp.example.test:6443
+     ---
+     apiVersion: v1alpha1
 Self-approval  predicted: you did not create this plan or publish this release, and authored no fragment, profile or assignment revision in it.
                Import-base authorship and automation you own are not predicted. The approval records the actual reasons; self-approval is marked and allowed.
 Type the plan ID to send it, or press Enter to stop:
