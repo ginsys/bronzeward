@@ -771,6 +771,109 @@ describe("a lapsed lease decides only after the operation's newest event was sho
   });
 });
 
+describe("a renewed lease reaches the page, and a confirmation belongs to the snapshot it checked (ginsys/bronzeward#734)", () => {
+  const OPID = "op_zcfw5mcm";
+  const tick = () => new Promise<void>((r) => setTimeout(r, 0));
+  const lease = (s: string, ownerGeneration = 2) => ing({ ownerGeneration, leaseUntil: `2026-11-01T${s}Z` });
+  // A watch of generation 2 over a server that serves the claim `serve` sets, with the page's snapshot `page` sets.
+  // A snapshot is read 15 s after its lease and the check runs 5 s later.
+  const rig = (first: Ingestion, served?: () => Promise<Ingestion>) => {
+    let claim = first;
+    const paths: string[] = [];
+    const acts: string[] = [];
+    let renewed = 0;
+    let cur = { b: first, at: Date.parse(first.leaseUntil) + 15_000 };
+    let t = cur.at + 5_000;
+    const client = {
+      readWithEpoch: async <T,>(p: string) => {
+        paths.push(p);
+        const data = p.startsWith("/ingestions/") ? await (served ?? (async () => claim))() : op({ lastEvent: 1 });
+        return { result: { kind: "ok", data } as unknown as ReadResult<T>, epoch: "e1" };
+      },
+    };
+    const f = followRun({
+      client, ingestion: first.id, op: OPID, generation: 2, signal: new AbortController().signal,
+      latest: () => cur, abandonedAt: () => undefined, now: () => t, view: (a) => acts.push(a.type), renewed: () => { renewed++; },
+    });
+    f.w.show({ id: "e1:1", type: "started", data: {}, at: "2026-11-01T06:56:00Z" } as never);
+    return {
+      f, paths, acts, renewed: () => renewed,
+      serve: (b: Ingestion) => { claim = b; },
+      page: (b: Ingestion) => { cur = { b, at: Date.parse(b.leaseUntil) + 15_000 }; t = cur.at + 5_000; },
+    };
+  };
+  test("a claim read with a strictly later lease under the watch's generation asks the page to read again, once per snapshot, and the watch goes on without a restart", async () => {
+    const r = rig(lease("07:05:00"));
+    r.serve(lease("07:10:00"));
+    expect(r.f.w.until!()).toBe(false);
+    await tick();
+    expect(r.renewed()).toBe(1);
+    // Checks made before the page's read arrives do not ask again.
+    expect(r.f.w.until!()).toBe(false);
+    await tick();
+    expect(r.f.w.until!()).toBe(false);
+    expect(r.renewed()).toBe(1);
+    // The events stay as they were: nothing was cleared or replayed, and the run did not settle.
+    expect(r.acts).toEqual(["show"]);
+    expect(r.f.settled()).toBeUndefined();
+    // The page's new snapshot shows the renewed lease; when it lapses, a check for it decides. The check the
+    // old snapshot left in flight ends first and keeps nothing.
+    r.page(lease("07:10:00"));
+    expect(r.f.w.until!()).toBe(false);
+    await tick();
+    expect(r.f.w.until!()).toBe(false);
+    await tick();
+    expect(r.f.w.until!()).toBe(true);
+  });
+  test("a lease that is not later does not ask the page to read again", async () => {
+    for (const read of [lease("07:05:00"), lease("07:04:00")]) {
+      const r = rig(lease("07:05:00"));
+      r.serve(read);
+      r.f.w.until!();
+      await tick();
+      expect(r.renewed()).toBe(0);
+    }
+  });
+  test("a later lease under another owner generation is a takeover, not a renewal: it does not ask the page to read again", async () => {
+    const r = rig(lease("07:05:00"));
+    r.serve(lease("07:10:00", 3));
+    r.f.w.until!();
+    await tick();
+    expect(r.renewed()).toBe(0);
+  });
+  test("a confirmation made for one snapshot is not used for a newer one: the claim and the operation are read again", async () => {
+    const r = rig(lease("07:05:00"));
+    r.f.w.until!();
+    await tick();
+    expect(r.f.w.until!()).toBe(true);
+    expect(r.paths).toHaveLength(2);
+    // The lease was renewed, the page read it and it lapsed again: the older confirmation says nothing about it.
+    r.serve(lease("07:10:00"));
+    r.page(lease("07:10:00"));
+    expect(r.f.w.until!()).toBe(false);
+    await tick();
+    expect(r.paths).toHaveLength(4);
+    expect(r.f.w.until!()).toBe(true);
+  });
+  test("a check still in flight when a newer snapshot arrives sets nothing and asks nothing of the page", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((res) => { release = res; });
+    const r = rig(lease("07:05:00"), async () => (await gate, lease("07:10:00")));
+    r.f.w.until!();
+    // The page reads the renewal while the check waits for its claim read.
+    r.page(lease("07:10:00"));
+    release();
+    await tick();
+    expect(r.renewed()).toBe(0);
+    expect(r.paths).toHaveLength(2);
+    // The newer snapshot gets its own check, which decides.
+    expect(r.f.w.until!()).toBe(false);
+    await tick();
+    expect(r.paths).toHaveLength(4);
+    expect(r.f.w.until!()).toBe(true);
+  });
+});
+
 describe("the start while its draft's ETag is read (ginsys/bronzeward#644 item G)", () => {
   const input: StartInput = { kind: "import", machine: "mch_b3caa2q", draft: "drf_2rmp457a", source: "document", staging: "encrypted", review: true, doc: "a: 1", marks: "/a" };
   test("text typed while the draft was read is kept, with the leave guard, and the submitted text is emptied", async () => {
