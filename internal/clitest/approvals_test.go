@@ -119,7 +119,7 @@ var approvalCases = map[string]func(*testing.T, *planEnv){
 		f.do(q, http.StatusCreated)
 		before := f.actCount()
 		config := filepath.Join(f.home, "bronzeward", "config.yaml")
-		process := "Recovery mode: the server was started for recovery: it refuses plan creation and approval"
+		process := "Recovery mode: the server was started for recovery: it refuses plan creation, approval and unfreeze"
 		f.want(e.ctl(e.create("apply-config")...), 1, "409", "(recovery-mode-active)", process)
 		f.want(e.approveTyped("human", last), 1, "409", "(recovery-mode-active)", process)
 		if cfg, _ := os.ReadFile(config); !strings.Contains(string(cfg), "startMode: recovery") || f.actCount() != before {

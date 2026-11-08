@@ -145,7 +145,7 @@ func TestUnfreezeWhyBlocked(t *testing.T) {
 	recoveryServer(t, map[string]string{route: "409 " + problemHead + `recovery-mode-active","title":"Recovery mode active","status":409,` +
 		`"detail":"this process started with the recovery-start flag; restart it without the flag for this act"` + problemTail}, "")
 	code, out, errOut = runDrift(t, unfreeze...)
-	if code != 1 || out != "" || !strings.Contains(errOut, "Recovery mode: the server was started for recovery: it refuses plan creation and approval") ||
+	if code != 1 || out != "" || !strings.Contains(errOut, "Recovery mode: the server was started for recovery: it refuses plan creation, approval and unfreeze") ||
 		!strings.Contains(errOut, processWhy+"\n") || strings.Contains(errOut, "the scope of machine") || strings.Contains(errOut, "Why: a restore can erase") ||
 		strings.Contains(errOut, "recovery status names") {
 		t.Errorf("the process's refusal: exit %d, stdout %q, stderr %q", code, out, errOut)

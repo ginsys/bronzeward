@@ -71,5 +71,5 @@
       startMode recovery; reads the normal start's refusal, with scope, as that scope's and leaves
       the start mode normal
     server: answers 409 recovery-mode-active without scope on the recovery start, then with machine and scope pre-restore-unaccounted; no act
-    shown: '"Recovery mode: the server was started for recovery: it refuses plan creation and approval", twice, exit 1; then "Recovery mode: the scope of machine mch_... is pre-restore-unaccounted.", exit 1'
+    shown: '"Recovery mode: the server was started for recovery: it refuses plan creation, approval and unfreeze", twice, exit 1; then "Recovery mode: the scope of machine mch_... is pre-restore-unaccounted.", exit 1'
     absent: [token in stdout, stderr, argv]
