@@ -20,8 +20,10 @@ type adoptChain struct {
 	plan             *planFake
 	mu               sync.Mutex
 	moveAfterPublish bool
-	read, moved      bool
-	log              []string
+	// pubUnknown answers the publication with a redirect, which the client cannot read: its outcome is unknown.
+	pubUnknown  bool
+	read, moved bool
+	log         []string
 }
 
 func (f *adoptChain) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -45,6 +47,9 @@ func (f *adoptChain) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"kind":"human","principal":"h_BWSYNTH","roles":["author","publisher"]}`)
 	case strings.HasPrefix(path, "/ingestions"), strings.HasPrefix(path, "/operations/op_BWSYNTH-ing"):
 		f.imp.ServeHTTP(w, r)
+	case strings.HasSuffix(path, "/publications") && r.Method == http.MethodPost && f.pubUnknown:
+		w.Header().Set("Location", "/elsewhere")
+		w.WriteHeader(http.StatusTemporaryRedirect)
 	case strings.HasSuffix(path, "/publications"), strings.HasPrefix(path, "/operations/op_BWSYNTH-pub"):
 		f.pub.ServeHTTP(w, r)
 	case path == "/plans":
@@ -117,5 +122,34 @@ func TestDriftAdoptSendsItsPlanWhenTheEpochHolds(t *testing.T) {
 	}
 	if got := savedEpoch(t); got != "ep_BWSYNTH-1" {
 		t.Errorf("saved epoch %q; want ep_BWSYNTH-1, which never moved", got)
+	}
+}
+
+// TestDriftAdoptNamesTheCommandToRepeat: after an unknown outcome of step 2 or step 3, the block names
+// the command that repeats that step, with the flags it printed. Repeating drift adopt would give
+// those flags to the import of step 1, whose key, epoch and fingerprint are another request.
+func TestDriftAdoptNamesTheCommandToRepeat(t *testing.T) {
+	for _, c := range []struct {
+		name, want string
+		set        func(*adoptChain)
+	}{
+		{"step 2, the publication", "give the same input, with the command bronzewardctl publish 'drf_BWSYNTH' in place of drift adopt, and: --idempotency-key ",
+			func(f *adoptChain) { f.pubUnknown = true }},
+		{"step 3, the adopt plan", "give the same input, with the command bronzewardctl plan create --release 'rel_BWSYNTH' --machine 'mch_BWSYNTH' --operation 'adopt' in place of drift adopt, and: --idempotency-key ",
+			func(f *adoptChain) {
+				f.plan.post = func(w http.ResponseWriter, _ string) {
+					w.Header().Set("Location", "/elsewhere")
+					w.WriteHeader(http.StatusTemporaryRedirect)
+				}
+			}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := adoptChainServer(t)
+			c.set(f)
+			code, _, errOut := runDrift(t, "drift", "adopt", "mch_BWSYNTH", "--draft", "drf_BWSYNTH")
+			if code != 3 || !strings.Contains(errOut, c.want) {
+				t.Errorf("exit %d, stderr %q; want exit 3 and %q", code, errOut, c.want)
+			}
+		})
 	}
 }
