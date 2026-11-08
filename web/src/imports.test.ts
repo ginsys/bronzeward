@@ -4,14 +4,15 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { components } from "./api/v1";
 import { forgetETag, keepETag, keptETag } from "./drafts.tsx";
 import { WritesProvider } from "./forms.tsx";
-import { ABANDONED_SETTLE, abandonedSince, againPath, allowed, caughtUp, documentRefusal, ended, fileReader, followRun, type Ingestion, MAX_DOCUMENT, onEvent, sendStart, StartImport, type StartInput, startBody, startETag, startParams, settledReads, startRun, started, stopsWatch, typedDocument, unsent, watchDeps, watchView } from "./imports.tsx";
-import { type Reads, ReadsProvider, short } from "./list.tsx";
+import { ABANDONED_SETTLE, abandonedSince, againPath, allowed, caughtUp, documentRefusal, ended, fileReader, followRun, forgetRefused, type Ingestion, keepTyped, MAX_DOCUMENT, onEvent, reviewFirst, sendStart, StartImport, type StartInput, startBody, startETag, startParams, settledReads, startRun, started, stopsWatch, typedDocument, unsent, watchDeps, watchView } from "./imports.tsx";
+import { type Load, type Reads, ReadsProvider, short } from "./list.tsx";
 import { eventLine, watch } from "./progress.ts";
 import { Client, type ReadResult } from "./request.ts";
 import { ShellContext } from "./shell.tsx";
 import { EPOCH_CHANGED_ASIDE, Write, Writes, type WriteSpec } from "./write.ts";
 
 type Operation = components["schemas"]["OperationBody"];
+type Draft = components["schemas"]["DraftBody"];
 
 const NOW = Date.parse("2026-11-01T07:00:00Z");
 const ing = (o: Partial<Ingestion> = {}): Ingestion => ({
@@ -659,5 +660,75 @@ describe("a lapsed lease decides only after the operation's newest event was sho
     expect(caughtUp(shown(4), "e2", "e1", 2)).toBe("reset");
     // A read that named no epoch is not a mismatch, as in the CLI.
     expect(caughtUp(shown(4), undefined, undefined, 4)).toBe(true);
+  });
+});
+
+describe("the start while its draft's ETag is read (ginsys/bronzeward#644 item G)", () => {
+  const input: StartInput = { kind: "import", machine: "mch_b3caa2q", draft: "drf_2rmp457a", source: "document", staging: "encrypted", review: true, doc: "a: 1", marks: "/a" };
+  test("text typed while the draft was read is kept, with the leave guard, and the submitted text is emptied", async () => {
+    let typed = { doc: "a: 1", marks: "/a" };
+    const sent: WriteSpec[] = [];
+    let release: (r: Load<Draft>) => void = () => {};
+    const slow = () => new Promise<Load<Draft>>((done) => { release = done; });
+    const done = startETag(slow, () => "e1", input.draft, (ifMatch) => sendStart((s) => void sent.push(s), () => { typed = keepTyped(typed, input); }, input, ifMatch));
+    // The operator keeps typing in the document field while the read is pending; the marks stay as submitted.
+    typed = { doc: "a: 1\nb: 2", marks: "/a" };
+    release({ kind: "ok", data: {} as Draft, etag: '"3"' });
+    expect(await done).toBeUndefined();
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.ifMatch).toBe('"3"');
+    expect((sent[0]!.body as { document: string }).document).toBe("a: 1");
+    expect(typed).toEqual({ doc: "a: 1\nb: 2", marks: "" });
+    expect(unsent(typed)).toBe(true);
+  });
+  test("fields that still equal the submitted text are emptied, as before", () => {
+    expect(keepTyped({ doc: "a: 1", marks: "/a" }, input)).toEqual({ doc: "", marks: "" });
+    expect(unsent(keepTyped({ doc: "a: 1", marks: "/a" }, input))).toBe(false);
+    expect(keepTyped({ doc: "other", marks: "/a" }, input)).toEqual({ doc: "other", marks: "" });
+  });
+});
+
+describe("a 412 on the start leads to the draft, and the same ETag is not sent again (ginsys/bronzeward#644 item H)", () => {
+  const input: StartInput = { kind: "import", machine: "mch_b3caa2q", draft: "drf_2rmp457a", source: "machine", staging: "encrypted", review: true, doc: "", marks: "" };
+  const refusedOn = (etag: string) => {
+    let spec: WriteSpec | undefined;
+    sendStart((s) => { spec = s; }, () => {}, input, etag);
+    spec!.settled!({ kind: "refused", status: 412, problem: null, replayed: false }, { epoch: "e1" } as unknown as Write);
+  };
+  const attempt = async () => {
+    const sent: string[] = [];
+    const why = await startETag(async () => ({ kind: "ok", data: {} as Draft, etag: '"fresh"' }), () => "e1", input.draft, (m) => void sent.push(m));
+    return { why, sent };
+  };
+  afterEach(() => forgetRefused(input.draft));
+  test("the refused write shows a link to its draft, and no other outcome does", () => {
+    const refused = { kind: "refused", status: 412, problem: null, replayed: false } as const;
+    const out = renderToStaticMarkup(h(ReadsProvider, { value: noReads }, reviewFirst(refused, input.draft)));
+    expect(out).toContain('href="/drafts/drf_2rmp457a"');
+    expect(out).toContain("Review the draft");
+    expect(reviewFirst({ ...refused, status: 409 }, input.draft)).toBeUndefined();
+    expect(reviewFirst({ kind: "done", data: null, replayed: false } as never, input.draft)).toBeUndefined();
+    expect(reviewFirst(undefined, input.draft)).toBeUndefined();
+    expect(reviewFirst(refused, undefined)).toBeUndefined();
+  });
+  test("with the kept ETag the 412 refused, nothing is sent; once the draft page kept another, it is", async () => {
+    keepETag(input.draft, '"old"', "e1");
+    refusedOn('"old"');
+    const blocked = await attempt();
+    expect(blocked.sent).toEqual([]);
+    expect(blocked.why).toBe("Not sent: the draft changed since this ETag was read. Review the draft first; its page reads the ETag again.");
+    // The draft's page read it again and kept its new ETag.
+    keepETag(input.draft, '"new"', "e1");
+    const open = await attempt();
+    expect(open.why).toBeUndefined();
+    expect(open.sent).toEqual(['"new"']);
+  });
+  test("a 412 on one draft does not stop the start of another that holds the same ETag text", async () => {
+    refusedOn('"old"');
+    keepETag("drf_other", '"old"', "e1");
+    const sent: string[] = [];
+    expect(await startETag(async () => undefined, () => "e1", "drf_other", (m) => void sent.push(m))).toBeUndefined();
+    expect(sent).toEqual(['"old"']);
+    forgetETag("drf_other");
   });
 });

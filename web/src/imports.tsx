@@ -15,7 +15,7 @@ import { eventLine, type Refusal, refusalOf, refusalText, terminal, type Watch, 
 import type { Client, ReadResult } from "./request.ts";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
-import type { WriteSpec } from "./write.ts";
+import type { Outcome, WriteSpec } from "./write.ts";
 
 type S = components["schemas"];
 export type Ingestion = S["IngestionBody"];
@@ -433,9 +433,28 @@ export function sendStart(send: (spec: WriteSpec) => void, clear: () => void, i:
     settled: (out, w) => {
       const a = out.kind === "done" ? (out.data as { ingestion?: string } | null) : null;
       if (typeof a?.ingestion === "string") started.set(a.ingestion, { draft, epoch: w.epoch });
+      if (out.kind === "refused" && out.status === 412) refusedTags.set(draft, ifMatch);
     },
   });
 }
+// The ETag of each draft whose start the server refused with a 412 (ginsys/bronzeward#644 item H):
+// sending the same ETag again is refused again, so nothing is sent until the draft's page, which the
+// 412 links to, has read the draft and kept another. In this page's memory only.
+const refusedTags = new Map<string, string>();
+export const forgetRefused = (draft: string) => void refusedTags.delete(draft);
+export const REVIEW_FIRST = "Not sent: the draft changed since this ETag was read. Review the draft first; its page reads the ETag again.";
+// What a refused start offers: the draft the 412 is about, to read before starting again.
+export const reviewFirst = (o: Outcome | undefined, draft: string | undefined): ReactNode =>
+  o?.kind === "refused" && o.status === 412 && draft !== undefined
+    ? <p><Ref to={`/drafts/${draft}`} id={draft}>Review the draft</Ref> before starting again: another write changed it.</p>
+    : undefined;
+// The typed fields after a start was sent: only a field that still equals the text that was sent is
+// emptied. Text typed while the draft's ETag was read is neither sent nor released, so it stays,
+// and the leave guard keeps asking for it (ginsys/bronzeward#644 item G).
+export const keepTyped = (now: { doc: string; marks: string }, sent: { doc: string; marks: string }) => ({
+  doc: now.doc === sent.doc ? "" : now.doc,
+  marks: now.marks === sent.marks ? "" : now.marks,
+});
 // The start's If-Match is the draft's ETag (§8.3): the kept one, else the draft read again. The write
 // is sent under the client's epoch at its send, so nothing is sent when that epoch is not the one the
 // ETag was read under (§8.5): `send` runs in the same turn as the check. Returns why nothing was sent.
@@ -443,6 +462,8 @@ export async function startETag(read: (path: string) => Promise<Load<Draft> | un
   const epoch = current();
   const kept = keptETag(draft, epoch);
   if (kept !== undefined) {
+    if (refusedTags.get(draft) === kept) return REVIEW_FIRST;
+    forgetRefused(draft);
     send(kept);
     return undefined;
   }
@@ -487,6 +508,8 @@ export function StartImport({ query }: { query: string }) {
   const [typed, setTyped] = useState({ doc: "", marks: "" });
   const [note, setNote] = useState<string>();
   const reading = useRef(false);
+  // The draft of the start last sent, for the link a 412 shows.
+  const sentDraft = useRef<string>(undefined);
   const [machines] = useList<Machine>("/machines", "", true);
   const [drafts] = useList<Draft>("/drafts", "", true);
   const m = machines.kind === "ok" ? machines.data.items.find((x) => x.id === machine) : undefined;
@@ -508,7 +531,11 @@ export function StartImport({ query }: { query: string }) {
     reading.current = true;
     try {
       const why = await startETag(read<Draft>, () => writes?.client?.currentEpoch, draft,
-        (ifMatch) => sendStart(send, () => setTyped({ doc: "", marks: "" }), { kind: params.kind, machine, draft, source, staging, review, doc, marks }, ifMatch));
+        (ifMatch) => {
+          sentDraft.current = draft;
+          // Only the text that was submitted is emptied: more typed while the draft's ETag was read stays.
+          sendStart(send, () => setTyped((now) => keepTyped(now, { doc, marks })), { kind: params.kind, machine, draft, source, staging, review, doc, marks }, ifMatch);
+        });
       if (why !== undefined) setNote(why);
     } finally {
       reading.current = false;
@@ -565,6 +592,7 @@ export function StartImport({ query }: { query: string }) {
         </p>
         {note !== undefined && <Status testid="start-note">{note}</Status>}
       </Form>
+      {reviewFirst(o, sentDraft.current)}
     </>
   );
 }
