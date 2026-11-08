@@ -9,7 +9,7 @@ import { type Reads, ReadsProvider } from "./list.tsx";
 import { candidates, markLines, markRefusal, markSent, MarksPanel, markSpec, MAX_CANDIDATES, MAX_MARKS, withMark } from "./marks.tsx";
 import { eventLine, refusalOf, refusalText } from "./progress.ts";
 import { ShellContext } from "./shell.tsx";
-import { Refused } from "./states.tsx";
+import { problemTail, Refused, Unknown } from "./states.tsx";
 import { Writes } from "./write.ts";
 
 type Operation = components["schemas"]["OperationBody"];
@@ -157,6 +157,14 @@ describe("a refused mark is named by rule and position, never a path (§11.3, PR
     expect(out).toContain("Request req_1.");
     expect(out).not.toContain("BWSYNTH");
     expect(renderToStaticMarkup(h(Refused, { problem: problem({ status: 409, position: 2 }), status: 409, verb: "saved" }))).not.toContain("position");
+  });
+  test("the notices of an unknown or repeated send show the position and no path either", () => {
+    const p = problem({ position: 2, path: SENTINEL, detail: `doc[0]/${SENTINEL}`, instance: "req_1" });
+    const unknown = renderToStaticMarkup(h(Unknown, { why: "timeout", problem: p, onShow: () => {} }));
+    expect(unknown).toContain("The mark at position 2 (the first is 0) is refused.");
+    expect(unknown).not.toContain("BWSYNTH");
+    expect(problemTail(p)).not.toContain("BWSYNTH");
+    expect(problemTail(problem({ status: 409, detail: "kept" }))).toContain("kept");
   });
 });
 

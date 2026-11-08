@@ -62,15 +62,24 @@ export function needs(status: number, problem: Problem): string {
   return Array.isArray(roles) && roles.length > 0 && roles.every((r) => typeof r === "string") ? ` Needs ${roles.join(" or ")}.` : "";
 }
 
+// A problem's `position` member when it is a whole number (a mark refused by its index).
+const positionOf = (p: Problem): number | undefined => {
+  const n = p["position"];
+  return typeof n === "number" && Number.isSafeInteger(n) && n >= 0 ? n : undefined;
+};
+// A refused mark is named by its position in the request, never its path (§8.2 422 row): its detail
+// is left out of every notice too, because the server's text may name the path.
+const refusedAt = (p: Problem) => (p.status === 422 && positionOf(p) !== undefined ? ` The mark at position ${positionOf(p)} (the first is 0) is refused.` : "");
+
 // A problem's title, its detail when present and its instance (§8.2), as one sentence or two.
-export const problemLine = (p: Problem) => `${p.title}${p.detail !== undefined ? `: ${p.detail}` : ""}.${p.instance !== undefined ? ` Request ${p.instance}.` : ""}`;
+export const problemLine = (p: Problem) => `${p.title}${p.detail !== undefined && refusedAt(p) === "" ? `: ${p.detail}` : ""}.${p.instance !== undefined ? ` Request ${p.instance}.` : ""}`;
 // An earlier-epoch idempotency record's 409 (§8.2 409 row, §8.4 item 7): the request it recorded
 // and that request's epoch, which the operator reads and reports.
 export const earlierRecord = (p: Problem) =>
   p.status === 409 && typeof p["request"] === "string" && typeof p["epoch"] === "string" ? ` The key's earlier record: request ${p["request"]}, epoch ${p["epoch"]}.` : "";
 // The problem an unknown or set-aside write's last answer carried, after its sentence: what the
 // route accepts (a 403's), then its fields. Nothing when no answer carried one.
-export const problemTail = (p: Problem | null) => (p === null ? "" : `${needs(p.status, p)} ${problemLine(p)}${earlierRecord(p)}`);
+export const problemTail = (p: Problem | null) => (p === null ? "" : `${needs(p.status, p)}${refusedAt(p)} ${problemLine(p)}${earlierRecord(p)}`);
 
 // A `409 recovery-mode-active` with a `scope` member is that scope's refusal. It says nothing about
 // the process's start mode (client contracts §8.5 item 1, §8.2 409 row). Any other problem, and a
@@ -81,20 +90,12 @@ export function scopeRefusal(code: string, problem: Problem): string {
   return code === "recovery-mode-active" && typeof scope === "string" ? ` Scope ${scope} refuses this request. ${SCOPE_NO_MODE}` : "";
 }
 
-// A problem's `position` member when it is a whole number (a mark refused by its index).
-const positionOf = (p: Problem): number | undefined => {
-  const n = p["position"];
-  return typeof n === "number" && Number.isSafeInteger(n) && n >= 0 ? n : undefined;
-};
-
 export function Refused({ problem, status, verb, testid, replayed = false, cut = false }: { problem: Problem | null; status: number; verb: "read" | "saved"; testid?: string; replayed?: boolean; cut?: boolean }) {
   const earlier = replayed && `${REPLAYED} `;
   if (problem === null) return <Status testid={testid}>{earlier}Not {verb}: the server answered {status}.{cut && ` ${CUT_OFF}`}</Status>;
   const code = problem.type.slice("urn:bronzeward:problem:".length);
   const rule = typeof problem["rule"] === "string" ? ` (rule ${problem["rule"]})` : "";
-  // A refused mark is named by its position in the request, never its path (§8.2 422 row): its detail
-  // is left out too, because the server's text may name the path.
-  const at = problem.status === 422 && positionOf(problem) !== undefined ? ` The mark at position ${positionOf(problem)} (the first is 0) is refused.` : "";
+  const at = refusedAt(problem);
   return (
     <Status testid={testid}>
       {earlier}Not {verb}: {code}{rule}.{at}{needs(status, problem)}{scopeRefusal(code, problem)} {problem.title}{problem.detail !== undefined && at === "" && `: ${problem.detail}`}
