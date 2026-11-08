@@ -4,7 +4,7 @@
 // are protected input (§11.1-§11.4): held in this page's memory only, sent once, and dropped once
 // the start is answered. The review, continue, takeover and abandon controls are W5's (claim.tsx).
 
-import { type ReactNode, useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { components } from "./api/v1";
 import { Claim } from "./claim.tsx";
 import { keepETag, keptETag, NO_ASSIST } from "./drafts.tsx";
@@ -134,11 +134,21 @@ export async function ended(client: Pick<Client, "readWithEpoch">, b: Ingestion,
 // The import page (/ingestions/{id}): a reload reads the ingestion and shows what its state allows.
 export function IngestionItem({ id }: { id: string }) {
   const [n, setN] = useState(0);
-  const item = useItem<Ingestion>(`/ingestions/${enc(id)}`, undefined, n);
-  const pending = usePending(item, "the import");
+  const { again: shellAgain, view } = useReads();
   const again = useCallback(() => setN((x) => x + 1), []);
+  // A read that found no answer keeps the import shown and is tried again (item J).
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  const retry = useMemo(() => refreshRetry(again, setRefreshFailed), [again]);
+  useEffect(() => retry.stop, [retry]);
+  const has = useRef(false);
+  const keep = useMemo(() => ({ held: () => has.current, lost: retry.lost }), [retry]);
+  const item = useItem<Ingestion>(`/ingestions/${enc(id)}`, keep, n);
+  has.current = item.kind === "ok";
+  const pending = usePending(item, "the import");
   const b = item.kind === "ok" ? item.data : undefined;
   const now = Date.now();
+  const stamp = useRef<ReadStamp>({ keys: [], began: now, read: undefined });
+  stamp.current = stampRead(stamp.current, b, [n, shellAgain, view], now);
   return (
     <>
       <h2>Import {short(id)}{b === undefined ? "" : `: ${b.state}`}</h2>
@@ -156,7 +166,8 @@ export function IngestionItem({ id }: { id: string }) {
           </dl>
           <Status testid="allowed">{allowed(b, now)}</Status>
           <Claim key={b.id} b={b} again={again} now={now} />
-          <Progress b={b} again={again} />
+          {refreshFailed && <Status testid="refresh-failed">{REFRESH_FAILED}</Status>}
+          <Progress b={b} readAt={stamp.current.read?.at ?? now} again={again} />
         </>
       )}
     </>
@@ -308,6 +319,46 @@ export const abandonedSince = (b: Pick<Ingestion, "state">, since: number | unde
 // watch stopped at the pause reads the failure event.
 export const watchDeps = (client: Client | undefined, b: Ingestion, again: () => void) => [client, b.operation, b.ownerGeneration, b.state === "abandoned", again] as const;
 
+// When the read of the ingestion that the page shows began (ginsys/bronzeward#644 item C). The lease
+// stop compares it with the lease plus the margin, and a snapshot begun before the lease ended can be
+// delivered after it, with a renewal in between. `keys` are what starts a read (the page's own refresh,
+// the shell's, the view): a change in a render stamps `began` with that render's time, before the read
+// that follows it begins, so the stamp is never later than the read's own start. An answer is stamped
+// with the `began` of the render before the one that carries it, so a read triggered in the very render
+// that delivers an older answer does not move that answer's stamp.
+export interface ReadStamp { keys: readonly unknown[]; began: number; read: { b: Ingestion; at: number } | undefined }
+export function stampRead(s: ReadStamp, b: Ingestion | undefined, keys: readonly unknown[], now: number): ReadStamp {
+  const read = b !== undefined && s.read?.b !== b ? { b, at: s.began } : s.read;
+  const same = keys.length === s.keys.length && keys.every((k, i) => k === s.keys[i]);
+  return { keys, began: same ? s.began : now, read };
+}
+
+// A refresh of the ingestion that found no answer is tried again, 1 s apart doubling to 30 s, and at
+// most 5 tries in all (client contracts §8.2, the reads' retry rule), so a lapsed lease is not
+// watched until the page leaves. After the last try the page says so (ginsys/bronzeward#644 item J).
+export const REFRESH_TRIES = 5;
+export const REFRESH_FAILED = "The import could not be read again after 5 tries, so its lease is not known to have lapsed. Reload the page to read it again.";
+export const refreshDelay = (failures: number) => Math.min(1000 * 2 ** (failures - 1), 30_000);
+export function refreshRetry(again: () => void, failed: (failed: boolean) => void) {
+  let failures = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const stop = () => { clearTimeout(timer); timer = undefined; };
+  return {
+    stop,
+    // Told the outcome of each settled read: true when it found no answer and kept the data shown.
+    lost: (lost: boolean) => {
+      stop();
+      if (!lost) {
+        failures = 0;
+        failed(false);
+        return;
+      }
+      if (++failures >= REFRESH_TRIES) return failed(true);
+      timer = setTimeout(again, refreshDelay(failures));
+    },
+  };
+}
+
 // What the Progress section shows: the event lines, the note that they were cleared (a restore or a
 // new epoch) and the end text. A watch starting resets all three, so a note or end of an earlier
 // operation never shows beside the next one's events.
@@ -324,15 +375,17 @@ export function watchView(v: WatchView, a: WatchAct): WatchView {
 
 // The import's operation followed to its end (§8.6), or until the claim pauses, its run records
 // resume-failed, or a read made once the lease passed shows it lapsed (§11.3, as the CLI follows).
-function Progress({ b, again }: { b: Ingestion; again: () => void }) {
+function Progress({ b, readAt, again }: { b: Ingestion; readAt: number; again: () => void }) {
   const client = useWrites()?.client;
   const { failure, settle, undropped } = useReads();
   const [{ lines, cleared, end }, show] = useReducer(watchView, { lines: [] });
   // The latest read of the ingestion and the page's failure view, for the watch begun before them.
-  const latest = useRef({ b, at: Date.now() });
+  // `at` is when that read began, for the lease stop (item C); `seen` is when it was delivered, from
+  // which the bound on an abandoned claim counts.
+  const latest = useRef({ b, at: readAt, seen: Date.now() });
   const abandonedAt = useRef<number>(undefined);
-  if (latest.current.b !== b) latest.current = { b, at: Date.now() };
-  abandonedAt.current = abandonedSince(b, abandonedAt.current, latest.current.at);
+  if (latest.current.b !== b) latest.current = { b, at: readAt, seen: Date.now() };
+  abandonedAt.current = abandonedSince(b, abandonedAt.current, latest.current.seen);
   const shown = useRef(failure);
   shown.current = failure;
   useEffect(() => {
