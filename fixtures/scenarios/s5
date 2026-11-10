@@ -28,8 +28,17 @@
 # step 4's refused drift adoption: S5's pass criteria name the secret absent on rejection too.
 # `drift`: the preconditions and steps 1 and 2 alone, which leave the worker drifted with its record
 # open and the scope not frozen, for the usability tasks (fixtures/participants).
-# Usage: scenarios/s5 run|pass|roles|drift   (run, pass or drift after scenarios/s4 run on the same
-# up; roles after run)
+# `cli` (ginsys/bronzeward#360): `pass` with steps 3, 4 and 6 run through bronzewardctl, built from
+# this checkout, as the humans the acceptance plan names. h-author freezes and imports (drift adopt,
+# which stops after step 1 because h-author holds no publisher role); h-publisher publishes and
+# creates the adopt plan; h-approver approves; the revert is h-publisher's drift revert, approved
+# by h-approver, and the unfreeze h-approver's. Only h-all holds three roles, and the plan names
+# three humans, so the adoption is three calls and not drift adopt's one. The steps the CLI does
+# not do stay the API's: the patches, the refused adoption, the label fragment, the observations
+# and every database assertion. The CLI's writes are checked in the database too: each freeze's
+# entry, each plan's act and each approval's act.
+# Usage: scenarios/s5 run|pass|cli|roles|drift   (run, pass, cli or drift after scenarios/s4 run on
+# the same up; roles after run)
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 bin=$here/../bin
@@ -37,9 +46,14 @@ bin=$here/../bin
 . "$here/../lib.sh"
 
 s5_mode=${1:-}
-pass_only=''
-case $s5_mode in run | roles | drift) ;; pass) pass_only=1 ;; *) die "usage: scenarios/s5 run|pass|roles|drift" ;; esac
-need docker curl jq timeout id sleep date awk wc od head tr
+pass_only='' via_cli=''
+case $s5_mode in
+  run | roles | drift) ;;
+  pass) pass_only=1 ;;
+  cli) pass_only=1 via_cli=1 ;;
+  *) die "usage: scenarios/s5 run|pass|cli|roles|drift" ;;
+esac
+need docker curl jq timeout id sleep date awk wc od head tr go grep sed
 need_state
 umask 077
 image_id=$(cat -- "$STATE/up-image") || die "no server image is recorded in $STATE; run fixtures/bin/up"
@@ -284,10 +298,15 @@ detect() {
 set_freeze() {
   local route=$1 role=$3 reason=${4:-S5 drift} frozen=true kind=freeze
   [ "$route" = freezes ] || frozen=false kind=unfreeze
-  fresh "$2"
-  answers_with ".machine == \"$machine_w\" and .frozen == $frozen and .role == \"$role\"" \
-    201 - POST "/api/v1/machines/$machine_w/$route" "$tok" "$(jq -nc --arg r "$reason" '{reason: $r}')" \
-    "$(key "$kind-$2-${reason//[^A-Za-z0-9]/-}")" || return 1
+  if [ -n "$via_cli" ]; then
+    # The CLI's machine freeze | unfreeze, whose verb is the entry's kind; the database below checks the rest.
+    ctl_rm "$kind-$2" "$2" machine "$kind" "$machine_w" --reason "$reason" || return 1
+  else
+    fresh "$2"
+    answers_with ".machine == \"$machine_w\" and .frozen == $frozen and .role == \"$role\"" \
+      201 - POST "/api/v1/machines/$machine_w/$route" "$tok" "$(jq -nc --arg r "$reason" '{reason: $r}')" \
+      "$(key "$kind-$2-${reason//[^A-Za-z0-9]/-}")" || return 1
+  fi
   [ "$(sql "SELECT frozen FROM machine WHERE id = '$machine_w'")" = "${frozen:0:1}" ] &&
     [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w' AND kind = '$kind'
       AND entry->>'principal' = '$(who_id "$2")' AND entry->>'role' = '$role' AND entry->>'reason' = '$reason'")" = 1 ]
@@ -315,7 +334,13 @@ cancel_by_creator() {
 revert=''
 freeze() {
   local ref='S5 step 3'
+  [ -z "$via_cli" ] ||
+    check "$ref" "h-viewer's drift show on the worker names the open drift and its choices" \
+      cli_drift_show open 'Drift opened by observation ' 'Choose: freeze while you decide; adopt it into a release; or revert to Desired \('
   check "$ref" 'h-author freezes the scope: 201, the freeze recorded under the author role' freeze_by h-author author
+  [ -z "$via_cli" ] ||
+    check "$ref" "h-viewer's drift show on the worker now says the scope is frozen, and what that stops" \
+      cli_drift_show frozen 'Choose: freeze while you decide' 'Frozen: no new commitment or attempt until an approver unfreezes; '
   # Without the freeze, the approved revert below would be committed and mutate the worker.
   [ "$(sql "SELECT frozen FROM machine WHERE id = '$machine_w'")" = t ] || die "s5: the scope is not frozen; nothing after it can run"
   # The frozen-scope control: a revert plan of the worker's Desired, which binds the open record and
@@ -644,6 +669,93 @@ adoption_kind() {
     answers_with '.kind == "drift-adoption"' 200 - GET "/api/v1/ingestions/${ingested[-1]}" "$author"
 }
 
+# The CLI's steps (mode cli, ginsys/bronzeward#360); the helpers that run bronzewardctl are common.sh's
+# (cli_prepare, ctl, cli_kept). ctl_rm <name> <human> <args>...: ctl, then the token files removed, which
+# hold fixture secrets the bundles scan for.
+ctl_rm() {
+  local rc=0
+  ctl "$@" || rc=$?
+  rm -f -- "$cli_dir"/h-*.json
+  return "$rc"
+}
+# cli_drift_show <name> <ERE>...: h-viewer's drift show on the worker, one line of it matching each ERE.
+cli_drift_show() {
+  local name=$1 re
+  shift
+  ctl_rm "drift-show-$name" h-viewer drift show "$machine_w" || return 1
+  for re in "$@"; do cli_kept "drift-show-$name" "$re" || return 1; done
+}
+# cli_import: step 4's import as h-author's drift adopt, the three marks on standard input and the
+# staging transient, as the API's. h-author holds no publisher role, so the command stops after
+# step 1 and says so. Then what ingest checks: the claim released, the operation succeeded, the
+# draft's ETag moved. The draft was made through the API: draft show keeps its ETag for h-author.
+cli_import() {
+  local ing op next
+  ctl_rm draft-show-author h-author draft show "$draft" || return 1
+  ctl_rm adopt h-author drift adopt "$machine_w" --draft "$draft" --staging transient --marks \
+    < <(jq -r '.[]' <<<"$ADOPT_MARKS") || return 1
+  cli_kept adopt 'Not run: step 2 needs a publisher\.' || return 1
+  read -r ing op < <(sed -n 's/.*Import \([^ ]*\) started (operation \([^ )]*\)).*/\1 \2/p' "$EV/cli-adopt.txt" | head -n 1) || return 1
+  [ -n "$ing" ] && [ -n "$op" ] || return 1
+  fresh_author
+  answers_with '.state == "released"' 200 - GET "/api/v1/ingestions/$ing" "$author" || return 1
+  ingested+=("$ing")
+  answers_with '.state == "succeeded"' 200 - GET "/api/v1/operations/$op" "$author" || return 1
+  answers 200 - GET "/api/v1/drafts/$draft" "$author" || return 1
+  next=$(etag_of_last)
+  [ -n "$next" ] && [ "$next" != "$etag" ] || {
+    say "s5: the draft's ETag did not move across drift adopt"
+    return 1
+  }
+  etag=$next
+}
+# cli_publish: step 4's publication as h-publisher's publish, under the ETag its own draft show kept:
+# the operation succeeded with one release, which is then the worker's Desired; its id in new_release.
+cli_publish() {
+  local was_desired
+  was_desired=$(sql "SELECT desired FROM machine_state WHERE machine = '$machine_w'")
+  new_release=''
+  ctl_rm draft-show-publisher h-publisher draft show "$draft" || return 1
+  ctl_rm publish h-publisher publish "$draft" || return 1
+  new_release=$(sql "SELECT desired FROM machine_state WHERE machine = '$machine_w'")
+  [ -n "$new_release" ] && [ "$new_release" != "$was_desired" ] || return 1
+  pub_op=$(sql "SELECT operation FROM release WHERE id = '$new_release'")
+  [ -n "$pub_op" ] && pub_succeeded
+}
+# cli_plan <name> <command>...: the command as h-publisher, which creates a plan; the plan's id in plan_id,
+# one plan.create act naming the plan and the worker, recorded under the publisher role.
+cli_plan() {
+  local name=$1
+  shift
+  plan_id=''
+  ctl_rm "plan-$name" h-publisher "$@" || return 1
+  plan_id=$(grep --only-matching --extended-regexp -- 'pln_[a-z2-7]{26}' "$EV/cli-plan-$name.txt" | head -n 1) || plan_id=
+  [ -n "$plan_id" ] &&
+    [ "$(sql "SELECT count(*) FROM act WHERE action = 'plan.create' AND role = 'publisher' AND subjects = ARRAY['$plan_id', '$machine_w']")" = 1 ]
+}
+# cli_approve <plan> <name>: h-approver's approve, the plan's ID typed back on standard input: one approval of
+# the plan, recorded with one plan.approve act.
+cli_approve() {
+  ctl_rm "approve-$2" h-approver approve "$1" <<<"$1" || return 1
+  [ "$(sql "SELECT (SELECT count(*) FROM approval WHERE plan = '$1') || ' ' ||
+      (SELECT count(*) FROM act WHERE action = 'plan.approve' AND '$1' = ANY (subjects))")" = '1 1' ]
+}
+# cli_unseen <plan> <name>: the approval's output says it approves an unseen overwrite, and the plan's
+# approval entry on the timeline records it as one.
+cli_unseen() {
+  cli_kept "approve-$2" 'It overwrites the drifted configuration, which no reviewer has seen: this approval records that you approve overwriting it\.' &&
+    [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w' AND kind = 'approval'
+      AND entry->>'plan' = '$1' AND (entry->>'unseenOverwrite')::boolean")" = 1 ]
+}
+# unfreeze_refused_cli <who>: an unfreeze by that identity, holding no approver role, is refused naming the
+# approver role, and the scope is still frozen.
+unfreeze_refused_cli() {
+  local rc=0
+  ctl_rm "unfreeze-$1" "$1" machine unfreeze "$machine_w" --reason 'S5 revert' || rc=$?
+  [ "$rc" -ne 0 ] && cli_kept "unfreeze-$1" 'Needs one of the roles \[approver\]\.' &&
+    [ "$(sql "SELECT frozen FROM machine WHERE id = '$machine_w'")" = t ]
+}
+
 adopt() {
   local ref='S5 step 4' plan_body_json w_after cp_after step
   check "$ref" 'h-author opens a new draft: 201' draft_by h-author adopt
@@ -653,8 +765,13 @@ adopt() {
   outcome_bundle "$ref, C §15" adoption-refused
   fresh_author
   ingest_kind=drift-adoption
-  check "$ref" "h-author ingests the drifted configuration into it as a drift adoption, If-Match its ETag, marking the S1 file's content, S2's label of it and the registry password: 202, the claim released, the operation succeeded, the ETag moved" \
-    ingest "$machine_w" "$ADOPT_MARKS" adopt
+  if [ -n "$via_cli" ]; then
+    check "$ref" "h-author runs drift adopt on the worker into it, marking the S1 file's content, S2's label of it and the registry password on standard input, transient staging: the import released into the draft, the command stopped for the publisher role h-author lacks, the operation succeeded, the ETag moved" \
+      cli_import
+  else
+    check "$ref" "h-author ingests the drifted configuration into it as a drift adoption, If-Match its ETag, marking the S1 file's content, S2's label of it and the registry password: 202, the claim released, the operation succeeded, the ETag moved" \
+      ingest "$machine_w" "$ADOPT_MARKS" adopt
+  fi
   ingest_kind=import
   check "$ref" 'the ingestion is stored and served as a drift adoption' adoption_kind
   outcome_bundle "$ref" adoption-ingestion
@@ -670,7 +787,11 @@ adopt() {
   fi
   check "$ref" "h-author stops the worker selecting S2's label fragment, the adopted base holding that reference: out of the workers profile, or, when it is the profile's only fragment, the worker's assignment back at the handover's cluster fragment: 200, the ETag replaced" \
     label_unselected h-author adopt s2-labels
-  check "$ref" 'h-publisher publishes the draft under its new ETag: 202, one release, the worker'"'"'s Desired' publish_by h-publisher adopt
+  if [ -n "$via_cli" ]; then
+    check "$ref" "h-publisher publishes the draft with publish, under the ETag its draft show kept: the operation succeeded with one release, the worker's Desired" cli_publish
+  else
+    check "$ref" 'h-publisher publishes the draft under its new ETag: 202, one release, the worker'"'"'s Desired' publish_by h-publisher adopt
+  fi
   [ -n "$new_release" ] || die "s5: no release; nothing after it can run"
   check "$ref" "the release's import base for the worker: the registry password, S1's file content and S2's label are references to create-only generations of the drift adoption" \
     adopted_references
@@ -678,12 +799,21 @@ adopt() {
     adopted_baseline
   check "$ref" "each of those generations holds, as a string, the decrypted baseline's value at its mark's path; the password's is step 1's secret" \
     adopted_values
-  plan_body_json=$(jq -nc --arg r "$new_release" --arg m "$machine_w" '{releaseId: $r, machine: $m, operation: "adopt"}')
-  fresh h-publisher
-  check "$ref" 'h-publisher creates an adopt plan of the release: 201, binding the open record' \
-    answers_with ".driftRecord == $opened" 201 - POST /api/v1/plans "$tok" "$plan_body_json" "$(key plan-adopt)"
-  plan=$(jq -er '.id' "$EV/last.body") || die "s5: no adopt plan; nothing after it can run"
-  check "$ref" 'h-approver approves it: 201' approve_by h-approver "$plan" adopt
+  if [ -n "$via_cli" ]; then
+    check "$ref" 'h-publisher creates an adopt plan of the release with plan create: one plan.create act' \
+      cli_plan adopt plan create --release "$new_release" --machine "$machine_w" --operation adopt
+    plan=$plan_id
+    [ -n "$plan" ] || die "s5: no adopt plan; nothing after it can run"
+    check "$ref" 'the plan binds the open record' same "$(sql "SELECT drift_record FROM plan WHERE id = '$plan'")" "$opened"
+    check "$ref" 'h-approver approves it with approve, the plan ID typed back: one approval, one plan.approve act' cli_approve "$plan" adopt
+  else
+    plan_body_json=$(jq -nc --arg r "$new_release" --arg m "$machine_w" '{releaseId: $r, machine: $m, operation: "adopt"}')
+    fresh h-publisher
+    check "$ref" 'h-publisher creates an adopt plan of the release: 201, binding the open record' \
+      answers_with ".driftRecord == $opened" 201 - POST /api/v1/plans "$tok" "$plan_body_json" "$(key plan-adopt)"
+    plan=$(jq -er '.id' "$EV/last.body") || die "s5: no adopt plan; nothing after it can run"
+    check "$ref" 'h-approver approves it: 201' approve_by h-approver "$plan" adopt
+  fi
   check "$ref" "the adoption commits under the freeze: Applied the release from source adoption, its digest the import base's and the patched one, the baseline revision one more, the record closed adopted" \
     within 120 adopted
   [ -n "$op" ] || die "s5: the adoption did not complete; nothing after it can run"
@@ -784,13 +914,25 @@ revert_step() {
     within 60 record_opened repatched
   redrift=$opened opened=$adopted_rec
   [ -n "$redrift" ] && [ "$redrift" != "$opened" ] || die "s5: no new drift record opened; nothing after it can run"
-  check "$ref" 'a plan for the drifted worker as h-publisher, a revert binding the new record: 201' plan_by h-publisher revert
+  if [ -n "$via_cli" ]; then
+    check "$ref" "h-viewer's drift show on the worker names the new record's choices, the scope still frozen" \
+      cli_drift_show redrift 'Drift opened by observation ' 'Choose: freeze while you decide' 'Frozen: no new commitment or attempt until an approver unfreezes; '
+    check "$ref" 'h-publisher runs drift revert on the worker: a revert plan of its Desired, one plan.create act' cli_plan revert drift revert "$machine_w"
+  else
+    check "$ref" 'a plan for the drifted worker as h-publisher, a revert binding the new record: 201' plan_by h-publisher revert
+  fi
   rplan=$plan_id
   [ -n "$rplan" ] || die "s5: no revert plan; nothing after it can run"
   check "$ref" 'the plan binds the new record' same "$(sql "SELECT drift_record FROM plan WHERE id = '$rplan'")" "$redrift"
-  check "$ref" 'approved as h-approver: 201' approve_by h-approver "$rplan" revert
-  check "$ref" 'the approval is recorded as approving an unseen overwrite, as answered and on the timeline' approved_unseen "$rplan"
-  if controls_run 'S5 negative controls' 'unfreezing by h-publisher, not an approver'; then
+  if [ -n "$via_cli" ]; then
+    check "$ref" 'h-approver approves it with approve, the plan ID typed back: one approval, one plan.approve act' cli_approve "$rplan" revert
+    check "$ref" 'the approval prints that it approves an unseen overwrite, and is recorded as doing so on the timeline' cli_unseen "$rplan" revert
+    check 'S5 negative controls' 'unfreezing as h-publisher, not an approver: refused naming the approver role, the scope still frozen' unfreeze_refused_cli h-publisher
+  else
+    check "$ref" 'approved as h-approver: 201' approve_by h-approver "$rplan" revert
+    check "$ref" 'the approval is recorded as approving an unseen overwrite, as answered and on the timeline' approved_unseen "$rplan"
+  fi
+  if [ -z "$via_cli" ] && controls_run 'S5 negative controls' 'unfreezing by h-publisher, not an approver'; then
     check 'S5 negative controls' 'unfreezing by h-publisher, not an approver: 403, the scope still frozen' unfreeze_refused h-publisher
   fi
   check "$ref" 'h-approver unfreezes the scope: 201, the unfreeze recorded under the approver role' \
@@ -857,6 +999,7 @@ backup_name=s5-$run_key
 run() {
   withheld+=("$BW_CANARY")
   preconditions
+  [ -z "$via_cli" ] || cli_prepare 'S5 CLI precondition' h-author h-publisher h-approver h-viewer
   detect
   freeze
   adopt

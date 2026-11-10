@@ -15,9 +15,10 @@
 #   s6:  up, s1 run, s3 handover, s2 run, s3 run, s4 run, s4 ds, s6 run, down.
 # The modes that need an up of their own run as step lists: up s1nid down; up s1 s3hc down;
 # up s1 s3h s2 s3r s4 s7c down; up s1 s3h s2 s3r s4 s7 s7n s7t s7o down; up s0walk down;
-# up s1 s8controls s8revocation down; up s1 s3h s2 s4cli down (the CLI's safe apply).
+# up s1 s8controls s8revocation down; up s1 s3h s2 s4cli down (the CLI's safe apply);
+# up s1 s3h s2 s3r s4 s5cli down (S5's drift adoption and revert through bronzewardctl).
 # Steps: up down s0 s0p s0walk s1 s1p s1nid s3h s3hc s2 s2p s3r s3rp s4 s4c s4x s4ds s4cli s5 s5p
-# s5roles s6 s7 s7c s7n s7t s7o s8 s8controls s8revocation; a step ending in p is that
+# s5cli s5roles s6 s7 s7c s7n s7t s7o s8 s8controls s8revocation; a step ending in p is that
 # scenario's pass mode. A step appears once per list: its log is <step>.log.
 # The record: <record dir>/<preset>-<utc>/chain.log (checkout, start, end and exit status of each
 # step), <step>.log, evidence/ (a copy of the fixture's evidence directories).
@@ -79,6 +80,7 @@ command_of() {
     s4cli) cmd=("$here/s4" cli) ;;
     s5) cmd=("$here/s5" run) ;;
     s5p) cmd=("$here/s5" pass) ;;
+    s5cli) cmd=("$here/s5" cli) ;;
     s5roles) cmd=("$here/s5" roles) ;;
     s6) cmd=("$here/s6" run) ;;
     s7) cmd=("$here/s7" run) ;;
