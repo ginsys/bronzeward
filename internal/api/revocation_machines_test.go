@@ -71,9 +71,9 @@ func TestIdentityRevocationMachineEntries(t *testing.T) {
 	decode[cancellationBody](t, p.cancel(p.robot, "k-cancel-cancelled-012", cancelled, reason), http.StatusOK)
 	others := plan("k-plan-others-01234567", "").ID
 	decode[approvalBody](t, p.approve(all, "k-approve-others-01234", others), http.StatusCreated)
-	expired := plan("k-plan-expired-0123456", `,"expiresInSeconds":2`)
+	expired := plan("k-plan-expired-0123456", "")
 	decode[approvalBody](t, p.approve(approver, "k-approve-expired-0123", expired.ID), http.StatusCreated)
-	time.Sleep(time.Until(expired.ExpiresAt.Add(100 * time.Millisecond)))
+	p.expirePlan(t, expired.ID, 0) // after the setup above, so no setup step races a short expiry
 
 	recovery, revokedID := p.human("h-recovery"), p.principalOf("h-approver")
 	body := `{"identity":"` + revokedID + `","reason":"left"}`

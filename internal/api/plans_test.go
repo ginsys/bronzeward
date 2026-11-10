@@ -577,13 +577,13 @@ func TestPlanReads(t *testing.T) {
 		}
 	}
 	// §8.1: expiry is evaluated by the server clock whenever the plan is read; a terminal state stays.
-	short := decode[planBody](t, p.plan(p.robot, "k-plan-read-short-0123", applyBody(p.target.rel, p.machine,
-		`,"expiresInSeconds":1`)), http.StatusCreated)
-	gone := decode[planBody](t, p.plan(p.robot, "k-plan-read-gone-01234", applyBody(p.target.rel, p.machine,
-		`,"expiresInSeconds":1`)), http.StatusCreated)
+	short := decode[planBody](t, p.plan(p.robot, "k-plan-read-short-0123", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
+	gone := decode[planBody](t, p.plan(p.robot, "k-plan-read-gone-01234", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
 	mustExec(t, p.db, `UPDATE plan_state SET state = 'cancelled', reason = 'cancelled', revision = 2, updated_at = now() WHERE plan = $1`,
 		gone.ID)
-	time.Sleep(time.Until(short.ExpiresAt.Add(100 * time.Millisecond)))
+	// Both expire after the setup, so no setup step races a short expiry.
+	p.expirePlan(t, short.ID, 0)
+	p.expirePlan(t, gone.ID, 0)
 	for _, c := range []struct{ id, state string }{{short.ID, "expired"}, {gone.ID, "cancelled"}, {b.ID, "proposed"}} {
 		got := decode[planBody](t, p.do(p.api, call{method: "GET", path: prefix + "/plans/" + c.id, token: viewer}), http.StatusOK)
 		if got.State != c.state {
@@ -600,8 +600,9 @@ func TestPlanReads(t *testing.T) {
 func TestPlanReadAfterLockWait(t *testing.T) {
 	t.Parallel()
 	p := newPlanEnv(t)
-	short := decode[planBody](t, p.plan(p.robot, "k-plan-wait-short-0123", applyBody(p.target.rel, p.machine,
-		`,"expiresInSeconds":2`)), http.StatusCreated)
+	short := decode[planBody](t, p.plan(p.robot, "k-plan-wait-short-0123", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
+	// Counted from the end of the setup, so the setup cannot outlast it.
+	short.ExpiresAt = p.expirePlan(t, short.ID, 3*time.Second)
 	lock, err := p.db.Begin()
 	if err != nil {
 		t.Fatal(err)
@@ -642,6 +643,8 @@ func TestPlanCreationAfterLockWait(t *testing.T) {
 	}
 	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
+		// The one second expiry is the behavior here, and no setup step can race it: the creation
+		// reads its times after the lock wait, so the expiry starts when the lock is released.
 		done <- p.plan(p.robot, "k-plan-wait-create-01", applyBody(p.target.rel, p.machine, `,"expiresInSeconds":1`))
 	}()
 	dbtest.WaitForLockWait(t, p.db)
@@ -736,6 +739,8 @@ func TestPlanCreationAfterActOrderWait(t *testing.T) {
 	lock := holdActOrder(t, p.db)
 	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
+		// The one second expiry is the behavior here, and no setup step can race it: the creation
+		// reads its times after the lock wait, so the expiry starts when the lock is released.
 		done <- p.plan(p.robot, "k-plan-wait-order-01", applyBody(p.target.rel, p.machine, `,"expiresInSeconds":1`))
 	}()
 	dbtest.WaitForLockWait(t, p.db)
@@ -818,12 +823,12 @@ func TestPlanReadRevokedApprover(t *testing.T) {
 		return decode[planBody](t, p.plan(p.robot, k, applyBody(p.target.rel, p.machine, extra)), http.StatusCreated)
 	}
 	revoked, kept, late := plan("k-plan-revoked-012345", ""), plan("k-plan-kept-012345678", ""),
-		plan("k-plan-late-012345678", `,"expiresInSeconds":1`)
+		plan("k-plan-late-012345678", "")
 	gone, stays := human("h-approver-gone"), human("h-approver-stays")
 	p.approveAs(t, revoked.ID, gone)
 	p.approveAs(t, late.ID, gone)
 	p.approveAs(t, kept.ID, stays)
-	time.Sleep(time.Until(late.ExpiresAt.Add(100 * time.Millisecond)))
+	p.expirePlan(t, late.ID, 0) // after the setup above, so no setup step races a short expiry
 	revocationOf(t, revoke(p.env, p.human("h-recovery"), key, `{"identity":"`+gone+`","reason":"left"}`))
 	want := map[string]string{revoked.ID: "revoked", kept.ID: "approved", late.ID: "expired"}
 	viewer := p.human("h-viewer")
@@ -853,9 +858,10 @@ func TestPlanReadRevocationAfterLockWait(t *testing.T) {
 	approver := id.New(id.Principal)
 	mustExec(t, p.db, `INSERT INTO principal (id, kind, iss, sub, created_at) VALUES ($1, 'human', $2, 'h-approver-held', now())`,
 		approver, p.iss.URL)
-	b := decode[planBody](t, p.plan(p.robot, "k-plan-held-012345678", applyBody(p.target.rel, p.machine, `,"expiresInSeconds":2`)),
-		http.StatusCreated)
+	b := decode[planBody](t, p.plan(p.robot, "k-plan-held-012345678", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
 	p.approveAs(t, b.ID, approver)
+	// Counted from the end of the setup, so the setup cannot outlast it.
+	b.ExpiresAt = p.expirePlan(t, b.ID, 3*time.Second)
 	lock, err := p.db.Begin()
 	if err != nil {
 		t.Fatal(err)
@@ -890,9 +896,10 @@ func TestPlanReadRevocationAfterActOrderWait(t *testing.T) {
 	approver := id.New(id.Principal)
 	mustExec(t, p.db, `INSERT INTO principal (id, kind, iss, sub, created_at) VALUES ($1, 'human', $2, 'h-approver-order', now())`,
 		approver, p.iss.URL)
-	b := decode[planBody](t, p.plan(p.robot, "k-plan-order-012345678", applyBody(p.target.rel, p.machine, `,"expiresInSeconds":2`)),
-		http.StatusCreated)
+	b := decode[planBody](t, p.plan(p.robot, "k-plan-order-012345678", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
 	p.approveAs(t, b.ID, approver)
+	// Counted from the end of the setup, so the setup cannot outlast it.
+	b.ExpiresAt = p.expirePlan(t, b.ID, 3*time.Second)
 	lock := holdActOrder(t, p.db)
 	recovery := p.human("h-recovery")
 	done := make(chan *httptest.ResponseRecorder, 1)

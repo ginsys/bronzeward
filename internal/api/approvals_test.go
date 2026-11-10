@@ -232,22 +232,22 @@ func TestApprovalRefusals(t *testing.T) {
 	wantProblem(t, p.approve(approver, "k-approve-cancelled-01", cancelled), http.StatusConflict, "conflict")
 	p.wantUnapproved(t, cancelled, "cancelled")
 
-	expired := decode[planBody](t, p.plan(p.robot, "k-plan-expired-0123456", applyBody(p.target.rel, p.machine, `,"expiresInSeconds":1`)),
-		http.StatusCreated)
-	time.Sleep(time.Until(expired.ExpiresAt.Add(100 * time.Millisecond)))
-	if doc := wantProblem(t, p.approve(approver, "k-approve-expired-0123", expired.ID), http.StatusConflict, "conflict"); doc["state"] != "expired" {
+	// The two plans below are created with the default expiry and expired after their setup, so no
+	// setup step races a short expiry.
+	expired := plan("k-plan-expired-0123456", "")
+	p.expirePlan(t, expired, 0)
+	if doc := wantProblem(t, p.approve(approver, "k-approve-expired-0123", expired), http.StatusConflict, "conflict"); doc["state"] != "expired" {
 		t.Fatalf("expired plan refused with %v", doc)
 	}
-	p.wantUnapproved(t, expired.ID, "proposed")
+	p.wantUnapproved(t, expired, "proposed")
 
-	lapsed := decode[planBody](t, p.plan(p.robot, "k-plan-lapsed-01234567", applyBody(p.target.rel, p.machine, `,"expiresInSeconds":1`)),
-		http.StatusCreated)
-	approved := decode[approvalBody](t, p.approve(approver, "k-approve-lapsed-01234", lapsed.ID), http.StatusCreated)
-	time.Sleep(time.Until(lapsed.ExpiresAt.Add(100 * time.Millisecond)))
-	if doc := wantProblem(t, p.approve(p.human("h-all"), "k-approve-lapsed-again", lapsed.ID), http.StatusConflict, "conflict"); doc["state"] != "expired" {
+	lapsed := plan("k-plan-lapsed-01234567", "")
+	approved := decode[approvalBody](t, p.approve(approver, "k-approve-lapsed-01234", lapsed), http.StatusCreated)
+	p.expirePlan(t, lapsed, 0)
+	if doc := wantProblem(t, p.approve(p.human("h-all"), "k-approve-lapsed-again", lapsed), http.StatusConflict, "conflict"); doc["state"] != "expired" {
 		t.Fatalf("expired approved plan refused with %v", doc)
 	}
-	if n := count(t, p.db, `SELECT count(*) FROM plan_state WHERE plan = $1 AND approval = $2 AND revision = 2`, lapsed.ID, approved.ID); n != 1 {
+	if n := count(t, p.db, `SELECT count(*) FROM plan_state WHERE plan = $1 AND approval = $2 AND revision = 2`, lapsed, approved.ID); n != 1 {
 		t.Fatal("the refused approval changed the expired plan's state")
 	}
 
@@ -358,9 +358,10 @@ func TestApprovalAfterActOrderWait(t *testing.T) {
 	t.Parallel()
 	p := newPlanEnv(t)
 	approver := p.human("h-approver")
-	late := decode[planBody](t, p.plan(p.robot, "k-plan-late-0123456789", applyBody(p.target.rel, p.machine, `,"expiresInSeconds":1`)),
-		http.StatusCreated)
+	late := decode[planBody](t, p.plan(p.robot, "k-plan-late-0123456789", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
 	timely := decode[planBody](t, p.plan(p.robot, "k-plan-timely-01234567", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
+	// Counted from the end of the setup, so the setup cannot outlast it.
+	late.ExpiresAt = p.expirePlan(t, late.ID, 3*time.Second)
 
 	lock := holdActOrder(t, p.db)
 	done := make(chan *httptest.ResponseRecorder, 1)
