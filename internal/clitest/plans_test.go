@@ -25,6 +25,7 @@ type planEnv struct {
 	s         seeded
 	st        *standIn
 	rel0, rel string
+	env       []string // added to the environment of every bronzewardctl that ctl runs
 	ctl       func(...string) result
 	ctlIn     func(stdin string, args ...string) result // ctl with stdin as standard input
 }
@@ -232,7 +233,7 @@ func newPlanEnvExec(t *testing.T, execution string) *planEnv {
 	f.store(f.humanFile(), f.mint("h-all", ""), "")
 	e := &planEnv{f: f, in: in, s: f.seed()}
 	e.ctlIn = func(stdin string, args ...string) result {
-		r := f.scan(f.exec(nil, stdin, args...), args)
+		r := f.scan(f.exec(e.env, stdin, args...), args)
 		if e.st == nil {
 			return r
 		}
