@@ -747,9 +747,7 @@ cli_approve() {
 # cli_unseen <plan> <name>: the approval's output says it approves an unseen overwrite, and the plan's
 # approval entry on the timeline records it as one.
 cli_unseen() {
-  cli_kept "approve-$2" '(^|[[:space:]])It[[:space:]]+overwrites[[:space:]]+the[[:space:]]+drifted[[:space:]]+configuration' &&
-    cli_kept "approve-$2" 'which[[:space:]]+no[[:space:]]+reviewer[[:space:]]+has[[:space:]]+seen' &&
-    cli_kept "approve-$2" 'records[[:space:]]+that[[:space:]]+you[[:space:]]+approve[[:space:]]+overwriting[[:space:]]+it' &&
+  cli_kept "approve-$2" '^[[:space:]]*It[[:space:]]+overwrites[[:space:]]+the[[:space:]]+drifted[[:space:]]+configuration,[[:space:]]+which[[:space:]]+no[[:space:]]+reviewer[[:space:]]+has[[:space:]]+seen:[[:space:]]+this[[:space:]]+approval[[:space:]]+records[[:space:]]+that[[:space:]]+you[[:space:]]+approve[[:space:]]+overwriting[[:space:]]+it\.[[:space:]]*$' &&
     [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w' AND kind = 'approval'
       AND entry->>'plan' = '$1' AND (entry->>'unseenOverwrite')::boolean")" = 1 ]
 }
