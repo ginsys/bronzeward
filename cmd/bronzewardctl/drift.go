@@ -385,7 +385,6 @@ func (e *env) driftAdopt(args []string) (err error) {
 	}
 	// The read can show another epoch, which this client keeps, as ingest saved its own before it; a
 	// failed read leaves the steps unrun, so they are printed.
-	before := c.Context.LastEpoch
 	b, bind, err := readIngestionBound(c, a.Ingestion)
 	saved := c.Save()
 	if err != nil || saved != nil {
@@ -411,19 +410,15 @@ func (e *env) driftAdopt(args []string) (err error) {
 	// state read was given under another epoch. Nothing is sent then. The same client carries on, and
 	// is saved once, at the end, so no earlier client writes an older epoch over it.
 	defer func() { err = errors.Join(err, c.Save()) }()
-	if c.EpochMoves() != bind.moves || c.Context.LastEpoch != bind.epoch {
-		moved := fmt.Sprintf("from %s to %s", before, bind.epoch)
-		if before == bind.epoch {
-			moved = "and came back to " + before
-		}
-		return errors.Join(notSent{fmt.Errorf("%s: step 2 not sent: the epoch changed %s while the import was read, so the import state may not hold. Nothing was sent. Read it again with: bronzewardctl import status %s, then run step 2",
-			c.Context.Where(), moved, pr(a.Ingestion))},
-			e.say(append([]string{"Step 2 again:"}, from(2, "")...)...))
-	}
 	// An unknown outcome of this write names the publish command, never drift adopt: the repeat flags it
 	// prints are this publication's, and drift adopt would give them to the import of step 1.
 	release, err := e.publishDraftOn(c, bind, draft, nil, "", "the command bronzewardctl publish "+client.ShellWord(draft)+" in place of drift adopt", false)
 	if err != nil {
+		// A refusal before the send leaves step 2 itself to run again; any other error leaves its outcome
+		// to the block it carries, and the step after it.
+		if errors.As(err, new(client.NotSent)) {
+			return errors.Join(err, e.say(append([]string{"Step 2 again:"}, from(2, "")...)...))
+		}
 		return errors.Join(err, e.say(append([]string{"The later step:"}, from(3, "")...)...))
 	}
 	if err := e.say("Step 3/3  plan an adoption of release " + pr(release)); err != nil {

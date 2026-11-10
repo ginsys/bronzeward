@@ -562,8 +562,18 @@ func TestReadsFromCountsMoves(t *testing.T) {
 		w.ReadsFrom(c)
 		_, err := c.Send(w)
 		if err == nil || !strings.Contains(err.Error(), "the epoch changed after the request was built from reads of 'ep_BWSYNTH-1', though the last read shows 'ep_BWSYNTH-1' as at those reads") ||
-			!strings.Contains(err.Error(), "Nothing was sent") || len(f.postsSeen()) != 0 {
-			t.Errorf("err %v, requests %v; want a refusal and no POST", err, f.requests())
+			!strings.Contains(err.Error(), "Nothing was sent") || !errors.As(err, new(NotSent)) || len(f.postsSeen()) != 0 {
+			t.Errorf("err %v, requests %v; want a NotSent refusal and no POST", err, f.requests())
+		}
+	})
+	t.Run("another epoch than the reads showed is a NotSent refusal too", func(t *testing.T) {
+		f := &fake{epoch: "ep_BWSYNTH-2", post: func(_ int, w http.ResponseWriter, _ *http.Request) { created(w) }}
+		c, _, _ := writeClient(t, f, first)
+		w := clusterWrite()
+		w.Reads = first
+		_, err := c.Send(w)
+		if err == nil || !strings.Contains(err.Error(), "Nothing was sent") || !errors.As(err, new(NotSent)) || len(f.postsSeen()) != 0 {
+			t.Errorf("err %v, requests %v; want a NotSent refusal and no POST", err, f.requests())
 		}
 	})
 	t.Run("plain Reads sees only the epochs", func(t *testing.T) {
