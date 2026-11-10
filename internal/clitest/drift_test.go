@@ -115,7 +115,7 @@ func TestDriftFreeze(t *testing.T) {
 	// server runs in this process, so the time carries the offset of the zone of this process. The
 	// client names that zone only when its own zone has the same offset, and prints a bare offset
 	// (+0100) otherwise. So the client takes the TZ of the test, and observedAt builds the expected
-	// text in the zone of the test. A pin to UTC would fail in any other zone.
+	// text in the zone of the test. A pin to UTC fails when the test runs in a zone with a nonzero offset.
 	// Printing local time stays the client's choice (operator experience specification).
 	e.env = testZone()
 	f, in := e.f, e.in
