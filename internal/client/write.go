@@ -103,9 +103,10 @@ type Repeat struct{ Key, Epoch, Principal string }
 // RefusedRepeat is a T10 repeat refused before the write was sent; the CLI exits 2.
 type RefusedRepeat struct{ error }
 
-// NotSent is a write refused before it was sent because the epoch changed since the reads that
-// built it (§8.5, §8.6 item 3). Its text and exit are those of the error it wraps; a composite
-// tests for it to name the step to run again.
+// NotSent is a write refused before it was sent because what it was built from no longer holds: the
+// epoch changed since the reads that built it (§8.5, §8.6 item 3), or the draft's kept ETag is gone
+// (§8.3). A failed read made for the send is not one. Its text and exit are those of the error it
+// wraps; a composite tests for it to name the step to run again.
 type NotSent struct{ error }
 
 func (n NotSent) Unwrap() error { return n.error }
@@ -237,8 +238,8 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 		if w.IfMatch, err = ETag(c.Context, w.Draft); err != nil {
 			return nil, c.Context.fail(fmt.Errorf("reading the kept ETag of %s: %w", printable(w.Draft), err))
 		} else if w.IfMatch == "" {
-			return nil, c.Context.fail(fmt.Errorf("%s not sent: no ETag of draft %s is kept for this context at its current epoch. Read the draft first: bronzewardctl --context %s draft show %s",
-				route, printable(w.Draft), ShellWord(c.Context.Name), ShellWord(w.Draft)))
+			return nil, NotSent{c.Context.fail(fmt.Errorf("%s not sent: no ETag of draft %s is kept for this context at its current epoch. Read the draft first: bronzewardctl --context %s draft show %s",
+				route, printable(w.Draft), ShellWord(c.Context.Name), ShellWord(w.Draft)))}
 		}
 	}
 	if w.Repeat == nil && !w.Entry {

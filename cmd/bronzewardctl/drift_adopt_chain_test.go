@@ -33,7 +33,9 @@ type adoptChain struct {
 	// epoch moved and came back between the read of the import and the send. preMoved says it did.
 	moveInPreflight bool
 	preMoved        bool
-	log             []string
+	// staysMoved makes that answer, and every one after it, ep_BWSYNTH-2: the epoch does not come back.
+	staysMoved bool
+	log        []string
 }
 
 func (f *adoptChain) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -52,7 +54,7 @@ func (f *adoptChain) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if f.moveInPreflight && !f.preMoved && f.rereads >= 2 && r.Method == http.MethodGet && path == "/server" {
 		// A retryable 503 that carries the other epoch: the client reads again and gets the first one.
-		f.preMoved = true
+		f.preMoved, f.moved = true, f.staysMoved
 		f.log = append(f.log, "GET /server 503 at ep_BWSYNTH-2")
 		f.mu.Unlock()
 		w = movedTo{w, "ep_BWSYNTH-2"}
@@ -172,15 +174,25 @@ func TestDriftAdoptBindsItsPublicationToTheIngestionAnswer(t *testing.T) {
 // publication's own preflight. The bound send refuses with nothing sent, and the block names step 2
 // again, not only the step after it.
 func TestDriftAdoptNamesStep2WhenThePreflightMovesTheEpoch(t *testing.T) {
-	f := adoptChainServer(t)
-	f.moveInPreflight = true
-	code, out, errOut := runDrift(t, "drift", "adopt", "mch_BWSYNTH", "--draft", "drf_BWSYNTH")
-	sent := false
-	for _, l := range f.log {
-		sent = sent || strings.HasPrefix(l, "POST /drafts/drf_BWSYNTH/publications")
-	}
-	if !f.preMoved || code == 0 || sent || !strings.Contains(out, "Step 2 again:") || strings.Contains(out, "The later step:") || !strings.Contains(errOut, "Nothing was sent") {
-		t.Errorf("exit %d, moved %v, publication sent %v, stdout %q, stderr %q; want a refusal that published nothing and names step 2 again\nrequests: %q", code, f.preMoved, sent, out, errOut, f.log)
+	for _, c := range []struct {
+		name, want string
+		staysMoved bool
+	}{
+		{"the epoch comes back", "Nothing was sent", false},
+		{"the epoch stays moved, so the kept ETag of the draft is gone", "no ETag of draft", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := adoptChainServer(t)
+			f.moveInPreflight, f.staysMoved = true, c.staysMoved
+			code, out, errOut := runDrift(t, "drift", "adopt", "mch_BWSYNTH", "--draft", "drf_BWSYNTH")
+			sent := false
+			for _, l := range f.log {
+				sent = sent || strings.HasPrefix(l, "POST /drafts/drf_BWSYNTH/publications")
+			}
+			if !f.preMoved || code == 0 || sent || !strings.Contains(out, "Step 2 again:") || strings.Contains(out, "The later step:") || !strings.Contains(errOut, c.want) {
+				t.Errorf("exit %d, moved %v, publication sent %v, stdout %q, stderr %q; want a refusal with %q that published nothing and names step 2 again\nrequests: %q", code, f.preMoved, sent, out, errOut, c.want, f.log)
+			}
+		})
 	}
 }
 
