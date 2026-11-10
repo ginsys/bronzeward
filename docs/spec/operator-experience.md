@@ -915,7 +915,11 @@ Each step has `step` (1 to 3), `name` (`import`, `publish` or `plan`), the `role
   the signed-in identity is not a person (step 1 takes a human only) or lacks the step's role.
 - `failed`: the write was refused, by the server or by the client before it sent anything (a
   missing kept ETag, a changed epoch), or the step's operation ended `failed`, `rejected` or
-  `cancelled`. The step did nothing that stands.
+  `cancelled`, or the import's run recorded `resume-failed` (its staged input could not be
+  decrypted, which a repeated step 1 can meet), so the claim stays held and the operation still
+  runs. The step did nothing that stands. The exit stays 1. The `command` is `import status`; the
+  author then runs `import takeover` once the lease lapsed, or `import abandon`, both with the
+  `author` role.
 - `unknown`: the write was accepted or may have been, and the outcome is not known. This is exit
   3, a Ctrl-C that cut the step's wait short, or a read of the step's operation that the server
   refused or that gave no answer (exit 1 or 3, as in the text output). For an ambiguous write the
