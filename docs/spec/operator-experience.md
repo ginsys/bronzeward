@@ -331,7 +331,11 @@ Global: --context, -o table|json|yaml, --no-input, --no-wait, --idempotency-key,
   (see [§5.7](#57-operation-tracking)).
 - `-o json` prints the API resource with the same members and values, so scripts never depend on
   table layout. DEL, C1 and bidirectional control characters are written as `\uNNNN`
-  ([client contracts §6](client-contracts.md#6-tls-trust) item 8). The
+  ([client contracts §6](client-contracts.md#6-tls-trust) item 8). `-o yaml` prints the same document
+  as YAML. One exception: a command that makes more than one write in a run prints one object that
+  names each step and holds each answer unchanged, once, when the command ends, never one document
+  per write ([§5.8](#58-drift-freeze-then-adopt-or-revert) sets it for `drift adopt`, the only such
+  command today). A later command of that kind follows the same rules. The
   protected import review has no `-o json` or `-o yaml` form ([§9](#9-secret-handling-in-the-clients)). Tables
   follow `NO_COLOR` and degrade to plain text when stdout is not a terminal.
 - A command that starts an operation prints its ID and waits by default, showing events;
@@ -886,6 +890,72 @@ adoption without sending anything, even while frozen
 a value as a reference refuses a fragment that overrides it, so the author must stop selecting
 such fragments (`docs/operator/walkthrough.md:303-306`). **Proposed:** the composite command
 prints each role's step instead of failing at the first role the caller lacks.
+
+**Structured output of a composite.** With `-o json` or `-o yaml`, `drift adopt` prints one
+object, once, after its last step has settled. The text output above does not change. The object
+has three members: `machine`, `draft` and `steps`, which always holds the three steps in order.
+
+```json
+{"machine": "mch_w4ze…n3fa", "draft": "drf_9pq…a1ka", "steps": [
+  {"step": 1, "name": "import", "role": "author", "state": "done", "answer": {"ingestion": "ing_4hw…", "operation": "op_…", "generation": 1}},
+  {"step": 2, "name": "publish", "role": "publisher", "state": "done", "answer": {"id": "op_…", "state": "queued"}, "release": "rel_fgqv…j6m"},
+  {"step": 3, "name": "plan", "role": "publisher", "state": "failed", "command": "bronzewardctl plan create …", "error": "…"}]}
+```
+
+The answers are shortened here. A `failed` step has no `answer` when the server refused the write.
+
+Each step has `step` (1 to 3), `name` (`import`, `publish` or `plan`), the `role` it needs
+(`author`, `publisher`, `publisher`) and a `state`:
+
+- `done`: the server answered the write, and the step's own wait ended well. The import is
+  released into the draft, the publication succeeded, the plan exists.
+- `paused`: step 1 only. The import is paused for review, so the draft has not changed. The later
+  steps are `not-run`.
+- `not-run`: the command sent nothing for this step, because an earlier step did not finish or
+  the signed-in identity lacks the step's role.
+- `failed`: the server refused the write, or the step's operation ended `failed`, `rejected` or
+  `cancelled`. The step did nothing that stands.
+- `unknown`: the outcome is not known. This is exit 3, or a Ctrl-C that cut the step's wait short.
+  The key and the repeat flags stay in the block on standard error
+  ([client contracts §8.4](client-contracts.md#84-idempotency-and-ambiguous-responses) item 4).
+
+Further members of a step: `answer` is the server's answer to the step's write, as served: the
+ingestion that was accepted, the operation, the plan. It is there exactly when the server
+answered that write with success, so it can be there for `paused`, `unknown` and a `failed`
+operation, and it is never there for a refused write. `release` is on a `done` publish step and
+names the release the publication made. `command` is on every step that is not `done`: the
+command the table output names for it, with `<release>` where the release is not yet known. For
+`paused` it is the `import mark` command. `error` is on `failed` and `unknown`: the line the
+command prints on standard error for that step, escaped as every such line is.
+
+The object is printed on every end after the identity read, on failure, on an unknown outcome and
+after a Ctrl-C, because a publication cannot be undone and the script must be able to see how far
+the run went. When the identity read itself fails, or the arguments are refused (exit 2), no step
+was run and nothing is printed. A caller who lacks the author role gets the object with three
+`not-run` steps and their commands, where the stream printed nothing and exited 0.
+
+The exit codes do not change. The exit code is that of the step that stopped the command: 0 when
+every step is `done`, or the command stopped by design at a `paused` import or a missing role; 1,
+3, 4 or 130 as for the same step in the text output; 6 when the object cannot be written. The
+error is printed beside it on standard error, as in the text output.
+
+`-o json` escapes DEL, C1 and bidirectional control characters in the whole object, the nested
+answers and the `command` and `error` text included, as one encoding of the whole
+([client contracts §6](client-contracts.md#6-tls-trust) item 8). `-o yaml` prints the same object
+as one YAML document, with no `---`.
+
+**Rejected: a stream of documents.** The alternative prints each step's answer as it arrives,
+with `---` between YAML documents and one JSON value per line, as `timeline --follow` does. It
+keeps each answer as the plain API resource, needs no carve-out in the rule on `-o json`, and
+prints the finished steps even if the process is killed. It was rejected for this command because
+the script's question after a composite is how far the run got. A stream answers it only by the
+shape and the number of the documents, and prints nothing for a step that was not run. For a
+publication, which cannot be undone, that guess is the wrong place to leave a script. The object
+costs two things, both accepted. A process ended by a signal that cannot be caught prints
+nothing, where a stream would have shown the finished steps. The operator then reads the server's
+records, as after any killed command. And the object is not an API resource, which the carve-out
+in the rule on `-o json` says. `timeline --follow` keeps its stream, because its entries are an
+open-ended series of reads and not the steps of one command.
 
 Revert:
 

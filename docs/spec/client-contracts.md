@@ -449,6 +449,9 @@ it. It holds no secret.
    **JSON output.** `-o json` passes the server's document on, with each DEL, C1 and
    bidirectional control character written as `\uNNNN`. The JSON encoder escapes the C0 range
    and leaves these raw. The escape decodes to the same text, so the document keeps its meaning.
+   The object a composite command prints (`drift adopt`,
+   [operator experience §5.8](operator-experience.md#58-drift-freeze-then-adopt-or-revert)) is one
+   document: the escape covers all of it, the nested answers and the text the client adds included.
    The same test runs every command in `-o json` and fails on a raw character of these kinds,
    on a raw C0 character that is not a line feed, or on a document that is not valid JSON.
 
