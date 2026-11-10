@@ -912,7 +912,7 @@ Each step has `step` (1 to 3), `name` (`import`, `publish` or `plan`), the `role
 - `paused`: step 1 only. The import is paused for review, so the draft has not changed. The later
   steps are `not-run`.
 - `not-run`: the command sent nothing for this step, because an earlier step did not finish or
-  the signed-in identity lacks the step's role.
+  the signed-in identity is not a person (step 1 takes a human only) or lacks the step's role.
 - `failed`: the write was refused, by the server or by the client before it sent anything (a
   missing kept ETag, a changed epoch), or the step's operation ended `failed`, `rejected` or
   `cancelled`. The step did nothing that stands.
@@ -929,22 +929,28 @@ answered that write with success and a body that is JSON, so it can be there for
 `unknown` and a `failed` operation, and it is never there for a refused write. A successful
 answer that is not JSON, an empty one included, cannot be nested in the object: `answer` is
 absent, the state stays that of the step, and `error` says that the answer cannot be read. `release` is on a `done` publish step and
-names the release the publication made. `command` is on every step that is not `done`: the
+names the release the publication made. A publication that succeeded without a readable
+release is `done` without `release`, the plan step is `not-run`, and the exit is 1 as in the
+text output. `command` is on every step that is not `done`: the
 command the table output names for it, with `<release>` where the release is not yet known. For
-`paused` it is the `import mark` command. `error` is on `failed` and `unknown`: the line the
-command prints on standard error for that step, escaped as every such line is.
+`paused` it is the `import mark` command. `error` is on `failed` and `unknown`, and on any step whose answer or result cannot be read: the
+line the command prints on standard error for that step, escaped as every such line is.
 
 The object is printed on every end after the identity read, on failure, on an unknown outcome and
 after a Ctrl-C, because a publication cannot be undone and the script must be able to see how far
 the run went. When the identity read itself fails, or the arguments are refused (exit 2), no step
-was run and nothing is printed. A caller who lacks the author role gets the object with three
+was run and nothing is printed. A caller who is not an author, or not a person, gets the object with three
 `not-run` steps and their commands, where the stream printed nothing and exited 0.
 
 The exit codes do not change. The exit code is that of the step that stopped the command: 0 when
-every step is `done`, or the command stopped by design at a `paused` import or a missing role; 1,
+every step is `done` and the client fails after none of them, or the command stopped by design at a
+`paused` import, a missing role or an identity that is not a person; 1,
 3, 4 or 130 as for the same step in the text output. Exit 6, for an object that cannot be written,
 follows the precedence rule of the exit codes above: it takes the place of 0, and a more specific
 code of the step stays. The error is printed beside it on standard error, as in the text output.
+The step states say what the server did. A failure of the client after the last step, such as
+keeping its state or reading the draft again after an import, changes no state, and it keeps its
+exit code and its error on standard error, so every step can be `done` with a nonzero exit.
 
 `-o json` escapes DEL, C1 and bidirectional control characters in the whole object, the nested
 answers and the `command` and `error` text included, as one encoding of the whole
