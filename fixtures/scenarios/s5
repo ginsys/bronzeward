@@ -53,7 +53,8 @@ case $s5_mode in
   cli) pass_only=1 via_cli=1 ;;
   *) die "usage: scenarios/s5 run|pass|cli|roles|drift" ;;
 esac
-need docker curl jq timeout id sleep date awk wc od head tr go grep sed
+need docker curl jq timeout id sleep date awk wc od head tr
+[ -z "$via_cli" ] || need go grep sed
 need_state
 umask 077
 image_id=$(cat -- "$STATE/up-image") || die "no server image is recorded in $STATE; run fixtures/bin/up"
@@ -713,7 +714,10 @@ cli_import() {
 # the operation succeeded with one release, which is then the worker's Desired; its id in new_release.
 cli_publish() {
   local was_desired
-  was_desired=$(sql "SELECT desired FROM machine_state WHERE machine = '$machine_w'")
+  was_desired=$(sql "SELECT desired FROM machine_state WHERE machine = '$machine_w'") && [ -n "$was_desired" ] || {
+    say "s5: the worker's Desired could not be read before the publication"
+    return 1
+  }
   new_release=''
   ctl_rm draft-show-publisher h-publisher draft show "$draft" || return 1
   ctl_rm publish h-publisher publish "$draft" || return 1
@@ -743,7 +747,9 @@ cli_approve() {
 # cli_unseen <plan> <name>: the approval's output says it approves an unseen overwrite, and the plan's
 # approval entry on the timeline records it as one.
 cli_unseen() {
-  cli_kept "approve-$2" 'It overwrites the drifted configuration, which no reviewer has seen: this approval records that you approve overwriting it\.' &&
+  cli_kept "approve-$2" '(^|[[:space:]])It[[:space:]]+overwrites[[:space:]]+the[[:space:]]+drifted[[:space:]]+configuration' &&
+    cli_kept "approve-$2" 'which[[:space:]]+no[[:space:]]+reviewer[[:space:]]+has[[:space:]]+seen' &&
+    cli_kept "approve-$2" 'records[[:space:]]+that[[:space:]]+you[[:space:]]+approve[[:space:]]+overwriting[[:space:]]+it' &&
     [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w' AND kind = 'approval'
       AND entry->>'plan' = '$1' AND (entry->>'unseenOverwrite')::boolean")" = 1 ]
 }
@@ -752,7 +758,7 @@ cli_unseen() {
 unfreeze_refused_cli() {
   local rc=0
   ctl_rm "unfreeze-$1" "$1" machine unfreeze "$machine_w" --reason 'S5 revert' || rc=$?
-  [ "$rc" -ne 0 ] && cli_kept "unfreeze-$1" 'Needs one of the roles \[approver\]\.' &&
+  [ "$rc" -eq 1 ] && cli_kept "unfreeze-$1" 'Needs one of the roles \[approver\]\.' &&
     [ "$(sql "SELECT frozen FROM machine WHERE id = '$machine_w'")" = t ]
 }
 
