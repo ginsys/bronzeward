@@ -93,6 +93,12 @@ const (
 // and a frozen one, the freeze and unfreeze answers and their refusals, and the roles of each.
 func TestDriftFreeze(t *testing.T) {
 	e := newPlanEnv(t)
+	// drift show prints a time in the zone of the client, and the fixture runs the client with no TZ,
+	// so it takes the zone of the host. This test pins UTC, as the operation cases do, so that the
+	// expected text of observedAt does not depend on the host. The other choice, to build the text in
+	// the zone of the client, would have to know that zone, and the test cannot read it from the
+	// child. Printing local time stays the client's choice (operator experience specification).
+	e.env = []string{"TZ=UTC"}
 	f, in := e.f, e.in
 	h := []string{"--context", "human"}
 	as := func(who string) []string {
