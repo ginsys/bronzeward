@@ -343,8 +343,12 @@ func (e *env) driftAdopt(args []string) (err error) {
 	if draft == "" {
 		return usageError{errors.New("drift adopt needs --draft")}
 	}
-	// The repeat flags are checked before any role guidance, as for every command that takes them.
+	// The repeat flags and the staging and review rules of the import are checked before any role
+	// guidance, so that a caller without the author role gets the usage error an author would get.
 	if _, err := rf.repeat(true); err != nil {
+		return err
+	}
+	if err := checkStaging(staging, review); err != nil {
 		return err
 	}
 	m := pos[0]

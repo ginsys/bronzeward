@@ -400,6 +400,19 @@ func TestDriftAdoptNeedsAnAuthorAndADraft(t *testing.T) {
 	if code, out, errOut := runDrift(t, "drift", "adopt", "mch_a", "--draft", "drf_a", "--idempotency-key="); code != 2 || out != "" {
 		t.Errorf("an empty key: exit %d, stdout %q, stderr %q; want exit 2 and no guidance", code, out, errOut)
 	}
+	// The staging and review rules of the import step are refused the same way for a caller without the author role.
+	for _, c := range []struct {
+		name, want string
+		flags      []string
+	}{
+		{"a staging that is neither", `--staging "bogus": give encrypted or transient`, []string{"--staging=bogus"}},
+		{"a review of transient staging", "--review needs encrypted staging", []string{"--review", "--staging=transient"}},
+	} {
+		code, out, errOut := runDrift(t, append([]string{"drift", "adopt", "mch_a", "--draft", "drf_a"}, c.flags...)...)
+		if code != 2 || out != "" || !strings.Contains(errOut, c.want) {
+			t.Errorf("%s: exit %d, stdout %q, stderr %q; want exit 2, no guidance and %q", c.name, code, out, errOut, c.want)
+		}
+	}
 	for _, r := range seen() {
 		if strings.HasPrefix(r, "POST ") {
 			t.Errorf("sent %s", r)

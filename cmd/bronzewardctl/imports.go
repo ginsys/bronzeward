@@ -103,6 +103,18 @@ func (e *env) importStart(args []string) error {
 	return err
 }
 
+// checkStaging is the rule for --staging and --review of an import. Import start and drift adopt
+// share it, so that the two cannot differ, and drift adopt applies it before any role guidance.
+func checkStaging(staging string, review bool) error {
+	switch {
+	case staging != "encrypted" && staging != "transient":
+		return usageError{fmt.Errorf("--staging %q: give encrypted or transient", staging)}
+	case review && staging != "encrypted":
+		return usageError{errors.New("--review needs encrypted staging, which keeps the input until the review is continued; nothing was sent")}
+	}
+	return nil
+}
+
 // ingest is import start's body for an ingestion of kind; drift adopt starts a drift-adoption. It
 // answers the client and the accepted ingestion, empty when the start was not accepted.
 func (e *env) ingest(name, kind string, args []string) (*client.Client, accepted, error) {
@@ -130,13 +142,11 @@ func (e *env) ingest(name, kind string, args []string) (*client.Client, accepted
 	}); err != nil {
 		return c, a, err
 	}
-	switch {
-	case machine == "" || draft == "":
+	if machine == "" || draft == "" {
 		return c, a, usageError{errors.New(name + " needs --machine and --draft")}
-	case staging != "encrypted" && staging != "transient":
-		return c, a, usageError{fmt.Errorf("--staging %q: give encrypted or transient", staging)}
-	case review && staging != "encrypted":
-		return c, a, usageError{errors.New("--review needs encrypted staging, which keeps the input until the review is continued; nothing was sent")}
+	}
+	if err := checkStaging(staging, review); err != nil {
+		return c, a, err
 	}
 	if u := stdinUsers(file, "", e.tokenStdin); len(u) > 1 {
 		return c, a, usageError{fmt.Errorf("%s read standard input, which only one of them can: give the token with --token-file", strings.Join(u, " and "))}
