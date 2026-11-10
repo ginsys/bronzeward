@@ -933,7 +933,10 @@ names the release the publication made. A publication that succeeded without a r
 release is `done` without `release`, the plan step is `not-run`, and the exit is 1 as in the
 text output. `command` is on every step that is not `done`: the
 command the table output names for it, with `<release>` where the release is not yet known. For
-`paused` it is the `import mark` command. `error` is on `failed` and `unknown`, and on any step whose answer or result cannot be read: the
+`paused` it is the `import mark` command, as in the table output. The author then runs `import
+continue` to continue the import and release it into the draft. Both commands need the `author`
+role, the `role` of step 1. The later steps then run by their own commands, which the `command`
+member of each names. `error` is on `failed` and `unknown`, and on any step whose answer or result cannot be read: the
 line the command prints on standard error for that step, escaped as every such line is.
 
 The object is printed on every end after the identity read, on failure, on an unknown outcome and
