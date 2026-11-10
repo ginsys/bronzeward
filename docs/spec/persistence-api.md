@@ -402,7 +402,11 @@ They are held apart **(choice §17.29)**.
   an administrative identity, before the cluster's first `source: machine`
   ingestion; rotating it is writing a new version. No Bronzeward identity
   writes, lists or deletes it, and no route accepts it: the normal API never
-  carries a secret value (compilation §1).
+  carries a secret value (compilation §1). The CLI links one package of Talos
+  access, `internal/talos/discover`, for `cluster discover`: a read-only package
+  with its own dial and source guard. It does not import `internal/talos`, and
+  the reader of the machine configuration and the apply path stay out of the CLI
+  (client contracts, "Excluded").
 - **Who reads it.** The ingestion identity, for a `source: machine` ingestion,
   and the executor identity, for its observations and dispatch (execution and
   recovery §3.1 item 2), each read its latest version at use and record that
