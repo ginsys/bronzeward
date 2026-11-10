@@ -23,7 +23,12 @@ type adoptChain struct {
 	// pubUnknown answers the publication with a redirect, which the client cannot read: its outcome is unknown.
 	pubUnknown  bool
 	read, moved bool
-	log         []string
+	// moveOnReread makes the reread of the ingestion that step 1 ends with, the second GET of it,
+	// answer ep_BWSYNTH-2. The /server refresh that follows answers ep_BWSYNTH-1 again, as every
+	// other answer does: the epoch changed and came back. rereads counts those GETs.
+	moveOnReread bool
+	rereads      int
+	log          []string
 }
 
 func (f *adoptChain) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -36,6 +41,10 @@ func (f *adoptChain) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.read = true
 	}
 	moved := f.moved
+	if f.moveOnReread && r.Method == http.MethodGet && path == "/ingestions/ing_BWSYNTH" {
+		f.rereads++
+		moved = moved || f.rereads == 2
+	}
 	f.log = append(f.log, fmt.Sprintf("%s %s moved=%v", r.Method, path, moved))
 	f.mu.Unlock()
 	if moved {
@@ -122,6 +131,41 @@ func TestDriftAdoptSendsItsPlanWhenTheEpochHolds(t *testing.T) {
 	}
 	if got := savedEpoch(t); got != "ep_BWSYNTH-1" {
 		t.Errorf("saved epoch %q; want ep_BWSYNTH-1, which never moved", got)
+	}
+}
+
+// TestDriftAdoptBindsItsPublicationToTheIngestionAnswer: the publication is sent on the client that
+// read the import, bound to the epoch of that answer. When the epoch changed and came back while
+// the import was read, the answer was given under another epoch, so nothing is published and the
+// output names step 2 again. Before, the publication opened a new client that read the epoch again,
+// found E1, and sent.
+func TestDriftAdoptBindsItsPublicationToTheIngestionAnswer(t *testing.T) {
+	f := adoptChainServer(t)
+	f.moveOnReread = true
+	code, out, errOut := runDrift(t, "drift", "adopt", "mch_BWSYNTH", "--draft", "drf_BWSYNTH")
+	sent := false
+	for _, l := range f.log {
+		sent = sent || strings.HasPrefix(l, "POST /drafts/drf_BWSYNTH/publications")
+	}
+	if code == 0 || sent || !strings.Contains(out, "Step 2 again:") {
+		t.Errorf("exit %d, publication sent %v, stdout %q, stderr %q; want a refusal that published nothing and names step 2 again\nrequests: %q", code, sent, out, errOut, f.log)
+	}
+}
+
+// TestDriftAdoptPublishesWhenTheIngestionAnswerHolds is the control of the test above: the same
+// chain with no move publishes once.
+func TestDriftAdoptPublishesWhenTheIngestionAnswerHolds(t *testing.T) {
+	f := adoptChainServer(t)
+	f.moveOnReread = false
+	code, out, errOut := runDrift(t, "drift", "adopt", "mch_BWSYNTH", "--draft", "drf_BWSYNTH")
+	n := 0
+	for _, l := range f.log {
+		if strings.HasPrefix(l, "POST /drafts/drf_BWSYNTH/publications") {
+			n++
+		}
+	}
+	if code != 0 || n != 1 {
+		t.Errorf("exit %d, publications sent %d, stdout %q, stderr %q; want exit 0 and one publication", code, n, out, errOut)
 	}
 }
 

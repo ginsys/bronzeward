@@ -52,11 +52,27 @@ func (e *env) publish(args []string) (err error) {
 // saves, and the release, "" with --no-wait. A caller that is not publish itself gives input, the
 // words that name the command to repeat this write with, as the outcome-unknown block prints it.
 func (e *env) publishDraft(d string, rp *client.Repeat, ifMatch, input string, noWait bool) (*client.Client, string, error) {
-	var c *client.Client
+	c, err := e.open()
+	if err != nil {
+		return nil, "", err
+	}
+	// The caller saves the client, as it does for every answer of this function.
+	release, err := e.publishDraftOn(c, nil, d, rp, ifMatch, input, noWait)
+	return c, release, err
+}
+
+// publishDraftOn is publishDraft on a client already open. A caller that read on the client passes
+// the bind of the read the publication follows (§8.5): the write is then refused, with nothing
+// sent, when the epoch changed since that read.
+func (e *env) publishDraftOn(c *client.Client, bind *epochBind, d string, rp *client.Repeat, ifMatch, input string, noWait bool) (string, error) {
 	var op apitypes.OperationBody
-	err := e.writeAfter(func(cl *client.Client) error { c = cl; return nil }, &client.Write{Method: http.MethodPost,
+	send := &client.Write{Method: http.MethodPost,
 		Path: "/drafts/" + url.PathEscape(d) + "/publications", Body: []byte("{}"), Draft: d, IfMatch: ifMatch, Repeat: rp, Input: input,
-		Check: "operation list --kind publish", Read: entryRead(d, "", "")}, func(_ *client.Client, r *client.Response) ([]string, error) {
+		Check: "operation list --kind publish", Read: entryRead(d, "", "")}
+	if bind != nil {
+		send.ReadsAt(bind.epoch, bind.moves)
+	}
+	err := e.writeWith(c, nil, send, func(_ *client.Client, r *client.Response) ([]string, error) {
 		if err := json.Unmarshal(r.Body, &op); err != nil {
 			return nil, err
 		}
@@ -75,11 +91,11 @@ func (e *env) publishDraft(d string, rp *client.Repeat, ifMatch, input string, n
 	})
 	switch {
 	case err != nil:
-		return c, "", err
+		return "", err
 	case op.Id == "":
-		return c, "", fmt.Errorf("%s: the publication was accepted without naming its operation; find it with: bronzewardctl operation list --kind publish", c.Context.Where())
+		return "", fmt.Errorf("%s: the publication was accepted without naming its operation; find it with: bronzewardctl operation list --kind publish", c.Context.Where())
 	case noWait:
-		return c, "", nil
+		return "", nil
 	}
 	o, read, err := c.Watch(op.Id, client.Watch{
 		Show:  func(ev client.Event) { fmt.Fprintf(e.err, "  %s\n", pr(ev.Type)) },
@@ -87,7 +103,7 @@ func (e *env) publishDraft(d string, rp *client.Repeat, ifMatch, input string, n
 	})
 	// No operation was read, so the state is not known: the error says so and names the read.
 	if o == nil {
-		return c, "", noOperation(op.Id, err)
+		return "", noOperation(op.Id, err)
 	}
 	// The operation's end decides the exit; a failed read of the events after it is reported beside.
 	if err != nil {
@@ -95,10 +111,10 @@ func (e *env) publishDraft(d string, rp *client.Repeat, ifMatch, input string, n
 	}
 	// A terminal read that an epoch change since overtook decides nothing: the state is not known.
 	if rerr := restoredRead(c, op.Id, o, read); rerr != nil {
-		return c, "", rerr
+		return "", rerr
 	}
 	if o.State != "succeeded" {
-		return c, "", operationFailed{fmt.Errorf("%s: publication operation %s %s: %s; nothing was sent to any machine", c.Context.Where(), pr(o.Id), pr(o.State), pr(compact(o.Error)))}
+		return "", operationFailed{fmt.Errorf("%s: publication operation %s %s: %s; nothing was sent to any machine", c.Context.Where(), pr(o.Id), pr(o.State), pr(compact(o.Error)))}
 	}
 	keep(e, c, d, "")
 	var res apitypes.PublishResult
@@ -106,9 +122,9 @@ func (e *env) publishDraft(d string, rp *client.Repeat, ifMatch, input string, n
 		res, err = o.Result.AsPublishResult()
 	}
 	if o.Result == nil || err != nil || res.Release == "" {
-		return c, "", fmt.Errorf("%s: publication operation %s succeeded without naming its release: %s", c.Context.Where(), pr(o.Id), pr(compact(o.Result)))
+		return "", fmt.Errorf("%s: publication operation %s succeeded without naming its release: %s", c.Context.Where(), pr(o.Id), pr(compact(o.Result)))
 	}
-	return c, res.Release, nil
+	return res.Release, nil
 }
 
 // pr escapes the control characters of text the server chose (client-contracts.md §6 item 4).

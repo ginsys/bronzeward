@@ -385,7 +385,8 @@ func (e *env) driftAdopt(args []string) (err error) {
 	}
 	// The read can show another epoch, which this client keeps, as ingest saved its own before it; a
 	// failed read leaves the steps unrun, so they are printed.
-	b, err := readIngestion(c, a.Ingestion)
+	before := c.Context.LastEpoch
+	b, bind, err := readIngestionBound(c, a.Ingestion)
 	saved := c.Save()
 	if err != nil || saved != nil {
 		// A failed read leaves the state unknown; a read that worked and a save that did not leaves it known.
@@ -405,12 +406,23 @@ func (e *env) driftAdopt(args []string) (err error) {
 	if err := e.say("Step 2/3  publish draft " + draft + ": it publishes the whole draft"); err != nil {
 		return err
 	}
+	// The publication follows the read of the import, so it is bound to the epoch and move count of that
+	// answer (§8.5): an epoch that changed, even if it came back, while the import was read means the
+	// state read was given under another epoch. Nothing is sent then. The same client carries on, and
+	// is saved once, at the end, so no earlier client writes an older epoch over it.
+	defer func() { err = errors.Join(err, c.Save()) }()
+	if c.EpochMoves() != bind.moves || c.Context.LastEpoch != bind.epoch {
+		moved := fmt.Sprintf("from %s to %s", before, bind.epoch)
+		if before == bind.epoch {
+			moved = "and came back to " + before
+		}
+		return errors.Join(notSent{fmt.Errorf("%s: step 2 not sent: the epoch changed %s while the import was read, so the import state may not hold. Nothing was sent. Read it again with: bronzewardctl import status %s, then run step 2",
+			c.Context.Where(), moved, pr(a.Ingestion))},
+			e.say(append([]string{"Step 2 again:"}, from(2, "")...)...))
+	}
 	// An unknown outcome of this write names the publish command, never drift adopt: the repeat flags it
 	// prints are this publication's, and drift adopt would give them to the import of step 1.
-	pc, release, err := e.publishDraft(draft, nil, "", "the command bronzewardctl publish "+client.ShellWord(draft)+" in place of drift adopt", false)
-	if pc != nil {
-		defer func() { err = errors.Join(err, pc.Save()) }()
-	}
+	release, err := e.publishDraftOn(c, bind, draft, nil, "", "the command bronzewardctl publish "+client.ShellWord(draft)+" in place of drift adopt", false)
 	if err != nil {
 		return errors.Join(err, e.say(append([]string{"The later step:"}, from(3, "")...)...))
 	}
@@ -422,7 +434,7 @@ func (e *env) driftAdopt(args []string) (err error) {
 	// One client is also saved once, at the end, so no earlier client writes an older epoch over it.
 	req, err := e.planParse("drift adopt", []string{"--release", release, "--machine", m, "--operation", "adopt"})
 	if err == nil {
-		err = e.planCreateOn(pc, req, planOpts{extra: adoptLines, bind: &epochBind{epoch: pc.Context.LastEpoch, moves: pc.EpochMoves()},
+		err = e.planCreateOn(c, req, planOpts{extra: adoptLines, bind: &epochBind{epoch: c.Context.LastEpoch, moves: c.EpochMoves()},
 			input: "the command " + createLine(release, m, "adopt") + " in place of drift adopt"})
 	}
 	if err != nil {

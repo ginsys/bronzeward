@@ -662,6 +662,20 @@ func readIngestionAt(c *client.Client, ing string) (*apitypes.IngestionBody, str
 	return &b, r.Header.Get("Bronzeward-Epoch"), nil
 }
 
+// readIngestionBound is readIngestion with the bind of its answer: the epoch it showed and the
+// client's move count as the answer left it, which a write built from this read is bound to (§8.5).
+func readIngestionBound(c *client.Client, ing string) (*apitypes.IngestionBody, *epochBind, error) {
+	r, err := c.Get("/ingestions/" + url.PathEscape(ing))
+	if err != nil {
+		return nil, nil, err
+	}
+	var b apitypes.IngestionBody
+	if err := json.Unmarshal(r.Body, &b); err != nil {
+		return nil, nil, fmt.Errorf("GET /api/v1/ingestions/%s cannot be read: %w", url.PathEscape(ing), err)
+	}
+	return &b, boundTo(c, r), nil
+}
+
 // ingestionRead reads an ingestion after an unknown outcome and says what it shows.
 func ingestionRead(ing string) func(*client.Client) (string, error) {
 	return func(c *client.Client) (string, error) {
