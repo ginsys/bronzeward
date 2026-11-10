@@ -591,7 +591,7 @@ step 6, `h-publisher` runs `drift revert`, and `h-approver` approves and unfreez
 database as the API's run, and adds each freeze's entry and each plan's and approval's act. The
 steps that no CLI command makes stay the API's: the out-of-band patches, the new draft's creation, the label
 fragment's removal and the observations. The mode is `s5 pass` with those steps made by the CLI, so
-it runs none of the negative controls except that unfreeze and none of the ingestion's interruptions.
+it runs none of the negative controls except the refused adoption of step 4 (made through the API) and that unfreeze, and none of the ingestion's interruptions.
 
 **Clauses exercised.** ER [§6.1](execution-recovery.md#61-detection),
 [§6.2](execution-recovery.md#62-freeze), [§6.3](execution-recovery.md#63-adopt),
