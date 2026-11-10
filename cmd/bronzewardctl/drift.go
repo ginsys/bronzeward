@@ -414,8 +414,9 @@ func (e *env) driftAdopt(args []string) (err error) {
 	// prints are this publication's, and drift adopt would give them to the import of step 1.
 	release, err := e.publishDraftOn(c, bind, draft, nil, "", "the command bronzewardctl publish "+client.ShellWord(draft)+" in place of drift adopt", false)
 	if err != nil {
-		// A refusal before the send leaves step 2 itself to run again; any other error leaves its outcome
-		// to the block it carries, and the step after it.
+		// A refusal the client makes because the epoch moved or the draft's ETag is gone sends nothing, so
+		// step 2 runs again. Any other error, a failed preflight read included, leaves the outcome to the
+		// block it carries, and names the step after it.
 		if errors.As(err, new(client.NotSent)) {
 			return errors.Join(err, e.say(append([]string{"Step 2 again:"}, from(2, "")...)...))
 		}
