@@ -897,7 +897,7 @@ has three members: `machine`, `draft` and `steps`, which always holds the three 
 
 ```json
 {"machine": "mch_w4ze…n3fa", "draft": "drf_9pq…a1ka", "steps": [
-  {"step": 1, "name": "import", "role": "author", "state": "done", "answer": {"ingestion": "ing_4hw…", "operation": "op_…", "generation": 1}},
+  {"step": 1, "name": "import", "role": "author", "state": "done", "answer": {"ingestion": "ing_4hw…", "operation": "op_…"}},
   {"step": 2, "name": "publish", "role": "publisher", "state": "done", "answer": {"id": "op_…", "state": "queued"}, "release": "rel_fgqv…j6m"},
   {"step": 3, "name": "plan", "role": "publisher", "state": "failed", "command": "bronzewardctl plan create …", "error": "…"}]}
 ```
@@ -913,16 +913,22 @@ Each step has `step` (1 to 3), `name` (`import`, `publish` or `plan`), the `role
   steps are `not-run`.
 - `not-run`: the command sent nothing for this step, because an earlier step did not finish or
   the signed-in identity lacks the step's role.
-- `failed`: the server refused the write, or the step's operation ended `failed`, `rejected` or
+- `failed`: the write was refused, by the server or by the client before it sent anything (a
+  missing kept ETag, a changed epoch), or the step's operation ended `failed`, `rejected` or
   `cancelled`. The step did nothing that stands.
-- `unknown`: the outcome is not known. This is exit 3, or a Ctrl-C that cut the step's wait short.
-  The key and the repeat flags stay in the block on standard error
+- `unknown`: the write was accepted or may have been, and the outcome is not known. This is exit
+  3, a Ctrl-C that cut the step's wait short, or a read of the step's operation that the server
+  refused or that gave no answer (exit 1 or 3, as in the text output). For an ambiguous write the
+  key and the repeat flags stay in the block on standard error
   ([client contracts §8.4](client-contracts.md#84-idempotency-and-ambiguous-responses) item 4).
+  After an accepted write, standard error names the command that reads the operation.
 
 Further members of a step: `answer` is the server's answer to the step's write, as served: the
 ingestion that was accepted, the operation, the plan. It is there exactly when the server
-answered that write with success, so it can be there for `paused`, `unknown` and a `failed`
-operation, and it is never there for a refused write. `release` is on a `done` publish step and
+answered that write with success and a body that is JSON, so it can be there for `paused`,
+`unknown` and a `failed` operation, and it is never there for a refused write. A successful
+answer that is not JSON, an empty one included, cannot be nested in the object: `answer` is
+absent, the state stays that of the step, and `error` says that the answer cannot be read. `release` is on a `done` publish step and
 names the release the publication made. `command` is on every step that is not `done`: the
 command the table output names for it, with `<release>` where the release is not yet known. For
 `paused` it is the `import mark` command. `error` is on `failed` and `unknown`: the line the
@@ -936,8 +942,9 @@ was run and nothing is printed. A caller who lacks the author role gets the obje
 
 The exit codes do not change. The exit code is that of the step that stopped the command: 0 when
 every step is `done`, or the command stopped by design at a `paused` import or a missing role; 1,
-3, 4 or 130 as for the same step in the text output; 6 when the object cannot be written. The
-error is printed beside it on standard error, as in the text output.
+3, 4 or 130 as for the same step in the text output. Exit 6, for an object that cannot be written,
+follows the precedence rule of the exit codes above: it takes the place of 0, and a more specific
+code of the step stays. The error is printed beside it on standard error, as in the text output.
 
 `-o json` escapes DEL, C1 and bidirectional control characters in the whole object, the nested
 answers and the `command` and `error` text included, as one encoding of the whole
