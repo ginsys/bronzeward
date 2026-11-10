@@ -70,14 +70,26 @@ func seedDrift(t *testing.T, db *sql.DB, machine string) string {
 	return obs
 }
 
-// observedAt is the time of observation obs as bronzewardctl shows it.
+// observedAt is the time of observation obs as bronzewardctl shows it, in the zone of the test
+// process: the server of the test runs in this process and sends the time in that zone, and the
+// client prints the time as it received it (cmd/bronzewardctl/records.go, when).
 func observedAt(t *testing.T, db *sql.DB, obs string) string {
 	t.Helper()
 	var at time.Time
 	if err := db.QueryRow(`SELECT at FROM observation WHERE id = $1`, obs).Scan(&at); err != nil {
 		t.Fatal(err)
 	}
-	return at.UTC().Format("2006-01-02 15:04:05 MST")
+	return at.Local().Format("2006-01-02 15:04:05 MST")
+}
+
+// testZone is the environment that gives the client the zone of the test process. The fixture runs
+// the client with a clean environment, so without it the client takes the zone of the host, and a
+// TZ in the environment of the test would reach the server and not the client.
+func testZone() []string {
+	if tz, ok := os.LookupEnv("TZ"); ok {
+		return []string{"TZ=" + tz}
+	}
+	return nil
 }
 
 // freezeWords are the sentences machine freeze, machine unfreeze and drift show say, pinned whole.
@@ -93,12 +105,13 @@ const (
 // and a frozen one, the freeze and unfreeze answers and their refusals, and the roles of each.
 func TestDriftFreeze(t *testing.T) {
 	e := newPlanEnv(t)
-	// drift show prints a time in the zone of the client, and the fixture runs the client with no TZ,
-	// so it takes the zone of the host. This test pins UTC, as the operation cases do, so that the
-	// expected text of observedAt does not depend on the host. The other choice, to build the text in
-	// the zone of the client, would have to know that zone, and the test cannot read it from the
-	// child. Printing local time stays the client's choice (operator experience specification).
-	e.env = []string{"TZ=UTC"}
+	// drift show prints the time as the server sent it, and the server runs in this process, so the
+	// time is in the zone of this process. The client must read that offset in the same zone, or it
+	// prints a bare offset (+0100) and not the zone name. The operation cases pin UTC for the client,
+	// which is right only while the test process is in UTC too. Here the client takes the TZ of the
+	// test, and observedAt builds the text in the zone of the test, so the expected text holds in
+	// any zone. Printing local time stays the client's choice (operator experience specification).
+	e.env = testZone()
 	f, in := e.f, e.in
 	h := []string{"--context", "human"}
 	as := func(who string) []string {
