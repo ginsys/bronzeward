@@ -103,6 +103,13 @@ type Repeat struct{ Key, Epoch, Principal string }
 // RefusedRepeat is a T10 repeat refused before the write was sent; the CLI exits 2.
 type RefusedRepeat struct{ error }
 
+// NotSent is a write refused before it was sent because the epoch changed since the reads that
+// built it (§8.5, §8.6 item 3). Its text and exit are those of the error it wraps; a composite
+// tests for it to name the step to run again.
+type NotSent struct{ error }
+
+func (n NotSent) Unwrap() error { return n.error }
+
 // Unknown is a write whose outcome is unknown, or which was set aside (§8.4 items 2-4): its Error
 // is T10's block, which the CLI prints on standard error before it exits 3.
 // Ambiguous says an attempt, this process's or the one a T10 repeat repeats, may have committed;
@@ -238,12 +245,12 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 		// The last epoch seen before the first send, the context-use read's included (§8.4 item 3).
 		ref = c.Context.LastEpoch
 		if w.Reads != "" && ref != "" && ref != w.Reads {
-			return nil, c.Context.fail(fmt.Errorf("%s not sent: the epoch changed from %s to %s after the request was built from reads of the earlier one. Nothing was sent. Read again with: bronzewardctl --context %s %s, then run this command again",
-				route, ShellWord(w.Reads), ShellWord(ref), ShellWord(c.Context.Name), w.Check))
+			return nil, NotSent{c.Context.fail(fmt.Errorf("%s not sent: the epoch changed from %s to %s after the request was built from reads of the earlier one. Nothing was sent. Read again with: bronzewardctl --context %s %s, then run this command again",
+				route, ShellWord(w.Reads), ShellWord(ref), ShellWord(c.Context.Name), w.Check))}
 		}
 		if w.counted && c.moves != w.readMoves {
-			return nil, c.Context.fail(fmt.Errorf("%s not sent: the epoch changed after the request was built from reads of %s, though the last read shows %s as at those reads. Nothing was sent. Read again with: bronzewardctl --context %s %s, then run this command again",
-				route, ShellWord(w.Reads), ShellWord(ref), ShellWord(c.Context.Name), w.Check))
+			return nil, NotSent{c.Context.fail(fmt.Errorf("%s not sent: the epoch changed after the request was built from reads of %s, though the last read shows %s as at those reads. Nothing was sent. Read again with: bronzewardctl --context %s %s, then run this command again",
+				route, ShellWord(w.Reads), ShellWord(ref), ShellWord(c.Context.Name), w.Check))}
 		}
 	}
 	if ref == "" && !w.Entry {

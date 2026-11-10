@@ -28,7 +28,12 @@ type adoptChain struct {
 	// other answer does: the epoch changed and came back. rereads counts those GETs.
 	moveOnReread bool
 	rereads      int
-	log          []string
+	// moveInPreflight makes the server read after that reread, which is the preflight of the
+	// publication, answer a retryable 503 at ep_BWSYNTH-2 once. The retry answers ep_BWSYNTH-1, so the
+	// epoch moved and came back between the read of the import and the send. preMoved says it did.
+	moveInPreflight bool
+	preMoved        bool
+	log             []string
 }
 
 func (f *adoptChain) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -41,9 +46,20 @@ func (f *adoptChain) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.read = true
 	}
 	moved := f.moved
-	if f.moveOnReread && r.Method == http.MethodGet && path == "/ingestions/ing_BWSYNTH" {
+	if r.Method == http.MethodGet && path == "/ingestions/ing_BWSYNTH" {
 		f.rereads++
-		moved = moved || f.rereads == 2
+		moved = moved || (f.moveOnReread && f.rereads == 2)
+	}
+	if f.moveInPreflight && !f.preMoved && f.rereads >= 2 && r.Method == http.MethodGet && path == "/server" {
+		// A retryable 503 that carries the other epoch: the client reads again and gets the first one.
+		f.preMoved = true
+		f.log = append(f.log, "GET /server 503 at ep_BWSYNTH-2")
+		f.mu.Unlock()
+		w = movedTo{w, "ep_BWSYNTH-2"}
+		w.Header().Set("Content-Type", "application/problem+json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		fmt.Fprint(w, `{"type":"urn:bronzeward:problem:dependency-unavailable","title":"Service Unavailable","status":503}`)
+		return
 	}
 	f.log = append(f.log, fmt.Sprintf("%s %s moved=%v", r.Method, path, moved))
 	f.mu.Unlock()
@@ -149,6 +165,22 @@ func TestDriftAdoptBindsItsPublicationToTheIngestionAnswer(t *testing.T) {
 	}
 	if code == 0 || sent || !strings.Contains(out, "Step 2 again:") {
 		t.Errorf("exit %d, publication sent %v, stdout %q, stderr %q; want a refusal that published nothing and names step 2 again\nrequests: %q", code, sent, out, errOut, f.log)
+	}
+}
+
+// TestDriftAdoptNamesStep2WhenThePreflightMovesTheEpoch: the epoch moves and comes back in the
+// publication's own preflight. The bound send refuses with nothing sent, and the block names step 2
+// again, not only the step after it.
+func TestDriftAdoptNamesStep2WhenThePreflightMovesTheEpoch(t *testing.T) {
+	f := adoptChainServer(t)
+	f.moveInPreflight = true
+	code, out, errOut := runDrift(t, "drift", "adopt", "mch_BWSYNTH", "--draft", "drf_BWSYNTH")
+	sent := false
+	for _, l := range f.log {
+		sent = sent || strings.HasPrefix(l, "POST /drafts/drf_BWSYNTH/publications")
+	}
+	if !f.preMoved || code == 0 || sent || !strings.Contains(out, "Step 2 again:") || strings.Contains(out, "The later step:") || !strings.Contains(errOut, "Nothing was sent") {
+		t.Errorf("exit %d, moved %v, publication sent %v, stdout %q, stderr %q; want a refusal that published nothing and names step 2 again\nrequests: %q", code, f.preMoved, sent, out, errOut, f.log)
 	}
 }
 
