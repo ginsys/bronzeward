@@ -582,6 +582,17 @@ ends: S1 to S4 run with none observing.
    `h-publisher`, `h-approver`, `h-recovery` and the automation identity each freeze the scope,
    `h-approver` unfreezing it after each (design §13.7's Freeze rows). This step stays out of the integrated run.
 
+**Through the operator CLI.** The fixture's `s5cli` mode runs steps 3, 4 and 6 through
+`bronzewardctl` ([operator experience](operator-experience.md)), as the same humans. `h-author`
+freezes the scope and runs `drift adopt`, which stops after its import because that human holds no
+publisher role. `h-publisher` publishes and creates the `adopt` plan. `h-approver` approves it. In
+step 6, `h-publisher` runs `drift revert`, and `h-approver` approves and unfreezes. Unfreezing as
+`h-publisher` is refused, naming the `approver` role. The mode makes the same assertions on the
+database as the API's run, and adds each freeze's entry and each plan's and approval's act. The
+steps that no CLI command makes stay the API's: the out-of-band patches, the new draft's creation, the label
+fragment's removal and the observations. The mode is `s5 pass` with those steps made by the CLI, so
+it runs none of the negative controls except that unfreeze and none of the ingestion's interruptions.
+
 **Clauses exercised.** ER [§6.1](execution-recovery.md#61-detection),
 [§6.2](execution-recovery.md#62-freeze), [§6.3](execution-recovery.md#63-adopt),
 [§6.4](execution-recovery.md#64-revert), [§6.5](execution-recovery.md#65-drift-states),
