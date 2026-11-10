@@ -200,8 +200,8 @@ func TestPlanCancellationRefusals(t *testing.T) {
 	revoked := plan("k-plan-revoked-01234567", "").ID
 	apr := decode[approvalBody](t, p.approve(approver, "k-approve-revoked-0123", revoked), http.StatusCreated)
 	decode[approvalRevocationBody](t, p.revokeApproval(approver, "k-revoke-0123456789ab", apr.ID, reason), http.StatusCreated)
-	expired := plan("k-plan-expired-0123456", `,"expiresInSeconds":1`)
-	time.Sleep(time.Until(expired.ExpiresAt.Add(100 * time.Millisecond)))
+	expired := plan("k-plan-expired-0123456", "")
+	p.expirePlan(t, expired.ID, 0) // after the setup above, so no setup step races a short expiry
 	for _, c := range []struct{ plan, state, k string }{
 		{cancelled, "cancelled", "k-cancel-cancelled-012"}, {revoked, "revoked", "k-cancel-revoked-01234"},
 		{expired.ID, "expired", "k-cancel-expired-01234"},
@@ -224,8 +224,9 @@ func TestPlanCancellationRefusals(t *testing.T) {
 func TestPlanCancellationAfterActOrderWait(t *testing.T) {
 	t.Parallel()
 	p := newPlanEnv(t)
-	plan := decode[planBody](t, p.plan(p.robot, "k-plan-late-0123456789", applyBody(p.target.rel, p.machine, `,"expiresInSeconds":1`)),
-		http.StatusCreated)
+	plan := decode[planBody](t, p.plan(p.robot, "k-plan-late-0123456789", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
+	// Counted from the end of the setup, so the setup cannot outlast it.
+	plan.ExpiresAt = p.expirePlan(t, plan.ID, 3*time.Second)
 	lock := holdActOrder(t, p.db)
 	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() { done <- p.cancel(p.robot, "k-cancel-late-0123456", plan.ID, `{"reason":"superseded"}`) }()

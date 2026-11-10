@@ -164,7 +164,7 @@ func TestApprovalRevocationKeepsState(t *testing.T) {
 	gone := p.principalOf("h-approver-gone")
 	orphan := plan("k-plan-orphan-01234567", "").ID
 	p.approveAs(t, orphan, gone)
-	lapsed := plan("k-plan-lapsed-01234567", `,"expiresInSeconds":1`)
+	lapsed := plan("k-plan-lapsed-01234567", "")
 	late := decode[approvalBody](t, p.approve(approver, "k-approve-lapsed-01234", lapsed.ID), http.StatusCreated)
 
 	newEpoch(t, p.db)
@@ -186,7 +186,7 @@ func TestApprovalRevocationKeepsState(t *testing.T) {
 	p.wantRevocation(t, orphaned, orphan, "revoked", orphaned, 3)
 	p.wantReason(t, orphan, "identity-revoked")
 
-	time.Sleep(time.Until(lapsed.ExpiresAt.Add(100 * time.Millisecond)))
+	p.expirePlan(t, lapsed.ID, 0) // after the setup above, so no setup step races a short expiry
 	revoked("k-revoke-lapsed-012345", late.ID)
 	p.wantRevocation(t, late.ID, lapsed.ID, "expired", "", 3)
 	p.wantReason(t, lapsed.ID, "expired")
@@ -203,9 +203,10 @@ func TestApprovalRevocationKeepsState(t *testing.T) {
 func TestApprovalRevocationAfterActOrderWait(t *testing.T) {
 	t.Parallel()
 	p := newPlanEnv(t)
-	plan := decode[planBody](t, p.plan(p.robot, "k-plan-late-0123456789", applyBody(p.target.rel, p.machine, `,"expiresInSeconds":1`)),
-		http.StatusCreated)
+	plan := decode[planBody](t, p.plan(p.robot, "k-plan-late-0123456789", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
 	apr := decode[approvalBody](t, p.approve(p.human("h-approver"), "k-approve-0123456789", plan.ID), http.StatusCreated)
+	// Counted from the end of the setup, so the setup cannot outlast it.
+	plan.ExpiresAt = p.expirePlan(t, plan.ID, 3*time.Second)
 	lock := holdActOrder(t, p.db)
 	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
