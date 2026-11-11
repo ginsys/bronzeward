@@ -63,17 +63,10 @@ describe("the publication page (#342)", () => {
     await $("main").$("a=Publish this draft").click();
     await expect($("main h2")).toHaveText(expect.stringContaining(`Publish draft ${short(id)}`), { wait: 20_000 });
     await $("main").$("button=Publish").click();
-    // The write was accepted, or refused at once; either way the page says what happened to the draft.
-    const end = $('[data-testid="ended"]');
-    const refused = $('[data-testid="write-result"]');
-    const refusal = async () => {
-      const t = await refused.getText().catch(() => "");
-      return t !== "" && !/^(Saving|Publishing draft)/.test(t);
-    };
-    await browser.waitUntil(async () => (await end.isExisting()) || (await refusal()), { timeout: 120_000, timeoutMsg: "the page showed neither an end nor a refusal" });
-    if (await end.isExisting()) {
-      await expect(end).toHaveText(expect.stringMatching(/^Publication operation \S+ (failed|rejected)(: .+)?\. Nothing has been sent to any machine\.$/));
-    }
+    // The server accepts the write (202, which needs the kept ETag as If-Match) and the operation fails
+    // at its node evidence check: the page names the operation, then says nothing was sent.
+    await expect($('[data-testid="write-result"]')).toHaveText(expect.stringMatching(/^Publishing draft \S+ revision \d+ \(operation \S+\)\.$/), { wait: 60_000 });
+    await expect($('[data-testid="ended"]')).toHaveText(expect.stringMatching(/^Publication operation \S+ (failed|rejected)(: .+)?\. Nothing has been sent to any machine\.$/), { wait: 120_000 });
     expect((await writes()).filter(([m]) => m === "POST").map(([, r]) => r)).toEqual([`/drafts/${id}/publications`]);
     // Nothing reached any machine: no release, no apply-config or adopt operation, no Applied release.
     const releases = await api("h-viewer", "GET", "/releases");
