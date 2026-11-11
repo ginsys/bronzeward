@@ -83,6 +83,43 @@ run fail "cli_unseen refuses a warning with other wording" \
 run fail "cli_unseen refuses an approval output without the warning" \
   "Plan plan_x approved." 0 1 cli_unseen plan_x s
 
+# The sentence above is the CLI's own, so the cases below that change it start from the real text.
+if grep -qF -- "\"$warning\"" "$repo_src/cmd/bronzewardctl/approvals.go"; then
+  echo "ok   the warning in this test is the sentence cmd/bronzewardctl/approvals.go prints"
+else
+  echo "FAIL the warning in this test is not the sentence cmd/bronzewardctl/approvals.go prints"
+  failed=$((failed + 1))
+fi
+
+# Every word of the sentence is a clause the scenario's match must hold: a match that stops checking one
+# word passes the cases above and accepts a sentence that says something else. So each word is replaced, each
+# punctuation mark is removed, and a negation is inserted at each gap, and the scenario must refuse each one.
+read -r -a words <<<"$warning"
+for i in "${!words[@]}"; do
+  w=${words[$i]}
+  core=${w%[,:.]}
+  punct=${w#"$core"}
+  alt=("${words[@]}")
+  alt[i]="XX$punct"
+  run fail "cli_unseen refuses the warning with the word '$core' replaced" \
+    "${alt[*]}" 0 1 cli_unseen plan_x s
+  if [ -n "$punct" ]; then
+    alt[i]=$core
+    run fail "cli_unseen refuses the warning without the '$punct' after '$core'" \
+      "${alt[*]}" 0 1 cli_unseen plan_x s
+  fi
+done
+for ((i = 1; i < ${#words[@]}; i++)); do
+  alt=("${words[@]:0:i}" not "${words[@]:i}")
+  run fail "cli_unseen refuses the warning with 'not' inserted before '${words[$i]}'" \
+    "${alt[*]}" 0 1 cli_unseen plan_x s
+done
+for ((i = 0; i < ${#words[@]} - 1; i++)); do
+  alt=("${words[@]:0:i}" "${words[i]}${words[i + 1]}" "${words[@]:i+2}")
+  run fail "cli_unseen refuses the warning with no space between '${words[i]}' and '${words[i + 1]}'" \
+    "${alt[*]}" 0 1 cli_unseen plan_x s
+done
+
 role='Needs one of the roles [approver].'
 run pass "unfreeze_refused_cli accepts exit 1 with the approver-role refusal and a frozen scope" \
   "$role" 1 t unfreeze_refused_cli h-viewer
@@ -98,6 +135,25 @@ run fail "unfreeze_refused_cli refuses a refusal that names no approver role" \
   "Refused." 1 t unfreeze_refused_cli h-viewer
 run fail "unfreeze_refused_cli refuses a scope that is no longer frozen" \
   "$role" 1 f unfreeze_refused_cli h-viewer
+
+# The refusal's words are held the same way: each one replaced, and the scenario must refuse the result.
+read -r -a role_words <<<"$role"
+for i in "${!role_words[@]}"; do
+  w=${role_words[$i]}
+  core=${w%.}
+  punct=${w#"$core"}
+  alt=("${role_words[@]}")
+  alt[i]="XX$punct"
+  run fail "unfreeze_refused_cli refuses the refusal with the word '$core' replaced" \
+    "${alt[*]}" 1 t unfreeze_refused_cli h-viewer
+done
+run fail "unfreeze_refused_cli refuses the refusal without its final period" \
+  "Needs one of the roles [approver]" 1 t unfreeze_refused_cli h-viewer
+for ((i = 0; i < ${#role_words[@]} - 1; i++)); do
+  alt=("${role_words[@]:0:i}" "${role_words[i]}${role_words[i + 1]}" "${role_words[@]:i+2}")
+  run fail "unfreeze_refused_cli refuses the refusal with no space between '${role_words[i]}' and '${role_words[i + 1]}'" \
+    "${alt[*]}" 1 t unfreeze_refused_cli h-viewer
+done
 
 [ "$failed" -eq 0 ] || { echo "s5-cli-test: $failed failed"; exit 1; }
 echo "s5-cli-test: ok"
