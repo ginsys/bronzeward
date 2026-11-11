@@ -419,3 +419,38 @@ func TestDriftAdoptNeedsAnAuthorAndADraft(t *testing.T) {
 		}
 	}
 }
+
+// TestDriftAdoptNoOpenDriftRefused: drift adopt on a machine with no open drift record (#360 row 2: "a
+// machine with no open drift is refused"). The server answers the import start with 409 conflict
+// naming the machine (internal/api/ingestions.go), and the CLI has no check of its own, so the
+// refusal must reach the caller whole: a failed step 1, no publication and no plan, exit 1.
+func TestDriftAdoptNoOpenDriftRefused(t *testing.T) {
+	f := adoptChainServer(t)
+	f.imp.refuseStart = problemHead + `conflict","title":"Conflict","status":409,"detail":"the machine has no open drift record","machine":"mch_BWSYNTH"` + problemTail
+	code, out, errOut := runDrift(t, "drift", "adopt", "mch_BWSYNTH", "--draft", "drf_BWSYNTH")
+	const refusal = "POST /api/v1/ingestions answered 409 Conflict (conflict): the machine has no open drift record"
+	if code != 1 || !strings.Contains(errOut, refusal) {
+		t.Errorf("exit %d, stderr %q; want exit 1 and %q", code, errOut, refusal)
+	}
+	if !strings.HasPrefix(out, "Step 1/3  import (drift-adoption) of machine mch_BWSYNTH into draft drf_BWSYNTH\nThe later steps:\n") ||
+		!strings.Contains(out, "bronzewardctl publish 'drf_BWSYNTH'") || !strings.Contains(out, "--operation 'adopt'") {
+		t.Errorf("stdout %q; want step 1 as the step that was tried, and steps 2 and 3 as not run", out)
+	}
+	posts := 0
+	for _, l := range f.log {
+		if strings.HasPrefix(l, "POST /ingestions") {
+			posts++
+		}
+		if strings.Contains(l, "/publications") || strings.HasPrefix(l, "POST /plans") {
+			t.Errorf("sent %s after the refusal", l)
+		}
+	}
+	if got := f.plan.took(); posts != 1 || len(got) != 0 {
+		t.Errorf("%d import starts and plans %q; want one start and no plan", posts, got)
+	}
+	// The server looks for an open drift record only for the kind drift-adoption, so the start that
+	// was refused must be one.
+	if got := f.imp.took(); len(got) != 1 || !strings.HasPrefix(got[0], "POST /ingestions ") || !strings.Contains(got[0], `"kind":"drift-adoption"`) {
+		t.Errorf("writes %q; want one POST /ingestions of the kind drift-adoption", got)
+	}
+}

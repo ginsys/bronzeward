@@ -45,6 +45,8 @@ type importFake struct {
 	// stall, when set, makes the event stream stall (see stallStream) under the epoch stallEpoch.
 	stall      chan struct{}
 	stallEpoch string
+	// refuseStart, when set, is the problem document that the import start answers with 409.
+	refuseStart string
 }
 
 const ingAccepted = `{"ingestion":"ing_BWSYNTH","operation":"op_BWSYNTH-ing"}`
@@ -102,6 +104,13 @@ func (f *importFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		record()
 		if r.Header.Get("If-Match") != f.etag() {
 			f.refuse(w)
+			return
+		}
+		// The server checks the draft's ETag before it looks for an open drift record.
+		if f.refuseStart != "" {
+			w.Header().Set("Content-Type", "application/problem+json")
+			w.WriteHeader(http.StatusConflict)
+			fmt.Fprint(w, f.refuseStart)
 			return
 		}
 		if f.onIngested != nil {
