@@ -23,6 +23,8 @@ type adoptChain struct {
 	// pubUnknown answers the publication with a redirect, which the client cannot read: its outcome is unknown.
 	pubUnknown  bool
 	read, moved bool
+	// identity, when set, is the GET /identity answer instead of a person who is author and publisher.
+	identity string
 	// moveOnReread makes the reread of the ingestion that step 1 ends with, the second GET of it,
 	// answer ep_BWSYNTH-2. The /server refresh that follows answers ep_BWSYNTH-1 again, as every
 	// other answer does: the epoch changed and came back. rereads counts those GETs.
@@ -71,6 +73,10 @@ func (f *adoptChain) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case path == "/identity":
 		w.Header().Set("Bronzeward-Epoch", "ep_BWSYNTH-1")
+		if f.identity != "" {
+			fmt.Fprint(w, f.identity)
+			return
+		}
 		fmt.Fprint(w, `{"kind":"human","principal":"h_BWSYNTH","roles":["author","publisher"]}`)
 	case strings.HasPrefix(path, "/ingestions"), strings.HasPrefix(path, "/operations/op_BWSYNTH-ing"):
 		f.imp.ServeHTTP(w, r)

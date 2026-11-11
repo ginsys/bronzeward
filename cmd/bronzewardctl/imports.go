@@ -516,9 +516,9 @@ func (e *env) follow(c *client.Client, a accepted, before int) (err error) {
 
 // resumeFailed reports what, a run that recorded resume-failed, as not applied: exit 1.
 func resumeFailed(c *client.Client, b *apitypes.IngestionBody, what, code string) error {
-	return &client.Blocked{Err: fmt.Errorf("%s: %s was not applied: its staged input could not be decrypted (resume-failed, %s). "+
+	return &client.Blocked{Err: resumeFailedErr{fmt.Errorf("%s: %s was not applied: its staged input could not be decrypted (resume-failed, %s). "+
 		"The claim stays held until its lease lapses. Read its lease with the first command; once it lapsed, take it over, or abandon it now:",
-		c.Context.Where(), pr(what), pr(or(&code, "no code"))), More: remedies(b.Id, "status", "takeover", "abandon")}
+		c.Context.Where(), pr(what), pr(or(&code, "no code"))), b.Id}, More: remedies(b.Id, "status", "takeover", "abandon")}
 }
 
 // lapsed reports what, whose claim's lease lapsed while its operation runs, as unknown: exit 3.
@@ -591,8 +591,10 @@ func (e *env) ended(c *client.Client, b *apitypes.IngestionBody, o *apitypes.Ope
 	if o.Result != nil {
 		res, err = o.Result.AsIngestResult()
 	}
+	// From here the import succeeded, so an error of the client below is afterEnd: it changes no state of
+	// the step (composite.go).
 	if o.Result == nil || err != nil || res.Draft == "" {
-		return fmt.Errorf("%s: import operation %s succeeded without naming its draft revision: %s", c.Context.Where(), o.Id, compact(o.Result))
+		return afterEnd{fmt.Errorf("%s: import operation %s succeeded without naming its draft revision: %s", c.Context.Where(), o.Id, compact(o.Result))}
 	}
 	if err := e.say(sf("Import %s released into draft %s (revision %d), import base %s.", b.Id, res.Draft, res.DraftRevision, res.ImportBaseRevision)); err != nil {
 		return err
@@ -607,22 +609,22 @@ func (e *env) ended(c *client.Client, b *apitypes.IngestionBody, o *apitypes.Ope
 	epoch := c.Context.LastEpoch
 	r, err := c.Get("/drafts/" + url.PathEscape(res.Draft))
 	if err != nil {
-		return err
+		return afterEnd{err}
 	}
 	show := []string{"  bronzewardctl --context " + client.ShellWord(c.Context.Name) + " draft show " + client.ShellWord(res.Draft)}
 	if epoch != "" && c.Context.LastEpoch != epoch {
 		// A restored draft can show the import's revision with other content (client-contracts.md §8.3).
-		return &client.Blocked{Err: fmt.Errorf("%s: the server's epoch changed while draft %s was read again after this import. Its ETag is not kept. Review the draft before writing again:",
-			c.Context.Where(), res.Draft), More: show}
+		return afterEnd{&client.Blocked{Err: fmt.Errorf("%s: the server's epoch changed while draft %s was read again after this import. Its ETag is not kept. Review the draft before writing again:",
+			c.Context.Where(), res.Draft), More: show}}
 	}
 	var d apitypes.DraftBody
 	if err := json.Unmarshal(r.Body, &d); err != nil {
-		return fmt.Errorf("GET /api/v1/drafts/%s cannot be read: %w", url.PathEscape(res.Draft), err)
+		return afterEnd{fmt.Errorf("GET /api/v1/drafts/%s cannot be read: %w", url.PathEscape(res.Draft), err)}
 	}
 	if d.Revision != res.DraftRevision {
 		// ETAG-02: another write followed the import's, treated as a 412.
-		return &client.Blocked{Err: fmt.Errorf("%s: draft %s is now revision %d: another write followed this import's revision %d. Its ETag is not kept. Review the change before writing again:",
-			c.Context.Where(), res.Draft, d.Revision, res.DraftRevision), More: show}
+		return afterEnd{&client.Blocked{Err: fmt.Errorf("%s: draft %s is now revision %d: another write followed this import's revision %d. Its ETag is not kept. Review the change before writing again:",
+			c.Context.Where(), res.Draft, d.Revision, res.DraftRevision), More: show}}
 	}
 	keep(e, c, res.Draft, r.Header.Get("ETag"))
 	return nil

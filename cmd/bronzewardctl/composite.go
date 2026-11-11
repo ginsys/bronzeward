@@ -54,8 +54,11 @@ type adoption struct {
 
 // resumeFailedErr marks the error of a step 1 run that recorded resume-failed, the one failed step
 // whose exit is 1 and whose command is import status (operator-experience.md §5.8, the failed state).
-// The import code wraps its resume-failed error in it.
-type resumeFailedErr struct{ error }
+// The import code wraps its resume-failed error in it, with the ingestion that import status reads.
+type resumeFailedErr struct {
+	error
+	ingestion string
+}
 
 func (e resumeFailedErr) Unwrap() error { return e.error }
 
@@ -65,10 +68,18 @@ type releaselessErr struct{ error }
 
 func (e releaselessErr) Unwrap() error { return e.error }
 
+// afterEnd marks an error of the client after a step's operation ended well, such as the read of the
+// draft again after an import: it changes no state, and the exit and the error stay those of the text
+// output (operator-experience.md §5.8, the exit codes).
+type afterEnd struct{ error }
+
+func (e afterEnd) Unwrap() error { return e.error }
+
 // classify is the state a step's error gives it, by the type of the error alone. accepted says that the
 // server answered the step's write with success, which tells a refused write from a refused later read.
 //
-//   - A publication without a release is done; the caller leaves release out and stops after it.
+//   - A publication without a release, and a client error after the operation ended well, are done;
+//     the caller leaves release out and stops after the first.
 //   - Ctrl-C, a signal, an unknown outcome and a lapsed claim leave the outcome unknown.
 //   - An operation that ended failed, rejected or cancelled, a resume-failed run, and a write the
 //     server or the client refused before it was sent did nothing that stands: failed.
@@ -77,7 +88,9 @@ func (e releaselessErr) Unwrap() error { return e.error }
 func classify(err error, accepted bool) stepState {
 	var (
 		releaseless releaselessErr
+		after       afterEnd
 		resume      resumeFailedErr
+		unsent      client.NotSent
 		ended       operationFailed
 		refusedHere notSent
 		refusedRep  client.RefusedRepeat
@@ -88,14 +101,14 @@ func classify(err error, accepted bool) stepState {
 		signalled   endedBySignal
 	)
 	switch {
-	case err == nil, errors.As(err, &releaseless):
+	case err == nil, errors.As(err, &releaseless), errors.As(err, &after):
 		return stateDone
 	case errors.As(err, &unknown), errors.As(err, &settled), errors.As(err, &cut), errors.As(err, &stopped), errors.As(err, &signalled):
 		return stateUnknown
-	case errors.As(err, &ended), errors.As(err, &resume), errors.As(err, &refusedHere), errors.As(err, &refusedRep):
+	// client.NotSent is the client's refusal, before it sent anything, for a missing kept ETag, a changed
+	// epoch or a moved count (operator-experience.md §5.8, the failed state).
+	case errors.As(err, &ended), errors.As(err, &resume), errors.As(err, &refusedHere), errors.As(err, &refusedRep), errors.As(err, &unsent):
 		return stateFailed
-	// TODO(ginsys/bronzeward#754): client.NotSent, the refusal for a missing kept ETag, a changed epoch or
-	// a moved count, is failed too. It lands with that PR; add its case here with the integration.
 	case accepted:
 		return stateUnknown
 	}
@@ -147,6 +160,11 @@ func (co *collector) settle(n int, err error) {
 	s.State = classify(err, co.accepted[n-1])
 	if err != nil && s.State != stateDone {
 		s.Error = client.Shown(err)
+	}
+	// A run that recorded resume-failed is read with import status, not restarted (§5.8, the failed state).
+	var resume resumeFailedErr
+	if errors.As(err, &resume) {
+		s.Command = "bronzewardctl import status " + client.ShellWord(resume.ingestion)
 	}
 }
 
