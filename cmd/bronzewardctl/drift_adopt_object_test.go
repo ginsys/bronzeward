@@ -232,8 +232,16 @@ func TestDriftAdoptObject_PrintsNothingBeforeTheIdentityRead(t *testing.T) {
 			}
 		}
 	}
-	// The identity read fails: the server answers a problem document.
+	// The identity read fails: /server answers, /identity answers a problem document. The test says that
+	// the identity was asked for, so that it cannot pass on a command that failed before it.
+	var asked int
+	f := adoptChainServer(t)
 	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/identity" {
+			f.ServeHTTP(w, r)
+			return
+		}
+		asked++
 		w.Header().Set("Content-Type", "application/problem+json")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		io.WriteString(w, `{"type":"urn:bronzeward:problem:dependency-unavailable","title":"Service Unavailable","status":503}`)
@@ -241,9 +249,10 @@ func TestDriftAdoptObject_PrintsNothingBeforeTheIdentityRead(t *testing.T) {
 	t.Cleanup(down.Close)
 	automationContext(t, down.URL)
 	for _, o := range []string{"json", "yaml"} {
+		before := asked
 		var out, errb bytes.Buffer
-		if code := run([]string{"-o", o, "drift", "adopt", "mch_BWSYNTH", "--draft", "drf_BWSYNTH"}, &out, &errb); code == 0 || out.Len() != 0 || errb.Len() == 0 {
-			t.Errorf("-o %s, identity read failing: exit %d, stdout %q, stderr %q; want a failure with nothing on standard output", o, code, out.String(), errb.String())
+		if code := run([]string{"-o", o, "drift", "adopt", "mch_BWSYNTH", "--draft", "drf_BWSYNTH"}, &out, &errb); code == 0 || out.Len() != 0 || errb.Len() == 0 || asked == before {
+			t.Errorf("-o %s, identity read failing: exit %d, stdout %q, stderr %q, identity asked %d times; want a failure after the identity was asked for, with nothing on standard output", o, code, out.String(), errb.String(), asked-before)
 		}
 	}
 }
@@ -312,5 +321,28 @@ func TestDriftAdoptObject_EmptyMachineRefused(t *testing.T) {
 		if code != 2 || out != "" || errOut == "" {
 			t.Errorf("-o %s: exit %d, stdout %q, stderr %q; want 2, nothing on standard output and the refusal on standard error", o, code, out, errOut)
 		}
+	}
+}
+
+// TestDriftAdoptObject_PausedThenSaveFails: contract lines 912-913 and 960-962: an import that paused
+// for review is paused, with its import mark command, when the client then cannot keep the epoch the
+// follow showed. The exit is nonzero and the error is on standard error.
+func TestDriftAdoptObject_PausedThenSaveFails(t *testing.T) {
+	f := adoptChainServer(t)
+	f.imp.set("paused", 1, time.Hour, "running", "", "", ev("started", `{"type":"started"}`), ev("staged", `{"type":"staged"}`), ev("paused", `{"type":"paused","generation":1}`))
+	f.moveInFollow = true
+	dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "bronzeward")
+	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+	old := f.imp.onIngested
+	f.imp.onIngested = func() {
+		old()
+		if err := os.Chmod(dir, 0o500); err != nil {
+			t.Errorf("the configuration directory stays writable: %v", err)
+		}
+	}
+	code, obj, _, errOut := adoptObject(t, "--review")
+	wantStates(t, obj, statePaused, stateNotRun, stateNotRun)
+	if code == 0 || !strings.Contains(errOut, "keeping the epoch") || obj.Steps[0].Command != "bronzewardctl import mark 'ing_BWSYNTH'" {
+		t.Errorf("exit %d, step 1 %+v, stderr %q; want a nonzero exit naming the epoch that could not be kept, and the import mark command", code, obj.Steps[0], errOut)
 	}
 }

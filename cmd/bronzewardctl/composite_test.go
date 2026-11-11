@@ -304,3 +304,38 @@ func TestJoinSave(t *testing.T) {
 		t.Errorf("a failed import with a Save error classifies %v; want failed", got)
 	}
 }
+
+// TestCompositeKeepsTheUnreadableAnswerNote: contract lines 936-937 and 945-946: a publication answered
+// with a body that cannot be read, and then ended by a later error, keeps the note that its answer
+// cannot be read beside that error, on a done step as on a failed one.
+func TestCompositeKeepsTheUnreadableAnswerNote(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		err  error
+		want stepState
+	}{
+		{"failed", errors.New("accepted without naming its operation"), stateUnknown},
+		{"releaseless", releaselessErr{errors.New("accepted without naming its operation")}, stateDone},
+	} {
+		co := newCollector("mch_1", "drf_1")
+		co.begin(2)
+		co.record([]byte("<html>"), errors.New("the answer is not JSON"))
+		co.settle(2, c.err)
+		s := co.object().Steps[1]
+		if s.State != c.want || !strings.Contains(s.Error, "its answer cannot be read") || !strings.Contains(s.Error, "accepted without naming its operation") {
+			t.Errorf("%s: step 2 is %+v; want state %v and both the note that its answer cannot be read and the later error", c.name, s, c.want)
+		}
+	}
+}
+
+// TestJoinSaveKeepsThePauseReadable: a Save error after a follow that ended well or paused is one the
+// drift adopt command recognizes, so that it reads the import again before it settles step 1.
+func TestJoinSaveKeepsThePauseReadable(t *testing.T) {
+	var lost saveFailed
+	if err := joinSave(nil, errors.New("keeping the epoch: permission denied")); !errors.As(err, &lost) {
+		t.Errorf("joinSave(nil, err) = %v; want a saveFailed", err)
+	}
+	if err := joinSave(operationFailed{errors.New("import failed")}, errors.New("keeping the epoch")); errors.As(err, &lost) {
+		t.Errorf("joinSave(an import error, err) = %v; want that error to stay plain", err)
+	}
+}

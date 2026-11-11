@@ -699,12 +699,12 @@ func ingestionsRead(machine, draft string) func(*client.Client) (string, error) 
 }
 
 // joinSave adds the error of saving the context to the error a follow ended with. When the follow
-// itself succeeded, the import is finished and the save error is afterEnd: it changes no state of the
-// step (§5.8, the unknown state). Joined with an error the follow ended with, it stays plain, so that
-// error keeps its class.
+// itself succeeded, it ended well or paused, and the save error is saveFailed, an afterEnd: it changes no
+// state of the step (§5.8, the unknown state). Joined with an error the follow ended with, it stays
+// plain, so that error keeps its class.
 func joinSave(err, saved error) error {
 	if saved != nil && err == nil {
-		saved = afterEnd{saved}
+		saved = saveFailed{afterEnd{saved}}
 	}
 	return errors.Join(err, saved)
 }
