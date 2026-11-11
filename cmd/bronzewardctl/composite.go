@@ -201,6 +201,19 @@ func (co *collector) pause(ingestion string) {
 	co.obj.Steps[0].Command = "bronzewardctl import mark " + client.ShellWord(ingestion)
 }
 
+// reread settles step 1 by the state the re-read of the import answered, where that state is not
+// released and not paused: held and resumed leave the outcome unknown, abandoned is failed, and the
+// command is import status, which reads the import (operator-experience.md §5.8, the re-read). The exit
+// and the error are not touched: they stay those of the text output.
+func (co *collector) reread(ingestion, state string) {
+	s := &co.obj.Steps[0]
+	s.State = stateUnknown
+	if state == "abandoned" {
+		s.State = stateFailed
+	}
+	s.Command = "bronzewardctl import status " + client.ShellWord(ingestion)
+}
+
 // release names the release a done publication made; the plan step's command carries it from then on.
 func (co *collector) release(r string) {
 	co.obj.Steps[1].Release = r

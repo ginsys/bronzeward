@@ -149,8 +149,11 @@ func (e *env) newTable() (*tabwriter.Writer, func() error) {
 // render is what emit prints for -o json or yaml, built in memory so that a conversion failure
 // is known before anything is written.
 func (e *env) render(raw []byte) ([]byte, error) {
+	// DEL, the C1 controls and bidirectional controls are written as \u escapes for both outputs: YAML
+	// rejects DEL and most C1 characters raw, folds U+0085 into a space, and reads the same escape
+	// inside a double-quoted string as the same text.
+	raw = client.EscapeJSON(raw)
 	if e.output == "json" {
-		raw = client.EscapeJSON(raw)
 		if !bytes.HasSuffix(raw, []byte("\n")) {
 			raw = append(raw, '\n')
 		}

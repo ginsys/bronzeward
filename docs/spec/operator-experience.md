@@ -934,6 +934,11 @@ Each step has `step` (1 to 3), `name` (`import`, `publish` or `plan`), the `role
   key and the repeat flags stay in the block on standard error
   ([client contracts §8.4](client-contracts.md#84-idempotency-and-ambiguous-responses) item 4).
   After an accepted write, standard error names the command that reads the operation.
+- Step 1 after a failed save: when the client cannot save its context after the import ended, it reads
+  the import again, and the state of that read gives the state of step 1. `released` is `done` and
+  `paused` is `paused`. `held` and `resumed` are `unknown`, and `abandoned` (by expiry, for example)
+  is `failed`. The `command` of these three is `import status`. The exit stays the one of the text
+  output.
 
 Further members of a step: `answer` is the server's answer to the step's write, as served: the
 ingestion that was accepted, the operation, the plan. It is there exactly when the server

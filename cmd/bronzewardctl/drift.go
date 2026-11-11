@@ -355,11 +355,15 @@ func (e *env) driftAdopt(args []string) (err error) {
 	if m == "" {
 		return usageError{errors.New("drift adopt needs a machine")}
 	}
-	// --marks has no input to read from when --no-input is given and standard input is a terminal or is
-	// taken by the token: ingest refuses it after sending nothing, so it is refused here, before any
-	// request, and a refusal prints nothing in json and yaml (§5.8, the arguments refused).
-	if marks && e.marksNeedInput() {
-		return usageError{errors.New(noMarksInput)}
+	// --marks has no input to read from when the read of the marks would refuse: --no-input with
+	// standard input a terminal or taken by the token, or the token on standard input with no
+	// controlling terminal. Ingest refuses it after sending nothing, so it is refused here with the
+	// same rule, before any request, and a refusal prints nothing in json and yaml (§5.8, the arguments
+	// refused).
+	if marks {
+		if err := e.checkMarksInput(); err != nil {
+			return err
+		}
 	}
 	// -o json and yaml print one object for the three steps, once, whatever ends the command after the
 	// identity read (operator-experience.md §5.8, "Structured output of a composite"), a failed save of
@@ -438,10 +442,13 @@ func (e *env) driftAdopt(args []string) (err error) {
 		// names, a read of it, never the drift adopt repeat, which would write again (§5.8, the command).
 		co.settle(1, err)
 		co.command(1, "bronzewardctl import status "+client.ShellWord(a.Ingestion))
-	case b.State != "released":
+	case b.State == "released":
+		co.settle(1, nil)
+	case b.State == "paused":
 		co.pause(b.Id)
 	default:
-		co.settle(1, nil)
+		// Held, resumed or abandoned: the import changed after the follow ended, so it is not paused.
+		co.reread(b.Id, b.State)
 	}
 	if err != nil || saved != nil {
 		// A failed read leaves the state unknown; a read that worked and a save that did not leaves it known.
