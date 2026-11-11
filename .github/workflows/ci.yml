@@ -40,9 +40,10 @@ env:
   # not stop a task run from installing. Tools come from jdx/mise-action's install step only.
   MISE_TASK_RUN_AUTO_INSTALL: "false"
 
-# Every jdx/mise-action step sets `cache_save` to main only: a pull_request or merge_group run's
-# cache is scoped to a ref nothing else can restore from, so saving there only fills the shared
-# cache server. Those runs still restore main's entry.
+# Every jdx/mise-action step that uses the cache sets `cache_save` to main only: a pull_request or
+# merge_group run's cache is scoped to a ref nothing else can restore from, so saving there only
+# fills the shared cache server. Those runs still restore main's entry. The test and web jobs set
+# `cache: "false"`: mise installs nothing for them (ginsys/bronzeward#783), so they have no cache.
 
 jobs:
   docs:
