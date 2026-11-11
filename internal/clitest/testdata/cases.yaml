@@ -12,8 +12,8 @@
   setup: server behind the injector, whose certificate is from a test CA outside the system store; viewer automation token
   action: context add untrusted --server <injector URL>; then context add trusted with --certificate-authority <the test CA bundle>
   exchange:
-    - first: none; the handshake fails before any request
-    - second: GET /livez, no Authorization
+    - 'first: none; the handshake fails before any request'
+    - 'second: GET /livez, no Authorization'
   fault: certificate from an untrusted CA
   expect:
     client: refuses before sending; names the host, the certificate's subject and issuer and the trust source
