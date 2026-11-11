@@ -65,7 +65,7 @@ async function open(flags: Record<string, string> = {}): Promise<string> {
 async function fill(name: string) {
   await $('input[name="name"]').setValue(name);
   await $('input[name="endpoint"]').setValue(`https://${name}.example.test:6443`);
-  await $('input[name="contract"]').setValue("v1.13");
+  await $('input[name="contract"]').setValue("v1.14");
   await $('input[name="talosClusterId"]').setValue(`${randomBytes(32).toString("base64url")}=`);
 }
 
@@ -338,7 +338,7 @@ describe("the write views (#338)", () => {
   it("keyboard only: the form is filled and sent without the pointer", async () => {
     const name = await open();
     await faults({ upstream: at });
-    await type([["name", name], ["endpoint", `https://${name}.example.test:6443`], ["contract", "v1.13"], ["talosClusterId", `${randomBytes(32).toString("base64url")}=`]]);
+    await type([["name", name], ["endpoint", `https://${name}.example.test:6443`], ["contract", "v1.14"], ["talosClusterId", `${randomBytes(32).toString("base64url")}=`]]);
     await expect(result()).toHaveText(expect.stringContaining(`Cluster ${name} recorded as`), { wait: 20_000 });
     await oneWrite(1);
   });

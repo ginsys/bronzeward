@@ -115,3 +115,27 @@ func TestCompileRestoredPassesNeverEchoASecret(t *testing.T) {
 		}
 	}
 }
+
+// A restored secret too short to hold a stand-in's id marks no quote, and its real and its trace
+// message are then the same text. The message is withheld, since neither the quote check nor the
+// six-byte floor of the value check could find the value in it.
+func TestCompileRestoredShortSecretWithholdsTheMessage(t *testing.T) {
+	const short = "qz9!"
+	text := regexp.MustCompile(`(?m)^(\s*clusterSecret: )\S+`).ReplaceAllString(string(generatedBase(t)), "${1}"+short)
+	_, err := Compile(Input{Base: source(t, text, ingest.Declarations{}, nil), Mode: ModeMetal})
+	var e *Error
+	if !errors.As(err, &e) || e.Rule != RuleInvalid {
+		t.Fatalf("got %v, want an invalid verdict", err)
+	}
+	if !strings.HasPrefix(e.Message, "<withheld:") {
+		t.Errorf("the message %q is not withheld", e.Message)
+	}
+	for _, rendered := range []string{
+		err.Error(), fmt.Sprintf("%v", err), fmt.Sprintf("%+v", err), fmt.Sprintf("%#v", err),
+		fmt.Sprintf("%q", e.Message), strings.Join(e.Paths, " "), e.Input, string(e.Rule),
+	} {
+		if shows(rendered, short) {
+			t.Errorf("a rendering holds the secret: %q", rendered)
+		}
+	}
+}

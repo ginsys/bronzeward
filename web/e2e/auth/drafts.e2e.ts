@@ -189,7 +189,7 @@ describe("the draft editor (#339)", () => {
     expect(res.status).toBe(200);
     at = await res.text();
     const name = `synthetic-${hex()}`;
-    const c = await api("h-author", "POST", "/clusters", { name, endpoint: `https://${name}.example.test:6443`, contract: "v1.13", talosClusterId: `${randomBytes(32).toString("base64url")}=` });
+    const c = await api("h-author", "POST", "/clusters", { name, endpoint: `https://${name}.example.test:6443`, contract: "v1.14", talosClusterId: `${randomBytes(32).toString("base64url")}=` });
     expect(c.status).toBe(201);
     cluster = { id: c.body!["id"] as string, name };
   });

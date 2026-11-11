@@ -35,7 +35,7 @@ async function write(at: string, path: string, body: object, human = "h-author")
 
 // Synthetic values only: a random cluster ID and documentation-range endpoints.
 const cluster = (at: string, name: string) =>
-  write(at, "/clusters", { name, endpoint: `https://${name}.example.test:6443`, contract: "v1.13", talosClusterId: randomBytes(32).toString("base64url") + "=" });
+  write(at, "/clusters", { name, endpoint: `https://${name}.example.test:6443`, contract: "v1.14", talosClusterId: randomBytes(32).toString("base64url") + "=" });
 async function machines(at: string, cl: string, n: number, from = 0): Promise<string[]> {
   const ids: string[] = [];
   for (let i = from; i < from + n; i++) {

@@ -67,6 +67,7 @@ type standInText struct {
 	value    string // the placed stand-in
 	raw      string // for TraceBytes, the stand-in before encoding
 	headless bool   // no line was long enough for the id, so other stand-ins can hold this one
+	restored bool   // the real value of a schema secret was put back in place of the stand-in
 }
 
 // ID is the tracer's id, unique within one composition's trace pass.
@@ -169,6 +170,13 @@ func (t Tracer) Carried(v string) bool {
 		return v == x.value
 	}
 	return false
+}
+
+// Unmarkable reports whether the tracer stands for a restored schema secret that no message can
+// mark: its stand-in was too short to hold the id, so Quotes finds nothing. Both passes then hold
+// the real value, a message of one quotes it as the other does, and nothing shows where it stands.
+func (t Tracer) Unmarkable() bool {
+	return t.p != nil && t.p.text != nil && t.p.text.restored && t.p.text.headless
 }
 
 // minQuote is the shortest quote of a stand-in a message is searched for: its head alone.
@@ -407,7 +415,7 @@ func TraceKeeping(s Sanitized, values map[string]provider.Value, first, flip int
 				kept[i][0] = x.value
 			}
 			if t.kind != TraceBoolean && secret.holds(memberPath(p, n, keys[i])) {
-				x.value, x.raw = leaf.Value, ""
+				x.value, x.raw, x.restored = leaf.Value, "", true
 				if plain, err := base64.StdEncoding.DecodeString(leaf.Value); err == nil && t.kind == TraceBytes {
 					x.raw = string(plain)
 				}

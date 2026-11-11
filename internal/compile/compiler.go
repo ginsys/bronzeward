@@ -308,9 +308,9 @@ func validationPasses(sources []Source, first []int, ts []traced) ([]Materialize
 // explain sets the message of a real rejection or invalid verdict as compilation.md §8.3 shows
 // it: cause, the machinery's message, redacted by the message the same step gave on the trace
 // pass (trace), when that pass was traced and the step refused it alike; otherwise withheld. The
-// step's input holds an unmarked value, a boolean or a mapping reference's key, when such a
-// reference is placed in a source up to the rejected one, or in any source for the final load and
-// for validation. Any other error is returned as is.
+// step's input holds an unmarked value, a boolean, a mapping reference's key or a restored secret
+// too short to mark a quote, when such a reference is placed in a source up to the rejected one, or
+// in any source for the final load and for validation. Any other error is returned as is.
 func explain(step string, err error, cause string, sources []Source, ts []traced, traceErr error, trace func() (string, error)) error {
 	var e *Error
 	if !errors.As(err, &e) || cause == "" {
@@ -331,7 +331,7 @@ func explain(step string, err error, cause string, sources []Source, ts []traced
 		}
 	}
 	unmarked := slices.ContainsFunc(ts, func(t traced) bool {
-		return (t.Kind() == ingest.TraceBoolean || t.Member() >= 0) && t.source <= upto
+		return (t.Kind() == ingest.TraceBoolean || t.Member() >= 0 || t.Unmarkable()) && t.source <= upto
 	})
 	e.Message, _ = redactMessage(step, cause, tc, ts, unmarked, newRedactor(sources))
 	return err

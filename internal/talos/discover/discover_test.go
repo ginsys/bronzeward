@@ -77,7 +77,7 @@ func TestDiscoverTwoMembers(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := Result{
-		ClusterID: "c-1", Version: "v1.13.6", Contract: "v1.13", Supported: true,
+		ClusterID: "c-1", Version: "v1.14.5", Contract: "v1.14", Supported: true,
 		KubernetesEndpoint: "https://10.0.0.1:6443",
 		Members: []Member{
 			{NodeID: "n1", Hostname: "cp-1", Address: "10.0.0.1", Role: "controlplane", SMBIOSUUID: "11111111-2222-3333-4444-555555555555", Platform: "metal", Answered: true},
@@ -144,14 +144,14 @@ func TestDiscoverMemberDoesNotAnswer(t *testing.T) {
 func TestDiscoverUnsupportedContract(t *testing.T) {
 	c := newCluster(t)
 	old := supportedMinor
-	supportedMinor = func() string { return "v1.14" }
+	supportedMinor = func() string { return "v1.15" }
 	t.Cleanup(func() { supportedMinor = old })
 	got, err := c.discover(t)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Contract != "v1.13" || got.Supported {
-		t.Fatalf("contract %q supported %v against a server on v1.14", got.Contract, got.Supported)
+	if got.Contract != "v1.14" || got.Supported {
+		t.Fatalf("contract %q supported %v against a server on v1.14 and a renderer for v1.15", got.Contract, got.Supported)
 	}
 }
 
