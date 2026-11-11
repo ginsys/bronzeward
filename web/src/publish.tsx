@@ -38,6 +38,14 @@ export function publishEnd(o: Operation): Ended {
   return { text: `Publication operation ${short(o.id)} ${o.state}${code === undefined ? "" : `: ${code}`}. ${SENT_NOTHING}` };
 }
 
+// What the accepted answer says: the draft's revision and the operation, each only when the answer names it.
+export function accepted(draft: string, data: unknown): string {
+  const o = typeof data === "object" && data !== null ? (data as Partial<Operation>) : {};
+  const rev = o.subject?.draftRevision;
+  const op = operationId(data);
+  return `Publishing draft ${short(draft)} revision ${rev ?? "?"}${op === undefined ? "." : ` (operation ${short(op)}).`}`;
+}
+
 // The id of the operation a publication's answer names, when it can be read and names one.
 export const operationId = (data: unknown): string | undefined => {
   const id = typeof data === "object" && data !== null ? (data as { id?: unknown }).id : undefined;
@@ -134,7 +142,7 @@ function Publish({ id }: { id: string }) {
       {note !== undefined && <Status testid="no-etag">{note} <button type="button" onClick={readAgain}>Read the draft again</button></Status>}
       <WriteResult
         w={w}
-        done={(data): ReactNode => `Publishing draft ${short(id)} revision ${(data as Operation).subject?.draftRevision ?? "?"}${(data as Operation).id === undefined ? "." : ` (operation ${short((data as Operation).id)}).`}`}
+        done={(data): ReactNode => accepted(id, data)}
         conflict={<Status testid="write-result">Not published: someone changed this draft since this page read it. <button type="button" onClick={readAgain}>Read the draft again</button></Status>}
       />
       {o?.kind === "done" && typeof o.data === "object" && op === undefined && <Status testid="no-operation">The publication was accepted without naming its operation. Find it in the operations list, kind publish.</Status>}

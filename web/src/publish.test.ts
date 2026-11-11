@@ -4,7 +4,7 @@ import { describe, expect, test } from "vitest";
 import type { components } from "./api/v1";
 import { publishPath } from "./drafts.tsx";
 import { type Reads, ReadsProvider, short } from "./list.tsx";
-import { NO_DRAFT, NOT_OPEN, notEstablished, operationId, PublishDraft, publishEnd, SENT_NOTHING } from "./publish.tsx";
+import { accepted, NO_DRAFT, NOT_OPEN, notEstablished, operationId, PublishDraft, publishEnd, SENT_NOTHING } from "./publish.tsx";
 
 type Operation = components["schemas"]["OperationBody"];
 const op = (state: string, result: unknown, error: unknown = null) => ({ id: "op_BWSYNTH-pub", state, result, error }) as unknown as Operation;
@@ -40,6 +40,11 @@ describe("the publication page (ginsys/bronzeward#342, journeys §5.5)", () => {
   test("an operation id is read from the accepted answer only when it names one", () => {
     expect(operationId({ id: "op_a" })).toBe("op_a");
     for (const data of [null, "op_a", {}, { id: "" }, { id: 3 }]) expect(operationId(data), JSON.stringify(data)).toBeUndefined();
+  });
+
+  test("an accepted answer that is null or not an object still renders, naming only what it holds", () => {
+    for (const data of [null, undefined, "text", 7, {}]) expect(accepted("drf_a", data)).toBe(`Publishing draft ${short("drf_a")} revision ?.`);
+    expect(accepted("drf_a", { id: "op_x", subject: { draftRevision: 3 } })).toBe(`Publishing draft ${short("drf_a")} revision 3 (operation ${short("op_x")}).`);
   });
 
   test("an operation read under another epoch is not an outcome", () => {
