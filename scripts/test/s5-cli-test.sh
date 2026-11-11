@@ -76,6 +76,10 @@ run fail "cli_unseen refuses a warning that is followed by more text on its line
   "$warning NOT APPROVED" 0 1 cli_unseen plan_x s
 run fail "cli_unseen refuses the whole line when the approval entry is not marked" \
   "$warning" 0 0 cli_unseen plan_x s
+run fail "cli_unseen refuses an approval entry counted twice" \
+  "$warning" 0 2 cli_unseen plan_x s
+run fail "cli_unseen refuses a warning with other wording" \
+  "It overwrites the drifted configuration, which one reviewer has seen: this approval records that you approve overwriting it." 0 1 cli_unseen plan_x s
 run fail "cli_unseen refuses an approval output without the warning" \
   "Plan plan_x approved." 0 1 cli_unseen plan_x s
 
@@ -84,6 +88,10 @@ run pass "unfreeze_refused_cli accepts exit 1 with the approver-role refusal and
   "$role" 1 t unfreeze_refused_cli h-viewer
 run fail "unfreeze_refused_cli refuses exit 2 with the same text" \
   "$role" 2 t unfreeze_refused_cli h-viewer
+run fail "unfreeze_refused_cli refuses a command that succeeded (exit 0) with the same text" \
+  "$role" 0 t unfreeze_refused_cli h-viewer
+run fail "unfreeze_refused_cli refuses a refusal that names another role" \
+  "Needs one of the roles [publisher]." 1 t unfreeze_refused_cli h-viewer
 run fail "unfreeze_refused_cli refuses a refusal that names no approver role" \
   "Refused." 1 t unfreeze_refused_cli h-viewer
 run fail "unfreeze_refused_cli refuses a scope that is no longer frozen" \
