@@ -61,8 +61,9 @@ type unreadValue struct {
 // The forms the observation table holds a node's report in; a report outside them is that read's
 // failure, so a node cannot make the record fail.
 var (
-	talosNodeIDForm    = regexp.MustCompile(`^[!-~]{1,128}$`)
-	talosClusterIDForm = regexp.MustCompile(`^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]=$`)
+	talosNodeIDForm = regexp.MustCompile(`^[!-~]{1,128}$`)
+	// The cluster ID is the standard spelling: talos.Identity converts what a node prints.
+	talosClusterIDForm = regexp.MustCompile(`^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$`)
 	runningVersionForm = regexp.MustCompile(`^v[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}(-[0-9A-Za-z.-]{1,64})?$`)
 	resourceVersionFm  = regexp.MustCompile(`^[!-~]{1,64}$`)
 )

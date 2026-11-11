@@ -971,7 +971,7 @@ type ClusterInput struct {
 	// Name At most 128 bytes, no control characters.
 	Name string `json:"name"`
 
-	// TalosClusterId The cluster ID `talosctl get info` prints: 32 bytes in URL-safe base64.
+	// TalosClusterId The cluster ID `talosctl get info` prints: 32 bytes in padded base64, in the standard or the URL-safe alphabet. The server stores and returns the standard spelling (persistence-api.md section 7.3).
 	TalosClusterId string `json:"talosClusterId"`
 }
 

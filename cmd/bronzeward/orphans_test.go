@@ -128,7 +128,7 @@ func newOrphanEnv(t *testing.T) *orphanEnv {
 		"ingestion: {instance: a, heartbeat: 5s, lease: 15s, absoluteExpiry: 10m, sweep: 15s}\n", 0o600)
 	mustDB(t, db, `INSERT INTO principal (id, kind, iss, sub, created_at) VALUES ($1, 'human', 'https://idp.test', 'alice', now())`, e.user)
 	mustDB(t, db, `INSERT INTO cluster (id, name, endpoint, contract, talos_cluster_id, created_at)
-		VALUES ($1, 'office', 'https://cp.example.test:6443', 'v1.14', '8TMwqXnWOTdw7xFDHSn-f6JMbBQrSWAuyzCfGIRVSL0=', now())`, e.a)
+		VALUES ($1, 'office', 'https://cp.example.test:6443', 'v1.14', '8TMwqXnWOTdw7xFDHSn+f6JMbBQrSWAuyzCfGIRVSL0=', now())`, e.a)
 	mustDB(t, db, `INSERT INTO machine (id, cluster, smbios_uuid, serial, scope_state, talos_endpoint, platform, created_at)
 		VALUES ($1, $2, '0b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b', 'SN-1', 'normal', '10.55.0.3:50000', 'metal', now())`, e.machine, e.a)
 	t.Cleanup(func() { orphanHooks = orphanTestHooks{} })

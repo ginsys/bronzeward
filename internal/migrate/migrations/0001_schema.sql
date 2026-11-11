@@ -151,9 +151,10 @@ CREATE DOMAIN talos_endpoint AS text
 
 -- A cluster (§3): its name, its Kubernetes API endpoint, the Talos contract minor it runs
 -- (compilation §10.2) and its Talos cluster ID. Not written through If-Match (§4.1), so its
--- revision never leaves the database and carries no ETag token. The Talos cluster ID is as
--- `talosctl get info` prints it: the URL-safe, padded base64 encoding of 32 bytes, in its one
--- canonical spelling, compared byte for byte.
+-- revision never leaves the database and carries no ETag token. The Talos cluster ID is the
+-- standard, padded base64 encoding of the 32 bytes `talosctl get info` prints, in its one canonical
+-- spelling, compared byte for byte. Talos before v1.14 prints the URL-safe alphabet, and the API
+-- converts that spelling before it is stored (§7.3).
 CREATE TABLE cluster (
   id         text PRIMARY KEY CHECK (id ~ '^cl_[a-z2-7]{26}$'),
   name       text NOT NULL CHECK (btrim(name) <> '' AND octet_length(name) <= 128 AND name !~ '[[:cntrl:]]'),
@@ -161,7 +162,7 @@ CREATE TABLE cluster (
   contract   text NOT NULL CHECK (contract ~ '^v[0-9]{1,4}\.[0-9]{1,4}$'),
   revision   integer NOT NULL DEFAULT 1 CHECK (revision >= 1),
   created_at timestamptz NOT NULL,
-  talos_cluster_id text NOT NULL CHECK (talos_cluster_id ~ '^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]=$')
+  talos_cluster_id text NOT NULL CHECK (talos_cluster_id ~ '^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$')
 );
 -- §7.3's cluster key: one Talos cluster ID is one record across the installation.
 CREATE UNIQUE INDEX cluster_talos_cluster_id ON cluster (talos_cluster_id);
@@ -1323,7 +1324,7 @@ CREATE TABLE observation (
   access_created       text CHECK (access_created ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?Z$'),
   smbios_uuid          uuid,
   talos_node_id        text CHECK (talos_node_id ~ '^[!-~]{1,128}$'),
-  talos_cluster_id     text CHECK (talos_cluster_id ~ '^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]=$'),
+  talos_cluster_id     text CHECK (talos_cluster_id ~ '^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$'),
   assignment_evidence  text CHECK (btrim(assignment_evidence) <> '' AND octet_length(assignment_evidence) <= 1024),
   running_version      text CHECK (running_version ~ '^v[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}(-[0-9A-Za-z.-]{1,64})?$'),
   configuration_digest bytea CHECK (length(configuration_digest) = 32),

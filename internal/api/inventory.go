@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/base32"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"net"
@@ -97,19 +96,10 @@ func (in *clusterInput) check(*API) error {
 	if in.Contract != supported {
 		return fmt.Errorf("contract %s is not supported: this server renders only %s", in.Contract, supported)
 	}
-	if !validClusterID(in.TalosClusterID) {
-		return errors.New("talosClusterId must be the cluster ID `talosctl get info` prints: 32 bytes in URL-safe base64 (persistence-api.md §7.3)")
+	if _, ok := talos.CanonicalClusterID(in.TalosClusterID); !ok {
+		return errors.New("talosClusterId must be the cluster ID `talosctl get info` prints: 32 bytes in padded base64, in the standard or the URL-safe alphabet (persistence-api.md §7.3)")
 	}
 	return nil
-}
-
-// validClusterID takes a Talos cluster ID in its one canonical spelling: the URL-safe, padded
-// base64 encoding of 32 bytes Talos prints. Decoding alone would also take nonzero padding bits
-// and the line breaks the decoder skips, so the decoded bytes must encode back to exactly what was
-// given.
-func validClusterID(s string) bool {
-	b, err := base64.URLEncoding.DecodeString(s)
-	return err == nil && len(b) == 32 && base64.URLEncoding.EncodeToString(b) == s
 }
 
 // nodeIDShape is a Talos node ID as `talosctl get identity` prints it: opaque printable ASCII
@@ -159,10 +149,15 @@ type clusterBody struct {
 
 // createCluster records a cluster. The Talos cluster ID's unique index is §7.3's cluster key, met
 // as the SMBIOS UUID's is in inventoryMachine: a second cluster from one secrets bundle is refused
-// naming the first.
+// naming the first. The ID is recorded in its standard spelling whichever one the operator read,
+// so the URL-safe spelling of a recorded ID names the same cluster.
 func createCluster(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result, error) {
 	in := q.input.(*clusterInput)
-	b := clusterBody{ID: id.New(id.Cluster), Name: in.Name, Endpoint: in.Endpoint, Contract: in.Contract, TalosClusterID: in.TalosClusterID}
+	clusterID, ok := talos.CanonicalClusterID(in.TalosClusterID)
+	if !ok {
+		return result{}, errors.New("the Talos cluster ID passed the check and is no cluster ID")
+	}
+	b := clusterBody{ID: id.New(id.Cluster), Name: in.Name, Endpoint: in.Endpoint, Contract: in.Contract, TalosClusterID: clusterID}
 	var inserted string
 	err := tx.QueryRowContext(ctx, `INSERT INTO cluster (id, name, endpoint, contract, talos_cluster_id, created_at)
 		VALUES ($1, $2, $3, $4, $5, now()) ON CONFLICT DO NOTHING RETURNING id`,
