@@ -346,3 +346,16 @@ func TestDriftAdoptObject_PausedThenSaveFails(t *testing.T) {
 		t.Errorf("exit %d, step 1 %+v, stderr %q; want a nonzero exit naming the epoch that could not be kept, and the import mark command", code, obj.Steps[0], errOut)
 	}
 }
+
+// TestDriftAdoptObject_RereadFails: contract lines 924-929 and 940-941: when the read of an accepted
+// import that step 1 ends with fails, step 1 is unknown and its command is the one the table output
+// names, import status, never the drift adopt repeat, which would write again.
+func TestDriftAdoptObject_RereadFails(t *testing.T) {
+	f := adoptChainServer(t)
+	f.failReread = true
+	code, obj, _, errOut := adoptObject(t)
+	wantStates(t, obj, stateUnknown, stateNotRun, stateNotRun)
+	if code == 0 || obj.Steps[0].Command != "bronzewardctl import status 'ing_BWSYNTH'" || obj.Steps[0].Answer == nil {
+		t.Errorf("exit %d, step 1 %+v, stderr %q; want a nonzero exit, the import status command and the accepted answer", code, obj.Steps[0], errOut)
+	}
+}
