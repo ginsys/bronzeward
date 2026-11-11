@@ -382,6 +382,19 @@ func TestDriftAdoptObject_ImportChangedBeforeTheReread(t *testing.T) {
 	}
 }
 
+// TestDriftAdoptObject_ImportChangedWithoutAFailedSave: the same switch runs when the save worked. An
+// import that another operator continued or abandoned before the re-read is unknown or failed, with the
+// import status command and an error that names the state, and the exit stays 0 as the text output has it.
+func TestDriftAdoptObject_ImportChangedWithoutAFailedSave(t *testing.T) {
+	f := adoptChainServer(t)
+	f.rereadClaim = "resumed"
+	code, obj, _, errOut := adoptObject(t)
+	wantStates(t, obj, stateUnknown, stateNotRun, stateNotRun)
+	if code != 0 || obj.Steps[0].Command != "bronzewardctl import status 'ing_BWSYNTH'" || !strings.Contains(obj.Steps[0].Error, "resumed") {
+		t.Errorf("exit %d, step 1 %+v, stderr %q; want 0, the import status command and an error that names the state", code, obj.Steps[0], errOut)
+	}
+}
+
 // wantReadCommand fails where s is unknown with an accepted write and its command is not a read of what
 // the write started: import status or operation show, never the repeat of the write (contract lines
 // 940-941). A write that was never confirmed accepted keeps the keyed repeat, which is not covered here.
