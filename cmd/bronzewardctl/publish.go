@@ -122,7 +122,7 @@ func (e *env) publishDraftOn(c *client.Client, bind *epochBind, d string, rp *cl
 		res, err = o.Result.AsPublishResult()
 	}
 	if o.Result == nil || err != nil || res.Release == "" {
-		return "", fmt.Errorf("%s: publication operation %s succeeded without naming its release: %s", c.Context.Where(), pr(o.Id), pr(compact(o.Result)))
+		return "", releaselessErr{fmt.Errorf("%s: publication operation %s succeeded without naming its release: %s", c.Context.Where(), pr(o.Id), pr(compact(o.Result)))}
 	}
 	return res.Release, nil
 }

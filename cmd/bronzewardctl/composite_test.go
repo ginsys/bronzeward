@@ -124,7 +124,7 @@ func TestClassifyStates(t *testing.T) {
 		{"done: the step function returned nil (line 909)", nil, true, stateDone},
 		{"done: a publication without a readable release (lines 936-939)", releaselessErr{plain}, true, stateDone},
 		{"failed: the operation ended failed, rejected or cancelled (lines 916-918)", operationFailed{plain}, true, stateFailed},
-		{"failed: a run that recorded resume-failed (lines 919-923)", &client.Blocked{Err: resumeFailedErr{plain}}, true, stateFailed},
+		{"failed: a run that recorded resume-failed (lines 919-923)", &client.Blocked{Err: resumeFailedErr{plain, "ing_1"}}, true, stateFailed},
 		{"failed: a write the server refused (line 916)", &client.Problem{Status: 409}, false, stateFailed},
 		{"failed: a write the client refused before sending (line 917)", notSent{plain}, false, stateFailed},
 		{"failed: a repeat refused before sending (line 917)", client.RefusedRepeat{}, false, stateFailed},

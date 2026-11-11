@@ -366,6 +366,20 @@ func (e *env) driftAdopt(args []string) (err error) {
 		}
 		return l
 	}
+	// -o json and yaml print one object for the three steps, once, whatever ends the command from here
+	// on (operator-experience.md §5.8, "Structured output of a composite"). It is the first deferred
+	// call, so it runs last, after the client was saved. Before this line nothing was run and nothing
+	// is printed: the arguments and the identity read refused.
+	co := newCollector(m, draft)
+	e.collect = co
+	defer func() {
+		e.collect = nil
+		if e.output != "table" {
+			if perr := e.printComposite(co.object()); perr != nil {
+				err = errors.Join(err, perr)
+			}
+		}
+	}()
 	if !has("author") || id.Kind != "human" {
 		return e.say(append([]string{"Not run: step 1 needs an author signed in as a person. The steps:"}, from(1, "")...)...)
 	}
@@ -379,14 +393,26 @@ func (e *env) driftAdopt(args []string) (err error) {
 	if err := e.say(fmt.Sprintf("Step 1/3  import (drift-adoption) of machine %s into draft %s", m, draft)); err != nil {
 		return err
 	}
+	co.begin(1)
 	c, a, err := e.ingest("drift adopt", "drift-adoption", importArgs)
 	if err != nil {
+		co.settle(1, err)
 		return errors.Join(err, e.say(append([]string{"The later steps:"}, from(2, "")...)...))
 	}
 	// The read can show another epoch, which this client keeps, as ingest saved its own before it; a
 	// failed read leaves the steps unrun, so they are printed.
 	b, bind, err := readIngestionBound(c, a.Ingestion)
 	saved := c.Save()
+	// The step's state is what the server answered: a failed read leaves it unknown, and a client that
+	// cannot save changes no state (§5.8, the exit codes).
+	switch {
+	case err != nil:
+		co.settle(1, err)
+	case b.State != "released":
+		co.pause(b.Id)
+	default:
+		co.settle(1, nil)
+	}
 	if err != nil || saved != nil {
 		// A failed read leaves the state unknown; a read that worked and a save that did not leaves it known.
 		head := "The import was accepted, but its state is not known. Read it with: bronzewardctl import status " + pr(a.Ingestion)
@@ -412,7 +438,9 @@ func (e *env) driftAdopt(args []string) (err error) {
 	defer func() { err = errors.Join(err, c.Save()) }()
 	// An unknown outcome of this write names the publish command, never drift adopt: the repeat flags it
 	// prints are this publication's, and drift adopt would give them to the import of step 1.
+	co.begin(2)
 	release, err := e.publishDraftOn(c, bind, draft, nil, "", "the command bronzewardctl publish "+client.ShellWord(draft)+" in place of drift adopt", false)
+	co.settle(2, err)
 	if err != nil {
 		// A refusal the client makes because the epoch moved or the draft's ETag is gone sends nothing, so
 		// step 2 runs again. Any other error, a failed preflight read included, leaves the outcome to the
@@ -422,9 +450,11 @@ func (e *env) driftAdopt(args []string) (err error) {
 		}
 		return errors.Join(err, e.say(append([]string{"The later step:"}, from(3, "")...)...))
 	}
+	co.release(release)
 	if err := e.say("Step 3/3  plan an adoption of release " + pr(release)); err != nil {
 		return err
 	}
+	co.begin(3)
 	// The plan is created on the publication's client, bound to the epoch and move count the publication
 	// left it at: its terminal read stood (restoredRead), and the release comes from that read (§8.5).
 	// One client is also saved once, at the end, so no earlier client writes an older epoch over it.
@@ -433,6 +463,7 @@ func (e *env) driftAdopt(args []string) (err error) {
 		err = e.planCreateOn(c, req, planOpts{extra: adoptLines, bind: &epochBind{epoch: c.Context.LastEpoch, moves: c.EpochMoves()},
 			input: "the command " + createLine(release, m, "adopt") + " in place of drift adopt"})
 	}
+	co.settle(3, err)
 	if err != nil {
 		return errors.Join(err, e.say(append([]string{"Step 3 again:"}, from(3, release)...)...))
 	}
