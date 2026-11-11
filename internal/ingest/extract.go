@@ -237,7 +237,7 @@ func knownSecrets(docs []*yaml.Node, marks []Path) (texts []string, complete boo
 		}
 		for _, sp := range pointers {
 			n, ok := resolve(docs, i, sp.pointer)
-			if ok && n.Tag == refTag {
+			if ok && n.Tag == refTag && n.Kind == yaml.ScalarNode {
 				continue // already a reference: it loads as a null and holds no secret
 			}
 			values = append(values, sp.value)

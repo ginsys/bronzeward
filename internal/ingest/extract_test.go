@@ -167,6 +167,21 @@ func TestExtractRefusalCreatesNothing(t *testing.T) {
 	}
 }
 
+// Only a scalar tagged !bwref is a reference. A mapping carrying the tag at a secret field is
+// malformed and may hold a real value: it is not skipped as "already a reference", so the refusal
+// that rejects it is redacted as any other and names the document alone, never a path through it.
+func TestExtractMalformedReferenceContainerRefusalNamesNoPath(t *testing.T) {
+	doc := "apiVersion: v1alpha1\nkind: KubeEtcdEncryptionConfig\nconfig:\n  leak-canary:\n    secret: !bwref {password: leak-canary}\n"
+	_, err := Extract(request(t, doc))
+	var r *Refusal
+	if !errors.As(err, &r) {
+		t.Fatalf("got %v, want a refusal", err)
+	}
+	if strings.Contains(err.Error(), "leak-canary") || strings.Contains(fmt.Sprintf("%+v %v", r, r.Paths), "leak-canary") {
+		t.Errorf("the refusal names the container's keys: %v %+v", err, r)
+	}
+}
+
 func TestCommitFailureAndOnce(t *testing.T) {
 	c, err := Extract(request(t, multiDoc))
 	if err != nil {
