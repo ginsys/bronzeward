@@ -1,6 +1,6 @@
 // The recovery console's entry (ginsys/bronzeward#364): REC-02 and REC-04 (a) (conformance/cases/)
 // against a disposable recovery start, through the injector. REC-04 (b) waits for the server's
-// COMMIT fault hook (#263). Every value is synthetic.
+// COMMIT fault hook (ginsys/bronzeward#366). Every value is synthetic.
 import { $, browser, expect } from "@wdio/globals";
 import { NORMAL_START, PRE_ENTRY } from "../../src/recovery.tsx";
 import { SET_ASIDE } from "../../src/states.tsx";

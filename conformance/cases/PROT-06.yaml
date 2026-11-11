@@ -18,4 +18,4 @@ runs:
   web:
     check: web/e2e/auth/protected.e2e.ts, mise run browser-auth with BW_SPECS=protected
     browsers: [chrome, edge, firefox, firefox-esr]
-    covers: 'cases 1 to 3. Case 4, the run releasing the claim before its lease lapses with its draft transaction delayed, waits for the server-side fault hook of ginsys/bronzeward#263'
+    covers: 'cases 1 to 3. Case 4, the run releasing the claim before its lease lapses with its draft transaction delayed, waits for the server-side fault hook of ginsys/bronzeward#366'

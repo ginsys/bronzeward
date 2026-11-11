@@ -1976,7 +1976,7 @@ Limits:
   and sends recovery enter, recovery exit and identity revoke; enter and revoke are sent only when
   the confirmation is typed back. Its tests run REC-02 and REC-04 (a) against a served bronzeward.
   REC-04 (b) waits for the server-side COMMIT fault hook of
-  [#263](https://github.com/ginsys/bronzeward/issues/263). With
+  [#366](https://github.com/ginsys/bronzeward/issues/366). With
   [#362](https://github.com/ginsys/bronzeward/issues/362) it also sends recovery scope-account,
   account, takeover, resolve, mark and release. Its tests run AMB-05, AMB-07 and AMB-12 with
   scope-account as the dropped write, and the 403 role refusal on all nine recovery write commands.

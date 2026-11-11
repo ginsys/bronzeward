@@ -16,4 +16,4 @@ runs:
   web:
     check: web/e2e/auth/recovery.e2e.ts, mise run browser-auth; the repeat, the key and the classification of the answers in web/src/write.test.ts, mise run web
     browsers: [chrome, edge, firefox, firefox-esr]
-    covers: '(a) only, the dropped 201. (b), the server losing its own COMMIT reply, waits for the server-side COMMIT fault hook of #263 (client contracts §12, REC-04); the server side of (b) is covered by internal/api/recovery_entries_test.go'
+    covers: '(a) only, the dropped 201. (b), the server losing its own COMMIT reply, waits for the server-side COMMIT fault hook of ginsys/bronzeward#366 (client contracts §12, REC-04); the server side of (b) is covered by internal/api/recovery_entries_test.go'
