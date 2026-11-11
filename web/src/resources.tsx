@@ -6,6 +6,7 @@
 import { Fragment as Group, type ReactNode, useRef } from "react";
 import type { components } from "./api/v1";
 import { CreateDraft, DraftItem, Drafts } from "./drafts.tsx";
+import { PublishDraft } from "./publish.tsx";
 import { AddCluster, RecordMachine } from "./forms.tsx";
 import { IngestionItem, StartImport } from "./imports.tsx";
 import { EmptyList, Head, Id, type Listed, More, Ref, Scroll, short, useItem, useList, usePending } from "./list.tsx";
@@ -442,6 +443,7 @@ export function view(path: string, query: string, go: (to: string) => void): Rea
   if (id === "new" && kind === "machines") return <RecordMachine query={query} />;
   if (id === "new" && kind === "drafts") return <CreateDraft />;
   if (id === "new" && kind === "ingestions") return <StartImport query={query} />;
+  if (id === "new" && kind === "publications") return <PublishDraft query={query} />;
   if (id === undefined) {
     const pages: Record<string, () => ReactNode> = {
       machines: () => <Machines query={query} go={go} />, clusters: () => <Clusters />, changes: () => <Changes />,

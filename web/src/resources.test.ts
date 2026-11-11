@@ -7,6 +7,7 @@ import { CreateDraft, DraftItem } from "./drafts.tsx";
 import { EmptyList, Id, type Listed, readPages, type Reads, ReadsProvider, RESTARTED, viewOf } from "./list.tsx";
 import { MachineItem } from "./machine.tsx";
 import { ClusterItem, Clusters, Machines } from "./machines.tsx";
+import { PublishDraft } from "./publish.tsx";
 import { RecoveryConsole } from "./recovery.tsx";
 import {
   Audit, Change, Changes, DEPENDENCY_CLASSES, DependencyItem, klass, OPERATION_KINDS, OPERATION_STATES, OperationItem, Operations, PLAN_STATES,
@@ -38,6 +39,11 @@ describe("paths (B3)", () => {
       expect(at(path)?.props, path).toEqual(props);
     }
     expect(at("/drafts/new")?.type).toBe(CreateDraft);
+    // ginsys/bronzeward#342: a publication has its own page, named by the draft in the query.
+    expect(at("/publications/new", "draft=drf_a")?.type).toBe(PublishDraft);
+    expect(at("/publications/new", "draft=drf_a")?.props).toEqual({ query: "draft=drf_a" });
+    expect(at("/publications")).toBeUndefined();
+    expect(at("/publications/pub_a")).toBeUndefined();
   });
 
   test("ginsys/bronzeward#517 H2: each draft's page is its own, so a move to another draft keeps none of its reads or editor", () => {
