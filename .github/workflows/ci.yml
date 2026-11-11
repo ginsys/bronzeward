@@ -170,9 +170,14 @@ jobs:
           v=$(sed -n 's/^node = "\(.*\)"$/\1/p' mise.toml)
           [ -n "$v" ] || { echo "web: no node = \"<version>\" line in mise.toml" >&2; exit 1; }
           echo "version=$v" >> "$GITHUB_OUTPUT"
+      # ginsys/bronzeward#788: a cold runner pod fetched every package for `npm ci` from the npm
+      # registry (6 to 8 minutes, or ETIMEDOUT). `cache: npm` restores npm's download directory from
+      # GitHub's actions cache instead, keyed on the lockfile; web/node_modules is not cached.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ steps.node.outputs.version }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
       # node is the only tool the job needs, so mise installs nothing and has nothing to cache.
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
         with:
