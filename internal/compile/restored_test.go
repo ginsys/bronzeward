@@ -168,6 +168,34 @@ func TestCompileRestoredShortSecretAtAnAliasWithholdsTheMessage(t *testing.T) {
 	}
 }
 
+// The value check of a message ignores an integer, whatever its length, and no tracer stands at an
+// alias: an INTEGER reference at an alias of a schema secret holds its real value in both passes
+// and the message would quote it, so the message is withheld even at eight digits.
+func TestCompileRestoredIntegerAtAnAliasWithholdsTheMessage(t *testing.T) {
+	const digits = "12345678"
+	text := string(generatedBase(t))
+	text = regexp.MustCompile(`(?m)^(\s*clusterID: )\S+`).ReplaceAllString(text, "${1}&s !bwref app/s")
+	text = regexp.MustCompile(`(?m)^(\s*clusterSecret: )\S+`).ReplaceAllString(text, "${1}*s")
+	decl := ingest.Declarations{References: map[string]ingest.Reference{"app/s": {Kind: provider.KindInteger, Version: 1}}}
+	base := source(t, text, decl, map[string]provider.Value{"app/s": value(t, provider.KindInteger, 12345678)})
+	_, err := Compile(Input{Base: base, Mode: ModeMetal})
+	var e *Error
+	if !errors.As(err, &e) || e.Rule != RuleInvalid {
+		t.Fatalf("got %v, want an invalid verdict", err)
+	}
+	if !strings.HasPrefix(e.Message, "<withheld:") {
+		t.Errorf("the message %q is not withheld", e.Message)
+	}
+	for _, rendered := range []string{
+		err.Error(), fmt.Sprintf("%v", err), fmt.Sprintf("%+v", err), fmt.Sprintf("%#v", err),
+		fmt.Sprintf("%q", e.Message), strings.Join(e.Paths, " "), e.Input, string(e.Rule),
+	} {
+		if shows(rendered, digits) {
+			t.Errorf("a rendering holds the secret: %q", rendered)
+		}
+	}
+}
+
 // A restored secret whose lines are all too short for the id is headless, but its value is not short:
 // the value check finds the whole value in a message, so the message keeps its diagnostic with the
 // value redacted, as it does for any secret of six bytes or more.

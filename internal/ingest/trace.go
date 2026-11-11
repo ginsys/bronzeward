@@ -180,12 +180,16 @@ func (t Tracer) Carried(v string) bool {
 // finds nothing), or an alias of the reference holds it at a path of its own, where no tracer stands.
 // Both passes then hold the real value, a message of one quotes it as the other does, and nothing
 // shows where it stands. A secret of floor bytes or more is found by the value check, whatever its
-// lines are, so its message keeps its diagnostic.
+// lines are, so its message keeps its diagnostic. The value check reads strings only, so an integer
+// held by an alias is unmarkable at any length.
 func (t Tracer) Unmarkable(floor int) bool {
 	if t.p == nil || t.p.text == nil {
 		return false
 	}
 	x := t.p.text
+	if x.aliased && t.p.kind == TraceInteger {
+		return true
+	}
 	return len(x.plain) < floor && (x.restored && x.headless || x.aliased)
 }
 

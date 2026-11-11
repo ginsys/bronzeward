@@ -52,7 +52,9 @@ func identify(docs []*yaml.Node, marks []Path) ([]*target, error) {
 			n, ok := resolve(docs, i, sp.pointer)
 			// A node already tagged !bwref loads as a null, which some documents still redact
 			// (the etcd encryption secret, machinery v1.14.5): it holds no secret, so it is skipped.
-			if ok && n.Tag == refTag {
+			// Only a scalar is a reference: a tagged collection is malformed, may hold a real
+			// value, and is refused below as an indirection.
+			if ok && n.Tag == refTag && n.Kind == yaml.ScalarNode {
 				continue
 			}
 			// The input node must be the leaf the machinery encoded, as written: a merge key,
