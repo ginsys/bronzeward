@@ -305,6 +305,38 @@ func TestJoinSave(t *testing.T) {
 	}
 }
 
+// TestCompositeUnknownAfterAcceptedIsRead: contract lines 924-929 and 940-941: whatever error leaves an
+// accepted write unknown, the step's command is the read of what the write started (import status for
+// the import, operation show for the publication), never the repeat of the write. The collector decides
+// it from the answer, so that no error class that sets no command can leave the repeat in place.
+func TestCompositeUnknownAfterAcceptedIsRead(t *testing.T) {
+	plain := errors.New("a read failed")
+	answers := map[int]string{1: `{"ingestion":"ing_1","operation":"op_1"}`, 2: `{"id":"op_2","state":"running"}`}
+	want := map[int]string{1: "bronzewardctl import status 'ing_1'", 2: "bronzewardctl operation show 'op_2'"}
+	for _, c := range []struct {
+		name string
+		err  error
+	}{
+		{"Ctrl-C in the wait", &client.Interrupted{Route: "GET /operations/op_1"}},
+		{"a signal", endedBySignal{syscall.SIGTERM}},
+		{"an unknown outcome", outcomeUnknown{plain}},
+		{"a lapsed claim", &client.Blocked{Err: outcomeUnknown{plain}}},
+		{"a refused read", &client.Problem{Status: 403}},
+		{"a read that gave no answer", plain},
+	} {
+		for n := 1; n <= 2; n++ {
+			co := newCollector("mch_1", "drf_1")
+			co.begin(n)
+			co.record([]byte(answers[n]), nil)
+			co.settle(n, c.err)
+			s := co.object().Steps[n-1]
+			if s.State != stateUnknown || s.Command != want[n] {
+				t.Errorf("%s, step %d: %+v; want unknown with the command %q", c.name, n, s, want[n])
+			}
+		}
+	}
+}
+
 // TestCompositeKeepsTheUnreadableAnswerNote: contract lines 936-937 and 945-946: a publication answered
 // with a body that cannot be read, and then ended by a later error, keeps the note that its answer
 // cannot be read beside that error, on a done step as on a failed one.
