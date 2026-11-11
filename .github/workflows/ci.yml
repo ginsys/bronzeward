@@ -162,7 +162,9 @@ jobs:
     # GitHub-hosted for every event: the in-cluster runners have no Docker daemon, so the service
     # container cannot start there (this job's first run failed initializing it, at
     # `docker version`). A hosted runner is also the more isolated place for PR code.
-    runs-on: ubuntu-latest
+    # ubuntu-24.04, not ubuntu-latest, while the 26.04 runners cannot resolve the Ubuntu archive
+    # (ginsys/bronzeward#791). Back to ubuntu-latest once they can.
+    runs-on: ubuntu-24.04
     # Above mise run go-db's 25 min package timeout plus setup, so that timeout fires first and
     # names the slow package.
     timeout-minutes: 30
@@ -198,6 +200,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install the Secret Service for the keyring tests
+        # Takes 15 seconds. A DNS fault made apt retry for 21 minutes (ginsys/bronzeward#791),
+        # so the step fails after 3 minutes and keeps the job red.
+        timeout-minutes: 3
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends dbus-daemon dbus-bin gnome-keyring
