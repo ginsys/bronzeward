@@ -65,7 +65,8 @@ commands:
   drift adopt <machine> --draft <draft> [--review] [--staging encrypted|transient] [--marks]
               import as a drift-adoption (author, a person), publish (publisher), then plan create
               --operation adopt (publisher); stops at a missing role or a pause and prints the
-              rest; never approves; its repeat flags repeat the import
+              rest; never approves; its repeat flags repeat the import; -o json and yaml print
+              one object with the state of each step instead of the API resources
   drift revert <machine>
               publisher; plan create of Desired as apply-config, bound to the open drift record;
               it reads the machine first and takes no repeat flag; a machine with no Applied
@@ -170,7 +171,8 @@ commands:
 
 global flags, before or after the command:
   --context <name>      else BRONZEWARD_CONTEXT, else the current context
-  -o table|json|yaml    json and yaml print the API resource unchanged
+  -o table|json|yaml    json and yaml print the API resource unchanged, but for drift adopt, which
+                        prints one object for its steps
   --token-file <path>   the automation token, from an owner-only file; else the context's
                         automation.tokenFile, else the path in BRONZEWARD_TOKEN_FILE
   --token-stdin         the automation token, from standard input
