@@ -112,6 +112,18 @@ func (e *env) writeWith(c *client.Client, prep func(*client.Client) error, w *cl
 		return err
 	}
 	lines, err := say(c, r)
+	if e.collect != nil && e.output != "table" {
+		// A composite prints one object at its end (composite.go): the answer is kept as served for it,
+		// and nothing is written for this step.
+		if !json.Valid(r.Body) {
+			err = errors.New("the answer is not JSON")
+		}
+		if err != nil {
+			e.unreadable(c, w, err)
+		}
+		e.collect.record(r.Body, err)
+		return nil
+	}
 	var out []byte
 	if err == nil && e.output != "table" {
 		// say can succeed without reading the answer: one that is not JSON, an empty one included, is
@@ -124,7 +136,7 @@ func (e *env) writeWith(c *client.Client, prep func(*client.Client) error, w *cl
 		}
 	}
 	if err != nil {
-		tf(e.err, "bronzewardctl: %s: %s /api/v1%s succeeded, but its answer cannot be read: %v\n", c.Context.Where(), w.Method, w.Path, err)
+		e.unreadable(c, w, err)
 		if e.output == "table" {
 			return nil
 		}
@@ -148,6 +160,11 @@ func (e *env) writeWith(c *client.Client, prep func(*client.Client) error, w *cl
 			fmt.Fprintln(tw, client.Printable(l)) // a sentence a write built without sf is escaped here
 		}
 	})
+}
+
+// unreadable says on standard error that w succeeded, but its answer cannot be read.
+func (e *env) unreadable(c *client.Client, w *client.Write, err error) {
+	tf(e.err, "bronzewardctl: %s: %s /api/v1%s succeeded, but its answer cannot be read: %v\n", c.Context.Where(), w.Method, w.Path, err)
 }
 
 // find reads every page of path and names the item match names, or says there is no such item,
