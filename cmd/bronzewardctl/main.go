@@ -207,6 +207,10 @@ type env struct {
 	// also when a caller dropped the error of that read.
 	cutMu sync.Mutex
 	cut   *client.Interrupted
+
+	// collect is set while a composite prints one object for -o json or yaml: a write then hands its
+	// answer to it and prints nothing (composite.go).
+	collect *collector
 }
 
 func main() {

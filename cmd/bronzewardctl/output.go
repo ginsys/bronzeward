@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"reflect"
@@ -161,6 +162,25 @@ func (e *env) render(raw []byte) ([]byte, error) {
 	}
 	block(&n)
 	return yaml.Marshal(&n)
+}
+
+// printComposite prints a composite's object for -o json or yaml, once and through render: json is
+// escaped as one encoding of the whole object, yaml is one document with no "---"
+// (operator-experience.md §5.8, "Structured output of a composite"). It is built in memory first, so a
+// conversion failure is known before anything is written, and a failed write is outputFailed.
+func (e *env) printComposite(v any) error {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return err
+	}
+	b, err := e.render(buf.Bytes())
+	if err != nil {
+		return err
+	}
+	_, err = e.out.Write(b)
+	return err
 }
 
 // block drops JSON's flow and quoting styles; the encoder still quotes a string that would
