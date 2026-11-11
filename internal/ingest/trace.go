@@ -68,6 +68,8 @@ type standInText struct {
 	raw      string // for TraceBytes, the stand-in before encoding
 	headless bool   // no line was long enough for the id, so other stand-ins can hold this one
 	restored bool   // the real value of a schema secret was put back in place of the stand-in
+	aliased  bool   // an alias of the reference holds the real value of a schema secret at its own path
+	plain    string // the real value, decoded when the reference is base64-encoded
 }
 
 // ID is the tracer's id, unique within one composition's trace pass.
@@ -172,11 +174,19 @@ func (t Tracer) Carried(v string) bool {
 	return false
 }
 
-// Unmarkable reports whether the tracer stands for a restored schema secret that no message can
-// mark: its stand-in was too short to hold the id, so Quotes finds nothing. Both passes then hold
-// the real value, a message of one quotes it as the other does, and nothing shows where it stands.
-func (t Tracer) Unmarkable() bool {
-	return t.p != nil && t.p.text != nil && t.p.text.restored && t.p.text.headless
+// Unmarkable reports whether a message of a pass could quote a real schema secret of the tracer that
+// no quote check finds and a value check of floor bytes would not: the secret is shorter than floor,
+// and either it stands in the tracer's own place with a stand-in too short to hold the id (Quotes
+// finds nothing), or an alias of the reference holds it at a path of its own, where no tracer stands.
+// Both passes then hold the real value, a message of one quotes it as the other does, and nothing
+// shows where it stands. A secret of floor bytes or more is found by the value check, whatever its
+// lines are, so its message keeps its diagnostic.
+func (t Tracer) Unmarkable(floor int) bool {
+	if t.p == nil || t.p.text == nil {
+		return false
+	}
+	x := t.p.text
+	return len(x.plain) < floor && (x.restored && x.headless || x.aliased)
 }
 
 // minQuote is the shortest quote of a stand-in a message is searched for: its head alone.
@@ -372,6 +382,7 @@ func TraceKeeping(s Sanitized, values map[string]provider.Value, first, flip int
 			}
 		}
 		kept := make([][2]string, len(leaves))
+		texts := make([]*standInText, len(leaves))
 		for i, leaf := range leaves {
 			if next > maxTracerID {
 				return nil, refuse(RuleTraceIndistinct, p.String())
@@ -410,6 +421,11 @@ func TraceKeeping(s Sanitized, values map[string]provider.Value, first, flip int
 			if t.kind != TraceBoolean && x.value == leaf.Value {
 				return nil, refuse(RuleTraceIndistinct, p.String())
 			}
+			x.plain = leaf.Value
+			if plain, err := base64.StdEncoding.DecodeString(leaf.Value); err == nil && t.kind == TraceBytes {
+				x.plain = string(plain)
+			}
+			texts[i] = x
 			kept[i] = [2]string{leaf.Value, x.value}
 			if t.kind == TraceBoolean {
 				kept[i][0] = x.value
@@ -429,13 +445,13 @@ func TraceKeeping(s Sanitized, values map[string]provider.Value, first, flip int
 				c := *n
 				c.Anchor = ""
 				if n.Kind != yaml.MappingNode {
-					c.Value = pickKept(secret, q, kept[0])
+					c.Value = pickKept(secret, q, kept[0], texts[0])
 					return &c
 				}
 				c.Content = slices.Clone(n.Content)
 				for i, k := range keys {
 					m := *n.Content[2*i+1]
-					m.Value = pickKept(secret, memberPath(q, n, k), kept[i])
+					m.Value = pickKept(secret, memberPath(q, n, k), kept[i], texts[i])
 					c.Content[2*i+1] = &m
 				}
 				return &c
@@ -469,9 +485,11 @@ func memberPath(p Path, v *yaml.Node, key string) Path {
 }
 
 // pickKept is the real value of a leaf at p when the schema holds a secret there, and its stand-in
-// otherwise.
-func pickKept(secret SecretLeaves, p Path, kept [2]string) string {
+// otherwise. The leaf's text records that an alias holds the real value, since no tracer stands in
+// the alias's place.
+func pickKept(secret SecretLeaves, p Path, kept [2]string, x *standInText) string {
 	if kept[0] != kept[1] && secret.holds(p) {
+		x.aliased = true
 		return kept[0]
 	}
 	return kept[1]

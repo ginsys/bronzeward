@@ -139,3 +139,55 @@ func TestCompileRestoredShortSecretWithholdsTheMessage(t *testing.T) {
 		}
 	}
 }
+
+// An alias restores the real value at its own path, with no tracer of its own: an alias of a scalar
+// reference that stands at a schema-secret field holds the secret in both passes whatever the
+// anchor's stand-in is. A secret that short is not found by the value check either, so the message is
+// withheld.
+func TestCompileRestoredShortSecretAtAnAliasWithholdsTheMessage(t *testing.T) {
+	const short = "qz9!"
+	text := string(generatedBase(t))
+	text = regexp.MustCompile(`(?m)^(\s*clusterID: )\S+`).ReplaceAllString(text, "${1}&s !bwref app/s")
+	text = regexp.MustCompile(`(?m)^(\s*clusterSecret: )\S+`).ReplaceAllString(text, "${1}*s")
+	base := source(t, text, strRef("app/s"), map[string]provider.Value{"app/s": value(t, provider.KindString, short)})
+	_, err := Compile(Input{Base: base, Mode: ModeMetal})
+	var e *Error
+	if !errors.As(err, &e) || e.Rule != RuleInvalid {
+		t.Fatalf("got %v, want an invalid verdict", err)
+	}
+	if !strings.HasPrefix(e.Message, "<withheld:") {
+		t.Errorf("the message %q is not withheld", e.Message)
+	}
+	for _, rendered := range []string{
+		err.Error(), fmt.Sprintf("%v", err), fmt.Sprintf("%+v", err), fmt.Sprintf("%#v", err),
+		fmt.Sprintf("%q", e.Message), strings.Join(e.Paths, " "), e.Input, string(e.Rule),
+	} {
+		if shows(rendered, short) {
+			t.Errorf("a rendering holds the secret: %q", rendered)
+		}
+	}
+}
+
+// A restored secret whose lines are all too short for the id is headless, but its value is not short:
+// the value check finds the whole value in a message, so the message keeps its diagnostic with the
+// value redacted, as it does for any secret of six bytes or more.
+func TestCompileRestoredLongMultilineSecretKeepsTheRedactedMessage(t *testing.T) {
+	const multi = "ab\ncd\nef"
+	text := regexp.MustCompile(`(?m)^(\s*clusterSecret: )\S+`).ReplaceAllString(string(generatedBase(t)), `${1}"ab\ncd\nef"`)
+	_, err := Compile(Input{Base: source(t, text, ingest.Declarations{}, nil), Mode: ModeMetal})
+	var e *Error
+	if !errors.As(err, &e) || e.Rule != RuleInvalid {
+		t.Fatalf("got %v, want an invalid verdict", err)
+	}
+	if strings.HasPrefix(e.Message, "<withheld:") || !strings.Contains(e.Message, "<redacted:") {
+		t.Errorf("the message %q is withheld or not redacted", e.Message)
+	}
+	for _, rendered := range []string{
+		err.Error(), fmt.Sprintf("%v", err), fmt.Sprintf("%+v", err), fmt.Sprintf("%#v", err),
+		fmt.Sprintf("%q", e.Message), strings.Join(e.Paths, " "), e.Input, string(e.Rule),
+	} {
+		if shows(rendered, multi) {
+			t.Errorf("a rendering holds the secret: %q", rendered)
+		}
+	}
+}
