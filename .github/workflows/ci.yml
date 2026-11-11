@@ -91,22 +91,44 @@ jobs:
     # failure cases. `commit-lint` below checks only this PR's own subjects. Also the fixtures for
     # `checks`' own script, and for the packaging check's comparison and Caddy rendering.
     runs-on: ${{ (github.event_name == 'merge_group' || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'autops-kube-ginsys' }}
-    # 45 minutes: a cold mise cache downloads node from nodejs.org (58 MB), which a slow path
-    # stretches far past the work of the job (ginsys/bronzeward#783).
+    # The 45-minute bound and the 43-minute mise download timeout are a backstop: mise ends a tool
+    # download after 30 minutes by default and then retries from zero. node no longer comes from
+    # mise (ginsys/bronzeward#783), so nothing in this job downloads from nodejs.org.
     timeout-minutes: 45
-    # mise ends a tool download after 30 minutes by default and then retries from zero, so the job
-    # bound alone does not help. One attempt can use almost the whole bound.
     env:
       MISE_HTTP_DOWNLOAD_TIMEOUT: 43m
+      # node comes from actions/setup-node below; mise leaves it out, so its tasks run that one.
+      MISE_DISABLE_TOOLS: node
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
+      # ginsys/bronzeward#783: mise fetches node from nodejs.org, which the office runners reach at
+      # 13 to 25 kB/s, so after a mise.toml change left the job without a cache it timed out
+      # installing it. actions/setup-node fetches the same version from GitHub's
+      # actions/node-versions releases instead. mise.toml stays the one place naming it.
+      - id: node
+        run: |
+          v=$(sed -n 's/^node = "\(.*\)"$/\1/p' mise.toml)
+          [ -n "$v" ] || { echo "test: no node = \"<version>\" line in mise.toml" >&2; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ steps.node.outputs.version }}
+      # The fixtures need bash, git, python3 and node (the t5 leak scan's test). node is the only
+      # tool the job needs, so mise installs nothing and has nothing to cache.
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
         with:
-          cache_save: ${{ github.ref == 'refs/heads/main' }}
-          install_args: node   # the fixtures need bash, git, python3 and node (the t5 leak scan's test)
+          install: "false"
+          cache: "false"
+      # The task below runs under mise: it must find setup-node's node, at mise.toml's version.
+      - env:
+          MISE_EXEC_AUTO_INSTALL: "false"
+          WANT: ${{ steps.node.outputs.version }}
+        run: |
+          got=$(mise exec -- node --version)
+          [ "$got" = "v$WANT" ] || { echo "test: mise runs node $got, not v$WANT" >&2; exit 1; }
       - run: mise run test
 
   go:
@@ -128,19 +150,40 @@ jobs:
     # web/: the API types generated from api/openapi.yaml and their type test, the unit tests and
     # the build.
     runs-on: ${{ (github.event_name == 'merge_group' || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'autops-kube-ginsys' }}
-    # 45 minutes: a cold mise cache downloads node from nodejs.org (58 MB), which a slow path
-    # stretches far past the work of the job (ginsys/bronzeward#783).
+    # The 45-minute bound and the 43-minute mise download timeout are a backstop: mise ends a tool
+    # download after 30 minutes by default and then retries from zero. node no longer comes from
+    # mise (ginsys/bronzeward#783), so nothing in this job downloads from nodejs.org.
     timeout-minutes: 45
-    # mise ends a tool download after 30 minutes by default and then retries from zero, so the job
-    # bound alone does not help. One attempt can use almost the whole bound.
     env:
       MISE_HTTP_DOWNLOAD_TIMEOUT: 43m
+      # node comes from actions/setup-node below; mise leaves it out, so its tasks run that one.
+      MISE_DISABLE_TOOLS: node
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # ginsys/bronzeward#783: mise fetches node from nodejs.org, which the office runners reach at
+      # 13 to 25 kB/s, so after a mise.toml change left the job without a cache it timed out
+      # installing it. actions/setup-node fetches the same version from GitHub's
+      # actions/node-versions releases instead. mise.toml stays the one place naming it.
+      - id: node
+        run: |
+          v=$(sed -n 's/^node = "\(.*\)"$/\1/p' mise.toml)
+          [ -n "$v" ] || { echo "web: no node = \"<version>\" line in mise.toml" >&2; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ steps.node.outputs.version }}
+      # node is the only tool the job needs, so mise installs nothing and has nothing to cache.
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
         with:
-          cache_save: ${{ github.ref == 'refs/heads/main' }}
-          install_args: node
+          install: "false"
+          cache: "false"
+      # The task below runs under mise: it must find setup-node's node, at mise.toml's version.
+      - env:
+          MISE_EXEC_AUTO_INSTALL: "false"
+          WANT: ${{ steps.node.outputs.version }}
+        run: |
+          got=$(mise exec -- node --version)
+          [ "$got" = "v$WANT" ] || { echo "web: mise runs node $got, not v$WANT" >&2; exit 1; }
       - run: mise run web
 
   browser:
