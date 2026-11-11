@@ -73,9 +73,11 @@ describe("the publication page (#342)", () => {
     expect(releases.status).toBe(200);
     expect(releases.body!["items"]).toEqual([]);
     const ops = await api("h-viewer", "GET", "/operations");
+    expect(ops.status).toBe(200);
     expect((ops.body!["items"] as { kind: string }[]).filter((o) => o.kind === "apply-config" || o.kind === "adopt")).toEqual([]);
     const m = await api("h-viewer", "GET", `/machines/${machine}`);
-    expect(m.body!["applied"] ?? null).toBeNull();
+    expect(m.status).toBe(200);
+    expect(m.body!["applied"]).toBeNull();
   });
 });
 
