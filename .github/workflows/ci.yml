@@ -94,6 +94,10 @@ jobs:
     # 45 minutes: a cold mise cache downloads node from nodejs.org (58 MB), which a slow path
     # stretches far past the work of the job (ginsys/bronzeward#783).
     timeout-minutes: 45
+    # mise ends a tool download after 30 minutes by default and then retries from zero, so the job
+    # bound alone does not help. One attempt can use almost the whole bound.
+    env:
+      MISE_HTTP_DOWNLOAD_TIMEOUT: 43m
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
@@ -127,6 +131,10 @@ jobs:
     # 45 minutes: a cold mise cache downloads node from nodejs.org (58 MB), which a slow path
     # stretches far past the work of the job (ginsys/bronzeward#783).
     timeout-minutes: 45
+    # mise ends a tool download after 30 minutes by default and then retries from zero, so the job
+    # bound alone does not help. One attempt can use almost the whole bound.
+    env:
+      MISE_HTTP_DOWNLOAD_TIMEOUT: 43m
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
