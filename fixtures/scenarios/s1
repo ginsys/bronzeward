@@ -683,8 +683,9 @@ cluster_register() {
     die "cannot read the control plane's node ID"
   nid_w=$(node_talos "$TALOS_WORKER_IP" get identity -o json | jq -er '.spec.nodeId') ||
     die "cannot read the worker's node ID"
-  talos_cid=$cid
-  wrong_cid=$(head -c 32 /dev/urandom | base64 | tr '+/' '-_') || die "cannot make a cluster ID"
+  # The server records the standard spelling; a node of Talos before v1.14 prints the URL-safe one.
+  talos_cid=$(printf '%s' "$cid" | tr -- '-_' '+/') || die "cannot spell the cluster ID"
+  wrong_cid=$(head -c 32 /dev/urandom | base64 -w 0) || die "cannot make a cluster ID"
   check 'S1 step 1' 'both nodes report one cluster ID' same "$cid" "$cid_w"
   check 'S1 step 1' 'the nodes report two node IDs' differ "$nid_cp" "$nid_w"
   record 'S1 step 1' 'POST /clusters as h-author with the Talos cluster ID: 201' /api/v1/clusters \

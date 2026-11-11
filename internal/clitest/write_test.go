@@ -26,7 +26,7 @@ import (
 func clusterAdd(name string, extra ...string) []string {
 	sum := sha256.Sum256([]byte(name))
 	return append([]string{"--context", "human", "cluster", "add", "--name", name, "--endpoint", "https://" + name + ".example.test:6443",
-		"--contract", "v1.14", "--talos-cluster-id", base64.URLEncoding.EncodeToString(sum[:])}, extra...)
+		"--contract", "v1.14", "--talos-cluster-id", base64.StdEncoding.EncodeToString(sum[:])}, extra...)
 }
 
 // sent records the key and the expected epoch of each write the injector received.

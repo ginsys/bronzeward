@@ -1454,9 +1454,11 @@ A Talos node ID is an opaque string accepted as Talos prints it (44
 alphanumeric characters on the nodes read for choice §10.26); it is compared
 byte for byte, never normalised. The
 cluster key is the Talos cluster ID the operator reads from one of its nodes
-(`talosctl get info`), the URL-safe, padded base64 encoding of 32 bytes, also
-compared byte for byte; a second cluster generated from the same Talos
-secrets bundle shares it and is refused `409 conflict`. The indexes cannot catch a record entered with a
+(`talosctl get info`): the padded base64 encoding of 32 bytes, in the
+standard alphabet or in the URL-safe alphabet. The server stores the standard
+spelling and compares that spelling byte for byte; a second cluster generated
+from the same Talos secrets bundle shares it and is refused `409 conflict`.
+The decision follows this paragraph. The indexes cannot catch a record entered with a
 wrong value, or under the node-ID key for a machine that reports a UUID;
 execution and recovery refuses either at dispatch instead. There, the node's
 observed identity must match this record and its cluster's before any send
@@ -1465,6 +1467,37 @@ observed identity must match this record and its cluster's before any send
 machine, or a record entered with a wrong value, is refused before it sends.
 A node swapped between that read and the send is a residual its choice §10.26
 states.
+
+Decision on the spelling of the cluster ID (ginsys/bronzeward#771). Talos
+before v1.14 prints a new cluster ID in the URL-safe alphabet. Talos v1.14
+prints it in the standard alphabet (machinery v1.14.5, `discovery_identity.go`
+and the secrets bundle generator). Talos never decodes the value and uses it
+only as a unique identifier. This specification states only the rule below
+and makes no claim about the spelling of a cluster that was upgraded.
+
+- The rule: `POST /clusters` and the node read accept either alphabet. Each
+  converts an accepted value to the standard spelling before it is stored or
+  compared. A value is accepted when it decodes to exactly 32 bytes and
+  encodes back to the same text in its own alphabet. `POST /clusters` refuses
+  a value that mixes the two alphabets, has the wrong length, has no padding,
+  has extra padding, has non-zero padding bits or contains a line break with
+  `400 invalid-request`. The node read passes such a value on as read. The
+  observation then records the identity as unread with the cause
+  `identity-read`, and ingestion refuses the machine with `409
+  machine-identity-mismatch`.
+- The checks: the cluster table and the observation table accept only the
+  standard spelling. The API and the two database checks agree, so a value
+  that passes the API never fails a check.
+- Alternative A, accept only the standard spelling: it refuses every cluster
+  ID that contains `-` or `_`, which is what Talos before v1.14 prints for most
+  clusters, and it makes the operator convert the value by hand. Rejected.
+- Alternative B, accept both and store the value as given: one cluster has two
+  spellings, so the unique index cannot find a second registration in the other
+  spelling and the identity comparison at dispatch fails for a correct record.
+  Rejected.
+- Chosen, alternative C, the rule above: one stored spelling keeps the unique
+  index and every byte-for-byte comparison sound, and the operator pastes what
+  the node printed.
 
 ## 8. Asynchronous operations
 

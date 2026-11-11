@@ -32,10 +32,10 @@ func decode[T any](t *testing.T, rec *httptest.ResponseRecorder, status int) T {
 	return v
 }
 
-// talosClusterID is a Talos cluster ID of the shape `talosctl get info` prints, distinct per seed.
+// talosClusterID is a Talos cluster ID in the standard spelling the server stores, distinct per seed.
 func talosClusterID(seed string) string {
 	s := sha256.Sum256([]byte(seed))
-	return base64.URLEncoding.EncodeToString(s[:])
+	return base64.StdEncoding.EncodeToString(s[:])
 }
 
 // clusterCall records a cluster as tok, its Talos cluster ID derived from k.
@@ -54,31 +54,46 @@ func (e *env) createCluster(h http.Handler, tok, k string) string {
 	return decode[clusterBody](e.t, rec, http.StatusCreated).ID
 }
 
-// §7.3: the Talos cluster ID is taken in the alphabet `talosctl get info` prints, URL-safe base64
-// with its padding ("_" seen on the fixture's cluster), "-" and "_" included, and refused in the
-// standard alphabet, whose "+" and "/" Talos never prints.
+// §7.3: the Talos cluster ID is taken in either base64 alphabet, the standard one Talos v1.14 prints
+// and the URL-safe one Talos before v1.14 printed, and stored in the standard spelling. A second
+// registration in the other spelling names the same cluster, so it conflicts. A mix of the two
+// alphabets is refused.
 func TestClusterIDTalosAlphabet(t *testing.T) {
 	e := newEnv(t, options{})
 	author := e.human("h-author")
 	urlSafe, standard := "", ""
-	for i := 0; urlSafe == "" || standard == ""; i++ {
+	for i := 0; urlSafe == ""; i++ {
 		s := sha256.Sum256([]byte("alphabet-" + strconv.Itoa(i)))
-		if u := base64.URLEncoding.EncodeToString(s[:]); urlSafe == "" && strings.ContainsAny(u, "-_") {
-			urlSafe = u
-		}
-		if v := base64.StdEncoding.EncodeToString(s[:]); standard == "" && strings.ContainsAny(v, "+/") {
-			standard = v
+		if u := base64.URLEncoding.EncodeToString(s[:]); strings.ContainsAny(u, "-_") && strings.ContainsAny(base64.StdEncoding.EncodeToString(s[:]), "+/") {
+			urlSafe, standard = u, base64.StdEncoding.EncodeToString(s[:])
 		}
 	}
 	body := func(c string) string {
 		return `{"name":"office","endpoint":"https://cp.example.test:6443","contract":"v1.14","talosClusterId":"` + c + `"}`
 	}
-	rec := e.do(e.api, call{method: "POST", path: prefix + "/clusters", token: author, key: "k-alphabet-url-safe-0123456", body: body(urlSafe)})
-	if got := decode[clusterBody](t, rec, http.StatusCreated); got.TalosClusterID != urlSafe {
-		t.Fatalf("recorded %q, want %q", got.TalosClusterID, urlSafe)
+	post := func(key, id string) *httptest.ResponseRecorder {
+		return e.do(e.api, call{method: "POST", path: prefix + "/clusters", token: author, key: key, body: body(id)})
 	}
-	rec = e.do(e.api, call{method: "POST", path: prefix + "/clusters", token: author, key: "k-alphabet-standard-0123456", body: body(standard)})
-	wantProblem(t, rec, http.StatusBadRequest, "invalid-request")
+	// The URL-safe spelling is stored in the standard one.
+	rec := post("k-alphabet-url-safe-0123456", urlSafe)
+	if got := decode[clusterBody](t, rec, http.StatusCreated); got.TalosClusterID != standard {
+		t.Fatalf("recorded %q, want %q", got.TalosClusterID, standard)
+	}
+	// The standard spelling of the recorded cluster is the same cluster.
+	wantProblem(t, post("k-alphabet-standard-0123456", standard), http.StatusConflict, "conflict")
+	// Another cluster in the standard spelling is taken as it is.
+	other := ""
+	for i := 0; other == ""; i++ {
+		s := sha256.Sum256([]byte("alphabet-other-" + strconv.Itoa(i)))
+		if v := base64.StdEncoding.EncodeToString(s[:]); strings.ContainsAny(v, "+/") {
+			other = v
+		}
+	}
+	if got := decode[clusterBody](t, post("k-alphabet-other-01234567", other), http.StatusCreated); got.TalosClusterID != other {
+		t.Fatalf("recorded %q, want %q", got.TalosClusterID, other)
+	}
+	// A mix of both alphabets is no cluster ID.
+	wantProblem(t, post("k-alphabet-mixed-012345678", "8TMwqXnWOTdw7xFDHSn+f6JMbBQrSWAuyzCfGIRVS-0="), http.StatusBadRequest, "invalid-request")
 }
 
 // validEndpoint takes https://<host>[:<port>] and nothing else: the controls beside the refusals

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -271,6 +272,33 @@ func TestObserveDrift(t *testing.T) {
 	}
 	if oe.leaks(t) {
 		t.Fatal("the talosconfig's key or the configuration is stored or logged")
+	}
+}
+
+// PA §7.3: a node of Talos before v1.14 prints its cluster ID in the URL-safe alphabet. The
+// observation reads it, records it in the standard spelling and names no value unread, so the
+// recorded ID is the one the cluster was registered under, whichever Talos version answered.
+func TestObserveClusterIDSpelling(t *testing.T) {
+	t.Parallel()
+	oe := newObsEnv(t)
+	// The fixture's cluster is registered under talosClusterID("lab"), whose standard spelling holds
+	// a "/", so its URL-safe spelling differs: the control that the node reports another spelling.
+	standard := oe.clusterID
+	raw, err := base64.StdEncoding.DecodeString(standard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	urlSafe := base64.URLEncoding.EncodeToString(raw)
+	if urlSafe == standard {
+		t.Fatalf("the fixture's cluster ID %q has the same spelling in both alphabets", standard)
+	}
+	oe.node.SetClusterID(t, urlSafe)
+	if _, err := observer(t, oe.env, oe.x, options{}).observe(t.Context(), oe.machine, observeFor{purpose: "drift"}); err != nil {
+		t.Fatal(err)
+	}
+	r := readObs(t, oe.db, oe.machine)
+	if r.clusterID.String != standard || fmt.Sprint(r.unread) != fmt.Sprint(map[string]map[string]string{"health": {"cause": "none-bound"}}) {
+		t.Fatalf("cluster ID %q, unread %v; want %q read, nothing unread", r.clusterID.String, r.unread, standard)
 	}
 }
 

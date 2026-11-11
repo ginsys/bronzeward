@@ -100,7 +100,7 @@ func newWorld(t *testing.T) *world {
 	w := &world{db: db, a: id.New(id.Cluster), b: id.New(id.Cluster), machine: id.New(id.Machine),
 		tree: map[string]map[string][]string{}}
 	exec(t, db, `INSERT INTO cluster (id, name, endpoint, contract, talos_cluster_id, created_at)
-		VALUES ($1, 'office', 'https://cp.example.test:6443', 'v1.13', '8TMwqXnWOTdw7xFDHSn-f6JMbBQrSWAuyzCfGIRVSL0=', now())`, w.a)
+		VALUES ($1, 'office', 'https://cp.example.test:6443', 'v1.13', '8TMwqXnWOTdw7xFDHSn+f6JMbBQrSWAuyzCfGIRVSL0=', now())`, w.a)
 	exec(t, db, `INSERT INTO machine (id, cluster, smbios_uuid, serial, scope_state, talos_endpoint, platform, created_at)
 		VALUES ($1, $2, '0b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b', 'SN-1', 'normal', '10.55.0.3:50000', 'metal', now())`, w.machine, w.a)
 	// The author reference's import base revisions name.

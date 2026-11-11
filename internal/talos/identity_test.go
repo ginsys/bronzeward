@@ -16,9 +16,12 @@ import (
 )
 
 const (
-	standInUUID    = "3E8D9F4B-5C6A-4B8C-9D2E-3F4A5B6C7D8E"
-	standInNode    = "7x1SuC8Ege5BGXdAfTEff5iQnlWZLfv9h1LGMxA2pYkC"
-	standInCluster = "8TMwqXnWOTdw7xFDHSn-f6JMbBQrSWAuyzCfGIRVSL0="
+	standInUUID = "3E8D9F4B-5C6A-4B8C-9D2E-3F4A5B6C7D8E"
+	standInNode = "7x1SuC8Ege5BGXdAfTEff5iQnlWZLfv9h1LGMxA2pYkC"
+	// standInCluster is a cluster ID as Talos v1.14 prints it, in the standard alphabet.
+	// standInClusterURLSafe is the same 32 bytes as Talos before v1.14 prints them.
+	standInCluster        = "8TMwqXnWOTdw7xFDHSn+f6JMbBQrSWAuyzCfGIRVSL0="
+	standInClusterURLSafe = "8TMwqXnWOTdw7xFDHSn-f6JMbBQrSWAuyzCfGIRVSL0="
 )
 
 func dialStandIn(t *testing.T) (*talostest.Node, Reader, context.Context) {
@@ -59,6 +62,31 @@ func TestIdentity(t *testing.T) {
 			}
 			if got != (Identity{SMBIOSUUID: c.want, NodeID: standInNode, ClusterID: standInCluster}) {
 				t.Fatalf("Identity %+v", got)
+			}
+		})
+	}
+}
+
+// PA §7.3: Identity gives the cluster ID in the standard spelling, whichever spelling the node
+// prints, so a node of Talos before v1.14 and one of v1.14 or later compare equal to one record. A
+// value that is no cluster ID in either spelling is passed on as read, for the caller's own form
+// check to refuse, and never repaired here.
+func TestIdentityClusterIDSpelling(t *testing.T) {
+	for name, c := range map[string]struct{ reported, want string }{
+		"standard, as Talos v1.14 prints it":    {standInCluster, standInCluster},
+		"URL-safe, as Talos before v1.14 does":  {standInClusterURLSafe, standInCluster},
+		"neither spelling is passed on as read": {"c-1", "c-1"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			n, r, ctx := dialStandIn(t)
+			n.SetNodeID(t, standInNode)
+			n.SetClusterID(t, c.reported)
+			got, err := r.Identity(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.ClusterID != c.want {
+				t.Fatalf("cluster ID %q; want %q", got.ClusterID, c.want)
 			}
 		})
 	}

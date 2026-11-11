@@ -674,7 +674,7 @@ func TestPlanImmutableTables(t *testing.T) {
 		"UPDATE machine SET smbios_uuid = '4f9e0a5c-6d7b-4c9d-8e3f-4a5b6c7d8e9f'",
 		"UPDATE machine SET smbios_uuid = NULL, talos_node_id = 'node-1' WHERE id = '" + p.machine + "'",
 		"UPDATE machine SET cluster = '" + p.other + "' WHERE id = '" + p.machine + "'",
-		"UPDATE cluster SET talos_cluster_id = translate(encode(sha256('x'), 'base64'), '+/', '-_') WHERE id = '" + p.cluster + "'",
+		"UPDATE cluster SET talos_cluster_id = encode(sha256('x'), 'base64') WHERE id = '" + p.cluster + "'",
 	} {
 		if _, err := db.Exec(q); sqlState(err) != ImmutableSQLState {
 			t.Errorf("%s: %v; want SQLSTATE %s", q, err, ImmutableSQLState)
@@ -735,7 +735,7 @@ func TestPlanConstraintControl(t *testing.T) {
 			{insertPlanOperation, []any{id.New(id.Operation), "apply-config", "committed", owner, p.apply, p.machine, p.cluster}}}},
 		{"DROP TRIGGER identity ON machine", []stmt{{`UPDATE machine SET smbios_uuid = NULL, talos_node_id = 'node-1' WHERE id = $1`,
 			[]any{p.otherMachine}}}},
-		{"DROP TRIGGER identity ON cluster", []stmt{{`UPDATE cluster SET talos_cluster_id = translate(encode(sha256('x'), 'base64'), '+/', '-_')
+		{"DROP TRIGGER identity ON cluster", []stmt{{`UPDATE cluster SET talos_cluster_id = encode(sha256('x'), 'base64')
 			WHERE id = $1`, []any{p.other}}}},
 	} {
 		func() {
