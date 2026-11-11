@@ -57,7 +57,7 @@ export const operationId = (data: unknown): string | undefined => {
 export const notEstablished = (op: string) =>
   `Publication operation ${short(op)} ended when it was read, but the installation was restored or entered recovery mode after that, so its outcome is not established. Read the operation again.`;
 
-function Progress({ op, draft }: { op: string; draft: string }) {
+function Progress({ op, draft, onFailed }: { op: string; draft: string; onFailed: (op: string) => void }) {
   const client = useWrites()?.client;
   const reads = useReads();
   const now = useRef(reads);
@@ -81,10 +81,13 @@ function Progress({ op, draft }: { op: string; draft: string }) {
       // A published draft takes no write: its ETag is forgotten once the operation is known to have succeeded,
       // whether or not its result names the release (the CLI does the same).
       if (r.operation.state === "succeeded") forgetETag(draft);
+      // A publication that definitively failed left the draft open: Publish may send again (the server
+      // reuses only a queued or running operation).
+      else onFailed(op);
       show({ type: "end", text: "release" in e ? <>Publication succeeded: release <Id id={e.release} /> was published. {SENT_NOTHING}</> : e.text });
     });
     return () => abort.abort();
-  }, [client, op, draft]);
+  }, [client, op, draft, onFailed]);
   return (
     <section aria-label="Progress">
       <h3>Progress of operation <Id id={op} /></h3>
@@ -127,7 +130,8 @@ function Publish({ id }: { id: string }) {
     const settled = (s: Outcome) => void (s.kind === "refused" && s.status === 412 && forgetETag(id));
     if (ifMatch !== undefined) send({ method: "POST", path: `/drafts/${enc(id)}/publications`, body: {}, ifMatch, resource: `/drafts/${id}`, settled });
   };
-  const busy = w !== undefined && (o === undefined || o.kind === "done" || o.kind === "unknown");
+  const [failed, setFailed] = useState<string | undefined>();
+  const busy = w !== undefined && (o === undefined || (o.kind === "done" && failed !== op) || o.kind === "unknown");
   return (
     <>
       <h2>Publish draft {short(id)}{d !== undefined && <> "{d.title}" {d.state}, revision {d.revision}, cluster <Id id={d.cluster} /></>}</h2>
@@ -146,7 +150,7 @@ function Publish({ id }: { id: string }) {
         conflict={<Status testid="write-result">Not published: someone changed this draft since this page read it. <button type="button" onClick={readAgain}>Read the draft again</button></Status>}
       />
       {o?.kind === "done" && typeof o.data === "object" && op === undefined && <Status testid="no-operation">The publication was accepted without naming its operation. Find it in the operations list, kind publish.</Status>}
-      {op !== undefined && <Progress key={op} op={op} draft={id} />}
+      {op !== undefined && <Progress key={op} op={op} draft={id} onFailed={setFailed} />}
       <p><Ref to={`/drafts/${id}`} id={id}>Back to the draft</Ref></p>
     </>
   );
