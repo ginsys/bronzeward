@@ -98,7 +98,8 @@
     - GET /api/v1/operations?state=unresolved
     - GET /api/v1/machines/<machine>
     - POST /api/v1/machines/<machine>/freezes and /unfreezes (variants)
-    - 'the recovery acts (variants): the read each act makes first, refused by the server; no POST'
+    - 'the recovery acts before the entry (variants): the first read of each act, refused by the server; no POST'
+    - POST /api/v1/recovery/scopes/<machine>/marks and /releases (variants, after the entry): refused by the server
   fault: 'status: the injector adds "Bronzeward-Recovery-Mode: true" and rewrites GET /recovery to recovery mode on with one ready scope; machine show: 409 recovery-mode-active, first with machine and scope members, then without. Variants: none; the server refuses the unfreeze itself, with no scope member on a recovery start and with the machine''s scope on a normal start after the entry. Recovery acts: none; the server refuses them itself, with no scope member before the entry, and a mark or release with the machine''s scope after it'
   expect:
     client: shows the recovery banner and the scopes; names the scope, or the process restriction when there is none; an unfreeze says why it is refused, and the scope's reason never follows the process''s refusal

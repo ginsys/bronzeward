@@ -112,7 +112,14 @@ func TestRecovery(t *testing.T) {
 
 	// REC-01's recovery acts, before the entry (#362): a recovery start serves only the entry, so each
 	// act shows the process's restriction, names no scope and sends no write.
-	beforeActs := f.actCount()
+	// The acts are counted in the database: the acts list is a read, which this start refuses too.
+	actRows := func() (n int) {
+		if err := f.db.QueryRow(`SELECT count(*) FROM act`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	beforeActs := actRows()
 	for _, args := range [][]string{
 		{"recovery", "takeover", "op_1", "--reason", "BWSYNTH drill"},
 		{"recovery", "resolve", "op_1", "--reason", "BWSYNTH drill"},
@@ -133,7 +140,7 @@ func TestRecovery(t *testing.T) {
 			}
 		}
 	}
-	if n := f.actCount(); n != beforeActs {
+	if n := actRows(); n != beforeActs {
 		t.Errorf("the refused recovery acts recorded %d acts, want none", n-beforeActs)
 	}
 
