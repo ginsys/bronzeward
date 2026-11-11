@@ -25,6 +25,9 @@ type adoptChain struct {
 	read, moved bool
 	// identity, when set, is the GET /identity answer instead of a person who is author and publisher.
 	identity string
+	// identityEpoch, when set, is the epoch of the GET /identity answer, so a client whose context
+	// keeps another epoch has something to save after that read.
+	identityEpoch string
 	// moveOnReread makes the reread of the ingestion that step 1 ends with, the second GET of it,
 	// answer ep_BWSYNTH-2. The /server refresh that follows answers ep_BWSYNTH-1 again, as every
 	// other answer does: the epoch changed and came back. rereads counts those GETs.
@@ -73,6 +76,9 @@ func (f *adoptChain) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case path == "/identity":
 		w.Header().Set("Bronzeward-Epoch", "ep_BWSYNTH-1")
+		if f.identityEpoch != "" {
+			w.Header().Set("Bronzeward-Epoch", f.identityEpoch)
+		}
 		if f.identity != "" {
 			fmt.Fprint(w, f.identity)
 			return

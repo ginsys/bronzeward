@@ -384,7 +384,7 @@ func (e *env) follow(c *client.Client, a accepted, before int) (err error) {
 	if a.Ingestion == "" || a.Operation == "" {
 		return fmt.Errorf("%s: the server accepted the import without naming its ingestion and operation; find it with: bronzewardctl import status --state held", c.Context.Where())
 	}
-	defer func() { err = errors.Join(err, c.Save()) }()
+	defer func() { err = joinSave(err, c.Save()) }()
 	b, err := readIngestion(c, a.Ingestion)
 	if err != nil {
 		return err
@@ -696,4 +696,15 @@ func ingestionsRead(machine, draft string) func(*client.Client) (string, error) 
 			return map[bool]string{true: "the ingestion " + b.Id + " (" + b.State + ") into draft " + draft}[b.Draft == draft]
 		})
 	}
+}
+
+// joinSave adds the error of saving the context to the error a follow ended with. When the follow
+// itself succeeded, the import is finished and the save error is afterEnd: it changes no state of the
+// step (§5.8, the unknown state). Joined with an error the follow ended with, it stays plain, so that
+// error keeps its class.
+func joinSave(err, saved error) error {
+	if saved != nil && err == nil {
+		saved = afterEnd{saved}
+	}
+	return errors.Join(err, saved)
 }

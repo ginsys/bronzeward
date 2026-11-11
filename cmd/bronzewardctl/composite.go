@@ -158,7 +158,8 @@ func (co *collector) record(body []byte, cause error) {
 func (co *collector) settle(n int, err error) {
 	s := &co.obj.Steps[n-1]
 	s.State = classify(err, co.accepted[n-1])
-	if err != nil && s.State != stateDone {
+	// A done step keeps the error that left its result unread (§5.8, the error member).
+	if err != nil {
 		s.Error = client.Shown(err)
 	}
 	// A run that recorded resume-failed is read with import status, not restarted (§5.8, the failed state).
