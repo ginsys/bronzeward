@@ -155,16 +155,16 @@ func TestCompositeSettleKeepsErrorText(t *testing.T) {
 	}
 }
 
-// TestCompositeReleaselessPublication: contract lines 936-939: done without release, the plan step
-// not-run with its <release> placeholder.
+// TestCompositeReleaselessPublication: contract lines 936-939 and 945-946: done without release or
+// command, carrying its error, the plan step not-run with its <release> placeholder.
 func TestCompositeReleaselessPublication(t *testing.T) {
 	co := newCollector("mch_1", "drf_1")
 	co.begin(2)
 	co.record([]byte(`{"id":"op_1"}`), nil)
 	co.settle(2, releaselessErr{errors.New("no release named")})
 	obj := co.object()
-	if s := obj.Steps[1]; s.State != stateDone || s.Release != "" || s.Command != "" || s.Error != "" {
-		t.Errorf("step 2 is %+v; want done with no release, command or error", s)
+	if s := obj.Steps[1]; s.State != stateDone || s.Release != "" || s.Command != "" || !strings.Contains(s.Error, "no release named") {
+		t.Errorf("step 2 is %+v; want done with no release or command and the error that says no release was named", s)
 	}
 	if s := obj.Steps[2]; s.State != stateNotRun || !strings.Contains(s.Command, "<release>") {
 		t.Errorf("step 3 is %+v; want not-run with the <release> placeholder", s)
@@ -273,5 +273,34 @@ func TestWriteWithCollectsAnswer(t *testing.T) {
 				t.Errorf("-o %s, %s: stderr %q, error %q; want the note %q beside the object", o, c.name, errb.String(), s.Error, c.note)
 			}
 		}
+	}
+}
+
+// TestCompositeDoneStepKeepsItsError: contract lines 945-946: a done step whose result could not be read
+// after its operation ended well, here a client failure marked afterEnd, carries that error.
+func TestCompositeDoneStepKeepsItsError(t *testing.T) {
+	co := newCollector("mch_1", "drf_1")
+	co.begin(1)
+	co.record([]byte(`{"ingestion":"ing_1"}`), nil)
+	co.settle(1, afterEnd{errors.New("the draft cannot be read again")})
+	if s := co.object().Steps[0]; s.State != stateDone || !strings.Contains(s.Error, "cannot be read again") {
+		t.Errorf("step 1 is %+v; want done with the error of the read after it", s)
+	}
+}
+
+// TestJoinSave: contract lines 924-929 keep a finished import done when the client cannot save its
+// context after follow: the save error is afterEnd and classifies done. An error follow ended with stays
+// the step's. This tests the seam follow uses; the real command reaches it only through a save failing
+// inside follow, which the tests of the command cannot cause without ending the follow too.
+func TestJoinSave(t *testing.T) {
+	boom := errors.New("keeping the epoch: permission denied")
+	if err := joinSave(nil, nil); err != nil {
+		t.Errorf("joinSave(nil, nil) = %v; want nil", err)
+	}
+	if got := classify(joinSave(nil, boom), true); got != stateDone {
+		t.Errorf("a Save error after a finished import classifies %v; want done", got)
+	}
+	if got := classify(joinSave(operationFailed{errors.New("import failed")}, boom), true); got != stateFailed {
+		t.Errorf("a failed import with a Save error classifies %v; want failed", got)
 	}
 }

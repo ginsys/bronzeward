@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -268,5 +269,48 @@ func TestDriftAdoptObject_SaveFailsAfterStep3(t *testing.T) {
 	wantStates(t, obj, stateDone, stateDone, stateDone)
 	if code == 0 || !strings.Contains(errOut, "keeping the epoch") {
 		t.Errorf("exit %d, stderr %q, stdout %q; want a nonzero exit naming the epoch that could not be kept, with the object printed", code, errOut, out)
+	}
+}
+
+// TestDriftAdoptObject_OutputFailureKeepsTheSpecificExit: contract lines 956-958: a failure to write the
+// object gives exit 6 only where nothing more specific stands. Here step 1 ended resume-failed (exit
+// 1) and standard output is full.
+func TestDriftAdoptObject_OutputFailureKeepsTheSpecificExit(t *testing.T) {
+	f := adoptChainServer(t)
+	f.imp.set("released", 1, time.Hour, "running", "", "", ev("started", `{"type":"started"}`), ev("resume-failed", `{"type":"resume-failed","code":"dependency-unavailable"}`))
+	var errb bytes.Buffer
+	code := run([]string{"-o", "json", "drift", "adopt", "mch_BWSYNTH", "--draft", "drf_BWSYNTH"}, failsWith{syscall.ENOSPC}, &errb)
+	if code != 1 || !strings.Contains(errb.String(), "no space left") {
+		t.Errorf("exit %d, stderr %q; want 1 and the write failure named on standard error", code, errb.String())
+	}
+}
+
+// TestDriftAdoptObject_SaveFailsAfterIdentity: contract lines 948-952: the identity read succeeded and
+// then the client cannot keep the epoch it showed. No step ran, and the object is printed with three
+// not-run steps and a nonzero exit.
+func TestDriftAdoptObject_SaveFailsAfterIdentity(t *testing.T) {
+	f := adoptChainServer(t)
+	f.identityEpoch = "ep_BWSYNTH-9"
+	dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "bronzeward")
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+	code, obj, _, errOut := adoptObject(t)
+	wantStates(t, obj, stateNotRun, stateNotRun, stateNotRun)
+	if code == 0 || !strings.Contains(errOut, "keeping the epoch") {
+		t.Errorf("exit %d, stderr %q; want a nonzero exit naming the epoch that could not be kept", code, errOut)
+	}
+}
+
+// TestDriftAdoptObject_EmptyMachineRefused: an empty machine argument is a usage error before the
+// identity read, with nothing on standard output, in json and in yaml.
+func TestDriftAdoptObject_EmptyMachineRefused(t *testing.T) {
+	adoptChainServer(t)
+	for _, o := range []string{"json", "yaml"} {
+		code, out, errOut := runDrift(t, "-o", o, "drift", "adopt", "", "--draft", "drf_BWSYNTH")
+		if code != 2 || out != "" || errOut == "" {
+			t.Errorf("-o %s: exit %d, stdout %q, stderr %q; want 2, nothing on standard output and the refusal on standard error", o, code, out, errOut)
+		}
 	}
 }

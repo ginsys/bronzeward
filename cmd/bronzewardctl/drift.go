@@ -352,12 +352,40 @@ func (e *env) driftAdopt(args []string) (err error) {
 		return err
 	}
 	m := pos[0]
+	if m == "" {
+		return usageError{errors.New("drift adopt needs a machine")}
+	}
+	// -o json and yaml print one object for the three steps, once, whatever ends the command after the
+	// identity read (operator-experience.md §5.8, "Structured output of a composite"), a failed save of
+	// that read included: no step ran then, and the object has three not-run steps. It is the first
+	// deferred call, so it runs last, after the client was saved. Before the read, and when the read
+	// itself fails, nothing was run and nothing is printed.
+	co := newCollector(m, draft)
 	var id apitypes.IdentityBody
-	if err := e.session(func(c *client.Client, _ *client.Response, _ *apitypes.ServerBody) error {
-		return getJSON(c, "/identity", &id)
+	read := false
+	defer func() {
+		e.collect = nil
+		if read && e.output != "table" {
+			if perr := e.printComposite(co.object()); perr != nil {
+				if err == nil {
+					err = perr
+				} else {
+					// A step's own failure keeps its exit (§5.8): the write failure is only named.
+					fmt.Fprintf(e.err, "bronzewardctl: %s\n", client.Shown(perr))
+				}
+			}
+		}
+	}()
+	if err = e.session(func(c *client.Client, _ *client.Response, _ *apitypes.ServerBody) error {
+		if err := getJSON(c, "/identity", &id); err != nil {
+			return err
+		}
+		read = true
+		return nil
 	}); err != nil {
 		return err
 	}
+	e.collect = co
 	has := func(role string) bool { return slices.Contains(id.Roles, apitypes.IdentityBodyRoles(role)) }
 	from := func(n int, release string) []string {
 		var l []string
@@ -366,20 +394,6 @@ func (e *env) driftAdopt(args []string) (err error) {
 		}
 		return l
 	}
-	// -o json and yaml print one object for the three steps, once, whatever ends the command from here
-	// on (operator-experience.md §5.8, "Structured output of a composite"). It is the first deferred
-	// call, so it runs last, after the client was saved. Before this line nothing was run and nothing
-	// is printed: the arguments and the identity read refused.
-	co := newCollector(m, draft)
-	e.collect = co
-	defer func() {
-		e.collect = nil
-		if e.output != "table" {
-			if perr := e.printComposite(co.object()); perr != nil {
-				err = errors.Join(err, perr)
-			}
-		}
-	}()
 	if !has("author") || id.Kind != "human" {
 		return e.say(append([]string{"Not run: step 1 needs an author signed in as a person. The steps:"}, from(1, "")...)...)
 	}
