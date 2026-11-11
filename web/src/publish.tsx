@@ -127,7 +127,7 @@ function Publish({ id }: { id: string }) {
       {d !== undefined && d.state !== "open" && <Status testid="not-open">{NOT_OPEN(d.state)}</Status>}
       {d !== undefined && d.state === "open" && (
         <>
-          <p>Publishing renders every machine's configuration from this draft's revision and makes the release Desired for them. {SENT_NOTHING}</p>
+          <p>Publishing renders the configuration of every machine of the cluster that has an import base, from this draft's revision, and makes the release Desired for those machines. {SENT_NOTHING}</p>
           <p><Action label="Publish" needs={["publisher"]} onClick={publish} busy={busy} /></p>
         </>
       )}
