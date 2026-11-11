@@ -29,7 +29,7 @@ Plan pln_…  proposed                                         expires <local ti
   Created by                         idn_… (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision <n>
   Approval                           none                                        policy one-approver, committed operation none
 Evidence
-  Validation  passed at publication (contract v1.13, machinery v1.13.6, Kubernetes v1.36.2, container)
+  Validation  passed at publication (contract v1.14, machinery v1.14.5, Kubernetes v1.37.1, container)
   Dry run     not available: no dry run is available for this operation
   Diff        Diff withheld: the change cannot be shown (rel_… -> rel_…)
 It is not approved and nothing runs until an approver approves: bronzewardctl approve 'pln_…'
@@ -54,7 +54,7 @@ Plan pln_…  proposed                                         expires <local ti
   Created by                         idn_… (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision <n>
   Approval                           none                                        policy one-approver, committed operation none
 Evidence
-  Validation  passed at publication (contract v1.13, machinery v1.13.6, Kubernetes v1.36.2, container)
+  Validation  passed at publication (contract v1.14, machinery v1.14.5, Kubernetes v1.37.1, container)
   Dry run     not available: no dry run is available for this operation
   Diff        Diff withheld: the change cannot be shown (rel_… -> rel_…)
 Self-approval  predicted: you did not create this plan or publish this release, and authored no fragment, profile or assignment revision in it.
@@ -97,7 +97,7 @@ Plan pln_…  proposed                                         expires <local ti
   Created by                         idn_… (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision <n>
   Approval                           none                                        policy one-approver, committed operation none
 Evidence
-  Validation           passed at publication (contract v1.13, machinery v1.13.6, Kubernetes v1.36.2, container)
+  Validation           passed at publication (contract v1.14, machinery v1.14.5, Kubernetes v1.37.1, container)
   Dry run              not available: no dry run is available for this operation
   Baseline             import base ibr_…, the node's own bytes
   Pending convergence  yes: the release's compiled configuration differs from the node's, which the adoption records; a later apply-config plan withholds its diff
@@ -117,7 +117,7 @@ Plan pln_…  proposed                                         expires <local ti
   Created by                         idn_… (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision <n>
   Approval                           none                                        policy one-approver, committed operation none
 Evidence
-  Validation           passed at publication (contract v1.13, machinery v1.13.6, Kubernetes v1.36.2, container)
+  Validation           passed at publication (contract v1.14, machinery v1.14.5, Kubernetes v1.37.1, container)
   Dry run              not available: no dry run is available for this operation
   Baseline             import base ibr_…, the node's own bytes
   Pending convergence  yes: the release's compiled configuration differs from the node's, which the adoption records; a later apply-config plan withholds its diff
