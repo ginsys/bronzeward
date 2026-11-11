@@ -39,6 +39,9 @@ type adoptChain struct {
 	// failReread makes the reread of the ingestion that step 1 ends with, the second GET of it, answer
 	// a problem document the client cannot go on from: the state of the accepted import is not read.
 	failReread bool
+	// failIngOp and failPubOp make the read of the import's, or the publication's, operation answer a
+	// problem document, so the operation of an accepted write is not read.
+	failIngOp, failPubOp bool
 	// moveInPreflight makes the server read after that reread, which is the preflight of the
 	// publication, answer a retryable 503 at ep_BWSYNTH-2 once. The retry answers ep_BWSYNTH-1, so the
 	// epoch moved and came back between the read of the import and the send. preMoved says it did.
@@ -64,6 +67,9 @@ func (f *adoptChain) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.rereads++
 		failNow = f.failReread && f.rereads == 2
 		moved = moved || (f.moveOnReread && f.rereads == 2) || (f.moveInFollow && f.rereads == 1)
+	}
+	if r.Method == http.MethodGet && (f.failIngOp && path == "/operations/op_BWSYNTH-ing" || f.failPubOp && path == "/operations/op_BWSYNTH-pub") {
+		failNow = true
 	}
 	if f.moveInPreflight && !f.preMoved && f.rereads >= 2 && r.Method == http.MethodGet && path == "/server" {
 		// A retryable 503 that carries the other epoch: the client reads again and gets the first one.

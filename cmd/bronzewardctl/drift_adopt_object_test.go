@@ -359,3 +359,24 @@ func TestDriftAdoptObject_RereadFails(t *testing.T) {
 		t.Errorf("exit %d, step 1 %+v, stderr %q; want a nonzero exit, the import status command and the accepted answer", code, obj.Steps[0], errOut)
 	}
 }
+
+// TestDriftAdoptObject_OperationNotRead: contract lines 924-929 and 940-941: when the operation of an
+// accepted write cannot be read, its step is unknown and its command is the read of that operation,
+// never the repeat of the write. It holds for the import of step 1 and for the publication of step 2.
+func TestDriftAdoptObject_OperationNotRead(t *testing.T) {
+	f := adoptChainServer(t)
+	f.failIngOp = true
+	code, obj, _, errOut := adoptObject(t)
+	wantStates(t, obj, stateUnknown, stateNotRun, stateNotRun)
+	if code == 0 || obj.Steps[0].Command != "bronzewardctl operation show 'op_BWSYNTH-ing'" {
+		t.Errorf("import: exit %d, step 1 %+v, stderr %q; want a nonzero exit and the operation show command", code, obj.Steps[0], errOut)
+	}
+
+	g := adoptChainServer(t)
+	g.failPubOp = true
+	code, obj, _, errOut = adoptObject(t)
+	wantStates(t, obj, stateDone, stateUnknown, stateNotRun)
+	if code == 0 || obj.Steps[1].Command != "bronzewardctl operation show 'op_BWSYNTH-pub'" {
+		t.Errorf("publication: exit %d, step 2 %+v, stderr %q; want a nonzero exit and the operation show command", code, obj.Steps[1], errOut)
+	}
+}

@@ -220,6 +220,16 @@ func declarations(p string) (*apitypes.Declarations, error) {
 	return &d, nil
 }
 
+// noMarksInput is the refusal of --marks when neither a prompt nor standard input is free.
+const noMarksInput = "--marks reads from a prompt on a terminal or from standard input, and neither is free here; nothing was sent"
+
+// marksNeedInput is whether readMarks refuses for a command that takes no other standard input: with
+// --no-input, standard input is a terminal or is the token's. A command that can know it before any
+// request refuses before the request.
+func (e *env) marksNeedInput() bool {
+	return e.noInput && (e.tokenStdin || isTerminal(stdin))
+}
+
 // readMarks reads marks, one per line until an empty line or the end of input (T12): from standard
 // input when it is free and not a terminal, else from a prompt on the terminal, standard input
 // when it is one and free, else the controlling terminal. With neither, or with --no-input and
@@ -242,7 +252,7 @@ func (e *env) readMarks(taken bool) ([]string, error) {
 		}
 	}
 	if in == nil {
-		return nil, usageError{errors.New("--marks reads from a prompt on a terminal or from standard input, and neither is free here; nothing was sent")}
+		return nil, usageError{errors.New(noMarksInput)}
 	}
 	ask := func() {}
 	if prompt != nil {

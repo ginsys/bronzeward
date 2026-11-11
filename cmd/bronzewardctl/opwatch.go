@@ -420,7 +420,7 @@ func noOperation(id string, err error) error {
 	if errors.As(err, new(*client.Interrupted)) {
 		return err
 	}
-	return unreadState(id, err)
+	return unreadOperation{unreadState(id, err), id}
 }
 
 // unreadState is the error of a watch that ended with no operation read. A problem document the

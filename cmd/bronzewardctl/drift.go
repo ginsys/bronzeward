@@ -355,6 +355,12 @@ func (e *env) driftAdopt(args []string) (err error) {
 	if m == "" {
 		return usageError{errors.New("drift adopt needs a machine")}
 	}
+	// --marks has no input to read from when --no-input is given and standard input is a terminal or is
+	// taken by the token: ingest refuses it after sending nothing, so it is refused here, before any
+	// request, and a refusal prints nothing in json and yaml (§5.8, the arguments refused).
+	if marks && e.marksNeedInput() {
+		return usageError{errors.New(noMarksInput)}
+	}
 	// -o json and yaml print one object for the three steps, once, whatever ends the command after the
 	// identity read (operator-experience.md §5.8, "Structured output of a composite"), a failed save of
 	// that read included: no step ran then, and the object has three not-run steps. It is the first
