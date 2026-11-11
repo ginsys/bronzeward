@@ -131,7 +131,7 @@ function Publish({ id }: { id: string }) {
     if (ifMatch !== undefined) send({ method: "POST", path: `/drafts/${enc(id)}/publications`, body: {}, ifMatch, resource: `/drafts/${id}`, settled });
   };
   const [failed, setFailed] = useState<string | undefined>();
-  const busy = w !== undefined && (o === undefined || (o.kind === "done" && failed !== op) || o.kind === "unknown");
+  const busy = w !== undefined && (o === undefined || (o.kind === "done" && (op === undefined || failed !== op)) || o.kind === "unknown");
   return (
     <>
       <h2>Publish draft {short(id)}{d !== undefined && <> "{d.title}" {d.state}, revision {d.revision}, cluster <Id id={d.cluster} /></>}</h2>
