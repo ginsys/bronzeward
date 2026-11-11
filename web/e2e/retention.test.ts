@@ -7,6 +7,7 @@
 import { readFileSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 import { expect, test } from "vitest";
 
 // WebdriverIO commands, the WebDriver and BiDi print and capture commands, and the Puppeteer calls that
@@ -15,13 +16,14 @@ const ARTIFACT_CALL = /\b(saveScreenshot|saveElementScreenshot|takeScreenshot|ta
 
 export const artifactCalls = (source: string): string[] => [...source.matchAll(ARTIFACT_CALL)].map((m) => m[1]!.replace(/\s+/g, ""));
 
-// A relative specifier of a static import, a re-export, a side-effect import or a dynamic import. The
-// quote may be a backtick, and a block comment may sit between the keyword and the specifier. A template
-// specifier with an interpolation is not matched, because it names no file.
-const LOCAL_IMPORT = /\b(?:from|import)\s*\(?\s*["'`](\.{1,2}\/[^"'`$]+)["'`]/g;
-
+// A relative specifier of a static import, a re-export, a side-effect import or a dynamic import, read by
+// the TypeScript scanner, so a comment, a string or a template cannot hide one or make a false one. A
+// template specifier with an interpolation names no file and is not returned.
 export const localImports = (source: string): string[] =>
-  [...source.replace(/\/\*[\s\S]*?\*\//g, " ").matchAll(LOCAL_IMPORT)].map((m) => m[1]!);
+  ts
+    .preProcessFile(source, true, true)
+    .importedFiles.map((f) => f.fileName)
+    .filter((name) => name.startsWith("./") || name.startsWith("../"));
 
 const here = (name: string) => fileURLToPath(new URL(`./${name}`, import.meta.url));
 
@@ -72,9 +74,23 @@ test("the positive control: the read finds the local imports of a source and ski
     const d = await import("./five.ts");
     const g = await import(\`./six.ts\`);
     import /* a helper */ "./seven.ts";
+    const h = "./*"; import "./eight.ts"; const i = "*/";
+    import "./$nine.ts";
+    const j = await import(\`./ten\${name}.ts\`);
+    // import "./commented.ts";
     import { e } from "node:fs";
     import { f } from "@wdio/globals";`;
-  expect(localImports(sample)).toEqual(["./one.ts", "../two.ts", "./three.ts", "./four.ts", "./five.ts", "./six.ts", "./seven.ts"]);
+  expect(localImports(sample)).toEqual([
+    "./one.ts",
+    "../two.ts",
+    "./three.ts",
+    "./four.ts",
+    "./five.ts",
+    "./six.ts",
+    "./seven.ts",
+    "./eight.ts",
+    "./$nine.ts",
+  ]);
 });
 
 test("the positive control: the walk reaches a file only a transitive import names and reads it to the end", () => {
