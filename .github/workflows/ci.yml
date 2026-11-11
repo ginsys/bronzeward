@@ -91,7 +91,9 @@ jobs:
     # failure cases. `commit-lint` below checks only this PR's own subjects. Also the fixtures for
     # `checks`' own script, and for the packaging check's comparison and Caddy rendering.
     runs-on: ${{ (github.event_name == 'merge_group' || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'autops-kube-ginsys' }}
-    timeout-minutes: 5
+    # 45 minutes: a cold mise cache downloads node from nodejs.org (58 MB), which a slow path
+    # stretches far past the work of the job (ginsys/bronzeward#783).
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
@@ -122,7 +124,9 @@ jobs:
     # web/: the API types generated from api/openapi.yaml and their type test, the unit tests and
     # the build.
     runs-on: ${{ (github.event_name == 'merge_group' || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'autops-kube-ginsys' }}
-    timeout-minutes: 10
+    # 45 minutes: a cold mise cache downloads node from nodejs.org (58 MB), which a slow path
+    # stretches far past the work of the job (ginsys/bronzeward#783).
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
