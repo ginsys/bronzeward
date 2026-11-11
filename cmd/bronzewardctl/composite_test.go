@@ -184,6 +184,27 @@ func TestCompositeUnreadableAnswer(t *testing.T) {
 	}
 }
 
+// TestCompositeRereadKeepsTheUnreadableAnswerNote: operator-experience.md §5.8, the error member: a
+// step that the re-read leaves unknown or failed has an error. It is the failed save where there is one,
+// the state the re-read showed where there is none, and it stays beside the note that the answer cannot
+// be read.
+func TestCompositeRereadKeepsTheUnreadableAnswerNote(t *testing.T) {
+	for _, saved := range []error{errors.New("keeping the epoch"), nil} {
+		co := newCollector("mch_1", "drf_1")
+		co.begin(1)
+		co.record([]byte(`{"ingestion":"ing_1","generation":"bad"}`), errors.New("the generation is not a number"))
+		co.reread("ing_1", "abandoned", saved)
+		s := co.object().Steps[0]
+		want := "keeping the epoch"
+		if saved == nil {
+			want = "the import is abandoned when it is read again"
+		}
+		if s.State != stateFailed || !strings.Contains(s.Error, "cannot be read") || !strings.Contains(s.Error, want) {
+			t.Errorf("saved %v: step 1 is %+v; want failed, the note that the answer cannot be read and %q", saved, s, want)
+		}
+	}
+}
+
 // TestCompositeEscapesTheWholeObject: contract lines 963-965: -o json escapes DEL, C1 and bidirectional
 // control characters in the whole object, a nested answer, the command and the error included.
 func TestCompositeEscapesTheWholeObject(t *testing.T) {
