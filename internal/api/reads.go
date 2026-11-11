@@ -399,12 +399,17 @@ func scanOperation(r interface{ Scan(...any) error }) (operationBody, error) {
 	return b, nil
 }
 
-// readOperation reads operation v as §8.3 shows it. The row is locked FOR SHARE before its
-// attempts are read: a transaction that moves the operation and records an attempt or its
-// accounting commits whole either before or after this read, never between its two statements.
+// readOperation reads operation v as §8.3 shows it. Only a plan operation shows attempts, and its
+// row is locked FOR SHARE before they are read: a transaction that moves the operation and records
+// an attempt or its accounting commits whole either before or after this read, never between its
+// two statements. Whether an operation has a plan is fixed at its insert, so the first read takes
+// no lock, and an operation without attempts is not made to wait for a transaction that holds it.
 func readOperation(ctx context.Context, tx *sql.Tx, v string) (operationBody, error) {
-	b, err := scanOperation(tx.QueryRowContext(ctx, selectOperation+` WHERE id = $1 FOR SHARE`, v))
+	b, err := scanOperation(tx.QueryRowContext(ctx, selectOperation+` WHERE id = $1`, v))
 	if err != nil || b.Subject == nil || b.Subject.Plan == "" {
+		return b, err
+	}
+	if b, err = scanOperation(tx.QueryRowContext(ctx, selectOperation+` WHERE id = $1 FOR SHARE`, v)); err != nil {
 		return b, err
 	}
 	b.Attempts, err = readAttempts(ctx, tx, v)

@@ -1689,6 +1689,11 @@ whose claim a read already treats as abandoned (compilation §3.5) stays
 one if that sweep fails or waits for a lock. An ingestion start of the same
 draft revision writes it first (T11), so the natural key (§7.3) never refuses
 on a claim already treated as abandoned.
+The read of the operation resource locks the operation's row `FOR SHARE` only for an `apply-config` or `adopt`
+operation, which shows its attempts: a transaction that moves the operation and records an attempt or its accounting
+commits whole before or after that read. An `ingest` or `publish` operation shows no attempts, so its read takes no
+lock and answers while a transaction that moves the operation is open; it shows the row as last committed. Whether an
+operation has a plan is fixed when the row is inserted.
 `GET /ingestions/{id}` reports the claim's state as read.
 
 A `publish` operation's events are `{"type": "queued"}`, written with the
