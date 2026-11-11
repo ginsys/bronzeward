@@ -13,7 +13,7 @@ import (
 
 	"github.com/ginsys/bronzeward/internal/client"
 	"github.com/ginsys/bronzeward/internal/client/apitypes"
-	"github.com/ginsys/bronzeward/internal/talos"
+	"github.com/ginsys/bronzeward/internal/clusterid"
 )
 
 // repeatFlags are decision T10's flags (#256), which every write command takes: the values an
@@ -210,7 +210,7 @@ func (e *env) clusterAdd(args []string) error {
 		Read: func(c *client.Client) (string, error) {
 			// The server records the standard spelling of the ID, whichever alphabet the operator typed.
 			want := in.TalosClusterId
-			if s, ok := talos.CanonicalClusterID(want); ok {
+			if s, ok := clusterid.Canonical(want); ok {
 				want = s
 			}
 			return find(c, "/clusters", "cluster with this Talos cluster ID", func(x apitypes.ClusterBody) string {

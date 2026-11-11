@@ -1,4 +1,4 @@
-package talos
+package clusterid
 
 import (
 	"encoding/base64"
@@ -7,7 +7,7 @@ import (
 )
 
 // PA §7.3: a Talos cluster ID is 32 bytes in padded base64. Talos before v1.14 prints the URL-safe
-// alphabet and v1.14 and later the standard one, and CanonicalClusterID gives both the standard
+// alphabet and v1.14 and later the standard one, and Canonical gives both the standard
 // spelling, so one cluster is one stored value. Anything else is refused, never repaired.
 func TestCanonicalClusterID(t *testing.T) {
 	const (
@@ -41,9 +41,9 @@ func TestCanonicalClusterID(t *testing.T) {
 		"one padding character too many":     {std + "=", "", false},
 	} {
 		t.Run(name, func(t *testing.T) {
-			got, ok := CanonicalClusterID(c.in)
+			got, ok := Canonical(c.in)
 			if got != c.want || ok != c.ok {
-				t.Fatalf("CanonicalClusterID(%q) = %q, %v; want %q, %v", c.in, got, ok, c.want, c.ok)
+				t.Fatalf("Canonical(%q) = %q, %v; want %q, %v", c.in, got, ok, c.want, c.ok)
 			}
 		})
 	}
@@ -65,8 +65,8 @@ func TestCanonicalClusterIDRoundTrip(t *testing.T) {
 			}
 		}
 		for _, in := range []string{std, url} {
-			if got, ok := CanonicalClusterID(in); !ok || got != std {
-				t.Fatalf("CanonicalClusterID(%q) = %q, %v; want %q", in, got, ok, std)
+			if got, ok := Canonical(in); !ok || got != std {
+				t.Fatalf("Canonical(%q) = %q, %v; want %q", in, got, ok, std)
 			}
 		}
 	}
