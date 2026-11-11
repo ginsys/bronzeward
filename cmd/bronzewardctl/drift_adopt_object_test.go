@@ -347,6 +347,37 @@ func TestDriftAdoptObject_PausedThenSaveFails(t *testing.T) {
 	}
 }
 
+// TestDriftAdoptObject_ImportChangedBeforeTheReread: operator-experience.md §5.8, the re-read after a
+// failed save: an import that changed state between the follow and the re-read is not paused. Held and
+// resumed are unknown, abandoned (by expiry, for instance) is failed, and each has the import status
+// command, which reads the import. The exit stays the save failure's, as the text output gives it.
+func TestDriftAdoptObject_ImportChangedBeforeTheReread(t *testing.T) {
+	for _, c := range []struct {
+		claim string
+		want  stepState
+	}{{"held", stateUnknown}, {"resumed", stateUnknown}, {"abandoned", stateFailed}} {
+		t.Run(c.claim, func(t *testing.T) {
+			f := adoptChainServer(t)
+			f.moveInFollow = true
+			f.rereadClaim = c.claim
+			dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "bronzeward")
+			t.Cleanup(func() { os.Chmod(dir, 0o700) })
+			old := f.imp.onIngested
+			f.imp.onIngested = func() {
+				old()
+				if err := os.Chmod(dir, 0o500); err != nil {
+					t.Errorf("the configuration directory stays writable: %v", err)
+				}
+			}
+			code, obj, _, errOut := adoptObject(t)
+			wantStates(t, obj, c.want, stateNotRun, stateNotRun)
+			if code == 0 || !strings.Contains(errOut, "keeping the epoch") || obj.Steps[0].Command != "bronzewardctl import status 'ing_BWSYNTH'" {
+				t.Errorf("exit %d, step 1 %+v, stderr %q; want a nonzero exit naming the epoch that could not be kept, and the import status command", code, obj.Steps[0], errOut)
+			}
+		})
+	}
+}
+
 // wantReadCommand fails where s is unknown with an accepted write and its command is not a read of what
 // the write started: import status or operation show, never the repeat of the write (contract lines
 // 940-941). A write that was never confirmed accepted keeps the keyed repeat, which is not covered here.
@@ -434,5 +465,56 @@ func TestDriftAdoptObject_OperationNotRead(t *testing.T) {
 	wantReadCommand(t, obj.Steps[1])
 	if code == 0 || obj.Steps[1].Command != "bronzewardctl operation show 'op_BWSYNTH-pub'" {
 		t.Errorf("publication: exit %d, step 2 %+v, stderr %q; want a nonzero exit and the operation show command", code, obj.Steps[1], errOut)
+	}
+}
+
+// TestDriftAdoptObject_YAMLControlCharacters: operator-experience.md §5.8 (the escaping paragraph): DEL and
+// the C1 controls in the machine argument keep their value in -o yaml, as in -o json. The YAML decoder
+// rejects DEL and most C1 characters, and folds U+0085 into a space, so the escapes have to reach it.
+func TestDriftAdoptObject_YAMLControlCharacters(t *testing.T) {
+	f := adoptChainServer(t)
+	f.identity = `{"kind":"human","principal":"h_BWSYNTH","roles":["publisher"]}`
+	machine := "mch_\u007f\u0085\u0091x"
+	for _, o := range []string{"json", "yaml"} {
+		code, out, errOut := runDrift(t, "-o", o, "drift", "adopt", machine, "--draft", "drf_BWSYNTH")
+		var obj adoption
+		var err error
+		if o == "json" {
+			err = json.Unmarshal([]byte(out), &obj)
+		} else {
+			err = yaml.Unmarshal([]byte(out), &obj)
+		}
+		if code != 0 || err != nil || obj.Machine != machine {
+			t.Errorf("-o %s: exit %d, machine %q, decode error %v, stdout %q, stderr %q; want 0 and the machine unchanged", o, code, obj.Machine, err, out, errOut)
+		}
+	}
+}
+
+// TestDriftAdoptObject_MarksRefusedWithTokenOnStdinAndNoTerminal: contract lines 950-951: arguments the
+// command refuses (exit 2) print nothing. --marks with the token on standard input and no controlling
+// terminal has no input to read marks from, and the command knows it before any request, as it does
+// with --no-input. Without --no-input the refusal came after the identity read.
+func TestDriftAdoptObject_MarksRefusedWithTokenOnStdinAndNoTerminal(t *testing.T) {
+	f := adoptChainServer(t)
+	oldTTY := ttyPath
+	ttyPath = filepath.Join(t.TempDir(), "no-tty")
+	t.Cleanup(func() { ttyPath = oldTTY })
+	for _, o := range []string{"json", "yaml"} {
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		w.WriteString("bwt_BWSYNTH\n")
+		w.Close()
+		// The client reads the token from os.Stdin itself, the command's own reads use stdin.
+		old, oldOS := stdin, os.Stdin
+		stdin, os.Stdin = r, r
+		before := len(f.log)
+		code, out, errOut := runDrift(t, "-o", o, "--token-stdin", "drift", "adopt", "mch_BWSYNTH", "--draft", "drf_BWSYNTH", "--marks")
+		stdin, os.Stdin = old, oldOS
+		r.Close()
+		if code != 2 || out != "" || errOut == "" || len(f.log) != before {
+			t.Errorf("-o %s: exit %d, stdout %q, stderr %q, %d requests; want 2, nothing on standard output, the refusal on standard error and no request", o, code, out, errOut, len(f.log)-before)
+		}
 	}
 }

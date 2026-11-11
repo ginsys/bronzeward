@@ -34,6 +34,9 @@ const overBodyLimit = "over the server's 1 MiB body limit"
 // stdin is the process's standard input, which tests replace.
 var stdin = os.Stdin
 
+// ttyPath is the controlling terminal, which tests point elsewhere because a test process can have one.
+var ttyPath = "/dev/tty"
+
 // fragmentSet puts a fragment in a draft (PUT /drafts/{id}/fragments/{name}). The document comes
 // from --file, a path or - for standard input, and the declarations from --declarations; with
 // --marks, marks come one per line from the prompt or standard input (decision T12 of #256), never
@@ -223,22 +226,15 @@ func declarations(p string) (*apitypes.Declarations, error) {
 // noMarksInput is the refusal of --marks when neither a prompt nor standard input is free.
 const noMarksInput = "--marks reads from a prompt on a terminal or from standard input, and neither is free here; nothing was sent"
 
-// marksNeedInput is whether readMarks refuses for a command that takes no other standard input: with
-// --no-input, standard input is a terminal or is the token's. A command that can know it before any
-// request refuses before the request.
-func (e *env) marksNeedInput() bool {
-	return e.noInput && (e.tokenStdin || isTerminal(stdin))
-}
-
-// readMarks reads marks, one per line until an empty line or the end of input (T12): from standard
-// input when it is free and not a terminal, else from a prompt on the terminal, standard input
-// when it is one and free, else the controlling terminal. With neither, or with --no-input and
-// standard input taken or a terminal, it refuses. taken says another input read standard input,
-// under any name (stdinUsers).
-func (e *env) readMarks(taken bool) ([]string, error) {
+// marksInput picks where marks are read from: standard input when it is free and not a terminal,
+// else a prompt on the terminal, standard input when it is one and free, else the controlling
+// terminal. With none of them, or with --no-input and standard input taken or a terminal, it refuses.
+// taken says another input read standard input, under any name (stdinUsers). The returned function
+// closes what was opened. It is the one rule for both the early check and the read, so a command can
+// refuse before any request exactly when the read would refuse.
+func (e *env) marksInput(taken bool) (in io.Reader, prompt io.Writer, closeIn func(), err error) {
 	free := !taken && !e.tokenStdin
-	var in io.Reader
-	var prompt io.Writer
+	closeIn = func() {}
 	switch {
 	case free && !isTerminal(stdin):
 		in = stdin
@@ -246,13 +242,32 @@ func (e *env) readMarks(taken bool) ([]string, error) {
 	case free:
 		in, prompt = stdin, e.err
 	default:
-		if tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0); err == nil {
-			defer tty.Close()
+		if tty, err := os.OpenFile(ttyPath, os.O_RDWR, 0); err == nil {
+			closeIn = func() { tty.Close() }
 			in, prompt = tty, tty
 		}
 	}
 	if in == nil {
-		return nil, usageError{errors.New(noMarksInput)}
+		return nil, nil, closeIn, usageError{errors.New(noMarksInput)}
+	}
+	return in, prompt, closeIn, nil
+}
+
+// checkMarksInput refuses, before any request, a --marks that readMarks would refuse for a command
+// that takes no other standard input.
+func (e *env) checkMarksInput() error {
+	_, _, closeIn, err := e.marksInput(false)
+	closeIn()
+	return err
+}
+
+// readMarks reads marks, one per line until an empty line or the end of input (T12), from the source
+// marksInput picks.
+func (e *env) readMarks(taken bool) ([]string, error) {
+	in, prompt, closeIn, err := e.marksInput(taken)
+	defer closeIn()
+	if err != nil {
+		return nil, err
 	}
 	ask := func() {}
 	if prompt != nil {

@@ -33,6 +33,9 @@ type adoptChain struct {
 	// other answer does: the epoch changed and came back. rereads counts those GETs.
 	moveOnReread bool
 	rereads      int
+	// rereadClaim, when set, is the claim the import has from the second GET of it on: the import
+	// changed state between the follow of step 1 and the reread that settles it.
+	rereadClaim string
 	// moveInFollow makes the first GET of the ingestion, the one the follow of step 1 makes, answer
 	// ep_BWSYNTH-2, so the client has an epoch to save when that follow ends.
 	moveInFollow bool
@@ -65,6 +68,11 @@ func (f *adoptChain) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	failNow := false
 	if r.Method == http.MethodGet && path == "/ingestions/ing_BWSYNTH" {
 		f.rereads++
+		if f.rereadClaim != "" && f.rereads == 2 {
+			f.imp.mu.Lock()
+			f.imp.claim = f.rereadClaim
+			f.imp.mu.Unlock()
+		}
 		failNow = f.failReread && f.rereads == 2
 		moved = moved || (f.moveOnReread && f.rereads == 2) || (f.moveInFollow && f.rereads == 1)
 	}
